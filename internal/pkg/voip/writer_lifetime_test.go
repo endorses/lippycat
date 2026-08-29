@@ -27,7 +27,7 @@ func TestRTPWriteRaceWithCompletionClose(t *testing.T) {
 	callID := "rtp-completion-race"
 	call := createCallWithRTPOutput(t, callID)
 	tracker := TestCallTracker(t)
-	tracker.output = call.tracker.output
+	tracker.replaceOutputForTest(trackerOutput(t, call.tracker))
 	call.tracker = tracker
 	tracker.shuttingDown.Store(0)
 	tracker.mu.Lock()
@@ -67,7 +67,7 @@ func TestSIPWriteRaceWithLRUEviction(t *testing.T) {
 	tracker := NewCallTrackerWithCapacity(1)
 	t.Cleanup(tracker.Shutdown)
 	call := createCallWithSIPOutput(t, "sip-lru-race")
-	tracker.output = call.tracker.output
+	tracker.replaceOutputForTest(trackerOutput(t, call.tracker))
 	call.tracker = tracker
 	tracker.mu.Lock()
 	tracker.callMap[call.CallID] = call
@@ -100,15 +100,12 @@ func TestAsyncWriteRaceWithClose(t *testing.T) {
 	tracker.shuttingDown.Store(0)
 	callID := "async-close-race"
 	call := createCallWithSIPOutput(t, callID)
-	tracker.output = call.tracker.output
+	tracker.replaceOutputForTest(trackerOutput(t, call.tracker))
 	call.tracker = tracker
 	tracker.mu.Lock()
 	tracker.callMap[callID] = call
 	tracker.mu.Unlock()
 	t.Cleanup(func() {
-		tracker.mu.Lock()
-		delete(tracker.callMap, callID)
-		tracker.mu.Unlock()
 		_ = call.Close()
 	})
 
@@ -121,7 +118,7 @@ func TestAsyncWriteRaceWithClose(t *testing.T) {
 			defer wg.Done()
 			for range 250 {
 				err := pool.processWriteRequest(req)
-				if err != nil && !errors.Is(err, ErrWriterNotInitialized) {
+				if err != nil && !errors.Is(err, ErrWriterNotInitialized) && !errors.Is(err, ErrCallNotFound) {
 					t.Errorf("unexpected async write result: %v", err)
 					return
 				}
@@ -130,5 +127,5 @@ func TestAsyncWriteRaceWithClose(t *testing.T) {
 	}
 	require.NoError(t, call.Close())
 	wg.Wait()
-	require.ErrorIs(t, pool.processWriteRequest(req), ErrWriterNotInitialized)
+	require.ErrorIs(t, pool.processWriteRequest(req), ErrCallNotFound)
 }

@@ -33,3 +33,25 @@ func TestSniffCompletionMonitorPrunesClosedCalls(t *testing.T) {
 		t.Fatal("expected recent call to remain")
 	}
 }
+
+func TestSniffCompletionMonitorAllowsCallIDReuse(t *testing.T) {
+	tracker := TestCallTracker(t)
+	defer tracker.Shutdown()
+	monitor := NewSniffCompletionMonitor(tracker, nil)
+	tracker.SetCompletionMonitor(monitor)
+
+	monitor.closedCalls["reused"] = time.Now()
+	call := tracker.GetOrCreateCall("reused", 1)
+	if call == nil {
+		t.Fatal("expected reused call to be admitted")
+	}
+	monitor.ScheduleClose("reused")
+
+	monitor.mu.Lock()
+	_, pending := monitor.pendingClose["reused"]
+	_, closed := monitor.closedCalls["reused"]
+	monitor.mu.Unlock()
+	if !pending || closed {
+		t.Fatalf("expected reused Call-ID to schedule a fresh close: pending=%v closed=%v", pending, closed)
+	}
+}

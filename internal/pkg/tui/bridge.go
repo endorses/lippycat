@@ -90,10 +90,6 @@ func (rb *timeRingBuffer) len() int {
 }
 
 var (
-	// Local call aggregator for direct merge triggering from TCP reassembly
-	localCallAggregator   *LocalCallAggregator
-	localCallAggregatorMu sync.RWMutex
-
 	// VoIP mode flag - controls whether TCP reassembly is active
 	// Only when VoIP protocol is selected should TCP be reassembled for SIP
 	// This mirrors the behavior of `lc hunt` vs `lc hunt voip`
@@ -383,27 +379,6 @@ func classifyICMPv6InnerPacket(pkt gopacket.Packet) (protocol, info string) {
 		}
 	}
 	return "", ""
-}
-
-// SetLocalCallAggregator sets the local call aggregator for direct merge triggering
-func SetLocalCallAggregator(agg *LocalCallAggregator) {
-	localCallAggregatorMu.Lock()
-	defer localCallAggregatorMu.Unlock()
-	localCallAggregator = agg
-}
-
-// GetLocalCallAggregator returns the current local call aggregator
-func GetLocalCallAggregator() *LocalCallAggregator {
-	localCallAggregatorMu.RLock()
-	defer localCallAggregatorMu.RUnlock()
-	return localCallAggregator
-}
-
-// ClearLocalCallAggregator clears the local call aggregator
-func ClearLocalCallAggregator() {
-	localCallAggregatorMu.Lock()
-	defer localCallAggregatorMu.Unlock()
-	localCallAggregator = nil
 }
 
 // Per-packet SIP extraction counters (for diagnostics)
@@ -901,7 +876,7 @@ func ResetBridgeStats() {
 //
 // The pause signal allows the bridge to block when capture is paused,
 // reducing CPU usage to near-idle.
-func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool) {
+func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregators ...*LocalCallAggregator) {
 	// Wait for TUI to be fully initialized before processing packets.
 	// This prevents race conditions where messages are sent before
 	// Bubbletea has completed terminal setup, which can cause
@@ -926,7 +901,11 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tcpHandler := NewTUISIPHandler(tracker)
+	var aggregator *LocalCallAggregator
+	if len(aggregators) > 0 {
+		aggregator = aggregators[0]
+	}
+	tcpHandler := NewTUISIPHandler(tracker, aggregator)
 	streamFactory := voip.NewSipStreamFactoryWithConfig(
 		ctx,
 		tcpHandler,

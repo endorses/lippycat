@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
@@ -514,6 +515,8 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// This enables per-call PCAP writing and RTP association in tap mode
 	// Pass the ApplicationFilter so only matching calls are tracked
 	voipProcConfig := voipprocessor.DefaultConfig()
+	selectionPolicy := callregistry.StickySelectionPolicy{}
+	voipProcConfig.SelectionPolicy = selectionPolicy
 	voipProcConfig.ApplicationFilter = appFilter
 	// LocalSource reuses this verdict instead of re-matching each packet. It needs
 	// the IDs regardless of LI: they also key the CallID->filterIDs cache that lets
@@ -531,6 +534,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// remaining calls receive deterministic shutdown lifecycle notifications.
 	defer voipAdapter.Close()
 	localSource.SetVoIPProcessor(voipAdapter)
+	localSource.SetSelectionPolicy(selectionPolicy)
 	logger.Info("VoIP processor enabled for tap mode (UDP SIP/RTP)")
 
 	// Set up TCP SIP reassembly for tap mode
@@ -540,7 +544,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// Create TapTCPHandler that sends processed TCP packets to the injection channel
 	tapTCPHandler := voip.NewTapTCPHandler(tcpInjectionChan)
 	tapTCPHandler.SetApplicationFilter(appFilter)
-	tapTCPHandler.SetSDPRegistrar(voipProc)
+	tapTCPHandler.SetCallRegistry(voipProc)
 
 	// Create SipStreamFactory with the tap TCP handler. Query the tap-local call
 	// registry so active dialogs retain their TCP streams across idle intervals.

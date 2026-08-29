@@ -25,12 +25,14 @@ func initConfigDefaults() {}
 // Config holds all configurable VoIP processing parameters
 type Config struct {
 	// Output and registry settings are resolved by command composition.
-	WriteVoIP         bool
-	OutputFile        string
-	MaxCalls          int
-	PCAPGracePeriod   time.Duration
-	PCAPClosedCallTTL time.Duration
-	Security          SecurityConfig
+	WriteVoIP               bool
+	OutputFile              string
+	MaxCalls                int
+	MaxEndpointsPerCall     int
+	MaxEndpointAssociations int
+	PCAPGracePeriod         time.Duration
+	PCAPClosedCallTTL       time.Duration
+	Security                SecurityConfig
 
 	VirtualInterface      bool
 	VIFName               string
@@ -134,6 +136,12 @@ func SetConfig(cfg *Config) {
 	configMu.Unlock()
 }
 
+func securityConfigSnapshot() SecurityConfig {
+	configMu.RLock()
+	defer configMu.RUnlock()
+	return config.Security
+}
+
 // DefaultConfig returns the balanced, dependency-free library defaults.
 func DefaultConfig() *Config {
 	profile := GetPerformanceProfiles()[DefaultTCPPerformanceMode]
@@ -141,6 +149,7 @@ func DefaultConfig() *Config {
 		PCAPGracePeriod: 5 * time.Second, PCAPClosedCallTTL: time.Hour,
 		Security: DefaultSecurityConfig(), VIFName: "lc0", VIFType: "tap", VIFBufferSize: 4096,
 		MaxGoroutines: DefaultGoroutineLimit, MaxStreams: DefaultMaxStreams,
+		MaxEndpointsPerCall: 64, MaxEndpointAssociations: DefaultMaxCalls * 8,
 		CallIDDetectionTimeout: DefaultCallIDDetectionTimeout,
 		JanitorCleanupInterval: profile.TCPCleanupInterval / 2,
 		CallExpirationTime:     profile.TCPBufferMaxAge,

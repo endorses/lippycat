@@ -36,11 +36,16 @@ func GetTCPSIPTypeStats() (requests, responses, requestsWithSDP, responsesWithSD
 // This replaces the heuristic-based detection that caused false positives.
 type TUISIPHandler struct {
 	callTracker *CallTracker
+	aggregator  *LocalCallAggregator
 }
 
 // NewTUISIPHandler creates a handler for TUI SIP detection
-func NewTUISIPHandler(tracker *CallTracker) *TUISIPHandler {
-	return &TUISIPHandler{callTracker: tracker}
+func NewTUISIPHandler(tracker *CallTracker, aggregator ...*LocalCallAggregator) *TUISIPHandler {
+	h := &TUISIPHandler{callTracker: tracker}
+	if len(aggregator) > 0 {
+		h.aggregator = aggregator[0]
+	}
+	return h
 }
 
 // HandleSIPMessage processes a complete SIP message detected via TCP reassembly.
@@ -96,7 +101,7 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 	// Feed the SIP message to LocalCallAggregator for call state tracking
 	// This ensures TCP SIP responses update call state (e.g., 401 → Failed with error code)
 	if callID != "" {
-		if agg := GetLocalCallAggregator(); agg != nil {
+		if agg := h.aggregator; agg != nil {
 			pkt := &components.PacketDisplay{
 				Timestamp: capturedAt,
 				SrcIP:     srcIP,
@@ -164,7 +169,7 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 
 				// If we found an RTP-only call, trigger merge via LocalCallAggregator
 				if syntheticCallID != "" {
-					if agg := GetLocalCallAggregator(); agg != nil {
+					if agg := h.aggregator; agg != nil {
 						agg.TriggerMerge(syntheticCallID, callID)
 						atomic.AddInt64(&tcpSIPMergesTriggered, 1)
 						logger.Debug("TCP SIP triggered RTP-only merge",

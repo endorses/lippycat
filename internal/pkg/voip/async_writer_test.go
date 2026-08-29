@@ -401,15 +401,16 @@ func createTestPacketForAsync(t *testing.T) gopacket.Packet {
 }
 
 func setupTestCall(t testing.TB, tracker *CallTracker, callID string) {
-	if _, ok := tracker.output.(*SessionOutputManager); !ok {
+	if _, ok := trackerOutput(t, tracker).(*SessionOutputManager); !ok {
 		cfg := *tracker.config
 		cfg.OutputFile = filepath.Join(t.TempDir(), "capture.pcap")
-		tracker.output = NewSessionOutputManager(&cfg)
+		tracker.replaceOutputForTest(NewSessionOutputManager(&cfg))
 	}
 	call := tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 	require.NotNil(t, call)
-	if _, ok := tracker.output.(*SessionOutputManager).sessions[callID]; !ok {
-		require.NoError(t, tracker.output.OpenSession(callID, layers.LinkTypeEthernet))
+	output := trackerOutput(t, tracker).(*SessionOutputManager)
+	if _, ok := output.sessions[callID]; !ok {
+		require.NoError(t, output.OpenSession(callID, layers.LinkTypeEthernet))
 	}
 }
 

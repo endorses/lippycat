@@ -55,6 +55,11 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		callOutput = NewSessionOutputManager(config)
 	}
 	tracker := NewCallTrackerWithOutput(config, callOutput)
+	defer func() {
+		if err := callOutput.Shutdown(); err != nil {
+			logger.Error("Failed to shut down VoIP session output", "error", err)
+		}
+	}()
 	defer tracker.Shutdown()
 	logger.InfoContext(ctx, "Starting VoIP sniffer",
 		"device_count", len(devices),
@@ -201,7 +206,7 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	// Create handler for local file writing
 	handler := NewLocalFileHandler(tracker)
-	streamFactory := NewSipStreamFactoryWithConfig(ctx, handler, *GetConfig(), tracker.IsCallActive)
+	streamFactory := NewSipStreamFactoryWithConfig(ctx, handler, *tracker.config, tracker.IsCallActive)
 	// VoIP owns its (connection-aware reassembly) assembler internally rather
 	// than threading it through the shared capture-layer signatures, which stay
 	// typed to the legacy *tcpassembly.Assembler for the other protocols.
@@ -264,7 +269,7 @@ func startProcessor(tracker *CallTracker, ch <-chan capture.PacketInfo, assemble
 	// Note: Virtual interface is now initialized in StartVoipSniffer() before packet processing begins
 	// This allows early permission checking and avoids wasting time if permissions are insufficient
 
-	numWorkers := getProcessorWorkerCount()
+	numWorkers := getProcessorWorkerCount(tracker.config)
 	if numWorkers <= 1 {
 		// Single-threaded path (original behaviour / offline-ordered mode).
 		for pkt := range ch {
@@ -280,7 +285,7 @@ func startProcessor(tracker *CallTracker, ch <-chan capture.PacketInfo, assemble
 		// because the reassembly assembler is not concurrency-safe (TCP/SIP volume is
 		// negligible here).
 		logger.Info("VoIP processor starting flow-sharded workers", "workers", numWorkers)
-		workerBuf := getProcessorWorkerBuffer()
+		workerBuf := getProcessorWorkerBuffer(tracker.config)
 		workers := make([]chan capture.PacketInfo, numWorkers)
 		counters := make([]*processorWorkerCounters, numWorkers)
 		var lastOverloadLog atomic.Int64
@@ -350,7 +355,7 @@ func processOnePacket(tracker *CallTracker, pkt capture.PacketInfo, assembler tc
 	}
 	switch layer := packet.TransportLayer().(type) {
 	case *layers.TCP:
-		handleTcpPackets(pkt, layer, assembler, offline)
+		handleTcpPacketsWithConfig(pkt, layer, assembler, tracker.config, offline)
 	case *layers.UDP:
 		handleUdpPackets(tracker, pkt, layer)
 	}
@@ -360,9 +365,13 @@ func processOnePacket(tracker *CallTracker, pkt capture.PacketInfo, assembler tc
 // workers. Configurable via voip.processor_workers; defaults to NumCPU-2 (leaving
 // headroom for the capture/decode goroutine and async writers), minimum 1.
 // A value of 1 selects the original single-threaded path.
-func getProcessorWorkerCount() int {
-	if n := GetConfig().ProcessorWorkers; n >= 1 {
-		return n
+func getProcessorWorkerCount(configs ...*Config) int {
+	var config *Config
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	if config != nil && config.ProcessorWorkers >= 1 {
+		return config.ProcessorWorkers
 	}
 	n := runtime.NumCPU() - 2
 	if n < 1 {
@@ -373,9 +382,13 @@ func getProcessorWorkerCount() int {
 
 // getProcessorWorkerBuffer returns the per-worker input channel depth.
 // Configurable via voip.processor_worker_buffer; defaults to 8192.
-func getProcessorWorkerBuffer() int {
-	if b := GetConfig().ProcessorWorkerBuffer; b > 0 {
-		return b
+func getProcessorWorkerBuffer(configs ...*Config) int {
+	var config *Config
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	if config != nil && config.ProcessorWorkerBuffer > 0 {
+		return config.ProcessorWorkerBuffer
 	}
 	return 8192
 }

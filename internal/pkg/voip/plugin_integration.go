@@ -138,14 +138,14 @@ func (p *PluginPacketProcessor) integrateResult(result *plugins.ProcessResult, p
 	}
 
 	// Write packet to appropriate files if writeVoip is enabled
-	if GetConfig().WriteVoIP && call != nil {
+	if p.tracker.config.WriteVoIP && call != nil {
 		switch result.Protocol {
 		case "sip":
-			if err := p.tracker.output.WritePacket(call.CallID, packet, PacketTypeSIP); err != nil {
+			if err := p.tracker.writePacket(call.CallID, packet, PacketTypeSIP); err != nil {
 				logger.Error("Failed to write SIP packet", "error", err)
 			}
 		case "rtp":
-			if err := p.tracker.output.WritePacket(call.CallID, packet, PacketTypeRTP); err != nil {
+			if err := p.tracker.writePacket(call.CallID, packet, PacketTypeRTP); err != nil {
 				logger.Error("Failed to write RTP packet", "error", err)
 			}
 		}
@@ -219,7 +219,7 @@ func ShutdownPluginProcessing(ctx context.Context) error {
 
 // EnablePluginProcessingForConfig enables plugin processing based on configuration
 func EnablePluginProcessingForConfig() {
-	if GetConfig().PluginsEnabled {
+	if globalPluginProcessor != nil && globalPluginProcessor.tracker.config.PluginsEnabled {
 		if err := InitializePluginProcessing(); err != nil {
 			logger.Error("Failed to initialize plugin processing", "error", err)
 		} else {

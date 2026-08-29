@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
@@ -19,6 +20,10 @@ const (
 
 // detectSIP checks if a UDP payload contains a SIP message and processes it.
 func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload []byte) *ProcessResult {
+	return p.detectSIPWithCompletion(packet, udp, payload, true)
+}
+
+func (p *Processor) detectSIPWithCompletion(packet gopacket.Packet, udp *layers.UDP, payload []byte, completeTerminal bool) *ProcessResult {
 	if len(payload) == 0 {
 		return nil
 	}
@@ -65,12 +70,15 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 	}
 
 	// If filter is set and packet doesn't match, don't track this call
-	if filterEvaluated && !filterMatched {
-		// Check if this call is already being tracked (subsequent SIP messages for matched calls)
+	if filterEvaluated {
 		p.mu.RLock()
-		_, exists := p.calls[callID]
+		_, previouslySelected := p.calls[callID]
 		p.mu.RUnlock()
-		if !exists {
+		if !p.selectionPolicy.Select(callregistry.SelectionInput{
+			FilterConfigured:   true,
+			DirectMatch:        filterMatched,
+			PreviouslySelected: previouslySelected,
+		}) {
 			// New call that doesn't match filter - don't track it, but report the
 			// verdict so the caller can drop the packet without matching again.
 			return &ProcessResult{
@@ -80,7 +88,6 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 				FilterEvaluated: true,
 			}
 		}
-		// Existing call - continue processing (allow BYE, ACK, etc.)
 	}
 
 	// Get or create call state
@@ -134,7 +141,7 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 	// A final response to dialog termination is the ownership boundary for RTP
 	// associations. Do this independently of per-call PCAP monitoring: tap mode
 	// may legitimately run without PCAP output enabled.
-	if isTerminalDialogResponse(metadata) {
+	if completeTerminal && isTerminalDialogResponse(metadata) {
 		p.CompleteCall(callID)
 	}
 

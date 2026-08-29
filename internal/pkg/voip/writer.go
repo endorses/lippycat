@@ -53,7 +53,7 @@ func (tracker *CallTracker) writeSIPSync(callID string, packet gopacket.Packet) 
 	tracker.mu.Unlock()
 
 	if ok && call != nil {
-		err := tracker.output.WritePacket(callID, packet, PacketTypeSIP)
+		err := tracker.writePacket(callID, packet, PacketTypeSIP)
 
 		if err != nil {
 			logger.Error("Error writing SIP packet for call",
@@ -117,7 +117,7 @@ func (tracker *CallTracker) writeRTPSync(callID string, packet gopacket.Packet) 
 	tracker.mu.Unlock()
 
 	if ok && call != nil {
-		err := tracker.output.WritePacket(callID, packet, PacketTypeRTP)
+		err := tracker.writePacket(callID, packet, PacketTypeRTP)
 
 		if err != nil {
 			logger.Error("Error writing RTP packet for call",

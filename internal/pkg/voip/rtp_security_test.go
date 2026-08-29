@@ -128,6 +128,7 @@ m=audio 65535 RTP/AVP 0`,
 			tracker.portToCallID = make(map[string][]string)
 			tracker.mu.Unlock()
 
+			tracker.GetOrCreateCall(tt.callID, layers.LinkTypeEthernet)
 			tracker.ExtractPortFromSDP(tt.sdpBody, tt.callID)
 
 			tracker.mu.Lock()
@@ -168,6 +169,7 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 					callID := fmt.Sprintf("call-%d-%d", routineID, j)
 					sdpBody := fmt.Sprintf("m=audio %s RTP/AVP 0", port)
 
+					tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 					tracker.ExtractPortFromSDP(sdpBody, callID)
 				}
 			}(i)
@@ -218,6 +220,7 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 					callID := fmt.Sprintf("concurrent-call-%d-%d", writerID, j)
 					sdpBody := fmt.Sprintf("m=audio %s RTP/AVP 0", port)
 
+					tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 					tracker.ExtractPortFromSDP(sdpBody, callID)
 				}
 			}(i)
@@ -340,6 +343,7 @@ func TestPortMapping_MemoryLeaks(t *testing.T) {
 			callID := fmt.Sprintf("call-%d", i)
 			sdpBody := fmt.Sprintf("m=audio %s RTP/AVP 0", port)
 
+			tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 			tracker.ExtractPortFromSDP(sdpBody, callID)
 		}
 
@@ -347,7 +351,7 @@ func TestPortMapping_MemoryLeaks(t *testing.T) {
 		mapSize := len(tracker.portToCallID)
 		tracker.mu.Unlock()
 
-		assert.Equal(t, 10000, mapSize, "Map should contain all added entries")
+		assert.LessOrEqual(t, mapSize, tracker.maxCalls, "endpoint associations should remain bounded by admitted calls")
 
 		// Clear map to prevent memory leaks in other tests
 		tracker.mu.Lock()
@@ -409,6 +413,7 @@ func TestExtractPortFromSdp_SecurityVulnerabilities(t *testing.T) {
 
 	for _, tt := range securityTests {
 		t.Run(tt.name, func(t *testing.T) {
+			tracker.GetOrCreateCall(tt.callID, layers.LinkTypeEthernet)
 			// Should not panic or crash
 			assert.NotPanics(t, func() {
 				tracker.ExtractPortFromSDP(tt.sdpBody, tt.callID)

@@ -101,6 +101,32 @@ func TestCallTrackerCopiesConfig(t *testing.T) {
 	assert.Equal(t, 7, ct.maxCalls)
 	assert.Equal(t, []string{"original"}, ct.config.PluginPaths)
 }
+
+func TestEndpointRegistrationRequiresAdmittedCallAndIsBounded(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxEndpointsPerCall = 2
+	cfg.MaxEndpointAssociations = 3
+	ct := NewCallTrackerWithConfig(cfg)
+	t.Cleanup(ct.Shutdown)
+
+	ct.registerEndpoint("4000", "missing")
+	assert.Empty(t, ct.portToCallID)
+
+	assert.NotNil(t, ct.GetOrCreateCall("first", layers.LinkTypeEthernet))
+	assert.NotNil(t, ct.GetOrCreateCall("second", layers.LinkTypeEthernet))
+	ct.registerEndpoint("4000", "first")
+	ct.registerEndpoint("4002", "first")
+	ct.registerEndpoint("4004", "first") // per-call limit
+	ct.registerEndpoint("5000", "second")
+	ct.registerEndpoint("5002", "second") // global limit
+
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	assert.Len(t, ct.portToCallID, 3)
+	assert.NotContains(t, ct.portToCallID, "4004")
+	assert.NotContains(t, ct.portToCallID, "5002")
+}
+
 func createTrackedCall(ct *CallTracker, id string) {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()

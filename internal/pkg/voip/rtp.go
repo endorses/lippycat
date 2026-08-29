@@ -24,17 +24,7 @@ func (tracker *CallTracker) ExtractPortFromSDP(sdpBody string, callID string) {
 	defer tracker.mu.Unlock()
 
 	for _, endpoint := range endpoints {
-		// Append to slice, avoiding duplicates (supports B2BUA with shared ports)
-		existing := tracker.portToCallID[endpoint]
-		alreadyRegistered := false
-		for _, cid := range existing {
-			if cid == callID {
-				alreadyRegistered = true
-				break
-			}
-		}
-		if !alreadyRegistered {
-			tracker.portToCallID[endpoint] = append(existing, callID)
+		if tracker.registerEndpointLocked(endpoint, callID) {
 			logger.Debug("Registered RTP endpoint mapping",
 				"endpoint", endpoint,
 				"call_id", SanitizeCallIDForLogging(callID),
@@ -207,19 +197,19 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 		srcEndpoint := srcIP + ":" + srcPort
 
 		if callIDs := tracker.portToCallID[dstEndpoint]; len(callIDs) > 0 {
-			return callIDs
+			return append([]string(nil), callIDs...)
 		}
 		if callIDs := tracker.portToCallID[srcEndpoint]; len(callIDs) > 0 {
-			return callIDs
+			return append([]string(nil), callIDs...)
 		}
 	}
 
 	// Fall back to port-only lookups (for NAT scenarios)
 	if callIDs := tracker.portToCallID[dstPort]; len(callIDs) > 0 {
-		return callIDs
+		return append([]string(nil), callIDs...)
 	}
 	if callIDs := tracker.portToCallID[srcPort]; len(callIDs) > 0 {
-		return callIDs
+		return append([]string(nil), callIDs...)
 	}
 	return nil
 }

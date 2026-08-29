@@ -3,10 +3,17 @@ package processor
 import (
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/google/gopacket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type directOnlySelectionPolicy struct{}
+
+func (directOnlySelectionPolicy) Select(input callregistry.SelectionInput) bool {
+	return !input.FilterConfigured || input.DirectMatch
+}
 
 // countingFilter records how often each match method is called so tests can
 // assert that a packet is evaluated exactly once.
@@ -43,6 +50,24 @@ func newFilteredProcessor(f ApplicationFilter, needIDs bool) *Processor {
 	cfg.ApplicationFilter = f
 	cfg.NeedFilterIDs = needIDs
 	return New(cfg)
+}
+
+func TestProcessorUsesInjectedSelectionPolicy(t *testing.T) {
+	filter := &countingFilter{matched: true}
+	cfg := DefaultConfig()
+	cfg.ApplicationFilter = filter
+	cfg.SelectionPolicy = directOnlySelectionPolicy{}
+	p := New(cfg)
+	t.Cleanup(p.Close)
+
+	invite := createUDPPacket(t, []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: selected-call\r\nCSeq: 1 INVITE\r\n\r\n"), 5060, 5060)
+	require.NotNil(t, p.Process(invite))
+
+	filter.matched = false
+	bye := createUDPPacket(t, []byte("BYE sip:bob@example.test SIP/2.0\r\nCall-ID: selected-call\r\nCSeq: 2 BYE\r\n\r\n"), 5060, 5060)
+	result := p.Process(bye)
+	require.NotNil(t, result)
+	require.False(t, result.IsVoIP)
 }
 
 // A matching packet must be evaluated once and carry the verdict plus IDs, so

@@ -97,8 +97,6 @@ func (m *Model) ensureCallAggregator() {
 	case components.CaptureModeLive:
 		m.liveCallAggregator = NewLocalCallAggregator(program, m.callTracker)
 		m.liveCallAggregator.Start()
-		// Set global accessor for TCP reassembly handler to trigger merges
-		SetLocalCallAggregator(m.liveCallAggregator)
 		if m.backgroundProcessor != nil {
 			m.backgroundProcessor.BeginGeneration()
 		}
@@ -110,8 +108,6 @@ func (m *Model) ensureCallAggregator() {
 	case components.CaptureModeOffline:
 		m.offlineCallAggregator = NewLocalCallAggregator(program, m.callTracker)
 		m.offlineCallAggregator.Start()
-		// Set global accessor for TCP reassembly handler to trigger merges
-		SetLocalCallAggregator(m.offlineCallAggregator)
 		if m.backgroundProcessor != nil {
 			m.backgroundProcessor.BeginGeneration()
 		}

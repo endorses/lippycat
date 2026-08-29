@@ -331,9 +331,9 @@ func (p *AsyncWriterPool) processWriteRequest(req PacketWriteRequest) error {
 	var err error
 	switch req.PacketType {
 	case PacketTypeSIP:
-		err = p.tracker.output.WritePacket(req.CallID, req.Packet, PacketTypeSIP)
+		err = p.tracker.writePacket(req.CallID, req.Packet, PacketTypeSIP)
 	case PacketTypeRTP:
-		err = p.tracker.output.WritePacket(req.CallID, req.Packet, PacketTypeRTP)
+		err = p.tracker.writePacket(req.CallID, req.Packet, PacketTypeRTP)
 	default:
 		return ErrInvalidPacketType
 	}
@@ -387,6 +387,9 @@ func GetAsyncWriter(tracker *CallTracker) *AsyncWriterPool {
 	}
 	tracker.asyncWriterMu.Lock()
 	defer tracker.asyncWriterMu.Unlock()
+	if tracker.shuttingDown.Load() != 0 {
+		return nil
+	}
 	pool, _ := tracker.asyncWriter.(*AsyncWriterPool)
 	if pool == nil || pool.stopped.Load() {
 		config := tracker.config

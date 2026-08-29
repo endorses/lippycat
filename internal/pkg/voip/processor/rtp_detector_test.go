@@ -1,9 +1,14 @@
 package processor
 
 import (
+	"net"
 	"testing"
+	"time"
 
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsValidRTP(t *testing.T) {
@@ -55,6 +60,39 @@ func TestIsValidRTP(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestDetectRTPRefreshesCallActivity(t *testing.T) {
+	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+	p.AssociateEndpoint("active-call", "192.0.2.2:10000")
+
+	stale := time.Now().Add(-time.Hour)
+	p.mu.Lock()
+	p.calls["active-call"].lastUpdated = stale
+	p.calls["active-call"].info.LastUpdated = stale
+	p.mu.Unlock()
+
+	packet := createRTPPacket(t, net.ParseIP("192.0.2.1"), net.ParseIP("192.0.2.2"), 20000, 10000)
+	require.NotNil(t, p.Process(packet))
+	call, exists := p.Call("active-call")
+	require.True(t, exists)
+	require.True(t, call.LastUpdated.After(stale))
+}
+
+func createRTPPacket(t *testing.T, srcIP, dstIP net.IP, srcPort, dstPort uint16) gopacket.Packet {
+	t.Helper()
+	eth := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 1},
+		DstMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 2},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip := &layers.IPv4{Version: 4, SrcIP: srcIP, DstIP: dstIP, Protocol: layers.IPProtocolUDP}
+	udp := &layers.UDP{SrcPort: layers.UDPPort(srcPort), DstPort: layers.UDPPort(dstPort)}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	buf := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, udp, gopacket.Payload(createRTPPayload(2, 0, 1, 1, 1))))
+	return gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
 
 func TestExtractRTPMetadata(t *testing.T) {

@@ -3,6 +3,7 @@ package voip
 import (
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
@@ -12,12 +13,19 @@ import (
 // LocalFileHandler handles SIP messages for local capture mode (lc sniff voip)
 // It writes matched calls to local PCAP files
 type LocalFileHandler struct {
-	tracker *CallTracker
+	tracker         *CallTracker
+	selectionPolicy callregistry.SelectionPolicy
 }
 
 // NewLocalFileHandler creates a handler for local file writing
 func NewLocalFileHandler(tracker *CallTracker) *LocalFileHandler {
-	return &LocalFileHandler{tracker: tracker}
+	return &LocalFileHandler{tracker: tracker, selectionPolicy: callregistry.StickySelectionPolicy{}}
+}
+
+func (h *LocalFileHandler) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
+	if policy != nil {
+		h.selectionPolicy = policy
+	}
 }
 
 // HandleSIPMessage processes a complete SIP message for local file writing.
@@ -82,7 +90,11 @@ func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, 
 		"matched", matched,
 		"already_matched", alreadyMatched)
 
-	if !matched && !alreadyMatched {
+	if !h.selectionPolicy.Select(callregistry.SelectionInput{
+		FilterConfigured:   true,
+		DirectMatch:        matched,
+		PreviouslySelected: alreadyMatched,
+	}) {
 		// Release this message's packets rather than leaving them buffered,
 		// where a later matching call would have written them into its PCAP.
 		discardTCPBufferedPackets(netFlow, transportFlow)
@@ -134,7 +146,7 @@ func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, 
 
 	injectPacketToVirtualInterface(pkt)
 
-	if GetConfig().WriteVoIP {
+	if h.tracker.config.WriteVoIP {
 		WriteSIP(h.tracker, callID, pkt.Packet)
 	}
 

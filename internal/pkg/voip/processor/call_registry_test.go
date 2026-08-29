@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -131,4 +132,67 @@ func TestCallRegistryConcurrentCloseIsIdempotent(t *testing.T) {
 		{callID: "b", reason: callregistry.EndShutdown},
 	}, observer.snapshot())
 	require.Empty(t, p.ActiveCalls())
+}
+
+func TestCallRegistryConcurrentLifecycleIsCausallyOrdered(t *testing.T) {
+	observer := &recordingLifecycleObserver{}
+	p := New(Config{MaxCalls: 256, CallTimeout: time.Hour, LifecycleObservers: []callregistry.LifecycleObserver{observer}})
+
+	var wg sync.WaitGroup
+	for i := range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			callID := fmt.Sprintf("call-%d", i)
+			p.AssociateEndpoint(callID, fmt.Sprintf("192.0.2.1:%d", 10000+i))
+			p.CompleteCall(callID)
+		}()
+	}
+	wg.Wait()
+	p.Close()
+
+	seenStart := make(map[string]bool)
+	for _, event := range observer.snapshot() {
+		if event.reason == "" {
+			seenStart[event.callID] = true
+			continue
+		}
+		require.True(t, seenStart[event.callID], "end notification preceded start for %s", event.callID)
+	}
+}
+
+func TestCallRegistryNormalizesNegativeCapacity(t *testing.T) {
+	p := New(Config{MaxCalls: -1, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+
+	p.AssociateEndpoint("call", "192.0.2.1:10000")
+	_, exists := p.Call("call")
+	require.True(t, exists)
+	require.Equal(t, 10000, p.config.MaxCalls)
+}
+
+func TestCallRegistryBoundsEndpointAssociations(t *testing.T) {
+	p := New(Config{
+		MaxCalls:                10,
+		MaxEndpointsPerCall:     2,
+		MaxEndpointAssociations: 3,
+		CallTimeout:             time.Hour,
+	})
+	t.Cleanup(p.Close)
+
+	p.AssociateEndpoint("one", "192.0.2.1:10000")
+	p.AssociateEndpoint("one", "192.0.2.1:10002")
+	p.AssociateEndpoint("one", "192.0.2.1:10004")
+	p.AssociateEndpoint("two", "192.0.2.2:20000")
+	p.AssociateEndpoint("two", "192.0.2.2:20002")
+
+	require.Equal(t, []string{"one"}, p.CallIDsForEndpoint("192.0.2.1:10000"))
+	require.Equal(t, []string{"one"}, p.CallIDsForEndpoint("192.0.2.1:10002"))
+	require.Empty(t, p.CallIDsForEndpoint("192.0.2.1:10004"))
+	require.Equal(t, []string{"two"}, p.CallIDsForEndpoint("192.0.2.2:20000"))
+	require.Empty(t, p.CallIDsForEndpoint("192.0.2.2:20002"))
+	require.Equal(t, 3, p.associationCount)
+
+	p.CompleteCall("one")
+	require.Equal(t, 1, p.associationCount)
 }

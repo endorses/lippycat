@@ -56,6 +56,9 @@ func newSIPWriteHarness(t *testing.T, callID string) *sipWriteHarness {
 	// repeat run reuses the previous run's CallInfo, whose writers point at an
 	// already-deleted temp directory.
 	tracker := TestCallTracker(t)
+	output := NewSessionOutputManager(&cfg)
+	tracker.replaceOutputForTest(output)
+	t.Cleanup(func() { require.NoError(t, output.Shutdown()) })
 	resetVoipWriteState(tracker, callID)
 	t.Cleanup(func() { resetVoipWriteState(tracker, callID) })
 
@@ -84,11 +87,11 @@ func resetVoipWriteState(tracker *CallTracker, callID string) {
 	tracker.shuttingDown.Store(0)
 
 	tracker.mu.Lock()
-	if call, ok := tracker.callMap[callID]; ok {
-		_ = call.Close()
-		delete(tracker.callMap, callID)
-	}
+	call := tracker.detachCallLocked(callID)
 	tracker.mu.Unlock()
+	if call != nil {
+		_ = tracker.notifyCallEnded(call)
+	}
 
 	tracker.closeAsyncWriter()
 }
@@ -116,7 +119,7 @@ func (h *sipWriteHarness) writtenStartLines() []string {
 	h.t.Helper()
 
 	h.tracker.closeAsyncWriter()
-	require.NoError(h.t, h.tracker.output.CloseSession(h.callID))
+	require.NoError(h.t, trackerOutput(h.t, h.tracker).CloseSession(h.callID))
 	return sipStartLinesFromPcap(h.t, h.sipPath)
 }
 
@@ -249,7 +252,7 @@ func TestUDPBufferedPath_UnmatchedCallNotWritten(t *testing.T) {
 	h.feed(sipMsg("BYE sip:bob@example.com SIP/2.0", callID, ";tag=2", ""))
 
 	h.tracker.closeAsyncWriter()
-	require.NoError(t, h.tracker.output.CloseSession(callID))
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callID))
 	_, err := os.Stat(h.sipPath)
 	require.True(t, os.IsNotExist(err), "no PCAP should be created for an unmatched call, got err=%v", err)
 }

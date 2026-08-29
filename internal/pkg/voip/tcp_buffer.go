@@ -173,6 +173,10 @@ func shouldReverseTCPBufferKey(netFlow, transportFlow gopacket.Flow) bool {
 // BufferTCPPacket buffers a TCP packet for a network and transport flow.
 // This is used by TCP SIP handlers to buffer packets before reassembly completes.
 func BufferTCPPacket(netFlow, transportFlow gopacket.Flow, pkt capture.PacketInfo) {
+	BufferTCPPacketWithConfig(netFlow, transportFlow, pkt, DefaultConfig())
+}
+
+func BufferTCPPacketWithConfig(netFlow, transportFlow gopacket.Flow, pkt capture.PacketInfo, config *Config) {
 	key := newTCPBufferKey(netFlow, transportFlow)
 
 	tcpPacketBuffersMu.Lock()
@@ -181,7 +185,9 @@ func BufferTCPPacket(netFlow, transportFlow gopacket.Flow, pkt capture.PacketInf
 	buffer, exists := tcpPacketBuffers[key]
 	if !exists {
 		// Create new buffer with configured strategy and size
-		config := GetConfig()
+		if config == nil {
+			config = DefaultConfig()
+		}
 		buffer = getOrCreateBuffer(config.TCPBufferStrategy, config.MaxTCPBuffers)
 		buffer.key = key
 		tcpPacketBuffers[key] = buffer

@@ -54,6 +54,14 @@ func NewSessionOutputManager(config *Config) *SessionOutputManager {
 	return &SessionOutputManager{config: cfg, sessions: make(map[string]*sessionFiles)}
 }
 
+func (m *SessionOutputManager) OnCallStarted(call *CallInfo) error {
+	return m.OpenSession(call.CallID, call.LinkType)
+}
+
+func (m *SessionOutputManager) OnCallEnded(call *CallInfo) error {
+	return m.CloseSession(call.CallID)
+}
+
 func (m *SessionOutputManager) OpenSession(callID string, linkType layers.LinkType) error {
 	m.mu.RLock()
 	closed := m.closed

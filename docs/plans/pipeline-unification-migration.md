@@ -939,3 +939,11 @@ policy, while command-local runtime values are explicitly hooks into the shared
 sniff, hunt, and tap runners rather than parallel protocol specifications. The
 focused race suite, `make test`, and the supported non-CUDA build/test/vet
 matrix pass.
+
+- [x] Consolidate hunter and tap DNS parsing and tunneling detection into one
+      domain analyzer, with protobuf conversion owned by the transport adapter.
+
+DNS boundary remediation (2026-08-29): hunter forwarding and tap local-source
+composition now consume the shared `dns.Analyzer`, which returns domain
+metadata. The duplicated analyzer implementations and protobuf converters were
+removed; the gRPC adapter owns the single domain-to-protobuf projection.

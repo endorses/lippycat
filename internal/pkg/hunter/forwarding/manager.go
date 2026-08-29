@@ -16,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
+	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 )
 
@@ -49,7 +50,7 @@ type ApplicationFilterReceiver interface {
 type DNSMetadataProvider interface {
 	// ProcessPacket parses a DNS packet and returns proto-ready metadata.
 	// Returns nil if the packet is not a DNS packet or parsing fails.
-	ProcessPacket(packet gopacket.Packet) *data.DNSMetadata
+	ProcessPacket(packet gopacket.Packet) *types.DNSMetadata
 }
 
 // StatsCollector provides access to hunter statistics
@@ -346,7 +347,7 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 					if metadata == nil {
 						metadata = &data.PacketMetadata{}
 					}
-					metadata.Dns = dnsMetadata
+					metadata.Dns = grpcadapter.DNSMetadataToProto(dnsMetadata)
 				}
 			}
 			if metadata != nil {

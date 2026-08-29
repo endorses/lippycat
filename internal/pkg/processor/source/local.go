@@ -783,7 +783,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 					if pbPkt.Metadata == nil {
 						pbPkt.Metadata = &data.PacketMetadata{}
 					}
-					pbPkt.Metadata.Dns = dnsMetadata
+					pbPkt.Metadata.Dns = grpcadapter.DNSMetadataToProto(dnsMetadata)
 				}
 			}
 

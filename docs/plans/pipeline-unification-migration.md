@@ -513,6 +513,11 @@ concurrent shutdown cannot emit an end before its corresponding start callback
 completes. Regression tests cover registry queries from start observers and
 start-before-end ordering during concurrent shutdown.
 
+Deterministic-drop follow-up (2026-08-29): tap TCP terminal completion callbacks
+now run when either the injection channel or local-source filtering drops the
+packet before batching. Regression tests cover both pre-batch drop paths, while
+successful output continues to defer completion until processor handling ends.
+
 ### Exit Criteria
 
 - No package-global call tracker or `getTracker()` consumer remains.

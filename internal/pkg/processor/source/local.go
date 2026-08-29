@@ -659,6 +659,9 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 					PreviouslySelected: len(inheritedIDs) > 0,
 				})
 				if !selected {
+					if injectedPkt.AfterProcess != nil {
+						injectedPkt.AfterProcess()
+					}
 					continue
 				}
 				if matched && len(filterIDs) > 0 {
@@ -673,6 +676,9 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 				} else {
 					filterIDs = inheritedIDs
 					if len(filterIDs) == 0 {
+						if injectedPkt.AfterProcess != nil {
+							injectedPkt.AfterProcess()
+						}
 						continue
 					}
 					pbPkt.MatchedFilterIds = filterIDs

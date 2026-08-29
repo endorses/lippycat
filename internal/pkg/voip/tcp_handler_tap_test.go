@@ -70,6 +70,25 @@ func TestTapTCPHandlerReportsTerminalDialogResponse(t *testing.T) {
 	}
 }
 
+func TestTapTCPHandlerCompletesTerminalDialogWhenInjectionChannelFull(t *testing.T) {
+	ch := make(chan source.InjectedPacket, 1)
+	ch <- source.InjectedPacket{}
+	h := NewTapTCPHandler(ch)
+	registrar := &recordingSDPRegistrar{calls: make(map[string]string)}
+	h.SetCallRegistry(registrar)
+
+	message := []byte("SIP/2.0 200 OK\r\nCall-ID: dropped-terminal\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n")
+	ok := h.HandleSIPMessage(message, "dropped-terminal", "10.0.0.1:5060", "10.0.0.2:5060",
+		testNetFlow(t, "10.0.0.1", "10.0.0.2"), testTransportFlow(t, 5060, 5060))
+
+	if !ok {
+		t.Fatal("terminal response should be accepted before the injection drop")
+	}
+	if len(registrar.completed) != 1 || registrar.completed[0] != "dropped-terminal" {
+		t.Fatalf("drop-path completions=%v", registrar.completed)
+	}
+}
+
 func (f *targetSubstringFilter) MatchPacket(pkt gopacket.Packet) bool {
 	var payload string
 	if app := pkt.ApplicationLayer(); app != nil {

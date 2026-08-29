@@ -97,6 +97,20 @@ func (ct *CallTracker) removeCall(callID string) (bool, error) {
 	return true, ct.notifyCallEnded(call)
 }
 
+func (ct *CallTracker) removeCallIf(callID string, expected *CallInfo) (bool, error) {
+	ct.mu.Lock()
+	if expected != nil && ct.callMap[callID] != expected {
+		ct.mu.Unlock()
+		return false, nil
+	}
+	call := ct.detachCallLocked(callID)
+	ct.mu.Unlock()
+	if call == nil {
+		return false, nil
+	}
+	return true, ct.notifyCallEnded(call)
+}
+
 func (ct *CallTracker) detachCallLocked(callID string) *CallInfo {
 	call := ct.callMap[callID]
 	if call == nil {
@@ -147,6 +161,8 @@ type CallTracker struct {
 	asyncWriterMu      sync.Mutex
 	asyncWriter        interface{ Stop() error }
 	shuttingDown       atomic.Int32   // Atomic flag: 1 if shutting down, 0 otherwise
+	writeGateMu        sync.Mutex     // Serializes write admission with closing activeWrites
+	writesClosed       bool           // Protected by writeGateMu
 	activeWrites       sync.WaitGroup // Tracks active write operations
 }
 
@@ -304,6 +320,13 @@ func (ct *CallTracker) Shutdown() {
 
 		ct.closeAsyncWriter()
 
+		// No async worker can start another accepted write after Stop returns.
+		// Close the synchronous admission gate before waiting, so Add can never
+		// race with Wait.
+		ct.writeGateMu.Lock()
+		ct.writesClosed = true
+		ct.writeGateMu.Unlock()
+
 		// Wait for all active writes to complete
 		ct.activeWrites.Wait()
 		logger.Info("All active writes completed, closing call files")
@@ -336,10 +359,10 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 		return
 	}
 	tracker.mu.Lock()
-	defer tracker.mu.Unlock()
 
 	c.State = newState
 	c.LastUpdated = time.Now()
+	notifyEnded := false
 
 	// If this is a call termination message (BYE or CANCEL), set EndTime
 	if newState == "BYE" || newState == "CANCEL" {
@@ -351,10 +374,15 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 				"method", newState,
 				"duration", now.Sub(c.Created))
 
-			// Schedule PCAP closure via this tracker's completion monitor.
-			for _, observer := range tracker.stateObservers {
-				observer.OnCallStateChanged(c.CallID, newState)
-			}
+			notifyEnded = true
+		}
+	}
+	observers := append([]CallStateObserver(nil), tracker.stateObservers...)
+	tracker.mu.Unlock()
+	if notifyEnded {
+		// Observer callbacks may inspect tracker state, so invoke them unlocked.
+		for _, observer := range observers {
+			observer.OnCallStateChanged(c.CallID, newState)
 		}
 	}
 }
@@ -399,12 +427,19 @@ func (tracker *CallTracker) GetOrCreateCall(callID string, linkType layers.LinkT
 }
 
 func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
+	if tracker.shuttingDown.Load() != 0 {
+		return nil
+	}
 	// Existing calls dominate the RTP packet path. Refresh their eviction
 	// recency atomically so every media packet does not take the tracker-wide
 	// write lock merely to promote an LRU element.
 	tracker.mu.RLock()
 	call, exists := tracker.callMap[callID]
 	if exists {
+		if tracker.shuttingDown.Load() != 0 {
+			tracker.mu.RUnlock()
+			return nil
+		}
 		tracker.touchCall(callID)
 		tracker.mu.RUnlock()
 		return call
@@ -413,6 +448,12 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 
 	tracker.mu.Lock()
 	var evicted *CallInfo
+	var admitted bool
+	var stateObservers []CallStateObserver
+	if tracker.shuttingDown.Load() != 0 {
+		tracker.mu.Unlock()
+		return nil
+	}
 
 	call, exists = tracker.callMap[callID]
 	if !exists {
@@ -496,13 +537,17 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 		tracker.lruIndex[callID] = elem
 		tracker.callMap[callID] = call
 		tracker.touchCall(callID)
-		for _, observer := range tracker.stateObservers {
-			observer.OnCallAdmitted(callID)
-		}
+		admitted = true
+		stateObservers = append([]CallStateObserver(nil), tracker.stateObservers...)
 	} else {
 		tracker.touchCall(callID)
 	}
 	tracker.mu.Unlock()
+	if admitted {
+		for _, observer := range stateObservers {
+			observer.OnCallAdmitted(callID)
+		}
+	}
 	if evicted != nil {
 		if err := tracker.notifyCallEnded(evicted); err != nil {
 			logger.Error("Error closing call files", "call_id", SanitizeCallIDForLogging(evicted.CallID), "error", err)
@@ -542,6 +587,30 @@ func (ct *CallTracker) notifyCallEnded(call *CallInfo) error {
 func (ct *CallTracker) touchCall(callID string) {
 	value, _ := ct.recency.LoadOrStore(callID, &atomic.Int64{})
 	value.(*atomic.Int64).Store(time.Now().UnixNano())
+}
+
+// beginWrite admits a synchronous write only while shutdown has not begun.
+// Holding writeGateMu across Add makes the transition to WaitGroup.Wait safe.
+func (ct *CallTracker) beginWrite() bool {
+	ct.writeGateMu.Lock()
+	defer ct.writeGateMu.Unlock()
+	if ct.writesClosed || ct.shuttingDown.Load() != 0 {
+		return false
+	}
+	ct.activeWrites.Add(1)
+	return true
+}
+
+// beginAcceptedWrite accounts for work already accepted by the async queue.
+// Shutdown stops and drains that queue before closing the admission gate.
+func (ct *CallTracker) beginAcceptedWrite() bool {
+	ct.writeGateMu.Lock()
+	defer ct.writeGateMu.Unlock()
+	if ct.writesClosed {
+		return false
+	}
+	ct.activeWrites.Add(1)
+	return true
 }
 
 // leastRecentUnpinnedLocked chooses using atomic packet recency while retaining
@@ -682,7 +751,16 @@ func (ct *CallTracker) cleanupOldCalls() {
 	ct.mu.Lock()
 	expired := make([]*CallInfo, 0)
 	for id, call := range ct.callMap {
-		if call != nil && ct.pins[id] == 0 && call.LastUpdated.Before(cutoff) {
+		if call == nil {
+			continue
+		}
+		lastActivity := call.LastUpdated
+		if value, ok := ct.recency.Load(id); ok {
+			if touched := time.Unix(0, value.(*atomic.Int64).Load()); touched.After(lastActivity) {
+				lastActivity = touched
+			}
+		}
+		if ct.pins[id] == 0 && lastActivity.Before(cutoff) {
 			expired = append(expired, ct.detachCallLocked(id))
 		}
 	}

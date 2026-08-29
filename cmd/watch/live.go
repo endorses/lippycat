@@ -90,6 +90,7 @@ func runLive(cmd *cobra.Command, args []string) {
 		"",              // nodesFilePath
 		insecureAllowed, // insecure - passed for remote mode switching
 	)
+	aggregator := model.PrepareLocalCallAggregator()
 
 	// Full terminal reset (RIS) to clear any corrupted state including color palette
 	fmt.Print("\033c")
@@ -99,6 +100,9 @@ func runLive(cmd *cobra.Command, args []string) {
 
 	// Start bubbletea program with mouse support
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
+	aggregator.SetProgram(p)
+	aggregator.Start()
+	defer aggregator.Stop()
 
 	// Store program reference for packet bridge
 	tui.SetCurrentProgram(p)
@@ -116,7 +120,7 @@ func runLive(cmd *cobra.Command, args []string) {
 		tui.WaitForTUIReady()
 
 		capture.StartLiveSniffer(liveInterfaces, liveFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-			startLiveSniffer(ctx, devices, filter, p, model.CallTracker())
+			startLiveSniffer(ctx, devices, filter, p, model.CallTracker(), aggregator)
 		})
 	}()
 
@@ -127,10 +131,10 @@ func runLive(cmd *cobra.Command, args []string) {
 	}
 }
 
-func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker) {
+func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) {
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
-		tui.StartPacketBridge(ch, program, pauseSignal, tracker, false)
+		tui.StartPacketBridge(ch, program, pauseSignal, tracker, false, aggregator)
 	}
 	// Pass pause function to drop packets at source when paused (reduces CPU)
 	capture.InitWithContext(ctx, devices, filter, processor, nil, pauseSignal.IsPaused)

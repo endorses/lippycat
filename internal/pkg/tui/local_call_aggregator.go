@@ -44,6 +44,8 @@ type LocalCallAggregator struct {
 	callUpdateTimer *time.Timer
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
+	startOnce       sync.Once
+	stopOnce        sync.Once
 	// Double-buffer for call updates to reduce allocations
 	// We alternate between buffers so one can be processed by TUI while we fill the other
 	callInfoBuffers [2][]types.CallInfo
@@ -59,6 +61,13 @@ func NewLocalCallAggregator(program *tea.Program, tracker *CallTracker) *LocalCa
 		notifyThrottle: 500 * time.Millisecond, // Throttle call updates
 		stopCh:         make(chan struct{}),
 	}
+}
+
+// SetProgram attaches the Bubble Tea program that receives call updates. It must
+// be called before Start or packet processing begins when the aggregator was
+// constructed before tea.NewProgram.
+func (lca *LocalCallAggregator) SetProgram(program *tea.Program) {
+	lca.program = program
 }
 
 // ProcessPacket processes a packet and updates call state
@@ -261,39 +270,43 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 
 // Start starts the background call update notifier
 func (lca *LocalCallAggregator) Start() {
-	lca.wg.Add(1)
-	go func() {
-		defer lca.wg.Done()
+	lca.startOnce.Do(func() {
+		lca.wg.Add(1)
+		go func() {
+			defer lca.wg.Done()
 
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				// Periodically check for call updates
-				lca.notifyCallUpdates()
-			case <-lca.stopCh:
-				return
+			for {
+				select {
+				case <-ticker.C:
+					// Periodically check for call updates
+					lca.notifyCallUpdates()
+				case <-lca.stopCh:
+					return
+				}
 			}
-		}
-	}()
+		}()
 
-	logger.Debug("Local call aggregator started")
+		logger.Debug("Local call aggregator started")
+	})
 }
 
 // Stop stops the background call update notifier
 func (lca *LocalCallAggregator) Stop() {
-	close(lca.stopCh)
-	lca.wg.Wait()
+	lca.stopOnce.Do(func() {
+		close(lca.stopCh)
+		lca.wg.Wait()
 
-	lca.mu.Lock()
-	if lca.callUpdateTimer != nil {
-		lca.callUpdateTimer.Stop()
-	}
-	lca.mu.Unlock()
+		lca.mu.Lock()
+		if lca.callUpdateTimer != nil {
+			lca.callUpdateTimer.Stop()
+		}
+		lca.mu.Unlock()
 
-	logger.Debug("Local call aggregator stopped")
+		logger.Debug("Local call aggregator stopped")
+	})
 }
 
 // GetCalls returns all tracked calls

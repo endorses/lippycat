@@ -30,23 +30,12 @@ func WriteSIP(tracker *CallTracker, callID string, packet gopacket.Packet) {
 // writeSIPSync performs synchronous SIP packet writing (legacy method)
 func (tracker *CallTracker) writeSIPSync(callID string, packet gopacket.Packet) error {
 
-	// Check if shutting down
-	if tracker.shuttingDown.Load() == 1 {
+	if !tracker.beginWrite() {
 		logger.Debug("Skipping SIP write during shutdown",
 			"call_id", SanitizeCallIDForLogging(callID))
 		return ErrShuttingDown
 	}
-
-	// Track active write
-	tracker.activeWrites.Add(1)
 	defer tracker.activeWrites.Done()
-
-	// Double-check shutdown after acquiring write slot
-	if tracker.shuttingDown.Load() == 1 {
-		logger.Debug("Skipping SIP write during shutdown",
-			"call_id", SanitizeCallIDForLogging(callID))
-		return ErrShuttingDown
-	}
 
 	tracker.mu.Lock()
 	call, ok := tracker.callMap[callID]
@@ -94,23 +83,12 @@ func WriteRTP(tracker *CallTracker, callID string, packet gopacket.Packet) {
 // writeRTPSync performs synchronous RTP packet writing (legacy method)
 func (tracker *CallTracker) writeRTPSync(callID string, packet gopacket.Packet) error {
 
-	// Check if shutting down
-	if tracker.shuttingDown.Load() == 1 {
+	if !tracker.beginWrite() {
 		logger.Debug("Skipping RTP write during shutdown",
 			"call_id", SanitizeCallIDForLogging(callID))
 		return ErrShuttingDown
 	}
-
-	// Track active write
-	tracker.activeWrites.Add(1)
 	defer tracker.activeWrites.Done()
-
-	// Double-check shutdown after acquiring write slot
-	if tracker.shuttingDown.Load() == 1 {
-		logger.Debug("Skipping RTP write during shutdown",
-			"call_id", SanitizeCallIDForLogging(callID))
-		return ErrShuttingDown
-	}
 
 	tracker.mu.Lock()
 	call, ok := tracker.callMap[callID]

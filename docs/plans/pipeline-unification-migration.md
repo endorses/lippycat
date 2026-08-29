@@ -483,6 +483,22 @@ configuration snapshots now cover legacy packet-processing paths. Focused race
 tests, `make test` (including LI packages), and the supported non-CUDA build
 matrix pass.
 
+### Post-Audit Repair Verification (2026-08-29)
+
+- [x] Reject legacy call admission once shutdown starts and serialize synchronous
+      and accepted asynchronous write accounting with shutdown.
+- [x] Make legacy timeout activity include RTP endpoint lookups even when
+      per-call packet output is disabled.
+- [x] Make completion-monitor cleanup generation-aware so a reused Call-ID cannot
+      be closed or suppressed by an older dialog.
+- [x] Carry tap TCP terminal completion through the local batch and run it only
+      after processor output handling, including deterministic drop paths.
+- [x] Require the session-owned TUI call aggregator in local watch bridges and
+      wire it explicitly from both `watch live` and `watch file`.
+
+Focused race tests cover legacy VoIP lifecycle, local-source callback ownership,
+processor completion ordering, and TUI aggregation wiring.
+
 ### Exit Criteria
 
 - No package-global call tracker or `getTracker()` consumer remains.

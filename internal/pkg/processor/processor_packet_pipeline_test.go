@@ -49,6 +49,30 @@ func TestProcessBatch_BasicFlow(t *testing.T) {
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
 }
 
+func TestProcessBatchRunsDeferredLocalCompletion(t *testing.T) {
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:55555",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	completed := false
+	batch := &source.PacketBatch{
+		SourceID: "local",
+		Packets: []*data.CapturedPacket{{
+			TimestampNs: time.Now().UnixNano(),
+			Data:        make([]byte, 64),
+		}},
+		AfterProcess: []func(){func() { completed = true }},
+	}
+
+	processor.processBatch(batch)
+	require.True(t, completed, "processor must run local completion after processing")
+	require.Empty(t, batch.AfterProcess)
+}
+
 // TestProcessBatch_MultiplePackets tests processing a batch with many packets
 func TestProcessBatch_MultiplePackets(t *testing.T) {
 	processor, err := New(Config{

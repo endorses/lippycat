@@ -876,7 +876,7 @@ func ResetBridgeStats() {
 //
 // The pause signal allows the bridge to block when capture is paused,
 // reducing CPU usage to near-idle.
-func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregators ...*LocalCallAggregator) {
+func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregator *LocalCallAggregator) {
 	// Wait for TUI to be fully initialized before processing packets.
 	// This prevents race conditions where messages are sent before
 	// Bubbletea has completed terminal setup, which can cause
@@ -901,10 +901,6 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var aggregator *LocalCallAggregator
-	if len(aggregators) > 0 {
-		aggregator = aggregators[0]
-	}
 	tcpHandler := NewTUISIPHandler(tracker, aggregator)
 	streamFactory := voip.NewSipStreamFactoryWithConfig(
 		ctx,

@@ -45,6 +45,7 @@ func DefaultSniffCompletionMonitorConfig() *SniffCompletionMonitorConfig {
 type sniffPendingCallInfo struct {
 	scheduledAt time.Time // When the call was first scheduled for closure
 	callID      string
+	call        *CallInfo // Exact admitted generation scheduled for closure
 }
 
 // SniffCompletionMonitor monitors call state and closes PCAP files after grace period.
@@ -127,6 +128,7 @@ func (m *SniffCompletionMonitor) ScheduleClose(callID string) {
 		return
 	}
 
+	call, _ := m.tracker.GetCall(callID)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -143,6 +145,7 @@ func (m *SniffCompletionMonitor) ScheduleClose(callID string) {
 	m.pendingClose[callID] = &sniffPendingCallInfo{
 		scheduledAt: time.Now(),
 		callID:      callID,
+		call:        call,
 	}
 
 	logger.Debug("Scheduled call PCAP closure",
@@ -185,11 +188,11 @@ func (m *SniffCompletionMonitor) processPendingClose() {
 	now := time.Now()
 
 	m.mu.Lock()
-	toClose := make([]string, 0)
+	toClose := make([]*sniffPendingCallInfo, 0)
 	for callID, info := range m.pendingClose {
 		gracePeriodExpired := now.After(info.scheduledAt.Add(m.config.GracePeriod))
 		if gracePeriodExpired {
-			toClose = append(toClose, callID)
+			toClose = append(toClose, info)
 			logger.Debug("Call grace period expired",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"waited", now.Sub(info.scheduledAt))
@@ -197,29 +200,40 @@ func (m *SniffCompletionMonitor) processPendingClose() {
 	}
 
 	// Remove from pending before releasing lock
-	for _, callID := range toClose {
-		delete(m.pendingClose, callID)
+	for _, info := range toClose {
+		delete(m.pendingClose, info.callID)
 	}
 	m.mu.Unlock()
 
 	// Close PCAP files outside the lock
-	for _, callID := range toClose {
-		m.closeCallPcap(callID)
+	for _, info := range toClose {
+		m.closeCallPcapGeneration(info.callID, info.call)
 	}
 }
 
 // closeCallPcap closes the PCAP files for a call
 func (m *SniffCompletionMonitor) closeCallPcap(callID string) {
-	// Clean up RTP port mappings for this call
-	m.tracker.CleanupPortMappings(callID)
+	m.closeCallPcapGeneration(callID, nil)
+}
 
-	// Detach tracker state before taking writer locks, then close the call.
-	found, err := m.tracker.removeCall(callID)
+func (m *SniffCompletionMonitor) closeCallPcapGeneration(callID string, expected *CallInfo) {
+	// Serialize the old generation's detach/closed marker with CallStarted.
+	// A reused Call-ID may already be admitted while CallStarted waits here; once
+	// this lock is released, CallStarted removes the old suppression marker.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Detaching atomically removes tracker state and RTP endpoint mappings before
+	// taking writer locks. The identity check protects a reused Call-ID.
+	found, err := m.tracker.removeCallIf(callID, expected)
 	if !found {
+		if expected != nil {
+			if current, getErr := m.tracker.GetCall(callID); getErr == nil && current != expected {
+				return
+			}
+		}
 		// Call may have already been evicted from LRU, just mark as closed
-		m.mu.Lock()
 		m.closedCalls[callID] = time.Now()
-		m.mu.Unlock()
 		logger.Debug("Call not found for PCAP closure (may have been evicted)",
 			"call_id", SanitizeCallIDForLogging(callID))
 		return
@@ -230,16 +244,12 @@ func (m *SniffCompletionMonitor) closeCallPcap(callID string) {
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)
 		// Still mark as closed to prevent infinite retry
-		m.mu.Lock()
 		m.closedCalls[callID] = time.Now()
-		m.mu.Unlock()
 		return
 	}
 
 	// Mark as closed
-	m.mu.Lock()
 	m.closedCalls[callID] = time.Now()
-	m.mu.Unlock()
 
 	logger.Info("Closed PCAP files for completed call",
 		"call_id", SanitizeCallIDForLogging(callID))
@@ -268,15 +278,15 @@ func (m *SniffCompletionMonitor) pruneClosedCalls(now time.Time) int {
 // closeAllPending closes all pending calls immediately (used during shutdown)
 func (m *SniffCompletionMonitor) closeAllPending() {
 	m.mu.Lock()
-	toClose := make([]string, 0, len(m.pendingClose))
-	for callID := range m.pendingClose {
-		toClose = append(toClose, callID)
+	toClose := make([]*sniffPendingCallInfo, 0, len(m.pendingClose))
+	for _, info := range m.pendingClose {
+		toClose = append(toClose, info)
 	}
 	m.pendingClose = make(map[string]*sniffPendingCallInfo)
 	m.mu.Unlock()
 
-	for _, callID := range toClose {
-		m.closeCallPcap(callID)
+	for _, info := range toClose {
+		m.closeCallPcapGeneration(info.callID, info.call)
 	}
 
 	logger.Info("Closed all pending call PCAP files on shutdown", "count", len(toClose))

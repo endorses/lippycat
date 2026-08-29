@@ -80,6 +80,23 @@ type PacketBatch struct {
 	// intercept tasks apply to these packets.
 	// Populated by hunters (distributed mode) or LocalSource (tap mode).
 	MatchedFilterIDs []string
+
+	// AfterProcess contains local-only lifecycle transitions that must run only
+	// after every packet in the batch has traversed the processor pipeline. It
+	// is intentionally absent from the wire representation.
+	AfterProcess []func()
+}
+
+// RunAfterProcess runs and clears local lifecycle callbacks. Clearing first
+// makes retries or duplicate cleanup paths harmless.
+func (b *PacketBatch) RunAfterProcess() {
+	callbacks := b.AfterProcess
+	b.AfterProcess = nil
+	for _, callback := range callbacks {
+		if callback != nil {
+			callback()
+		}
+	}
 }
 
 // Stats contains packet source statistics.

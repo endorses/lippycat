@@ -54,9 +54,10 @@ type VoIPProcessor = *voipprocessor.SourceAdapter
 type InjectedPacket struct {
 	PacketInfo capture.PacketInfo
 	Metadata   *data.PacketMetadata
-	// AfterEnqueue runs after the packet has entered the local source batch.
-	// It is used for lifecycle transitions that must follow the final packet.
-	AfterEnqueue func()
+	// AfterProcess runs after the packet's batch has traversed the processor
+	// pipeline. It is used for lifecycle transitions that must follow the final
+	// packet's processing and synchronous output writes.
+	AfterProcess func()
 }
 
 // TCPAssembler handles TCP packets for stream reassembly.
@@ -182,7 +183,10 @@ type LocalSource struct {
 	// Batching
 	batchMu      sync.Mutex
 	currentBatch []*data.CapturedPacket
-	batchSeq     uint64
+	// currentBatchAfterProcess is protected by batchMu and moves atomically
+	// with currentBatch into the emitted PacketBatch.
+	currentBatchAfterProcess []func()
+	batchSeq                 uint64
 
 	// Packet batch channel for processing
 	batches chan *PacketBatch
@@ -681,11 +685,11 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			// Add to batch
 			s.batchMu.Lock()
 			s.currentBatch = append(s.currentBatch, pbPkt)
+			if injectedPkt.AfterProcess != nil {
+				s.currentBatchAfterProcess = append(s.currentBatchAfterProcess, injectedPkt.AfterProcess)
+			}
 			batchLen := len(s.currentBatch)
 			s.batchMu.Unlock()
-			if injectedPkt.AfterEnqueue != nil {
-				injectedPkt.AfterEnqueue()
-			}
 
 			// Send if batch is full
 			if batchLen >= s.config.BatchSize {
@@ -875,10 +879,12 @@ func (s *LocalSource) sendBatch() {
 			FilteredMatched: s.stats.packetsForwarded.Load(),
 			Dropped:         s.droppedTotal(),
 		},
+		AfterProcess: s.currentBatchAfterProcess,
 	}
 
 	// Reset batch
 	s.currentBatch = make([]*data.CapturedPacket, 0, s.config.BatchSize)
+	s.currentBatchAfterProcess = nil
 	s.batchMu.Unlock()
 	if err := batch.SyncEnvelopesFromPackets(); err != nil {
 		s.stats.AddDropped(uint64(len(batch.Packets)))
@@ -886,6 +892,7 @@ func (s *LocalSource) sendBatch() {
 			"sequence", batch.Sequence,
 			"packets", len(batch.Packets),
 			"error", err)
+		batch.RunAfterProcess()
 		return
 	}
 
@@ -898,6 +905,7 @@ func (s *LocalSource) sendBatch() {
 	default:
 		// Buffer full - drop batch
 		s.stats.AddDropped(uint64(len(batch.Packets)))
+		batch.RunAfterProcess()
 		logger.Warn("LocalSource batch buffer full, dropping batch",
 			"sequence", batch.Sequence,
 			"packets", len(batch.Packets))

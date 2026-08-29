@@ -44,6 +44,10 @@ import (
 // processBatch processes a received packet batch using the source.PacketBatch abstraction.
 // This supports both gRPC (distributed) and local (standalone tap) packet sources.
 func (p *Processor) processBatch(batch *source.PacketBatch) {
+	// Complete local lifecycle transitions after the processing attempt on every
+	// exit path, including normalization/encoding failures.
+	defer batch.RunAfterProcess()
+
 	sourceID := batch.SourceID
 
 	logger.Debug("Received packet batch",
@@ -297,6 +301,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			logger.Warn("Failed to inject packet batch to virtual interface", "error", err)
 		}
 	}
+
 }
 
 func (p *Processor) trackConnections(sourceID string, packets []*data.CapturedPacket) {

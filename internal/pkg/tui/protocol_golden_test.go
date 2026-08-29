@@ -120,7 +120,7 @@ func runProtocolGoldenBridge(t *testing.T, infos []capture.PacketInfo, offline b
 		packetChan <- info
 	}
 	close(packetChan)
-	StartPacketBridge(packetChan, nil, NewPauseSignal(), tracker, offline)
+	StartPacketBridge(packetChan, nil, NewPauseSignal(), tracker, offline, nil)
 	stats := GetBridgeStats()
 	require.Equal(t, int64(len(infos)), stats.PacketsReceived)
 	require.Equal(t, int64(len(infos)), stats.PacketsDisplayed)

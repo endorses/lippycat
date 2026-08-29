@@ -1,7 +1,16 @@
 # Makefile for compiling CUDA kernels
 
-NVCC = nvcc
-CUDA_ARCH = -arch=sm_89  # RTX 4090 (Ada Lovelace) compute capability 8.9
+NVCC ?= nvcc
+
+# Build native kernels for the NVIDIA architectures commonly used by operators
+# and CI providers, and retain PTX for forward-compatible JIT compilation on
+# newer GPUs. Callers can override this when producing a device-specific build.
+CUDA_ARCH ?= \
+	-gencode arch=compute_75,code=sm_75 \
+	-gencode arch=compute_80,code=sm_80 \
+	-gencode arch=compute_86,code=sm_86 \
+	-gencode arch=compute_89,code=sm_89 \
+	-gencode arch=compute_89,code=compute_89
 
 # CUDA compiler flags
 NVCCFLAGS = -O3 -use_fast_math -Xcompiler -fPIC --shared

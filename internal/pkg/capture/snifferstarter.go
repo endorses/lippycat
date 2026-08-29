@@ -337,46 +337,29 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 		"first_timestamp", allPackets[0].Packet.Metadata().Timestamp,
 		"last_timestamp", allPackets[len(allPackets)-1].Packet.Metadata().Timestamp)
 
-	// Phase 3: Create buffer and send packets in order
-	ctx, cancel := context.WithCancel(context.Background())
-
-	bufferSize := getPacketBufferSize()
-	packetBuffer := NewPacketBuffer(ctx, bufferSize)
-	// IMPORTANT: defer order matters! Close() must run BEFORE cancel()
-	// because Close() needs the context to still be active for proper draining.
-	// Defers run in LIFO order, so we set cancel() first (runs last).
-	defer cancel()
-	defer packetBuffer.Close()
+	// Phase 3: Send packets through a plain channel in sorted order. The live
+	// PacketBuffer deliberately prioritizes SIP traffic, which is useful under
+	// load but would let a later SIP packet overtake an earlier non-SIP packet
+	// during lossless replay.
+	packetStream := make(chan PacketInfo)
 
 	// Start processor
 	var processorWg sync.WaitGroup
 	processorWg.Add(1)
 	go func() {
 		defer processorWg.Done()
-		processor(packetBuffer.Receive())
+		processor(packetStream)
 	}()
 
-	// Send all packets in timestamp order using blocking send.
-	// CRITICAL: For offline mode, we MUST use SendBlocking() to ensure all packets
-	// are processed. The non-blocking Send() would drop packets if the consumer
-	// (TUI bridge) hasn't started reading yet, causing inconsistent packet counts.
+	// Send all packets in timestamp order using blocking sends so replay cannot
+	// drop packets or advance until the consumer accepts the preceding packet.
 	for _, pkt := range allPackets {
 		observePacket(pkt)
-		if !packetBuffer.SendBlocking(pkt) {
-			// Buffer closed or context cancelled
-			break
-		}
+		packetStream <- pkt
 	}
+	close(packetStream)
 
-	// Signal end of input by closing input channels.
-	// CRITICAL: Use CloseInputs() NOT Close()!
-	// Close() cancels the context which causes the merger goroutine to exit early,
-	// losing any packets still in the pipeline. CloseInputs() just closes the
-	// input channels, allowing the merger to drain them properly before closing
-	// the output channel (mergedCh), which signals the processor to exit.
-	packetBuffer.CloseInputs()
-
-	// Wait for processor to finish (it will exit when mergedCh closes after draining)
+	// Wait for the processor to finish after packetStream closes.
 	processorWg.Wait()
 
 	logger.Info("Timestamp-ordered offline capture completed",

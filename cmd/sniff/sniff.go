@@ -126,8 +126,8 @@ func sniff(cmd *cobra.Command, args []string) {
 				capture.RunWithSignalHandler(devices, filter, processor(pipeline.SourceLiveCapture))
 			})
 		} else {
-			capture.StartOfflineSniffer(files, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-				capture.RunOffline(devices, filter, processor(pipeline.SourcePCAPReplay))
+			capture.StartOfflineSnifferOrdered(files, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+				capture.RunOfflineOrdered(devices, filter, processor(pipeline.SourcePCAPReplay))
 			})
 		}
 		logger.Info("Packet processing completed", "total_packets", localPipeline.count)

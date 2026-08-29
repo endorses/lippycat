@@ -256,7 +256,7 @@ func startEmailSniffer(devices []pcaptypes.PcapInterface, filter string, isOffli
 
 	// Run capture with appropriate mode
 	if isOffline {
-		capture.RunOffline(devices, filter, processor)
+		capture.RunOfflineOrdered(devices, filter, processor)
 	} else {
 		capture.RunWithSignalHandler(devices, filter, processor)
 	}
@@ -445,7 +445,7 @@ func StartLiveEmailSniffer(interfaces, filter string) {
 
 // StartOfflineEmailSniffer starts email capture from a PCAP file.
 func StartOfflineEmailSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startEmailSniffer(devices, filter, true)
 	})
 }

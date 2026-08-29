@@ -90,7 +90,7 @@ func startDNSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline
 
 	// Run capture with appropriate mode
 	if isOffline {
-		capture.RunOffline(devices, filter, processor)
+		capture.RunOfflineOrdered(devices, filter, processor)
 	} else {
 		capture.RunWithSignalHandler(devices, filter, processor)
 	}
@@ -282,7 +282,7 @@ func StartLiveDNSSniffer(interfaces, filter string) {
 
 // StartOfflineDNSSniffer starts DNS capture from one or more PCAP files.
 func StartOfflineDNSSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startDNSSniffer(devices, filter, true)
 	})
 }

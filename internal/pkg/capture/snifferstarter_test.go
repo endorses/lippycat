@@ -92,7 +92,44 @@ func TestRunOfflineOrderedSortsAcrossFiles(t *testing.T) {
 	}, got)
 }
 
+func TestRunOfflineOrderedDoesNotPrioritizeLaterSIPPacket(t *testing.T) {
+	base := time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC)
+	ordinary := writeTimestampedTestPCAPWithPayload(t, []timestampedPayload{{base.Add(time.Second), "ordinary"}})
+	sip := writeTimestampedTestPCAPWithPayload(t, []timestampedPayload{{base.Add(2 * time.Second), "INVITE sip:bob@example.com SIP/2.0\r\n\r\n"}})
+
+	var devices []pcaptypes.PcapInterface
+	for _, name := range []string{ordinary, sip} {
+		file, err := os.Open(name)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, file.Close()) })
+		devices = append(devices, pcaptypes.CreateOfflineInterface(file))
+	}
+
+	var got []int64
+	RunOfflineOrdered(devices, "", func(ch <-chan PacketInfo) {
+		for packet := range ch {
+			got = append(got, packet.Packet.Metadata().Timestamp.UnixNano())
+		}
+	})
+
+	require.Equal(t, []int64{base.Add(time.Second).UnixNano(), base.Add(2 * time.Second).UnixNano()}, got)
+}
+
+type timestampedPayload struct {
+	timestamp time.Time
+	payload   string
+}
+
 func writeTimestampedTestPCAP(t *testing.T, timestamps []time.Time) string {
+	t.Helper()
+	packets := make([]timestampedPayload, len(timestamps))
+	for i, timestamp := range timestamps {
+		packets[i] = timestampedPayload{timestamp: timestamp, payload: "test"}
+	}
+	return writeTimestampedTestPCAPWithPayload(t, packets)
+}
+
+func writeTimestampedTestPCAPWithPayload(t *testing.T, packets []timestampedPayload) string {
 	t.Helper()
 	name := filepath.Join(t.TempDir(), "capture")
 	file, err := os.Create(name)
@@ -108,11 +145,11 @@ func writeTimestampedTestPCAP(t *testing.T, timestamps []time.Time) string {
 	ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: []byte{192, 0, 2, 1}, DstIP: []byte{192, 0, 2, 2}}
 	udp := &layers.UDP{SrcPort: 1000, DstPort: 2000}
 	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
-	for _, timestamp := range timestamps {
+	for _, packet := range packets {
 		buffer := gopacket.NewSerializeBuffer()
-		require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, ethernet, ip, udp, gopacket.Payload("test")))
+		require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, ethernet, ip, udp, gopacket.Payload(packet.payload)))
 		data := buffer.Bytes()
-		require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: timestamp, CaptureLength: len(data), Length: len(data)}, data))
+		require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: packet.timestamp, CaptureLength: len(data), Length: len(data)}, data))
 	}
 	require.NoError(t, file.Close())
 	return name

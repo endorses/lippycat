@@ -76,7 +76,7 @@ func startTLSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline
 
 	// Run capture with appropriate mode
 	if isOffline {
-		capture.RunOffline(devices, filter, processor)
+		capture.RunOfflineOrdered(devices, filter, processor)
 	} else {
 		capture.RunWithSignalHandler(devices, filter, processor)
 	}
@@ -316,7 +316,7 @@ func StartLiveTLSSniffer(interfaces, filter string) {
 
 // StartOfflineTLSSniffer starts TLS capture from a PCAP file.
 func StartOfflineTLSSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startTLSSniffer(devices, filter, true)
 	})
 }

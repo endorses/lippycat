@@ -660,6 +660,11 @@ normalized packet-sink contract, also reused by general sniff. Regression tests
 cover extensionless relative replay files, genuinely interleaved multi-file
 ordering, and preservation of normalized PCAP metadata.
 
+Ordering remediation verification (2026-08-29): general sniff and the DNS,
+TLS, HTTP, and email offline starters now use the same stable timestamp-ordered
+runner as VoIP and watch-file replay. Multi-file ordering is therefore
+preserved across every Phase 6 local file-capture path.
+
 ### Exit Criteria
 
 - All five modes use normalized ingress and shared pipeline components.

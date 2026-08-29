@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
@@ -101,25 +100,10 @@ func runDNSHunt(cmd *cobra.Command, args []string) error {
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
-	config := hunter.Config{
-		ProcessorAddr:  cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),
-		HunterID:       cmdutil.GetStringConfig("hunter.hunter_id", hunterID),
-		Interfaces:     cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),
-		BPFFilter:      effectiveBPFFilter,
-		BufferSize:     cmdutil.GetIntConfig("hunter.buffer_size", bufferSize),
-		BatchSize:      cmdutil.GetIntConfig("hunter.batch_size", batchSize),
-		BatchTimeout:   time.Duration(cmdutil.GetIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BatchQueueSize: cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
-		VoIPMode:       false, // Not VoIP mode
-		// DNS hunter supports BPF, IP, and DNS domain filters
-		SupportedFilterTypes: []string{"bpf", "ip_address", "dns_domain"},
-		// TLS configuration (enabled by default unless --insecure is set)
-		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:   cmdutil.GetStringConfig("hunter.tls.cert_file", tlsCertFile),
-		TLSKeyFile:    cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),
-		TLSCAFile:     cmdutil.GetStringConfig("hunter.tls.ca_file", tlsCAFile),
-		TLSSkipVerify: cmdutil.GetBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
-	}
+	config := buildHunterConfig(hunterConfigSpec{
+		bpfFilter:            effectiveBPFFilter,
+		supportedFilterTypes: []string{"bpf", "ip_address", "dns_domain"},
+	})
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {

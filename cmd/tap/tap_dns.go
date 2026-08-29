@@ -3,20 +3,16 @@
 package tap
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
-	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
-	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
-	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -306,110 +302,26 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	// Create processor instance
-	p, err := processor.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to create processor: %w", err)
-	}
-
-	// Apply own-traffic BPF exclusion
-	exclusionFilter := buildOwnTrafficExclusionFilter(config.ListenAddr, config.UpstreamAddr)
-	effectiveBPFFilter = combineFiltersWithExclusion(effectiveBPFFilter, exclusionFilter)
-
-	if exclusionFilter != "" {
-		logger.Info("Own-traffic BPF exclusion applied",
-			"exclusion", exclusionFilter,
-			"effective_filter", effectiveBPFFilter)
-	}
-
-	// Create LocalSource for local packet capture with DNS filter
-	localSourceConfig := source.LocalSourceConfig{
-		Interfaces:   cmdutil.GetStringSliceConfig("tap.interfaces", interfaces),
-		BPFFilter:    effectiveBPFFilter,
-		BatchSize:    cmdutil.GetIntConfig("tap.batch_size", batchSize),
-		BatchTimeout: time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BufferSize:   cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
-		BatchBuffer:  1000,
-		ProcessorID:  effectiveTapID, // For virtual hunter ID generation
-		ProtocolMode: "dns",
-	}
-	localSource := source.NewLocalSource(localSourceConfig)
-
-	// Create LocalTarget for local filtering
-	localTargetConfig := filtering.LocalTargetConfig{
-		BaseBPF: effectiveBPFFilter,
-	}
-	localTarget := filtering.NewLocalTarget(localTargetConfig)
-
-	// Wire LocalTarget to LocalSource for BPF filter updates
-	localTarget.SetBPFUpdater(localSource)
-
-	// Create ApplicationFilter for content filtering (same as hunt mode)
-	appFilter, err := createApplicationFilter(GetGPUConfig())
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{
+		Name: "dns",
+		ConfigureSource: func(localSource *source.LocalSource) {
+			localSource.SetDNSProcessor(source.NewDNSProcessorFromViper())
+		},
+	})
 	if err != nil {
 		return err
 	}
 
-	// Wire ApplicationFilter to both LocalSource and LocalTarget
-	// - LocalSource uses it to filter packets before batching (like hunt does)
-	// - LocalTarget uses it to update filters when management API changes them
-	localSource.SetApplicationFilter(appFilter)
-	localTarget.SetApplicationFilter(appFilter)
-
-	// Wire DNS processor for DNS parsing and tunneling detection
-	// dns.detect_tunneling is already set in viper above
-	dnsProcessor := source.NewDNSProcessorFromViper()
-	localSource.SetDNSProcessor(dnsProcessor)
-
-	// Set the local source and target on the processor
-	p.SetPacketSource(localSource)
-	p.SetFilterTarget(localTarget)
-
-	mode := "standalone"
-	if config.UpstreamAddr != "" {
-		mode = "hierarchical"
-	}
-
 	logger.Info("DNS Tap configuration",
 		"tap_id", effectiveTapID,
-		"mode", mode,
-		"interfaces", localSourceConfig.Interfaces,
-		"bpf_filter", localSourceConfig.BPFFilter,
+		"mode", runtime.mode,
+		"interfaces", runtime.sourceConfig.Interfaces,
+		"bpf_filter", runtime.sourceConfig.BPFFilter,
 		"dns_ports", dnsTapPorts,
 		"udp_only", dnsTapUDPOnly,
 		"domain_pattern", domainPattern,
 		"auto_rotate_pcap", effectiveAutoRotate,
 		"listen", config.ListenAddr)
 
-	// Set up context
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals for graceful shutdown
-	cleanup := signals.SetupHandler(ctx, cancel)
-	defer cleanup()
-
-	// Start processor in background
-	errChan := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		if err := p.Start(ctx); err != nil {
-			errChan <- err
-		}
-	}()
-
-	logger.Info("DNS Tap node started successfully",
-		"listen", config.ListenAddr,
-		"mode", mode)
-
-	// Wait for shutdown signal or error
-	select {
-	case <-ctx.Done():
-		time.Sleep(constants.GracefulShutdownTimeout)
-	case err := <-errChan:
-		logger.Error("DNS Tap node failed", "error", err)
-		return err
-	}
-
-	logger.Info("DNS Tap node stopped")
-	return nil
+	return runtime.run("DNS Tap node", config)
 }

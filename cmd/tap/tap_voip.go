@@ -13,14 +13,12 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
-	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
-	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
@@ -601,43 +599,17 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		"tcp_performance_mode", tcpPerformanceMode,
 		"pattern_algorithm", patternAlgorithm)
 
-	// Set up context
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals for graceful shutdown
-	cleanup := signals.SetupHandler(ctx, cancel)
-	defer cleanup()
-
-	// Start processor in background
-	errChan := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		if err := p.Start(ctx); err != nil {
-			errChan <- err
-		}
-	}()
-
-	// Start TCP stream flusher goroutine to prevent memory leaks
-	// This periodically flushes old TCP streams that haven't received data
-	go func() {
-		if err := reassemblyEngine.Run(ctx); err != nil {
-			logger.Error("TCP reassembly engine stopped", "error", err)
-		}
-	}()
-
-	logger.Info("VoIP Tap node started successfully",
-		"listen", config.ListenAddr,
-		"mode", mode)
-
-	// Wait for shutdown signal or error
-	select {
-	case <-ctx.Done():
-		time.Sleep(constants.GracefulShutdownTimeout)
-	case err := <-errChan:
-		logger.Error("VoIP Tap node failed", "error", err)
-		return err
+	runtime := &tapRuntime{
+		processor:    p,
+		sourceConfig: localSourceConfig,
+		mode:         mode,
+		startHook: func(ctx context.Context) {
+			go func() {
+				if err := reassemblyEngine.Run(ctx); err != nil {
+					logger.Error("TCP reassembly engine stopped", "error", err)
+				}
+			}()
+		},
 	}
-
-	logger.Info("VoIP Tap node stopped")
-	return nil
+	return runtime.run("VoIP Tap node", config)
 }

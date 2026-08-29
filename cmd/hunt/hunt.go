@@ -181,32 +181,12 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (flags override config file)
-	config := hunter.Config{
-		ProcessorAddr:    cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),
-		HunterID:         cmdutil.GetStringConfig("hunter.hunter_id", hunterID),
-		Interfaces:       cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),
-		BPFFilter:        cmdutil.GetStringConfig("hunter.bpf_filter", bpfFilter),
-		BufferSize:       cmdutil.GetIntConfig("hunter.buffer_size", bufferSize),
-		BatchSize:        cmdutil.GetIntConfig("hunter.batch_size", batchSize),
-		BatchTimeout:     time.Duration(cmdutil.GetIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BatchQueueSize:   cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
-		VoIPMode:         false, // Generic hunter mode (no call buffering)
-		EnableVoIPFilter: GetGPUConfig().EnableVoIPFilter,
-		GPUBackend:       GetGPUConfig().GPUBackend,
-		GPUBatchSize:     GetGPUConfig().GPUBatchSize,
-		// Disk overflow buffer (nuclear-proof resilience)
-		DiskBufferEnabled: cmdutil.GetBoolConfig("hunter.disk_buffer.enabled", diskBufferEnabled),
-		DiskBufferDir:     cmdutil.GetStringConfig("hunter.disk_buffer.dir", diskBufferDir),
-		DiskBufferMaxSize: uint64(cmdutil.GetIntConfig("hunter.disk_buffer.max_mb", diskBufferMaxSize)) * 1024 * 1024, // Convert MB to bytes
-		// TLS configuration (enabled by default unless --insecure is set)
-		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:   cmdutil.GetStringConfig("hunter.tls.cert_file", tlsCertFile),
-		TLSKeyFile:    cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),
-		TLSCAFile:     cmdutil.GetStringConfig("hunter.tls.ca_file", tlsCAFile),
-		TLSSkipVerify: cmdutil.GetBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
-		// Filter policy
-		NoFilterPolicy: cmdutil.GetStringConfig("hunter.no_filter_policy", noFilterPolicy),
-	}
+	config := buildHunterConfig(hunterConfigSpec{
+		bpfFilter:           cmdutil.GetStringConfig("hunter.bpf_filter", bpfFilter),
+		useGPUFlag:          true,
+		includeDiskBuffer:   true,
+		includeFilterPolicy: true,
+	})
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {

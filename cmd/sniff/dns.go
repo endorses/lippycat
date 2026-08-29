@@ -3,6 +3,8 @@
 package sniff
 
 import (
+	"fmt"
+
 	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/spf13/cobra"
@@ -46,6 +48,19 @@ var (
 	dnsWriteFile     string
 )
 
+var dnsSpec = ProtocolSpec{
+	Name: "dns",
+	BuildBPF: func(baseFilter string) (string, error) {
+		ports, err := dns.ParsePorts(dnsPorts)
+		if err != nil {
+			return "", fmt.Errorf("invalid DNS port specification: %w", err)
+		}
+		return dns.NewFilterBuilder().Build(dns.FilterConfig{Ports: ports, UDPOnly: dnsUDPOnly, BaseFilter: baseFilter}), nil
+	},
+	StartLive:  dns.StartLiveDNSSniffer,
+	StartFiles: dns.StartOfflineDNSSniffer,
+}
+
 func dnsHandler(cmd *cobra.Command, args []string) {
 	// Set DNS configuration values
 	if cmd.Flags().Changed("domain") {
@@ -78,38 +93,16 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 		logger.Info("Loaded domain patterns from file", "count", len(patterns), "file", dnsDomainsFile)
 	}
 
-	// Build DNS filter
-	filterBuilder := dns.NewFilterBuilder()
-	ports, err := dns.ParsePorts(dnsPorts)
-	if err != nil {
-		logger.Error("Invalid DNS port specification", "error", err)
-		return
-	}
-
-	filterConfig := dns.FilterConfig{
-		Ports:      ports,
-		UDPOnly:    dnsUDPOnly,
-		BaseFilter: filter,
-	}
-	effectiveFilter := filterBuilder.Build(filterConfig)
-
 	logger.Info("Starting DNS sniffing",
 		"interfaces", interfaces,
-		"filter", effectiveFilter,
+		"filter", filter,
 		"domain_pattern", dnsDomainPattern,
 		"domains_file", dnsDomainsFile,
 		"track_queries", dnsTrackQueries,
 		"detect_tunneling", dnsDetectTunnel)
 
 	// Start DNS sniffer using appropriate mode
-	readFiles := collectReadFiles(readFile, args)
-	withStructuredLogs(func() {
-		if len(readFiles) == 0 {
-			dns.StartLiveDNSSniffer(interfaces, effectiveFilter)
-		} else {
-			dns.StartOfflineDNSSniffer(readFiles, effectiveFilter)
-		}
-	})
+	runProtocol(cmd, args, dnsSpec)
 }
 
 func init() {

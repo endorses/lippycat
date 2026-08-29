@@ -3,192 +3,241 @@
 package voip
 
 import (
+	"context"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
-	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 )
 
-// TapTCPHandler handles SIP messages for tap mode (lc tap voip).
-// It extracts SIP metadata and sends processed TCP packets to a channel
-// for integration with LocalSource's batch processing.
-type TapTCPHandler struct {
-	// packetChan receives TCP packets with metadata for batch processing
-	packetChan chan<- source.InjectedPacket
-	// appFilter is optional for proper filter matching
-	appFilter ApplicationFilter
-	// callRegistry owns tap-local call state and RTP associations. Keeping this explicit avoids
-	// writing TCP SDP into the legacy package-global tracker used by sniff/hunt.
-	callRegistry interface {
-		ProcessReassembledSIP(packet gopacket.Packet) *data.PacketMetadata
-		CompleteCall(callID string)
-	}
+type tapCallRegistry interface {
+	ProcessReassembledSIP(gopacket.Packet) *data.PacketMetadata
+	CompleteCall(string)
 }
 
-// SetCallRegistry routes complete reassembled TCP SIP through the tap's
-// processor-owned call registry.
-func (h *TapTCPHandler) SetCallRegistry(registry interface {
-	ProcessReassembledSIP(packet gopacket.Packet) *data.PacketMetadata
-	CompleteCall(callID string)
-}) {
-	h.callRegistry = registry
+type tapSelections struct {
+	mu sync.RWMutex
+	m  map[string]struct{}
 }
 
-// NewTapTCPHandler creates a handler for tap mode TCP SIP processing.
-// The packetChan receives TCP packets with metadata when SIP messages are matched.
-func NewTapTCPHandler(packetChan chan<- source.InjectedPacket) *TapTCPHandler {
-	return &TapTCPHandler{
-		packetChan: packetChan,
-	}
+func (s *tapSelections) Selected(id string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.m[id]
+	return ok
+}
+func (s *tapSelections) MarkSelected(id string) { s.mu.Lock(); s.m[id] = struct{}{}; s.mu.Unlock() }
+func (s *tapSelections) Forget(id string)       { s.mu.Lock(); delete(s.m, id); s.mu.Unlock() }
+
+type tapTerminalResponses struct{}
+
+func (tapTerminalResponses) Completes(e sharedsip.Event) bool {
+	return e.ResponseCode >= 200 && (e.CSeqMethod == "BYE" || e.CSeqMethod == "CANCEL")
 }
 
-// SetApplicationFilter sets the application filter for proper filter matching.
-// When set, this filter is used instead of the legacy sipusers.IsSurveiled() check.
-func (h *TapTCPHandler) SetApplicationFilter(filter ApplicationFilter) {
-	h.appFilter = filter
+type tapRegistryAdapter struct{ registry tapCallRegistry }
+
+func (a tapRegistryAdapter) Observe(r pipeline.SIPResult) (sipflow.RegistryObservation, error) {
+	if a.registry == nil || r.Packet == nil {
+		return sipflow.RegistryObservation{}, nil
+	}
+	return sipflow.RegistryObservation{Attachment: a.registry.ProcessReassembledSIP(r.Packet.Packet())}, nil
+}
+func (a tapRegistryAdapter) Complete(id string, _ time.Time) ([]pipeline.CallLifecycleObservation, error) {
+	return nil, nil
 }
 
-// HandleSIPMessage processes a complete SIP message for tap mode.
-// srcEndpoint and dstEndpoint are in "IP:port" format (e.g., "192.168.1.1:5060").
-// netFlow is used for TCP packet buffer lookup.
-//
-// Per-message semantics: the TCP reassembly loop (processSIPFromReader) invokes
-// this method once for EACH complete SIP message reassembled from the stream.
-// Each invocation is treated as an independent, matchable, forwardable unit:
-//
-//   - We synthesize a single packet carrying exactly THIS message's bytes (using
-//     the connection's 5-tuple) and run the target filter against it, so matching
-//     reflects the identity headers of the specific message (From/To/
-//     P-Asserted-Identity/...), not the first buffered packet of the flow.
-//   - We forward that one synthesized packet as this message's own X2 IRI.
-//
-// This is what lets every SIP message on a long-lived TCP connection (e.g. five
-// MT SMS-DELIVER, or an MO leg whose target only appears in From/
-// P-Asserted-Identity) be delivered — not just the first. Because each message
-// is dispatched exactly once by the reassembler and forwarded as a single unit,
-// there is no whole-flow "drain-and-forget" and no double-forwarding.
-func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
-	return h.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, time.Now())
+type tapInjectionSink struct{ ch chan<- source.InjectedPacket }
+
+type tapAttachment struct {
+	metadata *data.PacketMetadata
+	terminal bool
+	complete func()
+	accepted chan struct{}
 }
 
-func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
-	if callID == "" {
-		discardTCPBufferedPackets(netFlow, transportFlow)
-		return false
+func (s tapInjectionSink) HandleSIP(ctx context.Context, in sipflow.SinkInput) pipeline.Result {
+	attachment, _ := in.Attachment.(tapAttachment)
+	metadata := attachment.metadata
+	if metadata == nil {
+		metadata, _ = in.Attachment.(*data.PacketMetadata)
 	}
-
-	event, err := sharedsip.Parse(sipMessage, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint))
-	if err != nil || event.CallID != callID {
-		discardTCPBufferedPackets(netFlow, transportFlow)
-		return false
+	if metadata == nil {
+		metadata = metadataFromSIPResult(in.Result)
 	}
-	headers, method := event.Headers, event.Method
-
-	// Synthesize a packet carrying exactly this reassembled SIP message so that
-	// both filter matching and forwarding operate on THIS message rather than on
-	// the first raw packet buffered for the whole flow. Preserve the connection's
-	// real 5-tuple (IPs from netFlow, ports from the endpoint strings) so the
-	// downstream LI correlation (MatchPacketWithIDs) and delivery see correct
-	// addressing.
-	pkt, ok := buildSIPPacketInfo(sipMessage, srcEndpoint, dstEndpoint, netFlow, capturedAt)
-	if !ok {
-		logger.Warn("TCP SIP: failed to synthesize packet for message, dropping",
-			"call_id", SanitizeCallIDForLogging(callID),
-			"flow", srcEndpoint+"->"+dstEndpoint)
-		discardTCPBufferedPackets(netFlow, transportFlow)
-		return false
+	if metadata.Sip == nil || in.Result.Packet == nil {
+		return pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: fmt.Errorf("tap SIP registry returned no metadata")}
 	}
-
-	// Route complete messages through the registry when available. Its selection
-	// policy admits later in-dialog messages for an already selected call even
-	// when identity headers no longer match directly. The fallback is retained
-	// for non-tap consumers that do not inject a registry.
-	var registryMetadata *data.PacketMetadata
-	accepted := h.matchesMessage(pkt, headers)
-	if h.callRegistry != nil {
-		registryMetadata = h.callRegistry.ProcessReassembledSIP(pkt.Packet)
-		accepted = registryMetadata != nil && registryMetadata.Sip != nil
-	}
-	if !accepted {
-		// Message doesn't match filter - release any per-flow buffered packets.
-		discardTCPBufferedPackets(netFlow, transportFlow)
-		logger.Debug("TCP SIP message filtered out (tap mode)",
-			"call_id", SanitizeCallIDForLogging(callID),
-			"method", method,
-			"flow", srcEndpoint+"->"+dstEndpoint)
-		return false
-	}
-
-	logger.Info("TCP SIP message matched filter (tap mode), forwarding",
-		"call_id", SanitizeCallIDForLogging(callID),
-		"from", headers["from"],
-		"to", headers["to"],
-		"method", method)
-
-	// Create protobuf metadata for SIP. When a tap-local registry is wired, run
-	// the complete reassembled message through its normal SIP selection/state
-	// path so SDP-less dialogs and all identity/activity updates are retained.
-	pbMetadata := &data.PacketMetadata{
-		Sip: &data.SIPMetadata{
-			CallId:            callID,
-			FromUser:          event.FromUser,
-			ToUser:            event.ToUser,
-			FromTag:           event.FromTag,
-			ToTag:             event.ToTag,
-			FromUri:           event.FromURI,
-			ToUri:             event.ToURI,
-			Method:            method,
-			CseqMethod:        event.CSeqMethod,
-			ResponseCode:      uint32(event.ResponseCode),
-			PAssertedIdentity: headers["p-asserted-identity"],
-		},
-	}
-	if registryMetadata != nil {
-		pbMetadata = registryMetadata
-	}
-
-	var afterProcess func()
-	if h.callRegistry != nil && event.ResponseCode >= 200 && (event.CSeqMethod == "BYE" || event.CSeqMethod == "CANCEL") {
-		afterProcess = func() { h.callRegistry.CompleteCall(callID) }
-	}
-
-	// Forward exactly one packet for this SIP message.
-	select {
-	case h.packetChan <- source.InjectedPacket{PacketInfo: pkt, Metadata: pbMetadata, AfterProcess: afterProcess}:
-		// Sent successfully
-	default:
-		// The packet cannot reach processor output, so finish any deferred
-		// lifecycle transition on this deterministic drop path.
-		if afterProcess != nil {
-			afterProcess()
+	var done chan struct{}
+	var callback func()
+	if attachment.terminal {
+		done = make(chan struct{})
+		var once sync.Once
+		callback = func() {
+			once.Do(func() {
+				if attachment.complete != nil {
+					attachment.complete()
+				}
+				close(done)
+			})
 		}
-		logger.Warn("TCP packet channel full, dropping SIP message",
-			"call_id", SanitizeCallIDForLogging(callID))
 	}
-
-	// The synthesized packet is self-contained; the per-flow raw buffer is no
-	// longer needed to deliver this message. Release it so a long-lived,
-	// multi-message connection does not accumulate buffered packets. Subsequent
-	// messages on this connection are re-buffered as their packets arrive and
-	// handled by their own HandleSIPMessage invocation.
-	discardTCPBufferedPackets(netFlow, transportFlow)
-
-	return true
+	injected := source.InjectedPacket{PacketInfo: captureadapter.ToPacketInfo(in.Result.Packet), Metadata: metadata, AfterProcess: callback}
+	select {
+	case s.ch <- injected:
+		if attachment.accepted != nil {
+			close(attachment.accepted)
+		}
+	case <-ctx.Done():
+		if attachment.accepted != nil {
+			close(attachment.accepted)
+		}
+		return pipeline.Result{Outcome: pipeline.OutcomeShutdown, DropReason: pipeline.DropShutdown, Err: ctx.Err()}
+	default:
+		if callback != nil {
+			callback()
+		}
+		if attachment.accepted != nil {
+			close(attachment.accepted)
+		}
+		return pipeline.Result{Outcome: pipeline.OutcomeDropped, DropReason: pipeline.DropQueueFull}
+	}
+	if !attachment.terminal {
+		return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
+	}
+	select {
+	case <-done:
+		return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
+	case <-ctx.Done():
+		return pipeline.Result{Outcome: pipeline.OutcomeShutdown, DropReason: pipeline.DropShutdown, Err: ctx.Err()}
+	}
 }
 
-// matchesMessage checks if a single reassembled SIP message matches any
-// configured filter. It runs the ApplicationFilter against the synthesized
-// per-message packet (whose application payload is exactly this SIP message),
-// so matching reflects the identity headers of THIS message. Falls back to the
-// legacy containsUserInHeaders() check when no ApplicationFilter is configured.
-func (h *TapTCPHandler) matchesMessage(pkt capture.PacketInfo, headers map[string]string) bool {
-	if h.appFilter != nil && pkt.Packet != nil {
-		return h.appFilter.MatchPacket(pkt.Packet)
+func metadataFromSIPResult(r pipeline.SIPResult) *data.PacketMetadata {
+	return &data.PacketMetadata{Sip: &data.SIPMetadata{
+		CallId: r.CallID, FromUser: r.FromUser, ToUser: r.ToUser,
+		FromTag: r.FromTag, ToTag: r.ToTag, FromUri: r.FromURI, ToUri: r.ToURI,
+		Method: r.Method, CseqMethod: r.CSeqMethod, ResponseCode: uint32(r.ResponseCode),
+		PAssertedIdentity: r.PAssertedIdentity,
+	}}
+}
+
+// TapTCPHandler adapts reassembled TCP messages to shared SIP orchestration.
+type TapTCPHandler struct {
+	packetChan chan<- source.InjectedPacket
+	appFilter  ApplicationFilter
+	registry   tapCallRegistry
+	mu         sync.Mutex
+	flow       *sipflow.Orchestrator
+}
+
+func NewTapTCPHandler(ch chan<- source.InjectedPacket) *TapTCPHandler {
+	return &TapTCPHandler{packetChan: ch}
+}
+func (h *TapTCPHandler) SetApplicationFilter(f ApplicationFilter) { h.appFilter = f }
+func (h *TapTCPHandler) SetCallRegistry(r tapCallRegistry)        { h.registry = r }
+
+func (h *TapTCPHandler) ensureFlow() *sipflow.Orchestrator {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.flow != nil {
+		return h.flow
 	}
-	// Legacy fallback: use sipusers.IsSurveiled() via containsUserInHeaders()
-	return containsUserInHeaders(headers)
+	o, err := sipflow.New(sipflow.Config{SelectionPolicy: callregistry.StickySelectionPolicy{}, SelectionStore: &tapSelections{m: make(map[string]struct{})}, Registry: tapRegistryAdapter{h.registry}, Completion: tapTerminalResponses{}})
+	if err != nil {
+		logger.Error("Failed to create tap SIP orchestration", "error", err)
+		return nil
+	}
+	queueSize := cap(h.packetChan)
+	if queueSize < 1 {
+		queueSize = 1
+	}
+	if err = o.RegisterSink("tap_processor", tapInjectionSink{h.packetChan}, queueSize); err == nil {
+		err = o.Start(context.Background())
+	}
+	if err != nil {
+		logger.Error("Failed to start tap SIP orchestration", "error", err)
+		return nil
+	}
+	h.flow = o
+	return o
+}
+
+func (h *TapTCPHandler) Close() {
+	h.mu.Lock()
+	o := h.flow
+	h.mu.Unlock()
+	if o != nil {
+		o.Close()
+	}
+}
+
+func (h *TapTCPHandler) HandleSIPMessage(msg []byte, id, src, dst string, nf, tf gopacket.Flow) bool {
+	return h.HandleSIPMessageAt(msg, id, src, dst, nf, tf, time.Now())
+}
+
+func (h *TapTCPHandler) HandleSIPMessageAt(msg []byte, id, src, dst string, nf, tf gopacket.Flow, at time.Time) bool {
+	return h.handleSIPMessage(msg, nil, id, src, dst, nf, tf, at)
+}
+
+func (h *TapTCPHandler) HandleParsedSIPMessage(msg []byte, event sharedsip.Event, src, dst string, nf, tf gopacket.Flow) bool {
+	return h.handleSIPMessage(msg, &event, event.CallID, src, dst, nf, tf, event.Timestamp)
+}
+
+func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id, src, dst string, nf, tf gopacket.Flow, at time.Time) bool {
+	defer discardTCPBufferedPackets(nf, tf)
+	if id == "" {
+		return false
+	}
+	pkt, ok := buildSIPPacketInfo(msg, src, dst, nf, at)
+	if !ok {
+		logger.Warn("TCP SIP synthesis failed", "call_id", SanitizeCallIDForLogging(id))
+		return false
+	}
+	o := h.ensureFlow()
+	if o == nil {
+		return false
+	}
+	r := o.Analyze(sipflow.Message{
+		Payload: msg, Event: event, ExpectedCallID: id, Envelope: captureadapter.FromPacketInfo(pkt),
+		ParseOptions: sharedsip.OptionsForEndpoints(at, src, dst), FilterConfigured: true,
+		Match: func(event sharedsip.Event) bool {
+			if h.appFilter != nil {
+				return h.appFilter.MatchPacket(pkt.Packet)
+			}
+			return containsUserInHeaders(event.Headers)
+		},
+		Validate: func(event sharedsip.Event) error {
+			if event.CallID != id {
+				return fmt.Errorf("reassembled Call-ID %q does not match framed Call-ID %q", event.CallID, id)
+			}
+			return ValidateCallIDForSecurity(event.CallID)
+		},
+	})
+	if r.Stage.Outcome == pipeline.OutcomeAccepted {
+		metadata, _ := r.Attachment.(*data.PacketMetadata)
+		accepted := make(chan struct{})
+		var complete func()
+		if r.Terminal && h.registry != nil {
+			callID := r.SIP.CallID
+			complete = func() { h.registry.CompleteCall(callID) }
+		}
+		r.Attachment = tapAttachment{metadata: metadata, terminal: r.Terminal, complete: complete, accepted: accepted}
+		r = o.Dispatch(r)
+		if sinkResult, ok := r.Sinks["tap_processor"]; ok && sinkResult.Outcome == pipeline.OutcomeAccepted {
+			<-accepted
+		} else if complete != nil {
+			complete()
+		}
+	}
+	return r.Stage.Outcome == pipeline.OutcomeAccepted
 }

@@ -32,6 +32,14 @@ func (p *VoIPPacketProcessor) SetTCPHandler(handler *HunterForwardHandler) {
 	p.tcpHandler = handler
 }
 
+// Close drains the independently buffered SIP sinks owned by both transports.
+func (p *VoIPPacketProcessor) Close() {
+	p.udpHandler.Close()
+	if p.tcpHandler != nil {
+		p.tcpHandler.Close()
+	}
+}
+
 // SetAssembler sets the TCP stream assembler for SIP message reassembly.
 // When set, TCP packets are fed to the assembler for stream reconstruction.
 func (p *VoIPPacketProcessor) SetAssembler(assembler *pipeline.ReassemblyEngine) {

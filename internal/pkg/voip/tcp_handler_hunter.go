@@ -9,7 +9,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -27,17 +29,20 @@ type HunterForwardHandler struct {
 	forwarder       PacketForwarder
 	bufferMgr       *BufferManager
 	appFilter       ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
-	selectionPolicy callregistry.SelectionPolicy
+	selectionPolicy *hunterSelectionPolicy
+	orchestrator    *sipflow.Orchestrator
 }
 
 // NewHunterForwardHandler creates a handler for hunter packet forwarding
 func NewHunterForwardHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *HunterForwardHandler {
-	return &HunterForwardHandler{
+	h := &HunterForwardHandler{
 		tracker:         tracker,
 		forwarder:       forwarder,
 		bufferMgr:       bufferMgr,
-		selectionPolicy: callregistry.StickySelectionPolicy{},
+		selectionPolicy: newHunterSelectionPolicy(),
 	}
+	h.orchestrator = newHunterSIPOrchestrator(forwarder, h.selectionPolicy)
+	return h
 }
 
 // SetApplicationFilter sets the application filter for proper filter matching.
@@ -48,10 +53,13 @@ func (h *HunterForwardHandler) SetApplicationFilter(filter ApplicationFilter) {
 }
 
 func (h *HunterForwardHandler) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
-	if policy != nil {
-		h.selectionPolicy = policy
-	}
+	h.selectionPolicy.set(policy)
 }
+
+// Close drains accepted SIP forwarding and stops the handler-owned sink.
+func (h *HunterForwardHandler) Close() { h.orchestrator.Close() }
+
+func (h *HunterForwardHandler) SIPStats() map[string]sipflow.SinkStats { return h.orchestrator.Stats() }
 
 // HandleSIPMessage processes a complete SIP message for hunter forwarding.
 // srcEndpoint and dstEndpoint are in "IP:port" format (e.g., "192.168.1.1:5060").
@@ -72,17 +80,18 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 }
 
 func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
+	return h.handleSIPMessage(sipMessage, nil, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, capturedAt)
+}
+
+func (h *HunterForwardHandler) HandleParsedSIPMessage(sipMessage []byte, event sharedsip.Event, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
+	return h.handleSIPMessage(sipMessage, &event, event.CallID, srcEndpoint, dstEndpoint, netFlow, transportFlow, event.Timestamp)
+}
+
+func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *sharedsip.Event, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
 	if callID == "" {
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
-
-	event, err := sharedsip.Parse(sipMessage, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint))
-	if err != nil || event.CallID != callID {
-		discardTCPBufferedPackets(netFlow, transportFlow)
-		return false
-	}
-	headers, method := event.Headers, event.Method
 
 	// Synthesize a packet carrying exactly this reassembled SIP message so both
 	// matching and forwarding operate on THIS message rather than on the first
@@ -96,72 +105,29 @@ func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID stri
 		return false
 	}
 
+	directMatch := h.matchesMessage(pkt, nil)
+	analysis := h.orchestrator.Process(sipflow.Message{
+		Payload: sipMessage, Event: event, ExpectedCallID: callID, Envelope: envelopeForHunterPacket(pkt),
+		ParseOptions:     sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint),
+		FilterConfigured: true, DirectMatch: directMatch,
+	})
+	if analysis.Stage.Outcome != pipeline.OutcomeAccepted || analysis.SIP.CallID != callID {
+		discardTCPBufferedPackets(netFlow, transportFlow)
+		return false
+	}
+	result, method := analysis.SIP, analysis.SIP.Method
+
 	metadata := &CallMetadata{
 		CallID:            callID,
-		From:              event.FromUser,
-		To:                event.ToUser,
-		FromTag:           event.FromTag,
-		ToTag:             event.ToTag,
-		PAssertedIdentity: headers["p-asserted-identity"],
+		From:              result.FromUser,
+		To:                result.ToUser,
+		FromTag:           result.FromTag,
+		ToTag:             result.ToTag,
+		PAssertedIdentity: result.PAssertedIdentity,
 		Method:            method,
-		CSeqMethod:        event.CSeqMethod,
-		ResponseCode:      uint32(event.ResponseCode),
-		SDPBody:           string(event.SDP),
-	}
-
-	pbMetadata := &data.PacketMetadata{
-		Sip: &data.SIPMetadata{
-			CallId:            callID,
-			FromUser:          metadata.From, // username only
-			ToUser:            metadata.To,   // username only
-			FromTag:           metadata.FromTag,
-			ToTag:             metadata.ToTag,
-			FromUri:           event.FromURI,
-			ToUri:             event.ToURI,
-			Method:            metadata.Method,
-			CseqMethod:        metadata.CSeqMethod,
-			ResponseCode:      metadata.ResponseCode,
-			PAssertedIdentity: metadata.PAssertedIdentity,
-		},
-	}
-
-	previouslySelected := h.bufferMgr != nil && h.bufferMgr.IsCallMatched(callID)
-	directMatch := h.matchesMessage(pkt, headers)
-	selected := h.selectionPolicy.Select(callregistry.SelectionInput{
-		FilterConfigured:   true,
-		DirectMatch:        directMatch,
-		PreviouslySelected: previouslySelected,
-	})
-
-	// Call termination (BYE/CANCEL): only forward if selected by policy.
-	if method == "BYE" || method == "CANCEL" {
-		if selected {
-			if err := h.forwarder.ForwardPacketWithMetadata(pkt.Packet, pbMetadata, "", layers.LinkTypeEthernet); err != nil {
-				logger.Error("Failed to forward TCP call termination packet",
-					"call_id", SanitizeCallIDForLogging(callID),
-					"method", method,
-					"error", err)
-			} else {
-				logger.Info("Forwarded TCP call termination packet",
-					"call_id", SanitizeCallIDForLogging(callID),
-					"method", method)
-			}
-			discardTCPBufferedPackets(netFlow, transportFlow)
-			return true
-		}
-		// Call not tracked, discard
-		discardTCPBufferedPackets(netFlow, transportFlow)
-		return false
-	}
-
-	// Check if THIS message matches the filter (using the synthesized packet's SIP).
-	if !selected {
-		discardTCPBufferedPackets(netFlow, transportFlow)
-		logger.Debug("TCP SIP message filtered out",
-			"call_id", SanitizeCallIDForLogging(callID),
-			"method", method,
-			"flow", srcEndpoint+"->"+dstEndpoint)
-		return false
+		CSeqMethod:        result.CSeqMethod,
+		ResponseCode:      uint32(result.ResponseCode),
+		SDPBody:           string(result.SDP),
 	}
 
 	logger.Info("TCP SIP message matched filter, forwarding to processor",
@@ -170,21 +136,14 @@ func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID stri
 		"to", metadata.To,
 		"method", method)
 
-	// Forward this message's synthesized packet.
-	if err := h.forwarder.ForwardPacketWithMetadata(pkt.Packet, pbMetadata, "", layers.LinkTypeEthernet); err != nil {
-		logger.Error("Failed to forward TCP SIP packet",
-			"call_id", SanitizeCallIDForLogging(callID),
-			"error", err)
-	}
-
 	// Extract RTP ports from SDP for future RTP packet association
-	if len(event.SDP) > 0 {
-		h.tracker.ExtractPortFromSDP(string(event.SDP), callID)
+	if len(result.SDP) > 0 {
+		h.tracker.ExtractPortFromSDP(string(result.SDP), callID)
 	}
 
 	// Register the call as matched so its RTP media and later in-dialog messages
 	// (BYE/CANCEL) are forwarded too.
-	if h.bufferMgr != nil {
+	if h.bufferMgr != nil && !analysis.Terminal {
 		h.bufferMgr.MarkCallMatched(callID, metadata, "", layers.LinkTypeEthernet)
 	}
 

@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"strings"
 
-	"github.com/endorses/lippycat/api/gen/data"
-	"github.com/endorses/lippycat/internal/pkg/callregistry"
-	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -38,24 +39,6 @@ func (p *Processor) detectSIPWithCompletion(packet gopacket.Packet, udp *layers.
 		tcp := tcpLayer.(*layers.TCP)
 		opts.SourcePort, opts.DestinationPort = uint16(tcp.SrcPort), uint16(tcp.DstPort)
 	}
-	event, err := sharedsip.Parse(payload, opts)
-	if err != nil {
-		return nil
-	}
-	headers, body := event.Headers, string(event.Body)
-	callID := event.CallID
-	if callID == "" {
-		return nil
-	}
-
-	// Validate Call-ID for security
-	if err := validateCallID(callID); err != nil {
-		logger.Debug("Invalid Call-ID rejected",
-			"error", err,
-			"source", "voip_processor")
-		return nil
-	}
-
 	// Check if this packet matches the application filter (if set).
 	// The verdict is carried on the result so callers do not re-match the packet.
 	var filterEvaluated, filterMatched bool
@@ -68,110 +51,32 @@ func (p *Processor) detectSIPWithCompletion(packet gopacket.Packet, udp *layers.
 			filterMatched = p.appFilter.MatchPacket(packet)
 		}
 	}
-
-	// If filter is set and packet doesn't match, don't track this call
-	if filterEvaluated {
-		p.mu.RLock()
-		_, previouslySelected := p.calls[callID]
-		p.mu.RUnlock()
-		if !p.selectionPolicy.Select(callregistry.SelectionInput{
-			FilterConfigured:   true,
-			DirectMatch:        filterMatched,
-			PreviouslySelected: previouslySelected,
-		}) {
-			// New call that doesn't match filter - don't track it, but report the
-			// verdict so the caller can drop the packet without matching again.
-			return &ProcessResult{
-				PacketType:      PacketTypeSIP,
-				CallID:          callID,
-				CallIDs:         []string{callID},
-				FilterEvaluated: true,
-			}
+	linkType := layers.LinkTypeRaw
+	if packet.LinkLayer() != nil {
+		linkType = layers.LinkTypeEthernet
+	}
+	envelope := captureadapter.FromPacketInfo(capture.PacketInfo{Packet: packet, LinkType: linkType}, pipeline.SourceLiveCapture)
+	analysis := p.sipFlow.Analyze(sipflow.Message{
+		Payload: payload, Envelope: envelope, ParseOptions: opts,
+		FilterConfigured: filterEvaluated, DirectMatch: filterMatched,
+	})
+	if analysis.Stage.Outcome == pipeline.OutcomeFiltered {
+		if analysis.SIP.CallID == "" {
+			return nil
 		}
+		return &ProcessResult{PacketType: PacketTypeSIP, CallID: analysis.SIP.CallID,
+			CallIDs: []string{analysis.SIP.CallID}, FilterEvaluated: filterEvaluated}
 	}
-
-	// Get or create call state
-	_ = p.getOrCreateCall(callID)
-
-	// Detect SIP method
-	method := event.Method
-
-	// Extract Content-Type header
-	contentType := headers["content-type"]
-
-	// Extract metadata
-	metadata := &CallMetadata{
-		CallID:            callID,
-		From:              headers["from"],
-		To:                headers["to"],
-		FromTag:           event.FromTag,
-		ToTag:             event.ToTag,
-		PAssertedIdentity: headers["p-asserted-identity"],
-		Method:            method,
-		CSeqMethod:        event.CSeqMethod,
-		ResponseCode:      uint32(event.ResponseCode),
-		SDPBody:           string(event.SDP),
-		ContentType:       contentType,
+	if analysis.Stage.Outcome != pipeline.OutcomeAccepted {
+		return nil
 	}
-
-	// For MESSAGE method, extract body with size limit for LI compliance
-	if method == "MESSAGE" && body != "" {
-		metadata.Body = extractMessageBody(body)
+	callID := analysis.SIP.CallID
+	attachment, ok := analysis.Attachment.(processorSIPAttachment)
+	if !ok {
+		return nil
 	}
-
-	// Extract 3GPP IMS headers (P-Access-Network-Info, P-Visited-Network-ID)
-	if pani := headers["p-access-network-info"]; pani != "" {
-		metadata.AccessType, metadata.BSSID, metadata.CellID, metadata.LocalIP, metadata.AccessParams = parseAccessNetworkInfo(pani)
-	}
-	if pvni := headers["p-visited-network-id"]; pvni != "" {
-		metadata.VisitedNetworkID = parseVisitedNetworkID(pvni)
-	}
-
-	// Update call state
-	p.updateCallState(callID, method, metadata)
-
-	// Extract RTP ports from SDP if present
-	if strings.Contains(string(event.SDP), "m=audio") {
-		ports := extractRTPPortsFromSDP(string(event.SDP))
-		for _, port := range ports {
-			p.registerRTPPort(callID, port)
-		}
-	}
-
-	// A final response to dialog termination is the ownership boundary for RTP
-	// associations. Do this independently of per-call PCAP monitoring: tap mode
-	// may legitimately run without PCAP output enabled.
-	if completeTerminal && isTerminalDialogResponse(metadata) {
+	if completeTerminal && isTerminalDialogResponse(attachment.metadata) {
 		p.CompleteCall(callID)
-	}
-
-	// Build protobuf metadata
-	pbMetadata := &data.PacketMetadata{
-		Sip: &data.SIPMetadata{
-			CallId:            callID,
-			FromUser:          event.FromUser,
-			ToUser:            event.ToUser,
-			FromTag:           metadata.FromTag,
-			ToTag:             metadata.ToTag,
-			FromUri:           event.FromURI,
-			ToUri:             event.ToURI,
-			Method:            metadata.Method,
-			CseqMethod:        metadata.CSeqMethod,
-			ResponseCode:      metadata.ResponseCode,
-			PAssertedIdentity: metadata.PAssertedIdentity,
-			VisitedNetworkId:  metadata.VisitedNetworkID,
-		},
-	}
-
-	// Add AccessNetworkInfo if present
-	if metadata.AccessType != "" {
-		pbMetadata.Sip.AccessNetworkInfo = &data.AccessNetworkInfo{
-			AccessType: metadata.AccessType,
-			Bssid:      metadata.BSSID,
-			CellId:     metadata.CellID,
-			LocalIp:    metadata.LocalIP,
-			Parameters: metadata.AccessParams,
-		}
 	}
 
 	return &ProcessResult{
@@ -179,8 +84,8 @@ func (p *Processor) detectSIPWithCompletion(packet gopacket.Packet, udp *layers.
 		PacketType:      PacketTypeSIP,
 		CallID:          callID,
 		CallIDs:         []string{callID},
-		Metadata:        pbMetadata,
-		CallMetadata:    metadata,
+		Metadata:        attachment.pbMetadata,
+		CallMetadata:    attachment.metadata,
 		FilterEvaluated: filterEvaluated,
 		FilterMatched:   filterMatched,
 		FilterIDs:       filterIDs,

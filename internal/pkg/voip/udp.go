@@ -1,12 +1,15 @@
 package voip
 
 import (
+	"bytes"
 	"context"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/endorses/lippycat/internal/pkg/voip/monitoring"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -66,24 +69,12 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 		}
 		payload := udp.Payload
 
-		// Try to parse as SIP message (content-based detection, not port-based)
-		if handleSipMessage(tracker, payload, pkt.LinkType) {
-			// It's a SIP packet - inject into virtual interface
-			injectPacketToVirtualInterface(pkt)
-
-			// Process it
-			event, parseErr := sharedsip.Parse(payload, sipParseOptions(packet, layer))
-			if parseErr == nil && event.CallID != "" {
-				callID := event.CallID
-				// Validate the Call-ID for security
-				if err := ValidateCallIDForSecurity(callID); err != nil {
-					logger.Warn("Malicious Call-ID detected and rejected",
-						"call_id", SanitizeCallIDForLogging(callID),
-						"error", err,
-						"source", "udp_processing")
-					return
-				}
-				call, _ := tracker.GetCall(callID) // Call already created by handleSipMessage
+		// Analyze through the shared parser/selection/registry path.
+		analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, true, true)
+		if analysis.Stage.Outcome == pipeline.OutcomeAccepted {
+			callID := analysis.SIP.CallID
+			if callID != "" {
+				call, _ := tracker.GetCall(callID)
 				if call != nil {
 					// Record call tracking event
 					monitoring.RecordCallEvent(tracingCtx, callID, "sip_packet", map[string]interface{}{
@@ -94,13 +85,11 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 					})
 				}
 
-				if tracker.config.WriteVoIP {
-					WriteSIP(tracker, callID, packet)
-				} else {
+				delivery := (sniffSink{tracker: tracker}).HandleSIP(tracingCtx, sipflow.SinkInput{Result: analysis.SIP, Attachment: pkt})
+				if delivery.Outcome != pipeline.OutcomeAccepted {
+					logger.Warn("Failed to deliver UDP SIP packet", "call_id", SanitizeCallIDForLogging(callID))
+				} else if !tracker.config.WriteVoIP {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
-				}
-				if BytesContains(event.SDP, []byte("m=audio")) {
-					tracker.ExtractPortFromSDP(string(event.SDP), callID)
 				}
 			}
 			return // SIP packet processed, done
@@ -133,59 +122,32 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 		}
 		payload := udp.Payload
 
-		// Try to parse as SIP message (content-based detection, not port-based)
-		if handleSipMessage(tracker, payload, pkt.LinkType) {
-			// It's a SIP packet - process it
-			event, parseErr := sharedsip.Parse(payload, sipParseOptions(packet, layer))
-			if parseErr != nil || event.CallID == "" {
-				return
-			}
-			headers, callID := event.Headers, event.CallID
-
-			// Validate Call-ID for security
-			if err := ValidateCallIDForSecurity(callID); err != nil {
-				logger.Warn("Malicious Call-ID detected and rejected",
-					"call_id", SanitizeCallIDForLogging(callID),
-					"error", err,
-					"source", "udp_buffered")
-				return
-			}
+		analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, false, false)
+		if analysis.Stage.Outcome == pipeline.OutcomeAccepted {
+			callID := analysis.SIP.CallID
 
 			// Extract SIP metadata
-			metadata := &CallMetadata{
-				CallID:            callID,
-				From:              headers["from"],
-				To:                headers["to"],
-				FromTag:           event.FromTag,
-				ToTag:             event.ToTag,
-				PAssertedIdentity: headers["p-asserted-identity"],
-				Method:            event.Method,
-				CSeqMethod:        event.CSeqMethod,
-				ResponseCode:      uint32(event.ResponseCode),
-				SDPBody:           string(event.SDP),
-			}
+			metadata := callMetadataFromSIPResult(analysis.SIP)
 
 			// Buffer the SIP packet with link type for proper PCAP writing.
 			// Returns true once the call is matched, from which point every SIP
 			// packet of the call is written directly instead of buffered.
 			alreadyMatched := globalBufferMgr.AddSIPPacket(callID, packet, metadata, pkt.Interface, pkt.LinkType)
 
-			hasSDP := BytesContains(event.SDP, []byte("m=audio"))
+			hasSDP := BytesContains(analysis.SIP.SDP, []byte("m=audio"))
 
 			if alreadyMatched {
 				// Call already passed the filter: write this packet now,
 				// whether or not it carries SDP.
-				injectPacketToVirtualInterface(pkt)
-
-				if tracker.config.WriteVoIP {
-					WriteSIP(tracker, callID, packet)
-				} else {
-					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
+				if _, err := (sniffRegistry{tracker: tracker}).Observe(analysis.SIP); err != nil {
+					logger.Warn("Failed to update UDP SIP call", "call_id", SanitizeCallIDForLogging(callID), "error", err)
+					return
 				}
-
-				// A re-INVITE or delayed answer can move the media ports.
-				if hasSDP {
-					tracker.ExtractPortFromSDP(string(event.SDP), callID)
+				delivery := (sniffSink{tracker: tracker}).HandleSIP(tracingCtx, sipflow.SinkInput{Result: analysis.SIP, Attachment: pkt})
+				if delivery.Outcome != pipeline.OutcomeAccepted {
+					logger.Warn("Failed to deliver buffered UDP SIP packet", "call_id", SanitizeCallIDForLogging(callID))
+				} else if !tracker.config.WriteVoIP {
+					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
 				}
 				return
 			}
@@ -204,8 +166,11 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 						})
 					},
 					func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
-						// Create call tracker entry
-						call := tracker.GetOrCreateCall(callID, linkType)
+						if _, err := (sniffRegistry{tracker: tracker}).Observe(analysis.SIP); err != nil {
+							logger.Warn("Failed to update matched UDP SIP call", "call_id", SanitizeCallIDForLogging(callID), "error", err)
+							return
+						}
+						call, _ := tracker.GetCall(callID)
 						if call != nil {
 							monitoring.RecordCallEvent(tracingCtx, callID, "sip_matched", map[string]interface{}{
 								"from": metadata.From,
@@ -213,14 +178,11 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 							})
 						}
 
-						// Inject matched SIP packet into virtual interface
-						injectPacketToVirtualInterface(pkt)
-
 						// Write all buffered packets using helper
+						// Preserve legacy behavior: the current matching packet is
+						// injected once before the buffered PCAP writes.
+						injectPacketToVirtualInterface(pkt)
 						handleMatchedCallForFileWrite(tracker, callID, packets, metadata)
-
-						// Extract RTP ports from SDP for future RTP association
-						tracker.ExtractPortFromSDP(string(event.SDP), callID)
 					},
 				)
 				_ = matched // Callback already handled everything
@@ -308,7 +270,7 @@ func sipParseOptions(packet gopacket.Packet, layer *layers.UDP) sharedsip.ParseO
 }
 
 // isSIPPacket checks if a packet is a SIP packet using content-based detection
-func isSIPPacket(tracker *CallTracker, packet gopacket.Packet) bool {
+func isSIPPacket(_ *CallTracker, packet gopacket.Packet) bool {
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp, ok := udpLayer.(*layers.UDP)
 		if ok {
@@ -316,9 +278,17 @@ func isSIPPacket(tracker *CallTracker, packet gopacket.Packet) bool {
 			if len(payload) == 0 {
 				return false
 			}
-			// Use content-based SIP detection, not port-based
-			// Use Ethernet as default link type (most common case)
-			return handleSipMessage(tracker, payload, layers.LinkTypeEthernet)
+			// Buffered packets have already been parsed by sipflow. Classify them
+			// from the SIP start line here so output routing does not parse the
+			// same message a second time.
+			lineEnd := bytes.IndexByte(payload, '\n')
+			if lineEnd < 0 {
+				lineEnd = len(payload)
+			}
+			if lineEnd > 0 && payload[lineEnd-1] == '\r' {
+				lineEnd--
+			}
+			return sharedsip.IsStartLine(string(payload[:lineEnd]))
 		}
 	}
 	return false

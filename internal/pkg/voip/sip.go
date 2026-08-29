@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"strings"
 
-	"github.com/endorses/lippycat/internal/pkg/logger"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
-	"github.com/google/gopacket/layers"
 )
 
 // extractUserFromSIPURI extracts the username from a SIP URI
@@ -81,75 +79,6 @@ func ExtractURIFromHeaderBytes(header []byte) string {
 // Returns empty string if no tag parameter found
 func extractTagFromHeader(header string) string {
 	return sharedsip.Tag(header)
-}
-
-func handleSipMessage(tracker *CallTracker, data []byte, linkType layers.LinkType) bool {
-	logger.Debug("handleSipMessage called", "data_len", len(data))
-	lines := bytes.Split(data, []byte("\n"))
-	if len(lines) == 0 {
-		logger.Debug("handleSipMessage: no lines in data")
-		return false
-	}
-	startLine := strings.TrimSpace(string(lines[0]))
-	logger.Debug("handleSipMessage: checking start line", "start_line", startLine)
-	if !isSipStartLine(startLine) {
-		logger.Debug("handleSipMessage: not a SIP start line")
-		return false
-	}
-
-	logger.Debug("handleSipMessage: parsing SIP headers")
-	event, err := sharedsip.Parse(data, sharedsip.ParseOptions{})
-	if err != nil {
-		return false
-	}
-	headers := event.Headers
-
-	logger.Debug("handleSipMessage: checking user filter", "call_id", headers["call-id"])
-	if containsUserInHeaders(headers) {
-		callID := headers["call-id"]
-		if callID != "" {
-			// Truncate excessively long Call-IDs (for DoS protection)
-			const maxCallIDLength = 1024
-			if len(callID) > maxCallIDLength {
-				logger.Warn("Truncating excessively long Call-ID",
-					"original_length", len(callID),
-					"truncated_length", maxCallIDLength,
-					"source", "sip_processing")
-				callID = callID[:maxCallIDLength]
-				headers["call-id"] = callID
-			}
-
-			// Validate the Call-ID for security
-			if err := ValidateCallIDForSecurity(callID); err != nil {
-				logger.Warn("Malicious Call-ID detected and rejected",
-					"call_id", SanitizeCallIDForLogging(callID),
-					"error", err,
-					"source", "sip_processing")
-				return false
-			}
-
-			// Detect SIP method for state tracking
-			method := event.Method
-
-			// Update call state if call already exists
-			// Note: In hunter mode, calls should be created separately for local tracking
-			call, err := tracker.GetCall(callID)
-			if err == nil {
-				call.SetCallInfoState(method)
-			}
-
-			// Extract RTP ports from SDP if present
-			if BytesContains(event.SDP, []byte("m=audio")) {
-				tracker.ExtractPortFromSDP(string(event.SDP), callID)
-			}
-		}
-		return true
-	}
-	return false
-}
-
-func handleSipMessageWithTracker(tracker *CallTracker, data []byte, linkType layers.LinkType) bool {
-	return handleSipMessage(tracker, data, linkType)
 }
 
 func detectSipMethod(line string) string {

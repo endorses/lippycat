@@ -558,14 +558,27 @@ designated as a processor-level required sink.
 
 ### Tasks
 
-- [ ] Implement shared SIP message orchestration over the Phase 3 and 4 contracts.
-- [ ] Implement typed sink results and per-sink drop metrics.
-- [ ] Preserve call-level matching for subsequent in-dialog messages.
-- [ ] Preserve BYE/CANCEL handling and call completion policy explicitly.
-- [ ] Preserve per-message TCP forwarding and synthesized-packet semantics.
-- [ ] Migrate tap, then hunt, then sniff.
-- [ ] Delete each legacy handler immediately after its consumer migrates.
-- [ ] Extend the same parser/registry path to overlapping UDP SIP handling.
+- [x] Implement shared SIP message orchestration over the Phase 3 and 4 contracts.
+- [x] Implement typed sink results and per-sink drop metrics.
+- [x] Preserve call-level matching for subsequent in-dialog messages.
+- [x] Preserve BYE/CANCEL handling and call completion policy explicitly.
+- [x] Preserve per-message TCP forwarding and synthesized-packet semantics.
+- [x] Migrate tap, then hunt, then sniff.
+- [x] Delete each legacy handler immediately after its consumer migrates.
+- [x] Extend the same parser/registry path to overlapping UDP SIP handling.
+
+Implementation verification (2026-08-29): introduced the output-neutral
+`sipflow` orchestrator with synchronous analysis, independently bounded sink
+fan-out, typed outcomes, attributable drop metrics, explicit selection and
+completion policies, and deterministic draining shutdown. Tap, hunt, sniff, and
+the processor-owned tap UDP path now share the same parsing, selection, registry,
+and result pipeline. TCP framing passes its parsed event into orchestration so a
+message is parsed once; hunter UDP retains ordered pre-SDP buffering by caching
+bounded typed analyses rather than reparsing on release. Mode handlers remain as
+thin stream/packet and sink adapters; their former parsing and selection logic
+was removed. Terminal tap packets retain deferred `AfterProcess` completion,
+including deterministic drop paths. `make test`, focused race tests, and the
+supported non-CUDA build matrix pass.
 
 ### Exit Criteria
 

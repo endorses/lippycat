@@ -12,6 +12,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -179,6 +180,7 @@ type Processor struct {
 	appFilter       ApplicationFilter
 	needFilterIDs   bool
 	selectionPolicy callregistry.SelectionPolicy
+	sipFlow         *sipflow.Orchestrator
 
 	// Janitor for cleanup
 	janitorCtx    chan struct{}
@@ -223,6 +225,7 @@ func New(cfg Config) *Processor {
 		closeDone:       make(chan struct{}),
 		observers:       append([]callregistry.LifecycleObserver(nil), cfg.LifecycleObservers...),
 	}
+	p.sipFlow = newProcessorSIPFlow(p)
 
 	// Start janitor goroutine for cleanup
 	p.janitorWG.Add(1)
@@ -312,6 +315,9 @@ func (p *Processor) ActiveCalls() []CallInfo {
 
 // Close releases resources held by the processor.
 func (p *Processor) Close() {
+	if p.sipFlow != nil {
+		p.sipFlow.Close()
+	}
 	p.eventMu.Lock()
 	p.mu.Lock()
 	if p.janitorClosed {

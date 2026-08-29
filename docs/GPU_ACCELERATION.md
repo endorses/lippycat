@@ -2,12 +2,16 @@
 
 ## Overview
 
-lippycat supports GPU-accelerated pattern matching and SIP parsing to achieve maximum throughput on high-speed networks. The GPU acceleration framework provides:
+lippycat provides protocol-neutral batch pattern matching for edge filters. SIP,
+RTP, and other protocol parsing remain in their analyzer packages; the GPU layer
+only reports pattern matches and public pattern IDs.
+
+The acceleration framework provides:
 
 - **Multi-backend support**: CUDA, OpenCL, and optimized CPU SIMD fallback
 - **Automatic backend selection**: Chooses the best available backend
 - **Transparent fallback**: Falls back to CPU when GPU unavailable
-- **Zero-copy operations**: Minimizes data transfer overhead
+- **Pinned transfer buffers**: Reduces host/device transfer overhead when CUDA is enabled
 - **Batch processing**: Processes multiple packets simultaneously
 
 ## Architecture
@@ -29,41 +33,23 @@ flowchart TB
         PM4[Multi-pattern search]
     end
 
-    subgraph SIP[SIP-Specific Optimizations]
-        direction LR
-        S1[Call-ID extraction]
-        S2[Header parsing]
-        S3[Method detection]
-    end
-
     CUDA --> PM1
     OpenCL --> PM1
     SIMD --> PM1
-    PM1 --> S1
+    PM1 --> PM2
+    PM1 --> PM3
+    PM1 --> PM4
 ```
 
 ## Performance
 
-### Benchmark Results (64 packets/batch, Intel i9-13900HX + RTX 4090)
+Performance depends on the pattern set, batch size, packet sizes, GPU, driver,
+and selected algorithm. Run the benchmarks in `internal/pkg/gpuaccel` on the
+deployment hardware instead of relying on fixed historical figures:
 
-| Operation | Throughput | Latency | Allocations |
-|-----------|-----------|---------|-------------|
-| **GPU Batch Processing** | 29.7 Kpkts/s | 33.6 µs/batch | 138 allocs/batch |
-| **GPU Call-ID Extraction** | 19.4 Kpkts/s | 51.5 µs/batch | 148 allocs/batch |
-| **SIMD Pattern Matching** | 29.9 Kpkts/s | 33.4 µs/batch | 138 allocs/batch |
-| **SIMD Call-ID Extraction** | 18.9 Kpkts/s | 52.7 µs/batch | 154 allocs/batch |
-
-### Per-Packet Performance
-
-| Operation | Time/Packet | Allocations/Packet |
-|-----------|-------------|--------------------|
-| **Pattern Matching** | 525 ns | 2.16 allocs |
-| **Call-ID Extraction** | 805 ns | 2.31 allocs |
-
-### Speedup vs Single-Packet Processing
-
-- **Batch Pattern Matching**: ~3.4x faster than single-packet
-- **Vectorized Call-ID Extraction**: ~1.5x faster with zero false positives
+```bash
+go test -tags cuda -bench=. ./internal/pkg/gpuaccel
+```
 
 ## Supported Backends
 
@@ -81,18 +67,21 @@ flowchart TB
 
 ### 2. CUDA Backend (Requires NVIDIA GPU)
 
-**Status:** Placeholder (CUDA toolkit required for full implementation)
+**Status:** Implemented when built with the `cuda` build tag. Non-CUDA builds
+compile a stub that reports `ErrGPUNotAvailable` and fall back to CPU SIMD.
 
 **Requirements:**
 - NVIDIA GPU with Compute Capability 6.0+ (Pascal or newer)
 - CUDA Toolkit 11.0+
 - nvidia-driver 470+
 
-**Features (when implemented):**
+**Features:**
 - Native CUDA kernel execution
 - Pinned memory for faster transfers
 - Multiple CUDA streams
 - Direct GPU memory management
+- Linear literal, prefix, suffix, and contains matching
+- Named Aho-Corasick automatons for large pattern sets
 
 **Optimal Use:** High packet rates (1M+ pps), NVIDIA hardware
 
@@ -234,8 +223,10 @@ pattern := gpuaccel.GPUPattern{
 }
 ```
 
-### 4. Regex Match (Future)
-Full regular expression support (planned for CUDA/OpenCL backends).
+### 4. Suffix Match
+Matches a pattern at the end of data.
+
+Regular-expression matching is not implemented.
 
 ## Installation
 
@@ -366,29 +357,26 @@ This is expected and safe - performance will still be good with SIMD optimizatio
 1. **Check batch size**: Larger batches improve throughput
 2. **Monitor CPU usage**: Ensure not CPU-bound
 3. **Check memory**: GPU needs sufficient VRAM
-4. **Disable affinity in tests**: Set `WorkerAffinity: false`
 
 ## Future Enhancements
 
 ### Planned Features
 
-- [ ] Full CUDA kernel implementation with CGo bindings
 - [ ] OpenCL runtime kernel compilation
 - [ ] Regular expression support on GPU
 - [ ] Multi-GPU support with work distribution
-- [ ] Advanced pattern compilation (Aho-Corasick automaton)
 - [ ] DPI (Deep Packet Inspection) acceleration
 - [ ] GPU-based packet reassembly
 
 ### Contributing
 
-To implement CUDA/OpenCL backends:
+To extend the backends:
 
-1. See `gpu_cuda_backend.go` for CUDA placeholder
-2. See `gpu_opencl_backend.go` for OpenCL placeholder
-3. Implement CGo bindings to respective libraries
-4. Add kernel source files (`.cu` for CUDA)
-5. Update build system for optional GPU support
+1. See `gpu_cuda_backend_impl.go` for the CUDA implementation.
+2. See `gpu_cuda_backend.go` for the non-CUDA stub.
+3. See `gpu_opencl_backend.go` for the OpenCL placeholder.
+4. Keep backend APIs protocol-neutral and preserve CPU fallback behavior.
+5. Add equivalence tests for every supported matching mode.
 
 ## References
 

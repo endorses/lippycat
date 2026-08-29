@@ -792,6 +792,12 @@ Post-audit remediation (2026-08-29): updated the root CUDA build and cleanup
 targets to use `internal/pkg/gpuaccel` and removed the remaining unreferenced
 reassembly, analyzer, writer, and forwarding compatibility shims.
 
+Final cleanup audit (2026-08-29): removed the orphaned VoIP-local capture engine,
+AF_XDP socket implementation, CPU-affinity helper, and their test-only coverage.
+Updated operator documentation to describe the implemented protocol-neutral
+matching APIs and CUDA/non-CUDA behavior without advertising removed or
+unimplemented capture and SIP-parsing capabilities.
+
 ### Exit Criteria
 
 - The VoIP package contains SIP/RTP/SDP analysis and integration, not generic

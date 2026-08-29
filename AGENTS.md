@@ -608,7 +608,6 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 - [docs/GPU_TROUBLESHOOTING.md](docs/GPU_TROUBLESHOOTING.md) - GPU-specific troubleshooting
 - [docs/tcp-troubleshooting.md](docs/tcp-troubleshooting.md) - TCP SIP capture troubleshooting
 - [docs/TUI_REMOTE_CAPTURE.md](docs/TUI_REMOTE_CAPTURE.md) - Remote capture with TUI
-- [docs/AF_XDP_SETUP.md](docs/AF_XDP_SETUP.md) - AF_XDP high-performance capture setup
 - [docs/VIRTUAL_INTERFACE.md](docs/VIRTUAL_INTERFACE.md) - Virtual interface (TAP/TUN) for packet injection
 - [docs/API_KEY_AUTHENTICATION.md](docs/API_KEY_AUTHENTICATION.md) - API key authentication
 - [docs/voip-build-tag-optimization.md](docs/voip-build-tag-optimization.md) - VoIP build tag optimization

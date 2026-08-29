@@ -43,7 +43,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
 - **Virtual Interface**: Replay filtered streams to Wireshark, tcpdump, Snort (Linux only)
 - **Secure by Default**: TLS enabled for all gRPC connections, with optional mTLS
 - **Hunter Subscription**: Selective monitoring of specific hunters via TUI
-- **Performance**: SIMD optimizations, optional GPU acceleration, AF_XDP support
+- **Performance**: SIMD optimizations and optional GPU acceleration
 - **TUI & CLI**: Terminal UI with remote monitoring and command-line interfaces
 - **Flexible Output**: PCAP files (unified, per-call, auto-rotating), structured logging
 
@@ -254,9 +254,6 @@ Standard builds use CPU SIMD. Use `make build-cuda` for GPU acceleration.
 - **latency**: Real-time monitoring
 - **memory**: Resource-constrained environments
 
-### AF_XDP Support
-Kernel-bypass packet capture on Linux 4.18+ with XDP-capable NICs. See [docs/AF_XDP_SETUP.md](docs/AF_XDP_SETUP.md).
-
 ## Distributed Mode
 
 Deploy hunters across network segments and aggregate to central processors. **TLS is enabled by default** for all gRPC connections—processors require certificates, hunters require CA verification.
@@ -337,7 +334,6 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 - [Distributed Mode](docs/DISTRIBUTED_MODE.md) - Multi-node architecture
 - [TUI Remote Capture](docs/TUI_REMOTE_CAPTURE.md) - Remote monitoring setup
 - [GPU Acceleration](docs/GPU_ACCELERATION.md) - GPU/SIMD optimization
-- [AF_XDP Setup](docs/AF_XDP_SETUP.md) - Kernel-bypass capture
 - [Security Features](docs/SECURITY.md) - Encryption, sanitization, DoS protection
 - [TCP Troubleshooting](docs/tcp-troubleshooting.md) - TCP stream debugging
 - [GPU Troubleshooting](docs/GPU_TROUBLESHOOTING.md) - GPU backend issues

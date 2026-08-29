@@ -5,7 +5,6 @@ This appendix defines key terms used throughout the lippycat user manual.
 | Term | Definition |
 |------|-----------|
 | **ADMF** | Administration Function. The external system that manages Lawful Interception tasks by sending activation/deactivation requests over the X1 interface. See [Lawful Interception](../part5-advanced/lawful-interception.md). |
-| **AF_XDP** | Address Family XDP. A Linux kernel bypass mechanism that uses eBPF/XDP to deliver packets directly to userspace, enabling high-speed capture without the overhead of the traditional socket path. See [Performance Optimization](../part5-advanced/performance.md). |
 | **Aho-Corasick** | A string matching algorithm that searches for multiple patterns simultaneously in a single pass. Used by lippycat for efficient multi-pattern filtering (e.g., matching many SIP URIs at once). See [Performance Optimization](../part5-advanced/performance.md). |
 | **Auto-Rotating PCAP** | A non-VoIP capture feature that automatically rotates PCAP output files based on size or time thresholds, preventing any single file from growing unbounded. See [Central Aggregation with `lc process`](../part3-distributed/process.md). |
 | **BPF** | Berkeley Packet Filter. A kernel-level packet filtering language that allows capture tools to discard uninteresting packets before they reach userspace, reducing CPU and memory overhead. See [BPF Filter Reference](bpf-reference.md). |

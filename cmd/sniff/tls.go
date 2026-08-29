@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -56,8 +57,8 @@ var (
 	tlsWriteFile  string
 )
 
-var tlsSpec = ProtocolSpec{
-	Spec: sharedProtocolSpec("tls"),
+var tlsSpec = sniffRuntimeAdapter{
+	protocol: protocolcatalog.MustLookup("tls"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := tls.ParsePorts(tlsPorts)
 		if err != nil {

@@ -3,13 +3,13 @@
 package tui
 
 import (
-	"container/list"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -36,17 +36,10 @@ type CallPartyInfo struct {
 //
 // No fallbacks - exact IP:port match only.
 type CallTracker struct {
-	// Map: IP:port -> CallIDs. Shared endpoints are common with B2BUAs.
-	rtpEndpointToCallIDs map[string]map[string]struct{}
-	// Map: CallID -> list of endpoints (for cleanup on eviction)
-	callIDToEndpoints map[string][]string
+	registry *callregistry.Core
 	// Map: CallID -> From/To party info
 	callPartyInfo map[string]*CallPartyInfo
-	// LRU tracking by CallID
-	lruList  *list.List               // LRU list (front = most recently used)
-	lruIndex map[string]*list.Element // callID -> list element for O(1) lookup
-	maxCalls int                      // Maximum calls to keep
-	mu       sync.RWMutex
+	mu            sync.RWMutex
 	// Throttled LRU touch for RTP lookups (avoid lock contention at high packet rates)
 	lastRTPTouch sync.Map // map[string]int64 (callID -> unix nano timestamp)
 }
@@ -62,12 +55,11 @@ func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
 		maxCalls = DefaultMaxTrackedCalls
 	}
 	return &CallTracker{
-		rtpEndpointToCallIDs: make(map[string]map[string]struct{}),
-		callIDToEndpoints:    make(map[string][]string),
-		callPartyInfo:        make(map[string]*CallPartyInfo),
-		lruList:              list.New(),
-		lruIndex:             make(map[string]*list.Element),
-		maxCalls:             maxCalls,
+		registry: callregistry.New(callregistry.Config{
+			MaxCalls: maxCalls, MaxEndpointsPerCall: maxMediaEndpointsPerCall,
+			MaxEndpointAssociations: maxMediaEndpointAssociations,
+		}),
+		callPartyInfo: make(map[string]*CallPartyInfo),
 	}
 }
 
@@ -75,72 +67,38 @@ func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
 // If the call doesn't exist in the LRU, it adds it.
 // Must be called with mu held.
 func (t *CallTracker) touchCallLocked(callID string) {
-	if elem, ok := t.lruIndex[callID]; ok {
-		// Move existing call to front
-		t.lruList.MoveToFront(elem)
-	} else {
-		// Evict LRU (least recently used) if at capacity
-		if t.lruList.Len() >= t.maxCalls {
-			oldest := t.lruList.Back()
-			if oldest != nil {
-				oldestCallID := oldest.Value.(string)
-				t.evictCallLocked(oldestCallID)
-				t.lruList.Remove(oldest)
-				delete(t.lruIndex, oldestCallID)
+	if _, ok := t.registry.Call(callID); ok {
+		t.registry.Touch(callID, time.Now())
+		return
+	}
+	before := t.registry.ActiveCalls()
+	t.registry.Upsert(callregistry.Call{CallID: callID, Created: time.Now(), LastUpdated: time.Now()})
+	if len(before) > 0 {
+		for _, call := range before {
+			if _, ok := t.registry.Call(call.CallID); !ok {
+				delete(t.callPartyInfo, call.CallID)
+				t.lastRTPTouch.Delete(call.CallID)
 			}
 		}
-		// Add new call to front
-		elem := t.lruList.PushFront(callID)
-		t.lruIndex[callID] = elem
 	}
 }
 
 // evictCallLocked removes all data associated with a call.
 // Must be called with mu held.
 func (t *CallTracker) evictCallLocked(callID string) {
-	// Remove endpoints for this call, but ONLY if they still point to this call.
-	// This prevents deleting endpoints that were reassigned to a different call.
-	endpoints := t.callIDToEndpoints[callID]
-	for _, endpoint := range endpoints {
-		if callIDs := t.rtpEndpointToCallIDs[endpoint]; callIDs != nil {
-			delete(callIDs, callID)
-			if len(callIDs) == 0 {
-				delete(t.rtpEndpointToCallIDs, endpoint)
-			}
-		}
-	}
-	delete(t.callIDToEndpoints, callID)
+	t.registry.Remove(callID, callregistry.EndEvicted)
 	delete(t.callPartyInfo, callID)
 	t.lastRTPTouch.Delete(callID)
 }
 
 // registerEndpointLocked adds one bounded, deduplicated endpoint association.
 func (t *CallTracker) registerEndpointLocked(callID, endpoint string) bool {
-	for _, existing := range t.callIDToEndpoints[callID] {
-		if existing == endpoint {
-			return false
-		}
-	}
-	if len(t.callIDToEndpoints[callID]) >= maxMediaEndpointsPerCall {
-		return false
-	}
-	associations := 0
-	for _, ids := range t.rtpEndpointToCallIDs {
-		associations += len(ids)
-	}
-	if associations >= maxMediaEndpointAssociations {
-		return false
-	}
-	if t.rtpEndpointToCallIDs[endpoint] == nil {
-		t.rtpEndpointToCallIDs[endpoint] = make(map[string]struct{})
-	}
-	t.rtpEndpointToCallIDs[endpoint][callID] = struct{}{}
-	t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
-	return true
+	before := len(t.registry.EndpointsForCall(callID))
+	return t.registry.TryAssociateEndpoint(callID, endpoint) && len(t.registry.EndpointsForCall(callID)) > before
 }
 
-func firstRealCallID(callIDs map[string]struct{}) string {
-	for callID := range callIDs {
+func firstRealCallID(callIDs []string) string {
+	for _, callID := range callIDs {
 		if !strings.HasPrefix(callID, "rtp-") {
 			return callID
 		}
@@ -151,12 +109,8 @@ func firstRealCallID(callIDs map[string]struct{}) string {
 // callIDForEndpointLocked preserves the historical preference for the most
 // recently active owner while retaining every shared B2BUA association.
 func (t *CallTracker) callIDForEndpointLocked(endpoint string) string {
-	callIDs := t.rtpEndpointToCallIDs[endpoint]
-	for elem := t.lruList.Front(); elem != nil; elem = elem.Next() {
-		callID := elem.Value.(string)
-		if _, ok := callIDs[callID]; ok {
-			return callID
-		}
+	if callID, ok := t.registry.MostRecentCallIDForEndpoint(endpoint); ok {
+		return callID
 	}
 	return ""
 }
@@ -194,7 +148,7 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16, i
 	// Check if any endpoint already has a synthetic (RTP-only) CallID
 	for _, port := range ports {
 		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
-		for existingCallID := range t.rtpEndpointToCallIDs[endpoint] {
+		for _, existingCallID := range t.registry.CallIDsForEndpoint(endpoint) {
 			if strings.HasPrefix(existingCallID, "rtp-") && syntheticCallID == "" {
 				syntheticCallID = existingCallID
 			}
@@ -206,15 +160,10 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16, i
 	var syntheticEndpoints []string
 	if syntheticCallID != "" {
 		// Copy the synthetic call's endpoints before evicting
-		syntheticEndpoints = append(syntheticEndpoints, t.callIDToEndpoints[syntheticCallID]...)
+		syntheticEndpoints = append(syntheticEndpoints, t.registry.EndpointsForCall(syntheticCallID)...)
 
 		// Now evict the synthetic call
 		t.evictCallLocked(syntheticCallID)
-		// Also remove from LRU
-		if elem, ok := t.lruIndex[syntheticCallID]; ok {
-			t.lruList.Remove(elem)
-			delete(t.lruIndex, syntheticCallID)
-		}
 	}
 
 	// Touch the call in LRU (adds if new, evicts oldest if at capacity)
@@ -229,7 +178,7 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16, i
 				"call_id", callID,
 				"endpoint", endpoint,
 				"source", source,
-				"total_endpoints_for_call", len(t.callIDToEndpoints[callID]))
+				"total_endpoints_for_call", len(t.registry.EndpointsForCall(callID)))
 		}
 	}
 
@@ -278,14 +227,14 @@ func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, 
 	// Check if any endpoint already belongs to a real SIP call.
 	// If so, return that call ID so the caller can use it instead of synthetic.
 	// This handles the race where SIP registers endpoints just before RTP arrives.
-	if existingSrc := firstRealCallID(t.rtpEndpointToCallIDs[srcEndpoint]); existingSrc != "" {
+	if existingSrc := firstRealCallID(t.registry.CallIDsForEndpoint(srcEndpoint)); existingSrc != "" {
 		logger.Debug("RegisterRTPOnlyEndpoints: src endpoint belongs to SIP call, returning real call ID",
 			"endpoint", srcEndpoint,
 			"real_call", existingSrc,
 			"synthetic_call", syntheticCallID)
 		return existingSrc
 	}
-	if existingDst := firstRealCallID(t.rtpEndpointToCallIDs[dstEndpoint]); existingDst != "" {
+	if existingDst := firstRealCallID(t.registry.CallIDsForEndpoint(dstEndpoint)); existingDst != "" {
 		logger.Debug("RegisterRTPOnlyEndpoints: dst endpoint belongs to SIP call, returning real call ID",
 			"endpoint", dstEndpoint,
 			"real_call", existingDst,
@@ -490,18 +439,14 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 			atomic.AddInt64(&rtpLookupSrcMatch, 1)
 		}
 	}
-	mapSizes := [2]int{len(t.rtpEndpointToCallIDs), len(t.callIDToEndpoints)}
+	mapSizes := [2]int{len(t.registry.ActiveCalls()), len(t.registry.ActiveCalls())}
 	t.mu.RUnlock()
 
 	if found {
 		// Throttled LRU touch - at most once per second per call to avoid lock contention
 		now := time.Now().UnixNano()
 		if last, ok := t.lastRTPTouch.Load(callID); !ok || now-last.(int64) > int64(rtpLRUTouchInterval) {
-			t.mu.Lock()
-			if elem, ok := t.lruIndex[callID]; ok {
-				t.lruList.MoveToFront(elem)
-			}
-			t.mu.Unlock()
+			t.registry.Touch(callID, time.Now())
 			t.lastRTPTouch.Store(callID, now)
 		}
 		return callID
@@ -525,7 +470,7 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 func (t *CallTracker) GetTrackedCallCount() int {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.lruList.Len()
+	return len(t.registry.ActiveCalls())
 }
 
 // IsCallActive reports whether the tracker currently owns state for callID.
@@ -538,7 +483,7 @@ func (t *CallTracker) IsCallActive(callID string) bool {
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	_, active := t.lruIndex[callID]
+	_, active := t.registry.Call(callID)
 	return active
 }
 
@@ -547,11 +492,8 @@ func (t *CallTracker) Clear() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.rtpEndpointToCallIDs = make(map[string]map[string]struct{})
-	t.callIDToEndpoints = make(map[string][]string)
+	t.registry.Clear()
 	t.callPartyInfo = make(map[string]*CallPartyInfo)
-	t.lruList = list.New()
-	t.lruIndex = make(map[string]*list.Element)
 	t.lastRTPTouch.Range(func(key, _ any) bool { t.lastRTPTouch.Delete(key); return true })
 }
 
@@ -656,16 +598,14 @@ func (t *CallTracker) GetEndpointsForCall(callID string) []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	endpoints := t.callIDToEndpoints[callID]
+	endpoints := t.registry.EndpointsForCall(callID)
 	if len(endpoints) == 0 {
 		return nil
 	}
 
 	// Touch the LRU to keep this call from being evicted while it's being displayed.
 	// Only touch if the call already exists in the LRU (don't add phantom entries).
-	if _, ok := t.lruIndex[callID]; ok {
-		t.lruList.MoveToFront(t.lruIndex[callID])
-	}
+	t.registry.Touch(callID, time.Now())
 
 	// Return a copy to avoid races
 	result := make([]string, len(endpoints))

@@ -24,5 +24,5 @@ func TestHunterConvertPacketPreservesCaptureTimestamp(t *testing.T) {
 		Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: "fixture0",
 	})
 
-	require.Equal(t, capturedAt.UnixNano(), converted.TimestampNs)
+	require.Equal(t, capturedAt, converted.CaptureTime)
 }

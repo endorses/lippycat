@@ -1,7 +1,6 @@
 package voip
 
 import (
-	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -120,36 +120,14 @@ func (ct *CallTracker) detachCallLocked(callID string) *CallInfo {
 		timer.Stop()
 		delete(ct.completionTimers, callID)
 	}
-	delete(ct.pins, callID)
-	if elem := ct.lruIndex[callID]; elem != nil {
-		ct.lruList.Remove(elem)
-		delete(ct.lruIndex, callID)
-	}
-	for endpoint, callIDs := range ct.portToCallID {
-		kept := callIDs[:0]
-		for _, id := range callIDs {
-			if id != callID {
-				kept = append(kept, id)
-			}
-		}
-		if len(kept) == 0 {
-			delete(ct.portToCallID, endpoint)
-		} else {
-			ct.portToCallID[endpoint] = kept
-		}
-	}
-	ct.recency.Delete(callID)
+	ct.registry.Remove(callID, callregistry.EndCompleted)
 	return call
 }
 
 type CallTracker struct {
 	callMap            map[string]*CallInfo
-	portToCallID       map[string][]string      // key = port, value = []CallID (multi-value for B2BUA)
-	lruList            *list.List               // LRU list (front = most recently used)
-	lruIndex           map[string]*list.Element // callID -> list element for O(1) lookup
-	pins               map[string]int           // callID -> active retention leases
-	recency            sync.Map                 // callID -> *atomic.Int64 Unix nanoseconds; RTP fast path
-	maxCalls           int                      // Maximum calls to keep
+	registry           *callregistry.Core
+	maxCalls           int // Maximum calls to keep
 	lastPinnedWarning  time.Time
 	mu                 sync.RWMutex
 	lifecycleMu        sync.Mutex // Serializes registry mutations with lifecycle callbacks.
@@ -180,27 +158,18 @@ func (ct *CallTracker) registerEndpointLocked(endpoint, callID string) bool {
 	if endpoint == "" || callID == "" || ct.callMap[callID] == nil {
 		return false
 	}
-	for _, existing := range ct.portToCallID[endpoint] {
+	for _, existing := range ct.registry.CallIDsForEndpoint(endpoint) {
 		if existing == callID {
 			return true
 		}
 	}
-	perCall, total := 0, 0
-	for _, callIDs := range ct.portToCallID {
-		total += len(callIDs)
-		for _, existing := range callIDs {
-			if existing == callID {
-				perCall++
-			}
-		}
+	if _, ok := ct.registry.Call(callID); !ok {
+		call := ct.callMap[callID]
+		ct.registry.Upsert(callregistry.Call{CallID: call.CallID, State: call.State, Created: call.Created, LastUpdated: call.LastUpdated})
 	}
-	if perCall >= ct.config.MaxEndpointsPerCall || total >= ct.config.MaxEndpointAssociations {
-		logger.Warn("RTP endpoint association limit reached",
-			"call_id", SanitizeCallIDForLogging(callID),
-			"per_call", perCall, "total", total)
+	if !ct.registry.TryAssociateEndpoint(callID, endpoint) {
 		return false
 	}
-	ct.portToCallID[endpoint] = append(ct.portToCallID[endpoint], callID)
 	return true
 }
 
@@ -244,11 +213,17 @@ func newCallTracker(config *Config, maxCalls int, output CallOutput) *CallTracke
 		config.MaxEndpointAssociations = maxCalls * 8
 	}
 	tracker := &CallTracker{
-		callMap:          make(map[string]*CallInfo),
-		portToCallID:     make(map[string][]string),
-		lruList:          list.New(),
-		lruIndex:         make(map[string]*list.Element),
-		pins:             make(map[string]int),
+		callMap: make(map[string]*CallInfo),
+		registry: callregistry.New(callregistry.Config{
+			MaxCalls: maxCalls, MaxEndpointsPerCall: config.MaxEndpointsPerCall,
+			MaxEndpointAssociations: config.MaxEndpointAssociations,
+			EvictionPriority: func(call callregistry.Call) int {
+				if call.State == "BYE" || call.State == "CANCEL" {
+					return 1
+				}
+				return 0
+			},
+		}),
 		maxCalls:         maxCalls,
 		janitorCtx:       ctx,
 		janitorCancel:    cancel,
@@ -274,9 +249,7 @@ func (ct *CallTracker) PinCall(callID string) {
 	if callID == "" {
 		return
 	}
-	ct.mu.Lock()
-	ct.pins[callID]++
-	ct.mu.Unlock()
+	ct.registry.Pin(callID)
 }
 
 // UnpinCall releases one retention lease.
@@ -284,18 +257,10 @@ func (ct *CallTracker) UnpinCall(callID string) {
 	if callID == "" {
 		return
 	}
-	ct.mu.Lock()
-	if ct.pins[callID] <= 1 {
-		delete(ct.pins, callID)
-	} else {
-		ct.pins[callID]--
-	}
-	ct.mu.Unlock()
+	ct.registry.Unpin(callID)
 }
 func (ct *CallTracker) IsPinned(callID string) bool {
-	ct.mu.RLock()
-	defer ct.mu.RUnlock()
-	return ct.pins[callID] > 0
+	return ct.registry.IsPinned(callID)
 }
 
 func (ct *CallTracker) startJanitor() {
@@ -346,13 +311,9 @@ func (ct *CallTracker) Shutdown() {
 		for id, call := range ct.callMap {
 			calls = append(calls, call)
 			delete(ct.callMap, id)
-			ct.recency.Delete(id)
 		}
-		clear(ct.portToCallID)
-		clear(ct.lruIndex)
-		ct.lruList.Init()
-		clear(ct.pins)
 		ct.mu.Unlock()
+		ct.registry.Close()
 		for _, call := range calls {
 			if err := ct.notifyCallEnded(call); err != nil {
 				logger.Error("Failed to close call output", "call_id", SanitizeCallIDForLogging(call.CallID), "error", err)
@@ -372,6 +333,7 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 
 	c.State = newState
 	c.LastUpdated = time.Now()
+	tracker.registry.Upsert(callregistry.Call{CallID: c.CallID, State: c.State, Created: c.Created, LastUpdated: c.LastUpdated})
 	notifyEnded := false
 
 	// If this is a call termination message (BYE or CANCEL), set EndTime
@@ -463,18 +425,11 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 	if tracker.shuttingDown.Load() != 0 {
 		return nil
 	}
-	// Existing calls dominate the RTP packet path. Refresh their eviction
-	// recency atomically so every media packet does not take the tracker-wide
-	// write lock merely to promote an LRU element.
 	tracker.mu.RLock()
 	call, exists := tracker.callMap[callID]
 	if exists {
-		if tracker.shuttingDown.Load() != 0 {
-			tracker.mu.RUnlock()
-			return nil
-		}
-		tracker.touchCall(callID)
 		tracker.mu.RUnlock()
+		tracker.registry.Touch(callID, time.Now())
 		return call
 	}
 	tracker.mu.RUnlock()
@@ -482,8 +437,6 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 	tracker.lifecycleMu.Lock()
 	defer tracker.lifecycleMu.Unlock()
 	tracker.mu.Lock()
-	var evicted *CallInfo
-	var admitted bool
 	if tracker.shuttingDown.Load() != 0 {
 		tracker.mu.Unlock()
 		return nil
@@ -491,16 +444,6 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 
 	call, exists = tracker.callMap[callID]
 	if !exists {
-		// Enforce the capacity before allocating output resources. Pinned calls
-		// cannot be evicted, so admission fails when every resident is pinned.
-		if tracker.lruList.Len() >= tracker.maxCalls && tracker.leastRecentUnpinnedLocked() == nil {
-			if time.Since(tracker.lastPinnedWarning) > time.Minute {
-				tracker.lastPinnedWarning = time.Now()
-				logger.Warn("call tracker capacity reached; rejecting call because all calls are pinned", "max_calls", tracker.maxCalls)
-			}
-			tracker.mu.Unlock()
-			return nil
-		}
 		call = &CallInfo{
 			CallID:      callID,
 			State:       "NEW",
@@ -509,73 +452,27 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 			LinkType:    linkType,
 			tracker:     tracker,
 		}
-
-		// Evict LRU (least recently used) if at capacity
-		if tracker.lruList.Len() >= tracker.maxCalls {
-			// Prefer an unpinned inactive call, then any unpinned LRU call.
-			var oldest *list.Element
-			for e := tracker.lruList.Back(); e != nil; e = e.Prev() {
-				id := e.Value.(string)
-				if tracker.pins[id] == 0 && tracker.callMap[id] != nil && tracker.callMap[id].EndTime != nil {
-					oldest = e
-					break
+		before := tracker.registry.ActiveCalls()
+		if !tracker.registry.Upsert(callregistry.Call{
+			CallID: call.CallID, State: call.State, Created: call.Created, LastUpdated: call.LastUpdated,
+		}) {
+			tracker.mu.Unlock()
+			return nil
+		}
+		for _, prior := range before {
+			if _, retained := tracker.registry.Call(prior.CallID); !retained {
+				if old := tracker.callMap[prior.CallID]; old != nil {
+					delete(tracker.callMap, prior.CallID)
+					tracker.mu.Unlock()
+					_ = tracker.notifyCallEnded(old)
+					tracker.mu.Lock()
 				}
-			}
-			if oldest == nil {
-				oldest = tracker.leastRecentUnpinnedLocked()
-			}
-			if oldest != nil {
-				oldestCallID := oldest.Value.(string)
-				oldCall := tracker.callMap[oldestCallID]
-
-				// Detach the old call while holding the tracker lock. It is closed
-				// only after releasing that lock, per the documented lock order.
-				if oldCall != nil {
-					evicted = oldCall
-					// Remove from port mapping
-					for port, callIDs := range tracker.portToCallID {
-						for i, cid := range callIDs {
-							if cid == oldestCallID {
-								// Remove this call ID from the slice
-								tracker.portToCallID[port] = append(callIDs[:i], callIDs[i+1:]...)
-								break
-							}
-						}
-						// Clean up empty slices
-						if len(tracker.portToCallID[port]) == 0 {
-							delete(tracker.portToCallID, port)
-						}
-					}
-					delete(tracker.callMap, oldestCallID)
-					if timer := tracker.completionTimers[oldestCallID]; timer != nil {
-						timer.Stop()
-						delete(tracker.completionTimers, oldestCallID)
-					}
-					tracker.recency.Delete(oldestCallID)
-				}
-				tracker.lruList.Remove(oldest)
-				delete(tracker.lruIndex, oldestCallID)
-				logger.Debug("Evicted LRU call (buffer full)",
-					"call_id", SanitizeCallIDForLogging(oldestCallID))
 			}
 		}
-
-		// Add new call to front (most recently used)
-		elem := tracker.lruList.PushFront(callID)
-		tracker.lruIndex[callID] = elem
 		tracker.callMap[callID] = call
-		tracker.touchCall(callID)
-		admitted = true
-	} else {
-		tracker.touchCall(callID)
 	}
 	tracker.mu.Unlock()
-	if evicted != nil {
-		if err := tracker.notifyCallEnded(evicted); err != nil {
-			logger.Error("Error closing call files", "call_id", SanitizeCallIDForLogging(evicted.CallID), "error", err)
-		}
-	}
-	if admitted {
+	if !exists {
 		// Lifecycle observers describe registry admission, independently of whether
 		// packet output is enabled. Invoke them only after publishing the call and
 		// releasing the registry lock so observers may safely query the registry.
@@ -634,8 +531,7 @@ func (ct *CallTracker) notifyCallEnded(call *CallInfo) error {
 }
 
 func (ct *CallTracker) touchCall(callID string) {
-	value, _ := ct.recency.LoadOrStore(callID, &atomic.Int64{})
-	value.(*atomic.Int64).Store(time.Now().UnixNano())
+	ct.registry.Touch(callID, time.Now())
 }
 
 // beginWrite admits a synchronous write only while shutdown has not begun.
@@ -660,27 +556,6 @@ func (ct *CallTracker) beginAcceptedWrite() bool {
 	}
 	ct.activeWrites.Add(1)
 	return true
-}
-
-// leastRecentUnpinnedLocked chooses using atomic packet recency while retaining
-// list order as a deterministic fallback for calls created by older/test paths.
-func (ct *CallTracker) leastRecentUnpinnedLocked() *list.Element {
-	var selected *list.Element
-	var selectedAt int64
-	for e := ct.lruList.Back(); e != nil; e = e.Prev() {
-		id := e.Value.(string)
-		if ct.pins[id] != 0 {
-			continue
-		}
-		at := int64(0)
-		if value, ok := ct.recency.Load(id); ok {
-			at = value.(*atomic.Int64).Load()
-		}
-		if selected == nil || at < selectedAt {
-			selected, selectedAt = e, at
-		}
-	}
-	return selected
 }
 
 func sanitize(id string) string {
@@ -801,18 +676,9 @@ func (ct *CallTracker) cleanupOldCalls() {
 	defer ct.lifecycleMu.Unlock()
 	ct.mu.Lock()
 	expired := make([]*CallInfo, 0)
-	for id, call := range ct.callMap {
-		if call == nil {
-			continue
-		}
-		lastActivity := call.LastUpdated
-		if value, ok := ct.recency.Load(id); ok {
-			if touched := time.Unix(0, value.(*atomic.Int64).Load()); touched.After(lastActivity) {
-				lastActivity = touched
-			}
-		}
-		if ct.pins[id] == 0 && lastActivity.Before(cutoff) {
-			expired = append(expired, ct.detachCallLocked(id))
+	for _, registryCall := range ct.registry.ExpiredUnpinned(cutoff) {
+		if call := ct.callMap[registryCall.CallID]; call != nil {
+			expired = append(expired, ct.detachCallLocked(registryCall.CallID))
 		}
 	}
 	ct.mu.Unlock()

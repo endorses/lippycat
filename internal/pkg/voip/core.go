@@ -283,8 +283,8 @@ func startProcessorWithBufferAndOutputs(tracker *CallTracker, bufferManager *Buf
 		// Flow-sharded worker pool. Each flow (both directions) is pinned to one
 		// worker via a symmetric hash, so RTP-stream ordering and per-call state
 		// stay consistent while distinct calls parallelise across cores. All shared
-		// state touched by the handlers is mutex-protected: CallTracker.callMap and
-		// portToCallID (tracker.mu), per-call PCAP writers (sipWriterMu/rtpWriterMu),
+		// state touched by the handlers is mutex-protected: CallTracker.callMap
+		// (tracker.mu), registry endpoint state, per-call PCAP writers (sipWriterMu/rtpWriterMu),
 		// the buffer manager (bm.mu) and the async writer. TCP is pinned to worker 0
 		// because the reassembly assembler is not concurrency-safe (TCP/SIP volume is
 		// negligible here).

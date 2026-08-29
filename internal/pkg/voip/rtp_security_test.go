@@ -16,9 +16,7 @@ import (
 func TestExtractPortFromSdp_ComprehensiveParsing(t *testing.T) {
 	// Reset port map before tests
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	tests := []struct {
 		name          string
@@ -124,15 +122,14 @@ m=audio 65535 RTP/AVP 0`,
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear port map for each test
 			tracker := TestCallTracker(t)
-			tracker.mu.Lock()
-			tracker.portToCallID = make(map[string][]string)
-			tracker.mu.Unlock()
+			clearRegistryForTest(tracker)
 
 			tracker.GetOrCreateCall(tt.callID, layers.LinkTypeEthernet)
 			tracker.ExtractPortFromSDP(tt.sdpBody, tt.callID)
 
 			tracker.mu.Lock()
-			actualCallIDs, exists := tracker.portToCallID[tt.expectedPort]
+			actualCallIDs := tracker.registry.CallIDsForEndpoint(tt.expectedPort)
+			exists := len(actualCallIDs) > 0
 			tracker.mu.Unlock()
 
 			if tt.shouldExtract {
@@ -148,9 +145,7 @@ m=audio 65535 RTP/AVP 0`,
 func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 	// Reset port map
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	t.Run("Concurrent port extraction", func(t *testing.T) {
 		const numGoroutines = 100
@@ -179,16 +174,14 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 
 		// Verify all ports were mapped correctly
 		tracker.mu.Lock()
-		assert.Equal(t, numGoroutines*numCallsPerGoroutine, len(tracker.portToCallID),
+		assert.Equal(t, numGoroutines*numCallsPerGoroutine, endpointAssociationCountForTest(tracker),
 			"Should have mapped all ports")
 		tracker.mu.Unlock()
 	})
 
 	t.Run("Concurrent read while extracting", func(t *testing.T) {
 		// Reset map
-		tracker.mu.Lock()
-		tracker.portToCallID = make(map[string][]string)
-		tracker.mu.Unlock()
+		clearRegistryForTest(tracker)
 
 		var wg sync.WaitGroup
 		const numReaders = 50
@@ -202,9 +195,9 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 				for j := 0; j < 100; j++ {
 					// Try to read various ports
 					tracker.mu.Lock()
-					_ = tracker.portToCallID["5060"]
-					_ = tracker.portToCallID["5061"]
-					_ = tracker.portToCallID["5062"]
+					_ = tracker.registry.CallIDsForEndpoint("5060")
+					_ = tracker.registry.CallIDsForEndpoint("5061")
+					_ = tracker.registry.CallIDsForEndpoint("5062")
 					tracker.mu.Unlock()
 				}
 			}()
@@ -236,13 +229,9 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 func TestIsTracked_EdgeCases(t *testing.T) {
 	// Setup port mappings for testing
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = map[string][]string{
-		"5004": {"call-audio-1"},
-		"5006": {"call-audio-2"},
-		"5008": {"call-video-1"},
-	}
-	tracker.mu.Unlock()
+	associateEndpointForTest(tracker, "5004", "call-audio-1")
+	associateEndpointForTest(tracker, "5006", "call-audio-2")
+	associateEndpointForTest(tracker, "5008", "call-video-1")
 
 	tests := []struct {
 		name        string
@@ -287,13 +276,9 @@ func TestIsTracked_EdgeCases(t *testing.T) {
 func TestGetCallIDForPacket_PortMapping(t *testing.T) {
 	// Setup port mappings
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = map[string][]string{
-		"5004": {"call-audio-1"},
-		"5006": {"call-audio-2"},
-		"5008": {"call-video-1"},
-	}
-	tracker.mu.Unlock()
+	associateEndpointForTest(tracker, "5004", "call-audio-1")
+	associateEndpointForTest(tracker, "5006", "call-audio-2")
+	associateEndpointForTest(tracker, "5008", "call-video-1")
 
 	tests := []struct {
 		name        string
@@ -333,9 +318,7 @@ func TestPortMapping_MemoryLeaks(t *testing.T) {
 	t.Run("Port map growth", func(t *testing.T) {
 		// Reset map
 		tracker := TestCallTracker(t)
-		tracker.mu.Lock()
-		tracker.portToCallID = make(map[string][]string)
-		tracker.mu.Unlock()
+		clearRegistryForTest(tracker)
 
 		// Add many port mappings with valid numeric ports
 		for i := 1; i <= 10000; i++ {
@@ -348,24 +331,20 @@ func TestPortMapping_MemoryLeaks(t *testing.T) {
 		}
 
 		tracker.mu.Lock()
-		mapSize := len(tracker.portToCallID)
+		mapSize := endpointAssociationCountForTest(tracker)
 		tracker.mu.Unlock()
 
 		assert.LessOrEqual(t, mapSize, tracker.maxCalls, "endpoint associations should remain bounded by admitted calls")
 
 		// Clear map to prevent memory leaks in other tests
-		tracker.mu.Lock()
-		tracker.portToCallID = make(map[string][]string)
-		tracker.mu.Unlock()
+		clearRegistryForTest(tracker)
 	})
 }
 
 func TestExtractPortFromSdp_SecurityVulnerabilities(t *testing.T) {
 	// Reset port map
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	securityTests := []struct {
 		name        string
@@ -421,7 +400,7 @@ func TestExtractPortFromSdp_SecurityVulnerabilities(t *testing.T) {
 
 			// Function should complete and not leave system in bad state
 			tracker.mu.Lock()
-			mapLen := len(tracker.portToCallID)
+			mapLen := endpointAssociationCountForTest(tracker)
 			tracker.mu.Unlock()
 
 			// Map should not grow uncontrollably
@@ -434,21 +413,15 @@ func TestPortMapping_Cleanup(t *testing.T) {
 	t.Run("Port map state isolation", func(t *testing.T) {
 		// Ensure each test has clean state
 		tracker := TestCallTracker(t)
-		tracker.mu.Lock()
-		initialSize := len(tracker.portToCallID)
-		tracker.portToCallID["test-isolation"] = []string{"test-call"}
-		tracker.mu.Unlock()
+		initialSize := endpointAssociationCountForTest(tracker)
+		associateEndpointForTest(tracker, "test-isolation", "test-call")
 
 		// Verify isolation doesn't affect other tests
 		defer func() {
-			tracker.mu.Lock()
-			delete(tracker.portToCallID, "test-isolation")
-			tracker.mu.Unlock()
+			tracker.registry.DissociateEndpoints("test-call")
 		}()
 
-		tracker.mu.Lock()
-		currentSize := len(tracker.portToCallID)
-		tracker.mu.Unlock()
+		currentSize := endpointAssociationCountForTest(tracker)
 
 		assert.Equal(t, initialSize+1, currentSize, "Should properly isolate test state")
 	})

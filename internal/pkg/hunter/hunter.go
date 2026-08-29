@@ -17,6 +17,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -78,7 +80,7 @@ type Hunter struct {
 	packetProcessor forwarding.PacketProcessor // Optional custom processor for VoIP buffering, etc.
 
 	// Persistent batch queue (survives reconnections)
-	batchQueue     chan *data.PacketBatch
+	batchQueue     chan *pipeline.PacketBatch
 	batchQueueSize int
 
 	// Control
@@ -128,7 +130,7 @@ func New(config Config) (*Hunter, error) {
 		config:         config,
 		statsCollector: stats.New(),
 		captureManager: captureManager,
-		batchQueue:     make(chan *data.PacketBatch, batchQueueSize),
+		batchQueue:     make(chan *pipeline.PacketBatch, batchQueueSize),
 		batchQueueSize: batchQueueSize,
 	}
 
@@ -346,8 +348,8 @@ func (h *Hunter) handleFlowControl(ctrl *data.StreamControl) {
 	}
 }
 
-// convertPacket converts capture.PacketInfo to protobuf format
-func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket {
+// convertPacket converts capture.PacketInfo to the normalized pipeline format.
+func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *pipeline.PacketEnvelope {
 	pkt := pktInfo.Packet
 
 	captureLen := 0
@@ -377,14 +379,17 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 	}
 
 	// Packet field conversions (safe: lengths are from pcap, LinkType is enum < 300)
-	return &data.CapturedPacket{
+	return &pipeline.PacketEnvelope{
 		Data:           packetData,
-		TimestampNs:    timestamp.UnixNano(),
-		CaptureLength:  uint32(captureLen),  // #nosec G115
-		OriginalLength: uint32(originalLen), // #nosec G115
-		InterfaceIndex: 0,
-		LinkType:       uint32(pktInfo.LinkType), // #nosec G115
-		InterfaceName:  pktInfo.Interface,
+		CaptureTime:    timestamp,
+		CaptureLength:  captureLen,
+		OriginalLength: originalLen,
+		LinkType:       pktInfo.LinkType,
+		Source: pipeline.SourceProvenance{
+			Kind:          pipeline.SourceLiveCapture,
+			NodeID:        h.config.HunterID,
+			InterfaceName: pktInfo.Interface,
+		},
 		// TODO: Add metadata extraction (SIP, RTP, etc.)
 	}
 }
@@ -429,21 +434,29 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 			"timestamp_source", "forwarding_fallback")
 	}
 
-	// Create protobuf packet with embedded metadata
+	encodedMetadata, err := grpcadapter.MetadataFromProto(metadata)
+	if err != nil {
+		return fmt.Errorf("normalize packet metadata: %w", err)
+	}
+
 	// Use the provided link type from the capture source (preserves Linux cooked, raw IP, etc.)
-	pbPkt := &data.CapturedPacket{
+	envelope := &pipeline.PacketEnvelope{
 		Data:           packetData,
-		TimestampNs:    timestamp.UnixNano(),
-		CaptureLength:  uint32(captureLen),  // #nosec G115
-		OriginalLength: uint32(originalLen), // #nosec G115
-		InterfaceIndex: 0,
-		LinkType:       uint32(linkType), // #nosec G115
-		InterfaceName:  interfaceName,
-		Metadata:       metadata, // Embedded metadata from TCP SIP handler
+		CaptureTime:    timestamp,
+		CaptureLength:  captureLen,
+		OriginalLength: originalLen,
+		LinkType:       linkType,
+		Source: pipeline.SourceProvenance{
+			Kind:          pipeline.SourceLiveCapture,
+			NodeID:        h.config.HunterID,
+			InterfaceName: interfaceName,
+		},
+		Stages:   pipeline.StageProvenance(0).With(pipeline.StageAnalyzed),
+		Metadata: encodedMetadata,
 	}
 
 	// Add to current batch and send if full
-	if forwardingManager.AddPacketToBatch(pbPkt) {
+	if forwardingManager.AddPacketToBatch(envelope) {
 		forwardingManager.SendBatch()
 	}
 

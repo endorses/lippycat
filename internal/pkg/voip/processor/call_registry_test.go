@@ -191,8 +191,9 @@ func TestCallRegistryBoundsEndpointAssociations(t *testing.T) {
 	require.Empty(t, p.CallIDsForEndpoint("192.0.2.1:10004"))
 	require.Equal(t, []string{"two"}, p.CallIDsForEndpoint("192.0.2.2:20000"))
 	require.Empty(t, p.CallIDsForEndpoint("192.0.2.2:20002"))
-	require.Equal(t, 3, p.associationCount)
+	require.Len(t, p.registry.EndpointsForCall("one"), 2)
+	require.Len(t, p.registry.EndpointsForCall("two"), 1)
 
 	p.CompleteCall("one")
-	require.Equal(t, 1, p.associationCount)
+	require.Len(t, p.registry.EndpointsForCall("two"), 1)
 }

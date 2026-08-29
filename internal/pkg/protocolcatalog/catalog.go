@@ -7,9 +7,24 @@ package protocolcatalog
 type Spec struct {
 	Name                 string
 	SupportedFilterTypes []string
+	Hunter               HunterSpec
+}
+
+// HunterSpec declares the protocol's topology policy when it runs at the edge.
+// Transport values and flag-derived values remain owned by cmd/hunt; these
+// stable protocol capabilities belong here so every hunter composition consumes
+// the same registration.
+type HunterSpec struct {
+	VoIPMode            bool
+	EnableVoIPFilter    bool
+	UseGPUConfig        bool
+	IncludeFilterPolicy bool
 }
 
 var specs = map[string]Spec{
+	"generic": {
+		Name: "generic",
+	},
 	"dns": {
 		Name:                 "dns",
 		SupportedFilterTypes: []string{"bpf", "ip_address", "dns_domain"},
@@ -28,6 +43,12 @@ var specs = map[string]Spec{
 	},
 	"voip": {
 		Name: "voip",
+		Hunter: HunterSpec{
+			VoIPMode:            true,
+			EnableVoIPFilter:    true,
+			UseGPUConfig:        true,
+			IncludeFilterPolicy: true,
+		},
 	},
 }
 

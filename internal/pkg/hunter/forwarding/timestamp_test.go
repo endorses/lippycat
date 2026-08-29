@@ -24,5 +24,5 @@ func TestConvertPacketPreservesCaptureTimestamp(t *testing.T) {
 		Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: "fixture0",
 	}, []string{"li-filter"})
 
-	require.Equal(t, capturedAt.UnixNano(), converted.TimestampNs)
+	require.Equal(t, capturedAt, converted.CaptureTime)
 }

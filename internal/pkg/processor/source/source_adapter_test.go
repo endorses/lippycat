@@ -7,6 +7,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
@@ -37,15 +38,14 @@ func TestProtoBatchBoundaryPreservesProcessorEnrichment(t *testing.T) {
 	in := &data.PacketBatch{HunterId: "hunter-a", Packets: []*data.CapturedPacket{{Data: []byte{1}}}}
 	batch, err := FromProtoBatchE(in)
 	require.NoError(t, err)
-	batch.Packets[0].Metadata = &data.PacketMetadata{Protocol: "HTTP", Info: "GET /"}
-	require.NoError(t, batch.SyncEnvelopesFromPackets())
+	batch.Envelopes[0].Metadata, err = grpcadapter.MetadataFromProto(&data.PacketMetadata{Protocol: "HTTP", Info: "GET /"})
+	require.NoError(t, err)
 
 	out, err := batch.ToProtoBatchE()
 	require.NoError(t, err)
 	require.Equal(t, "HTTP", out.Packets[0].Metadata.Protocol)
 	require.Equal(t, "GET /", out.Packets[0].Metadata.Info)
 	require.False(t, batch.Envelopes[0].Stages.Has(pipeline.StageDetected))
-	require.False(t, batch.Envelopes[0].Stages.Has(pipeline.StageAnalyzed))
 }
 
 func TestProtoBatchBoundaryUsesAuthoritativeEnvelope(t *testing.T) {
@@ -54,8 +54,6 @@ func TestProtoBatchBoundaryUsesAuthoritativeEnvelope(t *testing.T) {
 	require.NoError(t, err)
 	batch.Envelopes[0].MatchedFilterIDs = []string{"normalized"}
 	batch.Envelopes[0].Source.InterfaceName = "normalized0"
-	require.NoError(t, batch.SyncEnvelopesFromPackets())
-
 	out, err := batch.ToProtoBatchE()
 	require.NoError(t, err)
 	require.Equal(t, []string{"normalized"}, out.Packets[0].MatchedFilterIds)

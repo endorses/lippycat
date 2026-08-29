@@ -8,7 +8,9 @@ import (
 	"github.com/google/gopacket"
 )
 
-// portToCallID is now managed by the CallTracker
+func (tracker *CallTracker) endpointCallIDs(endpoint string) []string {
+	return tracker.registry.CallIDsForEndpoint(endpoint)
+}
 
 // ExtractPortFromSDP registers every RTP endpoint advertised by SDP on this tracker.
 func (tracker *CallTracker) ExtractPortFromSDP(sdpBody string, callID string) {
@@ -20,15 +22,13 @@ func (tracker *CallTracker) ExtractPortFromSDP(sdpBody string, callID string) {
 	}
 
 	// Register all endpoints with the CallTracker
-	tracker.mu.Lock()
-	defer tracker.mu.Unlock()
-
 	for _, endpoint := range endpoints {
-		if tracker.registerEndpointLocked(endpoint, callID) {
+		tracker.registerEndpoint(endpoint, callID)
+		if len(tracker.registry.CallIDsForEndpoint(endpoint)) > 0 {
 			logger.Debug("Registered RTP endpoint mapping",
 				"endpoint", endpoint,
 				"call_id", SanitizeCallIDForLogging(callID),
-				"total_calls_on_port", len(tracker.portToCallID[endpoint]))
+				"total_calls_on_port", len(tracker.registry.CallIDsForEndpoint(endpoint)))
 		}
 	}
 }
@@ -136,9 +136,6 @@ func (tracker *CallTracker) IsTracked(packet gopacket.Packet) bool {
 	dstPort := transportLayer.TransportFlow().Dst().String()
 	srcPort := transportLayer.TransportFlow().Src().String()
 
-	tracker.mu.RLock()
-	defer tracker.mu.RUnlock()
-
 	// Try IP:PORT lookups first (more specific)
 	if networkLayer != nil {
 		dstIP := networkLayer.NetworkFlow().Dst().String()
@@ -147,17 +144,17 @@ func (tracker *CallTracker) IsTracked(packet gopacket.Packet) bool {
 		dstEndpoint := dstIP + ":" + dstPort
 		srcEndpoint := srcIP + ":" + srcPort
 
-		if callIDs := tracker.portToCallID[dstEndpoint]; len(callIDs) > 0 {
+		if callIDs := tracker.endpointCallIDs(dstEndpoint); len(callIDs) > 0 {
 			return true
 		}
-		if callIDs := tracker.portToCallID[srcEndpoint]; len(callIDs) > 0 {
+		if callIDs := tracker.endpointCallIDs(srcEndpoint); len(callIDs) > 0 {
 			return true
 		}
 	}
 
 	// Fall back to port-only lookups (for NAT scenarios)
-	dstCallIDs := tracker.portToCallID[dstPort]
-	srcCallIDs := tracker.portToCallID[srcPort]
+	dstCallIDs := tracker.endpointCallIDs(dstPort)
+	srcCallIDs := tracker.endpointCallIDs(srcPort)
 	return len(dstCallIDs) > 0 || len(srcCallIDs) > 0
 }
 
@@ -185,7 +182,6 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 	dstPort := transportLayer.TransportFlow().Dst().String()
 	srcPort := transportLayer.TransportFlow().Src().String()
 
-	tracker.mu.RLock()
 	var matched []string
 
 	// Try IP:PORT lookups first (more specific)
@@ -196,11 +192,11 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 		dstEndpoint := dstIP + ":" + dstPort
 		srcEndpoint := srcIP + ":" + srcPort
 
-		if callIDs := tracker.portToCallID[dstEndpoint]; len(callIDs) > 0 {
+		if callIDs := tracker.endpointCallIDs(dstEndpoint); len(callIDs) > 0 {
 			matched = append([]string(nil), callIDs...)
 		}
 		if len(matched) == 0 {
-			if callIDs := tracker.portToCallID[srcEndpoint]; len(callIDs) > 0 {
+			if callIDs := tracker.endpointCallIDs(srcEndpoint); len(callIDs) > 0 {
 				matched = append([]string(nil), callIDs...)
 			}
 		}
@@ -208,16 +204,15 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 
 	// Fall back to port-only lookups (for NAT scenarios)
 	if len(matched) == 0 {
-		if callIDs := tracker.portToCallID[dstPort]; len(callIDs) > 0 {
+		if callIDs := tracker.endpointCallIDs(dstPort); len(callIDs) > 0 {
 			matched = append([]string(nil), callIDs...)
 		}
 	}
 	if len(matched) == 0 {
-		if callIDs := tracker.portToCallID[srcPort]; len(callIDs) > 0 {
+		if callIDs := tracker.endpointCallIDs(srcPort); len(callIDs) > 0 {
 			matched = append([]string(nil), callIDs...)
 		}
 	}
-	tracker.mu.RUnlock()
 
 	// Valid endpoint attribution is call activity even when per-call packet
 	// output is disabled, so it must participate in timeout decisions.
@@ -232,25 +227,8 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 // port collisions with new calls.
 // CleanupPortMappings removes this call from every endpoint on this tracker.
 func (tracker *CallTracker) CleanupPortMappings(callID string) {
-	tracker.mu.Lock()
-	defer tracker.mu.Unlock()
-
-	// Find and remove this callID from all port mappings
-	var removed []string
-	for key, callIDs := range tracker.portToCallID {
-		for i, cid := range callIDs {
-			if cid == callID {
-				// Remove this call ID from the slice
-				tracker.portToCallID[key] = append(callIDs[:i], callIDs[i+1:]...)
-				removed = append(removed, key)
-				break
-			}
-		}
-		// Clean up empty slices
-		if len(tracker.portToCallID[key]) == 0 {
-			delete(tracker.portToCallID, key)
-		}
-	}
+	removed := tracker.registry.EndpointsForCall(callID)
+	tracker.registry.DissociateEndpoints(callID)
 
 	if len(removed) > 0 {
 		logger.Debug("Cleaned up RTP port mappings for ended call",

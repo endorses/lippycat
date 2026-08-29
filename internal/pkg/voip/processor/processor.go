@@ -7,7 +7,6 @@ package processor
 
 import (
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -170,13 +169,11 @@ type Processor struct {
 	config Config
 
 	// Call tracking
-	calls            map[string]*callState
-	portToCallID     map[string][]string // RTP port -> []CallID (multi-value for B2BUA)
-	associationCount int
-	mu               sync.RWMutex
-	eventMu          sync.Mutex
-	janitorWG        sync.WaitGroup
-	observers        []callregistry.LifecycleObserver
+	calls     map[string]*callState
+	registry  *callregistry.Core // calls retains processor-only metadata
+	mu        sync.RWMutex
+	eventMu   sync.Mutex
+	janitorWG sync.WaitGroup
 
 	// Optional application filter for call selection
 	appFilter       ApplicationFilter
@@ -194,7 +191,6 @@ type Processor struct {
 type callState struct {
 	info        CallInfo
 	metadata    *CallMetadata
-	rtpPorts    []string
 	lastUpdated time.Time
 }
 
@@ -217,15 +213,18 @@ func New(cfg Config) *Processor {
 	}
 
 	p := &Processor{
-		config:          cfg,
-		calls:           make(map[string]*callState),
-		portToCallID:    make(map[string][]string),
+		config: cfg,
+		calls:  make(map[string]*callState),
+		registry: callregistry.New(callregistry.Config{
+			MaxCalls: cfg.MaxCalls, MaxEndpointsPerCall: cfg.MaxEndpointsPerCall,
+			MaxEndpointAssociations: cfg.MaxEndpointAssociations,
+			Observers:               cfg.LifecycleObservers,
+		}),
 		appFilter:       cfg.ApplicationFilter,
 		needFilterIDs:   cfg.NeedFilterIDs,
 		selectionPolicy: cfg.SelectionPolicy,
 		janitorCtx:      make(chan struct{}),
 		closeDone:       make(chan struct{}),
-		observers:       append([]callregistry.LifecycleObserver(nil), cfg.LifecycleObservers...),
 	}
 	p.sipFlow = newProcessorSIPFlow(p)
 
@@ -242,9 +241,7 @@ func (p *Processor) AddLifecycleObserver(observer callregistry.LifecycleObserver
 	if p == nil || observer == nil {
 		return
 	}
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
-	p.observers = append(p.observers, observer)
+	p.registry.AddObserver(observer)
 }
 
 // Process analyzes a packet and returns VoIP metadata if applicable.
@@ -347,18 +344,11 @@ func (p *Processor) Close() {
 	}
 	close(p.janitorCtx)
 	p.janitorClosed = true
-	ended := make([]CallInfo, 0, len(p.calls))
-	for _, state := range p.calls {
-		ended = append(ended, state.info)
-	}
-	sort.Slice(ended, func(i, j int) bool { return ended[i].CallID < ended[j].CallID })
 	// Release every association on shutdown. The processor is the sole owner of
 	// these maps, so retaining them after Close only prolongs endpoint/call data.
-	clear(p.portToCallID)
 	clear(p.calls)
-	p.associationCount = 0
 	p.mu.Unlock()
-	p.notifyEndedLocked(ended, callregistry.EndShutdown)
+	p.registry.Close()
 	p.eventMu.Unlock()
 	p.janitorWG.Wait()
 	close(p.closeDone)
@@ -401,20 +391,14 @@ func (p *Processor) cleanupExpiredCalls() {
 	p.mu.Lock()
 
 	now := time.Now()
-	var ended []CallInfo
 	for callID, state := range p.calls {
 		if now.Sub(state.lastUpdated) > p.config.CallTimeout {
 			// Remove this callID from port mappings (multi-value for B2BUA)
-			for _, port := range state.rtpPorts {
-				p.removeCallIDFromPort(port, callID)
-			}
 			delete(p.calls, callID)
-			ended = append(ended, state.info)
+			p.registry.Remove(callID, callregistry.EndTimeout)
 		}
 	}
 	p.mu.Unlock()
-	sort.Slice(ended, func(i, j int) bool { return ended[i].CallID < ended[j].CallID })
-	p.notifyEndedLocked(ended, callregistry.EndTimeout)
 }
 
 // getOrCreateCall gets or creates a call state for the given CallID.
@@ -424,8 +408,6 @@ func (p *Processor) getOrCreateCall(callID string) *callState {
 	p.mu.Lock()
 
 	state, exists := p.calls[callID]
-	var started *CallInfo
-	var evicted *CallInfo
 	if !exists {
 		if p.janitorClosed {
 			p.mu.Unlock()
@@ -439,27 +421,16 @@ func (p *Processor) getOrCreateCall(callID string) *callState {
 				Created:     now,
 				LastUpdated: now,
 			},
-			rtpPorts:    make([]string, 0, 2),
 			lastUpdated: now,
 		}
 		p.calls[callID] = state
-		info := state.info
-		started = &info
-
+		p.registry.Upsert(state.info)
 		// Evict oldest call if at capacity
 		if len(p.calls) > p.config.MaxCalls {
-			if info, ok := p.evictOldestCallLocked(); ok {
-				evicted = &info
-			}
+			p.evictOldestCallLocked()
 		}
 	}
 	p.mu.Unlock()
-	if evicted != nil {
-		p.notifyEndedLocked([]CallInfo{*evicted}, callregistry.EndEvicted)
-	}
-	if started != nil {
-		p.notifyStartedLocked(*started)
-	}
 	return state
 }
 
@@ -477,72 +448,29 @@ func (p *Processor) evictOldestCallLocked() (CallInfo, bool) {
 
 	if oldestID != "" {
 		state := p.calls[oldestID]
-		for _, port := range state.rtpPorts {
-			p.removeCallIDFromPort(port, oldestID)
-		}
 		delete(p.calls, oldestID)
+		p.registry.Remove(oldestID, callregistry.EndEvicted)
 		return state.info, true
 	}
 	return CallInfo{}, false
-}
-
-// removeCallIDFromPort removes a specific callID from a port's mapping (must hold mu lock).
-func (p *Processor) removeCallIDFromPort(port, callID string) {
-	callIDs := p.portToCallID[port]
-	for i, cid := range callIDs {
-		if cid == callID {
-			p.portToCallID[port] = append(callIDs[:i], callIDs[i+1:]...)
-			p.associationCount--
-			break
-		}
-	}
-	// Clean up empty slices
-	if len(p.portToCallID[port]) == 0 {
-		delete(p.portToCallID, port)
-	}
 }
 
 // registerRTPPort associates an RTP port with a call (multi-value for B2BUA).
 func (p *Processor) registerRTPPort(callID, port string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	state, exists := p.calls[callID]
+	_, exists := p.calls[callID]
 	if p.janitorClosed || !exists {
 		return
 	}
 
-	// Append to slice, avoiding duplicates (supports B2BUA with shared ports)
-	existing := p.portToCallID[port]
-	alreadyRegistered := false
-	for _, cid := range existing {
-		if cid == callID {
-			alreadyRegistered = true
-			break
-		}
-	}
-	if !alreadyRegistered {
-		if len(state.rtpPorts) >= p.config.MaxEndpointsPerCall || p.associationCount >= p.config.MaxEndpointAssociations {
-			return
-		}
-		p.portToCallID[port] = append(existing, callID)
-		p.associationCount++
-	}
-
-	// Avoid duplicates in call's port list
-	for _, pt := range state.rtpPorts {
-		if pt == port {
-			return
-		}
-	}
-	state.rtpPorts = append(state.rtpPorts, port)
+	p.registry.TryAssociateEndpoint(callID, port)
 }
 
 // getCallIDForPort looks up the first CallID for an RTP port.
 // For B2BUA scenarios with multiple calls on same port, use getAllCallIDsForPort.
 func (p *Processor) getCallIDForPort(port string) (string, bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	callIDs := p.portToCallID[port]
+	callIDs := p.registry.CallIDsForEndpoint(port)
 	if len(callIDs) > 0 {
 		return callIDs[0], true
 	}
@@ -552,9 +480,7 @@ func (p *Processor) getCallIDForPort(port string) (string, bool) {
 // getAllCallIDsForPort returns all CallIDs associated with an RTP port.
 // This supports B2BUA scenarios where multiple call legs share the same port.
 func (p *Processor) getAllCallIDsForPort(port string) []string {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return append([]string(nil), p.portToCallID[port]...)
+	return p.registry.CallIDsForEndpoint(port)
 }
 
 // Call returns a copy of the tracked call.
@@ -587,18 +513,12 @@ func (p *Processor) CleanupCallPorts(callID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	state, exists := p.calls[callID]
+	_, exists := p.calls[callID]
 	if !exists {
 		return
 	}
 
-	// Remove this callID from all port mappings (multi-value for B2BUA)
-	for _, port := range state.rtpPorts {
-		p.removeCallIDFromPort(port, callID)
-	}
-
-	// Clear the ports list but keep the call state for reference
-	state.rtpPorts = state.rtpPorts[:0]
+	p.registry.DissociateEndpoints(callID)
 }
 
 // CompleteCall removes RTP associations once SIP confirms that a dialog has
@@ -613,30 +533,13 @@ func (p *Processor) removeCall(callID string, reason callregistry.EndReason) {
 	p.eventMu.Lock()
 	defer p.eventMu.Unlock()
 	p.mu.Lock()
-	state, exists := p.calls[callID]
+	_, exists := p.calls[callID]
 	if exists {
-		for _, port := range state.rtpPorts {
-			p.removeCallIDFromPort(port, callID)
-		}
 		delete(p.calls, callID)
 	}
 	p.mu.Unlock()
 	if exists {
-		p.notifyEndedLocked([]CallInfo{state.info}, reason)
-	}
-}
-
-func (p *Processor) notifyStartedLocked(call CallInfo) {
-	for _, observer := range p.observers {
-		observer.OnCallStarted(call)
-	}
-}
-
-func (p *Processor) notifyEndedLocked(calls []CallInfo, reason callregistry.EndReason) {
-	for _, call := range calls {
-		for _, observer := range p.observers {
-			observer.OnCallEnded(call, reason)
-		}
+		p.registry.Remove(callID, reason)
 	}
 }
 
@@ -649,6 +552,7 @@ func (p *Processor) touchCalls(callIDs []string) {
 		if state, ok := p.calls[callID]; ok {
 			state.lastUpdated = now
 			state.info.LastUpdated = now
+			p.registry.Touch(callID, now)
 		}
 	}
 }
@@ -667,6 +571,7 @@ func (p *Processor) updateCallState(callID, state string, metadata *CallMetadata
 			callState.info.From = metadata.From
 			callState.info.To = metadata.To
 		}
+		p.registry.Upsert(callState.info)
 	}
 }
 

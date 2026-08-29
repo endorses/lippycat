@@ -7,6 +7,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -48,8 +49,8 @@ var (
 	dnsWriteFile     string
 )
 
-var dnsSpec = ProtocolSpec{
-	Spec: sharedProtocolSpec("dns"),
+var dnsSpec = sniffRuntimeAdapter{
+	protocol: protocolcatalog.MustLookup("dns"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := dns.ParsePorts(dnsPorts)
 		if err != nil {

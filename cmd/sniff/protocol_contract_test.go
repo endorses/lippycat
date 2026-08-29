@@ -133,7 +133,7 @@ func pairs(values ...string) map[string]string {
 }
 
 func TestSniffProtocolContractNamesAreStable(t *testing.T) {
-	names := []string{dnsSpec.Name, emailSpec.Name, httpSpec.Name, tlsSpec.Name, voipSpec.Name}
+	names := []string{dnsSpec.protocol.Name, emailSpec.protocol.Name, httpSpec.protocol.Name, tlsSpec.protocol.Name, voipSpec.protocol.Name}
 	sort.Strings(names)
 	require.Equal(t, []string{"dns", "email", "http", "tls", "voip"}, names)
 }

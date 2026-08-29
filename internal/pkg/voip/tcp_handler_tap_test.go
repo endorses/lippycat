@@ -367,7 +367,7 @@ func TestTapHandler_TCPSDPDoesNotRetainInGlobalTracker(t *testing.T) {
 	}
 
 	tracker.mu.RLock()
-	globalMappings := len(tracker.portToCallID)
+	globalMappings := endpointAssociationCountForTest(tracker)
 	tracker.mu.RUnlock()
 	if globalMappings != 0 {
 		t.Fatalf("tap TCP SDP created %d global port mappings, want 0", globalMappings)

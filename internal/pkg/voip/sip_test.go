@@ -297,10 +297,7 @@ func TestParseHeaderLine(t *testing.T) {
 func TestHandleSipMessage_Integration(t *testing.T) {
 	// Clear any existing state
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.callMap = make(map[string]*CallInfo)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	// Test various SIP message types
 	tests := []struct {

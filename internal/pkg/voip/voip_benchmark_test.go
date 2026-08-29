@@ -96,9 +96,7 @@ func BenchmarkCallTracking(b *testing.B) {
 func BenchmarkCallIDExtraction(b *testing.B) {
 	// Create a packet with stored Call-ID mapping
 	tracker := TestCallTracker(b)
-	tracker.mu.Lock()
-	tracker.portToCallID["5060"] = []string{"benchmark-call-mapping"}
-	tracker.mu.Unlock()
+	associateEndpointForTest(tracker, "5060", "benchmark-call-mapping")
 
 	// Create test packet
 	eth := &layers.Ethernet{
@@ -139,7 +137,7 @@ func BenchmarkCallIDExtraction(b *testing.B) {
 
 	// Clean up
 	tracker.mu.Lock()
-	delete(tracker.portToCallID, "5060")
+	tracker.registry.DissociateEndpoints("benchmark-call-mapping")
 	tracker.mu.Unlock()
 }
 
@@ -229,7 +227,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 
 		// Get Call-ID from packet simulation
 		tracker.mu.RLock()
-		_ = tracker.portToCallID["8000"]
+		_ = tracker.registry.CallIDsForEndpoint("8000")
 		tracker.mu.RUnlock()
 	}
 }

@@ -84,7 +84,7 @@ func TestPerCallPCAPSemanticGolden(t *testing.T) {
 		// metadata. The production pipeline must use it to select the call writer.
 		semanticCapturedPacket(t2, rtpPacket, &data.SIPMetadata{CallId: fixture.CallID}, &data.RTPMetadata{}),
 	}
-	processor.processBatch(&source.PacketBatch{SourceID: "semantic-hunter", Sequence: 1, TimestampNs: t0.UnixNano(), Packets: packets})
+	processor.processBatch(source.FromProtoBatch(&data.PacketBatch{HunterId: "semantic-hunter", Sequence: 1, TimestampNs: t0.UnixNano(), Packets: packets}))
 	require.NoError(t, processor.sessionOutputManager.writer.CloseCallWriter(fixture.CallID))
 
 	observed := make([]semanticObservation, 0, 3)

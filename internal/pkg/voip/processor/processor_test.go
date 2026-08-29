@@ -45,8 +45,8 @@ func TestRegisterSDPAssociationLifecycle(t *testing.T) {
 	p.Close()
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if len(p.calls) != 0 || len(p.portToCallID) != 0 {
-		t.Fatalf("Close retained calls=%d mappings=%d", len(p.calls), len(p.portToCallID))
+	if len(p.calls) != 0 || len(p.registry.ActiveCalls()) != 0 {
+		t.Fatalf("Close retained calls=%d registry_calls=%d", len(p.calls), len(p.registry.ActiveCalls()))
 	}
 }
 
@@ -58,7 +58,7 @@ func TestCallAssociationCleanupBaseline(t *testing.T) {
 		p.CleanupCallPorts(callID)
 	}
 	p.mu.RLock()
-	retainedMappings := len(p.portToCallID)
+	retainedMappings := len(p.registry.CallIDsForEndpoint("4000")) + len(p.registry.CallIDsForEndpoint("4002"))
 	p.mu.RUnlock()
 	if retainedMappings != 0 {
 		t.Fatalf("cleanup baseline retained mappings=%d", retainedMappings)
@@ -66,8 +66,8 @@ func TestCallAssociationCleanupBaseline(t *testing.T) {
 	p.Close()
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if len(p.calls) != 0 || len(p.portToCallID) != 0 {
-		t.Fatalf("close baseline retained calls=%d mappings=%d", len(p.calls), len(p.portToCallID))
+	if len(p.calls) != 0 || len(p.registry.ActiveCalls()) != 0 {
+		t.Fatalf("close baseline retained calls=%d registry_calls=%d", len(p.calls), len(p.registry.ActiveCalls()))
 	}
 }
 
@@ -83,8 +83,8 @@ func TestCallAssociationTimeoutCleanupBaseline(t *testing.T) {
 	p.cleanupExpiredCalls()
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if len(p.calls) != 0 || len(p.portToCallID) != 0 {
-		t.Fatalf("timeout cleanup retained calls=%d mappings=%d", len(p.calls), len(p.portToCallID))
+	if len(p.calls) != 0 || len(p.registry.ActiveCalls()) != 0 {
+		t.Fatalf("timeout cleanup retained calls=%d registry_calls=%d", len(p.calls), len(p.registry.ActiveCalls()))
 	}
 }
 

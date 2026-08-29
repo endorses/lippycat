@@ -18,6 +18,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
@@ -454,8 +455,8 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{
-		Spec: sharedProtocolSpec("voip"),
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, tapRuntimeAdapter{
+		protocol: protocolcatalog.MustLookup("voip"),
 		ConfigureGPU: func(gpuConfig GPUConfig) GPUConfig {
 			// VoIP mode should always enable VoIP filtering.
 			gpuConfig.EnableVoIPFilter = true

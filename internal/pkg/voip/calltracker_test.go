@@ -128,11 +128,9 @@ func TestJanitorLoopCleanup(t *testing.T) {
 		LinkType:    layers.LinkTypeEthernet,
 	}
 
-	// Add calls to tracker
-	tracker.mu.Lock()
-	tracker.callMap[oldCallID] = oldCall
-	tracker.callMap[recentCallID] = recentCall
-	tracker.mu.Unlock()
+	// Add calls through the shared registry-backed test adapter.
+	adoptCallForTest(tracker, oldCall)
+	adoptCallForTest(tracker, recentCall)
 
 	// Verify both calls exist before cleanup
 	tracker.mu.RLock()
@@ -160,10 +158,9 @@ func TestShutdownClearsAllCallIndexes(t *testing.T) {
 	tracker.mu.RLock()
 	defer tracker.mu.RUnlock()
 	assert.Empty(t, tracker.callMap)
-	assert.Empty(t, tracker.portToCallID)
-	assert.Empty(t, tracker.lruIndex)
-	assert.Zero(t, tracker.lruList.Len())
-	assert.Empty(t, tracker.pins)
+	assert.Empty(t, tracker.registry.ActiveCalls())
+	assert.Empty(t, tracker.registry.CallIDsForEndpoint("10.0.0.1:4000"))
+	assert.False(t, tracker.registry.IsPinned(call.CallID))
 }
 
 func TestConcurrentCallCreation(t *testing.T) {
@@ -430,29 +427,13 @@ func TestWritesDuringShutdown(t *testing.T) {
 // TestCallTrackerFilePermissions verifies that per-call PCAP files are created with secure permissions (0600)
 // This test addresses security concern from code review: Phase 1.4 - Fix PCAP File Permissions
 func TestCallTrackerLRUEviction(t *testing.T) {
-	tracker := NewCallTracker()
+	tracker := NewCallTrackerWithCapacity(3)
 	defer tracker.Shutdown()
-
-	// Override maxCalls for testing
-	tracker.mu.Lock()
-	tracker.maxCalls = 3
-	tracker.mu.Unlock()
 
 	// Create 3 calls
 	for i := 0; i < 3; i++ {
 		callID := fmt.Sprintf("call-%d", i)
-		tracker.mu.Lock()
-		call := &CallInfo{
-			CallID:      callID,
-			State:       "NEW",
-			Created:     time.Now(),
-			LastUpdated: time.Now(),
-			LinkType:    layers.LinkTypeEthernet,
-		}
-		tracker.callMap[callID] = call
-		elem := tracker.lruList.PushFront(callID)
-		tracker.lruIndex[callID] = elem
-		tracker.mu.Unlock()
+		require.NotNil(t, tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet))
 	}
 
 	// Verify all 3 calls exist
@@ -461,37 +442,10 @@ func TestCallTrackerLRUEviction(t *testing.T) {
 	tracker.mu.RUnlock()
 
 	// Touch call-0 to make it most recently used (call-1 is now LRU)
-	tracker.mu.Lock()
-	if elem, ok := tracker.lruIndex["call-0"]; ok {
-		tracker.lruList.MoveToFront(elem)
-	}
-	tracker.mu.Unlock()
+	tracker.touchCall("call-0")
 
 	// Add call-3, should evict call-1 (LRU, not call-0 which was just touched)
-	tracker.mu.Lock()
-	call3 := &CallInfo{
-		CallID:      "call-3",
-		State:       "NEW",
-		Created:     time.Now(),
-		LastUpdated: time.Now(),
-		LinkType:    layers.LinkTypeEthernet,
-	}
-
-	// Evict LRU if at capacity
-	if tracker.lruList.Len() >= tracker.maxCalls {
-		oldest := tracker.lruList.Back()
-		if oldest != nil {
-			oldestCallID := oldest.Value.(string)
-			delete(tracker.callMap, oldestCallID)
-			tracker.lruList.Remove(oldest)
-			delete(tracker.lruIndex, oldestCallID)
-		}
-	}
-
-	tracker.callMap["call-3"] = call3
-	elem := tracker.lruList.PushFront("call-3")
-	tracker.lruIndex["call-3"] = elem
-	tracker.mu.Unlock()
+	require.NotNil(t, tracker.GetOrCreateCall("call-3", layers.LinkTypeEthernet))
 
 	// Verify eviction
 	tracker.mu.RLock()
@@ -509,64 +463,21 @@ func TestCallTrackerLRUEviction(t *testing.T) {
 
 // TestCallTrackerLRUActiveCallSurvival verifies active calls survive when buffer is full
 func TestCallTrackerLRUActiveCallSurvival(t *testing.T) {
-	tracker := NewCallTracker()
+	tracker := NewCallTrackerWithCapacity(3)
 	defer tracker.Shutdown()
-
-	// Override maxCalls for testing
-	tracker.mu.Lock()
-	tracker.maxCalls = 3
-	tracker.mu.Unlock()
 
 	// Create 3 calls
 	for i := 0; i < 3; i++ {
 		callID := fmt.Sprintf("call-%d", i)
-		tracker.mu.Lock()
-		call := &CallInfo{
-			CallID:      callID,
-			State:       "NEW",
-			Created:     time.Now(),
-			LastUpdated: time.Now(),
-			LinkType:    layers.LinkTypeEthernet,
-		}
-		tracker.callMap[callID] = call
-		elem := tracker.lruList.PushFront(callID)
-		tracker.lruIndex[callID] = elem
-		tracker.mu.Unlock()
+		require.NotNil(t, tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet))
 	}
 
 	// Keep call-0 active by touching it while adding new calls
 	for i := 3; i < 10; i++ {
 		// Touch call-0 to keep it active
-		tracker.mu.Lock()
-		if elem, ok := tracker.lruIndex["call-0"]; ok {
-			tracker.lruList.MoveToFront(elem)
-		}
-
-		// Add new call, evicting LRU
+		tracker.touchCall("call-0")
 		callID := fmt.Sprintf("call-%d", i)
-		call := &CallInfo{
-			CallID:      callID,
-			State:       "NEW",
-			Created:     time.Now(),
-			LastUpdated: time.Now(),
-			LinkType:    layers.LinkTypeEthernet,
-		}
-
-		// Evict LRU if at capacity
-		if tracker.lruList.Len() >= tracker.maxCalls {
-			oldest := tracker.lruList.Back()
-			if oldest != nil {
-				oldestCallID := oldest.Value.(string)
-				delete(tracker.callMap, oldestCallID)
-				tracker.lruList.Remove(oldest)
-				delete(tracker.lruIndex, oldestCallID)
-			}
-		}
-
-		tracker.callMap[callID] = call
-		elem := tracker.lruList.PushFront(callID)
-		tracker.lruIndex[callID] = elem
-		tracker.mu.Unlock()
+		require.NotNil(t, tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet))
 	}
 
 	// call-0 should survive because it was kept active

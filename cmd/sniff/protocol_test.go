@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProtocolSpecValidate(t *testing.T) {
-	valid := ProtocolSpec{
-		Spec:       protocolcatalog.Spec{Name: "test"},
+func TestSniffRuntimeAdapterValidate(t *testing.T) {
+	valid := sniffRuntimeAdapter{
+		protocol:   protocolcatalog.Spec{Name: "test"},
 		BuildBPF:   func(string) (string, error) { return "", nil },
 		StartLive:  func(string, string) {},
 		StartFiles: func([]string, string) {},
@@ -21,12 +21,12 @@ func TestProtocolSpecValidate(t *testing.T) {
 
 	tests := []struct {
 		name string
-		edit func(*ProtocolSpec)
+		edit func(*sniffRuntimeAdapter)
 	}{
-		{name: "name", edit: func(s *ProtocolSpec) { s.Name = "" }},
-		{name: "builder", edit: func(s *ProtocolSpec) { s.BuildBPF = nil }},
-		{name: "live", edit: func(s *ProtocolSpec) { s.StartLive = nil }},
-		{name: "files", edit: func(s *ProtocolSpec) { s.StartFiles = nil }},
+		{name: "name", edit: func(s *sniffRuntimeAdapter) { s.protocol.Name = "" }},
+		{name: "builder", edit: func(s *sniffRuntimeAdapter) { s.BuildBPF = nil }},
+		{name: "live", edit: func(s *sniffRuntimeAdapter) { s.StartLive = nil }},
+		{name: "files", edit: func(s *sniffRuntimeAdapter) { s.StartFiles = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -40,10 +40,10 @@ func TestProtocolSpecValidate(t *testing.T) {
 func TestProtocolCommandsUseSharedCatalog(t *testing.T) {
 	t.Parallel()
 
-	for name, got := range map[string]ProtocolSpec{
+	for name, got := range map[string]sniffRuntimeAdapter{
 		"dns": dnsSpec, "email": emailSpec, "http": httpSpec, "tls": tlsSpec, "voip": voipSpec,
 	} {
-		require.Equal(t, protocolcatalog.MustLookup(name), got.Spec)
+		require.Equal(t, protocolcatalog.MustLookup(name), got.protocol)
 	}
 }
 
@@ -55,8 +55,8 @@ func TestRunProtocolSelectsIngressAndPreservesArguments(t *testing.T) {
 	var liveCalls int
 	var gotInterfaces, gotFilter string
 	var gotFiles []string
-	spec := ProtocolSpec{
-		Spec: protocolcatalog.Spec{Name: "test"},
+	spec := sniffRuntimeAdapter{
+		protocol: protocolcatalog.Spec{Name: "test"},
 		BuildBPF: func(base string) (string, error) {
 			require.Equal(t, "tcp", base)
 			return "tcp and port 42", nil

@@ -2,7 +2,11 @@
 // depending on analyzers, transports, or output resources.
 package callregistry
 
-import "time"
+import (
+	"container/list"
+	"sync"
+	"time"
+)
 
 type Call struct {
 	CallID      string
@@ -58,3 +62,371 @@ type Registry interface {
 	CompleteCall(callID string)
 	Close()
 }
+
+// Config bounds the state owned by a Core. Limits are hard limits; an
+// association rejected because of a limit is not partially installed.
+type Config struct {
+	MaxCalls                int
+	MaxEndpointsPerCall     int
+	MaxEndpointAssociations int
+	Observers               []LifecycleObserver
+	// EvictionPriority ranks unpinned calls; larger values are evicted first.
+	EvictionPriority func(Call) int
+}
+
+// Core is the shared, instance-owned call lifecycle and endpoint-association
+// registry. It deliberately stores only protocol-neutral call data; analyzers
+// retain their topology-specific metadata beside it.
+type Core struct {
+	mu               sync.RWMutex
+	calls            map[string]Call
+	endpointCalls    map[string][]string
+	callEndpoints    map[string]map[string]struct{}
+	associationCount int
+	recency          *list.List
+	recencyIndex     map[string]*list.Element
+	config           Config
+	closed           bool
+	pins             map[string]int
+}
+
+func New(config Config) *Core {
+	if config.MaxCalls <= 0 {
+		config.MaxCalls = 1
+	}
+	if config.MaxEndpointsPerCall <= 0 {
+		config.MaxEndpointsPerCall = 1
+	}
+	if config.MaxEndpointAssociations <= 0 {
+		config.MaxEndpointAssociations = config.MaxCalls * config.MaxEndpointsPerCall
+	}
+	config.Observers = append([]LifecycleObserver(nil), config.Observers...)
+	return &Core{
+		calls:         make(map[string]Call),
+		endpointCalls: make(map[string][]string),
+		callEndpoints: make(map[string]map[string]struct{}),
+		recency:       list.New(),
+		recencyIndex:  make(map[string]*list.Element),
+		pins:          make(map[string]int),
+		config:        config,
+	}
+}
+
+func (c *Core) AddObserver(observer LifecycleObserver) {
+	if observer == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.config.Observers = append(c.config.Observers, observer)
+	}
+}
+
+// Upsert adds or replaces a call and makes it most recently used. Lifecycle
+// callbacks are synchronous and ordered after the mutation. It returns false
+// after Close or for an empty Call-ID.
+func (c *Core) Upsert(call Call) bool {
+	if call.CallID == "" {
+		return false
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return false
+	}
+	_, existed := c.calls[call.CallID]
+	if existed {
+		c.calls[call.CallID] = call
+		c.touchLocked(call.CallID)
+		c.mu.Unlock()
+		return true
+	}
+	var evicted *Call
+	if len(c.calls) >= c.config.MaxCalls {
+		oldest := c.evictionCandidateLocked()
+		if oldest != nil {
+			removed := c.removeLocked(oldest.Value.(string))
+			evicted = &removed
+		}
+		if oldest == nil {
+			c.mu.Unlock()
+			return false
+		}
+	}
+	c.calls[call.CallID] = call
+	c.recencyIndex[call.CallID] = c.recency.PushFront(call.CallID)
+	observers := append([]LifecycleObserver(nil), c.config.Observers...)
+	c.mu.Unlock()
+	if evicted != nil {
+		notifyEnded(observers, *evicted, EndEvicted)
+	}
+	for _, observer := range observers {
+		observer.OnCallStarted(call)
+	}
+	return true
+}
+
+func (c *Core) evictionCandidateLocked() *list.Element {
+	var candidate *list.Element
+	bestPriority := -1
+	for elem := c.recency.Back(); elem != nil; elem = elem.Prev() {
+		id := elem.Value.(string)
+		if c.pins[id] > 0 {
+			continue
+		}
+		priority := 0
+		if c.config.EvictionPriority != nil {
+			priority = c.config.EvictionPriority(c.calls[id])
+		}
+		if candidate == nil || priority > bestPriority {
+			candidate, bestPriority = elem, priority
+		}
+	}
+	return candidate
+}
+
+func (c *Core) Pin(callID string) {
+	if callID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.pins[callID]++
+	}
+}
+
+func (c *Core) Unpin(callID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pins[callID] <= 1 {
+		delete(c.pins, callID)
+	} else {
+		c.pins[callID]--
+	}
+}
+
+func (c *Core) IsPinned(callID string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.pins[callID] > 0
+}
+
+func (c *Core) touchLocked(callID string) {
+	if elem := c.recencyIndex[callID]; elem != nil {
+		c.recency.MoveToFront(elem)
+	}
+}
+
+// Touch refreshes recency and LastUpdated for an existing call.
+func (c *Core) Touch(callID string, at time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	call, ok := c.calls[callID]
+	if !ok || c.closed {
+		return false
+	}
+	call.LastUpdated = at
+	c.calls[callID] = call
+	c.touchLocked(callID)
+	return true
+}
+
+func (c *Core) ActiveCalls() []Call {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make([]Call, 0, len(c.calls))
+	for elem := c.recency.Front(); elem != nil; elem = elem.Next() {
+		result = append(result, c.calls[elem.Value.(string)])
+	}
+	return result
+}
+
+func (c *Core) Call(callID string) (Call, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	call, ok := c.calls[callID]
+	return call, ok
+}
+
+// AssociateEndpoint adds a deduplicated, multi-owner endpoint association.
+func (c *Core) TryAssociateEndpoint(callID, endpoint string) bool {
+	if callID == "" || endpoint == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
+	if _, ok := c.calls[callID]; !ok {
+		return false
+	}
+	if _, ok := c.callEndpoints[callID][endpoint]; ok {
+		return true
+	}
+	if len(c.callEndpoints[callID]) >= c.config.MaxEndpointsPerCall || c.associationCount >= c.config.MaxEndpointAssociations {
+		return false
+	}
+	if c.callEndpoints[callID] == nil {
+		c.callEndpoints[callID] = make(map[string]struct{})
+	}
+	c.callEndpoints[callID][endpoint] = struct{}{}
+	c.endpointCalls[endpoint] = append(c.endpointCalls[endpoint], callID)
+	c.associationCount++
+	return true
+}
+
+func (c *Core) AssociateEndpoint(callID, endpoint string) {
+	c.TryAssociateEndpoint(callID, endpoint)
+}
+
+func (c *Core) CallIDsForEndpoint(endpoint string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]string(nil), c.endpointCalls[endpoint]...)
+}
+
+// MostRecentCallIDForEndpoint resolves an ambiguous shared endpoint using call
+// activity rather than association insertion order.
+func (c *Core) MostRecentCallIDForEndpoint(endpoint string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	owners := c.endpointCalls[endpoint]
+	for elem := c.recency.Front(); elem != nil; elem = elem.Next() {
+		id := elem.Value.(string)
+		for _, owner := range owners {
+			if id == owner {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
+func (c *Core) EndpointsForCall(callID string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	endpoints := c.callEndpoints[callID]
+	result := make([]string, 0, len(endpoints))
+	for endpoint := range endpoints {
+		result = append(result, endpoint)
+	}
+	return result
+}
+
+// ExpiredUnpinned returns calls whose registry activity predates cutoff. The
+// caller remains responsible for removing them so protocol-specific lifecycle
+// side effects can be ordered around removal.
+func (c *Core) ExpiredUnpinned(cutoff time.Time) []Call {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make([]Call, 0)
+	for elem := c.recency.Back(); elem != nil; elem = elem.Prev() {
+		id := elem.Value.(string)
+		call := c.calls[id]
+		if c.pins[id] == 0 && call.LastUpdated.Before(cutoff) {
+			result = append(result, call)
+		}
+	}
+	return result
+}
+
+// DissociateEndpoints releases every endpoint owned by callID while retaining
+// the call lifecycle record (for example during a trailing-media grace period).
+func (c *Core) DissociateEndpoints(callID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for endpoint := range c.callEndpoints[callID] {
+		c.endpointCalls[endpoint] = withoutCallID(c.endpointCalls[endpoint], callID)
+		if len(c.endpointCalls[endpoint]) == 0 {
+			delete(c.endpointCalls, endpoint)
+		}
+		c.associationCount--
+	}
+	delete(c.callEndpoints, callID)
+	delete(c.pins, callID)
+}
+
+func (c *Core) Remove(callID string, reason EndReason) bool {
+	c.mu.Lock()
+	if _, ok := c.calls[callID]; !ok {
+		c.mu.Unlock()
+		return false
+	}
+	call := c.removeLocked(callID)
+	observers := append([]LifecycleObserver(nil), c.config.Observers...)
+	c.mu.Unlock()
+	notifyEnded(observers, call, reason)
+	return true
+}
+
+func (c *Core) CompleteCall(callID string) { c.Remove(callID, EndCompleted) }
+
+func (c *Core) removeLocked(callID string) Call {
+	call := c.calls[callID]
+	delete(c.calls, callID)
+	if elem := c.recencyIndex[callID]; elem != nil {
+		c.recency.Remove(elem)
+		delete(c.recencyIndex, callID)
+	}
+	c.dissociateEndpointsLocked(callID)
+	return call
+}
+
+func (c *Core) dissociateEndpointsLocked(callID string) {
+	for endpoint := range c.callEndpoints[callID] {
+		c.endpointCalls[endpoint] = withoutCallID(c.endpointCalls[endpoint], callID)
+		if len(c.endpointCalls[endpoint]) == 0 {
+			delete(c.endpointCalls, endpoint)
+		}
+		c.associationCount--
+	}
+	delete(c.callEndpoints, callID)
+}
+
+func (c *Core) clear(reason EndReason, closeRegistry bool) {
+	c.mu.Lock()
+	if closeRegistry && c.closed {
+		c.mu.Unlock()
+		return
+	}
+	calls := make([]Call, 0, len(c.calls))
+	for elem := c.recency.Front(); elem != nil; elem = elem.Next() {
+		calls = append(calls, c.calls[elem.Value.(string)])
+	}
+	c.calls = make(map[string]Call)
+	c.endpointCalls = make(map[string][]string)
+	c.callEndpoints = make(map[string]map[string]struct{})
+	c.associationCount = 0
+	c.recency.Init()
+	c.recencyIndex = make(map[string]*list.Element)
+	c.pins = make(map[string]int)
+	c.closed = closeRegistry
+	observers := append([]LifecycleObserver(nil), c.config.Observers...)
+	c.mu.Unlock()
+	for _, call := range calls {
+		notifyEnded(observers, call, reason)
+	}
+}
+
+func (c *Core) Clear() { c.clear(EndCompleted, false) }
+func (c *Core) Close() { c.clear(EndShutdown, true) }
+
+func notifyEnded(observers []LifecycleObserver, call Call, reason EndReason) {
+	for _, observer := range observers {
+		observer.OnCallEnded(call, reason)
+	}
+}
+
+func withoutCallID(callIDs []string, removed string) []string {
+	for index, callID := range callIDs {
+		if callID == removed {
+			return append(callIDs[:index], callIDs[index+1:]...)
+		}
+	}
+	return callIDs
+}
+
+var _ Registry = (*Core)(nil)

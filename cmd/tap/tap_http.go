@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/http"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -390,7 +391,7 @@ func runHTTPTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{Spec: sharedProtocolSpec("http")})
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, tapRuntimeAdapter{protocol: protocolcatalog.MustLookup("http")})
 	if err != nil {
 		return err
 	}

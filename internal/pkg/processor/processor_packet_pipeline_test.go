@@ -59,14 +59,14 @@ func TestProcessBatchRunsDeferredLocalCompletion(t *testing.T) {
 	defer processor.Shutdown()
 
 	completed := false
-	batch := &source.PacketBatch{
-		SourceID: "local",
+	batch := source.FromProtoBatch(&data.PacketBatch{
+		HunterId: "local",
 		Packets: []*data.CapturedPacket{{
 			TimestampNs: time.Now().UnixNano(),
 			Data:        make([]byte, 64),
 		}},
-		AfterProcess: []func(){func() { completed = true }},
-	}
+	})
+	batch.AfterProcess = []func(){func() { completed = true }}
 
 	processor.processBatch(batch)
 	require.True(t, completed, "processor must run local completion after processing")

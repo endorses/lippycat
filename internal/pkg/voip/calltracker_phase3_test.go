@@ -199,7 +199,7 @@ func TestEndpointRegistrationRequiresAdmittedCallAndIsBounded(t *testing.T) {
 	t.Cleanup(ct.Shutdown)
 
 	ct.registerEndpoint("4000", "missing")
-	assert.Empty(t, ct.portToCallID)
+	assert.Empty(t, ct.registry.CallIDsForEndpoint("4000"))
 
 	assert.NotNil(t, ct.GetOrCreateCall("first", layers.LinkTypeEthernet))
 	assert.NotNil(t, ct.GetOrCreateCall("second", layers.LinkTypeEthernet))
@@ -209,28 +209,12 @@ func TestEndpointRegistrationRequiresAdmittedCallAndIsBounded(t *testing.T) {
 	ct.registerEndpoint("5000", "second")
 	ct.registerEndpoint("5002", "second") // global limit
 
-	ct.mu.RLock()
-	defer ct.mu.RUnlock()
-	assert.Len(t, ct.portToCallID, 3)
-	assert.NotContains(t, ct.portToCallID, "4004")
-	assert.NotContains(t, ct.portToCallID, "5002")
+	assert.Len(t, ct.registry.EndpointsForCall("first"), 2)
+	assert.Len(t, ct.registry.EndpointsForCall("second"), 1)
+	assert.Empty(t, ct.registry.CallIDsForEndpoint("4004"))
+	assert.Empty(t, ct.registry.CallIDsForEndpoint("5002"))
 }
 
 func createTrackedCall(ct *CallTracker, id string) {
-	ct.mu.Lock()
-	defer ct.mu.Unlock()
-	if ct.lruList.Len() >= ct.maxCalls {
-		for e := ct.lruList.Back(); e != nil; e = e.Prev() {
-			old := e.Value.(string)
-			if ct.pins[old] == 0 {
-				delete(ct.callMap, old)
-				delete(ct.lruIndex, old)
-				ct.lruList.Remove(e)
-				break
-			}
-		}
-	}
-	c := &CallInfo{CallID: id, LinkType: layers.LinkTypeEthernet}
-	ct.callMap[id] = c
-	ct.lruIndex[id] = ct.lruList.PushFront(id)
+	ct.GetOrCreateCall(id, layers.LinkTypeEthernet)
 }

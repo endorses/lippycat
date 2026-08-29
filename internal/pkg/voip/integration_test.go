@@ -169,10 +169,7 @@ func TestEndToEndSipCallProcessing(t *testing.T) {
 	tracker := TestCallTracker(t)
 
 	// Clear any existing state
-	tracker.mu.Lock()
-	tracker.callMap = make(map[string]*CallInfo)
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	// Setup surveillance
 	sipusers.AddSipUser("alicent", &sipusers.SipUser{
@@ -215,7 +212,8 @@ a=rtpmap:0 PCMU/8000`)
 
 	// Verify RTP port was extracted and tracked
 	tracker.mu.RLock()
-	trackedCallIDs, portTracked := tracker.portToCallID["8000"]
+	trackedCallIDs := tracker.registry.CallIDsForEndpoint("8000")
+	portTracked := len(trackedCallIDs) > 0
 	tracker.mu.RUnlock()
 
 	if portTracked {
@@ -265,10 +263,7 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 	tracker := TestCallTracker(t)
 
 	// Clear any existing state
-	tracker.mu.Lock()
-	tracker.callMap = make(map[string]*CallInfo)
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	// Setup surveillance
 	sipusers.AddSipUser("alicent", &sipusers.SipUser{
@@ -318,7 +313,7 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 	// Verify final state
 	tracker.mu.RLock()
 	finalCallCount := len(tracker.callMap)
-	finalPortCount := len(tracker.portToCallID)
+	finalPortCount := endpointAssociationCountForTest(tracker)
 	tracker.mu.RUnlock()
 
 	t.Logf("Final state: %d calls, %d tracked ports", finalCallCount, finalPortCount)
@@ -511,10 +506,7 @@ func TestIntegrationErrorHandling(t *testing.T) {
 	tracker := TestCallTracker(t)
 
 	// Clear any existing state
-	tracker.mu.Lock()
-	tracker.callMap = make(map[string]*CallInfo)
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	tests := []struct {
 		name       string

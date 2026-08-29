@@ -482,6 +482,11 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 // 4-tuple) it scans forward within a bounded window for the next message
 // boundary and resumes there instead of condemning the whole connection.
 func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Reader) ([]byte, error) {
+	securityConfig := DefaultSecurityConfig()
+	if s.factory != nil && s.factory.config != nil {
+		securityConfig = s.factory.config.Security
+	}
+
 	startLine, scanned, err := s.readSIPStartLine(bufReader)
 	if err != nil {
 		if errors.Is(err, errNotSIP) {
@@ -555,7 +560,7 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 					continue
 				}
 				lengthStr := strings.TrimSpace(line[colon+1:])
-				if length, parseErr := ParseContentLengthSecurely(lengthStr); parseErr == nil {
+				if length, parseErr := parseContentLengthSecurely(lengthStr, securityConfig); parseErr == nil {
 					contentLength = length
 				} else {
 					logger.Warn("Content-Length security validation failed",
@@ -570,7 +575,7 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 
 	messageBytes := []byte(message.String())
 
-	if err := ValidateMessageSize(len(messageBytes)); err != nil {
+	if err := validateMessageSize(len(messageBytes), securityConfig); err != nil {
 		logger.Warn("SIP message size security validation failed",
 			"size", len(messageBytes),
 			"error", err,

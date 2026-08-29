@@ -18,10 +18,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/signals"
 )
 
-// tapRuntimeAdapter binds flag-derived setup hooks to the single shared
-// protocol definition. It is topology wiring, not another protocol spec.
-type tapRuntimeAdapter struct {
-	protocol        protocolcatalog.Spec
+// tapRuntimeHooks binds flag-derived setup hooks to a catalog protocol. It is
+// topology wiring, not a second protocol specification.
+type tapRuntimeHooks struct {
 	ConfigureGPU    func(GPUConfig) GPUConfig
 	ConfigureSource func(*source.LocalSource)
 }
@@ -37,7 +36,10 @@ type tapRuntime struct {
 
 // newTapRuntime constructs the shared processor/source/filter graph used by tap
 // protocol commands.
-func newTapRuntime(config processor.Config, effectiveBPF string, adapter tapRuntimeAdapter) (*tapRuntime, error) {
+func newTapRuntime(config processor.Config, effectiveBPF string, protocol protocolcatalog.Spec, hooks tapRuntimeHooks) (*tapRuntime, error) {
+	if protocol.Name == "" || protocol.Analyzer == "" {
+		return nil, fmt.Errorf("protocol catalog specification is incomplete")
+	}
 	p, err := processor.New(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create processor: %w", err)
@@ -49,14 +51,14 @@ func newTapRuntime(config processor.Config, effectiveBPF string, adapter tapRunt
 		logger.Info("Own-traffic BPF exclusion applied", "exclusion", exclusionFilter, "effective_filter", effectiveBPF)
 	}
 
-	sourceConfig := tapSourceConfig(config, effectiveBPF, adapter.protocol)
+	sourceConfig := tapSourceConfig(config, effectiveBPF, protocol)
 	localSource := source.NewLocalSource(sourceConfig)
 	localTarget := filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF})
 	localTarget.SetBPFUpdater(localSource)
 
 	gpuConfig := GetGPUConfig()
-	if adapter.ConfigureGPU != nil {
-		gpuConfig = adapter.ConfigureGPU(gpuConfig)
+	if hooks.ConfigureGPU != nil {
+		gpuConfig = hooks.ConfigureGPU(gpuConfig)
 	}
 	appFilter, err := createApplicationFilter(gpuConfig)
 	if err != nil {
@@ -64,8 +66,8 @@ func newTapRuntime(config processor.Config, effectiveBPF string, adapter tapRunt
 	}
 	localSource.SetApplicationFilter(appFilter)
 	localTarget.SetApplicationFilter(appFilter)
-	if adapter.ConfigureSource != nil {
-		adapter.ConfigureSource(localSource)
+	if hooks.ConfigureSource != nil {
+		hooks.ConfigureSource(localSource)
 	}
 
 	p.SetPacketSource(localSource)
@@ -92,7 +94,7 @@ func tapSourceConfig(config processor.Config, effectiveBPF string, protocol prot
 		BufferSize:   cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
 		BatchBuffer:  1000,
 		ProcessorID:  config.ProcessorID,
-		ProtocolMode: protocol.Name,
+		ProtocolMode: string(protocol.Analyzer),
 	}
 }
 

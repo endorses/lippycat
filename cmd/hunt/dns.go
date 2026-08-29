@@ -142,5 +142,5 @@ func runDNSHunt(cmd *cobra.Command, args []string) error {
 		"udp_only", hunterDNSUDPOnly)
 
 	// Domain filtering is managed by the processor and pushed to hunters via gRPC.
-	return runHunterRuntime(config, hunterRuntimeSpec{name: "dns"})
+	return runCatalogHunterRuntime(config, "dns", hunterRuntimeHooks{})
 }

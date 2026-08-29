@@ -22,6 +22,7 @@ func TestCatalog(t *testing.T) {
 		spec, ok := Lookup(name)
 		require.True(t, ok, name)
 		assert.Equal(t, name, spec.Name)
+		assert.Equal(t, AnalyzerKind(name), spec.Analyzer)
 		assert.Equal(t, filterTypes, spec.SupportedFilterTypes)
 	}
 }
@@ -49,4 +50,10 @@ func TestVoIPHunterPolicyIsPartOfRegistration(t *testing.T) {
 	for _, name := range []string{"dns", "email", "http", "tls"} {
 		assert.Zero(t, MustLookup(name).Hunter, name)
 	}
+
+	assert.Equal(t, HunterSpec{
+		UseGPUConfig:        true,
+		IncludeDiskBuffer:   true,
+		IncludeFilterPolicy: true,
+	}, MustLookup("generic").Hunter)
 }

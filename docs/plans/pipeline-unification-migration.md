@@ -918,9 +918,24 @@ claimed by this implementation status.
       sniff, hunt, and tap runtime adapters.
 - [x] Route generic tap through the same shared tap runtime used by
       protocol-specific tap commands.
+- [x] Attribute normalized packet-fanout outcomes and drop reasons to named
+      sinks with race-safe counters, and report nil-error pressure drops from
+      general sniff compositions.
+- [x] Make the protocol catalog authoritative for analyzer identity and hunter
+      topology policy; keep flag-derived topology hooks separate from protocol
+      specifications in sniff, hunt, and tap.
 
 Remediation verification removed the processor packet compatibility view and
 the legacy tracker compatibility maps/LRU state. Shared registry tests cover
 bounded calls and endpoints, retention leases, eviction priority, lifecycle
 ordering, expiration, and idempotent shutdown. Protocol command tests verify
 catalog-driven composition across sniff, hunt, and tap.
+
+Final success-metric remediation (2026-08-29): normalized packet fan-out now
+maintains per-sink counters for every typed outcome and drop reason, and general
+sniff logs bounded-pressure drops even when they carry no actionable error. The
+protocol catalog now owns stable analyzer identity and all hunter topology
+policy, while command-local runtime values are explicitly hooks into the shared
+sniff, hunt, and tap runners rather than parallel protocol specifications. The
+focused race suite, `make test`, and the supported non-CUDA build/test/vet
+matrix pass.

@@ -30,7 +30,9 @@ func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipel
 		p.count++
 		for _, named := range p.fanout.Dispatch(context.Background(), env) {
 			result := named.Result
-			if result.Err != nil {
+			if result.Outcome == pipeline.OutcomeDropped {
+				logger.Warn("Local packet sink dropped packet", "sink", named.Name, "outcome", result.Outcome, "drop_reason", result.DropReason, "interface", env.Source.InterfaceName)
+			} else if result.Err != nil {
 				logger.Error("Local packet sink failed", "sink", named.Name, "outcome", result.Outcome, "error", result.Err, "interface", env.Source.InterfaceName)
 			}
 		}

@@ -391,7 +391,7 @@ func runHTTPTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	runtime, err := newTapRuntime(config, effectiveBPFFilter, tapRuntimeAdapter{protocol: protocolcatalog.MustLookup("http")})
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, protocolcatalog.MustLookup("http"), tapRuntimeHooks{})
 	if err != nil {
 		return err
 	}

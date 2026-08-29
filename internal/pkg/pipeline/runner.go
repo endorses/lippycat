@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 // PacketSink consumes normalized packets. Close must drain accepted work and
@@ -32,8 +33,47 @@ type PacketFanout struct {
 }
 
 type namedPacketSink struct {
-	name string
-	sink PacketSink
+	name    string
+	sink    PacketSink
+	metrics sinkMetrics
+}
+
+const outcomeCount = int(OutcomeShutdown) + 1
+const dropReasonCount = int(DropShutdown) + 1
+
+type sinkMetrics struct {
+	outcomes [outcomeCount]atomic.Uint64
+	drops    [dropReasonCount]atomic.Uint64
+}
+
+// SinkMetrics is a point-in-time snapshot of outcomes attributed to one sink.
+type SinkMetrics struct {
+	Outcomes map[Outcome]uint64
+	Drops    map[DropReason]uint64
+}
+
+func (m *sinkMetrics) record(result Result) {
+	if int(result.Outcome) < len(m.outcomes) {
+		m.outcomes[result.Outcome].Add(1)
+	}
+	if result.DropReason != DropNone && int(result.DropReason) < len(m.drops) {
+		m.drops[result.DropReason].Add(1)
+	}
+}
+
+func (m *sinkMetrics) snapshot() SinkMetrics {
+	snapshot := SinkMetrics{Outcomes: make(map[Outcome]uint64), Drops: make(map[DropReason]uint64)}
+	for outcome := OutcomeAccepted; int(outcome) < len(m.outcomes); outcome++ {
+		if count := m.outcomes[outcome].Load(); count != 0 {
+			snapshot.Outcomes[outcome] = count
+		}
+	}
+	for reason := DropNone; int(reason) < len(m.drops); reason++ {
+		if count := m.drops[reason].Load(); count != 0 {
+			snapshot.Drops[reason] = count
+		}
+	}
+	return snapshot
 }
 
 // NewPacketFanout creates a fanout. Sink names must be non-empty and unique.
@@ -71,14 +111,30 @@ func (f *PacketFanout) Dispatch(ctx context.Context, envelope *PacketEnvelope) [
 		return []SinkResult{{Name: "fanout", Result: Result{Outcome: OutcomeShutdown, DropReason: DropShutdown, Err: context.Canceled}}}
 	}
 	results := make([]SinkResult, 0, len(f.sinks))
-	for _, configured := range f.sinks {
+	for i := range f.sinks {
+		configured := &f.sinks[i]
 		if err := ctx.Err(); err != nil {
-			results = append(results, SinkResult{Name: configured.name, Result: Result{Outcome: OutcomeShutdown, DropReason: DropShutdown, Err: err}})
+			result := Result{Outcome: OutcomeShutdown, DropReason: DropShutdown, Err: err}
+			configured.metrics.record(result)
+			results = append(results, SinkResult{Name: configured.name, Result: result})
 			continue
 		}
-		results = append(results, SinkResult{Name: configured.name, Result: configured.sink.HandlePacket(ctx, envelope)})
+		result := configured.sink.HandlePacket(ctx, envelope)
+		configured.metrics.record(result)
+		results = append(results, SinkResult{Name: configured.name, Result: result})
 	}
 	return results
+}
+
+// Metrics returns point-in-time outcome and drop counters keyed by sink name.
+func (f *PacketFanout) Metrics() map[string]SinkMetrics {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	metrics := make(map[string]SinkMetrics, len(f.sinks))
+	for i := range f.sinks {
+		metrics[f.sinks[i].name] = f.sinks[i].metrics.snapshot()
+	}
+	return metrics
 }
 
 // Close closes sinks in reverse registration order and joins all close errors.

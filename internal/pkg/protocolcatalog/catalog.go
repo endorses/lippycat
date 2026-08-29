@@ -6,9 +6,24 @@ package protocolcatalog
 // Mode-specific callbacks and configuration remain in the command packages.
 type Spec struct {
 	Name                 string
+	Analyzer             AnalyzerKind
 	SupportedFilterTypes []string
 	Hunter               HunterSpec
 }
+
+// AnalyzerKind is the stable analyzer identity consumed by topology adapters.
+// It deliberately lives in the declarative catalog so command packages do not
+// maintain parallel protocol-to-analyzer registries.
+type AnalyzerKind string
+
+const (
+	AnalyzerGeneric AnalyzerKind = "generic"
+	AnalyzerDNS     AnalyzerKind = "dns"
+	AnalyzerEmail   AnalyzerKind = "email"
+	AnalyzerHTTP    AnalyzerKind = "http"
+	AnalyzerTLS     AnalyzerKind = "tls"
+	AnalyzerVoIP    AnalyzerKind = "voip"
+)
 
 // HunterSpec declares the protocol's topology policy when it runs at the edge.
 // Transport values and flag-derived values remain owned by cmd/hunt; these
@@ -18,31 +33,43 @@ type HunterSpec struct {
 	VoIPMode            bool
 	EnableVoIPFilter    bool
 	UseGPUConfig        bool
+	IncludeDiskBuffer   bool
 	IncludeFilterPolicy bool
 }
 
 var specs = map[string]Spec{
 	"generic": {
-		Name: "generic",
+		Name:     "generic",
+		Analyzer: AnalyzerGeneric,
+		Hunter: HunterSpec{
+			UseGPUConfig:        true,
+			IncludeDiskBuffer:   true,
+			IncludeFilterPolicy: true,
+		},
 	},
 	"dns": {
 		Name:                 "dns",
+		Analyzer:             AnalyzerDNS,
 		SupportedFilterTypes: []string{"bpf", "ip_address", "dns_domain"},
 	},
 	"email": {
 		Name:                 "email",
+		Analyzer:             AnalyzerEmail,
 		SupportedFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"},
 	},
 	"http": {
 		Name:                 "http",
+		Analyzer:             AnalyzerHTTP,
 		SupportedFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"},
 	},
 	"tls": {
 		Name:                 "tls",
+		Analyzer:             AnalyzerTLS,
 		SupportedFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"},
 	},
 	"voip": {
-		Name: "voip",
+		Name:     "voip",
+		Analyzer: AnalyzerVoIP,
 		Hunter: HunterSpec{
 			VoIPMode:            true,
 			EnableVoIPFilter:    true,

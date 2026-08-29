@@ -244,8 +244,7 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		"interfaces", config.Interfaces,
 		"smtp_ports", hunterEmailPorts)
 
-	return runHunterRuntime(config, hunterRuntimeSpec{
-		name: "email",
+	return runCatalogHunterRuntime(config, "email", hunterRuntimeHooks{
 		setup: func(ctx context.Context, h *hunter.Hunter) (func(), error) {
 			contentFilter := buildEmailContentFilter()
 			smtpConfig := email.SMTPStreamFactoryConfig{

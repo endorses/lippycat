@@ -191,8 +191,7 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		"pattern_buffer_mb", viper.GetInt("voip.pattern_buffer_mb"))
 
 	var bufferMgr *voip.BufferManager
-	return runHunterRuntime(config, hunterRuntimeSpec{
-		name: "voip",
+	return runCatalogHunterRuntime(config, "voip", hunterRuntimeHooks{
 		setup: func(_ context.Context, _ *hunter.Hunter) (func(), error) {
 			bufferMgr = voip.NewBufferManager(5*time.Second, 200)
 			logger.Info("VoIP buffer manager initialized", "max_age", "5s", "max_size", 200)

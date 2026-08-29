@@ -10,29 +10,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSniffRuntimeAdapterValidate(t *testing.T) {
-	valid := sniffRuntimeAdapter{
-		protocol:   protocolcatalog.Spec{Name: "test"},
+func TestSniffRuntimeHooksValidate(t *testing.T) {
+	protocol := protocolcatalog.Spec{Name: "test", Analyzer: "test"}
+	valid := sniffRuntimeHooks{
 		BuildBPF:   func(string) (string, error) { return "", nil },
 		StartLive:  func(string, string) {},
 		StartFiles: func([]string, string) {},
 	}
-	require.NoError(t, valid.validate())
+	require.NoError(t, valid.validate(protocol))
 
 	tests := []struct {
 		name string
-		edit func(*sniffRuntimeAdapter)
+		edit func(*sniffRuntimeHooks)
 	}{
-		{name: "name", edit: func(s *sniffRuntimeAdapter) { s.protocol.Name = "" }},
-		{name: "builder", edit: func(s *sniffRuntimeAdapter) { s.BuildBPF = nil }},
-		{name: "live", edit: func(s *sniffRuntimeAdapter) { s.StartLive = nil }},
-		{name: "files", edit: func(s *sniffRuntimeAdapter) { s.StartFiles = nil }},
+		{name: "builder", edit: func(s *sniffRuntimeHooks) { s.BuildBPF = nil }},
+		{name: "live", edit: func(s *sniffRuntimeHooks) { s.StartLive = nil }},
+		{name: "files", edit: func(s *sniffRuntimeHooks) { s.StartFiles = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			spec := valid
 			tt.edit(&spec)
-			require.Error(t, spec.validate())
+			require.Error(t, spec.validate(protocol))
 		})
 	}
 }
@@ -40,10 +39,10 @@ func TestSniffRuntimeAdapterValidate(t *testing.T) {
 func TestProtocolCommandsUseSharedCatalog(t *testing.T) {
 	t.Parallel()
 
-	for name, got := range map[string]sniffRuntimeAdapter{
-		"dns": dnsSpec, "email": emailSpec, "http": httpSpec, "tls": tlsSpec, "voip": voipSpec,
+	for name, got := range map[string]sniffRuntimeHooks{
+		"dns": dnsRuntimeHooks, "email": emailRuntimeHooks, "http": httpRuntimeHooks, "tls": tlsRuntimeHooks, "voip": voipRuntimeHooks,
 	} {
-		require.Equal(t, protocolcatalog.MustLookup(name), got.protocol)
+		require.NoError(t, got.validate(protocolcatalog.MustLookup(name)))
 	}
 }
 
@@ -55,8 +54,8 @@ func TestRunProtocolSelectsIngressAndPreservesArguments(t *testing.T) {
 	var liveCalls int
 	var gotInterfaces, gotFilter string
 	var gotFiles []string
-	spec := sniffRuntimeAdapter{
-		protocol: protocolcatalog.Spec{Name: "test"},
+	protocol := protocolcatalog.Spec{Name: "test", Analyzer: "test"}
+	hooks := sniffRuntimeHooks{
 		BuildBPF: func(base string) (string, error) {
 			require.Equal(t, "tcp", base)
 			return "tcp and port 42", nil
@@ -71,13 +70,13 @@ func TestRunProtocolSelectsIngressAndPreservesArguments(t *testing.T) {
 	}
 
 	readFile = ""
-	runProtocol(&cobra.Command{}, nil, spec)
+	runProtocol(&cobra.Command{}, nil, protocol, hooks)
 	require.Equal(t, 1, liveCalls)
 	require.Equal(t, "eth-test", gotInterfaces)
 	require.Equal(t, "tcp and port 42", gotFilter)
 
 	readFile = "first.pcap"
-	runProtocol(&cobra.Command{}, []string{"second.pcap"}, spec)
+	runProtocol(&cobra.Command{}, []string{"second.pcap"}, protocol, hooks)
 	require.Equal(t, []string{"first.pcap", "second.pcap"}, gotFiles)
 	require.Equal(t, "tcp and port 42", gotFilter)
 }

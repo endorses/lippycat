@@ -226,14 +226,9 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	logger.Info("Hunter started successfully",
 		"processor", config.ProcessorAddr,
 		"hunter_id", config.HunterID)
-	return runHunterRuntime(config, hunterRuntimeSpec{name: "generic", shutdownDelay: constants.GracefulShutdownTimeout})
+	return runCatalogHunterRuntime(config, "generic", hunterRuntimeHooks{shutdownDelay: constants.GracefulShutdownTimeout})
 }
 
 func genericHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{
-		bpfFilter:           filter,
-		useGPUFlag:          true,
-		includeDiskBuffer:   true,
-		includeFilterPolicy: true,
-	}
+	return protocolHunterConfigSpec("generic", filter)
 }

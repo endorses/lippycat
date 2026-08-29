@@ -49,8 +49,7 @@ var (
 	dnsWriteFile     string
 )
 
-var dnsSpec = sniffRuntimeAdapter{
-	protocol: protocolcatalog.MustLookup("dns"),
+var dnsRuntimeHooks = sniffRuntimeHooks{
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := dns.ParsePorts(dnsPorts)
 		if err != nil {
@@ -103,7 +102,7 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 		"detect_tunneling", dnsDetectTunnel)
 
 	// Start DNS sniffer using appropriate mode
-	runProtocol(cmd, args, dnsSpec)
+	runProtocol(cmd, args, protocolcatalog.MustLookup("dns"), dnsRuntimeHooks)
 }
 
 func init() {

@@ -204,8 +204,7 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 		"http_ports", hunterHTTPPorts,
 		"tls_decryption", tlsKeylogPath != "")
 
-	return runHunterRuntime(config, hunterRuntimeSpec{
-		name: "http",
+	return runCatalogHunterRuntime(config, "http", hunterRuntimeHooks{
 		setup: func(_ context.Context, h *hunter.Hunter) (func(), error) {
 			contentFilter := buildHTTPContentFilter()
 			processor := http.NewProcessor(http.ProcessorConfig{

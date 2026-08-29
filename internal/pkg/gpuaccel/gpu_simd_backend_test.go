@@ -362,32 +362,6 @@ func TestSIMDCallIDExtractor(t *testing.T) {
 	assert.Contains(t, callIDs, "short123")
 }
 
-func TestSIMDPatternMatcher(t *testing.T) {
-	patterns := []GPUPattern{
-		{
-			ID:         0,
-			Pattern:    []byte("test"),
-			PatternLen: 4,
-			Type:       PatternTypeContains,
-		},
-	}
-
-	matcher := NewSIMDPatternMatcher(patterns)
-
-	packets := [][]byte{
-		[]byte("this is a test packet"),
-		[]byte("no match here"),
-		[]byte("another test"),
-	}
-
-	results := matcher.MatchBatch(packets)
-
-	// Should match packets 0 and 2
-	assert.Equal(t, 2, len(results))
-	assert.Equal(t, 0, results[0].PacketIndex)
-	assert.Equal(t, 2, results[1].PacketIndex)
-}
-
 func TestMultiPatternSearch(t *testing.T) {
 	patterns := []GPUPattern{
 		{
@@ -456,7 +430,7 @@ func TestSIMDBackend_BuildAutomaton(t *testing.T) {
 	assert.NotNil(t, backend.acMatchers["default"])
 }
 
-func TestSIMDBackend_MatchUsernames(t *testing.T) {
+func TestSIMDBackend_MatchWithDefaultAutomaton(t *testing.T) {
 	backend := NewSIMDBackend().(*SIMDBackend)
 	config := DefaultGPUConfig()
 	_ = backend.Initialize(config)
@@ -479,7 +453,7 @@ func TestSIMDBackend_MatchUsernames(t *testing.T) {
 		[]byte("+4912345@example.com"), // matches +49 and example.com
 	}
 
-	results, err := backend.MatchUsernames(usernames)
+	results, err := backend.MatchWithAutomaton("default", usernames)
 	require.NoError(t, err)
 	require.Equal(t, 6, len(results))
 
@@ -509,18 +483,18 @@ func TestSIMDBackend_MatchUsernames(t *testing.T) {
 	assert.Contains(t, results[5], 3)
 }
 
-func TestSIMDBackend_MatchUsernames_NoAutomaton(t *testing.T) {
+func TestSIMDBackend_MatchWithDefaultAutomaton_NoAutomaton(t *testing.T) {
 	backend := NewSIMDBackend().(*SIMDBackend)
 	config := DefaultGPUConfig()
 	_ = backend.Initialize(config)
 
-	// Don't build automaton, just call MatchUsernames
+	// Don't build an automaton before matching.
 	usernames := [][]byte{
 		[]byte("alice@test.org"),
 		[]byte("bob@example.com"),
 	}
 
-	results, err := backend.MatchUsernames(usernames)
+	results, err := backend.MatchWithAutomaton("default", usernames)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(results))
 
@@ -529,7 +503,7 @@ func TestSIMDBackend_MatchUsernames_NoAutomaton(t *testing.T) {
 	assert.Empty(t, results[1])
 }
 
-func TestSIMDBackend_MatchUsernames_EmptyPatterns(t *testing.T) {
+func TestSIMDBackend_MatchWithDefaultAutomaton_EmptyPatterns(t *testing.T) {
 	backend := NewSIMDBackend().(*SIMDBackend)
 	config := DefaultGPUConfig()
 	_ = backend.Initialize(config)
@@ -543,7 +517,7 @@ func TestSIMDBackend_MatchUsernames_EmptyPatterns(t *testing.T) {
 		[]byte("alice@test.org"),
 	}
 
-	results, err := backend.MatchUsernames(usernames)
+	results, err := backend.MatchWithAutomaton("default", usernames)
 	require.NoError(t, err)
 	assert.Empty(t, results[0])
 }
@@ -593,37 +567,6 @@ func BenchmarkSIMDCallIDExtractor(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_, _ = extractCallIDsForTest(accelerator, packets)
-	}
-}
-
-func BenchmarkSIMDPatternMatcher(b *testing.B) {
-	patterns := []GPUPattern{
-		{
-			ID:         0,
-			Pattern:    []byte("Call-ID:"),
-			PatternLen: 8,
-			Type:       PatternTypeContains,
-		},
-		{
-			ID:         1,
-			Pattern:    []byte("INVITE"),
-			PatternLen: 6,
-			Type:       PatternTypePrefix,
-		},
-	}
-
-	matcher := NewSIMDPatternMatcher(patterns)
-
-	packets := make([][]byte, 64)
-	for i := 0; i < 64; i++ {
-		packets[i] = []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: test\r\n")
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		_ = matcher.MatchBatch(packets)
 	}
 }
 

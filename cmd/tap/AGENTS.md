@@ -146,10 +146,14 @@ type PacketSource interface {
 }
 
 type PacketBatch struct {
-    SourceID    string
-    Packets     []*data.CapturedPacket
-    Sequence    uint64
-    TimestampNs int64
+    SourceID         string
+    Packets          []*data.CapturedPacket // Temporary compatibility view
+    Envelopes        []*pipeline.PacketEnvelope // Authoritative representation
+    Sequence         uint64
+    TimestampNs      int64
+    Stats            *data.BatchStats
+    MatchedFilterIDs []string
+    AfterProcess     []func() // Local-only lifecycle callbacks
 }
 ```
 

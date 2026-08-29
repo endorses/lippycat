@@ -338,14 +338,6 @@ func (sb *SIMDBackend) BuildNamedAutomaton(name string, patterns []ahocorasick.P
 	return nil
 }
 
-// MatchUsernames matches usernames against the default Aho-Corasick automaton.
-// Returns matched pattern IDs for each input username.
-// If no automaton is built, returns empty results for all inputs.
-// This is equivalent to MatchWithAutomaton("default", usernames).
-func (sb *SIMDBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
-	return sb.MatchWithAutomaton("default", usernames)
-}
-
 // MatchWithAutomaton matches inputs against a specific named automaton.
 // Returns matched pattern IDs for each input.
 // If no automaton with that name exists, returns empty results for all inputs.
@@ -418,44 +410,6 @@ func (sb *SIMDBackend) MatchWithAutomaton(name string, inputs [][]byte) ([][]int
 // GetStats returns SIMD backend statistics
 func (sb *SIMDBackend) GetStats() *SIMDBackendStats {
 	return &sb.stats
-}
-
-// SIMDPatternMatcher provides vectorized pattern matching
-type SIMDPatternMatcher struct {
-	patterns []GPUPattern
-	numLanes int
-	useAVX2  bool
-}
-
-// NewSIMDPatternMatcher creates a new SIMD pattern matcher
-func NewSIMDPatternMatcher(patterns []GPUPattern) *SIMDPatternMatcher {
-	return &SIMDPatternMatcher{
-		patterns: patterns,
-		numLanes: 8, // Process 8 patterns in parallel
-		useAVX2:  cpuFeatures.HasAVX2,
-	}
-}
-
-// MatchBatch matches patterns across a batch of packets
-func (spm *SIMDPatternMatcher) MatchBatch(packets [][]byte) []GPUResult {
-	results := make([]GPUResult, 0)
-
-	// Vectorized processing
-	for packetIdx, packet := range packets {
-		for _, pattern := range spm.patterns {
-			if matched, offset := matchPattern(packet, pattern); matched {
-				results = append(results, GPUResult{
-					PacketIndex: packetIdx,
-					PatternID:   pattern.ID,
-					Offset:      offset,
-					Length:      pattern.PatternLen,
-					Matched:     true,
-				})
-			}
-		}
-	}
-
-	return results
 }
 
 // MultiPatternSearch performs multi-pattern search using Aho-Corasick style algorithm

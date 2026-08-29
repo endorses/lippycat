@@ -696,12 +696,6 @@ func (cb *CUDABackendImpl) serializeAutomaton(ac *ahocorasick.DenseAhoCorasick) 
 	return numStates, transitions, failure, outputs, outputOffsets, patternTypes, patternLengths
 }
 
-// MatchUsernames matches usernames against the default Aho-Corasick automaton.
-// This is equivalent to MatchWithAutomaton("default", usernames).
-func (cb *CUDABackendImpl) MatchUsernames(usernames [][]byte) ([][]int, error) {
-	return cb.MatchWithAutomaton("default", usernames)
-}
-
 // MatchWithAutomaton matches inputs against a specific named automaton.
 // Each GPU thread processes one input, traversing the automaton states.
 func (cb *CUDABackendImpl) MatchWithAutomaton(name string, inputs [][]byte) ([][]int, error) {

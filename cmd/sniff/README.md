@@ -450,7 +450,9 @@ lc sniff voip -i eth0 -u alicent --write-file
 
 ### GPU Acceleration
 
-**Purpose:** Accelerate pattern matching for SIP header extraction using GPU or SIMD instructions.
+**Purpose:** Accelerate application-filter matching against SIP users, URIs, and other values after the protocol parser has extracted them. SIP parsing and Call-ID extraction remain CPU operations.
+
+These flags are available on `sniff voip` only in CUDA builds. Non-CUDA builds do not register them.
 
 **Flags:**
 - `--gpu-enable` - Enable GPU acceleration (default: true)
@@ -475,9 +477,9 @@ lc sniff voip -i eth0 --gpu-enable=false
 ```
 
 **Backend Selection:**
-- `auto` - Automatically selects best available: CUDA > OpenCL > CPU SIMD
+- `auto` - Automatically selects CUDA when available, then CPU SIMD
 - `cuda` - NVIDIA GPU acceleration (requires CUDA)
-- `opencl` - OpenCL GPU acceleration (AMD/Intel/NVIDIA)
+- `opencl` - Reserved compatibility value; the backend is not implemented and falls back to CPU
 - `cpu-simd` - CPU SIMD instructions (AVX2/SSE4.2)
 - `disabled` - No acceleration (pure Go implementation)
 
@@ -696,7 +698,7 @@ sudo lc sniff voip -i eth0 --virtual-interface
 
 1. **Start with profiles** - Use `--tcp-performance-mode` instead of manual tuning
 2. **Monitor memory usage** - Use system tools (`top`, `ps`) to verify profile fits your environment
-3. **Use GPU acceleration** - Significant performance improvement for SIP parsing (default: enabled)
+3. **Use GPU filtering where appropriate** - CUDA builds can accelerate matching large application-filter sets; parsing remains on the CPU
 4. **Enable backpressure** - Prevents memory exhaustion under heavy load
 5. **Test with sample traffic** - Validate configuration with representative PCAP files first
 

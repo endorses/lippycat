@@ -73,7 +73,7 @@ In a distributed deployment ([Chapter 6](../part3-distributed/architecture.md)),
 
 ## GPU Acceleration
 
-GPU acceleration speeds up pattern matching and SIP header parsing by processing packets in batches. lippycat supports multiple backends with automatic fallback.
+GPU acceleration speeds up capture-side application-filter matching against values already extracted by the protocol parsers. It does not parse SIP or extract Call-IDs; those operations remain on the CPU.
 
 ### Backend Selection
 
@@ -83,9 +83,7 @@ lippycat probes available backends in priority order and selects the best one:
 flowchart LR
     Auto["--gpu-backend auto"] --> CUDA{CUDA\navailable?}
     CUDA -->|Yes| UseCUDA[Use CUDA]
-    CUDA -->|No| OCL{OpenCL\navailable?}
-    OCL -->|Yes| UseOCL[Use OpenCL]
-    OCL -->|No| SIMD["Use CPU SIMD\n(always available)"]
+    CUDA -->|No| SIMD["Use CPU SIMD\n(always available)"]
 ```
 
 Select a backend explicitly or let auto-detection choose:
@@ -96,7 +94,6 @@ sudo lc sniff voip -i eth0 --gpu-backend auto
 
 # Force a specific backend
 sudo lc sniff voip -i eth0 --gpu-backend cuda
-sudo lc sniff voip -i eth0 --gpu-backend opencl
 sudo lc sniff voip -i eth0 --gpu-backend cpu-simd
 
 # Disable acceleration entirely
@@ -110,10 +107,11 @@ For `sniff voip`, `hunt`, and `tap`, these GPU flags are registered only in CUDA
 | Backend | Hardware | Software | Status |
 |---------|----------|----------|--------|
 | **CUDA** | NVIDIA GPU, Compute 6.0+ (Pascal or newer) | CUDA Toolkit 11.0+, nvidia-driver 470+ | Build with `-tags cuda` |
-| **OpenCL** | OpenCL 1.2+ GPU (NVIDIA, AMD, Intel) | OpenCL runtime, `ocl-icd-opencl-dev` | Build with OpenCL support |
 | **CPU SIMD** | Any x86_64 CPU | None (built-in) | Always available |
 
 The CPU SIMD backend uses AVX2 instructions when available, falling back to SSE4.2. It requires no special hardware or drivers and performs well on modern CPUs.
+
+The `opencl` value remains accepted for configuration compatibility, but the OpenCL backend is not implemented. Auto-detection skips it, and an explicit selection falls back to CPU matching after initialization fails.
 
 ### Benchmark Results
 
@@ -123,10 +121,7 @@ Benchmarks measured on Intel i9-13900HX with 64 packets per batch:
 |-----------|-----------|-------------------|
 | Pattern matching (GPU batch) | 29.7 Kpkts/s | 525 ns |
 | Pattern matching (CPU SIMD) | 29.9 Kpkts/s | 530 ns |
-| Call-ID extraction (GPU batch) | 19.4 Kpkts/s | 805 ns |
-| Call-ID extraction (CPU SIMD) | 18.9 Kpkts/s | 830 ns |
-
-CPU SIMD performance is comparable to GPU batching at moderate packet rates. The GPU backends show their advantage at very high packet rates (1M+ pps) where CPU cores become saturated with other work.
+CPU SIMD performance is comparable to GPU batching at moderate packet rates. Treat these pattern-matching microbenchmarks as comparative figures rather than end-to-end SIP parsing throughput.
 
 ### Batch Size Tuning
 
@@ -338,7 +333,7 @@ sudo lc sniff voip -i eth0 \
   --max-tcp-buffers 20000
 ```
 
-On dedicated hardware with 8+ GB RAM and a modern CPU, use the `throughput` profile. If you have an NVIDIA GPU and have built with `-tags cuda`, add `--gpu-backend auto` to let CUDA/OpenCL/SIMD selection pick the best backend. For 10GbE+ interfaces, distribute capture across additional hunters.
+On dedicated hardware with 8+ GB RAM and a modern CPU, use the `throughput` profile. If you have an NVIDIA GPU and have built with `-tags cuda`, add `--gpu-backend auto` to let CUDA or SIMD selection pick the best backend. For 10GbE+ interfaces, distribute capture across additional hunters.
 
 ### Kubernetes / Containers
 

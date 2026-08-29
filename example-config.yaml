@@ -200,14 +200,6 @@ voip:
     key_derive: "pbkdf2"
     pbkdf2_iterations: 100000
 
-  # Plugin System (disabled by default)
-  # plugins_enabled: false
-  # plugin_paths: []
-  # plugin_watch_enabled: false
-  # plugin_sip_enabled: true
-  # plugin_rtp_enabled: true
-  # plugin_generic_enabled: true
-
   # Monitoring (disabled by default)
   # monitoring_enabled: false
   # metrics_enabled: false
@@ -215,7 +207,6 @@ voip:
   # monitoring_update_interval: 30s
   # enable_runtime_metrics: true
   # enable_system_metrics: false
-  # enable_plugin_metrics: true
 
 # ============================================================================
 # HUNTER NODE (lc hunt)

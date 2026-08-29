@@ -255,9 +255,6 @@ func loadVoIPLibraryConfig() *voip.Config {
 	}
 	cfg.EnableStateTCPTimeouts = viper.GetBool("voip.enable_state_tcp_timeouts")
 	cfg.EnableCallAwareTimeout = viper.GetBool("voip.enable_call_aware_timeout")
-	cfg.PluginsEnabled = viper.GetBool("voip.plugins_enabled")
-	cfg.PluginPaths = append([]string(nil), viper.GetStringSlice("voip.plugin_paths")...)
-	cfg.PluginWatchEnabled = viper.GetBool("voip.plugin_watch_enabled")
 	cfg.MonitoringEnabled = viper.GetBool("voip.monitoring_enabled")
 	cfg.MetricsEnabled = viper.GetBool("voip.metrics_enabled")
 	cfg.TracingEnabled = viper.GetBool("voip.tracing_enabled")

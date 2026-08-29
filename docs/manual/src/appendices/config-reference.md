@@ -240,17 +240,6 @@ These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performa
 | `voip.gpu_batch_size` | integer | `1024` | Number of packets per GPU processing batch. |
 | `voip.gpu_max_memory` | integer | `0` | Maximum GPU memory in bytes (0 = unlimited). |
 
-### Plugins
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `voip.plugins_enabled` | boolean | `false` | Master switch for the plugin system. |
-| `voip.plugin_sip_enabled` | boolean | `true` | Enable the built-in SIP analysis plugin. |
-| `voip.plugin_rtp_enabled` | boolean | `true` | Enable the built-in RTP analysis plugin. |
-| `voip.plugin_generic_enabled` | boolean | `true` | Enable the generic protocol plugin. |
-| `voip.plugin_watch_enabled` | boolean | `false` | Enable hot-reload watching for plugin files. |
-| `voip.plugin_paths` | list | `[]` | Paths to external plugin shared libraries. |
-
 ### Metrics and Monitoring
 
 | Key | Type | Default | Description |
@@ -258,7 +247,6 @@ These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performa
 | `voip.metrics_enabled` | boolean | `false` | Enable metrics collection. |
 | `voip.monitoring_enabled` | boolean | `false` | Enable runtime monitoring. |
 | `voip.monitoring_update_interval` | duration | `"30s"` | Interval for monitoring metric updates. |
-| `voip.enable_plugin_metrics` | boolean | `true` | Collect per-plugin metrics. |
 | `voip.enable_runtime_metrics` | boolean | `true` | Collect Go runtime metrics. |
 | `voip.enable_system_metrics` | boolean | `false` | Collect system-level metrics (CPU, memory, disk). |
 | `voip.tracing_enabled` | boolean | `false` | Enable distributed tracing. |

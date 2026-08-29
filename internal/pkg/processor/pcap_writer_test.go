@@ -85,7 +85,7 @@ func TestPerCallPCAPSemanticGolden(t *testing.T) {
 		semanticCapturedPacket(t2, rtpPacket, &data.SIPMetadata{CallId: fixture.CallID}, &data.RTPMetadata{}),
 	}
 	processor.processBatch(&source.PacketBatch{SourceID: "semantic-hunter", Sequence: 1, TimestampNs: t0.UnixNano(), Packets: packets})
-	require.NoError(t, processor.perCallPcapWriter.CloseCallWriter(fixture.CallID))
+	require.NoError(t, processor.sessionOutputManager.writer.CloseCallWriter(fixture.CallID))
 
 	observed := make([]semanticObservation, 0, 3)
 	observed = append(observed, readSemanticPCAP(t, filepath.Join(dir, fixture.CallID+"_sip.pcap"), true)...)

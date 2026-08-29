@@ -379,19 +379,6 @@ func TraceCallProcessing(ctx context.Context, callID, operation string) (*Span, 
 	}
 }
 
-// TracePluginExecution traces plugin execution
-func TracePluginExecution(ctx context.Context, pluginName, protocol string) (*Span, context.Context, func()) {
-	span, newCtx := StartSpan(ctx, fmt.Sprintf("plugin_%s", pluginName), "plugin_system")
-	if span != nil {
-		span.AddTag("plugin", pluginName)
-		span.AddTag("protocol", protocol)
-	}
-
-	return span, newCtx, func() {
-		FinishSpan(span)
-	}
-}
-
 // TraceTCPStreamProcessing traces TCP stream processing
 func TraceTCPStreamProcessing(ctx context.Context, streamID string) (*Span, context.Context, func()) {
 	span, newCtx := StartSpan(ctx, "tcp_stream_processing", "tcp_processor")

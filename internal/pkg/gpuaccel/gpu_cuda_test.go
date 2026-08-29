@@ -45,7 +45,7 @@ func TestCUDABackend_AhoCorasickSemantics(t *testing.T) {
 		[]byte("she"),                     // failure-link output: she and he
 		{},
 	}
-	results, err := backend.MatchUsernames(inputs)
+	results, err := backend.MatchWithAutomaton("default", inputs)
 	require.NoError(t, err)
 	require.Len(t, results, len(inputs))
 	assert.ElementsMatch(t, []int{101, 601, 307}, results[0])
@@ -67,7 +67,7 @@ func TestCUDABackend_AhoCorasickDistinctMatchLimit(t *testing.T) {
 	}
 	require.NoError(t, backend.BuildAutomaton(patterns))
 
-	results, err := backend.MatchUsernames([][]byte{input, make([]byte, 200)})
+	results, err := backend.MatchWithAutomaton("default", [][]byte{input, make([]byte, 200)})
 	require.NoError(t, err)
 	require.Len(t, results[0], 16)
 	for i := range 16 {

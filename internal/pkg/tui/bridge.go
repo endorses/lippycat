@@ -900,52 +900,44 @@ func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *te
 	atomic.StoreInt32(&bridgeStats.Running, 1)
 	defer atomic.StoreInt32(&bridgeStats.Running, 0)
 
+	bridge := newEnvelopeBridgePipeline(program, pause, tracker, preserveAll, aggregator)
+	bridge.run(packetChan)
+}
+
+// envelopeBridgePipeline owns the local capture stages. StartEnvelopeBridge is
+// intentionally only the lifecycle/composition boundary used by cmd/watch.
+type envelopeBridgePipeline struct {
+	program     *tea.Program
+	pause       *PauseSignal
+	tracker     *CallTracker
+	preserveAll bool
+	aggregator  *LocalCallAggregator
+}
+
+func newEnvelopeBridgePipeline(program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregator *LocalCallAggregator) *envelopeBridgePipeline {
+	return &envelopeBridgePipeline{
+		program: program, pause: pause, tracker: tracker,
+		preserveAll: preserveAll, aggregator: aggregator,
+	}
+}
+
+func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope) {
+	program, pause, tracker := b.program, b.pause, b.tracker
+	preserveAll, aggregator := b.preserveAll, b.aggregator
+
 	const (
-		targetPacketsPerSecond = 1000                      // Target display rate (increased for bulk transfers)
-		batchInterval          = constants.TUITickInterval // Batch interval
-		rateWindowSize         = 2 * time.Second           // Rolling window for rate calculation (react quickly)
-		tuiQueueSize           = 10                        // Buffered channel capacity for TUI batches
-		// Ring buffer capacity: 2s window at max 10k pps = 20k entries, with some headroom
-		ringBufferCapacity = 25000
+		batchInterval = constants.TUITickInterval // Batch interval
+		tuiQueueSize  = 10                        // Buffered channel capacity for TUI batches
 	)
 
-	// Set up TCP reassembly for accurate SIP detection
-	// This replaces heuristic detection (port-based, header-based) which caused false positives
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	tcpHandler := NewTUISIPHandler(tracker, aggregator)
-	defer tcpHandler.Close()
-	streamFactory := voip.NewSipStreamFactoryWithConfig(
-		ctx,
-		tcpHandler,
-		*voip.GetConfig(),
-		tracker.IsCallActive,
-	)
-	assembler := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())
-	defer func() {
-		if err := assembler.Close(); err != nil {
-			logger.Error("Failed to close TUI TCP reassembly engine", "error", err)
-		}
-	}()
-	go func() {
-		if err := assembler.Run(ctx); err != nil {
-			logger.Error("TUI TCP reassembly engine stopped", "error", err)
-		}
-	}()
+	reassembly := newTUISIPReassemblyStage(tracker, aggregator)
+	defer reassembly.close()
 
 	batch := make([]components.PacketDisplay, 0, 100)
 	packetCount := int64(0)
 	displayedCount := int64(0)
 
-	// Ring buffer for rolling window rate calculation (fixed memory, O(1) operations)
-	recentPackets := newTimeRingBuffer(ringBufferCapacity)
-	lastRateCheck := time.Now()
-
-	// Cache sampling ratio to avoid recalculating for every packet
-	cachedSamplingRatio := 1.0
-	lastSamplingUpdateCount := int64(0)
-	const samplingUpdateEveryN = 1000 // Update sampling ratio every 1000 packets
+	sampling := newDisplaySamplingPolicy(preserveAll)
 
 	ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
@@ -1036,50 +1028,6 @@ func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *te
 		}
 	}
 
-	// Calculate sampling ratio based on RECENT packet rate (rolling 2s window)
-	// This allows quick switching between fast/full mode
-	getSamplingRatio := func() float64 {
-		now := time.Now()
-
-		// Update rolling window every 100ms to avoid overhead
-		if now.Sub(lastRateCheck) > constants.TUITickInterval {
-			// Remove packets older than window using ring buffer O(1) trim
-			cutoff := now.Add(-rateWindowSize)
-			recentPackets.trimBefore(cutoff)
-			lastRateCheck = now
-		}
-
-		// Calculate rate from rolling window
-		count := recentPackets.len()
-		if count < 10 {
-			atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // 100%
-			return 1.0                                          // Not enough data, use full mode
-		}
-
-		oldest := recentPackets.oldest()
-		windowDuration := now.Sub(oldest).Seconds()
-		if windowDuration < 0.1 {
-			atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // 100%
-			return 1.0                                          // Too short, use full mode
-		}
-
-		currentRate := float64(count) / windowDuration
-		if currentRate <= float64(targetPacketsPerSecond) {
-			atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // 100%
-			return 1.0                                          // Show all packets if under target
-		}
-
-		// Sample to achieve target rate
-		ratio := float64(targetPacketsPerSecond) / currentRate
-		if ratio < 0.01 {
-			ratio = 0.01 // Show at least 1%
-		}
-
-		// Store sampling ratio as integer (ratio * 1000 for precision)
-		atomic.StoreInt64(&bridgeStats.SamplingRatio, int64(ratio*1000))
-		return ratio
-	}
-
 	for {
 		// Check pause state at loop start - block until resumed
 		if pause != nil && pause.IsPaused() {
@@ -1132,64 +1080,9 @@ func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *te
 				continue
 			}
 
-			// Update rate tracking and sampling ratio every N packets (not every packet)
-			// This reduces overhead from 100k+ time.Now() calls/sec to 100 calls/sec
-			if packetCount-lastSamplingUpdateCount >= samplingUpdateEveryN {
-				recentPackets.push(time.Now())
-				cachedSamplingRatio = getSamplingRatio()
-				lastSamplingUpdateCount = packetCount
-			}
+			reassembly.process(env)
 
-			// Check if we're in offline mode (reading from PCAP files)
-			// In offline mode, process ALL packets - no sampling needed
-			offline := env.Source.Kind == pipeline.SourcePCAPReplay
-
-			// Feed TCP packets to the assembler for SIP reassembly
-			// Only when VoIP mode is enabled - this mirrors the behavior of
-			// `lc hunt` (no TCP reassembly) vs `lc hunt voip` (with TCP reassembly)
-			// Without this check, ALL TCP traffic would be processed through the
-			// SIP reassembler, causing blocking/hanging with non-SIP traffic
-			if IsVoIPModeEnabled() {
-				if tcpLayer := pkt.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-					tcp := tcpLayer.(*layers.TCP)
-					// Get network flow for assembler
-					if netFlow := pkt.NetworkLayer(); netFlow != nil {
-						count := atomic.AddInt64(&bridgeStats.TCPPacketsToAssembler, 1)
-						// Log every 100th TCP packet to assembler
-						if count%100 == 1 {
-							logger.Debug("TCP packets fed to assembler",
-								"total_count", count,
-								"payload_len", len(tcp.Payload))
-						}
-						if err := assembler.Assemble(env); err != nil {
-							logger.Error("Failed to assemble TUI TCP packet", "error", err)
-						}
-					}
-				}
-			}
-
-			// Use cached sampling ratio (only for live capture)
-			samplingRatio := cachedSamplingRatio
-			if offline || preserveAll {
-				samplingRatio = 1.0 // Process all packets in offline mode
-			}
-
-			// Fast SIP detection BEFORE sampling decision
-			// SIP packets are NEVER sampled/dropped because losing a SIP INVITE
-			// causes subsequent RTP to appear as "RTP-only" calls
-			isSIP := isSIPPacket(pkt)
-
-			// Determine if packet should be displayed:
-			// - SIP packets: always displayed (critical for call setup)
-			// - Other packets: subject to sampling when rate is high
-			var shouldDisplay bool
-			if isSIP {
-				shouldDisplay = true // Never drop SIP packets
-			} else {
-				shouldDisplay = samplingRatio >= 1.0 || (float64(packetCount)*samplingRatio) >= float64(displayedCount+int64(len(batch))+1)
-			}
-
-			if shouldDisplay {
+			if sampling.shouldDisplay(env, packetCount, displayedCount, len(batch)) {
 				// Full conversion to extract all metadata (SDP, etc.)
 				packet := convertEnvelope(env, tracker)
 				batch = append(batch, packet)

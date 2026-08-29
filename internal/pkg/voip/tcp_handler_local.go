@@ -14,8 +14,9 @@ import (
 // LocalFileHandler handles SIP messages for local capture mode (lc sniff voip)
 // It writes matched calls to local PCAP files
 type LocalFileHandler struct {
-	tracker *CallTracker
-	buffer  *BufferManager
+	tracker       *CallTracker
+	buffer        *BufferManager
+	packetOutputs *pipeline.PacketFanout
 }
 
 // NewLocalFileHandler creates a handler for local file writing
@@ -25,6 +26,10 @@ func NewLocalFileHandler(tracker *CallTracker) *LocalFileHandler {
 
 func newLocalFileHandlerWithBuffer(tracker *CallTracker, buffer *BufferManager) *LocalFileHandler {
 	return &LocalFileHandler{tracker: tracker, buffer: buffer}
+}
+
+func newLocalFileHandlerWithOutputs(tracker *CallTracker, buffer *BufferManager, outputs *pipeline.PacketFanout) *LocalFileHandler {
+	return &LocalFileHandler{tracker: tracker, buffer: buffer, packetOutputs: outputs}
 }
 
 // HandleSIPMessage processes a complete SIP message for local file writing.
@@ -96,7 +101,7 @@ func (h *LocalFileHandler) handleSIPMessage(sipMessage []byte, event *sharedsip.
 		Data: pkt.Packet.Data(), LinkType: layers.LinkTypeEthernet, CaptureTime: ts,
 		CaptureLength: len(pkt.Packet.Data()), OriginalLength: len(pkt.Packet.Data()),
 	}
-	flow := newSniffSIPFlow(h.tracker, true, true, h.buffer)
+	flow := newSniffSIPFlowWithOutputs(h.tracker, true, true, h.packetOutputs, h.buffer)
 	defer flow.Close()
 	analysis := flow.Analyze(sipflow.Message{
 		Payload: sipMessage, Event: event, ExpectedCallID: callID, Envelope: envelope,

@@ -8,6 +8,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/endorses/lippycat/internal/pkg/voip/monitoring"
@@ -20,6 +21,10 @@ func handleUdpPackets(tracker *CallTracker, pkt capture.PacketInfo, layer *layer
 }
 
 func handleUdpPacketsWithManager(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, buffer *BufferManager) {
+	handleUdpPacketsWithManagerAndOutputs(tracker, pkt, layer, buffer, nil)
+}
+
+func handleUdpPacketsWithManagerAndOutputs(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, buffer *BufferManager, outputs *pipeline.PacketFanout) {
 	start := time.Now()
 	packet := pkt.Packet
 	ctx := context.Background()
@@ -50,11 +55,11 @@ func handleUdpPacketsWithManager(tracker *CallTracker, pkt capture.PacketInfo, l
 	// Use buffering if buffer manager is initialized
 	if buffer != nil {
 		logger.Debug("Using buffered UDP processing")
-		handleUdpPacketsWithBuffer(tracker, pkt, layer, tracingCtx, buffer)
+		handleUdpPacketsWithBufferAndOutputs(tracker, pkt, layer, tracingCtx, buffer, outputs)
 	} else {
 		logger.Debug("Using immediate UDP processing")
 		// Fallback to immediate processing (no buffering)
-		handleUdpPacketsImmediate(tracker, pkt, layer, tracingCtx)
+		handleUdpPacketsImmediateWithOutputs(tracker, pkt, layer, tracingCtx, outputs)
 	}
 }
 
@@ -63,6 +68,10 @@ func handleUdpPacketsWithTracker(tracker *CallTracker, pkt capture.PacketInfo, l
 }
 
 func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context) {
+	handleUdpPacketsImmediateWithOutputs(tracker, pkt, layer, tracingCtx, nil)
+}
+
+func handleUdpPacketsImmediateWithOutputs(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context, outputs *pipeline.PacketFanout) {
 	packet := pkt.Packet
 
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
@@ -74,7 +83,7 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 		payload := udp.Payload
 
 		// Analyze through the shared parser/selection/registry path.
-		flow, analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, true, true)
+		flow, analysis := sniffSIPMessageWithOutputs(pkt, payload, sipParseOptions(packet, layer), tracker, true, true, outputs)
 		defer flow.Close()
 		if analysis.Stage.Outcome == pipeline.OutcomeAccepted {
 			callID := analysis.SIP.CallID
@@ -104,8 +113,7 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 
 	// Not a SIP packet - check if it's RTP for a tracked call
 	if tracker.IsTracked(packet) {
-		// It's an RTP packet for a tracked call - inject into virtual interface
-		injectPacketToVirtualInterface(pkt)
+		dispatchSelectedPacket(outputs, pkt)
 
 		callID := tracker.GetCallIDForPacket(packet)
 		if tracker.config.WriteVoIP {
@@ -122,6 +130,10 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 	if len(buffers) > 0 {
 		buffer = buffers[0]
 	}
+	handleUdpPacketsWithBufferAndOutputs(tracker, pkt, layer, tracingCtx, buffer, nil)
+}
+
+func handleUdpPacketsWithBufferAndOutputs(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context, buffer *BufferManager, outputs *pipeline.PacketFanout) {
 	packet := pkt.Packet
 
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
@@ -132,7 +144,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 		}
 		payload := udp.Payload
 
-		flow, analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, false, false, buffer)
+		flow, analysis := sniffSIPMessageWithOutputs(pkt, payload, sipParseOptions(packet, layer), tracker, false, false, outputs, buffer)
 		defer flow.Close()
 		if analysis.Stage.Outcome == pipeline.OutcomeAccepted {
 			callID := analysis.SIP.CallID
@@ -178,7 +190,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 						})
 					},
 					func(callID string, sipPackets []BufferedSIPPacket, rtpPackets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
-						releaseBufferedSniffPackets(tracker, callID, sipPackets, rtpPackets, interfaceName, linkType, buffer)
+						releaseBufferedSniffPacketsWithOutputs(tracker, callID, sipPackets, rtpPackets, interfaceName, linkType, buffer, outputs)
 						call, _ := tracker.GetCall(callID)
 						if call != nil {
 							monitoring.RecordCallEvent(tracingCtx, callID, "sip_matched", map[string]interface{}{
@@ -241,7 +253,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 
 				if shouldWrite {
 					// Call already matched, inject into virtual interface and write immediately
-					injectPacketToVirtualInterface(pkt)
+					dispatchSelectedPacket(outputs, pkt)
 
 					if tracker.config.WriteVoIP {
 						WriteRTP(tracker, bufCallID, packet)
@@ -250,7 +262,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 				// Otherwise packet is buffered, waiting for filter decision
 			} else if tracker.IsTracked(packet) {
 				// Call already decided and tracker knows about it, inject into virtual interface
-				injectPacketToVirtualInterface(pkt)
+				dispatchSelectedPacket(outputs, pkt)
 
 				if tracker.config.WriteVoIP {
 					WriteRTP(tracker, callID, packet)
@@ -305,7 +317,11 @@ func releaseBufferedSniffPackets(tracker *CallTracker, callID string, sipPackets
 	if len(buffers) > 0 {
 		buffer = buffers[0]
 	}
-	flow := newSniffSIPFlow(tracker, false, false, buffer)
+	return releaseBufferedSniffPacketsWithOutputs(tracker, callID, sipPackets, rtpPackets, interfaceName, linkType, buffer, nil)
+}
+
+func releaseBufferedSniffPacketsWithOutputs(tracker *CallTracker, callID string, sipPackets []BufferedSIPPacket, rtpPackets []gopacket.Packet, interfaceName string, linkType layers.LinkType, buffer *BufferManager, outputs *pipeline.PacketFanout) map[string]sipflow.SinkStats {
+	flow := newSniffSIPFlowWithOutputs(tracker, false, false, outputs, buffer)
 	registry := sniffRegistry{tracker: tracker, buffer: buffer}
 	for _, buffered := range sipPackets {
 		if _, err := registry.Observe(buffered.Result); err != nil {
@@ -326,6 +342,16 @@ func releaseBufferedSniffPackets(tracker *CallTracker, callID string, sipPackets
 			WriteRTP(tracker, callID, packet)
 		}
 	}
+	for _, packet := range rtpPackets {
+		dispatchSelectedPacket(outputs, capture.PacketInfo{Packet: packet, Interface: interfaceName, LinkType: linkType})
+	}
 	flow.Close()
 	return flow.Stats()
+}
+
+func dispatchSelectedPacket(outputs *pipeline.PacketFanout, pkt capture.PacketInfo) {
+	if outputs == nil {
+		return
+	}
+	outputs.Dispatch(context.Background(), captureadapter.FromPacketInfo(pkt, pipeline.SourceLiveCapture))
 }

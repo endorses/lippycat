@@ -49,7 +49,6 @@ func TestRTPWriteRaceWithCompletionClose(t *testing.T) {
 	tracker.callMap[callID] = call
 	tracker.lruIndex[callID] = tracker.lruList.PushFront(callID)
 	tracker.mu.Unlock()
-	monitor := NewSniffCompletionMonitor(tracker, nil)
 	packet := lifetimeTestPacket()
 	var wg sync.WaitGroup
 	for range 8 {
@@ -65,7 +64,9 @@ func TestRTPWriteRaceWithCompletionClose(t *testing.T) {
 			}
 		}()
 	}
-	monitor.closeCallPcap(callID)
+	found, err := tracker.removeCall(callID)
+	require.True(t, found)
+	require.NoError(t, err)
 	wg.Wait()
 	require.ErrorIs(t, call.writeRTP(packet), ErrWriterNotInitialized)
 	tracker.mu.RLock()
@@ -192,11 +193,13 @@ func TestRTPActivityPreventsExpirationWithoutOutput(t *testing.T) {
 }
 
 func TestStaleCompletionDoesNotCloseReusedCallID(t *testing.T) {
-	tracker := TestCallTracker(t)
-	monitor := NewSniffCompletionMonitor(tracker, nil)
-	tracker.SetCompletionMonitor(monitor)
+	config := DefaultConfig()
+	config.PCAPGracePeriod = 20 * time.Millisecond
+	tracker := NewCallTrackerWithConfig(config)
+	t.Cleanup(tracker.Shutdown)
 	oldCall := tracker.GetOrCreateCall("reused-generation", layers.LinkTypeEthernet)
 	require.NotNil(t, oldCall)
+	oldCall.SetCallInfoState("BYE")
 
 	found, err := tracker.removeCall(oldCall.CallID)
 	require.True(t, found)
@@ -205,8 +208,28 @@ func TestStaleCompletionDoesNotCloseReusedCallID(t *testing.T) {
 	require.NotNil(t, newCall)
 	require.NotSame(t, oldCall, newCall)
 
-	monitor.closeCallPcapGeneration(oldCall.CallID, oldCall)
+	time.Sleep(2 * config.PCAPGracePeriod)
 	got, err := tracker.GetCall(oldCall.CallID)
 	require.NoError(t, err)
 	require.Same(t, newCall, got)
+}
+
+func TestCompletedCallClosesThroughRegistryLifecycle(t *testing.T) {
+	config := DefaultConfig()
+	config.PCAPGracePeriod = 20 * time.Millisecond
+	output := &recordingCallOutput{}
+	tracker := NewCallTrackerWithOutput(config, output)
+	t.Cleanup(tracker.Shutdown)
+
+	call := tracker.GetOrCreateCall("completed", layers.LinkTypeEthernet)
+	require.NotNil(t, call)
+	call.SetCallInfoState("BYE")
+
+	require.Eventually(t, func() bool {
+		_, err := tracker.GetCall(call.CallID)
+		return err != nil
+	}, time.Second, 10*time.Millisecond)
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	require.Equal(t, []string{"completed"}, output.closed)
 }

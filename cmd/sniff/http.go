@@ -7,6 +7,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/http"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -116,8 +117,8 @@ var (
 	httpTLSKeylogPipe string
 )
 
-var httpSpec = ProtocolSpec{
-	Spec: sharedProtocolSpec("http"),
+var httpSpec = sniffRuntimeAdapter{
+	protocol: protocolcatalog.MustLookup("http"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := http.ParsePorts(httpPorts)
 		if err != nil {

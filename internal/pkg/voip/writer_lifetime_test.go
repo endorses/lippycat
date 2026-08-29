@@ -45,10 +45,7 @@ func TestRTPWriteRaceWithCompletionClose(t *testing.T) {
 	tracker.replaceOutputForTest(trackerOutput(t, call.tracker))
 	call.tracker = tracker
 	tracker.shuttingDown.Store(0)
-	tracker.mu.Lock()
-	tracker.callMap[callID] = call
-	tracker.lruIndex[callID] = tracker.lruList.PushFront(callID)
-	tracker.mu.Unlock()
+	adoptCallForTest(tracker, call)
 	packet := lifetimeTestPacket()
 	var wg sync.WaitGroup
 	for range 8 {
@@ -85,11 +82,8 @@ func TestSIPWriteRaceWithLRUEviction(t *testing.T) {
 	call := createCallWithSIPOutput(t, "sip-lru-race")
 	tracker.replaceOutputForTest(trackerOutput(t, call.tracker))
 	call.tracker = tracker
-	tracker.mu.Lock()
-	tracker.callMap[call.CallID] = call
-	tracker.lruIndex[call.CallID] = tracker.lruList.PushFront(call.CallID)
+	adoptCallForTest(tracker, call)
 	tracker.touchCall(call.CallID)
-	tracker.mu.Unlock()
 
 	packet := lifetimeTestPacket()
 	var wg sync.WaitGroup

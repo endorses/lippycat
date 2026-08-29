@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -144,7 +145,9 @@ func TestLocalSource_ForwardsInDialogBYEForMatchedCall(t *testing.T) {
 	for len(methods) < 2 {
 		select {
 		case batch := <-s.Batches():
-			for _, p := range batch.Packets {
+			for _, envelope := range batch.Envelopes {
+				p, err := grpcadapter.ToCapturedPacket(envelope)
+				require.NoError(t, err)
 				if p.Metadata != nil && p.Metadata.Sip != nil && p.Metadata.Sip.CallId == callID {
 					methods[p.Metadata.Sip.Method] = true
 				}

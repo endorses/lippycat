@@ -5,7 +5,6 @@
 package tap
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -21,9 +20,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logflags"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
-	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
-	"github.com/endorses/lippycat/internal/pkg/processor/source"
-	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -583,107 +580,26 @@ func runTap(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("listen address is required")
 	}
 
-	// Create processor instance
-	p, err := processor.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to create processor: %w", err)
-	}
-
-	// Build effective BPF filter with own-traffic exclusion
+	// The shared runtime builds the processor/source/filter graph and applies
+	// own-traffic exclusions consistently with protocol-specific tap commands.
 	baseBPFFilter := cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter)
-	exclusionFilter := buildOwnTrafficExclusionFilter(config.ListenAddr, config.UpstreamAddr)
-	effectiveBPFFilter := combineFiltersWithExclusion(baseBPFFilter, exclusionFilter)
-
-	if exclusionFilter != "" {
-		logger.Info("Own-traffic BPF exclusion applied",
-			"exclusion", exclusionFilter,
-			"effective_filter", effectiveBPFFilter)
-	}
-
-	// Create LocalSource for local packet capture
-	localSourceConfig := source.LocalSourceConfig{
-		Interfaces:   cmdutil.GetStringSliceConfig("tap.interfaces", interfaces),
-		BPFFilter:    effectiveBPFFilter,
-		BatchSize:    cmdutil.GetIntConfig("tap.batch_size", batchSize),
-		BatchTimeout: time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BufferSize:   cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
-		BatchBuffer:  1000,
-		ProcessorID:  effectiveTapID, // For virtual hunter ID generation
-		ProtocolMode: "generic",
-	}
-	localSource := source.NewLocalSource(localSourceConfig)
-
-	// Create LocalTarget for local BPF filtering
-	localTargetConfig := filtering.LocalTargetConfig{
-		BaseBPF: effectiveBPFFilter,
-	}
-	localTarget := filtering.NewLocalTarget(localTargetConfig)
-
-	// Wire LocalTarget to LocalSource for BPF filter updates
-	localTarget.SetBPFUpdater(localSource)
-
-	// Create ApplicationFilter for VoIP/content filtering (same as hunt mode)
-	appFilter, err := createApplicationFilter(GetGPUConfig())
+	runtime, err := newTapRuntime(config, baseBPFFilter, tapRuntimeAdapter{
+		protocol: protocolcatalog.MustLookup("generic"),
+	})
 	if err != nil {
 		return err
-	}
-
-	// Wire ApplicationFilter to both LocalSource and LocalTarget
-	// - LocalSource uses it to filter packets before batching (like hunt does)
-	// - LocalTarget uses it to update filters when management API changes them
-	localSource.SetApplicationFilter(appFilter)
-	localTarget.SetApplicationFilter(appFilter)
-
-	// Set the local source and target on the processor
-	p.SetPacketSource(localSource)
-	p.SetFilterTarget(localTarget)
-
-	mode := "standalone"
-	if config.UpstreamAddr != "" {
-		mode = "hierarchical"
 	}
 
 	logger.Info("Tap configuration",
 		"tap_id", effectiveTapID,
-		"mode", mode,
-		"interfaces", localSourceConfig.Interfaces,
-		"bpf_filter", localSourceConfig.BPFFilter,
+		"mode", runtime.mode,
+		"interfaces", runtime.sourceConfig.Interfaces,
+		"bpf_filter", runtime.sourceConfig.BPFFilter,
 		"listen", config.ListenAddr,
 		"upstream", config.UpstreamAddr,
 		"enable_detection", config.EnableDetection)
 
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals for graceful shutdown
-	cleanup := signals.SetupHandler(ctx, cancel)
-	defer cleanup()
-
-	// Start processor in background
-	errChan := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		if err := p.Start(ctx); err != nil {
-			errChan <- err
-		}
-	}()
-
-	logger.Info("Tap node started successfully",
-		"listen", config.ListenAddr,
-		"mode", mode)
-
-	// Wait for shutdown signal or error
-	select {
-	case <-ctx.Done():
-		// Signal received, give some time for graceful shutdown
-		time.Sleep(constants.GracefulShutdownTimeout)
-	case err := <-errChan:
-		logger.Error("Tap node failed", "error", err)
-		return err
-	}
-
-	logger.Info("Tap node stopped")
-	return nil
+	return runtime.run("Tap node", config)
 }
 
 // createApplicationFilter creates an ApplicationFilter with the no-filter policy applied.

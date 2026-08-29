@@ -156,7 +156,7 @@ func (s *GRPCSource) PushInternal(batch *PacketBatch) bool {
 	}
 
 	// Update stats (all packets are captured and forwarded)
-	for _, pkt := range batch.Packets {
+	for _, pkt := range batch.Envelopes {
 		s.stats.AddCaptured()
 		s.stats.AddForwarded(uint64(len(pkt.Data)))
 	}
@@ -167,10 +167,10 @@ func (s *GRPCSource) PushInternal(batch *PacketBatch) bool {
 	case s.batches <- batch:
 		return true
 	default:
-		s.stats.AddDropped(uint64(len(batch.Packets)))
+		s.stats.AddDropped(uint64(len(batch.Envelopes)))
 		logger.Warn("GRPCSource batch buffer full, dropping batch",
 			"source_id", batch.SourceID,
-			"packets", len(batch.Packets),
+			"packets", len(batch.Envelopes),
 			"sequence", batch.Sequence)
 		return false
 	}

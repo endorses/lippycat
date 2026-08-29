@@ -12,7 +12,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
-	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -146,7 +145,7 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(voipHunterConfigSpec(effectiveBPFFilter))
+	config := buildHunterConfig(protocolHunterConfigSpec("voip", effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -203,17 +202,6 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 			return runVoIPHunterWithBuffering(ctx, h, bufferMgr)
 		},
 	})
-}
-
-func voipHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{
-		protocol:            protocolcatalog.MustLookup("voip"),
-		bpfFilter:           filter,
-		voIPMode:            true,
-		enableVoIPFilter:    true,
-		useGPUFlag:          true,
-		includeFilterPolicy: true,
-	}
 }
 
 // runVoIPHunterWithBuffering wraps hunter packet processing with VoIP buffering and TCP reassembly

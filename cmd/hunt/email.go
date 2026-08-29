@@ -13,7 +13,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/email"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -201,7 +200,7 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(emailHunterConfigSpec(effectiveBPFFilter))
+	config := buildHunterConfig(protocolHunterConfigSpec("email", effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -263,10 +262,6 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 			return processor.Close, nil
 		},
 	})
-}
-
-func emailHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{protocol: protocolcatalog.MustLookup("email"), bpfFilter: filter}
 }
 
 // buildEmailContentFilter creates a ContentFilter from command-line flags.

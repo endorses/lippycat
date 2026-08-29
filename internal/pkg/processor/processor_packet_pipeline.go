@@ -28,6 +28,7 @@ package processor
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -35,6 +36,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
@@ -49,28 +52,34 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	defer batch.RunAfterProcess()
 
 	sourceID := batch.SourceID
+	protoBatch, err := batch.ToProtoBatchE()
+	if err != nil {
+		logger.Error("Failed to project normalized packet batch", "error", err, "source_id", sourceID, "sequence", batch.Sequence)
+		return
+	}
+	packets := protoBatch.Packets
 
 	logger.Debug("Received packet batch",
 		"source_id", sourceID,
 		"sequence", batch.Sequence,
-		"packets", len(batch.Packets))
+		"packets", len(packets))
 
 	// Update hunter statistics (only for gRPC sources with hunter IDs)
 	if p.hunterManager != nil && sourceID != "" && sourceID != "local" {
-		p.hunterManager.UpdatePacketStats(sourceID, uint64(len(batch.Packets)), batch.TimestampNs)
+		p.hunterManager.UpdatePacketStats(sourceID, uint64(len(packets)), batch.TimestampNs)
 	}
 
 	// Queue packets for async PCAP write if configured
 	if p.pcapWriter != nil {
-		p.pcapWriter.QueuePackets(batch.Packets)
+		p.pcapWriter.QueuePackets(packets)
 	}
 
 	// Update processor statistics (atomic increment)
-	p.packetsReceived.Add(uint64(len(batch.Packets)))
+	p.packetsReceived.Add(uint64(len(packets)))
 
 	// Process TLS session keys from packets (for decryption support)
 	if p.tlsKeylogWriter != nil {
-		for _, packet := range batch.Packets {
+		for _, packet := range packets {
 			if packet.TlsKeys != nil {
 				p.tlsKeylogWriter.ProcessPacketKeys(packet)
 			}
@@ -79,17 +88,17 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 	// Enrich packets with protocol detection if enabled
 	if p.enricher != nil {
-		p.enricher.Enrich(batch.Packets)
+		p.enricher.Enrich(packets)
 	}
 
-	p.trackConnections(sourceID, batch.Packets)
+	p.trackConnections(sourceID, packets)
 
 	// Normalize protocol metadata after enrichment and before forwarding/broadcasting.
-	p.emitProtocolEvents(sourceID, batch.Packets)
+	p.emitProtocolEvents(sourceID, packets)
 
 	// Aggregate VoIP call state from packet metadata
 	if p.callAggregator != nil {
-		for _, packet := range batch.Packets {
+		for _, packet := range packets {
 			if packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil) {
 				p.callAggregator.ProcessPacket(packet, sourceID)
 			}
@@ -98,7 +107,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 	// Correlate SIP calls across B2BUA boundaries
 	if p.callCorrelator != nil {
-		for _, packet := range batch.Packets {
+		for _, packet := range packets {
 			if packet.Metadata != nil && packet.Metadata.Sip != nil {
 				p.callCorrelator.ProcessPacket(packet, sourceID)
 			}
@@ -108,7 +117,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Aggregate DNS tunneling statistics from hunter-provided metadata
 	// This builds a cross-hunter view of suspicious domains
 	if p.dnsTunneling != nil {
-		for _, packet := range batch.Packets {
+		for _, packet := range packets {
 			if packet.Metadata != nil && packet.Metadata.Dns != nil {
 				dnsProto := packet.Metadata.Dns
 				// Convert proto DNS metadata to types.DNSMetadata for analysis
@@ -133,7 +142,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Process LI (Lawful Interception) if enabled
 	// This is a no-op if built without -tags li or if LI is not enabled
 	if p.isLIEnabled() {
-		for _, pkt := range batch.Packets {
+		for _, pkt := range packets {
 			// Skip packets without matched filter IDs (not targeted by LI)
 			if len(pkt.MatchedFilterIds) == 0 {
 				continue
@@ -207,7 +216,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Write VoIP packets to per-call PCAP files if configured
 	// Writes separate SIP and RTP files for each call
 	if p.sessionOutputManager != nil {
-		for _, packet := range batch.Packets {
+		for _, packet := range packets {
 			// Check if packet has SIP metadata with call-id
 			if packet.Metadata != nil && packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" {
 				callID := packet.Metadata.Sip.CallId
@@ -233,7 +242,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Write non-VoIP packets to auto-rotating PCAP files if configured
 	// Auto-rotates based on idle time, file size, and duration
 	if p.autoRotatePcapWriter != nil {
-		for _, packet := range batch.Packets {
+		for _, packet := range packets {
 			// Skip VoIP packets (they're handled by per-call writer)
 			isVoIP := packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil)
 			if isVoIP {
@@ -251,15 +260,11 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		}
 	}
 
-	// Convert to protobuf batch for upstream forwarding and subscriber broadcast
-	// Legacy processor stages above still mutate the compatibility protobuf view.
-	// Merge those changes at this explicit boundary; egress then reads only the
-	// normalized envelopes.
-	if err := batch.SyncEnvelopesFromPackets(); err != nil {
-		logger.Error("Failed to normalize processed packet batch", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
+	if err := refreshEnvelopes(batch, packets); err != nil {
+		logger.Error("Failed to retain processed packet metadata", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
 		return
 	}
-	protoBatch, err := batch.ToProtoBatchE()
+	protoBatch, err = batch.ToProtoBatchE()
 	if err != nil {
 		logger.Error("Failed to encode processed packet batch", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
 		return
@@ -277,8 +282,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	if p.vifManager != nil {
 		// Convert packet batch to PacketDisplay for injection
 		// We need to convert the protobuf packets to types.PacketDisplay format
-		displayPackets := make([]types.PacketDisplay, 0, len(batch.Packets))
-		for _, pkt := range batch.Packets {
+		displayPackets := make([]types.PacketDisplay, 0, len(packets))
+		for _, pkt := range packets {
 			display := types.PacketDisplay{
 				Timestamp: time.Unix(0, pkt.TimestampNs),
 				RawData:   pkt.Data,                      // Raw packet bytes (includes Ethernet header if LinkType is Ethernet)
@@ -302,6 +307,25 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		}
 	}
 
+}
+
+// refreshEnvelopes retains metadata produced by protobuf-backed analyzers while
+// preserving the normalized capture and source provenance as authoritative.
+func refreshEnvelopes(batch *source.PacketBatch, packets []*data.CapturedPacket) error {
+	if len(batch.Envelopes) != len(packets) {
+		return fmt.Errorf("envelope count %d differs from projected packet count %d", len(batch.Envelopes), len(packets))
+	}
+	for i, packet := range packets {
+		current := batch.Envelopes[i]
+		normalized, err := grpcadapter.FromCapturedPacket(packet, current.Source)
+		if err != nil {
+			return fmt.Errorf("normalize projected packet %d: %w", i, err)
+		}
+		current.Metadata = normalized.Metadata
+		current.TLSKeys = normalized.TLSKeys
+		current.Stages = current.Stages.With(pipeline.StageAnalyzed)
+	}
+	return nil
 }
 
 func (p *Processor) trackConnections(sourceID string, packets []*data.CapturedPacket) {

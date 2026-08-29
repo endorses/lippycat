@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
@@ -59,7 +60,7 @@ func (s *recordingStream) Context() context.Context         { return s.ctx }
 func (*recordingStream) SendMsg(any) error                  { return nil }
 func (*recordingStream) RecvMsg(any) error                  { return nil }
 
-func packet() *data.CapturedPacket { return &data.CapturedPacket{Data: []byte{1}} }
+func packet() *pipeline.PacketEnvelope { return &pipeline.PacketEnvelope{Data: []byte{1}} }
 
 func TestHandleFlowControl_PauseAndResume(t *testing.T) {
 	m := &Manager{}
@@ -166,7 +167,7 @@ func TestHandleFlowControl_StateTransitions(t *testing.T) {
 
 func TestPauseKeepsCurrentBatchBoundedAndAccountsDrops(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	queue := make(chan *data.PacketBatch, 2)
+	queue := make(chan *pipeline.PacketBatch, 2)
 	stats := &flowStats{}
 	m := New(Config{BatchSize: 2}, stats, nil, ctx, queue)
 	m.HandleFlowControl(&data.StreamControl{FlowControl: data.FlowControl_FLOW_PAUSE})
@@ -190,7 +191,7 @@ func TestPauseKeepsCurrentBatchBoundedAndAccountsDrops(t *testing.T) {
 
 func TestPauseAccountsDropsWhenMemoryAndDiskAreFull(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	queue := make(chan *data.PacketBatch, 1)
+	queue := make(chan *pipeline.PacketBatch, 1)
 	stats := &flowStats{}
 	m := New(Config{
 		BatchSize:         1,
@@ -216,7 +217,7 @@ func TestPauseAccountsDropsWhenMemoryAndDiskAreFull(t *testing.T) {
 func TestResumeDrainsPausedBatchesInOrder(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	queue := make(chan *data.PacketBatch, 4)
+	queue := make(chan *pipeline.PacketBatch, 4)
 	m := New(Config{BatchSize: 1}, &flowStats{}, nil, ctx, queue)
 	stream := &recordingStream{ctx: ctx, sent: make(chan struct{}, 4)}
 	m.SetStream(stream)
@@ -245,7 +246,7 @@ func TestResumeDrainsPausedBatchesInOrder(t *testing.T) {
 
 func TestResumePreservesOrderAcrossMemoryAndDiskOverflow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	queue := make(chan *data.PacketBatch, 2)
+	queue := make(chan *pipeline.PacketBatch, 2)
 	m := New(Config{
 		BatchSize:         1,
 		DiskBufferEnabled: true,
@@ -283,7 +284,7 @@ func TestResumePreservesOrderAcrossMemoryAndDiskOverflow(t *testing.T) {
 func TestSlowPacesSenderWithoutBlockingBatching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	queue := make(chan *data.PacketBatch, 8)
+	queue := make(chan *pipeline.PacketBatch, 8)
 	m := New(Config{BatchSize: 1, SlowSendInterval: 30 * time.Millisecond}, &flowStats{}, nil, ctx, queue)
 	stream := &recordingStream{ctx: ctx, sent: make(chan struct{}, 8)}
 	m.SetStream(stream)
@@ -311,7 +312,7 @@ func TestLongDurationFlowTransitionsWithFakeClock(t *testing.T) {
 	defer cancel()
 	ticker := &fakeTicker{ch: make(chan time.Time, 8)}
 	clock := &fakeClock{ticker: ticker}
-	queue := make(chan *data.PacketBatch, 8)
+	queue := make(chan *pipeline.PacketBatch, 8)
 	m := New(Config{BatchSize: 1, SlowSendInterval: time.Second, Clock: clock}, &flowStats{}, nil, ctx, queue)
 	stream := &recordingStream{ctx: ctx, sent: make(chan struct{}, 8)}
 	m.SetStream(stream)

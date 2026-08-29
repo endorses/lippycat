@@ -18,16 +18,29 @@ func FromCapturedPacket(p *data.CapturedPacket, source pipeline.SourceProvenance
 	source.InterfaceName, source.InterfaceIndex = p.InterfaceName, p.InterfaceIndex
 	e := &pipeline.PacketEnvelope{Data: append([]byte(nil), p.Data...), LinkType: layers.LinkType(p.LinkType), CaptureTime: time.Unix(0, p.TimestampNs), CaptureLength: int(p.CaptureLength), OriginalLength: int(p.OriginalLength), Source: source, MatchedFilterIDs: append([]string(nil), p.MatchedFilterIds...), TLSKeys: fromTLSKeys(p.TlsKeys)}
 	if p.Metadata != nil {
-		payload, err := proto.Marshal(p.Metadata)
+		metadata, err := MetadataFromProto(p.Metadata)
 		if err != nil {
-			return nil, fmt.Errorf("encode packet metadata: %w", err)
+			return nil, err
 		}
-		e.Metadata = &pipeline.Metadata{Protocol: p.Metadata.Protocol, SourceIP: p.Metadata.SrcIp, DestinationIP: p.Metadata.DstIp, SourcePort: p.Metadata.SrcPort, DestinationPort: p.Metadata.DstPort, Transport: p.Metadata.Transport, Info: p.Metadata.Info, Details: cloneMap(p.Metadata.Details), Encoding: pipeline.MetadataProtobuf, Payload: payload}
+		e.Metadata = metadata
 	}
 	if len(e.MatchedFilterIDs) > 0 {
 		e.Stages = e.Stages.With(pipeline.StageFiltered)
 	}
 	return e, nil
+}
+
+// MetadataFromProto encodes analyzer metadata for storage on a transport-neutral
+// envelope. Generated protobuf values must not escape the adapter boundary.
+func MetadataFromProto(metadata *data.PacketMetadata) (*pipeline.Metadata, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+	payload, err := proto.Marshal(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("encode packet metadata: %w", err)
+	}
+	return &pipeline.Metadata{Protocol: metadata.Protocol, SourceIP: metadata.SrcIp, DestinationIP: metadata.DstIp, SourcePort: metadata.SrcPort, DestinationPort: metadata.DstPort, Transport: metadata.Transport, Info: metadata.Info, Details: cloneMap(metadata.Details), Encoding: pipeline.MetadataProtobuf, Payload: payload}, nil
 }
 
 func FromPacketBatch(b *data.PacketBatch) (*pipeline.PacketBatch, error) {

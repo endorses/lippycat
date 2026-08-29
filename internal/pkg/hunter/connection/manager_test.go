@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
@@ -202,7 +203,7 @@ func TestSendTimeoutCancelsExactGenerationAndForcesTransportClose(t *testing.T) 
 	defer rootCancel()
 	connCtx, connCancel := context.WithCancel(rootCtx)
 	stream := &transportBlockedStream{started: make(chan struct{}), release: make(chan struct{})}
-	queue := make(chan *data.PacketBatch, 1)
+	queue := make(chan *pipeline.PacketBatch, 1)
 	fwd := forwarding.New(forwarding.Config{
 		BatchSize:   1,
 		SendTimeout: 10 * time.Millisecond,
@@ -225,7 +226,7 @@ func TestSendTimeoutCancelsExactGenerationAndForcesTransportClose(t *testing.T) 
 		return nil
 	}
 
-	queue <- &data.PacketBatch{Sequence: 1, Packets: []*data.CapturedPacket{{}}}
+	queue <- &pipeline.PacketBatch{Sequence: 1, Packets: []*pipeline.PacketEnvelope{{}}}
 	select {
 	case <-stream.started:
 	case <-time.After(time.Second):

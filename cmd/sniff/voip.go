@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/spf13/cobra"
@@ -67,8 +68,8 @@ var (
 	// (defined in sniff.go as PersistentFlags)
 )
 
-var voipSpec = ProtocolSpec{
-	Spec: sharedProtocolSpec("voip"),
+var voipSpec = sniffRuntimeAdapter{
+	protocol: protocolcatalog.MustLookup("voip"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		udpOnly := viper.GetBool("voip.udp_only")
 		sipPorts := viper.GetString("voip.sip_ports")

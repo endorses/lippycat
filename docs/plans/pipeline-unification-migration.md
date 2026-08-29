@@ -905,3 +905,22 @@ production code and regression tests. `make test`, the supported non-CUDA
 build/vet matrix, and focused race tests pass. CUDA-capable CI and the operational
 soak scenarios remain open release-qualification requirements and are not
 claimed by this implementation status.
+
+### Success-Metric Remediation (2026-08-29)
+
+- [x] Make `PacketEnvelope` authoritative through hunter batching, local-source
+      batching, gRPC ingress, and processor processing; restrict protobuf packet
+      projections to analyzer and transport boundaries.
+- [x] Replace the legacy, processor, and TUI call-state implementations with one
+      bounded, instance-owned `callregistry.Core`, retaining only
+      topology-specific metadata and output adapters outside the core.
+- [x] Make `protocolcatalog.Spec` the sole protocol definition consumed by
+      sniff, hunt, and tap runtime adapters.
+- [x] Route generic tap through the same shared tap runtime used by
+      protocol-specific tap commands.
+
+Remediation verification removed the processor packet compatibility view and
+the legacy tracker compatibility maps/LRU state. Shared registry tests cover
+bounded calls and endpoints, retention leases, eviction priority, lifecycle
+ordering, expiration, and idempotent shutdown. Protocol command tests verify
+catalog-driven composition across sniff, hunt, and tap.

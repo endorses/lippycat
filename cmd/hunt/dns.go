@@ -9,7 +9,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -97,7 +96,7 @@ func runDNSHunt(cmd *cobra.Command, args []string) error {
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(dnsHunterConfigSpec(effectiveBPFFilter))
+	config := buildHunterConfig(protocolHunterConfigSpec("dns", effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -144,8 +143,4 @@ func runDNSHunt(cmd *cobra.Command, args []string) error {
 
 	// Domain filtering is managed by the processor and pushed to hunters via gRPC.
 	return runHunterRuntime(config, hunterRuntimeSpec{name: "dns"})
-}
-
-func dnsHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{protocol: protocolcatalog.MustLookup("dns"), bpfFilter: filter}
 }

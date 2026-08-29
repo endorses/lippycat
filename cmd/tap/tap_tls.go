@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -251,7 +252,7 @@ func runTLSTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{Spec: sharedProtocolSpec("tls")})
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, tapRuntimeAdapter{protocol: protocolcatalog.MustLookup("tls")})
 	if err != nil {
 		return err
 	}

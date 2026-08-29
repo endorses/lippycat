@@ -13,6 +13,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter/buffer"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/google/gopacket"
 )
@@ -119,11 +121,11 @@ type Manager struct {
 
 	// Batching
 	batchMu       sync.Mutex
-	currentBatch  []*data.CapturedPacket
+	currentBatch  []*pipeline.PacketEnvelope
 	batchSequence uint64
 
 	// Batch sending (async)
-	batchQueue chan *data.PacketBatch
+	batchQueue chan *pipeline.PacketBatch
 	senderWg   sync.WaitGroup // tracks batch sender goroutine
 
 	// Disk overflow buffer (optional)
@@ -158,7 +160,7 @@ type Manager struct {
 
 // New creates a new forwarding manager with a persistent batch queue
 // The queue is provided externally to survive reconnections
-func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBufferProvider, connCtx context.Context, batchQueue chan *data.PacketBatch) *Manager {
+func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBufferProvider, connCtx context.Context, batchQueue chan *pipeline.PacketBatch) *Manager {
 	if config.SlowSendInterval <= 0 {
 		config.SlowSendInterval = 25 * time.Millisecond
 	}
@@ -170,7 +172,7 @@ func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBu
 	}
 	m := &Manager{
 		config:           config,
-		currentBatch:     make([]*data.CapturedPacket, 0, config.BatchSize),
+		currentBatch:     make([]*pipeline.PacketEnvelope, 0, config.BatchSize),
 		statsCollector:   statsCollector,
 		packetBufferProv: packetBufferProv,
 		connCtx:          connCtx,
@@ -335,23 +337,32 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				matchedFilterIDs = filterIDs
 			}
 
-			// Convert to protobuf packet
-			pbPkt := convertPacket(pktInfo, matchedFilterIDs)
-			pbPkt.Metadata = protocolmeta.Enrich(pktInfo.Packet, pbPkt.Metadata, m.config.IncludeHTTPHeaders)
+			envelope := convertPacket(pktInfo, matchedFilterIDs)
+			metadata := protocolmeta.Enrich(pktInfo.Packet, nil, m.config.IncludeHTTPHeaders)
 
 			// Add DNS metadata if DNS processor is set
 			if m.dnsMetadataProvider != nil {
 				if dnsMetadata := m.dnsMetadataProvider.ProcessPacket(pktInfo.Packet); dnsMetadata != nil {
-					if pbPkt.Metadata == nil {
-						pbPkt.Metadata = &data.PacketMetadata{}
+					if metadata == nil {
+						metadata = &data.PacketMetadata{}
 					}
-					pbPkt.Metadata.Dns = dnsMetadata
+					metadata.Dns = dnsMetadata
 				}
+			}
+			if metadata != nil {
+				encoded, err := grpcadapter.MetadataFromProto(metadata)
+				if err != nil {
+					logger.Error("Failed to normalize packet metadata", "error", err)
+					m.statsCollector.IncrementDropped(1)
+					continue
+				}
+				envelope.Metadata = encoded
+				envelope.Stages = envelope.Stages.With(pipeline.StageDetected).With(pipeline.StageAnalyzed)
 			}
 
 			// Add to current batch with minimal lock duration
 			m.batchMu.Lock()
-			m.currentBatch = append(m.currentBatch, pbPkt)
+			m.currentBatch = append(m.currentBatch, envelope)
 			batchLen := len(m.currentBatch)
 			m.batchMu.Unlock()
 
@@ -377,12 +388,13 @@ func (m *Manager) SendBatch() {
 
 	// Create batch message
 	m.batchSequence++
-	batch := &data.PacketBatch{
-		HunterId:    m.config.HunterID,
-		Sequence:    m.batchSequence,
-		TimestampNs: time.Now().UnixNano(),
-		Packets:     m.currentBatch,
-		Stats: &data.BatchStats{
+	batch := &pipeline.PacketBatch{
+		Source:    pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, NodeID: m.config.HunterID},
+		Sequence:  m.batchSequence,
+		CreatedAt: time.Now(),
+		Packets:   m.currentBatch,
+		HasStats:  true,
+		Stats: pipeline.BatchStats{
 			TotalCaptured:   m.statsCollector.GetCaptured(),
 			FilteredMatched: m.statsCollector.GetMatched(),
 			Dropped:         m.statsCollector.GetDropped(),
@@ -391,7 +403,7 @@ func (m *Manager) SendBatch() {
 	}
 
 	// Reset batch
-	m.currentBatch = make([]*data.CapturedPacket, 0, m.config.BatchSize)
+	m.currentBatch = make([]*pipeline.PacketEnvelope, 0, m.config.BatchSize)
 	m.batchMu.Unlock()
 
 	// Serialize admission across the memory and disk tiers. Once a batch spills
@@ -414,14 +426,20 @@ func (m *Manager) SendBatch() {
 }
 
 // writeBatchToDisk is called with overflowMu held.
-func (m *Manager) writeBatchToDisk(batch *data.PacketBatch) {
+func (m *Manager) writeBatchToDisk(batch *pipeline.PacketBatch) {
 	if m.diskBuffer == nil {
 		logger.Warn("Batch queue full, dropping batch (disk buffer disabled)",
 			"sequence", batch.Sequence, "packets", len(batch.Packets))
 		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
 		return
 	}
-	if err := m.diskBuffer.Write(batch); err != nil {
+	wireBatch, err := grpcadapter.ToPacketBatch(batch)
+	if err != nil {
+		logger.Error("Failed to encode batch for disk overflow", "sequence", batch.Sequence, "error", err)
+		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+		return
+	}
+	if err := m.diskBuffer.Write(wireBatch); err != nil {
 		logger.Warn("Batch queue and disk buffer full, dropping batch",
 			"sequence", batch.Sequence, "packets", len(batch.Packets), "error", err)
 		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
@@ -448,7 +466,7 @@ func (m *Manager) batchSender() {
 		diskCheckChan = diskCheckTicker.C
 	}
 
-	var pending *data.PacketBatch
+	var pending *pipeline.PacketBatch
 	for {
 		if pending != nil && !m.paused.Load() {
 			if m.GetFlowControlState() == data.FlowControl_FLOW_SLOW {
@@ -470,7 +488,7 @@ func (m *Manager) batchSender() {
 		// A nil channel disables the dequeue case. PAUSE therefore leaves all
 		// capture-side batching and bounded overflow behavior active while it
 		// prevents the sole stream owner from taking another batch.
-		var sendQueue <-chan *data.PacketBatch
+		var sendQueue <-chan *pipeline.PacketBatch
 		if !m.paused.Load() {
 			sendQueue = m.batchQueue
 		}
@@ -490,13 +508,24 @@ func (m *Manager) batchSender() {
 				continue
 			}
 			m.overflowMu.Lock()
-			batch, err := m.diskBuffer.Read()
+			wireBatch, err := m.diskBuffer.Read()
+			var batch *pipeline.PacketBatch
 			if err != nil {
 				logger.Error("Failed to read from disk buffer", "error", err)
-			} else if batch == nil {
+			} else if wireBatch == nil {
 				// Admission is serialized by overflowMu, so no producer can append
 				// between observing an empty disk and reopening the memory tier.
 				m.diskBacklog = false
+			} else {
+				batch, err = grpcadapter.FromPacketBatch(wireBatch)
+				if err != nil {
+					logger.Error("Failed to normalize disk-buffered batch", "error", err)
+				} else {
+					batch.Source.Kind = pipeline.SourceLiveCapture
+					for _, envelope := range batch.Packets {
+						envelope.Source.Kind = pipeline.SourceLiveCapture
+					}
+				}
 			}
 			m.overflowMu.Unlock()
 			if batch != nil {
@@ -507,7 +536,7 @@ func (m *Manager) batchSender() {
 }
 
 // sendBatch is called only by batchSender, the sole Send/CloseSend owner.
-func (m *Manager) sendBatch(batch *data.PacketBatch) bool {
+func (m *Manager) sendBatch(batch *pipeline.PacketBatch) bool {
 	// Get stream
 	m.streamMu.Lock()
 	stream := m.stream
@@ -525,7 +554,10 @@ func (m *Manager) sendBatch(batch *data.PacketBatch) bool {
 		timedOut.Store(true)
 		m.signalDisconnect()
 	})
-	err := stream.Send(batch)
+	wireBatch, err := grpcadapter.ToPacketBatch(batch)
+	if err == nil {
+		err = stream.Send(wireBatch)
+	}
 	timer.Stop()
 	if err != nil {
 		logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence,
@@ -585,9 +617,9 @@ func (m *Manager) recordSendFailure() {
 
 // AddPacketToBatch adds a packet directly to the current batch
 // Used by ForwardPacketWithMetadata for pre-constructed packets
-func (m *Manager) AddPacketToBatch(pbPkt *data.CapturedPacket) bool {
+func (m *Manager) AddPacketToBatch(envelope *pipeline.PacketEnvelope) bool {
 	m.batchMu.Lock()
-	m.currentBatch = append(m.currentBatch, pbPkt)
+	m.currentBatch = append(m.currentBatch, envelope)
 	batchLen := len(m.currentBatch)
 	m.batchMu.Unlock()
 
@@ -595,9 +627,9 @@ func (m *Manager) AddPacketToBatch(pbPkt *data.CapturedPacket) bool {
 	return batchLen >= m.config.BatchSize
 }
 
-// convertPacket converts capture.PacketInfo to protobuf format
+// convertPacket converts capture.PacketInfo to the normalized pipeline format.
 // matchedFilterIDs contains IDs of filters that matched this packet (for LI correlation)
-func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *data.CapturedPacket {
+func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *pipeline.PacketEnvelope {
 	pkt := pktInfo.Packet
 
 	captureLen := 0
@@ -627,15 +659,19 @@ func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *data.
 	}
 
 	// Packet field conversions (safe: lengths are from pcap, LinkType is enum < 300)
-	return &data.CapturedPacket{
+	stages := pipeline.StageProvenance(0)
+	if len(matchedFilterIDs) > 0 {
+		stages = stages.With(pipeline.StageFiltered)
+	}
+	return &pipeline.PacketEnvelope{
 		Data:             packetData,
-		TimestampNs:      timestamp.UnixNano(),
-		CaptureLength:    uint32(captureLen),  // #nosec G115
-		OriginalLength:   uint32(originalLen), // #nosec G115
-		InterfaceIndex:   0,
-		LinkType:         uint32(pktInfo.LinkType), // #nosec G115
-		InterfaceName:    pktInfo.Interface,
-		MatchedFilterIds: matchedFilterIDs, // For LI correlation
+		CaptureTime:      timestamp,
+		CaptureLength:    captureLen,
+		OriginalLength:   originalLen,
+		LinkType:         pktInfo.LinkType,
+		Source:           pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, NodeID: "", InterfaceName: pktInfo.Interface},
+		Stages:           stages,
+		MatchedFilterIDs: matchedFilterIDs, // For LI correlation
 	}
 }
 

@@ -22,6 +22,20 @@ type hunterConfigSpec struct {
 	includeFilterPolicy bool
 }
 
+// protocolHunterConfigSpec adapts a shared protocol registration to the hunter
+// topology. Protocol command files only resolve flags and analyzer callbacks.
+func protocolHunterConfigSpec(name, bpfFilter string) hunterConfigSpec {
+	protocol := protocolcatalog.MustLookup(name)
+	return hunterConfigSpec{
+		protocol:            protocol,
+		bpfFilter:           bpfFilter,
+		voIPMode:            protocol.Hunter.VoIPMode,
+		enableVoIPFilter:    protocol.Hunter.EnableVoIPFilter,
+		useGPUFlag:          protocol.Hunter.UseGPUConfig,
+		includeFilterPolicy: protocol.Hunter.IncludeFilterPolicy,
+	}
+}
+
 func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 	config := hunter.Config{
 		ProcessorAddr:        cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),

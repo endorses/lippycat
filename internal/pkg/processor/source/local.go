@@ -25,6 +25,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
@@ -182,7 +184,7 @@ type LocalSource struct {
 
 	// Batching
 	batchMu      sync.Mutex
-	currentBatch []*data.CapturedPacket
+	currentBatch []*pipeline.PacketEnvelope
 	// currentBatchAfterProcess is protected by batchMu and moves atomically
 	// with currentBatch into the emitted PacketBatch.
 	currentBatchAfterProcess []func()
@@ -295,7 +297,7 @@ func NewLocalSource(cfg LocalSourceConfig) *LocalSource {
 
 	return &LocalSource{
 		config:          cfg,
-		currentBatch:    make([]*data.CapturedPacket, 0, cfg.BatchSize),
+		currentBatch:    make([]*pipeline.PacketEnvelope, 0, cfg.BatchSize),
 		batches:         make(chan *PacketBatch, cfg.BatchBuffer),
 		stats:           NewAtomicStats(),
 		callFilterCache: newCallFilterCache(cfg.CallFilterCacheSize),
@@ -689,8 +691,17 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 
 			// Add to batch
+			envelope, err := s.normalizeLocalPacket(pbPkt)
+			if err != nil {
+				s.stats.AddDropped(1)
+				logger.Error("Failed to normalize injected local packet", "error", err)
+				if injectedPkt.AfterProcess != nil {
+					injectedPkt.AfterProcess()
+				}
+				continue
+			}
 			s.batchMu.Lock()
-			s.currentBatch = append(s.currentBatch, pbPkt)
+			s.currentBatch = append(s.currentBatch, envelope)
 			if injectedPkt.AfterProcess != nil {
 				s.currentBatchAfterProcess = append(s.currentBatchAfterProcess, injectedPkt.AfterProcess)
 			}
@@ -849,8 +860,14 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 
 			// Add to batch
+			envelope, err := s.normalizeLocalPacket(pbPkt)
+			if err != nil {
+				s.stats.AddDropped(1)
+				logger.Error("Failed to normalize local packet", "error", err)
+				continue
+			}
 			s.batchMu.Lock()
-			s.currentBatch = append(s.currentBatch, pbPkt)
+			s.currentBatch = append(s.currentBatch, envelope)
 			batchLen := len(s.currentBatch)
 			s.batchMu.Unlock()
 
@@ -875,11 +892,16 @@ func (s *LocalSource) sendBatch() {
 	}
 
 	s.batchSeq++
+	batchTime := time.Now()
+	for _, envelope := range s.currentBatch {
+		envelope.Source.BatchSequence = s.batchSeq
+		envelope.Source.BatchTimestamp = batchTime
+	}
 	batch := &PacketBatch{
 		SourceID:    s.SourceID(),
-		Packets:     s.currentBatch,
+		Envelopes:   s.currentBatch,
 		Sequence:    s.batchSeq,
-		TimestampNs: time.Now().UnixNano(),
+		TimestampNs: batchTime.UnixNano(),
 		Stats: &data.BatchStats{
 			TotalCaptured:   s.stats.packetsCaptured.Load(),
 			FilteredMatched: s.stats.packetsForwarded.Load(),
@@ -889,19 +911,9 @@ func (s *LocalSource) sendBatch() {
 	}
 
 	// Reset batch
-	s.currentBatch = make([]*data.CapturedPacket, 0, s.config.BatchSize)
+	s.currentBatch = make([]*pipeline.PacketEnvelope, 0, s.config.BatchSize)
 	s.currentBatchAfterProcess = nil
 	s.batchMu.Unlock()
-	if err := batch.SyncEnvelopesFromPackets(); err != nil {
-		s.stats.AddDropped(uint64(len(batch.Packets)))
-		logger.Error("Failed to normalize local packet batch",
-			"sequence", batch.Sequence,
-			"packets", len(batch.Packets),
-			"error", err)
-		batch.RunAfterProcess()
-		return
-	}
-
 	s.stats.AddBatch()
 
 	// Non-blocking send
@@ -910,12 +922,19 @@ func (s *LocalSource) sendBatch() {
 		// Successfully sent
 	default:
 		// Buffer full - drop batch
-		s.stats.AddDropped(uint64(len(batch.Packets)))
+		s.stats.AddDropped(uint64(len(batch.Envelopes)))
 		batch.RunAfterProcess()
 		logger.Warn("LocalSource batch buffer full, dropping batch",
 			"sequence", batch.Sequence,
-			"packets", len(batch.Packets))
+			"packets", len(batch.Envelopes))
 	}
+}
+
+func (s *LocalSource) normalizeLocalPacket(packet *data.CapturedPacket) (*pipeline.PacketEnvelope, error) {
+	return grpcadapter.FromCapturedPacket(packet, pipeline.SourceProvenance{
+		Kind:   pipeline.SourceLiveCapture,
+		NodeID: s.SourceID(),
+	})
 }
 
 // Batches returns the channel that receives packet batches.

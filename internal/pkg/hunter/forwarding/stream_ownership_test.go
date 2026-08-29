@@ -11,6 +11,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 )
@@ -67,13 +68,13 @@ func (*blockingStream) RecvMsg(any) error          { return nil }
 func TestBlockedSendTimeoutStopsOwnerBeforeClose(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := &blockingStream{ctx: ctx, started: make(chan struct{})}
-	queue := make(chan *data.PacketBatch, 2)
+	queue := make(chan *pipeline.PacketBatch, 2)
 	stats := &ownershipStats{}
 	m := New(Config{BatchSize: 1}, stats, nil, ctx, queue)
 	m.SetStream(stream)
 	m.SetDisconnectCallback(cancel)
-	queue <- &data.PacketBatch{Sequence: 1, Packets: []*data.CapturedPacket{{}}}
-	queue <- &data.PacketBatch{Sequence: 2, Packets: []*data.CapturedPacket{{}}}
+	queue <- &pipeline.PacketBatch{Sequence: 1, Packets: []*pipeline.PacketEnvelope{{}}}
+	queue <- &pipeline.PacketBatch{Sequence: 2, Packets: []*pipeline.PacketEnvelope{{}}}
 
 	select {
 	case <-stream.started:
@@ -98,12 +99,12 @@ func TestBlockedSendTimeoutStopsOwnerBeforeClose(t *testing.T) {
 func TestOldSenderCannotCloseSuccessorStream(t *testing.T) {
 	oldCtx, cancelOld := context.WithCancel(context.Background())
 	oldStream := &blockingStream{ctx: oldCtx, started: make(chan struct{})}
-	old := New(Config{BatchSize: 1}, &ownershipStats{}, nil, oldCtx, make(chan *data.PacketBatch, 1))
+	old := New(Config{BatchSize: 1}, &ownershipStats{}, nil, oldCtx, make(chan *pipeline.PacketBatch, 1))
 	old.SetStream(oldStream)
 
 	newCtx, cancelNew := context.WithCancel(context.Background())
 	newStream := &blockingStream{ctx: newCtx, started: make(chan struct{})}
-	newManager := New(Config{BatchSize: 1}, &ownershipStats{}, nil, newCtx, make(chan *data.PacketBatch, 1))
+	newManager := New(Config{BatchSize: 1}, &ownershipStats{}, nil, newCtx, make(chan *pipeline.PacketBatch, 1))
 	newManager.SetStream(newStream)
 
 	cancelOld()

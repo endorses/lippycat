@@ -31,25 +31,29 @@ func TestBuildHunterConfigProtocolFixtures(t *testing.T) {
 
 	tests := []struct {
 		name               string
-		specForCommand     func(string) hunterConfigSpec
 		wantVoIP           bool
 		wantVoIPFilter     bool
 		wantFilterTypes    []string
 		wantDiskBuffer     bool
 		wantNoFilterPolicy string
 	}{
-		{name: "dns", specForCommand: dnsHunterConfigSpec, wantFilterTypes: []string{"bpf", "ip_address", "dns_domain"}},
-		{name: "http", specForCommand: httpHunterConfigSpec, wantFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"}},
-		{name: "tls", specForCommand: tlsHunterConfigSpec, wantFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}},
-		{name: "email", specForCommand: emailHunterConfigSpec, wantFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"}},
-		{name: "voip", specForCommand: voipHunterConfigSpec, wantVoIP: true, wantVoIPFilter: true, wantNoFilterPolicy: "deny"},
-		{name: "generic", specForCommand: genericHunterConfigSpec, wantDiskBuffer: true, wantNoFilterPolicy: "deny"},
+		{name: "dns", wantFilterTypes: []string{"bpf", "ip_address", "dns_domain"}},
+		{name: "http", wantFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"}},
+		{name: "tls", wantFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}},
+		{name: "email", wantFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"}},
+		{name: "voip", wantVoIP: true, wantVoIPFilter: true, wantNoFilterPolicy: "deny"},
+		{name: "generic", wantDiskBuffer: true, wantNoFilterPolicy: "deny"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			filterFixture := tt.name + "-filter"
-			spec := tt.specForCommand(filterFixture)
+			var spec hunterConfigSpec
+			if tt.name == "generic" {
+				spec = genericHunterConfigSpec(filterFixture)
+			} else {
+				spec = protocolHunterConfigSpec(tt.name, filterFixture)
+			}
 			if tt.name != "generic" {
 				assert.Equal(t, protocolcatalog.MustLookup(tt.name), spec.protocol)
 			}

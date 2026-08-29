@@ -10,6 +10,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
@@ -91,7 +92,7 @@ func TestDroppedBatchRunsDeferredCompletion(t *testing.T) {
 	s.batches <- &PacketBatch{}
 	var completions atomic.Int32
 	s.batchMu.Lock()
-	s.currentBatch = append(s.currentBatch, &data.CapturedPacket{Data: []byte("terminal")})
+	s.currentBatch = append(s.currentBatch, &pipeline.PacketEnvelope{Data: []byte("terminal")})
 	s.currentBatchAfterProcess = append(s.currentBatchAfterProcess, func() { completions.Add(1) })
 	s.batchMu.Unlock()
 

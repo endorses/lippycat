@@ -12,7 +12,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/http"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -160,7 +159,7 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(httpHunterConfigSpec(effectiveBPFFilter))
+	config := buildHunterConfig(protocolHunterConfigSpec("http", effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -221,10 +220,6 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 			return processor.Stop, nil
 		},
 	})
-}
-
-func httpHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{protocol: protocolcatalog.MustLookup("http"), bpfFilter: filter}
 }
 
 // buildHTTPContentFilter creates a ContentFilter from command-line flags.

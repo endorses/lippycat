@@ -8,7 +8,6 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -84,7 +83,7 @@ func runTLSHunt(cmd *cobra.Command, args []string) error {
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(tlsHunterConfigSpec(effectiveBPFFilter))
+	config := buildHunterConfig(protocolHunterConfigSpec("tls", effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -130,8 +129,4 @@ func runTLSHunt(cmd *cobra.Command, args []string) error {
 
 	// SNI and fingerprint filtering is managed by the processor and pushed to hunters via gRPC.
 	return runHunterRuntime(config, hunterRuntimeSpec{name: "tls"})
-}
-
-func tlsHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{protocol: protocolcatalog.MustLookup("tls"), bpfFilter: filter}
 }

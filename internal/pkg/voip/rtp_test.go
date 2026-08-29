@@ -12,9 +12,7 @@ import (
 func TestExtractPortFromSdp(t *testing.T) {
 	// Clear existing port mappings
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	tests := []struct {
 		name    string
@@ -68,11 +66,9 @@ func TestExtractPortFromSdp(t *testing.T) {
 func TestIsTracked(t *testing.T) {
 	// Clear existing port mappings
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.portToCallID["8000"] = []string{"test-call-1"}
-	tracker.portToCallID["8002"] = []string{"test-call-2"}
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
+	associateEndpointForTest(tracker, "8000", "test-call-1")
+	associateEndpointForTest(tracker, "8002", "test-call-2")
 
 	tests := []struct {
 		name     string
@@ -118,11 +114,9 @@ func TestIsTracked(t *testing.T) {
 func TestGetCallIDForPacket(t *testing.T) {
 	// Clear existing port mappings and setup test data
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.portToCallID["8000"] = []string{"test-call-packet-1"}
-	tracker.portToCallID["8002"] = []string{"test-call-packet-2"}
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
+	associateEndpointForTest(tracker, "8000", "test-call-packet-1")
+	associateEndpointForTest(tracker, "8002", "test-call-packet-2")
 
 	tests := []struct {
 		name     string
@@ -172,10 +166,8 @@ func TestRTPPacketProcessing_Integration(t *testing.T) {
 
 	// Setup port mapping
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.portToCallID["8000"] = []string{testCallID}
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
+	associateEndpointForTest(tracker, "8000", testCallID)
 
 	// Create test packet
 	testPacket := createRTPPacket(9999, testPort)
@@ -195,12 +187,10 @@ func TestRTPPacketProcessing_Integration(t *testing.T) {
 func TestRTPPortTracking_EdgeCases(t *testing.T) {
 	// Test edge cases in port tracking
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.portToCallID["65534"] = []string{"test-high-port"}
-	tracker.portToCallID["1024"] = []string{"test-port-1024"}
-	tracker.portToCallID["0"] = []string{"test-port-zero"}
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
+	associateEndpointForTest(tracker, "65534", "test-high-port")
+	associateEndpointForTest(tracker, "1024", "test-port-1024")
+	associateEndpointForTest(tracker, "0", "test-port-zero")
 
 	tests := []struct {
 		name        string
@@ -242,9 +232,7 @@ func TestExtractPortFromSdp_MultiStream(t *testing.T) {
 	// Test multi-stream call support (conference calls, multiple audio streams)
 	// Now registers both IP:PORT endpoints (more specific) and port-only (NAT fallback)
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	tests := []struct {
 		name              string
@@ -330,9 +318,7 @@ a=inactive`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear tracker before each test
-			tracker.mu.Lock()
-			tracker.portToCallID = make(map[string][]string)
-			tracker.mu.Unlock()
+			clearRegistryForTest(tracker)
 
 			tracker.GetOrCreateCall(tt.callID, layers.LinkTypeEthernet)
 			// Extract ports from SDP
@@ -344,21 +330,23 @@ a=inactive`,
 
 			// Check port-only entries
 			for _, expectedPort := range tt.expectedPorts {
-				registeredCallIDs, exists := tracker.portToCallID[expectedPort]
+				registeredCallIDs := tracker.registry.CallIDsForEndpoint(expectedPort)
+				exists := len(registeredCallIDs) > 0
 				assert.True(t, exists, "Port %s should be registered", expectedPort)
 				assert.Contains(t, registeredCallIDs, tt.callID, "Port %s should map to correct call ID", expectedPort)
 			}
 
 			// Check IP:PORT endpoint entries
 			for _, expectedEndpoint := range tt.expectedEndpoints {
-				registeredCallIDs, exists := tracker.portToCallID[expectedEndpoint]
+				registeredCallIDs := tracker.registry.CallIDsForEndpoint(expectedEndpoint)
+				exists := len(registeredCallIDs) > 0
 				assert.True(t, exists, "Endpoint %s should be registered", expectedEndpoint)
 				assert.Contains(t, registeredCallIDs, tt.callID, "Endpoint %s should map to correct call ID", expectedEndpoint)
 			}
 
 			// Verify total entries (both port-only and IP:PORT)
 			expectedTotal := len(tt.expectedPorts) + len(tt.expectedEndpoints)
-			assert.Equal(t, expectedTotal, len(tracker.portToCallID),
+			assert.Equal(t, expectedTotal, endpointAssociationCountForTest(tracker),
 				"Should register exactly %d entries (ports + endpoints)", expectedTotal)
 		})
 	}

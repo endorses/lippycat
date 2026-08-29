@@ -12,9 +12,7 @@ import (
 func TestHandleUdpPackets(t *testing.T) {
 	// Clear existing state
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	tests := []struct {
 		name    string
@@ -103,11 +101,9 @@ Content-Length: 0
 func TestHandleUdpPackets_RTPTracking(t *testing.T) {
 	// Setup RTP port tracking
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.portToCallID["8000"] = []string{"rtp-test-call-1"}
-	tracker.portToCallID["8002"] = []string{"rtp-test-call-2"}
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
+	associateEndpointForTest(tracker, "8000", "rtp-test-call-1")
+	associateEndpointForTest(tracker, "8002", "rtp-test-call-2")
 
 	tests := []struct {
 		name    string
@@ -201,9 +197,7 @@ a=rtpmap:0 PCMU/8000`
 
 	// Clear existing state
 	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string][]string)
-	tracker.mu.Unlock()
+	clearRegistryForTest(tracker)
 
 	// Test UDP handling with SIP content
 	assert.NotPanics(t, func() {
@@ -214,7 +208,7 @@ a=rtpmap:0 PCMU/8000`
 
 	// After processing, there might be port mappings created
 	tracker.mu.Lock()
-	hasPortMappings := len(tracker.portToCallID) > 0
+	hasPortMappings := endpointAssociationCountForTest(tracker) > 0
 	tracker.mu.Unlock()
 
 	// The exact behavior depends on implementation, but it should not crash

@@ -191,7 +191,7 @@ func startHTTPSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 
 	// Run capture with appropriate mode
 	if isOffline {
-		capture.RunOffline(devices, filter, processor)
+		capture.RunOfflineOrdered(devices, filter, processor)
 	} else {
 		capture.RunWithSignalHandler(devices, filter, processor)
 	}
@@ -342,7 +342,7 @@ func StartLiveHTTPSniffer(interfaces, filter string) {
 
 // StartOfflineHTTPSniffer starts HTTP capture from a PCAP file.
 func StartOfflineHTTPSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startHTTPSniffer(devices, filter, true)
 	})
 }

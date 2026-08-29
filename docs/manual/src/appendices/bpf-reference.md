@@ -292,7 +292,6 @@ BPF filtering works alongside other lippycat performance features:
 
 - **TCP performance profiles** — BPF filters that narrow SIP and RTP ports reduce userspace work before TCP reassembly. For DNS-only captures, `--udp-only` can still exclude TCP DNS when zone transfers or large TCP DNS responses are not needed.
 
-- **AF_XDP** — In AF_XDP mode, BPF programs are compiled for the XDP hook in the kernel's network stack, running even earlier than standard socket-level BPF. The filter syntax is identical. See [Performance Optimization](../part5-advanced/performance.md) for AF_XDP setup.
 
 ## Tips and Gotchas
 
@@ -378,5 +377,5 @@ libpcap imposes a limit on BPF program length (typically 4096 instructions on Li
 ## Further Reading
 
 - [tcpdump filter syntax (pcap-filter manual page)](https://www.tcpdump.org/manpages/pcap-filter.7.html) — the authoritative reference for BPF expression syntax
-- [Performance Optimization](../part5-advanced/performance.md) — tuning capture performance with TCP profiles, GPU acceleration, and AF_XDP
+- [Performance Optimization](../part5-advanced/performance.md) — tuning capture performance with TCP profiles and GPU acceleration
 - [Distributed Architecture](../part3-distributed/architecture.md) — how BPF filters fit into hunter/processor deployments

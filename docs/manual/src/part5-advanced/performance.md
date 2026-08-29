@@ -1,6 +1,6 @@
 # Performance Optimization
 
-lippycat ships with sensible defaults, but production deployments often benefit from tuning. This chapter walks through the performance levers available — starting with TCP performance profiles (the easiest win), progressing through GPU acceleration and pattern matching algorithms, and finishing with AF_XDP kernel-bypass capture for environments that need maximum throughput. Each section builds on the capture and distributed concepts covered in Parts II and III.
+lippycat ships with sensible defaults, but production deployments often benefit from tuning. This chapter walks through the performance levers available — starting with TCP performance profiles (the easiest win), progressing through GPU acceleration and pattern matching algorithms. Each section builds on the capture and distributed concepts covered in Parts II and III.
 
 ## TCP Performance Profiles
 
@@ -306,183 +306,6 @@ For large-scale deployments (50+ hunters), a two-tier hierarchy avoids overloadi
 
 Each regional processor handles 10 hunters and applies protocol analysis before forwarding summaries upstream. This reduces the central processor's load by an order of magnitude. See [Chapter 6](../part3-distributed/architecture.md) for topology configuration.
 
-## AF_XDP High-Speed Capture
-
-AF_XDP (Address Family eXpress Data Path) provides kernel-bypass packet capture with optional zero-copy mode. It is the most advanced capture method lippycat supports, designed for environments where standard `libpcap` capture cannot keep up.
-
-### When to Use AF_XDP
-
-Standard libpcap capture handles approximately 1M packets per second. AF_XDP raises that to 5-10M pps out of the box, and up to 10-20M pps with tuning. The latency improvement is equally significant:
-
-| Capture Mode | Packet Rate | Latency |
-|---|---|---|
-| Standard (libpcap) | ~1M pps | 1-10 us |
-| AF_XDP | 5-10M pps | 100-500 ns |
-| AF_XDP zero-copy | 10-20M pps | 50-100 ns |
-
-If you are capturing on 10GbE or faster interfaces, or if you see packet drops with standard capture under load, AF_XDP is worth the setup cost.
-
-### Requirements
-
-AF_XDP has stricter requirements than standard capture:
-
-**Kernel:**
-- Minimum: Linux 4.18
-- Recommended: Linux 5.4+ (full feature support)
-- Optimal: Linux 5.10+ (best performance, zero-copy improvements)
-
-**NIC driver with XDP support:**
-
-| Vendor | Driver | Speed |
-|--------|--------|-------|
-| Intel | ixgbe | 10 GbE |
-| Intel | i40e | 40 GbE |
-| Intel | ice | 100 GbE |
-| Mellanox | mlx5 | 10-100 GbE |
-| Broadcom | bnxt | 10-25 GbE |
-
-Check your driver:
-
-```bash
-ethtool -i eth0 | grep driver
-```
-
-**Kernel configuration** (these must be compiled in, not as modules):
-
-```
-CONFIG_XDP_SOCKETS=y
-CONFIG_BPF=y
-CONFIG_BPF_SYSCALL=y
-CONFIG_BPF_JIT=y
-```
-
-Verify:
-
-```bash
-grep XDP_SOCKETS /boot/config-$(uname -r)
-```
-
-**Libraries:**
-
-```bash
-# Debian/Ubuntu
-sudo apt-get install libelf-dev libbpf-dev
-
-# RHEL/CentOS
-sudo yum install elfutils-libelf-devel libbpf-devel
-```
-
-**Capabilities:**
-
-```bash
-# Option 1: Run as root
-sudo lc sniff voip -i eth0
-
-# Option 2: Grant capabilities to the binary
-sudo setcap cap_net_admin,cap_net_raw=eip /usr/local/bin/lc
-```
-
-### Configuration
-
-Enable AF_XDP in YAML:
-
-```yaml
-capture:
-  interface: eth0
-  use_xdp: true
-  xdp_queue_id: 0
-
-xdp:
-  umem_size: 8388608      # 8 MB
-  num_frames: 8192
-  frame_size: 2048
-  rx_ring_size: 4096
-  tx_ring_size: 4096
-  fill_ring_size: 4096
-  comp_ring_size: 4096
-  batch_size: 128
-  enable_stats: true
-```
-
-Ring sizes must be powers of 2. Start with 4096 and adjust based on observed drop rates.
-
-### NIC Tuning
-
-Disable hardware offloads that interfere with XDP:
-
-```bash
-sudo ethtool -K eth0 gro off lro off tso off gso off
-```
-
-Increase NIC ring buffers:
-
-```bash
-sudo ethtool -G eth0 rx 4096 tx 4096
-```
-
-Enable multi-queue for parallel processing:
-
-```bash
-# Check available queues
-ethtool -l eth0
-
-# Set to maximum
-sudo ethtool -L eth0 combined 4
-```
-
-### CPU and Memory Tuning
-
-For maximum AF_XDP performance, pin the capture process to the same NUMA node as the NIC and configure the CPU governor:
-
-```bash
-# Find the NIC's NUMA node
-cat /sys/class/net/eth0/device/numa_node
-
-# Pin lippycat to that NUMA node
-numactl --cpunodebind=0 --membind=0 sudo lc sniff voip -i eth0
-
-# Set CPU governor to performance
-sudo cpupower frequency-set -g performance
-```
-
-Pin NIC interrupts to dedicated CPU cores:
-
-```bash
-# Find IRQ numbers
-grep eth0 /proc/interrupts
-
-# Pin to CPU core 0
-echo 1 > /proc/irq/<irq_number>/smp_affinity
-```
-
-Enable huge pages for UMEM allocations:
-
-```bash
-# Allocate 512 x 2 MB huge pages (1 GB total)
-echo 512 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
-
-# Increase locked memory limits
-# Add to /etc/security/limits.conf:
-# * soft memlock unlimited
-# * hard memlock unlimited
-```
-
-### Verifying AF_XDP is Active
-
-```bash
-# Check verbose output for capture mode
-sudo lc sniff voip -i eth0 --verbose 2>&1 | grep -i xdp
-# Expected: "Capture statistics: mode=AF_XDP ..."
-
-# List loaded XDP programs
-sudo bpftool prog show type xdp
-
-# Monitor XDP statistics from the NIC
-ethtool -S eth0 | grep xdp
-```
-
-If AF_XDP is unavailable (wrong kernel, unsupported driver), lippycat falls back to standard libpcap capture automatically and logs a warning.
-
 ## Environment-Specific Tuning
 
 Different deployment environments call for different combinations of the techniques above. Here are tested configurations for common scenarios.
@@ -505,7 +328,7 @@ sudo lc sniff voip -i eth0 \
   --max-tcp-buffers 5000
 ```
 
-AF_XDP generally does not work in VMs because the virtual NIC driver lacks XDP support. Adjust TCP buffer limits based on the RAM allocated to the VM.
+Adjust TCP buffer limits based on the RAM allocated to the VM.
 
 ### Bare Metal Servers
 
@@ -515,7 +338,7 @@ sudo lc sniff voip -i eth0 \
   --max-tcp-buffers 20000
 ```
 
-On dedicated hardware with 8+ GB RAM and a modern CPU, use the `throughput` profile. If you have an NVIDIA GPU and have built with `-tags cuda`, add `--gpu-backend auto` to let CUDA/OpenCL/SIMD selection pick the best backend. For 10GbE+ interfaces, add AF_XDP as described above.
+On dedicated hardware with 8+ GB RAM and a modern CPU, use the `throughput` profile. If you have an NVIDIA GPU and have built with `-tags cuda`, add `--gpu-backend auto` to let CUDA/OpenCL/SIMD selection pick the best backend. For 10GbE+ interfaces, distribute capture across additional hunters.
 
 ### Kubernetes / Containers
 
@@ -536,7 +359,7 @@ lc sniff voip -i eth0 \
   --max-tcp-buffers 5000
 ```
 
-Match the TCP profile to the container's memory limit — the `balanced` profile's 100 MB fits comfortably within a 2 GB container. GPU passthrough to containers is possible but complex. AF_XDP requires host networking and `CAP_NET_ADMIN`, which may conflict with container security policies.
+Match the TCP profile to the container's memory limit — the `balanced` profile's 100 MB fits comfortably within a 2 GB container. GPU passthrough to containers is possible but complex.
 
 ### Distributed Hunter on Constrained Edge
 
@@ -584,8 +407,8 @@ If memory grows continuously, check for:
 | Goal | What to Tune |
 |---|---|
 | Reduce memory usage | `--tcp-performance-mode minimal`, `--memory-optimization`, `--max-tcp-buffers` |
-| Increase throughput | `--tcp-performance-mode throughput` for `sniff voip`, `--tcp-performance-mode high_performance` for `tap voip`, AF_XDP |
+| Increase throughput | `--tcp-performance-mode throughput` for `sniff voip`, `--tcp-performance-mode high_performance` for `tap voip` |
 | Reduce latency | `--tcp-performance-mode latency` for `sniff voip`, `--tcp-performance-mode low_latency` for `tap voip` |
 | Scale across segments | Distribute hunters, filter at edge, hierarchical processors |
 | Handle large filter lists | `--pattern-algorithm aho-corasick`, `--pattern-buffer-mb 128` |
-| Capture at 10GbE+ | AF_XDP with NIC tuning, NUMA pinning, huge pages |
+| Capture at 10GbE+ | scale out with additional hunters |

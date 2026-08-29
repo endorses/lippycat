@@ -117,8 +117,7 @@ var (
 	httpTLSKeylogPipe string
 )
 
-var httpSpec = sniffRuntimeAdapter{
-	protocol: protocolcatalog.MustLookup("http"),
+var httpRuntimeHooks = sniffRuntimeHooks{
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := http.ParsePorts(httpPorts)
 		if err != nil {
@@ -252,7 +251,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		"tls_decryption", tlsKeylogPath != "")
 
 	// Start HTTP sniffer using appropriate mode
-	runProtocol(cmd, args, httpSpec)
+	runProtocol(cmd, args, protocolcatalog.MustLookup("http"), httpRuntimeHooks)
 }
 
 func init() {

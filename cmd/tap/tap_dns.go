@@ -303,8 +303,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	runtime, err := newTapRuntime(config, effectiveBPFFilter, tapRuntimeAdapter{
-		protocol: protocolcatalog.MustLookup("dns"),
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, protocolcatalog.MustLookup("dns"), tapRuntimeHooks{
 		ConfigureSource: func(localSource *source.LocalSource) {
 			localSource.SetDNSProcessor(source.NewDNSProcessorFromViper())
 		},

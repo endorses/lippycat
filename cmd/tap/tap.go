@@ -583,9 +583,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 	// The shared runtime builds the processor/source/filter graph and applies
 	// own-traffic exclusions consistently with protocol-specific tap commands.
 	baseBPFFilter := cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter)
-	runtime, err := newTapRuntime(config, baseBPFFilter, tapRuntimeAdapter{
-		protocol: protocolcatalog.MustLookup("generic"),
-	})
+	runtime, err := newTapRuntime(config, baseBPFFilter, protocolcatalog.MustLookup("generic"), tapRuntimeHooks{})
 	if err != nil {
 		return err
 	}

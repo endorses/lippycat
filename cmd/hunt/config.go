@@ -32,6 +32,7 @@ func protocolHunterConfigSpec(name, bpfFilter string) hunterConfigSpec {
 		voIPMode:            protocol.Hunter.VoIPMode,
 		enableVoIPFilter:    protocol.Hunter.EnableVoIPFilter,
 		useGPUFlag:          protocol.Hunter.UseGPUConfig,
+		includeDiskBuffer:   protocol.Hunter.IncludeDiskBuffer,
 		includeFilterPolicy: protocol.Hunter.IncludeFilterPolicy,
 	}
 }

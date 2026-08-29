@@ -9,6 +9,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -133,7 +134,13 @@ func pairs(values ...string) map[string]string {
 }
 
 func TestSniffProtocolContractNamesAreStable(t *testing.T) {
-	names := []string{dnsSpec.protocol.Name, emailSpec.protocol.Name, httpSpec.protocol.Name, tlsSpec.protocol.Name, voipSpec.protocol.Name}
+	names := []string{
+		protocolcatalog.MustLookup("dns").Name,
+		protocolcatalog.MustLookup("email").Name,
+		protocolcatalog.MustLookup("http").Name,
+		protocolcatalog.MustLookup("tls").Name,
+		protocolcatalog.MustLookup("voip").Name,
+	}
 	sort.Strings(names)
 	require.Equal(t, []string{"dns", "email", "http", "tls", "voip"}, names)
 }

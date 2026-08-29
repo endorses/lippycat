@@ -128,5 +128,5 @@ func runTLSHunt(cmd *cobra.Command, args []string) error {
 		"tls_ports", hunterTLSPorts)
 
 	// SNI and fingerprint filtering is managed by the processor and pushed to hunters via gRPC.
-	return runHunterRuntime(config, hunterRuntimeSpec{name: "tls"})
+	return runCatalogHunterRuntime(config, "tls", hunterRuntimeHooks{})
 }

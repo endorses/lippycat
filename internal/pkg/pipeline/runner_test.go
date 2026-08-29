@@ -58,6 +58,39 @@ func TestPacketFanoutPreservesRegistrationOrderAndOutcomes(t *testing.T) {
 	}, results)
 }
 
+func TestPacketFanoutAttributesOutcomeAndDropMetricsBySink(t *testing.T) {
+	accepted := &recordingPacketSink{result: Result{Outcome: OutcomeAccepted}}
+	dropped := &recordingPacketSink{result: Result{Outcome: OutcomeDropped, DropReason: DropQueueFull}}
+	consumer, err := NewPacketFanout(
+		SinkRegistration{Name: "cli", Sink: accepted},
+		SinkRegistration{Name: "virtual-interface", Sink: dropped},
+	)
+	require.NoError(t, err)
+
+	consumer.Dispatch(context.Background(), &PacketEnvelope{})
+	consumer.Dispatch(context.Background(), &PacketEnvelope{})
+
+	metrics := consumer.Metrics()
+	require.Equal(t, uint64(2), metrics["cli"].Outcomes[OutcomeAccepted])
+	require.Empty(t, metrics["cli"].Drops)
+	require.Equal(t, uint64(2), metrics["virtual-interface"].Outcomes[OutcomeDropped])
+	require.Equal(t, uint64(2), metrics["virtual-interface"].Drops[DropQueueFull])
+}
+
+func TestPacketFanoutAttributesCancellationBySink(t *testing.T) {
+	sink := &recordingPacketSink{}
+	consumer, err := NewPacketFanout(SinkRegistration{Name: "writer", Sink: sink})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	consumer.Dispatch(ctx, &PacketEnvelope{})
+
+	metrics := consumer.Metrics()["writer"]
+	require.Equal(t, uint64(1), metrics.Outcomes[OutcomeShutdown])
+	require.Equal(t, uint64(1), metrics.Drops[DropShutdown])
+}
+
 func TestEnvelopeRunnerPreservesPacketOrderAndReportsErrors(t *testing.T) {
 	deliveryErr := errors.New("writer unavailable")
 	sink := &recordingPacketSink{result: Result{Outcome: OutcomeRetryableFailure, Err: deliveryErr}}

@@ -120,8 +120,7 @@ var (
 	emailMaxBodySize int
 )
 
-var emailSpec = sniffRuntimeAdapter{
-	protocol: protocolcatalog.MustLookup("email"),
+var emailRuntimeHooks = sniffRuntimeHooks{
 	BuildBPF: func(baseFilter string) (string, error) {
 		protocol := viper.GetString("email.protocol")
 		if protocol == "" {
@@ -279,7 +278,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 	if protocol == "" {
 		protocol = "all"
 	}
-	effectiveFilter, err := emailSpec.BuildBPF(filter)
+	effectiveFilter, err := emailRuntimeHooks.BuildBPF(filter)
 	if err != nil {
 		logger.Error("Invalid email filter configuration", "protocol", protocol, "error", err)
 		return
@@ -296,7 +295,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		"track_sessions", emailTrackSessions)
 
 	// Start email sniffer using appropriate mode
-	runProtocol(cmd, args, emailSpec)
+	runProtocol(cmd, args, protocolcatalog.MustLookup("email"), emailRuntimeHooks)
 }
 
 func init() {

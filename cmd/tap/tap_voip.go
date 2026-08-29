@@ -455,8 +455,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	runtime, err := newTapRuntime(config, effectiveBPFFilter, tapRuntimeAdapter{
-		protocol: protocolcatalog.MustLookup("voip"),
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, protocolcatalog.MustLookup("voip"), tapRuntimeHooks{
 		ConfigureGPU: func(gpuConfig GPUConfig) GPUConfig {
 			// VoIP mode should always enable VoIP filtering.
 			gpuConfig.EnableVoIPFilter = true

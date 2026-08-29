@@ -68,8 +68,7 @@ var (
 	// (defined in sniff.go as PersistentFlags)
 )
 
-var voipSpec = sniffRuntimeAdapter{
-	protocol: protocolcatalog.MustLookup("voip"),
+var voipRuntimeHooks = sniffRuntimeHooks{
 	BuildBPF: func(baseFilter string) (string, error) {
 		udpOnly := viper.GetBool("voip.udp_only")
 		sipPorts := viper.GetString("voip.sip_ports")
@@ -202,7 +201,7 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	// The VoIP package deliberately has no dependency on Viper.
 	voip.SetConfig(loadVoIPLibraryConfig())
 
-	runProtocol(cmd, args, voipSpec)
+	runProtocol(cmd, args, protocolcatalog.MustLookup("voip"), voipRuntimeHooks)
 }
 
 func loadVoIPLibraryConfig() *voip.Config {

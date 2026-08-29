@@ -57,8 +57,7 @@ var (
 	tlsWriteFile  string
 )
 
-var tlsSpec = sniffRuntimeAdapter{
-	protocol: protocolcatalog.MustLookup("tls"),
+var tlsRuntimeHooks = sniffRuntimeHooks{
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := tls.ParsePorts(tlsPorts)
 		if err != nil {
@@ -161,7 +160,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		"track_connections", tlsTrackConns)
 
 	// Start TLS sniffer using appropriate mode
-	runProtocol(cmd, args, tlsSpec)
+	runProtocol(cmd, args, protocolcatalog.MustLookup("tls"), tlsRuntimeHooks)
 }
 
 func init() {

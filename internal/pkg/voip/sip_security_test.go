@@ -92,8 +92,8 @@ From: alicent@example.com
 To: victim@example.com
 
 m=audio 5004 RTP/AVP 0`,
-			expectedResult: true,
-			description:    "Very long Call-ID should be handled (but may be truncated)",
+			expectedResult: false,
+			description:    "Very long Call-ID should be rejected by shared orchestration",
 		},
 		{
 			name: "Missing body separator",
@@ -471,8 +471,8 @@ To: robb@example.com
 CSeq: 314159 INVITE
 
 m=audio 5004 RTP/AVP 0`,
-			expectedResult: true, // Should be processed but won't extract ports
-			description:    "Message without Call-ID should be processed but limited",
+			expectedResult: false,
+			description:    "Message without Call-ID should be rejected by shared orchestration",
 		},
 	}
 

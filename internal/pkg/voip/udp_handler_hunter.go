@@ -3,11 +3,16 @@
 package voip
 
 import (
+	"sync"
+	"time"
+
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -21,17 +26,90 @@ type UDPPacketHandler struct {
 	forwarder       PacketForwarder
 	bufferMgr       *BufferManager
 	appFilter       ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
-	selectionPolicy callregistry.SelectionPolicy
+	selectionPolicy *hunterSelectionPolicy
+	orchestrator    *sipflow.Orchestrator
+	analysisMu      sync.Mutex
+	bufferedSIP     map[string][]bufferedSIPAnalysis
 }
+
+type bufferedSIPAnalysis struct {
+	result sipflow.ProcessResult
+	at     time.Time
+}
+
+const maxBufferedSIPAnalysisCalls = 1024
 
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
 func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
-	return &UDPPacketHandler{
+	h := &UDPPacketHandler{
 		tracker:         tracker,
 		forwarder:       forwarder,
 		bufferMgr:       bufferMgr,
-		selectionPolicy: callregistry.StickySelectionPolicy{},
+		selectionPolicy: newHunterSelectionPolicy(),
+		bufferedSIP:     make(map[string][]bufferedSIPAnalysis),
 	}
+	h.orchestrator = newHunterSIPOrchestrator(forwarder, h.selectionPolicy)
+	return h
+}
+
+func (h *UDPPacketHandler) Close() { h.orchestrator.Close() }
+
+func (h *UDPPacketHandler) SIPStats() map[string]sipflow.SinkStats { return h.orchestrator.Stats() }
+
+func (h *UDPPacketHandler) cacheAnalysis(callID string, result sipflow.ProcessResult) {
+	h.analysisMu.Lock()
+	evicted := make([]string, 0, 2)
+	now := time.Now()
+	for id, entries := range h.bufferedSIP {
+		if len(entries) == 0 || now.Sub(entries[0].at) > h.bufferMgr.maxAge {
+			delete(h.bufferedSIP, id)
+			evicted = append(evicted, id)
+		}
+	}
+	if _, exists := h.bufferedSIP[callID]; !exists && len(h.bufferedSIP) >= maxBufferedSIPAnalysisCalls {
+		var oldestID string
+		var oldest time.Time
+		for id, entries := range h.bufferedSIP {
+			if len(entries) != 0 && (oldestID == "" || entries[0].at.Before(oldest)) {
+				oldestID, oldest = id, entries[0].at
+			}
+		}
+		if oldestID != "" {
+			delete(h.bufferedSIP, oldestID)
+			evicted = append(evicted, oldestID)
+		}
+	}
+	entries := h.bufferedSIP[callID]
+	if len(entries) >= h.bufferMgr.maxSize {
+		delete(h.bufferedSIP, callID)
+		evicted = append(evicted, callID)
+		entries = nil
+	}
+	h.bufferedSIP[callID] = append(entries, bufferedSIPAnalysis{result: result, at: now})
+	h.analysisMu.Unlock()
+	// Never acquire BufferManager.mu while holding analysisMu: its match
+	// callback takes the locks in the opposite order when draining analyses.
+	for _, id := range evicted {
+		h.bufferMgr.DiscardBuffer(id)
+	}
+}
+
+func (h *UDPPacketHandler) takeAnalyses(callID string) []sipflow.ProcessResult {
+	h.analysisMu.Lock()
+	defer h.analysisMu.Unlock()
+	entries := h.bufferedSIP[callID]
+	delete(h.bufferedSIP, callID)
+	results := make([]sipflow.ProcessResult, len(entries))
+	for i := range entries {
+		results[i] = entries[i].result
+	}
+	return results
+}
+
+func (h *UDPPacketHandler) discardAnalyses(callID string) {
+	h.analysisMu.Lock()
+	delete(h.bufferedSIP, callID)
+	h.analysisMu.Unlock()
 }
 
 // SetApplicationFilter sets the application filter for proper filter matching.
@@ -42,9 +120,7 @@ func (h *UDPPacketHandler) SetApplicationFilter(filter ApplicationFilter) {
 }
 
 func (h *UDPPacketHandler) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
-	if policy != nil {
-		h.selectionPolicy = policy
-	}
+	h.selectionPolicy.set(policy)
 }
 
 // matchesFilter checks if a packet matches any configured filter.
@@ -106,11 +182,15 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	if network := packet.NetworkLayer(); network != nil {
 		opts.SourceIP, opts.DestinationIP = network.NetworkFlow().Src().String(), network.NetworkFlow().Dst().String()
 	}
-	event, err := sharedsip.Parse(payload, opts)
-	if err != nil || event.CallID == "" {
+	directMatch := h.matchesFilter(packet, nil)
+	analysis := h.orchestrator.Analyze(sipflow.Message{
+		Payload: payload, Envelope: envelopeForHunterPacket(pkt), ParseOptions: opts,
+		FilterConfigured: true, DirectMatch: directMatch,
+	})
+	if analysis.Stage.Outcome != pipeline.OutcomeAccepted {
 		return false
 	}
-	headers, callID := event.Headers, event.CallID
+	result, callID := analysis.SIP, analysis.SIP.CallID
 
 	// Validate Call-ID for security
 	if err := ValidateCallIDForSecurity(callID); err != nil {
@@ -126,54 +206,37 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	call := h.tracker.GetOrCreateCall(callID, linkType)
 	if call != nil {
 		// Update call state based on SIP method
-		call.SetCallInfoState(event.Method)
-	}
-
-	// Check if the SIP message matches our filter (for forwarding decision)
-	// Use ApplicationFilter if available (supports phone_number, sip_user, etc.)
-	// Fall back to legacy containsUserInHeaders() if no ApplicationFilter is set
-	directMatch := h.matchesFilter(packet, headers)
-	previouslySelected := h.bufferMgr != nil && h.bufferMgr.IsCallMatched(callID)
-	if !h.selectionPolicy.Select(callregistry.SelectionInput{
-		FilterConfigured:   true,
-		DirectMatch:        directMatch,
-		PreviouslySelected: previouslySelected,
-	}) {
-		return false
+		call.SetCallInfoState(result.Method)
 	}
 
 	// Extract SIP metadata
 	metadata := &CallMetadata{
 		CallID:            callID,
-		From:              headers["from"],
-		To:                headers["to"],
-		FromTag:           event.FromTag,
-		ToTag:             event.ToTag,
-		PAssertedIdentity: headers["p-asserted-identity"],
-		Method:            event.Method,
-		CSeqMethod:        event.CSeqMethod,
-		ResponseCode:      uint32(event.ResponseCode),
-		SDPBody:           string(event.SDP),
+		From:              result.From,
+		To:                result.To,
+		FromTag:           result.FromTag,
+		ToTag:             result.ToTag,
+		PAssertedIdentity: result.PAssertedIdentity,
+		Method:            result.Method,
+		CSeqMethod:        result.CSeqMethod,
+		ResponseCode:      uint32(result.ResponseCode),
+		SDPBody:           string(result.SDP),
 	}
 
 	// Buffer the SIP packet with link type for proper PCAP writing.
 	// Returns true once the call is matched, from which point every SIP packet
 	// of the call is forwarded directly instead of buffered.
+	wasMatched := h.bufferMgr.IsCallMatched(callID)
+	if !wasMatched {
+		h.cacheAnalysis(callID, analysis)
+	}
 	alreadyMatched := h.bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName, pkt.LinkType)
 
-	hasSDP := BytesContains(event.SDP, []byte("m=audio"))
+	hasSDP := BytesContains(result.SDP, []byte("m=audio"))
 	method := metadata.Method
 
 	if alreadyMatched {
-		// Call already passed the filter: forward this packet now, whether or
-		// not it carries SDP. This covers in-dialog signalling (100 Trying,
-		// 180 Ringing, ACK, BYE/CANCEL, 4xx/5xx) that has no SDP body.
-		if err := h.forwarder.ForwardPacketWithMetadata(packet, sipPacketMetadata(callID, metadata), interfaceName, pkt.LinkType); err != nil {
-			logger.Error("Failed to forward UDP SIP packet for matched call",
-				"call_id", SanitizeCallIDForLogging(callID),
-				"method", method,
-				"error", err)
-		}
+		h.orchestrator.Dispatch(analysis)
 
 		// A re-INVITE or delayed answer can move the media ports.
 		if hasSDP {
@@ -185,6 +248,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	// Call termination for a call that never matched: nothing to correlate it
 	// with downstream, so discard rather than buffer it.
 	if method == "BYE" || method == "CANCEL" {
+		h.discardAnalyses(callID)
 		logger.Debug("UDP call termination message for untracked call, discarding",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"method", method)
@@ -197,14 +261,13 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		// Note: 'packet' is captured by the closure for ApplicationFilter matching
 		matched := h.bufferMgr.CheckFilterWithCallback(
 			callID,
-			func(m *CallMetadata) bool {
-				// Use ApplicationFilter if available (supports phone_number, sip_user, etc.)
-				// Falls back to legacy containsUserInHeaders() if no filter is set
-				return h.matchesFilterWithMetadata(packet, m)
-			},
+			// Analyze already applied direct or sticky call-level selection. Do not
+			// re-run a message-only filter against the SDP packet and lose an
+			// identity that appeared only on the earlier INVITE.
+			func(*CallMetadata) bool { return true },
 			func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
 				// Forward all buffered packets to processor
-				h.forwardBufferedPackets(callID, packets, metadata, interfaceName, linkType)
+				h.forwardBufferedPackets(callID, packets, h.takeAnalyses(callID), metadata, interfaceName, linkType)
 
 				// Extract RTP ports from SDP for future RTP association
 				h.tracker.ExtractPortFromSDP(metadata.SDPBody, callID)
@@ -305,8 +368,9 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 }
 
 // forwardBufferedPackets forwards all buffered packets for a matched call
-func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
+func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopacket.Packet, analyses []sipflow.ProcessResult, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
 	// Forward all buffered packets (SIP + RTP) with appropriate metadata
+	sipIndex := 0
 	for _, pkt := range packets {
 		// Check if this is an RTP packet by looking for UDP layer
 		var packetMetadata *data.PacketMetadata
@@ -340,9 +404,18 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 			}
 		}
 
-		// If not RTP, use SIP metadata only
+		// SIP packets re-enter the shared parser/selection path at release time so
+		// every buffered message gets its own typed result and sink outcome.
 		if packetMetadata == nil {
-			packetMetadata = sipPacketMetadata(callID, metadata)
+			if sipIndex >= len(analyses) {
+				continue
+			}
+			analysis := analyses[sipIndex]
+			sipIndex++
+			if analysis.Stage.Outcome == pipeline.OutcomeAccepted {
+				h.orchestrator.Dispatch(analysis)
+			}
+			continue
 		}
 
 		if err := h.forwarder.ForwardPacketWithMetadata(pkt, packetMetadata, interfaceName, linkType); err != nil {

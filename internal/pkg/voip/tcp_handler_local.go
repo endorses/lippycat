@@ -1,11 +1,13 @@
 package voip
 
 import (
+	"context"
 	"time"
 
-	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -13,19 +15,12 @@ import (
 // LocalFileHandler handles SIP messages for local capture mode (lc sniff voip)
 // It writes matched calls to local PCAP files
 type LocalFileHandler struct {
-	tracker         *CallTracker
-	selectionPolicy callregistry.SelectionPolicy
+	tracker *CallTracker
 }
 
 // NewLocalFileHandler creates a handler for local file writing
 func NewLocalFileHandler(tracker *CallTracker) *LocalFileHandler {
-	return &LocalFileHandler{tracker: tracker, selectionPolicy: callregistry.StickySelectionPolicy{}}
-}
-
-func (h *LocalFileHandler) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
-	if policy != nil {
-		h.selectionPolicy = policy
-	}
+	return &LocalFileHandler{tracker: tracker}
 }
 
 // HandleSIPMessage processes a complete SIP message for local file writing.
@@ -49,6 +44,14 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 }
 
 func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
+	return h.handleSIPMessage(sipMessage, nil, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, capturedAt)
+}
+
+func (h *LocalFileHandler) HandleParsedSIPMessage(sipMessage []byte, event sharedsip.Event, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
+	return h.handleSIPMessage(sipMessage, &event, event.CallID, srcEndpoint, dstEndpoint, netFlow, transportFlow, event.Timestamp)
+}
+
+func (h *LocalFileHandler) handleSIPMessage(sipMessage []byte, event *sharedsip.Event, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
 	logger.Debug("TCP HandleSIPMessage called",
 		"call_id", SanitizeCallIDForLogging(callID),
 		"message_len", len(sipMessage),
@@ -73,35 +76,6 @@ func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, 
 		}
 	}
 
-	// The buffer manager is where a call's match decision is remembered across
-	// messages; startProcessor initializes it before any packet is dispatched.
-	if globalBufferMgr == nil {
-		logger.Debug("No VoIP buffer manager: TCP SIP matching falls back to per-message",
-			"call_id", SanitizeCallIDForLogging(callID))
-	}
-	alreadyMatched := globalBufferMgr != nil && globalBufferMgr.IsCallMatched(callID)
-
-	// Always run the per-message check: besides matching, it updates call state
-	// and extracts RTP ports from any SDP body.
-	matched := handleSipMessage(h.tracker, sipMessage, getCurrentLinkType())
-
-	logger.Debug("TCP SIP filter check result",
-		"call_id", SanitizeCallIDForLogging(callID),
-		"matched", matched,
-		"already_matched", alreadyMatched)
-
-	if !h.selectionPolicy.Select(callregistry.SelectionInput{
-		FilterConfigured:   true,
-		DirectMatch:        matched,
-		PreviouslySelected: alreadyMatched,
-	}) {
-		// Release this message's packets rather than leaving them buffered,
-		// where a later matching call would have written them into its PCAP.
-		discardTCPBufferedPackets(netFlow, transportFlow)
-		logger.Debug("Message didn't match filter, not writing")
-		return false
-	}
-
 	// Synthesize a packet carrying exactly this SIP message, using the
 	// connection's real 5-tuple, so the PCAP contains one complete message per
 	// frame and nothing belonging to another call.
@@ -114,40 +88,29 @@ func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, 
 		return false
 	}
 
-	// The synthesized frame is Ethernet, so the call's writers must be too.
-	call := h.tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
-	if call == nil {
-		logger.Warn("Failed to create call for TCP SIP message", "call_id", SanitizeCallIDForLogging(callID))
+	envelope := &pipeline.PacketEnvelope{
+		Data: pkt.Packet.Data(), LinkType: layers.LinkTypeEthernet, CaptureTime: ts,
+		CaptureLength: len(pkt.Packet.Data()), OriginalLength: len(pkt.Packet.Data()),
+	}
+	flow := newSniffSIPFlow(h.tracker, true, true)
+	defer flow.Close()
+	analysis := flow.Analyze(sipflow.Message{
+		Payload: sipMessage, Event: event, ExpectedCallID: callID, Envelope: envelope,
+		ParseOptions:     sharedsip.OptionsForEndpoints(ts, srcEndpoint, dstEndpoint),
+		FilterConfigured: true,
+		Match:            func(event sharedsip.Event) bool { return containsUserInHeaders(event.Headers) },
+		Validate:         func(event sharedsip.Event) error { return ValidateCallIDForSecurity(event.CallID) },
+	})
+	if analysis.Stage.Outcome != pipeline.OutcomeAccepted {
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
-	// Remember the decision so the rest of this dialog is written even when an
-	// individual message carries no matchable identity.
-	if globalBufferMgr != nil && !alreadyMatched {
-		event, err := sharedsip.Parse(sipMessage, sharedsip.ParseOptions{Timestamp: ts})
-		if err != nil {
-			discardTCPBufferedPackets(netFlow, transportFlow)
-			return false
-		}
-		globalBufferMgr.MarkCallMatched(callID, &CallMetadata{
-			CallID:            callID,
-			From:              event.From,
-			To:                event.To,
-			FromTag:           event.FromTag,
-			ToTag:             event.ToTag,
-			PAssertedIdentity: event.PAssertedIdentity,
-			Method:            event.Method,
-			CSeqMethod:        event.CSeqMethod,
-			ResponseCode:      uint32(event.ResponseCode),
-			SDPBody:           string(event.SDP),
-		}, "", layers.LinkTypeEthernet)
-	}
-
-	injectPacketToVirtualInterface(pkt)
-
-	if h.tracker.config.WriteVoIP {
-		WriteSIP(h.tracker, callID, pkt.Packet)
+	analysis.Attachment = pkt
+	delivery := (sniffSink{tracker: h.tracker}).HandleSIP(context.Background(), sipflow.SinkInput{Result: analysis.SIP, Attachment: pkt})
+	if delivery.Outcome != pipeline.OutcomeAccepted {
+		discardTCPBufferedPackets(netFlow, transportFlow)
+		return false
 	}
 
 	// The synthesized packet is self-contained; release the raw buffer so a

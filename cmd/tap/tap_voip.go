@@ -543,6 +543,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	// Create TapTCPHandler that sends processed TCP packets to the injection channel
 	tapTCPHandler := voip.NewTapTCPHandler(tcpInjectionChan)
+	defer tapTCPHandler.Close()
 	tapTCPHandler.SetApplicationFilter(appFilter)
 	tapTCPHandler.SetCallRegistry(voipProc)
 

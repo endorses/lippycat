@@ -13,10 +13,41 @@ import (
 	"testing"
 	"time"
 
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/reassembly"
 )
+
+type parsedEventRecordingHandler struct {
+	parsedCalls int
+	legacyCalls int
+	event       sharedsip.Event
+}
+
+func (h *parsedEventRecordingHandler) HandleSIPMessage([]byte, string, string, string, gopacket.Flow, gopacket.Flow) bool {
+	h.legacyCalls++
+	return true
+}
+
+func (h *parsedEventRecordingHandler) HandleParsedSIPMessage(_ []byte, event sharedsip.Event, _, _ string, _, _ gopacket.Flow) bool {
+	h.parsedCalls++
+	h.event = event
+	return true
+}
+
+func TestTCPStreamDispatchesSingleParsedEventToMigratedHandler(t *testing.T) {
+	handler := &parsedEventRecordingHandler{}
+	stream := &bufferedSIPStream{factory: &sipStreamFactory{handler: handler}}
+	stream.processSipMessage([]byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: parsed-once\r\nContent-Length: 0\r\n\r\n"), time.Unix(123, 0))
+
+	if handler.parsedCalls != 1 || handler.legacyCalls != 0 {
+		t.Fatalf("parsed calls=%d legacy calls=%d", handler.parsedCalls, handler.legacyCalls)
+	}
+	if handler.event.CallID != "parsed-once" || !handler.event.Timestamp.Equal(time.Unix(123, 0)) {
+		t.Fatalf("unexpected parsed event: %+v", handler.event)
+	}
+}
 
 // recordingSIPHandler records the Call-IDs of every SIP message dispatched to
 // it, so a test can assert which reassembled messages actually reached

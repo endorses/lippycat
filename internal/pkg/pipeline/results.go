@@ -18,6 +18,8 @@ type SIPResult struct {
 	SourceIP, DestinationIP        string
 	SourcePort, DestinationPort    uint16
 	SDP                            []byte
+	Body                           []byte
+	Headers                        map[string]string
 	Packet                         *PacketEnvelope
 	MatchedFilterIDs               []string
 	Lifecycle                      []CallLifecycleObservation

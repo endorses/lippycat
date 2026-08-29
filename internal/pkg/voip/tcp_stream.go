@@ -41,6 +41,13 @@ type timestampedSIPMessageHandler interface {
 	HandleSIPMessageAt([]byte, string, string, string, gopacket.Flow, gopacket.Flow, time.Time) bool
 }
 
+// parsedSIPMessageHandler accepts the parser result already produced by TCP
+// framing. Migrated handlers implement this to avoid parsing each message a
+// second time; legacy handlers continue through the interfaces above.
+type parsedSIPMessageHandler interface {
+	HandleParsedSIPMessage([]byte, sharedsip.Event, string, string, gopacket.Flow, gopacket.Flow) bool
+}
+
 // bufferedSIPStream implements reassembly.Stream with a buffered channel.
 // This guarantees ReassembledSG() NEVER blocks, which is critical because:
 // 1. The assembler calls ReassembledSG() synchronously from the packet loop
@@ -738,7 +745,8 @@ func (s *bufferedSIPStream) processSipMessage(sipMessage []byte, timestamps ...t
 	if len(timestamps) > 0 {
 		capturedAt = timestamps[0]
 	}
-	event, err := sharedsip.Parse(sipMessage, sharedsip.ParseOptions{Timestamp: capturedAt})
+	srcEndpoint, dstEndpoint := s.getEndpoints()
+	event, err := sharedsip.Parse(sipMessage, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint))
 	if err == nil && event.CallID != "" {
 		callID := event.CallID
 		// Increment SIP messages detected counter (voip package)
@@ -749,8 +757,9 @@ func (s *bufferedSIPStream) processSipMessage(sipMessage []byte, timestamps ...t
 		}
 
 		if s.factory != nil && s.factory.handler != nil {
-			srcEndpoint, dstEndpoint := s.getEndpoints()
-			if handler, ok := s.factory.handler.(timestampedSIPMessageHandler); ok {
+			if handler, ok := s.factory.handler.(parsedSIPMessageHandler); ok {
+				handler.HandleParsedSIPMessage(sipMessage, event, srcEndpoint, dstEndpoint, s.netFlow, s.transportFlow)
+			} else if handler, ok := s.factory.handler.(timestampedSIPMessageHandler); ok {
 				handler.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, s.netFlow, s.transportFlow, capturedAt)
 			} else {
 				s.factory.handler.HandleSIPMessage(sipMessage, callID, srcEndpoint, dstEndpoint, s.netFlow, s.transportFlow)

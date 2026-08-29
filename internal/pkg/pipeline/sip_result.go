@@ -10,8 +10,20 @@ func SIPResultFromEvent(event sharedsip.Event, env *PacketEnvelope) SIPResult {
 		From: event.From, To: event.To, FromUser: event.FromUser, ToUser: event.ToUser,
 		FromURI: event.FromURI, ToURI: event.ToURI, FromTag: event.FromTag, ToTag: event.ToTag,
 		PAssertedIdentity: event.PAssertedIdentity, ContentType: event.ContentType,
+		Body: append([]byte(nil), event.Body...), Headers: cloneSIPHeaders(event.Headers),
 		SourceIP: event.SourceIP, DestinationIP: event.DestinationIP,
 		SourcePort: event.SourcePort, DestinationPort: event.DestinationPort,
 		SDP: append([]byte(nil), event.SDP...), Packet: env,
 	}
+}
+
+func cloneSIPHeaders(headers map[string]string) map[string]string {
+	if headers == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(headers))
+	for key, value := range headers {
+		cloned[key] = value
+	}
+	return cloned
 }

@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type recordingCallOutput struct {
@@ -29,6 +31,96 @@ func (r *recordingCallOutput) CloseSession(id string) error {
 	return nil
 }
 func (r *recordingCallOutput) Shutdown() error { return nil }
+
+type queryingLifecycleOutput struct {
+	mu           sync.Mutex
+	tracker      *CallTracker
+	events       []string
+	startEntered chan struct{}
+	releaseStart chan struct{}
+}
+
+func (o *queryingLifecycleOutput) OnCallStarted(call *CallInfo) error {
+	if !o.tracker.IsCallActive(call.CallID) {
+		return fmt.Errorf("started call %q is not visible in registry", call.CallID)
+	}
+	o.mu.Lock()
+	o.events = append(o.events, "start:"+call.CallID)
+	o.mu.Unlock()
+	if o.startEntered != nil {
+		close(o.startEntered)
+		<-o.releaseStart
+	}
+	return nil
+}
+
+func (o *queryingLifecycleOutput) OnCallEnded(call *CallInfo) error {
+	o.mu.Lock()
+	o.events = append(o.events, "end:"+call.CallID)
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *queryingLifecycleOutput) OpenSession(string, layers.LinkType) error { return nil }
+func (o *queryingLifecycleOutput) WritePacket(string, gopacket.Packet, PacketType) error {
+	return nil
+}
+func (o *queryingLifecycleOutput) CloseSession(string) error { return nil }
+func (o *queryingLifecycleOutput) Shutdown() error           { return nil }
+
+func TestLifecycleObserverRunsAfterAdmissionWhenOutputDisabled(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.WriteVoIP = false
+	output := &queryingLifecycleOutput{}
+	tracker := NewCallTrackerWithOutput(cfg, output)
+	output.tracker = tracker
+
+	call := tracker.GetOrCreateCall("observed", layers.LinkTypeEthernet)
+	require.NotNil(t, call)
+	tracker.Shutdown()
+
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	require.Equal(t, []string{"start:observed", "end:observed"}, output.events)
+}
+
+func TestLifecycleStartPrecedesConcurrentShutdownEnd(t *testing.T) {
+	cfg := DefaultConfig()
+	output := &queryingLifecycleOutput{
+		startEntered: make(chan struct{}),
+		releaseStart: make(chan struct{}),
+	}
+	tracker := NewCallTrackerWithOutput(cfg, output)
+	output.tracker = tracker
+
+	created := make(chan *CallInfo, 1)
+	go func() {
+		created <- tracker.GetOrCreateCall("concurrent", layers.LinkTypeEthernet)
+	}()
+	<-output.startEntered
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		tracker.Shutdown()
+		close(shutdownDone)
+	}()
+	require.Eventually(t, func() bool {
+		return tracker.shuttingDown.Load() != 0
+	}, time.Second, time.Millisecond)
+
+	select {
+	case <-shutdownDone:
+		t.Fatal("shutdown delivered the end event before the start callback completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(output.releaseStart)
+	require.NotNil(t, <-created)
+	<-shutdownDone
+
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	require.Equal(t, []string{"start:concurrent", "end:concurrent"}, output.events)
+}
 
 func TestPinnedCallSurvivesCapacityPressure(t *testing.T) {
 	ct := NewCallTrackerWithCapacity(2)

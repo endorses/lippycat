@@ -505,6 +505,14 @@ stream construction and verifies that framing behavior remains unchanged.
 Focused race tests cover legacy VoIP lifecycle, local-source callback ownership,
 processor completion ordering, and TUI aggregation wiring.
 
+Legacy lifecycle ordering follow-up (2026-08-29): legacy registry admission now
+emits lifecycle start notifications regardless of packet-output configuration,
+after the call is visible and without holding the registry data lock. Admission,
+eviction, timeout, completion, and shutdown notifications are serialized so a
+concurrent shutdown cannot emit an end before its corresponding start callback
+completes. Regression tests cover registry queries from start observers and
+start-before-end ordering during concurrent shutdown.
+
 ### Exit Criteria
 
 - No package-global call tracker or `getTracker()` consumer remains.

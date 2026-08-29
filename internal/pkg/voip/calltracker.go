@@ -88,6 +88,8 @@ func (c *CallInfo) Close() error {
 // removeCall detaches a call and all tracker-owned indexes before closing it.
 // Closing after releasing ct.mu is required by CallInfo's lock ordering rule.
 func (ct *CallTracker) removeCall(callID string) (bool, error) {
+	ct.lifecycleMu.Lock()
+	defer ct.lifecycleMu.Unlock()
 	ct.mu.Lock()
 	call := ct.detachCallLocked(callID)
 	ct.mu.Unlock()
@@ -98,6 +100,8 @@ func (ct *CallTracker) removeCall(callID string) (bool, error) {
 }
 
 func (ct *CallTracker) removeCallIf(callID string, expected *CallInfo) (bool, error) {
+	ct.lifecycleMu.Lock()
+	defer ct.lifecycleMu.Unlock()
 	ct.mu.Lock()
 	if expected != nil && ct.callMap[callID] != expected {
 		ct.mu.Unlock()
@@ -149,6 +153,7 @@ type CallTracker struct {
 	maxCalls           int                      // Maximum calls to keep
 	lastPinnedWarning  time.Time
 	mu                 sync.RWMutex
+	lifecycleMu        sync.Mutex // Serializes registry mutations with lifecycle callbacks.
 	janitorCtx         context.Context
 	janitorCancel      context.CancelFunc
 	janitorStarted     bool
@@ -332,6 +337,7 @@ func (ct *CallTracker) Shutdown() {
 		logger.Info("All active writes completed, closing call files")
 
 		// Now safe to close all files
+		ct.lifecycleMu.Lock()
 		ct.mu.Lock()
 		calls := make([]*CallInfo, 0, len(ct.callMap))
 		for id, call := range ct.callMap {
@@ -349,6 +355,7 @@ func (ct *CallTracker) Shutdown() {
 				logger.Error("Failed to close call output", "call_id", SanitizeCallIDForLogging(call.CallID), "error", err)
 			}
 		}
+		ct.lifecycleMu.Unlock()
 		logger.Info("Call tracker shutdown complete")
 	})
 }
@@ -446,6 +453,8 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 	}
 	tracker.mu.RUnlock()
 
+	tracker.lifecycleMu.Lock()
+	defer tracker.lifecycleMu.Unlock()
 	tracker.mu.Lock()
 	var evicted *CallInfo
 	var admitted bool
@@ -474,16 +483,6 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 			LastUpdated: time.Now(),
 			LinkType:    linkType,
 			tracker:     tracker,
-		}
-		if tracker.config.WriteVoIP {
-			if err := tracker.notifyCallStarted(call); err != nil {
-				logger.Error("Failed to initialize writers for call",
-					"call_id", SanitizeCallIDForLogging(callID),
-					"error", err)
-				// Don't track call if we can't write it - prevents silent data loss
-				tracker.mu.Unlock()
-				return nil
-			}
 		}
 
 		// Evict LRU (least recently used) if at capacity
@@ -543,14 +542,39 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 		tracker.touchCall(callID)
 	}
 	tracker.mu.Unlock()
-	if admitted {
-		for _, observer := range stateObservers {
-			observer.OnCallAdmitted(callID)
-		}
-	}
 	if evicted != nil {
 		if err := tracker.notifyCallEnded(evicted); err != nil {
 			logger.Error("Error closing call files", "call_id", SanitizeCallIDForLogging(evicted.CallID), "error", err)
+		}
+	}
+	if admitted {
+		// Lifecycle observers describe registry admission, independently of whether
+		// packet output is enabled. Invoke them only after publishing the call and
+		// releasing the registry lock so observers may safely query the registry.
+		if err := tracker.notifyCallStarted(call); err != nil {
+			logger.Error("Failed to initialize call lifecycle",
+				"call_id", SanitizeCallIDForLogging(callID),
+				"error", err)
+			// Roll back the exact generation that failed to initialize. End
+			// notification lets observers which started successfully release any
+			// resources they allocated before a later observer returned an error.
+			tracker.mu.Lock()
+			var failedCall *CallInfo
+			if tracker.callMap[callID] == call {
+				failedCall = tracker.detachCallLocked(callID)
+			}
+			tracker.mu.Unlock()
+			if failedCall != nil {
+				if removeErr := tracker.notifyCallEnded(failedCall); removeErr != nil {
+					logger.Error("Failed to roll back call lifecycle",
+						"call_id", SanitizeCallIDForLogging(callID),
+						"error", removeErr)
+				}
+			}
+			return nil
+		}
+		for _, observer := range stateObservers {
+			observer.OnCallAdmitted(callID)
 		}
 	}
 	return call
@@ -748,6 +772,8 @@ func (ct *CallTracker) cleanupOldCalls() {
 		return
 	}
 	cutoff := time.Now().Add(-ct.config.CallExpirationTime)
+	ct.lifecycleMu.Lock()
+	defer ct.lifecycleMu.Unlock()
 	ct.mu.Lock()
 	expired := make([]*CallInfo, 0)
 	for id, call := range ct.callMap {

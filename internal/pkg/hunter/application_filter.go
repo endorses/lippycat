@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
 	"github.com/endorses/lippycat/internal/pkg/hunter/filter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/phonematcher"
@@ -40,22 +41,22 @@ type parsedFilter struct {
 	original    string                // Original pattern from user (for logging)
 	pattern     string                // Parsed pattern (wildcards stripped)
 	patternType filtering.PatternType // Type of matching (prefix, suffix, contains)
-	gpuType     voip.PatternType      // GPU pattern type for SIMD matching
+	gpuType     gpuaccel.PatternType  // GPU pattern type for SIMD matching
 }
 
 // ApplicationFilter handles GPU-accelerated application-layer packet filtering
 // Supports multiple protocols via the detector and can be extended with protocol-specific filters
 type ApplicationFilter struct {
-	gpuAccel       *voip.GPUAccelerator
+	gpuAccel       *gpuaccel.GPUAccelerator
 	detector       *detector.Detector // Protocol detector for accurate protocol detection
-	config         *voip.GPUConfig
+	config         *gpuaccel.GPUConfig
 	sipUsers       []parsedFilter    // Parsed SIP user patterns (user part only, suffix matching)
 	sipURIs        []parsedFilter    // Parsed SIP URI patterns (user@domain, exact/contains matching)
 	phoneNumbers   []parsedFilter    // Parsed phone number patterns
 	ipAddresses    []string          // IP addresses as strings (for display/logging)
 	imsiFilters    map[string]string // IMSI (15 digits) -> filter ID
 	imeiFilters    map[string]string // IMEI (15 digits) -> filter ID
-	patterns       []voip.GPUPattern
+	patterns       []gpuaccel.GPUPattern
 	acPatterns     []ahocorasick.Pattern        // AC patterns for GPU backend (SIP users only)
 	acMatcher      *ahocorasick.BufferedMatcher // Aho-Corasick matcher for SIP user matching (alphanumeric)
 	phoneMatcher   *phonematcher.Matcher        // Bloom+hash matcher for phone numbers (LI-optimized)
@@ -89,16 +90,16 @@ type ApplicationFilter struct {
 
 // NewApplicationFilter creates a new application-layer filter with optional GPU acceleration
 // This filter is protocol-agnostic and uses the detector to identify protocols
-func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
-	// Convert voip.PatternAlgorithm to ahocorasick.Algorithm
+func NewApplicationFilter(config *gpuaccel.GPUConfig) (*ApplicationFilter, error) {
+	// Convert gpuaccel.PatternAlgorithm to ahocorasick.Algorithm
 	acAlgorithm := ahocorasick.AlgorithmAuto
 	if config != nil {
 		switch config.PatternAlgorithm {
-		case voip.PatternAlgorithmLinear:
+		case gpuaccel.PatternAlgorithmLinear:
 			acAlgorithm = ahocorasick.AlgorithmLinear
-		case voip.PatternAlgorithmAhoCorasick:
+		case gpuaccel.PatternAlgorithmAhoCorasick:
 			acAlgorithm = ahocorasick.AlgorithmAhoCorasick
-		case voip.PatternAlgorithmAuto:
+		case gpuaccel.PatternAlgorithmAuto:
 			acAlgorithm = ahocorasick.AlgorithmAuto
 		}
 	}
@@ -112,7 +113,7 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		ipAddresses:             make([]string, 0),
 		imsiFilters:             make(map[string]string),
 		imeiFilters:             make(map[string]string),
-		patterns:                make([]voip.GPUPattern, 0),
+		patterns:                make([]gpuaccel.GPUPattern, 0),
 		acPatterns:              make([]ahocorasick.Pattern, 0),
 		acMatcher:               ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick for SIP users
 		phoneMatcher:            phonematcher.New(),                                       // Bloom+hash for phone numbers (LI-optimized)
@@ -137,7 +138,7 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 
 	// Initialize GPU accelerator if enabled
 	if af.enabled {
-		gpuAccel, err := voip.NewGPUAccelerator(config)
+		gpuAccel, err := gpuaccel.NewGPUAccelerator(config)
 		if err != nil {
 			logger.Warn("Failed to initialize GPU accelerator for application-layer filtering, falling back to CPU", "error", err)
 			af.enabled = false
@@ -172,22 +173,22 @@ func (af *ApplicationFilter) GetNoFilterPolicy() NoFilterPolicy {
 
 // NewVoIPFilter is a deprecated alias for NewApplicationFilter
 // Maintained for backward compatibility
-func NewVoIPFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
+func NewVoIPFilter(config *gpuaccel.GPUConfig) (*ApplicationFilter, error) {
 	logger.Warn("NewVoIPFilter is deprecated, use NewApplicationFilter instead")
 	return NewApplicationFilter(config)
 }
 
-// filteringToGPUPatternType converts filtering.PatternType to voip.PatternType
-func filteringToGPUPatternType(pt filtering.PatternType) voip.PatternType {
+// filteringToGPUPatternType converts filtering.PatternType to gpuaccel.PatternType
+func filteringToGPUPatternType(pt filtering.PatternType) gpuaccel.PatternType {
 	switch pt {
 	case filtering.PatternTypePrefix:
-		return voip.PatternTypePrefix
+		return gpuaccel.PatternTypePrefix
 	case filtering.PatternTypeSuffix:
-		return voip.PatternTypeSuffix
+		return gpuaccel.PatternTypeSuffix
 	case filtering.PatternTypeContains:
-		return voip.PatternTypeContains
+		return gpuaccel.PatternTypeContains
 	default:
-		return voip.PatternTypeContains
+		return gpuaccel.PatternTypeContains
 	}
 }
 
@@ -241,7 +242,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 			})
 
 			// Create GPU pattern for SIP user matching
-			af.patterns = append(af.patterns, voip.GPUPattern{
+			af.patterns = append(af.patterns, gpuaccel.GPUPattern{
 				ID:            len(af.patterns),
 				Pattern:       []byte(pattern),
 				PatternLen:    len(pattern),
@@ -263,7 +264,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 			})
 
 			// Create GPU pattern for phone number matching
-			af.patterns = append(af.patterns, voip.GPUPattern{
+			af.patterns = append(af.patterns, gpuaccel.GPUPattern{
 				ID:            len(af.patterns),
 				Pattern:       []byte(pattern),
 				PatternLen:    len(pattern),

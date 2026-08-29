@@ -128,13 +128,13 @@ gpu:
 ### Go API Usage
 
 ```go
-import "github.com/endorses/lippycat/internal/pkg/voip"
+import "github.com/endorses/lippycat/internal/pkg/gpuaccel"
 
 // Create GPU accelerator with default config
-config := voip.DefaultGPUConfig()
+config := gpuaccel.DefaultGPUConfig()
 config.Enabled = true
 
-ga, err := voip.NewGPUAccelerator(config)
+ga, err := gpuaccel.NewGPUAccelerator(config)
 if err != nil {
     log.Fatal(err)
 }
@@ -144,19 +144,24 @@ defer ga.Close()
 backend := ga.GetBackendName()
 log.Printf("Using backend: %s", backend)
 
-// Extract Call-IDs from packet batch
+// Match application patterns in a packet batch
 packets := [][]byte{
     []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
     []byte("200 OK\r\nCall-ID: xyz789\r\n"),
 }
 
-callIDs, err := ga.ExtractCallIDsGPU(packets)
+patterns := []gpuaccel.GPUPattern{{
+    ID: 0, Pattern: []byte("Call-ID:"), PatternLen: 8,
+    Type: gpuaccel.PatternTypeContains,
+}}
+results, err := ga.ProcessBatch(packets, patterns)
 if err != nil {
     log.Fatal(err)
 }
 
-for _, callID := range callIDs {
-    fmt.Printf("Found Call-ID: %s\n", callID)
+for _, result := range results {
+    fmt.Printf("Pattern %d matched packet %d at offset %d\n",
+        result.PatternID, result.PacketIndex, result.Offset)
 }
 ```
 
@@ -164,18 +169,18 @@ for _, callID := range callIDs {
 
 ```go
 // Define custom patterns
-patterns := []voip.GPUPattern{
+patterns := []gpuaccel.GPUPattern{
     {
         ID:         0,
         Pattern:    []byte("INVITE"),
         PatternLen: 6,
-        Type:       voip.PatternTypePrefix,
+        Type:       gpuaccel.PatternTypePrefix,
     },
     {
         ID:         1,
         Pattern:    []byte("Call-ID:"),
         PatternLen: 8,
-        Type:       voip.PatternTypeContains,
+        Type:       gpuaccel.PatternTypeContains,
     },
 }
 
@@ -200,10 +205,10 @@ for _, result := range results {
 Exact byte-for-byte comparison.
 
 ```go
-pattern := voip.GPUPattern{
+pattern := gpuaccel.GPUPattern{
     Pattern:    []byte("SIP/2.0"),
     PatternLen: 7,
-    Type:       voip.PatternTypeLiteral,
+    Type:       gpuaccel.PatternTypeLiteral,
 }
 ```
 
@@ -211,10 +216,10 @@ pattern := voip.GPUPattern{
 Matches pattern at the beginning of data.
 
 ```go
-pattern := voip.GPUPattern{
+pattern := gpuaccel.GPUPattern{
     Pattern:    []byte("INVITE"),
     PatternLen: 6,
-    Type:       voip.PatternTypePrefix,
+    Type:       gpuaccel.PatternTypePrefix,
 }
 ```
 
@@ -222,10 +227,10 @@ pattern := voip.GPUPattern{
 Searches for pattern anywhere in data.
 
 ```go
-pattern := voip.GPUPattern{
+pattern := gpuaccel.GPUPattern{
     Pattern:    []byte("Call-ID:"),
     PatternLen: 8,
-    Type:       voip.PatternTypeContains,
+    Type:       gpuaccel.PatternTypeContains,
 }
 ```
 
@@ -310,7 +315,7 @@ go tool pprof cpu.prof
 - **Large batches (512-1024)**: Maximum throughput, higher latency
 
 ```go
-config := voip.DefaultGPUConfig()
+config := gpuaccel.DefaultGPUConfig()
 config.MaxBatchSize = 256  // Tune based on use case
 ```
 

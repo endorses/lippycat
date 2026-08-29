@@ -1,9 +1,10 @@
-package voip
+package gpuaccel
 
 import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -146,18 +147,25 @@ type GPUResultBuffers struct {
 
 // GPUStats holds GPU acceleration statistics
 type GPUStats struct {
-	_                 CachePadding
-	BatchesProcessed  PaddedCounter
-	PacketsProcessed  PaddedCounter
-	PatternsMatched   PaddedCounter
-	TransferToGPUNS   PaddedCounter
-	KernelExecutionNS PaddedCounter
-	TransferFromGPUNS PaddedCounter
-	TotalProcessingNS PaddedCounter
-	GPUMemoryUsed     PaddedCounter
-	FallbackToCPU     PaddedCounter
-	_                 CachePadding
+	BatchesProcessed  counter
+	PacketsProcessed  counter
+	PatternsMatched   counter
+	TransferToGPUNS   counter
+	KernelExecutionNS counter
+	TransferFromGPUNS counter
+	TotalProcessingNS counter
+	GPUMemoryUsed     counter
+	FallbackToCPU     counter
 }
+
+// counter wraps an atomic counter used by accelerator statistics.
+type counter struct {
+	value atomic.Uint64
+}
+
+func (c *counter) Inc()         { c.value.Add(1) }
+func (c *counter) Add(n uint64) { c.value.Add(n) }
+func (c *counter) Get() uint64  { return c.value.Load() }
 
 // DefaultGPUConfig returns default GPU configuration
 func DefaultGPUConfig() *GPUConfig {
@@ -332,7 +340,7 @@ func matchLiteral(data, pattern []byte) (bool, int) {
 	if len(data) != len(pattern) {
 		return false, -1
 	}
-	if BytesEqual(data, pattern) {
+	if BytesEqualSIMD(data, pattern) {
 		return true, 0
 	}
 	return false, -1
@@ -343,7 +351,7 @@ func matchPrefix(data, pattern []byte) (bool, int) {
 	if len(data) < len(pattern) {
 		return false, -1
 	}
-	if BytesEqual(data[:len(pattern)], pattern) {
+	if BytesEqualSIMD(data[:len(pattern)], pattern) {
 		return true, 0
 	}
 	return false, -1
@@ -355,7 +363,7 @@ func matchSuffix(data, pattern []byte) (bool, int) {
 		return false, -1
 	}
 	offset := len(data) - len(pattern)
-	if BytesEqual(data[offset:], pattern) {
+	if BytesEqualSIMD(data[offset:], pattern) {
 		return true, offset
 	}
 	return false, -1
@@ -368,59 +376,16 @@ func matchContains(data, pattern []byte) (bool, int) {
 	}
 
 	// Use SIMD-optimized BytesContains
-	if BytesContains(data, pattern) {
+	if BytesContainsSIMD(data, pattern) {
 		// Find offset (simple linear search for now)
 		for i := 0; i <= len(data)-len(pattern); i++ {
-			if BytesEqual(data[i:i+len(pattern)], pattern) {
+			if BytesEqualSIMD(data[i:i+len(pattern)], pattern) {
 				return true, i
 			}
 		}
 	}
 
 	return false, -1
-}
-
-// ExtractCallIDsGPU extracts Call-IDs using GPU acceleration
-// NOTE: This method is deprecated for production use. CallID extraction is faster on CPU.
-// Use ExtractCallIDFast() or VectorizedCallIDExtractor.ExtractCallIDs() instead.
-// GPU should only be used for pattern matching against large pattern sets.
-func (ga *GPUAccelerator) ExtractCallIDsGPU(packets [][]byte) ([]string, error) {
-	// Define Call-ID patterns
-	patterns := []GPUPattern{
-		{
-			ID:            0,
-			Pattern:       []byte("Call-ID:"),
-			PatternLen:    8,
-			Type:          PatternTypeContains,
-			CaseSensitive: false,
-		},
-		{
-			ID:            1,
-			Pattern:       []byte("\ni:"),
-			PatternLen:    3,
-			Type:          PatternTypeContains,
-			CaseSensitive: true,
-		},
-	}
-
-	results, err := ga.ProcessBatch(packets, patterns)
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract Call-IDs from matched packets
-	callIDs := make([]string, 0)
-	for _, result := range results {
-		if result.Matched && result.PacketIndex < len(packets) {
-			packet := packets[result.PacketIndex]
-			// Use existing fast extraction
-			if callID := extractCallIDFast(packet); callID != "" {
-				callIDs = append(callIDs, callID)
-			}
-		}
-	}
-
-	return callIDs, nil
 }
 
 // GetStats returns GPU acceleration statistics
@@ -465,61 +430,6 @@ func (ga *GPUAccelerator) Close() error {
 		return ga.backend.Cleanup()
 	}
 	return nil
-}
-
-// ConfigFromViper creates a GPU config from viper settings
-func ConfigFromViper(v interface {
-	GetBool(string) bool
-	GetString(string) string
-	GetInt(string) int
-	GetInt64(string) int64
-}) *GPUConfig {
-	config := DefaultGPUConfig()
-
-	// Check if explicitly disabled
-	if backend := v.GetString("voip.gpu_backend"); backend == "disabled" {
-		config.Enabled = false
-		return config
-	}
-
-	// Override defaults with config values
-	if v.GetBool("voip.gpu_enable") != config.Enabled {
-		config.Enabled = v.GetBool("voip.gpu_enable")
-	}
-
-	if backend := v.GetString("voip.gpu_backend"); backend != "" && backend != "auto" {
-		config.Backend = backend
-	}
-
-	if batchSize := v.GetInt("voip.gpu_batch_size"); batchSize > 0 {
-		config.MaxBatchSize = batchSize
-	}
-
-	if maxMem := v.GetInt64("voip.gpu_max_memory"); maxMem > 0 {
-		// Convert to pattern buffer size (simplified)
-		config.PatternBufferSize = int(maxMem)
-	}
-
-	// Pattern matching algorithm configuration
-	if algo := v.GetString("voip.pattern_algorithm"); algo != "" {
-		switch algo {
-		case "auto":
-			config.PatternAlgorithm = PatternAlgorithmAuto
-		case "linear":
-			config.PatternAlgorithm = PatternAlgorithmLinear
-		case "aho-corasick":
-			config.PatternAlgorithm = PatternAlgorithmAhoCorasick
-		default:
-			logger.Warn("Unknown pattern algorithm, using auto", "algorithm", algo)
-			config.PatternAlgorithm = PatternAlgorithmAuto
-		}
-	}
-
-	if bufferMB := v.GetInt("voip.pattern_buffer_mb"); bufferMB > 0 {
-		config.PatternBufferMB = bufferMB
-	}
-
-	return config
 }
 
 // Common errors

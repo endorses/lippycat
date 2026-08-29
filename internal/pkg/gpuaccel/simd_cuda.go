@@ -1,6 +1,6 @@
 //go:build cuda
 
-package voip
+package gpuaccel
 
 // When building with CUDA, we can't use assembly (CGo limitation)
 // Provide Go implementations of the SIMD functions

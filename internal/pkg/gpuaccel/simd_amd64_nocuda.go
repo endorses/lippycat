@@ -1,6 +1,6 @@
 //go:build amd64 && !cuda
 
-package voip
+package gpuaccel
 
 // Assembly function declarations - implemented in simd_amd64.s
 // These are only available when NOT building with CUDA (CGo + asm conflict)

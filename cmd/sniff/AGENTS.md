@@ -22,11 +22,12 @@ The `sniff` command provides **standalone local packet capture** - both general-
 ├─────────────────────────────────────────────────────────────┤
 │  Uses internal/pkg/                                         │
 │    ├── capture/         - gopacket integration              │
-│    ├── voip/            - VoIP protocol analysis            │
+│    ├── voip/            - SIP/RTP/SDP and call integration  │
 │    │   ├── sip.go       - SIP parsing                       │
 │    │   ├── rtp.go       - RTP stream handling               │
 │    │   ├── tcp*.go      - TCP reassembly                    │
-│    │   └── gpu*.go      - GPU acceleration                  │
+│    ├── gpuaccel/        - CUDA/SIMD matching backends       │
+│    ├── pipeline/        - Normalized packet contracts       │
 │    └── logger/          - Structured logging                │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -354,7 +355,9 @@ effectiveFilter := builder.Build(filterConfig)
 --gpu-backend auto  # CUDA > OpenCL > CPU SIMD > Pure Go
 ```
 
-**Implementation:** `internal/pkg/voip/gpu_*.go`
+**Implementation:** `internal/pkg/gpuaccel/gpu_*.go`. The VoIP runtime consumes
+this protocol-neutral backend; GPU lifecycle and build-tag implementations do
+not belong in `internal/pkg/voip`.
 
 Uses interface-based abstraction with runtime backend selection.
 

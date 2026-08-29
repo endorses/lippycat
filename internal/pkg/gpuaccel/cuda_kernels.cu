@@ -252,6 +252,83 @@ __global__ void extractCallIDKernel(
     }
 }
 
+// Dense Aho-Corasick matching kernel. Each thread owns one input and writes to
+// its own fixed-size result slice, so no atomics are required. Duplicate
+// pattern IDs are suppressed because filter consumers care whether a pattern
+// matched, not how many times it occurred in one input.
+__global__ void acMatchKernel(
+    const char* inputs,
+    const int* inputOffsets,
+    int numInputs,
+    const int* transitions,
+    const int* failure,
+    const int* outputs,
+    const int* outputOffsets,
+    const int* patternTypes,
+    const int* patternLengths,
+    int numStates,
+    int* results,
+    int* resultCounts,
+    int maxMatchesPerInput
+) {
+    int inputIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (inputIdx >= numInputs) {
+        return;
+    }
+
+    int state = 0;
+    int resultCount = 0;
+    int inputStart = inputOffsets[inputIdx];
+    int inputEnd = inputOffsets[inputIdx + 1];
+    int resultStart = inputIdx * maxMatchesPerInput;
+
+    for (int pos = inputStart; pos < inputEnd; pos++) {
+        unsigned char symbol = static_cast<unsigned char>(inputs[pos]);
+        if (symbol >= 'A' && symbol <= 'Z') {
+            symbol += 'a' - 'A';
+        }
+        int nextState = transitions[state * 256 + symbol];
+
+        // Exported dense automatons normally contain resolved transitions for
+        // every byte. Follow failure links defensively if an unresolved entry
+        // is ever supplied.
+        while (nextState < 0 && state != 0) {
+            state = failure[state];
+            nextState = transitions[state * 256 + symbol];
+        }
+        state = nextState >= 0 && nextState < numStates ? nextState : 0;
+
+        int outputStart = outputOffsets[state];
+        int outputEnd = outputOffsets[state + 1];
+        for (int outputIdx = outputStart; outputIdx < outputEnd; outputIdx++) {
+            int patternID = outputs[outputIdx];
+            int matchEnd = pos - inputStart + 1;
+            int matchStart = matchEnd - patternLengths[patternID];
+            int inputLength = inputEnd - inputStart;
+            // PatternTypeContains=0, Prefix=1, Suffix=2.
+            bool valid = patternTypes[patternID] == 0 ||
+                (patternTypes[patternID] == 1 && matchStart == 0) ||
+                (patternTypes[patternID] == 2 && matchEnd == inputLength);
+            if (!valid) {
+                continue;
+            }
+            bool duplicate = false;
+            for (int matchIdx = 0; matchIdx < resultCount; matchIdx++) {
+                if (results[resultStart + matchIdx] == patternID) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate && resultCount < maxMatchesPerInput) {
+                results[resultStart + resultCount] = patternID;
+                resultCount++;
+            }
+        }
+    }
+
+    resultCounts[inputIdx] = resultCount;
+}
+
 // C wrapper functions for CGo
 
 extern "C" {
@@ -318,6 +395,38 @@ void launchCallIDExtractionKernel(
     extractCallIDKernel<<<numBlocks, blockSize, 0, stream>>>(
         d_packets, d_packetOffsets, numPackets,
         d_callIDs, d_callIDOffsets, d_callIDCount
+    );
+}
+
+void launchACMatchKernel(
+    const char* d_inputs,
+    const int* d_inputOffsets,
+    int numInputs,
+    const int* d_transitions,
+    const int* d_failure,
+    const int* d_outputs,
+    const int* d_outputOffsets,
+    const int* d_patternTypes,
+    const int* d_patternLengths,
+    int numStates,
+    int* d_results,
+    int* d_resultCounts,
+    int maxMatchesPerInput,
+    cudaStream_t stream
+) {
+    if (numInputs <= 0 || numStates <= 0 || maxMatchesPerInput <= 0) {
+        return;
+    }
+
+    cudaMemsetAsync(d_resultCounts, 0, numInputs * sizeof(int), stream);
+
+    int blockSize = 256;
+    int numBlocks = (numInputs + blockSize - 1) / blockSize;
+    acMatchKernel<<<numBlocks, blockSize, 0, stream>>>(
+        d_inputs, d_inputOffsets, numInputs,
+        d_transitions, d_failure, d_outputs, d_outputOffsets,
+        d_patternTypes, d_patternLengths, numStates,
+        d_results, d_resultCounts, maxMatchesPerInput
     );
 }
 

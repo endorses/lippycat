@@ -1,8 +1,10 @@
 //go:build amd64
 
-package voip
+package gpuaccel
 
 import (
+	"bytes"
+
 	"golang.org/x/sys/cpu"
 )
 
@@ -18,6 +20,11 @@ type CPUFeatures struct {
 }
 
 var cpuFeatures CPUFeatures
+
+func bytesContainsSimple(data, pattern []byte) bool { return bytes.Contains(data, pattern) }
+func bytesContainsBMH(data, pattern []byte) bool    { return bytes.Contains(data, pattern) }
+func BytesEqual(a, b []byte) bool                   { return bytes.Equal(a, b) }
+func IndexByte(data []byte, c byte) int             { return bytes.IndexByte(data, c) }
 
 func init() {
 	// Detect CPU features at startup

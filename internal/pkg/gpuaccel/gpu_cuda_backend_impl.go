@@ -1,6 +1,6 @@
 //go:build cuda
 
-package voip
+package gpuaccel
 
 /*
 #cgo CFLAGS: -I/opt/cuda/include
@@ -79,6 +79,8 @@ extern void launchACMatchKernel(
     const int* d_failure,       // [numStates] failure links
     const int* d_outputs,       // [numStates] output pattern indices (packed)
     const int* d_outputOffsets, // [numStates+1] offsets into d_outputs
+    const int* d_patternTypes,  // [numPatterns] filtering.PatternType values
+    const int* d_patternLengths,// [numPatterns] pattern lengths
     int numStates,
     int* d_results,             // [numUsernames * maxMatches] matched pattern IDs
     int* d_resultCounts,        // [numUsernames] number of matches per username
@@ -89,6 +91,8 @@ extern void launchACMatchKernel(
 import "C"
 import (
 	"fmt"
+	"math"
+	"sync"
 	"unsafe"
 
 	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
@@ -97,16 +101,20 @@ import (
 
 // cudaACAutomaton holds GPU buffers for a single Aho-Corasick automaton
 type cudaACAutomaton struct {
-	transitions   unsafe.Pointer // [numStates][256] int32 dense transition table
-	failure       unsafe.Pointer // [numStates] int32 failure links
-	outputs       unsafe.Pointer // Packed output pattern indices
-	outputOffsets unsafe.Pointer // [numStates+1] int32 offsets into acOutputs
-	numStates     int
-	numPatterns   int
+	transitions    unsafe.Pointer // [numStates][256] int32 dense transition table
+	failure        unsafe.Pointer // [numStates] int32 failure links
+	outputs        unsafe.Pointer // Packed output pattern indices
+	outputOffsets  unsafe.Pointer // [numStates+1] int32 offsets into acOutputs
+	patternTypes   unsafe.Pointer // [numPatterns] filtering.PatternType values
+	patternLengths unsafe.Pointer // [numPatterns] pattern lengths
+	patternIDs     []int          // Pattern index to public Pattern.ID
+	numStates      int
+	numPatterns    int
 }
 
 // CUDABackendImpl is the real CUDA implementation
 type CUDABackendImpl struct {
+	acMu          sync.Mutex
 	config        *GPUConfig
 	deviceID      int
 	devicePtr     unsafe.Pointer
@@ -125,6 +133,7 @@ type CUDABackendImpl struct {
 
 	// Username matching buffers (shared across automatons)
 	usernameBuffer           unsafe.Pointer // Flattened username data
+	usernameBufferCapacity   int            // Allocated bytes in usernameBuffer
 	usernameOffsetBuffer     unsafe.Pointer // Offsets into username buffer
 	acResultBuffer           unsafe.Pointer // Match results per username
 	acResultCountBuffer      unsafe.Pointer // Match count per username
@@ -361,6 +370,9 @@ func (cb *CUDABackendImpl) TransferResultsFromGPU() ([]GPUResult, error) {
 
 // Cleanup releases CUDA resources
 func (cb *CUDABackendImpl) Cleanup() error {
+	cb.acMu.Lock()
+	defer cb.acMu.Unlock()
+
 	// Free Aho-Corasick buffers
 	cb.freeAllACBuffers()
 
@@ -412,6 +424,9 @@ func (cb *CUDABackendImpl) BuildAutomaton(patterns []ahocorasick.Pattern) error 
 // The automaton is serialized into dense arrays for efficient GPU traversal.
 // Multiple automatons can coexist with different names.
 func (cb *CUDABackendImpl) BuildNamedAutomaton(name string, patterns []ahocorasick.Pattern) error {
+	cb.acMu.Lock()
+	defer cb.acMu.Unlock()
+
 	if !cb.initialized {
 		return ErrGPUNotAvailable
 	}
@@ -430,13 +445,20 @@ func (cb *CUDABackendImpl) BuildNamedAutomaton(name string, patterns []ahocorasi
 	}
 
 	// Serialize automaton to flat arrays for GPU
-	numStates, transitions, failure, outputs, outputOffsets := cb.serializeAutomaton(ac)
+	numStates, transitions, failure, outputs, outputOffsets, patternTypes, patternLengths := cb.serializeAutomaton(ac)
 
 	// Create automaton struct
 	automaton := &cudaACAutomaton{
 		numStates:   numStates,
 		numPatterns: len(patterns),
+		patternIDs:  make([]int, len(patterns)),
 	}
+	for i := range patterns {
+		automaton.patternIDs[i] = patterns[i].ID
+	}
+	// Register immediately so every subsequent error path can release partial
+	// allocations through freeNamedACBuffers.
+	cb.acAutomatons[name] = automaton
 
 	// Allocate and copy transitions to GPU: [numStates][256] int32
 	transitionSize := numStates * 256 * 4
@@ -491,8 +513,29 @@ func (cb *CUDABackendImpl) BuildNamedAutomaton(name string, patterns []ahocorasi
 		}
 	}
 
-	// Store automaton
-	cb.acAutomatons[name] = automaton
+	patternTypesSize := len(patternTypes) * 4
+	var patternTypesBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&patternTypesBuf, C.size_t(patternTypesSize)); cerr != 0 {
+		cb.freeNamedACBuffers(name)
+		return fmt.Errorf("failed to allocate AC pattern types for %q: %d", name, cerr)
+	}
+	automaton.patternTypes = patternTypesBuf
+	if cerr := C.copyHostToDevice(patternTypesBuf, unsafe.Pointer(&patternTypes[0]), C.size_t(patternTypesSize)); cerr != 0 {
+		cb.freeNamedACBuffers(name)
+		return fmt.Errorf("failed to copy AC pattern types to GPU for %q: %d", name, cerr)
+	}
+
+	patternLengthsSize := len(patternLengths) * 4
+	var patternLengthsBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&patternLengthsBuf, C.size_t(patternLengthsSize)); cerr != 0 {
+		cb.freeNamedACBuffers(name)
+		return fmt.Errorf("failed to allocate AC pattern lengths for %q: %d", name, cerr)
+	}
+	automaton.patternLengths = patternLengthsBuf
+	if cerr := C.copyHostToDevice(patternLengthsBuf, unsafe.Pointer(&patternLengths[0]), C.size_t(patternLengthsSize)); cerr != 0 {
+		cb.freeNamedACBuffers(name)
+		return fmt.Errorf("failed to copy AC pattern lengths to GPU for %q: %d", name, cerr)
+	}
 
 	// Allocate shared matching buffers if not already done
 	if !cb.matchingBuffersAllocated {
@@ -523,6 +566,7 @@ func (cb *CUDABackendImpl) allocateMatchingBuffers() error {
 		return fmt.Errorf("failed to allocate input buffer: %d", cerr)
 	}
 	cb.usernameBuffer = usernameBuf
+	cb.usernameBufferCapacity = usernameBufferSize
 
 	// Input offsets
 	usernameOffsetsSize := (cb.maxUsernamesBatch + 1) * 4
@@ -554,10 +598,16 @@ func (cb *CUDABackendImpl) allocateMatchingBuffers() error {
 
 // serializeAutomaton extracts the automaton data into flat arrays.
 // Returns: numStates, transitions[numStates*256], failure[numStates], outputs[], outputOffsets[numStates+1]
-func (cb *CUDABackendImpl) serializeAutomaton(ac *ahocorasick.DenseAhoCorasick) (int, []int32, []int32, []int32, []int32) {
+func (cb *CUDABackendImpl) serializeAutomaton(ac *ahocorasick.DenseAhoCorasick) (int, []int32, []int32, []int32, []int32, []int32, []int32) {
 	numStates := ac.StateCount()
-	transitions, failure, outputs, outputOffsets, _, _ := ac.ExportStates()
-	return numStates, transitions, failure, outputs, outputOffsets
+	transitions, failure, outputs, outputOffsets, exportedTypes, exportedLengths := ac.ExportStates()
+	patternTypes := make([]int32, len(exportedTypes))
+	patternLengths := make([]int32, len(exportedLengths))
+	for i := range exportedTypes {
+		patternTypes[i] = int32(exportedTypes[i])
+		patternLengths[i] = int32(exportedLengths[i])
+	}
+	return numStates, transitions, failure, outputs, outputOffsets, patternTypes, patternLengths
 }
 
 // MatchUsernames matches usernames against the default Aho-Corasick automaton.
@@ -569,6 +619,9 @@ func (cb *CUDABackendImpl) MatchUsernames(usernames [][]byte) ([][]int, error) {
 // MatchWithAutomaton matches inputs against a specific named automaton.
 // Each GPU thread processes one input, traversing the automaton states.
 func (cb *CUDABackendImpl) MatchWithAutomaton(name string, inputs [][]byte) ([][]int, error) {
+	cb.acMu.Lock()
+	defer cb.acMu.Unlock()
+
 	if !cb.initialized {
 		return nil, ErrGPUNotAvailable
 	}
@@ -612,12 +665,20 @@ func (cb *CUDABackendImpl) matchInputsBatch(automaton *cudaACAutomaton, inputs [
 	offsets[0] = 0
 
 	for i, input := range inputs {
+		if len(input) > math.MaxInt32-totalSize {
+			return nil, fmt.Errorf("CUDA AC input batch exceeds int32 offset capacity")
+		}
 		totalSize += len(input)
 		offsets[i+1] = int32(totalSize)
 	}
 
 	if totalSize == 0 {
 		return results, nil
+	}
+	if totalSize > cb.usernameBufferCapacity {
+		if err := cb.resizeUsernameBuffer(totalSize); err != nil {
+			return nil, err
+		}
 	}
 
 	// Create flat buffer
@@ -647,6 +708,8 @@ func (cb *CUDABackendImpl) matchInputsBatch(automaton *cudaACAutomaton, inputs [
 		(*C.int)(automaton.failure),
 		(*C.int)(automaton.outputs),
 		(*C.int)(automaton.outputOffsets),
+		(*C.int)(automaton.patternTypes),
+		(*C.int)(automaton.patternLengths),
 		C.int(automaton.numStates),
 		(*C.int)(cb.acResultBuffer),
 		(*C.int)(cb.acResultCountBuffer),
@@ -680,13 +743,47 @@ func (cb *CUDABackendImpl) matchInputsBatch(automaton *cudaACAutomaton, inputs [
 			}
 			patternIDs := make([]int, count)
 			for j := 0; j < count; j++ {
-				patternIDs[j] = int(allResults[i*cb.maxMatchesPerUser+j])
+				patternIndex := int(allResults[i*cb.maxMatchesPerUser+j])
+				if patternIndex < 0 || patternIndex >= len(automaton.patternIDs) {
+					return nil, fmt.Errorf("CUDA AC matcher returned invalid pattern index %d", patternIndex)
+				}
+				patternIDs[j] = automaton.patternIDs[patternIndex]
 			}
 			results[i] = patternIDs
 		}
 	}
 
 	return results, nil
+}
+
+// resizeUsernameBuffer grows the shared input buffer without imposing a
+// hidden 64-byte-per-input limit. Matching is serialized by the accelerator,
+// so replacing this buffer cannot race another kernel launch.
+func (cb *CUDABackendImpl) resizeUsernameBuffer(required int) error {
+	newCapacity := cb.usernameBufferCapacity
+	if newCapacity == 0 {
+		newCapacity = 64
+	}
+	for newCapacity < required {
+		newCapacity *= 2
+	}
+
+	var newBuffer unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&newBuffer, C.size_t(newCapacity)); cerr != 0 {
+		return fmt.Errorf("failed to grow CUDA input buffer to %d bytes: %d", newCapacity, cerr)
+	}
+	if cb.usernameBuffer != nil {
+		if cerr := C.freeDeviceMemory(cb.usernameBuffer); cerr != 0 {
+			if freeErr := C.freeDeviceMemory(newBuffer); freeErr != 0 {
+				logger.Error("Failed to release replacement CUDA input buffer", "error_code", int(freeErr))
+			}
+			return fmt.Errorf("failed to release previous CUDA input buffer: %d", cerr)
+		}
+	}
+
+	cb.usernameBuffer = newBuffer
+	cb.usernameBufferCapacity = newCapacity
+	return nil
 }
 
 // freeNamedACBuffers releases GPU buffers for a specific named automaton.
@@ -708,6 +805,12 @@ func (cb *CUDABackendImpl) freeNamedACBuffers(name string) {
 	if automaton.outputOffsets != nil {
 		C.freeDeviceMemory(automaton.outputOffsets)
 	}
+	if automaton.patternTypes != nil {
+		C.freeDeviceMemory(automaton.patternTypes)
+	}
+	if automaton.patternLengths != nil {
+		C.freeDeviceMemory(automaton.patternLengths)
+	}
 
 	delete(cb.acAutomatons, name)
 }
@@ -723,6 +826,7 @@ func (cb *CUDABackendImpl) freeAllACBuffers() {
 	if cb.usernameBuffer != nil {
 		C.freeDeviceMemory(cb.usernameBuffer)
 		cb.usernameBuffer = nil
+		cb.usernameBufferCapacity = 0
 	}
 	if cb.usernameOffsetBuffer != nil {
 		C.freeDeviceMemory(cb.usernameOffsetBuffer)

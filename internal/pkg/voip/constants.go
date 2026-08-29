@@ -54,51 +54,6 @@ const (
 	DefaultTCPLatencyOptimization = false             // Latency optimization disabled by default
 )
 
-// Memory pool configuration constants
-//
-// Buffer Size Classes:
-// Memory pools use graduated size classes to efficiently handle objects of varying sizes.
-// Each class handles objects up to its size, reducing memory fragmentation.
-const (
-	// PoolSizeClass128 is the smallest buffer class (128 bytes)
-	// Used for small SIP headers, short strings, and minimal packet metadata
-	PoolSizeClass128 = 128
-
-	// PoolSizeClass512 is for medium-small buffers (512 bytes)
-	// Handles most SIP method lines and typical header values
-	PoolSizeClass512 = 512
-
-	// PoolSizeClass2K is for medium buffers (2KB)
-	// Suitable for SIP messages with several headers
-	PoolSizeClass2K = 2048
-
-	// PoolSizeClass8K is for larger buffers (8KB)
-	// Handles most complete SIP messages and moderate RTP payloads
-	PoolSizeClass8K = 8192
-
-	// PoolSizeClass32K is for large buffers (32KB)
-	// Used for SIP messages with large SDP bodies or multiple participants
-	PoolSizeClass32K = 32768
-
-	// PoolSizeClass64K is the maximum pooled buffer size (64KB)
-	// Maximum size for pooled objects; larger allocations bypass the pool
-	PoolSizeClass64K = 65536
-
-	// PoolDefaultInitialSize is the initial number of objects pre-allocated per pool
-	PoolDefaultInitialSize = 128
-
-	// PoolDefaultMaxSize is the maximum number of objects retained in a pool
-	// Objects beyond this limit are discarded to prevent memory bloat
-	PoolDefaultMaxSize = 10000
-
-	// PoolDefaultMaxObjectSize is the maximum size of objects allowed in the pool
-	// Larger objects are allocated directly and not pooled
-	PoolDefaultMaxObjectSize = PoolSizeClass64K
-
-	// PoolDefaultGrowthFactor is the multiplier when expanding pool capacity
-	PoolDefaultGrowthFactor = 2
-)
-
 // Security validation constants
 //
 // These limits protect against DoS attacks and malformed input.

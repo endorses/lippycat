@@ -30,7 +30,9 @@ Hunters are **edge capture agents** that:
 │    │   ├── hunter.go    - Main hunter impl & config          │
 │    │   └── connection/manager.go - gRPC client               │
 │    ├── capture/         - Packet capture                     │
-│    ├── voip/            - VoIP filtering & buffering         │
+│    ├── pipeline/        - Normalized packet contracts        │
+│    ├── gpuaccel/        - Protocol-neutral CUDA/SIMD matching│
+│    ├── voip/            - SIP/RTP/SDP filtering & buffering  │
 │    │   ├── buffermanager.go   - Call buffering               │
 │    │   └── filter.go          - Filter builders              │
 │    ├── hunter/filter/matcher.go - Filter matching            │
@@ -41,6 +43,12 @@ Hunters are **edge capture agents** that:
 │    └── management.proto - Filter distribution & heartbeat    │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+Protocol subcommands provide topology-specific flags and a shared runtime
+specification. Reassembly and protocol orchestration are shared components; do
+not introduce a second hunter-only packet loop. GPU backends live in
+`internal/pkg/gpuaccel`, while VoIP supplies only the SIP/RTP-specific inputs
+and result handling.
 
 ## Build Tags
 

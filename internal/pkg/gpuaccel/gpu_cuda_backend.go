@@ -1,6 +1,6 @@
 //go:build !cuda
 
-package voip
+package gpuaccel
 
 import (
 	"errors"

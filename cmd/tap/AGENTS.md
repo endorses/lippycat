@@ -45,12 +45,20 @@ When adding features to `hunt` or `process`, the same features must be added to 
 │    │       ├── target_local.go  - LocalTarget (BPF-based)       │
 │    │       └── target_hunter.go - HunterTarget (distributed)    │
 │    ├── capture/         - Packet capture (gopacket)             │
-│    └── voip/            - VoIP protocol analysis                │
+│    ├── pipeline/        - Normalized packet/result contracts    │
+│    ├── gpuaccel/        - Protocol-neutral CUDA/SIMD backends   │
+│    └── voip/            - SIP/RTP/SDP and call integration      │
 ├─────────────────────────────────────────────────────────────────┤
 │  gRPC Protocol: api/proto/                                      │
 │    └── monitoring.proto - TUI monitoring (same as processor)    │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+Protocol subcommands declare their flags and a shared runtime specification;
+they must not recreate capture, reassembly, analysis, or sink loops. Tap's local
+source produces normalized envelopes directly for the processor pipeline. The
+protobuf representation remains a transport-boundary concern and is not the
+local tap ingress contract.
 
 ## Build Tags
 

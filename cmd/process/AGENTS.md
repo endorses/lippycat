@@ -33,6 +33,7 @@ Processors are **central aggregation nodes** that:
 │    │   ├── filtering/                  - Filter management    │
 │    │   ├── flow/                       - Flow control logic   │
 │    │   └── upstream/                   - Upstream connection   │
+│    ├── pipeline/        - Normalized packet/result contracts  │
 │    ├── detector/        - Protocol detection                   │
 │    └── tlsutil/         - TLS configuration                    │
 ├────────────────────────────────────────────────────────────────┤
@@ -42,6 +43,12 @@ Processors are **central aggregation nodes** that:
 │    └── monitoring.proto - TUI monitoring                       │
 └────────────────────────────────────────────────────────────────┘
 ```
+
+Both gRPC and tap-local sources normalize ingress into
+`pipeline.PacketEnvelope` values. Generated protobuf packets are retained only
+at transport and compatibility boundaries while remaining stages migrate; new
+processor stages should consume normalized envelopes and must not add another
+protobuf-to-domain compatibility bridge.
 
 ## Processor Package File Organization
 

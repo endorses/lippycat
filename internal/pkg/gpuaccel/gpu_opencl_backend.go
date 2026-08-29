@@ -1,4 +1,4 @@
-package voip
+package gpuaccel
 
 import (
 	"errors"

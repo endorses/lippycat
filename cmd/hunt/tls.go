@@ -87,10 +87,7 @@ func runTLSHunt(cmd *cobra.Command, args []string) error {
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(hunterConfigSpec{
-		bpfFilter:            effectiveBPFFilter,
-		supportedFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"},
-	})
+	config := buildHunterConfig(tlsHunterConfigSpec(effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -165,4 +162,8 @@ func runTLSHunt(cmd *cobra.Command, args []string) error {
 		logger.Info("Shutdown signal received, stopping TLS hunter...")
 		return nil
 	}
+}
+
+func tlsHunterConfigSpec(filter string) hunterConfigSpec {
+	return hunterConfigSpec{bpfFilter: filter, supportedFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}}
 }

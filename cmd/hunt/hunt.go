@@ -181,12 +181,7 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (flags override config file)
-	config := buildHunterConfig(hunterConfigSpec{
-		bpfFilter:           cmdutil.GetStringConfig("hunter.bpf_filter", bpfFilter),
-		useGPUFlag:          true,
-		includeDiskBuffer:   true,
-		includeFilterPolicy: true,
-	})
+	config := buildHunterConfig(genericHunterConfigSpec(cmdutil.GetStringConfig("hunter.bpf_filter", bpfFilter)))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -270,4 +265,13 @@ func runHunt(cmd *cobra.Command, args []string) error {
 
 	logger.Info("Hunter stopped")
 	return nil
+}
+
+func genericHunterConfigSpec(filter string) hunterConfigSpec {
+	return hunterConfigSpec{
+		bpfFilter:           filter,
+		useGPUFlag:          true,
+		includeDiskBuffer:   true,
+		includeFilterPolicy: true,
+	}
 }

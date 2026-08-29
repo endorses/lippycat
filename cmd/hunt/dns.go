@@ -100,10 +100,7 @@ func runDNSHunt(cmd *cobra.Command, args []string) error {
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(hunterConfigSpec{
-		bpfFilter:            effectiveBPFFilter,
-		supportedFilterTypes: []string{"bpf", "ip_address", "dns_domain"},
-	})
+	config := buildHunterConfig(dnsHunterConfigSpec(effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -179,4 +176,8 @@ func runDNSHunt(cmd *cobra.Command, args []string) error {
 		logger.Info("Shutdown signal received, stopping DNS hunter...")
 		return nil
 	}
+}
+
+func dnsHunterConfigSpec(filter string) hunterConfigSpec {
+	return hunterConfigSpec{bpfFilter: filter, supportedFilterTypes: []string{"bpf", "ip_address", "dns_domain"}}
 }

@@ -727,6 +727,11 @@ Follow-up audit (2026-08-29): migrated the remaining VoIP tap construction to
 the shared runtime and expanded tap CLI contracts to cover every protocol-local
 flag/default and Viper binding.
 
+Verification hardening (2026-08-29): hunter configuration fixtures now invoke
+the exact per-command specification constructors used by production paths.
+Hunter, sniff, and tap CLI contracts snapshot complete rendered help and
+behaviorally verify every declared flag-to-Viper-key binding.
+
 ### Exit Criteria
 
 - Protocol subcommand files primarily declare flags and protocol differences.

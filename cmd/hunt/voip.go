@@ -147,13 +147,7 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(hunterConfigSpec{
-		bpfFilter:           effectiveBPFFilter,
-		voIPMode:            true,
-		enableVoIPFilter:    true,
-		useGPUFlag:          true,
-		includeFilterPolicy: true,
-	})
+	config := buildHunterConfig(voipHunterConfigSpec(effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -233,6 +227,16 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 	case <-ctx.Done():
 		logger.Info("Shutdown signal received, stopping VoIP hunter...")
 		return nil
+	}
+}
+
+func voipHunterConfigSpec(filter string) hunterConfigSpec {
+	return hunterConfigSpec{
+		bpfFilter:           filter,
+		voIPMode:            true,
+		enableVoIPFilter:    true,
+		useGPUFlag:          true,
+		includeFilterPolicy: true,
 	}
 }
 

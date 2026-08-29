@@ -65,6 +65,7 @@ extern void launchPatternMatchKernel(
     int numPatterns,
     int* d_results,
     int* d_resultCount,
+    int maxResults,
     cudaStream_t stream
 );
 
@@ -114,19 +115,25 @@ type cudaACAutomaton struct {
 
 // CUDABackendImpl is the real CUDA implementation
 type CUDABackendImpl struct {
-	acMu          sync.Mutex
-	config        *GPUConfig
-	deviceID      int
-	devicePtr     unsafe.Pointer
-	packetBuffer  unsafe.Pointer
-	patternBuffer unsafe.Pointer
-	resultBuffer  unsafe.Pointer
-	offsetBuffer  unsafe.Pointer
-	stream        C.cudaStream_t
-	deviceProps   C.struct_cudaDeviceProp
-	maxPacketSize int
-	maxBatchSize  int
-	initialized   bool
+	acMu                  sync.Mutex
+	config                *GPUConfig
+	deviceID              int
+	devicePtr             unsafe.Pointer
+	packetBuffer          unsafe.Pointer
+	patternBuffer         unsafe.Pointer
+	patternLengthBuffer   unsafe.Pointer
+	patternLengthCapacity int
+	resultBuffer          unsafe.Pointer
+	offsetBuffer          unsafe.Pointer
+	stream                C.cudaStream_t
+	deviceProps           C.struct_cudaDeviceProp
+	maxPacketSize         int
+	maxBatchSize          int
+	packetCount           int
+	packetLengths         []int
+	resultCapacity        int
+	activePatterns        []GPUPattern
+	initialized           bool
 
 	// Named Aho-Corasick automatons on GPU
 	acAutomatons map[string]*cudaACAutomaton
@@ -229,7 +236,9 @@ func (cb *CUDABackendImpl) AllocatePacketBuffers(maxPackets int, maxPacketSize i
 
 	// Allocate result buffer (4 ints per result * maxPackets * 10 patterns)
 	var resultBuf unsafe.Pointer
-	resultSize := maxPackets * 10 * 4 * 4 // max 10 patterns, 4 ints per result
+	cb.resultCapacity = maxPackets * 10
+	// The first int stores the result count; match records follow it.
+	resultSize := 4 + cb.resultCapacity*4*4
 	if cerr := C.allocateDeviceMemory(&resultBuf, C.size_t(resultSize)); cerr != 0 {
 		C.freeDeviceMemory(cb.packetBuffer)
 		C.freeDeviceMemory(cb.offsetBuffer)
@@ -251,6 +260,14 @@ func (cb *CUDABackendImpl) TransferPacketsToGPU(packets [][]byte) error {
 	if !cb.initialized {
 		return ErrGPUNotAvailable
 	}
+	if len(packets) == 0 {
+		cb.packetCount = 0
+		cb.packetLengths = nil
+		return nil
+	}
+	if len(packets) > cb.maxBatchSize {
+		return fmt.Errorf("packet batch size %d exceeds CUDA capacity %d", len(packets), cb.maxBatchSize)
+	}
 
 	if cb.packetBuffer == nil {
 		if err := cb.AllocatePacketBuffers(cb.maxBatchSize, cb.maxPacketSize); err != nil {
@@ -264,8 +281,15 @@ func (cb *CUDABackendImpl) TransferPacketsToGPU(packets [][]byte) error {
 	offsets[0] = 0
 
 	for i, pkt := range packets {
+		if len(pkt) > cb.maxPacketSize {
+			return fmt.Errorf("packet %d size %d exceeds CUDA packet capacity %d", i, len(pkt), cb.maxPacketSize)
+		}
 		totalSize += len(pkt)
 		offsets[i+1] = int32(totalSize)
+	}
+	cb.packetLengths = make([]int, len(packets))
+	for i := range packets {
+		cb.packetLengths[i] = len(packets[i])
 	}
 
 	// Create flat buffer
@@ -285,6 +309,7 @@ func (cb *CUDABackendImpl) TransferPacketsToGPU(packets [][]byte) error {
 	if cerr := C.copyHostToDevice(cb.offsetBuffer, unsafe.Pointer(&offsets[0]), C.size_t(len(offsets)*4)); cerr != 0 {
 		return fmt.Errorf("failed to copy offsets to GPU: %d", cerr)
 	}
+	cb.packetCount = len(packets)
 
 	return nil
 }
@@ -294,10 +319,23 @@ func (cb *CUDABackendImpl) ExecutePatternMatching(patterns []GPUPattern) error {
 	if !cb.initialized {
 		return ErrGPUNotAvailable
 	}
+	if cb.packetCount == 0 || len(patterns) == 0 {
+		var zero int32
+		if cb.resultBuffer != nil {
+			if cerr := C.copyHostToDevice(cb.resultBuffer, unsafe.Pointer(&zero), 4); cerr != 0 {
+				return fmt.Errorf("failed to reset CUDA result count: %d", cerr)
+			}
+		}
+		cb.activePatterns = nil
+		return nil
+	}
 
 	// Prepare pattern data
 	totalPatternSize := 0
 	for _, p := range patterns {
+		if p.PatternLen < 0 || p.PatternLen > len(p.Pattern) {
+			return fmt.Errorf("invalid CUDA pattern length %d for %d-byte pattern", p.PatternLen, len(p.Pattern))
+		}
 		totalPatternSize += p.PatternLen
 	}
 
@@ -311,14 +349,36 @@ func (cb *CUDABackendImpl) ExecutePatternMatching(patterns []GPUPattern) error {
 		offset += p.PatternLen
 	}
 
+	if totalPatternSize > 1024*1024 {
+		return fmt.Errorf("CUDA patterns require %d bytes, exceeding 1 MiB capacity", totalPatternSize)
+	}
 	// Copy patterns to GPU
 	if cerr := C.copyHostToDevice(cb.patternBuffer, unsafe.Pointer(&flatPatterns[0]), C.size_t(totalPatternSize)); cerr != 0 {
 		return fmt.Errorf("failed to copy patterns to GPU: %d", cerr)
 	}
-
-	// Launch kernel (implementation in .cu file)
-	// For now, return success - kernel implementation needed
-	logger.Debug("CUDA pattern matching kernel would execute here")
+	if len(patterns) > cb.patternLengthCapacity {
+		if cb.patternLengthBuffer != nil {
+			if cerr := C.freeDeviceMemory(cb.patternLengthBuffer); cerr != 0 {
+				return fmt.Errorf("failed to release CUDA pattern lengths: %d", cerr)
+			}
+			cb.patternLengthBuffer = nil
+			cb.patternLengthCapacity = 0
+		}
+		if cerr := C.allocateDeviceMemory(&cb.patternLengthBuffer, C.size_t(len(patterns)*4)); cerr != 0 {
+			return fmt.Errorf("failed to allocate CUDA pattern lengths: %d", cerr)
+		}
+		cb.patternLengthCapacity = len(patterns)
+	}
+	if cerr := C.copyHostToDevice(cb.patternLengthBuffer, unsafe.Pointer(&patternLengths[0]), C.size_t(len(patterns)*4)); cerr != 0 {
+		return fmt.Errorf("failed to copy CUDA pattern lengths: %d", cerr)
+	}
+	cb.activePatterns = append(cb.activePatterns[:0], patterns...)
+	resultData := unsafe.Pointer(uintptr(cb.resultBuffer) + 4)
+	C.launchPatternMatchKernel(
+		(*C.char)(cb.packetBuffer), (*C.int)(cb.offsetBuffer), C.int(cb.packetCount),
+		(*C.char)(cb.patternBuffer), (*C.int)(cb.patternLengthBuffer), C.int(len(patterns)),
+		(*C.int)(resultData), (*C.int)(cb.resultBuffer), C.int(cb.resultCapacity), cb.stream,
+	)
 
 	return nil
 }
@@ -343,6 +403,9 @@ func (cb *CUDABackendImpl) TransferResultsFromGPU() ([]GPUResult, error) {
 	if resultCount == 0 {
 		return []GPUResult{}, nil
 	}
+	if resultCount > int32(cb.resultCapacity) {
+		resultCount = int32(cb.resultCapacity)
+	}
 
 	// Read results (4 ints per result: packetIdx, patternID, offset, length)
 	resultData := make([]int32, resultCount*4)
@@ -354,15 +417,33 @@ func (cb *CUDABackendImpl) TransferResultsFromGPU() ([]GPUResult, error) {
 	}
 
 	// Convert to GPUResult structs
-	results := make([]GPUResult, resultCount)
+	results := make([]GPUResult, 0, resultCount)
 	for i := 0; i < int(resultCount); i++ {
-		results[i] = GPUResult{
-			PacketIndex: int(resultData[i*4+0]),
-			PatternID:   int(resultData[i*4+1]),
-			Offset:      int(resultData[i*4+2]),
+		packetIndex := int(resultData[i*4+0])
+		patternIndex := int(resultData[i*4+1])
+		offset := int(resultData[i*4+2])
+		if patternIndex < 0 || patternIndex >= len(cb.activePatterns) {
+			return nil, fmt.Errorf("CUDA matcher returned invalid pattern index %d", patternIndex)
+		}
+		if packetIndex < 0 || packetIndex >= len(cb.packetLengths) {
+			return nil, fmt.Errorf("CUDA matcher returned invalid packet index %d", packetIndex)
+		}
+		pattern := cb.activePatterns[patternIndex]
+		matchEnd := offset + pattern.PatternLen
+		valid := pattern.Type == PatternTypeContains ||
+			(pattern.Type == PatternTypePrefix && offset == 0) ||
+			(pattern.Type == PatternTypeSuffix && matchEnd == cb.packetLengths[packetIndex]) ||
+			(pattern.Type == PatternTypeLiteral && offset == 0 && matchEnd == cb.packetLengths[packetIndex])
+		if !valid {
+			continue
+		}
+		results = append(results, GPUResult{
+			PacketIndex: packetIndex,
+			PatternID:   pattern.ID,
+			Offset:      offset,
 			Length:      int(resultData[i*4+3]),
 			Matched:     true,
-		}
+		})
 	}
 
 	return results, nil
@@ -387,6 +468,11 @@ func (cb *CUDABackendImpl) Cleanup() error {
 	if cb.patternBuffer != nil {
 		C.freeDeviceMemory(cb.patternBuffer)
 		cb.patternBuffer = nil
+	}
+	if cb.patternLengthBuffer != nil {
+		C.freeDeviceMemory(cb.patternLengthBuffer)
+		cb.patternLengthBuffer = nil
+		cb.patternLengthCapacity = 0
 	}
 	if cb.resultBuffer != nil {
 		C.freeDeviceMemory(cb.resultBuffer)

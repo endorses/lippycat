@@ -191,6 +191,28 @@ func TestCUDABackend_PatternMatching(t *testing.T) {
 	assert.GreaterOrEqual(t, len(results), 2)
 }
 
+func TestCUDABackend_LinearPatternSemantics(t *testing.T) {
+	backend := newTestCUDABackend(t, 8)
+	packets := [][]byte{
+		[]byte("prefix-middle-suffix"),
+		[]byte("xprefix-middle-suffixx"),
+	}
+	require.NoError(t, backend.TransferPacketsToGPU(packets))
+	require.NoError(t, backend.ExecutePatternMatching([]GPUPattern{
+		{ID: 101, Pattern: []byte("prefix"), PatternLen: 6, Type: PatternTypePrefix},
+		{ID: 205, Pattern: []byte("suffix"), PatternLen: 6, Type: PatternTypeSuffix},
+		{ID: 307, Pattern: packets[0], PatternLen: len(packets[0]), Type: PatternTypeLiteral},
+	}))
+
+	results, err := backend.TransferResultsFromGPU()
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []GPUResult{
+		{PacketIndex: 0, PatternID: 101, Offset: 0, Length: 6, Matched: true},
+		{PacketIndex: 0, PatternID: 205, Offset: 14, Length: 6, Matched: true},
+		{PacketIndex: 0, PatternID: 307, Offset: 0, Length: 20, Matched: true},
+	}, results)
+}
+
 func TestCUDABackend_Name(t *testing.T) {
 	backend := NewCUDABackendImpl()
 

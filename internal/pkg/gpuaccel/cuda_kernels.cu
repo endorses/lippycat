@@ -13,7 +13,8 @@ __global__ void patternMatchKernel(
     const int* patternLengths,
     int numPatterns,
     int* results,
-    int* resultCount
+    int* resultCount,
+    int maxResults
 ) {
     int packetIdx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -56,7 +57,7 @@ __global__ void patternMatchKernel(
                 int resultIdx = atomicAdd(resultCount, 1);
 
                 // Store result: [packetIdx, patternIdx, offset, length]
-                if (resultIdx < 10000) {  // Safety limit
+                if (resultIdx < maxResults) {
                     results[resultIdx * 4 + 0] = packetIdx;
                     results[resultIdx * 4 + 1] = patternIdx;
                     results[resultIdx * 4 + 2] = i;
@@ -80,7 +81,8 @@ __global__ void patternMatchKernelOptimized(
     const int* patternLengths,
     int numPatterns,
     int* results,
-    int* resultCount
+    int* resultCount,
+    int maxResults
 ) {
     // Shared memory for pattern data (faster access)
     __shared__ char sharedPatterns[1024];
@@ -138,7 +140,7 @@ __global__ void patternMatchKernelOptimized(
             if (match) {
                 int resultIdx = atomicAdd(resultCount, 1);
 
-                if (resultIdx < 10000) {
+                if (resultIdx < maxResults) {
                     results[resultIdx * 4 + 0] = packetIdx;
                     results[resultIdx * 4 + 1] = patternIdx;
                     results[resultIdx * 4 + 2] = i;
@@ -342,39 +344,22 @@ void launchPatternMatchKernel(
     int numPatterns,
     int* d_results,
     int* d_resultCount,
+    int maxResults,
     cudaStream_t stream
 ) {
     // Reset result count
     cudaMemsetAsync(d_resultCount, 0, sizeof(int), stream);
 
-    // Launch kernel with optimal block size
+    // Launch kernel with optimal block size. Pattern lengths reside in device
+    // memory, so selecting the shared-memory variant on the host would require
+    // an additional copy. The general kernel supports the complete input.
     int blockSize = 256;
     int numBlocks = (numPackets + blockSize - 1) / blockSize;
-
-    // Use optimized kernel if patterns fit in shared memory
-    bool useOptimized = true;
-    int totalPatternSize = 0;
-    for (int i = 0; i < numPatterns && i < 32; i++) {
-        totalPatternSize += d_patternLengths[i];
-    }
-
-    if (totalPatternSize > 1024 || numPatterns > 32) {
-        useOptimized = false;
-    }
-
-    if (useOptimized) {
-        patternMatchKernelOptimized<<<numBlocks, blockSize, 0, stream>>>(
-            d_packets, d_packetOffsets, numPackets,
-            d_patterns, d_patternLengths, numPatterns,
-            d_results, d_resultCount
-        );
-    } else {
-        patternMatchKernel<<<numBlocks, blockSize, 0, stream>>>(
-            d_packets, d_packetOffsets, numPackets,
-            d_patterns, d_patternLengths, numPatterns,
-            d_results, d_resultCount
-        );
-    }
+    patternMatchKernel<<<numBlocks, blockSize, 0, stream>>>(
+        d_packets, d_packetOffsets, numPackets,
+        d_patterns, d_patternLengths, numPatterns,
+        d_results, d_resultCount, maxResults
+    );
 }
 
 void launchCallIDExtractionKernel(

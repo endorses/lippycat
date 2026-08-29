@@ -27,9 +27,9 @@ func TestNewGPUAccelerator(t *testing.T) {
 	require.NoError(t, err)
 	defer ga.Close()
 
-	// Should fall back to SIMD backend
+	// Auto selection uses the best backend available on the host.
 	assert.NotNil(t, ga)
-	assert.Equal(t, "cpu-simd-avx2", ga.GetBackendName())
+	assert.NotEqual(t, "none", ga.GetBackendName())
 }
 
 func TestGPUAccelerator_Disabled(t *testing.T) {

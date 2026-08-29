@@ -776,6 +776,13 @@ shared CUDA automaton/buffer access. The rebuilt shared library exports both
 matching entry points. `make test`, CUDA-tagged and race tests, and
 `make build-matrix-cuda` pass.
 
+CUDA runtime remediation (2026-08-29): the linear matcher now launches its
+kernel with device-resident pattern lengths, uses a bounded count-plus-records
+result layout, preserves public pattern IDs and literal/prefix/suffix semantics,
+and validates packet and pattern capacities. Backend-selection tests no longer
+assume CUDA is absent. The CUDA matrix now runs the GPU package tests, and the
+full CUDA suite passes on an NVIDIA RTX 4090.
+
 ### Exit Criteria
 
 - The VoIP package contains SIP/RTP/SDP analysis and integration, not generic

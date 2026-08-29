@@ -32,6 +32,7 @@ if [[ "${CUDA:-0}" == 1 ]]; then
     echo '==> building CUDA variants'
     CGO_ENABLED=1 go build -tags 'all,cuda' -o "$matrix_dir/lippycat-all-cuda" .
     CGO_ENABLED=1 go build -tags 'tap,li,cuda' -o "$matrix_dir/lippycat-tap-li-cuda" .
+    CGO_ENABLED=1 go test -tags 'all,cuda' ./internal/pkg/gpuaccel
     CGO_ENABLED=1 go vet -tags 'all,cuda' ./...
     CGO_ENABLED=1 go vet -tags 'tap,li,cuda' ./...
 else

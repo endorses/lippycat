@@ -10,14 +10,12 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
-// GPUAccelerator provides GPU-accelerated pattern matching and parsing
+// GPUAccelerator provides GPU-accelerated byte-pattern matching.
 type GPUAccelerator struct {
-	backend       GPUBackend
-	config        *GPUConfig
-	packetBuffers *GPUPacketBuffers
-	resultBuffers *GPUResultBuffers
-	stats         GPUStats
-	mu            sync.RWMutex
+	backend GPUBackend
+	config  *GPUConfig
+	stats   GPUStats
+	mu      sync.RWMutex
 }
 
 // PatternAlgorithm defines the algorithm used for pattern matching
@@ -58,7 +56,7 @@ type GPUBackend interface {
 	TransferPacketsToGPU(packets [][]byte) error
 
 	// ExecutePatternMatching executes pattern matching kernel.
-	// Deprecated: Use BuildAutomaton + MatchUsernames for Aho-Corasick based matching.
+	// Deprecated: Use BuildNamedAutomaton + MatchWithAutomaton for Aho-Corasick based matching.
 	// This method performs linear scan O(n*m) matching and will be removed in a future version.
 	ExecutePatternMatching(patterns []GPUPattern) error
 
@@ -75,12 +73,6 @@ type GPUBackend interface {
 	// Multiple automatons can coexist with different names (e.g., "sipuser", "sipuri").
 	// This allows different filter types to have their own GPU-accelerated matching.
 	BuildNamedAutomaton(name string, patterns []ahocorasick.Pattern) error
-
-	// MatchUsernames matches usernames against the default automaton.
-	// Returns matched pattern IDs for each input username.
-	// Each element in the result corresponds to an input username.
-	// This is equivalent to MatchWithAutomaton("default", usernames).
-	MatchUsernames(usernames [][]byte) ([][]int, error)
 
 	// MatchWithAutomaton matches inputs against a specific named automaton.
 	// Returns matched pattern IDs for each input.
@@ -124,25 +116,6 @@ type GPUResult struct {
 	Offset      int
 	Length      int
 	Matched     bool
-}
-
-// GPUPacketBuffers manages packet buffers on GPU
-type GPUPacketBuffers struct {
-	devicePtr     uintptr
-	hostPtr       []byte
-	capacity      int
-	packetCount   int
-	packetOffsets []int
-	pinnedMemory  bool
-}
-
-// GPUResultBuffers manages result buffers
-type GPUResultBuffers struct {
-	devicePtr    uintptr
-	hostPtr      []byte
-	capacity     int
-	resultCount  int
-	pinnedMemory bool
 }
 
 // GPUStats holds GPU acceleration statistics
@@ -419,7 +392,7 @@ func (ga *GPUAccelerator) GetBackendName() string {
 	return ga.backend.Name()
 }
 
-// Backend returns the underlying GPUBackend for direct access to BuildAutomaton/MatchUsernames
+// Backend returns the underlying GPUBackend for direct named-automaton access.
 func (ga *GPUAccelerator) Backend() GPUBackend {
 	return ga.backend
 }

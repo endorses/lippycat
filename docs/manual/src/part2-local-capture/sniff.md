@@ -298,7 +298,7 @@ The older `--udp-only` VoIP flag is still accepted for compatibility but hidden 
 
 ### GPU Acceleration
 
-Offload protocol detection and pattern matching to the GPU for high-throughput capture:
+Offload application-filter pattern matching to CUDA for high-throughput capture:
 
 ```bash
 sudo lc sniff voip -i eth0 -g auto
@@ -309,9 +309,10 @@ The `sniff voip` GPU flags are registered only in CUDA builds, such as binaries 
 | Backend | Flag Value | Requirements |
 |---------|-----------|-------------|
 | CUDA | `cuda` | NVIDIA GPU + CUDA toolkit, `make build-cuda` |
-| OpenCL | `opencl` | OpenCL-capable GPU |
 | CPU SIMD | `cpu-simd` | AVX2 or SSE4.2 support |
 | Auto-detect | `auto` | Selects best available |
+
+OpenCL is not currently implemented. The value is accepted for configuration compatibility but falls back to CPU matching. SIP parsing and Call-ID extraction also remain CPU operations.
 
 See [Performance Optimization](../part5-advanced/performance.md) for GPU configuration and benchmarks.
 

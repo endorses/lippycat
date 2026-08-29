@@ -84,12 +84,6 @@ func (cb *CUDABackend) BuildNamedAutomaton(name string, patterns []ahocorasick.P
 	return ErrGPUNotAvailable
 }
 
-// MatchUsernames matches usernames against the built automaton.
-// Stub: CUDA not available, returns ErrGPUNotAvailable.
-func (cb *CUDABackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
-	return cb.MatchWithAutomaton("default", usernames)
-}
-
 // MatchWithAutomaton matches inputs against a specific named automaton.
 // Stub: CUDA not available, returns ErrGPUNotAvailable.
 func (cb *CUDABackend) MatchWithAutomaton(name string, inputs [][]byte) ([][]int, error) {

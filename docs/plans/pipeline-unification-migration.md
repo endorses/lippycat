@@ -798,6 +798,13 @@ Updated operator documentation to describe the implemented protocol-neutral
 matching APIs and CUDA/non-CUDA behavior without advertising removed or
 unimplemented capture and SIP-parsing capabilities.
 
+Post-completion correction (2026-08-29): removed the superseded global VoIP
+plugin pipeline and its private tracker, the orphaned dynamic-plugin package and
+configuration surface, processor writer/monitor compatibility aliases, unused
+GPU buffer and username-matching compatibility APIs, and the placeholder SIMD
+matcher. Corrected remaining GPU, build-tag, configuration, and packet-batch
+documentation to match the production pipeline.
+
 ### Exit Criteria
 
 - The VoIP package contains SIP/RTP/SDP analysis and integration, not generic

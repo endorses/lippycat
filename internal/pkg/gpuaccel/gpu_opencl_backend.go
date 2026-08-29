@@ -88,12 +88,6 @@ func (ob *OpenCLBackend) BuildNamedAutomaton(name string, patterns []ahocorasick
 	return ErrGPUNotAvailable
 }
 
-// MatchUsernames matches usernames against the built automaton.
-// Stub: OpenCL not available, returns ErrGPUNotAvailable.
-func (ob *OpenCLBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
-	return ob.MatchWithAutomaton("default", usernames)
-}
-
 // MatchWithAutomaton matches inputs against a specific named automaton.
 // Stub: OpenCL not available, returns ErrGPUNotAvailable.
 func (ob *OpenCLBackend) MatchWithAutomaton(name string, inputs [][]byte) ([][]int, error) {

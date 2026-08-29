@@ -35,12 +35,6 @@ func handleUdpPacketsWithManagerAndOutputs(tracker *CallTracker, pkt capture.Pac
 	span, tracingCtx, finishTrace := monitoring.TracePacketProcessing(ctx, "udp")
 	defer finishTrace()
 
-	// Process through plugin system if enabled
-	if err := ProcessPacketWithPlugins(tracingCtx, packet); err != nil {
-		logger.Debug("Plugin processing error for UDP packet", "error", err)
-		monitoring.TraceError(tracingCtx, err, "Plugin processing failed")
-	}
-
 	// Record packet processing metrics
 	defer func() {
 		duration := time.Since(start)

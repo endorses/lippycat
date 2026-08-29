@@ -221,7 +221,6 @@ func NewCallTrackerWithOutput(config *Config, output CallOutput) *CallTracker {
 		config = DefaultConfig()
 	}
 	clone := *config
-	clone.PluginPaths = append([]string(nil), config.PluginPaths...)
 	if output == nil {
 		output = NoopCallOutput{}
 	}

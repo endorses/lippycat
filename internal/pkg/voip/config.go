@@ -93,14 +93,6 @@ type Config struct {
 	TCPCompressionLevel int   `mapstructure:"tcp_compression_level"`
 	TCPMemoryLimit      int64 `mapstructure:"tcp_memory_limit"`
 
-	// Plugin system configurations
-	PluginsEnabled       bool     `mapstructure:"plugins_enabled"`
-	PluginPaths          []string `mapstructure:"plugin_paths"`
-	PluginWatchEnabled   bool     `mapstructure:"plugin_watch_enabled"`
-	PluginSIPEnabled     bool     `mapstructure:"plugin_sip_enabled"`
-	PluginRTPEnabled     bool     `mapstructure:"plugin_rtp_enabled"`
-	PluginGenericEnabled bool     `mapstructure:"plugin_generic_enabled"`
-
 	// Monitoring configurations - disabled by default
 	MonitoringEnabled        bool          `mapstructure:"monitoring_enabled"`
 	MetricsEnabled           bool          `mapstructure:"metrics_enabled"`
@@ -108,7 +100,6 @@ type Config struct {
 	MonitoringUpdateInterval time.Duration `mapstructure:"monitoring_update_interval"`
 	EnableRuntimeMetrics     bool          `mapstructure:"enable_runtime_metrics"`
 	EnableSystemMetrics      bool          `mapstructure:"enable_system_metrics"`
-	EnablePluginMetrics      bool          `mapstructure:"enable_plugin_metrics"`
 	TCPLatencyOptimization   bool          `mapstructure:"tcp_latency_optimization"`
 	EnableAutoTuning         bool          `mapstructure:"enable_auto_tuning"`
 }
@@ -118,7 +109,6 @@ func GetConfig() *Config {
 	configMu.RLock()
 	defer configMu.RUnlock()
 	cfg := *config
-	cfg.PluginPaths = append([]string(nil), config.PluginPaths...)
 	return &cfg
 }
 
@@ -129,7 +119,6 @@ func SetConfig(cfg *Config) {
 		cfg = DefaultConfig()
 	}
 	clone := *cfg
-	clone.PluginPaths = append([]string(nil), cfg.PluginPaths...)
 	configMu.Lock()
 	config = &clone
 	configMu.Unlock()
@@ -174,8 +163,7 @@ func DefaultConfig() *Config {
 		TCPMemoryLimit:         profile.TCPMemoryLimit,
 		TCPLatencyOptimization: profile.TCPLatencyOptimization,
 
-		PluginSIPEnabled: true, PluginRTPEnabled: true, PluginGenericEnabled: true,
 		MonitoringUpdateInterval: 30 * time.Second,
-		EnableRuntimeMetrics:     true, EnablePluginMetrics: true, EnableAutoTuning: true,
+		EnableRuntimeMetrics:     true, EnableAutoTuning: true,
 	}
 }

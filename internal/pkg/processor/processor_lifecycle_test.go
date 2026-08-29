@@ -417,7 +417,7 @@ func TestProcessor_Shutdown_WithPerCallPcapWriter(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Process a VoIP packet with call-id
-	if processor.perCallPcapWriter != nil {
+	if processor.sessionOutputManager != nil {
 		batch := &data.PacketBatch{
 			HunterId:    "test-hunter",
 			Sequence:    1,
@@ -463,7 +463,7 @@ func TestProcessor_Shutdown_WithPerCallPcapWriter(t *testing.T) {
 	}
 
 	// Verify per-call PCAP writer was properly closed
-	assert.NotNil(t, processor.perCallPcapWriter)
+	assert.NotNil(t, processor.sessionOutputManager)
 }
 
 // TestProcessor_Shutdown_WithSubscribers tests shutdown notifies subscribers

@@ -184,14 +184,11 @@ func TestPinnedCallsEnforceHardCapacity(t *testing.T) {
 func TestCallTrackerCopiesConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.MaxCalls = 7
-	cfg.PluginPaths = []string{"original"}
 	ct := NewCallTrackerWithConfig(cfg)
 	t.Cleanup(ct.Shutdown)
 
 	cfg.MaxCalls = 99
-	cfg.PluginPaths[0] = "changed"
 	assert.Equal(t, 7, ct.maxCalls)
-	assert.Equal(t, []string{"original"}, ct.config.PluginPaths)
 }
 
 func TestEndpointRegistrationRequiresAdmittedCallAndIsBounded(t *testing.T) {

@@ -192,9 +192,6 @@ type Processor struct {
 	packetsForwarded   atomic.Uint64
 	vifInjectionErrors atomic.Uint64 // Virtual interface injection failures
 
-	// Per-call PCAP writer (separate from main PCAP writer)
-	// Deprecated compatibility alias; sessionOutputManager owns this writer.
-	perCallPcapWriter    *PcapWriterManager
 	sessionOutputManager *SessionOutputManager
 
 	// Auto-rotate PCAP writer (for non-VoIP traffic)
@@ -202,10 +199,6 @@ type Processor struct {
 
 	// Command executor for PCAP hooks
 	commandExecutor *CommandExecutor
-
-	// Call completion monitor (closes PCAP files after grace period)
-	// Deprecated compatibility alias; sessionOutputManager owns this monitor.
-	callCompletionMonitor *CallCompletionMonitor
 
 	// Protocol aggregators
 	callAggregator *voip.CallAggregator   // VoIP call state aggregation
@@ -392,9 +385,10 @@ func New(config Config) (*Processor, error) {
 			return nil, fmt.Errorf("failed to initialize session output manager: %w", err)
 		}
 		p.sessionOutputManager = manager
-		p.perCallPcapWriter = manager.writer
 		if monitor, ok := manager.monitor.(*CallCompletionMonitor); ok {
-			p.callCompletionMonitor = monitor
+			logger.Info("Call completion monitor configured",
+				"grace_period", monitor.config.GracePeriod,
+				"check_interval", monitor.config.CheckInterval)
 		}
 		logger.Info("Per-call PCAP writing enabled",
 			"output_dir", config.PcapWriterConfig.OutputDir,
@@ -417,13 +411,6 @@ func New(config Config) (*Processor, error) {
 			"pattern", config.AutoRotateConfig.FilePattern,
 			"max_idle_time", config.AutoRotateConfig.MaxIdleTime,
 			"max_file_size", config.AutoRotateConfig.MaxFileSize)
-	}
-
-	if p.sessionOutputManager != nil {
-		monitorConfig := p.callCompletionMonitor.config
-		logger.Info("Call completion monitor configured",
-			"grace_period", monitorConfig.GracePeriod,
-			"check_interval", monitorConfig.CheckInterval)
 	}
 
 	// Initialize virtual interface if configured

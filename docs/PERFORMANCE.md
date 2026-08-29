@@ -226,13 +226,15 @@ lc sniff voip \
 
 ## GPU Acceleration
 
-GPU acceleration provides significant performance improvements for pattern matching and SIP parsing.
+GPU acceleration is used by capture-side application filters to match already extracted values, such as SIP users and URIs, against large filter sets. SIP parsing and Call-ID extraction run on the CPU.
 
 ### Backend Selection
 
-lippycat supports multiple GPU backends with automatic fallback:
+lippycat supports CUDA acceleration with automatic CPU SIMD fallback:
 
-**Priority Order:** CUDA > OpenCL > CPU SIMD > Pure Go
+**Priority Order:** CUDA > CPU SIMD > Pure Go
+
+The `opencl` backend name is accepted for configuration compatibility, but the OpenCL implementation is currently a stub and is not selected by auto-detection. If requested explicitly, initialization fails and matching falls back to the CPU path.
 
 #### Auto Detection (Recommended)
 
@@ -254,31 +256,10 @@ Automatically selects the best available backend.
 lc sniff voip --gpu-backend cuda --gpu-batch-size 2048
 ```
 
-**Performance:**
-- Pattern matching: ~29.7K packets/second
-- Call-ID extraction: ~19.4K packets/second
-- Latency: ~33.6 µs/batch (64 packets)
-
 **Best For:**
 - NVIDIA GPU available
 - Very high packet rates (>100K pps)
 - Maximum throughput needed
-
-#### OpenCL Backend
-
-**Requirements:**
-- OpenCL 1.2+ compatible GPU
-- OpenCL runtime
-
-**Configuration:**
-```bash
-lc sniff voip --gpu-backend opencl --gpu-batch-size 1024
-```
-
-**Best For:**
-- AMD/Intel GPUs
-- Cross-platform deployment
-- Moderate GPU acceleration needed
 
 #### CPU SIMD Backend
 
@@ -288,11 +269,6 @@ lc sniff voip --gpu-backend opencl --gpu-batch-size 1024
 ```bash
 lc sniff voip --gpu-backend cpu-simd
 ```
-
-**Performance:**
-- Pattern matching: ~29.9K packets/second
-- Call-ID extraction: ~18.9K packets/second
-- Uses AVX2/SSE4.2 instructions
 
 **Best For:**
 - No GPU available
@@ -322,9 +298,7 @@ lc sniff voip --gpu-backend cpu-simd
 --gpu-max-memory 2147483648
 ```
 
-### Performance Benchmarks
-
-See [docs/GPU_ACCELERATION.md](GPU_ACCELERATION.md) for detailed benchmarks and optimization guide.
+These flags are registered for `sniff voip` only in CUDA builds. A regular non-CUDA `sniff` binary does not expose them. Hunter and tap application filtering can still use the built-in CPU matching path without CUDA.
 
 ## Pattern Matching Algorithm
 

@@ -188,7 +188,6 @@ func TestMonitor(t *testing.T) {
 	// Test monitoring operations
 	ctx := context.Background()
 	monitor.RecordPacketProcessing(ctx, "sip", "inbound", 10*time.Millisecond)
-	monitor.RecordPluginExecution(ctx, "sip_plugin", "sip", 5*time.Millisecond, true)
 	monitor.RecordCallTrackingEvent(ctx, "call123", "created", map[string]interface{}{
 		"protocol": "sip",
 		"source":   "192.168.1.1",
@@ -255,11 +254,6 @@ func TestConvenienceFunctions(t *testing.T) {
 		finish()
 	}
 
-	span, _, finish = TracePluginExecution(ctx, "sip_plugin", "sip")
-	if span != nil {
-		finish()
-	}
-
 	span, _, finish = TraceTCPStreamProcessing(ctx, "stream123")
 	if span != nil {
 		finish()
@@ -299,7 +293,6 @@ func TestGlobalInstances(t *testing.T) {
 	// Test global monitoring functions
 	ctx := context.Background()
 	RecordPacket(ctx, "sip", "inbound", 10*time.Millisecond)
-	RecordPlugin(ctx, "sip_plugin", "sip", 5*time.Millisecond, true)
 	RecordCallEvent(ctx, "call123", "created", map[string]interface{}{"protocol": "sip"})
 	UpdateActiveCalls(15, "sip")
 	RecordVoIPEvent(ctx, "invite", map[string]interface{}{"protocol": "sip"})

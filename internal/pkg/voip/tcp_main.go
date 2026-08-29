@@ -1,7 +1,6 @@
 package voip
 
 import (
-	"context"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -25,11 +24,6 @@ func handleTcpPacketsWithConfig(pkt capture.PacketInfo, layer *layers.TCP, assem
 	// Set the current link type for TCP stream processing
 	if linkLayer := pkt.Packet.LinkLayer(); linkLayer != nil {
 		setCurrentLinkType(layers.LinkTypeEthernet) // Default to ethernet
-	}
-
-	// Process through plugin system if enabled
-	if err := ProcessPacketWithPlugins(context.Background(), pkt.Packet); err != nil {
-		logger.Debug("Plugin processing error for TCP packet", "error", err)
 	}
 
 	// Buffer the packet for potential PCAP writing

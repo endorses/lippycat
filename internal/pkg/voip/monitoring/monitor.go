@@ -30,7 +30,6 @@ type MonitorConfig struct {
 	UpdateInterval       time.Duration `mapstructure:"update_interval"`
 	EnableRuntimeMetrics bool          `mapstructure:"enable_runtime_metrics"`
 	EnableSystemMetrics  bool          `mapstructure:"enable_system_metrics"`
-	EnablePluginMetrics  bool          `mapstructure:"enable_plugin_metrics"`
 }
 
 // NewMonitor creates a new monitoring coordinator
@@ -246,30 +245,6 @@ func (m *Monitor) RecordPacketProcessing(ctx context.Context, protocol, directio
 	}
 }
 
-// RecordPluginExecution records plugin execution metrics
-func (m *Monitor) RecordPluginExecution(ctx context.Context, pluginName, protocol string, duration time.Duration, success bool) {
-	if !m.enabled.Load() {
-		return
-	}
-
-	// Record metrics
-	m.metricsCollector.IncrementCounter(fmt.Sprintf("plugin_%s_executions", pluginName))
-	m.metricsCollector.RecordDuration(fmt.Sprintf("plugin_%s_duration", pluginName), duration)
-
-	if !success {
-		m.metricsCollector.IncrementCounter(fmt.Sprintf("plugin_%s_errors", pluginName))
-	}
-
-	// Tracing
-	if span := SpanFromContext(ctx); span != nil {
-		span.AddTag("plugin_duration_ms", float64(duration.Nanoseconds())/1e6)
-		span.AddTag("success", success)
-		if !success {
-			span.SetStatus(StatusError, "Plugin execution failed")
-		}
-	}
-}
-
 // RecordCallTrackingEvent records call tracking events
 func (m *Monitor) RecordCallTrackingEvent(ctx context.Context, callID, event string, metadata map[string]interface{}) {
 	if !m.enabled.Load() {
@@ -334,11 +309,6 @@ func ShutdownMonitoring() error {
 // RecordPacket records a packet processing event
 func RecordPacket(ctx context.Context, protocol, direction string, duration time.Duration) {
 	GetGlobalMonitor().RecordPacketProcessing(ctx, protocol, direction, duration)
-}
-
-// RecordPlugin records a plugin execution event
-func RecordPlugin(ctx context.Context, pluginName, protocol string, duration time.Duration, success bool) {
-	GetGlobalMonitor().RecordPluginExecution(ctx, pluginName, protocol, duration, success)
 }
 
 // RecordCallEvent records a call tracking event

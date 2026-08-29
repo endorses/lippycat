@@ -61,10 +61,6 @@ type ReassemblyLimitSnapshot struct {
 	MissingSequenceBytes      uint64
 }
 
-// ReassemblyGapSnapshot is retained for source compatibility.
-// Deprecated: use ReassemblyLimitSnapshot.
-type ReassemblyGapSnapshot = ReassemblyLimitSnapshot
-
 type observedStreamFactory struct {
 	factory       reassembly.StreamFactory
 	stats         *ReassemblyLimitStats
@@ -134,10 +130,6 @@ func (a *TCPAssembler) LimitStats() ReassemblyLimitSnapshot {
 		MissingSequenceBytes:      a.stats.MissingSequenceBytes.Load(),
 	}
 }
-
-// GapStats is retained for callers compiled against the original API.
-// Deprecated: use LimitStats.
-func (a *TCPAssembler) GapStats() ReassemblyGapSnapshot { return a.LimitStats() }
 
 // timestampContext carries a packet's capture timestamp into the assembler so
 // FlushCloseOlderThan ages streams by capture time (essential for offline replay),

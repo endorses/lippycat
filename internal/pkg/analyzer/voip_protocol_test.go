@@ -276,41 +276,6 @@ func TestVoIPProtocol_Registration(t *testing.T) {
 	assert.Equal(t, "VoIP Protocol Analyzer", voipProto.Name())
 }
 
-func TestVoIPProtocol_extractCallID(t *testing.T) {
-	// Note: extractCallID is currently a stub that returns ""
-	// This test documents the expected behavior for future implementation
-
-	tests := []struct {
-		name     string
-		payload  string
-		expected string
-	}{
-		{
-			name:     "empty payload",
-			payload:  "",
-			expected: "",
-		},
-		{
-			name:     "no Call-ID header",
-			payload:  "INVITE sip:user@example.com SIP/2.0\r\n",
-			expected: "",
-		},
-		// Future tests when extractCallID is implemented:
-		// {
-		//     name:     "valid Call-ID",
-		//     payload:  "INVITE sip:user@example.com SIP/2.0\r\nCall-ID: test123@host\r\n",
-		//     expected: "test123@host",
-		// },
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractCallID(tt.payload)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 // Helper functions
 
 func createUDPPacket(srcPort, dstPort layers.UDPPort, payload []byte) gopacket.Packet {

@@ -788,6 +788,10 @@ kernel and exported launch wrapper from the protocol-neutral GPU library. The
 library now exports only the generic linear and Aho-Corasick matching entry
 points used by production code.
 
+Post-audit remediation (2026-08-29): updated the root CUDA build and cleanup
+targets to use `internal/pkg/gpuaccel` and removed the remaining unreferenced
+reassembly, analyzer, writer, and forwarding compatibility shims.
+
 ### Exit Criteria
 
 - The VoIP package contains SIP/RTP/SDP analysis and integration, not generic

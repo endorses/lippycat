@@ -5,7 +5,7 @@ BINARY_NAME=lc
 CUDA_BINARY_NAME=lc-cuda
 PGO_PROFILE=default.pgo
 PROFILE_DATA=cpu.prof
-CUDA_DIR=internal/pkg/voip
+CUDA_DIR=internal/pkg/gpuaccel
 
 # Version information
 # Try git tag first, then VERSION file, then git commit, finally "dev"

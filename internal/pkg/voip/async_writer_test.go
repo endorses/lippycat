@@ -349,8 +349,8 @@ func TestAsyncWriterIntegration_WithUpdatedWriter(t *testing.T) {
 	// Wait for async processing
 	time.Sleep(200 * time.Millisecond)
 
-	// Get statistics
-	stats := GetWriterStats(tracker)
+	// Get statistics from the writer owned by this tracker.
+	stats := GetAsyncWriter(tracker).GetStats()
 	assert.Greater(t, stats.PacketsQueued.Load(), int64(0))
 
 	// Cleanup

@@ -241,7 +241,7 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 	}
 
 	// Run capture - InitWithContext handles both live and offline modes
-	// For offline: blocks until file is read (StartOfflineSniffer keeps file open)
+	// For offline: blocks until the caller-managed PCAP replay completes.
 	// For live: caller uses goroutine for non-blocking behavior
 	// Pass pause function to drop packets at source when paused (reduces CPU)
 	capture.InitWithContext(ctx, devices, filter, func(ch <-chan capture.PacketInfo, _ *capture.TCPAssembler) {

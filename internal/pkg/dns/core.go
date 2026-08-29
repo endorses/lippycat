@@ -33,7 +33,7 @@ var (
 )
 
 // StartDNSSniffer starts the DNS sniffer on the specified interfaces.
-// This is the callback function passed to capture.StartLiveSniffer/StartOfflineSniffer.
+// This is the callback function passed to capture.StartLiveSniffer.
 func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	startDNSSniffer(devices, filter, false)
 }
@@ -100,11 +100,6 @@ func startDNSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline
 	cleanup()
 }
 
-// processDNSPackets processes packets from the channel.
-func processDNSPackets(packetChan <-chan capture.PacketInfo) {
-	captureadapter.ForEach(packetChan, pipeline.SourceLiveCapture, processDNSEnvelope)
-}
-
 func processDNSEnvelope(env *pipeline.PacketEnvelope) {
 	quietMode := viper.GetBool("sniff.quiet")
 	format := viper.GetString("sniff.format")
@@ -116,58 +111,56 @@ func processDNSEnvelope(env *pipeline.PacketEnvelope) {
 	}
 
 	pktInfo := captureadapter.ToPacketInfo(env)
-	{
-		packet := pktInfo.Packet
+	packet := pktInfo.Packet
 
-		// Parse DNS
-		metadata := dnsParser.Parse(packet)
-		if metadata == nil {
-			return
+	// Parse DNS
+	metadata := dnsParser.Parse(packet)
+	if metadata == nil {
+		return
+	}
+
+	// Apply domain filter if configured
+	if len(dnsDomainPatterns) > 0 && !filtering.MatchAnyGlob(dnsDomainPatterns, metadata.QueryName) {
+		return
+	}
+
+	// Create packet display
+	pktDisplay := createPacketDisplayFromInfo(pktInfo, metadata)
+
+	// Track query/response correlation
+	if dnsTracker != nil {
+		if metadata.IsResponse {
+			dnsTracker.CorrelateResponse(pktDisplay, metadata)
+		} else {
+			dnsTracker.TrackQuery(pktDisplay, metadata)
 		}
+	}
 
-		// Apply domain filter if configured
-		if len(dnsDomainPatterns) > 0 && !filtering.MatchAnyGlob(dnsDomainPatterns, metadata.QueryName) {
-			return
-		}
+	// Analyze for tunneling
+	if dnsTunneling != nil {
+		dnsTunneling.Analyze(metadata)
+	}
 
-		// Create packet display
-		pktDisplay := createPacketDisplayFromInfo(pktInfo, metadata)
+	// Record for aggregation
+	dnsAggregator.RecordQuery(metadata, pktDisplay.SrcIP)
 
-		// Track query/response correlation
-		if dnsTracker != nil {
-			if metadata.IsResponse {
-				dnsTracker.CorrelateResponse(pktDisplay, metadata)
-			} else {
-				dnsTracker.TrackQuery(pktDisplay, metadata)
+	// Print to console unless quiet mode
+	if !quietMode {
+		if format == "json" {
+			// Output as JSON (omit RawData for cleaner output)
+			pktDisplay.RawData = nil
+			if err := jsonEncoder.Encode(pktDisplay); err != nil {
+				logger.Error("Failed to encode packet as JSON", "error", err)
 			}
+		} else {
+			printDNSPacket(pktDisplay, metadata)
 		}
+	}
 
-		// Analyze for tunneling
-		if dnsTunneling != nil {
-			dnsTunneling.Analyze(metadata)
-		}
-
-		// Record for aggregation
-		dnsAggregator.RecordQuery(metadata, pktDisplay.SrcIP)
-
-		// Print to console unless quiet mode
-		if !quietMode {
-			if format == "json" {
-				// Output as JSON (omit RawData for cleaner output)
-				pktDisplay.RawData = nil
-				if err := jsonEncoder.Encode(pktDisplay); err != nil {
-					logger.Error("Failed to encode packet as JSON", "error", err)
-				}
-			} else {
-				printDNSPacket(pktDisplay, metadata)
-			}
-		}
-
-		// Write to PCAP if configured
-		if dnsPacketSink != nil {
-			if result := dnsPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
-				logger.Error("DNS PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
-			}
+	// Write to PCAP if configured
+	if dnsPacketSink != nil {
+		if result := dnsPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
+			logger.Error("DNS PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
 		}
 	}
 }

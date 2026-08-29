@@ -87,7 +87,7 @@ func TestStartLiveSniffer_ErrorHandling(t *testing.T) {
 	}
 }
 
-func TestStartOfflineSniffer_FileHandling(t *testing.T) {
+func TestStartOfflineSnifferOrdered_FileHandling(t *testing.T) {
 	tests := []struct {
 		name        string
 		setupFile   func(*testing.T) string
@@ -144,7 +144,7 @@ func TestStartOfflineSniffer_FileHandling(t *testing.T) {
 			// in the actual implementation, but it verifies the parameter handling
 			if !tt.expectError {
 				assert.NotPanics(t, func() {
-					StartOfflineSniffer([]string{filePath}, tt.filter, mockStartSniffer)
+					StartOfflineSnifferOrdered([]string{filePath}, tt.filter, mockStartSniffer)
 				}, tt.description)
 			}
 		})

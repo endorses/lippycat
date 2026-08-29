@@ -85,7 +85,7 @@ func TestStartLiveSnifferErrorHandling(t *testing.T) {
 	}
 }
 
-func TestStartOfflineSnifferErrorHandling(t *testing.T) {
+func TestStartOfflineSnifferOrderedErrorHandling(t *testing.T) {
 	tests := []struct {
 		name        string
 		setupFile   func(*testing.T) string
@@ -139,7 +139,7 @@ func TestStartOfflineSnifferErrorHandling(t *testing.T) {
 				t.Skip("Cannot easily test log.Fatal without modifying source")
 			} else {
 				assert.NotPanics(t, func() {
-					StartOfflineSniffer([]string{filePath}, tt.filter, mockStartSniffer)
+					StartOfflineSnifferOrdered([]string{filePath}, tt.filter, mockStartSniffer)
 				})
 				assert.True(t, startSnifferCalled, "startSniffer should be called for valid file")
 			}

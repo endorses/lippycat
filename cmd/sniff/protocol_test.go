@@ -5,13 +5,14 @@ package sniff
 import (
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
 func TestProtocolSpecValidate(t *testing.T) {
 	valid := ProtocolSpec{
-		Name:       "test",
+		Spec:       protocolcatalog.Spec{Name: "test"},
 		BuildBPF:   func(string) (string, error) { return "", nil },
 		StartLive:  func(string, string) {},
 		StartFiles: func([]string, string) {},
@@ -36,6 +37,16 @@ func TestProtocolSpecValidate(t *testing.T) {
 	}
 }
 
+func TestProtocolCommandsUseSharedCatalog(t *testing.T) {
+	t.Parallel()
+
+	for name, got := range map[string]ProtocolSpec{
+		"dns": dnsSpec, "email": emailSpec, "http": httpSpec, "tls": tlsSpec, "voip": voipSpec,
+	} {
+		require.Equal(t, protocolcatalog.MustLookup(name), got.Spec)
+	}
+}
+
 func TestRunProtocolSelectsIngressAndPreservesArguments(t *testing.T) {
 	originalReadFile, originalInterfaces, originalFilter := readFile, interfaces, filter
 	t.Cleanup(func() { readFile, interfaces, filter = originalReadFile, originalInterfaces, originalFilter })
@@ -45,7 +56,7 @@ func TestRunProtocolSelectsIngressAndPreservesArguments(t *testing.T) {
 	var gotInterfaces, gotFilter string
 	var gotFiles []string
 	spec := ProtocolSpec{
-		Name: "test",
+		Spec: protocolcatalog.Spec{Name: "test"},
 		BuildBPF: func(base string) (string, error) {
 			require.Equal(t, "tcp", base)
 			return "tcp and port 42", nil

@@ -2,6 +2,7 @@ package voip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -35,6 +36,9 @@ func (s *virtualInterfacePacketSink) HandlePacket(_ context.Context, env *pipeli
 	display.RawData = append([]byte(nil), env.Data...)
 	display.LinkType = env.LinkType
 	if err := s.manager.InjectPacketBatch([]types.PacketDisplay{display}); err != nil {
+		if errors.Is(err, vinterface.ErrQueueFull) {
+			return pipeline.Result{Outcome: pipeline.OutcomeDropped, DropReason: pipeline.DropQueueFull}
+		}
 		return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: fmt.Errorf("inject packet: %w", err)}
 	}
 	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}

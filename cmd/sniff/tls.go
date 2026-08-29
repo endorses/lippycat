@@ -57,7 +57,7 @@ var (
 )
 
 var tlsSpec = ProtocolSpec{
-	Name: "tls",
+	Spec: sharedProtocolSpec("tls"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := tls.ParsePorts(tlsPorts)
 		if err != nil {

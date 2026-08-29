@@ -9,11 +9,10 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
-	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
-	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -192,46 +191,23 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		"pattern_algorithm", viper.GetString("voip.pattern_algorithm"),
 		"pattern_buffer_mb", viper.GetInt("voip.pattern_buffer_mb"))
 
-	// Create hunter instance
-	h, err := hunter.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to create hunter: %w", err)
-	}
-
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals for graceful shutdown
-	cleanup := signals.SetupHandler(ctx, cancel)
-	defer cleanup()
-
-	// Initialize VoIP buffer manager
-	bufferMgr := voip.NewBufferManager(5*time.Second, 200)
-	defer bufferMgr.Close()
-
-	logger.Info("VoIP buffer manager initialized", "max_age", "5s", "max_size", 200)
-
-	// Start hunter in background with VoIP buffering wrapper
-	errChan := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		if err := runVoIPHunterWithBuffering(ctx, h, bufferMgr); err != nil {
-			errChan <- err
-		}
-	}()
-
-	// Wait for error or context cancellation
-	select {
-	case err := <-errChan:
-		return fmt.Errorf("hunter error: %w", err)
-	case <-ctx.Done():
-		logger.Info("Shutdown signal received, stopping VoIP hunter...")
-		return nil
-	}
+	var bufferMgr *voip.BufferManager
+	return runHunterRuntime(config, hunterRuntimeSpec{
+		name: "voip",
+		setup: func(_ context.Context, _ *hunter.Hunter) (func(), error) {
+			bufferMgr = voip.NewBufferManager(5*time.Second, 200)
+			logger.Info("VoIP buffer manager initialized", "max_age", "5s", "max_size", 200)
+			return bufferMgr.Close, nil
+		},
+		start: func(ctx context.Context, h *hunter.Hunter) error {
+			return runVoIPHunterWithBuffering(ctx, h, bufferMgr)
+		},
+	})
 }
 
 func voipHunterConfigSpec(filter string) hunterConfigSpec {
 	return hunterConfigSpec{
+		protocol:            protocolcatalog.MustLookup("voip"),
 		bpfFilter:           filter,
 		voIPMode:            true,
 		enableVoIPFilter:    true,

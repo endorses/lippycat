@@ -226,6 +226,7 @@ func TestErrors(t *testing.T) {
 		ErrNotStarted,
 		ErrAlreadyStarted,
 		ErrShuttingDown,
+		ErrQueueFull,
 	}
 
 	// All errors should be non-nil
@@ -253,6 +254,7 @@ func TestErrors(t *testing.T) {
 	assert.Contains(t, ErrNotStarted.Error(), "not started")
 	assert.Contains(t, ErrAlreadyStarted.Error(), "already started")
 	assert.Contains(t, ErrShuttingDown.Error(), "shutting down")
+	assert.Contains(t, ErrQueueFull.Error(), "queue full")
 }
 
 func TestStats_InitialValues(t *testing.T) {

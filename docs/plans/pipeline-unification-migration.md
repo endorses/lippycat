@@ -1,7 +1,7 @@
 # Pipeline Unification Migration Plan
 
 **Date:** 2026-08-27
-**Status:** Draft
+**Status:** Implementation complete; release qualification pending
 
 ## Objective
 
@@ -596,6 +596,13 @@ manager lock, allowing sink selection-state queries without deadlock. Regression
 tests cover typed-result retention, unlocked callbacks, sink dispatch counts,
 and unchanged ordered PCAP output.
 
+Sink-pressure audit remediation (2026-08-29): virtual-interface injection now
+returns an explicit queue-full error when its bounded asynchronous queue drops
+packets. Both general and VoIP normalized packet sinks translate that condition
+to `OutcomeDropped` with `DropQueueFull`, while the virtual-interface statistics
+continue to count every dropped packet. Focused and race tests cover the manager
+and both sink adapters.
+
 ### Exit Criteria
 
 - One SIP parsing/orchestration implementation serves TCP and UDP compositions.
@@ -731,6 +738,14 @@ Verification hardening (2026-08-29): hunter configuration fixtures now invoke
 the exact per-command specification constructors used by production paths.
 Hunter, sniff, and tap CLI contracts snapshot complete rendered help and
 behaviorally verify every declared flag-to-Viper-key binding.
+
+Composition audit remediation (2026-08-29): introduced a protocol-neutral
+catalog for protocol identity and filter capabilities, consumed by sniff, hunt,
+and tap specifications. Hunter commands now share one lifecycle runner for
+validation, construction, setup/cleanup hooks, signal handling, and startup;
+protocol files retain only their flags, protocol-specific configuration, and
+hooks. Tests verify catalog use across all three modes and hunter hook/error
+ordering.
 
 ### Exit Criteria
 
@@ -884,3 +899,9 @@ Before completing Phases 4, 5, and 6:
   specification rather than per-mode runtime copies.
 - Material net reduction in duplicated and unused code without increasing the
   responsibility of any single component into a pipeline-wide god object.
+
+Implementation audit (2026-08-29): all success metrics above are represented in
+production code and regression tests. `make test`, the supported non-CUDA
+build/vet matrix, and focused race tests pass. CUDA-capable CI and the operational
+soak scenarios remain open release-qualification requirements and are not
+claimed by this implementation status.

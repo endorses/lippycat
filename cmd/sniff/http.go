@@ -117,7 +117,7 @@ var (
 )
 
 var httpSpec = ProtocolSpec{
-	Name: "http",
+	Spec: sharedProtocolSpec("http"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := http.ParsePorts(httpPorts)
 		if err != nil {

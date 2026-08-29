@@ -303,7 +303,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 	}
 
 	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{
-		Name: "dns",
+		Spec: sharedProtocolSpec("dns"),
 		ConfigureSource: func(localSource *source.LocalSource) {
 			localSource.SetDNSProcessor(source.NewDNSProcessorFromViper())
 		},

@@ -68,7 +68,7 @@ var (
 )
 
 var voipSpec = ProtocolSpec{
-	Name: "voip",
+	Spec: sharedProtocolSpec("voip"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		udpOnly := viper.GetBool("voip.udp_only")
 		sipPorts := viper.GetString("voip.sip_ports")

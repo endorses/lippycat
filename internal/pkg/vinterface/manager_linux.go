@@ -221,7 +221,7 @@ func (m *linuxManager) InjectPacket(packet []byte) error {
 	default:
 		// Queue full, drop packet
 		m.stats.packetsDropped.Add(1)
-		return nil
+		return ErrQueueFull
 	}
 }
 
@@ -237,6 +237,7 @@ func (m *linuxManager) InjectPacketBatch(packets []types.PacketDisplay) error {
 		return ErrNotStarted
 	}
 
+	queueFull := false
 	for i := range packets {
 		// Convert PacketDisplay to raw frame based on interface type
 		var frame []byte
@@ -275,11 +276,15 @@ func (m *linuxManager) InjectPacketBatch(packets []types.PacketDisplay) error {
 		default:
 			// Queue full, drop packet and return buffer to pool
 			m.stats.packetsDropped.Add(1)
+			queueFull = true
 			*bufPtr = buf[:0] // Reset length
 			m.bufferPool.Put(bufPtr)
 		}
 	}
 
+	if queueFull {
+		return ErrQueueFull
+	}
 	return nil
 }
 

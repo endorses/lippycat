@@ -3,17 +3,13 @@
 package hunt
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
-	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -227,44 +223,10 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		"buffer_size", config.BufferSize,
 		"batch_size", config.BatchSize)
 
-	// Create hunter instance
-	h, err := hunter.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to create hunter: %w", err)
-	}
-
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals for graceful shutdown
-	cleanup := signals.SetupHandler(ctx, cancel)
-	defer cleanup()
-
-	// Start hunter in background
-	errChan := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		if err := h.Start(ctx); err != nil {
-			errChan <- err
-		}
-	}()
-
 	logger.Info("Hunter started successfully",
 		"processor", config.ProcessorAddr,
 		"hunter_id", config.HunterID)
-
-	// Wait for shutdown signal or error
-	select {
-	case <-ctx.Done():
-		// Signal received, give some time for graceful shutdown
-		time.Sleep(constants.GracefulShutdownTimeout)
-	case err := <-errChan:
-		logger.Error("Hunter failed", "error", err)
-		return err
-	}
-
-	logger.Info("Hunter stopped")
-	return nil
+	return runHunterRuntime(config, hunterRuntimeSpec{name: "generic", shutdownDelay: constants.GracefulShutdownTimeout})
 }
 
 func genericHunterConfigSpec(filter string) hunterConfigSpec {

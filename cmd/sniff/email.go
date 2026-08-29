@@ -120,7 +120,7 @@ var (
 )
 
 var emailSpec = ProtocolSpec{
-	Name: "email",
+	Spec: sharedProtocolSpec("email"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		protocol := viper.GetString("email.protocol")
 		if protocol == "" {

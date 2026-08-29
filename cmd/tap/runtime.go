@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/signals"
 )
 
@@ -21,9 +22,13 @@ import (
 // flags and Viper bindings intentionally remain in the command files; this type
 // only captures the differences needed after configuration has been resolved.
 type ProtocolSpec struct {
-	Name            string
+	protocolcatalog.Spec
 	ConfigureGPU    func(GPUConfig) GPUConfig
 	ConfigureSource func(*source.LocalSource)
+}
+
+func sharedProtocolSpec(name string) protocolcatalog.Spec {
+	return protocolcatalog.MustLookup(name)
 }
 
 type tapRuntime struct {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
@@ -66,6 +68,37 @@ func TestPCAPEnvelopeSinkPreservesHeaderAndCaptureInfo(t *testing.T) {
 	require.Equal(t, env.CaptureLength, ci.CaptureLength)
 	require.Equal(t, env.OriginalLength, ci.Length)
 }
+
+func TestVirtualInterfaceEnvelopeSinkReportsQueueFullAsDrop(t *testing.T) {
+	sink := &virtualInterfaceEnvelopeSink{manager: &stubVIFManager{injectErr: vinterface.ErrQueueFull}}
+
+	result := sink.HandlePacket(context.Background(), testEnvelope(t))
+
+	require.Equal(t, pipeline.OutcomeDropped, result.Outcome)
+	require.Equal(t, pipeline.DropQueueFull, result.DropReason)
+	require.NoError(t, result.Err)
+}
+
+func TestVirtualInterfaceEnvelopeSinkReportsOtherErrorsAsRetryable(t *testing.T) {
+	injectErr := errors.New("write failed")
+	sink := &virtualInterfaceEnvelopeSink{manager: &stubVIFManager{injectErr: injectErr}}
+
+	result := sink.HandlePacket(context.Background(), testEnvelope(t))
+
+	require.Equal(t, pipeline.OutcomeRetryableFailure, result.Outcome)
+	require.ErrorIs(t, result.Err, injectErr)
+}
+
+type stubVIFManager struct {
+	injectErr error
+}
+
+func (*stubVIFManager) Name() string                                    { return "test0" }
+func (*stubVIFManager) Start() error                                    { return nil }
+func (*stubVIFManager) InjectPacket([]byte) error                       { return nil }
+func (m *stubVIFManager) InjectPacketBatch([]types.PacketDisplay) error { return m.injectErr }
+func (*stubVIFManager) Shutdown() error                                 { return nil }
+func (*stubVIFManager) Stats() vinterface.Stats                         { return vinterface.Stats{} }
 
 func testEnvelope(t *testing.T) *pipeline.PacketEnvelope {
 	t.Helper()

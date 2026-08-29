@@ -33,6 +33,11 @@ var (
 	// ErrShuttingDown indicates the manager is shutting down.
 	ErrShuttingDown = errors.New("manager is shutting down")
 
+	// ErrQueueFull indicates that the asynchronous injection queue could not
+	// accept one or more packets. The packets are dropped rather than blocking
+	// capture.
+	ErrQueueFull = errors.New("virtual interface injection queue full")
+
 	// ErrNetNSNotFound indicates the network namespace doesn't exist.
 	ErrNetNSNotFound = errors.New("network namespace not found")
 

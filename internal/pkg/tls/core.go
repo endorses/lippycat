@@ -12,6 +12,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -77,8 +79,12 @@ func StartTLSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create processor function
+	kind := pipeline.SourceLiveCapture
+	if isOffline {
+		kind = pipeline.SourcePCAPReplay
+	}
 	processor := func(packetChan <-chan capture.PacketInfo) {
-		processTLSPackets(packetChan)
+		captureadapter.ForEach(packetChan, kind, processTLSEnvelope)
 	}
 
 	// Run capture with appropriate mode
@@ -95,6 +101,10 @@ func StartTLSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 // processTLSPackets processes packets from the channel.
 func processTLSPackets(packetChan <-chan capture.PacketInfo) {
+	captureadapter.ForEach(packetChan, pipeline.SourceLiveCapture, processTLSEnvelope)
+}
+
+func processTLSEnvelope(env *pipeline.PacketEnvelope) {
 	quietMode := viper.GetBool("sniff.quiet")
 	format := viper.GetString("sniff.format")
 
@@ -104,18 +114,19 @@ func processTLSPackets(packetChan <-chan capture.PacketInfo) {
 		jsonEncoder = json.NewEncoder(os.Stdout)
 	}
 
-	for pktInfo := range packetChan {
+	pktInfo := captureadapter.ToPacketInfo(env)
+	{
 		packet := pktInfo.Packet
 
 		// Parse TLS
 		metadata := tlsParser.Parse(packet)
 		if metadata == nil {
-			continue
+			return
 		}
 
 		// Apply content filter if configured
 		if tlsContentFilter.HasFilters() && !tlsContentFilter.Match(metadata) {
-			continue
+			return
 		}
 
 		// Create packet display

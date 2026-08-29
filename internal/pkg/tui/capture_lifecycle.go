@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
 )
@@ -236,7 +237,7 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
-		StartPacketBridge(ch, program, pauseSignal, tracker, false, aggregator)
+		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator)
 	}
 
 	// Run capture - InitWithContext handles both live and offline modes
@@ -257,7 +258,7 @@ func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterfa
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
-		StartPacketBridge(ch, program, pauseSignal, tracker, true, aggregator)
+		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator)
 	}
 
 	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes

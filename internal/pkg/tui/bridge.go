@@ -4,8 +4,8 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -866,8 +866,21 @@ func ResetBridgeStats() {
 	// Note: Running is not reset here - it reflects actual bridge state
 }
 
-// StartPacketBridge creates a bridge between packet capture and TUI.
-// It converts capture.PacketInfo to PacketMsg for the TUI.
+// NormalizeCaptureStream adapts local capture records at the ingress boundary.
+// The returned channel is closed after input is drained.
+func NormalizeCaptureStream(ctx context.Context, packetChan <-chan capture.PacketInfo, kind pipeline.SourceKind) <-chan *pipeline.PacketEnvelope {
+	envelopes := make(chan *pipeline.PacketEnvelope)
+	go func() {
+		defer close(envelopes)
+		if err := captureadapter.Stream(ctx, packetChan, envelopes, kind); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("Failed to normalize TUI capture stream", "error", err, "source_kind", kind)
+		}
+	}()
+	return envelopes
+}
+
+// StartEnvelopeBridge creates a bridge between normalized local capture and TUI.
+// It translates normalized envelopes into TUI events.
 // Uses intelligent sampling and throttling to handle high packet rates.
 //
 // The bridge uses a buffered channel and separate consumer goroutine to
@@ -876,7 +889,7 @@ func ResetBridgeStats() {
 //
 // The pause signal allows the bridge to block when capture is paused,
 // reducing CPU usage to near-idle.
-func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregator *LocalCallAggregator) {
+func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregator *LocalCallAggregator) {
 	// Wait for TUI to be fully initialized before processing packets.
 	// This prevents race conditions where messages are sent before
 	// Bubbletea has completed terminal setup, which can cause
@@ -902,6 +915,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	defer cancel()
 
 	tcpHandler := NewTUISIPHandler(tracker, aggregator)
+	defer tcpHandler.Close()
 	streamFactory := voip.NewSipStreamFactoryWithConfig(
 		ctx,
 		tcpHandler,
@@ -939,6 +953,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	// Buffered channel to decouple packet conversion from TUI rendering.
 	// This prevents program.Send() from blocking the bridge when TUI is slow.
 	tuiBatchChan := make(chan PacketBatchMsg, tuiQueueSize)
+	eventHandler := newLocalTUIEventHandler(program, preserveAll)
 
 	// Consumer goroutine: reads from tuiBatchChan and adds to pending buffer.
 	// The TUI pulls from the pending buffer on its own timer, so this never blocks.
@@ -967,7 +982,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 				}
 				// Add to pending buffer (never blocks - TUI pulls when ready)
 				consumerPacketsReceived += int64(len(msg.Packets))
-				pendingPackets.addPackets(msg.Packets, preserveAll)
+				eventHandler.OnPacketBatch(msg.Packets)
 			}
 		}
 	}()
@@ -979,11 +994,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		if len(batch) > 0 {
 			msg := PacketBatchMsg{Packets: batch}
 
-			// Check if we're in offline mode (reading from PCAP files)
-			// In offline mode, we MUST NOT drop packets - use blocking send
-			hasCallTracker := tracker != nil
-
-			if hasCallTracker {
+			if preserveAll {
 				// Blocking send - wait until TUI is ready (offline mode)
 				tuiBatchChan <- msg
 				atomic.AddInt64(&bridgeStats.BatchesSent, 1)
@@ -1082,7 +1093,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			// Pause signaled mid-select, loop back to check and block
 			continue
 
-		case pktInfo, ok := <-packetChan:
+		case env, ok := <-packetChan:
 			if !ok {
 				// Channel closed, send remaining batch and shutdown consumer
 				pendingBatchSize := len(batch)
@@ -1104,15 +1115,6 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 					"batches_dropped", finalBatchesDropped,
 					"final_batch_size", pendingBatchSize)
 
-				// Write debug summary to file (useful when logger is disabled in TUI mode)
-				// #nosec G304 -- Debug output file path is hardcoded
-				if f, err := os.OpenFile("/tmp/lippycat_bridge_debug.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
-					fmt.Fprintf(f, "[%s] Bridge shutdown: received=%d, displayed=%d, batches_sent=%d, batches_dropped=%d\n",
-						time.Now().Format(time.RFC3339),
-						finalPacketsReceived, finalPacketsDisplayed, finalBatchesSent, finalBatchesDropped)
-					f.Close()
-				}
-
 				// Mark capture as successfully completed (for health indicator)
 				atomic.StoreInt32(&bridgeStats.CaptureComplete, 1)
 
@@ -1122,6 +1124,13 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			packetCount++
 			atomic.AddInt64(&bridgeStats.PacketsReceived, 1)
+			if env == nil {
+				continue
+			}
+			pkt := env.Packet()
+			if pkt == nil {
+				continue
+			}
 
 			// Update rate tracking and sampling ratio every N packets (not every packet)
 			// This reduces overhead from 100k+ time.Now() calls/sec to 100 calls/sec
@@ -1133,7 +1142,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			// Check if we're in offline mode (reading from PCAP files)
 			// In offline mode, process ALL packets - no sampling needed
-			hasCallTracker := preserveAll
+			offline := env.Source.Kind == pipeline.SourcePCAPReplay
 
 			// Feed TCP packets to the assembler for SIP reassembly
 			// Only when VoIP mode is enabled - this mirrors the behavior of
@@ -1141,10 +1150,10 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			// Without this check, ALL TCP traffic would be processed through the
 			// SIP reassembler, causing blocking/hanging with non-SIP traffic
 			if IsVoIPModeEnabled() {
-				if tcpLayer := pktInfo.Packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+				if tcpLayer := pkt.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 					tcp := tcpLayer.(*layers.TCP)
 					// Get network flow for assembler
-					if netFlow := pktInfo.Packet.NetworkLayer(); netFlow != nil {
+					if netFlow := pkt.NetworkLayer(); netFlow != nil {
 						count := atomic.AddInt64(&bridgeStats.TCPPacketsToAssembler, 1)
 						// Log every 100th TCP packet to assembler
 						if count%100 == 1 {
@@ -1152,11 +1161,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 								"total_count", count,
 								"payload_len", len(tcp.Payload))
 						}
-						kind := pipeline.SourceLiveCapture
-						if hasCallTracker {
-							kind = pipeline.SourcePCAPReplay
-						}
-						if err := assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, kind)); err != nil {
+						if err := assembler.Assemble(env); err != nil {
 							logger.Error("Failed to assemble TUI TCP packet", "error", err)
 						}
 					}
@@ -1165,14 +1170,14 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			// Use cached sampling ratio (only for live capture)
 			samplingRatio := cachedSamplingRatio
-			if hasCallTracker {
+			if offline || preserveAll {
 				samplingRatio = 1.0 // Process all packets in offline mode
 			}
 
 			// Fast SIP detection BEFORE sampling decision
 			// SIP packets are NEVER sampled/dropped because losing a SIP INVITE
 			// causes subsequent RTP to appear as "RTP-only" calls
-			isSIP := isSIPPacket(pktInfo.Packet)
+			isSIP := isSIPPacket(pkt)
 
 			// Determine if packet should be displayed:
 			// - SIP packets: always displayed (critical for call setup)
@@ -1186,7 +1191,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			if shouldDisplay {
 				// Full conversion to extract all metadata (SDP, etc.)
-				packet := convertPacket(pktInfo, tracker)
+				packet := convertEnvelope(env, tracker)
 				batch = append(batch, packet)
 			}
 
@@ -1202,14 +1207,14 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	}
 }
 
-// convertPacketFast is a lightweight version for high-speed scenarios
-// Uses shared extraction logic with TUI-specific fast SIP detection
-func convertPacketFast(pktInfo capture.PacketInfo, tracker ...*CallTracker) components.PacketDisplay {
+// convertEnvelopeFast is the envelope-native lightweight display adapter.
+// It uses shared extraction logic with TUI-specific fast SIP detection.
+func convertEnvelopeFast(env *pipeline.PacketEnvelope, tracker ...*CallTracker) components.PacketDisplay {
 	var callTracker *CallTracker
 	if len(tracker) > 0 {
 		callTracker = tracker[0]
 	}
-	pkt := pktInfo.Packet
+	pkt := env.Packet()
 
 	// Use shared extraction for basic fields
 	fields := capture.ExtractPacketFields(pkt)
@@ -1224,8 +1229,8 @@ func convertPacketFast(pktInfo capture.PacketInfo, tracker ...*CallTracker) comp
 		Length:    pkt.Metadata().Length,
 		Info:      "",  // Skip info in fast mode
 		RawData:   nil, // Don't copy raw data for performance
-		Interface: pktInfo.Interface,
-		LinkType:  pktInfo.LinkType,
+		Interface: env.Source.InterfaceName,
+		LinkType:  env.LinkType,
 	}
 
 	// Fast SIP detection for VoIP over TCP/UDP
@@ -1281,10 +1286,11 @@ func convertPacketFast(pktInfo capture.PacketInfo, tracker ...*CallTracker) comp
 	return display
 }
 
-// convertPacket converts a gopacket.Packet to PacketDisplay
-// Uses shared extraction logic enhanced with protocol detection
-func convertPacket(pktInfo capture.PacketInfo, tracker *CallTracker) components.PacketDisplay {
-	pkt := pktInfo.Packet
+// convertEnvelope translates a normalized packet into the existing TUI display
+// contract without reconstructing a capture-layer record. It uses shared
+// extraction logic enhanced with protocol detection.
+func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) components.PacketDisplay {
+	pkt := env.Packet()
 
 	// Use shared extraction for basic fields
 	fields := capture.ExtractPacketFields(pkt)
@@ -1306,8 +1312,8 @@ func convertPacket(pktInfo capture.PacketInfo, tracker *CallTracker) components.
 		Length:    pkt.Metadata().Length,
 		Info:      fields.Info,
 		RawData:   rawData,
-		Interface: pktInfo.Interface,
-		LinkType:  pktInfo.LinkType,
+		Interface: env.Source.InterfaceName,
+		LinkType:  env.LinkType,
 	}
 
 	// Use centralized detector for application layer protocols

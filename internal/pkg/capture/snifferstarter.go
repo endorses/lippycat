@@ -2,8 +2,6 @@ package capture
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -16,12 +14,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
-	"github.com/endorses/lippycat/internal/pkg/types"
-	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
-	"github.com/spf13/viper"
 )
 
 func StartLiveSniffer(interfaces, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
@@ -215,45 +209,6 @@ func checkCapturePermissions(devices []pcaptypes.PcapInterface) bool {
 	return hasPermission
 }
 
-func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
-	logger.Info("Starting packet sniffer")
-
-	// For basic sniffing, we don't need TCP stream reassembly
-	// Pass nil assembler to skip expensive TCP assembly
-	processor := func(ch <-chan PacketInfo) {
-		processPacketSimple(ch)
-	}
-
-	// Check if this is offline mode (reading from PCAP file)
-	// Offline interfaces have filenames as their Name(), not network interface names
-	isOffline := false
-	for _, dev := range devices {
-		// Offline interfaces return the filename in Name()
-		// which will contain a path separator or .pcap extension
-		name := dev.Name()
-		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
-			isOffline = true
-			break
-		}
-	}
-
-	// For live capture, check permissions upfront before starting goroutines
-	if !isOffline {
-		if !checkCapturePermissions(devices) {
-			// All captures failed - exit immediately
-			return
-		}
-	}
-
-	if isOffline {
-		// For offline mode, run until PCAP is fully read
-		RunOffline(devices, filter, processor)
-	} else {
-		// For live mode, run with signal handler (waits for Ctrl+C)
-		RunWithSignalHandler(devices, filter, processor)
-	}
-}
-
 // RunOffline runs the capture for offline PCAP files and exits when complete
 // Unlike RunWithSignalHandler, this cancels the context when all packets are read
 func RunOffline(devices []pcaptypes.PcapInterface, filter string,
@@ -371,7 +326,8 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	}
 
 	// Phase 2: Sort all packets by timestamp
-	sort.Slice(allPackets, func(i, j int) bool {
+	// Keep source/file order deterministic when capture timestamps are equal.
+	sort.SliceStable(allPackets, func(i, j int) bool {
 		return allPackets[i].Packet.Metadata().Timestamp.Before(
 			allPackets[j].Packet.Metadata().Timestamp)
 	})
@@ -549,225 +505,4 @@ func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]Pac
 	}
 
 	return packets, nil
-}
-
-// processPacketSimple is a lightweight processor without TCP reassembly
-func processPacketSimple(packetChan <-chan PacketInfo) {
-	packetCount := 0
-	lastStatsTime := time.Now()
-	startTime := time.Now()
-	quietMode := viper.GetBool("sniff.quiet")
-	format := viper.GetString("sniff.format")
-	writeFile := viper.GetString("sniff.write_file")
-
-	// Initialize virtual interface if enabled
-	var vifMgr vinterface.Manager
-	var timingReplayer *vinterface.TimingReplayer
-	if viper.GetBool("sniff.virtual_interface") {
-		vifName := viper.GetString("sniff.vif_name")
-		if vifName == "" {
-			vifName = "lc0"
-		}
-
-		cfg := vinterface.DefaultConfig()
-		cfg.Name = vifName
-
-		// Read type from config (default: tap)
-		if vifType := viper.GetString("sniff.vif_type"); vifType != "" {
-			cfg.Type = vifType
-		}
-
-		// Read buffer size from config (default: 4096)
-		if bufferSize := viper.GetInt("sniff.vif_buffer_size"); bufferSize > 0 {
-			cfg.BufferSize = bufferSize
-		}
-
-		// Read network namespace from config (default: empty)
-		if netNS := viper.GetString("sniff.vif_netns"); netNS != "" {
-			cfg.NetNS = netNS
-		}
-
-		// Read privilege dropping user from config (default: empty)
-		if dropPrivUser := viper.GetString("sniff.vif_drop_privileges"); dropPrivUser != "" {
-			cfg.DropPrivilegesUser = dropPrivUser
-		}
-
-		var err error
-		vifMgr, err = vinterface.NewManager(cfg)
-		if err != nil {
-			// Provide helpful error message for common errors
-			if errors.Is(err, vinterface.ErrPermissionDenied) {
-				logger.Error("Virtual interface requires elevated privileges",
-					"error", err,
-					"interface_name", vifName,
-					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
-			} else if errors.Is(err, vinterface.ErrInterfaceExists) {
-				logger.Error("Virtual interface already exists",
-					"error", err,
-					"interface_name", vifName,
-					"solution", "Delete existing interface or choose a different name with --vif-name")
-			} else {
-				logger.Error("Failed to create virtual interface manager",
-					"error", err,
-					"interface_name", vifName)
-			}
-			logger.Warn("Continuing without virtual interface")
-			vifMgr = nil
-		} else {
-			err = vifMgr.Start()
-			if err != nil {
-				// Provide helpful error message for common errors
-				if errors.Is(err, vinterface.ErrPermissionDenied) {
-					logger.Error("Virtual interface requires elevated privileges",
-						"error", err,
-						"interface_name", vifName,
-						"solution", "Run with sudo or add CAP_NET_ADMIN capability")
-				} else if errors.Is(err, vinterface.ErrInterfaceExists) {
-					logger.Error("Virtual interface already exists",
-						"error", err,
-						"interface_name", vifName,
-						"solution", "Delete existing interface or choose a different name with --vif-name")
-				} else {
-					logger.Error("Failed to start virtual interface",
-						"error", err,
-						"interface_name", vifName)
-				}
-				logger.Warn("Continuing without virtual interface")
-				vifMgr = nil
-			}
-		}
-
-		if vifMgr != nil {
-			logger.Info("Virtual interface started successfully",
-				"interface_name", vifMgr.Name())
-
-			// Wait for external tools (tcpdump, Wireshark) to attach
-			startupDelay := viper.GetDuration("sniff.vif_startup_delay")
-			if startupDelay > 0 {
-				logger.Info("Waiting for monitoring tools to attach...",
-					"delay", startupDelay)
-				time.Sleep(startupDelay)
-			}
-			logger.Info("Starting packet injection")
-
-			// Initialize timing replayer for virtual interface
-			replayTiming := viper.GetBool("sniff.vif_replay_timing")
-			timingReplayer = vinterface.NewTimingReplayer(replayTiming)
-		}
-
-		// Ensure cleanup on exit
-		defer func() {
-			if vifMgr != nil {
-				stats := vifMgr.Stats()
-				logger.Info("Virtual interface statistics",
-					"packets_injected", stats.PacketsInjected,
-					"packets_dropped", stats.PacketsDropped,
-					"injection_errors", stats.InjectionErrors,
-					"conversion_errors", stats.ConversionErrors)
-
-				if err := vifMgr.Shutdown(); err != nil {
-					logger.Error("Error shutting down virtual interface", "error", err)
-				} else {
-					logger.Info("Virtual interface shutdown successfully")
-				}
-			}
-		}()
-	}
-
-	// Create JSON encoder if using JSON format
-	var jsonEncoder *json.Encoder
-	if format == "json" {
-		jsonEncoder = json.NewEncoder(os.Stdout)
-	}
-
-	// Create PCAP writer if write_file is specified
-	// Note: The PCAP header is written on the first packet to use the correct link type
-	var pcapWriter *pcapgo.Writer
-	var pcapFile *os.File
-	var pcapHeaderWritten bool
-	if writeFile != "" {
-		// #nosec G304 -- writeFile is from CLI --write-file flag, intentional user-specified path
-		f, err := os.Create(writeFile)
-		if err != nil {
-			logger.Error("Failed to create PCAP file", "file", writeFile, "error", err)
-		} else {
-			pcapFile = f
-			pcapWriter = pcapgo.NewWriter(pcapFile)
-			logger.Info("Writing packets to PCAP file", "file", writeFile)
-			defer func() {
-				if pcapFile != nil {
-					pcapFile.Close()
-					logger.Info("PCAP file written successfully", "file", writeFile, "packets", packetCount)
-				}
-			}()
-		}
-	}
-
-	for p := range packetChan {
-		packetCount++
-
-		// Inject packet into virtual interface if enabled
-		if vifMgr != nil {
-			// Handle packet timing replay (respects PCAP timestamps like tcpreplay)
-			if timingReplayer != nil {
-				timingReplayer.WaitForPacketTime(p.Packet.Metadata().Timestamp)
-			}
-
-			display := ConvertPacketToDisplay(p)
-			// Preserve raw packet data for virtual interface injection
-			display.RawData = p.Packet.Data()
-			display.LinkType = p.LinkType
-			if err := vifMgr.InjectPacketBatch([]types.PacketDisplay{display}); err != nil {
-				logger.Debug("Failed to inject packet to virtual interface", "error", err)
-			}
-		}
-
-		// Write to PCAP file if writer is available
-		if pcapWriter != nil {
-			// Write PCAP header on first packet to use correct link type
-			if !pcapHeaderWritten {
-				if err := pcapWriter.WriteFileHeader(65535, p.LinkType); err != nil {
-					logger.Error("Failed to write PCAP header", "error", err)
-					pcapFile.Close()
-					pcapWriter = nil
-					pcapFile = nil
-				} else {
-					pcapHeaderWritten = true
-					logger.Debug("Wrote PCAP header with link type", "link_type", p.LinkType)
-				}
-			}
-			if pcapWriter != nil {
-				if err := pcapWriter.WritePacket(p.Packet.Metadata().CaptureInfo, p.Packet.Data()); err != nil {
-					logger.Error("Failed to write packet to PCAP", "error", err)
-				}
-			}
-		}
-
-		// Print each packet unless in quiet mode
-		if !quietMode {
-			if format == "json" {
-				// Convert to structured PacketDisplay and output as JSON
-				display := ConvertPacketToDisplay(p)
-				if err := jsonEncoder.Encode(display); err != nil {
-					logger.Error("Failed to encode packet as JSON", "error", err)
-				}
-			} else {
-				// Default text format (gopacket's String() representation)
-				fmt.Printf("%s\n", p.Packet)
-			}
-		}
-
-		// Print statistics summary every second
-		if time.Since(lastStatsTime) >= 1*time.Second {
-			elapsed := time.Since(startTime).Seconds()
-			if elapsed > 0 {
-				logger.Info("Packet statistics",
-					"total_processed", packetCount,
-					"rate_pps", int64(float64(packetCount)/elapsed))
-			}
-			lastStatsTime = time.Now()
-		}
-	}
-
-	logger.Info("Packet processing completed", "total_packets", packetCount)
 }

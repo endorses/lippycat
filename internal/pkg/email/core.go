@@ -259,7 +259,13 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		}
 	}()
 	processor := func(packetChan <-chan capture.PacketInfo) {
-		processEmailPackets(packetChan, emailAssembler, isOffline)
+		kind := pipeline.SourceLiveCapture
+		if isOffline {
+			kind = pipeline.SourcePCAPReplay
+		}
+		captureadapter.ForEach(packetChan, kind, func(env *pipeline.PacketEnvelope) {
+			processEmailEnvelope(env, emailAssembler)
+		})
 	}
 
 	// Run capture with appropriate mode
@@ -331,7 +337,15 @@ func initializePortMaps() {
 
 // processEmailPackets processes packets from the channel.
 func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *pipeline.ReassemblyEngine, offline bool) {
-	for pktInfo := range packetChan {
+	kind := pipeline.SourceLiveCapture
+	if offline {
+		kind = pipeline.SourcePCAPReplay
+	}
+	captureadapter.ForEach(packetChan, kind, func(env *pipeline.PacketEnvelope) { processEmailEnvelope(env, asm) })
+}
+
+func processEmailEnvelope(env *pipeline.PacketEnvelope, asm *pipeline.ReassemblyEngine) {
+	for _, pktInfo := range []capture.PacketInfo{captureadapter.ToPacketInfo(env)} {
 		packet := pktInfo.Packet
 
 		// Check for TCP layer
@@ -352,11 +366,7 @@ func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *pipeline.Rea
 
 		// Feed to assembler
 		if asm != nil {
-			kind := pipeline.SourceLiveCapture
-			if offline {
-				kind = pipeline.SourcePCAPReplay
-			}
-			if err := asm.Assemble(captureadapter.FromPacketInfo(pktInfo, kind)); err != nil {
+			if err := asm.Assemble(env); err != nil {
 				logger.Error("Failed to assemble email TCP packet", "error", err)
 			}
 		}

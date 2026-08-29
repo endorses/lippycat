@@ -3,9 +3,14 @@
 package sniff
 
 import (
+	"os"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -76,11 +81,56 @@ func sniff(cmd *cobra.Command, args []string) {
 
 	files := collectReadFiles(readFile, args)
 	withStructuredLogs(func() {
-		if len(files) == 0 {
-			capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
-		} else {
-			capture.StartOfflineSniffer(files, filter, capture.StartSniffer)
+		registrations := []pipeline.SinkRegistration{{Name: "cli", Sink: newCLIEnvelopeSink(os.Stdout, format, quiet)}}
+		if writeFile != "" {
+			pcapSink, err := newPCAPEnvelopeSink(writeFile)
+			if err != nil {
+				logger.Error("Failed to create PCAP sink", "file", writeFile, "error", err)
+			} else {
+				registrations = append(registrations, pipeline.SinkRegistration{Name: "pcap", Sink: pcapSink})
+			}
 		}
+		if viper.GetBool("sniff.virtual_interface") {
+			cfg := vinterface.DefaultConfig()
+			if value := viper.GetString("sniff.vif_name"); value != "" {
+				cfg.Name = value
+			}
+			if value := viper.GetString("sniff.vif_type"); value != "" {
+				cfg.Type = value
+			}
+			if value := viper.GetInt("sniff.vif_buffer_size"); value > 0 {
+				cfg.BufferSize = value
+			}
+			cfg.NetNS = viper.GetString("sniff.vif_netns")
+			cfg.DropPrivilegesUser = viper.GetString("sniff.vif_drop_privileges")
+			vifSink, err := startVirtualInterfaceSink(cfg, viper.GetBool("sniff.vif_replay_timing"), viper.GetDuration("sniff.vif_startup_delay"))
+			if err != nil {
+				logger.Error("Failed to start virtual interface; continuing without it", "error", err, "interface_name", cfg.Name)
+			} else {
+				registrations = append(registrations, pipeline.SinkRegistration{Name: "virtual-interface", Sink: vifSink})
+			}
+		}
+		fanout, err := pipeline.NewPacketFanout(registrations...)
+		if err != nil {
+			logger.Error("Failed to compose local packet sinks", "error", err)
+			return
+		}
+		localPipeline := &localEnvelopePipeline{fanout: fanout}
+		defer localPipeline.close()
+
+		processor := func(kind pipeline.SourceKind) func(<-chan capture.PacketInfo) {
+			return func(ch <-chan capture.PacketInfo) { localPipeline.process(ch, kind) }
+		}
+		if len(files) == 0 {
+			capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+				capture.RunWithSignalHandler(devices, filter, processor(pipeline.SourceLiveCapture))
+			})
+		} else {
+			capture.StartOfflineSniffer(files, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+				capture.RunOffline(devices, filter, processor(pipeline.SourcePCAPReplay))
+			})
+		}
+		logger.Info("Packet processing completed", "total_packets", localPipeline.count)
 	})
 }
 

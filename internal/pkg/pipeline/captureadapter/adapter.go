@@ -5,6 +5,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 // FromPacketInfo converts a local capture record with explicit source
@@ -15,7 +16,18 @@ func FromPacketInfo(info capture.PacketInfo, kind ...pipeline.SourceKind) *pipel
 	if len(kind) != 0 {
 		sourceKind = kind[0]
 	}
-	e := &pipeline.PacketEnvelope{LinkType: info.LinkType, Source: pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface}}
+	linkType := info.LinkType
+	if linkType == 0 && info.Packet != nil {
+		switch {
+		case info.Packet.Layer(layers.LayerTypeEthernet) != nil:
+			linkType = layers.LinkTypeEthernet
+		case info.Packet.Layer(layers.LayerTypeLinuxSLL) != nil:
+			linkType = layers.LinkTypeLinuxSLL
+		case info.Packet.Layer(layers.LayerTypeIPv4) != nil || info.Packet.Layer(layers.LayerTypeIPv6) != nil:
+			linkType = layers.LinkTypeRaw
+		}
+	}
+	e := &pipeline.PacketEnvelope{LinkType: linkType, Source: pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface}}
 	if info.Packet == nil {
 		return e
 	}
@@ -40,4 +52,12 @@ func ToPacketInfo(e *pipeline.PacketEnvelope) capture.PacketInfo {
 		Length:        e.OriginalLength,
 	}
 	return capture.PacketInfo{Packet: p, LinkType: e.LinkType, Interface: e.Source.InterfaceName}
+}
+
+// ForEach normalizes a local capture stream at its ingress boundary and invokes
+// consume synchronously, preserving channel order and backpressure semantics.
+func ForEach(in <-chan capture.PacketInfo, kind pipeline.SourceKind, consume func(*pipeline.PacketEnvelope)) {
+	for info := range in {
+		consume(FromPacketInfo(info, kind))
+	}
 }

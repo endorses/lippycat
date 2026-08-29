@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"context"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 )
 
 // TestBridgeOfflinePacketCounting tests that the bridge correctly counts all packets
@@ -65,7 +67,7 @@ func TestBridgeOfflinePacketCounting(t *testing.T) {
 			// Create processor that uses the bridge (like TUI does)
 			processor := func(ch <-chan capture.PacketInfo) {
 				// Run bridge (this is what TUI's startFileSnifferOrdered does)
-				StartPacketBridge(ch, nil, pauseSignal, callTracker, true, nil) // nil program is ok, we don't use it
+				StartEnvelopeBridge(NormalizeCaptureStream(context.Background(), ch, pipeline.SourcePCAPReplay), nil, pauseSignal, callTracker, true, nil)
 
 				// After bridge completes, count packets in pending buffer
 				pendingPackets.mu.Lock()
@@ -146,7 +148,7 @@ func TestBridgeOfflineConsistency(t *testing.T) {
 		pauseSignal := NewPauseSignal()
 
 		processor := func(ch <-chan capture.PacketInfo) {
-			StartPacketBridge(ch, nil, pauseSignal, callTracker, true, nil)
+			StartEnvelopeBridge(NormalizeCaptureStream(context.Background(), ch, pipeline.SourcePCAPReplay), nil, pauseSignal, callTracker, true, nil)
 		}
 
 		capture.RunOfflineOrdered(devices, "", processor)

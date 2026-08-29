@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -38,7 +40,7 @@ func TestStartProcessorChannelProcessing(t *testing.T) {
 	defer sipusers.DeleteSipUser("testuser")
 
 	// Create packet channel and assembler
-	packetCh := make(chan capture.PacketInfo, 100)
+	packetCh := make(chan *pipeline.PacketEnvelope, 100)
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler(tracker))
 	defer streamFactory.(*sipStreamFactory).Shutdown()
@@ -61,7 +63,7 @@ func TestStartProcessorChannelProcessing(t *testing.T) {
 	}
 
 	for _, pkt := range testPackets {
-		packetCh <- pkt
+		packetCh <- captureadapter.FromPacketInfo(pkt, pipeline.SourceLiveCapture)
 		time.Sleep(1 * time.Millisecond) // Small delay to allow processing
 	}
 

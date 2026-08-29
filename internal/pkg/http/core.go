@@ -193,7 +193,13 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	// Create processor function
 	processor := func(packetChan <-chan capture.PacketInfo) {
-		processHTTPPackets(packetChan, httpAssembler, isOffline)
+		kind := pipeline.SourceLiveCapture
+		if isOffline {
+			kind = pipeline.SourcePCAPReplay
+		}
+		captureadapter.ForEach(packetChan, kind, func(env *pipeline.PacketEnvelope) {
+			processHTTPEnvelope(env, httpAssembler)
+		})
 	}
 
 	// Run capture with appropriate mode
@@ -213,7 +219,15 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 // processHTTPPackets processes packets from the channel.
 func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *pipeline.ReassemblyEngine, offline bool) {
-	for pktInfo := range packetChan {
+	kind := pipeline.SourceLiveCapture
+	if offline {
+		kind = pipeline.SourcePCAPReplay
+	}
+	captureadapter.ForEach(packetChan, kind, func(env *pipeline.PacketEnvelope) { processHTTPEnvelope(env, asm) })
+}
+
+func processHTTPEnvelope(env *pipeline.PacketEnvelope, asm *pipeline.ReassemblyEngine) {
+	for _, pktInfo := range []capture.PacketInfo{captureadapter.ToPacketInfo(env)} {
 		packet := pktInfo.Packet
 
 		// Feed TCP packets to assembler
@@ -232,11 +246,7 @@ func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *pipeline.Reas
 		}
 
 		// Feed to assembler for reassembly
-		kind := pipeline.SourceLiveCapture
-		if offline {
-			kind = pipeline.SourcePCAPReplay
-		}
-		if err := asm.Assemble(captureadapter.FromPacketInfo(pktInfo, kind)); err != nil {
+		if err := asm.Assemble(env); err != nil {
 			logger.Error("Failed to assemble HTTP TCP packet", "error", err)
 		}
 

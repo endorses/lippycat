@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"net"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -58,7 +61,7 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		capture.RunOfflineOrdered([]pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(ch <-chan capture.PacketInfo) {
 			for info := range ch {
 				fileInfos = append(fileInfos, info)
-				observed = append(observed, convertPacket(info, nil))
+				observed = append(observed, convertEnvelope(captureadapter.FromPacketInfo(info, pipeline.SourcePCAPReplay), nil))
 			}
 		})
 		require.NoError(t, file.Close())
@@ -120,7 +123,11 @@ func runProtocolGoldenBridge(t *testing.T, infos []capture.PacketInfo, offline b
 		packetChan <- info
 	}
 	close(packetChan)
-	StartPacketBridge(packetChan, nil, NewPauseSignal(), tracker, offline, nil)
+	kind := pipeline.SourceLiveCapture
+	if offline {
+		kind = pipeline.SourcePCAPReplay
+	}
+	StartEnvelopeBridge(NormalizeCaptureStream(context.Background(), packetChan, kind), nil, NewPauseSignal(), tracker, offline, nil)
 	stats := GetBridgeStats()
 	require.Equal(t, int64(len(infos)), stats.PacketsReceived)
 	require.Equal(t, int64(len(infos)), stats.PacketsDisplayed)

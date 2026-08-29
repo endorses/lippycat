@@ -13,7 +13,20 @@ import (
 // This bridges the gap between the infrastructure layer (remotecapture)
 // and the presentation layer (TUI) without creating a dependency violation.
 type TUIEventHandler struct {
-	program *tea.Program
+	program         *tea.Program
+	localPacketSink func([]types.PacketDisplay)
+}
+
+// newLocalTUIEventHandler publishes local capture packets through the same
+// EventHandler boundary as remote capture. Local delivery uses the bridge's
+// bounded pending store so a slow Bubble Tea update loop cannot block capture.
+func newLocalTUIEventHandler(program *tea.Program, preserveAll bool) *TUIEventHandler {
+	return &TUIEventHandler{
+		program: program,
+		localPacketSink: func(packets []types.PacketDisplay) {
+			pendingPackets.addPackets(packets, preserveAll)
+		},
+	}
 }
 
 // NewTUIEventHandler creates a new TUI event handler
@@ -23,12 +36,18 @@ func NewTUIEventHandler(program *tea.Program) *TUIEventHandler {
 
 // OnPacketBatch sends PacketBatchMsg to TUI
 func (h *TUIEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
+	if h.localPacketSink != nil {
+		h.localPacketSink(packets)
+		return
+	}
 	if h.program != nil {
 		// Convert to components.PacketDisplay (which is now an alias)
 		// and send as PacketBatchMsg
 		h.program.Send(PacketBatchMsg{Packets: packets})
 	}
 }
+
+var _ types.EventHandler = (*TUIEventHandler)(nil)
 
 // OnHunterStatus sends HunterStatusMsg to TUI
 func (h *TUIEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string) {

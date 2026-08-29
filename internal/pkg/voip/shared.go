@@ -1,8 +1,6 @@
 package voip
 
 import (
-	"sync"
-
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
@@ -14,7 +12,6 @@ import (
 
 var (
 	globalBufferMgr    *BufferManager
-	bufferOnce         sync.Once
 	globalVifMgr       vinterface.Manager         // Virtual interface manager for packet injection
 	globalTimingReplay *vinterface.TimingReplayer // Timing replayer for virtual interface
 )

@@ -8,16 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/pcapsink"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
-	"github.com/google/gopacket/pcapgo"
 )
 
 type localEnvelopePipeline struct {
@@ -78,46 +77,7 @@ func (s *cliEnvelopeSink) HandlePacket(_ context.Context, env *pipeline.PacketEn
 
 func (*cliEnvelopeSink) Close(context.Context) error { return nil }
 
-type pcapEnvelopeSink struct {
-	file          *os.File
-	writer        *pcapgo.Writer
-	headerWritten bool
-}
-
-func newPCAPEnvelopeSink(path string) (*pcapEnvelopeSink, error) {
-	// #nosec G304 -- path is the explicit --write-file destination.
-	f, err := os.Create(path)
-	if err != nil {
-		return nil, fmt.Errorf("create PCAP file %q: %w", path, err)
-	}
-	return &pcapEnvelopeSink{file: f, writer: pcapgo.NewWriter(f)}, nil
-}
-
-func (s *pcapEnvelopeSink) HandlePacket(_ context.Context, env *pipeline.PacketEnvelope) pipeline.Result {
-	if !s.headerWritten {
-		if err := s.writer.WriteFileHeader(65535, env.LinkType); err != nil {
-			return pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: fmt.Errorf("write PCAP header: %w", err)}
-		}
-		s.headerWritten = true
-	}
-	info := captureadapter.ToPacketInfo(env)
-	if err := s.writer.WritePacket(info.Packet.Metadata().CaptureInfo, env.Data); err != nil {
-		return pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: fmt.Errorf("write PCAP packet: %w", err)}
-	}
-	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
-}
-
-func (s *pcapEnvelopeSink) Close(context.Context) error {
-	if s.file == nil {
-		return nil
-	}
-	err := s.file.Close()
-	s.file = nil
-	if err != nil {
-		return fmt.Errorf("close PCAP file: %w", err)
-	}
-	return nil
-}
+func newPCAPEnvelopeSink(path string) (*pcapsink.Sink, error) { return pcapsink.New(path) }
 
 type virtualInterfaceEnvelopeSink struct {
 	manager vinterface.Manager

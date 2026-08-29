@@ -3,6 +3,7 @@
 package dns
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,10 +16,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/pcapsink"
 	"github.com/endorses/lippycat/internal/pkg/types"
-	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/viper"
 )
 
@@ -28,14 +28,17 @@ var (
 	dnsTracker        *QueryTracker
 	dnsTunneling      *TunnelingDetector
 	dnsAggregator     *QueryAggregator
-	dnsPcapWriter     *pcapgo.Writer
-	dnsOutputFile     *os.File
+	dnsPacketSink     pipeline.PacketSink
 	dnsDomainPatterns []string // Domain patterns to filter (glob-style)
 )
 
 // StartDNSSniffer starts the DNS sniffer on the specified interfaces.
 // This is the callback function passed to capture.StartLiveSniffer/StartOfflineSniffer.
 func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
+	startDNSSniffer(devices, filter, false)
+}
+
+func startDNSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
 	logger.Info("Starting DNS sniffer",
 		"device_count", len(devices),
 		"filter", filter)
@@ -65,30 +68,14 @@ func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	// Create aggregator for statistics
 	dnsAggregator = NewQueryAggregator(10000)
 
-	// PCAP writer if output file specified
+	// PCAP sink if output file specified
 	if writeFile := viper.GetString("dns.write_file"); writeFile != "" {
 		var err error
-		dnsOutputFile, err = os.Create(writeFile)
+		dnsPacketSink, err = pcapsink.New(writeFile)
 		if err != nil {
 			logger.Error("Failed to create output file", "error", err, "file", writeFile)
 		} else {
-			dnsPcapWriter = pcapgo.NewWriter(dnsOutputFile)
-			if err := dnsPcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-				logger.Error("Failed to write PCAP header", "error", err)
-				dnsPcapWriter = nil
-			} else {
-				logger.Info("Writing DNS packets to file", "file", writeFile)
-			}
-		}
-	}
-
-	// Detect offline mode
-	isOffline := false
-	for _, dev := range devices {
-		name := dev.Name()
-		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
-			isOffline = true
-			break
+			logger.Info("Writing DNS packets to file", "file", writeFile)
 		}
 	}
 
@@ -177,15 +164,9 @@ func processDNSEnvelope(env *pipeline.PacketEnvelope) {
 		}
 
 		// Write to PCAP if configured
-		if dnsPcapWriter != nil {
-			ci := gopacket.CaptureInfo{
-				Timestamp:      packet.Metadata().Timestamp,
-				CaptureLength:  len(packet.Data()),
-				Length:         len(packet.Data()),
-				InterfaceIndex: 0,
-			}
-			if err := dnsPcapWriter.WritePacket(ci, packet.Data()); err != nil {
-				logger.Error("Failed to write packet to PCAP", "error", err)
+		if dnsPacketSink != nil {
+			if result := dnsPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
+				logger.Error("DNS PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
 			}
 		}
 	}
@@ -196,10 +177,11 @@ func cleanup() {
 	if dnsTunneling != nil {
 		dnsTunneling.Stop()
 	}
-	if dnsOutputFile != nil {
-		if err := dnsOutputFile.Close(); err != nil {
-			logger.Error("Failed to close output file", "error", err)
+	if dnsPacketSink != nil {
+		if err := dnsPacketSink.Close(context.Background()); err != nil {
+			logger.Error("Failed to close DNS PCAP sink", "error", err)
 		}
+		dnsPacketSink = nil
 	}
 }
 
@@ -293,12 +275,16 @@ func printDNSPacket(pkt *types.PacketDisplay, metadata *types.DNSMetadata) {
 
 // StartLiveDNSSniffer starts DNS capture on live network interfaces.
 func StartLiveDNSSniffer(interfaces, filter string) {
-	capture.StartLiveSniffer(interfaces, filter, StartDNSSniffer)
+	capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startDNSSniffer(devices, filter, false)
+	})
 }
 
 // StartOfflineDNSSniffer starts DNS capture from one or more PCAP files.
 func StartOfflineDNSSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, StartDNSSniffer)
+	capture.StartOfflineSniffer(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startDNSSniffer(devices, filter, true)
+	})
 }
 
 // printStatistics prints capture statistics.

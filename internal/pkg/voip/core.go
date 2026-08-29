@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +48,10 @@ func ProcessorWorkersStats() []ProcessorWorkerStats {
 }
 
 func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
+	startVoipSniffer(devices, filter, false)
+}
+
+func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
 	ctx := context.Background()
 	config := GetConfig()
 	var callOutput CallOutput = NoopCallOutput{}
@@ -215,18 +218,6 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 			logger.Error("VoIP reassembly engine stopped", "error", err)
 		}
 	}()
-	// Detect offline mode (reading from PCAP file)
-	// Offline interfaces have filenames as their Name(), not network interface names
-	isOffline := false
-	for _, dev := range devices {
-		// Offline interfaces return the filename in Name()
-		// which will contain a path separator or .pcap extension
-		name := dev.Name()
-		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
-			isOffline = true
-			break
-		}
-	}
 	kind := pipeline.SourceLiveCapture
 	if isOffline {
 		kind = pipeline.SourcePCAPReplay
@@ -244,7 +235,7 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	if isOffline {
 		// For offline mode, run until PCAP is fully read
-		capture.RunOffline(devices, filter, processor)
+		capture.RunOfflineOrdered(devices, filter, processor)
 	} else {
 		// For live mode, run with signal handler (waits for Ctrl+C)
 		capture.RunWithSignalHandler(devices, filter, processor)
@@ -252,11 +243,15 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 }
 
 func StartLiveVoipSniffer(interfaces, filter string) {
-	capture.StartLiveSniffer(interfaces, filter, StartVoipSniffer)
+	capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startVoipSniffer(devices, filter, false)
+	})
 }
 
 func StartOfflineVoipSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, StartVoipSniffer)
+	capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startVoipSniffer(devices, filter, true)
+	})
 }
 
 func startProcessor(tracker *CallTracker, ch <-chan *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offlineMode ...bool) {

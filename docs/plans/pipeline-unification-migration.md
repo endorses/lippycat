@@ -651,6 +651,15 @@ reuse, normalized VIF delivery, and lossless capture-time-ordered VoIP replay.
 `make test`, focused race tests, and the `all`, `hunter`, `processor`, `tap`,
 `cli`, and `tui` non-CUDA build targets pass.
 
+Offline/sink remediation verification (2026-08-29): live and offline protocol
+starters now pass capture mode explicitly instead of inferring it from file
+names, so extensionless replay files retain replay provenance and EOF-driven
+control flow. Multi-file VoIP sniff replay uses the stable timestamp-ordered
+offline runner. DNS, TLS, HTTP, and email PCAP output now uses the shared
+normalized packet-sink contract, also reused by general sniff. Regression tests
+cover extensionless relative replay files, genuinely interleaved multi-file
+ordering, and preservation of normalized PCAP metadata.
+
 ### Exit Criteria
 
 - All five modes use normalized ingress and shared pipeline components.

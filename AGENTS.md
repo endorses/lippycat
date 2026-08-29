@@ -48,6 +48,7 @@ This architecture allows for:
   - `internal/pkg/detector/`: Protocol detection with signature-based matching
   - `internal/pkg/vinterface/`: Virtual TAP/TUN interface for exposing filtered streams
   - `internal/pkg/simd/`: SIMD optimizations (AVX2/SSE4.2)
+  - `internal/pkg/gpuaccel/`: Protocol-neutral GPU/SIMD pattern-matching backends
   - `internal/pkg/ahocorasick/`: Aho-Corasick pattern matching
   - `internal/pkg/phonematcher/`: Phone number matching (Bloom filter + suffix)
   - `internal/pkg/logger/`: Structured logging

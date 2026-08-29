@@ -127,16 +127,6 @@ func (v *VoIPProtocol) ProcessPacket(ctx context.Context, packet gopacket.Packet
 	return nil, nil
 }
 
-// extractCallID remains as a compatibility seam for analyzer callers while SIP
-// interpretation is owned by the shared parser.
-func extractCallID(payload string) string {
-	event, err := sharedsip.Parse([]byte(payload), sharedsip.ParseOptions{})
-	if err != nil {
-		return ""
-	}
-	return event.CallID
-}
-
 // Initialize sets up the VoIP analyzer
 func (v *VoIPProtocol) Initialize(config map[string]interface{}) error {
 	v.enabled.Store(true)

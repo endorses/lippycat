@@ -230,12 +230,6 @@ func (m *Manager) SetDNSMetadataProvider(provider DNSMetadataProvider) {
 	m.dnsMetadataProvider = provider
 }
 
-// SetVoIPFilter is a deprecated alias for SetApplicationFilter
-// Maintained for backward compatibility
-func (m *Manager) SetVoIPFilter(filter ApplicationFilter) {
-	m.SetApplicationFilter(filter)
-}
-
 // HandleFlowControl updates flow control state based on processor signals
 func (m *Manager) HandleFlowControl(ctrl *data.StreamControl) {
 	oldState := data.FlowControl(m.flowControlState.Load())

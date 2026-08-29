@@ -161,7 +161,11 @@ func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 	case h.packetChan <- source.InjectedPacket{PacketInfo: pkt, Metadata: pbMetadata, AfterProcess: afterProcess}:
 		// Sent successfully
 	default:
-		// Channel full - log warning but continue
+		// The packet cannot reach processor output, so finish any deferred
+		// lifecycle transition on this deterministic drop path.
+		if afterProcess != nil {
+			afterProcess()
+		}
 		logger.Warn("TCP packet channel full, dropping SIP message",
 			"call_id", SanitizeCallIDForLogging(callID))
 	}

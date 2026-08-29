@@ -99,6 +99,46 @@ func TestDroppedBatchRunsDeferredCompletion(t *testing.T) {
 	require.Equal(t, int32(1), completions.Load())
 }
 
+func TestFilteredInjectedPacketRunsDeferredCompletion(t *testing.T) {
+	cfg := DefaultLocalSourceConfig()
+	s := NewLocalSource(cfg)
+	s.SetApplicationFilter(&mockAppFilter{matchAll: false})
+	ctx, cancel := context.WithCancel(context.Background())
+	s.ctx = ctx
+	injected := make(chan InjectedPacket, 1)
+	s.SetTCPInjectionChannel(injected)
+	input := make(chan capture.PacketInfo)
+	done := make(chan struct{})
+	go func() {
+		s.batchingWorker(input)
+		close(done)
+	}()
+
+	var completions atomic.Int32
+	injected <- InjectedPacket{
+		PacketInfo: buildTCPPacket(t, 1),
+		Metadata: &data.PacketMetadata{Sip: &data.SIPMetadata{
+			CallId: "filtered-terminal",
+		}},
+		AfterProcess: func() { completions.Add(1) },
+	}
+
+	require.Eventually(t, func() bool { return completions.Load() == 1 }, time.Second, time.Millisecond)
+	select {
+	case batch := <-s.Batches():
+		t.Fatalf("filtered packet unexpectedly produced batch: %+v", batch)
+	default:
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batching worker did not stop")
+	}
+	require.Equal(t, int32(1), completions.Load())
+}
+
 func TestNewLocalSource_PreservesCustomConfig(t *testing.T) {
 	cfg := LocalSourceConfig{
 		Interfaces:   []string{"eth0", "eth1"},

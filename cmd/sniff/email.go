@@ -3,6 +3,8 @@
 package sniff
 
 import (
+	"fmt"
+
 	"github.com/endorses/lippycat/internal/pkg/email"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/spf13/cobra"
@@ -117,6 +119,61 @@ var (
 	emailMaxBodySize int
 )
 
+var emailSpec = ProtocolSpec{
+	Name: "email",
+	BuildBPF: func(baseFilter string) (string, error) {
+		protocol := viper.GetString("email.protocol")
+		if protocol == "" {
+			protocol = "all"
+		}
+		parse := func(key string, defaults []uint16) ([]uint16, error) {
+			ports, err := email.ParsePorts(viper.GetString(key))
+			if err != nil {
+				return nil, err
+			}
+			if len(ports) == 0 {
+				return defaults, nil
+			}
+			return ports, nil
+		}
+		var ports []uint16
+		var err error
+		switch protocol {
+		case "smtp":
+			ports, err = parse("email.smtp_ports", email.DefaultSMTPPorts)
+		case "imap":
+			ports, err = parse("email.imap_ports", email.DefaultIMAPPorts)
+		case "pop3":
+			ports, err = parse("email.pop3_ports", email.DefaultPOP3Ports)
+		case "all":
+			for _, entry := range []struct {
+				key      string
+				defaults []uint16
+			}{
+				{"email.smtp_ports", email.DefaultSMTPPorts},
+				{"email.imap_ports", email.DefaultIMAPPorts},
+				{"email.pop3_ports", email.DefaultPOP3Ports},
+			} {
+				parsed, parseErr := parse(entry.key, entry.defaults)
+				if parseErr != nil {
+					// Preserve the previous all-protocol behavior: an invalid
+					// individual port list falls back to that protocol's defaults.
+					parsed = entry.defaults
+				}
+				ports = append(ports, parsed...)
+			}
+		default:
+			return "", fmt.Errorf("invalid protocol %q (valid: smtp, imap, pop3, all)", protocol)
+		}
+		if err != nil {
+			return "", fmt.Errorf("invalid %s port specification: %w", protocol, err)
+		}
+		return email.NewFilterBuilder().Build(email.FilterConfig{Ports: ports, Protocol: protocol, BaseFilter: baseFilter}), nil
+	},
+	StartLive:  email.StartLiveEmailSniffer,
+	StartFiles: email.StartOfflineEmailSniffer,
+}
+
 func emailHandler(cmd *cobra.Command, args []string) {
 	// Set email configuration values
 	if cmd.Flags().Changed("address") {
@@ -217,79 +274,15 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		logger.Info("Loaded keywords from file", "count", len(keywords), "file", emailKeywordsFile)
 	}
 
-	// Determine protocol and ports
 	protocol := viper.GetString("email.protocol")
 	if protocol == "" {
 		protocol = "all"
 	}
-
-	// Build port list based on protocol selection
-	var ports []uint16
-	switch protocol {
-	case "smtp":
-		parsed, err := email.ParsePorts(viper.GetString("email.smtp_ports"))
-		if err != nil {
-			logger.Error("Invalid SMTP port specification", "error", err)
-			return
-		}
-		ports = parsed
-	case "imap":
-		parsed, err := email.ParsePorts(viper.GetString("email.imap_ports"))
-		if err != nil {
-			logger.Error("Invalid IMAP port specification", "error", err)
-			return
-		}
-		if len(parsed) == 0 {
-			ports = email.DefaultIMAPPorts
-		} else {
-			ports = parsed
-		}
-	case "pop3":
-		parsed, err := email.ParsePorts(viper.GetString("email.pop3_ports"))
-		if err != nil {
-			logger.Error("Invalid POP3 port specification", "error", err)
-			return
-		}
-		if len(parsed) == 0 {
-			ports = email.DefaultPOP3Ports
-		} else {
-			ports = parsed
-		}
-	case "all":
-		// Combine all protocol ports
-		var allPorts []uint16
-		smtpParsed, err := email.ParsePorts(viper.GetString("email.smtp_ports"))
-		if err == nil && len(smtpParsed) > 0 {
-			allPorts = append(allPorts, smtpParsed...)
-		} else {
-			allPorts = append(allPorts, email.DefaultSMTPPorts...)
-		}
-		imapParsed, err := email.ParsePorts(viper.GetString("email.imap_ports"))
-		if err == nil && len(imapParsed) > 0 {
-			allPorts = append(allPorts, imapParsed...)
-		} else {
-			allPorts = append(allPorts, email.DefaultIMAPPorts...)
-		}
-		pop3Parsed, err := email.ParsePorts(viper.GetString("email.pop3_ports"))
-		if err == nil && len(pop3Parsed) > 0 {
-			allPorts = append(allPorts, pop3Parsed...)
-		} else {
-			allPorts = append(allPorts, email.DefaultPOP3Ports...)
-		}
-		ports = allPorts
-	default:
-		logger.Error("Invalid protocol", "protocol", protocol, "valid", "smtp, imap, pop3, all")
+	effectiveFilter, err := emailSpec.BuildBPF(filter)
+	if err != nil {
+		logger.Error("Invalid email filter configuration", "protocol", protocol, "error", err)
 		return
 	}
-
-	// Build email filter
-	filterBuilder := email.NewFilterBuilder()
-	filterConfig := email.FilterConfig{
-		Ports:      ports,
-		Protocol:   protocol,
-		BaseFilter: filter,
-	}
-	effectiveFilter := filterBuilder.Build(filterConfig)
 
 	logger.Info("Starting Email sniffing",
 		"interfaces", interfaces,
@@ -302,14 +295,7 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		"track_sessions", emailTrackSessions)
 
 	// Start email sniffer using appropriate mode
-	readFiles := collectReadFiles(readFile, args)
-	withStructuredLogs(func() {
-		if len(readFiles) == 0 {
-			email.StartLiveEmailSniffer(interfaces, effectiveFilter)
-		} else {
-			email.StartOfflineEmailSniffer(readFiles, effectiveFilter)
-		}
-	})
+	runProtocol(cmd, args, emailSpec)
 }
 
 func init() {

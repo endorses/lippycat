@@ -147,28 +147,13 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (reuse flags from parent command)
-	config := hunter.Config{
-		ProcessorAddr:    cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),
-		HunterID:         cmdutil.GetStringConfig("hunter.hunter_id", hunterID),
-		Interfaces:       cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),
-		BPFFilter:        effectiveBPFFilter,
-		BufferSize:       cmdutil.GetIntConfig("hunter.buffer_size", bufferSize),
-		BatchSize:        cmdutil.GetIntConfig("hunter.batch_size", batchSize),
-		BatchTimeout:     time.Duration(cmdutil.GetIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BatchQueueSize:   cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
-		VoIPMode:         true, // VoIP hunter mode (with call buffering)
-		EnableVoIPFilter: true, // Always enable VoIP filtering in voip mode
-		GPUBackend:       GetGPUConfig().GPUBackend,
-		GPUBatchSize:     GetGPUConfig().GPUBatchSize,
-		// TLS configuration (enabled by default unless --insecure is set)
-		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:   cmdutil.GetStringConfig("hunter.tls.cert_file", tlsCertFile),
-		TLSKeyFile:    cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),
-		TLSCAFile:     cmdutil.GetStringConfig("hunter.tls.ca_file", tlsCAFile),
-		TLSSkipVerify: cmdutil.GetBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
-		// Filter policy
-		NoFilterPolicy: cmdutil.GetStringConfig("hunter.no_filter_policy", noFilterPolicy),
-	}
+	config := buildHunterConfig(hunterConfigSpec{
+		bpfFilter:           effectiveBPFFilter,
+		voIPMode:            true,
+		enableVoIPFilter:    true,
+		useGPUFlag:          true,
+		includeFilterPolicy: true,
+	})
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {

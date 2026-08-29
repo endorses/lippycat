@@ -3,6 +3,8 @@
 package sniff
 
 import (
+	"fmt"
+
 	"github.com/endorses/lippycat/internal/pkg/http"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tls"
@@ -114,6 +116,19 @@ var (
 	httpTLSKeylogPipe string
 )
 
+var httpSpec = ProtocolSpec{
+	Name: "http",
+	BuildBPF: func(baseFilter string) (string, error) {
+		ports, err := http.ParsePorts(httpPorts)
+		if err != nil {
+			return "", fmt.Errorf("invalid HTTP port specification: %w", err)
+		}
+		return http.NewFilterBuilder().Build(http.FilterConfig{Ports: ports, BaseFilter: baseFilter}), nil
+	},
+	StartLive:  http.StartLiveHTTPSniffer,
+	StartFiles: http.StartOfflineHTTPSniffer,
+}
+
 func httpHandler(cmd *cobra.Command, args []string) {
 	// Set HTTP configuration values
 	if cmd.Flags().Changed("host") {
@@ -207,20 +222,6 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		logger.Info("Loaded keywords from file", "count", len(keywords), "file", httpKeywordsFile)
 	}
 
-	// Build HTTP filter
-	filterBuilder := http.NewFilterBuilder()
-	ports, err := http.ParsePorts(httpPorts)
-	if err != nil {
-		logger.Error("Invalid HTTP port specification", "error", err)
-		return
-	}
-
-	filterConfig := http.FilterConfig{
-		Ports:      ports,
-		BaseFilter: filter,
-	}
-	effectiveFilter := filterBuilder.Build(filterConfig)
-
 	// Configure TLS decryption if specified
 	tlsKeylogPath := httpTLSKeylog
 	if tlsKeylogPath == "" {
@@ -241,7 +242,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 
 	logger.Info("Starting HTTP sniffing",
 		"interfaces", interfaces,
-		"filter", effectiveFilter,
+		"filter", filter,
 		"host_pattern", httpHostPattern,
 		"path_pattern", httpPathPattern,
 		"methods", httpMethods,
@@ -250,14 +251,7 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		"tls_decryption", tlsKeylogPath != "")
 
 	// Start HTTP sniffer using appropriate mode
-	readFiles := collectReadFiles(readFile, args)
-	withStructuredLogs(func() {
-		if len(readFiles) == 0 {
-			http.StartLiveHTTPSniffer(interfaces, effectiveFilter)
-		} else {
-			http.StartOfflineHTTPSniffer(readFiles, effectiveFilter)
-		}
-	})
+	runProtocol(cmd, args, httpSpec)
 }
 
 func init() {

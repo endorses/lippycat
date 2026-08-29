@@ -703,14 +703,25 @@ tag-specific features remain behind existing tagged factories and stubs.
 
 ### Tasks
 
-- [ ] Extract hunter configuration construction and compare generated configs
+- [x] Extract hunter configuration construction and compare generated configs
       against existing command fixtures.
-- [ ] Extract shared tap runtime construction.
-- [ ] Extract shared sniff runtime construction.
-- [ ] Convert each protocol subcommand to flags plus a `ProtocolSpec`.
-- [ ] Snapshot and compare help text, flag defaults, Viper keys, and examples.
-- [ ] Keep command packages as composition roots; do not move Cobra or Viper into
+- [x] Extract shared tap runtime construction.
+- [x] Extract shared sniff runtime construction.
+- [x] Convert each protocol subcommand to flags plus a `ProtocolSpec`.
+- [x] Snapshot and compare help text, flag defaults, Viper keys, and examples.
+- [x] Keep command packages as composition roots; do not move Cobra or Viper into
       internal analyzers.
+
+Implementation verification (2026-08-29): hunter configuration is constructed
+from table-driven protocol specifications and checked against configuration
+fixtures. Sniff protocol commands share ingress selection and BPF construction;
+tap protocol commands share processor, local-source, filtering, application
+filter, and lifecycle construction while VoIP supplies its specialized
+reassembly start hook. Cobra flags and Viper bindings remain in the command
+packages. CLI contract tests snapshot protocol help/examples, flag names and
+defaults, Viper keys, and stable protocol names. `make test`, focused command
+vet and race tests, the dedicated LI command/package tests, and all supported
+non-CUDA build variants pass.
 
 ### Exit Criteria
 

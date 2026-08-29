@@ -3,6 +3,8 @@
 package sniff
 
 import (
+	"fmt"
+
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
@@ -53,6 +55,19 @@ var (
 	tlsTrackConns bool
 	tlsWriteFile  string
 )
+
+var tlsSpec = ProtocolSpec{
+	Name: "tls",
+	BuildBPF: func(baseFilter string) (string, error) {
+		ports, err := tls.ParsePorts(tlsPorts)
+		if err != nil {
+			return "", fmt.Errorf("invalid TLS port specification: %w", err)
+		}
+		return tls.NewFilterBuilder().Build(tls.FilterConfig{Ports: ports, BaseFilter: baseFilter}), nil
+	},
+	StartLive:  tls.StartLiveTLSSniffer,
+	StartFiles: tls.StartOfflineTLSSniffer,
+}
 
 func tlsHandler(cmd *cobra.Command, args []string) {
 	// Set TLS configuration values
@@ -134,23 +149,9 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		logger.Info("Loaded JA4 fingerprints from file", "count", len(fingerprints), "file", tlsJA4File)
 	}
 
-	// Build TLS filter
-	filterBuilder := tls.NewFilterBuilder()
-	ports, err := tls.ParsePorts(tlsPorts)
-	if err != nil {
-		logger.Error("Invalid TLS port specification", "error", err)
-		return
-	}
-
-	filterConfig := tls.FilterConfig{
-		Ports:      ports,
-		BaseFilter: filter,
-	}
-	effectiveFilter := filterBuilder.Build(filterConfig)
-
 	logger.Info("Starting TLS sniffing",
 		"interfaces", interfaces,
-		"filter", effectiveFilter,
+		"filter", filter,
 		"sni_pattern", tlsSNIPattern,
 		"sni_file", tlsSNIFile,
 		"ja3", tlsJA3 != "",
@@ -159,14 +160,7 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		"track_connections", tlsTrackConns)
 
 	// Start TLS sniffer using appropriate mode
-	readFiles := collectReadFiles(readFile, args)
-	withStructuredLogs(func() {
-		if len(readFiles) == 0 {
-			tls.StartLiveTLSSniffer(interfaces, effectiveFilter)
-		} else {
-			tls.StartOfflineTLSSniffer(readFiles, effectiveFilter)
-		}
-	})
+	runProtocol(cmd, args, tlsSpec)
 }
 
 func init() {

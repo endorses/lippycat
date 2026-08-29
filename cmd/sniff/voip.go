@@ -67,6 +67,37 @@ var (
 	// (defined in sniff.go as PersistentFlags)
 )
 
+var voipSpec = ProtocolSpec{
+	Name: "voip",
+	BuildBPF: func(baseFilter string) (string, error) {
+		udpOnly := viper.GetBool("voip.udp_only")
+		sipPorts := viper.GetString("voip.sip_ports")
+		rtpRanges := viper.GetString("voip.rtp_port_ranges")
+		if sipPorts == "" && !udpOnly {
+			logger.Warn("No --sip-port specified: capturing all TCP traffic for SIP detection")
+			logger.Warn("For better performance, use: --sip-port 5060 (or your SIP port)")
+		}
+		if !udpOnly && sipPorts == "" && rtpRanges == "" {
+			return baseFilter, nil
+		}
+		parsedSIPPorts, err := voip.ParsePorts(sipPorts)
+		if err != nil {
+			return "", fmt.Errorf("invalid --sip-port value: %w", err)
+		}
+		parsedRTPRanges, err := voip.ParsePortRanges(rtpRanges)
+		if err != nil {
+			return "", fmt.Errorf("invalid --rtp-port-range value: %w", err)
+		}
+		effective := voip.NewVoIPFilterBuilder().Build(voip.VoIPFilterConfig{
+			SIPPorts: parsedSIPPorts, RTPPortRanges: parsedRTPRanges, UDPOnly: udpOnly, BaseFilter: baseFilter,
+		})
+		logger.Info("VoIP BPF filter optimization enabled", "udp_only", udpOnly, "sip_ports", sipPorts, "rtp_port_ranges", rtpRanges, "effective_filter", effective)
+		return effective, nil
+	},
+	StartLive:  voip.StartLiveVoipSniffer,
+	StartFiles: voip.StartOfflineVoipSniffer,
+}
+
 func voipHandler(cmd *cobra.Command, args []string) {
 	expirationDate := time.Date(1, 1, 1, 1, 1, 1, 1, time.UTC)
 	su := sipusers.SipUser{ExpirationDate: expirationDate}
@@ -151,53 +182,6 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	// They are automatically bound to viper via sniff.go init()
 	// Read from sniff.* namespace (not voip.* namespace)
 
-	// Build optimized BPF filter using VoIPFilterBuilder
-	effectiveFilter := filter // Start with the base --filter value
-
-	// Parse BPF filter optimization flags (from flags or viper config)
-	voipUDPOnly := viper.GetBool("voip.udp_only")
-	voipSIPPorts := viper.GetString("voip.sip_ports")
-	voipRTPPortRanges := viper.GetString("voip.rtp_port_ranges")
-
-	// Warn if no SIP port filter is specified - all TCP will be captured
-	if voipSIPPorts == "" && !voipUDPOnly {
-		logger.Warn("No --sip-port specified: capturing all TCP traffic for SIP detection")
-		logger.Warn("For better performance, use: --sip-port 5060 (or your SIP port)")
-	}
-
-	// Only build VoIP filter if any optimization flags are set
-	if voipUDPOnly || voipSIPPorts != "" || voipRTPPortRanges != "" {
-		// Parse SIP ports
-		parsedSIPPorts, err := voip.ParsePorts(voipSIPPorts)
-		if err != nil {
-			logger.Error("Invalid --sip-port value", "error", err)
-			return
-		}
-
-		// Parse RTP port ranges
-		parsedRTPRanges, err := voip.ParsePortRanges(voipRTPPortRanges)
-		if err != nil {
-			logger.Error("Invalid --rtp-port-range value", "error", err)
-			return
-		}
-
-		// Build optimized filter
-		builder := voip.NewVoIPFilterBuilder()
-		filterConfig := voip.VoIPFilterConfig{
-			SIPPorts:      parsedSIPPorts,
-			RTPPortRanges: parsedRTPRanges,
-			UDPOnly:       voipUDPOnly,
-			BaseFilter:    filter,
-		}
-		effectiveFilter = builder.Build(filterConfig)
-
-		logger.Info("VoIP BPF filter optimization enabled",
-			"udp_only", voipUDPOnly,
-			"sip_ports", voipSIPPorts,
-			"rtp_port_ranges", voipRTPPortRanges,
-			"effective_filter", effectiveFilter)
-	}
-
 	logger.Info("Starting VoIP sniffing with optimizations",
 		"gpu_enable", viper.GetBool("voip.gpu_enable"),
 		"gpu_backend", viper.GetString("voip.gpu_backend"),
@@ -217,14 +201,7 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	// The VoIP package deliberately has no dependency on Viper.
 	voip.SetConfig(loadVoIPLibraryConfig())
 
-	readFiles := collectReadFiles(readFile, args)
-	withStructuredLogs(func() {
-		if len(readFiles) == 0 {
-			voip.StartLiveVoipSniffer(interfaces, effectiveFilter)
-		} else {
-			voip.StartOfflineVoipSniffer(readFiles, effectiveFilter)
-		}
-	})
+	runProtocol(cmd, args, voipSpec)
 }
 
 func loadVoIPLibraryConfig() *voip.Config {

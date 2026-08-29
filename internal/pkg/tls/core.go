@@ -3,6 +3,7 @@
 package tls
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,10 +15,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/pcapsink"
 	"github.com/endorses/lippycat/internal/pkg/types"
-	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/viper"
 )
 
@@ -27,12 +27,15 @@ var (
 	tlsTracker       *Tracker
 	tlsAggregator    *Aggregator
 	tlsContentFilter *ContentFilter
-	tlsPcapWriter    *pcapgo.Writer
-	tlsOutputFile    *os.File
+	tlsPacketSink    pipeline.PacketSink
 )
 
 // StartTLSSniffer starts the TLS sniffer on the specified interfaces.
 func StartTLSSniffer(devices []pcaptypes.PcapInterface, filter string) {
+	startTLSSniffer(devices, filter, false)
+}
+
+func startTLSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
 	logger.Info("Starting TLS sniffer",
 		"device_count", len(devices),
 		"filter", filter)
@@ -51,30 +54,14 @@ func StartTLSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	// Initialize content filter
 	tlsContentFilter = buildContentFilter()
 
-	// PCAP writer if output file specified
+	// PCAP sink if output file specified
 	if writeFile := viper.GetString("tls.write_file"); writeFile != "" {
 		var err error
-		tlsOutputFile, err = os.Create(writeFile)
+		tlsPacketSink, err = pcapsink.New(writeFile)
 		if err != nil {
 			logger.Error("Failed to create output file", "error", err, "file", writeFile)
 		} else {
-			tlsPcapWriter = pcapgo.NewWriter(tlsOutputFile)
-			if err := tlsPcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-				logger.Error("Failed to write PCAP header", "error", err)
-				tlsPcapWriter = nil
-			} else {
-				logger.Info("Writing TLS packets to file", "file", writeFile)
-			}
-		}
-	}
-
-	// Detect offline mode
-	isOffline := false
-	for _, dev := range devices {
-		name := dev.Name()
-		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
-			isOffline = true
-			break
+			logger.Info("Writing TLS packets to file", "file", writeFile)
 		}
 	}
 
@@ -158,15 +145,9 @@ func processTLSEnvelope(env *pipeline.PacketEnvelope) {
 		}
 
 		// Write to PCAP if configured
-		if tlsPcapWriter != nil {
-			ci := gopacket.CaptureInfo{
-				Timestamp:      packet.Metadata().Timestamp,
-				CaptureLength:  len(packet.Data()),
-				Length:         len(packet.Data()),
-				InterfaceIndex: 0,
-			}
-			if err := tlsPcapWriter.WritePacket(ci, packet.Data()); err != nil {
-				logger.Error("Failed to write packet to PCAP", "error", err)
+		if tlsPacketSink != nil {
+			if result := tlsPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
+				logger.Error("TLS PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
 			}
 		}
 	}
@@ -216,10 +197,11 @@ func cleanup() {
 	if tlsTracker != nil {
 		tlsTracker.Stop()
 	}
-	if tlsOutputFile != nil {
-		if err := tlsOutputFile.Close(); err != nil {
-			logger.Error("Failed to close output file", "error", err)
+	if tlsPacketSink != nil {
+		if err := tlsPacketSink.Close(context.Background()); err != nil {
+			logger.Error("Failed to close TLS PCAP sink", "error", err)
 		}
+		tlsPacketSink = nil
 	}
 }
 
@@ -327,12 +309,16 @@ func printTLSPacket(pkt *types.PacketDisplay, metadata *types.TLSMetadata) {
 
 // StartLiveTLSSniffer starts TLS capture on live network interfaces.
 func StartLiveTLSSniffer(interfaces, filter string) {
-	capture.StartLiveSniffer(interfaces, filter, StartTLSSniffer)
+	capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startTLSSniffer(devices, filter, false)
+	})
 }
 
 // StartOfflineTLSSniffer starts TLS capture from a PCAP file.
 func StartOfflineTLSSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, StartTLSSniffer)
+	capture.StartOfflineSniffer(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startTLSSniffer(devices, filter, true)
+	})
 }
 
 // printStatistics prints capture statistics.

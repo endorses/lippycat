@@ -15,10 +15,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/pcapsink"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/viper"
 )
 
@@ -28,8 +28,7 @@ var (
 	httpTracker       *RequestTracker
 	httpAggregator    *RequestAggregator
 	httpContentFilter *ContentFilter
-	httpPcapWriter    *pcapgo.Writer
-	httpOutputFile    *os.File
+	httpPacketSink    pipeline.PacketSink
 	httpFactory       HTTPStreamFactory
 	httpAssembler     *pipeline.ReassemblyEngine
 	httpHandler       *cliHTTPHandler
@@ -99,6 +98,10 @@ func (h *cliHTTPHandler) HandleHTTPMessage(metadata *types.HTTPMetadata, session
 
 // StartHTTPSniffer starts the HTTP sniffer on the specified interfaces.
 func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
+	startHTTPSniffer(devices, filter, false)
+}
+
+func startHTTPSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
 	logger.Info("Starting HTTP sniffer",
 		"device_count", len(devices),
 		"filter", filter)
@@ -121,20 +124,14 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		logger.Info("HTTP content filter enabled")
 	}
 
-	// PCAP writer if output file specified
+	// PCAP sink if output file specified
 	if writeFile := viper.GetString("http.write_file"); writeFile != "" {
 		var err error
-		httpOutputFile, err = os.Create(writeFile)
+		httpPacketSink, err = pcapsink.New(writeFile)
 		if err != nil {
 			logger.Error("Failed to create output file", "error", err, "file", writeFile)
 		} else {
-			httpPcapWriter = pcapgo.NewWriter(httpOutputFile)
-			if err := httpPcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-				logger.Error("Failed to write PCAP header", "error", err)
-				httpPcapWriter = nil
-			} else {
-				logger.Info("Writing HTTP packets to file", "file", writeFile)
-			}
+			logger.Info("Writing HTTP packets to file", "file", writeFile)
 		}
 	}
 
@@ -180,16 +177,6 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 			logger.Error("HTTP reassembly engine stopped", "error", err)
 		}
 	}()
-
-	// Detect offline mode
-	isOffline := false
-	for _, dev := range devices {
-		name := dev.Name()
-		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
-			isOffline = true
-			break
-		}
-	}
 
 	// Create processor function
 	processor := func(packetChan <-chan capture.PacketInfo) {
@@ -251,15 +238,9 @@ func processHTTPEnvelope(env *pipeline.PacketEnvelope, asm *pipeline.ReassemblyE
 		}
 
 		// Write to PCAP if configured
-		if httpPcapWriter != nil {
-			ci := gopacket.CaptureInfo{
-				Timestamp:      packet.Metadata().Timestamp,
-				CaptureLength:  len(packet.Data()),
-				Length:         len(packet.Data()),
-				InterfaceIndex: 0,
-			}
-			if err := httpPcapWriter.WritePacket(ci, packet.Data()); err != nil {
-				logger.Error("Failed to write packet to PCAP", "error", err)
+		if httpPacketSink != nil {
+			if result := httpPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
+				logger.Error("HTTP PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
 			}
 		}
 	}
@@ -295,10 +276,11 @@ func cleanup() {
 	if httpTracker != nil {
 		httpTracker.Close()
 	}
-	if httpOutputFile != nil {
-		if err := httpOutputFile.Close(); err != nil {
-			logger.Error("Failed to close output file", "error", err)
+	if httpPacketSink != nil {
+		if err := httpPacketSink.Close(context.Background()); err != nil {
+			logger.Error("Failed to close HTTP PCAP sink", "error", err)
 		}
+		httpPacketSink = nil
 	}
 }
 
@@ -353,12 +335,16 @@ func printHTTPPacket(pkt *types.PacketDisplay, metadata *types.HTTPMetadata) {
 
 // StartLiveHTTPSniffer starts HTTP capture on live network interfaces.
 func StartLiveHTTPSniffer(interfaces, filter string) {
-	capture.StartLiveSniffer(interfaces, filter, StartHTTPSniffer)
+	capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startHTTPSniffer(devices, filter, false)
+	})
 }
 
 // StartOfflineHTTPSniffer starts HTTP capture from a PCAP file.
 func StartOfflineHTTPSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, StartHTTPSniffer)
+	capture.StartOfflineSniffer(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startHTTPSniffer(devices, filter, true)
+	})
 }
 
 // printStatistics prints capture statistics.

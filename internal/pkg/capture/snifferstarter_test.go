@@ -10,7 +10,10 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,6 +39,22 @@ func TestStartOfflineSniffer(t *testing.T) {
 	assert.NotNil(t, StartOfflineSniffer)
 }
 
+func TestStartOfflineSnifferExtensionlessRelativeFile(t *testing.T) {
+	file, err := os.CreateTemp(".", "snifferstarter-extensionless-")
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+	name := filepath.Base(file.Name())
+	t.Cleanup(func() { require.NoError(t, os.Remove(name)) })
+
+	called := false
+	StartOfflineSniffer([]string{name}, "", func(devices []pcaptypes.PcapInterface, _ string) {
+		called = true
+		require.Len(t, devices, 1)
+		require.Equal(t, name, devices[0].Name())
+	})
+	require.True(t, called)
+}
+
 func TestPacketInfo(t *testing.T) {
 	// Test PacketInfo struct can be created
 	var pkt PacketInfo
@@ -43,6 +62,60 @@ func TestPacketInfo(t *testing.T) {
 	assert.NotNil(t, &pkt)
 	// The struct should be usable even when empty
 	assert.Nil(t, pkt.Packet)
+}
+
+func TestRunOfflineOrderedSortsAcrossFiles(t *testing.T) {
+	base := time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC)
+	lateFile := writeTimestampedTestPCAP(t, []time.Time{base.Add(3 * time.Second), base.Add(4 * time.Second)})
+	earlyFile := writeTimestampedTestPCAP(t, []time.Time{base.Add(time.Second), base.Add(2 * time.Second)})
+
+	var devices []pcaptypes.PcapInterface
+	for _, name := range []string{lateFile, earlyFile} {
+		file, err := os.Open(name)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, file.Close()) })
+		devices = append(devices, pcaptypes.CreateOfflineInterface(file))
+	}
+
+	var got []int64
+	RunOfflineOrdered(devices, "", func(ch <-chan PacketInfo) {
+		for packet := range ch {
+			got = append(got, packet.Packet.Metadata().Timestamp.UnixNano())
+		}
+	})
+
+	require.Equal(t, []int64{
+		base.Add(time.Second).UnixNano(),
+		base.Add(2 * time.Second).UnixNano(),
+		base.Add(3 * time.Second).UnixNano(),
+		base.Add(4 * time.Second).UnixNano(),
+	}, got)
+}
+
+func writeTimestampedTestPCAP(t *testing.T, timestamps []time.Time) string {
+	t.Helper()
+	name := filepath.Join(t.TempDir(), "capture")
+	file, err := os.Create(name)
+	require.NoError(t, err)
+	writer := pcapgo.NewWriter(file)
+	require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+
+	ethernet := &layers.Ethernet{
+		SrcMAC:       []byte{0, 1, 2, 3, 4, 5},
+		DstMAC:       []byte{6, 7, 8, 9, 10, 11},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: []byte{192, 0, 2, 1}, DstIP: []byte{192, 0, 2, 2}}
+	udp := &layers.UDP{SrcPort: 1000, DstPort: 2000}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	for _, timestamp := range timestamps {
+		buffer := gopacket.NewSerializeBuffer()
+		require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, ethernet, ip, udp, gopacket.Payload("test")))
+		data := buffer.Bytes()
+		require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: timestamp, CaptureLength: len(data), Length: len(data)}, data))
+	}
+	require.NoError(t, file.Close())
+	return name
 }
 
 // mockPcapInterface implements pcaptypes.PcapInterface for testing

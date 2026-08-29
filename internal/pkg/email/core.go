@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -15,10 +14,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/pcapsink"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 	"github.com/google/gopacket/reassembly"
 	"github.com/spf13/viper"
 )
@@ -31,8 +30,7 @@ var (
 	emailTracker    *SessionTracker
 	imapTracker     *IMAPTracker
 	pop3Tracker     *POP3Tracker
-	emailPcapWriter *pcapgo.Writer
-	emailOutputFile *os.File
+	emailPacketSink pipeline.PacketSink
 	smtpFactory     reassembly.StreamFactory
 	imapFactory     reassembly.StreamFactory
 	pop3Factory     reassembly.StreamFactory
@@ -138,6 +136,10 @@ func FormatEmailInfo(metadata *types.EmailMetadata) string {
 
 // StartEmailSniffer starts the email sniffer on the specified interfaces.
 func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
+	startEmailSniffer(devices, filter, false)
+}
+
+func startEmailSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline bool) {
 	logger.Info("Starting Email sniffer",
 		"device_count", len(devices),
 		"filter", filter)
@@ -174,20 +176,14 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		}
 	}
 
-	// PCAP writer if output file specified
+	// PCAP sink if output file specified
 	if writeFile := viper.GetString("email.write_file"); writeFile != "" {
 		var err error
-		emailOutputFile, err = os.Create(writeFile)
+		emailPacketSink, err = pcapsink.New(writeFile)
 		if err != nil {
 			logger.Error("Failed to create output file", "error", err, "file", writeFile)
 		} else {
-			emailPcapWriter = pcapgo.NewWriter(emailOutputFile)
-			if err := emailPcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-				logger.Error("Failed to write PCAP header", "error", err)
-				emailPcapWriter = nil
-			} else {
-				logger.Info("Writing email packets to file", "file", writeFile)
-			}
+			logger.Info("Writing email packets to file", "file", writeFile)
 		}
 	}
 
@@ -220,16 +216,6 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		imapTracker:   imapTracker,
 		pop3Tracker:   pop3Tracker,
 		contentFilter: contentFilter,
-	}
-
-	// Detect offline mode
-	isOffline := false
-	for _, dev := range devices {
-		name := dev.Name()
-		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
-			isOffline = true
-			break
-		}
 	}
 
 	// Create processor function with TCP reassembly
@@ -372,15 +358,9 @@ func processEmailEnvelope(env *pipeline.PacketEnvelope, asm *pipeline.Reassembly
 		}
 
 		// Write to PCAP if configured
-		if emailPcapWriter != nil {
-			ci := gopacket.CaptureInfo{
-				Timestamp:      packet.Metadata().Timestamp,
-				CaptureLength:  len(packet.Data()),
-				Length:         len(packet.Data()),
-				InterfaceIndex: 0,
-			}
-			if err := emailPcapWriter.WritePacket(ci, packet.Data()); err != nil {
-				logger.Error("Failed to write packet to PCAP", "error", err)
+		if emailPacketSink != nil {
+			if result := emailPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
+				logger.Error("Email PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
 			}
 		}
 	}
@@ -401,10 +381,11 @@ func cleanup() {
 	}
 
 	// Close output file
-	if emailOutputFile != nil {
-		if err := emailOutputFile.Close(); err != nil {
-			logger.Error("Failed to close output file", "error", err)
+	if emailPacketSink != nil {
+		if err := emailPacketSink.Close(context.Background()); err != nil {
+			logger.Error("Failed to close email PCAP sink", "error", err)
 		}
+		emailPacketSink = nil
 	}
 
 	// Close factories
@@ -457,12 +438,16 @@ func printEmailPacket(pkt *types.PacketDisplay, metadata *types.EmailMetadata) {
 
 // StartLiveEmailSniffer starts email capture on live network interfaces.
 func StartLiveEmailSniffer(interfaces, filter string) {
-	capture.StartLiveSniffer(interfaces, filter, StartEmailSniffer)
+	capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startEmailSniffer(devices, filter, false)
+	})
 }
 
 // StartOfflineEmailSniffer starts email capture from a PCAP file.
 func StartOfflineEmailSniffer(readFiles []string, filter string) {
-	capture.StartOfflineSniffer(readFiles, filter, StartEmailSniffer)
+	capture.StartOfflineSniffer(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startEmailSniffer(devices, filter, true)
+	})
 }
 
 // printStatistics prints capture statistics.

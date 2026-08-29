@@ -6,12 +6,14 @@
 package processor
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -276,6 +278,23 @@ func (p *Processor) ProcessReassembledSIP(packet gopacket.Packet) *data.PacketMe
 		return nil
 	}
 	return result.Metadata
+}
+
+// ProcessReassembledSIPResult records an already parsed, reassembled TCP SIP
+// message in the processor registry. Tap's TCP framer has already run the
+// shared SIP parser and selection policy, so routing that result through
+// detectSIPWithCompletion would parse and select the same message a second
+// time.
+func (p *Processor) ProcessReassembledSIPResult(result pipeline.SIPResult) (*data.PacketMetadata, error) {
+	observation, err := (processorSIPRegistry{processor: p}).Observe(result)
+	if err != nil {
+		return nil, fmt.Errorf("observe reassembled SIP result: %w", err)
+	}
+	attachment, ok := observation.Attachment.(processorSIPAttachment)
+	if !ok {
+		return nil, fmt.Errorf("observe reassembled SIP result: unexpected attachment type %T", observation.Attachment)
+	}
+	return attachment.pbMetadata, nil
 }
 
 // processUDP processes a UDP packet for SIP/RTP content.

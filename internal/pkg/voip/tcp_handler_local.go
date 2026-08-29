@@ -1,7 +1,6 @@
 package voip
 
 import (
-	"context"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -107,8 +106,8 @@ func (h *LocalFileHandler) handleSIPMessage(sipMessage []byte, event *sharedsip.
 	}
 
 	analysis.Attachment = pkt
-	delivery := (sniffSink{tracker: h.tracker}).HandleSIP(context.Background(), sipflow.SinkInput{Result: analysis.SIP, Attachment: pkt})
-	if delivery.Outcome != pipeline.OutcomeAccepted {
+	delivery := flow.Dispatch(analysis)
+	if delivery.Sinks[sniffSIPSinkName].Outcome != pipeline.OutcomeAccepted {
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}

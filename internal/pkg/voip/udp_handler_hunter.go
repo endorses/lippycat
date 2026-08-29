@@ -182,24 +182,21 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	if network := packet.NetworkLayer(); network != nil {
 		opts.SourceIP, opts.DestinationIP = network.NetworkFlow().Src().String(), network.NetworkFlow().Dst().String()
 	}
-	directMatch := h.matchesFilter(packet, nil)
+	directMatch := h.appFilter != nil && h.matchesFilter(packet, nil)
 	analysis := h.orchestrator.Analyze(sipflow.Message{
 		Payload: payload, Envelope: envelopeForHunterPacket(pkt), ParseOptions: opts,
 		FilterConfigured: true, DirectMatch: directMatch,
+		Match: func(event sharedsip.Event) bool {
+			return h.appFilter == nil && containsUserInHeaders(event.Headers)
+		},
+		Validate: func(event sharedsip.Event) error {
+			return ValidateCallIDForSecurity(event.CallID)
+		},
 	})
 	if analysis.Stage.Outcome != pipeline.OutcomeAccepted {
 		return false
 	}
 	result, callID := analysis.SIP, analysis.SIP.CallID
-
-	// Validate Call-ID for security
-	if err := ValidateCallIDForSecurity(callID); err != nil {
-		logger.Warn("Malicious Call-ID detected and rejected",
-			"call_id", SanitizeCallIDForLogging(callID),
-			"error", err,
-			"source", "hunter_udp")
-		return false
-	}
 
 	// Create call locally for TUI display (before filter check)
 	// This ensures the TUI shows all calls, not just matched ones

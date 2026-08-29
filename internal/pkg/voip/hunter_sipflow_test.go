@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -125,6 +127,88 @@ func TestHunterTCPStickySelectionIncludesCancel(t *testing.T) {
 	cancel := []byte("CANCEL sip:b@example.test SIP/2.0\r\nCall-ID: cancelled\r\nCSeq: 2 CANCEL\r\nContent-Length: 0\r\n\r\n")
 	require.True(t, handler.HandleSIPMessageAt(cancel, "cancelled", "192.0.2.1:5060", "198.51.100.2:5060", netFlow, transportFlow, time.Unix(2, 0)))
 	require.Eventually(t, func() bool { return forwarder.count() == 2 }, time.Second, time.Millisecond)
+}
+
+func TestHunterTCPStickySelectionIncludesFinalByeResponse(t *testing.T) {
+	forwarder := &recordingHunterForwarder{}
+	buffers := NewBufferManager(time.Minute, 10)
+	t.Cleanup(buffers.Close)
+	handler := NewHunterForwardHandler(TestCallTracker(t), forwarder, buffers)
+	t.Cleanup(handler.Close)
+	filter := &mutablePayloadFilter{needle: "alice"}
+	handler.SetApplicationFilter(filter)
+	netFlow, transportFlow := hunterFlow(t)
+	invite := []byte("INVITE sip:b@example.test SIP/2.0\r\nFrom: <sip:alice@example.test>\r\nCall-ID: final-bye\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
+	require.True(t, handler.HandleSIPMessageAt(invite, "final-bye", "192.0.2.1:5060", "198.51.100.2:5060", netFlow, transportFlow, time.Unix(1, 0)))
+	filter.set("never-present")
+	bye := []byte("BYE sip:b@example.test SIP/2.0\r\nCall-ID: final-bye\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n")
+	require.True(t, handler.HandleSIPMessageAt(bye, "final-bye", "192.0.2.1:5060", "198.51.100.2:5060", netFlow, transportFlow, time.Unix(2, 0)))
+	response := []byte("SIP/2.0 200 OK\r\nCall-ID: final-bye\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n")
+	require.True(t, handler.HandleSIPMessageAt(response, "final-bye", "198.51.100.2:5060", "192.0.2.1:5060", netFlow, transportFlow, time.Unix(3, 0)))
+	require.Eventually(t, func() bool { return forwarder.count() == 3 }, time.Second, time.Millisecond)
+}
+
+func TestHunterTCPFallbackMatchesParsedHeaders(t *testing.T) {
+	sipusers.ClearAll()
+	sipusers.AddSipUser("alice", &sipusers.SipUser{})
+	t.Cleanup(sipusers.ClearAll)
+	forwarder := &recordingHunterForwarder{}
+	buffers := NewBufferManager(time.Minute, 10)
+	t.Cleanup(buffers.Close)
+	handler := NewHunterForwardHandler(TestCallTracker(t), forwarder, buffers)
+	t.Cleanup(handler.Close)
+	netFlow, transportFlow := hunterFlow(t)
+	message := []byte("INVITE sip:b@example.test SIP/2.0\r\nFrom: <sip:alice@example.test>\r\nCall-ID: fallback\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
+	require.True(t, handler.HandleSIPMessageAt(message, "fallback", "192.0.2.1:5060", "198.51.100.2:5060", netFlow, transportFlow, time.Unix(1, 0)))
+	require.Eventually(t, func() bool { return forwarder.count() == 1 }, time.Second, time.Millisecond)
+}
+
+type recordingSelectionPolicy struct {
+	mu     sync.Mutex
+	inputs []callregistry.SelectionInput
+}
+
+func (p *recordingSelectionPolicy) Select(input callregistry.SelectionInput) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.inputs = append(p.inputs, input)
+	return true
+}
+
+func (p *recordingSelectionPolicy) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.inputs)
+}
+
+func TestHunterUDPValidatesCallIDBeforeSelection(t *testing.T) {
+	forwarder := &recordingHunterForwarder{}
+	buffers := NewBufferManager(time.Minute, 10)
+	t.Cleanup(buffers.Close)
+	handler := NewUDPPacketHandler(TestCallTracker(t), forwarder, buffers)
+	t.Cleanup(handler.Close)
+	policy := &recordingSelectionPolicy{}
+	handler.SetSelectionPolicy(policy)
+	message := []byte("INVITE sip:b@example.test SIP/2.0\r\nFrom: <sip:alice@example.test>\r\nCall-ID: ../../invalid\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
+	packet := createUDPPacket(5060, 5060, message)
+	require.False(t, handler.HandleUDPPacket(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
+	require.Zero(t, policy.count(), "security validation must run before selection policy and sticky state mutation")
+}
+
+func TestHunterUDPFallbackMatchesParsedHeaders(t *testing.T) {
+	sipusers.ClearAll()
+	sipusers.AddSipUser("alice", &sipusers.SipUser{})
+	t.Cleanup(sipusers.ClearAll)
+	forwarder := &recordingHunterForwarder{}
+	buffers := NewBufferManager(time.Minute, 10)
+	t.Cleanup(buffers.Close)
+	handler := NewUDPPacketHandler(TestCallTracker(t), forwarder, buffers)
+	t.Cleanup(handler.Close)
+	sdp := "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 20000 RTP/AVP 0\r\n"
+	message := []byte(fmt.Sprintf("INVITE sip:b@example.test SIP/2.0\r\nFrom: <sip:alice@example.test>\r\nCall-ID: udp-fallback\r\nCSeq: 1 INVITE\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s", len(sdp), sdp))
+	packet := createUDPPacket(5060, 5060, message)
+	require.True(t, handler.HandleUDPPacket(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
+	require.Eventually(t, func() bool { return forwarder.count() == 1 }, time.Second, time.Millisecond)
 }
 
 func TestHunterUDPBuffersUntilSDPThenForwardsStickyDialog(t *testing.T) {

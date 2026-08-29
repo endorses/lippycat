@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
@@ -32,15 +33,13 @@ type targetSubstringFilter struct {
 type recordingSDPRegistrar struct {
 	calls     map[string]string
 	completed []string
+	results   []pipeline.SIPResult
 }
 
-func (r *recordingSDPRegistrar) ProcessReassembledSIP(packet gopacket.Packet) *data.PacketMetadata {
-	event, err := sharedsip.Parse(packet.ApplicationLayer().LayerContents(), sharedsip.ParseOptions{})
-	if err != nil {
-		return nil
-	}
-	r.calls[event.CallID] = string(event.SDP)
-	return &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: event.CallID, Method: event.Method, CseqMethod: event.CSeqMethod, ResponseCode: uint32(event.ResponseCode)}}
+func (r *recordingSDPRegistrar) ProcessReassembledSIPResult(result pipeline.SIPResult) (*data.PacketMetadata, error) {
+	r.results = append(r.results, result)
+	r.calls[result.CallID] = string(result.SDP)
+	return &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: result.CallID, Method: result.Method, CseqMethod: result.CSeqMethod, ResponseCode: uint32(result.ResponseCode)}}, nil
 }
 func (r *recordingSDPRegistrar) CompleteCall(callID string) {
 	r.completed = append(r.completed, callID)
@@ -96,6 +95,41 @@ func (f *targetSubstringFilter) MatchPacket(pkt gopacket.Packet) bool {
 	}
 	f.seen = append(f.seen, payload)
 	return strings.Contains(payload, f.target)
+}
+
+func TestTapTCPHandlerReusesFramedSIPResultForRegistry(t *testing.T) {
+	ch := make(chan source.InjectedPacket, 1)
+	h := NewTapTCPHandler(ch)
+	h.SetApplicationFilter(&targetSubstringFilter{target: "not-valid-sip"})
+	registrar := &recordingSDPRegistrar{calls: make(map[string]string)}
+	h.SetCallRegistry(registrar)
+
+	event := sharedsip.Event{
+		Timestamp:  time.Unix(1700000000, 0),
+		CallID:     "parsed-once",
+		Method:     "INVITE",
+		CSeqMethod: "INVITE",
+		FromUser:   "alice",
+		ToUser:     "bob",
+		SDP:        []byte("m=audio 10000 RTP/AVP 0\r\n"),
+	}
+	// The framer supplies the parsed event. Deliberately use bytes that cannot be
+	// parsed as SIP: a nested processor parse would reject this message.
+	if !h.HandleParsedSIPMessage([]byte("not-valid-sip"), event, "10.0.0.1:5060", "10.0.0.2:5060",
+		testNetFlow(t, "10.0.0.1", "10.0.0.2"), testTransportFlow(t, 5060, 5060)) {
+		t.Fatal("pre-parsed SIP event was not accepted")
+	}
+	if len(registrar.results) != 1 {
+		t.Fatalf("registry received %d results, want 1", len(registrar.results))
+	}
+	got := registrar.results[0]
+	if got.CallID != event.CallID || got.Method != event.Method || got.FromUser != event.FromUser || string(got.SDP) != string(event.SDP) {
+		t.Fatalf("registry result = %+v, want framed event %+v", got, event)
+	}
+	injected := <-ch
+	if injected.Metadata == nil || injected.Metadata.Sip == nil || injected.Metadata.Sip.CallId != event.CallID {
+		t.Fatalf("injected metadata = %+v, want Call-ID %q", injected.Metadata, event.CallID)
+	}
 }
 
 // testNetFlow builds an IPv4 network-layer flow for the given dotted-quad IPs.

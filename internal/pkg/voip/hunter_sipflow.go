@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket/layers"
 )
@@ -74,6 +75,16 @@ func (s *hunterSelectionStore) Forget(callID string) {
 
 type hunterForwardSink struct{ forwarder PacketForwarder }
 
+// hunterDialogCompletionPolicy retains sticky selection after a BYE/CANCEL
+// request so the corresponding final response is still forwarded. The generic
+// sipflow policy also completes on the request, which is appropriate for sinks
+// that do not need to observe the response but not for a forwarding hunter.
+type hunterDialogCompletionPolicy struct{}
+
+func (hunterDialogCompletionPolicy) Completes(event sharedsip.Event) bool {
+	return event.ResponseCode >= 200 && (event.CSeqMethod == "BYE" || event.CSeqMethod == "CANCEL")
+}
+
 func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInput) pipeline.Result {
 	if err := ctx.Err(); err != nil {
 		return pipeline.Result{Outcome: pipeline.OutcomeShutdown, DropReason: pipeline.DropShutdown, Err: err}
@@ -99,7 +110,11 @@ func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInpu
 }
 
 func newHunterSIPOrchestrator(forwarder PacketForwarder, policy callregistry.SelectionPolicy) *sipflow.Orchestrator {
-	orchestrator, err := sipflow.New(sipflow.Config{SelectionStore: newHunterSelectionStore(), SelectionPolicy: policy})
+	orchestrator, err := sipflow.New(sipflow.Config{
+		SelectionStore:  newHunterSelectionStore(),
+		SelectionPolicy: policy,
+		Completion:      hunterDialogCompletionPolicy{},
+	})
 	if err != nil {
 		panic(err) // the static hunter composition is programmer-owned
 	}

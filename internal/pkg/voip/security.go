@@ -119,11 +119,13 @@ func ValidateCallIDForSecurity(callID string) error {
 // ValidateContentLength validates Content-Length header values for security
 // This prevents DoS attacks via excessive memory allocation
 func ValidateContentLength(contentLength int) error {
+	return validateContentLength(contentLength, *GetSecurityConfig())
+}
+
+func validateContentLength(contentLength int, config SecurityConfig) error {
 	if contentLength < 0 {
 		return fmt.Errorf("negative Content-Length not allowed: %d", contentLength)
 	}
-
-	config := GetSecurityConfig()
 
 	if contentLength > config.MaxContentLength {
 		return fmt.Errorf("Content-Length exceeds maximum allowed: %d > %d",
@@ -136,11 +138,13 @@ func ValidateContentLength(contentLength int) error {
 // ValidateMessageSize validates total SIP message size for security
 // This prevents DoS attacks via excessive memory allocation for complete messages
 func ValidateMessageSize(messageSize int) error {
+	return validateMessageSize(messageSize, *GetSecurityConfig())
+}
+
+func validateMessageSize(messageSize int, config SecurityConfig) error {
 	if messageSize < 0 {
 		return fmt.Errorf("negative message size not allowed: %d", messageSize)
 	}
-
-	config := GetSecurityConfig()
 
 	if messageSize > config.MaxMessageSize {
 		return fmt.Errorf("message size exceeds maximum allowed: %d > %d",
@@ -153,6 +157,10 @@ func ValidateMessageSize(messageSize int) error {
 // ParseContentLengthSecurely parses Content-Length with security validation
 // This replaces the basic parseContentLength function with bounds checking
 func ParseContentLengthSecurely(value string) (int, error) {
+	return parseContentLengthSecurely(value, *GetSecurityConfig())
+}
+
+func parseContentLengthSecurely(value string, config SecurityConfig) (int, error) {
 	// Trim whitespace and validate input
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -190,7 +198,7 @@ func ParseContentLengthSecurely(value string) (int, error) {
 	}
 
 	// Validate against security limits
-	if err := ValidateContentLength(length); err != nil {
+	if err := validateContentLength(length, config); err != nil {
 		return 0, fmt.Errorf("Content-Length security validation failed: %w", err)
 	}
 

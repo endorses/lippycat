@@ -483,6 +483,12 @@ configuration snapshots now cover legacy packet-processing paths. Focused race
 tests, `make test` (including LI packages), and the supported non-CUDA build
 matrix pass.
 
+Immutable-configuration follow-up (2026-08-29): TCP SIP framing now validates
+Content-Length and total message size against the stream factory's injected
+security configuration rather than consulting package-global configuration
+during processing. A regression test changes the global configuration after
+stream construction and verifies that framing behavior remains unchanged.
+
 ### Post-Audit Repair Verification (2026-08-29)
 
 - [x] Reject legacy call admission once shutdown starts and serialize synchronous

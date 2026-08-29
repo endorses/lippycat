@@ -155,105 +155,6 @@ __global__ void patternMatchKernelOptimized(
     }
 }
 
-// Call-ID extraction kernel (SIP-specific)
-__global__ void extractCallIDKernel(
-    const char* packets,
-    const int* packetOffsets,
-    int numPackets,
-    char* callIDs,
-    int* callIDOffsets,
-    int* callIDCount
-) {
-    int packetIdx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (packetIdx >= numPackets) {
-        return;
-    }
-
-    int packetStart = packetOffsets[packetIdx];
-    int packetEnd = packetOffsets[packetIdx + 1];
-    int packetLen = packetEnd - packetStart;
-
-    // Search for "Call-ID:" or "i:"
-    const char* callIDHeader = "Call-ID:";
-    const char* shortForm = "\ni:";
-
-    int headerLen = 8;
-    int foundOffset = -1;
-
-    // Search for Call-ID:
-    for (int i = 0; i <= packetLen - headerLen; i++) {
-        bool match = true;
-        for (int j = 0; j < headerLen; j++) {
-            if (packets[packetStart + i + j] != callIDHeader[j]) {
-                match = false;
-                break;
-            }
-        }
-
-        if (match) {
-            foundOffset = i + headerLen;
-            break;
-        }
-    }
-
-    // If not found, try short form
-    if (foundOffset == -1) {
-        headerLen = 3;
-        for (int i = 0; i <= packetLen - headerLen; i++) {
-            bool match = true;
-            for (int j = 0; j < headerLen; j++) {
-                if (packets[packetStart + i + j] != shortForm[j]) {
-                    match = false;
-                    break;
-                }
-            }
-
-            if (match) {
-                foundOffset = i + headerLen;
-                break;
-            }
-        }
-    }
-
-    if (foundOffset != -1) {
-        // Skip whitespace
-        while (foundOffset < packetLen &&
-               (packets[packetStart + foundOffset] == ' ' ||
-                packets[packetStart + foundOffset] == '\t')) {
-            foundOffset++;
-        }
-
-        // Find end of Call-ID (until \r or \n)
-        int callIDStart = foundOffset;
-        int callIDEnd = callIDStart;
-
-        while (callIDEnd < packetLen &&
-               packets[packetStart + callIDEnd] != '\r' &&
-               packets[packetStart + callIDEnd] != '\n') {
-            callIDEnd++;
-        }
-
-        int callIDLen = callIDEnd - callIDStart;
-
-        if (callIDLen > 0 && callIDLen < 128) {
-            // Record Call-ID
-            int resultIdx = atomicAdd(callIDCount, 1);
-
-            if (resultIdx < 10000) {
-                int outputOffset = resultIdx * 128;
-                callIDOffsets[resultIdx] = outputOffset;
-                callIDOffsets[resultIdx + 1] = outputOffset + callIDLen;
-
-                // Copy Call-ID
-                for (int i = 0; i < callIDLen; i++) {
-                    callIDs[outputOffset + i] = packets[packetStart + callIDStart + i];
-                }
-            }
-        }
-    }
-}
-
 // Dense Aho-Corasick matching kernel. Each thread owns one input and writes to
 // its own fixed-size result slice, so no atomics are required. Duplicate
 // pattern IDs are suppressed because filter consumers care whether a pattern
@@ -359,27 +260,6 @@ void launchPatternMatchKernel(
         d_packets, d_packetOffsets, numPackets,
         d_patterns, d_patternLengths, numPatterns,
         d_results, d_resultCount, maxResults
-    );
-}
-
-void launchCallIDExtractionKernel(
-    const char* d_packets,
-    const int* d_packetOffsets,
-    int numPackets,
-    char* d_callIDs,
-    int* d_callIDOffsets,
-    int* d_callIDCount,
-    cudaStream_t stream
-) {
-    // Reset result count
-    cudaMemsetAsync(d_callIDCount, 0, sizeof(int), stream);
-
-    int blockSize = 256;
-    int numBlocks = (numPackets + blockSize - 1) / blockSize;
-
-    extractCallIDKernel<<<numBlocks, blockSize, 0, stream>>>(
-        d_packets, d_packetOffsets, numPackets,
-        d_callIDs, d_callIDOffsets, d_callIDCount
     );
 }
 

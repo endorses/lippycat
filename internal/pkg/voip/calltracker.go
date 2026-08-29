@@ -42,17 +42,38 @@ type CallInfo struct {
 	tracker     *CallTracker
 }
 
+// CallLifecycleObserver owns side effects caused by registry admission and
+// removal. The registry itself owns only call/index state.
+type CallLifecycleObserver interface {
+	OnCallStarted(*CallInfo) error
+	OnCallEnded(*CallInfo) error
+}
+
+type CallStateObserver interface {
+	OnCallAdmitted(callID string)
+	OnCallStateChanged(callID, state string)
+}
+
+type callOutputLifecycleAdapter struct{ output CallOutput }
+
+func (a callOutputLifecycleAdapter) OnCallStarted(call *CallInfo) error {
+	return a.output.OpenSession(call.CallID, call.LinkType)
+}
+func (a callOutputLifecycleAdapter) OnCallEnded(call *CallInfo) error {
+	return a.output.CloseSession(call.CallID)
+}
+
 func (c *CallInfo) writeSIP(packet gopacket.Packet) error {
 	if c.tracker == nil {
 		return ErrWriterNotInitialized
 	}
-	return c.tracker.output.WritePacket(c.CallID, packet, PacketTypeSIP)
+	return c.tracker.writePacket(c.CallID, packet, PacketTypeSIP)
 }
 func (c *CallInfo) writeRTP(packet gopacket.Packet) error {
 	if c.tracker == nil {
 		return ErrWriterNotInitialized
 	}
-	return c.tracker.output.WritePacket(c.CallID, packet, PacketTypeRTP)
+	return c.tracker.writePacket(c.CallID, packet, PacketTypeRTP)
 }
 
 // Close emits a lifecycle callback; CallInfo itself owns no resources.
@@ -60,76 +81,107 @@ func (c *CallInfo) Close() error {
 	if c.tracker == nil {
 		return nil
 	}
-	return c.tracker.output.CloseSession(c.CallID)
+	_, err := c.tracker.removeCall(c.CallID)
+	return err
 }
 
 // removeCall detaches a call and all tracker-owned indexes before closing it.
 // Closing after releasing ct.mu is required by CallInfo's lock ordering rule.
 func (ct *CallTracker) removeCall(callID string) (bool, error) {
 	ct.mu.Lock()
-	call, exists := ct.callMap[callID]
-	if exists {
-		delete(ct.callMap, callID)
-		delete(ct.pins, callID)
-		if elem := ct.lruIndex[callID]; elem != nil {
-			ct.lruList.Remove(elem)
-			delete(ct.lruIndex, callID)
-		}
-		for port, callIDs := range ct.portToCallID {
-			kept := callIDs[:0]
-			for _, id := range callIDs {
-				if id != callID {
-					kept = append(kept, id)
-				}
-			}
-			if len(kept) == 0 {
-				delete(ct.portToCallID, port)
-			} else {
-				ct.portToCallID[port] = kept
-			}
-		}
-		ct.recency.Delete(callID)
-	}
+	call := ct.detachCallLocked(callID)
 	ct.mu.Unlock()
-	if !exists || call == nil {
-		return exists, nil
+	if call == nil {
+		return false, nil
 	}
-	return true, ct.output.CloseSession(callID)
+	return true, ct.notifyCallEnded(call)
+}
+
+func (ct *CallTracker) detachCallLocked(callID string) *CallInfo {
+	call := ct.callMap[callID]
+	if call == nil {
+		return nil
+	}
+	delete(ct.callMap, callID)
+	delete(ct.pins, callID)
+	if elem := ct.lruIndex[callID]; elem != nil {
+		ct.lruList.Remove(elem)
+		delete(ct.lruIndex, callID)
+	}
+	for endpoint, callIDs := range ct.portToCallID {
+		kept := callIDs[:0]
+		for _, id := range callIDs {
+			if id != callID {
+				kept = append(kept, id)
+			}
+		}
+		if len(kept) == 0 {
+			delete(ct.portToCallID, endpoint)
+		} else {
+			ct.portToCallID[endpoint] = kept
+		}
+	}
+	ct.recency.Delete(callID)
+	return call
 }
 
 type CallTracker struct {
-	callMap           map[string]*CallInfo
-	portToCallID      map[string][]string      // key = port, value = []CallID (multi-value for B2BUA)
-	lruList           *list.List               // LRU list (front = most recently used)
-	lruIndex          map[string]*list.Element // callID -> list element for O(1) lookup
-	pins              map[string]int           // callID -> active retention leases
-	recency           sync.Map                 // callID -> *atomic.Int64 Unix nanoseconds; RTP fast path
-	maxCalls          int                      // Maximum calls to keep
-	lastPinnedWarning time.Time
-	mu                sync.RWMutex
-	janitorCtx        context.Context
-	janitorCancel     context.CancelFunc
-	janitorStarted    bool
-	janitorWG         sync.WaitGroup
-	shutdownOnce      sync.Once
-	config            *Config
-	output            CallOutput
-	completionMonitor *SniffCompletionMonitor
-	asyncWriterMu     sync.Mutex
-	asyncWriter       interface{ Stop() error }
-	shuttingDown      atomic.Int32   // Atomic flag: 1 if shutting down, 0 otherwise
-	activeWrites      sync.WaitGroup // Tracks active write operations
+	callMap            map[string]*CallInfo
+	portToCallID       map[string][]string      // key = port, value = []CallID (multi-value for B2BUA)
+	lruList            *list.List               // LRU list (front = most recently used)
+	lruIndex           map[string]*list.Element // callID -> list element for O(1) lookup
+	pins               map[string]int           // callID -> active retention leases
+	recency            sync.Map                 // callID -> *atomic.Int64 Unix nanoseconds; RTP fast path
+	maxCalls           int                      // Maximum calls to keep
+	lastPinnedWarning  time.Time
+	mu                 sync.RWMutex
+	janitorCtx         context.Context
+	janitorCancel      context.CancelFunc
+	janitorStarted     bool
+	janitorWG          sync.WaitGroup
+	shutdownOnce       sync.Once
+	config             *Config
+	writePacket        func(string, gopacket.Packet, PacketType) error
+	lifecycleObservers []CallLifecycleObserver
+	stateObservers     []CallStateObserver
+	asyncWriterMu      sync.Mutex
+	asyncWriter        interface{ Stop() error }
+	shuttingDown       atomic.Int32   // Atomic flag: 1 if shutting down, 0 otherwise
+	activeWrites       sync.WaitGroup // Tracks active write operations
 }
 
 func (ct *CallTracker) registerEndpoint(endpoint, callID string) {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
+	ct.registerEndpointLocked(endpoint, callID)
+}
+
+func (ct *CallTracker) registerEndpointLocked(endpoint, callID string) bool {
+	if endpoint == "" || callID == "" || ct.callMap[callID] == nil {
+		return false
+	}
 	for _, existing := range ct.portToCallID[endpoint] {
 		if existing == callID {
-			return
+			return true
 		}
 	}
+	perCall, total := 0, 0
+	for _, callIDs := range ct.portToCallID {
+		total += len(callIDs)
+		for _, existing := range callIDs {
+			if existing == callID {
+				perCall++
+			}
+		}
+	}
+	if perCall >= ct.config.MaxEndpointsPerCall || total >= ct.config.MaxEndpointAssociations {
+		logger.Warn("RTP endpoint association limit reached",
+			"call_id", SanitizeCallIDForLogging(callID),
+			"per_call", perCall, "total", total)
+		return false
+	}
 	ct.portToCallID[endpoint] = append(ct.portToCallID[endpoint], callID)
+	return true
 }
 
 func NewCallTracker() *CallTracker {
@@ -151,11 +203,7 @@ func NewCallTrackerWithOutput(config *Config, output CallOutput) *CallTracker {
 	clone := *config
 	clone.PluginPaths = append([]string(nil), config.PluginPaths...)
 	if output == nil {
-		if clone.WriteVoIP {
-			output = NewSessionOutputManager(&clone)
-		} else {
-			output = NoopCallOutput{}
-		}
+		output = NoopCallOutput{}
 	}
 	return newCallTracker(&clone, clone.MaxCalls, output)
 }
@@ -170,6 +218,12 @@ func newCallTracker(config *Config, maxCalls int, output CallOutput) *CallTracke
 	if maxCalls <= 0 {
 		maxCalls = DefaultMaxCalls
 	}
+	if config.MaxEndpointsPerCall <= 0 {
+		config.MaxEndpointsPerCall = 64
+	}
+	if config.MaxEndpointAssociations <= 0 {
+		config.MaxEndpointAssociations = maxCalls * 8
+	}
 	tracker := &CallTracker{
 		callMap:        make(map[string]*CallInfo),
 		portToCallID:   make(map[string][]string),
@@ -181,7 +235,12 @@ func newCallTracker(config *Config, maxCalls int, output CallOutput) *CallTracke
 		janitorCancel:  cancel,
 		janitorStarted: false,
 		config:         config,
-		output:         output,
+		writePacket:    output.WritePacket,
+	}
+	if observer, ok := output.(CallLifecycleObserver); ok {
+		tracker.lifecycleObservers = append(tracker.lifecycleObservers, observer)
+	} else {
+		tracker.lifecycleObservers = append(tracker.lifecycleObservers, callOutputLifecycleAdapter{output: output})
 	}
 
 	tracker.startJanitor()
@@ -251,21 +310,21 @@ func (ct *CallTracker) Shutdown() {
 
 		// Now safe to close all files
 		ct.mu.Lock()
-		callIDs := make([]string, 0, len(ct.callMap))
+		calls := make([]*CallInfo, 0, len(ct.callMap))
 		for id, call := range ct.callMap {
-			_ = call
-			callIDs = append(callIDs, id)
+			calls = append(calls, call)
 			delete(ct.callMap, id)
 			ct.recency.Delete(id)
 		}
+		clear(ct.portToCallID)
+		clear(ct.lruIndex)
+		ct.lruList.Init()
+		clear(ct.pins)
 		ct.mu.Unlock()
-		for _, id := range callIDs {
-			if err := ct.output.CloseSession(id); err != nil {
-				logger.Error("Failed to close call output", "call_id", SanitizeCallIDForLogging(id), "error", err)
+		for _, call := range calls {
+			if err := ct.notifyCallEnded(call); err != nil {
+				logger.Error("Failed to close call output", "call_id", SanitizeCallIDForLogging(call.CallID), "error", err)
 			}
-		}
-		if err := ct.output.Shutdown(); err != nil {
-			logger.Error("Failed to shut down call output", "error", err)
 		}
 		logger.Info("Call tracker shutdown complete")
 	})
@@ -293,8 +352,8 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 				"duration", now.Sub(c.Created))
 
 			// Schedule PCAP closure via this tracker's completion monitor.
-			if monitor := tracker.completionMonitor; monitor != nil {
-				monitor.ScheduleClose(c.CallID)
+			for _, observer := range tracker.stateObservers {
+				observer.OnCallStateChanged(c.CallID, newState)
 			}
 		}
 	}
@@ -376,7 +435,7 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 			tracker:     tracker,
 		}
 		if tracker.config.WriteVoIP {
-			if err := tracker.output.OpenSession(callID, linkType); err != nil {
+			if err := tracker.notifyCallStarted(call); err != nil {
 				logger.Error("Failed to initialize writers for call",
 					"call_id", SanitizeCallIDForLogging(callID),
 					"error", err)
@@ -437,16 +496,47 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 		tracker.lruIndex[callID] = elem
 		tracker.callMap[callID] = call
 		tracker.touchCall(callID)
+		for _, observer := range tracker.stateObservers {
+			observer.OnCallAdmitted(callID)
+		}
 	} else {
 		tracker.touchCall(callID)
 	}
 	tracker.mu.Unlock()
 	if evicted != nil {
-		if err := tracker.output.CloseSession(evicted.CallID); err != nil {
+		if err := tracker.notifyCallEnded(evicted); err != nil {
 			logger.Error("Error closing call files", "call_id", SanitizeCallIDForLogging(evicted.CallID), "error", err)
 		}
 	}
 	return call
+}
+
+func (ct *CallTracker) notifyCallStarted(call *CallInfo) error {
+	for _, observer := range ct.lifecycleObservers {
+		if err := observer.OnCallStarted(call); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (ct *CallTracker) replaceOutputForTest(output CallOutput) {
+	ct.writePacket = output.WritePacket
+	ct.lifecycleObservers = ct.lifecycleObservers[:0]
+	if observer, ok := output.(CallLifecycleObserver); ok {
+		ct.lifecycleObservers = append(ct.lifecycleObservers, observer)
+	} else {
+		ct.lifecycleObservers = append(ct.lifecycleObservers, callOutputLifecycleAdapter{output: output})
+	}
+}
+
+func (ct *CallTracker) notifyCallEnded(call *CallInfo) error {
+	for _, observer := range ct.lifecycleObservers {
+		if err := observer.OnCallEnded(call); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (ct *CallTracker) touchCall(callID string) {
@@ -585,9 +675,29 @@ func (ct *CallTracker) janitorLoop() {
 }
 
 func (ct *CallTracker) cleanupOldCalls() {
-	// Ring buffer now handles call cleanup (FIFO when buffer is full)
-	// This function is kept for potential future maintenance tasks
-	// but does not expire calls based on time anymore
+	if ct.config.CallExpirationTime <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-ct.config.CallExpirationTime)
+	ct.mu.Lock()
+	expired := make([]*CallInfo, 0)
+	for id, call := range ct.callMap {
+		if call != nil && ct.pins[id] == 0 && call.LastUpdated.Before(cutoff) {
+			expired = append(expired, ct.detachCallLocked(id))
+		}
+	}
+	ct.mu.Unlock()
+	for _, call := range expired {
+		if call == nil {
+			continue
+		}
+		err := ct.notifyCallEnded(call)
+		if err != nil {
+			logger.Error("Failed to close expired call output", "call_id", SanitizeCallIDForLogging(call.CallID), "error", err)
+		} else {
+			logger.Debug("Expired inactive call", "call_id", SanitizeCallIDForLogging(call.CallID))
+		}
+	}
 }
 
 // getCapturesDir returns a safe absolute path for the captures directory

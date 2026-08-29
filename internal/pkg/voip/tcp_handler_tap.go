@@ -21,21 +21,21 @@ type TapTCPHandler struct {
 	packetChan chan<- source.InjectedPacket
 	// appFilter is optional for proper filter matching
 	appFilter ApplicationFilter
-	// sdpRegistrar owns tap-local RTP associations. Keeping this explicit avoids
+	// callRegistry owns tap-local call state and RTP associations. Keeping this explicit avoids
 	// writing TCP SDP into the legacy package-global tracker used by sniff/hunt.
-	sdpRegistrar interface {
-		RegisterSDP(callID, sdp string)
+	callRegistry interface {
+		ProcessReassembledSIP(packet gopacket.Packet) *data.PacketMetadata
 		CompleteCall(callID string)
 	}
 }
 
-// SetSDPRegistrar routes SDP learned from reassembled TCP SIP to the tap's
-// processor-owned call tracker.
-func (h *TapTCPHandler) SetSDPRegistrar(registrar interface {
-	RegisterSDP(callID, sdp string)
+// SetCallRegistry routes complete reassembled TCP SIP through the tap's
+// processor-owned call registry.
+func (h *TapTCPHandler) SetCallRegistry(registry interface {
+	ProcessReassembledSIP(packet gopacket.Packet) *data.PacketMetadata
 	CompleteCall(callID string)
 }) {
-	h.sdpRegistrar = registrar
+	h.callRegistry = registry
 }
 
 // NewTapTCPHandler creates a handler for tap mode TCP SIP processing.
@@ -103,8 +103,17 @@ func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 		return false
 	}
 
-	// Check if THIS message matches filters (using the synthesized packet's SIP).
-	if !h.matchesMessage(pkt, headers) {
+	// Route complete messages through the registry when available. Its selection
+	// policy admits later in-dialog messages for an already selected call even
+	// when identity headers no longer match directly. The fallback is retained
+	// for non-tap consumers that do not inject a registry.
+	var registryMetadata *data.PacketMetadata
+	accepted := h.matchesMessage(pkt, headers)
+	if h.callRegistry != nil {
+		registryMetadata = h.callRegistry.ProcessReassembledSIP(pkt.Packet)
+		accepted = registryMetadata != nil && registryMetadata.Sip != nil
+	}
+	if !accepted {
 		// Message doesn't match filter - release any per-flow buffered packets.
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		logger.Debug("TCP SIP message filtered out (tap mode)",
@@ -120,7 +129,9 @@ func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 		"to", headers["to"],
 		"method", method)
 
-	// Create protobuf metadata for SIP
+	// Create protobuf metadata for SIP. When a tap-local registry is wired, run
+	// the complete reassembled message through its normal SIP selection/state
+	// path so SDP-less dialogs and all identity/activity updates are retained.
 	pbMetadata := &data.PacketMetadata{
 		Sip: &data.SIPMetadata{
 			CallId:            callID,
@@ -136,21 +147,18 @@ func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 			PAssertedIdentity: headers["p-asserted-identity"],
 		},
 	}
-
-	// Register SDP only in the tap-local processor. The package-global tracker is
-	// intentionally reserved for sniff/hunter paths that consume it.
-	if len(event.SDP) > 0 && h.sdpRegistrar != nil {
-		h.sdpRegistrar.RegisterSDP(callID, string(event.SDP))
+	if registryMetadata != nil {
+		pbMetadata = registryMetadata
 	}
-	if h.sdpRegistrar != nil && event.ResponseCode >= 200 {
-		if event.CSeqMethod == "BYE" || event.CSeqMethod == "CANCEL" {
-			h.sdpRegistrar.CompleteCall(callID)
-		}
+
+	var afterEnqueue func()
+	if h.callRegistry != nil && event.ResponseCode >= 200 && (event.CSeqMethod == "BYE" || event.CSeqMethod == "CANCEL") {
+		afterEnqueue = func() { h.callRegistry.CompleteCall(callID) }
 	}
 
 	// Forward exactly one packet for this SIP message.
 	select {
-	case h.packetChan <- source.InjectedPacket{PacketInfo: pkt, Metadata: pbMetadata}:
+	case h.packetChan <- source.InjectedPacket{PacketInfo: pkt, Metadata: pbMetadata, AfterEnqueue: afterEnqueue}:
 		// Sent successfully
 	default:
 		// Channel full - log warning but continue

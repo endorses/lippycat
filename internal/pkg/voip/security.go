@@ -22,7 +22,7 @@ func DefaultSecurityConfig() SecurityConfig {
 
 // GetSecurityConfig returns the current security configuration
 func GetSecurityConfig() *SecurityConfig {
-	config := GetConfig().Security
+	config := securityConfigSnapshot()
 	return &config
 }
 

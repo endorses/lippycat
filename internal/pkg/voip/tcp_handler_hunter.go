@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
@@ -22,18 +23,20 @@ type PacketForwarder interface {
 // HunterForwardHandler handles SIP messages for hunter mode (lc hunt voip)
 // It checks filters, extracts metadata, and forwards matched calls to processor
 type HunterForwardHandler struct {
-	tracker   *CallTracker
-	forwarder PacketForwarder
-	bufferMgr *BufferManager
-	appFilter ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
+	tracker         *CallTracker
+	forwarder       PacketForwarder
+	bufferMgr       *BufferManager
+	appFilter       ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
+	selectionPolicy callregistry.SelectionPolicy
 }
 
 // NewHunterForwardHandler creates a handler for hunter packet forwarding
 func NewHunterForwardHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *HunterForwardHandler {
 	return &HunterForwardHandler{
-		tracker:   tracker,
-		forwarder: forwarder,
-		bufferMgr: bufferMgr,
+		tracker:         tracker,
+		forwarder:       forwarder,
+		bufferMgr:       bufferMgr,
+		selectionPolicy: callregistry.StickySelectionPolicy{},
 	}
 }
 
@@ -42,6 +45,12 @@ func NewHunterForwardHandler(tracker *CallTracker, forwarder PacketForwarder, bu
 // This supports all filter types including phone_number, sip_user, sipuri, ip_address, etc.
 func (h *HunterForwardHandler) SetApplicationFilter(filter ApplicationFilter) {
 	h.appFilter = filter
+}
+
+func (h *HunterForwardHandler) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
+	if policy != nil {
+		h.selectionPolicy = policy
+	}
 }
 
 // HandleSIPMessage processes a complete SIP message for hunter forwarding.
@@ -116,9 +125,17 @@ func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID stri
 		},
 	}
 
-	// Call termination (BYE/CANCEL): only forward if the call was already matched.
+	previouslySelected := h.bufferMgr != nil && h.bufferMgr.IsCallMatched(callID)
+	directMatch := h.matchesMessage(pkt, headers)
+	selected := h.selectionPolicy.Select(callregistry.SelectionInput{
+		FilterConfigured:   true,
+		DirectMatch:        directMatch,
+		PreviouslySelected: previouslySelected,
+	})
+
+	// Call termination (BYE/CANCEL): only forward if selected by policy.
 	if method == "BYE" || method == "CANCEL" {
-		if h.bufferMgr != nil && h.bufferMgr.IsCallMatched(callID) {
+		if selected {
 			if err := h.forwarder.ForwardPacketWithMetadata(pkt.Packet, pbMetadata, "", layers.LinkTypeEthernet); err != nil {
 				logger.Error("Failed to forward TCP call termination packet",
 					"call_id", SanitizeCallIDForLogging(callID),
@@ -138,7 +155,7 @@ func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID stri
 	}
 
 	// Check if THIS message matches the filter (using the synthesized packet's SIP).
-	if !h.matchesMessage(pkt, headers) {
+	if !selected {
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		logger.Debug("TCP SIP message filtered out",
 			"call_id", SanitizeCallIDForLogging(callID),

@@ -94,7 +94,7 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 					})
 				}
 
-				if GetConfig().WriteVoIP {
+				if tracker.config.WriteVoIP {
 					WriteSIP(tracker, callID, packet)
 				} else {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
@@ -113,7 +113,7 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 		injectPacketToVirtualInterface(pkt)
 
 		callID := tracker.GetCallIDForPacket(packet)
-		if GetConfig().WriteVoIP {
+		if tracker.config.WriteVoIP {
 			WriteRTP(tracker, callID, packet)
 		} else {
 			logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
@@ -177,7 +177,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 				// whether or not it carries SDP.
 				injectPacketToVirtualInterface(pkt)
 
-				if GetConfig().WriteVoIP {
+				if tracker.config.WriteVoIP {
 					WriteSIP(tracker, callID, packet)
 				} else {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
@@ -277,7 +277,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 					// Call already matched, inject into virtual interface and write immediately
 					injectPacketToVirtualInterface(pkt)
 
-					if GetConfig().WriteVoIP {
+					if tracker.config.WriteVoIP {
 						WriteRTP(tracker, bufCallID, packet)
 					}
 				}
@@ -286,7 +286,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 				// Call already decided and tracker knows about it, inject into virtual interface
 				injectPacketToVirtualInterface(pkt)
 
-				if GetConfig().WriteVoIP {
+				if tracker.config.WriteVoIP {
 					WriteRTP(tracker, callID, packet)
 				}
 			}
@@ -326,7 +326,7 @@ func isSIPPacket(tracker *CallTracker, packet gopacket.Packet) bool {
 
 // handleMatchedCallForFileWrite is a callback for BufferManager that writes packets to files
 func handleMatchedCallForFileWrite(tracker *CallTracker, callID string, packets []gopacket.Packet, metadata *CallMetadata) {
-	if !GetConfig().WriteVoIP {
+	if !tracker.config.WriteVoIP {
 		return
 	}
 

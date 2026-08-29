@@ -54,6 +54,9 @@ func newTCPSIPHarness(t *testing.T) *tcpSIPHarness {
 	// package; leftover calls can evict this test's call between queueing a
 	// write and the writer draining it, silently losing the packet.
 	tracker := TestCallTracker(t)
+	output := NewSessionOutputManager(&cfg)
+	tracker.replaceOutputForTest(output)
+	t.Cleanup(func() { require.NoError(t, output.Shutdown()) })
 	resetCallTracker(tracker)
 	t.Cleanup(func() { resetCallTracker(tracker) })
 
@@ -80,11 +83,16 @@ func resetCallTracker(tracker *CallTracker) {
 	tracker.shuttingDown.Store(0)
 
 	tracker.mu.Lock()
-	for id, call := range tracker.callMap {
-		_ = call.Close()
-		delete(tracker.callMap, id)
+	calls := make([]*CallInfo, 0, len(tracker.callMap))
+	for id := range tracker.callMap {
+		calls = append(calls, tracker.detachCallLocked(id))
 	}
 	tracker.mu.Unlock()
+	for _, call := range calls {
+		if call != nil {
+			_ = tracker.notifyCallEnded(call)
+		}
+	}
 
 	tracker.closeAsyncWriter()
 }
@@ -218,7 +226,7 @@ func TestTCPLocalPath_WritesInDialogMessagesOfMatchedCall(t *testing.T) {
 	h.dispatch(bye, callID, flow, transportFlow)
 
 	h.tracker.closeAsyncWriter()
-	require.NoError(t, h.tracker.output.CloseSession(callID))
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callID))
 	require.Equal(t, []string{
 		"INVITE sip:bob@example.com SIP/2.0",
 		"BYE sip:bob@example.com SIP/2.0",
@@ -253,7 +261,7 @@ func TestTCPLocalPath_DoesNotWriteOtherCallsPacketsIntoMatchedCall(t *testing.T)
 	require.True(t, h.dispatch(inviteA, callA, flow, transportFlow))
 
 	h.tracker.closeAsyncWriter()
-	require.NoError(t, h.tracker.output.CloseSession(callA))
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callA))
 	require.Equal(t, []string{
 		"INVITE sip:carol@example.com SIP/2.0",
 	}, sipStartLinesFromPcap(t, h.sipPath(callA)),
@@ -291,8 +299,8 @@ func TestTCPBuffersAreIsolatedPerConnection(t *testing.T) {
 	require.True(t, h.dispatchWithEndpoints(inviteB, callB, "192.168.1.100:5070", "192.168.1.101:5060", netFlowB, transportFlowB))
 
 	h.tracker.closeAsyncWriter()
-	require.NoError(t, h.tracker.output.CloseSession(callA))
-	require.NoError(t, h.tracker.output.CloseSession(callB))
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callA))
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callB))
 	require.Equal(t, []string{"INVITE sip:bob@example.com SIP/2.0"}, sipStartLinesFromPcap(t, h.sipPath(callA)))
 	require.Equal(t, []string{"INVITE sip:carol@example.com SIP/2.0"}, sipStartLinesFromPcap(t, h.sipPath(callB)))
 }
@@ -321,7 +329,7 @@ func TestTCPLocalPath_DoesNotWriteFilteredOutMessageIntoNextMatchedCall(t *testi
 	require.True(t, h.dispatch(invite, callID, flow, transportFlow))
 
 	h.tracker.closeAsyncWriter()
-	require.NoError(t, h.tracker.output.CloseSession(callID))
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callID))
 	require.Equal(t, []string{
 		"INVITE sip:bob@example.com SIP/2.0",
 	}, sipStartLinesFromPcap(t, h.sipPath(callID)),
@@ -350,8 +358,8 @@ func TestTCPLocalPath_SharedSegmentReachesBothCalls(t *testing.T) {
 	require.True(t, h.dispatch(msgB, callB, flow, transportFlow))
 
 	h.tracker.closeAsyncWriter()
-	require.NoError(t, h.tracker.output.CloseSession(callA))
-	require.NoError(t, h.tracker.output.CloseSession(callB))
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callA))
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callB))
 	require.Equal(t, []string{"INVITE sip:bob@example.com SIP/2.0"},
 		sipStartLinesFromPcap(t, h.sipPath(callA)), "call A should have its own message")
 	require.Equal(t, []string{"INVITE sip:carol@example.com SIP/2.0"},

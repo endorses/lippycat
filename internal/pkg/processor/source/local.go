@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -53,6 +54,9 @@ type VoIPProcessor = *voipprocessor.SourceAdapter
 type InjectedPacket struct {
 	PacketInfo capture.PacketInfo
 	Metadata   *data.PacketMetadata
+	// AfterEnqueue runs after the packet has entered the local source batch.
+	// It is used for lifecycle transitions that must follow the final packet.
+	AfterEnqueue func()
 }
 
 // TCPAssembler handles TCP packets for stream reassembly.
@@ -65,8 +69,85 @@ type TCPAssembler interface {
 
 // cachedFilterIDs stores filter IDs with a timestamp for TTL-based cleanup.
 type cachedFilterIDs struct {
-	filterIDs []string
-	storedAt  time.Time
+	filterIDs  []string
+	storedAt   time.Time
+	generation uint64
+}
+
+const defaultCallFilterCacheSize = 10000
+
+type callFilterCache struct {
+	mu             sync.Mutex
+	entries        map[string]cachedFilterIDs
+	order          []cachedFilterOrder
+	maxSize        int
+	nextGeneration uint64
+}
+
+type cachedFilterOrder struct {
+	key        string
+	generation uint64
+}
+
+func newCallFilterCache(maxSize int) *callFilterCache {
+	if maxSize <= 0 {
+		maxSize = defaultCallFilterCacheSize
+	}
+	return &callFilterCache{entries: make(map[string]cachedFilterIDs), maxSize: maxSize}
+}
+
+func (c *callFilterCache) Store(key string, value cachedFilterIDs) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.entries[key]; !exists {
+		if len(c.entries) >= c.maxSize {
+			for len(c.order) > 0 {
+				oldest := c.order[0]
+				c.order = c.order[1:]
+				if live, ok := c.entries[oldest.key]; ok && live.generation == oldest.generation {
+					delete(c.entries, oldest.key)
+					break
+				}
+			}
+		}
+		c.nextGeneration++
+		value.generation = c.nextGeneration
+		c.order = append(c.order, cachedFilterOrder{key: key, generation: value.generation})
+	} else {
+		value.generation = c.entries[key].generation
+	}
+	value.filterIDs = append([]string(nil), value.filterIDs...)
+	c.entries[key] = value
+}
+
+func (c *callFilterCache) Load(key string) (cachedFilterIDs, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	value, ok := c.entries[key]
+	value.filterIDs = append([]string(nil), value.filterIDs...)
+	return value, ok
+}
+
+func (c *callFilterCache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
+}
+
+func (c *callFilterCache) DeleteExpired(now time.Time, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, entry := range c.entries {
+		if now.Sub(entry.storedAt) > ttl {
+			delete(c.entries, key)
+		}
+	}
+}
+
+func (c *callFilterCache) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.entries)
 }
 
 func (s *LocalSource) cachedFilterIDsForCalls(callIDs []string) []string {
@@ -74,7 +155,7 @@ func (s *LocalSource) cachedFilterIDsForCalls(callIDs []string) []string {
 	seen := make(map[string]struct{})
 	for _, callID := range callIDs {
 		if cached, ok := s.callFilterCache.Load(callID); ok {
-			for _, filterID := range cached.(cachedFilterIDs).filterIDs {
+			for _, filterID := range cached.filterIDs {
 				if _, exists := seen[filterID]; exists {
 					continue
 				}
@@ -107,7 +188,8 @@ type LocalSource struct {
 	batches chan *PacketBatch
 
 	// Optional filtering
-	appFilter ApplicationFilter
+	appFilter       ApplicationFilter
+	selectionPolicy callregistry.SelectionPolicy
 
 	// Optional VoIP processing for SIP/RTP metadata extraction
 	voipProcessor VoIPProcessor
@@ -133,7 +215,7 @@ type LocalSource struct {
 	// LI: CallID → filterIDs cache for RTP packets
 	// SIP packets that match LI filters store their CallID→filterIDs mapping,
 	// so RTP packets for the same call can inherit the filter IDs.
-	callFilterCache sync.Map
+	callFilterCache *callFilterCache
 
 	// Lifecycle
 	ctx    context.Context
@@ -172,15 +254,19 @@ type LocalSourceConfig struct {
 	// ProtocolMode indicates the capture protocol mode (e.g., "generic", "voip", "dns", "email", "http", "tls").
 	// Used for TUI display and filter validation.
 	ProtocolMode string
+
+	// CallFilterCacheSize bounds retained selected-call filter attribution.
+	CallFilterCacheSize int
 }
 
 // DefaultLocalSourceConfig returns a LocalSourceConfig with sensible defaults.
 func DefaultLocalSourceConfig() LocalSourceConfig {
 	return LocalSourceConfig{
-		BatchSize:    100,
-		BatchTimeout: 100 * time.Millisecond,
-		BufferSize:   10000,
-		BatchBuffer:  1000,
+		BatchSize:           100,
+		BatchTimeout:        100 * time.Millisecond,
+		BufferSize:          10000,
+		BatchBuffer:         1000,
+		CallFilterCacheSize: defaultCallFilterCacheSize,
 	}
 }
 
@@ -199,12 +285,17 @@ func NewLocalSource(cfg LocalSourceConfig) *LocalSource {
 	if cfg.BatchBuffer == 0 {
 		cfg.BatchBuffer = 1000
 	}
+	if cfg.CallFilterCacheSize <= 0 {
+		cfg.CallFilterCacheSize = defaultCallFilterCacheSize
+	}
 
 	return &LocalSource{
-		config:       cfg,
-		currentBatch: make([]*data.CapturedPacket, 0, cfg.BatchSize),
-		batches:      make(chan *PacketBatch, cfg.BatchBuffer),
-		stats:        NewAtomicStats(),
+		config:          cfg,
+		currentBatch:    make([]*data.CapturedPacket, 0, cfg.BatchSize),
+		batches:         make(chan *PacketBatch, cfg.BatchBuffer),
+		stats:           NewAtomicStats(),
+		callFilterCache: newCallFilterCache(cfg.CallFilterCacheSize),
+		selectionPolicy: callregistry.StickySelectionPolicy{},
 	}
 }
 
@@ -217,6 +308,16 @@ func (s *LocalSource) SetApplicationFilter(filter ApplicationFilter) {
 	s.appFilter = filter
 }
 
+// SetSelectionPolicy sets the topology's call-selection inheritance policy.
+func (s *LocalSource) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
+	if policy == nil {
+		policy = callregistry.StickySelectionPolicy{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selectionPolicy = policy
+}
+
 // SetVoIPProcessor sets an optional VoIP processor for SIP/RTP detection.
 // When set, packets are processed for VoIP metadata which is attached to
 // the CapturedPacket.Metadata field for downstream per-call PCAP writing.
@@ -225,6 +326,20 @@ func (s *LocalSource) SetVoIPProcessor(processor VoIPProcessor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.voipProcessor = processor
+	if processor != nil {
+		processor.AddLifecycleObserver(s)
+	}
+}
+
+// OnCallStarted implements callregistry.LifecycleObserver. A reused Call-ID
+// must earn a fresh selection decision rather than inheriting stale filter IDs.
+func (s *LocalSource) OnCallStarted(call callregistry.Call) {
+	s.callFilterCache.Delete(call.CallID)
+}
+
+// OnCallEnded removes selection attribution at every registry end boundary.
+func (s *LocalSource) OnCallEnded(call callregistry.Call, _ callregistry.EndReason) {
+	s.callFilterCache.Delete(call.CallID)
 }
 
 // GetVoIPProcessor returns the VoIP processor if set.
@@ -320,15 +435,7 @@ func (s *LocalSource) Start(ctx context.Context) error {
 			case <-s.ctx.Done():
 				return
 			case <-ticker.C:
-				now := time.Now()
-				s.callFilterCache.Range(func(key, value any) bool {
-					if entry, ok := value.(cachedFilterIDs); ok {
-						if now.Sub(entry.storedAt) > 5*time.Minute {
-							s.callFilterCache.Delete(key)
-						}
-					}
-					return true
-				})
+				s.callFilterCache.DeleteExpired(time.Now(), 5*time.Minute)
 			}
 		}
 	}()
@@ -532,10 +639,24 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			// Apply filter to TCP SIP packets (same rules as UDP VoIP)
 			s.mu.Lock()
 			tcpFilter := s.appFilter
+			selectionPolicy := s.selectionPolicy
 			s.mu.Unlock()
 
 			if tcpFilter != nil {
 				matched, filterIDs := tcpFilter.MatchPacketWithIDs(injectedPkt.PacketInfo.Packet)
+				callID := ""
+				if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil {
+					callID = pbPkt.Metadata.Sip.CallId
+				}
+				inheritedIDs := s.cachedFilterIDsForCalls([]string{callID})
+				selected := selectionPolicy.Select(callregistry.SelectionInput{
+					FilterConfigured:   true,
+					DirectMatch:        matched,
+					PreviouslySelected: len(inheritedIDs) > 0,
+				})
+				if !selected {
+					continue
+				}
 				if matched && len(filterIDs) > 0 {
 					pbPkt.MatchedFilterIds = filterIDs
 					// Cache SIP CallID → filterIDs for RTP correlation
@@ -546,8 +667,11 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 						}
 					}
 				} else {
-					// No match — drop the packet
-					continue
+					filterIDs = inheritedIDs
+					if len(filterIDs) == 0 {
+						continue
+					}
+					pbPkt.MatchedFilterIds = filterIDs
 				}
 			}
 
@@ -559,6 +683,9 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			s.currentBatch = append(s.currentBatch, pbPkt)
 			batchLen := len(s.currentBatch)
 			s.batchMu.Unlock()
+			if injectedPkt.AfterEnqueue != nil {
+				injectedPkt.AfterEnqueue()
+			}
 
 			// Send if batch is full
 			if batchLen >= s.config.BatchSize {
@@ -594,6 +721,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			filter := s.appFilter
 			voipProc := s.voipProcessor
 			dnsProc := s.dnsProcessor
+			selectionPolicy := s.selectionPolicy
 			s.mu.Unlock()
 
 			// Convert to protobuf format first
@@ -654,6 +782,15 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 				// VoIP: filter decides pass/drop, with cache fallback for RTP
 				matched, filterIDs := matchFilter()
 
+				inheritedFilterIDs := s.cachedFilterIDsForCalls(voipCallIDs)
+				selected := selectionPolicy.Select(callregistry.SelectionInput{
+					FilterConfigured:   true,
+					DirectMatch:        matched,
+					PreviouslySelected: len(inheritedFilterIDs) > 0,
+				})
+				if !selected {
+					continue
+				}
 				if matched {
 					matchedFilterIDs = filterIDs
 
@@ -684,7 +821,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 					if len(voipCallIDs) == 0 && callID != "" {
 						voipCallIDs = []string{callID}
 					}
-					matchedFilterIDs = s.cachedFilterIDsForCalls(voipCallIDs)
+					matchedFilterIDs = inheritedFilterIDs
 
 					// If still no filter IDs, drop the packet
 					if len(matchedFilterIDs) == 0 {

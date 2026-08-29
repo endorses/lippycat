@@ -10,9 +10,20 @@ import (
 // SetCompletionMonitor binds lifecycle output handling to this tracker instance.
 func (ct *CallTracker) SetCompletionMonitor(m *SniffCompletionMonitor) {
 	ct.mu.Lock()
-	ct.completionMonitor = m
+	ct.stateObservers = ct.stateObservers[:0]
+	if m != nil {
+		ct.stateObservers = append(ct.stateObservers, m)
+	}
 	ct.mu.Unlock()
 }
+
+func (m *SniffCompletionMonitor) OnCallStateChanged(callID, state string) {
+	if state == "BYE" || state == "CANCEL" {
+		m.ScheduleClose(callID)
+	}
+}
+
+func (m *SniffCompletionMonitor) OnCallAdmitted(callID string) { m.CallStarted(callID) }
 
 // SniffCompletionMonitorConfig configures the sniff completion monitor
 type SniffCompletionMonitorConfig struct {
@@ -137,6 +148,19 @@ func (m *SniffCompletionMonitor) ScheduleClose(callID string) {
 	logger.Debug("Scheduled call PCAP closure",
 		"call_id", SanitizeCallIDForLogging(callID),
 		"grace_period", m.config.GracePeriod)
+}
+
+// CallStarted removes closure suppression left by an earlier dialog which used
+// the same Call-ID. SIP Call-IDs are identifiers, not globally unique session
+// generations, and may be reused after a call has been fully removed.
+func (m *SniffCompletionMonitor) CallStarted(callID string) {
+	if m == nil || callID == "" {
+		return
+	}
+	m.mu.Lock()
+	delete(m.closedCalls, callID)
+	delete(m.pendingClose, callID)
+	m.mu.Unlock()
 }
 
 // monitorLoop periodically checks for ended calls and closes PCAP files

@@ -101,8 +101,9 @@ func TestShutdownCallTracker(t *testing.T) {
 }
 
 func TestJanitorLoopCleanup(t *testing.T) {
-	// Create a new tracker for this test
-	tracker := NewCallTracker()
+	cfg := DefaultConfig()
+	cfg.CallExpirationTime = time.Hour
+	tracker := NewCallTrackerWithConfig(cfg)
 	defer tracker.Shutdown()
 
 	// Create test calls with different ages
@@ -139,14 +140,30 @@ func TestJanitorLoopCleanup(t *testing.T) {
 	assert.Contains(t, tracker.callMap, recentCallID)
 	tracker.mu.RUnlock()
 
-	// Test cleanup directly - this is now a no-op since cleanup is handled by ring buffer
 	tracker.cleanupOldCalls()
 
-	// Verify both calls remain (cleanup is now handled by ring buffer, not time-based expiry)
 	tracker.mu.RLock()
-	assert.Contains(t, tracker.callMap, oldCallID, "Call should remain (cleanup is ring buffer based)")
+	assert.NotContains(t, tracker.callMap, oldCallID, "inactive call should expire")
 	assert.Contains(t, tracker.callMap, recentCallID, "Recent call should still exist")
 	tracker.mu.RUnlock()
+}
+
+func TestShutdownClearsAllCallIndexes(t *testing.T) {
+	tracker := TestCallTracker(t)
+	call := tracker.GetOrCreateCall("indexed-call", layers.LinkTypeEthernet)
+	require.NotNil(t, call)
+	tracker.PinCall(call.CallID)
+	tracker.registerEndpoint("10.0.0.1:4000", call.CallID)
+
+	tracker.Shutdown()
+
+	tracker.mu.RLock()
+	defer tracker.mu.RUnlock()
+	assert.Empty(t, tracker.callMap)
+	assert.Empty(t, tracker.portToCallID)
+	assert.Empty(t, tracker.lruIndex)
+	assert.Zero(t, tracker.lruList.Len())
+	assert.Empty(t, tracker.pins)
 }
 
 func TestConcurrentCallCreation(t *testing.T) {

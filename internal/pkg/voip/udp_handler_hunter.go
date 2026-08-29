@@ -4,6 +4,7 @@ package voip
 
 import (
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
@@ -16,18 +17,20 @@ import (
 
 // UDPPacketHandler processes UDP SIP/RTP packets for hunter mode with buffering
 type UDPPacketHandler struct {
-	tracker   *CallTracker
-	forwarder PacketForwarder
-	bufferMgr *BufferManager
-	appFilter ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
+	tracker         *CallTracker
+	forwarder       PacketForwarder
+	bufferMgr       *BufferManager
+	appFilter       ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
+	selectionPolicy callregistry.SelectionPolicy
 }
 
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
 func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
 	return &UDPPacketHandler{
-		tracker:   tracker,
-		forwarder: forwarder,
-		bufferMgr: bufferMgr,
+		tracker:         tracker,
+		forwarder:       forwarder,
+		bufferMgr:       bufferMgr,
+		selectionPolicy: callregistry.StickySelectionPolicy{},
 	}
 }
 
@@ -36,6 +39,12 @@ func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, buffer
 // This supports all filter types including phone_number, sip_user, sipuri, ip_address, etc.
 func (h *UDPPacketHandler) SetApplicationFilter(filter ApplicationFilter) {
 	h.appFilter = filter
+}
+
+func (h *UDPPacketHandler) SetSelectionPolicy(policy callregistry.SelectionPolicy) {
+	if policy != nil {
+		h.selectionPolicy = policy
+	}
 }
 
 // matchesFilter checks if a packet matches any configured filter.
@@ -123,7 +132,13 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	// Check if the SIP message matches our filter (for forwarding decision)
 	// Use ApplicationFilter if available (supports phone_number, sip_user, etc.)
 	// Fall back to legacy containsUserInHeaders() if no ApplicationFilter is set
-	if !h.matchesFilter(packet, headers) {
+	directMatch := h.matchesFilter(packet, headers)
+	previouslySelected := h.bufferMgr != nil && h.bufferMgr.IsCallMatched(callID)
+	if !h.selectionPolicy.Select(callregistry.SelectionInput{
+		FilterConfigured:   true,
+		DirectMatch:        directMatch,
+		PreviouslySelected: previouslySelected,
+	}) {
 		return false
 	}
 

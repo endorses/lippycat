@@ -18,6 +18,10 @@ type tcpPacketAssembler interface {
 
 // handleTcpPackets processes TCP packets and feeds them to the assembler
 func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler tcpPacketAssembler, offlineMode ...bool) {
+	handleTcpPacketsWithConfig(pkt, layer, assembler, DefaultConfig(), offlineMode...)
+}
+
+func handleTcpPacketsWithConfig(pkt capture.PacketInfo, layer *layers.TCP, assembler tcpPacketAssembler, config *Config, offlineMode ...bool) {
 	// Set the current link type for TCP stream processing
 	if linkLayer := pkt.Packet.LinkLayer(); linkLayer != nil {
 		setCurrentLinkType(layers.LinkTypeEthernet) // Default to ethernet
@@ -31,7 +35,7 @@ func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler tcpPa
 	// Buffer the packet for potential PCAP writing
 	flow := pkt.Packet.NetworkLayer().NetworkFlow()
 	transportFlow := layer.TransportFlow()
-	BufferTCPPacket(flow, transportFlow, pkt)
+	BufferTCPPacketWithConfig(flow, transportFlow, pkt, config)
 
 	// Feed the packet to the TCP assembler for stream reconstruction
 	offline := len(offlineMode) > 0 && offlineMode[0]

@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -32,7 +34,14 @@ type recordingSDPRegistrar struct {
 	completed []string
 }
 
-func (r *recordingSDPRegistrar) RegisterSDP(callID, sdp string) { r.calls[callID] = sdp }
+func (r *recordingSDPRegistrar) ProcessReassembledSIP(packet gopacket.Packet) *data.PacketMetadata {
+	event, err := sharedsip.Parse(packet.ApplicationLayer().LayerContents(), sharedsip.ParseOptions{})
+	if err != nil {
+		return nil
+	}
+	r.calls[event.CallID] = string(event.SDP)
+	return &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: event.CallID, Method: event.Method, CseqMethod: event.CSeqMethod, ResponseCode: uint32(event.ResponseCode)}}
+}
 func (r *recordingSDPRegistrar) CompleteCall(callID string) {
 	r.completed = append(r.completed, callID)
 }
@@ -42,14 +51,22 @@ func TestTapTCPHandlerReportsTerminalDialogResponse(t *testing.T) {
 	h := NewTapTCPHandler(ch)
 	h.SetApplicationFilter(&targetSubstringFilter{target: "terminal-call"})
 	registrar := &recordingSDPRegistrar{calls: make(map[string]string)}
-	h.SetSDPRegistrar(registrar)
+	h.SetCallRegistry(registrar)
 
 	message := []byte("SIP/2.0 200 OK\r\nCall-ID: terminal-call\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n")
 	ok := h.HandleSIPMessage(message, "terminal-call", "10.0.0.1:5060", "10.0.0.2:5060",
 		testNetFlow(t, "10.0.0.1", "10.0.0.2"), testTransportFlow(t, 5060, 5060))
 
-	if !ok || len(registrar.completed) != 1 || registrar.completed[0] != "terminal-call" {
-		t.Fatalf("terminal response forwarded=%v completions=%v", ok, registrar.completed)
+	if !ok || len(registrar.completed) != 0 {
+		t.Fatalf("terminal response forwarded=%v premature completions=%v", ok, registrar.completed)
+	}
+	injected := <-ch
+	if injected.AfterEnqueue == nil {
+		t.Fatal("terminal response missing deferred completion")
+	}
+	injected.AfterEnqueue()
+	if len(registrar.completed) != 1 || registrar.completed[0] != "terminal-call" {
+		t.Fatalf("deferred completions=%v", registrar.completed)
 	}
 }
 
@@ -279,7 +296,7 @@ func TestTapHandler_TCPSDPDoesNotRetainInGlobalTracker(t *testing.T) {
 	h := NewTapTCPHandler(ch)
 	h.SetApplicationFilter(&targetSubstringFilter{target: "target"})
 	registrar := &recordingSDPRegistrar{calls: make(map[string]string)}
-	h.SetSDPRegistrar(registrar)
+	h.SetCallRegistry(registrar)
 	netFlow := testNetFlow(t, "10.0.0.1", "10.0.0.2")
 	transportFlow := testTransportFlow(t, 5060, 5060)
 

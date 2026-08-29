@@ -379,6 +379,110 @@ machinery was removed. TUI reassembly now receives its session registry's
 call-active query, and tap deterministically closes its local VoIP registry.
 Focused race tests, `make test`, and the supported non-CUDA build matrix pass.
 
+### Audit Findings Requiring Remediation (2026-08-29)
+
+The checked Phase 4 tasks are not yet fully implemented. A codebase-wide audit
+found the following remaining ownership, lifecycle, selection, boundedness, and
+concurrency defects:
+
+- [x] Separate legacy sniff registry state from output resources. `CallTracker`
+      still owns and invokes its `CallOutput` and `SniffCompletionMonitor`
+      directly (`internal/pkg/voip/calltracker.go`, `internal/pkg/voip/core.go`),
+      rather than emitting lifecycle events to an observing session-output
+      manager.
+- [x] Prevent async writer creation after legacy tracker shutdown begins.
+      `WriteSIP`/`WriteRTP` can call `GetAsyncWriter` after `Shutdown` has stopped
+      the previous pool, creating workers that are never stopped and that can
+      race output shutdown (`internal/pkg/voip/writer.go`,
+      `internal/pkg/voip/async_writer.go`).
+- [x] Make processor registry lifecycle notifications causally ordered with
+      registry mutations. Concurrent create, complete, timeout, eviction, and
+      shutdown operations can currently deliver `OnCallEnded` before
+      `OnCallStarted`, or deliver a start after shutdown
+      (`internal/pkg/voip/processor/processor.go`).
+- [x] Remove the package-global TUI `LocalCallAggregator` accessor and inject the
+      session-owned aggregator into `TUISIPHandler`. The current global pointer
+      contradicts explicit instance ownership and can retain a stopped session
+      (`internal/pkg/tui/bridge.go`, `internal/pkg/tui/tcp_handler_tui.go`).
+- [x] Implement legacy call timeout cleanup. The janitor runs, but
+      `cleanupOldCalls` is a no-op, so inactive calls persist until capacity
+      eviction or shutdown (`internal/pkg/voip/calltracker.go`).
+- [x] Clear all legacy call indexes during shutdown. `Shutdown` removes
+      `callMap` and recency entries but leaves endpoint associations, LRU state,
+      and pins populated (`internal/pkg/voip/calltracker.go`).
+- [x] Reject endpoint registration for calls that were not admitted. Legacy SDP
+      registration can add mappings after hard-capacity admission rejects the
+      call, creating stale associations outside `MaxCalls`
+      (`internal/pkg/voip/calltracker.go`, `internal/pkg/voip/rtp.go`).
+- [x] Return copies from legacy multi-call endpoint queries.
+      `GetAllCallIDsForPacket` currently returns an internal mutable slice after
+      releasing its read lock, allowing caller mutation and races with cleanup
+      (`internal/pkg/voip/rtp.go`).
+- [x] Refresh registry activity from RTP packets. The processor updates call
+      activity only from SIP, so a media-active call with no recent signaling is
+      timed out and loses its endpoint associations
+      (`internal/pkg/voip/processor/rtp_detector.go`).
+- [x] Bound media associations per call and globally. Processor, legacy, and TUI
+      trackers can accumulate arbitrarily many unique endpoints for a resident
+      call through repeated SDP updates (`internal/pkg/voip/processor/processor.go`,
+      `internal/pkg/voip/rtp.go`, `internal/pkg/tui/call_tracker.go`).
+- [x] Normalize or reject negative processor `MaxCalls` values. A negative value
+      causes every inserted call to be immediately evicted while creation still
+      returns state and emits lifecycle notifications
+      (`internal/pkg/voip/processor/processor.go`).
+- [x] Preserve selected-call policy for reassembled TCP SIP. The local TCP path
+      drops non-matching in-dialog BYE, ACK, and re-INVITE messages, while the UDP
+      path correctly inherits cached selection from the matched call
+      (`internal/pkg/processor/source/local.go`).
+- [x] Bound the local-source Call-ID-to-filter-ID cache and remove entries on
+      completion, timeout, and eviction. Its current five-minute TTL permits
+      burst growth and stale filter or LI attribution when a Call-ID is reused
+      (`internal/pkg/processor/source/local.go`).
+- [x] Permit safe Call-ID reuse in legacy session output.
+      `SniffCompletionMonitor` suppresses closure scheduling for any Call-ID in
+      its closed-call TTL set, so a new call reusing that ID can leave its writer
+      open until shutdown (`internal/pkg/voip/sniff_completion_monitor.go`).
+- [x] Make TUI endpoint associations multi-valued. Its current
+      endpoint-to-single-Call-ID map overwrites an earlier B2BUA leg sharing the
+      same media endpoint (`internal/pkg/tui/call_tracker.go`).
+- [x] Remove TUI RTP-touch state on eviction and capture reset. `lastRTPTouch` is
+      not cleared by call eviction or `Clear`, retaining Call-IDs across sessions
+      (`internal/pkg/tui/call_tracker.go`).
+- [x] Route complete reassembled TCP SIP events through tap's local registry.
+      Tap currently registers only SDP endpoints and terminal responses; an
+      SDP-less dialog is never created, and SDP-bearing calls remain `NEW` with
+      incomplete identity and activity state (`internal/pkg/voip/tcp_handler_tap.go`,
+      `internal/pkg/processor/source/local.go`).
+- [x] Preserve final-packet writer ordering for tap TCP calls. The TCP handler
+      calls `CompleteCall` before the synthesized terminal SIP packet reaches
+      the packet pipeline, allowing lifecycle-driven writer closure before the
+      final packet is written (`internal/pkg/voip/tcp_handler_tap.go`,
+      `internal/pkg/processor/processor_packet_pipeline.go`).
+- [x] Define and inject the explicit topology-aware `SelectionPolicy` contract
+      described by this phase. Selection remains embedded and duplicated across
+      the processor analyzer, tap TCP handler, and legacy paths
+      (`internal/pkg/callregistry/call_registry.go`,
+      `internal/pkg/voip/processor/sip_detector.go`).
+- [x] Finish immutable configuration injection in the legacy VoIP library.
+      Viper reads were removed, but production packet, TCP, plugin, security,
+      and output paths still consult package-global `GetConfig()` during
+      processing instead of using only construction-time snapshots
+      (`internal/pkg/voip/core.go`, `internal/pkg/voip/udp.go`,
+      `internal/pkg/voip/tcp_handler_local.go`,
+      `internal/pkg/voip/tcp_buffer.go`,
+      `internal/pkg/voip/plugin_integration.go`,
+      `internal/pkg/voip/security.go`).
+
+Audit remediation verification (2026-08-29): registry lifecycle and output
+ownership are separated; processor notifications are serialized with mutation;
+legacy, processor, and TUI association state is bounded and cleaned up; tap TCP
+uses the shared processor registry and defers terminal completion until after
+the final packet is enqueued; and a topology-aware sticky selection policy is
+injected across processor, tap/local-source, and legacy paths. Construction-time
+configuration snapshots now cover legacy packet-processing paths. Focused race
+tests, `make test` (including LI packages), and the supported non-CUDA build
+matrix pass.
+
 ### Exit Criteria
 
 - No package-global call tracker or `getTracker()` consumer remains.

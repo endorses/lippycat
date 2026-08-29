@@ -55,6 +55,7 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 	if !isValidRTP(payload) {
 		return nil
 	}
+	p.touchCalls(callIDs)
 
 	// Extract RTP header fields
 	rtpMeta := extractRTPMetadata(payload)

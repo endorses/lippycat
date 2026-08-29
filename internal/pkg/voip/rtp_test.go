@@ -55,6 +55,7 @@ func TestExtractPortFromSdp(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tracker.GetOrCreateCall(tt.callID, layers.LinkTypeEthernet)
 			// ExtractPortFromSdp doesn't return anything, it just updates the global map
 			tracker.ExtractPortFromSDP(tt.sdpLine, tt.callID)
 
@@ -333,6 +334,7 @@ a=inactive`,
 			tracker.portToCallID = make(map[string][]string)
 			tracker.mu.Unlock()
 
+			tracker.GetOrCreateCall(tt.callID, layers.LinkTypeEthernet)
 			// Extract ports from SDP
 			tracker.ExtractPortFromSDP(tt.sdpBody, tt.callID)
 

@@ -14,7 +14,11 @@ import (
 )
 
 // DefaultMaxTrackedCalls is the default maximum number of calls to track
-const DefaultMaxTrackedCalls = 5000
+const (
+	DefaultMaxTrackedCalls       = 5000
+	maxMediaEndpointsPerCall     = 64
+	maxMediaEndpointAssociations = DefaultMaxTrackedCalls * maxMediaEndpointsPerCall
+)
 
 // CallPartyInfo stores From/To information for a call
 type CallPartyInfo struct {
@@ -32,8 +36,8 @@ type CallPartyInfo struct {
 //
 // No fallbacks - exact IP:port match only.
 type CallTracker struct {
-	// Map: IP:port -> CallID
-	rtpEndpointToCallID map[string]string
+	// Map: IP:port -> CallIDs. Shared endpoints are common with B2BUAs.
+	rtpEndpointToCallIDs map[string]map[string]struct{}
 	// Map: CallID -> list of endpoints (for cleanup on eviction)
 	callIDToEndpoints map[string][]string
 	// Map: CallID -> From/To party info
@@ -58,12 +62,12 @@ func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
 		maxCalls = DefaultMaxTrackedCalls
 	}
 	return &CallTracker{
-		rtpEndpointToCallID: make(map[string]string),
-		callIDToEndpoints:   make(map[string][]string),
-		callPartyInfo:       make(map[string]*CallPartyInfo),
-		lruList:             list.New(),
-		lruIndex:            make(map[string]*list.Element),
-		maxCalls:            maxCalls,
+		rtpEndpointToCallIDs: make(map[string]map[string]struct{}),
+		callIDToEndpoints:    make(map[string][]string),
+		callPartyInfo:        make(map[string]*CallPartyInfo),
+		lruList:              list.New(),
+		lruIndex:             make(map[string]*list.Element),
+		maxCalls:             maxCalls,
 	}
 }
 
@@ -98,12 +102,63 @@ func (t *CallTracker) evictCallLocked(callID string) {
 	// This prevents deleting endpoints that were reassigned to a different call.
 	endpoints := t.callIDToEndpoints[callID]
 	for _, endpoint := range endpoints {
-		if mappedCallID, ok := t.rtpEndpointToCallID[endpoint]; ok && mappedCallID == callID {
-			delete(t.rtpEndpointToCallID, endpoint)
+		if callIDs := t.rtpEndpointToCallIDs[endpoint]; callIDs != nil {
+			delete(callIDs, callID)
+			if len(callIDs) == 0 {
+				delete(t.rtpEndpointToCallIDs, endpoint)
+			}
 		}
 	}
 	delete(t.callIDToEndpoints, callID)
 	delete(t.callPartyInfo, callID)
+	t.lastRTPTouch.Delete(callID)
+}
+
+// registerEndpointLocked adds one bounded, deduplicated endpoint association.
+func (t *CallTracker) registerEndpointLocked(callID, endpoint string) bool {
+	for _, existing := range t.callIDToEndpoints[callID] {
+		if existing == endpoint {
+			return false
+		}
+	}
+	if len(t.callIDToEndpoints[callID]) >= maxMediaEndpointsPerCall {
+		return false
+	}
+	associations := 0
+	for _, ids := range t.rtpEndpointToCallIDs {
+		associations += len(ids)
+	}
+	if associations >= maxMediaEndpointAssociations {
+		return false
+	}
+	if t.rtpEndpointToCallIDs[endpoint] == nil {
+		t.rtpEndpointToCallIDs[endpoint] = make(map[string]struct{})
+	}
+	t.rtpEndpointToCallIDs[endpoint][callID] = struct{}{}
+	t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
+	return true
+}
+
+func firstRealCallID(callIDs map[string]struct{}) string {
+	for callID := range callIDs {
+		if !strings.HasPrefix(callID, "rtp-") {
+			return callID
+		}
+	}
+	return ""
+}
+
+// callIDForEndpointLocked preserves the historical preference for the most
+// recently active owner while retaining every shared B2BUA association.
+func (t *CallTracker) callIDForEndpointLocked(endpoint string) string {
+	callIDs := t.rtpEndpointToCallIDs[endpoint]
+	for elem := t.lruList.Front(); elem != nil; elem = elem.Next() {
+		callID := elem.Value.(string)
+		if _, ok := callIDs[callID]; ok {
+			return callID
+		}
+	}
+	return ""
 }
 
 // extractIPFromEndpoint extracts the IP from an "IP:port" endpoint string.
@@ -139,7 +194,7 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16, i
 	// Check if any endpoint already has a synthetic (RTP-only) CallID
 	for _, port := range ports {
 		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
-		if existingCallID, ok := t.rtpEndpointToCallID[endpoint]; ok {
+		for existingCallID := range t.rtpEndpointToCallIDs[endpoint] {
 			if strings.HasPrefix(existingCallID, "rtp-") && syntheticCallID == "" {
 				syntheticCallID = existingCallID
 			}
@@ -167,18 +222,7 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16, i
 
 	// Helper to register an endpoint for the real CallID
 	registerEndpoint := func(endpoint, source string) {
-		t.rtpEndpointToCallID[endpoint] = callID
-
-		// Only add to callIDToEndpoints if not already present (deduplicate)
-		alreadyRegistered := false
-		for _, existing := range t.callIDToEndpoints[callID] {
-			if existing == endpoint {
-				alreadyRegistered = true
-				break
-			}
-		}
-		if !alreadyRegistered {
-			t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
+		if t.registerEndpointLocked(callID, endpoint) {
 			// Add to diagnostic buffer
 			addDiagEvent("REG", callID, endpoint, source)
 			logger.Debug("CallTracker registered endpoint",
@@ -234,14 +278,14 @@ func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, 
 	// Check if any endpoint already belongs to a real SIP call.
 	// If so, return that call ID so the caller can use it instead of synthetic.
 	// This handles the race where SIP registers endpoints just before RTP arrives.
-	if existingSrc, ok := t.rtpEndpointToCallID[srcEndpoint]; ok && !strings.HasPrefix(existingSrc, "rtp-") {
+	if existingSrc := firstRealCallID(t.rtpEndpointToCallIDs[srcEndpoint]); existingSrc != "" {
 		logger.Debug("RegisterRTPOnlyEndpoints: src endpoint belongs to SIP call, returning real call ID",
 			"endpoint", srcEndpoint,
 			"real_call", existingSrc,
 			"synthetic_call", syntheticCallID)
 		return existingSrc
 	}
-	if existingDst, ok := t.rtpEndpointToCallID[dstEndpoint]; ok && !strings.HasPrefix(existingDst, "rtp-") {
+	if existingDst := firstRealCallID(t.rtpEndpointToCallIDs[dstEndpoint]); existingDst != "" {
 		logger.Debug("RegisterRTPOnlyEndpoints: dst endpoint belongs to SIP call, returning real call ID",
 			"endpoint", dstEndpoint,
 			"real_call", existingDst,
@@ -253,26 +297,8 @@ func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, 
 	// Touch the call in LRU
 	t.touchCallLocked(syntheticCallID)
 
-	t.rtpEndpointToCallID[srcEndpoint] = syntheticCallID
-	t.rtpEndpointToCallID[dstEndpoint] = syntheticCallID
-
-	// Add both endpoints to callIDToEndpoints (deduplicated)
-	existingEndpoints := t.callIDToEndpoints[syntheticCallID]
-	hasSrc, hasDst := false, false
-	for _, ep := range existingEndpoints {
-		if ep == srcEndpoint {
-			hasSrc = true
-		}
-		if ep == dstEndpoint {
-			hasDst = true
-		}
-	}
-	if !hasSrc {
-		t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], srcEndpoint)
-	}
-	if !hasDst {
-		t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], dstEndpoint)
-	}
+	t.registerEndpointLocked(syntheticCallID, srcEndpoint)
+	t.registerEndpointLocked(syntheticCallID, dstEndpoint)
 
 	// Store party info for RTP-only calls (used as fallback in convertToTUICall)
 	// Use IP:port as From/To since we don't have SIP headers
@@ -367,19 +393,7 @@ func (t *CallTracker) ProcessSIPPacket(callID, srcIP, dstIP, payload string) {
 	for _, port := range rtpPorts {
 		endpoint := fmt.Sprintf("%s:%s", rtpIP, port)
 
-		t.rtpEndpointToCallID[endpoint] = callID
-
-		// Only add to callIDToEndpoints if not already present (deduplicate)
-		alreadyRegistered := false
-		for _, existing := range t.callIDToEndpoints[callID] {
-			if existing == endpoint {
-				alreadyRegistered = true
-				break
-			}
-		}
-		if !alreadyRegistered {
-			t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
-		}
+		t.registerEndpointLocked(callID, endpoint)
 	}
 }
 
@@ -465,13 +479,18 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 
 	// Read-lock for lookup
 	t.mu.RLock()
-	callID, found := t.rtpEndpointToCallID[dstEndpoint]
+	callID := t.callIDForEndpointLocked(dstEndpoint)
+	found := callID != ""
 	if found {
 		atomic.AddInt64(&rtpLookupDstMatch, 1)
-	} else if callID, found = t.rtpEndpointToCallID[srcEndpoint]; found {
-		atomic.AddInt64(&rtpLookupSrcMatch, 1)
+	} else {
+		callID = t.callIDForEndpointLocked(srcEndpoint)
+		found = callID != ""
+		if found {
+			atomic.AddInt64(&rtpLookupSrcMatch, 1)
+		}
 	}
-	mapSizes := [2]int{len(t.rtpEndpointToCallID), len(t.callIDToEndpoints)}
+	mapSizes := [2]int{len(t.rtpEndpointToCallIDs), len(t.callIDToEndpoints)}
 	t.mu.RUnlock()
 
 	if found {
@@ -493,7 +512,7 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 	logger.Debug("GetCallIDForRTPPacket: lookup failed",
 		"src_endpoint", srcEndpoint,
 		"dst_endpoint", dstEndpoint,
-		"rtpEndpointToCallID_size", mapSizes[0],
+		"rtpEndpointToCallIDs_size", mapSizes[0],
 		"callIDToEndpoints_size", mapSizes[1])
 	// Record miss in diagnostic buffer (only every 100th miss to avoid spam)
 	if atomic.LoadInt64(&rtpLookupFailed)%100 == 1 {
@@ -528,11 +547,12 @@ func (t *CallTracker) Clear() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.rtpEndpointToCallID = make(map[string]string)
+	t.rtpEndpointToCallIDs = make(map[string]map[string]struct{})
 	t.callIDToEndpoints = make(map[string][]string)
 	t.callPartyInfo = make(map[string]*CallPartyInfo)
 	t.lruList = list.New()
 	t.lruIndex = make(map[string]*list.Element)
+	t.lastRTPTouch.Range(func(key, _ any) bool { t.lastRTPTouch.Delete(key); return true })
 }
 
 // extractSDPBody extracts the SDP body from a SIP message

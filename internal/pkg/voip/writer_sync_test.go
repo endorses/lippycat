@@ -10,11 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAsyncWriterCannotRestartAfterTrackerShutdown(t *testing.T) {
+	tracker := NewCallTrackerWithConfig(DefaultConfig())
+	require.NotNil(t, GetAsyncWriter(tracker))
+	tracker.Shutdown()
+	require.Nil(t, GetAsyncWriter(tracker))
+}
+
 func newSyncWriterTracker(t *testing.T) *CallTracker {
 	cfg := DefaultConfig()
 	cfg.WriteVoIP = true
 	cfg.OutputFile = filepath.Join(t.TempDir(), "capture.pcap")
-	tracker := NewCallTrackerWithOutput(cfg, NewSessionOutputManager(cfg))
+	output := NewSessionOutputManager(cfg)
+	tracker := NewCallTrackerWithOutput(cfg, output)
+	t.Cleanup(func() { require.NoError(t, output.Shutdown()) })
 	t.Cleanup(tracker.Shutdown)
 	return tracker
 }
@@ -33,7 +42,7 @@ func TestSynchronousSessionWriteErrors(t *testing.T) {
 	require.ErrorIs(t, tracker.writeSIPSync("missing", testOutputPacket()), ErrCallNotFound)
 	call := tracker.GetOrCreateCall("closed", layers.LinkTypeEthernet)
 	require.NotNil(t, call)
-	require.NoError(t, tracker.output.CloseSession(call.CallID))
+	require.NoError(t, trackerOutput(t, tracker).CloseSession(call.CallID))
 	require.ErrorIs(t, tracker.writeRTPSync(call.CallID, testOutputPacket()), ErrWriterNotInitialized)
 }
 

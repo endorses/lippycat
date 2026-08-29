@@ -15,12 +15,14 @@ type VoIPPacketProcessor struct {
 	udpHandler *UDPPacketHandler
 	tcpHandler *HunterForwardHandler      // Optional: for wiring ApplicationFilter to TCP handler
 	assembler  *pipeline.ReassemblyEngine // TCP stream assembler for SIP reassembly
+	config     *Config
 }
 
 // NewVoIPPacketProcessor creates a packet processor for VoIP buffering in hunter mode
 func NewVoIPPacketProcessor(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *VoIPPacketProcessor {
 	return &VoIPPacketProcessor{
 		udpHandler: NewUDPPacketHandler(tracker, forwarder, bufferMgr),
+		config:     tracker.config,
 	}
 }
 
@@ -80,7 +82,7 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 			transportFlow := layer.TransportFlow()
 
 			// Buffer the raw packet for later forwarding when SIP message is matched
-			BufferTCPPacket(flow, transportFlow, pktInfo)
+			BufferTCPPacketWithConfig(flow, transportFlow, pktInfo, p.config)
 
 			// Feed the packet to the TCP assembler for stream reconstruction
 			if err := p.assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)); err != nil {

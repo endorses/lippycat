@@ -61,10 +61,10 @@ func TestTapTCPHandlerReportsTerminalDialogResponse(t *testing.T) {
 		t.Fatalf("terminal response forwarded=%v premature completions=%v", ok, registrar.completed)
 	}
 	injected := <-ch
-	if injected.AfterEnqueue == nil {
+	if injected.AfterProcess == nil {
 		t.Fatal("terminal response missing deferred completion")
 	}
-	injected.AfterEnqueue()
+	injected.AfterProcess()
 	if len(registrar.completed) != 1 || registrar.completed[0] != "terminal-call" {
 		t.Fatalf("deferred completions=%v", registrar.completed)
 	}

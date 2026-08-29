@@ -40,12 +40,8 @@ type TUISIPHandler struct {
 }
 
 // NewTUISIPHandler creates a handler for TUI SIP detection
-func NewTUISIPHandler(tracker *CallTracker, aggregator ...*LocalCallAggregator) *TUISIPHandler {
-	h := &TUISIPHandler{callTracker: tracker}
-	if len(aggregator) > 0 {
-		h.aggregator = aggregator[0]
-	}
-	return h
+func NewTUISIPHandler(tracker *CallTracker, aggregator *LocalCallAggregator) *TUISIPHandler {
+	return &TUISIPHandler{callTracker: tracker, aggregator: aggregator}
 }
 
 // HandleSIPMessage processes a complete SIP message detected via TCP reassembly.

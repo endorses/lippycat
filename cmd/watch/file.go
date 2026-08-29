@@ -110,12 +110,16 @@ func runFile(cmd *cobra.Command, args []string) {
 		"",              // nodesFilePath
 		insecureAllowed, // insecure - passed for remote mode switching
 	)
+	aggregator := model.PrepareLocalCallAggregator()
 
 	// Force color profile since termenv may have detected wrong profile during init
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	// Start bubbletea program with mouse support
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
+	aggregator.SetProgram(p)
+	aggregator.Start()
+	defer aggregator.Stop()
 
 	// Store program reference for packet bridge
 	tui.SetCurrentProgram(p)
@@ -135,7 +139,7 @@ func runFile(cmd *cobra.Command, args []string) {
 		tui.WaitForTUIReady()
 
 		capture.StartOfflineSnifferOrdered(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-			startFileSnifferOrdered(ctx, devices, filter, p, model.CallTracker())
+			startFileSnifferOrdered(ctx, devices, filter, p, model.CallTracker(), aggregator)
 		})
 
 		// Notify TUI that capture is complete so it can drain remaining packets
@@ -153,10 +157,10 @@ func runFile(cmd *cobra.Command, args []string) {
 // startFileSnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
 // This ensures SIP packets are processed before their corresponding RTP packets,
 // which is essential for proper call tracking and RTP-to-CallID mapping.
-func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker) {
+func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) {
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo) {
-		tui.StartPacketBridge(ch, program, pauseSignal, tracker, true)
+		tui.StartPacketBridge(ch, program, pauseSignal, tracker, true, aggregator)
 	}
 	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
 	capture.RunOfflineOrdered(devices, filter, processor)

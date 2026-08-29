@@ -186,7 +186,7 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 	srcPort := transportLayer.TransportFlow().Src().String()
 
 	tracker.mu.RLock()
-	defer tracker.mu.RUnlock()
+	var matched []string
 
 	// Try IP:PORT lookups first (more specific)
 	if networkLayer != nil {
@@ -197,21 +197,34 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 		srcEndpoint := srcIP + ":" + srcPort
 
 		if callIDs := tracker.portToCallID[dstEndpoint]; len(callIDs) > 0 {
-			return append([]string(nil), callIDs...)
+			matched = append([]string(nil), callIDs...)
 		}
-		if callIDs := tracker.portToCallID[srcEndpoint]; len(callIDs) > 0 {
-			return append([]string(nil), callIDs...)
+		if len(matched) == 0 {
+			if callIDs := tracker.portToCallID[srcEndpoint]; len(callIDs) > 0 {
+				matched = append([]string(nil), callIDs...)
+			}
 		}
 	}
 
 	// Fall back to port-only lookups (for NAT scenarios)
-	if callIDs := tracker.portToCallID[dstPort]; len(callIDs) > 0 {
-		return append([]string(nil), callIDs...)
+	if len(matched) == 0 {
+		if callIDs := tracker.portToCallID[dstPort]; len(callIDs) > 0 {
+			matched = append([]string(nil), callIDs...)
+		}
 	}
-	if callIDs := tracker.portToCallID[srcPort]; len(callIDs) > 0 {
-		return append([]string(nil), callIDs...)
+	if len(matched) == 0 {
+		if callIDs := tracker.portToCallID[srcPort]; len(callIDs) > 0 {
+			matched = append([]string(nil), callIDs...)
+		}
 	}
-	return nil
+	tracker.mu.RUnlock()
+
+	// Valid endpoint attribution is call activity even when per-call packet
+	// output is disabled, so it must participate in timeout decisions.
+	for _, callID := range matched {
+		tracker.touchCall(callID)
+	}
+	return matched
 }
 
 // CleanupPortMappings removes all port-to-callID mappings for a given callID.

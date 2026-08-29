@@ -304,8 +304,11 @@ func (p *AsyncWriterPool) worker(workerID int) {
 func (p *AsyncWriterPool) processWriteRequest(req PacketWriteRequest) error {
 	tracker := p.tracker
 
-	// Track active write
-	tracker.activeWrites.Add(1)
+	// Track work already accepted by the queue. Shutdown drains the pool before
+	// closing this gate, which keeps WaitGroup Add and Wait ordered.
+	if !tracker.beginAcceptedWrite() {
+		return ErrShuttingDown
+	}
 	defer tracker.activeWrites.Done()
 	// Requests already admitted to the pool must drain during shutdown. The
 	// stopped flag prevents new admissions while these accepted writes finish.

@@ -151,14 +151,14 @@ func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 		pbMetadata = registryMetadata
 	}
 
-	var afterEnqueue func()
+	var afterProcess func()
 	if h.callRegistry != nil && event.ResponseCode >= 200 && (event.CSeqMethod == "BYE" || event.CSeqMethod == "CANCEL") {
-		afterEnqueue = func() { h.callRegistry.CompleteCall(callID) }
+		afterProcess = func() { h.callRegistry.CompleteCall(callID) }
 	}
 
 	// Forward exactly one packet for this SIP message.
 	select {
-	case h.packetChan <- source.InjectedPacket{PacketInfo: pkt, Metadata: pbMetadata, AfterEnqueue: afterEnqueue}:
+	case h.packetChan <- source.InjectedPacket{PacketInfo: pkt, Metadata: pbMetadata, AfterProcess: afterProcess}:
 		// Sent successfully
 	default:
 		// Channel full - log warning but continue

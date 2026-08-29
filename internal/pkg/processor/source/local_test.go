@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -39,6 +40,63 @@ func TestNewLocalSource_AppliesDefaults(t *testing.T) {
 	assert.Equal(t, 10000, s.config.BufferSize)
 	assert.Equal(t, 1000, s.config.BatchBuffer)
 	assert.Equal(t, []string{"eth0"}, s.config.Interfaces)
+}
+
+func TestInjectedPacketCompletionMovesWithBatchWithoutRunning(t *testing.T) {
+	cfg := DefaultLocalSourceConfig()
+	cfg.BatchSize = 1
+	s := NewLocalSource(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.ctx = ctx
+	injected := make(chan InjectedPacket, 1)
+	s.SetTCPInjectionChannel(injected)
+	input := make(chan capture.PacketInfo)
+	done := make(chan struct{})
+	go func() {
+		s.batchingWorker(input)
+		close(done)
+	}()
+
+	var completed atomic.Bool
+	injected <- InjectedPacket{
+		PacketInfo:   buildTCPPacket(t, 1),
+		AfterProcess: func() { completed.Store(true) },
+	}
+
+	select {
+	case batch := <-s.Batches():
+		require.False(t, completed.Load(), "batching must not complete the call")
+		require.Len(t, batch.AfterProcess, 1)
+		batch.RunAfterProcess()
+		require.True(t, completed.Load())
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for injected packet batch")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batching worker did not stop")
+	}
+}
+
+func TestDroppedBatchRunsDeferredCompletion(t *testing.T) {
+	cfg := DefaultLocalSourceConfig()
+	cfg.BatchBuffer = 1
+	s := NewLocalSource(cfg)
+
+	// Occupy the only channel slot so sendBatch takes its definitive-drop path.
+	s.batches <- &PacketBatch{}
+	var completions atomic.Int32
+	s.batchMu.Lock()
+	s.currentBatch = append(s.currentBatch, &data.CapturedPacket{Data: []byte("terminal")})
+	s.currentBatchAfterProcess = append(s.currentBatchAfterProcess, func() { completions.Add(1) })
+	s.batchMu.Unlock()
+
+	s.sendBatch()
+	require.Equal(t, int32(1), completions.Load())
 }
 
 func TestNewLocalSource_PreservesCustomConfig(t *testing.T) {

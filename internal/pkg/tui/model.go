@@ -275,6 +275,26 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 // CallTracker returns the tracker owned by this TUI session.
 func (m *Model) CallTracker() *CallTracker { return m.callTracker }
 
+// PrepareLocalCallAggregator creates the session-owned aggregator before the
+// model is copied into a Bubble Tea program. The caller must attach the program
+// with SetProgram and start the aggregator before capture begins.
+func (m *Model) PrepareLocalCallAggregator() *LocalCallAggregator {
+	switch m.captureMode {
+	case components.CaptureModeLive:
+		if m.liveCallAggregator == nil {
+			m.liveCallAggregator = NewLocalCallAggregator(nil, m.callTracker)
+		}
+		return m.liveCallAggregator
+	case components.CaptureModeOffline:
+		if m.offlineCallAggregator == nil {
+			m.offlineCallAggregator = NewLocalCallAggregator(nil, m.callTracker)
+		}
+		return m.offlineCallAggregator
+	default:
+		return nil
+	}
+}
+
 // formatPCAPFilesDisplay formats PCAP files for display in the header.
 // For single file: returns the basename (e.g., "capture.pcap")
 // For multiple files: returns "file1.pcap +N more" if >2 files, or "file1.pcap, file2.pcap" if 2 files

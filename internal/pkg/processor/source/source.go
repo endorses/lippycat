@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
+	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 )
 
@@ -40,9 +41,9 @@ type PacketSource interface {
 // DNSProcessor provides DNS packet parsing and tunneling detection.
 // Implementations parse DNS packets and optionally detect tunneling behavior.
 type DNSProcessor interface {
-	// ProcessPacket parses a DNS packet and returns proto-ready metadata.
+	// ProcessPacket parses a DNS packet and returns domain metadata.
 	// Returns nil if the packet is not a DNS packet or parsing fails.
-	ProcessPacket(packet gopacket.Packet) *data.DNSMetadata
+	ProcessPacket(packet gopacket.Packet) *types.DNSMetadata
 
 	// Stop stops the DNS processor and releases resources.
 	Stop()

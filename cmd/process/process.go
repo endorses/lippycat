@@ -227,6 +227,8 @@ func init() {
 	_ = viper.BindPFlag("processor.upstream_addr", ProcessCmd.Flags().Lookup("processor"))
 	_ = viper.BindPFlag("processor.max_hunters", ProcessCmd.Flags().Lookup("max-hunters"))
 	_ = viper.BindPFlag("processor.max_subscribers", ProcessCmd.Flags().Lookup("max-subscribers"))
+	_ = viper.BindPFlag("processor.events.allow_sensitive_fields", ProcessCmd.Flags().Lookup("event-allow-sensitive-fields"))
+	_ = viper.BindPFlag("processor.events.allow_file_metadata", ProcessCmd.Flags().Lookup("event-allow-file-metadata"))
 	_ = viper.BindPFlag("processor.write_file", ProcessCmd.Flags().Lookup("write-file"))
 	_ = viper.BindPFlag("processor.display_stats", ProcessCmd.Flags().Lookup("stats"))
 	_ = viper.BindPFlag("processor.enable_detection", ProcessCmd.Flags().Lookup("enable-detection"))

@@ -153,6 +153,8 @@ An implementation reachability audit found that the conservative sensitive-field
 and file-metadata authorization policy could only be enabled by unit tests. The
 processor and every tap command path now expose explicit, default-deny flags and
 configuration keys for those permissions, while file content remains excluded.
+A follow-up configuration audit bound those flags to their Viper keys so explicit
+CLI authorization reliably takes precedence over configured default-deny values.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

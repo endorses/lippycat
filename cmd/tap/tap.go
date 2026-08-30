@@ -313,6 +313,8 @@ func init() {
 	_ = viper.BindPFlag("tap.tap_id", TapCmd.PersistentFlags().Lookup("id"))
 	_ = viper.BindPFlag("tap.max_hunters", TapCmd.PersistentFlags().Lookup("max-hunters"))
 	_ = viper.BindPFlag("tap.max_subscribers", TapCmd.PersistentFlags().Lookup("max-subscribers"))
+	_ = viper.BindPFlag("tap.events.allow_sensitive_fields", TapCmd.PersistentFlags().Lookup("event-allow-sensitive-fields"))
+	_ = viper.BindPFlag("tap.events.allow_file_metadata", TapCmd.PersistentFlags().Lookup("event-allow-file-metadata"))
 	_ = viper.BindPFlag("tap.processor_addr", TapCmd.PersistentFlags().Lookup("processor"))
 	// Also bind to old key for backward compatibility with config files
 	_ = viper.BindPFlag("tap.upstream_addr", TapCmd.PersistentFlags().Lookup("processor"))

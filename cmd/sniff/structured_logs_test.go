@@ -13,6 +13,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/testutil/eventfixture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
@@ -101,6 +102,37 @@ func TestSniffProducesNormalizedEventsWithoutLogDirectory(t *testing.T) {
 	require.Equal(t, input, dnsEvent.Envelope().Provenance.InputFile)
 	require.Equal(t, time.Unix(10, 123), dnsEvent.Envelope().Timestamp)
 	require.NotEmpty(t, dnsEvent.Envelope().EventID)
+}
+
+func TestSniffSharedFixtureProducesReassembledHTTPEvent(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "phase4.pcap")
+	require.NoError(t, os.WriteFile(input, []byte("phase4 fixture identity"), 0o600))
+	sink := &sniffEventSink{}
+	session, err := newSniffEventSession("", []string{input}, "phase4-equivalence", sink)
+	require.NoError(t, err)
+	packets, err := eventfixture.SegmentedHTTP()
+	require.NoError(t, err)
+	for _, packet := range packets {
+		packet.SourcePath = input
+		session.observe(packet)
+	}
+	session.analysis.EOF()
+	require.NoError(t, session.dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var httpEvents []events.HTTPEvent
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			httpEvents = append(httpEvents, event.(events.HTTPEvent))
+		}
+	}
+	require.Len(t, httpEvents, 1)
+	require.Equal(t, "GET", httpEvents[0].Method)
+	require.Equal(t, "/phase4", httpEvents[0].URI)
+	require.Equal(t, "parity.example.test", httpEvents[0].Host)
+	require.True(t, eventfixture.BaseTime.Add(2*time.Second).Equal(httpEvents[0].Envelope().Timestamp))
+	require.Equal(t, input, httpEvents[0].Envelope().Provenance.InputFile)
 }
 
 func TestSniffDistinguishesOfflineInputsWithSameBasename(t *testing.T) {

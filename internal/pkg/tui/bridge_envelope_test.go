@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/endorses/lippycat/internal/testutil/eventfixture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -131,4 +132,60 @@ func TestEnvelopeBridgePublishesOfflineEventsWithFileProvenanceBeforeEOF(t *test
 	require.NotEmpty(t, envelope.EventID)
 	require.NotEmpty(t, envelope.ProducerSessionID)
 	require.NotZero(t, envelope.EventSequence)
+}
+
+func TestWatchLiveAndFileSharedFixtureProduceEquivalentHTTPEvents(t *testing.T) {
+	type result struct {
+		event events.HTTPEvent
+		loss  uint64
+	}
+	run := func(t *testing.T, preserveAll bool, kind pipeline.SourceKind, source string) result {
+		t.Helper()
+		ResetBridgeStats()
+		ClearPendingPackets()
+		ResetTUIReady()
+		SignalTUIReady()
+		SetVoIPModeEnabled(false)
+		envelopes, err := eventfixture.Envelopes(kind, source)
+		require.NoError(t, err)
+		input := make(chan *pipeline.PacketEnvelope, len(envelopes))
+		for _, envelope := range envelopes {
+			input <- envelope
+		}
+		close(input)
+		var batches []types.EventBatch
+		StartEnvelopeBridge(input, nil, NewPauseSignal(), nil, preserveAll, nil, LocalEventAnalysisOptions{
+			NodeID: "watch-local", SourceOrdering: []string{source},
+			deliver: func(batch types.EventBatch) { batches = append(batches, batch) },
+		})
+		var got result
+		var count int
+		for _, batch := range batches {
+			for _, loss := range batch.Losses {
+				got.loss += loss.Count
+			}
+			for _, event := range batch.Events {
+				if event.Kind() == events.KindHTTP {
+					got.event = event.(events.HTTPEvent)
+					count++
+				}
+			}
+		}
+		require.Equal(t, 1, count)
+		require.Zero(t, got.loss)
+		return got
+	}
+
+	live := run(t, false, pipeline.SourceLiveCapture, "eth-test")
+	file := run(t, true, pipeline.SourcePCAPReplay, "/captures/phase4.pcap")
+	for _, event := range []events.HTTPEvent{live.event, file.event} {
+		require.Equal(t, "GET", event.Method)
+		require.Equal(t, "/phase4", event.URI)
+		require.Equal(t, "parity.example.test", event.Host)
+		require.True(t, eventfixture.BaseTime.Add(2*time.Second).Equal(event.Envelope().Timestamp))
+	}
+	require.Equal(t, "live", live.event.Envelope().Provenance.CaptureSource)
+	require.Equal(t, "eth-test", live.event.Envelope().Provenance.InterfaceName)
+	require.Equal(t, "pcap", file.event.Envelope().Provenance.CaptureSource)
+	require.Equal(t, "/captures/phase4.pcap", file.event.Envelope().Provenance.InputFile)
 }

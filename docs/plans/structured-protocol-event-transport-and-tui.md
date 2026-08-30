@@ -241,6 +241,15 @@ mixing, and silent dispatcher-level TUI loss. Focused race tests, specialized
 `cli`, `tui`, `processor`, and `tap` build-tag suites, and the complete
 `make test` suite (including localhost integration tests outside the sandbox)
 pass.
+An implementation follow-up corrected the remaining local parity gap for
+stateful application protocols: the shared runtime now feeds raw TCP through
+the project's bounded connection-aware reassembler and frames complete HTTP,
+TLS, and SMTP messages before invoking the existing semantic parsers. Events
+retain final-byte capture timestamps and source provenance, while mid-flow or
+gapped streams are partial and incomplete or oversized framing stays bounded.
+A shared segmented HTTP fixture now verifies equivalent normalized output at
+the processor, tap-local, sniff, watch-live, and watch-file composition
+boundaries, subject only to their documented provenance differences.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

@@ -142,9 +142,15 @@ func (c timestampContext) GetCaptureInfo() gopacket.CaptureInfo { return c.ci }
 
 // Assemble feeds a TCP packet to the assembler, tagged with its capture timestamp.
 func (a *TCPAssembler) Assemble(netFlow gopacket.Flow, tcp *layers.TCP, ts time.Time) {
+	a.AssembleCaptureInfo(netFlow, tcp, gopacket.CaptureInfo{Timestamp: ts})
+}
+
+// AssembleCaptureInfo feeds a TCP packet to the assembler while preserving
+// caller-owned ancillary context for reassembled application messages.
+func (a *TCPAssembler) AssembleCaptureInfo(netFlow gopacket.Flow, tcp *layers.TCP, ci gopacket.CaptureInfo) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.asm.AssembleWithContext(netFlow, tcp, timestampContext{ci: gopacket.CaptureInfo{Timestamp: ts}})
+	a.asm.AssembleWithContext(netFlow, tcp, timestampContext{ci: ci})
 }
 
 // AssembleTCP implements the transitional packet-assembler contract used while

@@ -54,16 +54,16 @@ type Config struct {
 type Stats struct{ Observed, Emitted, Invalid, Dropped uint64 }
 
 type Runtime struct {
-	mu          sync.Mutex
-	cfg         Config
-	identity    *flowid.Cache
-	connections *conntrack.Tracker
-	files       *fileanalysis.Analyzer
-	dns         *dnsparser.Parser
-	email       *emailparser.Parser
-	nextExpiry  time.Time
-	closed      bool
-	stats       Stats
+	mu           sync.Mutex
+	cfg          Config
+	identity     *flowid.Cache
+	connections  *conntrack.Tracker
+	tcpAssembler *capture.TCPAssembler
+	files        *fileanalysis.Analyzer
+	dns          *dnsparser.Parser
+	nextExpiry   time.Time
+	closed       bool
+	stats        Stats
 }
 
 func New(cfg Config) (*Runtime, error) {
@@ -104,7 +104,7 @@ func (r *Runtime) resetState() error {
 		return fmt.Errorf("initialize file analysis: %w", err)
 	}
 	r.dns = dnsparser.NewParser()
-	r.email = emailparser.NewParser()
+	r.resetReassembly()
 	r.nextExpiry = time.Time{}
 	return nil
 }
@@ -165,8 +165,11 @@ func (r *Runtime) ObservePacket(source Source, info capture.PacketInfo) error {
 	if parsed := r.dns.Parse(info.Packet); parsed != nil {
 		meta.Dns = dnsToProto(parsed)
 	}
-	if tcp, ok := info.Packet.Layer(layers.LayerTypeTCP).(*layers.TCP); ok && meta.Email == nil {
-		meta.Email = r.smtpToProto(tcp.Payload)
+	// Stateful application protocols are emitted from the bounded TCP
+	// reassembly path below. Clear packet-local guesses to avoid premature or
+	// duplicate events when a message spans segments.
+	if _, ok := info.Packet.Layer(layers.LayerTypeTCP).(*layers.TCP); ok {
+		meta.Tls, meta.Http, meta.Email = nil, nil, nil
 	}
 	timestamp := time.Time{}
 	if packetMetadata := info.Packet.Metadata(); packetMetadata != nil {
@@ -202,21 +205,19 @@ func dnsToProto(m *types.DNSMetadata) *data.DNSMetadata {
 }
 
 func (r *Runtime) smtpToProto(payload []byte) *data.EmailMetadata {
+	parser := emailparser.NewParser()
 	metadata := &types.EmailMetadata{}
 	recognized := false
 	for _, line := range strings.Split(string(payload), "\n") {
-		if r.email.ParseLine(line, metadata, false) {
+		if parser.ParseLine(line, metadata, false) {
 			recognized = true
 		}
-		r.email.ParseDataHeader(line, metadata)
+		parser.ParseDataHeader(line, metadata)
 	}
 	if !recognized && metadata.Subject == "" && metadata.MessageID == "" {
 		return nil
 	}
-	return &data.EmailMetadata{
-		MailFrom: metadata.MailFrom, RcptTo: append([]string(nil), metadata.RcptTo...),
-		Subject: metadata.Subject, MessageId: metadata.MessageID,
-	}
+	return &data.EmailMetadata{MailFrom: metadata.MailFrom, RcptTo: append([]string(nil), metadata.RcptTo...), Subject: metadata.Subject, MessageId: metadata.MessageID}
 }
 
 func (r *Runtime) observeCaptured(source Source, raw *data.CapturedPacket) (time.Time, error) {
@@ -248,6 +249,9 @@ func (r *Runtime) observeCaptured(source Source, raw *data.CapturedPacket) (time
 		r.emit(ev)
 	}
 	r.emitMetadata(env, raw.Metadata)
+	if raw.Metadata.Http == nil && raw.Metadata.Tls == nil && raw.Metadata.Email == nil {
+		r.observeTCP(source, packet, ts)
+	}
 	return ts, nil
 }
 
@@ -352,6 +356,9 @@ func (r *Runtime) emitHTTPFile(env events.Envelope, meta *data.HTTPMetadata) {
 }
 
 func (r *Runtime) expire(now time.Time) {
+	if r.tcpAssembler != nil {
+		r.tcpAssembler.FlushCloseOlderThan(now.Add(-r.cfg.Connections.IdleTimeout))
+	}
 	for _, ev := range r.connections.Expire(now) {
 		r.emit(ev)
 	}
@@ -369,6 +376,9 @@ func (r *Runtime) EOF() {
 	if r.closed {
 		return
 	}
+	if r.tcpAssembler != nil {
+		r.tcpAssembler.FlushAll()
+	}
 	for _, ev := range r.connections.Close() {
 		r.emit(ev)
 	}
@@ -378,6 +388,9 @@ func (r *Runtime) Reset() error {
 	defer r.mu.Unlock()
 	if r.closed {
 		return fmt.Errorf("event analysis runtime is closed")
+	}
+	if r.tcpAssembler != nil {
+		r.tcpAssembler.FlushAll()
 	}
 	for _, ev := range r.connections.Close() {
 		r.emit(ev)
@@ -389,6 +402,9 @@ func (r *Runtime) Close() {
 	defer r.mu.Unlock()
 	if r.closed {
 		return
+	}
+	if r.tcpAssembler != nil {
+		r.tcpAssembler.FlushAll()
 	}
 	for _, ev := range r.connections.Close() {
 		r.emit(ev)

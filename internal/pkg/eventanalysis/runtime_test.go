@@ -2,6 +2,7 @@ package eventanalysis
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 	"sync"
 	"testing"
@@ -248,4 +249,97 @@ func udpPacket(t *testing.T, sourcePort, destinationPort uint16) []byte {
 	buffer := gopacket.NewSerializeBuffer()
 	require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, udp, gopacket.Payload([]byte("payload"))))
 	return buffer.Bytes()
+}
+
+func tcpPacket(t *testing.T, sourcePort, destinationPort uint16, seq uint32, syn bool, payload []byte, ts time.Time) capture.PacketInfo {
+	t.Helper()
+	eth := &layers.Ethernet{SrcMAC: net.HardwareAddr{0, 1, 2, 3, 4, 5}, DstMAC: net.HardwareAddr{6, 7, 8, 9, 10, 11}, EthernetType: layers.EthernetTypeIPv4}
+	ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolTCP, SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2)}
+	tcp := &layers.TCP{SrcPort: layers.TCPPort(sourcePort), DstPort: layers.TCPPort(destinationPort), Seq: seq, SYN: syn, ACK: !syn, Window: 65535}
+	require.NoError(t, tcp.SetNetworkLayerForChecksum(ip))
+	buffer := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, tcp, gopacket.Payload(payload)))
+	pkt := gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
+	pkt.Metadata().Timestamp = ts
+	return capture.PacketInfo{Packet: pkt, LinkType: layers.LinkTypeEthernet, Interface: "fixture"}
+}
+
+func TestRuntimeReassemblesSegmentedApplicationProtocols(t *testing.T) {
+	tests := []struct {
+		name     string
+		port     uint16
+		payload  []byte
+		split    int
+		kind     events.Kind
+		validate func(t *testing.T, event events.Event)
+	}{
+		{name: "http", port: 80, payload: []byte("GET /split HTTP/1.1\r\nHost: example.test\r\n\r\n"), split: 29, kind: events.KindHTTP, validate: func(t *testing.T, event events.Event) {
+			httpEvent := event.(events.HTTPEvent)
+			require.Equal(t, "GET", httpEvent.Method)
+			require.Equal(t, "example.test", httpEvent.Host)
+		}},
+		{name: "smtp", port: 25, payload: []byte("MAIL FROM:<alice@example.test>\r\n"), split: 7, kind: events.KindSMTP, validate: func(t *testing.T, event events.Event) {
+			require.Equal(t, "alice@example.test", event.(events.SMTPEvent).MailFrom)
+		}},
+		{name: "tls", port: 443, payload: testClientHello(), split: 3, kind: events.KindTLS, validate: func(t *testing.T, event events.Event) {
+			require.Equal(t, "TLS 1.2", event.(events.TLSEvent).Version)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, dispatcher, sink := testRuntime(t, 32)
+			base := time.Unix(100, 0)
+			require.NoError(t, r.ObservePacket(Source{NodeID: "node", CaptureSource: "fixture"}, tcpPacket(t, 40000, tc.port, 1000, true, nil, base)))
+			require.NoError(t, r.ObservePacket(Source{NodeID: "node", CaptureSource: "fixture"}, tcpPacket(t, 40000, tc.port, 1001, false, tc.payload[:tc.split], base.Add(time.Second))))
+			require.NoError(t, dispatcher.Flush(context.Background()))
+			sink.mu.Lock()
+			for _, event := range sink.events {
+				require.NotEqual(t, tc.kind, event.Kind(), "incomplete segment emitted an application event")
+			}
+			sink.mu.Unlock()
+			completion := base.Add(2 * time.Second)
+			require.NoError(t, r.ObservePacket(Source{NodeID: "node", CaptureSource: "fixture"}, tcpPacket(t, 40000, tc.port, 1001+uint32(tc.split), false, tc.payload[tc.split:], completion)))
+			r.EOF()
+			require.NoError(t, dispatcher.Close(context.Background()))
+			sink.mu.Lock()
+			defer sink.mu.Unlock()
+			var matched []events.Event
+			for _, event := range sink.events {
+				if event.Kind() == tc.kind {
+					matched = append(matched, event)
+				}
+			}
+			require.Len(t, matched, 1)
+			require.Equal(t, completion, matched[0].Envelope().Timestamp)
+			tc.validate(t, matched[0])
+		})
+	}
+}
+
+func TestReassembledMidFlowApplicationEventIsPartial(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 16)
+	info := tcpPacket(t, 40000, 80, 5000, false, []byte("GET /mid HTTP/1.1\r\nHost: partial.test\r\n\r\n"), time.Unix(50, 0))
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, info))
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			require.True(t, event.Envelope().Partial)
+			return
+		}
+	}
+	t.Fatal("missing HTTP event")
+}
+
+func testClientHello() []byte {
+	body := binary.BigEndian.AppendUint16(nil, 0x0303)
+	body = append(body, make([]byte, 32)...)
+	body = append(body, 0, 0, 2, 0, 0x2f, 1, 0, 0, 0)
+	handshake := []byte{1, byte(len(body) >> 16), byte(len(body) >> 8), byte(len(body))}
+	handshake = append(handshake, body...)
+	record := []byte{22, 3, 1}
+	record = binary.BigEndian.AppendUint16(record, uint16(len(handshake)))
+	return append(record, handshake...)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
+	"github.com/endorses/lippycat/internal/testutil/eventfixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -218,4 +219,35 @@ func TestProtocolEventsPropagateFilteredCaptureProvenance(t *testing.T) {
 		require.Equal(t, events.CaptureScopeFiltered, event.Envelope().CaptureScope)
 		require.True(t, event.Envelope().Partial)
 	}
+}
+
+func TestProcessorAndTapSharedFixtureProduceEquivalentHTTPEvents(t *testing.T) {
+	fixture, err := eventfixture.Captured()
+	require.NoError(t, err)
+	run := func(t *testing.T, processorID, sourceID string) events.HTTPEvent {
+		t.Helper()
+		p, err := New(Config{ListenAddr: ":0", ProcessorID: processorID, EventQueueSize: 32})
+		require.NoError(t, err)
+		sink := &collectingSink{}
+		require.NoError(t, p.RegisterEventSink(sink, events.KindHTTP))
+		require.NoError(t, p.eventDispatcher.Start(context.Background()))
+		p.emitProtocolEvents(sourceID, fixture)
+		p.eventRuntime.EOF()
+		require.NoError(t, p.eventDispatcher.Close(context.Background()))
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		require.Len(t, sink.events, 1)
+		return sink.events[0].(events.HTTPEvent)
+	}
+	processorEvent := run(t, "processor-test", "hunter-a")
+	tapEvent := run(t, "tap-test", "tap-test-local")
+	for _, event := range []events.HTTPEvent{processorEvent, tapEvent} {
+		require.Equal(t, "GET", event.Method)
+		require.Equal(t, "/phase4", event.URI)
+		require.Equal(t, "parity.example.test", event.Host)
+		require.True(t, eventfixture.BaseTime.Add(2*time.Second).Equal(event.Envelope().Timestamp))
+	}
+	require.Equal(t, "hunter-a", processorEvent.Envelope().NodeID)
+	require.Equal(t, "tap-test", tapEvent.Envelope().NodeID)
+	require.Equal(t, "tap-test-local", tapEvent.Envelope().Provenance.CaptureSource)
 }

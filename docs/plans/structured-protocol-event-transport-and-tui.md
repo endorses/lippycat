@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Proposed
+**Status:** Phase 1 complete
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -31,28 +31,28 @@ exclusive per producer session.
 
 ## Phase 1 — Event identity and protobuf contract
 
-- [ ] Add event identity and producer-session metadata to
+- [x] Add event identity and producer-session metadata to
       `internal/pkg/events.Envelope`, with constructors that assign identity
       before dispatcher enqueue.
-- [ ] Define deterministic session and ordering rules for offline PCAP analysis;
+- [x] Define deterministic session and ordering rules for offline PCAP analysis;
       use random session IDs for live nodes.
-- [ ] Add `api/proto/events/v1/events.proto` with a versioned
+- [x] Add `api/proto/events/v1/events.proto` with a versioned
       `lippycat.events.v1` package containing:
-  - [ ] common envelope, flow, provenance, capture-scope, and loss types;
-  - [ ] typed conn, DNS, TLS, HTTP, SMTP, and file-metadata payloads;
-  - [ ] `ProtocolEvent` with a typed `oneof`;
-  - [ ] event batches with producer session, batch sequence, first/last event
+  - [x] common envelope, flow, provenance, capture-scope, and loss types;
+  - [x] typed conn, DNS, TLS, HTTP, SMTP, and file-metadata payloads;
+  - [x] `ProtocolEvent` with a typed `oneof`;
+  - [x] event batches with producer session, batch sequence, first/last event
         sequence, and loss counters; and
-  - [ ] subscription request/control messages that support event-kind and node
+  - [x] subscription request/control messages that support event-kind and node
         constraints.
-- [ ] Update protobuf generation without renaming the existing unversioned
+- [x] Update protobuf generation without renaming the existing unversioned
       `data` and `management` APIs.
-- [ ] Add strict adapters between protobuf values and every supported
+- [x] Add strict adapters between protobuf values and every supported
       `events.Event` type; validate addresses, ports, timestamps, identity,
       collection sizes, and content policy.
-- [ ] Preserve unknown protobuf fields and report unsupported `oneof` kinds as
+- [x] Preserve unknown protobuf fields and report unsupported `oneof` kinds as
       compatibility omissions rather than failing an entire stream.
-- [ ] Add round-trip, malformed-input, unknown-field, and mixed-capability tests.
+- [x] Add round-trip, malformed-input, unknown-field, and mixed-capability tests.
 
 **Gate:** Every current metadata event round-trips without semantic loss, and
 the contract contains no TUI layout or log-rendering fields.

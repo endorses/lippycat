@@ -20,6 +20,11 @@ type Config struct {
 	DropPolicy      DropPolicy
 	WarningInterval time.Duration
 	Logger          *slog.Logger
+	Producer        IdentityAssigner
+}
+
+type IdentityAssigner interface {
+	Assign(Event) Event
 }
 
 type DropPolicy string
@@ -54,6 +59,7 @@ type Dispatcher struct {
 	cfg                                                    Config
 	queue                                                  chan dispatchItem
 	mu                                                     sync.RWMutex
+	admissionMu                                            sync.Mutex
 	registrations                                          []*registration
 	started, stopped                                       bool
 	ctx                                                    context.Context
@@ -134,6 +140,15 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 		d.dropped.Add(1)
 		return false
 	}
+	d.admissionMu.Lock()
+	defer d.admissionMu.Unlock()
+	if d.cfg.Producer != nil {
+		ev = d.cfg.Producer.Assign(ev)
+		if ev == nil || !hasDeliveryIdentity(ev.Envelope()) {
+			d.dropped.Add(1)
+			return false
+		}
+	}
 	item := dispatchItem{event: ev}
 	select {
 	case d.queue <- item:
@@ -143,6 +158,10 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 		d.dropped.Add(1)
 		return false
 	}
+}
+
+func hasDeliveryIdentity(env Envelope) bool {
+	return env.NodeID != "" && env.EventID != "" && env.ProducerSessionID != "" && env.EventSequence != 0
 }
 
 func (d *Dispatcher) runDispatcher() {

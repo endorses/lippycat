@@ -169,3 +169,71 @@ func TestDispatcherRejectsUnsupportedDropPolicy(t *testing.T) {
 	_, err := NewDispatcher(Config{QueueSize: 1, DropPolicy: "block"})
 	require.ErrorContains(t, err, "unsupported event drop policy")
 }
+
+func TestDispatcherAssignsIdentityBeforeSinkEnqueue(t *testing.T) {
+	producer, err := NewOfflineProducer("processor", OfflineSession{InputIdentity: "capture", AnalysisProfile: "v1"})
+	require.NoError(t, err)
+	sink := &testSink{}
+	d, err := NewDispatcher(Config{QueueSize: 2, Producer: producer})
+	require.NoError(t, err)
+	require.NoError(t, d.Register(sink))
+	require.NoError(t, d.Start(context.Background()))
+	require.True(t, d.Enqueue(NewDNSEvent(Envelope{NodeID: "hunter"})))
+	require.NoError(t, d.Close(context.Background()))
+	require.Equal(t, "processor", sink.events[0].Envelope().NodeID)
+	require.Equal(t, "hunter", sink.events[0].Envelope().Provenance.CaptureSource)
+	require.Equal(t, producer.SessionID(), sink.events[0].Envelope().ProducerSessionID)
+	require.Equal(t, uint64(1), sink.events[0].Envelope().EventSequence)
+	require.NotEmpty(t, sink.events[0].Envelope().EventID)
+}
+
+func TestDispatcherSerializesIdentityAndAdmission(t *testing.T) {
+	producer, err := NewOfflineProducer("processor", OfflineSession{InputIdentity: "capture", AnalysisProfile: "v1"})
+	require.NoError(t, err)
+	assigner := &blockingAssigner{producer: producer, entered: make(chan struct{}, 2), release: make(chan struct{})}
+	sink := &testSink{}
+	d, err := NewDispatcher(Config{QueueSize: 2, Producer: assigner})
+	require.NoError(t, err)
+	require.NoError(t, d.Register(sink))
+	require.NoError(t, d.Start(context.Background()))
+
+	results := make(chan bool, 2)
+	go func() { results <- d.Enqueue(NewDNSEvent(Envelope{})) }()
+	<-assigner.entered
+	go func() { results <- d.Enqueue(NewDNSEvent(Envelope{})) }()
+	select {
+	case <-assigner.entered:
+		t.Fatal("second identity assignment entered before first event admission")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(assigner.release)
+	require.True(t, <-results)
+	require.True(t, <-results)
+	require.NoError(t, d.Close(context.Background()))
+	require.Equal(t, uint64(1), sink.events[0].Envelope().EventSequence)
+	require.Equal(t, uint64(2), sink.events[1].Envelope().EventSequence)
+}
+
+type blockingAssigner struct {
+	producer *Producer
+	entered  chan struct{}
+	release  chan struct{}
+	once     sync.Once
+}
+
+func (a *blockingAssigner) Assign(event Event) Event {
+	a.entered <- struct{}{}
+	a.once.Do(func() { <-a.release })
+	return a.producer.Assign(event)
+}
+
+func TestDispatcherRejectsUnidentifiedEventFromConfiguredAssigner(t *testing.T) {
+	producers, err := NewLiveProducerSet()
+	require.NoError(t, err)
+	d, err := NewDispatcher(Config{QueueSize: 1, Producer: producers})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	require.False(t, d.Enqueue(NewDNSEvent(Envelope{})))
+	require.Equal(t, uint64(1), d.Stats().Dropped)
+	require.NoError(t, d.Close(context.Background()))
+}

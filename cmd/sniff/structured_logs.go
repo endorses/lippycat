@@ -77,7 +77,11 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 	if queueSize <= 0 {
 		queueSize = 10000
 	}
-	d, err := events.NewDispatcher(events.Config{QueueSize: eventSize, SinkQueueSize: eventSize, DropPolicy: events.DropPolicy(viper.GetString("events.drop_policy"))})
+	producer, err := events.NewLiveProducer("local")
+	if err != nil {
+		return nil, fmt.Errorf("initialize event identity: %w", err)
+	}
+	d, err := events.NewDispatcher(events.Config{QueueSize: eventSize, SinkQueueSize: eventSize, DropPolicy: events.DropPolicy(viper.GetString("events.drop_policy")), Producer: producer})
 	if err != nil {
 		return nil, err
 	}

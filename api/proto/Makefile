@@ -4,7 +4,7 @@
 PROTOC = protoc
 
 # Protobuf files
-PROTO_FILES = data.proto management.proto
+PROTO_FILES = data.proto management.proto events/v1/events.proto
 
 # Output directory for generated Go files
 OUT_DIR = ../gen
@@ -12,10 +12,11 @@ OUT_DIR = ../gen
 # Go package paths
 DATA_PKG = github.com/endorses/lippycat/api/gen/data
 MGMT_PKG = github.com/endorses/lippycat/api/gen/management
+EVENTS_V1_PKG = github.com/endorses/lippycat/api/gen/events/v1
 
 .PHONY: all clean check-deps
 
-all: check-deps $(OUT_DIR)/data $(OUT_DIR)/management
+all: check-deps $(OUT_DIR)/data $(OUT_DIR)/management $(OUT_DIR)/events/v1
 	@echo "Generating Go code from protobuf definitions..."
 	$(PROTOC) --go_out=$(OUT_DIR)/data --go_opt=paths=source_relative \
 		--go-grpc_out=$(OUT_DIR)/data --go-grpc_opt=paths=source_relative \
@@ -23,6 +24,8 @@ all: check-deps $(OUT_DIR)/data $(OUT_DIR)/management
 	$(PROTOC) --go_out=$(OUT_DIR)/management --go_opt=paths=source_relative \
 		--go-grpc_out=$(OUT_DIR)/management --go-grpc_opt=paths=source_relative \
 		management.proto
+	$(PROTOC) --go_out=$(OUT_DIR) --go_opt=paths=source_relative \
+		events/v1/events.proto
 	@echo "✅ Protobuf generation complete"
 
 $(OUT_DIR)/data:
@@ -30,6 +33,9 @@ $(OUT_DIR)/data:
 
 $(OUT_DIR)/management:
 	mkdir -p $(OUT_DIR)/management
+
+$(OUT_DIR)/events/v1:
+	mkdir -p $(OUT_DIR)/events/v1
 
 check-deps:
 	@which protoc > /dev/null || (echo "❌ protoc not found. Install with: sudo apt install protobuf-compiler" && exit 1)
@@ -40,6 +46,7 @@ check-deps:
 clean:
 	rm -rf $(OUT_DIR)/data/*.pb.go
 	rm -rf $(OUT_DIR)/management/*.pb.go
+	rm -rf $(OUT_DIR)/events/v1/*.pb.go
 	@echo "✅ Cleaned generated files"
 
 install-deps:

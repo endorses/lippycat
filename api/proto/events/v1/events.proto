@@ -1,0 +1,274 @@
+syntax = "proto3";
+
+package lippycat.events.v1;
+
+option go_package = "github.com/endorses/lippycat/api/gen/events/v1;eventsv1";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// EventKind identifies a normalized event payload supported by this API major.
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  EVENT_KIND_CONN = 1;
+  EVENT_KIND_DNS = 2;
+  EVENT_KIND_TLS = 3;
+  EVENT_KIND_HTTP = 4;
+  EVENT_KIND_SMTP = 5;
+  EVENT_KIND_FILE_METADATA = 6;
+}
+
+enum CaptureScope {
+  CAPTURE_SCOPE_UNSPECIFIED = 0;
+  CAPTURE_SCOPE_FULL = 1;
+  CAPTURE_SCOPE_FILTERED = 2;
+}
+
+enum LossKind {
+  LOSS_KIND_UNSPECIFIED = 0;
+  LOSS_KIND_CAPTURE = 1;
+  LOSS_KIND_ANALYSIS = 2;
+  LOSS_KIND_DISPATCH = 3;
+  LOSS_KIND_BUFFER = 4;
+  LOSS_KIND_TRANSPORT = 5;
+  LOSS_KIND_SUBSCRIBER = 6;
+  LOSS_KIND_UNSUPPORTED_EVENT = 7;
+  LOSS_KIND_POLICY_OMISSION = 8;
+}
+
+message FlowTuple {
+  uint32 protocol = 1;
+  string source_address = 2;
+  string destination_address = 3;
+  uint32 source_port = 4;
+  uint32 destination_port = 5;
+}
+
+// SourceProvenance describes where an observation originated. Relays append
+// processor node IDs without replacing the producer or capture source.
+message SourceProvenance {
+  string capture_source = 1;
+  string interface_name = 2;
+  uint32 interface_index = 3;
+  string input_file = 4;
+  repeated string processor_node_ids = 5;
+}
+
+message EventEnvelope {
+  google.protobuf.Timestamp timestamp = 1;
+  string uid = 2;
+  string community_id = 3;
+  string node_id = 4;
+  FlowTuple flow = 5;
+  CaptureScope capture_scope = 6;
+  bool partial = 7;
+  SourceProvenance provenance = 8;
+  string event_id = 9;
+  string producer_session_id = 10;
+  uint64 event_sequence = 11;
+}
+
+message ConnEvent {
+  string service = 1;
+  google.protobuf.Duration duration = 2;
+  uint64 origin_bytes = 3;
+  uint64 response_bytes = 4;
+  string state = 5;
+  bool local_origin = 6;
+  bool local_response = 7;
+  uint64 missed_bytes = 8;
+  string history = 9;
+  uint64 origin_packets = 10;
+  uint64 origin_ip_bytes = 11;
+  uint64 response_packets = 12;
+  uint64 response_ip_bytes = 13;
+}
+
+message DNSEvent {
+  bool is_response = 1;
+  uint32 transaction_id = 2;
+  google.protobuf.Duration rtt = 3;
+  string query = 4;
+  uint32 qclass = 5;
+  uint32 qtype = 6;
+  uint32 rcode = 7;
+  bool authoritative = 8;
+  bool truncated = 9;
+  bool recursion_desired = 10;
+  bool recursion_available = 11;
+  uint32 z = 12;
+  repeated string answers = 13;
+  repeated google.protobuf.Duration ttls = 14;
+  bool rejected = 15;
+}
+
+message TLSEvent {
+  string version = 1;
+  string cipher = 2;
+  string curve = 3;
+  string server_name = 4;
+  bool resumed = 5;
+  string last_alert = 6;
+  string next_protocol = 7;
+  bool established = 8;
+  repeated string certificate_file_ids = 9;
+  repeated string client_certificate_file_ids = 10;
+  string subject = 11;
+  string issuer = 12;
+  string client_subject = 13;
+  string client_issuer = 14;
+  string validation_status = 15;
+  string ja3 = 16;
+  string ja3s = 17;
+  string ja4 = 18;
+}
+
+message HeaderValues {
+  repeated string values = 1;
+}
+
+message HTTPEvent {
+  uint64 transaction_depth = 1;
+  string method = 2;
+  string host = 3;
+  string uri = 4;
+  string referrer = 5;
+  string version = 6;
+  string user_agent = 7;
+  string origin = 8;
+  uint64 request_body_length = 9;
+  uint64 response_body_length = 10;
+  uint32 status_code = 11;
+  uint32 informational_code = 12;
+  string status_message = 13;
+  string informational_message = 14;
+  repeated string tags = 15;
+  string username = 16;
+  repeated string proxies = 17;
+  repeated string request_file_ids = 18;
+  repeated string request_filenames = 19;
+  repeated string request_mime_types = 20;
+  repeated string response_file_ids = 21;
+  repeated string response_filenames = 22;
+  repeated string response_mime_types = 23;
+  map<string, HeaderValues> headers = 24;
+}
+
+message SMTPEvent {
+  uint64 transaction_depth = 1;
+  string helo = 2;
+  string mail_from = 3;
+  repeated string recipients = 4;
+  string date = 5;
+  string from = 6;
+  repeated string to = 7;
+  repeated string cc = 8;
+  string reply_to = 9;
+  string message_id = 10;
+  string in_reply_to = 11;
+  string subject = 12;
+  string originating_ip = 13;
+  repeated string received = 14;
+  string last_reply = 15;
+  repeated string path = 16;
+  string user_agent = 17;
+  bool tls = 18;
+  repeated string file_ids = 19;
+  bool is_webmail = 20;
+}
+
+// FileMetadataEvent deliberately carries no extracted file content.
+message FileMetadataEvent {
+  string file_id = 1;
+  string source = 2;
+  uint64 depth = 3;
+  repeated string analyzers = 4;
+  string mime_type = 5;
+  string filename = 6;
+  google.protobuf.Duration duration = 7;
+  bool local_origin = 8;
+  bool is_origin = 9;
+  uint64 seen_bytes = 10;
+  uint64 total_bytes = 11;
+  uint64 missing_bytes = 12;
+  uint64 overflow_bytes = 13;
+  bool timed_out = 14;
+  string parent_file_id = 15;
+  string md5 = 16;
+  string sha1 = 17;
+  string sha256 = 18;
+  string extracted_path = 19;
+  bool hash_complete = 20;
+}
+
+message ProtocolEvent {
+  // event_id is an opaque, retry-stable representation of node ID, producer
+  // session ID, and event sequence.
+  string event_id = 1;
+  uint64 event_sequence = 2;
+  EventEnvelope envelope = 3;
+
+  // Reserved for a future, protocol-specific cross-sensor observation ID.
+  reserved 4;
+  reserved "observation_id";
+
+  oneof payload {
+    ConnEvent conn = 10;
+    DNSEvent dns = 11;
+    TLSEvent tls = 12;
+    HTTPEvent http = 13;
+    SMTPEvent smtp = 14;
+    FileMetadataEvent file_metadata = 15;
+  }
+}
+
+message SequenceRange {
+  uint64 first = 1;
+  uint64 last = 2;
+}
+
+message EventLoss {
+  LossKind kind = 1;
+  uint64 count = 2;
+  repeated SequenceRange event_sequence_ranges = 3;
+  string source_node_id = 4;
+}
+
+message EventBatchStats {
+  repeated EventLoss losses = 1;
+}
+
+message ProtocolEventBatch {
+  string source_node_id = 1;
+  string producer_session_id = 2;
+  uint64 batch_sequence = 3;
+  repeated ProtocolEvent events = 4;
+  EventBatchStats stats = 5;
+  uint32 semantic_profile_revision = 6;
+  uint64 first_event_sequence = 7;
+  uint64 last_event_sequence = 8;
+}
+
+message EventSubscribeRequest {
+  repeated EventKind event_kinds = 1;
+  repeated string node_ids = 2;
+  repeated string processor_node_ids = 3;
+  bool include_file_metadata = 4;
+  uint32 max_batch_events = 5;
+}
+
+enum SubscriptionControlKind {
+  SUBSCRIPTION_CONTROL_KIND_UNSPECIFIED = 0;
+  SUBSCRIPTION_CONTROL_KIND_STARTED = 1;
+  SUBSCRIPTION_CONTROL_KIND_GAP = 2;
+  SUBSCRIPTION_CONTROL_KIND_CAPABILITIES = 3;
+}
+
+message EventSubscriptionControl {
+  SubscriptionControlKind kind = 1;
+  string stream_id = 2;
+  google.protobuf.Timestamp live_boundary = 3;
+  uint64 delivery_sequence = 4;
+  repeated EventLoss losses = 5;
+  repeated EventKind supported_event_kinds = 6;
+}

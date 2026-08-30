@@ -252,7 +252,11 @@ func New(config Config) (*Processor, error) {
 	if config.LogConfig != nil {
 		dropPolicy = config.LogConfig.EventDropPolicy
 	}
-	p.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: eventQueueSize, SinkQueueSize: eventQueueSize, DropPolicy: events.DropPolicy(dropPolicy)})
+	eventProducers, err := events.NewLiveProducerSet()
+	if err != nil {
+		return nil, fmt.Errorf("initialize event identity: %w", err)
+	}
+	p.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: eventQueueSize, SinkQueueSize: eventQueueSize, DropPolicy: events.DropPolicy(dropPolicy), Producer: eventProducers})
 	if err != nil {
 		return nil, fmt.Errorf("initialize event dispatcher: %w", err)
 	}

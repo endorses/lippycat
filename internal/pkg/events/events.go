@@ -38,15 +38,30 @@ type FlowTuple struct {
 	DestinationPort    uint16     `json:"destination_port"`
 }
 
+// SourceProvenance records where an observation entered the analysis pipeline
+// and the processor hops that handled it. It contains no transport-specific
+// values and is preserved by event projections.
+type SourceProvenance struct {
+	CaptureSource    string   `json:"capture_source"`
+	InterfaceName    string   `json:"interface_name"`
+	InterfaceIndex   uint32   `json:"interface_index"`
+	InputFile        string   `json:"input_file"`
+	ProcessorNodeIDs []string `json:"processor_node_ids"`
+}
+
 // Envelope contains provenance and flow identity shared by every event.
 type Envelope struct {
-	Timestamp    time.Time    `json:"timestamp"`
-	UID          string       `json:"uid"`
-	CommunityID  string       `json:"community_id"`
-	NodeID       string       `json:"node_id"`
-	Flow         FlowTuple    `json:"flow"`
-	Partial      bool         `json:"partial"`
-	CaptureScope CaptureScope `json:"capture_scope"`
+	Timestamp         time.Time        `json:"timestamp"`
+	EventID           string           `json:"event_id"`
+	ProducerSessionID string           `json:"producer_session_id"`
+	EventSequence     uint64           `json:"event_sequence"`
+	UID               string           `json:"uid"`
+	CommunityID       string           `json:"community_id"`
+	NodeID            string           `json:"node_id"`
+	Flow              FlowTuple        `json:"flow"`
+	Partial           bool             `json:"partial"`
+	CaptureScope      CaptureScope     `json:"capture_scope"`
+	Provenance        SourceProvenance `json:"provenance"`
 }
 
 // Event is implemented only by the typed normalized event classes in this package.

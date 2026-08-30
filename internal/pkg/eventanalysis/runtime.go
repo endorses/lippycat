@@ -165,6 +165,7 @@ func (r *Runtime) ObservePacket(source Source, info capture.PacketInfo) error {
 	if parsed := r.dns.Parse(info.Packet); parsed != nil {
 		meta.Dns = dnsToProto(parsed)
 	}
+	protocolHint := applicationProtocolHint(meta)
 	// Stateful application protocols are emitted from the bounded TCP
 	// reassembly path below. Clear packet-local guesses to avoid premature or
 	// duplicate events when a message spans segments.
@@ -179,12 +180,12 @@ func (r *Runtime) ObservePacket(source Source, info capture.PacketInfo) error {
 	if !timestamp.IsZero() {
 		timestampNS = timestamp.UnixNano()
 	}
-	observedAt, err := r.observeCaptured(source, &data.CapturedPacket{
+	observedAt, err := r.observeCapturedWithHint(source, &data.CapturedPacket{
 		Data:        info.Packet.Data(),
 		TimestampNs: timestampNS,
 		LinkType:    uint32(info.LinkType),
 		Metadata:    meta,
-	})
+	}, protocolHint)
 	if err != nil {
 		r.stats.Invalid++
 		return err
@@ -221,6 +222,10 @@ func (r *Runtime) smtpToProto(payload []byte) *data.EmailMetadata {
 }
 
 func (r *Runtime) observeCaptured(source Source, raw *data.CapturedPacket) (time.Time, error) {
+	return r.observeCapturedWithHint(source, raw, "")
+}
+
+func (r *Runtime) observeCapturedWithHint(source Source, raw *data.CapturedPacket, protocolHint string) (time.Time, error) {
 	if raw == nil || raw.Metadata == nil {
 		return time.Time{}, fmt.Errorf("captured packet metadata is required")
 	}
@@ -248,11 +253,43 @@ func (r *Runtime) observeCaptured(source Source, raw *data.CapturedPacket) (time
 	for _, ev := range connEvents {
 		r.emit(ev)
 	}
-	r.emitMetadata(env, raw.Metadata)
-	if raw.Metadata.Http == nil && raw.Metadata.Tls == nil && raw.Metadata.Email == nil {
-		r.observeTCP(source, packet, ts, scope, source.Partial || scope == events.CaptureScopeFiltered)
+	if _, tcp := packet.TransportLayer().(*layers.TCP); tcp {
+		// Packet-local analyzers may recognize an incomplete TCP segment. Wait
+		// for bounded reassembly so all paths emit the same canonical event at
+		// the final-byte timestamp. The result remains useful as a parser hint
+		// for protocols detected on non-standard ports.
+		metadata := *raw.Metadata
+		if protocolHint == "" {
+			protocolHint = applicationProtocolHint(raw.Metadata)
+		}
+		metadata.Tls, metadata.Http, metadata.Email = nil, nil, nil
+		r.emitMetadata(env, &metadata)
+		r.observeTCP(source, packet, ts, scope, source.Partial || scope == events.CaptureScopeFiltered, protocolHint)
+	} else {
+		// Keep compatibility with metadata-only captured packets.
+		r.emitMetadata(env, raw.Metadata)
 	}
 	return ts, nil
+}
+
+func applicationProtocolHint(meta *data.PacketMetadata) string {
+	if meta == nil {
+		return ""
+	}
+	switch {
+	case meta.Http != nil:
+		return "http"
+	case meta.Tls != nil:
+		return "tls"
+	case meta.Email != nil:
+		return "smtp"
+	}
+	switch strings.ToLower(meta.Protocol) {
+	case "http", "tls", "smtp":
+		return strings.ToLower(meta.Protocol)
+	default:
+		return ""
+	}
 }
 
 func (r *Runtime) expireAfterBatch(newest time.Time) {

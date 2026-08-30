@@ -95,6 +95,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Normal settings tab key handling (when NOT editing)
 		switch msg.String() {
 		case "q", "ctrl+c":
+			m.Shutdown()
 			m.uiState.Quitting = true
 			return m, tea.Quit
 		case "ctrl+z":
@@ -119,6 +120,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 2 {
 		switch msg.String() {
 		case "q", "ctrl+c":
+			m.Shutdown()
 			m.uiState.Quitting = true
 			return m, tea.Quit
 		case "ctrl+z":
@@ -183,6 +185,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Normal Help tab key handling
 		switch msg.String() {
 		case "q", "ctrl+c":
+			m.Shutdown()
 			m.uiState.Quitting = true
 			return m, tea.Quit
 		case "ctrl+z":

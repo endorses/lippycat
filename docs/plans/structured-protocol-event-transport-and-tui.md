@@ -269,6 +269,13 @@ attachment analysis when body preview is explicitly enabled. Sniff also passes
 its existing email-body-preview setting into the shared runtime. Regression
 tests cover filtered segmented HTTP, chunked final-byte timing, and SMTP
 attachment metadata, and the Phase 4 race-enabled package tests pass.
+A final offline-identity audit added the email body-preview policy to sniff's
+deterministic analysis profile, preventing distinct SMTP/file event streams
+from sharing a producer-session identity.
+The same audit made transported TCP metadata pass through bounded reassembly
+instead of bypassing it, retained analyzer hints for protocols on non-standard
+ports, and ensured quitting from every TUI tab performs graceful capture and
+event-pipeline shutdown.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

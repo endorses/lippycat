@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/endorses/lippycat/internal/testutil/eventfixture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -316,6 +317,50 @@ func TestRuntimeReassemblesSegmentedApplicationProtocols(t *testing.T) {
 			tc.validate(t, matched[0])
 		})
 	}
+}
+
+func TestObserveCapturedReassemblesPacketLocalMetadataOnNonstandardPort(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 32)
+	base := time.Unix(150, 0)
+	payload := []byte("GET /transported HTTP/1.1\r\nHost: example.test\r\n\r\n")
+	split := 31
+	infos := []capture.PacketInfo{
+		tcpPacket(t, 40000, 18080, 1000, true, nil, base),
+		tcpPacket(t, 40000, 18080, 1001, false, payload[:split], base.Add(time.Second)),
+		tcpPacket(t, 40000, 18080, 1001+uint32(split), false, payload[split:], base.Add(2*time.Second)),
+	}
+	for index, info := range infos {
+		metadata := protocolmeta.Enrich(info.Packet, nil, false)
+		if index == 1 {
+			require.NotNil(t, metadata.Http, "fixture must exercise premature packet-local metadata")
+		}
+		require.NoError(t, r.ObserveCaptured(Source{NodeID: "node"}, []*data.CapturedPacket{{
+			Data: info.Packet.Data(), TimestampNs: info.Packet.Metadata().Timestamp.UnixNano(),
+			LinkType: uint32(info.LinkType), Metadata: metadata,
+		}}))
+		if index == 1 {
+			require.NoError(t, dispatcher.Flush(context.Background()))
+			sink.mu.Lock()
+			for _, event := range sink.events {
+				require.NotEqual(t, events.KindHTTP, event.Kind(), "incomplete transported metadata emitted")
+			}
+			sink.mu.Unlock()
+		}
+	}
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var matched []events.HTTPEvent
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			matched = append(matched, event.(events.HTTPEvent))
+		}
+	}
+	require.Len(t, matched, 1)
+	require.Equal(t, "/transported", matched[0].URI)
+	require.Equal(t, base.Add(2*time.Second), matched[0].Envelope().Timestamp)
 }
 
 func TestReassembledFilteredCapturePreservesScopeAndPartialState(t *testing.T) {

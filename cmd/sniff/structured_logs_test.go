@@ -64,6 +64,19 @@ func TestLiveStructuredEventProducerUsesRandomSessions(t *testing.T) {
 	require.NotEqual(t, first.SessionID(), second.SessionID())
 }
 
+func TestStructuredLogAnalysisProfileIncludesEmailBodyPolicy(t *testing.T) {
+	viper.Set("logs.include_email_body_preview", false)
+	t.Cleanup(func() { viper.Set("logs.include_email_body_preview", false) })
+	withoutBody := structuredLogAnalysisProfile("full", "")
+
+	viper.Set("logs.include_email_body_preview", true)
+	withBody := structuredLogAnalysisProfile("full", "")
+
+	require.NotEqual(t, withoutBody, withBody)
+	require.Contains(t, withoutBody, "email-body=false")
+	require.Contains(t, withBody, "email-body=true")
+}
+
 func TestStructuredLogFlagsAreInheritedByProtocolCommands(t *testing.T) {
 	for _, cmd := range []*cobra.Command{dnsCmd, tlsCmd, httpCmd, emailCmd, voipCmd} {
 		require.NotNil(t, cmd.InheritedFlags().Lookup("log-dir"), cmd.Name())

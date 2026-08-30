@@ -182,8 +182,8 @@ func sniffEventProducer(inputFiles []string, analysisProfile string) (*events.Pr
 }
 
 func structuredLogAnalysisProfile(scope, effectiveFilter string) string {
-	return fmt.Sprintf("events-v1|scope=%s|filter=%s|headers=%t|file-max=%d|file-total=%d|extract=%t|extract-dir=%s",
-		scope, effectiveFilter, viper.GetBool("logs.include_http_headers"), viper.GetInt64("files.max_size"),
+	return fmt.Sprintf("events-v1|scope=%s|filter=%s|headers=%t|email-body=%t|file-max=%d|file-total=%d|extract=%t|extract-dir=%s",
+		scope, effectiveFilter, viper.GetBool("logs.include_http_headers"), viper.GetBool("logs.include_email_body_preview"), viper.GetInt64("files.max_size"),
 		viper.GetInt64("files.total_size"), viper.GetBool("files.extract"), viper.GetString("files.extract_dir"))
 }
 

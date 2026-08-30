@@ -23,9 +23,10 @@ import (
 const maxReassembledApplicationBytes = 1 << 20
 
 type reassemblyContext struct {
-	source  Source
-	scope   events.CaptureScope
-	partial bool
+	source       Source
+	scope        events.CaptureScope
+	partial      bool
+	protocolHint string
 }
 
 type applicationFactory struct{ runtime *Runtime }
@@ -46,6 +47,7 @@ type applicationStream struct {
 	smtpBodySize      int
 	smtpBodyTruncated bool
 	partial           bool
+	protocolHint      string
 }
 
 func (*applicationStream) Accept(_ *layers.TCP, _ gopacket.CaptureInfo, _ reassembly.TCPFlowDirection, _ reassembly.Sequence, start *bool, _ reassembly.AssemblerContext) bool {
@@ -91,13 +93,16 @@ func (s *applicationStream) ReassemblyComplete(reassembly.AssemblerContext) bool
 }
 
 func (s *applicationStream) parse(ctx reassemblyContext, ci gopacket.CaptureInfo) {
+	if ctx.protocolHint != "" {
+		s.protocolHint = ctx.protocolHint
+	}
 	srcPort, dstPort := flowPort(s.tcpFlow.Src()), flowPort(s.tcpFlow.Dst())
 	switch {
-	case isTLSPort(srcPort) || isTLSPort(dstPort):
+	case s.protocolHint == "tls" || isTLSPort(srcPort) || isTLSPort(dstPort):
 		s.parseTLS(ctx, ci)
-	case isHTTPPort(srcPort) || isHTTPPort(dstPort):
+	case s.protocolHint == "http" || isHTTPPort(srcPort) || isHTTPPort(dstPort):
 		s.parseHTTP(ctx, ci)
-	case isSMTPPort(srcPort) || isSMTPPort(dstPort):
+	case s.protocolHint == "smtp" || isSMTPPort(srcPort) || isSMTPPort(dstPort):
 		s.parseSMTP(ctx, ci, isSMTPPort(srcPort))
 	}
 }
@@ -345,7 +350,7 @@ func (r *Runtime) resetReassembly() {
 	r.tcpAssembler = capture.NewTCPAssembler(&applicationFactory{runtime: r})
 }
 
-func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp time.Time, scope events.CaptureScope, partial bool) {
+func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp time.Time, scope events.CaptureScope, partial bool, protocolHint string) {
 	tcp, ok := packet.TransportLayer().(*layers.TCP)
 	if !ok || packet.NetworkLayer() == nil {
 		return
@@ -358,6 +363,6 @@ func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp ti
 	}
 	r.tcpAssembler.AssembleCaptureInfo(packet.NetworkLayer().NetworkFlow(), tcp, gopacket.CaptureInfo{
 		Timestamp:     timestamp,
-		AncillaryData: []interface{}{reassemblyContext{source: source, scope: scope, partial: partial}},
+		AncillaryData: []interface{}{reassemblyContext{source: source, scope: scope, partial: partial, protocolHint: protocolHint}},
 	})
 }

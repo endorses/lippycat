@@ -3,7 +3,9 @@
 package tui
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"strings"
 	"testing"
@@ -344,6 +346,28 @@ func TestSettingsTabPauseAlsoPausesEventStore(t *testing.T) {
 	// Restore the process-global capture signal for other tests.
 	m, _ = m.handleKeyboard(tea.KeyMsg{Type: tea.KeySpace})
 	require.False(t, m.eventStore.Paused())
+}
+
+func TestQuitFromAuxiliaryTabsStopsActiveCapture(t *testing.T) {
+	for _, tab := range []int{2, 3, 4} {
+		t.Run(fmt.Sprintf("tab-%d", tab), func(t *testing.T) {
+			m := NewModel(8, 8, "test0", "", nil, false, false, "", false)
+			m.uiState.Tabs.SetActive(tab)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() {
+				<-ctx.Done()
+				close(done)
+			}()
+			globalCaptureState.SetHandle(cancel, done)
+
+			updated, cmd := m.handleKeyboard(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+			require.NotNil(t, cmd)
+			require.True(t, updated.uiState.Quitting)
+			require.False(t, globalCaptureState.HasActiveCapture())
+		})
+	}
 }
 
 func TestProcessorDisconnectRetainsEventCursor(t *testing.T) {

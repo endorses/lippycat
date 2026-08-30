@@ -105,6 +105,33 @@ func TestEventServiceStreamsLiveFilteredProjectedEvents(t *testing.T) {
 	assert.Equal(t, 0, b.Stats().Subscribers)
 }
 
+func TestEventServiceSeparatesFilteredSequenceGapsIntoValidBatches(t *testing.T) {
+	b := broadcast.New()
+	service, err := NewEventService(b, EventSubscriptionPolicy{})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := &eventSubscriptionTestStream{ctx: ctx, notify: make(chan struct{}, 8)}
+	done := make(chan error, 1)
+	go func() {
+		done <- service.SubscribeEvents(&eventsv1.EventSubscribeRequest{
+			SubscriptionVersion: 1,
+			EventKinds:          []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_HTTP},
+		}, stream)
+	}()
+	waitEventMessage(t, stream.notify)
+	require.NoError(t, b.HandleEvent(context.Background(), events.NewHTTPEvent(testEventEnvelope("node-a", 1))))
+	require.NoError(t, b.HandleEvent(context.Background(), events.NewDNSEvent(testEventEnvelope("node-a", 2))))
+	require.NoError(t, b.HandleEvent(context.Background(), events.NewHTTPEvent(testEventEnvelope("node-a", 3))))
+	waitEventMessage(t, stream.notify)
+	waitEventMessage(t, stream.notify)
+	cancel()
+	require.NoError(t, <-done)
+	messages := stream.snapshot()
+	require.Len(t, messages, 3)
+	assert.Equal(t, uint64(1), messages[1].GetBatch().FirstEventSequence)
+	assert.Equal(t, uint64(3), messages[2].GetBatch().FirstEventSequence)
+}
+
 func TestEventServiceReportsOverflowWithoutLaterEvent(t *testing.T) {
 	b := broadcast.New()
 	service, err := NewEventService(b, EventSubscriptionPolicy{ProcessorNodeID: "processor-a", QueueSize: 1, MaxBatchEvents: 1})
@@ -159,7 +186,33 @@ func TestEventServiceEnforcesEncodedMessageSize(t *testing.T) {
 	require.Len(t, messages, 2)
 	assert.Nil(t, messages[1].GetBatch())
 	assert.Equal(t, eventsv1.LossKind_LOSS_KIND_POLICY_OMISSION, messages[1].GetControl().Losses[0].Kind)
+	assert.Equal(t, "session-a", messages[1].GetControl().Losses[0].ProducerSessionId)
 	assert.Equal(t, uint64(2), messages[1].DeliverySequence)
+}
+
+func TestEventServiceBoundsOversizedEventGap(t *testing.T) {
+	b := broadcast.New()
+	service, err := NewEventService(b, EventSubscriptionPolicy{MaxMessageBytes: 4096, AllowSensitiveFields: true})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := &eventSubscriptionTestStream{ctx: ctx, notify: make(chan struct{}, 4)}
+	done := make(chan error, 1)
+	go func() {
+		done <- service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, MaxMessageBytes: 1024, IncludeSensitiveFields: true}, stream)
+	}()
+	waitEventMessage(t, stream.notify)
+	event := events.NewHTTPEvent(testEventEnvelope(strings.Repeat("n", 2000), 1))
+	event.URI = "/" + strings.Repeat("x", 2000)
+	require.NoError(t, b.HandleEvent(context.Background(), event))
+	waitEventMessage(t, stream.notify)
+	cancel()
+	require.NoError(t, <-done)
+	messages := stream.snapshot()
+	require.Len(t, messages, 2)
+	assert.LessOrEqual(t, proto.Size(messages[1]), 1024)
+	require.Len(t, messages[1].GetControl().Losses, 1)
+	assert.Equal(t, eventsv1.LossKind_LOSS_KIND_POLICY_OMISSION, messages[1].GetControl().Losses[0].Kind)
+	assert.Equal(t, uint64(1), messages[1].GetControl().Losses[0].Count)
 }
 
 func TestEventServiceReportsReconnectGap(t *testing.T) {

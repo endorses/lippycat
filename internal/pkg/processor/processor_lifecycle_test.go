@@ -14,6 +14,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -610,6 +611,10 @@ func TestProcessor_Start_WithTLSProductionMode(t *testing.T) {
 	err = processor.Start(ctx)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "LIPPYCAT_PRODUCTION=true requires TLS")
+	require.NotNil(t, processor.listener)
+	_, acceptErr := processor.listener.Accept()
+	assert.ErrorIs(t, acceptErr, net.ErrClosed)
+	assert.ErrorIs(t, processor.eventBroadcaster.HandleEvent(context.Background(), events.NewDNSEvent(testEventEnvelope("node-a", 1))), broadcast.ErrClosed)
 }
 
 // TestProcessor_GRPCConnection tests that gRPC server is accessible

@@ -252,6 +252,11 @@ drain:
 				pending = next
 				break drain
 			}
+			previousEnvelope := batchEvents[len(batchEvents)-1].Envelope()
+			if nextEnvelope.EventSequence != previousEnvelope.EventSequence+1 {
+				pending = next
+				break drain
+			}
 			candidate := append(append([]events.Event(nil), batchEvents...), next)
 			wire, err := protoadapter.ToProtoBatch(firstEnvelope.NodeID, firstEnvelope.ProducerSessionID, batchSequence+1, candidate, nil, 1)
 			if err != nil {
@@ -277,14 +282,18 @@ drain:
 		deliverySequence++
 		return deliverySequence, batchSequence, pending, sendEventMessage(stream, message, maxMessageBytes)
 	}
-	deliverySequence++
-	loss := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_POLICY_OMISSION, Count: uint64(len(batchEvents)), SourceNodeId: first.Envelope().NodeID}
+	loss := &eventsv1.EventLoss{
+		Kind:              eventsv1.LossKind_LOSS_KIND_POLICY_OMISSION,
+		Count:             uint64(len(batchEvents)),
+		SourceNodeId:      first.Envelope().NodeID,
+		ProducerSessionId: first.Envelope().ProducerSessionID,
+	}
 	for _, event := range batchEvents {
 		sequence := event.Envelope().EventSequence
 		loss.EventSequenceRanges = append(loss.EventSequenceRanges, &eventsv1.SequenceRange{First: sequence, Last: sequence})
 	}
-	gap := &eventsv1.EventSubscriptionControl{Kind: eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP, StreamId: streamID, DeliverySequence: deliverySequence, Losses: []*eventsv1.EventLoss{loss}}
-	return deliverySequence, batchSequence, pending, sendEventMessage(stream, controlMessage(deliverySequence, gap), maxMessageBytes)
+	deliverySequence, err = sendLossGaps(stream, streamID, deliverySequence, []*eventsv1.EventLoss{loss}, maxMessageBytes)
+	return deliverySequence, batchSequence, pending, err
 }
 
 func sendEventMessage(stream eventsv1.EventService_SubscribeEventsServer, message *eventsv1.EventSubscriptionMessage, maxMessageBytes uint32) error {

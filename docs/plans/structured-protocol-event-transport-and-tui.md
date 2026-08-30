@@ -133,6 +133,11 @@ bounded GAP controls so a valid small receive limit cannot turn a reportable
 overflow into a `ResourceExhausted` stream termination. If one detailed loss
 record alone cannot fit, the stream retains its explicit loss kind and count in
 a bounded summary.
+A renewed audit corrected three remaining boundaries: filtered events with
+non-contiguous producer sequences are now split into separate valid batches;
+oversized-event omission reports preserve producer-session identity when it
+fits and use the bounded GAP path; and failed processor/tap startup now rolls
+back the event dispatcher, broadcaster, listener, and other started resources.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

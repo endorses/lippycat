@@ -50,12 +50,17 @@ import (
 )
 
 // Start begins processor operation
-func (p *Processor) Start(ctx context.Context) error {
+func (p *Processor) Start(ctx context.Context) (startErr error) {
 	if err := p.validateLIConfiguration(); err != nil {
 		return fmt.Errorf("invalid LI configuration: %w", err)
 	}
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	defer p.cancel()
+	defer func() {
+		if startErr != nil {
+			startErr = errors.Join(startErr, p.Shutdown())
+		}
+	}()
 
 	logger.Info("Processor starting", "processor_id", p.config.ProcessorID, "listen_addr", p.config.ListenAddr)
 	// Load filters from persistence file
@@ -323,6 +328,14 @@ func (p *Processor) Shutdown() error {
 				timeout = 5 * time.Second
 			}
 			gracefulStopWithTimeout(p.grpcServer, timeout)
+		}
+		p.listenerMu.RLock()
+		listener := p.listener
+		p.listenerMu.RUnlock()
+		if listener != nil {
+			if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				logger.Warn("Failed to close processor listener", "error", err)
+			}
 		}
 
 		// Includes the gRPC Serve goroutine and local source/consumer goroutines.

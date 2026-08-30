@@ -4,6 +4,7 @@ package conntrack
 import (
 	"fmt"
 	"hash/maphash"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -241,6 +242,7 @@ func (t *Tracker) Expire(now time.Time) []events.ConnEvent {
 		}
 		s.Unlock()
 	}
+	sortConnEvents(out)
 	return out
 }
 
@@ -257,7 +259,53 @@ func (t *Tracker) Close() []events.ConnEvent {
 		}
 		s.Unlock()
 	}
+	sortConnEvents(out)
 	return out
+}
+
+func sortConnEvents(out []events.ConnEvent) {
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i].Envelope(), out[j].Envelope()
+		if a.NodeID != b.NodeID {
+			return a.NodeID < b.NodeID
+		}
+		return flowTupleLess(a.Flow, b.Flow)
+	})
+}
+
+func flowTupleLess(a, b events.FlowTuple) bool {
+	if a.Protocol != b.Protocol {
+		return a.Protocol < b.Protocol
+	}
+	if cmp := a.SourceAddress.Compare(b.SourceAddress); cmp != 0 {
+		return cmp < 0
+	}
+	if cmp := a.DestinationAddress.Compare(b.DestinationAddress); cmp != 0 {
+		return cmp < 0
+	}
+	if a.SourcePort != b.SourcePort {
+		return a.SourcePort < b.SourcePort
+	}
+	return a.DestinationPort < b.DestinationPort
+}
+
+func trackerKeyLess(a, b trackerKey) bool {
+	if a.NodeID != b.NodeID {
+		return a.NodeID < b.NodeID
+	}
+	if a.Flow.Protocol != b.Flow.Protocol {
+		return a.Flow.Protocol < b.Flow.Protocol
+	}
+	if cmp := a.Flow.Address1.Compare(b.Flow.Address1); cmp != 0 {
+		return cmp < 0
+	}
+	if cmp := a.Flow.Address2.Compare(b.Flow.Address2); cmp != 0 {
+		return cmp < 0
+	}
+	if a.Flow.Port1 != b.Flow.Port1 {
+		return a.Flow.Port1 < b.Flow.Port1
+	}
+	return a.Flow.Port2 < b.Flow.Port2
 }
 
 func (f *flow) event() events.ConnEvent {
@@ -340,7 +388,7 @@ func (t *Tracker) evictOldest() (events.ConnEvent, bool) {
 		s := &t.shards[i]
 		s.Lock()
 		for _, f := range s.flows {
-			if !found || f.last.Before(candidateTime) {
+			if !found || f.last.Before(candidateTime) || (f.last.Equal(candidateTime) && trackerKeyLess(f.key, candidate)) {
 				candidate, candidateTime, found = f.key, f.last, true
 				cs = s
 			}

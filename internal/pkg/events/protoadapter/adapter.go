@@ -362,6 +362,12 @@ func decodeDuration(name string, d *durationpb.Duration) (time.Duration, error) 
 		return 0, fmt.Errorf("%s: %w", name, err)
 	}
 	v := d.AsDuration()
+	// Protobuf durations have a much wider range than time.Duration. AsDuration
+	// saturates values outside the Go range, which would silently change event
+	// semantics on decode, so require an exact representation.
+	if roundTrip := durationpb.New(v); roundTrip.Seconds != d.Seconds || roundTrip.Nanos != d.Nanos {
+		return 0, fmt.Errorf("%s: outside Go duration range", name)
+	}
 	if v < 0 {
 		return 0, fmt.Errorf("%s: negative duration", name)
 	}

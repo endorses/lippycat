@@ -73,6 +73,9 @@ session and carry consistent capture-source provenance.
 This audit also wired deterministic offline sessions into actual PCAP sniff
 production and rejected loss ranges that contradict delivered events or overlap
 across loss records.
+A final replay audit made connection expiry, shutdown, and equal-age eviction
+ordering deterministic so offline event IDs remain stable, and rejected valid
+protobuf durations that cannot be represented by Go without saturation.
 
 ## Phase 2 — Processor event subscription
 

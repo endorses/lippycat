@@ -55,6 +55,50 @@ func TestHardCapEvicts(t *testing.T) {
 	require.Equal(t, uint64(1), tr.Stats().Evictions)
 }
 
+func TestCloseOrdersFlowsDeterministically(t *testing.T) {
+	now := time.Now()
+	var want []uint16
+	for run := 0; run < 20; run++ {
+		tr, err := New(Config{MaxFlows: 10, IdleTimeout: time.Minute, HalfOpenTimeout: time.Second})
+		require.NoError(t, err)
+		for _, port := range []uint16{40003, 40001, 40002} {
+			env := testEnv(now, false)
+			env.Flow.SourcePort = port
+			_, err = tr.Observe(Observation{Envelope: env, TCP: &TCPFlags{SYN: true}})
+			require.NoError(t, err)
+		}
+		got := tr.Close()
+		ports := make([]uint16, len(got))
+		for i := range got {
+			ports[i] = got[i].Envelope().Flow.SourcePort
+		}
+		if run == 0 {
+			want = ports
+		} else {
+			require.Equal(t, want, ports)
+		}
+	}
+	require.Equal(t, []uint16{40001, 40002, 40003}, want)
+}
+
+func TestHardCapTieBreakIsDeterministic(t *testing.T) {
+	for run := 0; run < 20; run++ {
+		tr, err := New(Config{MaxFlows: 1, IdleTimeout: time.Minute, HalfOpenTimeout: time.Second})
+		require.NoError(t, err)
+		now := time.Now()
+		for _, port := range []uint16{40002, 40001} {
+			env := testEnv(now, false)
+			env.Flow.SourcePort = port
+			got, err := tr.Observe(Observation{Envelope: env, TCP: &TCPFlags{SYN: true}})
+			require.NoError(t, err)
+			if port == 40001 {
+				require.Len(t, got, 1)
+				require.Equal(t, uint16(40001), got[0].Envelope().Flow.SourcePort)
+			}
+		}
+	}
+}
+
 func BenchmarkTracker100kFlows(b *testing.B) {
 	tr, _ := New(Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second})
 	now := time.Now()

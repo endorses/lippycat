@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func testEnvelope(seq uint64) events.Envelope {
@@ -100,6 +101,15 @@ func TestMalformedInputs(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestDurationOutsideGoRangeIsRejected(t *testing.T) {
+	valid, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	valid.GetConn().Duration = &durationpb.Duration{Seconds: 10_000_000_000}
+
+	_, _, err = FromProto(valid)
+	require.ErrorContains(t, err, "outside Go duration range")
 }
 
 func TestUnknownPayloadIsCompatibilityOmissionAndPreserved(t *testing.T) {

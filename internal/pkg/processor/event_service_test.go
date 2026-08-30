@@ -5,6 +5,7 @@ package processor
 import (
 	"context"
 	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -208,6 +209,12 @@ func TestEventServiceRejectsUnauthorizedAndInvalidRequests(t *testing.T) {
 	err = service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, IncludeFileMetadata: true}, stream)
 	assert.Equal(t, codes.PermissionDenied, status.Code(err))
 	err = service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, MaxMessageBytes: 100}, stream)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	err = service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, NodeIds: []string{""}}, stream)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	err = service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, NodeIds: []string{strings.Repeat("x", protoadapter.MaxStringBytes+1)}}, stream)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	err = service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, ProcessorNodeIds: make([]string, protoadapter.MaxCollectionEntries+1)}, stream)
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 

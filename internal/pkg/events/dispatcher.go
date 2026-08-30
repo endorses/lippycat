@@ -165,7 +165,25 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 		return true
 	default:
 		d.dropped.Add(1)
+		d.notifyDropObservers(ev)
 		return false
+	}
+}
+
+// notifyDropObservers lets best-effort transports report an explicit gap for
+// an event rejected at the dispatcher's admission queue. The event already has
+// delivery identity at this point, so observers can preserve its exact lost
+// sequence. Implementations must not block.
+func (d *Dispatcher) notifyDropObservers(ev Event) {
+	for _, reg := range d.registrations {
+		if len(reg.kinds) > 0 {
+			if _, ok := reg.kinds[ev.Kind()]; !ok {
+				continue
+			}
+		}
+		if observer, ok := reg.sink.(dropObserver); ok {
+			observer.HandleDroppedEvent(ev)
+		}
 	}
 }
 

@@ -76,6 +76,15 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 	if req.IncludeFileMetadata && !s.policy.AllowFileMetadata {
 		return status.Error(codes.PermissionDenied, "file metadata events are not authorized")
 	}
+	if err := validateEventSelectors("node_ids", req.NodeIds); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := validateEventSelectors("processor_node_ids", req.ProcessorNodeIds); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	if len(req.EventKinds) > protoadapter.MaxCollectionEntries {
+		return status.Errorf(codes.InvalidArgument, "event_kinds exceeds %d entries", protoadapter.MaxCollectionEntries)
+	}
 	kinds, err := requestedEventKinds(req.EventKinds, req.IncludeFileMetadata)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
@@ -175,6 +184,21 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 			}
 		}
 	}
+}
+
+func validateEventSelectors(name string, values []string) error {
+	if len(values) > protoadapter.MaxCollectionEntries {
+		return fmt.Errorf("%s exceeds %d entries", name, protoadapter.MaxCollectionEntries)
+	}
+	for index, value := range values {
+		if value == "" {
+			return fmt.Errorf("%s[%d] is empty", name, index)
+		}
+		if len(value) > protoadapter.MaxStringBytes {
+			return fmt.Errorf("%s[%d] exceeds %d bytes", name, index, protoadapter.MaxStringBytes)
+		}
+	}
+	return nil
 }
 
 func (s *EventService) sendEventBatch(stream eventsv1.EventService_SubscribeEventsServer, sub *broadcast.Subscription, first events.Event, maxBatchEvents, maxMessageBytes uint32, streamID string, deliverySequence, batchSequence uint64) (uint64, uint64, events.Event, error) {

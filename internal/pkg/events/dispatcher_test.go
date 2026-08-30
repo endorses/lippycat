@@ -174,10 +174,17 @@ func (*bestEffortTestSink) ExcludeFromFlowControl() {}
 
 type droppedEventTestSink struct {
 	testSink
-	dropped atomic.Uint64
+	dropped       atomic.Uint64
+	droppedMu     sync.Mutex
+	droppedEvents []Event
 }
 
-func (s *droppedEventTestSink) HandleDroppedEvent(Event) { s.dropped.Add(1) }
+func (s *droppedEventTestSink) HandleDroppedEvent(event Event) {
+	s.dropped.Add(1)
+	s.droppedMu.Lock()
+	s.droppedEvents = append(s.droppedEvents, event)
+	s.droppedMu.Unlock()
+}
 
 func TestDispatcherNotifiesSinkAboutDeliveryQueueOverflow(t *testing.T) {
 	entered := make(chan struct{})
@@ -204,6 +211,31 @@ func TestDispatcherNotifiesSinkAboutDeliveryQueueOverflow(t *testing.T) {
 	close(release)
 	require.NoError(t, d.Close(context.Background()))
 	require.Equal(t, uint64(1), d.Stats().SinkDropped)
+}
+
+func TestDispatcherNotifiesSinkAboutAdmissionQueueOverflow(t *testing.T) {
+	observer := &droppedEventTestSink{}
+	producer, err := NewLiveProducerSet()
+	require.NoError(t, err)
+	d, err := NewDispatcher(Config{QueueSize: 1, SinkQueueSize: 1, Producer: producer})
+	require.NoError(t, err)
+	require.NoError(t, d.Register(observer, KindDNS))
+
+	// Fill the admission queue before the dispatcher starts. Enqueue normally
+	// requires a started dispatcher, so set the state under the same lock used
+	// by Start to deterministically exercise the full-queue boundary without a
+	// competing consumer.
+	d.mu.Lock()
+	d.started = true
+	d.mu.Unlock()
+	require.True(t, d.Enqueue(NewDNSEvent(Envelope{NodeID: "node-a"})))
+	require.False(t, d.Enqueue(NewDNSEvent(Envelope{NodeID: "node-a"})))
+
+	require.Equal(t, uint64(1), observer.dropped.Load())
+	observer.droppedMu.Lock()
+	require.Len(t, observer.droppedEvents, 1)
+	require.Equal(t, uint64(2), observer.droppedEvents[0].Envelope().EventSequence)
+	observer.droppedMu.Unlock()
 }
 
 func TestDispatcherExcludesBestEffortSinkQueueFromFlowControl(t *testing.T) {

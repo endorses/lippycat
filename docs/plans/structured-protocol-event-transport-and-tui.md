@@ -119,6 +119,10 @@ bounded dispatcher queue feeding the broadcaster overflows, the broadcaster
 now records the dropped event for every matching subscriber so the event
 service emits an explicit subscriber gap instead of only incrementing a global
 sink-drop counter.
+A final independent audit extended that correction to the dispatcher's main
+admission queue, where rejected events already had delivery identity but were
+not reported to matching subscribers. It also bounded and validated event
+subscription node selectors before allocating server-side filter maps.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/testutil/eventfixture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -315,6 +316,91 @@ func TestRuntimeReassemblesSegmentedApplicationProtocols(t *testing.T) {
 			tc.validate(t, matched[0])
 		})
 	}
+}
+
+func TestReassembledFilteredCapturePreservesScopeAndPartialState(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 32)
+	fixture, err := eventfixture.Captured()
+	require.NoError(t, err)
+	for _, packet := range fixture {
+		packet.MatchedFilterIds = []string{"filter-a"}
+	}
+	require.NoError(t, r.ObserveCaptured(Source{NodeID: "node", CaptureSource: "hunter-a"}, fixture))
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			require.Equal(t, events.CaptureScopeFiltered, event.Envelope().CaptureScope)
+			require.True(t, event.Envelope().Partial)
+			return
+		}
+	}
+	t.Fatal("missing reassembled HTTP event")
+}
+
+func TestRuntimeReassemblesChunkedHTTPBodyBeforeEmission(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 32)
+	base := time.Unix(200, 0)
+	payload := []byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: text/plain\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
+	split := len(payload) - 5
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 80, 40000, 1000, true, nil, base)))
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 80, 40000, 1001, false, payload[:split], base.Add(time.Second))))
+	require.NoError(t, dispatcher.Flush(context.Background()))
+	sink.mu.Lock()
+	for _, event := range sink.events {
+		require.NotEqual(t, events.KindHTTP, event.Kind(), "incomplete chunked response emitted")
+	}
+	sink.mu.Unlock()
+	completion := base.Add(2 * time.Second)
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 80, 40000, 1001+uint32(split), false, payload[split:], completion)))
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			httpEvent := event.(events.HTTPEvent)
+			require.Equal(t, uint64(11), httpEvent.ResponseBodyLength)
+			require.Equal(t, completion, httpEvent.Envelope().Timestamp)
+			return
+		}
+	}
+	t.Fatal("missing chunked HTTP event")
+}
+
+func TestRuntimeReassemblesSMTPDataForFileAnalysis(t *testing.T) {
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	dispatcher, err := events.NewDispatcher(events.Config{QueueSize: 32, SinkQueueSize: 32, Producer: producer})
+	require.NoError(t, err)
+	sink := &memorySink{}
+	require.NoError(t, dispatcher.Register(sink))
+	r, err := New(Config{Dispatcher: dispatcher, IncludeEmailBodyPreview: true})
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Start(context.Background()))
+
+	base := time.Unix(300, 0)
+	payload := []byte("DATA\r\nContent-Type: multipart/mixed; boundary=x\r\nSubject: attachment\r\n\r\n--x\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=a.txt\r\n\r\nhello\r\n--x--\r\n.\r\n")
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 40000, 25, 1000, true, nil, base)))
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 40000, 25, 1001, false, payload, base.Add(time.Second))))
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, event := range sink.events {
+		if event.Kind() == events.KindFileMetadata {
+			fileEvent := event.(events.FileMetadataEvent)
+			require.Equal(t, "a.txt", fileEvent.Filename)
+			require.Equal(t, "SMTP", fileEvent.Source)
+			return
+		}
+	}
+	t.Fatal("missing SMTP attachment metadata event")
 }
 
 func TestReassembledMidFlowApplicationEventIsPartial(t *testing.T) {

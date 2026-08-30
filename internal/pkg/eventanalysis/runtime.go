@@ -250,7 +250,7 @@ func (r *Runtime) observeCaptured(source Source, raw *data.CapturedPacket) (time
 	}
 	r.emitMetadata(env, raw.Metadata)
 	if raw.Metadata.Http == nil && raw.Metadata.Tls == nil && raw.Metadata.Email == nil {
-		r.observeTCP(source, packet, ts)
+		r.observeTCP(source, packet, ts, scope, source.Partial || scope == events.CaptureScopeFiltered)
 	}
 	return ts, nil
 }

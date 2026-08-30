@@ -3,6 +3,7 @@ package eventanalysis
 import (
 	"bytes"
 	"encoding/binary"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,12 +35,17 @@ func (f *applicationFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP
 }
 
 type applicationStream struct {
-	runtime          *Runtime
-	netFlow, tcpFlow gopacket.Flow
-	buffer           []byte
-	email            *emailparser.Parser
-	emailMetadata    types.EmailMetadata
-	partial          bool
+	runtime           *Runtime
+	netFlow, tcpFlow  gopacket.Flow
+	buffer            []byte
+	email             *emailparser.Parser
+	emailMetadata     types.EmailMetadata
+	smtpInData        bool
+	smtpInBody        bool
+	smtpBody          strings.Builder
+	smtpBodySize      int
+	smtpBodyTruncated bool
+	partial           bool
 }
 
 func (*applicationStream) Accept(_ *layers.TCP, _ gopacket.CaptureInfo, _ reassembly.TCPFlowDirection, _ reassembly.Sequence, start *bool, _ reassembly.AssemblerContext) bool {
@@ -120,6 +126,24 @@ func (s *applicationStream) parseHTTP(ctx reassemblyContext, ci gopacket.Capture
 			s.runtime.stats.Invalid++
 			continue
 		}
+		if strings.Contains(strings.ToLower(metadata.Headers["transfer-encoding"]), "chunked") {
+			messageEnd, body, complete, valid := chunkedMessage(s.buffer, frameEnd)
+			if !valid {
+				s.buffer = s.buffer[frameEnd:]
+				s.partial = true
+				s.runtime.stats.Invalid++
+				continue
+			}
+			if !complete {
+				return
+			}
+			metadata.BodyPreview = string(body)
+			metadata.BodySize = len(body)
+			metadata.ContentLength = int64(len(body))
+			s.buffer = s.buffer[messageEnd:]
+			s.emit(ctx, ci, nil, protocolmeta.HTTPToProto(metadata, s.runtime.cfg.IncludeHTTPHeaders), nil)
+			continue
+		}
 		messageEnd := frameEnd + int(bodyLength)
 		if len(s.buffer) < messageEnd {
 			return
@@ -130,6 +154,51 @@ func (s *applicationStream) parseHTTP(ctx reassemblyContext, ci gopacket.Capture
 		}
 		s.buffer = s.buffer[messageEnd:]
 		s.emit(ctx, ci, nil, protocolmeta.HTTPToProto(metadata, s.runtime.cfg.IncludeHTTPHeaders), nil)
+	}
+}
+
+func chunkedMessage(payload []byte, bodyStart int) (int, []byte, bool, bool) {
+	position := bodyStart
+	body := make([]byte, 0)
+	for {
+		lineEnd := bytes.IndexByte(payload[position:], '\n')
+		if lineEnd < 0 {
+			return 0, nil, false, true
+		}
+		lineEnd += position
+		sizeText, _, _ := strings.Cut(strings.TrimSpace(string(payload[position:lineEnd])), ";")
+		size, err := strconv.ParseUint(strings.TrimSpace(sizeText), 16, 64)
+		if err != nil || size > maxReassembledApplicationBytes || uint64(len(body))+size > maxReassembledApplicationBytes {
+			return 0, nil, false, false
+		}
+		position = lineEnd + 1
+		if size == 0 {
+			for {
+				trailerEnd := bytes.IndexByte(payload[position:], '\n')
+				if trailerEnd < 0 {
+					return 0, nil, false, true
+				}
+				trailerEnd += position
+				if len(bytes.TrimSpace(payload[position:trailerEnd])) == 0 {
+					return trailerEnd + 1, body, true, true
+				}
+				position = trailerEnd + 1
+			}
+		}
+		chunkEnd := position + int(size)
+		if chunkEnd < position || chunkEnd >= len(payload) {
+			return 0, nil, false, true
+		}
+		body = append(body, payload[position:chunkEnd]...)
+		position = chunkEnd
+		switch {
+		case len(payload[position:]) >= 2 && payload[position] == '\r' && payload[position+1] == '\n':
+			position += 2
+		case payload[position] == '\n':
+			position++
+		default:
+			return 0, nil, false, false
+		}
 	}
 }
 
@@ -161,14 +230,68 @@ func (s *applicationStream) parseSMTP(ctx reassemblyContext, ci gopacket.Capture
 		}
 		line := strings.TrimRight(string(s.buffer[:end+1]), "\r\n")
 		s.buffer = s.buffer[end+1:]
+		if !fromServer && s.smtpInData {
+			if line == "." {
+				metadata := &data.EmailMetadata{
+					MailFrom: s.emailMetadata.MailFrom, RcptTo: append([]string(nil), s.emailMetadata.RcptTo...),
+					Subject: s.emailMetadata.Subject, MessageId: s.emailMetadata.MessageID,
+					ContentType: s.emailMetadata.ContentType, BodySize: int32(s.smtpBodySize), // #nosec G115 -- bounded by the reassembly limit
+					BodyTruncated: s.smtpBodyTruncated,
+				}
+				if s.runtime.cfg.IncludeEmailBodyPreview {
+					metadata.BodyPreview = s.smtpBody.String()
+				}
+				s.emit(ctx, ci, nil, nil, metadata)
+				s.smtpInData, s.smtpInBody = false, false
+				s.smtpBody.Reset()
+				s.smtpBodySize, s.smtpBodyTruncated = 0, false
+				continue
+			}
+			if !s.smtpInBody {
+				s.email.ParseDataHeader(line, &s.emailMetadata)
+				s.smtpInBody = line == ""
+				continue
+			}
+			s.captureSMTPBody(line)
+			continue
+		}
 		recognized := s.email.ParseLine(line, &s.emailMetadata, fromServer)
-		s.email.ParseDataHeader(line, &s.emailMetadata)
+		if recognized && !fromServer && s.emailMetadata.Command == "DATA" {
+			s.smtpInData = true
+			s.smtpInBody = false
+		}
 		if !recognized && s.emailMetadata.Subject == "" && s.emailMetadata.MessageID == "" {
 			continue
 		}
 		metadata := &data.EmailMetadata{MailFrom: s.emailMetadata.MailFrom, RcptTo: append([]string(nil), s.emailMetadata.RcptTo...), Subject: s.emailMetadata.Subject, MessageId: s.emailMetadata.MessageID}
 		s.emit(ctx, ci, nil, nil, metadata)
 	}
+}
+
+func (s *applicationStream) captureSMTPBody(line string) {
+	lineBytes := len(line) + 1
+	s.smtpBodySize += lineBytes
+	if !s.runtime.cfg.IncludeEmailBodyPreview || s.smtpBodyTruncated {
+		return
+	}
+	limit := s.runtime.cfg.Files.MaxFileSize
+	if limit <= 0 || limit > maxReassembledApplicationBytes {
+		limit = maxReassembledApplicationBytes
+	}
+	remaining := int(limit) - s.smtpBody.Len()
+	if remaining <= 0 {
+		s.smtpBodyTruncated = true
+		return
+	}
+	text := line
+	if s.smtpBody.Len() != 0 {
+		text = "\n" + text
+	}
+	if len(text) > remaining {
+		text = text[:remaining]
+		s.smtpBodyTruncated = true
+	}
+	s.smtpBody.WriteString(text)
 }
 
 func (s *applicationStream) emit(ctx reassemblyContext, ci gopacket.CaptureInfo, tls *data.TLSMetadata, http *data.HTTPMetadata, email *data.EmailMetadata) {
@@ -222,7 +345,7 @@ func (r *Runtime) resetReassembly() {
 	r.tcpAssembler = capture.NewTCPAssembler(&applicationFactory{runtime: r})
 }
 
-func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp time.Time) {
+func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp time.Time, scope events.CaptureScope, partial bool) {
 	tcp, ok := packet.TransportLayer().(*layers.TCP)
 	if !ok || packet.NetworkLayer() == nil {
 		return
@@ -230,12 +353,11 @@ func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp ti
 	if len(tcp.Payload) == 0 && !tcp.SYN && !tcp.FIN && !tcp.RST {
 		return
 	}
-	scope := source.CaptureScope
 	if scope == "" {
 		scope = events.CaptureScopeFull
 	}
 	r.tcpAssembler.AssembleCaptureInfo(packet.NetworkLayer().NetworkFlow(), tcp, gopacket.CaptureInfo{
 		Timestamp:     timestamp,
-		AncillaryData: []interface{}{reassemblyContext{source: source, scope: scope, partial: source.Partial}},
+		AncillaryData: []interface{}{reassemblyContext{source: source, scope: scope, partial: partial}},
 	})
 }

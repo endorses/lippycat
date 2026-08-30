@@ -261,6 +261,14 @@ dispatcher draining during restart or mode changes; and failure to initialize
 sniff's auxiliary normalized-event analysis no longer suppresses the primary
 packet capture/output callback. Race-enabled Phase 4 package tests and the
 processor integration suite pass.
+A 2026-08-31 renewed runtime audit corrected three stateful-protocol parity
+gaps: filter-derived capture scope and partial state now survive TCP
+reassembly; chunked HTTP responses wait for and decode the complete bounded
+body before event and file analysis; and SMTP DATA bodies now feed bounded
+attachment analysis when body preview is explicitly enabled. Sniff also passes
+its existing email-body-preview setting into the shared runtime. Regression
+tests cover filtered segmented HTTP, chunked final-byte timing, and SMTP
+attachment metadata, and the Phase 4 race-enabled package tests pass.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

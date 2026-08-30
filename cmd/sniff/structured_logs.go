@@ -85,11 +85,12 @@ func newSniffEventSession(dir string, inputFiles []string, analysisProfile strin
 		}
 	}
 	analysis, err := eventanalysis.New(eventanalysis.Config{
-		Dispatcher:         d,
-		Flow:               flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute},
-		Connections:        conntrack.Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second},
-		Files:              fileanalysis.Config{MaxFileSize: viper.GetInt64("files.max_size"), MaxTotalSize: viper.GetInt64("files.total_size"), Extract: viper.GetBool("files.extract"), Directory: viper.GetString("files.extract_dir")},
-		IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers"),
+		Dispatcher:              d,
+		Flow:                    flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute},
+		Connections:             conntrack.Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second},
+		Files:                   fileanalysis.Config{MaxFileSize: viper.GetInt64("files.max_size"), MaxTotalSize: viper.GetInt64("files.total_size"), Extract: viper.GetBool("files.extract"), Directory: viper.GetString("files.extract_dir")},
+		IncludeHTTPHeaders:      viper.GetBool("logs.include_http_headers"),
+		IncludeEmailBodyPreview: viper.GetBool("logs.include_email_body_preview"),
 	})
 	if err != nil {
 		return nil, err

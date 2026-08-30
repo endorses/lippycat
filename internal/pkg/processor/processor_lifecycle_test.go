@@ -81,6 +81,27 @@ func TestProcessorRegistersEventServiceAlongsideExistingServices(t *testing.T) {
 	require.Contains(t, services, "lippycat.events.v1.EventService")
 }
 
+func TestProcessorEventSubscriptionPolicyIsExplicitlyConfigurable(t *testing.T) {
+	defaultProcessor, err := New(Config{ProcessorID: "default-policy", ListenAddr: "localhost:0"})
+	require.NoError(t, err)
+	defaultService, ok := defaultProcessor.eventService.(*EventService)
+	require.True(t, ok)
+	assert.False(t, defaultService.policy.AllowSensitiveFields)
+	assert.False(t, defaultService.policy.AllowFileMetadata)
+
+	enabledProcessor, err := New(Config{
+		ProcessorID:               "enabled-policy",
+		ListenAddr:                "localhost:0",
+		EventAllowSensitiveFields: true,
+		EventAllowFileMetadata:    true,
+	})
+	require.NoError(t, err)
+	enabledService, ok := enabledProcessor.eventService.(*EventService)
+	require.True(t, ok)
+	assert.True(t, enabledService.policy.AllowSensitiveFields)
+	assert.True(t, enabledService.policy.AllowFileMetadata)
+}
+
 func TestShutdownDrainsEventProducersBeforeClosingDispatcher(t *testing.T) {
 	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 4})
 	require.NoError(t, err)

@@ -149,6 +149,10 @@ successful sink delivery as well as drop reporting, preventing queued
 pre-admission events from leaking into a live-only stream. It also bounded
 reconnect-gap metadata to the negotiated message size and made packet and event
 subscriptions share the configured maximum-subscriber limit.
+An implementation reachability audit found that the conservative sensitive-field
+and file-metadata authorization policy could only be enabled by unit tests. The
+processor and every tap command path now expose explicit, default-deny flags and
+configuration keys for those permissions, while file content remains excluded.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

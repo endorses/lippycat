@@ -68,8 +68,10 @@ type Config struct {
 	ListenAddr                  string
 	ProcessorID                 string
 	UpstreamAddr                string
-	MaxHunters                  int // Maximum concurrent hunter connections (0 = unlimited)
-	MaxSubscribers              int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
+	MaxHunters                  int  // Maximum concurrent hunter connections (0 = unlimited)
+	MaxSubscribers              int  // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
+	EventAllowSensitiveFields   bool // Permit authenticated event subscribers to request sensitive fields
+	EventAllowFileMetadata      bool // Permit authenticated event subscribers to request file metadata (never content)
 	WriteFile                   string
 	DisplayStats                bool
 	PcapWriterConfig            *PcapWriterConfig            // Per-call PCAP writing configuration (VoIP)
@@ -272,6 +274,8 @@ func New(config Config) (*Processor, error) {
 	p.subscriptionLimit = newSubscriptionLimiter(config.MaxSubscribers)
 	p.eventService, err = NewEventService(p.eventBroadcaster, EventSubscriptionPolicy{
 		ProcessorNodeID: config.ProcessorID, subscriptionLimit: p.subscriptionLimit,
+		AllowSensitiveFields: config.EventAllowSensitiveFields,
+		AllowFileMetadata:    config.EventAllowFileMetadata,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize event subscription service: %w", err)

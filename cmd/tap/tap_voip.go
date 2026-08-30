@@ -389,6 +389,8 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		UpstreamAddr:                cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:                  cmdutil.GetIntConfig("tap.max_hunters", maxHunters),
 		MaxSubscribers:              cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
+		EventAllowSensitiveFields:   cmdutil.GetBoolConfig("tap.events.allow_sensitive_fields", eventAllowSensitiveFields),
+		EventAllowFileMetadata:      cmdutil.GetBoolConfig("tap.events.allow_file_metadata", eventAllowFileMetadata),
 		WriteFile:                   cmdutil.GetStringConfig("tap.write_file", writeFile),
 		DisplayStats:                true,
 		PcapWriterConfig:            pcapWriterConfig,

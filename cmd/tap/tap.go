@@ -104,11 +104,13 @@ var (
 	batchTimeout   int
 
 	// Management interface flags
-	listenAddr      string
-	tapID           string // renamed from tap-id, now --id
-	tapIDDeprecated string // deprecated, use tapID
-	maxHunters      int
-	maxSubscribers  int
+	listenAddr                string
+	tapID                     string // renamed from tap-id, now --id
+	tapIDDeprecated           string // deprecated, use tapID
+	maxHunters                int
+	maxSubscribers            int
+	eventAllowSensitiveFields bool
+	eventAllowFileMetadata    bool
 
 	// Upstream forwarding (renamed from --upstream to --processor)
 	processorAddr          string
@@ -204,6 +206,8 @@ func init() {
 	TapCmd.PersistentFlags().Lookup("tap-id").Hidden = true
 	TapCmd.PersistentFlags().IntVar(&maxHunters, "max-hunters", 0, "Maximum concurrent hunter connections (0 = unlimited)")
 	TapCmd.PersistentFlags().IntVar(&maxSubscribers, "max-subscribers", constants.DefaultMaxSubscribers, "Maximum concurrent TUI subscribers (0 = unlimited)")
+	TapCmd.PersistentFlags().BoolVar(&eventAllowSensitiveFields, "event-allow-sensitive-fields", false, "Allow event subscribers to request sensitive HTTP, SMTP, and file fields")
+	TapCmd.PersistentFlags().BoolVar(&eventAllowFileMetadata, "event-allow-file-metadata", false, "Allow event subscribers to request file metadata (never file content)")
 
 	// Upstream forwarding (--processor is the new name, --upstream is deprecated)
 	TapCmd.PersistentFlags().StringVarP(&processorAddr, "processor", "P", "", "Upstream processor address for hierarchical mode (host:port)")
@@ -493,20 +497,22 @@ func runTap(cmd *cobra.Command, args []string) error {
 	// Build processor configuration
 	eventQueue, structuredLogs := structuredLoggingConfig()
 	config := processor.Config{
-		EventQueueSize:        eventQueue,
-		LogConfig:             structuredLogs,
-		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
-		ProcessorID:           effectiveTapID,
-		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
-		MaxHunters:            cmdutil.GetIntConfig("tap.max_hunters", maxHunters),
-		MaxSubscribers:        cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
-		WriteFile:             cmdutil.GetStringConfig("tap.write_file", writeFile),
-		DisplayStats:          cmdutil.GetBoolConfig("tap.display_stats", displayStats),
-		PcapWriterConfig:      nil, // Per-call PCAP is VoIP-specific, use tap voip
-		AutoRotateConfig:      autoRotateConfig,
-		CommandExecutorConfig: commandExecutorConfig,
-		EnableDetection:       cmdutil.GetBoolConfig("tap.enable_detection", enableDetection),
-		FilterFile:            cmdutil.GetStringConfig("tap.filter_file", filterFile),
+		EventQueueSize:            eventQueue,
+		LogConfig:                 structuredLogs,
+		ListenAddr:                cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
+		ProcessorID:               effectiveTapID,
+		UpstreamAddr:              cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
+		MaxHunters:                cmdutil.GetIntConfig("tap.max_hunters", maxHunters),
+		MaxSubscribers:            cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
+		EventAllowSensitiveFields: cmdutil.GetBoolConfig("tap.events.allow_sensitive_fields", eventAllowSensitiveFields),
+		EventAllowFileMetadata:    cmdutil.GetBoolConfig("tap.events.allow_file_metadata", eventAllowFileMetadata),
+		WriteFile:                 cmdutil.GetStringConfig("tap.write_file", writeFile),
+		DisplayStats:              cmdutil.GetBoolConfig("tap.display_stats", displayStats),
+		PcapWriterConfig:          nil, // Per-call PCAP is VoIP-specific, use tap voip
+		AutoRotateConfig:          autoRotateConfig,
+		CommandExecutorConfig:     commandExecutorConfig,
+		EnableDetection:           cmdutil.GetBoolConfig("tap.enable_detection", enableDetection),
+		FilterFile:                cmdutil.GetStringConfig("tap.filter_file", filterFile),
 		// TLS configuration (TLS enabled by default unless --insecure is set)
 		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),

@@ -81,17 +81,19 @@ Examples:
 }
 
 var (
-	listenAddr             string
-	processorID            string // renamed from processor-id, now --id
-	processorIDDeprecated  string // deprecated, use processorID
-	processorAddr          string // renamed from upstreamAddr
-	upstreamAddrDeprecated string // deprecated, use processorAddr
-	maxHunters             int
-	maxSubscribers         int
-	writeFile              string
-	displayStats           bool
-	enableDetection        bool
-	filterFile             string
+	listenAddr                string
+	processorID               string // renamed from processor-id, now --id
+	processorIDDeprecated     string // deprecated, use processorID
+	processorAddr             string // renamed from upstreamAddr
+	upstreamAddrDeprecated    string // deprecated, use processorAddr
+	maxHunters                int
+	maxSubscribers            int
+	eventAllowSensitiveFields bool
+	eventAllowFileMetadata    bool
+	writeFile                 string
+	displayStats              bool
+	enableDetection           bool
+	filterFile                string
 	// TLS flags (TLS is enabled by default unless --insecure is set)
 	tlsCertFile     string
 	tlsKeyFile      string
@@ -154,6 +156,8 @@ func init() {
 	ProcessCmd.Flags().Lookup("upstream").Hidden = true
 	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", constants.DefaultMaxHunters, "Maximum number of concurrent hunter connections (0 = unlimited)")
 	ProcessCmd.Flags().IntVarP(&maxSubscribers, "max-subscribers", "", constants.DefaultMaxSubscribers, "Maximum number of concurrent TUI/monitoring subscribers (0 = unlimited)")
+	ProcessCmd.Flags().BoolVar(&eventAllowSensitiveFields, "event-allow-sensitive-fields", false, "Allow event subscribers to request sensitive HTTP, SMTP, and file fields")
+	ProcessCmd.Flags().BoolVar(&eventAllowFileMetadata, "event-allow-file-metadata", false, "Allow event subscribers to request file metadata (never file content)")
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 	ProcessCmd.Flags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")
 	ProcessCmd.Flags().BoolVarP(&enableDetection, "enable-detection", "d", true, "Enable centralized protocol detection (default: true)")
@@ -420,6 +424,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		UpstreamAddr:                cmdutil.GetStringConfig("processor.processor_addr", processorAddr),
 		MaxHunters:                  cmdutil.GetIntConfig("processor.max_hunters", maxHunters),
 		MaxSubscribers:              cmdutil.GetIntConfig("processor.max_subscribers", maxSubscribers),
+		EventAllowSensitiveFields:   cmdutil.GetBoolConfig("processor.events.allow_sensitive_fields", eventAllowSensitiveFields),
+		EventAllowFileMetadata:      cmdutil.GetBoolConfig("processor.events.allow_file_metadata", eventAllowFileMetadata),
 		WriteFile:                   cmdutil.GetStringConfig("processor.write_file", writeFile),
 		DisplayStats:                cmdutil.GetBoolConfig("processor.display_stats", displayStats),
 		PcapWriterConfig:            pcapWriterConfig,

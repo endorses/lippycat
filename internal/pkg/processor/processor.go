@@ -35,14 +35,13 @@ import (
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/auth"
-	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/dns"
+	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
 	"github.com/endorses/lippycat/internal/pkg/eventcoalesce"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
-	"github.com/endorses/lippycat/internal/pkg/flowid"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/logstream"
@@ -220,12 +219,9 @@ type Processor struct {
 	eventDispatcher   *events.Dispatcher
 	eventBroadcaster  *broadcast.Broadcaster
 	eventService      eventsv1.EventServiceServer
+	eventRuntime      *eventanalysis.Runtime
 	subscriptionLimit *subscriptionLimiter
-	flowIdentity      *flowid.Cache
-	connTracker       *conntrack.Tracker
-	connExpireAt      atomic.Int64
 	logSink           *logstream.Sink
-	fileAnalyzer      *fileanalysis.Analyzer
 
 	// Control
 	ctx          context.Context
@@ -284,17 +280,17 @@ func New(config Config) (*Processor, error) {
 	if config.LogConfig != nil {
 		fileCfg = fileanalysis.Config{MaxFileSize: config.LogConfig.FileMaxSize, MaxTotalSize: config.LogConfig.FileTotalSize, Extract: config.LogConfig.ExtractFiles, Directory: config.LogConfig.ExtractionDirectory}
 	}
-	p.fileAnalyzer, err = fileanalysis.New(fileCfg)
-	if err != nil {
-		return nil, fmt.Errorf("initialize file analyzer: %w", err)
+	includeHeaders, includeEmailBody := false, false
+	if config.LogConfig != nil {
+		includeHeaders = config.LogConfig.IncludeHTTPHeaders
+		includeEmailBody = config.LogConfig.IncludeEmailBodyPreview
 	}
-	p.flowIdentity, err = flowid.NewCache(flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute})
+	p.eventRuntime, err = eventanalysis.New(eventanalysis.Config{
+		Dispatcher: p.eventDispatcher, Files: fileCfg,
+		IncludeHTTPHeaders: includeHeaders, IncludeEmailBodyPreview: includeEmailBody,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("initialize flow identity cache: %w", err)
-	}
-	p.connTracker, err = conntrack.New(conntrack.Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second})
-	if err != nil {
-		return nil, fmt.Errorf("initialize connection tracker: %w", err)
+		return nil, fmt.Errorf("initialize event analysis runtime: %w", err)
 	}
 	if shouldEmitStructuredLogs(config) {
 		logCfg := config.LogConfig

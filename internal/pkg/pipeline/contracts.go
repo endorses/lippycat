@@ -25,6 +25,7 @@ type SourceProvenance struct {
 	Kind           SourceKind
 	NodeID         string
 	InterfaceName  string
+	InputFile      string
 	InterfaceIndex uint32
 	BatchSequence  uint64
 	BatchTimestamp time.Time

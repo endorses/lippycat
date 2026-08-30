@@ -108,6 +108,14 @@ func (m Model) handleResumeMsg(msg tea.ResumeMsg) (Model, tea.Cmd) {
 func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 	// When capturing and not paused: full processing
 	if !m.uiState.Paused && m.uiState.Capturing {
+		var eventCmds []tea.Cmd
+		for _, batch := range drainPendingLocalEvents(m.captureMode == components.CaptureModeOffline) {
+			var cmd tea.Cmd
+			m, cmd = m.handleEventBatchMsg(EventBatchMsg{Batch: batch, Local: true})
+			if cmd != nil {
+				eventCmds = append(eventCmds, cmd)
+			}
+		}
 		// PULL-BASED ARCHITECTURE: Drain pending packets from buffer
 		// This ensures TUI is never blocked by incoming packets - it pulls when ready
 		pendingPackets := DrainPendingPackets(m.captureMode == components.CaptureModeOffline)
@@ -140,7 +148,8 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 			m.lastRateRecord = now
 		}
 
-		return m, tickCmd()
+		eventCmds = append(eventCmds, tickCmd())
+		return m, tea.Batch(eventCmds...)
 	}
 
 	// When paused but still capturing: only update TUI metrics
@@ -242,8 +251,7 @@ func (m Model) handleNodesLoadFailedMsg(msg NodesLoadFailedMsg) (Model, tea.Cmd)
 // handleProtocolSelectedMsg handles protocol selection from protocol selector
 func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Model, tea.Cmd) {
 	// User selected a protocol from the protocol selector
-	preserveEvents := m.captureMode == components.CaptureModeRemote &&
-		m.uiState.ViewMode == "events" && eventScopeAvailable(msg.Protocol.Name)
+	preserveEvents := m.uiState.ViewMode == "events" && eventScopeAvailable(msg.Protocol.Name)
 	m.uiState.SelectedProtocol = msg.Protocol
 
 	// Update statistics view with selected protocol for protocol-specific stats
@@ -493,6 +501,14 @@ func (m Model) handleCaptureCompleteMsg(msg CaptureCompleteMsg) (Model, tea.Cmd)
 		}
 		m.processPendingPackets(pendingPackets)
 	}
+	var eventCmds []tea.Cmd
+	for _, batch := range drainPendingLocalEvents(true) {
+		var cmd tea.Cmd
+		m, cmd = m.handleEventBatchMsg(EventBatchMsg{Batch: batch, Local: true})
+		if cmd != nil {
+			eventCmds = append(eventCmds, cmd)
+		}
+	}
 
 	// Do a final packet list update
 	m.updatePacketListIncremental()
@@ -517,5 +533,6 @@ func (m Model) handleCaptureCompleteMsg(msg CaptureCompleteMsg) (Model, tea.Cmd)
 	// 2. The tick handler continues updating the UI as needed
 	// 3. Setting it to false would stop all UI updates
 
-	return m, toastCmd
+	eventCmds = append(eventCmds, toastCmd)
+	return m, tea.Batch(eventCmds...)
 }

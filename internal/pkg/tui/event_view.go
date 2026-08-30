@@ -16,6 +16,9 @@ func (m Model) handleEventBatchMsg(msg EventBatchMsg) (Model, tea.Cmd) {
 	if m.eventStore == nil {
 		return m, nil
 	}
+	if msg.Local == (m.captureMode == components.CaptureModeRemote) {
+		return m, nil
+	}
 	m.eventStore.AddBatch(msg.Batch.Events)
 	for _, loss := range msg.Batch.Losses {
 		m.eventStore.RecordTransportLoss(loss.Kind.String(), eventLossCount(loss))
@@ -64,7 +67,7 @@ func eventLossCount(loss types.EventLoss) uint64 {
 // common event timeline.
 func (m Model) captureViewsForSelectedProtocol() []string {
 	views := []string{"packets"}
-	if m.captureMode == components.CaptureModeRemote && eventScopeAvailable(m.uiState.SelectedProtocol.Name) {
+	if eventScopeAvailable(m.uiState.SelectedProtocol.Name) {
 		views = append(views, "events")
 	}
 	switch m.uiState.SelectedProtocol.Name {

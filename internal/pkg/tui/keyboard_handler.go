@@ -692,73 +692,17 @@ func (m Model) handleToggleTimeDisplay() (Model, tea.Cmd) {
 // handleToggleView toggles between different view modes
 func (m Model) handleToggleView() (Model, tea.Cmd) {
 	// On the capture tab, cycle only through views available for the current
-	// scope. Events are remote-only until the shared local analysis runtime is
-	// introduced in Phase 4.
+	// scope. Local and remote capture share the normalized Events view.
 	if m.uiState.Tabs.GetActive() == 0 {
-		if m.captureMode == components.CaptureModeRemote {
-			views := m.captureViewsForSelectedProtocol()
-			for i, view := range views {
-				if view == m.uiState.ViewMode {
-					m.setCaptureView(views[(i+1)%len(views)])
-					return m, nil
-				}
-			}
-			m.setCaptureView(views[0])
-			return m, nil
-		}
-		if m.uiState.SelectedProtocol.Name == "VoIP (SIP/RTP)" {
-			if m.uiState.ViewMode == "packets" {
-				m.uiState.ViewMode = "calls"
-			} else {
-				m.uiState.ViewMode = "packets"
-				// Refresh packet list when switching to packets view
-				// This ensures packets that arrived while in calls view are displayed
-				if !m.packetStore.HasFilter() {
-					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-				} else {
-					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-				}
-			}
-		} else if m.uiState.SelectedProtocol.Name == "DNS" {
-			// DNS: toggle between packets and queries view
-			if m.uiState.ViewMode == "packets" {
-				m.uiState.ViewMode = "queries"
-			} else {
-				m.uiState.ViewMode = "packets"
-				// Refresh packet list when switching to packets view
-				if !m.packetStore.HasFilter() {
-					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-				} else {
-					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-				}
-			}
-		} else if m.uiState.SelectedProtocol.Name == "Email" {
-			// Email: toggle between packets and emails view
-			if m.uiState.ViewMode == "packets" {
-				m.uiState.ViewMode = "emails"
-			} else {
-				m.uiState.ViewMode = "packets"
-				// Refresh packet list when switching to packets view
-				if !m.packetStore.HasFilter() {
-					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-				} else {
-					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-				}
-			}
-		} else if m.uiState.SelectedProtocol.Name == "HTTP" {
-			// HTTP: toggle between packets and http view
-			if m.uiState.ViewMode == "packets" {
-				m.uiState.ViewMode = "http"
-			} else {
-				m.uiState.ViewMode = "packets"
-				// Refresh packet list when switching to packets view
-				if !m.packetStore.HasFilter() {
-					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-				} else {
-					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-				}
+		views := m.captureViewsForSelectedProtocol()
+		for i, view := range views {
+			if view == m.uiState.ViewMode {
+				m.setCaptureView(views[(i+1)%len(views)])
+				return m, nil
 			}
 		}
+		m.setCaptureView(views[0])
+		return m, nil
 	} else if m.uiState.Tabs.GetActive() == 1 {
 		// On nodes tab: toggle between table and graph view
 		if !m.uiState.NodesView.ToggleView() {

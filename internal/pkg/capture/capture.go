@@ -18,9 +18,10 @@ import (
 )
 
 type PacketInfo struct {
-	LinkType  layers.LinkType
-	Packet    gopacket.Packet
-	Interface string // Name of the interface where packet was captured
+	LinkType   layers.LinkType
+	Packet     gopacket.Packet
+	Interface  string // Display name of the interface or offline input.
+	SourcePath string // Exact offline input path; empty for live capture.
 }
 
 // espNullSPICache maps ESP SPIs confirmed as NULL-encrypted to their inner IP protocol.

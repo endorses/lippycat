@@ -61,6 +61,11 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 
 	// Keep all remote clients connected regardless of mode
 	// Users can switch between modes without losing node connections
+	// Every capture restart begins a new normalized-event analysis session.
+	// Clear retained events before the new runtime starts so identities and
+	// partial flows from different inputs cannot be presented as one timeline.
+	m.eventStore.Reset()
+	m.eventStore.ClearUserFilters()
 
 	// Update settings based on mode and show toast
 	var toastCmd tea.Cmd
@@ -74,9 +79,6 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 			components.ToastDurationShort,
 		)
 	case components.CaptureModeOffline:
-		// A newly selected offline input is a separate analysis session.
-		m.eventStore.Reset()
-		m.eventStore.ClearUserFilters()
 		m.interfaceName = formatPCAPFilesDisplay(msg.PCAPFiles)
 		m.pcapFiles = msg.PCAPFiles
 		m.uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
@@ -135,6 +137,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	// Reset bridge state (clears stale data from previous capture mode)
 	ResetBridgeStats()
 	ClearPendingPackets()
+	pendingLocalEvents.clear()
 
 	// Start new capture in background using synchronized program reference
 	program := globalCaptureState.GetProgram()
@@ -240,7 +243,8 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
-		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator)
+		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator,
+			LocalEventAnalysisOptions{NodeID: "watch-local"})
 	}
 
 	// Run capture - InitWithContext handles both live and offline modes
@@ -261,9 +265,18 @@ func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterfa
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
-		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator)
+		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator,
+			LocalEventAnalysisOptions{NodeID: "watch-local", SourceOrdering: pcapInterfaceNames(devices)})
 	}
 
 	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes
-	capture.RunOfflineOrdered(devices, filter, processor)
+	capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
+}
+
+func pcapInterfaceNames(devices []pcaptypes.PcapInterface) []string {
+	names := make([]string, 0, len(devices))
+	for _, device := range devices {
+		names = append(names, device.Name())
+	}
+	return names
 }

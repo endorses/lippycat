@@ -4,7 +4,6 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/spf13/viper"
 )
 
@@ -31,7 +30,7 @@ func (m Model) View() string {
 	m.uiState.Footer.SetFilterCount(m.packetStore.FilterChain.Count())
 	m.uiState.Footer.SetActiveTab(m.uiState.Tabs.GetActive())
 	m.uiState.Footer.SetHasProtocolSelection(m.uiState.SelectedProtocol.Name != "All")
-	m.uiState.Footer.SetHasEvents(m.captureMode == components.CaptureModeRemote && eventScopeAvailable(m.uiState.SelectedProtocol.Name))
+	m.uiState.Footer.SetHasEvents(eventScopeAvailable(m.uiState.SelectedProtocol.Name))
 	m.uiState.Footer.SetPaused(m.uiState.Paused)
 	m.uiState.Footer.SetHasHelpSearch(m.uiState.HelpView.HasActiveSearch())
 	m.uiState.Footer.SetViewMode(m.uiState.ViewMode)

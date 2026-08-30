@@ -2,8 +2,10 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -150,6 +152,14 @@ func checkCapturePermissions(devices []pcaptypes.PcapInterface) bool {
 // It ensures proper temporal ordering across all files.
 func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	processor func(<-chan PacketInfo)) {
+	RunOfflineOrderedContext(context.Background(), devices, filter, processor)
+}
+
+// RunOfflineOrderedContext is RunOfflineOrdered with cancellation for the
+// lossless producer send. Cancellation closes the input before waiting for the
+// processor, so a context-aware consumer cannot strand the replay producer.
+func RunOfflineOrderedContext(ctx context.Context, devices []pcaptypes.PcapInterface, filter string,
+	processor func(<-chan PacketInfo)) {
 
 	logger.Info("Starting timestamp-ordered offline capture",
 		"file_count", len(devices))
@@ -157,8 +167,12 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	// Phase 1: Read all packets from all files into memory
 	var allPackets []PacketInfo
 	for _, dev := range devices {
-		packets, err := readAllPacketsFromDevice(dev, filter)
+		packets, err := readAllPacketsFromDeviceContext(ctx, dev, filter)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				logger.Info("Timestamp-ordered offline capture cancelled", "error", err)
+				return
+			}
 			logger.Error("Error reading packets from file",
 				"file", dev.Name(),
 				"error", err)
@@ -204,8 +218,15 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	// Send all packets in timestamp order using blocking sends so replay cannot
 	// drop packets or advance until the consumer accepts the preceding packet.
 	for _, pkt := range allPackets {
-		observePacket(pkt)
-		packetStream <- pkt
+		select {
+		case <-ctx.Done():
+			close(packetStream)
+			processorWg.Wait()
+			logger.Info("Timestamp-ordered offline capture cancelled", "error", ctx.Err())
+			return
+		case packetStream <- pkt:
+			observePacket(pkt)
+		}
 	}
 	close(packetStream)
 
@@ -218,6 +239,10 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 
 // readAllPacketsFromDevice reads all packets from a single PCAP device/file
 func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]PacketInfo, error) {
+	return readAllPacketsFromDeviceContext(context.Background(), dev, filter)
+}
+
+func readAllPacketsFromDeviceContext(ctx context.Context, dev pcaptypes.PcapInterface, filter string) ([]PacketInfo, error) {
 	err := dev.SetHandle()
 	if err != nil {
 		return nil, fmt.Errorf("failed to set handle: %w", err)
@@ -240,6 +265,7 @@ func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]Pac
 
 	linkType := handle.LinkType()
 	ifaceName := dev.Name()
+	displayName := filepath.Base(ifaceName)
 
 	packetSource := gopacket.NewPacketSource(handle, linkType)
 	packetSource.NoCopy = true
@@ -255,6 +281,9 @@ func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]Pac
 
 	var packets []PacketInfo
 	for packet := range packetSource.Packets() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Make a copy of the packet data since NoCopy=true
 		data := make([]byte, len(packet.Data()))
 		copy(data, packet.Data())
@@ -331,9 +360,10 @@ func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]Pac
 		}
 
 		packets = append(packets, PacketInfo{
-			LinkType:  effectiveLinkType,
-			Packet:    newPacket,
-			Interface: ifaceName,
+			LinkType:   effectiveLinkType,
+			Packet:     newPacket,
+			Interface:  displayName,
+			SourcePath: ifaceName,
 		})
 	}
 

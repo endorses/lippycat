@@ -3,6 +3,8 @@
 package sniff
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
@@ -75,8 +77,12 @@ func TestRunProtocolSelectsIngressAndPreservesArguments(t *testing.T) {
 	require.Equal(t, "eth-test", gotInterfaces)
 	require.Equal(t, "tcp and port 42", gotFilter)
 
-	readFile = "first.pcap"
-	runProtocol(&cobra.Command{}, []string{"second.pcap"}, protocol, hooks)
-	require.Equal(t, []string{"first.pcap", "second.pcap"}, gotFiles)
+	first := filepath.Join(t.TempDir(), "first.pcap")
+	second := filepath.Join(t.TempDir(), "second.pcap")
+	require.NoError(t, os.WriteFile(first, []byte("first"), 0o600))
+	require.NoError(t, os.WriteFile(second, []byte("second"), 0o600))
+	readFile = first
+	runProtocol(&cobra.Command{}, []string{second}, protocol, hooks)
+	require.Equal(t, []string{first, second}, gotFiles)
 	require.Equal(t, "tcp and port 42", gotFilter)
 }

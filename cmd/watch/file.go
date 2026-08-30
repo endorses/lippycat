@@ -161,10 +161,19 @@ func runFile(cmd *cobra.Command, args []string) {
 func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) {
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo) {
-		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator)
+		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator,
+			tui.LocalEventAnalysisOptions{NodeID: "watch-local", SourceOrdering: append([]string(nil), devicesToSourceOrdering(devices)...)})
 	}
 	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
-	capture.RunOfflineOrdered(devices, filter, processor)
+	capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
+}
+
+func devicesToSourceOrdering(devices []pcaptypes.PcapInterface) []string {
+	ordering := make([]string, 0, len(devices))
+	for _, device := range devices {
+		ordering = append(ordering, device.Name())
+	}
+	return ordering
 }
 
 func init() {

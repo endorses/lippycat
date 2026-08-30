@@ -3,12 +3,16 @@
 package sniff
 
 import (
+	"context"
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
@@ -16,6 +20,20 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
+
+type sniffEventSink struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (s *sniffEventSink) HandleEvent(_ context.Context, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+func (*sniffEventSink) Flush(context.Context) error { return nil }
+func (*sniffEventSink) Close(context.Context) error { return nil }
 
 func TestOfflineStructuredEventProducerIsDeterministic(t *testing.T) {
 	firstPath := filepath.Join(t.TempDir(), "first.pcap")
@@ -50,6 +68,69 @@ func TestStructuredLogFlagsAreInheritedByProtocolCommands(t *testing.T) {
 		require.NotNil(t, cmd.InheritedFlags().Lookup("log-dir"), cmd.Name())
 		require.NotNil(t, cmd.InheritedFlags().Lookup("log-streams"), cmd.Name())
 	}
+}
+
+func TestSniffProducesNormalizedEventsWithoutLogDirectory(t *testing.T) {
+	viper.Set("logs.dir", "")
+	viper.Set("events.queue_size", 32)
+	input := filepath.Join(t.TempDir(), "dns.pcap")
+	require.NoError(t, os.WriteFile(input, []byte("identity input"), 0o600))
+	sink := &sniffEventSink{}
+	session, err := newSniffEventSession("", []string{input}, "test-profile", sink)
+	require.NoError(t, err)
+
+	packet := gopacket.NewPacket(dnsPacket(t), layers.LayerTypeEthernet, gopacket.Default)
+	packet.Metadata().Timestamp = time.Unix(10, 123)
+	session.observe(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: filepath.Base(input), SourcePath: input})
+	session.analysis.EOF()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, session.dispatcher.Close(ctx))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var dnsEvent events.Event
+	for _, event := range sink.events {
+		if event.Kind() == events.KindDNS {
+			dnsEvent = event
+			break
+		}
+	}
+	require.NotNil(t, dnsEvent)
+	require.Equal(t, "local", dnsEvent.Envelope().NodeID)
+	require.Equal(t, input, dnsEvent.Envelope().Provenance.InputFile)
+	require.Equal(t, time.Unix(10, 123), dnsEvent.Envelope().Timestamp)
+	require.NotEmpty(t, dnsEvent.Envelope().EventID)
+}
+
+func TestSniffDistinguishesOfflineInputsWithSameBasename(t *testing.T) {
+	viper.Set("logs.dir", "")
+	viper.Set("events.queue_size", 32)
+	first := filepath.Join(t.TempDir(), "capture.pcap")
+	second := filepath.Join(t.TempDir(), "capture.pcap")
+	require.NoError(t, os.WriteFile(first, []byte("first"), 0o600))
+	require.NoError(t, os.WriteFile(second, []byte("second"), 0o600))
+	sink := &sniffEventSink{}
+	session, err := newSniffEventSession("", []string{first, second}, "test-profile", sink)
+	require.NoError(t, err)
+
+	for index, input := range []string{first, second} {
+		packet := gopacket.NewPacket(dnsPacket(t), layers.LayerTypeEthernet, gopacket.Default)
+		packet.Metadata().Timestamp = time.Unix(int64(10+index), 0)
+		session.observe(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: "capture.pcap", SourcePath: input})
+	}
+	session.analysis.EOF()
+	require.NoError(t, session.dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var provenance []string
+	for _, event := range sink.events {
+		if event.Kind() == events.KindDNS {
+			provenance = append(provenance, event.Envelope().Provenance.InputFile)
+		}
+	}
+	require.Equal(t, []string{first, second}, provenance)
 }
 
 func TestProtocolSniffPCAPWritesStructuredLogs(t *testing.T) {

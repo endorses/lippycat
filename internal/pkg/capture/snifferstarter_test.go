@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -90,6 +91,56 @@ func TestRunOfflineOrderedSortsAcrossFiles(t *testing.T) {
 		base.Add(3 * time.Second).UnixNano(),
 		base.Add(4 * time.Second).UnixNano(),
 	}, got)
+}
+
+func TestRunOfflineOrderedPreservesExactPathsForSameBasename(t *testing.T) {
+	base := time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC)
+	first := writeTimestampedTestPCAP(t, []time.Time{base})
+	second := writeTimestampedTestPCAP(t, []time.Time{base.Add(time.Second)})
+
+	var devices []pcaptypes.PcapInterface
+	for _, name := range []string{first, second} {
+		file, err := os.Open(name)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, file.Close()) })
+		devices = append(devices, pcaptypes.CreateOfflineInterface(file))
+	}
+
+	var got []PacketInfo
+	RunOfflineOrdered(devices, "", func(ch <-chan PacketInfo) {
+		for packet := range ch {
+			got = append(got, packet)
+		}
+	})
+	require.Len(t, got, 2)
+	require.Equal(t, "capture", got[0].Interface)
+	require.Equal(t, "capture", got[1].Interface)
+	require.Equal(t, first, got[0].SourcePath)
+	require.Equal(t, second, got[1].SourcePath)
+}
+
+func TestRunOfflineOrderedContextCancelsBlockedProducer(t *testing.T) {
+	input := writeTimestampedTestPCAP(t, []time.Time{time.Unix(1, 0), time.Unix(2, 0)})
+	file, err := os.Open(input)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, file.Close()) })
+	ctx, cancel := context.WithCancel(context.Background())
+	consumerStarted := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunOfflineOrderedContext(ctx, []pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(<-chan PacketInfo) {
+			close(consumerStarted)
+			<-ctx.Done()
+		})
+	}()
+	<-consumerStarted
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled ordered replay left its producer blocked")
+	}
 }
 
 func TestRunOfflineOrderedDoesNotPrioritizeLaterSIPPacket(t *testing.T) {

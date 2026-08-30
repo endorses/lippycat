@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Phase 3 complete
+**Status:** Phase 4 complete
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -206,27 +206,41 @@ navigation and view cycling, and an explicit related-packet eviction notice.
 
 ## Phase 4 — Shared stateful event-analysis runtime and local TUI parity
 
-- [ ] Extract a reusable normalized-event analysis runtime from processor-owned
+- [x] Extract a reusable normalized-event analysis runtime from processor-owned
       flow tracking and protocol event mapping into an internal package with no
       command or UI dependencies.
-- [ ] Give the runtime explicit source provenance, capture clock, reset,
+- [x] Give the runtime explicit source provenance, capture clock, reset,
       timeout/expiry, shutdown, EOF flush, partial-flow, and drop semantics.
-- [ ] Reuse existing protocol analyzers and reassembly; do not introduce a
+- [x] Reuse existing protocol analyzers and reassembly; do not introduce a
       second DNS, TLS, HTTP, SMTP, or file parser for the TUI.
-- [ ] Migrate processor, tap, and sniff event production to the shared runtime
+- [x] Migrate processor, tap, and sniff event production to the shared runtime
       without changing structured-log output.
-- [ ] Feed `watch live` events from the shared runtime into the common
+- [x] Feed `watch live` events from the shared runtime into the common
       `EventStore` through a bounded local sink.
-- [ ] Feed `watch file` through the same runtime, preserving capture timestamps,
+- [x] Feed `watch file` through the same runtime, preserving capture timestamps,
       deterministic ordering, source-file provenance, EOF flush, and reset when
       inputs change.
-- [ ] Add fixture equivalence tests across processor, tap, sniff, live-watch,
+- [x] Add fixture equivalence tests across processor, tap, sniff, live-watch,
       and file-watch paths.
-- [ ] Add EOF, mid-flow input, timeout, restart, queue-pressure, and graceful
+- [x] Add EOF, mid-flow input, timeout, restart, queue-pressure, and graceful
       shutdown tests.
 
 **Gate:** The same packet fixture produces equivalent normalized events in all
 local and processor analysis paths, subject only to documented source metadata.
+
+### Phase 4 verification
+
+Verified on 2026-08-30 with shared-runtime lifecycle and mapping tests,
+processor/tap adapter tests, sniff-without-log-output tests, local live/file TUI
+bridge tests, exact multi-file provenance tests, ordered-replay cancellation
+tests, and bounded delivery pressure tests. Independent audits corrected
+specialized TUI build tags, zero capture timestamps, out-of-order batch expiry,
+runtime parser locking, partial-batch error reporting, same-basename source-file
+identity, restart and replay cancellation deadlocks, local/remote timeline
+mixing, and silent dispatcher-level TUI loss. Focused race tests, specialized
+`cli`, `tui`, `processor`, and `tap` build-tag suites, and the complete
+`make test` suite (including localhost integration tests outside the sandbox)
+pass.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

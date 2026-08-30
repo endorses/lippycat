@@ -24,7 +24,7 @@ type cursorClientStub struct {
 func (c *cursorClientStub) Close()                        { c.closed = true }
 func (c *cursorClientStub) EventCursor() (string, uint64) { return "previous-stream", 42 }
 
-func TestCaptureViewCycleIncludesEventsOnlyForRemote(t *testing.T) {
+func TestCaptureViewCycleIncludesEventsForRemoteAndLocalCapture(t *testing.T) {
 	remote := NewModel(8, 8, "", "", nil, false, true, "", true)
 	remote.uiState.Tabs.SetActive(0)
 	require.Equal(t, []string{"packets", "events"}, remote.captureViewsForSelectedProtocol())
@@ -33,9 +33,60 @@ func TestCaptureViewCycleIncludesEventsOnlyForRemote(t *testing.T) {
 
 	local := NewModel(8, 8, "test0", "", nil, false, false, "", false)
 	local.uiState.Tabs.SetActive(0)
-	require.Equal(t, []string{"packets"}, local.captureViewsForSelectedProtocol())
+	require.Equal(t, []string{"packets", "events"}, local.captureViewsForSelectedProtocol())
 	local, _ = local.handleToggleView()
-	require.Equal(t, "packets", local.uiState.ViewMode)
+	require.Equal(t, "events", local.uiState.ViewMode)
+
+	offline := NewModel(8, 8, "", "", []string{"fixture.pcap"}, false, false, "", false)
+	offline.uiState.Tabs.SetActive(0)
+	require.Equal(t, []string{"packets", "events"}, offline.captureViewsForSelectedProtocol())
+}
+
+func TestLocalCaptureRestartResetsEventAnalysisView(t *testing.T) {
+	m := NewModel(8, 8, "old0", "", nil, false, false, "", false)
+	m.eventStore.AddEvent(events.NewDNSEvent(testEventEnvelope("old-event", 1)))
+	require.NoError(t, m.eventStore.AddUserFilter("kind:dns"))
+
+	m, _ = m.handleRestartCaptureMsg(components.RestartCaptureMsg{
+		Mode:       components.CaptureModeLive,
+		Interface:  "new0",
+		BufferSize: 8,
+	})
+
+	require.Empty(t, m.eventStore.Events())
+	require.Zero(t, m.eventStore.UserFilterCount())
+	require.Equal(t, "new0", m.interfaceName)
+}
+
+func TestEventBatchOriginIsGatedByCaptureMode(t *testing.T) {
+	remoteEvent := events.NewDNSEvent(testEventEnvelope("remote", 1))
+	localEvent := events.NewDNSEvent(testEventEnvelope("local", 2))
+
+	local := NewModel(8, 8, "test0", "", nil, false, false, "", false)
+	local, _ = local.handleEventBatchMsg(EventBatchMsg{Batch: types.EventBatch{Events: []events.Event{remoteEvent}}})
+	local, _ = local.handleEventBatchMsg(EventBatchMsg{Batch: types.EventBatch{Events: []events.Event{localEvent}}, Local: true})
+	require.Len(t, local.eventStore.Events(), 1)
+	require.Equal(t, "local", local.eventStore.Events()[0].Event.Envelope().EventID)
+
+	remote := NewModel(8, 8, "", "", nil, false, true, "", true)
+	remote, _ = remote.handleEventBatchMsg(EventBatchMsg{Batch: types.EventBatch{Events: []events.Event{localEvent}}, Local: true})
+	remote, _ = remote.handleEventBatchMsg(EventBatchMsg{Batch: types.EventBatch{Events: []events.Event{remoteEvent}}})
+	require.Len(t, remote.eventStore.Events(), 1)
+	require.Equal(t, "remote", remote.eventStore.Events()[0].Event.Envelope().EventID)
+}
+
+func TestTickPullsLocalEventsWithoutProgramSend(t *testing.T) {
+	pendingLocalEvents.clear()
+	t.Cleanup(pendingLocalEvents.clear)
+	m := NewModel(8, 8, "test0", "", nil, false, false, "", false)
+	m.uiState.Capturing = true
+	pendingLocalEvents.addBatch(types.EventBatch{Events: []events.Event{
+		events.NewDNSEvent(testEventEnvelope("local", 1)),
+	}})
+
+	m, _ = m.handleTickMsg(TickMsg{})
+	require.Len(t, m.eventStore.Events(), 1)
+	require.Equal(t, "local", m.eventStore.Events()[0].Event.Envelope().EventID)
 }
 
 func TestEventsViewPreservedAcrossCompatibleScopeChange(t *testing.T) {
@@ -57,6 +108,13 @@ func TestEventsViewPreservedAcrossCompatibleScopeChange(t *testing.T) {
 
 	m, _ = m.handleProtocolSelectedMsg(components.ProtocolSelectedMsg{Protocol: components.Protocol{Name: "VoIP (SIP/RTP)", BPFFilter: "has:voip"}})
 	require.Equal(t, "calls", m.uiState.ViewMode)
+}
+
+func TestLocalEventsViewPreservedAcrossCompatibleScopeChange(t *testing.T) {
+	m := NewModel(8, 8, "test0", "", nil, false, false, "", false)
+	m.uiState.ViewMode = "events"
+	m, _ = m.handleProtocolSelectedMsg(components.ProtocolSelectedMsg{Protocol: components.Protocol{Name: "DNS", BPFFilter: "port 53"}})
+	require.Equal(t, "events", m.uiState.ViewMode)
 }
 
 func TestEventBatchFilteringNavigationAndMissingPacketNotice(t *testing.T) {

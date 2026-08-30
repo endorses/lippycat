@@ -46,7 +46,7 @@ func runProtocol(cmd *cobra.Command, args []string, protocol protocolcatalog.Spe
 	}
 
 	files := collectReadFiles(readFile, args)
-	withStructuredLogs(files, structuredLogAnalysisProfile(protocol.Name, effectiveFilter), func() {
+	withEventAnalysis(files, structuredLogAnalysisProfile(protocol.Name, effectiveFilter), func() {
 		if len(files) == 0 {
 			hooks.StartLive(interfaces, effectiveFilter)
 			return

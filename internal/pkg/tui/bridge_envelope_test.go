@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
@@ -27,14 +28,15 @@ func TestNormalizeCaptureStreamPreservesEnvelopeProvenance(t *testing.T) {
 	}
 
 	input := make(chan capture.PacketInfo, 1)
-	input <- capture.PacketInfo{Packet: packet, Interface: "replay-0", LinkType: layers.LinkTypeEthernet}
+	input <- capture.PacketInfo{Packet: packet, Interface: "capture.pcap", SourcePath: "/captures/a/capture.pcap", LinkType: layers.LinkTypeEthernet}
 	close(input)
 
 	envelopes := NormalizeCaptureStream(context.Background(), input, pipeline.SourcePCAPReplay)
 	envelope := <-envelopes
 	require.NotNil(t, envelope)
 	require.Equal(t, pipeline.SourcePCAPReplay, envelope.Source.Kind)
-	require.Equal(t, "replay-0", envelope.Source.InterfaceName)
+	require.Equal(t, "capture.pcap", envelope.Source.InterfaceName)
+	require.Equal(t, "/captures/a/capture.pcap", envelope.Source.InputFile)
 	require.Equal(t, layers.LinkTypeEthernet, envelope.LinkType)
 	require.Equal(t, timestamp, envelope.CaptureTime)
 	require.Equal(t, len(data), envelope.CaptureLength)
@@ -79,4 +81,54 @@ func TestEnvelopeBridgePublishesOrderedPacketsThroughLocalEventHandler(t *testin
 	var handler types.EventHandler = newLocalTUIEventHandler(nil, true)
 	handler.OnPacketBatch([]types.PacketDisplay{{Timestamp: base.Add(4 * time.Millisecond)}})
 	require.Len(t, pendingPackets.drainPackets(1), 1)
+}
+
+func TestEnvelopeBridgePublishesOfflineEventsWithFileProvenanceBeforeEOF(t *testing.T) {
+	ResetBridgeStats()
+	ClearPendingPackets()
+	ResetTUIReady()
+	SignalTUIReady()
+	SetVoIPModeEnabled(false)
+
+	timestamp := time.Date(2026, time.August, 30, 15, 0, 0, 0, time.UTC)
+	data := goldenDNSPacket(t)
+	envelopes := make(chan *pipeline.PacketEnvelope, 1)
+	envelopes <- &pipeline.PacketEnvelope{
+		Data:           data,
+		LinkType:       layers.LinkTypeEthernet,
+		CaptureTime:    timestamp,
+		CaptureLength:  len(data),
+		OriginalLength: len(data),
+		Source: pipeline.SourceProvenance{
+			Kind: pipeline.SourcePCAPReplay, InterfaceName: "fixture.pcap",
+		},
+	}
+	close(envelopes)
+
+	var batches []types.EventBatch
+	StartEnvelopeBridge(envelopes, nil, NewPauseSignal(), nil, true, nil, LocalEventAnalysisOptions{
+		NodeID:         "watch-local",
+		SourceOrdering: []string{"fixture.pcap"},
+		deliver: func(batch types.EventBatch) {
+			batches = append(batches, batch)
+		},
+	})
+
+	var dnsEvent events.Event
+	for _, batch := range batches {
+		for _, event := range batch.Events {
+			if event.Kind() == events.KindDNS {
+				dnsEvent = event
+			}
+		}
+	}
+	require.NotNil(t, dnsEvent)
+	envelope := dnsEvent.Envelope()
+	require.True(t, timestamp.Equal(envelope.Timestamp))
+	require.Equal(t, "watch-local", envelope.NodeID)
+	require.Equal(t, "pcap", envelope.Provenance.CaptureSource)
+	require.Equal(t, "fixture.pcap", envelope.Provenance.InputFile)
+	require.NotEmpty(t, envelope.EventID)
+	require.NotEmpty(t, envelope.ProducerSessionID)
+	require.NotZero(t, envelope.EventSequence)
 }

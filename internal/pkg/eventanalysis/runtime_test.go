@@ -1,0 +1,251 @@
+package eventanalysis
+
+import (
+	"context"
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/conntrack"
+	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/stretchr/testify/require"
+)
+
+type memorySink struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (s *memorySink) HandleEvent(_ context.Context, e events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, e)
+	return nil
+}
+func (*memorySink) Flush(context.Context) error { return nil }
+func (*memorySink) Close(context.Context) error { return nil }
+
+func testRuntime(t *testing.T, queue int) (*Runtime, *events.Dispatcher, *memorySink) {
+	t.Helper()
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	d, err := events.NewDispatcher(events.Config{QueueSize: queue, SinkQueueSize: queue, Producer: producer})
+	require.NoError(t, err)
+	sink := &memorySink{}
+	require.NoError(t, d.Register(sink))
+	r, err := New(Config{Dispatcher: d})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	return r, d, sink
+}
+func packet(ts time.Time) *data.CapturedPacket {
+	return &data.CapturedPacket{TimestampNs: ts.UnixNano(), LinkType: 1, Metadata: &data.PacketMetadata{SrcIp: "192.0.2.1", DstIp: "192.0.2.53", SrcPort: 40000, DstPort: 53, Transport: "udp", Protocol: "DNS", Dns: &data.DNSMetadata{QueryName: "example.test", QueryType: "A", QueryClass: "IN"}}}
+}
+
+func TestRuntimeEOFEmitsPartialConnectionAndPreservesIdentity(t *testing.T) {
+	r, d, s := testRuntime(t, 16)
+	source := Source{NodeID: "node", CaptureSource: "pcap", InputFile: "fixture.pcap"}
+	require.NoError(t, r.ObserveCaptured(source, []*data.CapturedPacket{packet(time.Unix(10, 0))}))
+	r.EOF()
+	require.NoError(t, d.Close(context.Background()))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	require.Len(t, s.events, 2)
+	require.Equal(t, events.KindDNS, s.events[0].Kind())
+	require.Equal(t, events.KindConn, s.events[1].Kind())
+	require.Equal(t, s.events[0].Envelope().UID, s.events[1].Envelope().UID)
+	require.Equal(t, "fixture.pcap", s.events[0].Envelope().Provenance.InputFile)
+}
+
+func TestRuntimeResetFlushesOldFlowAndAcceptsNewInput(t *testing.T) {
+	r, d, s := testRuntime(t, 16)
+	source := Source{NodeID: "node", CaptureSource: "live"}
+	require.NoError(t, r.ObserveCaptured(source, []*data.CapturedPacket{packet(time.Unix(10, 0))}))
+	require.NoError(t, r.Reset())
+	require.NoError(t, r.ObserveCaptured(source, []*data.CapturedPacket{packet(time.Unix(20, 0))}))
+	r.Close()
+	r.Close()
+	require.Error(t, r.ObserveCaptured(source, []*data.CapturedPacket{packet(time.Unix(30, 0))}))
+	require.NoError(t, d.Close(context.Background()))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var conns int
+	for _, e := range s.events {
+		if e.Kind() == events.KindConn {
+			conns++
+		}
+	}
+	require.Equal(t, 2, conns)
+}
+
+func TestRuntimeExpireUsesCaptureClockAndMidFlowIsPartial(t *testing.T) {
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	d, err := events.NewDispatcher(events.Config{QueueSize: 16, SinkQueueSize: 16, Producer: producer})
+	require.NoError(t, err)
+	sink := &memorySink{}
+	require.NoError(t, d.Register(sink))
+	r, err := New(Config{Dispatcher: d, Connections: conntrack.Config{MaxFlows: 10, IdleTimeout: time.Second, HalfOpenTimeout: time.Second}})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	p := packet(time.Unix(10, 0))
+	p.Metadata.Transport, p.Metadata.SrcPort, p.Metadata.DstPort = "tcp", 40000, 443
+	require.NoError(t, r.ObserveCaptured(Source{NodeID: "node"}, []*data.CapturedPacket{p}))
+	r.Expire(time.Unix(12, 0))
+	require.NoError(t, d.Close(context.Background()))
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	found := false
+	for _, event := range sink.events {
+		if event.Kind() == events.KindConn {
+			found = true
+			require.True(t, event.Envelope().Partial)
+		}
+	}
+	require.True(t, found)
+}
+
+func TestRuntimeReportsDispatcherPressureWithoutBlocking(t *testing.T) {
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	d, err := events.NewDispatcher(events.Config{QueueSize: 1, SinkQueueSize: 1, Producer: producer})
+	require.NoError(t, err)
+	r, err := New(Config{Dispatcher: d})
+	require.NoError(t, err)
+	source := Source{NodeID: "node"}
+	require.NoError(t, r.ObserveCaptured(source, []*data.CapturedPacket{packet(time.Unix(10, 0))}))
+	stats := r.Stats()
+	require.Positive(t, stats.Dropped)
+	require.Equal(t, stats.Emitted, stats.Dropped)
+}
+
+func TestObservePacketUsesNowForMissingCaptureTimestamp(t *testing.T) {
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	d, err := events.NewDispatcher(events.Config{QueueSize: 16, SinkQueueSize: 16, Producer: producer})
+	require.NoError(t, err)
+	sink := &memorySink{}
+	require.NoError(t, d.Register(sink))
+	now := time.Unix(123, 456)
+	r, err := New(Config{Dispatcher: d, Now: func() time.Time { return now }})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+
+	pkt := gopacket.NewPacket(udpPacket(t, 40000, 53), layers.LayerTypeEthernet, gopacket.Default)
+	require.True(t, pkt.Metadata().Timestamp.IsZero())
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, capture.PacketInfo{Packet: pkt, LinkType: layers.LinkTypeEthernet}))
+	r.EOF()
+	require.NoError(t, d.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.NotEmpty(t, sink.events)
+	require.Equal(t, now, sink.events[0].Envelope().Timestamp)
+}
+
+func TestObserveCapturedExpiresAfterWholeOutOfOrderBatch(t *testing.T) {
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	d, err := events.NewDispatcher(events.Config{QueueSize: 32, SinkQueueSize: 32, Producer: producer})
+	require.NoError(t, err)
+	sink := &memorySink{}
+	require.NoError(t, d.Register(sink))
+	r, err := New(Config{Dispatcher: d, Connections: conntrack.Config{MaxFlows: 100, IdleTimeout: time.Second, HalfOpenTimeout: time.Second}})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	source := Source{NodeID: "node"}
+	original := packet(time.Unix(0, 1))
+	original.Metadata.Dns = nil
+	require.NoError(t, r.ObserveCaptured(source, []*data.CapturedPacket{original}))
+
+	trigger := packet(time.Unix(100, 0))
+	trigger.Metadata.Dns = nil
+	trigger.Metadata.SrcPort = 41000
+	continuation := packet(time.Unix(1, 0))
+	continuation.Metadata.Dns = nil
+	require.NoError(t, r.ObserveCaptured(source, []*data.CapturedPacket{trigger, continuation}))
+	r.EOF()
+	require.NoError(t, d.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	originalConnections := 0
+	for _, event := range sink.events {
+		if event.Kind() == events.KindConn && event.Envelope().Flow.SourcePort == 40000 {
+			originalConnections++
+		}
+	}
+	require.Equal(t, 1, originalConnections)
+}
+
+func TestObserveCapturedReportsInvalidPacketsAndContinues(t *testing.T) {
+	r, d, sink := testRuntime(t, 16)
+	err := r.ObserveCaptured(Source{NodeID: "node"}, []*data.CapturedPacket{nil, packet(time.Unix(10, 0))})
+	require.ErrorContains(t, err, "1 of 2 invalid")
+	r.EOF()
+	require.NoError(t, d.Close(context.Background()))
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.NotEmpty(t, sink.events)
+	require.Equal(t, uint64(1), r.Stats().Invalid)
+}
+
+func TestSMTPAdapterUsesSharedEmailParser(t *testing.T) {
+	r, d, _ := testRuntime(t, 16)
+	metadata := r.smtpToProto([]byte("MAIL FROM:<alice@example.test> SIZE=123\r\nRCPT TO:<bob@example.test>\r\nSubject: shared parser\r\nMessage-ID: <message-1@example.test>\r\n"))
+	require.NotNil(t, metadata)
+	require.Equal(t, "alice@example.test", metadata.MailFrom)
+	require.Equal(t, []string{"bob@example.test"}, metadata.RcptTo)
+	require.Equal(t, "shared parser", metadata.Subject)
+	require.Equal(t, "message-1@example.test", metadata.MessageId)
+	r.Close()
+	require.NoError(t, d.Close(context.Background()))
+}
+
+func TestLosslessEOFDrainsMoreConnectionsThanDispatcherQueue(t *testing.T) {
+	producer, err := events.NewOfflineProducer("node", events.OfflineSession{InputIdentity: "fixture", AnalysisProfile: "test"})
+	require.NoError(t, err)
+	d, err := events.NewDispatcher(events.Config{QueueSize: 1, SinkQueueSize: 1, Producer: producer})
+	require.NoError(t, err)
+	sink := &memorySink{}
+	require.NoError(t, d.Register(sink))
+	r, err := New(Config{Dispatcher: d, LosslessDelivery: true})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+
+	for i := 0; i < 20; i++ {
+		p := packet(time.Unix(int64(i+1), 0))
+		p.Metadata.Dns = nil
+		p.Metadata.SrcPort = uint32(40000 + i)
+		require.NoError(t, r.ObserveCaptured(Source{NodeID: "node"}, []*data.CapturedPacket{p}))
+	}
+	r.EOF()
+	require.NoError(t, d.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	connEvents := 0
+	for _, event := range sink.events {
+		if event.Kind() == events.KindConn {
+			connEvents++
+		}
+	}
+	require.Equal(t, 20, connEvents)
+	require.Zero(t, r.Stats().Dropped)
+}
+
+func udpPacket(t *testing.T, sourcePort, destinationPort uint16) []byte {
+	t.Helper()
+	eth := &layers.Ethernet{SrcMAC: net.HardwareAddr{0, 1, 2, 3, 4, 5}, DstMAC: net.HardwareAddr{6, 7, 8, 9, 10, 11}, EthernetType: layers.EthernetTypeIPv4}
+	ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 53)}
+	udp := &layers.UDP{SrcPort: layers.UDPPort(sourcePort), DstPort: layers.UDPPort(destinationPort)}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	buffer := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, udp, gopacket.Payload([]byte("payload"))))
+	return buffer.Bytes()
+}

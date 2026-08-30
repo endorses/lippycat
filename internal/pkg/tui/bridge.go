@@ -13,15 +13,19 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
+	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -889,7 +893,7 @@ func NormalizeCaptureStream(ctx context.Context, packetChan <-chan capture.Packe
 //
 // The pause signal allows the bridge to block when capture is paused,
 // reducing CPU usage to near-idle.
-func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregator *LocalCallAggregator) {
+func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregator *LocalCallAggregator, analysisOptions ...LocalEventAnalysisOptions) {
 	// Wait for TUI to be fully initialized before processing packets.
 	// This prevents race conditions where messages are sent before
 	// Bubbletea has completed terminal setup, which can cause
@@ -901,7 +905,18 @@ func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *te
 	defer atomic.StoreInt32(&bridgeStats.Running, 0)
 
 	bridge := newEnvelopeBridgePipeline(program, pause, tracker, preserveAll, aggregator)
+	if len(analysisOptions) != 0 {
+		bridge.analysis = analysisOptions[0]
+	}
 	bridge.run(packetChan)
+}
+
+// LocalEventAnalysisOptions defines the stable identity inputs for one local
+// capture session. Offline source order is the user-specified file order.
+type LocalEventAnalysisOptions struct {
+	NodeID         string
+	SourceOrdering []string
+	deliver        func(types.EventBatch)
 }
 
 // envelopeBridgePipeline owns the local capture stages. StartEnvelopeBridge is
@@ -912,6 +927,7 @@ type envelopeBridgePipeline struct {
 	tracker     *CallTracker
 	preserveAll bool
 	aggregator  *LocalCallAggregator
+	analysis    LocalEventAnalysisOptions
 }
 
 func newEnvelopeBridgePipeline(program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregator *LocalCallAggregator) *envelopeBridgePipeline {
@@ -946,6 +962,27 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 	// This prevents program.Send() from blocking the bridge when TUI is slow.
 	tuiBatchChan := make(chan PacketBatchMsg, tuiQueueSize)
 	eventHandler := newLocalTUIEventHandler(program, preserveAll)
+	eventHandler.localEventSink = b.analysis.deliver
+	if eventHandler.localEventSink == nil {
+		eventHandler.localEventSink = pendingLocalEvents.addBatch
+	}
+	eventRuntime, eventDispatcher := b.startEventAnalysis(eventHandler)
+	if eventRuntime != nil {
+		defer func() {
+			eventRuntime.EOF()
+			eventRuntime.Close()
+			if err := eventDispatcher.Close(context.Background()); err != nil {
+				logger.Error("Failed to drain local event analysis", "error", err)
+			}
+			stats := eventDispatcher.Stats()
+			if dropped := stats.Dropped + stats.SinkDropped; dropped != 0 {
+				eventHandler.OnEventBatch(types.EventBatch{Losses: []types.EventLoss{{
+					Kind:  eventsv1.LossKind_LOSS_KIND_BUFFER,
+					Count: dropped,
+				}}})
+			}
+		}()
+	}
 
 	// Consumer goroutine: reads from tuiBatchChan and adds to pending buffer.
 	// The TUI pulls from the pending buffer on its own timer, so this never blocks.
@@ -1081,6 +1118,29 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 			}
 
 			reassembly.process(env)
+			if eventRuntime != nil {
+				source := eventanalysis.Source{NodeID: b.analysis.NodeID}
+				if env.Source.Kind == pipeline.SourcePCAPReplay {
+					source.CaptureSource = "pcap"
+					source.InputFile = env.Source.InputFile
+					if source.InputFile == "" {
+						source.InputFile = env.Source.InterfaceName
+					}
+				} else {
+					source.CaptureSource = "live"
+					source.InterfaceName = env.Source.InterfaceName
+				}
+				if err := eventRuntime.ObservePacket(source, captureadapter.ToPacketInfo(env)); err != nil {
+					logger.Debug("Skipping invalid packet in local event analysis", "error", err)
+				} else if preserveAll {
+					// Offline replay is lossless and deterministically ordered. Drain
+					// each admission before reading the next packet so the dispatcher's
+					// non-blocking queue can never omit a burst from a fast PCAP.
+					if err := eventDispatcher.Flush(context.Background()); err != nil {
+						logger.Error("Failed to flush offline local events", "error", err)
+					}
+				}
+			}
 
 			if sampling.shouldDisplay(env, packetCount, displayedCount, len(batch)) {
 				// Full conversion to extract all metadata (SDP, etc.)
@@ -1098,6 +1158,61 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 			sendBatch()
 		}
 	}
+}
+
+func (b *envelopeBridgePipeline) startEventAnalysis(handler *TUIEventHandler) (*eventanalysis.Runtime, *events.Dispatcher) {
+	nodeID := b.analysis.NodeID
+	if nodeID == "" {
+		nodeID = "watch-local"
+		b.analysis.NodeID = nodeID
+	}
+	var producer events.IdentityAssigner
+	var err error
+	if b.preserveAll {
+		inputIdentity := strings.Join(b.analysis.SourceOrdering, "\x00")
+		if inputIdentity == "" {
+			inputIdentity = "offline-capture"
+		}
+		producer, err = events.NewOfflineProducer(nodeID, events.OfflineSession{
+			InputIdentity: inputIdentity, AnalysisProfile: "watch-eventanalysis-v1",
+			SourceOrdering: append([]string(nil), b.analysis.SourceOrdering...),
+		})
+	} else {
+		producer, err = events.NewLiveProducer(nodeID)
+	}
+	if err != nil {
+		logger.Error("Failed to create local event identity", "error", err)
+		return nil, nil
+	}
+	dispatcher, err := events.NewDispatcher(events.Config{
+		QueueSize: 1024, SinkQueueSize: 1024, DropPolicy: events.DropNew, Producer: producer,
+	})
+	if err != nil {
+		logger.Error("Failed to create local event dispatcher", "error", err)
+		return nil, nil
+	}
+	sink := newLocalEventSink(256, b.preserveAll, handler.OnEventBatch)
+	if err := dispatcher.Register(sink); err != nil {
+		logger.Error("Failed to register local event sink", "error", err)
+		_ = sink.Close(context.Background())
+		return nil, nil
+	}
+	runtime, err := eventanalysis.New(eventanalysis.Config{
+		Dispatcher:       dispatcher,
+		LosslessDelivery: b.preserveAll,
+	})
+	if err != nil {
+		logger.Error("Failed to create local event runtime", "error", err)
+		_ = sink.Close(context.Background())
+		return nil, nil
+	}
+	if err := dispatcher.Start(context.Background()); err != nil {
+		logger.Error("Failed to start local event dispatcher", "error", err)
+		runtime.Close()
+		_ = sink.Close(context.Background())
+		return nil, nil
+	}
+	return runtime, dispatcher
 }
 
 // convertEnvelopeFast is the envelope-native lightweight display adapter.

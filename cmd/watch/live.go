@@ -135,7 +135,8 @@ func runLive(cmd *cobra.Command, args []string) {
 func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) {
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
-		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator)
+		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator,
+			tui.LocalEventAnalysisOptions{NodeID: "watch-local"})
 	}
 	// Pass pause function to drop packets at source when paused (reduces CPU)
 	capture.InitWithContext(ctx, devices, filter, processor, nil, pauseSignal.IsPaused)

@@ -1,4 +1,4 @@
-//go:build (processor || tui) && !tap && !all && !cli && !hunter
+//go:build processor && !tap && !tui && !all && !cli && !hunter
 
 package protocolmeta
 

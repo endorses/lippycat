@@ -48,11 +48,13 @@ func TestPacketInfoRoundTripPreservesCaptureRecordAndReplayProvenance(t *testing
 	ts := time.Unix(1712345678, 123456789)
 	original := gopacket.NewPacket([]byte{0x45, 0, 0, 20}, layers.LinkTypeRaw, gopacket.Default)
 	original.Metadata().CaptureInfo = gopacket.CaptureInfo{Timestamp: ts, CaptureLength: 4, Length: 20}
-	in := capture.PacketInfo{Packet: original, LinkType: layers.LinkTypeRaw, Interface: "pcap0"}
+	in := capture.PacketInfo{Packet: original, LinkType: layers.LinkTypeRaw, Interface: "capture.pcap", SourcePath: "/captures/a/capture.pcap"}
 
 	envelope := FromPacketInfo(in, pipeline.SourcePCAPReplay)
 	require.Equal(t, pipeline.SourcePCAPReplay, envelope.Source.Kind)
+	require.Equal(t, "/captures/a/capture.pcap", envelope.Source.InputFile)
 	out := ToPacketInfo(envelope)
+	require.Equal(t, in.SourcePath, out.SourcePath)
 
 	require.Equal(t, in.Interface, out.Interface)
 	require.Equal(t, in.LinkType, out.LinkType)

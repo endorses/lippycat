@@ -111,7 +111,7 @@ func TestFileMetadataGenerationDoesNotRequireStructuredLogs(t *testing.T) {
 	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	require.Nil(t, p.logSink)
-	require.NotNil(t, p.fileAnalyzer)
+	require.NotNil(t, p.eventRuntime)
 
 	subscription, err := p.eventBroadcaster.Subscribe(broadcast.Options{QueueSize: 2, Kinds: []events.Kind{events.KindHTTP, events.KindFileMetadata}})
 	require.NoError(t, err)
@@ -148,11 +148,8 @@ func TestTapLocalEventsUseEffectiveTapID(t *testing.T) {
 			Dns: &data.DNSMetadata{QueryName: "example.test", QueryType: "A", QueryClass: "IN"},
 		},
 	}
-	p.trackConnections("tap-test-local", []*data.CapturedPacket{packet})
 	p.emitProtocolEvents("tap-test-local", []*data.CapturedPacket{packet})
-	for _, event := range p.connTracker.Close() {
-		p.eventDispatcher.Enqueue(event)
-	}
+	p.eventRuntime.EOF()
 	require.NoError(t, p.eventDispatcher.Close(context.Background()))
 
 	sink.mu.Lock()
@@ -175,11 +172,8 @@ func TestConnectionAndProtocolEventsShareFlowIdentity(t *testing.T) {
 	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS, events.KindConn))
 	require.NoError(t, p.eventDispatcher.Start(context.Background()))
 	packet := &data.CapturedPacket{TimestampNs: time.Unix(10, 0).UnixNano(), LinkType: 1, Metadata: &data.PacketMetadata{SrcIp: "192.0.2.10", DstIp: "192.0.2.53", SrcPort: 53000, DstPort: 53, Transport: "udp", Protocol: "DNS", Dns: &data.DNSMetadata{QueryName: "example.test", QueryType: "A", QueryClass: "IN"}}}
-	p.trackConnections("hunter-a", []*data.CapturedPacket{packet})
 	p.emitProtocolEvents("hunter-a", []*data.CapturedPacket{packet})
-	for _, event := range p.connTracker.Close() {
-		p.eventDispatcher.Enqueue(event)
-	}
+	p.eventRuntime.EOF()
 	require.NoError(t, p.eventDispatcher.Close(context.Background()))
 	sink.mu.Lock()
 	defer sink.mu.Unlock()

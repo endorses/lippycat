@@ -15,6 +15,7 @@ import (
 type TUIEventHandler struct {
 	program         *tea.Program
 	localPacketSink func([]types.PacketDisplay)
+	localEventSink  func(types.EventBatch)
 }
 
 // newLocalTUIEventHandler publishes local capture packets through the same
@@ -49,6 +50,10 @@ func (h *TUIEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
 
 // OnEventBatch sends normalized protocol events to the Bubble Tea event loop.
 func (h *TUIEventHandler) OnEventBatch(batch types.EventBatch) {
+	if h.localEventSink != nil {
+		h.localEventSink(batch)
+		return
+	}
 	if h.program != nil {
 		h.program.Send(EventBatchMsg{Batch: batch})
 	}
@@ -114,6 +119,9 @@ type PacketBatchMsg struct {
 // not packet display records and have independent loss semantics.
 type EventBatchMsg struct {
 	Batch types.EventBatch
+	// Local distinguishes batches produced by the active watch live/file
+	// runtime from remote processor subscriptions.
+	Local bool
 }
 
 // HunterStatusMsg is sent with hunter status updates from remote processor

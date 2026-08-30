@@ -342,10 +342,8 @@ func (p *Processor) Shutdown() error {
 		// Once this returns there is no producer that can call processBatch.
 		p.wg.Wait()
 
-		if p.connTracker != nil && p.eventDispatcher != nil {
-			for _, ev := range p.connTracker.Close() {
-				p.eventDispatcher.Enqueue(ev)
-			}
+		if p.eventRuntime != nil {
+			p.eventRuntime.Close()
 		}
 		if p.eventDispatcher != nil {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

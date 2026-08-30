@@ -27,7 +27,7 @@ func FromPacketInfo(info capture.PacketInfo, kind ...pipeline.SourceKind) *pipel
 			linkType = layers.LinkTypeRaw
 		}
 	}
-	e := &pipeline.PacketEnvelope{LinkType: linkType, Source: pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface}}
+	e := &pipeline.PacketEnvelope{LinkType: linkType, Source: pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface, InputFile: info.SourcePath}}
 	if info.Packet == nil {
 		return e
 	}
@@ -51,7 +51,7 @@ func ToPacketInfo(e *pipeline.PacketEnvelope) capture.PacketInfo {
 		CaptureLength: e.CaptureLength,
 		Length:        e.OriginalLength,
 	}
-	return capture.PacketInfo{Packet: p, LinkType: e.LinkType, Interface: e.Source.InterfaceName}
+	return capture.PacketInfo{Packet: p, LinkType: e.LinkType, Interface: e.Source.InterfaceName, SourcePath: e.Source.InputFile}
 }
 
 // ForEach normalizes a local capture stream at its ingress boundary and invokes

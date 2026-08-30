@@ -52,15 +52,15 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 		return DecodedEvent{}, fmt.Errorf("decode protocol event: unknown fields exceed %d bytes", MaxUnknownBytes)
 	}
 	wire := proto.Clone(in).(*eventsv1.ProtocolEvent)
+	env, err := decodeEnvelope(in)
+	if err != nil {
+		return DecodedEvent{}, err
+	}
 	if in.Payload == nil {
 		if len(in.ProtoReflect().GetUnknown()) != 0 {
 			return DecodedEvent{Wire: wire, Omission: &CompatibilityOmission{Reason: OmissionUnsupportedKind}}, nil
 		}
 		return DecodedEvent{}, errors.New("decode protocol event: missing payload")
-	}
-	env, err := decodeEnvelope(in)
-	if err != nil {
-		return DecodedEvent{}, err
 	}
 	var ev events.Event
 	switch payload := in.Payload.(type) {
@@ -200,6 +200,11 @@ func ToProto(ev events.Event) (*eventsv1.ProtocolEvent, error) {
 	if ev == nil {
 		return nil, errors.New("encode protocol event: nil event")
 	}
+	var err error
+	ev, err = eventValue(ev)
+	if err != nil {
+		return nil, err
+	}
 	if ev.Kind() == events.KindFileContent {
 		return nil, ErrFileContentDisallowed
 	}
@@ -310,6 +315,9 @@ func validateEnvelope(e events.Envelope) error {
 	if e.EventID == "" || e.ProducerSessionID == "" || e.EventSequence == 0 || e.NodeID == "" {
 		return errors.New("event envelope: identity fields must be non-empty")
 	}
+	if !events.HasValidDeliveryIdentity(e) {
+		return errors.New("event envelope: event ID does not match delivery identity")
+	}
 	if err := checkString("event ID", e.EventID); err != nil {
 		return err
 	}
@@ -379,6 +387,11 @@ func checkStrings(name string, v []string, max int) error {
 	return nil
 }
 func validateEventCollections(ev events.Event) error {
+	var err error
+	ev, err = eventValue(ev)
+	if err != nil {
+		return err
+	}
 	if err := validateEnvelope(ev.Envelope()); err != nil {
 		return err
 	}
@@ -454,6 +467,48 @@ func validateEventCollections(ev events.Event) error {
 		}
 	}
 	return nil
+}
+
+func eventValue(ev events.Event) (events.Event, error) {
+	switch e := ev.(type) {
+	case *events.ConnEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil connection pointer")
+		}
+		return *e, nil
+	case *events.DNSEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil DNS pointer")
+		}
+		return *e, nil
+	case *events.TLSEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil TLS pointer")
+		}
+		return *e, nil
+	case *events.HTTPEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil HTTP pointer")
+		}
+		return *e, nil
+	case *events.SMTPEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil SMTP pointer")
+		}
+		return *e, nil
+	case *events.FileMetadataEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil file metadata pointer")
+		}
+		return *e, nil
+	case *events.FileContentEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil file content pointer")
+		}
+		return *e, nil
+	default:
+		return ev, nil
+	}
 }
 
 // ValidateBatch checks identity, ordering, ranges, loss ranges and size before admission.

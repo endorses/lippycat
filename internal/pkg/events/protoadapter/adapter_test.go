@@ -15,7 +15,42 @@ import (
 )
 
 func testEnvelope(seq uint64) events.Envelope {
-	return events.Envelope{Timestamp: time.Unix(123, 456).UTC(), EventID: "node/session/" + string(rune('0'+seq)), ProducerSessionID: "session", EventSequence: seq, UID: "Cuid", CommunityID: "1:community", NodeID: "node", Flow: events.FlowTuple{Protocol: 6, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("2001:db8::2"), SourcePort: 1234, DestinationPort: 443}, Partial: true, CaptureScope: events.CaptureScopeFiltered, Provenance: events.SourceProvenance{CaptureSource: "pcap", InterfaceName: "eth0", InterfaceIndex: 2, InputFile: "sample.pcap", ProcessorNodeIDs: []string{"p1", "p2"}}}
+	return events.Envelope{Timestamp: time.Unix(123, 456).UTC(), EventID: events.DeliveryEventID("node", "session", seq), ProducerSessionID: "session", EventSequence: seq, UID: "Cuid", CommunityID: "1:community", NodeID: "node", Flow: events.FlowTuple{Protocol: 6, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("2001:db8::2"), SourcePort: 1234, DestinationPort: 443}, Partial: true, CaptureScope: events.CaptureScopeFiltered, Provenance: events.SourceProvenance{CaptureSource: "pcap", InterfaceName: "eth0", InterfaceIndex: 2, InputFile: "sample.pcap", ProcessorNodeIDs: []string{"p1", "p2"}}}
+}
+
+func TestEveryMetadataEventPointerRoundTrips(t *testing.T) {
+	for _, want := range allEvents() {
+		want := want
+		t.Run(string(want.Kind()), func(t *testing.T) {
+			var pointer events.Event
+			switch e := want.(type) {
+			case events.ConnEvent:
+				pointer = &e
+			case events.DNSEvent:
+				pointer = &e
+			case events.TLSEvent:
+				pointer = &e
+			case events.HTTPEvent:
+				pointer = &e
+			case events.SMTPEvent:
+				pointer = &e
+			case events.FileMetadataEvent:
+				pointer = &e
+			}
+			wire, err := ToProto(pointer)
+			require.NoError(t, err)
+			got, omission, err := FromProto(wire)
+			require.NoError(t, err)
+			require.Nil(t, omission)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+func TestTypedNilEventPointerIsRejected(t *testing.T) {
+	var dns *events.DNSEvent
+	_, err := ToProto(dns)
+	require.ErrorContains(t, err, "nil DNS pointer")
 }
 
 func allEvents() []events.Event {
@@ -56,7 +91,7 @@ func TestFileContentRejected(t *testing.T) {
 func TestMalformedInputs(t *testing.T) {
 	valid, err := ToProto(allEvents()[0])
 	require.NoError(t, err)
-	tests := map[string]func(*eventsv1.ProtocolEvent){"missing envelope": func(p *eventsv1.ProtocolEvent) { p.Envelope = nil }, "bad port": func(p *eventsv1.ProtocolEvent) { p.Envelope.Flow.SourcePort = 65536 }, "identity mismatch": func(p *eventsv1.ProtocolEvent) { p.Envelope.EventId = "different" }, "invalid address": func(p *eventsv1.ProtocolEvent) { p.Envelope.Flow.SourceAddress = "bad" }, "unknown scope": func(p *eventsv1.ProtocolEvent) { p.Envelope.CaptureScope = 99 }}
+	tests := map[string]func(*eventsv1.ProtocolEvent){"missing envelope": func(p *eventsv1.ProtocolEvent) { p.Envelope = nil }, "bad port": func(p *eventsv1.ProtocolEvent) { p.Envelope.Flow.SourcePort = 65536 }, "identity mismatch": func(p *eventsv1.ProtocolEvent) { p.Envelope.EventId = "different" }, "forged event ID": func(p *eventsv1.ProtocolEvent) { p.EventId, p.Envelope.EventId = "forged", "forged" }, "invalid address": func(p *eventsv1.ProtocolEvent) { p.Envelope.Flow.SourceAddress = "bad" }, "unknown scope": func(p *eventsv1.ProtocolEvent) { p.Envelope.CaptureScope = 99 }}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
 			p := proto.Clone(valid).(*eventsv1.ProtocolEvent)
@@ -70,15 +105,28 @@ func TestMalformedInputs(t *testing.T) {
 func TestUnknownPayloadIsCompatibilityOmissionAndPreserved(t *testing.T) {
 	raw := protowire.AppendTag(nil, 99, protowire.BytesType)
 	raw = protowire.AppendBytes(raw, []byte("future"))
-	var wire eventsv1.ProtocolEvent
-	require.NoError(t, proto.Unmarshal(raw, &wire))
-	decoded, err := DecodeEvent(&wire)
+	wire, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	wire.Payload = nil
+	wire.ProtoReflect().SetUnknown(raw)
+	decoded, err := DecodeEvent(wire)
 	require.NoError(t, err)
 	require.Nil(t, decoded.Event)
 	require.Equal(t, OmissionUnsupportedKind, decoded.Omission.Reason)
 	round, err := proto.Marshal(decoded.Wire)
 	require.NoError(t, err)
-	require.Equal(t, raw, round)
+	var preserved eventsv1.ProtocolEvent
+	require.NoError(t, proto.Unmarshal(round, &preserved))
+	require.Equal(t, raw, []byte(preserved.ProtoReflect().GetUnknown()))
+}
+
+func TestUnknownPayloadStillRequiresValidEnvelope(t *testing.T) {
+	raw := protowire.AppendTag(nil, 99, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, []byte("future"))
+	var wire eventsv1.ProtocolEvent
+	require.NoError(t, proto.Unmarshal(raw, &wire))
+	_, err := DecodeEvent(&wire)
+	require.ErrorContains(t, err, "missing envelope")
 }
 
 func TestMixedCapabilityBatchSkipsUnsupported(t *testing.T) {
@@ -91,7 +139,7 @@ func TestMixedCapabilityBatchSkipsUnsupported(t *testing.T) {
 	unknown.ProtoReflect().SetUnknown(raw)
 	unknown.EventSequence = 2
 	unknown.Envelope.EventSequence = 2
-	unknown.EventId = "node/session/2"
+	unknown.EventId = events.DeliveryEventID("node", "session", 2)
 	unknown.Envelope.EventId = unknown.EventId
 	b := &eventsv1.ProtocolEventBatch{SourceNodeId: "node", ProducerSessionId: "session", BatchSequence: 1, Events: []*eventsv1.ProtocolEvent{supported, unknown}, FirstEventSequence: 1, LastEventSequence: 2}
 	got, omissions, err := DecodeBatch(b)
@@ -146,7 +194,7 @@ func TestBatchValidationAllowsReportedSequenceGaps(t *testing.T) {
 	last, err := ToProto(allEvents()[1])
 	require.NoError(t, err)
 	last.EventSequence = 3
-	last.EventId = "node/session/3"
+	last.EventId = events.DeliveryEventID("node", "session", 3)
 	last.Envelope.EventSequence = 3
 	last.Envelope.EventId = last.EventId
 

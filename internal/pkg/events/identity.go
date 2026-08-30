@@ -127,7 +127,7 @@ func (p *Producer) NodeID() string    { return p.nodeID }
 func (p *Producer) SessionID() string { return p.sessionID }
 
 func (p *Producer) envelope(env Envelope) Envelope {
-	if env.EventID != "" && env.ProducerSessionID != "" && env.EventSequence != 0 {
+	if HasValidDeliveryIdentity(env) {
 		return env
 	}
 	sequence := p.sequence.Add(1)
@@ -233,6 +233,21 @@ func eventID(nodeID, sessionID string, sequence uint64) string {
 	value = append(value, sessionID...)
 	value = binary.BigEndian.AppendUint64(value, sequence)
 	return base64.RawURLEncoding.EncodeToString(value)
+}
+
+// DeliveryEventID returns the canonical opaque ID for a delivery identity.
+func DeliveryEventID(nodeID, sessionID string, sequence uint64) string {
+	if nodeID == "" || sessionID == "" || sequence == 0 {
+		return ""
+	}
+	return eventID(nodeID, sessionID, sequence)
+}
+
+// HasValidDeliveryIdentity reports whether EventID canonically represents the
+// event's node, producer session, and sequence.
+func HasValidDeliveryIdentity(env Envelope) bool {
+	return env.EventID != "" && env.ProducerSessionID != "" && env.EventSequence != 0 && env.NodeID != "" &&
+		env.EventID == DeliveryEventID(env.NodeID, env.ProducerSessionID, env.EventSequence)
 }
 
 func (p *Producer) NewDNSEvent(env Envelope) DNSEvent {

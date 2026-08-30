@@ -161,7 +161,7 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 }
 
 func hasDeliveryIdentity(env Envelope) bool {
-	return env.NodeID != "" && env.EventID != "" && env.ProducerSessionID != "" && env.EventSequence != 0
+	return HasValidDeliveryIdentity(env)
 }
 
 func (d *Dispatcher) runDispatcher() {

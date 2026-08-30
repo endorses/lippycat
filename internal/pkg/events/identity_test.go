@@ -68,6 +68,16 @@ func TestProducerAssignPreservesIdentityOnRetry(t *testing.T) {
 	require.Equal(t, uint64(2), producer.NewDNSEvent(Envelope{}).Envelope().EventSequence)
 }
 
+func TestProducerReplacesInconsistentIdentity(t *testing.T) {
+	producer, err := NewOfflineProducer("node", OfflineSession{InputIdentity: "input", AnalysisProfile: "v1"})
+	require.NoError(t, err)
+	event := NewDNSEvent(Envelope{NodeID: "node", ProducerSessionID: "stale", EventSequence: 99, EventID: "forged"})
+	assigned := producer.Assign(event)
+	require.True(t, HasValidDeliveryIdentity(assigned.Envelope()))
+	require.Equal(t, producer.SessionID(), assigned.Envelope().ProducerSessionID)
+	require.Equal(t, uint64(1), assigned.Envelope().EventSequence)
+}
+
 func TestEventIdentityUsesEffectiveProducerNode(t *testing.T) {
 	first, err := NewOfflineProducer("processor-a", OfflineSession{InputIdentity: "input", AnalysisProfile: "v1"})
 	require.NoError(t, err)

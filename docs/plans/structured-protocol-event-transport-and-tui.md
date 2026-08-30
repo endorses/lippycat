@@ -57,6 +57,13 @@ exclusive per producer session.
 **Gate:** Every current metadata event round-trips without semantic loss, and
 the contract contains no TUI layout or log-rendering fields.
 
+### Phase 1 verification
+
+Re-audited against the implementation on 2026-08-30. The audit corrected
+pointer-event adapter coverage, typed-nil handling, canonical event-ID
+validation, and envelope validation for compatibility omissions. Focused race
+tests and the full `make test` suite pass.
+
 ## Phase 2 — Processor event subscription
 
 - [ ] Add an event broadcaster sink with an independent bounded queue per

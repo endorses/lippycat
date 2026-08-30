@@ -101,6 +101,33 @@ func TestEventBroadcasterReceivesNormalizedEventsWithStructuredLogsDisabled(t *t
 	}
 }
 
+func TestFileMetadataGenerationDoesNotRequireStructuredLogs(t *testing.T) {
+	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	require.NoError(t, err)
+	require.Nil(t, p.logSink)
+	require.NotNil(t, p.fileAnalyzer)
+
+	subscription, err := p.eventBroadcaster.Subscribe(broadcast.Options{QueueSize: 2, Kinds: []events.Kind{events.KindHTTP, events.KindFileMetadata}})
+	require.NoError(t, err)
+	defer subscription.Close()
+	require.NoError(t, p.eventDispatcher.Start(context.Background()))
+	p.emitProtocolEvents("hunter-a", []*data.CapturedPacket{{
+		TimestampNs: time.Unix(10, 0).UnixNano(),
+		Metadata: &data.PacketMetadata{
+			SrcIp: "192.0.2.20", DstIp: "192.0.2.10", SrcPort: 80, DstPort: 52000, Transport: "tcp",
+			Http: &data.HTTPMetadata{Type: "response", IsServer: true, StatusCode: 200, ContentType: "text/plain", BodyPreview: []byte("payload"), BodySize: 7},
+		},
+	}})
+	require.NoError(t, p.eventDispatcher.Close(context.Background()))
+
+	kinds := map[events.Kind]bool{}
+	for event := range subscription.Events() {
+		kinds[event.Kind()] = true
+	}
+	require.True(t, kinds[events.KindHTTP])
+	require.True(t, kinds[events.KindFileMetadata])
+}
+
 func TestTapLocalEventsUseEffectiveTapID(t *testing.T) {
 	p, err := New(Config{ListenAddr: ":0", ProcessorID: "tap-test", EventQueueSize: 16})
 	require.NoError(t, err)

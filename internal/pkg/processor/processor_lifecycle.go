@@ -310,18 +310,6 @@ func (p *Processor) Shutdown() error {
 	p.shutdownOnce.Do(func() {
 		logger.Info("Shutting down processor")
 
-		if p.connTracker != nil && p.eventDispatcher != nil {
-			for _, ev := range p.connTracker.Close() {
-				p.eventDispatcher.Enqueue(ev)
-			}
-		}
-		if p.eventDispatcher != nil {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := p.eventDispatcher.Close(shutdownCtx); err != nil {
-				logger.Warn("Failed to close protocol event dispatcher", "error", err)
-			}
-			cancel()
-		}
 		if p.cancel != nil {
 			p.cancel()
 		}
@@ -340,6 +328,19 @@ func (p *Processor) Shutdown() error {
 		// Includes the gRPC Serve goroutine and local source/consumer goroutines.
 		// Once this returns there is no producer that can call processBatch.
 		p.wg.Wait()
+
+		if p.connTracker != nil && p.eventDispatcher != nil {
+			for _, ev := range p.connTracker.Close() {
+				p.eventDispatcher.Enqueue(ev)
+			}
+		}
+		if p.eventDispatcher != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := p.eventDispatcher.Close(shutdownCtx); err != nil {
+				logger.Warn("Failed to close protocol event dispatcher", "error", err)
+			}
+			cancel()
+		}
 
 		// Stop LI Manager (no-op if !li build)
 		p.stopLIManager()

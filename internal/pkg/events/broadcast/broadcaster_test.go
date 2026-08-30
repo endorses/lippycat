@@ -3,6 +3,7 @@ package broadcast
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -98,6 +99,56 @@ func TestBroadcasterReportsDispatcherDeliveryDrops(t *testing.T) {
 	assert.Empty(t, filtered.ConsumeLosses())
 	assert.Equal(t, uint64(1), matching.Stats().Dropped)
 	assert.Equal(t, uint64(1), b.Stats().Dropped)
+}
+
+func TestBroadcasterBoundsLossRangesAndSeparatesProducerSessions(t *testing.T) {
+	b := New()
+	sub, err := b.Subscribe(Options{QueueSize: 1})
+	require.NoError(t, err)
+
+	for i := uint64(0); i < maxLossSequenceRanges+20; i++ {
+		event := dnsEvent("node-a", i*2+1)
+		event.EventEnvelope.ProducerSessionID = "session-a"
+		b.HandleDroppedEvent(event)
+	}
+	event := dnsEvent("node-a", 1)
+	event.EventEnvelope.ProducerSessionID = "session-b"
+	b.HandleDroppedEvent(event)
+
+	losses := sub.ConsumeLosses()
+	require.Len(t, losses, 2)
+	for _, loss := range losses {
+		switch loss.ProducerSessionID {
+		case "session-a":
+			assert.Equal(t, uint64(maxLossSequenceRanges+20), loss.Count)
+			assert.Len(t, loss.Ranges, maxLossSequenceRanges)
+		case "session-b":
+			assert.Equal(t, uint64(1), loss.Count)
+			assert.Len(t, loss.Ranges, 1)
+		default:
+			t.Fatalf("unexpected producer session %q", loss.ProducerSessionID)
+		}
+	}
+}
+
+func TestBroadcasterBoundsDetailedLossRecords(t *testing.T) {
+	b := New()
+	sub, err := b.Subscribe(Options{QueueSize: 1})
+	require.NoError(t, err)
+
+	for i := 0; i < maxDetailedLossRecords+20; i++ {
+		event := dnsEvent("node-a", 1)
+		event.EventEnvelope.ProducerSessionID = fmt.Sprintf("session-%d", i)
+		b.HandleDroppedEvent(event)
+	}
+
+	losses := sub.ConsumeLosses()
+	assert.LessOrEqual(t, len(losses), maxDetailedLossRecords+1)
+	var count uint64
+	for _, loss := range losses {
+		count += loss.Count
+	}
+	assert.Equal(t, uint64(maxDetailedLossRecords+20), count)
 }
 
 func TestSubscriptionCloseCleansUp(t *testing.T) {

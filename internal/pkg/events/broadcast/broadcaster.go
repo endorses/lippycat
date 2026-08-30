@@ -14,6 +14,11 @@ import (
 
 var ErrClosed = errors.New("event broadcaster is closed")
 
+const (
+	maxDetailedLossRecords = 16
+	maxLossSequenceRanges  = 64
+)
+
 // Projector applies an authorization-sensitive projection before an event is
 // placed on a subscriber queue. Returning false omits the event.
 type Projector func(events.Event) (projected events.Event, include bool, err error)
@@ -40,10 +45,11 @@ const (
 
 // Loss describes events omitted because one subscriber's queue was full.
 type Loss struct {
-	SourceNodeID string
-	Cause        LossCause
-	Count        uint64
-	Ranges       []SequenceRange
+	SourceNodeID      string
+	ProducerSessionID string
+	Cause             LossCause
+	Count             uint64
+	Ranges            []SequenceRange
 }
 
 type SubscriberStats struct {
@@ -242,7 +248,7 @@ func (s *Subscription) ConsumeLosses() []Loss {
 	defer s.lossMu.Unlock()
 	result := make([]Loss, 0, len(s.losses))
 	for key, loss := range s.losses {
-		copyLoss := Loss{SourceNodeID: key.sourceNodeID, Cause: key.cause, Count: loss.Count, Ranges: append([]SequenceRange(nil), loss.Ranges...)}
+		copyLoss := Loss{SourceNodeID: key.sourceNodeID, ProducerSessionID: key.producerSessionID, Cause: key.cause, Count: loss.Count, Ranges: append([]SequenceRange(nil), loss.Ranges...)}
 		result = append(result, copyLoss)
 	}
 	s.losses = make(map[lossKey]*Loss)
@@ -284,27 +290,39 @@ func (s *Subscription) matchesProjected(event events.Event) bool {
 }
 
 type lossKey struct {
-	sourceNodeID string
-	cause        LossCause
+	sourceNodeID      string
+	producerSessionID string
+	cause             LossCause
 }
 
 func (s *Subscription) recordDrop(env events.Envelope, cause LossCause) {
 	s.dropped.Add(1)
 	s.lossMu.Lock()
 	defer s.lossMu.Unlock()
-	key := lossKey{sourceNodeID: env.NodeID, cause: cause}
+	key := lossKey{sourceNodeID: env.NodeID, producerSessionID: env.ProducerSessionID, cause: cause}
 	loss := s.losses[key]
 	if loss == nil {
-		loss = &Loss{SourceNodeID: env.NodeID, Cause: cause}
+		if len(s.losses) >= maxDetailedLossRecords {
+			// Preserve an exact count in a bounded catch-all record when producer
+			// churn exceeds the detailed identity budget.
+			key = lossKey{cause: cause}
+			loss = s.losses[key]
+		}
+	}
+	if loss == nil {
+		loss = &Loss{SourceNodeID: env.NodeID, ProducerSessionID: env.ProducerSessionID, Cause: cause}
 		s.losses[key] = loss
 	}
 	loss.Count++
-	if env.EventSequence == 0 {
+	if env.EventSequence == 0 || key.sourceNodeID == "" {
 		return
 	}
 	last := len(loss.Ranges) - 1
 	if last >= 0 && loss.Ranges[last].Last+1 == env.EventSequence {
 		loss.Ranges[last].Last = env.EventSequence
+		return
+	}
+	if len(loss.Ranges) >= maxLossSequenceRanges {
 		return
 	}
 	loss.Ranges = append(loss.Ranges, SequenceRange{First: env.EventSequence, Last: env.EventSequence})

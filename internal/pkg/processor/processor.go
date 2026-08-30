@@ -274,6 +274,14 @@ func New(config Config) (*Processor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize event subscription service: %w", err)
 	}
+	fileCfg := fileanalysis.Config{}
+	if config.LogConfig != nil {
+		fileCfg = fileanalysis.Config{MaxFileSize: config.LogConfig.FileMaxSize, MaxTotalSize: config.LogConfig.FileTotalSize, Extract: config.LogConfig.ExtractFiles, Directory: config.LogConfig.ExtractionDirectory}
+	}
+	p.fileAnalyzer, err = fileanalysis.New(fileCfg)
+	if err != nil {
+		return nil, fmt.Errorf("initialize file analyzer: %w", err)
+	}
 	p.flowIdentity, err = flowid.NewCache(flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute})
 	if err != nil {
 		return nil, fmt.Errorf("initialize flow identity cache: %w", err)
@@ -284,10 +292,6 @@ func New(config Config) (*Processor, error) {
 	}
 	if shouldEmitStructuredLogs(config) {
 		logCfg := config.LogConfig
-		p.fileAnalyzer, err = fileanalysis.New(fileanalysis.Config{MaxFileSize: logCfg.FileMaxSize, MaxTotalSize: logCfg.FileTotalSize, Extract: logCfg.ExtractFiles, Directory: logCfg.ExtractionDirectory})
-		if err != nil {
-			return nil, fmt.Errorf("initialize file analyzer: %w", err)
-		}
 		queueSize := logCfg.QueueSize
 		if queueSize <= 0 {
 			queueSize = 10000

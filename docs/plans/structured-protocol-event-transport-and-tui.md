@@ -123,6 +123,11 @@ A final independent audit extended that correction to the dispatcher's main
 admission queue, where rejected events already had delivery identity but were
 not reported to matching subscribers. It also bounded and validated event
 subscription node selectors before allocating server-side filter maps.
+A renewed implementation audit bounded both detailed overflow ranges and
+producer-session loss records, preserved producer-session identity in gap
+reports, moved dispatcher shutdown after packet-producer quiescence, and
+decoupled HTTP file-metadata generation from structured-log output. Focused
+race tests cover each corrected boundary.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

@@ -312,7 +312,7 @@ func subscriberLosses(losses []broadcast.Loss) []*eventsv1.EventLoss {
 		if loss.Cause == broadcast.LossCauseDispatcherOverflow {
 			kind = eventsv1.LossKind_LOSS_KIND_DISPATCH
 		}
-		wire := &eventsv1.EventLoss{Kind: kind, Count: loss.Count, SourceNodeId: loss.SourceNodeID}
+		wire := &eventsv1.EventLoss{Kind: kind, Count: loss.Count, SourceNodeId: loss.SourceNodeID, ProducerSessionId: loss.ProducerSessionID}
 		for _, sequenceRange := range loss.Ranges {
 			wire.EventSequenceRanges = append(wire.EventSequenceRanges, &eventsv1.SequenceRange{First: sequenceRange.First, Last: sequenceRange.Last})
 		}

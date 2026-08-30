@@ -233,6 +233,8 @@ message EventLoss {
   uint64 count = 2;
   repeated SequenceRange event_sequence_ranges = 3;
   string source_node_id = 4;
+  // Event sequences are scoped to a producer session.
+  string producer_session_id = 5;
 }
 
 message EventBatchStats {

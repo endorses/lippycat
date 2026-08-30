@@ -612,6 +612,14 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 			if loss.SourceNodeId != b.SourceNodeId {
 				return errors.New("event loss source does not match batch source")
 			}
+			if loss.ProducerSessionId != "" {
+				if err := checkString("event loss producer session ID", loss.ProducerSessionId); err != nil {
+					return err
+				}
+				if loss.ProducerSessionId != b.ProducerSessionId {
+					return errors.New("event loss producer session does not match batch session")
+				}
+			}
 			if len(loss.EventSequenceRanges) > MaxCollectionEntries {
 				return errors.New("too many event loss ranges")
 			}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,6 +78,30 @@ func TestProcessorRegistersEventServiceAlongsideExistingServices(t *testing.T) {
 	require.Contains(t, services, "lippycat.data.DataService")
 	require.Contains(t, services, "lippycat.management.ManagementService")
 	require.Contains(t, services, "lippycat.events.v1.EventService")
+}
+
+func TestShutdownDrainsEventProducersBeforeClosingDispatcher(t *testing.T) {
+	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 4})
+	require.NoError(t, err)
+	sink := &collectingSink{}
+	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS))
+	require.NoError(t, p.eventDispatcher.Start(context.Background()))
+
+	release := make(chan struct{})
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		<-release
+		p.eventDispatcher.Enqueue(events.NewDNSEvent(testEventEnvelope("node-a", 1)))
+	}()
+	done := make(chan error, 1)
+	go func() { done <- p.Shutdown() }()
+	close(release)
+	require.NoError(t, <-done)
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.Len(t, sink.events, 1)
 }
 
 // TestProcessor_Start_BindError tests startup failure due to port already in use

@@ -197,6 +197,23 @@ func TestEventsViewUsesCanonicalLogSchemaFields(t *testing.T) {
 	}())
 }
 
+func TestEventSummaryTrimsMissingLeadingFields(t *testing.T) {
+	env := events.Envelope{Timestamp: time.Unix(1, 0), EventID: "event"}
+	tlsEvent := events.NewTLSEvent(env)
+	tlsEvent.Version = "TLS 1.3"
+	connEvent := events.NewConnEvent(env)
+	connEvent.State = "S0"
+	connEvent.Duration = time.Second
+	httpEvent := events.NewHTTPEvent(env)
+	httpEvent.StatusCode = 200
+
+	for _, event := range []events.Event{tlsEvent, connEvent, httpEvent} {
+		summary := eventSummary(event)
+		assert.Equal(t, strings.TrimSpace(summary), summary)
+		assert.NotEmpty(t, summary)
+	}
+}
+
 func TestEventsViewProjectsAllMetadataKinds(t *testing.T) {
 	env := events.Envelope{Timestamp: time.Unix(1, 0), EventID: "event", ProducerSessionID: "session", EventSequence: 4}
 	dns := events.NewDNSEvent(env)

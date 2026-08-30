@@ -677,22 +677,24 @@ func eventSpecificValues(event events.Event) map[string]string {
 }
 
 func eventSummary(event events.Event) string {
+	var summary string
 	switch e := event.(type) {
 	case events.DNSEvent:
-		return fmt.Sprintf("%s qtype=%d rcode=%d", e.Query, e.QType, e.RCode)
+		summary = fmt.Sprintf("%s qtype=%d rcode=%d", e.Query, e.QType, e.RCode)
 	case events.HTTPEvent:
-		return fmt.Sprintf("%s %s%s status=%d", e.Method, e.Host, e.URI, e.StatusCode)
+		summary = fmt.Sprintf("%s %s%s status=%d", e.Method, e.Host, e.URI, e.StatusCode)
 	case events.TLSEvent:
-		return fmt.Sprintf("%s %s %s", e.ServerName, e.Version, e.ValidationStatus)
+		summary = fmt.Sprintf("%s %s %s", e.ServerName, e.Version, e.ValidationStatus)
 	case events.SMTPEvent:
-		return fmt.Sprintf("%s -> %s %s", e.MailFrom, strings.Join(e.Recipients, ","), e.Subject)
+		summary = fmt.Sprintf("%s -> %s %s", e.MailFrom, strings.Join(e.Recipients, ","), e.Subject)
 	case events.ConnEvent:
-		return fmt.Sprintf("%s %s %s", e.Service, e.State, e.Duration)
+		summary = fmt.Sprintf("%s %s %s", e.Service, e.State, e.Duration)
 	case events.FileMetadataEvent:
-		return fmt.Sprintf("%s %s %dB", e.Filename, e.MIMEType, e.SeenBytes)
+		summary = fmt.Sprintf("%s %s %dB", e.Filename, e.MIMEType, e.SeenBytes)
 	default:
 		return ""
 	}
+	return strings.TrimSpace(summary)
 }
 
 func boundedValue(value any) string {

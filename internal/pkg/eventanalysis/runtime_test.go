@@ -84,6 +84,42 @@ func TestRuntimeEOFEmitsPartialConnectionAndPreservesIdentity(t *testing.T) {
 	require.Equal(t, "fixture.pcap", s.events[0].Envelope().Provenance.InputFile)
 }
 
+func TestRuntimeLiveExpiryClosesQuietConnection(t *testing.T) {
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	dispatcher, err := events.NewDispatcher(events.Config{QueueSize: 16, SinkQueueSize: 16, Producer: producer})
+	require.NoError(t, err)
+	sink := &memorySink{}
+	require.NoError(t, dispatcher.Register(sink))
+	runtime, err := New(Config{
+		Dispatcher: dispatcher,
+		Connections: conntrack.Config{
+			MaxFlows:        16,
+			IdleTimeout:     20 * time.Millisecond,
+			HalfOpenTimeout: 20 * time.Millisecond,
+		},
+		ExpiryInterval: 5 * time.Millisecond,
+		LiveExpiry:     true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Start(context.Background()))
+	require.NoError(t, runtime.ObserveCaptured(Source{NodeID: "node", CaptureSource: "live"}, []*data.CapturedPacket{packet(time.Now())}))
+
+	require.Eventually(t, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		for _, event := range sink.events {
+			if event.Kind() == events.KindConn {
+				return true
+			}
+		}
+		return false
+	}, time.Second, 5*time.Millisecond)
+
+	runtime.Close()
+	require.NoError(t, dispatcher.Close(context.Background()))
+}
+
 func TestObserveCapturedPreservesPacketInterfaceProvenance(t *testing.T) {
 	r, d, sink := testRuntime(t, 16)
 	p := packet(time.Unix(10, 0))

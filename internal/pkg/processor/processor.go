@@ -288,10 +288,17 @@ func New(config Config) (*Processor, error) {
 	p.eventRuntime, err = eventanalysis.New(eventanalysis.Config{
 		Dispatcher: p.eventDispatcher, Files: fileCfg,
 		IncludeHTTPHeaders: includeHeaders, IncludeEmailBodyPreview: includeEmailBody,
+		LiveExpiry: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize event analysis runtime: %w", err)
 	}
+	eventRuntimeReady := false
+	defer func() {
+		if !eventRuntimeReady {
+			p.eventRuntime.Close()
+		}
+	}()
 	if shouldEmitStructuredLogs(config) {
 		logCfg := config.LogConfig
 		queueSize := logCfg.QueueSize
@@ -611,6 +618,7 @@ func New(config Config) (*Processor, error) {
 	// Initialize LI Manager (no-op if !li build or LI not enabled in config)
 	p.initLIManager()
 
+	eventRuntimeReady = true
 	return p, nil
 }
 

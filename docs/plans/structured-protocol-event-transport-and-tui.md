@@ -292,6 +292,13 @@ service without changing packet accounting, and processor, tap, sniff,
 watch-live, and watch-file fixture tests assert both HTTP and connection-event
 semantics. The same audit preserved explicitly configured flow and connection
 timeouts when their capacity fields use runtime defaults.
+A renewed lifecycle audit found that live connection expiry was still driven
+only by packet arrival, so a quiet flow could remain open past its idle or
+half-open timeout until another packet arrived or shutdown began. The shared
+runtime now advances expiry periodically for processor, live sniff, and
+watch-live sessions, while offline sniff and watch-file replay remain driven by
+capture timestamps and EOF for deterministic output. A race-enabled regression
+test verifies that a quiet live connection expires without another packet.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

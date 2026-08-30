@@ -45,6 +45,10 @@ type Config struct {
 	IncludeEmailBodyPreview bool
 	Now                     func() time.Time
 	ExpiryInterval          time.Duration
+	// LiveExpiry advances connection expiry from the wall clock when capture is
+	// idle. Leave it disabled for deterministic offline replay, where packet
+	// timestamps and EOF exclusively drive the capture clock.
+	LiveExpiry bool
 	// LosslessDelivery drains the dispatcher before every admission. It is
 	// intended for deterministic offline analysis only; live callers should
 	// retain the default non-blocking, drop-on-pressure behavior.
@@ -64,6 +68,9 @@ type Runtime struct {
 	nextExpiry   time.Time
 	closed       bool
 	stats        Stats
+	expiryStop   chan struct{}
+	expiryDone   chan struct{}
+	stopExpiry   sync.Once
 }
 
 func New(cfg Config) (*Runtime, error) {
@@ -95,7 +102,34 @@ func New(cfg Config) (*Runtime, error) {
 	if err := r.resetState(); err != nil {
 		return nil, err
 	}
+	if cfg.LiveExpiry {
+		r.expiryStop = make(chan struct{})
+		r.expiryDone = make(chan struct{})
+		go r.runLiveExpiry()
+	}
 	return r, nil
+}
+
+func (r *Runtime) runLiveExpiry() {
+	defer close(r.expiryDone)
+	ticker := time.NewTicker(r.cfg.ExpiryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			r.Expire(r.cfg.Now())
+		case <-r.expiryStop:
+			return
+		}
+	}
+}
+
+func (r *Runtime) stopLiveExpiry() {
+	if r.expiryStop == nil {
+		return
+	}
+	r.stopExpiry.Do(func() { close(r.expiryStop) })
+	<-r.expiryDone
 }
 
 func (r *Runtime) resetState() error {
@@ -453,6 +487,7 @@ func (r *Runtime) Reset() error {
 	return r.resetState()
 }
 func (r *Runtime) Close() {
+	r.stopLiveExpiry()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {

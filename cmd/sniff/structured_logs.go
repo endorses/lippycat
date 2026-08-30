@@ -53,6 +53,7 @@ func withEventAnalysis(inputFiles []string, analysisProfile string, run func()) 
 	defer restore()
 	defer func() {
 		s.analysis.EOF()
+		s.analysis.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := s.dispatcher.Close(ctx); err != nil {
@@ -91,6 +92,7 @@ func newSniffEventSession(dir string, inputFiles []string, analysisProfile strin
 		Files:                   fileanalysis.Config{MaxFileSize: viper.GetInt64("files.max_size"), MaxTotalSize: viper.GetInt64("files.total_size"), Extract: viper.GetBool("files.extract"), Directory: viper.GetString("files.extract_dir")},
 		IncludeHTTPHeaders:      viper.GetBool("logs.include_http_headers"),
 		IncludeEmailBodyPreview: viper.GetBool("logs.include_email_body_preview"),
+		LiveExpiry:              len(inputFiles) == 0,
 	})
 	if err != nil {
 		return nil, err
@@ -99,14 +101,17 @@ func newSniffEventSession(dir string, inputFiles []string, analysisProfile strin
 	if dir != "" {
 		sink, sinkErr := registerSniffLogSink(d, dir, queueSize)
 		if sinkErr != nil {
+			analysis.Close()
 			return nil, sinkErr
 		}
 		if sinkErr = sink.Start(context.Background()); sinkErr != nil {
+			analysis.Close()
 			return nil, sinkErr
 		}
 		startedSink = sink
 	}
 	if err := d.Start(context.Background()); err != nil {
+		analysis.Close()
 		if startedSink != nil {
 			if closeErr := startedSink.Close(context.Background()); closeErr != nil {
 				return nil, fmt.Errorf("start event dispatcher: %w; close structured log sink: %v", err, closeErr)

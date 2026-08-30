@@ -1195,6 +1195,7 @@ func (b *envelopeBridgePipeline) startEventAnalysis(handler *TUIEventHandler) (*
 	runtime, err := eventanalysis.New(eventanalysis.Config{
 		Dispatcher:       dispatcher,
 		LosslessDelivery: b.preserveAll,
+		LiveExpiry:       !b.preserveAll,
 	})
 	if err != nil {
 		logger.Error("Failed to create local event runtime", "error", err)

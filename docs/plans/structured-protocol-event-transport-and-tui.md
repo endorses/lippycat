@@ -255,6 +255,12 @@ shared runtime now admits payload-free SYN, FIN, and RST packets to reassembly,
 so complete HTTP, TLS, and SMTP streams are not incorrectly marked partial
 merely because their opening SYN carried no application payload. A shared
 segmented-protocol regression test covers all three protocols.
+A 2026-08-31 lifecycle audit corrected two remaining failure paths: stopping a
+paused local capture now resumes its bridge before waiting, allowing EOF and
+dispatcher draining during restart or mode changes; and failure to initialize
+sniff's auxiliary normalized-event analysis no longer suppresses the primary
+packet capture/output callback. Race-enabled Phase 4 package tests and the
+processor integration suite pass.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

@@ -104,6 +104,17 @@ func TestSniffProducesNormalizedEventsWithoutLogDirectory(t *testing.T) {
 	require.NotEmpty(t, dnsEvent.Envelope().EventID)
 }
 
+func TestWithEventAnalysisStillRunsWhenInitializationFails(t *testing.T) {
+	viper.Set("logs.dir", "")
+	viper.Set("events.drop_policy", "invalid")
+	t.Cleanup(func() { viper.Set("events.drop_policy", "") })
+
+	runs := 0
+	withEventAnalysis(nil, "test-profile", func() { runs++ })
+
+	require.Equal(t, 1, runs)
+}
+
 func TestSniffSharedFixtureProducesReassembledHTTPEvent(t *testing.T) {
 	input := filepath.Join(t.TempDir(), "phase4.pcap")
 	require.NoError(t, os.WriteFile(input, []byte("phase4 fixture identity"), 0o600))

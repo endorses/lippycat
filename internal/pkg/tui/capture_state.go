@@ -107,6 +107,10 @@ func (cs *CaptureState) StopCapture() bool {
 		return false
 	}
 
+	// A paused bridge waits on the shared pause signal and cannot observe the
+	// capture context cancellation until it resumes. Release it before waiting
+	// for completion so restart and mode-switch shutdown can always drain.
+	cs.GetPauseSignal().Resume()
 	handle.cancel()
 	// Wait for capture goroutine to finish (deterministic, no race conditions)
 	<-handle.done

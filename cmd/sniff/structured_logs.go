@@ -46,6 +46,7 @@ func withEventAnalysis(inputFiles []string, analysisProfile string, run func()) 
 	s, err := newSniffEventSession(dir, inputFiles, analysisProfile, nil)
 	if err != nil {
 		logger.Error("Failed to initialize normalized event analysis", "error", err)
+		run()
 		return
 	}
 	restore := capture.SetPacketObserver(s.observe)

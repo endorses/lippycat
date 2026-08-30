@@ -146,12 +146,18 @@ func TestSniffSharedFixtureProducesReassembledHTTPEvent(t *testing.T) {
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	var httpEvents []events.HTTPEvent
+	var connEvents []events.ConnEvent
 	for _, event := range sink.events {
-		if event.Kind() == events.KindHTTP {
+		switch event.Kind() {
+		case events.KindHTTP:
 			httpEvents = append(httpEvents, event.(events.HTTPEvent))
+		case events.KindConn:
+			connEvents = append(connEvents, event.(events.ConnEvent))
 		}
 	}
 	require.Len(t, httpEvents, 1)
+	require.Len(t, connEvents, 1)
+	require.Equal(t, "HTTP", connEvents[0].Service)
 	require.Equal(t, "GET", httpEvents[0].Method)
 	require.Equal(t, "/phase4", httpEvents[0].URI)
 	require.Equal(t, "parity.example.test", httpEvents[0].Host)

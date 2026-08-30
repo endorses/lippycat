@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/flowid"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/endorses/lippycat/internal/testutil/eventfixture"
 	"github.com/google/gopacket"
@@ -22,6 +23,24 @@ import (
 type memorySink struct {
 	mu     sync.Mutex
 	events []events.Event
+}
+
+func TestNewPreservesExplicitTimeoutsWhenCapacitiesDefault(t *testing.T) {
+	dispatcher, err := events.NewDispatcher(events.Config{QueueSize: 1, SinkQueueSize: 1})
+	require.NoError(t, err)
+	runtime, err := New(Config{
+		Dispatcher: dispatcher,
+		Flow:       flowid.Config{IdleTimeout: 11 * time.Second},
+		Connections: conntrack.Config{
+			IdleTimeout: 13 * time.Second, HalfOpenTimeout: 17 * time.Second,
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 100000, runtime.cfg.Flow.MaxEntries)
+	require.Equal(t, 11*time.Second, runtime.cfg.Flow.IdleTimeout)
+	require.Equal(t, 100000, runtime.cfg.Connections.MaxFlows)
+	require.Equal(t, 13*time.Second, runtime.cfg.Connections.IdleTimeout)
+	require.Equal(t, 17*time.Second, runtime.cfg.Connections.HalfOpenTimeout)
 }
 
 func (s *memorySink) HandleEvent(_ context.Context, e events.Event) error {

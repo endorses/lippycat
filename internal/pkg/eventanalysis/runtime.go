@@ -71,10 +71,19 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, fmt.Errorf("event analysis dispatcher is required")
 	}
 	if cfg.Flow.MaxEntries <= 0 {
-		cfg.Flow = flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute}
+		cfg.Flow.MaxEntries = 100000
+	}
+	if cfg.Flow.IdleTimeout <= 0 {
+		cfg.Flow.IdleTimeout = 5 * time.Minute
 	}
 	if cfg.Connections.MaxFlows <= 0 {
-		cfg.Connections = conntrack.Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second}
+		cfg.Connections.MaxFlows = 100000
+	}
+	if cfg.Connections.IdleTimeout <= 0 {
+		cfg.Connections.IdleTimeout = 5 * time.Minute
+	}
+	if cfg.Connections.HalfOpenTimeout <= 0 {
+		cfg.Connections.HalfOpenTimeout = 30 * time.Second
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

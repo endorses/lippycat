@@ -128,6 +128,27 @@ func (t *Tracker) Observe(o Observation) ([]events.ConnEvent, error) {
 	return nil, nil
 }
 
+// SetService records a protocol service discovered after packet accounting,
+// such as when an application message becomes recognizable only after TCP
+// reassembly. It does not alter packet or byte counters.
+func (t *Tracker) SetService(env events.Envelope, service string) error {
+	if service == "" {
+		return nil
+	}
+	key, err := flowid.Normalize(env.Flow)
+	if err != nil {
+		return err
+	}
+	tk := trackerKey{Flow: key, NodeID: env.NodeID}
+	s := t.shardFor(tk)
+	s.Lock()
+	if f := s.flows[tk]; f != nil {
+		f.service = service
+	}
+	s.Unlock()
+	return nil
+}
+
 func newFlow(key trackerKey, o Observation, now time.Time) *flow {
 	if o.Envelope.Flow.Protocol == flowid.ProtocolTCP && o.TCP != nil && o.TCP.SYN && o.TCP.ACK {
 		o.Envelope.Flow.SourceAddress, o.Envelope.Flow.DestinationAddress = o.Envelope.Flow.DestinationAddress, o.Envelope.Flow.SourceAddress

@@ -221,33 +221,48 @@ func TestProtocolEventsPropagateFilteredCaptureProvenance(t *testing.T) {
 	}
 }
 
-func TestProcessorAndTapSharedFixtureProduceEquivalentHTTPEvents(t *testing.T) {
+func TestProcessorAndTapSharedFixtureProduceEquivalentEvents(t *testing.T) {
 	fixture, err := eventfixture.Captured()
 	require.NoError(t, err)
-	run := func(t *testing.T, processorID, sourceID string) events.HTTPEvent {
+	type result struct {
+		http events.HTTPEvent
+		conn events.ConnEvent
+	}
+	run := func(t *testing.T, processorID, sourceID string) result {
 		t.Helper()
 		p, err := New(Config{ListenAddr: ":0", ProcessorID: processorID, EventQueueSize: 32})
 		require.NoError(t, err)
 		sink := &collectingSink{}
-		require.NoError(t, p.RegisterEventSink(sink, events.KindHTTP))
+		require.NoError(t, p.RegisterEventSink(sink, events.KindHTTP, events.KindConn))
 		require.NoError(t, p.eventDispatcher.Start(context.Background()))
 		p.emitProtocolEvents(sourceID, fixture)
 		p.eventRuntime.EOF()
 		require.NoError(t, p.eventDispatcher.Close(context.Background()))
 		sink.mu.Lock()
 		defer sink.mu.Unlock()
-		require.Len(t, sink.events, 1)
-		return sink.events[0].(events.HTTPEvent)
+		require.Len(t, sink.events, 2)
+		var got result
+		for _, event := range sink.events {
+			switch event := event.(type) {
+			case events.HTTPEvent:
+				got.http = event
+			case events.ConnEvent:
+				got.conn = event
+			}
+		}
+		return got
 	}
 	processorEvent := run(t, "processor-test", "hunter-a")
 	tapEvent := run(t, "tap-test", "tap-test-local")
-	for _, event := range []events.HTTPEvent{processorEvent, tapEvent} {
+	for _, event := range []events.HTTPEvent{processorEvent.http, tapEvent.http} {
 		require.Equal(t, "GET", event.Method)
 		require.Equal(t, "/phase4", event.URI)
 		require.Equal(t, "parity.example.test", event.Host)
 		require.True(t, eventfixture.BaseTime.Add(2*time.Second).Equal(event.Envelope().Timestamp))
 	}
-	require.Equal(t, "hunter-a", processorEvent.Envelope().NodeID)
-	require.Equal(t, "tap-test", tapEvent.Envelope().NodeID)
-	require.Equal(t, "tap-test-local", tapEvent.Envelope().Provenance.CaptureSource)
+	require.Equal(t, "HTTP", processorEvent.conn.Service)
+	require.Equal(t, "HTTP", tapEvent.conn.Service)
+	require.Equal(t, "hunter-a", processorEvent.http.Envelope().NodeID)
+	require.Equal(t, "tap-test", tapEvent.http.Envelope().NodeID)
+	require.Equal(t, "tap-test-local", tapEvent.http.Envelope().Provenance.CaptureSource)
 }

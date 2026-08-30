@@ -343,6 +343,18 @@ func (s *applicationStream) emit(ctx reassemblyContext, ci gopacket.CaptureInfo,
 		s.runtime.stats.Invalid++
 		return
 	}
+	service := ""
+	switch {
+	case http != nil:
+		service = "HTTP"
+	case tls != nil:
+		service = "TLS"
+	case email != nil:
+		service = "SMTP"
+	}
+	if err := s.runtime.connections.SetService(env, service); err != nil {
+		s.runtime.stats.Invalid++
+	}
 	s.runtime.emitMetadata(env, metadata)
 	s.partial = false
 }

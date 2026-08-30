@@ -138,6 +138,7 @@ func TestEnvelopeBridgePublishesOfflineEventsWithFileProvenanceBeforeEOF(t *test
 func TestWatchLiveAndFileSharedFixtureProduceEquivalentHTTPEvents(t *testing.T) {
 	type result struct {
 		event events.HTTPEvent
+		conn  events.ConnEvent
 		loss  uint64
 	}
 	run := func(t *testing.T, preserveAll bool, kind pipeline.SourceKind, source string) result {
@@ -166,9 +167,12 @@ func TestWatchLiveAndFileSharedFixtureProduceEquivalentHTTPEvents(t *testing.T) 
 				got.loss += loss.Count
 			}
 			for _, event := range batch.Events {
-				if event.Kind() == events.KindHTTP {
+				switch event.Kind() {
+				case events.KindHTTP:
 					got.event = event.(events.HTTPEvent)
 					count++
+				case events.KindConn:
+					got.conn = event.(events.ConnEvent)
 				}
 			}
 		}
@@ -185,6 +189,8 @@ func TestWatchLiveAndFileSharedFixtureProduceEquivalentHTTPEvents(t *testing.T) 
 		require.Equal(t, "parity.example.test", event.Host)
 		require.True(t, eventfixture.BaseTime.Add(2*time.Second).Equal(event.Envelope().Timestamp))
 	}
+	require.Equal(t, "HTTP", live.conn.Service)
+	require.Equal(t, "HTTP", file.conn.Service)
 	require.Equal(t, "live", live.event.Envelope().Provenance.CaptureSource)
 	require.Equal(t, "eth-test", live.event.Envelope().Provenance.InterfaceName)
 	require.Equal(t, "pcap", file.event.Envelope().Provenance.CaptureSource)

@@ -285,6 +285,13 @@ A subsequent local-TUI audit preserved the capture interface index at the
 envelope-to-runtime boundary and removed duplicate shutdown loss reporting;
 dispatcher drops are already reported exactly once through the bounded local
 sink's drop-observer path.
+A final cross-path equivalence audit found that transported segmented HTTP
+flows retained their detector-provided connection service while locally
+reassembled flows did not. Reassembly now updates the existing connection's
+service without changing packet accounting, and processor, tap, sniff,
+watch-live, and watch-file fixture tests assert both HTTP and connection-event
+semantics. The same audit preserved explicitly configured flow and connection
+timeouts when their capacity fields use runtime defaults.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

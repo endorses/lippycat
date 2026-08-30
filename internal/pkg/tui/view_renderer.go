@@ -38,6 +38,9 @@ func (m Model) View() string {
 	m.uiState.Footer.SetCallFilterMode(m.uiState.CallFilterMode)
 	m.uiState.Footer.SetHasCallFilter(m.callStore.HasFilter())
 	m.uiState.Footer.SetCallFilterCount(m.callStore.FilterChain.Count())
+	m.uiState.Footer.SetEventFilterMode(m.uiState.EventFilterMode)
+	m.uiState.Footer.SetHasEventFilter(m.eventStore.HasUserFilters())
+	m.uiState.Footer.SetEventFilterCount(m.eventStore.UserFilterCount())
 	m.uiState.Footer.SetStatsSubView(m.uiState.StatisticsView.GetSubView())
 
 	// Render components
@@ -259,6 +262,11 @@ func (m Model) renderBottomArea(footerView string) string {
 	if m.uiState.CallFilterMode {
 		// Call filter (3 lines) + footer (1 line) = 4 lines
 		filterView := m.uiState.CallFilterInput.View()
+		return filterView + "\n" + footerView
+	}
+
+	if m.uiState.EventFilterMode {
+		filterView := m.uiState.EventFilterInput.View()
 		return filterView + "\n" + footerView
 	}
 

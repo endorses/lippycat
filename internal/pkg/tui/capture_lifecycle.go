@@ -74,6 +74,9 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 			components.ToastDurationShort,
 		)
 	case components.CaptureModeOffline:
+		// A newly selected offline input is a separate analysis session.
+		m.eventStore.Reset()
+		m.eventStore.ClearUserFilters()
 		m.interfaceName = formatPCAPFilesDisplay(msg.PCAPFiles)
 		m.pcapFiles = msg.PCAPFiles
 		m.uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")

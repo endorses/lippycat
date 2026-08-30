@@ -83,6 +83,31 @@ func TestEventBatchFilteringNavigationAndMissingPacketNotice(t *testing.T) {
 	require.NotNil(t, updated)
 }
 
+func TestEventFiltersUseIndependentContextSensitiveInput(t *testing.T) {
+	m := NewModel(8, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(0)
+	m.uiState.ViewMode = "events"
+	m.eventStore.AddBatch([]events.Event{events.NewDNSEvent(testEventEnvelope("dns", 1)), events.NewHTTPEvent(testEventEnvelope("http", 2))})
+
+	m, _ = m.handleKeyboard(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	require.True(t, m.uiState.EventFilterMode)
+	require.False(t, m.uiState.FilterMode)
+	require.False(t, m.uiState.CallFilterMode)
+	for _, r := range "kind:http" {
+		m, _ = m.handleKeyboard(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m, _ = m.handleKeyboard(tea.KeyMsg{Type: tea.KeyEnter})
+	require.Len(t, m.eventStore.Events(), 1)
+	require.Equal(t, 1, m.eventStore.UserFilterCount())
+	require.False(t, m.packetStore.HasFilter())
+	require.False(t, m.callStore.HasFilter())
+
+	m.uiState.ViewMode = "packets"
+	m, _ = m.handleKeyboard(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	require.True(t, m.uiState.FilterMode)
+	require.Equal(t, 1, m.eventStore.UserFilterCount(), "cycling views preserves event filters")
+}
+
 func TestEventListMouseWheelMovesSelection(t *testing.T) {
 	m := NewModel(10, 8, "", "", nil, false, true, "", true)
 	m.uiState.Tabs.SetActive(0)

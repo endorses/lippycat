@@ -67,6 +67,11 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return model.(Model), cmd
 	}
 
+	if m.uiState.EventFilterMode {
+		model, cmd := m.handleEventFilterInput(msg)
+		return model.(Model), cmd
+	}
+
 	// Settings tab gets priority for most keys (except q, ctrl+c, ctrl+z, space, tab/shift+tab)
 	if m.uiState.Tabs.GetActive() == 3 {
 		// If actively editing ANY field, pass ALL keys to settings view
@@ -243,6 +248,9 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "/": // Enter filter mode (Capture tab) or search mode (Help tab)
 		if m.uiState.Tabs.GetActive() == 0 {
+			if m.uiState.ViewMode == "events" {
+				return m.handleEnterEventFilterMode()
+			}
 			// Check if we're in calls view mode
 			if m.uiState.ViewMode == "calls" {
 				return m.handleEnterCallFilterMode()
@@ -257,6 +265,9 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "C": // Clear all filters (Shift+C) - Capture tab only
 		if m.uiState.Tabs.GetActive() == 0 {
+			if m.uiState.ViewMode == "events" {
+				return m.handleClearAllEventFilters()
+			}
 			// Check if we're in calls view mode
 			if m.uiState.ViewMode == "calls" {
 				return m.handleClearAllCallFilters()
@@ -267,6 +278,9 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "c": // Remove last filter - Capture tab only
 		if m.uiState.Tabs.GetActive() == 0 {
+			if m.uiState.ViewMode == "events" {
+				return m.handleRemoveLastEventFilter()
+			}
 			// Check if we're in calls view mode
 			if m.uiState.ViewMode == "calls" {
 				return m.handleRemoveLastCallFilter()

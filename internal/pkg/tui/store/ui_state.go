@@ -34,6 +34,7 @@ type UIState struct {
 	HunterSelector   components.HunterSelector
 	FilterManager    components.FilterManager
 	FilterInput      components.FilterInput
+	EventFilterInput components.FilterInput
 	FileDialog       components.FileDialog
 	ConfirmDialog    components.ConfirmDialog
 	Toast            components.Toast
@@ -48,6 +49,7 @@ type UIState struct {
 	Quitting           bool
 	Theme              themes.Theme
 	FilterMode         bool
+	EventFilterMode    bool // Filter mode for normalized events view
 	CallFilterMode     bool // Filter mode for calls view
 	CallFilterInput    components.FilterInput
 	ShowDetails        bool
@@ -135,6 +137,9 @@ func NewUIState(theme themes.Theme) *UIState {
 	callFilterInput := components.NewFilterInput("/")
 	callFilterInput.SetTheme(theme)
 
+	eventFilterInput := components.NewFilterInput("/")
+	eventFilterInput.SetTheme(theme)
+
 	// Initialize FileDialog for saving PCAP files
 	// Use current working directory
 	var initialPath string
@@ -177,6 +182,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		HunterSelector:   hunterSelector,
 		FilterManager:    filterManager,
 		FilterInput:      filterInput,
+		EventFilterInput: eventFilterInput,
 		CallFilterInput:  callFilterInput,
 		FileDialog:       fileDialog,
 		ConfirmDialog:    confirmDialog,
@@ -190,6 +196,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		Quitting:         false,
 		Theme:            theme,
 		FilterMode:       false,
+		EventFilterMode:  false,
 		CallFilterMode:   false,
 		ShowDetails:      false,
 		EventShowDetails: false,
@@ -222,6 +229,7 @@ func (ui *UIState) SetTheme(theme themes.Theme) {
 	ui.EventsView.SetTheme(theme)
 	ui.ProtocolSelector.SetTheme(theme)
 	ui.FilterInput.SetTheme(theme)
+	ui.EventFilterInput.SetTheme(theme)
 	ui.CallFilterInput.SetTheme(theme)
 	ui.Toast.SetTheme(theme)
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/internal/pkg/eventquery"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logschema"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
@@ -528,25 +529,28 @@ func eventFields(event events.Event) []eventField {
 		return nil
 	}
 	fields := make([]eventField, 0, len(schema.Fields))
+	projection := eventquery.Project(event)
 	for _, canonical := range schema.Fields {
-		value, present := canonicalEventValue(event, canonical.Name)
+		projected, present := projection.Fields[canonical.Name]
 		if !present {
 			continue
 		}
-		fields = append(fields, eventField{Name: canonical.Name, Type: canonical.Type, Value: sanitizeEventText(value)})
+		fields = append(fields, eventField{Name: canonical.Name, Type: canonical.Type, Value: sanitizeEventText(projectedValue(projected))})
 	}
 	return fields
 }
 
-func canonicalEventValue(event events.Event, name string) (string, bool) {
-	env := event.Envelope()
-	common := map[string]string{"ts": env.Timestamp.Format(time.RFC3339Nano), "uid": env.UID, "id.orig_h": env.Flow.SourceAddress.String(), "id.orig_p": fmt.Sprint(env.Flow.SourcePort), "id.resp_h": env.Flow.DestinationAddress.String(), "id.resp_p": fmt.Sprint(env.Flow.DestinationPort), "proto": fmt.Sprint(env.Flow.Protocol), "community_id": env.CommunityID, "node_id": env.NodeID, "capture_scope": string(env.CaptureScope), "partial": fmt.Sprint(env.Partial)}
-	if value, ok := common[name]; ok {
-		return value, true
+func projectedValue(value eventquery.Value) string {
+	parts := make([]string, len(value.Values))
+	for i, member := range value.Values {
+		parts[i] = fmt.Sprint(member)
 	}
-	values := eventSpecificValues(event)
-	value, ok := values[name]
-	return value, ok
+	return strings.Join(parts, ", ")
+}
+
+func canonicalEventValue(event events.Event, name string) (string, bool) {
+	value, ok := eventquery.Project(event).Fields[name]
+	return projectedValue(value), ok
 }
 
 func eventSpecificValues(event events.Event) map[string]string {
@@ -677,24 +681,7 @@ func eventSpecificValues(event events.Event) map[string]string {
 }
 
 func eventSummary(event events.Event) string {
-	var summary string
-	switch e := event.(type) {
-	case events.DNSEvent:
-		summary = fmt.Sprintf("%s qtype=%d rcode=%d", e.Query, e.QType, e.RCode)
-	case events.HTTPEvent:
-		summary = fmt.Sprintf("%s %s%s status=%d", e.Method, e.Host, e.URI, e.StatusCode)
-	case events.TLSEvent:
-		summary = fmt.Sprintf("%s %s %s", e.ServerName, e.Version, e.ValidationStatus)
-	case events.SMTPEvent:
-		summary = fmt.Sprintf("%s -> %s %s", e.MailFrom, strings.Join(e.Recipients, ","), e.Subject)
-	case events.ConnEvent:
-		summary = fmt.Sprintf("%s %s %s", e.Service, e.State, e.Duration)
-	case events.FileMetadataEvent:
-		summary = fmt.Sprintf("%s %s %dB", e.Filename, e.MIMEType, e.SeenBytes)
-	default:
-		return ""
-	}
-	return strings.TrimSpace(summary)
+	return eventquery.Summary(event)
 }
 
 func boundedValue(value any) string {

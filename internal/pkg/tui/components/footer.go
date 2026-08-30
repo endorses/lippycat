@@ -37,6 +37,9 @@ type Footer struct {
 	callFilterMode       bool    // True when call filter input is active
 	hasCallFilter        bool    // True when call filters are applied
 	callFilterCount      int     // Number of stacked call filters
+	eventFilterMode      bool    // True when event query input is active
+	hasEventFilter       bool    // True when event filters are applied
+	eventFilterCount     int     // Number of stacked event filters
 	statsSubView         SubView // Current sub-view in Statistics tab
 }
 
@@ -123,6 +126,10 @@ func (f *Footer) SetCallFilterCount(count int) {
 	f.callFilterCount = count
 }
 
+func (f *Footer) SetEventFilterMode(active bool) { f.eventFilterMode = active }
+func (f *Footer) SetHasEventFilter(has bool)     { f.hasEventFilter = has }
+func (f *Footer) SetEventFilterCount(count int)  { f.eventFilterCount = count }
+
 // SetStatsSubView sets the current statistics sub-view for context-sensitive keybindings
 func (f *Footer) SetStatsSubView(sv SubView) {
 	f.statsSubView = sv
@@ -155,7 +162,14 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		}
 
 		// Conditional keybinds based on view mode
-		if f.viewMode == "calls" {
+		if f.viewMode == "events" {
+			if f.hasEventFilter {
+				keybinds = append(keybinds, TabKeybind{Key: "c", Description: "remove event filter", ShortDesc: "clr", Essential: false})
+				if f.eventFilterCount > 1 {
+					keybinds = append(keybinds, TabKeybind{Key: "C", Description: "clear event filters", ShortDesc: "all", Essential: false})
+				}
+			}
+		} else if f.viewMode == "calls" {
 			// Calls view: use call filter state
 			if f.hasCallFilter {
 				keybinds = append(keybinds, TabKeybind{Key: "c", Description: "clear", ShortDesc: "clr", Essential: false})
@@ -397,7 +411,7 @@ func (f *Footer) renderGeneralSection() string {
 // View renders the footer with two lines: horizontal separator + keybindings
 func (f *Footer) View() string {
 	// Special case: filter mode shows filter keybinds only
-	if f.filterMode || f.callFilterMode {
+	if f.filterMode || f.callFilterMode || f.eventFilterMode {
 		return f.renderFilterModeFooter()
 	}
 

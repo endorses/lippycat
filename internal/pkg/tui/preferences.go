@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 	"github.com/spf13/viper"
@@ -123,6 +124,44 @@ func saveCallFilterHistory(filterInput *components.FilterInput) {
 				// Silently ignore errors - history will still work for this session
 				return
 			}
+		}
+	}
+}
+
+// loadEventFilterHistory loads normalized event-query history from config.
+func loadEventFilterHistory(filterInput *components.FilterInput) {
+	history := viper.GetStringSlice("watch.event_filter_history")
+	if len(history) > 0 {
+		filterInput.SetHistory(history)
+	}
+}
+
+// saveEventFilterHistory saves normalized event-query history to config.
+func saveEventFilterHistory(filterInput *components.FilterInput) {
+	history := filterInput.GetHistory()
+	viper.Set("watch.event_filter_history", history)
+	writePreferences()
+}
+
+func writePreferences() {
+	if err := viper.WriteConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			logger.Warn("Failed to save event filter history", "error", err)
+			return
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			logger.Warn("Failed to locate home directory for event filter history", "error", err)
+			return
+		}
+		configDir := filepath.Join(home, ".config", "lippycat")
+		if err := os.MkdirAll(configDir, 0750); err != nil {
+			logger.Warn("Failed to create config directory for event filter history", "error", err, "directory", configDir)
+			return
+		}
+		viper.SetConfigFile(filepath.Join(configDir, "config.yaml"))
+		if err := viper.SafeWriteConfig(); err != nil {
+			logger.Warn("Failed to save event filter history", "error", err)
 		}
 	}
 }

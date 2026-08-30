@@ -170,6 +170,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	// Load filter history from config
 	loadFilterHistory(&uiState.FilterInput)
 	loadCallFilterHistory(&uiState.CallFilterInput)
+	loadEventFilterHistory(&uiState.EventFilterInput)
 	loadNodeHistory(uiState.NodesView)
 
 	// Determine initial capture mode and interface name

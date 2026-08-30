@@ -99,6 +99,83 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m Model) handleEventFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	input := &m.uiState.EventFilterInput
+	switch msg.String() {
+	case "enter":
+		value := input.Value()
+		var cmd tea.Cmd
+		if value == "" {
+			m.eventStore.ClearUserFilters()
+		} else if err := m.eventStore.AddUserFilter(value); err != nil {
+			cmd = m.uiState.Toast.Show(fmt.Sprintf("Invalid event filter: %s", err), components.ToastError, components.ToastDurationLong)
+		} else {
+			input.AddToHistory(value)
+			saveEventFilterHistory(input)
+			cmd = m.uiState.Toast.Show(fmt.Sprintf("Event filter added (%d active)", m.eventStore.UserFilterCount()), components.ToastSuccess, components.ToastDurationShort)
+		}
+		m.syncEventsView()
+		m.uiState.EventFilterMode = false
+		input.Deactivate()
+		return m, cmd
+	case "esc", "ctrl+c":
+		m.uiState.EventFilterMode = false
+		input.Deactivate()
+		return m, nil
+	case "up", "ctrl+p":
+		input.HistoryUp()
+	case "down", "ctrl+n":
+		input.HistoryDown()
+	case "left", "ctrl+b":
+		input.CursorLeft()
+	case "right", "ctrl+f":
+		input.CursorRight()
+	case "home", "ctrl+a":
+		input.CursorHome()
+	case "end", "ctrl+e":
+		input.CursorEnd()
+	case "backspace":
+		input.Backspace()
+	case "delete", "ctrl+d":
+		input.Delete()
+	case "ctrl+u":
+		input.DeleteToBeginning()
+	case "ctrl+k":
+		input.DeleteToEnd()
+	default:
+		for _, r := range msg.Runes {
+			input.InsertRune(r)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleEnterEventFilterMode() (Model, tea.Cmd) {
+	m.uiState.EventFilterMode = true
+	m.uiState.EventFilterInput.Activate()
+	m.uiState.EventFilterInput.Clear()
+	m.uiState.EventFilterInput.SetActiveFilters(m.eventStore.UserFilterCount(), m.eventStore.UserFilterDescriptions())
+	return m, nil
+}
+
+func (m Model) handleRemoveLastEventFilter() (Model, tea.Cmd) {
+	if !m.eventStore.RemoveLastUserFilter() {
+		return m, nil
+	}
+	m.syncEventsView()
+	return m, m.uiState.Toast.Show("Last event filter removed", components.ToastInfo, components.ToastDurationShort)
+}
+
+func (m Model) handleClearAllEventFilters() (Model, tea.Cmd) {
+	count := m.eventStore.UserFilterCount()
+	if count == 0 {
+		return m, nil
+	}
+	m.eventStore.ClearUserFilters()
+	m.syncEventsView()
+	return m, m.uiState.Toast.Show(fmt.Sprintf("All event filters cleared (%d removed)", count), components.ToastInfo, components.ToastDurationShort)
+}
+
 // handleOpenFilterManager opens the filter manager modal for the selected node
 func (m *Model) handleOpenFilterManager() tea.Cmd {
 	// Get selected processor or hunter from nodes view

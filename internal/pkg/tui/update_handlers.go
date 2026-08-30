@@ -36,6 +36,7 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.uiState.Tabs.SetWidth(msg.Width)
 	m.uiState.FilterInput.SetWidth(msg.Width)
 	m.uiState.CallFilterInput.SetWidth(msg.Width)
+	m.uiState.EventFilterInput.SetWidth(msg.Width)
 	m.uiState.FileDialog.SetSize(msg.Width, msg.Height)
 	m.uiState.ConfirmDialog.SetSize(msg.Width, msg.Height)
 	m.uiState.Toast.SetSize(msg.Width, msg.Height)

@@ -95,3 +95,32 @@ func TestEventStoreKindAndSourceProjections(t *testing.T) {
 	assert.Equal(t, uint64(2), store.CountByKind()[events.KindDNS])
 	assert.Equal(t, uint64(2), store.CountBySource()["pcap"])
 }
+
+func TestEventStoreUserFiltersStackReprojectAndPreserveSelection(t *testing.T) {
+	store := NewEventStore(4)
+	store.AddBatch([]events.Event{testEvent("one", "pcap", events.KindDNS), testEvent("two", "eth0", events.KindHTTP), testEvent("three", "pcap", events.KindHTTP)})
+	require.NoError(t, store.AddUserFilter("kind:http"))
+	require.Len(t, store.Events(), 2)
+	require.True(t, store.SelectByID("two"))
+	require.NoError(t, store.AddUserFilter("source:pcap"))
+	require.Len(t, store.Events(), 1)
+	assert.Equal(t, "three", store.SelectedID())
+	assert.Equal(t, uint64(3), store.Stats().Retained)
+	assert.Equal(t, 2, store.UserFilterCount())
+
+	require.Error(t, store.AddUserFilter("unknown:value"))
+	assert.Equal(t, 2, store.UserFilterCount(), "invalid filters must not change the projection")
+	require.True(t, store.RemoveLastUserFilter())
+	require.Len(t, store.Events(), 2)
+	store.ClearUserFilters()
+	require.Len(t, store.Events(), 3)
+}
+
+func TestEventStoreProtocolScopeIntersectsUserFiltersAndNewArrivals(t *testing.T) {
+	store := NewEventStore(4)
+	store.SetKindFilter([]events.Kind{events.KindHTTP})
+	require.NoError(t, store.AddUserFilter("source:pcap"))
+	store.AddBatch([]events.Event{testEvent("dns", "pcap", events.KindDNS), testEvent("http-a", "eth0", events.KindHTTP), testEvent("http-b", "pcap", events.KindHTTP)})
+	require.Len(t, store.Events(), 1)
+	assert.Equal(t, "http-b", store.Events()[0].Event.Envelope().EventID)
+}

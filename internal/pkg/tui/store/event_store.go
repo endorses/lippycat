@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/eventquery"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
@@ -29,6 +30,12 @@ type EventStore struct {
 	lossByKind                                   map[string]uint64
 	kinds                                        map[events.Kind]struct{}
 	sources                                      map[string]struct{}
+	userFilters                                  []eventUserFilter
+}
+
+type eventUserFilter struct {
+	description string
+	predicate   eventquery.Predicate
 }
 
 func NewEventStore(capacity int) *EventStore {
@@ -123,6 +130,60 @@ func (s *EventStore) SetSourceFilter(sources []string) {
 		}
 	}
 	s.ensureVisibleSelectionLocked()
+}
+
+// AddUserFilter compiles and stacks a local event query with AND semantics.
+// Compilation happens before mutation so invalid queries leave the projection unchanged.
+func (s *EventStore) AddUserFilter(description string) error {
+	predicate, err := eventquery.Compile(description)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.userFilters = append(s.userFilters, eventUserFilter{description: description, predicate: predicate})
+	s.ensureVisibleSelectionLocked()
+	return nil
+}
+
+func (s *EventStore) RemoveLastUserFilter() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.userFilters) == 0 {
+		return false
+	}
+	s.userFilters = s.userFilters[:len(s.userFilters)-1]
+	s.ensureVisibleSelectionLocked()
+	return true
+}
+
+func (s *EventStore) ClearUserFilters() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.userFilters = nil
+	s.ensureVisibleSelectionLocked()
+}
+
+func (s *EventStore) HasUserFilters() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.userFilters) > 0
+}
+
+func (s *EventStore) UserFilterCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.userFilters)
+}
+
+func (s *EventStore) UserFilterDescriptions() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	descriptions := make([]string, len(s.userFilters))
+	for i := range s.userFilters {
+		descriptions[i] = s.userFilters[i].description
+	}
+	return descriptions
 }
 
 func (s *EventStore) Events() []components.EventItem {
@@ -261,6 +322,11 @@ func (s *EventStore) visibleLocked(event events.Event) bool {
 	}
 	if s.sources != nil {
 		if _, ok := s.sources[event.Envelope().Provenance.CaptureSource]; !ok {
+			return false
+		}
+	}
+	for _, filter := range s.userFilters {
+		if !filter.predicate(event) {
 			return false
 		}
 	}

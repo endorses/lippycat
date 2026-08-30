@@ -119,7 +119,7 @@ func (b *Broadcaster) ExcludeFromFlowControl() {}
 func (b *Broadcaster) LockDropBoundary()   { b.mu.RLock() }
 func (b *Broadcaster) UnlockDropBoundary() { b.mu.RUnlock() }
 
-func (b *Broadcaster) HandleDroppedEventLocked(event events.Event) {
+func (b *Broadcaster) HandleDroppedEventLocked(event events.Event, admittedAt time.Time) {
 	if event == nil || event.Kind() == events.KindFileContent {
 		return
 	}
@@ -127,6 +127,9 @@ func (b *Broadcaster) HandleDroppedEventLocked(event events.Event) {
 		return
 	}
 	for _, subscriber := range b.subscribers {
+		if !admittedAt.IsZero() && admittedAt.Before(subscriber.admittedAt) {
+			continue
+		}
 		if subscriber.matchesProjected(event) {
 			subscriber.recordDrop(event.Envelope(), LossCauseDispatcherOverflow)
 			b.dropped.Add(1)
@@ -136,6 +139,16 @@ func (b *Broadcaster) HandleDroppedEventLocked(event events.Event) {
 
 // HandleEvent implements events.Sink. Fanout never waits for queue space.
 func (b *Broadcaster) HandleEvent(_ context.Context, event events.Event) error {
+	return b.handleEvent(event, time.Time{})
+}
+
+// HandleEventAdmitted preserves the dispatcher's admission time so a newly
+// registered live-only subscriber cannot receive older queued events.
+func (b *Broadcaster) HandleEventAdmitted(_ context.Context, event events.Event, admittedAt time.Time) error {
+	return b.handleEvent(event, admittedAt)
+}
+
+func (b *Broadcaster) handleEvent(event events.Event, admittedAt time.Time) error {
 	if event == nil {
 		return nil
 	}
@@ -151,6 +164,9 @@ func (b *Broadcaster) HandleEvent(_ context.Context, event events.Event) error {
 		return ErrClosed
 	}
 	for _, subscriber := range b.subscribers {
+		if !admittedAt.IsZero() && admittedAt.Before(subscriber.admittedAt) {
+			continue
+		}
 		if !subscriber.matches(event) {
 			continue
 		}

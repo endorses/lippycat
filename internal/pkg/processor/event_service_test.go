@@ -239,6 +239,61 @@ func TestEventServiceReportsReconnectGap(t *testing.T) {
 	assert.Equal(t, uint64(2), messages[1].DeliverySequence)
 }
 
+func TestEventServiceBoundsReconnectGapToNegotiatedMessageSize(t *testing.T) {
+	b := broadcast.New()
+	service, err := NewEventService(b, EventSubscriptionPolicy{ProcessorNodeID: "processor-a"})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := &eventSubscriptionTestStream{ctx: ctx, notify: make(chan struct{}, 4)}
+	done := make(chan error, 1)
+	go func() {
+		done <- service.SubscribeEvents(&eventsv1.EventSubscribeRequest{
+			SubscriptionVersion:      1,
+			PreviousStreamId:         strings.Repeat("s", 2048),
+			PreviousDeliverySequence: 42,
+			MaxMessageBytes:          1024,
+		}, stream)
+	}()
+	waitEventMessage(t, stream.notify)
+	waitEventMessage(t, stream.notify)
+	cancel()
+	require.NoError(t, <-done)
+
+	messages := stream.snapshot()
+	require.Len(t, messages, 2)
+	assert.LessOrEqual(t, proto.Size(messages[1]), 1024)
+	control := messages[1].GetControl()
+	require.NotNil(t, control)
+	assert.Equal(t, eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP, control.Kind)
+	require.Len(t, control.Losses, 1)
+	assert.Equal(t, eventsv1.LossKind_LOSS_KIND_RECONNECT, control.Losses[0].Kind)
+	assert.Empty(t, control.PreviousStreamId)
+	assert.Equal(t, uint64(42), control.PreviousDeliverySequence)
+}
+
+func TestEventServiceSharesSubscriberLimit(t *testing.T) {
+	b := broadcast.New()
+	limit := newSubscriptionLimiter(1)
+	service, err := NewEventService(b, EventSubscriptionPolicy{subscriptionLimit: limit})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := &eventSubscriptionTestStream{ctx: ctx, notify: make(chan struct{}, 2)}
+	done := make(chan error, 1)
+	go func() {
+		done <- service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1}, stream)
+	}()
+	waitEventMessage(t, stream.notify)
+
+	second := &eventSubscriptionTestStream{ctx: context.Background(), notify: make(chan struct{}, 1)}
+	err = service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1}, second)
+	assert.Equal(t, codes.ResourceExhausted, status.Code(err))
+
+	cancel()
+	require.NoError(t, <-done)
+	assert.True(t, limit.acquire())
+	limit.release()
+}
+
 func TestSubscriberLossesDistinguishDispatcherOverflow(t *testing.T) {
 	wire := subscriberLosses([]broadcast.Loss{{
 		SourceNodeID: "node-a", ProducerSessionID: "session-a",

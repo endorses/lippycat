@@ -44,23 +44,31 @@ type QueueMetric struct {
 
 type flowControlExcludedSink interface{ ExcludeFromFlowControl() }
 
+// admissionAwareSink can reject work that predates a live-only consumer's
+// admission boundary even when the event waited in a dispatcher sink queue.
+type admissionAwareSink interface {
+	HandleEventAdmitted(context.Context, Event, time.Time) error
+}
+
 // dropObserver is implemented by best-effort sinks that can surface a dropped
 // dispatcher-to-sink item to their own consumers. It must not block.
 type dropObserver interface {
 	LockDropBoundary()
-	HandleDroppedEventLocked(Event)
+	HandleDroppedEventLocked(Event, time.Time)
 	UnlockDropBoundary()
 }
 
 type Stats struct{ Enqueued, Dispatched, Dropped, SinkDropped, SinkErrors uint64 }
 
 type dispatchItem struct {
-	event   Event
-	barrier chan struct{}
+	event      Event
+	admittedAt time.Time
+	barrier    chan struct{}
 }
 type sinkItem struct {
-	event   Event
-	barrier chan struct{}
+	event      Event
+	admittedAt time.Time
+	barrier    chan struct{}
 }
 type registration struct {
 	sink  Sink
@@ -162,7 +170,7 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 			return false
 		}
 	}
-	item := dispatchItem{event: ev}
+	item := dispatchItem{event: ev, admittedAt: time.Now()}
 	observers := d.lockDropObservers(ev)
 	defer unlockDropObservers(observers)
 	select {
@@ -171,7 +179,7 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 		return true
 	default:
 		d.dropped.Add(1)
-		notifyDropObserversLocked(observers, ev)
+		notifyDropObserversLocked(observers, ev, item.admittedAt)
 		return false
 	}
 }
@@ -196,9 +204,9 @@ func (d *Dispatcher) lockDropObservers(ev Event) []dropObserver {
 	return observers
 }
 
-func notifyDropObserversLocked(observers []dropObserver, ev Event) {
+func notifyDropObserversLocked(observers []dropObserver, ev Event, admittedAt time.Time) {
 	for _, observer := range observers {
-		observer.HandleDroppedEventLocked(ev)
+		observer.HandleDroppedEventLocked(ev, admittedAt)
 	}
 }
 
@@ -244,12 +252,12 @@ func (d *Dispatcher) runDispatcher() {
 					observer.LockDropBoundary()
 				}
 				select {
-				case reg.queue <- sinkItem{event: ev}:
+				case reg.queue <- sinkItem{event: ev, admittedAt: item.admittedAt}:
 					d.dispatched.Add(1)
 				default:
 					d.sinkDropped.Add(1)
 					if observesDrops {
-						observer.HandleDroppedEventLocked(ev)
+						observer.HandleDroppedEventLocked(ev, item.admittedAt)
 					}
 				}
 				if observesDrops {
@@ -273,7 +281,13 @@ func (d *Dispatcher) runSink(reg *registration) {
 			item.barrier <- struct{}{}
 			continue
 		}
-		if err := reg.sink.HandleEvent(d.ctx, item.event); err != nil {
+		var err error
+		if sink, ok := reg.sink.(admissionAwareSink); ok {
+			err = sink.HandleEventAdmitted(d.ctx, item.event, item.admittedAt)
+		} else {
+			err = reg.sink.HandleEvent(d.ctx, item.event)
+		}
+		if err != nil {
 			d.sinkErrors.Add(1)
 			d.cfg.Logger.Error("normalized event sink failed", "kind", item.event.Kind(), "error", err)
 		}

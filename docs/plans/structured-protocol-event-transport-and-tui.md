@@ -144,6 +144,11 @@ arrive out of event-sequence order from separate queue-overflow boundaries.
 A final live-boundary audit timestamped dispatcher drop decisions and excludes
 notifications for drops that predate subscriber admission, preventing a new
 live-only stream from reporting historical overflow during a registration race.
+A renewed end-to-end audit propagated dispatcher admission time through
+successful sink delivery as well as drop reporting, preventing queued
+pre-admission events from leaking into a live-only stream. It also bounded
+reconnect-gap metadata to the negotiated message size and made packet and event
+subscriptions share the configured maximum-subscriber limit.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

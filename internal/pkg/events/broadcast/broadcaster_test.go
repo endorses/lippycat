@@ -39,7 +39,7 @@ func TestBroadcasterSortsAndMergesOutOfOrderDispatcherLosses(t *testing.T) {
 
 	for _, sequence := range []uint64{3, 2, 5, 4, 2} {
 		b.LockDropBoundary()
-		b.HandleDroppedEventLocked(dnsEvent("node-a", sequence))
+		b.HandleDroppedEventLocked(dnsEvent("node-a", sequence), time.Time{})
 		b.UnlockDropBoundary()
 	}
 
@@ -68,7 +68,7 @@ func TestBroadcasterDropBoundarySerializesSubscriberAdmission(t *testing.T) {
 	}()
 	<-started
 
-	b.HandleDroppedEventLocked(dnsEvent("node-a", 1))
+	b.HandleDroppedEventLocked(dnsEvent("node-a", 1), time.Time{})
 	b.UnlockDropBoundary()
 
 	got := <-result
@@ -138,7 +138,7 @@ func TestBroadcasterReportsDispatcherDeliveryDrops(t *testing.T) {
 	require.NoError(t, err)
 
 	b.LockDropBoundary()
-	b.HandleDroppedEventLocked(dnsEvent("node-a", 7))
+	b.HandleDroppedEventLocked(dnsEvent("node-a", 7), time.Time{})
 	b.UnlockDropBoundary()
 
 	assert.Equal(t, []Loss{{SourceNodeID: "node-a", Cause: LossCauseDispatcherOverflow, Count: 1, Ranges: []SequenceRange{{First: 7, Last: 7}}}}, matching.ConsumeLosses())
@@ -156,13 +156,13 @@ func TestBroadcasterBoundsLossRangesAndSeparatesProducerSessions(t *testing.T) {
 		event := dnsEvent("node-a", i*2+1)
 		event.EventEnvelope.ProducerSessionID = "session-a"
 		b.LockDropBoundary()
-		b.HandleDroppedEventLocked(event)
+		b.HandleDroppedEventLocked(event, time.Time{})
 		b.UnlockDropBoundary()
 	}
 	event := dnsEvent("node-a", 1)
 	event.EventEnvelope.ProducerSessionID = "session-b"
 	b.LockDropBoundary()
-	b.HandleDroppedEventLocked(event)
+	b.HandleDroppedEventLocked(event, time.Time{})
 	b.UnlockDropBoundary()
 
 	losses := sub.ConsumeLosses()
@@ -190,7 +190,7 @@ func TestBroadcasterBoundsDetailedLossRecords(t *testing.T) {
 		event := dnsEvent("node-a", 1)
 		event.EventEnvelope.ProducerSessionID = fmt.Sprintf("session-%d", i)
 		b.LockDropBoundary()
-		b.HandleDroppedEventLocked(event)
+		b.HandleDroppedEventLocked(event, time.Time{})
 		b.UnlockDropBoundary()
 	}
 
@@ -259,6 +259,28 @@ func TestSubscriptionRecordsAdmissionTime(t *testing.T) {
 	after := time.Now().UTC()
 	assert.False(t, sub.AdmittedAt().Before(before))
 	assert.False(t, sub.AdmittedAt().After(after))
+}
+
+func TestAdmissionAwareDeliveryExcludesQueuedPreAdmissionEvent(t *testing.T) {
+	b := New()
+	admittedBeforeSubscription := time.Now().UTC()
+	sub, err := b.Subscribe(Options{QueueSize: 1})
+	require.NoError(t, err)
+
+	require.NoError(t, b.HandleEventAdmitted(context.Background(), dnsEvent("node", 1), admittedBeforeSubscription))
+	select {
+	case <-sub.Events():
+		t.Fatal("received event admitted before live subscription boundary")
+	default:
+	}
+
+	require.NoError(t, b.HandleEventAdmitted(context.Background(), dnsEvent("node", 2), time.Now().UTC()))
+	select {
+	case event := <-sub.Events():
+		assert.Equal(t, uint64(2), event.Envelope().EventSequence)
+	case <-time.After(time.Second):
+		t.Fatal("did not receive event admitted after live subscription boundary")
+	}
 }
 
 func dnsEvent(node string, sequence uint64) events.DNSEvent {

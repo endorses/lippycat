@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sync"
 	"time"
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
@@ -38,6 +39,37 @@ type EventSubscriptionPolicy struct {
 	MaxMessageBytes      uint32
 	AllowSensitiveFields bool
 	AllowFileMetadata    bool
+	subscriptionLimit    *subscriptionLimiter
+}
+
+type subscriptionLimiter struct {
+	mu     sync.Mutex
+	active int
+	max    int
+}
+
+func newSubscriptionLimiter(max int) *subscriptionLimiter { return &subscriptionLimiter{max: max} }
+
+func (l *subscriptionLimiter) acquire() bool {
+	if l == nil {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.max > 0 && l.active >= l.max {
+		return false
+	}
+	l.active++
+	return true
+}
+
+func (l *subscriptionLimiter) release() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.active--
+	l.mu.Unlock()
 }
 
 // EventService serves the live-only v1 normalized event subscription API.
@@ -103,6 +135,10 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 	if maxMessageBytes < minimumEventMaxMessageBytes {
 		return status.Errorf(codes.InvalidArgument, "max_message_bytes must be at least %d", minimumEventMaxMessageBytes)
 	}
+	if !s.policy.subscriptionLimit.acquire() {
+		return status.Error(codes.ResourceExhausted, "maximum number of subscribers reached")
+	}
+	defer s.policy.subscriptionLimit.release()
 
 	project := safeEventProjector(req.IncludeSensitiveFields, req.IncludeFileMetadata)
 	sub, err := s.broadcaster.Subscribe(broadcast.Options{
@@ -136,6 +172,12 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 			Losses:                   []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_RECONNECT, SourceNodeId: s.policy.ProcessorNodeID}},
 			PreviousStreamId:         req.PreviousStreamId,
 			PreviousDeliverySequence: req.PreviousDeliverySequence,
+		}
+		// The prior stream ID is diagnostic metadata. Keep the mandatory,
+		// explicit reconnect loss report even when that metadata cannot fit the
+		// subscriber's negotiated receive limit.
+		if proto.Size(controlMessage(deliverySequence, gap)) > int(maxMessageBytes) {
+			gap.PreviousStreamId = ""
 		}
 		if err := sendEventMessage(stream, controlMessage(deliverySequence, gap), maxMessageBytes); err != nil {
 			return err

@@ -181,7 +181,7 @@ type droppedEventTestSink struct {
 
 func (s *droppedEventTestSink) LockDropBoundary()   {}
 func (s *droppedEventTestSink) UnlockDropBoundary() {}
-func (s *droppedEventTestSink) HandleDroppedEventLocked(event Event) {
+func (s *droppedEventTestSink) HandleDroppedEventLocked(event Event, _ time.Time) {
 	s.dropped.Add(1)
 	s.droppedMu.Lock()
 	s.droppedEvents = append(s.droppedEvents, event)

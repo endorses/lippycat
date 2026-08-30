@@ -214,15 +214,16 @@ type Processor struct {
 	liManager *li.Manager
 
 	// TLS keylog writer for session key storage and file output
-	tlsKeylogWriter  *TLSKeylogWriter
-	eventDispatcher  *events.Dispatcher
-	eventBroadcaster *broadcast.Broadcaster
-	eventService     eventsv1.EventServiceServer
-	flowIdentity     *flowid.Cache
-	connTracker      *conntrack.Tracker
-	connExpireAt     atomic.Int64
-	logSink          *logstream.Sink
-	fileAnalyzer     *fileanalysis.Analyzer
+	tlsKeylogWriter   *TLSKeylogWriter
+	eventDispatcher   *events.Dispatcher
+	eventBroadcaster  *broadcast.Broadcaster
+	eventService      eventsv1.EventServiceServer
+	subscriptionLimit *subscriptionLimiter
+	flowIdentity      *flowid.Cache
+	connTracker       *conntrack.Tracker
+	connExpireAt      atomic.Int64
+	logSink           *logstream.Sink
+	fileAnalyzer      *fileanalysis.Analyzer
 
 	// Control
 	ctx          context.Context
@@ -268,8 +269,9 @@ func New(config Config) (*Processor, error) {
 	if err = p.eventDispatcher.Register(p.eventBroadcaster); err != nil {
 		return nil, fmt.Errorf("register event broadcaster: %w", err)
 	}
+	p.subscriptionLimit = newSubscriptionLimiter(config.MaxSubscribers)
 	p.eventService, err = NewEventService(p.eventBroadcaster, EventSubscriptionPolicy{
-		ProcessorNodeID: config.ProcessorID,
+		ProcessorNodeID: config.ProcessorID, subscriptionLimit: p.subscriptionLimit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize event subscription service: %w", err)

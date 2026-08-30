@@ -1097,6 +1097,11 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 		return status.Errorf(codes.ResourceExhausted,
 			"maximum number of subscribers (%d) reached", p.config.MaxSubscribers)
 	}
+	if !p.subscriptionLimit.acquire() {
+		return status.Errorf(codes.ResourceExhausted,
+			"maximum number of subscribers (%d) reached", p.config.MaxSubscribers)
+	}
+	defer p.subscriptionLimit.release()
 
 	// Compile BPF filter if specified
 	var bpfFilter *BPFFilter

@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Phase 1 complete
+**Status:** Phase 2 complete
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -81,26 +81,35 @@ protobuf fields cannot substitute for a missing typed event payload.
 
 ## Phase 2 — Processor event subscription
 
-- [ ] Add an event broadcaster sink with an independent bounded queue per
+- [x] Add an event broadcaster sink with an independent bounded queue per
       subscriber and counters for subscriber drops.
-- [ ] Register the broadcaster before the processor dispatcher starts and keep
+- [x] Register the broadcaster before the processor dispatcher starts and keep
       normalized event generation active even when file logging is disabled or
       no TUI is connected.
-- [ ] Add a dedicated event service with a server-streaming `SubscribeEvents`
+- [x] Add a dedicated event service with a server-streaming `SubscribeEvents`
       RPC using the Phase 1 messages.
-- [ ] Make subscription version 1 live-only; send a stream ID, live boundary,
+- [x] Make subscription version 1 live-only; send a stream ID, live boundary,
       monotonic delivery sequence, and explicit overflow/reconnect gaps.
-- [ ] Apply server-side authentication, authorization, event-kind/node filters,
+- [x] Apply server-side authentication, authorization, event-kind/node filters,
       sensitive-field projection, and message-size limits.
-- [ ] Exclude `FileContentEvent` and unauthorized optional HTTP, SMTP, and file
+- [x] Exclude `FileContentEvent` and unauthorized optional HTTP, SMTP, and file
       fields before enqueueing subscriber batches.
-- [ ] Register the service in processor and tap builds without changing packet
+- [x] Register the service in processor and tap builds without changing packet
       subscription behavior.
-- [ ] Test multiple subscribers, slow-client isolation, disconnect cleanup,
+- [x] Test multiple subscribers, slow-client isolation, disconnect cleanup,
       authorization, loss reporting, and operation with structured logs off.
 
 **Gate:** A processor event can be streamed, decoded to an equivalent typed
 event, and consumed without affecting packet processing or another sink.
+
+### Phase 2 verification
+
+Verified on 2026-08-30 with protobuf regeneration, focused event-service and
+broadcaster race tests, complete processor and tap build-tag suites, and the
+full `make test` suite. The implementation uses independent bounded subscriber
+queues, reports subscriber overflow and reconnect boundaries explicitly,
+applies authentication and conservative field projection before serialization,
+and keeps normalized event production active without structured log output.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

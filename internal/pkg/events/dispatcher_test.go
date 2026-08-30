@@ -163,6 +163,22 @@ func TestDispatcherExposesPerSinkQueueMetrics(t *testing.T) {
 	require.Equal(t, 3, metrics[0].Capacity())
 	require.Equal(t, "event_sink_0", metrics[1].Name)
 	require.Equal(t, 2, metrics[1].Capacity())
+	require.True(t, metrics[0].FlowControl)
+	require.True(t, metrics[1].FlowControl)
+}
+
+type bestEffortTestSink struct{ testSink }
+
+func (*bestEffortTestSink) ExcludeFromFlowControl() {}
+
+func TestDispatcherExcludesBestEffortSinkQueueFromFlowControl(t *testing.T) {
+	d, err := NewDispatcher(Config{QueueSize: 3, SinkQueueSize: 2})
+	require.NoError(t, err)
+	require.NoError(t, d.Register(&bestEffortTestSink{}))
+	metrics := d.QueueMetrics()
+	require.Len(t, metrics, 2)
+	require.True(t, metrics[0].FlowControl)
+	require.False(t, metrics[1].FlowControl)
 }
 
 func TestDispatcherRejectsUnsupportedDropPolicy(t *testing.T) {

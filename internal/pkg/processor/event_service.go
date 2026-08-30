@@ -92,7 +92,6 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 		return status.Errorf(codes.InvalidArgument, "max_message_bytes must be at least %d", minimumEventMaxMessageBytes)
 	}
 
-	liveBoundary := timestamppb.Now()
 	project := safeEventProjector(req.IncludeSensitiveFields, req.IncludeFileMetadata)
 	sub, err := s.broadcaster.Subscribe(broadcast.Options{
 		QueueSize: s.policy.QueueSize, Kinds: kinds, NodeIDs: req.NodeIds,
@@ -102,6 +101,7 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 		return status.Errorf(codes.Unavailable, "subscribe to processor events: %v", err)
 	}
 	defer sub.Close()
+	liveBoundary := timestamppb.New(sub.AdmittedAt())
 
 	streamID, err := newEventStreamID()
 	if err != nil {
@@ -136,6 +136,14 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 	defer lossTicker.Stop()
 	for {
 		if pending != nil {
+			losses := sub.ConsumeLosses()
+			if len(losses) > 0 {
+				deliverySequence++
+				gap := &eventsv1.EventSubscriptionControl{Kind: eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP, StreamId: streamID, DeliverySequence: deliverySequence, Losses: subscriberLosses(losses)}
+				if err := sendEventMessage(stream, controlMessage(deliverySequence, gap), maxMessageBytes); err != nil {
+					return err
+				}
+			}
 			event := pending
 			pending = nil
 			deliverySequence, batchSequence, pending, err = s.sendEventBatch(stream, sub, event, maxBatchEvents, maxMessageBytes, streamID, deliverySequence, batchSequence)

@@ -134,6 +134,15 @@ func TestSubscribeValidatesQueueSize(t *testing.T) {
 	assert.EqualError(t, err, "subscriber queue size must be positive")
 }
 
+func TestSubscriptionRecordsAdmissionTime(t *testing.T) {
+	before := time.Now().UTC()
+	sub, err := New().Subscribe(Options{QueueSize: 1})
+	require.NoError(t, err)
+	after := time.Now().UTC()
+	assert.False(t, sub.AdmittedAt().Before(before))
+	assert.False(t, sub.AdmittedAt().After(after))
+}
+
 func dnsEvent(node string, sequence uint64) events.DNSEvent {
 	event := events.NewDNSEvent(events.Envelope{NodeID: node, EventSequence: sequence})
 	event.Query = "private.example"

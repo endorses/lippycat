@@ -110,6 +110,10 @@ full `make test` suite. The implementation uses independent bounded subscriber
 queues, reports subscriber overflow and reconnect boundaries explicitly,
 applies authentication and conservative field projection before serialization,
 and keeps normalized event production active without structured log output.
+An independent follow-up audit corrected the admission boundary so it is
+captured atomically with broadcaster registration, ensured sustained
+cross-producer delivery cannot starve overflow-gap reporting, and excluded the
+best-effort broadcaster sink queue from hunter flow-control pressure.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

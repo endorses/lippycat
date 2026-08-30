@@ -37,7 +37,12 @@ type QueueMetric struct {
 	Name     string
 	Depth    func() int
 	Capacity func() int
+	// FlowControl is false for best-effort sinks whose pressure must not slow
+	// packet producers.
+	FlowControl bool
 }
+
+type flowControlExcludedSink interface{ ExcludeFromFlowControl() }
 
 type Stats struct{ Enqueued, Dispatched, Dropped, SinkDropped, SinkErrors uint64 }
 
@@ -301,10 +306,11 @@ func (d *Dispatcher) QueueCapacity() int { return cap(d.queue) }
 func (d *Dispatcher) QueueMetrics() []QueueMetric {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	metrics := []QueueMetric{{Name: "events", Depth: d.QueueDepth, Capacity: d.QueueCapacity}}
+	metrics := []QueueMetric{{Name: "events", Depth: d.QueueDepth, Capacity: d.QueueCapacity, FlowControl: true}}
 	for i, reg := range d.registrations {
 		queue := reg.queue
-		metrics = append(metrics, QueueMetric{Name: fmt.Sprintf("event_sink_%d", i), Depth: func() int { return len(queue) }, Capacity: func() int { return cap(queue) }})
+		_, excluded := reg.sink.(flowControlExcludedSink)
+		metrics = append(metrics, QueueMetric{Name: fmt.Sprintf("event_sink_%d", i), Depth: func() int { return len(queue) }, Capacity: func() int { return cap(queue) }, FlowControl: !excluded})
 	}
 	return metrics
 }

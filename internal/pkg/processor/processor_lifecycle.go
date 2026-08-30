@@ -117,6 +117,9 @@ func (p *Processor) Start(ctx context.Context) error {
 			return fmt.Errorf("start event dispatcher: %w", err)
 		}
 		for _, metric := range p.eventDispatcher.QueueMetrics() {
+			if !metric.FlowControl {
+				continue
+			}
 			p.flowController.SetQueueSource(flow.QueuePressureSource{Name: metric.Name, Depth: metric.Depth, Capacity: metric.Capacity})
 		}
 	}

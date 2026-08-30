@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/events"
 )
@@ -86,10 +87,16 @@ func (b *Broadcaster) Subscribe(opts Options) (*Subscription, error) {
 		processorIDs: stringSet(opts.ProcessorNodeIDs),
 		project:      opts.Project,
 		losses:       make(map[string]*Loss),
+		admittedAt:   time.Now().UTC(),
 	}
 	b.subscribers[s.id] = s
 	return s, nil
 }
+
+// ExcludeFromFlowControl marks this best-effort sink as unsuitable for
+// processor-level backpressure. Subscriber loss is reported on the event
+// stream instead of slowing packet producers.
+func (b *Broadcaster) ExcludeFromFlowControl() {}
 
 // HandleEvent implements events.Sink. Fanout never waits for queue space.
 func (b *Broadcaster) HandleEvent(_ context.Context, event events.Event) error {
@@ -178,9 +185,11 @@ type Subscription struct {
 	projectErrs  atomic.Uint64
 	lossMu       sync.Mutex
 	losses       map[string]*Loss
+	admittedAt   time.Time
 }
 
 func (s *Subscription) Events() <-chan events.Event { return s.events }
+func (s *Subscription) AdmittedAt() time.Time       { return s.admittedAt }
 
 // Close removes the subscription and closes its event channel. It is safe to
 // call concurrently with publication and more than once.

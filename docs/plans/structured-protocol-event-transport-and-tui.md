@@ -141,6 +141,9 @@ back the event dispatcher, broadcaster, listener, and other started resources.
 A subsequent independent audit bounded the reconnect stream identifier before
 subscriber admission and sorted and merged dispatcher-loss ranges that can
 arrive out of event-sequence order from separate queue-overflow boundaries.
+A final live-boundary audit timestamped dispatcher drop decisions and excludes
+notifications for drops that predate subscriber admission, preventing a new
+live-only stream from reporting historical overflow during a registration race.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

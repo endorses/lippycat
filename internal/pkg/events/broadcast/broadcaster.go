@@ -116,12 +116,13 @@ func (b *Broadcaster) ExcludeFromFlowControl() {}
 // HandleDroppedEvent records an event that the dispatcher could not deliver
 // to this broadcaster. Every matching subscriber would otherwise miss the
 // event silently, so preserve it in that subscriber's loss report.
-func (b *Broadcaster) HandleDroppedEvent(event events.Event) {
+func (b *Broadcaster) LockDropBoundary()   { b.mu.RLock() }
+func (b *Broadcaster) UnlockDropBoundary() { b.mu.RUnlock() }
+
+func (b *Broadcaster) HandleDroppedEventLocked(event events.Event) {
 	if event == nil || event.Kind() == events.KindFileContent {
 		return
 	}
-	b.mu.RLock()
-	defer b.mu.RUnlock()
 	if b.closed {
 		return
 	}

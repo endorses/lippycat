@@ -46,7 +46,11 @@ type flowControlExcludedSink interface{ ExcludeFromFlowControl() }
 
 // dropObserver is implemented by best-effort sinks that can surface a dropped
 // dispatcher-to-sink item to their own consumers. It must not block.
-type dropObserver interface{ HandleDroppedEvent(Event) }
+type dropObserver interface {
+	LockDropBoundary()
+	HandleDroppedEventLocked(Event)
+	UnlockDropBoundary()
+}
 
 type Stats struct{ Enqueued, Dispatched, Dropped, SinkDropped, SinkErrors uint64 }
 
@@ -159,13 +163,15 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 		}
 	}
 	item := dispatchItem{event: ev}
+	observers := d.lockDropObservers(ev)
+	defer unlockDropObservers(observers)
 	select {
 	case d.queue <- item:
 		d.enqueued.Add(1)
 		return true
 	default:
 		d.dropped.Add(1)
-		d.notifyDropObservers(ev)
+		notifyDropObserversLocked(observers, ev)
 		return false
 	}
 }
@@ -174,7 +180,8 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 // an event rejected at the dispatcher's admission queue. The event already has
 // delivery identity at this point, so observers can preserve its exact lost
 // sequence. Implementations must not block.
-func (d *Dispatcher) notifyDropObservers(ev Event) {
+func (d *Dispatcher) lockDropObservers(ev Event) []dropObserver {
+	observers := make([]dropObserver, 0, len(d.registrations))
 	for _, reg := range d.registrations {
 		if len(reg.kinds) > 0 {
 			if _, ok := reg.kinds[ev.Kind()]; !ok {
@@ -182,8 +189,22 @@ func (d *Dispatcher) notifyDropObservers(ev Event) {
 			}
 		}
 		if observer, ok := reg.sink.(dropObserver); ok {
-			observer.HandleDroppedEvent(ev)
+			observer.LockDropBoundary()
+			observers = append(observers, observer)
 		}
+	}
+	return observers
+}
+
+func notifyDropObserversLocked(observers []dropObserver, ev Event) {
+	for _, observer := range observers {
+		observer.HandleDroppedEventLocked(ev)
+	}
+}
+
+func unlockDropObservers(observers []dropObserver) {
+	for index := len(observers) - 1; index >= 0; index-- {
+		observers[index].UnlockDropBoundary()
 	}
 }
 
@@ -218,14 +239,21 @@ func (d *Dispatcher) runDispatcher() {
 						continue
 					}
 				}
+				observer, observesDrops := reg.sink.(dropObserver)
+				if observesDrops {
+					observer.LockDropBoundary()
+				}
 				select {
 				case reg.queue <- sinkItem{event: ev}:
 					d.dispatched.Add(1)
 				default:
 					d.sinkDropped.Add(1)
-					if observer, ok := reg.sink.(dropObserver); ok {
-						observer.HandleDroppedEvent(ev)
+					if observesDrops {
+						observer.HandleDroppedEventLocked(ev)
 					}
+				}
+				if observesDrops {
+					observer.UnlockDropBoundary()
 				}
 			}
 		case <-ticker.C:

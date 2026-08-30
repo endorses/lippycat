@@ -38,7 +38,9 @@ func TestBroadcasterSortsAndMergesOutOfOrderDispatcherLosses(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, sequence := range []uint64{3, 2, 5, 4, 2} {
-		b.HandleDroppedEvent(dnsEvent("node-a", sequence))
+		b.LockDropBoundary()
+		b.HandleDroppedEventLocked(dnsEvent("node-a", sequence))
+		b.UnlockDropBoundary()
 	}
 
 	assert.Equal(t, []Loss{{
@@ -47,6 +49,31 @@ func TestBroadcasterSortsAndMergesOutOfOrderDispatcherLosses(t *testing.T) {
 		Count:        5,
 		Ranges:       []SequenceRange{{First: 2, Last: 5}},
 	}}, sub.ConsumeLosses())
+}
+
+func TestBroadcasterDropBoundarySerializesSubscriberAdmission(t *testing.T) {
+	b := New()
+	b.LockDropBoundary()
+
+	started := make(chan struct{})
+	type subscribeResult struct {
+		sub *Subscription
+		err error
+	}
+	result := make(chan subscribeResult, 1)
+	go func() {
+		close(started)
+		sub, err := b.Subscribe(Options{QueueSize: 1})
+		result <- subscribeResult{sub: sub, err: err}
+	}()
+	<-started
+
+	b.HandleDroppedEventLocked(dnsEvent("node-a", 1))
+	b.UnlockDropBoundary()
+
+	got := <-result
+	require.NoError(t, got.err)
+	assert.Empty(t, got.sub.ConsumeLosses())
 }
 
 func TestBroadcasterFiltersAndProjectsBeforeEnqueue(t *testing.T) {
@@ -110,7 +137,9 @@ func TestBroadcasterReportsDispatcherDeliveryDrops(t *testing.T) {
 	filtered, err := b.Subscribe(Options{QueueSize: 1, Kinds: []events.Kind{events.KindHTTP}})
 	require.NoError(t, err)
 
-	b.HandleDroppedEvent(dnsEvent("node-a", 7))
+	b.LockDropBoundary()
+	b.HandleDroppedEventLocked(dnsEvent("node-a", 7))
+	b.UnlockDropBoundary()
 
 	assert.Equal(t, []Loss{{SourceNodeID: "node-a", Cause: LossCauseDispatcherOverflow, Count: 1, Ranges: []SequenceRange{{First: 7, Last: 7}}}}, matching.ConsumeLosses())
 	assert.Empty(t, filtered.ConsumeLosses())
@@ -126,11 +155,15 @@ func TestBroadcasterBoundsLossRangesAndSeparatesProducerSessions(t *testing.T) {
 	for i := uint64(0); i < maxLossSequenceRanges+20; i++ {
 		event := dnsEvent("node-a", i*2+1)
 		event.EventEnvelope.ProducerSessionID = "session-a"
-		b.HandleDroppedEvent(event)
+		b.LockDropBoundary()
+		b.HandleDroppedEventLocked(event)
+		b.UnlockDropBoundary()
 	}
 	event := dnsEvent("node-a", 1)
 	event.EventEnvelope.ProducerSessionID = "session-b"
-	b.HandleDroppedEvent(event)
+	b.LockDropBoundary()
+	b.HandleDroppedEventLocked(event)
+	b.UnlockDropBoundary()
 
 	losses := sub.ConsumeLosses()
 	require.Len(t, losses, 2)
@@ -156,7 +189,9 @@ func TestBroadcasterBoundsDetailedLossRecords(t *testing.T) {
 	for i := 0; i < maxDetailedLossRecords+20; i++ {
 		event := dnsEvent("node-a", 1)
 		event.EventEnvelope.ProducerSessionID = fmt.Sprintf("session-%d", i)
-		b.HandleDroppedEvent(event)
+		b.LockDropBoundary()
+		b.HandleDroppedEventLocked(event)
+		b.UnlockDropBoundary()
 	}
 
 	losses := sub.ConsumeLosses()

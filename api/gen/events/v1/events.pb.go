@@ -2243,8 +2243,12 @@ type EventSubscriptionControl struct {
 	DeliverySequence    uint64                  `protobuf:"varint,4,opt,name=delivery_sequence,json=deliverySequence,proto3" json:"delivery_sequence,omitempty"`
 	Losses              []*EventLoss            `protobuf:"bytes,5,rep,name=losses,proto3" json:"losses,omitempty"`
 	SupportedEventKinds []EventKind             `protobuf:"varint,6,rep,packed,name=supported_event_kinds,json=supportedEventKinds,proto3,enum=lippycat.events.v1.EventKind" json:"supported_event_kinds,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Populated on a live-only reconnect gap to identify the cursor which could
+	// not be replayed by subscription version 1.
+	PreviousStreamId         string `protobuf:"bytes,7,opt,name=previous_stream_id,json=previousStreamId,proto3" json:"previous_stream_id,omitempty"`
+	PreviousDeliverySequence uint64 `protobuf:"varint,8,opt,name=previous_delivery_sequence,json=previousDeliverySequence,proto3" json:"previous_delivery_sequence,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *EventSubscriptionControl) Reset() {
@@ -2317,6 +2321,20 @@ func (x *EventSubscriptionControl) GetSupportedEventKinds() []EventKind {
 		return x.SupportedEventKinds
 	}
 	return nil
+}
+
+func (x *EventSubscriptionControl) GetPreviousStreamId() string {
+	if x != nil {
+		return x.PreviousStreamId
+	}
+	return ""
+}
+
+func (x *EventSubscriptionControl) GetPreviousDeliverySequence() uint64 {
+	if x != nil {
+		return x.PreviousDeliverySequence
+	}
+	return 0
 }
 
 type EventSubscriptionMessage struct {
@@ -2627,14 +2645,16 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x11max_message_bytes\x18\b \x01(\rR\x0fmaxMessageBytes\x12,\n" +
 	"\x12previous_stream_id\x18\t \x01(\tR\x10previousStreamId\x12<\n" +
 	"\x1aprevious_delivery_sequence\x18\n" +
-	" \x01(\x04R\x18previousDeliverySequence\"\xf0\x02\n" +
+	" \x01(\x04R\x18previousDeliverySequence\"\xdc\x03\n" +
 	"\x18EventSubscriptionControl\x12?\n" +
 	"\x04kind\x18\x01 \x01(\x0e2+.lippycat.events.v1.SubscriptionControlKindR\x04kind\x12\x1b\n" +
 	"\tstream_id\x18\x02 \x01(\tR\bstreamId\x12?\n" +
 	"\rlive_boundary\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\fliveBoundary\x12+\n" +
 	"\x11delivery_sequence\x18\x04 \x01(\x04R\x10deliverySequence\x125\n" +
 	"\x06losses\x18\x05 \x03(\v2\x1d.lippycat.events.v1.EventLossR\x06losses\x12Q\n" +
-	"\x15supported_event_kinds\x18\x06 \x03(\x0e2\x1d.lippycat.events.v1.EventKindR\x13supportedEventKinds\"\xdc\x01\n" +
+	"\x15supported_event_kinds\x18\x06 \x03(\x0e2\x1d.lippycat.events.v1.EventKindR\x13supportedEventKinds\x12,\n" +
+	"\x12previous_stream_id\x18\a \x01(\tR\x10previousStreamId\x12<\n" +
+	"\x1aprevious_delivery_sequence\x18\b \x01(\x04R\x18previousDeliverySequence\"\xdc\x01\n" +
 	"\x18EventSubscriptionMessage\x12+\n" +
 	"\x11delivery_sequence\x18\x01 \x01(\x04R\x10deliverySequence\x12H\n" +
 	"\acontrol\x18\x02 \x01(\v2,.lippycat.events.v1.EventSubscriptionControlH\x00R\acontrol\x12>\n" +

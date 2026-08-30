@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"time"
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
@@ -120,7 +121,9 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 		gap := &eventsv1.EventSubscriptionControl{
 			Kind:     eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP,
 			StreamId: streamID, DeliverySequence: deliverySequence,
-			Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_RECONNECT, SourceNodeId: s.policy.ProcessorNodeID}},
+			Losses:                   []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_RECONNECT, SourceNodeId: s.policy.ProcessorNodeID}},
+			PreviousStreamId:         req.PreviousStreamId,
+			PreviousDeliverySequence: req.PreviousDeliverySequence,
 		}
 		if err := sendEventMessage(stream, controlMessage(deliverySequence, gap), maxMessageBytes); err != nil {
 			return err
@@ -178,6 +181,16 @@ drain:
 			}
 			firstEnvelope, nextEnvelope := first.Envelope(), next.Envelope()
 			if nextEnvelope.NodeID != firstEnvelope.NodeID || nextEnvelope.ProducerSessionID != firstEnvelope.ProducerSessionID {
+				pending = next
+				break drain
+			}
+			candidate := append(append([]events.Event(nil), batchEvents...), next)
+			wire, err := protoadapter.ToProtoBatch(firstEnvelope.NodeID, firstEnvelope.ProducerSessionID, batchSequence+1, candidate, nil, 1)
+			if err != nil {
+				return deliverySequence, batchSequence, pending, status.Errorf(codes.Internal, "encode subscribed event batch: %v", err)
+			}
+			candidateMessage := &eventsv1.EventSubscriptionMessage{DeliverySequence: deliverySequence + 1, Message: &eventsv1.EventSubscriptionMessage_Batch{Batch: wire}}
+			if proto.Size(candidateMessage) > int(maxMessageBytes) {
 				pending = next
 				break drain
 			}
@@ -287,18 +300,24 @@ func safeEventProjector(includeSensitiveFields, includeFileMetadata bool) broadc
 		case events.HTTPEvent:
 			value.Headers, value.Username = nil, ""
 			value.RequestFilenames, value.ResponseFilenames = nil, nil
+			value.URI, value.Referrer, value.Origin = "", "", ""
 			return value, true, nil
 		case *events.HTTPEvent:
 			copy := *value
 			copy.Headers, copy.Username = nil, ""
 			copy.RequestFilenames, copy.ResponseFilenames = nil, nil
+			copy.URI, copy.Referrer, copy.Origin = "", "", ""
 			return copy, true, nil
 		case events.SMTPEvent:
-			value.Subject, value.Received = "", nil
+			value.MailFrom, value.Recipients, value.From, value.To, value.CC = "", nil, "", nil, nil
+			value.ReplyTo, value.MessageID, value.InReplyTo, value.Subject = "", "", "", ""
+			value.OriginatingIP, value.Received, value.Path = netip.Addr{}, nil, nil
 			return value, true, nil
 		case *events.SMTPEvent:
 			copy := *value
-			copy.Subject, copy.Received = "", nil
+			copy.MailFrom, copy.Recipients, copy.From, copy.To, copy.CC = "", nil, "", nil, nil
+			copy.ReplyTo, copy.MessageID, copy.InReplyTo, copy.Subject = "", "", "", ""
+			copy.OriginatingIP, copy.Received, copy.Path = netip.Addr{}, nil, nil
 			return copy, true, nil
 		case events.FileMetadataEvent:
 			value.Filename, value.ExtractedPath = "", ""

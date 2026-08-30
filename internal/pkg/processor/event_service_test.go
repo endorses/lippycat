@@ -91,12 +91,15 @@ func TestEventServiceStreamsLiveFilteredProjectedEvents(t *testing.T) {
 	require.Len(t, messages[1].GetBatch().Events, 1)
 	wireHTTP := messages[1].GetBatch().Events[0].GetHttp()
 	assert.Equal(t, "GET", wireHTTP.Method)
+	assert.Empty(t, wireHTTP.Uri)
 	assert.Empty(t, wireHTTP.Username)
 	assert.Empty(t, wireHTTP.Headers)
 	decoded, omission, err := protoadapter.FromProto(messages[1].GetBatch().Events[0])
 	require.NoError(t, err)
 	assert.Nil(t, omission)
 	assert.Equal(t, httpEvent.Envelope(), decoded.Envelope())
+	assert.Equal(t, "/private", httpEvent.URI)
+	assert.Equal(t, "alice", httpEvent.Username)
 	assert.Equal(t, 0, b.Stats().Subscribers)
 }
 
@@ -135,13 +138,13 @@ func TestEventServiceReportsOverflowWithoutLaterEvent(t *testing.T) {
 
 func TestEventServiceEnforcesEncodedMessageSize(t *testing.T) {
 	b := broadcast.New()
-	service, err := NewEventService(b, EventSubscriptionPolicy{MaxMessageBytes: 4096})
+	service, err := NewEventService(b, EventSubscriptionPolicy{MaxMessageBytes: 4096, AllowSensitiveFields: true})
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := &eventSubscriptionTestStream{ctx: ctx, notify: make(chan struct{}, 4)}
 	done := make(chan error, 1)
 	go func() {
-		done <- service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, MaxMessageBytes: 1024}, stream)
+		done <- service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, MaxMessageBytes: 1024, IncludeSensitiveFields: true}, stream)
 	}()
 	waitEventMessage(t, stream.notify)
 	event := events.NewHTTPEvent(testEventEnvelope("node-a", 1))
@@ -176,6 +179,8 @@ func TestEventServiceReportsReconnectGap(t *testing.T) {
 	assert.Equal(t, eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP, messages[1].GetControl().Kind)
 	require.Len(t, messages[1].GetControl().Losses, 1)
 	assert.Equal(t, eventsv1.LossKind_LOSS_KIND_RECONNECT, messages[1].GetControl().Losses[0].Kind)
+	assert.Equal(t, "old", messages[1].GetControl().PreviousStreamId)
+	assert.Equal(t, uint64(42), messages[1].GetControl().PreviousDeliverySequence)
 	assert.Equal(t, uint64(2), messages[1].DeliverySequence)
 }
 

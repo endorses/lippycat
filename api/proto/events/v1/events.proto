@@ -285,6 +285,10 @@ message EventSubscriptionControl {
   uint64 delivery_sequence = 4;
   repeated EventLoss losses = 5;
   repeated EventKind supported_event_kinds = 6;
+  // Populated on a live-only reconnect gap to identify the cursor which could
+  // not be replayed by subscription version 1.
+  string previous_stream_id = 7;
+  uint64 previous_delivery_sequence = 8;
 }
 
 message EventSubscriptionMessage {

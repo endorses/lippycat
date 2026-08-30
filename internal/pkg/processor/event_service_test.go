@@ -241,7 +241,7 @@ func TestEventServiceReportsReconnectGap(t *testing.T) {
 
 func TestEventServiceBoundsReconnectGapToNegotiatedMessageSize(t *testing.T) {
 	b := broadcast.New()
-	service, err := NewEventService(b, EventSubscriptionPolicy{ProcessorNodeID: "processor-a"})
+	service, err := NewEventService(b, EventSubscriptionPolicy{ProcessorNodeID: strings.Repeat("p", 2048)})
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := &eventSubscriptionTestStream{ctx: ctx, notify: make(chan struct{}, 4)}
@@ -267,6 +267,7 @@ func TestEventServiceBoundsReconnectGapToNegotiatedMessageSize(t *testing.T) {
 	assert.Equal(t, eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP, control.Kind)
 	require.Len(t, control.Losses, 1)
 	assert.Equal(t, eventsv1.LossKind_LOSS_KIND_RECONNECT, control.Losses[0].Kind)
+	assert.Empty(t, control.Losses[0].SourceNodeId)
 	assert.Empty(t, control.PreviousStreamId)
 	assert.Equal(t, uint64(42), control.PreviousDeliverySequence)
 }

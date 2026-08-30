@@ -328,7 +328,7 @@ func (s *Subscription) recordDrop(env events.Envelope, cause LossCause) {
 		}
 	}
 	if loss == nil {
-		loss = &Loss{SourceNodeID: env.NodeID, ProducerSessionID: env.ProducerSessionID, Cause: cause}
+		loss = &Loss{SourceNodeID: key.sourceNodeID, ProducerSessionID: key.producerSessionID, Cause: cause}
 		s.losses[key] = loss
 	}
 	loss.Count++

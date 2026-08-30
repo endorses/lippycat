@@ -179,6 +179,9 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 		if proto.Size(controlMessage(deliverySequence, gap)) > int(maxMessageBytes) {
 			gap.PreviousStreamId = ""
 		}
+		if proto.Size(controlMessage(deliverySequence, gap)) > int(maxMessageBytes) {
+			gap.Losses[0].SourceNodeId = ""
+		}
 		if err := sendEventMessage(stream, controlMessage(deliverySequence, gap), maxMessageBytes); err != nil {
 			return err
 		}

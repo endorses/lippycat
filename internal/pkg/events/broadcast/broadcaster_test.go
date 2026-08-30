@@ -197,10 +197,18 @@ func TestBroadcasterBoundsDetailedLossRecords(t *testing.T) {
 	losses := sub.ConsumeLosses()
 	assert.LessOrEqual(t, len(losses), maxDetailedLossRecords+1)
 	var count uint64
+	var catchAll *Loss
 	for _, loss := range losses {
 		count += loss.Count
+		if loss.SourceNodeID == "" && loss.ProducerSessionID == "" {
+			loss := loss
+			catchAll = &loss
+		}
 	}
 	assert.Equal(t, uint64(maxDetailedLossRecords+20), count)
+	require.NotNil(t, catchAll)
+	assert.Equal(t, uint64(20), catchAll.Count)
+	assert.Empty(t, catchAll.Ranges)
 }
 
 func TestSubscriptionCloseCleansUp(t *testing.T) {

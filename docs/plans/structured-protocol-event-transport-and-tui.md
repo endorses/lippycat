@@ -158,6 +158,10 @@ CLI authorization reliably takes precedence over configured default-deny values.
 A final processor-provenance audit made the `processor_node_ids` subscription
 selector reachable for real processor and tap events by recording the effective
 handling processor ID in every locally produced event envelope.
+A renewed independent audit corrected two bounded-loss edge cases: catch-all
+loss records no longer attribute losses from multiple producer sessions to the
+first overflow producer, and reconnect GAP controls omit an oversized processor
+identity when necessary to honor the subscriber's negotiated message limit.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

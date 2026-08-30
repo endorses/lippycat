@@ -12,6 +12,7 @@ import (
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -59,7 +60,11 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 		return DecodedEvent{}, err
 	}
 	if in.Payload == nil {
-		if len(in.ProtoReflect().GetUnknown()) != 0 {
+		unknownPayload, err := hasUnknownMessageField(in.ProtoReflect().GetUnknown())
+		if err != nil {
+			return DecodedEvent{}, fmt.Errorf("decode protocol event: malformed unknown field: %w", err)
+		}
+		if unknownPayload {
 			return DecodedEvent{Wire: wire, Omission: &CompatibilityOmission{Reason: OmissionUnsupportedKind}}, nil
 		}
 		return DecodedEvent{}, errors.New("decode protocol event: missing payload")
@@ -191,6 +196,24 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 		return DecodedEvent{}, err
 	}
 	return DecodedEvent{Event: ev, Wire: wire}, nil
+}
+
+// hasUnknownMessageField reports whether unknown wire data can represent a
+// future typed oneof alternative. Protobuf message fields are always
+// length-delimited; scalar unknown fields cannot stand in for an event payload.
+func hasUnknownMessageField(raw protoreflect.RawFields) (bool, error) {
+	found := false
+	for len(raw) > 0 {
+		_, wireType, size := protowire.ConsumeField(raw)
+		if size < 0 {
+			return false, protowire.ParseError(size)
+		}
+		if wireType == protowire.BytesType {
+			found = true
+		}
+		raw = raw[size:]
+	}
+	return found, nil
 }
 
 func FromProto(in *eventsv1.ProtocolEvent) (events.Event, *CompatibilityOmission, error) {

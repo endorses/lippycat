@@ -76,6 +76,8 @@ across loss records.
 A final replay audit made connection expiry, shutdown, and equal-age eviction
 ordering deterministic so offline event IDs remain stable, and rejected valid
 protobuf durations that cannot be represented by Go without saturation.
+This assessment also tightened unsupported-kind detection so scalar unknown
+protobuf fields cannot substitute for a missing typed event payload.
 
 ## Phase 2 — Processor event subscription
 

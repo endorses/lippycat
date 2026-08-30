@@ -130,6 +130,31 @@ func TestUnknownPayloadIsCompatibilityOmissionAndPreserved(t *testing.T) {
 	require.Equal(t, raw, []byte(preserved.ProtoReflect().GetUnknown()))
 }
 
+func TestScalarUnknownFieldDoesNotSubstituteForMissingPayload(t *testing.T) {
+	raw := protowire.AppendTag(nil, 99, protowire.VarintType)
+	raw = protowire.AppendVarint(raw, 1)
+	wire, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	wire.Payload = nil
+	wire.ProtoReflect().SetUnknown(raw)
+
+	_, err = DecodeEvent(wire)
+	require.ErrorContains(t, err, "missing payload")
+}
+
+func TestMalformedUnknownFieldIsRejectedWithUnknownPayload(t *testing.T) {
+	raw := protowire.AppendTag(nil, 99, protowire.BytesType)
+	raw = protowire.AppendBytes(raw, []byte("future"))
+	raw = append(raw, 0x80)
+	wire, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	wire.Payload = nil
+	wire.ProtoReflect().SetUnknown(raw)
+
+	_, err = DecodeEvent(wire)
+	require.ErrorContains(t, err, "malformed unknown field")
+}
+
 func TestUnknownPayloadStillRequiresValidEnvelope(t *testing.T) {
 	raw := protowire.AppendTag(nil, 99, protowire.BytesType)
 	raw = protowire.AppendBytes(raw, []byte("future"))

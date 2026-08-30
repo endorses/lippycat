@@ -69,6 +69,7 @@ func TestEmitDNSAndSMTPEvents(t *testing.T) {
 	require.Len(t, sink.events, 2)
 	for _, event := range sink.events {
 		require.Equal(t, "hunter-a", event.Envelope().NodeID)
+		require.Equal(t, []string{"processor-test"}, event.Envelope().Provenance.ProcessorNodeIDs)
 		require.NotEmpty(t, event.Envelope().UID)
 		require.NotEmpty(t, event.Envelope().CommunityID)
 	}
@@ -79,7 +80,11 @@ func TestEventBroadcasterReceivesNormalizedEventsWithStructuredLogsDisabled(t *t
 	require.NoError(t, err)
 	require.Nil(t, p.logSink)
 
-	subscription, err := p.eventBroadcaster.Subscribe(broadcast.Options{QueueSize: 1, Kinds: []events.Kind{events.KindDNS}})
+	subscription, err := p.eventBroadcaster.Subscribe(broadcast.Options{
+		QueueSize:        1,
+		Kinds:            []events.Kind{events.KindDNS},
+		ProcessorNodeIDs: []string{"processor-test"},
+	})
 	require.NoError(t, err)
 	defer subscription.Close()
 	require.NoError(t, p.eventDispatcher.Start(context.Background()))
@@ -96,6 +101,7 @@ func TestEventBroadcasterReceivesNormalizedEventsWithStructuredLogsDisabled(t *t
 	case event := <-subscription.Events():
 		require.Equal(t, events.KindDNS, event.Kind())
 		require.Equal(t, "hunter-a", event.Envelope().NodeID)
+		require.Equal(t, []string{"processor-test"}, event.Envelope().Provenance.ProcessorNodeIDs)
 	default:
 		t.Fatal("event broadcaster did not receive normalized DNS event")
 	}
@@ -156,6 +162,7 @@ func TestTapLocalEventsUseEffectiveTapID(t *testing.T) {
 		envelope := event.Envelope()
 		require.Equal(t, "tap-test", envelope.NodeID)
 		require.Equal(t, "tap-test-local", envelope.Provenance.CaptureSource)
+		require.Equal(t, []string{"tap-test"}, envelope.Provenance.ProcessorNodeIDs)
 		require.NotEmpty(t, envelope.ProducerSessionID)
 		require.Equal(t, sink.events[0].Envelope().ProducerSessionID, envelope.ProducerSessionID)
 	}

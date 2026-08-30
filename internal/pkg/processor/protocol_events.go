@@ -82,7 +82,11 @@ func (p *Processor) eventSource(sourceID string) (string, events.SourceProvenanc
 	if p.config.ProcessorID != "" && sourceID == p.config.ProcessorID+"-local" {
 		producerNodeID = p.config.ProcessorID
 	}
-	return producerNodeID, events.SourceProvenance{CaptureSource: sourceID}
+	provenance := events.SourceProvenance{CaptureSource: sourceID}
+	if p.config.ProcessorID != "" {
+		provenance.ProcessorNodeIDs = []string{p.config.ProcessorID}
+	}
+	return producerNodeID, provenance
 }
 
 func (p *Processor) emitSMTPFiles(env events.Envelope, meta *data.EmailMetadata) {

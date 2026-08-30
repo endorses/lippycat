@@ -155,6 +155,9 @@ processor and every tap command path now expose explicit, default-deny flags and
 configuration keys for those permissions, while file content remains excluded.
 A follow-up configuration audit bound those flags to their Viper keys so explicit
 CLI authorization reliably takes precedence over configured default-deny values.
+A final processor-provenance audit made the `processor_node_ids` subscription
+selector reachable for real processor and tap events by recording the effective
+handling processor ID in every locally produced event envelope.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

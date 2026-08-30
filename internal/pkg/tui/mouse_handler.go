@@ -31,6 +31,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				if !m.uiState.EventShowDetails || m.uiState.Width < 160 || msg.X < m.uiState.Width-79 {
 					m.eventStore.SelectPrevious()
 					m.syncEventsView()
+				} else {
+					m.uiState.EventsView.ScrollDetailsUp()
 				}
 				return m, nil
 			}
@@ -105,6 +107,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				if !m.uiState.EventShowDetails || m.uiState.Width < 160 || msg.X < m.uiState.Width-79 {
 					m.eventStore.SelectNext()
 					m.syncEventsView()
+				} else {
+					m.uiState.EventsView.ScrollDetailsDown()
 				}
 				return m, nil
 			}

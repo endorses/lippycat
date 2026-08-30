@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logschema"
@@ -46,12 +47,18 @@ type EventsView struct {
 	theme                   themes.Theme
 	relatedPacketsKnown     bool
 	relatedPacketsAvailable bool
+	detailsViewport         viewport.Model
+	detailsViewportReady    bool
+	detailsSelectedID       string
 }
 
 func NewEventsView() *EventsView { return &EventsView{theme: themes.Solarized()} }
 
-func (v *EventsView) SetTheme(theme themes.Theme) { v.theme = theme }
-func (v *EventsView) SetSize(width, height int)   { v.width, v.height = width, height }
+func (v *EventsView) SetTheme(theme themes.Theme) {
+	v.theme = theme
+	v.detailsSelectedID = ""
+}
+func (v *EventsView) SetSize(width, height int) { v.width, v.height = width, height }
 
 func (v *EventsView) SetEvents(items []EventItem) {
 	oldSelected := v.indexByID(v.selectedID)
@@ -107,6 +114,7 @@ func (v *EventsView) SelectPrevious() {
 func (v *EventsView) SetRelatedPacketsAvailable(available bool) {
 	v.relatedPacketsKnown = true
 	v.relatedPacketsAvailable = available
+	v.detailsSelectedID = ""
 }
 
 func (v *EventsView) RenderTimeline(width, height int, focused bool) string {
@@ -193,7 +201,7 @@ func (v *EventsView) RenderDetails(width, height int, focused bool) string {
 		return ""
 	}
 	contentWidth := max(1, width-6)
-	contentHeight := max(1, height-4)
+	contentHeight := max(5, height-4)
 	borderColor := v.theme.BorderColor
 	borderType := lipgloss.RoundedBorder()
 	if focused {
@@ -211,32 +219,210 @@ func (v *EventsView) RenderDetails(width, height int, focused bool) string {
 		return borderStyle.Render("No event selected")
 	}
 	item := v.items[i]
+	if !v.detailsViewportReady {
+		v.detailsViewport = viewport.New(contentWidth, contentHeight)
+		v.detailsViewportReady = true
+	} else {
+		v.detailsViewport.Width = contentWidth
+		v.detailsViewport.Height = contentHeight
+	}
+	if v.detailsSelectedID != v.selectedID {
+		v.detailsSelectedID = v.selectedID
+		v.detailsViewport.SetContent(v.renderEventDetailsContent(item, contentWidth))
+		v.detailsViewport.GotoTop()
+	}
+	return borderStyle.Render(v.detailsViewport.View())
+}
+
+func (v *EventsView) ScrollDetailsUp() {
+	if v.detailsViewportReady {
+		v.detailsViewport.LineUp(1)
+	}
+}
+func (v *EventsView) ScrollDetailsDown() {
+	if v.detailsViewportReady {
+		v.detailsViewport.LineDown(1)
+	}
+}
+func (v *EventsView) ScrollDetailsPageUp() {
+	if v.detailsViewportReady {
+		v.detailsViewport.ViewUp()
+	}
+}
+func (v *EventsView) ScrollDetailsPageDown() {
+	if v.detailsViewportReady {
+		v.detailsViewport.ViewDown()
+	}
+}
+func (v *EventsView) ScrollDetailsToTop() {
+	if v.detailsViewportReady {
+		v.detailsViewport.GotoTop()
+	}
+}
+func (v *EventsView) ScrollDetailsToBottom() {
+	if v.detailsViewportReady {
+		v.detailsViewport.GotoBottom()
+	}
+}
+
+func (v *EventsView) renderEventDetailsContent(item EventItem, width int) string {
 	env := item.Event.Envelope()
-	lines := []string{
-		fmt.Sprintf("%s event", strings.ToUpper(string(item.Event.Kind()))),
-		"event_id: " + env.EventID,
-		"producer_session_id: " + env.ProducerSessionID,
-		fmt.Sprintf("event_sequence: %d", env.EventSequence),
-		fmt.Sprintf("arrival_sequence: %d", item.ArrivalSequence),
-		"capture_source: " + env.Provenance.CaptureSource,
-		"interface_name: " + env.Provenance.InterfaceName,
-		fmt.Sprintf("interface_index: %d", env.Provenance.InterfaceIndex),
-		"input_file: " + env.Provenance.InputFile,
-		"processor_node_ids: " + boundedValue(env.Provenance.ProcessorNodeIDs),
-	}
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(v.theme.InfoColor)
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(v.theme.StatusBarFg)
+	valueStyle := lipgloss.NewStyle().Foreground(v.theme.StatusBarFg)
+	mutedStyle := lipgloss.NewStyle().Foreground(v.theme.Foreground)
+	kindStyle := lipgloss.NewStyle().Bold(true).Foreground(v.eventColor(item.Event.Kind()))
+	warningStyle := lipgloss.NewStyle().Bold(true).Foreground(v.theme.WarningColor)
+
+	var content strings.Builder
+	content.WriteString(kindStyle.Render(eventKindIcon(item.Event.Kind()) + " " + strings.ToUpper(string(item.Event.Kind())) + " Event"))
 	if v.relatedPacketsKnown && !v.relatedPacketsAvailable {
-		lines = append(lines[:1], append([]string{"Related packets are no longer buffered.", ""}, lines[1:]...)...)
+		content.WriteString("\n\n")
+		content.WriteString(warningStyle.Render("⚠ Related packets are no longer buffered."))
 	}
+
+	writeSection := func(title string, rows []eventDetailRow) {
+		visible := rows[:0]
+		for _, row := range rows {
+			if strings.TrimSpace(row.value) != "" {
+				visible = append(visible, row)
+			}
+		}
+		if len(visible) == 0 {
+			return
+		}
+		content.WriteString("\n\n")
+		content.WriteString(sectionStyle.Render(title))
+		content.WriteString("\n\n")
+		for _, row := range visible {
+			content.WriteString(renderEventDetailRow(row.label, row.value, width, labelStyle, valueStyle, mutedStyle, v.theme))
+			content.WriteByte('\n')
+		}
+	}
+
+	writeSection("Overview", []eventDetailRow{
+		{"Time", env.Timestamp.Format("2006-01-02 15:04:05.000000")},
+		{"Origin", env.NodeID},
+		{"Summary", eventSummary(item.Event)},
+	})
+	writeSection("Flow", []eventDetailRow{
+		{"Source", fmt.Sprintf("%s:%d", env.Flow.SourceAddress, env.Flow.SourcePort)},
+		{"Destination", fmt.Sprintf("%s:%d", env.Flow.DestinationAddress, env.Flow.DestinationPort)},
+		{"Transport", fmt.Sprint(env.Flow.Protocol)},
+		{"Scope", string(env.CaptureScope)},
+		{"Partial", fmt.Sprint(env.Partial)},
+	})
+
+	commonFields := map[string]bool{"ts": true, "uid": true, "id.orig_h": true, "id.orig_p": true, "id.resp_h": true, "id.resp_p": true, "proto": true, "community_id": true, "node_id": true, "capture_scope": true, "partial": true}
+	protocolRows := make([]eventDetailRow, 0)
 	for _, field := range eventFields(item.Event) {
-		lines = append(lines, fmt.Sprintf("%-18s %-16s %s", field.Name, field.Type, field.Value))
+		if !commonFields[field.Name] && strings.TrimSpace(field.Value) != "" {
+			protocolRows = append(protocolRows, eventDetailRow{humanizeEventField(field.Name), field.Value})
+		}
 	}
-	if len(lines) > contentHeight {
-		lines = lines[:contentHeight]
+	writeSection(eventKindSectionTitle(item.Event.Kind()), protocolRows)
+
+	interfaceValue := env.Provenance.InterfaceName
+	if interfaceValue != "" || env.Provenance.InterfaceIndex != 0 {
+		interfaceValue = fmt.Sprintf("%s (index %d)", valueOrDash(interfaceValue), env.Provenance.InterfaceIndex)
 	}
-	for i := range lines {
-		lines[i] = truncateRunes(sanitizeEventText(lines[i]), contentWidth)
+	writeSection("Provenance", []eventDetailRow{
+		{"Capture", env.Provenance.CaptureSource},
+		{"Interface", interfaceValue},
+		{"Input File", env.Provenance.InputFile},
+		{"Processors", boundedValue(env.Provenance.ProcessorNodeIDs)},
+	})
+	writeSection("Flow Identity", []eventDetailRow{{"UID", env.UID}, {"Community ID", env.CommunityID}})
+	writeSection("Event Identity", []eventDetailRow{
+		{"Event ID", env.EventID},
+		{"Session", env.ProducerSessionID},
+		{"Sequence", fmt.Sprint(env.EventSequence)},
+		{"Arrival", fmt.Sprint(item.ArrivalSequence)},
+	})
+	return strings.TrimRight(content.String(), "\n")
+}
+
+type eventDetailRow struct{ label, value string }
+
+func renderEventDetailRow(label, value string, width int, labelStyle, valueStyle, mutedStyle lipgloss.Style, theme themes.Theme) string {
+	const labelWidth = 15
+	valueWidth := max(10, width-labelWidth)
+	var content strings.Builder
+	content.WriteString(labelStyle.Render(fitRunes(label, labelWidth)))
+	style := valueStyle
+	displayValue := sanitizeEventText(value)
+	if value == "false" {
+		displayValue = "no"
+		style = mutedStyle
+	} else if value == "true" {
+		displayValue = "yes"
+		style = valueStyle.Foreground(theme.SuccessColor)
 	}
-	return borderStyle.Render(strings.Join(lines, "\n"))
+	wrapped := wrapEventValue(displayValue, valueWidth)
+	for i, line := range wrapped {
+		if i > 0 {
+			content.WriteByte('\n')
+			content.WriteString(strings.Repeat(" ", labelWidth))
+		}
+		content.WriteString(style.Render(line))
+	}
+	return content.String()
+}
+
+func wrapEventValue(value string, width int) []string {
+	if value == "" {
+		return []string{"-"}
+	}
+	runes := []rune(value)
+	lines := make([]string, 0, (len(runes)/width)+1)
+	for len(runes) > width {
+		lines = append(lines, string(runes[:width]))
+		runes = runes[width:]
+	}
+	return append(lines, string(runes))
+}
+
+func humanizeEventField(name string) string {
+	replacer := strings.NewReplacer("id.orig_h", "Source Address", "id.orig_p", "Source Port", "id.resp_h", "Destination Address", "id.resp_p", "Destination Port", "ja3s", "JA3S", "ja3", "JA3", "ja4", "JA4", "rtt", "RTT", "uid", "UID", "fuid", "FUID", "ttls", "TTLs", "qclass", "Query Class", "qtype", "Query Type", "rcode", "Response Code", "_", " ")
+	words := strings.Fields(replacer.Replace(name))
+	for i := range words {
+		words[i] = strings.ToUpper(words[i][:1]) + words[i][1:]
+	}
+	return strings.Join(words, " ")
+}
+
+func eventKindIcon(kind events.Kind) string {
+	switch kind {
+	case events.KindTLS:
+		return "🔐"
+	case events.KindHTTP:
+		return "🌐"
+	case events.KindDNS:
+		return "🔍"
+	case events.KindConn:
+		return "🔗"
+	case events.KindSMTP:
+		return "✉"
+	case events.KindFileMetadata:
+		return "📄"
+	default:
+		return "📋"
+	}
+}
+
+func eventKindSectionTitle(kind events.Kind) string {
+	name := strings.ToUpper(string(kind))
+	if kind == events.KindFileMetadata {
+		name = "File"
+	}
+	return name + " Details"
+}
+
+func valueOrDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
 
 // View renders the full-width timeline using the configured dimensions.

@@ -232,7 +232,45 @@ func TestEventsViewDetailsExposeIdentityAndProvenance(t *testing.T) {
 	view := NewEventsView()
 	view.SetEvents([]EventItem{{Event: event, ArrivalSequence: 9}})
 	details := view.RenderDetails(120, 100, false)
-	for _, expected := range []string{"event-id", "producer-session", "event_sequence: 42", "arrival_sequence: 9", "capture_source: remote", "interface_name: eth0", "input_file: capture.pcap", "processor-a"} {
+	for _, expected := range []string{"Event Identity", "event-id", "producer-session", "Sequence", "42", "Arrival", "9", "Provenance", "remote", "eth0 (index 2)", "capture.pcap", "processor-a"} {
 		assert.Contains(t, details, expected)
 	}
+}
+
+func TestEventsViewDetailsAreStructuredAndScrollable(t *testing.T) {
+	event := events.NewTLSEvent(events.Envelope{Timestamp: time.Unix(1, 0), EventID: "event-id", UID: "flow-uid", CommunityID: "community-id"})
+	event.Version = "TLS 1.3"
+	event.ServerName = "example.org"
+	event.Established = true
+	view := NewEventsView()
+	view.SetEvents([]EventItem{{Event: event, ArrivalSequence: 7}})
+
+	top := view.RenderDetails(77, 16, false)
+	assert.Contains(t, top, "TLS Event")
+	assert.Contains(t, top, "Overview")
+	assert.Contains(t, top, "Flow")
+	assert.NotContains(t, top, "Event Identity")
+	assert.NotContains(t, top, "string")
+
+	view.ScrollDetailsToBottom()
+	bottom := view.RenderDetails(77, 16, false)
+	assert.Contains(t, bottom, "Event Identity")
+	assert.Contains(t, bottom, "event-id")
+	assert.Equal(t, lipgloss.Width(top), lipgloss.Width(bottom))
+	assert.Equal(t, lipgloss.Height(top), lipgloss.Height(bottom))
+}
+
+func TestEventsViewDetailsScrollResetsForNewSelection(t *testing.T) {
+	first := dnsEvent("first", "first.example")
+	second := dnsEvent("second", "second.example")
+	view := NewEventsView()
+	view.SetEvents([]EventItem{{Event: first}, {Event: second}})
+	view.RenderDetails(77, 16, false)
+	view.ScrollDetailsToBottom()
+	view.SetSelectedID("second")
+
+	details := view.RenderDetails(77, 16, false)
+	assert.Contains(t, details, "Overview")
+	assert.Contains(t, details, "second.example")
+	assert.NotContains(t, details, "Event Identity")
 }

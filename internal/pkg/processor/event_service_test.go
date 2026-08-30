@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type eventSubscriptionTestStream struct {
@@ -195,6 +196,65 @@ func TestSubscriberLossesDistinguishDispatcherOverflow(t *testing.T) {
 	assert.Equal(t, eventsv1.LossKind_LOSS_KIND_DISPATCH, wire[0].Kind)
 	assert.Equal(t, uint64(1), wire[0].Count)
 	assert.Equal(t, "session-a", wire[0].ProducerSessionId)
+}
+
+func TestSendLossGapsHonorsMessageLimit(t *testing.T) {
+	stream := &eventSubscriptionTestStream{ctx: context.Background(), notify: make(chan struct{}, 32)}
+	losses := make([]*eventsv1.EventLoss, 17)
+	for index := range losses {
+		loss := &eventsv1.EventLoss{
+			Kind:              eventsv1.LossKind_LOSS_KIND_SUBSCRIBER,
+			Count:             64,
+			SourceNodeId:      strings.Repeat("n", 64),
+			ProducerSessionId: strings.Repeat("s", 64),
+		}
+		for sequence := uint64(1); sequence <= 64; sequence++ {
+			loss.EventSequenceRanges = append(loss.EventSequenceRanges, &eventsv1.SequenceRange{First: sequence * 2, Last: sequence * 2})
+		}
+		losses[index] = loss
+	}
+
+	deliverySequence, err := sendLossGaps(stream, "stream", 1, losses, 1024)
+	require.NoError(t, err)
+	messages := stream.snapshot()
+	assert.Greater(t, len(messages), 1)
+	assert.Equal(t, uint64(len(messages)+1), deliverySequence)
+	var lossCount uint64
+	for index, message := range messages {
+		assert.LessOrEqual(t, proto.Size(message), 1024)
+		assert.Equal(t, uint64(index+2), message.DeliverySequence)
+		for _, loss := range message.GetControl().Losses {
+			lossCount += loss.Count
+		}
+	}
+	assert.Equal(t, uint64(17*64), lossCount)
+}
+
+func TestSendLossGapsSummarizesOversizedDetail(t *testing.T) {
+	stream := &eventSubscriptionTestStream{ctx: context.Background(), notify: make(chan struct{}, 1)}
+	loss := &eventsv1.EventLoss{
+		Kind:              eventsv1.LossKind_LOSS_KIND_DISPATCH,
+		Count:             7,
+		SourceNodeId:      strings.Repeat("n", 2048),
+		ProducerSessionId: strings.Repeat("s", 2048),
+		EventSequenceRanges: []*eventsv1.SequenceRange{
+			{First: 1, Last: 7},
+		},
+	}
+
+	deliverySequence, err := sendLossGaps(stream, "stream", 4, []*eventsv1.EventLoss{loss}, 1024)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(5), deliverySequence)
+	messages := stream.snapshot()
+	require.Len(t, messages, 1)
+	assert.LessOrEqual(t, proto.Size(messages[0]), 1024)
+	require.Len(t, messages[0].GetControl().Losses, 1)
+	summary := messages[0].GetControl().Losses[0]
+	assert.Equal(t, eventsv1.LossKind_LOSS_KIND_DISPATCH, summary.Kind)
+	assert.Equal(t, uint64(7), summary.Count)
+	assert.Empty(t, summary.SourceNodeId)
+	assert.Empty(t, summary.ProducerSessionId)
+	assert.Empty(t, summary.EventSequenceRanges)
 }
 
 func TestEventServiceRejectsUnauthorizedAndInvalidRequests(t *testing.T) {

@@ -147,9 +147,8 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 		if pending != nil {
 			losses := sub.ConsumeLosses()
 			if len(losses) > 0 {
-				deliverySequence++
-				gap := &eventsv1.EventSubscriptionControl{Kind: eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP, StreamId: streamID, DeliverySequence: deliverySequence, Losses: subscriberLosses(losses)}
-				if err := sendEventMessage(stream, controlMessage(deliverySequence, gap), maxMessageBytes); err != nil {
+				deliverySequence, err = sendLossGaps(stream, streamID, deliverySequence, subscriberLosses(losses), maxMessageBytes)
+				if err != nil {
 					return err
 				}
 			}
@@ -169,9 +168,8 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 			if len(losses) == 0 {
 				continue
 			}
-			deliverySequence++
-			gap := &eventsv1.EventSubscriptionControl{Kind: eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP, StreamId: streamID, DeliverySequence: deliverySequence, Losses: subscriberLosses(losses)}
-			if err := sendEventMessage(stream, controlMessage(deliverySequence, gap), maxMessageBytes); err != nil {
+			deliverySequence, err = sendLossGaps(stream, streamID, deliverySequence, subscriberLosses(losses), maxMessageBytes)
+			if err != nil {
 				return err
 			}
 		case event, ok := <-sub.Events():
@@ -184,6 +182,44 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 			}
 		}
 	}
+}
+
+func sendLossGaps(stream eventsv1.EventService_SubscribeEventsServer, streamID string, deliverySequence uint64, losses []*eventsv1.EventLoss, maxMessageBytes uint32) (uint64, error) {
+	for len(losses) > 0 {
+		count := 1
+		for count <= len(losses) {
+			sequence := deliverySequence + 1
+			gap := &eventsv1.EventSubscriptionControl{
+				Kind:             eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP,
+				StreamId:         streamID,
+				DeliverySequence: sequence,
+				Losses:           losses[:count],
+			}
+			if proto.Size(controlMessage(sequence, gap)) > int(maxMessageBytes) {
+				break
+			}
+			count++
+		}
+		count--
+		if count == 0 {
+			// Preserve an explicit loss count even when one detailed record cannot
+			// fit the subscriber's negotiated receive limit.
+			losses[0] = &eventsv1.EventLoss{Kind: losses[0].Kind, Count: losses[0].Count}
+			continue
+		}
+		deliverySequence++
+		gap := &eventsv1.EventSubscriptionControl{
+			Kind:             eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_GAP,
+			StreamId:         streamID,
+			DeliverySequence: deliverySequence,
+			Losses:           losses[:count],
+		}
+		if err := sendEventMessage(stream, controlMessage(deliverySequence, gap), maxMessageBytes); err != nil {
+			return deliverySequence, err
+		}
+		losses = losses[count:]
+	}
+	return deliverySequence, nil
 }
 
 func validateEventSelectors(name string, values []string) error {

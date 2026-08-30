@@ -128,6 +128,11 @@ producer-session loss records, preserved producer-session identity in gap
 reports, moved dispatcher shutdown after packet-producer quiescence, and
 decoupled HTTP file-metadata generation from structured-log output. Focused
 race tests cover each corrected boundary.
+A final message-boundary audit split accumulated subscriber-loss reports across
+bounded GAP controls so a valid small receive limit cannot turn a reportable
+overflow into a `ResourceExhausted` stream termination. If one detailed loss
+record alone cannot fit, the stream retains its explicit loss kind and count in
+a bounded summary.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

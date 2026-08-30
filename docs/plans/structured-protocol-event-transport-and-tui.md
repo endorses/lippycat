@@ -67,7 +67,9 @@ unknown-field admission bounds for nested event and batch messages. Focused
 race tests and the full `make test` suite pass. A subsequent independent audit
 also corrected count-only loss validation and ensured tap-local events use the
 effective tap ID as producer identity while retaining the local capture source
-in provenance.
+in provenance. The final implementation audit extended that normalization to
+connection events, ensuring all event kinds from one tap share a producer
+session and carry consistent capture-source provenance.
 
 ## Phase 2 — Processor event subscription
 

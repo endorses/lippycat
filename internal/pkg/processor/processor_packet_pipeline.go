@@ -352,7 +352,11 @@ func (p *Processor) trackConnections(sourceID string, packets []*data.CapturedPa
 		if len(raw.MatchedFilterIds) > 0 {
 			scope = events.CaptureScopeFiltered
 		}
-		env, err := p.flowIdentity.Enrich(events.Envelope{Timestamp: ts, NodeID: sourceID, Flow: flow, CaptureScope: scope})
+		producerNodeID, provenance := p.eventSource(sourceID)
+		env, err := p.flowIdentity.Enrich(events.Envelope{
+			Timestamp: ts, NodeID: producerNodeID, Flow: flow, CaptureScope: scope,
+			Partial: scope == events.CaptureScopeFiltered, Provenance: provenance,
+		})
 		if err != nil {
 			continue
 		}

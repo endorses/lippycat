@@ -77,23 +77,33 @@ func TestTapLocalEventsUseEffectiveTapID(t *testing.T) {
 	p, err := New(Config{ListenAddr: ":0", ProcessorID: "tap-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	sink := &collectingSink{}
-	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS))
+	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS, events.KindConn))
 	require.NoError(t, p.eventDispatcher.Start(context.Background()))
-	p.emitProtocolEvents("tap-test-local", []*data.CapturedPacket{{
+	packet := &data.CapturedPacket{
 		TimestampNs: time.Unix(10, 0).UnixNano(),
+		LinkType:    1,
 		Metadata: &data.PacketMetadata{
-			SrcIp: "192.0.2.10", DstIp: "192.0.2.53", SrcPort: 53000, DstPort: 53, Transport: "udp",
+			SrcIp: "192.0.2.10", DstIp: "192.0.2.53", SrcPort: 53000, DstPort: 53, Transport: "udp", Protocol: "DNS",
 			Dns: &data.DNSMetadata{QueryName: "example.test", QueryType: "A", QueryClass: "IN"},
 		},
-	}})
+	}
+	p.trackConnections("tap-test-local", []*data.CapturedPacket{packet})
+	p.emitProtocolEvents("tap-test-local", []*data.CapturedPacket{packet})
+	for _, event := range p.connTracker.Close() {
+		p.eventDispatcher.Enqueue(event)
+	}
 	require.NoError(t, p.eventDispatcher.Close(context.Background()))
 
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
-	require.Len(t, sink.events, 1)
-	envelope := sink.events[0].Envelope()
-	require.Equal(t, "tap-test", envelope.NodeID)
-	require.Equal(t, "tap-test-local", envelope.Provenance.CaptureSource)
+	require.Len(t, sink.events, 2)
+	for _, event := range sink.events {
+		envelope := event.Envelope()
+		require.Equal(t, "tap-test", envelope.NodeID)
+		require.Equal(t, "tap-test-local", envelope.Provenance.CaptureSource)
+		require.NotEmpty(t, envelope.ProducerSessionID)
+		require.Equal(t, sink.events[0].Envelope().ProducerSessionID, envelope.ProducerSessionID)
+	}
 }
 
 func TestConnectionAndProtocolEventsShareFlowIdentity(t *testing.T) {

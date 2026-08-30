@@ -37,17 +37,14 @@ func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.Captu
 		if len(packet.MatchedFilterIds) > 0 {
 			scope = events.CaptureScopeFiltered
 		}
-		producerNodeID := batchSource
-		if p.config.ProcessorID != "" && batchSource == p.config.ProcessorID+"-local" {
-			producerNodeID = p.config.ProcessorID
-		}
+		producerNodeID, provenance := p.eventSource(batchSource)
 		env := events.Envelope{
 			Timestamp:    timestamp,
 			NodeID:       producerNodeID,
 			Flow:         flow,
 			CaptureScope: scope,
 			Partial:      scope == events.CaptureScopeFiltered,
-			Provenance:   events.SourceProvenance{CaptureSource: batchSource},
+			Provenance:   provenance,
 		}
 		env, err = p.flowIdentity.Enrich(env)
 		if err != nil {
@@ -75,6 +72,17 @@ func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.Captu
 			p.emitHTTPFile(env, meta.Http)
 		}
 	}
+}
+
+// eventSource keeps the transport/capture source in provenance while using
+// the effective tap ID as the producer identity for tap-local observations.
+// All event kinds from one local tap must share the same producer session.
+func (p *Processor) eventSource(sourceID string) (string, events.SourceProvenance) {
+	producerNodeID := sourceID
+	if p.config.ProcessorID != "" && sourceID == p.config.ProcessorID+"-local" {
+		producerNodeID = p.config.ProcessorID
+	}
+	return producerNodeID, events.SourceProvenance{CaptureSource: sourceID}
 }
 
 func (p *Processor) emitSMTPFiles(env events.Envelope, meta *data.EmailMetadata) {

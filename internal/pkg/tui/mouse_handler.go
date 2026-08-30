@@ -27,6 +27,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	// Handle mouse wheel scrolling - based on hover position, not focus
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
 		if m.uiState.Tabs.GetActive() == 0 {
+			if m.uiState.ViewMode == "events" {
+				if !m.uiState.EventShowDetails || m.uiState.Width < 160 || msg.X < m.uiState.Width-79 {
+					m.eventStore.SelectPrevious()
+					m.syncEventsView()
+				}
+				return m, nil
+			}
 			// On capture tab - check if we're in calls view or packet list
 			if m.uiState.ViewMode == "calls" {
 				// Check if details panel is visible and determine which pane we're hovering
@@ -94,6 +101,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
 		if m.uiState.Tabs.GetActive() == 0 {
+			if m.uiState.ViewMode == "events" {
+				if !m.uiState.EventShowDetails || m.uiState.Width < 160 || msg.X < m.uiState.Width-79 {
+					m.eventStore.SelectNext()
+					m.syncEventsView()
+				}
+				return m, nil
+			}
 			// On capture tab - check if we're in calls view or packet list
 			if m.uiState.ViewMode == "calls" {
 				// Check if details panel is visible and determine which pane we're hovering
@@ -192,6 +206,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		if m.uiState.ViewMode == "calls" {
 			return m.handleCallsViewClick(msg, contentStartY, contentHeight)
 		}
+		if m.uiState.ViewMode == "events" {
+			return m.handleEventsViewClick(msg, contentStartY)
+		}
 		return m.handlePacketListClick(msg, contentStartY, contentHeight)
 	}
 
@@ -228,6 +245,45 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	return m, nil
+}
+
+func (m Model) handleEventsViewClick(msg tea.MouseMsg, contentStartY int) (Model, tea.Cmd) {
+	detailsVisible := m.uiState.EventShowDetails && m.uiState.Width >= 160
+	listWidth := m.uiState.Width
+	if detailsVisible {
+		listWidth = m.uiState.Width - 79
+	}
+	if msg.X >= listWidth {
+		m.uiState.FocusedPane = "right"
+		return m, nil
+	}
+
+	m.uiState.FocusedPane = "left"
+	// The first event row follows the panel border and table header.
+	visibleRow := msg.Y - contentStartY - 2
+	id, ok := m.uiState.EventsView.EventIDAtVisibleRow(visibleRow)
+	if !ok {
+		return m, nil
+	}
+	now := time.Now()
+	isDoubleClick := id == m.uiState.LastEventClickID &&
+		now.Sub(m.uiState.LastEventClickTime) < 500*time.Millisecond
+	if isDoubleClick {
+		m.uiState.LastEventClickID = ""
+		m.uiState.LastEventClickTime = time.Time{}
+	} else {
+		m.uiState.LastEventClickID = id
+		m.uiState.LastEventClickTime = now
+	}
+	m.eventStore.SelectByIDFollowingLatest(id)
+	m.syncEventsView()
+	if isDoubleClick {
+		m.uiState.EventShowDetails = !m.uiState.EventShowDetails
+		if !m.uiState.EventShowDetails {
+			m.uiState.FocusedPane = "left"
+		}
+	}
 	return m, nil
 }
 

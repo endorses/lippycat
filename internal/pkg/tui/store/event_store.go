@@ -23,6 +23,7 @@ type EventStore struct {
 	items                                        []components.EventItem
 	nextArrival                                  uint64
 	selectedID                                   string
+	followLatest                                 bool
 	paused                                       bool
 	arrived, evicted, pausedCount, transportLost uint64
 	lossByKind                                   map[string]uint64
@@ -34,7 +35,7 @@ func NewEventStore(capacity int) *EventStore {
 	if capacity < 1 {
 		capacity = 1
 	}
-	return &EventStore{capacity: capacity, items: make([]components.EventItem, 0, capacity), lossByKind: make(map[string]uint64)}
+	return &EventStore{capacity: capacity, items: make([]components.EventItem, 0, capacity), followLatest: true, lossByKind: make(map[string]uint64)}
 }
 
 func (s *EventStore) AddEvent(event events.Event) bool {
@@ -50,7 +51,7 @@ func (s *EventStore) AddEvent(event events.Event) bool {
 	}
 	s.nextArrival++
 	s.items = append(s.items, components.EventItem{Event: event, ArrivalSequence: s.nextArrival, ArrivedAt: time.Now()})
-	if s.selectedID == "" {
+	if s.selectedID == "" || (s.followLatest && s.visibleLocked(event)) {
 		s.selectedID = event.Envelope().EventID
 	}
 	if len(s.items) > s.capacity {
@@ -89,6 +90,7 @@ func (s *EventStore) Reset() {
 	defer s.mu.Unlock()
 	s.items = s.items[:0]
 	s.selectedID = ""
+	s.followLatest = true
 	s.nextArrival = 0
 	s.arrived = 0
 	s.evicted = 0
@@ -141,11 +143,24 @@ func (s *EventStore) Selected() (components.EventItem, bool) {
 }
 func (s *EventStore) SelectedID() string { s.mu.RLock(); defer s.mu.RUnlock(); return s.selectedID }
 func (s *EventStore) SelectByID(id string) bool {
+	return s.selectByID(id, false)
+}
+
+// SelectByIDFollowingLatest selects an event and enables live-edge following
+// when that event is the last visible item. Mouse selection uses this to match
+// PacketList.SetCursor behavior.
+func (s *EventStore) SelectByIDFollowingLatest(id string) bool {
+	return s.selectByID(id, true)
+}
+
+func (s *EventStore) selectByID(id string, followWhenLast bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, item := range s.items {
+	visible := s.visibleItemsLocked()
+	for i, item := range visible {
 		if s.visibleLocked(item.Event) && item.Event.Envelope().EventID == id {
 			s.selectedID = id
+			s.followLatest = followWhenLast && i == len(visible)-1
 			return true
 		}
 	}
@@ -170,6 +185,7 @@ func (s *EventStore) selectBoundary(last bool) {
 		index = len(visible) - 1
 	}
 	s.selectedID = visible[index].Event.Envelope().EventID
+	s.followLatest = last
 }
 
 func (s *EventStore) moveSelection(delta int) {
@@ -195,6 +211,7 @@ func (s *EventStore) moveSelection(delta int) {
 		index = len(visible) - 1
 	}
 	s.selectedID = visible[index].Event.Envelope().EventID
+	s.followLatest = index == len(visible)-1
 }
 
 func (s *EventStore) RecordTransportLoss(kind string, count uint64) {
@@ -264,11 +281,14 @@ func (s *EventStore) ensureVisibleSelectionLocked() {
 			return
 		}
 	}
-	for _, item := range s.items {
-		if s.visibleLocked(item.Event) {
-			s.selectedID = item.Event.Envelope().EventID
-			return
+	visible := s.visibleItemsLocked()
+	if len(visible) > 0 {
+		index := 0
+		if s.followLatest {
+			index = len(visible) - 1
 		}
+		s.selectedID = visible[index].Event.Envelope().EventID
+		return
 	}
 	s.selectedID = ""
 }

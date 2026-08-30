@@ -19,6 +19,15 @@ import (
 const (
 	maxEventFieldRunes = 512
 	maxEventListItems  = 64
+	eventTimeWidth     = 12
+	eventKindWidth     = 13
+	eventOriginWidth   = 16
+	// 46 fits two maximum-length IPv4 address:port endpoints plus the arrow.
+	eventFlowWidth      = 46
+	eventKindMinWidth   = 4
+	eventOriginMinWidth = 5
+	eventFlowMinWidth   = 24
+	eventInfoMinWidth   = 10
 )
 
 // EventItem is the immutable presentation record retained by EventStore.
@@ -32,6 +41,7 @@ type EventItem struct {
 type EventsView struct {
 	items                   []EventItem
 	selectedID              string
+	offset                  int
 	width, height           int
 	theme                   themes.Theme
 	relatedPacketsKnown     bool
@@ -44,7 +54,13 @@ func (v *EventsView) SetTheme(theme themes.Theme) { v.theme = theme }
 func (v *EventsView) SetSize(width, height int)   { v.width, v.height = width, height }
 
 func (v *EventsView) SetEvents(items []EventItem) {
+	oldSelected := v.indexByID(v.selectedID)
 	v.items = append(v.items[:0], items...)
+	newSelected := v.indexByID(v.selectedID)
+	if oldSelected >= 0 && newSelected >= 0 {
+		v.offset += newSelected - oldSelected
+	}
+	v.offset = max(0, v.offset)
 	if v.indexByID(v.selectedID) >= 0 {
 		return
 	}
@@ -62,6 +78,16 @@ func (v *EventsView) SetSelectedID(id string) {
 }
 
 func (v *EventsView) SelectedID() string { return v.selectedID }
+
+// EventIDAtVisibleRow returns the event at a zero-based data row in the
+// currently rendered viewport.
+func (v *EventsView) EventIDAtVisibleRow(row int) (string, bool) {
+	index := v.offset + row
+	if row < 0 || index < 0 || index >= len(v.items) || v.items[index].Event == nil {
+		return "", false
+	}
+	return v.items[index].Event.Envelope().EventID, true
+}
 
 func (v *EventsView) SelectNext() {
 	i := v.indexByID(v.selectedID)
@@ -87,44 +113,102 @@ func (v *EventsView) RenderTimeline(width, height int, focused bool) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
+	contentWidth := max(1, width-6)        // border (2) and horizontal padding (4)
+	contentHeight := max(1, height-4)      // border (2) and vertical padding (2)
+	visibleRows := max(0, contentHeight-1) // table header
+
+	borderColor := v.theme.BorderColor
+	borderType := lipgloss.RoundedBorder()
+	if focused {
+		borderColor = v.theme.SelectionBg
+		borderType = lipgloss.ThickBorder()
+	}
+	borderStyle := lipgloss.NewStyle().
+		Border(borderType).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Width(width - 2).
+		Height(height - 2)
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(v.theme.HeaderBg).
+		Reverse(true).
+		Width(contentWidth)
+
+	var content strings.Builder
+	content.WriteString(headerStyle.Render(eventTimelineHeader(contentWidth)))
+	if visibleRows > 0 {
+		content.WriteByte('\n')
+	}
 	if len(v.items) == 0 {
-		return lipgloss.NewStyle().Width(width).Render("No protocol events")
+		content.WriteString("No protocol events")
+		for i := 1; i < visibleRows; i++ {
+			content.WriteByte('\n')
+		}
+		return borderStyle.Render(content.String())
 	}
 	selected := v.indexByID(v.selectedID)
 	if selected < 0 {
 		selected = 0
 	}
-	start := selected - height + 1
-	if start < 0 {
-		start = 0
+	maxOffset := max(0, len(v.items)-visibleRows)
+	v.offset = min(v.offset, maxOffset)
+	if selected < v.offset {
+		v.offset = selected
+	} else if selected >= v.offset+visibleRows {
+		v.offset = selected - visibleRows + 1
 	}
-	end := min(start+height, len(v.items))
-	rows := make([]string, 0, end-start)
-	for i := start; i < end; i++ {
+	end := min(v.offset+visibleRows, len(v.items))
+	for i := v.offset; i < end; i++ {
 		item := v.items[i]
 		env := item.Event.Envelope()
-		marker := " "
-		style := lipgloss.NewStyle()
+		style := lipgloss.NewStyle().Foreground(v.eventColor(item.Event.Kind()))
 		if i == selected {
-			marker = ">"
-			if focused {
-				style = style.Foreground(v.theme.SelectionFg).Background(v.theme.SelectionBg).Bold(true)
-			}
+			style = style.Foreground(v.theme.SelectionFg).Background(v.theme.SelectionBg).Bold(true)
 		}
 		endpoints := fmt.Sprintf("%s:%d -> %s:%d", env.Flow.SourceAddress, env.Flow.SourcePort, env.Flow.DestinationAddress, env.Flow.DestinationPort)
-		line := fmt.Sprintf("%s %s %-13s %-16s %-35s %s", marker, env.Timestamp.Format("15:04:05.000"), item.Event.Kind(), compactNode(env.NodeID), endpoints, eventSummary(item.Event))
-		rows = append(rows, style.Render(truncateRunes(sanitizeEventText(line), width)))
+		line := eventTimelineRow(
+			env.Timestamp.Format("15:04:05.000"),
+			string(item.Event.Kind()),
+			compactNode(env.NodeID),
+			endpoints,
+			eventSummary(item.Event),
+			contentWidth,
+		)
+		line = padRunes(truncateRunes(sanitizeEventText(line), contentWidth), contentWidth)
+		content.WriteString(style.Width(contentWidth).Render(line))
+		if i < end-1 {
+			content.WriteByte('\n')
+		}
 	}
-	return strings.Join(rows, "\n")
+	for i := end - v.offset; i < visibleRows; i++ {
+		content.WriteByte('\n')
+	}
+	return borderStyle.Render(content.String())
 }
 
-func (v *EventsView) RenderDetails(width, height int) string {
+func (v *EventsView) RenderDetails(width, height int, focused bool) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
+	contentWidth := max(1, width-6)
+	contentHeight := max(1, height-4)
+	borderColor := v.theme.BorderColor
+	borderType := lipgloss.RoundedBorder()
+	if focused {
+		borderColor = v.theme.SelectionBg
+		borderType = lipgloss.ThickBorder()
+	}
+	borderStyle := lipgloss.NewStyle().
+		Border(borderType).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Width(width).
+		Height(height - 2)
 	i := v.indexByID(v.selectedID)
 	if i < 0 {
-		return "No event selected"
+		return borderStyle.Render("No event selected")
 	}
 	item := v.items[i]
 	env := item.Event.Envelope()
@@ -146,17 +230,88 @@ func (v *EventsView) RenderDetails(width, height int) string {
 	for _, field := range eventFields(item.Event) {
 		lines = append(lines, fmt.Sprintf("%-18s %-16s %s", field.Name, field.Type, field.Value))
 	}
-	if len(lines) > height {
-		lines = lines[:height]
+	if len(lines) > contentHeight {
+		lines = lines[:contentHeight]
 	}
 	for i := range lines {
-		lines[i] = truncateRunes(sanitizeEventText(lines[i]), width)
+		lines[i] = truncateRunes(sanitizeEventText(lines[i]), contentWidth)
 	}
-	return strings.Join(lines, "\n")
+	return borderStyle.Render(strings.Join(lines, "\n"))
 }
 
 // View renders the full-width timeline using the configured dimensions.
 func (v *EventsView) View() string { return v.RenderTimeline(v.width, v.height, true) }
+
+func (v *EventsView) eventColor(kind events.Kind) lipgloss.Color {
+	switch kind {
+	case events.KindTLS:
+		return v.theme.TLSColor
+	case events.KindHTTP:
+		return v.theme.HTTPColor
+	case events.KindDNS:
+		return v.theme.DNSColor
+	case events.KindConn:
+		return v.theme.TCPColor
+	default:
+		return v.theme.Foreground
+	}
+}
+
+func eventTimelineHeader(width int) string {
+	return eventTimelineRow("Time", "Event", "Origin", "Src IP:Port -> Dst IP:Port", "Info", width)
+}
+
+func eventTimelineRow(timestamp, kind, origin, flow, info string, width int) string {
+	info = strings.TrimSpace(sanitizeEventText(info))
+	columns := eventTimelineColumnWidths(width)
+	row := strings.Join([]string{
+		fitRunes(timestamp, columns.time),
+		fitRunes(kind, columns.kind),
+		fitRunes(origin, columns.origin),
+		fitRunes(flow, columns.flow),
+		info,
+	}, " ")
+	return padRunes(truncateRunes(row, width), width)
+}
+
+type eventTimelineWidths struct {
+	time, kind, origin, flow int
+}
+
+func eventTimelineColumnWidths(width int) eventTimelineWidths {
+	columns := eventTimelineWidths{
+		time: eventTimeWidth, kind: eventKindMinWidth,
+		origin: eventOriginMinWidth, flow: eventFlowMinWidth,
+	}
+	const separators = 4
+	remaining := width - columns.time - columns.kind - columns.origin - columns.flow - eventInfoMinWidth - separators
+	if remaining <= 0 {
+		return columns
+	}
+	grow := func(current *int, preferred int) {
+		extra := min(remaining, preferred-*current)
+		*current += extra
+		remaining -= extra
+	}
+	// Preserve endpoint readability first. Event kind and origin can safely
+	// contract to their short forms in narrower split layouts.
+	grow(&columns.flow, eventFlowWidth)
+	grow(&columns.origin, eventOriginWidth)
+	grow(&columns.kind, eventKindWidth)
+	return columns
+}
+
+func fitRunes(value string, width int) string {
+	return padRunes(truncateRunes(sanitizeEventText(value), width), width)
+}
+
+func padRunes(value string, width int) string {
+	count := utf8.RuneCountInString(value)
+	if count >= width {
+		return value
+	}
+	return value + strings.Repeat(" ", width-count)
+}
 
 func (v *EventsView) indexByID(id string) int {
 	for i, item := range v.items {

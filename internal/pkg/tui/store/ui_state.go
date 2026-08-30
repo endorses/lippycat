@@ -41,24 +41,27 @@ type UIState struct {
 	DevConsole       *components.DevConsole // Debug console (only when LOG_LEVEL=DEBUG)
 
 	// UI State
-	Capturing        bool
-	Paused           bool
-	Width            int
-	Height           int
-	Quitting         bool
-	Theme            themes.Theme
-	FilterMode       bool
-	CallFilterMode   bool // Filter mode for calls view
-	CallFilterInput  components.FilterInput
-	ShowDetails      bool
-	FocusedPane      string // "left" (packet list) or "right" (details/hex)
-	NeedsUIUpdate    bool
-	SelectedProtocol components.Protocol
-	ViewMode         string // "packets" or "calls" (for VoIP)
-	LastClickTime    time.Time
-	LastClickPacket  int
-	LastKeyPress     string    // Track last key for vim-style navigation (gg)
-	LastKeyPressTime time.Time // Timestamp of last key press
+	Capturing          bool
+	Paused             bool
+	Width              int
+	Height             int
+	Quitting           bool
+	Theme              themes.Theme
+	FilterMode         bool
+	CallFilterMode     bool // Filter mode for calls view
+	CallFilterInput    components.FilterInput
+	ShowDetails        bool
+	EventShowDetails   bool
+	FocusedPane        string // "left" (packet list) or "right" (details/hex)
+	NeedsUIUpdate      bool
+	SelectedProtocol   components.Protocol
+	ViewMode           string // "packets" or "calls" (for VoIP)
+	LastClickTime      time.Time
+	LastClickPacket    int
+	LastEventClickTime time.Time
+	LastEventClickID   string
+	LastKeyPress       string    // Track last key for vim-style navigation (gg)
+	LastKeyPressTime   time.Time // Timestamp of last key press
 
 	// Save State
 	SaveInProgress bool // One-shot save in progress
@@ -189,6 +192,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		FilterMode:       false,
 		CallFilterMode:   false,
 		ShowDetails:      false,
+		EventShowDetails: false,
 		FocusedPane:      "left",
 		NeedsUIUpdate:    false,
 		SelectedProtocol: components.Protocol{Name: "All", BPFFilter: ""}, // Default to "All"

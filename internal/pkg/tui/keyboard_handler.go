@@ -611,8 +611,8 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 	// On Capture tab: check view mode
 	if m.uiState.Tabs.GetActive() == 0 {
 		if m.uiState.ViewMode == "events" {
-			m.uiState.ShowDetails = !m.uiState.ShowDetails
-			if !m.uiState.ShowDetails {
+			m.uiState.EventShowDetails = !m.uiState.EventShowDetails
+			if !m.uiState.EventShowDetails {
 				m.uiState.FocusedPane = "left"
 			}
 			return m, nil

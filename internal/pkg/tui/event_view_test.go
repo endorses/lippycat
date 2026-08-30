@@ -54,15 +54,15 @@ func TestEventBatchFilteringNavigationAndMissingPacketNotice(t *testing.T) {
 	m := NewModel(2, 8, "", "", nil, false, true, "", true)
 	m.uiState.Tabs.SetActive(0)
 	m.uiState.ViewMode = "events"
-	m.uiState.ShowDetails = true
-	m.uiState.Width, m.uiState.Height = 120, 30
+	m.uiState.EventShowDetails = true
+	m.uiState.Width, m.uiState.Height = 160, 30
 
 	dns := events.NewDNSEvent(testEventEnvelope("dns-1", 1))
 	http := events.NewHTTPEvent(testEventEnvelope("http-2", 2))
 	m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: types.EventBatch{Events: []events.Event{dns, http}}})
-	require.Equal(t, "dns-1", m.eventStore.SelectedID())
-	m, _ = m.handleMoveDown()
 	require.Equal(t, "http-2", m.eventStore.SelectedID())
+	m, _ = m.handleMoveUp()
+	require.Equal(t, "dns-1", m.eventStore.SelectedID())
 
 	m.uiState.SelectedProtocol = components.Protocol{Name: "DNS"}
 	m.setCaptureView("events")
@@ -72,6 +72,101 @@ func TestEventBatchFilteringNavigationAndMissingPacketNotice(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
 	require.NotNil(t, updated)
+}
+
+func TestEventListMouseWheelMovesSelection(t *testing.T) {
+	m := NewModel(10, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(0)
+	m.uiState.ViewMode = "events"
+	m.uiState.EventShowDetails = false
+	m.uiState.Width, m.uiState.Height = 120, 30
+	m.eventStore.AddBatch([]events.Event{
+		events.NewDNSEvent(testEventEnvelope("one", 1)),
+		events.NewDNSEvent(testEventEnvelope("two", 2)),
+	})
+	m.syncEventsView()
+	require.Equal(t, "two", m.eventStore.SelectedID())
+
+	m, _ = m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 20, Y: 10})
+	require.Equal(t, "one", m.eventStore.SelectedID())
+	m, _ = m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: 20, Y: 10})
+	require.Equal(t, "two", m.eventStore.SelectedID())
+}
+
+func TestEventListMouseClickSelectsVisibleRow(t *testing.T) {
+	m := NewModel(10, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(0)
+	m.uiState.ViewMode = "events"
+	m.uiState.Width, m.uiState.Height = 120, 30
+	m.eventStore.AddBatch([]events.Event{
+		events.NewDNSEvent(testEventEnvelope("one", 1)),
+		events.NewDNSEvent(testEventEnvelope("two", 2)),
+	})
+	m.syncEventsView()
+	_ = m.renderCaptureTab(20)
+
+	// Capture content begins at Y=6; the border and header put row 0 at Y=8.
+	m, _ = m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 20, Y: 8})
+	require.Equal(t, "one", m.eventStore.SelectedID())
+}
+
+func TestClickingBottomEventReenablesAutoScroll(t *testing.T) {
+	m := NewModel(10, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(0)
+	m.uiState.ViewMode = "events"
+	m.uiState.Width, m.uiState.Height = 120, 30
+	m.eventStore.AddBatch([]events.Event{
+		events.NewDNSEvent(testEventEnvelope("one", 1)),
+		events.NewDNSEvent(testEventEnvelope("two", 2)),
+	})
+	m.eventStore.SelectPrevious()
+	m.syncEventsView()
+	_ = m.renderCaptureTab(20)
+
+	// Row 1 is the last visible event.
+	m, _ = m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 20, Y: 9})
+	require.Equal(t, "two", m.eventStore.SelectedID())
+	m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: types.EventBatch{Events: []events.Event{
+		events.NewDNSEvent(testEventEnvelope("three", 3)),
+	}}})
+	require.Equal(t, "three", m.eventStore.SelectedID())
+}
+
+func TestEventListDoubleClickTogglesEventDetails(t *testing.T) {
+	m := NewModel(10, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(0)
+	m.uiState.ViewMode = "events"
+	m.uiState.Width, m.uiState.Height = 180, 30
+	m.eventStore.AddEvent(events.NewDNSEvent(testEventEnvelope("one", 1)))
+	m.syncEventsView()
+	_ = m.renderCaptureTab(20)
+	click := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 20, Y: 8}
+
+	m, _ = m.handleMouse(click)
+	require.False(t, m.uiState.EventShowDetails)
+	m, _ = m.handleMouse(click)
+	require.True(t, m.uiState.EventShowDetails)
+	require.False(t, m.uiState.ShowDetails)
+
+	m, _ = m.handleMouse(click)
+	require.True(t, m.uiState.EventShowDetails, "a third click starts a new double-click sequence")
+}
+
+func TestPacketAndEventDetailsToggleIndependently(t *testing.T) {
+	m := NewModel(10, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(0)
+	m.uiState.ShowDetails = true
+	m.uiState.EventShowDetails = false
+	m.uiState.ViewMode = "events"
+
+	m, _ = m.handleDKey()
+	require.True(t, m.uiState.ShowDetails)
+	require.True(t, m.uiState.EventShowDetails)
+
+	m.uiState.ViewMode = "packets"
+	m, _ = m.handleDKey()
+	require.False(t, m.uiState.ShowDetails)
+	require.True(t, m.uiState.EventShowDetails)
 }
 
 func testEventEnvelope(id string, sequence uint64) events.Envelope {
@@ -94,7 +189,7 @@ func testEventEnvelope(id string, sequence uint64) events.Envelope {
 func TestEventsDetailsRecognizesBufferedRelatedPacket(t *testing.T) {
 	m := NewModel(2, 8, "", "", nil, false, true, "", true)
 	m.uiState.ViewMode = "events"
-	m.uiState.ShowDetails = true
+	m.uiState.EventShowDetails = true
 	m.uiState.Width = 120
 	m.packetStore.AddPacket(components.PacketDisplay{SrcIP: "192.0.2.1", DstIP: "198.51.100.2", SrcPort: "12345", DstPort: "80", NodeID: "processor"})
 	m.eventStore.AddEvent(events.NewHTTPEvent(testEventEnvelope("http-1", 1)))

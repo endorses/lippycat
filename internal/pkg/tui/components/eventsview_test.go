@@ -3,10 +3,12 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +19,136 @@ func dnsEvent(id, query string) events.DNSEvent {
 	event.Query = query
 	event.QType = 1
 	return event
+}
+
+func TestEventsViewTimelineUsesPacketListChrome(t *testing.T) {
+	view := NewEventsView()
+	view.SetEvents([]EventItem{{Event: dnsEvent("one", "example.org"), ArrivalSequence: 1}})
+
+	rendered := view.RenderTimeline(100, 20, false)
+	assert.Equal(t, 100, lipgloss.Width(rendered))
+	assert.Equal(t, 20, lipgloss.Height(rendered))
+	assert.Contains(t, rendered, "Time")
+	assert.Contains(t, rendered, "Event")
+	assert.Contains(t, rendered, "Origin")
+	assert.Contains(t, rendered, "Src IP:Port -> Dst IP:Port")
+	assert.NotContains(t, rendered, "> 00:00:01.000")
+	assert.Contains(t, rendered, "╭")
+	assert.Contains(t, rendered, "╯")
+}
+
+func TestEventsViewSplitPanesExposeFocusAndFixedSize(t *testing.T) {
+	view := NewEventsView()
+	view.SetEvents([]EventItem{{Event: dnsEvent("one", "example.org"), ArrivalSequence: 1}})
+
+	timeline := view.RenderTimeline(100, 20, true)
+	details := view.RenderDetails(60, 20, false)
+	assert.Equal(t, 100, lipgloss.Width(timeline))
+	assert.Equal(t, 20, lipgloss.Height(timeline))
+	assert.Equal(t, 62, lipgloss.Width(details))
+	assert.Equal(t, 20, lipgloss.Height(details))
+	assert.Contains(t, timeline, "┏")
+	assert.Contains(t, details, "╭")
+
+	focusedDetails := view.RenderDetails(60, 20, true)
+	assert.Equal(t, 62, lipgloss.Width(focusedDetails))
+	assert.Contains(t, focusedDetails, "┏")
+}
+
+func TestEventTimelineRowsKeepColumnsAlignedWithLongValues(t *testing.T) {
+	header := eventTimelineHeader(120)
+	row := eventTimelineRow(
+		"12:34:56.789",
+		"unexpectedly-long-event-kind",
+		"unexpectedly-long-processor-node-name",
+		"2001:db8:ffff:ffff:ffff:ffff:ffff:ffff:65535 -> 2001:db8::1:65535",
+		"summary",
+		120,
+	)
+
+	kindStart := eventTimeWidth + 1
+	columns := eventTimelineColumnWidths(120)
+	originStart := kindStart + columns.kind + 1
+	flowStart := originStart + columns.origin + 1
+	infoStart := flowStart + columns.flow + 1
+	headerRunes := []rune(header)
+	rowRunes := []rune(row)
+	assert.Equal(t, "Event", strings.TrimSpace(string(headerRunes[kindStart:originStart-1])))
+	assert.Equal(t, "Origin", strings.TrimSpace(string(headerRunes[originStart:flowStart-1])))
+	assert.Equal(t, "Src IP:Port -> Dst IP:Port", strings.TrimSpace(string(headerRunes[flowStart:infoStart-1])))
+	assert.Equal(t, "Info", strings.TrimSpace(string(headerRunes[infoStart:])))
+	assert.Equal(t, "summary", strings.TrimSpace(string(rowRunes[infoStart:])))
+	assert.Equal(t, 120, len(rowRunes))
+}
+
+func TestEventTimelineFlowColumnFitsFullIPv4Endpoints(t *testing.T) {
+	flow := "255.255.255.255:65535 -> 255.255.255.255:65535"
+	row := []rune(eventTimelineRow("12:34:56.789", "tls", "processor", flow, "TLS 1.3", 140))
+	columns := eventTimelineColumnWidths(140)
+	flowStart := columns.time + 1 + columns.kind + 1 + columns.origin + 1
+	infoStart := flowStart + columns.flow + 1
+
+	assert.Equal(t, flow, strings.TrimSpace(string(row[flowStart:infoStart-1])))
+	assert.Equal(t, "TLS 1.3", strings.TrimSpace(string(row[infoStart:])))
+}
+
+func TestEventTimelineInfoStartsAtFixedColumn(t *testing.T) {
+	columns := eventTimelineColumnWidths(140)
+	infoStart := columns.time + 1 + columns.kind + 1 + columns.origin + 1 + columns.flow + 1
+	for _, info := range []string{
+		"query qtype=1 rcode=0",
+		"  TLS 1.3 ",
+		" GET example.org status=200",
+		"  S0 0s",
+	} {
+		row := []rune(eventTimelineRow("12:34:56.789", "event", "processor", "192.0.2.1:1 -> 192.0.2.2:2", info, 140))
+		assert.Equal(t, strings.TrimSpace(info), strings.TrimSpace(string(row[infoStart:])))
+		assert.NotEqual(t, ' ', row[infoStart])
+	}
+}
+
+func TestEventTimelineColumnsContractResponsively(t *testing.T) {
+	wide := eventTimelineColumnWidths(140)
+	narrow := eventTimelineColumnWidths(80)
+
+	assert.Equal(t, eventKindWidth, wide.kind)
+	assert.Equal(t, eventOriginWidth, wide.origin)
+	assert.Equal(t, eventFlowWidth, wide.flow)
+	assert.Equal(t, eventKindMinWidth, narrow.kind)
+	assert.Equal(t, eventOriginMinWidth, narrow.origin)
+	assert.GreaterOrEqual(t, narrow.flow, eventFlowMinWidth)
+	assert.Equal(t, 80, len([]rune(eventTimelineRow("12:34:56.789", "file_metadata", "processor-long", "192.0.2.1:12345 -> 198.51.100.2:443", "summary", 80))))
+}
+
+func TestEventsViewUsesPacketProtocolColors(t *testing.T) {
+	view := NewEventsView()
+	assert.Equal(t, view.theme.TLSColor, view.eventColor(events.KindTLS))
+	assert.Equal(t, view.theme.HTTPColor, view.eventColor(events.KindHTTP))
+	assert.Equal(t, view.theme.DNSColor, view.eventColor(events.KindDNS))
+	assert.Equal(t, view.theme.TCPColor, view.eventColor(events.KindConn))
+	assert.Equal(t, view.theme.Foreground, view.eventColor(events.KindSMTP))
+}
+
+func TestEventsViewSelectionMovesAboveBottomWithoutScrollingViewport(t *testing.T) {
+	view := NewEventsView()
+	items := make([]EventItem, 20)
+	for i := range items {
+		items[i] = EventItem{Event: dnsEvent(fmt.Sprintf("event-%d", i), "example.org"), ArrivalSequence: uint64(i + 1)}
+	}
+	view.SetEvents(items)
+	view.SetSelectedID("event-19")
+	view.RenderTimeline(100, 10, false)
+	require.Equal(t, 15, view.offset)
+
+	view.SetSelectedID("event-18")
+	view.RenderTimeline(100, 10, false)
+	assert.Equal(t, 15, view.offset, "moving up should leave the bottom row visible")
+
+	items = append(items, EventItem{Event: dnsEvent("event-20", "example.org"), ArrivalSequence: 21})
+	view.SetEvents(items)
+	view.SetSelectedID("event-20")
+	view.RenderTimeline(100, 10, false)
+	assert.Equal(t, 16, view.offset, "following a new last event should scroll by one row")
 }
 
 func TestEventsViewNarrowTimelineAndStableSelection(t *testing.T) {
@@ -41,12 +173,12 @@ func TestEventsViewSanitizesAndBoundsDetails(t *testing.T) {
 	view := NewEventsView()
 	view.SetEvents([]EventItem{{Event: event, ArrivalSequence: 1}})
 	view.SetRelatedPacketsAvailable(false)
-	details := view.RenderDetails(80, 100)
+	details := view.RenderDetails(80, 100, false)
 	assert.NotContains(t, details, "bad\nquery")
 	assert.Contains(t, details, "query")
 	assert.Contains(t, details, "Related packets are no longer buffered.")
 	for _, line := range strings.Split(details, "\n") {
-		assert.LessOrEqual(t, len([]rune(line)), 80)
+		assert.LessOrEqual(t, len([]rune(line)), 82)
 	}
 }
 
@@ -99,7 +231,7 @@ func TestEventsViewDetailsExposeIdentityAndProvenance(t *testing.T) {
 	event.Query = "example.org"
 	view := NewEventsView()
 	view.SetEvents([]EventItem{{Event: event, ArrivalSequence: 9}})
-	details := view.RenderDetails(120, 100)
+	details := view.RenderDetails(120, 100, false)
 	for _, expected := range []string{"event-id", "producer-session", "event_sequence: 42", "arrival_sequence: 9", "capture_source: remote", "interface_name: eth0", "input_file: capture.pcap", "processor-a"} {
 		assert.Contains(t, details, expected)
 	}

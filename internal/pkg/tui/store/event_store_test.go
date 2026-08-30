@@ -42,6 +42,27 @@ func TestEventStoreSelectionSurvivesAppendAndEviction(t *testing.T) {
 	assert.Equal(t, "three", store.SelectedID(), "evicted selection moves to the closest retained arrival")
 }
 
+func TestEventStoreFollowsLatestUntilUserNavigatesAway(t *testing.T) {
+	store := NewEventStore(10)
+	store.AddBatch([]events.Event{
+		testEvent("one", "a", events.KindDNS),
+		testEvent("two", "a", events.KindDNS),
+	})
+	assert.Equal(t, "two", store.SelectedID())
+
+	store.AddEvent(testEvent("three", "a", events.KindDNS))
+	assert.Equal(t, "three", store.SelectedID())
+
+	store.SelectPrevious()
+	assert.Equal(t, "two", store.SelectedID())
+	store.AddEvent(testEvent("four", "a", events.KindDNS))
+	assert.Equal(t, "two", store.SelectedID())
+
+	store.SelectLast()
+	store.AddEvent(testEvent("five", "a", events.KindDNS))
+	assert.Equal(t, "five", store.SelectedID())
+}
+
 func TestEventStorePauseResetFiltersAndLoss(t *testing.T) {
 	store := NewEventStore(4)
 	store.SetPaused(true)

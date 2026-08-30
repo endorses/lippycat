@@ -65,6 +65,23 @@ func TestRuntimeEOFEmitsPartialConnectionAndPreservesIdentity(t *testing.T) {
 	require.Equal(t, "fixture.pcap", s.events[0].Envelope().Provenance.InputFile)
 }
 
+func TestObserveCapturedPreservesPacketInterfaceProvenance(t *testing.T) {
+	r, d, sink := testRuntime(t, 16)
+	p := packet(time.Unix(10, 0))
+	p.InterfaceName = "eth7"
+	p.InterfaceIndex = 7
+	require.NoError(t, r.ObserveCaptured(Source{NodeID: "node", CaptureSource: "hunter-a"}, []*data.CapturedPacket{p}))
+	r.EOF()
+	require.NoError(t, d.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.NotEmpty(t, sink.events)
+	provenance := sink.events[0].Envelope().Provenance
+	require.Equal(t, "eth7", provenance.InterfaceName)
+	require.Equal(t, uint32(7), provenance.InterfaceIndex)
+}
+
 func TestRuntimeResetFlushesOldFlowAndAcceptsNewInput(t *testing.T) {
 	r, d, s := testRuntime(t, 16)
 	source := Source{NodeID: "node", CaptureSource: "live"}
@@ -317,6 +334,46 @@ func TestRuntimeReassemblesSegmentedApplicationProtocols(t *testing.T) {
 			tc.validate(t, matched[0])
 		})
 	}
+}
+
+func TestRuntimeReassemblesTLSHandshakeAcrossRecords(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 32)
+	base := time.Unix(125, 0)
+	record := testClientHello()
+	handshake := record[5:]
+	split := 20
+	first := []byte{22, 3, 1}
+	first = binary.BigEndian.AppendUint16(first, uint16(split))
+	first = append(first, handshake[:split]...)
+	second := []byte{22, 3, 1}
+	second = binary.BigEndian.AppendUint16(second, uint16(len(handshake)-split))
+	second = append(second, handshake[split:]...)
+
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 40000, 443, 1000, true, nil, base)))
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 40000, 443, 1001, false, first, base.Add(time.Second))))
+	require.NoError(t, dispatcher.Flush(context.Background()))
+	sink.mu.Lock()
+	for _, event := range sink.events {
+		require.NotEqual(t, events.KindTLS, event.Kind(), "incomplete TLS handshake emitted")
+	}
+	sink.mu.Unlock()
+
+	completion := base.Add(2 * time.Second)
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 40000, 443, 1001+uint32(len(first)), false, second, completion)))
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var matched []events.TLSEvent
+	for _, event := range sink.events {
+		if event.Kind() == events.KindTLS {
+			matched = append(matched, event.(events.TLSEvent))
+		}
+	}
+	require.Len(t, matched, 1)
+	require.Equal(t, "TLS 1.2", matched[0].Version)
+	require.Equal(t, completion, matched[0].Envelope().Timestamp)
 }
 
 func TestObserveCapturedReassemblesPacketLocalMetadataOnNonstandardPort(t *testing.T) {

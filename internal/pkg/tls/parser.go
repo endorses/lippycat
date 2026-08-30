@@ -107,12 +107,31 @@ func (p *Parser) ParsePayload(payload []byte) *types.TLSMetadata {
 		return nil
 	}
 
-	// Parse handshake message (inside the record)
+	// Parse a complete handshake message contained in this record. Stateful
+	// callers that reassemble a handshake spanning records use ParseHandshake.
 	if len(payload) < 10 {
 		return nil
 	}
+	handshakeLength := int(payload[6])<<16 | int(payload[7])<<8 | int(payload[8])
+	messageEnd := 5 + 4 + handshakeLength
+	if messageEnd > int(recordLength)+5 {
+		return nil
+	}
+	return p.ParseHandshake(recordVersion, payload[5:messageEnd])
+}
 
-	handshakeType := payload[5]
+// ParseHandshake parses one complete TLS handshake message after record-layer
+// reassembly. The slice starts at the handshake type and includes its header.
+func (p *Parser) ParseHandshake(recordVersion uint16, handshake []byte) *types.TLSMetadata {
+	if len(handshake) < 4 {
+		return nil
+	}
+	handshakeLength := int(handshake[1])<<16 | int(handshake[2])<<8 | int(handshake[3])
+	if handshakeLength+4 != len(handshake) {
+		return nil
+	}
+
+	handshakeType := handshake[0]
 
 	metadata := &types.TLSMetadata{
 		RecordVersion: recordVersion,
@@ -121,10 +140,10 @@ func (p *Parser) ParsePayload(payload []byte) *types.TLSMetadata {
 
 	switch handshakeType {
 	case HandshakeTypeClientHello:
-		p.parseClientHello(payload[5:], metadata)
+		p.parseClientHello(handshake, metadata)
 	case HandshakeTypeServerHello:
 		metadata.IsServer = true
-		p.parseServerHello(payload[5:], metadata)
+		p.parseServerHello(handshake, metadata)
 	default:
 		// For other handshake types, just set basic info
 		metadata.Version = p.versionString(recordVersion)

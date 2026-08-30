@@ -276,6 +276,11 @@ The same audit made transported TCP metadata pass through bounded reassembly
 instead of bypassing it, retained analyzer hints for protocols on non-standard
 ports, and ensured quitting from every TUI tab performs graceful capture and
 event-pipeline shutdown.
+A renewed Phase 4 audit preserved per-packet interface name and index on
+transported processor/tap events and corrected TLS framing so handshake
+messages split across multiple TLS records are emitted only after complete
+reassembly, with the final-record capture timestamp. Regression tests and the
+race-enabled event-analysis, TLS, TUI, sniff, and processor suites pass.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

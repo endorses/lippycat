@@ -233,6 +233,15 @@ func (r *Runtime) observeCapturedWithHint(source Source, raw *data.CapturedPacke
 	if raw.TimestampNs == 0 {
 		ts = r.cfg.Now()
 	}
+	// Transported captures carry interface provenance per packet. Preserve an
+	// explicitly supplied source value, but fill it from the packet when the
+	// batch-level source cannot describe packets from multiple interfaces.
+	if source.InterfaceName == "" {
+		source.InterfaceName = raw.InterfaceName
+	}
+	if source.InterfaceIndex == 0 {
+		source.InterfaceIndex = raw.InterfaceIndex
+	}
 	scope := source.CaptureScope
 	if scope == "" {
 		scope = events.CaptureScopeFull

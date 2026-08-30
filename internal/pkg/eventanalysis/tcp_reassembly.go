@@ -48,6 +48,8 @@ type applicationStream struct {
 	smtpBodyTruncated bool
 	partial           bool
 	protocolHint      string
+	tlsHandshake      []byte
+	tlsRecordVersion  uint16
 }
 
 func (*applicationStream) Accept(_ *layers.TCP, _ gopacket.CaptureInfo, _ reassembly.TCPFlowDirection, _ reassembly.Sequence, start *bool, _ reassembly.AssemblerContext) bool {
@@ -220,9 +222,36 @@ func (s *applicationStream) parseTLS(ctx reassemblyContext, ci gopacket.CaptureI
 		}
 		frame := s.buffer[:length]
 		s.buffer = s.buffer[length:]
-		metadata := tlsparser.NewParser().ParsePayload(frame)
-		if metadata != nil {
-			s.emit(ctx, ci, protocolmeta.TLSToProto(metadata), nil, nil)
+		if frame[0] != tlsparser.RecordTypeHandshake {
+			continue
+		}
+		if len(s.tlsHandshake)+len(frame)-5 > maxReassembledApplicationBytes {
+			s.tlsHandshake = s.tlsHandshake[:0]
+			s.partial = true
+			s.runtime.stats.Invalid++
+			continue
+		}
+		if len(s.tlsHandshake) == 0 {
+			s.tlsRecordVersion = binary.BigEndian.Uint16(frame[1:3])
+		}
+		s.tlsHandshake = append(s.tlsHandshake, frame[5:]...)
+		for len(s.tlsHandshake) >= 4 {
+			handshakeLength := int(s.tlsHandshake[1])<<16 | int(s.tlsHandshake[2])<<8 | int(s.tlsHandshake[3])
+			messageEnd := handshakeLength + 4
+			if messageEnd > maxReassembledApplicationBytes {
+				s.tlsHandshake = s.tlsHandshake[:0]
+				s.partial = true
+				s.runtime.stats.Invalid++
+				break
+			}
+			if len(s.tlsHandshake) < messageEnd {
+				break
+			}
+			metadata := tlsparser.NewParser().ParseHandshake(s.tlsRecordVersion, s.tlsHandshake[:messageEnd])
+			s.tlsHandshake = s.tlsHandshake[messageEnd:]
+			if metadata != nil {
+				s.emit(ctx, ci, protocolmeta.TLSToProto(metadata), nil, nil)
+			}
 		}
 	}
 }

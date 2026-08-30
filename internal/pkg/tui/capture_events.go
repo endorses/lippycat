@@ -513,6 +513,8 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 
 	// Capture insecure flag for use in goroutine
 	insecure := m.insecure
+	previousEventStreamID := proc.EventStreamID
+	previousEventDeliverySequence := proc.EventDeliverySeq
 
 	// Attempt connection in background
 	go func() {
@@ -534,13 +536,15 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 		}
 
 		clientConfig := &remotecapture.ClientConfig{
-			Address:               msg.Address,
-			TLSEnabled:            tlsEnabled,
-			TLSCAFile:             viper.GetString("watch.tls.ca_file"),
-			TLSCertFile:           viper.GetString("watch.tls.cert_file"),
-			TLSKeyFile:            viper.GetString("watch.tls.key_file"),
-			TLSSkipVerify:         viper.GetBool("watch.tls.skip_verify"),
-			TLSServerNameOverride: viper.GetString("watch.tls.server_name_override"),
+			Address:                       msg.Address,
+			TLSEnabled:                    tlsEnabled,
+			TLSCAFile:                     viper.GetString("watch.tls.ca_file"),
+			TLSCertFile:                   viper.GetString("watch.tls.cert_file"),
+			TLSKeyFile:                    viper.GetString("watch.tls.key_file"),
+			TLSSkipVerify:                 viper.GetBool("watch.tls.skip_verify"),
+			TLSServerNameOverride:         viper.GetString("watch.tls.server_name_override"),
+			PreviousEventStreamID:         previousEventStreamID,
+			PreviousEventDeliverySequence: previousEventDeliverySequence,
 		}
 
 		client, err := remotecapture.NewClientWithConfig(clientConfig, handler)
@@ -693,6 +697,9 @@ func (m Model) handleProcessorDisconnectedMsg(msg ProcessorDisconnectedMsg) (Mod
 
 		// Clean up old client
 		if proc.Client != nil {
+			if cursorClient, ok := proc.Client.(interface{ EventCursor() (string, uint64) }); ok {
+				proc.EventStreamID, proc.EventDeliverySeq = cursorClient.EventCursor()
+			}
 			proc.Client.Close()
 			proc.Client = nil
 		}

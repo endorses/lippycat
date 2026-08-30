@@ -35,6 +35,10 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 	streamCtx, streamCancel := context.WithCancel(c.ctx)
 	c.streamCancel = streamCancel
 	c.currentHunters = hunterIDs
+	c.eventCursorMu.Lock()
+	c.eventStreamGeneration++
+	eventStreamGeneration := c.eventStreamGeneration
+	c.eventCursorMu.Unlock()
 	c.streamMu.Unlock()
 
 	// Subscribe to packet stream using the new SubscribePackets RPC
@@ -51,7 +55,7 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 
 	// Event delivery is an independent, best-effort side stream. Older nodes do
 	// not implement EventService; that must never prevent packet monitoring.
-	go c.startEventStream(streamCtx, hunterIDs)
+	go c.startEventStream(streamCtx, hunterIDs, eventStreamGeneration)
 
 	// Start goroutine to receive packets
 	// Note: gRPC keepalive (30s ping + 20s timeout) detects dead connections
@@ -125,7 +129,7 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 	return nil
 }
 
-func (c *Client) startEventStream(ctx context.Context, nodeIDs []string) {
+func (c *Client) startEventStream(ctx context.Context, nodeIDs []string, generation uint64) {
 	if nodeIDs != nil && len(nodeIDs) == 0 {
 		return
 	}
@@ -147,10 +151,14 @@ func (c *Client) startEventStream(ctx context.Context, nodeIDs []string) {
 		return
 	}
 
-	go c.receiveEvents(ctx, stream)
+	go c.receiveEventsGeneration(ctx, stream, generation)
 }
 
 func (c *Client) receiveEvents(ctx context.Context, stream eventsv1.EventService_SubscribeEventsClient) {
+	c.receiveEventsGeneration(ctx, stream, 0)
+}
+
+func (c *Client) receiveEventsGeneration(ctx context.Context, stream eventsv1.EventService_SubscribeEventsClient, generation uint64) {
 	var streamID string
 	var deliverySequence uint64
 	started := false
@@ -163,6 +171,9 @@ func (c *Client) receiveEvents(ctx context.Context, stream eventsv1.EventService
 			// The packet subscription remains authoritative for connection health.
 			// Surface an event-only transport gap without triggering reconnect.
 			c.deliverEventBatch(types.EventBatch{Losses: []types.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1}}, StreamID: streamID, DeliverySequence: deliverySequence})
+			return
+		}
+		if ctx.Err() != nil || !c.isCurrentEventStream(generation) {
 			return
 		}
 		if message == nil || message.DeliverySequence == 0 || message.DeliverySequence != deliverySequence+1 {
@@ -207,10 +218,28 @@ func (c *Client) receiveEvents(ctx context.Context, stream eventsv1.EventService
 		}
 
 		c.eventCursorMu.Lock()
-		c.eventStreamID = streamID
-		c.eventDeliverySequence = deliverySequence
+		if generation == 0 || generation == c.eventStreamGeneration {
+			c.eventStreamID = streamID
+			c.eventDeliverySequence = deliverySequence
+		}
 		c.eventCursorMu.Unlock()
 	}
+}
+
+func (c *Client) isCurrentEventStream(generation uint64) bool {
+	if generation == 0 {
+		return true
+	}
+	c.eventCursorMu.Lock()
+	defer c.eventCursorMu.Unlock()
+	return generation == c.eventStreamGeneration
+}
+
+// EventCursor returns the last validated event-stream delivery boundary.
+func (c *Client) EventCursor() (string, uint64) {
+	c.eventCursorMu.Lock()
+	defer c.eventCursorMu.Unlock()
+	return c.eventStreamID, c.eventDeliverySequence
 }
 
 func (c *Client) deliverEventBatch(batch types.EventBatch) {

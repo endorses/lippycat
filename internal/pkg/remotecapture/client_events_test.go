@@ -72,3 +72,29 @@ func TestConvertEventLossesPreservesIdentityAndRanges(t *testing.T) {
 	require.Equal(t, uint64(4), losses[0].SequenceRanges[0].First)
 	require.Equal(t, uint64(6), losses[0].SequenceRanges[0].Last)
 }
+
+func TestCanceledEventStreamCannotOverwriteCurrentCursor(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		ctx:                   context.Background(),
+		handler:               handler,
+		eventStreamID:         "current",
+		eventDeliverySequence: 9,
+		eventStreamGeneration: 2,
+	}
+	stream := &fakeEventStream{messages: []*eventsv1.EventSubscriptionMessage{{
+		DeliverySequence: 1,
+		Message: &eventsv1.EventSubscriptionMessage_Control{Control: &eventsv1.EventSubscriptionControl{
+			Kind:             eventsv1.SubscriptionControlKind_SUBSCRIPTION_CONTROL_KIND_STARTED,
+			StreamId:         "stale",
+			DeliverySequence: 1,
+		}},
+	}}}
+
+	client.receiveEventsGeneration(context.Background(), stream, 1)
+
+	require.Empty(t, handler.EventBatches)
+	streamID, sequence := client.EventCursor()
+	require.Equal(t, "current", streamID)
+	require.Equal(t, uint64(9), sequence)
+}

@@ -53,6 +53,10 @@ type ClientConfig struct {
 	TLSKeyFile            string // Path to client key file (for mutual TLS)
 	TLSSkipVerify         bool   // Skip certificate verification (insecure, for testing only)
 	TLSServerNameOverride string // Override server name for certificate verification
+
+	// Event cursor resumes best-effort event delivery after a client reconnect.
+	PreviousEventStreamID         string
+	PreviousEventDeliverySequence uint64
 }
 
 // Client wraps gRPC client for remote packet capture
@@ -86,6 +90,7 @@ type Client struct {
 	eventCursorMu         sync.Mutex
 	eventStreamID         string
 	eventDeliverySequence uint64
+	eventStreamGeneration uint64
 }
 
 // rtpQualityStats tracks RTP quality metrics for a call
@@ -176,17 +181,19 @@ func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Cli
 	}
 
 	client := &Client{
-		conn:        conn,
-		dataClient:  data.NewDataServiceClient(conn),
-		eventClient: eventsv1.NewEventServiceClient(conn),
-		mgmtClient:  management.NewManagementServiceClient(conn),
-		handler:     handler,
-		ctx:         ctx,
-		cancel:      cancel,
-		addr:        config.Address,
-		interfaces:  make(map[string][]string),
-		calls:       make(map[string]*types.CallInfo),
-		rtpStats:    make(map[string]*rtpQualityStats),
+		conn:                  conn,
+		dataClient:            data.NewDataServiceClient(conn),
+		eventClient:           eventsv1.NewEventServiceClient(conn),
+		mgmtClient:            management.NewManagementServiceClient(conn),
+		handler:               handler,
+		ctx:                   ctx,
+		cancel:                cancel,
+		addr:                  config.Address,
+		eventStreamID:         config.PreviousEventStreamID,
+		eventDeliverySequence: config.PreviousEventDeliverySequence,
+		interfaces:            make(map[string][]string),
+		calls:                 make(map[string]*types.CallInfo),
+		rtpStats:              make(map[string]*rtpQualityStats),
 	}
 
 	// Detect node type by checking if GetHunterStatus is available

@@ -41,6 +41,8 @@ type ProcessorConnection struct {
 	UnreachableReason  string              // Reason why processor is unreachable (empty if reachable)
 	NodeType           management.NodeType // TAP captures locally, PROCESSOR receives from hunters
 	CaptureInterfaces  []string            // Interfaces being captured (TAP only)
+	EventStreamID      string              // Last validated event stream, retained across reconnects
+	EventDeliverySeq   uint64              // Last validated event delivery sequence
 }
 
 // ConnectionManager manages remote processor connections

@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"errors"
 	"net/netip"
 	"strings"
 	"testing"
@@ -11,9 +12,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/tui/store"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/require"
 )
+
+type cursorClientStub struct {
+	closed bool
+}
+
+func (c *cursorClientStub) Close()                        { c.closed = true }
+func (c *cursorClientStub) EventCursor() (string, uint64) { return "previous-stream", 42 }
 
 func TestCaptureViewCycleIncludesEventsOnlyForRemote(t *testing.T) {
 	remote := NewModel(8, 8, "", "", nil, false, true, "", true)
@@ -201,4 +210,44 @@ func TestEventLossCountSurfacesCountlessGaps(t *testing.T) {
 	require.Equal(t, uint64(1), eventLossCount(types.EventLoss{}))
 	require.Equal(t, uint64(5), eventLossCount(types.EventLoss{SequenceRanges: []types.EventSequenceRange{{First: 4, Last: 8}}}))
 	require.Equal(t, uint64(7), eventLossCount(types.EventLoss{Count: 7, SequenceRanges: []types.EventSequenceRange{{First: 4, Last: 8}}}))
+}
+
+func TestSettingsTabPauseAlsoPausesEventStore(t *testing.T) {
+	m := NewModel(2, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(3)
+
+	m, _ = m.handleKeyboard(tea.KeyMsg{Type: tea.KeySpace})
+	require.True(t, m.uiState.Paused)
+	require.True(t, m.eventStore.Paused())
+
+	m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: types.EventBatch{Events: []events.Event{
+		events.NewDNSEvent(testEventEnvelope("paused", 1)),
+	}}})
+	require.Empty(t, m.eventStore.Events())
+	require.Equal(t, uint64(1), m.eventStore.Stats().Paused)
+
+	// Restore the process-global capture signal for other tests.
+	m, _ = m.handleKeyboard(tea.KeyMsg{Type: tea.KeySpace})
+	require.False(t, m.eventStore.Paused())
+}
+
+func TestProcessorDisconnectRetainsEventCursor(t *testing.T) {
+	m := NewModel(2, 8, "", "", nil, false, true, "", true)
+	client := &cursorClientStub{}
+	m.connectionMgr.AddProcessor("processor:55555", &store.ProcessorConnection{
+		Address: "processor:55555",
+		State:   store.ProcessorStateConnected,
+		Client:  client,
+	})
+
+	m, _ = m.handleProcessorDisconnectedMsg(ProcessorDisconnectedMsg{
+		Address: "processor:55555",
+		Error:   errors.New("connection lost"),
+	})
+
+	processor, ok := m.connectionMgr.GetProcessor("processor:55555")
+	require.True(t, ok)
+	require.Equal(t, "previous-stream", processor.EventStreamID)
+	require.Equal(t, uint64(42), processor.EventDeliverySeq)
+	require.True(t, client.closed)
 }

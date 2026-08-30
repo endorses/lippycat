@@ -96,30 +96,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			// Suspend the process
 			return m, tea.Suspend
 		case " ": // Allow space to pause/resume capture
-			m.uiState.Paused = !m.uiState.Paused
-			// Notify capture pipeline to pause/resume
-			pauseSignal := globalCaptureState.GetPauseSignal()
-			if m.uiState.Paused {
-				pauseSignal.Pause()
-			} else {
-				pauseSignal.Resume()
-			}
-			// Show toast when unpausing (existing tick will transition to fast tick)
-			if !m.uiState.Paused {
-				return m, m.uiState.Toast.ShowWithKey(
-					"Capture resumed",
-					components.ToastSuccess,
-					components.ToastDurationShort,
-					components.ToastKeyCaptureState,
-				)
-			}
-			// Show toast for pause
-			return m, m.uiState.Toast.ShowWithKey(
-				"Capture paused",
-				components.ToastInfo,
-				components.ToastDurationShort,
-				components.ToastKeyCaptureState,
-			)
+			return m.handlePauseResume()
 		case "t": // Allow theme toggle
 			return m.handleThemeToggle()
 		case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "p", "?":

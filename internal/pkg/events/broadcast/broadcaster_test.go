@@ -27,7 +27,7 @@ func TestBroadcasterSlowSubscriberDoesNotAffectOthers(t *testing.T) {
 	for sequence := uint64(1); sequence <= 3; sequence++ {
 		assert.Equal(t, sequence, (<-fast.Events()).Envelope().EventSequence)
 	}
-	assert.Equal(t, []Loss{{SourceNodeID: "node-a", Count: 2, Ranges: []SequenceRange{{First: 2, Last: 3}}}}, slow.ConsumeLosses())
+	assert.Equal(t, []Loss{{SourceNodeID: "node-a", Cause: LossCauseSubscriberOverflow, Count: 2, Ranges: []SequenceRange{{First: 2, Last: 3}}}}, slow.ConsumeLosses())
 	assert.Empty(t, slow.ConsumeLosses())
 }
 
@@ -83,6 +83,21 @@ func TestBroadcasterAlwaysExcludesFileContent(t *testing.T) {
 	require.NoError(t, b.HandleEvent(context.Background(), content))
 	assert.Empty(t, sub.Events())
 	assert.Zero(t, b.Stats().Published)
+}
+
+func TestBroadcasterReportsDispatcherDeliveryDrops(t *testing.T) {
+	b := New()
+	matching, err := b.Subscribe(Options{QueueSize: 1, Kinds: []events.Kind{events.KindDNS}, NodeIDs: []string{"node-a"}})
+	require.NoError(t, err)
+	filtered, err := b.Subscribe(Options{QueueSize: 1, Kinds: []events.Kind{events.KindHTTP}})
+	require.NoError(t, err)
+
+	b.HandleDroppedEvent(dnsEvent("node-a", 7))
+
+	assert.Equal(t, []Loss{{SourceNodeID: "node-a", Cause: LossCauseDispatcherOverflow, Count: 1, Ranges: []SequenceRange{{First: 7, Last: 7}}}}, matching.ConsumeLosses())
+	assert.Empty(t, filtered.ConsumeLosses())
+	assert.Equal(t, uint64(1), matching.Stats().Dropped)
+	assert.Equal(t, uint64(1), b.Stats().Dropped)
 }
 
 func TestSubscriptionCloseCleansUp(t *testing.T) {

@@ -31,9 +31,17 @@ type SequenceRange struct {
 	Last  uint64
 }
 
+type LossCause uint8
+
+const (
+	LossCauseSubscriberOverflow LossCause = iota + 1
+	LossCauseDispatcherOverflow
+)
+
 // Loss describes events omitted because one subscriber's queue was full.
 type Loss struct {
 	SourceNodeID string
+	Cause        LossCause
 	Count        uint64
 	Ranges       []SequenceRange
 }
@@ -86,7 +94,7 @@ func (b *Broadcaster) Subscribe(opts Options) (*Subscription, error) {
 		nodeIDs:      stringSet(opts.NodeIDs),
 		processorIDs: stringSet(opts.ProcessorNodeIDs),
 		project:      opts.Project,
-		losses:       make(map[string]*Loss),
+		losses:       make(map[lossKey]*Loss),
 		admittedAt:   time.Now().UTC(),
 	}
 	b.subscribers[s.id] = s
@@ -97,6 +105,26 @@ func (b *Broadcaster) Subscribe(opts Options) (*Subscription, error) {
 // processor-level backpressure. Subscriber loss is reported on the event
 // stream instead of slowing packet producers.
 func (b *Broadcaster) ExcludeFromFlowControl() {}
+
+// HandleDroppedEvent records an event that the dispatcher could not deliver
+// to this broadcaster. Every matching subscriber would otherwise miss the
+// event silently, so preserve it in that subscriber's loss report.
+func (b *Broadcaster) HandleDroppedEvent(event events.Event) {
+	if event == nil || event.Kind() == events.KindFileContent {
+		return
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed {
+		return
+	}
+	for _, subscriber := range b.subscribers {
+		if subscriber.matchesProjected(event) {
+			subscriber.recordDrop(event.Envelope(), LossCauseDispatcherOverflow)
+			b.dropped.Add(1)
+		}
+	}
+}
 
 // HandleEvent implements events.Sink. Fanout never waits for queue space.
 func (b *Broadcaster) HandleEvent(_ context.Context, event events.Event) error {
@@ -137,7 +165,7 @@ func (b *Broadcaster) HandleEvent(_ context.Context, event events.Event) error {
 			subscriber.enqueued.Add(1)
 			b.enqueued.Add(1)
 		default:
-			subscriber.recordDrop(event.Envelope())
+			subscriber.recordDrop(event.Envelope(), LossCauseSubscriberOverflow)
 			b.dropped.Add(1)
 		}
 	}
@@ -184,7 +212,7 @@ type Subscription struct {
 	dropped      atomic.Uint64
 	projectErrs  atomic.Uint64
 	lossMu       sync.Mutex
-	losses       map[string]*Loss
+	losses       map[lossKey]*Loss
 	admittedAt   time.Time
 }
 
@@ -213,11 +241,11 @@ func (s *Subscription) ConsumeLosses() []Loss {
 	s.lossMu.Lock()
 	defer s.lossMu.Unlock()
 	result := make([]Loss, 0, len(s.losses))
-	for source, loss := range s.losses {
-		copyLoss := Loss{SourceNodeID: source, Count: loss.Count, Ranges: append([]SequenceRange(nil), loss.Ranges...)}
+	for key, loss := range s.losses {
+		copyLoss := Loss{SourceNodeID: key.sourceNodeID, Cause: key.cause, Count: loss.Count, Ranges: append([]SequenceRange(nil), loss.Ranges...)}
 		result = append(result, copyLoss)
 	}
-	s.losses = make(map[string]*Loss)
+	s.losses = make(map[lossKey]*Loss)
 	return result
 }
 
@@ -239,14 +267,36 @@ func (s *Subscription) matches(event events.Event) bool {
 	return true
 }
 
-func (s *Subscription) recordDrop(env events.Envelope) {
+func (s *Subscription) matchesProjected(event events.Event) bool {
+	if !s.matches(event) {
+		return false
+	}
+	if s.project == nil {
+		return true
+	}
+	projected, include, err := s.project(event)
+	if err != nil {
+		s.projectErrs.Add(1)
+		s.owner.projectErrs.Add(1)
+		return false
+	}
+	return include && projected != nil && projected.Kind() != events.KindFileContent
+}
+
+type lossKey struct {
+	sourceNodeID string
+	cause        LossCause
+}
+
+func (s *Subscription) recordDrop(env events.Envelope, cause LossCause) {
 	s.dropped.Add(1)
 	s.lossMu.Lock()
 	defer s.lossMu.Unlock()
-	loss := s.losses[env.NodeID]
+	key := lossKey{sourceNodeID: env.NodeID, cause: cause}
+	loss := s.losses[key]
 	if loss == nil {
-		loss = &Loss{SourceNodeID: env.NodeID}
-		s.losses[env.NodeID] = loss
+		loss = &Loss{SourceNodeID: env.NodeID, Cause: cause}
+		s.losses[key] = loss
 	}
 	loss.Count++
 	if env.EventSequence == 0 {

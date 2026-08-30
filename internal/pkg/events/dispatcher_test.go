@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -170,6 +171,40 @@ func TestDispatcherExposesPerSinkQueueMetrics(t *testing.T) {
 type bestEffortTestSink struct{ testSink }
 
 func (*bestEffortTestSink) ExcludeFromFlowControl() {}
+
+type droppedEventTestSink struct {
+	testSink
+	dropped atomic.Uint64
+}
+
+func (s *droppedEventTestSink) HandleDroppedEvent(Event) { s.dropped.Add(1) }
+
+func TestDispatcherNotifiesSinkAboutDeliveryQueueOverflow(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	sink := &droppedEventTestSink{}
+	sink.handle = func(Event) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}
+	d, err := NewDispatcher(Config{QueueSize: 4, SinkQueueSize: 1})
+	require.NoError(t, err)
+	require.NoError(t, d.Register(sink))
+	require.NoError(t, d.Start(context.Background()))
+	require.True(t, d.Enqueue(NewDNSEvent(Envelope{})))
+	<-entered
+	require.True(t, d.Enqueue(NewDNSEvent(Envelope{})))
+	require.Eventually(t, func() bool { return d.Stats().Dispatched == 2 }, time.Second, time.Millisecond)
+	require.True(t, d.Enqueue(NewDNSEvent(Envelope{})))
+	require.Eventually(t, func() bool { return sink.dropped.Load() == 1 }, time.Second, time.Millisecond)
+	close(release)
+	require.NoError(t, d.Close(context.Background()))
+	require.Equal(t, uint64(1), d.Stats().SinkDropped)
+}
 
 func TestDispatcherExcludesBestEffortSinkQueueFromFlowControl(t *testing.T) {
 	d, err := NewDispatcher(Config{QueueSize: 3, SinkQueueSize: 2})

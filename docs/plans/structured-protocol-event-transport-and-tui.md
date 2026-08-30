@@ -114,6 +114,11 @@ An independent follow-up audit corrected the admission boundary so it is
 captured atomically with broadcaster registration, ensured sustained
 cross-producer delivery cannot starve overflow-gap reporting, and excluded the
 best-effort broadcaster sink queue from hunter flow-control pressure.
+A later dispatcher-boundary audit corrected a silent-loss path: when the
+bounded dispatcher queue feeding the broadcaster overflows, the broadcaster
+now records the dropped event for every matching subscriber so the event
+service emits an explicit subscriber gap instead of only incrementing a global
+sink-drop counter.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

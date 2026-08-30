@@ -284,7 +284,11 @@ func supportedEventKinds(includeFileMetadata bool) []eventsv1.EventKind {
 func subscriberLosses(losses []broadcast.Loss) []*eventsv1.EventLoss {
 	result := make([]*eventsv1.EventLoss, 0, len(losses))
 	for _, loss := range losses {
-		wire := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_SUBSCRIBER, Count: loss.Count, SourceNodeId: loss.SourceNodeID}
+		kind := eventsv1.LossKind_LOSS_KIND_SUBSCRIBER
+		if loss.Cause == broadcast.LossCauseDispatcherOverflow {
+			kind = eventsv1.LossKind_LOSS_KIND_DISPATCH
+		}
+		wire := &eventsv1.EventLoss{Kind: kind, Count: loss.Count, SourceNodeId: loss.SourceNodeID}
 		for _, sequenceRange := range loss.Ranges {
 			wire.EventSequenceRanges = append(wire.EventSequenceRanges, &eventsv1.SequenceRange{First: sequenceRange.First, Last: sequenceRange.Last})
 		}

@@ -44,6 +44,10 @@ type QueueMetric struct {
 
 type flowControlExcludedSink interface{ ExcludeFromFlowControl() }
 
+// dropObserver is implemented by best-effort sinks that can surface a dropped
+// dispatcher-to-sink item to their own consumers. It must not block.
+type dropObserver interface{ HandleDroppedEvent(Event) }
+
 type Stats struct{ Enqueued, Dispatched, Dropped, SinkDropped, SinkErrors uint64 }
 
 type dispatchItem struct {
@@ -201,6 +205,9 @@ func (d *Dispatcher) runDispatcher() {
 					d.dispatched.Add(1)
 				default:
 					d.sinkDropped.Add(1)
+					if observer, ok := reg.sink.(dropObserver); ok {
+						observer.HandleDroppedEvent(ev)
+					}
 				}
 			}
 		case <-ticker.C:

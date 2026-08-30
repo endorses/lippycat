@@ -184,6 +184,18 @@ func TestEventServiceReportsReconnectGap(t *testing.T) {
 	assert.Equal(t, uint64(2), messages[1].DeliverySequence)
 }
 
+func TestSubscriberLossesDistinguishDispatcherOverflow(t *testing.T) {
+	wire := subscriberLosses([]broadcast.Loss{{
+		SourceNodeID: "node-a",
+		Cause:        broadcast.LossCauseDispatcherOverflow,
+		Count:        1,
+		Ranges:       []broadcast.SequenceRange{{First: 7, Last: 7}},
+	}})
+	require.Len(t, wire, 1)
+	assert.Equal(t, eventsv1.LossKind_LOSS_KIND_DISPATCH, wire[0].Kind)
+	assert.Equal(t, uint64(1), wire[0].Count)
+}
+
 func TestEventServiceRejectsUnauthorizedAndInvalidRequests(t *testing.T) {
 	service, err := NewEventService(broadcast.New(), EventSubscriptionPolicy{})
 	require.NoError(t, err)

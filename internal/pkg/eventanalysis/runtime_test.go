@@ -311,6 +311,7 @@ func TestRuntimeReassemblesSegmentedApplicationProtocols(t *testing.T) {
 			}
 			require.Len(t, matched, 1)
 			require.Equal(t, completion, matched[0].Envelope().Timestamp)
+			require.False(t, matched[0].Envelope().Partial)
 			tc.validate(t, matched[0])
 		})
 	}

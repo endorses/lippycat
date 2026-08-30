@@ -224,7 +224,10 @@ func (r *Runtime) resetReassembly() {
 
 func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp time.Time) {
 	tcp, ok := packet.TransportLayer().(*layers.TCP)
-	if !ok || packet.NetworkLayer() == nil || len(tcp.Payload) == 0 {
+	if !ok || packet.NetworkLayer() == nil {
+		return
+	}
+	if len(tcp.Payload) == 0 && !tcp.SYN && !tcp.FIN && !tcp.RST {
 		return
 	}
 	scope := source.CaptureScope

@@ -250,6 +250,11 @@ gapped streams are partial and incomplete or oversized framing stays bounded.
 A shared segmented HTTP fixture now verifies equivalent normalized output at
 the processor, tap-local, sniff, watch-live, and watch-file composition
 boundaries, subject only to their documented provenance differences.
+A renewed implementation audit corrected full-capture TCP provenance: the
+shared runtime now admits payload-free SYN, FIN, and RST packets to reassembly,
+so complete HTTP, TLS, and SMTP streams are not incorrectly marked partial
+merely because their opening SYN carried no application payload. A shared
+segmented-protocol regression test covers all three protocols.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

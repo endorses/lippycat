@@ -284,12 +284,28 @@ func TestBatchValidationRejectsContradictoryLossAccounting(t *testing.T) {
 	require.ErrorContains(t, ValidateBatch(batch), "source does not match")
 	loss.SourceNodeId = "node"
 	loss.Count = 0
-	require.ErrorContains(t, ValidateBatch(batch), "count is smaller")
+	require.ErrorContains(t, ValidateBatch(batch), "count must be positive")
 	loss.Count = 2
 	loss.EventSequenceRanges = []*eventsv1.SequenceRange{{First: 2, Last: 3}, {First: 3, Last: 4}}
 	require.ErrorContains(t, ValidateBatch(batch), "overlap")
 	loss.EventSequenceRanges = []*eventsv1.SequenceRange{{First: 1, Last: ^uint64(0)}}
 	require.ErrorContains(t, ValidateBatch(batch), "overflows")
+}
+
+func TestBatchValidationRejectsInvalidCountOnlyLoss(t *testing.T) {
+	event, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	loss := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_CAPTURE, Count: 1, SourceNodeId: "other"}
+	batch := &eventsv1.ProtocolEventBatch{
+		SourceNodeId: "node", ProducerSessionId: "session", BatchSequence: 1,
+		Events: []*eventsv1.ProtocolEvent{event}, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{loss}},
+		FirstEventSequence: 1, LastEventSequence: 1,
+	}
+
+	require.ErrorContains(t, ValidateBatch(batch), "source does not match")
+	loss.SourceNodeId = "node"
+	loss.Count = 0
+	require.ErrorContains(t, ValidateBatch(batch), "count must be positive")
 }
 
 func TestNilPayloadIsMalformedWithoutUnknownKind(t *testing.T) {

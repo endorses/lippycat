@@ -73,6 +73,29 @@ func TestEmitDNSAndSMTPEvents(t *testing.T) {
 	}
 }
 
+func TestTapLocalEventsUseEffectiveTapID(t *testing.T) {
+	p, err := New(Config{ListenAddr: ":0", ProcessorID: "tap-test", EventQueueSize: 16})
+	require.NoError(t, err)
+	sink := &collectingSink{}
+	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS))
+	require.NoError(t, p.eventDispatcher.Start(context.Background()))
+	p.emitProtocolEvents("tap-test-local", []*data.CapturedPacket{{
+		TimestampNs: time.Unix(10, 0).UnixNano(),
+		Metadata: &data.PacketMetadata{
+			SrcIp: "192.0.2.10", DstIp: "192.0.2.53", SrcPort: 53000, DstPort: 53, Transport: "udp",
+			Dns: &data.DNSMetadata{QueryName: "example.test", QueryType: "A", QueryClass: "IN"},
+		},
+	}})
+	require.NoError(t, p.eventDispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.Len(t, sink.events, 1)
+	envelope := sink.events[0].Envelope()
+	require.Equal(t, "tap-test", envelope.NodeID)
+	require.Equal(t, "tap-test-local", envelope.Provenance.CaptureSource)
+}
+
 func TestConnectionAndProtocolEventsShareFlowIdentity(t *testing.T) {
 	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)

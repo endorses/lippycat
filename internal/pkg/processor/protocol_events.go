@@ -37,7 +37,18 @@ func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.Captu
 		if len(packet.MatchedFilterIds) > 0 {
 			scope = events.CaptureScopeFiltered
 		}
-		env := events.Envelope{Timestamp: timestamp, NodeID: batchSource, Flow: flow, CaptureScope: scope, Partial: scope == events.CaptureScopeFiltered}
+		producerNodeID := batchSource
+		if p.config.ProcessorID != "" && batchSource == p.config.ProcessorID+"-local" {
+			producerNodeID = p.config.ProcessorID
+		}
+		env := events.Envelope{
+			Timestamp:    timestamp,
+			NodeID:       producerNodeID,
+			Flow:         flow,
+			CaptureScope: scope,
+			Partial:      scope == events.CaptureScopeFiltered,
+			Provenance:   events.SourceProvenance{CaptureSource: batchSource},
+		}
 		env, err = p.flowIdentity.Enrich(env)
 		if err != nil {
 			logger.Warn("Failed to assign protocol event flow identity", "error", err)

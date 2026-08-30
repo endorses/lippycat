@@ -64,7 +64,10 @@ pointer-event adapter coverage, typed-nil handling, canonical event-ID
 validation, envelope validation for compatibility omissions, admission-grade
 batch member validation, source-consistent loss accounting, and recursive
 unknown-field admission bounds for nested event and batch messages. Focused
-race tests and the full `make test` suite pass.
+race tests and the full `make test` suite pass. A subsequent independent audit
+also corrected count-only loss validation and ensured tap-local events use the
+effective tap ID as producer identity while retaining the local capture source
+in provenance.
 
 ## Phase 2 — Processor event subscription
 

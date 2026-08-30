@@ -571,8 +571,14 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 			if loss == nil || loss.Kind <= eventsv1.LossKind_LOSS_KIND_UNSPECIFIED || loss.Kind > eventsv1.LossKind_LOSS_KIND_POLICY_OMISSION {
 				return errors.New("invalid event loss")
 			}
+			if loss.Count == 0 {
+				return errors.New("event loss count must be positive")
+			}
 			if err := checkString("event loss source node ID", loss.SourceNodeId); err != nil {
 				return err
+			}
+			if loss.SourceNodeId != b.SourceNodeId {
+				return errors.New("event loss source does not match batch source")
 			}
 			if len(loss.EventSequenceRanges) > MaxCollectionEntries {
 				return errors.New("too many event loss ranges")
@@ -582,9 +588,6 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 			for i, r := range loss.EventSequenceRanges {
 				if r == nil || r.First == 0 || r.Last < r.First {
 					return errors.New("invalid event loss range")
-				}
-				if loss.SourceNodeId != b.SourceNodeId {
-					return errors.New("event loss range source does not match batch source")
 				}
 				if i > 0 && r.First <= previousLast {
 					return errors.New("event loss ranges overlap or are out of order")

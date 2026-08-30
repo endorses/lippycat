@@ -34,6 +34,7 @@ enum LossKind {
   LOSS_KIND_SUBSCRIBER = 6;
   LOSS_KIND_UNSUPPORTED_EVENT = 7;
   LOSS_KIND_POLICY_OMISSION = 8;
+  LOSS_KIND_RECONNECT = 9;
 }
 
 message FlowTuple {
@@ -255,6 +256,19 @@ message EventSubscribeRequest {
   repeated string processor_node_ids = 3;
   bool include_file_metadata = 4;
   uint32 max_batch_events = 5;
+  // subscription_version must be 1. Version 1 starts at the live boundary and
+  // does not replay events produced before the subscription was admitted.
+  uint32 subscription_version = 6;
+  // Sensitive enrichments are returned only when both requested and permitted
+  // by the processor's event-subscription policy.
+  bool include_sensitive_fields = 7;
+  // Optional client receive limit. The server applies the lower of this value
+  // and its configured maximum. Zero selects the server maximum.
+  uint32 max_message_bytes = 8;
+  // Version 1 is live-only. These fields do not request replay; they only let
+  // the server report an explicit reconnect gap from a previous stream.
+  string previous_stream_id = 9;
+  uint64 previous_delivery_sequence = 10;
 }
 
 enum SubscriptionControlKind {
@@ -271,4 +285,20 @@ message EventSubscriptionControl {
   uint64 delivery_sequence = 4;
   repeated EventLoss losses = 5;
   repeated EventKind supported_event_kinds = 6;
+}
+
+message EventSubscriptionMessage {
+  // Monotonic within stream_id, including control and batch messages.
+  uint64 delivery_sequence = 1;
+  oneof message {
+    EventSubscriptionControl control = 2;
+    ProtocolEventBatch batch = 3;
+  }
+}
+
+// EventService is deliberately separate from packet delivery so event
+// subscribers have independent buffering and backpressure.
+service EventService {
+  rpc SubscribeEvents(EventSubscribeRequest)
+      returns (stream EventSubscriptionMessage);
 }

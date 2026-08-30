@@ -21,6 +21,7 @@ var methodRoles = map[string]Role{
 	"/lippycat.data.DataService/StreamPackets":            RoleHunter,
 	"/lippycat.data.DataService/SubscribePackets":         RoleSubscriber,
 	"/lippycat.data.DataService/SubscribeCorrelatedCalls": RoleSubscriber,
+	"/lippycat.events.v1.EventService/SubscribeEvents":    RoleSubscriber,
 
 	// Management service methods (lippycat.management package)
 	"/lippycat.management.ManagementService/RegisterHunter":          RoleHunter,

@@ -146,6 +146,7 @@ const (
 	LossKind_LOSS_KIND_SUBSCRIBER        LossKind = 6
 	LossKind_LOSS_KIND_UNSUPPORTED_EVENT LossKind = 7
 	LossKind_LOSS_KIND_POLICY_OMISSION   LossKind = 8
+	LossKind_LOSS_KIND_RECONNECT         LossKind = 9
 )
 
 // Enum value maps for LossKind.
@@ -160,6 +161,7 @@ var (
 		6: "LOSS_KIND_SUBSCRIBER",
 		7: "LOSS_KIND_UNSUPPORTED_EVENT",
 		8: "LOSS_KIND_POLICY_OMISSION",
+		9: "LOSS_KIND_RECONNECT",
 	}
 	LossKind_value = map[string]int32{
 		"LOSS_KIND_UNSPECIFIED":       0,
@@ -171,6 +173,7 @@ var (
 		"LOSS_KIND_SUBSCRIBER":        6,
 		"LOSS_KIND_UNSUPPORTED_EVENT": 7,
 		"LOSS_KIND_POLICY_OMISSION":   8,
+		"LOSS_KIND_RECONNECT":         9,
 	}
 )
 
@@ -2115,8 +2118,21 @@ type EventSubscribeRequest struct {
 	ProcessorNodeIds    []string               `protobuf:"bytes,3,rep,name=processor_node_ids,json=processorNodeIds,proto3" json:"processor_node_ids,omitempty"`
 	IncludeFileMetadata bool                   `protobuf:"varint,4,opt,name=include_file_metadata,json=includeFileMetadata,proto3" json:"include_file_metadata,omitempty"`
 	MaxBatchEvents      uint32                 `protobuf:"varint,5,opt,name=max_batch_events,json=maxBatchEvents,proto3" json:"max_batch_events,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// subscription_version must be 1. Version 1 starts at the live boundary and
+	// does not replay events produced before the subscription was admitted.
+	SubscriptionVersion uint32 `protobuf:"varint,6,opt,name=subscription_version,json=subscriptionVersion,proto3" json:"subscription_version,omitempty"`
+	// Sensitive enrichments are returned only when both requested and permitted
+	// by the processor's event-subscription policy.
+	IncludeSensitiveFields bool `protobuf:"varint,7,opt,name=include_sensitive_fields,json=includeSensitiveFields,proto3" json:"include_sensitive_fields,omitempty"`
+	// Optional client receive limit. The server applies the lower of this value
+	// and its configured maximum. Zero selects the server maximum.
+	MaxMessageBytes uint32 `protobuf:"varint,8,opt,name=max_message_bytes,json=maxMessageBytes,proto3" json:"max_message_bytes,omitempty"`
+	// Version 1 is live-only. These fields do not request replay; they only let
+	// the server report an explicit reconnect gap from a previous stream.
+	PreviousStreamId         string `protobuf:"bytes,9,opt,name=previous_stream_id,json=previousStreamId,proto3" json:"previous_stream_id,omitempty"`
+	PreviousDeliverySequence uint64 `protobuf:"varint,10,opt,name=previous_delivery_sequence,json=previousDeliverySequence,proto3" json:"previous_delivery_sequence,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *EventSubscribeRequest) Reset() {
@@ -2180,6 +2196,41 @@ func (x *EventSubscribeRequest) GetIncludeFileMetadata() bool {
 func (x *EventSubscribeRequest) GetMaxBatchEvents() uint32 {
 	if x != nil {
 		return x.MaxBatchEvents
+	}
+	return 0
+}
+
+func (x *EventSubscribeRequest) GetSubscriptionVersion() uint32 {
+	if x != nil {
+		return x.SubscriptionVersion
+	}
+	return 0
+}
+
+func (x *EventSubscribeRequest) GetIncludeSensitiveFields() bool {
+	if x != nil {
+		return x.IncludeSensitiveFields
+	}
+	return false
+}
+
+func (x *EventSubscribeRequest) GetMaxMessageBytes() uint32 {
+	if x != nil {
+		return x.MaxMessageBytes
+	}
+	return 0
+}
+
+func (x *EventSubscribeRequest) GetPreviousStreamId() string {
+	if x != nil {
+		return x.PreviousStreamId
+	}
+	return ""
+}
+
+func (x *EventSubscribeRequest) GetPreviousDeliverySequence() uint64 {
+	if x != nil {
+		return x.PreviousDeliverySequence
 	}
 	return 0
 }
@@ -2267,6 +2318,97 @@ func (x *EventSubscriptionControl) GetSupportedEventKinds() []EventKind {
 	}
 	return nil
 }
+
+type EventSubscriptionMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Monotonic within stream_id, including control and batch messages.
+	DeliverySequence uint64 `protobuf:"varint,1,opt,name=delivery_sequence,json=deliverySequence,proto3" json:"delivery_sequence,omitempty"`
+	// Types that are valid to be assigned to Message:
+	//
+	//	*EventSubscriptionMessage_Control
+	//	*EventSubscriptionMessage_Batch
+	Message       isEventSubscriptionMessage_Message `protobuf_oneof:"message"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventSubscriptionMessage) Reset() {
+	*x = EventSubscriptionMessage{}
+	mi := &file_events_v1_events_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventSubscriptionMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventSubscriptionMessage) ProtoMessage() {}
+
+func (x *EventSubscriptionMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_events_v1_events_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventSubscriptionMessage.ProtoReflect.Descriptor instead.
+func (*EventSubscriptionMessage) Descriptor() ([]byte, []int) {
+	return file_events_v1_events_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *EventSubscriptionMessage) GetDeliverySequence() uint64 {
+	if x != nil {
+		return x.DeliverySequence
+	}
+	return 0
+}
+
+func (x *EventSubscriptionMessage) GetMessage() isEventSubscriptionMessage_Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *EventSubscriptionMessage) GetControl() *EventSubscriptionControl {
+	if x != nil {
+		if x, ok := x.Message.(*EventSubscriptionMessage_Control); ok {
+			return x.Control
+		}
+	}
+	return nil
+}
+
+func (x *EventSubscriptionMessage) GetBatch() *ProtocolEventBatch {
+	if x != nil {
+		if x, ok := x.Message.(*EventSubscriptionMessage_Batch); ok {
+			return x.Batch
+		}
+	}
+	return nil
+}
+
+type isEventSubscriptionMessage_Message interface {
+	isEventSubscriptionMessage_Message()
+}
+
+type EventSubscriptionMessage_Control struct {
+	Control *EventSubscriptionControl `protobuf:"bytes,2,opt,name=control,proto3,oneof"`
+}
+
+type EventSubscriptionMessage_Batch struct {
+	Batch *ProtocolEventBatch `protobuf:"bytes,3,opt,name=batch,proto3,oneof"`
+}
+
+func (*EventSubscriptionMessage_Control) isEventSubscriptionMessage_Message() {}
+
+func (*EventSubscriptionMessage_Batch) isEventSubscriptionMessage_Message() {}
 
 var File_events_v1_events_proto protoreflect.FileDescriptor
 
@@ -2472,21 +2614,32 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x05stats\x18\x05 \x01(\v2#.lippycat.events.v1.EventBatchStatsR\x05stats\x12:\n" +
 	"\x19semantic_profile_revision\x18\x06 \x01(\rR\x17semanticProfileRevision\x120\n" +
 	"\x14first_event_sequence\x18\a \x01(\x04R\x12firstEventSequence\x12.\n" +
-	"\x13last_event_sequence\x18\b \x01(\x04R\x11lastEventSequence\"\xfe\x01\n" +
+	"\x13last_event_sequence\x18\b \x01(\x04R\x11lastEventSequence\"\x83\x04\n" +
 	"\x15EventSubscribeRequest\x12>\n" +
 	"\vevent_kinds\x18\x01 \x03(\x0e2\x1d.lippycat.events.v1.EventKindR\n" +
 	"eventKinds\x12\x19\n" +
 	"\bnode_ids\x18\x02 \x03(\tR\anodeIds\x12,\n" +
 	"\x12processor_node_ids\x18\x03 \x03(\tR\x10processorNodeIds\x122\n" +
 	"\x15include_file_metadata\x18\x04 \x01(\bR\x13includeFileMetadata\x12(\n" +
-	"\x10max_batch_events\x18\x05 \x01(\rR\x0emaxBatchEvents\"\xf0\x02\n" +
+	"\x10max_batch_events\x18\x05 \x01(\rR\x0emaxBatchEvents\x121\n" +
+	"\x14subscription_version\x18\x06 \x01(\rR\x13subscriptionVersion\x128\n" +
+	"\x18include_sensitive_fields\x18\a \x01(\bR\x16includeSensitiveFields\x12*\n" +
+	"\x11max_message_bytes\x18\b \x01(\rR\x0fmaxMessageBytes\x12,\n" +
+	"\x12previous_stream_id\x18\t \x01(\tR\x10previousStreamId\x12<\n" +
+	"\x1aprevious_delivery_sequence\x18\n" +
+	" \x01(\x04R\x18previousDeliverySequence\"\xf0\x02\n" +
 	"\x18EventSubscriptionControl\x12?\n" +
 	"\x04kind\x18\x01 \x01(\x0e2+.lippycat.events.v1.SubscriptionControlKindR\x04kind\x12\x1b\n" +
 	"\tstream_id\x18\x02 \x01(\tR\bstreamId\x12?\n" +
 	"\rlive_boundary\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\fliveBoundary\x12+\n" +
 	"\x11delivery_sequence\x18\x04 \x01(\x04R\x10deliverySequence\x125\n" +
 	"\x06losses\x18\x05 \x03(\v2\x1d.lippycat.events.v1.EventLossR\x06losses\x12Q\n" +
-	"\x15supported_event_kinds\x18\x06 \x03(\x0e2\x1d.lippycat.events.v1.EventKindR\x13supportedEventKinds*\xac\x01\n" +
+	"\x15supported_event_kinds\x18\x06 \x03(\x0e2\x1d.lippycat.events.v1.EventKindR\x13supportedEventKinds\"\xdc\x01\n" +
+	"\x18EventSubscriptionMessage\x12+\n" +
+	"\x11delivery_sequence\x18\x01 \x01(\x04R\x10deliverySequence\x12H\n" +
+	"\acontrol\x18\x02 \x01(\v2,.lippycat.events.v1.EventSubscriptionControlH\x00R\acontrol\x12>\n" +
+	"\x05batch\x18\x03 \x01(\v2&.lippycat.events.v1.ProtocolEventBatchH\x00R\x05batchB\t\n" +
+	"\amessage*\xac\x01\n" +
 	"\tEventKind\x12\x1a\n" +
 	"\x16EVENT_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fEVENT_KIND_CONN\x10\x01\x12\x12\n" +
@@ -2498,7 +2651,7 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\fCaptureScope\x12\x1d\n" +
 	"\x19CAPTURE_SCOPE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12CAPTURE_SCOPE_FULL\x10\x01\x12\x1a\n" +
-	"\x16CAPTURE_SCOPE_FILTERED\x10\x02*\xf5\x01\n" +
+	"\x16CAPTURE_SCOPE_FILTERED\x10\x02*\x8e\x02\n" +
 	"\bLossKind\x12\x19\n" +
 	"\x15LOSS_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11LOSS_KIND_CAPTURE\x10\x01\x12\x16\n" +
@@ -2508,12 +2661,15 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x13LOSS_KIND_TRANSPORT\x10\x05\x12\x18\n" +
 	"\x14LOSS_KIND_SUBSCRIBER\x10\x06\x12\x1f\n" +
 	"\x1bLOSS_KIND_UNSUPPORTED_EVENT\x10\a\x12\x1d\n" +
-	"\x19LOSS_KIND_POLICY_OMISSION\x10\b*\xba\x01\n" +
+	"\x19LOSS_KIND_POLICY_OMISSION\x10\b\x12\x17\n" +
+	"\x13LOSS_KIND_RECONNECT\x10\t*\xba\x01\n" +
 	"\x17SubscriptionControlKind\x12)\n" +
 	"%SUBSCRIPTION_CONTROL_KIND_UNSPECIFIED\x10\x00\x12%\n" +
 	"!SUBSCRIPTION_CONTROL_KIND_STARTED\x10\x01\x12!\n" +
 	"\x1dSUBSCRIPTION_CONTROL_KIND_GAP\x10\x02\x12*\n" +
-	"&SUBSCRIPTION_CONTROL_KIND_CAPABILITIES\x10\x03B9Z7github.com/endorses/lippycat/api/gen/events/v1;eventsv1b\x06proto3"
+	"&SUBSCRIPTION_CONTROL_KIND_CAPABILITIES\x10\x032|\n" +
+	"\fEventService\x12l\n" +
+	"\x0fSubscribeEvents\x12).lippycat.events.v1.EventSubscribeRequest\x1a,.lippycat.events.v1.EventSubscriptionMessage0\x01B9Z7github.com/endorses/lippycat/api/gen/events/v1;eventsv1b\x06proto3"
 
 var (
 	file_events_v1_events_proto_rawDescOnce sync.Once
@@ -2528,7 +2684,7 @@ func file_events_v1_events_proto_rawDescGZIP() []byte {
 }
 
 var file_events_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_events_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_events_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_events_v1_events_proto_goTypes = []any{
 	(EventKind)(0),                   // 0: lippycat.events.v1.EventKind
 	(CaptureScope)(0),                // 1: lippycat.events.v1.CaptureScope
@@ -2551,20 +2707,21 @@ var file_events_v1_events_proto_goTypes = []any{
 	(*ProtocolEventBatch)(nil),       // 18: lippycat.events.v1.ProtocolEventBatch
 	(*EventSubscribeRequest)(nil),    // 19: lippycat.events.v1.EventSubscribeRequest
 	(*EventSubscriptionControl)(nil), // 20: lippycat.events.v1.EventSubscriptionControl
-	nil,                              // 21: lippycat.events.v1.HTTPEvent.HeadersEntry
-	(*timestamppb.Timestamp)(nil),    // 22: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),      // 23: google.protobuf.Duration
+	(*EventSubscriptionMessage)(nil), // 21: lippycat.events.v1.EventSubscriptionMessage
+	nil,                              // 22: lippycat.events.v1.HTTPEvent.HeadersEntry
+	(*timestamppb.Timestamp)(nil),    // 23: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),      // 24: google.protobuf.Duration
 }
 var file_events_v1_events_proto_depIdxs = []int32{
-	22, // 0: lippycat.events.v1.EventEnvelope.timestamp:type_name -> google.protobuf.Timestamp
+	23, // 0: lippycat.events.v1.EventEnvelope.timestamp:type_name -> google.protobuf.Timestamp
 	4,  // 1: lippycat.events.v1.EventEnvelope.flow:type_name -> lippycat.events.v1.FlowTuple
 	1,  // 2: lippycat.events.v1.EventEnvelope.capture_scope:type_name -> lippycat.events.v1.CaptureScope
 	5,  // 3: lippycat.events.v1.EventEnvelope.provenance:type_name -> lippycat.events.v1.SourceProvenance
-	23, // 4: lippycat.events.v1.ConnEvent.duration:type_name -> google.protobuf.Duration
-	23, // 5: lippycat.events.v1.DNSEvent.rtt:type_name -> google.protobuf.Duration
-	23, // 6: lippycat.events.v1.DNSEvent.ttls:type_name -> google.protobuf.Duration
-	21, // 7: lippycat.events.v1.HTTPEvent.headers:type_name -> lippycat.events.v1.HTTPEvent.HeadersEntry
-	23, // 8: lippycat.events.v1.FileMetadataEvent.duration:type_name -> google.protobuf.Duration
+	24, // 4: lippycat.events.v1.ConnEvent.duration:type_name -> google.protobuf.Duration
+	24, // 5: lippycat.events.v1.DNSEvent.rtt:type_name -> google.protobuf.Duration
+	24, // 6: lippycat.events.v1.DNSEvent.ttls:type_name -> google.protobuf.Duration
+	22, // 7: lippycat.events.v1.HTTPEvent.headers:type_name -> lippycat.events.v1.HTTPEvent.HeadersEntry
+	24, // 8: lippycat.events.v1.FileMetadataEvent.duration:type_name -> google.protobuf.Duration
 	6,  // 9: lippycat.events.v1.ProtocolEvent.envelope:type_name -> lippycat.events.v1.EventEnvelope
 	7,  // 10: lippycat.events.v1.ProtocolEvent.conn:type_name -> lippycat.events.v1.ConnEvent
 	8,  // 11: lippycat.events.v1.ProtocolEvent.dns:type_name -> lippycat.events.v1.DNSEvent
@@ -2579,15 +2736,19 @@ var file_events_v1_events_proto_depIdxs = []int32{
 	17, // 20: lippycat.events.v1.ProtocolEventBatch.stats:type_name -> lippycat.events.v1.EventBatchStats
 	0,  // 21: lippycat.events.v1.EventSubscribeRequest.event_kinds:type_name -> lippycat.events.v1.EventKind
 	3,  // 22: lippycat.events.v1.EventSubscriptionControl.kind:type_name -> lippycat.events.v1.SubscriptionControlKind
-	22, // 23: lippycat.events.v1.EventSubscriptionControl.live_boundary:type_name -> google.protobuf.Timestamp
+	23, // 23: lippycat.events.v1.EventSubscriptionControl.live_boundary:type_name -> google.protobuf.Timestamp
 	16, // 24: lippycat.events.v1.EventSubscriptionControl.losses:type_name -> lippycat.events.v1.EventLoss
 	0,  // 25: lippycat.events.v1.EventSubscriptionControl.supported_event_kinds:type_name -> lippycat.events.v1.EventKind
-	10, // 26: lippycat.events.v1.HTTPEvent.HeadersEntry.value:type_name -> lippycat.events.v1.HeaderValues
-	27, // [27:27] is the sub-list for method output_type
-	27, // [27:27] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	20, // 26: lippycat.events.v1.EventSubscriptionMessage.control:type_name -> lippycat.events.v1.EventSubscriptionControl
+	18, // 27: lippycat.events.v1.EventSubscriptionMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
+	10, // 28: lippycat.events.v1.HTTPEvent.HeadersEntry.value:type_name -> lippycat.events.v1.HeaderValues
+	19, // 29: lippycat.events.v1.EventService.SubscribeEvents:input_type -> lippycat.events.v1.EventSubscribeRequest
+	21, // 30: lippycat.events.v1.EventService.SubscribeEvents:output_type -> lippycat.events.v1.EventSubscriptionMessage
+	30, // [30:31] is the sub-list for method output_type
+	29, // [29:30] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_events_v1_events_proto_init() }
@@ -2603,15 +2764,19 @@ func file_events_v1_events_proto_init() {
 		(*ProtocolEvent_Smtp)(nil),
 		(*ProtocolEvent_FileMetadata)(nil),
 	}
+	file_events_v1_events_proto_msgTypes[17].OneofWrappers = []any{
+		(*EventSubscriptionMessage_Control)(nil),
+		(*EventSubscriptionMessage_Batch)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_events_v1_events_proto_rawDesc), len(file_events_v1_events_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
-			NumServices:   0,
+			NumServices:   1,
 		},
 		GoTypes:           file_events_v1_events_proto_goTypes,
 		DependencyIndexes: file_events_v1_events_proto_depIdxs,

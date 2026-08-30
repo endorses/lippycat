@@ -25,6 +25,7 @@ all: check-deps $(OUT_DIR)/data $(OUT_DIR)/management $(OUT_DIR)/events/v1
 		--go-grpc_out=$(OUT_DIR)/management --go-grpc_opt=paths=source_relative \
 		management.proto
 	$(PROTOC) --go_out=$(OUT_DIR) --go_opt=paths=source_relative \
+		--go-grpc_out=$(OUT_DIR) --go-grpc_opt=paths=source_relative \
 		events/v1/events.proto
 	@echo "✅ Protobuf generation complete"
 

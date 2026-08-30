@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
@@ -39,6 +40,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/eventcoalesce"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/flowid"
 	"github.com/endorses/lippycat/internal/pkg/li"
@@ -212,13 +214,15 @@ type Processor struct {
 	liManager *li.Manager
 
 	// TLS keylog writer for session key storage and file output
-	tlsKeylogWriter *TLSKeylogWriter
-	eventDispatcher *events.Dispatcher
-	flowIdentity    *flowid.Cache
-	connTracker     *conntrack.Tracker
-	connExpireAt    atomic.Int64
-	logSink         *logstream.Sink
-	fileAnalyzer    *fileanalysis.Analyzer
+	tlsKeylogWriter  *TLSKeylogWriter
+	eventDispatcher  *events.Dispatcher
+	eventBroadcaster *broadcast.Broadcaster
+	eventService     eventsv1.EventServiceServer
+	flowIdentity     *flowid.Cache
+	connTracker      *conntrack.Tracker
+	connExpireAt     atomic.Int64
+	logSink          *logstream.Sink
+	fileAnalyzer     *fileanalysis.Analyzer
 
 	// Control
 	ctx          context.Context
@@ -259,6 +263,16 @@ func New(config Config) (*Processor, error) {
 	p.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: eventQueueSize, SinkQueueSize: eventQueueSize, DropPolicy: events.DropPolicy(dropPolicy), Producer: eventProducers})
 	if err != nil {
 		return nil, fmt.Errorf("initialize event dispatcher: %w", err)
+	}
+	p.eventBroadcaster = broadcast.New()
+	if err = p.eventDispatcher.Register(p.eventBroadcaster); err != nil {
+		return nil, fmt.Errorf("register event broadcaster: %w", err)
+	}
+	p.eventService, err = NewEventService(p.eventBroadcaster, EventSubscriptionPolicy{
+		ProcessorNodeID: config.ProcessorID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize event subscription service: %w", err)
 	}
 	p.flowIdentity, err = flowid.NewCache(flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute})
 	if err != nil {

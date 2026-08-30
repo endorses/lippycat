@@ -12,6 +12,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
 	"github.com/stretchr/testify/require"
 )
 
@@ -70,6 +71,33 @@ func TestEmitDNSAndSMTPEvents(t *testing.T) {
 		require.Equal(t, "hunter-a", event.Envelope().NodeID)
 		require.NotEmpty(t, event.Envelope().UID)
 		require.NotEmpty(t, event.Envelope().CommunityID)
+	}
+}
+
+func TestEventBroadcasterReceivesNormalizedEventsWithStructuredLogsDisabled(t *testing.T) {
+	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	require.NoError(t, err)
+	require.Nil(t, p.logSink)
+
+	subscription, err := p.eventBroadcaster.Subscribe(broadcast.Options{QueueSize: 1, Kinds: []events.Kind{events.KindDNS}})
+	require.NoError(t, err)
+	defer subscription.Close()
+	require.NoError(t, p.eventDispatcher.Start(context.Background()))
+	p.emitProtocolEvents("hunter-a", []*data.CapturedPacket{{
+		TimestampNs: time.Unix(10, 0).UnixNano(),
+		Metadata: &data.PacketMetadata{
+			SrcIp: "192.0.2.10", DstIp: "192.0.2.53", SrcPort: 53000, DstPort: 53, Transport: "udp",
+			Dns: &data.DNSMetadata{TransactionId: 7, QueryName: "example.test", QueryType: "A", QueryClass: "IN"},
+		},
+	}})
+	require.NoError(t, p.eventDispatcher.Close(context.Background()))
+
+	select {
+	case event := <-subscription.Events():
+		require.Equal(t, events.KindDNS, event.Kind())
+		require.Equal(t, "hunter-a", event.Envelope().NodeID)
+	default:
+		t.Fatal("event broadcaster did not receive normalized DNS event")
 	}
 }
 

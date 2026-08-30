@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/constants"
@@ -196,13 +197,13 @@ func (p *Processor) Start(ctx context.Context) error {
 
 	p.grpcServer = grpc.NewServer(serverOpts...)
 
-	// Register services
-	data.RegisterDataServiceServer(p.grpcServer, p)
-	management.RegisterManagementServiceServer(p.grpcServer, p)
+	// Register packet, management, and normalized event services. Event
+	// subscriptions are additive and do not alter packet subscription paths.
+	p.registerGRPCServices(p.grpcServer)
 
 	logger.Info("gRPC server created",
 		"addr", listener.Addr().String(),
-		"services", []string{"DataService", "ManagementService"},
+		"services", []string{"DataService", "ManagementService", "EventService"},
 		"tls", p.config.TLSEnabled)
 
 	// Start server in background
@@ -292,6 +293,12 @@ func (p *Processor) Start(ctx context.Context) error {
 	<-p.ctx.Done()
 
 	return p.Shutdown()
+}
+
+func (p *Processor) registerGRPCServices(registrar grpc.ServiceRegistrar) {
+	data.RegisterDataServiceServer(registrar, p)
+	management.RegisterManagementServiceServer(registrar, p)
+	eventsv1.RegisterEventServiceServer(registrar, p.eventService)
 }
 
 // Shutdown gracefully shuts down the processor.

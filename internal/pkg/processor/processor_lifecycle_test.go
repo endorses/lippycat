@@ -16,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
 
 // TestProcessor_Start_Success tests successful processor startup
@@ -62,6 +63,20 @@ func TestProcessor_Start_Success(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("processor shutdown timeout")
 	}
+}
+
+func TestProcessorRegistersEventServiceAlongsideExistingServices(t *testing.T) {
+	processor, err := New(Config{ProcessorID: "test-processor", ListenAddr: "localhost:0"})
+	require.NoError(t, err)
+	require.NotNil(t, processor.eventBroadcaster)
+	require.NotNil(t, processor.eventService)
+
+	server := grpc.NewServer()
+	processor.registerGRPCServices(server)
+	services := server.GetServiceInfo()
+	require.Contains(t, services, "lippycat.data.DataService")
+	require.Contains(t, services, "lippycat.management.ManagementService")
+	require.Contains(t, services, "lippycat.events.v1.EventService")
 }
 
 // TestProcessor_Start_BindError tests startup failure due to port already in use

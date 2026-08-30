@@ -12,6 +12,7 @@ import (
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -48,8 +49,8 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 	if in == nil {
 		return DecodedEvent{}, errors.New("decode protocol event: nil event")
 	}
-	if len(in.ProtoReflect().GetUnknown()) > MaxUnknownBytes {
-		return DecodedEvent{}, fmt.Errorf("decode protocol event: unknown fields exceed %d bytes", MaxUnknownBytes)
+	if err := validateUnknownFields("decode protocol event", in); err != nil {
+		return DecodedEvent{}, err
 	}
 	wire := proto.Clone(in).(*eventsv1.ProtocolEvent)
 	env, err := decodeEnvelope(in)
@@ -516,6 +517,9 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 	if b == nil {
 		return errors.New("nil event batch")
 	}
+	if err := validateUnknownFields("event batch", b); err != nil {
+		return err
+	}
 	if b.SourceNodeId == "" || b.ProducerSessionId == "" || b.BatchSequence == 0 {
 		return errors.New("event batch identity fields must be non-empty")
 	}
@@ -606,6 +610,44 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 		if current > previous+1 && !lossesCover(b.Stats, b.SourceNodeId, previous+1, current-1) {
 			return fmt.Errorf("event batch gap %d-%d is not reported", previous+1, current-1)
 		}
+	}
+	return nil
+}
+
+// validateUnknownFields bounds all opaque compatibility data retained by a
+// message, including unknown fields nested in known submessages. Checking only
+// the outer message would let an otherwise valid envelope, payload, or loss
+// record bypass admission limits with arbitrarily large unknown fields.
+func validateUnknownFields(name string, message proto.Message) error {
+	var total int
+	var visit func(protoreflect.Message) bool
+	visit = func(current protoreflect.Message) bool {
+		total += len(current.GetUnknown())
+		if total > MaxUnknownBytes {
+			return false
+		}
+		current.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+			switch {
+			case field.IsMap() && field.MapValue().Message() != nil:
+				value.Map().Range(func(_ protoreflect.MapKey, entry protoreflect.Value) bool {
+					return visit(entry.Message())
+				})
+			case field.IsList() && field.Message() != nil:
+				list := value.List()
+				for i := 0; i < list.Len(); i++ {
+					if !visit(list.Get(i).Message()) {
+						return false
+					}
+				}
+			case field.Message() != nil:
+				return visit(value.Message())
+			}
+			return total <= MaxUnknownBytes
+		})
+		return total <= MaxUnknownBytes
+	}
+	if !visit(message.ProtoReflect()) {
+		return fmt.Errorf("%s: unknown fields exceed %d bytes", name, MaxUnknownBytes)
 	}
 	return nil
 }

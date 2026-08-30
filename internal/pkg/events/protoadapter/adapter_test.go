@@ -129,6 +129,38 @@ func TestUnknownPayloadStillRequiresValidEnvelope(t *testing.T) {
 	require.ErrorContains(t, err, "missing envelope")
 }
 
+func TestNestedUnknownFieldsAreBounded(t *testing.T) {
+	wire, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	wire.Envelope.Flow.ProtoReflect().SetUnknown(make([]byte, MaxUnknownBytes+1))
+
+	_, err = DecodeEvent(wire)
+	require.ErrorContains(t, err, "unknown fields exceed")
+}
+
+func TestBatchUnknownFieldsAreBounded(t *testing.T) {
+	wire, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	loss := &eventsv1.EventLoss{
+		Kind:                eventsv1.LossKind_LOSS_KIND_CAPTURE,
+		Count:               1,
+		SourceNodeId:        "node",
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}},
+	}
+	loss.EventSequenceRanges[0].ProtoReflect().SetUnknown(make([]byte, MaxUnknownBytes+1))
+	batch := &eventsv1.ProtocolEventBatch{
+		SourceNodeId:       "node",
+		ProducerSessionId:  "session",
+		BatchSequence:      1,
+		Events:             []*eventsv1.ProtocolEvent{wire},
+		Stats:              &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{loss}},
+		FirstEventSequence: 1,
+		LastEventSequence:  1,
+	}
+
+	require.ErrorContains(t, ValidateBatch(batch), "unknown fields exceed")
+}
+
 func TestMixedCapabilityBatchSkipsUnsupported(t *testing.T) {
 	supported, err := ToProto(allEvents()[0])
 	require.NoError(t, err)

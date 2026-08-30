@@ -526,6 +526,16 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 
 // handleClearPackets clears all packets from the buffer
 func (m Model) handleClearPackets() (Model, tea.Cmd) {
+	if m.uiState.ViewMode == "events" && m.eventStore != nil {
+		stats := m.eventStore.Stats()
+		m.eventStore.Reset()
+		m.syncEventsView()
+		return m, m.uiState.Toast.Show(
+			fmt.Sprintf("Cleared %d event(s)", stats.Retained),
+			components.ToastInfo,
+			components.ToastDurationShort,
+		)
+	}
 	// Store count before clearing
 	packetCount := m.packetStore.PacketsCount
 
@@ -562,6 +572,9 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 // handlePauseResume toggles capture pause state
 func (m Model) handlePauseResume() (Model, tea.Cmd) {
 	m.uiState.Paused = !m.uiState.Paused
+	if m.eventStore != nil {
+		m.eventStore.SetPaused(m.uiState.Paused)
+	}
 	// Notify capture pipeline to pause/resume
 	pauseSignal := globalCaptureState.GetPauseSignal()
 	if m.uiState.Paused {
@@ -597,6 +610,13 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 
 	// On Capture tab: check view mode
 	if m.uiState.Tabs.GetActive() == 0 {
+		if m.uiState.ViewMode == "events" {
+			m.uiState.ShowDetails = !m.uiState.ShowDetails
+			if !m.uiState.ShowDetails {
+				m.uiState.FocusedPane = "left"
+			}
+			return m, nil
+		}
 		// If in calls view mode, toggle CallsView details
 		if m.uiState.ViewMode == "calls" {
 			m.uiState.CallsView.ToggleDetails()
@@ -680,8 +700,21 @@ func (m Model) handleToggleTimeDisplay() (Model, tea.Cmd) {
 
 // handleToggleView toggles between different view modes
 func (m Model) handleToggleView() (Model, tea.Cmd) {
-	// On capture tab: toggle between packets and calls for VoIP
+	// On the capture tab, cycle only through views available for the current
+	// scope. Events are remote-only until the shared local analysis runtime is
+	// introduced in Phase 4.
 	if m.uiState.Tabs.GetActive() == 0 {
+		if m.captureMode == components.CaptureModeRemote {
+			views := m.captureViewsForSelectedProtocol()
+			for i, view := range views {
+				if view == m.uiState.ViewMode {
+					m.setCaptureView(views[(i+1)%len(views)])
+					return m, nil
+				}
+			}
+			m.setCaptureView(views[0])
+			return m, nil
+		}
 		if m.uiState.SelectedProtocol.Name == "VoIP (SIP/RTP)" {
 			if m.uiState.ViewMode == "packets" {
 				m.uiState.ViewMode = "calls"

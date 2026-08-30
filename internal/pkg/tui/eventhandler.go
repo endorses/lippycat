@@ -47,6 +47,13 @@ func (h *TUIEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
 	}
 }
 
+// OnEventBatch sends normalized protocol events to the Bubble Tea event loop.
+func (h *TUIEventHandler) OnEventBatch(batch types.EventBatch) {
+	if h.program != nil {
+		h.program.Send(EventBatchMsg{Batch: batch})
+	}
+}
+
 var _ types.EventHandler = (*TUIEventHandler)(nil)
 
 // OnHunterStatus sends HunterStatusMsg to TUI
@@ -101,6 +108,12 @@ func (h *TUIEventHandler) OnTopologyUpdate(update *management.TopologyUpdate, pr
 // PacketBatchMsg is sent when multiple packets are captured
 type PacketBatchMsg struct {
 	Packets []components.PacketDisplay
+}
+
+// EventBatchMsg is kept separate from PacketBatchMsg: normalized events are
+// not packet display records and have independent loss semantics.
+type EventBatchMsg struct {
+	Batch types.EventBatch
 }
 
 // HunterStatusMsg is sent with hunter status updates from remote processor

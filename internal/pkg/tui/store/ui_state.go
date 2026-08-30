@@ -29,6 +29,7 @@ type UIState struct {
 	DNSQueriesView   *components.DNSQueriesView
 	EmailView        *components.EmailView
 	HTTPView         *components.HTTPView
+	EventsView       *components.EventsView
 	ProtocolSelector components.ProtocolSelector
 	HunterSelector   components.HunterSelector
 	FilterManager    components.FilterManager
@@ -113,6 +114,9 @@ func NewUIState(theme themes.Theme) *UIState {
 	httpView := components.NewHTTPView()
 	httpView.SetTheme(theme)
 
+	eventsView := components.NewEventsView()
+	eventsView.SetTheme(theme)
+
 	protocolSelector := components.NewProtocolSelector()
 	protocolSelector.SetTheme(theme)
 
@@ -165,6 +169,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		DNSQueriesView:   dnsQueriesView,
 		EmailView:        emailView,
 		HTTPView:         httpView,
+		EventsView:       eventsView,
 		ProtocolSelector: protocolSelector,
 		HunterSelector:   hunterSelector,
 		FilterManager:    filterManager,
@@ -210,6 +215,7 @@ func (ui *UIState) SetTheme(theme themes.Theme) {
 	ui.DNSQueriesView.SetTheme(theme)
 	ui.EmailView.SetTheme(theme)
 	ui.HTTPView.SetTheme(theme)
+	ui.EventsView.SetTheme(theme)
 	ui.ProtocolSelector.SetTheme(theme)
 	ui.FilterInput.SetTheme(theme)
 	ui.CallFilterInput.SetTheme(theme)

@@ -100,6 +100,7 @@ type Model struct {
 	// Data stores (thread-safe)
 	packetStore   *store.PacketStore
 	callStore     *store.CallStore
+	eventStore    *store.EventStore
 	connectionMgr *store.ConnectionManager
 	uiState       *store.UIState
 
@@ -162,6 +163,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	// Initialize data stores
 	packetStore := store.NewPacketStore(bufferSize)
 	callStore := store.NewCallStore(maxCalls)
+	eventStore := store.NewEventStore(bufferSize)
 	connectionMgr := store.NewConnectionManager()
 	uiState := store.NewUIState(theme)
 
@@ -254,6 +256,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	return Model{
 		packetStore:                packetStore,
 		callStore:                  callStore,
+		eventStore:                 eventStore,
 		connectionMgr:              connectionMgr,
 		uiState:                    uiState,
 		statistics:                 uiState.Statistics, // Reference to same statistics
@@ -485,6 +488,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleTickMsg(msg)
 	case PacketBatchMsg:
 		return m.handlePacketBatchMsg(msg)
+	case EventBatchMsg:
+		return m.handleEventBatchMsg(msg)
 	case CallUpdateMsg:
 		return m.handleCallUpdateMsg(msg)
 	case CorrelatedCallUpdateMsg:

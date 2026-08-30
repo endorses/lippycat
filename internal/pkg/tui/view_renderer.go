@@ -4,6 +4,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/spf13/viper"
 )
 
@@ -30,6 +31,7 @@ func (m Model) View() string {
 	m.uiState.Footer.SetFilterCount(m.packetStore.FilterChain.Count())
 	m.uiState.Footer.SetActiveTab(m.uiState.Tabs.GetActive())
 	m.uiState.Footer.SetHasProtocolSelection(m.uiState.SelectedProtocol.Name != "All")
+	m.uiState.Footer.SetHasEvents(m.captureMode == components.CaptureModeRemote && eventScopeAvailable(m.uiState.SelectedProtocol.Name))
 	m.uiState.Footer.SetPaused(m.uiState.Paused)
 	m.uiState.Footer.SetHasHelpSearch(m.uiState.HelpView.HasActiveSearch())
 	m.uiState.Footer.SetViewMode(m.uiState.ViewMode)
@@ -94,6 +96,20 @@ func (m Model) View() string {
 // renderCaptureTab renders the Capture tab content (packets or calls)
 func (m Model) renderCaptureTab(contentHeight int) string {
 	// Check if we should display calls view, queries view, or packets view
+	if m.uiState.ViewMode == "events" && m.uiState.EventsView != nil {
+		m.syncEventsView()
+		const minWidthForDetails = 100
+		if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
+			detailsWidth := min(60, m.uiState.Width/2)
+			timelineWidth := m.uiState.Width - detailsWidth
+			return lipgloss.JoinHorizontal(lipgloss.Top,
+				m.uiState.EventsView.RenderTimeline(timelineWidth, contentHeight, m.uiState.FocusedPane == "left"),
+				m.uiState.EventsView.RenderDetails(detailsWidth, contentHeight),
+			)
+		}
+		return m.uiState.EventsView.RenderTimeline(m.uiState.Width, contentHeight, false)
+	}
+
 	if m.uiState.ViewMode == "calls" {
 		// Render calls view with optional details panel
 		minWidthForDetails := 120 // Need enough width for call details

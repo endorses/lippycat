@@ -36,7 +36,10 @@ func (m Model) handleFocusRight() (Model, tea.Cmd) {
 func (m Model) handleMoveDown() (Model, tea.Cmd) {
 	switch m.uiState.Tabs.GetActive() {
 	case 0: // Capture tab
-		if m.uiState.ViewMode == "calls" {
+		if m.uiState.ViewMode == "events" {
+			m.eventStore.SelectNext()
+			m.syncEventsView()
+		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
 			minWidthForDetails := 120
 			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
@@ -73,7 +76,10 @@ func (m Model) handleMoveDown() (Model, tea.Cmd) {
 func (m Model) handleMoveUp() (Model, tea.Cmd) {
 	switch m.uiState.Tabs.GetActive() {
 	case 0: // Capture tab
-		if m.uiState.ViewMode == "calls" {
+		if m.uiState.ViewMode == "events" {
+			m.eventStore.SelectPrevious()
+			m.syncEventsView()
+		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
 			minWidthForDetails := 120
 			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
@@ -109,7 +115,10 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 // handleJumpToTop jumps to the top of the current list
 func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
-		if m.uiState.ViewMode == "calls" {
+		if m.uiState.ViewMode == "events" {
+			m.eventStore.SelectFirst()
+			m.syncEventsView()
+		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
 			minWidthForDetails := 120
 			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
@@ -140,7 +149,10 @@ func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 // handleJumpToBottom jumps to the bottom of the current list
 func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
-		if m.uiState.ViewMode == "calls" {
+		if m.uiState.ViewMode == "events" {
+			m.eventStore.SelectLast()
+			m.syncEventsView()
+		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
 			minWidthForDetails := 120
 			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
@@ -174,7 +186,10 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 // handlePageUp moves up one page in the current list
 func (m Model) handlePageUp() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
-		if m.uiState.ViewMode == "calls" {
+		if m.uiState.ViewMode == "events" {
+			m.eventStore.SelectOffset(-max(1, m.uiState.Height-10))
+			m.syncEventsView()
+		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
 			minWidthForDetails := 120
 			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
@@ -205,7 +220,10 @@ func (m Model) handlePageUp() (Model, tea.Cmd) {
 // handlePageDown moves down one page in the current list
 func (m Model) handlePageDown() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
-		if m.uiState.ViewMode == "calls" {
+		if m.uiState.ViewMode == "events" {
+			m.eventStore.SelectOffset(max(1, m.uiState.Height-10))
+			m.syncEventsView()
+		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
 			minWidthForDetails := 120
 			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails

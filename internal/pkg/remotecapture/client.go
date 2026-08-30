@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
@@ -56,15 +57,16 @@ type ClientConfig struct {
 
 // Client wraps gRPC client for remote packet capture
 type Client struct {
-	conn       *grpc.ClientConn
-	dataClient data.DataServiceClient
-	mgmtClient management.ManagementServiceClient
-	handler    types.EventHandler
-	ctx        context.Context
-	cancel     context.CancelFunc
-	nodeType   NodeType
-	nodeID     string // ID of connected node
-	addr       string // Address of connected node
+	conn        *grpc.ClientConn
+	dataClient  data.DataServiceClient
+	eventClient eventsv1.EventServiceClient
+	mgmtClient  management.ManagementServiceClient
+	handler     types.EventHandler
+	ctx         context.Context
+	cancel      context.CancelFunc
+	nodeType    NodeType
+	nodeID      string // ID of connected node
+	addr        string // Address of connected node
 
 	// Interface mapping: hunterID -> []interfaceName (indexed by interface_index)
 	interfacesMu sync.RWMutex
@@ -78,9 +80,12 @@ type Client struct {
 	callUpdateTimer *time.Timer
 
 	// Subscription management for hot-swapping
-	streamMu       sync.RWMutex
-	streamCancel   context.CancelFunc // Cancel function for current stream
-	currentHunters []string           // Current hunter filter
+	streamMu              sync.RWMutex
+	streamCancel          context.CancelFunc // Cancel function for current stream
+	currentHunters        []string           // Current hunter filter
+	eventCursorMu         sync.Mutex
+	eventStreamID         string
+	eventDeliverySequence uint64
 }
 
 // rtpQualityStats tracks RTP quality metrics for a call
@@ -171,16 +176,17 @@ func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Cli
 	}
 
 	client := &Client{
-		conn:       conn,
-		dataClient: data.NewDataServiceClient(conn),
-		mgmtClient: management.NewManagementServiceClient(conn),
-		handler:    handler,
-		ctx:        ctx,
-		cancel:     cancel,
-		addr:       config.Address,
-		interfaces: make(map[string][]string),
-		calls:      make(map[string]*types.CallInfo),
-		rtpStats:   make(map[string]*rtpQualityStats),
+		conn:        conn,
+		dataClient:  data.NewDataServiceClient(conn),
+		eventClient: eventsv1.NewEventServiceClient(conn),
+		mgmtClient:  management.NewManagementServiceClient(conn),
+		handler:     handler,
+		ctx:         ctx,
+		cancel:      cancel,
+		addr:        config.Address,
+		interfaces:  make(map[string][]string),
+		calls:       make(map[string]*types.CallInfo),
+		rtpStats:    make(map[string]*rtpQualityStats),
 	}
 
 	// Detect node type by checking if GetHunterStatus is available

@@ -16,6 +16,7 @@ import (
 // MockEventHandler implements types.EventHandler for testing
 type MockEventHandler struct {
 	PacketBatches  [][]types.PacketDisplay
+	EventBatches   []types.EventBatch
 	HunterStatuses []MockHunterStatus
 	Disconnects    []MockDisconnect
 	CallUpdates    [][]types.CallInfo
@@ -36,6 +37,10 @@ type MockDisconnect struct {
 
 func (m *MockEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
 	m.PacketBatches = append(m.PacketBatches, packets)
+}
+
+func (m *MockEventHandler) OnEventBatch(batch types.EventBatch) {
+	m.EventBatches = append(m.EventBatches, batch)
 }
 
 func (m *MockEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string) {

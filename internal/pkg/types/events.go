@@ -3,14 +3,45 @@ package types
 import (
 	"time"
 
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/events"
 )
+
+// EventBatch is one decoded delivery from the normalized protocol-event
+// stream. It deliberately contains events rather than packet display values so
+// non-TUI clients can consume the same callback without a presentation-layer
+// dependency.
+type EventBatch struct {
+	Events                 []events.Event
+	Losses                 []EventLoss
+	CompatibilityOmissions uint64
+	StreamID               string
+	DeliverySequence       uint64
+}
+
+// EventLoss describes an explicitly reported gap in event delivery.
+type EventLoss struct {
+	Kind              eventsv1.LossKind
+	Count             uint64
+	SourceNodeID      string
+	ProducerSessionID string
+	SequenceRanges    []EventSequenceRange
+}
+
+type EventSequenceRange struct {
+	First uint64
+	Last  uint64
+}
 
 // EventHandler defines the interface for receiving remote capture events.
 // This allows remotecapture to be decoupled from TUI-specific implementations.
 type EventHandler interface {
 	// OnPacketBatch is called when a batch of packets is received
 	OnPacketBatch(packets []PacketDisplay)
+
+	// OnEventBatch is called for decoded events and event-stream loss reports.
+	OnEventBatch(batch EventBatch)
 
 	// OnHunterStatus is called when hunter status is updated
 	// processorAddr is the address of the processor being queried
@@ -79,6 +110,7 @@ type CallLegInfo struct {
 type NoopEventHandler struct{}
 
 func (n *NoopEventHandler) OnPacketBatch(packets []PacketDisplay) {}
+func (n *NoopEventHandler) OnEventBatch(batch EventBatch)         {}
 func (n *NoopEventHandler) OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string) {
 }
 func (n *NoopEventHandler) OnCallUpdate(calls []CallInfo)                               {}

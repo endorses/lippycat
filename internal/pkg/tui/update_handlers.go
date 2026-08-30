@@ -68,6 +68,9 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 
 	// Set calls view size (always full width, no split view)
 	m.uiState.CallsView.SetSize(msg.Width, contentHeight)
+	if m.uiState.EventsView != nil {
+		m.uiState.EventsView.SetSize(msg.Width, contentHeight)
+	}
 
 	// Auto-hide details panel if terminal is too narrow or if details are toggled off
 	minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
@@ -238,6 +241,8 @@ func (m Model) handleNodesLoadFailedMsg(msg NodesLoadFailedMsg) (Model, tea.Cmd)
 // handleProtocolSelectedMsg handles protocol selection from protocol selector
 func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Model, tea.Cmd) {
 	// User selected a protocol from the protocol selector
+	preserveEvents := m.captureMode == components.CaptureModeRemote &&
+		m.uiState.ViewMode == "events" && eventScopeAvailable(msg.Protocol.Name)
 	m.uiState.SelectedProtocol = msg.Protocol
 
 	// Update statistics view with selected protocol for protocol-specific stats
@@ -267,7 +272,9 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 
 	// Switch to calls view if VoIP protocol selected
 	// Also enable/disable TCP reassembly for SIP detection
-	if msg.Protocol.Name == "VoIP (SIP/RTP)" {
+	if preserveEvents {
+		m.setCaptureView("events")
+	} else if msg.Protocol.Name == "VoIP (SIP/RTP)" {
 		m.uiState.ViewMode = "calls"
 		SetVoIPModeEnabled(true) // Enable TCP reassembly for SIP
 	} else {

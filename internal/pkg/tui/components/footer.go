@@ -30,6 +30,7 @@ type Footer struct {
 	streamingSave        bool    // True when streaming save is active
 	activeTab            int     // Active tab index
 	hasProtocolSelection bool    // True when a protocol is selected
+	hasEvents            bool    // True when the common Events view is available
 	paused               bool    // True when capture is paused
 	hasHelpSearch        bool    // True when Help tab has active search
 	viewMode             string  // "packets" or "calls" for Capture tab
@@ -88,6 +89,9 @@ func (f *Footer) SetActiveTab(index int) {
 func (f *Footer) SetHasProtocolSelection(has bool) {
 	f.hasProtocolSelection = has
 }
+
+// SetHasEvents controls whether Capture view cycling includes normalized events.
+func (f *Footer) SetHasEvents(has bool) { f.hasEvents = has }
 
 // SetPaused sets whether capture is currently paused
 func (f *Footer) SetPaused(paused bool) {
@@ -173,7 +177,7 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 			TabKeybind{Key: "t", Description: "time", ShortDesc: "tm", Essential: false},
 		)
 
-		if f.hasProtocolSelection {
+		if f.hasProtocolSelection || f.hasEvents {
 			keybinds = append(keybinds, TabKeybind{Key: "v", Description: "view", ShortDesc: "vw", Essential: false})
 		}
 		if f.streamingSave {

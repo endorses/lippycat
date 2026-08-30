@@ -488,6 +488,8 @@ func (h *TestEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
 	h.packetBatches = append(h.packetBatches, packets)
 }
 
+func (h *TestEventHandler) OnEventBatch(batch types.EventBatch) {}
+
 func (h *TestEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

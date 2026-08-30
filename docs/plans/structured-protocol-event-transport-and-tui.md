@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Phase 2 complete
+**Status:** Phase 3 complete
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -165,31 +165,44 @@ identity when necessary to honor the subscriber's negotiated message limit.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 
-- [ ] Add a bounded `EventStore` with stable event-ID selection, arrival
+- [x] Add a bounded `EventStore` with stable event-ID selection, arrival
       sequence, capture timestamp, per-kind/source projections, pause/reset
       behavior, eviction counters, and transport-loss counters.
-- [ ] Add a generic Events component with a compact timeline and sanitized,
+- [x] Add a generic Events component with a compact timeline and sanitized,
       bounded details for all Phase 1 event kinds.
-- [ ] Derive canonical field names and types from `internal/pkg/logschema` while
+- [x] Derive canonical field names and types from `internal/pkg/logschema` while
       keeping TUI summary and layout logic separate.
-- [ ] Add `EventBatchMsg` and a focused event callback to the TUI/remotecapture
+- [x] Add `EventBatchMsg` and a focused event callback to the TUI/remotecapture
       bridge without coupling normalized events to packet display types.
-- [ ] Extend the remote client to negotiate and consume `SubscribeEvents`, and
+- [x] Extend the remote client to negotiate and consume `SubscribeEvents`, and
       surface incompatible kinds, reconnect gaps, and subscriber drops.
-- [ ] Add Events to Capture-tab view cycling:
-  - [ ] `p` changes traffic/protocol scope;
-  - [ ] `v` changes Packets, Events, or an available specialized view;
-  - [ ] exact event-kind filtering is used initially; and
-  - [ ] the Events view is preserved across compatible scope changes.
-- [ ] Add event details, navigation, filtering entry points, contextual footer
+- [x] Add Events to Capture-tab view cycling:
+  - [x] `p` changes traffic/protocol scope;
+  - [x] `v` changes Packets, Events, or an available specialized view;
+  - [x] exact event-kind filtering is used initially; and
+  - [x] the Events view is preserved across compatible scope changes.
+- [x] Add event details, navigation, filtering entry points, contextual footer
       help, and a clear message when related packets are no longer buffered.
-- [ ] Keep existing Calls and protocol-specific views until separate parity
+- [x] Keep existing Calls and protocol-specific views until separate parity
       decisions are made.
-- [ ] Test selection across append/eviction, narrow layouts, sanitization,
+- [x] Test selection across append/eviction, narrow layouts, sanitization,
       filtering, pause/reset, reconnect, and local-versus-remote decoding parity.
 
 **Gate:** `lc watch remote` can browse live processor events without requiring
 `--log-dir`; packet and call views remain unchanged.
+
+### Phase 3 verification
+
+Verified on 2026-08-30 with focused EventStore, Events component, remote-client,
+and TUI integration race tests; TUI, processor, and tap build-tag suites; and
+the full `make test` suite including localhost integration tests outside the
+sandbox. The remote event subscription is independent of packet delivery and
+legacy servers, decodes through the shared protobuf adapter, validates stream
+identity and delivery ordering, preserves reconnect cursors, and exposes
+subscriber, reconnect, transport, and compatibility gaps. The bounded Events
+view retains stable event-ID selection, exact kind/source projections,
+sanitized `logschema`-derived details for every metadata event kind, contextual
+navigation and view cycling, and an explicit related-packet eviction notice.
 
 ## Phase 4 — Shared stateful event-analysis runtime and local TUI parity
 

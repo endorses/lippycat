@@ -27,7 +27,8 @@ type OfflineSession struct {
 
 // Producer assigns immutable delivery identity to normalized events. A
 // Producer belongs to exactly one effective node ID and producer session.
-// Event sequences begin at one and follow typed-constructor invocation order.
+// Event sequences begin at one and follow assignment order, which is dispatcher
+// admission order for production pipelines.
 type Producer struct {
 	nodeID    string
 	sessionID string
@@ -52,7 +53,7 @@ func NewLiveProducerSet() (*ProducerSet, error) {
 }
 
 func (s *ProducerSet) Assign(event Event) Event {
-	if s == nil || event == nil {
+	if s == nil || isNilEvent(event) {
 		return event
 	}
 	nodeID := event.Envelope().NodeID
@@ -71,6 +72,33 @@ func (s *ProducerSet) Assign(event Event) Event {
 	}
 	s.mu.Unlock()
 	return producer.Assign(event)
+}
+
+// isNilEvent handles typed nil pointers stored in an Event interface. Event is
+// intentionally closed to the concrete event types in this package, so this
+// exhaustive check avoids reflection on the capture hot path.
+func isNilEvent(event Event) bool {
+	if event == nil {
+		return true
+	}
+	switch ev := event.(type) {
+	case *DNSEvent:
+		return ev == nil
+	case *SMTPEvent:
+		return ev == nil
+	case *TLSEvent:
+		return ev == nil
+	case *HTTPEvent:
+		return ev == nil
+	case *ConnEvent:
+		return ev == nil
+	case *FileMetadataEvent:
+		return ev == nil
+	case *FileContentEvent:
+		return ev == nil
+	default:
+		return false
+	}
 }
 
 // NewLiveProducer creates a producer with a cryptographically random 128-bit

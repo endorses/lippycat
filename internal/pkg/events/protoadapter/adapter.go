@@ -551,6 +551,9 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 			if e.Envelope.ProducerSessionId != b.ProducerSessionId || e.Envelope.EventId != e.EventId || e.Envelope.EventSequence != e.EventSequence {
 				return fmt.Errorf("event batch event %d identity mismatch", i)
 			}
+			if _, err := DecodeEvent(e); err != nil {
+				return fmt.Errorf("event batch event %d is invalid: %w", i, err)
+			}
 		}
 		if b.FirstEventSequence != b.Events[0].EventSequence || b.LastEventSequence != b.Events[len(b.Events)-1].EventSequence {
 			return errors.New("event batch sequence boundary mismatch")
@@ -570,24 +573,44 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 			if len(loss.EventSequenceRanges) > MaxCollectionEntries {
 				return errors.New("too many event loss ranges")
 			}
-			for _, r := range loss.EventSequenceRanges {
+			var rangedCount uint64
+			var previousLast uint64
+			for i, r := range loss.EventSequenceRanges {
 				if r == nil || r.First == 0 || r.Last < r.First {
 					return errors.New("invalid event loss range")
 				}
+				if loss.SourceNodeId != b.SourceNodeId {
+					return errors.New("event loss range source does not match batch source")
+				}
+				if i > 0 && r.First <= previousLast {
+					return errors.New("event loss ranges overlap or are out of order")
+				}
+				if r.First == 1 && r.Last == ^uint64(0) {
+					return errors.New("event loss range count overflows")
+				}
+				rangeCount := r.Last - r.First + 1
+				if rangedCount > ^uint64(0)-rangeCount {
+					return errors.New("event loss range count overflows")
+				}
+				rangedCount += rangeCount
+				previousLast = r.Last
+			}
+			if loss.Count < rangedCount {
+				return errors.New("event loss count is smaller than its sequence ranges")
 			}
 		}
 	}
 	for i := 1; i < len(b.Events); i++ {
 		previous := b.Events[i-1].EventSequence
 		current := b.Events[i].EventSequence
-		if current > previous+1 && !lossesCover(b.Stats, previous+1, current-1) {
+		if current > previous+1 && !lossesCover(b.Stats, b.SourceNodeId, previous+1, current-1) {
 			return fmt.Errorf("event batch gap %d-%d is not reported", previous+1, current-1)
 		}
 	}
 	return nil
 }
 
-func lossesCover(stats *eventsv1.EventBatchStats, first, last uint64) bool {
+func lossesCover(stats *eventsv1.EventBatchStats, sourceNodeID string, first, last uint64) bool {
 	if stats == nil {
 		return false
 	}
@@ -595,7 +618,7 @@ func lossesCover(stats *eventsv1.EventBatchStats, first, last uint64) bool {
 	for next <= last {
 		coveredThrough := uint64(0)
 		for _, loss := range stats.Losses {
-			if loss == nil {
+			if loss == nil || loss.SourceNodeId != sourceNodeID {
 				continue
 			}
 			for _, r := range loss.EventSequenceRanges {

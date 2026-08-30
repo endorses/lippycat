@@ -237,3 +237,21 @@ func TestDispatcherRejectsUnidentifiedEventFromConfiguredAssigner(t *testing.T) 
 	require.Equal(t, uint64(1), d.Stats().Dropped)
 	require.NoError(t, d.Close(context.Background()))
 }
+
+func TestDispatcherRejectsTypedNilEvents(t *testing.T) {
+	producers, err := NewLiveProducerSet()
+	require.NoError(t, err)
+	d, err := NewDispatcher(Config{QueueSize: 1, Producer: producers})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	events := []Event{
+		(*DNSEvent)(nil), (*SMTPEvent)(nil), (*TLSEvent)(nil),
+		(*HTTPEvent)(nil), (*ConnEvent)(nil), (*FileMetadataEvent)(nil),
+		(*FileContentEvent)(nil),
+	}
+	for _, event := range events {
+		require.False(t, d.Enqueue(event))
+		require.True(t, isNilEvent(producers.Assign(event)))
+	}
+	require.NoError(t, d.Close(context.Background()))
+}

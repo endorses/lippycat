@@ -222,6 +222,44 @@ func TestBatchValidationAllowsReportedSequenceGaps(t *testing.T) {
 	require.ErrorContains(t, ValidateBatch(batch), "out of sequence")
 }
 
+func TestBatchValidationRejectsMalformedMember(t *testing.T) {
+	event, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	batch := &eventsv1.ProtocolEventBatch{SourceNodeId: "node", ProducerSessionId: "session", BatchSequence: 1, Events: []*eventsv1.ProtocolEvent{event}, FirstEventSequence: 1, LastEventSequence: 1}
+
+	event.EventId = "forged"
+	event.Envelope.EventId = "forged"
+	require.ErrorContains(t, ValidateBatch(batch), "event ID does not match")
+
+	event.EventId = events.DeliveryEventID("node", "session", 1)
+	event.Envelope.EventId = event.EventId
+	event.Envelope.Flow.SourceAddress = "invalid"
+	require.ErrorContains(t, ValidateBatch(batch), "decode source address")
+}
+
+func TestBatchValidationRejectsContradictoryLossAccounting(t *testing.T) {
+	first, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	last, err := ToProto(allEvents()[1])
+	require.NoError(t, err)
+	last.EventSequence = 3
+	last.EventId = events.DeliveryEventID("node", "session", 3)
+	last.Envelope.EventSequence = 3
+	last.Envelope.EventId = last.EventId
+	loss := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_DISPATCH, Count: 1, SourceNodeId: "other", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}}}
+	batch := &eventsv1.ProtocolEventBatch{SourceNodeId: "node", ProducerSessionId: "session", BatchSequence: 1, Events: []*eventsv1.ProtocolEvent{first, last}, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{loss}}, FirstEventSequence: 1, LastEventSequence: 3}
+
+	require.ErrorContains(t, ValidateBatch(batch), "source does not match")
+	loss.SourceNodeId = "node"
+	loss.Count = 0
+	require.ErrorContains(t, ValidateBatch(batch), "count is smaller")
+	loss.Count = 2
+	loss.EventSequenceRanges = []*eventsv1.SequenceRange{{First: 2, Last: 3}, {First: 3, Last: 4}}
+	require.ErrorContains(t, ValidateBatch(batch), "overlap")
+	loss.EventSequenceRanges = []*eventsv1.SequenceRange{{First: 1, Last: ^uint64(0)}}
+	require.ErrorContains(t, ValidateBatch(batch), "overflows")
+}
+
 func TestNilPayloadIsMalformedWithoutUnknownKind(t *testing.T) {
 	_, _, err := FromProto(&eventsv1.ProtocolEvent{})
 	require.Error(t, err)

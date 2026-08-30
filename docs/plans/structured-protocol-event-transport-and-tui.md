@@ -61,7 +61,8 @@ the contract contains no TUI layout or log-rendering fields.
 
 Re-audited against the implementation on 2026-08-30. The audit corrected
 pointer-event adapter coverage, typed-nil handling, canonical event-ID
-validation, and envelope validation for compatibility omissions. Focused race
+validation, envelope validation for compatibility omissions, admission-grade
+batch member validation, and source-consistent loss accounting. Focused race
 tests and the full `make test` suite pass.
 
 ## Phase 2 — Processor event subscription

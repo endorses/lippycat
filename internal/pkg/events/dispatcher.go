@@ -131,7 +131,7 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 
 // Enqueue never waits for a sink or for queue space.
 func (d *Dispatcher) Enqueue(ev Event) bool {
-	if ev == nil {
+	if isNilEvent(ev) {
 		return false
 	}
 	d.mu.RLock()
@@ -144,7 +144,7 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 	defer d.admissionMu.Unlock()
 	if d.cfg.Producer != nil {
 		ev = d.cfg.Producer.Assign(ev)
-		if ev == nil || !hasDeliveryIdentity(ev.Envelope()) {
+		if isNilEvent(ev) || !hasDeliveryIdentity(ev.Envelope()) {
 			d.dropped.Add(1)
 			return false
 		}

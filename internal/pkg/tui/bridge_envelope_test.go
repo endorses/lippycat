@@ -101,7 +101,7 @@ func TestEnvelopeBridgePublishesOfflineEventsWithFileProvenanceBeforeEOF(t *test
 		CaptureLength:  len(data),
 		OriginalLength: len(data),
 		Source: pipeline.SourceProvenance{
-			Kind: pipeline.SourcePCAPReplay, InterfaceName: "fixture.pcap",
+			Kind: pipeline.SourcePCAPReplay, InterfaceName: "fixture.pcap", InterfaceIndex: 7,
 		},
 	}
 	close(envelopes)
@@ -129,6 +129,7 @@ func TestEnvelopeBridgePublishesOfflineEventsWithFileProvenanceBeforeEOF(t *test
 	require.Equal(t, "watch-local", envelope.NodeID)
 	require.Equal(t, "pcap", envelope.Provenance.CaptureSource)
 	require.Equal(t, "fixture.pcap", envelope.Provenance.InputFile)
+	require.Equal(t, uint32(7), envelope.Provenance.InterfaceIndex)
 	require.NotEmpty(t, envelope.EventID)
 	require.NotEmpty(t, envelope.ProducerSessionID)
 	require.NotZero(t, envelope.EventSequence)

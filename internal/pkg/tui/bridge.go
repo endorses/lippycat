@@ -13,7 +13,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/detector"
@@ -974,13 +973,6 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 			if err := eventDispatcher.Close(context.Background()); err != nil {
 				logger.Error("Failed to drain local event analysis", "error", err)
 			}
-			stats := eventDispatcher.Stats()
-			if dropped := stats.Dropped + stats.SinkDropped; dropped != 0 {
-				eventHandler.OnEventBatch(types.EventBatch{Losses: []types.EventLoss{{
-					Kind:  eventsv1.LossKind_LOSS_KIND_BUFFER,
-					Count: dropped,
-				}}})
-			}
 		}()
 	}
 
@@ -1119,7 +1111,10 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 
 			reassembly.process(env)
 			if eventRuntime != nil {
-				source := eventanalysis.Source{NodeID: b.analysis.NodeID}
+				source := eventanalysis.Source{
+					NodeID:         b.analysis.NodeID,
+					InterfaceIndex: env.Source.InterfaceIndex,
+				}
 				if env.Source.Kind == pipeline.SourcePCAPReplay {
 					source.CaptureSource = "pcap"
 					source.InputFile = env.Source.InputFile

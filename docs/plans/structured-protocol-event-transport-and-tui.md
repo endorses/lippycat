@@ -281,6 +281,10 @@ transported processor/tap events and corrected TLS framing so handshake
 messages split across multiple TLS records are emitted only after complete
 reassembly, with the final-record capture timestamp. Regression tests and the
 race-enabled event-analysis, TLS, TUI, sniff, and processor suites pass.
+A subsequent local-TUI audit preserved the capture interface index at the
+envelope-to-runtime boundary and removed duplicate shutdown loss reporting;
+dispatcher drops are already reported exactly once through the bounded local
+sink's drop-observer path.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

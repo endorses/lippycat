@@ -82,6 +82,23 @@ func TestLocalEventSinkOfflineWaitsAndFlushesInOrder(t *testing.T) {
 	require.Equal(t, []string{"one", "two", "three"}, ids)
 }
 
+func TestLocalEventSinkReportsDispatcherDropExactlyOnceAtShutdown(t *testing.T) {
+	var batches []types.EventBatch
+	sink := newLocalEventSink(1, false, func(batch types.EventBatch) {
+		batches = append(batches, batch)
+	})
+
+	sink.LockDropBoundary()
+	sink.HandleDroppedEventLocked(localSinkTestEvent("dropped", 1), time.Now())
+	sink.UnlockDropBoundary()
+	require.NoError(t, sink.Close(context.Background()))
+
+	require.Len(t, batches, 1)
+	require.Empty(t, batches[0].Events)
+	require.Len(t, batches[0].Losses, 1)
+	require.Equal(t, uint64(1), batches[0].Losses[0].Count)
+}
+
 func TestPendingLocalEventsAreBoundedOrderedAndReportPressure(t *testing.T) {
 	pendingLocalEvents.clear()
 	t.Cleanup(pendingLocalEvents.clear)

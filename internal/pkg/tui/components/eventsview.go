@@ -112,9 +112,12 @@ func (v *EventsView) SelectPrevious() {
 
 // SetRelatedPacketsAvailable controls the explicit packet-eviction notice.
 func (v *EventsView) SetRelatedPacketsAvailable(available bool) {
+	changed := !v.relatedPacketsKnown || v.relatedPacketsAvailable != available
 	v.relatedPacketsKnown = true
 	v.relatedPacketsAvailable = available
-	v.detailsSelectedID = ""
+	if changed {
+		v.detailsSelectedID = ""
+	}
 }
 
 func (v *EventsView) RenderTimeline(width, height int, focused bool) string {

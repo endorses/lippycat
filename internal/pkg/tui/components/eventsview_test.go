@@ -274,3 +274,19 @@ func TestEventsViewDetailsScrollResetsForNewSelection(t *testing.T) {
 	assert.Contains(t, details, "second.example")
 	assert.NotContains(t, details, "Event Identity")
 }
+
+func TestEventsViewRepeatedAvailabilitySyncPreservesDetailScroll(t *testing.T) {
+	event := dnsEvent("event", "example.org")
+	view := NewEventsView()
+	view.SetEvents([]EventItem{{Event: event}})
+	view.SetRelatedPacketsAvailable(false)
+	view.RenderDetails(77, 16, false)
+	view.ScrollDetailsToBottom()
+
+	// The model synchronizes this state before every render. Reapplying an
+	// unchanged value must not rebuild the viewport and reset its offset.
+	view.SetRelatedPacketsAvailable(false)
+	details := view.RenderDetails(77, 16, false)
+	assert.Contains(t, details, "Event Identity")
+	assert.Contains(t, details, "event")
+}

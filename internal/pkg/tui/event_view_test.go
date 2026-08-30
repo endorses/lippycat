@@ -197,6 +197,7 @@ func testEventEnvelope(id string, sequence uint64) events.Envelope {
 
 func TestEventsDetailsRecognizesBufferedRelatedPacket(t *testing.T) {
 	m := NewModel(2, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(0)
 	m.uiState.ViewMode = "events"
 	m.uiState.EventShowDetails = true
 	m.uiState.Width = 120
@@ -204,6 +205,37 @@ func TestEventsDetailsRecognizesBufferedRelatedPacket(t *testing.T) {
 	m.eventStore.AddEvent(events.NewHTTPEvent(testEventEnvelope("http-1", 1)))
 	m.syncEventsView()
 	require.False(t, strings.Contains(m.renderCaptureTab(20), "no longer buffered"))
+}
+
+func TestEventDetailsScrollSurvivesRenderSynchronization(t *testing.T) {
+	m := NewModel(2, 8, "", "", nil, false, true, "", true)
+	m.uiState.Tabs.SetActive(0)
+	m.uiState.ViewMode = "events"
+	m.uiState.EventShowDetails = true
+	m.uiState.Width = 180
+	m.uiState.Height = 30
+	event := events.NewDNSEvent(testEventEnvelope("dns-scroll", 1))
+	event.Query = "example.org"
+	m.eventStore.AddEvent(event)
+
+	// Initialize the viewport, then exercise the same focus-aware keyboard
+	// path used by packet details.
+	m.renderCaptureTab(20)
+	m.uiState.FocusedPane = "right"
+	m, _ = m.handleJumpToBottom()
+	details := m.renderCaptureTab(20)
+	require.Contains(t, details, "Event Identity")
+	require.Equal(t, "dns-scroll", m.eventStore.SelectedID())
+
+	// Mouse-wheel scrolling over the right pane must likewise survive the
+	// synchronization performed by the following render.
+	m, _ = m.handleJumpToTop()
+	for range 50 {
+		m, _ = m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: 170, Y: 10})
+	}
+	details = m.renderCaptureTab(20)
+	require.Contains(t, details, "Event Identity")
+	require.Equal(t, "dns-scroll", m.eventStore.SelectedID())
 }
 
 func TestEventLossCountSurfacesCountlessGaps(t *testing.T) {

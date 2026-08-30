@@ -329,6 +329,9 @@ func TestEventServiceRejectsUnauthorizedAndInvalidRequests(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	err = service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, ProcessorNodeIds: make([]string, protoadapter.MaxCollectionEntries+1)}, stream)
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	err = service.SubscribeEvents(&eventsv1.EventSubscribeRequest{SubscriptionVersion: 1, PreviousStreamId: strings.Repeat("x", protoadapter.MaxStringBytes+1)}, stream)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	assert.Empty(t, stream.snapshot())
 }
 
 func testEventEnvelope(nodeID string, sequence uint64) events.Envelope {

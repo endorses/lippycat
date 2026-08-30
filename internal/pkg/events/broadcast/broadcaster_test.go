@@ -32,6 +32,23 @@ func TestBroadcasterSlowSubscriberDoesNotAffectOthers(t *testing.T) {
 	assert.Empty(t, slow.ConsumeLosses())
 }
 
+func TestBroadcasterSortsAndMergesOutOfOrderDispatcherLosses(t *testing.T) {
+	b := New()
+	sub, err := b.Subscribe(Options{QueueSize: 1})
+	require.NoError(t, err)
+
+	for _, sequence := range []uint64{3, 2, 5, 4, 2} {
+		b.HandleDroppedEvent(dnsEvent("node-a", sequence))
+	}
+
+	assert.Equal(t, []Loss{{
+		SourceNodeID: "node-a",
+		Cause:        LossCauseDispatcherOverflow,
+		Count:        5,
+		Ranges:       []SequenceRange{{First: 2, Last: 5}},
+	}}, sub.ConsumeLosses())
+}
+
 func TestBroadcasterFiltersAndProjectsBeforeEnqueue(t *testing.T) {
 	b := New()
 	sub, err := b.Subscribe(Options{

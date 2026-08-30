@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -317,15 +318,27 @@ func (s *Subscription) recordDrop(env events.Envelope, cause LossCause) {
 	if env.EventSequence == 0 || key.sourceNodeID == "" {
 		return
 	}
-	last := len(loss.Ranges) - 1
-	if last >= 0 && loss.Ranges[last].Last+1 == env.EventSequence {
-		loss.Ranges[last].Last = env.EventSequence
-		return
-	}
-	if len(loss.Ranges) >= maxLossSequenceRanges {
-		return
-	}
 	loss.Ranges = append(loss.Ranges, SequenceRange{First: env.EventSequence, Last: env.EventSequence})
+	sort.Slice(loss.Ranges, func(i, j int) bool {
+		return loss.Ranges[i].First < loss.Ranges[j].First
+	})
+	merged := loss.Ranges[:0]
+	for _, sequenceRange := range loss.Ranges {
+		last := len(merged) - 1
+		overlaps := last >= 0 && sequenceRange.First <= merged[last].Last
+		adjacent := last >= 0 && merged[last].Last != ^uint64(0) && sequenceRange.First == merged[last].Last+1
+		if overlaps || adjacent {
+			if sequenceRange.Last > merged[last].Last {
+				merged[last].Last = sequenceRange.Last
+			}
+			continue
+		}
+		if len(merged) == maxLossSequenceRanges {
+			break
+		}
+		merged = append(merged, sequenceRange)
+	}
+	loss.Ranges = merged
 }
 
 func stringSet[T ~string](values []T) map[T]struct{} {

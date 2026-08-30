@@ -82,6 +82,9 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 	if err := validateEventSelectors("processor_node_ids", req.ProcessorNodeIds); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
+	if len(req.PreviousStreamId) > protoadapter.MaxStringBytes {
+		return status.Errorf(codes.InvalidArgument, "previous_stream_id exceeds %d bytes", protoadapter.MaxStringBytes)
+	}
 	if len(req.EventKinds) > protoadapter.MaxCollectionEntries {
 		return status.Errorf(codes.InvalidArgument, "event_kinds exceeds %d entries", protoadapter.MaxCollectionEntries)
 	}

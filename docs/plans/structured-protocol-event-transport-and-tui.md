@@ -138,6 +138,9 @@ non-contiguous producer sequences are now split into separate valid batches;
 oversized-event omission reports preserve producer-session identity when it
 fits and use the bounded GAP path; and failed processor/tap startup now rolls
 back the event dispatcher, broadcaster, listener, and other started resources.
+A subsequent independent audit bounded the reconnect stream identifier before
+subscriber admission and sorted and merged dispatcher-loss ranges that can
+arrive out of event-sequence order from separate queue-overflow boundaries.
 
 ## Phase 3 — Common TUI Events view and remote delivery
 

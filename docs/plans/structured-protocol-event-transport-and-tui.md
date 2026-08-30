@@ -70,6 +70,9 @@ effective tap ID as producer identity while retaining the local capture source
 in provenance. The final implementation audit extended that normalization to
 connection events, ensuring all event kinds from one tap share a producer
 session and carry consistent capture-source provenance.
+This audit also wired deterministic offline sessions into actual PCAP sniff
+production and rejected loss ranges that contradict delivered events or overlap
+across loss records.
 
 ## Phase 2 — Processor event subscription
 

@@ -80,7 +80,7 @@ func sniff(cmd *cobra.Command, args []string) {
 	}
 
 	files := collectReadFiles(readFile, args)
-	withStructuredLogs(func() {
+	withStructuredLogs(files, structuredLogAnalysisProfile("sniff", filter), func() {
 		registrations := []pipeline.SinkRegistration{{Name: "cli", Sink: newCLIEnvelopeSink(os.Stdout, format, quiet)}}
 		if writeFile != "" {
 			pcapSink, err := newPCAPEnvelopeSink(writeFile)

@@ -4,8 +4,12 @@ package sniff
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net/netip"
+	"os"
 	"strings"
 	"time"
 
@@ -42,13 +46,13 @@ type sniffLogSession struct {
 	files          *fileanalysis.Analyzer
 }
 
-func withStructuredLogs(run func()) {
+func withStructuredLogs(inputFiles []string, analysisProfile string, run func()) {
 	dir := viper.GetString("logs.dir")
 	if dir == "" {
 		run()
 		return
 	}
-	s, err := newSniffLogSession(dir)
+	s, err := newSniffLogSession(dir, inputFiles, analysisProfile)
 	if err != nil {
 		logger.Error("Failed to initialize structured protocol logs", "error", err)
 		return
@@ -68,7 +72,7 @@ func withStructuredLogs(run func()) {
 	run()
 }
 
-func newSniffLogSession(dir string) (*sniffLogSession, error) {
+func newSniffLogSession(dir string, inputFiles []string, analysisProfile string) (*sniffLogSession, error) {
 	eventSize := viper.GetInt("events.queue_size")
 	if eventSize <= 0 {
 		eventSize = 20000
@@ -77,7 +81,7 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 	if queueSize <= 0 {
 		queueSize = 10000
 	}
-	producer, err := events.NewLiveProducer("local")
+	producer, err := sniffEventProducer(inputFiles, analysisProfile)
 	if err != nil {
 		return nil, fmt.Errorf("initialize event identity: %w", err)
 	}
@@ -134,6 +138,46 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 		return nil, err
 	}
 	return &sniffLogSession{dispatcher: d, identity: identity, connections: connections, dns: dnsparser.NewParser(), includeHeaders: viper.GetBool("logs.include_http_headers"), files: files}, nil
+}
+
+func sniffEventProducer(inputFiles []string, analysisProfile string) (*events.Producer, error) {
+	if len(inputFiles) == 0 {
+		return events.NewLiveProducer("local")
+	}
+	h := sha256.New()
+	for _, path := range inputFiles {
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open offline event input %q: %w", path, err)
+		}
+		fileHash := sha256.New()
+		_, copyErr := io.Copy(fileHash, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			if closeErr != nil {
+				return nil, fmt.Errorf("hash offline event input %q: copy: %w; close: %w", path, copyErr, closeErr)
+			}
+			return nil, fmt.Errorf("hash offline event input %q: %w", path, copyErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close offline event input %q: %w", path, closeErr)
+		}
+		// Each digest has a fixed width, so file boundaries remain part of the
+		// identity even when adjacent files' bytes could otherwise concatenate
+		// to the same stream.
+		_, _ = h.Write(fileHash.Sum(nil))
+	}
+	return events.NewOfflineProducer("local", events.OfflineSession{
+		InputIdentity:   "sha256:" + hex.EncodeToString(h.Sum(nil)),
+		AnalysisProfile: analysisProfile,
+		SourceOrdering:  append([]string(nil), inputFiles...),
+	})
+}
+
+func structuredLogAnalysisProfile(scope, effectiveFilter string) string {
+	return fmt.Sprintf("events-v1|scope=%s|filter=%s|headers=%t|file-max=%d|file-total=%d|extract=%t|extract-dir=%s",
+		scope, effectiveFilter, viper.GetBool("logs.include_http_headers"), viper.GetInt64("files.max_size"),
+		viper.GetInt64("files.total_size"), viper.GetBool("files.extract"), viper.GetString("files.extract_dir"))
 }
 
 func (s *sniffLogSession) observe(info capture.PacketInfo) {

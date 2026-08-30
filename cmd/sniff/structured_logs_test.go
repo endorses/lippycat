@@ -17,6 +17,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOfflineStructuredEventProducerIsDeterministic(t *testing.T) {
+	firstPath := filepath.Join(t.TempDir(), "first.pcap")
+	secondPath := filepath.Join(t.TempDir(), "second.pcap")
+	require.NoError(t, os.WriteFile(firstPath, []byte("first"), 0o600))
+	require.NoError(t, os.WriteFile(secondPath, []byte("second"), 0o600))
+
+	first, err := sniffEventProducer([]string{firstPath, secondPath}, "profile-a")
+	require.NoError(t, err)
+	replay, err := sniffEventProducer([]string{firstPath, secondPath}, "profile-a")
+	require.NoError(t, err)
+	reordered, err := sniffEventProducer([]string{secondPath, firstPath}, "profile-a")
+	require.NoError(t, err)
+	changedProfile, err := sniffEventProducer([]string{firstPath, secondPath}, "profile-b")
+	require.NoError(t, err)
+
+	require.Equal(t, first.SessionID(), replay.SessionID())
+	require.NotEqual(t, first.SessionID(), reordered.SessionID())
+	require.NotEqual(t, first.SessionID(), changedProfile.SessionID())
+}
+
+func TestLiveStructuredEventProducerUsesRandomSessions(t *testing.T) {
+	first, err := sniffEventProducer(nil, "profile")
+	require.NoError(t, err)
+	second, err := sniffEventProducer(nil, "profile")
+	require.NoError(t, err)
+	require.NotEqual(t, first.SessionID(), second.SessionID())
+}
+
 func TestStructuredLogFlagsAreInheritedByProtocolCommands(t *testing.T) {
 	for _, cmd := range []*cobra.Command{dnsCmd, tlsCmd, httpCmd, emailCmd, voipCmd} {
 		require.NotNil(t, cmd.InheritedFlags().Lookup("log-dir"), cmd.Name())

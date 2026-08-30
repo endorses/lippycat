@@ -290,6 +290,16 @@ func TestBatchValidationRejectsContradictoryLossAccounting(t *testing.T) {
 	require.ErrorContains(t, ValidateBatch(batch), "overlap")
 	loss.EventSequenceRanges = []*eventsv1.SequenceRange{{First: 1, Last: ^uint64(0)}}
 	require.ErrorContains(t, ValidateBatch(batch), "overflows")
+
+	loss.Count = 1
+	loss.EventSequenceRanges = []*eventsv1.SequenceRange{{First: 1, Last: 1}}
+	require.ErrorContains(t, ValidateBatch(batch), "overlaps a delivered event")
+
+	loss.EventSequenceRanges = []*eventsv1.SequenceRange{{First: 2, Last: 2}}
+	duplicate := proto.Clone(loss).(*eventsv1.EventLoss)
+	duplicate.Kind = eventsv1.LossKind_LOSS_KIND_TRANSPORT
+	batch.Stats.Losses = []*eventsv1.EventLoss{loss, duplicate}
+	require.ErrorContains(t, ValidateBatch(batch), "overlap across loss records")
 }
 
 func TestBatchValidationRejectsInvalidCountOnlyLoss(t *testing.T) {

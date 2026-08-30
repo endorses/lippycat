@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sort"
 	"time"
 	"unicode/utf8"
 
@@ -563,6 +564,8 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 			return errors.New("event batch sequence boundary mismatch")
 		}
 	}
+	type lossRange struct{ first, last uint64 }
+	var allLossRanges []lossRange
 	if b.Stats != nil {
 		if len(b.Stats.Losses) > MaxCollectionEntries {
 			return errors.New("too many event losses")
@@ -583,6 +586,9 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 			if len(loss.EventSequenceRanges) > MaxCollectionEntries {
 				return errors.New("too many event loss ranges")
 			}
+			if len(allLossRanges)+len(loss.EventSequenceRanges) > MaxCollectionEntries {
+				return errors.New("too many event loss ranges")
+			}
 			var rangedCount uint64
 			var previousLast uint64
 			for i, r := range loss.EventSequenceRanges {
@@ -601,10 +607,28 @@ func ValidateBatch(b *eventsv1.ProtocolEventBatch) error {
 				}
 				rangedCount += rangeCount
 				previousLast = r.Last
+				allLossRanges = append(allLossRanges, lossRange{first: r.First, last: r.Last})
 			}
 			if loss.Count < rangedCount {
 				return errors.New("event loss count is smaller than its sequence ranges")
 			}
+		}
+	}
+	sort.Slice(allLossRanges, func(i, j int) bool {
+		if allLossRanges[i].first == allLossRanges[j].first {
+			return allLossRanges[i].last < allLossRanges[j].last
+		}
+		return allLossRanges[i].first < allLossRanges[j].first
+	})
+	for i, r := range allLossRanges {
+		if i > 0 && r.first <= allLossRanges[i-1].last {
+			return errors.New("event loss ranges overlap across loss records")
+		}
+		index := sort.Search(len(b.Events), func(j int) bool {
+			return b.Events[j].EventSequence >= r.first
+		})
+		if index < len(b.Events) && b.Events[index].EventSequence <= r.last {
+			return errors.New("event loss range overlaps a delivered event")
 		}
 	}
 	for i := 1; i < len(b.Events); i++ {

@@ -484,6 +484,12 @@ wedged that producer session. Memory-only ingress now treats the first retained
 batch of an unknown session as its post-restart baseline while keeping all
 subsequent gap checks strict; reliable ingress remains WAL-backed and strict.
 A race-enabled regression covers restart recovery and post-baseline NACKs.
+A renewed recovery and status audit corrected two remaining boundaries. A
+hunter with recovered, unacknowledged reliable event batches now rejects packet
+fallback instead of stranding its durable event session while beginning raw
+packet forwarding. Tap-local status now reports capture, analysis, queue,
+unsupported-kind, and transport losses separately, including upstream event
+spool and transport losses.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

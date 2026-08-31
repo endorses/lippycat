@@ -98,6 +98,17 @@ func TestEventRouterFlushPersistsTerminalUnsupportedLoss(t *testing.T) {
 	require.Equal(t, uint64(1), losses[0].GetEventSequenceRanges()[0].GetLast())
 }
 
+func TestEventRouterSeparatesLossCounters(t *testing.T) {
+	router := &EventRouter{}
+	router.recordLoss(eventsv1.LossKind_LOSS_KIND_CAPTURE, 1)
+	router.recordLoss(eventsv1.LossKind_LOSS_KIND_ANALYSIS, 2)
+	router.recordLoss(eventsv1.LossKind_LOSS_KIND_BUFFER, 3)
+	router.recordLoss(eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, 4)
+	router.recordLoss(eventsv1.LossKind_LOSS_KIND_TRANSPORT, 5)
+
+	require.Equal(t, LossSnapshot{Capture: 1, Analysis: 2, Queue: 3, UnsupportedKind: 4, Transport: 5}, router.Losses())
+}
+
 func TestEventRouterDrainAndRetireWaitsForAcknowledgment(t *testing.T) {
 	dir := t.TempDir()
 	manager := NewManager(Config{ForwardMode: "events"}, nil)

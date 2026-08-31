@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
@@ -32,6 +33,35 @@ type EventRouter struct {
 	routes  map[eventRouteKey]*eventRoute
 	ctx     context.Context
 	cancel  context.CancelFunc
+	losses  EventLossStats
+}
+
+// EventLossStats contains cumulative event-forwarding losses by pipeline
+// boundary for tap/processor status reporting.
+type EventLossStats struct {
+	Capture, Analysis, Queue, UnsupportedKind, Transport atomic.Uint64
+}
+
+// LossSnapshot is a consistent-enough lock-free cumulative status sample.
+type LossSnapshot struct{ Capture, Analysis, Queue, UnsupportedKind, Transport uint64 }
+
+func (r *EventRouter) Losses() LossSnapshot {
+	return LossSnapshot{Capture: r.losses.Capture.Load(), Analysis: r.losses.Analysis.Load(), Queue: r.losses.Queue.Load(), UnsupportedKind: r.losses.UnsupportedKind.Load(), Transport: r.losses.Transport.Load()}
+}
+
+func (r *EventRouter) recordLoss(kind eventsv1.LossKind, count uint64) {
+	switch kind {
+	case eventsv1.LossKind_LOSS_KIND_CAPTURE:
+		r.losses.Capture.Add(count)
+	case eventsv1.LossKind_LOSS_KIND_ANALYSIS:
+		r.losses.Analysis.Add(count)
+	case eventsv1.LossKind_LOSS_KIND_DISPATCH, eventsv1.LossKind_LOSS_KIND_BUFFER:
+		r.losses.Queue.Add(count)
+	case eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT:
+		r.losses.UnsupportedKind.Add(count)
+	case eventsv1.LossKind_LOSS_KIND_TRANSPORT:
+		r.losses.Transport.Add(count)
+	}
 }
 
 type eventRouteKey struct {
@@ -149,7 +179,7 @@ func (r *EventRouter) newRoute(nodeID, sessionID string) (*eventRoute, error) {
 }
 
 func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64, spool *eventspool.Spool) (*eventRoute, error) {
-	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: nodeID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{1, 2, 3, 4, 5, 6}, Profile: r.config.Profile, RelayNodeID: r.manager.config.ProcessorID}, spool)
+	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: nodeID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{1, 2, 3, 4, 5, 6}, Profile: r.config.Profile, RelayNodeID: r.manager.config.ProcessorID, OnLoss: r.recordLoss}, spool)
 	if err != nil {
 		return nil, err
 	}

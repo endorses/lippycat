@@ -115,6 +115,17 @@ func TestEnqueueRejectsProducerSessionMutation(t *testing.T) {
 	require.Empty(t, spool.Batches())
 }
 
+func TestHasPendingTracksDurableAcknowledgement(t *testing.T) {
+	client, spool := newTestClient(t)
+	require.False(t, client.HasPending())
+
+	_, err := client.Enqueue(ingressBatch(1))
+	require.NoError(t, err)
+	require.True(t, client.HasPending())
+	require.NoError(t, spool.Ack("hunter", "session", 1))
+	require.False(t, client.HasPending())
+}
+
 func TestACKCarriesFlowControl(t *testing.T) {
 	client, _ := newTestClient(t)
 	paused, _, err := client.handleControl(context.Background(), controlResult{control: &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, FlowControl: int32(data.FlowControl_FLOW_PAUSE)}}, false, 1)

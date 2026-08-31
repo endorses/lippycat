@@ -41,6 +41,10 @@ type Client struct {
 
 func (c *Client) ProducerSessionID() string { return c.config.ProducerSessionID }
 
+// HasPending reports whether the durable spool contains unacknowledged event
+// batches. A forwarding-mode fallback must not strand these records.
+func (c *Client) HasPending() bool { return c.spool.Bytes() != 0 }
+
 func New(config Config, spool *eventspool.Spool) (*Client, error) {
 	if spool == nil {
 		return nil, errors.New("new event forwarding client: spool is required")

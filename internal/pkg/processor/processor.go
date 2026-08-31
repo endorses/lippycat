@@ -861,6 +861,12 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 	}
 
 	stats := localSource.Stats()
+	eventRuntimeStats := p.eventRuntime.Stats()
+	eventDispatcherStats := p.eventDispatcher.Stats()
+	var upstreamLosses upstream.LossSnapshot
+	if p.upstreamEventRouter != nil {
+		upstreamLosses = p.upstreamEventRouter.Losses()
+	}
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "localhost"
@@ -902,13 +908,18 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		Stats: &management.HunterStats{
 			PacketsCaptured: stats.PacketsCaptured,
 			// Local capture has no forwarding hop, so matched == forwarded.
-			PacketsMatched:   stats.PacketsForwarded,
-			PacketsForwarded: stats.PacketsForwarded,
-			PacketsDropped:   stats.PacketsDropped,
-			ActiveFilters:    activeFilters,
-			CpuPercent:       float32(stats.CPUPercent),
-			MemoryRssBytes:   stats.MemoryRSSBytes,
-			MemoryLimitBytes: stats.MemoryLimitBytes,
+			PacketsMatched:        stats.PacketsForwarded,
+			PacketsForwarded:      stats.PacketsForwarded,
+			PacketsDropped:        stats.PacketsDropped,
+			ActiveFilters:         activeFilters,
+			CpuPercent:            float32(stats.CPUPercent),
+			MemoryRssBytes:        stats.MemoryRSSBytes,
+			MemoryLimitBytes:      stats.MemoryLimitBytes,
+			CaptureLosses:         stats.PacketsDropped + upstreamLosses.Capture,
+			AnalysisLosses:        eventRuntimeStats.Invalid + eventRuntimeStats.Dropped + eventRuntimeStats.ReassemblyEvicted + upstreamLosses.Analysis,
+			QueueLosses:           eventDispatcherStats.Dropped + eventDispatcherStats.SinkDropped + upstreamLosses.Queue,
+			UnsupportedKindLosses: upstreamLosses.UnsupportedKind,
+			TransportLosses:       upstreamLosses.Transport,
 		},
 		Interfaces:   localSource.Interfaces(),
 		Capabilities: caps,

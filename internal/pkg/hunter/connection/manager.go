@@ -4,6 +4,7 @@ package connection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -558,6 +559,9 @@ func (m *Manager) register() error {
 		return fmt.Errorf("registration rejected requested event forwarding profile: processor selected %s", accepted)
 	}
 	if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && accepted == management.ForwardingMode_FORWARDING_MODE_PACKETS {
+		if forwarder := m.getEventForwarder(); forwarder != nil && forwarder.HasPending() {
+			return errors.New("registration selected packet fallback while recovered event batches remain unacknowledged")
+		}
 		// Explicit fallback fixes packet mode for this producer lifetime. A later
 		// reconnect must not silently switch the same capture session to events.
 		m.config.ForwardMode = "packets"

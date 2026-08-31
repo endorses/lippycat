@@ -62,6 +62,7 @@ import (
 // StreamPackets handles packet streaming from hunters (Data Service)
 func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) error {
 	var hunterID string // Track which hunter this stream belongs to
+	var forwardingContract *hunter.PacketStreamContract
 
 	defer func() {
 		if hunterID != "" {
@@ -76,10 +77,21 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 			return err
 		}
 
-		// Track hunter ID from first batch
+		// Pin the stream to the exact packet-mode registration selected during
+		// negotiation. Re-registration invalidates the old stream so a producer
+		// can never send packets and events under one accepted contract.
 		if hunterID == "" {
 			hunterID = batch.HunterId
+			var ok bool
+			forwardingContract, ok = p.hunterManager.AdmitPacketStream(hunterID)
+			if !ok {
+				return status.Error(codes.FailedPrecondition, "packet stream requires a current packet-mode hunter registration")
+			}
 			logger.Info("Packet stream started", "hunter_id", hunterID)
+		} else if batch.HunterId != hunterID {
+			return status.Error(codes.InvalidArgument, "packet stream hunter ID changed")
+		} else if !p.hunterManager.ValidatePacketStream(hunterID, forwardingContract) {
+			return status.Error(codes.FailedPrecondition, "packet stream registration was replaced")
 		}
 
 		// Convert protobuf batch to internal format and process

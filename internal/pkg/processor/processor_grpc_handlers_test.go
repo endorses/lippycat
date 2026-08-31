@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -508,7 +509,15 @@ type mockStreamPacketsServer struct {
 	mu              sync.Mutex
 	recvErr         error // Error to return from Recv()
 	sendErr         error // Error to return from Send()
-	cancelAfterRecv int   // Cancel context after N Recv() calls (0 = don't cancel)
+	onSend          func()
+	cancelAfterRecv int // Cancel context after N Recv() calls (0 = don't cancel)
+}
+
+func registerPacketHunter(t *testing.T, processor *Processor, hunterID string) {
+	t.Helper()
+	response, err := processor.RegisterHunter(context.Background(), &management.HunterRegistration{HunterId: hunterID})
+	require.NoError(t, err)
+	require.True(t, response.Accepted)
 }
 
 func (m *mockStreamPacketsServer) Context() context.Context {
@@ -549,6 +558,9 @@ func (m *mockStreamPacketsServer) Send(ctrl *data.StreamControl) error {
 	}
 
 	m.sentControls = append(m.sentControls, ctrl)
+	if m.onSend != nil {
+		m.onSend()
+	}
 	return nil
 }
 
@@ -580,6 +592,7 @@ func TestStreamPackets_Success(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer processor.Shutdown()
+	registerPacketHunter(t, processor, "hunter-1")
 
 	// Create packet batches
 	batches := []*data.PacketBatch{
@@ -662,6 +675,7 @@ func TestStreamPackets_MultipleConcurrentHunters(t *testing.T) {
 
 	for i := 0; i < numHunters; i++ {
 		hunterID := fmt.Sprintf("hunter-%d", i+1)
+		registerPacketHunter(t, processor, hunterID)
 
 		go func(hid string) {
 			defer wg.Done()
@@ -721,6 +735,7 @@ func TestStreamPackets_DisconnectHandling(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer processor.Shutdown()
+	registerPacketHunter(t, processor, "hunter-disconnect")
 
 	// Create batches but configure to cancel after 2 receives
 	batches := []*data.PacketBatch{
@@ -775,6 +790,7 @@ func TestStreamPackets_FlowControl(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer processor.Shutdown()
+	registerPacketHunter(t, processor, "hunter-flow")
 
 	// Create batches
 	batch := &data.PacketBatch{
@@ -822,6 +838,7 @@ func TestStreamPackets_SendError(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer processor.Shutdown()
+	registerPacketHunter(t, processor, "hunter-send-error")
 
 	// Create batch
 	batch := &data.PacketBatch{
@@ -856,6 +873,7 @@ func TestStreamPackets_EmptyBatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer processor.Shutdown()
+	registerPacketHunter(t, processor, "hunter-empty")
 
 	// Create empty batch
 	batch := &data.PacketBatch{
@@ -881,6 +899,59 @@ func TestStreamPackets_EmptyBatch(t *testing.T) {
 	mockStream.mu.Lock()
 	defer mockStream.mu.Unlock()
 	assert.Len(t, mockStream.sentControls, 1)
+}
+
+func TestStreamPackets_EnforcesNegotiatedPacketContract(t *testing.T) {
+	newProcessor := func(t *testing.T) *Processor {
+		t.Helper()
+		processor, err := New(Config{ProcessorID: "test-processor", ListenAddr: "localhost:55555", MaxHunters: 10})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, processor.Shutdown()) })
+		return processor
+	}
+	batch := func(hunterID string, sequence uint64) *data.PacketBatch {
+		return &data.PacketBatch{HunterId: hunterID, Sequence: sequence, TimestampNs: time.Now().UnixNano()}
+	}
+
+	t.Run("unregistered hunter", func(t *testing.T) {
+		processor := newProcessor(t)
+		err := processor.StreamPackets(&mockStreamPacketsServer{ctx: context.Background(), recvBatches: []*data.PacketBatch{batch("unknown", 1)}})
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	})
+
+	t.Run("event-mode hunter", func(t *testing.T) {
+		processor := newProcessor(t)
+		response, err := processor.RegisterHunter(context.Background(), &management.HunterRegistration{
+			HunterId: "event-hunter", EventForwarding: eventForwardingCapabilities(int32(eventsv1.EventKind_EVENT_KIND_DNS)),
+		})
+		require.NoError(t, err)
+		require.Equal(t, management.ForwardingMode_FORWARDING_MODE_EVENTS, response.AcceptedForwardingMode)
+		err = processor.StreamPackets(&mockStreamPacketsServer{ctx: context.Background(), recvBatches: []*data.PacketBatch{batch("event-hunter", 1)}})
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	})
+
+	t.Run("hunter ID changes", func(t *testing.T) {
+		processor := newProcessor(t)
+		registerPacketHunter(t, processor, "hunter-a")
+		registerPacketHunter(t, processor, "hunter-b")
+		err := processor.StreamPackets(&mockStreamPacketsServer{ctx: context.Background(), recvBatches: []*data.PacketBatch{batch("hunter-a", 1), batch("hunter-b", 2)}})
+		require.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
+
+	t.Run("registration replaced", func(t *testing.T) {
+		processor := newProcessor(t)
+		registerPacketHunter(t, processor, "hunter")
+		stream := &mockStreamPacketsServer{ctx: context.Background(), recvBatches: []*data.PacketBatch{batch("hunter", 1), batch("hunter", 2)}}
+		stream.onSend = func() {
+			stream.onSend = nil
+			_, err := processor.RegisterHunter(context.Background(), &management.HunterRegistration{
+				HunterId: "hunter", EventForwarding: eventForwardingCapabilities(int32(eventsv1.EventKind_EVENT_KIND_DNS)),
+			})
+			require.NoError(t, err)
+		}
+		err := processor.StreamPackets(stream)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	})
 }
 
 // mockSubscribePacketsServer is a mock implementation of DataService_SubscribePacketsServer for testing

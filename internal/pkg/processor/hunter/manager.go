@@ -56,6 +56,13 @@ type ForwardingContract struct {
 	SemanticProfileRevision uint32
 }
 
+// PacketStreamContract identifies the exact packet-mode registration under
+// which a packet stream was admitted. Re-registration replaces the underlying
+// hunter record, invalidating streams admitted under the previous contract.
+type PacketStreamContract struct {
+	hunter *ConnectedHunter
+}
+
 // Manager manages connected hunter nodes
 type Manager struct {
 	mu      sync.RWMutex
@@ -271,6 +278,33 @@ func (m *Manager) Get(hunterID string) (*ConnectedHunter, bool) {
 
 	hunter, exists := m.hunters[hunterID]
 	return hunter, exists
+}
+
+// AdmitPacketStream admits a packet stream only for a currently registered
+// packet-mode hunter and returns a token pinned to that registration.
+func (m *Manager) AdmitPacketStream(hunterID string) (*PacketStreamContract, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	registered, exists := m.hunters[hunterID]
+	if !exists || registered.ForwardingMode != management.ForwardingMode_FORWARDING_MODE_PACKETS {
+		return nil, false
+	}
+	return &PacketStreamContract{hunter: registered}, true
+}
+
+// ValidatePacketStream reports whether the stream's pinned packet-mode
+// registration is still current. It fails after any re-registration.
+func (m *Manager) ValidatePacketStream(hunterID string, contract *PacketStreamContract) bool {
+	if contract == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	registered, exists := m.hunters[hunterID]
+	return exists && registered == contract.hunter &&
+		registered.ForwardingMode == management.ForwardingMode_FORWARDING_MODE_PACKETS
 }
 
 // GetAll returns all hunters (optionally filtered by ID)

@@ -471,6 +471,12 @@ valid producer identities now use typed route keys and fixed-length,
 identity-derived spool path components, so punctuation collisions cannot make
 one producer reject or share another producer's recoverable spool. A restart
 regression covers identities that previously mapped to the same directory.
+A final receiver-boundary audit made packet ingestion enforce the forwarding
+mode accepted at registration. Packet streams now require a current packet-mode
+hunter registration, pin the exact registration for the stream lifetime, and
+fail if the producer identity changes or the hunter re-registers. This prevents
+an event-mode producer from also supplying raw packets through the legacy data
+RPC and preserves one canonical event stream per producer session.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

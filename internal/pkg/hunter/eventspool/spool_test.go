@@ -135,6 +135,24 @@ func TestRecoveryStateResumesIdentityAndSequences(t *testing.T) {
 	require.Equal(t, uint64(7), batchSequence)
 }
 
+func TestRecoveryStateIncludesLossOnlyEventHighWater(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	lossOnly := batch("hunter", "session", 3, 0, 0)
+	lossOnly.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, Count: 4,
+		SourceNodeId: "hunter", ProducerSessionId: "session",
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 10, Last: 13}},
+	}}}
+	_, err = s.Enqueue(lossOnly)
+	require.NoError(t, err)
+
+	_, _, eventSequence, batchSequence, err := s.RecoveryState()
+	require.NoError(t, err)
+	require.Equal(t, uint64(13), eventSequence)
+	require.Equal(t, uint64(3), batchSequence)
+}
+
 func TestRecoveryStateRejectsMixedSessions(t *testing.T) {
 	s, err := Open(Config{Directory: t.TempDir()})
 	require.NoError(t, err)

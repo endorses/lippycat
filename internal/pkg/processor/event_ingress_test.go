@@ -53,6 +53,37 @@ func TestNegotiateEventForwardingRejectsInsufficientStatefulAnalysis(t *testing.
 	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_EVENTS, mode)
 }
 
+func TestRegisterHunterAcceptsMixedPacketAndEventModes(t *testing.T) {
+	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0", MaxHunters: 2})
+	require.NoError(t, err)
+
+	packetResponse, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "packet-hunter",
+		EventForwarding: &management.EventForwardingCapabilities{
+			RequestedMode: management.ForwardingMode_FORWARDING_MODE_PACKETS,
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, packetResponse.GetAccepted())
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, packetResponse.GetAcceptedForwardingMode())
+
+	eventResponse, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "event-hunter",
+		EventForwarding: &management.EventForwardingCapabilities{
+			RequestedMode:            management.ForwardingMode_FORWARDING_MODE_EVENTS,
+			EventApiMajors:           []uint32{1},
+			EventKinds:               []int32{1, 2, 3, 4, 5, 6},
+			SemanticProfileRevision:  1,
+			StatefulAnalysisFeatures: []string{"tcp_reassembly", "connection_tracking", "file_metadata"},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, eventResponse.GetAccepted())
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_EVENTS, eventResponse.GetAcceptedForwardingMode())
+
+	require.Len(t, p.hunterManager.GetAll(""), 2)
+}
+
 func TestEventIngressDeduplicatesAndNACKsGaps(t *testing.T) {
 	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
 	require.NoError(t, err)
@@ -168,6 +199,36 @@ func TestReliableEventIngressDispatchesAfterDurableAdmission(t *testing.T) {
 	require.Eventually(t, func() bool { return broadcaster.Stats().Published == 1 }, time.Second, time.Millisecond)
 }
 
+func TestReliableEventIngressRetainsAckedUndispatchedBatchForRecovery(t *testing.T) {
+	dir := t.TempDir()
+	stopped, err := events.NewDispatcher(events.Config{QueueSize: 1})
+	require.NoError(t, err)
+	ingress, err := newEventIngress(EventIngressPolicy{Dispatcher: stopped, Profile: "reliable", WALDirectory: dir})
+	require.NoError(t, err)
+	b := ingressBatch(t, 1, 1)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
+	key := b.SourceNodeId + "\x00" + b.ProducerSessionId
+	ack, err := ingress.admit(context.Background(), key, open, nil, b)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), ack.CumulativeAckSequence)
+	require.Equal(t, ingressSession{batch: 1, event: 1}, ingress.sessions[key])
+	require.Empty(t, ingress.delivered)
+	require.False(t, ingressSessionsEqual(ingress.sessions, ingress.delivered))
+	require.NoError(t, ingress.wal.checkpoint(ingress.delivered))
+	require.NoError(t, ingress.wal.close())
+
+	recoveredDispatcher, err := events.NewDispatcher(events.Config{QueueSize: 2})
+	require.NoError(t, err)
+	require.NoError(t, recoveredDispatcher.Start(context.Background()))
+	defer recoveredDispatcher.Close(context.Background())
+	recovered, err := newEventIngress(EventIngressPolicy{Dispatcher: recoveredDispatcher, Profile: "reliable", WALDirectory: dir})
+	require.NoError(t, err)
+	defer recovered.wal.close()
+	require.NoError(t, recovered.recover())
+	require.Equal(t, ingressSession{batch: 1, event: 1}, recovered.sessions[key])
+	require.Equal(t, recovered.sessions, recovered.delivered)
+}
+
 func TestWALRecoveryDoesNotAdvanceDedupBeforeQueueAdmission(t *testing.T) {
 	d, err := events.NewDispatcher(events.Config{QueueSize: 1})
 	require.NoError(t, err)
@@ -180,6 +241,45 @@ func TestWALRecoveryDoesNotAdvanceDedupBeforeQueueAdmission(t *testing.T) {
 	require.ErrorContains(t, i.recover(), "queue full")
 	require.Empty(t, i.sessions)
 	require.NoError(t, i.wal.close())
+}
+
+func TestWALRecoveryRestoresLossOnlyEventHighWater(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 1})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: t.TempDir()})
+	require.NoError(t, err)
+	defer i.wal.close()
+	lossOnly := &eventsv1.ProtocolEventBatch{
+		SourceNodeId: "node-a", ProducerSessionId: "session-a", BatchSequence: 1,
+		SemanticProfileRevision: 1,
+		Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+			Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 7,
+			SourceNodeId: "node-a", ProducerSessionId: "session-a",
+			EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 7}},
+		}}},
+	}
+	require.NoError(t, i.wal.append(lossOnly))
+	require.NoError(t, i.recover())
+	require.Equal(t, ingressSession{batch: 1, event: 7}, i.sessions["node-a\x00session-a"])
+}
+
+func TestEventWALReplayHonorsConfiguredRecordLimit(t *testing.T) {
+	dir := t.TempDir()
+	w, err := openEventWAL(dir, 16<<20)
+	require.NoError(t, err)
+	w.maxRecordBytes = 5 << 20
+	large := &eventsv1.ProtocolEventBatch{SourceNodeId: string(make([]byte, defaultIngressMaxBatchBytes+1))}
+	require.NoError(t, w.append(large))
+	require.NoError(t, w.close())
+
+	reopened, err := openEventWAL(dir, 16<<20)
+	require.NoError(t, err)
+	defer reopened.close()
+	reopened.maxRecordBytes = 5 << 20
+	require.NoError(t, reopened.replay(func(*eventsv1.ProtocolEventBatch) error { return nil }))
 }
 
 func TestEventWALResetCheckpointsDrainedRecords(t *testing.T) {

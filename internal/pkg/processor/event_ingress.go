@@ -41,6 +41,7 @@ type eventIngress struct {
 	wal           *eventWAL
 	mu            sync.Mutex
 	sessions      map[string]ingressSession
+	delivered     map[string]ingressSession
 	authorize     func(string, string) bool
 	flowControl   func() int32
 }
@@ -56,7 +57,10 @@ func newEventIngress(p EventIngressPolicy) (*eventIngress, error) {
 	if p.MaxBatchBytes <= 0 {
 		p.MaxBatchBytes = defaultIngressMaxBatchBytes
 	}
-	i := &eventIngress{dispatcher: p.Dispatcher, profile: profile, maxBatchBytes: p.MaxBatchBytes, sessions: make(map[string]ingressSession)}
+	i := &eventIngress{
+		dispatcher: p.Dispatcher, profile: profile, maxBatchBytes: p.MaxBatchBytes,
+		sessions: make(map[string]ingressSession), delivered: make(map[string]ingressSession),
+	}
 	if profile == eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE {
 		if p.WALDirectory == "" {
 			return nil, errors.New("reliable event ingress requires a WAL directory")
@@ -65,6 +69,7 @@ func newEventIngress(p EventIngressPolicy) (*eventIngress, error) {
 		if err != nil {
 			return nil, err
 		}
+		wal.maxRecordBytes = p.MaxBatchBytes
 		i.wal = wal
 	}
 	return i, nil
@@ -155,7 +160,7 @@ func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.Event
 	if batch.BatchSequence != state.batch+1 && !gapCovered {
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, CumulativeAckSequence: state.batch, NackBatchRanges: []*eventsv1.SequenceRange{{First: state.batch + 1, Last: batch.BatchSequence - 1}}}, nil
 	}
-	if batch.FirstEventSequence <= state.event {
+	if batch.FirstEventSequence != 0 && batch.FirstEventSequence <= state.event {
 		return nil, status.Error(codes.InvalidArgument, "event sequence overlaps previously admitted events")
 	}
 	if hasEventGap && !gapCovered {
@@ -172,9 +177,12 @@ func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.Event
 		state.batch = batch.BatchSequence
 		state.event = admittedEventHighWater(batch, state.event)
 		i.sessions[key] = state
-		// Admit atomically so recovery cannot replay a full durable batch after
-		// live delivery accepted only a prefix of it.
-		_ = i.dispatcher.EnqueueBatch(decoded)
+		// Once a durable session has an undispatched batch, preserve ordering by
+		// leaving subsequent batches in the WAL for recovery as well.
+		delivered := i.delivered[key]
+		if delivered.batch+1 == batch.BatchSequence && i.dispatcher.EnqueueBatch(decoded) {
+			i.delivered[key] = state
+		}
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
 	}
 	if !i.dispatcher.EnqueueBatch(decoded) {
@@ -253,6 +261,10 @@ func (i *eventIngress) recover() error {
 		return err
 	}
 	i.sessions = checkpoint
+	i.delivered = make(map[string]ingressSession, len(checkpoint))
+	for key, state := range checkpoint {
+		i.delivered[key] = state
+	}
 	return i.wal.replay(func(batch *eventsv1.ProtocolEventBatch) error {
 		decoded, _, err := protoadapter.DecodeBatch(batch)
 		if err != nil {
@@ -269,10 +281,9 @@ func (i *eventIngress) recover() error {
 		state := i.sessions[key]
 		if batch.BatchSequence > state.batch {
 			state.batch = batch.BatchSequence
-			if batch.LastEventSequence > state.event {
-				state.event = batch.LastEventSequence
-			}
+			state.event = admittedEventHighWater(batch, state.event)
 			i.sessions[key] = state
+			i.delivered[key] = state
 		}
 		i.mu.Unlock()
 		return nil
@@ -283,8 +294,11 @@ type eventWAL struct {
 	mu       sync.Mutex
 	file     *os.File
 	maxBytes int64
-	size     int64
-	dir      string
+	// maxRecordBytes mirrors the configured ingress batch limit so every
+	// batch accepted before a crash is also valid during recovery.
+	maxRecordBytes int
+	size           int64
+	dir            string
 }
 
 func openEventWAL(dir string, max int64) (*eventWAL, error) {
@@ -303,7 +317,7 @@ func openEventWAL(dir string, max int64) (*eventWAL, error) {
 		_ = f.Close()
 		return nil, err
 	}
-	return &eventWAL{file: f, maxBytes: max, size: info.Size(), dir: dir}, nil
+	return &eventWAL{file: f, maxBytes: max, maxRecordBytes: defaultIngressMaxBatchBytes, size: info.Size(), dir: dir}, nil
 }
 
 func (w *eventWAL) checkpoint(sessions map[string]ingressSession) error {
@@ -414,7 +428,7 @@ func (w *eventWAL) replay(fn func(*eventsv1.ProtocolEventBatch) error) error {
 			return fmt.Errorf("read WAL header: %w", err)
 		}
 		n := binary.BigEndian.Uint32(h[:4])
-		if n == 0 || int(n) > defaultIngressMaxBatchBytes {
+		if n == 0 || uint64(n) > uint64(w.maxRecordBytes) {
 			return errors.New("invalid WAL record length")
 		}
 		b := make([]byte, n)

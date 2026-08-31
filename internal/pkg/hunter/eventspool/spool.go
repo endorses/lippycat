@@ -239,6 +239,14 @@ func (s *Spool) RecoveryState() (sourceNodeID, producerSessionID string, lastEve
 			return "", "", 0, 0, fmt.Errorf("event spool contains multiple producer sessions")
 		}
 		lastEventSequence = max(lastEventSequence, b.GetLastEventSequence())
+		for _, loss := range b.GetStats().GetLosses() {
+			if loss.GetSourceNodeId() != b.GetSourceNodeId() || loss.GetProducerSessionId() != b.GetProducerSessionId() {
+				continue
+			}
+			for _, eventRange := range loss.GetEventSequenceRanges() {
+				lastEventSequence = max(lastEventSequence, eventRange.GetLast())
+			}
+		}
 		lastBatchSequence = max(lastBatchSequence, b.GetBatchSequence())
 	}
 	return sourceNodeID, producerSessionID, lastEventSequence, lastBatchSequence, nil

@@ -363,12 +363,15 @@ func (p *Processor) Shutdown() error {
 		if p.eventIngress != nil && p.eventIngress.wal != nil {
 			if eventsDrained {
 				p.eventIngress.mu.Lock()
-				checkpointErr := p.eventIngress.wal.checkpoint(p.eventIngress.sessions)
+				checkpointErr := p.eventIngress.wal.checkpoint(p.eventIngress.delivered)
+				allDelivered := ingressSessionsEqual(p.eventIngress.sessions, p.eventIngress.delivered)
 				p.eventIngress.mu.Unlock()
 				if checkpointErr != nil {
 					logger.Warn("Failed to persist drained event ingress checkpoint", "error", checkpointErr)
-				} else if err := p.eventIngress.wal.reset(); err != nil {
-					logger.Warn("Failed to checkpoint drained event ingress WAL", "error", err)
+				} else if allDelivered {
+					if err := p.eventIngress.wal.reset(); err != nil {
+						logger.Warn("Failed to checkpoint drained event ingress WAL", "error", err)
+					}
 				}
 			}
 			if err := p.eventIngress.wal.close(); err != nil {
@@ -448,6 +451,18 @@ func (p *Processor) Shutdown() error {
 		logger.Info("Processor shutdown complete")
 	})
 	return nil
+}
+
+func ingressSessionsEqual(a, b map[string]ingressSession) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, state := range a {
+		if b[key] != state {
+			return false
+		}
+	}
+	return true
 }
 
 type grpcStopper interface {

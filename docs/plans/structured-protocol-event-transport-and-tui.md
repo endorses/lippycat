@@ -405,6 +405,14 @@ Focused race tests cover policy coordination, reconnect filtering, producer
 rotation, capture-loss delta sampling, terminal unsupported loss, loss-only
 ingress high-water advancement, and the complete hunter/processor/tap command
 paths. Phase 5 is complete.
+A renewed independent audit corrected accepted-profile validation on the hunter,
+loss-only event high-water restoration in both producer and processor recovery,
+and WAL replay under a configured batch limit above the default. Reliable ingress
+now distinguishes durably admitted batches from batches actually queued for
+delivery, so clean shutdown retains an ACKed but undispatched record for recovery
+instead of checkpointing it away. Regression tests also explicitly cover mixed
+packet/event hunter registration and verify that the event transport schema has
+no raw-byte field.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

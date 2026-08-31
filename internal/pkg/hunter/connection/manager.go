@@ -562,6 +562,11 @@ func (m *Manager) register() error {
 		// reconnect must not silently switch the same capture session to events.
 		m.config.ForwardMode = "packets"
 	}
+	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+		if err := validateAcceptedEventProfile(resp); err != nil {
+			return fmt.Errorf("registration accepted an insufficient event forwarding profile: %w", err)
+		}
+	}
 	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS && m.getEventForwarder() == nil {
 		return fmt.Errorf("registration selected event forwarding without an event runtime")
 	}
@@ -578,6 +583,26 @@ func (m *Manager) register() error {
 	default:
 	}
 
+	return nil
+}
+
+func validateAcceptedEventProfile(resp *management.RegistrationResponse) error {
+	if resp.GetAcceptedEventApiMajor() != 1 {
+		return fmt.Errorf("unsupported event API major %d", resp.GetAcceptedEventApiMajor())
+	}
+	if resp.GetAcceptedSemanticProfileRevision() != 1 {
+		return fmt.Errorf("unsupported semantic profile revision %d", resp.GetAcceptedSemanticProfileRevision())
+	}
+
+	acceptedKinds := make(map[int32]struct{}, len(resp.GetAcceptedEventKinds()))
+	for _, kind := range resp.GetAcceptedEventKinds() {
+		acceptedKinds[kind] = struct{}{}
+	}
+	for _, required := range []int32{1, 2, 3, 4, 5, 6} {
+		if _, ok := acceptedKinds[required]; !ok {
+			return fmt.Errorf("required event kind %d was not accepted", required)
+		}
+	}
 	return nil
 }
 

@@ -58,6 +58,36 @@ func (m *mockCaptureManager) GetPacketBuffer() *capture.PacketBuffer {
 	return m.buffer
 }
 
+func TestValidateAcceptedEventProfile(t *testing.T) {
+	valid := func() *management.RegistrationResponse {
+		return &management.RegistrationResponse{
+			AcceptedEventApiMajor:           1,
+			AcceptedSemanticProfileRevision: 1,
+			AcceptedEventKinds:              []int32{1, 2, 3, 4, 5, 6},
+		}
+	}
+
+	require.NoError(t, validateAcceptedEventProfile(valid()))
+
+	tests := []struct {
+		name   string
+		mutate func(*management.RegistrationResponse)
+		want   string
+	}{
+		{name: "missing API", mutate: func(r *management.RegistrationResponse) { r.AcceptedEventApiMajor = 0 }, want: "API major"},
+		{name: "wrong semantic profile", mutate: func(r *management.RegistrationResponse) { r.AcceptedSemanticProfileRevision = 2 }, want: "semantic profile"},
+		{name: "empty kinds", mutate: func(r *management.RegistrationResponse) { r.AcceptedEventKinds = nil }, want: "event kind 1"},
+		{name: "partial kinds", mutate: func(r *management.RegistrationResponse) { r.AcceptedEventKinds = []int32{1, 2, 3, 4, 5} }, want: "event kind 6"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := valid()
+			tt.mutate(response)
+			require.ErrorContains(t, validateAcceptedEventProfile(response), tt.want)
+		})
+	}
+}
+
 type mockForwardingFactory struct{}
 
 func (m *mockForwardingFactory) CreateForwardingManager(

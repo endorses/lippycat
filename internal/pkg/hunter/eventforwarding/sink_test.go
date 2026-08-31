@@ -10,7 +10,30 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
+
+func TestEventTransportSchemaHasNoRawPacketBytes(t *testing.T) {
+	visited := make(map[protoreflect.FullName]bool)
+	var checkMessage func(protoreflect.MessageDescriptor)
+	checkMessage = func(message protoreflect.MessageDescriptor) {
+		if visited[message.FullName()] {
+			return
+		}
+		visited[message.FullName()] = true
+		fields := message.Fields()
+		for i := 0; i < fields.Len(); i++ {
+			field := fields.Get(i)
+			require.NotEqualf(t, protoreflect.BytesKind, field.Kind(),
+				"event transport field %s must not carry raw packet bytes", field.FullName())
+			if field.Kind() == protoreflect.MessageKind {
+				checkMessage(field.Message())
+			}
+		}
+	}
+
+	checkMessage((&eventsv1.ProtocolEventBatch{}).ProtoReflect().Descriptor())
+}
 
 func TestSinkReportsUnsupportedContentAndCarriesExactGap(t *testing.T) {
 	spool, err := eventspool.Open(eventspool.Config{Directory: t.TempDir()})

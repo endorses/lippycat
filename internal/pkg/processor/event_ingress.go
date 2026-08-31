@@ -164,7 +164,21 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	state := i.sessions[key]
+	state, knownSession := i.sessions[key]
+	// Memory-only ingress deliberately loses its admitted high-water marks when
+	// the processor restarts. The producer has already deleted cumulatively
+	// ACKed batches, so a fresh processor must treat the first retained batch as
+	// the new baseline. Otherwise it NACKs an unrecoverable prefix forever and
+	// wedges the producer session. Once a session is known, normal gap detection
+	// remains strict. Reliable ingress restores its baseline from the WAL.
+	if !knownSession && i.wal == nil {
+		if batch.BatchSequence > 0 {
+			state.batch = batch.BatchSequence - 1
+		}
+		if batch.FirstEventSequence > 0 {
+			state.event = batch.FirstEventSequence - 1
+		}
+	}
 	if batch.BatchSequence <= state.batch {
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
 	}

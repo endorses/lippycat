@@ -208,6 +208,32 @@ func TestEventIngressAcceptsExplicitlyReportedSpoolGap(t *testing.T) {
 	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
 }
 
+func TestMemoryOnlyEventIngressResumesAfterProcessorRestart(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+
+	// A memory-only processor ACKed batch 1 before crashing. The hunter removed
+	// that batch from its spool and can only offer the next retained batch to the
+	// fresh ingress instance.
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "memory_only"})
+	require.NoError(t, err)
+	b := ingressBatch(t, 2, 2)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
+	ack, err := i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, b)
+	require.NoError(t, err)
+	require.Equal(t, eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, ack.Kind)
+	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
+
+	// Gaps after the restart baseline are still rejected.
+	gap := ingressBatch(t, 4, 4)
+	ctrl, err := i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, gap)
+	require.NoError(t, err)
+	require.Equal(t, eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, ctrl.Kind)
+	require.Equal(t, uint64(3), ctrl.NackBatchRanges[0].First)
+}
+
 func TestEventIngressLossOnlyBatchAdvancesEventHighWater(t *testing.T) {
 	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
 	require.NoError(t, err)

@@ -477,6 +477,13 @@ hunter registration, pin the exact registration for the stream lifetime, and
 fail if the producer identity changes or the hunter re-registers. This prevents
 an event-mode producer from also supplying raw packets through the legacy data
 RPC and preserves one canonical event stream per producer session.
+A renewed memory-only recovery audit found that a processor restart discarded
+its ingress high-water marks after the hunter had already deleted cumulatively
+ACKed batches. The fresh processor therefore NACKed an unrecoverable prefix and
+wedged that producer session. Memory-only ingress now treats the first retained
+batch of an unknown session as its post-restart baseline while keeping all
+subsequent gap checks strict; reliable ingress remains WAL-backed and strict.
+A race-enabled regression covers restart recovery and post-baseline NACKs.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

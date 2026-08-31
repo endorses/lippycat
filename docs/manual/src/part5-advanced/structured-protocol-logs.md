@@ -220,6 +220,23 @@ extraction succeeds.
 
 ## Rotation and operations
 
+### Remote event transport and TUI retention
+
+Hunters and taps can forward normalized records with `--forward-mode=events`.
+The receiver gains events, not original packets: upstream PCAP writing,
+virtual-interface injection, and analysis needing packet bytes are unavailable.
+A tap can retain local PCAP while forwarding events when both are needed.
+
+Event transport negotiates API and semantic compatibility. Packet forwarding is
+the legacy-compatible default; `--event-fallback-to-packets` permits an explicit,
+logged fallback. Reliable mode uses bounded producer spooling and processor
+ingress WAL, while memory-only mode is not crash-durable.
+
+TUI event subscription version 1 is live-only and provides no replay. Its
+transport-loss count represents gaps or omissions before display. The separate
+local-eviction count represents received events aged out of the bounded TUI ring
+and does not indicate transport loss.
+
 Each enabled stream has a bounded, non-blocking queue and a single writer. A
 full event or stream queue drops new work and increments counters; periodic
 warnings summarize drops. Processor flow control considers sustained event and

@@ -15,6 +15,34 @@ The lippycat TUI supports **remote capture mode**, allowing you to monitor distr
 - **Visual Node Tree**: Hunters grouped by processor in an intuitive tree view
 - **Status Indicators**: Visual indicators for node connection status and health
 
+## Normalized Event Timeline
+
+For DNS, HTTP, HTTPS/TLS, email, TCP, and the combined scope, the Capture tab
+includes an **events** view. It is independent of packet subscription, so a
+legacy processor can still provide packets when normalized events are
+unavailable. Unsupported event kinds appear as compatibility omissions.
+
+### Live-only behavior and gaps
+
+Subscription version 1 is live-only. Opening the TUI establishes a live
+boundary; older events are not replayed. On reconnect, the previous cursor lets
+the processor identify a gap but does not request replay. Use structured logs or
+retained PCAP for auditable history.
+
+The event view distinguishes **transport lost** (producer/queue losses,
+compatibility omissions, reconnect gaps, or stream discontinuities) from
+**local evicted** (successfully received rows removed from the bounded TUI ring).
+Local eviction is normal display retention; transport loss requires upstream
+investigation. The packet stream remains authoritative for connection health,
+so an event-only interruption can warn without disconnecting the TUI.
+
+### Security and privacy
+
+Use TLS or mTLS and authorize processor access as access to captured metadata.
+Sensitive fields are denied by default and require
+`--event-allow-sensitive-fields`; file metadata also requires
+`--event-allow-file-metadata`. Event subscriptions never carry file content.
+
 ## Quick Start
 
 ### Prerequisites

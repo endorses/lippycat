@@ -17,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -49,6 +50,63 @@ func (m *mockFilterManager) SetInitialFilters(filters []*management.Filter) erro
 }
 func (m *mockFilterManager) ApplyPendingInitial() {}
 func (m *mockFilterManager) Subscribe(ctx, connCtx context.Context, mgmtClient management.ManagementServiceClient) {
+}
+
+type legacyManagementClient struct {
+	management.ManagementServiceClient
+	response *management.RegistrationResponse
+	request  *management.HunterRegistration
+}
+
+func (c *legacyManagementClient) RegisterHunter(_ context.Context, request *management.HunterRegistration, _ ...grpc.CallOption) (*management.RegistrationResponse, error) {
+	c.request = request
+	return c.response, nil
+}
+
+func newLegacyProcessorManager(forwardMode string, allowFallback bool) (*Manager, *legacyManagementClient) {
+	client := &legacyManagementClient{response: &management.RegistrationResponse{
+		Accepted:   true,
+		AssignedId: "hunter-a",
+	}}
+	return &Manager{
+		ctx: context.Background(),
+		config: Config{
+			HunterID:               "hunter-a",
+			Interfaces:             []string{"legacy-test-interface"},
+			ForwardMode:            forwardMode,
+			EventFallbackToPackets: allowFallback,
+		},
+		mgmtClient:    client,
+		filterManager: &mockFilterManager{},
+		modeReady:     make(chan management.ForwardingMode, 1),
+	}, client
+}
+
+func TestRegisterWithLegacyProcessorUsesPacketCompatibilityDefault(t *testing.T) {
+	manager, client := newLegacyProcessorManager("packets", false)
+
+	require.NoError(t, manager.register())
+	require.NotNil(t, client.request.GetEventForwarding())
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, client.request.GetEventForwarding().GetRequestedMode())
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, manager.acceptedMode)
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, <-manager.modeReady)
+}
+
+func TestRegisterEventModeWithLegacyProcessorRequiresExplicitFallback(t *testing.T) {
+	manager, _ := newLegacyProcessorManager("events", false)
+
+	err := manager.register()
+	require.ErrorContains(t, err, "rejected requested event forwarding profile")
+}
+
+func TestRegisterEventModeWithLegacyProcessorExplicitlyFallsBackToPackets(t *testing.T) {
+	manager, client := newLegacyProcessorManager("events", true)
+
+	require.NoError(t, manager.register())
+	require.True(t, client.request.GetEventForwarding().GetAllowPacketFallback())
+	require.Equal(t, "packets", manager.config.ForwardMode)
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, manager.acceptedMode)
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, <-manager.modeReady)
 }
 
 type mockCaptureManager struct {

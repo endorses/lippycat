@@ -24,6 +24,28 @@ lc process --listen :55555 --insecure
 
 Hunters connect to the processor automatically. No configuration is needed on the processor side to accept a specific hunter — any hunter with the correct TLS credentials can connect.
 
+### Packet and Event Producers
+
+A processor can accept packet-mode and event-mode nodes at the same time.
+Packet mode is the default and remains processor-authoritative: raw packets are
+available for PCAP, packet views, virtual interfaces, and central analysis.
+Event mode is opt-in and edge-authoritative: normalized metadata is accepted
+from the producer without raw packet bytes or file content, and the processor
+does not create a second canonical event stream for that session.
+
+Registration negotiates the event API, kinds, stateful-analysis profile,
+enrichment, and limits. An incompatible request is rejected unless the producer
+explicitly allows visible packet fallback. This lets older packet-only nodes
+coexist with newer event-capable nodes without silently weakening an event-mode
+privacy policy.
+
+Reliable ingress acknowledges recoverable WAL admission; memory-only ingress
+acknowledges queue admission and can lose acknowledged events on processor
+crash. At-least-once ingress is deduplicated by producer/session/event identity,
+while sink pressure and transport loss remain separately observable. Protect
+the WAL and metadata outputs as sensitive evidence and use TLS/mTLS and
+least-privilege authorization.
+
 ### Key Flags
 
 | Flag | Default | Description |

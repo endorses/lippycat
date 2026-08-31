@@ -26,6 +26,45 @@ lc hunt --processor processor:55555 --id edge-01
 lc hunt voip --processor processor:55555
 ```
 
+## Forwarding Modes
+
+`--forward-mode packets` is the compatibility default. It sends selected raw
+packets and leaves canonical protocol analysis to the processor, preserving
+central PCAP writing, packet views, virtual-interface output, and any feature
+that needs payload bytes.
+
+`--forward-mode events` runs normalized DNS, TLS, HTTP, SMTP, file-metadata,
+and connection analysis at the hunter and sends metadata events only. No raw
+packet bytes or file content are carried by the event transport. This reduces
+upstream bandwidth and limits disclosure, but the processor cannot reconstruct
+PCAPs, feed packet views or a virtual interface, redo analysis with a different
+policy, or recover packet evidence that was not retained at the edge.
+
+```bash
+sudo lc hunt -P processor:55555 -i eth0 --forward-mode events \
+  --event-delivery-profile reliable \
+  --event-spool-dir /var/lib/lippycat/event-spool --tls-ca ca.crt
+```
+
+Reliable delivery durably spools unacknowledged batches; `memory-only`
+acknowledges processor queue admission and can lose admitted events if the
+processor crashes. Bound the spool with `--event-spool-max-bytes` and
+`--event-spool-max-age`; exhaustion defaults to `drop_oldest`, with exact loss
+ranges reported, or can use `drop_new`.
+
+Event mode requires a compatible event-capable processor and negotiated
+analysis profile. Negotiation fails closed by default. Add
+`--event-fallback-to-packets` only when raw-packet fallback is acceptable; the
+fallback emits an explicit forwarding notice and fixes packet mode for that
+producer session. Older packet-only processors therefore continue to work with the
+default, while an event request without explicit fallback is rejected.
+
+Treat normalized metadata and spool files as sensitive evidence: use TLS/mTLS,
+restrict filesystem access, encrypt storage where required, and size retention
+to policy. Edge filtering and event mode reduce transferred content, but host,
+path, address, certificate, and file metadata can still contain personal or
+credential-adjacent data.
+
 ## Commands
 
 ### `lc hunt` - General Hunter Mode
@@ -66,6 +105,15 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--disk-buffer` - Enable disk overflow buffer for extended disconnections
 - `--disk-buffer-dir` - Directory for buffer files (default: /var/tmp/lippycat-buffer)
 - `--disk-buffer-max-mb` - Maximum disk buffer size in MB (default: 1024)
+
+**Upstream Forwarding:**
+- `--forward-mode` - `packets` (default) or `events`
+- `--event-fallback-to-packets` - Explicitly allow packet fallback after event negotiation fails
+- `--event-delivery-profile` - `reliable` (default) or `memory-only`
+- `--event-spool-dir` - Recoverable event spool directory
+- `--event-spool-max-bytes` - Spool byte limit (0 = unlimited)
+- `--event-spool-max-age` - Spool age limit (0 = unlimited)
+- `--event-spool-exhaustion-policy` - `drop_oldest` (default) or `drop_new`
 
 **TLS/Security (TLS enabled by default):**
 - `--tls-cert` - Path to client TLS certificate (for mutual TLS)

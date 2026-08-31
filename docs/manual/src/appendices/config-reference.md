@@ -273,6 +273,13 @@ Hunter nodes capture packets at the network edge and forward them to a processor
 | `hunter.batch_timeout_ms` | integer | `100` | Maximum time in ms to wait before sending an incomplete batch. |
 | `hunter.batch_queue_size` | integer | `0` | Size of the batch send queue (0 = default). |
 | `hunter.no_filter_policy` | string | `"deny"` | Behavior when no processor filters are configured: `"allow"` forwards all packets, `"deny"` forwards none. |
+| `hunter.forward_mode` | string | `"packets"` | Upstream representation: `"packets"` or `"events"`. |
+| `hunter.events.fallback_to_packets` | boolean | `false` | Explicitly allow packet fallback when event negotiation fails. |
+| `hunter.events.delivery_profile` | string | `"reliable"` | Event delivery: `"reliable"` or `"memory-only"`. |
+| `hunter.events.spool.dir` | string | `"/var/tmp/lippycat-event-spool"` | Recoverable event spool directory. |
+| `hunter.events.spool.max_bytes` | integer | `1073741824` | Spool byte limit (0 = unlimited). |
+| `hunter.events.spool.max_age` | duration | `"24h"` | Spool age limit (0 = unlimited). |
+| `hunter.events.spool.exhaustion_policy` | string | `"drop_oldest"` | `"drop_oldest"` or `"drop_new"`; losses are reported. |
 | `hunter.debug_listen` | string | `""` | Optional pprof debug HTTP listen address. Loopback-only unless `hunter.debug_allow_non_loopback` is true. |
 | `hunter.debug_allow_non_loopback` | boolean | `false` | Allow the pprof listener to bind non-loopback addresses. |
 
@@ -371,8 +378,14 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 | `processor.upstream_addr` | string | `""` | Alias for `processor.processor_addr`. |
 | `processor.max_hunters` | integer | `100` | Maximum concurrent hunter connections (0 = unlimited). |
 | `processor.max_subscribers` | integer | `100` | Maximum TUI subscriber connections (0 = unlimited). |
+| `processor.events.allow_sensitive_fields` | boolean | `false` | Permit authorized event subscribers to request sensitive HTTP, SMTP, and file fields. |
+| `processor.events.allow_file_metadata` | boolean | `false` | Permit authorized event subscribers to request file metadata; file content is never exposed. |
 | `processor.display_stats` | boolean | `true` | Display periodic statistics to stdout. |
 | `processor.enable_detection` | boolean | `true` | Enable protocol detection on received packets. |
+| `processor.events.ingress.profile` | string | `"memory-only"` | Event acknowledgement profile: `"memory-only"` or `"reliable"`. |
+| `processor.events.ingress.wal_dir` | string | `""` | Recoverable event-ingress WAL directory; required for reliable ingress. |
+| `processor.events.ingress.wal_max_bytes` | integer | `1073741824` | Maximum event-ingress WAL size. |
+| `processor.events.ingress.max_batch_bytes` | integer | `4194304` | Maximum accepted serialized event batch. |
 | `processor.filter_file` | string | `""` | Path to a YAML filter file for packet filtering rules. |
 | `processor.write_file` | string | `""` | Path for unified PCAP output (all traffic to one file). |
 | `processor.command_concurrency` | integer | `10` | Maximum concurrent command hook executions. |
@@ -502,6 +515,12 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 | `tap.listen_addr` | string | `":55555"` | Listen address for hunter and TUI client connections. |
 | `tap.max_hunters` | integer | `0` | Maximum hunter connections (0 = unlimited). |
 | `tap.max_subscribers` | integer | `100` | Maximum TUI subscriber connections (0 = unlimited). |
+| `tap.events.allow_sensitive_fields` | boolean | `false` | Permit authorized subscribers to request sensitive HTTP, SMTP, and file fields. |
+| `tap.events.allow_file_metadata` | boolean | `false` | Permit authorized subscribers to request file metadata; file content is never exposed. |
+| `tap.events.ingress.profile` | string | `"memory-only"` | Downstream event-ingress acknowledgement profile: `"memory-only"` or `"reliable"`. |
+| `tap.events.ingress.wal_dir` | string | `""` | Recoverable event-ingress WAL directory; required for reliable ingress. |
+| `tap.events.ingress.wal_max_bytes` | integer | `1073741824` | Maximum event-ingress WAL size. |
+| `tap.events.ingress.max_batch_bytes` | integer | `4194304` | Maximum accepted serialized event batch. |
 | `tap.tls.cert_file` | string | `""` | Server TLS certificate. |
 | `tap.tls.key_file` | string | `""` | Server TLS private key. |
 | `tap.tls.ca_file` | string | `""` | CA certificate for client verification. |
@@ -516,6 +535,13 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 |-----|------|---------|-------------|
 | `tap.processor_addr` | string | `""` | Upstream processor address for forwarding captured packets. |
 | `tap.upstream_addr` | string | `""` | Alias for `tap.processor_addr`. |
+| `tap.forward_mode` | string | `"packets"` | Upstream representation: `"packets"` or `"events"`. |
+| `tap.events.fallback_to_packets` | boolean | `false` | Explicitly permit packet fallback after event negotiation failure. |
+| `tap.events.delivery_profile` | string | `"reliable"` | Upstream event delivery: `"reliable"` or `"memory-only"`. |
+| `tap.events.spool.dir` | string | `"/var/tmp/lippycat-tap-event-spool"` | Recoverable upstream event spool directory. |
+| `tap.events.spool.max_bytes` | integer | `1073741824` | Upstream event spool byte limit (0 = unlimited). |
+| `tap.events.spool.max_age` | duration | `"24h"` | Upstream event spool age limit (0 = unlimited). |
+| `tap.events.spool.exhaustion_policy` | string | `"drop_oldest"` | Upstream spool exhaustion behavior. |
 
 #### Tap Per-Call PCAP
 

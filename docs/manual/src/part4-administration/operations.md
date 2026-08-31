@@ -118,6 +118,26 @@ sudo systemctl status lippycat-processor
 
 ## Health Checks
 
+### Normalized event transport
+
+Confirm event-mode negotiation in node logs, generate a known DNS or HTTP
+transaction, and find it in the processor structured log and TUI event timeline.
+Alert on producer spool or processor WAL exhaustion, rejected batches,
+compatibility omissions, and event sequence gaps. Verify local tap PCAP
+separately when packet evidence is required.
+
+TUI subscription version 1 starts at a live boundary and never replays a
+disconnect interval. A reconnect gap is expected after interruption. It differs
+from **local eviction**, where the bounded TUI ring removes an older row that had
+already arrived. Transport loss affects completeness; eviction affects only the
+display window.
+
+During rolling upgrades, update processors before event producers and keep
+packet mode as the compatibility baseline. Opt into fallback only after checking
+its bandwidth and privacy impact. Keep sensitive-field and file-metadata gates
+disabled unless required, and protect event spools, WALs, logs, and TUI transport
+as capture evidence.
+
 ### Quick Status Check
 
 ```bash

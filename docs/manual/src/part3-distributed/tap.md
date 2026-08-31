@@ -32,6 +32,32 @@ flowchart LR
 
 The key question: **do you need to capture from multiple machines?** If yes, use hunt + process. If no, tap is simpler.
 
+## Upstream Forwarding Modes and Local Evidence
+
+When `--processor` is set, `--forward-mode packets` is the compatibility
+default. It sends raw packets so the upstream can create PCAPs, serve packet
+views, inject a virtual interface, and perform canonical analysis.
+
+`--forward-mode events` instead performs canonical analysis at the tap and
+sends only normalized metadata. Raw packet bytes and file content never enter
+the event transport. Packet-dependent upstream features are therefore
+unavailable, but the tap's local PCAP writers, rotation, per-call output, and
+post-write hooks continue to work:
+
+```bash
+sudo lc tap -i eth0 -P central:55555 --forward-mode events \
+  --auto-rotate-pcap --auto-rotate-pcap-dir /var/lib/lippycat/pcap \
+  --event-spool-dir /var/lib/lippycat/event-spool --tls-ca ca.crt
+```
+
+Use this topology to retain forensic evidence at the edge while centralizing
+less revealing metadata. Reliable event delivery uses a recoverable spool;
+`memory-only` can lose queue-admitted events on processor crash. Protect both
+PCAP and event spools with restricted permissions, encryption and retention
+limits. Event negotiation fails closed unless
+`--event-fallback-to-packets` explicitly permits fallback. The default packet
+mode remains interoperable with packet-only upstream versions.
+
 ## Basic Usage
 
 ### Structured protocol logs

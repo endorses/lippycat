@@ -68,6 +68,38 @@ sudo lc hunt --processor localhost:55555 -i eth0 --tls-ca ca.crt
 
 The hunter captures packets on `eth0`, batches them, and streams them to the processor via gRPC. The processor writes everything to `captured.pcap`.
 
+## Packet or Event Forwarding
+
+Hunters default to `--forward-mode packets` for compatibility. The processor
+receives raw packets, owns protocol analysis, and can provide PCAP output,
+packet-oriented TUI views, virtual-interface injection, and later reanalysis.
+
+With `--forward-mode events`, analysis moves to the hunter. Only normalized
+connection, DNS, TLS, HTTP, SMTP, and file-metadata events cross the network;
+raw packets and file content do not. The central processor can log and display
+the negotiated events, but cannot reconstruct packet evidence, rerun analysis,
+or provide packet-dependent output for that producer.
+
+```bash
+sudo lc hunt -P processor:55555 -i eth0 --forward-mode events \
+  --event-delivery-profile reliable \
+  --event-spool-dir /var/lib/lippycat/event-spool --tls-ca ca.crt
+```
+
+The default reliable profile retains unacknowledged batches in a recoverable
+edge spool. `memory-only` lowers disk use but acknowledged queue admissions may
+be lost if the processor crashes. Configure byte/age limits and choose
+`drop_oldest` or `drop_new`; loss remains visible in hunter status.
+
+Event capability and analysis policy are negotiated. Incompatibility fails
+closed unless `--event-fallback-to-packets` explicitly permits raw-packet
+fallback. Keep that flag off where event mode is a privacy boundary. Existing
+packet-only nodes remain compatible because packet mode is the default.
+
+Metadata is not anonymous: URLs, mail addresses, DNS names, certificates, and
+file attributes may be sensitive. Use TLS/mTLS, authorize node identities,
+restrict and encrypt spool storage, and apply retention limits.
+
 For quick local testing without TLS:
 
 ```bash

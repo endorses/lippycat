@@ -39,6 +39,28 @@ Lippycat supports a fully distributed packet capture architecture that allows yo
 - **Health monitoring** with heartbeat streaming
 - **Scalable** to hundreds of capture nodes
 
+### Packet and event forwarding modes
+
+Hunters and taps default to `--forward-mode=packets`, preserving upstream PCAP
+writing, virtual-interface injection, and packet-based analysis.
+`--forward-mode=events` analyzes at the observation node and forwards versioned
+normalized events. This reduces bandwidth, but the receiver cannot reconstruct
+omitted packet data or packet-derived features.
+
+Choose packet mode for central evidence or downstream packet analysis. Choose
+event mode when normalized telemetry is sufficient. For both, deploy a tap that
+retains local PCAP and forwards events; event forwarding is not remote evidence
+capture.
+
+Nodes negotiate the event API, event kinds, and semantic profile. Legacy peers
+remain compatible through packet mode. An event-mode producer stops on
+incompatibility unless `--event-fallback-to-packets` explicitly authorizes a
+visible fallback. Reliable event forwarding uses a bounded producer spool and
+processor ingress WAL; memory-only mode is not crash-durable. Alert on
+exhaustion and reported loss. Hierarchical processors preserve the originating
+node, producer session, and event sequence while using a separate recoverable
+admission and acknowledgement boundary at each hop.
+
 ---
 
 ## Architecture

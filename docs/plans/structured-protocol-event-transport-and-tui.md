@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Phase 5 complete
+**Status:** Phase 6 complete
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -16,17 +16,17 @@ exclusive per producer session.
 
 ## Required invariants
 
-- [ ] Reuse the effective hunter, processor, or tap ID as the producer node ID.
-- [ ] Identify events by node ID, producer-session ID, and per-event sequence;
+- [x] Reuse the effective hunter, processor, or tap ID as the producer node ID.
+- [x] Identify events by node ID, producer-session ID, and per-event sequence;
       preserve identity through retry, relay, and fan-out.
-- [ ] Keep normalized events output-neutral; protobuf, TUI, logstream, and LI
+- [x] Keep normalized events output-neutral; protobuf, TUI, logstream, and LI
       are projections or consumers of the same immutable event.
-- [ ] Keep packet mode processor-authoritative and event mode edge-authoritative;
+- [x] Keep packet mode processor-authoritative and event mode edge-authoritative;
       never derive two canonical event streams for one producer session.
-- [ ] Keep TUI delivery bounded and best-effort so it cannot affect capture,
+- [x] Keep TUI delivery bounded and best-effort so it cannot affect capture,
       hunter flow control, structured logs, LI, or other subscribers.
-- [ ] Exclude file content from the generic event transport and TUI view.
-- [ ] Add future event kinds as typed protobuf alternatives; do not use generic
+- [x] Exclude file content from the generic event transport and TUI view.
+- [x] Add future event kinds as typed protobuf alternatives; do not use generic
       maps or speculative placeholder messages.
 
 ## Phase 1 — Event identity and protobuf contract
@@ -503,18 +503,42 @@ hierarchical profile mismatch, and the recovered-route fallback guard.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 
-- [ ] Document forwarding modes, feature loss in event mode, tap-based local
+- [x] Document forwarding modes, feature loss in event mode, tap-based local
       evidence retention, security/privacy controls, and compatibility fallback.
-- [ ] Document that TUI subscription v1 is live-only and distinguish transport
+- [x] Document that TUI subscription v1 is live-only and distinguish transport
       gaps from normal local ring eviction.
-- [ ] Update command references, configuration examples, manual architecture,
+- [x] Update command references, configuration examples, manual architecture,
       structured-log documentation, and operational procedures.
-- [ ] Add compatibility tests for old packet-only hunters/processors and newer
+- [x] Add compatibility tests for old packet-only hunters/processors and newer
       event-capable nodes.
-- [ ] Run formatting before staging, then run the relevant unit, integration,
+- [x] Run formatting before staging, then run the relevant unit, integration,
       race, build-tag, and full test suites.
-- [ ] Check off only verified tasks in this plan and commit the implementation,
+- [x] Check off only verified tasks in this plan and commit the implementation,
       generated protobuf code, documentation, and completed plan together.
+
+### Phase 6 verification
+
+Verified on 2026-08-31 after independent documentation and compatibility-test
+implementation passes followed by primary-agent review. The operator and manual
+documentation now covers packet/event analysis authority, event-mode feature
+loss, tap-local PCAP evidence, reliable and memory-only durability, bounded
+loss reporting, default-deny sensitive metadata, explicit compatibility
+fallback, hierarchical identity preservation, and TUI subscription v1's
+live-only boundary. Transport gaps and compatibility omissions are documented
+separately from normal bounded local-ring eviction.
+
+Compatibility regressions cover an old packet-only hunter registering with a
+new processor, a new packet-mode hunter registering with an old processor, and
+a new event-mode hunter failing closed against an old processor unless packet
+fallback is explicitly enabled. Focused normal and race tests, scoped vet for
+the changed hunter/processor/tap command partitions, all supported build-tag
+compile partitions, the mdBook build, and the complete `make test` all-tag and
+LI suites pass. The repository-wide build-matrix vet step also reported two
+pre-existing copy-lock findings in `internal/pkg/eventanalysis/runtime.go` and
+`internal/pkg/processor/upstream/manager_test.go`; neither file is part of this
+phase, and the relevant scoped vet checks pass. No protobuf contract or
+generated-code change was required for this documentation and compatibility
+phase.
 
 ## Deferred work
 

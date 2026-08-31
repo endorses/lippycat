@@ -81,6 +81,29 @@ lc sniff voip --tcp-performance-mode throughput --max-goroutines 2000
 
 ### Health Monitoring
 
+#### Normalized Event Transport
+
+For event-mode deployments, verify data semantics as well as service health:
+
+1. Confirm the producer registered in event mode without a negotiation or
+   packet-fallback notice.
+2. Generate a known DNS or HTTP transaction and find it in the processor
+   structured log and TUI event view.
+3. Check producer spool and processor ingress WAL use; investigate exhaustion,
+   rejected batches, compatibility omissions, and sequence gaps.
+4. Reconnect a TUI and confirm version 1 starts at a new live boundary and
+   reports a gap rather than implying replay.
+5. Verify local tap PCAP separately when packet evidence is required.
+
+For rolling upgrades, update the receiver before switching producers to event
+mode. Packet mode is the compatibility baseline. Enable explicit packet fallback
+only after accepting its bandwidth and privacy impact. Current TUIs retain packet
+views against older packet-only processors; their event timeline is unavailable.
+
+Protect event spools, WALs, logs, and TUI transport. Leave
+`--event-allow-sensitive-fields` and `--event-allow-file-metadata` disabled
+unless the monitoring purpose requires them.
+
 #### Daily Health Check
 ```bash
 #!/bin/bash

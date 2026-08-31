@@ -87,6 +87,26 @@ func TestRegisterHunterAcceptsMixedPacketAndEventModes(t *testing.T) {
 	require.Len(t, p.hunterManager.GetAll(""), 2)
 }
 
+func TestRegisterLegacyHunterDefaultsToPacketForwarding(t *testing.T) {
+	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
+	require.NoError(t, err)
+
+	response, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "legacy-hunter",
+		Hostname: "legacy.example",
+	})
+	require.NoError(t, err)
+	require.True(t, response.GetAccepted())
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, response.GetAcceptedForwardingMode())
+	require.Zero(t, response.GetAcceptedEventApiMajor())
+	require.Empty(t, response.GetAcceptedEventKinds())
+	require.Zero(t, response.GetAcceptedSemanticProfileRevision())
+
+	hunters := p.hunterManager.GetAll("")
+	require.Len(t, hunters, 1)
+	require.Equal(t, "legacy-hunter", hunters[0].ID)
+}
+
 func eventForwardingCapabilities(kinds ...int32) *management.EventForwardingCapabilities {
 	return &management.EventForwardingCapabilities{
 		RequestedMode:            management.ForwardingMode_FORWARDING_MODE_EVENTS,

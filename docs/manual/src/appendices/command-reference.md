@@ -457,6 +457,12 @@ lc tap [flags]
 | `--id` | `-I` | string | | Node identifier |
 | `--max-hunters` | | int | `0` | Maximum concurrent hunters (0 = unlimited) |
 | `--max-subscribers` | | int | `100` | Maximum concurrent TUI subscribers (0 = unlimited) |
+| `--event-allow-sensitive-fields` | | bool | `false` | Permit authorized requests for sensitive HTTP, SMTP, and file fields |
+| `--event-allow-file-metadata` | | bool | `false` | Permit authorized file-metadata requests; never file content |
+| `--event-ingress-profile` | | string | `memory-only` | Downstream event acknowledgement: `memory-only` or `reliable` |
+| `--event-ingress-wal-dir` | | string | | Recoverable ingress WAL; required for reliable profile |
+| `--event-ingress-wal-max-bytes` | | int64 | `1073741824` | Maximum event-ingress WAL size |
+| `--event-ingress-max-batch-bytes` | | int | `4194304` | Maximum accepted event batch size |
 | `--insecure` | | bool | `false` | Disable TLS for gRPC server |
 | `--api-key-auth` | | bool | `false` | Enable API key authentication |
 | `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |
@@ -467,6 +473,13 @@ lc tap [flags]
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--processor` | `-P` | string | | Upstream processor address for forwarding |
+| `--forward-mode` | | string | `packets` | Upstream representation: `packets` or `events` |
+| `--event-fallback-to-packets` | | bool | `false` | Explicitly allow packet fallback after failed event negotiation |
+| `--event-delivery-profile` | | string | `reliable` | `reliable` or `memory-only` event delivery |
+| `--event-spool-dir` | | string | `/var/tmp/lippycat-tap-event-spool` | Recoverable upstream event spool |
+| `--event-spool-max-bytes` | | uint | `1073741824` | Spool byte limit (0 = unlimited) |
+| `--event-spool-max-age` | | duration | `24h` | Spool age limit (0 = unlimited) |
+| `--event-spool-exhaustion-policy` | | string | `drop_oldest` | `drop_oldest` or `drop_new` |
 
 **Detection**
 
@@ -581,6 +594,13 @@ lc hunt [flags]
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--processor` | `-P` | string | **required** | Processor address (`host:port`) |
+| `--forward-mode` | | string | `packets` | Upstream representation: `packets` or `events` |
+| `--event-fallback-to-packets` | | bool | `false` | Explicitly allow packet fallback after failed event negotiation |
+| `--event-delivery-profile` | | string | `reliable` | `reliable` or `memory-only` event delivery |
+| `--event-spool-dir` | | string | `/var/tmp/lippycat-event-spool` | Recoverable event spool |
+| `--event-spool-max-bytes` | | uint | `1073741824` | Spool byte limit (0 = unlimited) |
+| `--event-spool-max-age` | | duration | `24h` | Spool age limit (0 = unlimited) |
+| `--event-spool-exhaustion-policy` | | string | `drop_oldest` | `drop_oldest` or `drop_new` |
 | `--id` | `-I` | string | | Hunter identifier |
 | `--interface` | `-i` | string | `any` | Network interface(s) to capture on |
 | `--filter` | `-f` | string | | BPF filter expression |
@@ -730,6 +750,12 @@ lc process [flags]
 | `--id` | `-I` | string | | Processor identifier |
 | `--max-hunters` | `-m` | int | `100` | Maximum connected hunters |
 | `--max-subscribers` | | int | `100` | Maximum TUI subscribers |
+| `--event-allow-sensitive-fields` | | bool | `false` | Permit authorized requests for sensitive HTTP, SMTP, and file fields |
+| `--event-allow-file-metadata` | | bool | `false` | Permit authorized file-metadata requests; never file content |
+| `--event-ingress-profile` | | string | `memory-only` | Event acknowledgement profile: `memory-only` or `reliable` |
+| `--event-ingress-wal-dir` | | string | | Recoverable ingress WAL; required for reliable profile |
+| `--event-ingress-wal-max-bytes` | | int64 | `1073741824` | Maximum event-ingress WAL size |
+| `--event-ingress-max-batch-bytes` | | int | `4194304` | Maximum accepted event batch size |
 | `--insecure` | | bool | `false` | Disable TLS |
 | `--api-key-auth` | | bool | `false` | Enable API key authentication |
 | `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |

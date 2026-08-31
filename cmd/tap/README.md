@@ -182,10 +182,46 @@ sudo lc tap tls -i eth0 \
 - `-I, --id` - Unique tap identifier (default: hostname-tap)
 - `--max-hunters` - Maximum concurrent hunter connections (default: 0, unlimited)
 - `--max-subscribers` - Maximum concurrent TUI subscribers (default: 100, 0 = unlimited)
+- `--event-allow-sensitive-fields` - Allow subscribers to request sensitive HTTP, SMTP, and file fields (default: false)
+- `--event-allow-file-metadata` - Allow subscribers to request file metadata, never file content (default: false)
 
 ### Upstream Forwarding
 
 - `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
+- `--forward-mode` - `packets` (default) or normalized `events`
+- `--event-fallback-to-packets` - Explicitly permit compatibility fallback to raw packets
+- `--event-delivery-profile` - `reliable` (default) or `memory-only`
+- `--event-spool-dir` - Recoverable upstream event spool directory
+- `--event-spool-max-bytes` / `--event-spool-max-age` - Spool retention limits
+- `--event-spool-exhaustion-policy` - `drop_oldest` (default) or `drop_new`
+- `--event-ingress-profile` - Downstream event ingress: `memory-only` (default) or `reliable`
+- `--event-ingress-wal-dir` - Recoverable ingress WAL (required for reliable ingress)
+- `--event-ingress-wal-max-bytes` - Ingress WAL limit (default: 1 GiB)
+- `--event-ingress-max-batch-bytes` - Maximum accepted event batch (default: 4 MiB)
+
+Packet mode preserves every upstream feature that requires raw bytes. Event
+mode analyzes locally and sends normalized metadata without raw packet bytes or
+file content. The upstream processor consequently cannot create PCAP evidence,
+serve upstream packet views, inject packets into a virtual interface, or rerun
+analysis from the original payload.
+
+Unlike a hunter, a tap can retain packet evidence locally while forwarding
+events. Unified, rotating, and per-call PCAP writers and their post-write hooks
+remain local in event mode:
+
+```bash
+sudo lc tap -i eth0 -P central:55555 --forward-mode events \
+  --auto-rotate-pcap --auto-rotate-pcap-dir /var/lib/lippycat/pcap \
+  --event-spool-dir /var/lib/lippycat/event-spool --tls-ca ca.crt
+```
+
+This is the recommended topology when the central site needs metadata but the
+edge must preserve forensic evidence. Protect both PCAP and event spools with
+least-privilege permissions, storage encryption, retention limits, and TLS or
+mTLS in transit. Event negotiation fails closed unless
+`--event-fallback-to-packets` explicitly authorizes the privacy-impacting
+fallback. Packet-only upstream nodes remain compatible with the default packet
+mode.
 
 ### PCAP Writing
 

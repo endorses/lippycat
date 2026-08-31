@@ -67,7 +67,13 @@ guidance.
 - `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
 - `-m, --max-hunters` - Maximum concurrent hunter connections (default: 100, 0 = unlimited)
 - `--max-subscribers` - Maximum TUI/monitoring subscribers (default: 100, 0 = unlimited)
+- `--event-allow-sensitive-fields` - Allow subscribers to request sensitive HTTP, SMTP, and file fields (default: false)
+- `--event-allow-file-metadata` - Allow subscribers to request file metadata, never file content (default: false)
 - `-s, --stats` - Display statistics (default: true)
+- `--event-ingress-profile` - Event acknowledgement profile: `memory-only` (default) or `reliable`
+- `--event-ingress-wal-dir` - Recoverable ingress WAL directory (required for `reliable`)
+- `--event-ingress-wal-max-bytes` - Ingress WAL size limit (default: 1 GiB)
+- `--event-ingress-max-batch-bytes` - Maximum accepted event batch (default: 4 MiB)
 
 ### PCAP File Writing
 
@@ -432,6 +438,28 @@ lc process --listen :55555 --insecure
 See [docs/SECURITY.md](../../docs/SECURITY.md#tls-transport-encryption) for complete TLS setup and certificate management.
 
 ## Hierarchical Mode
+
+Processors accept packet-mode and event-mode producers concurrently. Packet
+mode remains processor-authoritative: the processor receives raw packets and
+can write PCAP, populate packet views, inject a virtual interface, and perform
+canonical analysis. Event mode is edge-authoritative: the processor receives
+already-normalized metadata, never raw packet bytes or file content, and must
+not derive a second canonical event stream for that producer session.
+
+An event-mode producer negotiates the event API, event kinds, analysis profile,
+enrichment, and resource bounds during registration. An insufficient profile
+is rejected. Compatibility fallback to packet mode occurs only when the
+producer explicitly enables it; otherwise failure is closed and visible.
+Mixed deployments are supported: older nodes continue using packet mode while
+new event-capable nodes opt in independently.
+
+Reliable ingress uses the configured processor event WAL and acknowledges only
+recoverable admission. Memory-only ingress acknowledges queue admission and can
+lose acknowledged work on processor crash. Event delivery is at-least-once to
+ingress, with identity-based deduplication; later sink drops remain separately
+observable. TLS/mTLS, authorization, default-deny sensitive-field projection,
+WAL access controls, encryption at rest, and retention limits are still
+required because normalized metadata remains sensitive.
 
 Processors can forward filtered traffic to upstream processors for multi-tier aggregation:
 

@@ -59,6 +59,24 @@ flowchart TB
 
 **Data flow**: Hunters batch packets (default: 64 per batch) and stream them to the processor over gRPC. The processor writes to PCAP, broadcasts to TUI subscribers, injects into virtual interfaces, and optionally forwards upstream.
 
+### Packet and Event Forwarding
+
+Each hunter or forwarding tap session uses one canonical upstream
+representation:
+
+| Mode | Analysis authority | Sent upstream | Central capabilities |
+|------|--------------------|---------------|----------------------|
+| `packets` (default) | Processor | Selected raw packets | PCAP, packet views, virtual interface, reanalysis, normalized events |
+| `events` | Hunter or tap | Negotiated normalized metadata; no raw bytes or file content | Event views, structured logs, and authorized metadata consumers |
+
+Event mode reduces bandwidth and raw-content exposure, but the receiver cannot
+reconstruct packet evidence or repeat packet-dependent analysis. Use a tap with
+local PCAP retention when both centralized metadata and edge evidence are
+required. Event API and analysis capabilities are negotiated; incompatibility
+fails closed unless the producer explicitly permits a logged packet fallback.
+In hierarchical event mode, processors retain origin identity and use a
+recoverable spool and acknowledgement boundary for each forwarding hop.
+
 There's also a third node type:
 
 - **Tap** combines hunter and processor in a single process. It captures locally and provides all processor capabilities without gRPC overhead between capture and processing. See [Chapter 9](tap.md) for details.

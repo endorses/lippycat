@@ -350,18 +350,24 @@ func readRecord(path string) (record, error) {
 }
 
 func lossesFor(batch *eventsv1.ProtocolEventBatch) []*eventsv1.EventLoss {
+	var losses []*eventsv1.EventLoss
+	for _, loss := range batch.GetStats().GetLosses() {
+		if loss != nil {
+			losses = append(losses, proto.Clone(loss).(*eventsv1.EventLoss))
+		}
+	}
 	first, last := batch.GetFirstEventSequence(), batch.GetLastEventSequence()
 	if first == 0 && last == 0 {
-		return nil
+		return losses
 	}
 	if last < first {
 		first, last = last, first
 	}
-	return []*eventsv1.EventLoss{{
+	return append(losses, &eventsv1.EventLoss{
 		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: last - first + 1,
 		SourceNodeId: batch.GetSourceNodeId(), ProducerSessionId: batch.GetProducerSessionId(),
 		EventSequenceRanges: []*eventsv1.SequenceRange{{First: first, Last: last}},
-	}}
+	})
 }
 
 func syncDirectory(path string) error {

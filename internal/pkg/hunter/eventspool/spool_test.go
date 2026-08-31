@@ -8,6 +8,7 @@ import (
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func batch(source, session string, batchSequence, first, last uint64) *eventsv1.ProtocolEventBatch {
@@ -70,6 +71,60 @@ func TestDropOldestReportsExactRanges(t *testing.T) {
 	stored := s.Batches()[0]
 	require.Equal(t, uint64(2), stored.BatchSequence)
 	require.Equal(t, result.Losses, stored.GetStats().GetLosses())
+}
+
+func TestDropOldestPreservesInheritedLossesAcrossRepeatedEviction(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(1000, 0)
+	s, err := Open(Config{Directory: dir, MaxAge: time.Second, Policy: DropOldest, Clock: func() time.Time { return now }})
+	require.NoError(t, err)
+
+	_, err = s.Enqueue(batch("hunter", "session", 1, 10, 12))
+	require.NoError(t, err)
+	now = now.Add(2 * time.Second)
+	_, err = s.Enqueue(batch("hunter", "session", 2, 20, 21))
+	require.NoError(t, err)
+	now = now.Add(2 * time.Second)
+	result, err := s.Enqueue(batch("hunter", "session", 3, 30, 30))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.Len(t, result.Losses, 2)
+	require.Equal(t, uint64(10), result.Losses[0].GetEventSequenceRanges()[0].GetFirst())
+	require.Equal(t, uint64(12), result.Losses[0].GetEventSequenceRanges()[0].GetLast())
+	require.Equal(t, uint64(20), result.Losses[1].GetEventSequenceRanges()[0].GetFirst())
+	require.Equal(t, uint64(21), result.Losses[1].GetEventSequenceRanges()[0].GetLast())
+	require.True(t, proto.Equal(
+		&eventsv1.EventBatchStats{Losses: result.Losses},
+		&eventsv1.EventBatchStats{Losses: s.Batches()[0].GetStats().GetLosses()},
+	))
+}
+
+func TestDropOldestPreservesLossOnlyBatch(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(1000, 0)
+	s, err := Open(Config{Directory: dir, MaxAge: time.Second, Policy: DropOldest, Clock: func() time.Time { return now }})
+	require.NoError(t, err)
+	lossOnly := batch("hunter", "session", 1, 0, 0)
+	lossOnly.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, Count: 2,
+		SourceNodeId: "hunter", ProducerSessionId: "session",
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 4, Last: 5}},
+	}}}
+	_, err = s.Enqueue(lossOnly)
+	require.NoError(t, err)
+
+	now = now.Add(2 * time.Second)
+	result, err := s.Enqueue(batch("hunter", "session", 2, 6, 6))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.Len(t, result.Losses, 1)
+	require.Equal(t, eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, result.Losses[0].GetKind())
+	require.Equal(t, uint64(4), result.Losses[0].GetEventSequenceRanges()[0].GetFirst())
+	require.Equal(t, uint64(5), result.Losses[0].GetEventSequenceRanges()[0].GetLast())
+	require.True(t, proto.Equal(
+		&eventsv1.EventBatchStats{Losses: result.Losses},
+		&eventsv1.EventBatchStats{Losses: s.Batches()[0].GetStats().GetLosses()},
+	))
 }
 
 func TestDropOldestWriteFailurePreservesExistingRecords(t *testing.T) {

@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Phase 5 complete
+**Status:** Phase 5 incomplete — tap filter/session boundary remains open
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -353,7 +353,7 @@ connection summaries with accurate counters and provenance.
 - [x] Default spool exhaustion to dropping oldest complete batches while
       reporting exact lost ranges; support an operator-selected `drop_new`
       policy.
-- [x] Fix forwarding mode for the lifetime of a producer session; flush and
+- [ ] Fix forwarding mode for the lifetime of a producer session; flush and
       start a new session when mode, filtering, capture scope, or analysis policy
       changes.
 - [x] Run the shared stateful runtime on event-mode hunters and taps; assign
@@ -435,6 +435,14 @@ processor flow-control state on duplicate ACK and gap NACK responses. Explicit
 tap packet fallback now completes initial upstream negotiation before local
 capture starts, preventing pre-negotiation events from being stranded or later
 replayed across the forwarding-mode boundary.
+A 2026-08-31 implementation audit corrected three additional defects: authenticated
+event ingestion now authorizes hunter credentials, repeated producer-spool
+eviction preserves inherited and loss-only exact gap records, and hierarchical
+event routing flushes terminal unsupported-kind losses. The same audit found
+that effective live tap filter changes still do not quiesce and drain capture,
+flush/reset analysis, ACK-drain the old upstream route, and rotate the producer
+session transactionally. The producer-session lifetime task and Phase 5 status
+are therefore reopened until that coordinated tap boundary is implemented.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -180,7 +181,22 @@ func (r *EventRouter) serve(client *eventforwarding.Client) {
 	}
 }
 
-func (r *EventRouter) Flush(context.Context) error { return nil }
+func (r *EventRouter) Flush(ctx context.Context) error {
+	r.mu.Lock()
+	routes := make([]*eventforwarding.Sink, 0, len(r.routes))
+	for _, sink := range r.routes {
+		routes = append(routes, sink)
+	}
+	r.mu.Unlock()
+
+	var errs []error
+	for _, sink := range routes {
+		if err := sink.Flush(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
 func (r *EventRouter) Close(context.Context) error { r.cancel(); return nil }
 
 func safePathPart(value string) string {

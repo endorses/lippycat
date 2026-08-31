@@ -436,6 +436,45 @@ func TestRuntimeKeepsReassemblyIsolatedBySource(t *testing.T) {
 	require.Equal(t, "b.example", got["hunter-b:eth0"].Host)
 }
 
+func TestRuntimeKeepsConnectionTrackingIsolatedByCaptureInput(t *testing.T) {
+	runtime, dispatcher, sink := testRuntime(t, 32)
+	packets, err := eventfixture.Captured()
+	require.NoError(t, err)
+
+	for i, input := range []string{"first.pcap", "second.pcap"} {
+		source := Source{
+			NodeID:         "watch-file",
+			CaptureSource:  "pcap",
+			InterfaceName:  "eth0",
+			InterfaceIndex: uint32(i + 1),
+			InputFile:      input,
+		}
+		require.NoError(t, runtime.ObserveCaptured(source, packets))
+	}
+	runtime.EOF()
+	runtime.Close()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var connections []events.ConnEvent
+	for _, event := range sink.events {
+		if connection, ok := event.(events.ConnEvent); ok {
+			connections = append(connections, connection)
+		}
+	}
+	require.Len(t, connections, 2)
+	provenance := map[string]events.ConnEvent{}
+	for _, connection := range connections {
+		provenance[connection.Envelope().Provenance.InputFile] = connection
+	}
+	for _, input := range []string{"first.pcap", "second.pcap"} {
+		connection, ok := provenance[input]
+		require.True(t, ok)
+		require.Equal(t, uint64(3), connection.OriginPackets+connection.ResponsePackets)
+	}
+}
+
 func TestRuntimeBoundsTCPReassemblyStreamsUnderFlowChurn(t *testing.T) {
 	dispatcher, err := events.NewDispatcher(events.Config{QueueSize: 64, SinkQueueSize: 64})
 	require.NoError(t, err)

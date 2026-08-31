@@ -41,8 +41,12 @@ type Stats struct {
 }
 
 type trackerKey struct {
-	Flow   flowid.Key
-	NodeID string
+	Flow           flowid.Key
+	NodeID         string
+	CaptureSource  string
+	InterfaceName  string
+	InterfaceIndex uint32
+	InputFile      string
 }
 type direction uint8
 
@@ -106,7 +110,7 @@ func (t *Tracker) Observe(o Observation) ([]events.ConnEvent, error) {
 		now = time.Now()
 	}
 	t.observations.Add(1)
-	tk := trackerKey{Flow: key, NodeID: o.Envelope.NodeID}
+	tk := trackerKeyForEnvelope(key, o.Envelope)
 	s := t.shardFor(tk)
 	s.Lock()
 	f := s.flows[tk]
@@ -139,7 +143,7 @@ func (t *Tracker) SetService(env events.Envelope, service string) error {
 	if err != nil {
 		return err
 	}
-	tk := trackerKey{Flow: key, NodeID: env.NodeID}
+	tk := trackerKeyForEnvelope(key, env)
 	s := t.shardFor(tk)
 	s.Lock()
 	if f := s.flows[tk]; f != nil {
@@ -147,6 +151,17 @@ func (t *Tracker) SetService(env events.Envelope, service string) error {
 	}
 	s.Unlock()
 	return nil
+}
+
+func trackerKeyForEnvelope(key flowid.Key, env events.Envelope) trackerKey {
+	return trackerKey{
+		Flow:           key,
+		NodeID:         env.NodeID,
+		CaptureSource:  env.Provenance.CaptureSource,
+		InterfaceName:  env.Provenance.InterfaceName,
+		InterfaceIndex: env.Provenance.InterfaceIndex,
+		InputFile:      env.Provenance.InputFile,
+	}
 }
 
 func newFlow(key trackerKey, o Observation, now time.Time) *flow {

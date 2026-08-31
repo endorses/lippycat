@@ -323,6 +323,10 @@ reassembly streams and replaced the monotonically retained capture-source
 namespace map with deterministic source hashing. Capacity eviction is observable
 through runtime statistics, and a source/flow-churn regression test verifies
 that state remains within the configured limit.
+A final connection-isolation audit aligned connection tracking with TCP
+reassembly by namespacing identical network tuples by capture source, interface,
+and input file. Multi-interface capture and multi-file replay now emit separate
+connection summaries with accurate counters and provenance.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

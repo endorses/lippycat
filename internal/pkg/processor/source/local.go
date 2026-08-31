@@ -261,6 +261,11 @@ type LocalSourceConfig struct {
 	// Used for TUI display and filter validation.
 	ProtocolMode string
 
+	// IncludeHTTPHeaders controls whether protocol enrichment retains complete
+	// HTTP header maps. Resolve this once during command composition; packet
+	// processing must not perform configuration lookups on the hot path.
+	IncludeHTTPHeaders bool
+
 	// CallFilterCacheSize bounds retained selected-call filter attribution.
 	CallFilterCacheSize int
 }
@@ -747,7 +752,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 
 			// Convert to protobuf format first
 			pbPkt := convertPacketInfo(pktInfo)
-			pbPkt.Metadata = protocolmeta.Enrich(pktInfo.Packet, pbPkt.Metadata, viper.GetBool("logs.include_http_headers"))
+			pbPkt.Metadata = protocolmeta.Enrich(pktInfo.Packet, pbPkt.Metadata, s.config.IncludeHTTPHeaders)
 
 			// Apply VoIP processing BEFORE filtering
 			// This ensures RTP packets associated with calls are detected

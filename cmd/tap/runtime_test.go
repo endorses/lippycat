@@ -26,7 +26,10 @@ func TestTapSourceConfigUsesSharedProtocol(t *testing.T) {
 	interfaces = []string{"eth0", "eth1"}
 	batchSize, batchTimeout, bufferSize = 42, 250, 2048
 
-	got := tapSourceConfig(processor.Config{ProcessorID: "tap-test"}, "tcp port 443", protocolcatalog.MustLookup("tls"))
+	got := tapSourceConfig(processor.Config{
+		ProcessorID: "tap-test",
+		LogConfig:   &processor.StructuredLogConfig{IncludeHTTPHeaders: true},
+	}, "tcp port 443", protocolcatalog.MustLookup("tls"))
 	require.Equal(t, []string{"eth0", "eth1"}, got.Interfaces)
 	require.Equal(t, "tcp port 443", got.BPFFilter)
 	require.Equal(t, 42, got.BatchSize)
@@ -35,6 +38,7 @@ func TestTapSourceConfigUsesSharedProtocol(t *testing.T) {
 	require.Equal(t, 1000, got.BatchBuffer)
 	require.Equal(t, "tap-test", got.ProcessorID)
 	require.Equal(t, "tls", got.ProtocolMode)
+	require.True(t, got.IncludeHTTPHeaders)
 }
 
 func TestTapSourceConfigSupportsGenericMode(t *testing.T) {
@@ -43,6 +47,7 @@ func TestTapSourceConfigSupportsGenericMode(t *testing.T) {
 	require.Equal(t, "generic-tap", got.ProcessorID)
 	require.Equal(t, "generic", got.ProtocolMode)
 	require.Equal(t, "udp", got.BPFFilter)
+	require.False(t, got.IncludeHTTPHeaders)
 }
 
 func TestTapProtocolsComeFromSharedCatalog(t *testing.T) {

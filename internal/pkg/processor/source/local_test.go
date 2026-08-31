@@ -25,6 +25,7 @@ func TestDefaultLocalSourceConfig(t *testing.T) {
 	assert.Equal(t, 100*time.Millisecond, cfg.BatchTimeout)
 	assert.Equal(t, 10000, cfg.BufferSize)
 	assert.Equal(t, 1000, cfg.BatchBuffer)
+	assert.False(t, cfg.IncludeHTTPHeaders)
 }
 
 func TestNewLocalSource_AppliesDefaults(t *testing.T) {

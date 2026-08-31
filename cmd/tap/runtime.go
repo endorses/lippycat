@@ -86,15 +86,17 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 }
 
 func tapSourceConfig(config processor.Config, effectiveBPF string, protocol protocolcatalog.Spec) source.LocalSourceConfig {
+	includeHTTPHeaders := config.LogConfig != nil && config.LogConfig.IncludeHTTPHeaders
 	return source.LocalSourceConfig{
-		Interfaces:   cmdutil.GetStringSliceConfig("tap.interfaces", interfaces),
-		BPFFilter:    effectiveBPF,
-		BatchSize:    cmdutil.GetIntConfig("tap.batch_size", batchSize),
-		BatchTimeout: time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BufferSize:   cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
-		BatchBuffer:  1000,
-		ProcessorID:  config.ProcessorID,
-		ProtocolMode: string(protocol.Analyzer),
+		Interfaces:         cmdutil.GetStringSliceConfig("tap.interfaces", interfaces),
+		BPFFilter:          effectiveBPF,
+		BatchSize:          cmdutil.GetIntConfig("tap.batch_size", batchSize),
+		BatchTimeout:       time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		BufferSize:         cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
+		BatchBuffer:        1000,
+		ProcessorID:        config.ProcessorID,
+		ProtocolMode:       string(protocol.Analyzer),
+		IncludeHTTPHeaders: includeHTTPHeaders,
 	}
 }
 

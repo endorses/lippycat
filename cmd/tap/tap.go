@@ -113,8 +113,19 @@ var (
 	eventAllowFileMetadata    bool
 
 	// Upstream forwarding (renamed from --upstream to --processor)
-	processorAddr          string
-	upstreamAddrDeprecated string // deprecated, use processorAddr
+	processorAddr              string
+	upstreamAddrDeprecated     string // deprecated, use processorAddr
+	forwardMode                string
+	eventFallbackToPackets     bool
+	eventDeliveryProfile       string
+	eventSpoolDir              string
+	eventSpoolMaxBytes         uint64
+	eventSpoolMaxAge           time.Duration
+	eventSpoolExhaustionPolicy string
+	eventIngressProfile        string
+	eventIngressWALDir         string
+	eventIngressWALMaxBytes    int64
+	eventIngressMaxBatchBytes  int
 
 	// PCAP flags
 	writeFile string
@@ -214,6 +225,17 @@ func init() {
 	TapCmd.PersistentFlags().StringVar(&upstreamAddrDeprecated, "upstream", "", "")
 	TapCmd.PersistentFlags().Lookup("upstream").Deprecated = "use --processor instead"
 	TapCmd.PersistentFlags().Lookup("upstream").Hidden = true
+	TapCmd.PersistentFlags().StringVar(&forwardMode, "forward-mode", "packets", "Upstream forwarding mode: packets or events")
+	TapCmd.PersistentFlags().BoolVar(&eventFallbackToPackets, "event-fallback-to-packets", false, "Allow an event-mode upstream session to visibly fall back to packet forwarding when negotiation fails")
+	TapCmd.PersistentFlags().StringVar(&eventDeliveryProfile, "event-delivery-profile", "reliable", "Upstream event delivery profile: reliable or memory-only")
+	TapCmd.PersistentFlags().StringVar(&eventSpoolDir, "event-spool-dir", "/var/tmp/lippycat-tap-event-spool", "Crash-recoverable upstream event spool directory")
+	TapCmd.PersistentFlags().Uint64Var(&eventSpoolMaxBytes, "event-spool-max-bytes", 1<<30, "Maximum upstream event spool size in bytes (0 = unlimited)")
+	TapCmd.PersistentFlags().DurationVar(&eventSpoolMaxAge, "event-spool-max-age", 24*time.Hour, "Maximum age of upstream event batches in the spool (0 = unlimited)")
+	TapCmd.PersistentFlags().StringVar(&eventSpoolExhaustionPolicy, "event-spool-exhaustion-policy", "drop_oldest", "Upstream event spool exhaustion policy: drop_oldest or drop_new")
+	TapCmd.PersistentFlags().StringVar(&eventIngressProfile, "event-ingress-profile", "memory-only", "Event ingestion acknowledgement profile: reliable or memory-only")
+	TapCmd.PersistentFlags().StringVar(&eventIngressWALDir, "event-ingress-wal-dir", "", "Event ingress WAL directory (required for reliable profile)")
+	TapCmd.PersistentFlags().Int64Var(&eventIngressWALMaxBytes, "event-ingress-wal-max-bytes", 1<<30, "Maximum event ingress WAL size in bytes")
+	TapCmd.PersistentFlags().IntVar(&eventIngressMaxBatchBytes, "event-ingress-max-batch-bytes", 4<<20, "Maximum accepted event batch size in bytes")
 
 	// ============================================================
 	// PCAP Writing Configuration (persistent for voip subcommand)
@@ -318,6 +340,17 @@ func init() {
 	_ = viper.BindPFlag("tap.processor_addr", TapCmd.PersistentFlags().Lookup("processor"))
 	// Also bind to old key for backward compatibility with config files
 	_ = viper.BindPFlag("tap.upstream_addr", TapCmd.PersistentFlags().Lookup("processor"))
+	_ = viper.BindPFlag("tap.forward_mode", TapCmd.PersistentFlags().Lookup("forward-mode"))
+	_ = viper.BindPFlag("tap.events.fallback_to_packets", TapCmd.PersistentFlags().Lookup("event-fallback-to-packets"))
+	_ = viper.BindPFlag("tap.events.delivery_profile", TapCmd.PersistentFlags().Lookup("event-delivery-profile"))
+	_ = viper.BindPFlag("tap.events.spool.dir", TapCmd.PersistentFlags().Lookup("event-spool-dir"))
+	_ = viper.BindPFlag("tap.events.spool.max_bytes", TapCmd.PersistentFlags().Lookup("event-spool-max-bytes"))
+	_ = viper.BindPFlag("tap.events.spool.max_age", TapCmd.PersistentFlags().Lookup("event-spool-max-age"))
+	_ = viper.BindPFlag("tap.events.spool.exhaustion_policy", TapCmd.PersistentFlags().Lookup("event-spool-exhaustion-policy"))
+	_ = viper.BindPFlag("tap.events.ingress.profile", TapCmd.PersistentFlags().Lookup("event-ingress-profile"))
+	_ = viper.BindPFlag("tap.events.ingress.wal_dir", TapCmd.PersistentFlags().Lookup("event-ingress-wal-dir"))
+	_ = viper.BindPFlag("tap.events.ingress.wal_max_bytes", TapCmd.PersistentFlags().Lookup("event-ingress-wal-max-bytes"))
+	_ = viper.BindPFlag("tap.events.ingress.max_batch_bytes", TapCmd.PersistentFlags().Lookup("event-ingress-max-batch-bytes"))
 
 	// PCAP configuration
 	_ = viper.BindPFlag("tap.write_file", TapCmd.PersistentFlags().Lookup("write-file"))

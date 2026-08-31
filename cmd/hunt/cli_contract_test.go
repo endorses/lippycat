@@ -26,6 +26,9 @@ func TestHuntPersistentFlagContract(t *testing.T) {
 		"buffer-size": "10000", "debug-allow-non-loopback": "false", "debug-listen": "",
 		"disk-buffer": "false", "disk-buffer-dir": "/var/tmp/lippycat-buffer", "disk-buffer-max-mb": "1024",
 		"esp-heuristic": "false", "esp-icv-size": "-1", "esp-null": "false", "filter": "",
+		"event-delivery-profile": "reliable", "event-fallback-to-packets": "false",
+		"event-spool-dir": "/var/tmp/lippycat-event-spool", "event-spool-exhaustion-policy": "drop_oldest",
+		"event-spool-max-age": "24h0m0s", "event-spool-max-bytes": "1073741824", "forward-mode": "packets",
 		"hunter-id": "", "id": "", "insecure": "false", "interface": "[any]",
 		"no-filter-policy": "deny", "pcap-buffer-size": "16777216", "processor": "", "promisc": "false",
 		"tls-ca": "", "tls-cert": "", "tls-key": "", "tls-skip-verify": "false",
@@ -118,12 +121,12 @@ func bindingFixture(flagType, original string) string {
 
 func TestHuntRenderedHelpSnapshots(t *testing.T) {
 	want := map[string]string{
-		"hunt":  "182eb36e5c7df71544938fe1a4ed7a5e2faa3b20e10dfee0a3ebb07129120af1",
-		"dns":   "adbc29a0e80452449786b14d9461338635ca4758a9b1f6e578a32729e006b93a",
-		"http":  "b440b35caac98873397fd23532f54e799e254c26e10a5c0cb48a9b2dc58e0322",
-		"tls":   "05fd4c020a4808319490cf34c1eb28af371e3ebc8451e03223e40ba7497864a4",
-		"email": "3f918f9b2b57075e915d53abec0c26baeeb50e1fb9f5793bb56d91c81adb5c49",
-		"voip":  "244d126ff9386a2796e0de6fc0167f7dd31b389449a33f1e56d42ab919287d4e",
+		"hunt":  "dcc2f68a42a706d6cd70f7e24cb903c709caddf6b607f4fd6120a2a07407bca9",
+		"dns":   "176ac84328313d2191394248783ad43c9fc458a1171085ce907bc3f766b00df4",
+		"http":  "0f80f83cbb19af341b108d20884c95fc4656c602b0d99b4f9d2dc8b9d5974ace",
+		"tls":   "21b86049b07be0abad41385e3bd2b86bf4c476edcad941876238a015a3d1f961",
+		"email": "4ac2249ed1b0fd02ddf7e226e979b5071c90fd3b590aa1107db42b4db047d9bf",
+		"voip":  "bac4ac2b2727af11536689ba09af249d725cb1784632d7dfc8748f0ed7154b8b",
 	}
 	commands := map[string]*cobra.Command{"hunt": HuntCmd, "dns": dnsHuntCmd, "http": httpHuntCmd, "tls": tlsHuntCmd, "email": emailHuntCmd, "voip": voipHuntCmd}
 	for name, cmd := range commands {

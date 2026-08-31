@@ -39,6 +39,7 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -120,6 +121,10 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 // For production deployments, set LIPPYCAT_PRODUCTION=true to enforce mutual TLS.
 func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRegistration) (*management.RegistrationResponse, error) {
 	hunterID := req.HunterId
+	mode, apiMajor, kinds, profileRevision, notice, err := negotiateEventForwarding(req.EventForwarding)
+	if err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
 
 	logger.Info("Hunter registration request",
 		"hunter_id", hunterID,
@@ -154,7 +159,55 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 			MaxReconnectAttempts: 0, // infinite
 			ProcessorId:          p.config.ProcessorID,
 		},
+		AcceptedForwardingMode:          mode,
+		AcceptedEventApiMajor:           apiMajor,
+		AcceptedEventKinds:              kinds,
+		AcceptedSemanticProfileRevision: profileRevision,
+		ForwardingNotice:                notice,
 	}, nil
+}
+
+const supportedEventSemanticProfile uint32 = 1
+
+var supportedIngressEventKinds = []int32{1, 2, 3, 4, 5, 6}
+
+func negotiateEventForwarding(c *management.EventForwardingCapabilities) (management.ForwardingMode, uint32, []int32, uint32, string, error) {
+	if c == nil || c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_UNSPECIFIED || c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
+		return management.ForwardingMode_FORWARDING_MODE_PACKETS, 0, nil, 0, "", nil
+	}
+	if c.RequestedMode != management.ForwardingMode_FORWARDING_MODE_EVENTS {
+		return 0, 0, nil, 0, "", fmt.Errorf("unsupported forwarding mode %s", c.RequestedMode)
+	}
+	apiOK := false
+	for _, major := range c.EventApiMajors {
+		apiOK = apiOK || major == 1
+	}
+	profileOK := c.SemanticProfileRevision == supportedEventSemanticProfile
+	if !apiOK || !profileOK {
+		reason := fmt.Sprintf("event profile unsupported (api majors=%v semantic profile=%d; require API 1/profile %d)", c.EventApiMajors, c.SemanticProfileRevision, supportedEventSemanticProfile)
+		if c.AllowPacketFallback {
+			return management.ForwardingMode_FORWARDING_MODE_PACKETS, 0, nil, 0, "explicit packet fallback: " + reason, nil
+		}
+		return 0, 0, nil, 0, "", errors.New(reason)
+	}
+	supported := make(map[int32]struct{}, len(supportedIngressEventKinds))
+	for _, kind := range supportedIngressEventKinds {
+		supported[kind] = struct{}{}
+	}
+	accepted := make([]int32, 0, len(c.EventKinds))
+	for _, kind := range c.EventKinds {
+		if _, ok := supported[kind]; ok {
+			accepted = append(accepted, kind)
+		}
+	}
+	if len(accepted) == 0 {
+		reason := "event profile has no mutually supported event kinds"
+		if c.AllowPacketFallback {
+			return management.ForwardingMode_FORWARDING_MODE_PACKETS, 0, nil, 0, "explicit packet fallback: " + reason, nil
+		}
+		return 0, 0, nil, 0, "", errors.New(reason)
+	}
+	return management.ForwardingMode_FORWARDING_MODE_EVENTS, 1, accepted, supportedEventSemanticProfile, "", nil
 }
 
 // Heartbeat handles bidirectional heartbeat stream (Management Service)
@@ -403,6 +456,10 @@ func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.Li
 
 // RegisterProcessor registers a downstream processor that forwards packets to this processor
 func (p *Processor) RegisterProcessor(ctx context.Context, req *management.ProcessorRegistration) (*management.ProcessorRegistrationResponse, error) {
+	mode, apiMajor, kinds, profileRevision, notice, negotiationErr := negotiateEventForwarding(req.EventForwarding)
+	if negotiationErr != nil {
+		return nil, status.Error(codes.FailedPrecondition, negotiationErr.Error())
+	}
 	logger.Info("Downstream processor registration",
 		"processor_id", req.ProcessorId,
 		"listen_address", req.ListenAddress,
@@ -514,8 +571,9 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 	p.proxyManager.PublishTopologyUpdate(topologyUpdate)
 
 	return &management.ProcessorRegistrationResponse{
-		Accepted:            true,
-		UpstreamProcessorId: p.config.ProcessorID,
+		Accepted:               true,
+		UpstreamProcessorId:    p.config.ProcessorID,
+		AcceptedForwardingMode: mode, AcceptedEventApiMajor: apiMajor, AcceptedEventKinds: kinds, AcceptedSemanticProfileRevision: profileRevision, ForwardingNotice: notice,
 	}, nil
 }
 

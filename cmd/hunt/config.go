@@ -3,11 +3,14 @@
 package hunt
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
+	"github.com/spf13/viper"
 )
 
 // hunterConfigSpec contains the protocol-specific differences in the otherwise
@@ -39,22 +42,29 @@ func protocolHunterConfigSpec(name, bpfFilter string) hunterConfigSpec {
 
 func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 	config := hunter.Config{
-		ProcessorAddr:        cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),
-		HunterID:             cmdutil.GetStringConfig("hunter.hunter_id", hunterID),
-		Interfaces:           cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),
-		BPFFilter:            spec.bpfFilter,
-		BufferSize:           cmdutil.GetIntConfig("hunter.buffer_size", bufferSize),
-		BatchSize:            cmdutil.GetIntConfig("hunter.batch_size", batchSize),
-		BatchTimeout:         time.Duration(cmdutil.GetIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BatchQueueSize:       cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
-		VoIPMode:             spec.voIPMode,
-		EnableVoIPFilter:     spec.enableVoIPFilter,
-		SupportedFilterTypes: append([]string(nil), spec.protocol.SupportedFilterTypes...),
-		TLSEnabled:           !cmdutil.GetBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:          cmdutil.GetStringConfig("hunter.tls.cert_file", tlsCertFile),
-		TLSKeyFile:           cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),
-		TLSCAFile:            cmdutil.GetStringConfig("hunter.tls.ca_file", tlsCAFile),
-		TLSSkipVerify:        cmdutil.GetBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
+		ProcessorAddr:              cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),
+		HunterID:                   cmdutil.GetStringConfig("hunter.hunter_id", hunterID),
+		Interfaces:                 cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),
+		BPFFilter:                  spec.bpfFilter,
+		BufferSize:                 cmdutil.GetIntConfig("hunter.buffer_size", bufferSize),
+		BatchSize:                  cmdutil.GetIntConfig("hunter.batch_size", batchSize),
+		BatchTimeout:               time.Duration(cmdutil.GetIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		BatchQueueSize:             cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
+		VoIPMode:                   spec.voIPMode,
+		EnableVoIPFilter:           spec.enableVoIPFilter,
+		SupportedFilterTypes:       append([]string(nil), spec.protocol.SupportedFilterTypes...),
+		TLSEnabled:                 !cmdutil.GetBoolConfig("insecure", insecureAllowed),
+		TLSCertFile:                cmdutil.GetStringConfig("hunter.tls.cert_file", tlsCertFile),
+		TLSKeyFile:                 cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),
+		TLSCAFile:                  cmdutil.GetStringConfig("hunter.tls.ca_file", tlsCAFile),
+		TLSSkipVerify:              cmdutil.GetBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
+		ForwardMode:                strings.ToLower(cmdutil.GetStringConfig("hunter.forward_mode", forwardMode)),
+		EventFallbackToPackets:     cmdutil.GetBoolConfig("hunter.events.fallback_to_packets", eventFallbackToPackets),
+		EventDeliveryProfile:       strings.ReplaceAll(strings.ToLower(cmdutil.GetStringConfig("hunter.events.delivery_profile", eventDeliveryProfile)), "-", "_"),
+		EventSpoolDir:              cmdutil.GetStringConfig("hunter.events.spool.dir", eventSpoolDir),
+		EventSpoolMaxBytes:         viper.GetUint64("hunter.events.spool.max_bytes"),
+		EventSpoolMaxAge:           viper.GetDuration("hunter.events.spool.max_age"),
+		EventSpoolExhaustionPolicy: strings.ToLower(cmdutil.GetStringConfig("hunter.events.spool.exhaustion_policy", eventSpoolExhaustionPolicy)),
 	}
 
 	if spec.useGPUFlag {
@@ -74,4 +84,32 @@ func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 		config.NoFilterPolicy = cmdutil.GetStringConfig("hunter.no_filter_policy", noFilterPolicy)
 	}
 	return config
+}
+
+func validateHunterForwardingConfig(config hunter.Config) error {
+	if config.ForwardMode == "" {
+		config.ForwardMode = "packets"
+	}
+	if config.EventDeliveryProfile == "" {
+		config.EventDeliveryProfile = "reliable"
+	}
+	if config.EventSpoolExhaustionPolicy == "" {
+		config.EventSpoolExhaustionPolicy = "drop_oldest"
+	}
+	if config.ForwardMode != "packets" && config.ForwardMode != "events" {
+		return fmt.Errorf("invalid forward mode %q: must be packets or events", config.ForwardMode)
+	}
+	if config.EventDeliveryProfile != "reliable" && config.EventDeliveryProfile != "memory_only" {
+		return fmt.Errorf("invalid event delivery profile %q: must be reliable or memory-only", config.EventDeliveryProfile)
+	}
+	if config.EventSpoolExhaustionPolicy != "drop_oldest" && config.EventSpoolExhaustionPolicy != "drop_new" {
+		return fmt.Errorf("invalid event spool exhaustion policy %q: must be drop_oldest or drop_new", config.EventSpoolExhaustionPolicy)
+	}
+	if config.EventFallbackToPackets && config.ForwardMode != "events" {
+		return fmt.Errorf("event fallback to packets is only valid with --forward-mode=events")
+	}
+	if config.ForwardMode == "events" && config.EventDeliveryProfile == "reliable" && config.EventSpoolDir == "" {
+		return fmt.Errorf("reliable event delivery requires a non-empty event spool directory")
+	}
+	return nil
 }

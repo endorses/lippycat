@@ -13,14 +13,17 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter/circuitbreaker"
+	"github.com/endorses/lippycat/internal/pkg/hunter/eventforwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"github.com/endorses/lippycat/internal/pkg/version"
+	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -46,7 +49,11 @@ type Config struct {
 	TLSSkipVerify         bool
 	TLSServerNameOverride string
 	// Reconnection
-	MaxReconnectAttempts int
+	MaxReconnectAttempts   int
+	ForwardMode            string
+	EventFallbackToPackets bool
+	EventSpoolMaxBytes     uint64
+	EventSpoolMaxAge       time.Duration
 }
 
 // StatsCollector interface for statistics access
@@ -85,6 +92,7 @@ type Manager struct {
 	managementConn *grpc.ClientConn
 	dataClient     data.DataServiceClient
 	mgmtClient     management.ManagementServiceClient
+	eventClient    eventsv1.EventServiceClient
 
 	// Packet streaming
 	stream   data.DataService_StreamPacketsClient
@@ -97,6 +105,9 @@ type Manager struct {
 	forwardingFactory  ForwardingManagerFactory
 	forwardingManager  *forwarding.Manager
 	flowControlHandler func(*data.StreamControl)
+	eventForwarder     *eventforwarding.Client
+	acceptedMode       management.ForwardingMode
+	modeReady          chan management.ForwardingMode
 
 	// Reconnection
 	reconnectAttempts int
@@ -117,6 +128,8 @@ type Manager struct {
 	forwardingExitGrace time.Duration
 	closeDataTransport  func() error
 }
+
+func (m *Manager) SetEventForwarder(client *eventforwarding.Client) { m.eventForwarder = client }
 
 const defaultForwardingExitGrace = time.Second
 
@@ -147,6 +160,16 @@ func New(
 		reconnectAttempts:  0,
 		reconnecting:       false,
 		circuitBreaker:     cb,
+		modeReady:          make(chan management.ForwardingMode, 1),
+	}
+}
+
+func (m *Manager) WaitAcceptedMode(ctx context.Context) (management.ForwardingMode, error) {
+	select {
+	case mode := <-m.modeReady:
+		return mode, nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
 	}
 }
 
@@ -247,16 +270,31 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 			m.reconnectAttempts = 0
 			m.reconnectMu.Unlock()
 
-			// Create forwarding manager for this connection
-			m.forwardingManager = m.forwardingFactory.CreateForwardingManager(m.connCtx, m.stream)
-			m.forwardingManager.SetDisconnectCallback(func() {
-				m.markGenerationDisconnected(generation)
-			})
+			// Start the negotiated transport only. A producer session never emits
+			// both packets and normalized events.
+			if m.acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+				m.connWg.Add(1)
+				go func() {
+					defer m.connWg.Done()
+					stream, streamErr := m.eventClient.StreamEvents(m.connCtx)
+					if streamErr == nil {
+						streamErr = m.eventForwarder.Serve(m.connCtx, stream)
+					}
+					if streamErr != nil && m.connCtx.Err() == nil {
+						logger.Error("Event stream failed", "error", streamErr)
+						m.markGenerationDisconnected(generation)
+					}
+				}()
+			} else {
+				m.forwardingManager = m.forwardingFactory.CreateForwardingManager(m.connCtx, m.stream)
+				m.forwardingManager.SetDisconnectCallback(func() { m.markGenerationDisconnected(generation) })
+				m.connWg.Add(2)
+				go m.forwardingManager.ForwardPackets(&m.connWg)
+				go m.handleStreamControl()
+			}
 
-			// Start connection-dependent goroutines with connection-scoped waitgroup
-			m.connWg.Add(4)
-			go m.forwardingManager.ForwardPackets(&m.connWg)
-			go m.handleStreamControl()
+			// Start common connection-dependent goroutines.
+			m.connWg.Add(2)
 			go m.subscribeToFilters()
 			go m.sendHeartbeats()
 
@@ -316,9 +354,10 @@ func (m *Manager) connectAndRegister() error {
 		return fmt.Errorf("failed to register with processor: %w", err)
 	}
 
-	// Start packet streaming
-	if err := m.startStreaming(); err != nil {
-		return fmt.Errorf("failed to start streaming: %w", err)
+	if m.acceptedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
+		if err := m.startStreaming(); err != nil {
+			return fmt.Errorf("failed to start streaming: %w", err)
+		}
 	}
 
 	// Reset reconnect attempts on successful connection
@@ -403,6 +442,7 @@ func (m *Manager) connectToProcessor() error {
 	}
 	m.dataConn = dataConn
 	m.dataClient = data.NewDataServiceClient(dataConn)
+	m.eventClient = eventsv1.NewEventServiceClient(dataConn)
 
 	// Connect management channel (same address for now, different service)
 	mgmtConn, err := grpc.NewClient(m.config.ProcessorAddr, opts...)
@@ -463,6 +503,10 @@ func (m *Manager) register() error {
 		filterTypes = []string{"bpf", "ip_address"}
 	}
 
+	requestedMode := management.ForwardingMode_FORWARDING_MODE_PACKETS
+	if m.config.ForwardMode == "events" {
+		requestedMode = management.ForwardingMode_FORWARDING_MODE_EVENTS
+	}
 	req := &management.HunterRegistration{
 		HunterId:   m.config.HunterID,
 		Hostname:   hostname,
@@ -474,6 +518,14 @@ func (m *Manager) register() error {
 			GpuAcceleration: false,                              // TODO: detect GPU
 			AfXdp:           false,                              // TODO: detect AF_XDP
 		},
+		EventForwarding: &management.EventForwardingCapabilities{
+			RequestedMode: requestedMode, EventApiMajors: []uint32{1},
+			EventKinds: []int32{1, 2, 3, 4, 5, 6}, SemanticProfileRevision: 1,
+			StatefulAnalysisFeatures: []string{"tcp_reassembly", "connection_tracking", "file_metadata"},
+			SensitiveEnrichment:      viper.GetBool("logs.include_http_headers"),
+			MaxSpoolBytes:            m.config.EventSpoolMaxBytes, MaxSpoolAgeSeconds: uint64(max(m.config.EventSpoolMaxAge/time.Second, 0)),
+			AllowPacketFallback: m.config.EventFallbackToPackets,
+		},
 	}
 
 	resp, err := m.mgmtClient.RegisterHunter(m.ctx, req)
@@ -484,10 +536,30 @@ func (m *Manager) register() error {
 	if !resp.Accepted {
 		return fmt.Errorf("registration rejected: %s", resp.Error)
 	}
+	accepted := resp.GetAcceptedForwardingMode()
+	if accepted == management.ForwardingMode_FORWARDING_MODE_UNSPECIFIED {
+		accepted = management.ForwardingMode_FORWARDING_MODE_PACKETS
+	}
+	if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && accepted != requestedMode && !m.config.EventFallbackToPackets {
+		return fmt.Errorf("registration rejected requested event forwarding profile: processor selected %s", accepted)
+	}
+	if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && accepted == management.ForwardingMode_FORWARDING_MODE_PACKETS {
+		// Explicit fallback fixes packet mode for this producer lifetime. A later
+		// reconnect must not silently switch the same capture session to events.
+		m.config.ForwardMode = "packets"
+	}
+	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS && m.eventForwarder == nil {
+		return fmt.Errorf("registration selected event forwarding without an event runtime")
+	}
+	m.acceptedMode = accepted
+	select {
+	case m.modeReady <- accepted:
+	default:
+	}
 
 	logger.Info("Registration accepted",
 		"assigned_id", resp.AssignedId,
-		"initial_filters", len(resp.Filters))
+		"initial_filters", len(resp.Filters), "forwarding_mode", accepted, "forwarding_notice", resp.GetForwardingNotice())
 
 	// Store initial filters in filter manager
 	m.filterManager.SetInitialFilters(resp.Filters)

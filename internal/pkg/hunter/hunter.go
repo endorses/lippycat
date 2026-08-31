@@ -9,10 +9,16 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
 	huntercapture "github.com/endorses/lippycat/internal/pkg/hunter/capture"
 	"github.com/endorses/lippycat/internal/pkg/hunter/connection"
+	"github.com/endorses/lippycat/internal/pkg/hunter/eventforwarding"
+	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/endorses/lippycat/internal/pkg/hunter/filtering"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
@@ -58,6 +64,14 @@ type Config struct {
 	DiskBufferMaxSize uint64 // Maximum disk buffer size in bytes (default: 1GB)
 	// Filter policy
 	NoFilterPolicy string // Policy when no filters: "allow" (default) or "deny"
+	// Normalized event forwarding. Packet forwarding remains the compatibility default.
+	ForwardMode                string
+	EventFallbackToPackets     bool
+	EventDeliveryProfile       string
+	EventSpoolDir              string
+	EventSpoolMaxBytes         uint64
+	EventSpoolMaxAge           time.Duration
+	EventSpoolExhaustionPolicy string
 }
 
 // Hunter represents a hunter node
@@ -84,9 +98,12 @@ type Hunter struct {
 	batchQueueSize int
 
 	// Control
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	eventRuntime    *eventanalysis.Runtime
+	eventDispatcher *events.Dispatcher
+	eventForwarder  *eventforwarding.Client
 }
 
 // New creates a new hunter instance
@@ -155,6 +172,17 @@ func (h *Hunter) Start(ctx context.Context) error {
 	defer h.cancel()
 
 	logger.Info("Hunter starting", "hunter_id", h.config.HunterID)
+	if h.config.ForwardMode == "events" {
+		if err := h.initializeEventForwarding(); err != nil {
+			return err
+		}
+		defer func() {
+			h.eventRuntime.Close()
+			if err := h.eventDispatcher.Close(context.Background()); err != nil {
+				logger.Error("Failed to close hunter event dispatcher", "error", err)
+			}
+		}()
+	}
 
 	// Start system metrics collection (CPU/RAM monitoring)
 	metricsCollector := sysmetrics.New()
@@ -162,6 +190,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 	defer metricsCollector.Stop()
 
 	// Periodically update stats with system metrics
+	var lastEventQueueLosses uint64
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
@@ -173,6 +202,14 @@ func (h *Hunter) Start(ctx context.Context) error {
 				return
 			case <-ticker.C:
 				h.statsCollector.SetSystemMetrics(metricsCollector.Get())
+				if h.eventDispatcher != nil {
+					stats := h.eventDispatcher.Stats()
+					current := stats.Dropped + stats.SinkDropped
+					if current > lastEventQueueLosses {
+						h.statsCollector.IncrementQueueLoss(current - lastEventQueueLosses)
+					}
+					lastEventQueueLosses = current
+				}
 			}
 		}
 	}()
@@ -272,6 +309,8 @@ func (h *Hunter) Start(ctx context.Context) error {
 			TLSSkipVerify:         h.config.TLSSkipVerify,
 			TLSServerNameOverride: h.config.TLSServerNameOverride,
 			MaxReconnectAttempts:  0, // 0 = infinite
+			ForwardMode:           h.config.ForwardMode, EventFallbackToPackets: h.config.EventFallbackToPackets,
+			EventSpoolMaxBytes: h.config.EventSpoolMaxBytes, EventSpoolMaxAge: h.config.EventSpoolMaxAge,
 		},
 		h.statsCollector,
 		h.filterManager,
@@ -279,7 +318,18 @@ func (h *Hunter) Start(ctx context.Context) error {
 		h, // ForwardingManagerFactory interface
 		h.handleFlowControl,
 	)
+	h.connectionManager.SetEventForwarder(h.eventForwarder)
 	h.connectionManager.Start(h.ctx, &h.wg)
+	if h.eventRuntime != nil {
+		h.wg.Add(1)
+		go func() {
+			defer h.wg.Done()
+			mode, err := h.connectionManager.WaitAcceptedMode(h.ctx)
+			if err == nil && mode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+				h.analyzeEvents()
+			}
+		}()
+	}
 
 	logger.Info("Hunter started successfully", "hunter_id", h.config.HunterID)
 
@@ -291,6 +341,88 @@ func (h *Hunter) Start(ctx context.Context) error {
 
 	logger.Info("Hunter stopped", "hunter_id", h.config.HunterID)
 	return nil
+}
+
+func (h *Hunter) initializeEventForwarding() error {
+	spool, err := eventspool.Open(eventspool.Config{Directory: h.config.EventSpoolDir, MaxBytes: h.config.EventSpoolMaxBytes, MaxAge: h.config.EventSpoolMaxAge, Policy: eventspool.ExhaustionPolicy(h.config.EventSpoolExhaustionPolicy)})
+	if err != nil {
+		return fmt.Errorf("initialize hunter event spool: %w", err)
+	}
+	source, session, lastEvent, lastBatch, err := spool.RecoveryState()
+	if err != nil {
+		return err
+	}
+	var producer *events.Producer
+	if session == "" {
+		producer, err = events.NewLiveProducer(h.config.HunterID)
+	} else {
+		if source != h.config.HunterID {
+			return fmt.Errorf("event spool belongs to node %q, configured node is %q", source, h.config.HunterID)
+		}
+		producer, err = events.ResumeLiveProducer(source, session, lastEvent)
+	}
+	if err != nil {
+		return err
+	}
+	profile := eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE
+	if h.config.EventDeliveryProfile == "memory_only" {
+		profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
+	}
+	h.eventForwarder, err = eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: producer.SessionID(), EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_FILE_METADATA}, Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
+		if kind == eventsv1.LossKind_LOSS_KIND_TRANSPORT {
+			h.statsCollector.IncrementTransportLoss(count)
+		}
+	}}, spool)
+	if err != nil {
+		return err
+	}
+	sink, err := eventforwarding.NewSink(h.eventForwarder, lastBatch+1, 1)
+	if err != nil {
+		return err
+	}
+	h.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: 1024, SinkQueueSize: 1024, DropPolicy: events.DropNew, Producer: producer})
+	if err != nil {
+		return err
+	}
+	if err = h.eventDispatcher.Register(sink); err != nil {
+		return err
+	}
+	h.eventRuntime, err = eventanalysis.New(eventanalysis.Config{Dispatcher: h.eventDispatcher, LiveExpiry: true, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers")})
+	if err != nil {
+		return err
+	}
+	return h.eventDispatcher.Start(h.ctx)
+}
+
+func (h *Hunter) analyzeEvents() {
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case info, ok := <-h.captureManager.GetPacketBuffer().Receive():
+			if !ok {
+				return
+			}
+			h.statsCollector.IncrementCaptured()
+			if h.packetProcessor != nil {
+				if !h.packetProcessor.ProcessPacket(info) {
+					continue
+				}
+				h.statsCollector.IncrementMatched()
+			} else if h.applicationFilter != nil {
+				if matched, _ := h.applicationFilter.MatchPacketWithIDs(info.Packet); !matched {
+					continue
+				}
+				h.statsCollector.IncrementMatched()
+			}
+			err := h.eventRuntime.ObservePacket(eventanalysis.Source{NodeID: h.config.HunterID, CaptureSource: h.config.HunterID, InterfaceName: info.Interface, CaptureScope: events.CaptureScopeFiltered}, info)
+			if err != nil {
+				h.statsCollector.IncrementDropped(1)
+				h.statsCollector.IncrementAnalysisLoss(1)
+				logger.Debug("Hunter event analysis skipped packet", "error", err)
+			}
+		}
+	}
 }
 
 // CreateForwardingManager implements ForwardingManagerFactory interface

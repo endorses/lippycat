@@ -23,6 +23,9 @@ type hunterRuntimeHooks struct {
 }
 
 func runHunterRuntime(config hunter.Config, protocol protocolcatalog.Spec, hooks hunterRuntimeHooks) error {
+	if err := validateHunterForwardingConfig(config); err != nil {
+		return err
+	}
 	if protocol.Name == "" || protocol.Analyzer == "" {
 		return fmt.Errorf("protocol catalog specification is incomplete")
 	}

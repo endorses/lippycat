@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
@@ -90,6 +91,10 @@ var (
 	maxSubscribers            int
 	eventAllowSensitiveFields bool
 	eventAllowFileMetadata    bool
+	eventIngressProfile       string
+	eventIngressWALDir        string
+	eventIngressWALMaxBytes   int64
+	eventIngressMaxBatchBytes int
 	writeFile                 string
 	displayStats              bool
 	enableDetection           bool
@@ -158,6 +163,10 @@ func init() {
 	ProcessCmd.Flags().IntVarP(&maxSubscribers, "max-subscribers", "", constants.DefaultMaxSubscribers, "Maximum number of concurrent TUI/monitoring subscribers (0 = unlimited)")
 	ProcessCmd.Flags().BoolVar(&eventAllowSensitiveFields, "event-allow-sensitive-fields", false, "Allow event subscribers to request sensitive HTTP, SMTP, and file fields")
 	ProcessCmd.Flags().BoolVar(&eventAllowFileMetadata, "event-allow-file-metadata", false, "Allow event subscribers to request file metadata (never file content)")
+	ProcessCmd.Flags().StringVar(&eventIngressProfile, "event-ingress-profile", "memory-only", "Event ingestion acknowledgement profile: reliable or memory-only")
+	ProcessCmd.Flags().StringVar(&eventIngressWALDir, "event-ingress-wal-dir", "", "Event ingress WAL directory (required for reliable profile)")
+	ProcessCmd.Flags().Int64Var(&eventIngressWALMaxBytes, "event-ingress-wal-max-bytes", 1<<30, "Maximum event ingress WAL size in bytes")
+	ProcessCmd.Flags().IntVar(&eventIngressMaxBatchBytes, "event-ingress-max-batch-bytes", 4<<20, "Maximum accepted event batch size in bytes")
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 	ProcessCmd.Flags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")
 	ProcessCmd.Flags().BoolVarP(&enableDetection, "enable-detection", "d", true, "Enable centralized protocol detection (default: true)")
@@ -229,6 +238,10 @@ func init() {
 	_ = viper.BindPFlag("processor.max_subscribers", ProcessCmd.Flags().Lookup("max-subscribers"))
 	_ = viper.BindPFlag("processor.events.allow_sensitive_fields", ProcessCmd.Flags().Lookup("event-allow-sensitive-fields"))
 	_ = viper.BindPFlag("processor.events.allow_file_metadata", ProcessCmd.Flags().Lookup("event-allow-file-metadata"))
+	_ = viper.BindPFlag("processor.events.ingress.profile", ProcessCmd.Flags().Lookup("event-ingress-profile"))
+	_ = viper.BindPFlag("processor.events.ingress.wal_dir", ProcessCmd.Flags().Lookup("event-ingress-wal-dir"))
+	_ = viper.BindPFlag("processor.events.ingress.wal_max_bytes", ProcessCmd.Flags().Lookup("event-ingress-wal-max-bytes"))
+	_ = viper.BindPFlag("processor.events.ingress.max_batch_bytes", ProcessCmd.Flags().Lookup("event-ingress-max-batch-bytes"))
 	_ = viper.BindPFlag("processor.write_file", ProcessCmd.Flags().Lookup("write-file"))
 	_ = viper.BindPFlag("processor.display_stats", ProcessCmd.Flags().Lookup("stats"))
 	_ = viper.BindPFlag("processor.enable_detection", ProcessCmd.Flags().Lookup("enable-detection"))
@@ -428,6 +441,10 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		MaxSubscribers:              cmdutil.GetIntConfig("processor.max_subscribers", maxSubscribers),
 		EventAllowSensitiveFields:   cmdutil.GetBoolConfig("processor.events.allow_sensitive_fields", eventAllowSensitiveFields),
 		EventAllowFileMetadata:      cmdutil.GetBoolConfig("processor.events.allow_file_metadata", eventAllowFileMetadata),
+		EventIngressProfile:         strings.ReplaceAll(strings.ToLower(cmdutil.GetStringConfig("processor.events.ingress.profile", eventIngressProfile)), "-", "_"),
+		EventIngressWALDirectory:    cmdutil.GetStringConfig("processor.events.ingress.wal_dir", eventIngressWALDir),
+		EventIngressWALMaxBytes:     viper.GetInt64("processor.events.ingress.wal_max_bytes"),
+		EventIngressMaxBatchBytes:   cmdutil.GetIntConfig("processor.events.ingress.max_batch_bytes", eventIngressMaxBatchBytes),
 		WriteFile:                   cmdutil.GetStringConfig("processor.write_file", writeFile),
 		DisplayStats:                cmdutil.GetBoolConfig("processor.display_stats", displayStats),
 		PcapWriterConfig:            pcapWriterConfig,
@@ -555,6 +572,16 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		"enable_detection", config.EnableDetection)
 
 	// Create processor instance
+	if config.EventIngressProfile != "reliable" && config.EventIngressProfile != "memory_only" {
+		return fmt.Errorf("invalid event ingress profile %q: must be reliable or memory-only", config.EventIngressProfile)
+	}
+	if config.EventIngressProfile == "reliable" && config.EventIngressWALDirectory == "" {
+		return fmt.Errorf("reliable event ingress requires --event-ingress-wal-dir")
+	}
+	if config.EventIngressWALMaxBytes < 0 || config.EventIngressMaxBatchBytes <= 0 {
+		return fmt.Errorf("event ingress limits must be non-negative and max batch bytes must be positive")
+	}
+
 	p, err := processor.New(config)
 	if err != nil {
 		return fmt.Errorf("failed to create processor: %w", err)

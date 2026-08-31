@@ -252,6 +252,53 @@ message ProtocolEventBatch {
   uint64 last_event_sequence = 8;
 }
 
+// IngressProfile controls when the processor acknowledges an event batch.
+enum IngressProfile {
+  INGRESS_PROFILE_UNSPECIFIED = 0;
+  // ACK follows recoverable admission to the processor WAL.
+  INGRESS_PROFILE_RELIABLE = 1;
+  // ACK follows in-memory queue admission. Processor crashes can lose data.
+  INGRESS_PROFILE_MEMORY_ONLY = 2;
+}
+
+message EventIngressOpen {
+  string source_node_id = 1;
+  string producer_session_id = 2;
+  uint32 event_api_major = 3;
+  uint32 semantic_profile_revision = 4;
+  repeated EventKind event_kinds = 5;
+  IngressProfile profile = 6;
+  // relay_node_id is empty for a direct hunter and identifies a registered
+  // downstream processor when preserving an original producer node ID.
+  string relay_node_id = 7;
+}
+
+message EventIngressMessage {
+  oneof message {
+    EventIngressOpen open = 1;
+    ProtocolEventBatch batch = 2;
+  }
+}
+
+enum EventIngressControlKind {
+  EVENT_INGRESS_CONTROL_KIND_UNSPECIFIED = 0;
+  EVENT_INGRESS_CONTROL_KIND_ACCEPTED = 1;
+  EVENT_INGRESS_CONTROL_KIND_ACK = 2;
+  EVENT_INGRESS_CONTROL_KIND_NACK = 3;
+  EVENT_INGRESS_CONTROL_KIND_FLOW = 4;
+}
+
+message EventIngressControl {
+  EventIngressControlKind kind = 1;
+  uint64 cumulative_ack_sequence = 2;
+  repeated SequenceRange nack_batch_ranges = 3;
+  IngressProfile accepted_profile = 4;
+  // Uses lippycat.data.FlowControl numeric values without coupling this API to
+  // the legacy packet transport protobuf.
+  int32 flow_control = 5;
+  string error = 6;
+}
+
 message EventSubscribeRequest {
   repeated EventKind event_kinds = 1;
   repeated string node_ids = 2;
@@ -305,6 +352,11 @@ message EventSubscriptionMessage {
 // EventService is deliberately separate from packet delivery so event
 // subscribers have independent buffering and backpressure.
 service EventService {
+  // StreamEvents ingests normalized events from hunters and taps. The first
+  // client message must be EventIngressOpen and fixes the producer session's
+  // profile and semantic contract for the lifetime of the stream.
+  rpc StreamEvents(stream EventIngressMessage)
+      returns (stream EventIngressControl);
   rpc SubscribeEvents(EventSubscribeRequest)
       returns (stream EventSubscriptionMessage);
 }

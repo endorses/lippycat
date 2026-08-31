@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	EventService_StreamEvents_FullMethodName    = "/lippycat.events.v1.EventService/StreamEvents"
 	EventService_SubscribeEvents_FullMethodName = "/lippycat.events.v1.EventService/SubscribeEvents"
 )
 
@@ -29,6 +30,10 @@ const (
 // EventService is deliberately separate from packet delivery so event
 // subscribers have independent buffering and backpressure.
 type EventServiceClient interface {
+	// StreamEvents ingests normalized events from hunters and taps. The first
+	// client message must be EventIngressOpen and fixes the producer session's
+	// profile and semantic contract for the lifetime of the stream.
+	StreamEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EventIngressMessage, EventIngressControl], error)
 	SubscribeEvents(ctx context.Context, in *EventSubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[EventSubscriptionMessage], error)
 }
 
@@ -40,9 +45,22 @@ func NewEventServiceClient(cc grpc.ClientConnInterface) EventServiceClient {
 	return &eventServiceClient{cc}
 }
 
+func (c *eventServiceClient) StreamEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EventIngressMessage, EventIngressControl], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EventService_ServiceDesc.Streams[0], EventService_StreamEvents_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[EventIngressMessage, EventIngressControl]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EventService_StreamEventsClient = grpc.BidiStreamingClient[EventIngressMessage, EventIngressControl]
+
 func (c *eventServiceClient) SubscribeEvents(ctx context.Context, in *EventSubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[EventSubscriptionMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &EventService_ServiceDesc.Streams[0], EventService_SubscribeEvents_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &EventService_ServiceDesc.Streams[1], EventService_SubscribeEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +84,10 @@ type EventService_SubscribeEventsClient = grpc.ServerStreamingClient[EventSubscr
 // EventService is deliberately separate from packet delivery so event
 // subscribers have independent buffering and backpressure.
 type EventServiceServer interface {
+	// StreamEvents ingests normalized events from hunters and taps. The first
+	// client message must be EventIngressOpen and fixes the producer session's
+	// profile and semantic contract for the lifetime of the stream.
+	StreamEvents(grpc.BidiStreamingServer[EventIngressMessage, EventIngressControl]) error
 	SubscribeEvents(*EventSubscribeRequest, grpc.ServerStreamingServer[EventSubscriptionMessage]) error
 	mustEmbedUnimplementedEventServiceServer()
 }
@@ -77,6 +99,9 @@ type EventServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedEventServiceServer struct{}
 
+func (UnimplementedEventServiceServer) StreamEvents(grpc.BidiStreamingServer[EventIngressMessage, EventIngressControl]) error {
+	return status.Errorf(codes.Unimplemented, "method StreamEvents not implemented")
+}
 func (UnimplementedEventServiceServer) SubscribeEvents(*EventSubscribeRequest, grpc.ServerStreamingServer[EventSubscriptionMessage]) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeEvents not implemented")
 }
@@ -101,6 +126,13 @@ func RegisterEventServiceServer(s grpc.ServiceRegistrar, srv EventServiceServer)
 	s.RegisterService(&EventService_ServiceDesc, srv)
 }
 
+func _EventService_StreamEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EventServiceServer).StreamEvents(&grpc.GenericServerStream[EventIngressMessage, EventIngressControl]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EventService_StreamEventsServer = grpc.BidiStreamingServer[EventIngressMessage, EventIngressControl]
+
 func _EventService_SubscribeEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(EventSubscribeRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -120,6 +152,12 @@ var EventService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*EventServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamEvents",
+			Handler:       _EventService_StreamEvents_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 		{
 			StreamName:    "SubscribeEvents",
 			Handler:       _EventService_SubscribeEvents_Handler,

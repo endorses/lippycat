@@ -108,6 +108,20 @@ func NewLiveProducer(nodeID string) (*Producer, error) {
 	return newLiveProducer(nodeID, rand.Reader)
 }
 
+// ResumeLiveProducer restores a crash-recovered producer identity. Callers
+// must obtain sessionID and lastSequence from their checksummed durable spool.
+func ResumeLiveProducer(nodeID, sessionID string, lastSequence uint64) (*Producer, error) {
+	if nodeID == "" || sessionID == "" {
+		return nil, fmt.Errorf("resume live event producer: node and session IDs are required")
+	}
+	if _, err := hex.DecodeString(sessionID); err != nil || len(sessionID) != producerSessionBytes*2 {
+		return nil, fmt.Errorf("resume live event producer: invalid session ID")
+	}
+	p := &Producer{nodeID: nodeID, sessionID: sessionID}
+	p.sequence.Store(lastSequence)
+	return p, nil
+}
+
 func newLiveProducer(nodeID string, random io.Reader) (*Producer, error) {
 	if nodeID == "" {
 		return nil, fmt.Errorf("create live event producer: node ID is required")

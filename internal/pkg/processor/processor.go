@@ -42,6 +42,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
+	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/logstream"
@@ -64,23 +65,30 @@ import (
 
 // Config contains processor configuration
 type Config struct {
-	ListenAddr                  string
-	ProcessorID                 string
-	UpstreamAddr                string
-	MaxHunters                  int  // Maximum concurrent hunter connections (0 = unlimited)
-	MaxSubscribers              int  // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
-	EventAllowSensitiveFields   bool // Permit authenticated event subscribers to request sensitive fields
-	EventAllowFileMetadata      bool // Permit authenticated event subscribers to request file metadata (never content)
-	WriteFile                   string
-	DisplayStats                bool
-	PcapWriterConfig            *PcapWriterConfig            // Per-call PCAP writing configuration (VoIP)
-	AutoRotateConfig            *AutoRotateConfig            // Auto-rotating PCAP writing configuration (non-VoIP)
-	CommandExecutorConfig       *CommandExecutorConfig       // Command execution for PCAP hooks
-	CallCompletionMonitorConfig *CallCompletionMonitorConfig // Call completion monitoring configuration
-	TunnelingThreshold          float64                      // DNS tunneling score threshold (default: 0.7)
-	TunnelingDebounce           time.Duration                // Min time between alerts per domain (default: 5m)
-	EnableDetection             bool                         // Enable centralized protocol detection
-	FilterFile                  string                       // Path to filter persistence file (YAML)
+	ListenAddr                         string
+	ProcessorID                        string
+	UpstreamAddr                       string
+	UpstreamForwardMode                string
+	UpstreamEventFallbackToPackets     bool
+	UpstreamEventDeliveryProfile       string
+	UpstreamEventSpoolDirectory        string
+	UpstreamEventSpoolMaxBytes         uint64
+	UpstreamEventSpoolMaxAge           time.Duration
+	UpstreamEventSpoolExhaustionPolicy string
+	MaxHunters                         int  // Maximum concurrent hunter connections (0 = unlimited)
+	MaxSubscribers                     int  // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
+	EventAllowSensitiveFields          bool // Permit authenticated event subscribers to request sensitive fields
+	EventAllowFileMetadata             bool // Permit authenticated event subscribers to request file metadata (never content)
+	WriteFile                          string
+	DisplayStats                       bool
+	PcapWriterConfig                   *PcapWriterConfig            // Per-call PCAP writing configuration (VoIP)
+	AutoRotateConfig                   *AutoRotateConfig            // Auto-rotating PCAP writing configuration (non-VoIP)
+	CommandExecutorConfig              *CommandExecutorConfig       // Command execution for PCAP hooks
+	CallCompletionMonitorConfig        *CallCompletionMonitorConfig // Call completion monitoring configuration
+	TunnelingThreshold                 float64                      // DNS tunneling score threshold (default: 0.7)
+	TunnelingDebounce                  time.Duration                // Min time between alerts per domain (default: 5m)
+	EnableDetection                    bool                         // Enable centralized protocol detection
+	FilterFile                         string                       // Path to filter persistence file (YAML)
 	// TLS settings
 	TLSEnabled    bool   // Enable TLS encryption for gRPC server
 	TLSCertFile   string // Path to TLS certificate file
@@ -140,7 +148,13 @@ type Config struct {
 	// TLS keylog settings (for decryption support)
 	TLSKeylogConfig *TLSKeylogWriterConfig // TLS session key storage and file writing
 	EventQueueSize  int
-	LogConfig       *StructuredLogConfig
+	// EventIngressProfile is "reliable" (WAL + fsync before ACK) or
+	// "memory_only" (ACK after queue admission; processor crashes can lose it).
+	EventIngressProfile       string
+	EventIngressWALDirectory  string
+	EventIngressWALMaxBytes   int64
+	EventIngressMaxBatchBytes int
+	LogConfig                 *StructuredLogConfig
 	// GracefulShutdownTimeout bounds waiting for clients to close gRPC streams.
 	// Zero uses the five-second default.
 	GracefulShutdownTimeout time.Duration
@@ -219,6 +233,7 @@ type Processor struct {
 	eventDispatcher   *events.Dispatcher
 	eventBroadcaster  *broadcast.Broadcaster
 	eventService      eventsv1.EventServiceServer
+	eventIngress      *eventIngress
 	eventRuntime      *eventanalysis.Runtime
 	subscriptionLimit *subscriptionLimiter
 	logSink           *logstream.Sink
@@ -268,14 +283,16 @@ func New(config Config) (*Processor, error) {
 		return nil, fmt.Errorf("register event broadcaster: %w", err)
 	}
 	p.subscriptionLimit = newSubscriptionLimiter(config.MaxSubscribers)
-	p.eventService, err = NewEventService(p.eventBroadcaster, EventSubscriptionPolicy{
+	service, err := NewEventService(p.eventBroadcaster, EventSubscriptionPolicy{
 		ProcessorNodeID: config.ProcessorID, subscriptionLimit: p.subscriptionLimit,
 		AllowSensitiveFields: config.EventAllowSensitiveFields,
 		AllowFileMetadata:    config.EventAllowFileMetadata,
-	})
+	}, EventIngressPolicy{Dispatcher: p.eventDispatcher, Profile: config.EventIngressProfile, WALDirectory: config.EventIngressWALDirectory, WALMaxBytes: config.EventIngressWALMaxBytes, MaxBatchBytes: config.EventIngressMaxBatchBytes})
 	if err != nil {
 		return nil, fmt.Errorf("initialize event subscription service: %w", err)
 	}
+	p.eventService = service
+	p.eventIngress = service.ingress
 	fileCfg := fileanalysis.Config{}
 	if config.LogConfig != nil {
 		fileCfg = fileanalysis.Config{MaxFileSize: config.LogConfig.FileMaxSize, MaxTotalSize: config.LogConfig.FileTotalSize, Extract: config.LogConfig.ExtractFiles, Directory: config.LogConfig.ExtractionDirectory}
@@ -525,6 +542,13 @@ func New(config Config) (*Processor, error) {
 
 	// Initialize hunter manager
 	p.hunterManager = hunter.NewManager(config.ProcessorID, config.MaxHunters, onStatsChanged)
+	p.eventIngress.authorize = func(sourceNodeID, relayNodeID string) bool {
+		if relayNodeID == "" {
+			_, ok := p.hunterManager.Get(sourceNodeID)
+			return ok
+		}
+		return p.downstreamManager != nil && p.downstreamManager.Get(relayNodeID) != nil
+	}
 
 	// Initialize hunter monitor (will be started in Start())
 	p.hunterMonitor = hunter.NewMonitor(p.hunterManager)
@@ -550,6 +574,7 @@ func New(config Config) (*Processor, error) {
 	// Initialize flow controller
 	hasUpstream := config.UpstreamAddr != ""
 	p.flowController = flow.NewController(hasUpstream)
+	p.eventIngress.flowControl = func() int32 { return int32(p.flowController.Determine()) }
 
 	// Initialize subscriber manager
 	p.subscriberManager = subscriber.NewManager(config.MaxSubscribers)
@@ -558,17 +583,38 @@ func New(config Config) (*Processor, error) {
 	if config.UpstreamAddr != "" {
 		p.upstreamManager = upstream.NewManager(
 			upstream.Config{
-				Address:       config.UpstreamAddr,
-				TLSEnabled:    config.TLSEnabled,
-				TLSCAFile:     config.TLSCAFile,
-				TLSCertFile:   config.TLSCertFile,
-				TLSKeyFile:    config.TLSKeyFile,
-				ProcessorID:   config.ProcessorID,
-				ListenAddress: config.ListenAddr, // Use the listen address so upstream can query back
+				Address:                config.UpstreamAddr,
+				TLSEnabled:             config.TLSEnabled,
+				TLSCAFile:              config.TLSCAFile,
+				TLSCertFile:            config.TLSCertFile,
+				TLSKeyFile:             config.TLSKeyFile,
+				ProcessorID:            config.ProcessorID,
+				ListenAddress:          config.ListenAddr, // Use the listen address so upstream can query back
+				ForwardMode:            config.UpstreamForwardMode,
+				EventFallbackToPackets: config.UpstreamEventFallbackToPackets,
 			},
 			&p.packetsForwarded,
 		)
 		p.flowController.SetUpstreamQueue(p.upstreamManager.QueueDepth, p.upstreamManager.QueueCapacity)
+		if config.UpstreamForwardMode == "events" {
+			profile := eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE
+			if config.UpstreamEventDeliveryProfile == "memory_only" {
+				profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
+			}
+			router, routerErr := upstream.NewEventRouter(p.upstreamManager, upstream.EventRouterConfig{
+				SpoolDirectory: config.UpstreamEventSpoolDirectory,
+				MaxBytes:       config.UpstreamEventSpoolMaxBytes,
+				MaxAge:         config.UpstreamEventSpoolMaxAge,
+				Policy:         eventspool.ExhaustionPolicy(config.UpstreamEventSpoolExhaustionPolicy),
+				Profile:        profile,
+			})
+			if routerErr != nil {
+				return nil, fmt.Errorf("initialize upstream event router: %w", routerErr)
+			}
+			if err = p.eventDispatcher.Register(router); err != nil {
+				return nil, fmt.Errorf("register upstream event router: %w", err)
+			}
+		}
 	}
 
 	// Initialize downstream manager (always, to track processors forwarding to us)

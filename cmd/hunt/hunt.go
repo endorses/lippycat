@@ -5,6 +5,7 @@ package hunt
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
@@ -73,6 +74,14 @@ var (
 	insecureAllowed bool
 	// Filter policy
 	noFilterPolicy string
+	// Event forwarding is opt-in; packet forwarding remains the compatibility default.
+	forwardMode                string
+	eventFallbackToPackets     bool
+	eventDeliveryProfile       string
+	eventSpoolDir              string
+	eventSpoolMaxBytes         uint64
+	eventSpoolMaxAge           time.Duration
+	eventSpoolExhaustionPolicy string
 
 	// ESP-NULL decapsulation flags
 	espNull      bool
@@ -130,6 +139,13 @@ func init() {
 
 	// Filter policy configuration
 	HuntCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "deny", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
+	HuntCmd.PersistentFlags().StringVar(&forwardMode, "forward-mode", "packets", "Upstream forwarding mode: packets or events")
+	HuntCmd.PersistentFlags().BoolVar(&eventFallbackToPackets, "event-fallback-to-packets", false, "Allow an event-mode session to visibly fall back to packet forwarding when negotiation fails")
+	HuntCmd.PersistentFlags().StringVar(&eventDeliveryProfile, "event-delivery-profile", "reliable", "Event delivery profile: reliable or memory-only")
+	HuntCmd.PersistentFlags().StringVar(&eventSpoolDir, "event-spool-dir", "/var/tmp/lippycat-event-spool", "Crash-recoverable event spool directory")
+	HuntCmd.PersistentFlags().Uint64Var(&eventSpoolMaxBytes, "event-spool-max-bytes", 1<<30, "Maximum event spool size in bytes (0 = unlimited)")
+	HuntCmd.PersistentFlags().DurationVar(&eventSpoolMaxAge, "event-spool-max-age", 24*time.Hour, "Maximum age of event batches in the spool (0 = unlimited)")
+	HuntCmd.PersistentFlags().StringVar(&eventSpoolExhaustionPolicy, "event-spool-exhaustion-policy", "drop_oldest", "Event spool exhaustion policy: drop_oldest or drop_new")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("hunter.processor_addr", HuntCmd.PersistentFlags().Lookup("processor"))
@@ -155,6 +171,13 @@ func init() {
 	_ = viper.BindPFlag("hunter.tls.skip_verify", HuntCmd.PersistentFlags().Lookup("tls-skip-verify"))
 	_ = viper.BindPFlag("hunter.insecure", HuntCmd.PersistentFlags().Lookup("insecure"))
 	_ = viper.BindPFlag("hunter.no_filter_policy", HuntCmd.PersistentFlags().Lookup("no-filter-policy"))
+	_ = viper.BindPFlag("hunter.forward_mode", HuntCmd.PersistentFlags().Lookup("forward-mode"))
+	_ = viper.BindPFlag("hunter.events.fallback_to_packets", HuntCmd.PersistentFlags().Lookup("event-fallback-to-packets"))
+	_ = viper.BindPFlag("hunter.events.delivery_profile", HuntCmd.PersistentFlags().Lookup("event-delivery-profile"))
+	_ = viper.BindPFlag("hunter.events.spool.dir", HuntCmd.PersistentFlags().Lookup("event-spool-dir"))
+	_ = viper.BindPFlag("hunter.events.spool.max_bytes", HuntCmd.PersistentFlags().Lookup("event-spool-max-bytes"))
+	_ = viper.BindPFlag("hunter.events.spool.max_age", HuntCmd.PersistentFlags().Lookup("event-spool-max-age"))
+	_ = viper.BindPFlag("hunter.events.spool.exhaustion_policy", HuntCmd.PersistentFlags().Lookup("event-spool-exhaustion-policy"))
 
 	// ESP-NULL decapsulation
 	_ = viper.BindPFlag("esp_null", HuntCmd.PersistentFlags().Lookup("esp-null"))

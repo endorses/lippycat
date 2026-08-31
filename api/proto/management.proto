@@ -76,6 +76,26 @@ message HunterRegistration {
 
     // Capture capabilities
     HunterCapabilities capabilities = 5;
+
+    EventForwardingCapabilities event_forwarding = 6;
+}
+
+enum ForwardingMode {
+    FORWARDING_MODE_UNSPECIFIED = 0;
+    FORWARDING_MODE_PACKETS = 1;
+    FORWARDING_MODE_EVENTS = 2;
+}
+
+message EventForwardingCapabilities {
+    ForwardingMode requested_mode = 1;
+    repeated uint32 event_api_majors = 2;
+    repeated int32 event_kinds = 3;
+    uint32 semantic_profile_revision = 4;
+    repeated string stateful_analysis_features = 5;
+    bool sensitive_enrichment = 6;
+    uint64 max_spool_bytes = 7;
+    uint64 max_spool_age_seconds = 8;
+    bool allow_packet_fallback = 9;
 }
 
 // ProcessorRegistration sent when a processor connects to forward upstream
@@ -94,6 +114,7 @@ message ProcessorRegistration {
     // Example: ["root", "intermediate1", "intermediate2"] means this processor
     // connects to intermediate2, which connects to intermediate1, which connects to root
     repeated string upstream_chain = 4;
+    EventForwardingCapabilities event_forwarding = 5;
 }
 
 // ProcessorRegistrationResponse from upstream after processor registration
@@ -107,6 +128,11 @@ message ProcessorRegistrationResponse {
     // Upstream processor ID (the processor that accepted this registration)
     // This allows the downstream processor to know its parent's ID for topology reporting
     string upstream_processor_id = 3;
+    ForwardingMode accepted_forwarding_mode = 4;
+    uint32 accepted_event_api_major = 5;
+    repeated int32 accepted_event_kinds = 6;
+    uint32 accepted_semantic_profile_revision = 7;
+    string forwarding_notice = 8;
 }
 
 // HunterCapabilities describes what a hunter can do
@@ -140,6 +166,12 @@ message RegistrationResponse {
 
     // Processor configuration
     ProcessorConfig config = 5;
+
+    ForwardingMode accepted_forwarding_mode = 6;
+    uint32 accepted_event_api_major = 7;
+    repeated int32 accepted_event_kinds = 8;
+    uint32 accepted_semantic_profile_revision = 9;
+    string forwarding_notice = 10;
 }
 
 // ProcessorConfig sent to hunter
@@ -218,6 +250,13 @@ message HunterStats {
 
     // Memory limit in bytes (from cgroup, 0 if unavailable)
     uint64 memory_limit_bytes = 9;
+
+    // Event-mode losses are separated by pipeline boundary.
+    uint64 capture_losses = 10;
+    uint64 analysis_losses = 11;
+    uint64 queue_losses = 12;
+    uint64 unsupported_kind_losses = 13;
+    uint64 transport_losses = 14;
 }
 
 // ProcessorHeartbeat response from processor

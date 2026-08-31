@@ -121,6 +121,11 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 		if err := p.eventDispatcher.Start(p.ctx); err != nil {
 			return fmt.Errorf("start event dispatcher: %w", err)
 		}
+		if p.eventIngress != nil {
+			if err := p.eventIngress.recover(); err != nil {
+				return fmt.Errorf("recover event ingress WAL: %w", err)
+			}
+		}
 		for _, metric := range p.eventDispatcher.QueueMetrics() {
 			if !metric.FlowControl {
 				continue
@@ -345,12 +350,25 @@ func (p *Processor) Shutdown() error {
 		if p.eventRuntime != nil {
 			p.eventRuntime.Close()
 		}
+		eventsDrained := p.eventDispatcher == nil
 		if p.eventDispatcher != nil {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := p.eventDispatcher.Close(shutdownCtx); err != nil {
 				logger.Warn("Failed to close protocol event dispatcher", "error", err)
+			} else {
+				eventsDrained = true
 			}
 			cancel()
+		}
+		if p.eventIngress != nil && p.eventIngress.wal != nil {
+			if eventsDrained {
+				if err := p.eventIngress.wal.reset(); err != nil {
+					logger.Warn("Failed to checkpoint drained event ingress WAL", "error", err)
+				}
+			}
+			if err := p.eventIngress.wal.close(); err != nil {
+				logger.Warn("Failed to close event ingress WAL", "error", err)
+			}
 		}
 
 		// Stop LI Manager (no-op if !li build)

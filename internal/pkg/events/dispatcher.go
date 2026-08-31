@@ -184,6 +184,44 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 	}
 }
 
+// EnqueueBatch admits all events atomically with respect to other producers.
+// It returns false without admitting any event when the queue lacks capacity.
+// This is used by transports whose ACK boundary is whole-batch queue admission.
+func (d *Dispatcher) EnqueueBatch(input []Event) bool {
+	if len(input) == 0 {
+		return true
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if !d.started || d.stopped {
+		return false
+	}
+	d.admissionMu.Lock()
+	defer d.admissionMu.Unlock()
+	events := make([]Event, 0, len(input))
+	for _, event := range input {
+		if isNilEvent(event) {
+			return false
+		}
+		if d.cfg.Producer != nil {
+			event = d.cfg.Producer.Assign(event)
+			if isNilEvent(event) || !hasDeliveryIdentity(event.Envelope()) {
+				return false
+			}
+		}
+		events = append(events, event)
+	}
+	if cap(d.queue)-len(d.queue) < len(events) {
+		return false
+	}
+	now := time.Now()
+	for _, event := range events {
+		d.queue <- dispatchItem{event: event, admittedAt: now}
+	}
+	d.enqueued.Add(uint64(len(events)))
+	return true
+}
+
 // notifyDropObservers lets best-effort transports report an explicit gap for
 // an event rejected at the dispatcher's admission queue. The event already has
 // delivery identity at this point, so observers can preserve its exact lost

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/grpcpool"
@@ -31,7 +32,9 @@ type Config struct {
 	// full, Forward drops the new batch; because forwarded packet accounting only
 	// happens after Send succeeds, the processor flow controller observes the
 	// resulting backlog and applies pressure to hunters.
-	OutboundQueueSize int
+	OutboundQueueSize      int
+	ForwardMode            string
+	EventFallbackToPackets bool
 }
 
 const defaultOutboundQueueSize = 256
@@ -62,11 +65,12 @@ type Manager struct {
 	config Config
 
 	// gRPC connection
-	conn       *grpc.ClientConn
-	dataClient data.DataServiceClient
-	mgmtClient management.ManagementServiceClient
-	generation *connection
-	mu         sync.Mutex
+	conn        *grpc.ClientConn
+	dataClient  data.DataServiceClient
+	mgmtClient  management.ManagementServiceClient
+	eventClient eventsv1.EventServiceClient
+	generation  *connection
+	mu          sync.Mutex
 
 	// Connection pooling
 	connPool *grpcpool.ConnectionPool
@@ -227,6 +231,7 @@ func (m *Manager) connectAndRegister() error {
 	m.conn = conn
 	m.dataClient = data.NewDataServiceClient(conn)
 	m.mgmtClient = management.NewManagementServiceClient(conn)
+	m.eventClient = eventsv1.NewEventServiceClient(conn)
 
 	// Register this processor with upstream
 	if m.config.ProcessorID != "" && m.config.ListenAddress != "" {
@@ -234,10 +239,15 @@ func (m *Manager) connectAndRegister() error {
 			"processor_id", m.config.ProcessorID,
 			"listen_address", m.config.ListenAddress)
 
+		requestedMode := management.ForwardingMode_FORWARDING_MODE_PACKETS
+		if m.config.ForwardMode == "events" {
+			requestedMode = management.ForwardingMode_FORWARDING_MODE_EVENTS
+		}
 		regResp, err := m.mgmtClient.RegisterProcessor(m.ctx, &management.ProcessorRegistration{
-			ProcessorId:   m.config.ProcessorID,
-			ListenAddress: m.config.ListenAddress,
-			Version:       "dev", // TODO: Use actual version
+			ProcessorId:     m.config.ProcessorID,
+			ListenAddress:   m.config.ListenAddress,
+			Version:         "dev", // TODO: Use actual version
+			EventForwarding: &management.EventForwardingCapabilities{RequestedMode: requestedMode, EventApiMajors: []uint32{1}, EventKinds: []int32{1, 2, 3, 4, 5, 6}, SemanticProfileRevision: 1, StatefulAnalysisFeatures: []string{"relay"}, AllowPacketFallback: m.config.EventFallbackToPackets},
 		})
 		if err != nil {
 			grpcpool.Release(m.connPool, m.config.Address)
@@ -246,6 +256,20 @@ func (m *Manager) connectAndRegister() error {
 		if !regResp.Accepted {
 			grpcpool.Release(m.connPool, m.config.Address)
 			return fmt.Errorf("upstream processor rejected registration: %s", regResp.Error)
+		}
+		acceptedMode := regResp.GetAcceptedForwardingMode()
+		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_UNSPECIFIED {
+			acceptedMode = management.ForwardingMode_FORWARDING_MODE_PACKETS
+		}
+		if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && acceptedMode != requestedMode && !m.config.EventFallbackToPackets {
+			grpcpool.Release(m.connPool, m.config.Address)
+			return fmt.Errorf("upstream rejected requested event forwarding profile: selected %s", acceptedMode)
+		}
+		if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && acceptedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
+			m.mu.Lock()
+			m.config.ForwardMode = "packets"
+			m.mu.Unlock()
+			logger.Warn("Upstream explicitly selected packet fallback", "notice", regResp.GetForwardingNotice())
 		}
 
 		// Store the upstream processor ID for topology reporting
@@ -256,8 +280,15 @@ func (m *Manager) connectAndRegister() error {
 		logger.Warn("ProcessorID or ListenAddress not configured, skipping processor registration")
 	}
 
-	// Create streaming connection
+	// Event mode uses EventService exclusively and never opens StreamPackets.
 	generationCtx, generationCancel := context.WithCancel(m.ctx)
+	if m.config.ForwardMode == "events" {
+		generation := &connection{queue: make(chan *data.PacketBatch, m.config.OutboundQueueSize), ctx: generationCtx, cancel: generationCancel}
+		m.mu.Lock()
+		m.generation = generation
+		m.mu.Unlock()
+		return nil
+	}
 	stream, err := m.dataClient.StreamPackets(generationCtx)
 	if err != nil {
 		generationCancel()
@@ -281,6 +312,20 @@ func (m *Manager) connectAndRegister() error {
 	go m.receiveAcks(generation)
 
 	return nil
+}
+
+// ForwardingEvents reports the fixed effective transport mode. It changes only
+// once when an explicitly permitted initial event negotiation falls back.
+func (m *Manager) ForwardingEvents() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.config.ForwardMode == "events"
+}
+
+func (m *Manager) eventServiceClient() eventsv1.EventServiceClient {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.eventClient
 }
 
 // monitorConnection monitors for disconnections and returns when reconnection is needed
@@ -340,6 +385,7 @@ func (m *Manager) cleanup() {
 	m.mu.Lock()
 	generation := m.generation
 	m.generation = nil
+	m.eventClient = nil
 	m.mu.Unlock()
 	if generation != nil {
 		generation.enqueueMu.Lock()

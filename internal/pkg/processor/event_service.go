@@ -77,9 +77,10 @@ type EventService struct {
 	eventsv1.UnimplementedEventServiceServer
 	broadcaster *broadcast.Broadcaster
 	policy      EventSubscriptionPolicy
+	ingress     *eventIngress
 }
 
-func NewEventService(broadcaster *broadcast.Broadcaster, policy EventSubscriptionPolicy) (*EventService, error) {
+func NewEventService(broadcaster *broadcast.Broadcaster, policy EventSubscriptionPolicy, ingressPolicies ...EventIngressPolicy) (*EventService, error) {
 	if broadcaster == nil {
 		return nil, errors.New("event broadcaster is required")
 	}
@@ -92,7 +93,15 @@ func NewEventService(broadcaster *broadcast.Broadcaster, policy EventSubscriptio
 	if policy.MaxMessageBytes == 0 {
 		policy.MaxMessageBytes = defaultEventMaxMessageBytes
 	}
-	return &EventService{broadcaster: broadcaster, policy: policy}, nil
+	var ingressPolicy EventIngressPolicy
+	if len(ingressPolicies) != 0 {
+		ingressPolicy = ingressPolicies[0]
+	}
+	ingress, err := newEventIngress(ingressPolicy)
+	if err != nil {
+		return nil, err
+	}
+	return &EventService{broadcaster: broadcaster, policy: policy, ingress: ingress}, nil
 }
 
 func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stream eventsv1.EventService_SubscribeEventsServer) error {

@@ -163,6 +163,11 @@ func TestToProto(t *testing.T) {
 	c.IncrementForwarded(10)
 	c.IncrementDropped(1)
 	c.SetBufferBytes(2048)
+	c.IncrementCaptureLoss(1)
+	c.IncrementAnalysisLoss(2)
+	c.IncrementQueueLoss(3)
+	c.IncrementUnsupportedKindLoss(4)
+	c.IncrementTransportLoss(5)
 	c.SetSystemMetrics(sysmetrics.Metrics{
 		CPUPercent:       55.5,
 		MemoryRSSBytes:   209715200,  // 200 MB
@@ -170,6 +175,9 @@ func TestToProto(t *testing.T) {
 	})
 
 	proto := c.ToProto(5)
+	if proto.CaptureLosses != 1 || proto.AnalysisLosses != 2 || proto.QueueLosses != 3 || proto.UnsupportedKindLosses != 4 || proto.TransportLosses != 5 {
+		t.Errorf("event loss counters were not preserved: %+v", proto)
+	}
 
 	if proto.PacketsCaptured != 3 {
 		t.Errorf("Expected proto.PacketsCaptured 3, got %d", proto.PacketsCaptured)

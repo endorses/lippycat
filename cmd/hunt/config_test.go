@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,4 +89,26 @@ func TestBuildHunterConfigCopiesFilterCapabilities(t *testing.T) {
 	config := buildHunterConfig(hunterConfigSpec{protocol: protocolcatalog.Spec{SupportedFilterTypes: filterTypes}})
 	filterTypes[1] = "changed"
 	assert.Equal(t, []string{"bpf", "dns_domain"}, config.SupportedFilterTypes)
+}
+
+func TestValidateHunterForwardingConfig(t *testing.T) {
+	valid := hunter.Config{ForwardMode: "events", EventDeliveryProfile: "reliable", EventSpoolDir: "/tmp/spool", EventSpoolExhaustionPolicy: "drop_oldest"}
+	require.NoError(t, validateHunterForwardingConfig(valid))
+
+	tests := []struct {
+		name   string
+		mutate func(*hunter.Config)
+	}{
+		{name: "invalid mode", mutate: func(c *hunter.Config) { c.ForwardMode = "auto" }},
+		{name: "implicit fallback", mutate: func(c *hunter.Config) { c.ForwardMode = "packets"; c.EventFallbackToPackets = true }},
+		{name: "missing reliable spool", mutate: func(c *hunter.Config) { c.EventSpoolDir = "" }},
+		{name: "invalid exhaustion policy", mutate: func(c *hunter.Config) { c.EventSpoolExhaustionPolicy = "overwrite" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := valid
+			tt.mutate(&config)
+			require.Error(t, validateHunterForwardingConfig(config))
+		})
+	}
 }

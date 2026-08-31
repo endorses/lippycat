@@ -66,31 +66,31 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 	contracts := map[string]tapProtocolContract{
 		"dns": {
 			cmd: dnsTapCmd, short: "Standalone DNS capture with full processor capabilities",
-			helpHash: "5dc55e923dfe44399d4abc3b24a2b72ad0a81332c218aea78251a46a3b237ead",
+			helpHash: "4124dc42b5258e687ffb3edc7380c32d6ac3f7ef4aa57d574349999ef5b298a0",
 			flags:    tapFlagDefaults("detect-tunneling", "true", "dns-port", "53", "domain", "", "domains-file", "", "tunneling-command", "", "tunneling-debounce", "5m", "tunneling-threshold", "0.7", "udp-only", "false"),
 			bindings: tapBindings("detect-tunneling", "dns.detect_tunneling", "dns-port", "tap.dns.ports", "domain", "tap.dns.domain_pattern", "domains-file", "tap.dns.domains_file", "tunneling-command", "processor.tunneling_command", "tunneling-debounce", "processor.tunneling_debounce", "tunneling-threshold", "processor.tunneling_threshold", "udp-only", "tap.dns.udp_only"),
 		},
 		"http": {
 			cmd: httpTapCmd, short: "Standalone HTTP capture with full processor capabilities",
-			helpHash: "bf1948fdef338af7367bc078576822431b050347023a4f32b4e3b39f9e866eb1",
+			helpHash: "ff9907b780d29f68030505a33816f0dd6c165561833392051531e9eac82aaae7",
 			flags:    tapFlagDefaults("capture-body", "false", "content-type", "", "content-types-file", "", "host", "", "hosts-file", "", "http-port", "80,8080,8000,3000,8888", "keywords-file", "", "max-body-size", "65536", "method", "", "path", "", "paths-file", "", "status", "", "tls-keylog", "", "tls-keylog-pipe", "", "user-agent", "", "user-agents-file", ""),
 			bindings: tapBindings("capture-body", "tap.http.capture_body", "content-type", "tap.http.content_type_pattern", "content-types-file", "tap.http.content_types_file", "host", "tap.http.host_pattern", "hosts-file", "tap.http.hosts_file", "http-port", "tap.http.ports", "keywords-file", "tap.http.keywords_file", "max-body-size", "tap.http.max_body_size", "method", "tap.http.methods", "path", "tap.http.path_pattern", "paths-file", "tap.http.paths_file", "status", "tap.http.status_codes", "tls-keylog", "tap.http.tls_keylog", "tls-keylog-pipe", "tap.http.tls_keylog_pipe", "user-agent", "tap.http.user_agent_pattern", "user-agents-file", "tap.http.user_agents_file"),
 		},
 		"tls": {
 			cmd: tlsTapCmd, short: "Standalone TLS capture with full processor capabilities",
-			helpHash: "54c8d70e348b147f3368262ecc83e51071dc9bac33d49407f31db8dcd56b396c",
+			helpHash: "af5d5df4ced3bb0753f852c100c9ea92ba479a8fb62649cfa32161a59696e5a2",
 			flags:    tapFlagDefaults("sni", "", "sni-file", "", "tls-port", "443"),
 			bindings: tapBindings("sni", "tap.tls.sni_pattern", "sni-file", "tap.tls.sni_file", "tls-port", "tap.tls.ports"),
 		},
 		"email": {
 			cmd: emailTapCmd, short: "Standalone email capture with full processor capabilities",
-			helpHash: "c431e575201c7e7e629ac5dbce65c2c900e9cb6cbfc8d0e3be03c90ff33a62e4",
+			helpHash: "3e072a2ad88e98bb79f54b6a4971c2f47f17e3ece7af13e842db54df3cbc651e",
 			flags:    tapFlagDefaults("address", "", "addresses-file", "", "capture-body", "false", "command", "", "imap-port", "143,993", "keywords-file", "", "mailbox", "", "max-body-size", "65536", "pop3-port", "110,995", "protocol", "all", "recipient", "", "recipients-file", "", "sender", "", "senders-file", "", "smtp-port", "25,587,465", "subject", "", "subjects-file", ""),
 			bindings: tapBindings("address", "tap.email.address_pattern", "addresses-file", "tap.email.addresses_file", "capture-body", "tap.email.capture_body", "command", "tap.email.command_pattern", "imap-port", "tap.email.imap_ports", "keywords-file", "tap.email.keywords_file", "mailbox", "tap.email.mailbox_pattern", "max-body-size", "tap.email.max_body_size", "pop3-port", "tap.email.pop3_ports", "protocol", "tap.email.protocol", "recipient", "tap.email.recipient_pattern", "recipients-file", "tap.email.recipients_file", "sender", "tap.email.sender_pattern", "senders-file", "tap.email.senders_file", "smtp-port", "tap.email.smtp_ports", "subject", "tap.email.subject_pattern", "subjects-file", "tap.email.subjects_file"),
 		},
 		"voip": {
 			cmd: voipTapCmd, short: "Standalone VoIP capture with full processor capabilities",
-			helpHash: "fac39ea9c3f2de6963e6a5b0e6ab89240b20e8610eff94aa06fb4e92854e5ccd",
+			helpHash: "35e476ac25484ea76acfd90c798302893369f2745c7b5b22cda411113a78694e",
 			flags:    tapFlagDefaults("pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-user", "", "sipuser", "", "tcp-performance-mode", "balanced", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
 			bindings: tapBindings("pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-user", "tap.voip.sip_user", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
 		},
@@ -174,4 +174,35 @@ func TestTapProtocolContractNamesAreStable(t *testing.T) {
 	names := []string{dnsTapCmd.Use, emailTapCmd.Use, httpTapCmd.Use, tlsTapCmd.Use, voipTapCmd.Use}
 	sort.Strings(names)
 	require.Equal(t, []string{"dns", "email", "http", "tls", "voip"}, names)
+}
+
+func TestApplyTapEventTransportConfig(t *testing.T) {
+	oldForwardMode, oldFallback := forwardMode, eventFallbackToPackets
+	oldDelivery, oldSpoolDir, oldPolicy := eventDeliveryProfile, eventSpoolDir, eventSpoolExhaustionPolicy
+	oldIngress, oldWALDir := eventIngressProfile, eventIngressWALDir
+	t.Cleanup(func() {
+		forwardMode, eventFallbackToPackets = oldForwardMode, oldFallback
+		eventDeliveryProfile, eventSpoolDir, eventSpoolExhaustionPolicy = oldDelivery, oldSpoolDir, oldPolicy
+		eventIngressProfile, eventIngressWALDir = oldIngress, oldWALDir
+	})
+	forwardMode, eventFallbackToPackets = "events", false
+	eventDeliveryProfile, eventSpoolDir, eventSpoolExhaustionPolicy = "memory-only", "/tmp/tap-spool", "drop_new"
+	eventIngressProfile, eventIngressWALDir = "reliable", "/tmp/tap-wal"
+
+	config := processor.Config{}
+	require.NoError(t, applyTapEventTransportConfig(&config))
+	require.Equal(t, "events", config.UpstreamForwardMode)
+	require.Equal(t, "memory_only", config.UpstreamEventDeliveryProfile)
+	require.Equal(t, "drop_new", config.UpstreamEventSpoolExhaustionPolicy)
+	require.Equal(t, "reliable", config.EventIngressProfile)
+	require.Equal(t, "/tmp/tap-wal", config.EventIngressWALDirectory)
+}
+
+func TestApplyTapEventTransportConfigRejectsImplicitFallback(t *testing.T) {
+	oldMode, oldFallback := forwardMode, eventFallbackToPackets
+	t.Cleanup(func() { forwardMode, eventFallbackToPackets = oldMode, oldFallback })
+	forwardMode, eventFallbackToPackets = "packets", true
+
+	err := applyTapEventTransportConfig(&processor.Config{})
+	require.ErrorContains(t, err, "only valid with --forward-mode=events")
 }

@@ -11,11 +11,13 @@ import (
 
 // Collector tracks hunter statistics with lock-free atomic operations
 type Collector struct {
-	packetsCaptured  atomic.Uint64
-	packetsMatched   atomic.Uint64
-	packetsForwarded atomic.Uint64
-	packetsDropped   atomic.Uint64
-	bufferBytes      atomic.Uint64
+	packetsCaptured                            atomic.Uint64
+	packetsMatched                             atomic.Uint64
+	packetsForwarded                           atomic.Uint64
+	packetsDropped                             atomic.Uint64
+	bufferBytes                                atomic.Uint64
+	captureLosses, analysisLosses, queueLosses atomic.Uint64
+	unsupportedKindLosses, transportLosses     atomic.Uint64
 
 	// System metrics (CPU/RAM)
 	cpuPercent       atomic.Value // stores float64
@@ -49,6 +51,12 @@ func (c *Collector) IncrementForwarded(count uint64) {
 func (c *Collector) IncrementDropped(count uint64) {
 	c.packetsDropped.Add(count)
 }
+
+func (c *Collector) IncrementCaptureLoss(count uint64)         { c.captureLosses.Add(count) }
+func (c *Collector) IncrementAnalysisLoss(count uint64)        { c.analysisLosses.Add(count) }
+func (c *Collector) IncrementQueueLoss(count uint64)           { c.queueLosses.Add(count) }
+func (c *Collector) IncrementUnsupportedKindLoss(count uint64) { c.unsupportedKindLosses.Add(count) }
+func (c *Collector) IncrementTransportLoss(count uint64)       { c.transportLosses.Add(count) }
 
 // SetBufferBytes sets the current buffer bytes
 func (c *Collector) SetBufferBytes(bytes uint64) {
@@ -117,5 +125,8 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 		CpuPercent:       float32(c.cpuPercent.Load().(float64)),
 		MemoryRssBytes:   c.memoryRSSBytes.Load(),
 		MemoryLimitBytes: c.memoryLimitBytes.Load(),
+		CaptureLosses:    c.captureLosses.Load(), AnalysisLosses: c.analysisLosses.Load(),
+		QueueLosses: c.queueLosses.Load(), UnsupportedKindLosses: c.unsupportedKindLosses.Load(),
+		TransportLosses: c.transportLosses.Load(),
 	}
 }

@@ -266,7 +266,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	}
 
 	// Forward to upstream in hierarchical mode
-	if p.upstreamManager != nil {
+	if p.upstreamManager != nil && !p.upstreamManager.ForwardingEvents() {
 		p.upstreamManager.Forward(protoBatch)
 	}
 

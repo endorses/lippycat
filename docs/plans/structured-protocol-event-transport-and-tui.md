@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Phase 4 complete
+**Status:** Phase 5 complete
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -330,39 +330,39 @@ connection summaries with accurate counters and provenance.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 
-- [ ] Extend hunter registration capabilities with requested/accepted
+- [x] Extend hunter registration capabilities with requested/accepted
       `packets` or `events` mode, supported event API majors and kinds, semantic
       profile revision, stateful-analysis features, sensitive enrichment, and
       resource limits.
-- [ ] Reject an insufficient event profile; permit explicit, visible fallback
+- [x] Reject an insufficient event profile; permit explicit, visible fallback
       to packet mode only when configured.
-- [ ] Add `--forward-mode packets|events` and corresponding configuration to
+- [x] Add `--forward-mode packets|events` and corresponding configuration to
       hunt and tap, retaining `packets` as the compatibility default.
-- [ ] Add a bidirectional `StreamEvents` ingestion RPC with cumulative ACK,
+- [x] Add a bidirectional `StreamEvents` ingestion RPC with cumulative ACK,
       NACK/gap ranges, flow control, producer session, and batch sequencing.
-- [ ] Add processor deduplication keyed by node ID, producer-session ID, and
+- [x] Add processor deduplication keyed by node ID, producer-session ID, and
       event sequence.
-- [ ] Implement a processor ingress WAL/spool; acknowledge the reliable profile
+- [x] Implement a processor ingress WAL/spool; acknowledge the reliable profile
       only after validation, authorization, dedup registration, and recoverable
       admission.
-- [ ] Add an explicitly labeled memory-only profile that ACKs queue admission
+- [x] Add an explicitly labeled memory-only profile that ACKs queue admission
       and documents processor-crash loss.
-- [ ] Implement a separate crash-recoverable hunter event spool with byte/age
+- [x] Implement a separate crash-recoverable hunter event spool with byte/age
       limits, checksummed records, cumulative-ACK deletion, and no startup
       deletion.
-- [ ] Default spool exhaustion to dropping oldest complete batches while
+- [x] Default spool exhaustion to dropping oldest complete batches while
       reporting exact lost ranges; support an operator-selected `drop_new`
       policy.
-- [ ] Fix forwarding mode for the lifetime of a producer session; flush and
+- [x] Fix forwarding mode for the lifetime of a producer session; flush and
       start a new session when mode, filtering, capture scope, or analysis policy
       changes.
-- [ ] Run the shared stateful runtime on event-mode hunters and taps; assign
+- [x] Run the shared stateful runtime on event-mode hunters and taps; assign
       identity before buffering and send no raw packet bytes.
-- [ ] Keep tap PCAP writing, rotation, per-call output, and post-write hooks
+- [x] Keep tap PCAP writing, rotation, per-call output, and post-write hooks
       local while forwarding only events upstream.
-- [ ] Report capture, analysis, queue, unsupported-kind, and transport losses
+- [x] Report capture, analysis, queue, unsupported-kind, and transport losses
       separately in heartbeat/status output.
-- [ ] Test mixed packet-mode and event-mode hunters on one processor, explicit
+- [x] Test mixed packet-mode and event-mode hunters on one processor, explicit
       fallback, configuration boundaries, graceful flush, retry deduplication,
       crash recovery, spool exhaustion, and verification that event mode
       transmits no raw packet content.
@@ -371,6 +371,19 @@ connection summaries with accurate counters and provenance.
 visible events equivalent to packet mode for its negotiated profile, without
 forwarding packets. Reliable ingestion is at-least-once to recoverable processor
 admission; sink durability remains separately observable.
+
+### Phase 5 verification
+
+Verified on 2026-08-31 with focused race tests for event identity, hunter
+connection management, recoverable producer spools, event forwarding, processor
+upstream routing, and all hunt/process/tap command paths; processor negotiation,
+ingress, deduplication, WAL recovery, and clean-checkpoint tests; specialized
+hunter, processor, and tap build-tag compilation; and the complete `make test`
+suite including localhost gRPC integration tests outside the sandbox.
+Independent cross-component audits corrected atomic memory-only admission,
+durable dispatch and recovery ordering, clean WAL checkpointing, ACK-carried
+flow control, recovered-spool ordering, producer-lifetime fallback pinning,
+relayed-source authorization, and hierarchical tap capability negotiation.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

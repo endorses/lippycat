@@ -15,6 +15,53 @@ func batch(source, session string, batchSequence, first, last uint64) *eventsv1.
 	return &eventsv1.ProtocolEventBatch{SourceNodeId: source, ProducerSessionId: session, BatchSequence: batchSequence, FirstEventSequence: first, LastEventSequence: last}
 }
 
+func sessionPolicy(session, profile string, headers bool) SessionPolicy {
+	return SessionPolicy{Version: 1, SourceNodeID: "hunter", ProducerSessionID: session, DeliveryProfile: profile, IncludeHTTPHeaders: headers, SemanticRevision: 1}
+}
+
+func TestSessionPolicyRecoveryRequiresExactMatch(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	policy := sessionPolicy("session", "reliable", false)
+	require.NoError(t, s.BindSessionPolicy(policy))
+	_, err = s.Enqueue(batch("hunter", "session", 1, 1, 1))
+	require.NoError(t, err)
+
+	reopened, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.NoError(t, reopened.BindSessionPolicy(policy))
+
+	changedDelivery := policy
+	changedDelivery.DeliveryProfile = "memory_only"
+	require.ErrorContains(t, reopened.BindSessionPolicy(changedDelivery), "pending records use policy")
+	changedEnrichment := policy
+	changedEnrichment.IncludeHTTPHeaders = true
+	require.ErrorContains(t, reopened.BindSessionPolicy(changedEnrichment), "pending records use policy")
+}
+
+func TestSessionPolicyLegacyPendingRecordsFailSafe(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("hunter", "legacy", 1, 1, 1))
+	require.NoError(t, err)
+
+	reopened, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.ErrorContains(t, reopened.BindSessionPolicy(sessionPolicy("legacy", "reliable", false)), "pending legacy records")
+}
+
+func TestSessionPolicyCanRotateAfterAckDrain(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	require.NoError(t, s.BindSessionPolicy(sessionPolicy("old", "reliable", false)))
+	_, err = s.Enqueue(batch("hunter", "old", 1, 1, 1))
+	require.NoError(t, err)
+	require.NoError(t, s.Ack("hunter", "old", 1))
+	require.NoError(t, s.BindSessionPolicy(sessionPolicy("new", "memory_only", true)))
+}
+
 func TestOpenRetainsExistingRecordsDespiteLimits(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1000, 0)

@@ -41,6 +41,15 @@ func TestValidateAcceptedEventProfile(t *testing.T) {
 	}
 }
 
+func TestEventFallbackGuardRejectsPendingDurableBatches(t *testing.T) {
+	m := NewManager(Config{}, nil)
+	m.SetEventFallbackGuard(func() bool { return true })
+	require.False(t, m.canFallbackToPackets())
+
+	m.SetEventFallbackGuard(func() bool { return false })
+	require.True(t, m.canFallbackToPackets())
+}
+
 type detectingStream struct {
 	inSend     atomic.Int32
 	overlapped atomic.Bool

@@ -49,6 +49,19 @@ func (r *EventRouter) Losses() LossSnapshot {
 	return LossSnapshot{Capture: r.losses.Capture.Load(), Analysis: r.losses.Analysis.Load(), Queue: r.losses.Queue.Load(), UnsupportedKind: r.losses.UnsupportedKind.Load(), Transport: r.losses.Transport.Load()}
 }
 
+// HasPendingDurableBatches reports whether any producer route still owns
+// unacknowledged spool data. Packet fallback must not strand these batches.
+func (r *EventRouter) HasPendingDurableBatches() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, route := range r.routes {
+		if route.spool.Bytes() != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *EventRouter) recordLoss(kind eventsv1.LossKind, count uint64) {
 	switch kind {
 	case eventsv1.LossKind_LOSS_KIND_CAPTURE:
@@ -179,6 +192,9 @@ func (r *EventRouter) newRoute(nodeID, sessionID string) (*eventRoute, error) {
 }
 
 func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64, spool *eventspool.Spool) (*eventRoute, error) {
+	if err := spool.BindSessionPolicy(r.sessionPolicy(nodeID, sessionID)); err != nil {
+		return nil, fmt.Errorf("bind upstream event route session policy: %w", err)
+	}
 	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: nodeID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{1, 2, 3, 4, 5, 6}, Profile: r.config.Profile, RelayNodeID: r.manager.config.ProcessorID, OnLoss: r.recordLoss}, spool)
 	if err != nil {
 		return nil, err
@@ -190,6 +206,17 @@ func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64,
 	routeCtx, cancel := context.WithCancel(r.ctx)
 	go r.serve(routeCtx, client)
 	return &eventRoute{sink: sink, spool: spool, cancel: cancel}, nil
+}
+
+func (r *EventRouter) sessionPolicy(nodeID, sessionID string) eventspool.SessionPolicy {
+	deliveryProfile := "reliable"
+	if r.config.Profile == eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY {
+		deliveryProfile = "memory_only"
+	}
+	return eventspool.SessionPolicy{
+		Version: 1, SourceNodeID: nodeID, ProducerSessionID: sessionID,
+		DeliveryProfile: deliveryProfile, IncludeHTTPHeaders: false, SemanticRevision: 1,
+	}
 }
 
 func (r *EventRouter) serve(ctx context.Context, client *eventforwarding.Client) {

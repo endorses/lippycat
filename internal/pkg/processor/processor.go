@@ -655,6 +655,7 @@ func New(config Config) (*Processor, error) {
 				return nil, fmt.Errorf("register upstream event router: %w", err)
 			}
 			p.upstreamEventRouter = router
+			p.upstreamManager.SetEventFallbackGuard(router.HasPendingDurableBatches)
 		}
 	}
 

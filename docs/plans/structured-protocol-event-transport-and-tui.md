@@ -490,6 +490,16 @@ fallback instead of stranding its durable event session while beginning raw
 packet forwarding. Tap-local status now reports capture, analysis, queue,
 unsupported-kind, and transport losses separately, including upstream event
 spool and transport losses.
+A final restart-policy audit found that hunter and hierarchical event spools
+restored producer identity and sequence state without retaining the delivery
+and analysis policy that defined the session. Spools now persist and validate
+session policy before resuming pending batches, reject unsafe legacy or
+policy-mismatched recovery, and permit policy replacement only after the old
+session is fully drained. Hierarchical packet fallback also rejects recovered
+unacknowledged event routes instead of stranding them while beginning raw packet
+forwarding. Focused race tests cover exact-policy recovery, delivery and
+enrichment mismatches, legacy fail-safe behavior, post-drain rotation,
+hierarchical profile mismatch, and the recovered-route fallback guard.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

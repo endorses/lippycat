@@ -48,6 +48,22 @@ func TestEventRouterPersistsIndependentProducerSessions(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, recovered.Close(context.Background())) })
 	require.Len(t, recovered.routes, 2, "startup must resume every unacknowledged producer route")
+	require.True(t, recovered.HasPendingDurableBatches())
+}
+
+func TestEventRouterRejectsRecoveredSessionPolicyMismatch(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewManager(Config{ForwardMode: "events"}, nil)
+	reliable := EventRouterConfig{SpoolDirectory: dir, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE}
+	router, err := NewEventRouter(manager, reliable)
+	require.NoError(t, err)
+	require.NoError(t, router.HandleEvent(context.Background(), routedDNS("tap-node", "30313233343536373839616263646566", 1)))
+	require.NoError(t, router.Close(context.Background()))
+
+	memoryOnly := reliable
+	memoryOnly.Profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
+	_, err = NewEventRouter(manager, memoryOnly)
+	require.ErrorContains(t, err, "pending records use policy")
 }
 
 func TestEventRouterKeepsSanitizedIdentityCollisionsIndependent(t *testing.T) {

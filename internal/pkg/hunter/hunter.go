@@ -410,6 +410,9 @@ func (h *Hunter) initializeEventForwarding() error {
 	if err != nil {
 		return err
 	}
+	if err := spool.BindSessionPolicy(h.eventSessionPolicy(producer.SessionID())); err != nil {
+		return err
+	}
 	h.eventSpool = spool
 	forwarder, dispatcher, runtime, err := h.newEventPipeline(spool, producer, lastBatch+1)
 	if err != nil {
@@ -417,6 +420,17 @@ func (h *Hunter) initializeEventForwarding() error {
 	}
 	h.eventForwarder, h.eventDispatcher, h.eventRuntime = forwarder, dispatcher, runtime
 	return nil
+}
+
+func (h *Hunter) eventSessionPolicy(sessionID string) eventspool.SessionPolicy {
+	deliveryProfile := h.config.EventDeliveryProfile
+	if deliveryProfile == "" {
+		deliveryProfile = "reliable"
+	}
+	return eventspool.SessionPolicy{
+		Version: 1, SourceNodeID: h.config.HunterID, ProducerSessionID: sessionID,
+		DeliveryProfile: deliveryProfile, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers"), SemanticRevision: 1,
+	}
 }
 
 func (h *Hunter) newEventPipeline(spool *eventspool.Spool, producer *events.Producer, firstBatch uint64) (*eventforwarding.Client, *events.Dispatcher, *eventanalysis.Runtime, error) {
@@ -551,6 +565,12 @@ func (h *Hunter) ApplyPolicyChange(apply func() error) error {
 	}
 	producer, err := events.NewLiveProducer(h.config.HunterID)
 	if err != nil {
+		if h.cancel != nil {
+			h.cancel()
+		}
+		return err
+	}
+	if err := h.eventSpool.BindSessionPolicy(h.eventSessionPolicy(producer.SessionID())); err != nil {
 		if h.cancel != nil {
 			h.cancel()
 		}

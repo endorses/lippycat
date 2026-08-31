@@ -3,6 +3,7 @@ package eventspool
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -20,9 +21,22 @@ import (
 
 const (
 	recordExtension = ".eventbatch"
+	policyFileName  = "session-policy.json"
 	recordVersion   = uint16(1)
 	headerSize      = 8 + 2 + 8 + 8 + 4
 )
+
+// SessionPolicy contains the settings that define one producer session's
+// delivery and analysis semantics. It is persisted separately from batches so
+// recovery cannot silently continue a session under changed configuration.
+type SessionPolicy struct {
+	Version            uint32 `json:"version"`
+	SourceNodeID       string `json:"source_node_id"`
+	ProducerSessionID  string `json:"producer_session_id"`
+	DeliveryProfile    string `json:"delivery_profile"`
+	IncludeHTTPHeaders bool   `json:"include_http_headers"`
+	SemanticRevision   uint32 `json:"semantic_revision"`
+}
 
 var recordMagic = [8]byte{'L', 'C', 'E', 'V', 'S', 'P', 'L', '1'}
 
@@ -235,6 +249,80 @@ func (s *Spool) Bytes() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.bytes
+}
+
+// BindSessionPolicy durably associates the spool with a producer session and
+// its semantic policy. An empty spool may begin a new session and replace old
+// metadata. Pending legacy records without metadata are rejected because their
+// original enrichment and delivery policy cannot be established safely.
+func (s *Spool) BindSessionPolicy(policy SessionPolicy) error {
+	if policy.SourceNodeID == "" || policy.ProducerSessionID == "" || policy.DeliveryProfile == "" || policy.SemanticRevision == 0 {
+		return errors.New("bind event spool session policy: incomplete policy")
+	}
+	if policy.Version == 0 {
+		policy.Version = 1
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path := filepath.Join(s.config.Directory, policyFileName)
+	existing, err := readSessionPolicy(path)
+	if len(s.records) > 0 {
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New("bind event spool session policy: pending legacy records have no recoverable session policy; drain them with the previous version or move the spool aside")
+		}
+		if err != nil {
+			return err
+		}
+		if existing != policy {
+			return fmt.Errorf("bind event spool session policy: pending records use policy %+v, configured policy is %+v", existing, policy)
+		}
+		return nil
+	}
+	if err == nil && existing == policy {
+		return nil
+	}
+	payload, err := json.Marshal(policy)
+	if err != nil {
+		return fmt.Errorf("bind event spool session policy: marshal: %w", err)
+	}
+	tmp, err := os.CreateTemp(s.config.Directory, ".session-policy-*")
+	if err != nil {
+		return fmt.Errorf("bind event spool session policy: create temporary file: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err = tmp.Write(payload); err == nil {
+		err = tmp.Sync()
+	}
+	closeErr := tmp.Close()
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("bind event spool session policy: write: %w", err)
+	}
+	if closeErr != nil {
+		cleanup()
+		return fmt.Errorf("bind event spool session policy: close: %w", closeErr)
+	}
+	if err = os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return fmt.Errorf("bind event spool session policy: publish: %w", err)
+	}
+	return syncDirectory(s.config.Directory)
+}
+
+func readSessionPolicy(path string) (SessionPolicy, error) {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return SessionPolicy{}, err
+	}
+	var policy SessionPolicy
+	if err := json.Unmarshal(payload, &policy); err != nil {
+		return SessionPolicy{}, fmt.Errorf("read event spool session policy: %w", err)
+	}
+	if policy.Version != 1 {
+		return SessionPolicy{}, fmt.Errorf("read event spool session policy: unsupported version %d", policy.Version)
+	}
+	return policy, nil
 }
 
 // RecoveryState returns the sole producer session and its highest persisted

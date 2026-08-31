@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -92,6 +93,7 @@ type Manager struct {
 	droppedBatches       atomic.Uint64
 	droppedPackets       atomic.Uint64
 	modeNegotiated       atomic.Bool
+	eventFallbackGuard   func() bool
 	maxReconnectAttempts int // 0 = unlimited
 
 	// Context for goroutines
@@ -138,6 +140,22 @@ func (m *Manager) Start() error {
 	go m.connectionManager(initialConnected)
 
 	return nil
+}
+
+// SetEventFallbackGuard installs a check that reports whether switching to
+// packet forwarding would strand durable event batches recovered at startup.
+// It must be configured before Start.
+func (m *Manager) SetEventFallbackGuard(guard func() bool) {
+	m.mu.Lock()
+	m.eventFallbackGuard = guard
+	m.mu.Unlock()
+}
+
+func (m *Manager) canFallbackToPackets() bool {
+	m.mu.Lock()
+	guard := m.eventFallbackGuard
+	m.mu.Unlock()
+	return guard == nil || !guard()
 }
 
 // connectionManager manages upstream connection lifecycle with automatic reconnection
@@ -285,6 +303,10 @@ func (m *Manager) connectAndRegister() error {
 			return fmt.Errorf("upstream rejected requested event forwarding profile: selected %s", acceptedMode)
 		}
 		if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && acceptedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
+			if !m.canFallbackToPackets() {
+				grpcpool.Release(m.connPool, m.config.Address)
+				return errors.New("upstream selected packet fallback while recovered event batches remain unacknowledged")
+			}
 			m.mu.Lock()
 			m.config.ForwardMode = "packets"
 			m.mu.Unlock()

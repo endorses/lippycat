@@ -4,11 +4,7 @@ package sniff
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -156,31 +152,12 @@ func sniffEventProducer(inputFiles []string, analysisProfile string) (*events.Pr
 	if len(inputFiles) == 0 {
 		return events.NewLiveProducer("local")
 	}
-	h := sha256.New()
-	for _, path := range inputFiles {
-		file, err := os.Open(path)
-		if err != nil {
-			return nil, fmt.Errorf("open offline event input %q: %w", path, err)
-		}
-		fileHash := sha256.New()
-		_, copyErr := io.Copy(fileHash, file)
-		closeErr := file.Close()
-		if copyErr != nil {
-			if closeErr != nil {
-				return nil, fmt.Errorf("hash offline event input %q: copy: %w; close: %w", path, copyErr, closeErr)
-			}
-			return nil, fmt.Errorf("hash offline event input %q: %w", path, copyErr)
-		}
-		if closeErr != nil {
-			return nil, fmt.Errorf("close offline event input %q: %w", path, closeErr)
-		}
-		// Each digest has a fixed width, so file boundaries remain part of the
-		// identity even when adjacent files' bytes could otherwise concatenate
-		// to the same stream.
-		_, _ = h.Write(fileHash.Sum(nil))
+	inputIdentity, err := events.OfflineInputIdentity(inputFiles)
+	if err != nil {
+		return nil, err
 	}
 	return events.NewOfflineProducer("local", events.OfflineSession{
-		InputIdentity:   "sha256:" + hex.EncodeToString(h.Sum(nil)),
+		InputIdentity:   inputIdentity,
 		AnalysisProfile: analysisProfile,
 		SourceOrdering:  append([]string(nil), inputFiles...),
 	})

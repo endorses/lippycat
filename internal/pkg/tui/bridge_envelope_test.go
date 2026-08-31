@@ -196,3 +196,37 @@ func TestWatchLiveAndFileSharedFixtureProduceEquivalentHTTPEvents(t *testing.T) 
 	require.Equal(t, "pcap", file.event.Envelope().Provenance.CaptureSource)
 	require.Equal(t, "/captures/phase4.pcap", file.event.Envelope().Provenance.InputFile)
 }
+
+func TestWatchFileEventIdentityTracksInputAndAnalysisProfile(t *testing.T) {
+	session := func(t *testing.T, inputIdentity, profile string) string {
+		t.Helper()
+		ResetBridgeStats()
+		ClearPendingPackets()
+		ResetTUIReady()
+		SignalTUIReady()
+		envelopes, err := eventfixture.Envelopes(pipeline.SourcePCAPReplay, "fixture.pcap")
+		require.NoError(t, err)
+		input := make(chan *pipeline.PacketEnvelope, len(envelopes))
+		for _, envelope := range envelopes {
+			input <- envelope
+		}
+		close(input)
+		var producerSession string
+		StartEnvelopeBridge(input, nil, NewPauseSignal(), nil, true, nil, LocalEventAnalysisOptions{
+			NodeID: "watch-local", InputIdentity: inputIdentity, AnalysisProfile: profile,
+			SourceOrdering: []string{"fixture.pcap"},
+			deliver: func(batch types.EventBatch) {
+				if producerSession == "" && len(batch.Events) != 0 {
+					producerSession = batch.Events[0].Envelope().ProducerSessionID
+				}
+			},
+		})
+		require.NotEmpty(t, producerSession)
+		return producerSession
+	}
+
+	baseline := session(t, "sha256:input-a", "watch-eventanalysis-v1|filter=tcp")
+	require.Equal(t, baseline, session(t, "sha256:input-a", "watch-eventanalysis-v1|filter=tcp"))
+	require.NotEqual(t, baseline, session(t, "sha256:input-b", "watch-eventanalysis-v1|filter=tcp"))
+	require.NotEqual(t, baseline, session(t, "sha256:input-a", "watch-eventanalysis-v1|filter=udp"))
+}

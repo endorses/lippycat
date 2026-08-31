@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
@@ -222,8 +223,12 @@ func startLiveCapture(ctx context.Context, interfaceName string, filter string, 
 // before their corresponding RTP packets are processed (critical for VoIP analysis)
 func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string, program *tea.Program, done chan struct{}, tracker *CallTracker, aggregator *LocalCallAggregator) {
 	defer close(done) // Signal completion when capture goroutine exits
+	inputIdentity, err := events.OfflineInputIdentity(pcapFiles)
+	if err != nil {
+		logger.Error("Failed to identify offline event inputs", "error", err)
+	}
 	capture.StartOfflineSnifferOrdered(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startTUISnifferOrdered(ctx, devices, filter, program, tracker, aggregator)
+		startTUISnifferOrdered(ctx, devices, filter, inputIdentity, program, tracker, aggregator)
 	})
 
 	// Notify TUI that capture is complete so it can drain remaining packets
@@ -259,18 +264,22 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 // startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
 // This ensures SIP packets are processed before their corresponding RTP packets,
 // which is essential for proper call tracking and RTP-to-CallID mapping.
-func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *CallTracker, aggregator *LocalCallAggregator) {
+func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter, inputIdentity string, program *tea.Program, tracker *CallTracker, aggregator *LocalCallAggregator) {
 	// Get pause signal for bridge to respect pause/resume
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
 		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator,
-			LocalEventAnalysisOptions{NodeID: "watch-local", SourceOrdering: pcapInterfaceNames(devices)})
+			LocalEventAnalysisOptions{NodeID: "watch-local", InputIdentity: inputIdentity, AnalysisProfile: localFileAnalysisProfile(filter), SourceOrdering: pcapInterfaceNames(devices)})
 	}
 
 	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes
 	capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
+}
+
+func localFileAnalysisProfile(filter string) string {
+	return fmt.Sprintf("watch-eventanalysis-v1|filter=%s", filter)
 }
 
 func pcapInterfaceNames(devices []pcaptypes.PcapInterface) []string {

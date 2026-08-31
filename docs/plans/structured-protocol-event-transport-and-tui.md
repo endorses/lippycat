@@ -299,6 +299,12 @@ runtime now advances expiry periodically for processor, live sniff, and
 watch-live sessions, while offline sniff and watch-file replay remain driven by
 capture timestamps and EOF for deterministic output. A race-enabled regression
 test verifies that a quiet live connection expires without another packet.
+A final offline-session audit corrected watch-file identity reuse when a PCAP
+changed in place or the effective BPF filter changed. Watch-file now uses the
+ordered input contents and filter-aware analysis profile for deterministic
+producer-session identity, sharing the content-identity helper with sniff.
+Regression tests verify repeatability and distinct identities for content,
+source-order, and filter changes.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

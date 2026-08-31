@@ -913,9 +913,11 @@ func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *te
 // LocalEventAnalysisOptions defines the stable identity inputs for one local
 // capture session. Offline source order is the user-specified file order.
 type LocalEventAnalysisOptions struct {
-	NodeID         string
-	SourceOrdering []string
-	deliver        func(types.EventBatch)
+	NodeID          string
+	InputIdentity   string
+	AnalysisProfile string
+	SourceOrdering  []string
+	deliver         func(types.EventBatch)
 }
 
 // envelopeBridgePipeline owns the local capture stages. StartEnvelopeBridge is
@@ -1164,12 +1166,19 @@ func (b *envelopeBridgePipeline) startEventAnalysis(handler *TUIEventHandler) (*
 	var producer events.IdentityAssigner
 	var err error
 	if b.preserveAll {
-		inputIdentity := strings.Join(b.analysis.SourceOrdering, "\x00")
+		inputIdentity := b.analysis.InputIdentity
+		if inputIdentity == "" {
+			inputIdentity = strings.Join(b.analysis.SourceOrdering, "\x00")
+		}
 		if inputIdentity == "" {
 			inputIdentity = "offline-capture"
 		}
+		analysisProfile := b.analysis.AnalysisProfile
+		if analysisProfile == "" {
+			analysisProfile = "watch-eventanalysis-v1"
+		}
 		producer, err = events.NewOfflineProducer(nodeID, events.OfflineSession{
-			InputIdentity: inputIdentity, AnalysisProfile: "watch-eventanalysis-v1",
+			InputIdentity: inputIdentity, AnalysisProfile: analysisProfile,
 			SourceOrdering: append([]string(nil), b.analysis.SourceOrdering...),
 		})
 	} else {

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/tls"
@@ -159,13 +160,22 @@ func runFile(cmd *cobra.Command, args []string) {
 // This ensures SIP packets are processed before their corresponding RTP packets,
 // which is essential for proper call tracking and RTP-to-CallID mapping.
 func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) {
+	ordering := devicesToSourceOrdering(devices)
+	inputIdentity, err := events.OfflineInputIdentity(ordering)
+	if err != nil {
+		logger.Error("Failed to identify offline event inputs", "error", err)
+	}
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo) {
 		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator,
-			tui.LocalEventAnalysisOptions{NodeID: "watch-local", SourceOrdering: append([]string(nil), devicesToSourceOrdering(devices)...)})
+			tui.LocalEventAnalysisOptions{NodeID: "watch-local", InputIdentity: inputIdentity, AnalysisProfile: watchFileAnalysisProfile(filter), SourceOrdering: append([]string(nil), ordering...)})
 	}
 	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
 	capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
+}
+
+func watchFileAnalysisProfile(filter string) string {
+	return fmt.Sprintf("watch-eventanalysis-v1|filter=%s", filter)
 }
 
 func devicesToSourceOrdering(devices []pcaptypes.PcapInterface) []string {

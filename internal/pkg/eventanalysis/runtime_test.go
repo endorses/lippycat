@@ -391,6 +391,46 @@ func TestRuntimeReassemblesSegmentedApplicationProtocols(t *testing.T) {
 	}
 }
 
+func TestRuntimeKeepsReassemblyIsolatedBySource(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 32)
+	base := time.Unix(120, 0)
+	sources := []Source{
+		{NodeID: "hunter-a", CaptureSource: "hunter-a:eth0", InterfaceName: "eth0", InterfaceIndex: 1},
+		{NodeID: "hunter-b", CaptureSource: "hunter-b:eth0", InterfaceName: "eth0", InterfaceIndex: 1},
+	}
+	payloads := [][]byte{
+		[]byte("GET /hunter-a HTTP/1.1\r\nHost: a.example\r\n\r\n"),
+		[]byte("GET /hunter-b HTTP/1.1\r\nHost: b.example\r\n\r\n"),
+	}
+	const split = 24
+	for _, source := range sources {
+		require.NoError(t, r.ObservePacket(source, tcpPacket(t, 40000, 80, 1000, true, nil, base)))
+	}
+	for index, source := range sources {
+		require.NoError(t, r.ObservePacket(source, tcpPacket(t, 40000, 80, 1001, false, payloads[index][:split], base.Add(time.Second))))
+	}
+	for index, source := range sources {
+		require.NoError(t, r.ObservePacket(source, tcpPacket(t, 40000, 80, 1001+split, false, payloads[index][split:], base.Add(2*time.Second))))
+	}
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	got := make(map[string]events.HTTPEvent)
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			httpEvent := event.(events.HTTPEvent)
+			got[httpEvent.Envelope().Provenance.CaptureSource] = httpEvent
+		}
+	}
+	require.Len(t, got, 2)
+	require.Equal(t, "/hunter-a", got["hunter-a:eth0"].URI)
+	require.Equal(t, "a.example", got["hunter-a:eth0"].Host)
+	require.Equal(t, "/hunter-b", got["hunter-b:eth0"].URI)
+	require.Equal(t, "b.example", got["hunter-b:eth0"].Host)
+}
+
 func TestRuntimeReassemblesTLSHandshakeAcrossRecords(t *testing.T) {
 	r, dispatcher, sink := testRuntime(t, 32)
 	base := time.Unix(125, 0)

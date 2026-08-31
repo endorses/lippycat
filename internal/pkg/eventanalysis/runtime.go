@@ -58,19 +58,21 @@ type Config struct {
 type Stats struct{ Observed, Emitted, Invalid, Dropped uint64 }
 
 type Runtime struct {
-	mu           sync.Mutex
-	cfg          Config
-	identity     *flowid.Cache
-	connections  *conntrack.Tracker
-	tcpAssembler *capture.TCPAssembler
-	files        *fileanalysis.Analyzer
-	dns          *dnsparser.Parser
-	nextExpiry   time.Time
-	closed       bool
-	stats        Stats
-	expiryStop   chan struct{}
-	expiryDone   chan struct{}
-	stopExpiry   sync.Once
+	mu            sync.Mutex
+	cfg           Config
+	identity      *flowid.Cache
+	connections   *conntrack.Tracker
+	tcpAssembler  *capture.TCPAssembler
+	tcpNamespaces map[reassemblySourceKey]uint64
+	nextNamespace uint64
+	files         *fileanalysis.Analyzer
+	dns           *dnsparser.Parser
+	nextExpiry    time.Time
+	closed        bool
+	stats         Stats
+	expiryStop    chan struct{}
+	expiryDone    chan struct{}
+	stopExpiry    sync.Once
 }
 
 func New(cfg Config) (*Runtime, error) {

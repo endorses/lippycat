@@ -305,6 +305,13 @@ ordered input contents and filter-aware analysis profile for deterministic
 producer-session identity, sharing the content-identity helper with sniff.
 Regression tests verify repeatability and distinct identities for content,
 source-order, and filter changes.
+A final multi-hunter isolation audit found that processor-side TCP reassembly
+keyed streams only by their network tuple, allowing identical tuples from
+different hunters to contribute bytes to one application stream. The shared
+runtime now namespaces reassembly by capture producer/input while retaining one
+globally bounded assembler and the original flow in emitted events. A regression
+test interleaves segmented HTTP from two sources and verifies independent event
+payloads and provenance.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

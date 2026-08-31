@@ -2,7 +2,9 @@ package eventanalysis
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -22,16 +24,49 @@ import (
 
 const maxReassembledApplicationBytes = 1 << 20
 
+var endpointNamespacedNetwork = gopacket.RegisterEndpointType(1000, gopacket.EndpointTypeMetadata{
+	Name: "namespaced-network",
+	Formatter: func(raw []byte) string {
+		return fmt.Sprintf("%x", raw)
+	},
+})
+
 type reassemblyContext struct {
 	source       Source
 	scope        events.CaptureScope
 	partial      bool
 	protocolHint string
+	netFlow      gopacket.Flow
+	tcpFlow      gopacket.Flow
+}
+
+// reassemblySourceKey prevents packets captured by independent producers or
+// inputs from being combined merely because they share a network 5-tuple.
+type reassemblySourceKey struct {
+	nodeID         string
+	captureSource  string
+	interfaceName  string
+	interfaceIndex uint32
+	inputFile      string
+}
+
+func sourceReassemblyKey(source Source) reassemblySourceKey {
+	return reassemblySourceKey{
+		nodeID: source.NodeID, captureSource: source.CaptureSource,
+		interfaceName: source.InterfaceName, interfaceIndex: source.InterfaceIndex,
+		inputFile: source.InputFile,
+	}
 }
 
 type applicationFactory struct{ runtime *Runtime }
 
-func (f *applicationFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP, _ reassembly.AssemblerContext) reassembly.Stream {
+func (f *applicationFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
+	ci := ac.GetCaptureInfo()
+	if len(ci.AncillaryData) != 0 {
+		if ctx, ok := ci.AncillaryData[0].(reassemblyContext); ok {
+			netFlow, tcpFlow = ctx.netFlow, ctx.tcpFlow
+		}
+	}
 	return &applicationStream{runtime: f.runtime, netFlow: netFlow, tcpFlow: tcpFlow, email: emailparser.NewParser(), partial: tcp == nil || !tcp.SYN}
 }
 
@@ -389,6 +424,8 @@ func isSMTPPort(port uint16) bool {
 
 func (r *Runtime) resetReassembly() {
 	r.tcpAssembler = capture.NewTCPAssembler(&applicationFactory{runtime: r})
+	r.tcpNamespaces = make(map[reassemblySourceKey]uint64)
+	r.nextNamespace = 0
 }
 
 func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp time.Time, scope events.CaptureScope, partial bool, protocolHint string) {
@@ -402,8 +439,30 @@ func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp ti
 	if scope == "" {
 		scope = events.CaptureScopeFull
 	}
-	r.tcpAssembler.AssembleCaptureInfo(packet.NetworkLayer().NetworkFlow(), tcp, gopacket.CaptureInfo{
+	key := sourceReassemblyKey(source)
+	namespace, ok := r.tcpNamespaces[key]
+	if !ok {
+		r.nextNamespace++
+		namespace = r.nextNamespace
+		r.tcpNamespaces[key] = namespace
+	}
+	netFlow := packet.NetworkLayer().NetworkFlow()
+	portFlow := tcp.TransportFlow()
+	namespacedFlow := gopacket.NewFlow(endpointNamespacedNetwork,
+		namespacedEndpoint(namespace, netFlow.Src()),
+		namespacedEndpoint(namespace, netFlow.Dst()),
+	)
+	r.tcpAssembler.AssembleCaptureInfo(namespacedFlow, tcp, gopacket.CaptureInfo{
 		Timestamp:     timestamp,
-		AncillaryData: []interface{}{reassemblyContext{source: source, scope: scope, partial: partial, protocolHint: protocolHint}},
+		AncillaryData: []interface{}{reassemblyContext{source: source, scope: scope, partial: partial, protocolHint: protocolHint, netFlow: netFlow, tcpFlow: portFlow}},
 	})
+}
+
+func namespacedEndpoint(namespace uint64, endpoint gopacket.Endpoint) []byte {
+	identity := make([]byte, 16, 16+len(endpoint.Raw()))
+	binary.BigEndian.PutUint64(identity, namespace)
+	binary.BigEndian.PutUint64(identity[8:], uint64(endpoint.EndpointType()))
+	identity = append(identity, endpoint.Raw()...)
+	sum := sha256.Sum256(identity)
+	return sum[:16]
 }

@@ -459,6 +459,12 @@ checkpoint representation that migrates legacy checkpoints. It also made exact
 gap coverage independent of the order of loss records. Regression tests cover
 identities containing delimiter bytes and valid loss ranges reported in
 non-global order.
+A renewed status-path audit found that the five event-loss counters emitted in
+hunter heartbeats were discarded from processor state and consequently reported
+as zero by hunter status and topology responses. Processor hunter state now
+preserves capture, analysis, queue, unsupported-kind, and transport losses and
+projects them through both management responses. Focused race tests cover the
+heartbeat, status, and topology paths.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

@@ -31,6 +31,11 @@ type ConnectedHunter struct {
 	PacketsMatched          uint64 // Packets matching filters (from heartbeat stats)
 	PacketsForwarded        uint64 // Packets forwarded by hunter (from heartbeat stats)
 	PacketsDropped          uint64 // Packets dropped by hunter (from heartbeat stats)
+	CaptureLosses           uint64 // Capture-buffer losses reported by hunter
+	AnalysisLosses          uint64 // Stateful analysis losses reported by hunter
+	QueueLosses             uint64 // Event queue/spool losses reported by hunter
+	UnsupportedKindLosses   uint64 // Unsupported event-kind losses reported by hunter
+	TransportLosses         uint64 // Event transport losses reported by hunter
 	BufferBytes             uint64 // Hunter buffer occupancy (from heartbeat stats)
 	ActiveFilters           uint32 // Active filter count from hunter stats
 	Status                  management.HunterStatus
@@ -187,6 +192,11 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 			hunter.PacketsMatched = stats.PacketsMatched
 			hunter.PacketsForwarded = stats.PacketsForwarded
 			hunter.PacketsDropped = stats.PacketsDropped
+			hunter.CaptureLosses = stats.CaptureLosses
+			hunter.AnalysisLosses = stats.AnalysisLosses
+			hunter.QueueLosses = stats.QueueLosses
+			hunter.UnsupportedKindLosses = stats.UnsupportedKindLosses
+			hunter.TransportLosses = stats.TransportLosses
 			hunter.BufferBytes = stats.BufferBytes
 
 			// Update system metrics (CPU/RAM)

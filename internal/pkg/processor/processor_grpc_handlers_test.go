@@ -2798,6 +2798,45 @@ func TestGetTopology(t *testing.T) {
 	})
 }
 
+func TestHunterEventLossStatsAppearInStatusAndTopology(t *testing.T) {
+	processor, err := New(Config{ProcessorID: "test-processor", ListenAddr: "localhost:55555", MaxHunters: 10})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	_, err = processor.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "hunter-losses",
+		Hostname: "host1",
+	})
+	require.NoError(t, err)
+	processor.hunterManager.UpdateHeartbeat("hunter-losses", time.Now().UnixNano(), management.HunterStatus_STATUS_HEALTHY, &management.HunterStats{
+		CaptureLosses:         1,
+		AnalysisLosses:        2,
+		QueueLosses:           3,
+		UnsupportedKindLosses: 4,
+		TransportLosses:       5,
+	})
+
+	status, err := processor.GetHunterStatus(context.Background(), &management.StatusRequest{HunterId: "hunter-losses"})
+	require.NoError(t, err)
+	require.Len(t, status.Hunters, 1)
+	assertHunterEventLossStats(t, status.Hunters[0].Stats)
+
+	topology, err := processor.GetTopology(context.Background(), &management.TopologyRequest{})
+	require.NoError(t, err)
+	require.Len(t, topology.Processor.Hunters, 1)
+	assertHunterEventLossStats(t, topology.Processor.Hunters[0].Stats)
+}
+
+func assertHunterEventLossStats(t *testing.T, stats *management.HunterStats) {
+	t.Helper()
+	require.NotNil(t, stats)
+	assert.Equal(t, uint64(1), stats.CaptureLosses)
+	assert.Equal(t, uint64(2), stats.AnalysisLosses)
+	assert.Equal(t, uint64(3), stats.QueueLosses)
+	assert.Equal(t, uint64(4), stats.UnsupportedKindLosses)
+	assert.Equal(t, uint64(5), stats.TransportLosses)
+}
+
 // TestRequestAuthToken tests the RequestAuthToken gRPC handler
 func TestRequestAuthToken(t *testing.T) {
 	t.Run("fails with internal error when not configured", func(t *testing.T) {

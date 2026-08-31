@@ -130,6 +130,28 @@ func TestGetHunterStatus(t *testing.T) {
 	assert.True(t, found, "hunter-2 should be in the list")
 }
 
+func TestHunterEventLossStatsSurviveHeartbeat(t *testing.T) {
+	hunterMgr := hunter.NewManager("test-processor", 10, nil)
+	_, _, err := hunterMgr.Register("hunter-1", "host1", []string{"eth0"}, nil)
+	require.NoError(t, err)
+
+	hunterMgr.UpdateHeartbeat("hunter-1", time.Now().UnixNano(), management.HunterStatus_STATUS_HEALTHY, &management.HunterStats{
+		CaptureLosses:         1,
+		AnalysisLosses:        2,
+		QueueLosses:           3,
+		UnsupportedKindLosses: 4,
+		TransportLosses:       5,
+	})
+
+	hunters := hunterMgr.GetAll("hunter-1")
+	require.Len(t, hunters, 1)
+	assert.Equal(t, uint64(1), hunters[0].CaptureLosses)
+	assert.Equal(t, uint64(2), hunters[0].AnalysisLosses)
+	assert.Equal(t, uint64(3), hunters[0].QueueLosses)
+	assert.Equal(t, uint64(4), hunters[0].UnsupportedKindLosses)
+	assert.Equal(t, uint64(5), hunters[0].TransportLosses)
+}
+
 // TestFlowControlConstants tests flow control enum values
 func TestFlowControlConstants(t *testing.T) {
 	// Verify flow control constants are defined

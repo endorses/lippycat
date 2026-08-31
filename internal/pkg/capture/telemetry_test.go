@@ -27,6 +27,11 @@ func TestTelemetryCollectorAggregatesInterfacesWithoutDuplicatingBufferDrops(t *
 
 func TestTelemetryCollectorNilCallbackIsSafe(t *testing.T) {
 	collector := newTelemetryCollector(nil)
-	require.Nil(t, collector)
-	require.Equal(t, Telemetry{}, collector.report("eth0", 1, 2, 3, 4))
+	require.NotNil(t, collector)
+	require.Equal(t, Telemetry{
+		PacketsReceived:   1,
+		KernelDrops:       2,
+		InterfaceDrops:    3,
+		PacketBufferDrops: 4,
+	}, collector.report("eth0", 1, 2, 3, 4))
 }

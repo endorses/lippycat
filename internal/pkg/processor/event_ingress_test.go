@@ -33,7 +33,7 @@ func ingressBatch(t *testing.T, batch, sequence uint64) *eventsv1.ProtocolEventB
 }
 
 func TestNegotiateEventForwardingRejectsAndExplicitlyFallsBack(t *testing.T) {
-	bad := &management.EventForwardingCapabilities{RequestedMode: management.ForwardingMode_FORWARDING_MODE_EVENTS, EventApiMajors: []uint32{2}, SemanticProfileRevision: 1, EventKinds: []int32{1}}
+	bad := &management.EventForwardingCapabilities{RequestedMode: management.ForwardingMode_FORWARDING_MODE_EVENTS, EventApiMajors: []uint32{2}, SemanticProfileRevision: 1, EventKinds: []int32{1}, StatefulAnalysisFeatures: []string{"tcp_reassembly", "connection_tracking", "file_metadata"}}
 	_, _, _, _, _, err := negotiateEventForwarding(bad)
 	require.Error(t, err)
 	bad.AllowPacketFallback = true
@@ -41,6 +41,16 @@ func TestNegotiateEventForwardingRejectsAndExplicitlyFallsBack(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, mode)
 	assert.Contains(t, notice, "explicit packet fallback")
+}
+
+func TestNegotiateEventForwardingRejectsInsufficientStatefulAnalysis(t *testing.T) {
+	capabilities := &management.EventForwardingCapabilities{RequestedMode: management.ForwardingMode_FORWARDING_MODE_EVENTS, EventApiMajors: []uint32{1}, SemanticProfileRevision: 1, EventKinds: []int32{1}, StatefulAnalysisFeatures: []string{"tcp_reassembly"}}
+	_, _, _, _, _, err := negotiateEventForwarding(capabilities)
+	require.ErrorContains(t, err, "stateful features")
+	capabilities.StatefulAnalysisFeatures = []string{"relay"}
+	mode, _, _, _, _, err := negotiateEventForwarding(capabilities)
+	require.NoError(t, err)
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_EVENTS, mode)
 }
 
 func TestEventIngressDeduplicatesAndNACKsGaps(t *testing.T) {
@@ -65,6 +75,41 @@ func TestEventIngressDeduplicatesAndNACKsGaps(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, ctrl.Kind)
 	assert.Equal(t, uint64(2), ctrl.NackBatchRanges[0].First)
+}
+
+func TestEventIngressAcceptsExplicitlyReportedSpoolGap(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "memory_only"})
+	require.NoError(t, err)
+	b := ingressBatch(t, 2, 2)
+	b.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}}}}}
+	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
+	ack, err := i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, b)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
+}
+
+func TestEventIngressRejectsPartialCrossBatchOverlap(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "memory_only"})
+	require.NoError(t, err)
+	first := ingressBatch(t, 1, 1)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId, SemanticProfileRevision: 1}
+	_, err = i.admit(context.Background(), first.SourceNodeId+"\x00"+first.ProducerSessionId, open, nil, first)
+	require.NoError(t, err)
+	overlap := ingressBatch(t, 2, 2)
+	overlap.Events = append([]*eventsv1.ProtocolEvent{first.Events[0]}, overlap.Events...)
+	overlap.FirstEventSequence = 1
+	require.ErrorContains(t, func() error {
+		_, admitErr := i.admit(context.Background(), first.SourceNodeId+"\x00"+first.ProducerSessionId, open, nil, overlap)
+		return admitErr
+	}(), "overlaps")
 }
 
 func TestReliableEventIngressWALSurvivesReopen(t *testing.T) {
@@ -129,4 +174,20 @@ func TestEventWALResetCheckpointsDrainedRecords(t *testing.T) {
 	require.NoError(t, wal.replay(func(*eventsv1.ProtocolEventBatch) error { count++; return nil }))
 	require.Zero(t, count)
 	require.NoError(t, wal.close())
+}
+
+func TestEventWALCheckpointPreservesDedupAfterReset(t *testing.T) {
+	dir := t.TempDir()
+	wal, err := openEventWAL(dir, 1<<20)
+	require.NoError(t, err)
+	sessions := map[string]ingressSession{"node\x00session": {batch: 3, event: 7}}
+	require.NoError(t, wal.checkpoint(sessions))
+	require.NoError(t, wal.reset())
+	require.NoError(t, wal.close())
+	reopened, err := openEventWAL(dir, 1<<20)
+	require.NoError(t, err)
+	got, err := reopened.loadCheckpoint()
+	require.NoError(t, err)
+	require.Equal(t, sessions, got)
+	require.NoError(t, reopened.close())
 }

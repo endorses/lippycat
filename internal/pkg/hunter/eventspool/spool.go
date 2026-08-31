@@ -130,7 +130,9 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 		return EnqueueResult{Losses: lossesFor(batch)}, nil
 	}
 	result := EnqueueResult{}
+	storedBatch := batch
 	if s.config.Policy == DropOldest {
+		storedBatch = proto.Clone(batch).(*eventsv1.ProtocolEventBatch)
 		for len(s.records) > 0 && (s.recordExpired(s.records[0], now) || s.overByteLimit(s.bytes+recordBytes)) {
 			removed := s.records[0]
 			if err := os.Remove(removed.path); err != nil {
@@ -139,6 +141,12 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 			s.records = s.records[1:]
 			s.bytes -= removed.size
 			result.Losses = append(result.Losses, lossesFor(removed.batch)...)
+			storedBatch.Stats = appendLosses(storedBatch.GetStats(), lossesFor(removed.batch))
+			payload, err = proto.MarshalOptions{Deterministic: true}.Marshal(storedBatch)
+			if err != nil {
+				return result, fmt.Errorf("enqueue event batch: marshal with loss report: %w", err)
+			}
+			recordBytes = uint64(headerSize + len(payload))
 		}
 		if s.overByteLimit(recordBytes) {
 			result.Losses = append(result.Losses, lossesFor(batch)...)
@@ -147,6 +155,7 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 			}
 			return result, nil
 		}
+		batch = storedBatch
 	}
 
 	r, err := s.writeRecord(now, batch, payload)
@@ -157,6 +166,20 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	s.bytes += r.size
 	result.Stored = true
 	return result, nil
+}
+
+func appendLosses(stats *eventsv1.EventBatchStats, losses []*eventsv1.EventLoss) *eventsv1.EventBatchStats {
+	if stats == nil {
+		stats = &eventsv1.EventBatchStats{}
+	} else {
+		stats = proto.Clone(stats).(*eventsv1.EventBatchStats)
+	}
+	for _, loss := range losses {
+		if loss != nil {
+			stats.Losses = append(stats.Losses, proto.Clone(loss).(*eventsv1.EventLoss))
+		}
+	}
+	return stats
 }
 
 // Ack deletes complete records cumulatively for one producer session. Records

@@ -58,9 +58,8 @@ func TestDropOldestReportsExactRanges(t *testing.T) {
 	first, err := s.Enqueue(batch("hunter", "session", 1, 10, 12))
 	require.NoError(t, err)
 	require.True(t, first.Stored)
-	maxBytes := s.Bytes()
-	s.config.MaxBytes = maxBytes
-	now = now.Add(time.Second)
+	s.config.MaxAge = time.Second
+	now = now.Add(2 * time.Second)
 	result, err := s.Enqueue(batch("hunter", "session", 2, 20, 21))
 	require.NoError(t, err)
 	require.True(t, result.Stored)
@@ -68,7 +67,9 @@ func TestDropOldestReportsExactRanges(t *testing.T) {
 	require.Equal(t, uint64(3), result.Losses[0].Count)
 	require.Equal(t, uint64(10), result.Losses[0].EventSequenceRanges[0].First)
 	require.Equal(t, uint64(12), result.Losses[0].EventSequenceRanges[0].Last)
-	require.Equal(t, uint64(2), s.Batches()[0].BatchSequence)
+	stored := s.Batches()[0]
+	require.Equal(t, uint64(2), stored.BatchSequence)
+	require.Equal(t, result.Losses, stored.GetStats().GetLosses())
 }
 
 func TestDropNewPreservesExistingAndReportsIncomingRange(t *testing.T) {

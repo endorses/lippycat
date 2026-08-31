@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -148,13 +149,16 @@ func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.Event
 	if batch.BatchSequence <= state.batch {
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch}, nil
 	}
-	if batch.BatchSequence != state.batch+1 {
+	eventGapFirst := state.event + 1
+	hasEventGap := batch.FirstEventSequence > eventGapFirst
+	gapCovered := hasEventGap && lossRangeCovered(batch.GetStats().GetLosses(), open.SourceNodeId, open.ProducerSessionId, eventGapFirst, batch.FirstEventSequence-1)
+	if batch.BatchSequence != state.batch+1 && !gapCovered {
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, CumulativeAckSequence: state.batch, NackBatchRanges: []*eventsv1.SequenceRange{{First: state.batch + 1, Last: batch.BatchSequence - 1}}}, nil
 	}
-	if state.event != 0 && batch.LastEventSequence <= state.event {
-		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch}, nil
+	if batch.FirstEventSequence <= state.event {
+		return nil, status.Error(codes.InvalidArgument, "event sequence overlaps previously admitted events")
 	}
-	if state.event != 0 && batch.FirstEventSequence > state.event+1 {
+	if hasEventGap && !gapCovered {
 		return nil, status.Error(codes.InvalidArgument, "event sequence leaves a gap after previously admitted events")
 	}
 	if i.wal != nil {
@@ -168,13 +172,9 @@ func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.Event
 		state.batch = batch.BatchSequence
 		state.event = batch.LastEventSequence
 		i.sessions[key] = state
-		for _, event := range decoded {
-			if !i.dispatcher.Enqueue(event) {
-				// The durable record remains available for recovery. ACK still
-				// reflects recoverable admission, independently of volatile pressure.
-				break
-			}
-		}
+		// Admit atomically so recovery cannot replay a full durable batch after
+		// live delivery accepted only a prefix of it.
+		_ = i.dispatcher.EnqueueBatch(decoded)
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
 	}
 	if !i.dispatcher.EnqueueBatch(decoded) {
@@ -184,6 +184,28 @@ func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.Event
 	state.event = batch.LastEventSequence
 	i.sessions[key] = state
 	return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
+}
+
+func lossRangeCovered(losses []*eventsv1.EventLoss, sourceNodeID, producerSessionID string, first, last uint64) bool {
+	if first == 0 || last < first {
+		return false
+	}
+	next := first
+	for _, loss := range losses {
+		if loss.GetSourceNodeId() != sourceNodeID || loss.GetProducerSessionId() != producerSessionID {
+			continue
+		}
+		for _, r := range loss.GetEventSequenceRanges() {
+			if r.GetFirst() > next || r.GetLast() < next {
+				continue
+			}
+			if r.GetLast() >= last {
+				return true
+			}
+			next = r.GetLast() + 1
+		}
+	}
+	return false
 }
 
 func ingressEventKind(kind eventsv1.EventKind) (events.Kind, bool) {
@@ -216,12 +238,20 @@ func (i *eventIngress) recover() error {
 	if i == nil || i.wal == nil {
 		return nil
 	}
+	checkpoint, err := i.wal.loadCheckpoint()
+	if err != nil {
+		return err
+	}
+	i.sessions = checkpoint
 	return i.wal.replay(func(batch *eventsv1.ProtocolEventBatch) error {
 		decoded, _, err := protoadapter.DecodeBatch(batch)
 		if err != nil {
 			return fmt.Errorf("decode recovered event batch: %w", err)
 		}
 		key := batch.SourceNodeId + "\x00" + batch.ProducerSessionId
+		if state := i.sessions[key]; batch.BatchSequence <= state.batch {
+			return nil
+		}
 		if !i.dispatcher.EnqueueBatch(decoded) {
 			return errors.New("event queue full during WAL recovery")
 		}
@@ -244,6 +274,7 @@ type eventWAL struct {
 	file     *os.File
 	maxBytes int64
 	size     int64
+	dir      string
 }
 
 func openEventWAL(dir string, max int64) (*eventWAL, error) {
@@ -262,7 +293,73 @@ func openEventWAL(dir string, max int64) (*eventWAL, error) {
 		_ = f.Close()
 		return nil, err
 	}
-	return &eventWAL{file: f, maxBytes: max, size: info.Size()}, nil
+	return &eventWAL{file: f, maxBytes: max, size: info.Size(), dir: dir}, nil
+}
+
+func (w *eventWAL) checkpoint(sessions map[string]ingressSession) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	durable := make(map[string]durableIngressSession, len(sessions))
+	for key, state := range sessions {
+		durable[key] = durableIngressSession{Batch: state.batch, Event: state.event}
+	}
+	payload, err := json.Marshal(durable)
+	if err != nil {
+		return fmt.Errorf("marshal event ingress checkpoint: %w", err)
+	}
+	tmp, err := os.CreateTemp(w.dir, ".event-ingress-checkpoint-*")
+	if err != nil {
+		return fmt.Errorf("create event ingress checkpoint: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err = tmp.Write(payload); err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return fmt.Errorf("write event ingress checkpoint: %w", err)
+	}
+	if err = os.Rename(tmpName, filepath.Join(w.dir, "processor-events.checkpoint")); err != nil {
+		return fmt.Errorf("publish event ingress checkpoint: %w", err)
+	}
+	return syncIngressDirectory(w.dir)
+}
+
+func (w *eventWAL) loadCheckpoint() (map[string]ingressSession, error) {
+	path := filepath.Join(w.dir, "processor-events.checkpoint")
+	payload, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return make(map[string]ingressSession), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read event ingress checkpoint: %w", err)
+	}
+	durable := make(map[string]durableIngressSession)
+	if err := json.Unmarshal(payload, &durable); err != nil {
+		return nil, fmt.Errorf("decode event ingress checkpoint: %w", err)
+	}
+	result := make(map[string]ingressSession, len(durable))
+	for key, state := range durable {
+		result[key] = ingressSession{batch: state.Batch, event: state.Event}
+	}
+	return result, nil
+}
+
+type durableIngressSession struct {
+	Batch uint64 `json:"batch"`
+	Event uint64 `json:"event"`
+}
+
+func syncIngressDirectory(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 func (w *eventWAL) append(batch *eventsv1.ProtocolEventBatch) error {
 	payload, err := proto.Marshal(batch)

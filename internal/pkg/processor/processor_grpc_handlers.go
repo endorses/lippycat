@@ -183,8 +183,9 @@ func negotiateEventForwarding(c *management.EventForwardingCapabilities) (manage
 		apiOK = apiOK || major == 1
 	}
 	profileOK := c.SemanticProfileRevision == supportedEventSemanticProfile
-	if !apiOK || !profileOK {
-		reason := fmt.Sprintf("event profile unsupported (api majors=%v semantic profile=%d; require API 1/profile %d)", c.EventApiMajors, c.SemanticProfileRevision, supportedEventSemanticProfile)
+	featuresOK := sufficientEventAnalysisFeatures(c.StatefulAnalysisFeatures)
+	if !apiOK || !profileOK || !featuresOK {
+		reason := fmt.Sprintf("event profile unsupported (api majors=%v semantic profile=%d stateful features=%v; require API 1/profile %d and relay or tcp_reassembly+connection_tracking+file_metadata)", c.EventApiMajors, c.SemanticProfileRevision, c.StatefulAnalysisFeatures, supportedEventSemanticProfile)
 		if c.AllowPacketFallback {
 			return management.ForwardingMode_FORWARDING_MODE_PACKETS, 0, nil, 0, "explicit packet fallback: " + reason, nil
 		}
@@ -208,6 +209,22 @@ func negotiateEventForwarding(c *management.EventForwardingCapabilities) (manage
 		return 0, 0, nil, 0, "", errors.New(reason)
 	}
 	return management.ForwardingMode_FORWARDING_MODE_EVENTS, 1, accepted, supportedEventSemanticProfile, "", nil
+}
+
+func sufficientEventAnalysisFeatures(features []string) bool {
+	set := make(map[string]struct{}, len(features))
+	for _, feature := range features {
+		set[feature] = struct{}{}
+	}
+	if _, ok := set["relay"]; ok {
+		return true
+	}
+	for _, required := range []string{"tcp_reassembly", "connection_tracking", "file_metadata"} {
+		if _, ok := set[required]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // Heartbeat handles bidirectional heartbeat stream (Management Service)

@@ -362,7 +362,12 @@ func (p *Processor) Shutdown() error {
 		}
 		if p.eventIngress != nil && p.eventIngress.wal != nil {
 			if eventsDrained {
-				if err := p.eventIngress.wal.reset(); err != nil {
+				p.eventIngress.mu.Lock()
+				checkpointErr := p.eventIngress.wal.checkpoint(p.eventIngress.sessions)
+				p.eventIngress.mu.Unlock()
+				if checkpointErr != nil {
+					logger.Warn("Failed to persist drained event ingress checkpoint", "error", checkpointErr)
+				} else if err := p.eventIngress.wal.reset(); err != nil {
 					logger.Warn("Failed to checkpoint drained event ingress WAL", "error", err)
 				}
 			}

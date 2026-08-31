@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Phase 5 complete
+**Status:** Phase 5 incomplete after implementation audit
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -353,14 +353,14 @@ connection summaries with accurate counters and provenance.
 - [x] Default spool exhaustion to dropping oldest complete batches while
       reporting exact lost ranges; support an operator-selected `drop_new`
       policy.
-- [x] Fix forwarding mode for the lifetime of a producer session; flush and
+- [ ] Fix forwarding mode for the lifetime of a producer session; flush and
       start a new session when mode, filtering, capture scope, or analysis policy
       changes.
 - [x] Run the shared stateful runtime on event-mode hunters and taps; assign
       identity before buffering and send no raw packet bytes.
 - [x] Keep tap PCAP writing, rotation, per-call output, and post-write hooks
       local while forwarding only events upstream.
-- [x] Report capture, analysis, queue, unsupported-kind, and transport losses
+- [ ] Report capture, analysis, queue, unsupported-kind, and transport losses
       separately in heartbeat/status output.
 - [x] Test mixed packet-mode and event-mode hunters on one processor, explicit
       fallback, configuration boundaries, graceful flush, retry deduplication,
@@ -384,6 +384,14 @@ Independent cross-component audits corrected atomic memory-only admission,
 durable dispatch and recovery ordering, clean WAL checkpointing, ACK-carried
 flow control, recovered-spool ordering, producer-lifetime fallback pinning,
 relayed-source authorization, and hierarchical tap capability negotiation.
+A renewed implementation audit found and corrected spool-exhaustion deadlocks,
+cross-batch event overlap, partial reliable batch admission, loss-insensitive
+gap handling, clean-restart dedup state loss, and negotiation that advertised
+but did not validate stateful-analysis features. Focused race tests and hunter,
+processor, and tap build-tag suites pass. The audit also found that live filter
+changes do not yet rotate the hunter producer session, and that capture and
+unsupported-kind heartbeat counters have no production loss-boundary wiring;
+those two Phase 5 tasks are therefore reopened rather than claimed complete.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

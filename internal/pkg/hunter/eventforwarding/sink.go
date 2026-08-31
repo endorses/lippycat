@@ -53,7 +53,9 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	}
 	if result.Stored {
 		s.nextBatchSequence++
-		s.pendingLosses = cloneLosses(result.Losses)
+		// Drop-oldest losses are attached to the newly stored batch by the
+		// spool, so they must not be deferred to a later batch.
+		s.pendingLosses = nil
 	} else {
 		// drop_new loses this event; preserve both earlier and current exact
 		// ranges for the next successfully admitted batch.

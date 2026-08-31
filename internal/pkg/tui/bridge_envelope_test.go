@@ -44,6 +44,37 @@ func TestNormalizeCaptureStreamPreservesEnvelopeProvenance(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestNormalizeCaptureStreamBuffersShortBridgeStall(t *testing.T) {
+	const packetCount = 64
+	input := make(chan capture.PacketInfo)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	envelopes := NormalizeCaptureStream(ctx, input, pipeline.SourceLiveCapture)
+	producerDone := make(chan struct{})
+	go func() {
+		defer close(producerDone)
+		for i := 0; i < packetCount; i++ {
+			packet := gopacket.NewPacket([]byte{byte(i)}, gopacket.LayerTypePayload, gopacket.Default)
+			input <- capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeRaw}
+		}
+		close(input)
+	}()
+
+	select {
+	case <-producerDone:
+	case <-time.After(time.Second):
+		t.Fatal("normalization did not absorb a short bridge stall")
+	}
+
+	for i := 0; i < packetCount; i++ {
+		envelope := <-envelopes
+		require.Equal(t, byte(i), envelope.Data[0])
+	}
+	_, ok := <-envelopes
+	require.False(t, ok)
+}
+
 func TestEnvelopeBridgePublishesOrderedPacketsThroughLocalEventHandler(t *testing.T) {
 	ResetBridgeStats()
 	ClearPendingPackets()

@@ -19,7 +19,12 @@ type sipStreamFactory struct {
 	activeGoroutines int64
 	config           *Config
 	configMutex      sync.RWMutex
-	lastLogTime      int64
+	// autoTuneBatchSize is the configured/profile batch size restored when
+	// auto-tuning pressure clears. backpressureEnabled makes transitions
+	// idempotent so the monitor does not repeatedly halve or log the same state.
+	autoTuneBatchSize   int
+	backpressureEnabled bool
+	lastLogTime         int64
 	// lastStreamLimitLogTime rate-limits the MaxStreams rejection warning
 	lastStreamLimitLogTime int64
 	allWorkers             sync.WaitGroup // tracks all background goroutines
@@ -50,12 +55,13 @@ func NewSipStreamFactoryWithConfig(ctx context.Context, handler SIPMessageHandle
 	applyPerformanceModeOptimizations(&config)
 
 	factory := &sipStreamFactory{
-		ctx:           ctx,
-		cancel:        cancel,
-		config:        &config,
-		handler:       handler,
-		callActive:    callActive,
-		cleanupTicker: time.NewTicker(config.TCPCleanupInterval),
+		ctx:               ctx,
+		cancel:            cancel,
+		config:            &config,
+		autoTuneBatchSize: config.TCPBatchSize,
+		handler:           handler,
+		callActive:        callActive,
+		cleanupTicker:     time.NewTicker(config.TCPCleanupInterval),
 	}
 
 	// Start cleanup goroutine for resource management

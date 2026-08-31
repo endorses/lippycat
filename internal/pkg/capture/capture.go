@@ -505,6 +505,12 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 // When pauseFn returns true, packets are dropped at the source to reduce CPU usage.
 // Note: Signal handling should be done by the caller. This function only respects context cancellation.
 func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool) {
+	InitWithContextAndTelemetry(ctx, ifaces, filter, packetProcessor, assembler, pauseFn, nil)
+}
+
+// InitWithContextAndTelemetry starts packet capture and periodically reports
+// cumulative libpcap and PacketBuffer drop statistics.
+func InitWithContextAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool, telemetryCallback TelemetryCallback) {
 	// Use a configurable buffer size with proper backpressure handling
 	bufferSize := getPacketBufferSize()
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
@@ -513,14 +519,19 @@ func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filt
 	}
 	defer packetBuffer.Close()
 
-	InitWithBuffer(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler)
+	initWithBufferAndTelemetry(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler, telemetryCallback)
 }
 
 // InitWithBuffer starts packet capture with an external PacketBuffer
 // This allows the caller to own the buffer and read from it directly, avoiding
 // double-buffering when the processor would just copy packets to another buffer.
 func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler) {
+	initWithBufferAndTelemetry(ctx, ifaces, filter, buffer, packetProcessor, assembler, nil)
+}
+
+func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, telemetryCallback TelemetryCallback) {
 	packetBuffer := buffer
+	telemetry := newTelemetryCollector(telemetryCallback)
 
 	var wg sync.WaitGroup
 	var processorWg sync.WaitGroup
@@ -588,20 +599,44 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 					"interface", pif.Name())
 				return
 			}
-			defer handle.Close()
-
 			// Mark that at least one capture succeeded
 			captureSuccessCount.Add(1)
+			var handleMu sync.Mutex
+			defer func() {
+				handleMu.Lock()
+				defer handleMu.Unlock()
+				handle.Close()
+			}()
 
 			// Close handle when context is cancelled to unblock packet reads
 			// This ensures captureFromInterface exits promptly on context cancellation
+			captureDone := make(chan struct{})
+			cancelWatcherDone := make(chan struct{})
 			go func() {
-				<-ctx.Done()
+				defer close(cancelWatcherDone)
+				select {
+				case <-captureDone:
+					return
+				case <-ctx.Done():
+				}
 				logger.Debug("Context cancelled, closing pcap handle", "interface", pif.Name())
+				handleMu.Lock()
+				defer handleMu.Unlock()
+				if pcapStats, statsErr := handle.Stats(); statsErr == nil {
+					telemetry.report(
+						pif.Name(),
+						int64(pcapStats.PacketsReceived),
+						int64(pcapStats.PacketsDropped),
+						int64(pcapStats.PacketsIfDropped),
+						packetBuffer.GetDropped()+packetBuffer.GetSIPDropped(),
+					)
+				}
 				handle.Close() // This will cause packetSource.Packets() channel to close
 			}()
 
-			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter)
+			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu)
+			close(captureDone)
+			<-cancelWatcherDone
 		}(iface)
 	}
 
@@ -690,7 +725,7 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 	}
 }
 
-func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter) {
+func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter, telemetry *telemetryCollector, handleMu *sync.Mutex) {
 	logger.Debug("captureFromInterface starting", "interface", iface.Name())
 	defer logger.Debug("captureFromInterface exiting", "interface", iface.Name())
 
@@ -714,9 +749,29 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	// Note: defragmenter is shared across all interfaces to correctly reassemble
 	// IP fragments that may arrive on different interfaces (e.g., due to port mirror splits)
 
-	// Add periodic stats logging
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+	statsCtx, stopStats := context.WithCancel(ctx)
+	statsTicker := time.NewTicker(time.Second)
+	defer statsTicker.Stop()
+	statsDone := make(chan struct{})
+	defer func() {
+		stopStats()
+		<-statsDone
+		handleMu.Lock()
+		defer handleMu.Unlock()
+		if ctx.Err() == nil {
+			pcapStats, statsErr := handle.Stats()
+			if statsErr != nil {
+				return
+			}
+			telemetry.report(
+				iface.Name(),
+				int64(pcapStats.PacketsReceived),
+				int64(pcapStats.PacketsDropped),
+				int64(pcapStats.PacketsIfDropped),
+				buffer.GetDropped()+buffer.GetSIPDropped(),
+			)
+		}
+	}()
 
 	// Batched atomic updates: use local counter and periodically sync to atomic
 	// Both counters are atomic so the stats goroutine can safely read the total
@@ -727,30 +782,43 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	const batchThreshold = 100          // flush to packetCount every N packets
 
 	go func() {
+		defer close(statsDone)
 		logger.Debug("Stats logging goroutine starting", "interface", iface.Name())
 		defer logger.Debug("Stats logging goroutine exiting", "interface", iface.Name())
 		for {
 			select {
-			case <-ctx.Done():
+			case <-statsCtx.Done():
 				logger.Debug("Stats goroutine received context cancellation", "interface", iface.Name())
 				return
-			case <-ticker.C:
+			case tickTime := <-statsTicker.C:
 				// Note: stale fragment cleanup is handled by a single shared goroutine
 				// in InitWithBuffer to avoid duplicate cleanup across interfaces
 
 				// Include both flushed and unflushed counts for accurate reporting
 				count := packetCount.Load() + localCount.Load()
-				dropped := atomic.LoadInt64(&buffer.dropped)
+				bufferDrops := buffer.GetDropped() + buffer.GetSIPDropped()
 				frags := fragmentsReceived.Load()
 				reassembled := packetsReassembled.Load()
-				logger.Info("Capture heartbeat",
-					"interface", iface.Name(),
-					"packets_processed", count,
-					"packets_dropped", dropped,
-					"ip_fragments", frags,
-					"reassembled", reassembled,
-					"buffer_len", buffer.Len(),
-					"buffer_closed", buffer.IsClosed())
+				handleMu.Lock()
+				pcapStats, statsErr := handle.Stats()
+				handleMu.Unlock()
+				if statsErr == nil {
+					snapshot := telemetry.report(iface.Name(), int64(pcapStats.PacketsReceived), int64(pcapStats.PacketsDropped), int64(pcapStats.PacketsIfDropped), bufferDrops)
+					if tickTime.Second()%30 == 0 {
+						logger.Info("Capture heartbeat",
+							"interface", iface.Name(),
+							"packets_processed", count,
+							"pcap_packets_received", pcapStats.PacketsReceived,
+							"pcap_kernel_dropped", pcapStats.PacketsDropped,
+							"pcap_interface_dropped", pcapStats.PacketsIfDropped,
+							"total_kernel_dropped", snapshot.KernelDrops+snapshot.InterfaceDrops,
+							"packet_buffer_dropped", bufferDrops,
+							"ip_fragments", frags,
+							"reassembled", reassembled,
+							"buffer_len", buffer.Len(),
+							"buffer_closed", buffer.IsClosed())
+					}
+				}
 			}
 		}
 	}()

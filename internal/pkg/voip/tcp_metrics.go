@@ -302,12 +302,16 @@ func (f *sipStreamFactory) performanceMonitor() {
 
 func (f *sipStreamFactory) performAutoTuning() {
 	activeGoroutines := atomic.LoadInt64(&f.activeGoroutines)
-	maxGoroutines := int64(f.config.MaxGoroutines)
+	f.configMutex.RLock()
+	maxStreams := int64(f.config.MaxStreams)
+	f.configMutex.RUnlock()
 
-	// Auto-tune based on load
-	if activeGoroutines > maxGoroutines*8/10 {
+	// MaxGoroutines is a soft observability threshold and is not a capacity
+	// control. Base pressure on MaxStreams, the actual enforced stream limit.
+	// An unlimited stream configuration has no capacity-derived pressure signal.
+	if maxStreams > 0 && activeGoroutines > maxStreams*8/10 {
 		f.enableBackpressure()
-	} else if activeGoroutines < maxGoroutines*3/10 {
+	} else if maxStreams == 0 || activeGoroutines < maxStreams*3/10 {
 		f.relaxBackpressure()
 	}
 
@@ -317,7 +321,8 @@ func (f *sipStreamFactory) performAutoTuning() {
 	}
 
 	logger.Debug("Performance auto-tuning completed",
-		"active_goroutines", activeGoroutines)
+		"active_streams", activeGoroutines,
+		"max_streams", maxStreams)
 }
 
 // getCurrentBatchSize safely gets the current batch size
@@ -329,25 +334,29 @@ func (f *sipStreamFactory) getCurrentBatchSize() int {
 
 // enableBackpressure implements backpressure mechanisms
 func (f *sipStreamFactory) enableBackpressure() {
-	// Implement backpressure by reducing batch sizes and increasing delays
 	f.configMutex.Lock()
 	defer f.configMutex.Unlock()
 
-	if f.config.TCPBatchSize > 1 {
-		f.config.TCPBatchSize = f.config.TCPBatchSize / 2
+	if f.backpressureEnabled {
+		return
 	}
+
+	f.backpressureEnabled = true
+	f.config.TCPBatchSize = max(1, f.autoTuneBatchSize/2)
 	logger.Info("Backpressure enabled", "new_batch_size", f.config.TCPBatchSize)
 }
 
 // relaxBackpressure reduces backpressure mechanisms
 func (f *sipStreamFactory) relaxBackpressure() {
-	// Relax backpressure by increasing batch sizes
 	f.configMutex.Lock()
 	defer f.configMutex.Unlock()
 
-	if f.config.TCPBatchSize < 64 {
-		f.config.TCPBatchSize = f.config.TCPBatchSize * 2
+	if !f.backpressureEnabled {
+		return
 	}
+
+	f.backpressureEnabled = false
+	f.config.TCPBatchSize = f.autoTuneBatchSize
 	logger.Debug("Backpressure relaxed", "new_batch_size", f.config.TCPBatchSize)
 }
 

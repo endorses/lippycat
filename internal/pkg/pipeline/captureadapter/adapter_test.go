@@ -22,6 +22,9 @@ func TestFromPacketInfoPreservesCaptureRecord(t *testing.T) {
 	require.Equal(t, 40, e.OriginalLength)
 	require.Equal(t, "any0", e.Source.InterfaceName)
 	require.Equal(t, layers.LinkTypeRaw, e.LinkType)
+	require.Same(t, p, e.Packet())
+	require.True(t, e.Stages.Has(pipeline.StageDecoded))
+	require.Equal(t, &p.Data()[0], &e.Data[0])
 }
 
 func TestEnvelopePacketRestoresCaptureMetadata(t *testing.T) {
@@ -58,6 +61,7 @@ func TestPacketInfoRoundTripPreservesCaptureRecordAndReplayProvenance(t *testing
 	require.Equal(t, in.LinkType, out.LinkType)
 	require.Equal(t, in.Packet.Data(), out.Packet.Data())
 	require.Equal(t, in.Packet.Metadata().CaptureInfo, out.Packet.Metadata().CaptureInfo)
+	require.Same(t, original, out.Packet)
 }
 
 func TestForEachPreservesOrderAndReplayProvenance(t *testing.T) {

@@ -131,15 +131,14 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	}
 	result := EnqueueResult{}
 	storedBatch := batch
+	var victims []record
 	if s.config.Policy == DropOldest {
 		storedBatch = proto.Clone(batch).(*eventsv1.ProtocolEventBatch)
-		for len(s.records) > 0 && (s.recordExpired(s.records[0], now) || s.overByteLimit(s.bytes+recordBytes)) {
-			removed := s.records[0]
-			if err := os.Remove(removed.path); err != nil {
-				return result, fmt.Errorf("enqueue event batch: remove oldest %q: %w", removed.path, err)
-			}
-			s.records = s.records[1:]
-			s.bytes -= removed.size
+		remainingBytes := s.bytes
+		for len(victims) < len(s.records) && (s.recordExpired(s.records[len(victims)], now) || s.overByteLimit(remainingBytes+recordBytes)) {
+			removed := s.records[len(victims)]
+			victims = append(victims, removed)
+			remainingBytes -= removed.size
 			result.Losses = append(result.Losses, lossesFor(removed.batch)...)
 			storedBatch.Stats = appendLosses(storedBatch.GetStats(), lossesFor(removed.batch))
 			payload, err = proto.MarshalOptions{Deterministic: true}.Marshal(storedBatch)
@@ -149,11 +148,9 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 			recordBytes = uint64(headerSize + len(payload))
 		}
 		if s.overByteLimit(recordBytes) {
-			result.Losses = append(result.Losses, lossesFor(batch)...)
-			if err := syncDirectory(s.config.Directory); err != nil {
-				return result, err
-			}
-			return result, nil
+			// The replacement cannot durably carry the accumulated loss report,
+			// so retain every existing record and reject only the incoming batch.
+			return EnqueueResult{Losses: lossesFor(batch)}, nil
 		}
 		batch = storedBatch
 	}
@@ -164,6 +161,21 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	}
 	s.records = append(s.records, r)
 	s.bytes += r.size
+	// Publish and sync the replacement, including exact loss ranges, before
+	// deleting any record it supersedes. This ordering ensures a failed write
+	// or crash cannot erase both the old data and the durable loss report.
+	for _, victim := range victims {
+		if err := os.Remove(victim.path); err != nil {
+			return result, fmt.Errorf("enqueue event batch: remove oldest %q: %w", victim.path, err)
+		}
+		s.bytes -= victim.size
+	}
+	if len(victims) > 0 {
+		s.records = append(s.records[:0], s.records[len(victims):]...)
+		if err := syncDirectory(s.config.Directory); err != nil {
+			return result, err
+		}
+	}
 	result.Stored = true
 	return result, nil
 }

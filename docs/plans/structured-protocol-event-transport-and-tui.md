@@ -413,6 +413,11 @@ delivery, so clean shutdown retains an ACKed but undispatched record for recover
 instead of checkpointing it away. Regression tests also explicitly cover mixed
 packet/event hunter registration and verify that the event transport schema has
 no raw-byte field.
+A final spool durability audit corrected `drop_oldest` replacement ordering. The
+replacement batch and its exact loss ranges are now published and synced before
+any superseded durable record is deleted, so a replacement write failure cannot
+silently erase both the old data and its loss report. A regression test verifies
+that the original record survives that failure boundary.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

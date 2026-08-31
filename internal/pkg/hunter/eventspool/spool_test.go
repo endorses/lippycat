@@ -72,6 +72,25 @@ func TestDropOldestReportsExactRanges(t *testing.T) {
 	require.Equal(t, result.Losses, stored.GetStats().GetLosses())
 }
 
+func TestDropOldestWriteFailurePreservesExistingRecords(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(1000, 0)
+	s, err := Open(Config{Directory: dir, Policy: DropOldest, Clock: func() time.Time { return now }})
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("hunter", "session", 1, 10, 12))
+	require.NoError(t, err)
+
+	s.config.MaxAge = time.Second
+	now = now.Add(2 * time.Second)
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(dir, 0o700)) })
+
+	_, err = s.Enqueue(batch("hunter", "session", 2, 20, 21))
+	require.Error(t, err)
+	require.Len(t, s.Batches(), 1)
+	require.Equal(t, uint64(1), s.Batches()[0].GetBatchSequence())
+}
+
 func TestDropNewPreservesExistingAndReportsIncomingRange(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir, Policy: DropNew})

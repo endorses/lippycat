@@ -465,6 +465,12 @@ as zero by hunter status and topology responses. Processor hunter state now
 preserves capture, analysis, queue, unsupported-kind, and transport losses and
 projects them through both management responses. Focused race tests cover the
 heartbeat, status, and topology paths.
+A final durable-routing audit replaced lossy filesystem sanitization and
+delimiter-concatenated in-memory keys for hierarchical event routes. Distinct
+valid producer identities now use typed route keys and fixed-length,
+identity-derived spool path components, so punctuation collisions cannot make
+one producer reject or share another producer's recoverable spool. A restart
+regression covers identities that previously mapped to the same directory.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

@@ -2,11 +2,11 @@ package upstream
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,9 +29,14 @@ type EventRouter struct {
 	mu      sync.Mutex
 	manager *Manager
 	config  EventRouterConfig
-	routes  map[string]*eventRoute
+	routes  map[eventRouteKey]*eventRoute
 	ctx     context.Context
 	cancel  context.CancelFunc
+}
+
+type eventRouteKey struct {
+	nodeID    string
+	sessionID string
 }
 
 type eventRoute struct {
@@ -46,7 +51,7 @@ func NewEventRouter(manager *Manager, config EventRouterConfig) (*EventRouter, e
 		return nil, fmt.Errorf("new upstream event router: manager and spool directory are required")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &EventRouter{manager: manager, config: config, routes: make(map[string]*eventRoute), ctx: ctx, cancel: cancel}
+	r := &EventRouter{manager: manager, config: config, routes: make(map[eventRouteKey]*eventRoute), ctx: ctx, cancel: cancel}
 	if err := r.loadExisting(); err != nil {
 		cancel()
 		return nil, err
@@ -90,7 +95,7 @@ func (r *EventRouter) loadExisting() error {
 			if err != nil {
 				return err
 			}
-			r.routes[source+"\x00"+session] = route
+			r.routes[eventRouteKey{nodeID: source, sessionID: session}] = route
 		}
 	}
 	return nil
@@ -107,7 +112,7 @@ func (r *EventRouter) HandleEvent(ctx context.Context, event events.Event) error
 	if env.NodeID == "" || env.ProducerSessionID == "" || env.EventSequence == 0 {
 		return fmt.Errorf("route upstream event: delivery identity is required")
 	}
-	key := env.NodeID + "\x00" + env.ProducerSessionID
+	key := eventRouteKey{nodeID: env.NodeID, sessionID: env.ProducerSessionID}
 	r.mu.Lock()
 	route := r.routes[key]
 	if route == nil {
@@ -128,7 +133,7 @@ func (r *EventRouter) HandleEvent(ctx context.Context, event events.Event) error
 }
 
 func (r *EventRouter) newRoute(nodeID, sessionID string) (*eventRoute, error) {
-	dir := filepath.Join(r.config.SpoolDirectory, safePathPart(nodeID), safePathPart(sessionID))
+	dir := filepath.Join(r.config.SpoolDirectory, identityPathPart(nodeID), identityPathPart(sessionID))
 	spool, err := eventspool.Open(eventspool.Config{Directory: dir, MaxBytes: r.config.MaxBytes, MaxAge: r.config.MaxAge, Policy: r.config.Policy})
 	if err != nil {
 		return nil, err
@@ -214,7 +219,7 @@ func (r *EventRouter) Flush(ctx context.Context) error {
 // cumulatively acknowledged every durable batch, and removes the fixed-session
 // route. Once retirement starts, the old session rejects new events.
 func (r *EventRouter) DrainAndRetire(ctx context.Context, nodeID, sessionID string) error {
-	key := nodeID + "\x00" + sessionID
+	key := eventRouteKey{nodeID: nodeID, sessionID: sessionID}
 	r.mu.Lock()
 	route := r.routes[key]
 	if route == nil {
@@ -246,13 +251,8 @@ func (r *EventRouter) DrainAndRetire(ctx context.Context, nodeID, sessionID stri
 
 func (r *EventRouter) Close(context.Context) error { r.cancel(); return nil }
 
-func safePathPart(value string) string {
-	return strings.Map(func(ch rune) rune {
-		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_' {
-			return ch
-		}
-		return '_'
-	}, value)
+func identityPathPart(value string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
 }
 
 var _ events.Sink = (*EventRouter)(nil)

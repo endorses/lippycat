@@ -33,9 +33,9 @@ func TestEventRouterPersistsIndependentProducerSessions(t *testing.T) {
 	require.NoError(t, router.HandleEvent(context.Background(), routedDNS("tap-node", "30313233343536373839616263646566", 1)))
 	require.NoError(t, router.HandleEvent(context.Background(), routedDNS("other-node", "31313233343536373839616263646566", 1)))
 
-	first, err := filepath.Glob(filepath.Join(dir, "tap-node", "30313233343536373839616263646566", "*.eventbatch"))
+	first, err := filepath.Glob(filepath.Join(dir, identityPathPart("tap-node"), identityPathPart("30313233343536373839616263646566"), "*.eventbatch"))
 	require.NoError(t, err)
-	second, err := filepath.Glob(filepath.Join(dir, "other-node", "31313233343536373839616263646566", "*.eventbatch"))
+	second, err := filepath.Glob(filepath.Join(dir, identityPathPart("other-node"), identityPathPart("31313233343536373839616263646566"), "*.eventbatch"))
 	require.NoError(t, err)
 	require.Len(t, first, 1)
 	require.Len(t, second, 1)
@@ -48,6 +48,26 @@ func TestEventRouterPersistsIndependentProducerSessions(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, recovered.Close(context.Background())) })
 	require.Len(t, recovered.routes, 2, "startup must resume every unacknowledged producer route")
+}
+
+func TestEventRouterKeepsSanitizedIdentityCollisionsIndependent(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewManager(Config{ForwardMode: "events"}, nil)
+	router, err := NewEventRouter(manager, EventRouterConfig{SpoolDirectory: dir, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE})
+	require.NoError(t, err)
+
+	session := "30313233343536373839616263646566"
+	require.NoError(t, router.HandleEvent(context.Background(), routedDNS("tap/a", session, 1)))
+	require.NoError(t, router.HandleEvent(context.Background(), routedDNS("tap_a", session, 1)))
+	require.Len(t, router.routes, 2)
+	require.NotEqual(t, identityPathPart("tap/a"), identityPathPart("tap_a"))
+	require.NoError(t, router.Close(context.Background()))
+
+	recovered, err := NewEventRouter(manager, EventRouterConfig{SpoolDirectory: dir, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, recovered.Close(context.Background())) })
+	require.Contains(t, recovered.routes, eventRouteKey{nodeID: "tap/a", sessionID: session})
+	require.Contains(t, recovered.routes, eventRouteKey{nodeID: "tap_a", sessionID: session})
 }
 
 func TestEventRouterFlushPersistsTerminalUnsupportedLoss(t *testing.T) {
@@ -66,7 +86,7 @@ func TestEventRouterFlushPersistsTerminalUnsupportedLoss(t *testing.T) {
 	require.NoError(t, router.HandleEvent(context.Background(), events.NewFileContentEvent(envelope)))
 	require.NoError(t, router.Flush(context.Background()))
 
-	spool, err := eventspool.Open(eventspool.Config{Directory: filepath.Join(dir, node, session)})
+	spool, err := eventspool.Open(eventspool.Config{Directory: filepath.Join(dir, identityPathPart(node), identityPathPart(session))})
 	require.NoError(t, err)
 	batches := spool.Batches()
 	require.Len(t, batches, 1)
@@ -94,7 +114,7 @@ func TestEventRouterDrainAndRetireWaitsForAcknowledgment(t *testing.T) {
 	require.Eventually(t, func() bool {
 		router.mu.Lock()
 		defer router.mu.Unlock()
-		return router.routes[node+"\x00"+session].retiring
+		return router.routes[eventRouteKey{nodeID: node, sessionID: session}].retiring
 	}, time.Second, time.Millisecond)
 	require.ErrorContains(t, router.HandleEvent(context.Background(), routedDNS(node, session, 2)), "retiring")
 	select {
@@ -104,12 +124,12 @@ func TestEventRouterDrainAndRetireWaitsForAcknowledgment(t *testing.T) {
 	}
 
 	router.mu.Lock()
-	route := router.routes[node+"\x00"+session]
+	route := router.routes[eventRouteKey{nodeID: node, sessionID: session}]
 	router.mu.Unlock()
 	require.NoError(t, route.spool.Ack(node, session, 1))
 	require.NoError(t, <-drained)
 	router.mu.Lock()
-	_, exists := router.routes[node+"\x00"+session]
+	_, exists := router.routes[eventRouteKey{nodeID: node, sessionID: session}]
 	router.mu.Unlock()
 	require.False(t, exists)
 }

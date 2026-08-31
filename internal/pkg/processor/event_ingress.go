@@ -13,6 +13,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
@@ -34,14 +36,23 @@ type EventIngressPolicy struct {
 }
 
 type ingressSession struct{ batch, event uint64 }
+type ingressSessionKey struct {
+	sourceNodeID      string
+	producerSessionID string
+}
+
+func ingressKey(sourceNodeID, producerSessionID string) ingressSessionKey {
+	return ingressSessionKey{sourceNodeID: sourceNodeID, producerSessionID: producerSessionID}
+}
+
 type eventIngress struct {
 	dispatcher    *events.Dispatcher
 	profile       eventsv1.IngressProfile
 	maxBatchBytes int
 	wal           *eventWAL
 	mu            sync.Mutex
-	sessions      map[string]ingressSession
-	delivered     map[string]ingressSession
+	sessions      map[ingressSessionKey]ingressSession
+	delivered     map[ingressSessionKey]ingressSession
 	authorize     func(*eventsv1.EventIngressOpen) bool
 	flowControl   func() int32
 }
@@ -59,7 +70,7 @@ func newEventIngress(p EventIngressPolicy) (*eventIngress, error) {
 	}
 	i := &eventIngress{
 		dispatcher: p.Dispatcher, profile: profile, maxBatchBytes: p.MaxBatchBytes,
-		sessions: make(map[string]ingressSession), delivered: make(map[string]ingressSession),
+		sessions: make(map[ingressSessionKey]ingressSession), delivered: make(map[ingressSessionKey]ingressSession),
 	}
 	if profile == eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE {
 		if p.WALDirectory == "" {
@@ -110,7 +121,7 @@ func (s *EventService) StreamEvents(stream eventsv1.EventService_StreamEventsSer
 	if err := stream.Send(&eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: s.ingress.profile}); err != nil {
 		return err
 	}
-	key := open.SourceNodeId + "\x00" + open.ProducerSessionId
+	key := ingressKey(open.SourceNodeId, open.ProducerSessionId)
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -133,7 +144,7 @@ func (s *EventService) StreamEvents(stream eventsv1.EventService_StreamEventsSer
 	}
 }
 
-func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.EventIngressOpen, allowedKinds map[events.Kind]struct{}, batch *eventsv1.ProtocolEventBatch) (*eventsv1.EventIngressControl, error) {
+func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eventsv1.EventIngressOpen, allowedKinds map[events.Kind]struct{}, batch *eventsv1.ProtocolEventBatch) (*eventsv1.EventIngressControl, error) {
 	if proto.Size(batch) > i.maxBatchBytes {
 		return nil, status.Error(codes.ResourceExhausted, "event batch exceeds processor ingress limit")
 	}
@@ -211,20 +222,25 @@ func lossRangeCovered(losses []*eventsv1.EventLoss, sourceNodeID, producerSessio
 	if first == 0 || last < first {
 		return false
 	}
-	next := first
+	ranges := make([]*eventsv1.SequenceRange, 0)
 	for _, loss := range losses {
 		if loss.GetSourceNodeId() != sourceNodeID || loss.GetProducerSessionId() != producerSessionID {
 			continue
 		}
 		for _, r := range loss.GetEventSequenceRanges() {
-			if r.GetFirst() > next || r.GetLast() < next {
-				continue
-			}
-			if r.GetLast() >= last {
-				return true
-			}
-			next = r.GetLast() + 1
+			ranges = append(ranges, r)
 		}
+	}
+	sort.Slice(ranges, func(a, b int) bool { return ranges[a].GetFirst() < ranges[b].GetFirst() })
+	next := first
+	for _, r := range ranges {
+		if r.GetFirst() > next || r.GetLast() < next {
+			continue
+		}
+		if r.GetLast() >= last {
+			return true
+		}
+		next = r.GetLast() + 1
 	}
 	return false
 }
@@ -264,7 +280,7 @@ func (i *eventIngress) recover() error {
 		return err
 	}
 	i.sessions = checkpoint
-	i.delivered = make(map[string]ingressSession, len(checkpoint))
+	i.delivered = make(map[ingressSessionKey]ingressSession, len(checkpoint))
 	for key, state := range checkpoint {
 		i.delivered[key] = state
 	}
@@ -273,7 +289,7 @@ func (i *eventIngress) recover() error {
 		if err != nil {
 			return fmt.Errorf("decode recovered event batch: %w", err)
 		}
-		key := batch.SourceNodeId + "\x00" + batch.ProducerSessionId
+		key := ingressKey(batch.SourceNodeId, batch.ProducerSessionId)
 		if state := i.sessions[key]; batch.BatchSequence <= state.batch {
 			return nil
 		}
@@ -323,13 +339,19 @@ func openEventWAL(dir string, max int64) (*eventWAL, error) {
 	return &eventWAL{file: f, maxBytes: max, maxRecordBytes: defaultIngressMaxBatchBytes, size: info.Size(), dir: dir}, nil
 }
 
-func (w *eventWAL) checkpoint(sessions map[string]ingressSession) error {
+func (w *eventWAL) checkpoint(sessions map[ingressSessionKey]ingressSession) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	durable := make(map[string]durableIngressSession, len(sessions))
+	durable := durableIngressCheckpoint{Version: 1, Sessions: make([]durableIngressSession, 0, len(sessions))}
 	for key, state := range sessions {
-		durable[key] = durableIngressSession{Batch: state.batch, Event: state.event}
+		durable.Sessions = append(durable.Sessions, durableIngressSession{SourceNodeID: key.sourceNodeID, ProducerSessionID: key.producerSessionID, Batch: state.batch, Event: state.event})
 	}
+	sort.Slice(durable.Sessions, func(a, b int) bool {
+		if durable.Sessions[a].SourceNodeID == durable.Sessions[b].SourceNodeID {
+			return durable.Sessions[a].ProducerSessionID < durable.Sessions[b].ProducerSessionID
+		}
+		return durable.Sessions[a].SourceNodeID < durable.Sessions[b].SourceNodeID
+	})
 	payload, err := json.Marshal(durable)
 	if err != nil {
 		return fmt.Errorf("marshal event ingress checkpoint: %w", err)
@@ -355,29 +377,65 @@ func (w *eventWAL) checkpoint(sessions map[string]ingressSession) error {
 	return syncIngressDirectory(w.dir)
 }
 
-func (w *eventWAL) loadCheckpoint() (map[string]ingressSession, error) {
+func (w *eventWAL) loadCheckpoint() (map[ingressSessionKey]ingressSession, error) {
 	path := filepath.Join(w.dir, "processor-events.checkpoint")
 	payload, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return make(map[string]ingressSession), nil
+		return make(map[ingressSessionKey]ingressSession), nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read event ingress checkpoint: %w", err)
 	}
-	durable := make(map[string]durableIngressSession)
+	var durable durableIngressCheckpoint
 	if err := json.Unmarshal(payload, &durable); err != nil {
 		return nil, fmt.Errorf("decode event ingress checkpoint: %w", err)
 	}
-	result := make(map[string]ingressSession, len(durable))
-	for key, state := range durable {
+	if durable.Version == 0 {
+		return loadLegacyIngressCheckpoint(payload)
+	}
+	if durable.Version != 1 {
+		return nil, fmt.Errorf("decode event ingress checkpoint: unsupported version %d", durable.Version)
+	}
+	result := make(map[ingressSessionKey]ingressSession, len(durable.Sessions))
+	for _, state := range durable.Sessions {
+		key := ingressKey(state.SourceNodeID, state.ProducerSessionID)
+		if key.sourceNodeID == "" || key.producerSessionID == "" {
+			return nil, errors.New("decode event ingress checkpoint: session identity is required")
+		}
+		if _, exists := result[key]; exists {
+			return nil, errors.New("decode event ingress checkpoint: duplicate session identity")
+		}
 		result[key] = ingressSession{batch: state.Batch, event: state.Event}
 	}
 	return result, nil
 }
 
+func loadLegacyIngressCheckpoint(payload []byte) (map[ingressSessionKey]ingressSession, error) {
+	legacy := make(map[string]durableIngressSession)
+	if err := json.Unmarshal(payload, &legacy); err != nil {
+		return nil, fmt.Errorf("decode legacy event ingress checkpoint: %w", err)
+	}
+	result := make(map[ingressSessionKey]ingressSession, len(legacy))
+	for encoded, state := range legacy {
+		parts := strings.SplitN(encoded, "\x00", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return nil, errors.New("decode legacy event ingress checkpoint: invalid session identity")
+		}
+		result[ingressKey(parts[0], parts[1])] = ingressSession{batch: state.Batch, event: state.Event}
+	}
+	return result, nil
+}
+
+type durableIngressCheckpoint struct {
+	Version  uint32                  `json:"version"`
+	Sessions []durableIngressSession `json:"sessions"`
+}
+
 type durableIngressSession struct {
-	Batch uint64 `json:"batch"`
-	Event uint64 `json:"event"`
+	SourceNodeID      string `json:"source_node_id"`
+	ProducerSessionID string `json:"producer_session_id"`
+	Batch             uint64 `json:"batch"`
+	Event             uint64 `json:"event"`
 }
 
 func syncIngressDirectory(path string) error {

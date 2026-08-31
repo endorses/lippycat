@@ -5,6 +5,8 @@ package processor
 import (
 	"context"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -173,18 +175,18 @@ func TestEventIngressDeduplicatesAndNACKsGaps(t *testing.T) {
 	require.NoError(t, err)
 	b := ingressBatch(t, 1, 1)
 	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
-	ack, err := i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, b)
+	ack, err := i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, b)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), ack.CumulativeAckSequence)
-	ack, err = i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, b)
+	ack, err = i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, b)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), ack.CumulativeAckSequence)
 	i.flowControl = func() int32 { return int32(data.FlowControl_FLOW_PAUSE) }
-	ack, err = i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, b)
+	ack, err = i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, b)
 	require.NoError(t, err)
 	assert.Equal(t, int32(data.FlowControl_FLOW_PAUSE), ack.FlowControl)
 	gap := ingressBatch(t, 3, 2)
-	ctrl, err := i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, gap)
+	ctrl, err := i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, gap)
 	require.NoError(t, err)
 	assert.Equal(t, eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, ctrl.Kind)
 	assert.Equal(t, uint64(2), ctrl.NackBatchRanges[0].First)
@@ -201,7 +203,7 @@ func TestEventIngressAcceptsExplicitlyReportedSpoolGap(t *testing.T) {
 	b := ingressBatch(t, 2, 2)
 	b.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}}}}}
 	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
-	ack, err := i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, b)
+	ack, err := i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, b)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
 }
@@ -216,7 +218,7 @@ func TestEventIngressLossOnlyBatchAdvancesEventHighWater(t *testing.T) {
 	next := ingressBatch(t, 2, 2)
 	lossOnly := &eventsv1.ProtocolEventBatch{SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, BatchSequence: 1, SemanticProfileRevision: 1, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, Count: 1, SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}}}}}}
 	open := &eventsv1.EventIngressOpen{SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, SemanticProfileRevision: 1}
-	key := next.SourceNodeId + "\x00" + next.ProducerSessionId
+	key := ingressKey(next.SourceNodeId, next.ProducerSessionId)
 	ack, err := i.admit(context.Background(), key, open, nil, lossOnly)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), ack.CumulativeAckSequence)
@@ -234,13 +236,13 @@ func TestEventIngressRejectsPartialCrossBatchOverlap(t *testing.T) {
 	require.NoError(t, err)
 	first := ingressBatch(t, 1, 1)
 	open := &eventsv1.EventIngressOpen{SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId, SemanticProfileRevision: 1}
-	_, err = i.admit(context.Background(), first.SourceNodeId+"\x00"+first.ProducerSessionId, open, nil, first)
+	_, err = i.admit(context.Background(), ingressKey(first.SourceNodeId, first.ProducerSessionId), open, nil, first)
 	require.NoError(t, err)
 	overlap := ingressBatch(t, 2, 2)
 	overlap.Events = append([]*eventsv1.ProtocolEvent{first.Events[0]}, overlap.Events...)
 	overlap.FirstEventSequence = 1
 	require.ErrorContains(t, func() error {
-		_, admitErr := i.admit(context.Background(), first.SourceNodeId+"\x00"+first.ProducerSessionId, open, nil, overlap)
+		_, admitErr := i.admit(context.Background(), ingressKey(first.SourceNodeId, first.ProducerSessionId), open, nil, overlap)
 		return admitErr
 	}(), "overlaps")
 }
@@ -312,7 +314,7 @@ func TestReliableEventIngressDispatchesAfterDurableAdmission(t *testing.T) {
 	defer i.wal.close()
 	b := ingressBatch(t, 1, 1)
 	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
-	ack, err := i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, b)
+	ack, err := i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, b)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), ack.CumulativeAckSequence)
 	require.Eventually(t, func() bool { return broadcaster.Stats().Published == 1 }, time.Second, time.Millisecond)
@@ -326,7 +328,7 @@ func TestReliableEventIngressRetainsAckedUndispatchedBatchForRecovery(t *testing
 	require.NoError(t, err)
 	b := ingressBatch(t, 1, 1)
 	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
-	key := b.SourceNodeId + "\x00" + b.ProducerSessionId
+	key := ingressKey(b.SourceNodeId, b.ProducerSessionId)
 	ack, err := ingress.admit(context.Background(), key, open, nil, b)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), ack.CumulativeAckSequence)
@@ -382,7 +384,7 @@ func TestWALRecoveryRestoresLossOnlyEventHighWater(t *testing.T) {
 	}
 	require.NoError(t, i.wal.append(lossOnly))
 	require.NoError(t, i.recover())
-	require.Equal(t, ingressSession{batch: 1, event: 7}, i.sessions["node-a\x00session-a"])
+	require.Equal(t, ingressSession{batch: 1, event: 7}, i.sessions[ingressKey("node-a", "session-a")])
 }
 
 func TestEventWALReplayHonorsConfiguredRecordLimit(t *testing.T) {
@@ -418,7 +420,7 @@ func TestEventWALCheckpointPreservesDedupAfterReset(t *testing.T) {
 	dir := t.TempDir()
 	wal, err := openEventWAL(dir, 1<<20)
 	require.NoError(t, err)
-	sessions := map[string]ingressSession{"node\x00session": {batch: 3, event: 7}}
+	sessions := map[ingressSessionKey]ingressSession{ingressKey("node", "session"): {batch: 3, event: 7}}
 	require.NoError(t, wal.checkpoint(sessions))
 	require.NoError(t, wal.reset())
 	require.NoError(t, wal.close())
@@ -428,4 +430,38 @@ func TestEventWALCheckpointPreservesDedupAfterReset(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, sessions, got)
 	require.NoError(t, reopened.close())
+}
+
+func TestEventWALCheckpointKeepsDelimiterContainingIdentitiesDistinct(t *testing.T) {
+	dir := t.TempDir()
+	wal, err := openEventWAL(dir, 1<<20)
+	require.NoError(t, err)
+	sessions := map[ingressSessionKey]ingressSession{
+		ingressKey("a\x00b", "c"): {batch: 1, event: 2},
+		ingressKey("a", "b\x00c"): {batch: 3, event: 4},
+	}
+	require.NoError(t, wal.checkpoint(sessions))
+	got, err := wal.loadCheckpoint()
+	require.NoError(t, err)
+	require.Equal(t, sessions, got)
+	require.NoError(t, wal.close())
+}
+
+func TestEventWALLoadsLegacyCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "processor-events.checkpoint"), []byte(`{"node\u0000session":{"batch":3,"event":7}}`), 0o600))
+	wal, err := openEventWAL(dir, 1<<20)
+	require.NoError(t, err)
+	got, err := wal.loadCheckpoint()
+	require.NoError(t, err)
+	require.Equal(t, ingressSession{batch: 3, event: 7}, got[ingressKey("node", "session")])
+	require.NoError(t, wal.close())
+}
+
+func TestLossRangeCoveredAcrossOutOfOrderLossRecords(t *testing.T) {
+	losses := []*eventsv1.EventLoss{
+		{SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 5, Last: 10}}},
+		{SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 4}}},
+	}
+	require.True(t, lossRangeCovered(losses, "node", "session", 1, 10))
 }

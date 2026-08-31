@@ -453,7 +453,7 @@ func (p *Processor) Shutdown() error {
 	return nil
 }
 
-func ingressSessionsEqual(a, b map[string]ingressSession) bool {
+func ingressSessionsEqual(a, b map[ingressSessionKey]ingressSession) bool {
 	if len(a) != len(b) {
 		return false
 	}

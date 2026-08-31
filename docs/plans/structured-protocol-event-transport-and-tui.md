@@ -453,6 +453,12 @@ successful reconciliation, and failed boundaries stop the tap rather than
 continuing with mixed semantics. Focused race tests cover source draining,
 transaction rollback and no-op behavior, producer rotation, and upstream route
 retirement; processor and tap suites pass.
+A final processor-ingress audit replaced delimiter-concatenated deduplication
+keys with typed producer identity keys and a versioned, collision-free WAL
+checkpoint representation that migrates legacy checkpoints. It also made exact
+gap coverage independent of the order of loss records. Regression tests cover
+identities containing delimiter bytes and valid loss ranges reported in
+non-global order.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

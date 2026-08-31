@@ -91,6 +91,7 @@ type Manager struct {
 	consecutiveFailures  atomic.Int32
 	droppedBatches       atomic.Uint64
 	droppedPackets       atomic.Uint64
+	modeNegotiated       atomic.Bool
 	maxReconnectAttempts int // 0 = unlimited
 
 	// Context for goroutines
@@ -121,14 +122,26 @@ func (m *Manager) Start() error {
 		return fmt.Errorf("upstream address not configured")
 	}
 
+	initialConnected := false
+	// Packet fallback cannot safely change the forwarding mode after local tap
+	// capture has begun: packets observed before negotiation would already have
+	// been committed to the event pipeline. Resolve that explicit boundary
+	// synchronously before Processor.Start launches local capture.
+	if m.config.ForwardMode == "events" && m.config.EventFallbackToPackets {
+		if err := m.connectAndRegister(); err != nil {
+			return fmt.Errorf("negotiate initial upstream forwarding mode: %w", err)
+		}
+		initialConnected = true
+	}
+
 	m.wg.Add(1)
-	go m.connectionManager()
+	go m.connectionManager(initialConnected)
 
 	return nil
 }
 
 // connectionManager manages upstream connection lifecycle with automatic reconnection
-func (m *Manager) connectionManager() {
+func (m *Manager) connectionManager(initialConnected bool) {
 	defer m.wg.Done()
 
 	logger.Info("Upstream connection manager started", "addr", m.config.Address)
@@ -141,8 +154,13 @@ func (m *Manager) connectionManager() {
 		default:
 		}
 
-		// Attempt to connect
-		err := m.connectAndRegister()
+		// Attempt to connect unless Start already established the initial
+		// generation to resolve an explicit fallback before capture begins.
+		var err error
+		if !initialConnected {
+			err = m.connectAndRegister()
+		}
+		initialConnected = false
 		if err == nil {
 			// Successfully connected
 			logger.Info("Connected to upstream processor", "addr", m.config.Address)
@@ -243,11 +261,12 @@ func (m *Manager) connectAndRegister() error {
 		if m.config.ForwardMode == "events" {
 			requestedMode = management.ForwardingMode_FORWARDING_MODE_EVENTS
 		}
+		allowFallback := m.config.EventFallbackToPackets && !m.modeNegotiated.Load()
 		regResp, err := m.mgmtClient.RegisterProcessor(m.ctx, &management.ProcessorRegistration{
 			ProcessorId:     m.config.ProcessorID,
 			ListenAddress:   m.config.ListenAddress,
 			Version:         "dev", // TODO: Use actual version
-			EventForwarding: &management.EventForwardingCapabilities{RequestedMode: requestedMode, EventApiMajors: []uint32{1}, EventKinds: []int32{1, 2, 3, 4, 5, 6}, SemanticProfileRevision: 1, StatefulAnalysisFeatures: []string{"relay"}, AllowPacketFallback: m.config.EventFallbackToPackets},
+			EventForwarding: &management.EventForwardingCapabilities{RequestedMode: requestedMode, EventApiMajors: []uint32{1}, EventKinds: []int32{1, 2, 3, 4, 5, 6}, SemanticProfileRevision: 1, StatefulAnalysisFeatures: []string{"relay"}, AllowPacketFallback: allowFallback},
 		})
 		if err != nil {
 			grpcpool.Release(m.connPool, m.config.Address)
@@ -261,7 +280,7 @@ func (m *Manager) connectAndRegister() error {
 		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_UNSPECIFIED {
 			acceptedMode = management.ForwardingMode_FORWARDING_MODE_PACKETS
 		}
-		if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && acceptedMode != requestedMode && !m.config.EventFallbackToPackets {
+		if requestedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS && acceptedMode != requestedMode && !allowFallback {
 			grpcpool.Release(m.connPool, m.config.Address)
 			return fmt.Errorf("upstream rejected requested event forwarding profile: selected %s", acceptedMode)
 		}
@@ -271,6 +290,13 @@ func (m *Manager) connectAndRegister() error {
 			m.mu.Unlock()
 			logger.Warn("Upstream explicitly selected packet fallback", "notice", regResp.GetForwardingNotice())
 		}
+		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+			if err := validateAcceptedEventProfile(regResp); err != nil {
+				grpcpool.Release(m.connPool, m.config.Address)
+				return fmt.Errorf("upstream accepted an insufficient event forwarding profile: %w", err)
+			}
+		}
+		m.modeNegotiated.Store(true)
 
 		// Store the upstream processor ID for topology reporting
 		m.upstreamProcessorID = regResp.UpstreamProcessorId
@@ -311,6 +337,26 @@ func (m *Manager) connectAndRegister() error {
 	go m.sendBatches(generation)
 	go m.receiveAcks(generation)
 
+	return nil
+}
+
+func validateAcceptedEventProfile(resp *management.ProcessorRegistrationResponse) error {
+	if resp.GetAcceptedEventApiMajor() != 1 {
+		return fmt.Errorf("unsupported event API major %d", resp.GetAcceptedEventApiMajor())
+	}
+	if resp.GetAcceptedSemanticProfileRevision() != 1 {
+		return fmt.Errorf("unsupported semantic profile revision %d", resp.GetAcceptedSemanticProfileRevision())
+	}
+
+	acceptedKinds := make(map[int32]struct{}, len(resp.GetAcceptedEventKinds()))
+	for _, kind := range resp.GetAcceptedEventKinds() {
+		acceptedKinds[kind] = struct{}{}
+	}
+	for _, required := range []int32{1, 2, 3, 4, 5, 6} {
+		if _, ok := acceptedKinds[required]; !ok {
+			return fmt.Errorf("required event kind %d was not accepted", required)
+		}
+	}
 	return nil
 }
 

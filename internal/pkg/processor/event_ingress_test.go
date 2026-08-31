@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/events"
@@ -178,11 +179,16 @@ func TestEventIngressDeduplicatesAndNACKsGaps(t *testing.T) {
 	ack, err = i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, b)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), ack.CumulativeAckSequence)
+	i.flowControl = func() int32 { return int32(data.FlowControl_FLOW_PAUSE) }
+	ack, err = i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, b)
+	require.NoError(t, err)
+	assert.Equal(t, int32(data.FlowControl_FLOW_PAUSE), ack.FlowControl)
 	gap := ingressBatch(t, 3, 2)
 	ctrl, err := i.admit(context.Background(), b.SourceNodeId+"\x00"+b.ProducerSessionId, open, nil, gap)
 	require.NoError(t, err)
 	assert.Equal(t, eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, ctrl.Kind)
 	assert.Equal(t, uint64(2), ctrl.NackBatchRanges[0].First)
+	assert.Equal(t, int32(data.FlowControl_FLOW_PAUSE), ctrl.FlowControl)
 }
 
 func TestEventIngressAcceptsExplicitlyReportedSpoolGap(t *testing.T) {

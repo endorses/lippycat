@@ -47,6 +47,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
 	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
@@ -525,7 +526,9 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 		}
 	}
 
-	err := p.downstreamManager.Register(req.ProcessorId, req.ListenAddress, req.Version)
+	err := p.downstreamManager.Register(req.ProcessorId, req.ListenAddress, req.Version, downstream.ForwardingContract{
+		Mode: mode, EventAPIMajor: apiMajor, EventKinds: kinds, SemanticProfileRevision: profileRevision,
+	})
 	if err != nil {
 		return &management.ProcessorRegistrationResponse{
 			Accepted: false,

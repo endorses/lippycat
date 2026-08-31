@@ -561,7 +561,29 @@ func New(config Config) (*Processor, error) {
 			}
 			return true
 		}
-		return p.downstreamManager != nil && p.downstreamManager.Get(open.RelayNodeId) != nil
+		if p.downstreamManager == nil {
+			return false
+		}
+		registered := p.downstreamManager.Get(open.RelayNodeId)
+		if registered == nil {
+			return false
+		}
+		contract := registered.GetForwardingContract()
+		if contract.Mode != management.ForwardingMode_FORWARDING_MODE_EVENTS ||
+			contract.EventAPIMajor != open.EventApiMajor ||
+			contract.SemanticProfileRevision != open.SemanticProfileRevision {
+			return false
+		}
+		acceptedKinds := make(map[int32]struct{}, len(contract.EventKinds))
+		for _, kind := range contract.EventKinds {
+			acceptedKinds[kind] = struct{}{}
+		}
+		for _, kind := range open.EventKinds {
+			if _, ok := acceptedKinds[int32(kind)]; !ok {
+				return false
+			}
+		}
+		return true
 	}
 
 	// Initialize hunter monitor (will be started in Start())

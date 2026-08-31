@@ -428,6 +428,13 @@ policy now quiesces the hunter's provisional capture, discards pre-policy
 packets, and restarts capture with the accepted filter before forwarding begins.
 Focused regressions, the race-enabled Phase 5 package suite, and hunter,
 processor, and tap specialized-build compilation pass.
+A final cross-component audit corrected accepted-profile validation for
+hierarchical processor/tap forwarding, revalidates producer and relay
+authorization for every ingress batch after re-registration, and preserves
+processor flow-control state on duplicate ACK and gap NACK responses. Explicit
+tap packet fallback now completes initial upstream negotiation before local
+capture starts, preventing pre-negotiation events from being stranded or later
+replayed across the forwarding-mode boundary.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

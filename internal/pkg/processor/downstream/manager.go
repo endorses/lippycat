@@ -22,9 +22,13 @@ type ProcessorInfo struct {
 	Version       string
 	RegisteredAt  time.Time
 	LastSeen      time.Time
-
 	// mu protects all fields below from concurrent access
 	mu sync.Mutex
+
+	ForwardingMode          management.ForwardingMode
+	EventAPIMajor           uint32
+	EventKinds              []int32
+	SemanticProfileRevision uint32
 
 	// gRPC client for querying this downstream processor (protected by mu)
 	client management.ManagementServiceClient
@@ -41,12 +45,33 @@ type ProcessorInfo struct {
 	reconnectBackoff  time.Duration // Current backoff duration
 }
 
+// ForwardingContract records the event profile accepted for a downstream
+// processor registration. Event ingress must remain within this contract.
+type ForwardingContract struct {
+	Mode                    management.ForwardingMode
+	EventAPIMajor           uint32
+	EventKinds              []int32
+	SemanticProfileRevision uint32
+}
+
 // GetClient returns the gRPC management client in a thread-safe manner.
 // Returns nil if the client is not initialized.
 func (p *ProcessorInfo) GetClient() management.ManagementServiceClient {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.client
+}
+
+// GetForwardingContract returns a snapshot of the currently accepted profile.
+func (p *ProcessorInfo) GetForwardingContract() ForwardingContract {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return ForwardingContract{
+		Mode:                    p.ForwardingMode,
+		EventAPIMajor:           p.EventAPIMajor,
+		EventKinds:              append([]int32(nil), p.EventKinds...),
+		SemanticProfileRevision: p.SemanticProfileRevision,
+	}
 }
 
 // setClient sets the gRPC client and connection in a thread-safe manner.
@@ -133,11 +158,15 @@ func (m *Manager) SetTopologyPublisher(publisher TopologyPublisher) {
 }
 
 // Register registers a downstream processor
-func (m *Manager) Register(processorID, listenAddress, version string) error {
+func (m *Manager) Register(processorID, listenAddress, version string, contracts ...ForwardingContract) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
+	contract := ForwardingContract{Mode: management.ForwardingMode_FORWARDING_MODE_PACKETS}
+	if len(contracts) != 0 {
+		contract = contracts[0]
+	}
 
 	// Check if already registered
 	if existing, exists := m.downstreams[processorID]; exists {
@@ -147,6 +176,12 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 		existing.LastSeen = now
 		existing.ListenAddress = listenAddress // Update in case it changed
 		existing.Version = version
+		existing.mu.Lock()
+		existing.ForwardingMode = contract.Mode
+		existing.EventAPIMajor = contract.EventAPIMajor
+		existing.EventKinds = append(existing.EventKinds[:0], contract.EventKinds...)
+		existing.SemanticProfileRevision = contract.SemanticProfileRevision
+		existing.mu.Unlock()
 
 		// Create new gRPC client FIRST before closing old connection
 		// This ensures the existing goroutine can use the new client immediately
@@ -249,13 +284,17 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 	client := management.NewManagementServiceClient(conn)
 
 	proc := &ProcessorInfo{
-		ProcessorID:   processorID,
-		ListenAddress: listenAddress,
-		Version:       version,
-		RegisteredAt:  now,
-		LastSeen:      now,
-		client:        client,
-		conn:          conn,
+		ProcessorID:             processorID,
+		ListenAddress:           listenAddress,
+		Version:                 version,
+		RegisteredAt:            now,
+		LastSeen:                now,
+		ForwardingMode:          contract.Mode,
+		EventAPIMajor:           contract.EventAPIMajor,
+		EventKinds:              append([]int32(nil), contract.EventKinds...),
+		SemanticProfileRevision: contract.SemanticProfileRevision,
+		client:                  client,
+		conn:                    conn,
 	}
 
 	m.downstreams[processorID] = proc

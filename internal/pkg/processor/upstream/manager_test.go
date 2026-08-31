@@ -9,9 +9,37 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/stretchr/testify/require"
 )
+
+func TestValidateAcceptedEventProfile(t *testing.T) {
+	valid := &management.ProcessorRegistrationResponse{
+		AcceptedEventApiMajor:           1,
+		AcceptedSemanticProfileRevision: 1,
+		AcceptedEventKinds:              []int32{1, 2, 3, 4, 5, 6},
+	}
+	require.NoError(t, validateAcceptedEventProfile(valid))
+
+	tests := []struct {
+		name   string
+		mutate func(*management.ProcessorRegistrationResponse)
+		want   string
+	}{
+		{name: "API major", mutate: func(r *management.ProcessorRegistrationResponse) { r.AcceptedEventApiMajor = 2 }, want: "API major"},
+		{name: "semantic profile", mutate: func(r *management.ProcessorRegistrationResponse) { r.AcceptedSemanticProfileRevision = 2 }, want: "semantic profile"},
+		{name: "event kinds", mutate: func(r *management.ProcessorRegistrationResponse) { r.AcceptedEventKinds = []int32{1, 2, 3, 4, 5} }, want: "event kind 6"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := *valid
+			response.AcceptedEventKinds = append([]int32(nil), valid.AcceptedEventKinds...)
+			test.mutate(&response)
+			require.ErrorContains(t, validateAcceptedEventProfile(&response), test.want)
+		})
+	}
+}
 
 type detectingStream struct {
 	inSend     atomic.Int32

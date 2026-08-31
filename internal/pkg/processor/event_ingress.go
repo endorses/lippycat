@@ -120,6 +120,9 @@ func (s *EventService) StreamEvents(stream eventsv1.EventService_StreamEventsSer
 		if batch == nil {
 			return status.Error(codes.InvalidArgument, "producer session is already open")
 		}
+		if s.ingress.authorize != nil && !s.ingress.authorize(open) {
+			return status.Error(codes.PermissionDenied, "event producer or relay registration no longer authorizes this session")
+		}
 		ctrl, err := s.ingress.admit(stream.Context(), key, open, allowedKinds, batch)
 		if err != nil {
 			return err
@@ -152,13 +155,13 @@ func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.Event
 	defer i.mu.Unlock()
 	state := i.sessions[key]
 	if batch.BatchSequence <= state.batch {
-		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch}, nil
+		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
 	}
 	eventGapFirst := state.event + 1
 	hasEventGap := batch.FirstEventSequence > eventGapFirst
 	gapCovered := hasEventGap && lossRangeCovered(batch.GetStats().GetLosses(), open.SourceNodeId, open.ProducerSessionId, eventGapFirst, batch.FirstEventSequence-1)
 	if batch.BatchSequence != state.batch+1 && !gapCovered {
-		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, CumulativeAckSequence: state.batch, NackBatchRanges: []*eventsv1.SequenceRange{{First: state.batch + 1, Last: batch.BatchSequence - 1}}}, nil
+		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, CumulativeAckSequence: state.batch, NackBatchRanges: []*eventsv1.SequenceRange{{First: state.batch + 1, Last: batch.BatchSequence - 1}}, FlowControl: i.currentFlowControl()}, nil
 	}
 	if batch.FirstEventSequence != 0 && batch.FirstEventSequence <= state.event {
 		return nil, status.Error(codes.InvalidArgument, "event sequence overlaps previously admitted events")

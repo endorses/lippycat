@@ -29,9 +29,6 @@ type interfaceTelemetry struct {
 }
 
 func newTelemetryCollector(callback TelemetryCallback) *telemetryCollector {
-	if callback == nil {
-		return nil
-	}
 	return &telemetryCollector{
 		interfaces: make(map[string]interfaceTelemetry),
 		callback:   callback,
@@ -60,6 +57,8 @@ func (c *telemetryCollector) report(interfaceName string, received, kernelDrops,
 	}
 	snapshot.PacketBufferDrops = bufferDrops
 	c.mu.Unlock()
-	c.callback(snapshot)
+	if c.callback != nil {
+		c.callback(snapshot)
+	}
 	return snapshot
 }

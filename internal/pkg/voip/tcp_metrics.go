@@ -304,14 +304,15 @@ func (f *sipStreamFactory) performAutoTuning() {
 	activeGoroutines := atomic.LoadInt64(&f.activeGoroutines)
 	f.configMutex.RLock()
 	maxStreams := int64(f.config.MaxStreams)
+	backpressureAllowed := f.config.EnableBackpressure
 	f.configMutex.RUnlock()
 
 	// MaxGoroutines is a soft observability threshold and is not a capacity
 	// control. Base pressure on MaxStreams, the actual enforced stream limit.
 	// An unlimited stream configuration has no capacity-derived pressure signal.
-	if maxStreams > 0 && activeGoroutines > maxStreams*8/10 {
+	if backpressureAllowed && maxStreams > 0 && activeGoroutines > maxStreams*8/10 {
 		f.enableBackpressure()
-	} else if maxStreams == 0 || activeGoroutines < maxStreams*3/10 {
+	} else if !backpressureAllowed || maxStreams == 0 || activeGoroutines < maxStreams*3/10 {
 		f.relaxBackpressure()
 	}
 

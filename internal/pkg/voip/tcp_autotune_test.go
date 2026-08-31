@@ -27,7 +27,9 @@ func TestAutoTuningUsesEnforcedStreamCapacity(t *testing.T) {
 	// This is above the soft monitoring threshold, but well below the actual
 	// enforced stream capacity and must not activate control pressure.
 	atomic.StoreInt64(&factory.activeGoroutines, 20)
-	factory.performAutoTuning()
+	for range 10 {
+		factory.performAutoTuning()
+	}
 
 	assert.False(t, factory.backpressureEnabled)
 	assert.Equal(t, 32, factory.getCurrentBatchSize())
@@ -37,6 +39,23 @@ func TestAutoTuningUsesEnforcedStreamCapacity(t *testing.T) {
 
 	assert.True(t, factory.backpressureEnabled)
 	assert.Equal(t, 16, factory.getCurrentBatchSize())
+}
+
+func TestAutoTuningRespectsDisabledBackpressure(t *testing.T) {
+	cfg := *DefaultConfig()
+	cfg.MaxStreams = 100
+	cfg.TCPBatchSize = 64
+	cfg.EnableBackpressure = false
+	cfg.MemoryOptimization = false
+	factory := newAutoTuneTestFactory(cfg)
+
+	atomic.StoreInt64(&factory.activeGoroutines, 90)
+	for range 10 {
+		factory.performAutoTuning()
+	}
+
+	assert.False(t, factory.backpressureEnabled)
+	assert.Equal(t, 64, factory.getCurrentBatchSize())
 }
 
 func TestAutoTuningUnlimitedStreamsIgnoresSoftThreshold(t *testing.T) {

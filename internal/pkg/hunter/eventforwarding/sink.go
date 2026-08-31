@@ -2,6 +2,7 @@ package eventforwarding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -45,7 +46,16 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	stats := &eventsv1.EventBatchStats{Losses: cloneLosses(s.pendingLosses)}
 	batch, err := protoadapter.ToProtoBatch(env.NodeID, env.ProducerSessionID, s.nextBatchSequence, []events.Event{event}, stats, s.semanticProfileRevision)
 	if err != nil {
-		return fmt.Errorf("forward event: encode batch: %w", err)
+		if !errors.Is(err, protoadapter.ErrFileContentDisallowed) {
+			return fmt.Errorf("forward event: encode batch: %w", err)
+		}
+		s.client.reportLoss(eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, 1)
+		s.pendingLosses = append(s.pendingLosses, &eventsv1.EventLoss{
+			Kind: eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, Count: 1,
+			SourceNodeId: env.NodeID, ProducerSessionId: env.ProducerSessionID,
+			EventSequenceRanges: []*eventsv1.SequenceRange{{First: env.EventSequence, Last: env.EventSequence}},
+		})
+		return nil
 	}
 	result, err := s.client.Enqueue(batch)
 	if err != nil {
@@ -64,7 +74,28 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	return nil
 }
 
-func (s *Sink) Flush(context.Context) error { return nil }
+func (s *Sink) Flush(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.pendingLosses) == 0 {
+		return nil
+	}
+	batch := &eventsv1.ProtocolEventBatch{
+		SourceNodeId: s.client.config.SourceNodeID, ProducerSessionId: s.client.config.ProducerSessionID,
+		BatchSequence: s.nextBatchSequence, SemanticProfileRevision: s.semanticProfileRevision,
+		Stats: &eventsv1.EventBatchStats{Losses: cloneLosses(s.pendingLosses)},
+	}
+	result, err := s.client.Enqueue(batch)
+	if err != nil {
+		return err
+	}
+	if !result.Stored {
+		return fmt.Errorf("flush unsupported-event loss report: event spool rejected batch")
+	}
+	s.nextBatchSequence++
+	s.pendingLosses = nil
+	return nil
+}
 func (s *Sink) Close(context.Context) error { return nil }
 
 func cloneLosses(input []*eventsv1.EventLoss) []*eventsv1.EventLoss {

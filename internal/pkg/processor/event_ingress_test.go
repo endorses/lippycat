@@ -92,6 +92,25 @@ func TestEventIngressAcceptsExplicitlyReportedSpoolGap(t *testing.T) {
 	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
 }
 
+func TestEventIngressLossOnlyBatchAdvancesEventHighWater(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "memory_only"})
+	require.NoError(t, err)
+	next := ingressBatch(t, 2, 2)
+	lossOnly := &eventsv1.ProtocolEventBatch{SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, BatchSequence: 1, SemanticProfileRevision: 1, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, Count: 1, SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}}}}}}
+	open := &eventsv1.EventIngressOpen{SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, SemanticProfileRevision: 1}
+	key := next.SourceNodeId + "\x00" + next.ProducerSessionId
+	ack, err := i.admit(context.Background(), key, open, nil, lossOnly)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), ack.CumulativeAckSequence)
+	ack, err = i.admit(context.Background(), key, open, nil, next)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
+}
+
 func TestEventIngressRejectsPartialCrossBatchOverlap(t *testing.T) {
 	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
 	require.NoError(t, err)

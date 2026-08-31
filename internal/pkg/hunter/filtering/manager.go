@@ -29,6 +29,10 @@ type ApplicationFilterUpdater interface {
 	UpdateFilters(filters []*management.Filter)
 }
 
+type PolicyChangeCoordinator interface {
+	ApplyPolicyChange(func() error) error
+}
+
 // Manager handles filter subscription and updates from processor
 type Manager struct {
 	hunterID string
@@ -36,9 +40,18 @@ type Manager struct {
 	filters  []*management.Filter
 
 	// Dependencies
-	captureRestarter CaptureRestarter
-	disconnectMarker DisconnectMarker
-	appFilterUpdater ApplicationFilterUpdater // Optional: for hot-reload of app-level filters
+	captureRestarter  CaptureRestarter
+	disconnectMarker  DisconnectMarker
+	appFilterUpdater  ApplicationFilterUpdater // Optional: for hot-reload of app-level filters
+	policyCoordinator PolicyChangeCoordinator
+	initialApplied    bool
+	pendingInitial    []*management.Filter
+}
+
+func (m *Manager) SetPolicyChangeCoordinator(coordinator PolicyChangeCoordinator) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.policyCoordinator = coordinator
 }
 
 // New creates a new filter manager
@@ -80,7 +93,17 @@ func (m *Manager) GetFilterCount() int {
 // SetInitialFilters sets the initial filters from registration response
 func (m *Manager) SetInitialFilters(filters []*management.Filter) {
 	m.mu.Lock()
-	m.filters = filters
+	if m.initialApplied {
+		if filtersEqual(m.filters, filters) {
+			m.mu.Unlock()
+			return
+		}
+		m.pendingInitial = append([]*management.Filter(nil), filters...)
+		m.mu.Unlock()
+		return
+	}
+	m.initialApplied = true
+	m.filters = append([]*management.Filter(nil), filters...)
 	appFilterUpdater := m.appFilterUpdater
 	m.mu.Unlock()
 
@@ -89,6 +112,65 @@ func (m *Manager) SetInitialFilters(filters []*management.Filter) {
 	if appFilterUpdater != nil {
 		appFilterUpdater.UpdateFilters(filters)
 	}
+}
+
+func (m *Manager) ApplyPendingInitial() {
+	m.mu.Lock()
+	if len(m.pendingInitial) == 0 {
+		m.mu.Unlock()
+		return
+	}
+	next := append([]*management.Filter(nil), m.pendingInitial...)
+	m.pendingInitial = nil
+	previous := append([]*management.Filter(nil), m.filters...)
+	updater := m.appFilterUpdater
+	coordinator := m.policyCoordinator
+	m.mu.Unlock()
+
+	apply := func() error {
+		if updater != nil && !containsAnyBPF(previous) && !containsAnyBPF(next) {
+			updater.UpdateFilters(next)
+			if coordinator != nil {
+				return m.captureRestarter.Restart(next)
+			}
+			return nil
+		}
+		return m.captureRestarter.Restart(next)
+	}
+	var err error
+	if coordinator != nil {
+		err = coordinator.ApplyPolicyChange(apply)
+	} else {
+		err = apply()
+	}
+	if err != nil {
+		logger.Error("Failed to apply changed registration filter policy", "error", err)
+		return
+	}
+	m.mu.Lock()
+	m.filters = next
+	m.mu.Unlock()
+}
+
+func filtersEqual(left, right []*management.Filter) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !proto.Equal(left[i], right[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsAnyBPF(filters []*management.Filter) bool {
+	for _, filter := range filters {
+		if filter != nil && filter.Type == management.FilterType_FILTER_BPF {
+			return true
+		}
+	}
+	return false
 }
 
 // Subscribe subscribes to filter updates from processor
@@ -197,6 +279,7 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 		"filter_type", update.Filter.Type)
 
 	m.mu.Lock()
+	previousFilters := append([]*management.Filter(nil), m.filters...)
 	filtersChanged := false
 
 	switch update.UpdateType {
@@ -289,6 +372,7 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 	// Get current filters and appFilterUpdater before unlocking
 	currentFilters := append([]*management.Filter(nil), m.filters...)
 	appFilterUpdater := m.appFilterUpdater
+	policyCoordinator := m.policyCoordinator
 	m.mu.Unlock()
 
 	// Apply filters based on type
@@ -296,29 +380,43 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 		// Check if this is a BPF filter change (requires capture restart)
 		needsRestart := m.containsBPFFilter(update.Filter)
 
-		if needsRestart {
-			// BPF filter changed - must restart capture
-			logger.Info("BPF filter changed, restarting capture", "active_filters", len(currentFilters))
+		apply := func() error {
+			if needsRestart {
+				// BPF filter changed - must restart capture
+				logger.Info("BPF filter changed, restarting capture", "active_filters", len(currentFilters))
 
-			if err := m.captureRestarter.Restart(currentFilters); err != nil {
-				logger.Error("Failed to restart capture with new filters", "error", err)
+				return m.captureRestarter.Restart(currentFilters)
+			} else if appFilterUpdater != nil {
+				// Application-level filter changed - hot-reload without restart
+				// Note: Phase 2 removed sipusers sync - ApplicationFilter handles all filter types
+				logger.Info("Application-level filter changed, hot-reloading (no restart)",
+					"active_filters", len(currentFilters))
+
+				// Update application filter without restarting capture
+				appFilterUpdater.UpdateFilters(currentFilters)
+				if policyCoordinator != nil {
+					return m.captureRestarter.Restart(currentFilters)
+				}
+				return nil
+			} else {
+				// No app filter updater - fall back to restart (backward compatibility)
+				logger.Info("Application-level filter changed but no updater set, restarting capture",
+					"active_filters", len(currentFilters))
+
+				return m.captureRestarter.Restart(currentFilters)
 			}
-		} else if appFilterUpdater != nil {
-			// Application-level filter changed - hot-reload without restart
-			// Note: Phase 2 removed sipusers sync - ApplicationFilter handles all filter types
-			logger.Info("Application-level filter changed, hot-reloading (no restart)",
-				"active_filters", len(currentFilters))
-
-			// Update application filter without restarting capture
-			appFilterUpdater.UpdateFilters(currentFilters)
+		}
+		var err error
+		if policyCoordinator != nil {
+			err = policyCoordinator.ApplyPolicyChange(apply)
 		} else {
-			// No app filter updater - fall back to restart (backward compatibility)
-			logger.Info("Application-level filter changed but no updater set, restarting capture",
-				"active_filters", len(currentFilters))
-
-			if err := m.captureRestarter.Restart(currentFilters); err != nil {
-				logger.Error("Failed to restart capture with new filters", "error", err)
-			}
+			err = apply()
+		}
+		if err != nil {
+			m.mu.Lock()
+			m.filters = previousFilters
+			m.mu.Unlock()
+			logger.Error("Failed to apply filter policy change", "error", err)
 		}
 	}
 }

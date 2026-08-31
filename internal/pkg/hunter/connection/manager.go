@@ -70,6 +70,7 @@ type StatsCollector interface {
 type FilterManager interface {
 	GetFilterCount() int
 	SetInitialFilters(filters []*management.Filter)
+	ApplyPendingInitial()
 	Subscribe(ctx, connCtx context.Context, mgmtClient management.ManagementServiceClient)
 }
 
@@ -106,6 +107,7 @@ type Manager struct {
 	forwardingManager  *forwarding.Manager
 	flowControlHandler func(*data.StreamControl)
 	eventForwarder     *eventforwarding.Client
+	eventForwarderMu   sync.RWMutex
 	acceptedMode       management.ForwardingMode
 	modeReady          chan management.ForwardingMode
 
@@ -129,7 +131,17 @@ type Manager struct {
 	closeDataTransport  func() error
 }
 
-func (m *Manager) SetEventForwarder(client *eventforwarding.Client) { m.eventForwarder = client }
+func (m *Manager) SetEventForwarder(client *eventforwarding.Client) {
+	m.eventForwarderMu.Lock()
+	defer m.eventForwarderMu.Unlock()
+	m.eventForwarder = client
+}
+
+func (m *Manager) getEventForwarder() *eventforwarding.Client {
+	m.eventForwarderMu.RLock()
+	defer m.eventForwarderMu.RUnlock()
+	return m.eventForwarder
+}
 
 const defaultForwardingExitGrace = time.Second
 
@@ -273,12 +285,13 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 			// Start the negotiated transport only. A producer session never emits
 			// both packets and normalized events.
 			if m.acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+				forwarder := m.getEventForwarder()
 				m.connWg.Add(1)
 				go func() {
 					defer m.connWg.Done()
 					stream, streamErr := m.eventClient.StreamEvents(m.connCtx)
 					if streamErr == nil {
-						streamErr = m.eventForwarder.Serve(m.connCtx, stream)
+						streamErr = forwarder.Serve(m.connCtx, stream)
 					}
 					if streamErr != nil && m.connCtx.Err() == nil {
 						logger.Error("Event stream failed", "error", streamErr)
@@ -292,6 +305,7 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 				go m.forwardingManager.ForwardPackets(&m.connWg)
 				go m.handleStreamControl()
 			}
+			m.filterManager.ApplyPendingInitial()
 
 			// Start common connection-dependent goroutines.
 			m.connWg.Add(2)
@@ -548,14 +562,10 @@ func (m *Manager) register() error {
 		// reconnect must not silently switch the same capture session to events.
 		m.config.ForwardMode = "packets"
 	}
-	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS && m.eventForwarder == nil {
+	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS && m.getEventForwarder() == nil {
 		return fmt.Errorf("registration selected event forwarding without an event runtime")
 	}
 	m.acceptedMode = accepted
-	select {
-	case m.modeReady <- accepted:
-	default:
-	}
 
 	logger.Info("Registration accepted",
 		"assigned_id", resp.AssignedId,
@@ -563,6 +573,10 @@ func (m *Manager) register() error {
 
 	// Store initial filters in filter manager
 	m.filterManager.SetInitialFilters(resp.Filters)
+	select {
+	case m.modeReady <- accepted:
+	default:
+	}
 
 	return nil
 }

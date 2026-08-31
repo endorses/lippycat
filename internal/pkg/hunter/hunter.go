@@ -104,6 +104,11 @@ type Hunter struct {
 	eventRuntime    *eventanalysis.Runtime
 	eventDispatcher *events.Dispatcher
 	eventForwarder  *eventforwarding.Client
+	eventSpool      *eventspool.Spool
+	eventMu         sync.RWMutex
+	eventLossMu     sync.Mutex
+	eventLossSource *events.Dispatcher
+	eventLossCount  uint64
 }
 
 // New creates a new hunter instance
@@ -153,6 +158,9 @@ func New(config Config) (*Hunter, error) {
 
 	// Create filter manager with capture restarter interface
 	h.filterManager = filtering.New(config.HunterID, captureManager, h)
+	if config.ForwardMode == "events" {
+		h.filterManager.SetPolicyChangeCoordinator(h)
+	}
 
 	// Note: Application filter will be wired up in Start() after initialization
 	// This allows filter manager to hot-reload app-level filters without restart
@@ -177,9 +185,15 @@ func (h *Hunter) Start(ctx context.Context) error {
 			return err
 		}
 		defer func() {
-			h.eventRuntime.Close()
-			if err := h.eventDispatcher.Close(context.Background()); err != nil {
-				logger.Error("Failed to close hunter event dispatcher", "error", err)
+			h.eventMu.Lock()
+			defer h.eventMu.Unlock()
+			if h.eventRuntime != nil {
+				h.eventRuntime.Close()
+			}
+			if h.eventDispatcher != nil {
+				if err := h.eventDispatcher.Close(context.Background()); err != nil {
+					logger.Error("Failed to close hunter event dispatcher", "error", err)
+				}
 			}
 		}()
 	}
@@ -190,7 +204,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 	defer metricsCollector.Stop()
 
 	// Periodically update stats with system metrics
-	var lastEventQueueLosses uint64
+	var lastCaptureLosses int64
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
@@ -202,13 +216,12 @@ func (h *Hunter) Start(ctx context.Context) error {
 				return
 			case <-ticker.C:
 				h.statsCollector.SetSystemMetrics(metricsCollector.Get())
-				if h.eventDispatcher != nil {
-					stats := h.eventDispatcher.Stats()
-					current := stats.Dropped + stats.SinkDropped
-					if current > lastEventQueueLosses {
-						h.statsCollector.IncrementQueueLoss(current - lastEventQueueLosses)
-					}
-					lastEventQueueLosses = current
+				h.updateCaptureLossStats(&lastCaptureLosses)
+				h.eventMu.RLock()
+				dispatcher := h.eventDispatcher
+				h.eventMu.RUnlock()
+				if dispatcher != nil {
+					h.sampleEventQueueLosses(dispatcher)
 				}
 			}
 		}
@@ -343,6 +356,39 @@ func (h *Hunter) Start(ctx context.Context) error {
 	return nil
 }
 
+func (h *Hunter) updateCaptureLossStats(previous *int64) {
+	if h == nil || h.captureManager == nil || h.statsCollector == nil || previous == nil {
+		return
+	}
+	buffer := h.captureManager.GetPacketBuffer()
+	if buffer == nil {
+		return
+	}
+	current := buffer.GetDropped() + buffer.GetSIPDropped()
+	if current > *previous {
+		h.statsCollector.IncrementCaptureLoss(uint64(current - *previous))
+	}
+	*previous = current
+}
+
+func (h *Hunter) sampleEventQueueLosses(dispatcher *events.Dispatcher) {
+	if dispatcher == nil {
+		return
+	}
+	h.eventLossMu.Lock()
+	defer h.eventLossMu.Unlock()
+	if dispatcher != h.eventLossSource {
+		h.eventLossSource = dispatcher
+		h.eventLossCount = 0
+	}
+	stats := dispatcher.Stats()
+	current := stats.Dropped + stats.SinkDropped
+	if current > h.eventLossCount {
+		h.statsCollector.IncrementQueueLoss(current - h.eventLossCount)
+	}
+	h.eventLossCount = current
+}
+
 func (h *Hunter) initializeEventForwarding() error {
 	spool, err := eventspool.Open(eventspool.Config{Directory: h.config.EventSpoolDir, MaxBytes: h.config.EventSpoolMaxBytes, MaxAge: h.config.EventSpoolMaxAge, Policy: eventspool.ExhaustionPolicy(h.config.EventSpoolExhaustionPolicy)})
 	if err != nil {
@@ -364,34 +410,51 @@ func (h *Hunter) initializeEventForwarding() error {
 	if err != nil {
 		return err
 	}
+	h.eventSpool = spool
+	forwarder, dispatcher, runtime, err := h.newEventPipeline(spool, producer, lastBatch+1)
+	if err != nil {
+		return err
+	}
+	h.eventForwarder, h.eventDispatcher, h.eventRuntime = forwarder, dispatcher, runtime
+	return nil
+}
+
+func (h *Hunter) newEventPipeline(spool *eventspool.Spool, producer *events.Producer, firstBatch uint64) (*eventforwarding.Client, *events.Dispatcher, *eventanalysis.Runtime, error) {
 	profile := eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE
 	if h.config.EventDeliveryProfile == "memory_only" {
 		profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
 	}
-	h.eventForwarder, err = eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: producer.SessionID(), EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_FILE_METADATA}, Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
-		if kind == eventsv1.LossKind_LOSS_KIND_TRANSPORT {
+	forwarder, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: producer.SessionID(), EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_FILE_METADATA}, Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
+		switch kind {
+		case eventsv1.LossKind_LOSS_KIND_TRANSPORT:
 			h.statsCollector.IncrementTransportLoss(count)
+		case eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT:
+			h.statsCollector.IncrementUnsupportedKindLoss(count)
 		}
 	}}, spool)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	sink, err := eventforwarding.NewSink(h.eventForwarder, lastBatch+1, 1)
+	sink, err := eventforwarding.NewSink(forwarder, firstBatch, 1)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	h.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: 1024, SinkQueueSize: 1024, DropPolicy: events.DropNew, Producer: producer})
+	dispatcher, err := events.NewDispatcher(events.Config{QueueSize: 1024, SinkQueueSize: 1024, DropPolicy: events.DropNew, Producer: producer})
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	if err = h.eventDispatcher.Register(sink); err != nil {
-		return err
+	if err = dispatcher.Register(sink); err != nil {
+		return nil, nil, nil, err
 	}
-	h.eventRuntime, err = eventanalysis.New(eventanalysis.Config{Dispatcher: h.eventDispatcher, LiveExpiry: true, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers")})
+	runtime, err := eventanalysis.New(eventanalysis.Config{Dispatcher: dispatcher, LiveExpiry: true, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers")})
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	return h.eventDispatcher.Start(h.ctx)
+	if err := dispatcher.Start(h.ctx); err != nil {
+		runtime.Close()
+		return nil, nil, nil, err
+	}
+	return forwarder, dispatcher, runtime, nil
 }
 
 func (h *Hunter) analyzeEvents() {
@@ -403,19 +466,23 @@ func (h *Hunter) analyzeEvents() {
 			if !ok {
 				return
 			}
+			h.eventMu.RLock()
 			h.statsCollector.IncrementCaptured()
 			if h.packetProcessor != nil {
 				if !h.packetProcessor.ProcessPacket(info) {
+					h.eventMu.RUnlock()
 					continue
 				}
 				h.statsCollector.IncrementMatched()
 			} else if h.applicationFilter != nil {
 				if matched, _ := h.applicationFilter.MatchPacketWithIDs(info.Packet); !matched {
+					h.eventMu.RUnlock()
 					continue
 				}
 				h.statsCollector.IncrementMatched()
 			}
 			err := h.eventRuntime.ObservePacket(eventanalysis.Source{NodeID: h.config.HunterID, CaptureSource: h.config.HunterID, InterfaceName: info.Interface, CaptureScope: events.CaptureScopeFiltered}, info)
+			h.eventMu.RUnlock()
 			if err != nil {
 				h.statsCollector.IncrementDropped(1)
 				h.statsCollector.IncrementAnalysisLoss(1)
@@ -423,6 +490,93 @@ func (h *Hunter) analyzeEvents() {
 			}
 		}
 	}
+}
+
+// ApplyPolicyChange creates a strict analysis-authority boundary around an
+// effective live filter change. Old-session state is flushed and acknowledged
+// before the new policy becomes visible, so one producer session never spans
+// two filtering policies.
+func (h *Hunter) ApplyPolicyChange(apply func() error) error {
+	if apply == nil {
+		return nil
+	}
+	if h.config.ForwardMode != "events" || h.eventRuntime == nil {
+		return apply()
+	}
+	boundaryCtx, boundaryCancel := context.WithTimeout(h.ctx, 30*time.Second)
+	defer boundaryCancel()
+	if err := h.captureManager.Quiesce(boundaryCtx); err != nil {
+		return fmt.Errorf("quiesce capture before policy change: %w", err)
+	}
+	if buffer := h.captureManager.GetPacketBuffer(); buffer != nil {
+		emptySamples := 0
+		for emptySamples < 5 {
+			if len(buffer.Receive()) == 0 {
+				emptySamples++
+			} else {
+				emptySamples = 0
+			}
+			select {
+			case <-boundaryCtx.Done():
+				if h.cancel != nil {
+					h.cancel()
+				}
+				return fmt.Errorf("drain captured packets before policy change: %w", boundaryCtx.Err())
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}
+	h.eventMu.Lock()
+	defer h.eventMu.Unlock()
+	h.eventRuntime.Close()
+	drainCtx := boundaryCtx
+	if err := h.eventDispatcher.Close(drainCtx); err != nil {
+		if h.cancel != nil {
+			h.cancel()
+		}
+		return fmt.Errorf("flush event session before policy change: %w", err)
+	}
+	h.sampleEventQueueLosses(h.eventDispatcher)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for h.eventSpool.Bytes() != 0 {
+		select {
+		case <-drainCtx.Done():
+			if h.cancel != nil {
+				h.cancel()
+			}
+			return fmt.Errorf("drain event spool before policy change: %w", drainCtx.Err())
+		case <-ticker.C:
+		}
+	}
+	producer, err := events.NewLiveProducer(h.config.HunterID)
+	if err != nil {
+		if h.cancel != nil {
+			h.cancel()
+		}
+		return err
+	}
+	forwarder, dispatcher, runtime, err := h.newEventPipeline(h.eventSpool, producer, 1)
+	if err != nil {
+		if h.cancel != nil {
+			h.cancel()
+		}
+		return err
+	}
+	if err := apply(); err != nil {
+		runtime.Close()
+		_ = dispatcher.Close(context.Background())
+		if h.cancel != nil {
+			h.cancel()
+		}
+		return err
+	}
+	h.eventForwarder, h.eventDispatcher, h.eventRuntime = forwarder, dispatcher, runtime
+	if h.connectionManager != nil {
+		h.connectionManager.SetEventForwarder(forwarder)
+		h.connectionManager.MarkDisconnected()
+	}
+	return nil
 }
 
 // CreateForwardingManager implements ForwardingManagerFactory interface

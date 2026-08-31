@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -128,6 +129,39 @@ func TestGetStatsCollector(t *testing.T) {
 	assert.Equal(t, uint64(0), statsCollector.GetForwarded())
 	assert.Equal(t, uint64(0), statsCollector.GetDropped())
 	assert.Equal(t, uint64(0), statsCollector.GetBufferBytes())
+}
+
+func TestCaptureLossStatsSampleBufferOverflowOnce(t *testing.T) {
+	hunter, err := New(Config{ProcessorAddr: "processor:55555", HunterID: "hunter-loss", BufferSize: 1})
+	require.NoError(t, err)
+	require.NoError(t, hunter.captureManager.Start(nil))
+	defer hunter.captureManager.Stop()
+	buffer := hunter.captureManager.GetPacketBuffer()
+	require.NotNil(t, buffer)
+	for range 100 {
+		buffer.Send(capture.PacketInfo{})
+	}
+	previous := int64(0)
+	hunter.updateCaptureLossStats(&previous)
+	first := hunter.statsCollector.ToProto(0).GetCaptureLosses()
+	require.Positive(t, first)
+	hunter.updateCaptureLossStats(&previous)
+	require.Equal(t, first, hunter.statsCollector.ToProto(0).GetCaptureLosses())
+}
+
+func TestEventPolicyChangeRotatesProducerSession(t *testing.T) {
+	hunter, err := New(Config{ProcessorAddr: "processor:55555", HunterID: "hunter-rotate", ForwardMode: "events", EventSpoolDir: t.TempDir(), EventDeliveryProfile: "memory_only"})
+	require.NoError(t, err)
+	hunter.ctx, hunter.cancel = context.WithCancel(context.Background())
+	defer hunter.cancel()
+	require.NoError(t, hunter.initializeEventForwarding())
+	oldSession := hunter.eventForwarder.ProducerSessionID()
+	applied := false
+	require.NoError(t, hunter.ApplyPolicyChange(func() error { applied = true; return nil }))
+	require.True(t, applied)
+	require.NotEqual(t, oldSession, hunter.eventForwarder.ProducerSessionID())
+	hunter.eventRuntime.Close()
+	require.NoError(t, hunter.eventDispatcher.Close(context.Background()))
 }
 
 // TestStatsAtomic tests that stats can be safely updated from multiple goroutines

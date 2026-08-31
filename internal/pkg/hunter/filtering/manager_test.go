@@ -29,6 +29,13 @@ type recordingApplicationUpdater struct {
 	filters [][]*management.Filter
 }
 
+type recordingPolicyCoordinator struct{ calls int }
+
+func (c *recordingPolicyCoordinator) ApplyPolicyChange(apply func() error) error {
+	c.calls++
+	return apply()
+}
+
 func (u *recordingApplicationUpdater) UpdateFilters(filters []*management.Filter) {
 	u.calls++
 	u.filters = append(u.filters, append([]*management.Filter(nil), filters...))
@@ -39,6 +46,8 @@ func TestModifyIsIdempotentUpsertForApplicationFilters(t *testing.T) {
 	updater := &recordingApplicationUpdater{}
 	manager := New("hunter-b", restarter, noopDisconnectMarker{})
 	manager.SetApplicationFilterUpdater(updater)
+	coordinator := &recordingPolicyCoordinator{}
+	manager.SetPolicyChangeCoordinator(coordinator)
 
 	filter := &management.Filter{
 		Id:      "retargeted-filter",
@@ -56,13 +65,15 @@ func TestModifyIsIdempotentUpsertForApplicationFilters(t *testing.T) {
 	require.Len(t, manager.GetFilters(), 1)
 	require.Equal(t, filter, manager.GetFilters()[0])
 	require.Equal(t, 1, updater.calls)
-	require.Zero(t, restarter.calls)
+	require.Equal(t, 1, restarter.calls)
+	require.Equal(t, 1, coordinator.calls)
 
 	// Replaying the same update is a no-op: no duplicate and no rebuild.
 	manager.handleUpdate(modify)
 	require.Len(t, manager.GetFilters(), 1)
 	require.Equal(t, 1, updater.calls)
-	require.Zero(t, restarter.calls)
+	require.Equal(t, 1, restarter.calls)
+	require.Equal(t, 1, coordinator.calls)
 
 	changed := &management.Filter{
 		Id:      filter.Id,
@@ -76,7 +87,8 @@ func TestModifyIsIdempotentUpsertForApplicationFilters(t *testing.T) {
 	require.Len(t, manager.GetFilters(), 1)
 	require.Equal(t, changed, manager.GetFilters()[0])
 	require.Equal(t, 2, updater.calls)
-	require.Zero(t, restarter.calls)
+	require.Equal(t, 2, restarter.calls)
+	require.Equal(t, 2, coordinator.calls)
 }
 
 func TestModifyUpsertCoversCPU_GPUCapableAndLIFilterTypes(t *testing.T) {
@@ -112,6 +124,8 @@ func TestModifyUpsertCoversCPU_GPUCapableAndLIFilterTypes(t *testing.T) {
 func TestModifyUpsertRebuildsBPFStateOncePerEffectiveChange(t *testing.T) {
 	restarter := &recordingRestarter{}
 	manager := New("hunter-b", restarter, noopDisconnectMarker{})
+	coordinator := &recordingPolicyCoordinator{}
+	manager.SetPolicyChangeCoordinator(coordinator)
 	filter := &management.Filter{
 		Id:      "gpu-capable-filter",
 		Type:    management.FilterType_FILTER_BPF,
@@ -125,10 +139,12 @@ func TestModifyUpsertRebuildsBPFStateOncePerEffectiveChange(t *testing.T) {
 	manager.handleUpdate(modify)
 	require.Len(t, manager.GetFilters(), 1)
 	require.Equal(t, 1, restarter.calls)
+	require.Equal(t, 1, coordinator.calls)
 
 	manager.handleUpdate(modify)
 	require.Len(t, manager.GetFilters(), 1)
 	require.Equal(t, 1, restarter.calls)
+	require.Equal(t, 1, coordinator.calls)
 
 	manager.handleUpdate(&management.FilterUpdate{
 		UpdateType: management.FilterUpdateType_UPDATE_DELETE,
@@ -136,6 +152,7 @@ func TestModifyUpsertRebuildsBPFStateOncePerEffectiveChange(t *testing.T) {
 	})
 	require.Empty(t, manager.GetFilters())
 	require.Equal(t, 2, restarter.calls)
+	require.Equal(t, 2, coordinator.calls)
 
 	// Replayed deletion is harmless and does not rebuild state again.
 	manager.handleUpdate(&management.FilterUpdate{
@@ -143,6 +160,29 @@ func TestModifyUpsertRebuildsBPFStateOncePerEffectiveChange(t *testing.T) {
 		Filter:     filter,
 	})
 	require.Equal(t, 2, restarter.calls)
+	require.Equal(t, 2, coordinator.calls)
+}
+
+func TestChangedReconnectFiltersUsePolicyCoordinator(t *testing.T) {
+	restarter := &recordingRestarter{}
+	updater := &recordingApplicationUpdater{}
+	coordinator := &recordingPolicyCoordinator{}
+	manager := New("hunter", restarter, noopDisconnectMarker{})
+	manager.SetApplicationFilterUpdater(updater)
+	manager.SetPolicyChangeCoordinator(coordinator)
+	first := []*management.Filter{{Id: "one", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice"}}
+	second := []*management.Filter{{Id: "one", Type: management.FilterType_FILTER_SIP_USER, Pattern: "bob"}}
+	manager.SetInitialFilters(first)
+	require.Equal(t, 1, updater.calls)
+	manager.SetInitialFilters(first)
+	manager.ApplyPendingInitial()
+	require.Zero(t, coordinator.calls)
+	manager.SetInitialFilters(second)
+	require.Equal(t, first, manager.GetFilters(), "changed reconnect policy must remain pending until the transport is running")
+	manager.ApplyPendingInitial()
+	require.Equal(t, 1, coordinator.calls)
+	require.Equal(t, 1, restarter.calls)
+	require.Equal(t, second, manager.GetFilters())
 }
 
 func TestModifyCollapsesDuplicateIDs(t *testing.T) {

@@ -152,6 +152,24 @@ func (m *Manager) Stop() {
 	}
 }
 
+// Quiesce stops the current capture generation and waits until no producer can
+// enqueue another packet. The shared PacketBuffer remains open for draining
+// across an analysis-policy boundary.
+func (m *Manager) Quiesce(ctx context.Context) error {
+	if m.captureCancel != nil {
+		m.captureCancel()
+	}
+	if m.captureDone == nil {
+		return nil
+	}
+	select {
+	case <-m.captureDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // buildProcessorPortExclusionFilter builds a BPF filter to exclude the processor communication port.
 // This prevents the hunter from capturing its own gRPC traffic to the processor.
 // Returns empty string if no processor address is configured.

@@ -39,6 +39,8 @@ type Client struct {
 	wake   chan struct{}
 }
 
+func (c *Client) ProducerSessionID() string { return c.config.ProducerSessionID }
+
 func New(config Config, spool *eventspool.Spool) (*Client, error) {
 	if spool == nil {
 		return nil, errors.New("new event forwarding client: spool is required")
@@ -208,5 +210,11 @@ func (c *Client) notify() {
 	select {
 	case c.wake <- struct{}{}:
 	default:
+	}
+}
+
+func (c *Client) reportLoss(kind eventsv1.LossKind, count uint64) {
+	if count > 0 && c.config.OnLoss != nil {
+		c.config.OnLoss(kind, count)
 	}
 }

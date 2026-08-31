@@ -170,7 +170,7 @@ func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.Event
 	// retry must not append it again even if the volatile dispatcher is full.
 	if i.wal != nil {
 		state.batch = batch.BatchSequence
-		state.event = batch.LastEventSequence
+		state.event = admittedEventHighWater(batch, state.event)
 		i.sessions[key] = state
 		// Admit atomically so recovery cannot replay a full durable batch after
 		// live delivery accepted only a prefix of it.
@@ -181,9 +181,19 @@ func (i *eventIngress) admit(_ context.Context, key string, open *eventsv1.Event
 		return nil, status.Error(codes.ResourceExhausted, "event ingress queue is full")
 	}
 	state.batch = batch.BatchSequence
-	state.event = batch.LastEventSequence
+	state.event = admittedEventHighWater(batch, state.event)
 	i.sessions[key] = state
 	return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
+}
+
+func admittedEventHighWater(batch *eventsv1.ProtocolEventBatch, current uint64) uint64 {
+	high := max(current, batch.GetLastEventSequence())
+	for _, loss := range batch.GetStats().GetLosses() {
+		for _, r := range loss.GetEventSequenceRanges() {
+			high = max(high, r.GetLast())
+		}
+	}
+	return high
 }
 
 func lossRangeCovered(losses []*eventsv1.EventLoss, sourceNodeID, producerSessionID string, first, last uint64) bool {

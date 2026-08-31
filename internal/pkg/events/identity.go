@@ -39,13 +39,14 @@ type Producer struct {
 // used by packet-mode processors, which originate events for multiple
 // registered hunter identities during one process lifetime.
 type ProducerSet struct {
-	mu        sync.Mutex
-	seed      [32]byte
-	producers map[string]*Producer
+	mu         sync.Mutex
+	seed       [32]byte
+	generation map[string]uint64
+	producers  map[string]*Producer
 }
 
 func NewLiveProducerSet() (*ProducerSet, error) {
-	set := &ProducerSet{producers: make(map[string]*Producer)}
+	set := &ProducerSet{generation: make(map[string]uint64), producers: make(map[string]*Producer)}
 	if _, err := io.ReadFull(rand.Reader, set.seed[:]); err != nil {
 		return nil, fmt.Errorf("create live event producer set: %w", err)
 	}
@@ -63,15 +64,41 @@ func (s *ProducerSet) Assign(event Event) Event {
 	s.mu.Lock()
 	producer := s.producers[nodeID]
 	if producer == nil {
-		h := sha256.New()
-		_, _ = h.Write(s.seed[:])
-		writeIdentityPart(h, nodeID)
-		sum := h.Sum(nil)
-		producer = &Producer{nodeID: nodeID, sessionID: hex.EncodeToString(sum[:producerSessionBytes])}
+		producer = s.producer(nodeID, s.generation[nodeID])
 		s.producers[nodeID] = producer
 	}
 	s.mu.Unlock()
 	return producer.Assign(event)
+}
+
+// Rotate starts a fresh live producer session for nodeID. It is safe to call
+// only after callers have stopped event admission and flushed the old session;
+// concurrent Assign calls after Rotate returns use the replacement producer.
+// The previous session is empty when the node has not produced an event yet.
+func (s *ProducerSet) Rotate(nodeID string) (previousSessionID, newSessionID string, err error) {
+	if s == nil || nodeID == "" {
+		return "", "", fmt.Errorf("rotate live event producer: node ID is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if previous := s.producers[nodeID]; previous != nil {
+		previousSessionID = previous.SessionID()
+	}
+	s.generation[nodeID]++
+	producer := s.producer(nodeID, s.generation[nodeID])
+	s.producers[nodeID] = producer
+	return previousSessionID, producer.SessionID(), nil
+}
+
+func (s *ProducerSet) producer(nodeID string, generation uint64) *Producer {
+	h := sha256.New()
+	_, _ = h.Write(s.seed[:])
+	writeIdentityPart(h, nodeID)
+	var encodedGeneration [8]byte
+	binary.BigEndian.PutUint64(encodedGeneration[:], generation)
+	_, _ = h.Write(encodedGeneration[:])
+	sum := h.Sum(nil)
+	return &Producer{nodeID: nodeID, sessionID: hex.EncodeToString(sum[:producerSessionBytes])}
 }
 
 // isNilEvent handles typed nil pointers stored in an Event interface. Event is

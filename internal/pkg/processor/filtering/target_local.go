@@ -22,6 +22,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"google.golang.org/protobuf/proto"
 )
 
 // BPFUpdater is an interface for updating BPF filters on a capture source.
@@ -36,12 +37,46 @@ type AppFilterUpdater interface {
 	UpdateFilters(filters []*management.Filter)
 }
 
+// LocalFilterPolicy is a detached snapshot of the effective local filtering
+// policy. Slices and protobuf messages are cloned before a policy is handed to
+// a coordinator, so coordinator-side mutation cannot alter LocalTarget state.
+type LocalFilterPolicy struct {
+	BaseBPF            string
+	BPFExpression      string
+	Filters            []*management.Filter
+	ApplicationFilters []*management.Filter
+}
+
+// LocalFilterChange describes one effective local-policy transition.
+type LocalFilterChange struct {
+	Previous LocalFilterPolicy
+	Next     LocalFilterPolicy
+}
+
+// LocalFilterCoordinator performs a local filter transition at a capture and
+// producer-session boundary. LocalTarget commits its candidate state only when
+// this method succeeds.
+type LocalFilterCoordinator interface {
+	ReconcileLocalFilterChange(change LocalFilterChange) error
+}
+
+// ApplyApplicationPolicy applies a prepared userspace policy while capture is quiesced.
+func (t *LocalTarget) ApplyApplicationPolicy(policy LocalFilterPolicy) {
+	t.mu.RLock()
+	appFilter := t.appFilterFunc
+	t.mu.RUnlock()
+	if appFilter != nil {
+		appFilter.UpdateFilters(cloneFilterSlice(policy.ApplicationFilters))
+	}
+}
+
 // LocalTarget implements FilterTarget for local standalone capture mode.
 // It applies BPF filters at the kernel level and routes VoIP filters
 // to an ApplicationFilter for userspace matching.
 type LocalTarget struct {
 	mu         sync.RWMutex
 	bpfApplyMu sync.Mutex
+	mutationMu sync.Mutex
 
 	// Active filters indexed by ID
 	filters map[string]*management.Filter
@@ -52,12 +87,20 @@ type LocalTarget struct {
 	// Dependencies (optional, set via Set* methods)
 	bpfUpdater    BPFUpdater
 	appFilterFunc AppFilterUpdater
+	coordinator   LocalFilterCoordinator
 
 	// lastAppliedBPF is only valid when hasAppliedBPF is true. Keeping the
 	// boolean separate matters because an empty expression is a real applied
 	// state (it clears the kernel filter).
 	lastAppliedBPF string
 	hasAppliedBPF  bool
+}
+
+// SetCoordinator installs the owner of capture/session filter boundaries.
+func (t *LocalTarget) SetCoordinator(coordinator LocalFilterCoordinator) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.coordinator = coordinator
 }
 
 // LocalTargetConfig contains configuration for LocalTarget.
@@ -101,15 +144,13 @@ func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
 		return 0, nil
 	}
 
-	t.mu.Lock()
-	// Store or update the filter
-	_, exists := t.filters[filter.Id]
-	t.filters[filter.Id] = filter
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
 
-	// Get current state for logging
-	bpfUpdater := t.bpfUpdater
-	appFilter := t.appFilterFunc
-	t.mu.Unlock()
+	previous, next := t.candidateState(func(filters map[string]*management.Filter) {
+		filters[filter.Id] = cloneFilter(filter)
+	})
+	_, exists := previous.filters[filter.Id]
 
 	action := "added"
 	if exists {
@@ -121,10 +162,10 @@ func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
 		"filter_type", filter.Type,
 		"pattern", filter.Pattern)
 
-	// Apply filters based on type
-	if err := t.applyFilters(bpfUpdater, appFilter); err != nil {
+	if err := t.reconcileCandidate(previous, next); err != nil {
 		return 0, fmt.Errorf("failed to apply filter: %w", err)
 	}
+	t.commitCandidate(next)
 
 	return 1, nil
 }
@@ -138,22 +179,23 @@ func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, er
 		return 0, nil
 	}
 
-	t.mu.Lock()
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
+
 	var count uint32
-	for _, filter := range filters {
-		if filter == nil || filter.Id == "" {
-			continue
+	previous, next := t.candidateState(func(candidate map[string]*management.Filter) {
+		for _, filter := range filters {
+			if filter == nil || filter.Id == "" {
+				continue
+			}
+			candidate[filter.Id] = cloneFilter(filter)
+			count++
 		}
-		t.filters[filter.Id] = filter
-		count++
-	}
-	bpfUpdater := t.bpfUpdater
-	appFilter := t.appFilterFunc
-	t.mu.Unlock()
+	})
 
 	// Count enabled filters by type
 	var enabledApp, disabledCount int
-	for _, f := range t.filters {
+	for _, f := range next.filters {
 		if !f.Enabled {
 			disabledCount++
 			continue
@@ -172,9 +214,10 @@ func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, er
 		"disabled_count", disabledCount)
 
 	// Apply all filters once
-	if err := t.applyFilters(bpfUpdater, appFilter); err != nil {
+	if err := t.reconcileCandidate(previous, next); err != nil {
 		return 0, fmt.Errorf("failed to apply filters: %w", err)
 	}
+	t.commitCandidate(next)
 
 	return count, nil
 }
@@ -186,24 +229,24 @@ func (t *LocalTarget) RemoveFilter(filterID string) (uint32, error) {
 		return 0, nil
 	}
 
-	t.mu.Lock()
-	_, exists := t.filters[filterID]
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
+
+	previous, next := t.candidateState(func(filters map[string]*management.Filter) {
+		delete(filters, filterID)
+	})
+	_, exists := previous.filters[filterID]
 	if !exists {
-		t.mu.Unlock()
 		return 0, nil
 	}
-
-	delete(t.filters, filterID)
-	bpfUpdater := t.bpfUpdater
-	appFilter := t.appFilterFunc
-	t.mu.Unlock()
 
 	logger.Debug("LocalTarget filter removed", "filter_id", filterID)
 
 	// Re-apply remaining filters
-	if err := t.applyFilters(bpfUpdater, appFilter); err != nil {
+	if err := t.reconcileCandidate(previous, next); err != nil {
 		return 0, fmt.Errorf("failed to reapply filters after removal: %w", err)
 	}
+	t.commitCandidate(next)
 
 	return 1, nil
 }
@@ -215,7 +258,7 @@ func (t *LocalTarget) GetActiveFilters() []*management.Filter {
 
 	filters := make([]*management.Filter, 0, len(t.filters))
 	for _, f := range t.filters {
-		filters = append(filters, f)
+		filters = append(filters, cloneFilter(f))
 	}
 	return filters
 }
@@ -251,17 +294,8 @@ func (t *LocalTarget) FilterCount() int {
 	return len(t.filters)
 }
 
-// applyFilters applies all current filters to the capture source.
-// BPF-convertible filters are combined into a single BPF expression.
-// VoIP filters are passed to the ApplicationFilter.
-func (t *LocalTarget) applyFilters(bpfUpdater BPFUpdater, appFilter AppFilterUpdater) error {
-	t.mu.RLock()
-	filters := make([]*management.Filter, 0, len(t.filters))
-	for _, f := range t.filters {
-		filters = append(filters, f)
-	}
-	baseBPF := t.baseBPF
-	t.mu.RUnlock()
+func (t *LocalTarget) applyPolicy(policy LocalFilterPolicy, bpfUpdater BPFUpdater, appFilter AppFilterUpdater) error {
+	filters := policy.Filters
 
 	// Map iteration order is random. Stable ordering prevents an equivalent set
 	// of BPF filters from looking changed merely because reconciliation visited
@@ -270,29 +304,8 @@ func (t *LocalTarget) applyFilters(bpfUpdater BPFUpdater, appFilter AppFilterUpd
 		return filters[i].Id < filters[j].Id
 	})
 
-	// Separate filters by type
-	var bpfFilters []*management.Filter
-	var appFilters []*management.Filter
-
-	for _, f := range filters {
-		if !f.Enabled {
-			continue
-		}
-
-		switch f.Type {
-		case management.FilterType_FILTER_BPF,
-			management.FilterType_FILTER_IP_ADDRESS:
-			bpfFilters = append(bpfFilters, f)
-		case management.FilterType_FILTER_SIP_USER,
-			management.FilterType_FILTER_PHONE_NUMBER,
-			management.FilterType_FILTER_CALL_ID,
-			management.FilterType_FILTER_CODEC:
-			appFilters = append(appFilters, f)
-		}
-	}
-
-	// Build combined BPF expression
-	bpfExpr := t.buildBPFExpression(baseBPF, bpfFilters)
+	bpfExpr := policy.BPFExpression
+	appFilters := policy.ApplicationFilters
 
 	// Apply BPF only when its effective expression changed. Phone-number, SIP
 	// URI, Call-ID, and codec filters are userspace-only and must not restart
@@ -342,6 +355,120 @@ func (t *LocalTarget) applyFilters(bpfUpdater BPFUpdater, appFilter AppFilterUpd
 	}
 
 	return nil
+}
+
+type localTargetState struct {
+	filters map[string]*management.Filter
+	baseBPF string
+	policy  LocalFilterPolicy
+}
+
+func (t *LocalTarget) candidateState(mutate func(map[string]*management.Filter)) (localTargetState, localTargetState) {
+	t.mu.RLock()
+	previous := localTargetState{filters: cloneFilterMap(t.filters), baseBPF: t.baseBPF}
+	t.mu.RUnlock()
+	next := localTargetState{filters: cloneFilterMap(previous.filters), baseBPF: previous.baseBPF}
+	mutate(next.filters)
+	previous.policy = t.buildPolicy(previous.baseBPF, previous.filters)
+	next.policy = t.buildPolicy(next.baseBPF, next.filters)
+	return previous, next
+}
+
+func (t *LocalTarget) reconcileCandidate(previous, next localTargetState) error {
+	if effectivePoliciesEqual(previous.policy, next.policy) {
+		return nil
+	}
+	t.mu.RLock()
+	coordinator := t.coordinator
+	bpfUpdater := t.bpfUpdater
+	appFilter := t.appFilterFunc
+	t.mu.RUnlock()
+	if coordinator != nil {
+		return coordinator.ReconcileLocalFilterChange(LocalFilterChange{
+			Previous: clonePolicy(previous.policy),
+			Next:     clonePolicy(next.policy),
+		})
+	}
+	return t.applyPolicy(next.policy, bpfUpdater, appFilter)
+}
+
+func (t *LocalTarget) commitCandidate(next localTargetState) {
+	t.mu.Lock()
+	t.filters = cloneFilterMap(next.filters)
+	t.baseBPF = next.baseBPF
+	if t.coordinator != nil {
+		t.lastAppliedBPF = next.policy.BPFExpression
+		t.hasAppliedBPF = true
+	}
+	t.mu.Unlock()
+}
+
+func (t *LocalTarget) buildPolicy(baseBPF string, filters map[string]*management.Filter) LocalFilterPolicy {
+	all := make([]*management.Filter, 0, len(filters))
+	var bpfFilters, appFilters []*management.Filter
+	for _, filter := range filters {
+		f := cloneFilter(filter)
+		all = append(all, f)
+		if !f.Enabled {
+			continue
+		}
+		switch f.Type {
+		case management.FilterType_FILTER_BPF, management.FilterType_FILTER_IP_ADDRESS:
+			bpfFilters = append(bpfFilters, f)
+		case management.FilterType_FILTER_SIP_USER, management.FilterType_FILTER_PHONE_NUMBER,
+			management.FilterType_FILTER_CALL_ID, management.FilterType_FILTER_CODEC:
+			appFilters = append(appFilters, f)
+		}
+	}
+	sortFilters(all)
+	sortFilters(bpfFilters)
+	sortFilters(appFilters)
+	return LocalFilterPolicy{BaseBPF: baseBPF, BPFExpression: t.buildBPFExpression(baseBPF, bpfFilters), Filters: all, ApplicationFilters: appFilters}
+}
+
+func sortFilters(filters []*management.Filter) {
+	sort.Slice(filters, func(i, j int) bool { return filters[i].Id < filters[j].Id })
+}
+
+func effectivePoliciesEqual(a, b LocalFilterPolicy) bool {
+	if a.BPFExpression != b.BPFExpression || len(a.ApplicationFilters) != len(b.ApplicationFilters) {
+		return false
+	}
+	for i := range a.ApplicationFilters {
+		af, bf := a.ApplicationFilters[i], b.ApplicationFilters[i]
+		if af.Id != bf.Id || af.Type != bf.Type || af.Pattern != bf.Pattern || af.Enabled != bf.Enabled {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneFilter(filter *management.Filter) *management.Filter {
+	if filter == nil {
+		return nil
+	}
+	return proto.Clone(filter).(*management.Filter)
+}
+
+func cloneFilterMap(filters map[string]*management.Filter) map[string]*management.Filter {
+	result := make(map[string]*management.Filter, len(filters))
+	for id, filter := range filters {
+		result[id] = cloneFilter(filter)
+	}
+	return result
+}
+
+func clonePolicy(policy LocalFilterPolicy) LocalFilterPolicy {
+	return LocalFilterPolicy{BaseBPF: policy.BaseBPF, BPFExpression: policy.BPFExpression,
+		Filters: cloneFilterSlice(policy.Filters), ApplicationFilters: cloneFilterSlice(policy.ApplicationFilters)}
+}
+
+func cloneFilterSlice(filters []*management.Filter) []*management.Filter {
+	result := make([]*management.Filter, len(filters))
+	for i, filter := range filters {
+		result[i] = cloneFilter(filter)
+	}
+	return result
 }
 
 // buildBPFExpression builds a combined BPF expression from base BPF and filters.
@@ -440,13 +567,16 @@ func (t *LocalTarget) ipAddressToBPF(pattern string) string {
 // SetBaseBPF updates the base BPF filter.
 // This triggers recompilation of the combined filter expression.
 func (t *LocalTarget) SetBaseBPF(bpf string) error {
-	t.mu.Lock()
-	t.baseBPF = bpf
-	bpfUpdater := t.bpfUpdater
-	appFilter := t.appFilterFunc
-	t.mu.Unlock()
-
-	return t.applyFilters(bpfUpdater, appFilter)
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
+	previous, next := t.candidateState(func(map[string]*management.Filter) {})
+	next.baseBPF = bpf
+	next.policy = t.buildPolicy(next.baseBPF, next.filters)
+	if err := t.reconcileCandidate(previous, next); err != nil {
+		return err
+	}
+	t.commitCandidate(next)
+	return nil
 }
 
 // GetBaseBPF returns the current base BPF filter.

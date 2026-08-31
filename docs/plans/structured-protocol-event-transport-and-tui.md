@@ -1,7 +1,7 @@
 # Structured Protocol Event Transport and TUI Implementation Plan
 
 **Date:** 2026-08-30
-**Status:** Phase 5 incomplete — tap filter/session boundary remains open
+**Status:** Phase 5 complete
 **Research:**
 [`structured-protocol-event-transport.md`](../research/structured-protocol-event-transport.md),
 [`tui-structured-protocol-events.md`](../research/tui-structured-protocol-events.md),
@@ -353,7 +353,7 @@ connection summaries with accurate counters and provenance.
 - [x] Default spool exhaustion to dropping oldest complete batches while
       reporting exact lost ranges; support an operator-selected `drop_new`
       policy.
-- [ ] Fix forwarding mode for the lifetime of a producer session; flush and
+- [x] Fix forwarding mode for the lifetime of a producer session; flush and
       start a new session when mode, filtering, capture scope, or analysis policy
       changes.
 - [x] Run the shared stateful runtime on event-mode hunters and taps; assign
@@ -443,6 +443,16 @@ that effective live tap filter changes still do not quiesce and drain capture,
 flush/reset analysis, ACK-drain the old upstream route, and rotate the producer
 session transactionally. The producer-session lifetime task and Phase 5 status
 are therefore reopened until that coordinated tap boundary is implemented.
+A completion pass added that boundary. Effective tap policy mutations now
+serialize, quiesce capture, drain capture workers and processor admission,
+flush/reset stateful analysis, flush and cumulatively ACK-drain the old
+upstream route, rotate producer identity, apply the new BPF and application
+policy, and resume with a fresh capture generation. Effective no-op mutations
+do not rotate. Local filter state is staged and cloned, commits only after
+successful reconciliation, and failed boundaries stop the tap rather than
+continuing with mixed semantics. Focused race tests cover source draining,
+transaction rollback and no-op behavior, producer rotation, and upstream route
+retirement; processor and tap suites pass.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

@@ -14,6 +14,7 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -181,6 +182,8 @@ type LocalSource struct {
 	captureCtx    context.Context
 	captureCancel context.CancelFunc
 	captureDone   chan struct{}
+	batchingDone  chan struct{}
+	boundaryMu    sync.Mutex
 
 	// Batching
 	batchMu      sync.Mutex
@@ -458,8 +461,12 @@ func (s *LocalSource) Start(ctx context.Context) error {
 	go s.capturePackets(s.captureCtx, s.config.BPFFilter, s.captureDone)
 
 	// Start batching goroutine
+	s.batchingDone = make(chan struct{})
 	s.wg.Add(1)
-	go s.batchingLoop()
+	go func() {
+		defer close(s.batchingDone)
+		s.batchingLoop()
+	}()
 
 	// Wait for context cancellation
 	<-s.ctx.Done()
@@ -1030,6 +1037,89 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 	go s.capturePackets(s.captureCtx, filter, s.captureDone)
 
 	return nil
+}
+
+// ApplyPolicyBoundary stops packet admission, drains every packet already
+// admitted by the old capture generation through the downstream processor,
+// runs apply while capture is quiescent, and then starts a fresh generation
+// with filter. It serializes live policy changes so callers can safely reset
+// stateful analysis and rotate producer identity in apply.
+func (s *LocalSource) ApplyPolicyBoundary(ctx context.Context, filter string, apply func() error) error {
+	if apply == nil {
+		return nil
+	}
+	s.boundaryMu.Lock()
+	defer s.boundaryMu.Unlock()
+
+	s.mu.Lock()
+	if !s.started {
+		s.config.BPFFilter = filter
+		s.mu.Unlock()
+		return apply()
+	}
+	captureCancel := s.captureCancel
+	captureDone := s.captureDone
+	batchingDone := s.batchingDone
+	packetBuffer := s.packetBuffer.Load()
+	s.mu.Unlock()
+
+	if captureCancel != nil {
+		captureCancel()
+	}
+	if err := waitDone(ctx, captureDone); err != nil {
+		return fmt.Errorf("quiesce local capture: %w", err)
+	}
+	if packetBuffer != nil {
+		packetBuffer.Close()
+	}
+	if err := waitDone(ctx, batchingDone); err != nil {
+		return fmt.Errorf("drain local capture workers: %w", err)
+	}
+
+	processed := make(chan struct{})
+	barrier := &PacketBatch{SourceID: s.SourceID(), AfterProcess: []func(){func() { close(processed) }}}
+	select {
+	case s.batches <- barrier:
+	case <-ctx.Done():
+		return fmt.Errorf("enqueue local processor drain barrier: %w", ctx.Err())
+	}
+	if err := waitDone(ctx, processed); err != nil {
+		return fmt.Errorf("drain local processor pipeline: %w", err)
+	}
+
+	if err := apply(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config.BPFFilter = filter
+	if s.ctx == nil || s.ctx.Err() != nil {
+		return nil
+	}
+	s.packetBuffer.Store(capture.NewPacketBuffer(s.ctx, s.config.BufferSize))
+	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
+	s.captureDone = make(chan struct{})
+	s.batchingDone = make(chan struct{})
+	s.wg.Add(2)
+	go s.capturePackets(s.captureCtx, filter, s.captureDone)
+	go func(done chan struct{}) {
+		defer close(done)
+		s.batchingLoop()
+	}(s.batchingDone)
+	return nil
+}
+
+func waitDone(ctx context.Context, done <-chan struct{}) error {
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Stop gracefully stops the source.

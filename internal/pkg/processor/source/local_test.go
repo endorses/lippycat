@@ -441,6 +441,77 @@ func TestLocalSource_ImplementsPacketSource(t *testing.T) {
 	var _ PacketSource = (*LocalSource)(nil)
 }
 
+func TestApplyPolicyBoundaryDrainsProcessorBeforeApplyAndResumes(t *testing.T) {
+	s := NewLocalSource(LocalSourceConfig{Interfaces: []string{"test0"}, BPFFilter: "old", BatchBuffer: 4})
+	sourceCtx, cancelSource := context.WithCancel(context.Background())
+	defer cancelSource()
+
+	s.mu.Lock()
+	s.started = true
+	s.ctx = sourceCtx
+	s.captureDone = make(chan struct{})
+	close(s.captureDone)
+	s.batchingDone = make(chan struct{})
+	pb := capture.NewPacketBuffer(sourceCtx, 1)
+	s.packetBuffer.Store(pb)
+	s.wg.Add(1)
+	go func() {
+		defer close(s.batchingDone)
+		s.batchingLoop()
+	}()
+	s.mu.Unlock()
+
+	processedOld := make(chan struct{})
+	s.batches <- &PacketBatch{SourceID: s.SourceID(), AfterProcess: []func(){func() { close(processedOld) }}}
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		for batch := range s.batches {
+			batch.RunAfterProcess()
+		}
+	}()
+
+	applyCalled := false
+	err := s.ApplyPolicyBoundary(t.Context(), "new", func() error {
+		select {
+		case <-processedOld:
+			applyCalled = true
+		default:
+			t.Fatal("policy applied before old processor work drained")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, applyCalled)
+	require.Equal(t, "new", s.config.BPFFilter)
+
+	cancelSource()
+	if current := s.packetBuffer.Load(); current != nil {
+		current.Close()
+	}
+	s.wg.Wait()
+	close(s.batches)
+	<-consumerDone
+}
+
+func TestApplyPolicyBoundaryDoesNotApplyWhenDrainTimesOut(t *testing.T) {
+	s := NewLocalSource(LocalSourceConfig{BPFFilter: "old", BatchBuffer: 1})
+	s.mu.Lock()
+	s.started = true
+	s.ctx = context.Background()
+	s.captureDone = make(chan struct{})
+	s.batchingDone = make(chan struct{})
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	err := s.ApplyPolicyBoundary(ctx, "new", func() error { called = true; return nil })
+	require.Error(t, err)
+	require.False(t, called)
+	require.Equal(t, "old", s.config.BPFFilter)
+}
+
 func TestConvertPacketInfo(t *testing.T) {
 	// Test with nil packet
 	t.Run("handles nil packet data", func(t *testing.T) {

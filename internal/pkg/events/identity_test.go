@@ -137,3 +137,21 @@ func TestLiveProducerSetKeepsPerSourceIdentity(t *testing.T) {
 	require.Equal(t, uint64(2), second.Envelope().EventSequence)
 	require.NotEqual(t, first.Envelope().ProducerSessionID, other.Envelope().ProducerSessionID)
 }
+
+func TestLiveProducerSetRotateStartsFreshSession(t *testing.T) {
+	set, err := NewLiveProducerSet()
+	require.NoError(t, err)
+	first := set.Assign(NewDNSEvent(Envelope{NodeID: "node"}))
+	previous, replacement, err := set.Rotate("node")
+	require.NoError(t, err)
+	require.Equal(t, first.Envelope().ProducerSessionID, previous)
+	require.NotEqual(t, previous, replacement)
+	second := set.Assign(NewDNSEvent(Envelope{NodeID: "node"}))
+	require.Equal(t, replacement, second.Envelope().ProducerSessionID)
+	require.Equal(t, uint64(1), second.Envelope().EventSequence)
+
+	other := set.Assign(NewDNSEvent(Envelope{NodeID: "other"}))
+	require.NotEqual(t, replacement, other.Envelope().ProducerSessionID)
+	_, _, err = set.Rotate("")
+	require.Error(t, err)
+}

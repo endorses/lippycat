@@ -739,18 +739,17 @@ func (p *Processor) SubscribeTopology(req *management.TopologySubscribeRequest, 
 func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter) (*management.FilterUpdateResult, error) {
 	logger.Info("Update filter request", "filter_id", filter.Id, "type", filter.Type, "pattern", filter.Pattern)
 
-	// Store filter and distribute to hunters (distributed mode)
-	huntersUpdated, err := p.filterManager.Update(filter)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update filter: %v", err)
-	}
-
 	// For tap mode (LocalTarget), also apply the filter locally to restart capture
 	// with updated BPF filter and application-layer filters
 	if localTarget, ok := p.filterTarget.(*filtering.LocalTarget); ok {
 		if _, err := localTarget.ApplyFilter(filter); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to apply filter locally: %v", err)
 		}
+	}
+	// Commit persistence/distribution only after local reconciliation succeeds.
+	huntersUpdated, err := p.filterManager.Update(filter)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update filter: %v", err)
 	}
 
 	logger.Info("Filter updated",
@@ -767,18 +766,17 @@ func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter)
 func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDeleteRequest) (*management.FilterUpdateResult, error) {
 	logger.Info("Delete filter request", "filter_id", req.FilterId)
 
-	// Remove filter and notify hunters (distributed mode)
-	huntersUpdated, err := p.filterManager.Delete(req.FilterId)
-	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "filter not found: %s", req.FilterId)
-	}
-
 	// For tap mode (LocalTarget), also remove the filter locally to restart capture
 	// with updated BPF filter and application-layer filters
 	if localTarget, ok := p.filterTarget.(*filtering.LocalTarget); ok {
 		if _, err := localTarget.RemoveFilter(req.FilterId); err != nil {
-			logger.Warn("Failed to remove filter locally", "filter_id", req.FilterId, "error", err)
+			return nil, status.Errorf(codes.Internal, "failed to remove filter locally: %v", err)
 		}
+	}
+	// Commit persistence/distribution only after local reconciliation succeeds.
+	huntersUpdated, err := p.filterManager.Delete(req.FilterId)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "filter not found: %s", req.FilterId)
 	}
 
 	logger.Info("Filter deleted",

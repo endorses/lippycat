@@ -229,14 +229,17 @@ type Processor struct {
 	liManager *li.Manager
 
 	// TLS keylog writer for session key storage and file output
-	tlsKeylogWriter   *TLSKeylogWriter
-	eventDispatcher   *events.Dispatcher
-	eventBroadcaster  *broadcast.Broadcaster
-	eventService      eventsv1.EventServiceServer
-	eventIngress      *eventIngress
-	eventRuntime      *eventanalysis.Runtime
-	subscriptionLimit *subscriptionLimiter
-	logSink           *logstream.Sink
+	tlsKeylogWriter     *TLSKeylogWriter
+	eventDispatcher     *events.Dispatcher
+	eventBroadcaster    *broadcast.Broadcaster
+	eventService        eventsv1.EventServiceServer
+	eventIngress        *eventIngress
+	eventRuntime        *eventanalysis.Runtime
+	eventProducers      *events.ProducerSet
+	upstreamEventRouter *upstream.EventRouter
+	localPolicyMu       sync.Mutex
+	subscriptionLimit   *subscriptionLimiter
+	logSink             *logstream.Sink
 
 	// Control
 	ctx          context.Context
@@ -274,6 +277,7 @@ func New(config Config) (*Processor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize event identity: %w", err)
 	}
+	p.eventProducers = eventProducers
 	p.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: eventQueueSize, SinkQueueSize: eventQueueSize, DropPolicy: events.DropPolicy(dropPolicy), Producer: eventProducers})
 	if err != nil {
 		return nil, fmt.Errorf("initialize event dispatcher: %w", err)
@@ -650,6 +654,7 @@ func New(config Config) (*Processor, error) {
 			if err = p.eventDispatcher.Register(router); err != nil {
 				return nil, fmt.Errorf("register upstream event router: %w", err)
 			}
+			p.upstreamEventRouter = router
 		}
 	}
 
@@ -758,6 +763,57 @@ func (p *Processor) SetPacketSource(packetSource source.PacketSource) {
 // Must be called before Start().
 func (p *Processor) SetFilterTarget(target filtering.FilterTarget) {
 	p.filterTarget = target
+	if localTarget, ok := target.(*filtering.LocalTarget); ok && p.config.UpstreamForwardMode == "events" {
+		localTarget.SetCoordinator(p)
+	}
+}
+
+// ReconcileLocalFilterChange establishes a capture and producer-session
+// boundary before an event-forwarding tap commits an effective policy change.
+func (p *Processor) ReconcileLocalFilterChange(change filtering.LocalFilterChange) error {
+	p.localPolicyMu.Lock()
+	defer p.localPolicyMu.Unlock()
+	localSource, ok := p.packetSource.(*source.LocalSource)
+	if !ok {
+		return fmt.Errorf("local filter boundary requires a local packet source")
+	}
+	localTarget, ok := p.filterTarget.(*filtering.LocalTarget)
+	if !ok {
+		return fmt.Errorf("local filter boundary requires a local filter target")
+	}
+	ctx := p.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	boundaryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	err := localSource.ApplyPolicyBoundary(boundaryCtx, change.Next.BPFExpression, func() error {
+		if p.eventRuntime != nil {
+			if err := p.eventRuntime.Reset(); err != nil {
+				return fmt.Errorf("reset event analysis: %w", err)
+			}
+		}
+		if p.eventDispatcher != nil {
+			if err := p.eventDispatcher.Flush(boundaryCtx); err != nil {
+				return fmt.Errorf("flush old event session: %w", err)
+			}
+		}
+		oldSession, _, err := p.eventProducers.Rotate(p.config.ProcessorID)
+		if err != nil {
+			return fmt.Errorf("rotate event producer: %w", err)
+		}
+		if oldSession != "" && p.upstreamEventRouter != nil {
+			if err := p.upstreamEventRouter.DrainAndRetire(boundaryCtx, p.config.ProcessorID, oldSession); err != nil {
+				return err
+			}
+		}
+		localTarget.ApplyApplicationPolicy(change.Next)
+		return nil
+	})
+	if err != nil && p.cancel != nil {
+		p.cancel() // fail closed: never continue a semantically mixed tap session
+	}
+	return err
 }
 
 // IsLocalMode returns true if the processor is using a local packet source

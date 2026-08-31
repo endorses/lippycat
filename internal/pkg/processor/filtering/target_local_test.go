@@ -1,6 +1,7 @@
 package filtering
 
 import (
+	"errors"
 	"sync"
 	"testing"
 
@@ -8,6 +9,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type recordingLocalFilterCoordinator struct {
+	mu      sync.Mutex
+	changes []LocalFilterChange
+	err     error
+}
+
+func (c *recordingLocalFilterCoordinator) ReconcileLocalFilterChange(change LocalFilterChange) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.changes = append(c.changes, change)
+	return c.err
+}
+
+func (c *recordingLocalFilterCoordinator) Changes() []LocalFilterChange {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]LocalFilterChange(nil), c.changes...)
+}
 
 // mockBPFUpdater records BPF filter updates for testing.
 type mockBPFUpdater struct {
@@ -269,6 +289,72 @@ func TestLocalTarget_GenuineBPFChangeIsApplied(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, bpfUpdater.FilterCount())
 	assert.Equal(t, "(port 5060) and (host 192.0.2.10)", bpfUpdater.LastFilter())
+}
+
+func TestLocalTarget_CoordinatorCommitsOnlyAfterSuccessfulBoundary(t *testing.T) {
+	target := NewLocalTarget(LocalTargetConfig{BaseBPF: "udp"})
+	coordinator := &recordingLocalFilterCoordinator{}
+	target.SetCoordinator(coordinator)
+
+	filter := &management.Filter{Id: "host-1", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.0.2.10", Enabled: true}
+	count, err := target.ApplyFilter(filter)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), count)
+	require.Equal(t, 1, target.FilterCount())
+
+	changes := coordinator.Changes()
+	require.Len(t, changes, 1)
+	assert.Equal(t, "udp", changes[0].Previous.BPFExpression)
+	assert.Equal(t, "(udp) and (host 192.0.2.10)", changes[0].Next.BPFExpression)
+
+	// Neither caller nor coordinator-owned protobuf pointers alias committed state.
+	filter.Pattern = "203.0.113.1"
+	changes[0].Next.Filters[0].Pattern = "198.51.100.1"
+	assert.Equal(t, "192.0.2.10", target.GetActiveFilters()[0].Pattern)
+
+	coordinator.err = errors.New("boundary failed")
+	_, err = target.ApplyFilter(&management.Filter{Id: "host-1", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.0.2.20", Enabled: true})
+	require.ErrorContains(t, err, "boundary failed")
+	assert.Equal(t, "192.0.2.10", target.GetActiveFilters()[0].Pattern, "failed boundary must not commit its candidate")
+}
+
+func TestLocalTarget_EffectiveNoOpSkipsCoordinatorButCommitsMetadata(t *testing.T) {
+	target := NewLocalTarget(LocalTargetConfig{})
+	coordinator := &recordingLocalFilterCoordinator{}
+	target.SetCoordinator(coordinator)
+
+	_, err := target.ApplyFilter(&management.Filter{Id: "sip-1", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice", Description: "old", Enabled: true})
+	require.NoError(t, err)
+	require.Len(t, coordinator.Changes(), 1)
+
+	_, err = target.ApplyFilter(&management.Filter{Id: "sip-1", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice", Description: "new", Enabled: true})
+	require.NoError(t, err)
+	assert.Len(t, coordinator.Changes(), 1, "metadata-only update must not create a capture/session boundary")
+	assert.Equal(t, "new", target.GetActiveFilters()[0].Description)
+}
+
+func TestLocalTarget_FailedDefaultReconciliationDoesNotCommit(t *testing.T) {
+	target := NewLocalTarget(LocalTargetConfig{})
+	bpfUpdater := &mockBPFUpdater{err: errors.New("pcap failure")}
+	target.SetBPFUpdater(bpfUpdater)
+
+	_, err := target.ApplyFilter(&management.Filter{Id: "bpf-1", Type: management.FilterType_FILTER_BPF, Pattern: "port 53", Enabled: true})
+	require.ErrorContains(t, err, "pcap failure")
+	assert.Empty(t, target.GetActiveFilters())
+	assert.Zero(t, target.FilterCount())
+}
+
+func TestLocalTarget_RemoveCoordinatorFailureRetainsFilter(t *testing.T) {
+	target := NewLocalTarget(LocalTargetConfig{})
+	coordinator := &recordingLocalFilterCoordinator{}
+	target.SetCoordinator(coordinator)
+	_, err := target.ApplyFilter(&management.Filter{Id: "sip-1", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice", Enabled: true})
+	require.NoError(t, err)
+
+	coordinator.err = errors.New("retire failed")
+	_, err = target.RemoveFilter("sip-1")
+	require.ErrorContains(t, err, "retire failed")
+	assert.Equal(t, 1, target.FilterCount())
 }
 
 func TestLocalTarget_RemoveFilter(t *testing.T) {

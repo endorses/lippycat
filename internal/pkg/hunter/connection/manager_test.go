@@ -43,8 +43,9 @@ type mockFilterManager struct {
 }
 
 func (m *mockFilterManager) GetFilterCount() int { return m.filterCount }
-func (m *mockFilterManager) SetInitialFilters(filters []*management.Filter) {
+func (m *mockFilterManager) SetInitialFilters(filters []*management.Filter) error {
 	m.filterCount = len(filters)
+	return nil
 }
 func (m *mockFilterManager) ApplyPendingInitial() {}
 func (m *mockFilterManager) Subscribe(ctx, connCtx context.Context, mgmtClient management.ManagementServiceClient) {

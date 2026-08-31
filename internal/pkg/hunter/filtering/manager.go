@@ -17,6 +17,7 @@ import (
 // CaptureRestarter is an interface for restarting capture with new filters
 type CaptureRestarter interface {
 	Restart(filters []*management.Filter) error
+	ApplyInitialFilters(filters []*management.Filter) error
 }
 
 // DisconnectMarker is an interface for marking connection as disconnected
@@ -91,19 +92,17 @@ func (m *Manager) GetFilterCount() int {
 }
 
 // SetInitialFilters sets the initial filters from registration response
-func (m *Manager) SetInitialFilters(filters []*management.Filter) {
+func (m *Manager) SetInitialFilters(filters []*management.Filter) error {
 	m.mu.Lock()
 	if m.initialApplied {
 		if filtersEqual(m.filters, filters) {
 			m.mu.Unlock()
-			return
+			return nil
 		}
 		m.pendingInitial = append([]*management.Filter(nil), filters...)
 		m.mu.Unlock()
-		return
+		return nil
 	}
-	m.initialApplied = true
-	m.filters = append([]*management.Filter(nil), filters...)
 	appFilterUpdater := m.appFilterUpdater
 	m.mu.Unlock()
 
@@ -112,6 +111,16 @@ func (m *Manager) SetInitialFilters(filters []*management.Filter) {
 	if appFilterUpdater != nil {
 		appFilterUpdater.UpdateFilters(filters)
 	}
+	if containsAnyBPF(filters) {
+		if err := m.captureRestarter.ApplyInitialFilters(filters); err != nil {
+			return err
+		}
+	}
+	m.mu.Lock()
+	m.initialApplied = true
+	m.filters = append([]*management.Filter(nil), filters...)
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *Manager) ApplyPendingInitial() {

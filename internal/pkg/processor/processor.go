@@ -542,12 +542,26 @@ func New(config Config) (*Processor, error) {
 
 	// Initialize hunter manager
 	p.hunterManager = hunter.NewManager(config.ProcessorID, config.MaxHunters, onStatsChanged)
-	p.eventIngress.authorize = func(sourceNodeID, relayNodeID string) bool {
-		if relayNodeID == "" {
-			_, ok := p.hunterManager.Get(sourceNodeID)
-			return ok
+	p.eventIngress.authorize = func(open *eventsv1.EventIngressOpen) bool {
+		if open.RelayNodeId == "" {
+			registered, ok := p.hunterManager.Get(open.SourceNodeId)
+			if !ok || registered.ForwardingMode != management.ForwardingMode_FORWARDING_MODE_EVENTS ||
+				registered.EventAPIMajor != open.EventApiMajor ||
+				registered.SemanticProfileRevision != open.SemanticProfileRevision {
+				return false
+			}
+			acceptedKinds := make(map[int32]struct{}, len(registered.EventKinds))
+			for _, kind := range registered.EventKinds {
+				acceptedKinds[kind] = struct{}{}
+			}
+			for _, kind := range open.EventKinds {
+				if _, ok := acceptedKinds[int32(kind)]; !ok {
+					return false
+				}
+			}
+			return true
 		}
-		return p.downstreamManager != nil && p.downstreamManager.Get(relayNodeID) != nil
+		return p.downstreamManager != nil && p.downstreamManager.Get(open.RelayNodeId) != nil
 	}
 
 	// Initialize hunter monitor (will be started in Start())

@@ -20,6 +20,12 @@ func (r *recordingRestarter) Restart(filters []*management.Filter) error {
 	return nil
 }
 
+func (r *recordingRestarter) ApplyInitialFilters(filters []*management.Filter) error {
+	r.calls++
+	r.filters = append(r.filters, append([]*management.Filter(nil), filters...))
+	return nil
+}
+
 type noopDisconnectMarker struct{}
 
 func (noopDisconnectMarker) MarkDisconnected() {}
@@ -172,17 +178,30 @@ func TestChangedReconnectFiltersUsePolicyCoordinator(t *testing.T) {
 	manager.SetPolicyChangeCoordinator(coordinator)
 	first := []*management.Filter{{Id: "one", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice"}}
 	second := []*management.Filter{{Id: "one", Type: management.FilterType_FILTER_SIP_USER, Pattern: "bob"}}
-	manager.SetInitialFilters(first)
+	require.NoError(t, manager.SetInitialFilters(first))
 	require.Equal(t, 1, updater.calls)
-	manager.SetInitialFilters(first)
+	require.NoError(t, manager.SetInitialFilters(first))
 	manager.ApplyPendingInitial()
 	require.Zero(t, coordinator.calls)
-	manager.SetInitialFilters(second)
+	require.NoError(t, manager.SetInitialFilters(second))
 	require.Equal(t, first, manager.GetFilters(), "changed reconnect policy must remain pending until the transport is running")
 	manager.ApplyPendingInitial()
 	require.Equal(t, 1, coordinator.calls)
 	require.Equal(t, 1, restarter.calls)
 	require.Equal(t, second, manager.GetFilters())
+}
+
+func TestInitialBPFFiltersReplaceRunningCaptureWithoutPolicyRotation(t *testing.T) {
+	restarter := &recordingRestarter{}
+	coordinator := &recordingPolicyCoordinator{}
+	manager := New("hunter", restarter, noopDisconnectMarker{})
+	manager.SetPolicyChangeCoordinator(coordinator)
+	filters := []*management.Filter{{Id: "initial-bpf", Type: management.FilterType_FILTER_BPF, Pattern: "udp port 53"}}
+
+	require.NoError(t, manager.SetInitialFilters(filters))
+	require.Equal(t, 1, restarter.calls)
+	require.Equal(t, filters, restarter.filters[0])
+	require.Zero(t, coordinator.calls, "the unused initial event session must not rotate")
 }
 
 func TestModifyCollapsesDuplicateIDs(t *testing.T) {

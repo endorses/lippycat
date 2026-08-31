@@ -4,6 +4,7 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -142,6 +143,41 @@ func (m *Manager) Restart(dynamicFilters []*management.Filter) error {
 		logger.Debug("No old capture to wait for (first start)")
 	}
 
+	return nil
+}
+
+// ApplyInitialFilters installs the processor's first BPF policy after capture
+// has already started. Packets captured before that policy was known are
+// discarded so they cannot enter either forwarding mode under the wrong
+// capture scope.
+func (m *Manager) ApplyInitialFilters(dynamicFilters []*management.Filter) error {
+	ctx, cancel := context.WithTimeout(m.mainCtx, 5*time.Second)
+	defer cancel()
+	if err := m.Quiesce(ctx); err != nil {
+		return fmt.Errorf("quiesce capture for initial filters: %w", err)
+	}
+	if m.packetBuffer != nil {
+		emptySamples := 0
+		for emptySamples < 5 {
+			select {
+			case _, ok := <-m.packetBuffer.Receive():
+				if !ok {
+					return errors.New("discard pre-policy packets: packet buffer closed")
+				}
+				emptySamples = 0
+			default:
+				emptySamples++
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("discard pre-policy packets: %w", ctx.Err())
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}
+	if err := m.Start(dynamicFilters); err != nil {
+		return fmt.Errorf("start capture with initial filters: %w", err)
+	}
 	return nil
 }
 

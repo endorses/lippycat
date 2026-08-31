@@ -20,6 +20,10 @@ type ConnectedHunter struct {
 	RemoteAddr              string
 	Interfaces              []string
 	Capabilities            *management.HunterCapabilities // Filter capabilities advertised by hunter
+	ForwardingMode          management.ForwardingMode
+	EventAPIMajor           uint32
+	EventKinds              []int32
+	SemanticProfileRevision uint32
 	ConnectedAt             int64
 	LastHeartbeat           int64
 	PacketsReceived         uint64 // Packets received by processor from this hunter
@@ -36,6 +40,15 @@ type ConnectedHunter struct {
 	CpuPercent       float32 // CPU usage percentage (0-100, -1 if unavailable)
 	MemoryRssBytes   uint64  // Process RSS memory in bytes
 	MemoryLimitBytes uint64  // Cgroup memory limit in bytes (0 if no limit)
+}
+
+// ForwardingContract is the processor-authoritative transport contract
+// accepted during registration. It is replaced atomically on re-registration.
+type ForwardingContract struct {
+	Mode                    management.ForwardingMode
+	EventAPIMajor           uint32
+	EventKinds              []int32
+	SemanticProfileRevision uint32
 }
 
 // Manager manages connected hunter nodes
@@ -69,7 +82,7 @@ func (m *Manager) SetTopologyPublisher(publisher TopologyPublisher) {
 }
 
 // Register registers or re-registers a hunter
-func (m *Manager) Register(hunterID, hostname string, interfaces []string, capabilities *management.HunterCapabilities) (*ConnectedHunter, bool, error) {
+func (m *Manager) Register(hunterID, hostname string, interfaces []string, capabilities *management.HunterCapabilities, contracts ...ForwardingContract) (*ConnectedHunter, bool, error) {
 	m.mu.Lock()
 
 	isReconnect := false
@@ -88,14 +101,22 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string, capab
 
 	// Register/re-register hunter
 	now := time.Now().UnixNano()
+	contract := ForwardingContract{Mode: management.ForwardingMode_FORWARDING_MODE_PACKETS}
+	if len(contracts) != 0 {
+		contract = contracts[0]
+	}
 	hunter := &ConnectedHunter{
-		ID:            hunterID,
-		Hostname:      hostname,
-		Interfaces:    interfaces,
-		Capabilities:  capabilities,
-		ConnectedAt:   now,
-		LastHeartbeat: now, // Initialize to connection time so stale detection works
-		Status:        management.HunterStatus_STATUS_HEALTHY,
+		ID:                      hunterID,
+		Hostname:                hostname,
+		Interfaces:              interfaces,
+		Capabilities:            capabilities,
+		ConnectedAt:             now,
+		LastHeartbeat:           now, // Initialize to connection time so stale detection works
+		Status:                  management.HunterStatus_STATUS_HEALTHY,
+		ForwardingMode:          contract.Mode,
+		EventAPIMajor:           contract.EventAPIMajor,
+		EventKinds:              append([]int32(nil), contract.EventKinds...),
+		SemanticProfileRevision: contract.SemanticProfileRevision,
 	}
 	m.hunters[hunterID] = hunter
 

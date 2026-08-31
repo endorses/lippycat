@@ -133,7 +133,12 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 		"capabilities", req.Capabilities)
 
 	// Register hunter with manager
-	_, isReconnect, err := p.hunterManager.Register(hunterID, req.Hostname, req.Interfaces, req.Capabilities)
+	_, isReconnect, err := p.hunterManager.Register(hunterID, req.Hostname, req.Interfaces, req.Capabilities, hunter.ForwardingContract{
+		Mode:                    mode,
+		EventAPIMajor:           apiMajor,
+		EventKinds:              kinds,
+		SemanticProfileRevision: profileRevision,
+	})
 	if err != nil {
 		if err == hunter.ErrMaxHuntersReached {
 			logger.Warn("Max hunters limit reached", "limit", p.config.MaxHunters)

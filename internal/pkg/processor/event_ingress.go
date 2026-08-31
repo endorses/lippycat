@@ -42,7 +42,7 @@ type eventIngress struct {
 	mu            sync.Mutex
 	sessions      map[string]ingressSession
 	delivered     map[string]ingressSession
-	authorize     func(string, string) bool
+	authorize     func(*eventsv1.EventIngressOpen) bool
 	flowControl   func() int32
 }
 
@@ -104,7 +104,7 @@ func (s *EventService) StreamEvents(stream eventsv1.EventService_StreamEventsSer
 	if len(allowedKinds) == 0 {
 		return status.Error(codes.FailedPrecondition, "producer profile has no event kinds")
 	}
-	if s.ingress.authorize != nil && !s.ingress.authorize(open.SourceNodeId, open.RelayNodeId) {
+	if s.ingress.authorize != nil && !s.ingress.authorize(open) {
 		return status.Error(codes.PermissionDenied, "event producer or relay is not registered")
 	}
 	if err := stream.Send(&eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: s.ingress.profile}); err != nil {
@@ -403,14 +403,28 @@ func (w *eventWAL) append(batch *eventsv1.ProtocolEventBatch) error {
 		_, err = w.file.Write(payload)
 	}
 	if err != nil {
-		return err
+		return errors.Join(err, w.rollbackAppend())
 	}
 	if err = w.file.Sync(); err != nil {
-		return err
+		return errors.Join(err, w.rollbackAppend())
 	}
 	w.size += recordSize
 	return nil
 }
+
+func (w *eventWAL) rollbackAppend() error {
+	if err := w.file.Truncate(w.size); err != nil {
+		return fmt.Errorf("truncate failed WAL append: %w", err)
+	}
+	if _, err := w.file.Seek(0, io.SeekEnd); err != nil {
+		return fmt.Errorf("seek after failed WAL append: %w", err)
+	}
+	if err := w.file.Sync(); err != nil {
+		return fmt.Errorf("sync failed WAL rollback: %w", err)
+	}
+	return nil
+}
+
 func (w *eventWAL) replay(fn func(*eventsv1.ProtocolEventBatch) error) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -418,10 +432,17 @@ func (w *eventWAL) replay(fn func(*eventsv1.ProtocolEventBatch) error) error {
 		return err
 	}
 	r := bufio.NewReader(w.file)
+	var validSize int64
 	for {
 		var h [8]byte
 		_, err := io.ReadFull(r, h[:])
 		if errors.Is(err, io.EOF) {
+			break
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			if err = w.truncateTornTail(validSize); err != nil {
+				return err
+			}
 			break
 		}
 		if err != nil {
@@ -433,6 +454,12 @@ func (w *eventWAL) replay(fn func(*eventsv1.ProtocolEventBatch) error) error {
 		}
 		b := make([]byte, n)
 		if _, err = io.ReadFull(r, b); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				if err = w.truncateTornTail(validSize); err != nil {
+					return err
+				}
+				break
+			}
 			return err
 		}
 		if crc32.ChecksumIEEE(b) != binary.BigEndian.Uint32(h[4:]) {
@@ -445,9 +472,21 @@ func (w *eventWAL) replay(fn func(*eventsv1.ProtocolEventBatch) error) error {
 		if err = fn(batch); err != nil {
 			return err
 		}
+		validSize += int64(len(h) + len(b))
 	}
 	_, err := w.file.Seek(0, io.SeekEnd)
 	return err
+}
+
+func (w *eventWAL) truncateTornTail(validSize int64) error {
+	if err := w.file.Truncate(validSize); err != nil {
+		return fmt.Errorf("truncate torn event ingress WAL tail: %w", err)
+	}
+	if err := w.file.Sync(); err != nil {
+		return fmt.Errorf("sync truncated event ingress WAL: %w", err)
+	}
+	w.size = validSize
+	return nil
 }
 func (w *eventWAL) close() error {
 	if w == nil {

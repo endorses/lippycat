@@ -69,7 +69,7 @@ type StatsCollector interface {
 // FilterManager interface for filter management
 type FilterManager interface {
 	GetFilterCount() int
-	SetInitialFilters(filters []*management.Filter)
+	SetInitialFilters(filters []*management.Filter) error
 	ApplyPendingInitial()
 	Subscribe(ctx, connCtx context.Context, mgmtClient management.ManagementServiceClient)
 }
@@ -577,7 +577,9 @@ func (m *Manager) register() error {
 		"initial_filters", len(resp.Filters), "forwarding_mode", accepted, "forwarding_notice", resp.GetForwardingNotice())
 
 	// Store initial filters in filter manager
-	m.filterManager.SetInitialFilters(resp.Filters)
+	if err := m.filterManager.SetInitialFilters(resp.Filters); err != nil {
+		return fmt.Errorf("apply initial processor filters: %w", err)
+	}
 	select {
 	case m.modeReady <- accepted:
 	default:

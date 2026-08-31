@@ -84,6 +84,83 @@ func TestRegisterHunterAcceptsMixedPacketAndEventModes(t *testing.T) {
 	require.Len(t, p.hunterManager.GetAll(""), 2)
 }
 
+func eventForwardingCapabilities(kinds ...int32) *management.EventForwardingCapabilities {
+	return &management.EventForwardingCapabilities{
+		RequestedMode:            management.ForwardingMode_FORWARDING_MODE_EVENTS,
+		EventApiMajors:           []uint32{1},
+		EventKinds:               kinds,
+		SemanticProfileRevision:  1,
+		StatefulAnalysisFeatures: []string{"tcp_reassembly", "connection_tracking", "file_metadata"},
+	}
+}
+
+func eventIngressOpen(nodeID string, kinds ...eventsv1.EventKind) *eventsv1.EventIngressOpen {
+	return &eventsv1.EventIngressOpen{
+		SourceNodeId:            nodeID,
+		ProducerSessionId:       "session-a",
+		EventApiMajor:           1,
+		SemanticProfileRevision: 1,
+		EventKinds:              kinds,
+	}
+}
+
+func TestEventIngressAuthorizationRejectsPacketAndFallbackRegistrations(t *testing.T) {
+	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
+	require.NoError(t, err)
+
+	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "packet-hunter",
+		EventForwarding: &management.EventForwardingCapabilities{
+			RequestedMode: management.ForwardingMode_FORWARDING_MODE_PACKETS,
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, p.eventIngress.authorize(eventIngressOpen("packet-hunter", eventsv1.EventKind_EVENT_KIND_DNS)))
+
+	fallback := eventForwardingCapabilities(int32(eventsv1.EventKind_EVENT_KIND_DNS))
+	fallback.EventApiMajors = []uint32{2}
+	fallback.AllowPacketFallback = true
+	response, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{HunterId: "fallback-hunter", EventForwarding: fallback})
+	require.NoError(t, err)
+	require.Equal(t, management.ForwardingMode_FORWARDING_MODE_PACKETS, response.AcceptedForwardingMode)
+	require.False(t, p.eventIngress.authorize(eventIngressOpen("fallback-hunter", eventsv1.EventKind_EVENT_KIND_DNS)))
+}
+
+func TestEventIngressAuthorizationEnforcesAcceptedKinds(t *testing.T) {
+	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
+	require.NoError(t, err)
+	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId:        "event-hunter",
+		EventForwarding: eventForwardingCapabilities(int32(eventsv1.EventKind_EVENT_KIND_DNS)),
+	})
+	require.NoError(t, err)
+
+	require.True(t, p.eventIngress.authorize(eventIngressOpen("event-hunter", eventsv1.EventKind_EVENT_KIND_DNS)))
+	require.False(t, p.eventIngress.authorize(eventIngressOpen("event-hunter", eventsv1.EventKind_EVENT_KIND_HTTP)))
+	require.False(t, p.eventIngress.authorize(eventIngressOpen("event-hunter", eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_HTTP)))
+}
+
+func TestEventIngressAuthorizationUsesLatestRegistration(t *testing.T) {
+	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
+	require.NoError(t, err)
+	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId:        "hunter-a",
+		EventForwarding: eventForwardingCapabilities(int32(eventsv1.EventKind_EVENT_KIND_DNS)),
+	})
+	require.NoError(t, err)
+	open := eventIngressOpen("hunter-a", eventsv1.EventKind_EVENT_KIND_DNS)
+	require.True(t, p.eventIngress.authorize(open))
+
+	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "hunter-a",
+		EventForwarding: &management.EventForwardingCapabilities{
+			RequestedMode: management.ForwardingMode_FORWARDING_MODE_PACKETS,
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, p.eventIngress.authorize(open))
+}
+
 func TestEventIngressDeduplicatesAndNACKsGaps(t *testing.T) {
 	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
 	require.NoError(t, err)
@@ -179,6 +256,42 @@ func TestReliableEventIngressWALSurvivesReopen(t *testing.T) {
 		return nil
 	}))
 	assert.Equal(t, 1, count)
+}
+
+func TestEventWALReplayTruncatesTornFinalRecord(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		tail []byte
+	}{
+		{name: "partial header", tail: []byte{0, 0, 0}},
+		{name: "partial payload", tail: []byte{0, 0, 0, 10, 0, 0, 0, 0, 1, 2, 3}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			wal, err := openEventWAL(dir, 1<<20)
+			require.NoError(t, err)
+			require.NoError(t, wal.append(ingressBatch(t, 1, 1)))
+			validSize := wal.size
+			_, err = wal.file.Write(test.tail)
+			require.NoError(t, err)
+			require.NoError(t, wal.file.Sync())
+			require.NoError(t, wal.close())
+
+			reopened, err := openEventWAL(dir, 1<<20)
+			require.NoError(t, err)
+			count := 0
+			require.NoError(t, reopened.replay(func(*eventsv1.ProtocolEventBatch) error {
+				count++
+				return nil
+			}))
+			require.Equal(t, 1, count)
+			require.Equal(t, validSize, reopened.size)
+			info, err := reopened.file.Stat()
+			require.NoError(t, err)
+			require.Equal(t, validSize, info.Size())
+			require.NoError(t, reopened.close())
+		})
+	}
 }
 
 func TestReliableEventIngressDispatchesAfterDurableAdmission(t *testing.T) {

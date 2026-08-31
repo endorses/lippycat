@@ -418,6 +418,16 @@ replacement batch and its exact loss ranges are now published and synced before
 any superseded durable record is deleted, so a replacement write failure cannot
 silently erase both the old data and its loss report. A regression test verifies
 that the original record survives that failure boundary.
+A renewed Phase 5 audit corrected three remaining boundaries. Processor event
+ingress is now authorized against the forwarding mode, API major, event kinds,
+and semantic profile actually accepted during hunter registration, including
+replacement on re-registration. Processor WAL recovery truncates an incomplete
+final record while retaining earlier durable admissions, and failed appends roll
+back to their previous durable offset. Finally, the first processor-provided BPF
+policy now quiesces the hunter's provisional capture, discards pre-policy
+packets, and restarts capture with the accepted filter before forwarding begins.
+Focused regressions, the race-enabled Phase 5 package suite, and hunter,
+processor, and tap specialized-build compilation pass.
 
 ## Phase 6 — Documentation, compatibility, and release verification
 

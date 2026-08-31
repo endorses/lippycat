@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-08-31
+
+### Changed
+- Avoid redundant packet copying and decoding in local capture, and buffer live normalization to reduce capture-path stalls
+- Surface cumulative libpcap receive/drop counters and exact application buffer drops in local TUI health statistics and capture logs
+- Base TCP auto-tuning pressure on enforced stream capacity, with idempotent backpressure transitions that honor disabled backpressure
+
+### Fixed
+- Preserve aggregate capture-drop logging when no telemetry callback is configured
+- Eliminate flaky CI failures caused by an unsafe concurrency-test barrier and hard-coded integration-test ports
+
 ## [0.11.1] - 2026-08-31
 
 ### Changed

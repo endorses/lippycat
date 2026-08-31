@@ -112,6 +112,28 @@ type BatchStats struct {
 	BufferUsage                             uint32
 }
 
+// NewDecodedPacketEnvelope creates an envelope that retains an already-decoded
+// packet. The packet and its data must remain immutable after this call. Keeping
+// the packet avoids copying and decoding local capture records a second time.
+func NewDecodedPacketEnvelope(packet gopacket.Packet, linkType layers.LinkType) *PacketEnvelope {
+	e := &PacketEnvelope{LinkType: linkType}
+	if packet == nil {
+		return e
+	}
+
+	e.Data = packet.Data()
+	if metadata := packet.Metadata(); metadata != nil {
+		e.CaptureTime = metadata.Timestamp
+		e.CaptureLength = metadata.CaptureLength
+		e.OriginalLength = metadata.Length
+	}
+	e.decodeOnce.Do(func() {
+		e.packet = packet
+	})
+	e.Stages = e.Stages.With(StageDecoded)
+	return e
+}
+
 // Packet lazily decodes the captured bytes and returns the same packet thereafter.
 func (e *PacketEnvelope) Packet() gopacket.Packet {
 	if e == nil {

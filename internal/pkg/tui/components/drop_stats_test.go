@@ -208,6 +208,7 @@ func TestDropStats_UpdateFromBridgeStats(t *testing.T) {
 
 	t.Run("updates from bridge stats", func(t *testing.T) {
 		ds := NewDropStats()
+		ds.SetBufferDrops(17)
 		bs := &BridgeStatistics{
 			PacketsReceived: 10000,
 			BatchesDropped:  5,
@@ -217,6 +218,7 @@ func TestDropStats_UpdateFromBridgeStats(t *testing.T) {
 
 		summary := ds.GetSummary()
 		// 5 batches * 100 packets/batch = 500 estimated drops
-		assert.Equal(t, int64(500), summary.BufferDrops)
+		assert.Equal(t, int64(17), summary.BufferDrops)
+		assert.Equal(t, int64(500), summary.QueueDrops)
 	})
 }

@@ -182,7 +182,9 @@ func (ds *DropStats) Reset() {
 	ds.TotalPackets = 0
 }
 
-// UpdateFromBridgeStats updates drop stats from BridgeStatistics.
+// UpdateFromBridgeStats updates TUI queue pressure from BridgeStatistics.
+// PacketBuffer drops are supplied by capture telemetry and must not be
+// overwritten with an estimate derived from dropped batches.
 func (ds *DropStats) UpdateFromBridgeStats(bs *BridgeStatistics) {
 	if bs == nil {
 		return
@@ -191,9 +193,9 @@ func (ds *DropStats) UpdateFromBridgeStats(bs *BridgeStatistics) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 
-	// Bridge batches dropped represents buffer/queue pressure
+	// Bridge batches dropped represents TUI queue pressure.
 	// Convert batch drops to estimated packet drops (assume ~100 packets per batch average)
-	ds.BufferDrops = bs.BatchesDropped * 100
+	ds.QueueDrops = bs.BatchesDropped * 100
 
 	// Total packets from bridge
 	ds.TotalPackets = bs.PacketsReceived

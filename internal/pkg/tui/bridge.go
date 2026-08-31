@@ -869,7 +869,10 @@ func ResetBridgeStats() {
 // NormalizeCaptureStream adapts local capture records at the ingress boundary.
 // The returned channel is closed after input is drained.
 func NormalizeCaptureStream(ctx context.Context, packetChan <-chan capture.PacketInfo, kind pipeline.SourceKind) <-chan *pipeline.PacketEnvelope {
-	envelopes := make(chan *pipeline.PacketEnvelope)
+	// Absorb short bridge stalls without allowing normalization to consume an
+	// unbounded amount of memory. Capture has its own bounded buffer upstream.
+	const normalizationQueueSize = 256
+	envelopes := make(chan *pipeline.PacketEnvelope, normalizationQueueSize)
 	go func() {
 		defer close(envelopes)
 		if err := captureadapter.Stream(ctx, packetChan, envelopes, kind); err != nil && !errors.Is(err, context.Canceled) {

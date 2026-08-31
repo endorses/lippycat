@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pcap"
@@ -93,6 +94,9 @@ type SaveCompleteMsg struct {
 type CaptureCompleteMsg struct {
 	PacketsReceived int64 // Total packets received by bridge
 }
+
+// CaptureTelemetryMsg carries cumulative local capture health counters.
+type CaptureTelemetryMsg capture.Telemetry
 
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
@@ -552,6 +556,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleFilterOperationMsg(msg)
 	case CaptureCompleteMsg:
 		return m.handleCaptureCompleteMsg(msg)
+	case CaptureTelemetryMsg:
+		stats := m.uiState.StatisticsView.GetDropStats()
+		stats.SetKernelStats(msg.PacketsReceived, msg.KernelDrops+msg.InterfaceDrops)
+		stats.SetBufferDrops(msg.PacketBufferDrops)
+		return m, nil
 	}
 
 	// Return toast command if active

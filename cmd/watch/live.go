@@ -138,7 +138,11 @@ func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator)
 	}
 	// Pass pause function to drop packets at source when paused (reduces CPU)
-	capture.InitWithContext(ctx, devices, filter, processor, nil, pauseSignal.IsPaused)
+	capture.InitWithContextAndTelemetry(ctx, devices, filter, processor, nil, pauseSignal.IsPaused, func(stats capture.Telemetry) {
+		if program != nil {
+			program.Send(tui.CaptureTelemetryMsg(stats))
+		}
+	})
 }
 
 func init() {

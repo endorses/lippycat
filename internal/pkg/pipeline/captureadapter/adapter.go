@@ -4,7 +4,6 @@ package captureadapter
 import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
-	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
@@ -27,14 +26,8 @@ func FromPacketInfo(info capture.PacketInfo, kind ...pipeline.SourceKind) *pipel
 			linkType = layers.LinkTypeRaw
 		}
 	}
-	e := &pipeline.PacketEnvelope{LinkType: linkType, Source: pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface}}
-	if info.Packet == nil {
-		return e
-	}
-	e.Data = append([]byte(nil), info.Packet.Data()...)
-	if m := info.Packet.Metadata(); m != nil {
-		e.CaptureTime, e.CaptureLength, e.OriginalLength = m.Timestamp, m.CaptureLength, m.Length
-	}
+	e := pipeline.NewDecodedPacketEnvelope(info.Packet, linkType)
+	e.Source = pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface}
 	return e
 }
 
@@ -45,13 +38,7 @@ func ToPacketInfo(e *pipeline.PacketEnvelope) capture.PacketInfo {
 	if e == nil {
 		return capture.PacketInfo{}
 	}
-	p := gopacket.NewPacket(append([]byte(nil), e.Data...), e.LinkType, gopacket.Default)
-	p.Metadata().CaptureInfo = gopacket.CaptureInfo{
-		Timestamp:     e.CaptureTime,
-		CaptureLength: e.CaptureLength,
-		Length:        e.OriginalLength,
-	}
-	return capture.PacketInfo{Packet: p, LinkType: e.LinkType, Interface: e.Source.InterfaceName}
+	return capture.PacketInfo{Packet: e.Packet(), LinkType: e.LinkType, Interface: e.Source.InterfaceName}
 }
 
 // ForEach normalizes a local capture stream at its ingress boundary and invokes

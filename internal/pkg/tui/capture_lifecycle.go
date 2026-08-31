@@ -128,6 +128,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	m.statistics.MinPacketSize = 999999
 	m.statistics.MaxPacketSize = 0
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
+	m.uiState.StatisticsView.GetDropStats().Reset()
 
 	// Reset bridge state (clears stale data from previous capture mode)
 	ResetBridgeStats()
@@ -244,9 +245,13 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 	// For offline: blocks until the caller-managed PCAP replay completes.
 	// For live: caller uses goroutine for non-blocking behavior
 	// Pass pause function to drop packets at source when paused (reduces CPU)
-	capture.InitWithContext(ctx, devices, filter, func(ch <-chan capture.PacketInfo, _ *capture.TCPAssembler) {
+	capture.InitWithContextAndTelemetry(ctx, devices, filter, func(ch <-chan capture.PacketInfo, _ *capture.TCPAssembler) {
 		processor(ch)
-	}, nil, pauseSignal.IsPaused)
+	}, nil, pauseSignal.IsPaused, func(stats capture.Telemetry) {
+		if program != nil {
+			program.Send(CaptureTelemetryMsg(stats))
+		}
+	})
 }
 
 // startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.

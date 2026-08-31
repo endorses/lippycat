@@ -167,8 +167,11 @@ func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterf
 	}
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo) {
-		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator,
-			tui.LocalEventAnalysisOptions{NodeID: "watch-local", InputIdentity: inputIdentity, AnalysisProfile: watchFileAnalysisProfile(filter), SourceOrdering: append([]string(nil), ordering...)})
+		options := localEventAnalysisOptions(filter)
+		options.InputIdentity = inputIdentity
+		options.AnalysisProfile = watchFileAnalysisProfile(filter)
+		options.SourceOrdering = append([]string(nil), ordering...)
+		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator, options)
 	}
 	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
 	capture.RunOfflineOrderedContext(ctx, devices, filter, processor)

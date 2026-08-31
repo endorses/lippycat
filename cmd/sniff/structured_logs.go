@@ -32,12 +32,13 @@ func registerStructuredLogFlags(cmd *cobra.Command) {
 type sniffEventSession struct {
 	dispatcher *events.Dispatcher
 	analysis   *eventanalysis.Runtime
+	filtered   bool
 }
 
 // withEventAnalysis keeps normalized event production active independently of
 // optional structured-log output. The observer is best-effort and cannot block
 // the packet display/output pipeline.
-func withEventAnalysis(inputFiles []string, analysisProfile string, run func()) {
+func withEventAnalysis(inputFiles []string, analysisProfile, effectiveFilter string, run func()) {
 	dir := viper.GetString("logs.dir")
 	s, err := newSniffEventSession(dir, inputFiles, analysisProfile, nil)
 	if err != nil {
@@ -45,6 +46,7 @@ func withEventAnalysis(inputFiles []string, analysisProfile string, run func()) 
 		run()
 		return
 	}
+	s.filtered = strings.TrimSpace(effectiveFilter) != ""
 	restore := capture.SetPacketObserver(s.observe)
 	defer restore()
 	defer func() {
@@ -171,6 +173,10 @@ func structuredLogAnalysisProfile(scope, effectiveFilter string) string {
 
 func (s *sniffEventSession) observe(info capture.PacketInfo) {
 	source := eventanalysis.Source{NodeID: "local", CaptureSource: info.Interface}
+	if s.filtered {
+		source.CaptureScope = events.CaptureScopeFiltered
+		source.Partial = true
+	}
 	if info.SourcePath != "" {
 		source.InputFile = info.SourcePath
 	} else {

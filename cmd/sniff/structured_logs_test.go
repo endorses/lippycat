@@ -92,6 +92,7 @@ func TestSniffProducesNormalizedEventsWithoutLogDirectory(t *testing.T) {
 	sink := &sniffEventSink{}
 	session, err := newSniffEventSession("", []string{input}, "test-profile", sink)
 	require.NoError(t, err)
+	session.filtered = true
 
 	packet := gopacket.NewPacket(dnsPacket(t), layers.LayerTypeEthernet, gopacket.Default)
 	packet.Metadata().Timestamp = time.Unix(10, 123)
@@ -114,6 +115,8 @@ func TestSniffProducesNormalizedEventsWithoutLogDirectory(t *testing.T) {
 	require.Equal(t, "local", dnsEvent.Envelope().NodeID)
 	require.Equal(t, input, dnsEvent.Envelope().Provenance.InputFile)
 	require.Equal(t, time.Unix(10, 123), dnsEvent.Envelope().Timestamp)
+	require.Equal(t, events.CaptureScopeFiltered, dnsEvent.Envelope().CaptureScope)
+	require.True(t, dnsEvent.Envelope().Partial)
 	require.NotEmpty(t, dnsEvent.Envelope().EventID)
 }
 
@@ -123,7 +126,7 @@ func TestWithEventAnalysisStillRunsWhenInitializationFails(t *testing.T) {
 	t.Cleanup(func() { viper.Set("events.drop_policy", "") })
 
 	runs := 0
-	withEventAnalysis(nil, "test-profile", func() { runs++ })
+	withEventAnalysis(nil, "test-profile", "", func() { runs++ })
 
 	require.Equal(t, 1, runs)
 }

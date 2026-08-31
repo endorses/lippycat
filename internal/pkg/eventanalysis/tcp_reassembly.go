@@ -74,6 +74,7 @@ type applicationStream struct {
 	runtime           *Runtime
 	netFlow, tcpFlow  gopacket.Flow
 	buffer            []byte
+	marks             []reassemblyMark
 	email             *emailparser.Parser
 	emailMetadata     types.EmailMetadata
 	smtpInData        bool
@@ -81,10 +82,22 @@ type applicationStream struct {
 	smtpBody          strings.Builder
 	smtpBodySize      int
 	smtpBodyTruncated bool
+	smtpContext       reassemblyMark
+	smtpContextSet    bool
 	partial           bool
 	protocolHint      string
 	tlsHandshake      []byte
 	tlsRecordVersion  uint16
+	tlsContext        reassemblyMark
+	tlsContextSet     bool
+	httpCloseBody     *types.HTTPMetadata
+	httpCloseContext  reassemblyMark
+}
+
+type reassemblyMark struct {
+	end int
+	ctx reassemblyContext
+	ci  gopacket.CaptureInfo
 }
 
 func (*applicationStream) Accept(_ *layers.TCP, _ gopacket.CaptureInfo, _ reassembly.TCPFlowDirection, _ reassembly.Sequence, start *bool, _ reassembly.AssemblerContext) bool {
@@ -98,12 +111,7 @@ func (s *applicationStream) ReassembledSG(sg reassembly.ScatterGather, _ reassem
 		return
 	}
 	ci := sg.CaptureInfo(available - 1)
-	var ctx reassemblyContext
-	ok := len(ci.AncillaryData) != 0
-	if ok {
-		ctx, ok = ci.AncillaryData[0].(reassemblyContext)
-	}
-	if !ok {
+	if _, ok := captureContext(ci); !ok {
 		s.partial = true
 		return
 	}
@@ -118,33 +126,48 @@ func (s *applicationStream) ReassembledSG(sg reassembly.ScatterGather, _ reassem
 		s.runtime.stats.Invalid++
 		return
 	}
+	s.appendMarks(sg, available)
 	s.buffer = append(s.buffer, chunk...)
-	s.parse(ctx, ci)
+	s.parse()
 }
 
 func (s *applicationStream) ReassemblyComplete(reassembly.AssemblerContext) bool {
+	if s.httpCloseBody != nil {
+		metadata := s.httpCloseBody
+		metadata.BodyPreview = string(s.buffer)
+		metadata.BodySize = len(s.buffer)
+		metadata.ContentLength = int64(len(s.buffer))
+		mark := s.contextThrough(len(s.buffer))
+		mark = mergeCaptureMarks(s.httpCloseContext, mark)
+		s.consume(len(s.buffer))
+		s.emit(mark.ctx, mark.ci, nil, protocolmeta.HTTPToProto(metadata, s.runtime.cfg.IncludeHTTPHeaders), nil)
+		s.httpCloseBody = nil
+	}
 	if len(s.buffer) != 0 {
 		s.runtime.stats.Invalid++
 	}
 	return true
 }
 
-func (s *applicationStream) parse(ctx reassemblyContext, ci gopacket.CaptureInfo) {
-	if ctx.protocolHint != "" {
-		s.protocolHint = ctx.protocolHint
+func (s *applicationStream) parse() {
+	if len(s.marks) != 0 && s.marks[len(s.marks)-1].ctx.protocolHint != "" {
+		s.protocolHint = s.marks[len(s.marks)-1].ctx.protocolHint
 	}
 	srcPort, dstPort := flowPort(s.tcpFlow.Src()), flowPort(s.tcpFlow.Dst())
 	switch {
 	case s.protocolHint == "tls" || isTLSPort(srcPort) || isTLSPort(dstPort):
-		s.parseTLS(ctx, ci)
+		s.parseTLS()
 	case s.protocolHint == "http" || isHTTPPort(srcPort) || isHTTPPort(dstPort):
-		s.parseHTTP(ctx, ci)
+		s.parseHTTP()
 	case s.protocolHint == "smtp" || isSMTPPort(srcPort) || isSMTPPort(dstPort):
-		s.parseSMTP(ctx, ci, isSMTPPort(srcPort))
+		s.parseSMTP(isSMTPPort(srcPort))
 	}
 }
 
-func (s *applicationStream) parseHTTP(ctx reassemblyContext, ci gopacket.CaptureInfo) {
+func (s *applicationStream) parseHTTP() {
+	if s.httpCloseBody != nil {
+		return
+	}
 	for {
 		end := bytes.Index(s.buffer, []byte("\r\n\r\n"))
 		separator := 4
@@ -157,13 +180,13 @@ func (s *applicationStream) parseHTTP(ctx reassemblyContext, ci gopacket.Capture
 		frameEnd := end + separator
 		metadata := httpparser.NewParser().ParsePayload(s.buffer[:frameEnd])
 		if metadata == nil {
-			s.buffer = s.buffer[frameEnd:]
+			s.consume(frameEnd)
 			s.partial = true
 			continue
 		}
 		bodyLength := metadata.ContentLength
 		if bodyLength < 0 || bodyLength > maxReassembledApplicationBytes {
-			s.buffer = s.buffer[frameEnd:]
+			s.consume(frameEnd)
 			s.partial = true
 			s.runtime.stats.Invalid++
 			continue
@@ -171,7 +194,7 @@ func (s *applicationStream) parseHTTP(ctx reassemblyContext, ci gopacket.Capture
 		if strings.Contains(strings.ToLower(metadata.Headers["transfer-encoding"]), "chunked") {
 			messageEnd, body, complete, valid := chunkedMessage(s.buffer, frameEnd)
 			if !valid {
-				s.buffer = s.buffer[frameEnd:]
+				s.consume(frameEnd)
 				s.partial = true
 				s.runtime.stats.Invalid++
 				continue
@@ -182,9 +205,17 @@ func (s *applicationStream) parseHTTP(ctx reassemblyContext, ci gopacket.Capture
 			metadata.BodyPreview = string(body)
 			metadata.BodySize = len(body)
 			metadata.ContentLength = int64(len(body))
-			s.buffer = s.buffer[messageEnd:]
-			s.emit(ctx, ci, nil, protocolmeta.HTTPToProto(metadata, s.runtime.cfg.IncludeHTTPHeaders), nil)
+			mark := s.contextThrough(messageEnd)
+			s.consume(messageEnd)
+			s.emit(mark.ctx, mark.ci, nil, protocolmeta.HTTPToProto(metadata, s.runtime.cfg.IncludeHTTPHeaders), nil)
 			continue
+		}
+		_, hasContentLength := metadata.Headers["content-length"]
+		if metadata.StatusCode != 0 && !hasContentLength && responseMayHaveCloseDelimitedBody(metadata.StatusCode) {
+			s.httpCloseBody = metadata
+			s.httpCloseContext = s.contextThrough(frameEnd)
+			s.consume(frameEnd)
+			return
 		}
 		messageEnd := frameEnd + int(bodyLength)
 		if len(s.buffer) < messageEnd {
@@ -194,9 +225,14 @@ func (s *applicationStream) parseHTTP(ctx reassemblyContext, ci gopacket.Capture
 			metadata.BodyPreview = string(s.buffer[frameEnd:messageEnd])
 			metadata.BodySize = int(bodyLength)
 		}
-		s.buffer = s.buffer[messageEnd:]
-		s.emit(ctx, ci, nil, protocolmeta.HTTPToProto(metadata, s.runtime.cfg.IncludeHTTPHeaders), nil)
+		mark := s.contextThrough(messageEnd)
+		s.consume(messageEnd)
+		s.emit(mark.ctx, mark.ci, nil, protocolmeta.HTTPToProto(metadata, s.runtime.cfg.IncludeHTTPHeaders), nil)
 	}
+}
+
+func responseMayHaveCloseDelimitedBody(status int) bool {
+	return status >= 200 && status != 204 && status != 304
 }
 
 func chunkedMessage(payload []byte, bodyStart int) (int, []byte, bool, bool) {
@@ -244,11 +280,11 @@ func chunkedMessage(payload []byte, bodyStart int) (int, []byte, bool, bool) {
 	}
 }
 
-func (s *applicationStream) parseTLS(ctx reassemblyContext, ci gopacket.CaptureInfo) {
+func (s *applicationStream) parseTLS() {
 	for len(s.buffer) >= 5 {
 		length := int(binary.BigEndian.Uint16(s.buffer[3:5])) + 5
 		if length > maxReassembledApplicationBytes || s.buffer[0] < 20 || s.buffer[0] > 24 || s.buffer[1] != 3 {
-			s.buffer = s.buffer[1:]
+			s.consume(1)
 			s.partial = true
 			continue
 		}
@@ -256,7 +292,8 @@ func (s *applicationStream) parseTLS(ctx reassemblyContext, ci gopacket.CaptureI
 			return
 		}
 		frame := s.buffer[:length]
-		s.buffer = s.buffer[length:]
+		mark := s.contextThrough(length)
+		s.consume(length)
 		if frame[0] != tlsparser.RecordTypeHandshake {
 			continue
 		}
@@ -270,6 +307,7 @@ func (s *applicationStream) parseTLS(ctx reassemblyContext, ci gopacket.CaptureI
 			s.tlsRecordVersion = binary.BigEndian.Uint16(frame[1:3])
 		}
 		s.tlsHandshake = append(s.tlsHandshake, frame[5:]...)
+		s.mergeTLSContext(mark)
 		for len(s.tlsHandshake) >= 4 {
 			handshakeLength := int(s.tlsHandshake[1])<<16 | int(s.tlsHandshake[2])<<8 | int(s.tlsHandshake[3])
 			messageEnd := handshakeLength + 4
@@ -285,21 +323,26 @@ func (s *applicationStream) parseTLS(ctx reassemblyContext, ci gopacket.CaptureI
 			metadata := tlsparser.NewParser().ParseHandshake(s.tlsRecordVersion, s.tlsHandshake[:messageEnd])
 			s.tlsHandshake = s.tlsHandshake[messageEnd:]
 			if metadata != nil {
-				s.emit(ctx, ci, protocolmeta.TLSToProto(metadata), nil, nil)
+				s.emit(s.tlsContext.ctx, s.tlsContext.ci, protocolmeta.TLSToProto(metadata), nil, nil)
 			}
+		}
+		if len(s.tlsHandshake) == 0 {
+			s.tlsContextSet = false
 		}
 	}
 }
 
-func (s *applicationStream) parseSMTP(ctx reassemblyContext, ci gopacket.CaptureInfo, fromServer bool) {
+func (s *applicationStream) parseSMTP(fromServer bool) {
 	for {
 		end := bytes.IndexByte(s.buffer, '\n')
 		if end < 0 {
 			return
 		}
 		line := strings.TrimRight(string(s.buffer[:end+1]), "\r\n")
-		s.buffer = s.buffer[end+1:]
+		mark := s.contextThrough(end + 1)
+		s.consume(end + 1)
 		if !fromServer && s.smtpInData {
+			s.mergeSMTPContext(mark)
 			if line == "." {
 				metadata := &data.EmailMetadata{
 					MailFrom: s.emailMetadata.MailFrom, RcptTo: append([]string(nil), s.emailMetadata.RcptTo...),
@@ -310,10 +353,11 @@ func (s *applicationStream) parseSMTP(ctx reassemblyContext, ci gopacket.Capture
 				if s.runtime.cfg.IncludeEmailBodyPreview {
 					metadata.BodyPreview = s.smtpBody.String()
 				}
-				s.emit(ctx, ci, nil, nil, metadata)
+				s.emit(s.smtpContext.ctx, s.smtpContext.ci, nil, nil, metadata)
 				s.smtpInData, s.smtpInBody = false, false
 				s.smtpBody.Reset()
 				s.smtpBodySize, s.smtpBodyTruncated = 0, false
+				s.smtpContextSet = false
 				continue
 			}
 			if !s.smtpInBody {
@@ -328,13 +372,124 @@ func (s *applicationStream) parseSMTP(ctx reassemblyContext, ci gopacket.Capture
 		if recognized && !fromServer && s.emailMetadata.Command == "DATA" {
 			s.smtpInData = true
 			s.smtpInBody = false
+			s.smtpContext, s.smtpContextSet = mark, true
 		}
 		if !recognized && s.emailMetadata.Subject == "" && s.emailMetadata.MessageID == "" {
 			continue
 		}
 		metadata := &data.EmailMetadata{MailFrom: s.emailMetadata.MailFrom, RcptTo: append([]string(nil), s.emailMetadata.RcptTo...), Subject: s.emailMetadata.Subject, MessageId: s.emailMetadata.MessageID}
-		s.emit(ctx, ci, nil, nil, metadata)
+		s.emit(mark.ctx, mark.ci, nil, nil, metadata)
 	}
+}
+
+func (s *applicationStream) appendMarks(sg reassembly.ScatterGather, available int) {
+	base := len(s.buffer)
+	for offset := 0; offset < available; offset++ {
+		ci := sg.CaptureInfo(offset)
+		ctx, ok := captureContext(ci)
+		if !ok {
+			s.partial = true
+			continue
+		}
+		if len(s.marks) == 0 || !sameCaptureMark(s.marks[len(s.marks)-1], ctx, ci) {
+			s.marks = append(s.marks, reassemblyMark{end: base + offset + 1, ctx: ctx, ci: ci})
+		} else {
+			s.marks[len(s.marks)-1].end = base + offset + 1
+		}
+	}
+}
+
+func captureContext(ci gopacket.CaptureInfo) (reassemblyContext, bool) {
+	if len(ci.AncillaryData) == 0 {
+		return reassemblyContext{}, false
+	}
+	ctx, ok := ci.AncillaryData[0].(reassemblyContext)
+	return ctx, ok
+}
+
+func sameCaptureMark(mark reassemblyMark, ctx reassemblyContext, ci gopacket.CaptureInfo) bool {
+	return mark.ci.Timestamp.Equal(ci.Timestamp) && mark.ctx.scope == ctx.scope && mark.ctx.partial == ctx.partial && sameSource(mark.ctx.source, ctx.source) && mark.ctx.protocolHint == ctx.protocolHint
+}
+
+func sameSource(a, b Source) bool {
+	if a.NodeID != b.NodeID || a.CaptureSource != b.CaptureSource || a.InterfaceName != b.InterfaceName || a.InterfaceIndex != b.InterfaceIndex || a.InputFile != b.InputFile || a.CaptureScope != b.CaptureScope || a.Partial != b.Partial || len(a.ProcessorNodeIDs) != len(b.ProcessorNodeIDs) {
+		return false
+	}
+	for i := range a.ProcessorNodeIDs {
+		if a.ProcessorNodeIDs[i] != b.ProcessorNodeIDs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *applicationStream) contextThrough(end int) reassemblyMark {
+	var result reassemblyMark
+	for _, mark := range s.marks {
+		result = mark
+		if mark.end >= end {
+			break
+		}
+	}
+	// Re-scan provenance flags because result is replaced as capture runs are
+	// traversed and the conservative flags must survive until frame completion.
+	for _, mark := range s.marks {
+		if mark.ctx.scope == events.CaptureScopeFiltered {
+			result.ctx.scope = events.CaptureScopeFiltered
+		}
+		result.ctx.partial = result.ctx.partial || mark.ctx.partial
+		if mark.end >= end {
+			break
+		}
+	}
+	return result
+}
+
+func (s *applicationStream) consume(count int) {
+	s.buffer = s.buffer[count:]
+	kept := s.marks[:0]
+	for _, mark := range s.marks {
+		if mark.end <= count {
+			continue
+		}
+		mark.end -= count
+		kept = append(kept, mark)
+	}
+	s.marks = kept
+}
+
+func (s *applicationStream) mergeTLSContext(mark reassemblyMark) {
+	if !s.tlsContextSet {
+		s.tlsContext, s.tlsContextSet = mark, true
+		return
+	}
+	s.tlsContext.ci = mark.ci
+	if mark.ctx.scope == events.CaptureScopeFiltered {
+		s.tlsContext.ctx.scope = events.CaptureScopeFiltered
+	}
+	s.tlsContext.ctx.partial = s.tlsContext.ctx.partial || mark.ctx.partial
+}
+
+func (s *applicationStream) mergeSMTPContext(mark reassemblyMark) {
+	if !s.smtpContextSet {
+		s.smtpContext, s.smtpContextSet = mark, true
+		return
+	}
+	s.smtpContext = mergeCaptureMarks(s.smtpContext, mark)
+}
+
+func mergeCaptureMarks(first, last reassemblyMark) reassemblyMark {
+	if first.ctx.scope == events.CaptureScopeFiltered {
+		last.ctx.scope = events.CaptureScopeFiltered
+	}
+	last.ctx.partial = last.ctx.partial || first.ctx.partial
+	if last.ci.Timestamp.IsZero() {
+		last.ci = first.ci
+	}
+	if last.ctx.source.NodeID == "" {
+		last.ctx.source = first.ctx.source
+	}
+	return last
 }
 
 func (s *applicationStream) captureSMTPBody(line string) {

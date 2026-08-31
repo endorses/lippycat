@@ -108,8 +108,8 @@ func TestEnvelopeBridgePublishesOfflineEventsWithFileProvenanceBeforeEOF(t *test
 
 	var batches []types.EventBatch
 	StartEnvelopeBridge(envelopes, nil, NewPauseSignal(), nil, true, nil, LocalEventAnalysisOptions{
-		NodeID:         "watch-local",
-		SourceOrdering: []string{"fixture.pcap"},
+		NodeID: "watch-local", SourceOrdering: []string{"fixture.pcap"},
+		CaptureScope: events.CaptureScopeFiltered, Partial: true,
 		deliver: func(batch types.EventBatch) {
 			batches = append(batches, batch)
 		},
@@ -130,6 +130,8 @@ func TestEnvelopeBridgePublishesOfflineEventsWithFileProvenanceBeforeEOF(t *test
 	require.Equal(t, "pcap", envelope.Provenance.CaptureSource)
 	require.Equal(t, "fixture.pcap", envelope.Provenance.InputFile)
 	require.Equal(t, uint32(7), envelope.Provenance.InterfaceIndex)
+	require.Equal(t, events.CaptureScopeFiltered, envelope.CaptureScope)
+	require.True(t, envelope.Partial)
 	require.NotEmpty(t, envelope.EventID)
 	require.NotEmpty(t, envelope.ProducerSessionID)
 	require.NotZero(t, envelope.EventSequence)

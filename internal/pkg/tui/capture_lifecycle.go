@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -249,7 +250,7 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
 		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator,
-			LocalEventAnalysisOptions{NodeID: "watch-local"})
+			localCaptureEventOptions(filter))
 	}
 
 	// Run capture - InitWithContext handles both live and offline modes
@@ -270,12 +271,24 @@ func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterfa
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
-		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator,
-			LocalEventAnalysisOptions{NodeID: "watch-local", InputIdentity: inputIdentity, AnalysisProfile: localFileAnalysisProfile(filter), SourceOrdering: pcapInterfaceNames(devices)})
+		options := localCaptureEventOptions(filter)
+		options.InputIdentity = inputIdentity
+		options.AnalysisProfile = localFileAnalysisProfile(filter)
+		options.SourceOrdering = pcapInterfaceNames(devices)
+		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator, options)
 	}
 
 	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes
 	capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
+}
+
+func localCaptureEventOptions(filter string) LocalEventAnalysisOptions {
+	options := LocalEventAnalysisOptions{NodeID: "watch-local"}
+	if strings.TrimSpace(filter) != "" {
+		options.CaptureScope = events.CaptureScopeFiltered
+		options.Partial = true
+	}
+	return options
 }
 
 func localFileAnalysisProfile(filter string) string {

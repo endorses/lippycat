@@ -326,10 +326,14 @@ func udpPacket(t *testing.T, sourcePort, destinationPort uint16) []byte {
 }
 
 func tcpPacket(t *testing.T, sourcePort, destinationPort uint16, seq uint32, syn bool, payload []byte, ts time.Time) capture.PacketInfo {
+	return tcpPacketFlags(t, sourcePort, destinationPort, seq, syn, false, payload, ts)
+}
+
+func tcpPacketFlags(t *testing.T, sourcePort, destinationPort uint16, seq uint32, syn, fin bool, payload []byte, ts time.Time) capture.PacketInfo {
 	t.Helper()
 	eth := &layers.Ethernet{SrcMAC: net.HardwareAddr{0, 1, 2, 3, 4, 5}, DstMAC: net.HardwareAddr{6, 7, 8, 9, 10, 11}, EthernetType: layers.EthernetTypeIPv4}
 	ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolTCP, SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2)}
-	tcp := &layers.TCP{SrcPort: layers.TCPPort(sourcePort), DstPort: layers.TCPPort(destinationPort), Seq: seq, SYN: syn, ACK: !syn, Window: 65535}
+	tcp := &layers.TCP{SrcPort: layers.TCPPort(sourcePort), DstPort: layers.TCPPort(destinationPort), Seq: seq, SYN: syn, FIN: fin, ACK: !syn, Window: 65535}
 	require.NoError(t, tcp.SetNetworkLayerForChecksum(ip))
 	buffer := gopacket.NewSerializeBuffer()
 	require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, tcp, gopacket.Payload(payload)))
@@ -536,6 +540,86 @@ func TestReassembledFilteredCapturePreservesScopeAndPartialState(t *testing.T) {
 		}
 	}
 	t.Fatal("missing reassembled HTTP event")
+}
+
+func TestReassembledMixedScopeCaptureRemainsFilteredAndPartial(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 32)
+	fixture, err := eventfixture.Captured()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(fixture), 3)
+	fixture[1].MatchedFilterIds = []string{"filter-a"}
+	require.Empty(t, fixture[len(fixture)-1].MatchedFilterIds)
+	require.NoError(t, r.ObserveCaptured(Source{NodeID: "node", CaptureSource: "hunter-a"}, fixture))
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			require.Equal(t, events.CaptureScopeFiltered, event.Envelope().CaptureScope)
+			require.True(t, event.Envelope().Partial)
+			return
+		}
+	}
+	t.Fatal("missing reassembled HTTP event")
+}
+
+func TestReassembledPipelinedHTTPUsesEachFrameFinalByteTimestamp(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 32)
+	base := time.Unix(250, 0)
+	first := []byte("GET /first HTTP/1.1\r\nHost: example.test\r\n\r\n")
+	second := []byte("GET /second HTTP/1.1\r\nHost: example.test\r\n\r\n")
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 40000, 80, 1000, true, nil, base)))
+	// Leave a gap, then fill it so one reassembly callback releases both frames.
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 40000, 80, 1001+uint32(len(first)), false, second, base.Add(2*time.Second))))
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 40000, 80, 1001, false, first, base.Add(time.Second))))
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var got []events.HTTPEvent
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			got = append(got, event.(events.HTTPEvent))
+		}
+	}
+	require.Len(t, got, 2)
+	require.Equal(t, "/first", got[0].URI)
+	require.Equal(t, base.Add(time.Second), got[0].Envelope().Timestamp)
+	require.Equal(t, "/second", got[1].URI)
+	require.Equal(t, base.Add(2*time.Second), got[1].Envelope().Timestamp)
+}
+
+func TestRuntimeCompletesCloseDelimitedHTTPResponseAtFIN(t *testing.T) {
+	r, dispatcher, sink := testRuntime(t, 32)
+	base := time.Unix(275, 0)
+	payload := []byte("HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\nhello close body")
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 80, 40000, 1000, true, nil, base)))
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacket(t, 80, 40000, 1001, false, payload, base.Add(time.Second))))
+	require.NoError(t, dispatcher.Flush(context.Background()))
+	sink.mu.Lock()
+	for _, event := range sink.events {
+		require.NotEqual(t, events.KindHTTP, event.Kind(), "close-delimited response emitted before stream close")
+	}
+	sink.mu.Unlock()
+	finish := base.Add(2 * time.Second)
+	require.NoError(t, r.ObservePacket(Source{NodeID: "node"}, tcpPacketFlags(t, 80, 40000, 1001+uint32(len(payload)), false, true, nil, finish)))
+	r.EOF()
+	require.NoError(t, dispatcher.Close(context.Background()))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, event := range sink.events {
+		if event.Kind() == events.KindHTTP {
+			httpEvent := event.(events.HTTPEvent)
+			require.Equal(t, uint64(len("hello close body")), httpEvent.ResponseBodyLength)
+			require.Equal(t, base.Add(time.Second), httpEvent.Envelope().Timestamp)
+			return
+		}
+	}
+	t.Fatal("missing close-delimited HTTP event")
 }
 
 func TestRuntimeReassemblesChunkedHTTPBodyBeforeEmission(t *testing.T) {

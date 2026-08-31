@@ -312,6 +312,12 @@ runtime now namespaces reassembly by capture producer/input while retaining one
 globally bounded assembler and the original flow in emitted events. A regression
 test interleaves segmented HTTP from two sources and verifies independent event
 payloads and provenance.
+A renewed implementation audit corrected four remaining parity gaps: effective
+local sniff/watch filters now mark emitted events filtered and partial; mixed
+scope TCP segments retain conservative provenance; application frames released
+together retain their own final-byte timestamps; and close-delimited HTTP
+response bodies are completed at stream close. Regression tests cover each
+boundary across the shared runtime and local integration adapters.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

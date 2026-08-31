@@ -6,11 +6,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/tui"
@@ -136,10 +138,19 @@ func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
 		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator,
-			tui.LocalEventAnalysisOptions{NodeID: "watch-local"})
+			localEventAnalysisOptions(filter))
 	}
 	// Pass pause function to drop packets at source when paused (reduces CPU)
 	capture.InitWithContext(ctx, devices, filter, processor, nil, pauseSignal.IsPaused)
+}
+
+func localEventAnalysisOptions(filter string) tui.LocalEventAnalysisOptions {
+	options := tui.LocalEventAnalysisOptions{NodeID: "watch-local"}
+	if strings.TrimSpace(filter) != "" {
+		options.CaptureScope = events.CaptureScopeFiltered
+		options.Partial = true
+	}
+	return options
 }
 
 func init() {

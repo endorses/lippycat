@@ -917,6 +917,8 @@ type LocalEventAnalysisOptions struct {
 	InputIdentity   string
 	AnalysisProfile string
 	SourceOrdering  []string
+	CaptureScope    events.CaptureScope
+	Partial         bool
 	deliver         func(types.EventBatch)
 }
 
@@ -1116,6 +1118,8 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 				source := eventanalysis.Source{
 					NodeID:         b.analysis.NodeID,
 					InterfaceIndex: env.Source.InterfaceIndex,
+					CaptureScope:   b.analysis.CaptureScope,
+					Partial:        b.analysis.Partial,
 				}
 				if env.Source.Kind == pipeline.SourcePCAPReplay {
 					source.CaptureSource = "pcap"

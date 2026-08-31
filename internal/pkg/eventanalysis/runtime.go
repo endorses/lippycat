@@ -45,6 +45,7 @@ type Config struct {
 	IncludeEmailBodyPreview bool
 	Now                     func() time.Time
 	ExpiryInterval          time.Duration
+	MaxReassemblyStreams    int
 	// LiveExpiry advances connection expiry from the wall clock when capture is
 	// idle. Leave it disabled for deterministic offline replay, where packet
 	// timestamps and EOF exclusively drive the capture clock.
@@ -55,24 +56,23 @@ type Config struct {
 	LosslessDelivery bool
 }
 
-type Stats struct{ Observed, Emitted, Invalid, Dropped uint64 }
+type Stats struct{ Observed, Emitted, Invalid, Dropped, ReassemblyEvicted uint64 }
 
 type Runtime struct {
-	mu            sync.Mutex
-	cfg           Config
-	identity      *flowid.Cache
-	connections   *conntrack.Tracker
-	tcpAssembler  *capture.TCPAssembler
-	tcpNamespaces map[reassemblySourceKey]uint64
-	nextNamespace uint64
-	files         *fileanalysis.Analyzer
-	dns           *dnsparser.Parser
-	nextExpiry    time.Time
-	closed        bool
-	stats         Stats
-	expiryStop    chan struct{}
-	expiryDone    chan struct{}
-	stopExpiry    sync.Once
+	mu             sync.Mutex
+	cfg            Config
+	identity       *flowid.Cache
+	connections    *conntrack.Tracker
+	tcpAssembler   *capture.TCPAssembler
+	activeTCPFlows map[reassemblyFlowKey]struct{}
+	files          *fileanalysis.Analyzer
+	dns            *dnsparser.Parser
+	nextExpiry     time.Time
+	closed         bool
+	stats          Stats
+	expiryStop     chan struct{}
+	expiryDone     chan struct{}
+	stopExpiry     sync.Once
 }
 
 func New(cfg Config) (*Runtime, error) {
@@ -99,6 +99,9 @@ func New(cfg Config) (*Runtime, error) {
 	}
 	if cfg.ExpiryInterval <= 0 {
 		cfg.ExpiryInterval = time.Second
+	}
+	if cfg.MaxReassemblyStreams <= 0 {
+		cfg.MaxReassemblyStreams = cfg.Connections.MaxFlows
 	}
 	r := &Runtime{cfg: cfg}
 	if err := r.resetState(); err != nil {

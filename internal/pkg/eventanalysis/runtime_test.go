@@ -3,6 +3,7 @@ package eventanalysis
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -433,6 +434,29 @@ func TestRuntimeKeepsReassemblyIsolatedBySource(t *testing.T) {
 	require.Equal(t, "a.example", got["hunter-a:eth0"].Host)
 	require.Equal(t, "/hunter-b", got["hunter-b:eth0"].URI)
 	require.Equal(t, "b.example", got["hunter-b:eth0"].Host)
+}
+
+func TestRuntimeBoundsTCPReassemblyStreamsUnderFlowChurn(t *testing.T) {
+	dispatcher, err := events.NewDispatcher(events.Config{QueueSize: 64, SinkQueueSize: 64})
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
+
+	r, err := New(Config{
+		Dispatcher:           dispatcher,
+		Connections:          conntrack.Config{MaxFlows: 32, IdleTimeout: time.Hour, HalfOpenTimeout: time.Hour},
+		MaxReassemblyStreams: 2,
+	})
+	require.NoError(t, err)
+	t.Cleanup(r.Close)
+
+	base := time.Unix(200, 0)
+	for i := 0; i < 10; i++ {
+		source := Source{NodeID: fmt.Sprintf("hunter-%d", i), CaptureSource: fmt.Sprintf("hunter-%d:eth0", i)}
+		require.NoError(t, r.ObservePacket(source, tcpPacket(t, uint16(40000+i), 80, 1000, true, nil, base.Add(time.Duration(i)*time.Second))))
+		require.LessOrEqual(t, len(r.activeTCPFlows), 2)
+	}
+	require.Greater(t, r.Stats().ReassemblyEvicted, uint64(0), "capacity eviction must remain observable")
 }
 
 func TestRuntimeReassemblesTLSHandshakeAcrossRecords(t *testing.T) {

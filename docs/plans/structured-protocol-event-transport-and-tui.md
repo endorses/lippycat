@@ -318,6 +318,11 @@ scope TCP segments retain conservative provenance; application frames released
 together retain their own final-byte timestamps; and close-delimited HTTP
 response bodies are completed at stream close. Regression tests cover each
 boundary across the shared runtime and local integration adapters.
+A final bounded-state audit capped the number of active TCP application
+reassembly streams and replaced the monotonically retained capture-source
+namespace map with deterministic source hashing. Capacity eviction is observable
+through runtime statistics, and a source/flow-churn regression test verifies
+that state remains within the configured limit.
 
 ## Phase 5 — Hunter/tap event-mode negotiation and analysis
 

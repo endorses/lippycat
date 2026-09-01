@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -47,6 +48,112 @@ func testTCPPacket(seq uint32) (gopacket.Flow, *layers.TCP) {
 	return gopacket.NewFlow(layers.EndpointIPv4, []byte{10, 0, 0, 1}, []byte{10, 0, 0, 2}), &layers.TCP{
 		SrcPort: 5060, DstPort: 5060, Seq: seq, SYN: seq == 1,
 	}
+}
+
+func testTCPFlow(last byte, srcPort, dstPort layers.TCPPort) (gopacket.Flow, *layers.TCP) {
+	return gopacket.NewFlow(layers.EndpointIPv4, []byte{10, 0, 0, last}, []byte{10, 1, 0, last}), &layers.TCP{
+		SrcPort: srcPort, DstPort: dstPort, Seq: 1, SYN: true,
+	}
+}
+
+func flowForShard(t *testing.T, shard, count int) (gopacket.Flow, *layers.TCP) {
+	t.Helper()
+	for i := 1; i < 65535; i++ {
+		netFlow, tcp := testTCPFlow(byte(i%250+1), layers.TCPPort(i), 5060)
+		if FlowShard(netFlow, tcp.TransportFlow(), count) == shard {
+			return netFlow, tcp
+		}
+	}
+	t.Fatalf("could not find flow for shard %d/%d", shard, count)
+	return gopacket.Flow{}, nil
+}
+
+func TestReassemblyEngineShardConstructionAndExactGlobalLimit(t *testing.T) {
+	for _, count := range []int{1, 2, 4} {
+		t.Run(fmt.Sprintf("shards_%d", count), func(t *testing.T) {
+			engine := NewReassemblyEngine(&testReassemblyFactory{}, ReassemblyConfig{
+				ShardCount: count, MaxBufferedPagesPerConnection: 7, MaxBufferedPagesTotal: 19,
+			})
+			t.Cleanup(func() { require.NoError(t, engine.Close()) })
+			require.Equal(t, count, engine.ShardCount())
+			var total int
+			for _, shard := range engine.shards {
+				perConnection, pages := shard.BufferedPageLimits()
+				require.Equal(t, 7, perConnection)
+				total += pages
+			}
+			require.Equal(t, 19, total)
+		})
+	}
+}
+
+func TestReassemblyEngineCapsShardsAtGlobalPageLimit(t *testing.T) {
+	engine := NewReassemblyEngine(&testReassemblyFactory{}, ReassemblyConfig{ShardCount: 4, MaxBufferedPagesTotal: 2})
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+	require.Equal(t, 2, engine.ShardCount())
+	for _, shard := range engine.shards {
+		_, pages := shard.BufferedPageLimits()
+		require.Equal(t, 1, pages)
+	}
+}
+
+func TestFlowShardIsDirectionIndependentAndDistributes(t *testing.T) {
+	seen := make(map[int]bool)
+	for i := 1; i <= 512; i++ {
+		netFlow, tcp := testTCPFlow(byte(i%250+1), layers.TCPPort(1000+i), 5060)
+		forward := FlowShard(netFlow, tcp.TransportFlow(), 4)
+		reverse := FlowShard(netFlow.Reverse(), tcp.TransportFlow().Reverse(), 4)
+		require.Equal(t, forward, reverse)
+		seen[forward] = true
+	}
+	require.Len(t, seen, 4)
+}
+
+type overlappingFactory struct {
+	testReassemblyFactory
+	entered chan struct{}
+	release chan struct{}
+	active  atomic.Int32
+	max     atomic.Int32
+}
+
+func (f *overlappingFactory) New(gopacket.Flow, gopacket.Flow, *layers.TCP, reassembly.AssemblerContext) reassembly.Stream {
+	active := f.active.Add(1)
+	for {
+		old := f.max.Load()
+		if active <= old || f.max.CompareAndSwap(old, active) {
+			break
+		}
+	}
+	f.entered <- struct{}{}
+	<-f.release
+	f.active.Add(-1)
+	return testReassemblyStream{factory: &f.testReassemblyFactory}
+}
+
+func TestReassemblyEngineIndependentShardsAssembleConcurrently(t *testing.T) {
+	factory := &overlappingFactory{entered: make(chan struct{}, 2), release: make(chan struct{})}
+	engine := NewReassemblyEngine(factory, ReassemblyConfig{ShardCount: 2})
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+	var wg sync.WaitGroup
+	for shard := 0; shard < 2; shard++ {
+		netFlow, tcp := flowForShard(t, shard, 2)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			require.NoError(t, engine.AssembleTCP(netFlow, tcp, time.Now()))
+		}()
+	}
+	for range 2 {
+		select {
+		case <-factory.entered:
+		case <-time.After(time.Second):
+			t.Fatal("independent shard assembly did not overlap")
+		}
+	}
+	close(factory.release)
+	wg.Wait()
+	require.Equal(t, int32(2), factory.max.Load())
 }
 
 func TestReassemblyEngineCloseIsIdempotent(t *testing.T) {
@@ -160,14 +267,55 @@ func TestReassemblyEngineOfflineTimestampAging(t *testing.T) {
 	require.NoError(t, engine.Assemble(second))
 	clock.Ticker().ch <- clock.now
 	require.Eventually(t, func() bool {
-		engine.stateMu.RLock()
-		defer engine.stateMu.RUnlock()
+		engine.agingMu.Lock()
+		defer engine.agingMu.Unlock()
 		return engine.captureTimeAging && engine.latestCaptureTime.Equal(second.CaptureTime)
 	}, time.Second, time.Millisecond)
 	require.Eventually(t, func() bool { return factory.completed.Load() >= 1 }, time.Second, time.Millisecond)
 	cancel()
 	require.NoError(t, <-done)
 	require.NoError(t, engine.Close())
+}
+
+func TestReassemblyEnginePeriodicFlushVisitsEveryShard(t *testing.T) {
+	clock := &manualClock{now: time.Unix(7200, 0)}
+	factory := &testReassemblyFactory{}
+	engine := NewReassemblyEngine(factory, ReassemblyConfig{
+		ShardCount: 4, FlushInterval: time.Second, IdleTimeout: time.Minute, Clock: clock,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- engine.Run(ctx) }()
+	require.Eventually(t, func() bool { return clock.Ticker() != nil }, time.Second, time.Millisecond)
+	for shard := 0; shard < engine.ShardCount(); shard++ {
+		netFlow, tcp := flowForShard(t, shard, engine.ShardCount())
+		require.NoError(t, engine.AssembleTCP(netFlow, tcp, time.Unix(1, 0)))
+	}
+	clock.Ticker().ch <- clock.now
+	require.Eventually(t, func() bool { return factory.completed.Load() == 4 }, time.Second, time.Millisecond)
+	cancel()
+	require.NoError(t, <-done)
+	require.NoError(t, engine.Close())
+	require.Equal(t, int32(1), factory.shutdowns.Load())
+}
+
+func TestReassemblyEngineAggregatesShardLimitStats(t *testing.T) {
+	engine := NewReassemblyEngine(&testReassemblyFactory{}, ReassemblyConfig{ShardCount: 2})
+	for shard := 0; shard < engine.ShardCount(); shard++ {
+		netFlow, syn := flowForShard(t, shard, engine.ShardCount())
+		require.NoError(t, engine.AssembleTCP(netFlow, syn, time.Unix(1, 0)))
+		gap := *syn
+		gap.SYN = false
+		gap.ACK = true
+		gap.Seq = 100
+		gap.Payload = []byte("data after gap")
+		require.NoError(t, engine.AssembleTCP(netFlow, &gap, time.Unix(2, 0)))
+	}
+	require.NoError(t, engine.Close())
+	stats := engine.LimitStats()
+	require.Equal(t, uint64(2), stats.ExplicitFlushDiscontinuities)
+	require.Positive(t, stats.ExplicitFlushMissingBytes)
+	require.Equal(t, stats.ExplicitFlushMissingBytes, stats.MissingSequenceBytes)
 }
 
 func serializedTCPEnvelope(t *testing.T, ts time.Time, lastIP byte, kind SourceKind) *PacketEnvelope {

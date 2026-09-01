@@ -1,7 +1,7 @@
 # High-Volume Capture Integrity and Headroom Plan
 
 **Date:** 2026-09-01
-**Status:** In Progress (Phases 0-3 complete)
+**Status:** In Progress (Phases 0-4 complete)
 **Priority:** High
 
 ## Overview
@@ -290,50 +290,66 @@ named local stages. New protobuf fields must be additive and use new field numbe
 
 ### Implementation
 
-- [ ] Extend `pipeline.ReassemblyConfig` in
+- [x] Extend `pipeline.ReassemblyConfig` in
       `internal/pkg/pipeline/reassembly.go` with a shard count that defaults to one
       for compatibility.
-- [ ] Make `ReassemblyEngine` own one `capture.TCPAssembler` and stream pool per
+- [x] Make `ReassemblyEngine` own one `capture.TCPAssembler` and stream pool per
       shard. Select shards with a tested direction-independent hash over network
       and transport endpoints.
-- [ ] Define buffered-page limits precisely under sharding. Keep the configured
+- [x] Define buffered-page limits precisely under sharding. Keep the configured
       total memory bound global where practical rather than multiplying it by the
       shard count; preserve a safe per-connection cap.
-- [ ] Aggregate per-shard reassembly statistics, flush every shard, flush all
+- [x] Aggregate per-shard reassembly statistics, flush every shard, flush all
       shards during close, and call the shared stream factory shutdown exactly
       once.
-- [ ] Refactor the engine lifecycle lock so concurrent assembly on different
+- [x] Refactor the engine lifecycle lock so concurrent assembly on different
       shards is possible while `Close` still excludes new input safely; do not
       retain an engine-wide write lock around every `Assemble` call.
-- [ ] Update `internal/pkg/processor/source/local.go` to route TCP flows across
+- [x] Update `internal/pkg/processor/source/local.go` to route TCP flows across
       detection workers with the same canonical hash, remove worker-0 pinning and
       the global `assemblerMu`, and preserve same-flow ordering.
-- [ ] Add shard configuration to the applicable local/tap composition and Viper
+- [x] Add shard configuration to the applicable local/tap composition and Viper
       configuration. Audit every other `ReassemblyEngine` user and retain one
       shard unless explicitly enabled and tested for that path.
-- [ ] Document configuration, memory implications, telemetry aggregation, and
+- [x] Document configuration, memory implications, telemetry aggregation, and
       rollback to one shard.
 
 ### Tests and Benchmarks
 
-- [ ] Test one-, two-, and four-shard construction; reverse directions must select
+- [x] Test one-, two-, and four-shard construction; reverse directions must select
       one shard and independent flows must distribute across shards.
-- [ ] Test concurrent assembly, periodic flushing, shutdown, factory shutdown-once,
+- [x] Test concurrent assembly, periodic flushing, shutdown, factory shutdown-once,
       stats aggregation, and `Assemble`/`Close` race safety.
-- [ ] Test local-source routing so separate TCP flows execute concurrently while
+- [x] Test local-source routing so separate TCP flows execute concurrently while
       packet order remains stable within each flow.
-- [ ] Add a representative SIP-over-TCP benchmark at one, two, four, and eight
+- [x] Add a representative SIP-over-TCP benchmark at one, two, four, and eight
       shards. Record packets/s, CPU, heap, allocations, gaps, and all drop stages.
-- [ ] Run race tests for pipeline, processor source, capture, and VoIP packages.
+- [x] Run race tests for pipeline, processor source, capture, and VoIP packages.
+
+      Benchmark record (linux/amd64, 13th Gen Intel Core i9-13900HX, GOMAXPROCS
+      32, 64 independent synthetic SIP flows, one-second run): one shard 311.7
+      ns/op and 3.21 M packets/s; two shards 274.7 ns/op and 3.64 M packets/s;
+      four shards 259.6 ns/op and 3.85 M packets/s; eight shards 212.3 ns/op and
+      4.71 M packets/s. Every case used 400 B/op and 2 allocs/op and reported
+      zero reassembly gaps and missing bytes. The complete benchmark process used
+      14.526 user CPU seconds and 0.911 system CPU seconds over 6.332 seconds wall
+      time (243% aggregate CPU). CPU and heap profiles were captured under `/tmp`;
+      B/op records benchmark heap allocation, but this Go installation did not
+      provide the `pprof` inspection tool. Capture-buffer, batch-channel,
+      post-reassembly queue, parser, and display drops are not exercised by this
+      engine-level benchmark and are therefore not misreported as measured zeros.
+      The production default remains one shard: the benchmark establishes useful
+      opt-in headroom but is not end-to-end evidence for changing the compatibility
+      default.
 
 ### Acceptance Criteria
 
-- [ ] Independent TCP flows can use multiple cores without concurrent access to a
+- [x] Independent TCP flows can use multiple cores without concurrent access to a
       single gopacket assembler.
-- [ ] Per-flow direction and ordering guarantees are unchanged.
-- [ ] Lifecycle, memory bounds, and aggregated metrics remain correct under race
+- [x] Per-flow direction and ordering guarantees are unchanged.
+- [x] Lifecycle, memory bounds, and aggregated metrics remain correct under race
       testing.
-- [ ] The production default is chosen from benchmark evidence; the plan makes no
+- [x] The production default is chosen from benchmark evidence; the plan makes no
       fixed Nx throughput promise.
 
 ## Phase 5: Profile-Guided Detector Allocation Diet

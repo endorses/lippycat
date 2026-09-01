@@ -71,6 +71,28 @@ In a distributed deployment ([Chapter 6](../part3-distributed/architecture.md)),
 - **Processors** receive already-reassembled packets over gRPC, so the TCP profile primarily affects any local capture the processor may do (relevant in tap mode, [Chapter 9](../part3-distributed/tap.md)).
 - **Tap nodes** combine both roles. Match the profile to the local traffic volume.
 
+### TCP Reassembly Shards in Tap Mode
+
+`tap voip` uses one TCP reassembly shard by default. This preserves the
+single-assembler behavior and is also the rollback setting. On systems where
+profiles show the assembler is the bottleneck, independent TCP connections can
+be spread across cores:
+
+```bash
+sudo lc tap voip -i eth0 --tcp-reassembly-shards 4 --insecure
+```
+
+Both directions and every packet of a connection are routed to the same shard,
+so per-flow ordering does not change. The global buffered-page limit is divided
+among the shards rather than multiplied, and the per-connection limit remains
+unchanged. Telemetry reports the sum of reassembly gaps and bounded-retention
+releases from all shards. Each shard does add an assembler and stream pool, so
+compare packets/s, CPU, heap, allocations, gaps, and every capture/stream drop
+counter with shard counts `1`, `2`, `4`, and `8` under a representative flow
+mix. Tune `processor.detection_workers` alongside the shard count; extra shards
+cannot help if too few workers feed them. Return to `--tcp-reassembly-shards 1`
+if resource use or integrity telemetry regresses.
+
 ### SIP Capture Priority and Its Limits
 
 The capture buffer gives recognized SIP signaling a separate 1,000-packet

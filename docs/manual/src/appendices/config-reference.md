@@ -595,6 +595,7 @@ Tap supports the same protocol-specific subcommands as hunter. The configuration
 | `tap.voip.rtp_port_ranges` | string | `""` | RTP port ranges. |
 | `tap.voip.udp_only` | boolean | `false` | Legacy UDP-only VoIP capture. The CLI flag is hidden and deprecated; prefer `tap.voip.sip_ports` and `tap.voip.rtp_port_ranges`. |
 | `tap.voip.tcp_performance_mode` | string | `"balanced"` | TCP performance profile for tap VoIP. |
+| `tap.voip.tcp_reassembly_shards` | integer | `1` | Flow-sharded TCP assembler count. Both directions of a connection remain on one shard. Values above one are opt-in and should be benchmarked. |
 | `tap.voip.pattern_algorithm` | string | `"auto"` | Pattern matching algorithm: `"auto"`, `"linear"`, or `"aho-corasick"`. |
 | `tap.voip.pattern_buffer_mb` | integer | `64` | Pattern buffer memory in MB. |
 

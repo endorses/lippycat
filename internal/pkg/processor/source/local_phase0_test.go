@@ -210,7 +210,7 @@ func runPhase0LocalSourceWithProcessorFilter(t *testing.T, filter, processorFilt
 	}
 }
 
-func TestLocalSourcePhase0_ClassifiedRTPInvokesFullMatcher(t *testing.T) {
+func TestLocalSourcePhase2_ClassifiedRTPInvokesPacketLevelMatcher(t *testing.T) {
 	filter := &recordingApplicationFilter{match: func(packet gopacket.Packet) (bool, []string) {
 		if bytes.HasPrefix(phase0PacketPayload(packet), []byte("INVITE ")) {
 			return true, []string{"sip-filter"}
@@ -222,8 +222,8 @@ func TestLocalSourcePhase0_ClassifiedRTPInvokesFullMatcher(t *testing.T) {
 	require.Len(t, packets, 2)
 	require.NotNil(t, packets[1].Metadata.GetRtp(), "fixture must be classified as RTP")
 	fullCalls, packetLevelCalls := filter.counts()
-	require.Equal(t, 2, fullCalls, "the reusable INVITE verdict and RTP fallback each invoke the matcher once")
-	require.Zero(t, packetLevelCalls, "Phase 0 LocalSource has no packet-level media path")
+	require.Equal(t, 1, fullCalls, "the SIP verdict is evaluated once and reused")
+	require.Equal(t, 1, packetLevelCalls, "classified RTP uses the packet-level matcher")
 	require.Equal(t, []string{"sip-filter"}, packets[1].MatchedFilterIds, "RTP inherits the selected call's filter ID")
 }
 
@@ -273,6 +273,8 @@ func TestLocalSourcePhase0_RTPSelectionBaselines(t *testing.T) {
 				// Permit SDP registration without caching an inherited ID.
 				return true, nil
 			}
+			return false, nil
+		}, packetLevelMatch: func(packet gopacket.Packet) (bool, []string) {
 			if packet.NetworkLayer().NetworkFlow().Src().String() == phase0MediaIP &&
 				packet.TransportLayer().TransportFlow().Src().String() == "20000" {
 				return true, []string{"ip-filter"}
@@ -290,8 +292,8 @@ func TestLocalSourcePhase0_RTPSelectionBaselines(t *testing.T) {
 		packets := runPhase0LocalSource(t, filter, phase0SIPPacket(t, "INVITE", true), phase0RTPPacket(t))
 		require.Empty(t, packets)
 		fullCalls, packetLevelCalls := filter.counts()
-		require.Equal(t, 2, fullCalls)
-		require.Zero(t, packetLevelCalls)
+		require.Equal(t, 1, fullCalls)
+		require.Equal(t, 1, packetLevelCalls)
 	})
 }
 
@@ -320,7 +322,7 @@ func TestLocalSourcePhase0_NoFilterPolicyForwardsUnclassifiedUDP(t *testing.T) {
 	})
 }
 
-func TestLocalSourcePhase0_ClassifiedRTCPInvokesFullMatcher(t *testing.T) {
+func TestLocalSourcePhase2_ClassifiedRTCPInvokesPacketLevelMatcher(t *testing.T) {
 	filter := &recordingApplicationFilter{match: func(packet gopacket.Packet) (bool, []string) {
 		if bytes.HasPrefix(phase0PacketPayload(packet), []byte("INVITE ")) {
 			return true, []string{"call-filter"}
@@ -331,8 +333,8 @@ func TestLocalSourcePhase0_ClassifiedRTCPInvokesFullMatcher(t *testing.T) {
 	require.Len(t, packets, 2)
 	require.NotNil(t, packets[1].Metadata.GetRtp(), "current detector represents associated RTCP as media metadata")
 	fullCalls, packetLevelCalls := filter.counts()
-	require.Equal(t, 2, fullCalls)
-	require.Zero(t, packetLevelCalls)
+	require.Equal(t, 1, fullCalls)
+	require.Equal(t, 1, packetLevelCalls)
 }
 
 func TestPhase0SyntheticMediaBuilders(t *testing.T) {

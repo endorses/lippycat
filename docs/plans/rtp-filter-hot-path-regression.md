@@ -200,54 +200,54 @@ run outside the timed region.
 
 ### Implementation
 
-- [ ] Replace the single `matchFilter` closure in the local batching worker with
+- [x] Replace the single `matchFilter` closure in the local batching worker with
       an explicit decision that distinguishes reusable SIP verdicts, full SIP
       matching, and packet-level media matching.
-- [ ] Route `Metadata.Rtp != nil` packets exclusively through the packet-level
+- [x] Route `Metadata.Rtp != nil` packets exclusively through the packet-level
       matcher before applying call-cache inheritance and selection policy.
-- [ ] Preserve the VoIP processor's already-evaluated SIP verdict so a SIP packet
+- [x] Preserve the VoIP processor's already-evaluated SIP verdict so a SIP packet
       is never matched twice.
-- [ ] Add the bounded allocation-free credible-SIP fallback for VoIP results with
+- [x] Add the bounded allocation-free credible-SIP fallback for VoIP results with
       neither SIP nor RTP metadata, with focused false-positive and false-negative
       tests.
-- [ ] Extract stable ID deduplication/union into a small helper and use it when
+- [x] Extract stable ID deduplication/union into a small helper and use it when
       composing direct and inherited IDs.
-- [ ] Apply the same ID-composition helper to the reassembled TCP SIP injection
+- [x] Apply the same ID-composition helper to the reassembled TCP SIP injection
       branch without changing its filtering scope or `AfterProcess` lifecycle.
-- [ ] Cache only direct SIP filter IDs against a Call-ID; do not write inherited
+- [x] Cache only direct SIP filter IDs against a Call-ID; do not write inherited
       unions back into the cache, which could spread IDs between unrelated call
       associations over time.
-- [ ] Keep batch normalization, forwarding counters, drop counters, and cache
+- [x] Keep batch normalization, forwarding counters, drop counters, and cache
       expiry behavior unchanged.
 
 ### Tests
 
-- [ ] Verify classified RTP and RTCP make zero full-match calls and exactly one
+- [x] Verify classified RTP and RTCP make zero full-match calls and exactly one
       packet-level-match call when a filter is configured.
-- [ ] Verify RTP with only identity filters is selected solely through associated
+- [x] Verify RTP with only identity filters is selected solely through associated
       call inheritance and is otherwise dropped without SIP parsing.
-- [ ] Verify RTP with a direct IP-filter match retains that direct ID even when no
+- [x] Verify RTP with a direct IP-filter match retains that direct ID even when no
       call is selected.
-- [ ] Verify RTP with both direct and inherited matches carries the stable,
+- [x] Verify RTP with both direct and inherited matches carries the stable,
       deduplicated union in direct-then-inherited order.
-- [ ] Verify multiple associated call legs contribute only their own cached IDs,
+- [x] Verify multiple associated call legs contribute only their own cached IDs,
       with duplicates removed and no unrelated cache entries included.
-- [ ] Verify SIP direct matches populate the Call-ID cache, later in-dialog SIP
+- [x] Verify SIP direct matches populate the Call-ID cache, later in-dialog SIP
       inherits selection, and an already-evaluated VoIP verdict is not repeated.
-- [ ] Verify reassembled TCP SIP uses the same direct-plus-inherited composition
+- [x] Verify reassembled TCP SIP uses the same direct-plus-inherited composition
       and invokes `AfterProcess` exactly once on forward, drop, and normalization
       error paths.
-- [ ] Verify unclassified credible SIP uses the full matcher while arbitrary
+- [x] Verify unclassified credible SIP uses the full matcher while arbitrary
       binary payload uses only packet-level matching.
-- [ ] Run the local-source tests with the race detector to cover multiple flow
+- [x] Run the local-source tests with the race detector to cover multiple flow
       workers sharing the application filter and call cache.
 
 ### Acceptance criteria
 
-- [ ] No classified RTP or RTCP packet reaches SIP identity extraction.
-- [ ] Direct packet-level matches, sticky call selection, and downstream filter
+- [x] No classified RTP or RTCP packet reaches SIP identity extraction.
+- [x] Direct packet-level matches, sticky call selection, and downstream filter
       IDs remain correct for every tested combination.
-- [ ] SIP filtering and lifecycle behavior are unchanged.
+- [x] SIP filtering and lifecycle behavior are unchanged.
 
 ## Phase 3: Make SIP Header Extraction Allocation-Light
 

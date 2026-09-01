@@ -216,6 +216,29 @@ func TestResync_CorrectlyFramedInvalidContentLengthIsPolicyRejection(t *testing.
 	}
 }
 
+func TestTCPFramingRejectsConflictingDuplicateContentLength(t *testing.T) {
+	s, cancel := newResyncTestStream(t, &recordingSIPHandler{})
+	defer cancel()
+
+	input := "INVITE sip:b@example.test SIP/2.0\r\nContent-Length: 0\r\nl: 3\r\n\r\n" +
+		"OPTIONS sip:b@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n"
+	reader := bufio.NewReader(strings.NewReader(input))
+
+	_, err := s.readCompleteSipMessageFromReader(reader)
+	var policyErr *contentLengthPolicyError
+	if !errors.As(err, &policyErr) {
+		t.Fatalf("error %v is not a Content-Length policy rejection", err)
+	}
+
+	remaining, readErr := io.ReadAll(reader)
+	if readErr != nil {
+		t.Fatalf("read remaining bytes: %v", readErr)
+	}
+	if got, want := string(remaining), "\r\nOPTIONS sip:b@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n"; got != want {
+		t.Fatalf("remaining bytes = %q, want %q", got, want)
+	}
+}
+
 func TestCredibleSIPAfterEmbeddedCRRejectsLoneAndFalseStarts(t *testing.T) {
 	for _, input := range []string{
 		"Content-Length: 3\r\n",

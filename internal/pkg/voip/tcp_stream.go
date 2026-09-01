@@ -185,6 +185,10 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	}
 
 	available, _ := sg.Lengths()
+	_, _, _, skip := sg.Info()
+	if skip > 0 {
+		RecordReassemblyDiscontinuity(skip)
+	}
 	if available == 0 {
 		IncrementReassembledEmptyData()
 		return
@@ -232,7 +236,7 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 			"flow", fmt.Sprintf("%s:%s->%s:%s", s.netFlow.Src(), s.transportFlow.Src(), s.netFlow.Dst(), s.transportFlow.Dst()))
 	default:
 		// Buffer full - drop this chunk (log at debug level to avoid spam)
-		IncrementReassembledDataDropped()
+		RecordPostReassemblyDrop(len(data))
 		logger.Debug("TCP stream buffer full, dropping data", "bytes", len(data))
 	}
 }
@@ -419,6 +423,7 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 	// immediately instead of waiting for TCPBufferMaxAge.
 	defer discardTCPBufferedPackets(s.netFlow, s.transportFlow)
 
+	recoveryPending := false
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -441,11 +446,15 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 				// traffic (e.g. TLS) is still discarded and buffering stops
 				// (bounded — no unbounded scan or buffer).
 				if atomic.LoadInt64(&s.nonSIPBytes) < maxNonSIPBytesBeforeDiscard {
+					recoveryPending = true
 					logger.Debug("Non-SIP data (recoverable), continuing resync",
 						"non_sip_bytes", atomic.LoadInt64(&s.nonSIPBytes))
 					continue
 				}
 				atomic.StoreInt32(&s.discard, 1)
+				if recoveryPending {
+					IncrementStreamRecoveryFailure()
+				}
 				logger.Debug("Non-SIP data exceeded resync cap, closing stream")
 			} else if errors.Is(err, errReadTimeout) {
 				// Also discard on timeout - no point buffering if nothing is being processed
@@ -460,6 +469,10 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 
 		if len(sipMessage) == 0 {
 			continue
+		}
+		if recoveryPending {
+			IncrementStreamRecoverySuccess()
+			recoveryPending = false
 		}
 
 		// A complete SIP message was parsed: this connection is confirmed SIP.

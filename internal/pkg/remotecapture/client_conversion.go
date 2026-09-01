@@ -248,23 +248,26 @@ func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.Hunter
 	connectedAt := time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9) // #nosec G115
 
 	return types.HunterInfo{
-		ID:               h.HunterId,
-		Hostname:         h.Hostname,
-		RemoteAddr:       h.RemoteAddr,
-		Status:           h.Status,
-		ConnectedAt:      connectedAt,
-		LastHeartbeat:    h.LastHeartbeatNs,
-		PacketsCaptured:  h.Stats.PacketsCaptured,
-		PacketsMatched:   h.Stats.PacketsMatched,
-		PacketsForwarded: h.Stats.PacketsForwarded,
-		PacketsDropped:   h.Stats.PacketsDropped,
-		ActiveFilters:    h.Stats.ActiveFilters,
-		CPUPercent:       float64(h.Stats.CpuPercent),
-		MemoryRSSBytes:   h.Stats.MemoryRssBytes,
-		MemoryLimitBytes: h.Stats.MemoryLimitBytes,
-		Interfaces:       h.Interfaces,
-		ProcessorAddr:    c.addr,         // Address of processor this client is connected to
-		Capabilities:     h.Capabilities, // Hunter capabilities (filter types, etc.)
+		ID:                        h.HunterId,
+		Hostname:                  h.Hostname,
+		RemoteAddr:                h.RemoteAddr,
+		Status:                    h.Status,
+		ConnectedAt:               connectedAt,
+		LastHeartbeat:             h.LastHeartbeatNs,
+		PacketsCaptured:           h.Stats.PacketsCaptured,
+		PacketsMatched:            h.Stats.PacketsMatched,
+		PacketsForwarded:          h.Stats.PacketsForwarded,
+		PacketsDropped:            h.Stats.PacketsDropped,
+		CaptureBufferRegularDrops: h.Stats.CaptureBufferRegularDrops,
+		CaptureBufferSIPDrops:     h.Stats.CaptureBufferSipDrops,
+		BatchChannelDrops:         h.Stats.BatchChannelDrops,
+		ActiveFilters:             h.Stats.ActiveFilters,
+		CPUPercent:                float64(h.Stats.CpuPercent),
+		MemoryRSSBytes:            h.Stats.MemoryRssBytes,
+		MemoryLimitBytes:          h.Stats.MemoryLimitBytes,
+		Interfaces:                h.Interfaces,
+		ProcessorAddr:             c.addr,         // Address of processor this client is connected to
+		Capabilities:              h.Capabilities, // Hunter capabilities (filter types, etc.)
 	}
 }
 

@@ -107,15 +107,17 @@ func (c *Collector) GetAll() (captured, matched, forwarded, dropped, bufferBytes
 
 // ToProto converts statistics to protobuf HunterStats message
 func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
+	batchDrops := c.packetsDropped.Load()
 	return &management.HunterStats{
-		PacketsCaptured:  c.packetsCaptured.Load(),
-		PacketsMatched:   c.packetsMatched.Load(),
-		PacketsForwarded: c.packetsForwarded.Load(),
-		PacketsDropped:   c.packetsDropped.Load(),
-		BufferBytes:      c.bufferBytes.Load(),
-		ActiveFilters:    activeFilters,
-		CpuPercent:       float32(c.cpuPercent.Load().(float64)),
-		MemoryRssBytes:   c.memoryRSSBytes.Load(),
-		MemoryLimitBytes: c.memoryLimitBytes.Load(),
+		PacketsCaptured:   c.packetsCaptured.Load(),
+		PacketsMatched:    c.packetsMatched.Load(),
+		PacketsForwarded:  c.packetsForwarded.Load(),
+		PacketsDropped:    batchDrops,
+		BatchChannelDrops: batchDrops,
+		BufferBytes:       c.bufferBytes.Load(),
+		ActiveFilters:     activeFilters,
+		CpuPercent:        float32(c.cpuPercent.Load().(float64)),
+		MemoryRssBytes:    c.memoryRSSBytes.Load(),
+		MemoryLimitBytes:  c.memoryLimitBytes.Load(),
 	}
 }

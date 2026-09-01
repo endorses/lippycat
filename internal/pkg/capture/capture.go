@@ -813,6 +813,8 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 							"pcap_interface_dropped", pcapStats.PacketsIfDropped,
 							"total_kernel_dropped", snapshot.KernelDrops+snapshot.InterfaceDrops,
 							"packet_buffer_dropped", bufferDrops,
+							"packet_buffer_regular_dropped", buffer.GetDropped(),
+							"packet_buffer_sip_dropped", buffer.GetSIPDropped(),
 							"ip_fragments", frags,
 							"reassembled", reassembled,
 							"buffer_len", buffer.Len(),

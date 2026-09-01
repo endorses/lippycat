@@ -19,6 +19,7 @@ import (
 type fakeScatterGather struct {
 	data []byte
 	dir  reassembly.TCPFlowDirection
+	skip int
 }
 
 func (f *fakeScatterGather) Lengths() (int, int) { return len(f.data), 0 }
@@ -28,7 +29,28 @@ func (f *fakeScatterGather) CaptureInfo(int) gopacket.CaptureInfo {
 	return gopacket.CaptureInfo{Timestamp: time.Now()}
 }
 func (f *fakeScatterGather) Info() (reassembly.TCPFlowDirection, bool, bool, int) {
-	return f.dir, false, false, 0
+	return f.dir, false, false, f.skip
+}
+
+func TestSIPStreamFullQueueReportsDroppedChunkAndBytes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &bufferedSIPStream{ctx: ctx, dataChan: make(chan streamChunk, 1)}
+	stream.dataChan <- streamChunk{data: []byte("occupied")}
+	before := GetTCPStreamMetrics()
+	payload := []byte("test-payload")
+	stream.ReassembledSG(&fakeScatterGather{data: payload, skip: 4}, nil)
+	after := GetTCPStreamMetrics()
+
+	if got := after.PostReassemblyDroppedChunks - before.PostReassemblyDroppedChunks; got != 1 {
+		t.Fatalf("dropped chunks delta = %d, want 1", got)
+	}
+	if got := after.PostReassemblyDroppedBytes - before.PostReassemblyDroppedBytes; got != int64(len(payload)) {
+		t.Fatalf("dropped bytes delta = %d, want %d", got, len(payload))
+	}
+	if got := after.MissingSequenceBytes - before.MissingSequenceBytes; got != 4 {
+		t.Fatalf("missing bytes delta = %d, want 4", got)
+	}
 }
 func (f *fakeScatterGather) Stats() reassembly.TCPAssemblyStats {
 	return reassembly.TCPAssemblyStats{}

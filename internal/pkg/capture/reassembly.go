@@ -51,14 +51,22 @@ type TCPAssembler struct {
 // MissingSequenceBytes are absent sequence-space bytes, not captured payload
 // bytes discarded by lippycat.
 type ReassemblyLimitStats struct {
-	BufferedPageLimitReleases atomic.Uint64
-	MissingSequenceBytes      atomic.Uint64
+	BufferedPageLimitReleases    atomic.Uint64
+	MissingSequenceBytes         atomic.Uint64
+	NormalDiscontinuities        atomic.Uint64
+	NormalMissingBytes           atomic.Uint64
+	ExplicitFlushDiscontinuities atomic.Uint64
+	ExplicitFlushMissingBytes    atomic.Uint64
 }
 
 // ReassemblyLimitSnapshot is a consistent, copyable view of retention releases.
 type ReassemblyLimitSnapshot struct {
-	BufferedPageLimitReleases uint64
-	MissingSequenceBytes      uint64
+	BufferedPageLimitReleases    uint64
+	MissingSequenceBytes         uint64
+	NormalDiscontinuities        uint64
+	NormalMissingBytes           uint64
+	ExplicitFlushDiscontinuities uint64
+	ExplicitFlushMissingBytes    uint64
 }
 
 type observedStreamFactory struct {
@@ -82,9 +90,17 @@ func (s *observedStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembl
 	// Explicit age/all flushes can expose gaps too; exclude those so this metric
 	// describes forced delivery observed during normal packet assembly. The
 	// callback does not say whether a page limit caused the delivery.
-	if skip > 0 && !s.explicitFlush.Load() {
-		s.stats.BufferedPageLimitReleases.Add(1)
-		s.stats.MissingSequenceBytes.Add(uint64(skip))
+	if skip > 0 {
+		missing := uint64(skip)
+		s.stats.MissingSequenceBytes.Add(missing)
+		if s.explicitFlush.Load() {
+			s.stats.ExplicitFlushDiscontinuities.Add(1)
+			s.stats.ExplicitFlushMissingBytes.Add(missing)
+		} else {
+			s.stats.BufferedPageLimitReleases.Add(1)
+			s.stats.NormalDiscontinuities.Add(1)
+			s.stats.NormalMissingBytes.Add(missing)
+		}
 	}
 	s.Stream.ReassembledSG(sg, ac)
 }
@@ -126,8 +142,12 @@ func (a *TCPAssembler) BufferedPageLimits() (perConnection, total int) {
 // expose whether the per-connection or global page bound caused a release.
 func (a *TCPAssembler) LimitStats() ReassemblyLimitSnapshot {
 	return ReassemblyLimitSnapshot{
-		BufferedPageLimitReleases: a.stats.BufferedPageLimitReleases.Load(),
-		MissingSequenceBytes:      a.stats.MissingSequenceBytes.Load(),
+		BufferedPageLimitReleases:    a.stats.BufferedPageLimitReleases.Load(),
+		MissingSequenceBytes:         a.stats.MissingSequenceBytes.Load(),
+		NormalDiscontinuities:        a.stats.NormalDiscontinuities.Load(),
+		NormalMissingBytes:           a.stats.NormalMissingBytes.Load(),
+		ExplicitFlushDiscontinuities: a.stats.ExplicitFlushDiscontinuities.Load(),
+		ExplicitFlushMissingBytes:    a.stats.ExplicitFlushMissingBytes.Load(),
 	}
 }
 

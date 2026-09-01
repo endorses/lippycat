@@ -99,18 +99,21 @@ type ExportStatsMsg struct {
 
 // HunterContribution represents a hunter's contribution to overall traffic.
 type HunterContribution struct {
-	ID               string
-	Hostname         string
-	ProcessorAddr    string
-	Status           string // "healthy", "warning", "error"
-	PacketsCaptured  uint64
-	PacketsForwarded uint64
-	PacketsDropped   uint64
-	DropRate         float64 // Percentage of packets dropped
-	Contribution     float64 // Percentage of total fleet packets
-	CPUPercent       float64
-	MemoryRSSBytes   uint64
-	MemoryLimitBytes uint64
+	ID                        string
+	Hostname                  string
+	ProcessorAddr             string
+	Status                    string // "healthy", "warning", "error"
+	PacketsCaptured           uint64
+	PacketsForwarded          uint64
+	PacketsDropped            uint64
+	CaptureBufferRegularDrops uint64
+	CaptureBufferSIPDrops     uint64
+	BatchChannelDrops         uint64
+	DropRate                  float64 // Percentage of packets dropped
+	Contribution              float64 // Percentage of total fleet packets
+	CPUPercent                float64
+	MemoryRSSBytes            uint64
+	MemoryLimitBytes          uint64
 }
 
 // ProcessorSummary represents aggregated stats for a processor.
@@ -534,17 +537,20 @@ func (s *StatisticsView) UpdateDistributedStats(hunters []HunterInfo, processors
 		}
 
 		contrib := HunterContribution{
-			ID:               hunter.ID,
-			Hostname:         hunter.Hostname,
-			ProcessorAddr:    hunter.ProcessorAddr,
-			Status:           statusStr,
-			PacketsCaptured:  hunter.PacketsCaptured,
-			PacketsForwarded: hunter.PacketsForwarded,
-			PacketsDropped:   hunter.PacketsDropped,
-			DropRate:         dropRate,
-			CPUPercent:       hunter.CPUPercent,
-			MemoryRSSBytes:   hunter.MemoryRSSBytes,
-			MemoryLimitBytes: hunter.MemoryLimitBytes,
+			ID:                        hunter.ID,
+			Hostname:                  hunter.Hostname,
+			ProcessorAddr:             hunter.ProcessorAddr,
+			Status:                    statusStr,
+			PacketsCaptured:           hunter.PacketsCaptured,
+			PacketsForwarded:          hunter.PacketsForwarded,
+			PacketsDropped:            hunter.PacketsDropped,
+			CaptureBufferRegularDrops: hunter.CaptureBufferRegularDrops,
+			CaptureBufferSIPDrops:     hunter.CaptureBufferSIPDrops,
+			BatchChannelDrops:         hunter.BatchChannelDrops,
+			DropRate:                  dropRate,
+			CPUPercent:                hunter.CPUPercent,
+			MemoryRSSBytes:            hunter.MemoryRSSBytes,
+			MemoryLimitBytes:          hunter.MemoryLimitBytes,
 		}
 		ds.HunterContributions = append(ds.HunterContributions, contrib)
 	}
@@ -2002,6 +2008,18 @@ func (s *StatisticsView) renderDistributedSubView() string {
 	} else {
 		result.WriteString(dimStyle.Render("N/A"))
 	}
+	result.WriteString("\n")
+	var regularDrops, sipDrops, batchDrops uint64
+	for _, hunter := range ds.HunterContributions {
+		regularDrops += hunter.CaptureBufferRegularDrops
+		sipDrops += hunter.CaptureBufferSIPDrops
+		batchDrops += hunter.BatchChannelDrops
+	}
+	result.WriteString(labelStyle.Render("  Capture buffer: "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("regular %s, SIP %s", formatNumber64(int64(regularDrops)), formatNumber64(int64(sipDrops)))))
+	result.WriteString("\n")
+	result.WriteString(labelStyle.Render("  Batch delivery: "))
+	result.WriteString(valueStyle.Render(formatNumber64(int64(batchDrops))))
 	result.WriteString("\n")
 
 	result.WriteString(labelStyle.Render("Total Memory RSS:  "))

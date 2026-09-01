@@ -218,6 +218,16 @@ message HunterStats {
 
     // Memory limit in bytes (from cgroup, 0 if unavailable)
     uint64 memory_limit_bytes = 9;
+
+    // Packets shed by the regular capture-buffer lane. Cumulative per capture
+    // session; packets_dropped remains the compatible sum of named local stages.
+    uint64 capture_buffer_regular_drops = 10;
+
+    // Recognized SIP packets shed by the protected capture-buffer lane.
+    uint64 capture_buffer_sip_drops = 11;
+
+    // Packets shed after capture while admitting batches for delivery.
+    uint64 batch_channel_drops = 12;
 }
 
 // ProcessorHeartbeat response from processor

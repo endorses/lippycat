@@ -40,7 +40,7 @@ func TestTCPAssemblerObservesForcedGapWhenPageLimitReleasesBufferedData(t *testi
 	assembleLimitTestTCP(a, 1007, false, 7)
 
 	stats := a.LimitStats()
-	if stats.BufferedPageLimitReleases == 0 || stats.MissingSequenceBytes == 0 {
+	if stats.BufferedPageLimitReleases == 0 || stats.NormalDiscontinuities == 0 || stats.NormalMissingBytes == 0 || stats.MissingSequenceBytes != stats.NormalMissingBytes {
 		t.Fatalf("gap stats = %+v, want an observed forced gap", stats)
 	}
 }
@@ -56,14 +56,14 @@ func TestTCPAssemblerOutOfOrderRecoveryDoesNotCountAsForcedGap(t *testing.T) {
 	}
 }
 
-func TestTCPAssemblerExplicitFlushGapIsNotReportedAsForcedGap(t *testing.T) {
+func TestTCPAssemblerExplicitFlushGapIsAttributedSeparately(t *testing.T) {
 	a := NewTCPAssemblerWithLimits(discardReassemblyFactory{}, 10, 100)
 	assembleLimitTestTCP(a, 1000, true, 1)
 	assembleLimitTestTCP(a, 1003, false, 3)
 	a.FlushAll()
 
-	if stats := a.LimitStats(); stats.BufferedPageLimitReleases != 0 || stats.MissingSequenceBytes != 0 {
-		t.Fatalf("gap stats = %+v after explicit flush, want zero", stats)
+	if stats := a.LimitStats(); stats.BufferedPageLimitReleases != 0 || stats.NormalMissingBytes != 0 || stats.ExplicitFlushDiscontinuities == 0 || stats.ExplicitFlushMissingBytes == 0 || stats.MissingSequenceBytes != stats.ExplicitFlushMissingBytes {
+		t.Fatalf("gap stats = %+v after explicit flush, want explicit-only attribution", stats)
 	}
 }
 

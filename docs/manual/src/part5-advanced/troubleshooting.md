@@ -45,6 +45,25 @@ After setting capabilities, any non-root user can run captures. Note that `setca
 
 **Diagnosis:**
 
+Loss counters are cumulative for one capture session and reset when that capture
+source restarts. Classify the first non-zero local stage before assigning a root
+cause:
+
+- kernel/interface drops occur before lippycat receives a packet;
+- regular and SIP capture-buffer drops identify which admission lane saturated;
+- batch-channel drops occur while handing captured packets to processing or
+  forwarding;
+- normal/page-pressure and explicit-flush TCP gaps both count absent TCP sequence
+  bytes, but remain separately attributed;
+- post-reassembly chunk/byte drops mean the SIP stream queue saturated;
+- parser discontinuity and recovery counters describe framing recovery; and
+- display sampling or queue loss affects packet detail visibility, not ingress.
+
+The compatible aggregate packet-drop counter is the sum of the named local packet
+drop stages. Do not infer an external capture-source fault merely because TCP
+sequence space is missing: first check every locally measured stage. Batch and
+heartbeat values are cumulative snapshots and must not be summed across reports.
+
 ```bash
 # List all interfaces with their current state
 ip link show

@@ -1,7 +1,7 @@
 # High-Volume Capture Integrity and Headroom Plan
 
 **Date:** 2026-09-01
-**Status:** In Progress (Phases 0-1 complete)
+**Status:** In Progress (Phases 0-2 complete)
 **Priority:** High
 
 ## Overview
@@ -187,53 +187,53 @@ named local stages. New protobuf fields must be additive and use new field numbe
 
 ### Implementation
 
-- [ ] Extend the SIP stream chunk contract in `internal/pkg/voip/tcp_stream.go`
+- [x] Extend the SIP stream chunk contract in `internal/pkg/voip/tcp_stream.go`
       with discontinuity metadata: reason and known missing sequence bytes.
-- [ ] Read `sg.Info().skip` in `bufferedSIPStream.ReassembledSG` and attach a gap
+- [x] Read `sg.Info().skip` in `bufferedSIPStream.ReassembledSG` and attach a gap
       boundary to the bytes delivered after a positive skip.
-- [ ] When the non-blocking post-reassembly `dataChan` is full, record dropped
+- [x] When the non-blocking post-reassembly `dataChan` is full, record dropped
       chunks and bytes and set a per-stream pending-discontinuity marker; attach it
       to the next successfully enqueued chunk without blocking the assembler.
-- [ ] Update `streamChunkReader` so it never silently concatenates bytes across a
+- [x] Update `streamChunkReader` so it never silently concatenates bytes across a
       known discontinuity. Abort the partial message and report a typed recoverable
       framing error to the SIP message loop.
-- [ ] Introduce a typed recoverable framing/discontinuity error distinct from
+- [x] Introduce a typed recoverable framing/discontinuity error distinct from
       `errNotSIP` and from a correctly framed Content-Length policy violation.
-- [ ] Detect impossible embedded carriage-return plus credible SIP-start patterns
+- [x] Detect impossible embedded carriage-return plus credible SIP-start patterns
       as framing loss. Do not accept a lone carriage return as valid SIP syntax.
-- [ ] Preserve or replay a credible SIP suffix already consumed by
+- [x] Preserve or replay a credible SIP suffix already consumed by
       `ReadString('\n')`, then perform bounded resynchronization at the next valid
       SIP start line instead of terminating the stream.
-- [ ] Keep the current bounds explicit: at most 16 KiB per resynchronization
+- [x] Keep the current bounds explicit: at most 16 KiB per resynchronization
       attempt and 64 KiB cumulative non-SIP scanning before permanent discard.
       Prevent false-start loops and unbounded buffering.
-- [ ] Keep genuinely oversized, negative, non-numeric, or otherwise invalid
+- [x] Keep genuinely oversized, negative, non-numeric, or otherwise invalid
       correctly framed Content-Length values on the security-rejection path.
-- [ ] Rate-limit operational warnings, report counters instead of payload values,
+- [x] Rate-limit operational warnings, report counters instead of payload values,
       and ensure one malformed message cannot flood logs.
 
 ### Tests
 
-- [ ] Add a missing-middle-segment test where `skip > 0`; discard the partial SIP
+- [x] Add a missing-middle-segment test where `skip > 0`; discard the partial SIP
       message and successfully process the next complete message.
-- [ ] Add a post-reassembly channel-overflow test followed by a complete SIP
+- [x] Add a post-reassembly channel-overflow test followed by a complete SIP
       message; verify discontinuity accounting and recovery.
-- [ ] Add a malformed `Content-Length: digits\rSIP/2.0...` regression that
+- [x] Add a malformed `Content-Length: digits\rSIP/2.0...` regression that
       preserves and processes the credible following response.
-- [ ] Verify that correctly framed invalid Content-Length values remain rejected
+- [x] Verify that correctly framed invalid Content-Length values remain rejected
       and are not reclassified as transport gaps.
-- [ ] Verify per-attempt and cumulative resynchronization bounds, shutdown, and
+- [x] Verify per-attempt and cumulative resynchronization bounds, shutdown, and
       stream re-arm behavior under repeated gaps.
-- [ ] Add fuzz seeds for embedded CR, consumed suffixes, gaps at every header/body
+- [x] Add fuzz seeds for embedded CR, consumed suffixes, gaps at every header/body
       boundary, and repeated plausible start lines.
 
 ### Acceptance Criteria
 
-- [ ] No known reassembly or stream-queue discontinuity is hidden by byte
+- [x] No known reassembly or stream-queue discontinuity is hidden by byte
       concatenation.
-- [ ] A framing gap discards at most the incomplete message and allows a later
+- [x] A framing gap discards at most the incomplete message and allows a later
       correctly framed SIP message on the same live stream to be processed.
-- [ ] Security validation remains strict for correctly framed hostile input.
+- [x] Security validation remains strict for correctly framed hostile input.
 
 ## Phase 3: Stateful SIP-First Capture Shedding
 

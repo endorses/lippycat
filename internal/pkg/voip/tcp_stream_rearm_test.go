@@ -3,7 +3,10 @@
 package voip
 
 import (
+	"bufio"
 	"context"
+	"errors"
+	"io"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,6 +54,264 @@ func TestSIPStreamFullQueueReportsDroppedChunkAndBytes(t *testing.T) {
 	if got := after.MissingSequenceBytes - before.MissingSequenceBytes; got != 4 {
 		t.Fatalf("missing bytes delta = %d, want 4", got)
 	}
+}
+
+func TestStreamChunkReaderBreaksFramingAtReassemblyGap(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &bufferedSIPStream{ctx: ctx, dataChan: make(chan streamChunk, 2)}
+	stream.dataChan <- streamChunk{data: []byte("INVITE sip:a@b SIP/2.0\r\nCall-ID: incomplete")}
+	complete := []byte("OPTIONS sip:a@b SIP/2.0\r\nCall-ID: recovered\r\nContent-Length: 0\r\n\r\n")
+	stream.dataChan <- streamChunk{
+		data: complete,
+		gap:  streamGap{reason: streamGapReassembly, missingBytes: 17},
+	}
+
+	reader := &streamChunkReader{stream: stream, state: TCPStateOpening}
+	buffered := bufio.NewReader(reader)
+	_, err := stream.readCompleteSipMessageFromReader(buffered)
+	var framingErr *recoverableFramingError
+	if !errors.As(err, &framingErr) {
+		t.Fatalf("partial message error = %v, want recoverable framing error", err)
+	}
+	if framingErr.missingBytes != 17 {
+		t.Fatalf("missing bytes = %d, want 17", framingErr.missingBytes)
+	}
+
+	message, err := stream.readCompleteSipMessageFromReader(bufio.NewReader(reader))
+	if err != nil {
+		t.Fatalf("read post-gap message: %v", err)
+	}
+	if string(message) != string(complete) {
+		t.Fatalf("post-gap message = %q, want %q", message, complete)
+	}
+}
+
+func TestQueueOverflowMarkerAttachesOnlyAfterSuccessfulEnqueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &bufferedSIPStream{ctx: ctx, dataChan: make(chan streamChunk, 1)}
+	stream.dataChan <- streamChunk{data: []byte("occupied")}
+
+	stream.ReassembledSG(&fakeScatterGather{data: []byte("first-drop")}, nil)
+	stream.ReassembledSG(&fakeScatterGather{data: []byte("second-drop"), skip: 3}, nil)
+	<-stream.dataChan
+	stream.ReassembledSG(&fakeScatterGather{data: []byte("safe")}, nil)
+
+	chunk := <-stream.dataChan
+	if chunk.gap.reason&streamGapQueueOverflow == 0 || chunk.gap.reason&streamGapReassembly == 0 {
+		t.Fatalf("gap reason = %d, want overflow and reassembly", chunk.gap.reason)
+	}
+	if chunk.gap.missingBytes != 3 {
+		t.Fatalf("missing sequence bytes = %d, want 3", chunk.gap.missingBytes)
+	}
+	wantDropped := len("first-drop") + len("second-drop")
+	if chunk.gap.droppedBytes != wantDropped {
+		t.Fatalf("queue-dropped bytes = %d, want %d", chunk.gap.droppedBytes, wantDropped)
+	}
+	if stream.pendingGap.reason != streamGapNone {
+		t.Fatalf("pending gap was not cleared after successful enqueue: %+v", stream.pendingGap)
+	}
+}
+
+func TestEmptyReassemblyGapCarriesToNextData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &bufferedSIPStream{ctx: ctx, dataChan: make(chan streamChunk, 1)}
+
+	stream.ReassembledSG(&fakeScatterGather{skip: 9}, nil)
+	stream.ReassembledSG(&fakeScatterGather{data: []byte("after-gap")}, nil)
+
+	chunk := <-stream.dataChan
+	if chunk.gap.reason&streamGapReassembly == 0 || chunk.gap.missingBytes != 9 {
+		t.Fatalf("carried gap = %+v, want reassembly gap with 9 missing bytes", chunk.gap)
+	}
+}
+
+func TestStreamChunkReaderReturnsOldThenBoundaryThenNew(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &bufferedSIPStream{ctx: ctx, dataChan: make(chan streamChunk, 2)}
+	stream.dataChan <- streamChunk{data: []byte("old")}
+	stream.dataChan <- streamChunk{
+		data: []byte("new"),
+		gap:  streamGap{reason: streamGapQueueOverflow, droppedBytes: 12},
+	}
+	reader := &streamChunkReader{stream: stream, state: TCPStateOpening}
+	buf := make([]byte, 3)
+
+	if n, err := reader.Read(buf); n != 3 || err != nil || string(buf) != "old" {
+		t.Fatalf("first read = (%d, %v, %q), want (3, nil, old)", n, err, buf)
+	}
+	n, err := reader.Read(buf)
+	var framingErr *recoverableFramingError
+	if n != 0 || !errors.As(err, &framingErr) || framingErr.droppedBytes != 12 {
+		t.Fatalf("boundary read = (%d, %v), dropped=%v; want recoverable boundary with 12 dropped", n, err, framingErr)
+	}
+	if n, err = reader.Read(buf); n != 3 || err != nil || string(buf) != "new" {
+		t.Fatalf("post-gap read = (%d, %v, %q), want (3, nil, new)", n, err, buf)
+	}
+}
+
+func runChunkRecovery(t *testing.T, chunks []streamChunk) (*recordingSIPHandler, TCPStreamMetrics, TCPStreamMetrics) {
+	t.Helper()
+	rec := &recordingSIPHandler{}
+	stream, cancel := newResyncTestStream(t, rec)
+	stream.dataChan = make(chan streamChunk, len(chunks))
+	for _, chunk := range chunks {
+		stream.dataChan <- chunk
+	}
+	close(stream.dataChan)
+	before := GetTCPStreamMetrics()
+	stream.processSIPFromReader(&streamChunkReader{stream: stream, state: TCPStateOpening})
+	after := GetTCPStreamMetrics()
+	cancel()
+	return rec, before, after
+}
+
+func TestMissingMiddleSegmentRecoversNextCompleteMessage(t *testing.T) {
+	complete := []byte("OPTIONS sip:a@b SIP/2.0\r\nCall-ID: skip-recovered\r\nContent-Length: 0\r\n\r\n")
+	rec, before, after := runChunkRecovery(t, []streamChunk{
+		{data: []byte("INVITE sip:a@b SIP/2.0\r\nCall-ID: incomplete\r\nContent-Length: 20\r\n\r\npart")},
+		{data: complete, gap: streamGap{reason: streamGapReassembly, missingBytes: 11}},
+	})
+	if !rec.has("skip-recovered") || rec.has("incomplete") {
+		t.Fatalf("missing-middle recovery dispatched %v", rec.callIDs)
+	}
+	if got := after.RecoverySuccesses - before.RecoverySuccesses; got != 1 {
+		t.Fatalf("recovery successes delta = %d, want 1", got)
+	}
+	if got := after.ParserFramingDiscontinuities - before.ParserFramingDiscontinuities; got != 1 {
+		t.Fatalf("parser discontinuities delta = %d, want 1", got)
+	}
+}
+
+func TestQueueOverflowThenCompleteMessageRecovers(t *testing.T) {
+	rec := &recordingSIPHandler{}
+	stream, cancel := newResyncTestStream(t, rec)
+	defer cancel()
+	stream.dataChan = make(chan streamChunk, 2)
+	stream.dataChan <- streamChunk{data: []byte("INVITE sip:a@b SIP/2.0\r\n")}
+	stream.dataChan <- streamChunk{data: []byte("Call-ID: incomplete")}
+	dropped := []byte("dropped-header-bytes")
+	before := GetTCPStreamMetrics()
+	stream.ReassembledSG(&fakeScatterGather{data: dropped}, nil)
+
+	done := make(chan struct{})
+	go func() {
+		stream.processSIPFromReader(&streamChunkReader{stream: stream, state: TCPStateOpening})
+		close(done)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for len(stream.dataChan) == cap(stream.dataChan) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(stream.dataChan) == cap(stream.dataChan) {
+		t.Fatal("stream reader did not drain saturated queue")
+	}
+	complete := []byte("SIP/2.0 200 OK\r\nCall-ID: overflow-recovered\r\nContent-Length: 0\r\n\r\n")
+	stream.ReassembledSG(&fakeScatterGather{data: complete}, nil)
+	stream.ReassemblyComplete(nil)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stream processing did not stop")
+	}
+	after := GetTCPStreamMetrics()
+	if !rec.has("overflow-recovered") || rec.has("incomplete") {
+		t.Fatalf("overflow recovery dispatched %v", rec.callIDs)
+	}
+	if got := after.PostReassemblyDroppedChunks - before.PostReassemblyDroppedChunks; got != 1 {
+		t.Fatalf("dropped chunks delta = %d, want 1", got)
+	}
+	if got := after.PostReassemblyDroppedBytes - before.PostReassemblyDroppedBytes; got != int64(len(dropped)) {
+		t.Fatalf("dropped bytes delta = %d, want %d", got, len(dropped))
+	}
+	if got := after.RecoverySuccesses - before.RecoverySuccesses; got != 1 {
+		t.Fatalf("recovery successes delta = %d, want 1", got)
+	}
+}
+
+func TestTransportGapRecoveryAtMessageBoundaries(t *testing.T) {
+	partialCases := map[string][]byte{
+		"start-line":        []byte("INVITE sip:a@b"),
+		"header":            []byte("INVITE sip:a@b SIP/2.0\r\nCall-ID: cut"),
+		"header-terminator": []byte("INVITE sip:a@b SIP/2.0\r\nCall-ID: cut\r\nContent-Length: 0\r"),
+		"body":              []byte("MESSAGE sip:a@b SIP/2.0\r\nCall-ID: cut\r\nContent-Length: 8\r\n\r\nabc"),
+	}
+	for name, partial := range partialCases {
+		t.Run(name, func(t *testing.T) {
+			complete := []byte("OPTIONS sip:a@b SIP/2.0\r\nCall-ID: boundary-" + name + "\r\nContent-Length: 0\r\n\r\n")
+			rec, _, _ := runChunkRecovery(t, []streamChunk{
+				{data: partial},
+				{data: complete, gap: streamGap{reason: streamGapReassembly, missingBytes: 1}},
+			})
+			if !rec.has("boundary-" + name) {
+				t.Fatalf("post-gap message not recovered; got %v", rec.callIDs)
+			}
+		})
+	}
+}
+
+func TestShutdownWithPendingTransportGapIsNotRecoveryFailure(t *testing.T) {
+	rec := &recordingSIPHandler{}
+	stream, cancel := newResyncTestStream(t, rec)
+	stream.dataChan = make(chan streamChunk, 1)
+	stream.dataChan <- streamChunk{
+		data: []byte("OPTIONS sip:a@b SIP/2.0\r\nCall-ID: never-read\r\nContent-Length: 0\r\n\r\n"),
+		gap:  streamGap{reason: streamGapQueueOverflow, droppedBytes: 5},
+	}
+	before := GetTCPStreamMetrics()
+	done := make(chan struct{})
+	go func() {
+		stream.processSIPFromReader(&streamChunkReader{stream: stream, state: TCPStateOpening})
+		close(done)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for GetTCPStreamMetrics().ParserFramingDiscontinuities == before.ParserFramingDiscontinuities && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not stop pending recovery")
+	}
+	after := GetTCPStreamMetrics()
+	if got := after.RecoveryFailures - before.RecoveryFailures; got != 0 {
+		t.Fatalf("administrative shutdown recovery failures delta = %d, want 0", got)
+	}
+}
+
+func TestRecoveryFailureCountedExactlyOnceAtNonSIPCap(t *testing.T) {
+	stream, cancel := newResyncTestStream(t, &recordingSIPHandler{})
+	defer cancel()
+	line := make([]byte, resyncWindowBytes)
+	for i := range line {
+		line[i] = 'x'
+	}
+	line[len(line)-1] = '\n'
+	input := make([]byte, 0, len(line)*5)
+	for range 5 {
+		input = append(input, line...)
+	}
+	before := GetTCPStreamMetrics()
+	stream.processSIPFromReader(io.LimitReader(&oneByteReader{data: input}, int64(len(input))))
+	after := GetTCPStreamMetrics()
+	if got := after.RecoveryFailures - before.RecoveryFailures; got != 1 {
+		t.Fatalf("recovery failures delta = %d, want exactly 1", got)
+	}
+}
+
+type oneByteReader struct{ data []byte }
+
+func (r *oneByteReader) Read(dst []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	dst[0] = r.data[0]
+	r.data = r.data[1:]
+	return 1, nil
 }
 func (f *fakeScatterGather) Stats() reassembly.TCPAssemblyStats {
 	return reassembly.TCPAssemblyStats{}
@@ -114,6 +375,7 @@ func TestRearm_CompletedStreamReusedForNewSIP(t *testing.T) {
 	s.cancel()
 	waitFor(t, func() bool { return loadFinished(s) == 1 }, "processing goroutine to finish")
 	storeDiscard(s, 1)
+	s.pendingGap = streamGap{reason: streamGapQueueOverflow, droppedBytes: 7}
 
 	// SMS #2 MO leg ~seconds later reuses the SAME 4-tuple. gopacket routes it to
 	// this finished Stream (no New()). It must re-arm and dispatch.
@@ -122,6 +384,9 @@ func TestRearm_CompletedStreamReusedForNewSIP(t *testing.T) {
 
 	if loadDiscard(s) != 0 {
 		t.Errorf("re-arm did not clear discard flag (discard=%d)", loadDiscard(s))
+	}
+	if s.pendingGap.reason != streamGapNone {
+		t.Errorf("re-arm did not clear pending transport gap: %+v", s.pendingGap)
 	}
 }
 

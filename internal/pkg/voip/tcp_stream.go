@@ -67,11 +67,12 @@ type bufferedSIPStream struct {
 	createdAt      time.Time
 	processedBytes int64
 	processedMsgs  int64
-	closed         int32 // atomic flag - set permanently when ReassemblyComplete fires (gopacket evicts)
-	finished       int32 // atomic flag - set once the processing goroutine has fully exited (re-arm gate)
-	discard        int32 // atomic flag - set when stream is determined to be non-SIP
-	lockedOnSIP    int32 // atomic flag - set once at least one SIP message has been parsed
-	nonSIPBytes    int64 // atomic - bytes scanned as non-SIP since the last successful SIP message
+	closed         int32     // atomic flag - set permanently when ReassemblyComplete fires (gopacket evicts)
+	finished       int32     // atomic flag - set once the processing goroutine has fully exited (re-arm gate)
+	discard        int32     // atomic flag - set when stream is determined to be non-SIP
+	lockedOnSIP    int32     // atomic flag - set once at least one SIP message has been parsed
+	nonSIPBytes    int64     // atomic - bytes scanned as non-SIP since the last successful SIP message
+	pendingGap     streamGap // assembler-owned; attached to the next queued chunk
 
 	// State-based timeout support (Phase 3)
 	state            TCPState      // Current TCP state
@@ -89,6 +90,27 @@ const streamBufferSize = 64
 type streamChunk struct {
 	data      []byte
 	timestamp time.Time
+	gap       streamGap
+}
+
+type streamGapReason uint8
+
+const (
+	streamGapNone       streamGapReason = 0
+	streamGapReassembly streamGapReason = 1 << iota
+	streamGapQueueOverflow
+)
+
+type streamGap struct {
+	reason       streamGapReason
+	missingBytes int
+	droppedBytes int
+}
+
+func (g *streamGap) merge(other streamGap) {
+	g.reason |= other.reason
+	g.missingBytes += other.missingBytes
+	g.droppedBytes += other.droppedBytes
 }
 
 // discardStream is returned by the factory when the voip.max_streams cap is hit.
@@ -186,10 +208,13 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 
 	available, _ := sg.Lengths()
 	_, _, _, skip := sg.Info()
+	gap := streamGap{}
 	if skip > 0 {
 		RecordReassemblyDiscontinuity(skip)
+		gap = streamGap{reason: streamGapReassembly, missingBytes: skip}
 	}
 	if available == 0 {
+		s.pendingGap.merge(gap)
 		IncrementReassembledEmptyData()
 		return
 	}
@@ -229,14 +254,18 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	s.captureMu.RLock()
 	capturedAt := s.capturedAt
 	s.captureMu.RUnlock()
+	gap.merge(s.pendingGap)
 	select {
-	case s.dataChan <- streamChunk{data: data, timestamp: capturedAt}:
+	case s.dataChan <- streamChunk{data: data, timestamp: capturedAt, gap: gap}:
+		s.pendingGap = streamGap{}
 		logger.Debug("TCP data queued to stream",
 			"bytes", len(data),
 			"flow", fmt.Sprintf("%s:%s->%s:%s", s.netFlow.Src(), s.transportFlow.Src(), s.netFlow.Dst(), s.transportFlow.Dst()))
 	default:
 		// Buffer full - drop this chunk (log at debug level to avoid spam)
 		RecordPostReassemblyDrop(len(data))
+		s.pendingGap = gap
+		s.pendingGap.merge(streamGap{reason: streamGapQueueOverflow, droppedBytes: len(data)})
 		logger.Debug("TCP stream buffer full, dropping data", "bytes", len(data))
 	}
 }
@@ -285,6 +314,7 @@ func (s *bufferedSIPStream) rearm() {
 		s.stateChan = make(chan TCPState, 1)
 	}
 	s.createdAt = time.Now()
+	s.pendingGap = streamGap{}
 
 	// Reset per-message parser / lifecycle flags.
 	atomic.StoreInt32(&s.discard, 0)
@@ -371,10 +401,77 @@ type streamChunkReader struct {
 	timestamp time.Time
 	gotData   bool
 	state     TCPState
+	pending   *streamChunk
+}
+
+// recoverableFramingError marks loss of framing without weakening SIP security
+// validation. The parser may discard the incomplete message and scan for a
+// later start line. replay contains a credible start already consumed with a
+// malformed line and must be placed back in front of the reader.
+type recoverableFramingError struct {
+	reason       string
+	missingBytes int
+	droppedBytes int
+	replay       []byte
+	scannedBytes int
+}
+
+func (e *recoverableFramingError) Error() string {
+	return "recoverable SIP framing discontinuity: " + e.reason
+}
+
+type contentLengthPolicyError struct{ err error }
+
+func (e *contentLengthPolicyError) Error() string {
+	return "Content-Length policy rejection: " + e.err.Error()
+}
+func (e *contentLengthPolicyError) Unwrap() error { return e.err }
+
+var lastSIPParserWarningUnix atomic.Int64
+
+func logSIPParserWarning(reason string) {
+	now := time.Now().Unix()
+	last := lastSIPParserWarningUnix.Load()
+	if now-last < 60 || !lastSIPParserWarningUnix.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("SIP TCP parser rejected malformed framing", "reason", reason)
+}
+
+// credibleSIPAfterEmbeddedCR detects a start line swallowed by ReadString when
+// framing loss replaced CRLF with a lone CR. A lone CR by itself is never
+// accepted as SIP syntax; only a syntactically credible complete start line is
+// replayed for bounded resynchronization.
+func credibleSIPAfterEmbeddedCR(line string) string {
+	for offset := 0; offset < len(line); {
+		rel := strings.IndexByte(line[offset:], '\r')
+		if rel < 0 {
+			return ""
+		}
+		i := offset + rel
+		if i+1 < len(line) && line[i+1] != '\n' {
+			suffix := line[i+1:]
+			candidate := strings.TrimSuffix(strings.TrimSuffix(suffix, "\n"), "\r")
+			if isSIPRequestLine(candidate) || isSIPResponseLine(candidate) {
+				return suffix
+			}
+		}
+		offset = i + 1
+	}
+	return ""
 }
 
 func (r *streamChunkReader) Read(dst []byte) (int, error) {
 	for len(r.current) == 0 {
+		if r.pending != nil {
+			chunk := *r.pending
+			r.pending = nil
+			r.current, r.timestamp, r.gotData = chunk.data, chunk.timestamp, true
+			if r.state == TCPStateOpening {
+				r.state = TCPStateEstablished
+			}
+			continue
+		}
 		timeout := initialReadTimeout
 		if r.gotData {
 			timeout = r.stream.getTimeoutForState(r.state)
@@ -392,6 +489,14 @@ func (r *streamChunkReader) Read(dst []byte) (int, error) {
 			timer.Stop()
 			if !ok {
 				return 0, io.EOF
+			}
+			if chunk.gap.reason != streamGapNone {
+				r.pending = &chunk
+				return 0, &recoverableFramingError{
+					reason:       "transport gap",
+					missingBytes: chunk.gap.missingBytes,
+					droppedBytes: chunk.gap.droppedBytes,
+				}
 			}
 			r.current, r.timestamp, r.gotData = chunk.data, chunk.timestamp, true
 			if r.state == TCPStateOpening {
@@ -424,6 +529,14 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 	defer discardTCPBufferedPackets(s.netFlow, s.transportFlow)
 
 	recoveryPending := false
+	defer func() {
+		// A recovery attempt that ends at EOF, timeout, or a hard parser policy
+		// rejection failed to find a later valid message. Administrative shutdown
+		// is not parser failure and is intentionally excluded.
+		if recoveryPending && s.ctx.Err() == nil {
+			IncrementStreamRecoveryFailure()
+		}
+	}()
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -433,7 +546,36 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 
 		sipMessage, err := s.readCompleteSipMessageFromReader(bufReader)
 		if err != nil {
-			if errors.Is(err, errNotSIP) {
+			var framingErr *recoverableFramingError
+			var policyErr *contentLengthPolicyError
+			if errors.As(err, &framingErr) {
+				IncrementParserFramingDiscontinuity()
+				recoveryPending = true
+				if framingErr.reason == "transport gap" {
+					// bufio may retain bytes from the incomplete pre-gap message.
+					// Drop them; streamChunkReader retained the post-gap chunk.
+					bufReader = bufio.NewReader(reader)
+					continue
+				}
+				if framingErr.scannedBytes > 0 && atomic.AddInt64(&s.nonSIPBytes, int64(framingErr.scannedBytes)) >= maxNonSIPBytesBeforeDiscard {
+					IncrementStreamRecoveryFailure()
+					recoveryPending = false
+					atomic.StoreInt32(&s.discard, 1)
+					logSIPParserWarning("cumulative_resynchronization_limit")
+					return
+				}
+				if len(framingErr.replay) > 0 {
+					// ReadString consumed a credible next start line together with the
+					// damaged header. Replay it without losing bytes already buffered.
+					bufReader = bufio.NewReader(io.MultiReader(bytes.NewReader(framingErr.replay), bufReader))
+				}
+				continue
+			} else if errors.As(err, &policyErr) {
+				// Correctly CRLF-framed hostile Content-Length is a hard security
+				// rejection, never a transport/framing recovery opportunity.
+				logSIPParserWarning("content_length_policy")
+				return
+			} else if errors.Is(err, errNotSIP) {
 				IncrementNonSIPRejection()
 				// Once this flow has carried valid SIP, a later framing rejection is
 				// a parser discontinuity rather than initial non-SIP classification.
@@ -459,6 +601,7 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 				atomic.StoreInt32(&s.discard, 1)
 				if recoveryPending {
 					IncrementStreamRecoveryFailure()
+					recoveryPending = false
 				}
 				logger.Debug("Non-SIP data exceeded resync cap, closing stream")
 			} else if errors.Is(err, errReadTimeout) {
@@ -563,6 +706,14 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 			return nil, errNotSIP
 		}
 
+		if suffix := credibleSIPAfterEmbeddedCR(line); suffix != "" {
+			return nil, &recoverableFramingError{
+				reason:       "embedded carriage return before SIP start",
+				replay:       []byte(suffix),
+				scannedBytes: len(line) - len(suffix),
+			}
+		}
+
 		message.WriteString(line)
 		headerCount++
 
@@ -588,11 +739,7 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 				if length, parseErr := parseContentLengthSecurely(lengthStr, securityConfig); parseErr == nil {
 					contentLength = length
 				} else {
-					logger.Warn("Content-Length security validation failed",
-						"value", lengthStr,
-						"error", parseErr,
-						"source", "tcp_stream")
-					return nil, fmt.Errorf("invalid Content-Length: %w", parseErr)
+					return nil, &contentLengthPolicyError{err: parseErr}
 				}
 			}
 		}
@@ -601,10 +748,7 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 	messageBytes := []byte(message.String())
 
 	if err := validateMessageSize(len(messageBytes), securityConfig); err != nil {
-		logger.Warn("SIP message size security validation failed",
-			"size", len(messageBytes),
-			"error", err,
-			"source", "tcp_stream")
+		logSIPParserWarning("message_size_policy")
 		return nil, fmt.Errorf("SIP message too large: %w", err)
 	}
 

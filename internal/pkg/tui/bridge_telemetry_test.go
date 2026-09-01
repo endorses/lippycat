@@ -170,6 +170,24 @@ func TestEnvelopeBridgePreservesAcceptedBatchAcrossPause(t *testing.T) {
 	close(envelopes)
 	<-done
 	require.Len(t, DrainPendingPackets(false), 50)
+	require.Zero(t, GetBridgeStats().QueueDepth)
+}
+
+func TestEnvelopeBridgeQueueDepthReturnsToZeroAfterConsumerDrain(t *testing.T) {
+	ResetBridgeStats()
+	ClearPendingPackets()
+	t.Cleanup(ClearPendingPackets)
+	SetVoIPModeEnabled(false)
+
+	envelopes := make(chan *pipeline.PacketEnvelope, 1)
+	envelopes <- telemetryUDPEnvelope(t, pipeline.SourceLiveCapture, []byte("queue-depth"))
+	close(envelopes)
+
+	bridge := newEnvelopeBridgePipeline(nil, NewPauseSignal(), nil, false, nil)
+	bridge.run(envelopes)
+
+	require.Zero(t, GetBridgeStats().QueueDepth)
+	require.Len(t, DrainPendingPackets(false), 1)
 }
 
 func telemetryUDPEnvelope(tb testing.TB, kind pipeline.SourceKind, payload []byte) *pipeline.PacketEnvelope {

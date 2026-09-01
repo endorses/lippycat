@@ -813,7 +813,7 @@ func (pb *pendingPacketBuffer) liveLen() int {
 
 // DrainPendingPackets returns pending packets for the TUI to process.
 // This is the public API called by the TUI's tick handler.
-// For live capture: Limited to 50 packets per tick to prevent UI stutter.
+// For live capture: Uses a bounded adaptive drain to prevent UI stutter.
 // For offline capture: Returns ALL pending packets to ensure complete processing.
 func DrainPendingPackets(preserveAll bool) []components.PacketDisplay {
 	// In offline mode, drain all packets to ensure none are lost
@@ -1061,7 +1061,8 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 
 	// Consumer goroutine: reads from tuiBatchChan and adds to pending buffer.
 	// The TUI pulls from the pending buffer on its own timer, so this never blocks.
-	// When paused, packets are discarded (the bridge is blocked, so minimal packets arrive).
+	// Batches accepted before a pause remain pending; dropping them here would be
+	// an unaccounted loss stage and break the bridge counter reconciliation.
 	consumerDone := make(chan struct{})
 	var consumerPacketsReceived int64
 	go func() {
@@ -1077,12 +1078,6 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 				if !ok {
 					// Channel closed
 					return
-				}
-				// Discard packets when paused (bridge is blocked, so minimal arrive)
-				if pause != nil && pause.IsPaused() {
-					logger.Debug("Bridge consumer: discarding batch due to pause",
-						"batch_size", len(msg.Packets))
-					continue
 				}
 				// Add to pending buffer (never blocks - TUI pulls when ready)
 				consumerPacketsReceived += int64(len(msg.Packets))

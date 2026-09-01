@@ -550,10 +550,10 @@ func (s *LocalSource) batchingLoop() {
 	for i := range workerChans {
 		workerChans[i] = make(chan capture.PacketInfo, detectionWorkerChanBuffer)
 		wg.Add(1)
-		go func(in <-chan capture.PacketInfo) {
+		go func(in <-chan capture.PacketInfo, receiveTCPInjection bool) {
 			defer wg.Done()
-			s.batchingWorker(in)
-		}(workerChans[i])
+			s.batchingWorkerWithInjection(in, receiveTCPInjection)
+		}(workerChans[i], i == 0)
 	}
 
 	closeWorkers := func() {
@@ -609,6 +609,14 @@ func getDetectionWorkerCount() int {
 // currentBatch (batchMu), and stats (atomic). TCP assembler concurrency is
 // handled by the reassembly engine's flow shards.
 func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
+	s.batchingWorkerWithInjection(input, true)
+}
+
+// batchingWorkerWithInjection processes one flow-routed ingress queue. Exactly
+// one worker receives reassembled TCP injections: multiple consumers would
+// preserve channel receive order but could finish filtering and append to the
+// shared batch out of order for consecutive messages on the same TCP flow.
+func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInfo, receiveTCPInjection bool) {
 	ticker := time.NewTicker(s.config.BatchTimeout)
 	defer ticker.Stop()
 
@@ -617,6 +625,9 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 	tcpChan := s.tcpInjectionChan
 	tcpAssembler := s.tcpAssembler
 	s.mu.Unlock()
+	if !receiveTCPInjection {
+		tcpChan = nil
+	}
 
 	for {
 		select {

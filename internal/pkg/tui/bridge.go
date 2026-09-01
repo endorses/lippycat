@@ -1024,18 +1024,27 @@ type envelopeBridgePipeline struct {
 	tracker     *CallTracker
 	preserveAll bool
 	aggregator  *LocalCallAggregator
+	now         func() time.Time
+
+	// onBatchQueued is a test seam for observing the exact point at which a
+	// batch becomes owned by the consumer. Production pipelines leave it nil.
+	onBatchQueued func()
 }
 
 func newEnvelopeBridgePipeline(program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool, aggregator *LocalCallAggregator) *envelopeBridgePipeline {
 	return &envelopeBridgePipeline{
 		program: program, pause: pause, tracker: tracker,
-		preserveAll: preserveAll, aggregator: aggregator,
+		preserveAll: preserveAll, aggregator: aggregator, now: time.Now,
 	}
 }
 
 func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope) {
 	program, pause, tracker := b.program, b.pause, b.tracker
 	preserveAll, aggregator := b.preserveAll, b.aggregator
+	now := b.now
+	if now == nil {
+		now = time.Now
+	}
 
 	const (
 		batchInterval = constants.TUITickInterval // Batch interval
@@ -1046,8 +1055,8 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 	defer reassembly.close()
 
 	batch := make([]components.PacketDisplay, 0, 100)
-	sampling := newDisplaySamplingPolicy(preserveAll)
-	ingressTelemetry := newIngressTelemetryAccumulator(time.Now())
+	sampling := newDisplaySamplingPolicy(preserveAll, now())
+	ingressTelemetry := newIngressTelemetryAccumulator(now())
 
 	ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
@@ -1103,6 +1112,9 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 					// Successfully queued
 					atomic.AddInt64(&bridgeStats.BatchesSent, 1)
 					dropTracker.recordBatchResult(false)
+					if b.onBatchQueued != nil {
+						b.onBatchQueued()
+					}
 				default:
 					// TUI is behind - drop batch to prevent blocking
 					atomic.AddInt64(&bridgeStats.BatchesDropped, 1)
@@ -1146,7 +1158,7 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 
 		case env, ok := <-packetChan:
 			if !ok {
-				if snapshot, publish := ingressTelemetry.snapshot(time.Now(), true); publish {
+				if snapshot, publish := ingressTelemetry.snapshot(now(), true); publish {
 					publishIngressTelemetry(snapshot)
 				}
 				// Channel closed, send remaining batch and shutdown consumer
@@ -1193,7 +1205,7 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 
 			reassembly.process(env)
 
-			if sampling.shouldDisplay(env, ingressTelemetry.packets, time.Now()) {
+			if sampling.shouldDisplay(env, ingressTelemetry.packets, now()) {
 				// Full conversion to extract all metadata (SDP, etc.)
 				packet := convertEnvelope(env, tracker)
 				batch = append(batch, packet)
@@ -1207,7 +1219,7 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 			}
 
 		case <-ticker.C:
-			if snapshot, publish := ingressTelemetry.snapshot(time.Now(), false); publish {
+			if snapshot, publish := ingressTelemetry.snapshot(now(), false); publish {
 				publishIngressTelemetry(snapshot)
 			}
 			// Send batch on interval

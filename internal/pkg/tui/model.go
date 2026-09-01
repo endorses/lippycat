@@ -214,6 +214,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 		// Switch to Nodes tab when starting in remote mode
 		uiState.Tabs.SetActive(1)
 	}
+	uiState.StatisticsView.SetL3L4ProtocolClassification(initialMode == components.CaptureModeLive)
 
 	// Create settings view with correct initial mode
 	uiState.SettingsView = components.NewSettingsView(interfaceName, bufferSize, promiscuous, bpfFilter, initialPCAPFile)

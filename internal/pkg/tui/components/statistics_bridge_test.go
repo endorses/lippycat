@@ -47,3 +47,11 @@ func TestHealthRenderingShowsPacketLevelDisplayLoss(t *testing.T) {
 		assert.Truef(t, strings.Contains(rendered, expected), "rendered health missing %q", expected)
 	}
 }
+
+func TestLiveIngressLabelsExactProtocolClassification(t *testing.T) {
+	view := NewStatisticsView()
+	assert.Equal(t, "🔌 Protocol Distribution", view.protocolDistributionTitle())
+
+	view.SetL3L4ProtocolClassification(true)
+	assert.Equal(t, "🔌 L3/L4 Protocol Distribution", view.protocolDistributionTitle())
+}

@@ -279,6 +279,7 @@ type StatisticsView struct {
 	protocolRegistry *ProtocolStatsRegistry // Registry of protocol stats providers
 	voipProvider     *VoIPStatsProvider     // VoIP-specific stats provider
 	selectedProtocol string                 // Currently selected protocol filter
+	l3L4Protocols    bool                   // Protocol totals are exact, inexpensive live L3/L4 classifications
 
 	// Phase 6: TUI process metrics
 	cpuTracker *CPUTracker // CPU usage history for sparkline
@@ -383,6 +384,21 @@ func (s *StatisticsView) SetSize(width, height int) {
 func (s *StatisticsView) SetStatistics(stats *Statistics) {
 	s.stats = stats
 	s.dirty = true // Mark for lazy re-render
+}
+
+// SetL3L4ProtocolClassification labels live ingress totals according to their
+// intentionally inexpensive classification. Offline and remote detail paths
+// retain enriched application-protocol labels.
+func (s *StatisticsView) SetL3L4ProtocolClassification(enabled bool) {
+	s.l3L4Protocols = enabled
+	s.dirty = true
+}
+
+func (s *StatisticsView) protocolDistributionTitle() string {
+	if s.l3L4Protocols {
+		return "🔌 L3/L4 Protocol Distribution"
+	}
+	return "🔌 Protocol Distribution"
 }
 
 // SetBridgeStats updates the bridge statistics data
@@ -1036,7 +1052,7 @@ func (s *StatisticsView) renderOverviewNarrow() string {
 	result.WriteString("\n")
 
 	// Section: Protocol Distribution
-	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
+	result.WriteString(titleStyle.Render(s.protocolDistributionTitle()))
 	result.WriteString("\n\n")
 
 	result.WriteString(s.renderProtocolDistribution(5, s.width))
@@ -1703,7 +1719,7 @@ func (s *StatisticsView) renderTrafficSubView() string {
 
 	// Protocol distribution
 	result.WriteString("\n")
-	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
+	result.WriteString(titleStyle.Render(s.protocolDistributionTitle()))
 	result.WriteString("\n\n")
 
 	result.WriteString(s.renderProtocolDistribution(10, s.width))

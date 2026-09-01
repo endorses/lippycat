@@ -5,10 +5,19 @@ import "sync"
 // Telemetry is a cumulative snapshot of live capture health across all
 // interfaces participating in one capture session.
 type Telemetry struct {
-	PacketsReceived   int64
-	KernelDrops       int64
-	InterfaceDrops    int64
-	PacketBufferDrops int64
+	PacketsReceived           int64
+	KernelDrops               int64
+	InterfaceDrops            int64
+	PacketBufferDrops         int64
+	PacketBufferRegularDrops  int64
+	PacketBufferSIPDrops      int64
+	SIPClassified             int64
+	SIPFlowPromotions         uint64
+	SIPFlowClassifiedSegments uint64
+	SIPFlowIdleExpirations    uint64
+	SIPFlowCapacityEvictions  uint64
+	SIPFlowConnectionCloses   uint64
+	SIPFlowActive             int
 }
 
 // TelemetryCallback receives cumulative snapshots. Callbacks must return
@@ -35,7 +44,7 @@ func newTelemetryCollector(callback TelemetryCallback) *telemetryCollector {
 	}
 }
 
-func (c *telemetryCollector) report(interfaceName string, received, kernelDrops, interfaceDrops, bufferDrops int64) Telemetry {
+func (c *telemetryCollector) report(interfaceName string, received, kernelDrops, interfaceDrops int64, buffer *PacketBuffer) Telemetry {
 	if c == nil {
 		return Telemetry{}
 	}
@@ -55,7 +64,19 @@ func (c *telemetryCollector) report(interfaceName string, received, kernelDrops,
 		snapshot.KernelDrops += stats.kernelDrops
 		snapshot.InterfaceDrops += stats.interfaceDrops
 	}
-	snapshot.PacketBufferDrops = bufferDrops
+	if buffer != nil {
+		snapshot.PacketBufferRegularDrops = buffer.GetDropped()
+		snapshot.PacketBufferSIPDrops = buffer.GetSIPDropped()
+		snapshot.PacketBufferDrops = snapshot.PacketBufferRegularDrops + snapshot.PacketBufferSIPDrops
+		snapshot.SIPClassified = buffer.GetSIPClassified()
+		flowStats, active := buffer.GetSIPFlowClassifierStats()
+		snapshot.SIPFlowPromotions = flowStats.Promotions
+		snapshot.SIPFlowClassifiedSegments = flowStats.ClassifiedSegments
+		snapshot.SIPFlowIdleExpirations = flowStats.IdleExpirations
+		snapshot.SIPFlowCapacityEvictions = flowStats.CapacityEvictions
+		snapshot.SIPFlowConnectionCloses = flowStats.ConnectionCloses
+		snapshot.SIPFlowActive = active
+	}
 	c.mu.Unlock()
 	if c.callback != nil {
 		c.callback(snapshot)

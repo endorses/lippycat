@@ -158,6 +158,24 @@ Press `Alt+3` to view real-time traffic statistics:
 - Traffic rates
 - Distributed node statistics (when connected to processors)
 
+The packet-detail view is deliberately bounded during live capture. Exact
+ingress counters continue to account for every valid packet, while the detail
+feed may sample packets, drop a queued detail batch, or evict the oldest packet
+from its pending ring to keep the newest diagnostics visible. The Statistics
+tab reports these stages separately as **Sampled Out**, **Batch Queue Drops**,
+and **Pending Evictions**. **Packets Delivered** and its retained percentage
+measure end-to-end detail retention from valid TUI ingress; they do not measure
+capture integrity or packets written to PCAP.
+
+Recognized SIP packets bypass adaptive detail sampling, but they can still be
+lost at the later batch-queue or pending-ring stages. Offline PCAP replay uses a
+separate preserve-all pending path and does not inherit live-ring eviction.
+
+All of these TUI counters are cumulative for the current session. Do not add
+successive snapshots. A low retained percentage means packet rows are an
+incomplete diagnostic sample. Use the exact ingress/protocol counters for
+traffic rates and a PCAP sink when complete packet evidence is required.
+
 Toggle between Overview and Distributed sub-views with `v` or the `1`/`2` keys. Export statistics to JSON with `e`.
 
 ### Settings Tab

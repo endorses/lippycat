@@ -202,6 +202,10 @@ named local stages. New protobuf fields must be additive and use new field numbe
 - [x] Preserve batches already accepted by the bridge across a capture pause so
       every received packet still reconciles as invalid, sampled out,
       batch-dropped, pending-evicted, or delivered.
+- [x] Exclude invalid envelopes from the valid-ingress rate used by live detail
+      sampling.
+- [x] Use the authoritative end-to-end bridge retention ratio in drop-health
+      summaries instead of inferring retention from intermediate loss counters.
 
 ## Phase 2: TCP Discontinuity Preservation and SIP Parser Recovery
 

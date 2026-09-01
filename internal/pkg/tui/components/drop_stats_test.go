@@ -231,6 +231,7 @@ func TestDropStats_UpdateFromBridgeStats(t *testing.T) {
 			PacketsSampledOut:      400,
 			BatchQueuePacketDrops:  75,
 			PendingPacketEvictions: 25,
+			DisplayRetentionRatio:  700,
 		}
 
 		ds.UpdateFromBridgeStats(bs)
@@ -242,6 +243,6 @@ func TestDropStats_UpdateFromBridgeStats(t *testing.T) {
 		assert.Equal(t, int64(75), summary.BatchQueuePacketDrops)
 		assert.Equal(t, int64(25), summary.PendingEvictions)
 		assert.Equal(t, int64(500), summary.DisplayDrops)
-		assert.Equal(t, 95.0, summary.DisplayRetentionRate)
+		assert.Equal(t, 70.0, summary.DisplayRetentionRate)
 	})
 }

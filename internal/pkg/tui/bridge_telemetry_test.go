@@ -69,6 +69,27 @@ func TestSustainedSyntheticBridgeAboveOneThousandPacketsPerSecond(t *testing.T) 
 	require.Greater(t, delivered, int64(0))
 }
 
+func TestInvalidEnvelopesDoNotInflateSamplingIngressRate(t *testing.T) {
+	t.Parallel()
+	start := time.Unix(25, 0)
+	acc := newIngressTelemetryAccumulator(start)
+	policy := newDisplaySamplingPolicy(false, start)
+
+	for range 10_000 {
+		require.False(t, acc.observe(nil))
+	}
+
+	env := telemetryUDPEnvelope(t, pipeline.SourceLiveCapture, []byte("valid"))
+	for i := 1; i <= 500; i++ {
+		require.True(t, acc.observe(env))
+		now := start.Add(time.Duration(i) * 2 * time.Millisecond)
+		require.True(t, policy.shouldDisplay(env, acc.packets, now))
+	}
+
+	require.Equal(t, int64(500), acc.packets)
+	require.Equal(t, 1.0, policy.ratio)
+}
+
 func TestBridgePacketCounterReconciliationInvariant(t *testing.T) {
 	// At a settled boundary every received envelope is either invalid, sampled
 	// out, dropped at a later local stage, or delivered to the model/list.

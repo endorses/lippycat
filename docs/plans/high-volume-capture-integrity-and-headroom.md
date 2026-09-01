@@ -1,7 +1,7 @@
 # High-Volume Capture Integrity and Headroom Plan
 
 **Date:** 2026-09-01
-**Status:** In Progress (Phases 0-5 complete)
+**Status:** Complete (Phases 0-6 complete)
 **Priority:** High
 
 ## Overview
@@ -421,22 +421,22 @@ named local stages. New protobuf fields must be additive and use new field numbe
 
 ## Phase 6: Documentation, Validation, and Release
 
-- [ ] Run `gofmt` on every changed Go file before staging.
-- [ ] Regenerate and verify protobuf outputs after schema changes.
-- [ ] Run targeted unit, integration, fuzz-seed, benchmark, and race tests for each
+- [x] Run `gofmt` on every changed Go file before staging.
+- [x] Regenerate and verify protobuf outputs after schema changes.
+- [x] Run targeted unit, integration, fuzz-seed, benchmark, and race tests for each
       phase before proceeding to the next.
-- [ ] Run the full tagged test suite relevant to tap, processor, hunter, TUI, and LI
+- [x] Run the full tagged test suite relevant to tap, processor, hunter, TUI, and LI
       builds after all phases are integrated.
-- [ ] Verify specialized builds compile and non-LI builds continue to exclude LI
+- [x] Verify specialized builds compile and non-LI builds continue to exclude LI
       code.
-- [ ] Update operator documentation for TUI retention semantics, loss-stage
+- [x] Update operator documentation for TUI retention semantics, loss-stage
       counters, SIP-priority capacity assumptions, parser recovery, and reassembly
       shard tuning.
-- [ ] Use only synthetic/anonymized evidence in committed tests and documentation;
+- [x] Use only synthetic/anonymized evidence in committed tests and documentation;
       perform a final repository search for deployment identifiers and captured
       identities before staging.
-- [ ] Check off only tasks verified by code, tests, or recorded benchmark evidence.
-- [ ] Commit the implementation, generated code, documentation, benchmark summary,
+- [x] Check off only tasks verified by code, tests, or recorded benchmark evidence.
+- [x] Commit the implementation, generated code, documentation, benchmark summary,
       and this completed plan together as required by the repository workflow.
 
 ## Recommended Delivery Order

@@ -37,13 +37,7 @@ getcap /usr/local/bin/lc
 
 After setting capabilities, any non-root user can run captures. Note that `setcap` must be reapplied after reinstalling or upgrading the binary.
 
-### Interface Not Found
-
-**Symptom:** lippycat reports `no such device` or the interface name is not recognized.
-
-**Cause:** The interface name does not match any active network device. This commonly happens after renaming (e.g., `eth0` became `enp3s0`) or when a virtual interface has not been created yet.
-
-**Diagnosis:**
+### Attribute Capture Loss by Stage
 
 Loss counters are cumulative for one capture session and reset when that capture
 source restarts. Classify the first non-zero local stage before assigning a root
@@ -63,6 +57,14 @@ The compatible aggregate packet-drop counter is the sum of the named local packe
 drop stages. Do not infer an external capture-source fault merely because TCP
 sequence space is missing: first check every locally measured stage. Batch and
 heartbeat values are cumulative snapshots and must not be summed across reports.
+
+### Interface Not Found
+
+**Symptom:** lippycat reports `no such device` or the interface name is not recognized.
+
+**Cause:** The interface name does not match any active network device. This commonly happens after renaming (e.g., `eth0` became `enp3s0`) or when a virtual interface has not been created yet.
+
+**Diagnosis:**
 
 ```bash
 # List all interfaces with their current state

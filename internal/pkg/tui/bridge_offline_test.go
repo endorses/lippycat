@@ -92,8 +92,8 @@ func TestBridgeOfflinePacketCounting(t *testing.T) {
 			if stats.PacketsReceived != expectedPackets {
 				t.Errorf("Expected %d packets received, got %d", expectedPackets, stats.PacketsReceived)
 			}
-			if stats.PacketsDisplayed != expectedPackets {
-				t.Errorf("Expected %d packets displayed, got %d", expectedPackets, stats.PacketsDisplayed)
+			if stats.PacketsDisplayed != 0 {
+				t.Errorf("Expected no packets displayed before model delivery, got %d", stats.PacketsDisplayed)
 			}
 			if stats.BatchesDropped != 0 {
 				t.Errorf("Expected 0 batches dropped, got %d", stats.BatchesDropped)

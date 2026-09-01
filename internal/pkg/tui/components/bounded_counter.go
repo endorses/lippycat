@@ -78,6 +78,22 @@ func (bc *BoundedCounter) Clear() {
 	bc.cacheValid = false
 }
 
+// Replace installs a cumulative snapshot while preserving the counter's bound.
+// It is used by exact ingress telemetry so sampled detail packets are not counted
+// a second time by the model.
+func (bc *BoundedCounter) Replace(counts map[string]int64) {
+	bc.counts = make(map[string]int64, min(len(counts), bc.capacity))
+	for key, count := range counts {
+		if len(bc.counts) >= bc.capacity {
+			break
+		}
+		bc.counts[key] = count
+	}
+	bc.cachedTopN = nil
+	bc.cacheN = 0
+	bc.cacheValid = false
+}
+
 // GetTopN returns the top N keys by count, sorted descending.
 // Results are cached and reused if n <= cachedN and cache is valid.
 func (bc *BoundedCounter) GetTopN(n int) []KeyCount {

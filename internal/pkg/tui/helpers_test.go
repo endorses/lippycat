@@ -210,3 +210,41 @@ func TestUpdateStatistics_ProtocolCounts(t *testing.T) {
 	// the statistics object was updated (non-zero packets)
 	assert.Equal(t, int64(5), m.statistics.TotalPackets, "Should have 5 packets total")
 }
+
+func TestProcessPendingPacketsLiveUsesExactIngressSnapshotWithoutDoubleCounting(t *testing.T) {
+	theme := themes.Solarized()
+	uiState := store.NewUIState(theme)
+	uiState.Statistics = &components.Statistics{
+		ProtocolCounts: components.NewBoundedCounter(1000),
+		SourceCounts:   components.NewBoundedCounter(10000),
+		DestCounts:     components.NewBoundedCounter(10000),
+		MinPacketSize:  999999,
+	}
+	m := Model{
+		statistics: uiState.Statistics,
+		uiState:    uiState, packetStore: store.NewPacketStore(10),
+		captureMode: components.CaptureModeLive,
+	}
+	publishIngressTelemetry(IngressTelemetrySnapshot{
+		Packets: 10, Bytes: 1000, MinPacketSize: 60, MaxPacketSize: 200,
+		ProtocolCounts: map[string]int64{"UDP": 10},
+		SourceCounts:   map[string]int64{"192.0.2.1": 10},
+		DestCounts:     map[string]int64{"198.51.100.2": 10},
+	})
+	ResetBridgeStats()
+	// Reset clears telemetry, so publish the capture snapshot afterward.
+	publishIngressTelemetry(IngressTelemetrySnapshot{
+		Packets: 10, Bytes: 1000, MinPacketSize: 60, MaxPacketSize: 200,
+		ProtocolCounts: map[string]int64{"UDP": 10},
+		SourceCounts:   map[string]int64{"192.0.2.1": 10},
+		DestCounts:     map[string]int64{"198.51.100.2": 10},
+	})
+
+	m.processPendingPackets([]components.PacketDisplay{{Protocol: "UDP", SrcIP: "192.0.2.1", DstIP: "198.51.100.2", Length: 100}})
+
+	assert.Equal(t, int64(10), m.statistics.TotalPackets)
+	assert.Equal(t, int64(1000), m.statistics.TotalBytes)
+	assert.Equal(t, int64(10), m.statistics.ProtocolCounts.Get("UDP"))
+	assert.Equal(t, int64(1), GetBridgeStats().PacketsDelivered)
+	assert.Equal(t, int64(1), GetBridgeStats().PacketsDisplayed)
+}

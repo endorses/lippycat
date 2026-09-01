@@ -188,16 +188,54 @@ type Statistics struct {
 // These stats help identify backpressure issues where the TUI can't keep up
 // with packet ingestion rate.
 type BridgeStatistics struct {
-	PacketsReceived  int64 // Total packets received from capture
-	PacketsDisplayed int64 // Packets sent to TUI for display
-	BatchesSent      int64 // Batches successfully queued for TUI
-	BatchesDropped   int64 // Batches dropped due to TUI backpressure
-	QueueDepth       int64 // Current batch queue depth
-	MaxQueueDepth    int64 // Peak queue depth seen
-	SamplingRatio    int64 // Current sampling ratio * 1000 (1000 = 100%)
-	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s, for throttling)
-	Running          int32 // 1 if bridge is running, 0 if stopped
-	CaptureComplete  int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+	PacketsReceived        int64 // Total packets received from capture
+	PacketsDisplayed       int64 // Deprecated compatibility alias for PacketsDelivered
+	InvalidEnvelopes       int64 // Invalid envelopes rejected before ingress acceptance
+	PacketsSampledOut      int64 // Valid ingress packets omitted from the detail feed
+	BatchQueuePacketDrops  int64 // Detail packets lost when the bridge batch queue is full
+	PendingPacketEvictions int64 // Detail packets evicted from the live pending buffer
+	PacketsDelivered       int64 // Detail packets delivered to the model/list
+	DisplayRetentionRatio  int64 // End-to-end detail retention * 1000 (1000 = 100%)
+	BatchesSent            int64 // Batches successfully queued for TUI
+	BatchesDropped         int64 // Batches dropped due to TUI backpressure
+	QueueDepth             int64 // Current batch queue depth
+	MaxQueueDepth          int64 // Peak queue depth seen
+	SamplingRatio          int64 // Current sampling ratio * 1000 (1000 = 100%)
+	RecentDropRate         int64 // Recent drop rate * 1000 (last 5s, for throttling)
+	Running                int32 // 1 if bridge is running, 0 if stopped
+	CaptureComplete        int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+}
+
+// RetentionRatio returns end-to-end detail retention on a 0..1 scale. The
+// cumulative counts are authoritative; the scaled field is retained so bridge
+// snapshots can publish a precomputed value without floating-point atomics.
+func (bs *BridgeStatistics) RetentionRatio() float64 {
+	if bs == nil {
+		return 1
+	}
+	validIngress := bs.PacketsReceived - bs.InvalidEnvelopes
+	if validIngress <= 0 {
+		return 1
+	}
+	delivered := bs.PacketsDelivered
+	if delivered == 0 && bs.PacketsDisplayed > 0 {
+		delivered = bs.PacketsDisplayed
+	}
+	ratio := float64(delivered) / float64(validIngress)
+	if ratio < 0 {
+		return 0
+	}
+	if ratio > 1 {
+		return 1
+	}
+	return ratio
+}
+
+func (bs *BridgeStatistics) deliveredPackets() int64 {
+	if bs.PacketsDelivered == 0 && bs.PacketsDisplayed > 0 {
+		return bs.PacketsDisplayed
+	}
+	return bs.PacketsDelivered
 }
 
 // StatisticsView displays statistics
@@ -1695,16 +1733,22 @@ func (s *StatisticsView) renderHealthSubView() string {
 		result.WriteString(titleStyle.Render("🌉 Bridge Performance"))
 		result.WriteString("\n\n")
 
-		// Packets received vs displayed
+		// Exact ingress vs detail-feed delivery and loss stages.
 		result.WriteString(labelStyle.Render("Packets Received:   "))
 		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsReceived)))
 		result.WriteString("\n")
-		result.WriteString(labelStyle.Render("Packets Displayed:  "))
-		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsDisplayed)))
-		if s.bridgeStats.PacketsReceived > 0 {
-			displayPct := float64(s.bridgeStats.PacketsDisplayed) / float64(s.bridgeStats.PacketsReceived) * 100
-			result.WriteString(valueStyle.Render(fmt.Sprintf(" (%.1f%%)", displayPct)))
-		}
+		result.WriteString(labelStyle.Render("Packets Delivered:  "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d (%.1f%% retained)",
+			s.bridgeStats.deliveredPackets(), s.bridgeStats.RetentionRatio()*100)))
+		result.WriteString("\n")
+		result.WriteString(labelStyle.Render("Sampled Out:        "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsSampledOut)))
+		result.WriteString("\n")
+		result.WriteString(labelStyle.Render("Batch Queue Drops:  "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.BatchQueuePacketDrops)))
+		result.WriteString("\n")
+		result.WriteString(labelStyle.Render("Pending Evictions:  "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PendingPacketEvictions)))
 		result.WriteString("\n")
 
 		// Sampling ratio
@@ -2709,14 +2753,15 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 		// Bridge header
 		rightLines = append(rightLines, titleStyle.Render("🌉 Bridge"))
 
-		// Packets Displayed
-		displayedLine := labelStyle.Render("Displayed: ") +
-			valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsDisplayed))
-		if s.bridgeStats.PacketsReceived > 0 {
-			displayPct := float64(s.bridgeStats.PacketsDisplayed) / float64(s.bridgeStats.PacketsReceived) * 100
-			displayedLine += valueStyle.Render(fmt.Sprintf(" (%.0f%%)", displayPct))
-		}
+		// Detail feed retention is packet-based and includes every local shedding stage.
+		displayedLine := labelStyle.Render("Retained:  ") +
+			valueStyle.Render(fmt.Sprintf("%d (%.0f%%)", s.bridgeStats.deliveredPackets(), s.bridgeStats.RetentionRatio()*100))
 		rightLines = append(rightLines, displayedLine)
+		displayLoss := s.bridgeStats.PacketsSampledOut + s.bridgeStats.BatchQueuePacketDrops + s.bridgeStats.PendingPacketEvictions
+		if displayLoss > 0 {
+			rightLines = append(rightLines, labelStyle.Render("Detail loss: ")+
+				valueStyle.Render(fmt.Sprintf("%d packets", displayLoss)))
+		}
 
 		// Sampling Ratio
 		samplingPct := float64(s.bridgeStats.SamplingRatio) / 10.0

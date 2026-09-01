@@ -19,50 +19,60 @@ import (
 // conditionals.
 type displaySamplingPolicy struct {
 	preserveAll     bool
-	recent          *timeRingBuffer
 	lastRateCheck   time.Time
 	ratio           float64
-	lastUpdateCount int64
+	lastPacketCount int64
+	selectionCredit float64
 }
 
-func newDisplaySamplingPolicy(preserveAll bool) *displaySamplingPolicy {
-	return &displaySamplingPolicy{preserveAll: preserveAll, recent: newTimeRingBuffer(25000), lastRateCheck: time.Now(), ratio: 1}
+func newDisplaySamplingPolicy(preserveAll bool, now ...time.Time) *displaySamplingPolicy {
+	started := time.Now()
+	if len(now) > 0 {
+		started = now[0]
+	}
+	return &displaySamplingPolicy{preserveAll: preserveAll, lastRateCheck: started, ratio: 1}
 }
 
-func (p *displaySamplingPolicy) shouldDisplay(env *pipeline.PacketEnvelope, packetCount, displayedCount int64, pending int) bool {
+func (p *displaySamplingPolicy) shouldDisplay(env *pipeline.PacketEnvelope, packetCount int64, now time.Time) bool {
 	if p.preserveAll || env.Source.Kind == pipeline.SourcePCAPReplay {
 		return true
 	}
-	if packetCount-p.lastUpdateCount >= 1000 {
-		now := time.Now()
-		p.recent.push(now)
-		if now.Sub(p.lastRateCheck) > constants.TUITickInterval {
-			p.recent.trimBefore(now.Add(-2 * time.Second))
-			p.lastRateCheck = now
-		}
-		p.ratio = p.currentRatio(now)
-		p.lastUpdateCount = packetCount
+	if elapsed := now.Sub(p.lastRateCheck); elapsed >= constants.TUITickInterval {
+		packetDelta := packetCount - p.lastPacketCount
+		p.ratio = samplingRatio(packetDelta, elapsed)
+		p.lastRateCheck = now
+		p.lastPacketCount = packetCount
+		atomic.StoreInt64(&bridgeStats.SamplingRatio, int64(p.ratio*1000))
 	}
 	if isSIPPacket(env.Packet()) {
 		return true
 	}
-	return p.ratio >= 1 || float64(packetCount)*p.ratio >= float64(displayedCount+int64(pending)+1)
+	if p.ratio >= 1 {
+		return true
+	}
+	p.selectionCredit += p.ratio
+	if p.selectionCredit < 1 {
+		return false
+	}
+	p.selectionCredit--
+	return true
 }
 
-func (p *displaySamplingPolicy) currentRatio(now time.Time) float64 {
-	count := p.recent.len()
-	if count < 10 || now.Sub(p.recent.oldest()).Seconds() < 0.1 {
-		atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000)
+// samplingRatio defines a detail-display budget independent of ingress. Exact
+// ingress statistics are collected before this policy runs. The minimum keeps a
+// small diagnostic sample visible even during extreme overload.
+func samplingRatio(packetDelta int64, elapsed time.Duration) float64 {
+	if packetDelta <= 0 || elapsed <= 0 {
 		return 1
 	}
-	rate := float64(count) / now.Sub(p.recent.oldest()).Seconds()
-	ratio := 1000 / rate
+	const detailDisplayBudgetPPS = 1000.0
+	rate := float64(packetDelta) / elapsed.Seconds()
+	ratio := detailDisplayBudgetPPS / rate
 	if ratio > 1 {
 		ratio = 1
 	} else if ratio < 0.01 {
 		ratio = 0.01
 	}
-	atomic.StoreInt64(&bridgeStats.SamplingRatio, int64(ratio*1000))
 	return ratio
 }
 

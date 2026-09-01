@@ -213,6 +213,8 @@ named local stages. New protobuf fields must be additive and use new field numbe
       the bridge consumer and is preserved through resume.
 - [x] Label exact live ingress protocol totals as L3/L4 classification while
       retaining the enriched protocol label for offline and remote detail paths.
+- [x] Resume a paused bridge before synchronous capture shutdown so restart and
+      exit cannot deadlock while waiting for the capture goroutine.
 
 ## Phase 2: TCP Discontinuity Preservation and SIP Parser Recovery
 

@@ -1869,6 +1869,33 @@ func TestGetHunterStatus_GRPCHandler(t *testing.T) {
 			expectHunters: 1,
 		},
 		{
+			name: "heartbeat loss counters propagated to status",
+			setupHunters: func(p *Processor) {
+				_, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
+					HunterId: "hunter-loss",
+					Hostname: "host-loss",
+				})
+				require.NoError(t, err)
+				p.hunterManager.UpdateHeartbeat("hunter-loss", time.Now().UnixNano(), management.HunterStatus_STATUS_HEALTHY, &management.HunterStats{
+					PacketsDropped:            9,
+					CaptureBufferRegularDrops: 4,
+					CaptureBufferSipDrops:     2,
+					BatchChannelDrops:         3,
+				})
+			},
+			request: &management.StatusRequest{HunterId: "hunter-loss"},
+			validateResp: func(t *testing.T, resp *management.StatusResponse) {
+				require.Len(t, resp.Hunters, 1)
+				stats := resp.Hunters[0].Stats
+				require.NotNil(t, stats)
+				assert.Equal(t, uint64(9), stats.PacketsDropped)
+				assert.Equal(t, uint64(4), stats.CaptureBufferRegularDrops)
+				assert.Equal(t, uint64(2), stats.CaptureBufferSipDrops)
+				assert.Equal(t, uint64(3), stats.BatchChannelDrops)
+			},
+			expectHunters: 1,
+		},
+		{
 			name: "multiple hunters connected",
 			setupHunters: func(p *Processor) {
 				ctx := context.Background()

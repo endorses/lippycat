@@ -442,6 +442,10 @@ func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 					hunters[i].Status = hunter.Status
 					hunters[i].PacketsCaptured = hunter.PacketsCaptured
 					hunters[i].PacketsForwarded = hunter.PacketsForwarded
+					hunters[i].PacketsDropped = hunter.PacketsDropped
+					hunters[i].CaptureBufferRegularDrops = hunter.CaptureBufferRegularDrops
+					hunters[i].CaptureBufferSIPDrops = hunter.CaptureBufferSIPDrops
+					hunters[i].BatchChannelDrops = hunter.BatchChannelDrops
 					hunters[i].ActiveFilters = hunter.ActiveFilters
 					hunters[i].CPUPercent = hunter.CPUPercent
 					hunters[i].MemoryRSSBytes = hunter.MemoryRSSBytes

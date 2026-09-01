@@ -124,6 +124,10 @@ named local stages. New protobuf fields must be additive and use new field numbe
       TUI system-health input instead of exposing them only through diagnostics.
 - [x] Count local packets as forwarded only after normalization succeeds and the
       packet can be admitted to a batch.
+- [x] Preserve and render named regular-lane and SIP-lane capture-buffer drops in
+      the local TUI health path.
+- [x] Correct the heartbeat schema to describe cumulative capture-session
+      snapshots and add the missing Phase 0 wire/status round-trip coverage.
 
 ## Phase 1: Live TUI Statistics and Display Backpressure
 

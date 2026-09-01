@@ -115,6 +115,16 @@ named local stages. New protobuf fields must be additive and use new field numbe
 - [x] Named counters are monotonic during a capture session and reconcile with the
       documented aggregate semantics.
 
+### Phase 0 Verification (2026-09-01)
+
+- [x] Make reassembly limit snapshots consistent while packet assembly is active.
+- [x] Reset SIP stream loss and recovery counters when a new local TUI capture
+      session starts.
+- [x] Include reassembly, post-reassembly, parser, and recovery failures in the
+      TUI system-health input instead of exposing them only through diagnostics.
+- [x] Count local packets as forwarded only after normalization succeeds and the
+      packet can be admitted to a batch.
+
 ## Phase 1: Live TUI Statistics and Display Backpressure
 
 ### Implementation

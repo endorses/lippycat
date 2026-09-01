@@ -141,6 +141,8 @@ func (a *TCPAssembler) BufferedPageLimits() (perConnection, total int) {
 // LimitStats returns observable bounded-retention releases. Gopacket does not
 // expose whether the per-connection or global page bound caused a release.
 func (a *TCPAssembler) LimitStats() ReassemblyLimitSnapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return ReassemblyLimitSnapshot{
 		BufferedPageLimitReleases:    a.stats.BufferedPageLimitReleases.Load(),
 		MissingSequenceBytes:         a.stats.MissingSequenceBytes.Load(),

@@ -692,9 +692,6 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				}
 			}
 
-			// Update stats
-			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
-
 			// Add to batch
 			envelope, err := s.normalizeLocalPacket(pbPkt)
 			if err != nil {
@@ -705,6 +702,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				}
 				continue
 			}
+			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 			s.batchMu.Lock()
 			s.currentBatch = append(s.currentBatch, envelope)
 			if injectedPkt.AfterProcess != nil {
@@ -858,9 +856,6 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				pbPkt.MatchedFilterIds = matchedFilterIDs
 			}
 
-			// Update stats for packets that passed filtering
-			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
-
 			// Add to batch
 			envelope, err := s.normalizeLocalPacket(pbPkt)
 			if err != nil {
@@ -868,6 +863,8 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				logger.Error("Failed to normalize local packet", "error", err)
 				continue
 			}
+			// A packet is forwarded only after it can be admitted to a batch.
+			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 			s.batchMu.Lock()
 			s.currentBatch = append(s.currentBatch, envelope)
 			batchLen := len(s.currentBatch)

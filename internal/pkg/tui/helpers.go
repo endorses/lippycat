@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 )
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
@@ -68,23 +69,30 @@ func (m *Model) updateStatistics(pkt components.PacketDisplay) {
 // updateBridgeStats updates the bridge statistics in the statistics view
 func (m *Model) updateBridgeStats() {
 	stats := GetBridgeStats()
+	tcpStats := voip.GetTCPStreamMetrics()
 	m.uiState.StatisticsView.SetBridgeStats(&components.BridgeStatistics{
-		PacketsReceived:        stats.PacketsReceived,
-		PacketsDisplayed:       stats.PacketsDisplayed,
-		InvalidEnvelopes:       stats.InvalidEnvelopes,
-		PacketsSampledOut:      stats.PacketsSampledOut,
-		BatchQueuePacketDrops:  stats.BatchQueuePacketDrops,
-		PendingPacketEvictions: stats.PendingPacketEvictions,
-		PacketsDelivered:       stats.PacketsDelivered,
-		DisplayRetentionRatio:  stats.DisplayRetentionRatio,
-		BatchesSent:            stats.BatchesSent,
-		BatchesDropped:         stats.BatchesDropped,
-		QueueDepth:             stats.QueueDepth,
-		MaxQueueDepth:          stats.MaxQueueDepth,
-		SamplingRatio:          stats.SamplingRatio,
-		RecentDropRate:         stats.RecentDropRate,
-		Running:                stats.Running,
-		CaptureComplete:        stats.CaptureComplete,
+		PacketsReceived:              stats.PacketsReceived,
+		PacketsDisplayed:             stats.PacketsDisplayed,
+		InvalidEnvelopes:             stats.InvalidEnvelopes,
+		PacketsSampledOut:            stats.PacketsSampledOut,
+		BatchQueuePacketDrops:        stats.BatchQueuePacketDrops,
+		PendingPacketEvictions:       stats.PendingPacketEvictions,
+		PacketsDelivered:             stats.PacketsDelivered,
+		DisplayRetentionRatio:        stats.DisplayRetentionRatio,
+		BatchesSent:                  stats.BatchesSent,
+		BatchesDropped:               stats.BatchesDropped,
+		QueueDepth:                   stats.QueueDepth,
+		MaxQueueDepth:                stats.MaxQueueDepth,
+		SamplingRatio:                stats.SamplingRatio,
+		RecentDropRate:               stats.RecentDropRate,
+		Running:                      stats.Running,
+		CaptureComplete:              stats.CaptureComplete,
+		ReassemblyDiscontinuities:    stats.ReassemblyNormalDiscontinuities + stats.ReassemblyExplicitFlushDiscontinuities,
+		ReassemblyMissingBytes:       stats.ReassemblyNormalMissingBytes + stats.ReassemblyExplicitFlushMissingBytes,
+		PostReassemblyDroppedChunks:  tcpStats.PostReassemblyDroppedChunks,
+		PostReassemblyDroppedBytes:   tcpStats.PostReassemblyDroppedBytes,
+		ParserFramingDiscontinuities: tcpStats.ParserFramingDiscontinuities,
+		RecoveryFailures:             tcpStats.RecoveryFailures,
 	})
 }
 

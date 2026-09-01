@@ -71,6 +71,33 @@ var tcpStreamMetrics = &tcpStreamMetricsInternal{
 	lastMetricsUpdate: time.Now(),
 }
 
+// ResetTCPStreamMetrics starts a new capture-session accounting interval.
+// It must only be called after the prior capture pipeline has stopped.
+func ResetTCPStreamMetrics() {
+	tcpStreamMetrics.mu.Lock()
+	defer tcpStreamMetrics.mu.Unlock()
+	tcpStreamMetrics.activeStreams = 0
+	tcpStreamMetrics.totalStreamsCreated = 0
+	tcpStreamMetrics.totalStreamsCompleted = 0
+	tcpStreamMetrics.totalStreamsFailed = 0
+	tcpStreamMetrics.queuedStreams = 0
+	tcpStreamMetrics.droppedStreams = 0
+	tcpStreamMetrics.streamsRejectedNonSIP = 0
+	tcpStreamMetrics.streamsTimedOut = 0
+	tcpStreamMetrics.sipMessagesDetected = 0
+	tcpStreamMetrics.reassembledCalls = 0
+	tcpStreamMetrics.reassembledWithData = 0
+	tcpStreamMetrics.reassembledEmptyData = 0
+	tcpStreamMetrics.reassembledDataDropped = 0
+	tcpStreamMetrics.postReassemblyDroppedBytes = 0
+	tcpStreamMetrics.streamDiscontinuities = 0
+	tcpStreamMetrics.missingSequenceBytes = 0
+	tcpStreamMetrics.parserFramingDiscontinuities = 0
+	tcpStreamMetrics.recoverySuccesses = 0
+	tcpStreamMetrics.recoveryFailures = 0
+	tcpStreamMetrics.lastMetricsUpdate = time.Now()
+}
+
 // GetTCPStreamMetrics returns current TCP stream metrics
 func GetTCPStreamMetrics() TCPStreamMetrics {
 	tcpStreamMetrics.mu.RLock()
@@ -144,7 +171,7 @@ func IncrementReassembledDataDropped() {
 }
 
 // RecordPostReassemblyDrop records one whole chunk rejected by the bounded
-// stream queue. Counters are cumulative for the process lifetime.
+// stream queue. Counters are cumulative for the current capture session.
 func RecordPostReassemblyDrop(bytes int) {
 	atomic.AddInt64(&tcpStreamMetrics.reassembledDataDropped, 1)
 	atomic.AddInt64(&tcpStreamMetrics.postReassemblyDroppedBytes, int64(bytes))

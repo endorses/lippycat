@@ -493,12 +493,28 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	}
 }
 
-// MatchPacket checks if a packet matches any of the filters
+type packetMatchScope uint8
+
+const (
+	packetMatchFull packetMatchScope = iota
+	// packetMatchMedia contains only filter families explicitly safe for RTP/RTCP.
+	// Future media-applicable filter types must opt in to this scope.
+	packetMatchMedia
+)
+
+// MatchPacket checks if a packet matches any of the filters.
 func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
+	matched, _ := af.matchPacket(packet, packetMatchFull, false)
+	return matched
+}
+
+func (af *ApplicationFilter) matchPacket(packet gopacket.Packet, scope packetMatchScope, collectIDs bool) (bool, []string) {
 	af.mu.RLock()
 	defer af.mu.RUnlock()
+	return af.matchPacketLocked(packet, scope, collectIDs)
+}
 
-	// Check if we have any filters at all
+func (af *ApplicationFilter) matchPacketLocked(packet gopacket.Packet, scope packetMatchScope, collectIDs bool) (bool, []string) {
 	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
 	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
 	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
@@ -509,45 +525,53 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 
 	// If no filters, use the no-filter policy
 	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters && !hasIMSIFilters && !hasIMEIFilters {
-		return af.noFilterPolicy == NoFilterPolicyAllow
+		return af.noFilterPolicy == NoFilterPolicyAllow, nil
 	}
 
-	// Check IP addresses first (applies to all protocols)
+	var matchedFilterIDs []string
 	if hasIPFilters {
-		if af.matchIPAddressBool(packet) {
-			return true
-		}
-		// If we have ONLY IP filters (no other protocol filters), no match
-		if !hasVoIPFilters && !hasDNSFilters && !hasTLSFilters {
-			return false
+		if collectIDs {
+			matchedFilterIDs = append(matchedFilterIDs, af.matchIPAddress(packet)...)
+		} else if af.matchIPAddressBool(packet) {
+			return true, nil
 		}
 	}
+	if scope == packetMatchMedia {
+		return len(matchedFilterIDs) > 0, matchedFilterIDs
+	}
 
-	// Check DNS packets
 	if hasDNSFilters {
-		if matched, _ := af.matchDNSPacket(packet); matched {
-			return true
+		if matched, ids := af.matchDNSPacket(packet); matched {
+			if !collectIDs {
+				return true, nil
+			}
+			matchedFilterIDs = append(matchedFilterIDs, ids...)
 		}
 	}
 
 	// Check email packets
 	if hasEmailFilters {
-		if matched, _ := af.matchEmailPacket(packet); matched {
-			return true
+		if matched, ids := af.matchEmailPacket(packet); matched {
+			if !collectIDs {
+				return true, nil
+			}
+			matchedFilterIDs = append(matchedFilterIDs, ids...)
 		}
 	}
 
 	// Check TLS packets
 	if hasTLSFilters {
-		if matched, _ := af.matchTLSPacket(packet); matched {
-			return true
+		if matched, ids := af.matchTLSPacket(packet); matched {
+			if !collectIDs {
+				return true, nil
+			}
+			matchedFilterIDs = append(matchedFilterIDs, ids...)
 		}
 	}
 
 	// Check VoIP packets (including IMSI/IMEI which are in SIP headers)
 	if hasVoIPFilters || hasIMSIFilters || hasIMEIFilters {
-		// Check if this is a SIP or RTP packet
-		if af.isVoIPPacket(packet) {
+		if af.isSIPPacket(packet) {
 			// Get payload - use LayerContents() to get full message including headers
 			// Payload() only returns the body (e.g., SDP for SIP), missing critical info
 			appLayer := packet.ApplicationLayer()
@@ -556,105 +580,43 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 
 				// Check IMSI/IMEI first (separate from other VoIP filters)
 				if hasIMSIFilters || hasIMEIFilters {
-					if af.matchIMSIIMEI(payload) {
-						return true
+					if collectIDs {
+						matchedFilterIDs = append(matchedFilterIDs, af.matchIMSIIMEIWithIDs(payload)...)
+					} else if af.matchIMSIIMEI(payload) {
+						return true, nil
 					}
 				}
 
 				// Check other VoIP filters
 				if hasVoIPFilters {
 					// Use GPU if enabled and at least one GPU automaton is built
-					if af.enabled && af.gpuAccel != nil && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
-						return af.matchWithGPU([]byte(payload))
+					if collectIDs {
+						matchedFilterIDs = append(matchedFilterIDs, af.matchWithCPUAndReturnIDs(payload)...)
+					} else if af.enabled && af.gpuAccel != nil && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
+						return af.matchWithGPU([]byte(payload)), nil
+					} else {
+						return af.matchWithCPU(string(payload)), nil
 					}
-
-					// CPU fallback
-					return af.matchWithCPU(string(payload))
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-// MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
-// This method is used for LI correlation - it returns which specific filters matched
-// so the LI Manager can look up the corresponding intercept task XIDs.
-func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, []string) {
-	af.mu.RLock()
-	defer af.mu.RUnlock()
-
-	var matchedFilterIDs []string
-
-	// Check if we have any filters at all
-	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
-	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
-	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
-	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
-	hasIMSIFilters := len(af.imsiFilters) > 0
-	hasIMEIFilters := len(af.imeiFilters) > 0
-	hasIPFilters := len(af.ipAddresses) > 0
-
-	// If no filters, use the no-filter policy (but no specific filter IDs)
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters && !hasIMSIFilters && !hasIMEIFilters {
-		return af.noFilterPolicy == NoFilterPolicyAllow, nil
-	}
-
-	// Check IP addresses first (applies to all protocols)
-	if hasIPFilters {
-		ipFilterIDs := af.matchIPAddress(packet)
-		if len(ipFilterIDs) > 0 {
-			matchedFilterIDs = append(matchedFilterIDs, ipFilterIDs...)
-		}
-	}
-
-	// Check DNS packets
-	if hasDNSFilters {
-		if matched, dnsFilterIDs := af.matchDNSPacket(packet); matched {
-			matchedFilterIDs = append(matchedFilterIDs, dnsFilterIDs...)
-		}
-	}
-
-	// Check email packets
-	if hasEmailFilters {
-		if matched, emailFilterIDs := af.matchEmailPacket(packet); matched {
-			matchedFilterIDs = append(matchedFilterIDs, emailFilterIDs...)
-		}
-	}
-
-	// Check TLS packets
-	if hasTLSFilters {
-		if matched, tlsFilterIDs := af.matchTLSPacket(packet); matched {
-			matchedFilterIDs = append(matchedFilterIDs, tlsFilterIDs...)
-		}
-	}
-
-	// Check VoIP packets (including IMSI/IMEI)
-	if hasVoIPFilters || hasIMSIFilters || hasIMEIFilters {
-		// Check if this is a SIP or RTP packet
-		if af.isVoIPPacket(packet) {
-			// Get payload - use LayerContents() to get full message including headers
-			appLayer := packet.ApplicationLayer()
-			if appLayer != nil {
-				payload := appLayer.LayerContents()
-
-				// Match IMSI/IMEI filters and collect filter IDs
-				if hasIMSIFilters || hasIMEIFilters {
-					imsiImeiFilterIDs := af.matchIMSIIMEIWithIDs(payload)
-					matchedFilterIDs = append(matchedFilterIDs, imsiImeiFilterIDs...)
-				}
-
-				// Match other VoIP filters and collect filter IDs
-				if hasVoIPFilters {
-					voipFilterIDs := af.matchWithCPUAndReturnIDs(payload)
-					matchedFilterIDs = append(matchedFilterIDs, voipFilterIDs...)
 				}
 			}
 		}
 	}
 
 	return len(matchedFilterIDs) > 0, matchedFilterIDs
+}
+
+// MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
+// This method is used for LI correlation - it returns which specific filters matched
+// so the LI Manager can look up the corresponding intercept task XIDs.
+func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, []string) {
+	return af.matchPacket(packet, packetMatchFull, true)
+}
+
+// MatchPacketLevelWithIDs evaluates only packet-level filters safe for
+// classified media. Currently that is IP filtering plus the global no-filter
+// policy; application payload and identity matchers are excluded.
+func (af *ApplicationFilter) MatchPacketLevelWithIDs(packet gopacket.Packet) (bool, []string) {
+	return af.matchPacket(packet, packetMatchMedia, true)
 }
 
 // matchWithCPUAndReturnIDs uses CPU matching and returns matched filter IDs.
@@ -756,7 +718,7 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	voipIndices := make([]int, 0, len(packets))
 
 	for i, packet := range packets {
-		if af.isVoIPPacket(packet) {
+		if af.isSIPPacket(packet) {
 			if appLayer := packet.ApplicationLayer(); appLayer != nil {
 				// Use LayerContents() to get full message with headers
 				voipPayloads = append(voipPayloads, appLayer.LayerContents())
@@ -840,7 +802,7 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	// CPU fallback
 	for _, idx := range voipIndices {
 		packet := packets[idx]
-		results[idx] = af.MatchPacket(packet)
+		results[idx], _ = af.matchPacketLocked(packet, packetMatchFull, false)
 	}
 
 	return results
@@ -1269,8 +1231,8 @@ func (af *ApplicationFilter) matchSingleIP(addr netip.Addr) (string, bool) {
 	return "", false
 }
 
-// isVoIPPacket checks if a packet is SIP or RTP using centralized detector
-func (af *ApplicationFilter) isVoIPPacket(packet gopacket.Packet) bool {
+// isSIPPacket gates every route into SIP identity extraction.
+func (af *ApplicationFilter) isSIPPacket(packet gopacket.Packet) bool {
 	// Use centralized detector for accurate protocol detection
 	// This replaces unreliable port-based heuristics
 	result := af.detector.Detect(packet)
@@ -1278,13 +1240,7 @@ func (af *ApplicationFilter) isVoIPPacket(packet gopacket.Packet) bool {
 		return false
 	}
 
-	// Check if detected protocol is VoIP-related
-	switch result.Protocol {
-	case "SIP", "RTP", "RTCP":
-		return true
-	default:
-		return false
-	}
+	return result.Protocol == "SIP"
 }
 
 // matchDNSPacket checks if a packet is DNS and matches domain filters.

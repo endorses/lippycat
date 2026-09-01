@@ -70,6 +70,10 @@ func (f *inviteOnlyFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, []s
 	return false, nil
 }
 
+func (f *inviteOnlyFilter) MatchPacketLevelWithIDs(packet gopacket.Packet) (bool, []string) {
+	return f.MatchPacketWithIDs(packet)
+}
+
 func buildUDPSIPPacket(t *testing.T, payload string) capture.PacketInfo {
 	t.Helper()
 	return buildUDPPacket(t, 5060, payload)

@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 )
 
 // handleRestartCaptureMsg handles restarting capture with new settings
@@ -132,6 +133,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 
 	// Reset bridge state (clears stale data from previous capture mode)
 	ResetBridgeStats()
+	voip.ResetTCPStreamMetrics()
 	ClearPendingPackets()
 
 	// Start new capture in background using synchronized program reference

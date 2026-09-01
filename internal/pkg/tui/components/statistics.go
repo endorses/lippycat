@@ -188,22 +188,28 @@ type Statistics struct {
 // These stats help identify backpressure issues where the TUI can't keep up
 // with packet ingestion rate.
 type BridgeStatistics struct {
-	PacketsReceived        int64 // Total packets received from capture
-	PacketsDisplayed       int64 // Deprecated compatibility alias for PacketsDelivered
-	InvalidEnvelopes       int64 // Invalid envelopes rejected before ingress acceptance
-	PacketsSampledOut      int64 // Valid ingress packets omitted from the detail feed
-	BatchQueuePacketDrops  int64 // Detail packets lost when the bridge batch queue is full
-	PendingPacketEvictions int64 // Detail packets evicted from the live pending buffer
-	PacketsDelivered       int64 // Detail packets delivered to the model/list
-	DisplayRetentionRatio  int64 // End-to-end detail retention * 1000 (1000 = 100%)
-	BatchesSent            int64 // Batches successfully queued for TUI
-	BatchesDropped         int64 // Batches dropped due to TUI backpressure
-	QueueDepth             int64 // Current batch queue depth
-	MaxQueueDepth          int64 // Peak queue depth seen
-	SamplingRatio          int64 // Current sampling ratio * 1000 (1000 = 100%)
-	RecentDropRate         int64 // Recent drop rate * 1000 (last 5s, for throttling)
-	Running                int32 // 1 if bridge is running, 0 if stopped
-	CaptureComplete        int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+	PacketsReceived              int64 // Total packets received from capture
+	PacketsDisplayed             int64 // Deprecated compatibility alias for PacketsDelivered
+	InvalidEnvelopes             int64 // Invalid envelopes rejected before ingress acceptance
+	PacketsSampledOut            int64 // Valid ingress packets omitted from the detail feed
+	BatchQueuePacketDrops        int64 // Detail packets lost when the bridge batch queue is full
+	PendingPacketEvictions       int64 // Detail packets evicted from the live pending buffer
+	PacketsDelivered             int64 // Detail packets delivered to the model/list
+	DisplayRetentionRatio        int64 // End-to-end detail retention * 1000 (1000 = 100%)
+	BatchesSent                  int64 // Batches successfully queued for TUI
+	BatchesDropped               int64 // Batches dropped due to TUI backpressure
+	QueueDepth                   int64 // Current batch queue depth
+	MaxQueueDepth                int64 // Peak queue depth seen
+	SamplingRatio                int64 // Current sampling ratio * 1000 (1000 = 100%)
+	RecentDropRate               int64 // Recent drop rate * 1000 (last 5s, for throttling)
+	Running                      int32 // 1 if bridge is running, 0 if stopped
+	CaptureComplete              int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+	ReassemblyDiscontinuities    int64
+	ReassemblyMissingBytes       int64
+	PostReassemblyDroppedChunks  int64
+	PostReassemblyDroppedBytes   int64
+	ParserFramingDiscontinuities int64
+	RecoveryFailures             int64
 }
 
 // RetentionRatio returns end-to-end detail retention on a 0..1 scale. The
@@ -2646,6 +2652,13 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 			Label string
 			Level HealthLevel
 		}{"Throttle", throttleLevel})
+		if s.bridgeStats.ReassemblyDiscontinuities > 0 || s.bridgeStats.PostReassemblyDroppedChunks > 0 ||
+			s.bridgeStats.ParserFramingDiscontinuities > 0 || s.bridgeStats.RecoveryFailures > 0 {
+			items = append(items, struct {
+				Label string
+				Level HealthLevel
+			}{"SIP integrity", HealthCritical})
+		}
 	}
 
 	// Render health indicators
@@ -2720,6 +2733,13 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 			Label string
 			Level HealthLevel
 		}{"Throttle", throttleLevel})
+		if s.bridgeStats.ReassemblyDiscontinuities > 0 || s.bridgeStats.PostReassemblyDroppedChunks > 0 ||
+			s.bridgeStats.ParserFramingDiscontinuities > 0 || s.bridgeStats.RecoveryFailures > 0 {
+			items = append(items, struct {
+				Label string
+				Level HealthLevel
+			}{"SIP integrity", HealthCritical})
+		}
 	}
 
 	// No health data
@@ -2761,6 +2781,18 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 		if displayLoss > 0 {
 			rightLines = append(rightLines, labelStyle.Render("Detail loss: ")+
 				valueStyle.Render(fmt.Sprintf("%d packets", displayLoss)))
+		}
+		if s.bridgeStats.ReassemblyDiscontinuities > 0 {
+			rightLines = append(rightLines, labelStyle.Render("TCP gaps:   ")+
+				valueStyle.Render(fmt.Sprintf("%d (%d bytes)", s.bridgeStats.ReassemblyDiscontinuities, s.bridgeStats.ReassemblyMissingBytes)))
+		}
+		if s.bridgeStats.PostReassemblyDroppedChunks > 0 {
+			rightLines = append(rightLines, labelStyle.Render("SIP queue:  ")+
+				valueStyle.Render(fmt.Sprintf("%d chunks (%d bytes)", s.bridgeStats.PostReassemblyDroppedChunks, s.bridgeStats.PostReassemblyDroppedBytes)))
+		}
+		if s.bridgeStats.ParserFramingDiscontinuities > 0 || s.bridgeStats.RecoveryFailures > 0 {
+			rightLines = append(rightLines, labelStyle.Render("SIP parser: ")+
+				valueStyle.Render(fmt.Sprintf("%d gaps, %d failed recoveries", s.bridgeStats.ParserFramingDiscontinuities, s.bridgeStats.RecoveryFailures)))
 		}
 
 		// Sampling Ratio

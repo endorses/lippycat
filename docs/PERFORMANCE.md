@@ -7,6 +7,7 @@ This document provides comprehensive guidance for optimizing lippycat's performa
 - [TCP Performance Profiles](#tcp-performance-profiles)
 - [GPU Acceleration](#gpu-acceleration)
 - [Pattern Matching Algorithm](#pattern-matching-algorithm)
+- [VoIP Filter Regression Benchmark](#voip-filter-regression-benchmark)
 - [Network Capture Optimization](#network-capture-optimization)
 - [Distributed Mode Performance](#distributed-mode-performance)
 - [Memory Management](#memory-management)
@@ -382,6 +383,72 @@ lc hunt voip --processor processor:55555 \
 - 100K patterns (avg 20 chars) ≈ 2MB automaton
 - Dense state tables add ~1MB per 1K states
 - Total: <100MB for 100K patterns
+
+## VoIP Filter Regression Benchmark
+
+The v0.11.3 validation includes a generated, media-heavy VoIP workload to guard
+against classified RTP being treated as possible SIP. These measurements are
+regression evidence, not a throughput commitment: capture hardware, enabled
+sinks, filter distribution, and traffic shape determine production capacity.
+
+The application-filter microbenchmark was measured before and after the fix on
+the same generic CPU-only environment (Linux/amd64, Go 1.26.3, benchmark
+concurrency 32, 13th-generation Intel Core i9 class CPU):
+
+| Revision | Identity filters | ns/op | B/op | allocs/op |
+|----------|-----------------:|------:|-----:|----------:|
+| Before | 400 | 4,449–4,879 | 2,259 | 52 |
+| After | 500 | 1,536–1,616 | 1,475 | 18 |
+
+The post-fix run deliberately uses the Phase 4 minimum of 500 identity filters,
+so this is a conservative comparison rather than an identical-input
+microbenchmark. It shows that classified media no longer pays the former SIP
+identity-parsing cost even with a larger configured filter set.
+
+The LocalSource benchmark uses a 100-packet generated cycle: three SDP INVITEs,
+92 classified RTP packets, and five SIP OPTIONS requests. The RTP cases include
+selected inherited-only traffic, unselected traffic, and direct IP-filter-only
+traffic. Five repeated one-second runs produced:
+
+| ns/op | packets/s | B/op | allocs/op | LocalSource full calls/op | packet-level calls/op | processor SIP full calls/op |
+|------:|----------:|-----:|----------:|--------------------------:|----------------------:|----------------------------:|
+| 4,295–4,821 | 207,415–232,834 | 2,241 | 35 | 0 | 0.92 | 0.08 |
+
+The benchmark exercises packet classification, VoIP call association, direct
+and inherited selection, local packet conversion and normalization, batching,
+and cleanup callbacks. It excludes capture-device and kernel I/O, live BPF
+installation, downstream processor and subscriber sinks, PCAP/log writing,
+gRPC transport, and TUI rendering. Its timing must therefore not be read as
+whole-node packet capacity.
+
+Run the checks with:
+
+```bash
+go test -tags all ./internal/pkg/hunter \
+  -run '^TestApplicationFilterClassifiedRTPPacketLevelAllocationCeiling$'
+go test -tags all ./internal/pkg/processor/source -run '^$' \
+  -bench '^BenchmarkLocalSourceMixedVoIP$' -benchmem
+```
+
+The structural allocation check requires zero allocations in the classified
+RTP packet-level filter operation. The LocalSource benchmark also asserts the
+matching boundary directly: classified media accounts for exactly 0.92
+packet-level calls per packet and zero LocalSource full-match calls; only the
+eight SIP control packets per cycle enter the processor's full matcher.
+
+A bounded two-second run of this generated workload produced CPU and allocation
+profiles. Inspection of their complete node lists found no
+`hunter.extractSIPHeaders` or hunter identity-matching frames. SIP parser frames
+remain expected because eight percent of the workload is intentional SIP
+control traffic. Generate equivalent temporary profiles without writing capture
+data into the repository:
+
+```bash
+go test -tags all ./internal/pkg/processor/source -run '^$' \
+  -bench '^BenchmarkLocalSourceMixedVoIP$' -benchtime=2s -count=1 \
+  -cpuprofile=/tmp/lippycat-voip-cpu.prof \
+  -memprofile=/tmp/lippycat-voip-mem.prof
+```
 
 ## Network Capture Optimization
 

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.3] - Unreleased
+
+### Fixed
+- Prevent classified RTP and RTCP packets from entering SIP, IMSI, and IMEI identity matching while preserving packet-level IP matches, selected-call inheritance, and downstream filter-ID correlation
+- Reduce SIP header extraction allocations in the local VoIP filtering path
+
 ## [0.11.2] - 2026-08-31
 
 ### Changed

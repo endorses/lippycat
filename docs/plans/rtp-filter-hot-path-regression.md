@@ -1,7 +1,7 @@
 # RTP Filter Hot-Path Regression Fix Plan
 
 **Date:** 2026-09-01
-**Status:** Proposed
+**Status:** Complete
 **Priority:** Release blocker for v0.11.3
 
 ## Overview
@@ -298,52 +298,52 @@ can be reviewed independently.
 
 ### Benchmarks
 
-- [ ] Add a LocalSource-oriented mixed VoIP benchmark with at least 85 percent
+- [x] Add a LocalSource-oriented mixed VoIP benchmark with at least 85 percent
       RTP, at least 500 synthetic identity filters, selected and unselected calls,
       direct packet-level matches, and representative SIP control traffic.
-- [ ] Report `ns/op`, `B/op`, `allocs/op`, packets processed per second, and the
+- [x] Report `ns/op`, `B/op`, `allocs/op`, packets processed per second, and the
       number of full versus packet-level matcher invocations.
-- [ ] Add a structural allocation assertion for the classified RTP filtering
+- [x] Add a structural allocation assertion for the classified RTP filtering
       operation using `testing.AllocsPerRun`; keep timing measurements informative
       rather than brittle CI pass/fail thresholds.
-- [ ] Record before-and-after results on the same generic test environment and
+- [x] Record before-and-after results on the same generic test environment and
       explain which parts of the end-to-end capture pipeline the benchmark does
       and does not exercise.
-- [ ] Capture bounded CPU and allocation profiles using only generated traffic;
+- [x] Capture bounded CPU and allocation profiles using only generated traffic;
       verify that SIP header extraction is absent from classified RTP samples.
 
 ### Validation
 
-- [ ] Run `gofmt` on every changed Go file before staging.
-- [ ] Run targeted tests for `internal/pkg/hunter`,
+- [x] Run `gofmt` on every changed Go file before staging.
+- [x] Run targeted tests for `internal/pkg/hunter`,
       `internal/pkg/processor/source`, and `internal/pkg/voip/processor`.
-- [ ] Run race tests for the filter and local-source packages.
-- [ ] Run the tagged suites relevant to tap, processor, hunter, and LI builds.
-- [ ] Verify tap and processor variants compile and non-LI variants still exclude
+- [x] Run race tests for the filter and local-source packages.
+- [x] Run the tagged suites relevant to tap, processor, hunter, and LI builds.
+- [x] Verify tap and processor variants compile and non-LI variants still exclude
       LI-only code.
-- [ ] Search the final diff for deployment identifiers, customer data,
+- [x] Search the final diff for deployment identifiers, customer data,
       production addresses, and captured identities before staging.
-- [ ] Update operator or release documentation to state that v0.11.3 removes the
+- [x] Update operator or release documentation to state that v0.11.3 removes the
       RTP-to-SIP matcher regression without promising a fixed throughput gain.
 
 ### Acceptance criteria
 
-- [ ] The mixed workload performs full matching only for SIP or a credible
+- [x] The mixed workload performs full matching only for SIP or a credible
       unclassified SIP fallback, never for classified RTP or RTCP.
-- [ ] Classified media filtering meets the recorded allocation ceiling and shows
+- [x] Classified media filtering meets the recorded allocation ceiling and shows
       a material end-to-end improvement over the baseline.
-- [ ] All direct, inherited, union, and no-match filter-ID cases pass under the
+- [x] All direct, inherited, union, and no-match filter-ID cases pass under the
       race detector.
-- [ ] Full tagged validation and specialized builds pass before v0.11.3 is
+- [x] Full tagged validation and specialized builds pass before v0.11.3 is
       released.
 
 ## Recommended Delivery Order
 
 - [x] Phase 0: reproduce the regression and freeze selection semantics.
 - [x] Phase 1: introduce the media-safe matching contract.
-- [ ] Phase 2: route local packets correctly and unify ID composition.
+- [x] Phase 2: route local packets correctly and unify ID composition.
 - [x] Phase 3: optimize real SIP parsing independently.
-- [ ] Phase 4: benchmark, validate, document, and release.
+- [x] Phase 4: benchmark, validate, document, and release.
 
 ## Principal Risks
 

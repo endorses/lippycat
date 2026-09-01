@@ -44,6 +44,7 @@ type ApplicationFilter interface {
 	// MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
 	// Used for LI correlation to map matched filters back to intercept task XIDs.
 	MatchPacketWithIDs(packet gopacket.Packet) (matched bool, filterIDs []string)
+	MatchPacketLevelWithIDs(packet gopacket.Packet) (matched bool, filterIDs []string)
 }
 
 // VoIPProcessor is an alias for voipprocessor.SourceAdapter.

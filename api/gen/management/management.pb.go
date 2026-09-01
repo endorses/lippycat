@@ -893,7 +893,8 @@ type HunterHeartbeat struct {
 	TimestampNs int64 `protobuf:"varint,2,opt,name=timestamp_ns,json=timestampNs,proto3" json:"timestamp_ns,omitempty"`
 	// Current hunter status
 	Status HunterStatus `protobuf:"varint,3,opt,name=status,proto3,enum=lippycat.management.HunterStatus" json:"status,omitempty"`
-	// Statistics since last heartbeat
+	// Cumulative statistics for the current capture session. Receivers must
+	// treat each heartbeat as a snapshot and must not sum reports.
 	Stats         *HunterStats `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

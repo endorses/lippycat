@@ -2772,6 +2772,14 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 
 		// Bridge header
 		rightLines = append(rightLines, titleStyle.Render("🌉 Bridge"))
+		if dropSummary.BufferRegularDrops > 0 {
+			rightLines = append(rightLines, labelStyle.Render("Capture regular: ")+
+				valueStyle.Render(fmt.Sprintf("%d packets", dropSummary.BufferRegularDrops)))
+		}
+		if dropSummary.BufferSIPDrops > 0 {
+			rightLines = append(rightLines, labelStyle.Render("Capture SIP:     ")+
+				valueStyle.Render(fmt.Sprintf("%d packets", dropSummary.BufferSIPDrops)))
+		}
 
 		// Detail feed retention is packet-based and includes every local shedding stage.
 		displayedLine := labelStyle.Render("Retained:  ") +

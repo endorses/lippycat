@@ -559,7 +559,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CaptureTelemetryMsg:
 		stats := m.uiState.StatisticsView.GetDropStats()
 		stats.SetKernelStats(msg.PacketsReceived, msg.KernelDrops+msg.InterfaceDrops)
-		stats.SetBufferDrops(msg.PacketBufferDrops)
+		stats.SetBufferDropStages(msg.PacketBufferRegularDrops, msg.PacketBufferSIPDrops)
 		return m, nil
 	}
 

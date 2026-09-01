@@ -171,7 +171,8 @@ message HunterHeartbeat {
     // Current hunter status
     HunterStatus status = 3;
 
-    // Statistics since last heartbeat
+    // Cumulative statistics for the current capture session. Receivers must
+    // treat each heartbeat as a snapshot and must not sum reports.
     HunterStats stats = 4;
 }
 

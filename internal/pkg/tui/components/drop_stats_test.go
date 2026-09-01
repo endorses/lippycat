@@ -45,6 +45,23 @@ func TestDropStats_BufferDrops(t *testing.T) {
 	assert.Equal(t, int64(20), summary.BufferDrops)
 }
 
+func TestDropStats_BufferDropStagesPreserveNamedCountersAndAggregate(t *testing.T) {
+	ds := NewDropStats()
+	ds.SetBufferDropStages(7, 3)
+
+	summary := ds.GetSummary()
+	assert.Equal(t, int64(7), summary.BufferRegularDrops)
+	assert.Equal(t, int64(3), summary.BufferSIPDrops)
+	assert.Equal(t, int64(10), summary.BufferDrops)
+	assert.Equal(t, int64(10), summary.TotalDrops)
+
+	ds.Reset()
+	summary = ds.GetSummary()
+	assert.Zero(t, summary.BufferRegularDrops)
+	assert.Zero(t, summary.BufferSIPDrops)
+	assert.Zero(t, summary.BufferDrops)
+}
+
 func TestDropStats_QueueDrops(t *testing.T) {
 	ds := NewDropStats()
 	ds.SetTotalPackets(1000)

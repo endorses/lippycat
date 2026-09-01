@@ -17,9 +17,11 @@ type DropStats struct {
 	KernelReceived int64 // For calculating drop rate
 
 	// Application level
-	BufferDrops int64 // PacketBuffer overflow
-	QueueDrops  int64 // TCP assembler queue full
-	FilterDrops int64 // Filtered out (intentional, not counted in total)
+	BufferDrops        int64 // Compatible aggregate of regular and SIP PacketBuffer overflow
+	BufferRegularDrops int64 // Regular-lane PacketBuffer overflow
+	BufferSIPDrops     int64 // Protected SIP-lane PacketBuffer overflow
+	QueueDrops         int64 // TCP assembler queue full
+	FilterDrops        int64 // Filtered out (intentional, not counted in total)
 
 	// Distributed mode
 	HunterDrops  int64 // Aggregated from all hunters
@@ -60,6 +62,16 @@ func (ds *DropStats) SetBufferDrops(count int64) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 	ds.BufferDrops = count
+}
+
+// SetBufferDropStages sets the named PacketBuffer loss stages and maintains the
+// compatible aggregate used by existing health calculations.
+func (ds *DropStats) SetBufferDropStages(regular, sip int64) {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	ds.BufferRegularDrops = regular
+	ds.BufferSIPDrops = sip
+	ds.BufferDrops = regular + sip
 }
 
 // AddQueueDrops adds to the queue drop counter.
@@ -116,6 +128,8 @@ type DropSummary struct {
 	KernelDrops           int64
 	KernelDropRate        float64
 	BufferDrops           int64
+	BufferRegularDrops    int64
+	BufferSIPDrops        int64
 	BufferDropRate        float64
 	QueueDrops            int64
 	QueueDropRate         float64
@@ -151,6 +165,8 @@ func (ds *DropStats) GetSummary() DropSummary {
 	summary := DropSummary{
 		KernelDrops:           ds.KernelDrops,
 		BufferDrops:           ds.BufferDrops,
+		BufferRegularDrops:    ds.BufferRegularDrops,
+		BufferSIPDrops:        ds.BufferSIPDrops,
 		QueueDrops:            ds.QueueDrops,
 		HunterDrops:           ds.HunterDrops,
 		NetworkDrops:          ds.NetworkDrops,
@@ -200,6 +216,8 @@ func (ds *DropStats) Reset() {
 	ds.KernelDrops = 0
 	ds.KernelReceived = 0
 	ds.BufferDrops = 0
+	ds.BufferRegularDrops = 0
+	ds.BufferSIPDrops = 0
 	ds.QueueDrops = 0
 	ds.FilterDrops = 0
 	ds.HunterDrops = 0

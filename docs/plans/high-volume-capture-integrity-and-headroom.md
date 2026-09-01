@@ -215,6 +215,8 @@ named local stages. New protobuf fields must be additive and use new field numbe
       retaining the enriched protocol label for offline and remote detail paths.
 - [x] Resume a paused bridge before synchronous capture shutdown so restart and
       exit cannot deadlock while waiting for the capture goroutine.
+- [x] Propagate bridge counters into the statistics view's drop-health aggregator
+      so summaries and exports use current display-loss and retention values.
 
 ## Phase 2: TCP Discontinuity Preservation and SIP Parser Recovery
 

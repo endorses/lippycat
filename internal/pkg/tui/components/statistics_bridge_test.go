@@ -48,6 +48,24 @@ func TestHealthRenderingShowsPacketLevelDisplayLoss(t *testing.T) {
 	}
 }
 
+func TestSetBridgeStatsUpdatesDropHealthSummary(t *testing.T) {
+	view := NewStatisticsView()
+	view.SetBridgeStats(&BridgeStatistics{
+		PacketsReceived:        1000,
+		PacketsSampledOut:      200,
+		BatchQueuePacketDrops:  75,
+		PendingPacketEvictions: 25,
+		DisplayRetentionRatio:  700,
+	})
+
+	summary := view.GetDropSummary()
+	assert.Equal(t, int64(1000), view.GetDropStats().TotalPackets)
+	assert.Equal(t, int64(200), summary.SampledOutPackets)
+	assert.Equal(t, int64(75), summary.BatchQueuePacketDrops)
+	assert.Equal(t, int64(25), summary.PendingEvictions)
+	assert.Equal(t, 70.0, summary.DisplayRetentionRate)
+}
+
 func TestLiveIngressLabelsExactProtocolClassification(t *testing.T) {
 	view := NewStatisticsView()
 	assert.Equal(t, "🔌 Protocol Distribution", view.protocolDistributionTitle())

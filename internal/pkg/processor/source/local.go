@@ -824,6 +824,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			dnsProc := s.dnsProcessor
 			selectionPolicy := s.selectionPolicy
 			s.mu.Unlock()
+			filterConfigured := filter != nil
 
 			// Convert to protobuf format first
 			pbPkt := convertPacketInfo(pktInfo)
@@ -865,7 +866,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			// Special case: RTP packets that don't directly match can pass if their
 			// CallID is in the callFilterCache (associated with a matched SIP call).
 			var matchedFilterIDs []string
-			if filter != nil && !isVoIPPacket {
+			if filterConfigured && !isVoIPPacket {
 				// Non-VoIP: filter decides pass/drop
 				matched, filterIDs := reuseMatched, reuseIDs
 				if !reuseVerdict {
@@ -875,7 +876,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					continue
 				}
 				matchedFilterIDs = filterIDs
-			} else if filter != nil && isVoIPPacket {
+			} else if filterConfigured && isVoIPPacket {
 				// Classified media is restricted to packet-level filters. SIP can
 				// reuse the processor verdict; conservative start-line recognition
 				// handles VoIP results lacking protocol metadata.
@@ -899,7 +900,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				}
 				inheritedFilterIDs := s.cachedFilterIDsForCalls(voipCallIDs)
 				selected := selectionPolicy.Select(callregistry.SelectionInput{
-					FilterConfigured:   true,
+					FilterConfigured:   filterConfigured,
 					DirectMatch:        matched,
 					PreviouslySelected: len(inheritedFilterIDs) > 0,
 				})

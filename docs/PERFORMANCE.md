@@ -410,9 +410,9 @@ The LocalSource benchmark uses a 100-packet generated cycle: three SDP INVITEs,
 selected inherited-only traffic, unselected traffic, and direct IP-filter-only
 traffic. Five repeated one-second runs produced:
 
-| ns/op | packets/s | B/op | allocs/op | LocalSource full calls/op | packet-level calls/op | processor SIP full calls/op |
-|------:|----------:|-----:|----------:|--------------------------:|----------------------:|----------------------------:|
-| 4,295–4,821 | 207,415–232,834 | 2,241 | 35 | 0 | 0.92 | 0.08 |
+| ns/op | packets/s | B/op | allocs/op | LocalSource full calls/op | packet-level calls/op | processor matcher calls/op | processor identity work/op |
+|------:|----------:|-----:|----------:|--------------------------:|----------------------:|---------------------------:|---------------------------:|
+| 3,546–3,927 | 254,678–281,971 | 1,885 | 28 | 0 | 0.92 | 0.08 | 0.08 |
 
 The benchmark exercises packet classification, VoIP call association, direct
 and inherited selection, local packet conversion and normalization, batching,
@@ -433,8 +433,11 @@ go test -tags all ./internal/pkg/processor/source -run '^$' \
 The structural allocation check requires zero allocations in the classified
 RTP packet-level filter operation. The LocalSource benchmark also asserts the
 matching boundary directly: classified media accounts for exactly 0.92
-packet-level calls per packet and zero LocalSource full-match calls; only the
-eight SIP control packets per cycle enter the processor's full matcher.
+packet-level calls per packet and zero LocalSource full-match calls. Associated
+RTP is recognized before SIP filtering, so only the eight SIP control packets
+per cycle enter the processor matcher or perform identity work. Matcher entry
+and identity work are counted separately to prevent a benchmark-side protocol
+gate from concealing calls made by the composed tap path.
 
 A bounded two-second run of this generated workload produced CPU and allocation
 profiles. Inspection of their complete node lists found no

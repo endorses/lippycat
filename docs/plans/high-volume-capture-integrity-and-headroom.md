@@ -483,6 +483,17 @@ named local stages. New protobuf fields must be additive and use new field numbe
 - [x] Commit the implementation, generated code, documentation, benchmark summary,
       and this completed plan together as required by the repository workflow.
 
+### Independent Audit Follow-up (2026-09-01)
+
+- [x] Recognize valid RTP on tracked media endpoints before the VoIP processor
+      enters SIP filtering, so associated media makes zero full-matcher calls.
+- [x] Add an end-to-end counting-filter regression for the composed processor path.
+- [x] Count processor matcher entry separately from identity work in the mixed
+      VoIP benchmark and correct the performance documentation.
+- [x] Derive `SelectionInput.FilterConfigured` from the actual filter state.
+- [x] Make `MatchBatch` use complete matching semantics when non-VoIP filter
+      families are configured instead of applying its VoIP-only empty check.
+
 ## Recommended Delivery Order
 
 1. Phase 0: observability and compatibility plumbing.

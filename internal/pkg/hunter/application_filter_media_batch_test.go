@@ -53,6 +53,19 @@ func TestApplicationFilterMatchBatchSkipsIdentityMatchingForMedia(t *testing.T) 
 	require.Equal(t, []bool{false, false, true}, filter.MatchBatch(packets))
 }
 
+func TestApplicationFilterMatchBatchHonorsNonVoIPFilters(t *testing.T) {
+	filter, err := NewApplicationFilter(nil)
+	require.NoError(t, err)
+	filter.UpdateFilters([]*management.Filter{{
+		Id:      "synthetic-source",
+		Type:    management.FilterType_FILTER_IP_ADDRESS,
+		Pattern: "192.0.2.10",
+	}})
+
+	packet := serializeMediaBatchPacket(t, 10000, 20000, []byte{0x80, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1})
+	require.Equal(t, []bool{true}, filter.MatchBatch([]gopacket.Packet{packet}))
+}
+
 func serializeMediaBatchPacket(t *testing.T, srcPort, dstPort layers.UDPPort, payload []byte) gopacket.Packet {
 	t.Helper()
 

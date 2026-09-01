@@ -298,13 +298,15 @@ func (p *Processor) ProcessReassembledSIPResult(result pipeline.SIPResult) (*dat
 func (p *Processor) processUDP(packet gopacket.Packet, udp *layers.UDP) *ProcessResult {
 	payload := udp.Payload
 
-	// Try SIP detection first
-	if result := p.detectSIP(packet, udp, payload); result != nil {
+	// Check tracked media endpoints first. A valid RTP header cannot be a SIP
+	// start line, and recognizing associated media here keeps binary media out
+	// of the SIP application-filter and parser paths.
+	if result := p.detectRTP(packet, udp); result != nil {
 		return result
 	}
 
-	// Try RTP detection (check if port is tracked)
-	if result := p.detectRTP(packet, udp); result != nil {
+	// Fall back to SIP detection for signaling and unassociated UDP traffic.
+	if result := p.detectSIP(packet, udp, payload); result != nil {
 		return result
 	}
 

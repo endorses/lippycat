@@ -197,6 +197,12 @@ named local stages. New protobuf fields must be additive and use new field numbe
 - [x] Saturated pending-buffer work scales with the drained/appended batch, not the
       entire queued backlog.
 
+### Phase 1 Verification (2026-09-01)
+
+- [x] Preserve batches already accepted by the bridge across a capture pause so
+      every received packet still reconciles as invalid, sampled out,
+      batch-dropped, pending-evicted, or delivered.
+
 ## Phase 2: TCP Discontinuity Preservation and SIP Parser Recovery
 
 ### Implementation

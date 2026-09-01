@@ -217,6 +217,9 @@ named local stages. New protobuf fields must be additive and use new field numbe
       exit cannot deadlock while waiting for the capture goroutine.
 - [x] Propagate bridge counters into the statistics view's drop-health aggregator
       so summaries and exports use current display-loss and retention values.
+- [x] Refresh the reported batch queue depth when the bridge consumer drains a
+      batch, and reset it on consumer exit so current queue pressure cannot remain
+      stale after capture completion.
 
 ## Phase 2: TCP Discontinuity Preservation and SIP Parser Recovery
 

@@ -1074,6 +1074,7 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 	var consumerPacketsReceived int64
 	go func() {
 		defer close(consumerDone)
+		defer atomic.StoreInt64(&bridgeStats.QueueDepth, 0)
 		defer func() {
 			logger.Debug("Bridge consumer: shutting down",
 				"total_packets_added_to_pending", consumerPacketsReceived)
@@ -1086,6 +1087,7 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 					// Channel closed
 					return
 				}
+				atomic.StoreInt64(&bridgeStats.QueueDepth, int64(len(tuiBatchChan)))
 				// Add to pending buffer (never blocks - TUI pulls when ready)
 				consumerPacketsReceived += int64(len(msg.Packets))
 				eventHandler.OnPacketBatch(msg.Packets)

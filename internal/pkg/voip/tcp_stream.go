@@ -429,6 +429,8 @@ func (e *contentLengthPolicyError) Unwrap() error { return e.err }
 
 var lastSIPParserWarningUnix atomic.Int64
 
+var errSIPLineLimit = errors.New("SIP line exceeds bounded read limit")
+
 func logSIPParserWarning(reason string) {
 	now := time.Now().Unix()
 	last := lastSIPParserWarningUnix.Load()
@@ -459,6 +461,40 @@ func credibleSIPAfterEmbeddedCR(line string) string {
 		offset = i + 1
 	}
 	return ""
+}
+
+// readBoundedLine reads through the next newline without ever consuming or
+// retaining more than limit bytes. bufio.Reader.ReadString cannot provide this
+// guarantee because a newline-free input makes it grow until EOF.
+func readBoundedLine(reader *bufio.Reader, limit int) (string, error) {
+	if limit <= 0 {
+		return "", errSIPLineLimit
+	}
+
+	line := make([]byte, 0, min(limit, reader.Size()))
+	for len(line) < limit {
+		if _, err := reader.Peek(1); err != nil {
+			return string(line), err
+		}
+		buffered := reader.Buffered()
+		chunk, err := reader.Peek(buffered)
+		if err != nil {
+			return string(line), err
+		}
+		remaining := limit - len(line)
+		consume := min(len(chunk), remaining)
+		if newline := bytes.IndexByte(chunk[:consume], '\n'); newline >= 0 {
+			consume = newline + 1
+		}
+		line = append(line, chunk[:consume]...)
+		if _, err := reader.Discard(consume); err != nil {
+			return string(line), err
+		}
+		if line[len(line)-1] == '\n' {
+			return string(line), nil
+		}
+	}
+	return string(line), errSIPLineLimit
 }
 
 func (r *streamChunkReader) Read(dst []byte) (int, error) {
@@ -697,13 +733,12 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 		default:
 		}
 
-		line, err := bufReader.ReadString('\n')
+		line, err := readBoundedLine(bufReader, maxSIPHeaderLineLength)
 		if err != nil {
+			if errors.Is(err, errSIPLineLimit) {
+				return nil, errNotSIP
+			}
 			return nil, fmt.Errorf("failed to read SIP message line: %w", err)
-		}
-
-		if len(line) > maxSIPHeaderLineLength {
-			return nil, errNotSIP
 		}
 
 		if suffix := credibleSIPAfterEmbeddedCR(line); suffix != "" {
@@ -783,8 +818,11 @@ func (s *bufferedSIPStream) readSIPStartLine(bufReader *bufio.Reader) (string, i
 		default:
 		}
 
-		line, err := bufReader.ReadString('\n')
+		line, err := readBoundedLine(bufReader, resyncWindowBytes-scanned)
 		if err != nil {
+			if errors.Is(err, errSIPLineLimit) {
+				return "", scanned + len(line), errNotSIP
+			}
 			return "", scanned, fmt.Errorf("failed to read SIP message line: %w", err)
 		}
 		scanned += len(line)
@@ -1086,7 +1124,12 @@ func isSIPRequestLine(line string) bool {
 
 // isSIPResponseLine checks if a line looks like a SIP response (e.g., "SIP/2.0 200 OK")
 func isSIPResponseLine(line string) bool {
-	return strings.HasPrefix(line, "SIP/2.0 ")
+	if len(line) < len("SIP/2.0 000 ") || !strings.HasPrefix(line, "SIP/2.0 ") {
+		return false
+	}
+	return line[8] >= '1' && line[8] <= '6' &&
+		line[9] >= '0' && line[9] <= '9' &&
+		line[10] >= '0' && line[10] <= '9' && line[11] == ' '
 }
 
 // looksLikeSIPStart reports whether the first line of data is a SIP request or

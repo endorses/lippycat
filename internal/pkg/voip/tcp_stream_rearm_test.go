@@ -253,6 +253,31 @@ func TestTransportGapRecoveryAtMessageBoundaries(t *testing.T) {
 	}
 }
 
+func FuzzTransportGapRecoveryAtMessageBoundaries(f *testing.F) {
+	partials := [][]byte{
+		[]byte("INVITE sip:a@b"),
+		[]byte("INVITE sip:a@b SIP/2.0\r\nCall-ID: cut"),
+		[]byte("INVITE sip:a@b SIP/2.0\r\nCall-ID: cut\r\nContent-Length: 0\r"),
+		[]byte("MESSAGE sip:a@b SIP/2.0\r\nCall-ID: cut\r\nContent-Length: 8\r\n\r\nabc"),
+	}
+	for _, partial := range partials {
+		f.Add(partial)
+	}
+	f.Fuzz(func(t *testing.T, partial []byte) {
+		if len(partial) > resyncWindowBytes {
+			t.Skip()
+		}
+		complete := []byte("OPTIONS sip:a@b SIP/2.0\r\nCall-ID: fuzz-gap-recovered\r\nContent-Length: 0\r\n\r\n")
+		rec, _, _ := runChunkRecovery(t, []streamChunk{
+			{data: partial},
+			{data: complete, gap: streamGap{reason: streamGapReassembly, missingBytes: 1}},
+		})
+		if !rec.has("fuzz-gap-recovered") {
+			t.Fatalf("post-gap message was not recovered; got %v", rec.callIDs)
+		}
+	})
+}
+
 func TestShutdownWithPendingTransportGapIsNotRecoveryFailure(t *testing.T) {
 	rec := &recordingSIPHandler{}
 	stream, cancel := newResyncTestStream(t, rec)

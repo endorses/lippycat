@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -164,7 +165,7 @@ func TestResync_GenuineNonSIPRejectedAfterBoundedScan(t *testing.T) {
 	}
 
 	// Directly exercise the bounded scan: a large non-SIP blob (many short
-	// non-SIP lines) must return errNotSIP after scanning past the window, not
+	// non-SIP lines) must return errNotSIP at the window, not
 	// hang or scan unbounded.
 	var big strings.Builder
 	line := "GET /some/very/long/non-sip/path/that/is/not/a/start/line HTTP/1.1\r\n"
@@ -175,11 +176,8 @@ func TestResync_GenuineNonSIPRejectedAfterBoundedScan(t *testing.T) {
 	if !errors.Is(err, errNotSIP) {
 		t.Fatalf("readSIPStartLine on non-SIP blob returned err=%v, want errNotSIP", err)
 	}
-	if scanned <= resyncWindowBytes {
-		t.Errorf("scanned=%d, want > resyncWindowBytes(%d) — scan not reaching the bound", scanned, resyncWindowBytes)
-	}
-	if scanned > resyncWindowBytes+maxSIPHeaderLineLength+len(line) {
-		t.Errorf("scanned=%d exceeds the bounded window by more than one line — scan not bounded", scanned)
+	if scanned != resyncWindowBytes {
+		t.Errorf("scanned=%d, want exact resyncWindowBytes(%d)", scanned, resyncWindowBytes)
 	}
 }
 
@@ -231,6 +229,80 @@ func TestCredibleSIPAfterEmbeddedCRRejectsLoneAndFalseStarts(t *testing.T) {
 	input := "Content-Length: 3\rOPTIONS sip:a@example.test SIP/2.0\r\n"
 	if got := credibleSIPAfterEmbeddedCR(input); got != "OPTIONS sip:a@example.test SIP/2.0\r\n" {
 		t.Fatalf("unexpected replay suffix %q", got)
+	}
+}
+
+func TestResyncRejectsMalformedResponseFalseStart(t *testing.T) {
+	for _, line := range []string{
+		"SIP/2.0 garbage",
+		"SIP/2.0 20 OK",
+		"SIP/2.0 700 Invalid",
+		"SIP/2.0 200OK",
+	} {
+		if isSIPResponseLine(line) {
+			t.Fatalf("malformed response %q accepted as a SIP start line", line)
+		}
+	}
+	if !isSIPResponseLine("SIP/2.0 200 OK") {
+		t.Fatal("valid response start line was rejected")
+	}
+}
+
+func TestResyncHardLimitOnNewlineFreeInput(t *testing.T) {
+	s, cancel := newResyncTestStream(t, &recordingSIPHandler{})
+	defer cancel()
+
+	input := strings.Repeat("x", resyncWindowBytes*4)
+	_, scanned, err := s.readSIPStartLine(bufio.NewReader(strings.NewReader(input)))
+	if !errors.Is(err, errNotSIP) {
+		t.Fatalf("newline-free input returned %v, want errNotSIP", err)
+	}
+	if scanned != resyncWindowBytes {
+		t.Fatalf("scanned %d bytes, want hard limit %d", scanned, resyncWindowBytes)
+	}
+}
+
+func TestReadBoundedLineReturnsBeforeLiveStreamCloses(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	result := make(chan struct {
+		line string
+		err  error
+	}, 1)
+	go func() {
+		line, err := readBoundedLine(bufio.NewReader(reader), maxSIPHeaderLineLength)
+		result <- struct {
+			line string
+			err  error
+		}{line: line, err: err}
+	}()
+
+	if _, err := writer.Write([]byte("Call-ID: live-stream\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		if got.err != nil || got.line != "Call-ID: live-stream\r\n" {
+			t.Fatalf("readBoundedLine() = %q, %v", got.line, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("readBoundedLine blocked waiting for more live-stream data")
+	}
+}
+
+func TestReadBoundedLineDoesNotConsumePastLimit(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("12345\nnext\n"))
+	line, err := readBoundedLine(reader, 5)
+	if !errors.Is(err, errSIPLineLimit) || line != "12345" {
+		t.Fatalf("readBoundedLine() = %q, %v", line, err)
+	}
+	next, err := reader.ReadByte()
+	if err != nil || next != '\n' {
+		t.Fatalf("byte after limit = %q, %v; want preserved newline", next, err)
 	}
 }
 

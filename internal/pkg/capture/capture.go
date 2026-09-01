@@ -111,13 +111,17 @@ type PacketBuffer struct {
 	cancel     context.CancelFunc
 	dropped    int64
 	sipDropped int64 // Separate counter for dropped SIP packets (should be rare)
-	bufferSize int
-	closed     int32          // atomic flag: 0 = open, 1 = closed
-	sendersMu  sync.Mutex     // protects closed-check-and-add sequence to prevent race with Wait()
-	sendersWg  sync.WaitGroup // tracks active Send() operations to prevent race on channel close
-	mergerWg   sync.WaitGroup // tracks merger goroutine
-	pauseFn    func() bool    // optional: if set and returns true, Send skips packet (for TUI pause)
-	pauseMu    sync.RWMutex   // protects pauseFn
+	// sipClassified counts packets routed as recognized SIP, including UDP starts
+	// and every TCP segment protected by stateful flow classification.
+	sipClassified int64
+	bufferSize    int
+	closed        int32          // atomic flag: 0 = open, 1 = closed
+	sendersMu     sync.Mutex     // protects closed-check-and-add sequence to prevent race with Wait()
+	sendersWg     sync.WaitGroup // tracks active Send() operations to prevent race on channel close
+	mergerWg      sync.WaitGroup // tracks merger goroutine
+	pauseFn       func() bool    // optional: if set and returns true, Send skips packet (for TUI pause)
+	pauseMu       sync.RWMutex   // protects pauseFn
+	sipFlows      *tcpSIPFlowClassifier
 }
 
 func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
@@ -130,6 +134,7 @@ func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
 		cancel:     cancel,
 		bufferSize: bufferSize,
 		closed:     0,
+		sipFlows:   newTCPSIPFlowClassifier(),
 	}
 
 	// Start merger goroutine that prioritizes SIP packets
@@ -274,6 +279,7 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 	isSIP := pb.isSIPPacket(pkt.Packet)
 
 	if isSIP {
+		atomic.AddInt64(&pb.sipClassified, 1)
 		// Try SIP priority channel first
 		select {
 		case pb.sipCh <- pkt:
@@ -357,6 +363,7 @@ func (pb *PacketBuffer) SendBlocking(pkt PacketInfo) bool {
 	isSIP := pb.isSIPPacket(pkt.Packet)
 
 	if isSIP {
+		atomic.AddInt64(&pb.sipClassified, 1)
 		// Try SIP priority channel first (blocking)
 		select {
 		case pb.sipCh <- pkt:
@@ -390,7 +397,7 @@ func (pb *PacketBuffer) isSIPPacket(pkt gopacket.Packet) bool {
 	var payload []byte
 	switch trans := transLayer.(type) {
 	case *layers.TCP:
-		payload = trans.LayerPayload()
+		return pb.sipFlows.classify(pkt.NetworkLayer(), trans, time.Now())
 	case *layers.UDP:
 		payload = trans.LayerPayload()
 	default:
@@ -435,9 +442,22 @@ func (pb *PacketBuffer) GetSIPDropped() int64 {
 	return atomic.LoadInt64(&pb.sipDropped)
 }
 
+// GetSIPClassified returns the cumulative number of packets routed to the SIP
+// priority path. It includes accepted packets and packets later dropped after
+// both the priority and fallback lanes were saturated.
+func (pb *PacketBuffer) GetSIPClassified() int64 {
+	return atomic.LoadInt64(&pb.sipClassified)
+}
+
 // GetDropped returns the number of dropped regular packets
 func (pb *PacketBuffer) GetDropped() int64 {
 	return atomic.LoadInt64(&pb.dropped)
+}
+
+// GetSIPFlowClassifierStats returns cumulative classifier telemetry and the
+// current bounded flow-state cardinality.
+func (pb *PacketBuffer) GetSIPFlowClassifierStats() (SIPFlowClassifierStats, int) {
+	return pb.sipFlows.snapshot()
 }
 
 func (pb *PacketBuffer) Close() {
@@ -452,6 +472,7 @@ func (pb *PacketBuffer) Close() {
 
 		// Wait for all active Send() operations to complete
 		pb.sendersWg.Wait()
+		pb.sipFlows.clear()
 
 		// Close both input channels (order matters: close sipCh first to drain priority packets)
 		close(pb.sipCh)
@@ -490,6 +511,7 @@ func (pb *PacketBuffer) CloseInputs() {
 
 	// Wait for all active Send() operations to complete
 	pb.sendersWg.Wait()
+	pb.sipFlows.clear()
 
 	// Close input channels - merger will drain and close mergedCh
 	close(pb.sipCh)

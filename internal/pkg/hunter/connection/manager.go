@@ -675,11 +675,19 @@ func (m *Manager) sendHeartbeats() {
 				"packets_forwarded", packetsForwarded,
 				"status", status)
 
+			stats := m.statsCollector.ToProto(activeFilters)
+			if m.captureManager != nil {
+				if buffer := m.captureManager.GetPacketBuffer(); buffer != nil {
+					stats.CaptureBufferRegularDrops = uint64(buffer.GetDropped()) // #nosec G115
+					stats.CaptureBufferSipDrops = uint64(buffer.GetSIPDropped())  // #nosec G115
+					stats.PacketsDropped = stats.CaptureBufferRegularDrops + stats.CaptureBufferSipDrops + stats.BatchChannelDrops
+				}
+			}
 			hb := &management.HunterHeartbeat{
 				HunterId:    m.config.HunterID,
 				TimestampNs: time.Now().UnixNano(),
 				Status:      status,
-				Stats:       m.statsCollector.ToProto(activeFilters),
+				Stats:       stats,
 			}
 
 			if err := stream.Send(hb); err != nil {

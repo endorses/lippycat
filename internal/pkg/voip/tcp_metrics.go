@@ -26,10 +26,15 @@ type tcpStreamMetricsInternal struct {
 	sipMessagesDetected   int64 // SIP messages successfully detected and processed
 
 	// Reassembled() call tracking
-	reassembledCalls       int64 // Total Reassembled() calls from assembler
-	reassembledWithData    int64 // Reassembled() calls that received actual data
-	reassembledEmptyData   int64 // Reassembled() calls with no payload (SYN/ACK)
-	reassembledDataDropped int64 // Data dropped due to full buffer
+	reassembledCalls           int64 // Total Reassembled() calls from assembler
+	reassembledWithData        int64 // Reassembled() calls that received actual data
+	reassembledEmptyData       int64 // Reassembled() calls with no payload (SYN/ACK)
+	reassembledDataDropped     int64 // Data dropped due to full buffer
+	postReassemblyDroppedBytes int64
+	streamDiscontinuities      int64
+	missingSequenceBytes       int64
+	recoverySuccesses          int64
+	recoveryFailures           int64
 }
 
 // TCPStreamMetrics represents TCP stream statistics without mutexes for external use
@@ -48,10 +53,16 @@ type TCPStreamMetrics struct {
 	SIPMessagesDetected   int64 `json:"sip_messages_detected"`
 
 	// Reassembled() call tracking
-	ReassembledCalls       int64 `json:"reassembled_calls"`
-	ReassembledWithData    int64 `json:"reassembled_with_data"`
-	ReassembledEmptyData   int64 `json:"reassembled_empty_data"`
-	ReassembledDataDropped int64 `json:"reassembled_data_dropped"`
+	ReassembledCalls            int64 `json:"reassembled_calls"`
+	ReassembledWithData         int64 `json:"reassembled_with_data"`
+	ReassembledEmptyData        int64 `json:"reassembled_empty_data"`
+	ReassembledDataDropped      int64 `json:"reassembled_data_dropped"`
+	PostReassemblyDroppedChunks int64 `json:"post_reassembly_dropped_chunks"`
+	PostReassemblyDroppedBytes  int64 `json:"post_reassembly_dropped_bytes"`
+	StreamDiscontinuities       int64 `json:"stream_discontinuities"`
+	MissingSequenceBytes        int64 `json:"missing_sequence_bytes"`
+	RecoverySuccesses           int64 `json:"recovery_successes"`
+	RecoveryFailures            int64 `json:"recovery_failures"`
 }
 
 var tcpStreamMetrics = &tcpStreamMetricsInternal{
@@ -75,10 +86,16 @@ func GetTCPStreamMetrics() TCPStreamMetrics {
 		StreamsTimedOut:       tcpStreamMetrics.streamsTimedOut,
 		SIPMessagesDetected:   tcpStreamMetrics.sipMessagesDetected,
 
-		ReassembledCalls:       atomic.LoadInt64(&tcpStreamMetrics.reassembledCalls),
-		ReassembledWithData:    atomic.LoadInt64(&tcpStreamMetrics.reassembledWithData),
-		ReassembledEmptyData:   atomic.LoadInt64(&tcpStreamMetrics.reassembledEmptyData),
-		ReassembledDataDropped: atomic.LoadInt64(&tcpStreamMetrics.reassembledDataDropped),
+		ReassembledCalls:            atomic.LoadInt64(&tcpStreamMetrics.reassembledCalls),
+		ReassembledWithData:         atomic.LoadInt64(&tcpStreamMetrics.reassembledWithData),
+		ReassembledEmptyData:        atomic.LoadInt64(&tcpStreamMetrics.reassembledEmptyData),
+		ReassembledDataDropped:      atomic.LoadInt64(&tcpStreamMetrics.reassembledDataDropped),
+		PostReassemblyDroppedChunks: atomic.LoadInt64(&tcpStreamMetrics.reassembledDataDropped),
+		PostReassemblyDroppedBytes:  atomic.LoadInt64(&tcpStreamMetrics.postReassemblyDroppedBytes),
+		StreamDiscontinuities:       atomic.LoadInt64(&tcpStreamMetrics.streamDiscontinuities),
+		MissingSequenceBytes:        atomic.LoadInt64(&tcpStreamMetrics.missingSequenceBytes),
+		RecoverySuccesses:           atomic.LoadInt64(&tcpStreamMetrics.recoverySuccesses),
+		RecoveryFailures:            atomic.LoadInt64(&tcpStreamMetrics.recoveryFailures),
 	}
 }
 
@@ -122,6 +139,27 @@ func IncrementReassembledEmptyData() {
 func IncrementReassembledDataDropped() {
 	atomic.AddInt64(&tcpStreamMetrics.reassembledDataDropped, 1)
 }
+
+// RecordPostReassemblyDrop records one whole chunk rejected by the bounded
+// stream queue. Counters are cumulative for the process lifetime.
+func RecordPostReassemblyDrop(bytes int) {
+	atomic.AddInt64(&tcpStreamMetrics.reassembledDataDropped, 1)
+	atomic.AddInt64(&tcpStreamMetrics.postReassemblyDroppedBytes, int64(bytes))
+	atomic.AddInt64(&tcpStreamMetrics.streamDiscontinuities, 1)
+}
+
+// RecordReassemblyDiscontinuity records absent TCP sequence space reported by
+// gopacket. Missing bytes never include locally dropped payload bytes.
+func RecordReassemblyDiscontinuity(bytes int) {
+	if bytes <= 0 {
+		return
+	}
+	atomic.AddInt64(&tcpStreamMetrics.streamDiscontinuities, 1)
+	atomic.AddInt64(&tcpStreamMetrics.missingSequenceBytes, int64(bytes))
+}
+
+func IncrementStreamRecoverySuccess() { atomic.AddInt64(&tcpStreamMetrics.recoverySuccesses, 1) }
+func IncrementStreamRecoveryFailure() { atomic.AddInt64(&tcpStreamMetrics.recoveryFailures, 1) }
 
 // Global TCP assembler monitoring
 var (

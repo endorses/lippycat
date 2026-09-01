@@ -396,10 +396,11 @@ func (m *Manager) SendBatch() {
 		Packets:   m.currentBatch,
 		HasStats:  true,
 		Stats: pipeline.BatchStats{
-			TotalCaptured:   m.statsCollector.GetCaptured(),
-			FilteredMatched: m.statsCollector.GetMatched(),
-			Dropped:         m.statsCollector.GetDropped(),
-			BufferUsage:     0, // Will be set by caller if needed
+			TotalCaptured:     m.statsCollector.GetCaptured(),
+			FilteredMatched:   m.statsCollector.GetMatched(),
+			Dropped:           m.statsCollector.GetDropped(),
+			BatchChannelDrops: m.statsCollector.GetDropped(),
+			BufferUsage:       0, // Will be set by caller if needed
 		},
 	}
 

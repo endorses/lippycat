@@ -908,9 +908,12 @@ func (s *LocalSource) sendBatch() {
 		Sequence:    s.batchSeq,
 		TimestampNs: batchTime.UnixNano(),
 		Stats: &data.BatchStats{
-			TotalCaptured:   s.stats.packetsCaptured.Load(),
-			FilteredMatched: s.stats.packetsForwarded.Load(),
-			Dropped:         s.droppedTotal(),
+			TotalCaptured:             s.stats.packetsCaptured.Load(),
+			FilteredMatched:           s.stats.packetsForwarded.Load(),
+			Dropped:                   s.droppedTotal(),
+			CaptureBufferRegularDrops: s.captureBufferRegularDrops(),
+			CaptureBufferSipDrops:     s.captureBufferSIPDrops(),
+			BatchChannelDrops:         s.stats.packetsDropped.Load(),
 		},
 		AfterProcess: s.currentBatchAfterProcess,
 	}
@@ -950,17 +953,30 @@ func (s *LocalSource) Batches() <-chan *PacketBatch {
 // Stats returns current capture statistics.
 func (s *LocalSource) Stats() Stats {
 	st := s.stats.Snapshot()
-	st.PacketsDropped = s.droppedTotal()
+	st.CaptureBufferRegularDrops = s.captureBufferRegularDrops()
+	st.CaptureBufferSIPDrops = s.captureBufferSIPDrops()
+	st.BatchChannelDrops = s.stats.packetsDropped.Load()
+	st.PacketsDropped = st.CaptureBufferRegularDrops + st.CaptureBufferSIPDrops + st.BatchChannelDrops
 	return st
+}
+
+func (s *LocalSource) captureBufferRegularDrops() uint64 {
+	if pb := s.packetBuffer.Load(); pb != nil {
+		return uint64(pb.GetDropped()) // #nosec G115 -- drop counters cannot be negative
+	}
+	return 0
+}
+
+func (s *LocalSource) captureBufferSIPDrops() uint64 {
+	if pb := s.packetBuffer.Load(); pb != nil {
+		return uint64(pb.GetSIPDropped()) // #nosec G115 -- drop counters cannot be negative
+	}
+	return 0
 }
 
 // droppedTotal returns capture buffer overflow (regular + SIP) plus batch channel overflow.
 func (s *LocalSource) droppedTotal() uint64 {
-	dropped := s.stats.packetsDropped.Load()
-	if pb := s.packetBuffer.Load(); pb != nil {
-		dropped += uint64(pb.GetDropped()) + uint64(pb.GetSIPDropped()) // #nosec G115
-	}
-	return dropped
+	return s.captureBufferRegularDrops() + s.captureBufferSIPDrops() + s.stats.packetsDropped.Load()
 }
 
 // SourceID returns the source identifier for this local capture.

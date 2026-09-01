@@ -467,21 +467,24 @@ func (p PacketDisplay) RecordType() string {
 // HunterInfo represents a hunter node's status information.
 // This type is shared between processor, remote capture client, and TUI.
 type HunterInfo struct {
-	ID               string
-	Hostname         string
-	RemoteAddr       string
-	Status           management.HunterStatus
-	ConnectedAt      int64
-	LastHeartbeat    int64
-	PacketsCaptured  uint64
-	PacketsMatched   uint64
-	PacketsForwarded uint64
-	PacketsDropped   uint64
-	ActiveFilters    uint32
-	CPUPercent       float64 // CPU usage percentage (0-100, -1 if unavailable)
-	MemoryRSSBytes   uint64  // Process resident set size in bytes
-	MemoryLimitBytes uint64  // Memory limit from cgroup (0 if unavailable)
-	Interfaces       []string
-	ProcessorAddr    string                         // Address of processor this hunter belongs to
-	Capabilities     *management.HunterCapabilities // Hunter capabilities (filter types, etc.)
+	ID                        string
+	Hostname                  string
+	RemoteAddr                string
+	Status                    management.HunterStatus
+	ConnectedAt               int64
+	LastHeartbeat             int64
+	PacketsCaptured           uint64
+	PacketsMatched            uint64
+	PacketsForwarded          uint64
+	PacketsDropped            uint64
+	CaptureBufferRegularDrops uint64
+	CaptureBufferSIPDrops     uint64
+	BatchChannelDrops         uint64
+	ActiveFilters             uint32
+	CPUPercent                float64 // CPU usage percentage (0-100, -1 if unavailable)
+	MemoryRSSBytes            uint64  // Process resident set size in bytes
+	MemoryLimitBytes          uint64  // Memory limit from cgroup (0 if unavailable)
+	Interfaces                []string
+	ProcessorAddr             string                         // Address of processor this hunter belongs to
+	Capabilities              *management.HunterCapabilities // Hunter capabilities (filter types, etc.)
 }

@@ -109,6 +109,9 @@ type PacketBatch struct {
 
 type BatchStats struct {
 	TotalCaptured, FilteredMatched, Dropped uint64
+	CaptureBufferRegularDrops               uint64
+	CaptureBufferSIPDrops                   uint64
+	BatchChannelDrops                       uint64
 	BufferUsage                             uint32
 }
 

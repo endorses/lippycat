@@ -183,6 +183,9 @@ func TestToProto(t *testing.T) {
 	if proto.PacketsDropped != 1 {
 		t.Errorf("Expected proto.PacketsDropped 1, got %d", proto.PacketsDropped)
 	}
+	if proto.BatchChannelDrops != 1 {
+		t.Errorf("Expected proto.BatchChannelDrops 1, got %d", proto.BatchChannelDrops)
+	}
 	if proto.BufferBytes != 2048 {
 		t.Errorf("Expected proto.BufferBytes 2048, got %d", proto.BufferBytes)
 	}

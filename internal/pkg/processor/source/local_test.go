@@ -200,7 +200,11 @@ func TestLocalSource_Stats_IncludesCaptureBufferDrops(t *testing.T) {
 
 	s.stats.AddDropped(5) // batch channel overflow
 
-	assert.Equal(t, uint64(pb.GetDropped())+5, s.Stats().PacketsDropped)
+	stats := s.Stats()
+	assert.Equal(t, uint64(pb.GetDropped()), stats.CaptureBufferRegularDrops)
+	assert.Zero(t, stats.CaptureBufferSIPDrops)
+	assert.Equal(t, uint64(5), stats.BatchChannelDrops)
+	assert.Equal(t, stats.CaptureBufferRegularDrops+stats.CaptureBufferSIPDrops+stats.BatchChannelDrops, stats.PacketsDropped)
 }
 
 func TestLocalSource_SetBPFFilter_BeforeStart(t *testing.T) {

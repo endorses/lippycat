@@ -101,8 +101,15 @@ type Stats struct {
 	// PacketsForwarded is the number of packets that passed filtering and were batched
 	PacketsForwarded uint64
 
-	// PacketsDropped is the number of packets dropped (buffer overflow, etc.)
+	// PacketsDropped is the compatibility aggregate. It always equals
+	// CaptureBufferRegularDrops + CaptureBufferSIPDrops + BatchChannelDrops.
 	PacketsDropped uint64
+
+	// Named loss counters are packet counts, cumulative and monotonic for the
+	// lifetime of this source. They reset only when a new source is constructed.
+	CaptureBufferRegularDrops uint64
+	CaptureBufferSIPDrops     uint64
+	BatchChannelDrops         uint64
 
 	// BytesReceived is the total bytes received/captured
 	BytesReceived uint64
@@ -190,16 +197,17 @@ func (s *AtomicStats) Snapshot() Stats {
 	}
 
 	return Stats{
-		PacketsCaptured:  s.packetsCaptured.Load(),
-		PacketsForwarded: s.packetsForwarded.Load(),
-		PacketsDropped:   s.packetsDropped.Load(),
-		BytesReceived:    s.bytesReceived.Load(),
-		BatchesReceived:  s.batchesReceived.Load(),
-		LastPacketTime:   lastTime,
-		StartTime:        time.Unix(0, s.startTime),
-		CPUPercent:       s.cpuPercent.Load().(float64),
-		MemoryRSSBytes:   s.memoryRSSBytes.Load(),
-		MemoryLimitBytes: s.memoryLimitBytes.Load(),
+		PacketsCaptured:   s.packetsCaptured.Load(),
+		PacketsForwarded:  s.packetsForwarded.Load(),
+		PacketsDropped:    s.packetsDropped.Load(),
+		BatchChannelDrops: s.packetsDropped.Load(),
+		BytesReceived:     s.bytesReceived.Load(),
+		BatchesReceived:   s.batchesReceived.Load(),
+		LastPacketTime:    lastTime,
+		StartTime:         time.Unix(0, s.startTime),
+		CPUPercent:        s.cpuPercent.Load().(float64),
+		MemoryRSSBytes:    s.memoryRSSBytes.Load(),
+		MemoryLimitBytes:  s.memoryLimitBytes.Load(),
 	}
 }
 
@@ -250,7 +258,7 @@ func (b *PacketBatch) ToProtoBatchE() (*data.PacketBatch, error) {
 	}
 	if b.Stats != nil {
 		normalized.HasStats = true
-		normalized.Stats = pipeline.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage}
+		normalized.Stats = pipeline.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSIPDrops: b.Stats.CaptureBufferSipDrops, BatchChannelDrops: b.Stats.BatchChannelDrops}
 	}
 	pb, err := grpcadapter.ToPacketBatch(normalized)
 	if err != nil {

@@ -13,6 +13,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"runtime"
 	"strings"
@@ -160,6 +161,9 @@ func (s *LocalSource) cachedFilterIDsForCalls(callIDs []string) []string {
 	for _, callID := range callIDs {
 		if cached, ok := s.callFilterCache.Load(callID); ok {
 			for _, filterID := range cached.filterIDs {
+				if filterID == "" {
+					continue
+				}
 				if _, exists := seen[filterID]; exists {
 					continue
 				}
@@ -169,6 +173,80 @@ func (s *LocalSource) cachedFilterIDsForCalls(callIDs []string) []string {
 		}
 	}
 	return filterIDs
+}
+
+// composeFilterIDs returns the stable, deduplicated union of direct packet
+// matches followed by IDs inherited from selected calls.
+func composeFilterIDs(direct, inherited []string) []string {
+	filterIDs := make([]string, 0, len(direct)+len(inherited))
+	seen := make(map[string]struct{}, len(direct)+len(inherited))
+	for _, ids := range [][]string{direct, inherited} {
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			filterIDs = append(filterIDs, id)
+		}
+	}
+	return filterIDs
+}
+
+const credibleSIPStartLineLimit = 256
+
+// hasCredibleSIPStartLine conservatively recognizes a bounded SIP request or
+// response start line without converting packet data to strings or allocating.
+func hasCredibleSIPStartLine(packet gopacket.Packet) bool {
+	if packet == nil || packet.TransportLayer() == nil {
+		return false
+	}
+	payload := packet.TransportLayer().LayerPayload()
+	if len(payload) == 0 {
+		return false
+	}
+	if len(payload) > credibleSIPStartLineLimit {
+		payload = payload[:credibleSIPStartLineLimit]
+	}
+	lineEnd := bytes.IndexByte(payload, '\n')
+	if lineEnd < 0 {
+		return false
+	}
+	line := payload[:lineEnd]
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
+	if bytes.HasPrefix(line, []byte("SIP/2.0 ")) {
+		status := line[len("SIP/2.0 "):]
+		return len(status) >= 3 && status[0] >= '1' && status[0] <= '6' &&
+			status[1] >= '0' && status[1] <= '9' && status[2] >= '0' && status[2] <= '9' &&
+			(len(status) == 3 || status[3] == ' ')
+	}
+
+	space := bytes.IndexByte(line, ' ')
+	if space <= 0 || !credibleSIPMethod(line[:space]) {
+		return false
+	}
+	rest := line[space+1:]
+	version := bytes.LastIndex(rest, []byte(" SIP/2.0"))
+	return version > 0 && version+len(" SIP/2.0") == len(rest) &&
+		bytes.IndexByte(rest[:version], ' ') < 0
+}
+
+func credibleSIPMethod(method []byte) bool {
+	for _, known := range [...][]byte{
+		[]byte("ACK"), []byte("BYE"), []byte("CANCEL"), []byte("INFO"),
+		[]byte("INVITE"), []byte("MESSAGE"), []byte("NOTIFY"), []byte("OPTIONS"),
+		[]byte("PRACK"), []byte("PUBLISH"), []byte("REFER"), []byte("REGISTER"),
+		[]byte("SUBSCRIBE"), []byte("UPDATE"),
+	} {
+		if bytes.Equal(method, known) {
+			return true
+		}
+	}
+	return false
 }
 
 // LocalSource captures packets from local network interfaces.
@@ -655,7 +733,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			s.mu.Unlock()
 
 			if tcpFilter != nil {
-				matched, filterIDs := tcpFilter.MatchPacketWithIDs(injectedPkt.PacketInfo.Packet)
+				matched, directIDs := tcpFilter.MatchPacketWithIDs(injectedPkt.PacketInfo.Packet)
 				callID := ""
 				if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil {
 					callID = pbPkt.Metadata.Sip.CallId
@@ -672,25 +750,26 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					}
 					continue
 				}
-				if matched && len(filterIDs) > 0 {
-					pbPkt.MatchedFilterIds = filterIDs
+				filterIDs := composeFilterIDs(directIDs, inheritedIDs)
+				if matched && len(directIDs) > 0 {
 					// Cache SIP CallID → filterIDs for RTP correlation
 					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
-							s.callFilterCache.Store(callID, cachedFilterIDs{filterIDs: filterIDs, storedAt: time.Now()})
+							s.callFilterCache.Store(callID, cachedFilterIDs{
+								filterIDs: composeFilterIDs(directIDs, nil),
+								storedAt:  time.Now(),
+							})
 						}
 					}
-				} else {
-					filterIDs = inheritedIDs
-					if len(filterIDs) == 0 {
-						if injectedPkt.AfterProcess != nil {
-							injectedPkt.AfterProcess()
-						}
-						continue
-					}
-					pbPkt.MatchedFilterIds = filterIDs
 				}
+				if !matched && len(filterIDs) == 0 {
+					if injectedPkt.AfterProcess != nil {
+						injectedPkt.AfterProcess()
+					}
+					continue
+				}
+				pbPkt.MatchedFilterIds = filterIDs
 			}
 
 			// Add to batch
@@ -769,13 +848,6 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					}
 				}
 			}
-			matchFilter := func() (bool, []string) {
-				if reuseVerdict {
-					return reuseMatched, reuseIDs
-				}
-				return filter.MatchPacketWithIDs(pktInfo.Packet)
-			}
-
 			// Apply DNS processing if enabled and not a VoIP packet
 			// DNS packets are not VoIP, so skip if already identified as VoIP
 			if dnsProc != nil && !isVoIPPacket {
@@ -795,15 +867,36 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			var matchedFilterIDs []string
 			if filter != nil && !isVoIPPacket {
 				// Non-VoIP: filter decides pass/drop
-				matched, filterIDs := matchFilter()
+				matched, filterIDs := reuseMatched, reuseIDs
+				if !reuseVerdict {
+					matched, filterIDs = filter.MatchPacketWithIDs(pktInfo.Packet)
+				}
 				if !matched {
 					continue
 				}
 				matchedFilterIDs = filterIDs
 			} else if filter != nil && isVoIPPacket {
-				// VoIP: filter decides pass/drop, with cache fallback for RTP
-				matched, filterIDs := matchFilter()
+				// Classified media is restricted to packet-level filters. SIP can
+				// reuse the processor verdict; conservative start-line recognition
+				// handles VoIP results lacking protocol metadata.
+				var matched bool
+				var directFilterIDs []string
+				switch {
+				case pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil:
+					matched, directFilterIDs = filter.MatchPacketLevelWithIDs(pktInfo.Packet)
+				case pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && reuseVerdict:
+					matched, directFilterIDs = reuseMatched, reuseIDs
+				case pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil:
+					matched, directFilterIDs = filter.MatchPacketWithIDs(pktInfo.Packet)
+				case hasCredibleSIPStartLine(pktInfo.Packet):
+					matched, directFilterIDs = filter.MatchPacketWithIDs(pktInfo.Packet)
+				default:
+					matched, directFilterIDs = filter.MatchPacketLevelWithIDs(pktInfo.Packet)
+				}
 
+				if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && len(voipCallIDs) == 0 && pbPkt.Metadata.Sip.CallId != "" {
+					voipCallIDs = []string{pbPkt.Metadata.Sip.CallId}
+				}
 				inheritedFilterIDs := s.cachedFilterIDsForCalls(voipCallIDs)
 				selected := selectionPolicy.Select(callregistry.SelectionInput{
 					FilterConfigured:   true,
@@ -813,15 +906,18 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				if !selected {
 					continue
 				}
+				matchedFilterIDs = composeFilterIDs(directFilterIDs, inheritedFilterIDs)
 				if matched {
-					matchedFilterIDs = filterIDs
 
 					// For SIP packets that match, cache CallID → filterIDs
 					// so RTP packets (same CallID) can inherit the filter IDs
-					if len(filterIDs) > 0 && pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
+					if len(directFilterIDs) > 0 && pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
-							s.callFilterCache.Store(callID, cachedFilterIDs{filterIDs: filterIDs, storedAt: time.Now()})
+							s.callFilterCache.Store(callID, cachedFilterIDs{
+								filterIDs: composeFilterIDs(directFilterIDs, nil),
+								storedAt:  time.Now(),
+							})
 						}
 					}
 				} else {
@@ -843,8 +939,6 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					if len(voipCallIDs) == 0 && callID != "" {
 						voipCallIDs = []string{callID}
 					}
-					matchedFilterIDs = inheritedFilterIDs
-
 					// If still no filter IDs, drop the packet
 					if len(matchedFilterIDs) == 0 {
 						continue

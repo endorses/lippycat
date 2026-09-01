@@ -404,6 +404,9 @@ func (s *StatisticsView) protocolDistributionTitle() string {
 // SetBridgeStats updates the bridge statistics data
 func (s *StatisticsView) SetBridgeStats(bridgeStats *BridgeStatistics) {
 	s.bridgeStats = bridgeStats
+	if s.dropStats != nil {
+		s.dropStats.UpdateFromBridgeStats(bridgeStats)
+	}
 	s.dirty = true // Mark for lazy re-render
 }
 

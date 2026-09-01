@@ -703,6 +703,7 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 
 	var message strings.Builder
 	var contentLength int
+	var contentLengthSeen bool
 	headersDone := false
 	headerCount := 0
 
@@ -772,7 +773,11 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 				}
 				lengthStr := strings.TrimSpace(line[colon+1:])
 				if length, parseErr := parseContentLengthSecurely(lengthStr, securityConfig); parseErr == nil {
+					if contentLengthSeen && length != contentLength {
+						return nil, &contentLengthPolicyError{err: errors.New("conflicting duplicate Content-Length values")}
+					}
 					contentLength = length
+					contentLengthSeen = true
 				} else {
 					return nil, &contentLengthPolicyError{err: parseErr}
 				}

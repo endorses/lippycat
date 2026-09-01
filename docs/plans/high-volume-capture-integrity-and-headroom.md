@@ -273,6 +273,12 @@ named local stages. New protobuf fields must be additive and use new field numbe
       correctly framed SIP message on the same live stream to be processed.
 - [x] Security validation remains strict for correctly framed hostile input.
 
+### Phase 2 Verification (2026-09-01)
+
+- [x] Reject conflicting duplicate long-form or compact `Content-Length` headers
+      in the TCP framing layer before either value can consume bytes from a
+      following pipelined SIP message.
+
 ## Phase 3: Stateful SIP-First Capture Shedding
 
 ### Implementation

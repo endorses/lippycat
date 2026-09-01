@@ -287,6 +287,7 @@ lc tap voip -i eth0 --voip-command 'notify.sh %callid% %caller% %called%' --inse
 - `--pattern-algorithm` - Pattern matching algorithm: `auto`, `linear`, `aho-corasick`
 - `--pattern-buffer-mb` - Memory budget for pattern buffer in MB
 - `--tcp-performance-mode` - TCP performance mode: `minimal`, `balanced`, `high_performance`, `low_latency`
+- `--tcp-reassembly-shards` - Number of flow-sharded TCP assemblers (default: `1`)
 
 ### DNS-Specific Flags (tap dns only)
 
@@ -601,6 +602,7 @@ tap:
     pattern_algorithm: "auto"
     pattern_buffer_mb: 64
     tcp_performance_mode: "balanced"
+    tcp_reassembly_shards: 1
 
   # DNS-specific (for tap dns)
   dns:
@@ -654,9 +656,22 @@ lc tap voip -i eth0 --tcp-performance-mode balanced --insecure
 # High-traffic environments
 lc tap voip -i eth0 --tcp-performance-mode high_performance --insecure
 
+# Benchmark-proven multi-core reassembly; independent flows may run in parallel
+lc tap voip -i eth0 --tcp-reassembly-shards 4 --insecure
+
 # Low latency real-time analysis
 lc tap voip -i eth0 --tcp-performance-mode low_latency --insecure
 ```
+
+TCP reassembly sharding is opt-in. Both directions of one connection always use
+the same shard, while independent connections can use different cores. The
+configured total buffered-page limit is partitioned across shards rather than
+multiplied; the per-connection limit is unchanged. Reassembly gap and bounded
+retention counters are summed across shards. Increasing the shard count also
+adds an assembler and stream-pool overhead per shard, so benchmark the expected
+flow mix and tune `processor.detection_workers` with it. Set the value back to
+`1` to restore the single-assembler path if CPU, heap, gap, or drop telemetry
+regresses.
 
 ## Troubleshooting
 

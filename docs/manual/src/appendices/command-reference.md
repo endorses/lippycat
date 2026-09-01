@@ -500,6 +500,7 @@ Inherits all `lc tap` flags, plus:
 | `--sip-port` | int | `5060` | SIP signaling port |
 | `--rtp-port-range` | string | | RTP port range |
 | `--tcp-performance-mode` | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency` |
+| `--tcp-reassembly-shards` | int | `1` | Flow-sharded TCP reassembly assembler count |
 | `--pattern-algorithm` | string | `auto` | Pattern matching algorithm: `auto`, `linear`, `aho-corasick` |
 | `--pattern-buffer-mb` | int | `64` | Pattern buffer size (MB) |
 

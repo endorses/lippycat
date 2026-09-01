@@ -82,8 +82,9 @@ var (
 	patternBufferMB  int
 
 	// TCP-specific configuration flags
-	tcpPerformanceMode string
-	tcpSIPIdleTimeout  time.Duration
+	tcpPerformanceMode  string
+	tcpSIPIdleTimeout   time.Duration
+	tcpReassemblyShards int
 
 	// Per-call PCAP flags (VoIP-specific)
 	perCallPcapEnabled    bool
@@ -154,6 +155,7 @@ func init() {
 	// TCP Performance Mode
 	voipTapCmd.Flags().StringVarP(&tcpPerformanceMode, "tcp-performance-mode", "M", "balanced", "TCP performance mode: 'minimal', 'balanced', 'high_performance', 'low_latency'")
 	voipTapCmd.Flags().DurationVar(&tcpSIPIdleTimeout, "tcp-sip-idle-timeout", 0, "Idle timeout for SIP TCP connections (default: 120s, 0 = use default)")
+	voipTapCmd.Flags().IntVar(&tcpReassemblyShards, "tcp-reassembly-shards", 1, "Number of flow-sharded TCP reassembly assemblers (default: 1)")
 
 	// Per-call PCAP (VoIP-specific)
 	voipTapCmd.Flags().BoolVar(&perCallPcapEnabled, "per-call-pcap", false, "Enable per-call PCAP writing for VoIP traffic (default: enabled for tap voip)")
@@ -176,6 +178,7 @@ func init() {
 	_ = viper.BindPFlag("tap.voip.pattern_buffer_mb", voipTapCmd.Flags().Lookup("pattern-buffer-mb"))
 	_ = viper.BindPFlag("tap.voip.tcp_performance_mode", voipTapCmd.Flags().Lookup("tcp-performance-mode"))
 	_ = viper.BindPFlag("voip.tcp_sip_idle_timeout", voipTapCmd.Flags().Lookup("tcp-sip-idle-timeout"))
+	_ = viper.BindPFlag("tap.voip.tcp_reassembly_shards", voipTapCmd.Flags().Lookup("tcp-reassembly-shards"))
 	_ = viper.BindPFlag("tap.per_call_pcap.enabled", voipTapCmd.Flags().Lookup("per-call-pcap"))
 	_ = viper.BindPFlag("tap.per_call_pcap.output_dir", voipTapCmd.Flags().Lookup("per-call-pcap-dir"))
 	_ = viper.BindPFlag("tap.per_call_pcap.file_pattern", voipTapCmd.Flags().Lookup("per-call-pcap-pattern"))
@@ -518,8 +521,11 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		},
 	)
 
-	// Create connection-aware reassembly assembler
-	reassemblyEngine := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())
+	// Create connection-aware reassembly assemblers. Sharding is opt-in so the
+	// compatibility default retains the historical single-assembler behavior.
+	reassemblyConfig := pipeline.DefaultReassemblyConfig()
+	reassemblyConfig.ShardCount = cmdutil.GetIntConfig("tap.voip.tcp_reassembly_shards", tcpReassemblyShards)
+	reassemblyEngine := pipeline.NewReassemblyEngine(streamFactory, reassemblyConfig)
 	defer func() {
 		if err := reassemblyEngine.Close(); err != nil {
 			logger.Error("Failed to close TCP reassembly engine", "error", err)
@@ -536,6 +542,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	logger.Info("TCP SIP reassembly enabled for tap mode",
 		"tcp_handler", "TapTCPHandler",
 		"tcp_assembler", "reassembly.Assembler",
+		"tcp_reassembly_shards", reassemblyEngine.ShardCount(),
 		"injection_buffer", 1000)
 
 	logger.Info("VoIP Tap configuration",

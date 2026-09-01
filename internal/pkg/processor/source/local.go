@@ -211,10 +211,6 @@ type LocalSource struct {
 	// When set, TCP packets are routed to the assembler instead of direct processing
 	tcpAssembler TCPAssembler
 
-	// Guards tcpAssembler.AssemblePacket, which is not concurrency-safe, when the
-	// batching loop drains the packet buffer from multiple detection workers.
-	assemblerMu sync.Mutex
-
 	// Stats tracking
 	stats *AtomicStats
 
@@ -573,14 +569,7 @@ func (s *LocalSource) batchingLoop() {
 			netLayer := pkt.NetworkLayer()
 			transLayer := pkt.TransportLayer()
 			if netLayer != nil && transLayer != nil {
-				if _, isTCP := transLayer.(*layers.TCP); isTCP {
-					// TCP goes to worker 0: the reassembly assembler is not
-					// concurrency-safe, so all TCP is handled by a single worker.
-					idx = 0
-				} else {
-					h := netLayer.NetworkFlow().FastHash() ^ transLayer.TransportFlow().FastHash()
-					idx = int(h % uint64(numWorkers))
-				}
+				idx = pipeline.FlowShard(netLayer.NetworkFlow(), transLayer.TransportFlow(), numWorkers)
 			}
 		}
 		select {
@@ -617,8 +606,8 @@ func getDetectionWorkerCount() int {
 // same worker, per-flow detector state stays single-goroutine and in order.
 // Cross-worker shared state is concurrency-safe: the detector's cache/flow-tracker
 // (RWMutex) and SIP IP-pair map (sync.Map), callFilterCache (sync.Map),
-// currentBatch (batchMu), stats (atomic), and the TCP assembler (guarded by
-// assemblerMu; TCP is additionally pinned to a single worker).
+// currentBatch (batchMu), and stats (atomic). TCP assembler concurrency is
+// handled by the reassembly engine's flow shards.
 func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 	ticker := time.NewTicker(s.config.BatchTimeout)
 	defer ticker.Stop()
@@ -732,10 +721,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			// TCP packets will come back via tcpInjectionChan when SIP messages are complete
 			if tcpAssembler != nil && pktInfo.Packet != nil && pktInfo.Packet.TransportLayer() != nil {
 				if _, isTCP := pktInfo.Packet.TransportLayer().(*layers.TCP); isTCP {
-					// AssemblePacket is not concurrency-safe; serialise it across workers.
-					s.assemblerMu.Lock()
 					handled := tcpAssembler.AssemblePacket(pktInfo)
-					s.assemblerMu.Unlock()
 					if handled {
 						// TCP packet handled by assembler, don't process further
 						continue

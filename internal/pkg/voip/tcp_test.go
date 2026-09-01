@@ -46,17 +46,15 @@ func TestCallIDDetector_Concurrency(t *testing.T) {
 	const numGoroutines = 50
 	const expectedCallID = "first-call-id"
 
-	var startWg sync.WaitGroup
+	start := make(chan struct{})
 	var endWg sync.WaitGroup
 
 	// Start multiple goroutines that try to set the call ID
 	for i := 0; i < numGoroutines; i++ {
-		startWg.Add(1)
 		endWg.Add(1)
 		go func(id int) {
 			defer endWg.Done()
-			startWg.Done()
-			startWg.Wait() // Wait for all goroutines to start
+			<-start
 
 			callID := fmt.Sprintf("call-id-%d", id)
 			if id == 0 {
@@ -65,6 +63,7 @@ func TestCallIDDetector_Concurrency(t *testing.T) {
 			detector.SetCallID(callID)
 		}(i)
 	}
+	close(start)
 
 	// Start goroutines that wait for the result
 	results := make(chan string, numGoroutines)

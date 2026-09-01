@@ -123,6 +123,23 @@ func TestFilterVerdict_BooleanMatchWhenIDsNotNeeded(t *testing.T) {
 	assert.Equal(t, 0, f.withIDsCalls)
 }
 
+// Associated RTP is recognized before SIP filtering, so binary media must not
+// enter either full application-filter method.
+func TestFilterVerdict_AssociatedRTPDoesNotEnterFullMatcher(t *testing.T) {
+	f := &countingFilter{matched: true, ids: []string{"li-1"}}
+	p := newFilteredProcessor(f, true)
+	defer p.Close()
+
+	p.AssociateEndpoint("media@example.com", "192.168.1.1:20000")
+	rtpPayload := createRTPPayload(2, 0, 1, 12345, 0x12345678)
+	result := p.Process(createUDPPacket(t, rtpPayload, 20000, 12345))
+
+	require.NotNil(t, result)
+	assert.Equal(t, PacketTypeRTP, result.PacketType)
+	assert.Equal(t, 0, f.matchCalls)
+	assert.Equal(t, 0, f.withIDsCalls)
+}
+
 // With no filter configured nothing is evaluated, so callers must fall back to
 // their own matching rather than trusting an empty verdict.
 func TestFilterVerdict_NoFilterMeansNotEvaluated(t *testing.T) {

@@ -116,6 +116,9 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 				eventCmds = append(eventCmds, cmd)
 			}
 		}
+
+		// Exact live ingress telemetry is independent of the sampled detail feed.
+		m.applyIngressTelemetrySnapshot()
 		// PULL-BASED ARCHITECTURE: Drain pending packets from buffer
 		// This ensures TUI is never blocked by incoming packets - it pulls when ready
 		pendingPackets := DrainPendingPackets(m.captureMode == components.CaptureModeOffline)

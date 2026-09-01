@@ -37,6 +37,27 @@ getcap /usr/local/bin/lc
 
 After setting capabilities, any non-root user can run captures. Note that `setcap` must be reapplied after reinstalling or upgrading the binary.
 
+### Attribute Capture Loss by Stage
+
+Loss counters are cumulative for one capture session and reset when that capture
+source restarts. Classify the first non-zero local stage before assigning a root
+cause:
+
+- kernel/interface drops occur before lippycat receives a packet;
+- regular and SIP capture-buffer drops identify which admission lane saturated;
+- batch-channel drops occur while handing captured packets to processing or
+  forwarding;
+- normal/page-pressure and explicit-flush TCP gaps both count absent TCP sequence
+  bytes, but remain separately attributed;
+- post-reassembly chunk/byte drops mean the SIP stream queue saturated;
+- parser discontinuity and recovery counters describe framing recovery; and
+- display sampling or queue loss affects packet detail visibility, not ingress.
+
+The compatible aggregate packet-drop counter is the sum of the named local packet
+drop stages. Do not infer an external capture-source fault merely because TCP
+sequence space is missing: first check every locally measured stage. Batch and
+heartbeat values are cumulative snapshots and must not be summed across reports.
+
 ### Interface Not Found
 
 **Symptom:** lippycat reports `no such device` or the interface name is not recognized.
@@ -189,7 +210,46 @@ grep -i "fragment\|reassembl\|content-length\|malform" debug.log
    sudo lc sniff voip -i eth0 --tcp-performance-mode latency
    ```
 
-3. Verify SIP message format with a packet capture. Check that `Content-Length` headers match the actual body size — mismatches cause the parser to wait indefinitely for more data.
+3. Verify SIP message format with a packet capture. Check that `Content-Length`
+   headers match the actual body size. A reassembly gap or truncated body causes
+   the stream parser to discard the incomplete frame and scan forward for a
+   credible SIP start line; a correctly framed but prohibited `Content-Length`
+   remains a hard policy rejection.
+
+### SIP Parser Recovery Counters
+
+TCP loss, a forced reassembly flush, or a full post-reassembly stream queue can
+leave the parser in the middle of a SIP header or body. The stream is re-armed
+at that discontinuity and performs a bounded scan for the next credible SIP
+request or response start line. Recovery is intentionally bounded to 16 KiB per
+scan and 64 KiB cumulatively without a complete SIP message. Parsing a complete
+message resets the cumulative allowance; traffic beyond the cap is discarded
+instead of consuming unbounded CPU or memory.
+
+Press `B` in the TUI to inspect the TCP SIP diagnostic toast and debug log. Read
+the counters in this order:
+
+- `reassembly_normal_*` attributes gaps released during normal/page-pressure
+  assembly;
+- `reassembly_explicit_flush_*` attributes gaps exposed by an explicit flush;
+- `post_reassembly_dropped_chunks` and `post_reassembly_dropped_bytes` identify
+  loss at the bounded stream queue;
+- `parser_framing_discontinuities` counts parser re-arms after framing was no
+  longer trustworthy; and
+- `stream_recovery_successes` and `stream_recovery_failures` show whether the
+  bounded scan found a subsequent valid SIP boundary.
+
+A recovery success means later SIP messages were parsed; it does not restore
+the damaged message or its missing bytes. Rising recovery failures usually mean
+the loss persisted beyond the scan bound, the capture began midstream without a
+later SIP boundary, or the flow is not SIP. Correlate parser counters with the
+earlier loss stages before changing parser assumptions.
+
+Recovery never relaxes the SIP body-size security policy. Negative, malformed,
+overflowing, conflicting, or over-limit `Content-Length` values on otherwise
+correctly CRLF-framed messages are rejected rather than skipped in search of a
+later message. Fix or filter the offending sender; do not interpret those hard
+rejections as ordinary loss recovery.
 
 ### High Memory Usage During TCP Capture
 

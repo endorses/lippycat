@@ -308,4 +308,5 @@ tap:
     udp_only: false
     sip_ports: ""
     tcp_performance_mode: "balanced"
+    tcp_reassembly_shards: 1
 ```

@@ -113,7 +113,8 @@ func TestIntegration_HunterCrashRecovery(t *testing.T) {
 	defer cancel()
 
 	// Start processor
-	processorAddr := "127.0.0.1:50099"
+	processorAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port")
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
@@ -171,7 +172,8 @@ func TestIntegration_ProcessorRestartWithConnectedHunters(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	processorAddr := "127.0.0.1:50053"
+	processorAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port")
 
 	// Start processor
 	proc1Ctx, proc1Cancel := context.WithCancel(ctx)
@@ -262,7 +264,8 @@ func TestIntegration_NetworkPartition(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	processorAddr := "127.0.0.1:50054"
+	processorAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port")
 
 	// Start processor
 	procCtx, procCancel := context.WithCancel(ctx)
@@ -322,7 +325,8 @@ func TestIntegration_HighVolume(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	processorAddr := "127.0.0.1:50055"
+	processorAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port")
 
 	// Start processor
 	procCtx, procCancel := context.WithCancel(ctx)
@@ -383,7 +387,8 @@ func TestIntegration_MultipleHuntersSimultaneous(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	processorAddr := "127.0.0.1:50056"
+	processorAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port")
 
 	// Start processor
 	procCtx, procCancel := context.WithCancel(ctx)
@@ -448,7 +453,8 @@ func TestIntegration_JumboFrames(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	processorAddr := "127.0.0.1:50057"
+	processorAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port")
 
 	// Start processor with increased message size
 	procCtx, procCancel := context.WithCancel(ctx)

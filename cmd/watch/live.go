@@ -141,7 +141,11 @@ func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 			localEventAnalysisOptions(filter))
 	}
 	// Pass pause function to drop packets at source when paused (reduces CPU)
-	capture.InitWithContext(ctx, devices, filter, processor, nil, pauseSignal.IsPaused)
+	capture.InitWithContextAndTelemetry(ctx, devices, filter, processor, nil, pauseSignal.IsPaused, func(stats capture.Telemetry) {
+		if program != nil {
+			program.Send(tui.CaptureTelemetryMsg(stats))
+		}
+	})
 }
 
 func localEventAnalysisOptions(filter string) tui.LocalEventAnalysisOptions {

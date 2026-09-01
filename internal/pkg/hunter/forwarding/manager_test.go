@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,6 +62,37 @@ func (*recordingStream) SendMsg(any) error                  { return nil }
 func (*recordingStream) RecvMsg(any) error                  { return nil }
 
 func packet() *pipeline.PacketEnvelope { return &pipeline.PacketEnvelope{Data: []byte{1}} }
+
+type testPacketBufferProvider struct{ buffer *capture.PacketBuffer }
+
+func (p testPacketBufferProvider) GetPacketBuffer() *capture.PacketBuffer { return p.buffer }
+
+func TestSendBatchReconcilesNamedLossCounters(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	packetBuffer := capture.NewPacketBuffer(ctx, 1)
+	defer packetBuffer.Close()
+	for i := 0; i < 100; i++ {
+		packetBuffer.Send(capture.PacketInfo{})
+	}
+	require.Positive(t, packetBuffer.GetDropped())
+
+	stats := &flowStats{}
+	stats.dropped.Store(3)
+	queue := make(chan *pipeline.PacketBatch, 1)
+	m := New(Config{BatchSize: 1}, stats, testPacketBufferProvider{buffer: packetBuffer}, ctx, queue)
+	m.HandleFlowControl(&data.StreamControl{FlowControl: data.FlowControl_FLOW_PAUSE})
+	require.True(t, m.AddPacketToBatch(packet()))
+	m.SendBatch()
+
+	batch := <-queue
+	require.Equal(t, uint64(packetBuffer.GetDropped()), batch.Stats.CaptureBufferRegularDrops)
+	require.Zero(t, batch.Stats.CaptureBufferSIPDrops)
+	require.Equal(t, uint64(3), batch.Stats.BatchChannelDrops)
+	require.Equal(t, batch.Stats.CaptureBufferRegularDrops+batch.Stats.CaptureBufferSIPDrops+batch.Stats.BatchChannelDrops, batch.Stats.Dropped)
+
+	cancel()
+	m.Wait()
+}
 
 func TestHandleFlowControl_PauseAndResume(t *testing.T) {
 	m := &Manager{}

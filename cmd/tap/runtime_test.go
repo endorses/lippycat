@@ -26,7 +26,10 @@ func TestTapSourceConfigUsesSharedProtocol(t *testing.T) {
 	interfaces = []string{"eth0", "eth1"}
 	batchSize, batchTimeout, bufferSize = 42, 250, 2048
 
-	got := tapSourceConfig(processor.Config{ProcessorID: "tap-test"}, "tcp port 443", protocolcatalog.MustLookup("tls"))
+	got := tapSourceConfig(processor.Config{
+		ProcessorID: "tap-test",
+		LogConfig:   &processor.StructuredLogConfig{IncludeHTTPHeaders: true},
+	}, "tcp port 443", protocolcatalog.MustLookup("tls"))
 	require.Equal(t, []string{"eth0", "eth1"}, got.Interfaces)
 	require.Equal(t, "tcp port 443", got.BPFFilter)
 	require.Equal(t, 42, got.BatchSize)
@@ -35,6 +38,7 @@ func TestTapSourceConfigUsesSharedProtocol(t *testing.T) {
 	require.Equal(t, 1000, got.BatchBuffer)
 	require.Equal(t, "tap-test", got.ProcessorID)
 	require.Equal(t, "tls", got.ProtocolMode)
+	require.True(t, got.IncludeHTTPHeaders)
 }
 
 func TestTapSourceConfigSupportsGenericMode(t *testing.T) {
@@ -43,6 +47,7 @@ func TestTapSourceConfigSupportsGenericMode(t *testing.T) {
 	require.Equal(t, "generic-tap", got.ProcessorID)
 	require.Equal(t, "generic", got.ProtocolMode)
 	require.Equal(t, "udp", got.BPFFilter)
+	require.False(t, got.IncludeHTTPHeaders)
 }
 
 func TestTapProtocolsComeFromSharedCatalog(t *testing.T) {
@@ -90,9 +95,9 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 		},
 		"voip": {
 			cmd: voipTapCmd, short: "Standalone VoIP capture with full processor capabilities",
-			helpHash: "35e476ac25484ea76acfd90c798302893369f2745c7b5b22cda411113a78694e",
-			flags:    tapFlagDefaults("pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-user", "", "sipuser", "", "tcp-performance-mode", "balanced", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
-			bindings: tapBindings("pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-user", "tap.voip.sip_user", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
+			helpHash: "f81282ded212c6cb468833f09749f3c1ef65671ff9ed9735102cd4f27cd566fb",
+			flags:    tapFlagDefaults("pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-user", "", "sipuser", "", "tcp-performance-mode", "balanced", "tcp-reassembly-shards", "1", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
+			bindings: tapBindings("pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-user", "tap.voip.sip_user", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-reassembly-shards", "tap.voip.tcp_reassembly_shards", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
 		},
 	}
 

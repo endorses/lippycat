@@ -13,6 +13,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"runtime"
@@ -45,6 +46,7 @@ type ApplicationFilter interface {
 	// MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
 	// Used for LI correlation to map matched filters back to intercept task XIDs.
 	MatchPacketWithIDs(packet gopacket.Packet) (matched bool, filterIDs []string)
+	MatchPacketLevelWithIDs(packet gopacket.Packet) (matched bool, filterIDs []string)
 }
 
 // VoIPProcessor is an alias for voipprocessor.SourceAdapter.
@@ -160,6 +162,9 @@ func (s *LocalSource) cachedFilterIDsForCalls(callIDs []string) []string {
 	for _, callID := range callIDs {
 		if cached, ok := s.callFilterCache.Load(callID); ok {
 			for _, filterID := range cached.filterIDs {
+				if filterID == "" {
+					continue
+				}
 				if _, exists := seen[filterID]; exists {
 					continue
 				}
@@ -169,6 +174,80 @@ func (s *LocalSource) cachedFilterIDsForCalls(callIDs []string) []string {
 		}
 	}
 	return filterIDs
+}
+
+// composeFilterIDs returns the stable, deduplicated union of direct packet
+// matches followed by IDs inherited from selected calls.
+func composeFilterIDs(direct, inherited []string) []string {
+	filterIDs := make([]string, 0, len(direct)+len(inherited))
+	seen := make(map[string]struct{}, len(direct)+len(inherited))
+	for _, ids := range [][]string{direct, inherited} {
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			filterIDs = append(filterIDs, id)
+		}
+	}
+	return filterIDs
+}
+
+const credibleSIPStartLineLimit = 256
+
+// hasCredibleSIPStartLine conservatively recognizes a bounded SIP request or
+// response start line without converting packet data to strings or allocating.
+func hasCredibleSIPStartLine(packet gopacket.Packet) bool {
+	if packet == nil || packet.TransportLayer() == nil {
+		return false
+	}
+	payload := packet.TransportLayer().LayerPayload()
+	if len(payload) == 0 {
+		return false
+	}
+	if len(payload) > credibleSIPStartLineLimit {
+		payload = payload[:credibleSIPStartLineLimit]
+	}
+	lineEnd := bytes.IndexByte(payload, '\n')
+	if lineEnd < 0 {
+		return false
+	}
+	line := payload[:lineEnd]
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
+	if bytes.HasPrefix(line, []byte("SIP/2.0 ")) {
+		status := line[len("SIP/2.0 "):]
+		return len(status) >= 3 && status[0] >= '1' && status[0] <= '6' &&
+			status[1] >= '0' && status[1] <= '9' && status[2] >= '0' && status[2] <= '9' &&
+			(len(status) == 3 || status[3] == ' ')
+	}
+
+	space := bytes.IndexByte(line, ' ')
+	if space <= 0 || !credibleSIPMethod(line[:space]) {
+		return false
+	}
+	rest := line[space+1:]
+	version := bytes.LastIndex(rest, []byte(" SIP/2.0"))
+	return version > 0 && version+len(" SIP/2.0") == len(rest) &&
+		bytes.IndexByte(rest[:version], ' ') < 0
+}
+
+func credibleSIPMethod(method []byte) bool {
+	for _, known := range [...][]byte{
+		[]byte("ACK"), []byte("BYE"), []byte("CANCEL"), []byte("INFO"),
+		[]byte("INVITE"), []byte("MESSAGE"), []byte("NOTIFY"), []byte("OPTIONS"),
+		[]byte("PRACK"), []byte("PUBLISH"), []byte("REFER"), []byte("REGISTER"),
+		[]byte("SUBSCRIBE"), []byte("UPDATE"),
+	} {
+		if bytes.Equal(method, known) {
+			return true
+		}
+	}
+	return false
 }
 
 // LocalSource captures packets from local network interfaces.
@@ -213,10 +292,6 @@ type LocalSource struct {
 	// Optional TCP assembler for TCP stream reassembly (e.g., TCP SIP)
 	// When set, TCP packets are routed to the assembler instead of direct processing
 	tcpAssembler TCPAssembler
-
-	// Guards tcpAssembler.AssemblePacket, which is not concurrency-safe, when the
-	// batching loop drains the packet buffer from multiple detection workers.
-	assemblerMu sync.Mutex
 
 	// Stats tracking
 	stats *AtomicStats
@@ -263,6 +338,11 @@ type LocalSourceConfig struct {
 	// ProtocolMode indicates the capture protocol mode (e.g., "generic", "voip", "dns", "email", "http", "tls").
 	// Used for TUI display and filter validation.
 	ProtocolMode string
+
+	// IncludeHTTPHeaders controls whether protocol enrichment retains complete
+	// HTTP header maps. Resolve this once during command composition; packet
+	// processing must not perform configuration lookups on the hot path.
+	IncludeHTTPHeaders bool
 
 	// CallFilterCacheSize bounds retained selected-call filter attribution.
 	CallFilterCacheSize int
@@ -556,10 +636,10 @@ func (s *LocalSource) batchingLoop() {
 	for i := range workerChans {
 		workerChans[i] = make(chan capture.PacketInfo, detectionWorkerChanBuffer)
 		wg.Add(1)
-		go func(in <-chan capture.PacketInfo) {
+		go func(in <-chan capture.PacketInfo, receiveTCPInjection bool) {
 			defer wg.Done()
-			s.batchingWorker(in)
-		}(workerChans[i])
+			s.batchingWorkerWithInjection(in, receiveTCPInjection)
+		}(workerChans[i], i == 0)
 	}
 
 	closeWorkers := func() {
@@ -575,14 +655,7 @@ func (s *LocalSource) batchingLoop() {
 			netLayer := pkt.NetworkLayer()
 			transLayer := pkt.TransportLayer()
 			if netLayer != nil && transLayer != nil {
-				if _, isTCP := transLayer.(*layers.TCP); isTCP {
-					// TCP goes to worker 0: the reassembly assembler is not
-					// concurrency-safe, so all TCP is handled by a single worker.
-					idx = 0
-				} else {
-					h := netLayer.NetworkFlow().FastHash() ^ transLayer.TransportFlow().FastHash()
-					idx = int(h % uint64(numWorkers))
-				}
+				idx = pipeline.FlowShard(netLayer.NetworkFlow(), transLayer.TransportFlow(), numWorkers)
 			}
 		}
 		select {
@@ -619,9 +692,17 @@ func getDetectionWorkerCount() int {
 // same worker, per-flow detector state stays single-goroutine and in order.
 // Cross-worker shared state is concurrency-safe: the detector's cache/flow-tracker
 // (RWMutex) and SIP IP-pair map (sync.Map), callFilterCache (sync.Map),
-// currentBatch (batchMu), stats (atomic), and the TCP assembler (guarded by
-// assemblerMu; TCP is additionally pinned to a single worker).
+// currentBatch (batchMu), and stats (atomic). TCP assembler concurrency is
+// handled by the reassembly engine's flow shards.
 func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
+	s.batchingWorkerWithInjection(input, true)
+}
+
+// batchingWorkerWithInjection processes one flow-routed ingress queue. Exactly
+// one worker receives reassembled TCP injections: multiple consumers would
+// preserve channel receive order but could finish filtering and append to the
+// shared batch out of order for consecutive messages on the same TCP flow.
+func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInfo, receiveTCPInjection bool) {
 	ticker := time.NewTicker(s.config.BatchTimeout)
 	defer ticker.Stop()
 
@@ -630,6 +711,9 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 	tcpChan := s.tcpInjectionChan
 	tcpAssembler := s.tcpAssembler
 	s.mu.Unlock()
+	if !receiveTCPInjection {
+		tcpChan = nil
+	}
 
 	for {
 		select {
@@ -656,7 +740,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			s.mu.Unlock()
 
 			if tcpFilter != nil {
-				matched, filterIDs := tcpFilter.MatchPacketWithIDs(injectedPkt.PacketInfo.Packet)
+				matched, directIDs := tcpFilter.MatchPacketWithIDs(injectedPkt.PacketInfo.Packet)
 				callID := ""
 				if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil {
 					callID = pbPkt.Metadata.Sip.CallId
@@ -673,29 +757,27 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 					}
 					continue
 				}
-				if matched && len(filterIDs) > 0 {
-					pbPkt.MatchedFilterIds = filterIDs
+				filterIDs := composeFilterIDs(directIDs, inheritedIDs)
+				if matched && len(directIDs) > 0 {
 					// Cache SIP CallID → filterIDs for RTP correlation
 					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
-							s.callFilterCache.Store(callID, cachedFilterIDs{filterIDs: filterIDs, storedAt: time.Now()})
+							s.callFilterCache.Store(callID, cachedFilterIDs{
+								filterIDs: composeFilterIDs(directIDs, nil),
+								storedAt:  time.Now(),
+							})
 						}
 					}
-				} else {
-					filterIDs = inheritedIDs
-					if len(filterIDs) == 0 {
-						if injectedPkt.AfterProcess != nil {
-							injectedPkt.AfterProcess()
-						}
-						continue
-					}
-					pbPkt.MatchedFilterIds = filterIDs
 				}
+				if !matched && len(filterIDs) == 0 {
+					if injectedPkt.AfterProcess != nil {
+						injectedPkt.AfterProcess()
+					}
+					continue
+				}
+				pbPkt.MatchedFilterIds = filterIDs
 			}
-
-			// Update stats
-			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 
 			// Add to batch
 			envelope, err := s.normalizeLocalPacket(pbPkt)
@@ -707,6 +789,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 				}
 				continue
 			}
+			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 			s.batchMu.Lock()
 			s.currentBatch = append(s.currentBatch, envelope)
 			if injectedPkt.AfterProcess != nil {
@@ -734,10 +817,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			// TCP packets will come back via tcpInjectionChan when SIP messages are complete
 			if tcpAssembler != nil && pktInfo.Packet != nil && pktInfo.Packet.TransportLayer() != nil {
 				if _, isTCP := pktInfo.Packet.TransportLayer().(*layers.TCP); isTCP {
-					// AssemblePacket is not concurrency-safe; serialise it across workers.
-					s.assemblerMu.Lock()
 					handled := tcpAssembler.AssemblePacket(pktInfo)
-					s.assemblerMu.Unlock()
 					if handled {
 						// TCP packet handled by assembler, don't process further
 						continue
@@ -751,10 +831,11 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			dnsProc := s.dnsProcessor
 			selectionPolicy := s.selectionPolicy
 			s.mu.Unlock()
+			filterConfigured := filter != nil
 
 			// Convert to protobuf format first
 			pbPkt := convertPacketInfo(pktInfo)
-			pbPkt.Metadata = protocolmeta.Enrich(pktInfo.Packet, pbPkt.Metadata, viper.GetBool("logs.include_http_headers"))
+			pbPkt.Metadata = protocolmeta.Enrich(pktInfo.Packet, pbPkt.Metadata, s.config.IncludeHTTPHeaders)
 
 			// Apply VoIP processing BEFORE filtering
 			// This ensures RTP packets associated with calls are detected
@@ -775,13 +856,6 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 					}
 				}
 			}
-			matchFilter := func() (bool, []string) {
-				if reuseVerdict {
-					return reuseMatched, reuseIDs
-				}
-				return filter.MatchPacketWithIDs(pktInfo.Packet)
-			}
-
 			// Apply DNS processing if enabled and not a VoIP packet
 			// DNS packets are not VoIP, so skip if already identified as VoIP
 			if dnsProc != nil && !isVoIPPacket {
@@ -799,35 +873,59 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			// Special case: RTP packets that don't directly match can pass if their
 			// CallID is in the callFilterCache (associated with a matched SIP call).
 			var matchedFilterIDs []string
-			if filter != nil && !isVoIPPacket {
+			if filterConfigured && !isVoIPPacket {
 				// Non-VoIP: filter decides pass/drop
-				matched, filterIDs := matchFilter()
+				matched, filterIDs := reuseMatched, reuseIDs
+				if !reuseVerdict {
+					matched, filterIDs = filter.MatchPacketWithIDs(pktInfo.Packet)
+				}
 				if !matched {
 					continue
 				}
 				matchedFilterIDs = filterIDs
-			} else if filter != nil && isVoIPPacket {
-				// VoIP: filter decides pass/drop, with cache fallback for RTP
-				matched, filterIDs := matchFilter()
+			} else if filterConfigured && isVoIPPacket {
+				// Classified media is restricted to packet-level filters. SIP can
+				// reuse the processor verdict; conservative start-line recognition
+				// handles VoIP results lacking protocol metadata.
+				var matched bool
+				var directFilterIDs []string
+				switch {
+				case pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil:
+					matched, directFilterIDs = filter.MatchPacketLevelWithIDs(pktInfo.Packet)
+				case pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && reuseVerdict:
+					matched, directFilterIDs = reuseMatched, reuseIDs
+				case pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil:
+					matched, directFilterIDs = filter.MatchPacketWithIDs(pktInfo.Packet)
+				case hasCredibleSIPStartLine(pktInfo.Packet):
+					matched, directFilterIDs = filter.MatchPacketWithIDs(pktInfo.Packet)
+				default:
+					matched, directFilterIDs = filter.MatchPacketLevelWithIDs(pktInfo.Packet)
+				}
 
+				if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && len(voipCallIDs) == 0 && pbPkt.Metadata.Sip.CallId != "" {
+					voipCallIDs = []string{pbPkt.Metadata.Sip.CallId}
+				}
 				inheritedFilterIDs := s.cachedFilterIDsForCalls(voipCallIDs)
 				selected := selectionPolicy.Select(callregistry.SelectionInput{
-					FilterConfigured:   true,
+					FilterConfigured:   filterConfigured,
 					DirectMatch:        matched,
 					PreviouslySelected: len(inheritedFilterIDs) > 0,
 				})
 				if !selected {
 					continue
 				}
+				matchedFilterIDs = composeFilterIDs(directFilterIDs, inheritedFilterIDs)
 				if matched {
-					matchedFilterIDs = filterIDs
 
 					// For SIP packets that match, cache CallID → filterIDs
 					// so RTP packets (same CallID) can inherit the filter IDs
-					if len(filterIDs) > 0 && pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
+					if len(directFilterIDs) > 0 && pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
-							s.callFilterCache.Store(callID, cachedFilterIDs{filterIDs: filterIDs, storedAt: time.Now()})
+							s.callFilterCache.Store(callID, cachedFilterIDs{
+								filterIDs: composeFilterIDs(directFilterIDs, nil),
+								storedAt:  time.Now(),
+							})
 						}
 					}
 				} else {
@@ -849,8 +947,6 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 					if len(voipCallIDs) == 0 && callID != "" {
 						voipCallIDs = []string{callID}
 					}
-					matchedFilterIDs = inheritedFilterIDs
-
 					// If still no filter IDs, drop the packet
 					if len(matchedFilterIDs) == 0 {
 						continue
@@ -863,9 +959,6 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 				pbPkt.MatchedFilterIds = matchedFilterIDs
 			}
 
-			// Update stats for packets that passed filtering
-			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
-
 			// Add to batch
 			envelope, err := s.normalizeLocalPacket(pbPkt)
 			if err != nil {
@@ -873,6 +966,8 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 				logger.Error("Failed to normalize local packet", "error", err)
 				continue
 			}
+			// A packet is forwarded only after it can be admitted to a batch.
+			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 			s.batchMu.Lock()
 			s.currentBatch = append(s.currentBatch, envelope)
 			batchLen := len(s.currentBatch)
@@ -910,9 +1005,12 @@ func (s *LocalSource) sendBatch() {
 		Sequence:    s.batchSeq,
 		TimestampNs: batchTime.UnixNano(),
 		Stats: &data.BatchStats{
-			TotalCaptured:   s.stats.packetsCaptured.Load(),
-			FilteredMatched: s.stats.packetsForwarded.Load(),
-			Dropped:         s.droppedTotal(),
+			TotalCaptured:             s.stats.packetsCaptured.Load(),
+			FilteredMatched:           s.stats.packetsForwarded.Load(),
+			Dropped:                   s.droppedTotal(),
+			CaptureBufferRegularDrops: s.captureBufferRegularDrops(),
+			CaptureBufferSipDrops:     s.captureBufferSIPDrops(),
+			BatchChannelDrops:         s.stats.packetsDropped.Load(),
 		},
 		AfterProcess: s.currentBatchAfterProcess,
 	}
@@ -952,17 +1050,30 @@ func (s *LocalSource) Batches() <-chan *PacketBatch {
 // Stats returns current capture statistics.
 func (s *LocalSource) Stats() Stats {
 	st := s.stats.Snapshot()
-	st.PacketsDropped = s.droppedTotal()
+	st.CaptureBufferRegularDrops = s.captureBufferRegularDrops()
+	st.CaptureBufferSIPDrops = s.captureBufferSIPDrops()
+	st.BatchChannelDrops = s.stats.packetsDropped.Load()
+	st.PacketsDropped = st.CaptureBufferRegularDrops + st.CaptureBufferSIPDrops + st.BatchChannelDrops
 	return st
+}
+
+func (s *LocalSource) captureBufferRegularDrops() uint64 {
+	if pb := s.packetBuffer.Load(); pb != nil {
+		return uint64(pb.GetDropped()) // #nosec G115 -- drop counters cannot be negative
+	}
+	return 0
+}
+
+func (s *LocalSource) captureBufferSIPDrops() uint64 {
+	if pb := s.packetBuffer.Load(); pb != nil {
+		return uint64(pb.GetSIPDropped()) // #nosec G115 -- drop counters cannot be negative
+	}
+	return 0
 }
 
 // droppedTotal returns capture buffer overflow (regular + SIP) plus batch channel overflow.
 func (s *LocalSource) droppedTotal() uint64 {
-	dropped := s.stats.packetsDropped.Load()
-	if pb := s.packetBuffer.Load(); pb != nil {
-		dropped += uint64(pb.GetDropped()) + uint64(pb.GetSIPDropped()) // #nosec G115
-	}
-	return dropped
+	return s.captureBufferRegularDrops() + s.captureBufferSIPDrops() + s.stats.packetsDropped.Load()
 }
 
 // SourceID returns the source identifier for this local capture.

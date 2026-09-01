@@ -112,13 +112,17 @@ type PacketBuffer struct {
 	cancel     context.CancelFunc
 	dropped    int64
 	sipDropped int64 // Separate counter for dropped SIP packets (should be rare)
-	bufferSize int
-	closed     int32          // atomic flag: 0 = open, 1 = closed
-	sendersMu  sync.Mutex     // protects closed-check-and-add sequence to prevent race with Wait()
-	sendersWg  sync.WaitGroup // tracks active Send() operations to prevent race on channel close
-	mergerWg   sync.WaitGroup // tracks merger goroutine
-	pauseFn    func() bool    // optional: if set and returns true, Send skips packet (for TUI pause)
-	pauseMu    sync.RWMutex   // protects pauseFn
+	// sipClassified counts packets routed as recognized SIP, including UDP starts
+	// and every TCP segment protected by stateful flow classification.
+	sipClassified int64
+	bufferSize    int
+	closed        int32          // atomic flag: 0 = open, 1 = closed
+	sendersMu     sync.Mutex     // protects closed-check-and-add sequence to prevent race with Wait()
+	sendersWg     sync.WaitGroup // tracks active Send() operations to prevent race on channel close
+	mergerWg      sync.WaitGroup // tracks merger goroutine
+	pauseFn       func() bool    // optional: if set and returns true, Send skips packet (for TUI pause)
+	pauseMu       sync.RWMutex   // protects pauseFn
+	sipFlows      *tcpSIPFlowClassifier
 }
 
 func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
@@ -131,6 +135,7 @@ func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
 		cancel:     cancel,
 		bufferSize: bufferSize,
 		closed:     0,
+		sipFlows:   newTCPSIPFlowClassifier(),
 	}
 
 	// Start merger goroutine that prioritizes SIP packets
@@ -275,6 +280,7 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 	isSIP := pb.isSIPPacket(pkt.Packet)
 
 	if isSIP {
+		atomic.AddInt64(&pb.sipClassified, 1)
 		// Try SIP priority channel first
 		select {
 		case pb.sipCh <- pkt:
@@ -358,6 +364,7 @@ func (pb *PacketBuffer) SendBlocking(pkt PacketInfo) bool {
 	isSIP := pb.isSIPPacket(pkt.Packet)
 
 	if isSIP {
+		atomic.AddInt64(&pb.sipClassified, 1)
 		// Try SIP priority channel first (blocking)
 		select {
 		case pb.sipCh <- pkt:
@@ -391,7 +398,7 @@ func (pb *PacketBuffer) isSIPPacket(pkt gopacket.Packet) bool {
 	var payload []byte
 	switch trans := transLayer.(type) {
 	case *layers.TCP:
-		payload = trans.LayerPayload()
+		return pb.sipFlows.classify(pkt.NetworkLayer(), trans, time.Now())
 	case *layers.UDP:
 		payload = trans.LayerPayload()
 	default:
@@ -436,9 +443,22 @@ func (pb *PacketBuffer) GetSIPDropped() int64 {
 	return atomic.LoadInt64(&pb.sipDropped)
 }
 
+// GetSIPClassified returns the cumulative number of packets routed to the SIP
+// priority path. It includes accepted packets and packets later dropped after
+// both the priority and fallback lanes were saturated.
+func (pb *PacketBuffer) GetSIPClassified() int64 {
+	return atomic.LoadInt64(&pb.sipClassified)
+}
+
 // GetDropped returns the number of dropped regular packets
 func (pb *PacketBuffer) GetDropped() int64 {
 	return atomic.LoadInt64(&pb.dropped)
+}
+
+// GetSIPFlowClassifierStats returns cumulative classifier telemetry and the
+// current bounded flow-state cardinality.
+func (pb *PacketBuffer) GetSIPFlowClassifierStats() (SIPFlowClassifierStats, int) {
+	return pb.sipFlows.snapshot(time.Now())
 }
 
 func (pb *PacketBuffer) Close() {
@@ -453,6 +473,7 @@ func (pb *PacketBuffer) Close() {
 
 		// Wait for all active Send() operations to complete
 		pb.sendersWg.Wait()
+		pb.sipFlows.clear()
 
 		// Close both input channels (order matters: close sipCh first to drain priority packets)
 		close(pb.sipCh)
@@ -491,6 +512,7 @@ func (pb *PacketBuffer) CloseInputs() {
 
 	// Wait for all active Send() operations to complete
 	pb.sendersWg.Wait()
+	pb.sipFlows.clear()
 
 	// Close input channels - merger will drain and close mergedCh
 	close(pb.sipCh)
@@ -506,6 +528,12 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 // When pauseFn returns true, packets are dropped at the source to reduce CPU usage.
 // Note: Signal handling should be done by the caller. This function only respects context cancellation.
 func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool) {
+	InitWithContextAndTelemetry(ctx, ifaces, filter, packetProcessor, assembler, pauseFn, nil)
+}
+
+// InitWithContextAndTelemetry starts packet capture and periodically reports
+// cumulative libpcap and PacketBuffer drop statistics.
+func InitWithContextAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool, telemetryCallback TelemetryCallback) {
 	// Use a configurable buffer size with proper backpressure handling
 	bufferSize := getPacketBufferSize()
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
@@ -514,14 +542,19 @@ func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filt
 	}
 	defer packetBuffer.Close()
 
-	InitWithBuffer(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler)
+	initWithBufferAndTelemetry(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler, telemetryCallback)
 }
 
 // InitWithBuffer starts packet capture with an external PacketBuffer
 // This allows the caller to own the buffer and read from it directly, avoiding
 // double-buffering when the processor would just copy packets to another buffer.
 func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler) {
+	initWithBufferAndTelemetry(ctx, ifaces, filter, buffer, packetProcessor, assembler, nil)
+}
+
+func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, telemetryCallback TelemetryCallback) {
 	packetBuffer := buffer
+	telemetry := newTelemetryCollector(telemetryCallback)
 
 	var wg sync.WaitGroup
 	var processorWg sync.WaitGroup
@@ -589,20 +622,44 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 					"interface", pif.Name())
 				return
 			}
-			defer handle.Close()
-
 			// Mark that at least one capture succeeded
 			captureSuccessCount.Add(1)
+			var handleMu sync.Mutex
+			defer func() {
+				handleMu.Lock()
+				defer handleMu.Unlock()
+				handle.Close()
+			}()
 
 			// Close handle when context is cancelled to unblock packet reads
 			// This ensures captureFromInterface exits promptly on context cancellation
+			captureDone := make(chan struct{})
+			cancelWatcherDone := make(chan struct{})
 			go func() {
-				<-ctx.Done()
+				defer close(cancelWatcherDone)
+				select {
+				case <-captureDone:
+					return
+				case <-ctx.Done():
+				}
 				logger.Debug("Context cancelled, closing pcap handle", "interface", pif.Name())
+				handleMu.Lock()
+				defer handleMu.Unlock()
+				if pcapStats, statsErr := handle.Stats(); statsErr == nil {
+					telemetry.report(
+						pif.Name(),
+						int64(pcapStats.PacketsReceived),
+						int64(pcapStats.PacketsDropped),
+						int64(pcapStats.PacketsIfDropped),
+						packetBuffer,
+					)
+				}
 				handle.Close() // This will cause packetSource.Packets() channel to close
 			}()
 
-			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter)
+			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu)
+			close(captureDone)
+			<-cancelWatcherDone
 		}(iface)
 	}
 
@@ -691,7 +748,7 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 	}
 }
 
-func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter) {
+func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter, telemetry *telemetryCollector, handleMu *sync.Mutex) {
 	logger.Debug("captureFromInterface starting", "interface", iface.Name())
 	defer logger.Debug("captureFromInterface exiting", "interface", iface.Name())
 
@@ -715,9 +772,29 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	// Note: defragmenter is shared across all interfaces to correctly reassemble
 	// IP fragments that may arrive on different interfaces (e.g., due to port mirror splits)
 
-	// Add periodic stats logging
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+	statsCtx, stopStats := context.WithCancel(ctx)
+	statsTicker := time.NewTicker(time.Second)
+	defer statsTicker.Stop()
+	statsDone := make(chan struct{})
+	defer func() {
+		stopStats()
+		<-statsDone
+		handleMu.Lock()
+		defer handleMu.Unlock()
+		if ctx.Err() == nil {
+			pcapStats, statsErr := handle.Stats()
+			if statsErr != nil {
+				return
+			}
+			telemetry.report(
+				iface.Name(),
+				int64(pcapStats.PacketsReceived),
+				int64(pcapStats.PacketsDropped),
+				int64(pcapStats.PacketsIfDropped),
+				buffer,
+			)
+		}
+	}()
 
 	// Batched atomic updates: use local counter and periodically sync to atomic
 	// Both counters are atomic so the stats goroutine can safely read the total
@@ -728,30 +805,51 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	const batchThreshold = 100          // flush to packetCount every N packets
 
 	go func() {
+		defer close(statsDone)
 		logger.Debug("Stats logging goroutine starting", "interface", iface.Name())
 		defer logger.Debug("Stats logging goroutine exiting", "interface", iface.Name())
 		for {
 			select {
-			case <-ctx.Done():
+			case <-statsCtx.Done():
 				logger.Debug("Stats goroutine received context cancellation", "interface", iface.Name())
 				return
-			case <-ticker.C:
+			case tickTime := <-statsTicker.C:
 				// Note: stale fragment cleanup is handled by a single shared goroutine
 				// in InitWithBuffer to avoid duplicate cleanup across interfaces
 
 				// Include both flushed and unflushed counts for accurate reporting
 				count := packetCount.Load() + localCount.Load()
-				dropped := atomic.LoadInt64(&buffer.dropped)
 				frags := fragmentsReceived.Load()
 				reassembled := packetsReassembled.Load()
-				logger.Info("Capture heartbeat",
-					"interface", iface.Name(),
-					"packets_processed", count,
-					"packets_dropped", dropped,
-					"ip_fragments", frags,
-					"reassembled", reassembled,
-					"buffer_len", buffer.Len(),
-					"buffer_closed", buffer.IsClosed())
+				handleMu.Lock()
+				pcapStats, statsErr := handle.Stats()
+				handleMu.Unlock()
+				if statsErr == nil {
+					snapshot := telemetry.report(iface.Name(), int64(pcapStats.PacketsReceived), int64(pcapStats.PacketsDropped), int64(pcapStats.PacketsIfDropped), buffer)
+					if tickTime.Second()%30 == 0 {
+						logger.Info("Capture heartbeat",
+							"interface", iface.Name(),
+							"packets_processed", count,
+							"pcap_packets_received", pcapStats.PacketsReceived,
+							"pcap_kernel_dropped", pcapStats.PacketsDropped,
+							"pcap_interface_dropped", pcapStats.PacketsIfDropped,
+							"total_kernel_dropped", snapshot.KernelDrops+snapshot.InterfaceDrops,
+							"packet_buffer_dropped", snapshot.PacketBufferDrops,
+							"packet_buffer_regular_dropped", buffer.GetDropped(),
+							"packet_buffer_sip_dropped", buffer.GetSIPDropped(),
+							"sip_priority_classified", snapshot.SIPClassified,
+							"sip_flow_promotions", snapshot.SIPFlowPromotions,
+							"sip_flow_classified_segments", snapshot.SIPFlowClassifiedSegments,
+							"sip_flow_idle_expirations", snapshot.SIPFlowIdleExpirations,
+							"sip_flow_capacity_evictions", snapshot.SIPFlowCapacityEvictions,
+							"sip_flow_connection_closes", snapshot.SIPFlowConnectionCloses,
+							"sip_flow_active", snapshot.SIPFlowActive,
+							"ip_fragments", frags,
+							"reassembled", reassembled,
+							"buffer_len", buffer.Len(),
+							"buffer_closed", buffer.IsClosed())
+					}
+				}
 			}
 		}
 	}()

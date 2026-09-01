@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -164,7 +165,7 @@ func TestResync_GenuineNonSIPRejectedAfterBoundedScan(t *testing.T) {
 	}
 
 	// Directly exercise the bounded scan: a large non-SIP blob (many short
-	// non-SIP lines) must return errNotSIP after scanning past the window, not
+	// non-SIP lines) must return errNotSIP at the window, not
 	// hang or scan unbounded.
 	var big strings.Builder
 	line := "GET /some/very/long/non-sip/path/that/is/not/a/start/line HTTP/1.1\r\n"
@@ -175,12 +176,200 @@ func TestResync_GenuineNonSIPRejectedAfterBoundedScan(t *testing.T) {
 	if !errors.Is(err, errNotSIP) {
 		t.Fatalf("readSIPStartLine on non-SIP blob returned err=%v, want errNotSIP", err)
 	}
-	if scanned <= resyncWindowBytes {
-		t.Errorf("scanned=%d, want > resyncWindowBytes(%d) — scan not reaching the bound", scanned, resyncWindowBytes)
+	if scanned != resyncWindowBytes {
+		t.Errorf("scanned=%d, want exact resyncWindowBytes(%d)", scanned, resyncWindowBytes)
 	}
-	if scanned > resyncWindowBytes+maxSIPHeaderLineLength+len(line) {
-		t.Errorf("scanned=%d exceeds the bounded window by more than one line — scan not bounded", scanned)
+}
+
+func TestResync_EmbeddedCRReplaysCredibleResponse(t *testing.T) {
+	rec := &recordingSIPHandler{}
+	s, cancel := newResyncTestStream(t, rec)
+	defer cancel()
+
+	damaged := "INVITE sip:b@example.test SIP/2.0\r\n" +
+		"Call-ID: incomplete\r\nContent-Length: 12\r" +
+		"SIP/2.0 200 OK\r\nCall-ID: recovered\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n"
+	s.processSIPFromReader(strings.NewReader(damaged))
+
+	if rec.has("incomplete") || !rec.has("recovered") {
+		t.Fatalf("embedded-CR recovery dispatched call IDs %v", rec.callIDs)
 	}
+}
+
+func TestResync_CorrectlyFramedInvalidContentLengthIsPolicyRejection(t *testing.T) {
+	tests := []string{"-1", "not-a-number", "999999999999"}
+	for _, value := range tests {
+		t.Run(value, func(t *testing.T) {
+			s, cancel := newResyncTestStream(t, &recordingSIPHandler{})
+			defer cancel()
+			input := "INVITE sip:b@example.test SIP/2.0\r\nContent-Length: " + value + "\r\n\r\n"
+			_, err := s.readCompleteSipMessageFromReader(bufio.NewReader(strings.NewReader(input)))
+			var policyErr *contentLengthPolicyError
+			if !errors.As(err, &policyErr) {
+				t.Fatalf("error %v is not a Content-Length policy rejection", err)
+			}
+			var framingErr *recoverableFramingError
+			if errors.As(err, &framingErr) {
+				t.Fatalf("policy rejection was reclassified as recoverable: %v", err)
+			}
+		})
+	}
+}
+
+func TestTCPFramingRejectsConflictingDuplicateContentLength(t *testing.T) {
+	s, cancel := newResyncTestStream(t, &recordingSIPHandler{})
+	defer cancel()
+
+	input := "INVITE sip:b@example.test SIP/2.0\r\nContent-Length: 0\r\nl: 3\r\n\r\n" +
+		"OPTIONS sip:b@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n"
+	reader := bufio.NewReader(strings.NewReader(input))
+
+	_, err := s.readCompleteSipMessageFromReader(reader)
+	var policyErr *contentLengthPolicyError
+	if !errors.As(err, &policyErr) {
+		t.Fatalf("error %v is not a Content-Length policy rejection", err)
+	}
+
+	remaining, readErr := io.ReadAll(reader)
+	if readErr != nil {
+		t.Fatalf("read remaining bytes: %v", readErr)
+	}
+	if got, want := string(remaining), "\r\nOPTIONS sip:b@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n"; got != want {
+		t.Fatalf("remaining bytes = %q, want %q", got, want)
+	}
+}
+
+func TestCredibleSIPAfterEmbeddedCRRejectsLoneAndFalseStarts(t *testing.T) {
+	for _, input := range []string{
+		"Content-Length: 3\r\n",
+		"Content-Length: 3\rnot a SIP line\r\n",
+		"Header: value\rINVITE missing-version\r\n",
+	} {
+		if got := credibleSIPAfterEmbeddedCR(input); got != "" {
+			t.Fatalf("credibleSIPAfterEmbeddedCR(%q) = %q", input, got)
+		}
+	}
+	input := "Content-Length: 3\rOPTIONS sip:a@example.test SIP/2.0\r\n"
+	if got := credibleSIPAfterEmbeddedCR(input); got != "OPTIONS sip:a@example.test SIP/2.0\r\n" {
+		t.Fatalf("unexpected replay suffix %q", got)
+	}
+}
+
+func TestResyncRejectsMalformedResponseFalseStart(t *testing.T) {
+	for _, line := range []string{
+		"SIP/2.0 garbage",
+		"SIP/2.0 20 OK",
+		"SIP/2.0 700 Invalid",
+		"SIP/2.0 200OK",
+	} {
+		if isSIPResponseLine(line) {
+			t.Fatalf("malformed response %q accepted as a SIP start line", line)
+		}
+	}
+	if !isSIPResponseLine("SIP/2.0 200 OK") {
+		t.Fatal("valid response start line was rejected")
+	}
+}
+
+func TestResyncHardLimitOnNewlineFreeInput(t *testing.T) {
+	s, cancel := newResyncTestStream(t, &recordingSIPHandler{})
+	defer cancel()
+
+	input := strings.Repeat("x", resyncWindowBytes*4)
+	_, scanned, err := s.readSIPStartLine(bufio.NewReader(strings.NewReader(input)))
+	if !errors.Is(err, errNotSIP) {
+		t.Fatalf("newline-free input returned %v, want errNotSIP", err)
+	}
+	if scanned != resyncWindowBytes {
+		t.Fatalf("scanned %d bytes, want hard limit %d", scanned, resyncWindowBytes)
+	}
+}
+
+func TestReadBoundedLineReturnsBeforeLiveStreamCloses(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	result := make(chan struct {
+		line string
+		err  error
+	}, 1)
+	go func() {
+		line, err := readBoundedLine(bufio.NewReader(reader), maxSIPHeaderLineLength)
+		result <- struct {
+			line string
+			err  error
+		}{line: line, err: err}
+	}()
+
+	if _, err := writer.Write([]byte("Call-ID: live-stream\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		if got.err != nil || got.line != "Call-ID: live-stream\r\n" {
+			t.Fatalf("readBoundedLine() = %q, %v", got.line, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("readBoundedLine blocked waiting for more live-stream data")
+	}
+}
+
+func TestReadBoundedLineDoesNotConsumePastLimit(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("12345\nnext\n"))
+	line, err := readBoundedLine(reader, 5)
+	if !errors.Is(err, errSIPLineLimit) || line != "12345" {
+		t.Fatalf("readBoundedLine() = %q, %v", line, err)
+	}
+	next, err := reader.ReadByte()
+	if err != nil || next != '\n' {
+		t.Fatalf("byte after limit = %q, %v; want preserved newline", next, err)
+	}
+}
+
+func TestResync_RepeatedEmbeddedCRHonorsCumulativeBound(t *testing.T) {
+	rec := &recordingSIPHandler{}
+	s, cancel := newResyncTestStream(t, rec)
+	defer cancel()
+
+	// Each malformed header consumes bytes before replaying another credible
+	// start. Repetition must stop at the cumulative 64 KiB limit.
+	unit := "OPTIONS sip:a@example.test SIP/2.0\r\nX-Fill: " + strings.Repeat("x", 2048) + "\r"
+	var input strings.Builder
+	for input.Len() < maxNonSIPBytesBeforeDiscard*2 {
+		input.WriteString(unit)
+	}
+	input.WriteString("OPTIONS sip:a@example.test SIP/2.0\r\nCall-ID: too-late\r\nContent-Length: 0\r\n\r\n")
+	s.processSIPFromReader(strings.NewReader(input.String()))
+	if rec.has("too-late") {
+		t.Fatal("parser exceeded cumulative resynchronization limit")
+	}
+	if loadDiscard(s) == 0 {
+		t.Fatal("stream was not discarded at cumulative resynchronization limit")
+	}
+}
+
+func FuzzTCPFramingRecovery(f *testing.F) {
+	seeds := [][]byte{
+		[]byte("INVITE sip:a@example.test SIP/2.0\r\nContent-Length: 3\rSIP/2.0 200 OK\r\nCall-ID: recovered\r\nContent-Length: 0\r\n\r\n"),
+		[]byte("INVITE sip:a@example.test SIP/2.0\r\nCall-ID: gap-header\r\n\r\nSIP/2.0 486 Busy Here\r\nContent-Length: 0\r\n\r\n"),
+		[]byte("MESSAGE sip:a@example.test SIP/2.0\r\nContent-Length: 4\r\nbo\rSIP/2.0 200 OK\r\nContent-Length: 0\r\n\r\n"),
+		[]byte("SIP/2.0 100 Trying\rplausible-but-damaged\rSIP/2.0 180 Ringing\r\nContent-Length: 0\r\n\r\n"),
+		[]byte(strings.Repeat("X: y\r\n", 256) + "\r\nOPTIONS sip:a@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n"),
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > maxNonSIPBytesBeforeDiscard*2 {
+			t.Skip()
+		}
+		s, cancel := newResyncTestStream(t, &recordingSIPHandler{})
+		defer cancel()
+		s.processSIPFromReader(bytes.NewReader(data))
+	})
 }
 
 // TestResync_ReusedFourTupleReassembles verifies the eviction/reset behaviour:

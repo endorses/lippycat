@@ -25,6 +25,7 @@ func TestDefaultLocalSourceConfig(t *testing.T) {
 	assert.Equal(t, 100*time.Millisecond, cfg.BatchTimeout)
 	assert.Equal(t, 10000, cfg.BufferSize)
 	assert.Equal(t, 1000, cfg.BatchBuffer)
+	assert.False(t, cfg.IncludeHTTPHeaders)
 }
 
 func TestNewLocalSource_AppliesDefaults(t *testing.T) {
@@ -81,6 +82,33 @@ func TestInjectedPacketCompletionMovesWithBatchWithoutRunning(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("batching worker did not stop")
 	}
+}
+
+func TestNonInjectionWorkerDoesNotConsumeReassembledPackets(t *testing.T) {
+	cfg := DefaultLocalSourceConfig()
+	s := NewLocalSource(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.ctx = ctx
+
+	injected := make(chan InjectedPacket, 1)
+	injected <- InjectedPacket{PacketInfo: buildTCPPacket(t, 1)}
+	s.SetTCPInjectionChannel(injected)
+	input := make(chan capture.PacketInfo)
+	close(input)
+
+	done := make(chan struct{})
+	go func() {
+		s.batchingWorkerWithInjection(input, false)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("non-injection worker did not stop")
+	}
+	require.Len(t, injected, 1, "only the designated worker may consume ordered TCP injections")
 }
 
 func TestDroppedBatchRunsDeferredCompletion(t *testing.T) {
@@ -199,7 +227,11 @@ func TestLocalSource_Stats_IncludesCaptureBufferDrops(t *testing.T) {
 
 	s.stats.AddDropped(5) // batch channel overflow
 
-	assert.Equal(t, uint64(pb.GetDropped())+5, s.Stats().PacketsDropped)
+	stats := s.Stats()
+	assert.Equal(t, uint64(pb.GetDropped()), stats.CaptureBufferRegularDrops)
+	assert.Zero(t, stats.CaptureBufferSIPDrops)
+	assert.Equal(t, uint64(5), stats.BatchChannelDrops)
+	assert.Equal(t, stats.CaptureBufferRegularDrops+stats.CaptureBufferSIPDrops+stats.BatchChannelDrops, stats.PacketsDropped)
 }
 
 func TestLocalSource_SetBPFFilter_BeforeStart(t *testing.T) {
@@ -336,6 +368,97 @@ func TestLocalSourceShutdownWithFullWorkerChannels(t *testing.T) {
 	}
 }
 
+func TestLocalSourceTCPFlowRoutingPreservesBidirectionalOrder(t *testing.T) {
+	viper.Set("processor.detection_workers", 4)
+	t.Cleanup(viper.Reset)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s := NewLocalSource(LocalSourceConfig{BatchSize: 100, BatchTimeout: time.Hour, BufferSize: 16, BatchBuffer: 1})
+	s.ctx = ctx
+	s.cancel = cancel
+	recorder := &orderedTCPAssembler{}
+	s.SetTCPAssembler(recorder)
+	pb := capture.NewPacketBuffer(ctx, 16)
+	s.packetBuffer.Store(pb)
+
+	packets := []capture.PacketInfo{
+		buildTCPFlowPacket(t, "192.0.2.10", "192.0.2.20", 5060, 5080, 1),
+		buildTCPFlowPacket(t, "192.0.2.20", "192.0.2.10", 5080, 5060, 2),
+		buildTCPFlowPacket(t, "192.0.2.10", "192.0.2.20", 5060, 5080, 3),
+		buildTCPFlowPacket(t, "192.0.2.20", "192.0.2.10", 5080, 5060, 4),
+	}
+	for _, pkt := range packets {
+		require.True(t, pb.Send(pkt))
+	}
+	pb.CloseInputs()
+
+	done := make(chan struct{})
+	s.wg.Add(1)
+	go func() {
+		s.batchingLoop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batchingLoop did not drain")
+	}
+	assert.Equal(t, []uint32{1, 2, 3, 4}, recorder.Sequences())
+	assert.Equal(t, int32(1), recorder.MaxConcurrency(), "opposite directions of one flow must stay on one worker")
+}
+
+func TestLocalSourceTCPIndependentFlowsExecuteConcurrently(t *testing.T) {
+	const workers = 2
+	viper.Set("processor.detection_workers", workers)
+	t.Cleanup(viper.Reset)
+
+	var packets [workers]capture.PacketInfo
+	found := [workers]bool{}
+	for port := uint16(10000); port < 20000 && (!found[0] || !found[1]); port++ {
+		pkt := buildTCPFlowPacket(t, "192.0.2.10", "192.0.2.20", port, 5060, uint32(port))
+		idx := pipeline.FlowShard(pkt.Packet.NetworkLayer().NetworkFlow(), pkt.Packet.TransportLayer().TransportFlow(), workers)
+		if !found[idx] {
+			packets[idx] = pkt
+			found[idx] = true
+		}
+	}
+	require.True(t, found[0] && found[1], "test flows must cover both workers")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s := NewLocalSource(LocalSourceConfig{BatchSize: 100, BatchTimeout: time.Hour, BufferSize: 4, BatchBuffer: 1})
+	s.ctx = ctx
+	s.cancel = cancel
+	assembler := newConcurrentTCPAssembler(2)
+	t.Cleanup(assembler.Release)
+	s.SetTCPAssembler(assembler)
+	pb := capture.NewPacketBuffer(ctx, 4)
+	s.packetBuffer.Store(pb)
+	require.True(t, pb.Send(packets[0]))
+	require.True(t, pb.Send(packets[1]))
+	pb.CloseInputs()
+
+	done := make(chan struct{})
+	s.wg.Add(1)
+	go func() {
+		s.batchingLoop()
+		close(done)
+	}()
+	select {
+	case <-assembler.allEntered:
+		// Both workers reached the assembler before either was released.
+	case <-time.After(time.Second):
+		t.Fatal("independent TCP flows did not execute concurrently")
+	}
+	assembler.Release()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batchingLoop did not drain")
+	}
+}
+
 func TestLocalSource_StartMultipleTimes(t *testing.T) {
 	s := NewLocalSource(LocalSourceConfig{
 		Interfaces: []string{"lo"}, // Use loopback for test
@@ -386,6 +509,60 @@ type blockingTCPAssembler struct {
 	releaseOnce sync.Once
 }
 
+type orderedTCPAssembler struct {
+	mu        sync.Mutex
+	sequences []uint32
+	active    atomic.Int32
+	maxActive atomic.Int32
+}
+
+func (a *orderedTCPAssembler) AssemblePacket(pkt capture.PacketInfo) bool {
+	active := a.active.Add(1)
+	for old := a.maxActive.Load(); active > old && !a.maxActive.CompareAndSwap(old, active); old = a.maxActive.Load() {
+	}
+	defer a.active.Add(-1)
+	// Give an incorrectly routed reverse-direction packet time to overlap.
+	time.Sleep(10 * time.Millisecond)
+	tcp := pkt.Packet.TransportLayer().(*layers.TCP)
+	a.mu.Lock()
+	a.sequences = append(a.sequences, tcp.Seq)
+	a.mu.Unlock()
+	return true
+}
+
+func (a *orderedTCPAssembler) MaxConcurrency() int32 { return a.maxActive.Load() }
+
+func (a *orderedTCPAssembler) Sequences() []uint32 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]uint32(nil), a.sequences...)
+}
+
+type concurrentTCPAssembler struct {
+	entered     atomic.Int32
+	want        int32
+	allEntered  chan struct{}
+	release     chan struct{}
+	enterOnce   sync.Once
+	releaseOnce sync.Once
+}
+
+func newConcurrentTCPAssembler(want int32) *concurrentTCPAssembler {
+	return &concurrentTCPAssembler{want: want, allEntered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (a *concurrentTCPAssembler) AssemblePacket(_ capture.PacketInfo) bool {
+	if a.entered.Add(1) == a.want {
+		a.enterOnce.Do(func() { close(a.allEntered) })
+	}
+	<-a.release
+	return true
+}
+
+func (a *concurrentTCPAssembler) Release() {
+	a.releaseOnce.Do(func() { close(a.release) })
+}
+
 func (b *blockingTCPAssembler) AssemblePacket(_ capture.PacketInfo) bool {
 	if b.once.CompareAndSwap(false, true) {
 		close(b.entered)
@@ -401,6 +578,10 @@ func (b *blockingTCPAssembler) Release() {
 }
 
 func buildTCPPacket(t *testing.T, seq uint32) capture.PacketInfo {
+	return buildTCPFlowPacket(t, "192.0.2.10", "192.0.2.20", 5060, 5060, seq)
+}
+
+func buildTCPFlowPacket(t *testing.T, srcIP, dstIP string, srcPort, dstPort uint16, seq uint32) capture.PacketInfo {
 	t.Helper()
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 1},
@@ -412,10 +593,10 @@ func buildTCPPacket(t *testing.T, seq uint32) capture.PacketInfo {
 		IHL:      5,
 		TTL:      64,
 		Protocol: layers.IPProtocolTCP,
-		SrcIP:    net.ParseIP("192.0.2.10").To4(),
-		DstIP:    net.ParseIP("192.0.2.20").To4(),
+		SrcIP:    net.ParseIP(srcIP).To4(),
+		DstIP:    net.ParseIP(dstIP).To4(),
 	}
-	tcp := &layers.TCP{SrcPort: 5060, DstPort: 5060, Seq: seq, ACK: true, PSH: true, Window: 8192}
+	tcp := &layers.TCP{SrcPort: layers.TCPPort(srcPort), DstPort: layers.TCPPort(dstPort), Seq: seq, ACK: true, PSH: true, Window: 8192}
 	require.NoError(t, tcp.SetNetworkLayerForChecksum(ip))
 
 	buf := gopacket.NewSerializeBuffer()
@@ -434,6 +615,10 @@ func (m *mockAppFilter) MatchPacket(_ gopacket.Packet) bool {
 func (m *mockAppFilter) MatchPacketWithIDs(_ gopacket.Packet) (bool, []string) {
 	m.calls++
 	return m.matchAll, nil
+}
+
+func (m *mockAppFilter) MatchPacketLevelWithIDs(packet gopacket.Packet) (bool, []string) {
+	return m.MatchPacketWithIDs(packet)
 }
 
 func TestLocalSource_ImplementsPacketSource(t *testing.T) {

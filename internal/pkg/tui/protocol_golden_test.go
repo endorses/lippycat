@@ -130,7 +130,7 @@ func runProtocolGoldenBridge(t *testing.T, infos []capture.PacketInfo, offline b
 	StartEnvelopeBridge(NormalizeCaptureStream(context.Background(), packetChan, kind), nil, NewPauseSignal(), tracker, offline, nil)
 	stats := GetBridgeStats()
 	require.Equal(t, int64(len(infos)), stats.PacketsReceived)
-	require.Equal(t, int64(len(infos)), stats.PacketsDisplayed)
+	require.Zero(t, stats.PacketsDisplayed)
 	require.Zero(t, stats.BatchesDropped)
 	return pendingPackets.drainPackets(len(infos))
 }

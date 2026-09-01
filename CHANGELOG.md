@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.3] - 2026-09-01
+
+### Added
+- Add end-to-end capture-loss, queue-depth, and backpressure telemetry for local and distributed TUI capture paths
+- Add stateful SIP-over-TCP flow classification and sharded local TCP reassembly to improve high-volume capture scalability
+
+### Changed
+- Prioritize tracked SIP flows during TCP reassembly, bound resynchronization work, and reduce detector and SIP header parsing allocations
+- Expand high-volume capture integrity benchmarks, regression coverage, operator documentation, and troubleshooting guidance
+
+### Fixed
+- Prevent classified RTP and RTCP packets from entering SIP, IMSI, and IMEI identity matching while preserving packet-level IP matches, selected-call inheritance, and downstream filter-ID correlation
+- Route locally captured RTP through media filters and optimize the tracked-RTP filtering hot path
+- Preserve SIP TCP discontinuities, reset classification for reused connections, and handle duplicate Content-Length framing safely
+- Correct TUI pause, shutdown, retention, queue-depth, and loss accounting across capture stages
+- Resolve the TUI test build partition and remaining reassembly concurrency gaps
+
+## [0.11.2] - 2026-08-31
+
+### Changed
+- Avoid redundant packet copying and decoding in local capture, and buffer live normalization to reduce capture-path stalls
+- Surface cumulative libpcap receive/drop counters and exact application buffer drops in local TUI health statistics and capture logs
+- Base TCP auto-tuning pressure on enforced stream capacity, with idempotent backpressure transitions that honor disabled backpressure
+
+### Fixed
+- Preserve aggregate capture-drop logging when no telemetry callback is configured
+- Eliminate flaky CI failures caused by an unsafe concurrency-test barrier and hard-coded integration-test ports
+
+## [0.11.1] - 2026-08-31
+
+### Changed
+- Expand the CUDA build matrix to link and vet the complete combined `all,li,cuda` feature partition alongside the existing CUDA variants
+
+### Fixed
+- Resolve HTTP-header logging configuration once during tap composition instead of querying Viper for every locally captured packet, eliminating substantial CPU, allocation, and GC overhead on high-throughput links
+
 ## [0.11.0] - 2026-08-29
 
 ### Added

@@ -203,7 +203,8 @@ message HunterHeartbeat {
     // Current hunter status
     HunterStatus status = 3;
 
-    // Statistics since last heartbeat
+    // Cumulative statistics for the current capture session. Receivers must
+    // treat each heartbeat as a snapshot and must not sum reports.
     HunterStats stats = 4;
 }
 
@@ -251,12 +252,22 @@ message HunterStats {
     // Memory limit in bytes (from cgroup, 0 if unavailable)
     uint64 memory_limit_bytes = 9;
 
+    // Packets shed by the regular capture-buffer lane. Cumulative per capture
+    // session; packets_dropped remains the compatible sum of named local stages.
+    uint64 capture_buffer_regular_drops = 10;
+
+    // Recognized SIP packets shed by the protected capture-buffer lane.
+    uint64 capture_buffer_sip_drops = 11;
+
+    // Packets shed after capture while admitting batches for delivery.
+    uint64 batch_channel_drops = 12;
+
     // Event-mode losses are separated by pipeline boundary.
-    uint64 capture_losses = 10;
-    uint64 analysis_losses = 11;
-    uint64 queue_losses = 12;
-    uint64 unsupported_kind_losses = 13;
-    uint64 transport_losses = 14;
+    uint64 capture_losses = 13;
+    uint64 analysis_losses = 14;
+    uint64 queue_losses = 15;
+    uint64 unsupported_kind_losses = 16;
+    uint64 transport_losses = 17;
 }
 
 // ProcessorHeartbeat response from processor

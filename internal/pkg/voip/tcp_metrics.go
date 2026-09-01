@@ -26,10 +26,16 @@ type tcpStreamMetricsInternal struct {
 	sipMessagesDetected   int64 // SIP messages successfully detected and processed
 
 	// Reassembled() call tracking
-	reassembledCalls       int64 // Total Reassembled() calls from assembler
-	reassembledWithData    int64 // Reassembled() calls that received actual data
-	reassembledEmptyData   int64 // Reassembled() calls with no payload (SYN/ACK)
-	reassembledDataDropped int64 // Data dropped due to full buffer
+	reassembledCalls             int64 // Total Reassembled() calls from assembler
+	reassembledWithData          int64 // Reassembled() calls that received actual data
+	reassembledEmptyData         int64 // Reassembled() calls with no payload (SYN/ACK)
+	reassembledDataDropped       int64 // Data dropped due to full buffer
+	postReassemblyDroppedBytes   int64
+	streamDiscontinuities        int64
+	missingSequenceBytes         int64
+	parserFramingDiscontinuities int64
+	recoverySuccesses            int64
+	recoveryFailures             int64
 }
 
 // TCPStreamMetrics represents TCP stream statistics without mutexes for external use
@@ -48,14 +54,48 @@ type TCPStreamMetrics struct {
 	SIPMessagesDetected   int64 `json:"sip_messages_detected"`
 
 	// Reassembled() call tracking
-	ReassembledCalls       int64 `json:"reassembled_calls"`
-	ReassembledWithData    int64 `json:"reassembled_with_data"`
-	ReassembledEmptyData   int64 `json:"reassembled_empty_data"`
-	ReassembledDataDropped int64 `json:"reassembled_data_dropped"`
+	ReassembledCalls             int64 `json:"reassembled_calls"`
+	ReassembledWithData          int64 `json:"reassembled_with_data"`
+	ReassembledEmptyData         int64 `json:"reassembled_empty_data"`
+	ReassembledDataDropped       int64 `json:"reassembled_data_dropped"`
+	PostReassemblyDroppedChunks  int64 `json:"post_reassembly_dropped_chunks"`
+	PostReassemblyDroppedBytes   int64 `json:"post_reassembly_dropped_bytes"`
+	StreamDiscontinuities        int64 `json:"stream_discontinuities"`
+	MissingSequenceBytes         int64 `json:"missing_sequence_bytes"`
+	ParserFramingDiscontinuities int64 `json:"parser_framing_discontinuities"`
+	RecoverySuccesses            int64 `json:"recovery_successes"`
+	RecoveryFailures             int64 `json:"recovery_failures"`
 }
 
 var tcpStreamMetrics = &tcpStreamMetricsInternal{
 	lastMetricsUpdate: time.Now(),
+}
+
+// ResetTCPStreamMetrics starts a new capture-session accounting interval.
+// It must only be called after the prior capture pipeline has stopped.
+func ResetTCPStreamMetrics() {
+	tcpStreamMetrics.mu.Lock()
+	defer tcpStreamMetrics.mu.Unlock()
+	tcpStreamMetrics.activeStreams = 0
+	tcpStreamMetrics.totalStreamsCreated = 0
+	tcpStreamMetrics.totalStreamsCompleted = 0
+	tcpStreamMetrics.totalStreamsFailed = 0
+	tcpStreamMetrics.queuedStreams = 0
+	tcpStreamMetrics.droppedStreams = 0
+	tcpStreamMetrics.streamsRejectedNonSIP = 0
+	tcpStreamMetrics.streamsTimedOut = 0
+	tcpStreamMetrics.sipMessagesDetected = 0
+	tcpStreamMetrics.reassembledCalls = 0
+	tcpStreamMetrics.reassembledWithData = 0
+	tcpStreamMetrics.reassembledEmptyData = 0
+	tcpStreamMetrics.reassembledDataDropped = 0
+	tcpStreamMetrics.postReassemblyDroppedBytes = 0
+	tcpStreamMetrics.streamDiscontinuities = 0
+	tcpStreamMetrics.missingSequenceBytes = 0
+	tcpStreamMetrics.parserFramingDiscontinuities = 0
+	tcpStreamMetrics.recoverySuccesses = 0
+	tcpStreamMetrics.recoveryFailures = 0
+	tcpStreamMetrics.lastMetricsUpdate = time.Now()
 }
 
 // GetTCPStreamMetrics returns current TCP stream metrics
@@ -75,10 +115,17 @@ func GetTCPStreamMetrics() TCPStreamMetrics {
 		StreamsTimedOut:       tcpStreamMetrics.streamsTimedOut,
 		SIPMessagesDetected:   tcpStreamMetrics.sipMessagesDetected,
 
-		ReassembledCalls:       atomic.LoadInt64(&tcpStreamMetrics.reassembledCalls),
-		ReassembledWithData:    atomic.LoadInt64(&tcpStreamMetrics.reassembledWithData),
-		ReassembledEmptyData:   atomic.LoadInt64(&tcpStreamMetrics.reassembledEmptyData),
-		ReassembledDataDropped: atomic.LoadInt64(&tcpStreamMetrics.reassembledDataDropped),
+		ReassembledCalls:             atomic.LoadInt64(&tcpStreamMetrics.reassembledCalls),
+		ReassembledWithData:          atomic.LoadInt64(&tcpStreamMetrics.reassembledWithData),
+		ReassembledEmptyData:         atomic.LoadInt64(&tcpStreamMetrics.reassembledEmptyData),
+		ReassembledDataDropped:       atomic.LoadInt64(&tcpStreamMetrics.reassembledDataDropped),
+		PostReassemblyDroppedChunks:  atomic.LoadInt64(&tcpStreamMetrics.reassembledDataDropped),
+		PostReassemblyDroppedBytes:   atomic.LoadInt64(&tcpStreamMetrics.postReassemblyDroppedBytes),
+		StreamDiscontinuities:        atomic.LoadInt64(&tcpStreamMetrics.streamDiscontinuities),
+		MissingSequenceBytes:         atomic.LoadInt64(&tcpStreamMetrics.missingSequenceBytes),
+		ParserFramingDiscontinuities: atomic.LoadInt64(&tcpStreamMetrics.parserFramingDiscontinuities),
+		RecoverySuccesses:            atomic.LoadInt64(&tcpStreamMetrics.recoverySuccesses),
+		RecoveryFailures:             atomic.LoadInt64(&tcpStreamMetrics.recoveryFailures),
 	}
 }
 
@@ -121,6 +168,30 @@ func IncrementReassembledEmptyData() {
 // IncrementReassembledDataDropped increments counter for dropped data due to full buffer
 func IncrementReassembledDataDropped() {
 	atomic.AddInt64(&tcpStreamMetrics.reassembledDataDropped, 1)
+}
+
+// RecordPostReassemblyDrop records one whole chunk rejected by the bounded
+// stream queue. Counters are cumulative for the current capture session.
+func RecordPostReassemblyDrop(bytes int) {
+	atomic.AddInt64(&tcpStreamMetrics.reassembledDataDropped, 1)
+	atomic.AddInt64(&tcpStreamMetrics.postReassemblyDroppedBytes, int64(bytes))
+	atomic.AddInt64(&tcpStreamMetrics.streamDiscontinuities, 1)
+}
+
+// RecordReassemblyDiscontinuity records absent TCP sequence space reported by
+// gopacket. Missing bytes never include locally dropped payload bytes.
+func RecordReassemblyDiscontinuity(bytes int) {
+	if bytes <= 0 {
+		return
+	}
+	atomic.AddInt64(&tcpStreamMetrics.streamDiscontinuities, 1)
+	atomic.AddInt64(&tcpStreamMetrics.missingSequenceBytes, int64(bytes))
+}
+
+func IncrementStreamRecoverySuccess() { atomic.AddInt64(&tcpStreamMetrics.recoverySuccesses, 1) }
+func IncrementStreamRecoveryFailure() { atomic.AddInt64(&tcpStreamMetrics.recoveryFailures, 1) }
+func IncrementParserFramingDiscontinuity() {
+	atomic.AddInt64(&tcpStreamMetrics.parserFramingDiscontinuities, 1)
 }
 
 // Global TCP assembler monitoring
@@ -302,12 +373,17 @@ func (f *sipStreamFactory) performanceMonitor() {
 
 func (f *sipStreamFactory) performAutoTuning() {
 	activeGoroutines := atomic.LoadInt64(&f.activeGoroutines)
-	maxGoroutines := int64(f.config.MaxGoroutines)
+	f.configMutex.RLock()
+	maxStreams := int64(f.config.MaxStreams)
+	backpressureAllowed := f.config.EnableBackpressure
+	f.configMutex.RUnlock()
 
-	// Auto-tune based on load
-	if activeGoroutines > maxGoroutines*8/10 {
+	// MaxGoroutines is a soft observability threshold and is not a capacity
+	// control. Base pressure on MaxStreams, the actual enforced stream limit.
+	// An unlimited stream configuration has no capacity-derived pressure signal.
+	if backpressureAllowed && maxStreams > 0 && activeGoroutines > maxStreams*8/10 {
 		f.enableBackpressure()
-	} else if activeGoroutines < maxGoroutines*3/10 {
+	} else if !backpressureAllowed || maxStreams == 0 || activeGoroutines < maxStreams*3/10 {
 		f.relaxBackpressure()
 	}
 
@@ -317,7 +393,8 @@ func (f *sipStreamFactory) performAutoTuning() {
 	}
 
 	logger.Debug("Performance auto-tuning completed",
-		"active_goroutines", activeGoroutines)
+		"active_streams", activeGoroutines,
+		"max_streams", maxStreams)
 }
 
 // getCurrentBatchSize safely gets the current batch size
@@ -329,25 +406,29 @@ func (f *sipStreamFactory) getCurrentBatchSize() int {
 
 // enableBackpressure implements backpressure mechanisms
 func (f *sipStreamFactory) enableBackpressure() {
-	// Implement backpressure by reducing batch sizes and increasing delays
 	f.configMutex.Lock()
 	defer f.configMutex.Unlock()
 
-	if f.config.TCPBatchSize > 1 {
-		f.config.TCPBatchSize = f.config.TCPBatchSize / 2
+	if f.backpressureEnabled {
+		return
 	}
+
+	f.backpressureEnabled = true
+	f.config.TCPBatchSize = max(1, f.autoTuneBatchSize/2)
 	logger.Info("Backpressure enabled", "new_batch_size", f.config.TCPBatchSize)
 }
 
 // relaxBackpressure reduces backpressure mechanisms
 func (f *sipStreamFactory) relaxBackpressure() {
-	// Relax backpressure by increasing batch sizes
 	f.configMutex.Lock()
 	defer f.configMutex.Unlock()
 
-	if f.config.TCPBatchSize < 64 {
-		f.config.TCPBatchSize = f.config.TCPBatchSize * 2
+	if !f.backpressureEnabled {
+		return
 	}
+
+	f.backpressureEnabled = false
+	f.config.TCPBatchSize = f.autoTuneBatchSize
 	logger.Debug("Backpressure relaxed", "new_batch_size", f.config.TCPBatchSize)
 }
 

@@ -141,6 +141,17 @@ lc watch remote -P localhost:55555 --insecure
 - `Enter` - View packet details
 - `Ctrl+S` - Save packets to PCAP file
 
+Live packet rows are a bounded diagnostic feed. Under load, the TUI samples
+detail packets, can drop full detail batches, and evicts the oldest pending rows
+so recent traffic remains visible. The Statistics view exposes **Sampled Out**,
+**Batch Queue Drops**, **Pending Evictions**, and the end-to-end retained
+percentage. These losses affect TUI detail visibility, not exact ingress
+telemetry, upstream capture flow control, or PCAP output. Treat the displayed
+packet list as incomplete whenever retention is below 100%; use PCAP output for
+loss-sensitive analysis. Recognized SIP bypasses adaptive sampling but remains
+subject to the later batch and ring limits. Offline PCAP replay uses a separate
+preserve-all path.
+
 ### Nodes View (Remote Mode)
 - `s` - Subscribe to hunters
 - `d` - Unsubscribe from hunters

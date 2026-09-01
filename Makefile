@@ -130,7 +130,7 @@ build-cuda: cuda-kernels
 	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags all,cuda -ldflags "$(LDFLAGS)" -o $(CUDA_BINARY_NAME)
 
 # Validate every supported role/feature partition. Set CUDA=1 on a CUDA builder
-# to include the two CUDA variants.
+# to include all three CUDA variants, including the complete LI build.
 build-matrix:
 	./scripts/check-build-matrix.sh
 

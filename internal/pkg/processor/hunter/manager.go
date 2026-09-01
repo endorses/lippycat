@@ -15,32 +15,35 @@ type TopologyPublisher interface {
 
 // ConnectedHunter represents a connected hunter node
 type ConnectedHunter struct {
-	ID                      string
-	Hostname                string
-	RemoteAddr              string
-	Interfaces              []string
-	Capabilities            *management.HunterCapabilities // Filter capabilities advertised by hunter
-	ForwardingMode          management.ForwardingMode
-	EventAPIMajor           uint32
-	EventKinds              []int32
-	SemanticProfileRevision uint32
-	ConnectedAt             int64
-	LastHeartbeat           int64
-	PacketsReceived         uint64 // Packets received by processor from this hunter
-	PacketsCaptured         uint64 // Packets captured by hunter (from heartbeat stats)
-	PacketsMatched          uint64 // Packets matching filters (from heartbeat stats)
-	PacketsForwarded        uint64 // Packets forwarded by hunter (from heartbeat stats)
-	PacketsDropped          uint64 // Packets dropped by hunter (from heartbeat stats)
-	CaptureLosses           uint64 // Capture-buffer losses reported by hunter
-	AnalysisLosses          uint64 // Stateful analysis losses reported by hunter
-	QueueLosses             uint64 // Event queue/spool losses reported by hunter
-	UnsupportedKindLosses   uint64 // Unsupported event-kind losses reported by hunter
-	TransportLosses         uint64 // Event transport losses reported by hunter
-	BufferBytes             uint64 // Hunter buffer occupancy (from heartbeat stats)
-	ActiveFilters           uint32 // Active filter count from hunter stats
-	Status                  management.HunterStatus
-	FilterUpdateFailures    uint32 // Consecutive filter update send failures
-	LastFilterUpdateFailure int64  // Timestamp of last filter update failure
+	ID                        string
+	Hostname                  string
+	RemoteAddr                string
+	Interfaces                []string
+	Capabilities              *management.HunterCapabilities // Filter capabilities advertised by hunter
+	ForwardingMode            management.ForwardingMode
+	EventAPIMajor             uint32
+	EventKinds                []int32
+	SemanticProfileRevision   uint32
+	ConnectedAt               int64
+	LastHeartbeat             int64
+	PacketsReceived           uint64 // Packets received by processor from this hunter
+	PacketsCaptured           uint64 // Packets captured by hunter (from heartbeat stats)
+	PacketsMatched            uint64 // Packets matching filters (from heartbeat stats)
+	PacketsForwarded          uint64 // Packets forwarded by hunter (from heartbeat stats)
+	PacketsDropped            uint64 // Packets dropped by hunter (from heartbeat stats)
+	CaptureLosses             uint64 // Capture-buffer losses reported by hunter
+	AnalysisLosses            uint64 // Stateful analysis losses reported by hunter
+	QueueLosses               uint64 // Event queue/spool losses reported by hunter
+	UnsupportedKindLosses     uint64 // Unsupported event-kind losses reported by hunter
+	TransportLosses           uint64 // Event transport losses reported by hunter
+	CaptureBufferRegularDrops uint64
+	CaptureBufferSIPDrops     uint64
+	BatchChannelDrops         uint64
+	BufferBytes               uint64 // Hunter buffer occupancy (from heartbeat stats)
+	ActiveFilters             uint32 // Active filter count from hunter stats
+	Status                    management.HunterStatus
+	FilterUpdateFailures      uint32 // Consecutive filter update send failures
+	LastFilterUpdateFailure   int64  // Timestamp of last filter update failure
 	// System metrics (from heartbeat stats)
 	CpuPercent       float32 // CPU usage percentage (0-100, -1 if unavailable)
 	MemoryRssBytes   uint64  // Process RSS memory in bytes
@@ -204,6 +207,9 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 			hunter.QueueLosses = stats.QueueLosses
 			hunter.UnsupportedKindLosses = stats.UnsupportedKindLosses
 			hunter.TransportLosses = stats.TransportLosses
+			hunter.CaptureBufferRegularDrops = stats.CaptureBufferRegularDrops
+			hunter.CaptureBufferSIPDrops = stats.CaptureBufferSipDrops
+			hunter.BatchChannelDrops = stats.BatchChannelDrops
 			hunter.BufferBytes = stats.BufferBytes
 
 			// Update system metrics (CPU/RAM)

@@ -45,6 +45,23 @@ func TestDropStats_BufferDrops(t *testing.T) {
 	assert.Equal(t, int64(20), summary.BufferDrops)
 }
 
+func TestDropStats_BufferDropStagesPreserveNamedCountersAndAggregate(t *testing.T) {
+	ds := NewDropStats()
+	ds.SetBufferDropStages(7, 3)
+
+	summary := ds.GetSummary()
+	assert.Equal(t, int64(7), summary.BufferRegularDrops)
+	assert.Equal(t, int64(3), summary.BufferSIPDrops)
+	assert.Equal(t, int64(10), summary.BufferDrops)
+	assert.Equal(t, int64(10), summary.TotalDrops)
+
+	ds.Reset()
+	summary = ds.GetSummary()
+	assert.Zero(t, summary.BufferRegularDrops)
+	assert.Zero(t, summary.BufferSIPDrops)
+	assert.Zero(t, summary.BufferDrops)
+}
+
 func TestDropStats_QueueDrops(t *testing.T) {
 	ds := NewDropStats()
 	ds.SetTotalPackets(1000)
@@ -208,15 +225,24 @@ func TestDropStats_UpdateFromBridgeStats(t *testing.T) {
 
 	t.Run("updates from bridge stats", func(t *testing.T) {
 		ds := NewDropStats()
+		ds.SetBufferDrops(17)
 		bs := &BridgeStatistics{
-			PacketsReceived: 10000,
-			BatchesDropped:  5,
+			PacketsReceived:        10000,
+			PacketsSampledOut:      400,
+			BatchQueuePacketDrops:  75,
+			PendingPacketEvictions: 25,
+			DisplayRetentionRatio:  700,
 		}
 
 		ds.UpdateFromBridgeStats(bs)
 
 		summary := ds.GetSummary()
-		// 5 batches * 100 packets/batch = 500 estimated drops
-		assert.Equal(t, int64(500), summary.BufferDrops)
+		assert.Equal(t, int64(17), summary.BufferDrops)
+		assert.Equal(t, int64(0), summary.QueueDrops)
+		assert.Equal(t, int64(400), summary.SampledOutPackets)
+		assert.Equal(t, int64(75), summary.BatchQueuePacketDrops)
+		assert.Equal(t, int64(25), summary.PendingEvictions)
+		assert.Equal(t, int64(500), summary.DisplayDrops)
+		assert.Equal(t, 70.0, summary.DisplayRetentionRate)
 	})
 }

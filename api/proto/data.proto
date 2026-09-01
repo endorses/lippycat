@@ -343,6 +343,11 @@ message BatchStats {
 
     // Current buffer usage percentage (0-100)
     uint32 buffer_usage = 4;
+
+    // Named cumulative local loss stages. dropped remains their compatible sum.
+    uint64 capture_buffer_regular_drops = 5;
+    uint64 capture_buffer_sip_drops = 6;
+    uint64 batch_channel_drops = 7;
 }
 
 // StreamControl messages from processor to hunter

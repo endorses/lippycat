@@ -1146,7 +1146,8 @@ type HunterHeartbeat struct {
 	TimestampNs int64 `protobuf:"varint,2,opt,name=timestamp_ns,json=timestampNs,proto3" json:"timestamp_ns,omitempty"`
 	// Current hunter status
 	Status HunterStatus `protobuf:"varint,3,opt,name=status,proto3,enum=lippycat.management.HunterStatus" json:"status,omitempty"`
-	// Statistics since last heartbeat
+	// Cumulative statistics for the current capture session. Receivers must
+	// treat each heartbeat as a snapshot and must not sum reports.
 	Stats         *HunterStats `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1231,12 +1232,19 @@ type HunterStats struct {
 	MemoryRssBytes uint64 `protobuf:"varint,8,opt,name=memory_rss_bytes,json=memoryRssBytes,proto3" json:"memory_rss_bytes,omitempty"`
 	// Memory limit in bytes (from cgroup, 0 if unavailable)
 	MemoryLimitBytes uint64 `protobuf:"varint,9,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"`
+	// Packets shed by the regular capture-buffer lane. Cumulative per capture
+	// session; packets_dropped remains the compatible sum of named local stages.
+	CaptureBufferRegularDrops uint64 `protobuf:"varint,10,opt,name=capture_buffer_regular_drops,json=captureBufferRegularDrops,proto3" json:"capture_buffer_regular_drops,omitempty"`
+	// Recognized SIP packets shed by the protected capture-buffer lane.
+	CaptureBufferSipDrops uint64 `protobuf:"varint,11,opt,name=capture_buffer_sip_drops,json=captureBufferSipDrops,proto3" json:"capture_buffer_sip_drops,omitempty"`
+	// Packets shed after capture while admitting batches for delivery.
+	BatchChannelDrops uint64 `protobuf:"varint,12,opt,name=batch_channel_drops,json=batchChannelDrops,proto3" json:"batch_channel_drops,omitempty"`
 	// Event-mode losses are separated by pipeline boundary.
-	CaptureLosses         uint64 `protobuf:"varint,10,opt,name=capture_losses,json=captureLosses,proto3" json:"capture_losses,omitempty"`
-	AnalysisLosses        uint64 `protobuf:"varint,11,opt,name=analysis_losses,json=analysisLosses,proto3" json:"analysis_losses,omitempty"`
-	QueueLosses           uint64 `protobuf:"varint,12,opt,name=queue_losses,json=queueLosses,proto3" json:"queue_losses,omitempty"`
-	UnsupportedKindLosses uint64 `protobuf:"varint,13,opt,name=unsupported_kind_losses,json=unsupportedKindLosses,proto3" json:"unsupported_kind_losses,omitempty"`
-	TransportLosses       uint64 `protobuf:"varint,14,opt,name=transport_losses,json=transportLosses,proto3" json:"transport_losses,omitempty"`
+	CaptureLosses         uint64 `protobuf:"varint,13,opt,name=capture_losses,json=captureLosses,proto3" json:"capture_losses,omitempty"`
+	AnalysisLosses        uint64 `protobuf:"varint,14,opt,name=analysis_losses,json=analysisLosses,proto3" json:"analysis_losses,omitempty"`
+	QueueLosses           uint64 `protobuf:"varint,15,opt,name=queue_losses,json=queueLosses,proto3" json:"queue_losses,omitempty"`
+	UnsupportedKindLosses uint64 `protobuf:"varint,16,opt,name=unsupported_kind_losses,json=unsupportedKindLosses,proto3" json:"unsupported_kind_losses,omitempty"`
+	TransportLosses       uint64 `protobuf:"varint,17,opt,name=transport_losses,json=transportLosses,proto3" json:"transport_losses,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1330,6 +1338,27 @@ func (x *HunterStats) GetMemoryRssBytes() uint64 {
 func (x *HunterStats) GetMemoryLimitBytes() uint64 {
 	if x != nil {
 		return x.MemoryLimitBytes
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferRegularDrops() uint64 {
+	if x != nil {
+		return x.CaptureBufferRegularDrops
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferSipDrops() uint64 {
+	if x != nil {
+		return x.CaptureBufferSipDrops
+	}
+	return 0
+}
+
+func (x *HunterStats) GetBatchChannelDrops() uint64 {
+	if x != nil {
+		return x.BatchChannelDrops
 	}
 	return 0
 }
@@ -3442,7 +3471,7 @@ const file_management_proto_rawDesc = "" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x129\n" +
 	"\x06status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\x06status\x126\n" +
-	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xd0\x04\n" +
+	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xfa\x05\n" +
 	"\vHunterStats\x12)\n" +
 	"\x10packets_captured\x18\x01 \x01(\x04R\x0fpacketsCaptured\x12'\n" +
 	"\x0fpackets_matched\x18\x02 \x01(\x04R\x0epacketsMatched\x12+\n" +
@@ -3453,13 +3482,16 @@ const file_management_proto_rawDesc = "" +
 	"\vcpu_percent\x18\a \x01(\x02R\n" +
 	"cpuPercent\x12(\n" +
 	"\x10memory_rss_bytes\x18\b \x01(\x04R\x0ememoryRssBytes\x12,\n" +
-	"\x12memory_limit_bytes\x18\t \x01(\x04R\x10memoryLimitBytes\x12%\n" +
-	"\x0ecapture_losses\x18\n" +
-	" \x01(\x04R\rcaptureLosses\x12'\n" +
-	"\x0fanalysis_losses\x18\v \x01(\x04R\x0eanalysisLosses\x12!\n" +
-	"\fqueue_losses\x18\f \x01(\x04R\vqueueLosses\x126\n" +
-	"\x17unsupported_kind_losses\x18\r \x01(\x04R\x15unsupportedKindLosses\x12)\n" +
-	"\x10transport_losses\x18\x0e \x01(\x04R\x0ftransportLosses\"\xc5\x01\n" +
+	"\x12memory_limit_bytes\x18\t \x01(\x04R\x10memoryLimitBytes\x12?\n" +
+	"\x1ccapture_buffer_regular_drops\x18\n" +
+	" \x01(\x04R\x19captureBufferRegularDrops\x127\n" +
+	"\x18capture_buffer_sip_drops\x18\v \x01(\x04R\x15captureBufferSipDrops\x12.\n" +
+	"\x13batch_channel_drops\x18\f \x01(\x04R\x11batchChannelDrops\x12%\n" +
+	"\x0ecapture_losses\x18\r \x01(\x04R\rcaptureLosses\x12'\n" +
+	"\x0fanalysis_losses\x18\x0e \x01(\x04R\x0eanalysisLosses\x12!\n" +
+	"\fqueue_losses\x18\x0f \x01(\x04R\vqueueLosses\x126\n" +
+	"\x17unsupported_kind_losses\x18\x10 \x01(\x04R\x15unsupportedKindLosses\x12)\n" +
+	"\x10transport_losses\x18\x11 \x01(\x04R\x0ftransportLosses\"\xc5\x01\n" +
 	"\x12ProcessorHeartbeat\x12!\n" +
 	"\ftimestamp_ns\x18\x01 \x01(\x03R\vtimestampNs\x12<\n" +
 	"\x06status\x18\x02 \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\x12+\n" +

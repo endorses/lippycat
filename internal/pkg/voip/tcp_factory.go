@@ -19,7 +19,12 @@ type sipStreamFactory struct {
 	activeGoroutines int64
 	config           *Config
 	configMutex      sync.RWMutex
-	lastLogTime      int64
+	// autoTuneBatchSize is the configured/profile batch size restored when
+	// auto-tuning pressure clears. backpressureEnabled makes transitions
+	// idempotent so the monitor does not repeatedly halve or log the same state.
+	autoTuneBatchSize   int
+	backpressureEnabled bool
+	lastLogTime         int64
 	// lastStreamLimitLogTime rate-limits the MaxStreams rejection warning
 	lastStreamLimitLogTime int64
 	allWorkers             sync.WaitGroup // tracks all background goroutines
@@ -50,12 +55,13 @@ func NewSipStreamFactoryWithConfig(ctx context.Context, handler SIPMessageHandle
 	applyPerformanceModeOptimizations(&config)
 
 	factory := &sipStreamFactory{
-		ctx:           ctx,
-		cancel:        cancel,
-		config:        &config,
-		handler:       handler,
-		callActive:    callActive,
-		cleanupTicker: time.NewTicker(config.TCPCleanupInterval),
+		ctx:               ctx,
+		cancel:            cancel,
+		config:            &config,
+		autoTuneBatchSize: config.TCPBatchSize,
+		handler:           handler,
+		callActive:        callActive,
+		cleanupTicker:     time.NewTicker(config.TCPCleanupInterval),
 	}
 
 	// Start cleanup goroutine for resource management
@@ -160,16 +166,13 @@ func (f *sipStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac
 	// ReassembledSG() NEVER blocks the packet capture loop - data is dropped only
 	// if the buffer is full. This guarantees the capture loop always continues.
 
-	// Log if we're over the soft limit (for monitoring, not enforcement)
-	current := atomic.LoadInt64(&f.activeGoroutines)
-	if current >= int64(f.config.MaxGoroutines) {
-		f.logGoroutineLimit()
-	}
-
 	// voip.max_streams is a hard cap (0 = unlimited): beyond it, new connections
 	// get a stream that discards data instead of spawning goroutines. Without it,
-	// a flood of short-lived or bogus TCP flows grows memory without bound.
-	if limit := f.config.MaxStreams; limit > 0 && current >= int64(limit) {
+	// a flood of short-lived or bogus TCP flows grows memory without bound. New
+	// may run concurrently across reassembly shards, so reserve the slot with a
+	// CAS instead of separating the limit check from the increment.
+	current, reserved := f.reserveStreamSlot()
+	if !reserved {
 		tcpStreamMetrics.mu.Lock()
 		tcpStreamMetrics.droppedStreams++
 		tcpStreamMetrics.mu.Unlock()
@@ -177,10 +180,13 @@ func (f *sipStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac
 		return &discardStream{}
 	}
 
+	// Log if we're over the soft limit (for monitoring, not enforcement).
+	if current > int64(f.config.MaxGoroutines) {
+		f.logGoroutineLimit()
+	}
+
 	detector := NewCallIDDetector()
 
-	// Increment goroutine counter before creating stream (stream starts goroutine)
-	atomic.AddInt64(&f.activeGoroutines, 1)
 	// Update metrics
 	tcpStreamMetrics.mu.Lock()
 	atomic.AddInt64(&tcpStreamMetrics.activeStreams, 1)
@@ -193,6 +199,19 @@ func (f *sipStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac
 	stream := newBufferedSIPStream(f.ctx, f, detector, net, transport)
 
 	return stream
+}
+
+func (f *sipStreamFactory) reserveStreamSlot() (int64, bool) {
+	limit := int64(f.config.MaxStreams)
+	for {
+		current := atomic.LoadInt64(&f.activeGoroutines)
+		if limit > 0 && current >= limit {
+			return current, false
+		}
+		if atomic.CompareAndSwapInt64(&f.activeGoroutines, current, current+1) {
+			return current + 1, true
+		}
+	}
 }
 
 // GetActiveGoroutines returns the current number of active goroutines

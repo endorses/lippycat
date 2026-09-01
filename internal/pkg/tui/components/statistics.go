@@ -99,18 +99,21 @@ type ExportStatsMsg struct {
 
 // HunterContribution represents a hunter's contribution to overall traffic.
 type HunterContribution struct {
-	ID               string
-	Hostname         string
-	ProcessorAddr    string
-	Status           string // "healthy", "warning", "error"
-	PacketsCaptured  uint64
-	PacketsForwarded uint64
-	PacketsDropped   uint64
-	DropRate         float64 // Percentage of packets dropped
-	Contribution     float64 // Percentage of total fleet packets
-	CPUPercent       float64
-	MemoryRSSBytes   uint64
-	MemoryLimitBytes uint64
+	ID                        string
+	Hostname                  string
+	ProcessorAddr             string
+	Status                    string // "healthy", "warning", "error"
+	PacketsCaptured           uint64
+	PacketsForwarded          uint64
+	PacketsDropped            uint64
+	CaptureBufferRegularDrops uint64
+	CaptureBufferSIPDrops     uint64
+	BatchChannelDrops         uint64
+	DropRate                  float64 // Percentage of packets dropped
+	Contribution              float64 // Percentage of total fleet packets
+	CPUPercent                float64
+	MemoryRSSBytes            uint64
+	MemoryLimitBytes          uint64
 }
 
 // ProcessorSummary represents aggregated stats for a processor.
@@ -185,16 +188,60 @@ type Statistics struct {
 // These stats help identify backpressure issues where the TUI can't keep up
 // with packet ingestion rate.
 type BridgeStatistics struct {
-	PacketsReceived  int64 // Total packets received from capture
-	PacketsDisplayed int64 // Packets sent to TUI for display
-	BatchesSent      int64 // Batches successfully queued for TUI
-	BatchesDropped   int64 // Batches dropped due to TUI backpressure
-	QueueDepth       int64 // Current batch queue depth
-	MaxQueueDepth    int64 // Peak queue depth seen
-	SamplingRatio    int64 // Current sampling ratio * 1000 (1000 = 100%)
-	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s, for throttling)
-	Running          int32 // 1 if bridge is running, 0 if stopped
-	CaptureComplete  int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+	PacketsReceived              int64 // Total packets received from capture
+	PacketsDisplayed             int64 // Deprecated compatibility alias for PacketsDelivered
+	InvalidEnvelopes             int64 // Invalid envelopes rejected before ingress acceptance
+	PacketsSampledOut            int64 // Valid ingress packets omitted from the detail feed
+	BatchQueuePacketDrops        int64 // Detail packets lost when the bridge batch queue is full
+	PendingPacketEvictions       int64 // Detail packets evicted from the live pending buffer
+	PacketsDelivered             int64 // Detail packets delivered to the model/list
+	DisplayRetentionRatio        int64 // End-to-end detail retention * 1000 (1000 = 100%)
+	BatchesSent                  int64 // Batches successfully queued for TUI
+	BatchesDropped               int64 // Batches dropped due to TUI backpressure
+	QueueDepth                   int64 // Current batch queue depth
+	MaxQueueDepth                int64 // Peak queue depth seen
+	SamplingRatio                int64 // Current sampling ratio * 1000 (1000 = 100%)
+	RecentDropRate               int64 // Recent drop rate * 1000 (last 5s, for throttling)
+	Running                      int32 // 1 if bridge is running, 0 if stopped
+	CaptureComplete              int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+	ReassemblyDiscontinuities    int64
+	ReassemblyMissingBytes       int64
+	PostReassemblyDroppedChunks  int64
+	PostReassemblyDroppedBytes   int64
+	ParserFramingDiscontinuities int64
+	RecoveryFailures             int64
+}
+
+// RetentionRatio returns end-to-end detail retention on a 0..1 scale. The
+// cumulative counts are authoritative; the scaled field is retained so bridge
+// snapshots can publish a precomputed value without floating-point atomics.
+func (bs *BridgeStatistics) RetentionRatio() float64 {
+	if bs == nil {
+		return 1
+	}
+	validIngress := bs.PacketsReceived - bs.InvalidEnvelopes
+	if validIngress <= 0 {
+		return 1
+	}
+	delivered := bs.PacketsDelivered
+	if delivered == 0 && bs.PacketsDisplayed > 0 {
+		delivered = bs.PacketsDisplayed
+	}
+	ratio := float64(delivered) / float64(validIngress)
+	if ratio < 0 {
+		return 0
+	}
+	if ratio > 1 {
+		return 1
+	}
+	return ratio
+}
+
+func (bs *BridgeStatistics) deliveredPackets() int64 {
+	if bs.PacketsDelivered == 0 && bs.PacketsDisplayed > 0 {
+		return bs.PacketsDisplayed
+	}
+	return bs.PacketsDelivered
 }
 
 // StatisticsView displays statistics
@@ -232,6 +279,7 @@ type StatisticsView struct {
 	protocolRegistry *ProtocolStatsRegistry // Registry of protocol stats providers
 	voipProvider     *VoIPStatsProvider     // VoIP-specific stats provider
 	selectedProtocol string                 // Currently selected protocol filter
+	l3L4Protocols    bool                   // Protocol totals are exact, inexpensive live L3/L4 classifications
 
 	// Phase 6: TUI process metrics
 	cpuTracker *CPUTracker // CPU usage history for sparkline
@@ -338,9 +386,27 @@ func (s *StatisticsView) SetStatistics(stats *Statistics) {
 	s.dirty = true // Mark for lazy re-render
 }
 
+// SetL3L4ProtocolClassification labels live ingress totals according to their
+// intentionally inexpensive classification. Offline and remote detail paths
+// retain enriched application-protocol labels.
+func (s *StatisticsView) SetL3L4ProtocolClassification(enabled bool) {
+	s.l3L4Protocols = enabled
+	s.dirty = true
+}
+
+func (s *StatisticsView) protocolDistributionTitle() string {
+	if s.l3L4Protocols {
+		return "🔌 L3/L4 Protocol Distribution"
+	}
+	return "🔌 Protocol Distribution"
+}
+
 // SetBridgeStats updates the bridge statistics data
 func (s *StatisticsView) SetBridgeStats(bridgeStats *BridgeStatistics) {
 	s.bridgeStats = bridgeStats
+	if s.dropStats != nil {
+		s.dropStats.UpdateFromBridgeStats(bridgeStats)
+	}
 	s.dirty = true // Mark for lazy re-render
 }
 
@@ -534,17 +600,20 @@ func (s *StatisticsView) UpdateDistributedStats(hunters []HunterInfo, processors
 		}
 
 		contrib := HunterContribution{
-			ID:               hunter.ID,
-			Hostname:         hunter.Hostname,
-			ProcessorAddr:    hunter.ProcessorAddr,
-			Status:           statusStr,
-			PacketsCaptured:  hunter.PacketsCaptured,
-			PacketsForwarded: hunter.PacketsForwarded,
-			PacketsDropped:   hunter.PacketsDropped,
-			DropRate:         dropRate,
-			CPUPercent:       hunter.CPUPercent,
-			MemoryRSSBytes:   hunter.MemoryRSSBytes,
-			MemoryLimitBytes: hunter.MemoryLimitBytes,
+			ID:                        hunter.ID,
+			Hostname:                  hunter.Hostname,
+			ProcessorAddr:             hunter.ProcessorAddr,
+			Status:                    statusStr,
+			PacketsCaptured:           hunter.PacketsCaptured,
+			PacketsForwarded:          hunter.PacketsForwarded,
+			PacketsDropped:            hunter.PacketsDropped,
+			CaptureBufferRegularDrops: hunter.CaptureBufferRegularDrops,
+			CaptureBufferSIPDrops:     hunter.CaptureBufferSIPDrops,
+			BatchChannelDrops:         hunter.BatchChannelDrops,
+			DropRate:                  dropRate,
+			CPUPercent:                hunter.CPUPercent,
+			MemoryRSSBytes:            hunter.MemoryRSSBytes,
+			MemoryLimitBytes:          hunter.MemoryLimitBytes,
 		}
 		ds.HunterContributions = append(ds.HunterContributions, contrib)
 	}
@@ -986,7 +1055,7 @@ func (s *StatisticsView) renderOverviewNarrow() string {
 	result.WriteString("\n")
 
 	// Section: Protocol Distribution
-	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
+	result.WriteString(titleStyle.Render(s.protocolDistributionTitle()))
 	result.WriteString("\n\n")
 
 	result.WriteString(s.renderProtocolDistribution(5, s.width))
@@ -1653,7 +1722,7 @@ func (s *StatisticsView) renderTrafficSubView() string {
 
 	// Protocol distribution
 	result.WriteString("\n")
-	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
+	result.WriteString(titleStyle.Render(s.protocolDistributionTitle()))
 	result.WriteString("\n\n")
 
 	result.WriteString(s.renderProtocolDistribution(10, s.width))
@@ -1689,16 +1758,22 @@ func (s *StatisticsView) renderHealthSubView() string {
 		result.WriteString(titleStyle.Render("🌉 Bridge Performance"))
 		result.WriteString("\n\n")
 
-		// Packets received vs displayed
+		// Exact ingress vs detail-feed delivery and loss stages.
 		result.WriteString(labelStyle.Render("Packets Received:   "))
 		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsReceived)))
 		result.WriteString("\n")
-		result.WriteString(labelStyle.Render("Packets Displayed:  "))
-		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsDisplayed)))
-		if s.bridgeStats.PacketsReceived > 0 {
-			displayPct := float64(s.bridgeStats.PacketsDisplayed) / float64(s.bridgeStats.PacketsReceived) * 100
-			result.WriteString(valueStyle.Render(fmt.Sprintf(" (%.1f%%)", displayPct)))
-		}
+		result.WriteString(labelStyle.Render("Packets Delivered:  "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d (%.1f%% retained)",
+			s.bridgeStats.deliveredPackets(), s.bridgeStats.RetentionRatio()*100)))
+		result.WriteString("\n")
+		result.WriteString(labelStyle.Render("Sampled Out:        "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsSampledOut)))
+		result.WriteString("\n")
+		result.WriteString(labelStyle.Render("Batch Queue Drops:  "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.BatchQueuePacketDrops)))
+		result.WriteString("\n")
+		result.WriteString(labelStyle.Render("Pending Evictions:  "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PendingPacketEvictions)))
 		result.WriteString("\n")
 
 		// Sampling ratio
@@ -2002,6 +2077,18 @@ func (s *StatisticsView) renderDistributedSubView() string {
 	} else {
 		result.WriteString(dimStyle.Render("N/A"))
 	}
+	result.WriteString("\n")
+	var regularDrops, sipDrops, batchDrops uint64
+	for _, hunter := range ds.HunterContributions {
+		regularDrops += hunter.CaptureBufferRegularDrops
+		sipDrops += hunter.CaptureBufferSIPDrops
+		batchDrops += hunter.BatchChannelDrops
+	}
+	result.WriteString(labelStyle.Render("  Capture buffer: "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("regular %s, SIP %s", formatNumber64(int64(regularDrops)), formatNumber64(int64(sipDrops)))))
+	result.WriteString("\n")
+	result.WriteString(labelStyle.Render("  Batch delivery: "))
+	result.WriteString(valueStyle.Render(formatNumber64(int64(batchDrops))))
 	result.WriteString("\n")
 
 	result.WriteString(labelStyle.Render("Total Memory RSS:  "))
@@ -2584,6 +2671,13 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 			Label string
 			Level HealthLevel
 		}{"Throttle", throttleLevel})
+		if s.bridgeStats.ReassemblyDiscontinuities > 0 || s.bridgeStats.PostReassemblyDroppedChunks > 0 ||
+			s.bridgeStats.ParserFramingDiscontinuities > 0 || s.bridgeStats.RecoveryFailures > 0 {
+			items = append(items, struct {
+				Label string
+				Level HealthLevel
+			}{"SIP integrity", HealthCritical})
+		}
 	}
 
 	// Render health indicators
@@ -2658,6 +2752,13 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 			Label string
 			Level HealthLevel
 		}{"Throttle", throttleLevel})
+		if s.bridgeStats.ReassemblyDiscontinuities > 0 || s.bridgeStats.PostReassemblyDroppedChunks > 0 ||
+			s.bridgeStats.ParserFramingDiscontinuities > 0 || s.bridgeStats.RecoveryFailures > 0 {
+			items = append(items, struct {
+				Label string
+				Level HealthLevel
+			}{"SIP integrity", HealthCritical})
+		}
 	}
 
 	// No health data
@@ -2690,15 +2791,36 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 
 		// Bridge header
 		rightLines = append(rightLines, titleStyle.Render("🌉 Bridge"))
-
-		// Packets Displayed
-		displayedLine := labelStyle.Render("Displayed: ") +
-			valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsDisplayed))
-		if s.bridgeStats.PacketsReceived > 0 {
-			displayPct := float64(s.bridgeStats.PacketsDisplayed) / float64(s.bridgeStats.PacketsReceived) * 100
-			displayedLine += valueStyle.Render(fmt.Sprintf(" (%.0f%%)", displayPct))
+		if dropSummary.BufferRegularDrops > 0 {
+			rightLines = append(rightLines, labelStyle.Render("Capture regular: ")+
+				valueStyle.Render(fmt.Sprintf("%d packets", dropSummary.BufferRegularDrops)))
 		}
+		if dropSummary.BufferSIPDrops > 0 {
+			rightLines = append(rightLines, labelStyle.Render("Capture SIP:     ")+
+				valueStyle.Render(fmt.Sprintf("%d packets", dropSummary.BufferSIPDrops)))
+		}
+
+		// Detail feed retention is packet-based and includes every local shedding stage.
+		displayedLine := labelStyle.Render("Retained:  ") +
+			valueStyle.Render(fmt.Sprintf("%d (%.0f%%)", s.bridgeStats.deliveredPackets(), s.bridgeStats.RetentionRatio()*100))
 		rightLines = append(rightLines, displayedLine)
+		displayLoss := s.bridgeStats.PacketsSampledOut + s.bridgeStats.BatchQueuePacketDrops + s.bridgeStats.PendingPacketEvictions
+		if displayLoss > 0 {
+			rightLines = append(rightLines, labelStyle.Render("Detail loss: ")+
+				valueStyle.Render(fmt.Sprintf("%d packets", displayLoss)))
+		}
+		if s.bridgeStats.ReassemblyDiscontinuities > 0 {
+			rightLines = append(rightLines, labelStyle.Render("TCP gaps:   ")+
+				valueStyle.Render(fmt.Sprintf("%d (%d bytes)", s.bridgeStats.ReassemblyDiscontinuities, s.bridgeStats.ReassemblyMissingBytes)))
+		}
+		if s.bridgeStats.PostReassemblyDroppedChunks > 0 {
+			rightLines = append(rightLines, labelStyle.Render("SIP queue:  ")+
+				valueStyle.Render(fmt.Sprintf("%d chunks (%d bytes)", s.bridgeStats.PostReassemblyDroppedChunks, s.bridgeStats.PostReassemblyDroppedBytes)))
+		}
+		if s.bridgeStats.ParserFramingDiscontinuities > 0 || s.bridgeStats.RecoveryFailures > 0 {
+			rightLines = append(rightLines, labelStyle.Render("SIP parser: ")+
+				valueStyle.Render(fmt.Sprintf("%d gaps, %d failed recoveries", s.bridgeStats.ParserFramingDiscontinuities, s.bridgeStats.RecoveryFailures)))
+		}
 
 		// Sampling Ratio
 		samplingPct := float64(s.bridgeStats.SamplingRatio) / 10.0

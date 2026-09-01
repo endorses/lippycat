@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
@@ -493,12 +495,28 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	}
 }
 
-// MatchPacket checks if a packet matches any of the filters
+type packetMatchScope uint8
+
+const (
+	packetMatchFull packetMatchScope = iota
+	// packetMatchMedia contains only filter families explicitly safe for RTP/RTCP.
+	// Future media-applicable filter types must opt in to this scope.
+	packetMatchMedia
+)
+
+// MatchPacket checks if a packet matches any of the filters.
 func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
+	matched, _ := af.matchPacket(packet, packetMatchFull, false)
+	return matched
+}
+
+func (af *ApplicationFilter) matchPacket(packet gopacket.Packet, scope packetMatchScope, collectIDs bool) (bool, []string) {
 	af.mu.RLock()
 	defer af.mu.RUnlock()
+	return af.matchPacketLocked(packet, scope, collectIDs)
+}
 
-	// Check if we have any filters at all
+func (af *ApplicationFilter) matchPacketLocked(packet gopacket.Packet, scope packetMatchScope, collectIDs bool) (bool, []string) {
 	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
 	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
 	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
@@ -509,146 +527,79 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 
 	// If no filters, use the no-filter policy
 	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters && !hasIMSIFilters && !hasIMEIFilters {
-		return af.noFilterPolicy == NoFilterPolicyAllow
+		return af.noFilterPolicy == NoFilterPolicyAllow, nil
 	}
 
-	// Check IP addresses first (applies to all protocols)
+	var matchedFilterIDs []string
 	if hasIPFilters {
-		if af.matchIPAddressBool(packet) {
-			return true
-		}
-		// If we have ONLY IP filters (no other protocol filters), no match
-		if !hasVoIPFilters && !hasDNSFilters && !hasTLSFilters {
-			return false
+		if collectIDs {
+			matchedFilterIDs = append(matchedFilterIDs, af.matchIPAddress(packet)...)
+		} else if af.matchIPAddressBool(packet) {
+			return true, nil
 		}
 	}
+	if scope == packetMatchMedia {
+		return len(matchedFilterIDs) > 0, matchedFilterIDs
+	}
 
-	// Check DNS packets
 	if hasDNSFilters {
-		if matched, _ := af.matchDNSPacket(packet); matched {
-			return true
+		if matched, ids := af.matchDNSPacket(packet); matched {
+			if !collectIDs {
+				return true, nil
+			}
+			matchedFilterIDs = append(matchedFilterIDs, ids...)
 		}
 	}
 
 	// Check email packets
 	if hasEmailFilters {
-		if matched, _ := af.matchEmailPacket(packet); matched {
-			return true
+		if matched, ids := af.matchEmailPacket(packet); matched {
+			if !collectIDs {
+				return true, nil
+			}
+			matchedFilterIDs = append(matchedFilterIDs, ids...)
 		}
 	}
 
 	// Check TLS packets
 	if hasTLSFilters {
-		if matched, _ := af.matchTLSPacket(packet); matched {
-			return true
+		if matched, ids := af.matchTLSPacket(packet); matched {
+			if !collectIDs {
+				return true, nil
+			}
+			matchedFilterIDs = append(matchedFilterIDs, ids...)
 		}
 	}
 
 	// Check VoIP packets (including IMSI/IMEI which are in SIP headers)
 	if hasVoIPFilters || hasIMSIFilters || hasIMEIFilters {
-		// Check if this is a SIP or RTP packet
-		if af.isVoIPPacket(packet) {
+		if af.isSIPPacket(packet) {
 			// Get payload - use LayerContents() to get full message including headers
 			// Payload() only returns the body (e.g., SDP for SIP), missing critical info
 			appLayer := packet.ApplicationLayer()
 			if appLayer != nil {
 				payload := appLayer.LayerContents()
+				sipHeaders := extractSIPHeaders(payload)
 
 				// Check IMSI/IMEI first (separate from other VoIP filters)
 				if hasIMSIFilters || hasIMEIFilters {
-					if af.matchIMSIIMEI(payload) {
-						return true
+					if collectIDs {
+						matchedFilterIDs = append(matchedFilterIDs, af.matchIMSIIMEIHeadersWithIDs(sipHeaders)...)
+					} else if af.matchIMSIIMEIHeaders(sipHeaders) {
+						return true, nil
 					}
 				}
 
 				// Check other VoIP filters
 				if hasVoIPFilters {
 					// Use GPU if enabled and at least one GPU automaton is built
-					if af.enabled && af.gpuAccel != nil && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
-						return af.matchWithGPU([]byte(payload))
+					if collectIDs {
+						matchedFilterIDs = append(matchedFilterIDs, af.matchSIPHeadersWithCPUAndReturnIDs(sipHeaders)...)
+					} else if af.enabled && af.gpuAccel != nil && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
+						return af.matchSIPHeadersWithGPU(sipHeaders), nil
+					} else {
+						return af.matchSIPHeadersWithCPU(sipHeaders), nil
 					}
-
-					// CPU fallback
-					return af.matchWithCPU(string(payload))
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-// MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
-// This method is used for LI correlation - it returns which specific filters matched
-// so the LI Manager can look up the corresponding intercept task XIDs.
-func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, []string) {
-	af.mu.RLock()
-	defer af.mu.RUnlock()
-
-	var matchedFilterIDs []string
-
-	// Check if we have any filters at all
-	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
-	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
-	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
-	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
-	hasIMSIFilters := len(af.imsiFilters) > 0
-	hasIMEIFilters := len(af.imeiFilters) > 0
-	hasIPFilters := len(af.ipAddresses) > 0
-
-	// If no filters, use the no-filter policy (but no specific filter IDs)
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters && !hasIMSIFilters && !hasIMEIFilters {
-		return af.noFilterPolicy == NoFilterPolicyAllow, nil
-	}
-
-	// Check IP addresses first (applies to all protocols)
-	if hasIPFilters {
-		ipFilterIDs := af.matchIPAddress(packet)
-		if len(ipFilterIDs) > 0 {
-			matchedFilterIDs = append(matchedFilterIDs, ipFilterIDs...)
-		}
-	}
-
-	// Check DNS packets
-	if hasDNSFilters {
-		if matched, dnsFilterIDs := af.matchDNSPacket(packet); matched {
-			matchedFilterIDs = append(matchedFilterIDs, dnsFilterIDs...)
-		}
-	}
-
-	// Check email packets
-	if hasEmailFilters {
-		if matched, emailFilterIDs := af.matchEmailPacket(packet); matched {
-			matchedFilterIDs = append(matchedFilterIDs, emailFilterIDs...)
-		}
-	}
-
-	// Check TLS packets
-	if hasTLSFilters {
-		if matched, tlsFilterIDs := af.matchTLSPacket(packet); matched {
-			matchedFilterIDs = append(matchedFilterIDs, tlsFilterIDs...)
-		}
-	}
-
-	// Check VoIP packets (including IMSI/IMEI)
-	if hasVoIPFilters || hasIMSIFilters || hasIMEIFilters {
-		// Check if this is a SIP or RTP packet
-		if af.isVoIPPacket(packet) {
-			// Get payload - use LayerContents() to get full message including headers
-			appLayer := packet.ApplicationLayer()
-			if appLayer != nil {
-				payload := appLayer.LayerContents()
-
-				// Match IMSI/IMEI filters and collect filter IDs
-				if hasIMSIFilters || hasIMEIFilters {
-					imsiImeiFilterIDs := af.matchIMSIIMEIWithIDs(payload)
-					matchedFilterIDs = append(matchedFilterIDs, imsiImeiFilterIDs...)
-				}
-
-				// Match other VoIP filters and collect filter IDs
-				if hasVoIPFilters {
-					voipFilterIDs := af.matchWithCPUAndReturnIDs(payload)
-					matchedFilterIDs = append(matchedFilterIDs, voipFilterIDs...)
 				}
 			}
 		}
@@ -657,14 +608,29 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 	return len(matchedFilterIDs) > 0, matchedFilterIDs
 }
 
+// MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
+// This method is used for LI correlation - it returns which specific filters matched
+// so the LI Manager can look up the corresponding intercept task XIDs.
+func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, []string) {
+	return af.matchPacket(packet, packetMatchFull, true)
+}
+
+// MatchPacketLevelWithIDs evaluates only packet-level filters safe for
+// classified media. Currently that is IP filtering plus the global no-filter
+// policy; application payload and identity matchers are excluded.
+func (af *ApplicationFilter) MatchPacketLevelWithIDs(packet gopacket.Packet) (bool, []string) {
+	return af.matchPacket(packet, packetMatchMedia, true)
+}
+
 // matchWithCPUAndReturnIDs uses CPU matching and returns matched filter IDs.
 // This is used by MatchPacketWithIDs for LI correlation.
 func (af *ApplicationFilter) matchWithCPUAndReturnIDs(payload []byte) []string {
+	return af.matchSIPHeadersWithCPUAndReturnIDs(extractSIPHeaders(payload))
+}
+
+func (af *ApplicationFilter) matchSIPHeadersWithCPUAndReturnIDs(sipHeaders sipHeaders) []string {
 	var matchedFilterIDs []string
 	seen := make(map[string]bool) // Deduplicate filter IDs
-
-	// Extract SIP headers for proper matching
-	sipHeaders := extractSIPHeaders(payload)
 
 	// Extract usernames for SIPUser and PhoneNumber matching.
 	// Cover all identity-bearing headers (From/To/P-Asserted-Identity/
@@ -743,10 +709,24 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	results := make([]bool, len(packets))
 
 	// If no filters, use the no-filter policy
-	if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 {
+	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
+	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
+	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
+	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
+	hasOtherFilters := len(af.ipAddresses) > 0 || hasDNSFilters || hasEmailFilters || hasTLSFilters ||
+		len(af.imsiFilters) > 0 || len(af.imeiFilters) > 0
+	if !hasVoIPFilters && !hasOtherFilters {
 		matchAll := af.noFilterPolicy == NoFilterPolicyAllow
 		for i := range results {
 			results[i] = matchAll
+		}
+		return results
+	}
+	// The optimized batch path below is specific to SIP identity filters. Mixed
+	// filter families require the complete per-packet semantics.
+	if hasOtherFilters {
+		for i, packet := range packets {
+			results[i], _ = af.matchPacketLocked(packet, packetMatchFull, false)
 		}
 		return results
 	}
@@ -756,10 +736,11 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	voipIndices := make([]int, 0, len(packets))
 
 	for i, packet := range packets {
-		if af.isVoIPPacket(packet) {
+		if af.isSIPPacket(packet) {
 			if appLayer := packet.ApplicationLayer(); appLayer != nil {
 				// Use LayerContents() to get full message with headers
-				voipPayloads = append(voipPayloads, appLayer.LayerContents())
+				payload := appLayer.LayerContents()
+				voipPayloads = append(voipPayloads, payload)
 				voipIndices = append(voipIndices, i)
 			}
 		}
@@ -769,6 +750,10 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	if af.enabled && af.gpuAccel != nil && len(voipPayloads) > 1 && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
 		backend := af.gpuAccel.Backend()
 		if backend != nil {
+			voipHeaders := make([]sipHeaders, len(voipPayloads))
+			for i, payload := range voipPayloads {
+				voipHeaders[i] = extractSIPHeaders(payload)
+			}
 			matchedPayloads := make(map[int]bool)
 
 			// SIPUser/PhoneNumber batch matching via GPU
@@ -776,8 +761,7 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 				allUsernames := make([][]byte, 0, len(voipPayloads)*3)
 				usernameToPacket := make([]int, 0, len(voipPayloads)*3)
 
-				for payloadIdx, payload := range voipPayloads {
-					sipHeaders := extractSIPHeaders(payload)
+				for payloadIdx, sipHeaders := range voipHeaders {
 					for _, v := range sipHeaders.identityValues() {
 						if user := voip.ExtractUserFromHeaderBytes(v); user != "" {
 							allUsernames = append(allUsernames, []byte(user))
@@ -803,12 +787,11 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 				allURIs := make([][]byte, 0, len(voipPayloads)*3)
 				uriToPacket := make([]int, 0, len(voipPayloads)*3)
 
-				for payloadIdx, payload := range voipPayloads {
+				for payloadIdx, sipHeaders := range voipHeaders {
 					// Skip already matched packets
 					if matchedPayloads[payloadIdx] {
 						continue
 					}
-					sipHeaders := extractSIPHeaders(payload)
 					for _, v := range sipHeaders.identityValues() {
 						if uri := voip.ExtractURIFromHeaderBytes(v); uri != "" {
 							allURIs = append(allURIs, []byte(uri))
@@ -838,9 +821,8 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	}
 
 	// CPU fallback
-	for _, idx := range voipIndices {
-		packet := packets[idx]
-		results[idx] = af.MatchPacket(packet)
+	for _, packetIdx := range voipIndices {
+		results[packetIdx], _ = af.matchPacketLocked(packets[packetIdx], packetMatchFull, false)
 	}
 
 	return results
@@ -850,13 +832,14 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 // SIP users use GPU Aho-Corasick, phone numbers use CPU PhoneNumberMatcher (bloom+hash)
 // SIPURI patterns use a separate GPU Aho-Corasick automaton
 func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
+	return af.matchSIPHeadersWithGPU(extractSIPHeaders(payload))
+}
+
+func (af *ApplicationFilter) matchSIPHeadersWithGPU(sipHeaders sipHeaders) bool {
 	backend := af.gpuAccel.Backend()
 	if backend == nil {
-		return af.matchWithCPU(string(payload))
+		return af.matchSIPHeadersWithCPU(sipHeaders)
 	}
-
-	// Extract SIP headers for matching
-	sipHeaders := extractSIPHeaders(payload)
 
 	// Extract usernames once for both SIPUser and PhoneNumber matching.
 	// Cover all identity-bearing headers (From/To/P-Asserted-Identity/
@@ -960,11 +943,10 @@ func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
 // Runs separate matching passes for SIPUser, PhoneNumber, and SIPURI
 // Only runs each pass if filters of that type exist (typical case: single pass)
 func (af *ApplicationFilter) matchWithCPU(payload string) bool {
-	// Convert to bytes for header extraction
-	payloadBytes := []byte(payload)
+	return af.matchSIPHeadersWithCPU(extractSIPHeaders([]byte(payload)))
+}
 
-	// Extract SIP headers for proper matching
-	sipHeaders := extractSIPHeaders(payloadBytes)
+func (af *ApplicationFilter) matchSIPHeadersWithCPU(sipHeaders sipHeaders) bool {
 
 	// Extract usernames once for both SIPUser and PhoneNumber matching.
 	// Cover all identity-bearing headers (From/To/P-Asserted-Identity/
@@ -1058,112 +1040,159 @@ func (h sipHeaders) identityValues() [][]byte {
 // This is a fast, zero-allocation parser for filtering.
 func extractSIPHeaders(payload []byte) sipHeaders {
 	var headers sipHeaders
-
-	// Parse line by line - handle both \r\n (SIP standard) and \n (for tests/compatibility)
-	var lines [][]byte
-	if bytes.Contains(payload, []byte("\r\n")) {
-		lines = bytes.Split(payload, []byte("\r\n"))
-	} else {
-		lines = bytes.Split(payload, []byte("\n"))
-	}
-
-	// Request-URI: the middle token of a SIP request line
-	// ("METHOD SP Request-URI SP SIP-Version"). Responses ("SIP/2.0 ...") have
-	// no Request-URI. This is the callee target for MT requests (e.g. an MT
-	// SMS-DELIVER MESSAGE whose recipient appears only in the Request-URI).
-	if len(lines) > 0 {
-		fields := bytes.Fields(lines[0])
-		if len(fields) == 3 && bytes.HasPrefix(fields[2], []byte("SIP/")) {
-			headers.requestURI = fields[1]
+	firstLine := true
+	for lineStart := 0; lineStart <= len(payload); {
+		lineEnd := bytes.IndexByte(payload[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(payload)
+		} else {
+			lineEnd += lineStart
 		}
-	}
+		line := payload[lineStart:lineEnd]
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
 
-	for _, line := range lines {
 		if len(line) == 0 {
 			// Empty line marks end of headers
 			break
 		}
+		if firstLine {
+			headers.requestURI = extractRequestURI(line)
+			firstLine = false
+			if lineEnd == len(payload) {
+				break
+			}
+			lineStart = lineEnd + 1
+			continue
+		}
 
 		// Check for From header (case-insensitive)
-		if len(line) >= 5 {
-			lineUpper := bytes.ToUpper(line[:5])
-			if bytes.Equal(lineUpper, []byte("FROM:")) {
-				headers.from = extractHeaderValue(line)
-				continue
-			}
+		if hasASCIIFoldPrefix(line, "From:") {
+			headers.from = extractHeaderValue(line)
+			goto nextLine
 		}
 		// Short form: f:
 		if len(line) >= 2 && (line[0] == 'f' || line[0] == 'F') && line[1] == ':' {
 			headers.from = extractHeaderValue(line)
-			continue
+			goto nextLine
 		}
 
 		// Check for To header (case-insensitive)
-		if len(line) >= 3 {
-			lineUpper := bytes.ToUpper(line[:3])
-			if bytes.Equal(lineUpper, []byte("TO:")) {
-				headers.to = extractHeaderValue(line)
-				continue
-			}
+		if hasASCIIFoldPrefix(line, "To:") {
+			headers.to = extractHeaderValue(line)
+			goto nextLine
 		}
 		// Short form: t:
 		if len(line) >= 2 && (line[0] == 't' || line[0] == 'T') && line[1] == ':' {
 			headers.to = extractHeaderValue(line)
-			continue
+			goto nextLine
 		}
 
 		// Check for P-Asserted-Identity header (case-insensitive)
-		if len(line) >= 20 {
-			lineUpper := bytes.ToUpper(line[:20])
-			if bytes.Equal(lineUpper, []byte("P-ASSERTED-IDENTITY:")) {
-				headers.pAssertedIdentity = extractHeaderValue(line)
-				continue
-			}
+		if hasASCIIFoldPrefix(line, "P-Asserted-Identity:") {
+			headers.pAssertedIdentity = extractHeaderValue(line)
+			goto nextLine
 		}
 
 		// Check for P-Preferred-Identity header (case-insensitive)
-		if len(line) >= 21 {
-			lineUpper := bytes.ToUpper(line[:21])
-			if bytes.Equal(lineUpper, []byte("P-PREFERRED-IDENTITY:")) {
-				headers.pPreferredIdentity = extractHeaderValue(line)
-				continue
-			}
+		if hasASCIIFoldPrefix(line, "P-Preferred-Identity:") {
+			headers.pPreferredIdentity = extractHeaderValue(line)
+			goto nextLine
 		}
 
 		// Check for P-Called-Party-ID header (case-insensitive)
-		if len(line) >= 18 {
-			lineUpper := bytes.ToUpper(line[:18])
-			if bytes.Equal(lineUpper, []byte("P-CALLED-PARTY-ID:")) {
-				headers.pCalledPartyID = extractHeaderValue(line)
-				continue
-			}
+		if hasASCIIFoldPrefix(line, "P-Called-Party-ID:") {
+			headers.pCalledPartyID = extractHeaderValue(line)
+			goto nextLine
 		}
 
 		// Check for Authorization header (case-insensitive)
-		if len(line) >= 14 {
-			lineUpper := bytes.ToUpper(line[:14])
-			if bytes.Equal(lineUpper, []byte("AUTHORIZATION:")) {
-				headers.authorization = extractHeaderValue(line)
-				continue
-			}
+		if hasASCIIFoldPrefix(line, "Authorization:") {
+			headers.authorization = extractHeaderValue(line)
+			goto nextLine
 		}
 
 		// Check for Contact header (case-insensitive)
-		if len(line) >= 8 {
-			lineUpper := bytes.ToUpper(line[:8])
-			if bytes.Equal(lineUpper, []byte("CONTACT:")) {
-				headers.contact = extractHeaderValue(line)
-				continue
-			}
+		if hasASCIIFoldPrefix(line, "Contact:") {
+			headers.contact = extractHeaderValue(line)
+			goto nextLine
 		}
 		// Short form: m: (Contact can be abbreviated as m in SIP)
 		if len(line) >= 2 && (line[0] == 'm' || line[0] == 'M') && line[1] == ':' {
 			headers.contact = extractHeaderValue(line)
-			continue
 		}
+
+	nextLine:
+		if lineEnd == len(payload) {
+			break
+		}
+		lineStart = lineEnd + 1
 	}
 
 	return headers
+}
+
+func hasASCIIFoldPrefix(value []byte, prefix string) bool {
+	if len(value) < len(prefix) {
+		return false
+	}
+	for i := range len(prefix) {
+		a, b := value[i], prefix[i]
+		if a >= 'A' && a <= 'Z' {
+			a += 'a' - 'A'
+		}
+		if b >= 'A' && b <= 'Z' {
+			b += 'a' - 'A'
+		}
+		if a != b {
+			return false
+		}
+	}
+	return true
+}
+
+func extractRequestURI(line []byte) []byte {
+	var fields [4][]byte
+	count := 0
+	for i := 0; i < len(line); {
+		for i < len(line) {
+			width, space := fieldSpaceWidth(line[i:])
+			if !space {
+				break
+			}
+			i += width
+		}
+		if i == len(line) {
+			break
+		}
+		start := i
+		for i < len(line) {
+			width, space := fieldSpaceWidth(line[i:])
+			if space {
+				break
+			}
+			i += width
+		}
+		if count == len(fields) {
+			return nil
+		}
+		fields[count] = line[start:i]
+		count++
+	}
+	if count == 3 && bytes.HasPrefix(fields[2], []byte("SIP/")) {
+		return fields[1]
+	}
+	return nil
+}
+
+func fieldSpaceWidth(value []byte) (int, bool) {
+	b := value[0]
+	if b < utf8.RuneSelf {
+		return 1, b == ' ' || b == '\t' || b == '\r' || b == '\n' || b == '\v' || b == '\f'
+	}
+	r, width := utf8.DecodeRune(value)
+	return width, r != utf8.RuneError && unicode.IsSpace(r)
 }
 
 // extractHeaderValue extracts the value part of a SIP header (after the colon)
@@ -1269,8 +1298,8 @@ func (af *ApplicationFilter) matchSingleIP(addr netip.Addr) (string, bool) {
 	return "", false
 }
 
-// isVoIPPacket checks if a packet is SIP or RTP using centralized detector
-func (af *ApplicationFilter) isVoIPPacket(packet gopacket.Packet) bool {
+// isSIPPacket gates every route into SIP identity extraction.
+func (af *ApplicationFilter) isSIPPacket(packet gopacket.Packet) bool {
 	// Use centralized detector for accurate protocol detection
 	// This replaces unreliable port-based heuristics
 	result := af.detector.Detect(packet)
@@ -1278,13 +1307,7 @@ func (af *ApplicationFilter) isVoIPPacket(packet gopacket.Packet) bool {
 		return false
 	}
 
-	// Check if detected protocol is VoIP-related
-	switch result.Protocol {
-	case "SIP", "RTP", "RTCP":
-		return true
-	default:
-		return false
-	}
+	return result.Protocol == "SIP"
 }
 
 // matchDNSPacket checks if a packet is DNS and matches domain filters.
@@ -1580,8 +1603,10 @@ func extractSubjectLine(payload string) string {
 // matchIMSIIMEI checks if the packet contains IMSI or IMEI matching any filter.
 // Returns true if either IMSI or IMEI matches.
 func (af *ApplicationFilter) matchIMSIIMEI(payload []byte) bool {
-	sipHeaders := extractSIPHeaders(payload)
+	return af.matchIMSIIMEIHeaders(extractSIPHeaders(payload))
+}
 
+func (af *ApplicationFilter) matchIMSIIMEIHeaders(sipHeaders sipHeaders) bool {
 	// Extract and match IMSI
 	if len(af.imsiFilters) > 0 {
 		imsi := voip.ExtractIMSI(string(sipHeaders.authorization), string(sipHeaders.pAssertedIdentity))
@@ -1608,8 +1633,11 @@ func (af *ApplicationFilter) matchIMSIIMEI(payload []byte) bool {
 // matchIMSIIMEIWithIDs checks if the packet contains IMSI or IMEI matching any filter.
 // Returns matched filter IDs for LI correlation.
 func (af *ApplicationFilter) matchIMSIIMEIWithIDs(payload []byte) []string {
+	return af.matchIMSIIMEIHeadersWithIDs(extractSIPHeaders(payload))
+}
+
+func (af *ApplicationFilter) matchIMSIIMEIHeadersWithIDs(sipHeaders sipHeaders) []string {
 	var matchedFilterIDs []string
-	sipHeaders := extractSIPHeaders(payload)
 
 	// Extract and match IMSI
 	if len(af.imsiFilters) > 0 {

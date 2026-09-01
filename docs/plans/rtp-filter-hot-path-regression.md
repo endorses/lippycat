@@ -256,42 +256,42 @@ can be reviewed independently.
 
 ### Implementation
 
-- [ ] Replace `bytes.Split` line materialization with an index-based scan that
+- [x] Replace `bytes.Split` line materialization with an index-based scan that
       accepts the existing supported line endings and stops at the header/body
       boundary.
-- [ ] Replace repeated `bytes.ToUpper` calls with an allocation-free
+- [x] Replace repeated `bytes.ToUpper` calls with an allocation-free
       case-insensitive byte-prefix helper local to the filtering package, or move
       an existing helper to a neutral package only if doing so avoids an import
       cycle and remains narrowly scoped.
-- [ ] Parse the request-line tokens with indexes rather than `bytes.Fields`, while
+- [x] Parse the request-line tokens with indexes rather than `bytes.Fields`, while
       preserving response handling and malformed-line behavior.
-- [ ] Extract SIP headers once per match operation and pass the parsed view to
+- [x] Extract SIP headers once per match operation and pass the parsed view to
       identity, URI, authorization, and contact matching helpers that need it.
-- [ ] Remove or correct the current zero-allocation comment only after benchmarks
+- [x] Remove or correct the current zero-allocation comment only after benchmarks
       establish the actual allocation count.
-- [ ] Avoid pooling payload-backed header views; their ownership is limited to the
+- [x] Avoid pooling payload-backed header views; their ownership is limited to the
       packet match and pooling would create retention and reset risks.
 
 ### Tests and fuzzing
 
-- [ ] Preserve coverage for long and compact header names, mixed casing, request
+- [x] Preserve coverage for long and compact header names, mixed casing, request
       URIs, responses, supported line endings, empty headers, malformed lines,
       and header/body termination.
-- [ ] Add equivalence tests comparing the old parser behavior captured as test
+- [x] Add equivalence tests comparing the old parser behavior captured as test
       cases with the new scanner for all identity-bearing headers.
-- [ ] Add fuzz seeds containing binary data, truncated lines, repeated headers,
+- [x] Add fuzz seeds containing binary data, truncated lines, repeated headers,
       unusual casing, and oversized synthetic headers; assert no panic and
       bounded scanning.
-- [ ] Add focused parser benchmarks with `ReportAllocs` for representative SIP,
+- [x] Add focused parser benchmarks with `ReportAllocs` for representative SIP,
       minimal SIP, no-match text, and binary media payloads.
 
 ### Acceptance criteria
 
-- [ ] Header extraction introduces no per-line case-conversion or line-slice
+- [x] Header extraction introduces no per-line case-conversion or line-slice
       allocations.
-- [ ] Identity matching results remain byte-for-byte compatible for valid SIP
+- [x] Identity matching results remain byte-for-byte compatible for valid SIP
       fixtures.
-- [ ] Parser work is bounded by the supplied payload and retains no packet data
+- [x] Parser work is bounded by the supplied payload and retains no packet data
       after the match returns.
 
 ## Phase 4: Regression Benchmark and Validation
@@ -342,7 +342,7 @@ can be reviewed independently.
 - [x] Phase 0: reproduce the regression and freeze selection semantics.
 - [x] Phase 1: introduce the media-safe matching contract.
 - [ ] Phase 2: route local packets correctly and unify ID composition.
-- [ ] Phase 3: optimize real SIP parsing independently.
+- [x] Phase 3: optimize real SIP parsing independently.
 - [ ] Phase 4: benchmark, validate, document, and release.
 
 ## Principal Risks

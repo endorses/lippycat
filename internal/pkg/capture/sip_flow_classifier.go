@@ -88,8 +88,10 @@ func (c *tcpSIPFlowClassifier) classify(network gopacket.NetworkLayer, tcp *laye
 		c.stats.IdleExpirations++
 		state = nil
 	}
-	// A fresh handshake explicitly starts a new incarnation of a reused tuple.
-	if tcp.SYN && !tcp.ACK {
+	// Any observed handshake packet starts a new incarnation of a reused tuple.
+	// Reset on SYN-ACK too: capture may have missed the opening SYN, and retaining
+	// an old promotion would then protect unrelated payload on the reused tuple.
+	if tcp.SYN {
 		delete(c.flows, key)
 		state = nil
 	}

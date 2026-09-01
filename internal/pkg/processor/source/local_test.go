@@ -84,6 +84,33 @@ func TestInjectedPacketCompletionMovesWithBatchWithoutRunning(t *testing.T) {
 	}
 }
 
+func TestNonInjectionWorkerDoesNotConsumeReassembledPackets(t *testing.T) {
+	cfg := DefaultLocalSourceConfig()
+	s := NewLocalSource(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.ctx = ctx
+
+	injected := make(chan InjectedPacket, 1)
+	injected <- InjectedPacket{PacketInfo: buildTCPPacket(t, 1)}
+	s.SetTCPInjectionChannel(injected)
+	input := make(chan capture.PacketInfo)
+	close(input)
+
+	done := make(chan struct{})
+	go func() {
+		s.batchingWorkerWithInjection(input, false)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("non-injection worker did not stop")
+	}
+	require.Len(t, injected, 1, "only the designated worker may consume ordered TCP injections")
+}
+
 func TestDroppedBatchRunsDeferredCompletion(t *testing.T) {
 	cfg := DefaultLocalSourceConfig()
 	cfg.BatchBuffer = 1

@@ -1046,8 +1046,6 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 	defer reassembly.close()
 
 	batch := make([]components.PacketDisplay, 0, 100)
-	packetCount := int64(0)
-
 	sampling := newDisplaySamplingPolicy(preserveAll)
 	ingressTelemetry := newIngressTelemetryAccumulator(time.Now())
 
@@ -1178,7 +1176,6 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 				return
 			}
 
-			packetCount++
 			atomic.AddInt64(&bridgeStats.PacketsReceived, 1)
 			if env == nil {
 				atomic.AddInt64(&bridgeStats.InvalidEnvelopes, 1)
@@ -1196,7 +1193,7 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 
 			reassembly.process(env)
 
-			if sampling.shouldDisplay(env, packetCount, time.Now()) {
+			if sampling.shouldDisplay(env, ingressTelemetry.packets, time.Now()) {
 				// Full conversion to extract all metadata (SDP, etc.)
 				packet := convertEnvelope(env, tracker)
 				batch = append(batch, packet)

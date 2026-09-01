@@ -32,6 +32,8 @@ type DropStats struct {
 	SampledOutPackets     int64
 	BatchQueuePacketDrops int64
 	PendingEvictions      int64
+	DisplayRetentionRatio int64 // End-to-end valid-ingress retention * 1000
+	hasDisplayRetention   bool
 
 	// Total packets for percentage calculations
 	TotalPackets int64
@@ -177,7 +179,9 @@ func (ds *DropStats) GetSummary() DropSummary {
 		FilterDrops:           ds.FilterDrops,
 	}
 	summary.DisplayDrops = ds.SampledOutPackets + ds.BatchQueuePacketDrops + ds.PendingEvictions
-	if ds.TotalPackets > 0 {
+	if ds.hasDisplayRetention {
+		summary.DisplayRetentionRate = float64(ds.DisplayRetentionRatio) / 10
+	} else if ds.TotalPackets > 0 {
 		retained := ds.TotalPackets - summary.DisplayDrops
 		if retained < 0 {
 			retained = 0
@@ -225,6 +229,8 @@ func (ds *DropStats) Reset() {
 	ds.SampledOutPackets = 0
 	ds.BatchQueuePacketDrops = 0
 	ds.PendingEvictions = 0
+	ds.DisplayRetentionRatio = 0
+	ds.hasDisplayRetention = false
 	ds.TotalPackets = 0
 }
 
@@ -242,6 +248,8 @@ func (ds *DropStats) UpdateFromBridgeStats(bs *BridgeStatistics) {
 	ds.SampledOutPackets = bs.PacketsSampledOut
 	ds.BatchQueuePacketDrops = bs.BatchQueuePacketDrops
 	ds.PendingEvictions = bs.PendingPacketEvictions
+	ds.DisplayRetentionRatio = bs.DisplayRetentionRatio
+	ds.hasDisplayRetention = true
 
 	// Total packets from bridge
 	ds.TotalPackets = bs.PacketsReceived

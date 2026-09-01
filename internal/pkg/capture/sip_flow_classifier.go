@@ -162,9 +162,15 @@ func (c *tcpSIPFlowClassifier) makeRoom(now time.Time) {
 	}
 }
 
-func (c *tcpSIPFlowClassifier) snapshot() (SIPFlowClassifierStats, int) {
+func (c *tcpSIPFlowClassifier) snapshot(now time.Time) (SIPFlowClassifierStats, int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for key, state := range c.flows {
+		if now.Sub(state.lastSeen) > c.idleTimeout {
+			delete(c.flows, key)
+			c.stats.IdleExpirations++
+		}
+	}
 	return c.stats, len(c.flows)
 }
 

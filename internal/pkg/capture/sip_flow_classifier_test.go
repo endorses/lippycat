@@ -200,9 +200,21 @@ func TestTCPSIPFlowClassifierBoundedStateAndPrefixes(t *testing.T) {
 
 	prefix := appendSIPPrefix(nil, make([]byte, tcpSIPPrefixMaxBytes*4))
 	assert.Len(t, prefix, tcpSIPPrefixMaxBytes)
-	stats, active := c.snapshot()
+	stats, active := c.snapshot(now.Add(time.Second))
 	assert.Equal(t, c.maxEntries, active)
 	assert.Greater(t, stats.CapacityEvictions, uint64(0))
+}
+
+func TestTCPSIPFlowClassifierSnapshotExpiresInactiveFlows(t *testing.T) {
+	c := newTCPSIPFlowClassifier()
+	c.idleTimeout = time.Second
+	now := time.Unix(650, 0)
+	ip := testIPv4("192.0.2.1", "198.51.100.1")
+	require.True(t, c.classify(ip, testTCP(41000, 5060, "INVITE sip:x@example.invalid SIP/2.0\r\n"), now))
+
+	stats, active := c.snapshot(now.Add(time.Second + time.Nanosecond))
+	assert.Zero(t, active)
+	assert.Equal(t, uint64(1), stats.IdleExpirations)
 }
 
 func TestTCPSIPFlowClassifierConcurrent(t *testing.T) {

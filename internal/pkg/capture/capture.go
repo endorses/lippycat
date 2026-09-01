@@ -457,7 +457,7 @@ func (pb *PacketBuffer) GetDropped() int64 {
 // GetSIPFlowClassifierStats returns cumulative classifier telemetry and the
 // current bounded flow-state cardinality.
 func (pb *PacketBuffer) GetSIPFlowClassifierStats() (SIPFlowClassifierStats, int) {
-	return pb.sipFlows.snapshot()
+	return pb.sipFlows.snapshot(time.Now())
 }
 
 func (pb *PacketBuffer) Close() {
@@ -650,7 +650,7 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 						int64(pcapStats.PacketsReceived),
 						int64(pcapStats.PacketsDropped),
 						int64(pcapStats.PacketsIfDropped),
-						packetBuffer.GetDropped()+packetBuffer.GetSIPDropped(),
+						packetBuffer,
 					)
 				}
 				handle.Close() // This will cause packetSource.Packets() channel to close
@@ -790,7 +790,7 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				int64(pcapStats.PacketsReceived),
 				int64(pcapStats.PacketsDropped),
 				int64(pcapStats.PacketsIfDropped),
-				buffer.GetDropped()+buffer.GetSIPDropped(),
+				buffer,
 			)
 		}
 	}()
@@ -818,14 +818,13 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 
 				// Include both flushed and unflushed counts for accurate reporting
 				count := packetCount.Load() + localCount.Load()
-				bufferDrops := buffer.GetDropped() + buffer.GetSIPDropped()
 				frags := fragmentsReceived.Load()
 				reassembled := packetsReassembled.Load()
 				handleMu.Lock()
 				pcapStats, statsErr := handle.Stats()
 				handleMu.Unlock()
 				if statsErr == nil {
-					snapshot := telemetry.report(iface.Name(), int64(pcapStats.PacketsReceived), int64(pcapStats.PacketsDropped), int64(pcapStats.PacketsIfDropped), bufferDrops)
+					snapshot := telemetry.report(iface.Name(), int64(pcapStats.PacketsReceived), int64(pcapStats.PacketsDropped), int64(pcapStats.PacketsIfDropped), buffer)
 					if tickTime.Second()%30 == 0 {
 						logger.Info("Capture heartbeat",
 							"interface", iface.Name(),
@@ -834,9 +833,16 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 							"pcap_kernel_dropped", pcapStats.PacketsDropped,
 							"pcap_interface_dropped", pcapStats.PacketsIfDropped,
 							"total_kernel_dropped", snapshot.KernelDrops+snapshot.InterfaceDrops,
-							"packet_buffer_dropped", bufferDrops,
+							"packet_buffer_dropped", snapshot.PacketBufferDrops,
 							"packet_buffer_regular_dropped", buffer.GetDropped(),
 							"packet_buffer_sip_dropped", buffer.GetSIPDropped(),
+							"sip_priority_classified", snapshot.SIPClassified,
+							"sip_flow_promotions", snapshot.SIPFlowPromotions,
+							"sip_flow_classified_segments", snapshot.SIPFlowClassifiedSegments,
+							"sip_flow_idle_expirations", snapshot.SIPFlowIdleExpirations,
+							"sip_flow_capacity_evictions", snapshot.SIPFlowCapacityEvictions,
+							"sip_flow_connection_closes", snapshot.SIPFlowConnectionCloses,
+							"sip_flow_active", snapshot.SIPFlowActive,
 							"ip_fragments", frags,
 							"reassembled", reassembled,
 							"buffer_len", buffer.Len(),

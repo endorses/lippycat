@@ -273,6 +273,10 @@ named local stages. New protobuf fields must be additive and use new field numbe
       miss 818.5-902.4 ns/op, 130-131 B/op, 4 allocs/op; full-cache eviction
       873.4-915.3 ns/op, 130-131 B/op, 4 allocs/op.
 
+      Post-implementation audit: classifier snapshots now remove passively expired
+      entries, and classification/lifecycle counters are included in cumulative
+      capture telemetry and heartbeat output rather than remaining getter-only.
+
 ### Acceptance Criteria
 
 - [x] Regular traffic saturation does not evict recognized SIP traffic within the

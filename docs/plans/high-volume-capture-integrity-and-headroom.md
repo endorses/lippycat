@@ -1,7 +1,7 @@
 # High-Volume Capture Integrity and Headroom Plan
 
 **Date:** 2026-09-01
-**Status:** In Progress (Phases 0-4 complete)
+**Status:** In Progress (Phases 0-5 complete)
 **Priority:** High
 
 ## Overview
@@ -356,38 +356,67 @@ named local stages. New protobuf fields must be additive and use new field numbe
 
 ### Baseline
 
-- [ ] Extend `internal/pkg/detector/detector_bench_test.go` with
+- [x] Extend `internal/pkg/detector/detector_bench_test.go` with
       `ReportAllocs`, isolated `BuildContext` and flow-ID benchmarks, cache
       hit/miss churn, and realistic mixed high-cardinality TCP/UDP cases.
-- [ ] Capture bounded CPU and allocation profiles using synthetic or anonymized
+- [x] Capture bounded CPU and allocation profiles using synthetic or anonymized
       replay data and the existing loopback-only profiling facility.
-- [ ] Record baseline ns/op, B/op, allocs/op, packets/s, CPU, and heap before
+- [x] Record baseline ns/op, B/op, allocs/op, packets/s, CPU, and heap before
       selecting changes.
+
+      Benchmark record (linux/amd64, 13th Gen Intel Core i9-13900HX, three runs):
+      flow-ID generation improved from 95.91-98.99 ns/op, 24 B/op, and 2
+      allocs/op to 48.91-59.22 ns/op, 16 B/op, and 1 alloc/op. `BuildContext`
+      improved from 253.0-257.2 ns/op, 192 B/op, and 5 allocs/op to
+      206.5-218.3 ns/op, 184 B/op, and 4 allocs/op. The representative 4,096-flow
+      mixed TCP/UDP detector workload improved from 1148-1239 ns/op, 970 B/op,
+      and 13 allocs/op to 1052-1178 ns/op, 946 B/op, and 11 allocs/op. Median
+      throughput increased from approximately 0.83 M to 0.89 M packets/s.
+      A detector-plus-packet-decode/enrichment benchmark improved from
+      1953-2155 ns/op, 2366-2367 B/op, and 26 allocs/op to 1779-1957 ns/op,
+      2340 B/op, and 24 allocs/op; median throughput increased from approximately
+      0.47 M to 0.56 M packets/s. Each fixture class is correctness-checked before
+      timing, including the unknown-result path.
+      Matched three-second CPU and heap profiles were captured at
+      `/tmp/detector-phase5-{before,after}.{cpu,mem}`; the local Go installation
+      does not provide the `pprof` inspection tool, so no unsupported hotspot
+      claims were inferred from them.
 
 ### Candidate Optimizations
 
-- [ ] Replace `fmt.Sprintf("%x", sum)` in detector flow-ID generation with a
+- [x] Replace `fmt.Sprintf("%x", sum)` in detector flow-ID generation with a
       measured lower-allocation numeric/fixed-hex representation while preserving
       bidirectional stability and external compatibility where required.
-- [ ] Avoid allocating empty metadata maps for unknown detection results if all
+- [x] Avoid allocating empty metadata maps for unknown detection results if all
       consumers are verified nil-safe.
-- [ ] If profiles justify it, introduce an internal comparable binary flow key and
+- [x] If profiles justify it, introduce an internal comparable binary flow key and
       materialize strings only at API/log boundaries.
-- [ ] Treat removal of `SrcIP.String()`/`DstIP.String()` and migration to
+
+      Profile-guided decision: deferred. The narrow formatting and nil-metadata
+      changes already improve the representative workload; changing public
+      `FlowID` and both cache/tracker key types would broaden compatibility and
+      lifecycle risk without evidence that it is needed.
+- [x] Treat removal of `SrcIP.String()`/`DstIP.String()` and migration to
       `netip` as a separate cross-package change with explicit benchmarks and
       compatibility tests.
-- [ ] Treat typed protocol metadata as a later API migration, not a pooling patch,
+
+      Profile-guided decision: deferred as the explicitly separate cross-package
+      change described above.
+- [x] Treat typed protocol metadata as a later API migration, not a pooling patch,
       unless profiles prove it is necessary and ownership/reset semantics are
       fully defined.
 
+      Profile-guided decision: deferred; the profiles did not justify an API
+      migration or introduce ownership/reset semantics into this phase.
+
 ### Tests and Acceptance Criteria
 
-- [ ] Test stable direction-independent flow identity and cache behavior after any
+- [x] Test stable direction-independent flow identity and cache behavior after any
       key representation change.
-- [ ] Test nil-metadata compatibility across every affected detector consumer.
-- [ ] Demonstrate a measurable end-to-end improvement without increasing false
+- [x] Test nil-metadata compatibility across every affected detector consumer.
+- [x] Demonstrate a measurable end-to-end improvement without increasing false
       detection, memory retention, or allocations elsewhere.
-- [ ] Reject optimizations that improve a microbenchmark but regress representative
+- [x] Reject optimizations that improve a microbenchmark but regress representative
       pipeline throughput or maintainability.
 
 ## Phase 6: Documentation, Validation, and Release

@@ -95,6 +95,24 @@ func TestDetector_Detect(t *testing.T) {
 	assert.Equal(t, result.Protocol, result2.Protocol)
 }
 
+func TestDetector_UnknownResultsUseNilMetadata(t *testing.T) {
+	d := New()
+	t.Cleanup(d.Shutdown)
+	packet := createTestPacket([]byte("unrecognized payload"))
+
+	result := d.Detect(packet)
+	require.NotNil(t, result)
+	assert.Equal(t, "unknown", result.Protocol)
+	assert.Nil(t, result.Metadata)
+	_, exists := result.Metadata["absent"]
+	assert.False(t, exists, "reading nil metadata must remain safe")
+
+	withoutCache := d.DetectWithoutCache(packet)
+	require.NotNil(t, withoutCache)
+	assert.Equal(t, "unknown", withoutCache.Protocol)
+	assert.Nil(t, withoutCache.Metadata)
+}
+
 func TestDetector_PriorityOrdering(t *testing.T) {
 	d := New()
 
@@ -293,6 +311,7 @@ func TestGenerateFlowID(t *testing.T) {
 		srcPort   uint16
 		dstPort   uint16
 		transport string
+		expected  string
 	}{
 		{
 			name:      "Normal order",
@@ -301,6 +320,7 @@ func TestGenerateFlowID(t *testing.T) {
 			srcPort:   12345,
 			dstPort:   80,
 			transport: "TCP",
+			expected:  "2494b009928e7714",
 		},
 		{
 			name:      "Reverse order (should normalize)",
@@ -309,6 +329,7 @@ func TestGenerateFlowID(t *testing.T) {
 			srcPort:   80,
 			dstPort:   12345,
 			transport: "TCP",
+			expected:  "2494b009928e7714",
 		},
 		{
 			name:      "UDP transport",
@@ -317,15 +338,15 @@ func TestGenerateFlowID(t *testing.T) {
 			srcPort:   5060,
 			dstPort:   5060,
 			transport: "UDP",
+			expected:  "45d5d1188ed0dc9b",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			flowID := generateFlowID(tt.srcIP, tt.dstIP, tt.srcPort, tt.dstPort, tt.transport)
-			// Verify it's a hex hash string (16 characters from 64-bit hash)
-			assert.Len(t, flowID, 16, "Flow ID should be 16 character hex hash")
-			assert.Regexp(t, "^[0-9a-f]{16}$", flowID, "Flow ID should be lowercase hex")
+			assert.Regexp(t, "^[0-9a-f]{1,16}$", flowID, "Flow ID should be lowercase hexadecimal")
+			assert.Equal(t, tt.expected, flowID, "flow ID representation must remain externally compatible")
 		})
 	}
 

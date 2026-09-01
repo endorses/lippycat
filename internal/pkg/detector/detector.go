@@ -2,9 +2,9 @@ package detector
 
 import (
 	"context"
-	"fmt"
 	"hash/fnv"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -173,7 +173,6 @@ func (d *Detector) Detect(packet gopacket.Packet) *signatures.DetectionResult {
 	return &signatures.DetectionResult{
 		Protocol:      "unknown",
 		Confidence:    0.0,
-		Metadata:      make(map[string]interface{}),
 		ShouldCache:   false,
 		CacheStrategy: signatures.CacheNever,
 	}
@@ -245,7 +244,6 @@ func (d *Detector) DetectWithoutCache(packet gopacket.Packet) *signatures.Detect
 	return &signatures.DetectionResult{
 		Protocol:    "unknown",
 		Confidence:  0.0,
-		Metadata:    make(map[string]interface{}),
 		ShouldCache: false,
 	}
 }
@@ -391,7 +389,7 @@ func generateFlowID(srcIP, dstIP string, srcPort, dstPort uint16, transport stri
 	_, _ = h.Write([]byte(transport))
 
 	// Return as string representation of hash (still need string for map key)
-	return fmt.Sprintf("%x", h.Sum64())
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 // GetStats returns detector statistics

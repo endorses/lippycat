@@ -1,7 +1,7 @@
 # High-Volume Capture Integrity and Headroom Plan
 
 **Date:** 2026-09-01
-**Status:** In Progress (Phases 0-2 complete)
+**Status:** In Progress (Phases 0-3 complete)
 **Priority:** High
 
 ## Overview
@@ -239,42 +239,47 @@ named local stages. New protobuf fields must be additive and use new field numbe
 
 ### Implementation
 
-- [ ] Add a bounded, expiring, concurrency-safe TCP SIP-flow classifier owned by
+- [x] Add a bounded, expiring, concurrency-safe TCP SIP-flow classifier owned by
       `capture.PacketBuffer` in `internal/pkg/capture/capture.go`.
-- [ ] Use a canonical direction-independent network/transport flow key so a
+- [x] Use a canonical direction-independent network/transport flow key so a
       credible SIP start promotes both directions of the connection to the SIP
       lane.
-- [ ] Add a small bounded prefix accumulator sufficient to recognize a SIP start
+- [x] Add a small bounded prefix accumulator sufficient to recognize a SIP start
       split across TCP segments; never retain arbitrary payload or unbounded state.
-- [ ] Route continuation segments and bodies for a promoted flow through the SIP
+- [x] Route continuation segments and bodies for a promoted flow through the SIP
       lane. Expire state on FIN/RST and idle timeout, and handle tuple reuse without
       inheriting stale classification.
-- [ ] Document the join-midstream limitation before the first recognizable SIP
+- [x] Document the join-midstream limitation before the first recognizable SIP
       start and the fallback behavior when the SIP lane itself is saturated.
-- [ ] If stateful classification proves too costly or error-prone, evaluate a
+- [x] If stateful classification proves too costly or error-prone, evaluate a
       separately bounded protected-TCP lane; do not route all TCP into the SIP lane
       by default because unrelated TCP could starve signaling.
 
 ### Tests and Benchmarks
 
-- [ ] Strengthen the existing packet-buffer priority test: regular-lane saturation
+- [x] Strengthen the existing packet-buffer priority test: regular-lane saturation
       must produce regular drops and exactly zero recognized-SIP drops while SIP
       offered load remains within priority-lane service capacity.
-- [ ] Cover split start lines, same-direction continuations, reverse-direction
+- [x] Cover split start lines, same-direction continuations, reverse-direction
       responses, bodies, FIN/RST, idle expiry, tuple reuse, and priority-lane
       capacity exhaustion with truthful SIP-drop accounting.
-- [ ] Add concurrent/race tests for multiple capture senders and bounded-state
+- [x] Add concurrent/race tests for multiple capture senders and bounded-state
       tests under high flow cardinality.
-- [ ] Benchmark fast classification and flow-cache hit/miss behavior with allocation
+- [x] Benchmark fast classification and flow-cache hit/miss behavior with allocation
       reporting.
+
+      Benchmark record (linux/amd64, 13th Gen Intel Core i9-13900HX, three runs):
+      promoted-flow hit 65.79-67.90 ns/op, 0 B/op, 0 allocs/op; bounded new-flow
+      miss 818.5-902.4 ns/op, 130-131 B/op, 4 allocs/op; full-cache eviction
+      873.4-915.3 ns/op, 130-131 B/op, 4 allocs/op.
 
 ### Acceptance Criteria
 
-- [ ] Regular traffic saturation does not evict recognized SIP traffic within the
+- [x] Regular traffic saturation does not evict recognized SIP traffic within the
       documented SIP-lane capacity envelope.
-- [ ] Every priority classification and loss case is attributable through named
+- [x] Every priority classification and loss case is attributable through named
       telemetry.
-- [ ] Flow state remains bounded and does not survive connection close or idle
+- [x] Flow state remains bounded and does not survive connection close or idle
       expiry incorrectly.
 
 ## Phase 4: Flow-Sharded TCP Reassembly

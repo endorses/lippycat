@@ -71,6 +71,30 @@ In a distributed deployment ([Chapter 6](../part3-distributed/architecture.md)),
 - **Processors** receive already-reassembled packets over gRPC, so the TCP profile primarily affects any local capture the processor may do (relevant in tap mode, [Chapter 9](../part3-distributed/tap.md)).
 - **Tap nodes** combine both roles. Match the profile to the local traffic volume.
 
+### SIP Capture Priority and Its Limits
+
+The capture buffer gives recognized SIP signaling a separate 1,000-packet
+priority lane. For SIP over TCP, recognition is stateful: after a credible SIP
+start line is observed, later header and body segments in both directions of
+that connection use the priority lane. The flow classifier retains at most
+65,536 entries, keeps at most 1 KiB of possible start-line prefix per direction,
+expires idle entries after two minutes, and removes entries on TCP FIN or RST.
+
+This protection starts only after a recognizable SIP start. When capture joins
+an established TCP connection midstream, or while a start line is still split
+across incomplete segments, those packets use the regular lane. They can
+therefore be shed during overload before the flow is promoted. A later complete
+recognizable start can still promote the connection.
+
+The priority lane is bounded, not a lossless guarantee. When it is full, a
+recognized SIP packet falls back to the regular lane. If both lanes are full,
+the packet is rejected and counted as a SIP capture-buffer drop; regular-lane
+overflow is counted separately. These counters distinguish which lane lost the
+packet, but they do not by themselves identify an upstream network or kernel
+cause. If SIP drops increase, reduce offered traffic with a BPF filter, increase
+downstream service capacity, or investigate the other named capture and
+processing loss stages before assigning a root cause.
+
 ## GPU Acceleration
 
 GPU acceleration speeds up capture-side application-filter matching against values already extracted by the protocol parsers. It does not parse SIP or extract Call-IDs; those operations remain on the CPU.

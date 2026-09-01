@@ -3,10 +3,14 @@
 package tui
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/tui/store"
+	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -48,25 +52,64 @@ func TestIngressTelemetrySnapshotDoesNotExposeMutableMaps(t *testing.T) {
 }
 
 func TestSustainedSyntheticBridgeAboveOneThousandPacketsPerSecond(t *testing.T) {
-	t.Parallel()
+	ResetBridgeStats()
+	ClearPendingPackets()
+	t.Cleanup(ClearPendingPackets)
+	SetVoIPModeEnabled(false)
+
 	start := time.Unix(20, 0)
-	acc := newIngressTelemetryAccumulator(start)
-	policy := newDisplaySamplingPolicy(false, start)
+	current := start
+	clock := func() time.Time {
+		now := current
+		current = current.Add(250 * time.Microsecond)
+		return now
+	}
 	env := telemetryUDPEnvelope(t, pipeline.SourceLiveCapture, []byte("synthetic"))
 	const offeredPackets = 4000
-	delivered := int64(0)
-	for i := int64(1); i <= offeredPackets; i++ {
-		now := start.Add(time.Duration(i) * 250 * time.Microsecond) // 4,000 pps
-		require.True(t, acc.observe(env))
-		if policy.shouldDisplay(env, i, now) {
-			delivered++
-		}
+	envelopes := make(chan *pipeline.PacketEnvelope, offeredPackets+3)
+	for range 3 {
+		envelopes <- nil
 	}
-	snapshot, ok := acc.snapshot(start.Add(time.Second), true)
-	require.True(t, ok)
-	require.Equal(t, int64(offeredPackets), snapshot.Packets)
-	require.Less(t, delivered, int64(offeredPackets))
-	require.Greater(t, delivered, int64(0))
+	for range offeredPackets {
+		envelopes <- env
+	}
+	close(envelopes)
+
+	bridge := newEnvelopeBridgePipeline(nil, NewPauseSignal(), nil, false, nil)
+	bridge.now = clock
+	bridge.run(envelopes)
+
+	var details []components.PacketDisplay
+	for {
+		drained := DrainPendingPackets(false)
+		if len(drained) == 0 {
+			break
+		}
+		details = append(details, drained...)
+	}
+	theme := themes.Solarized()
+	uiState := store.NewUIState(theme)
+	uiState.Statistics = &components.Statistics{
+		ProtocolCounts: components.NewBoundedCounter(1000),
+		SourceCounts:   components.NewBoundedCounter(10000),
+		DestCounts:     components.NewBoundedCounter(10000),
+		MinPacketSize:  999999,
+	}
+	model := Model{
+		statistics: uiState.Statistics, uiState: uiState,
+		packetStore: store.NewPacketStore(offeredPackets), captureMode: components.CaptureModeLive,
+	}
+	model.processPendingPackets(details)
+
+	stats := GetBridgeStats()
+	require.Equal(t, int64(offeredPackets+3), stats.PacketsReceived)
+	require.Equal(t, int64(3), stats.InvalidEnvelopes)
+	require.Equal(t, int64(offeredPackets), GetIngressTelemetrySnapshot().Packets)
+	require.Positive(t, stats.PacketsSampledOut)
+	require.Positive(t, stats.PacketsDelivered)
+	require.Less(t, stats.DisplayRetentionRatio, int64(1000))
+	require.Equal(t, stats.PacketsReceived, stats.InvalidEnvelopes+stats.PacketsSampledOut+
+		stats.BatchQueuePacketDrops+stats.PendingPacketEvictions+stats.PacketsDelivered)
 }
 
 func TestInvalidEnvelopesDoNotInflateSamplingIngressRate(t *testing.T) {
@@ -90,16 +133,43 @@ func TestInvalidEnvelopesDoNotInflateSamplingIngressRate(t *testing.T) {
 	require.Equal(t, 1.0, policy.ratio)
 }
 
-func TestBridgePacketCounterReconciliationInvariant(t *testing.T) {
-	// At a settled boundary every received envelope is either invalid, sampled
-	// out, dropped at a later local stage, or delivered to the model/list.
-	stats := BridgeStats{
-		PacketsReceived: 100, InvalidEnvelopes: 3, PacketsSampledOut: 50,
-		BatchQueuePacketDrops: 10, PendingPacketEvictions: 7, PacketsDelivered: 30,
+func TestEnvelopeBridgePreservesAcceptedBatchAcrossPause(t *testing.T) {
+	ResetBridgeStats()
+	ClearPendingPackets()
+	t.Cleanup(ClearPendingPackets)
+	SetVoIPModeEnabled(false)
+
+	pause := NewPauseSignal()
+	accepted := make(chan struct{})
+	var once sync.Once
+	bridge := newEnvelopeBridgePipeline(nil, pause, nil, false, nil)
+	bridge.onBatchQueued = func() {
+		once.Do(func() {
+			pause.Pause()
+			close(accepted)
+		})
 	}
-	reconciled := stats.InvalidEnvelopes + stats.PacketsSampledOut +
-		stats.BatchQueuePacketDrops + stats.PendingPacketEvictions + stats.PacketsDelivered
-	require.Equal(t, stats.PacketsReceived, reconciled)
+
+	envelopes := make(chan *pipeline.PacketEnvelope, 50)
+	env := telemetryUDPEnvelope(t, pipeline.SourceLiveCapture, []byte("pause"))
+	for range 50 {
+		envelopes <- env
+	}
+	done := make(chan struct{})
+	go func() {
+		bridge.run(envelopes)
+		close(done)
+	}()
+
+	<-accepted
+	require.Eventually(t, func() bool { return pendingPackets.liveLen() == 50 }, time.Second, time.Millisecond)
+	require.Equal(t, int64(50), GetBridgeStats().PacketsReceived)
+	require.Zero(t, GetBridgeStats().BatchQueuePacketDrops)
+
+	pause.Resume()
+	close(envelopes)
+	<-done
+	require.Len(t, DrainPendingPackets(false), 50)
 }
 
 func telemetryUDPEnvelope(tb testing.TB, kind pipeline.SourceKind, payload []byte) *pipeline.PacketEnvelope {

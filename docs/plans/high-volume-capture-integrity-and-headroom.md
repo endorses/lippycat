@@ -206,6 +206,13 @@ named local stages. New protobuf fields must be additive and use new field numbe
       sampling.
 - [x] Use the authoritative end-to-end bridge retention ratio in drop-health
       summaries instead of inferring retention from intermediate loss counters.
+- [x] Exercise sustained live ingress, exact telemetry, sampling, pending
+      delivery, retention, and counter reconciliation through the actual bridge
+      pipeline rather than isolated helper counters.
+- [x] Verify that a batch accepted immediately before a pause remains owned by
+      the bridge consumer and is preserved through resume.
+- [x] Label exact live ingress protocol totals as L3/L4 classification while
+      retaining the enriched protocol label for offline and remote detail paths.
 
 ## Phase 2: TCP Discontinuity Preservation and SIP Parser Recovery
 

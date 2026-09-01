@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
@@ -68,17 +69,42 @@ func (m *Model) updateStatistics(pkt components.PacketDisplay) {
 func (m *Model) updateBridgeStats() {
 	stats := GetBridgeStats()
 	m.uiState.StatisticsView.SetBridgeStats(&components.BridgeStatistics{
-		PacketsReceived:  stats.PacketsReceived,
-		PacketsDisplayed: stats.PacketsDisplayed,
-		BatchesSent:      stats.BatchesSent,
-		BatchesDropped:   stats.BatchesDropped,
-		QueueDepth:       stats.QueueDepth,
-		MaxQueueDepth:    stats.MaxQueueDepth,
-		SamplingRatio:    stats.SamplingRatio,
-		RecentDropRate:   stats.RecentDropRate,
-		Running:          stats.Running,
-		CaptureComplete:  stats.CaptureComplete,
+		PacketsReceived:        stats.PacketsReceived,
+		PacketsDisplayed:       stats.PacketsDisplayed,
+		InvalidEnvelopes:       stats.InvalidEnvelopes,
+		PacketsSampledOut:      stats.PacketsSampledOut,
+		BatchQueuePacketDrops:  stats.BatchQueuePacketDrops,
+		PendingPacketEvictions: stats.PendingPacketEvictions,
+		PacketsDelivered:       stats.PacketsDelivered,
+		DisplayRetentionRatio:  stats.DisplayRetentionRatio,
+		BatchesSent:            stats.BatchesSent,
+		BatchesDropped:         stats.BatchesDropped,
+		QueueDepth:             stats.QueueDepth,
+		MaxQueueDepth:          stats.MaxQueueDepth,
+		SamplingRatio:          stats.SamplingRatio,
+		RecentDropRate:         stats.RecentDropRate,
+		Running:                stats.Running,
+		CaptureComplete:        stats.CaptureComplete,
 	})
+}
+
+// applyIngressTelemetrySnapshot publishes the latest exact, pre-sampling live
+// ingress totals into the Bubble Tea model. Calling this from the UI tick keeps
+// statistics current even when no detail packets survive sampling in that tick.
+func (m *Model) applyIngressTelemetrySnapshot() {
+	if m.captureMode != components.CaptureModeLive || m.statistics == nil || m.uiState == nil ||
+		m.statistics.ProtocolCounts == nil || m.statistics.SourceCounts == nil || m.statistics.DestCounts == nil {
+		return
+	}
+	snapshot := GetIngressTelemetrySnapshot()
+	m.statistics.ProtocolCounts.Replace(snapshot.ProtocolCounts)
+	m.statistics.SourceCounts.Replace(snapshot.SourceCounts)
+	m.statistics.DestCounts.Replace(snapshot.DestCounts)
+	m.statistics.TotalBytes = snapshot.Bytes
+	m.statistics.TotalPackets = snapshot.Packets
+	m.statistics.MinPacketSize = snapshot.MinPacketSize
+	m.statistics.MaxPacketSize = snapshot.MaxPacketSize
+	m.uiState.StatisticsView.SetStatistics(m.statistics)
 }
 
 // generateDefaultFilename creates a timestamp-based filename for saving captures
@@ -209,25 +235,34 @@ func (m *Model) processPendingPackets(packets []components.PacketDisplay) {
 	if len(filteredPackets) == 0 {
 		return
 	}
+	atomic.AddInt64(&bridgeStats.PacketsDelivered, int64(len(filteredPackets)))
+	atomic.AddInt64(&bridgeStats.PacketsDisplayed, int64(len(filteredPackets)))
 
 	// Add packets to store in batch (single lock acquisition)
 	m.packetStore.AddPacketBatch(filteredPackets)
 
-	// Update statistics for all packets in batch (single view update at the end)
+	// Live local statistics come from the exact pre-sampling ingress accumulator.
+	// Offline and remote modes still count their lossless/detail delivery paths.
+	if m.captureMode == components.CaptureModeLive {
+		m.applyIngressTelemetrySnapshot()
+	}
+
 	for i := range filteredPackets {
 		pkt := filteredPackets[i]
 
-		// Update counters without triggering view rebuild
-		m.statistics.ProtocolCounts.Increment(pkt.Protocol)
-		m.statistics.SourceCounts.Increment(pkt.SrcIP)
-		m.statistics.DestCounts.Increment(pkt.DstIP)
-		m.statistics.TotalBytes += int64(pkt.Length)
-		m.statistics.TotalPackets++
-		if pkt.Length < m.statistics.MinPacketSize {
-			m.statistics.MinPacketSize = pkt.Length
-		}
-		if pkt.Length > m.statistics.MaxPacketSize {
-			m.statistics.MaxPacketSize = pkt.Length
+		if m.captureMode != components.CaptureModeLive {
+			// Update counters without triggering view rebuild.
+			m.statistics.ProtocolCounts.Increment(pkt.Protocol)
+			m.statistics.SourceCounts.Increment(pkt.SrcIP)
+			m.statistics.DestCounts.Increment(pkt.DstIP)
+			m.statistics.TotalBytes += int64(pkt.Length)
+			m.statistics.TotalPackets++
+			if pkt.Length < m.statistics.MinPacketSize {
+				m.statistics.MinPacketSize = pkt.Length
+			}
+			if pkt.Length > m.statistics.MaxPacketSize {
+				m.statistics.MaxPacketSize = pkt.Length
+			}
 		}
 
 		// Write to streaming save if active (must be synchronous)

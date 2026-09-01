@@ -119,7 +119,7 @@ func TestEnvelopeBridgePublishesOrderedPacketsThroughLocalEventHandler(t *testin
 		require.Equal(t, base.Add(time.Duration(i)*time.Millisecond), got[i].Timestamp)
 		require.Equal(t, "ordered.pcap", got[i].Interface)
 	}
-	require.Equal(t, int64(3), GetBridgeStats().PacketsDisplayed)
+	require.Zero(t, GetBridgeStats().PacketsDisplayed)
 
 	// Compile-time and behavioral coverage for the shared local/remote boundary.
 	var handler types.EventHandler = newLocalTUIEventHandler(nil, true)

@@ -1,7 +1,7 @@
 # High-Volume Capture Integrity and Headroom Plan
 
 **Date:** 2026-09-01
-**Status:** In Progress (Phase 0 complete)
+**Status:** In Progress (Phases 0-1 complete)
 **Priority:** High
 
 ## Overview
@@ -119,63 +119,68 @@ named local stages. New protobuf fields must be additive and use new field numbe
 
 ### Implementation
 
-- [ ] Fix `displaySamplingPolicy` in `internal/pkg/tui/bridge_stages.go` to compute
+- [x] Fix `displaySamplingPolicy` in `internal/pkg/tui/bridge_stages.go` to compute
       ingress packets/s from packet-count/time deltas, or weight each checkpoint
       by the packets it represents. Keep sampling before `convertEnvelope`.
-- [ ] Make sampling time injectable or pass explicit timestamps so rate and clamp
+- [x] Make sampling time injectable or pass explicit timestamps so rate and clamp
       behavior can be tested deterministically.
-- [ ] Preserve lossless offline/replay behavior and the intentional SIP display
+- [x] Preserve lossless offline/replay behavior and the intentional SIP display
       preference while defining the live detail-display budget independently from
       the observed ingress rate.
-- [ ] Add a lightweight ingress telemetry accumulator to the TUI bridge that sees
+- [x] Add a lightweight ingress telemetry accumulator to the TUI bridge that sees
       every valid envelope before display sampling. Track packets, bytes, min/max
       size, protocol counts, and bounded source/destination talkers without copying
       raw packet data or performing full `PacketDisplay` conversion.
-- [ ] Publish accumulator snapshots to the Bubble Tea model at a bounded cadence.
+- [x] Publish accumulator snapshots to the Bubble Tea model at a bounded cadence.
       Update `internal/pkg/tui/helpers.go` so live `processPendingPackets` updates
       the packet store/list without double-counting exact ingress statistics.
-- [ ] Define whether upstream protocol statistics are L3/L4-only or enriched; if
+- [x] Define whether upstream protocol statistics are L3/L4-only or enriched; if
       enriched application classification would duplicate expensive work, expose
       the cheaper exact classification and label it accurately.
-- [ ] Replace `pendingPacketBuffer`'s front-sliced queue in
+- [x] Replace `pendingPacketBuffer`'s front-sliced queue in
       `internal/pkg/tui/bridge.go` with a bounded ring/deque for live capture so
       append, oldest eviction, and drain cost O(batch) rather than O(queue depth).
       Keep offline preservation as a separate lossless path.
-- [ ] Replace the fixed 50-packet live drain with a bounded adaptive drain based on
+- [x] Replace the fixed 50-packet live drain with a bounded adaptive drain based on
       backlog and/or a per-tick processing budget, with a hard maximum that protects
       terminal responsiveness.
-- [ ] Add packet-level counters for sampling, batch-channel loss, pending eviction,
+- [x] Add packet-level counters for sampling, batch-channel loss, pending eviction,
       and model/list delivery. Rename or redefine `PacketsDisplayed`, which
       currently increments before pending eviction and is not a displayed count.
-- [ ] Thread the counters and an end-to-end display-retention ratio through
+- [x] Thread the counters and an end-to-end display-retention ratio through
       `BridgeStats`, `components.BridgeStatistics`, `helpers.go`,
       `components/drop_stats.go`, and `components/statistics.go`.
-- [ ] Reset the accumulator, pending storage, and every new counter consistently in
+- [x] Reset the accumulator, pending storage, and every new counter consistently in
       bridge/capture lifecycle reset paths.
 
 ### Tests and Benchmarks
 
-- [ ] Add deterministic sampling-policy tests for representative low and high
+- [x] Add deterministic sampling-policy tests for representative low and high
       rates, minimum/maximum clamps, SIP preference, and replay preservation.
-- [ ] Add ring/deque tests for ordering, wraparound, exact eviction counts, bounded
+- [x] Add ring/deque tests for ordering, wraparound, exact eviction counts, bounded
       capacity, partial drains, and offline no-loss behavior.
-- [ ] Add a sustained synthetic bridge test above 1,000 packets/s proving that
+- [x] Add a sustained synthetic bridge test above 1,000 packets/s proving that
       ingress statistics cover all accepted packets while display retention is
       reported below 100% when shedding occurs.
-- [ ] Assert a documented reconciliation invariant across invalid, sampled-out,
+- [x] Assert a documented reconciliation invariant across invalid, sampled-out,
       queue-dropped, pending-evicted, and delivered packet counts.
-- [ ] Add statistics/drop-health rendering tests and model tests proving ingress
+- [x] Add statistics/drop-health rendering tests and model tests proving ingress
       statistics are not double-counted by packet-list processing.
-- [ ] Add sampling and saturated pending-buffer benchmarks with allocation
+- [x] Add sampling and saturated pending-buffer benchmarks with allocation
       reporting; record before/after ns/op, B/op, and allocs/op.
+
+      Benchmark record (linux/amd64, 13th Gen Intel Core i9-13900HX, three runs):
+      sampling policy 62.10-68.17 ns/op, 24 B/op, 2 allocs/op; legacy saturated
+      front-slice buffer 343337-376885 ns/op, 2605056-2605058 B/op, 2 allocs/op;
+      saturated live ring 4436-4767 ns/op, 24576 B/op, 1 alloc/op.
 
 ### Acceptance Criteria
 
-- [ ] Live statistics no longer plateau at the detail drain ceiling.
-- [ ] The health view never reports full retention when packets were sampled,
+- [x] Live statistics no longer plateau at the detail drain ceiling.
+- [x] The health view never reports full retention when packets were sampled,
       batch-dropped, or evicted from the pending queue.
-- [ ] Full display conversion runs only for packets selected for the detail feed.
-- [ ] Saturated pending-buffer work scales with the drained/appended batch, not the
+- [x] Full display conversion runs only for packets selected for the detail feed.
+- [x] Saturated pending-buffer work scales with the drained/appended batch, not the
       entire queued backlog.
 
 ## Phase 2: TCP Discontinuity Preservation and SIP Parser Recovery

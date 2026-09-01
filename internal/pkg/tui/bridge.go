@@ -640,16 +640,22 @@ func IsVoIPModeEnabled() bool {
 // These stats help identify backpressure issues where the TUI can't keep up
 // with packet ingestion rate.
 type BridgeStats struct {
-	PacketsReceived  int64 // Total packets received from capture
-	PacketsDisplayed int64 // Packets sent to TUI for display
-	BatchesSent      int64 // Batches successfully queued for TUI
-	BatchesDropped   int64 // Batches dropped due to TUI backpressure
-	QueueDepth       int64 // Current batch queue depth (0-tuiQueueSize)
-	MaxQueueDepth    int64 // Peak queue depth seen
-	SamplingRatio    int64 // Current sampling ratio * 1000 (e.g., 1000 = 100%, 500 = 50%)
-	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s window, for throttling)
-	Running          int32 // 1 if bridge is running, 0 if stopped
-	CaptureComplete  int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+	PacketsReceived        int64 // Total packets received from capture
+	PacketsDisplayed       int64 // Deprecated compatibility alias for PacketsDelivered
+	BatchesSent            int64 // Batches successfully queued for TUI
+	BatchesDropped         int64 // Batches dropped due to TUI backpressure
+	QueueDepth             int64 // Current batch queue depth (0-tuiQueueSize)
+	MaxQueueDepth          int64 // Peak queue depth seen
+	SamplingRatio          int64 // Current sampling ratio * 1000 (e.g., 1000 = 100%, 500 = 50%)
+	RecentDropRate         int64 // Recent drop rate * 1000 (last 5s window, for throttling)
+	Running                int32 // 1 if bridge is running, 0 if stopped
+	CaptureComplete        int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+	PendingPacketEvictions int64 // Live packets evicted from the bounded pending ring
+	PacketsDelivered       int64 // Packets accepted by the model/list processing path
+	InvalidEnvelopes       int64 // Nil or undecodable envelopes rejected at ingress
+	PacketsSampledOut      int64 // Valid packets omitted from the detail feed
+	BatchQueuePacketDrops  int64 // Detail packets dropped with a full batch queue
+	DisplayRetentionRatio  int64 // Delivered valid ingress ratio * 1000
 
 	// TCP SIP diagnostic counters
 	TCPPacketsToAssembler int64 // TCP packets fed to the assembler
@@ -678,6 +684,14 @@ type dropEvent struct {
 	dropped   bool
 }
 
+func (dt *recentDropTracker) reset() {
+	dt.mu.Lock()
+	dt.events = dt.events[:0]
+	dt.totalSent = 0
+	dt.totalDropped = 0
+	dt.mu.Unlock()
+}
+
 var dropTracker = &recentDropTracker{
 	windowSize: 5 * time.Second,
 	events:     make([]dropEvent, 0, 1000),
@@ -687,34 +701,57 @@ var dropTracker = &recentDropTracker{
 // This decouples packet production from TUI rendering - the TUI
 // pulls packets when it's ready rather than being pushed to.
 type pendingPacketBuffer struct {
-	mu      sync.Mutex
+	mu sync.Mutex
+
+	// packets is the lossless offline/replay path. It is intentionally separate
+	// from the bounded live ring so replay never inherits live shedding.
 	packets []components.PacketDisplay
+
+	// live is a fixed-capacity ring. head identifies the oldest packet and count
+	// is the number of occupied slots. Live append, eviction, and drain therefore
+	// scale with the incoming/drained batch rather than the queued backlog.
+	live  []components.PacketDisplay
+	head  int
+	count int
 }
+
+const maxPendingLivePackets = 5000
 
 var pendingPackets = &pendingPacketBuffer{
 	packets: make([]components.PacketDisplay, 0, 2000),
+	live:    make([]components.PacketDisplay, maxPendingLivePackets),
 }
 
 // addPackets adds packets to the pending buffer (called by bridge consumer)
 func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay, preserveAll bool) {
+	if len(packets) == 0 {
+		return
+	}
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
-	pb.packets = append(pb.packets, packets...)
-
-	// Cap buffer size to prevent unbounded growth (only for live capture).
-	// In offline mode (VoIP with CallTracker), we preserve all packets.
-	// Note: Pause is now handled upstream (source + bridge), so no pause check needed here.
-	if !preserveAll {
-		const maxPending = 5000
-		if len(pb.packets) > maxPending {
-			dropped := len(pb.packets) - maxPending
-			pb.packets = pb.packets[len(pb.packets)-maxPending:]
-			logger.Warn("pendingPackets: buffer capped, packets dropped",
-				"dropped", dropped,
-				"preserve_all", preserveAll)
-		}
+	if preserveAll {
+		pb.packets = append(pb.packets, packets...)
+		return
 	}
 
+	evicted := 0
+	for i := range packets {
+		if pb.count == len(pb.live) {
+			pb.live[pb.head] = packets[i]
+			pb.head = (pb.head + 1) % len(pb.live)
+			evicted++
+			continue
+		}
+		write := (pb.head + pb.count) % len(pb.live)
+		pb.live[write] = packets[i]
+		pb.count++
+	}
+	if evicted > 0 {
+		atomic.AddInt64(&bridgeStats.PendingPacketEvictions, int64(evicted))
+		logger.Warn("pendingPackets: live ring capped, oldest packets evicted",
+			"evicted", evicted,
+			"capacity", len(pb.live))
+	}
 }
 
 // drainPackets returns up to maxPackets pending packets.
@@ -723,11 +760,16 @@ func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay, pr
 func (pb *pendingPacketBuffer) drainPackets(maxPackets int) []components.PacketDisplay {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
-	if len(pb.packets) == 0 {
+	if maxPackets <= 0 {
 		return nil
 	}
+	if len(pb.packets) > 0 {
+		return pb.drainOfflineLocked(maxPackets)
+	}
+	return pb.drainLiveLocked(maxPackets)
+}
 
-	// Take at most maxPackets from the front (oldest first)
+func (pb *pendingPacketBuffer) drainOfflineLocked(maxPackets int) []components.PacketDisplay {
 	count := len(pb.packets)
 	if count > maxPackets {
 		count = maxPackets
@@ -736,16 +778,37 @@ func (pb *pendingPacketBuffer) drainPackets(maxPackets int) []components.PacketD
 	result := make([]components.PacketDisplay, count)
 	copy(result, pb.packets[:count])
 
-	// Keep remaining packets in buffer
-	if count < len(pb.packets) {
-		remaining := make([]components.PacketDisplay, len(pb.packets)-count)
-		copy(remaining, pb.packets[count:])
-		pb.packets = remaining
-	} else {
-		pb.packets = pb.packets[:0] // Reuse backing array
-	}
-
+	copy(pb.packets, pb.packets[count:])
+	clear(pb.packets[len(pb.packets)-count:])
+	pb.packets = pb.packets[:len(pb.packets)-count]
 	return result
+}
+
+func (pb *pendingPacketBuffer) drainLiveLocked(maxPackets int) []components.PacketDisplay {
+	if pb.count == 0 {
+		return nil
+	}
+	count := min(pb.count, maxPackets)
+	result := make([]components.PacketDisplay, count)
+	first := min(count, len(pb.live)-pb.head)
+	copy(result, pb.live[pb.head:pb.head+first])
+	copy(result[first:], pb.live[:count-first])
+	clear(pb.live[pb.head : pb.head+first])
+	if first < count {
+		clear(pb.live[:count-first])
+	}
+	pb.head = (pb.head + count) % len(pb.live)
+	pb.count -= count
+	if pb.count == 0 {
+		pb.head = 0
+	}
+	return result
+}
+
+func (pb *pendingPacketBuffer) liveLen() int {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	return pb.count
 }
 
 // DrainPendingPackets returns pending packets for the TUI to process.
@@ -755,11 +818,18 @@ func (pb *pendingPacketBuffer) drainPackets(maxPackets int) []components.PacketD
 func DrainPendingPackets(preserveAll bool) []components.PacketDisplay {
 	// In offline mode, drain all packets to ensure none are lost
 	if preserveAll {
-		return pendingPackets.drainPackets(100000) // Large number = all packets
+		return pendingPackets.drainPackets(int(^uint(0) >> 1))
 	}
-	// Live mode: limit to prevent UI stutter
-	const maxPacketsPerTick = 50
-	return pendingPackets.drainPackets(maxPacketsPerTick)
+	// Drain more aggressively as backlog grows, while retaining a hard ceiling
+	// so one Bubble Tea tick cannot monopolize terminal rendering.
+	const (
+		minPacketsPerTick = 50
+		maxPacketsPerTick = 500
+	)
+	backlog := pendingPackets.liveLen()
+	drain := max(minPacketsPerTick, backlog/4)
+	drain = min(drain, maxPacketsPerTick)
+	return pendingPackets.drainPackets(drain)
 }
 
 // recordBatchResult records a batch send result (success or drop)
@@ -831,8 +901,16 @@ var bridgeStats BridgeStats
 
 // GetBridgeStats returns a copy of the current bridge statistics.
 func GetBridgeStats() BridgeStats {
+	received := atomic.LoadInt64(&bridgeStats.PacketsReceived)
+	invalid := atomic.LoadInt64(&bridgeStats.InvalidEnvelopes)
+	delivered := atomic.LoadInt64(&bridgeStats.PacketsDelivered)
+	validIngress := received - invalid
+	retention := int64(1000)
+	if validIngress > 0 {
+		retention = min(int64(1000), delivered*1000/validIngress)
+	}
 	return BridgeStats{
-		PacketsReceived:                        atomic.LoadInt64(&bridgeStats.PacketsReceived),
+		PacketsReceived:                        received,
 		PacketsDisplayed:                       atomic.LoadInt64(&bridgeStats.PacketsDisplayed),
 		BatchesSent:                            atomic.LoadInt64(&bridgeStats.BatchesSent),
 		BatchesDropped:                         atomic.LoadInt64(&bridgeStats.BatchesDropped),
@@ -842,6 +920,12 @@ func GetBridgeStats() BridgeStats {
 		RecentDropRate:                         dropTracker.getRecentDropRate(),
 		Running:                                atomic.LoadInt32(&bridgeStats.Running),
 		CaptureComplete:                        atomic.LoadInt32(&bridgeStats.CaptureComplete),
+		PendingPacketEvictions:                 atomic.LoadInt64(&bridgeStats.PendingPacketEvictions),
+		PacketsDelivered:                       delivered,
+		InvalidEnvelopes:                       invalid,
+		PacketsSampledOut:                      atomic.LoadInt64(&bridgeStats.PacketsSampledOut),
+		BatchQueuePacketDrops:                  atomic.LoadInt64(&bridgeStats.BatchQueuePacketDrops),
+		DisplayRetentionRatio:                  retention,
 		TCPPacketsToAssembler:                  atomic.LoadInt64(&bridgeStats.TCPPacketsToAssembler),
 		SIPMessagesDetected:                    atomic.LoadInt64(&bridgeStats.SIPMessagesDetected),
 		TCPSIPFlowsMarked:                      atomic.LoadInt64(&bridgeStats.TCPSIPFlowsMarked),
@@ -859,11 +943,17 @@ func GetBridgeStats() BridgeStats {
 func ClearPendingPackets() {
 	pendingPackets.mu.Lock()
 	defer pendingPackets.mu.Unlock()
+	clear(pendingPackets.packets)
 	pendingPackets.packets = pendingPackets.packets[:0]
+	clear(pendingPackets.live)
+	pendingPackets.head = 0
+	pendingPackets.count = 0
 }
 
 // ResetBridgeStats resets bridge statistics to zero.
 func ResetBridgeStats() {
+	resetIngressTelemetry()
+	dropTracker.reset()
 	atomic.StoreInt64(&bridgeStats.PacketsReceived, 0)
 	atomic.StoreInt64(&bridgeStats.PacketsDisplayed, 0)
 	atomic.StoreInt64(&bridgeStats.BatchesSent, 0)
@@ -871,6 +961,12 @@ func ResetBridgeStats() {
 	atomic.StoreInt64(&bridgeStats.QueueDepth, 0)
 	atomic.StoreInt64(&bridgeStats.MaxQueueDepth, 0)
 	atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // Default to 100%
+	atomic.StoreInt64(&bridgeStats.PendingPacketEvictions, 0)
+	atomic.StoreInt64(&bridgeStats.PacketsDelivered, 0)
+	atomic.StoreInt64(&bridgeStats.InvalidEnvelopes, 0)
+	atomic.StoreInt64(&bridgeStats.PacketsSampledOut, 0)
+	atomic.StoreInt64(&bridgeStats.BatchQueuePacketDrops, 0)
+	atomic.StoreInt64(&bridgeStats.DisplayRetentionRatio, 1000)
 	atomic.StoreInt64(&bridgeStats.ReassemblyNormalDiscontinuities, 0)
 	atomic.StoreInt64(&bridgeStats.ReassemblyNormalMissingBytes, 0)
 	atomic.StoreInt64(&bridgeStats.ReassemblyExplicitFlushDiscontinuities, 0)
@@ -951,9 +1047,9 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 
 	batch := make([]components.PacketDisplay, 0, 100)
 	packetCount := int64(0)
-	displayedCount := int64(0)
 
 	sampling := newDisplaySamplingPolicy(preserveAll)
+	ingressTelemetry := newIngressTelemetryAccumulator(time.Now())
 
 	ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
@@ -1006,7 +1102,6 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 				// Blocking send - wait until TUI is ready (offline mode)
 				tuiBatchChan <- msg
 				atomic.AddInt64(&bridgeStats.BatchesSent, 1)
-				atomic.AddInt64(&bridgeStats.PacketsDisplayed, int64(len(batch)))
 				dropTracker.recordBatchResult(false)
 			} else {
 				// Non-blocking send - drop if TUI is slow (live capture)
@@ -1014,18 +1109,17 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 				case tuiBatchChan <- msg:
 					// Successfully queued
 					atomic.AddInt64(&bridgeStats.BatchesSent, 1)
-					atomic.AddInt64(&bridgeStats.PacketsDisplayed, int64(len(batch)))
 					dropTracker.recordBatchResult(false)
 				default:
 					// TUI is behind - drop batch to prevent blocking
 					atomic.AddInt64(&bridgeStats.BatchesDropped, 1)
+					atomic.AddInt64(&bridgeStats.BatchQueuePacketDrops, int64(len(batch)))
 					dropTracker.recordBatchResult(true)
 					logger.Debug("TUI backpressure: dropped packet batch",
 						"batch_size", len(batch),
 						"total_dropped", atomic.LoadInt64(&bridgeStats.BatchesDropped))
 				}
 			}
-			displayedCount += int64(len(batch))
 			batch = make([]components.PacketDisplay, 0, 100)
 
 			// Update queue depth stats
@@ -1059,6 +1153,9 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 
 		case env, ok := <-packetChan:
 			if !ok {
+				if snapshot, publish := ingressTelemetry.snapshot(time.Now(), true); publish {
+					publishIngressTelemetry(snapshot)
+				}
 				// Channel closed, send remaining batch and shutdown consumer
 				pendingBatchSize := len(batch)
 				sendBatch() // Send final batch before capturing stats
@@ -1089,19 +1186,27 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 			packetCount++
 			atomic.AddInt64(&bridgeStats.PacketsReceived, 1)
 			if env == nil {
+				atomic.AddInt64(&bridgeStats.InvalidEnvelopes, 1)
 				continue
 			}
 			pkt := env.Packet()
 			if pkt == nil {
+				atomic.AddInt64(&bridgeStats.InvalidEnvelopes, 1)
+				continue
+			}
+			if !ingressTelemetry.observe(env) {
+				atomic.AddInt64(&bridgeStats.InvalidEnvelopes, 1)
 				continue
 			}
 
 			reassembly.process(env)
 
-			if sampling.shouldDisplay(env, packetCount, displayedCount, len(batch)) {
+			if sampling.shouldDisplay(env, packetCount, time.Now()) {
 				// Full conversion to extract all metadata (SDP, etc.)
 				packet := convertEnvelope(env, tracker)
 				batch = append(batch, packet)
+			} else {
+				atomic.AddInt64(&bridgeStats.PacketsSampledOut, 1)
 			}
 
 			// Send if batch is large enough
@@ -1110,6 +1215,9 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 			}
 
 		case <-ticker.C:
+			if snapshot, publish := ingressTelemetry.snapshot(time.Now(), false); publish {
+				publishIngressTelemetry(snapshot)
+			}
 			// Send batch on interval
 			sendBatch()
 		}

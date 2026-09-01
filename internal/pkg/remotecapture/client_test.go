@@ -381,6 +381,24 @@ func TestHunterInfo_Fields(t *testing.T) {
 	assert.Equal(t, management.HunterStatus_STATUS_HEALTHY, hunter.Status)
 }
 
+func TestConvertToHunterInfoPreservesNamedLossCounters(t *testing.T) {
+	client := &Client{addr: "processor.test:55555"}
+	info := client.convertToHunterInfo(&management.ConnectedHunter{
+		HunterId: "hunter-1",
+		Stats: &management.HunterStats{
+			PacketsDropped:            9,
+			CaptureBufferRegularDrops: 4,
+			CaptureBufferSipDrops:     2,
+			BatchChannelDrops:         3,
+		},
+	})
+
+	assert.Equal(t, uint64(9), info.PacketsDropped)
+	assert.Equal(t, uint64(4), info.CaptureBufferRegularDrops)
+	assert.Equal(t, uint64(2), info.CaptureBufferSIPDrops)
+	assert.Equal(t, uint64(3), info.BatchChannelDrops)
+}
+
 func TestClient_CloseIdempotent(t *testing.T) {
 	// Test that calling Close() multiple times is safe
 	handler := &MockEventHandler{}

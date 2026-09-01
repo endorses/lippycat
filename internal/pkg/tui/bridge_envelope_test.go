@@ -5,6 +5,7 @@ package tui
 import (
 	"bytes"
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,6 +43,20 @@ func TestNormalizeCaptureStreamPreservesEnvelopeProvenance(t *testing.T) {
 	require.True(t, bytes.Equal(data, envelope.Data))
 	_, ok := <-envelopes
 	require.False(t, ok)
+}
+
+func TestBridgeStatsExposeReassemblyLossStages(t *testing.T) {
+	ResetBridgeStats()
+	atomic.StoreInt64(&bridgeStats.ReassemblyNormalDiscontinuities, 2)
+	atomic.StoreInt64(&bridgeStats.ReassemblyNormalMissingBytes, 20)
+	atomic.StoreInt64(&bridgeStats.ReassemblyExplicitFlushDiscontinuities, 3)
+	atomic.StoreInt64(&bridgeStats.ReassemblyExplicitFlushMissingBytes, 30)
+
+	stats := GetBridgeStats()
+	require.Equal(t, int64(2), stats.ReassemblyNormalDiscontinuities)
+	require.Equal(t, int64(20), stats.ReassemblyNormalMissingBytes)
+	require.Equal(t, int64(3), stats.ReassemblyExplicitFlushDiscontinuities)
+	require.Equal(t, int64(30), stats.ReassemblyExplicitFlushMissingBytes)
 }
 
 func TestNormalizeCaptureStreamBuffersShortBridgeStall(t *testing.T) {

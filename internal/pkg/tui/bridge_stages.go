@@ -86,6 +86,18 @@ func newTUISIPReassemblyStage(tracker *CallTracker, aggregator *LocalCallAggrega
 			logger.Error("TUI TCP reassembly engine stopped", "error", err)
 		}
 	}()
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				stage.publishStats()
+			}
+		}
+	}()
 	return stage
 }
 
@@ -105,6 +117,15 @@ func (s *tuiSIPReassemblyStage) process(env *pipeline.PacketEnvelope) {
 	if err := s.assembler.Assemble(env); err != nil {
 		logger.Error("Failed to assemble TUI TCP packet", "error", err)
 	}
+	s.publishStats()
+}
+
+func (s *tuiSIPReassemblyStage) publishStats() {
+	snapshot := s.assembler.LimitStats()
+	atomic.StoreInt64(&bridgeStats.ReassemblyNormalDiscontinuities, int64(snapshot.NormalDiscontinuities))               // #nosec G115 -- diagnostic counters
+	atomic.StoreInt64(&bridgeStats.ReassemblyNormalMissingBytes, int64(snapshot.NormalMissingBytes))                     // #nosec G115 -- diagnostic counters
+	atomic.StoreInt64(&bridgeStats.ReassemblyExplicitFlushDiscontinuities, int64(snapshot.ExplicitFlushDiscontinuities)) // #nosec G115 -- diagnostic counters
+	atomic.StoreInt64(&bridgeStats.ReassemblyExplicitFlushMissingBytes, int64(snapshot.ExplicitFlushMissingBytes))       // #nosec G115 -- diagnostic counters
 }
 
 func (s *tuiSIPReassemblyStage) close() {
@@ -112,4 +133,5 @@ func (s *tuiSIPReassemblyStage) close() {
 	if err := s.assembler.Close(); err != nil {
 		logger.Error("Failed to close TUI TCP reassembly engine", "error", err)
 	}
+	s.publishStats()
 }

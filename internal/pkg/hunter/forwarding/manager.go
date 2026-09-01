@@ -387,6 +387,17 @@ func (m *Manager) SendBatch() {
 		return
 	}
 
+	// Snapshot every cumulative local loss stage for the data-plane batch stats.
+	// The compatible aggregate must match the management heartbeat semantics.
+	batchDrops := m.statsCollector.GetDropped()
+	var regularDrops, sipDrops uint64
+	if m.packetBufferProv != nil {
+		if packetBuffer := m.packetBufferProv.GetPacketBuffer(); packetBuffer != nil {
+			regularDrops = uint64(packetBuffer.GetDropped()) // #nosec G115 -- counters cannot be negative
+			sipDrops = uint64(packetBuffer.GetSIPDropped())  // #nosec G115 -- counters cannot be negative
+		}
+	}
+
 	// Create batch message
 	m.batchSequence++
 	batch := &pipeline.PacketBatch{
@@ -396,11 +407,13 @@ func (m *Manager) SendBatch() {
 		Packets:   m.currentBatch,
 		HasStats:  true,
 		Stats: pipeline.BatchStats{
-			TotalCaptured:     m.statsCollector.GetCaptured(),
-			FilteredMatched:   m.statsCollector.GetMatched(),
-			Dropped:           m.statsCollector.GetDropped(),
-			BatchChannelDrops: m.statsCollector.GetDropped(),
-			BufferUsage:       0, // Will be set by caller if needed
+			TotalCaptured:             m.statsCollector.GetCaptured(),
+			FilteredMatched:           m.statsCollector.GetMatched(),
+			Dropped:                   regularDrops + sipDrops + batchDrops,
+			CaptureBufferRegularDrops: regularDrops,
+			CaptureBufferSIPDrops:     sipDrops,
+			BatchChannelDrops:         batchDrops,
+			BufferUsage:               0, // Will be set by caller if needed
 		},
 	}
 

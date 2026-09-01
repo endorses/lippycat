@@ -435,6 +435,11 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 		if err != nil {
 			if errors.Is(err, errNotSIP) {
 				IncrementNonSIPRejection()
+				// Once this flow has carried valid SIP, a later framing rejection is
+				// a parser discontinuity rather than initial non-SIP classification.
+				if atomic.LoadInt32(&s.lockedOnSIP) == 1 {
+					IncrementParserFramingDiscontinuity()
+				}
 				// Recoverable discard: a connection we joined mid-message (or a
 				// reused 4-tuple whose bytes precede the next SIP message) may
 				// still carry SIP that only starts after the bytes seen so far.

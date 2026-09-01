@@ -668,13 +668,6 @@ func (m *Manager) sendHeartbeats() {
 			packetsCaptured := m.statsCollector.GetCaptured()
 			packetsForwarded := m.statsCollector.GetForwarded()
 
-			logger.Debug("Sending heartbeat",
-				"hunter_id", m.config.HunterID,
-				"active_filters", activeFilters,
-				"packets_captured", packetsCaptured,
-				"packets_forwarded", packetsForwarded,
-				"status", status)
-
 			stats := m.statsCollector.ToProto(activeFilters)
 			if m.captureManager != nil {
 				if buffer := m.captureManager.GetPacketBuffer(); buffer != nil {
@@ -683,6 +676,16 @@ func (m *Manager) sendHeartbeats() {
 					stats.PacketsDropped = stats.CaptureBufferRegularDrops + stats.CaptureBufferSipDrops + stats.BatchChannelDrops
 				}
 			}
+			logger.Debug("Sending heartbeat",
+				"hunter_id", m.config.HunterID,
+				"active_filters", activeFilters,
+				"packets_captured", packetsCaptured,
+				"packets_forwarded", packetsForwarded,
+				"packets_dropped", stats.PacketsDropped,
+				"capture_buffer_regular_drops", stats.CaptureBufferRegularDrops,
+				"capture_buffer_sip_drops", stats.CaptureBufferSipDrops,
+				"batch_channel_drops", stats.BatchChannelDrops,
+				"status", status)
 			hb := &management.HunterHeartbeat{
 				HunterId:    m.config.HunterID,
 				TimestampNs: time.Now().UnixNano(),

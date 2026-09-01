@@ -709,10 +709,24 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	results := make([]bool, len(packets))
 
 	// If no filters, use the no-filter policy
-	if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 {
+	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
+	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
+	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
+	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
+	hasOtherFilters := len(af.ipAddresses) > 0 || hasDNSFilters || hasEmailFilters || hasTLSFilters ||
+		len(af.imsiFilters) > 0 || len(af.imeiFilters) > 0
+	if !hasVoIPFilters && !hasOtherFilters {
 		matchAll := af.noFilterPolicy == NoFilterPolicyAllow
 		for i := range results {
 			results[i] = matchAll
+		}
+		return results
+	}
+	// The optimized batch path below is specific to SIP identity filters. Mixed
+	// filter families require the complete per-packet semantics.
+	if hasOtherFilters {
+		for i, packet := range packets {
+			results[i], _ = af.matchPacketLocked(packet, packetMatchFull, false)
 		}
 		return results
 	}

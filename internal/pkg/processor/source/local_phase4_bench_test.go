@@ -21,7 +21,8 @@ import (
 type phase4BenchmarkFilter struct {
 	identities       [][]byte
 	sipOnlyFull      bool
-	fullCalls        atomic.Uint64
+	matcherCalls     atomic.Uint64
+	identityWork     atomic.Uint64
 	packetLevelCalls atomic.Uint64
 }
 
@@ -39,10 +40,11 @@ func (f *phase4BenchmarkFilter) MatchPacket(packet gopacket.Packet) bool {
 }
 
 func (f *phase4BenchmarkFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, []string) {
+	f.matcherCalls.Add(1)
 	if f.sipOnlyFull && !hasCredibleSIPStartLine(packet) {
 		return false, nil
 	}
-	f.fullCalls.Add(1)
+	f.identityWork.Add(1)
 	payload := phase0PacketPayload(packet)
 	for i, identity := range f.identities {
 		if bytes.Contains(payload, identity) {
@@ -123,27 +125,29 @@ func BenchmarkLocalSourceMixedVoIP(b *testing.B) {
 	if elapsed > 0 {
 		b.ReportMetric(float64(b.N)/elapsed, "packets/s")
 	}
-	full := filter.fullCalls.Load()
+	full := filter.matcherCalls.Load()
 	media := filter.packetLevelCalls.Load()
-	processorFull := processorFilter.fullCalls.Load()
+	processorMatcher := processorFilter.matcherCalls.Load()
+	processorIdentityWork := processorFilter.identityWork.Load()
 	b.ReportMetric(float64(full)/float64(b.N), "full_calls/op")
 	b.ReportMetric(float64(media)/float64(b.N), "packet_level_calls/op")
-	b.ReportMetric(float64(processorFull)/float64(b.N), "processor_full_calls/op")
+	b.ReportMetric(float64(processorMatcher)/float64(b.N), "processor_matcher_calls/op")
+	b.ReportMetric(float64(processorIdentityWork)/float64(b.N), "processor_identity_work/op")
 	expectedMedia := uint64(b.N / len(packets) * 92)
-	expectedProcessorFull := uint64(b.N / len(packets) * 8)
+	expectedProcessorMatcher := uint64(b.N / len(packets) * 8)
 	remainder := b.N % len(packets)
 	if remainder > 3 {
 		expectedMedia += uint64(min(remainder, 95) - 3)
 	}
-	expectedProcessorFull += uint64(min(remainder, 3))
+	expectedProcessorMatcher += uint64(min(remainder, 3))
 	if remainder > 95 {
-		expectedProcessorFull += uint64(remainder - 95)
+		expectedProcessorMatcher += uint64(remainder - 95)
 	}
 	if full != 0 || media != expectedMedia {
 		b.Fatalf("LocalSource matcher routing: full=%d packet-level=%d, want full=0 packet-level=%d", full, media, expectedMedia)
 	}
-	if processorFull != expectedProcessorFull {
-		b.Fatalf("processor SIP matcher routing: full=%d, want %d", processorFull, expectedProcessorFull)
+	if processorMatcher != expectedProcessorMatcher || processorIdentityWork != expectedProcessorMatcher {
+		b.Fatalf("processor SIP matcher routing: calls=%d identity_work=%d, want %d", processorMatcher, processorIdentityWork, expectedProcessorMatcher)
 	}
 }
 

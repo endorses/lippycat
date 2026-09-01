@@ -657,6 +657,11 @@ type BridgeStats struct {
 	TCPSIPFlowsMarked     int64 // TCP flows marked as SIP
 	TCPSIPFlowLookups     int64 // Times isTCPSIPFlow was called
 	TCPSIPFlowHits        int64 // Times isTCPSIPFlow returned true
+
+	ReassemblyNormalDiscontinuities        int64
+	ReassemblyNormalMissingBytes           int64
+	ReassemblyExplicitFlushDiscontinuities int64
+	ReassemblyExplicitFlushMissingBytes    int64
 }
 
 // recentDropTracker tracks batch drops over a sliding window for throttling
@@ -827,21 +832,25 @@ var bridgeStats BridgeStats
 // GetBridgeStats returns a copy of the current bridge statistics.
 func GetBridgeStats() BridgeStats {
 	return BridgeStats{
-		PacketsReceived:       atomic.LoadInt64(&bridgeStats.PacketsReceived),
-		PacketsDisplayed:      atomic.LoadInt64(&bridgeStats.PacketsDisplayed),
-		BatchesSent:           atomic.LoadInt64(&bridgeStats.BatchesSent),
-		BatchesDropped:        atomic.LoadInt64(&bridgeStats.BatchesDropped),
-		QueueDepth:            atomic.LoadInt64(&bridgeStats.QueueDepth),
-		MaxQueueDepth:         atomic.LoadInt64(&bridgeStats.MaxQueueDepth),
-		SamplingRatio:         atomic.LoadInt64(&bridgeStats.SamplingRatio),
-		RecentDropRate:        dropTracker.getRecentDropRate(),
-		Running:               atomic.LoadInt32(&bridgeStats.Running),
-		CaptureComplete:       atomic.LoadInt32(&bridgeStats.CaptureComplete),
-		TCPPacketsToAssembler: atomic.LoadInt64(&bridgeStats.TCPPacketsToAssembler),
-		SIPMessagesDetected:   atomic.LoadInt64(&bridgeStats.SIPMessagesDetected),
-		TCPSIPFlowsMarked:     atomic.LoadInt64(&bridgeStats.TCPSIPFlowsMarked),
-		TCPSIPFlowLookups:     atomic.LoadInt64(&bridgeStats.TCPSIPFlowLookups),
-		TCPSIPFlowHits:        atomic.LoadInt64(&bridgeStats.TCPSIPFlowHits),
+		PacketsReceived:                        atomic.LoadInt64(&bridgeStats.PacketsReceived),
+		PacketsDisplayed:                       atomic.LoadInt64(&bridgeStats.PacketsDisplayed),
+		BatchesSent:                            atomic.LoadInt64(&bridgeStats.BatchesSent),
+		BatchesDropped:                         atomic.LoadInt64(&bridgeStats.BatchesDropped),
+		QueueDepth:                             atomic.LoadInt64(&bridgeStats.QueueDepth),
+		MaxQueueDepth:                          atomic.LoadInt64(&bridgeStats.MaxQueueDepth),
+		SamplingRatio:                          atomic.LoadInt64(&bridgeStats.SamplingRatio),
+		RecentDropRate:                         dropTracker.getRecentDropRate(),
+		Running:                                atomic.LoadInt32(&bridgeStats.Running),
+		CaptureComplete:                        atomic.LoadInt32(&bridgeStats.CaptureComplete),
+		TCPPacketsToAssembler:                  atomic.LoadInt64(&bridgeStats.TCPPacketsToAssembler),
+		SIPMessagesDetected:                    atomic.LoadInt64(&bridgeStats.SIPMessagesDetected),
+		TCPSIPFlowsMarked:                      atomic.LoadInt64(&bridgeStats.TCPSIPFlowsMarked),
+		TCPSIPFlowLookups:                      atomic.LoadInt64(&bridgeStats.TCPSIPFlowLookups),
+		TCPSIPFlowHits:                         atomic.LoadInt64(&bridgeStats.TCPSIPFlowHits),
+		ReassemblyNormalDiscontinuities:        atomic.LoadInt64(&bridgeStats.ReassemblyNormalDiscontinuities),
+		ReassemblyNormalMissingBytes:           atomic.LoadInt64(&bridgeStats.ReassemblyNormalMissingBytes),
+		ReassemblyExplicitFlushDiscontinuities: atomic.LoadInt64(&bridgeStats.ReassemblyExplicitFlushDiscontinuities),
+		ReassemblyExplicitFlushMissingBytes:    atomic.LoadInt64(&bridgeStats.ReassemblyExplicitFlushMissingBytes),
 	}
 }
 
@@ -862,6 +871,10 @@ func ResetBridgeStats() {
 	atomic.StoreInt64(&bridgeStats.QueueDepth, 0)
 	atomic.StoreInt64(&bridgeStats.MaxQueueDepth, 0)
 	atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // Default to 100%
+	atomic.StoreInt64(&bridgeStats.ReassemblyNormalDiscontinuities, 0)
+	atomic.StoreInt64(&bridgeStats.ReassemblyNormalMissingBytes, 0)
+	atomic.StoreInt64(&bridgeStats.ReassemblyExplicitFlushDiscontinuities, 0)
+	atomic.StoreInt64(&bridgeStats.ReassemblyExplicitFlushMissingBytes, 0)
 	atomic.StoreInt32(&bridgeStats.CaptureComplete, 0)
 	// Note: Running is not reset here - it reflects actual bridge state
 }

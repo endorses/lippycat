@@ -129,10 +129,24 @@ func BenchmarkDetector_MixedHighCardinality(b *testing.B) {
 	for i := 0; i < benchmarkFlowCardinality; i++ {
 		packets = append(packets, constructors[i%len(constructors)](i))
 	}
+	assertMixedBenchmarkFixtures(b, det, constructors)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = det.Detect(packets[i%len(packets)])
+	}
+}
+
+func assertMixedBenchmarkFixtures(b *testing.B, det *detector.Detector, constructors []func(int) gopacket.Packet) {
+	b.Helper()
+	wantProtocols := []string{"DNS", "HTTP", "RTP", "TLS", "unknown", "unknown"}
+	if len(constructors) != len(wantProtocols) {
+		b.Fatalf("mixed benchmark has %d fixture classes, want %d", len(constructors), len(wantProtocols))
+	}
+	for i, constructor := range constructors {
+		if result := det.Detect(constructor(i)); result == nil || result.Protocol != wantProtocols[i] {
+			b.Fatalf("mixed benchmark fixture %d detected as %#v, want protocol %q", i, result, wantProtocols[i])
+		}
 	}
 }
 

@@ -247,8 +247,8 @@ named local stages. New protobuf fields must be additive and use new field numbe
 - [x] Add a small bounded prefix accumulator sufficient to recognize a SIP start
       split across TCP segments; never retain arbitrary payload or unbounded state.
 - [x] Route continuation segments and bodies for a promoted flow through the SIP
-      lane. Expire state on FIN/RST and idle timeout, and handle tuple reuse without
-      inheriting stale classification.
+      lane. Expire state on FIN/RST and idle timeout, and handle tuple reuse on
+      either observed SYN or SYN-ACK without inheriting stale classification.
 - [x] Document the join-midstream limitation before the first recognizable SIP
       start and the fallback behavior when the SIP lane itself is saturated.
 - [x] If stateful classification proves too costly or error-prone, evaluate a

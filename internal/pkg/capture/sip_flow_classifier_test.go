@@ -140,16 +140,25 @@ func TestTCPSIPFlowClassifierCloseExpiryAndTupleReuse(t *testing.T) {
 		assert.False(t, c.classify(ip, testTCP(43000, 5060, "expired continuation"), now.Add(time.Second+time.Nanosecond)))
 	})
 
-	t.Run("fresh SYN", func(t *testing.T) {
-		c := newTCPSIPFlowClassifier()
-		now := time.Unix(400, 0)
-		ip := testIPv4("203.0.113.3", "203.0.113.4")
-		require.True(t, c.classify(ip, testTCP(44000, 5060, "BYE sip:u@example.invalid SIP/2.0\r\n"), now))
-		syn := testTCP(44000, 5060, "")
-		syn.SYN = true
-		assert.False(t, c.classify(ip, syn, now.Add(time.Second)))
-		assert.False(t, c.classify(ip, testTCP(44000, 5060, "new connection data"), now.Add(2*time.Second)))
-	})
+	for _, handshake := range []struct {
+		name string
+		ack  bool
+	}{
+		{name: "fresh SYN"},
+		{name: "fresh SYN-ACK after missed SYN", ack: true},
+	} {
+		t.Run(handshake.name, func(t *testing.T) {
+			c := newTCPSIPFlowClassifier()
+			now := time.Unix(400, 0)
+			ip := testIPv4("203.0.113.3", "203.0.113.4")
+			require.True(t, c.classify(ip, testTCP(44000, 5060, "BYE sip:u@example.invalid SIP/2.0\r\n"), now))
+			syn := testTCP(44000, 5060, "")
+			syn.SYN = true
+			syn.ACK = handshake.ack
+			assert.False(t, c.classify(ip, syn, now.Add(time.Second)))
+			assert.False(t, c.classify(ip, testTCP(44000, 5060, "new connection data"), now.Add(2*time.Second)))
+		})
+	}
 }
 
 func TestTCPSIPFlowClassifierCanonicalKeysIPv4AndIPv6(t *testing.T) {

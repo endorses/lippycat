@@ -786,8 +786,20 @@ func (writer *CallPcapWriter) syncLoop() {
 
 func (writer *CallPcapWriter) notifyFileClosed(path string) {
 	if path != "" && writer.config.OnFileClose != nil {
-		writer.config.OnFileClose(path)
+		invokeCallback("per-call PCAP file-close", func() {
+			writer.config.OnFileClose(path)
+		}, "call_id", writer.callID, "file", path)
 	}
+}
+
+func invokeCallback(name string, callback func(), context ...any) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			fields := append([]any{"callback", name, "panic", recovered}, context...)
+			logger.Error("Recovered panic from external callback", fields...)
+		}
+	}()
+	callback()
 }
 
 func (writer *CallPcapWriter) reserveCallback() {
@@ -828,7 +840,14 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 		return nil
 	}
 
-	writer.waitForCallbacks()
+	// A rotation callback may synchronously initiate manager shutdown. Waiting
+	// for callbacks in that path would wait for the callback currently calling
+	// Close and deadlock. Shutdown has no completion callback to order after a
+	// rotation callback, so it may safely close the remaining live files while
+	// that already-closed-file notification is still active.
+	if reason != CallFinalizationShutdown {
+		writer.waitForCallbacks()
+	}
 
 	writer.mu.Lock()
 	if writer.closed {
@@ -890,7 +909,9 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 	writer.notifyFileClosed(sipClosedPath)
 	writer.notifyFileClosed(rtpClosedPath)
 	if callComplete && writer.config.OnCallComplete != nil {
-		writer.config.OnCallComplete(meta)
+		invokeCallback("per-call completion", func() {
+			writer.config.OnCallComplete(meta)
+		}, "call_id", writer.callID)
 	}
 
 	return nil
@@ -973,7 +994,9 @@ func (pwm *PcapWriterManager) completeFinalization(result CallFinalizationResult
 	reason := result.Reason
 	callID := result.CallID
 	if reason != CallFinalizationShutdown && hook != nil {
-		hook(callID, reason)
+		invokeCallback("per-call pre-finalization", func() {
+			hook(callID, reason)
+		}, "call_id", callID, "reason", reason)
 	}
 	if writer == nil {
 		return result, nil

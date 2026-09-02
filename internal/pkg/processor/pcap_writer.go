@@ -61,6 +61,21 @@ type CallFinalizationResult struct {
 	HadWriter   bool
 }
 
+// PcapWriterTelemetry is a snapshot of per-call output lifecycle state.
+// Gauges are current values; counters are monotonic for the manager lifetime.
+type PcapWriterTelemetry struct {
+	ActiveWriters              uint64
+	Tombstones                 uint64
+	ProtocolFinalizations      uint64
+	IdleFinalizations          uint64
+	CapacityFinalizations      uint64
+	ManualFinalizations        uint64
+	SuppressedLatePackets      uint64
+	TombstoneCapacityEvictions uint64
+	FilenameCollisions         uint64
+	CallbackFailures           uint64
+}
+
 func (e *FinalizedCallError) Error() string {
 	return fmt.Sprintf("call %q was finalized at %s", e.CallID, e.FinalizedAt.Format(time.RFC3339Nano))
 }
@@ -153,6 +168,13 @@ type PcapWriterManager struct {
 
 	suppressedLatePackets atomic.Uint64
 	lastLateWarning       atomic.Int64
+	protocolFinalizations atomic.Uint64
+	idleFinalizations     atomic.Uint64
+	capacityFinalizations atomic.Uint64
+	manualFinalizations   atomic.Uint64
+	tombstoneEvictions    atomic.Uint64
+	filenameCollisions    atomic.Uint64
+	callbackFailures      atomic.Uint64
 }
 
 // SetBeforeFinalize installs the lifecycle cleanup hook. It runs at most once
@@ -300,7 +322,10 @@ func (pwm *PcapWriterManager) WritePacket(callID, from, to string, timestamp tim
 	pwm.mu.RUnlock()
 	writer.notifyFileClosed(closedPath)
 	writer.completeCallback()
-	return writeErr
+	if writeErr != nil {
+		return fmt.Errorf("write per-call PCAP packet for call %q: %w", callID, writeErr)
+	}
+	return nil
 }
 
 // SuppressedLatePackets returns the process-lifetime count of packets rejected
@@ -310,6 +335,30 @@ func (pwm *PcapWriterManager) SuppressedLatePackets() uint64 {
 		return 0
 	}
 	return pwm.suppressedLatePackets.Load()
+}
+
+// Telemetry returns current gauges and process-lifetime counters.
+func (pwm *PcapWriterManager) Telemetry() PcapWriterTelemetry {
+	if pwm == nil {
+		return PcapWriterTelemetry{}
+	}
+	pwm.mu.Lock()
+	pwm.pruneTombstonesLocked(time.Now())
+	activeWriters := len(pwm.writers)
+	tombstones := len(pwm.tombstones)
+	pwm.mu.Unlock()
+	return PcapWriterTelemetry{
+		ActiveWriters:              uint64(activeWriters), // #nosec G115 -- map sizes cannot be negative
+		Tombstones:                 uint64(tombstones),    // #nosec G115 -- map sizes cannot be negative
+		ProtocolFinalizations:      pwm.protocolFinalizations.Load(),
+		IdleFinalizations:          pwm.idleFinalizations.Load(),
+		CapacityFinalizations:      pwm.capacityFinalizations.Load(),
+		ManualFinalizations:        pwm.manualFinalizations.Load(),
+		SuppressedLatePackets:      pwm.suppressedLatePackets.Load(),
+		TombstoneCapacityEvictions: pwm.tombstoneEvictions.Load(),
+		FilenameCollisions:         pwm.filenameCollisions.Load(),
+		CallbackFailures:           pwm.callbackFailures.Load(),
+	}
 }
 
 func (pwm *PcapWriterManager) recordSuppressedLatePacket(callID string, finalizedAt time.Time) {
@@ -346,6 +395,7 @@ func (pwm *PcapWriterManager) addTombstoneLocked(callID string, finalizedAt time
 			}
 		}
 		delete(pwm.tombstones, oldestID)
+		pwm.tombstoneEvictions.Add(1)
 	}
 	pwm.tombstones[callID] = finalizedAt
 }
@@ -631,6 +681,9 @@ func (writer *CallPcapWriter) openCallPcapFile(filePath string) (*os.File, *pcap
 		if !errors.Is(err, os.ErrExist) {
 			return nil, nil, "", err
 		}
+		if writer.manager != nil {
+			writer.manager.filenameCollisions.Add(1)
+		}
 		actualPath = generationFilePath(filePath, time.Now().UnixNano(), attempt)
 	}
 
@@ -786,20 +839,24 @@ func (writer *CallPcapWriter) syncLoop() {
 
 func (writer *CallPcapWriter) notifyFileClosed(path string) {
 	if path != "" && writer.config.OnFileClose != nil {
-		invokeCallback("per-call PCAP file-close", func() {
+		if invokeCallback("per-call PCAP file-close", func() {
 			writer.config.OnFileClose(path)
-		}, "call_id", writer.callID, "file", path)
+		}, "call_id", writer.callID, "file", path) && writer.manager != nil {
+			writer.manager.callbackFailures.Add(1)
+		}
 	}
 }
 
-func invokeCallback(name string, callback func(), context ...any) {
+func invokeCallback(name string, callback func(), context ...any) (failed bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			failed = true
 			fields := append([]any{"callback", name, "panic", recovered}, context...)
 			logger.Error("Recovered panic from external callback", fields...)
 		}
 	}()
 	callback()
+	return false
 }
 
 func (writer *CallPcapWriter) reserveCallback() {
@@ -855,6 +912,7 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 		return nil
 	}
 	writer.closed = true
+	var finalizationErrors []error
 
 	// Stop sync loop
 	close(writer.stopSync)
@@ -865,10 +923,14 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 	if writer.sipFile != nil {
 		sipClosedPath = writer.sipFilePath
 		if err := writer.sipFile.Sync(); err != nil {
-			logger.Warn("Failed to sync SIP PCAP file", "error", err)
+			wrapped := fmt.Errorf("sync SIP PCAP for call %q file %q: %w", writer.callID, sipClosedPath, err)
+			finalizationErrors = append(finalizationErrors, wrapped)
+			logger.Warn("Failed to sync SIP PCAP file", "error", wrapped, "call_id", writer.callID, "file", sipClosedPath)
 		}
 		if err := writer.sipFile.Close(); err != nil {
-			logger.Warn("Failed to close SIP PCAP file", "error", err)
+			wrapped := fmt.Errorf("close SIP PCAP for call %q file %q: %w", writer.callID, sipClosedPath, err)
+			finalizationErrors = append(finalizationErrors, wrapped)
+			logger.Warn("Failed to close SIP PCAP file", "error", wrapped, "call_id", writer.callID, "file", sipClosedPath)
 		}
 		writer.sipFile = nil
 		writer.sipWriter = nil
@@ -880,10 +942,14 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 	if writer.rtpFile != nil {
 		rtpClosedPath = writer.rtpFilePath
 		if err := writer.rtpFile.Sync(); err != nil {
-			logger.Warn("Failed to sync RTP PCAP file", "error", err)
+			wrapped := fmt.Errorf("sync RTP PCAP for call %q file %q: %w", writer.callID, rtpClosedPath, err)
+			finalizationErrors = append(finalizationErrors, wrapped)
+			logger.Warn("Failed to sync RTP PCAP file", "error", wrapped, "call_id", writer.callID, "file", rtpClosedPath)
 		}
 		if err := writer.rtpFile.Close(); err != nil {
-			logger.Warn("Failed to close RTP PCAP file", "error", err)
+			wrapped := fmt.Errorf("close RTP PCAP for call %q file %q: %w", writer.callID, rtpClosedPath, err)
+			finalizationErrors = append(finalizationErrors, wrapped)
+			logger.Warn("Failed to close RTP PCAP file", "error", wrapped, "call_id", writer.callID, "file", rtpClosedPath)
 		}
 		writer.rtpFile = nil
 		writer.rtpWriter = nil
@@ -909,12 +975,14 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 	writer.notifyFileClosed(sipClosedPath)
 	writer.notifyFileClosed(rtpClosedPath)
 	if callComplete && writer.config.OnCallComplete != nil {
-		invokeCallback("per-call completion", func() {
+		if invokeCallback("per-call completion", func() {
 			writer.config.OnCallComplete(meta)
-		}, "call_id", writer.callID)
+		}, "call_id", writer.callID) && writer.manager != nil {
+			writer.manager.callbackFailures.Add(1)
+		}
 	}
 
-	return nil
+	return errors.Join(finalizationErrors...)
 }
 
 // CloseCall closes both PCAP files and fires the OnCallComplete callback
@@ -994,9 +1062,21 @@ func (pwm *PcapWriterManager) completeFinalization(result CallFinalizationResult
 	reason := result.Reason
 	callID := result.CallID
 	if reason != CallFinalizationShutdown && hook != nil {
-		invokeCallback("per-call pre-finalization", func() {
+		if invokeCallback("per-call pre-finalization", func() {
 			hook(callID, reason)
-		}, "call_id", callID, "reason", reason)
+		}, "call_id", callID, "reason", reason) {
+			pwm.callbackFailures.Add(1)
+		}
+	}
+	switch reason {
+	case CallFinalizationProtocolComplete:
+		pwm.protocolFinalizations.Add(1)
+	case CallFinalizationIdleTimeout:
+		pwm.idleFinalizations.Add(1)
+	case CallFinalizationCapacityEviction:
+		pwm.capacityFinalizations.Add(1)
+	case CallFinalizationManual:
+		pwm.manualFinalizations.Add(1)
 	}
 	if writer == nil {
 		return result, nil

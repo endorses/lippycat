@@ -18,7 +18,7 @@ func TestFlowTrackerEvictsOldestBatch(t *testing.T) {
 	now := time.Now()
 	for i := 0; i < 20; i++ {
 		flow := tracker.GetOrCreate(fmt.Sprintf("flow-%02d", i))
-		flow.LastSeen = now.Add(time.Duration(i) * time.Second)
+		flow.Touch(now.Add(time.Duration(i+1) * time.Second))
 	}
 
 	tracker.GetOrCreate("new")
@@ -46,13 +46,16 @@ func TestFlowTrackerBatchEvictionRecoversFromOversizedMap(t *testing.T) {
 	t.Cleanup(tracker.Close)
 
 	now := time.Now()
+	tracker.mu.Lock()
 	for i := 0; i < 15; i++ {
 		flowID := fmt.Sprintf("flow-%02d", i)
 		tracker.flows[flowID] = &signatures.FlowContext{
 			FlowID:   flowID,
 			LastSeen: now.Add(time.Duration(i) * time.Second),
 		}
+		tracker.cleanupElements[flowID] = tracker.cleanupOrder.PushBack(flowID)
 	}
+	tracker.mu.Unlock()
 
 	tracker.GetOrCreate("new")
 
@@ -107,12 +110,18 @@ func TestFlowContextConcurrentDetectionUpdatesAndSnapshots(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for iteration := 0; iteration < iterations; iteration++ {
+				metadataKey := fmt.Sprintf("worker-%d", worker)
 				flow.RecordDetection(
 					fmt.Sprintf("protocol-%d", worker%3),
 					time.Unix(int64(worker*iterations+iteration+1), 0),
 				)
 				_ = flow.LastSeenTime()
 				_ = flow.ProtocolsSnapshot()
+				flow.SetMetadata(metadataKey, iteration)
+				_, _ = flow.GetMetadata(metadataKey)
+				if iteration%7 == 0 {
+					flow.DeleteMetadata(metadataKey)
+				}
 			}
 		}()
 	}

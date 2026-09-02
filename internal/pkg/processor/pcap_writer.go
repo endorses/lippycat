@@ -149,6 +149,7 @@ type PcapWriterManager struct {
 	shutdown       bool
 	beforeFinalize func(string, CallFinalizationReason)
 	mu             sync.RWMutex
+	finalizationWG sync.WaitGroup
 
 	suppressedLatePackets atomic.Uint64
 	lastLateWarning       atomic.Int64
@@ -587,6 +588,10 @@ func (pwm *PcapWriterManager) SweepIdle(maxIdle time.Duration) int {
 func (pwm *PcapWriterManager) finalizeCallIfIdle(callID string, maxIdle time.Duration) (CallFinalizationResult, error) {
 	result := CallFinalizationResult{CallID: callID, Reason: CallFinalizationIdleTimeout}
 	pwm.mu.Lock()
+	if pwm.shutdown {
+		pwm.mu.Unlock()
+		return result, nil
+	}
 	writer, exists := pwm.writers[callID]
 	if !exists {
 		pwm.mu.Unlock()
@@ -925,6 +930,10 @@ func (pwm *PcapWriterManager) FinalizeCall(callID string, reason CallFinalizatio
 		return result, nil
 	}
 	pwm.mu.Lock()
+	if pwm.shutdown {
+		pwm.mu.Unlock()
+		return result, nil
+	}
 	result, writer, hook := pwm.transitionFinalizationLocked(callID, reason, time.Now())
 	pwm.mu.Unlock()
 	return pwm.completeFinalization(result, writer, hook)
@@ -947,6 +956,7 @@ func (pwm *PcapWriterManager) transitionFinalizationLocked(callID string, reason
 	}
 	if exists {
 		delete(pwm.writers, callID)
+		pwm.finalizationWG.Add(1)
 	}
 	result.FinalizedAt = finalizedAt
 	result.Finalized = true
@@ -968,6 +978,7 @@ func (pwm *PcapWriterManager) completeFinalization(result CallFinalizationResult
 	if writer == nil {
 		return result, nil
 	}
+	defer pwm.finalizationWG.Done()
 	return result, writer.finalize(reason)
 }
 
@@ -1013,6 +1024,7 @@ func (pwm *PcapWriterManager) Close() error {
 	writers := pwm.writers
 	pwm.writers = make(map[string]*CallPcapWriter)
 	pwm.mu.Unlock()
+	pwm.finalizationWG.Wait()
 
 	var lastErr error
 	for callID, writer := range writers {

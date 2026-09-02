@@ -1,7 +1,9 @@
 package logger
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 )
 
@@ -78,5 +80,44 @@ func TestWithMethods(t *testing.T) {
 	groupLogger := WithGroup("test_group")
 	if groupLogger == nil {
 		t.Error("Expected WithGroup to return logger")
+	}
+}
+
+func TestEnabledReflectsActiveHandlerLevel(t *testing.T) {
+	t.Cleanup(Enable)
+
+	UseFile(&bytes.Buffer{})
+
+	if !Enabled(slog.LevelDebug) {
+		t.Fatal("expected debug to be enabled by the active debug handler")
+	}
+	if !Enabled(slog.LevelError) {
+		t.Fatal("expected error to be enabled by the active debug handler")
+	}
+
+	Enable()
+	if Enabled(slog.LevelDebug) {
+		t.Fatal("expected debug to be disabled by the active info handler")
+	}
+	if !Enabled(slog.LevelInfo) {
+		t.Fatal("expected info to be enabled by the active info handler")
+	}
+}
+
+func TestEnabledHonorsDisable(t *testing.T) {
+	t.Cleanup(Enable)
+
+	UseFile(&bytes.Buffer{})
+	Disable()
+
+	for _, level := range []slog.Level{
+		slog.LevelDebug,
+		slog.LevelInfo,
+		slog.LevelWarn,
+		slog.LevelError,
+	} {
+		if Enabled(level) {
+			t.Errorf("expected level %s to be disabled", level)
+		}
 	}
 }

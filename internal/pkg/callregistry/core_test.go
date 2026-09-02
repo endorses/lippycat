@@ -1,6 +1,7 @@
 package callregistry
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -33,12 +34,41 @@ func TestCoreMultiValuedAssociationsAndCleanup(t *testing.T) {
 	require.True(t, core.Upsert(Call{CallID: "two"}))
 	require.True(t, core.TryAssociateEndpoint("one", "10.0.0.1:8000"))
 	require.True(t, core.TryAssociateEndpoint("two", "10.0.0.1:8000"))
+	require.Equal(t, 2, core.ActiveCallCount())
+	require.Equal(t, 2, core.EndpointAssociationCount())
 	require.Equal(t, []string{"one", "two"}, core.CallIDsForEndpoint("10.0.0.1:8000"))
 
 	require.True(t, core.Remove("two", EndCompleted))
 	require.Equal(t, []string{"one"}, core.CallIDsForEndpoint("10.0.0.1:8000"))
 	require.Empty(t, core.EndpointsForCall("two"))
+	require.Equal(t, 1, core.ActiveCallCount())
+	require.Equal(t, 1, core.EndpointAssociationCount())
 	require.Equal(t, []string{"two:completed"}, observer.ends)
+}
+
+func TestCoreCountsAreSafeDuringConcurrentMutation(t *testing.T) {
+	core := New(Config{MaxCalls: 100, MaxEndpointsPerCall: 1})
+
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		worker := worker
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := 0; index < 100; index++ {
+				callID := fmt.Sprintf("%d-%d", worker, index)
+				core.Upsert(Call{CallID: callID})
+				core.TryAssociateEndpoint(callID, callID)
+				_ = core.ActiveCallCount()
+				_ = core.EndpointAssociationCount()
+				core.Remove(callID, EndCompleted)
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.Zero(t, core.ActiveCallCount())
+	require.Zero(t, core.EndpointAssociationCount())
 }
 
 func TestCoreEvictionIsDeterministicAndCleansAssociations(t *testing.T) {

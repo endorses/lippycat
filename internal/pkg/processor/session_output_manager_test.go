@@ -91,6 +91,43 @@ func TestSessionOutputManagerRejectsWritesAfterClose(t *testing.T) {
 	require.ErrorIs(t, err, errSessionOutputClosed)
 }
 
+func TestSessionOutputManagerShutdownCallbackCanReenter(t *testing.T) {
+	var manager *SessionOutputManager
+	callbackDone := make(chan error, 1)
+	writer, err := NewPcapWriterManager(&PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    t.TempDir(),
+		FilePattern:  "{callid}.pcap",
+		SyncInterval: time.Hour,
+		OnFileClose: func(string) {
+			callbackDone <- manager.WritePacket(
+				"reentrant", "alice", "bob", time.Now(), []byte{2}, layers.LinkTypeEthernet, false,
+			)
+		},
+	})
+	require.NoError(t, err)
+	manager = newSessionOutputManager(writer, nil)
+	require.NoError(t, manager.WritePacket(
+		"shutdown", "alice", "bob", time.Now(), []byte{1}, layers.LinkTypeEthernet, false,
+	))
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- manager.Close() }()
+
+	select {
+	case err := <-callbackDone:
+		require.ErrorIs(t, err, errSessionOutputClosed)
+	case <-time.After(time.Second):
+		t.Fatal("file-close callback deadlocked while re-entering session output manager")
+	}
+	select {
+	case err := <-closeDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("session output manager shutdown deadlocked")
+	}
+}
+
 func TestSetPacketSourceRegistersSessionOutputLifecycleObserver(t *testing.T) {
 	monitor := &recordingSessionMonitor{}
 	manager := newSessionOutputManager(nil, monitor)

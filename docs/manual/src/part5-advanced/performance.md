@@ -188,10 +188,13 @@ completed event and replace their previous values. Do not sum or rate these
 last-event fields. Retain samples externally if a mean, maximum, or tail
 latency matters.
 
-Investigate when entry gauges stay close to their cap while pressure episodes
-rise on successive heartbeats, especially when eviction duration approaches
-100 ms. Correlate detector pressure with packet-buffer occupancy and named drop
-counters before assigning packet loss to detector pauses.
+Trend `flow_last_eviction_duration_ns` while entry gauges remain near their cap.
+At the default 100,000-flow cap, batching improves throughput and total lock
+work but observed individual flow-eviction episodes have held the exclusive
+lock for 27-44 ms, compared with roughly 7 ms before batching. Lower
+`detector.max_flows` when that pause is too large for the workload; reverting to
+per-insertion full-map eviction restores the throughput regression. Correlate
+detector pressure with packet-buffer occupancy and named drop counters.
 
 ## GPU Acceleration
 

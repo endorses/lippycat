@@ -163,7 +163,7 @@ func init() {
 	voipTapCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files")
 	voipTapCmd.Flags().DurationVar(&pcapGracePeriod, "pcap-grace-period", 5*time.Second, "Grace period before closing PCAP files after call ends (for trailing RTP)")
 	voipTapCmd.Flags().DurationVar(&perCallPcapMaxIdle, "per-call-pcap-max-idle", 10*time.Minute, "Close per-call PCAP writers after this idle time (0 = disabled)")
-	voipTapCmd.Flags().IntVar(&perCallPcapMaxWriters, "per-call-pcap-max-writers", 0, "Maximum active per-call PCAP writers (0 = unlimited)")
+	voipTapCmd.Flags().IntVar(&perCallPcapMaxWriters, "per-call-pcap-max-writers", 0, "Soft active per-call PCAP writer pressure threshold (0 = disabled)")
 	voipTapCmd.Flags().DurationVar(&pcapClosedCallTTL, "pcap-closed-call-ttl", time.Hour, "How long to suppress duplicate PCAP close handling for completed calls")
 
 	// Bind VoIP-specific flags to viper

@@ -416,7 +416,7 @@ TLS is enabled by default unless `processor.insecure` is true. Provide `processo
 | `processor.per_call_pcap.output_dir` | string | `"./pcaps"` | Directory for per-call PCAP files. |
 | `processor.per_call_pcap.file_pattern` | string | `"{timestamp}_{callid}.pcap"` | Filename pattern. Placeholders: `{timestamp}`, `{callid}`. |
 | `processor.per_call_pcap.max_idle` | duration | `"10m"` | Close idle per-call PCAP writers after this duration (0 disables idle close). |
-| `processor.per_call_pcap.max_writers` | integer | `0` | Maximum active per-call PCAP writers (0 = unlimited). |
+| `processor.per_call_pcap.max_writers` | integer | `0` | Soft active-writer pressure threshold (0 = disabled). Active calls are preserved above the threshold. |
 | `processor.per_call_pcap.closed_call_ttl` | duration | `"1h"` | Suppress duplicate close handling for completed calls for this duration. |
 
 #### Auto-Rotating PCAP
@@ -541,7 +541,7 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 | `tap.per_call_pcap.output_dir` | string | `"./pcaps"` | Directory for per-call PCAP files. |
 | `tap.per_call_pcap.file_pattern` | string | `"{timestamp}_{callid}.pcap"` | Filename pattern. |
 | `tap.per_call_pcap.max_idle` | duration | `"10m"` | Close idle per-call PCAP writers after this duration (0 disables idle close). |
-| `tap.per_call_pcap.max_writers` | integer | `0` | Maximum active per-call PCAP writers (0 = unlimited). |
+| `tap.per_call_pcap.max_writers` | integer | `0` | Soft active-writer pressure threshold (0 = disabled). Active calls are preserved above the threshold. |
 | `tap.per_call_pcap.closed_call_ttl` | duration | `"1h"` | Suppress duplicate close handling for completed calls for this duration. |
 
 #### Tap Auto-Rotating PCAP

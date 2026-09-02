@@ -175,7 +175,7 @@ func init() {
 	ProcessCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
 	ProcessCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files (supports {callid}, {from}, {to}, {timestamp})")
 	ProcessCmd.Flags().DurationVar(&perCallPcapMaxIdle, "per-call-pcap-max-idle", 10*time.Minute, "Close per-call PCAP writers after this idle time (0 = disabled)")
-	ProcessCmd.Flags().IntVar(&perCallPcapMaxWriters, "per-call-pcap-max-writers", 0, "Maximum active per-call PCAP writers (0 = unlimited)")
+	ProcessCmd.Flags().IntVar(&perCallPcapMaxWriters, "per-call-pcap-max-writers", 0, "Soft active per-call PCAP writer pressure threshold (0 = disabled)")
 	ProcessCmd.Flags().DurationVar(&pcapClosedCallTTL, "pcap-closed-call-ttl", time.Hour, "How long to suppress duplicate PCAP close handling for completed calls")
 
 	// Auto-rotate PCAP writing

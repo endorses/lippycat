@@ -155,6 +155,12 @@ retention bound removes an entry, a later packet can be treated as a new
 Call-ID generation; artifact names still include unique generation material so
 an old file cannot be mistaken for the new live call.
 
+`per_call_pcap.max_writers` is a soft pressure threshold, not a destructive
+capacity limit. Crossing it emits a rate-limited warning but does not finalize,
+tombstone, or detach a possibly active call. Idle and protocol-complete calls
+remain the safe reclamation paths. Operators that set this threshold must size
+file-descriptor limits for temporary excursions above it.
+
 The current policy does not retain late packets. In particular, suppressed
 packets do not create a `.late` PCAP and cannot invoke the normal call-complete
 hook a second time. A future late-retention mode would have to use a distinct,

@@ -412,8 +412,7 @@ func TestPcapWriterManagerMaxWriters(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, secondWriter)
 
-	assert.Len(t, completed, 1)
-	assert.Equal(t, "first-call", completed[0].CallID)
+	assert.Empty(t, completed, "capacity eviction is resource pressure, not protocol completion")
 
 	manager.mu.RLock()
 	_, firstExists := manager.writers["first-call"]

@@ -129,14 +129,7 @@ func (m *SessionOutputManager) WritePacket(
 		return nil
 	}
 
-	writer, err := m.writer.GetOrCreateWriter(callID, from, to)
-	if err != nil || writer == nil {
-		return err
-	}
-	if isRTP {
-		return writer.WriteRTPPacket(timestamp, data, linkType)
-	}
-	return writer.WriteSIPPacket(timestamp, data, linkType)
+	return m.writer.WritePacket(callID, from, to, timestamp, data, linkType, isRTP)
 }
 
 // Close is safe for concurrent use and preserves shutdown ordering: stop the

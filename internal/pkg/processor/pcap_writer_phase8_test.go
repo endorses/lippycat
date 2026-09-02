@@ -106,6 +106,78 @@ func TestPhase8FinalizeAndWriterCloseAreIdempotent(t *testing.T) {
 	assert.Error(t, writer.WriteSIPPacket(time.Now(), []byte("after-close"), layers.LinkTypeEthernet))
 }
 
+func TestPhase8ManagedWriterCloseCallUsesManagerLifecycle(t *testing.T) {
+	var completed atomic.Int32
+	manager := newPhase8Manager(t, func(config *PcapWriterConfig) {
+		config.OnCallComplete = func(CallMetadata) { completed.Add(1) }
+	})
+	cleaner := &recordingPortCleaner{}
+	manager.SetBeforeFinalize(func(callID string, _ CallFinalizationReason) {
+		cleaner.CleanupCallPorts(callID)
+	})
+
+	writer, err := manager.GetOrCreateWriter("managed-close", "alice", "bob")
+	require.NoError(t, err)
+	require.NoError(t, writer.CloseCall())
+
+	assert.True(t, manager.IsFinalized("managed-close"))
+	assert.Equal(t, []string{"managed-close"}, cleaner.calls())
+	assert.Equal(t, int32(1), completed.Load())
+	err = manager.WritePacket("managed-close", "alice", "bob", time.Now(), []byte("late"), layers.LinkTypeEthernet, false)
+	assert.True(t, IsCallFinalized(err))
+}
+
+func TestPhase8RotationCallbackPrecedesCompletion(t *testing.T) {
+	rotationStarted := make(chan struct{})
+	releaseRotation := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	var events []string
+	manager := newPhase8Manager(t, func(config *PcapWriterConfig) {
+		config.MaxFileSize = 1
+		config.OnFileClose = func(string) {
+			mu.Lock()
+			events = append(events, "file")
+			mu.Unlock()
+			once.Do(func() {
+				close(rotationStarted)
+				<-releaseRotation
+			})
+		}
+		config.OnCallComplete = func(CallMetadata) {
+			mu.Lock()
+			events = append(events, "complete")
+			mu.Unlock()
+		}
+	})
+	require.NoError(t, manager.WritePacket("ordered", "alice", "bob", time.Now(), []byte{1}, layers.LinkTypeEthernet, false))
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- manager.WritePacket("ordered", "alice", "bob", time.Now(), []byte{2}, layers.LinkTypeEthernet, false)
+	}()
+	<-rotationStarted
+	finalizeDone := make(chan error, 1)
+	go func() {
+		_, err := manager.FinalizeCall("ordered", CallFinalizationProtocolComplete)
+		finalizeDone <- err
+	}()
+
+	select {
+	case err := <-finalizeDone:
+		require.NoError(t, err)
+		t.Fatal("finalization overtook the pending rotation callback")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseRotation)
+	require.NoError(t, <-writeDone)
+	require.NoError(t, <-finalizeDone)
+
+	mu.Lock()
+	assert.Equal(t, []string{"file", "file", "complete"}, events)
+	mu.Unlock()
+}
+
 func TestPhase8CallbacksAreOrderedAndReentrantWithoutLocks(t *testing.T) {
 	var manager *PcapWriterManager
 	var mu sync.Mutex

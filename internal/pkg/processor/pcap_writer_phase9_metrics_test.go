@@ -3,6 +3,7 @@
 package processor
 
 import (
+	"container/heap"
 	"github.com/endorses/lippycat/api/gen/management"
 	"io"
 	"os"
@@ -86,11 +87,15 @@ func TestPhase9TelemetryAccountsForLifecyclePressure(t *testing.T) {
 	_, err := manager.FinalizeCall("protocol", CallFinalizationProtocolComplete)
 	require.NoError(t, err)
 
-	// Reuse a pruned filename to exercise collision-safe admission telemetry.
+	// Reuse an expired Call-ID to exercise collision-safe admission telemetry.
 	manager.mu.Lock()
-	manager.tombstones["protocol"] = time.Now().Add(-2 * manager.tombstoneTTL)
+	manager.tombstoneTTL = time.Nanosecond
 	manager.mu.Unlock()
+	time.Sleep(time.Nanosecond)
 	require.NoError(t, manager.WritePacket("protocol", "e", "f", time.Now(), []byte{3}, layers.LinkTypeEthernet, false))
+	manager.mu.Lock()
+	manager.tombstoneTTL = completedCallTombstoneTTL
+	manager.mu.Unlock()
 	_, err = manager.FinalizeCall("protocol", CallFinalizationManual)
 	require.NoError(t, err)
 	require.NoError(t, manager.WritePacket("idle", "g", "h", time.Now(), []byte{4}, layers.LinkTypeEthernet, false))
@@ -104,16 +109,16 @@ func TestPhase9TelemetryAccountsForLifecyclePressure(t *testing.T) {
 	assert.True(t, IsCallFinalized(manager.WritePacket("idle", "g", "h", time.Now(), []byte("late"), layers.LinkTypeEthernet, false)))
 
 	got := manager.Telemetry()
-	assert.Zero(t, got.ActiveWriters)
+	assert.Equal(t, uint64(1), got.ActiveWriters)
 	assert.LessOrEqual(t, got.Tombstones, uint64(2))
 	assert.Equal(t, uint64(1), got.ProtocolFinalizations)
-	assert.Equal(t, uint64(1), got.CapacityFinalizations)
+	assert.Zero(t, got.CapacityFinalizations)
 	assert.Equal(t, uint64(1), got.ManualFinalizations)
 	assert.Equal(t, uint64(1), got.IdleFinalizations)
 	assert.Equal(t, uint64(1), got.SuppressedLatePackets)
 	assert.GreaterOrEqual(t, got.FilenameCollisions, uint64(1))
 	assert.Equal(t, uint64(2), got.CallbackFailures)
-	assert.GreaterOrEqual(t, got.TombstoneCapacityEvictions, uint64(1))
+	assert.Zero(t, got.TombstoneCapacityEvictions)
 }
 
 func TestPhase9ProcessorHeartbeatTelemetryMappingAndSerialization(t *testing.T) {
@@ -129,13 +134,11 @@ func TestPhase9ProcessorHeartbeatTelemetryMappingAndSerialization(t *testing.T) 
 	assert.Equal(t, uint64(1), decoded.PcapWriter.ActiveWriters)
 }
 
-func TestPhase9TombstoneAdmissionAllocationsAreCardinalityIndependent(t *testing.T) {
+func TestPhase9TombstoneLookupAllocationsAreCardinalityIndependent(t *testing.T) {
 	for _, size := range []int{10, 1_000, 100_000} {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {
-			manager := &PcapWriterManager{tombstones: make(map[string]time.Time, size), tombstoneTTL: time.Hour}
-			for i := range size {
-				manager.tombstones[strconv.Itoa(i)] = time.Now()
-			}
+			manager := newTombstoneTestManager(size)
+			seedTombstones(manager, size, time.Now())
 			allocs := testing.AllocsPerRun(100, func() { _ = manager.IsFinalized("absent") })
 			assert.Zero(t, allocs)
 		})
@@ -247,15 +250,13 @@ func TestPhase9LatePacketAndGetOrCreateDuringFinalizationAreSuppressed(t *testin
 	require.NoError(t, <-done)
 }
 
-func BenchmarkPcapWriterTombstoneAdmission(b *testing.B) {
+func BenchmarkPcapWriterTombstoneLookup(b *testing.B) {
 	for _, size := range []int{10, 1_000, 100_000} {
 		b.Run(strconv.Itoa(size), func(b *testing.B) {
 			manager := benchmarkPcapManager(b)
 			manager.tombstoneLimit = 100_000
 			manager.mu.Lock()
-			for i := range size {
-				manager.tombstones[strings.Repeat("x", 8)+string(rune(i))] = time.Now()
-			}
+			seedTombstonesLocked(manager, size, time.Now())
 			manager.mu.Unlock()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -268,22 +269,60 @@ func BenchmarkPcapWriterTombstoneAdmission(b *testing.B) {
 func BenchmarkPcapWriterTombstonePruning(b *testing.B) {
 	for _, size := range []int{1_000, 10_000, 100_000} {
 		b.Run(strconv.Itoa(size), func(b *testing.B) {
-			manager := &PcapWriterManager{tombstones: make(map[string]time.Time, size), tombstoneTTL: time.Hour}
+			manager := newTombstoneTestManager(size)
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				manager.mu.Lock()
 				clear(manager.tombstones)
-				for entry := range size {
-					manager.tombstones[strconv.Itoa(entry)] = time.Unix(0, 0)
-				}
+				clear(manager.tombstoneIndex)
+				manager.tombstoneQueue = manager.tombstoneQueue[:0]
+				seedTombstonesLocked(manager, size, time.Unix(0, 0))
 				manager.mu.Unlock()
 				b.StartTimer()
 				manager.mu.Lock()
-				manager.pruneTombstonesLocked(time.Now())
+				manager.pruneTombstonesLocked(time.Now(), tombstonePruneBatch)
 				manager.mu.Unlock()
 				b.StopTimer()
 			}
 		})
+	}
+}
+
+func BenchmarkPcapWriterTelemetryAtTombstoneCardinality(b *testing.B) {
+	for _, size := range []int{1_000, 10_000, 100_000} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			manager := newTombstoneTestManager(size)
+			seedTombstones(manager, size, time.Now())
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = manager.Telemetry()
+			}
+		})
+	}
+}
+
+func newTombstoneTestManager(size int) *PcapWriterManager {
+	return &PcapWriterManager{
+		tombstones:     make(map[string]time.Time, size),
+		tombstoneIndex: make(map[string]*callTombstone, size),
+		tombstoneLimit: size + 1,
+		tombstoneTTL:   time.Hour,
+	}
+}
+
+func seedTombstones(manager *PcapWriterManager, size int, finalizedAt time.Time) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	seedTombstonesLocked(manager, size, finalizedAt)
+}
+
+func seedTombstonesLocked(manager *PcapWriterManager, size int, finalizedAt time.Time) {
+	for i := range size {
+		callID := strings.Repeat("x", 8) + strconv.Itoa(i)
+		entry := &callTombstone{callID: callID, finalizedAt: finalizedAt.Add(time.Duration(i))}
+		manager.tombstones[callID] = entry.finalizedAt
+		manager.tombstoneIndex[callID] = entry
+		heap.Push(&manager.tombstoneQueue, entry)
 	}
 }
 

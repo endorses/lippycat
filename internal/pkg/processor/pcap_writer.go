@@ -3,6 +3,7 @@
 package processor
 
 import (
+	"container/heap"
 	"errors"
 	"fmt"
 	"os"
@@ -29,9 +30,41 @@ const (
 	// completedCallTombstoneLimit bounds terminal lifecycle memory. At pressure,
 	// the oldest tombstones are discarded; collision-safe file creation still
 	// protects finalized artifacts if such a Call-ID is subsequently reused.
-	completedCallTombstoneLimit = 100_000
-	latePacketWarningInterval   = time.Minute
+	completedCallTombstoneLimit   = 100_000
+	latePacketWarningInterval     = time.Minute
+	writerCapacityWarningInterval = time.Minute
+	tombstonePruneBatch           = 64
 )
+
+type callTombstone struct {
+	callID      string
+	finalizedAt time.Time
+	index       int
+}
+
+type callTombstoneHeap []*callTombstone
+
+func (h callTombstoneHeap) Len() int           { return len(h) }
+func (h callTombstoneHeap) Less(i, j int) bool { return h[i].finalizedAt.Before(h[j].finalizedAt) }
+func (h callTombstoneHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index = i
+	h[j].index = j
+}
+func (h *callTombstoneHeap) Push(value any) {
+	entry := value.(*callTombstone)
+	entry.index = len(*h)
+	*h = append(*h, entry)
+}
+func (h *callTombstoneHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	value := old[last]
+	old[last] = nil
+	*h = old[:last]
+	value.index = -1
+	return value
+}
 
 // FinalizedCallError is the expected, non-fatal result when a late packet
 // attempts to recreate a writer for a call that has reached terminal state.
@@ -94,7 +127,7 @@ type PcapWriterConfig struct {
 	MaxFileSize     int64         // Max PCAP file size in bytes (0 = unlimited)
 	MaxFilesPerCall int           // Max number of PCAP files per call (for rotation)
 	MaxIdle         time.Duration // Max idle time before a call writer is reclaimed (0 = disabled)
-	MaxWriters      int           // Max active call writers (0 = unlimited)
+	MaxWriters      int           // Soft active-writer pressure threshold (0 = disabled)
 	BufferSize      int           // Write buffer size
 	SyncInterval    time.Duration // How often to sync to disk
 
@@ -159,6 +192,8 @@ type PcapWriterManager struct {
 	config         *PcapWriterConfig
 	writers        map[string]*CallPcapWriter
 	tombstones     map[string]time.Time
+	tombstoneIndex map[string]*callTombstone
+	tombstoneQueue callTombstoneHeap
 	tombstoneTTL   time.Duration
 	tombstoneLimit int
 	shutdown       bool
@@ -166,15 +201,17 @@ type PcapWriterManager struct {
 	mu             sync.RWMutex
 	finalizationWG sync.WaitGroup
 
-	suppressedLatePackets atomic.Uint64
-	lastLateWarning       atomic.Int64
-	protocolFinalizations atomic.Uint64
-	idleFinalizations     atomic.Uint64
-	capacityFinalizations atomic.Uint64
-	manualFinalizations   atomic.Uint64
-	tombstoneEvictions    atomic.Uint64
-	filenameCollisions    atomic.Uint64
-	callbackFailures      atomic.Uint64
+	suppressedLatePackets  atomic.Uint64
+	lastLateWarning        atomic.Int64
+	lastCapacityWarning    atomic.Int64
+	protocolFinalizations  atomic.Uint64
+	idleFinalizations      atomic.Uint64
+	capacityFinalizations  atomic.Uint64
+	manualFinalizations    atomic.Uint64
+	tombstoneEvictions     atomic.Uint64
+	filenameCollisions     atomic.Uint64
+	callbackFailures       atomic.Uint64
+	capacityPressureEvents atomic.Uint64
 }
 
 // SetBeforeFinalize installs the lifecycle cleanup hook. It runs at most once
@@ -199,7 +236,7 @@ func (pwm *PcapWriterManager) IsFinalized(callID string) bool {
 	defer pwm.mu.Unlock()
 	finalizedAt, ok := pwm.tombstones[callID]
 	if ok && pwm.tombstoneTTL > 0 && now.Sub(finalizedAt) >= pwm.tombstoneTTL {
-		delete(pwm.tombstones, callID)
+		pwm.removeTombstoneLocked(callID)
 		return false
 	}
 	return ok
@@ -222,6 +259,7 @@ func NewPcapWriterManager(config *PcapWriterConfig) (*PcapWriterManager, error) 
 		config:         config,
 		writers:        make(map[string]*CallPcapWriter),
 		tombstones:     make(map[string]time.Time),
+		tombstoneIndex: make(map[string]*callTombstone),
 		tombstoneTTL:   completedCallTombstoneTTL,
 		tombstoneLimit: completedCallTombstoneLimit,
 	}, nil
@@ -258,21 +296,15 @@ func (pwm *PcapWriterManager) GetOrCreateWriter(callID, from, to string) (*CallP
 				pwm.recordSuppressedLatePacket(callID, finalizedAt)
 				return nil, &FinalizedCallError{CallID: callID, FinalizedAt: finalizedAt}
 			}
-			delete(pwm.tombstones, callID)
+			pwm.removeTombstoneLocked(callID)
 		}
 
 		if pwm.config.MaxWriters > 0 && len(pwm.writers) >= pwm.config.MaxWriters {
-			evictCallID, evictWriter := pwm.leastRecentlyWrittenLocked()
-			if evictWriter != nil {
-				pwm.mu.Unlock()
-				logger.Warn("Closing per-call PCAP writer due to max writer limit",
-					"call_id", evictCallID, "max_writers", pwm.config.MaxWriters,
-					"reason", CallFinalizationCapacityEviction)
-				if _, err := pwm.FinalizeCall(evictCallID, CallFinalizationCapacityEviction); err != nil {
-					return nil, fmt.Errorf("failed to close overflow PCAP writer %q: %w", evictCallID, err)
-				}
-				continue
-			}
+			// A live call has no safe eviction point: finalizing it would discard
+			// subsequent packets (and tombstoning would suppress them for the full
+			// retention window). Treat MaxWriters as a pressure threshold and keep
+			// capture lossless until an idle or completed call is reclaimed.
+			pwm.recordWriterCapacityPressureLocked(callID)
 		}
 
 		writer, err := pwm.createWriter(callID, from, to)
@@ -342,11 +374,10 @@ func (pwm *PcapWriterManager) Telemetry() PcapWriterTelemetry {
 	if pwm == nil {
 		return PcapWriterTelemetry{}
 	}
-	pwm.mu.Lock()
-	pwm.pruneTombstonesLocked(time.Now())
+	pwm.mu.RLock()
 	activeWriters := len(pwm.writers)
 	tombstones := len(pwm.tombstones)
-	pwm.mu.Unlock()
+	pwm.mu.RUnlock()
 	return PcapWriterTelemetry{
 		ActiveWriters:              uint64(activeWriters), // #nosec G115 -- map sizes cannot be negative
 		Tombstones:                 uint64(tombstones),    // #nosec G115 -- map sizes cannot be negative
@@ -373,11 +404,26 @@ func (pwm *PcapWriterManager) recordSuppressedLatePacket(callID string, finalize
 		"call_id", callID, "finalized_at", finalizedAt, "suppressed_total", total)
 }
 
-func (pwm *PcapWriterManager) pruneTombstonesLocked(now time.Time) {
-	for callID, finalizedAt := range pwm.tombstones {
-		if pwm.tombstoneTTL <= 0 || now.Sub(finalizedAt) >= pwm.tombstoneTTL {
-			delete(pwm.tombstones, callID)
+func (pwm *PcapWriterManager) recordWriterCapacityPressureLocked(callID string) {
+	total := pwm.capacityPressureEvents.Add(1)
+	now := time.Now().UnixNano()
+	last := pwm.lastCapacityWarning.Load()
+	if now-last < writerCapacityWarningInterval.Nanoseconds() ||
+		!pwm.lastCapacityWarning.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("Per-call PCAP writer pressure threshold exceeded; preserving active calls",
+		"call_id", callID, "active_writers", len(pwm.writers),
+		"max_writers", pwm.config.MaxWriters, "pressure_events", total)
+}
+
+func (pwm *PcapWriterManager) pruneTombstonesLocked(now time.Time, limit int) {
+	for removed := 0; removed < limit && len(pwm.tombstoneQueue) > 0; removed++ {
+		oldest := pwm.tombstoneQueue[0]
+		if pwm.tombstoneTTL > 0 && now.Sub(oldest.finalizedAt) < pwm.tombstoneTTL {
+			return
 		}
+		pwm.removeTombstoneLocked(oldest.callID)
 	}
 }
 
@@ -385,19 +431,30 @@ func (pwm *PcapWriterManager) addTombstoneLocked(callID string, finalizedAt time
 	if pwm.tombstoneLimit <= 0 {
 		return
 	}
-	pwm.pruneTombstonesLocked(finalizedAt)
+	pwm.pruneTombstonesLocked(finalizedAt, tombstonePruneBatch)
 	if _, exists := pwm.tombstones[callID]; !exists && len(pwm.tombstones) >= pwm.tombstoneLimit {
-		var oldestID string
-		var oldestAt time.Time
-		for existingID, existingAt := range pwm.tombstones {
-			if oldestID == "" || existingAt.Before(oldestAt) {
-				oldestID, oldestAt = existingID, existingAt
-			}
-		}
-		delete(pwm.tombstones, oldestID)
-		pwm.tombstoneEvictions.Add(1)
+		pwm.evictOldestTombstoneLocked()
 	}
 	pwm.tombstones[callID] = finalizedAt
+	entry := &callTombstone{callID: callID, finalizedAt: finalizedAt}
+	pwm.tombstoneIndex[callID] = entry
+	heap.Push(&pwm.tombstoneQueue, entry)
+}
+
+func (pwm *PcapWriterManager) evictOldestTombstoneLocked() {
+	if len(pwm.tombstoneQueue) == 0 {
+		return
+	}
+	pwm.removeTombstoneLocked(pwm.tombstoneQueue[0].callID)
+	pwm.tombstoneEvictions.Add(1)
+}
+
+func (pwm *PcapWriterManager) removeTombstoneLocked(callID string) {
+	delete(pwm.tombstones, callID)
+	if entry := pwm.tombstoneIndex[callID]; entry != nil {
+		heap.Remove(&pwm.tombstoneQueue, entry.index)
+		delete(pwm.tombstoneIndex, callID)
+	}
 }
 
 // createWriter creates a new PCAP writer for a call with separate SIP and RTP files
@@ -578,28 +635,6 @@ func (writer *CallPcapWriter) writeRTPPacket(timestamp time.Time, data []byte, l
 	writer.lastWrite = time.Now()
 
 	return closedPath, nil
-}
-
-func (pwm *PcapWriterManager) leastRecentlyWrittenLocked() (string, *CallPcapWriter) {
-	var (
-		oldestCallID string
-		oldestWriter *CallPcapWriter
-		oldestWrite  time.Time
-	)
-
-	for callID, writer := range pwm.writers {
-		writer.mu.Lock()
-		lastWrite := writer.lastWrite
-		writer.mu.Unlock()
-
-		if oldestWriter == nil || lastWrite.Before(oldestWrite) {
-			oldestCallID = callID
-			oldestWriter = writer
-			oldestWrite = lastWrite
-		}
-	}
-
-	return oldestCallID, oldestWriter
 }
 
 // SweepIdle closes writers that have not received SIP or RTP packets within maxIdle.

@@ -101,15 +101,6 @@ func TestPhase9CompletionHookPolicyIsStableAcrossTerminalPaths(t *testing.T) {
 			wantReason:      CallFinalizationIdleTimeout,
 			wantCompletions: 1,
 		},
-		{
-			name: "capacity pressure",
-			finalize: func(t *testing.T, manager *PcapWriterManager, _ *CallPcapWriter) {
-				_, err := manager.GetOrCreateWriter("new", "carol", "dave")
-				require.NoError(t, err)
-			},
-			wantReason:      CallFinalizationCapacityEviction,
-			wantCompletions: 0,
-		},
 	}
 
 	for _, tt := range tests {

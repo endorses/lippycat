@@ -233,21 +233,25 @@ func TestPhase8IdleFinalizationCleansPortsAndTombstones(t *testing.T) {
 	assert.True(t, IsCallFinalized(err))
 }
 
-func TestPhase8CapacityEvictionReportsPressureWithoutCompletion(t *testing.T) {
+func TestPhase8CapacityPressurePreservesActiveCalls(t *testing.T) {
 	var completed atomic.Int32
+	var cleaned atomic.Int32
 	manager := newPhase8Manager(t, func(config *PcapWriterConfig) {
 		config.MaxWriters = 1
 		config.OnCallComplete = func(CallMetadata) { completed.Add(1) }
 	})
-	reasons := make(chan CallFinalizationReason, 1)
-	manager.SetBeforeFinalize(func(_ string, reason CallFinalizationReason) { reasons <- reason })
+	manager.SetBeforeFinalize(func(string, CallFinalizationReason) { cleaned.Add(1) })
 	_, err := manager.GetOrCreateWriter("old", "alice", "bob")
 	require.NoError(t, err)
 	_, err = manager.GetOrCreateWriter("new", "carol", "dave")
 	require.NoError(t, err)
-	assert.Equal(t, CallFinalizationCapacityEviction, <-reasons)
+	require.NoError(t, manager.WritePacket("old", "alice", "bob", time.Now(), []byte("still-active"), layers.LinkTypeEthernet, false))
 	assert.Zero(t, completed.Load())
-	assert.True(t, manager.IsFinalized("old"))
+	assert.Zero(t, cleaned.Load())
+	assert.False(t, manager.IsFinalized("old"))
+	manager.mu.RLock()
+	assert.Len(t, manager.writers, 2)
+	manager.mu.RUnlock()
 }
 
 func TestPhase8ShutdownFlushesWithoutCompletionOrTombstone(t *testing.T) {

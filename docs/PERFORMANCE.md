@@ -686,10 +686,12 @@ most recently completed event. Do not sum these fields across time or derive a
 rate from them. Retain samples externally when a mean, maximum, or tail-latency
 alert is required.
 
-Alert on sustained behavior rather than one batch: entry gauges repeatedly near
-the cap, pressure episodes increasing every heartbeat, and eviction duration
-approaching the 100 ms production budget together indicate that the configured
-retention does not fit the workload or the host. Correlate this with capture
+Trend `flow_last_eviction_duration_ns` rather than waiting for the 100 ms
+production ceiling. At the default 100,000-flow cap, batching greatly reduces
+total lock work and improves throughput, but an individual eviction episode may
+hold the exclusive lock for 27-44 ms versus roughly 7 ms before batching. If
+that pause is unacceptable for the workload, lower `detector.max_flows`; do not
+revert to per-insertion full-map eviction. Correlate the duration with capture
 buffer occupancy and packet-drop telemetry before attributing packet loss to
 the detector.
 

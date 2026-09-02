@@ -94,7 +94,13 @@ type DetectionResult struct {
 	PriorityOverride int
 }
 
-// FlowContext tracks state for multi-packet protocol flows
+// FlowContext tracks state for multi-packet protocol flows.
+//
+// FlowContext owns synchronization for all mutable fields after the context is
+// published by FlowTracker. Callers may initialize fields in a struct literal
+// before publication, but must use the methods below for subsequent timestamp,
+// protocol, metadata, and state access. FlowTracker separately owns membership
+// in its flow map; its lock does not protect a returned FlowContext.
 type FlowContext struct {
 	// FlowID is the unique flow identifier (5-tuple hash)
 	FlowID string
@@ -112,8 +118,44 @@ type FlowContext struct {
 	// Protocol-specific state (type-asserted by signatures)
 	State interface{}
 
-	// mu protects concurrent access to Metadata and State
+	// mu protects all mutable fields after publication.
 	mu sync.RWMutex
+}
+
+// RecordDetection updates flow activity and records a protocol once.
+func (f *FlowContext) RecordDetection(protocol string, seen time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.LastSeen = seen
+	for _, existing := range f.Protocols {
+		if existing == protocol {
+			return
+		}
+	}
+	f.Protocols = append(f.Protocols, protocol)
+}
+
+// LastSeenTime returns the last activity timestamp.
+func (f *FlowContext) LastSeenTime() time.Time {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.LastSeen
+}
+
+// ProtocolsSnapshot returns a copy safe for use after the method returns.
+func (f *FlowContext) ProtocolsSnapshot() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return append([]string(nil), f.Protocols...)
+}
+
+// UpdateState serializes a read-modify-write transition of protocol state.
+// The callback executes while the context is locked and must not call another
+// FlowContext method. Its return value becomes the new state.
+func (f *FlowContext) UpdateState(update func(interface{}) interface{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.State = update(f.State)
 }
 
 // SetMetadata safely sets a metadata key-value pair

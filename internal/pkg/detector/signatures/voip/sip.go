@@ -95,40 +95,31 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 			if len(sdpInfo.MediaPorts) > 0 {
 				// Store in flow context for RTP correlation
 				if ctx.Flow != nil {
-					// Get or create SIP flow state
-					var sipState *SIPFlowState
-					if ctx.Flow.State != nil {
-						sipState, _ = ctx.Flow.State.(*SIPFlowState)
-					}
-					if sipState == nil {
-						sipState = &SIPFlowState{
-							MediaPorts: make([]uint16, 0),
+					ctx.Flow.UpdateState(func(state interface{}) interface{} {
+						sipState, _ := state.(*SIPFlowState)
+						if sipState == nil {
+							sipState = &SIPFlowState{MediaPorts: make([]uint16, 0)}
 						}
-						ctx.Flow.State = sipState
-					}
-
-					// Update Call-ID if available
-					if callID, ok := metadata["call_id"].(string); ok {
-						sipState.CallID = callID
-					}
-
-					// Add new media ports (avoid duplicates).
-					// Also register RTCP port (RTP+1) per RFC 3550 so RTCP packets
-					// can be correlated even without an explicit a=rtcp: SDP attribute.
-					for _, port := range sdpInfo.MediaPorts {
-						for _, candidate := range []uint16{port, port + 1} {
-							found := false
-							for _, existing := range sipState.MediaPorts {
-								if existing == candidate {
-									found = true
-									break
+						if callID, ok := metadata["call_id"].(string); ok {
+							sipState.CallID = callID
+						}
+						// Register RTP and implicit RTCP (RTP+1) ports once.
+						for _, port := range sdpInfo.MediaPorts {
+							for _, candidate := range []uint16{port, port + 1} {
+								found := false
+								for _, existing := range sipState.MediaPorts {
+									if existing == candidate {
+										found = true
+										break
+									}
+								}
+								if !found {
+									sipState.MediaPorts = append(sipState.MediaPorts, candidate)
 								}
 							}
-							if !found {
-								sipState.MediaPorts = append(sipState.MediaPorts, candidate)
-							}
 						}
-					}
+						return sipState
+					})
 
 					metadata["media_ports"] = sdpInfo.MediaPorts
 					// Store connection IP for RTP endpoint registration

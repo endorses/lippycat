@@ -2,6 +2,7 @@ package detector
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -87,5 +88,152 @@ func TestFlowTrackerEvictionScratchDoesNotRetainFlowIDs(t *testing.T) {
 	for _, candidate := range tracker.evictionScratch[:cap(tracker.evictionScratch)] {
 		assert.Empty(t, candidate.flowID)
 		assert.True(t, candidate.lastSeen.IsZero())
+	}
+}
+
+func TestFlowContextConcurrentDetectionUpdatesAndSnapshots(t *testing.T) {
+	tracker := NewFlowTrackerWithMaxEntries(time.Hour, 0)
+	t.Cleanup(tracker.Close)
+	flow := tracker.GetOrCreate("shared")
+
+	const workers = 12
+	const iterations = 200
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		worker := worker
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for iteration := 0; iteration < iterations; iteration++ {
+				flow.RecordDetection(
+					fmt.Sprintf("protocol-%d", worker%3),
+					time.Unix(int64(worker*iterations+iteration+1), 0),
+				)
+				_ = flow.LastSeenTime()
+				_ = flow.ProtocolsSnapshot()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	protocols := flow.ProtocolsSnapshot()
+	assert.ElementsMatch(t, []string{"protocol-0", "protocol-1", "protocol-2"}, protocols)
+	assert.False(t, flow.LastSeenTime().IsZero())
+
+	// A snapshot belongs to the caller and must not mutate tracker-owned state.
+	protocols[0] = "mutated"
+	assert.NotContains(t, flow.ProtocolsSnapshot(), "mutated")
+}
+
+func TestFlowContextUpdateStateSerializesReadModifyWrite(t *testing.T) {
+	flow := &signatures.FlowContext{}
+
+	const workers = 16
+	const increments = 250
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range increments {
+				flow.UpdateState(func(state interface{}) interface{} {
+					if state == nil {
+						return 1
+					}
+					return state.(int) + 1
+				})
+				_ = flow.GetState()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	assert.Equal(t, workers*increments, flow.GetState())
+}
+
+func TestFlowTrackerConcurrentLookupUpdateEvictionDeleteAndClear(t *testing.T) {
+	const capacity = 32
+	tracker := NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+	t.Cleanup(tracker.Close)
+
+	const workers = 8
+	const iterations = 250
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		worker := worker
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for iteration := 0; iteration < iterations; iteration++ {
+				flowID := fmt.Sprintf("flow-%d", (worker*iterations+iteration)%64)
+				flow := tracker.GetOrCreate(flowID)
+				flow.RecordDetection("test", time.Now())
+				if current := tracker.Get(flowID); current != nil {
+					_ = current.LastSeenTime()
+					_ = current.ProtocolsSnapshot()
+				}
+				if iteration%11 == 0 {
+					tracker.Delete(flowID)
+				}
+				if iteration%79 == 0 {
+					tracker.Clear()
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	require.LessOrEqual(t, tracker.Size(), capacity)
+}
+
+func TestFlowTrackerCleanupExpirationIsBounded(t *testing.T) {
+	tracker := NewFlowTrackerWithMaxEntries(time.Minute, 0)
+	t.Cleanup(tracker.Close)
+
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		tracker.GetOrCreate(fmt.Sprintf("expired-%d", i)).RecordDetection("test", now.Add(-2*time.Minute))
+	}
+	tracker.GetOrCreate("live").RecordDetection("test", now)
+
+	assert.Equal(t, 2, tracker.cleanupExpired(now, 2))
+	assert.Equal(t, 4, tracker.Size(), "one cleanup pass must inspect at most its limit")
+	assert.NotNil(t, tracker.Get("live"))
+
+	assert.Equal(t, 3, tracker.cleanupExpired(now, 16))
+	assert.Equal(t, 1, tracker.Size())
+	assert.NotNil(t, tracker.Get("live"))
+}
+
+func TestFlowTrackerCloseIsConcurrentAndIdempotent(t *testing.T) {
+	tracker := NewFlowTrackerWithMaxEntries(time.Hour, 16)
+
+	const callers = 32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			tracker.Close()
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	select {
+	case <-tracker.cleanupDone:
+	case <-time.After(time.Second):
+		t.Fatal("flow cleanup goroutine survived Close")
 	}
 }

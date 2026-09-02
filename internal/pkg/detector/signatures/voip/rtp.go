@@ -155,73 +155,85 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	//    Correlation can be: SIP negotiation OR existing RTP flow state
 	hasSIPCorrelation := false
 	hasRTPFlowCorrelation := false
+	stateRejected := false
+	var correlatedCallID string
 
 	// Store SSRC in flow for validation across packets
 	if ctx.Flow != nil {
-		// Check for SIP correlation first
-		if sipState, ok := ctx.Flow.State.(*SIPFlowState); ok {
-			for _, port := range sipState.MediaPorts {
-				if ctx.DstPort == port || ctx.SrcPort == port {
-					hasSIPCorrelation = true
-					break
-				}
-			}
-		}
-
-		if rtpState, ok := ctx.Flow.State.(*RTPFlowState); ok {
-			// We already have RTP state for this flow - this is likely the return path!
-			hasRTPFlowCorrelation = true
-
-			// Determine if this is forward or reverse direction
-			isForward := (rtpState.FirstSrcPort == ctx.SrcPort)
-
-			// Check SSRC and sequence consistency for this direction
-			if isForward {
-				if rtpState.SSRCForward != 0 && rtpState.SSRCForward != ssrc {
-					// Forward SSRC changed - possible false positive
-					return nil
-				}
-				rtpState.SSRCForward = ssrc
-
-				// Check sequence progression for forward direction
-				if rtpState.LastSeqForward != 0 {
-					seqDiff := int32(seqNum) - int32(rtpState.LastSeqForward)
-					// Allow wrap-around but reject huge jumps
-					if seqDiff > 1000 || seqDiff < -1000 {
-						return nil
+		ctx.Flow.UpdateState(func(state interface{}) interface{} {
+			if sipState, ok := state.(*SIPFlowState); ok {
+				for _, port := range sipState.MediaPorts {
+					if ctx.DstPort == port || ctx.SrcPort == port {
+						hasSIPCorrelation = true
+						correlatedCallID = sipState.CallID
+						break
 					}
 				}
-				rtpState.LastSeqForward = seqNum
-			} else {
-				// Reverse direction
-				if rtpState.SSRCReverse != 0 && rtpState.SSRCReverse != ssrc {
-					// Reverse SSRC changed - possible false positive
-					return nil
-				}
-				rtpState.SSRCReverse = ssrc
+				return state
+			}
 
-				// Check sequence progression for reverse direction
-				if rtpState.LastSeqReverse != 0 {
-					seqDiff := int32(seqNum) - int32(rtpState.LastSeqReverse)
-					// Allow wrap-around but reject huge jumps
-					if seqDiff > 1000 || seqDiff < -1000 {
-						return nil
+			if rtpState, ok := state.(*RTPFlowState); ok {
+				// We already have RTP state for this flow - this is likely the return path!
+				hasRTPFlowCorrelation = true
+
+				// Determine if this is forward or reverse direction
+				isForward := (rtpState.FirstSrcPort == ctx.SrcPort)
+
+				// Check SSRC and sequence consistency for this direction
+				if isForward {
+					if rtpState.SSRCForward != 0 && rtpState.SSRCForward != ssrc {
+						stateRejected = true
+						return state
 					}
-				}
-				rtpState.LastSeqReverse = seqNum
-			}
+					rtpState.SSRCForward = ssrc
 
-			rtpState.PacketCount++
-		} else if !hasSIPCorrelation {
-			// Initialize RTP flow state (only if not SIP-correlated)
-			ctx.Flow.State = &RTPFlowState{
-				SSRCForward:    ssrc,
-				SSRCReverse:    0, // Will be set when reverse packet arrives
-				LastSeqForward: seqNum,
-				LastSeqReverse: 0,
-				PacketCount:    1,
-				FirstSrcPort:   ctx.SrcPort,
+					// Check sequence progression for forward direction
+					if rtpState.LastSeqForward != 0 {
+						seqDiff := int32(seqNum) - int32(rtpState.LastSeqForward)
+						// Allow wrap-around but reject huge jumps
+						if seqDiff > 1000 || seqDiff < -1000 {
+							stateRejected = true
+							return state
+						}
+					}
+					rtpState.LastSeqForward = seqNum
+				} else {
+					// Reverse direction
+					if rtpState.SSRCReverse != 0 && rtpState.SSRCReverse != ssrc {
+						stateRejected = true
+						return state
+					}
+					rtpState.SSRCReverse = ssrc
+
+					// Check sequence progression for reverse direction
+					if rtpState.LastSeqReverse != 0 {
+						seqDiff := int32(seqNum) - int32(rtpState.LastSeqReverse)
+						// Allow wrap-around but reject huge jumps
+						if seqDiff > 1000 || seqDiff < -1000 {
+							stateRejected = true
+							return state
+						}
+					}
+					rtpState.LastSeqReverse = seqNum
+				}
+
+				rtpState.PacketCount++
+				return rtpState
+			} else if !hasSIPCorrelation {
+				// Initialize RTP flow state (only if not SIP-correlated)
+				return &RTPFlowState{
+					SSRCForward:    ssrc,
+					SSRCReverse:    0, // Will be set when reverse packet arrives
+					LastSeqForward: seqNum,
+					LastSeqReverse: 0,
+					PacketCount:    1,
+					FirstSrcPort:   ctx.SrcPort,
+				}
 			}
+			return state
+		})
+		if stateRejected {
+			return nil
 		}
 	}
 
@@ -244,19 +256,10 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	confidence := r.calculateConfidence(ctx, metadata)
 
 	// Check if this RTP stream was negotiated in SIP (if flow context available)
-	if ctx.Flow != nil && ctx.Flow.State != nil {
-		if sipState, ok := ctx.Flow.State.(*SIPFlowState); ok {
-			// Check if this port was negotiated in SIP SDP
-			for _, port := range sipState.MediaPorts {
-				if ctx.DstPort == port || ctx.SrcPort == port {
-					// Very high confidence - RTP port was explicitly negotiated
-					confidence = signatures.ConfidenceVeryHigh
-					metadata["sip_correlated"] = true
-					metadata["call_id"] = sipState.CallID
-					break
-				}
-			}
-		}
+	if hasSIPCorrelation {
+		confidence = signatures.ConfidenceVeryHigh
+		metadata["sip_correlated"] = true
+		metadata["call_id"] = correlatedCallID
 	}
 
 	return &signatures.DetectionResult{

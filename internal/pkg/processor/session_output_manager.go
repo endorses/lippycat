@@ -57,6 +57,7 @@ type SessionOutputManager struct {
 	monitor sessionCompletionMonitor
 
 	lifecycleMu sync.RWMutex
+	writesWG    sync.WaitGroup
 	closed      bool
 	startOnce   sync.Once
 	closeOnce   sync.Once
@@ -108,8 +109,9 @@ func (m *SessionOutputManager) SetVoIPPortCleaner(cleaner VoIPPortCleaner) {
 	}
 }
 
-// WritePacket writes one packet while holding a shared lifecycle lease. Close
-// takes the exclusive lease, so a writer can never be closed beneath a write.
+// WritePacket registers an in-flight operation before releasing the lifecycle
+// lock. Close first rejects new writes, then waits for admitted writes before
+// closing the writer, without holding a lock across external callbacks.
 func (m *SessionOutputManager) WritePacket(
 	callID, from, to string,
 	timestamp time.Time,
@@ -120,16 +122,22 @@ func (m *SessionOutputManager) WritePacket(
 	if m == nil {
 		return nil
 	}
-	m.lifecycleMu.RLock()
-	defer m.lifecycleMu.RUnlock()
+	m.lifecycleMu.Lock()
 	if m.closed {
+		m.lifecycleMu.Unlock()
 		return errSessionOutputClosed
 	}
-	if m.writer == nil {
+	writer := m.writer
+	if writer != nil {
+		m.writesWG.Add(1)
+	}
+	m.lifecycleMu.Unlock()
+	if writer == nil {
 		return nil
 	}
+	defer m.writesWG.Done()
 
-	return m.writer.WritePacket(callID, from, to, timestamp, data, linkType, isRTP)
+	return writer.WritePacket(callID, from, to, timestamp, data, linkType, isRTP)
 }
 
 // Close is safe for concurrent use and preserves shutdown ordering: stop the
@@ -140,13 +148,20 @@ func (m *SessionOutputManager) Close() error {
 	}
 	m.closeOnce.Do(func() {
 		m.lifecycleMu.Lock()
-		defer m.lifecycleMu.Unlock()
 		m.closed = true
-		if m.monitor != nil {
-			m.monitor.Stop()
+		monitor := m.monitor
+		closer := m.closer
+		m.lifecycleMu.Unlock()
+
+		// Stop and close outside the lifecycle lock. Writer shutdown invokes
+		// externally supplied file-close callbacks, which may safely re-enter
+		// this manager and observe the terminal state.
+		if monitor != nil {
+			monitor.Stop()
 		}
-		if m.closer != nil {
-			m.closeErr = m.closer.Close()
+		m.writesWG.Wait()
+		if closer != nil {
+			m.closeErr = closer.Close()
 		}
 	})
 	return m.closeErr

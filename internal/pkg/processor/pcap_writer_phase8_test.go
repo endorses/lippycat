@@ -299,3 +299,55 @@ func TestPhase8ShutdownWaitsForDetachedFinalization(t *testing.T) {
 	require.NoError(t, <-finalizeDone)
 	require.NoError(t, <-closeDone)
 }
+
+func TestPhase8RotationCallbackCanInitiateShutdown(t *testing.T) {
+	var manager *PcapWriterManager
+	shutdownDone := make(chan error, 2)
+	manager = newPhase8Manager(t, func(config *PcapWriterConfig) {
+		config.MaxFileSize = 1
+		config.OnFileClose = func(string) {
+			shutdownDone <- manager.Close()
+		}
+	})
+	require.NoError(t, manager.WritePacket("shutdown-callback", "alice", "bob", time.Now(), []byte{1}, layers.LinkTypeEthernet, false))
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- manager.WritePacket("shutdown-callback", "alice", "bob", time.Now(), []byte{2}, layers.LinkTypeEthernet, false)
+	}()
+
+	select {
+	case err := <-shutdownDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("rotation callback deadlocked while initiating shutdown")
+	}
+	select {
+	case err := <-writeDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("packet write did not return after callback-initiated shutdown")
+	}
+}
+
+func TestPhase8CallbackPanicsDoNotStrandFinalization(t *testing.T) {
+	manager := newPhase8Manager(t, func(config *PcapWriterConfig) {
+		config.OnFileClose = func(string) { panic("file callback") }
+		config.OnCallComplete = func(CallMetadata) { panic("completion callback") }
+	})
+	manager.SetBeforeFinalize(func(string, CallFinalizationReason) { panic("cleanup callback") })
+	require.NoError(t, manager.WritePacket("panicking-callbacks", "alice", "bob", time.Now(), []byte{1}, layers.LinkTypeEthernet, false))
+
+	result, err := manager.FinalizeCall("panicking-callbacks", CallFinalizationProtocolComplete)
+	require.NoError(t, err)
+	assert.True(t, result.Finalized)
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- manager.Close() }()
+	select {
+	case err := <-closeDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("callback panic stranded finalization bookkeeping")
+	}
+}

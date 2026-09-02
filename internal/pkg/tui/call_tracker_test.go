@@ -226,52 +226,83 @@ func TestCallTracker_MultipleCalls_ExactMatch(t *testing.T) {
 	assert.Empty(t, callID, "should not match when ports don't match exactly")
 }
 
-func BenchmarkGetCallIDForRTPPacket_DirectMatch(b *testing.B) {
-	tracker := NewCallTrackerWithCapacity(5000)
+type rtpLookupBenchmarkCase struct {
+	name     string
+	srcIP    string
+	srcPort  string
+	dstIP    string
+	dstPort  string
+	expected string
+}
 
-	// Register 5000 calls
-	for i := 0; i < 5000; i++ {
-		ip := fmt.Sprintf("10.0.%d.%d", i/256, i%256)
+var rtpLookupBenchmarkResult string
+
+func newRTPLookupBenchmarkTracker(b *testing.B, activeCalls int) (*CallTracker, string, string) {
+	b.Helper()
+
+	tracker := NewCallTrackerWithCapacity(activeCalls)
+	for i := 0; i < activeCalls; i++ {
+		ip := fmt.Sprintf("10.%d.%d.%d", i/(256*256), (i/256)%256, i%256)
 		tracker.RegisterMediaPorts(fmt.Sprintf("call-%d", i), ip, []uint16{uint16(10000 + i)}, false)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Direct match - should be O(1)
-		tracker.GetCallIDForRTPPacket("x", "y", "10.0.19.136", "14999") // call-4999
+	last := activeCalls - 1
+	return tracker,
+		fmt.Sprintf("10.%d.%d.%d", last/(256*256), (last/256)%256, last%256),
+		fmt.Sprintf("%d", 10000+last)
+}
+
+func benchmarkRTPLookupCases(b *testing.B, measureAllocations bool) {
+	for _, activeCalls := range []int{10, 1000, DefaultMaxTrackedCalls} {
+		activeCalls := activeCalls
+		b.Run(fmt.Sprintf("active_calls_%d", activeCalls), func(b *testing.B) {
+			tracker, hitIP, hitPort := newRTPLookupBenchmarkTracker(b, activeCalls)
+			cases := []rtpLookupBenchmarkCase{
+				{name: "destination_hit", srcIP: "192.0.2.1", srcPort: "5000", dstIP: hitIP, dstPort: hitPort, expected: fmt.Sprintf("call-%d", activeCalls-1)},
+				{name: "source_hit", srcIP: hitIP, srcPort: hitPort, dstIP: "192.0.2.1", dstPort: "5000", expected: fmt.Sprintf("call-%d", activeCalls-1)},
+				{name: "miss", srcIP: "192.0.2.1", srcPort: "5000", dstIP: "198.51.100.1", dstPort: "6000"},
+			}
+
+			for _, lookup := range cases {
+				lookup := lookup
+				b.Run(lookup.name, func(b *testing.B) {
+					if got := tracker.GetCallIDForRTPPacket(lookup.srcIP, lookup.srcPort, lookup.dstIP, lookup.dstPort); got != lookup.expected {
+						b.Fatalf("lookup returned %q, want %q", got, lookup.expected)
+					}
+
+					if measureAllocations {
+						b.ReportAllocs()
+						b.ResetTimer()
+						for i := 0; i < b.N; i++ {
+							rtpLookupBenchmarkResult = tracker.GetCallIDForRTPPacket(lookup.srcIP, lookup.srcPort, lookup.dstIP, lookup.dstPort)
+						}
+						b.StopTimer()
+						b.ReportMetric(0, "ns/op")
+						return
+					}
+
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						rtpLookupBenchmarkResult = tracker.GetCallIDForRTPPacket(lookup.srcIP, lookup.srcPort, lookup.dstIP, lookup.dstPort)
+					}
+				})
+			}
+		})
 	}
 }
 
-func BenchmarkGetCallIDForRTPPacket_SourceMatch(b *testing.B) {
-	tracker := NewCallTrackerWithCapacity(5000)
-
-	// Register 5000 calls with unique IPs
-	for i := 0; i < 5000; i++ {
-		ip := fmt.Sprintf("10.0.%d.%d", i/256, i%256)
-		tracker.RegisterMediaPorts(fmt.Sprintf("call-%d", i), ip, []uint16{uint16(10000 + i)}, false)
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Source match - check when RTP is sent FROM a registered port
-		tracker.GetCallIDForRTPPacket("10.0.19.136", "14999", "192.168.1.1", "5000") // call-4999 as source
-	}
+// BenchmarkGetCallIDForRTPPacketRuntime measures lookup latency independently
+// of allocation reporting. Use BenchmarkGetCallIDForRTPPacketAllocations for
+// allocation baselines.
+func BenchmarkGetCallIDForRTPPacketRuntime(b *testing.B) {
+	benchmarkRTPLookupCases(b, false)
 }
 
-func BenchmarkGetCallIDForRTPPacket_NoMatch(b *testing.B) {
-	tracker := NewCallTrackerWithCapacity(5000)
-
-	// Register 5000 calls
-	for i := 0; i < 5000; i++ {
-		ip := fmt.Sprintf("10.0.%d.%d", i/256, i%256)
-		tracker.RegisterMediaPorts(fmt.Sprintf("call-%d", i), ip, []uint16{uint16(10000 + i)}, false)
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// No match - should be O(1) now
-		tracker.GetCallIDForRTPPacket("192.168.1.1", "5000", "172.16.0.1", "6000")
-	}
+// BenchmarkGetCallIDForRTPPacketAllocations reports the standard B/op and
+// allocs/op metrics while suppressing runtime to keep the two baselines
+// distinct.
+func BenchmarkGetCallIDForRTPPacketAllocations(b *testing.B) {
+	benchmarkRTPLookupCases(b, true)
 }
 
 func TestExtractIPFromEndpoint(t *testing.T) {

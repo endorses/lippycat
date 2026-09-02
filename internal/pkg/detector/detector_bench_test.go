@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -18,6 +19,8 @@ import (
 )
 
 const benchmarkFlowCardinality = 4096
+
+var detectorInsertionCaps = []int{1_000, 10_000, 100_000}
 
 func BenchmarkDetector_SingleSignature(b *testing.B) {
 	det := detector.NewDetector()
@@ -110,6 +113,149 @@ func BenchmarkDetectionCache(b *testing.B) {
 			cache.Set(key, result)
 		}
 	})
+}
+
+// BenchmarkDetectorInsertionAtCap captures the cost of inserting a new entry
+// when the bounded detector maps are already full. In addition to Go's
+// aggregate ns/op and allocation metrics, it reports sampled insertion-tail
+// latency and the latency of consecutive ten-insertion batches. The custom
+// latency metrics include the time.Now measurement overhead.
+func BenchmarkDetectorInsertionAtCap(b *testing.B) {
+	result := &signatures.DetectionResult{Protocol: "TLS", CacheStrategy: signatures.CacheSession}
+
+	for _, capacity := range detectorInsertionCaps {
+		capacity := capacity
+		b.Run(fmt.Sprintf("FlowTracker/cap_%d", capacity), func(b *testing.B) {
+			tracker := detector.NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(tracker.Close)
+			keys := detectorBenchmarkKeys(capacity)
+			for _, key := range keys[:capacity] {
+				tracker.GetOrCreate(key)
+			}
+			// Trigger the one-time cap warning before benchmark timing.
+			tracker.GetOrCreate(keys[capacity])
+
+			latency := newInsertionLatencyRecorder()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				started := time.Now()
+				tracker.GetOrCreate(keys[i%len(keys)])
+				latency.Record(time.Since(started))
+			}
+			b.StopTimer()
+			latency.Report(b)
+		})
+
+		b.Run(fmt.Sprintf("DetectionCache/cap_%d", capacity), func(b *testing.B) {
+			cache := detector.NewDetectionCacheWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(cache.Close)
+			keys := detectorBenchmarkKeys(capacity)
+			for _, key := range keys[:capacity] {
+				cache.Set(key, result)
+			}
+			// Trigger the one-time cap warning before benchmark timing.
+			cache.Set(keys[capacity], result)
+
+			latency := newInsertionLatencyRecorder()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				started := time.Now()
+				cache.Set(keys[i%len(keys)], result)
+				latency.Record(time.Since(started))
+			}
+			b.StopTimer()
+			latency.Report(b)
+		})
+	}
+}
+
+const (
+	detectorLatencySampleSize = 2048
+	detectorBatchSize         = 10
+)
+
+type insertionLatencyRecorder struct {
+	insertions []time.Duration
+	batches    []time.Duration
+	insertAt   int
+	batchAt    int
+	batchStart time.Time
+	batchCount int
+	total      time.Duration
+	maximum    time.Duration
+}
+
+func newInsertionLatencyRecorder() *insertionLatencyRecorder {
+	return &insertionLatencyRecorder{
+		insertions: make([]time.Duration, 0, detectorLatencySampleSize),
+		batches:    make([]time.Duration, 0, detectorLatencySampleSize),
+	}
+}
+
+func (r *insertionLatencyRecorder) Record(elapsed time.Duration) {
+	r.total += elapsed
+	if elapsed > r.maximum {
+		r.maximum = elapsed
+	}
+	r.insertAt = recordDurationSample(r.insertions, r.insertAt, elapsed)
+	if len(r.insertions) < detectorLatencySampleSize {
+		r.insertions = append(r.insertions, elapsed)
+	}
+
+	if r.batchCount == 0 {
+		r.batchStart = time.Now().Add(-elapsed)
+	}
+	r.batchCount++
+	if r.batchCount == detectorBatchSize {
+		batchElapsed := time.Since(r.batchStart)
+		r.batchAt = recordDurationSample(r.batches, r.batchAt, batchElapsed)
+		if len(r.batches) < detectorLatencySampleSize {
+			r.batches = append(r.batches, batchElapsed)
+		}
+		r.batchCount = 0
+	}
+}
+
+func recordDurationSample(samples []time.Duration, next int, elapsed time.Duration) int {
+	if len(samples) < detectorLatencySampleSize {
+		return next
+	}
+	samples[next] = elapsed
+	return (next + 1) % detectorLatencySampleSize
+}
+
+func (r *insertionLatencyRecorder) Report(b *testing.B) {
+	b.Helper()
+	if b.N > 0 {
+		// Override the framework's ns/op so recorder bookkeeping is excluded.
+		b.ReportMetric(float64(r.total)/float64(b.N), "ns/op")
+	}
+	b.ReportMetric(float64(durationPercentile(r.insertions, 0.95)), "p95-ns/insert")
+	b.ReportMetric(float64(durationPercentile(r.insertions, 0.99)), "p99-ns/insert")
+	b.ReportMetric(float64(r.maximum), "max-ns/insert")
+	if len(r.batches) > 0 {
+		b.ReportMetric(float64(durationPercentile(r.batches, 0.95)), "p95-ns/10-insert-batch")
+	}
+}
+
+func durationPercentile(samples []time.Duration, percentile float64) time.Duration {
+	if len(samples) == 0 {
+		return 0
+	}
+	ordered := append([]time.Duration(nil), samples...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	index := int(float64(len(ordered)-1) * percentile)
+	return ordered[index]
+}
+
+func detectorBenchmarkKeys(capacity int) []string {
+	keys := make([]string, capacity+1)
+	for i := range keys {
+		keys[i] = "baseline-flow-" + strconv.Itoa(i)
+	}
+	return keys
 }
 
 func BenchmarkDetector_WithoutCache(b *testing.B) {

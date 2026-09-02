@@ -171,6 +171,95 @@ func BenchmarkDetectorInsertionAtCap(b *testing.B) {
 	}
 }
 
+// BenchmarkDetectorBatchEvictionAtCap isolates the latency of the insertion
+// that triggers a hysteresis batch. Refilling the evicted headroom happens with
+// the timer stopped, so ns/op represents one complete selection-and-eviction
+// event instead of being diluted by the intervening cheap insertions.
+func BenchmarkDetectorBatchEvictionAtCap(b *testing.B) {
+	result := &signatures.DetectionResult{Protocol: "TLS", CacheStrategy: signatures.CacheSession}
+
+	for _, capacity := range detectorInsertionCaps {
+		capacity := capacity
+		batchSize := detectorEvictionBatchSize(capacity)
+
+		b.Run(fmt.Sprintf("FlowTracker/cap_%d", capacity), func(b *testing.B) {
+			tracker := detector.NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(tracker.Close)
+			nextKey := 0
+			for ; nextKey < capacity; nextKey++ {
+				tracker.GetOrCreate("batch-flow-" + strconv.Itoa(nextKey))
+			}
+			// Warm the reusable selection scratch, then restore the cap so timed
+			// iterations represent steady-state pressure episodes.
+			tracker.GetOrCreate("batch-flow-" + strconv.Itoa(nextKey))
+			nextKey++
+			for refill := 1; refill < batchSize; refill++ {
+				tracker.GetOrCreate("batch-flow-" + strconv.Itoa(nextKey))
+				nextKey++
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.StopTimer()
+			for i := 0; i < b.N; i++ {
+				eventKey := "batch-flow-" + strconv.Itoa(nextKey)
+				nextKey++
+				b.StartTimer()
+				tracker.GetOrCreate(eventKey)
+				b.StopTimer()
+
+				for refill := 1; refill < batchSize; refill++ {
+					tracker.GetOrCreate("batch-flow-" + strconv.Itoa(nextKey))
+					nextKey++
+				}
+			}
+			b.ReportMetric(float64(batchSize), "entries/eviction")
+		})
+
+		b.Run(fmt.Sprintf("DetectionCache/cap_%d", capacity), func(b *testing.B) {
+			cache := detector.NewDetectionCacheWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(cache.Close)
+			nextKey := 0
+			for ; nextKey < capacity; nextKey++ {
+				cache.Set("batch-flow-"+strconv.Itoa(nextKey), result)
+			}
+			// Warm the reusable selection scratch, then restore the cap so timed
+			// iterations represent steady-state pressure episodes.
+			cache.Set("batch-flow-"+strconv.Itoa(nextKey), result)
+			nextKey++
+			for refill := 1; refill < batchSize; refill++ {
+				cache.Set("batch-flow-"+strconv.Itoa(nextKey), result)
+				nextKey++
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.StopTimer()
+			for i := 0; i < b.N; i++ {
+				eventKey := "batch-flow-" + strconv.Itoa(nextKey)
+				nextKey++
+				b.StartTimer()
+				cache.Set(eventKey, result)
+				b.StopTimer()
+
+				for refill := 1; refill < batchSize; refill++ {
+					cache.Set("batch-flow-"+strconv.Itoa(nextKey), result)
+					nextKey++
+				}
+			}
+			b.ReportMetric(float64(batchSize), "entries/eviction")
+		})
+	}
+}
+
+func detectorEvictionBatchSize(capacity int) int {
+	batchSize := capacity / 10
+	if batchSize < 1 {
+		return 1
+	}
+	return batchSize
+}
+
 const (
 	detectorLatencySampleSize = 2048
 	detectorBatchSize         = 10

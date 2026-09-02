@@ -105,6 +105,7 @@ func DefaultPcapWriterConfig() *PcapWriterConfig {
 
 // CallPcapWriter writes packets for a specific call to separate SIP and RTP PCAP files
 type CallPcapWriter struct {
+	manager   *PcapWriterManager
 	config    *PcapWriterConfig
 	callID    string
 	from      string
@@ -127,12 +128,15 @@ type CallPcapWriter struct {
 	rtpFileIndex   int
 	rtpPacketCount int
 	// Synchronization
-	mu         sync.Mutex
-	syncTicker *time.Ticker
-	stopSync   chan struct{}
-	syncErrors int // Count of sync errors during periodic sync
-	closed     bool
-	complete   bool
+	mu              sync.Mutex
+	callbackMu      sync.Mutex
+	callbackCond    *sync.Cond
+	callbacksActive int
+	syncTicker      *time.Ticker
+	stopSync        chan struct{}
+	syncErrors      int // Count of sync errors during periodic sync
+	closed          bool
+	complete        bool
 }
 
 // PcapWriterManager manages PCAP writers for multiple calls
@@ -289,8 +293,12 @@ func (pwm *PcapWriterManager) WritePacket(callID, from, to string, timestamp tim
 	} else {
 		closedPath, writeErr = writer.writeSIPPacket(timestamp, data, linkType)
 	}
+	// Claim callback order while the manager lease still prevents finalization.
+	// The callback itself runs after the manager lock is released.
+	writer.reserveCallback()
 	pwm.mu.RUnlock()
 	writer.notifyFileClosed(closedPath)
+	writer.completeCallback()
 	return writeErr
 }
 
@@ -345,6 +353,7 @@ func (pwm *PcapWriterManager) addTombstoneLocked(callID string, finalizedAt time
 func (pwm *PcapWriterManager) createWriter(callID, from, to string) (*CallPcapWriter, error) {
 	now := time.Now()
 	writer := &CallPcapWriter{
+		manager:   pwm,
 		config:    pwm.config,
 		callID:    callID,
 		from:      from,
@@ -353,6 +362,7 @@ func (pwm *PcapWriterManager) createWriter(callID, from, to string) (*CallPcapWr
 		lastWrite: now,
 		stopSync:  make(chan struct{}),
 	}
+	writer.callbackCond = sync.NewCond(&writer.callbackMu)
 
 	// Create initial SIP and RTP PCAP files
 	if err := writer.createInitialFiles(); err != nil {
@@ -379,6 +389,14 @@ func (writer *CallPcapWriter) createInitialFiles() error {
 
 // WriteSIPPacket writes a SIP packet to the SIP PCAP file
 func (writer *CallPcapWriter) WriteSIPPacket(timestamp time.Time, data []byte, linkType layers.LinkType) error {
+	if writer == nil {
+		return nil
+	}
+	if writer.manager != nil {
+		return writer.manager.WritePacket(writer.callID, writer.from, writer.to, timestamp, data, linkType, false)
+	}
+	writer.reserveCallback()
+	defer writer.completeCallback()
 	closedPath, err := writer.writeSIPPacket(timestamp, data, linkType)
 	writer.notifyFileClosed(closedPath)
 	return err
@@ -442,6 +460,14 @@ func (writer *CallPcapWriter) writeSIPPacket(timestamp time.Time, data []byte, l
 
 // WriteRTPPacket writes an RTP packet to the RTP PCAP file
 func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte, linkType layers.LinkType) error {
+	if writer == nil {
+		return nil
+	}
+	if writer.manager != nil {
+		return writer.manager.WritePacket(writer.callID, writer.from, writer.to, timestamp, data, linkType, true)
+	}
+	writer.reserveCallback()
+	defer writer.completeCallback()
 	closedPath, err := writer.writeRTPPacket(timestamp, data, linkType)
 	writer.notifyFileClosed(closedPath)
 	return err
@@ -759,8 +785,36 @@ func (writer *CallPcapWriter) notifyFileClosed(path string) {
 	}
 }
 
+func (writer *CallPcapWriter) reserveCallback() {
+	writer.callbackMu.Lock()
+	writer.callbacksActive++
+	writer.callbackMu.Unlock()
+}
+
+func (writer *CallPcapWriter) completeCallback() {
+	writer.callbackMu.Lock()
+	writer.callbacksActive--
+	writer.callbackCond.Broadcast()
+	writer.callbackMu.Unlock()
+}
+
+func (writer *CallPcapWriter) waitForCallbacks() {
+	writer.callbackMu.Lock()
+	for writer.callbacksActive > 0 {
+		writer.callbackCond.Wait()
+	}
+	writer.callbackMu.Unlock()
+}
+
 // Close closes the writer and flushes data for both SIP and RTP files
 func (writer *CallPcapWriter) Close() error {
+	if writer == nil {
+		return nil
+	}
+	if writer.manager != nil {
+		_, err := writer.manager.FinalizeCall(writer.callID, CallFinalizationManual)
+		return err
+	}
 	return writer.finalize(CallFinalizationManual)
 }
 
@@ -768,6 +822,8 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 	if writer == nil {
 		return nil
 	}
+
+	writer.waitForCallbacks()
 
 	writer.mu.Lock()
 	if writer.closed {
@@ -838,6 +894,13 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 // CloseCall closes both PCAP files and fires the OnCallComplete callback
 // This should be called when a VoIP call is complete
 func (writer *CallPcapWriter) CloseCall() error {
+	if writer == nil {
+		return nil
+	}
+	if writer.manager != nil {
+		_, err := writer.manager.FinalizeCall(writer.callID, CallFinalizationProtocolComplete)
+		return err
+	}
 	return writer.finalize(CallFinalizationProtocolComplete)
 }
 

@@ -80,16 +80,19 @@ type Config struct {
 // registry. It deliberately stores only protocol-neutral call data; analyzers
 // retain their topology-specific metadata beside it.
 type Core struct {
-	mu               sync.RWMutex
-	calls            map[string]Call
-	endpointCalls    map[string][]string
-	callEndpoints    map[string]map[string]struct{}
-	associationCount int
-	recency          *list.List
-	recencyIndex     map[string]*list.Element
-	config           Config
-	closed           bool
-	pins             map[string]int
+	mu                sync.RWMutex
+	calls             map[string]Call
+	endpointCalls     map[string][]string
+	endpointWinner    map[string]string
+	callEndpoints     map[string]map[string]struct{}
+	associationCount  int
+	recency           *list.List
+	recencyIndex      map[string]*list.Element
+	recencyGeneration map[string]uint64
+	nextGeneration    uint64
+	config            Config
+	closed            bool
+	pins              map[string]int
 }
 
 func New(config Config) *Core {
@@ -104,13 +107,15 @@ func New(config Config) *Core {
 	}
 	config.Observers = append([]LifecycleObserver(nil), config.Observers...)
 	return &Core{
-		calls:         make(map[string]Call),
-		endpointCalls: make(map[string][]string),
-		callEndpoints: make(map[string]map[string]struct{}),
-		recency:       list.New(),
-		recencyIndex:  make(map[string]*list.Element),
-		pins:          make(map[string]int),
-		config:        config,
+		calls:             make(map[string]Call),
+		endpointCalls:     make(map[string][]string),
+		endpointWinner:    make(map[string]string),
+		callEndpoints:     make(map[string]map[string]struct{}),
+		recency:           list.New(),
+		recencyIndex:      make(map[string]*list.Element),
+		recencyGeneration: make(map[string]uint64),
+		pins:              make(map[string]int),
+		config:            config,
 	}
 }
 
@@ -158,6 +163,7 @@ func (c *Core) Upsert(call Call) bool {
 	}
 	c.calls[call.CallID] = call
 	c.recencyIndex[call.CallID] = c.recency.PushFront(call.CallID)
+	c.markRecentLocked(call.CallID)
 	observers := append([]LifecycleObserver(nil), c.config.Observers...)
 	c.mu.Unlock()
 	if evicted != nil {
@@ -218,6 +224,15 @@ func (c *Core) IsPinned(callID string) bool {
 func (c *Core) touchLocked(callID string) {
 	if elem := c.recencyIndex[callID]; elem != nil {
 		c.recency.MoveToFront(elem)
+	}
+	c.markRecentLocked(callID)
+}
+
+func (c *Core) markRecentLocked(callID string) {
+	c.nextGeneration++
+	c.recencyGeneration[callID] = c.nextGeneration
+	for endpoint := range c.callEndpoints[callID] {
+		c.endpointWinner[endpoint] = callID
 	}
 }
 
@@ -293,6 +308,9 @@ func (c *Core) TryAssociateEndpoint(callID, endpoint string) bool {
 	}
 	c.callEndpoints[callID][endpoint] = struct{}{}
 	c.endpointCalls[endpoint] = append(c.endpointCalls[endpoint], callID)
+	if winner := c.endpointWinner[endpoint]; winner == "" || c.recencyGeneration[callID] > c.recencyGeneration[winner] {
+		c.endpointWinner[endpoint] = callID
+	}
 	c.associationCount++
 	return true
 }
@@ -312,16 +330,8 @@ func (c *Core) CallIDsForEndpoint(endpoint string) []string {
 func (c *Core) MostRecentCallIDForEndpoint(endpoint string) (string, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	owners := c.endpointCalls[endpoint]
-	for elem := c.recency.Front(); elem != nil; elem = elem.Next() {
-		id := elem.Value.(string)
-		for _, owner := range owners {
-			if id == owner {
-				return id, true
-			}
-		}
-	}
-	return "", false
+	callID, ok := c.endpointWinner[endpoint]
+	return callID, ok
 }
 
 func (c *Core) EndpointsForCall(callID string) []string {
@@ -361,6 +371,9 @@ func (c *Core) DissociateEndpoints(callID string) {
 		c.endpointCalls[endpoint] = withoutCallID(c.endpointCalls[endpoint], callID)
 		if len(c.endpointCalls[endpoint]) == 0 {
 			delete(c.endpointCalls, endpoint)
+			delete(c.endpointWinner, endpoint)
+		} else if c.endpointWinner[endpoint] == callID {
+			c.recomputeEndpointWinnerLocked(endpoint)
 		}
 		c.associationCount--
 	}
@@ -391,7 +404,24 @@ func (c *Core) removeLocked(callID string) Call {
 		delete(c.recencyIndex, callID)
 	}
 	c.dissociateEndpointsLocked(callID)
+	delete(c.recencyGeneration, callID)
 	return call
+}
+
+func (c *Core) recomputeEndpointWinnerLocked(endpoint string) {
+	var winner string
+	var winnerGeneration uint64
+	for _, callID := range c.endpointCalls[endpoint] {
+		if generation := c.recencyGeneration[callID]; winner == "" || generation > winnerGeneration {
+			winner = callID
+			winnerGeneration = generation
+		}
+	}
+	if winner == "" {
+		delete(c.endpointWinner, endpoint)
+		return
+	}
+	c.endpointWinner[endpoint] = winner
 }
 
 func (c *Core) dissociateEndpointsLocked(callID string) {
@@ -399,6 +429,9 @@ func (c *Core) dissociateEndpointsLocked(callID string) {
 		c.endpointCalls[endpoint] = withoutCallID(c.endpointCalls[endpoint], callID)
 		if len(c.endpointCalls[endpoint]) == 0 {
 			delete(c.endpointCalls, endpoint)
+			delete(c.endpointWinner, endpoint)
+		} else if c.endpointWinner[endpoint] == callID {
+			c.recomputeEndpointWinnerLocked(endpoint)
 		}
 		c.associationCount--
 	}
@@ -417,10 +450,13 @@ func (c *Core) clear(reason EndReason, closeRegistry bool) {
 	}
 	c.calls = make(map[string]Call)
 	c.endpointCalls = make(map[string][]string)
+	c.endpointWinner = make(map[string]string)
 	c.callEndpoints = make(map[string]map[string]struct{})
 	c.associationCount = 0
 	c.recency.Init()
 	c.recencyIndex = make(map[string]*list.Element)
+	c.recencyGeneration = make(map[string]uint64)
+	c.nextGeneration = 0
 	c.pins = make(map[string]int)
 	c.closed = closeRegistry
 	observers := append([]LifecycleObserver(nil), c.config.Observers...)

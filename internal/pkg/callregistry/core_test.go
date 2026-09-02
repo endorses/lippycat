@@ -46,6 +46,54 @@ func TestCoreMultiValuedAssociationsAndCleanup(t *testing.T) {
 	require.Equal(t, []string{"two:completed"}, observer.ends)
 }
 
+func TestCoreMostRecentEndpointOwnerChangesOnTouch(t *testing.T) {
+	core := New(Config{MaxCalls: 3, MaxEndpointsPerCall: 1})
+	require.True(t, core.Upsert(Call{CallID: "one"}))
+	require.True(t, core.Upsert(Call{CallID: "two"}))
+	require.True(t, core.TryAssociateEndpoint("two", "10.0.0.1:8000"))
+	// Association order must not change the global call-recency preference.
+	require.True(t, core.TryAssociateEndpoint("one", "10.0.0.1:8000"))
+
+	winner, ok := core.MostRecentCallIDForEndpoint("10.0.0.1:8000")
+	require.True(t, ok)
+	require.Equal(t, "two", winner)
+
+	require.True(t, core.Touch("one", time.Unix(1, 0)))
+	winner, ok = core.MostRecentCallIDForEndpoint("10.0.0.1:8000")
+	require.True(t, ok)
+	require.Equal(t, "one", winner)
+}
+
+func TestCoreEndpointWinnerCleanupOnRemovalAndEviction(t *testing.T) {
+	core := New(Config{
+		MaxCalls:            2,
+		MaxEndpointsPerCall: 1,
+		EvictionPriority: func(call Call) int {
+			if call.State == "evict-first" {
+				return 1
+			}
+			return 0
+		},
+	})
+	require.True(t, core.Upsert(Call{CallID: "one"}))
+	require.True(t, core.Upsert(Call{CallID: "two", State: "evict-first"}))
+	require.True(t, core.TryAssociateEndpoint("one", "shared"))
+	require.True(t, core.TryAssociateEndpoint("two", "shared"))
+
+	winner, ok := core.MostRecentCallIDForEndpoint("shared")
+	require.True(t, ok)
+	require.Equal(t, "two", winner)
+
+	require.True(t, core.Upsert(Call{CallID: "three"}))
+	winner, ok = core.MostRecentCallIDForEndpoint("shared")
+	require.True(t, ok)
+	require.Equal(t, "one", winner)
+
+	require.True(t, core.Remove("one", EndCompleted))
+	_, ok = core.MostRecentCallIDForEndpoint("shared")
+	require.False(t, ok)
+}
+
 func TestCoreCountsAreSafeDuringConcurrentMutation(t *testing.T) {
 	core := New(Config{MaxCalls: 100, MaxEndpointsPerCall: 1})
 

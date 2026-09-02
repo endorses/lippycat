@@ -267,3 +267,35 @@ func TestPhase8ShutdownFlushesWithoutCompletionOrTombstone(t *testing.T) {
 	assert.Error(t, err)
 	assert.False(t, errors.As(err, new(*FinalizedCallError)))
 }
+
+func TestPhase8ShutdownWaitsForDetachedFinalization(t *testing.T) {
+	manager := newPhase8Manager(t, nil)
+	require.NoError(t, manager.WritePacket("detached", "alice", "bob", time.Now(), []byte("sip"), layers.LinkTypeEthernet, false))
+
+	finalizationStarted := make(chan struct{})
+	releaseFinalization := make(chan struct{})
+	manager.SetBeforeFinalize(func(string, CallFinalizationReason) {
+		close(finalizationStarted)
+		<-releaseFinalization
+	})
+
+	finalizeDone := make(chan error, 1)
+	go func() {
+		_, err := manager.FinalizeCall("detached", CallFinalizationProtocolComplete)
+		finalizeDone <- err
+	}()
+	<-finalizationStarted
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- manager.Close() }()
+	select {
+	case err := <-closeDone:
+		require.NoError(t, err)
+		t.Fatal("manager shutdown returned before detached finalization completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseFinalization)
+	require.NoError(t, <-finalizeDone)
+	require.NoError(t, <-closeDone)
+}

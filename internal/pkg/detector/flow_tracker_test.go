@@ -128,6 +128,17 @@ func TestFlowContextConcurrentDetectionUpdatesAndSnapshots(t *testing.T) {
 	assert.NotContains(t, flow.ProtocolsSnapshot(), "mutated")
 }
 
+func TestFlowContextRecordDetectionKeepsLastSeenMonotonic(t *testing.T) {
+	newer := time.Unix(200, 0)
+	older := time.Unix(100, 0)
+	flow := &signatures.FlowContext{LastSeen: newer}
+
+	flow.RecordDetection("new", older)
+
+	assert.Equal(t, newer, flow.LastSeenTime())
+	assert.Equal(t, []string{"new"}, flow.ProtocolsSnapshot())
+}
+
 func TestFlowContextUpdateStateSerializesReadModifyWrite(t *testing.T) {
 	flow := &signatures.FlowContext{}
 
@@ -183,6 +194,9 @@ func TestFlowTrackerConcurrentLookupUpdateEvictionDeleteAndClear(t *testing.T) {
 				if iteration%11 == 0 {
 					tracker.Delete(flowID)
 				}
+				if iteration%13 == 0 {
+					tracker.cleanupExpired(time.Now().Add(2*time.Hour), 3)
+				}
 				if iteration%79 == 0 {
 					tracker.Clear()
 				}
@@ -201,17 +215,33 @@ func TestFlowTrackerCleanupExpirationIsBounded(t *testing.T) {
 
 	now := time.Now()
 	for i := 0; i < 5; i++ {
-		tracker.GetOrCreate(fmt.Sprintf("expired-%d", i)).RecordDetection("test", now.Add(-2*time.Minute))
+		tracker.GetOrCreate(fmt.Sprintf("expired-%d", i)).RecordDetection("test", now)
 	}
-	tracker.GetOrCreate("live").RecordDetection("test", now)
+	cleanupTime := now.Add(2 * time.Minute)
+	tracker.GetOrCreate("live").RecordDetection("test", cleanupTime)
 
-	assert.Equal(t, 2, tracker.cleanupExpired(now, 2))
+	assert.Equal(t, 2, tracker.cleanupExpired(cleanupTime, 2))
 	assert.Equal(t, 4, tracker.Size(), "one cleanup pass must inspect at most its limit")
 	assert.NotNil(t, tracker.Get("live"))
 
-	assert.Equal(t, 3, tracker.cleanupExpired(now, 16))
+	assert.Equal(t, 3, tracker.cleanupExpired(cleanupTime, 16))
 	assert.Equal(t, 1, tracker.Size())
 	assert.NotNil(t, tracker.Get("live"))
+}
+
+func TestFlowTrackerGetOrCreateRefreshesActivityBeforeCleanup(t *testing.T) {
+	tracker := NewFlowTrackerWithMaxEntries(time.Minute, 0)
+	t.Cleanup(tracker.Close)
+	flow := tracker.GetOrCreate("active")
+	initial := flow.LastSeenTime()
+
+	flow.RecordDetection("test", initial.Add(-time.Minute))
+	refreshed := tracker.GetOrCreate("active")
+
+	assert.Same(t, flow, refreshed)
+	assert.True(t, refreshed.LastSeenTime().After(initial))
+	assert.Zero(t, tracker.cleanupExpired(initial.Add(time.Minute), 1))
+	assert.Same(t, flow, tracker.Get("active"))
 }
 
 func TestFlowTrackerCloseIsConcurrentAndIdempotent(t *testing.T) {

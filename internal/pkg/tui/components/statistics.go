@@ -1776,8 +1776,8 @@ func (s *StatisticsView) renderHealthSubView() string {
 		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PendingPacketEvictions)))
 		result.WriteString("\n")
 
-		// Sampling ratio
-		result.WriteString(labelStyle.Render("Sampling Ratio:     "))
+		// Current sampling policy, distinct from cumulative packet retention above.
+		result.WriteString(labelStyle.Render("Current Sampling:   "))
 		samplingPct := float64(s.bridgeStats.SamplingRatio) / 10.0
 		if samplingPct >= 100.0 {
 			result.WriteString(valueStyle.Render("100% (full)"))
@@ -2822,13 +2822,13 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 				valueStyle.Render(fmt.Sprintf("%d gaps, %d failed recoveries", s.bridgeStats.ParserFramingDiscontinuities, s.bridgeStats.RecoveryFailures)))
 		}
 
-		// Sampling Ratio
+		// Current sampling policy, distinct from cumulative packet retention above.
 		samplingPct := float64(s.bridgeStats.SamplingRatio) / 10.0
 		samplingText := fmt.Sprintf("%.0f%%", samplingPct)
 		if samplingPct >= 100.0 {
 			samplingText = "100% (full)"
 		}
-		rightLines = append(rightLines, labelStyle.Render("Sampling:  ")+valueStyle.Render(samplingText))
+		rightLines = append(rightLines, labelStyle.Render("Current Sampling: ")+valueStyle.Render(samplingText))
 
 		// Batches Sent/Dropped
 		rightLines = append(rightLines, labelStyle.Render("Batches:   ")+

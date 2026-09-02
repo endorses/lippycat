@@ -199,9 +199,11 @@ bench:
 fmt:
 	$(GO) fmt ./...
 
-# Run go vet
+# Vet the same build partitions as the required test entry point. An untagged
+# invocation cannot compile the role-selected command and protocolmeta packages.
 vet:
-	$(GO) vet ./...
+	$(GO) vet -tags all ./...
+	$(GO) vet -tags li ./internal/pkg/li/...
 
 # Security scanning with gosec (clean output, SSA errors filtered)
 # The Golang SSA analysis errors are expected - see .gosec.yaml for details

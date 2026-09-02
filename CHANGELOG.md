@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The fixes below target version 0.11.4.
+
+### Changed
+- Add detector occupancy, eviction, expiry, pressure, and pause telemetry to hunter and processor health reporting
+- Make per-call PCAP finalization manager-owned, bounded, collision-safe, and consistent across protocol completion, idle reclamation, and capacity pressure
+
+### Fixed
+- Keep RTP-to-call lookup cost independent of active-call cardinality in busy `watch live` sessions by removing eager call-list materialization and disabled debug-field computation
+- Replace per-insertion full detector-map scans at capacity with oldest-first batch eviction and bounded incremental expiry, preventing nonlinear pauses in hunt, tap, and processor-backed capture paths
+- Prevent late packets, concurrent closure, filename collisions, and callback re-entry from mutating finalized per-call PCAPs or delivering duplicate in-process completion hooks in tap and process modes
+
+Before upgrading, operators can reduce detector pause exposure by narrowing capture filters or lowering `detector.max_flows` (at the cost of shorter flow retention), and should avoid reusing per-call output paths or running completion hooks that assume immutable output. Hook delivery is at most once within a running process; it is not crash-durable exactly-once delivery.
+
 ## [0.11.3] - 2026-09-01
 
 ### Added

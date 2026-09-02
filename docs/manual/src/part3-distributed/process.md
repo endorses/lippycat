@@ -134,6 +134,41 @@ Files rotate independently when reaching 100MB. Per-call PCAP only applies to Vo
 
 **Use cases**: VoIP call recording, per-call quality analysis, selective archival.
 
+#### Per-call file lifecycle
+
+The per-call writer manager owns the logical lifetime of every Call-ID. Its
+state machine is:
+
+| State | Writer admission and packet behavior |
+|---|---|
+| **Live** | One manager-owned writer generation accepts SIP and RTP packets. Rotation remains part of that same generation. |
+| **Finalizing** | The writer has been removed from the live set and a tombstone installed in one atomic transition. No new normal writer can be admitted while files are synced and closed, endpoint mappings are cleaned up, and completion hooks run. |
+| **Finalized / tombstoned** | Packets arriving for the Call-ID are expected late traffic and are suppressed. This is reported as a typed, non-fatal finalized-call result, with a warning at most once per minute and an atomic suppressed-late-packet counter; it is not reported as a file-creation failure. |
+| **Expired** | After tombstone expiry, reuse of the Call-ID may start a new writer generation. The new generation receives a collision-proof filename and never overwrites or appends to an earlier call artifact. |
+| **Manager shutdown** | Writer admission stops, live writers transition to finalizing, and their files are flushed and closed. Use `SIGTERM` or `SIGINT` to allow this drain to complete. |
+
+Finalized Call-IDs are retained for one hour, matching the closed-call
+compatibility window. The manager also applies a hard internal limit of 100,000
+tombstones, evicting the oldest entries when necessary. These bounds limit
+memory use while absorbing delayed or duplicated network traffic. Once either
+retention bound removes an entry, a later packet can be treated as a new
+Call-ID generation; artifact names still include unique generation material so
+an old file cannot be mistaken for the new live call.
+
+The current policy does not retain late packets. In particular, suppressed
+packets do not create a `.late` PCAP and cannot invoke the normal call-complete
+hook a second time. A future late-retention mode would have to use a distinct,
+standalone PCAP with its own valid header and separate completion semantics.
+
+File modification times are not lifecycle state. A process restart or an
+expired tombstone therefore never causes a writer to continue an existing file
+merely because it was modified recently. Only a writer still present in the
+manager's live set may append to its files. New artifacts are opened with
+exclusive creation. A path collision selects a
+`_gen_<Unix-nanoseconds>`-suffixed name (with a numeric retry suffix if needed),
+writes a fresh standalone PCAP header, and never truncates or ambiguously
+appends to the existing file.
+
 ### Auto-Rotating PCAP
 
 Write non-VoIP packets to auto-rotating files based on activity:

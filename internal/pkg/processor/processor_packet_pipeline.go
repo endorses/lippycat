@@ -229,7 +229,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 					linkType := layers.LinkType(packet.LinkType)
 					if err := p.sessionOutputManager.WritePacket(
 						callID, from, to, timestamp, packet.Data, linkType, packet.Metadata.Rtp != nil,
-					); err != nil && !errors.Is(err, errSessionOutputClosed) {
+					); err != nil && !errors.Is(err, errSessionOutputClosed) && !IsCallFinalized(err) {
 						logger.Warn("Failed to write packet to call PCAP",
 							"call_id", callID,
 							"error", err)

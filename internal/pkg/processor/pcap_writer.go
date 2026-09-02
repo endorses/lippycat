@@ -3,11 +3,13 @@
 package processor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/constants"
@@ -16,6 +18,34 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 )
+
+const (
+	// completedCallTombstoneTTL preserves the historical one-hour closed-call
+	// retention window. After expiry a Call-ID may represent a new generation.
+	completedCallTombstoneTTL = time.Hour
+	// completedCallTombstoneLimit bounds terminal lifecycle memory. At pressure,
+	// the oldest tombstones are discarded; collision-safe file creation still
+	// protects finalized artifacts if such a Call-ID is subsequently reused.
+	completedCallTombstoneLimit = 100_000
+	latePacketWarningInterval   = time.Minute
+)
+
+// FinalizedCallError is the expected, non-fatal result when a late packet
+// attempts to recreate a writer for a call that has reached terminal state.
+type FinalizedCallError struct {
+	CallID      string
+	FinalizedAt time.Time
+}
+
+func (e *FinalizedCallError) Error() string {
+	return fmt.Sprintf("call %q was finalized at %s", e.CallID, e.FinalizedAt.Format(time.RFC3339Nano))
+}
+
+// IsCallFinalized reports whether err represents intentional late-packet suppression.
+func IsCallFinalized(err error) bool {
+	var finalizedErr *FinalizedCallError
+	return errors.As(err, &finalizedErr)
+}
 
 // PcapWriterConfig configures per-call PCAP writing
 type PcapWriterConfig struct {
@@ -81,9 +111,16 @@ type CallPcapWriter struct {
 
 // PcapWriterManager manages PCAP writers for multiple calls
 type PcapWriterManager struct {
-	config  *PcapWriterConfig
-	writers map[string]*CallPcapWriter
-	mu      sync.RWMutex
+	config         *PcapWriterConfig
+	writers        map[string]*CallPcapWriter
+	tombstones     map[string]time.Time
+	tombstoneTTL   time.Duration
+	tombstoneLimit int
+	shutdown       bool
+	mu             sync.RWMutex
+
+	suppressedLatePackets atomic.Uint64
+	lastLateWarning       atomic.Int64
 }
 
 // NewPcapWriterManager creates a new PCAP writer manager
@@ -100,10 +137,21 @@ func NewPcapWriterManager(config *PcapWriterConfig) (*PcapWriterManager, error) 
 	}
 
 	return &PcapWriterManager{
-		config:  config,
-		writers: make(map[string]*CallPcapWriter),
+		config:         config,
+		writers:        make(map[string]*CallPcapWriter),
+		tombstones:     make(map[string]time.Time),
+		tombstoneTTL:   completedCallTombstoneTTL,
+		tombstoneLimit: completedCallTombstoneLimit,
 	}, nil
 }
+
+// Writer lifecycle is manager-owned: absent -> live -> finalizing -> tombstoned.
+// The live-to-tombstone transition is atomic under mu; finalizing work (file
+// sync/close and callbacks) occurs after mu is released. Tombstones suppress
+// late packets. Expired/pruned tombstones admit a new generation, whose files
+// are collision-safe. Manager shutdown rejects creation and closes live writers
+// without treating process shutdown as protocol completion. Late output is not
+// retained; adding it requires a distinct, standalone artifact lifecycle.
 
 // GetOrCreateWriter gets or creates a writer for a call
 func (pwm *PcapWriterManager) GetOrCreateWriter(callID, from, to string) (*CallPcapWriter, error) {
@@ -111,35 +159,97 @@ func (pwm *PcapWriterManager) GetOrCreateWriter(callID, from, to string) (*CallP
 		return nil, nil
 	}
 
-	pwm.mu.Lock()
-	defer pwm.mu.Unlock()
+	for {
+		now := time.Now()
+		pwm.mu.Lock()
+		if pwm.shutdown {
+			pwm.mu.Unlock()
+			return nil, fmt.Errorf("per-call PCAP writer manager is shut down")
+		}
+		if writer, exists := pwm.writers[callID]; exists {
+			pwm.mu.Unlock()
+			return writer, nil
+		}
+		if finalizedAt, finalized := pwm.tombstones[callID]; finalized {
+			if pwm.tombstoneTTL > 0 && now.Sub(finalizedAt) < pwm.tombstoneTTL {
+				pwm.mu.Unlock()
+				pwm.recordSuppressedLatePacket(callID, finalizedAt)
+				return nil, &FinalizedCallError{CallID: callID, FinalizedAt: finalizedAt}
+			}
+			delete(pwm.tombstones, callID)
+		}
 
-	// Check if writer already exists
-	if writer, exists := pwm.writers[callID]; exists {
-		return writer, nil
-	}
-
-	if pwm.config.MaxWriters > 0 && len(pwm.writers) >= pwm.config.MaxWriters {
-		evictCallID, evictWriter := pwm.leastRecentlyWrittenLocked()
-		if evictWriter != nil {
-			delete(pwm.writers, evictCallID)
-			logger.Warn("Closing per-call PCAP writer due to max writer limit",
-				"call_id", evictCallID,
-				"max_writers", pwm.config.MaxWriters)
-			if err := evictWriter.CloseCall(); err != nil {
-				return nil, fmt.Errorf("failed to close overflow PCAP writer %q: %w", evictCallID, err)
+		if pwm.config.MaxWriters > 0 && len(pwm.writers) >= pwm.config.MaxWriters {
+			evictCallID, evictWriter := pwm.leastRecentlyWrittenLocked()
+			if evictWriter != nil {
+				// Removal and tombstone installation are one manager-locked
+				// transition. Slow finalization is deliberately outside mu.
+				delete(pwm.writers, evictCallID)
+				pwm.addTombstoneLocked(evictCallID, now)
+				pwm.mu.Unlock()
+				logger.Warn("Closing per-call PCAP writer due to max writer limit",
+					"call_id", evictCallID, "max_writers", pwm.config.MaxWriters)
+				if err := evictWriter.CloseCall(); err != nil {
+					return nil, fmt.Errorf("failed to close overflow PCAP writer %q: %w", evictCallID, err)
+				}
+				continue
 			}
 		}
-	}
 
-	// Create new writer
-	writer, err := pwm.createWriter(callID, from, to)
-	if err != nil {
-		return nil, err
+		writer, err := pwm.createWriter(callID, from, to)
+		if err == nil {
+			pwm.writers[callID] = writer
+		}
+		pwm.mu.Unlock()
+		return writer, err
 	}
+}
 
-	pwm.writers[callID] = writer
-	return writer, nil
+// SuppressedLatePackets returns the process-lifetime count of packets rejected
+// because their Call-ID remained tombstoned. The counter is monotonic.
+func (pwm *PcapWriterManager) SuppressedLatePackets() uint64 {
+	if pwm == nil {
+		return 0
+	}
+	return pwm.suppressedLatePackets.Load()
+}
+
+func (pwm *PcapWriterManager) recordSuppressedLatePacket(callID string, finalizedAt time.Time) {
+	total := pwm.suppressedLatePackets.Add(1)
+	now := time.Now().UnixNano()
+	last := pwm.lastLateWarning.Load()
+	if now-last < latePacketWarningInterval.Nanoseconds() ||
+		!pwm.lastLateWarning.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("Suppressing late packet for finalized call",
+		"call_id", callID, "finalized_at", finalizedAt, "suppressed_total", total)
+}
+
+func (pwm *PcapWriterManager) pruneTombstonesLocked(now time.Time) {
+	for callID, finalizedAt := range pwm.tombstones {
+		if pwm.tombstoneTTL <= 0 || now.Sub(finalizedAt) >= pwm.tombstoneTTL {
+			delete(pwm.tombstones, callID)
+		}
+	}
+}
+
+func (pwm *PcapWriterManager) addTombstoneLocked(callID string, finalizedAt time.Time) {
+	if pwm.tombstoneLimit <= 0 {
+		return
+	}
+	pwm.pruneTombstonesLocked(finalizedAt)
+	if _, exists := pwm.tombstones[callID]; !exists && len(pwm.tombstones) >= pwm.tombstoneLimit {
+		var oldestID string
+		var oldestAt time.Time
+		for existingID, existingAt := range pwm.tombstones {
+			if oldestID == "" || existingAt.Before(oldestAt) {
+				oldestID, oldestAt = existingID, existingAt
+			}
+		}
+		delete(pwm.tombstones, oldestID)
+	}
+	pwm.tombstones[callID] = finalizedAt
 }
 
 // createWriter creates a new PCAP writer for a call with separate SIP and RTP files
@@ -334,52 +444,49 @@ func (pwm *PcapWriterManager) SweepIdle(maxIdle time.Duration) int {
 	return closed
 }
 
-// perCallReopenWindow bounds how recently a per-call PCAP must have been written
-// for a re-created writer to append rather than truncate (so a stale leftover
-// file from an unrelated earlier call is not merged in).
-const perCallReopenWindow = 10 * time.Minute
-
-// openCallPcapFile opens filePath for a per-call PCAP. A new file is truncated
-// and given a PCAP header; an existing file written within perCallReopenWindow
-// is appended to without a header, so a re-created writer preserves the earlier
-// INVITE/SDP/media instead of wiping it. Returns the file, its writer, and the
-// pre-existing byte size.
-func (writer *CallPcapWriter) openCallPcapFile(filePath string) (*os.File, *pcapgo.Writer, int64, error) {
+// openCallPcapFile creates a new standalone PCAP without replacing or appending
+// to an existing artifact. Manager-owned live state, never filesystem mtime,
+// is the authority for continuation. A collision receives a generation suffix
+// so Call-ID reuse after tombstone expiry cannot mutate finalized output.
+func (writer *CallPcapWriter) openCallPcapFile(filePath string) (*os.File, *pcapgo.Writer, string, error) {
 	linkType := writer.linkType
 	if linkType == 0 {
 		linkType = layers.LinkTypeEthernet
 	}
 
-	var existingSize int64
-	appendMode := false
-	if fi, statErr := os.Stat(filePath); statErr == nil && fi.Size() > 0 &&
-		time.Since(fi.ModTime()) < perCallReopenWindow {
-		appendMode = true
-		existingSize = fi.Size()
-	}
-
-	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
-	if appendMode {
-		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
-	}
-
-	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.OpenFile(filePath, flags, 0600)
-	if err != nil {
-		return nil, nil, 0, err
+	actualPath := filePath
+	var file *os.File
+	for attempt := 0; ; attempt++ {
+		// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
+		created, err := os.OpenFile(actualPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			file = created
+			break
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, nil, "", err
+		}
+		actualPath = generationFilePath(filePath, time.Now().UnixNano(), attempt)
 	}
 
 	pcapWriter := pcapgo.NewWriter(file)
-	if !appendMode {
-		if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, linkType); err != nil {
-			if closeErr := file.Close(); closeErr != nil {
-				logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
-			}
-			return nil, nil, 0, err
+	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, linkType); err != nil {
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", actualPath)
 		}
+		return nil, nil, "", err
 	}
 
-	return file, pcapWriter, existingSize, nil
+	return file, pcapWriter, actualPath, nil
+}
+
+func generationFilePath(filePath string, generation int64, attempt int) string {
+	ext := filepath.Ext(filePath)
+	base := strings.TrimSuffix(filePath, ext)
+	if attempt == 0 {
+		return fmt.Sprintf("%s_gen_%d%s", base, generation, ext)
+	}
+	return fmt.Sprintf("%s_gen_%d_%d%s", base, generation, attempt, ext)
 }
 
 // rotateSIPFile creates a new SIP PCAP file (called when size limit reached)
@@ -405,18 +512,18 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 	filename := writer.generateFilename("sip", writer.sipFileIndex)
 	filePath := filepath.Join(writer.config.OutputDir, filename)
 
-	file, pcapWriter, existingSize, err := writer.openCallPcapFile(filePath)
+	file, pcapWriter, actualPath, err := writer.openCallPcapFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create SIP PCAP file: %w", err)
 	}
 
 	writer.sipFile = file
 	writer.sipWriter = pcapWriter
-	writer.sipFilePath = filePath
-	writer.sipSize = existingSize
+	writer.sipFilePath = actualPath
+	writer.sipSize = 0
 	writer.sipFileIndex++
 
-	logger.Info("Opened SIP PCAP file for call", "call_id", writer.callID, "file", filePath, "append", existingSize > 0)
+	logger.Info("Opened SIP PCAP file for call", "call_id", writer.callID, "file", actualPath)
 
 	return nil
 }
@@ -444,18 +551,18 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 	filename := writer.generateFilename("rtp", writer.rtpFileIndex)
 	filePath := filepath.Join(writer.config.OutputDir, filename)
 
-	file, pcapWriter, existingSize, err := writer.openCallPcapFile(filePath)
+	file, pcapWriter, actualPath, err := writer.openCallPcapFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create RTP PCAP file: %w", err)
 	}
 
 	writer.rtpFile = file
 	writer.rtpWriter = pcapWriter
-	writer.rtpFilePath = filePath
-	writer.rtpSize = existingSize
+	writer.rtpFilePath = actualPath
+	writer.rtpSize = 0
 	writer.rtpFileIndex++
 
-	logger.Info("Opened RTP PCAP file for call", "call_id", writer.callID, "file", filePath, "append", existingSize > 0)
+	logger.Info("Opened RTP PCAP file for call", "call_id", writer.callID, "file", actualPath)
 
 	return nil
 }
@@ -600,38 +707,35 @@ func (writer *CallPcapWriter) CloseCall() error {
 // CloseWriter closes a specific call's writer (without firing OnCallComplete)
 func (pwm *PcapWriterManager) CloseWriter(callID string) error {
 	pwm.mu.Lock()
-	defer pwm.mu.Unlock()
-
 	writer, exists := pwm.writers[callID]
 	if !exists {
+		pwm.mu.Unlock()
 		return nil
 	}
-
-	if err := writer.Close(); err != nil {
-		return err
-	}
-
 	delete(pwm.writers, callID)
-	return nil
+	pwm.addTombstoneLocked(callID, time.Now())
+	pwm.mu.Unlock()
+
+	return writer.Close()
 }
 
 // CloseCallWriter closes a specific call's writer and fires OnCallComplete callback.
 // Use this method when a VoIP call completes to trigger the voipcommand hook.
 func (pwm *PcapWriterManager) CloseCallWriter(callID string) error {
 	pwm.mu.Lock()
-	defer pwm.mu.Unlock()
-
 	writer, exists := pwm.writers[callID]
+	finalizedAt := time.Now()
+	// A completion observed before the first captured packet is still terminal.
+	// Record it so a delayed packet cannot create the first writer afterward.
+	pwm.addTombstoneLocked(callID, finalizedAt)
 	if !exists {
+		pwm.mu.Unlock()
 		return nil
 	}
-
-	if err := writer.CloseCall(); err != nil {
-		return err
-	}
-
 	delete(pwm.writers, callID)
-	return nil
+	pwm.mu.Unlock()
+
+	return writer.CloseCall()
 }
 
 // HasRTPPackets returns true if the call has received any RTP packets.
@@ -668,17 +772,22 @@ func (pwm *PcapWriterManager) HasSIPPackets(callID string) bool {
 // Close closes all writers
 func (pwm *PcapWriterManager) Close() error {
 	pwm.mu.Lock()
-	defer pwm.mu.Unlock()
+	if pwm.shutdown {
+		pwm.mu.Unlock()
+		return nil
+	}
+	pwm.shutdown = true
+	writers := pwm.writers
+	pwm.writers = make(map[string]*CallPcapWriter)
+	pwm.mu.Unlock()
 
 	var lastErr error
-	for callID, writer := range pwm.writers {
+	for callID, writer := range writers {
 		if err := writer.Close(); err != nil {
 			logger.Warn("Failed to close PCAP writer", "call_id", callID, "error", err)
 			lastErr = err
 		}
 	}
-
-	pwm.writers = make(map[string]*CallPcapWriter)
 	return lastErr
 }
 

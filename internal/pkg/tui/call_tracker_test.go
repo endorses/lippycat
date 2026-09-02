@@ -3,9 +3,14 @@
 package tui
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -237,6 +242,43 @@ type rtpLookupBenchmarkCase struct {
 
 var rtpLookupBenchmarkResult string
 
+type rtpLookupRegistrySpy struct {
+	*callregistry.Core
+	activeCallsCalls              int
+	activeCallCountCalls          int
+	endpointAssociationCountCalls int
+	touchCalls                    int
+}
+
+func (s *rtpLookupRegistrySpy) ActiveCalls() []callregistry.Call {
+	s.activeCallsCalls++
+	panic("RTP lookup must not materialize ActiveCalls")
+}
+
+func (s *rtpLookupRegistrySpy) ActiveCallCount() int {
+	s.activeCallCountCalls++
+	return s.Core.ActiveCallCount()
+}
+
+func (s *rtpLookupRegistrySpy) EndpointAssociationCount() int {
+	s.endpointAssociationCountCalls++
+	return s.Core.EndpointAssociationCount()
+}
+
+func (s *rtpLookupRegistrySpy) Touch(callID string, at time.Time) bool {
+	s.touchCalls++
+	return s.Core.Touch(callID, at)
+}
+
+func installRTPLookupRegistrySpy(t *testing.T, tracker *CallTracker) *rtpLookupRegistrySpy {
+	t.Helper()
+	core, ok := tracker.registry.(*callregistry.Core)
+	require.True(t, ok, "new tracker must use callregistry.Core")
+	spy := &rtpLookupRegistrySpy{Core: core}
+	tracker.registry = spy
+	return spy
+}
+
 func newRTPLookupBenchmarkTracker(b *testing.B, activeCalls int) (*CallTracker, string, string) {
 	b.Helper()
 
@@ -303,6 +345,157 @@ func BenchmarkGetCallIDForRTPPacketRuntime(b *testing.B) {
 // distinct.
 func BenchmarkGetCallIDForRTPPacketAllocations(b *testing.B) {
 	benchmarkRTPLookupCases(b, true)
+}
+
+func TestCallTracker_RTPLookupAllocationsDoNotScaleWithActiveCalls(t *testing.T) {
+	logger.Disable()
+	t.Cleanup(logger.Enable)
+
+	const runs = 100
+	for _, lookup := range []struct {
+		name           string
+		srcIP, srcPort string
+		dstIP, dstPort string
+		want           string
+	}{
+		{name: "destination_hit", srcIP: "192.0.2.1", srcPort: "5000"},
+		{name: "source_hit", dstIP: "192.0.2.1", dstPort: "5000"},
+		{name: "miss", srcIP: "192.0.2.1", srcPort: "5000", dstIP: "198.51.100.1", dstPort: "6000"},
+	} {
+		lookup := lookup
+		t.Run(lookup.name, func(t *testing.T) {
+			var baseline float64
+			for _, activeCalls := range []int{10, 1000, DefaultMaxTrackedCalls} {
+				tracker := NewCallTrackerWithCapacity(activeCalls)
+				for i := 0; i < activeCalls; i++ {
+					ip := fmt.Sprintf("10.%d.%d.%d", i/(256*256), (i/256)%256, i%256)
+					tracker.RegisterMediaPorts(fmt.Sprintf("call-%d", i), ip, []uint16{uint16(10000 + i)}, false)
+				}
+
+				last := activeCalls - 1
+				hitIP := fmt.Sprintf("10.%d.%d.%d", last/(256*256), (last/256)%256, last%256)
+				hitPort := fmt.Sprintf("%d", 10000+last)
+				srcIP, srcPort, dstIP, dstPort := lookup.srcIP, lookup.srcPort, lookup.dstIP, lookup.dstPort
+				want := lookup.want
+				switch lookup.name {
+				case "destination_hit":
+					dstIP, dstPort, want = hitIP, hitPort, fmt.Sprintf("call-%d", last)
+				case "source_hit":
+					srcIP, srcPort, want = hitIP, hitPort, fmt.Sprintf("call-%d", last)
+				}
+
+				if got := tracker.GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort); got != want {
+					t.Fatalf("lookup with %d calls returned %q, want %q", activeCalls, got, want)
+				}
+				allocs := testing.AllocsPerRun(runs, func() {
+					rtpLookupBenchmarkResult = tracker.GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort)
+				})
+				if activeCalls == 10 {
+					baseline = allocs
+				} else {
+					assert.Equal(t, baseline, allocs,
+						"lookup allocations must not grow with active-call cardinality (%d calls)", activeCalls)
+				}
+			}
+		})
+	}
+}
+
+func TestCallTracker_RTPLookupMissDebugDiagnostics(t *testing.T) {
+	var output bytes.Buffer
+	logger.UseFile(&output)
+	t.Cleanup(logger.Enable)
+
+	tracker := NewCallTrackerWithCapacity(10)
+	tracker.RegisterMediaPorts("call-1", "10.0.0.1", []uint16{10000}, false)
+	tracker.RegisterMediaPorts("call-2", "10.0.0.2", []uint16{20000}, false)
+	spy := installRTPLookupRegistrySpy(t, tracker)
+
+	assert.Empty(t, tracker.GetCallIDForRTPPacket("192.0.2.1", "5000", "198.51.100.1", "6000"))
+	assert.Zero(t, spy.activeCallsCalls)
+	assert.Equal(t, 1, spy.activeCallCountCalls)
+	assert.Equal(t, 1, spy.endpointAssociationCountCalls)
+
+	var record map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(output.Bytes()), []byte("\n")) {
+		var candidate map[string]any
+		require.NoError(t, json.Unmarshal(line, &candidate))
+		if candidate["msg"] == "GetCallIDForRTPPacket: lookup failed" {
+			record = candidate
+			break
+		}
+	}
+	require.NotNil(t, record, "debug output must contain the RTP miss diagnostic")
+	assert.Equal(t, "GetCallIDForRTPPacket: lookup failed", record["msg"])
+	assert.Equal(t, float64(2), record["active_calls"])
+	assert.Equal(t, float64(4), record["endpoint_associations"])
+	assert.Equal(t, "192.0.2.1:5000", record["src_endpoint"])
+	assert.Equal(t, "198.51.100.1:6000", record["dst_endpoint"])
+}
+
+func TestCallTracker_RTPLookupDoesNotBuildDebugDiagnosticWhenLoggingDisabled(t *testing.T) {
+	var output bytes.Buffer
+	logger.UseFile(&output)
+	logger.Disable()
+	t.Cleanup(logger.Enable)
+
+	tracker := NewCallTrackerWithCapacity(DefaultMaxTrackedCalls)
+	for i := 0; i < DefaultMaxTrackedCalls; i++ {
+		ip := fmt.Sprintf("10.%d.%d.%d", i/(256*256), (i/256)%256, i%256)
+		tracker.RegisterMediaPorts(fmt.Sprintf("call-%d", i), ip, []uint16{uint16(10000 + i)}, false)
+	}
+	spy := installRTPLookupRegistrySpy(t, tracker)
+
+	assert.Equal(t, "call-0", tracker.GetCallIDForRTPPacket("192.0.2.1", "5000", "10.0.0.0", "10000"))
+	assert.Equal(t, "call-1", tracker.GetCallIDForRTPPacket("10.0.0.1", "10001", "198.51.100.1", "6000"))
+	assert.Empty(t, tracker.GetCallIDForRTPPacket("192.0.2.1", "5000", "198.51.100.1", "6000"))
+	assert.Zero(t, spy.activeCallsCalls)
+	assert.Zero(t, spy.activeCallCountCalls, "disabled miss must not compute active-call diagnostic fields")
+	assert.Zero(t, spy.endpointAssociationCountCalls, "disabled miss must not compute endpoint diagnostic fields")
+	assert.Empty(t, output.String(), "disabled logging must not emit RTP miss diagnostics")
+}
+
+func TestCallTracker_RTPLookupTouchIsThrottled(t *testing.T) {
+	logger.Disable()
+	t.Cleanup(logger.Enable)
+
+	tracker := NewCallTrackerWithCapacity(10)
+	tracker.RegisterMediaPorts("call-1", "10.0.0.1", []uint16{10000}, false)
+	spy := installRTPLookupRegistrySpy(t, tracker)
+
+	for i := 0; i < 3; i++ {
+		assert.Equal(t, "call-1", tracker.GetCallIDForRTPPacket("192.0.2.1", "5000", "10.0.0.1", "10000"))
+	}
+	assert.Equal(t, 1, spy.touchCalls, "repeated RTP hits inside the interval must touch once")
+
+	tracker.lastRTPTouch.Store("call-1", time.Now().Add(-rtpLRUTouchInterval-time.Millisecond).UnixNano())
+	assert.Equal(t, "call-1", tracker.GetCallIDForRTPPacket("192.0.2.1", "5000", "10.0.0.1", "10000"))
+	assert.Equal(t, 2, spy.touchCalls, "RTP hit after the interval must refresh registry recency")
+	assert.Zero(t, spy.activeCallsCalls)
+}
+
+func TestCallTracker_RTPLookupEndpointKeyCompatibility(t *testing.T) {
+	logger.Disable()
+	t.Cleanup(logger.Enable)
+
+	for _, test := range []struct {
+		name string
+		ip   string
+	}{
+		{name: "IPv4", ip: "192.0.2.10"},
+		{name: "raw_IPv6", ip: "2001:db8::10"},
+		{name: "bracketed_IPv6", ip: "[2001:db8::10]"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tracker := NewCallTrackerWithCapacity(10)
+			tracker.RegisterMediaPorts("call-1", test.ip, []uint16{10000}, false)
+			spy := installRTPLookupRegistrySpy(t, tracker)
+
+			assert.Equal(t, "call-1", tracker.GetCallIDForRTPPacket("198.51.100.1", "5000", test.ip, "10000"))
+			assert.Equal(t, "call-1", tracker.GetCallIDForRTPPacket(test.ip, "10000", "198.51.100.1", "5000"))
+			assert.Zero(t, spy.activeCallsCalls)
+		})
+	}
 }
 
 func TestExtractIPFromEndpoint(t *testing.T) {

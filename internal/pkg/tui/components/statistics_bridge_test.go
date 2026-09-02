@@ -43,9 +43,27 @@ func TestHealthRenderingShowsPacketLevelDisplayLoss(t *testing.T) {
 	for _, expected := range []string{
 		"Packets Delivered:", "700 (70.0% retained)",
 		"Sampled Out:", "200", "Batch Queue Drops:", "75", "Pending Evictions:", "25",
+		"Current Sampling:", "70.0%",
 	} {
 		assert.Truef(t, strings.Contains(rendered, expected), "rendered health missing %q", expected)
 	}
+	assert.NotContains(t, rendered, "Sampling Ratio:")
+}
+
+func TestHealthCardDistinguishesCurrentSamplingFromCumulativeRetention(t *testing.T) {
+	view := NewStatisticsView()
+	view.SetBridgeStats(&BridgeStatistics{
+		PacketsReceived:  1000,
+		PacketsDelivered: 700,
+		SamplingRatio:    500,
+	})
+
+	rendered := view.buildHealthContent(80)
+	assert.Contains(t, rendered, "Retained:")
+	assert.Contains(t, rendered, "700 (70%)")
+	assert.Contains(t, rendered, "Current Sampling:")
+	assert.Contains(t, rendered, "50%")
+	assert.NotContains(t, rendered, "Sampling:  ")
 }
 
 func TestSetBridgeStatsUpdatesDropHealthSummary(t *testing.T) {

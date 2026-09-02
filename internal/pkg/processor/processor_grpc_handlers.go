@@ -195,6 +195,7 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 			Status:           management.ProcessorStatus_PROCESSOR_HEALTHY,
 			HuntersConnected: processorStats.TotalHunters,
 			ProcessorId:      p.config.ProcessorID,
+			PcapWriter:       p.pcapWriterTelemetryProto(),
 		}
 
 		if err := stream.Send(resp); err != nil {

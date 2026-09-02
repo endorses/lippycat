@@ -233,6 +233,10 @@ message HunterStats {
     // Detector cache telemetry. Gauges are current values; counters are
     // cumulative for the detector lifetime. Last-batch values are snapshots.
     DetectorTelemetry detector = 13;
+
+    // Per-call PCAP lifecycle telemetry. Gauges are current values and counters
+    // are cumulative for the writer-manager lifetime.
+    PcapWriterTelemetry pcap_writer = 14;
 }
 
 // ProcessorHeartbeat response from processor
@@ -248,6 +252,9 @@ message ProcessorHeartbeat {
 
     // Processor identifier
     string processor_id = 4;
+
+    // Processor-owned per-call output lifecycle telemetry.
+    PcapWriterTelemetry pcap_writer = 5;
 }
 
 // ProcessorStatus enum
@@ -757,4 +764,17 @@ message DetectorTelemetry {
     uint64 cache_last_eviction_duration_ns = 10;
     uint64 flow_last_eviction_batch_size = 11;
     uint64 cache_last_eviction_batch_size = 12;
+}
+
+message PcapWriterTelemetry {
+    uint64 active_writers = 1;
+    uint64 tombstones = 2;
+    uint64 protocol_finalizations = 3;
+    uint64 idle_finalizations = 4;
+    uint64 capacity_finalizations = 5;
+    uint64 manual_finalizations = 6;
+    uint64 suppressed_late_packets = 7;
+    uint64 tombstone_capacity_evictions = 8;
+    uint64 filename_collisions = 9;
+    uint64 callback_failures = 10;
 }

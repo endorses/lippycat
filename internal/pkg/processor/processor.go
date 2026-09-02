@@ -723,6 +723,7 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		activeFilters = uint32(len(p.filterTarget.GetActiveFilters())) // #nosec G115
 	}
 	detectorStats := detector.GetDefault().Telemetry()
+	pcapStats := p.sessionOutputManager.Telemetry()
 
 	return &management.ConnectedHunter{
 		HunterId:             p.config.ProcessorID + "-local",
@@ -757,8 +758,36 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 				FlowLastEvictionBatchSize:   detectorStats.FlowLastEvictionBatchSize,
 				CacheLastEvictionBatchSize:  detectorStats.CacheLastEvictionBatchSize,
 			},
+			PcapWriter: &management.PcapWriterTelemetry{
+				ActiveWriters:              pcapStats.ActiveWriters,
+				Tombstones:                 pcapStats.Tombstones,
+				ProtocolFinalizations:      pcapStats.ProtocolFinalizations,
+				IdleFinalizations:          pcapStats.IdleFinalizations,
+				CapacityFinalizations:      pcapStats.CapacityFinalizations,
+				ManualFinalizations:        pcapStats.ManualFinalizations,
+				SuppressedLatePackets:      pcapStats.SuppressedLatePackets,
+				TombstoneCapacityEvictions: pcapStats.TombstoneCapacityEvictions,
+				FilenameCollisions:         pcapStats.FilenameCollisions,
+				CallbackFailures:           pcapStats.CallbackFailures,
+			},
 		},
 		Interfaces:   localSource.Interfaces(),
 		Capabilities: caps,
+	}
+}
+
+func (p *Processor) pcapWriterTelemetryProto() *management.PcapWriterTelemetry {
+	stats := p.sessionOutputManager.Telemetry()
+	return &management.PcapWriterTelemetry{
+		ActiveWriters:              stats.ActiveWriters,
+		Tombstones:                 stats.Tombstones,
+		ProtocolFinalizations:      stats.ProtocolFinalizations,
+		IdleFinalizations:          stats.IdleFinalizations,
+		CapacityFinalizations:      stats.CapacityFinalizations,
+		ManualFinalizations:        stats.ManualFinalizations,
+		SuppressedLatePackets:      stats.SuppressedLatePackets,
+		TombstoneCapacityEvictions: stats.TombstoneCapacityEvictions,
+		FilenameCollisions:         stats.FilenameCollisions,
+		CallbackFailures:           stats.CallbackFailures,
 	}
 }

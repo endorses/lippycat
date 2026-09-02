@@ -109,6 +109,13 @@ func (m *SessionOutputManager) SetVoIPPortCleaner(cleaner VoIPPortCleaner) {
 	}
 }
 
+func (m *SessionOutputManager) Telemetry() PcapWriterTelemetry {
+	if m == nil || m.writer == nil {
+		return PcapWriterTelemetry{}
+	}
+	return m.writer.Telemetry()
+}
+
 // WritePacket registers an in-flight operation before releasing the lifecycle
 // lock. Close first rejects new writes, then waits for admitted writes before
 // closing the writer, without holding a lock across external callbacks.

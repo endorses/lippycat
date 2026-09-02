@@ -45,7 +45,11 @@ func (h *cacheEvictionHeap) Pop() any {
 	return value
 }
 
-const cacheCapWarningInterval = time.Minute
+const (
+	cacheCapWarningInterval = time.Minute
+	cacheCleanupInterval    = 100 * time.Millisecond
+	cacheCleanupBatchSize   = 1024
+)
 
 // DetectionCache provides caching for detection results
 type DetectionCache struct {
@@ -57,8 +61,16 @@ type DetectionCache struct {
 	// mu is write-locked. evictOldestLocked clears it before releasing the lock
 	// so removed flow IDs are not retained between pressure episodes.
 	evictionScratch []cacheEvictionCandidate
+	// cleanupKeys and cleanupKeyIndex provide a stable, incrementally scanned
+	// schedule. They are kept in sync with entries while mu is write-locked so a
+	// cleanup tick never needs to scan the complete cache under one lock hold.
+	cleanupKeys     []string
+	cleanupKeyIndex map[string]int
+	cleanupCursor   int
 	mu              sync.RWMutex
 	done            chan struct{}
+	closeOnce       sync.Once
+	cleanupWG       sync.WaitGroup
 }
 
 // NewDetectionCache creates a new detection cache
@@ -70,13 +82,15 @@ func NewDetectionCache(ttl time.Duration) *DetectionCache {
 // entry cap. A maxEntries value of zero or less disables cap-based eviction.
 func NewDetectionCacheWithMaxEntries(ttl time.Duration, maxEntries int) *DetectionCache {
 	cache := &DetectionCache{
-		entries:    make(map[string]*cacheEntry),
-		ttl:        ttl,
-		maxEntries: maxEntries,
-		done:       make(chan struct{}),
+		entries:         make(map[string]*cacheEntry),
+		cleanupKeyIndex: make(map[string]int),
+		ttl:             ttl,
+		maxEntries:      maxEntries,
+		done:            make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
+	cache.cleanupWG.Add(1)
 	go cache.cleanup()
 
 	return cache
@@ -94,7 +108,7 @@ func (c *DetectionCache) Get(flowID string) *signatures.DetectionResult {
 
 	// Check if expired
 	if time.Now().After(entry.expiresAt) {
-		delete(c.entries, flowID)
+		c.removeLocked(flowID)
 		return nil
 	}
 
@@ -109,6 +123,7 @@ func (c *DetectionCache) Set(flowID string, result *signatures.DetectionResult) 
 	now := time.Now()
 	if _, exists := c.entries[flowID]; !exists {
 		c.evictOldestLocked(now)
+		c.addCleanupKeyLocked(flowID)
 	}
 	c.entries[flowID] = &cacheEntry{
 		result:    result,
@@ -156,7 +171,7 @@ func (c *DetectionCache) evictOldestLocked(now time.Time) {
 	}
 
 	for i := range c.evictionScratch {
-		delete(c.entries, c.evictionScratch[i].flowID)
+		c.removeLocked(c.evictionScratch[i].flowID)
 	}
 	if c.capWarningDueLocked(now) {
 		logger.Warn("Detector cache cap reached, evicting oldest entry batch",
@@ -182,7 +197,7 @@ func (c *DetectionCache) Delete(flowID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	delete(c.entries, flowID)
+	c.removeLocked(flowID)
 }
 
 // Clear removes all entries from cache
@@ -191,6 +206,9 @@ func (c *DetectionCache) Clear() {
 	defer c.mu.Unlock()
 
 	c.entries = make(map[string]*cacheEntry)
+	c.cleanupKeys = nil
+	c.cleanupKeyIndex = make(map[string]int)
+	c.cleanupCursor = 0
 }
 
 // Size returns the number of cached entries
@@ -203,19 +221,15 @@ func (c *DetectionCache) Size() int {
 
 // cleanup periodically removes expired entries
 func (c *DetectionCache) cleanup() {
-	ticker := time.NewTicker(1 * time.Minute)
+	defer c.cleanupWG.Done()
+	ticker := time.NewTicker(cacheCleanupInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			c.mu.Lock()
-			now := time.Now()
-			for flowID, entry := range c.entries {
-				if now.After(entry.expiresAt) {
-					delete(c.entries, flowID)
-				}
-			}
+			c.cleanupExpiredBatchLocked(time.Now(), cacheCleanupBatchSize)
 			c.mu.Unlock()
 		case <-c.done:
 			return
@@ -225,11 +239,70 @@ func (c *DetectionCache) cleanup() {
 
 // Close stops the cleanup goroutine
 func (c *DetectionCache) Close() {
-	select {
-	case <-c.done:
-		// Already closed
+	c.closeOnce.Do(func() { close(c.done) })
+	c.cleanupWG.Wait()
+}
+
+// cleanupExpiredBatchLocked examines at most limit scheduled entries. Keeping
+// the unit of work fixed bounds an individual cleanup lock hold independently
+// of cache cardinality. c.mu must be write-locked.
+func (c *DetectionCache) cleanupExpiredBatchLocked(now time.Time, limit int) int {
+	if limit <= 0 || len(c.cleanupKeys) == 0 {
+		return 0
+	}
+
+	removed := 0
+	for inspected := 0; inspected < limit && len(c.cleanupKeys) > 0; inspected++ {
+		if c.cleanupCursor >= len(c.cleanupKeys) {
+			c.cleanupCursor = 0
+		}
+		flowID := c.cleanupKeys[c.cleanupCursor]
+		entry, exists := c.entries[flowID]
+		if !exists || now.After(entry.expiresAt) {
+			c.removeLocked(flowID)
+			if exists {
+				removed++
+			}
+			continue
+		}
+		c.cleanupCursor++
+	}
+	return removed
+}
+
+func (c *DetectionCache) addCleanupKeyLocked(flowID string) {
+	if _, exists := c.cleanupKeyIndex[flowID]; exists {
 		return
-	default:
-		close(c.done)
+	}
+	c.cleanupKeyIndex[flowID] = len(c.cleanupKeys)
+	c.cleanupKeys = append(c.cleanupKeys, flowID)
+}
+
+// removeLocked removes an entry and its cleanup schedule in constant time.
+// c.mu must be write-locked.
+func (c *DetectionCache) removeLocked(flowID string) {
+	delete(c.entries, flowID)
+	index, scheduled := c.cleanupKeyIndex[flowID]
+	if !scheduled {
+		return
+	}
+
+	last := len(c.cleanupKeys) - 1
+	lastFlowID := c.cleanupKeys[last]
+	c.cleanupKeys[index] = lastFlowID
+	c.cleanupKeyIndex[lastFlowID] = index
+	c.cleanupKeys[last] = ""
+	c.cleanupKeys = c.cleanupKeys[:last]
+	delete(c.cleanupKeyIndex, flowID)
+
+	if len(c.cleanupKeys) == 0 {
+		c.cleanupCursor = 0
+		return
+	}
+	if index < c.cleanupCursor {
+		c.cleanupCursor--
+	}
+	if c.cleanupCursor >= len(c.cleanupKeys) {
+		c.cleanupCursor = 0
 	}
 }

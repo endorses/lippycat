@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -439,7 +440,6 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 			atomic.AddInt64(&rtpLookupSrcMatch, 1)
 		}
 	}
-	mapSizes := [2]int{len(t.registry.ActiveCalls()), len(t.registry.ActiveCalls())}
 	t.mu.RUnlock()
 
 	if found {
@@ -453,12 +453,15 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 	}
 
 	atomic.AddInt64(&rtpLookupFailed, 1)
-	// Log lookup failures with map state for debugging
-	logger.Debug("GetCallIDForRTPPacket: lookup failed",
-		"src_endpoint", srcEndpoint,
-		"dst_endpoint", dstEndpoint,
-		"rtpEndpointToCallIDs_size", mapSizes[0],
-		"callIDToEndpoints_size", mapSizes[1])
+	// Query counts only when the active logger can emit the diagnostic. The
+	// sampled diagnostic buffer below remains independent of normal logging.
+	if logger.Enabled(slog.LevelDebug) {
+		logger.Debug("GetCallIDForRTPPacket: lookup failed",
+			"src_endpoint", srcEndpoint,
+			"dst_endpoint", dstEndpoint,
+			"active_calls", t.registry.ActiveCallCount(),
+			"endpoint_associations", t.registry.EndpointAssociationCount())
+	}
 	// Record miss in diagnostic buffer (only every 100th miss to avoid spam)
 	if atomic.LoadInt64(&rtpLookupFailed)%100 == 1 {
 		addDiagEvent("MISS", "", srcEndpoint, dstEndpoint)
@@ -468,9 +471,7 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 
 // GetTrackedCallCount returns the number of tracked calls
 func (t *CallTracker) GetTrackedCallCount() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return len(t.registry.ActiveCalls())
+	return t.registry.ActiveCallCount()
 }
 
 // IsCallActive reports whether the tracker currently owns state for callID.

@@ -331,6 +331,19 @@ func (p *Processor) ActiveCalls() []CallInfo {
 	return calls
 }
 
+// ActiveCallCount returns the number of calls without copying their metadata.
+func (p *Processor) ActiveCallCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.calls)
+}
+
+// EndpointAssociationCount returns the number of media endpoint-to-call
+// associations currently tracked by the processor.
+func (p *Processor) EndpointAssociationCount() int {
+	return p.registry.EndpointAssociationCount()
+}
+
 // Close releases resources held by the processor.
 func (p *Processor) Close() {
 	if p.sipFlow != nil {

@@ -56,6 +56,8 @@ func (StickySelectionPolicy) Select(input SelectionInput) bool {
 
 type Registry interface {
 	ActiveCalls() []Call
+	ActiveCallCount() int
+	EndpointAssociationCount() int
 	Call(callID string) (Call, bool)
 	CallIDsForEndpoint(endpoint string) []string
 	AssociateEndpoint(callID, endpoint string)
@@ -241,6 +243,23 @@ func (c *Core) ActiveCalls() []Call {
 		result = append(result, c.calls[elem.Value.(string)])
 	}
 	return result
+}
+
+// ActiveCallCount returns the number of calls without materializing the active
+// call collection.
+func (c *Core) ActiveCallCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.calls)
+}
+
+// EndpointAssociationCount returns the number of endpoint-to-call
+// associations. A shared endpoint contributes one association for each call
+// that owns it.
+func (c *Core) EndpointAssociationCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.associationCount
 }
 
 func (c *Core) Call(callID string) (Call, bool) {

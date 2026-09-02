@@ -217,8 +217,10 @@ func EnableConsoleCapture() {
 		return
 	}
 
+	Initialize()
 	disabledMux.Lock()
 	defer disabledMux.Unlock()
+	disabled = false
 
 	// Create a multi-handler that writes to both console buffer and original destination
 	consoleHandler := NewConsoleHandler(consoleBuffer, slog.LevelDebug)

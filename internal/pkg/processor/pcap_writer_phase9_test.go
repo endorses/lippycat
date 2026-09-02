@@ -142,3 +142,48 @@ func TestPhase9CompletionHookPolicyIsStableAcrossTerminalPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestPhase9FinalizationCallbacksCanInitiateShutdown(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*PcapWriterConfig, func())
+	}{
+		{
+			name: "file close callback",
+			configure: func(config *PcapWriterConfig, closeManager func()) {
+				config.OnFileClose = func(string) { closeManager() }
+			},
+		},
+		{
+			name: "call completion callback",
+			configure: func(config *PcapWriterConfig, closeManager func()) {
+				config.OnCallComplete = func(CallMetadata) { closeManager() }
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var manager *PcapWriterManager
+			shutdownErr := make(chan error, 1)
+			manager = newPhase8Manager(t, func(config *PcapWriterConfig) {
+				tt.configure(config, func() { shutdownErr <- manager.Close() })
+			})
+			require.NoError(t, manager.WritePacket("callback-shutdown", "alice", "bob", time.Now(), []byte("packet"), layers.LinkTypeEthernet, false))
+
+			finalizeDone := make(chan error, 1)
+			go func() {
+				_, err := manager.FinalizeCall("callback-shutdown", CallFinalizationProtocolComplete)
+				finalizeDone <- err
+			}()
+
+			select {
+			case err := <-shutdownErr:
+				require.NoError(t, err)
+			case <-time.After(time.Second):
+				t.Fatal("finalization callback deadlocked while initiating shutdown")
+			}
+			require.NoError(t, <-finalizeDone)
+		})
+	}
+}

@@ -94,18 +94,24 @@ func (f *FlowTracker) GetOrCreate(flowID string) *signatures.FlowContext {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	now := time.Now()
 	flow, ok := f.flows[flowID]
 	if !ok {
 		f.evictOldestBatchLocked()
 		flow = &signatures.FlowContext{
 			FlowID:    flowID,
-			FirstSeen: time.Now(),
-			LastSeen:  time.Now(),
+			FirstSeen: now,
+			LastSeen:  now,
 			Protocols: make([]string, 0),
 			Metadata:  make(map[string]interface{}),
 		}
 		f.flows[flowID] = flow
 		f.cleanupElements[flowID] = f.cleanupOrder.PushBack(flowID)
+	} else {
+		// Refresh activity while tracker membership is stable. This prevents
+		// cleanup from removing an expired flow between lookup and the detector's
+		// later protocol update, and covers cache-hit/no-cache packet paths too.
+		flow.Touch(now)
 	}
 
 	return flow

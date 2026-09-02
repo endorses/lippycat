@@ -126,13 +126,27 @@ type FlowContext struct {
 func (f *FlowContext) RecordDetection(protocol string, seen time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.LastSeen = seen
+	// Callers capture seen before acquiring this lock. Preserve the newest
+	// observation when concurrent detections arrive at the lock out of order so
+	// TTL cleanup cannot expire an active flow from a regressed timestamp.
+	if seen.After(f.LastSeen) {
+		f.LastSeen = seen
+	}
 	for _, existing := range f.Protocols {
 		if existing == protocol {
 			return
 		}
 	}
 	f.Protocols = append(f.Protocols, protocol)
+}
+
+// Touch advances the last activity timestamp without changing detection state.
+func (f *FlowContext) Touch(seen time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if seen.After(f.LastSeen) {
+		f.LastSeen = seen
+	}
 }
 
 // LastSeenTime returns the last activity timestamp.

@@ -722,6 +722,7 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 	if p.filterTarget != nil {
 		activeFilters = uint32(len(p.filterTarget.GetActiveFilters())) // #nosec G115
 	}
+	detectorStats := detector.GetDefault().Telemetry()
 
 	return &management.ConnectedHunter{
 		HunterId:             p.config.ProcessorID + "-local",
@@ -742,6 +743,20 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 			CpuPercent:                float32(stats.CPUPercent),
 			MemoryRssBytes:            stats.MemoryRSSBytes,
 			MemoryLimitBytes:          stats.MemoryLimitBytes,
+			Detector: &management.DetectorTelemetry{
+				FlowEntries:                 detectorStats.FlowEntries,
+				CacheEntries:                detectorStats.CacheEntries,
+				FlowEvictions:               detectorStats.FlowEvictions,
+				CacheEvictions:              detectorStats.CacheEvictions,
+				FlowExpiredRemovals:         detectorStats.FlowExpiredRemovals,
+				CacheExpiredRemovals:        detectorStats.CacheExpiredRemovals,
+				FlowPressureEpisodes:        detectorStats.FlowPressureEpisodes,
+				CachePressureEpisodes:       detectorStats.CachePressureEpisodes,
+				FlowLastEvictionDurationNs:  detectorStats.FlowLastEvictionDurationNs,
+				CacheLastEvictionDurationNs: detectorStats.CacheLastEvictionDurationNs,
+				FlowLastEvictionBatchSize:   detectorStats.FlowLastEvictionBatchSize,
+				CacheLastEvictionBatchSize:  detectorStats.CacheLastEvictionBatchSize,
+			},
 		},
 		Interfaces:   localSource.Interfaces(),
 		Capabilities: caps,

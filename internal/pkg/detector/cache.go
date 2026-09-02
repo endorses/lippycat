@@ -3,6 +3,7 @@ package detector
 import (
 	"container/heap"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
@@ -64,13 +65,18 @@ type DetectionCache struct {
 	// cleanupKeys and cleanupKeyIndex provide a stable, incrementally scanned
 	// schedule. They are kept in sync with entries while mu is write-locked so a
 	// cleanup tick never needs to scan the complete cache under one lock hold.
-	cleanupKeys     []string
-	cleanupKeyIndex map[string]int
-	cleanupCursor   int
-	mu              sync.RWMutex
-	done            chan struct{}
-	closeOnce       sync.Once
-	cleanupWG       sync.WaitGroup
+	cleanupKeys            []string
+	cleanupKeyIndex        map[string]int
+	cleanupCursor          int
+	mu                     sync.RWMutex
+	done                   chan struct{}
+	closeOnce              sync.Once
+	cleanupWG              sync.WaitGroup
+	totalEvictions         atomic.Uint64
+	expiredRemovals        atomic.Uint64
+	pressureEpisodes       atomic.Uint64
+	lastEvictionDurationNs atomic.Uint64
+	lastEvictionBatchSize  atomic.Uint64
 }
 
 // NewDetectionCache creates a new detection cache
@@ -109,6 +115,7 @@ func (c *DetectionCache) Get(flowID string) *signatures.DetectionResult {
 	// Check if expired
 	if time.Now().After(entry.expiresAt) {
 		c.removeLocked(flowID)
+		c.expiredRemovals.Add(1)
 		return nil
 	}
 
@@ -135,6 +142,8 @@ func (c *DetectionCache) evictOldestLocked(now time.Time) {
 	if c.maxEntries <= 0 || len(c.entries) < c.maxEntries {
 		return
 	}
+	started := time.Now()
+	c.pressureEpisodes.Add(1)
 
 	batchSize := c.maxEntries / 10
 	if batchSize < 1 {
@@ -173,6 +182,8 @@ func (c *DetectionCache) evictOldestLocked(now time.Time) {
 	for i := range c.evictionScratch {
 		c.removeLocked(c.evictionScratch[i].flowID)
 	}
+	evicted := len(c.evictionScratch)
+	c.totalEvictions.Add(uint64(evicted))
 	if c.capWarningDueLocked(now) {
 		logger.Warn("Detector cache cap reached, evicting oldest entry batch",
 			"max_entries", c.maxEntries,
@@ -180,6 +191,8 @@ func (c *DetectionCache) evictOldestLocked(now time.Time) {
 	}
 	clear(c.evictionScratch[:cap(c.evictionScratch)])
 	c.evictionScratch = c.evictionScratch[:0]
+	c.lastEvictionBatchSize.Store(uint64(evicted))
+	c.lastEvictionDurationNs.Store(uint64(time.Since(started).Nanoseconds()))
 }
 
 // capWarningDueLocked allows an immediate initial warning and then at most one
@@ -267,6 +280,7 @@ func (c *DetectionCache) cleanupExpiredBatchLocked(now time.Time, limit int) int
 		}
 		c.cleanupCursor++
 	}
+	c.expiredRemovals.Add(uint64(removed))
 	return removed
 }
 

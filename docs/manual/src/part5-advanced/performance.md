@@ -117,6 +117,82 @@ cause. If SIP drops increase, reduce offered traffic with a BPF filter, increase
 downstream service capacity, or investigate the other named capture and
 processing loss stages before assigning a root cause.
 
+## Detector Capacity and Retention
+
+The protocol detector defaults to 100,000 active flow contexts and 100,000
+cached results. Configure the bounds independently:
+
+```yaml
+detector:
+  max_flows: 100000
+  max_cache_entries: 100000
+```
+
+When a new key arrives at a full structure, the detector evicts an oldest 10%
+batch (at least one entry), then admits the key. This hysteresis avoids paying
+for eviction on every subsequent insertion. Flow victims have the oldest last
+activity; cache victims expire soonest. Capacity pressure is consequently a
+retention signal, not proof that packets were dropped.
+
+Lowering `detector.max_flows` reduces memory and the size of an individual
+eviction pause, but preserves protocol history for fewer flows. Under a working
+set larger than the cap, reclassification increases and a quiet long-lived flow
+can lose state. A higher cap improves retention and reduces eviction frequency
+at the cost of memory and larger 10% batches. `detector.max_cache_entries` has
+the same memory-versus-reclassification tradeoff. Zero or negative values
+disable the corresponding cap and should be used only with another reliable
+memory bound.
+
+Tune against representative high-cardinality traffic and change one cap at a
+time. A good setting makes resident memory plateau without recurring pressure
+on every heartbeat or worsening capture loss.
+
+### Acceptance Criteria
+
+Production release evidence must cover sustained-at-cap flow and cache
+benchmarks at 1,000, 10,000, and 100,000 entries and a concurrent detector
+worker benchmark. Between batch events, steady-state insertion must not scale
+linearly with cap. At the 100,000-entry default, an eviction batch must complete
+within **100 ms** on each supported production hardware class. This is the
+packet-buffer latency budget corresponding to the default hunter/tap batch
+timeout.
+
+Record average throughput, tail insertion latency, and eviction-batch latency.
+The 100 ms wall-clock result is release evidence tied to the host, toolchain,
+build, worker count, and fixture; it is not a portable CI threshold. CI should
+instead enforce cardinality scaling and allocation behavior.
+
+### Capacity Telemetry
+
+Detector telemetry appears below `HunterStats.detector` in each heartbeat; tap
+uses the same fields for its local source:
+
+| Fields | Semantics |
+|---|---|
+| `flow_entries`, `cache_entries` | Current gauges |
+| `flow_evictions`, `cache_evictions` | Cumulative capacity evictions |
+| `flow_expired_removals`, `cache_expired_removals` | Cumulative TTL removals |
+| `flow_pressure_episodes`, `cache_pressure_episodes` | Cumulative eviction-batch events |
+| `flow_last_eviction_duration_ns`, `cache_last_eviction_duration_ns` | Latest batch duration snapshots |
+| `flow_last_eviction_batch_size`, `cache_last_eviction_batch_size` | Latest batch-size snapshots |
+
+Counters are monotonic for one detector lifetime and reset when a new detector
+or capture process starts. Heartbeats are snapshots, so do not sum a counter
+across successive reports. Calculate non-negative per-source deltas and treat a
+lower value as a reset. For a fleet view, sum latest gauges per source and sum
+per-source counter deltas over the same interval. Account for sources joining
+or leaving the aggregate, and keep flow and cache values separate.
+
+The last eviction duration and last batch size describe the most recently
+completed event and replace their previous values. Do not sum or rate these
+last-event fields. Retain samples externally if a mean, maximum, or tail
+latency matters.
+
+Investigate when entry gauges stay close to their cap while pressure episodes
+rise on successive heartbeats, especially when eviction duration approaches
+100 ms. Correlate detector pressure with packet-buffer occupancy and named drop
+counters before assigning packet loss to detector pauses.
+
 ## GPU Acceleration
 
 GPU acceleration speeds up capture-side application-filter matching against values already extracted by the protocol parsers. It does not parse SIP or extract Call-IDs; those operations remain on the CPU.

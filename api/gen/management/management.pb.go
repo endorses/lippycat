@@ -986,8 +986,11 @@ type HunterStats struct {
 	CaptureBufferSipDrops uint64 `protobuf:"varint,11,opt,name=capture_buffer_sip_drops,json=captureBufferSipDrops,proto3" json:"capture_buffer_sip_drops,omitempty"`
 	// Packets shed after capture while admitting batches for delivery.
 	BatchChannelDrops uint64 `protobuf:"varint,12,opt,name=batch_channel_drops,json=batchChannelDrops,proto3" json:"batch_channel_drops,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Detector cache telemetry. Gauges are current values; counters are
+	// cumulative for the detector lifetime. Last-batch values are snapshots.
+	Detector      *DetectorTelemetry `protobuf:"bytes,13,opt,name=detector,proto3" json:"detector,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HunterStats) Reset() {
@@ -1102,6 +1105,13 @@ func (x *HunterStats) GetBatchChannelDrops() uint64 {
 		return x.BatchChannelDrops
 	}
 	return 0
+}
+
+func (x *HunterStats) GetDetector() *DetectorTelemetry {
+	if x != nil {
+		return x.Detector
+	}
+	return nil
 }
 
 // ProcessorHeartbeat response from processor
@@ -3108,6 +3118,139 @@ func (x *HunterStatusChangedEvent) GetNewStatus() HunterStatus {
 	return HunterStatus_STATUS_HEALTHY
 }
 
+// DetectorTelemetry reports bounded detector flow/cache behavior.
+type DetectorTelemetry struct {
+	state                       protoimpl.MessageState `protogen:"open.v1"`
+	FlowEntries                 uint64                 `protobuf:"varint,1,opt,name=flow_entries,json=flowEntries,proto3" json:"flow_entries,omitempty"`
+	CacheEntries                uint64                 `protobuf:"varint,2,opt,name=cache_entries,json=cacheEntries,proto3" json:"cache_entries,omitempty"`
+	FlowEvictions               uint64                 `protobuf:"varint,3,opt,name=flow_evictions,json=flowEvictions,proto3" json:"flow_evictions,omitempty"`
+	CacheEvictions              uint64                 `protobuf:"varint,4,opt,name=cache_evictions,json=cacheEvictions,proto3" json:"cache_evictions,omitempty"`
+	FlowExpiredRemovals         uint64                 `protobuf:"varint,5,opt,name=flow_expired_removals,json=flowExpiredRemovals,proto3" json:"flow_expired_removals,omitempty"`
+	CacheExpiredRemovals        uint64                 `protobuf:"varint,6,opt,name=cache_expired_removals,json=cacheExpiredRemovals,proto3" json:"cache_expired_removals,omitempty"`
+	FlowPressureEpisodes        uint64                 `protobuf:"varint,7,opt,name=flow_pressure_episodes,json=flowPressureEpisodes,proto3" json:"flow_pressure_episodes,omitempty"`
+	CachePressureEpisodes       uint64                 `protobuf:"varint,8,opt,name=cache_pressure_episodes,json=cachePressureEpisodes,proto3" json:"cache_pressure_episodes,omitempty"`
+	FlowLastEvictionDurationNs  uint64                 `protobuf:"varint,9,opt,name=flow_last_eviction_duration_ns,json=flowLastEvictionDurationNs,proto3" json:"flow_last_eviction_duration_ns,omitempty"`
+	CacheLastEvictionDurationNs uint64                 `protobuf:"varint,10,opt,name=cache_last_eviction_duration_ns,json=cacheLastEvictionDurationNs,proto3" json:"cache_last_eviction_duration_ns,omitempty"`
+	FlowLastEvictionBatchSize   uint64                 `protobuf:"varint,11,opt,name=flow_last_eviction_batch_size,json=flowLastEvictionBatchSize,proto3" json:"flow_last_eviction_batch_size,omitempty"`
+	CacheLastEvictionBatchSize  uint64                 `protobuf:"varint,12,opt,name=cache_last_eviction_batch_size,json=cacheLastEvictionBatchSize,proto3" json:"cache_last_eviction_batch_size,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
+}
+
+func (x *DetectorTelemetry) Reset() {
+	*x = DetectorTelemetry{}
+	mi := &file_management_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DetectorTelemetry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DetectorTelemetry) ProtoMessage() {}
+
+func (x *DetectorTelemetry) ProtoReflect() protoreflect.Message {
+	mi := &file_management_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DetectorTelemetry.ProtoReflect.Descriptor instead.
+func (*DetectorTelemetry) Descriptor() ([]byte, []int) {
+	return file_management_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *DetectorTelemetry) GetFlowEntries() uint64 {
+	if x != nil {
+		return x.FlowEntries
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetCacheEntries() uint64 {
+	if x != nil {
+		return x.CacheEntries
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetFlowEvictions() uint64 {
+	if x != nil {
+		return x.FlowEvictions
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetCacheEvictions() uint64 {
+	if x != nil {
+		return x.CacheEvictions
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetFlowExpiredRemovals() uint64 {
+	if x != nil {
+		return x.FlowExpiredRemovals
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetCacheExpiredRemovals() uint64 {
+	if x != nil {
+		return x.CacheExpiredRemovals
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetFlowPressureEpisodes() uint64 {
+	if x != nil {
+		return x.FlowPressureEpisodes
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetCachePressureEpisodes() uint64 {
+	if x != nil {
+		return x.CachePressureEpisodes
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetFlowLastEvictionDurationNs() uint64 {
+	if x != nil {
+		return x.FlowLastEvictionDurationNs
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetCacheLastEvictionDurationNs() uint64 {
+	if x != nil {
+		return x.CacheLastEvictionDurationNs
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetFlowLastEvictionBatchSize() uint64 {
+	if x != nil {
+		return x.FlowLastEvictionBatchSize
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetCacheLastEvictionBatchSize() uint64 {
+	if x != nil {
+		return x.CacheLastEvictionBatchSize
+	}
+	return 0
+}
+
 var File_management_proto protoreflect.FileDescriptor
 
 const file_management_proto_rawDesc = "" +
@@ -3153,7 +3296,7 @@ const file_management_proto_rawDesc = "" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x129\n" +
 	"\x06status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\x06status\x126\n" +
-	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xa4\x04\n" +
+	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xe8\x04\n" +
 	"\vHunterStats\x12)\n" +
 	"\x10packets_captured\x18\x01 \x01(\x04R\x0fpacketsCaptured\x12'\n" +
 	"\x0fpackets_matched\x18\x02 \x01(\x04R\x0epacketsMatched\x12+\n" +
@@ -3168,7 +3311,8 @@ const file_management_proto_rawDesc = "" +
 	"\x1ccapture_buffer_regular_drops\x18\n" +
 	" \x01(\x04R\x19captureBufferRegularDrops\x127\n" +
 	"\x18capture_buffer_sip_drops\x18\v \x01(\x04R\x15captureBufferSipDrops\x12.\n" +
-	"\x13batch_channel_drops\x18\f \x01(\x04R\x11batchChannelDrops\"\xc5\x01\n" +
+	"\x13batch_channel_drops\x18\f \x01(\x04R\x11batchChannelDrops\x12B\n" +
+	"\bdetector\x18\r \x01(\v2&.lippycat.management.DetectorTelemetryR\bdetector\"\xc5\x01\n" +
 	"\x12ProcessorHeartbeat\x12!\n" +
 	"\ftimestamp_ns\x18\x01 \x01(\x03R\vtimestampNs\x12<\n" +
 	"\x06status\x18\x02 \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\x12+\n" +
@@ -3312,7 +3456,21 @@ const file_management_proto_rawDesc = "" +
 	"\n" +
 	"old_status\x18\x02 \x01(\x0e2!.lippycat.management.HunterStatusR\toldStatus\x12@\n" +
 	"\n" +
-	"new_status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\tnewStatus*]\n" +
+	"new_status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\tnewStatus\"\x93\x05\n" +
+	"\x11DetectorTelemetry\x12!\n" +
+	"\fflow_entries\x18\x01 \x01(\x04R\vflowEntries\x12#\n" +
+	"\rcache_entries\x18\x02 \x01(\x04R\fcacheEntries\x12%\n" +
+	"\x0eflow_evictions\x18\x03 \x01(\x04R\rflowEvictions\x12'\n" +
+	"\x0fcache_evictions\x18\x04 \x01(\x04R\x0ecacheEvictions\x122\n" +
+	"\x15flow_expired_removals\x18\x05 \x01(\x04R\x13flowExpiredRemovals\x124\n" +
+	"\x16cache_expired_removals\x18\x06 \x01(\x04R\x14cacheExpiredRemovals\x124\n" +
+	"\x16flow_pressure_episodes\x18\a \x01(\x04R\x14flowPressureEpisodes\x126\n" +
+	"\x17cache_pressure_episodes\x18\b \x01(\x04R\x15cachePressureEpisodes\x12B\n" +
+	"\x1eflow_last_eviction_duration_ns\x18\t \x01(\x04R\x1aflowLastEvictionDurationNs\x12D\n" +
+	"\x1fcache_last_eviction_duration_ns\x18\n" +
+	" \x01(\x04R\x1bcacheLastEvictionDurationNs\x12@\n" +
+	"\x1dflow_last_eviction_batch_size\x18\v \x01(\x04R\x19flowLastEvictionBatchSize\x12B\n" +
+	"\x1ecache_last_eviction_batch_size\x18\f \x01(\x04R\x1acacheLastEvictionBatchSize*]\n" +
 	"\fHunterStatus\x12\x12\n" +
 	"\x0eSTATUS_HEALTHY\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_WARNING\x10\x01\x12\x10\n" +
@@ -3389,7 +3547,7 @@ func file_management_proto_rawDescGZIP() []byte {
 }
 
 var file_management_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_management_proto_goTypes = []any{
 	(HunterStatus)(0),                     // 0: lippycat.management.HunterStatus
 	(ProcessorStatus)(0),                  // 1: lippycat.management.ProcessorStatus
@@ -3434,6 +3592,7 @@ var file_management_proto_goTypes = []any{
 	(*ProcessorConnectedEvent)(nil),       // 40: lippycat.management.ProcessorConnectedEvent
 	(*ProcessorDisconnectedEvent)(nil),    // 41: lippycat.management.ProcessorDisconnectedEvent
 	(*HunterStatusChangedEvent)(nil),      // 42: lippycat.management.HunterStatusChangedEvent
+	(*DetectorTelemetry)(nil),             // 43: lippycat.management.DetectorTelemetry
 }
 var file_management_proto_depIdxs = []int32{
 	9,  // 0: lippycat.management.HunterRegistration.capabilities:type_name -> lippycat.management.HunterCapabilities
@@ -3441,75 +3600,76 @@ var file_management_proto_depIdxs = []int32{
 	11, // 2: lippycat.management.RegistrationResponse.config:type_name -> lippycat.management.ProcessorConfig
 	0,  // 3: lippycat.management.HunterHeartbeat.status:type_name -> lippycat.management.HunterStatus
 	13, // 4: lippycat.management.HunterHeartbeat.stats:type_name -> lippycat.management.HunterStats
-	1,  // 5: lippycat.management.ProcessorHeartbeat.status:type_name -> lippycat.management.ProcessorStatus
-	17, // 6: lippycat.management.FilterResponse.filters:type_name -> lippycat.management.Filter
-	2,  // 7: lippycat.management.Filter.type:type_name -> lippycat.management.FilterType
-	3,  // 8: lippycat.management.FilterUpdate.update_type:type_name -> lippycat.management.FilterUpdateType
-	17, // 9: lippycat.management.FilterUpdate.filter:type_name -> lippycat.management.Filter
-	17, // 10: lippycat.management.ProcessorFilterRequest.filter:type_name -> lippycat.management.Filter
-	22, // 11: lippycat.management.ProcessorFilterRequest.auth_token:type_name -> lippycat.management.AuthorizationToken
-	22, // 12: lippycat.management.ProcessorFilterDeleteRequest.auth_token:type_name -> lippycat.management.AuthorizationToken
-	22, // 13: lippycat.management.ProcessorFilterQuery.auth_token:type_name -> lippycat.management.AuthorizationToken
-	28, // 14: lippycat.management.StatusResponse.hunters:type_name -> lippycat.management.ConnectedHunter
-	29, // 15: lippycat.management.StatusResponse.processor_stats:type_name -> lippycat.management.ProcessorStats
-	0,  // 16: lippycat.management.ConnectedHunter.status:type_name -> lippycat.management.HunterStatus
-	13, // 17: lippycat.management.ConnectedHunter.stats:type_name -> lippycat.management.HunterStats
-	17, // 18: lippycat.management.ConnectedHunter.filters:type_name -> lippycat.management.Filter
-	9,  // 19: lippycat.management.ConnectedHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
-	1,  // 20: lippycat.management.ProcessorStats.status:type_name -> lippycat.management.ProcessorStatus
-	32, // 21: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
-	0,  // 22: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
-	9,  // 23: lippycat.management.AvailableHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
-	35, // 24: lippycat.management.TopologyResponse.processor:type_name -> lippycat.management.ProcessorNode
-	1,  // 25: lippycat.management.ProcessorNode.status:type_name -> lippycat.management.ProcessorStatus
-	28, // 26: lippycat.management.ProcessorNode.hunters:type_name -> lippycat.management.ConnectedHunter
-	35, // 27: lippycat.management.ProcessorNode.downstream_processors:type_name -> lippycat.management.ProcessorNode
-	4,  // 28: lippycat.management.ProcessorNode.node_type:type_name -> lippycat.management.NodeType
-	5,  // 29: lippycat.management.TopologyUpdate.update_type:type_name -> lippycat.management.TopologyUpdateType
-	38, // 30: lippycat.management.TopologyUpdate.hunter_connected:type_name -> lippycat.management.HunterConnectedEvent
-	39, // 31: lippycat.management.TopologyUpdate.hunter_disconnected:type_name -> lippycat.management.HunterDisconnectedEvent
-	40, // 32: lippycat.management.TopologyUpdate.processor_connected:type_name -> lippycat.management.ProcessorConnectedEvent
-	41, // 33: lippycat.management.TopologyUpdate.processor_disconnected:type_name -> lippycat.management.ProcessorDisconnectedEvent
-	42, // 34: lippycat.management.TopologyUpdate.hunter_status_changed:type_name -> lippycat.management.HunterStatusChangedEvent
-	28, // 35: lippycat.management.HunterConnectedEvent.hunter:type_name -> lippycat.management.ConnectedHunter
-	35, // 36: lippycat.management.ProcessorConnectedEvent.processor:type_name -> lippycat.management.ProcessorNode
-	0,  // 37: lippycat.management.HunterStatusChangedEvent.old_status:type_name -> lippycat.management.HunterStatus
-	0,  // 38: lippycat.management.HunterStatusChangedEvent.new_status:type_name -> lippycat.management.HunterStatus
-	6,  // 39: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
-	7,  // 40: lippycat.management.ManagementService.RegisterProcessor:input_type -> lippycat.management.ProcessorRegistration
-	12, // 41: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
-	15, // 42: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
-	15, // 43: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
-	26, // 44: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
-	17, // 45: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
-	20, // 46: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
-	30, // 47: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
-	33, // 48: lippycat.management.ManagementService.GetTopology:input_type -> lippycat.management.TopologyRequest
-	36, // 49: lippycat.management.ManagementService.SubscribeTopology:input_type -> lippycat.management.TopologySubscribeRequest
-	23, // 50: lippycat.management.ManagementService.UpdateFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterRequest
-	24, // 51: lippycat.management.ManagementService.DeleteFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterDeleteRequest
-	25, // 52: lippycat.management.ManagementService.GetFiltersFromProcessor:input_type -> lippycat.management.ProcessorFilterQuery
-	21, // 53: lippycat.management.ManagementService.RequestAuthToken:input_type -> lippycat.management.AuthTokenRequest
-	10, // 54: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
-	8,  // 55: lippycat.management.ManagementService.RegisterProcessor:output_type -> lippycat.management.ProcessorRegistrationResponse
-	14, // 56: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
-	16, // 57: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
-	18, // 58: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
-	27, // 59: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
-	19, // 60: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
-	19, // 61: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
-	31, // 62: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
-	34, // 63: lippycat.management.ManagementService.GetTopology:output_type -> lippycat.management.TopologyResponse
-	37, // 64: lippycat.management.ManagementService.SubscribeTopology:output_type -> lippycat.management.TopologyUpdate
-	19, // 65: lippycat.management.ManagementService.UpdateFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
-	19, // 66: lippycat.management.ManagementService.DeleteFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
-	16, // 67: lippycat.management.ManagementService.GetFiltersFromProcessor:output_type -> lippycat.management.FilterResponse
-	22, // 68: lippycat.management.ManagementService.RequestAuthToken:output_type -> lippycat.management.AuthorizationToken
-	54, // [54:69] is the sub-list for method output_type
-	39, // [39:54] is the sub-list for method input_type
-	39, // [39:39] is the sub-list for extension type_name
-	39, // [39:39] is the sub-list for extension extendee
-	0,  // [0:39] is the sub-list for field type_name
+	43, // 5: lippycat.management.HunterStats.detector:type_name -> lippycat.management.DetectorTelemetry
+	1,  // 6: lippycat.management.ProcessorHeartbeat.status:type_name -> lippycat.management.ProcessorStatus
+	17, // 7: lippycat.management.FilterResponse.filters:type_name -> lippycat.management.Filter
+	2,  // 8: lippycat.management.Filter.type:type_name -> lippycat.management.FilterType
+	3,  // 9: lippycat.management.FilterUpdate.update_type:type_name -> lippycat.management.FilterUpdateType
+	17, // 10: lippycat.management.FilterUpdate.filter:type_name -> lippycat.management.Filter
+	17, // 11: lippycat.management.ProcessorFilterRequest.filter:type_name -> lippycat.management.Filter
+	22, // 12: lippycat.management.ProcessorFilterRequest.auth_token:type_name -> lippycat.management.AuthorizationToken
+	22, // 13: lippycat.management.ProcessorFilterDeleteRequest.auth_token:type_name -> lippycat.management.AuthorizationToken
+	22, // 14: lippycat.management.ProcessorFilterQuery.auth_token:type_name -> lippycat.management.AuthorizationToken
+	28, // 15: lippycat.management.StatusResponse.hunters:type_name -> lippycat.management.ConnectedHunter
+	29, // 16: lippycat.management.StatusResponse.processor_stats:type_name -> lippycat.management.ProcessorStats
+	0,  // 17: lippycat.management.ConnectedHunter.status:type_name -> lippycat.management.HunterStatus
+	13, // 18: lippycat.management.ConnectedHunter.stats:type_name -> lippycat.management.HunterStats
+	17, // 19: lippycat.management.ConnectedHunter.filters:type_name -> lippycat.management.Filter
+	9,  // 20: lippycat.management.ConnectedHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
+	1,  // 21: lippycat.management.ProcessorStats.status:type_name -> lippycat.management.ProcessorStatus
+	32, // 22: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
+	0,  // 23: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
+	9,  // 24: lippycat.management.AvailableHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
+	35, // 25: lippycat.management.TopologyResponse.processor:type_name -> lippycat.management.ProcessorNode
+	1,  // 26: lippycat.management.ProcessorNode.status:type_name -> lippycat.management.ProcessorStatus
+	28, // 27: lippycat.management.ProcessorNode.hunters:type_name -> lippycat.management.ConnectedHunter
+	35, // 28: lippycat.management.ProcessorNode.downstream_processors:type_name -> lippycat.management.ProcessorNode
+	4,  // 29: lippycat.management.ProcessorNode.node_type:type_name -> lippycat.management.NodeType
+	5,  // 30: lippycat.management.TopologyUpdate.update_type:type_name -> lippycat.management.TopologyUpdateType
+	38, // 31: lippycat.management.TopologyUpdate.hunter_connected:type_name -> lippycat.management.HunterConnectedEvent
+	39, // 32: lippycat.management.TopologyUpdate.hunter_disconnected:type_name -> lippycat.management.HunterDisconnectedEvent
+	40, // 33: lippycat.management.TopologyUpdate.processor_connected:type_name -> lippycat.management.ProcessorConnectedEvent
+	41, // 34: lippycat.management.TopologyUpdate.processor_disconnected:type_name -> lippycat.management.ProcessorDisconnectedEvent
+	42, // 35: lippycat.management.TopologyUpdate.hunter_status_changed:type_name -> lippycat.management.HunterStatusChangedEvent
+	28, // 36: lippycat.management.HunterConnectedEvent.hunter:type_name -> lippycat.management.ConnectedHunter
+	35, // 37: lippycat.management.ProcessorConnectedEvent.processor:type_name -> lippycat.management.ProcessorNode
+	0,  // 38: lippycat.management.HunterStatusChangedEvent.old_status:type_name -> lippycat.management.HunterStatus
+	0,  // 39: lippycat.management.HunterStatusChangedEvent.new_status:type_name -> lippycat.management.HunterStatus
+	6,  // 40: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
+	7,  // 41: lippycat.management.ManagementService.RegisterProcessor:input_type -> lippycat.management.ProcessorRegistration
+	12, // 42: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
+	15, // 43: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
+	15, // 44: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
+	26, // 45: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
+	17, // 46: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
+	20, // 47: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
+	30, // 48: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
+	33, // 49: lippycat.management.ManagementService.GetTopology:input_type -> lippycat.management.TopologyRequest
+	36, // 50: lippycat.management.ManagementService.SubscribeTopology:input_type -> lippycat.management.TopologySubscribeRequest
+	23, // 51: lippycat.management.ManagementService.UpdateFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterRequest
+	24, // 52: lippycat.management.ManagementService.DeleteFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterDeleteRequest
+	25, // 53: lippycat.management.ManagementService.GetFiltersFromProcessor:input_type -> lippycat.management.ProcessorFilterQuery
+	21, // 54: lippycat.management.ManagementService.RequestAuthToken:input_type -> lippycat.management.AuthTokenRequest
+	10, // 55: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
+	8,  // 56: lippycat.management.ManagementService.RegisterProcessor:output_type -> lippycat.management.ProcessorRegistrationResponse
+	14, // 57: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
+	16, // 58: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
+	18, // 59: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
+	27, // 60: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
+	19, // 61: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
+	19, // 62: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
+	31, // 63: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
+	34, // 64: lippycat.management.ManagementService.GetTopology:output_type -> lippycat.management.TopologyResponse
+	37, // 65: lippycat.management.ManagementService.SubscribeTopology:output_type -> lippycat.management.TopologyUpdate
+	19, // 66: lippycat.management.ManagementService.UpdateFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
+	19, // 67: lippycat.management.ManagementService.DeleteFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
+	16, // 68: lippycat.management.ManagementService.GetFiltersFromProcessor:output_type -> lippycat.management.FilterResponse
+	22, // 69: lippycat.management.ManagementService.RequestAuthToken:output_type -> lippycat.management.AuthorizationToken
+	55, // [55:70] is the sub-list for method output_type
+	40, // [40:55] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_management_proto_init() }
@@ -3530,7 +3690,7 @@ func file_management_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_management_proto_rawDesc), len(file_management_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   37,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

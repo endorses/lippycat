@@ -30,6 +30,9 @@ func TestManagerHeartbeatPreservesNamedLossCounters(t *testing.T) {
 		CaptureBufferRegularDrops: 4,
 		CaptureBufferSipDrops:     2,
 		BatchChannelDrops:         3,
+		Detector: &management.DetectorTelemetry{
+			FlowEntries: 42,
+		},
 	}
 	manager.UpdateHeartbeat("hunter-1", 123, management.HunterStatus_STATUS_WARNING, stats)
 
@@ -39,4 +42,7 @@ func TestManagerHeartbeatPreservesNamedLossCounters(t *testing.T) {
 	require.Equal(t, uint64(4), hunter.CaptureBufferRegularDrops)
 	require.Equal(t, uint64(2), hunter.CaptureBufferSIPDrops)
 	require.Equal(t, uint64(3), hunter.BatchChannelDrops)
+	require.Equal(t, uint64(42), hunter.Detector.FlowEntries)
+	stats.Detector.FlowEntries = 99
+	require.Equal(t, uint64(42), hunter.Detector.FlowEntries, "heartbeat telemetry must be snapshotted")
 }

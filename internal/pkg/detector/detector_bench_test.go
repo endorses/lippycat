@@ -6,6 +6,8 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -252,6 +254,75 @@ func BenchmarkDetectorBatchEvictionAtCap(b *testing.B) {
 	}
 }
 
+// BenchmarkDetectorContentionAtCap models concurrent detector workers creating
+// previously unseen flows while the bounded maps remain under steady pressure.
+// Alongside aggregate throughput it reports operation tail latency and the p99
+// wall time for a worker-local batch of ten events. The latter is the relevant
+// packet-buffer pause signal: on supported production hardware its 100,000-entry
+// result must remain below the configured packet-buffer latency budget.
+//
+// Capacity comparisons are the scaling acceptance test. Steady-state insertion
+// should remain sublinear as the cap grows; a near-10x latency increase for a
+// 10x cap increase indicates that eviction has regressed to a full linear scan.
+func BenchmarkDetectorContentionAtCap(b *testing.B) {
+	result := &signatures.DetectionResult{Protocol: "TLS", CacheStrategy: signatures.CacheSession}
+
+	for _, capacity := range detectorInsertionCaps {
+		capacity := capacity
+		b.Run(fmt.Sprintf("FlowTracker/cap_%d", capacity), func(b *testing.B) {
+			tracker := detector.NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(tracker.Close)
+			for i := 0; i < capacity; i++ {
+				tracker.GetOrCreate("seed-flow-" + strconv.Itoa(i))
+			}
+			tracker.GetOrCreate("warm-pressure")
+
+			var sequence atomic.Uint64
+			latency := newConcurrentInsertionLatencyRecorder()
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				local := newInsertionLatencyRecorder()
+				defer latency.Merge(local)
+				for pb.Next() {
+					key := "contended-flow-" + strconv.FormatUint(sequence.Add(1), 10)
+					started := time.Now()
+					tracker.GetOrCreate(key)
+					local.Record(time.Since(started))
+				}
+			})
+			b.StopTimer()
+			latency.Report(b)
+		})
+
+		b.Run(fmt.Sprintf("DetectionCache/cap_%d", capacity), func(b *testing.B) {
+			cache := detector.NewDetectionCacheWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(cache.Close)
+			for i := 0; i < capacity; i++ {
+				cache.Set("seed-flow-"+strconv.Itoa(i), result)
+			}
+			cache.Set("warm-pressure", result)
+
+			var sequence atomic.Uint64
+			latency := newConcurrentInsertionLatencyRecorder()
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				local := newInsertionLatencyRecorder()
+				defer latency.Merge(local)
+				for pb.Next() {
+					key := "contended-flow-" + strconv.FormatUint(sequence.Add(1), 10)
+					started := time.Now()
+					cache.Set(key, result)
+					local.Record(time.Since(started))
+				}
+			})
+			b.StopTimer()
+			latency.Report(b)
+		})
+	}
+}
+
 func detectorEvictionBatchSize(capacity int) int {
 	batchSize := capacity / 10
 	if batchSize < 1 {
@@ -274,6 +345,49 @@ type insertionLatencyRecorder struct {
 	batchCount int
 	total      time.Duration
 	maximum    time.Duration
+}
+
+type concurrentInsertionLatencyRecorder struct {
+	mu         sync.Mutex
+	insertions []time.Duration
+	batches    []time.Duration
+	maximum    time.Duration
+}
+
+func newConcurrentInsertionLatencyRecorder() *concurrentInsertionLatencyRecorder {
+	return &concurrentInsertionLatencyRecorder{
+		insertions: make([]time.Duration, 0, detectorLatencySampleSize),
+		batches:    make([]time.Duration, 0, detectorLatencySampleSize),
+	}
+}
+
+func (r *concurrentInsertionLatencyRecorder) Merge(local *insertionLatencyRecorder) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.insertions = appendDurationSamples(r.insertions, local.insertions)
+	r.batches = appendDurationSamples(r.batches, local.batches)
+	if local.maximum > r.maximum {
+		r.maximum = local.maximum
+	}
+}
+
+func appendDurationSamples(destination, source []time.Duration) []time.Duration {
+	remaining := detectorLatencySampleSize - len(destination)
+	if remaining <= 0 {
+		return destination
+	}
+	if len(source) > remaining {
+		source = source[:remaining]
+	}
+	return append(destination, source...)
+}
+
+func (r *concurrentInsertionLatencyRecorder) Report(b *testing.B) {
+	b.Helper()
+	b.ReportMetric(float64(durationPercentile(r.insertions, 0.95)), "p95-ns/event")
+	b.ReportMetric(float64(durationPercentile(r.insertions, 0.99)), "p99-ns/event")
+	b.ReportMetric(float64(r.maximum), "max-ns/event")
+	b.ReportMetric(float64(durationPercentile(r.batches, 0.99)), "p99-ns/10-event-batch")
 }
 
 func newInsertionLatencyRecorder() *insertionLatencyRecorder {

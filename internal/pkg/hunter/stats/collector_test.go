@@ -201,6 +201,9 @@ func TestToProto(t *testing.T) {
 	if proto.MemoryLimitBytes != 4294967296 {
 		t.Errorf("Expected proto.MemoryLimitBytes 4294967296, got %d", proto.MemoryLimitBytes)
 	}
+	if proto.Detector == nil {
+		t.Fatal("Expected detector telemetry in heartbeat stats")
+	}
 }
 
 func TestToProto_WithUnavailableCPU(t *testing.T) {

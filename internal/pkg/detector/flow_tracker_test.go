@@ -31,14 +31,59 @@ func TestFlowTrackerEvictsOldestBatch(t *testing.T) {
 }
 
 func TestFlowTrackerBatchEvictionMinimumAndHardCap(t *testing.T) {
-	tracker := NewFlowTrackerWithMaxEntries(time.Hour, 5)
-	t.Cleanup(tracker.Close)
+	for _, capacity := range []int{1, 2, 5, 9, 20, 100} {
+		t.Run(fmt.Sprintf("capacity_%d", capacity), func(t *testing.T) {
+			tracker := NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+			t.Cleanup(tracker.Close)
 
-	for i := 0; i < 100; i++ {
-		tracker.GetOrCreate(fmt.Sprintf("flow-%03d", i))
-		require.LessOrEqual(t, tracker.Size(), 5)
+			base := time.Now()
+			for i := 0; i < capacity; i++ {
+				tracker.GetOrCreate(fmt.Sprintf("flow-%03d", i)).Touch(base.Add(time.Duration(i) * time.Second))
+			}
+
+			// Updating an existing key at the cap must neither evict nor grow.
+			updated := tracker.GetOrCreate(fmt.Sprintf("flow-%03d", capacity-1))
+			require.Equal(t, capacity, tracker.Size())
+
+			inserted := tracker.GetOrCreate("pending")
+			batchSize := capacity / 10
+			if batchSize < 1 {
+				batchSize = 1
+			}
+			wantSize := capacity - batchSize + 1
+			assert.Equal(t, wantSize, tracker.Size(), "eviction must leave the configured hysteresis")
+			assert.Same(t, inserted, tracker.Get("pending"))
+			for i := 0; i < batchSize; i++ {
+				assert.Nil(t, tracker.Get(fmt.Sprintf("flow-%03d", i)), "oldest flow %d was retained", i)
+			}
+			if batchSize < capacity {
+				assert.Same(t, updated, tracker.Get(fmt.Sprintf("flow-%03d", capacity-1)))
+				assert.NotNil(t, tracker.Get(fmt.Sprintf("flow-%03d", batchSize)))
+			}
+
+			// The headroom left by hysteresis must accept further inserts without
+			// exceeding the hard cap.
+			for i := 1; i < batchSize; i++ {
+				tracker.GetOrCreate(fmt.Sprintf("pending-%03d", i))
+				require.LessOrEqual(t, tracker.Size(), capacity)
+			}
+			assert.Equal(t, capacity, tracker.Size())
+		})
 	}
-	assert.Equal(t, 5, tracker.Size(), "capacities below ten must evict at least one entry")
+}
+
+func TestFlowTrackerDisabledCapDoesNotEvict(t *testing.T) {
+	for _, capacity := range []int{0, -1} {
+		t.Run(fmt.Sprintf("capacity_%d", capacity), func(t *testing.T) {
+			tracker := NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+			t.Cleanup(tracker.Close)
+
+			for i := 0; i < 25; i++ {
+				tracker.GetOrCreate(fmt.Sprintf("flow-%03d", i))
+			}
+			assert.Equal(t, 25, tracker.Size())
+		})
+	}
 }
 
 func TestFlowTrackerBatchEvictionRecoversFromOversizedMap(t *testing.T) {

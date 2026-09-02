@@ -39,6 +39,7 @@ type ConnectedHunter struct {
 	CpuPercent       float32 // CPU usage percentage (0-100, -1 if unavailable)
 	MemoryRssBytes   uint64  // Process RSS memory in bytes
 	MemoryLimitBytes uint64  // Cgroup memory limit in bytes (0 if no limit)
+	Detector         *management.DetectorTelemetry
 }
 
 // Manager manages connected hunter nodes
@@ -178,6 +179,12 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 			hunter.CpuPercent = stats.CpuPercent
 			hunter.MemoryRssBytes = stats.MemoryRssBytes
 			hunter.MemoryLimitBytes = stats.MemoryLimitBytes
+			if stats.Detector == nil {
+				hunter.Detector = nil
+			} else {
+				detectorSnapshot := *stats.Detector
+				hunter.Detector = &detectorSnapshot
+			}
 
 			// Check if filter count changed
 			oldFilters := hunter.ActiveFilters

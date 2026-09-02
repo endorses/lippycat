@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"container/list"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
@@ -19,17 +20,22 @@ const (
 
 // FlowTracker manages flow contexts for stateful protocol detection
 type FlowTracker struct {
-	flows           map[string]*signatures.FlowContext
-	ttl             time.Duration
-	maxEntries      int
-	lastCapWarning  time.Time
-	evictionScratch []flowEvictionCandidate
-	cleanupOrder    *list.List
-	cleanupElements map[string]*list.Element
-	mu              sync.RWMutex
-	done            chan struct{}
-	closeOnce       sync.Once
-	cleanupDone     chan struct{}
+	flows                  map[string]*signatures.FlowContext
+	ttl                    time.Duration
+	maxEntries             int
+	lastCapWarning         time.Time
+	evictionScratch        []flowEvictionCandidate
+	cleanupOrder           *list.List
+	cleanupElements        map[string]*list.Element
+	mu                     sync.RWMutex
+	done                   chan struct{}
+	closeOnce              sync.Once
+	cleanupDone            chan struct{}
+	totalEvictions         atomic.Uint64
+	expiredRemovals        atomic.Uint64
+	pressureEpisodes       atomic.Uint64
+	lastEvictionDurationNs atomic.Uint64
+	lastEvictionBatchSize  atomic.Uint64
 }
 
 type flowEvictionCandidate struct {
@@ -121,6 +127,8 @@ func (f *FlowTracker) evictOldestBatchLocked() {
 	if f.maxEntries <= 0 || len(f.flows) < f.maxEntries {
 		return
 	}
+	started := time.Now()
+	f.pressureEpisodes.Add(1)
 
 	batchSize := f.maxEntries / 10
 	if batchSize < 1 {
@@ -158,6 +166,7 @@ func (f *FlowTracker) evictOldestBatchLocked() {
 	for i := 0; i < batchSize; i++ {
 		f.deleteLocked(f.evictionScratch[i].flowID)
 	}
+	f.totalEvictions.Add(uint64(batchSize))
 	if now := time.Now(); f.capWarningEligibleLocked(now) {
 		logger.Warn("Detector flow cap reached, evicting oldest flow batch",
 			"max_entries", f.maxEntries,
@@ -166,6 +175,8 @@ func (f *FlowTracker) evictOldestBatchLocked() {
 	}
 	clear(f.evictionScratch[:cap(f.evictionScratch)])
 	f.evictionScratch = f.evictionScratch[:0]
+	f.lastEvictionBatchSize.Store(uint64(batchSize))
+	f.lastEvictionDurationNs.Store(uint64(time.Since(started).Nanoseconds()))
 }
 
 // capWarningEligibleLocked reports whether cap pressure may be logged now.
@@ -269,6 +280,7 @@ func (f *FlowTracker) cleanupExpired(now time.Time, limit int) int {
 		}
 		f.cleanupOrder.MoveToBack(element)
 	}
+	f.expiredRemovals.Add(uint64(removed))
 	return removed
 }
 

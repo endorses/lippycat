@@ -311,6 +311,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 				CpuPercent:                h.CpuPercent,
 				MemoryRssBytes:            h.MemoryRssBytes,
 				MemoryLimitBytes:          h.MemoryLimitBytes,
+				Detector:                  h.Detector,
 			},
 			Interfaces:   h.Interfaces,
 			Capabilities: h.Capabilities, // Hunter capabilities (filter types, etc.)
@@ -553,6 +554,7 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 				CpuPercent:                h.CpuPercent,
 				MemoryRssBytes:            h.MemoryRssBytes,
 				MemoryLimitBytes:          h.MemoryLimitBytes,
+				Detector:                  h.Detector,
 			},
 			Interfaces:   h.Interfaces,
 			Capabilities: h.Capabilities,

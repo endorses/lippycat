@@ -56,6 +56,22 @@ These top-level keys apply to all commands.
 
 ---
 
+## Protocol Detector Capacity
+
+These keys bound state retained by the protocol detector. At a positive cap,
+inserting a new key when full evicts an oldest 10% batch (with a minimum of one)
+before admitting the key. A value of zero or less disables cap-based eviction.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `detector.max_flows` | integer | `100000` | Maximum active flow contexts. Lower values reduce memory and eviction-pause size but retain less stateful protocol history under high cardinality. |
+| `detector.max_cache_entries` | integer | `100000` | Maximum cached detection results. Lower values reduce memory but cause more reclassification when the working set exceeds the cap. |
+
+See [Performance Optimization](../part5-advanced/performance.md#detector-capacity-and-retention)
+for production tuning and telemetry interpretation.
+
+---
+
 ## Structured Protocol Logging
 
 These keys configure the optional normalized protocol logs for `sniff`,

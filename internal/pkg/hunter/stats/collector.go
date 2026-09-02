@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 )
 
@@ -108,6 +109,7 @@ func (c *Collector) GetAll() (captured, matched, forwarded, dropped, bufferBytes
 // ToProto converts statistics to protobuf HunterStats message
 func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 	batchDrops := c.packetsDropped.Load()
+	detectorStats := detector.GetDefault().Telemetry()
 	return &management.HunterStats{
 		PacketsCaptured:   c.packetsCaptured.Load(),
 		PacketsMatched:    c.packetsMatched.Load(),
@@ -119,5 +121,19 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 		CpuPercent:        float32(c.cpuPercent.Load().(float64)),
 		MemoryRssBytes:    c.memoryRSSBytes.Load(),
 		MemoryLimitBytes:  c.memoryLimitBytes.Load(),
+		Detector: &management.DetectorTelemetry{
+			FlowEntries:                 detectorStats.FlowEntries,
+			CacheEntries:                detectorStats.CacheEntries,
+			FlowEvictions:               detectorStats.FlowEvictions,
+			CacheEvictions:              detectorStats.CacheEvictions,
+			FlowExpiredRemovals:         detectorStats.FlowExpiredRemovals,
+			CacheExpiredRemovals:        detectorStats.CacheExpiredRemovals,
+			FlowPressureEpisodes:        detectorStats.FlowPressureEpisodes,
+			CachePressureEpisodes:       detectorStats.CachePressureEpisodes,
+			FlowLastEvictionDurationNs:  detectorStats.FlowLastEvictionDurationNs,
+			CacheLastEvictionDurationNs: detectorStats.CacheLastEvictionDurationNs,
+			FlowLastEvictionBatchSize:   detectorStats.FlowLastEvictionBatchSize,
+			CacheLastEvictionBatchSize:  detectorStats.CacheLastEvictionBatchSize,
+		},
 	}
 }

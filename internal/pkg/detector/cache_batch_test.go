@@ -50,16 +50,64 @@ func TestDetectionCacheCapWarningRateLimit(t *testing.T) {
 }
 
 func TestDetectionCacheBatchEvictionMaintainsHardCap(t *testing.T) {
-	for _, capacity := range []int{1, 2, 9, 10, 100} {
+	for _, capacity := range []int{1, 2, 5, 9, 20, 100} {
 		t.Run(fmt.Sprintf("capacity_%d", capacity), func(t *testing.T) {
 			cache := NewDetectionCacheWithMaxEntries(time.Hour, capacity)
 			t.Cleanup(cache.Close)
-			result := &signatures.DetectionResult{Protocol: "TEST"}
+			original := &signatures.DetectionResult{Protocol: "ORIGINAL"}
+			updated := &signatures.DetectionResult{Protocol: "UPDATED"}
+			base := time.Now()
 
-			for i := 0; i < capacity*3; i++ {
-				cache.Set(fmt.Sprintf("flow-%d", i), result)
+			for i := 0; i < capacity; i++ {
+				flowID := fmt.Sprintf("flow-%03d", i)
+				cache.Set(flowID, original)
+				cache.mu.Lock()
+				cache.entries[flowID].expiresAt = base.Add(time.Duration(i) * time.Second)
+				cache.mu.Unlock()
 				require.LessOrEqual(t, cache.Size(), capacity)
 			}
+
+			// Updating an existing key at the cap must not cause pressure eviction.
+			newestID := fmt.Sprintf("flow-%03d", capacity-1)
+			cache.Set(newestID, updated)
+			require.Equal(t, capacity, cache.Size())
+			assert.Same(t, updated, cache.Get(newestID))
+
+			cache.Set("pending", original)
+			batchSize := capacity / 10
+			if batchSize < 1 {
+				batchSize = 1
+			}
+			wantSize := capacity - batchSize + 1
+			assert.Equal(t, wantSize, cache.Size(), "eviction must leave the configured hysteresis")
+			assert.NotNil(t, cache.Get("pending"))
+			for i := 0; i < batchSize; i++ {
+				assert.Nil(t, cache.Get(fmt.Sprintf("flow-%03d", i)), "oldest cache entry %d was retained", i)
+			}
+			if batchSize < capacity {
+				assert.NotNil(t, cache.Get(fmt.Sprintf("flow-%03d", batchSize)))
+			}
+
+			for i := 1; i < batchSize; i++ {
+				cache.Set(fmt.Sprintf("pending-%03d", i), original)
+				require.LessOrEqual(t, cache.Size(), capacity)
+			}
+			assert.Equal(t, capacity, cache.Size())
+		})
+	}
+}
+
+func TestDetectionCacheDisabledCapDoesNotEvict(t *testing.T) {
+	result := &signatures.DetectionResult{Protocol: "TEST"}
+	for _, capacity := range []int{0, -1} {
+		t.Run(fmt.Sprintf("capacity_%d", capacity), func(t *testing.T) {
+			cache := NewDetectionCacheWithMaxEntries(time.Hour, capacity)
+			t.Cleanup(cache.Close)
+
+			for i := 0; i < 25; i++ {
+				cache.Set(fmt.Sprintf("flow-%03d", i), result)
+			}
+			assert.Equal(t, 25, cache.Size())
 		})
 	}
 }

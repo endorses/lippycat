@@ -598,6 +598,55 @@ lc sniff voip --max-tcp-buffers 2000
 lc sniff voip --tcp-performance-mode minimal
 ```
 
+### Detector Capacity and Retention
+
+The stateful protocol detector bounds both active flow state and cached
+detection results. The defaults are 100,000 entries for each structure:
+
+```yaml
+detector:
+  max_flows: 100000
+  max_cache_entries: 100000
+```
+
+Reaching either cap is **capacity pressure**, not a packet-drop counter. On a
+new key at the cap, the detector removes an oldest 10% batch (at least one
+entry) to create hysteresis before admitting the new key. Flow state is ordered
+by last activity; cached results are ordered by expiration. Previously seen
+traffic whose state was evicted may therefore need to be classified again, and
+stateful detection can lose history for that flow.
+
+Lowering `detector.max_flows` bounds memory more tightly and makes each pressure
+batch smaller, which can improve worst-case detector pauses on constrained
+hosts. The cost is shorter retention under high flow cardinality: more flows
+are reclassified and long-lived but quiet flows may lose protocol history.
+Raising the cap retains more history and reduces pressure frequency, but uses
+more memory and makes each 10% eviction event larger. Tune
+`detector.max_cache_entries` with the same principle. Values of zero or less
+disable that cap and are not recommended without an external memory bound.
+
+Change one cap at a time under a representative flow mix. Confirm that resident
+memory plateaus, packet loss does not increase, and pressure episodes do not
+repeat continuously. A continuously rising eviction count indicates working-set
+cardinality above the configured cap; it does not by itself prove overload.
+
+### Detector Performance Acceptance
+
+Release qualification runs the sustained-at-cap detector benchmarks at 1,000,
+10,000, and 100,000 entries for both flow tracking and detection caching, plus
+the concurrent-worker benchmark. Accept a change only when ordinary insertions
+between eviction events no longer grow linearly with the configured cap and the
+100,000-entry eviction batch remains below **100 ms** on every supported
+production hardware class. The 100 ms limit is the packet-buffer latency budget
+derived from the default hunter/tap batch timeout.
+
+Record average throughput together with tail insertion and eviction-batch
+latency; throughput alone can hide a capture-visible pause. Absolute timings are
+release evidence for the tested host, kernel, Go toolchain, build tags, worker
+count, and traffic fixture. They are not hardware-independent CI thresholds;
+automated regression checks should enforce cardinality scaling and allocation
+behavior instead.
+
 ### Identifying Memory Leaks
 
 ```bash
@@ -609,6 +658,40 @@ top -p $(pgrep -f 'lc (sniff|hunt|process|tap)')
 ```
 
 ## Monitoring and Diagnostics
+
+### Detector Capacity Telemetry
+
+Detector telemetry is nested under each `HunterStats.detector` heartbeat; tap
+reports the same fields for its local capture source:
+
+| Fields | Semantics |
+|---|---|
+| `flow_entries`, `cache_entries` | Current gauges |
+| `flow_evictions`, `cache_evictions` | Cumulative entries removed to make capacity headroom |
+| `flow_expired_removals`, `cache_expired_removals` | Cumulative TTL removals |
+| `flow_pressure_episodes`, `cache_pressure_episodes` | Cumulative eviction-batch events |
+| `flow_last_eviction_duration_ns`, `cache_last_eviction_duration_ns` | Most recent batch duration snapshots |
+| `flow_last_eviction_batch_size`, `cache_last_eviction_batch_size` | Most recent batch-size snapshots |
+
+Counters are monotonic for the lifetime of that detector and reset when a new
+detector/capture process starts. Heartbeats are snapshots: never sum cumulative
+counters across successive reports. Derive rates from non-negative deltas per
+source, treating a lower value as a reset. For fleet totals, sum current gauges
+from the latest heartbeat per source and sum per-source counter deltas over the
+same interval; source connection or removal changes membership and must not be
+misread as detector activity. Keep flow and cache components separate.
+
+For an eviction event, the last batch size and last duration describe only the
+most recently completed event. Do not sum these fields across time or derive a
+rate from them. Retain samples externally when a mean, maximum, or tail-latency
+alert is required.
+
+Alert on sustained behavior rather than one batch: entry gauges repeatedly near
+the cap, pressure episodes increasing every heartbeat, and eviction duration
+approaching the 100 ms production budget together indicate that the configured
+retention does not fit the workload or the host. Correlate this with capture
+buffer occupancy and packet-drop telemetry before attributing packet loss to
+the detector.
 
 ### Real-Time Monitoring
 

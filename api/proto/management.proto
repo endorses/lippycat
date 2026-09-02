@@ -229,6 +229,10 @@ message HunterStats {
 
     // Packets shed after capture while admitting batches for delivery.
     uint64 batch_channel_drops = 12;
+
+    // Detector cache telemetry. Gauges are current values; counters are
+    // cumulative for the detector lifetime. Last-batch values are snapshots.
+    DetectorTelemetry detector = 13;
 }
 
 // ProcessorHeartbeat response from processor
@@ -737,4 +741,20 @@ message HunterStatusChangedEvent {
 
     // New status
     HunterStatus new_status = 3;
+}
+
+// DetectorTelemetry reports bounded detector flow/cache behavior.
+message DetectorTelemetry {
+    uint64 flow_entries = 1;
+    uint64 cache_entries = 2;
+    uint64 flow_evictions = 3;
+    uint64 cache_evictions = 4;
+    uint64 flow_expired_removals = 5;
+    uint64 cache_expired_removals = 6;
+    uint64 flow_pressure_episodes = 7;
+    uint64 cache_pressure_episodes = 8;
+    uint64 flow_last_eviction_duration_ns = 9;
+    uint64 cache_last_eviction_duration_ns = 10;
+    uint64 flow_last_eviction_batch_size = 11;
+    uint64 cache_last_eviction_batch_size = 12;
 }

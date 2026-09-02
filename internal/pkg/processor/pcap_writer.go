@@ -893,7 +893,18 @@ func (writer *CallPcapWriter) Close() error {
 }
 
 func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
+	return writer.finalizeWithBeforeCallbacks(reason, nil)
+}
+
+// finalizeWithBeforeCallbacks closes and clears all file resources before
+// running beforeCallbacks and the externally supplied completion callbacks.
+// The manager uses this boundary to mark resource finalization complete before
+// a callback can re-enter manager shutdown and wait for finalization work.
+func (writer *CallPcapWriter) finalizeWithBeforeCallbacks(reason CallFinalizationReason, beforeCallbacks func()) error {
 	if writer == nil {
+		if beforeCallbacks != nil {
+			beforeCallbacks()
+		}
 		return nil
 	}
 
@@ -909,6 +920,9 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 	writer.mu.Lock()
 	if writer.closed {
 		writer.mu.Unlock()
+		if beforeCallbacks != nil {
+			beforeCallbacks()
+		}
 		return nil
 	}
 	writer.closed = true
@@ -969,6 +983,9 @@ func (writer *CallPcapWriter) finalize(reason CallFinalizationReason) error {
 	writer.complete = writer.complete || complete
 	meta := CallMetadata{CallID: writer.callID, DirName: writer.config.OutputDir, Caller: writer.from, Called: writer.to, CallDate: writer.startTime}
 	writer.mu.Unlock()
+	if beforeCallbacks != nil {
+		beforeCallbacks()
+	}
 
 	// Deterministic callback ordering: all file-close hooks, SIP before RTP,
 	// followed by the call-completion hook. No writer lock is held here.
@@ -1081,8 +1098,17 @@ func (pwm *PcapWriterManager) completeFinalization(result CallFinalizationResult
 	if writer == nil {
 		return result, nil
 	}
-	defer pwm.finalizationWG.Done()
-	return result, writer.finalize(reason)
+	released := false
+	releaseFinalization := func() {
+		pwm.finalizationWG.Done()
+		released = true
+	}
+	defer func() {
+		if !released {
+			pwm.finalizationWG.Done()
+		}
+	}()
+	return result, writer.finalizeWithBeforeCallbacks(reason, releaseFinalization)
 }
 
 // HasRTPPackets returns true if the call has received any RTP packets.

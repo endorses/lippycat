@@ -6,6 +6,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"google.golang.org/protobuf/proto"
 )
 
 // TopologyPublisher defines the interface for publishing topology updates upstream
@@ -182,8 +183,10 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 			if stats.Detector == nil {
 				hunter.Detector = nil
 			} else {
-				detectorSnapshot := *stats.Detector
-				hunter.Detector = &detectorSnapshot
+				// Generated protobuf messages contain internal synchronization
+				// state and must not be copied by value. Clone also preserves any
+				// fields added to the telemetry message in future schema versions.
+				hunter.Detector = proto.Clone(stats.Detector).(*management.DetectorTelemetry)
 			}
 
 			// Check if filter count changed

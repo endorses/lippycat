@@ -3,6 +3,7 @@
 package voip
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -254,6 +255,9 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 
 	// Check filter if we have SDP (INVITE or 200 OK with m=audio)
 	if hasSDP {
+		// Make the exact SDP endpoints visible to the shared authoritative
+		// resolver before any media can be stamped or forwarded.
+		h.tracker.ExtractPortFromSDP(metadata.SDPBody, callID)
 		// Use callback-based filter check for flexible handling
 		// Note: 'packet' is captured by the closure for ApplicationFilter matching
 		matched := h.bufferMgr.CheckFilterWithCallback(
@@ -312,8 +316,8 @@ func sipPacketMetadata(callID string, metadata *CallMetadata) *data.PacketMetada
 func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers.UDP) bool {
 	packet := pkt.Packet
 	interfaceName := pkt.Interface
-	dstPort := layer.DstPort.String()
-	srcPort := layer.SrcPort.String()
+	dstPort := strconv.Itoa(int(layer.DstPort))
+	srcPort := strconv.Itoa(int(layer.SrcPort))
 
 	// Extract IP addresses for IP:PORT endpoint lookups
 	var dstIP, srcIP string
@@ -322,37 +326,23 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 		srcIP = netLayer.NetworkFlow().Src().String()
 	}
 
-	// Try to get CallID from buffer manager's port mapping
-	// Check IP:PORT endpoints first (more specific), then fall back to port-only
-	var bufCallID string
-	var exists bool
-
-	if dstIP != "" {
-		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(dstIP + ":" + dstPort)
-	}
-	if !exists && srcIP != "" {
-		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(srcIP + ":" + srcPort)
-	}
-	// Fall back to port-only lookups
-	if !exists {
-		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(dstPort)
-	}
-	if !exists {
-		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(srcPort)
-	}
-
-	if !exists {
+	resolution := h.tracker.ResolveMediaPacket(packet)
+	if resolution.Status != callregistry.MediaResolved {
 		// Not a tracked RTP port
 		return false
 	}
+	bufCallID := resolution.CallID
 
-	// This RTP packet belongs to a call we're buffering or tracking
-	// Use IP:PORT for the port parameter if available for more precise matching
-	portKey := dstPort
-	if dstIP != "" {
-		portKey = dstIP + ":" + dstPort
+	// Buffer only after the same resolved call owns one of these exact endpoints.
+	shouldForward, accepted := h.bufferMgr.AddRTPPacketForEndpoints(
+		bufCallID,
+		srcIP+":"+srcPort,
+		dstIP+":"+dstPort,
+		packet,
+	)
+	if !accepted {
+		return false
 	}
-	shouldForward := h.bufferMgr.AddRTPPacket(bufCallID, portKey, packet)
 
 	if shouldForward {
 		// Call already matched, forward immediately with RTP metadata

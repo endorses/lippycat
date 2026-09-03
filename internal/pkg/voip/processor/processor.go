@@ -51,6 +51,10 @@ type ProcessResult struct {
 	// that can represent only one call.
 	CallIDs []string
 
+	// MediaResolution carries the authoritative exact-endpoint attribution for
+	// RTP. Consumers must not infer resolution from CallID or CallIDs.
+	MediaResolution callregistry.MediaResolution
+
 	// Metadata contains protobuf metadata for forwarding to processors.
 	Metadata *data.PacketMetadata
 
@@ -482,18 +486,9 @@ func (p *Processor) registerRTPPort(callID, port string) {
 	p.registry.TryAssociateEndpoint(callID, port)
 }
 
-// getCallIDForPort looks up the first CallID for an RTP port.
-// For B2BUA scenarios with multiple calls on same port, use getAllCallIDsForPort.
-func (p *Processor) getCallIDForPort(port string) (string, bool) {
-	callIDs := p.registry.CallIDsForEndpoint(port)
-	if len(callIDs) > 0 {
-		return callIDs[0], true
-	}
-	return "", false
-}
-
 // getAllCallIDsForPort returns all CallIDs associated with an RTP port.
-// This supports B2BUA scenarios where multiple call legs share the same port.
+// This diagnostic API is unsuitable for filtering, output attribution, or LI
+// correlation; use ResolveMediaEndpoints for authoritative ownership.
 func (p *Processor) getAllCallIDsForPort(port string) []string {
 	return p.registry.CallIDsForEndpoint(port)
 }
@@ -512,6 +507,11 @@ func (p *Processor) Call(callID string) (callregistry.Call, bool) {
 // CallIDsForEndpoint returns a copy of all calls associated with endpoint.
 func (p *Processor) CallIDsForEndpoint(endpoint string) []string {
 	return p.getAllCallIDsForPort(endpoint)
+}
+
+// ResolveMediaEndpoints returns the registry's atomic exact-endpoint result.
+func (p *Processor) ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint string) callregistry.MediaResolution {
+	return p.registry.ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint)
 }
 
 // AssociateEndpoint associates a media endpoint with an existing call.

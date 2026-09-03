@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -78,6 +79,48 @@ func TestDetectRTPRefreshesCallActivity(t *testing.T) {
 	call, exists := p.Call("active-call")
 	require.True(t, exists)
 	require.True(t, call.LastUpdated.After(stale))
+}
+
+func TestDetectRTPAuthoritativeResolution(t *testing.T) {
+	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+	p.AssociateEndpoint("call-a", "192.0.2.1:20000")
+	p.AssociateEndpoint("call-a", "192.0.2.2:10000")
+	p.AssociateEndpoint("call-b", "192.0.2.2:10000")
+	p.AssociateEndpoint("call-b", "192.0.2.3:30000")
+
+	t.Run("intersection resolves one call", func(t *testing.T) {
+		result := p.Process(createRTPPacket(t, net.ParseIP("192.0.2.1"), net.ParseIP("192.0.2.2"), 20000, 10000))
+		require.NotNil(t, result)
+		require.Equal(t, callregistry.MediaResolution{Status: callregistry.MediaResolved, CallID: "call-a"}, result.MediaResolution)
+		require.Equal(t, "call-a", result.CallID)
+		require.Equal(t, "call-a", result.Metadata.GetSip().GetCallId())
+	})
+
+	t.Run("shared endpoint is ambiguous", func(t *testing.T) {
+		beforeA, ok := p.Call("call-a")
+		require.True(t, ok)
+		beforeB, ok := p.Call("call-b")
+		require.True(t, ok)
+		result := p.Process(createRTPPacket(t, net.ParseIP("192.0.2.99"), net.ParseIP("192.0.2.2"), 9999, 10000))
+		require.NotNil(t, result)
+		require.Equal(t, callregistry.MediaResolution{Status: callregistry.MediaAmbiguous}, result.MediaResolution)
+		require.Empty(t, result.CallID)
+		require.Nil(t, result.Metadata.GetSip())
+		afterA, ok := p.Call("call-a")
+		require.True(t, ok)
+		afterB, ok := p.Call("call-b")
+		require.True(t, ok)
+		require.Equal(t, beforeA.LastUpdated, afterA.LastUpdated)
+		require.Equal(t, beforeB.LastUpdated, afterB.LastUpdated)
+	})
+
+	t.Run("contradictory endpoints are unresolved", func(t *testing.T) {
+		result := p.Process(createRTPPacket(t, net.ParseIP("192.0.2.1"), net.ParseIP("192.0.2.3"), 20000, 30000))
+		require.NotNil(t, result)
+		require.Equal(t, callregistry.MediaResolution{Status: callregistry.MediaUnresolved}, result.MediaResolution)
+		require.Empty(t, result.CallID)
+	})
 }
 
 func createRTPPacket(t *testing.T, srcIP, dstIP net.IP, srcPort, dstPort uint16) gopacket.Packet {

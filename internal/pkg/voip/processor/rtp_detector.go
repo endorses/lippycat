@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -27,53 +28,44 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 	// disabled — on busy networks ports get reused across unrelated calls and
 	// a port-only fallback stamps the wrong CallID on RTP from a different
 	// host. SDP carries the c= connection address; we require it.
-	callIDs := make([]string, 0, 2)
-	seenCallIDs := make(map[string]struct{})
-	appendCallIDs := func(endpoint string) {
-		for _, callID := range p.getAllCallIDsForPort(endpoint) {
-			if _, exists := seenCallIDs[callID]; exists {
-				continue
-			}
-			seenCallIDs[callID] = struct{}{}
-			callIDs = append(callIDs, callID)
-		}
-	}
-	if dstIP != "" {
-		appendCallIDs(dstIP + ":" + dstPort)
-	}
-	if srcIP != "" {
-		appendCallIDs(srcIP + ":" + srcPort)
-	}
-
-	if len(callIDs) == 0 {
-		return nil
-	}
-	callID := callIDs[0]
-
 	// Validate RTP header
 	payload := udp.Payload
 	if !isValidRTP(payload) {
 		return nil
 	}
-	p.touchCalls(callIDs)
+	sourceEndpoint, destinationEndpoint := "", ""
+	if srcIP != "" {
+		sourceEndpoint = srcIP + ":" + srcPort
+	}
+	if dstIP != "" {
+		destinationEndpoint = dstIP + ":" + dstPort
+	}
+	resolution := p.registry.ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint)
+	callID := resolution.CallID
+	var callIDs []string
+	if resolution.Status == callregistry.MediaResolved {
+		p.touchCalls([]string{callID})
+		callIDs = []string{callID}
+	}
 
 	// Extract RTP header fields
 	rtpMeta := extractRTPMetadata(payload)
 
 	// Build protobuf metadata
 	pbMetadata := &data.PacketMetadata{
-		Sip: &data.SIPMetadata{
-			CallId: callID,
-		},
 		Rtp: rtpMeta,
+	}
+	if callID != "" {
+		pbMetadata.Sip = &data.SIPMetadata{CallId: callID}
 	}
 
 	return &ProcessResult{
-		IsVoIP:     true,
-		PacketType: PacketTypeRTP,
-		CallID:     callID,
-		CallIDs:    callIDs,
-		Metadata:   pbMetadata,
+		IsVoIP:          true,
+		PacketType:      PacketTypeRTP,
+		CallID:          callID,
+		CallIDs:         callIDs,
+		MediaResolution: resolution,
+		Metadata:        pbMetadata,
 	}
 }
 

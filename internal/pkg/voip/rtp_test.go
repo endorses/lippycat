@@ -67,8 +67,8 @@ func TestIsTracked(t *testing.T) {
 	// Clear existing port mappings
 	tracker := TestCallTracker(t)
 	clearRegistryForTest(tracker)
-	associateEndpointForTest(tracker, "8000", "test-call-1")
-	associateEndpointForTest(tracker, "8002", "test-call-2")
+	associateEndpointForTest(tracker, "192.168.1.101:8000", "test-call-1")
+	associateEndpointForTest(tracker, "192.168.1.100:8002", "test-call-2")
 
 	tests := []struct {
 		name     string
@@ -95,10 +95,10 @@ func TestIsTracked(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "Both ports tracked",
+			name:     "Contradictory endpoints are not tracked",
 			srcPort:  8000,
 			dstPort:  8002,
-			expected: true,
+			expected: false,
 		},
 	}
 
@@ -115,8 +115,9 @@ func TestGetCallIDForPacket(t *testing.T) {
 	// Clear existing port mappings and setup test data
 	tracker := TestCallTracker(t)
 	clearRegistryForTest(tracker)
-	associateEndpointForTest(tracker, "8000", "test-call-packet-1")
-	associateEndpointForTest(tracker, "8002", "test-call-packet-2")
+	associateEndpointForTest(tracker, "192.168.1.101:8000", "test-call-packet-1")
+	associateEndpointForTest(tracker, "192.168.1.101:8002", "test-call-packet-2")
+	associateEndpointForTest(tracker, "192.168.1.100:8000", "test-call-packet-1")
 
 	tests := []struct {
 		name     string
@@ -167,7 +168,7 @@ func TestRTPPacketProcessing_Integration(t *testing.T) {
 	// Setup port mapping
 	tracker := TestCallTracker(t)
 	clearRegistryForTest(tracker)
-	associateEndpointForTest(tracker, "8000", testCallID)
+	associateEndpointForTest(tracker, "192.168.1.101:8000", testCallID)
 
 	// Create test packet
 	testPacket := createRTPPacket(9999, testPort)

@@ -229,9 +229,10 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 func TestIsTracked_EdgeCases(t *testing.T) {
 	// Setup port mappings for testing
 	tracker := TestCallTracker(t)
-	associateEndpointForTest(tracker, "5004", "call-audio-1")
-	associateEndpointForTest(tracker, "5006", "call-audio-2")
-	associateEndpointForTest(tracker, "5008", "call-video-1")
+	associateEndpointForTest(tracker, "192.168.1.2:5004", "call-audio-1")
+	associateEndpointForTest(tracker, "192.168.1.1:5004", "call-audio-1")
+	associateEndpointForTest(tracker, "192.168.1.2:5006", "call-audio-2")
+	associateEndpointForTest(tracker, "192.168.1.2:5008", "call-video-1")
 
 	tests := []struct {
 		name        string
@@ -258,10 +259,10 @@ func TestIsTracked_EdgeCases(t *testing.T) {
 			description: "Packet with no tracked ports should not be tracked",
 		},
 		{
-			name:        "Both ports tracked",
+			name:        "Diagnostic detection sees tracked endpoints",
 			packet:      createRTPTestPacket(t, 5004, 5006),
 			expected:    true,
-			description: "Packet with both ports tracked should be tracked",
+			description: "Non-authoritative detection may retain candidate visibility",
 		},
 	}
 
@@ -276,9 +277,9 @@ func TestIsTracked_EdgeCases(t *testing.T) {
 func TestGetCallIDForPacket_PortMapping(t *testing.T) {
 	// Setup port mappings
 	tracker := TestCallTracker(t)
-	associateEndpointForTest(tracker, "5004", "call-audio-1")
-	associateEndpointForTest(tracker, "5006", "call-audio-2")
-	associateEndpointForTest(tracker, "5008", "call-video-1")
+	associateEndpointForTest(tracker, "192.168.1.2:5004", "call-audio-1")
+	associateEndpointForTest(tracker, "192.168.1.2:5006", "call-audio-2")
+	associateEndpointForTest(tracker, "192.168.1.2:5008", "call-video-1")
 
 	tests := []struct {
 		name        string

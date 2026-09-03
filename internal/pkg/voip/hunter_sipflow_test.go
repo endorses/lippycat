@@ -211,6 +211,45 @@ func TestHunterUDPFallbackMatchesParsedHeaders(t *testing.T) {
 	require.Eventually(t, func() bool { return forwarder.count() == 1 }, time.Second, time.Millisecond)
 }
 
+func TestHunterRTPRequiresAuthoritativeOwnership(t *testing.T) {
+	const endpoint = "192.168.1.200:20000"
+	rtpPayload := []byte{0x80, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1}
+
+	t.Run("shared endpoint is not forwarded", func(t *testing.T) {
+		tracker := TestCallTracker(t)
+		associateEndpointForTest(tracker, endpoint, "call-a")
+		associateEndpointForTest(tracker, endpoint, "call-b")
+		forwarder := &recordingHunterForwarder{}
+		buffers := NewBufferManager(time.Minute, 10)
+		t.Cleanup(buffers.Close)
+		handler := NewUDPPacketHandler(tracker, forwarder, buffers)
+		t.Cleanup(handler.Close)
+		packet := createUDPPacket(30000, 20000, rtpPayload)
+		require.False(t, handler.handleRTPPacket(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
+		require.Zero(t, forwarder.count())
+	})
+
+	t.Run("unique endpoint is forwarded with its call", func(t *testing.T) {
+		tracker := TestCallTracker(t)
+		associateEndpointForTest(tracker, endpoint, "call-a")
+		forwarder := &recordingHunterForwarder{}
+		buffers := NewBufferManager(time.Minute, 10)
+		t.Cleanup(buffers.Close)
+		metadata := &CallMetadata{CallID: "call-a", SDPBody: "v=0\r\nc=IN IP4 192.168.1.200\r\nm=audio 20000 RTP/AVP 0\r\n"}
+		buffers.AddSIPPacket("call-a", nil, metadata, "eth-test", layers.LinkTypeEthernet)
+		matched, _ := buffers.CheckFilter("call-a", func(*CallMetadata) bool { return true })
+		require.True(t, matched)
+		handler := NewUDPPacketHandler(tracker, forwarder, buffers)
+		t.Cleanup(handler.Close)
+		packet := createUDPPacket(30000, 20000, rtpPayload)
+		require.True(t, handler.handleRTPPacket(capture.PacketInfo{Packet: packet, Interface: "eth-test", LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
+		require.Equal(t, 1, forwarder.count())
+		forwarder.mu.Lock()
+		defer forwarder.mu.Unlock()
+		require.Equal(t, "call-a", forwarder.records[0].meta.GetSip().GetCallId())
+	})
+}
+
 func TestHunterUDPBuffersUntilSDPThenForwardsStickyDialog(t *testing.T) {
 	forwarder := &recordingHunterForwarder{}
 	buffers := NewBufferManager(time.Minute, 100)

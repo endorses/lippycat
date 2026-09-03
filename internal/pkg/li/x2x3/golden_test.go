@@ -96,6 +96,17 @@ var goldenRTP = []byte{
 	0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef,
 }
 
+// This literal is intentionally independent of the encoder constants. It is a
+// 48-byte keepalive-ack header with a sole sequence-number attribute (42).
+var goldenKeepaliveAck42 = []byte{
+	0x00, 0x05, 0x00, 0x04, 0x00, 0x00, 0x00, 0x30,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x08, 0x00, 0x04, 0x00, 0x00, 0x00, 0x2a,
+}
+
 func buildGoldenX2(seq uint32, dir PayloadDirection, sip string) *PDU {
 	pdu := NewX2SIPPDU(goldenXID, goldenCorr)
 	pdu.Header.PayloadDirection = dir
@@ -116,16 +127,21 @@ func TestGoldenVectors_Encode(t *testing.T) {
 	cases := []struct {
 		name string
 		pdu  *PDU
+		want []byte
 	}{
-		{"x2_sip_invite.hex", buildGoldenX2(1, PayloadDirectionFromTarget, goldenINVITE)},
-		{"x2_sip_bye.hex", buildGoldenX2(2, PayloadDirectionToTarget, goldenBYE)},
-		{"x2_sip_message.hex", buildGoldenX2(3, PayloadDirectionFromTarget, goldenMESSAGE)},
-		{"x3_rtp.hex", buildGoldenX3(4, PayloadDirectionFromTarget, goldenRTP)},
-		{"keepalive.hex", NewKeepalivePDU()},
+		{"x2_sip_invite.hex", buildGoldenX2(1, PayloadDirectionFromTarget, goldenINVITE), nil},
+		{"x2_sip_bye.hex", buildGoldenX2(2, PayloadDirectionToTarget, goldenBYE), nil},
+		{"x2_sip_message.hex", buildGoldenX2(3, PayloadDirectionFromTarget, goldenMESSAGE), nil},
+		{"x3_rtp.hex", buildGoldenX3(4, PayloadDirectionFromTarget, goldenRTP), nil},
+		{"keepalive.hex", NewKeepalivePDU(), nil},
+		{"keepalive_ack_literal", NewKeepaliveAckPDU(42), goldenKeepaliveAck42},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			want := loadVector(t, tc.name)
+			want := tc.want
+			if want == nil {
+				want = loadVector(t, tc.name)
+			}
 			got, err := tc.pdu.MarshalBinary()
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
@@ -139,45 +155,68 @@ func TestGoldenVectors_Encode(t *testing.T) {
 }
 
 func TestGoldenVectors_Decode(t *testing.T) {
-	raw := loadVector(t, "x2_sip_invite.hex")
-	var pdu PDU
-	if err := pdu.UnmarshalBinary(raw); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	cases := []struct {
+		name        string
+		wire        []byte
+		wantType    PDUType
+		wantFormat  PayloadFormat
+		wantDir     PayloadDirection
+		wantXID     uuid.UUID
+		wantCorr    uint64
+		wantPayload []byte
+	}{
+		{"x2_sip_invite.hex", nil, PDUTypeX2, PayloadFormatSIP, PayloadDirectionFromTarget, goldenXID, goldenCorr, []byte(goldenINVITE)},
+		{"x2_sip_bye.hex", nil, PDUTypeX2, PayloadFormatSIP, PayloadDirectionToTarget, goldenXID, goldenCorr, []byte(goldenBYE)},
+		{"x2_sip_message.hex", nil, PDUTypeX2, PayloadFormatSIP, PayloadDirectionFromTarget, goldenXID, goldenCorr, []byte(goldenMESSAGE)},
+		{"x3_rtp.hex", nil, PDUTypeX3, PayloadFormatRTP, PayloadDirectionFromTarget, goldenXID, goldenCorr, goldenRTP},
+		{"keepalive.hex", nil, PDUTypeKeepalive, PayloadFormatKeepalive, PayloadDirectionKeepalive, uuid.Nil, 0, nil},
+		{"keepalive_ack_literal", goldenKeepaliveAck42, PDUTypeKeepaliveAck, PayloadFormatKeepalive, PayloadDirectionKeepalive, uuid.Nil, 0, nil},
 	}
-	if pdu.Header.Type != PDUTypeX2 {
-		t.Errorf("pdu type = %v, want X2", pdu.Header.Type)
-	}
-	if pdu.Header.PayloadFormat != PayloadFormatSIP {
-		t.Errorf("payload format = %v, want SIP", pdu.Header.PayloadFormat)
-	}
-	if pdu.Header.PayloadDirection != PayloadDirectionFromTarget {
-		t.Errorf("direction = %v, want FromTarget", pdu.Header.PayloadDirection)
-	}
-	if pdu.Header.XID != goldenXID {
-		t.Errorf("xid = %v, want %v", pdu.Header.XID, goldenXID)
-	}
-	if pdu.Header.CorrelationID != goldenCorr {
-		t.Errorf("corr = %x, want %x", pdu.Header.CorrelationID, goldenCorr)
-	}
-	if got := string(pdu.Payload); got != goldenINVITE {
-		t.Errorf("payload = %q, want INVITE", got)
-	}
-	if tgt := FindAttribute(pdu.Attributes, AttrMatchedTargetIdentifier); tgt == nil {
-		t.Error("missing matched target identifier attribute")
-	} else if string(tgt.Value) != "sip:alice@example.com" {
-		t.Errorf("matched target = %q", tgt.Value)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wire := tc.wire
+			if wire == nil {
+				wire = loadVector(t, tc.name)
+			}
+			var pdu PDU
+			if err := pdu.UnmarshalBinary(wire); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if pdu.Header.Version != 0x0005 {
+				t.Errorf("version = %#04x, want 0x0005", pdu.Header.Version)
+			}
+			if pdu.Header.Type != tc.wantType {
+				t.Errorf("pdu type = %v, want %v", pdu.Header.Type, tc.wantType)
+			}
+			if pdu.Header.PayloadFormat != tc.wantFormat {
+				t.Errorf("payload format = %v, want %v", pdu.Header.PayloadFormat, tc.wantFormat)
+			}
+			if pdu.Header.PayloadDirection != tc.wantDir {
+				t.Errorf("payload direction = %v, want %v", pdu.Header.PayloadDirection, tc.wantDir)
+			}
+			if pdu.Header.XID != tc.wantXID {
+				t.Errorf("xid = %v, want %v", pdu.Header.XID, tc.wantXID)
+			}
+			if pdu.Header.CorrelationID != tc.wantCorr {
+				t.Errorf("correlation ID = %x, want %x", pdu.Header.CorrelationID, tc.wantCorr)
+			}
+			if !bytesEqual(pdu.Payload, tc.wantPayload) {
+				t.Errorf("payload = %x, want %x", pdu.Payload, tc.wantPayload)
+			}
+			if tc.wantType == PDUTypeX2 {
+				target := FindAttribute(pdu.Attributes, AttrMatchedTargetIdentifier)
+				if target == nil || string(target.Value) != "sip:alice@example.com" {
+					t.Errorf("matched target = %v, want sip:alice@example.com", target)
+				}
+			}
+		})
 	}
 
-	// Keepalive decode.
-	kaRaw := loadVector(t, "keepalive.hex")
-	var ka PDU
-	if err := ka.UnmarshalBinary(kaRaw); err != nil {
-		t.Fatalf("unmarshal keepalive: %v", err)
+	var ack PDU
+	if err := ack.UnmarshalBinary(goldenKeepaliveAck42); err != nil {
+		t.Fatalf("decode keepalive ack sequence: %v", err)
 	}
-	if ka.Header.Type != PDUTypeKeepalive {
-		t.Errorf("keepalive type = %v, want Keepalive", ka.Header.Type)
-	}
-	if ka.Header.XID != uuid.Nil {
-		t.Errorf("keepalive xid = %v, want nil", ka.Header.XID)
+	if seq, err := ack.KeepaliveSequence(); err != nil || seq != 42 {
+		t.Errorf("keepalive ack sequence = %d, err = %v; want 42", seq, err)
 	}
 }

@@ -316,6 +316,15 @@ write admission and cannot route delayed packets into a newer call that reused
 the same Call-ID. Regression coverage verifies the new generation remains
 unmodified while direct manager writes continue to target the current generation.
 
+A Phase 3 verification audit closed two additional lifecycle gaps. Timeout and
+capacity-eviction notifications now retain endpoint and filter attribution until
+the shared grace/finalization boundary, preserve their original terminal reason,
+and avoid repeatedly selecting calls already pending finalization. Lifecycle
+shutdown is also split into callback-safe initiation and an owner-facing draining
+wait, preventing completion callbacks that initiate shutdown from deadlocking
+while normal processor shutdown still waits for admitted work and committed
+finalization subscribers.
+
 ## Phase 4: Guard X3 Encoding and Delayed Delivery
 
 - [ ] Require authoritative attribution before an inherited identity filter may

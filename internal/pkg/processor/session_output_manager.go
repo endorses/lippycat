@@ -194,7 +194,7 @@ func (m *SessionOutputManager) Close() error {
 		}
 		m.writesWG.Wait()
 		if m.lifecycle != nil {
-			m.lifecycle.Shutdown()
+			m.lifecycle.ShutdownAndWait()
 		}
 		if closer != nil {
 			m.closeErr = closer.Close()

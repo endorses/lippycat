@@ -303,12 +303,29 @@ func (r *CallLifecycleRegistry) Telemetry() CallLifecycleTelemetry {
 	}
 }
 
-// Shutdown rejects new work and waits for admitted work. It is process
-// lifecycle only: it creates no tombstones and emits no finalization events.
+// Shutdown begins process shutdown and rejects new work. It is safe to call
+// from a finalization subscriber because it does not wait for that subscriber
+// to return. Shutdown creates no tombstones and emits no finalization events.
 func (r *CallLifecycleRegistry) Shutdown() {
 	if r == nil {
 		return
 	}
+	r.beginShutdown()
+}
+
+// ShutdownAndWait begins process shutdown and waits for admitted work and all
+// committed finalization subscribers to drain. Finalization subscribers must
+// use Shutdown instead: waiting for the subscriber currently on the stack would
+// be self-dependent.
+func (r *CallLifecycleRegistry) ShutdownAndWait() {
+	if r == nil {
+		return
+	}
+	drain := r.beginShutdown()
+	<-drain
+}
+
+func (r *CallLifecycleRegistry) beginShutdown() <-chan struct{} {
 	r.mu.Lock()
 	if !r.shutdown {
 		r.shutdown = true
@@ -323,7 +340,7 @@ func (r *CallLifecycleRegistry) Shutdown() {
 	}
 	drain := r.shutdownDrain
 	r.mu.Unlock()
-	<-drain
+	return drain
 }
 
 func (r *CallLifecycleRegistry) closeShutdownDrainLocked() {

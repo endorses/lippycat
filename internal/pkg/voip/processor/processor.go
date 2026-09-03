@@ -182,7 +182,7 @@ type Processor struct {
 	// coordinator. While installed, completed calls retain their endpoint state
 	// until FinalizeCallCleanup is invoked by that coordinator.
 	completionHandler func(callregistry.Call, callregistry.EndReason)
-	pendingCompletion map[string]struct{}
+	pendingCompletion map[string]callregistry.EndReason
 
 	// Optional application filter for call selection
 	appFilter       ApplicationFilter
@@ -224,9 +224,12 @@ func New(cfg Config) *Processor {
 	p := &Processor{
 		config:            cfg,
 		calls:             make(map[string]*callState),
-		pendingCompletion: make(map[string]struct{}),
+		pendingCompletion: make(map[string]callregistry.EndReason),
 		registry: callregistry.New(callregistry.Config{
-			MaxCalls: cfg.MaxCalls, MaxEndpointsPerCall: cfg.MaxEndpointsPerCall,
+			// The processor owns capacity termination so an external lifecycle
+			// coordinator can retain attribution through its grace period. The
+			// registry's independent eviction would cross that boundary early.
+			MaxCalls: int(^uint(0) >> 1), MaxEndpointsPerCall: cfg.MaxEndpointsPerCall,
 			MaxEndpointAssociations: cfg.MaxEndpointAssociations,
 			Observers:               cfg.LifecycleObservers,
 		}),
@@ -423,30 +426,46 @@ func (p *Processor) janitorLoop() {
 // cleanupExpiredCalls removes calls that have exceeded the timeout.
 func (p *Processor) cleanupExpiredCalls() {
 	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
 	p.mu.Lock()
 
 	now := time.Now()
+	type pendingNotification struct {
+		call    callregistry.Call
+		handler func(callregistry.Call, callregistry.EndReason)
+	}
+	var notifications []pendingNotification
 	for callID, state := range p.calls {
 		if now.Sub(state.lastUpdated) > p.config.CallTimeout {
-			// Remove this callID from port mappings (multi-value for B2BUA)
+			if p.completionHandler != nil {
+				if _, pending := p.pendingCompletion[callID]; pending {
+					continue
+				}
+				p.pendingCompletion[callID] = callregistry.EndTimeout
+				notifications = append(notifications, pendingNotification{call: state.info, handler: p.completionHandler})
+				continue
+			}
 			delete(p.calls, callID)
 			p.registry.Remove(callID, callregistry.EndTimeout)
 		}
 	}
 	p.mu.Unlock()
+	p.eventMu.Unlock()
+
+	for _, notification := range notifications {
+		notification.handler(notification.call, callregistry.EndTimeout)
+	}
 }
 
 // getOrCreateCall gets or creates a call state for the given CallID.
 func (p *Processor) getOrCreateCall(callID string) *callState {
 	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
 	p.mu.Lock()
 
 	state, exists := p.calls[callID]
 	if !exists {
 		if p.janitorClosed {
 			p.mu.Unlock()
+			p.eventMu.Unlock()
 			return nil
 		}
 		now := time.Now()
@@ -460,22 +479,38 @@ func (p *Processor) getOrCreateCall(callID string) *callState {
 			lastUpdated: now,
 		}
 		p.calls[callID] = state
-		p.registry.Upsert(state.info)
 		// Evict oldest call if at capacity
+		var evicted CallInfo
+		var notifyEviction bool
 		if len(p.calls) > p.config.MaxCalls {
-			p.evictOldestCallLocked()
+			evicted, notifyEviction = p.evictOldestCallLocked(callID)
 		}
+		p.registry.Upsert(state.info)
+		p.mu.Unlock()
+		handler := p.completionHandler
+		p.eventMu.Unlock()
+		if notifyEviction && handler != nil {
+			handler(evicted, callregistry.EndEvicted)
+		}
+		return state
 	}
 	p.mu.Unlock()
+	p.eventMu.Unlock()
 	return state
 }
 
 // evictOldestCallLocked removes the oldest call (must hold mu lock).
-func (p *Processor) evictOldestCallLocked() (CallInfo, bool) {
+func (p *Processor) evictOldestCallLocked(excludeCallID string) (CallInfo, bool) {
 	var oldestID string
 	var oldestTime time.Time
 
 	for id, state := range p.calls {
+		if id == excludeCallID {
+			continue
+		}
+		if _, pending := p.pendingCompletion[id]; pending {
+			continue
+		}
 		if oldestID == "" || state.lastUpdated.Before(oldestTime) {
 			oldestID = id
 			oldestTime = state.lastUpdated
@@ -484,6 +519,10 @@ func (p *Processor) evictOldestCallLocked() (CallInfo, bool) {
 
 	if oldestID != "" {
 		state := p.calls[oldestID]
+		if p.completionHandler != nil {
+			p.pendingCompletion[oldestID] = callregistry.EndEvicted
+			return state.info, true
+		}
 		delete(p.calls, oldestID)
 		p.registry.Remove(oldestID, callregistry.EndEvicted)
 		return state.info, true
@@ -569,7 +608,7 @@ func (p *Processor) CompleteCall(callID string) {
 			p.eventMu.Unlock()
 			return
 		}
-		p.pendingCompletion[callID] = struct{}{}
+		p.pendingCompletion[callID] = callregistry.EndCompleted
 		handler := p.completionHandler
 		p.eventMu.Unlock()
 		handler(call, callregistry.EndCompleted)
@@ -582,7 +621,13 @@ func (p *Processor) CompleteCall(callID string) {
 // FinalizeCallCleanup removes a call after an external lifecycle coordinator
 // has crossed its atomic finalization boundary.
 func (p *Processor) FinalizeCallCleanup(callID string) {
-	p.removeCall(callID, callregistry.EndCompleted)
+	p.eventMu.Lock()
+	reason := p.pendingCompletion[callID]
+	p.eventMu.Unlock()
+	if reason == "" {
+		reason = callregistry.EndCompleted
+	}
+	p.removeCall(callID, reason)
 }
 
 func (p *Processor) removeCall(callID string, reason callregistry.EndReason) {

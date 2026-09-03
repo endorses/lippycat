@@ -98,6 +98,59 @@ func TestDeferredCompletionRetainsAttributionUntilFinalCleanup(t *testing.T) {
 	require.False(t, exists)
 }
 
+func TestDeferredTimeoutRetainsAttributionUntilFinalCleanup(t *testing.T) {
+	p := New(Config{MaxCalls: 10, CallTimeout: time.Millisecond})
+	t.Cleanup(p.Close)
+
+	var completed []lifecycleEvent
+	p.SetCompletionHandler(func(call callregistry.Call, reason callregistry.EndReason) {
+		completed = append(completed, lifecycleEvent{callID: call.CallID, reason: reason})
+	})
+	p.AssociateEndpoint("timed-out", "192.0.2.21:12002")
+	p.mu.Lock()
+	p.calls["timed-out"].lastUpdated = time.Now().Add(-time.Second)
+	p.mu.Unlock()
+
+	p.cleanupExpiredCalls()
+	p.cleanupExpiredCalls()
+	require.Equal(t, []lifecycleEvent{{callID: "timed-out", reason: callregistry.EndTimeout}}, completed)
+	require.Equal(t, []string{"timed-out"}, p.CallIDsForEndpoint("192.0.2.21:12002"),
+		"timeout must retain attribution until the shared finalization boundary")
+
+	p.FinalizeCallCleanup("timed-out")
+	require.Empty(t, p.CallIDsForEndpoint("192.0.2.21:12002"))
+	_, exists := p.Call("timed-out")
+	require.False(t, exists)
+}
+
+func TestDeferredCapacityEvictionRetainsAttributionAndSkipsPendingCalls(t *testing.T) {
+	p := New(Config{MaxCalls: 1, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+
+	var completed []lifecycleEvent
+	p.SetCompletionHandler(func(call callregistry.Call, reason callregistry.EndReason) {
+		completed = append(completed, lifecycleEvent{callID: call.CallID, reason: reason})
+	})
+	p.AssociateEndpoint("oldest", "192.0.2.22:12004")
+	time.Sleep(time.Millisecond)
+	p.AssociateEndpoint("middle", "192.0.2.23:12006")
+	require.Equal(t, []lifecycleEvent{{callID: "oldest", reason: callregistry.EndEvicted}}, completed)
+	require.Equal(t, []string{"oldest"}, p.CallIDsForEndpoint("192.0.2.22:12004"),
+		"capacity eviction must retain attribution until the shared finalization boundary")
+
+	time.Sleep(time.Millisecond)
+	p.AssociateEndpoint("newest", "192.0.2.24:12008")
+	require.Equal(t, []lifecycleEvent{
+		{callID: "oldest", reason: callregistry.EndEvicted},
+		{callID: "middle", reason: callregistry.EndEvicted},
+	}, completed, "capacity checks must not repeatedly schedule an already pending call")
+
+	p.FinalizeCallCleanup("oldest")
+	require.Empty(t, p.CallIDsForEndpoint("192.0.2.22:12004"))
+	_, exists := p.Call("oldest")
+	require.False(t, exists)
+}
+
 func TestCallRegistryB2BUAAssociationsAreCopied(t *testing.T) {
 	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
 	t.Cleanup(p.Close)

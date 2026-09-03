@@ -158,14 +158,14 @@ type CallPcapWriter struct {
 
 // PcapWriterManager manages PCAP writers for multiple calls
 type PcapWriterManager struct {
-	config             *PcapWriterConfig
-	writers            map[string]*CallPcapWriter
-	lifecycle          *CallLifecycleRegistry
-	shutdown           bool
-	beforeFinalize     func(string, CallFinalizationReason)
-	finalizationErrors map[uint64]error
-	mu                 sync.RWMutex
-	finalizationWG     sync.WaitGroup
+	config              *PcapWriterConfig
+	writers             map[string]*CallPcapWriter
+	lifecycle           *CallLifecycleRegistry
+	shutdown            bool
+	beforeFinalize      func(string, CallFinalizationReason)
+	finalizationWaiters map[string][]chan pcapFinalizationOutcome
+	mu                  sync.RWMutex
+	finalizationWG      sync.WaitGroup
 
 	suppressedLatePackets  atomic.Uint64
 	lastLateWarning        atomic.Int64
@@ -177,6 +177,11 @@ type PcapWriterManager struct {
 	filenameCollisions     atomic.Uint64
 	callbackFailures       atomic.Uint64
 	capacityPressureEvents atomic.Uint64
+}
+
+type pcapFinalizationOutcome struct {
+	hadWriter bool
+	err       error
 }
 
 // SetBeforeFinalize installs the lifecycle cleanup hook. It runs at most once
@@ -225,10 +230,10 @@ func NewPcapWriterManagerWithLifecycle(config *PcapWriterConfig, lifecycle *Call
 		})
 	}
 	manager := &PcapWriterManager{
-		config:             config,
-		writers:            make(map[string]*CallPcapWriter),
-		lifecycle:          lifecycle,
-		finalizationErrors: make(map[uint64]error),
+		config:              config,
+		writers:             make(map[string]*CallPcapWriter),
+		lifecycle:           lifecycle,
+		finalizationWaiters: make(map[string][]chan pcapFinalizationOutcome),
 	}
 	lifecycle.Subscribe(manager.handleLifecycleFinalization)
 	return manager, nil
@@ -635,8 +640,7 @@ func (pwm *PcapWriterManager) finalizeCallIfIdle(callID string, maxIdle time.Dur
 	}
 	generation := writer.generation
 	pwm.mu.Unlock()
-	result = pwm.lifecycle.FinalizeGeneration(callID, generation, CallFinalizationIdleTimeout)
-	return result, pwm.takeFinalizationError(generation)
+	return pwm.finalizeCallGeneration(callID, generation, CallFinalizationIdleTimeout)
 }
 
 // openCallPcapFile creates a new standalone PCAP without replacing or appending
@@ -866,7 +870,7 @@ func (writer *CallPcapWriter) Close() error {
 		return nil
 	}
 	if writer.manager != nil {
-		_, err := writer.manager.FinalizeCall(writer.callID, CallFinalizationManual)
+		_, err := writer.manager.finalizeCallGeneration(writer.callID, writer.generation, CallFinalizationManual)
 		return err
 	}
 	return writer.finalize(CallFinalizationManual)
@@ -989,7 +993,7 @@ func (writer *CallPcapWriter) CloseCall() error {
 		return nil
 	}
 	if writer.manager != nil {
-		_, err := writer.manager.FinalizeCall(writer.callID, CallFinalizationProtocolComplete)
+		_, err := writer.manager.finalizeCallGeneration(writer.callID, writer.generation, CallFinalizationProtocolComplete)
 		return err
 	}
 	return writer.finalize(CallFinalizationProtocolComplete)
@@ -1011,22 +1015,40 @@ func (pwm *PcapWriterManager) CloseCallWriter(callID string) error {
 // FinalizeCall performs the single live-to-terminal transition. Manager state
 // changes atomically; cleanup, file closing, and callbacks run after unlocking.
 func (pwm *PcapWriterManager) FinalizeCall(callID string, reason CallFinalizationReason) (CallFinalizationResult, error) {
+	return pwm.finalizeCallGeneration(callID, 0, reason)
+}
+
+// finalizeCallGeneration performs a generation-conditional transition when
+// generation is non-zero. Writer-bound operations use this path so a retained
+// handle cannot finalize a newer reuse of the same Call-ID.
+func (pwm *PcapWriterManager) finalizeCallGeneration(callID string, generation uint64, reason CallFinalizationReason) (CallFinalizationResult, error) {
 	result := CallFinalizationResult{CallID: callID, Reason: reason}
 	if pwm == nil || callID == "" {
 		return result, nil
 	}
-	pwm.mu.RLock()
+	waiter := make(chan pcapFinalizationOutcome, 1)
+	pwm.mu.Lock()
 	if pwm.shutdown {
-		pwm.mu.RUnlock()
+		pwm.mu.Unlock()
 		return result, nil
 	}
 	writer := pwm.writers[callID]
-	pwm.mu.RUnlock()
-	result = pwm.lifecycle.Finalize(callID, reason)
-	if writer != nil {
-		result.HadWriter = result.Finalized
-		return result, pwm.takeFinalizationError(writer.generation)
+	if generation != 0 && writer != nil && writer.generation != generation {
+		writer = nil
 	}
+	pwm.finalizationWaiters[callID] = append(pwm.finalizationWaiters[callID], waiter)
+	pwm.mu.Unlock()
+	if generation == 0 {
+		result = pwm.lifecycle.Finalize(callID, reason)
+	} else {
+		result = pwm.lifecycle.FinalizeGeneration(callID, generation, reason)
+	}
+	if result.Finalized {
+		outcome := <-waiter
+		result.HadWriter = outcome.hadWriter
+		return result, outcome.err
+	}
+	pwm.removeFinalizationWaiter(callID, waiter)
 	return result, nil
 }
 
@@ -1040,26 +1062,34 @@ func (pwm *PcapWriterManager) handleLifecycleFinalization(event CallFinalization
 		writer = nil
 	}
 	hook := pwm.beforeFinalize
+	waiters := pwm.finalizationWaiters[event.CallID]
+	delete(pwm.finalizationWaiters, event.CallID)
 	pwm.mu.Unlock()
 
 	result := CallFinalizationResult{CallID: event.CallID, Reason: event.Reason, FinalizedAt: event.FinalizedAt, Finalized: true, HadWriter: writer != nil}
 	_, err := pwm.completeFinalization(result, writer, hook)
-	if err != nil {
-		pwm.mu.Lock()
-		pwm.finalizationErrors[event.Generation] = err
-		pwm.mu.Unlock()
+	outcome := pcapFinalizationOutcome{hadWriter: writer != nil, err: err}
+	for _, waiter := range waiters {
+		waiter <- outcome
 	}
 }
 
-func (pwm *PcapWriterManager) takeFinalizationError(generation uint64) error {
-	if generation == 0 {
-		return nil
-	}
+func (pwm *PcapWriterManager) removeFinalizationWaiter(callID string, target chan pcapFinalizationOutcome) {
 	pwm.mu.Lock()
 	defer pwm.mu.Unlock()
-	err := pwm.finalizationErrors[generation]
-	delete(pwm.finalizationErrors, generation)
-	return err
+	waiters := pwm.finalizationWaiters[callID]
+	for i, waiter := range waiters {
+		if waiter != target {
+			continue
+		}
+		waiters = append(waiters[:i], waiters[i+1:]...)
+		if len(waiters) == 0 {
+			delete(pwm.finalizationWaiters, callID)
+		} else {
+			pwm.finalizationWaiters[callID] = waiters
+		}
+		return
+	}
 }
 
 // completeFinalization performs slow resource work and externally supplied

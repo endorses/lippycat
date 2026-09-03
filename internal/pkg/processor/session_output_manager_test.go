@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -21,14 +23,16 @@ type recordingSessionMonitor struct {
 	events    *[]string
 	stops     atomic.Int32
 	scheduled []string
+	reasons   []CallFinalizationReason
 }
 
 func (m *recordingSessionMonitor) Start()                             {}
 func (m *recordingSessionMonitor) SetVoIPPortCleaner(VoIPPortCleaner) {}
-func (m *recordingSessionMonitor) ScheduleClose(callID string, _ bool) {
+func (m *recordingSessionMonitor) ScheduleCloseReason(callID string, _ bool, reason CallFinalizationReason) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.scheduled = append(m.scheduled, callID)
+	m.reasons = append(m.reasons, reason)
 }
 func (m *recordingSessionMonitor) Stop() {
 	m.stops.Add(1)
@@ -144,4 +148,33 @@ func TestSetPacketSourceRegistersSessionOutputLifecycleObserver(t *testing.T) {
 	monitor.mu.Lock()
 	defer monitor.mu.Unlock()
 	require.Equal(t, []string{"call-id"}, monitor.scheduled)
+}
+
+func TestSessionOutputManagerMapsEndReasonsAndIgnoresShutdown(t *testing.T) {
+	monitor := &recordingSessionMonitor{}
+	manager := newSessionOutputManagerWithLifecycle(nil, monitor, NewCallLifecycleRegistry(CallLifecycleConfig{}))
+
+	manager.OnCallEnded(callregistry.Call{CallID: "completed"}, callregistry.EndCompleted)
+	manager.OnCallEnded(callregistry.Call{CallID: "timeout"}, callregistry.EndTimeout)
+	manager.OnCallEnded(callregistry.Call{CallID: "evicted"}, callregistry.EndEvicted)
+	manager.OnCallEnded(callregistry.Call{CallID: "shutdown"}, callregistry.EndShutdown)
+
+	monitor.mu.Lock()
+	defer monitor.mu.Unlock()
+	assert.Equal(t, []string{"completed", "timeout", "evicted"}, monitor.scheduled)
+	assert.Equal(t, []CallFinalizationReason{
+		CallFinalizationProtocolComplete,
+		CallFinalizationIdleTimeout,
+		CallFinalizationCapacityEviction,
+	}, monitor.reasons)
+}
+
+func TestNewSessionOutputManagerWithoutPCAPOwnsLifecycle(t *testing.T) {
+	manager, err := NewSessionOutputManager(nil, nil, voip.NewCallAggregator())
+	require.NoError(t, err)
+	require.NotNil(t, manager.lifecycle)
+	assert.Nil(t, manager.writer)
+	require.NoError(t, manager.Close())
+	_, err = manager.lifecycle.Admit("after-shutdown")
+	assert.ErrorIs(t, err, ErrCallLifecycleShutdown)
 }

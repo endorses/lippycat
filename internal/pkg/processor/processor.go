@@ -193,6 +193,7 @@ type Processor struct {
 	vifInjectionErrors atomic.Uint64 // Virtual interface injection failures
 
 	sessionOutputManager *SessionOutputManager
+	callLifecycle        *CallLifecycleRegistry
 
 	// Auto-rotate PCAP writer (for non-VoIP traffic)
 	autoRotatePcapWriter *AutoRotatePcapWriter
@@ -369,10 +370,12 @@ func New(config Config) (*Processor, error) {
 			"debounce", debounce)
 	}
 
-	// Initialize per-call PCAP writer if configured
-	if config.PcapWriterConfig != nil && config.PcapWriterConfig.Enabled {
+	// Terminal call state is required by both per-call PCAP and LI. Keep the
+	// lifecycle monitor alive for LI even when no PCAP files are requested.
+	pcapEnabled := config.PcapWriterConfig != nil && config.PcapWriterConfig.Enabled
+	if pcapEnabled || config.LIEnabled {
 		// Wire command executor callbacks to PCAP writer config
-		if p.commandExecutor != nil {
+		if pcapEnabled && p.commandExecutor != nil {
 			config.PcapWriterConfig.OnFileClose = p.commandExecutor.OnFileClose()
 			config.PcapWriterConfig.OnCallComplete = p.commandExecutor.OnCallComplete()
 		}
@@ -385,14 +388,17 @@ func New(config Config) (*Processor, error) {
 			return nil, fmt.Errorf("failed to initialize session output manager: %w", err)
 		}
 		p.sessionOutputManager = manager
+		p.callLifecycle = manager.lifecycle
 		if monitor, ok := manager.monitor.(*CallCompletionMonitor); ok {
 			logger.Info("Call completion monitor configured",
 				"grace_period", monitor.config.GracePeriod,
 				"check_interval", monitor.config.CheckInterval)
 		}
-		logger.Info("Per-call PCAP writing enabled",
-			"output_dir", config.PcapWriterConfig.OutputDir,
-			"pattern", config.PcapWriterConfig.FilePattern)
+		if pcapEnabled {
+			logger.Info("Per-call PCAP writing enabled",
+				"output_dir", config.PcapWriterConfig.OutputDir,
+				"pattern", config.PcapWriterConfig.FilePattern)
+		}
 	}
 
 	// Initialize auto-rotate PCAP writer if configured

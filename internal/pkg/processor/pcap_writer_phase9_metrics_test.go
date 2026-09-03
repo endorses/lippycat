@@ -79,7 +79,9 @@ func TestPhase9TelemetryAccountsForLifecyclePressure(t *testing.T) {
 		config.MaxWriters = 1
 		config.OnCallComplete = func(CallMetadata) { panic("completion failure") }
 	})
-	manager.tombstoneLimit = 2
+	manager.lifecycle.mu.Lock()
+	manager.lifecycle.tombstoneLimit = 2
+	manager.lifecycle.mu.Unlock()
 	assert.Equal(t, uint64(0), manager.Telemetry().ActiveWriters)
 	require.NoError(t, manager.WritePacket("capacity", "a", "b", time.Now(), []byte{1}, layers.LinkTypeEthernet, false))
 	assert.Equal(t, uint64(1), manager.Telemetry().ActiveWriters)
@@ -88,14 +90,14 @@ func TestPhase9TelemetryAccountsForLifecyclePressure(t *testing.T) {
 	require.NoError(t, err)
 
 	// Reuse an expired Call-ID to exercise collision-safe admission telemetry.
-	manager.mu.Lock()
-	manager.tombstoneTTL = time.Nanosecond
-	manager.mu.Unlock()
+	manager.lifecycle.mu.Lock()
+	manager.lifecycle.tombstoneTTL = time.Nanosecond
+	manager.lifecycle.mu.Unlock()
 	time.Sleep(time.Nanosecond)
 	require.NoError(t, manager.WritePacket("protocol", "e", "f", time.Now(), []byte{3}, layers.LinkTypeEthernet, false))
-	manager.mu.Lock()
-	manager.tombstoneTTL = completedCallTombstoneTTL
-	manager.mu.Unlock()
+	manager.lifecycle.mu.Lock()
+	manager.lifecycle.tombstoneTTL = completedCallTombstoneTTL
+	manager.lifecycle.mu.Unlock()
 	_, err = manager.FinalizeCall("protocol", CallFinalizationManual)
 	require.NoError(t, err)
 	require.NoError(t, manager.WritePacket("idle", "g", "h", time.Now(), []byte{4}, layers.LinkTypeEthernet, false))
@@ -254,10 +256,10 @@ func BenchmarkPcapWriterTombstoneLookup(b *testing.B) {
 	for _, size := range []int{10, 1_000, 100_000} {
 		b.Run(strconv.Itoa(size), func(b *testing.B) {
 			manager := benchmarkPcapManager(b)
-			manager.tombstoneLimit = 100_000
-			manager.mu.Lock()
-			seedTombstonesLocked(manager, size, time.Now())
-			manager.mu.Unlock()
+			manager.lifecycle.mu.Lock()
+			manager.lifecycle.tombstoneLimit = 100_000
+			seedTombstonesLocked(manager.lifecycle, size, time.Now())
+			manager.lifecycle.mu.Unlock()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				_ = manager.IsFinalized("absent-call")
@@ -272,16 +274,15 @@ func BenchmarkPcapWriterTombstonePruning(b *testing.B) {
 			manager := newTombstoneTestManager(size)
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
-				manager.mu.Lock()
-				clear(manager.tombstones)
-				clear(manager.tombstoneIndex)
-				manager.tombstoneQueue = manager.tombstoneQueue[:0]
-				seedTombstonesLocked(manager, size, time.Unix(0, 0))
-				manager.mu.Unlock()
+				manager.lifecycle.mu.Lock()
+				clear(manager.lifecycle.tombstones)
+				manager.lifecycle.tombstoneQueue = manager.lifecycle.tombstoneQueue[:0]
+				seedTombstonesLocked(manager.lifecycle, size, time.Unix(0, 0))
+				manager.lifecycle.mu.Unlock()
 				b.StartTimer()
-				manager.mu.Lock()
-				manager.pruneTombstonesLocked(time.Now(), tombstonePruneBatch)
-				manager.mu.Unlock()
+				manager.lifecycle.mu.Lock()
+				manager.lifecycle.pruneExpiredLocked(time.Now())
+				manager.lifecycle.mu.Unlock()
 				b.StopTimer()
 			}
 		})
@@ -303,26 +304,22 @@ func BenchmarkPcapWriterTelemetryAtTombstoneCardinality(b *testing.B) {
 
 func newTombstoneTestManager(size int) *PcapWriterManager {
 	return &PcapWriterManager{
-		tombstones:     make(map[string]time.Time, size),
-		tombstoneIndex: make(map[string]*callTombstone, size),
-		tombstoneLimit: size + 1,
-		tombstoneTTL:   time.Hour,
+		lifecycle: NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneLimit: size + 1, TombstoneTTL: time.Hour}),
 	}
 }
 
 func seedTombstones(manager *PcapWriterManager, size int, finalizedAt time.Time) {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	seedTombstonesLocked(manager, size, finalizedAt)
+	manager.lifecycle.mu.Lock()
+	defer manager.lifecycle.mu.Unlock()
+	seedTombstonesLocked(manager.lifecycle, size, finalizedAt)
 }
 
-func seedTombstonesLocked(manager *PcapWriterManager, size int, finalizedAt time.Time) {
+func seedTombstonesLocked(registry *CallLifecycleRegistry, size int, finalizedAt time.Time) {
 	for i := range size {
 		callID := strings.Repeat("x", 8) + strconv.Itoa(i)
-		entry := &callTombstone{callID: callID, finalizedAt: finalizedAt.Add(time.Duration(i))}
-		manager.tombstones[callID] = entry.finalizedAt
-		manager.tombstoneIndex[callID] = entry
-		heap.Push(&manager.tombstoneQueue, entry)
+		entry := &lifecycleTombstone{callID: callID, generation: uint64(i + 1), finalizedAt: finalizedAt.Add(time.Duration(i))}
+		registry.tombstones[callID] = entry
+		heap.Push(&registry.tombstoneQueue, entry)
 	}
 }
 

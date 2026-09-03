@@ -19,7 +19,7 @@ type sessionCompletionMonitor interface {
 	Start()
 	Stop()
 	SetVoIPPortCleaner(VoIPPortCleaner)
-	ScheduleClose(string, bool)
+	ScheduleCloseReason(string, bool, CallFinalizationReason)
 }
 
 // OnCallStarted implements callregistry.LifecycleObserver. Writers are opened
@@ -28,14 +28,18 @@ func (m *SessionOutputManager) OnCallStarted(callregistry.Call) {}
 
 // OnCallEnded schedules output closure without transferring registry state or
 // writer ownership into the analyzer.
-func (m *SessionOutputManager) OnCallEnded(call callregistry.Call, _ callregistry.EndReason) {
+func (m *SessionOutputManager) OnCallEnded(call callregistry.Call, reason callregistry.EndReason) {
 	if m == nil {
 		return
 	}
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	if !m.closed && m.monitor != nil {
-		m.monitor.ScheduleClose(call.CallID, call.State == "ACTIVE" || call.State == "ENDED")
+	if !m.closed && m.monitor != nil && reason != callregistry.EndShutdown {
+		m.monitor.ScheduleCloseReason(
+			call.CallID,
+			call.State == "ACTIVE" || call.State == "ENDED",
+			mapRegistryEndReason(reason),
+		)
 	}
 }
 
@@ -52,9 +56,10 @@ type sessionWriterCloser interface {
 // Close excludes new writes before stopping lifecycle observation. It then
 // closes the writers, ensuring callbacks cannot run before their files close.
 type SessionOutputManager struct {
-	writer  *PcapWriterManager
-	closer  sessionWriterCloser
-	monitor sessionCompletionMonitor
+	writer    *PcapWriterManager
+	lifecycle *CallLifecycleRegistry
+	closer    sessionWriterCloser
+	monitor   sessionCompletionMonitor
 
 	lifecycleMu sync.RWMutex
 	writesWG    sync.WaitGroup
@@ -69,16 +74,37 @@ func NewSessionOutputManager(
 	monitorConfig *CallCompletionMonitorConfig,
 	aggregator *voip.CallAggregator,
 ) (*SessionOutputManager, error) {
-	writer, err := NewPcapWriterManager(writerConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create per-call PCAP writer manager: %w", err)
+	monitorDefaults := monitorConfig
+	if monitorDefaults == nil {
+		monitorDefaults = DefaultCallCompletionMonitorConfig()
+	}
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneTTL: monitorDefaults.ClosedCallTTL})
+	var writer *PcapWriterManager
+	if writerConfig != nil && writerConfig.Enabled {
+		var err error
+		writer, err = NewPcapWriterManagerWithLifecycle(writerConfig, lifecycle)
+		if err != nil {
+			return nil, fmt.Errorf("create per-call PCAP writer manager: %w", err)
+		}
 	}
 
-	return newSessionOutputManager(writer, NewCallCompletionMonitor(monitorConfig, aggregator, writer)), nil
+	return newSessionOutputManagerWithLifecycle(
+		writer,
+		NewCallCompletionMonitorWithLifecycle(monitorConfig, aggregator, writer, lifecycle),
+		lifecycle,
+	), nil
 }
 
 func newSessionOutputManager(writer *PcapWriterManager, monitor sessionCompletionMonitor) *SessionOutputManager {
-	manager := &SessionOutputManager{writer: writer, monitor: monitor}
+	var lifecycle *CallLifecycleRegistry
+	if writer != nil {
+		lifecycle = writer.lifecycle
+	}
+	return newSessionOutputManagerWithLifecycle(writer, monitor, lifecycle)
+}
+
+func newSessionOutputManagerWithLifecycle(writer *PcapWriterManager, monitor sessionCompletionMonitor, lifecycle *CallLifecycleRegistry) *SessionOutputManager {
+	manager := &SessionOutputManager{writer: writer, lifecycle: lifecycle, monitor: monitor}
 	if writer != nil {
 		manager.closer = writer
 	}
@@ -167,9 +193,23 @@ func (m *SessionOutputManager) Close() error {
 			monitor.Stop()
 		}
 		m.writesWG.Wait()
+		if m.lifecycle != nil {
+			m.lifecycle.Shutdown()
+		}
 		if closer != nil {
 			m.closeErr = closer.Close()
 		}
 	})
 	return m.closeErr
+}
+
+func mapRegistryEndReason(reason callregistry.EndReason) CallFinalizationReason {
+	switch reason {
+	case callregistry.EndTimeout:
+		return CallFinalizationIdleTimeout
+	case callregistry.EndEvicted:
+		return CallFinalizationCapacityEviction
+	default:
+		return CallFinalizationProtocolComplete
+	}
 }

@@ -125,6 +125,32 @@ func TestCallCompletionMonitor_StartWithNilComponents(t *testing.T) {
 	monitor2.Stop()
 }
 
+type countingPortCleaner struct{ calls atomic.Int32 }
+
+func (c *countingPortCleaner) CleanupCallPorts(string) { c.calls.Add(1) }
+
+func TestCallCompletionMonitorFinalizesWithoutPCAP(t *testing.T) {
+	aggregator := voip.NewCallAggregator()
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneTTL: time.Hour})
+	monitor := NewCallCompletionMonitorWithLifecycle(&CallCompletionMonitorConfig{
+		GracePeriod:    time.Nanosecond,
+		CheckInterval:  time.Hour,
+		RTPWaitTimeout: time.Nanosecond,
+		ClosedCallTTL:  time.Hour,
+	}, aggregator, nil, lifecycle)
+	cleaner := &countingPortCleaner{}
+	monitor.SetVoIPPortCleaner(cleaner)
+
+	monitor.ScheduleCloseReason("no-pcap-call", false, CallFinalizationProtocolComplete)
+	time.Sleep(time.Millisecond)
+	monitor.processPendingClose()
+
+	assert.True(t, lifecycle.IsFinalized("no-pcap-call"))
+	assert.Equal(t, int32(1), cleaner.calls.Load())
+	monitor.finalizeCall("no-pcap-call", CallFinalizationProtocolComplete)
+	assert.Equal(t, int32(1), cleaner.calls.Load(), "cleanup must run once")
+}
+
 func TestCallCompletionMonitor_DetectsEndedCalls(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
 	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing

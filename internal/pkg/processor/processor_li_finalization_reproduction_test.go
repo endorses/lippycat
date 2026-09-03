@@ -97,20 +97,25 @@ func TestPhase0FinalizedCallWithPCAPStillAcceptedByX3(t *testing.T) {
 		"reproduction: X3 accepts the same late packet that PCAP rejects")
 }
 
-func TestPhase0FinalizedCallWithoutPCAPStillAcceptedByX3(t *testing.T) {
+func TestPhase3FinalizedCallWithoutPCAPHasSharedLifecycle(t *testing.T) {
 	p, filterID := newFinalizationReproductionProcessor(t, false)
-	require.Nil(t, p.sessionOutputManager,
-		"the processor has no PCAP-owned finalization registry")
+	require.NotNil(t, p.sessionOutputManager)
+	require.Nil(t, p.sessionOutputManager.writer)
+	require.NotNil(t, p.callLifecycle,
+		"LI requires terminal call state even when PCAP output is disabled")
 
 	bye := dirSIPPacket("BYE "+dirTargetURI+" SIP/2.0", 0, dirRemoteURI, dirTargetURI, "xyz", "")
 	bye.VoIPData.CallID = finalizedCallID
 	bye.VoIPData.Method = "BYE"
 	bye.VoIPData.CSeqMethod = "BYE"
 	p.processLIPacket(bye, []string{filterID})
+	result := p.callLifecycle.Finalize(finalizedCallID, CallFinalizationProtocolComplete)
+	require.True(t, result.Finalized)
+	assert.True(t, p.callLifecycle.IsFinalized(finalizedCallID))
 
 	before := p.getLIEncodingStats()
 	p.processLIPacket(finalizedCallRTP(), []string{filterID})
 	after := p.getLIEncodingStats()
 	assert.Equal(t, before.X3Encoded+1, after.X3Encoded,
-		"reproduction: a post-BYE packet is accepted because finalization disappears with PCAP disabled")
+		"Phase 4 will apply the shared lifecycle admission boundary to X3")
 }

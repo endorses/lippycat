@@ -425,7 +425,8 @@ type Manager struct {
 	stopChan chan struct{}
 
 	// wg tracks background goroutines.
-	wg sync.WaitGroup
+	wg       sync.WaitGroup
+	workerMu sync.Mutex
 
 	// shuttingDown indicates shutdown is in progress.
 	shuttingDown      atomic.Bool
@@ -604,8 +605,10 @@ func (m *Manager) Start() {
 
 // Stop gracefully shuts down the manager and closes all connections.
 func (m *Manager) Stop() {
+	m.workerMu.Lock()
 	m.shuttingDown.Store(true)
 	close(m.stopChan)
+	m.workerMu.Unlock()
 
 	m.mu.Lock()
 	for did, state := range m.destinations {
@@ -615,6 +618,18 @@ func (m *Manager) Stop() {
 
 	m.wg.Wait()
 	logger.Info("destination manager stopped")
+}
+
+// admitWorkers registers background work atomically with shutdown initiation.
+// sync.WaitGroup requires every positive Add to complete before Wait may begin.
+func (m *Manager) admitWorkers(count int) bool {
+	m.workerMu.Lock()
+	defer m.workerMu.Unlock()
+	if m.shuttingDown.Load() {
+		return false
+	}
+	m.wg.Add(count)
+	return true
 }
 
 // AddDestination adds a new destination and initiates connection.
@@ -647,8 +662,9 @@ func (m *Manager) AddDestination(dest *li.Destination) error {
 	m.destinations[dest.DID] = state
 
 	// Start connection in background.
-	m.wg.Add(1)
-	go m.connectDestination(dest.DID)
+	if m.admitWorkers(1) {
+		go m.connectDestination(dest.DID)
+	}
 
 	logger.Info("destination added",
 		"did", dest.DID,
@@ -709,8 +725,9 @@ func (m *Manager) UpdateDestination(dest *li.Destination) error {
 		state.backoff = m.config.InitialBackoff
 		state.mu.Unlock()
 
-		m.wg.Add(1)
-		go m.connectDestination(dest.DID)
+		if m.admitWorkers(1) {
+			go m.connectDestination(dest.DID)
+		}
 
 		logger.Info("destination updated, reconnecting",
 			"did", dest.DID,
@@ -1171,7 +1188,9 @@ func (m *Manager) registerConnection(state *destinationState, conn *tls.Conn, if
 // timers. Reads are never discarded: only valid ACKs for an outstanding
 // sequence refresh liveness.
 func (m *Manager) watchConnection(did uuid.UUID, conn *tls.Conn) {
-	m.wg.Add(2)
+	if !m.admitWorkers(2) {
+		return
+	}
 	go func() {
 		defer m.wg.Done()
 		for {
@@ -1327,8 +1346,9 @@ func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 				m.config.DeliveryFault(did, timeoutErr)
 			}
 			m.invalidateConnection(did, conn, false)
-			m.wg.Add(1)
-			go m.reconnectInterface(did, iface)
+			if m.admitWorkers(1) {
+				go m.reconnectInterface(did, iface)
+			}
 			return
 		}
 		for _, frame := range frames {
@@ -1513,8 +1533,7 @@ func (m *Manager) scheduleReconnect(did uuid.UUID, state *destinationState) {
 	}
 
 	state.reconnectTimer = time.AfterFunc(wait, func() {
-		if !m.shuttingDown.Load() {
-			m.wg.Add(1)
+		if m.admitWorkers(1) {
 			go m.connectDestination(did)
 		}
 	})

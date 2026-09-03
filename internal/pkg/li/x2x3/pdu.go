@@ -20,12 +20,10 @@ import (
 
 // Protocol version per ETSI TS 103 221-2.
 // Version field: upper 8 bits = major, lower 8 bits = minor.
-// The major version 5 is the value mandated by the current published spec
-// (TS 103 221-2 V1.9.1, clause 5.2); it is incremented only on a
-// backwards-incompatible change to the X2/X3 PDU structure.
+// The currently supported wire version is major 0, minor 5.
 const (
-	VersionMajor = 5
-	VersionMinor = 0
+	VersionMajor = 0
+	VersionMinor = 5
 	Version      = (VersionMajor << 8) | VersionMinor
 )
 
@@ -236,7 +234,8 @@ func (h *PDUHeader) UnmarshalBinary(data []byte) error {
 	copy(h.XID[:], data[16:32])
 	h.CorrelationID = binary.BigEndian.Uint64(data[32:40])
 
-	// Validate
+	// Minor revisions within the supported major version are wire-compatible.
+	// Reject only newer major versions, whose layout may be incompatible.
 	if h.Version>>8 > VersionMajor {
 		return ErrInvalidVersion
 	}

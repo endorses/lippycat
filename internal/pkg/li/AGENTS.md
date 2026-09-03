@@ -290,11 +290,12 @@ Binary PDU format per TS 103 221-2:
 
 ```go
 type PDUHeader struct {
-    Version       uint16      // Protocol version (5.0)
+    Version       uint16      // Protocol version (0.5, encoded as 0x0005)
     Type          PDUType     // X2 (1) or X3 (2)
-    HeaderLength  uint16      // Total header size
-    PayloadFormat PayloadFormat
+    HeaderLength  uint32      // Total header size
     PayloadLength uint32
+    PayloadFormat PayloadFormat
+    PayloadDirection PayloadDirection
     XID           uuid.UUID   // Task identifier
     CorrelationID uint64      // Links related PDUs
 }
@@ -309,14 +310,15 @@ type TLVAttribute struct {
 ```
 Offset  Size  Field
 ------  ----  -----
-0       2     Version
+0       2     Version (0.5, wire bytes 00 05)
 2       2     PDU Type
-4       2     Header Length
-6       2     Payload Format
+4       4     Header Length
 8       4     Payload Length
-12      16    XID (UUID)
-28      8     Correlation ID
-36      var   Conditional Attributes (TLV)
+12      2     Payload Format
+14      2     Payload Direction
+16      16    XID (UUID)
+32      8     Correlation ID
+40      var   Conditional Attributes (TLV)
 ```
 
 ### X2 Encoder

@@ -278,19 +278,22 @@ failed tasks cannot be reactivated with `ActivateTask`.
 ## X2/X3 Protocol (Binary TLV)
 
 Content is delivered to MDF using binary TLV encoding per TS 103 221-2.
+The two-byte protocol version is 0.5, encoded in network byte order as `00 05`.
+The fixed PDU header is 40 bytes; conditional TLV attributes extend it.
 
 ### PDU Structure
 
 | Offset | Field | Size |
 |--------|-------|------|
-| 0 | Version | 2 bytes |
+| 0 | Version (`0.5`, wire bytes `00 05`) | 2 bytes |
 | 2 | Type | 2 bytes |
-| 4 | HeaderLen | 2 bytes |
-| 6 | PayloadFmt | 2 bytes |
+| 4 | HeaderLen | 4 bytes |
 | 8 | PayloadLength | 4 bytes |
-| 12 | XID (UUID) | 16 bytes |
-| 28 | CorrelationID | 8 bytes |
-| 36+ | Conditional Attributes (TLV) | variable |
+| 12 | PayloadFmt | 2 bytes |
+| 14 | PayloadDirection | 2 bytes |
+| 16 | XID (UUID) | 16 bytes |
+| 32 | CorrelationID | 8 bytes |
+| 40+ | Conditional Attributes (TLV) | variable |
 | ... | Payload | variable |
 
 ### X2 IRI Events

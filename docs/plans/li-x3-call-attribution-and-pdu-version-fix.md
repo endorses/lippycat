@@ -381,26 +381,37 @@ another call under the same XID.
 
 ## Phase 5: Correct the ETSI PDU Version
 
-- [ ] Change the canonical constants to `VersionMajor = 0`, `VersionMinor = 5`,
+- [x] Change the canonical constants to `VersionMajor = 0`, `VersionMinor = 5`,
   and packed `Version = 0x0005`; keep all PDU constructors on this one value.
-- [ ] Correct comments that describe major version 5, including package guidance
+- [x] Correct comments that describe major version 5, including package guidance
   that calls the protocol version 5.0.
-- [ ] Preserve the decoder's compatibility rule deliberately: accept supported
+- [x] Preserve the decoder's compatibility rule deliberately: accept supported
   major version 0 minor revisions according to policy, and reject major versions
   greater than 0.
-- [ ] Add independent literal assertions for packed value `0x0005` and wire bytes
+- [x] Add independent literal assertions for packed value `0x0005` and wire bytes
   `00 05`; do not derive the expected bytes from the constants under test.
-- [ ] Add a decode test accepting `00 05` and a regression test rejecting the
+- [x] Add a decode test accepting `00 05` and a regression test rejecting the
   legacy broken `05 00` value with `ErrInvalidVersion`.
-- [ ] Adjust the existing unsupported-major test so it remains meaningful when
+- [x] Adjust the existing unsupported-major test so it remains meaningful when
   the supported major is zero.
-- [ ] Change the first two bytes of all five golden vectors under
+- [x] Change the first two bytes of all five golden vectors under
   `internal/pkg/li/x2x3/testdata/x2x3/` from `0500` to `0005`.
-- [ ] Decode all X2, X3, keepalive, and keepalive-ack golden variants in
+- [x] Decode all X2, X3, keepalive, and keepalive-ack golden variants in
   table-driven coverage, in addition to exact encoder byte comparisons.
-- [ ] Reconcile stale X2/X3 header/version descriptions in `internal/pkg/li` and
+- [x] Reconcile stale X2/X3 header/version descriptions in `internal/pkg/li` and
   operator documentation with the actual 40-byte, uint32-length layout rather
   than updating only the version label in an otherwise incorrect diagram.
+
+Phase 5 implementation note: all X2/X3 constructors now emit the canonical
+TS 103 221-2 version value 0.5 as `00 05`. The decoder deliberately accepts
+minor revisions within major version zero and rejects non-zero majors, including
+the legacy broken `05 00` encoding. All five file-backed golden vectors were
+corrected and are decoded table-wise alongside an independent literal
+keepalive-ack vector; exact encoder comparisons cover every PDU type. Package
+guidance and the LI operator integration guide now document the actual 40-byte
+header with uint32 header and payload lengths. Focused X2/X3 tests and the full
+LI package suite pass, with the latter run outside the sandbox for localhost
+listener coverage.
 
 ## Phase 6: Observability and Documentation
 

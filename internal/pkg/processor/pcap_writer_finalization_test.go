@@ -142,6 +142,69 @@ func TestPcapWriterManagerExpiredCallIDReuseDoesNotMutateArtifact(t *testing.T) 
 	}
 }
 
+func TestRetainedWriterCannotFinalizeReusedCallID(t *testing.T) {
+	tests := []struct {
+		name  string
+		close func(*CallPcapWriter) error
+	}{
+		{name: "close", close: (*CallPcapWriter).Close},
+		{name: "close call", close: (*CallPcapWriter).CloseCall},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := newFinalizationTestManager(t, "{callid}.pcap")
+			const callID = "generation-safe-reuse"
+
+			first, err := manager.GetOrCreateWriter(callID, "alice", "bob")
+			require.NoError(t, err)
+			require.NoError(t, manager.CloseCallWriter(callID))
+
+			manager.lifecycle.mu.Lock()
+			manager.lifecycle.tombstones[callID].finalizedAt = time.Now().Add(-2 * manager.lifecycle.tombstoneTTL)
+			manager.lifecycle.mu.Unlock()
+
+			second, err := manager.GetOrCreateWriter(callID, "carol", "dave")
+			require.NoError(t, err)
+			require.NotSame(t, first, second)
+
+			require.NoError(t, tt.close(first))
+			assert.False(t, manager.IsFinalized(callID), "stale writer handle finalized the reused Call-ID")
+			require.NoError(t, second.WriteSIPPacket(time.Now(), []byte("new generation remains live"), layers.LinkTypeEthernet))
+			require.NoError(t, manager.CloseCallWriter(callID))
+		})
+	}
+}
+
+func TestFinalizeReportsWriterCreatedByAdmittedConcurrentWork(t *testing.T) {
+	manager := newFinalizationTestManager(t, "{callid}.pcap")
+	const callID = "admitted-writer-race"
+
+	admission, err := manager.lifecycle.Admit(callID)
+	require.NoError(t, err)
+
+	type finalizeResult struct {
+		result CallFinalizationResult
+		err    error
+	}
+	finalized := make(chan finalizeResult, 1)
+	go func() {
+		result, finalizeErr := manager.FinalizeCall(callID, CallFinalizationProtocolComplete)
+		finalized <- finalizeResult{result: result, err: finalizeErr}
+	}()
+	require.Eventually(t, func() bool { return manager.lifecycle.IsFinalized(callID) }, time.Second, time.Millisecond)
+
+	writer, err := manager.getOrCreateWriter(callID, "alice", "bob", admission.Generation())
+	require.NoError(t, err)
+	require.NotNil(t, writer)
+	admission.Release()
+
+	outcome := <-finalized
+	require.NoError(t, outcome.err)
+	assert.True(t, outcome.result.Finalized)
+	assert.True(t, outcome.result.HadWriter)
+}
+
 func TestPcapWriterManagerExistingPathIsNeverTruncated(t *testing.T) {
 	dir := t.TempDir()
 	originalPath := filepath.Join(dir, "collision_sip.pcap")

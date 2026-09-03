@@ -293,8 +293,9 @@ Phase 3 implementation note: processor-owned `CallLifecycleRegistry` now provide
 bounded tombstones, monotonic generations, atomic admission tokens, conditional
 generation finalization, ordered finalization subscribers, and non-semantic
 shutdown draining. Per-call PCAP uses this registry for writer creation and packet
-write admission; writer generations and exclusive file creation preserve finalized
-artifacts across Call-ID reuse. The completion monitor owns terminal decisions even
+write admission; writer generations, generation-conditional handle finalization,
+and exclusive file creation preserve finalized artifacts across Call-ID reuse. The
+completion monitor owns terminal decisions even
 without PCAP, maps call-registry completion reasons deliberately, and publishes one
 shared cleanup event. LI-enabled processors therefore instantiate and run the
 lifecycle monitor with an optional PCAP sink. Focused and full processor tests pass

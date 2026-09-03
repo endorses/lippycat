@@ -42,13 +42,13 @@ type ProcessResult struct {
 
 	// CallID is the SIP Call-ID associated with this packet.
 	// For SIP packets, this is extracted from headers.
-	// For RTP packets, this is looked up from the port-to-call mapping.
+	// For RTP packets, this is populated only after authoritative exact-endpoint
+	// resolution succeeds.
 	CallID string
 
-	// CallIDs contains every SIP Call-ID associated with this packet. RTP can
-	// belong to multiple call legs when a B2BUA advertises a shared media
-	// endpoint. CallID remains the first entry for compatibility with consumers
-	// that can represent only one call.
+	// CallIDs contains the Call-IDs associated with this packet. For RTP it is
+	// either empty or contains the single authoritatively resolved Call-ID;
+	// ambiguous ownership is never exposed as an ordered candidate list.
 	CallIDs []string
 
 	// MediaResolution carries the authoritative exact-endpoint attribution for

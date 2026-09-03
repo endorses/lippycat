@@ -84,6 +84,7 @@ type CallLifecycleRegistry struct {
 	mu sync.Mutex
 
 	active         map[string]*lifecycleCall
+	finalizing     map[string]*lifecycleTombstone
 	tombstones     map[string]*lifecycleTombstone
 	tombstoneQueue lifecycleTombstoneHeap
 	tombstoneTTL   time.Duration
@@ -115,6 +116,7 @@ func NewCallLifecycleRegistry(config CallLifecycleConfig) *CallLifecycleRegistry
 	}
 	return &CallLifecycleRegistry{
 		active:         make(map[string]*lifecycleCall),
+		finalizing:     make(map[string]*lifecycleTombstone),
 		tombstones:     make(map[string]*lifecycleTombstone),
 		tombstoneTTL:   config.TombstoneTTL,
 		tombstoneLimit: config.TombstoneLimit,
@@ -149,6 +151,9 @@ func (r *CallLifecycleRegistry) Admit(callID string) (*CallAdmission, error) {
 		return nil, ErrCallLifecycleShutdown
 	}
 	now := time.Now()
+	if terminal := r.finalizing[callID]; terminal != nil {
+		return nil, &FinalizedCallError{CallID: callID, FinalizedAt: terminal.finalizedAt}
+	}
 	if terminal := r.tombstones[callID]; terminal != nil {
 		if r.tombstoneTTL <= 0 || now.Sub(terminal.finalizedAt) < r.tombstoneTTL {
 			return nil, &FinalizedCallError{CallID: callID, FinalizedAt: terminal.finalizedAt}
@@ -214,6 +219,11 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 		return result
 	}
 	now := time.Now()
+	if terminal := r.finalizing[callID]; terminal != nil {
+		result.FinalizedAt = terminal.finalizedAt
+		r.mu.Unlock()
+		return result
+	}
 	if old := r.tombstones[callID]; old != nil {
 		if r.tombstoneTTL <= 0 || now.Sub(old.finalizedAt) < r.tombstoneTTL {
 			result.FinalizedAt = old.finalizedAt
@@ -237,6 +247,7 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 		close(call.drained)
 	}
 	r.addTombstoneLocked(callID, call.generation, now)
+	r.finalizing[callID] = &lifecycleTombstone{callID: callID, generation: call.generation, finalizedAt: now, index: -1}
 	subscribers := append([]func(CallFinalizationEvent){}, r.subscribers...)
 	event := CallFinalizationEvent{CallID: callID, Generation: call.generation, Reason: reason, FinalizedAt: now}
 	result.Finalized = true
@@ -247,6 +258,11 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 	for _, subscriber := range subscribers {
 		subscriber(event)
 	}
+	r.mu.Lock()
+	if current := r.finalizing[callID]; current != nil && current.generation == call.generation {
+		delete(r.finalizing, callID)
+	}
+	r.mu.Unlock()
 	return result
 }
 
@@ -258,6 +274,9 @@ func (r *CallLifecycleRegistry) IsFinalized(callID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry := r.tombstones[callID]
+	if finalizing := r.finalizing[callID]; finalizing != nil {
+		return true
+	}
 	if entry != nil && r.tombstoneTTL > 0 && time.Since(entry.finalizedAt) >= r.tombstoneTTL {
 		r.removeTombstoneLocked(callID)
 		return false

@@ -156,3 +156,60 @@ func TestCallLifecycleShutdownDrainsWithoutFinalizing(t *testing.T) {
 	assert.False(t, r.IsFinalized("live"))
 	assert.Zero(t, callbacks.Load())
 }
+
+func TestCallLifecycleReuseWaitsForOldGenerationSubscribers(t *testing.T) {
+	tests := []struct {
+		name   string
+		config CallLifecycleConfig
+		press  func(*CallLifecycleRegistry)
+	}{
+		{
+			name:   "expired tombstone",
+			config: CallLifecycleConfig{TombstoneTTL: time.Millisecond, TombstoneLimit: 4},
+			press:  func(*CallLifecycleRegistry) { time.Sleep(2 * time.Millisecond) },
+		},
+		{
+			name:   "capacity-evicted tombstone",
+			config: CallLifecycleConfig{TombstoneTTL: time.Hour, TombstoneLimit: 1},
+			press: func(r *CallLifecycleRegistry) {
+				r.Finalize("capacity-pressure", CallFinalizationManual)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewCallLifecycleRegistry(tt.config)
+			first, err := r.Admit("reused")
+			require.NoError(t, err)
+			firstGeneration := first.Generation()
+			first.Release()
+
+			subscriberStarted := make(chan struct{})
+			releaseSubscriber := make(chan struct{})
+			r.Subscribe(func(event CallFinalizationEvent) {
+				if event.CallID == "reused" {
+					close(subscriberStarted)
+					<-releaseSubscriber
+				}
+			})
+
+			finalized := make(chan CallFinalizationResult, 1)
+			go func() {
+				finalized <- r.Finalize("reused", CallFinalizationProtocolComplete)
+			}()
+			<-subscriberStarted
+			tt.press(r)
+
+			_, err = r.Admit("reused")
+			assert.True(t, IsCallFinalized(err), "old-generation cleanup must exclude reuse")
+			close(releaseSubscriber)
+			assert.True(t, (<-finalized).Finalized)
+
+			second, err := r.Admit("reused")
+			require.NoError(t, err)
+			defer second.Release()
+			assert.Greater(t, second.Generation(), firstGeneration)
+		})
+	}
+}

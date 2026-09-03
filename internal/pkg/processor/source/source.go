@@ -111,6 +111,11 @@ type Stats struct {
 	CaptureBufferSIPDrops     uint64
 	BatchChannelDrops         uint64
 
+	// IdentityInheritanceSuppressed counts classified media packets for which
+	// identity-filter inheritance was denied because call ownership was not
+	// authoritatively resolved. Direct packet-level matches remain eligible.
+	IdentityInheritanceSuppressed uint64
+
 	// BytesReceived is the total bytes received/captured
 	BytesReceived uint64
 
@@ -136,13 +141,14 @@ type Stats struct {
 // AtomicStats provides thread-safe access to Stats fields.
 // Use this for concurrent updates from packet processing goroutines.
 type AtomicStats struct {
-	packetsCaptured  atomic.Uint64
-	packetsForwarded atomic.Uint64
-	packetsDropped   atomic.Uint64
-	bytesReceived    atomic.Uint64
-	batchesReceived  atomic.Uint64
-	lastPacketTime   atomic.Int64 // Unix nano
-	startTime        int64        // Set once at start
+	packetsCaptured               atomic.Uint64
+	packetsForwarded              atomic.Uint64
+	packetsDropped                atomic.Uint64
+	bytesReceived                 atomic.Uint64
+	batchesReceived               atomic.Uint64
+	identityInheritanceSuppressed atomic.Uint64
+	lastPacketTime                atomic.Int64 // Unix nano
+	startTime                     int64        // Set once at start
 
 	// System metrics (CPU/RAM)
 	cpuPercent       atomic.Value // stores float64
@@ -181,6 +187,11 @@ func (s *AtomicStats) AddBatch() {
 	s.batchesReceived.Add(1)
 }
 
+// AddIdentityInheritanceSuppressed records a fail-closed media attribution.
+func (s *AtomicStats) AddIdentityInheritanceSuppressed() {
+	s.identityInheritanceSuppressed.Add(1)
+}
+
 // SetSystemMetrics updates the system metrics (CPU/RAM) from sysmetrics collector.
 func (s *AtomicStats) SetSystemMetrics(m sysmetrics.Metrics) {
 	s.cpuPercent.Store(m.CPUPercent)
@@ -197,17 +208,18 @@ func (s *AtomicStats) Snapshot() Stats {
 	}
 
 	return Stats{
-		PacketsCaptured:   s.packetsCaptured.Load(),
-		PacketsForwarded:  s.packetsForwarded.Load(),
-		PacketsDropped:    s.packetsDropped.Load(),
-		BatchChannelDrops: s.packetsDropped.Load(),
-		BytesReceived:     s.bytesReceived.Load(),
-		BatchesReceived:   s.batchesReceived.Load(),
-		LastPacketTime:    lastTime,
-		StartTime:         time.Unix(0, s.startTime),
-		CPUPercent:        s.cpuPercent.Load().(float64),
-		MemoryRSSBytes:    s.memoryRSSBytes.Load(),
-		MemoryLimitBytes:  s.memoryLimitBytes.Load(),
+		PacketsCaptured:               s.packetsCaptured.Load(),
+		PacketsForwarded:              s.packetsForwarded.Load(),
+		PacketsDropped:                s.packetsDropped.Load(),
+		BatchChannelDrops:             s.packetsDropped.Load(),
+		BytesReceived:                 s.bytesReceived.Load(),
+		BatchesReceived:               s.batchesReceived.Load(),
+		IdentityInheritanceSuppressed: s.identityInheritanceSuppressed.Load(),
+		LastPacketTime:                lastTime,
+		StartTime:                     time.Unix(0, s.startTime),
+		CPUPercent:                    s.cpuPercent.Load().(float64),
+		MemoryRSSBytes:                s.memoryRSSBytes.Load(),
+		MemoryLimitBytes:              s.memoryLimitBytes.Load(),
 	}
 }
 

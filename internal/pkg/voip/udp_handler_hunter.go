@@ -38,6 +38,10 @@ type bufferedSIPAnalysis struct {
 	at     time.Time
 }
 
+type packetLevelFilterWithIDs interface {
+	MatchPacketLevelWithIDs(gopacket.Packet) (bool, []string)
+}
+
 const maxBufferedSIPAnalysisCalls = 1024
 
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
@@ -327,11 +331,28 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 	}
 
 	resolution := h.tracker.ResolveMediaPacket(packet)
+	var directMatched bool
+	var directFilterIDs []string
+	if filter, ok := h.appFilter.(packetLevelFilterWithIDs); ok {
+		directMatched, directFilterIDs = filter.MatchPacketLevelWithIDs(packet)
+	}
 	if resolution.Status != callregistry.MediaResolved {
-		// Not a tracked RTP port
+		// Ambiguous or unresolved media cannot inherit identity selection, but a
+		// direct packet-level IP/CIDR match remains authoritative on its own.
+		if directMatched {
+			h.forwardRTPPacket("", packet, layer, interfaceName, pkt.LinkType, directFilterIDs, nil)
+			return true
+		}
 		return false
 	}
 	bufCallID := resolution.CallID
+	if directMatched {
+		// Direct evidence selects this packet independently. Do not also place it
+		// in the call buffer, where a later identity decision could forward it a
+		// second time under different provenance.
+		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType, directFilterIDs, nil)
+		return true
+	}
 
 	// Buffer only after the same resolved call owns one of these exact endpoints.
 	shouldForward, accepted := h.bufferMgr.AddRTPPacketForEndpoints(
@@ -346,7 +367,7 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 
 	if shouldForward {
 		// Call already matched, forward immediately with RTP metadata
-		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType)
+		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType, directFilterIDs, nil)
 		return true
 	}
 
@@ -418,7 +439,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 }
 
 // forwardRTPPacket forwards a single RTP packet immediately (call already matched)
-func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType) {
+func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) {
 	// Try to extract RTP header for metadata
 	var pbMetadata *data.PacketMetadata
 
@@ -433,10 +454,6 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 			ssrc := uint32(payload[8])<<24 | uint32(payload[9])<<16 | uint32(payload[10])<<8 | uint32(payload[11])
 
 			pbMetadata = &data.PacketMetadata{
-				// Include SIP metadata with CallID so processor can associate RTP with call
-				Sip: &data.SIPMetadata{
-					CallId: callID,
-				},
 				// Include RTP metadata for quality calculations
 				Rtp: &data.RTPMetadata{
 					Ssrc:        ssrc,
@@ -445,11 +462,14 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 					Timestamp:   timestamp,
 				},
 			}
+			if callID != "" {
+				pbMetadata.Sip = &data.SIPMetadata{CallId: callID}
+			}
 		}
 	}
 
 	// Forward with RTP metadata if available
-	if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName, linkType); err != nil {
+	if err := forwardPacketWithFilterProvenance(h.forwarder, packet, pbMetadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs); err != nil {
 		logger.Error("Failed to forward RTP packet",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)

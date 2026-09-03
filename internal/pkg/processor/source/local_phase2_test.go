@@ -107,14 +107,71 @@ func TestLocalSourcePhase2_RTPDirectAndInheritedIDComposition(t *testing.T) {
 	})
 }
 
-func TestLocalSourcePhase2_AssociatedCallIDUnionIsBounded(t *testing.T) {
+func TestLocalSourcePhase2_AmbiguousSharedEndpointFailsClosed(t *testing.T) {
+	const (
+		callA = "synthetic-shared-leg-a@example.invalid"
+		callB = "synthetic-shared-leg-b@example.invalid"
+	)
+
+	sharedInvite := func(t *testing.T, callID string) capture.PacketInfo {
+		t.Helper()
+		return phase0UDPPacket(t, phase0MediaIP, "192.0.2.20", 5060, 5060,
+			phase0SIPPayload("INVITE", callID, true))
+	}
+	identityMatcher := func(packet gopacket.Packet) (bool, []string) {
+		payload := phase0PacketPayload(packet)
+		switch {
+		case bytes.Contains(payload, []byte("Call-ID: "+callA)):
+			return true, []string{"identity-a"}
+		case bytes.Contains(payload, []byte("Call-ID: "+callB)):
+			return true, []string{"identity-b"}
+		default:
+			return false, nil
+		}
+	}
+
+	t.Run("direct IP match survives without foreign identity union", func(t *testing.T) {
+		filter := phase2Filter(identityMatcher, func(gopacket.Packet) (bool, []string) {
+			return true, []string{"direct-ip"}
+		})
+		packets := runPhase0LocalSourceWithProcessorFilter(t, filter, filter,
+			sharedInvite(t, callA), sharedInvite(t, callB), phase0RTPPacket(t))
+
+		require.Len(t, packets, 3)
+		media := packets[2]
+		require.NotNil(t, media.Metadata.GetRtp(), "fixture must remain classified as RTP")
+		require.Nil(t, media.Metadata.GetSip(), "ambiguous media must not carry a guessed Call-ID")
+		require.Equal(t, []string{"direct-ip"}, media.MatchedFilterIds,
+			"direct packet attribution remains valid, but neither call's identity may be inherited")
+		require.Equal(t, []string{"direct-ip"}, media.DirectMatchedFilterIds)
+		require.Empty(t, media.InheritedMatchedFilterIds,
+			"ambiguous media must expose no identity provenance at the LI boundary")
+	})
+
+	t.Run("identity-only media is not selected", func(t *testing.T) {
+		filter := phase2Filter(identityMatcher, func(gopacket.Packet) (bool, []string) {
+			return false, nil
+		})
+		packets := runPhase0LocalSourceWithProcessorFilter(t, filter, filter,
+			sharedInvite(t, callA), sharedInvite(t, callB), phase0RTPPacket(t))
+
+		require.Len(t, packets, 2, "ambiguous RTP must not enter either identity-selected task")
+		for _, packet := range packets {
+			require.NotNil(t, packet.Metadata.GetSip())
+		}
+	})
+}
+
+func TestLocalSourcePhase2_CachedFilterLookupIsSingleCallAndDeduplicated(t *testing.T) {
 	s := NewLocalSource(DefaultLocalSourceConfig())
 	now := time.Now()
 	s.callFilterCache.Store("leg-a", cachedFilterIDs{filterIDs: []string{"a", "shared", ""}, storedAt: now})
 	s.callFilterCache.Store("unrelated", cachedFilterIDs{filterIDs: []string{"forbidden"}, storedAt: now})
 	s.callFilterCache.Store("leg-b", cachedFilterIDs{filterIDs: []string{"shared", "b", "b"}, storedAt: now})
 
-	require.Equal(t, []string{"a", "shared", "b"}, s.cachedFilterIDsForCalls([]string{"leg-a", "leg-b"}))
+	require.Equal(t, []string{"a", "shared"}, s.cachedFilterIDsForCall("leg-a"))
+	require.Equal(t, []string{"shared", "b"}, s.cachedFilterIDsForCall("leg-b"))
+	require.Empty(t, s.cachedFilterIDsForCall(""))
 }
 
 func runPhase2Injected(t *testing.T, s *LocalSource, injected InjectedPacket) (*data.CapturedPacket, bool) {

@@ -22,6 +22,19 @@ type PacketForwarder interface {
 	ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType) error
 }
 
+// PacketForwarderWithFilterProvenance is implemented by forwarders that can
+// preserve direct versus call-inherited filter evidence across gRPC.
+type PacketForwarderWithFilterProvenance interface {
+	ForwardPacketWithFilterProvenance(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) error
+}
+
+func forwardPacketWithFilterProvenance(forwarder PacketForwarder, packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) error {
+	if provenanceForwarder, ok := forwarder.(PacketForwarderWithFilterProvenance); ok {
+		return provenanceForwarder.ForwardPacketWithFilterProvenance(packet, metadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs)
+	}
+	return forwarder.ForwardPacketWithMetadata(packet, metadata, interfaceName, linkType)
+}
+
 // HunterForwardHandler handles SIP messages for hunter mode (lc hunt voip)
 // It checks filters, extracts metadata, and forwards matched calls to processor
 type HunterForwardHandler struct {

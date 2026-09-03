@@ -209,7 +209,14 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			}
 
 			// Use per-packet filter IDs for LI correlation
-			p.processLIPacket(&display, pkt.MatchedFilterIds)
+			directFilterIDs := pkt.DirectMatchedFilterIds
+			if len(directFilterIDs) == 0 && len(pkt.InheritedMatchedFilterIds) == 0 {
+				// Legacy peers carry only the compatibility union. Treat it as
+				// direct evidence; the LI boundary permits only media-safe IP/CIDR
+				// filters for RTP and therefore still fails closed for identities.
+				directFilterIDs = pkt.MatchedFilterIds
+			}
+			p.processLIPacketWithProvenance(&display, directFilterIDs, pkt.InheritedMatchedFilterIds)
 		}
 	}
 

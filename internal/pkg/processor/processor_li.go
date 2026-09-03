@@ -41,13 +41,15 @@ var (
 
 // LI statistics
 var (
-	liX2Encoded atomic.Uint64
-	liX3Encoded atomic.Uint64
-	liX2Errors  atomic.Uint64
-	liX3Errors  atomic.Uint64
-	liX2Skipped atomic.Uint64
-	liX3Skipped atomic.Uint64
-	liNoEncoder atomic.Uint64
+	liX2Encoded             atomic.Uint64
+	liX3Encoded             atomic.Uint64
+	liX2Errors              atomic.Uint64
+	liX3Errors              atomic.Uint64
+	liX2Skipped             atomic.Uint64
+	liX3Skipped             atomic.Uint64
+	liNoEncoder             atomic.Uint64
+	liX3FinalizedSuppressed atomic.Uint64
+	liX3BufferedDiscarded   atomic.Uint64
 )
 
 // processorFilterPusher adapts the processor's filter management system
@@ -199,6 +201,20 @@ func (p *Processor) initLIManager() {
 	// Media direction resolver: RTP carries no SIP identity, so the direction of
 	// media for an identity target is derived from the call's signalling.
 	liMediaDirection = li.NewMediaDirectionResolver(li.MediaDirectionConfig{})
+	if p.callLifecycle != nil {
+		p.callLifecycle.Subscribe(func(event CallFinalizationEvent) {
+			liMediaDirection.ClearCall(event.CallID)
+			liPinnedCalls.Range(func(_, value any) bool {
+				value.(*sync.Map).Delete(event.CallID)
+				return true
+			})
+			liReorderBuffers.Range(func(_, value any) bool {
+				discarded := value.(*delivery.ReorderBuffer).DiscardCall(event.CallID, event.Generation)
+				liX3BufferedDiscarded.Add(uint64(discarded)) // #nosec G115 -- bounded buffer count
+				return true
+			})
+		})
+	}
 
 	// Initialize delivery client if TLS certs are configured
 	if p.config.LIDeliveryTLSCertFile != "" && p.config.LIDeliveryTLSKeyFile != "" {
@@ -259,7 +275,7 @@ func (p *Processor) initLIManager() {
 		// Determine what to deliver based on task configuration
 		deliverX2 := task.DeliveryType == li.DeliveryX2Only || task.DeliveryType == li.DeliveryX2andX3
 		deliverX3 := task.DeliveryType == li.DeliveryX3Only || task.DeliveryType == li.DeliveryX2andX3
-		if deliverX3 && pkt.VoIPData != nil && pkt.VoIPData.CallID != "" {
+		if deliverX3 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" {
 			callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
 			calls := callsAny.(*sync.Map)
 			calls.LoadOrStore(pkt.VoIPData.CallID, struct{}{})
@@ -324,6 +340,27 @@ func (p *Processor) initLIManager() {
 
 		// Encode and deliver X3 (CC - content) for RTP packets
 		if deliverX3 && pkt.VoIPData != nil && pkt.VoIPData.IsRTP {
+			taskAdmission, taskActive := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+			if !taskActive {
+				return
+			}
+			defer taskAdmission.Release()
+
+			callID := pkt.VoIPData.CallID
+			var admission *CallAdmission
+			if callID != "" && p.callLifecycle != nil {
+				var admissionErr error
+				admission, admissionErr = p.callLifecycle.Admit(callID)
+				if admissionErr != nil {
+					liX3FinalizedSuppressed.Add(1)
+					return
+				}
+				defer admission.Release()
+			}
+			if callID != "" {
+				callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
+				callsAny.(*sync.Map).LoadOrStore(callID, struct{}{})
+			}
 			pdu, err := liX3Encoder.EncodeCC(pkt, task.XID)
 			if err != nil {
 				liX3Errors.Add(1)
@@ -355,16 +392,36 @@ func (p *Processor) initLIManager() {
 					for _, destID := range task.DestinationIDs {
 						did := destID // capture for closure
 						bufKey := fmt.Sprintf("%s-%s", task.XID, did)
-						buf, _ := liReorderBuffers.LoadOrStore(bufKey, delivery.NewReorderBuffer(
-							func(orderedPDU []byte) {
+						buf, _ := liReorderBuffers.LoadOrStore(bufKey, delivery.NewCallAwareReorderBuffer(
+							func(entry delivery.ReorderEntry) {
+								deliveryTaskAdmission, taskStillActive := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+								if !taskStillActive {
+									return
+								}
+								defer deliveryTaskAdmission.Release()
+
+								var sendAdmission *CallAdmission
+								if entry.CallID != "" && p.callLifecycle != nil {
+									var sendErr error
+									sendAdmission, sendErr = p.callLifecycle.AdmitGeneration(entry.CallID, entry.Generation)
+									if sendErr != nil {
+										liX3FinalizedSuppressed.Add(1)
+										return
+									}
+									defer sendAdmission.Release()
+								}
 								dids := []uuid.UUID{did}
-								if sendErr := liDeliveryClient.SendX3(task.XID, dids, orderedPDU); sendErr != nil {
+								if sendErr := liDeliveryClient.SendX3(task.XID, dids, entry.PDU); sendErr != nil {
 									logger.Debug("X3 delivery failed", "xid", task.XID, "error", sendErr)
 								}
 							},
 							60*time.Millisecond,
 						))
-						buf.(*delivery.ReorderBuffer).DeliverX3(ssrc, rtpSeq, data)
+						generation := uint64(0)
+						if admission != nil {
+							generation = admission.Generation()
+						}
+						buf.(*delivery.ReorderBuffer).DeliverCallX3(callID, generation, ssrc, rtpSeq, data)
 					}
 					logger.Debug("X3 CC queued via reorder buffer",
 						"xid", task.XID,
@@ -544,10 +601,35 @@ func (p *Processor) stopLIManager() {
 // 2. LocalSource to use MatchPacketWithIDs and include filter IDs
 // This will be implemented in a subsequent step.
 func (p *Processor) processLIPacket(pkt *types.PacketDisplay, matchedFilterIDs []string) {
+	p.processLIPacketWithProvenance(pkt, matchedFilterIDs, nil)
+}
+
+func (p *Processor) processLIPacketWithProvenance(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string) {
 	if p.liManager == nil || !p.liManager.IsEnabled() {
 		return
 	}
-	p.liManager.ProcessPacket(pkt, matchedFilterIDs)
+	// Finalization cleanup may already have removed the call's inherited LI
+	// filter, so account and reject terminal media before task lookup. The packet
+	// callback performs the admission that covers encoding for live calls.
+	if pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" && p.callLifecycle != nil {
+		admission, err := p.callLifecycle.Admit(pkt.VoIPData.CallID)
+		if err != nil {
+			liX3FinalizedSuppressed.Add(1)
+			return
+		}
+		admission.Release()
+	}
+	provenance := li.PacketFilterProvenance{
+		DirectFilterIDs:    directFilterIDs,
+		InheritedFilterIDs: inheritedFilterIDs,
+	}
+	if pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && len(inheritedFilterIDs) > 0 {
+		// The capture pipeline stamps Call-ID only after authoritative endpoint
+		// resolution, and inherited IDs come from that same single call cache.
+		provenance.AuthoritativeCallID = pkt.VoIPData.CallID
+		provenance.InheritedFromCallID = pkt.VoIPData.CallID
+	}
+	p.liManager.ProcessPacketWithProvenance(pkt, provenance)
 }
 
 // isLIEnabled returns whether LI is enabled on this processor.
@@ -569,7 +651,9 @@ type LIEncodingStats struct {
 	// was derived from the call's observed signalling.
 	DirectionResolvedMedia uint64
 	// DirectionUnknownRTP counts RTP packets delivered without a direction.
-	DirectionUnknownRTP uint64
+	DirectionUnknownRTP   uint64
+	X3FinalizedSuppressed uint64
+	X3BufferedDiscarded   uint64
 }
 
 // getLIEncodingStats returns current LI encoding statistics.
@@ -585,5 +669,7 @@ func (p *Processor) getLIEncodingStats() LIEncodingStats {
 		NoEncoder:              liNoEncoder.Load(),
 		DirectionResolvedMedia: dirStats.ResolvedFromMedia,
 		DirectionUnknownRTP:    dirStats.UnknownRTP,
+		X3FinalizedSuppressed:  liX3FinalizedSuppressed.Load(),
+		X3BufferedDiscarded:    liX3BufferedDiscarded.Load(),
 	}
 }

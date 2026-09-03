@@ -71,6 +71,27 @@ func TestCallLifecycleTTLAndCapacityReuseHaveFreshGenerations(t *testing.T) {
 	})
 }
 
+func TestCallLifecycleAdmitGenerationRejectsStaleReuse(t *testing.T) {
+	r := NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneTTL: time.Millisecond})
+	old, err := r.Admit("reused")
+	require.NoError(t, err)
+	oldGeneration := old.Generation()
+	old.Release()
+	require.True(t, r.Finalize("reused", CallFinalizationProtocolComplete).Finalized)
+	time.Sleep(2 * time.Millisecond)
+
+	current, err := r.Admit("reused")
+	require.NoError(t, err)
+	require.Greater(t, current.Generation(), oldGeneration)
+	current.Release()
+
+	_, err = r.AdmitGeneration("reused", oldGeneration)
+	require.Error(t, err)
+	currentAgain, err := r.AdmitGeneration("reused", current.Generation())
+	require.NoError(t, err)
+	currentAgain.Release()
+}
+
 func TestCallLifecycleFinalizeWaitsForAdmissionAndRejectsLateWork(t *testing.T) {
 	r := NewCallLifecycleRegistry(CallLifecycleConfig{})
 	admission, err := r.Admit("synthetic-call")

@@ -327,31 +327,46 @@ finalization subscribers.
 
 ## Phase 4: Guard X3 Encoding and Delayed Delivery
 
-- [ ] Require authoritative attribution before an inherited identity filter may
+- [x] Require authoritative attribution before an inherited identity filter may
   invoke X3 processing; validate the task/filter provenance defensively at the LI
   boundary.
-- [ ] Acquire a lifecycle admission token before direction mutation, X3 encoding,
+- [x] Acquire a lifecycle admission token before direction mutation, X3 encoding,
   sequence allocation, and reorder-buffer insertion for call-correlated media.
-- [ ] Count finalization/stale-generation rejection without incrementing
+- [x] Count finalization/stale-generation rejection without incrementing
   `liX3Encoded`.
-- [ ] Make reorder entries and keys call/generation-aware, or validate immutable
+- [x] Make reorder entries and keys call/generation-aware, or validate immutable
   generation tokens in the delayed callback immediately around `SendX3`.
-- [ ] Selectively discard buffered entries for a finalized call without affecting
+- [x] Selectively discard buffered entries for a finalized call without affecting
   other calls sharing an XID or destination.
-- [ ] Clear call-specific media-direction, pinned-call, flow-binding, and reorder
+- [x] Clear call-specific media-direction, pinned-call, flow-binding, and reorder
   state on finalization; preserve XID-wide task-deactivation cleanup.
-- [ ] Ensure task deactivation remains a strict boundary and composes safely with
+- [x] Ensure task deactivation remains a strict boundary and composes safely with
   call finalization without duplicate sends, counters, or cleanup.
-- [ ] Add an LI integration test proving calls A/B on a shared endpoint can never
+- [x] Add an LI integration test proving calls A/B on a shared endpoint can never
   deliver B media under A's XID or FNV correlation ID.
-- [ ] Add tests proving finalized RTP is neither encoded nor queued with PCAP on
+- [x] Add tests proving finalized RTP is neither encoded nor queued with PCAP on
   and off, and that the finalization-suppression counter increments once.
-- [ ] Add an out-of-order/buffered test that finalizes the call before the reorder
+- [x] Add an out-of-order/buffered test that finalizes the call before the reorder
   timer fires and asserts zero `SendX3` calls afterward.
-- [ ] Add a generation-reuse test proving an old buffered callback cannot become
+- [x] Add a generation-reuse test proving an old buffered callback cannot become
   valid when the same Call-ID is admitted after tombstone expiry.
-- [ ] Add direction tests proving state is keyed to the authoritative call and is
+- [x] Add direction tests proving state is keyed to the authoritative call and is
   cleared at finalization.
+
+Phase 4 implementation note: the LI boundary now consumes the direct/inherited
+filter provenance already carried by the packet transport. Identity-derived RTP
+is accepted only when its inherited filter source and authoritative stamped
+Call-ID agree; legacy combined-only RTP remains eligible only for direct IP/CIDR
+tasks. X3 takes shared call-generation admission before mutating call state or
+encoding, and delayed delivery re-admits that immutable generation immediately
+around the queue enqueue. Reorder streams carry call/generation identity and are
+selectively discarded by the shared finalization subscriber, which also clears
+media direction and pinned-call state. No media-flow binding exists in the
+current resolver, so there is no additional binding table to clear. Task
+generation admission composes the same enqueue boundary with deactivation and
+reactivation. Focused race tests cover selective discard, timer finalization,
+Call-ID reuse, task-generation reuse, PCAP-enabled and PCAP-disabled suppression,
+direction cleanup, and shared-endpoint foreign-XID/FNV rejection.
 
 ## Phase 5: Correct the ETSI PDU Version
 

@@ -24,5 +24,7 @@ func (p *Processor) stopLIManager() {}
 // processLIPacket is a no-op when LI is not compiled in.
 func (p *Processor) processLIPacket(_ *types.PacketDisplay, _ []string) {}
 
+func (p *Processor) processLIPacketWithProvenance(_ *types.PacketDisplay, _, _ []string) {}
+
 // isLIEnabled always returns false when LI is not compiled in.
 func (p *Processor) isLIEnabled() bool { return false }

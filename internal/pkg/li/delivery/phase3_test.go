@@ -81,6 +81,57 @@ func TestReorderDiscardStopsWithoutDeliveringBufferedPDUs(t *testing.T) {
 	assert.Zero(t, packets)
 	assert.Zero(t, bytes)
 }
+
+func TestReorderDiscardCallIsGenerationSelective(t *testing.T) {
+	var mu sync.Mutex
+	var delivered []ReorderEntry
+	rb := NewCallAwareReorderBuffer(func(entry ReorderEntry) {
+		mu.Lock()
+		delivered = append(delivered, entry)
+		mu.Unlock()
+	}, 20*time.Millisecond)
+	defer rb.Discard()
+
+	rb.DeliverCallX3("call-a", 1, 7, 10, []byte("a-first"))
+	rb.DeliverCallX3("call-a", 1, 7, 12, []byte("a-buffered"))
+	rb.DeliverCallX3("call-b", 2, 7, 20, []byte("b-first"))
+	rb.DeliverCallX3("call-b", 2, 7, 22, []byte("b-buffered"))
+
+	require.Equal(t, 1, rb.DiscardCall("call-a", 1))
+	require.Zero(t, rb.DiscardCall("call-a", 1))
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, entry := range delivered {
+			if string(entry.PDU) == "a-buffered" {
+				return false
+			}
+		}
+		return len(delivered) == 3
+	}, time.Second, 5*time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []ReorderEntry{
+		{CallID: "call-a", Generation: 1, PDU: []byte("a-first")},
+		{CallID: "call-b", Generation: 2, PDU: []byte("b-first")},
+		{CallID: "call-b", Generation: 2, PDU: []byte("b-buffered")},
+	}, delivered)
+}
+
+func TestReorderSeparatesReusedCallGenerationsWithSameSSRC(t *testing.T) {
+	delivered := make(chan ReorderEntry, 4)
+	rb := NewCallAwareReorderBuffer(func(entry ReorderEntry) { delivered <- entry }, time.Hour)
+	defer rb.Discard()
+
+	rb.DeliverCallX3("reused", 1, 99, 10, []byte("old"))
+	rb.DeliverCallX3("reused", 2, 99, 40, []byte("new"))
+
+	first := <-delivered
+	second := <-delivered
+	assert.Equal(t, uint64(1), first.Generation)
+	assert.Equal(t, uint64(2), second.Generation)
+}
 func TestDestinationQueueSeparatesX2AndX3(t *testing.T) {
 	q := newDestinationQueue(uuid.New(), 2)
 	x2 := &deliveryItem{pduType: PDUTypeX2}

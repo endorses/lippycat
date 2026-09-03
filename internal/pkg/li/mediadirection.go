@@ -136,6 +136,21 @@ func (r *MediaDirectionResolver) ClearXID(xid uuid.UUID) {
 	}
 }
 
+// ClearCall removes direction state for callID across every task. Shared call
+// finalization uses this without disturbing other calls under the same XID.
+func (r *MediaDirectionResolver) ClearCall(callID string) {
+	if r == nil || callID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key := range r.calls {
+		if key.callID == callID {
+			delete(r.calls, key)
+		}
+	}
+}
+
 // NewMediaDirectionResolver creates a resolver and starts its eviction sweeper
 // (unless cfg.SweepInterval is negative). Call Close to release it.
 func NewMediaDirectionResolver(cfg MediaDirectionConfig) *MediaDirectionResolver {

@@ -261,6 +261,9 @@ originating provenance without re-attributing packets. The hunter retains the
 stable direct IDs that selected each call, labels later signaling and uniquely
 resolved media as inherited from that call, and owns the single enqueue for
 accepted UDP packets so a provenance-free duplicate cannot escape alongside it.
+The integrated B2BUA/shared-relay regression models two independently selected
+legs advertising one relay endpoint and verifies that ambiguous media inherits
+neither leg while an independent direct IP match remains deliverable.
 
 ## Phase 3: Centralize Call Finalization
 

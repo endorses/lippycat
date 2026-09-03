@@ -107,12 +107,15 @@ func TestLocalSourcePhase2_RTPDirectAndInheritedIDComposition(t *testing.T) {
 	})
 }
 
-func TestLocalSourcePhase2_AmbiguousSharedEndpointFailsClosed(t *testing.T) {
+func TestLocalSourcePhase2_B2BUASharedRelayLegsFailClosed(t *testing.T) {
 	const (
 		callA = "synthetic-shared-leg-a@example.invalid"
 		callB = "synthetic-shared-leg-b@example.invalid"
 	)
 
+	// Model two independently selected B2BUA legs whose SDP advertises the same
+	// relay endpoint. Signaling correlation alone must not turn that shared
+	// endpoint into authoritative evidence that either leg owns later media.
 	sharedInvite := func(t *testing.T, callID string) capture.PacketInfo {
 		t.Helper()
 		return phase0UDPPacket(t, phase0MediaIP, "192.0.2.20", 5060, 5060,

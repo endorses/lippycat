@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
@@ -116,7 +117,7 @@ type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 // The Manager is the main entry point for LI operations in the processor.
 type Manager struct {
 	mu          sync.RWMutex
-	lifecycleMu sync.Mutex
+	lifecycleMu sync.RWMutex
 
 	config   ManagerConfig
 	registry *Registry
@@ -159,22 +160,68 @@ type Manager struct {
 
 type packetProcessorHolder struct{ fn PacketProcessor }
 type managerAtomicStats struct {
-	packetsProcessed     atomic.Uint64
-	packetsMatched       atomic.Uint64
-	x2EventsSent         atomic.Uint64
-	x3EventsSent         atomic.Uint64
-	matchErrors          atomic.Uint64
-	rejectedCombinations atomic.Uint64
+	packetsProcessed            atomic.Uint64
+	packetsMatched              atomic.Uint64
+	x2EventsSent                atomic.Uint64
+	x3EventsSent                atomic.Uint64
+	matchErrors                 atomic.Uint64
+	rejectedCombinations        atomic.Uint64
+	inheritedProvenanceRejected atomic.Uint64
 }
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
-	PacketsProcessed     uint64
-	PacketsMatched       uint64
-	X2EventsSent         uint64
-	X3EventsSent         uint64
-	MatchErrors          uint64
-	RejectedCombinations uint64
+	PacketsProcessed            uint64
+	PacketsMatched              uint64
+	X2EventsSent                uint64
+	X3EventsSent                uint64
+	MatchErrors                 uint64
+	RejectedCombinations        uint64
+	InheritedProvenanceRejected uint64
+}
+
+// PacketFilterProvenance preserves why a packet matched while crossing the LI
+// trust boundary. AuthoritativeCallID must be populated only by the exact-media
+// endpoint resolver; an RTP packet's display Call-ID is not proof by itself.
+type PacketFilterProvenance struct {
+	DirectFilterIDs     []string
+	InheritedFilterIDs  []string
+	AuthoritativeCallID string
+	// InheritedFromCallID identifies the single cache entry from which all
+	// inherited IDs were loaded. It must equal AuthoritativeCallID for RTP.
+	InheritedFromCallID string
+}
+
+// TaskAdmission serializes one irreversible delivery acceptance step with task
+// deactivation. Callers must Release it promptly and must not hold it across
+// encoding, network I/O, or callbacks.
+type TaskAdmission struct {
+	manager *Manager
+	once    sync.Once
+}
+
+// Release ends the protected acceptance step.
+func (a *TaskAdmission) Release() {
+	if a == nil || a.manager == nil {
+		return
+	}
+	a.once.Do(a.manager.lifecycleMu.RUnlock)
+}
+
+// AcquireTaskAdmission validates an immutable activation generation and holds a
+// read admission barrier. Deactivation and reactivation take the corresponding
+// write barrier, so they cannot cross the caller's irreversible enqueue step.
+func (m *Manager) AcquireTaskAdmission(xid uuid.UUID, generation uint64) (*TaskAdmission, bool) {
+	if generation == 0 {
+		return nil, false
+	}
+	m.lifecycleMu.RLock()
+	task, err := m.registry.GetTaskDetails(xid)
+	if err != nil || !task.IsActive() || task.ActivationGeneration != generation {
+		m.lifecycleMu.RUnlock()
+		return nil, false
+	}
+	return &TaskAdmission{manager: m}, true
 }
 
 // NewManager creates a new LI Manager.
@@ -1005,6 +1052,16 @@ func (m *Manager) SetDestinationRemovedCallback(cb func(did uuid.UUID)) {
 //  3. ProcessPacket looks up which XIDs those filter IDs belong to
 //  4. PacketProcessor callback is invoked for X2/X3 delivery
 func (m *Manager) ProcessPacket(pkt *types.PacketDisplay, matchedFilterIDs []string) {
+	m.ProcessPacketWithProvenance(pkt, PacketFilterProvenance{DirectFilterIDs: matchedFilterIDs})
+}
+
+// ProcessPacketWithProvenance processes a packet while defensively validating
+// direct-versus-inherited filter provenance. For RTP, only packet-level IP/CIDR
+// matches are valid direct evidence. Identity matches must be inherited from the
+// single authoritatively resolved call, and the resolver's Call-ID must agree
+// with the Call-ID carried by the packet.
+func (m *Manager) ProcessPacketWithProvenance(pkt *types.PacketDisplay, provenance PacketFilterProvenance) {
+	matchedFilterIDs := m.validatedFilterIDs(pkt, provenance)
 	if pkt == nil || len(matchedFilterIDs) == 0 {
 		return
 	}
@@ -1046,6 +1103,51 @@ func (m *Manager) ProcessPacket(pkt *types.PacketDisplay, matchedFilterIDs []str
 
 		processor(task, pkt)
 	}
+}
+
+func (m *Manager) validatedFilterIDs(pkt *types.PacketDisplay, provenance PacketFilterProvenance) []string {
+	if pkt == nil || pkt.VoIPData == nil || !pkt.VoIPData.IsRTP {
+		return stableFilterUnion(provenance.DirectFilterIDs, provenance.InheritedFilterIDs)
+	}
+
+	valid := make([]string, 0, len(provenance.DirectFilterIDs)+len(provenance.InheritedFilterIDs))
+	for _, filterID := range provenance.DirectFilterIDs {
+		match, exists := m.filters.LookupFilter(filterID)
+		if exists && match.Filter.Type == management.FilterType_FILTER_IP_ADDRESS {
+			valid = append(valid, match.FilterID)
+		}
+	}
+
+	authoritative := provenance.AuthoritativeCallID != "" &&
+		pkt.VoIPData.CallID == provenance.AuthoritativeCallID &&
+		provenance.InheritedFromCallID == provenance.AuthoritativeCallID
+	for _, filterID := range provenance.InheritedFilterIDs {
+		match, exists := m.filters.LookupFilter(filterID)
+		if authoritative && exists && match.Filter.Type != management.FilterType_FILTER_IP_ADDRESS {
+			valid = append(valid, match.FilterID)
+		} else if exists {
+			m.stats.inheritedProvenanceRejected.Add(1)
+		}
+	}
+	return stableFilterUnion(valid, nil)
+}
+
+func stableFilterUnion(first, second []string) []string {
+	result := make([]string, 0, len(first)+len(second))
+	seen := make(map[string]struct{}, len(first)+len(second))
+	for _, ids := range [][]string{first, second} {
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			result = append(result, id)
+		}
+	}
+	return result
 }
 
 // ActivateTask adds and activates a new intercept task.
@@ -1716,12 +1818,13 @@ func convertTaskStatusToX1(s TaskStatus) x1.TaskStatus {
 // Stats returns current LI processing statistics.
 func (m *Manager) Stats() ManagerStats {
 	return ManagerStats{
-		PacketsProcessed:     m.stats.packetsProcessed.Load(),
-		PacketsMatched:       m.stats.packetsMatched.Load(),
-		X2EventsSent:         m.stats.x2EventsSent.Load(),
-		X3EventsSent:         m.stats.x3EventsSent.Load(),
-		MatchErrors:          m.stats.matchErrors.Load(),
-		RejectedCombinations: m.stats.rejectedCombinations.Load(),
+		PacketsProcessed:            m.stats.packetsProcessed.Load(),
+		PacketsMatched:              m.stats.packetsMatched.Load(),
+		X2EventsSent:                m.stats.x2EventsSent.Load(),
+		X3EventsSent:                m.stats.x3EventsSent.Load(),
+		MatchErrors:                 m.stats.matchErrors.Load(),
+		RejectedCombinations:        m.stats.rejectedCombinations.Load(),
+		InheritedProvenanceRejected: m.stats.inheritedProvenanceRejected.Load(),
 	}
 }
 

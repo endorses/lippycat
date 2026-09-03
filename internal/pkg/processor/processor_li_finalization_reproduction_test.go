@@ -72,7 +72,7 @@ func finalizedCallRTP() *types.PacketDisplay {
 	return pkt
 }
 
-func TestPhase0FinalizedCallWithPCAPStillAcceptedByX3(t *testing.T) {
+func TestPhase4FinalizedCallWithPCAPIsRejectedByX3(t *testing.T) {
 	p, filterID := newFinalizationReproductionProcessor(t, true)
 	require.NotNil(t, p.sessionOutputManager)
 
@@ -93,11 +93,11 @@ func TestPhase0FinalizedCallWithPCAPStillAcceptedByX3(t *testing.T) {
 	before := p.getLIEncodingStats()
 	p.processLIPacket(finalizedCallRTP(), []string{filterID})
 	after := p.getLIEncodingStats()
-	assert.Equal(t, before.X3Encoded+1, after.X3Encoded,
-		"reproduction: X3 accepts the same late packet that PCAP rejects")
+	assert.Equal(t, before.X3Encoded, after.X3Encoded)
+	assert.Equal(t, before.X3FinalizedSuppressed+1, after.X3FinalizedSuppressed)
 }
 
-func TestPhase3FinalizedCallWithoutPCAPHasSharedLifecycle(t *testing.T) {
+func TestPhase4FinalizedCallWithoutPCAPIsRejectedByX3(t *testing.T) {
 	p, filterID := newFinalizationReproductionProcessor(t, false)
 	require.NotNil(t, p.sessionOutputManager)
 	require.Nil(t, p.sessionOutputManager.writer)
@@ -116,6 +116,6 @@ func TestPhase3FinalizedCallWithoutPCAPHasSharedLifecycle(t *testing.T) {
 	before := p.getLIEncodingStats()
 	p.processLIPacket(finalizedCallRTP(), []string{filterID})
 	after := p.getLIEncodingStats()
-	assert.Equal(t, before.X3Encoded+1, after.X3Encoded,
-		"Phase 4 will apply the shared lifecycle admission boundary to X3")
+	assert.Equal(t, before.X3Encoded, after.X3Encoded)
+	assert.Equal(t, before.X3FinalizedSuppressed+1, after.X3FinalizedSuppressed)
 }

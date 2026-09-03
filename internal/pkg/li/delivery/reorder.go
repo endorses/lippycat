@@ -17,16 +17,29 @@ const (
 // are always invoked without the buffer lock held.
 type ReorderBuffer struct {
 	mu                 sync.Mutex
-	streams            map[uint32]*rtpStream
-	deliverFn          func([]byte)
+	streams            map[reorderStreamKey]*rtpStream
+	deliverFn          func(ReorderEntry)
 	flushDelay         time.Duration
 	packetCap, byteCap int
 	stopped            bool
 }
 type bufferedPDU struct {
 	seqNum  uint16
-	pdu     []byte
+	entry   ReorderEntry
 	arrived time.Time
+}
+
+// ReorderEntry carries the immutable call lifecycle identity associated with an
+// X3 PDU. CallID and Generation are empty for callers using the legacy API.
+type ReorderEntry struct {
+	CallID     string
+	Generation uint64
+	PDU        []byte
+}
+type reorderStreamKey struct {
+	callID     string
+	generation uint64
+	ssrc       uint32
 }
 type rtpStream struct {
 	buffer      map[uint16]bufferedPDU
@@ -42,48 +55,59 @@ func NewReorderBuffer(deliverFn func([]byte), flushDelay time.Duration) *Reorder
 	return NewReorderBufferWithLimits(deliverFn, flushDelay, defaultReorderPacketCap, defaultReorderByteCap)
 }
 func NewReorderBufferWithLimits(deliverFn func([]byte), flushDelay time.Duration, packetCap, byteCap int) *ReorderBuffer {
+	return NewCallAwareReorderBufferWithLimits(func(entry ReorderEntry) { deliverFn(entry.PDU) }, flushDelay, packetCap, byteCap)
+}
+func NewCallAwareReorderBuffer(deliverFn func(ReorderEntry), flushDelay time.Duration) *ReorderBuffer {
+	return NewCallAwareReorderBufferWithLimits(deliverFn, flushDelay, defaultReorderPacketCap, defaultReorderByteCap)
+}
+func NewCallAwareReorderBufferWithLimits(deliverFn func(ReorderEntry), flushDelay time.Duration, packetCap, byteCap int) *ReorderBuffer {
 	if packetCap <= 0 {
 		packetCap = defaultReorderPacketCap
 	}
 	if byteCap <= 0 {
 		byteCap = defaultReorderByteCap
 	}
-	return &ReorderBuffer{streams: make(map[uint32]*rtpStream), deliverFn: deliverFn, flushDelay: flushDelay, packetCap: packetCap, byteCap: byteCap}
+	return &ReorderBuffer{streams: make(map[reorderStreamKey]*rtpStream), deliverFn: deliverFn, flushDelay: flushDelay, packetCap: packetCap, byteCap: byteCap}
 }
-func (rb *ReorderBuffer) DeliverX2(pdu []byte) { rb.deliverFn(pdu) }
+func (rb *ReorderBuffer) DeliverX2(pdu []byte) { rb.deliverFn(ReorderEntry{PDU: pdu}) }
 func (rb *ReorderBuffer) DeliverX3(ssrc uint32, seq uint16, pdu []byte) {
+	rb.DeliverCallX3("", 0, ssrc, seq, pdu)
+}
+func (rb *ReorderBuffer) DeliverCallX3(callID string, generation uint64, ssrc uint32, seq uint16, pdu []byte) {
 	now := time.Now()
+	key := reorderStreamKey{callID: callID, generation: generation, ssrc: ssrc}
 	rb.mu.Lock()
 	if rb.stopped {
 		rb.mu.Unlock()
 		return
 	}
-	s := rb.streams[ssrc]
+	s := rb.streams[key]
 	if s == nil {
 		s = &rtpStream{buffer: make(map[uint16]bufferedPDU)}
-		rb.streams[ssrc] = s
+		rb.streams[key] = s
 	}
 	s.lastUsed = now
-	var out [][]byte
+	entry := ReorderEntry{CallID: callID, Generation: generation, PDU: pdu}
+	var out []ReorderEntry
 	if !s.hasBase {
 		s.hasBase = true
 		s.lastFlushed = seq
-		out = append(out, pdu)
+		out = append(out, entry)
 	} else {
 		next := s.lastFlushed + 1
 		switch {
 		case seq == next:
 			s.lastFlushed = seq
-			out = append(out, pdu)
+			out = append(out, entry)
 			out = append(out, drainConsecutive(s)...)
 		case seqBefore(seq, next):
-			out = append(out, pdu)
+			out = append(out, entry)
 		default:
 			if _, dup := s.buffer[seq]; !dup {
-				s.buffer[seq] = bufferedPDU{seq, pdu, now}
+				s.buffer[seq] = bufferedPDU{seqNum: seq, entry: entry, arrived: now}
 				s.bytes += len(pdu)
 			}
-			rb.armTimerLocked(ssrc, s, now)
+			rb.armTimerLocked(key, s, now)
 			if len(s.buffer) > rb.packetCap || s.bytes > rb.byteCap {
 				out = append(out, drainAll(s)...)
 				rb.disarmLocked(s)
@@ -93,7 +117,7 @@ func (rb *ReorderBuffer) DeliverX3(ssrc uint32, seq uint16, pdu []byte) {
 	rb.mu.Unlock()
 	rb.deliver(out)
 }
-func drainConsecutive(s *rtpStream) (out [][]byte) {
+func drainConsecutive(s *rtpStream) (out []ReorderEntry) {
 	for {
 		next := s.lastFlushed + 1
 		bp, ok := s.buffer[next]
@@ -101,9 +125,9 @@ func drainConsecutive(s *rtpStream) (out [][]byte) {
 			return
 		}
 		delete(s.buffer, next)
-		s.bytes -= len(bp.pdu)
+		s.bytes -= len(bp.entry.PDU)
 		s.lastFlushed = next
-		out = append(out, bp.pdu)
+		out = append(out, bp.entry)
 	}
 }
 func ordered(s *rtpStream) []bufferedPDU {
@@ -116,16 +140,16 @@ func ordered(s *rtpStream) []bufferedPDU {
 	})
 	return v
 }
-func drainAll(s *rtpStream) (out [][]byte) {
+func drainAll(s *rtpStream) (out []ReorderEntry) {
 	for _, bp := range ordered(s) {
-		out = append(out, bp.pdu)
+		out = append(out, bp.entry)
 		s.lastFlushed = bp.seqNum
 	}
 	clear(s.buffer)
 	s.bytes = 0
 	return
 }
-func (rb *ReorderBuffer) armTimerLocked(ssrc uint32, s *rtpStream, now time.Time) {
+func (rb *ReorderBuffer) armTimerLocked(key reorderStreamKey, s *rtpStream, now time.Time) {
 	if len(s.buffer) == 0 || s.timer != nil {
 		return
 	}
@@ -140,7 +164,7 @@ func (rb *ReorderBuffer) armTimerLocked(ssrc uint32, s *rtpStream, now time.Time
 	if delay < 0 {
 		delay = 0
 	}
-	s.timer = time.AfterFunc(delay, func() { rb.flush(ssrc) })
+	s.timer = time.AfterFunc(delay, func() { rb.flush(key) })
 }
 func (rb *ReorderBuffer) disarmLocked(s *rtpStream) {
 	if s.timer != nil {
@@ -149,9 +173,9 @@ func (rb *ReorderBuffer) disarmLocked(s *rtpStream) {
 	}
 	s.deadline = time.Time{}
 }
-func (rb *ReorderBuffer) flush(ssrc uint32) {
+func (rb *ReorderBuffer) flush(key reorderStreamKey) {
 	rb.mu.Lock()
-	s := rb.streams[ssrc]
+	s := rb.streams[key]
 	if s == nil {
 		rb.mu.Unlock()
 		return
@@ -162,9 +186,9 @@ func (rb *ReorderBuffer) flush(ssrc uint32) {
 	rb.mu.Unlock()
 	rb.deliver(out)
 }
-func (rb *ReorderBuffer) deliver(out [][]byte) {
-	for _, p := range out {
-		rb.deliverFn(p)
+func (rb *ReorderBuffer) deliver(out []ReorderEntry) {
+	for _, entry := range out {
+		rb.deliverFn(entry)
 	}
 }
 func (rb *ReorderBuffer) LastUsed() time.Time {
@@ -181,7 +205,7 @@ func (rb *ReorderBuffer) LastUsed() time.Time {
 func (rb *ReorderBuffer) CleanupIdleStreams(maxIdle time.Duration) bool {
 	now := time.Now()
 	rb.mu.Lock()
-	var out [][]byte
+	var out []ReorderEntry
 	for id, s := range rb.streams {
 		if now.Sub(s.lastUsed) > maxIdle {
 			rb.disarmLocked(s)
@@ -201,7 +225,7 @@ func (rb *ReorderBuffer) Stop() {
 		return
 	}
 	rb.stopped = true
-	var out [][]byte
+	var out []ReorderEntry
 	for _, s := range rb.streams {
 		rb.disarmLocked(s)
 		out = append(out, drainAll(s)...)
@@ -209,6 +233,24 @@ func (rb *ReorderBuffer) Stop() {
 	clear(rb.streams)
 	rb.mu.Unlock()
 	rb.deliver(out)
+}
+
+// DiscardCall drops queued PDUs for exactly one call generation. It leaves
+// other calls sharing this XID/destination buffer untouched and returns the
+// number of discarded PDUs for single-owner accounting.
+func (rb *ReorderBuffer) DiscardCall(callID string, generation uint64) int {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	discarded := 0
+	for key, stream := range rb.streams {
+		if key.callID != callID || key.generation != generation {
+			continue
+		}
+		rb.disarmLocked(stream)
+		discarded += len(stream.buffer)
+		delete(rb.streams, key)
+	}
+	return discarded
 }
 
 // Discard stops the buffer and drops every queued PDU without invoking the

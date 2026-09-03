@@ -145,6 +145,20 @@ func (a *CallAdmission) Release() {
 
 // Admit atomically accepts work for the current call generation.
 func (r *CallLifecycleRegistry) Admit(callID string) (*CallAdmission, error) {
+	return r.admit(callID, 0)
+}
+
+// AdmitGeneration atomically accepts work only when generation is still the
+// current live incarnation of callID. Delayed sink callbacks use this to avoid
+// attaching old work to a reused Call-ID.
+func (r *CallLifecycleRegistry) AdmitGeneration(callID string, generation uint64) (*CallAdmission, error) {
+	if generation == 0 {
+		return nil, &FinalizedCallError{CallID: callID}
+	}
+	return r.admit(callID, generation)
+}
+
+func (r *CallLifecycleRegistry) admit(callID string, requiredGeneration uint64) (*CallAdmission, error) {
 	if r == nil {
 		return nil, ErrCallLifecycleShutdown
 	}
@@ -164,6 +178,9 @@ func (r *CallLifecycleRegistry) Admit(callID string) (*CallAdmission, error) {
 		r.removeTombstoneLocked(callID)
 	}
 	call := r.active[callID]
+	if requiredGeneration != 0 && (call == nil || call.generation != requiredGeneration) {
+		return nil, &FinalizedCallError{CallID: callID}
+	}
 	if call == nil {
 		r.nextGeneration++
 		call = &lifecycleCall{callID: callID, generation: r.nextGeneration, drained: make(chan struct{})}

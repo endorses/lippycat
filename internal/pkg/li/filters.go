@@ -578,6 +578,23 @@ type MatchResult struct {
 	Filter *management.Filter
 }
 
+// LookupFilter returns one LI-owned filter without applying task-level
+// deduplication. Provenance validation must inspect every supplied filter before
+// matches for the same XID can be collapsed.
+func (m *FilterManager) LookupFilter(filterID string) (MatchResult, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	xid, exists := m.filterToXID[filterID]
+	if !exists {
+		return MatchResult{}, false
+	}
+	filter, exists := m.filterStore[filterID]
+	if !exists {
+		return MatchResult{}, false
+	}
+	return MatchResult{XID: xid, FilterID: filterID, Filter: filter}, true
+}
+
 // LookupMatches finds all LI tasks that would match a given filter match.
 //
 // This is called by the packet processing pipeline when a filter matches.

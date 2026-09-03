@@ -750,8 +750,9 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
+							cachedCallIDs := s.cachedFilterIDsForCall(callID)
 							s.callFilterCache.Store(callID, cachedFilterIDs{
-								filterIDs: composeFilterIDs(directIDs, nil),
+								filterIDs: composeFilterIDs(cachedCallIDs, directIDs),
 								storedAt:  time.Now(),
 							})
 						}
@@ -929,8 +930,9 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					if len(directFilterIDs) > 0 && pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
+							cachedCallIDs := s.cachedFilterIDsForCall(callID)
 							s.callFilterCache.Store(callID, cachedFilterIDs{
-								filterIDs: composeFilterIDs(directFilterIDs, nil),
+								filterIDs: composeFilterIDs(cachedCallIDs, directFilterIDs),
 								storedAt:  time.Now(),
 							})
 						}

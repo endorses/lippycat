@@ -40,6 +40,12 @@ func (p *VoIPPacketProcessor) Close() {
 	}
 }
 
+// IdentityInheritanceSuppressed reports media packets that failed closed
+// before hunter forwarding because ownership was not authoritative.
+func (p *VoIPPacketProcessor) IdentityInheritanceSuppressed() uint64 {
+	return p.udpHandler.IdentityInheritanceSuppressed()
+}
+
 // SetAssembler sets the TCP stream assembler for SIP message reassembly.
 // When set, TCP packets are fed to the assembler for stream reconstruction.
 func (p *VoIPPacketProcessor) SetAssembler(assembler *pipeline.ReassemblyEngine) {
@@ -113,7 +119,9 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 				"src", layer.SrcPort,
 				"dst", layer.DstPort)
 		}
-		return shouldForward
+		// UDPPacketHandler owns accepted forwarding so buffered releases and
+		// immediate packets share one provenance-aware enqueue path.
+		return false
 
 	default:
 		// Unknown transport (not TCP/UDP) - drop when in VoIP mode

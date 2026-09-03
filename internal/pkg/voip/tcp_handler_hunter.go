@@ -28,6 +28,30 @@ type PacketForwarderWithFilterProvenance interface {
 	ForwardPacketWithFilterProvenance(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) error
 }
 
+type packetFilterWithIDs interface {
+	MatchPacketWithIDs(gopacket.Packet) (bool, []string)
+}
+
+func matchPacketWithIDs(filter ApplicationFilter, packet gopacket.Packet) (bool, []string) {
+	if filter == nil {
+		return false, nil
+	}
+	if withIDs, ok := filter.(packetFilterWithIDs); ok {
+		return withIDs.MatchPacketWithIDs(packet)
+	}
+	return filter.MatchPacket(packet), nil
+}
+
+func setHunterFilterProvenance(env *pipeline.PacketEnvelope, direct, inherited []string) {
+	if env == nil {
+		return
+	}
+	env.DirectMatchedFilterIDs = stableFilterIDs(direct)
+	env.InheritedMatchedFilterIDs = stableFilterIDs(inherited)
+	combined := append(append([]string(nil), direct...), inherited...)
+	env.MatchedFilterIDs = stableFilterIDs(combined)
+}
+
 func forwardPacketWithFilterProvenance(forwarder PacketForwarder, packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) error {
 	if provenanceForwarder, ok := forwarder.(PacketForwarderWithFilterProvenance); ok {
 		return provenanceForwarder.ForwardPacketWithFilterProvenance(packet, metadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs)
@@ -118,9 +142,15 @@ func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *shared
 		return false
 	}
 
-	directMatch := h.appFilter != nil && h.matchesMessage(pkt, nil)
+	directMatch, directFilterIDs := matchPacketWithIDs(h.appFilter, pkt.Packet)
+	var inheritedFilterIDs []string
+	if h.bufferMgr != nil {
+		inheritedFilterIDs = h.bufferMgr.MatchedFilterIDs(callID)
+	}
+	envelope := envelopeForHunterPacket(pkt)
+	setHunterFilterProvenance(envelope, directFilterIDs, inheritedFilterIDs)
 	analysis := h.orchestrator.Process(sipflow.Message{
-		Payload: sipMessage, Event: event, ExpectedCallID: callID, Envelope: envelopeForHunterPacket(pkt),
+		Payload: sipMessage, Event: event, ExpectedCallID: callID, Envelope: envelope,
 		ParseOptions:     sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint),
 		FilterConfigured: true, DirectMatch: directMatch,
 		Match: func(event sharedsip.Event) bool {
@@ -133,6 +163,9 @@ func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *shared
 	if analysis.Stage.Outcome != pipeline.OutcomeAccepted || analysis.SIP.CallID != callID {
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
+	}
+	if directMatch && h.bufferMgr != nil {
+		h.bufferMgr.StoreMatchedFilterIDs(callID, directFilterIDs)
 	}
 	result, method := analysis.SIP, analysis.SIP.Method
 

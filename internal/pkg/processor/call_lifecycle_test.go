@@ -135,7 +135,7 @@ func TestCallLifecycleShutdownDrainsWithoutFinalizing(t *testing.T) {
 
 	closed := make(chan struct{})
 	go func() {
-		r.Shutdown()
+		r.ShutdownAndWait()
 		close(closed)
 	}()
 	require.Eventually(t, func() bool {
@@ -152,7 +152,7 @@ func TestCallLifecycleShutdownDrainsWithoutFinalizing(t *testing.T) {
 	}
 	admission.Release()
 	<-closed
-	r.Shutdown()
+	r.ShutdownAndWait()
 	assert.False(t, r.IsFinalized("live"))
 	assert.Zero(t, callbacks.Load())
 }
@@ -178,7 +178,7 @@ func TestCallLifecycleShutdownWaitsForCommittedFinalizationSubscribers(t *testin
 
 	shutdown := make(chan struct{})
 	go func() {
-		r.Shutdown()
+		r.ShutdownAndWait()
 		close(shutdown)
 	}()
 	admission.Release()
@@ -192,6 +192,27 @@ func TestCallLifecycleShutdownWaitsForCommittedFinalizationSubscribers(t *testin
 	close(releaseSubscriber)
 	<-finalized
 	<-shutdown
+}
+
+func TestCallLifecycleSubscriberCanInitiateShutdown(t *testing.T) {
+	r := NewCallLifecycleRegistry(CallLifecycleConfig{})
+	callbackReturned := make(chan struct{})
+	r.Subscribe(func(CallFinalizationEvent) {
+		r.Shutdown()
+		close(callbackReturned)
+	})
+
+	result := r.Finalize("subscriber-shutdown", CallFinalizationProtocolComplete)
+	require.True(t, result.Finalized)
+	select {
+	case <-callbackReturned:
+	default:
+		t.Fatal("shutdown blocked the finalization subscriber")
+	}
+
+	_, err := r.Admit("late-call")
+	assert.ErrorIs(t, err, ErrCallLifecycleShutdown)
+	r.ShutdownAndWait()
 }
 
 func TestCallLifecycleSubscriberPanicDoesNotStrandFinalization(t *testing.T) {

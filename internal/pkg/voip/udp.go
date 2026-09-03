@@ -3,8 +3,10 @@ package voip
 import (
 	"bytes"
 	"context"
+	"strconv"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
@@ -106,10 +108,11 @@ func handleUdpPacketsImmediateWithOutputs(tracker *CallTracker, pkt capture.Pack
 	}
 
 	// Not a SIP packet - check if it's RTP for a tracked call
-	if tracker.IsTracked(packet) {
+	resolution := tracker.ResolveMediaPacket(packet)
+	if resolution.Status == callregistry.MediaResolved {
 		dispatchSelectedPacket(outputs, pkt)
 
-		callID := tracker.GetCallIDForPacket(packet)
+		callID := resolution.CallID
 		if tracker.config.WriteVoIP {
 			WriteRTP(tracker, callID, packet)
 		} else {
@@ -204,11 +207,12 @@ func handleUdpPacketsWithBufferAndOutputs(tracker *CallTracker, pkt capture.Pack
 	// Not a SIP packet - check if it's RTP for a tracked call
 	{
 		// Potentially RTP packet - check if it belongs to a tracked call
-		callID := tracker.GetCallIDForPacket(packet)
-		if callID != "" {
+		resolution := tracker.ResolveMediaPacket(packet)
+		if resolution.Status == callregistry.MediaResolved {
+			callID := resolution.CallID
 			// Check if this is a port we're tracking
-			dstPort := layer.DstPort.String()
-			srcPort := layer.SrcPort.String()
+			dstPort := strconv.Itoa(int(layer.DstPort))
+			srcPort := strconv.Itoa(int(layer.SrcPort))
 
 			// Extract IP addresses for IP:PORT endpoint lookups
 			var dstIP, srcIP string
@@ -217,33 +221,11 @@ func handleUdpPacketsWithBufferAndOutputs(tracker *CallTracker, pkt capture.Pack
 				srcIP = netLayer.NetworkFlow().Src().String()
 			}
 
-			// Try to get CallID from buffer manager's port mapping
-			// Check IP:PORT endpoints first (more specific), then fall back to port-only
-			var bufCallID string
-			var exists bool
-
-			if dstIP != "" {
-				bufCallID, exists = buffer.GetCallIDForRTPPort(dstIP + ":" + dstPort)
-			}
-			if !exists && srcIP != "" {
-				bufCallID, exists = buffer.GetCallIDForRTPPort(srcIP + ":" + srcPort)
-			}
-			// Fall back to port-only lookups
-			if !exists {
-				bufCallID, exists = buffer.GetCallIDForRTPPort(dstPort)
-			}
-			if !exists {
-				bufCallID, exists = buffer.GetCallIDForRTPPort(srcPort)
-			}
-
-			if exists {
-				// This RTP packet belongs to a call we're buffering
-				// Use IP:PORT for the port parameter if available for more precise matching
-				portKey := dstPort
-				if dstIP != "" {
-					portKey = dstIP + ":" + dstPort
-				}
-				shouldWrite := buffer.AddRTPPacket(bufCallID, portKey, packet)
+			bufCallID := callID
+			sourceEndpoint := srcIP + ":" + srcPort
+			destinationEndpoint := dstIP + ":" + dstPort
+			shouldWrite, accepted := buffer.AddRTPPacketForEndpoints(bufCallID, sourceEndpoint, destinationEndpoint, packet)
+			if accepted {
 
 				if shouldWrite {
 					// Call already matched, inject into virtual interface and write immediately
@@ -254,7 +236,7 @@ func handleUdpPacketsWithBufferAndOutputs(tracker *CallTracker, pkt capture.Pack
 					}
 				}
 				// Otherwise packet is buffered, waiting for filter decision
-			} else if tracker.IsTracked(packet) {
+			} else {
 				// Call already decided and tracker knows about it, inject into virtual interface
 				dispatchSelectedPacket(outputs, pkt)
 

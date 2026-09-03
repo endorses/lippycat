@@ -102,8 +102,8 @@ func TestHandleUdpPackets_RTPTracking(t *testing.T) {
 	// Setup RTP port tracking
 	tracker := TestCallTracker(t)
 	clearRegistryForTest(tracker)
-	associateEndpointForTest(tracker, "8000", "rtp-test-call-1")
-	associateEndpointForTest(tracker, "8002", "rtp-test-call-2")
+	associateEndpointForTest(tracker, "192.168.1.200:8000", "rtp-test-call-1")
+	associateEndpointForTest(tracker, "192.168.1.100:8002", "rtp-test-call-2")
 
 	tests := []struct {
 		name    string

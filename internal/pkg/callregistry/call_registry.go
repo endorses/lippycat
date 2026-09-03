@@ -60,9 +60,27 @@ type Registry interface {
 	EndpointAssociationCount() int
 	Call(callID string) (Call, bool)
 	CallIDsForEndpoint(endpoint string) []string
+	ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint string) MediaResolution
 	AssociateEndpoint(callID, endpoint string)
 	CompleteCall(callID string)
 	Close()
+}
+
+// MediaResolutionStatus describes whether exact packet endpoints prove a
+// single active call owns a media packet.
+type MediaResolutionStatus uint8
+
+const (
+	MediaUnresolved MediaResolutionStatus = iota
+	MediaResolved
+	MediaAmbiguous
+)
+
+// MediaResolution is an attribution result, not a candidate list. CallID is
+// populated only when Status is MediaResolved.
+type MediaResolution struct {
+	Status MediaResolutionStatus
+	CallID string
 }
 
 // Config bounds the state owned by a Core. Limits are hard limits; an
@@ -325,8 +343,60 @@ func (c *Core) CallIDsForEndpoint(endpoint string) []string {
 	return append([]string(nil), c.endpointCalls[endpoint]...)
 }
 
-// MostRecentCallIDForEndpoint resolves an ambiguous shared endpoint using call
-// activity rather than association insertion order.
+// ResolveMediaEndpoints atomically snapshots the active owners of two exact
+// IP:port endpoints. When both sides have owners their intersection is the
+// candidate set; otherwise the non-empty side is used. No registry or caller
+// lock may be held while calling this method.
+func (c *Core) ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint string) MediaResolution {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	source := c.endpointCalls[sourceEndpoint]
+	destination := c.endpointCalls[destinationEndpoint]
+	candidateCount := 0
+	resolvedID := ""
+	if len(source) > 0 && len(destination) > 0 {
+		destinationOwners := make(map[string]struct{}, len(destination))
+		for _, callID := range destination {
+			if _, active := c.calls[callID]; active {
+				destinationOwners[callID] = struct{}{}
+			}
+		}
+		for _, callID := range source {
+			if _, active := c.calls[callID]; !active {
+				continue
+			}
+			if _, ownsDestination := destinationOwners[callID]; ownsDestination {
+				candidateCount++
+				resolvedID = callID
+			}
+		}
+	} else {
+		owners := source
+		if len(owners) == 0 {
+			owners = destination
+		}
+		for _, callID := range owners {
+			if _, active := c.calls[callID]; active {
+				candidateCount++
+				resolvedID = callID
+			}
+		}
+	}
+
+	switch candidateCount {
+	case 0:
+		return MediaResolution{Status: MediaUnresolved}
+	case 1:
+		return MediaResolution{Status: MediaResolved, CallID: resolvedID}
+	default:
+		return MediaResolution{Status: MediaAmbiguous}
+	}
+}
+
+// MostRecentCallIDForEndpoint is a presentation heuristic for diagnostics and
+// UI display. Recency does not prove media ownership; this result is unsuitable
+// for filtering, output attribution, Call-ID stamping, or LI correlation.
 func (c *Core) MostRecentCallIDForEndpoint(endpoint string) (string, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

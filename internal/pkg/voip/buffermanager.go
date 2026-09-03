@@ -177,7 +177,31 @@ func (bm *BufferManager) AddRTPPacket(callID string, port string, packet gopacke
 	return false // Buffered, don't forward yet
 }
 
-// GetCallIDForRTPPort looks up which call a given RTP port belongs to
+// AddRTPPacketForEndpoints adds media only when one of the packet's exact
+// endpoints belongs to the already-authoritatively resolved call. The second
+// return value distinguishes a buffered packet from an endpoint mismatch.
+func (bm *BufferManager) AddRTPPacketForEndpoints(callID, sourceEndpoint, destinationEndpoint string, packet gopacket.Packet) (forward, accepted bool) {
+	bm.mu.RLock()
+	buffer, exists := bm.buffers[callID]
+	bm.mu.RUnlock()
+	if !exists || (!buffer.IsRTPPort(sourceEndpoint) && !buffer.IsRTPPort(destinationEndpoint)) {
+		return false, false
+	}
+	if buffer.IsFilterChecked() && buffer.IsMatched() {
+		return true, true
+	}
+
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if bm.buffers[callID] != buffer {
+		return false, false
+	}
+	buffer.AddRTPPacket(packet)
+	return false, true
+}
+
+// GetCallIDForRTPPort is retained for non-authoritative diagnostics. Its
+// map-order result must not be used for filtering or packet attribution.
 func (bm *BufferManager) GetCallIDForRTPPort(port string) (string, bool) {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
@@ -413,7 +437,7 @@ func (bm *BufferManager) Close() {
 }
 
 // extractRTPPortsFromSDP extracts RTP ports and IP:PORT endpoints from SDP body
-// Returns both IP:PORT (for precise matching) and port-only (for NAT fallback)
+// Returns exact IP:PORT endpoints. Port-only ownership is not authoritative.
 func extractRTPPortsFromSDP(sdp string) []string {
 	endpoints := make([]string, 0, 4)
 
@@ -464,8 +488,8 @@ func extractRTPPortsFromSDP(sdp string) []string {
 							"port", port,
 							"endpoint", endpoint)
 					}
-					// Also register port-only for backward compatibility
-					// (some RTP may come from unexpected IPs due to NAT)
+					// Retain port-only membership for legacy buffer bookkeeping.
+					// Security-sensitive attribution never queries this fallback.
 					endpoints = append(endpoints, port)
 				}
 			}

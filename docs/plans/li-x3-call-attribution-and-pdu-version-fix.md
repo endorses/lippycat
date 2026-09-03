@@ -310,6 +310,12 @@ shutdown now waits for every already-committed semantic finalization subscriber,
 and a panicking subscriber is isolated so later ordered cleanup still runs and
 the Call-ID cannot remain permanently stuck in the finalizing state.
 
+A later independent audit closed one generation-reuse gap in the public PCAP
+writer handle: retained old-generation handles now carry their generation into
+write admission and cannot route delayed packets into a newer call that reused
+the same Call-ID. Regression coverage verifies the new generation remains
+unmodified while direct manager writes continue to target the current generation.
+
 ## Phase 4: Guard X3 Encoding and Delayed Delivery
 
 - [ ] Require authoritative attribution before an inherited identity filter may

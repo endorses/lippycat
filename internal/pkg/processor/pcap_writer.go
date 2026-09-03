@@ -303,6 +303,13 @@ func (pwm *PcapWriterManager) getOrCreateWriter(callID, from, to string, generat
 // and write operation. Finalization takes the exclusive manager lock, so a
 // writer cannot be detached or closed between lookup and packet serialization.
 func (pwm *PcapWriterManager) WritePacket(callID, from, to string, timestamp time.Time, data []byte, linkType layers.LinkType, isRTP bool) error {
+	return pwm.writePacketGeneration(callID, from, to, timestamp, data, linkType, isRTP, 0)
+}
+
+// writePacketGeneration rejects work submitted through a retained writer handle
+// when its generation no longer owns callID. Direct manager writes pass zero and
+// intentionally target the current generation.
+func (pwm *PcapWriterManager) writePacketGeneration(callID, from, to string, timestamp time.Time, data []byte, linkType layers.LinkType, isRTP bool, requiredGeneration uint64) error {
 	if pwm == nil || !pwm.config.Enabled {
 		return nil
 	}
@@ -317,6 +324,9 @@ func (pwm *PcapWriterManager) WritePacket(callID, from, to string, timestamp tim
 		return err
 	}
 	defer admission.Release()
+	if requiredGeneration != 0 && admission.Generation() != requiredGeneration {
+		return fmt.Errorf("%w: call %q generation %d is no longer current", ErrCallPcapWriterClosed, callID, requiredGeneration)
+	}
 	writer, err := pwm.getOrCreateWriter(callID, from, to, admission.Generation())
 	if err != nil || writer == nil {
 		return err
@@ -450,7 +460,7 @@ func (writer *CallPcapWriter) WriteSIPPacket(timestamp time.Time, data []byte, l
 		return nil
 	}
 	if writer.manager != nil {
-		return writer.manager.WritePacket(writer.callID, writer.from, writer.to, timestamp, data, linkType, false)
+		return writer.manager.writePacketGeneration(writer.callID, writer.from, writer.to, timestamp, data, linkType, false, writer.generation)
 	}
 	writer.reserveCallback()
 	defer writer.completeCallback()
@@ -521,7 +531,7 @@ func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte, l
 		return nil
 	}
 	if writer.manager != nil {
-		return writer.manager.WritePacket(writer.callID, writer.from, writer.to, timestamp, data, linkType, true)
+		return writer.manager.writePacketGeneration(writer.callID, writer.from, writer.to, timestamp, data, linkType, true, writer.generation)
 	}
 	writer.reserveCallback()
 	defer writer.completeCallback()

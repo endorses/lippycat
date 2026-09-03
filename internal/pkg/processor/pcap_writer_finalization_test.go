@@ -176,6 +176,32 @@ func TestRetainedWriterCannotFinalizeReusedCallID(t *testing.T) {
 	}
 }
 
+func TestRetainedWriterCannotWriteToReusedCallID(t *testing.T) {
+	manager := newFinalizationTestManager(t, "{callid}.pcap")
+	const callID = "generation-safe-write"
+
+	first, err := manager.GetOrCreateWriter(callID, "alice", "bob")
+	require.NoError(t, err)
+	require.NoError(t, manager.CloseCallWriter(callID))
+
+	manager.lifecycle.mu.Lock()
+	manager.lifecycle.tombstones[callID].finalizedAt = time.Now().Add(-2 * manager.lifecycle.tombstoneTTL)
+	manager.lifecycle.mu.Unlock()
+
+	second, err := manager.GetOrCreateWriter(callID, "carol", "dave")
+	require.NoError(t, err)
+	require.NotSame(t, first, second)
+
+	err = first.WriteSIPPacket(time.Now(), []byte("stale-generation"), layers.LinkTypeEthernet)
+	assert.ErrorIs(t, err, ErrCallPcapWriterClosed)
+	second.mu.Lock()
+	assert.Zero(t, second.sipPacketCount, "stale handle must not write into the reused generation")
+	second.mu.Unlock()
+
+	require.NoError(t, second.WriteSIPPacket(time.Now(), []byte("current-generation"), layers.LinkTypeEthernet))
+	require.NoError(t, manager.CloseCallWriter(callID))
+}
+
 func TestFinalizeReportsWriterCreatedByAdmittedConcurrentWork(t *testing.T) {
 	manager := newFinalizationTestManager(t, "{callid}.pcap")
 	const callID = "admitted-writer-race"

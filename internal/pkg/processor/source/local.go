@@ -425,13 +425,14 @@ func (s *LocalSource) OnCallEnded(call callregistry.Call, _ callregistry.EndReas
 // CleanupCallPorts clears all call-scoped attribution owned by the local
 // capture path at the processor's shared finalization boundary.
 func (s *LocalSource) CleanupCallPorts(callID string) {
-	s.callFilterCache.Delete(callID)
 	s.mu.Lock()
 	processor := s.voipProcessor
 	s.mu.Unlock()
 	if processor != nil {
 		processor.CleanupCallPorts(callID)
+		return
 	}
+	s.callFilterCache.Delete(callID)
 }
 
 // GetVoIPProcessor returns the VoIP processor if set.

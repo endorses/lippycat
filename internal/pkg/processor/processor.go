@@ -641,6 +641,7 @@ func (p *Processor) SetPacketSource(packetSource source.PacketSource) {
 	if localSource, ok := packetSource.(*source.LocalSource); ok {
 		if voipProcessor := localSource.GetVoIPProcessor(); voipProcessor != nil {
 			voipProcessor.AddLifecycleObserver(p.sessionOutputManager)
+			voipProcessor.SetCompletionHandler(p.sessionOutputManager.OnCallEnded)
 		}
 	}
 }

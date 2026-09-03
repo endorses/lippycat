@@ -187,9 +187,15 @@ type CapturedPacket struct {
 	// TLS session keys for decryption (forwarded on first matched packet of session)
 	// Original encrypted packets are preserved for audit integrity.
 	// Processor uses these keys to decrypt traffic for display/analysis.
-	TlsKeys       *TLSSessionKeys `protobuf:"bytes,10,opt,name=tls_keys,json=tlsKeys,proto3" json:"tls_keys,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TlsKeys *TLSSessionKeys `protobuf:"bytes,10,opt,name=tls_keys,json=tlsKeys,proto3" json:"tls_keys,omitempty"`
+	// Filter IDs matched directly against this packet (for example IP/CIDR).
+	// Kept separate so LI can distinguish packet evidence from call inheritance.
+	DirectMatchedFilterIds []string `protobuf:"bytes,11,rep,name=direct_matched_filter_ids,json=directMatchedFilterIds,proto3" json:"direct_matched_filter_ids,omitempty"`
+	// Filter IDs inherited from one authoritatively resolved call. This must be
+	// empty for unresolved or ambiguous media.
+	InheritedMatchedFilterIds []string `protobuf:"bytes,12,rep,name=inherited_matched_filter_ids,json=inheritedMatchedFilterIds,proto3" json:"inherited_matched_filter_ids,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *CapturedPacket) Reset() {
@@ -288,6 +294,20 @@ func (x *CapturedPacket) GetMatchedFilterIds() []string {
 func (x *CapturedPacket) GetTlsKeys() *TLSSessionKeys {
 	if x != nil {
 		return x.TlsKeys
+	}
+	return nil
+}
+
+func (x *CapturedPacket) GetDirectMatchedFilterIds() []string {
+	if x != nil {
+		return x.DirectMatchedFilterIds
+	}
+	return nil
+}
+
+func (x *CapturedPacket) GetInheritedMatchedFilterIds() []string {
+	if x != nil {
+		return x.InheritedMatchedFilterIds
 	}
 	return nil
 }
@@ -2272,7 +2292,7 @@ const file_data_proto_rawDesc = "" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12!\n" +
 	"\ftimestamp_ns\x18\x03 \x01(\x03R\vtimestampNs\x127\n" +
 	"\apackets\x18\x04 \x03(\v2\x1d.lippycat.data.CapturedPacketR\apackets\x12/\n" +
-	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\xa7\x03\n" +
+	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\xa3\x04\n" +
 	"\x0eCapturedPacket\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12%\n" +
@@ -2284,7 +2304,9 @@ const file_data_proto_rawDesc = "" +
 	"\x0einterface_name\x18\b \x01(\tR\rinterfaceName\x12,\n" +
 	"\x12matched_filter_ids\x18\t \x03(\tR\x10matchedFilterIds\x128\n" +
 	"\btls_keys\x18\n" +
-	" \x01(\v2\x1d.lippycat.data.TLSSessionKeysR\atlsKeys\"\xe1\x04\n" +
+	" \x01(\v2\x1d.lippycat.data.TLSSessionKeysR\atlsKeys\x129\n" +
+	"\x19direct_matched_filter_ids\x18\v \x03(\tR\x16directMatchedFilterIds\x12?\n" +
+	"\x1cinherited_matched_filter_ids\x18\f \x03(\tR\x19inheritedMatchedFilterIds\"\xe1\x04\n" +
 	"\x0ePacketMetadata\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x15\n" +
 	"\x06src_ip\x18\x02 \x01(\tR\x05srcIp\x12\x15\n" +

@@ -25,6 +25,24 @@ import (
 	"github.com/spf13/viper"
 )
 
+func stableFilterIDUnion(direct, inherited []string) []string {
+	result := make([]string, 0, len(direct)+len(inherited))
+	seen := make(map[string]struct{}, len(direct)+len(inherited))
+	for _, ids := range [][]string{direct, inherited} {
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
 // Config contains hunter configuration
 type Config struct {
 	ProcessorAddr  string
@@ -397,6 +415,12 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *pipeline.PacketEnvel
 // ForwardPacketWithMetadata forwards a packet with embedded metadata to the processor
 // This is used by TCP SIP handler to forward reassembled packets with extracted metadata
 func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType) error {
+	return h.ForwardPacketWithFilterProvenance(packet, metadata, interfaceName, linkType, nil, nil)
+}
+
+// ForwardPacketWithFilterProvenance forwards a packet while retaining the
+// origin of each filter match for downstream LI authorization.
+func (h *Hunter) ForwardPacketWithFilterProvenance(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) error {
 	if packet == nil {
 		return fmt.Errorf("cannot forward nil packet")
 	}
@@ -438,6 +462,10 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 	if err != nil {
 		return fmt.Errorf("normalize packet metadata: %w", err)
 	}
+	stages := pipeline.StageProvenance(0).With(pipeline.StageAnalyzed)
+	if len(directFilterIDs) > 0 || len(inheritedFilterIDs) > 0 {
+		stages = stages.With(pipeline.StageFiltered)
+	}
 
 	// Use the provided link type from the capture source (preserves Linux cooked, raw IP, etc.)
 	envelope := &pipeline.PacketEnvelope{
@@ -451,8 +479,11 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 			NodeID:        h.config.HunterID,
 			InterfaceName: interfaceName,
 		},
-		Stages:   pipeline.StageProvenance(0).With(pipeline.StageAnalyzed),
-		Metadata: encodedMetadata,
+		Stages:                    stages,
+		Metadata:                  encodedMetadata,
+		DirectMatchedFilterIDs:    append([]string(nil), directFilterIDs...),
+		InheritedMatchedFilterIDs: append([]string(nil), inheritedFilterIDs...),
+		MatchedFilterIDs:          stableFilterIDUnion(directFilterIDs, inheritedFilterIDs),
 	}
 
 	// Add to current batch and send if full

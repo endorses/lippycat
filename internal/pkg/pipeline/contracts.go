@@ -82,16 +82,18 @@ type TLSSessionKeys struct {
 
 // PacketEnvelope is the normalized unit passed between ingress and stages.
 type PacketEnvelope struct {
-	Data             []byte
-	LinkType         layers.LinkType
-	CaptureTime      time.Time
-	CaptureLength    int
-	OriginalLength   int
-	Source           SourceProvenance
-	Stages           StageProvenance
-	MatchedFilterIDs []string
-	Metadata         *Metadata
-	TLSKeys          *TLSSessionKeys
+	Data                      []byte
+	LinkType                  layers.LinkType
+	CaptureTime               time.Time
+	CaptureLength             int
+	OriginalLength            int
+	Source                    SourceProvenance
+	Stages                    StageProvenance
+	MatchedFilterIDs          []string
+	DirectMatchedFilterIDs    []string
+	InheritedMatchedFilterIDs []string
+	Metadata                  *Metadata
+	TLSKeys                   *TLSSessionKeys
 
 	decodeOnce sync.Once
 	packet     gopacket.Packet

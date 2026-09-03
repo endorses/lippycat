@@ -679,14 +679,15 @@ func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *pipel
 		stages = stages.With(pipeline.StageFiltered)
 	}
 	return &pipeline.PacketEnvelope{
-		Data:             packetData,
-		CaptureTime:      timestamp,
-		CaptureLength:    captureLen,
-		OriginalLength:   originalLen,
-		LinkType:         pktInfo.LinkType,
-		Source:           pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, NodeID: "", InterfaceName: pktInfo.Interface},
-		Stages:           stages,
-		MatchedFilterIDs: matchedFilterIDs, // For LI correlation
+		Data:                   packetData,
+		CaptureTime:            timestamp,
+		CaptureLength:          captureLen,
+		OriginalLength:         originalLen,
+		LinkType:               pktInfo.LinkType,
+		Source:                 pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, NodeID: "", InterfaceName: pktInfo.Interface},
+		Stages:                 stages,
+		MatchedFilterIDs:       matchedFilterIDs, // For LI correlation
+		DirectMatchedFilterIDs: append([]string(nil), matchedFilterIDs...),
 	}
 }
 

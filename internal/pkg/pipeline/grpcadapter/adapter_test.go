@@ -48,9 +48,11 @@ func TestEnvelopeGRPCRoundTripPreservesTransportFields(t *testing.T) {
 		Packets: []*pipeline.PacketEnvelope{{
 			Data: []byte{1, 2, 3, 4}, LinkType: layers.LinkTypeEthernet,
 			CaptureTime: capturedAt, CaptureLength: 4, OriginalLength: 64,
-			Source:           pipeline.SourceProvenance{Kind: pipeline.SourceGRPC, NodeID: "hunter-a", InterfaceName: "eth9", InterfaceIndex: 3},
-			MatchedFilterIDs: []string{"filter-b", "filter-a"},
-			Metadata:         &pipeline.Metadata{Encoding: pipeline.MetadataProtobuf, Payload: payload},
+			Source:                    pipeline.SourceProvenance{Kind: pipeline.SourceGRPC, NodeID: "hunter-a", InterfaceName: "eth9", InterfaceIndex: 3},
+			MatchedFilterIDs:          []string{"filter-b", "filter-a"},
+			DirectMatchedFilterIDs:    []string{"filter-b"},
+			InheritedMatchedFilterIDs: []string{"filter-a"},
+			Metadata:                  &pipeline.Metadata{Encoding: pipeline.MetadataProtobuf, Payload: payload},
 		}},
 	}
 
@@ -69,6 +71,8 @@ func TestEnvelopeGRPCRoundTripPreservesTransportFields(t *testing.T) {
 	require.Equal(t, in.Packets[0].Source.InterfaceName, out.Packets[0].Source.InterfaceName)
 	require.Equal(t, in.Packets[0].Source.InterfaceIndex, out.Packets[0].Source.InterfaceIndex)
 	require.Equal(t, in.Packets[0].MatchedFilterIDs, out.Packets[0].MatchedFilterIDs)
+	require.Equal(t, in.Packets[0].DirectMatchedFilterIDs, out.Packets[0].DirectMatchedFilterIDs)
+	require.Equal(t, in.Packets[0].InheritedMatchedFilterIDs, out.Packets[0].InheritedMatchedFilterIDs)
 	require.True(t, proto.Equal(metadata, wire.Packets[0].Metadata))
 	require.Equal(t, payload, out.Packets[0].Metadata.Payload)
 }

@@ -20,10 +20,12 @@ import (
 )
 
 type hunterForwardRecord struct {
-	packet gopacket.Packet
-	meta   *data.PacketMetadata
-	iface  string
-	link   layers.LinkType
+	packet       gopacket.Packet
+	meta         *data.PacketMetadata
+	iface        string
+	link         layers.LinkType
+	directIDs    []string
+	inheritedIDs []string
 }
 
 type recordingHunterForwarder struct {
@@ -39,6 +41,20 @@ func (f *recordingHunterForwarder) ForwardPacketWithMetadata(packet gopacket.Pac
 	return f.err
 }
 
+func (f *recordingHunterForwarder) ForwardPacketWithFilterProvenance(packet gopacket.Packet, metadata *data.PacketMetadata, iface string, link layers.LinkType, directFilterIDs, inheritedFilterIDs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records = append(f.records, hunterForwardRecord{
+		packet:       packet,
+		meta:         metadata,
+		iface:        iface,
+		link:         link,
+		directIDs:    append([]string(nil), directFilterIDs...),
+		inheritedIDs: append([]string(nil), inheritedFilterIDs...),
+	})
+	return f.err
+}
+
 func (f *recordingHunterForwarder) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -48,6 +64,17 @@ func (f *recordingHunterForwarder) count() int {
 type mutablePayloadFilter struct {
 	mu     sync.RWMutex
 	needle string
+}
+
+type hunterPacketLevelFilter struct {
+	directMatch bool
+	directIDs   []string
+}
+
+func (f *hunterPacketLevelFilter) MatchPacket(gopacket.Packet) bool { return false }
+
+func (f *hunterPacketLevelFilter) MatchPacketLevelWithIDs(gopacket.Packet) (bool, []string) {
+	return f.directMatch, append([]string(nil), f.directIDs...)
 }
 
 func (f *mutablePayloadFilter) MatchPacket(packet gopacket.Packet) bool {
@@ -215,7 +242,7 @@ func TestHunterRTPRequiresAuthoritativeOwnership(t *testing.T) {
 	const endpoint = "192.168.1.200:20000"
 	rtpPayload := []byte{0x80, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1}
 
-	t.Run("shared endpoint is not forwarded", func(t *testing.T) {
+	t.Run("shared endpoint direct match forwards without call attribution", func(t *testing.T) {
 		tracker := TestCallTracker(t)
 		associateEndpointForTest(tracker, endpoint, "call-a")
 		associateEndpointForTest(tracker, endpoint, "call-b")
@@ -224,9 +251,38 @@ func TestHunterRTPRequiresAuthoritativeOwnership(t *testing.T) {
 		t.Cleanup(buffers.Close)
 		handler := NewUDPPacketHandler(tracker, forwarder, buffers)
 		t.Cleanup(handler.Close)
+		handler.SetApplicationFilter(&hunterPacketLevelFilter{directMatch: true, directIDs: []string{"direct-ip"}})
+		packet := createUDPPacket(30000, 20000, rtpPayload)
+		require.True(t, handler.handleRTPPacket(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
+		require.Equal(t, 1, forwarder.count())
+
+		forwarder.mu.Lock()
+		defer forwarder.mu.Unlock()
+		record := forwarder.records[0]
+		require.NotNil(t, record.meta.GetRtp())
+		require.Nil(t, record.meta.GetSip(), "ambiguous RTP must not carry a guessed Call-ID")
+		require.Equal(t, []string{"direct-ip"}, record.directIDs)
+		require.Empty(t, record.inheritedIDs)
+	})
+
+	t.Run("shared endpoint identity-only selection is not forwarded", func(t *testing.T) {
+		tracker := TestCallTracker(t)
+		associateEndpointForTest(tracker, endpoint, "call-a")
+		associateEndpointForTest(tracker, endpoint, "call-b")
+		forwarder := &recordingHunterForwarder{}
+		buffers := NewBufferManager(time.Minute, 10)
+		t.Cleanup(buffers.Close)
+		for _, callID := range []string{"call-a", "call-b"} {
+			buffers.AddSIPPacket(callID, nil, &CallMetadata{CallID: callID}, "eth-test", layers.LinkTypeEthernet)
+			matched, _ := buffers.CheckFilter(callID, func(*CallMetadata) bool { return true })
+			require.True(t, matched)
+		}
+		handler := NewUDPPacketHandler(tracker, forwarder, buffers)
+		t.Cleanup(handler.Close)
+		handler.SetApplicationFilter(&hunterPacketLevelFilter{})
 		packet := createUDPPacket(30000, 20000, rtpPayload)
 		require.False(t, handler.handleRTPPacket(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
-		require.Zero(t, forwarder.count())
+		require.Zero(t, forwarder.count(), "neither selected identity call may claim ambiguous RTP")
 	})
 
 	t.Run("unique endpoint is forwarded with its call", func(t *testing.T) {

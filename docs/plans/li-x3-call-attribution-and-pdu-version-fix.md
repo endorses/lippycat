@@ -231,23 +231,33 @@ are not used by packet forwarding, Call-ID stamping, filtering, or LI paths.
 
 ## Phase 2: Make Filter Inheritance Fail Closed
 
-- [ ] Change `LocalSource` to load cached filter IDs only for the authoritative
+- [x] Change `LocalSource` to load cached filter IDs only for the authoritative
   resolved Call-ID.
-- [ ] Remove multi-call unioning from packet selection; retain a helper that
+- [x] Remove multi-call unioning from packet selection; retain a helper that
   combines direct IDs with one call's inherited IDs in stable deduplicated order.
-- [ ] Preserve direct media-safe IP/CIDR matches for unresolved and ambiguous RTP.
-- [ ] Suppress identity inheritance for unresolved or ambiguous media and account
+- [x] Preserve direct media-safe IP/CIDR matches for unresolved and ambiguous RTP.
+- [x] Suppress identity inheritance for unresolved or ambiguous media and account
   for the suppression before dropping or forwarding the packet.
-- [ ] Audit the hunter, tap, local processor, upstream forwarding, and replay paths
+- [x] Audit the hunter, tap, local processor, upstream forwarding, and replay paths
   so all paths apply the same attribution semantics.
-- [ ] Add explicit direct-versus-inherited provenance to the internal envelope or
+- [x] Add explicit direct-versus-inherited provenance to the internal envelope or
   protobuf contract if it must cross process boundaries; regenerate code using
   the repository's normal protobuf workflow.
-- [ ] Add tests proving no foreign filter union, no identity-task delivery on
+- [x] Add tests proving no foreign filter union, no identity-task delivery on
   ambiguity, direct IP/CIDR delivery remains possible, and in-dialog SIP sticky
   selection is unchanged.
-- [ ] Add a B2BUA/shared-relay test demonstrating that legitimate correlated legs
+- [x] Add a B2BUA/shared-relay test demonstrating that legitimate correlated legs
   are not guessed to be the same call without authoritative evidence.
+
+Phase 2 implementation note: local/tap inheritance now consumes the explicit
+media-resolution result and can load cached identity filters from only its one
+resolved Call-ID. Direct and inherited IDs are carried separately through the
+internal envelope and protobuf transport while the legacy combined field remains
+a stable, deduplicated compatibility union. Hunter media handling also evaluates
+safe packet-level matches before rejecting unresolved or ambiguous attribution,
+so direct IP/CIDR evidence survives without a guessed Call-ID. Offline replay
+does not perform call-filter inheritance; upstream processors preserve the
+originating provenance without re-attributing packets.
 
 ## Phase 3: Centralize Call Finalization
 

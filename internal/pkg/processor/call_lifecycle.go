@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
 // ErrCallLifecycleShutdown is returned when admission is attempted after the
@@ -94,6 +96,7 @@ type CallLifecycleRegistry struct {
 
 	shutdown           bool
 	totalInflight      uint64
+	totalFinalizing    uint64
 	shutdownDrain      chan struct{}
 	shutdownClosed     bool
 	tombstoneEvictions atomic.Uint64
@@ -179,10 +182,7 @@ func (r *CallLifecycleRegistry) release(call *lifecycleCall) {
 	if call.closed && call.inflight == 0 {
 		close(call.drained)
 	}
-	if r.shutdown && r.totalInflight == 0 && !r.shutdownClosed {
-		close(r.shutdownDrain)
-		r.shutdownClosed = true
-	}
+	r.closeShutdownDrainLocked()
 }
 
 // Subscribe adds a finalization observer. Observers run in registration order,
@@ -248,6 +248,7 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 	}
 	r.addTombstoneLocked(callID, call.generation, now)
 	r.finalizing[callID] = &lifecycleTombstone{callID: callID, generation: call.generation, finalizedAt: now, index: -1}
+	r.totalFinalizing++
 	subscribers := append([]func(CallFinalizationEvent){}, r.subscribers...)
 	event := CallFinalizationEvent{CallID: callID, Generation: call.generation, Reason: reason, FinalizedAt: now}
 	result.Finalized = true
@@ -255,13 +256,15 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 	r.mu.Unlock()
 
 	<-call.drained
-	for _, subscriber := range subscribers {
-		subscriber(event)
+	for index, subscriber := range subscribers {
+		invokeLifecycleSubscriber(subscriber, event, index)
 	}
 	r.mu.Lock()
 	if current := r.finalizing[callID]; current != nil && current.generation == call.generation {
 		delete(r.finalizing, callID)
 	}
+	r.totalFinalizing--
+	r.closeShutdownDrainLocked()
 	r.mu.Unlock()
 	return result
 }
@@ -316,14 +319,31 @@ func (r *CallLifecycleRegistry) Shutdown() {
 				close(call.drained)
 			}
 		}
-		if r.totalInflight == 0 && !r.shutdownClosed {
-			close(r.shutdownDrain)
-			r.shutdownClosed = true
-		}
+		r.closeShutdownDrainLocked()
 	}
 	drain := r.shutdownDrain
 	r.mu.Unlock()
 	<-drain
+}
+
+func (r *CallLifecycleRegistry) closeShutdownDrainLocked() {
+	if r.shutdown && r.totalInflight == 0 && r.totalFinalizing == 0 && !r.shutdownClosed {
+		close(r.shutdownDrain)
+		r.shutdownClosed = true
+	}
+}
+
+func invokeLifecycleSubscriber(subscriber func(CallFinalizationEvent), event CallFinalizationEvent, index int) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.Error("Call lifecycle subscriber panicked",
+				"generation", event.Generation,
+				"reason", event.Reason,
+				"subscriber_index", index,
+				"panic", recovered)
+		}
+	}()
+	subscriber(event)
 }
 
 func (r *CallLifecycleRegistry) addTombstoneLocked(callID string, generation uint64, finalizedAt time.Time) {

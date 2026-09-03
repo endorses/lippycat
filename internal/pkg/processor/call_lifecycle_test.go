@@ -157,6 +157,59 @@ func TestCallLifecycleShutdownDrainsWithoutFinalizing(t *testing.T) {
 	assert.Zero(t, callbacks.Load())
 }
 
+func TestCallLifecycleShutdownWaitsForCommittedFinalizationSubscribers(t *testing.T) {
+	r := NewCallLifecycleRegistry(CallLifecycleConfig{})
+	admission, err := r.Admit("finalizing")
+	require.NoError(t, err)
+
+	subscriberStarted := make(chan struct{})
+	releaseSubscriber := make(chan struct{})
+	r.Subscribe(func(CallFinalizationEvent) {
+		close(subscriberStarted)
+		<-releaseSubscriber
+	})
+
+	finalized := make(chan struct{})
+	go func() {
+		r.Finalize("finalizing", CallFinalizationProtocolComplete)
+		close(finalized)
+	}()
+	require.Eventually(t, func() bool { return r.IsFinalized("finalizing") }, time.Second, time.Millisecond)
+
+	shutdown := make(chan struct{})
+	go func() {
+		r.Shutdown()
+		close(shutdown)
+	}()
+	admission.Release()
+	<-subscriberStarted
+	select {
+	case <-shutdown:
+		t.Fatal("shutdown returned before committed finalization subscriber completed")
+	default:
+	}
+
+	close(releaseSubscriber)
+	<-finalized
+	<-shutdown
+}
+
+func TestCallLifecycleSubscriberPanicDoesNotStrandFinalization(t *testing.T) {
+	r := NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneTTL: time.Millisecond})
+	var laterSubscriberCalls atomic.Uint64
+	r.Subscribe(func(CallFinalizationEvent) { panic("synthetic subscriber failure") })
+	r.Subscribe(func(CallFinalizationEvent) { laterSubscriberCalls.Add(1) })
+
+	result := r.Finalize("panicking-subscriber", CallFinalizationProtocolComplete)
+	require.True(t, result.Finalized)
+	assert.Equal(t, uint64(1), laterSubscriberCalls.Load())
+
+	time.Sleep(2 * time.Millisecond)
+	admission, err := r.Admit("panicking-subscriber")
+	require.NoError(t, err)
+	admission.Release()
+}
+
 func TestCallLifecycleReuseWaitsForOldGenerationSubscribers(t *testing.T) {
 	tests := []struct {
 		name   string

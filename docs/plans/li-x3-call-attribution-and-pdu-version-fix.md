@@ -167,19 +167,27 @@ for ambiguity prefer candidate count and endpoint/flow hashes over identities.
 
 ## Phase 0: Reproduce and Freeze the Failure
 
-- [ ] Add a synthetic regression fixture with calls A and B sharing one media
+- [x] Add a synthetic regression fixture with calls A and B sharing one media
   endpoint while having distinct identity filter IDs and XIDs.
-- [ ] Prove the v0.11.4 behavior in a test: B media inherits A and B filter IDs,
+- [x] Prove the v0.11.4 behavior in a test: B media inherits A and B filter IDs,
   is stamped with A, and produces A's Call-ID correlation hash.
-- [ ] Add the eviction reproduction showing that removal of the selected call's
+- [x] Add the eviction reproduction showing that removal of the selected call's
   endpoint/cache association causes later identity-selected media to disappear
   before LI accounting.
-- [ ] Add a finalized-call reproduction with PCAP enabled showing PCAP rejects the
+- [x] Add a finalized-call reproduction with PCAP enabled showing PCAP rejects the
   late packet while X3 still accepts it.
-- [ ] Add the same late-X3 reproduction with PCAP disabled to prove finalization
+- [x] Add the same late-X3 reproduction with PCAP disabled to prove finalization
   enforcement cannot depend on `PcapWriterManager` existence.
-- [ ] Record existing relevant benchmarks and test behavior before refactoring;
+- [x] Record existing relevant benchmarks and test behavior before refactoring;
   use assertions rather than production packet captures.
+
+Phase 0 implementation note: Phase 1 had already landed when these historical
+characterizations were added. The shared-endpoint tests therefore use an
+explicitly test-only model of the relevant v0.11.4 (`92ed306a`) attribution and
+cache-eviction operations. On eviction, the remaining call B still owns the
+endpoint and reaches LI, while the evicted call A's identity task disappears
+before LI accounting. The fixture does not incorrectly model the whole packet
+as disappearing.
 
 ## Phase 1: Introduce Explicit RTP Resolution
 

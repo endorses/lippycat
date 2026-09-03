@@ -305,6 +305,11 @@ the configured trailing-media grace period; the shared lifecycle finalization
 subscriber performs the once-only call cleanup. Standalone VoIP processing without
 a shared lifecycle coordinator preserves immediate terminal cleanup.
 
+A post-implementation audit also closed two shutdown/error-path gaps: process
+shutdown now waits for every already-committed semantic finalization subscriber,
+and a panicking subscriber is isolated so later ordered cleanup still runs and
+the Call-ID cannot remain permanently stuck in the finalizing state.
+
 ## Phase 4: Guard X3 Encoding and Delayed Delivery
 
 - [ ] Require authoritative attribution before an inherited identity filter may

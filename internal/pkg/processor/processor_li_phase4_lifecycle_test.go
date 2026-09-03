@@ -81,11 +81,16 @@ func TestPhase4FinalizationClearsMediaDirectionForOnlyThatCall(t *testing.T) {
 	liMediaDirection.ObserveSIP(xid, dirTarget, dirSIPPacket(
 		"INVITE "+dirRemoteURI+" SIP/2.0", 0, dirTargetURI, dirRemoteURI, "", dirSDP(dirGWAddr, dirGWPort),
 	))
-	require.Equal(t, 1, liMediaDirection.Stats().CallsTracked)
+	otherCall := dirSIPPacket(
+		"INVITE "+dirRemoteURI+" SIP/2.0", 0, dirTargetURI, dirRemoteURI, "", dirSDP(dirGWAddr, dirGWPort),
+	)
+	otherCall.VoIPData.CallID = "other-direction-call@example.invalid"
+	liMediaDirection.ObserveSIP(xid, dirTarget, otherCall)
+	require.Equal(t, 2, liMediaDirection.Stats().CallsTracked)
 
 	admission, err := p.callLifecycle.Admit(dirCallID)
 	require.NoError(t, err)
 	admission.Release()
 	require.True(t, p.callLifecycle.Finalize(dirCallID, CallFinalizationProtocolComplete).Finalized)
-	assert.Equal(t, 0, liMediaDirection.Stats().CallsTracked)
+	assert.Equal(t, 1, liMediaDirection.Stats().CallsTracked)
 }

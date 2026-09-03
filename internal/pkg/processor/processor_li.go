@@ -389,8 +389,30 @@ func (p *Processor) initLIManager() {
 					// Route through reorder buffer per destination
 					ssrc := pkt.VoIPData.SSRC
 					rtpSeq := pkt.VoIPData.SequenceNum
-					for _, destID := range task.DestinationIDs {
+					generation := uint64(0)
+					if admission != nil {
+						generation = admission.Generation()
+					}
+					for destinationIndex, destID := range task.DestinationIDs {
 						did := destID // capture for closure
+						insertionTaskAdmission := taskAdmission
+						insertionCallAdmission := admission
+						if destinationIndex > 0 {
+							var taskStillActive bool
+							insertionTaskAdmission, taskStillActive = p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+							if !taskStillActive {
+								return
+							}
+							if callID != "" && p.callLifecycle != nil {
+								var insertionErr error
+								insertionCallAdmission, insertionErr = p.callLifecycle.AdmitGeneration(callID, generation)
+								if insertionErr != nil {
+									insertionTaskAdmission.Release()
+									liX3FinalizedSuppressed.Add(1)
+									return
+								}
+							}
+						}
 						bufKey := fmt.Sprintf("%s-%s", task.XID, did)
 						buf, _ := liReorderBuffers.LoadOrStore(bufKey, delivery.NewCallAwareReorderBuffer(
 							func(entry delivery.ReorderEntry) {
@@ -417,11 +439,16 @@ func (p *Processor) initLIManager() {
 							},
 							60*time.Millisecond,
 						))
-						generation := uint64(0)
-						if admission != nil {
-							generation = admission.Generation()
-						}
-						buf.(*delivery.ReorderBuffer).DeliverCallX3(callID, generation, ssrc, rtpSeq, data)
+						buf.(*delivery.ReorderBuffer).DeliverCallX3AfterCommit(callID, generation, ssrc, rtpSeq, data, func() {
+							// DeliverCallX3 may synchronously invoke its delivery
+							// callback. Release the outer admissions after insertion
+							// so that callback can safely re-admit even when a task
+							// deactivation writer is already waiting.
+							insertionTaskAdmission.Release()
+							if insertionCallAdmission != nil {
+								insertionCallAdmission.Release()
+							}
+						})
 					}
 					logger.Debug("X3 CC queued via reorder buffer",
 						"xid", task.XID,

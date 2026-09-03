@@ -132,6 +132,18 @@ func TestReorderSeparatesReusedCallGenerationsWithSameSSRC(t *testing.T) {
 	assert.Equal(t, uint64(1), first.Generation)
 	assert.Equal(t, uint64(2), second.Generation)
 }
+
+func TestReorderRunsCommitHookBeforeSynchronousDelivery(t *testing.T) {
+	committed := false
+	rb := NewCallAwareReorderBuffer(func(ReorderEntry) {
+		require.True(t, committed, "admission must be released before synchronous delivery re-admits")
+	}, time.Second)
+	t.Cleanup(rb.Discard)
+
+	rb.DeliverCallX3AfterCommit("call-a", 1, 42, 10, []byte("first"), func() {
+		committed = true
+	})
+}
 func TestDestinationQueueSeparatesX2AndX3(t *testing.T) {
 	q := newDestinationQueue(uuid.New(), 2)
 	x2 := &deliveryItem{pduType: PDUTypeX2}

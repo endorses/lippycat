@@ -74,11 +74,22 @@ func (rb *ReorderBuffer) DeliverX3(ssrc uint32, seq uint16, pdu []byte) {
 	rb.DeliverCallX3("", 0, ssrc, seq, pdu)
 }
 func (rb *ReorderBuffer) DeliverCallX3(callID string, generation uint64, ssrc uint32, seq uint16, pdu []byte) {
+	rb.DeliverCallX3AfterCommit(callID, generation, ssrc, seq, pdu, nil)
+}
+
+// DeliverCallX3AfterCommit inserts the PDU while the caller's admission is
+// still held, invokes afterCommit once the buffer mutation is complete, and
+// only then invokes delivery callbacks. This lets callers release admission
+// barriers before a synchronous callback re-admits around its final enqueue.
+func (rb *ReorderBuffer) DeliverCallX3AfterCommit(callID string, generation uint64, ssrc uint32, seq uint16, pdu []byte, afterCommit func()) {
 	now := time.Now()
 	key := reorderStreamKey{callID: callID, generation: generation, ssrc: ssrc}
 	rb.mu.Lock()
 	if rb.stopped {
 		rb.mu.Unlock()
+		if afterCommit != nil {
+			afterCommit()
+		}
 		return
 	}
 	s := rb.streams[key]
@@ -115,6 +126,9 @@ func (rb *ReorderBuffer) DeliverCallX3(callID string, generation uint64, ssrc ui
 		}
 	}
 	rb.mu.Unlock()
+	if afterCommit != nil {
+		afterCommit()
+	}
 	rb.deliver(out)
 }
 func drainConsecutive(s *rtpStream) (out []ReorderEntry) {

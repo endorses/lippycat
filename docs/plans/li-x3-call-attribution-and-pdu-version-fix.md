@@ -368,6 +368,17 @@ reactivation. Focused race tests cover selective discard, timer finalization,
 Call-ID reuse, task-generation reuse, PCAP-enabled and PCAP-disabled suppression,
 direction cleanup, and shared-endpoint foreign-XID/FNV rejection.
 
+A post-implementation Phase 4 audit found and fixed a writer-preference deadlock
+at the reorder boundary. The first or newly consecutive RTP entry can be delivered
+synchronously; its callback previously tried to acquire task admission recursively
+while the outer admission still covered reorder insertion. A concurrently queued
+task-deactivation writer could therefore block the recursive read lock while also
+waiting for the outer read lock. Reorder insertion now invokes an explicit commit
+hook that releases the outer task and call admissions before any synchronous
+delivery callback re-admits around `SendX3`. Regression coverage verifies that
+ordering, and direction cleanup coverage now proves finalizing one call preserves
+another call under the same XID.
+
 ## Phase 5: Correct the ETSI PDU Version
 
 - [ ] Change the canonical constants to `VersionMajor = 0`, `VersionMinor = 5`,

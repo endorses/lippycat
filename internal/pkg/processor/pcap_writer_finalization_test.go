@@ -45,7 +45,9 @@ func TestPcapWriterManagerSuppressesTombstonedCall(t *testing.T) {
 
 func TestPcapWriterManagerPrunesTombstonesToLimit(t *testing.T) {
 	manager := newFinalizationTestManager(t, "{callid}.pcap")
-	manager.tombstoneLimit = 2
+	manager.lifecycle.mu.Lock()
+	manager.lifecycle.tombstoneLimit = 2
+	manager.lifecycle.mu.Unlock()
 
 	for _, callID := range []string{"oldest", "middle", "newest"} {
 		_, err := manager.GetOrCreateWriter(callID, "alice", "bob")
@@ -54,18 +56,20 @@ func TestPcapWriterManagerPrunesTombstonesToLimit(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	manager.mu.RLock()
-	defer manager.mu.RUnlock()
-	assert.Len(t, manager.tombstones, 2)
-	assert.NotContains(t, manager.tombstones, "oldest")
-	assert.Contains(t, manager.tombstones, "middle")
-	assert.Contains(t, manager.tombstones, "newest")
+	manager.lifecycle.mu.Lock()
+	defer manager.lifecycle.mu.Unlock()
+	assert.Len(t, manager.lifecycle.tombstones, 2)
+	assert.NotContains(t, manager.lifecycle.tombstones, "oldest")
+	assert.Contains(t, manager.lifecycle.tombstones, "middle")
+	assert.Contains(t, manager.lifecycle.tombstones, "newest")
 }
 
 func TestPcapWriterManagerCapacityPrunedCallIDReuseDoesNotMutateArtifact(t *testing.T) {
 	dir := t.TempDir()
 	manager := newFinalizationTestManagerInDir(t, dir, "{callid}.pcap")
-	manager.tombstoneLimit = 2
+	manager.lifecycle.mu.Lock()
+	manager.lifecycle.tombstoneLimit = 2
+	manager.lifecycle.mu.Unlock()
 
 	first, err := manager.GetOrCreateWriter("oldest", "alice", "bob")
 	require.NoError(t, err)
@@ -115,10 +119,10 @@ func TestPcapWriterManagerExpiredCallIDReuseDoesNotMutateArtifact(t *testing.T) 
 	original, err := os.ReadFile(originalPath)
 	require.NoError(t, err)
 
-	manager.mu.Lock()
-	manager.tombstoneTTL = time.Minute
-	manager.tombstones[callID] = time.Now().Add(-2 * time.Minute)
-	manager.mu.Unlock()
+	manager.lifecycle.mu.Lock()
+	manager.lifecycle.tombstoneTTL = time.Minute
+	manager.lifecycle.tombstones[callID].finalizedAt = time.Now().Add(-2 * time.Minute)
+	manager.lifecycle.mu.Unlock()
 
 	second, err := manager.GetOrCreateWriter(callID, "alice", "bob")
 	require.NoError(t, err)

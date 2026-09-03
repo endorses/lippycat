@@ -32,6 +32,7 @@ func DefaultCallCompletionMonitorConfig() *CallCompletionMonitorConfig {
 type pendingCallInfo struct {
 	scheduledAt time.Time // When the call was first scheduled for closure
 	rtpExpected bool      // Whether RTP is expected (call was ACTIVE)
+	reason      CallFinalizationReason
 }
 
 // VoIPPortCleaner is an interface for cleaning up VoIP port-to-call mappings.
@@ -46,6 +47,7 @@ type CallCompletionMonitor struct {
 	config       *CallCompletionMonitorConfig
 	aggregator   *voip.CallAggregator
 	pcapManager  *PcapWriterManager
+	lifecycle    *CallLifecycleRegistry
 	voipCleaner  VoIPPortCleaner             // Optional voip processor for port cleanup
 	pendingClose map[string]*pendingCallInfo // callID -> pending closure info
 	mu           sync.Mutex
@@ -54,6 +56,7 @@ type CallCompletionMonitor struct {
 	wg           sync.WaitGroup
 	startOnce    sync.Once
 	stopOnce     sync.Once
+	cleanerOnce  sync.Once
 }
 
 // NewCallCompletionMonitor creates a new call completion monitor
@@ -61,6 +64,17 @@ func NewCallCompletionMonitor(
 	config *CallCompletionMonitorConfig,
 	aggregator *voip.CallAggregator,
 	pcapManager *PcapWriterManager,
+) *CallCompletionMonitor {
+	return NewCallCompletionMonitorWithLifecycle(config, aggregator, pcapManager, nil)
+}
+
+// NewCallCompletionMonitorWithLifecycle creates a monitor whose terminal call
+// decisions are owned by lifecycle, independently of whether PCAP output exists.
+func NewCallCompletionMonitorWithLifecycle(
+	config *CallCompletionMonitorConfig,
+	aggregator *voip.CallAggregator,
+	pcapManager *PcapWriterManager,
+	lifecycle *CallLifecycleRegistry,
 ) *CallCompletionMonitor {
 	if config == nil {
 		config = DefaultCallCompletionMonitorConfig()
@@ -79,18 +93,23 @@ func NewCallCompletionMonitor(
 	if config.ClosedCallTTL <= 0 {
 		config.ClosedCallTTL = 1 * time.Hour
 	}
-	// The manager tombstone set is the sole completed-call authority. Preserve
-	// the monitor configuration knob by applying it to that authoritative set.
-	if pcapManager != nil {
-		pcapManager.mu.Lock()
-		pcapManager.tombstoneTTL = config.ClosedCallTTL
-		pcapManager.mu.Unlock()
+	if lifecycle == nil && pcapManager != nil {
+		lifecycle = pcapManager.Lifecycle()
 	}
+	if lifecycle == nil {
+		lifecycle = NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneTTL: config.ClosedCallTTL})
+	}
+	// Preserve the monitor's retention knob on the shared terminal authority,
+	// including the compatibility path where the PCAP manager supplied it.
+	lifecycle.mu.Lock()
+	lifecycle.tombstoneTTL = config.ClosedCallTTL
+	lifecycle.mu.Unlock()
 
 	return &CallCompletionMonitor{
 		config:       config,
 		aggregator:   aggregator,
 		pcapManager:  pcapManager,
+		lifecycle:    lifecycle,
 		pendingClose: make(map[string]*pendingCallInfo),
 		stopChan:     make(chan struct{}),
 	}
@@ -98,7 +117,7 @@ func NewCallCompletionMonitor(
 
 // Start begins monitoring call completions
 func (m *CallCompletionMonitor) Start() {
-	if m == nil || m.aggregator == nil || m.pcapManager == nil {
+	if m == nil || m.aggregator == nil || m.lifecycle == nil {
 		return
 	}
 
@@ -138,11 +157,16 @@ func (m *CallCompletionMonitor) SetVoIPPortCleaner(cleaner VoIPPortCleaner) {
 	m.mu.Lock()
 	m.voipCleaner = cleaner
 	m.mu.Unlock()
-	if m.pcapManager != nil {
-		m.pcapManager.SetBeforeFinalize(func(callID string, _ CallFinalizationReason) {
-			if cleaner != nil {
-				cleaner.CleanupCallPorts(callID)
-			}
+	if m.lifecycle != nil {
+		m.cleanerOnce.Do(func() {
+			m.lifecycle.Subscribe(func(event CallFinalizationEvent) {
+				m.mu.Lock()
+				currentCleaner := m.voipCleaner
+				m.mu.Unlock()
+				if currentCleaner != nil {
+					currentCleaner.CleanupCallPorts(event.CallID)
+				}
+			})
 		})
 	}
 }
@@ -181,7 +205,7 @@ func (m *CallCompletionMonitor) checkEndedCalls() {
 
 	for _, call := range calls {
 		// Skip if already closed
-		if m.pcapManager != nil && m.pcapManager.IsFinalized(call.CallID) {
+		if m.lifecycle.IsFinalized(call.CallID) {
 			continue
 		}
 
@@ -202,6 +226,7 @@ func (m *CallCompletionMonitor) checkEndedCalls() {
 			m.pendingClose[call.CallID] = &pendingCallInfo{
 				scheduledAt: now,
 				rtpExpected: rtpExpected,
+				reason:      CallFinalizationProtocolComplete,
 			}
 
 			logger.Debug("Scheduled call PCAP closure",
@@ -218,18 +243,23 @@ func (m *CallCompletionMonitor) checkEndedCalls() {
 // path used by instance-owned registries; polling remains temporarily for the
 // processor aggregator until its Phase 5 orchestration migration.
 func (m *CallCompletionMonitor) ScheduleClose(callID string, rtpExpected bool) {
+	m.ScheduleCloseReason(callID, rtpExpected, CallFinalizationProtocolComplete)
+}
+
+// ScheduleCloseReason records completion while preserving its lifecycle cause.
+func (m *CallCompletionMonitor) ScheduleCloseReason(callID string, rtpExpected bool, reason CallFinalizationReason) {
 	if m == nil || callID == "" {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.pcapManager != nil && m.pcapManager.IsFinalized(callID) {
+	if m.lifecycle != nil && m.lifecycle.IsFinalized(callID) {
 		return
 	}
 	if _, pending := m.pendingClose[callID]; pending {
 		return
 	}
-	m.pendingClose[callID] = &pendingCallInfo{scheduledAt: time.Now(), rtpExpected: rtpExpected}
+	m.pendingClose[callID] = &pendingCallInfo{scheduledAt: time.Now(), rtpExpected: rtpExpected, reason: reason}
 }
 
 // processPendingClose closes PCAP files for calls whose grace period has expired
@@ -237,7 +267,11 @@ func (m *CallCompletionMonitor) processPendingClose() {
 	now := time.Now()
 
 	m.mu.Lock()
-	toClose := make([]string, 0)
+	type pendingFinalization struct {
+		callID string
+		reason CallFinalizationReason
+	}
+	toClose := make([]pendingFinalization, 0)
 	for callID, info := range m.pendingClose {
 		gracePeriodExpired := now.After(info.scheduledAt.Add(m.config.GracePeriod))
 		if !gracePeriodExpired {
@@ -252,7 +286,7 @@ func (m *CallCompletionMonitor) processPendingClose() {
 			// No RTP expected (failed call), close immediately after grace period
 			shouldClose = true
 			reason = "no RTP expected"
-		} else if m.pcapManager.HasRTPPackets(callID) {
+		} else if m.hasRTPPackets(callID) {
 			// RTP expected and received, safe to close
 			shouldClose = true
 			reason = "RTP received"
@@ -270,7 +304,7 @@ func (m *CallCompletionMonitor) processPendingClose() {
 		}
 
 		if shouldClose {
-			toClose = append(toClose, callID)
+			toClose = append(toClose, pendingFinalization{callID: callID, reason: info.reason})
 			logger.Debug("Call ready to close",
 				"call_id", callID,
 				"reason", reason,
@@ -279,40 +313,37 @@ func (m *CallCompletionMonitor) processPendingClose() {
 	}
 
 	// Remove from pending before releasing lock
-	for _, callID := range toClose {
-		delete(m.pendingClose, callID)
+	for _, pending := range toClose {
+		delete(m.pendingClose, pending.callID)
 	}
 	m.mu.Unlock()
 
 	// Close PCAP files outside the lock
-	for _, callID := range toClose {
-		m.closeCallPcap(callID)
+	for _, pending := range toClose {
+		m.finalizeCall(pending.callID, pending.reason)
 	}
 }
 
 // closeCallPcap closes the PCAP files for a call and fires the voipcommand callback
-func (m *CallCompletionMonitor) closeCallPcap(callID string) {
-	if m.pcapManager == nil {
-		m.mu.Lock()
-		cleaner := m.voipCleaner
-		m.mu.Unlock()
-		if cleaner != nil {
-			cleaner.CleanupCallPorts(callID)
-		}
+func (m *CallCompletionMonitor) finalizeCall(callID string, reason CallFinalizationReason) {
+	if m.lifecycle == nil {
 		return
 	}
-
-	result, err := m.pcapManager.FinalizeCall(callID, CallFinalizationProtocolComplete)
-	if err != nil {
-		logger.Error("Failed to close call PCAP writer",
-			"call_id", callID,
-			"error", err)
-		return
-	}
-
+	result := m.lifecycle.Finalize(callID, reason)
 	if result.Finalized {
-		logger.Info("Closed PCAP files for completed call", "call_id", callID)
+		logger.Info("Finalized completed call", "call_id", callID, "reason", reason)
 	}
+}
+
+func (m *CallCompletionMonitor) hasRTPPackets(callID string) bool {
+	if m.aggregator != nil {
+		for _, call := range m.aggregator.GetCalls() {
+			if call.CallID == callID {
+				return call.RTPStats != nil && call.RTPStats.TotalPackets > 0
+			}
+		}
+	}
+	return m.pcapManager != nil && m.pcapManager.HasRTPPackets(callID)
 }
 
 func (m *CallCompletionMonitor) sweepIdleWriters() {

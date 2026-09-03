@@ -80,3 +80,23 @@ func TestPcapWriterManagerIdleFinalizationRevalidatesLastWrite(t *testing.T) {
 	manager.mu.RUnlock()
 	require.True(t, live)
 }
+
+func TestPcapWriterManagerObservesSharedLifecycleFinalization(t *testing.T) {
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{})
+	manager, err := NewPcapWriterManagerWithLifecycle(&PcapWriterConfig{
+		Enabled: true, OutputDir: t.TempDir(), FilePattern: "{callid}.pcap", SyncInterval: time.Hour,
+	}, lifecycle)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+
+	require.NoError(t, manager.WritePacket("shared-call", "alice", "bob", time.Now(), []byte("sip"), layers.LinkTypeEthernet, false))
+	result := lifecycle.Finalize("shared-call", CallFinalizationProtocolComplete)
+	require.True(t, result.Finalized)
+	require.True(t, manager.IsFinalized("shared-call"))
+
+	manager.mu.RLock()
+	_, live := manager.writers["shared-call"]
+	manager.mu.RUnlock()
+	require.False(t, live)
+	require.True(t, IsCallFinalized(manager.WritePacket("shared-call", "alice", "bob", time.Now(), []byte("late"), layers.LinkTypeEthernet, false)))
+}

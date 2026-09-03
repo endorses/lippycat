@@ -3,7 +3,6 @@
 package processor
 
 import (
-	"container/heap"
 	"errors"
 	"fmt"
 	"os"
@@ -33,38 +32,7 @@ const (
 	completedCallTombstoneLimit   = 100_000
 	latePacketWarningInterval     = time.Minute
 	writerCapacityWarningInterval = time.Minute
-	tombstonePruneBatch           = 64
 )
-
-type callTombstone struct {
-	callID      string
-	finalizedAt time.Time
-	index       int
-}
-
-type callTombstoneHeap []*callTombstone
-
-func (h callTombstoneHeap) Len() int           { return len(h) }
-func (h callTombstoneHeap) Less(i, j int) bool { return h[i].finalizedAt.Before(h[j].finalizedAt) }
-func (h callTombstoneHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-	h[i].index = i
-	h[j].index = j
-}
-func (h *callTombstoneHeap) Push(value any) {
-	entry := value.(*callTombstone)
-	entry.index = len(*h)
-	*h = append(*h, entry)
-}
-func (h *callTombstoneHeap) Pop() any {
-	old := *h
-	last := len(old) - 1
-	value := old[last]
-	old[last] = nil
-	*h = old[:last]
-	value.index = -1
-	return value
-}
 
 // FinalizedCallError is the expected, non-fatal result when a late packet
 // attempts to recreate a writer for a call that has reached terminal state.
@@ -153,14 +121,15 @@ func DefaultPcapWriterConfig() *PcapWriterConfig {
 
 // CallPcapWriter writes packets for a specific call to separate SIP and RTP PCAP files
 type CallPcapWriter struct {
-	manager   *PcapWriterManager
-	config    *PcapWriterConfig
-	callID    string
-	from      string
-	to        string
-	startTime time.Time
-	lastWrite time.Time
-	linkType  layers.LinkType // Link type for PCAP files (set from first packet)
+	manager    *PcapWriterManager
+	generation uint64
+	config     *PcapWriterConfig
+	callID     string
+	from       string
+	to         string
+	startTime  time.Time
+	lastWrite  time.Time
+	linkType   layers.LinkType // Link type for PCAP files (set from first packet)
 	// SIP file
 	sipFile        *os.File
 	sipWriter      *pcapgo.Writer
@@ -189,17 +158,14 @@ type CallPcapWriter struct {
 
 // PcapWriterManager manages PCAP writers for multiple calls
 type PcapWriterManager struct {
-	config         *PcapWriterConfig
-	writers        map[string]*CallPcapWriter
-	tombstones     map[string]time.Time
-	tombstoneIndex map[string]*callTombstone
-	tombstoneQueue callTombstoneHeap
-	tombstoneTTL   time.Duration
-	tombstoneLimit int
-	shutdown       bool
-	beforeFinalize func(string, CallFinalizationReason)
-	mu             sync.RWMutex
-	finalizationWG sync.WaitGroup
+	config             *PcapWriterConfig
+	writers            map[string]*CallPcapWriter
+	lifecycle          *CallLifecycleRegistry
+	shutdown           bool
+	beforeFinalize     func(string, CallFinalizationReason)
+	finalizationErrors map[uint64]error
+	mu                 sync.RWMutex
+	finalizationWG     sync.WaitGroup
 
 	suppressedLatePackets  atomic.Uint64
 	lastLateWarning        atomic.Int64
@@ -208,7 +174,6 @@ type PcapWriterManager struct {
 	idleFinalizations      atomic.Uint64
 	capacityFinalizations  atomic.Uint64
 	manualFinalizations    atomic.Uint64
-	tombstoneEvictions     atomic.Uint64
 	filenameCollisions     atomic.Uint64
 	callbackFailures       atomic.Uint64
 	capacityPressureEvents atomic.Uint64
@@ -231,19 +196,18 @@ func (pwm *PcapWriterManager) IsFinalized(callID string) bool {
 	if pwm == nil {
 		return false
 	}
-	now := time.Now()
-	pwm.mu.Lock()
-	defer pwm.mu.Unlock()
-	finalizedAt, ok := pwm.tombstones[callID]
-	if ok && pwm.tombstoneTTL > 0 && now.Sub(finalizedAt) >= pwm.tombstoneTTL {
-		pwm.removeTombstoneLocked(callID)
-		return false
-	}
-	return ok
+	return pwm.lifecycle.IsFinalized(callID)
 }
 
 // NewPcapWriterManager creates a new PCAP writer manager
 func NewPcapWriterManager(config *PcapWriterConfig) (*PcapWriterManager, error) {
+	return NewPcapWriterManagerWithLifecycle(config, nil)
+}
+
+// NewPcapWriterManagerWithLifecycle creates a PCAP manager using lifecycle as
+// the shared call-finalization authority. When lifecycle is nil, the manager
+// creates and owns a private registry for backwards compatibility.
+func NewPcapWriterManagerWithLifecycle(config *PcapWriterConfig, lifecycle *CallLifecycleRegistry) (*PcapWriterManager, error) {
 	if config == nil {
 		config = DefaultPcapWriterConfig()
 	}
@@ -255,48 +219,62 @@ func NewPcapWriterManager(config *PcapWriterConfig) (*PcapWriterManager, error) 
 		}
 	}
 
-	return &PcapWriterManager{
-		config:         config,
-		writers:        make(map[string]*CallPcapWriter),
-		tombstones:     make(map[string]time.Time),
-		tombstoneIndex: make(map[string]*callTombstone),
-		tombstoneTTL:   completedCallTombstoneTTL,
-		tombstoneLimit: completedCallTombstoneLimit,
-	}, nil
+	if lifecycle == nil {
+		lifecycle = NewCallLifecycleRegistry(CallLifecycleConfig{
+			TombstoneTTL: completedCallTombstoneTTL, TombstoneLimit: completedCallTombstoneLimit,
+		})
+	}
+	manager := &PcapWriterManager{
+		config:             config,
+		writers:            make(map[string]*CallPcapWriter),
+		lifecycle:          lifecycle,
+		finalizationErrors: make(map[uint64]error),
+	}
+	lifecycle.Subscribe(manager.handleLifecycleFinalization)
+	return manager, nil
 }
 
-// Writer lifecycle is manager-owned: absent -> live -> finalizing -> tombstoned.
-// The live-to-tombstone transition is atomic under mu; finalizing work (file
-// sync/close and callbacks) occurs after mu is released. Tombstones suppress
-// late packets. Expired/pruned tombstones admit a new generation, whose files
-// are collision-safe. Manager shutdown rejects creation and closes live writers
-// without treating process shutdown as protocol completion. Late output is not
-// retained; adding it requires a distinct, standalone artifact lifecycle.
+// Lifecycle returns the lifecycle registry used by this manager.
+func (pwm *PcapWriterManager) Lifecycle() *CallLifecycleRegistry {
+	if pwm == nil {
+		return nil
+	}
+	return pwm.lifecycle
+}
+
+// Call lifecycle is registry-owned: absent -> live -> finalizing -> tombstoned.
+// Each write holds a generation-specific admission through packet serialization
+// and rotation callbacks. Registry finalization drains those admissions before
+// this manager detaches and closes the corresponding writer. Expired or pruned
+// tombstones admit a new generation whose files remain collision-safe. Manager
+// shutdown flushes live writers without creating semantic call tombstones.
 
 // GetOrCreateWriter gets or creates a writer for a call
 func (pwm *PcapWriterManager) GetOrCreateWriter(callID, from, to string) (*CallPcapWriter, error) {
 	if !pwm.config.Enabled {
 		return nil, nil
 	}
+	admission, err := pwm.lifecycle.Admit(callID)
+	if err != nil {
+		if finalized := new(FinalizedCallError); errors.As(err, &finalized) {
+			pwm.recordSuppressedLatePacket(callID, finalized.FinalizedAt)
+		}
+		return nil, err
+	}
+	defer admission.Release()
+	return pwm.getOrCreateWriter(callID, from, to, admission.Generation())
+}
 
+func (pwm *PcapWriterManager) getOrCreateWriter(callID, from, to string, generation uint64) (*CallPcapWriter, error) {
 	for {
-		now := time.Now()
 		pwm.mu.Lock()
 		if pwm.shutdown {
 			pwm.mu.Unlock()
 			return nil, fmt.Errorf("per-call PCAP writer manager is shut down")
 		}
-		if writer, exists := pwm.writers[callID]; exists {
+		if writer, exists := pwm.writers[callID]; exists && writer.generation == generation {
 			pwm.mu.Unlock()
 			return writer, nil
-		}
-		if finalizedAt, finalized := pwm.tombstones[callID]; finalized {
-			if pwm.tombstoneTTL > 0 && now.Sub(finalizedAt) < pwm.tombstoneTTL {
-				pwm.mu.Unlock()
-				pwm.recordSuppressedLatePacket(callID, finalizedAt)
-				return nil, &FinalizedCallError{CallID: callID, FinalizedAt: finalizedAt}
-			}
-			pwm.removeTombstoneLocked(callID)
 		}
 
 		if pwm.config.MaxWriters > 0 && len(pwm.writers) >= pwm.config.MaxWriters {
@@ -307,7 +285,7 @@ func (pwm *PcapWriterManager) GetOrCreateWriter(callID, from, to string) (*CallP
 			pwm.recordWriterCapacityPressureLocked(callID)
 		}
 
-		writer, err := pwm.createWriter(callID, from, to)
+		writer, err := pwm.createWriter(callID, from, to, generation)
 		if err == nil {
 			pwm.writers[callID] = writer
 		}
@@ -326,18 +304,23 @@ func (pwm *PcapWriterManager) WritePacket(callID, from, to string, timestamp tim
 
 	// Creation and capacity eviction require the write lock. Once the writer
 	// exists, retain a read lease through the writer operation.
-	writer, err := pwm.GetOrCreateWriter(callID, from, to)
+	admission, err := pwm.lifecycle.Admit(callID)
+	if err != nil {
+		if finalized := new(FinalizedCallError); errors.As(err, &finalized) {
+			pwm.recordSuppressedLatePacket(callID, finalized.FinalizedAt)
+		}
+		return err
+	}
+	defer admission.Release()
+	writer, err := pwm.getOrCreateWriter(callID, from, to, admission.Generation())
 	if err != nil || writer == nil {
 		return err
 	}
 	pwm.mu.RLock()
 	current, live := pwm.writers[callID]
-	if !live || current != writer {
-		finalizedAt := pwm.tombstones[callID]
+	if !live || current != writer || writer.generation != admission.Generation() {
+		finalizedAt := time.Now()
 		pwm.mu.RUnlock()
-		if finalizedAt.IsZero() {
-			finalizedAt = time.Now()
-		}
 		pwm.recordSuppressedLatePacket(callID, finalizedAt)
 		return &FinalizedCallError{CallID: callID, FinalizedAt: finalizedAt}
 	}
@@ -376,17 +359,17 @@ func (pwm *PcapWriterManager) Telemetry() PcapWriterTelemetry {
 	}
 	pwm.mu.RLock()
 	activeWriters := len(pwm.writers)
-	tombstones := len(pwm.tombstones)
 	pwm.mu.RUnlock()
+	lifecycleTelemetry := pwm.lifecycle.Telemetry()
 	return PcapWriterTelemetry{
 		ActiveWriters:              uint64(activeWriters), // #nosec G115 -- map sizes cannot be negative
-		Tombstones:                 uint64(tombstones),    // #nosec G115 -- map sizes cannot be negative
+		Tombstones:                 lifecycleTelemetry.Tombstones,
 		ProtocolFinalizations:      pwm.protocolFinalizations.Load(),
 		IdleFinalizations:          pwm.idleFinalizations.Load(),
 		CapacityFinalizations:      pwm.capacityFinalizations.Load(),
 		ManualFinalizations:        pwm.manualFinalizations.Load(),
 		SuppressedLatePackets:      pwm.suppressedLatePackets.Load(),
-		TombstoneCapacityEvictions: pwm.tombstoneEvictions.Load(),
+		TombstoneCapacityEvictions: lifecycleTelemetry.TombstoneCapacityEvictions,
 		FilenameCollisions:         pwm.filenameCollisions.Load(),
 		CallbackFailures:           pwm.callbackFailures.Load(),
 	}
@@ -417,58 +400,19 @@ func (pwm *PcapWriterManager) recordWriterCapacityPressureLocked(callID string) 
 		"max_writers", pwm.config.MaxWriters, "pressure_events", total)
 }
 
-func (pwm *PcapWriterManager) pruneTombstonesLocked(now time.Time, limit int) {
-	for removed := 0; removed < limit && len(pwm.tombstoneQueue) > 0; removed++ {
-		oldest := pwm.tombstoneQueue[0]
-		if pwm.tombstoneTTL > 0 && now.Sub(oldest.finalizedAt) < pwm.tombstoneTTL {
-			return
-		}
-		pwm.removeTombstoneLocked(oldest.callID)
-	}
-}
-
-func (pwm *PcapWriterManager) addTombstoneLocked(callID string, finalizedAt time.Time) {
-	if pwm.tombstoneLimit <= 0 {
-		return
-	}
-	pwm.pruneTombstonesLocked(finalizedAt, tombstonePruneBatch)
-	if _, exists := pwm.tombstones[callID]; !exists && len(pwm.tombstones) >= pwm.tombstoneLimit {
-		pwm.evictOldestTombstoneLocked()
-	}
-	pwm.tombstones[callID] = finalizedAt
-	entry := &callTombstone{callID: callID, finalizedAt: finalizedAt}
-	pwm.tombstoneIndex[callID] = entry
-	heap.Push(&pwm.tombstoneQueue, entry)
-}
-
-func (pwm *PcapWriterManager) evictOldestTombstoneLocked() {
-	if len(pwm.tombstoneQueue) == 0 {
-		return
-	}
-	pwm.removeTombstoneLocked(pwm.tombstoneQueue[0].callID)
-	pwm.tombstoneEvictions.Add(1)
-}
-
-func (pwm *PcapWriterManager) removeTombstoneLocked(callID string) {
-	delete(pwm.tombstones, callID)
-	if entry := pwm.tombstoneIndex[callID]; entry != nil {
-		heap.Remove(&pwm.tombstoneQueue, entry.index)
-		delete(pwm.tombstoneIndex, callID)
-	}
-}
-
 // createWriter creates a new PCAP writer for a call with separate SIP and RTP files
-func (pwm *PcapWriterManager) createWriter(callID, from, to string) (*CallPcapWriter, error) {
+func (pwm *PcapWriterManager) createWriter(callID, from, to string, generation uint64) (*CallPcapWriter, error) {
 	now := time.Now()
 	writer := &CallPcapWriter{
-		manager:   pwm,
-		config:    pwm.config,
-		callID:    callID,
-		from:      from,
-		to:        to,
-		startTime: now,
-		lastWrite: now,
-		stopSync:  make(chan struct{}),
+		manager:    pwm,
+		generation: generation,
+		config:     pwm.config,
+		callID:     callID,
+		from:       from,
+		to:         to,
+		startTime:  now,
+		lastWrite:  now,
+		stopSync:   make(chan struct{}),
 	}
 	writer.callbackCond = sync.NewCond(&writer.callbackMu)
 
@@ -689,9 +633,10 @@ func (pwm *PcapWriterManager) finalizeCallIfIdle(callID string, maxIdle time.Dur
 		pwm.mu.Unlock()
 		return result, nil
 	}
-	result, writer, hook := pwm.transitionFinalizationLocked(callID, CallFinalizationIdleTimeout, time.Now())
+	generation := writer.generation
 	pwm.mu.Unlock()
-	return pwm.completeFinalization(result, writer, hook)
+	result = pwm.lifecycle.FinalizeGeneration(callID, generation, CallFinalizationIdleTimeout)
+	return result, pwm.takeFinalizationError(generation)
 }
 
 // openCallPcapFile creates a new standalone PCAP without replacing or appending
@@ -1070,39 +1015,51 @@ func (pwm *PcapWriterManager) FinalizeCall(callID string, reason CallFinalizatio
 	if pwm == nil || callID == "" {
 		return result, nil
 	}
-	pwm.mu.Lock()
+	pwm.mu.RLock()
 	if pwm.shutdown {
-		pwm.mu.Unlock()
+		pwm.mu.RUnlock()
 		return result, nil
 	}
-	result, writer, hook := pwm.transitionFinalizationLocked(callID, reason, time.Now())
-	pwm.mu.Unlock()
-	return pwm.completeFinalization(result, writer, hook)
+	writer := pwm.writers[callID]
+	pwm.mu.RUnlock()
+	result = pwm.lifecycle.Finalize(callID, reason)
+	if writer != nil {
+		result.HadWriter = result.Finalized
+		return result, pwm.takeFinalizationError(writer.generation)
+	}
+	return result, nil
 }
 
-// transitionFinalizationLocked is the sole manager-state transition into a
-// terminal lifecycle. The caller must hold pwm.mu for writing.
-func (pwm *PcapWriterManager) transitionFinalizationLocked(callID string, reason CallFinalizationReason, finalizedAt time.Time) (CallFinalizationResult, *CallPcapWriter, func(string, CallFinalizationReason)) {
-	result := CallFinalizationResult{CallID: callID, Reason: reason}
-	writer, exists := pwm.writers[callID]
-	if prior, finalized := pwm.tombstones[callID]; finalized {
-		result.FinalizedAt = prior
-		return result, nil, nil
-	}
-	// A completion observed before the first captured packet is still terminal.
-	// Record it so a delayed packet cannot create the first writer afterward.
-	// Shutdown is process lifecycle only and deliberately creates no tombstone.
-	if reason != CallFinalizationShutdown {
-		pwm.addTombstoneLocked(callID, finalizedAt)
-	}
-	if exists {
-		delete(pwm.writers, callID)
+func (pwm *PcapWriterManager) handleLifecycleFinalization(event CallFinalizationEvent) {
+	pwm.mu.Lock()
+	writer := pwm.writers[event.CallID]
+	if writer != nil && writer.generation == event.Generation {
+		delete(pwm.writers, event.CallID)
 		pwm.finalizationWG.Add(1)
+	} else {
+		writer = nil
 	}
-	result.FinalizedAt = finalizedAt
-	result.Finalized = true
-	result.HadWriter = exists
-	return result, writer, pwm.beforeFinalize
+	hook := pwm.beforeFinalize
+	pwm.mu.Unlock()
+
+	result := CallFinalizationResult{CallID: event.CallID, Reason: event.Reason, FinalizedAt: event.FinalizedAt, Finalized: true, HadWriter: writer != nil}
+	_, err := pwm.completeFinalization(result, writer, hook)
+	if err != nil {
+		pwm.mu.Lock()
+		pwm.finalizationErrors[event.Generation] = err
+		pwm.mu.Unlock()
+	}
+}
+
+func (pwm *PcapWriterManager) takeFinalizationError(generation uint64) error {
+	if generation == 0 {
+		return nil
+	}
+	pwm.mu.Lock()
+	defer pwm.mu.Unlock()
+	err := pwm.finalizationErrors[generation]
+	delete(pwm.finalizationErrors, generation)
+	return err
 }
 
 // completeFinalization performs slow resource work and externally supplied

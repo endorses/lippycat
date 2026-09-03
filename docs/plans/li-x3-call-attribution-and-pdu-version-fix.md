@@ -267,27 +267,38 @@ neither leg while an independent direct IP match remains deliverable.
 
 ## Phase 3: Centralize Call Finalization
 
-- [ ] Extract bounded tombstones, lifecycle generation, and admission semantics
+- [x] Extract bounded tombstones, lifecycle generation, and admission semantics
   into a focused processor call-lifecycle component independent of PCAP output.
-- [ ] Define atomic `Admit`/release and `Finalize` behavior, including how
+- [x] Define atomic `Admit`/release and `Finalize` behavior, including how
   finalization waits for accepted critical sections without holding locks through
   slow work.
-- [ ] Instantiate the lifecycle component when LI requires it even if per-call
+- [x] Instantiate the lifecycle component when LI requires it even if per-call
   PCAP is disabled.
-- [ ] Make the call completion monitor run and finalize calls independently of
+- [x] Make the call completion monitor run and finalize calls independently of
   `PcapWriterManager` availability.
-- [ ] Migrate PCAP writer creation/write admission to the shared lifecycle while
+- [x] Migrate PCAP writer creation/write admission to the shared lifecycle while
   preserving its v0.11.4 artifact immutability, collision-safe Call-ID reuse,
   telemetry, callbacks, and shutdown behavior.
-- [ ] Move endpoint/cache/flow-binding cleanup out of the PCAP-only callback and
+- [x] Move endpoint/cache/flow-binding cleanup out of the PCAP-only callback and
   subscribe it to the shared once-only finalization event.
-- [ ] Ensure protocol completion, idle timeout, manual completion, capacity
+- [x] Ensure protocol completion, idle timeout, manual completion, capacity
   behavior, and shutdown map deliberately to shared lifecycle reasons.
-- [ ] Add lifecycle unit tests for idempotent finalization, completion before the
+- [x] Add lifecycle unit tests for idempotent finalization, completion before the
   first packet, TTL expiry, capacity pruning, generation-safe Call-ID reuse,
   simultaneous admit/finalize, callback re-entry, and shutdown.
-- [ ] Add race tests proving finalization and packet admission have a single
+- [x] Add race tests proving finalization and packet admission have a single
   winner and cannot deadlock or admit work after the boundary.
+
+Phase 3 implementation note: processor-owned `CallLifecycleRegistry` now provides
+bounded tombstones, monotonic generations, atomic admission tokens, conditional
+generation finalization, ordered finalization subscribers, and non-semantic
+shutdown draining. Per-call PCAP uses this registry for writer creation and packet
+write admission; writer generations and exclusive file creation preserve finalized
+artifacts across Call-ID reuse. The completion monitor owns terminal decisions even
+without PCAP, maps call-registry completion reasons deliberately, and publishes one
+shared cleanup event. LI-enabled processors therefore instantiate and run the
+lifecycle monitor with an optional PCAP sink. Focused and full processor tests pass
+with `all` and `all,li` tags, including the race-enabled lifecycle/PCAP suite.
 
 ## Phase 4: Guard X3 Encoding and Delayed Delivery
 

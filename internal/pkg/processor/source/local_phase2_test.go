@@ -222,8 +222,8 @@ func TestLocalSourcePhase2_ReassembledSIPCompositionAndCompletion(t *testing.T) 
 		require.Equal(t, []string{"direct", "shared", "inherited"}, packet.MatchedFilterIds)
 		cached, ok := s.callFilterCache.Load("tcp-call")
 		require.True(t, ok)
-		require.Equal(t, []string{"direct", "shared"}, cached.filterIDs,
-			"only stable direct IDs may be written back to the call cache")
+		require.Equal(t, []string{"shared", "inherited", "direct"}, cached.filterIDs,
+			"new direct evidence must not erase the call's sticky identity selection")
 		require.Equal(t, int32(1), completions.Load())
 	})
 

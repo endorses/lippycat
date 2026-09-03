@@ -91,6 +91,31 @@ func TestBufferManager_AddRTPPacket(t *testing.T) {
 	assert.Equal(t, 1, bm.GetBufferCount(), "Should still have 1 buffer")
 }
 
+func TestBufferManager_UnmatchedFilterIDsDoNotSurviveDiscardOrEviction(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cleanup func(*BufferManager, string)
+	}{
+		{name: "discard", cleanup: func(bm *BufferManager, callID string) { bm.DiscardBuffer(callID) }},
+		{name: "age eviction", cleanup: func(bm *BufferManager, _ string) {
+			bm.maxAge = -time.Second
+			bm.cleanupOldBuffers()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bm := NewBufferManager(time.Minute, 10)
+			defer bm.Close()
+			const callID = "reused-call"
+			bm.AddSIPPacket(callID, createTestUDPPacket(t, 5060, 5061, []byte("INVITE")), &CallMetadata{CallID: callID}, "eth0", layers.LinkTypeEthernet)
+			bm.StoreMatchedFilterIDs(callID, []string{"old-identity"})
+
+			tc.cleanup(bm, callID)
+
+			assert.Empty(t, bm.MatchedFilterIDs(callID), "reused Call-ID must not inherit orphaned identity evidence")
+		})
+	}
+}
+
 func TestBufferManager_CheckFilter_Matched(t *testing.T) {
 	bm := NewBufferManager(5*time.Second, 200)
 	defer bm.Close()

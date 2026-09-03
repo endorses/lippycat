@@ -257,7 +257,10 @@ a stable, deduplicated compatibility union. Hunter media handling also evaluates
 safe packet-level matches before rejecting unresolved or ambiguous attribution,
 so direct IP/CIDR evidence survives without a guessed Call-ID. Offline replay
 does not perform call-filter inheritance; upstream processors preserve the
-originating provenance without re-attributing packets.
+originating provenance without re-attributing packets. The hunter retains the
+stable direct IDs that selected each call, labels later signaling and uniquely
+resolved media as inherited from that call, and owns the single enqueue for
+accepted UDP packets so a provenance-free duplicate cannot escape alongside it.
 
 ## Phase 3: Centralize Call Finalization
 

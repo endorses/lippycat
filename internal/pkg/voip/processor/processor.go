@@ -178,6 +178,11 @@ type Processor struct {
 	mu        sync.RWMutex
 	eventMu   sync.Mutex
 	janitorWG sync.WaitGroup
+	// completionHandler transfers terminal decisions to an external lifecycle
+	// coordinator. While installed, completed calls retain their endpoint state
+	// until FinalizeCallCleanup is invoked by that coordinator.
+	completionHandler func(callregistry.Call, callregistry.EndReason)
+	pendingCompletion map[string]struct{}
 
 	// Optional application filter for call selection
 	appFilter       ApplicationFilter
@@ -217,8 +222,9 @@ func New(cfg Config) *Processor {
 	}
 
 	p := &Processor{
-		config: cfg,
-		calls:  make(map[string]*callState),
+		config:            cfg,
+		calls:             make(map[string]*callState),
+		pendingCompletion: make(map[string]struct{}),
 		registry: callregistry.New(callregistry.Config{
 			MaxCalls: cfg.MaxCalls, MaxEndpointsPerCall: cfg.MaxEndpointsPerCall,
 			MaxEndpointAssociations: cfg.MaxEndpointAssociations,
@@ -246,6 +252,17 @@ func (p *Processor) AddLifecycleObserver(observer callregistry.LifecycleObserver
 		return
 	}
 	p.registry.AddObserver(observer)
+}
+
+// SetCompletionHandler delegates terminal-call cleanup to an external lifecycle
+// coordinator. It must be configured before packet processing starts.
+func (p *Processor) SetCompletionHandler(handler func(callregistry.Call, callregistry.EndReason)) {
+	if p == nil {
+		return
+	}
+	p.eventMu.Lock()
+	p.completionHandler = handler
+	p.eventMu.Unlock()
 }
 
 // Process analyzes a packet and returns VoIP metadata if applicable.
@@ -536,11 +553,35 @@ func (p *Processor) CleanupCallPorts(callID string) {
 	p.registry.DissociateEndpoints(callID)
 }
 
-// CompleteCall removes RTP associations once SIP confirms that a dialog has
-// terminated. The call record is retained until normal timeout/eviction so
-// callers can still inspect its final metadata, but reused media endpoints can
-// no longer be attributed to the completed call.
+// CompleteCall reports that SIP confirmed a terminal dialog. Standalone
+// processors remove attribution immediately; processors with an external
+// completion handler retain it through that coordinator's trailing-media grace
+// period.
 func (p *Processor) CompleteCall(callID string) {
+	p.eventMu.Lock()
+	if p.completionHandler != nil {
+		if _, pending := p.pendingCompletion[callID]; pending {
+			p.eventMu.Unlock()
+			return
+		}
+		call, exists := p.registry.Call(callID)
+		if !exists {
+			p.eventMu.Unlock()
+			return
+		}
+		p.pendingCompletion[callID] = struct{}{}
+		handler := p.completionHandler
+		p.eventMu.Unlock()
+		handler(call, callregistry.EndCompleted)
+		return
+	}
+	p.eventMu.Unlock()
+	p.removeCall(callID, callregistry.EndCompleted)
+}
+
+// FinalizeCallCleanup removes a call after an external lifecycle coordinator
+// has crossed its atomic finalization boundary.
+func (p *Processor) FinalizeCallCleanup(callID string) {
 	p.removeCall(callID, callregistry.EndCompleted)
 }
 
@@ -551,6 +592,7 @@ func (p *Processor) removeCall(callID string, reason callregistry.EndReason) {
 	_, exists := p.calls[callID]
 	if exists {
 		delete(p.calls, callID)
+		delete(p.pendingCompletion, callID)
 	}
 	p.mu.Unlock()
 	if exists {

@@ -150,6 +150,31 @@ func TestSetPacketSourceRegistersSessionOutputLifecycleObserver(t *testing.T) {
 	require.Equal(t, []string{"call-id"}, monitor.scheduled)
 }
 
+func TestLocalCompletionCleanupWaitsForSharedFinalization(t *testing.T) {
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneTTL: time.Hour})
+	monitor := NewCallCompletionMonitorWithLifecycle(nil, nil, nil, lifecycle)
+	manager := newSessionOutputManagerWithLifecycle(nil, monitor, lifecycle)
+	registry := voipprocessor.New(voipprocessor.Config{MaxCalls: 10, CallTimeout: time.Hour})
+	t.Cleanup(registry.Close)
+	localSource := source.NewLocalSource(source.DefaultLocalSourceConfig())
+	localSource.SetVoIPProcessor(voipprocessor.NewSourceAdapter(registry))
+	manager.SetVoIPPortCleaner(localSource)
+	p := &Processor{sessionOutputManager: manager}
+	p.SetPacketSource(localSource)
+
+	registry.AssociateEndpoint("shared-boundary", "192.0.2.30:13000")
+	registry.CompleteCall("shared-boundary")
+	require.Equal(t, []string{"shared-boundary"}, registry.CallIDsForEndpoint("192.0.2.30:13000"),
+		"terminal signaling must retain attribution during the grace period")
+
+	result := lifecycle.Finalize("shared-boundary", CallFinalizationProtocolComplete)
+	require.True(t, result.Finalized)
+	require.Empty(t, registry.CallIDsForEndpoint("192.0.2.30:13000"),
+		"shared finalization must clean attribution")
+	_, exists := registry.Call("shared-boundary")
+	require.False(t, exists)
+}
+
 func TestSessionOutputManagerMapsEndReasonsAndIgnoresShutdown(t *testing.T) {
 	monitor := &recordingSessionMonitor{}
 	manager := newSessionOutputManagerWithLifecycle(nil, monitor, NewCallLifecycleRegistry(CallLifecycleConfig{}))

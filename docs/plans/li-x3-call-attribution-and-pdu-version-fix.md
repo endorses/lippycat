@@ -299,6 +299,10 @@ without PCAP, maps call-registry completion reasons deliberately, and publishes 
 shared cleanup event. LI-enabled processors therefore instantiate and run the
 lifecycle monitor with an optional PCAP sink. Focused and full processor tests pass
 with `all` and `all,li` tags, including the race-enabled lifecycle/PCAP suite.
+Local/tap terminal signaling retains call endpoint and filter attribution through
+the configured trailing-media grace period; the shared lifecycle finalization
+subscriber performs the once-only call cleanup. Standalone VoIP processing without
+a shared lifecycle coordinator preserves immediate terminal cleanup.
 
 ## Phase 4: Guard X3 Encoding and Delayed Delivery
 

@@ -74,6 +74,30 @@ func TestCallRegistryObserverCanBeAddedAfterConstruction(t *testing.T) {
 	}, observer.snapshot())
 }
 
+func TestDeferredCompletionRetainsAttributionUntilFinalCleanup(t *testing.T) {
+	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+
+	var completed []string
+	p.SetCompletionHandler(func(call callregistry.Call, reason callregistry.EndReason) {
+		require.Equal(t, callregistry.EndCompleted, reason)
+		completed = append(completed, call.CallID)
+	})
+	p.AssociateEndpoint("deferred-call", "192.0.2.20:12000")
+
+	p.CompleteCall("deferred-call")
+	p.CompleteCall("deferred-call")
+	require.Equal(t, []string{"deferred-call"}, completed)
+	require.Equal(t, []string{"deferred-call"}, p.CallIDsForEndpoint("192.0.2.20:12000"))
+	_, exists := p.Call("deferred-call")
+	require.True(t, exists)
+
+	p.FinalizeCallCleanup("deferred-call")
+	require.Empty(t, p.CallIDsForEndpoint("192.0.2.20:12000"))
+	_, exists = p.Call("deferred-call")
+	require.False(t, exists)
+}
+
 func TestCallRegistryB2BUAAssociationsAreCopied(t *testing.T) {
 	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
 	t.Cleanup(p.Close)

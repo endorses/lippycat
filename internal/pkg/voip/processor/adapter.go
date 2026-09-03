@@ -101,8 +101,17 @@ func (a *SourceAdapter) AddLifecycleObserver(observer callregistry.LifecycleObse
 	a.proc.AddLifecycleObserver(observer)
 }
 
+// SetCompletionHandler delegates terminal cleanup to a shared processor
+// lifecycle coordinator.
+func (a *SourceAdapter) SetCompletionHandler(handler func(callregistry.Call, callregistry.EndReason)) {
+	if a == nil || a.proc == nil {
+		return
+	}
+	a.proc.SetCompletionHandler(handler)
+}
+
 // CleanupCallPorts removes all port-to-callID mappings for a given callID.
 // This should be called when a call ends to prevent port collisions with new calls.
 func (a *SourceAdapter) CleanupCallPorts(callID string) {
-	a.proc.CleanupCallPorts(callID)
+	a.proc.FinalizeCallCleanup(callID)
 }

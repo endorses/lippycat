@@ -3,6 +3,9 @@
 package voip
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -24,15 +27,18 @@ import (
 
 // UDPPacketHandler processes UDP SIP/RTP packets for hunter mode with buffering
 type UDPPacketHandler struct {
-	tracker               *CallTracker
-	forwarder             PacketForwarder
-	bufferMgr             *BufferManager
-	appFilter             ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
-	selectionPolicy       *hunterSelectionPolicy
-	orchestrator          *sipflow.Orchestrator
-	analysisMu            sync.Mutex
-	bufferedSIP           map[string][]bufferedSIPAnalysis
-	inheritanceSuppressed atomic.Uint64
+	tracker                *CallTracker
+	forwarder              PacketForwarder
+	bufferMgr              *BufferManager
+	appFilter              ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
+	selectionPolicy        *hunterSelectionPolicy
+	orchestrator           *sipflow.Orchestrator
+	analysisMu             sync.Mutex
+	bufferedSIP            map[string][]bufferedSIPAnalysis
+	inheritanceSuppressed  atomic.Uint64
+	rtpOwnershipUnresolved atomic.Uint64
+	rtpOwnershipAmbiguous  atomic.Uint64
+	lastAmbiguousWarning   atomic.Int64
 }
 
 type bufferedSIPAnalysis struct {
@@ -45,6 +51,43 @@ type packetLevelFilterWithIDs interface {
 }
 
 const maxBufferedSIPAnalysisCalls = 1024
+
+const ambiguousRTPWarningInterval = time.Minute
+
+// RTPAttributionStats uses one field per finite outcome rather than dynamic
+// endpoint or Call-ID labels, keeping metric cardinality bounded.
+type RTPAttributionStats struct {
+	OwnershipUnresolved   uint64
+	OwnershipAmbiguous    uint64
+	InheritanceSuppressed uint64
+}
+
+func hashedMediaFlow(packet gopacket.Packet) string {
+	if packet == nil || packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
+		return "unavailable"
+	}
+	endpoints := []string{
+		packet.NetworkLayer().NetworkFlow().Src().String() + ":" + packet.TransportLayer().TransportFlow().Src().String(),
+		packet.NetworkLayer().NetworkFlow().Dst().String() + ":" + packet.TransportLayer().TransportFlow().Dst().String(),
+	}
+	sort.Strings(endpoints)
+	sum := sha256.Sum256([]byte(endpoints[0] + "\x00" + endpoints[1]))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (h *UDPPacketHandler) warnAmbiguousRTP(packet gopacket.Packet) {
+	now := time.Now().UnixNano()
+	last := h.lastAmbiguousWarning.Load()
+	if last != 0 && now-last < ambiguousRTPWarningInterval.Nanoseconds() {
+		return
+	}
+	if !h.lastAmbiguousWarning.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("RTP ownership is ambiguous; suppressing identity inheritance",
+		"resolution", "ambiguous",
+		"flow_hash", hashedMediaFlow(packet))
+}
 
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
 func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
@@ -346,6 +389,13 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 		directMatched, directFilterIDs = filter.MatchPacketLevelWithIDs(packet)
 	}
 	if resolution.Status != callregistry.MediaResolved {
+		switch resolution.Status {
+		case callregistry.MediaUnresolved:
+			h.rtpOwnershipUnresolved.Add(1)
+		case callregistry.MediaAmbiguous:
+			h.rtpOwnershipAmbiguous.Add(1)
+			h.warnAmbiguousRTP(packet)
+		}
 		h.inheritanceSuppressed.Add(1)
 		// Ambiguous or unresolved media cannot inherit identity selection, but a
 		// direct packet-level IP/CIDR match remains authoritative on its own.
@@ -453,6 +503,16 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 // not inherit identity filters because ownership was unresolved or ambiguous.
 func (h *UDPPacketHandler) IdentityInheritanceSuppressed() uint64 {
 	return h.inheritanceSuppressed.Load()
+}
+
+// RTPAttributionStats returns a consistent-enough monotonic snapshot; each
+// counter is independent and may advance while the snapshot is being read.
+func (h *UDPPacketHandler) RTPAttributionStats() RTPAttributionStats {
+	return RTPAttributionStats{
+		OwnershipUnresolved:   h.rtpOwnershipUnresolved.Load(),
+		OwnershipAmbiguous:    h.rtpOwnershipAmbiguous.Load(),
+		InheritanceSuppressed: h.inheritanceSuppressed.Load(),
+	}
 }
 
 // forwardRTPPacket forwards a single RTP packet immediately (call already matched)

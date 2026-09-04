@@ -271,18 +271,26 @@ func (rb *ReorderBuffer) DiscardCall(callID string, generation uint64) int {
 // delivery callback. Task deactivation and expiry use this path: once
 // enforcement ends, packets held only for reordering must not be emitted.
 func (rb *ReorderBuffer) Discard() {
+	rb.DiscardCount()
+}
+
+// DiscardCount is Discard with single-owner accounting for queued PDUs.
+func (rb *ReorderBuffer) DiscardCount() int {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 	if rb.stopped {
-		return
+		return 0
 	}
 	rb.stopped = true
+	discarded := 0
 	for _, s := range rb.streams {
 		rb.disarmLocked(s)
+		discarded += len(s.buffer)
 		clear(s.buffer)
 		s.bytes = 0
 	}
 	clear(rb.streams)
+	return discarded
 }
 func (rb *ReorderBuffer) Buffered() (packets, bytes int) {
 	rb.mu.Lock()

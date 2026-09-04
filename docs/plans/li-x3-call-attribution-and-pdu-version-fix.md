@@ -1,7 +1,7 @@
 # LI X3 Call Attribution, Finalization, and PDU Version Fix Plan
 
 **Date:** 2026-09-03
-**Status:** Proposed
+**Status:** Phase 6 complete
 **Priority:** Critical interception-integrity fix for the first release after v0.11.4
 
 ## Overview
@@ -415,18 +415,32 @@ listener coverage.
 
 ## Phase 6: Observability and Documentation
 
-- [ ] Add source-level RTP resolution and inheritance-suppression counters with
+- [x] Add source-level RTP resolution and inheritance-suppression counters with
   bounded-cardinality labels.
-- [ ] Extend LI encoding statistics with finalized/stale-generation and buffered
+- [x] Extend LI encoding statistics with finalized/stale-generation and buffered
   discard counters; document exactly where each counter is incremented.
-- [ ] Add rate-limited structured warnings for ambiguous ownership and rejected
+- [x] Add rate-limited structured warnings for ambiguous ownership and rejected
   late X3 content using sanitized or hashed identifiers.
-- [ ] Expose new telemetry through existing status surfaces without breaking
+- [x] Expose new telemetry through existing status surfaces without breaking
   non-LI builds or build-tag variants.
-- [ ] Document fail-closed ambiguity behavior, direct IP/CIDR behavior, lifecycle
+- [x] Document fail-closed ambiguity behavior, direct IP/CIDR behavior, lifecycle
   retention, and operator signals in LI and troubleshooting documentation.
-- [ ] Update architecture guidance so future code cannot use all-owner endpoint
+- [x] Update architecture guidance so future code cannot use all-owner endpoint
   lists or recency winners for security-sensitive attribution.
+
+Phase 6 implementation note: local/tap and distributed hunter sources now expose
+fixed-field, monotonic counters for unresolved and ambiguous RTP ownership and
+suppressed identity inheritance. Ambiguity warnings are limited to one per minute
+per source and contain only a canonical truncated SHA-256 flow hash. Processor LI
+status exposes encoding, direction, provenance rejection, finalized/stale
+suppression, buffered-discard, and source-attribution counters; hunter heartbeats
+carry the source counters, and the JSON status client preserves both surfaces.
+Late X3 rejection warnings use only a truncated Call-ID hash and are rate-limited
+globally per processor. Operator and architecture documentation records the
+single accounting owner for each discard and prohibits recency or ordered
+all-owner lists as security attribution evidence. Focused, full tagged, and
+race-enabled suites were run for the affected packages, including an
+outside-sandbox run for localhost LI delivery coverage.
 
 ## Phase 7: Verification and Release Gate
 

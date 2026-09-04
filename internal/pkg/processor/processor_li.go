@@ -7,6 +7,8 @@
 package processor
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -50,7 +52,33 @@ var (
 	liNoEncoder             atomic.Uint64
 	liX3FinalizedSuppressed atomic.Uint64
 	liX3BufferedDiscarded   atomic.Uint64
+	liX3LastLateWarning     atomic.Int64
 )
+
+const liLateX3WarningInterval = time.Minute
+
+func sanitizedCallID(callID string) string {
+	sum := sha256.Sum256([]byte(callID))
+	return hex.EncodeToString(sum[:8])
+}
+
+// recordLateX3Suppression is the single-owner accounting point for an X3 PDU
+// rejected by lifecycle admission. It emits at most one sanitized warning per
+// interval across the processor, keeping log cardinality bounded.
+func recordLateX3Suppression(callID string, generation uint64, reason string) {
+	total := liX3FinalizedSuppressed.Add(1)
+	now := time.Now().UnixNano()
+	last := liX3LastLateWarning.Load()
+	if now-last < liLateX3WarningInterval.Nanoseconds() || !liX3LastLateWarning.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("late X3 content rejected",
+		"call_id_hash", sanitizedCallID(callID),
+		"generation", generation,
+		"reason", reason,
+		"suppressed_total", total,
+	)
+}
 
 // processorFilterPusher adapts the processor's filter management system
 // to the li.FilterPusher interface.
@@ -178,7 +206,8 @@ func (p *Processor) initLIManager() {
 			if ok && strings.HasPrefix(keyString, prefix) {
 				// Expiry/deactivation is an enforcement boundary. Buffered X3
 				// packets must be discarded, not flushed after the task ended.
-				value.(*delivery.ReorderBuffer).Discard()
+				discarded := value.(*delivery.ReorderBuffer).DiscardCount()
+				liX3BufferedDiscarded.Add(uint64(discarded)) // #nosec G115 -- bounded buffer count
 				liReorderBuffers.Delete(key)
 			}
 			return true
@@ -352,7 +381,7 @@ func (p *Processor) initLIManager() {
 				var admissionErr error
 				admission, admissionErr = p.callLifecycle.Admit(callID)
 				if admissionErr != nil {
-					liX3FinalizedSuppressed.Add(1)
+					recordLateX3Suppression(callID, 0, "initial_admission")
 					return
 				}
 				defer admission.Release()
@@ -408,7 +437,7 @@ func (p *Processor) initLIManager() {
 								insertionCallAdmission, insertionErr = p.callLifecycle.AdmitGeneration(callID, generation)
 								if insertionErr != nil {
 									insertionTaskAdmission.Release()
-									liX3FinalizedSuppressed.Add(1)
+									recordLateX3Suppression(callID, generation, "destination_admission")
 									return
 								}
 							}
@@ -427,7 +456,7 @@ func (p *Processor) initLIManager() {
 									var sendErr error
 									sendAdmission, sendErr = p.callLifecycle.AdmitGeneration(entry.CallID, entry.Generation)
 									if sendErr != nil {
-										liX3FinalizedSuppressed.Add(1)
+										recordLateX3Suppression(entry.CallID, entry.Generation, "delayed_send_admission")
 										return
 									}
 									defer sendAdmission.Release()
@@ -641,7 +670,7 @@ func (p *Processor) processLIPacketWithProvenance(pkt *types.PacketDisplay, dire
 	if pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" && p.callLifecycle != nil {
 		admission, err := p.callLifecycle.Admit(pkt.VoIPData.CallID)
 		if err != nil {
-			liX3FinalizedSuppressed.Add(1)
+			recordLateX3Suppression(pkt.VoIPData.CallID, 0, "pipeline_admission")
 			return
 		}
 		admission.Release()
@@ -698,5 +727,33 @@ func (p *Processor) getLIEncodingStats() LIEncodingStats {
 		DirectionUnknownRTP:    dirStats.UnknownRTP,
 		X3FinalizedSuppressed:  liX3FinalizedSuppressed.Load(),
 		X3BufferedDiscarded:    liX3BufferedDiscarded.Load(),
+	}
+}
+
+func (p *Processor) populateLIEncodingStats(dst *management.ProcessorStats) {
+	if dst == nil || !p.isLIEnabled() {
+		return
+	}
+	stats := p.getLIEncodingStats()
+	managerStats := p.liManager.Stats()
+	dst.LiEncoding = &management.LIEncodingStats{
+		X2Encoded:                    stats.X2Encoded,
+		X2Errors:                     stats.X2Errors,
+		X2Skipped:                    stats.X2Skipped,
+		X3Encoded:                    stats.X3Encoded,
+		X3Errors:                     stats.X3Errors,
+		X3Skipped:                    stats.X3Skipped,
+		NoEncoder:                    stats.NoEncoder,
+		DirectionResolvedMedia:       stats.DirectionResolvedMedia,
+		DirectionUnknownRtp:          stats.DirectionUnknownRTP,
+		X3FinalizedOrStaleSuppressed: stats.X3FinalizedSuppressed,
+		X3BufferedDiscarded:          stats.X3BufferedDiscarded,
+		InheritedProvenanceRejected:  managerStats.InheritedProvenanceRejected,
+	}
+	if p.packetSource != nil {
+		sourceStats := p.packetSource.Stats()
+		dst.LiEncoding.RtpOwnershipUnresolved = sourceStats.RTPOwnershipUnresolved
+		dst.LiEncoding.RtpOwnershipAmbiguous = sourceStats.RTPOwnershipAmbiguous
+		dst.LiEncoding.IdentityInheritanceSuppressed = sourceStats.IdentityInheritanceSuppressed
 	}
 }

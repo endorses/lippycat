@@ -46,6 +46,11 @@ func (p *VoIPPacketProcessor) IdentityInheritanceSuppressed() uint64 {
 	return p.udpHandler.IdentityInheritanceSuppressed()
 }
 
+// RTPAttributionStats reports bounded-cardinality RTP attribution outcomes.
+func (p *VoIPPacketProcessor) RTPAttributionStats() RTPAttributionStats {
+	return p.udpHandler.RTPAttributionStats()
+}
+
 // SetAssembler sets the TCP stream assembler for SIP message reassembly.
 // When set, TCP packets are fed to the assembler for stream reconstruction.
 func (p *VoIPPacketProcessor) SetAssembler(assembler *pipeline.ReassemblyEngine) {

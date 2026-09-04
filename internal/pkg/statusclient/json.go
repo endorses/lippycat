@@ -7,16 +7,17 @@ import (
 
 // StatusJSON represents processor status in JSON-friendly format
 type StatusJSON struct {
-	ProcessorID       string `json:"processor_id"`
-	Status            string `json:"status"`
-	TotalHunters      uint32 `json:"total_hunters"`
-	HealthyHunters    uint32 `json:"healthy_hunters"`
-	WarningHunters    uint32 `json:"warning_hunters"`
-	ErrorHunters      uint32 `json:"error_hunters"`
-	TotalPackets      uint64 `json:"total_packets_received"`
-	PacketsForwarded  uint64 `json:"total_packets_forwarded"`
-	TotalFilters      uint32 `json:"total_filters"`
-	UpstreamProcessor string `json:"upstream_processor,omitempty"`
+	ProcessorID       string                      `json:"processor_id"`
+	Status            string                      `json:"status"`
+	TotalHunters      uint32                      `json:"total_hunters"`
+	HealthyHunters    uint32                      `json:"healthy_hunters"`
+	WarningHunters    uint32                      `json:"warning_hunters"`
+	ErrorHunters      uint32                      `json:"error_hunters"`
+	TotalPackets      uint64                      `json:"total_packets_received"`
+	PacketsForwarded  uint64                      `json:"total_packets_forwarded"`
+	TotalFilters      uint32                      `json:"total_filters"`
+	UpstreamProcessor string                      `json:"upstream_processor,omitempty"`
+	LIEncoding        *management.LIEncodingStats `json:"li_encoding,omitempty"`
 }
 
 // HunterJSON represents a connected hunter in JSON-friendly format
@@ -33,18 +34,21 @@ type HunterJSON struct {
 
 // HunterStatsJSON represents hunter statistics in JSON-friendly format
 type HunterStatsJSON struct {
-	PacketsCaptured           uint64  `json:"packets_captured"`
-	PacketsMatched            uint64  `json:"packets_matched"`
-	PacketsForwarded          uint64  `json:"packets_forwarded"`
-	PacketsDropped            uint64  `json:"packets_dropped"`
-	CaptureBufferRegularDrops uint64  `json:"capture_buffer_regular_drops"`
-	CaptureBufferSIPDrops     uint64  `json:"capture_buffer_sip_drops"`
-	BatchChannelDrops         uint64  `json:"batch_channel_drops"`
-	BufferBytes               uint64  `json:"buffer_bytes"`
-	ActiveFilters             uint32  `json:"active_filters"`
-	CPUPercent                float64 `json:"cpu_percent"`
-	MemoryRSSBytes            uint64  `json:"memory_rss_bytes"`
-	MemoryLimitBytes          uint64  `json:"memory_limit_bytes,omitempty"`
+	PacketsCaptured               uint64  `json:"packets_captured"`
+	PacketsMatched                uint64  `json:"packets_matched"`
+	PacketsForwarded              uint64  `json:"packets_forwarded"`
+	PacketsDropped                uint64  `json:"packets_dropped"`
+	CaptureBufferRegularDrops     uint64  `json:"capture_buffer_regular_drops"`
+	CaptureBufferSIPDrops         uint64  `json:"capture_buffer_sip_drops"`
+	BatchChannelDrops             uint64  `json:"batch_channel_drops"`
+	BufferBytes                   uint64  `json:"buffer_bytes"`
+	ActiveFilters                 uint32  `json:"active_filters"`
+	CPUPercent                    float64 `json:"cpu_percent"`
+	MemoryRSSBytes                uint64  `json:"memory_rss_bytes"`
+	MemoryLimitBytes              uint64  `json:"memory_limit_bytes,omitempty"`
+	RTPOwnershipUnresolved        uint64  `json:"rtp_ownership_unresolved"`
+	RTPOwnershipAmbiguous         uint64  `json:"rtp_ownership_ambiguous"`
+	IdentityInheritanceSuppressed uint64  `json:"identity_inheritance_suppressed"`
 }
 
 // CapabilitiesJSON represents hunter capabilities in JSON-friendly format
@@ -84,6 +88,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 		status.PacketsForwarded = resp.ProcessorStats.TotalPacketsForwarded
 		status.TotalFilters = resp.ProcessorStats.TotalFilters
 		status.UpstreamProcessor = resp.ProcessorStats.UpstreamProcessor
+		status.LIEncoding = resp.ProcessorStats.LiEncoding
 	}
 
 	return output.MarshalJSONPretty(status, pretty)
@@ -127,18 +132,21 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 
 	if h.Stats != nil {
 		hunter.Stats = &HunterStatsJSON{
-			PacketsCaptured:           h.Stats.PacketsCaptured,
-			PacketsMatched:            h.Stats.PacketsMatched,
-			PacketsForwarded:          h.Stats.PacketsForwarded,
-			PacketsDropped:            h.Stats.PacketsDropped,
-			CaptureBufferRegularDrops: h.Stats.CaptureBufferRegularDrops,
-			CaptureBufferSIPDrops:     h.Stats.CaptureBufferSipDrops,
-			BatchChannelDrops:         h.Stats.BatchChannelDrops,
-			BufferBytes:               h.Stats.BufferBytes,
-			ActiveFilters:             h.Stats.ActiveFilters,
-			CPUPercent:                float64(h.Stats.CpuPercent),
-			MemoryRSSBytes:            h.Stats.MemoryRssBytes,
-			MemoryLimitBytes:          h.Stats.MemoryLimitBytes,
+			PacketsCaptured:               h.Stats.PacketsCaptured,
+			PacketsMatched:                h.Stats.PacketsMatched,
+			PacketsForwarded:              h.Stats.PacketsForwarded,
+			PacketsDropped:                h.Stats.PacketsDropped,
+			CaptureBufferRegularDrops:     h.Stats.CaptureBufferRegularDrops,
+			CaptureBufferSIPDrops:         h.Stats.CaptureBufferSipDrops,
+			BatchChannelDrops:             h.Stats.BatchChannelDrops,
+			BufferBytes:                   h.Stats.BufferBytes,
+			ActiveFilters:                 h.Stats.ActiveFilters,
+			CPUPercent:                    float64(h.Stats.CpuPercent),
+			MemoryRSSBytes:                h.Stats.MemoryRssBytes,
+			MemoryLimitBytes:              h.Stats.MemoryLimitBytes,
+			RTPOwnershipUnresolved:        h.Stats.RtpOwnershipUnresolved,
+			RTPOwnershipAmbiguous:         h.Stats.RtpOwnershipAmbiguous,
+			IdentityInheritanceSuppressed: h.Stats.IdentityInheritanceSuppressed,
 		}
 	}
 

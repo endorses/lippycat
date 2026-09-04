@@ -7,6 +7,7 @@
 package processor
 
 import (
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -28,3 +29,5 @@ func (p *Processor) processLIPacketWithProvenance(_ *types.PacketDisplay, _, _ [
 
 // isLIEnabled always returns false when LI is not compiled in.
 func (p *Processor) isLIEnabled() bool { return false }
+
+func (p *Processor) populateLIEncodingStats(_ *management.ProcessorStats) {}

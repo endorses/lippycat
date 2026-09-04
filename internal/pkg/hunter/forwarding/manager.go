@@ -17,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 )
 
@@ -25,6 +26,10 @@ import (
 // to buffer and filter packets based on call state.
 type PacketProcessor interface {
 	ProcessPacket(pktInfo capture.PacketInfo) bool
+}
+
+type rtpAttributionProvider interface {
+	RTPAttributionStats() voip.RTPAttributionStats
 }
 
 // ApplicationFilter provides application-layer packet filtering (protocol-agnostic)
@@ -62,6 +67,10 @@ type StatsCollector interface {
 	GetCaptured() uint64
 	GetMatched() uint64
 	GetDropped() uint64
+}
+
+type rtpAttributionStatsSink interface {
+	SetRTPAttribution(unresolved, ambiguous, inheritanceSuppressed uint64)
 }
 
 // PacketBufferProvider provides access to the packet buffer
@@ -318,7 +327,14 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 
 			// Apply custom packet processor if set (for VoIP buffering, etc.)
 			if m.packetProcessor != nil {
-				if !m.packetProcessor.ProcessPacket(pktInfo) {
+				forward := m.packetProcessor.ProcessPacket(pktInfo)
+				if provider, ok := m.packetProcessor.(rtpAttributionProvider); ok {
+					attribution := provider.RTPAttributionStats()
+					if sink, ok := m.statsCollector.(rtpAttributionStatsSink); ok {
+						sink.SetRTPAttribution(attribution.OwnershipUnresolved, attribution.OwnershipAmbiguous, attribution.InheritanceSuppressed)
+					}
+				}
+				if !forward {
 					// Packet was buffered or filtered out by processor
 					continue
 				}

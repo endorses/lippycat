@@ -40,14 +40,21 @@ func benchmarkEventItems(count int) []EventItem {
 func BenchmarkEventsViewAppendViaSetEvents(b *testing.B) {
 	for _, retained := range []int{1_000, 10_000} {
 		b.Run(fmt.Sprintf("retained_%d", retained), func(b *testing.B) {
+			// Slide over a cyclic pool larger than retention so every refresh
+			// appends a new event and evicts the oldest without duplicate IDs.
 			items := benchmarkEventItems(retained + 1)
+			windows := append(append(make([]EventItem, 0, 2*len(items)), items...), items...)
 			view := NewEventsView()
 			view.SetEvents(items[:retained])
 			view.SetSelectedID(items[retained-1].Event.Envelope().EventID)
+			next := 1
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				view.SetEvents(items)
+				window := windows[next : next+retained]
+				view.SetEvents(window)
+				view.SetSelectedID(window[retained-1].Event.Envelope().EventID)
+				next = (next + 1) % len(items)
 			}
 		})
 	}

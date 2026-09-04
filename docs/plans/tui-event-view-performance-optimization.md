@@ -194,6 +194,28 @@ The TUI correctness suite and race suite pass. Rendering purity and bounded
 refresh cadence remain explicit later-phase changes, not passing Phase 1
 baseline invariants.
 
+### Phase 1 append-workload review
+
+- [x] Correct the `EventsView` append benchmark to introduce one new retained
+      event on every iteration, including across fixture-cycle boundaries.
+- [x] Independently review the cyclic fixture and rerun the affected benchmark,
+      component correctness tests, and race-enabled checks.
+
+The previous `BenchmarkEventsViewAppendViaSetEvents` appended only on its first
+iteration, then repeatedly supplied the same projection. It now slides a fixed
+1,000- or 10,000-event window over a pool one event larger than retention and
+selects the newest event after each refresh. Every operation adds one event and
+evicts one, with no duplicate retained IDs. A one-second review run measured
+132 µs/op and 1.21 ms/op respectively, both with zero steady-state allocations.
+These are observational measurements of the corrected workload, which includes
+updating selection; they are not a performance comparison with the old fixture.
+
+The review also passed the TUI correctness and race suites, reran the Phase 1
+benchmarks, and reproduced the DNS replay CPU/allocation profiles. The replay
+measured 137.78 ms/op and 150,051,905 bytes/op; profiles again exposed full
+synchronization, selection lookup, packet materialization, visible projection,
+and front eviction. No Phase 1 production-code defect was found.
+
 Likely files:
 
 - `internal/pkg/tui/store/event_store_test.go`

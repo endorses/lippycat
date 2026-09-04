@@ -282,13 +282,13 @@ func (m Model) handleEventsViewClick(msg tea.MouseMsg, contentStartY int) (Model
 		m.uiState.LastEventClickTime = now
 	}
 	m.eventStore.SelectByIDFollowingLatest(id)
-	m.syncEventsView()
 	if isDoubleClick {
 		m.uiState.EventShowDetails = !m.uiState.EventShowDetails
 		if !m.uiState.EventShowDetails {
 			m.uiState.FocusedPane = "left"
 		}
 	}
+	m.syncEventsView()
 	return m, nil
 }
 

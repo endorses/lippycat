@@ -123,3 +123,28 @@ func TestEventProjectionOwnedByUpdates(t *testing.T) {
 	require.Equal(t, initial+2, m.eventViewSyncCount)
 	require.Equal(t, "inactive-arrival", m.uiState.EventsView.SelectedID())
 }
+
+func TestEventDoubleClickPreparesDetailsImmediately(t *testing.T) {
+	m := newEventRenderModel(t, false)
+	id, ok := m.uiState.EventsView.EventIDAtVisibleRow(0)
+	require.True(t, ok)
+	// Seed the preceding click to exercise double-click handling without a
+	// timing-dependent pair of updates.
+	m.uiState.LastEventClickID = id
+	m.uiState.LastEventClickTime = time.Now()
+	initial := m.eventViewSyncCount
+	m = updateEventRenderModel(t, m, tea.MouseMsg{
+		X: 5, Y: 8, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	require.True(t, m.uiState.EventShowDetails)
+	require.Equal(t, initial+1, m.eventViewSyncCount)
+	require.Equal(t, id, m.uiState.EventsView.SelectedID())
+	// Rendering the newly opened pane must already have its selected event's
+	// content, even if no capture traffic or later update arrives.
+	selected, ok := m.eventStore.Selected()
+	require.True(t, ok)
+	timestamp := selected.Event.Envelope().Timestamp.Format("2006-01-02 15:04:05.000000")
+	require.Contains(t, m.uiState.EventsView.RenderDetails(77, 14, false), timestamp)
+	require.Contains(t, m.View(), timestamp)
+	require.Equal(t, initial+1, m.eventViewSyncCount)
+}

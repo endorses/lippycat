@@ -424,6 +424,23 @@ retained events, respectively, with zero steady-state allocations. Final benchma
 output is `/tmp/tui-event-phase3-final-bench.txt`; use the Phase 1 commands to
 reproduce the workloads. No timing threshold was added to CI.
 
+### Phase 3 double-click review
+
+- [x] Prepare event presentation after the mouse double-click details toggle,
+      so opening the pane immediately displays the selected event.
+- [x] Independently reproduce the blank pane through public `Update` calls
+      and verify the fix preserves exactly one synchronization per click.
+
+The mouse handler synchronized while details were still hidden, then toggled
+the pane open. With rendering now read-only, the pane stayed blank until a
+later synchronization. Moving the existing synchronization after the toggle
+prepares the final layout without adding another projection. Two sub-agents
+audited component and model ownership; root independently reproduced the
+regression before applying the fix. No other Phase 3 defect was confirmed.
+The new regression passed independent cross-review. Full TUI correctness and
+race suites, `tui` and `all` builds, and the local/remote synchronization
+benchmark smoke checks passed after the fix. Go files were formatted.
+
 ## 8. Phase 4 — Implement True Bulk EventStore Ingestion
 
 Make batch cost depend on the batch and final retained state, not capacity per

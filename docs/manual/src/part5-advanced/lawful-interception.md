@@ -538,6 +538,15 @@ the oldest PDU is dropped and recorded in the destination delivery statistics.
 Retries provide at-least-once delivery; an ambiguous TCP write can therefore
 produce a duplicate at the MDF.
 
+Fan-out to multiple MDF destinations is fail-closed but is not atomic across
+destinations. The first destination accepts under the packet's existing task and
+call admissions; each later destination rechecks them. If the task or call is
+finalized during fan-out, an earlier MDF can receive the PDU while later MDFs
+reject it. The rejection is counted in the applicable suppression or buffered-
+discard telemetry.
+Deployments requiring atomic cross-MDF delivery must coordinate it outside
+lippycat and reconcile the per-destination sequence and drop statistics.
+
 ## Filter Integration
 
 When the ADMF activates a task, the LI Manager translates target identifiers into lippycat's internal filter system. This uses the same optimized filter infrastructure described in earlier chapters on hunters ([Chapter 7](../part3-distributed/hunt.md)) and processors ([Chapter 8](../part3-distributed/process.md)).

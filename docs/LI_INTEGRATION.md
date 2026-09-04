@@ -379,6 +379,15 @@ and are bounded to 100,000 entries. Capacity eviction is observable. A Call-ID
 seen after its tombstone expires starts a new generation; buffered content from
 an older generation is never attached to it.
 
+For tasks with multiple MDF destinations, fan-out is fail-closed but not an
+atomic multicast operation. The first destination commits under the task and
+call admissions acquired for the packet; each subsequent destination rechecks
+those admissions before accepting the same PDU. If task or call finalization
+begins during that loop, an earlier MDF may receive the PDU while later MDFs
+drop it and increment the applicable finalized/stale suppression accounting.
+Operators that require cross-MDF atomic delivery must provide that coordination
+outside lippycat and reconcile per-destination sequence and drop metrics.
+
 ## Task Lifecycle
 
 ### Task States

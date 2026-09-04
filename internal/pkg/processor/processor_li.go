@@ -690,12 +690,12 @@ func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, direc
 	// filter, so account and reject terminal media before task lookup. The packet
 	// callback performs the admission that covers encoding for live calls.
 	if admission == nil && pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" && p.callLifecycle != nil {
-		admission, err := p.callLifecycle.Admit(pkt.VoIPData.CallID)
+		probeAdmission, err := p.callLifecycle.Admit(pkt.VoIPData.CallID)
 		if err != nil {
 			recordLateX3Suppression(pkt.VoIPData.CallID, 0, "pipeline_admission")
 			return
 		}
-		admission.Release()
+		probeAdmission.Release()
 	}
 	provenance := li.PacketFilterProvenance{
 		DirectFilterIDs:    directFilterIDs,

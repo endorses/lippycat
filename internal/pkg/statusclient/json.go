@@ -49,6 +49,9 @@ type HunterStatsJSON struct {
 	RTPOwnershipUnresolved        uint64  `json:"rtp_ownership_unresolved"`
 	RTPOwnershipAmbiguous         uint64  `json:"rtp_ownership_ambiguous"`
 	IdentityInheritanceSuppressed uint64  `json:"identity_inheritance_suppressed"`
+	TCPEstablishedIdleRetentions  uint64  `json:"tcp_established_idle_retentions"`
+	TCPPreRearmDiscardedChunks    uint64  `json:"tcp_pre_rearm_discarded_chunks"`
+	TCPRearmRejectedChunks        uint64  `json:"tcp_rearm_rejected_chunks"`
 }
 
 // CapabilitiesJSON represents hunter capabilities in JSON-friendly format
@@ -147,6 +150,9 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 			RTPOwnershipUnresolved:        h.Stats.RtpOwnershipUnresolved,
 			RTPOwnershipAmbiguous:         h.Stats.RtpOwnershipAmbiguous,
 			IdentityInheritanceSuppressed: h.Stats.IdentityInheritanceSuppressed,
+			TCPEstablishedIdleRetentions:  h.Stats.TcpEstablishedIdleRetentions,
+			TCPPreRearmDiscardedChunks:    h.Stats.TcpPreRearmDiscardedChunks,
+			TCPRearmRejectedChunks:        h.Stats.TcpRearmRejectedChunks,
 		}
 	}
 

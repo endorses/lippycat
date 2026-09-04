@@ -265,6 +265,27 @@ func TestLocalSource_Stats_IncludesCaptureBufferDrops(t *testing.T) {
 	assert.Equal(t, stats.CaptureBufferRegularDrops+stats.CaptureBufferSIPDrops+stats.BatchChannelDrops, stats.PacketsDropped)
 }
 
+func TestLocalSourceStatsIncludesTCPStreamTelemetry(t *testing.T) {
+	s := NewLocalSource(DefaultLocalSourceConfig())
+	s.SetTCPStreamTelemetryProvider(func() TCPStreamTelemetry {
+		return TCPStreamTelemetry{
+			EstablishedIdleRetentions: 7,
+			PreRearmDiscardedChunks:   11,
+			RearmRejectedChunks:       13,
+		}
+	})
+
+	stats := s.Stats()
+	assert.Equal(t, uint64(7), stats.TCPEstablishedIdleRetentions)
+	assert.Equal(t, uint64(11), stats.TCPPreRearmDiscardedChunks)
+	assert.Equal(t, uint64(13), stats.TCPRearmRejectedChunks)
+	assert.Equal(t, []any{
+		"tcp_established_idle_retentions", uint64(7),
+		"tcp_pre_rearm_discarded_chunks", uint64(11),
+		"tcp_rearm_rejected_chunks", uint64(13),
+	}, s.captureHeartbeatFields())
+}
+
 func TestLocalSource_SetBPFFilter_BeforeStart(t *testing.T) {
 	s := NewLocalSource(LocalSourceConfig{
 		Interfaces: []string{"eth0"},

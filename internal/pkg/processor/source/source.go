@@ -124,6 +124,12 @@ type Stats struct {
 	RTPOwnershipUnresolved uint64
 	RTPOwnershipAmbiguous  uint64
 
+	// TCP SIP stream recovery counters are supplied by the optional local VoIP
+	// reassembly provider. They are cumulative for the capture session.
+	TCPEstablishedIdleRetentions uint64
+	TCPPreRearmDiscardedChunks   uint64
+	TCPRearmRejectedChunks       uint64
+
 	// BytesReceived is the total bytes received/captured
 	BytesReceived uint64
 
@@ -144,6 +150,15 @@ type Stats struct {
 
 	// MemoryLimitBytes is the memory limit from cgroup (0 if unavailable)
 	MemoryLimitBytes uint64
+}
+
+// TCPStreamTelemetry is the bounded subset of TCP SIP reassembly telemetry
+// exposed by a packet source. Keeping this contract here avoids coupling the
+// generic capture and processor packages to the VoIP implementation.
+type TCPStreamTelemetry struct {
+	EstablishedIdleRetentions uint64
+	PreRearmDiscardedChunks   uint64
+	RearmRejectedChunks       uint64
 }
 
 // AtomicStats provides thread-safe access to Stats fields.

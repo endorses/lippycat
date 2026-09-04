@@ -996,8 +996,14 @@ type HunterStats struct {
 	RtpOwnershipUnresolved        uint64 `protobuf:"varint,15,opt,name=rtp_ownership_unresolved,json=rtpOwnershipUnresolved,proto3" json:"rtp_ownership_unresolved,omitempty"`
 	RtpOwnershipAmbiguous         uint64 `protobuf:"varint,16,opt,name=rtp_ownership_ambiguous,json=rtpOwnershipAmbiguous,proto3" json:"rtp_ownership_ambiguous,omitempty"`
 	IdentityInheritanceSuppressed uint64 `protobuf:"varint,17,opt,name=identity_inheritance_suppressed,json=identityInheritanceSuppressed,proto3" json:"identity_inheritance_suppressed,omitempty"`
-	unknownFields                 protoimpl.UnknownFields
-	sizeCache                     protoimpl.SizeCache
+	// Established TCP SIP streams retained across a parser read timeout.
+	TcpEstablishedIdleRetentions uint64 `protobuf:"varint,18,opt,name=tcp_established_idle_retentions,json=tcpEstablishedIdleRetentions,proto3" json:"tcp_established_idle_retentions,omitempty"`
+	// TCP chunks discarded while a timed-out stream had not finished cleanup.
+	TcpPreRearmDiscardedChunks uint64 `protobuf:"varint,19,opt,name=tcp_pre_rearm_discarded_chunks,json=tcpPreRearmDiscardedChunks,proto3" json:"tcp_pre_rearm_discarded_chunks,omitempty"`
+	// TCP chunks rejected because dead-stream re-arm did not start at SIP.
+	TcpRearmRejectedChunks uint64 `protobuf:"varint,20,opt,name=tcp_rearm_rejected_chunks,json=tcpRearmRejectedChunks,proto3" json:"tcp_rearm_rejected_chunks,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *HunterStats) Reset() {
@@ -1145,6 +1151,27 @@ func (x *HunterStats) GetRtpOwnershipAmbiguous() uint64 {
 func (x *HunterStats) GetIdentityInheritanceSuppressed() uint64 {
 	if x != nil {
 		return x.IdentityInheritanceSuppressed
+	}
+	return 0
+}
+
+func (x *HunterStats) GetTcpEstablishedIdleRetentions() uint64 {
+	if x != nil {
+		return x.TcpEstablishedIdleRetentions
+	}
+	return 0
+}
+
+func (x *HunterStats) GetTcpPreRearmDiscardedChunks() uint64 {
+	if x != nil {
+		return x.TcpPreRearmDiscardedChunks
+	}
+	return 0
+}
+
+func (x *HunterStats) GetTcpRearmRejectedChunks() uint64 {
+	if x != nil {
+		return x.TcpRearmRejectedChunks
 	}
 	return 0
 }
@@ -3626,7 +3653,7 @@ const file_management_proto_rawDesc = "" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x129\n" +
 	"\x06status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\x06status\x126\n" +
-	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xed\x06\n" +
+	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xb3\b\n" +
 	"\vHunterStats\x12)\n" +
 	"\x10packets_captured\x18\x01 \x01(\x04R\x0fpacketsCaptured\x12'\n" +
 	"\x0fpackets_matched\x18\x02 \x01(\x04R\x0epacketsMatched\x12+\n" +
@@ -3647,7 +3674,10 @@ const file_management_proto_rawDesc = "" +
 	"pcapWriter\x128\n" +
 	"\x18rtp_ownership_unresolved\x18\x0f \x01(\x04R\x16rtpOwnershipUnresolved\x126\n" +
 	"\x17rtp_ownership_ambiguous\x18\x10 \x01(\x04R\x15rtpOwnershipAmbiguous\x12F\n" +
-	"\x1fidentity_inheritance_suppressed\x18\x11 \x01(\x04R\x1didentityInheritanceSuppressed\"\x90\x02\n" +
+	"\x1fidentity_inheritance_suppressed\x18\x11 \x01(\x04R\x1didentityInheritanceSuppressed\x12E\n" +
+	"\x1ftcp_established_idle_retentions\x18\x12 \x01(\x04R\x1ctcpEstablishedIdleRetentions\x12B\n" +
+	"\x1etcp_pre_rearm_discarded_chunks\x18\x13 \x01(\x04R\x1atcpPreRearmDiscardedChunks\x129\n" +
+	"\x19tcp_rearm_rejected_chunks\x18\x14 \x01(\x04R\x16tcpRearmRejectedChunks\"\x90\x02\n" +
 	"\x12ProcessorHeartbeat\x12!\n" +
 	"\ftimestamp_ns\x18\x01 \x01(\x03R\vtimestampNs\x12<\n" +
 	"\x06status\x18\x02 \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\x12+\n" +

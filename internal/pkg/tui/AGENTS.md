@@ -589,8 +589,24 @@ and mode switches cannot strand event data. Connection and resume handlers must
 not start additional recurring tick chains. `TickMsg.Time` permits deterministic
 refresh-cadence tests without sleeps.
 
+`EventStore.AddBatch` holds one mutex while writing a preallocated circular
+buffer; `AddEvent` delegates to it. Head points to the next write slot, count is
+bounded by capacity, and ordered reads start at `(head-count+capacity)%capacity`.
+Accepted unpaused events receive monotonic arrival sequences, including those
+overwritten within an oversized batch. Rejected nil/file-content events do not
+affect counters; paused supported events affect arrival/pause counters only.
+Eviction accounting and the final selected ID are committed once per batch.
+
+Retained normalized events are immutable snapshots with stable IDs. Per-slot
+visibility and first/last visible indices preserve selection transitions without
+rebuilding the projection during ingestion. Advancing the oldest visible index
+visits intervening slots once over their retained lifetime, so append/eviction
+and selection maintenance are amortized constant-time per event. Filter changes
+rebuild visibility; reset clears backing references while preserving filters and
+pause state. The packet store remains a separate typed implementation.
+
 Full event projection and packet scans still occur on each synchronization;
-incremental storage/projection are later phases of
+incremental projection and packet indexing are later phases of
 `docs/plans/tui-event-view-performance-optimization.md`.
 
 ### Rendering Optimization

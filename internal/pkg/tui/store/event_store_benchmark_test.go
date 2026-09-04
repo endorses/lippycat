@@ -103,6 +103,37 @@ func BenchmarkEventStoreVisibleProjection(b *testing.B) {
 	}
 }
 
+// Exercise eviction of the pinned selection on every batch, including when the
+// oldest retained arrival is hidden by a filter. The history benchmark below
+// instead measures a pinned selection that stays retained.
+func BenchmarkEventStorePinnedSelectionEviction(b *testing.B) {
+	for _, capacity := range []int{1000, 10000} {
+		for _, filtered := range []bool{false, true} {
+			b.Run(fmt.Sprintf("capacity_%d/filtered_%t", capacity, filtered), func(b *testing.B) {
+				poolSize := (capacity/eventStoreBenchmarkBatchSize + 1) * eventStoreBenchmarkBatchSize
+				items := benchmarkEvents(poolSize)
+				store := NewEventStore(capacity)
+				store.AddBatch(items[poolSize-capacity:])
+				if filtered {
+					store.SetKindFilter([]events.Kind{events.KindHTTP})
+				}
+				store.SelectFirst()
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					start := (i % (poolSize / eventStoreBenchmarkBatchSize)) * eventStoreBenchmarkBatchSize
+					store.AddBatch(items[start : start+eventStoreBenchmarkBatchSize])
+				}
+				b.StopTimer()
+				visible := store.Events()
+				if len(visible) == 0 || store.SelectedID() != visible[0].Event.Envelope().EventID {
+					b.Fatal("evicted history selection must move to the first retained visible event")
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkEventStoreSelectionMaintenance(b *testing.B) {
 	for _, followLatest := range []bool{true, false} {
 		name := "follow_latest"

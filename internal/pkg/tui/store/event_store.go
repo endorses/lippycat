@@ -18,10 +18,30 @@ type EventStoreStats struct {
 }
 
 // EventStore is a bounded, concurrency-safe arrival-ordered event buffer.
+// Events are immutable after ingestion; a stable EventID identifies the same
+// event metadata on repeated delivery, including all fields used by filters.
+//
+// The ring follows PacketStore.AddPacketBatch: items has exactly capacity slots,
+// head names the next write slot, and count is bounded by capacity. Before the
+// first wrap, live slots start at zero; when full, head is also the oldest slot.
+// Ordered materialization starts at (head-count+capacity)%capacity. PacketStore's
+// GetNewPackets uses the same rule for the newest n slots, starting at head-n,
+// and requires a full refresh when arrivals since its cursor reach capacity.
+// ArrivalSequence records accepted, unpaused arrivals independently of wrap.
+//
+// visible caches the current filters for each live slot. Its first/last indices
+// let ingestion repair selection without scanning the retained projection. When
+// the first visible slot is evicted, advancing to its successor visits each
+// intervening slot at most once during that slot's retained lifetime. Thus ring
+// insertion and selection maintenance are amortized O(1) per arrival. Filter
+// changes rebuild the cache; filtering and navigation may still scan the ring.
 type EventStore struct {
 	mu                                           sync.RWMutex
 	capacity                                     int
 	items                                        []components.EventItem
+	head, count                                  int
+	visible                                      []bool
+	firstVisible, lastVisible                    int
 	nextArrival                                  uint64
 	selectedID                                   string
 	followLatest                                 bool
@@ -42,47 +62,102 @@ func NewEventStore(capacity int) *EventStore {
 	if capacity < 1 {
 		capacity = 1
 	}
-	return &EventStore{capacity: capacity, items: make([]components.EventItem, 0, capacity), followLatest: true, lossByKind: make(map[string]uint64)}
+	return &EventStore{
+		capacity: capacity, items: make([]components.EventItem, capacity),
+		visible: make([]bool, capacity), firstVisible: -1, lastVisible: -1,
+		followLatest: true, lossByKind: make(map[string]uint64),
+	}
 }
 
 func (s *EventStore) AddEvent(event events.Event) bool {
-	if event == nil || event.Kind() == events.KindFileContent {
-		return false
+	return s.AddBatch([]events.Event{event}) == 1
+}
+
+// AddBatch applies one ordered delivery under a single lock. Selection transitions
+// are tracked locally, including intermediate evictions in oversized batches,
+// then committed once so batching preserves singleton ingestion behavior.
+func (s *EventStore) AddBatch(batch []events.Event) int {
+	if len(batch) == 0 {
+		return 0
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.arrived++
-	if s.paused {
-		s.pausedCount++
-		return false
-	}
-	s.nextArrival++
-	s.items = append(s.items, components.EventItem{Event: event, ArrivalSequence: s.nextArrival, ArrivedAt: time.Now()})
-	if s.selectedID == "" || (s.followLatest && s.visibleLocked(event)) {
-		s.selectedID = event.Envelope().EventID
-	}
-	if len(s.items) > s.capacity {
-		evicted := s.items[0].Event.Envelope().EventID
-		copy(s.items, s.items[1:])
-		s.items = s.items[:s.capacity]
-		s.evicted++
-		if s.selectedID == evicted {
-			s.selectedID = s.items[0].Event.Envelope().EventID
-		}
-	}
-	s.ensureVisibleSelectionLocked()
-	return true
-}
 
-func (s *EventStore) AddBatch(batch []events.Event) int {
-	added := 0
+	added, oldCount := 0, s.count
+	selectedID := s.selectedID
 	for _, event := range batch {
-		if s.AddEvent(event) {
-			added++
+		if event == nil || event.Kind() == events.KindFileContent {
+			continue
+		}
+		s.arrived++
+		if s.paused {
+			s.pausedCount++
+			continue
+		}
+
+		full := s.count == s.capacity
+		evictedID := ""
+		if full {
+			evictedID = s.items[s.head].Event.Envelope().EventID
+			if s.visible[s.head] {
+				s.visible[s.head] = false
+				if s.firstVisible == s.lastVisible {
+					s.firstVisible, s.lastVisible = -1, -1
+				} else {
+					next := (s.head + 1) % s.capacity
+					for !s.visible[next] {
+						next = (next + 1) % s.capacity
+					}
+					s.firstVisible = next
+				}
+			}
+		} else {
+			s.count++
+		}
+
+		s.nextArrival++
+		s.items[s.head] = components.EventItem{Event: event, ArrivalSequence: s.nextArrival, ArrivedAt: time.Now()}
+		isVisible := s.visibleLocked(event)
+		s.visible[s.head] = isVisible
+		if isVisible {
+			if s.firstVisible < 0 {
+				s.firstVisible = s.head
+			}
+			s.lastVisible = s.head
+		}
+		s.head = (s.head + 1) % s.capacity
+		added++
+
+		// Existing selections are visible until overwritten. Preserve the old
+		// physical-oldest fallback before applying the visible-boundary repair;
+		// followLatest can still select an older row after a filter is broadened.
+		selectionVisible := true
+		if selectedID == "" || (s.followLatest && isVisible) {
+			selectedID = event.Envelope().EventID
+			selectionVisible = isVisible
+		}
+		if full && selectedID == evictedID {
+			selectedID = s.items[s.head].Event.Envelope().EventID
+			selectionVisible = s.visible[s.head]
+		}
+		if !selectionVisible {
+			index := s.firstVisible
+			if s.followLatest {
+				index = s.lastVisible
+			}
+			selectedID = ""
+			if index >= 0 {
+				selectedID = s.items[index].Event.Envelope().EventID
+			}
 		}
 	}
+	// Every accepted item counts, including items overwritten within this batch.
+	// The ring bounds retention as it writes; accounting is applied once.
+	s.evicted += uint64(oldCount + added - s.count)
+	s.selectedID = selectedID
 	return added
 }
+
 func (s *EventStore) SetPaused(paused bool) { s.mu.Lock(); s.paused = paused; s.mu.Unlock() }
 func (s *EventStore) TogglePaused() bool {
 	s.mu.Lock()
@@ -95,7 +170,10 @@ func (s *EventStore) Paused() bool { s.mu.RLock(); defer s.mu.RUnlock(); return 
 func (s *EventStore) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.items = s.items[:0]
+	clear(s.items)
+	clear(s.visible)
+	s.head, s.count = 0, 0
+	s.firstVisible, s.lastVisible = -1, -1
 	s.selectedID = ""
 	s.followLatest = true
 	s.nextArrival = 0
@@ -195,7 +273,8 @@ func (s *EventStore) Events() []components.EventItem {
 func (s *EventStore) Selected() (components.EventItem, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, item := range s.items {
+	for i := 0; i < s.count; i++ {
+		item := s.itemLocked(i)
 		if s.visibleLocked(item.Event) && item.Event.Envelope().EventID == s.selectedID {
 			return item, true
 		}
@@ -292,14 +371,15 @@ func (s *EventStore) Stats() EventStoreStats {
 	for kind, count := range s.lossByKind {
 		losses[kind] = count
 	}
-	return EventStoreStats{Arrived: s.arrived, Retained: uint64(len(s.items)), Evicted: s.evicted, Paused: s.pausedCount, TransportLost: s.transportLost, TransportLossByKind: losses}
+	return EventStoreStats{Arrived: s.arrived, Retained: uint64(s.count), Evicted: s.evicted, Paused: s.pausedCount, TransportLost: s.transportLost, TransportLossByKind: losses}
 }
 
 func (s *EventStore) CountByKind() map[events.Kind]uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make(map[events.Kind]uint64)
-	for _, item := range s.items {
+	for i := 0; i < s.count; i++ {
+		item := s.itemLocked(i)
 		result[item.Event.Kind()]++
 	}
 	return result
@@ -308,7 +388,8 @@ func (s *EventStore) CountBySource() map[string]uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make(map[string]uint64)
-	for _, item := range s.items {
+	for i := 0; i < s.count; i++ {
+		item := s.itemLocked(i)
 		result[item.Event.Envelope().Provenance.CaptureSource]++
 	}
 	return result
@@ -333,16 +414,38 @@ func (s *EventStore) visibleLocked(event events.Event) bool {
 	return true
 }
 func (s *EventStore) visibleItemsLocked() []components.EventItem {
-	result := make([]components.EventItem, 0, len(s.items))
-	for _, item := range s.items {
+	result := make([]components.EventItem, 0, s.count)
+	for i := 0; i < s.count; i++ {
+		item := s.itemLocked(i)
 		if s.visibleLocked(item.Event) {
 			result = append(result, item)
 		}
 	}
 	return result
 }
+
+// itemLocked returns the logical arrival-ordered item, never an unused slot.
+func (s *EventStore) itemLocked(index int) components.EventItem {
+	return s.items[(s.head-s.count+s.capacity+index)%s.capacity]
+}
+
 func (s *EventStore) ensureVisibleSelectionLocked() {
-	for _, item := range s.items {
+	// All callers change filters, so refresh visibility before repairing the
+	// selected ID. Ingestion maintains this cache directly for new arrivals.
+	clear(s.visible)
+	s.firstVisible, s.lastVisible = -1, -1
+	for i := 0; i < s.count; i++ {
+		index := (s.head - s.count + s.capacity + i) % s.capacity
+		if s.visibleLocked(s.items[index].Event) {
+			s.visible[index] = true
+			if s.firstVisible < 0 {
+				s.firstVisible = index
+			}
+			s.lastVisible = index
+		}
+	}
+	for i := 0; i < s.count; i++ {
+		item := s.itemLocked(i)
 		if s.visibleLocked(item.Event) && item.Event.Envelope().EventID == s.selectedID {
 			return
 		}

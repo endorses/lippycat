@@ -1,7 +1,7 @@
 # TUI Event View Performance Optimization Plan
 
 **Date:** 2026-09-04
-**Status:** Phases 1–3 verified; Phases 4–7 planned
+**Status:** Phases 1–4 verified; Phases 5–7 planned
 **Scope:** Normalized event ingestion, retention, projection, synchronization,
 and rendering in `internal/pkg/tui`
 
@@ -447,33 +447,115 @@ Make batch cost depend on the batch and final retained state, not capacity per
 event. Use `PacketStore`'s existing circular-buffer implementation as the
 algorithmic reference.
 
-- [ ] Document the packet ring invariants used by `AddPacketBatch`, ordered
+- [x] Document the packet ring invariants used by `AddPacketBatch`, ordered
       materialization, and `GetNewPackets` before porting them.
-- [ ] Rewrite `EventStore.AddBatch` to acquire the mutex once.
-- [ ] Validate and account for nil and file-content events inside the bulk
+- [x] Rewrite `EventStore.AddBatch` to acquire the mutex once.
+- [x] Validate and account for nil and file-content events inside the bulk
       operation without changing statistics semantics.
-- [ ] Append accepted events and update arrival sequences in one pass.
-- [ ] Apply capacity truncation once per batch and account for every evicted
+- [x] Append accepted events and update arrival sequences in one pass.
+- [x] Apply capacity truncation once per batch and account for every evicted
       event exactly.
-- [ ] Replace front-of-slice shifting with the same preallocated backing slice,
+- [x] Replace front-of-slice shifting with the same preallocated backing slice,
       head index, count, and overwrite mechanics used by `PacketStore` so
       steady-state append/evict is O(1).
-- [ ] Validate or repair selection once after the batch is applied.
-- [ ] Keep `AddEvent` as a thin wrapper around the bulk implementation so the
+- [x] Validate or repair selection once after the batch is applied.
+- [x] Keep `AddEvent` as a thin wrapper around the bulk implementation so the
       two paths cannot diverge.
-- [ ] Add wraparound, oversized-batch, exact-capacity, pause, selection-eviction,
+- [x] Add wraparound, oversized-batch, exact-capacity, pause, selection-eviction,
       and race tests.
-- [ ] Confirm benchmarks no longer show capacity-sized copies per insertion.
-- [ ] Add table-driven equivalence tests that run the packet and event ring
+- [x] Confirm benchmarks no longer show capacity-sized copies per insertion.
+- [x] Add table-driven equivalence tests that run the packet and event ring
       algorithms through empty, partial, full, wraparound, and oversized-batch
       cases and compare their ordered retention behavior.
-- [ ] Do not modify `PacketStore` merely to create a generic container during
+- [x] Do not modify `PacketStore` merely to create a generic container during
       this phase.
 
 Likely files:
 
 - `internal/pkg/tui/store/event_store.go`
 - `internal/pkg/tui/store/event_store_test.go`
+
+### Phase 4 packet-ring reference
+
+Before porting, the reference `PacketStore` invariants are:
+
+- The backing slice has fixed length equal to capacity. The head identifies the
+  next write slot; count is bounded by capacity. Each append overwrites that slot,
+  advances head modulo capacity, and increments count only while below capacity.
+- Ordered retention starts at `(head - count + capacity) % capacity` and visits
+  exactly count slots. Before filling, this starts at zero; at capacity, head is
+  the oldest retained item. Oversized batches retain their newest capacity items.
+- `AddPacketBatch` holds one mutex across all writes and trims its separate
+  filtered projection once after insertion. Event storage will retain its own
+  filtering and selection contracts rather than copying that projection cache.
+- `GetNewPackets` uses the monotonic total-arrival counter, never the bounded
+  count, as its cursor. A positive delta below capacity reads the newest delta
+  slots ending immediately before head; a delta at least capacity requests full
+  refresh. The event delta API remains Phase 5 work.
+
+### Phase 4 implementation and verification
+
+`EventStore` now uses preallocated event and visibility slices, a next-write head,
+and a bounded count. All reads traverse live slots in arrival order. `AddBatch`
+holds one mutex, rejects nil/file-content entries without counting them, accounts
+for supported paused arrivals without consuming retention sequences, and writes
+accepted events directly into the ring. Eviction accounting is applied once per
+batch, including events overwritten within an oversized batch. `AddEvent` is a
+thin wrapper; `PacketStore` was not changed.
+
+Cached visibility and the first/last visible slots preserve selection transitions
+through intermediate evictions without per-event retained-buffer scans. Advancing
+the first visible slot visits each intervening retained slot at most once, making
+ingestion and selection maintenance amortized O(1) per event. The selected ID is
+committed once after the batch. This preserves the existing physical-oldest
+fallback followed by visible-boundary repair, including after filter broadening.
+Filter changes rebuild visibility. Reset releases retained event references and
+preserves pause/filter state. Events remain immutable normalized snapshots;
+repeated delivery of the same stable ID has the same filter metadata.
+
+Two sub-agents implemented production code and tests, and a third independently
+reviewed both. Root reviewed the diff and compared the new store against the
+previous implementation using 60,000 seeded operations with unique IDs and another
+60,000 with repeated immutable events. Both comparisons passed across oversized
+batches, filters, navigation, pause, and reset. Temporary legacy-comparison files
+were removed after verification; permanent regressions cover eight packet/event
+ring equivalence scenarios, exact accounting, filtered selection eviction,
+concurrent access, randomized batch/singleton equivalence, repeated identities,
+zero-allocation steady-state ingestion, and reset reference release.
+
+Full TUI correctness and race suites under `-tags all` passed, as did `make tui all`.
+The existing store/component/model benchmark suite and generated DNS capture replay
+passed their assertions. Full projection and packet relationship scans remain
+Phases 5–6; no claim is made here about completing those optimizations or the
+plan's final mixed-mode manual/CPU acceptance gates.
+
+Final one-second runs on the same Intel Core i9-13900HX, without concurrent test
+workloads, measured:
+
+| Workload | Before Phase 4 time/op | Phase 4 time/op | Phase 4 allocated bytes/op |
+| --- | ---: | ---: | ---: |
+| Batch eviction, 128 events, capacity 1,000 | 2.616 ms | 9.03 µs | 0 |
+| Batch eviction, 128 events, capacity 10,000 | 28.023 ms | 9.41 µs | 0 |
+| Single-event selection maintenance, following latest | 20.01 µs | 95.93 ns | 0 |
+| Single-event selection maintenance, pinned history | 6.26 µs | 88.95 ns | 0 |
+| Local tick, 50 singleton batches, 10,000 retained | 11.67 ms | 1.03 ms | 488,408 |
+| Remote batch, 1 event, 10,000 retained | 1.28 ms | 0.97 ms | 484,122 |
+| Remote batch, 128 events, 10,000 retained | 29.41 ms | 0.98 ms | 484,099 |
+
+Store baselines were measured immediately before this implementation; model
+baselines are the recorded Phase 3 runs. The new pinned-selection-eviction
+benchmark measured 9.39–10.77 µs per 128-event batch across both capacities and
+filtered/unfiltered cases, with zero allocations. These results and source review
+confirm that capacity-sized copies and scans no longer occur per insertion.
+Timings are observational, not CI thresholds; allocation assertions are deterministic.
+
+The one-second generated DNS replay measured 5.66 ms/op and 5,243,130 bytes/op
+for 50 packets, versus Phase 3's 20.65 ms/op and 5,127,473 bytes/op. Arrival,
+eviction, selection, and zero-loss assertions passed. This phase primarily reduces
+ingestion CPU; full-projection and packet-scan allocations remain. Benchmark
+output is `/tmp/tui-event-phase4-bench.txt`, with the uncontended final focused run
+in `/tmp/tui-event-phase4-final-bench.txt`. Reproduce with the Phase 1 commands,
+adding `BenchmarkEventStorePinnedSelectionEviction` and the DNS replay workload.
 
 ## 9. Phase 5 — Introduce Incremental Event Projection
 
@@ -566,7 +648,7 @@ Likely files:
 
 ## 12. Verification
 
-After each phase (checked below for Phases 1–3):
+After each phase (checked below for Phases 1–4):
 
 - [x] Format all modified Go files with `gofmt` before staging.
 - [x] Run focused event-store, event-view, and TUI tests with the appropriate

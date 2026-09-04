@@ -41,7 +41,7 @@ func BenchmarkEventStoreAddEventBelowCapacity(b *testing.B) {
 }
 
 func BenchmarkEventStoreAddBatchBelowCapacity(b *testing.B) {
-	batch := benchmarkEvents(eventStoreBenchmarkBatchSize)
+	items := benchmarkEvents(eventStoreBenchmarkBatchSize * 8)
 	store := NewEventStore(eventStoreBenchmarkBatchSize*8 + 1)
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -51,21 +51,29 @@ func BenchmarkEventStoreAddBatchBelowCapacity(b *testing.B) {
 			store.Reset()
 			b.StartTimer()
 		}
-		store.AddBatch(batch)
+		start := (i % 8) * eventStoreBenchmarkBatchSize
+		store.AddBatch(items[start : start+eventStoreBenchmarkBatchSize])
 	}
 }
 
 func BenchmarkEventStoreAddBatchWithEviction(b *testing.B) {
 	for _, capacity := range []int{1000, 10000} {
 		b.Run(fmt.Sprintf("capacity_%d", capacity), func(b *testing.B) {
-			seed := benchmarkEvents(capacity)
-			batch := benchmarkEvents(eventStoreBenchmarkBatchSize)
+			// The cycle exceeds retention, so an ID is evicted before reuse.
+			poolSize := (capacity/eventStoreBenchmarkBatchSize + 1) * eventStoreBenchmarkBatchSize
+			items := benchmarkEvents(poolSize)
 			store := NewEventStore(capacity)
-			store.AddBatch(seed)
+			store.AddBatch(items[poolSize-capacity:])
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				store.AddBatch(batch)
+				start := (i % (poolSize / eventStoreBenchmarkBatchSize)) * eventStoreBenchmarkBatchSize
+				store.AddBatch(items[start : start+eventStoreBenchmarkBatchSize])
+			}
+			b.StopTimer()
+			selected, ok := store.Selected()
+			if !ok || selected.ArrivalSequence != store.nextArrival {
+				b.Fatal("benchmark must keep selection on the latest arrival")
 			}
 		})
 	}
@@ -103,8 +111,9 @@ func BenchmarkEventStoreSelectionMaintenance(b *testing.B) {
 		}
 		b.Run(name, func(b *testing.B) {
 			const capacity = 1000
-			seed := benchmarkEvents(capacity)
-			incoming := testEvent("incoming", "eth0", events.KindDNS)
+			items := benchmarkEvents(capacity + capacity/2)
+			seed := items[:capacity]
+			incoming := items[capacity:]
 			store := NewEventStore(capacity)
 			prepare := func() {
 				store.Reset()
@@ -122,7 +131,7 @@ func BenchmarkEventStoreSelectionMaintenance(b *testing.B) {
 					prepare()
 					b.StartTimer()
 				}
-				store.AddEvent(incoming)
+				store.AddEvent(incoming[i%len(incoming)])
 			}
 		})
 	}

@@ -1,7 +1,7 @@
 # TUI Event View Performance Optimization Plan
 
 **Date:** 2026-09-04
-**Status:** Planned
+**Status:** Phase 1 verified; Phases 2–7 planned
 **Scope:** Normalized event ingestion, retention, projection, synchronization,
 and rendering in `internal/pkg/tui`
 
@@ -128,24 +128,71 @@ Create repeatable measurements before changing the hot path.
 
 ### Phase 1 baseline
 
-The repeatable synthetic workload retains 10,000 normalized DNS events and
-10,000 unrelated packets, then synchronizes the active event view. On an Intel
-Core i9-13900HX, the baseline was approximately 1.75 ms and 2.81 MB allocated
-per synchronization. A live tick containing 50 singleton event batches took
-approximately 61.9 ms and allocated 24.4 MB because it synchronized 50 times.
-At capacity, adding a 128-event batch took approximately 1.82 ms with 1,000
-retained events and 21.6 ms with 10,000 retained events. Visible projection
-grew from approximately 23 microseconds and 49 KB at 1,000 events to 334
-microseconds and 483 KB at 10,000 events. A related-packet miss grew from
-approximately 31 microseconds and 238 KB at 1,000 retained packets to 540
-microseconds and 2.33 MB at 10,000 retained packets.
+The Phase 1 review corrected repeated event IDs in the ingestion benchmarks.
+Those fixtures let selection lookups stop at an earlier retained event and
+understated live-edge selection costs. Prebuilt fixture cycles now exceed
+retention, so an ID leaves the buffer before reuse; below-capacity batches and
+selection-maintenance fixtures also use distinct retained IDs. These results
+supersede the original ingestion baseline.
 
-CPU and allocation profiles were written from the same benchmark workload.
-The installed Go toolchain did not include the interactive `pprof` command, so
-the constituent benchmarks provide the checked attribution for synchronization,
-projection, selection maintenance, rendering, packet scanning, and front
-eviction. Re-run profiles during Phase 2 on a toolchain containing `pprof` for
-interactive call-graph comparison.
+On an Intel Core i9-13900HX, corrected one-second benchmark runs measured:
+
+| Workload | Time/op | Allocated bytes/op |
+| --- | ---: | ---: |
+| Remote batch, 1 event, 10,000 retained | 1.57 ms | 484,736 |
+| Remote batch, 128 events, 10,000 retained | 30.31 ms | 512,221 |
+| Local tick, 50 singleton batches, 10,000 retained | 67.54 ms | 24,232,643 |
+| Batch eviction, 128 events, capacity 1,000 | 2.90 ms | 184 |
+| Batch eviction, 128 events, capacity 10,000 | 31.87 ms | 18,618 |
+| Synchronization, 10,000 events and unrelated packets | 1.96 ms | 2,809,861 |
+| Related-packet miss, 10,000 retained packets | 0.58 ms | 2,326,918 |
+
+Eviction allocation figures amortize the initial backing-slice expansion over
+the measured iterations; they are not steady-state allocations per insertion.
+The local tick still performs exactly 50 synchronizations. Timings are
+observational baselines, not CI thresholds.
+
+`BenchmarkModelEventDNSReplay` supplies the previously missing capture replay
+measurement. It decodes checksum-valid generated Ethernet/IPv4/UDP DNS query
+frames and exercises the production analyzer, event identity assignment,
+dispatcher, local sink, packet/event tick delivery, and `Model.View()` at
+160×40 with details open. It retains 10,000 events and packets, rotates across
+10,001 flows, and replays 50 queries per operation. Assertions verify packet
+retention, exact event arrivals/evictions, latest selection, and zero loss.
+This controlled DNS workload excludes PCAP disk I/O and terminal-driver costs;
+it does not represent a mixed-protocol production capture.
+
+A 15-second profiled run measured 126.19 ms/op, 149,964,780 bytes/op, and 70,199
+allocations/op. Profiles include setup (roughly 1.5 seconds of 19.65 seconds
+elapsed), while benchmark timing excludes it. CPU attribution confirms
+`syncEventsView` at 49.53% cumulative, view ID lookup at 25.92% flat, store
+selection maintenance at 11.07% flat, and related-packet lookup at 10.30%
+cumulative. Source-line attribution identifies 370 ms in the front-eviction
+`copy`. Allocation attribution identifies packet-buffer materialization at
+78.45% and visible event projection at 16.21%. Cumulative percentages overlap.
+
+Reproduce measurements and inspect profiles with:
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -tags all -run '^$' \
+  -bench 'Benchmark(EventStore|EventsView|ModelEventBatch|SyncEventsView|HasRelated)' \
+  -benchtime=1s -benchmem ./internal/pkg/tui ./internal/pkg/tui/store ./internal/pkg/tui/components
+GOCACHE=/tmp/lippycat-go-cache go test -tags all -run '^$' \
+  -bench '^BenchmarkModelEventDNSReplay$' -benchtime=15s -benchmem \
+  -cpuprofile=/tmp/tui-event-dns-replay.cpu.pprof \
+  -memprofile=/tmp/tui-event-dns-replay.allocs.pprof \
+  -o /tmp/tui-event-dns-replay.test ./internal/pkg/tui
+GOCACHE=/tmp/lippycat-go-cache go run cmd/pprof -top -cum /tmp/tui-event-dns-replay.cpu.pprof
+GOCACHE=/tmp/lippycat-go-cache go run cmd/pprof -top -alloc_space /tmp/tui-event-dns-replay.allocs.pprof
+GOCACHE=/tmp/lippycat-go-cache go run cmd/pprof -list 'EventStore.*AddEvent' /tmp/tui-event-dns-replay.cpu.pprof
+```
+
+The installed toolchain lacks the `go tool pprof` binary, but its local
+`cmd/pprof` source works without installing a dependency. Profile binaries live
+in `/tmp`; the workload, commands, and attribution above preserve reproducibility.
+The TUI correctness suite and race suite pass. Rendering purity and bounded
+refresh cadence remain explicit later-phase changes, not passing Phase 1
+baseline invariants.
 
 Likely files:
 
@@ -333,13 +380,13 @@ Likely files:
 
 ## 12. Verification
 
-After each phase:
+After each phase (checked below for Phase 1):
 
-- [ ] Format all modified Go files with `gofmt` before staging.
-- [ ] Run focused event-store, event-view, and TUI tests with the appropriate
+- [x] Format all modified Go files with `gofmt` before staging.
+- [x] Run focused event-store, event-view, and TUI tests with the appropriate
       `tui`/`all` build tag.
-- [ ] Run the new benchmarks and compare with the recorded baseline.
-- [ ] Run race-enabled tests for the touched TUI/store packages.
+- [x] Run the new benchmarks and compare with the recorded baseline.
+- [x] Run race-enabled tests for the touched TUI/store packages.
 
 Before completion:
 

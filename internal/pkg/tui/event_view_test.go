@@ -149,19 +149,27 @@ func TestEventLossAndCompatibilityAccountingRespectsCaptureOrigin(t *testing.T) 
 func BenchmarkModelEventBatchSynchronization(b *testing.B) {
 	for _, size := range []int{1, 128} {
 		b.Run(fmt.Sprintf("remote_batch_%d", size), func(b *testing.B) {
-			batch := makeEventBatch(size, "remote")
+			// A pool larger than retention keeps IDs unique among buffered events.
+			pool := makeEventBatch(((10_000/size)+1)*size, "remote").Events
+			next := 0
 			m := NewModel(10_000, 8, "", "", nil, false, true, "", true)
 			m.uiState.ViewMode = "events"
 			m.eventStore.AddBatch(makeEventBatch(10_000, "seed").Events)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
+				batch := types.EventBatch{Events: pool[next : next+size]}
 				m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: batch})
+				next = (next + size) % len(pool)
 			}
 		})
 	}
 
 	b.Run("local_50_singleton_batches", func(b *testing.B) {
+		pendingLocalEvents.clear()
+		b.Cleanup(pendingLocalEvents.clear)
+		pool := makeEventBatch(10_050, "local").Events
+		next := 0
 		m := NewModel(10_000, 8, "test0", "", nil, false, false, "", false)
 		m.uiState.Capturing = true
 		m.uiState.ViewMode = "events"
@@ -169,19 +177,16 @@ func BenchmarkModelEventBatchSynchronization(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			pendingLocalEvents.clear()
 			for i := range 50 {
-				pendingLocalEvents.addBatch(types.EventBatch{Events: []events.Event{
-					events.NewDNSEvent(testEventEnvelope(fmt.Sprintf("local-%d", i), uint64(i+1))),
-				}})
+				pendingLocalEvents.addBatch(types.EventBatch{Events: pool[next+i : next+i+1]})
 			}
 			before := m.eventViewSyncCount
 			m, _ = m.handleTickMsg(TickMsg{})
 			if got := m.eventViewSyncCount - before; got != 50 {
 				b.Fatalf("got %d synchronizations, want 50", got)
 			}
+			next = (next + 50) % len(pool)
 		}
-		pendingLocalEvents.clear()
 	})
 }
 

@@ -34,6 +34,15 @@ func TestLateX3SuppressionCountsEveryRejectionButRateLimitsWarnings(t *testing.T
 	assert.Equal(t, firstWarning, liX3LastLateWarning.Load())
 }
 
+func TestBufferedX3DiscardAccountingIgnoresEmptyDiscard(t *testing.T) {
+	before := liX3BufferedDiscarded.Load()
+
+	recordBufferedX3Discard(0)
+	recordBufferedX3Discard(1)
+
+	assert.Equal(t, before+1, liX3BufferedDiscarded.Load())
+}
+
 func TestPopulateLIEncodingStatsExposesLifecycleCounters(t *testing.T) {
 	p := &Processor{liManager: li.NewManager(li.ManagerConfig{Enabled: true}, nil)}
 	dst := &management.ProcessorStats{}

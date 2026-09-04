@@ -442,6 +442,12 @@ all-owner lists as security attribution evidence. Focused, full tagged, and
 race-enabled suites were run for the affected packages, including an
 outside-sandbox run for localhost LI delivery coverage.
 
+Post-implementation audit: processor status reconstruction now preserves the
+three source-attribution counters from remote hunter heartbeats and synthetic tap
+hunters. A reorder entry drained concurrently with task finalization is accounted
+by the failed delivery-admission callback, because it is no longer visible to the
+finalizer's buffered-entry count.
+
 ## Phase 7: Verification and Release Gate
 
 - [ ] Run `gofmt` on every changed Go file before staging.

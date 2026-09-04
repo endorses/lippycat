@@ -80,6 +80,12 @@ func recordLateX3Suppression(callID string, generation uint64, reason string) {
 	)
 }
 
+func recordBufferedX3Discard(count int) {
+	if count > 0 {
+		liX3BufferedDiscarded.Add(uint64(count)) // #nosec G115 -- bounded buffer count
+	}
+}
+
 // processorFilterPusher adapts the processor's filter management system
 // to the li.FilterPusher interface.
 type processorFilterPusher struct {
@@ -206,8 +212,7 @@ func (p *Processor) initLIManager() {
 			if ok && strings.HasPrefix(keyString, prefix) {
 				// Expiry/deactivation is an enforcement boundary. Buffered X3
 				// packets must be discarded, not flushed after the task ended.
-				discarded := value.(*delivery.ReorderBuffer).DiscardCount()
-				liX3BufferedDiscarded.Add(uint64(discarded)) // #nosec G115 -- bounded buffer count
+				recordBufferedX3Discard(value.(*delivery.ReorderBuffer).DiscardCount())
 				liReorderBuffers.Delete(key)
 			}
 			return true
@@ -447,6 +452,11 @@ func (p *Processor) initLIManager() {
 							func(entry delivery.ReorderEntry) {
 								deliveryTaskAdmission, taskStillActive := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
 								if !taskStillActive {
+									// The reorder buffer may have drained this entry just
+									// before task finalization acquired its barrier. In that
+									// case DiscardCount cannot see it, so this callback owns
+									// the entry's single terminal accounting event.
+									recordBufferedX3Discard(1)
 									return
 								}
 								defer deliveryTaskAdmission.Release()

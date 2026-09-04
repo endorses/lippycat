@@ -573,8 +573,8 @@ the processor/source status counters and structured warnings:
 
 | Signal | Increment owner and interpretation |
 |--------|------------------------------------|
-| media resolution `resolved` / `ambiguous` / `unknown` | The local packet source increments exactly one result when its exact-endpoint lookup completes. `ambiguous` means multiple live calls own the evidence; `unknown` means none does. Labels are the fixed result set only. |
-| `identity_inheritance_suppressed` | The local packet source increments once per classified media packet whose identity inheritance is denied. Direct IP/CIDR matches may still pass. |
+| `rtp_ownership_unresolved` / `rtp_ownership_ambiguous` | The local source or distributed hunter increments one exceptional-outcome counter when exact-endpoint lookup cannot identify one authoritative call. `ambiguous` means multiple live calls own the evidence; `unresolved` means none does. Resolved packets do not increment either counter. |
+| `identity_inheritance_suppressed` | The local source or distributed hunter increments once per classified media packet whose identity inheritance is denied. Direct IP/CIDR matches may still pass. |
 | `inherited_provenance_rejected` | The LI manager increments once per inherited filter ID rejected at the LI trust boundary, including non-authoritative or mismatched Call-ID provenance. |
 | `x3_finalized_or_stale_suppressed` | The processor LI path increments at the admission check that rejects X3 work for a finalized or stale call generation. It is not incremented again by a downstream layer for the same rejection. |
 | `x3_buffered_discarded` | The call-finalization subscriber increments by the number of queued reorder entries removed for that exact Call-ID and generation. |

@@ -16,26 +16,29 @@ type TopologyPublisher interface {
 
 // ConnectedHunter represents a connected hunter node
 type ConnectedHunter struct {
-	ID                        string
-	Hostname                  string
-	RemoteAddr                string
-	Interfaces                []string
-	Capabilities              *management.HunterCapabilities // Filter capabilities advertised by hunter
-	ConnectedAt               int64
-	LastHeartbeat             int64
-	PacketsReceived           uint64 // Packets received by processor from this hunter
-	PacketsCaptured           uint64 // Packets captured by hunter (from heartbeat stats)
-	PacketsMatched            uint64 // Packets matching filters (from heartbeat stats)
-	PacketsForwarded          uint64 // Packets forwarded by hunter (from heartbeat stats)
-	PacketsDropped            uint64 // Packets dropped by hunter (from heartbeat stats)
-	CaptureBufferRegularDrops uint64
-	CaptureBufferSIPDrops     uint64
-	BatchChannelDrops         uint64
-	BufferBytes               uint64 // Hunter buffer occupancy (from heartbeat stats)
-	ActiveFilters             uint32 // Active filter count from hunter stats
-	Status                    management.HunterStatus
-	FilterUpdateFailures      uint32 // Consecutive filter update send failures
-	LastFilterUpdateFailure   int64  // Timestamp of last filter update failure
+	ID                            string
+	Hostname                      string
+	RemoteAddr                    string
+	Interfaces                    []string
+	Capabilities                  *management.HunterCapabilities // Filter capabilities advertised by hunter
+	ConnectedAt                   int64
+	LastHeartbeat                 int64
+	PacketsReceived               uint64 // Packets received by processor from this hunter
+	PacketsCaptured               uint64 // Packets captured by hunter (from heartbeat stats)
+	PacketsMatched                uint64 // Packets matching filters (from heartbeat stats)
+	PacketsForwarded              uint64 // Packets forwarded by hunter (from heartbeat stats)
+	PacketsDropped                uint64 // Packets dropped by hunter (from heartbeat stats)
+	CaptureBufferRegularDrops     uint64
+	CaptureBufferSIPDrops         uint64
+	BatchChannelDrops             uint64
+	BufferBytes                   uint64 // Hunter buffer occupancy (from heartbeat stats)
+	ActiveFilters                 uint32 // Active filter count from hunter stats
+	RTPOwnershipUnresolved        uint64
+	RTPOwnershipAmbiguous         uint64
+	IdentityInheritanceSuppressed uint64
+	Status                        management.HunterStatus
+	FilterUpdateFailures          uint32 // Consecutive filter update send failures
+	LastFilterUpdateFailure       int64  // Timestamp of last filter update failure
 	// System metrics (from heartbeat stats)
 	CpuPercent       float32 // CPU usage percentage (0-100, -1 if unavailable)
 	MemoryRssBytes   uint64  // Process RSS memory in bytes
@@ -175,6 +178,9 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 			hunter.CaptureBufferSIPDrops = stats.CaptureBufferSipDrops
 			hunter.BatchChannelDrops = stats.BatchChannelDrops
 			hunter.BufferBytes = stats.BufferBytes
+			hunter.RTPOwnershipUnresolved = stats.RtpOwnershipUnresolved
+			hunter.RTPOwnershipAmbiguous = stats.RtpOwnershipAmbiguous
+			hunter.IdentityInheritanceSuppressed = stats.IdentityInheritanceSuppressed
 
 			// Update system metrics (CPU/RAM)
 			hunter.CpuPercent = stats.CpuPercent

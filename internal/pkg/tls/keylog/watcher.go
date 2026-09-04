@@ -371,11 +371,15 @@ func (w *Watcher) pipeReadLoop(ctx context.Context) {
 		default:
 		}
 
-		// Open pipe with non-blocking mode to avoid blocking on open
-		// This allows us to check ctx/stopChan while waiting for a writer
-		file, err := os.OpenFile(w.path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+		// Keep both ends open in non-blocking mode. Opening a FIFO read-only can
+		// report EOF whenever no external writer is connected, creating a gap in
+		// which a writer can open successfully and then block or fail before the
+		// next reader is installed. O_RDWR keeps one stable reader for the
+		// watcher's lifetime while still allowing shutdown polling.
+		file, err := os.OpenFile(w.path, os.O_RDWR|syscall.O_NONBLOCK, 0)
 		if err != nil {
-			// ENXIO means no writer is connected yet - this is expected
+			// Treat a transient missing peer as retryable for platforms that can
+			// still return ENXIO when opening a FIFO in non-blocking mode.
 			if !errors.Is(err, syscall.ENXIO) {
 				logger.Warn("failed to open key log pipe",
 					"path", w.path,

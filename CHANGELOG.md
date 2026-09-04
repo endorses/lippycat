@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-09-04
+
+### Added
+- Add source and processor telemetry for unresolved or ambiguous RTP ownership,
+  suppressed identity inheritance, finalized or stale X3 work, and discarded
+  reorder entries
+
+### Changed
+- Resolve RTP ownership from exact endpoint evidence and carry direct-versus-
+  inherited filter provenance across local and distributed capture paths
+- Centralize bounded call generations, admissions, and finalization in the
+  processor so per-call PCAP and LI use one lifecycle authority even when PCAP
+  output is disabled
+- Document fail-closed RTP attribution, lifecycle suppression counters, and the
+  non-atomic delivery behavior of multi-MDF X3 fan-out during finalization
+
+### Fixed
+- Prevent shared or reused media endpoints from assigning one call's RTP to
+  another call's identity filter, XID, correlation ID, or direction state while
+  preserving direct IP and CIDR interception
+- Prevent finalized or stale call content from being encoded, buffered, queued,
+  or attached to a reused Call-ID, including delayed X3 reorder delivery
+- Make LI and per-call PCAP share one packet-scoped admission so finalization
+  cannot split their acceptance decisions
+- Prevent LI reorder admission deadlocks and delivery shutdown worker races
+- Encode ETSI TS 103 221-2 version 0.5 as network bytes `00 05` for X2, X3,
+  keepalive, and keepalive-ack PDUs, and reject the legacy `05 00` encoding
+
 ## [0.11.4] - 2026-09-03
 
 ### Changed

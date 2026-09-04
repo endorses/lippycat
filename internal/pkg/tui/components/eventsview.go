@@ -39,9 +39,17 @@ type EventItem struct {
 	ArrivedAt       time.Time
 }
 
+// eventIDPositions tracks the first and last retained occurrence of a stable ID.
+// Absolute positions survive front trims and backing-slice compaction.
+type eventIDPositions struct{ first, last uint64 }
+
 // EventsView renders a protocol-neutral event timeline and detail panel.
 type EventsView struct {
 	items                   []EventItem
+	itemStorage             []EventItem
+	itemBase                uint64
+	positions               map[string]eventIDPositions
+	nextDuplicate           map[uint64]uint64
 	selectedID              string
 	offset                  int
 	width, height           int
@@ -124,7 +132,16 @@ func (v *EventsView) timelineOffset(height, selected int) int {
 
 func (v *EventsView) SetEvents(items []EventItem) {
 	oldSelected := v.indexByID(v.selectedID)
-	v.items = append(v.items[:0], items...)
+	oldStorage := v.itemStorage
+	v.itemStorage = append(v.itemStorage[:0], items...)
+	if len(oldStorage) > len(items) {
+		clear(oldStorage[len(items):])
+	}
+	v.items = v.itemStorage
+	v.itemBase = 0
+	clear(v.positions)
+	clear(v.nextDuplicate)
+	v.indexAppended(0)
 	newSelected := v.indexByID(v.selectedID)
 	if oldSelected >= 0 && newSelected >= 0 {
 		v.offset += newSelected - oldSelected
@@ -141,6 +158,115 @@ func (v *EventsView) SetEvents(items []EventItem) {
 	}
 	v.selectedID = v.items[0].Event.Envelope().EventID
 	v.offset = v.timelineOffset(v.height, 0)
+}
+
+// AppendEvents copies new rows without rebuilding the retained projection.
+// Selection remains pinned until the owner applies its selected stable ID.
+func (v *EventsView) AppendEvents(items []EventItem) {
+	if len(items) == 0 {
+		return
+	}
+	oldCount := len(v.items)
+	start := len(v.itemStorage) - oldCount
+	if len(v.itemStorage)+len(items) > cap(v.itemStorage) {
+		// Compact only after at least as many rows have been trimmed as remain.
+		// Otherwise grow geometrically, keeping append/trim amortized O(delta).
+		if start >= oldCount && oldCount+len(items) <= cap(v.itemStorage) {
+			copy(v.itemStorage, v.items)
+			clear(v.itemStorage[oldCount:])
+			v.itemStorage = v.itemStorage[:oldCount]
+		} else {
+			storage := make([]EventItem, oldCount, max(2*cap(v.itemStorage), oldCount+len(items)))
+			copy(storage, v.items)
+			v.itemStorage = storage
+		}
+		start = 0
+	}
+	v.itemStorage = append(v.itemStorage, items...)
+	v.items = v.itemStorage[start:]
+	v.indexAppended(oldCount)
+	if oldCount == 0 {
+		v.selectedID = v.items[0].Event.Envelope().EventID
+	}
+	v.offset = v.timelineOffset(v.height, v.indexByID(v.selectedID))
+}
+
+// TrimOldEvents removes a visible prefix, releasing event references immediately.
+// Logical positions are derived from a moving base; surviving IDs are not reindexed.
+// For a combined delta, append before trimming to retain the original selection
+// as the viewport anchor if the same stable ID is evicted and reintroduced.
+func (v *EventsView) TrimOldEvents(count int) {
+	count = min(max(count, 0), len(v.items))
+	if count == 0 {
+		return
+	}
+	oldSelected := v.indexByID(v.selectedID)
+	for i, item := range v.items[:count] {
+		if item.Event == nil {
+			continue
+		}
+		id := item.Event.Envelope().EventID
+		position := v.itemBase + uint64(i)
+		entry := v.positions[id]
+		if entry.first == entry.last {
+			delete(v.positions, id)
+		} else {
+			entry.first = v.nextDuplicate[position]
+			delete(v.nextDuplicate, position)
+			v.positions[id] = entry
+		}
+	}
+	clear(v.items[:count])
+	v.items = v.items[count:]
+	v.itemBase += uint64(count)
+	newSelected := v.indexByID(v.selectedID)
+	if oldSelected >= 0 && newSelected >= 0 {
+		v.offset += newSelected - oldSelected
+	} else {
+		// PrepareLayout invalidates details using the final selected ID after
+		// trim, append, and owner selection have all been applied. The same
+		// immutable ID can be evicted and reintroduced in one delta.
+		if len(v.items) == 0 {
+			v.selectedID = ""
+			v.offset = 0
+			return
+		}
+		v.selectedID = v.items[0].Event.Envelope().EventID
+		newSelected = 0
+	}
+	v.offset = v.timelineOffset(v.height, newSelected)
+}
+
+func (v *EventsView) indexAppended(start int) {
+	if v.positions == nil {
+		v.positions = make(map[string]eventIDPositions, len(v.items))
+	}
+	for i := start; i < len(v.items); i++ {
+		if v.items[i].Event == nil {
+			continue
+		}
+		id := v.items[i].Event.Envelope().EventID
+		position := v.itemBase + uint64(i)
+		entry, exists := v.positions[id]
+		if !exists {
+			v.positions[id] = eventIDPositions{first: position, last: position}
+			continue
+		}
+		if v.nextDuplicate == nil {
+			v.nextDuplicate = make(map[uint64]uint64)
+		}
+		v.nextDuplicate[entry.last] = position
+		entry.last = position
+		v.positions[id] = entry
+	}
+}
+
+// Selected returns the first retained row with the selected stable ID.
+func (v *EventsView) Selected() (EventItem, bool) {
+	if i := v.indexByID(v.selectedID); i >= 0 {
+		return v.items[i], true
+	}
+	return EventItem{}, false
 }
 
 func (v *EventsView) SetSelectedID(id string) {
@@ -553,10 +679,8 @@ func padRunes(value string, width int) string {
 }
 
 func (v *EventsView) indexByID(id string) int {
-	for i, item := range v.items {
-		if item.Event != nil && item.Event.Envelope().EventID == id {
-			return i
-		}
+	if entry, ok := v.positions[id]; ok {
+		return int(entry.first - v.itemBase)
 	}
 	return -1
 }

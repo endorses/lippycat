@@ -1,7 +1,7 @@
 # TUI Event View Performance Optimization Plan
 
 **Date:** 2026-09-04
-**Status:** Phases 1–4 verified; Phases 5–7 planned
+**Status:** Phases 1–5 verified; Phases 6–7 planned
 **Scope:** Normalized event ingestion, retention, projection, synchronization,
 and rendering in `internal/pkg/tui`
 
@@ -564,29 +564,29 @@ append-only updates. Mirror the established packet-list incremental flow:
 detect a projection change, use a full refresh only when required, otherwise
 retrieve a sequence delta, trim the view, and append new rows.
 
-- [ ] Add an event equivalent of `PacketStore.GetNewPackets`, keyed by the
+- [x] Add an event equivalent of `PacketStore.GetNewPackets`, keyed by the
       existing monotonic arrival sequence and a projection/filter revision.
-- [ ] Return the same essential outcome as the packet API: new visible items,
+- [x] Return the same essential outcome as the packet API: new visible items,
       the new synchronization cursor, and whether a full refresh is required.
-- [ ] Define any additional event-view delta fields narrowly—for example the
+- [x] Define any additional event-view delta fields narrowly—for example the
       number of visible items trimmed, selection ID, and projection generation.
-- [ ] Have `EventStore.AddBatch` expose or retain enough change information to
+- [x] Have `EventStore.AddBatch` expose or retain enough change information to
       build the delta without scanning the full store.
-- [ ] Add typed `EventsView.AppendEvents` and `EventsView.TrimOldEvents`
+- [x] Add typed `EventsView.AppendEvents` and `EventsView.TrimOldEvents`
       operations modeled on `PacketList.AppendPackets` and
       `PacketList.TrimOldPackets`, plus reset and stable-ID selection updates.
-- [ ] Maintain an ID-to-logical-index map, or equivalent stable index, so
+- [x] Maintain an ID-to-logical-index map, or equivalent stable index, so
       selection operations do not repeatedly scan the full projection.
-- [ ] Reserve full projection rebuilds for protocol/source/user-filter changes,
+- [x] Reserve full projection rebuilds for protocol/source/user-filter changes,
       resets, or recovery from a generation mismatch.
-- [ ] Ensure filtering new arrivals evaluates only the new events; filter
+- [x] Ensure filtering new arrivals evaluates only the new events; filter
       changes may intentionally perform one full rebuild.
-- [ ] Keep viewport offset and follow-latest behavior correct across circular
+- [x] Keep viewport offset and follow-latest behavior correct across circular
       buffer wraparound and filtered evictions.
-- [ ] Add equivalence tests that compare incremental results with a reference
+- [x] Add equivalence tests that compare incremental results with a reference
       full projection across randomized batches, filters, selections, and
       evictions.
-- [ ] Add parallel packet/event incremental-sync scenarios proving both paths
+- [x] Add parallel packet/event incremental-sync scenarios proving both paths
       make the same full-refresh versus delta decisions for equivalent ring
       states.
 
@@ -596,6 +596,65 @@ Likely files:
 - `internal/pkg/tui/components/eventsview.go`
 - `internal/pkg/tui/event_view.go`
 - corresponding test files
+
+### Phase 5 implementation and verification
+
+`EventStore.GetNewEvents` returns an atomic cursor, selection, visible eviction
+count, and new visible rows. Arrival sequences address the newest ring slots;
+cached per-slot visibility avoids re-evaluating predicates during synchronization.
+Filter revisions and reset invalidate the cursor. Missing at least capacity
+arrivals requests a recovery snapshot, matching `PacketStore.GetNewPackets`.
+Unchanged protocol/source filters preserve the revision. Explicit navigation
+uses cached ring visibility without allocating a complete projection; ordinary
+refresh selection uses the component's constant-time stable-ID index.
+
+The model uses full snapshots only for initialization, invalidation, or recovery,
+and detects store replacement even if its cursor values match the prior store.
+`EventsView` maintains absolute ID positions, including linked repeated-ID
+occurrences, across trims and amortized backing-slice compaction. Evicted event
+references are cleared immediately. The model appends before trimming so an ID
+evicted and reintroduced in one delta retains its original viewport anchor.
+Selection and layout are prepared after the complete update; rendering stays
+read-only. Full reset still clears detail state.
+
+Two sub-agents implemented store and component changes, while root integrated
+the model and a third agent independently reviewed the result. Review reproduced
+and verified fixes for repeated-ID detail-scroll reset and viewport drift.
+Permanent tests compare 9,000 randomized store operations with an independently
+filtered full projection and 5,000 atomic component deltas with full `SetEvents`
+updates, alongside 3,000 individual component-operation comparisons. Parallel
+packet/event scenarios verify recovery decisions; deterministic tests cover
+cached predicate work, idle/invisible zero-allocation deltas, bounded index work,
+reference release, unchanged filters, reset, store replacement, and model full-
+refresh counts. Independent exhaustive viewport comparisons also passed.
+
+Full TUI correctness and race suites under `-tags all` and `make tui all` passed.
+Go files were formatted. The same generated DNS replay passed arrival, eviction,
+selection, and zero-loss assertions. No Phase 6 packet index or final mixed-mode
+manual/CPU acceptance claim is included in this phase.
+
+One-second runs on the same Intel Core i9-13900HX measured:
+
+| Workload | Phase 4 time/op | Phase 5 time/op | Phase 5 allocated bytes/op |
+| --- | ---: | ---: | ---: |
+| Local tick, 50 singleton batches, 10,000 retained | 1.03 ms | 16.20 µs | 12,218 |
+| Remote batch, 1 event, 10,000 retained | 0.97 ms | 1.13 µs | 423 |
+| Remote batch, 128 events, 10,000 retained | 0.98 ms | 34.75 µs | 16,141 |
+| Generated DNS replay, 50 packets | 5.66 ms | 3.61 ms | 4,669,859 |
+
+Incremental component append/trim/selection measured 134.1 ns and 134.7 ns at
+1,000 and 10,000 retained events, with zero steady-state allocations. Store
+append plus unfiltered delta measured 138.0 ns and 140.9 ns, respectively, with
+48 bytes per operation. The filtered alternating-kind workload measured
+125.1–141.5 ns and 24 amortized bytes per operation. Model synchronization
+benchmarks retain their exactly-one-sync-per-tick assertions. These timings are
+observations rather than CI thresholds; retained-capacity-independent work is
+also guarded by deterministic operation-count tests. Replay allocations still
+include full packet-buffer relationship scans, which Phase 6 addresses.
+
+Output is recorded in `/tmp/tui-event-phase5-bench.txt`. Reproduce using the
+Phase 1 benchmark command with
+`Benchmark(EventStoreIncrementalProjection|EventsViewAppendIncremental|ModelEventBatchSynchronization|ModelEventDNSReplay)$`.
 
 ## 10. Phase 6 — Remove Full Packet-Buffer Scans
 
@@ -648,7 +707,7 @@ Likely files:
 
 ## 12. Verification
 
-After each phase (checked below for Phases 1–4):
+After each phase (checked below for Phases 1–5):
 
 - [x] Format all modified Go files with `gofmt` before staging.
 - [x] Run focused event-store, event-view, and TUI tests with the appropriate

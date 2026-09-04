@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/tui/store"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -162,9 +163,23 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 	m.eventViewDirty = false
 	m.lastEventViewUpdate = now
 	m.eventViewSyncCount++
-	m.uiState.EventsView.SetEvents(m.eventStore.Events())
-	m.uiState.EventsView.SetSelectedID(m.eventStore.SelectedID())
-	if selected, ok := m.eventStore.Selected(); ok {
+	if m.eventViewStore != m.eventStore {
+		m.eventViewCursor = store.EventCursor{}
+		m.eventViewStore = m.eventStore
+	}
+	delta := m.eventStore.GetNewEvents(m.eventViewCursor)
+	if delta.FullRefresh {
+		m.uiState.EventsView.SetEvents(delta.Items)
+		m.eventViewFullSyncCount++
+	} else {
+		// Append before trimming so a repeated stable ID present in the final
+		// projection never temporarily loses its selection/viewport anchor.
+		m.uiState.EventsView.AppendEvents(delta.Items)
+		m.uiState.EventsView.TrimOldEvents(delta.Trimmed)
+	}
+	m.eventViewCursor = delta.Cursor
+	m.uiState.EventsView.SetSelectedID(delta.SelectedID)
+	if selected, ok := m.uiState.EventsView.Selected(); ok {
 		m.uiState.EventsView.SetRelatedPacketsAvailable(m.hasRelatedPacket(selected.Event))
 	}
 	m.prepareEventsViewLayout()

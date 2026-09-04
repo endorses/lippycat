@@ -605,8 +605,20 @@ and selection maintenance are amortized constant-time per event. Filter changes
 rebuild visibility; reset clears backing references while preserving filters and
 pause state. The packet store remains a separate typed implementation.
 
-Full event projection and packet scans still occur on each synchronization;
-incremental projection and packet indexing are later phases of
+`EventStore.GetNewEvents` returns an atomic projection delta, selection, and cursor
+containing arrival sequence, filter revision, and visible eviction count. Normal
+refreshes read only new ring slots using cached visibility. Initial refresh,
+filter changes, reset, and a cursor that missed at least capacity arrivals return
+a full snapshot. The model also invalidates its cursor when the store is replaced.
+Unchanged protocol/source filters preserve the revision.
+
+`EventsView.TrimOldEvents` releases evicted references and `AppendEvents` copies
+new rows. A stable absolute-position index preserves first-match selection for
+repeated event IDs without rescanning surviving rows. Backing storage compacts
+amortized over trims. The model applies the final selection before preparing
+layout, preserving detail scrolling when a repeated ID survives the final delta.
+Rendering remains read-only. Related-packet lookup still scans the packet buffer;
+packet indexing remains Phase 6 of
 `docs/plans/tui-event-view-performance-optimization.md`.
 
 ### Rendering Optimization

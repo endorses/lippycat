@@ -17,6 +17,26 @@ type EventStoreStats struct {
 	TransportLossByKind                map[string]uint64
 }
 
+// EventCursor identifies a synchronized projection. Callers retain the entire
+// cursor returned by GetNewEvents; its zero value requests an initial snapshot.
+type EventCursor struct {
+	ArrivalSequence uint64
+	Revision        uint64
+	VisibleEvicted  uint64
+}
+
+// EventDelta is an atomic projection update. FullRefresh replaces the projection
+// with Items; otherwise callers append Items and remove Trimmed oldest rows.
+// Appending first preserves the view's stable-ID anchor across repeated delivery.
+// SelectedID is authoritative even when no rows have changed.
+type EventDelta struct {
+	Items       []components.EventItem
+	Cursor      EventCursor
+	FullRefresh bool
+	Trimmed     int
+	SelectedID  string
+}
+
 // EventStore is a bounded, concurrency-safe arrival-ordered event buffer.
 // Events are immutable after ingestion; a stable EventID identifies the same
 // event metadata on repeated delivery, including all fields used by filters.
@@ -43,6 +63,7 @@ type EventStore struct {
 	visible                                      []bool
 	firstVisible, lastVisible                    int
 	nextArrival                                  uint64
+	projectionRevision, visibleEvicted           uint64
 	selectedID                                   string
 	followLatest                                 bool
 	paused                                       bool
@@ -66,6 +87,7 @@ func NewEventStore(capacity int) *EventStore {
 		capacity: capacity, items: make([]components.EventItem, capacity),
 		visible: make([]bool, capacity), firstVisible: -1, lastVisible: -1,
 		followLatest: true, lossByKind: make(map[string]uint64),
+		projectionRevision: 1,
 	}
 }
 
@@ -100,6 +122,7 @@ func (s *EventStore) AddBatch(batch []events.Event) int {
 		if full {
 			evictedID = s.items[s.head].Event.Envelope().EventID
 			if s.visible[s.head] {
+				s.visibleEvicted++
 				s.visible[s.head] = false
 				if s.firstVisible == s.lastVisible {
 					s.firstVisible, s.lastVisible = -1, -1
@@ -177,6 +200,8 @@ func (s *EventStore) Reset() {
 	s.selectedID = ""
 	s.followLatest = true
 	s.nextArrival = 0
+	s.projectionRevision++
+	s.visibleEvicted = 0
 	s.arrived = 0
 	s.evicted = 0
 	s.pausedCount = 0
@@ -187,6 +212,9 @@ func (s *EventStore) Reset() {
 func (s *EventStore) SetKindFilter(kinds []events.Kind) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if sameEventFilter(s.kinds, kinds) {
+		return
+	}
 	s.kinds = nil
 	if kinds != nil {
 		s.kinds = make(map[events.Kind]struct{}, len(kinds))
@@ -200,6 +228,9 @@ func (s *EventStore) SetKindFilter(kinds []events.Kind) {
 func (s *EventStore) SetSourceFilter(sources []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if sameEventFilter(s.sources, sources) {
+		return
+	}
 	s.sources = nil
 	if sources != nil {
 		s.sources = make(map[string]struct{}, len(sources))
@@ -238,8 +269,37 @@ func (s *EventStore) RemoveLastUserFilter() bool {
 func (s *EventStore) ClearUserFilters() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.userFilters) == 0 {
+		return
+	}
 	s.userFilters = nil
 	s.ensureVisibleSelectionLocked()
+}
+
+// sameEventFilter compares set membership while preserving nil (all) versus an
+// empty non-nil filter (none). Duplicate requested values do not change a set.
+func sameEventFilter[T comparable](current map[T]struct{}, requested []T) bool {
+	if current == nil || requested == nil {
+		return current == nil && requested == nil
+	}
+	for _, value := range requested {
+		if _, ok := current[value]; !ok {
+			return false
+		}
+	}
+	for value := range current {
+		found := false
+		for _, candidate := range requested {
+			if candidate == value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *EventStore) HasUserFilters() bool {
@@ -270,12 +330,43 @@ func (s *EventStore) Events() []components.EventItem {
 	return s.visibleItemsLocked()
 }
 
+// GetNewEvents mirrors PacketStore.GetNewPackets: fewer than capacity arrivals
+// can be read directly from the newest ring slots; capacity or more requires a
+// recovery snapshot. Filter changes and reset also invalidate the cursor.
+// Cached visibility avoids evaluating filters again, and the eviction counter
+// identifies old visible rows to trim without traversing retained history.
+func (s *EventStore) GetNewEvents(cursor EventCursor) EventDelta {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := EventDelta{
+		Cursor:     EventCursor{s.nextArrival, s.projectionRevision, s.visibleEvicted},
+		SelectedID: s.selectedID,
+	}
+	if cursor.Revision != s.projectionRevision || cursor.ArrivalSequence > s.nextArrival ||
+		cursor.VisibleEvicted > s.visibleEvicted || s.nextArrival-cursor.ArrivalSequence >= uint64(s.capacity) {
+		result.FullRefresh = true
+		result.Items = s.visibleItemsLocked()
+		return result
+	}
+	result.Trimmed = int(s.visibleEvicted - cursor.VisibleEvicted)
+	count := int(s.nextArrival - cursor.ArrivalSequence)
+	// Allocate only matching rows, including no allocation for invisible arrivals.
+	for i := 0; i < count; i++ {
+		index := (s.head - count + s.capacity + i) % s.capacity
+		if s.visible[index] {
+			result.Items = append(result.Items, s.items[index])
+		}
+	}
+	return result
+}
+
 func (s *EventStore) Selected() (components.EventItem, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := 0; i < s.count; i++ {
 		item := s.itemLocked(i)
-		if s.visibleLocked(item.Event) && item.Event.Envelope().EventID == s.selectedID {
+		if s.visible[(s.head-s.count+s.capacity+i)%s.capacity] && item.Event.Envelope().EventID == s.selectedID {
 			return item, true
 		}
 	}
@@ -296,11 +387,11 @@ func (s *EventStore) SelectByIDFollowingLatest(id string) bool {
 func (s *EventStore) selectByID(id string, followWhenLast bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	visible := s.visibleItemsLocked()
-	for i, item := range visible {
-		if s.visibleLocked(item.Event) && item.Event.Envelope().EventID == id {
+	for i := 0; i < s.count; i++ {
+		index := (s.head - s.count + s.capacity + i) % s.capacity
+		if s.visible[index] && s.items[index].Event.Envelope().EventID == id {
 			s.selectedID = id
-			s.followLatest = followWhenLast && i == len(visible)-1
+			s.followLatest = followWhenLast && index == s.lastVisible
 			return true
 		}
 	}
@@ -315,43 +406,54 @@ func (s *EventStore) SelectOffset(delta int) { s.moveSelection(delta) }
 func (s *EventStore) selectBoundary(last bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	visible := s.visibleItemsLocked()
-	if len(visible) == 0 {
+	index := s.firstVisible
+	if last {
+		index = s.lastVisible
+	}
+	if index < 0 {
 		s.selectedID = ""
 		return
 	}
-	index := 0
-	if last {
-		index = len(visible) - 1
-	}
-	s.selectedID = visible[index].Event.Envelope().EventID
+	s.selectedID = s.items[index].Event.Envelope().EventID
 	s.followLatest = last
 }
 
 func (s *EventStore) moveSelection(delta int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	visible := s.visibleItemsLocked()
-	if len(visible) == 0 {
+	if s.firstVisible < 0 {
 		s.selectedID = ""
 		return
 	}
-	index := 0
-	for i := range visible {
-		if visible[i].Event.Envelope().EventID == s.selectedID {
-			index = i
-			break
+	// Explicit navigation scans cached visibility without constructing a full
+	// projection or evaluating predicates. Select the first matching stable ID,
+	// preserving repeated-delivery behavior.
+	visibleCount, selected := 0, 0
+	found := false
+	for i := 0; i < s.count; i++ {
+		index := (s.head - s.count + s.capacity + i) % s.capacity
+		if !s.visible[index] {
+			continue
 		}
+		if !found && s.items[index].Event.Envelope().EventID == s.selectedID {
+			selected, found = visibleCount, true
+		}
+		visibleCount++
 	}
-	index += delta
-	if index < 0 {
-		index = 0
+	target := max(0, min(visibleCount-1, selected+delta))
+	visibleIndex := 0
+	for i := 0; i < s.count; i++ {
+		index := (s.head - s.count + s.capacity + i) % s.capacity
+		if !s.visible[index] {
+			continue
+		}
+		if visibleIndex == target {
+			s.selectedID = s.items[index].Event.Envelope().EventID
+			s.followLatest = target == visibleCount-1
+			return
+		}
+		visibleIndex++
 	}
-	if index >= len(visible) {
-		index = len(visible) - 1
-	}
-	s.selectedID = visible[index].Event.Envelope().EventID
-	s.followLatest = index == len(visible)-1
 }
 
 func (s *EventStore) RecordTransportLoss(kind string, count uint64) {
@@ -416,9 +518,9 @@ func (s *EventStore) visibleLocked(event events.Event) bool {
 func (s *EventStore) visibleItemsLocked() []components.EventItem {
 	result := make([]components.EventItem, 0, s.count)
 	for i := 0; i < s.count; i++ {
-		item := s.itemLocked(i)
-		if s.visibleLocked(item.Event) {
-			result = append(result, item)
+		index := (s.head - s.count + s.capacity + i) % s.capacity
+		if s.visible[index] {
+			result = append(result, s.items[index])
 		}
 	}
 	return result
@@ -430,6 +532,8 @@ func (s *EventStore) itemLocked(index int) components.EventItem {
 }
 
 func (s *EventStore) ensureVisibleSelectionLocked() {
+	s.projectionRevision++
+	s.visibleEvicted = 0
 	// All callers change filters, so refresh visibility before repairing the
 	// selected ID. Ingestion maintains this cache directly for new arrivals.
 	clear(s.visible)
@@ -446,17 +550,16 @@ func (s *EventStore) ensureVisibleSelectionLocked() {
 	}
 	for i := 0; i < s.count; i++ {
 		item := s.itemLocked(i)
-		if s.visibleLocked(item.Event) && item.Event.Envelope().EventID == s.selectedID {
+		if s.visible[(s.head-s.count+s.capacity+i)%s.capacity] && item.Event.Envelope().EventID == s.selectedID {
 			return
 		}
 	}
-	visible := s.visibleItemsLocked()
-	if len(visible) > 0 {
-		index := 0
-		if s.followLatest {
-			index = len(visible) - 1
-		}
-		s.selectedID = visible[index].Event.Envelope().EventID
+	index := s.firstVisible
+	if s.followLatest {
+		index = s.lastVisible
+	}
+	if index >= 0 {
+		s.selectedID = s.items[index].Event.Envelope().EventID
 		return
 	}
 	s.selectedID = ""

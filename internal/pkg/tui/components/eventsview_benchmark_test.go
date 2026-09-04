@@ -76,3 +76,23 @@ func BenchmarkEventsViewRenderTimeline(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkEventsViewAppendIncremental(b *testing.B) {
+	for _, retained := range []int{1_000, 10_000} {
+		b.Run(fmt.Sprintf("retained_%d", retained), func(b *testing.B) {
+			items := benchmarkEventItems(retained + 1)
+			view := NewEventsView()
+			view.SetEvents(items[:retained])
+			view.SetSelectedID(items[retained-1].Event.Envelope().EventID)
+			next := retained
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				view.AppendEvents(items[next : next+1])
+				view.TrimOldEvents(1)
+				view.SetSelectedID(items[next].Event.Envelope().EventID)
+				next = (next + 1) % len(items)
+			}
+		})
+	}
+}

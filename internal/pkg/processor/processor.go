@@ -194,6 +194,12 @@ type Processor struct {
 
 	sessionOutputManager *SessionOutputManager
 	callLifecycle        *CallLifecycleRegistry
+	// afterLIPacket is a test synchronization hook for the coordinated
+	// LI/per-call-PCAP admission boundary. Production leaves it nil.
+	afterLIPacket func()
+	// liPacketAdmissions carries packet-scoped lifecycle leases through the LI
+	// manager's synchronous task callback without widening its public API.
+	liPacketAdmissions sync.Map // map[*types.PacketDisplay]*CallAdmission
 
 	// Auto-rotate PCAP writer (for non-VoIP traffic)
 	autoRotatePcapWriter *AutoRotatePcapWriter

@@ -327,6 +327,16 @@ func (pwm *PcapWriterManager) writePacketGeneration(callID, from, to string, tim
 	if requiredGeneration != 0 && admission.Generation() != requiredGeneration {
 		return fmt.Errorf("%w: call %q generation %d is no longer current", ErrCallPcapWriterClosed, callID, requiredGeneration)
 	}
+	return pwm.writePacketWithAdmission(admission, callID, from, to, timestamp, data, linkType, isRTP)
+}
+
+// writePacketWithAdmission performs the irreversible PCAP acceptance step under
+// a packet-scoped admission already held by the processor pipeline. This keeps
+// LI and PCAP on the same side of a concurrent finalization boundary.
+func (pwm *PcapWriterManager) writePacketWithAdmission(admission *CallAdmission, callID, from, to string, timestamp time.Time, data []byte, linkType layers.LinkType, isRTP bool) error {
+	if pwm == nil || !pwm.config.Enabled || admission == nil {
+		return nil
+	}
 	writer, err := pwm.getOrCreateWriter(callID, from, to, admission.Generation())
 	if err != nil || writer == nil {
 		return err

@@ -27,6 +27,9 @@ func (p *Processor) processLIPacket(_ *types.PacketDisplay, _ []string) {}
 
 func (p *Processor) processLIPacketWithProvenance(_ *types.PacketDisplay, _, _ []string) {}
 
+func (p *Processor) processLIPacketWithAdmission(_ *types.PacketDisplay, _, _ []string, _ *CallAdmission) {
+}
+
 // isLIEnabled always returns false when LI is not compiled in.
 func (p *Processor) isLIEnabled() bool { return false }
 

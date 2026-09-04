@@ -173,6 +173,34 @@ func (m *SessionOutputManager) WritePacket(
 	return writer.WritePacket(callID, from, to, timestamp, data, linkType, isRTP)
 }
 
+func (m *SessionOutputManager) writePacketWithAdmission(
+	admission *CallAdmission,
+	callID, from, to string,
+	timestamp time.Time,
+	data []byte,
+	linkType layers.LinkType,
+	isRTP bool,
+) error {
+	if m == nil {
+		return nil
+	}
+	m.lifecycleMu.Lock()
+	if m.closed {
+		m.lifecycleMu.Unlock()
+		return errSessionOutputClosed
+	}
+	writer := m.writer
+	if writer != nil {
+		m.writesWG.Add(1)
+	}
+	m.lifecycleMu.Unlock()
+	if writer == nil {
+		return nil
+	}
+	defer m.writesWG.Done()
+	return writer.writePacketWithAdmission(admission, callID, from, to, timestamp, data, linkType, isRTP)
+}
+
 // Close is safe for concurrent use and preserves shutdown ordering: stop the
 // lifecycle monitor first, then close all output writers.
 func (m *SessionOutputManager) Close() error {

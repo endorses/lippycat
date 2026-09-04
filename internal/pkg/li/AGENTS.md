@@ -480,6 +480,11 @@ type Client struct {
 - Drop-oldest overflow with reason-labelled statistics
 - Batching for efficiency (default: 100 PDUs/batch)
 - Immutable PDU fan-out: every destination receives identical encoded bytes
+- Multi-destination fan-out is fail-closed but not atomic: destination zero
+  commits under the outer admissions, while later destinations re-admit. A
+  concurrent task or call finalization may therefore deliver to an earlier MDF
+  and suppress later MDFs; preserve this accounting and document the operational
+  asymmetry unless the delivery architecture gains an explicit atomic fan-out.
 - At-least-once retry semantics after ambiguous writes
 
 **Methods:**

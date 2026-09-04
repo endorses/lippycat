@@ -345,7 +345,7 @@ func TestDecapsulateESPNull_TCPStripsTrailerAndFixesLength(t *testing.T) {
 		viper.Reset()
 	}()
 
-	sip := []byte("MESSAGE sip:+4915215940608@ims.example SIP/2.0\r\n" +
+	sip := []byte("MESSAGE sip:+00000000000@ims.example SIP/2.0\r\n" +
 		"Content-Type: text/plain\r\nContent-Length: 4\r\n\r\ntest")
 	tcpData := buildMinimalTCPHeader(5060, 5060, sip)
 	padLen, icvSize := 2, 12

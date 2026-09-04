@@ -389,7 +389,7 @@ func TestRearm_CompletedStreamReusedForNewSIP(t *testing.T) {
 	s := newLiveStream(t, rec, 60421, 16413)
 
 	// SMS #1 MO leg: first MESSAGE on the connection.
-	s.ReassembledSG(&fakeScatterGather{data: moMessage("mo-sms-1", "4915215940608")}, nil)
+	s.ReassembledSG(&fakeScatterGather{data: moMessage("mo-sms-1", "00000000000")}, nil)
 	waitFor(t, func() bool { return rec.has("mo-sms-1") }, "SMS#1 MO message dispatched")
 
 	// The MO leg completes and the connection goes idle; the processing
@@ -404,7 +404,7 @@ func TestRearm_CompletedStreamReusedForNewSIP(t *testing.T) {
 
 	// SMS #2 MO leg ~seconds later reuses the SAME 4-tuple. gopacket routes it to
 	// this finished Stream (no New()). It must re-arm and dispatch.
-	s.ReassembledSG(&fakeScatterGather{data: moMessage("mo-sms-2", "4915215940608")}, nil)
+	s.ReassembledSG(&fakeScatterGather{data: moMessage("mo-sms-2", "00000000000")}, nil)
 	waitFor(t, func() bool { return rec.has("mo-sms-2") }, "SMS#2 MO message dispatched after re-arm")
 
 	if loadDiscard(s) != 0 {
@@ -425,7 +425,7 @@ func TestRearm_InProgressMultiMessageNotRearmed(t *testing.T) {
 	s := newLiveStream(t, rec, 5555, 5060)
 
 	// Two messages arrive on the live stream without any teardown in between.
-	s.ReassembledSG(&fakeScatterGather{data: moMessage("live-msg-1", "4915215940608")}, nil)
+	s.ReassembledSG(&fakeScatterGather{data: moMessage("live-msg-1", "00000000000")}, nil)
 	waitFor(t, func() bool { return rec.has("live-msg-1") }, "first live message dispatched")
 
 	// Stream must still be live (never finished) — so no re-arm can occur.
@@ -433,7 +433,7 @@ func TestRearm_InProgressMultiMessageNotRearmed(t *testing.T) {
 		t.Fatalf("in-progress stream marked finished unexpectedly (finished=%d)", loadFinished(s))
 	}
 
-	s.ReassembledSG(&fakeScatterGather{data: moMessage("live-msg-2", "4915215940608")}, nil)
+	s.ReassembledSG(&fakeScatterGather{data: moMessage("live-msg-2", "00000000000")}, nil)
 	waitFor(t, func() bool { return rec.has("live-msg-2") }, "second live message dispatched")
 
 	if loadFinished(s) != 0 {
@@ -442,4 +442,35 @@ func TestRearm_InProgressMultiMessageNotRearmed(t *testing.T) {
 	if rec.count() < 2 {
 		t.Errorf("expected both live messages dispatched, got %d: %v", rec.count(), rec.callIDs)
 	}
+}
+
+// A confirmed SIP connection may multiplex many dialogs on a non-standard
+// port. The per-reader idle timeout must not turn it into a zombie stream;
+// idle eviction belongs to the assembler, which also owns its TCP sequence
+// state. This reproduces the access-leg pattern where the next INVITE arrives
+// after more than tcp_sip_idle_timeout on the same persistent connection.
+func TestEstablishedSIPStreamSurvivesReaderIdleTimeout(t *testing.T) {
+	rec := &recordingSIPHandler{}
+	s := newLiveStream(t, rec, 60421, 16413)
+	s.factory.config.TCPSIPIdleTimeout = 10 * time.Millisecond
+	before := GetTCPStreamMetrics()
+
+	s.ReassembledSG(&fakeScatterGather{data: moMessage("persistent-call-1", "00000000000")}, nil)
+	waitFor(t, func() bool { return rec.has("persistent-call-1") }, "first persistent-stream message dispatched")
+
+	// Allow several reader timeout periods to pass. Before the fix the reader
+	// exited, set discard, and depended on best-effort re-arm of the next chunk.
+	time.Sleep(50 * time.Millisecond)
+	if got := loadFinished(s); got != 0 {
+		t.Fatalf("established SIP reader exited after idle timeout (finished=%d)", got)
+	}
+	if got := loadDiscard(s); got != 0 {
+		t.Fatalf("established SIP stream was marked discarded after idle timeout (discard=%d)", got)
+	}
+	if got := GetTCPStreamMetrics().EstablishedIdleRetentions - before.EstablishedIdleRetentions; got == 0 {
+		t.Fatal("established SIP idle retention was not counted")
+	}
+
+	s.ReassembledSG(&fakeScatterGather{data: moMessage("persistent-call-2", "00000000000")}, nil)
+	waitFor(t, func() bool { return rec.has("persistent-call-2") }, "post-idle persistent-stream message dispatched")
 }

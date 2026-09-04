@@ -44,7 +44,7 @@ func (f phase9IdentityFilter) MatchPacketLevelWithIDs(packet gopacket.Packet) (b
 func TestPhase9FilteredInviteAndInheritedByeFinalizeSessionOutput(t *testing.T) {
 	const (
 		callID   = "filtered-phase9-call"
-		identity = "+4915215940608@ims.example"
+		identity = "+00000000000@ims.example"
 		endpoint = "192.0.2.55:16000"
 	)
 	dir := t.TempDir()

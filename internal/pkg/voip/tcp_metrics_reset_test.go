@@ -12,6 +12,9 @@ func TestResetTCPStreamMetricsStartsNewCaptureSession(t *testing.T) {
 	RecordReassemblyDiscontinuity(9)
 	IncrementParserFramingDiscontinuity()
 	IncrementStreamRecoveryFailure()
+	IncrementEstablishedIdleRetention()
+	IncrementPreRearmDiscardedChunk()
+	IncrementRearmRejectedChunk()
 
 	before := GetTCPStreamMetrics()
 	require.Equal(t, int64(1), before.PostReassemblyDroppedChunks)
@@ -26,4 +29,7 @@ func TestResetTCPStreamMetricsStartsNewCaptureSession(t *testing.T) {
 	require.Zero(t, after.MissingSequenceBytes)
 	require.Zero(t, after.ParserFramingDiscontinuities)
 	require.Zero(t, after.RecoveryFailures)
+	require.Zero(t, after.EstablishedIdleRetentions)
+	require.Zero(t, after.PreRearmDiscardedChunks)
+	require.Zero(t, after.RearmRejectedChunks)
 }

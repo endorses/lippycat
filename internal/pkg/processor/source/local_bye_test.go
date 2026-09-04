@@ -110,19 +110,19 @@ func buildUDPPacket(t *testing.T, port layers.UDPPort, payload string) capture.P
 func TestLocalSource_ForwardsInDialogBYEForMatchedCall(t *testing.T) {
 	const callID = "test-call-end-abc123"
 
-	invite := "INVITE sip:+4915215940608@ims.example SIP/2.0\r\n" +
+	invite := "INVITE sip:+00000000000@ims.example SIP/2.0\r\n" +
 		"Via: SIP/2.0/UDP [2a03:9ec0::1]:5060\r\n" +
-		"From: <sip:+4915215940608@ims.example>;tag=aaa\r\n" +
+		"From: <sip:+00000000000@ims.example>;tag=aaa\r\n" +
 		"To: <tel:01630071100>\r\n" +
 		"Call-ID: " + callID + "\r\n" +
 		"CSeq: 1 INVITE\r\n" +
-		"P-Asserted-Identity: <sip:+4915215940608@ims.example>\r\n\r\n"
+		"P-Asserted-Identity: <sip:+00000000000@ims.example>\r\n\r\n"
 	// BYE in the same dialog, WITHOUT the matched identity (no P-Asserted-Identity,
 	// tags/direction swapped) so it does not directly match the filter.
-	bye := "BYE sip:+4915215940608@ims.example SIP/2.0\r\n" +
+	bye := "BYE sip:+00000000000@ims.example SIP/2.0\r\n" +
 		"Via: SIP/2.0/UDP [2a03:9ec0::2]:5060\r\n" +
 		"From: <tel:01630071100>;tag=bbb\r\n" +
-		"To: <sip:+4915215940608@ims.example>;tag=aaa\r\n" +
+		"To: <sip:+00000000000@ims.example>;tag=aaa\r\n" +
 		"Call-ID: " + callID + "\r\n" +
 		"CSeq: 2 BYE\r\n\r\n"
 

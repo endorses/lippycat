@@ -36,6 +36,9 @@ type tcpStreamMetricsInternal struct {
 	parserFramingDiscontinuities int64
 	recoverySuccesses            int64
 	recoveryFailures             int64
+	establishedIdleRetentions    int64
+	preRearmDiscardedChunks      int64
+	rearmRejectedChunks          int64
 }
 
 // TCPStreamMetrics represents TCP stream statistics without mutexes for external use
@@ -65,6 +68,9 @@ type TCPStreamMetrics struct {
 	ParserFramingDiscontinuities int64 `json:"parser_framing_discontinuities"`
 	RecoverySuccesses            int64 `json:"recovery_successes"`
 	RecoveryFailures             int64 `json:"recovery_failures"`
+	EstablishedIdleRetentions    int64 `json:"established_idle_retentions"`
+	PreRearmDiscardedChunks      int64 `json:"pre_rearm_discarded_chunks"`
+	RearmRejectedChunks          int64 `json:"rearm_rejected_chunks"`
 }
 
 var tcpStreamMetrics = &tcpStreamMetricsInternal{
@@ -95,6 +101,9 @@ func ResetTCPStreamMetrics() {
 	tcpStreamMetrics.parserFramingDiscontinuities = 0
 	tcpStreamMetrics.recoverySuccesses = 0
 	tcpStreamMetrics.recoveryFailures = 0
+	tcpStreamMetrics.establishedIdleRetentions = 0
+	tcpStreamMetrics.preRearmDiscardedChunks = 0
+	tcpStreamMetrics.rearmRejectedChunks = 0
 	tcpStreamMetrics.lastMetricsUpdate = time.Now()
 }
 
@@ -126,6 +135,9 @@ func GetTCPStreamMetrics() TCPStreamMetrics {
 		ParserFramingDiscontinuities: atomic.LoadInt64(&tcpStreamMetrics.parserFramingDiscontinuities),
 		RecoverySuccesses:            atomic.LoadInt64(&tcpStreamMetrics.recoverySuccesses),
 		RecoveryFailures:             atomic.LoadInt64(&tcpStreamMetrics.recoveryFailures),
+		EstablishedIdleRetentions:    atomic.LoadInt64(&tcpStreamMetrics.establishedIdleRetentions),
+		PreRearmDiscardedChunks:      atomic.LoadInt64(&tcpStreamMetrics.preRearmDiscardedChunks),
+		RearmRejectedChunks:          atomic.LoadInt64(&tcpStreamMetrics.rearmRejectedChunks),
 	}
 }
 
@@ -190,6 +202,13 @@ func RecordReassemblyDiscontinuity(bytes int) {
 
 func IncrementStreamRecoverySuccess() { atomic.AddInt64(&tcpStreamMetrics.recoverySuccesses, 1) }
 func IncrementStreamRecoveryFailure() { atomic.AddInt64(&tcpStreamMetrics.recoveryFailures, 1) }
+func IncrementEstablishedIdleRetention() {
+	atomic.AddInt64(&tcpStreamMetrics.establishedIdleRetentions, 1)
+}
+func IncrementPreRearmDiscardedChunk() {
+	atomic.AddInt64(&tcpStreamMetrics.preRearmDiscardedChunks, 1)
+}
+func IncrementRearmRejectedChunk() { atomic.AddInt64(&tcpStreamMetrics.rearmRejectedChunks, 1) }
 func IncrementParserFramingDiscontinuity() {
 	atomic.AddInt64(&tcpStreamMetrics.parserFramingDiscontinuities, 1)
 }

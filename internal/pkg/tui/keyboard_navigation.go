@@ -40,8 +40,7 @@ func (m Model) handleMoveDown() (Model, tea.Cmd) {
 			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
 				m.uiState.EventsView.ScrollDetailsDown()
 			} else {
-				m.eventStore.SelectNext()
-				m.syncEventsView()
+				m.moveEventSelection(1)
 			}
 		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
@@ -84,8 +83,7 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
 				m.uiState.EventsView.ScrollDetailsUp()
 			} else {
-				m.eventStore.SelectPrevious()
-				m.syncEventsView()
+				m.moveEventSelection(-1)
 			}
 		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
@@ -206,8 +204,7 @@ func (m Model) handlePageUp() (Model, tea.Cmd) {
 			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
 				m.uiState.EventsView.ScrollDetailsPageUp()
 			} else {
-				m.eventStore.SelectOffset(-max(1, m.uiState.Height-10))
-				m.syncEventsView()
+				m.moveEventSelection(-max(1, m.uiState.Height-10))
 			}
 		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused
@@ -244,8 +241,7 @@ func (m Model) handlePageDown() (Model, tea.Cmd) {
 			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
 				m.uiState.EventsView.ScrollDetailsPageDown()
 			} else {
-				m.eventStore.SelectOffset(max(1, m.uiState.Height-10))
-				m.syncEventsView()
+				m.moveEventSelection(max(1, m.uiState.Height-10))
 			}
 		} else if m.uiState.ViewMode == "calls" {
 			// Check if details panel is visible and focused

@@ -138,6 +138,19 @@ func (m *Model) setCaptureView(view string) {
 	}
 }
 
+// moveEventSelection starts relative navigation from the event the user sees.
+// Ingestion can advance the store's live-edge selection before presentation
+// refreshes. If the displayed event has been evicted, keep the store's repaired
+// selection as the navigation anchor.
+func (m *Model) moveEventSelection(delta int) {
+	if id := m.uiState.EventsView.SelectedID(); id != "" && id != m.eventStore.SelectedID() {
+		// A missing ID leaves the current valid store selection unchanged.
+		m.eventStore.SelectByID(id)
+	}
+	m.eventStore.SelectOffset(delta)
+	m.syncEventsView()
+}
+
 func (m *Model) syncEventsView() {
 	m.syncEventsViewAt(time.Now())
 }

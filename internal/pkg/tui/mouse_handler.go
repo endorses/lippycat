@@ -29,8 +29,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		if m.uiState.Tabs.GetActive() == 0 {
 			if m.uiState.ViewMode == "events" {
 				if !m.uiState.EventShowDetails || m.uiState.Width < 160 || msg.X < m.uiState.Width-79 {
-					m.eventStore.SelectPrevious()
-					m.syncEventsView()
+					m.moveEventSelection(-1)
 				} else {
 					m.uiState.EventsView.ScrollDetailsUp()
 				}
@@ -105,8 +104,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		if m.uiState.Tabs.GetActive() == 0 {
 			if m.uiState.ViewMode == "events" {
 				if !m.uiState.EventShowDetails || m.uiState.Width < 160 || msg.X < m.uiState.Width-79 {
-					m.eventStore.SelectNext()
-					m.syncEventsView()
+					m.moveEventSelection(1)
 				} else {
 					m.uiState.EventsView.ScrollDetailsDown()
 				}

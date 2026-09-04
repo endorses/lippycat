@@ -329,6 +329,28 @@ Phase 2 profile artifacts are `/tmp/tui-event-phase2.cpu.pprof` and
 `/tmp/tui-event-phase2.allocs.pprof`; reproduce with the Phase 1 replay command
 using those output paths.
 
+### Phase 2 navigation review
+
+Review found that deferred presentation could leave the store's live-edge
+selection ahead of the displayed selection. With event 3 displayed and selected,
+accepting events 4–5 before a refresh made Up select event 4 instead of event 2.
+Arrow keys, page navigation, and mouse-wheel navigation shared this problem.
+
+- [x] Anchor relative event navigation to the displayed stable ID when it is
+      still retained, then move and synchronize once. Preserve the store's
+      selection fallback when the displayed event has been evicted.
+- [x] Verify regression coverage for all relative navigation paths, history
+      pinning, live-edge following, and eviction; run TUI correctness and race
+      checks and build the `tui` and `all` variants.
+
+Three sub-agents reviewed delivery, cadence, and interactions. The navigation
+regression was independently reproduced in all six relative input paths before
+the fix, and the correction received independent cross-review. Focused tests
+and the uncached full TUI race suite passed; both build variants passed. The
+local/remote synchronization benchmark smoke run also preserved its one-sync
+assertions. No further Phase 2 defect was confirmed; later-phase storage,
+projection, and rendering work remains deferred as planned.
+
 ## 7. Phase 3 — Make Rendering Pure
 
 Eliminate redundant full synchronization and make update ownership explicit.

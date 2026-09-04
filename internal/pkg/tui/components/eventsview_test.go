@@ -42,6 +42,7 @@ func TestEventsViewSplitPanesExposeFocusAndFixedSize(t *testing.T) {
 	view.SetEvents([]EventItem{{Event: dnsEvent("one", "example.org"), ArrivalSequence: 1}})
 
 	timeline := view.RenderTimeline(100, 20, true)
+	view.PrepareLayout(100, 20, 60, 20)
 	details := view.RenderDetails(60, 20, false)
 	assert.Equal(t, 100, lipgloss.Width(timeline))
 	assert.Equal(t, 20, lipgloss.Height(timeline))
@@ -50,6 +51,7 @@ func TestEventsViewSplitPanesExposeFocusAndFixedSize(t *testing.T) {
 	assert.Contains(t, timeline, "┏")
 	assert.Contains(t, details, "╭")
 
+	view.PrepareLayout(100, 20, 60, 20)
 	focusedDetails := view.RenderDetails(60, 20, true)
 	assert.Equal(t, 62, lipgloss.Width(focusedDetails))
 	assert.Contains(t, focusedDetails, "┏")
@@ -137,17 +139,17 @@ func TestEventsViewSelectionMovesAboveBottomWithoutScrollingViewport(t *testing.
 	}
 	view.SetEvents(items)
 	view.SetSelectedID("event-19")
-	view.RenderTimeline(100, 10, false)
+	view.PrepareLayout(100, 10, 0, 0)
 	require.Equal(t, 15, view.offset)
 
 	view.SetSelectedID("event-18")
-	view.RenderTimeline(100, 10, false)
+	view.PrepareLayout(100, 10, 0, 0)
 	assert.Equal(t, 15, view.offset, "moving up should leave the bottom row visible")
 
 	items = append(items, EventItem{Event: dnsEvent("event-20", "example.org"), ArrivalSequence: 21})
 	view.SetEvents(items)
 	view.SetSelectedID("event-20")
-	view.RenderTimeline(100, 10, false)
+	view.PrepareLayout(100, 10, 0, 0)
 	assert.Equal(t, 16, view.offset, "following a new last event should scroll by one row")
 }
 
@@ -173,6 +175,7 @@ func TestEventsViewSanitizesAndBoundsDetails(t *testing.T) {
 	view := NewEventsView()
 	view.SetEvents([]EventItem{{Event: event, ArrivalSequence: 1}})
 	view.SetRelatedPacketsAvailable(false)
+	view.PrepareLayout(100, 100, 80, 100)
 	details := view.RenderDetails(80, 100, false)
 	assert.NotContains(t, details, "bad\nquery")
 	assert.Contains(t, details, "query")
@@ -248,6 +251,7 @@ func TestEventsViewDetailsExposeIdentityAndProvenance(t *testing.T) {
 	event.Query = "example.org"
 	view := NewEventsView()
 	view.SetEvents([]EventItem{{Event: event, ArrivalSequence: 9}})
+	view.PrepareLayout(100, 100, 120, 100)
 	details := view.RenderDetails(120, 100, false)
 	for _, expected := range []string{"Event Identity", "event-id", "producer-session", "Sequence", "42", "Arrival", "9", "Provenance", "remote", "eth0 (index 2)", "capture.pcap", "processor-a"} {
 		assert.Contains(t, details, expected)
@@ -262,6 +266,7 @@ func TestEventsViewDetailsAreStructuredAndScrollable(t *testing.T) {
 	view := NewEventsView()
 	view.SetEvents([]EventItem{{Event: event, ArrivalSequence: 7}})
 
+	view.PrepareLayout(100, 16, 77, 16)
 	top := view.RenderDetails(77, 16, false)
 	assert.Contains(t, top, "TLS Event")
 	assert.Contains(t, top, "Overview")
@@ -270,6 +275,7 @@ func TestEventsViewDetailsAreStructuredAndScrollable(t *testing.T) {
 	assert.NotContains(t, top, "string")
 
 	view.ScrollDetailsToBottom()
+	view.PrepareLayout(100, 16, 77, 16)
 	bottom := view.RenderDetails(77, 16, false)
 	assert.Contains(t, bottom, "Event Identity")
 	assert.Contains(t, bottom, "event-id")
@@ -282,10 +288,12 @@ func TestEventsViewDetailsScrollResetsForNewSelection(t *testing.T) {
 	second := dnsEvent("second", "second.example")
 	view := NewEventsView()
 	view.SetEvents([]EventItem{{Event: first}, {Event: second}})
+	view.PrepareLayout(100, 16, 77, 16)
 	view.RenderDetails(77, 16, false)
 	view.ScrollDetailsToBottom()
 	view.SetSelectedID("second")
 
+	view.PrepareLayout(100, 16, 77, 16)
 	details := view.RenderDetails(77, 16, false)
 	assert.Contains(t, details, "Overview")
 	assert.Contains(t, details, "second.example")
@@ -297,12 +305,14 @@ func TestEventsViewRepeatedAvailabilitySyncPreservesDetailScroll(t *testing.T) {
 	view := NewEventsView()
 	view.SetEvents([]EventItem{{Event: event}})
 	view.SetRelatedPacketsAvailable(false)
+	view.PrepareLayout(100, 16, 77, 16)
 	view.RenderDetails(77, 16, false)
 	view.ScrollDetailsToBottom()
 
-	// The model synchronizes this state before every render. Reapplying an
-	// unchanged value must not rebuild the viewport and reset its offset.
+	// Reapplying unchanged availability during a presentation refresh must
+	// not rebuild the viewport and reset its offset.
 	view.SetRelatedPacketsAvailable(false)
+	view.PrepareLayout(100, 16, 77, 16)
 	details := view.RenderDetails(77, 16, false)
 	assert.Contains(t, details, "Event Identity")
 	assert.Contains(t, details, "event")
@@ -333,7 +343,7 @@ func TestEventsViewAppendPreservesPinnedSelectionAndVisibleRow(t *testing.T) {
 	view := NewEventsView()
 	view.SetEvents(items)
 	view.SetSelectedID("event-17")
-	view.RenderTimeline(100, 10, false)
+	view.PrepareLayout(100, 10, 0, 0)
 	selectedRow := 17 - view.offset
 	selectedID, ok := view.EventIDAtVisibleRow(selectedRow)
 	require.True(t, ok)
@@ -356,7 +366,7 @@ func TestEventsViewRefreshAfterFrontEvictionKeepsSelectionAtVisibleRow(t *testin
 	view := NewEventsView()
 	view.SetEvents(items)
 	view.SetSelectedID("event-17")
-	view.RenderTimeline(100, 10, false)
+	view.PrepareLayout(100, 10, 0, 0)
 	selectedRow := 17 - view.offset
 
 	replacement := append([]EventItem(nil), items[5:]...)
@@ -369,4 +379,129 @@ func TestEventsViewRefreshAfterFrontEvictionKeepsSelectionAtVisibleRow(t *testin
 	visibleID, ok := view.EventIDAtVisibleRow(selectedRow)
 	require.True(t, ok)
 	assert.Equal(t, "event-17", visibleID, "front eviction must compensate the viewport offset")
+}
+
+func TestEventsViewRenderingDoesNotMutatePresentation(t *testing.T) {
+	view := NewEventsView()
+	items := make([]EventItem, 20)
+	for i := range items {
+		items[i] = EventItem{Event: dnsEvent(fmt.Sprintf("event-%d", i), "example.org")}
+	}
+	view.SetEvents(items)
+	view.SetSelectedID("event-19")
+	view.SetRelatedPacketsAvailable(false)
+	view.PrepareLayout(100, 10, 77, 16)
+	view.ScrollDetailsToBottom()
+	before := *view
+	before.items = append([]EventItem(nil), view.items...)
+	details := view.RenderDetails(77, 16, false)
+	timeline := view.View()
+	for range 5 {
+		assert.Equal(t, timeline, view.View())
+		assert.Equal(t, details, view.RenderDetails(77, 16, false))
+		// Even render-only geometry/focus changes cannot change hit testing or
+		// viewport dimensions. Geometry is committed by PrepareLayout.
+		view.RenderTimeline(80, 20, false)
+		view.RenderDetails(90, 25, true)
+		assert.Equal(t, before, *view)
+	}
+}
+
+func TestEventsViewLayoutPreparesHitTestingBeforeRendering(t *testing.T) {
+	view := NewEventsView()
+	items := make([]EventItem, 20)
+	for i := range items {
+		items[i] = EventItem{Event: dnsEvent(fmt.Sprintf("event-%d", i), "example.org")}
+	}
+	view.SetEvents(items)
+	view.SetSelectedID("event-19")
+	view.PrepareLayout(100, 10, 0, 0)
+	id, ok := view.EventIDAtVisibleRow(4)
+	require.True(t, ok)
+	assert.Equal(t, "event-19", id)
+	view.SelectPrevious()
+	assert.Equal(t, 15, view.offset)
+	view.SetSize(100, 20)
+	assert.Equal(t, 5, view.offset)
+	view.SetSize(24, 2)
+	assert.Equal(t, 0, view.offset, "a viewport with no data rows must not advance beyond the buffer")
+}
+
+func TestEventsViewDetailsPreparationPreservesAndInvalidatesCache(t *testing.T) {
+	view := NewEventsView()
+	view.SetEvents([]EventItem{{Event: dnsEvent("first", "first.example")}, {Event: dnsEvent("second", "second.example")}})
+	view.SetRelatedPacketsAvailable(true)
+	view.PrepareLayout(100, 10, 77, 16)
+	view.ScrollDetailsToBottom()
+	before := view.detailsViewport
+	view.SetEvents(append(append([]EventItem(nil), view.items...), EventItem{Event: dnsEvent("third", "third.example")}))
+	view.SetSelectedID("first")
+	view.SetRelatedPacketsAvailable(true)
+	view.PrepareLayout(100, 10, 77, 16)
+	assert.Equal(t, before, view.detailsViewport, "unchanged selection and detail state must retain the scroll cache")
+
+	view.PrepareLayout(100, 10, 0, 0)
+	assert.Equal(t, before, view.detailsViewport, "hiding details must retain scroll")
+	view.PrepareLayout(100, 10, 77, 16)
+	assert.Equal(t, before, view.detailsViewport, "reopening unchanged details must retain scroll")
+
+	view.SetRelatedPacketsAvailable(false)
+	view.PrepareLayout(100, 10, 77, 16)
+	assert.Zero(t, view.detailsViewport.YOffset)
+	assert.Contains(t, view.RenderDetails(77, 16, false), "Related packets are no longer buffered.")
+
+	view.ScrollDetailsToBottom()
+	view.PrepareLayout(100, 10, 90, 16)
+	assert.Zero(t, view.detailsViewport.YOffset, "width changes must rewrap detail content")
+	assert.Equal(t, 84, view.detailsViewport.Width)
+	view.ScrollDetailsToBottom()
+	view.SetTheme(view.theme)
+	view.PrepareLayout(100, 10, 90, 16)
+	assert.Zero(t, view.detailsViewport.YOffset, "theme changes invalidate styled content")
+
+	view.ScrollDetailsToBottom()
+	view.SetEvents(nil)
+	view.SetEvents([]EventItem{{Event: dnsEvent("first", "replacement.example")}})
+	view.PrepareLayout(100, 10, 90, 16)
+	assert.Zero(t, view.detailsViewport.YOffset)
+	view.SetRelatedPacketsAvailable(true)
+	view.PrepareLayout(100, 10, 90, 16)
+	assert.Contains(t, view.RenderDetails(90, 16, false), "replacement.example", "clear must invalidate details even if an ID is reused before preparation")
+}
+
+// Counting Kind calls detects detail content work without adding a production
+// instrumentation hook. The immutable event's ID lookup only calls Envelope.
+type detailProjectionCountingEvent struct {
+	events.Event
+	kindCalls *int
+}
+
+func (e detailProjectionCountingEvent) Kind() events.Kind {
+	*e.kindCalls++
+	return e.Event.Kind()
+}
+
+func TestEventsViewPreparesDetailProjectionOnlyWhenInvalidated(t *testing.T) {
+	view := NewEventsView()
+	kindCalls := 0
+	item := EventItem{Event: detailProjectionCountingEvent{Event: dnsEvent("first", "example.org"), kindCalls: &kindCalls}}
+	view.SetEvents([]EventItem{item})
+	view.SetRelatedPacketsAvailable(true)
+	view.PrepareLayout(100, 10, 77, 16)
+	require.Positive(t, kindCalls, "initial layout must prepare details")
+	preparedCalls := kindCalls
+	for range 5 {
+		view.SetEvents([]EventItem{item, {Event: dnsEvent("second", "second.example")}})
+		view.SetSelectedID("first")
+		view.SetRelatedPacketsAvailable(true)
+		view.PrepareLayout(100, 10, 77, 16)
+		view.RenderDetails(77, 16, false)
+	}
+	assert.Equal(t, preparedCalls, kindCalls, "unchanged details must not be projected again during updates or rendering")
+	view.SetRelatedPacketsAvailable(false)
+	view.PrepareLayout(100, 10, 77, 16)
+	assert.Equal(t, 2*preparedCalls, kindCalls, "one invalidation must cause exactly one detail projection")
+	view.PrepareLayout(100, 10, 77, 16)
+	view.RenderDetails(77, 16, false)
+	assert.Equal(t, 2*preparedCalls, kindCalls)
 }

@@ -265,7 +265,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	bgProcessor := NewBackgroundProcessor()
 	bgProcessor.BeginGeneration()
 
-	return Model{
+	m := Model{
 		packetStore:                packetStore,
 		callStore:                  callStore,
 		eventStore:                 eventStore,
@@ -286,6 +286,8 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 		backgroundProcessor:        bgProcessor,
 		metricsCollector:           sysmetrics.New(),
 	}
+	m.prepareViewChrome()
+	return m
 }
 
 // CallTracker returns the tracker owned by this TUI session.
@@ -369,6 +371,15 @@ func (m *Model) Shutdown() {
 
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	updated, cmd := m.update(msg)
+	if next, ok := updated.(Model); ok {
+		next.prepareViewChrome()
+		return next, cmd
+	}
+	return updated, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Recover from any panics to prevent cryptic "kevent: bad file descriptor" errors
 	defer func() {
 		if r := recover(); r != nil {

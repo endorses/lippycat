@@ -569,7 +569,19 @@ synchronizes the active Capture event view on ticks, using the packet list's
 shared `presentationRefreshPolicy` and normal `TUITickInterval`. Explicit view
 entry, filters, navigation, resize, pause/resume, clear, and capture completion
 can synchronize immediately. Packet-only retention changes also refresh the
-related-packet notice. Rendering the Capture tab must not call `syncEventsView`.
+related-packet notice. Clean Capture tab returns reuse the existing projection;
+dirty or uninitialized returns synchronize immediately. Rendering must not call
+`syncEventsView` or read the event store, including for footer filter indicators.
+
+`NewModel` and the public `Update` wrapper prepare header/footer state before
+rendering. `syncEventsViewAt` applies event items, stable selection, and related-
+packet availability, then calls `EventsView.PrepareLayout`. Timeline offsets are
+maintained by component setters so mouse hit testing works before the next render.
+Detail viewport initialization, sizing, and content preparation also belong to
+`PrepareLayout`; `RenderTimeline`, `RenderDetails`, and `View` are read-only.
+Unchanged detail state preserves scrolling, including when hiding and reopening
+the pane. Selection, availability, theme, width, and clear invalidate detail
+content; height changes clamp scrolling to the valid range.
 
 `Init` starts one recurring tick chain. Active capture uses normal ticks; paused
 and inactive capture retain slow ticks so queued final deliveries, reconnects,
@@ -578,8 +590,8 @@ not start additional recurring tick chains. `TickMsg.Time` permits deterministic
 refresh-cadence tests without sleeps.
 
 Full event projection and packet scans still occur on each synchronization;
-incremental storage/projection and the remaining rendering-purity audit are
-later phases of `docs/plans/tui-event-view-performance-optimization.md`.
+incremental storage/projection are later phases of
+`docs/plans/tui-event-view-performance-optimization.md`.
 
 ### Rendering Optimization
 

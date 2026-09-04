@@ -1,7 +1,7 @@
 # TUI Event View Performance Optimization Plan
 
 **Date:** 2026-09-04
-**Status:** Phases 1–2 verified; Phase 3 partially implemented; Phases 4–7 planned
+**Status:** Phases 1–3 verified; Phases 4–7 planned
 **Scope:** Normalized event ingestion, retention, projection, synchronization,
 and rendering in `internal/pkg/tui`
 
@@ -356,14 +356,14 @@ projection, and rendering work remains deferred as planned.
 Eliminate redundant full synchronization and make update ownership explicit.
 
 - [x] Remove `syncEventsView()` from `renderCaptureTab` (required by Phase 2 cadence).
-- [ ] Audit the complete TUI render path for other event-store reads or state
+- [x] Audit the complete TUI render path for other event-store reads or state
       mutations that belong in `Update` handlers.
-- [ ] Synchronize on entry to the event view and on explicit dirty refreshes.
-- [ ] Ensure tab switches and unrelated Bubble Tea messages do not rebuild the
+- [x] Synchronize on entry to the event view and on explicit dirty refreshes.
+- [x] Ensure tab switches and unrelated Bubble Tea messages do not rebuild the
       event projection.
-- [ ] Add a test that repeatedly calls `View()` without model updates and
+- [x] Add a test that repeatedly calls `View()` without model updates and
       verifies that event projection and selection state do not change.
-- [ ] Add an operation-count regression test showing that an event update causes
+- [x] Add an operation-count regression test showing that an event update causes
       at most one synchronization/render projection.
 
 Likely files:
@@ -371,6 +371,58 @@ Likely files:
 - `internal/pkg/tui/view_renderer.go`
 - `internal/pkg/tui/event_view.go`
 - `internal/pkg/tui/event_view_test.go`
+
+### Phase 3 implementation and verification
+
+The render-path audit found event-store filter reads and shared header/footer
+mutation in `Model.View`, timeline offset updates in `RenderTimeline`, and
+detail viewport initialization, sizing, and content projection in `RenderDetails`.
+Initialization and the public `Update` wrapper now prepare header/footer state;
+settings-dialog sizing also moved out of rendering. Event synchronization applies
+items, stable selection, and related-packet availability before `PrepareLayout`
+prepares the timeline geometry and detail viewport. Event rendering performs no
+store reads, synchronization, or persistent state mutation.
+
+Component setters maintain the timeline offset before rendering, including for
+mouse hit testing, eviction, and resizing. Detail scrolling survives unchanged
+refreshes and hiding/reopening the pane. Selection, related-packet availability,
+theme, width, and clear invalidate detail content; height changes clamp scrolling.
+Clean tab returns reuse the existing event projection, while dirty or uninitialized
+returns refresh immediately. Explicit event-view entry and dirty cadence refreshes
+retain their existing synchronization ownership.
+
+Two sub-agents implemented the component and model changes; a third independently
+audited the render and update paths. Root review and suite verification caught a
+partial-model fixture panic in chrome preparation and unnecessary repeated selection
+scans; both were corrected. Regression tests exercise the public `Update`/`View`
+path, snapshot event projection/selection/scroll and chrome before the first render,
+and confirm rendering works with the event store detached. Operation-count checks
+verify one synchronization per due event refresh, none on renders or clean tab
+round trips, and one detail projection per relevant invalidation.
+
+Full TUI correctness and race suites under `-tags all` passed, as did `tui` and
+`all` builds. The existing store/component/model benchmarks and generated DNS replay
+were rerun. Storage, full projection, and related-packet scan optimizations remain
+Phases 4–6; unrelated specialized views were audited for event access but their
+own component rendering behavior is outside this phase's event-state scope.
+
+Final one-second runs on the same Intel Core i9-13900HX measured:
+
+| Workload | Phase 2 time/op | Phase 3 time/op | Phase 3 allocated bytes/op |
+| --- | ---: | ---: | ---: |
+| Local tick, 50 singleton batches, 10,000 retained | 12.26 ms | 11.67 ms | 499,206 |
+| Remote batch, 1 event, 10,000 retained | 1.38 ms | 1.28 ms | 484,759 |
+| Remote batch, 128 events, 10,000 retained | 31.75 ms | 29.41 ms | 509,840 |
+
+The final one-second DNS replay smoke measurement was 20.65 ms/op and
+5,127,473 bytes/op (50 packets/op), compared with the recorded Phase 2
+15-second profile run's 21.63 ms/op and 5,016,548 bytes/op. These observational
+runs have different durations and do not establish a new CPU-performance claim.
+The replay retains its arrival, eviction, selection, and zero-loss assertions.
+Append-via-SetEvents measured 81.60 µs/op and 940.23 µs/op at 1,000 and 10,000
+retained events, respectively, with zero steady-state allocations. Final benchmark
+output is `/tmp/tui-event-phase3-final-bench.txt`; use the Phase 1 commands to
+reproduce the workloads. No timing threshold was added to CI.
 
 ## 8. Phase 4 — Implement True Bulk EventStore Ingestion
 
@@ -497,7 +549,7 @@ Likely files:
 
 ## 12. Verification
 
-After each phase (checked below for Phases 1–2):
+After each phase (checked below for Phases 1–3):
 
 - [x] Format all modified Go files with `gofmt` before staging.
 - [x] Run focused event-store, event-view, and TUI tests with the appropriate

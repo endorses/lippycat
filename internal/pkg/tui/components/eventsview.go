@@ -59,7 +59,68 @@ func (v *EventsView) SetTheme(theme themes.Theme) {
 	v.theme = theme
 	v.detailsSelectedID = ""
 }
-func (v *EventsView) SetSize(width, height int) { v.width, v.height = width, height }
+func (v *EventsView) SetSize(width, height int) {
+	if v.width == width && v.height == height {
+		return
+	}
+	v.width, v.height = width, height
+	v.offset = v.timelineOffset(height, v.indexByID(v.selectedID))
+}
+
+// PrepareLayout prepares presentation state during Update, after event selection,
+// availability, and pane dimensions have been applied. Rendering never rebuilds
+// the detail projection or changes the timeline's hit-testing offset.
+// Zero detail dimensions leave the hidden detail pane and its scroll cache alone.
+func (v *EventsView) PrepareLayout(timelineWidth, timelineHeight, detailsWidth, detailsHeight int) {
+	v.SetSize(timelineWidth, timelineHeight)
+	if detailsWidth <= 0 || detailsHeight <= 0 {
+		return
+	}
+	contentWidth := max(1, detailsWidth-6)
+	contentHeight := max(5, detailsHeight-4)
+	if !v.detailsViewportReady {
+		v.detailsViewport = viewport.New(contentWidth, contentHeight)
+		v.detailsViewportReady = true
+	} else {
+		if v.detailsViewport.Width != contentWidth {
+			v.detailsSelectedID = ""
+		}
+		v.detailsViewport.Width = contentWidth
+		v.detailsViewport.Height = contentHeight
+	}
+	if v.detailsSelectedID == v.selectedID && v.selectedID != "" {
+		// A taller viewport can reduce the maximum valid scroll offset.
+		v.detailsViewport.SetYOffset(v.detailsViewport.YOffset)
+		return
+	}
+	i := v.indexByID(v.selectedID)
+	if i < 0 {
+		v.detailsSelectedID = ""
+		v.detailsViewport.SetContent("")
+		v.detailsViewport.GotoTop()
+		return
+	}
+	if v.detailsSelectedID != v.selectedID {
+		v.detailsSelectedID = v.selectedID
+		v.detailsViewport.SetContent(v.renderEventDetailsContent(v.items[i], contentWidth))
+		v.detailsViewport.GotoTop()
+	}
+}
+
+func (v *EventsView) timelineOffset(height, selected int) int {
+	visibleRows := max(0, max(1, height-4)-1)
+	if visibleRows == 0 || len(v.items) == 0 {
+		return 0
+	}
+	selected = max(0, selected)
+	offset := min(max(0, v.offset), max(0, len(v.items)-visibleRows))
+	if selected < offset {
+		offset = selected
+	} else if selected >= offset+visibleRows {
+		offset = selected - visibleRows + 1
+	}
+	return offset
+}
 
 func (v *EventsView) SetEvents(items []EventItem) {
 	oldSelected := v.indexByID(v.selectedID)
@@ -68,20 +129,24 @@ func (v *EventsView) SetEvents(items []EventItem) {
 	if oldSelected >= 0 && newSelected >= 0 {
 		v.offset += newSelected - oldSelected
 	}
-	v.offset = max(0, v.offset)
-	if v.indexByID(v.selectedID) >= 0 {
+	if newSelected >= 0 {
+		v.offset = v.timelineOffset(v.height, newSelected)
 		return
 	}
+	v.detailsSelectedID = ""
 	if len(v.items) == 0 {
 		v.selectedID = ""
+		v.offset = 0
 		return
 	}
 	v.selectedID = v.items[0].Event.Envelope().EventID
+	v.offset = v.timelineOffset(v.height, 0)
 }
 
 func (v *EventsView) SetSelectedID(id string) {
-	if v.indexByID(id) >= 0 {
+	if selected := v.indexByID(id); selected >= 0 {
 		v.selectedID = id
+		v.offset = v.timelineOffset(v.height, selected)
 	}
 }
 
@@ -101,6 +166,7 @@ func (v *EventsView) SelectNext() {
 	i := v.indexByID(v.selectedID)
 	if i >= 0 && i+1 < len(v.items) {
 		v.selectedID = v.items[i+1].Event.Envelope().EventID
+		v.offset = v.timelineOffset(v.height, i+1)
 	}
 }
 
@@ -108,6 +174,7 @@ func (v *EventsView) SelectPrevious() {
 	i := v.indexByID(v.selectedID)
 	if i > 0 {
 		v.selectedID = v.items[i-1].Event.Envelope().EventID
+		v.offset = v.timelineOffset(v.height, i-1)
 	}
 }
 
@@ -164,15 +231,12 @@ func (v *EventsView) RenderTimeline(width, height int, focused bool) string {
 	if selected < 0 {
 		selected = 0
 	}
-	maxOffset := max(0, len(v.items)-visibleRows)
-	v.offset = min(v.offset, maxOffset)
-	if selected < v.offset {
-		v.offset = selected
-	} else if selected >= v.offset+visibleRows {
-		v.offset = selected - visibleRows + 1
+	offset := v.offset
+	if height != v.height {
+		offset = v.timelineOffset(height, selected)
 	}
-	end := min(v.offset+visibleRows, len(v.items))
-	for i := v.offset; i < end; i++ {
+	end := min(offset+visibleRows, len(v.items))
+	for i := offset; i < end; i++ {
 		item := v.items[i]
 		env := item.Event.Envelope()
 		style := lipgloss.NewStyle().Foreground(v.eventColor(item.Event.Kind()))
@@ -194,7 +258,7 @@ func (v *EventsView) RenderTimeline(width, height int, focused bool) string {
 			content.WriteByte('\n')
 		}
 	}
-	for i := end - v.offset; i < visibleRows; i++ {
+	for i := end - offset; i < visibleRows; i++ {
 		content.WriteByte('\n')
 	}
 	return borderStyle.Render(content.String())
@@ -204,8 +268,6 @@ func (v *EventsView) RenderDetails(width, height int, focused bool) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
-	contentWidth := max(1, width-6)
-	contentHeight := max(5, height-4)
 	borderColor := v.theme.BorderColor
 	borderType := lipgloss.RoundedBorder()
 	if focused {
@@ -221,19 +283,6 @@ func (v *EventsView) RenderDetails(width, height int, focused bool) string {
 	i := v.indexByID(v.selectedID)
 	if i < 0 {
 		return borderStyle.Render("No event selected")
-	}
-	item := v.items[i]
-	if !v.detailsViewportReady {
-		v.detailsViewport = viewport.New(contentWidth, contentHeight)
-		v.detailsViewportReady = true
-	} else {
-		v.detailsViewport.Width = contentWidth
-		v.detailsViewport.Height = contentHeight
-	}
-	if v.detailsSelectedID != v.selectedID {
-		v.detailsSelectedID = v.selectedID
-		v.detailsViewport.SetContent(v.renderEventDetailsContent(item, contentWidth))
-		v.detailsViewport.GotoTop()
 	}
 	return borderStyle.Render(v.detailsViewport.View())
 }

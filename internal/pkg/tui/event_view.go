@@ -167,6 +167,7 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 	if selected, ok := m.eventStore.Selected(); ok {
 		m.uiState.EventsView.SetRelatedPacketsAvailable(m.hasRelatedPacket(selected.Event))
 	}
+	m.prepareEventsViewLayout()
 }
 
 func (m Model) hasRelatedPacket(event events.Event) bool {
@@ -200,4 +201,26 @@ func eventMatchesProtocol(event events.Event, protocol string) bool {
 		}
 	}
 	return false
+}
+
+// syncEventsViewOnTabEntry reuses a clean projection when returning to Capture.
+// Dirty data refreshes immediately, without waiting for the next cadence tick.
+func (m *Model) syncEventsViewOnTabEntry() {
+	if m.eventViewDirty || m.lastEventViewUpdate.IsZero() {
+		m.syncEventsView()
+	}
+}
+
+// prepareEventsViewLayout owns the dimensions used by event rendering and
+// hit-testing, and prepares details before Bubble Tea calls View.
+func (m *Model) prepareEventsViewLayout() {
+	if m.uiState.EventsView == nil || m.uiState.ViewMode != "events" {
+		return
+	}
+	contentHeight := m.uiState.Height - 2 - 4 - 4
+	if m.uiState.EventShowDetails && m.uiState.Width >= 160 {
+		m.uiState.EventsView.PrepareLayout(m.uiState.Width-77-2, contentHeight, 77, contentHeight)
+	} else {
+		m.uiState.EventsView.PrepareLayout(m.uiState.Width, contentHeight, 0, 0)
+	}
 }

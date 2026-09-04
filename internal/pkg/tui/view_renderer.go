@@ -13,35 +13,6 @@ func (m Model) View() string {
 		return "Goodbye!\n"
 	}
 
-	// Update header state
-	m.uiState.Header.SetState(m.uiState.Capturing, m.uiState.Paused)
-	m.uiState.Header.SetPacketCount(m.packetStore.PacketsCount, m.packetStore.MaxPackets)
-	m.uiState.Header.SetInterface(m.interfaceName)
-	m.uiState.Header.SetCaptureMode(m.captureMode)
-	m.uiState.Header.SetPCAPFileCount(len(m.pcapFiles))
-	// Use hunter count (not remote client count) for accurate node display
-	m.uiState.Header.SetNodeCount(m.uiState.NodesView.GetHunterCount())
-	m.uiState.Header.SetProcessorCount(m.uiState.NodesView.GetProcessorCount())
-	m.uiState.Header.SetTLSDecryption(viper.GetBool("watch.tls_decryption_enabled"))
-
-	// Update footer state
-	m.uiState.Footer.SetFilterMode(m.uiState.FilterMode)
-	m.uiState.Footer.SetHasFilter(m.packetStore.HasFilter())
-	m.uiState.Footer.SetFilterCount(m.packetStore.FilterChain.Count())
-	m.uiState.Footer.SetActiveTab(m.uiState.Tabs.GetActive())
-	m.uiState.Footer.SetHasProtocolSelection(m.uiState.SelectedProtocol.Name != "All")
-	m.uiState.Footer.SetHasEvents(eventScopeAvailable(m.uiState.SelectedProtocol.Name))
-	m.uiState.Footer.SetPaused(m.uiState.Paused)
-	m.uiState.Footer.SetHasHelpSearch(m.uiState.HelpView.HasActiveSearch())
-	m.uiState.Footer.SetViewMode(m.uiState.ViewMode)
-	m.uiState.Footer.SetCallFilterMode(m.uiState.CallFilterMode)
-	m.uiState.Footer.SetHasCallFilter(m.callStore.HasFilter())
-	m.uiState.Footer.SetCallFilterCount(m.callStore.FilterChain.Count())
-	m.uiState.Footer.SetEventFilterMode(m.uiState.EventFilterMode)
-	m.uiState.Footer.SetHasEventFilter(m.eventStore.HasUserFilters())
-	m.uiState.Footer.SetEventFilterCount(m.eventStore.UserFilterCount())
-	m.uiState.Footer.SetStatsSubView(m.uiState.StatisticsView.GetSubView())
-
 	// Render components
 	headerView := m.uiState.Header.View()
 	tabsView := m.uiState.Tabs.View()
@@ -316,12 +287,10 @@ func (m Model) renderActiveModal() string {
 	if m.uiState.SettingsView.IsFileDialogActive() {
 		if m.uiState.SettingsView.GetPcapFileDialog().IsActive() {
 			pcapDialog := m.uiState.SettingsView.GetPcapFileDialog()
-			pcapDialog.SetSize(m.uiState.Width, m.uiState.Height)
 			return pcapDialog.View()
 		}
 		if m.uiState.SettingsView.GetNodesFileDialog().IsActive() {
 			nodesDialog := m.uiState.SettingsView.GetNodesFileDialog()
-			nodesDialog.SetSize(m.uiState.Width, m.uiState.Height)
 			return nodesDialog.View()
 		}
 	}
@@ -345,4 +314,49 @@ func (m Model) renderActiveModal() string {
 
 	// No modal active
 	return ""
+}
+
+// prepareViewChrome snapshots presentation state during model updates. Rendering
+// must not read the event store or mutate the shared header and footer.
+func (m *Model) prepareViewChrome() {
+	if m.uiState == nil || m.packetStore == nil || m.callStore == nil || m.eventStore == nil {
+		return
+	}
+	if m.uiState.SettingsView.IsFileDialogActive() {
+		if dialog := m.uiState.SettingsView.GetPcapFileDialog(); dialog.IsActive() {
+			dialog.SetSize(m.uiState.Width, m.uiState.Height)
+		}
+		if dialog := m.uiState.SettingsView.GetNodesFileDialog(); dialog.IsActive() {
+			dialog.SetSize(m.uiState.Width, m.uiState.Height)
+		}
+	}
+
+	// Update header state
+	m.uiState.Header.SetState(m.uiState.Capturing, m.uiState.Paused)
+	m.uiState.Header.SetPacketCount(m.packetStore.PacketsCount, m.packetStore.MaxPackets)
+	m.uiState.Header.SetInterface(m.interfaceName)
+	m.uiState.Header.SetCaptureMode(m.captureMode)
+	m.uiState.Header.SetPCAPFileCount(len(m.pcapFiles))
+	// Use hunter count (not remote client count) for accurate node display
+	m.uiState.Header.SetNodeCount(m.uiState.NodesView.GetHunterCount())
+	m.uiState.Header.SetProcessorCount(m.uiState.NodesView.GetProcessorCount())
+	m.uiState.Header.SetTLSDecryption(viper.GetBool("watch.tls_decryption_enabled"))
+
+	// Update footer state
+	m.uiState.Footer.SetFilterMode(m.uiState.FilterMode)
+	m.uiState.Footer.SetHasFilter(m.packetStore.HasFilter())
+	m.uiState.Footer.SetFilterCount(m.packetStore.FilterChain.Count())
+	m.uiState.Footer.SetActiveTab(m.uiState.Tabs.GetActive())
+	m.uiState.Footer.SetHasProtocolSelection(m.uiState.SelectedProtocol.Name != "All")
+	m.uiState.Footer.SetHasEvents(eventScopeAvailable(m.uiState.SelectedProtocol.Name))
+	m.uiState.Footer.SetPaused(m.uiState.Paused)
+	m.uiState.Footer.SetHasHelpSearch(m.uiState.HelpView.HasActiveSearch())
+	m.uiState.Footer.SetViewMode(m.uiState.ViewMode)
+	m.uiState.Footer.SetCallFilterMode(m.uiState.CallFilterMode)
+	m.uiState.Footer.SetHasCallFilter(m.callStore.HasFilter())
+	m.uiState.Footer.SetCallFilterCount(m.callStore.FilterChain.Count())
+	m.uiState.Footer.SetEventFilterMode(m.uiState.EventFilterMode)
+	m.uiState.Footer.SetHasEventFilter(m.eventStore.HasUserFilters())
+	m.uiState.Footer.SetEventFilterCount(m.eventStore.UserFilterCount())
+	m.uiState.Footer.SetStatsSubView(m.uiState.StatisticsView.GetSubView())
 }

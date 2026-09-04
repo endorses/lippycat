@@ -12,11 +12,14 @@ import (
 
 // Collector tracks hunter statistics with lock-free atomic operations
 type Collector struct {
-	packetsCaptured  atomic.Uint64
-	packetsMatched   atomic.Uint64
-	packetsForwarded atomic.Uint64
-	packetsDropped   atomic.Uint64
-	bufferBytes      atomic.Uint64
+	packetsCaptured               atomic.Uint64
+	packetsMatched                atomic.Uint64
+	packetsForwarded              atomic.Uint64
+	packetsDropped                atomic.Uint64
+	bufferBytes                   atomic.Uint64
+	rtpOwnershipUnresolved        atomic.Uint64
+	rtpOwnershipAmbiguous         atomic.Uint64
+	identityInheritanceSuppressed atomic.Uint64
 
 	// System metrics (CPU/RAM)
 	cpuPercent       atomic.Value // stores float64
@@ -54,6 +57,14 @@ func (c *Collector) IncrementDropped(count uint64) {
 // SetBufferBytes sets the current buffer bytes
 func (c *Collector) SetBufferBytes(bytes uint64) {
 	c.bufferBytes.Store(bytes)
+}
+
+// SetRTPAttribution publishes the VoIP processor's cumulative attribution
+// snapshot for the next heartbeat/status response.
+func (c *Collector) SetRTPAttribution(unresolved, ambiguous, inheritanceSuppressed uint64) {
+	c.rtpOwnershipUnresolved.Store(unresolved)
+	c.rtpOwnershipAmbiguous.Store(ambiguous)
+	c.identityInheritanceSuppressed.Store(inheritanceSuppressed)
 }
 
 // GetCaptured returns packets captured count
@@ -111,16 +122,19 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 	batchDrops := c.packetsDropped.Load()
 	detectorStats := detector.GetDefault().Telemetry()
 	return &management.HunterStats{
-		PacketsCaptured:   c.packetsCaptured.Load(),
-		PacketsMatched:    c.packetsMatched.Load(),
-		PacketsForwarded:  c.packetsForwarded.Load(),
-		PacketsDropped:    batchDrops,
-		BatchChannelDrops: batchDrops,
-		BufferBytes:       c.bufferBytes.Load(),
-		ActiveFilters:     activeFilters,
-		CpuPercent:        float32(c.cpuPercent.Load().(float64)),
-		MemoryRssBytes:    c.memoryRSSBytes.Load(),
-		MemoryLimitBytes:  c.memoryLimitBytes.Load(),
+		PacketsCaptured:               c.packetsCaptured.Load(),
+		PacketsMatched:                c.packetsMatched.Load(),
+		PacketsForwarded:              c.packetsForwarded.Load(),
+		PacketsDropped:                batchDrops,
+		BatchChannelDrops:             batchDrops,
+		BufferBytes:                   c.bufferBytes.Load(),
+		ActiveFilters:                 activeFilters,
+		CpuPercent:                    float32(c.cpuPercent.Load().(float64)),
+		MemoryRssBytes:                c.memoryRSSBytes.Load(),
+		MemoryLimitBytes:              c.memoryLimitBytes.Load(),
+		RtpOwnershipUnresolved:        c.rtpOwnershipUnresolved.Load(),
+		RtpOwnershipAmbiguous:         c.rtpOwnershipAmbiguous.Load(),
+		IdentityInheritanceSuppressed: c.identityInheritanceSuppressed.Load(),
 		Detector: &management.DetectorTelemetry{
 			FlowEntries:                 detectorStats.FlowEntries,
 			CacheEntries:                detectorStats.CacheEntries,

@@ -163,6 +163,7 @@ func TestToProto(t *testing.T) {
 	c.IncrementForwarded(10)
 	c.IncrementDropped(1)
 	c.SetBufferBytes(2048)
+	c.SetRTPAttribution(2, 3, 5)
 	c.SetSystemMetrics(sysmetrics.Metrics{
 		CPUPercent:       55.5,
 		MemoryRSSBytes:   209715200,  // 200 MB
@@ -170,6 +171,9 @@ func TestToProto(t *testing.T) {
 	})
 
 	proto := c.ToProto(5)
+	if proto.RtpOwnershipUnresolved != 2 || proto.RtpOwnershipAmbiguous != 3 || proto.IdentityInheritanceSuppressed != 5 {
+		t.Fatalf("unexpected RTP attribution telemetry: %+v", proto)
+	}
 
 	if proto.PacketsCaptured != 3 {
 		t.Errorf("Expected proto.PacketsCaptured 3, got %d", proto.PacketsCaptured)

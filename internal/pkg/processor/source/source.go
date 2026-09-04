@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
@@ -116,6 +117,13 @@ type Stats struct {
 	// authoritatively resolved. Direct packet-level matches remain eligible.
 	IdentityInheritanceSuppressed uint64
 
+	// RTPOwnershipUnresolved and RTPOwnershipAmbiguous count exact-endpoint
+	// attribution outcomes. The fixed outcome fields intentionally avoid
+	// endpoint, Call-ID, or filter-ID labels and therefore have bounded
+	// cardinality.
+	RTPOwnershipUnresolved uint64
+	RTPOwnershipAmbiguous  uint64
+
 	// BytesReceived is the total bytes received/captured
 	BytesReceived uint64
 
@@ -147,6 +155,8 @@ type AtomicStats struct {
 	bytesReceived                 atomic.Uint64
 	batchesReceived               atomic.Uint64
 	identityInheritanceSuppressed atomic.Uint64
+	rtpOwnershipUnresolved        atomic.Uint64
+	rtpOwnershipAmbiguous         atomic.Uint64
 	lastPacketTime                atomic.Int64 // Unix nano
 	startTime                     int64        // Set once at start
 
@@ -192,6 +202,17 @@ func (s *AtomicStats) AddIdentityInheritanceSuppressed() {
 	s.identityInheritanceSuppressed.Add(1)
 }
 
+// AddRTPResolution records one non-authoritative RTP ownership outcome. A
+// resolved outcome needs no exceptional counter and unknown values are ignored.
+func (s *AtomicStats) AddRTPResolution(status callregistry.MediaResolutionStatus) {
+	switch status {
+	case callregistry.MediaUnresolved:
+		s.rtpOwnershipUnresolved.Add(1)
+	case callregistry.MediaAmbiguous:
+		s.rtpOwnershipAmbiguous.Add(1)
+	}
+}
+
 // SetSystemMetrics updates the system metrics (CPU/RAM) from sysmetrics collector.
 func (s *AtomicStats) SetSystemMetrics(m sysmetrics.Metrics) {
 	s.cpuPercent.Store(m.CPUPercent)
@@ -215,6 +236,8 @@ func (s *AtomicStats) Snapshot() Stats {
 		BytesReceived:                 s.bytesReceived.Load(),
 		BatchesReceived:               s.batchesReceived.Load(),
 		IdentityInheritanceSuppressed: s.identityInheritanceSuppressed.Load(),
+		RTPOwnershipUnresolved:        s.rtpOwnershipUnresolved.Load(),
+		RTPOwnershipAmbiguous:         s.rtpOwnershipAmbiguous.Load(),
 		LastPacketTime:                lastTime,
 		StartTime:                     time.Unix(0, s.startTime),
 		CPUPercent:                    s.cpuPercent.Load().(float64),

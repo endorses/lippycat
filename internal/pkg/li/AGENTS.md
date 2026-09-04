@@ -404,6 +404,23 @@ exposed via `Stats()`. Endpoints are only ever added, so a re-INVITE cannot
 invalidate an earlier verdict; re-INVITE/UPDATE SDP is attributed only when its
 connection address already belongs to one party.
 
+**Attribution security invariant.** Security-sensitive RTP attribution must use
+the exact-endpoint resolver and must produce one authoritative call or no inherited
+identity. Do not reconstruct ownership from an all-owner endpoint list, merge the
+filters of candidate calls, or choose a winner by insertion time, activity time,
+or recency. Unknown and multi-owner results fail closed for identity inheritance.
+Packet-level IP/CIDR matching is separate direct evidence and may remain eligible.
+Carry direct and inherited provenance separately through the LI boundary, where
+the inherited Call-ID must agree with the resolver's authoritative Call-ID.
+
+Counters have a single increment owner: the packet source owns endpoint-resolution
+results and per-packet inheritance suppression; the LI manager owns rejection of
+individual inherited filter IDs at the trust boundary; the processor LI admission
+site owns finalized/stale-generation X3 suppression; the lifecycle finalization
+subscriber owns the number of reorder entries discarded; and the lifecycle
+registry owns tombstone-capacity evictions. Downstream consumers expose snapshots
+only and must not increment or reclassify these events.
+
 ### Buffer Pooling
 
 Both encoders use `sync.Pool` for PDU buffers:

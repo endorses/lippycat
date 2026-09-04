@@ -357,6 +357,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 	}
 
 	processorStats := p.statsCollector.GetProto()
+	p.populateLIEncodingStats(processorStats)
 
 	return &management.StatusResponse{
 		Hunters:        connectedHunters,

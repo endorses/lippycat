@@ -302,6 +302,26 @@ func TestHunterRTPRequiresAuthoritativeOwnership(t *testing.T) {
 		require.False(t, handler.handleRTPPacket(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
 		require.Zero(t, forwarder.count(), "neither selected identity call may claim ambiguous RTP")
 		require.Equal(t, uint64(1), handler.IdentityInheritanceSuppressed())
+		require.Equal(t, RTPAttributionStats{
+			OwnershipAmbiguous:    1,
+			InheritanceSuppressed: 1,
+		}, handler.RTPAttributionStats())
+	})
+
+	t.Run("unowned endpoint records unresolved suppression", func(t *testing.T) {
+		tracker := TestCallTracker(t)
+		forwarder := &recordingHunterForwarder{}
+		buffers := NewBufferManager(time.Minute, 10)
+		t.Cleanup(buffers.Close)
+		handler := NewUDPPacketHandler(tracker, forwarder, buffers)
+		t.Cleanup(handler.Close)
+		handler.SetApplicationFilter(&hunterPacketLevelFilter{})
+		packet := createUDPPacket(30000, 20000, rtpPayload)
+		require.False(t, handler.handleRTPPacket(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP)))
+		require.Equal(t, RTPAttributionStats{
+			OwnershipUnresolved:   1,
+			InheritanceSuppressed: 1,
+		}, handler.RTPAttributionStats())
 	})
 
 	t.Run("unique endpoint is forwarded with its call", func(t *testing.T) {

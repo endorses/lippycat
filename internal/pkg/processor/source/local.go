@@ -15,7 +15,10 @@ package source
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -191,6 +194,35 @@ func composeFilterIDs(direct, inherited []string) []string {
 
 const credibleSIPStartLineLimit = 256
 
+const ambiguousOwnershipWarningInterval = time.Minute
+
+func mediaFlowHash(packet gopacket.Packet) string {
+	if packet == nil || packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
+		return "unavailable"
+	}
+	endpoints := []string{
+		packet.NetworkLayer().NetworkFlow().Src().String() + ":" + packet.TransportLayer().TransportFlow().Src().String(),
+		packet.NetworkLayer().NetworkFlow().Dst().String() + ":" + packet.TransportLayer().TransportFlow().Dst().String(),
+	}
+	sort.Strings(endpoints)
+	sum := sha256.Sum256([]byte(endpoints[0] + "\x00" + endpoints[1]))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (s *LocalSource) warnAmbiguousOwnership(packet gopacket.Packet) {
+	now := time.Now().UnixNano()
+	last := s.lastAmbiguousOwnershipWarning.Load()
+	if last != 0 && now-last < ambiguousOwnershipWarningInterval.Nanoseconds() {
+		return
+	}
+	if !s.lastAmbiguousOwnershipWarning.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("RTP ownership is ambiguous; suppressing identity inheritance",
+		"resolution", "ambiguous",
+		"flow_hash", mediaFlowHash(packet))
+}
+
 // hasCredibleSIPStartLine conservatively recognizes a bounded SIP request or
 // response start line without converting packet data to strings or allocating.
 func hasCredibleSIPStartLine(packet gopacket.Packet) bool {
@@ -286,6 +318,9 @@ type LocalSource struct {
 
 	// Stats tracking
 	stats *AtomicStats
+	// lastAmbiguousOwnershipWarning rate-limits a single bounded warning stream;
+	// endpoint values are represented only by a short one-way flow hash.
+	lastAmbiguousOwnershipWarning atomic.Int64
 
 	// LI: CallID → filterIDs cache for RTP packets
 	// SIP packets that match LI filters store their CallID→filterIDs mapping,
@@ -859,6 +894,12 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 						pbPkt.Metadata = result.GetMetadata()
 						isVoIPPacket = true
 					}
+				}
+			}
+			if isVoIPPacket && pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil && mediaResolution.Status != callregistry.MediaResolved {
+				s.stats.AddRTPResolution(mediaResolution.Status)
+				if mediaResolution.Status == callregistry.MediaAmbiguous {
+					s.warnAmbiguousOwnership(pktInfo.Packet)
 				}
 			}
 			// Apply DNS processing if enabled and not a VoIP packet

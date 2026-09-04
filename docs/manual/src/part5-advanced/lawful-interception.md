@@ -505,6 +505,20 @@ X3 PDUs carry communication content; X3 is not a structured-log transport:
 
 X3 PDUs include RTP-specific attributes (SSRC, sequence number, timestamp, payload type) and a stream ID that correlates back to the X2 session events.
 
+#### Fail-closed call attribution
+
+Identity-based X3 selection is inherited only after exact RTP endpoint resolution
+proves a single active call. Shared or unknown endpoints do not use a recency
+winner and do not combine filters from all candidate calls. The identity match is
+suppressed. Direct IP-address and CIDR targets still match the packet endpoints,
+so they remain valid even when call ownership is ambiguous.
+
+Finalization closes the X3 path as well as per-call output. Buffered entries for
+the finalized call generation are discarded, and later encoding or delivery is
+rejected. Closed Call-IDs are retained for one hour by default in a bounded
+100,000-entry tombstone registry. Reuse after expiry creates a new generation;
+old buffered content cannot cross into it.
+
 ### Delivery Performance
 
 The delivery subsystem uses asynchronous queuing with backpressure to handle high throughput:
@@ -630,6 +644,17 @@ If PDUs are not reaching the MDF:
 2. Verify network connectivity to the MDF endpoint.
 3. Check that the delivery client certificate is signed by a CA the MDF trusts.
 4. Monitor the delivery queue depth -- a full queue indicates the MDF cannot keep up or is unreachable.
+
+### RTP attribution and lifecycle signals
+
+Treat increasing media `ambiguous`/`unknown`,
+`identity_inheritance_suppressed`, `inherited_provenance_rejected`,
+`x3_finalized_or_stale_suppressed`, `x3_buffered_discarded`, and lifecycle tombstone
+capacity-eviction counters as security signals. Ambiguity normally points to
+shared media endpoints or incomplete SDP visibility. Finalized/stale-generation
+rejections normally point to late batches, reorder delay, or Call-ID reuse.
+Structured warnings are rate limited and expose only sanitized or hashed
+identifiers; compare counter deltas to measure volume.
 
 ### Tasks Not Matching Traffic
 

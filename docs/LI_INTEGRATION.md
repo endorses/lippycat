@@ -356,6 +356,29 @@ normally. A direction is never guessed: where the evidence is absent, the field 
 Both legs of a relayed call (for example a target behind an IMS media gateway) are
 delivered and are labelled consistently, distinguished by their stream identifier.
 
+### Security-sensitive RTP attribution
+
+RTP identity-filter inheritance is fail closed. The processor resolves the exact
+source and destination media endpoints against the active-call registry. Identity
+selection is inherited only when that lookup proves one authoritative Call-ID. If
+the endpoint is unknown or is shared by multiple live calls, the packet is not
+assigned to the most recently observed call and identities from every possible
+owner are not combined. The inherited identity match is suppressed instead.
+
+Packet-level IP address and CIDR targets are independent direct evidence. They are
+matched against the RTP packet's source and destination addresses and remain
+eligible even when call ownership is ambiguous. Thus an ambiguous RTP packet can
+still be delivered to a directly matching IP/CIDR task, but it cannot enter a SIP
+URI, telephone-number, NAI, username, IMSI, or IMEI task by guessed inheritance.
+
+Call finalization is also an enforcement boundary. A shared lifecycle registry
+prevents X3 encoding, reorder-buffer insertion, and delivery after BYE/CANCEL,
+failure, idle/capacity cleanup, or manual finalization. Terminal Call-ID
+tombstones are retained for the configured closed-call TTL (one hour by default)
+and are bounded to 100,000 entries. Capacity eviction is observable. A Call-ID
+seen after its tombstone expires starts a new generation; buffered content from
+an older generation is never attached to it.
+
 ## Task Lifecycle
 
 ### Task States
@@ -542,6 +565,28 @@ automatically. Check:
 4. With debug logging, look for `LI media direction resolved for SSRC`; its absence
    alongside `LI media direction: SDP owner not attributable` means the SDP could not
    be attributed to a party
+
+### Ambiguous RTP ownership or rejected late X3
+
+These are intentional fail-closed outcomes, not evidence of packet loss. Monitor
+the processor/source status counters and structured warnings:
+
+| Signal | Increment owner and interpretation |
+|--------|------------------------------------|
+| media resolution `resolved` / `ambiguous` / `unknown` | The local packet source increments exactly one result when its exact-endpoint lookup completes. `ambiguous` means multiple live calls own the evidence; `unknown` means none does. Labels are the fixed result set only. |
+| `identity_inheritance_suppressed` | The local packet source increments once per classified media packet whose identity inheritance is denied. Direct IP/CIDR matches may still pass. |
+| `inherited_provenance_rejected` | The LI manager increments once per inherited filter ID rejected at the LI trust boundary, including non-authoritative or mismatched Call-ID provenance. |
+| `x3_finalized_or_stale_suppressed` | The processor LI path increments at the admission check that rejects X3 work for a finalized or stale call generation. It is not incremented again by a downstream layer for the same rejection. |
+| `x3_buffered_discarded` | The call-finalization subscriber increments by the number of queued reorder entries removed for that exact Call-ID and generation. |
+| lifecycle tombstone capacity evictions | The lifecycle registry increments once for each terminal tombstone removed to enforce its bound. Sustained growth shortens effective late-content protection. |
+
+Warnings for ambiguous ownership and rejected late X3 content are rate limited.
+They use sanitized or hashed identifiers rather than raw SIP identities or Call-IDs;
+use the counter deltas as the authoritative volume signal. A rising ambiguity rate
+usually indicates shared SBC/media-gateway endpoints, missing SDP, or capture from
+only one side of a NAT boundary. A rising finalized/stale-generation rate indicates
+late capture batches, excessive reorder delay, or Call-ID reuse. Do not work around
+either condition by selecting the newest candidate or merging candidate owners.
 
 ### Logs
 

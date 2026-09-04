@@ -237,6 +237,11 @@ message HunterStats {
     // Per-call PCAP lifecycle telemetry. Gauges are current values and counters
     // are cumulative for the writer-manager lifetime.
     PcapWriterTelemetry pcap_writer = 14;
+
+    // Bounded-cardinality RTP attribution outcomes for VoIP hunters.
+    uint64 rtp_ownership_unresolved = 15;
+    uint64 rtp_ownership_ambiguous = 16;
+    uint64 identity_inheritance_suppressed = 17;
 }
 
 // ProcessorHeartbeat response from processor
@@ -564,6 +569,32 @@ message ProcessorStats {
     // Upstream processor address (if forwarding to another processor)
     // Empty if this is a leaf processor (no upstream)
     string upstream_processor = 10;
+
+    // LI encoding telemetry. Absent when LI is not compiled in or enabled.
+    LIEncodingStats li_encoding = 11;
+}
+
+// LIEncodingStats reports monotonic counters from the processor's LI encoding
+// boundary. It contains no target identities, Call-IDs, or media data.
+message LIEncodingStats {
+    uint64 x2_encoded = 1;
+    uint64 x2_errors = 2;
+    uint64 x2_skipped = 3;
+    uint64 x3_encoded = 4;
+    uint64 x3_errors = 5;
+    uint64 x3_skipped = 6;
+    uint64 no_encoder = 7;
+    uint64 direction_resolved_media = 8;
+    uint64 direction_unknown_rtp = 9;
+    // Counted once where admission rejects an X3 PDU because its call is
+    // finalized or its immutable generation is stale.
+    uint64 x3_finalized_or_stale_suppressed = 10;
+    // Counted per buffered PDU removed by call or task finalization.
+    uint64 x3_buffered_discarded = 11;
+    uint64 rtp_ownership_unresolved = 12;
+    uint64 rtp_ownership_ambiguous = 13;
+    uint64 identity_inheritance_suppressed = 14;
+    uint64 inherited_provenance_rejected = 15;
 }
 
 // ListHuntersRequest to retrieve available hunters

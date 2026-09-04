@@ -231,7 +231,7 @@ func TestDetector_FlowTracking(t *testing.T) {
 	ctx := d.buildContext(packet)
 	flow := d.flows.Get(ctx.FlowID)
 	require.NotNil(t, flow)
-	assert.Contains(t, flow.Protocols, "FLOW")
+	assert.Contains(t, flow.ProtocolsSnapshot(), "FLOW")
 
 	// Second detection (same flow)
 	time.Sleep(10 * time.Millisecond)
@@ -240,17 +240,16 @@ func TestDetector_FlowTracking(t *testing.T) {
 
 	// Verify flow was updated
 	flow = d.flows.Get(ctx.FlowID)
-	assert.True(t, flow.LastSeen.After(flow.FirstSeen))
+	assert.True(t, flow.LastSeenTime().After(flow.FirstSeen))
 }
 
 func TestFlowTrackerRespectsMaxEntries(t *testing.T) {
 	tracker := NewFlowTrackerWithMaxEntries(time.Hour, 2)
 	defer tracker.Close()
 
-	old := tracker.GetOrCreate("old")
-	old.LastSeen = time.Now().Add(-time.Hour)
+	tracker.GetOrCreate("old")
 	newer := tracker.GetOrCreate("newer")
-	newer.LastSeen = time.Now()
+	newer.Touch(time.Now().Add(time.Hour))
 
 	tracker.GetOrCreate("newest")
 

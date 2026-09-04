@@ -15,6 +15,7 @@ import (
 type BufferManager struct {
 	buffers      map[string]*CallBuffer // callID -> buffer (temporary until filter decision)
 	matchedCalls map[string]time.Time   // callID -> matchTime (persists after buffer cleanup)
+	matchedIDs   map[string][]string    // callID -> direct filter IDs selecting the call
 	mu           sync.RWMutex
 	maxAge       time.Duration // Max time to buffer before decision
 	maxSize      int           // Max packets per buffer
@@ -33,6 +34,7 @@ func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 	bm := &BufferManager{
 		buffers:      make(map[string]*CallBuffer),
 		matchedCalls: make(map[string]time.Time),
+		matchedIDs:   make(map[string][]string),
 		maxAge:       maxAge,
 		maxSize:      maxSize,
 		matchedTTL:   DefaultMatchedTTL,
@@ -177,7 +179,31 @@ func (bm *BufferManager) AddRTPPacket(callID string, port string, packet gopacke
 	return false // Buffered, don't forward yet
 }
 
-// GetCallIDForRTPPort looks up which call a given RTP port belongs to
+// AddRTPPacketForEndpoints adds media only when one of the packet's exact
+// endpoints belongs to the already-authoritatively resolved call. The second
+// return value distinguishes a buffered packet from an endpoint mismatch.
+func (bm *BufferManager) AddRTPPacketForEndpoints(callID, sourceEndpoint, destinationEndpoint string, packet gopacket.Packet) (forward, accepted bool) {
+	bm.mu.RLock()
+	buffer, exists := bm.buffers[callID]
+	bm.mu.RUnlock()
+	if !exists || (!buffer.IsRTPPort(sourceEndpoint) && !buffer.IsRTPPort(destinationEndpoint)) {
+		return false, false
+	}
+	if buffer.IsFilterChecked() && buffer.IsMatched() {
+		return true, true
+	}
+
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if bm.buffers[callID] != buffer {
+		return false, false
+	}
+	buffer.AddRTPPacket(packet)
+	return false, true
+}
+
+// GetCallIDForRTPPort is retained for non-authoritative diagnostics. Its
+// map-order result must not be used for filtering or packet attribution.
 func (bm *BufferManager) GetCallIDForRTPPort(port string) (string, bool) {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
@@ -327,11 +353,50 @@ func (bm *BufferManager) IsCallMatched(callID string) bool {
 	return buffer.IsFilterChecked() && buffer.IsMatched()
 }
 
+// StoreMatchedFilterIDs retains the direct filter evidence that selected one
+// call. Media may inherit only this call-scoped snapshot after authoritative
+// endpoint resolution.
+func (bm *BufferManager) StoreMatchedFilterIDs(callID string, filterIDs []string) {
+	if callID == "" || len(filterIDs) == 0 {
+		return
+	}
+	bm.mu.Lock()
+	combined := append(append([]string(nil), bm.matchedIDs[callID]...), filterIDs...)
+	bm.matchedIDs[callID] = stableFilterIDs(combined)
+	bm.mu.Unlock()
+}
+
+// MatchedFilterIDs returns a copy of the direct IDs that selected callID.
+func (bm *BufferManager) MatchedFilterIDs(callID string) []string {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	return append([]string(nil), bm.matchedIDs[callID]...)
+}
+
+func stableFilterIDs(filterIDs []string) []string {
+	result := make([]string, 0, len(filterIDs))
+	seen := make(map[string]struct{}, len(filterIDs))
+	for _, id := range filterIDs {
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
+}
+
 // DiscardBuffer removes a buffer without flushing
 func (bm *BufferManager) DiscardBuffer(callID string) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 	delete(bm.buffers, callID)
+	if _, matched := bm.matchedCalls[callID]; !matched {
+		delete(bm.matchedIDs, callID)
+	}
 }
 
 // GetBufferCount returns the number of active buffers
@@ -376,6 +441,9 @@ func (bm *BufferManager) cleanupOldBuffers() {
 				"age_seconds", int(age.Seconds()),
 				"packet_count", packetCount)
 			delete(bm.buffers, callID)
+			if _, matched := bm.matchedCalls[callID]; !matched {
+				delete(bm.matchedIDs, callID)
+			}
 			continue
 		}
 
@@ -386,6 +454,9 @@ func (bm *BufferManager) cleanupOldBuffers() {
 				"packet_count", packetCount,
 				"max_size", bm.maxSize)
 			delete(bm.buffers, callID)
+			if _, matched := bm.matchedCalls[callID]; !matched {
+				delete(bm.matchedIDs, callID)
+			}
 		}
 	}
 
@@ -396,6 +467,7 @@ func (bm *BufferManager) cleanupOldBuffers() {
 				"call_id", SanitizeCallIDForLogging(callID),
 				"age_hours", int(now.Sub(matchTime).Hours()))
 			delete(bm.matchedCalls, callID)
+			delete(bm.matchedIDs, callID)
 		}
 	}
 }
@@ -413,7 +485,7 @@ func (bm *BufferManager) Close() {
 }
 
 // extractRTPPortsFromSDP extracts RTP ports and IP:PORT endpoints from SDP body
-// Returns both IP:PORT (for precise matching) and port-only (for NAT fallback)
+// Returns exact IP:PORT endpoints. Port-only ownership is not authoritative.
 func extractRTPPortsFromSDP(sdp string) []string {
 	endpoints := make([]string, 0, 4)
 
@@ -464,8 +536,8 @@ func extractRTPPortsFromSDP(sdp string) []string {
 							"port", port,
 							"endpoint", endpoint)
 					}
-					// Also register port-only for backward compatibility
-					// (some RTP may come from unexpected IPs due to NAT)
+					// Retain port-only membership for legacy buffer bookkeeping.
+					// Security-sensitive attribution never queries this fallback.
 					endpoints = append(endpoints, port)
 				}
 			}

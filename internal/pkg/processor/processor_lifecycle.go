@@ -243,9 +243,7 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 	if p.sessionOutputManager != nil {
 		// Wire up voip processor cleanup if available (tap mode with LocalSource)
 		if localSrc, ok := p.packetSource.(*source.LocalSource); ok {
-			if voipProc := localSrc.GetVoIPProcessor(); voipProc != nil {
-				p.sessionOutputManager.SetVoIPPortCleaner(voipProc)
-			}
+			p.sessionOutputManager.SetVoIPPortCleaner(localSrc)
 		}
 		p.sessionOutputManager.Start()
 	}

@@ -3,7 +3,12 @@
 package voip
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"sort"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -22,14 +27,18 @@ import (
 
 // UDPPacketHandler processes UDP SIP/RTP packets for hunter mode with buffering
 type UDPPacketHandler struct {
-	tracker         *CallTracker
-	forwarder       PacketForwarder
-	bufferMgr       *BufferManager
-	appFilter       ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
-	selectionPolicy *hunterSelectionPolicy
-	orchestrator    *sipflow.Orchestrator
-	analysisMu      sync.Mutex
-	bufferedSIP     map[string][]bufferedSIPAnalysis
+	tracker                *CallTracker
+	forwarder              PacketForwarder
+	bufferMgr              *BufferManager
+	appFilter              ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
+	selectionPolicy        *hunterSelectionPolicy
+	orchestrator           *sipflow.Orchestrator
+	analysisMu             sync.Mutex
+	bufferedSIP            map[string][]bufferedSIPAnalysis
+	inheritanceSuppressed  atomic.Uint64
+	rtpOwnershipUnresolved atomic.Uint64
+	rtpOwnershipAmbiguous  atomic.Uint64
+	lastAmbiguousWarning   atomic.Int64
 }
 
 type bufferedSIPAnalysis struct {
@@ -37,7 +46,48 @@ type bufferedSIPAnalysis struct {
 	at     time.Time
 }
 
+type packetLevelFilterWithIDs interface {
+	MatchPacketLevelWithIDs(gopacket.Packet) (bool, []string)
+}
+
 const maxBufferedSIPAnalysisCalls = 1024
+
+const ambiguousRTPWarningInterval = time.Minute
+
+// RTPAttributionStats uses one field per finite outcome rather than dynamic
+// endpoint or Call-ID labels, keeping metric cardinality bounded.
+type RTPAttributionStats struct {
+	OwnershipUnresolved   uint64
+	OwnershipAmbiguous    uint64
+	InheritanceSuppressed uint64
+}
+
+func hashedMediaFlow(packet gopacket.Packet) string {
+	if packet == nil || packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
+		return "unavailable"
+	}
+	endpoints := []string{
+		packet.NetworkLayer().NetworkFlow().Src().String() + ":" + packet.TransportLayer().TransportFlow().Src().String(),
+		packet.NetworkLayer().NetworkFlow().Dst().String() + ":" + packet.TransportLayer().TransportFlow().Dst().String(),
+	}
+	sort.Strings(endpoints)
+	sum := sha256.Sum256([]byte(endpoints[0] + "\x00" + endpoints[1]))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (h *UDPPacketHandler) warnAmbiguousRTP(packet gopacket.Packet) {
+	now := time.Now().UnixNano()
+	last := h.lastAmbiguousWarning.Load()
+	if last != 0 && now-last < ambiguousRTPWarningInterval.Nanoseconds() {
+		return
+	}
+	if !h.lastAmbiguousWarning.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("RTP ownership is ambiguous; suppressing identity inheritance",
+		"resolution", "ambiguous",
+		"flow_hash", hashedMediaFlow(packet))
+}
 
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
 func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
@@ -182,9 +232,11 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	if network := packet.NetworkLayer(); network != nil {
 		opts.SourceIP, opts.DestinationIP = network.NetworkFlow().Src().String(), network.NetworkFlow().Dst().String()
 	}
-	directMatch := h.appFilter != nil && h.matchesFilter(packet, nil)
+	directMatch, directFilterIDs := matchPacketWithIDs(h.appFilter, packet)
+	envelope := envelopeForHunterPacket(pkt)
+	setHunterFilterProvenance(envelope, directFilterIDs, nil)
 	analysis := h.orchestrator.Analyze(sipflow.Message{
-		Payload: payload, Envelope: envelopeForHunterPacket(pkt), ParseOptions: opts,
+		Payload: payload, Envelope: envelope, ParseOptions: opts,
 		FilterConfigured: true, DirectMatch: directMatch,
 		Match: func(event sharedsip.Event) bool {
 			return h.appFilter == nil && containsUserInHeaders(event.Headers)
@@ -197,6 +249,11 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		return false
 	}
 	result, callID := analysis.SIP, analysis.SIP.CallID
+	inheritedFilterIDs := h.bufferMgr.MatchedFilterIDs(callID)
+	setHunterFilterProvenance(envelope, directFilterIDs, inheritedFilterIDs)
+	if directMatch {
+		h.bufferMgr.StoreMatchedFilterIDs(callID, directFilterIDs)
+	}
 
 	// Create call locally for TUI display (before filter check)
 	// This ensures the TUI shows all calls, not just matched ones
@@ -254,6 +311,9 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 
 	// Check filter if we have SDP (INVITE or 200 OK with m=audio)
 	if hasSDP {
+		// Make the exact SDP endpoints visible to the shared authoritative
+		// resolver before any media can be stamped or forwarded.
+		h.tracker.ExtractPortFromSDP(metadata.SDPBody, callID)
 		// Use callback-based filter check for flexible handling
 		// Note: 'packet' is captured by the closure for ApplicationFilter matching
 		matched := h.bufferMgr.CheckFilterWithCallback(
@@ -312,8 +372,8 @@ func sipPacketMetadata(callID string, metadata *CallMetadata) *data.PacketMetada
 func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers.UDP) bool {
 	packet := pkt.Packet
 	interfaceName := pkt.Interface
-	dstPort := layer.DstPort.String()
-	srcPort := layer.SrcPort.String()
+	dstPort := strconv.Itoa(int(layer.DstPort))
+	srcPort := strconv.Itoa(int(layer.SrcPort))
 
 	// Extract IP addresses for IP:PORT endpoint lookups
 	var dstIP, srcIP string
@@ -322,41 +382,53 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 		srcIP = netLayer.NetworkFlow().Src().String()
 	}
 
-	// Try to get CallID from buffer manager's port mapping
-	// Check IP:PORT endpoints first (more specific), then fall back to port-only
-	var bufCallID string
-	var exists bool
+	resolution := h.tracker.ResolveMediaPacket(packet)
+	var directMatched bool
+	var directFilterIDs []string
+	if filter, ok := h.appFilter.(packetLevelFilterWithIDs); ok {
+		directMatched, directFilterIDs = filter.MatchPacketLevelWithIDs(packet)
+	}
+	if resolution.Status != callregistry.MediaResolved {
+		switch resolution.Status {
+		case callregistry.MediaUnresolved:
+			h.rtpOwnershipUnresolved.Add(1)
+		case callregistry.MediaAmbiguous:
+			h.rtpOwnershipAmbiguous.Add(1)
+			h.warnAmbiguousRTP(packet)
+		}
+		h.inheritanceSuppressed.Add(1)
+		// Ambiguous or unresolved media cannot inherit identity selection, but a
+		// direct packet-level IP/CIDR match remains authoritative on its own.
+		if directMatched {
+			h.forwardRTPPacket("", packet, layer, interfaceName, pkt.LinkType, directFilterIDs, nil)
+			return true
+		}
+		return false
+	}
+	bufCallID := resolution.CallID
+	inheritedFilterIDs := h.bufferMgr.MatchedFilterIDs(bufCallID)
+	if directMatched {
+		// Direct evidence selects this packet independently. Do not also place it
+		// in the call buffer, where a later identity decision could forward it a
+		// second time under different provenance.
+		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType, directFilterIDs, inheritedFilterIDs)
+		return true
+	}
 
-	if dstIP != "" {
-		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(dstIP + ":" + dstPort)
-	}
-	if !exists && srcIP != "" {
-		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(srcIP + ":" + srcPort)
-	}
-	// Fall back to port-only lookups
-	if !exists {
-		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(dstPort)
-	}
-	if !exists {
-		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(srcPort)
-	}
-
-	if !exists {
-		// Not a tracked RTP port
+	// Buffer only after the same resolved call owns one of these exact endpoints.
+	shouldForward, accepted := h.bufferMgr.AddRTPPacketForEndpoints(
+		bufCallID,
+		srcIP+":"+srcPort,
+		dstIP+":"+dstPort,
+		packet,
+	)
+	if !accepted {
 		return false
 	}
 
-	// This RTP packet belongs to a call we're buffering or tracking
-	// Use IP:PORT for the port parameter if available for more precise matching
-	portKey := dstPort
-	if dstIP != "" {
-		portKey = dstIP + ":" + dstPort
-	}
-	shouldForward := h.bufferMgr.AddRTPPacket(bufCallID, portKey, packet)
-
 	if shouldForward {
 		// Call already matched, forward immediately with RTP metadata
-		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType)
+		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType, directFilterIDs, inheritedFilterIDs)
 		return true
 	}
 
@@ -415,7 +487,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 			continue
 		}
 
-		if err := h.forwarder.ForwardPacketWithMetadata(pkt, packetMetadata, interfaceName, linkType); err != nil {
+		if err := forwardPacketWithFilterProvenance(h.forwarder, pkt, packetMetadata, interfaceName, linkType, nil, h.bufferMgr.MatchedFilterIDs(callID)); err != nil {
 			logger.Error("Failed to forward buffered UDP packet",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
@@ -427,8 +499,24 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 		"packet_count", len(packets))
 }
 
+// IdentityInheritanceSuppressed returns the number of media packets that could
+// not inherit identity filters because ownership was unresolved or ambiguous.
+func (h *UDPPacketHandler) IdentityInheritanceSuppressed() uint64 {
+	return h.inheritanceSuppressed.Load()
+}
+
+// RTPAttributionStats returns a consistent-enough monotonic snapshot; each
+// counter is independent and may advance while the snapshot is being read.
+func (h *UDPPacketHandler) RTPAttributionStats() RTPAttributionStats {
+	return RTPAttributionStats{
+		OwnershipUnresolved:   h.rtpOwnershipUnresolved.Load(),
+		OwnershipAmbiguous:    h.rtpOwnershipAmbiguous.Load(),
+		InheritanceSuppressed: h.inheritanceSuppressed.Load(),
+	}
+}
+
 // forwardRTPPacket forwards a single RTP packet immediately (call already matched)
-func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType) {
+func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType, directFilterIDs, inheritedFilterIDs []string) {
 	// Try to extract RTP header for metadata
 	var pbMetadata *data.PacketMetadata
 
@@ -443,10 +531,6 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 			ssrc := uint32(payload[8])<<24 | uint32(payload[9])<<16 | uint32(payload[10])<<8 | uint32(payload[11])
 
 			pbMetadata = &data.PacketMetadata{
-				// Include SIP metadata with CallID so processor can associate RTP with call
-				Sip: &data.SIPMetadata{
-					CallId: callID,
-				},
 				// Include RTP metadata for quality calculations
 				Rtp: &data.RTPMetadata{
 					Ssrc:        ssrc,
@@ -455,11 +539,14 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 					Timestamp:   timestamp,
 				},
 			}
+			if callID != "" {
+				pbMetadata.Sip = &data.SIPMetadata{CallId: callID}
+			}
 		}
 	}
 
 	// Forward with RTP metadata if available
-	if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName, linkType); err != nil {
+	if err := forwardPacketWithFilterProvenance(h.forwarder, packet, pbMetadata, interfaceName, linkType, directFilterIDs, inheritedFilterIDs); err != nil {
 		logger.Error("Failed to forward RTP packet",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)

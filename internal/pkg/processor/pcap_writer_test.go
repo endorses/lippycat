@@ -412,17 +412,16 @@ func TestPcapWriterManagerMaxWriters(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, secondWriter)
 
-	assert.Len(t, completed, 1)
-	assert.Equal(t, "first-call", completed[0].CallID)
+	assert.Empty(t, completed, "capacity pressure must not complete an active call")
 
 	manager.mu.RLock()
 	_, firstExists := manager.writers["first-call"]
 	_, secondExists := manager.writers["second-call"]
 	writerCount := len(manager.writers)
 	manager.mu.RUnlock()
-	assert.False(t, firstExists)
+	assert.True(t, firstExists)
 	assert.True(t, secondExists)
-	assert.Equal(t, 1, writerCount)
+	assert.Equal(t, 2, writerCount)
 }
 
 // TestGetOrCreateWriter_Disabled tests that no writer is created when disabled

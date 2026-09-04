@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,24 @@ type CallPartyInfo struct {
 	To   string
 }
 
+// callTrackerRegistry is the subset of callregistry.Core used by CallTracker.
+// Keeping this boundary narrow also allows the RTP hot path to be tested for
+// accidental active-call collection materialization.
+type callTrackerRegistry interface {
+	ActiveCalls() []callregistry.Call
+	ActiveCallCount() int
+	EndpointAssociationCount() int
+	Call(string) (callregistry.Call, bool)
+	CallIDsForEndpoint(string) []string
+	Clear()
+	EndpointsForCall(string) []string
+	MostRecentCallIDForEndpoint(string) (string, bool)
+	Remove(string, callregistry.EndReason) bool
+	Touch(string, time.Time) bool
+	TryAssociateEndpoint(string, string) bool
+	Upsert(callregistry.Call) bool
+}
+
 // CallTracker tracks RTP-to-CallID mappings for TUI capture modes (live and offline)
 // It parses SDP from SIP packets to extract RTP connection information.
 // Uses LRU eviction to prevent unbounded memory growth.
@@ -36,7 +55,7 @@ type CallPartyInfo struct {
 //
 // No fallbacks - exact IP:port match only.
 type CallTracker struct {
-	registry *callregistry.Core
+	registry callTrackerRegistry
 	// Map: CallID -> From/To party info
 	callPartyInfo map[string]*CallPartyInfo
 	mu            sync.RWMutex
@@ -423,8 +442,11 @@ const rtpLRUTouchInterval = time.Second
 func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort string) string {
 	atomic.AddInt64(&rtpLookupAttempts, 1)
 
-	dstEndpoint := fmt.Sprintf("%s:%s", dstIP, dstPort)
-	srcEndpoint := fmt.Sprintf("%s:%s", srcIP, srcPort)
+	// The endpoint components are already strings, so direct concatenation keeps
+	// the established IPv4/IPv6 key representation without fmt's interface and
+	// formatting overhead on every RTP packet.
+	dstEndpoint := dstIP + ":" + dstPort
+	srcEndpoint := srcIP + ":" + srcPort
 
 	// Read-lock for lookup
 	t.mu.RLock()
@@ -439,7 +461,6 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 			atomic.AddInt64(&rtpLookupSrcMatch, 1)
 		}
 	}
-	mapSizes := [2]int{len(t.registry.ActiveCalls()), len(t.registry.ActiveCalls())}
 	t.mu.RUnlock()
 
 	if found {
@@ -453,12 +474,15 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 	}
 
 	atomic.AddInt64(&rtpLookupFailed, 1)
-	// Log lookup failures with map state for debugging
-	logger.Debug("GetCallIDForRTPPacket: lookup failed",
-		"src_endpoint", srcEndpoint,
-		"dst_endpoint", dstEndpoint,
-		"rtpEndpointToCallIDs_size", mapSizes[0],
-		"callIDToEndpoints_size", mapSizes[1])
+	// Query counts only when the active logger can emit the diagnostic. The
+	// sampled diagnostic buffer below remains independent of normal logging.
+	if logger.Enabled(slog.LevelDebug) {
+		logger.Debug("GetCallIDForRTPPacket: lookup failed",
+			"src_endpoint", srcEndpoint,
+			"dst_endpoint", dstEndpoint,
+			"active_calls", t.registry.ActiveCallCount(),
+			"endpoint_associations", t.registry.EndpointAssociationCount())
+	}
 	// Record miss in diagnostic buffer (only every 100th miss to avoid spam)
 	if atomic.LoadInt64(&rtpLookupFailed)%100 == 1 {
 		addDiagEvent("MISS", "", srcEndpoint, dstEndpoint)
@@ -468,9 +492,7 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 
 // GetTrackedCallCount returns the number of tracked calls
 func (t *CallTracker) GetTrackedCallCount() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return len(t.registry.ActiveCalls())
+	return t.registry.ActiveCallCount()
 }
 
 // IsCallActive reports whether the tracker currently owns state for callID.

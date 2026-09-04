@@ -210,6 +210,13 @@ type Processor struct {
 	vifInjectionErrors atomic.Uint64 // Virtual interface injection failures
 
 	sessionOutputManager *SessionOutputManager
+	callLifecycle        *CallLifecycleRegistry
+	// afterLIPacket is a test synchronization hook for the coordinated
+	// LI/per-call-PCAP admission boundary. Production leaves it nil.
+	afterLIPacket func()
+	// liPacketAdmissions carries packet-scoped lifecycle leases through the LI
+	// manager's synchronous task callback without widening its public API.
+	liPacketAdmissions sync.Map // map[*types.PacketDisplay]*CallAdmission
 
 	// Auto-rotate PCAP writer (for non-VoIP traffic)
 	autoRotatePcapWriter *AutoRotatePcapWriter
@@ -421,10 +428,12 @@ func New(config Config) (*Processor, error) {
 			"debounce", debounce)
 	}
 
-	// Initialize per-call PCAP writer if configured
-	if config.PcapWriterConfig != nil && config.PcapWriterConfig.Enabled {
+	// Terminal call state is required by both per-call PCAP and LI. Keep the
+	// lifecycle monitor alive for LI even when no PCAP files are requested.
+	pcapEnabled := config.PcapWriterConfig != nil && config.PcapWriterConfig.Enabled
+	if pcapEnabled || config.LIEnabled {
 		// Wire command executor callbacks to PCAP writer config
-		if p.commandExecutor != nil {
+		if pcapEnabled && p.commandExecutor != nil {
 			config.PcapWriterConfig.OnFileClose = p.commandExecutor.OnFileClose()
 			config.PcapWriterConfig.OnCallComplete = p.commandExecutor.OnCallComplete()
 		}
@@ -437,14 +446,17 @@ func New(config Config) (*Processor, error) {
 			return nil, fmt.Errorf("failed to initialize session output manager: %w", err)
 		}
 		p.sessionOutputManager = manager
+		p.callLifecycle = manager.lifecycle
 		if monitor, ok := manager.monitor.(*CallCompletionMonitor); ok {
 			logger.Info("Call completion monitor configured",
 				"grace_period", monitor.config.GracePeriod,
 				"check_interval", monitor.config.CheckInterval)
 		}
-		logger.Info("Per-call PCAP writing enabled",
-			"output_dir", config.PcapWriterConfig.OutputDir,
-			"pattern", config.PcapWriterConfig.FilePattern)
+		if pcapEnabled {
+			logger.Info("Per-call PCAP writing enabled",
+				"output_dir", config.PcapWriterConfig.OutputDir,
+				"pattern", config.PcapWriterConfig.FilePattern)
+		}
 	}
 
 	// Initialize auto-rotate PCAP writer if configured
@@ -755,6 +767,7 @@ func (p *Processor) SetPacketSource(packetSource source.PacketSource) {
 	if localSource, ok := packetSource.(*source.LocalSource); ok {
 		if voipProcessor := localSource.GetVoIPProcessor(); voipProcessor != nil {
 			voipProcessor.AddLifecycleObserver(p.sessionOutputManager)
+			voipProcessor.SetCompletionHandler(p.sessionOutputManager.OnCallEnded)
 		}
 	}
 }
@@ -899,6 +912,8 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 	if p.filterTarget != nil {
 		activeFilters = uint32(len(p.filterTarget.GetActiveFilters())) // #nosec G115
 	}
+	detectorStats := detector.GetDefault().Telemetry()
+	pcapStats := p.sessionOutputManager.Telemetry()
 
 	return &management.ConnectedHunter{
 		HunterId:             p.config.ProcessorID + "-local",
@@ -909,23 +924,68 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		Stats: &management.HunterStats{
 			PacketsCaptured: stats.PacketsCaptured,
 			// Local capture has no forwarding hop, so matched == forwarded.
-			PacketsMatched:            stats.PacketsForwarded,
-			PacketsForwarded:          stats.PacketsForwarded,
-			PacketsDropped:            stats.PacketsDropped,
-			ActiveFilters:             activeFilters,
-			CpuPercent:                float32(stats.CPUPercent),
-			MemoryRssBytes:            stats.MemoryRSSBytes,
-			MemoryLimitBytes:          stats.MemoryLimitBytes,
-			CaptureLosses:             stats.PacketsDropped + upstreamLosses.Capture,
-			AnalysisLosses:            eventRuntimeStats.Invalid + eventRuntimeStats.Dropped + eventRuntimeStats.ReassemblyEvicted + upstreamLosses.Analysis,
-			QueueLosses:               eventDispatcherStats.Dropped + eventDispatcherStats.SinkDropped + upstreamLosses.Queue,
-			UnsupportedKindLosses:     upstreamLosses.UnsupportedKind,
-			TransportLosses:           upstreamLosses.Transport,
-			CaptureBufferRegularDrops: stats.CaptureBufferRegularDrops,
-			CaptureBufferSipDrops:     stats.CaptureBufferSIPDrops,
-			BatchChannelDrops:         stats.BatchChannelDrops,
+			PacketsMatched:                stats.PacketsForwarded,
+			PacketsForwarded:              stats.PacketsForwarded,
+			PacketsDropped:                stats.PacketsDropped,
+			CaptureBufferRegularDrops:     stats.CaptureBufferRegularDrops,
+			CaptureBufferSipDrops:         stats.CaptureBufferSIPDrops,
+			BatchChannelDrops:             stats.BatchChannelDrops,
+			ActiveFilters:                 activeFilters,
+			CpuPercent:                    float32(stats.CPUPercent),
+			MemoryRssBytes:                stats.MemoryRSSBytes,
+			MemoryLimitBytes:              stats.MemoryLimitBytes,
+			RtpOwnershipUnresolved:        stats.RTPOwnershipUnresolved,
+			RtpOwnershipAmbiguous:         stats.RTPOwnershipAmbiguous,
+			IdentityInheritanceSuppressed: stats.IdentityInheritanceSuppressed,
+			CaptureLosses:                 stats.PacketsDropped + upstreamLosses.Capture,
+			AnalysisLosses:                eventRuntimeStats.Invalid + eventRuntimeStats.Dropped + eventRuntimeStats.ReassemblyEvicted + upstreamLosses.Analysis,
+			QueueLosses:                   eventDispatcherStats.Dropped + eventDispatcherStats.SinkDropped + upstreamLosses.Queue,
+			UnsupportedKindLosses:         upstreamLosses.UnsupportedKind,
+			TransportLosses:               upstreamLosses.Transport,
+			Detector: &management.DetectorTelemetry{
+				FlowEntries:                 detectorStats.FlowEntries,
+				CacheEntries:                detectorStats.CacheEntries,
+				FlowEvictions:               detectorStats.FlowEvictions,
+				CacheEvictions:              detectorStats.CacheEvictions,
+				FlowExpiredRemovals:         detectorStats.FlowExpiredRemovals,
+				CacheExpiredRemovals:        detectorStats.CacheExpiredRemovals,
+				FlowPressureEpisodes:        detectorStats.FlowPressureEpisodes,
+				CachePressureEpisodes:       detectorStats.CachePressureEpisodes,
+				FlowLastEvictionDurationNs:  detectorStats.FlowLastEvictionDurationNs,
+				CacheLastEvictionDurationNs: detectorStats.CacheLastEvictionDurationNs,
+				FlowLastEvictionBatchSize:   detectorStats.FlowLastEvictionBatchSize,
+				CacheLastEvictionBatchSize:  detectorStats.CacheLastEvictionBatchSize,
+			},
+			PcapWriter: &management.PcapWriterTelemetry{
+				ActiveWriters:              pcapStats.ActiveWriters,
+				Tombstones:                 pcapStats.Tombstones,
+				ProtocolFinalizations:      pcapStats.ProtocolFinalizations,
+				IdleFinalizations:          pcapStats.IdleFinalizations,
+				CapacityFinalizations:      pcapStats.CapacityFinalizations,
+				ManualFinalizations:        pcapStats.ManualFinalizations,
+				SuppressedLatePackets:      pcapStats.SuppressedLatePackets,
+				TombstoneCapacityEvictions: pcapStats.TombstoneCapacityEvictions,
+				FilenameCollisions:         pcapStats.FilenameCollisions,
+				CallbackFailures:           pcapStats.CallbackFailures,
+			},
 		},
 		Interfaces:   localSource.Interfaces(),
 		Capabilities: caps,
+	}
+}
+
+func (p *Processor) pcapWriterTelemetryProto() *management.PcapWriterTelemetry {
+	stats := p.sessionOutputManager.Telemetry()
+	return &management.PcapWriterTelemetry{
+		ActiveWriters:              stats.ActiveWriters,
+		Tombstones:                 stats.Tombstones,
+		ProtocolFinalizations:      stats.ProtocolFinalizations,
+		IdleFinalizations:          stats.IdleFinalizations,
+		CapacityFinalizations:      stats.CapacityFinalizations,
+		ManualFinalizations:        stats.ManualFinalizations,
+		SuppressedLatePackets:      stats.SuppressedLatePackets,
+		TombstoneCapacityEvictions: stats.TombstoneCapacityEvictions,
+		FilenameCollisions:         stats.FilenameCollisions,
+		CallbackFailures:           stats.CallbackFailures,
 	}
 }

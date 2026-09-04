@@ -4,8 +4,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 func (tracker *CallTracker) endpointCallIDs(endpoint string) []string {
@@ -86,8 +88,8 @@ func extractAllRTPEndpoints(sdp string) []string {
 							"port", port,
 							"endpoint", endpoint)
 					}
-					// Also register port-only for backward compatibility
-					// (some RTP may come from unexpected IPs due to NAT)
+					// Retain the port-only association for diagnostics and legacy
+					// detection. Authoritative attribution never consults it.
 					endpoints = append(endpoints, port)
 				}
 			}
@@ -125,53 +127,38 @@ func extractAllRTPPorts(sdp string) []string {
 	return ports
 }
 
-// IsTracked reports whether a packet matches an RTP endpoint on this tracker.
+// IsTracked is a non-authoritative detection helper. It may use legacy
+// port-only candidates; attribution callers must use ResolveMediaPacket.
 func (tracker *CallTracker) IsTracked(packet gopacket.Packet) bool {
-	transportLayer := packet.TransportLayer()
-	if transportLayer == nil {
-		return false
-	}
-	networkLayer := packet.NetworkLayer()
-
-	dstPort := transportLayer.TransportFlow().Dst().String()
-	srcPort := transportLayer.TransportFlow().Src().String()
-
-	// Try IP:PORT lookups first (more specific)
-	if networkLayer != nil {
-		dstIP := networkLayer.NetworkFlow().Dst().String()
-		srcIP := networkLayer.NetworkFlow().Src().String()
-
-		dstEndpoint := dstIP + ":" + dstPort
-		srcEndpoint := srcIP + ":" + srcPort
-
-		if callIDs := tracker.endpointCallIDs(dstEndpoint); len(callIDs) > 0 {
-			return true
-		}
-		if callIDs := tracker.endpointCallIDs(srcEndpoint); len(callIDs) > 0 {
-			return true
-		}
-	}
-
-	// Fall back to port-only lookups (for NAT scenarios)
-	dstCallIDs := tracker.endpointCallIDs(dstPort)
-	srcCallIDs := tracker.endpointCallIDs(srcPort)
-	return len(dstCallIDs) > 0 || len(srcCallIDs) > 0
+	return len(tracker.GetAllCallIDsForPacket(packet)) > 0
 }
 
-// GetCallIDForPacket returns the first call ID associated with a packet's port.
-// For B2BUA scenarios where multiple calls share a port, use GetAllCallIDsForPacket.
-// GetCallIDForPacket returns the first call associated with a packet.
+// GetCallIDForPacket is a compatibility wrapper that returns a Call-ID only
+// for authoritative resolution. Ambiguous and unresolved packets return empty.
 func (tracker *CallTracker) GetCallIDForPacket(packet gopacket.Packet) string {
-	callIDs := tracker.GetAllCallIDsForPacket(packet)
-	if len(callIDs) > 0 {
-		return callIDs[0]
-	}
-	return ""
+	return tracker.ResolveMediaPacket(packet).CallID
 }
 
-// GetAllCallIDsForPacket returns all call IDs associated with a packet's port.
-// This supports B2BUA scenarios where multiple call legs share the same RTP port.
-// GetAllCallIDsForPacket returns all calls associated with a packet.
+// ResolveMediaPacket attributes media only from exact IP:port endpoints. It
+// deliberately excludes the legacy port-only diagnostic fallback.
+func (tracker *CallTracker) ResolveMediaPacket(packet gopacket.Packet) callregistry.MediaResolution {
+	network := packet.NetworkLayer()
+	udpLayer := packet.Layer(layers.LayerTypeUDP)
+	if udpLayer == nil || network == nil {
+		return callregistry.MediaResolution{Status: callregistry.MediaUnresolved}
+	}
+	udp := udpLayer.(*layers.UDP)
+	source := network.NetworkFlow().Src().String() + ":" + strconv.Itoa(int(udp.SrcPort))
+	destination := network.NetworkFlow().Dst().String() + ":" + strconv.Itoa(int(udp.DstPort))
+	resolution := tracker.registry.ResolveMediaEndpoints(source, destination)
+	if resolution.Status == callregistry.MediaResolved {
+		tracker.touchCall(resolution.CallID)
+	}
+	return resolution
+}
+
+// GetAllCallIDsForPacket is a diagnostic candidate API and is unsuitable for
+// filtering, output attribution, or LI correlation.
 func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []string {
 	transportLayer := packet.TransportLayer()
 	if transportLayer == nil {
@@ -214,11 +201,6 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 		}
 	}
 
-	// Valid endpoint attribution is call activity even when per-call packet
-	// output is disabled, so it must participate in timeout decisions.
-	for _, callID := range matched {
-		tracker.touchCall(callID)
-	}
 	return matched
 }
 

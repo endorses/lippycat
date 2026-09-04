@@ -4,7 +4,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +21,8 @@ import (
 )
 
 const benchmarkFlowCardinality = 4096
+
+var detectorInsertionCaps = []int{1_000, 10_000, 100_000}
 
 func BenchmarkDetector_SingleSignature(b *testing.B) {
 	det := detector.NewDetector()
@@ -110,6 +115,350 @@ func BenchmarkDetectionCache(b *testing.B) {
 			cache.Set(key, result)
 		}
 	})
+}
+
+// BenchmarkDetectorInsertionAtCap captures the cost of inserting a new entry
+// when the bounded detector maps are already full. In addition to Go's
+// aggregate ns/op and allocation metrics, it reports sampled insertion-tail
+// latency and the latency of consecutive ten-insertion batches. The custom
+// latency metrics include the time.Now measurement overhead.
+func BenchmarkDetectorInsertionAtCap(b *testing.B) {
+	result := &signatures.DetectionResult{Protocol: "TLS", CacheStrategy: signatures.CacheSession}
+
+	for _, capacity := range detectorInsertionCaps {
+		capacity := capacity
+		b.Run(fmt.Sprintf("FlowTracker/cap_%d", capacity), func(b *testing.B) {
+			tracker := detector.NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(tracker.Close)
+			keys := detectorBenchmarkKeys(capacity)
+			for _, key := range keys[:capacity] {
+				tracker.GetOrCreate(key)
+			}
+			// Trigger the one-time cap warning before benchmark timing.
+			tracker.GetOrCreate(keys[capacity])
+
+			latency := newInsertionLatencyRecorder()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				started := time.Now()
+				tracker.GetOrCreate(keys[i%len(keys)])
+				latency.Record(time.Since(started))
+			}
+			b.StopTimer()
+			latency.Report(b)
+		})
+
+		b.Run(fmt.Sprintf("DetectionCache/cap_%d", capacity), func(b *testing.B) {
+			cache := detector.NewDetectionCacheWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(cache.Close)
+			keys := detectorBenchmarkKeys(capacity)
+			for _, key := range keys[:capacity] {
+				cache.Set(key, result)
+			}
+			// Trigger the one-time cap warning before benchmark timing.
+			cache.Set(keys[capacity], result)
+
+			latency := newInsertionLatencyRecorder()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				started := time.Now()
+				cache.Set(keys[i%len(keys)], result)
+				latency.Record(time.Since(started))
+			}
+			b.StopTimer()
+			latency.Report(b)
+		})
+	}
+}
+
+// BenchmarkDetectorBatchEvictionAtCap isolates the latency of the insertion
+// that triggers a hysteresis batch. Refilling the evicted headroom happens with
+// the timer stopped, so ns/op represents one complete selection-and-eviction
+// event instead of being diluted by the intervening cheap insertions.
+func BenchmarkDetectorBatchEvictionAtCap(b *testing.B) {
+	result := &signatures.DetectionResult{Protocol: "TLS", CacheStrategy: signatures.CacheSession}
+
+	for _, capacity := range detectorInsertionCaps {
+		capacity := capacity
+		batchSize := detectorEvictionBatchSize(capacity)
+
+		b.Run(fmt.Sprintf("FlowTracker/cap_%d", capacity), func(b *testing.B) {
+			tracker := detector.NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(tracker.Close)
+			nextKey := 0
+			for ; nextKey < capacity; nextKey++ {
+				tracker.GetOrCreate("batch-flow-" + strconv.Itoa(nextKey))
+			}
+			// Warm the reusable selection scratch, then restore the cap so timed
+			// iterations represent steady-state pressure episodes.
+			tracker.GetOrCreate("batch-flow-" + strconv.Itoa(nextKey))
+			nextKey++
+			for refill := 1; refill < batchSize; refill++ {
+				tracker.GetOrCreate("batch-flow-" + strconv.Itoa(nextKey))
+				nextKey++
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.StopTimer()
+			for i := 0; i < b.N; i++ {
+				eventKey := "batch-flow-" + strconv.Itoa(nextKey)
+				nextKey++
+				b.StartTimer()
+				tracker.GetOrCreate(eventKey)
+				b.StopTimer()
+
+				for refill := 1; refill < batchSize; refill++ {
+					tracker.GetOrCreate("batch-flow-" + strconv.Itoa(nextKey))
+					nextKey++
+				}
+			}
+			b.ReportMetric(float64(batchSize), "entries/eviction")
+		})
+
+		b.Run(fmt.Sprintf("DetectionCache/cap_%d", capacity), func(b *testing.B) {
+			cache := detector.NewDetectionCacheWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(cache.Close)
+			nextKey := 0
+			for ; nextKey < capacity; nextKey++ {
+				cache.Set("batch-flow-"+strconv.Itoa(nextKey), result)
+			}
+			// Warm the reusable selection scratch, then restore the cap so timed
+			// iterations represent steady-state pressure episodes.
+			cache.Set("batch-flow-"+strconv.Itoa(nextKey), result)
+			nextKey++
+			for refill := 1; refill < batchSize; refill++ {
+				cache.Set("batch-flow-"+strconv.Itoa(nextKey), result)
+				nextKey++
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.StopTimer()
+			for i := 0; i < b.N; i++ {
+				eventKey := "batch-flow-" + strconv.Itoa(nextKey)
+				nextKey++
+				b.StartTimer()
+				cache.Set(eventKey, result)
+				b.StopTimer()
+
+				for refill := 1; refill < batchSize; refill++ {
+					cache.Set("batch-flow-"+strconv.Itoa(nextKey), result)
+					nextKey++
+				}
+			}
+			b.ReportMetric(float64(batchSize), "entries/eviction")
+		})
+	}
+}
+
+// BenchmarkDetectorContentionAtCap models concurrent detector workers creating
+// previously unseen flows while the bounded maps remain under steady pressure.
+// Alongside aggregate throughput it reports operation tail latency and the p99
+// wall time for a worker-local batch of ten events. The latter is the relevant
+// packet-buffer pause signal: on supported production hardware its 100,000-entry
+// result must remain below the configured packet-buffer latency budget.
+//
+// Capacity comparisons are the scaling acceptance test. Steady-state insertion
+// should remain sublinear as the cap grows; a near-10x latency increase for a
+// 10x cap increase indicates that eviction has regressed to a full linear scan.
+func BenchmarkDetectorContentionAtCap(b *testing.B) {
+	result := &signatures.DetectionResult{Protocol: "TLS", CacheStrategy: signatures.CacheSession}
+
+	for _, capacity := range detectorInsertionCaps {
+		capacity := capacity
+		b.Run(fmt.Sprintf("FlowTracker/cap_%d", capacity), func(b *testing.B) {
+			tracker := detector.NewFlowTrackerWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(tracker.Close)
+			for i := 0; i < capacity; i++ {
+				tracker.GetOrCreate("seed-flow-" + strconv.Itoa(i))
+			}
+			tracker.GetOrCreate("warm-pressure")
+
+			var sequence atomic.Uint64
+			latency := newConcurrentInsertionLatencyRecorder()
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				local := newInsertionLatencyRecorder()
+				defer latency.Merge(local)
+				for pb.Next() {
+					key := "contended-flow-" + strconv.FormatUint(sequence.Add(1), 10)
+					started := time.Now()
+					tracker.GetOrCreate(key)
+					local.Record(time.Since(started))
+				}
+			})
+			b.StopTimer()
+			latency.Report(b)
+		})
+
+		b.Run(fmt.Sprintf("DetectionCache/cap_%d", capacity), func(b *testing.B) {
+			cache := detector.NewDetectionCacheWithMaxEntries(time.Hour, capacity)
+			b.Cleanup(cache.Close)
+			for i := 0; i < capacity; i++ {
+				cache.Set("seed-flow-"+strconv.Itoa(i), result)
+			}
+			cache.Set("warm-pressure", result)
+
+			var sequence atomic.Uint64
+			latency := newConcurrentInsertionLatencyRecorder()
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				local := newInsertionLatencyRecorder()
+				defer latency.Merge(local)
+				for pb.Next() {
+					key := "contended-flow-" + strconv.FormatUint(sequence.Add(1), 10)
+					started := time.Now()
+					cache.Set(key, result)
+					local.Record(time.Since(started))
+				}
+			})
+			b.StopTimer()
+			latency.Report(b)
+		})
+	}
+}
+
+func detectorEvictionBatchSize(capacity int) int {
+	batchSize := capacity / 10
+	if batchSize < 1 {
+		return 1
+	}
+	return batchSize
+}
+
+const (
+	detectorLatencySampleSize = 2048
+	detectorBatchSize         = 10
+)
+
+type insertionLatencyRecorder struct {
+	insertions []time.Duration
+	batches    []time.Duration
+	insertAt   int
+	batchAt    int
+	batchStart time.Time
+	batchCount int
+	total      time.Duration
+	maximum    time.Duration
+}
+
+type concurrentInsertionLatencyRecorder struct {
+	mu         sync.Mutex
+	insertions []time.Duration
+	batches    []time.Duration
+	maximum    time.Duration
+}
+
+func newConcurrentInsertionLatencyRecorder() *concurrentInsertionLatencyRecorder {
+	return &concurrentInsertionLatencyRecorder{
+		insertions: make([]time.Duration, 0, detectorLatencySampleSize),
+		batches:    make([]time.Duration, 0, detectorLatencySampleSize),
+	}
+}
+
+func (r *concurrentInsertionLatencyRecorder) Merge(local *insertionLatencyRecorder) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.insertions = appendDurationSamples(r.insertions, local.insertions)
+	r.batches = appendDurationSamples(r.batches, local.batches)
+	if local.maximum > r.maximum {
+		r.maximum = local.maximum
+	}
+}
+
+func appendDurationSamples(destination, source []time.Duration) []time.Duration {
+	remaining := detectorLatencySampleSize - len(destination)
+	if remaining <= 0 {
+		return destination
+	}
+	if len(source) > remaining {
+		source = source[:remaining]
+	}
+	return append(destination, source...)
+}
+
+func (r *concurrentInsertionLatencyRecorder) Report(b *testing.B) {
+	b.Helper()
+	b.ReportMetric(float64(durationPercentile(r.insertions, 0.95)), "p95-ns/event")
+	b.ReportMetric(float64(durationPercentile(r.insertions, 0.99)), "p99-ns/event")
+	b.ReportMetric(float64(r.maximum), "max-ns/event")
+	b.ReportMetric(float64(durationPercentile(r.batches, 0.99)), "p99-ns/10-event-batch")
+}
+
+func newInsertionLatencyRecorder() *insertionLatencyRecorder {
+	return &insertionLatencyRecorder{
+		insertions: make([]time.Duration, 0, detectorLatencySampleSize),
+		batches:    make([]time.Duration, 0, detectorLatencySampleSize),
+	}
+}
+
+func (r *insertionLatencyRecorder) Record(elapsed time.Duration) {
+	r.total += elapsed
+	if elapsed > r.maximum {
+		r.maximum = elapsed
+	}
+	r.insertAt = recordDurationSample(r.insertions, r.insertAt, elapsed)
+	if len(r.insertions) < detectorLatencySampleSize {
+		r.insertions = append(r.insertions, elapsed)
+	}
+
+	if r.batchCount == 0 {
+		r.batchStart = time.Now().Add(-elapsed)
+	}
+	r.batchCount++
+	if r.batchCount == detectorBatchSize {
+		batchElapsed := time.Since(r.batchStart)
+		r.batchAt = recordDurationSample(r.batches, r.batchAt, batchElapsed)
+		if len(r.batches) < detectorLatencySampleSize {
+			r.batches = append(r.batches, batchElapsed)
+		}
+		r.batchCount = 0
+	}
+}
+
+func recordDurationSample(samples []time.Duration, next int, elapsed time.Duration) int {
+	if len(samples) < detectorLatencySampleSize {
+		return next
+	}
+	samples[next] = elapsed
+	return (next + 1) % detectorLatencySampleSize
+}
+
+func (r *insertionLatencyRecorder) Report(b *testing.B) {
+	b.Helper()
+	if b.N > 0 {
+		// Override the framework's ns/op so recorder bookkeeping is excluded.
+		b.ReportMetric(float64(r.total)/float64(b.N), "ns/op")
+	}
+	b.ReportMetric(float64(durationPercentile(r.insertions, 0.95)), "p95-ns/insert")
+	b.ReportMetric(float64(durationPercentile(r.insertions, 0.99)), "p99-ns/insert")
+	b.ReportMetric(float64(r.maximum), "max-ns/insert")
+	if len(r.batches) > 0 {
+		b.ReportMetric(float64(durationPercentile(r.batches, 0.95)), "p95-ns/10-insert-batch")
+	}
+}
+
+func durationPercentile(samples []time.Duration, percentile float64) time.Duration {
+	if len(samples) == 0 {
+		return 0
+	}
+	ordered := append([]time.Duration(nil), samples...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	index := int(float64(len(ordered)-1) * percentile)
+	return ordered[index]
+}
+
+func detectorBenchmarkKeys(capacity int) []string {
+	keys := make([]string, capacity+1)
+	for i := range keys {
+		keys[i] = "baseline-flow-" + strconv.Itoa(i)
+	}
+	return keys
 }
 
 func BenchmarkDetector_WithoutCache(b *testing.B) {

@@ -7,6 +7,8 @@
 package processor
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -41,14 +43,48 @@ var (
 
 // LI statistics
 var (
-	liX2Encoded atomic.Uint64
-	liX3Encoded atomic.Uint64
-	liX2Errors  atomic.Uint64
-	liX3Errors  atomic.Uint64
-	liX2Skipped atomic.Uint64
-	liX3Skipped atomic.Uint64
-	liNoEncoder atomic.Uint64
+	liX2Encoded             atomic.Uint64
+	liX3Encoded             atomic.Uint64
+	liX2Errors              atomic.Uint64
+	liX3Errors              atomic.Uint64
+	liX2Skipped             atomic.Uint64
+	liX3Skipped             atomic.Uint64
+	liNoEncoder             atomic.Uint64
+	liX3FinalizedSuppressed atomic.Uint64
+	liX3BufferedDiscarded   atomic.Uint64
+	liX3LastLateWarning     atomic.Int64
 )
+
+const liLateX3WarningInterval = time.Minute
+
+func sanitizedCallID(callID string) string {
+	sum := sha256.Sum256([]byte(callID))
+	return hex.EncodeToString(sum[:8])
+}
+
+// recordLateX3Suppression is the single-owner accounting point for an X3 PDU
+// rejected by lifecycle admission. It emits at most one sanitized warning per
+// interval across the processor, keeping log cardinality bounded.
+func recordLateX3Suppression(callID string, generation uint64, reason string) {
+	total := liX3FinalizedSuppressed.Add(1)
+	now := time.Now().UnixNano()
+	last := liX3LastLateWarning.Load()
+	if now-last < liLateX3WarningInterval.Nanoseconds() || !liX3LastLateWarning.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("late X3 content rejected",
+		"call_id_hash", sanitizedCallID(callID),
+		"generation", generation,
+		"reason", reason,
+		"suppressed_total", total,
+	)
+}
+
+func recordBufferedX3Discard(count int) {
+	if count > 0 {
+		liX3BufferedDiscarded.Add(uint64(count)) // #nosec G115 -- bounded buffer count
+	}
+}
 
 // processorFilterPusher adapts the processor's filter management system
 // to the li.FilterPusher interface.
@@ -176,7 +212,7 @@ func (p *Processor) initLIManager() {
 			if ok && strings.HasPrefix(keyString, prefix) {
 				// Expiry/deactivation is an enforcement boundary. Buffered X3
 				// packets must be discarded, not flushed after the task ended.
-				value.(*delivery.ReorderBuffer).Discard()
+				recordBufferedX3Discard(value.(*delivery.ReorderBuffer).DiscardCount())
 				liReorderBuffers.Delete(key)
 			}
 			return true
@@ -199,6 +235,20 @@ func (p *Processor) initLIManager() {
 	// Media direction resolver: RTP carries no SIP identity, so the direction of
 	// media for an identity target is derived from the call's signalling.
 	liMediaDirection = li.NewMediaDirectionResolver(li.MediaDirectionConfig{})
+	if p.callLifecycle != nil {
+		p.callLifecycle.Subscribe(func(event CallFinalizationEvent) {
+			liMediaDirection.ClearCall(event.CallID)
+			liPinnedCalls.Range(func(_, value any) bool {
+				value.(*sync.Map).Delete(event.CallID)
+				return true
+			})
+			liReorderBuffers.Range(func(_, value any) bool {
+				discarded := value.(*delivery.ReorderBuffer).DiscardCall(event.CallID, event.Generation)
+				liX3BufferedDiscarded.Add(uint64(discarded)) // #nosec G115 -- bounded buffer count
+				return true
+			})
+		})
+	}
 
 	// Initialize delivery client if TLS certs are configured
 	if p.config.LIDeliveryTLSCertFile != "" && p.config.LIDeliveryTLSKeyFile != "" {
@@ -259,7 +309,7 @@ func (p *Processor) initLIManager() {
 		// Determine what to deliver based on task configuration
 		deliverX2 := task.DeliveryType == li.DeliveryX2Only || task.DeliveryType == li.DeliveryX2andX3
 		deliverX3 := task.DeliveryType == li.DeliveryX3Only || task.DeliveryType == li.DeliveryX2andX3
-		if deliverX3 && pkt.VoIPData != nil && pkt.VoIPData.CallID != "" {
+		if deliverX3 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" {
 			callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
 			calls := callsAny.(*sync.Map)
 			calls.LoadOrStore(pkt.VoIPData.CallID, struct{}{})
@@ -324,6 +374,33 @@ func (p *Processor) initLIManager() {
 
 		// Encode and deliver X3 (CC - content) for RTP packets
 		if deliverX3 && pkt.VoIPData != nil && pkt.VoIPData.IsRTP {
+			taskAdmission, taskActive := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+			if !taskActive {
+				return
+			}
+			defer taskAdmission.Release()
+
+			callID := pkt.VoIPData.CallID
+			var admission *CallAdmission
+			ownsAdmission := false
+			if callID != "" && p.callLifecycle != nil {
+				if shared, ok := p.liPacketAdmissions.Load(pkt); ok {
+					admission = shared.(*CallAdmission)
+				} else {
+					var admissionErr error
+					admission, admissionErr = p.callLifecycle.Admit(callID)
+					if admissionErr != nil {
+						recordLateX3Suppression(callID, 0, "initial_admission")
+						return
+					}
+					ownsAdmission = true
+					defer admission.Release()
+				}
+			}
+			if callID != "" {
+				callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
+				callsAny.(*sync.Map).LoadOrStore(callID, struct{}{})
+			}
 			pdu, err := liX3Encoder.EncodeCC(pkt, task.XID)
 			if err != nil {
 				liX3Errors.Add(1)
@@ -352,19 +429,73 @@ func (p *Processor) initLIManager() {
 					// Route through reorder buffer per destination
 					ssrc := pkt.VoIPData.SSRC
 					rtpSeq := pkt.VoIPData.SequenceNum
-					for _, destID := range task.DestinationIDs {
+					generation := uint64(0)
+					if admission != nil {
+						generation = admission.Generation()
+					}
+					for destinationIndex, destID := range task.DestinationIDs {
 						did := destID // capture for closure
+						insertionTaskAdmission := taskAdmission
+						insertionCallAdmission := admission
+						insertionOwnsCallAdmission := ownsAdmission
+						if destinationIndex > 0 {
+							var taskStillActive bool
+							insertionTaskAdmission, taskStillActive = p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+							if !taskStillActive {
+								return
+							}
+							if ownsAdmission && callID != "" && p.callLifecycle != nil {
+								var insertionErr error
+								insertionCallAdmission, insertionErr = p.callLifecycle.AdmitGeneration(callID, generation)
+								if insertionErr != nil {
+									insertionTaskAdmission.Release()
+									recordLateX3Suppression(callID, generation, "destination_admission")
+									return
+								}
+								insertionOwnsCallAdmission = true
+							}
+						}
 						bufKey := fmt.Sprintf("%s-%s", task.XID, did)
-						buf, _ := liReorderBuffers.LoadOrStore(bufKey, delivery.NewReorderBuffer(
-							func(orderedPDU []byte) {
+						buf, _ := liReorderBuffers.LoadOrStore(bufKey, delivery.NewCallAwareReorderBuffer(
+							func(entry delivery.ReorderEntry) {
+								deliveryTaskAdmission, taskStillActive := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+								if !taskStillActive {
+									// The reorder buffer may have drained this entry just
+									// before task finalization acquired its barrier. In that
+									// case DiscardCount cannot see it, so this callback owns
+									// the entry's single terminal accounting event.
+									recordBufferedX3Discard(1)
+									return
+								}
+								defer deliveryTaskAdmission.Release()
+
+								var sendAdmission *CallAdmission
+								if entry.CallID != "" && p.callLifecycle != nil {
+									var sendErr error
+									sendAdmission, sendErr = p.callLifecycle.AdmitGeneration(entry.CallID, entry.Generation)
+									if sendErr != nil {
+										recordLateX3Suppression(entry.CallID, entry.Generation, "delayed_send_admission")
+										return
+									}
+									defer sendAdmission.Release()
+								}
 								dids := []uuid.UUID{did}
-								if sendErr := liDeliveryClient.SendX3(task.XID, dids, orderedPDU); sendErr != nil {
+								if sendErr := liDeliveryClient.SendX3(task.XID, dids, entry.PDU); sendErr != nil {
 									logger.Debug("X3 delivery failed", "xid", task.XID, "error", sendErr)
 								}
 							},
 							60*time.Millisecond,
 						))
-						buf.(*delivery.ReorderBuffer).DeliverX3(ssrc, rtpSeq, data)
+						buf.(*delivery.ReorderBuffer).DeliverCallX3AfterCommit(callID, generation, ssrc, rtpSeq, data, func() {
+							// DeliverCallX3 may synchronously invoke its delivery
+							// callback. Release the outer admissions after insertion
+							// so that callback can safely re-admit even when a task
+							// deactivation writer is already waiting.
+							insertionTaskAdmission.Release()
+							if insertionOwnsCallAdmission && insertionCallAdmission != nil {
+								insertionCallAdmission.Release()
+							}
+						})
 					}
 					logger.Debug("X3 CC queued via reorder buffer",
 						"xid", task.XID,
@@ -544,10 +675,43 @@ func (p *Processor) stopLIManager() {
 // 2. LocalSource to use MatchPacketWithIDs and include filter IDs
 // This will be implemented in a subsequent step.
 func (p *Processor) processLIPacket(pkt *types.PacketDisplay, matchedFilterIDs []string) {
+	p.processLIPacketWithProvenance(pkt, matchedFilterIDs, nil)
+}
+
+func (p *Processor) processLIPacketWithProvenance(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string) {
+	p.processLIPacketWithAdmission(pkt, directFilterIDs, inheritedFilterIDs, nil)
+}
+
+func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission) {
 	if p.liManager == nil || !p.liManager.IsEnabled() {
 		return
 	}
-	p.liManager.ProcessPacket(pkt, matchedFilterIDs)
+	// Finalization cleanup may already have removed the call's inherited LI
+	// filter, so account and reject terminal media before task lookup. The packet
+	// callback performs the admission that covers encoding for live calls.
+	if admission == nil && pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" && p.callLifecycle != nil {
+		probeAdmission, err := p.callLifecycle.Admit(pkt.VoIPData.CallID)
+		if err != nil {
+			recordLateX3Suppression(pkt.VoIPData.CallID, 0, "pipeline_admission")
+			return
+		}
+		probeAdmission.Release()
+	}
+	provenance := li.PacketFilterProvenance{
+		DirectFilterIDs:    directFilterIDs,
+		InheritedFilterIDs: inheritedFilterIDs,
+	}
+	if pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && len(inheritedFilterIDs) > 0 {
+		// The capture pipeline stamps Call-ID only after authoritative endpoint
+		// resolution, and inherited IDs come from that same single call cache.
+		provenance.AuthoritativeCallID = pkt.VoIPData.CallID
+		provenance.InheritedFromCallID = pkt.VoIPData.CallID
+	}
+	if admission != nil {
+		p.liPacketAdmissions.Store(pkt, admission)
+		defer p.liPacketAdmissions.Delete(pkt)
+	}
+	p.liManager.ProcessPacketWithProvenance(pkt, provenance)
 }
 
 // isLIEnabled returns whether LI is enabled on this processor.
@@ -569,7 +733,9 @@ type LIEncodingStats struct {
 	// was derived from the call's observed signalling.
 	DirectionResolvedMedia uint64
 	// DirectionUnknownRTP counts RTP packets delivered without a direction.
-	DirectionUnknownRTP uint64
+	DirectionUnknownRTP   uint64
+	X3FinalizedSuppressed uint64
+	X3BufferedDiscarded   uint64
 }
 
 // getLIEncodingStats returns current LI encoding statistics.
@@ -585,5 +751,35 @@ func (p *Processor) getLIEncodingStats() LIEncodingStats {
 		NoEncoder:              liNoEncoder.Load(),
 		DirectionResolvedMedia: dirStats.ResolvedFromMedia,
 		DirectionUnknownRTP:    dirStats.UnknownRTP,
+		X3FinalizedSuppressed:  liX3FinalizedSuppressed.Load(),
+		X3BufferedDiscarded:    liX3BufferedDiscarded.Load(),
+	}
+}
+
+func (p *Processor) populateLIEncodingStats(dst *management.ProcessorStats) {
+	if dst == nil || !p.isLIEnabled() {
+		return
+	}
+	stats := p.getLIEncodingStats()
+	managerStats := p.liManager.Stats()
+	dst.LiEncoding = &management.LIEncodingStats{
+		X2Encoded:                    stats.X2Encoded,
+		X2Errors:                     stats.X2Errors,
+		X2Skipped:                    stats.X2Skipped,
+		X3Encoded:                    stats.X3Encoded,
+		X3Errors:                     stats.X3Errors,
+		X3Skipped:                    stats.X3Skipped,
+		NoEncoder:                    stats.NoEncoder,
+		DirectionResolvedMedia:       stats.DirectionResolvedMedia,
+		DirectionUnknownRtp:          stats.DirectionUnknownRTP,
+		X3FinalizedOrStaleSuppressed: stats.X3FinalizedSuppressed,
+		X3BufferedDiscarded:          stats.X3BufferedDiscarded,
+		InheritedProvenanceRejected:  managerStats.InheritedProvenanceRejected,
+	}
+	if p.packetSource != nil {
+		sourceStats := p.packetSource.Stats()
+		dst.LiEncoding.RtpOwnershipUnresolved = sourceStats.RTPOwnershipUnresolved
+		dst.LiEncoding.RtpOwnershipAmbiguous = sourceStats.RTPOwnershipAmbiguous
+		dst.LiEncoding.IdentityInheritanceSuppressed = sourceStats.IdentityInheritanceSuppressed
 	}
 }

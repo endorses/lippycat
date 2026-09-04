@@ -74,6 +74,14 @@ message CapturedPacket {
     // Original encrypted packets are preserved for audit integrity.
     // Processor uses these keys to decrypt traffic for display/analysis.
     TLSSessionKeys tls_keys = 10;
+
+    // Filter IDs matched directly against this packet (for example IP/CIDR).
+    // Kept separate so LI can distinguish packet evidence from call inheritance.
+    repeated string direct_matched_filter_ids = 11;
+
+    // Filter IDs inherited from one authoritatively resolved call. This must be
+    // empty for unresolved or ambiguous media.
+    repeated string inherited_matched_filter_ids = 12;
 }
 
 // PacketMetadata contains hunter-side analysis results

@@ -188,10 +188,7 @@ func (d *Detector) cacheAndUpdateFlow(ctx *signatures.DetectionContext, result *
 
 	// Update flow context
 	if ctx.Flow != nil {
-		ctx.Flow.LastSeen = time.Now()
-		if !contains(ctx.Flow.Protocols, result.Protocol) {
-			ctx.Flow.Protocols = append(ctx.Flow.Protocols, result.Protocol)
-		}
+		ctx.Flow.RecordDetection(result.Protocol, time.Now())
 	}
 }
 

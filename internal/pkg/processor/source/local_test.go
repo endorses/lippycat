@@ -3,12 +3,14 @@ package source
 import (
 	"context"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/google/gopacket"
@@ -210,6 +212,35 @@ func TestLocalSource_Stats(t *testing.T) {
 	assert.Equal(t, uint64(0), stats.PacketsDropped)
 	assert.Equal(t, uint64(0), stats.BytesReceived)
 	assert.Equal(t, uint64(0), stats.BatchesReceived)
+}
+
+func TestAtomicStats_RTPAttributionOutcomes(t *testing.T) {
+	stats := NewAtomicStats()
+	stats.AddRTPResolution(callregistry.MediaResolved)
+	stats.AddRTPResolution(callregistry.MediaUnresolved)
+	stats.AddRTPResolution(callregistry.MediaAmbiguous)
+	stats.AddIdentityInheritanceSuppressed()
+	stats.AddIdentityInheritanceSuppressed()
+
+	snapshot := stats.Snapshot()
+	assert.Equal(t, uint64(1), snapshot.RTPOwnershipUnresolved)
+	assert.Equal(t, uint64(1), snapshot.RTPOwnershipAmbiguous)
+	assert.Equal(t, uint64(2), snapshot.IdentityInheritanceSuppressed)
+}
+
+func TestMediaFlowHashAndAmbiguousWarningAreSanitizedAndRateLimited(t *testing.T) {
+	packet := phase0RTPPacket(t).Packet
+	hash := mediaFlowHash(packet)
+	assert.Len(t, hash, 16)
+	assert.NotEqual(t, "unavailable", hash)
+	assert.False(t, strings.Contains(hash, phase0MediaIP))
+
+	source := NewLocalSource(DefaultLocalSourceConfig())
+	source.warnAmbiguousOwnership(packet)
+	first := source.lastAmbiguousOwnershipWarning.Load()
+	require.NotZero(t, first)
+	source.warnAmbiguousOwnership(packet)
+	assert.Equal(t, first, source.lastAmbiguousOwnershipWarning.Load())
 }
 
 func TestLocalSource_Stats_IncludesCaptureBufferDrops(t *testing.T) {

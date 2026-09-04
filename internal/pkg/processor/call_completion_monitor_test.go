@@ -80,29 +80,6 @@ func TestNewCallCompletionMonitor(t *testing.T) {
 	}
 }
 
-func TestCallCompletionMonitorPrunesClosedCalls(t *testing.T) {
-	monitor := NewCallCompletionMonitor(&CallCompletionMonitorConfig{
-		GracePeriod:   time.Second,
-		CheckInterval: time.Second,
-		ClosedCallTTL: time.Minute,
-	}, nil, nil)
-
-	now := time.Now()
-	monitor.closedCalls["expired-call"] = now.Add(-2 * time.Minute)
-	monitor.closedCalls["recent-call"] = now.Add(-30 * time.Second)
-
-	pruned := monitor.pruneClosedCalls(now)
-	assert.Equal(t, 1, pruned)
-
-	monitor.mu.Lock()
-	_, expiredExists := monitor.closedCalls["expired-call"]
-	_, recentExists := monitor.closedCalls["recent-call"]
-	monitor.mu.Unlock()
-
-	assert.False(t, expiredExists)
-	assert.True(t, recentExists)
-}
-
 func TestCallCompletionMonitor_StartStop(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
 	tmpDir := t.TempDir()
@@ -146,6 +123,32 @@ func TestCallCompletionMonitor_StartWithNilComponents(t *testing.T) {
 	monitor2 := NewCallCompletionMonitor(nil, aggregator, nil)
 	monitor2.Start()
 	monitor2.Stop()
+}
+
+type countingPortCleaner struct{ calls atomic.Int32 }
+
+func (c *countingPortCleaner) CleanupCallPorts(string) { c.calls.Add(1) }
+
+func TestCallCompletionMonitorFinalizesWithoutPCAP(t *testing.T) {
+	aggregator := voip.NewCallAggregator()
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneTTL: time.Hour})
+	monitor := NewCallCompletionMonitorWithLifecycle(&CallCompletionMonitorConfig{
+		GracePeriod:    time.Nanosecond,
+		CheckInterval:  time.Hour,
+		RTPWaitTimeout: time.Nanosecond,
+		ClosedCallTTL:  time.Hour,
+	}, aggregator, nil, lifecycle)
+	cleaner := &countingPortCleaner{}
+	monitor.SetVoIPPortCleaner(cleaner)
+
+	monitor.ScheduleCloseReason("no-pcap-call", false, CallFinalizationProtocolComplete)
+	time.Sleep(time.Millisecond)
+	monitor.processPendingClose()
+
+	assert.True(t, lifecycle.IsFinalized("no-pcap-call"))
+	assert.Equal(t, int32(1), cleaner.calls.Load())
+	monitor.finalizeCall("no-pcap-call", CallFinalizationProtocolComplete)
+	assert.Equal(t, int32(1), cleaner.calls.Load(), "cleanup must run once")
 }
 
 func TestCallCompletionMonitor_DetectsEndedCalls(t *testing.T) {
@@ -466,7 +469,7 @@ func TestCallCompletionMonitor_MultipleCalls(t *testing.T) {
 	assert.Equal(t, 0, monitor.GetPendingCount(), "All calls should have been closed")
 }
 
-func TestCallCompletionMonitor_ShutdownClosesPending(t *testing.T) {
+func TestCallCompletionMonitor_ShutdownDiscardsPendingCompletion(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
 	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	tmpDir := t.TempDir()
@@ -524,15 +527,22 @@ func TestCallCompletionMonitor_ShutdownClosesPending(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	assert.Greater(t, monitor.GetPendingCount(), 0, "Call should be pending closure")
 
-	// Stop the monitor - should close pending calls immediately
+	// Stopping the monitor discards scheduling. The manager owns shutdown flushes,
+	// which must remain distinct from protocol completion.
 	monitor.Stop()
 
-	// Verify PCAP writer was closed (call removed from manager)
+	// The writer remains live until manager shutdown.
 	pcapManager.mu.RLock()
 	_, exists := pcapManager.writers[callID]
 	pcapManager.mu.RUnlock()
+	assert.True(t, exists, "monitor shutdown should not finalize a call")
 
-	assert.False(t, exists, "PCAP writer should have been closed on shutdown")
+	require.NoError(t, pcapManager.Close())
+	pcapManager.mu.RLock()
+	_, exists = pcapManager.writers[callID]
+	pcapManager.mu.RUnlock()
+
+	assert.False(t, exists, "manager shutdown should flush and remove the PCAP writer")
 }
 
 func TestCallCompletionMonitor_GetPendingCount_NilMonitor(t *testing.T) {

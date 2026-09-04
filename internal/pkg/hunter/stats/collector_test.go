@@ -168,6 +168,7 @@ func TestToProto(t *testing.T) {
 	c.IncrementQueueLoss(3)
 	c.IncrementUnsupportedKindLoss(4)
 	c.IncrementTransportLoss(5)
+	c.SetRTPAttribution(2, 3, 5)
 	c.SetSystemMetrics(sysmetrics.Metrics{
 		CPUPercent:       55.5,
 		MemoryRSSBytes:   209715200,  // 200 MB
@@ -177,6 +178,9 @@ func TestToProto(t *testing.T) {
 	proto := c.ToProto(5)
 	if proto.CaptureLosses != 1 || proto.AnalysisLosses != 2 || proto.QueueLosses != 3 || proto.UnsupportedKindLosses != 4 || proto.TransportLosses != 5 {
 		t.Errorf("event loss counters were not preserved: %+v", proto)
+	}
+	if proto.RtpOwnershipUnresolved != 2 || proto.RtpOwnershipAmbiguous != 3 || proto.IdentityInheritanceSuppressed != 5 {
+		t.Fatalf("unexpected RTP attribution telemetry: %+v", proto)
 	}
 
 	if proto.PacketsCaptured != 3 {
@@ -208,6 +212,9 @@ func TestToProto(t *testing.T) {
 	}
 	if proto.MemoryLimitBytes != 4294967296 {
 		t.Errorf("Expected proto.MemoryLimitBytes 4294967296, got %d", proto.MemoryLimitBytes)
+	}
+	if proto.Detector == nil {
+		t.Fatal("Expected detector telemetry in heartbeat stats")
 	}
 }
 

@@ -21,13 +21,14 @@ import (
 // present in the INVITE but not in in-dialog requests like BYE.
 type inviteOnlyFilter struct{}
 
-func TestCachedFilterIDsForB2BUACallAssociations(t *testing.T) {
+func TestCachedFilterIDsRemainScopedToOneB2BUACallAssociation(t *testing.T) {
 	s := NewLocalSource(DefaultLocalSourceConfig())
 	now := time.Now()
 	s.callFilterCache.Store("leg-a", cachedFilterIDs{filterIDs: []string{"filter-a", "shared"}, storedAt: now})
 	s.callFilterCache.Store("leg-b", cachedFilterIDs{filterIDs: []string{"filter-b", "shared"}, storedAt: now})
 
-	require.Equal(t, []string{"filter-a", "shared", "filter-b"}, s.cachedFilterIDsForCalls([]string{"leg-a", "leg-b"}))
+	require.Equal(t, []string{"filter-a", "shared"}, s.cachedFilterIDsForCall("leg-a"))
+	require.Equal(t, []string{"filter-b", "shared"}, s.cachedFilterIDsForCall("leg-b"))
 }
 
 func TestCallFilterCacheIsBoundedAndLifecycleAware(t *testing.T) {
@@ -40,15 +41,15 @@ func TestCallFilterCacheIsBoundedAndLifecycleAware(t *testing.T) {
 	s.callFilterCache.Store("three", cachedFilterIDs{filterIDs: []string{"filter-three"}, storedAt: now})
 
 	require.Equal(t, 2, s.callFilterCache.Len())
-	require.Empty(t, s.cachedFilterIDsForCalls([]string{"one"}))
+	require.Empty(t, s.cachedFilterIDsForCall("one"))
 	s.OnCallEnded(callregistry.Call{CallID: "two"}, callregistry.EndTimeout)
-	require.Empty(t, s.cachedFilterIDsForCalls([]string{"two"}))
+	require.Empty(t, s.cachedFilterIDsForCall("two"))
 
 	// Reusing a Call-ID must not let its stale insertion-order entry evict the
 	// new generation when capacity pressure arrives.
 	s.callFilterCache.Store("two", cachedFilterIDs{filterIDs: []string{"filter-reused"}, storedAt: now})
 	s.callFilterCache.Store("four", cachedFilterIDs{filterIDs: []string{"filter-four"}, storedAt: now})
-	require.Equal(t, []string{"filter-reused"}, s.cachedFilterIDsForCalls([]string{"two"}))
+	require.Equal(t, []string{"filter-reused"}, s.cachedFilterIDsForCall("two"))
 }
 
 func (f *inviteOnlyFilter) MatchPacket(packet gopacket.Packet) bool {

@@ -143,7 +143,7 @@ func TestProcessLIPacket_ResolvesMediaDirection(t *testing.T) {
 		dirRTPPacket(ssrcFromTarget, dirUEAddr, dirUEPort, dirGWAddr, dirGWPort),
 	}
 	for _, pkt := range packets {
-		p.processLIPacket(pkt, []string{filterID})
+		p.processLIPacketWithProvenance(pkt, nil, []string{filterID})
 	}
 
 	after := p.getLIEncodingStats()
@@ -176,7 +176,7 @@ func TestProcessLIPacket_X3OnlyTaskLearnsFromSignalling(t *testing.T) {
 	feedIncomingCallSignalling(p, filterID)
 
 	networkLeg := dirRTPPacket(0x002a016b, dirCoreAddr, dirCorePort, dirGWAddr, dirGWPort)
-	p.processLIPacket(networkLeg, []string{filterID})
+	p.processLIPacketWithProvenance(networkLeg, nil, []string{filterID})
 
 	after := p.getLIEncodingStats()
 	assert.Equal(t, uint64(0), after.X2Encoded-before.X2Encoded, "X3-only task delivers no IRI")
@@ -192,7 +192,7 @@ func TestProcessLIPacket_UnobservedSignallingStaysUnknown(t *testing.T) {
 
 	before := p.getLIEncodingStats()
 	networkLeg := dirRTPPacket(0x002a016b, dirCoreAddr, dirCorePort, dirGWAddr, dirGWPort)
-	p.processLIPacket(networkLeg, []string{filterID})
+	p.processLIPacketWithProvenance(networkLeg, nil, []string{filterID})
 
 	after := p.getLIEncodingStats()
 	assert.Equal(t, uint64(1), after.X3Encoded-before.X3Encoded, "media is still delivered")

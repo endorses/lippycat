@@ -648,6 +648,23 @@ This will fail with a descriptive error instead of silently falling back.
 
 VoIP capture involves correlating SIP signaling with RTP media streams. These issues are specific to `sniff voip`, `hunt voip`, and `tap voip` modes. See [Chapter 4](../part2-local-capture/sniff.md) for VoIP capture fundamentals.
 
+### LI identity matches missing for some RTP
+
+If direct IP/CIDR interception works but an identity-based LI task omits RTP,
+check the media-resolution and inheritance-suppression counters. An exact endpoint
+owned by multiple live calls is ambiguous; an endpoint owned by none is unknown.
+Both outcomes deliberately suppress identity inheritance while preserving direct
+packet-level IP/CIDR matches. Capture the complete SIP/SDP exchange and both media
+legs, and check NAT/SBC endpoint reuse. Never compensate by choosing the newest
+call or combining all candidate owners.
+
+If `x3_finalized_or_stale_suppressed` or `x3_buffered_discarded` rises, content arrived or
+remained buffered after the call generation was finalized. Check upstream batch
+latency and reorder pressure. Closed-call tombstones last one hour by default and
+are bounded to 100,000; capacity-eviction growth means protection may be shorter
+under pressure. Rate-limited warnings contain sanitized or hashed identifiers, so
+use counter deltas—not warning counts—to quantify the condition.
+
 ### Missing RTP Streams
 
 **Symptom:** SIP calls are detected (INVITE, 200 OK visible) but no RTP packets are captured. Per-call PCAP files contain only signaling.

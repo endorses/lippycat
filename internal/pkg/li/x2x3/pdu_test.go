@@ -55,6 +55,42 @@ func TestPDUHeader_MarshalBinary(t *testing.T) {
 	assert.Equal(t, correlationID, gotCorr)
 }
 
+func TestVersionWireValue(t *testing.T) {
+	assert.Equal(t, 0x0005, Version)
+
+	header := NewPDUHeader(PDUTypeX2, uuid.Nil, 0)
+	wire, err := header.MarshalBinary()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(wire), 2)
+	assert.Equal(t, []byte{0x00, 0x05}, wire[:2])
+}
+
+func TestPDUHeader_VersionCompatibility(t *testing.T) {
+	validHeader := func(version uint16) []byte {
+		data := make([]byte, HeaderMinSize)
+		binary.BigEndian.PutUint16(data[0:2], version)
+		binary.BigEndian.PutUint16(data[2:4], uint16(PDUTypeX2))
+		binary.BigEndian.PutUint32(data[4:8], HeaderMinSize)
+		return data
+	}
+
+	t.Run("accepts wire version 00 05", func(t *testing.T) {
+		var header PDUHeader
+		require.NoError(t, header.UnmarshalBinary(validHeader(0x0005)))
+		assert.Equal(t, uint16(0x0005), header.Version)
+	})
+
+	t.Run("accepts another minor revision in major zero", func(t *testing.T) {
+		var header PDUHeader
+		require.NoError(t, header.UnmarshalBinary(validHeader(0x00ff)))
+	})
+
+	t.Run("rejects legacy broken 05 00", func(t *testing.T) {
+		var header PDUHeader
+		assert.ErrorIs(t, header.UnmarshalBinary(validHeader(0x0500)), ErrInvalidVersion)
+	})
+}
+
 func TestPDUHeader_UnmarshalBinary(t *testing.T) {
 	xid := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 	correlationID := uint64(0x123456789ABCDEF0)

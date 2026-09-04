@@ -136,8 +136,25 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 	// Process LI (Lawful Interception) if enabled
 	// This is a no-op if built without -tags li or if LI is not enabled
+	packetAdmissions := make([]*CallAdmission, len(packets))
+	if p.isLIEnabled() && p.sessionOutputManager != nil && p.sessionOutputManager.writer != nil && p.callLifecycle != nil {
+		for index, packet := range packets {
+			if packet.Metadata == nil || packet.Metadata.Sip == nil || packet.Metadata.Sip.CallId == "" || len(packet.Data) == 0 {
+				continue
+			}
+			admission, admissionErr := p.callLifecycle.Admit(packet.Metadata.Sip.CallId)
+			if admissionErr == nil {
+				packetAdmissions[index] = admission
+			}
+		}
+		defer func() {
+			for _, admission := range packetAdmissions {
+				admission.Release()
+			}
+		}()
+	}
 	if p.isLIEnabled() {
-		for _, pkt := range packets {
+		for index, pkt := range packets {
 			// Skip packets without matched filter IDs (not targeted by LI)
 			if len(pkt.MatchedFilterIds) == 0 {
 				continue
@@ -204,14 +221,24 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			}
 
 			// Use per-packet filter IDs for LI correlation
-			p.processLIPacket(&display, pkt.MatchedFilterIds)
+			directFilterIDs := pkt.DirectMatchedFilterIds
+			if len(directFilterIDs) == 0 && len(pkt.InheritedMatchedFilterIds) == 0 {
+				// Legacy peers carry only the compatibility union. Treat it as
+				// direct evidence; the LI boundary permits only media-safe IP/CIDR
+				// filters for RTP and therefore still fails closed for identities.
+				directFilterIDs = pkt.MatchedFilterIds
+			}
+			p.processLIPacketWithAdmission(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index])
+			if p.afterLIPacket != nil {
+				p.afterLIPacket()
+			}
 		}
 	}
 
 	// Write VoIP packets to per-call PCAP files if configured
 	// Writes separate SIP and RTP files for each call
 	if p.sessionOutputManager != nil {
-		for _, packet := range packets {
+		for index, packet := range packets {
 			// Check if packet has SIP metadata with call-id
 			if packet.Metadata != nil && packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" {
 				callID := packet.Metadata.Sip.CallId
@@ -222,16 +249,28 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				if len(packet.Data) > 0 {
 					timestamp := time.Unix(0, packet.TimestampNs)
 					linkType := layers.LinkType(packet.LinkType)
-					if err := p.sessionOutputManager.WritePacket(
-						callID, from, to, timestamp, packet.Data, linkType, packet.Metadata.Rtp != nil,
-					); err != nil && !errors.Is(err, errSessionOutputClosed) {
+					var writeErr error
+					if admission := packetAdmissions[index]; admission != nil {
+						writeErr = p.sessionOutputManager.writePacketWithAdmission(
+							admission, callID, from, to, timestamp, packet.Data, linkType, packet.Metadata.Rtp != nil,
+						)
+					} else {
+						writeErr = p.sessionOutputManager.WritePacket(
+							callID, from, to, timestamp, packet.Data, linkType, packet.Metadata.Rtp != nil,
+						)
+					}
+					if writeErr != nil && !errors.Is(writeErr, errSessionOutputClosed) && !IsCallFinalized(writeErr) {
 						logger.Warn("Failed to write packet to call PCAP",
 							"call_id", callID,
-							"error", err)
+							"error", writeErr)
 					}
 				}
 			}
 		}
+	}
+	for index, admission := range packetAdmissions {
+		admission.Release()
+		packetAdmissions[index] = nil
 	}
 
 	// Write non-VoIP packets to auto-rotating PCAP files if configured

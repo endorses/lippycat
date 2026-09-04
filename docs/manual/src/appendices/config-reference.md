@@ -56,6 +56,22 @@ These top-level keys apply to all commands.
 
 ---
 
+## Protocol Detector Capacity
+
+These keys bound state retained by the protocol detector. At a positive cap,
+inserting a new key when full evicts an oldest 10% batch (with a minimum of one)
+before admitting the key. A value of zero or less disables cap-based eviction.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `detector.max_flows` | integer | `100000` | Maximum active flow contexts. Lower values reduce memory and eviction-pause size but retain less stateful protocol history under high cardinality. |
+| `detector.max_cache_entries` | integer | `100000` | Maximum cached detection results. Lower values reduce memory but cause more reclassification when the working set exceeds the cap. |
+
+See [Performance Optimization](../part5-advanced/performance.md#detector-capacity-and-retention)
+for production tuning and telemetry interpretation.
+
+---
+
 ## Structured Protocol Logging
 
 These keys configure the optional normalized protocol logs for `sniff`,
@@ -413,7 +429,7 @@ TLS is enabled by default unless `processor.insecure` is true. Provide `processo
 | `processor.per_call_pcap.output_dir` | string | `"./pcaps"` | Directory for per-call PCAP files. |
 | `processor.per_call_pcap.file_pattern` | string | `"{timestamp}_{callid}.pcap"` | Filename pattern. Placeholders: `{timestamp}`, `{callid}`. |
 | `processor.per_call_pcap.max_idle` | duration | `"10m"` | Close idle per-call PCAP writers after this duration (0 disables idle close). |
-| `processor.per_call_pcap.max_writers` | integer | `0` | Maximum active per-call PCAP writers (0 = unlimited). |
+| `processor.per_call_pcap.max_writers` | integer | `0` | Soft active-writer pressure threshold (0 = disabled). Active calls are preserved above the threshold. |
 | `processor.per_call_pcap.closed_call_ttl` | duration | `"1h"` | Suppress duplicate close handling for completed calls for this duration. |
 
 #### Auto-Rotating PCAP
@@ -551,7 +567,7 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 | `tap.per_call_pcap.output_dir` | string | `"./pcaps"` | Directory for per-call PCAP files. |
 | `tap.per_call_pcap.file_pattern` | string | `"{timestamp}_{callid}.pcap"` | Filename pattern. |
 | `tap.per_call_pcap.max_idle` | duration | `"10m"` | Close idle per-call PCAP writers after this duration (0 disables idle close). |
-| `tap.per_call_pcap.max_writers` | integer | `0` | Maximum active per-call PCAP writers (0 = unlimited). |
+| `tap.per_call_pcap.max_writers` | integer | `0` | Soft active-writer pressure threshold (0 = disabled). Active calls are preserved above the threshold. |
 | `tap.per_call_pcap.closed_call_ttl` | duration | `"1h"` | Suppress duplicate close handling for completed calls for this duration. |
 
 #### Tap Auto-Rotating PCAP

@@ -23,10 +23,17 @@ type SourceProcessResult struct {
 	isVoIP          bool
 	callID          string
 	callIDs         []string
+	mediaResolution callregistry.MediaResolution
 	metadata        *data.PacketMetadata
 	filterEvaluated bool
 	filterMatched   bool
 	filterIDs       []string
+}
+
+// GetMediaResolution returns the explicit authoritative RTP ownership result.
+// Consumers must not infer ownership from an empty or non-empty Call-ID.
+func (r *SourceProcessResult) GetMediaResolution() callregistry.MediaResolution {
+	return r.mediaResolution
 }
 
 // IsVoIPPacket implements source.VoIPResult.
@@ -68,6 +75,7 @@ func (a *SourceAdapter) Process(packet gopacket.Packet) *SourceProcessResult {
 		isVoIP:          result.IsVoIP,
 		callID:          result.CallID,
 		callIDs:         result.CallIDs,
+		mediaResolution: result.MediaResolution,
 		metadata:        result.Metadata,
 		filterEvaluated: result.FilterEvaluated,
 		filterMatched:   result.FilterMatched,
@@ -93,8 +101,17 @@ func (a *SourceAdapter) AddLifecycleObserver(observer callregistry.LifecycleObse
 	a.proc.AddLifecycleObserver(observer)
 }
 
+// SetCompletionHandler delegates terminal cleanup to a shared processor
+// lifecycle coordinator.
+func (a *SourceAdapter) SetCompletionHandler(handler func(callregistry.Call, callregistry.EndReason)) {
+	if a == nil || a.proc == nil {
+		return
+	}
+	a.proc.SetCompletionHandler(handler)
+}
+
 // CleanupCallPorts removes all port-to-callID mappings for a given callID.
 // This should be called when a call ends to prevent port collisions with new calls.
 func (a *SourceAdapter) CleanupCallPorts(callID string) {
-	a.proc.CleanupCallPorts(callID)
+	a.proc.FinalizeCallCleanup(callID)
 }

@@ -56,11 +56,31 @@ func (StickySelectionPolicy) Select(input SelectionInput) bool {
 
 type Registry interface {
 	ActiveCalls() []Call
+	ActiveCallCount() int
+	EndpointAssociationCount() int
 	Call(callID string) (Call, bool)
 	CallIDsForEndpoint(endpoint string) []string
+	ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint string) MediaResolution
 	AssociateEndpoint(callID, endpoint string)
 	CompleteCall(callID string)
 	Close()
+}
+
+// MediaResolutionStatus describes whether exact packet endpoints prove a
+// single active call owns a media packet.
+type MediaResolutionStatus uint8
+
+const (
+	MediaUnresolved MediaResolutionStatus = iota
+	MediaResolved
+	MediaAmbiguous
+)
+
+// MediaResolution is an attribution result, not a candidate list. CallID is
+// populated only when Status is MediaResolved.
+type MediaResolution struct {
+	Status MediaResolutionStatus
+	CallID string
 }
 
 // Config bounds the state owned by a Core. Limits are hard limits; an
@@ -78,16 +98,19 @@ type Config struct {
 // registry. It deliberately stores only protocol-neutral call data; analyzers
 // retain their topology-specific metadata beside it.
 type Core struct {
-	mu               sync.RWMutex
-	calls            map[string]Call
-	endpointCalls    map[string][]string
-	callEndpoints    map[string]map[string]struct{}
-	associationCount int
-	recency          *list.List
-	recencyIndex     map[string]*list.Element
-	config           Config
-	closed           bool
-	pins             map[string]int
+	mu                sync.RWMutex
+	calls             map[string]Call
+	endpointCalls     map[string][]string
+	endpointWinner    map[string]string
+	callEndpoints     map[string]map[string]struct{}
+	associationCount  int
+	recency           *list.List
+	recencyIndex      map[string]*list.Element
+	recencyGeneration map[string]uint64
+	nextGeneration    uint64
+	config            Config
+	closed            bool
+	pins              map[string]int
 }
 
 func New(config Config) *Core {
@@ -102,13 +125,15 @@ func New(config Config) *Core {
 	}
 	config.Observers = append([]LifecycleObserver(nil), config.Observers...)
 	return &Core{
-		calls:         make(map[string]Call),
-		endpointCalls: make(map[string][]string),
-		callEndpoints: make(map[string]map[string]struct{}),
-		recency:       list.New(),
-		recencyIndex:  make(map[string]*list.Element),
-		pins:          make(map[string]int),
-		config:        config,
+		calls:             make(map[string]Call),
+		endpointCalls:     make(map[string][]string),
+		endpointWinner:    make(map[string]string),
+		callEndpoints:     make(map[string]map[string]struct{}),
+		recency:           list.New(),
+		recencyIndex:      make(map[string]*list.Element),
+		recencyGeneration: make(map[string]uint64),
+		pins:              make(map[string]int),
+		config:            config,
 	}
 }
 
@@ -156,6 +181,7 @@ func (c *Core) Upsert(call Call) bool {
 	}
 	c.calls[call.CallID] = call
 	c.recencyIndex[call.CallID] = c.recency.PushFront(call.CallID)
+	c.markRecentLocked(call.CallID)
 	observers := append([]LifecycleObserver(nil), c.config.Observers...)
 	c.mu.Unlock()
 	if evicted != nil {
@@ -217,6 +243,15 @@ func (c *Core) touchLocked(callID string) {
 	if elem := c.recencyIndex[callID]; elem != nil {
 		c.recency.MoveToFront(elem)
 	}
+	c.markRecentLocked(callID)
+}
+
+func (c *Core) markRecentLocked(callID string) {
+	c.nextGeneration++
+	c.recencyGeneration[callID] = c.nextGeneration
+	for endpoint := range c.callEndpoints[callID] {
+		c.endpointWinner[endpoint] = callID
+	}
 }
 
 // Touch refreshes recency and LastUpdated for an existing call.
@@ -241,6 +276,23 @@ func (c *Core) ActiveCalls() []Call {
 		result = append(result, c.calls[elem.Value.(string)])
 	}
 	return result
+}
+
+// ActiveCallCount returns the number of calls without materializing the active
+// call collection.
+func (c *Core) ActiveCallCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.calls)
+}
+
+// EndpointAssociationCount returns the number of endpoint-to-call
+// associations. A shared endpoint contributes one association for each call
+// that owns it.
+func (c *Core) EndpointAssociationCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.associationCount
 }
 
 func (c *Core) Call(callID string) (Call, bool) {
@@ -274,6 +326,9 @@ func (c *Core) TryAssociateEndpoint(callID, endpoint string) bool {
 	}
 	c.callEndpoints[callID][endpoint] = struct{}{}
 	c.endpointCalls[endpoint] = append(c.endpointCalls[endpoint], callID)
+	if winner := c.endpointWinner[endpoint]; winner == "" || c.recencyGeneration[callID] > c.recencyGeneration[winner] {
+		c.endpointWinner[endpoint] = callID
+	}
 	c.associationCount++
 	return true
 }
@@ -288,21 +343,65 @@ func (c *Core) CallIDsForEndpoint(endpoint string) []string {
 	return append([]string(nil), c.endpointCalls[endpoint]...)
 }
 
-// MostRecentCallIDForEndpoint resolves an ambiguous shared endpoint using call
-// activity rather than association insertion order.
-func (c *Core) MostRecentCallIDForEndpoint(endpoint string) (string, bool) {
+// ResolveMediaEndpoints atomically snapshots the active owners of two exact
+// IP:port endpoints. When both sides have owners their intersection is the
+// candidate set; otherwise the non-empty side is used. No registry or caller
+// lock may be held while calling this method.
+func (c *Core) ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint string) MediaResolution {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	owners := c.endpointCalls[endpoint]
-	for elem := c.recency.Front(); elem != nil; elem = elem.Next() {
-		id := elem.Value.(string)
-		for _, owner := range owners {
-			if id == owner {
-				return id, true
+
+	source := c.endpointCalls[sourceEndpoint]
+	destination := c.endpointCalls[destinationEndpoint]
+	candidateCount := 0
+	resolvedID := ""
+	if len(source) > 0 && len(destination) > 0 {
+		destinationOwners := make(map[string]struct{}, len(destination))
+		for _, callID := range destination {
+			if _, active := c.calls[callID]; active {
+				destinationOwners[callID] = struct{}{}
+			}
+		}
+		for _, callID := range source {
+			if _, active := c.calls[callID]; !active {
+				continue
+			}
+			if _, ownsDestination := destinationOwners[callID]; ownsDestination {
+				candidateCount++
+				resolvedID = callID
+			}
+		}
+	} else {
+		owners := source
+		if len(owners) == 0 {
+			owners = destination
+		}
+		for _, callID := range owners {
+			if _, active := c.calls[callID]; active {
+				candidateCount++
+				resolvedID = callID
 			}
 		}
 	}
-	return "", false
+
+	switch candidateCount {
+	case 0:
+		return MediaResolution{Status: MediaUnresolved}
+	case 1:
+		return MediaResolution{Status: MediaResolved, CallID: resolvedID}
+	default:
+		return MediaResolution{Status: MediaAmbiguous}
+	}
+}
+
+// MostRecentCallIDForEndpoint is a presentation heuristic for diagnostics and
+// UI display. Recency does not prove media ownership; this result is unsuitable
+// for filtering, output attribution, Call-ID stamping, or LI correlation.
+func (c *Core) MostRecentCallIDForEndpoint(endpoint string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	callID, ok := c.endpointWinner[endpoint]
+	return callID, ok
 }
 
 func (c *Core) EndpointsForCall(callID string) []string {
@@ -342,6 +441,9 @@ func (c *Core) DissociateEndpoints(callID string) {
 		c.endpointCalls[endpoint] = withoutCallID(c.endpointCalls[endpoint], callID)
 		if len(c.endpointCalls[endpoint]) == 0 {
 			delete(c.endpointCalls, endpoint)
+			delete(c.endpointWinner, endpoint)
+		} else if c.endpointWinner[endpoint] == callID {
+			c.recomputeEndpointWinnerLocked(endpoint)
 		}
 		c.associationCount--
 	}
@@ -372,7 +474,24 @@ func (c *Core) removeLocked(callID string) Call {
 		delete(c.recencyIndex, callID)
 	}
 	c.dissociateEndpointsLocked(callID)
+	delete(c.recencyGeneration, callID)
 	return call
+}
+
+func (c *Core) recomputeEndpointWinnerLocked(endpoint string) {
+	var winner string
+	var winnerGeneration uint64
+	for _, callID := range c.endpointCalls[endpoint] {
+		if generation := c.recencyGeneration[callID]; winner == "" || generation > winnerGeneration {
+			winner = callID
+			winnerGeneration = generation
+		}
+	}
+	if winner == "" {
+		delete(c.endpointWinner, endpoint)
+		return
+	}
+	c.endpointWinner[endpoint] = winner
 }
 
 func (c *Core) dissociateEndpointsLocked(callID string) {
@@ -380,6 +499,9 @@ func (c *Core) dissociateEndpointsLocked(callID string) {
 		c.endpointCalls[endpoint] = withoutCallID(c.endpointCalls[endpoint], callID)
 		if len(c.endpointCalls[endpoint]) == 0 {
 			delete(c.endpointCalls, endpoint)
+			delete(c.endpointWinner, endpoint)
+		} else if c.endpointWinner[endpoint] == callID {
+			c.recomputeEndpointWinnerLocked(endpoint)
 		}
 		c.associationCount--
 	}
@@ -398,10 +520,13 @@ func (c *Core) clear(reason EndReason, closeRegistry bool) {
 	}
 	c.calls = make(map[string]Call)
 	c.endpointCalls = make(map[string][]string)
+	c.endpointWinner = make(map[string]string)
 	c.callEndpoints = make(map[string]map[string]struct{})
 	c.associationCount = 0
 	c.recency.Init()
 	c.recencyIndex = make(map[string]*list.Element)
+	c.recencyGeneration = make(map[string]uint64)
+	c.nextGeneration = 0
 	c.pins = make(map[string]int)
 	c.closed = closeRegistry
 	observers := append([]LifecycleObserver(nil), c.config.Observers...)

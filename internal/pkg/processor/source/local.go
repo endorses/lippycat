@@ -15,8 +15,11 @@ package source
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -156,28 +159,22 @@ func (c *callFilterCache) Len() int {
 	return len(c.entries)
 }
 
-func (s *LocalSource) cachedFilterIDsForCalls(callIDs []string) []string {
-	filterIDs := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, callID := range callIDs {
-		if cached, ok := s.callFilterCache.Load(callID); ok {
-			for _, filterID := range cached.filterIDs {
-				if filterID == "" {
-					continue
-				}
-				if _, exists := seen[filterID]; exists {
-					continue
-				}
-				seen[filterID] = struct{}{}
-				filterIDs = append(filterIDs, filterID)
-			}
-		}
+// cachedFilterIDsForCall returns filter IDs inherited from exactly one call.
+// Call attribution must be resolved before this helper is called; accepting a
+// candidate slice here would make it too easy to reintroduce cross-call unions.
+func (s *LocalSource) cachedFilterIDsForCall(callID string) []string {
+	if callID == "" {
+		return nil
 	}
-	return filterIDs
+	cached, ok := s.callFilterCache.Load(callID)
+	if !ok {
+		return nil
+	}
+	return composeFilterIDs(cached.filterIDs, nil)
 }
 
 // composeFilterIDs returns the stable, deduplicated union of direct packet
-// matches followed by IDs inherited from selected calls.
+// matches followed by IDs inherited from one authoritatively selected call.
 func composeFilterIDs(direct, inherited []string) []string {
 	filterIDs := make([]string, 0, len(direct)+len(inherited))
 	seen := make(map[string]struct{}, len(direct)+len(inherited))
@@ -197,6 +194,35 @@ func composeFilterIDs(direct, inherited []string) []string {
 }
 
 const credibleSIPStartLineLimit = 256
+
+const ambiguousOwnershipWarningInterval = time.Minute
+
+func mediaFlowHash(packet gopacket.Packet) string {
+	if packet == nil || packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
+		return "unavailable"
+	}
+	endpoints := []string{
+		packet.NetworkLayer().NetworkFlow().Src().String() + ":" + packet.TransportLayer().TransportFlow().Src().String(),
+		packet.NetworkLayer().NetworkFlow().Dst().String() + ":" + packet.TransportLayer().TransportFlow().Dst().String(),
+	}
+	sort.Strings(endpoints)
+	sum := sha256.Sum256([]byte(endpoints[0] + "\x00" + endpoints[1]))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (s *LocalSource) warnAmbiguousOwnership(packet gopacket.Packet) {
+	now := time.Now().UnixNano()
+	last := s.lastAmbiguousOwnershipWarning.Load()
+	if last != 0 && now-last < ambiguousOwnershipWarningInterval.Nanoseconds() {
+		return
+	}
+	if !s.lastAmbiguousOwnershipWarning.CompareAndSwap(last, now) {
+		return
+	}
+	logger.Warn("RTP ownership is ambiguous; suppressing identity inheritance",
+		"resolution", "ambiguous",
+		"flow_hash", mediaFlowHash(packet))
+}
 
 // hasCredibleSIPStartLine conservatively recognizes a bounded SIP request or
 // response start line without converting packet data to strings or allocating.
@@ -295,6 +321,9 @@ type LocalSource struct {
 
 	// Stats tracking
 	stats *AtomicStats
+	// lastAmbiguousOwnershipWarning rate-limits a single bounded warning stream;
+	// endpoint values are represented only by a short one-way flow hash.
+	lastAmbiguousOwnershipWarning atomic.Int64
 
 	// LI: CallID → filterIDs cache for RTP packets
 	// SIP packets that match LI filters store their CallID→filterIDs mapping,
@@ -429,6 +458,19 @@ func (s *LocalSource) OnCallStarted(call callregistry.Call) {
 // OnCallEnded removes selection attribution at every registry end boundary.
 func (s *LocalSource) OnCallEnded(call callregistry.Call, _ callregistry.EndReason) {
 	s.callFilterCache.Delete(call.CallID)
+}
+
+// CleanupCallPorts clears all call-scoped attribution owned by the local
+// capture path at the processor's shared finalization boundary.
+func (s *LocalSource) CleanupCallPorts(callID string) {
+	s.mu.Lock()
+	processor := s.voipProcessor
+	s.mu.Unlock()
+	if processor != nil {
+		processor.CleanupCallPorts(callID)
+		return
+	}
+	s.callFilterCache.Delete(callID)
 }
 
 // GetVoIPProcessor returns the VoIP processor if set.
@@ -745,7 +787,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil {
 					callID = pbPkt.Metadata.Sip.CallId
 				}
-				inheritedIDs := s.cachedFilterIDsForCalls([]string{callID})
+				inheritedIDs := s.cachedFilterIDsForCall(callID)
 				selected := selectionPolicy.Select(callregistry.SelectionInput{
 					FilterConfigured:   true,
 					DirectMatch:        matched,
@@ -763,8 +805,9 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
+							cachedCallIDs := s.cachedFilterIDsForCall(callID)
 							s.callFilterCache.Store(callID, cachedFilterIDs{
-								filterIDs: composeFilterIDs(directIDs, nil),
+								filterIDs: composeFilterIDs(cachedCallIDs, directIDs),
 								storedAt:  time.Now(),
 							})
 						}
@@ -777,6 +820,8 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					continue
 				}
 				pbPkt.MatchedFilterIds = filterIDs
+				pbPkt.DirectMatchedFilterIds = composeFilterIDs(directIDs, nil)
+				pbPkt.InheritedMatchedFilterIds = composeFilterIDs(inheritedIDs, nil)
 			}
 
 			// Add to batch
@@ -843,17 +888,25 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			// The VoIP processor already evaluates the application filter while
 			// detecting SIP, so reuse its verdict rather than matching again.
 			var isVoIPPacket bool
-			var voipCallIDs []string
+			var voipCallID string
+			var mediaResolution callregistry.MediaResolution
 			var reuseVerdict, reuseMatched bool
 			var reuseIDs []string
 			if voipProc != nil {
 				if result := voipProc.Process(pktInfo.Packet); result != nil {
-					voipCallIDs = result.GetCallIDs()
+					voipCallID = result.GetCallID()
+					mediaResolution = result.GetMediaResolution()
 					reuseVerdict, reuseMatched, reuseIDs = result.FilterVerdict()
 					if result.IsVoIPPacket() {
 						pbPkt.Metadata = result.GetMetadata()
 						isVoIPPacket = true
 					}
+				}
+			}
+			if isVoIPPacket && pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil && mediaResolution.Status != callregistry.MediaResolved {
+				s.stats.AddRTPResolution(mediaResolution.Status)
+				if mediaResolution.Status == callregistry.MediaAmbiguous {
+					s.warnAmbiguousOwnership(pktInfo.Packet)
 				}
 			}
 			// Apply DNS processing if enabled and not a VoIP packet
@@ -873,6 +926,8 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			// Special case: RTP packets that don't directly match can pass if their
 			// CallID is in the callFilterCache (associated with a matched SIP call).
 			var matchedFilterIDs []string
+			var directMatchedFilterIDs []string
+			var inheritedMatchedFilterIDs []string
 			if filterConfigured && !isVoIPPacket {
 				// Non-VoIP: filter decides pass/drop
 				matched, filterIDs := reuseMatched, reuseIDs
@@ -883,6 +938,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					continue
 				}
 				matchedFilterIDs = filterIDs
+				directMatchedFilterIDs = composeFilterIDs(filterIDs, nil)
 			} else if filterConfigured && isVoIPPacket {
 				// Classified media is restricted to packet-level filters. SIP can
 				// reuse the processor verdict; conservative start-line recognition
@@ -902,10 +958,21 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					matched, directFilterIDs = filter.MatchPacketLevelWithIDs(pktInfo.Packet)
 				}
 
-				if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && len(voipCallIDs) == 0 && pbPkt.Metadata.Sip.CallId != "" {
-					voipCallIDs = []string{pbPkt.Metadata.Sip.CallId}
+				isMedia := pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil
+				if isMedia {
+					// RTP may inherit identity selection only after exact-endpoint
+					// resolution proves one authoritative owner. In particular, do
+					// not reconstruct ownership from metadata or candidate lists.
+					if mediaResolution.Status == callregistry.MediaResolved {
+						voipCallID = mediaResolution.CallID
+					} else {
+						voipCallID = ""
+						s.stats.AddIdentityInheritanceSuppressed()
+					}
+				} else if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && voipCallID == "" {
+					voipCallID = pbPkt.Metadata.Sip.CallId
 				}
-				inheritedFilterIDs := s.cachedFilterIDsForCalls(voipCallIDs)
+				inheritedFilterIDs := s.cachedFilterIDsForCall(voipCallID)
 				selected := selectionPolicy.Select(callregistry.SelectionInput{
 					FilterConfigured:   filterConfigured,
 					DirectMatch:        matched,
@@ -915,6 +982,8 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					continue
 				}
 				matchedFilterIDs = composeFilterIDs(directFilterIDs, inheritedFilterIDs)
+				directMatchedFilterIDs = composeFilterIDs(directFilterIDs, nil)
+				inheritedMatchedFilterIDs = composeFilterIDs(inheritedFilterIDs, nil)
 				if matched {
 
 					// For SIP packets that match, cache CallID → filterIDs
@@ -922,8 +991,9 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					if len(directFilterIDs) > 0 && pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
+							cachedCallIDs := s.cachedFilterIDsForCall(callID)
 							s.callFilterCache.Store(callID, cachedFilterIDs{
-								filterIDs: composeFilterIDs(directFilterIDs, nil),
+								filterIDs: composeFilterIDs(cachedCallIDs, directFilterIDs),
 								storedAt:  time.Now(),
 							})
 						}
@@ -940,13 +1010,6 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					//     never be reported as ended downstream — it stays "Active"
 					//     forever in the TUI.
 					// Mirrors the hunter's IsCallMatched() termination forwarding.
-					callID := ""
-					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil {
-						callID = pbPkt.Metadata.Sip.CallId
-					}
-					if len(voipCallIDs) == 0 && callID != "" {
-						voipCallIDs = []string{callID}
-					}
 					// If still no filter IDs, drop the packet
 					if len(matchedFilterIDs) == 0 {
 						continue
@@ -957,6 +1020,8 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			// Set matched filter IDs for LI correlation
 			if len(matchedFilterIDs) > 0 {
 				pbPkt.MatchedFilterIds = matchedFilterIDs
+				pbPkt.DirectMatchedFilterIds = directMatchedFilterIDs
+				pbPkt.InheritedMatchedFilterIds = inheritedMatchedFilterIDs
 			}
 
 			// Add to batch

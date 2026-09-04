@@ -6,6 +6,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"google.golang.org/protobuf/proto"
 )
 
 // TopologyPublisher defines the interface for publishing topology updates upstream
@@ -15,39 +16,43 @@ type TopologyPublisher interface {
 
 // ConnectedHunter represents a connected hunter node
 type ConnectedHunter struct {
-	ID                        string
-	Hostname                  string
-	RemoteAddr                string
-	Interfaces                []string
-	Capabilities              *management.HunterCapabilities // Filter capabilities advertised by hunter
-	ForwardingMode            management.ForwardingMode
-	EventAPIMajor             uint32
-	EventKinds                []int32
-	SemanticProfileRevision   uint32
-	ConnectedAt               int64
-	LastHeartbeat             int64
-	PacketsReceived           uint64 // Packets received by processor from this hunter
-	PacketsCaptured           uint64 // Packets captured by hunter (from heartbeat stats)
-	PacketsMatched            uint64 // Packets matching filters (from heartbeat stats)
-	PacketsForwarded          uint64 // Packets forwarded by hunter (from heartbeat stats)
-	PacketsDropped            uint64 // Packets dropped by hunter (from heartbeat stats)
-	CaptureLosses             uint64 // Capture-buffer losses reported by hunter
-	AnalysisLosses            uint64 // Stateful analysis losses reported by hunter
-	QueueLosses               uint64 // Event queue/spool losses reported by hunter
-	UnsupportedKindLosses     uint64 // Unsupported event-kind losses reported by hunter
-	TransportLosses           uint64 // Event transport losses reported by hunter
-	CaptureBufferRegularDrops uint64
-	CaptureBufferSIPDrops     uint64
-	BatchChannelDrops         uint64
-	BufferBytes               uint64 // Hunter buffer occupancy (from heartbeat stats)
-	ActiveFilters             uint32 // Active filter count from hunter stats
-	Status                    management.HunterStatus
-	FilterUpdateFailures      uint32 // Consecutive filter update send failures
-	LastFilterUpdateFailure   int64  // Timestamp of last filter update failure
+	ID                            string
+	Hostname                      string
+	RemoteAddr                    string
+	Interfaces                    []string
+	Capabilities                  *management.HunterCapabilities // Filter capabilities advertised by hunter
+	ForwardingMode                management.ForwardingMode
+	EventAPIMajor                 uint32
+	EventKinds                    []int32
+	SemanticProfileRevision       uint32
+	ConnectedAt                   int64
+	LastHeartbeat                 int64
+	PacketsReceived               uint64 // Packets received by processor from this hunter
+	PacketsCaptured               uint64 // Packets captured by hunter (from heartbeat stats)
+	PacketsMatched                uint64 // Packets matching filters (from heartbeat stats)
+	PacketsForwarded              uint64 // Packets forwarded by hunter (from heartbeat stats)
+	PacketsDropped                uint64 // Packets dropped by hunter (from heartbeat stats)
+	CaptureLosses                 uint64 // Capture-buffer losses reported by hunter
+	AnalysisLosses                uint64 // Stateful analysis losses reported by hunter
+	QueueLosses                   uint64 // Event queue/spool losses reported by hunter
+	UnsupportedKindLosses         uint64 // Unsupported event-kind losses reported by hunter
+	TransportLosses               uint64 // Event transport losses reported by hunter
+	CaptureBufferRegularDrops     uint64
+	CaptureBufferSIPDrops         uint64
+	BatchChannelDrops             uint64
+	BufferBytes                   uint64 // Hunter buffer occupancy (from heartbeat stats)
+	ActiveFilters                 uint32 // Active filter count from hunter stats
+	RTPOwnershipUnresolved        uint64
+	RTPOwnershipAmbiguous         uint64
+	IdentityInheritanceSuppressed uint64
+	Status                        management.HunterStatus
+	FilterUpdateFailures          uint32 // Consecutive filter update send failures
+	LastFilterUpdateFailure       int64  // Timestamp of last filter update failure
 	// System metrics (from heartbeat stats)
 	CpuPercent       float32 // CPU usage percentage (0-100, -1 if unavailable)
 	MemoryRssBytes   uint64  // Process RSS memory in bytes
 	MemoryLimitBytes uint64  // Cgroup memory limit in bytes (0 if no limit)
+	Detector         *management.DetectorTelemetry
 }
 
 // ForwardingContract is the processor-authoritative transport contract
@@ -211,11 +216,22 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 			hunter.CaptureBufferSIPDrops = stats.CaptureBufferSipDrops
 			hunter.BatchChannelDrops = stats.BatchChannelDrops
 			hunter.BufferBytes = stats.BufferBytes
+			hunter.RTPOwnershipUnresolved = stats.RtpOwnershipUnresolved
+			hunter.RTPOwnershipAmbiguous = stats.RtpOwnershipAmbiguous
+			hunter.IdentityInheritanceSuppressed = stats.IdentityInheritanceSuppressed
 
 			// Update system metrics (CPU/RAM)
 			hunter.CpuPercent = stats.CpuPercent
 			hunter.MemoryRssBytes = stats.MemoryRssBytes
 			hunter.MemoryLimitBytes = stats.MemoryLimitBytes
+			if stats.Detector == nil {
+				hunter.Detector = nil
+			} else {
+				// Generated protobuf messages contain internal synchronization
+				// state and must not be copied by value. Clone also preserves any
+				// fields added to the telemetry message in future schema versions.
+				hunter.Detector = proto.Clone(stats.Detector).(*management.DetectorTelemetry)
+			}
 
 			// Check if filter count changed
 			oldFilters := hunter.ActiveFilters

@@ -103,7 +103,7 @@ func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInpu
 		ToUri: input.Result.ToURI, Method: input.Result.Method, CseqMethod: input.Result.CSeqMethod,
 		ResponseCode: uint32(input.Result.ResponseCode), PAssertedIdentity: input.Result.PAssertedIdentity,
 	}}
-	if err := s.forwarder.ForwardPacketWithMetadata(packet, metadata, env.Source.InterfaceName, env.LinkType); err != nil {
+	if err := forwardPacketWithFilterProvenance(s.forwarder, packet, metadata, env.Source.InterfaceName, env.LinkType, env.DirectMatchedFilterIDs, env.InheritedMatchedFilterIDs); err != nil {
 		return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: err}
 	}
 	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}

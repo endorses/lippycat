@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -27,18 +28,16 @@ func TestRegisterSDPAssociationLifecycle(t *testing.T) {
 	t.Cleanup(p.Close)
 
 	p.RegisterSDP("call-1", "v=0\r\nc=IN IP4 192.0.2.10\r\nm=audio 10000 RTP/AVP 0\r\n")
-	if got, ok := p.getCallIDForPort("192.0.2.10:10000"); !ok || got != "call-1" {
-		t.Fatalf("registered endpoint lookup = %q, %v; want call-1, true", got, ok)
-	}
+	require.Equal(t, []string{"call-1"}, p.CallIDsForEndpoint("192.0.2.10:10000"))
 	p.CleanupCallPorts("call-1")
-	if _, ok := p.getCallIDForPort("192.0.2.10:10000"); ok {
+	if len(p.CallIDsForEndpoint("192.0.2.10:10000")) != 0 {
 		t.Fatal("endpoint mapping survived call completion cleanup")
 	}
 
 	p.RegisterSDP("call-2", "v=0\r\nc=IN IP4 192.0.2.11\r\nm=audio 10002 RTP/AVP 0\r\n")
 	p.RegisterSDP("call-3", "v=0\r\nc=IN IP4 192.0.2.12\r\nm=audio 10004 RTP/AVP 0\r\n")
 	p.RegisterSDP("call-4", "v=0\r\nc=IN IP4 192.0.2.13\r\nm=audio 10006 RTP/AVP 0\r\n")
-	if _, ok := p.getCallIDForPort("192.0.2.11:10002"); ok {
+	if len(p.CallIDsForEndpoint("192.0.2.11:10002")) != 0 {
 		t.Fatal("oldest call's endpoint mapping survived eviction")
 	}
 
@@ -148,8 +147,7 @@ func TestTerminalSIPResponseRemovesRTPAssociationWithoutPCAPMonitor(t *testing.T
 		"Call-ID: completed-call\r\n"+
 		"CSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n"), 5060, 5060)
 	require.NotNil(t, p.Process(response))
-	_, exists := p.getCallIDForPort("192.0.2.20:12000")
-	require.False(t, exists, "terminal SIP response must release RTP mapping without a PCAP monitor")
+	require.Empty(t, p.CallIDsForEndpoint("192.0.2.20:12000"), "terminal SIP response must release RTP mapping without a PCAP monitor")
 }
 
 func TestDefaultConfig(t *testing.T) {
@@ -272,9 +270,7 @@ m=audio 16384 RTP/AVP 0
 	assert.Equal(t, "def456@example.com", result.CallID)
 
 	// Verify RTP IP:port endpoint was registered
-	callID, exists := p.getCallIDForPort("192.168.1.1:16384")
-	assert.True(t, exists)
-	assert.Equal(t, "def456@example.com", callID)
+	assert.Equal(t, []string{"def456@example.com"}, p.CallIDsForEndpoint("192.168.1.1:16384"))
 }
 
 func TestProcessor_ProcessRTPPacket(t *testing.T) {
@@ -303,9 +299,7 @@ func TestProcessor_ProcessRTPPacket(t *testing.T) {
 	require.Equal(t, "rtp-test@example.com", sipResult.CallID)
 
 	// Verify the IP:port endpoint was registered
-	callID, exists := p.getCallIDForPort("192.168.1.1:20000")
-	require.True(t, exists, "RTP endpoint 192.168.1.1:20000 should be registered")
-	require.Equal(t, "rtp-test@example.com", callID)
+	require.Equal(t, []string{"rtp-test@example.com"}, p.CallIDsForEndpoint("192.168.1.1:20000"))
 
 	// Now create an RTP packet from the advertised endpoint (symmetric RTP:
 	// the host that announced "c=192.168.1.1, m=audio 20000" sends from
@@ -324,7 +318,7 @@ func TestProcessor_ProcessRTPPacket(t *testing.T) {
 	assert.Equal(t, uint32(0x12345678), result.Metadata.Rtp.Ssrc)
 }
 
-func TestProcessor_ProcessRTPPacketReturnsAllSharedEndpointCalls(t *testing.T) {
+func TestProcessor_ProcessRTPPacketRejectsSharedEndpointAttribution(t *testing.T) {
 	p := New(DefaultConfig())
 	defer p.Close()
 
@@ -336,17 +330,15 @@ func TestProcessor_ProcessRTPPacketReturnsAllSharedEndpointCalls(t *testing.T) {
 	result := p.Process(createUDPPacket(t, rtpPayload, 20000, 12345))
 
 	require.NotNil(t, result)
-	assert.Equal(t, "b2bua-leg-a", result.CallID, "legacy primary association must remain deterministic")
-	assert.Equal(t, []string{"b2bua-leg-a", "b2bua-leg-b"}, result.CallIDs)
-	assert.Equal(t, "b2bua-leg-a", result.Metadata.Sip.CallId)
+	assert.Equal(t, callregistry.MediaAmbiguous, result.MediaResolution.Status)
+	assert.Empty(t, result.CallID)
+	assert.Empty(t, result.CallIDs)
+	assert.Nil(t, result.Metadata.Sip)
 
 	adapterResult := NewSourceAdapter(p).Process(createUDPPacket(t, rtpPayload, 20000, 12345))
 	require.NotNil(t, adapterResult)
-	assert.Equal(t, []string{"b2bua-leg-a", "b2bua-leg-b"}, adapterResult.GetCallIDs())
-
-	callIDs := adapterResult.GetCallIDs()
-	callIDs[0] = "mutated"
-	assert.Equal(t, []string{"b2bua-leg-a", "b2bua-leg-b"}, adapterResult.GetCallIDs())
+	assert.Empty(t, adapterResult.GetCallIDs())
+	assert.Equal(t, callregistry.MediaAmbiguous, adapterResult.GetMediaResolution().Status)
 }
 
 func TestProcessor_ActiveCalls(t *testing.T) {

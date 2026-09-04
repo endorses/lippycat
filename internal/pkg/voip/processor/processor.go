@@ -42,14 +42,18 @@ type ProcessResult struct {
 
 	// CallID is the SIP Call-ID associated with this packet.
 	// For SIP packets, this is extracted from headers.
-	// For RTP packets, this is looked up from the port-to-call mapping.
+	// For RTP packets, this is populated only after authoritative exact-endpoint
+	// resolution succeeds.
 	CallID string
 
-	// CallIDs contains every SIP Call-ID associated with this packet. RTP can
-	// belong to multiple call legs when a B2BUA advertises a shared media
-	// endpoint. CallID remains the first entry for compatibility with consumers
-	// that can represent only one call.
+	// CallIDs contains the Call-IDs associated with this packet. For RTP it is
+	// either empty or contains the single authoritatively resolved Call-ID;
+	// ambiguous ownership is never exposed as an ordered candidate list.
 	CallIDs []string
+
+	// MediaResolution carries the authoritative exact-endpoint attribution for
+	// RTP. Consumers must not infer resolution from CallID or CallIDs.
+	MediaResolution callregistry.MediaResolution
 
 	// Metadata contains protobuf metadata for forwarding to processors.
 	Metadata *data.PacketMetadata
@@ -174,6 +178,11 @@ type Processor struct {
 	mu        sync.RWMutex
 	eventMu   sync.Mutex
 	janitorWG sync.WaitGroup
+	// completionHandler transfers terminal decisions to an external lifecycle
+	// coordinator. While installed, completed calls retain their endpoint state
+	// until FinalizeCallCleanup is invoked by that coordinator.
+	completionHandler func(callregistry.Call, callregistry.EndReason)
+	pendingCompletion map[string]callregistry.EndReason
 
 	// Optional application filter for call selection
 	appFilter       ApplicationFilter
@@ -213,10 +222,14 @@ func New(cfg Config) *Processor {
 	}
 
 	p := &Processor{
-		config: cfg,
-		calls:  make(map[string]*callState),
+		config:            cfg,
+		calls:             make(map[string]*callState),
+		pendingCompletion: make(map[string]callregistry.EndReason),
 		registry: callregistry.New(callregistry.Config{
-			MaxCalls: cfg.MaxCalls, MaxEndpointsPerCall: cfg.MaxEndpointsPerCall,
+			// The processor owns capacity termination so an external lifecycle
+			// coordinator can retain attribution through its grace period. The
+			// registry's independent eviction would cross that boundary early.
+			MaxCalls: int(^uint(0) >> 1), MaxEndpointsPerCall: cfg.MaxEndpointsPerCall,
 			MaxEndpointAssociations: cfg.MaxEndpointAssociations,
 			Observers:               cfg.LifecycleObservers,
 		}),
@@ -242,6 +255,17 @@ func (p *Processor) AddLifecycleObserver(observer callregistry.LifecycleObserver
 		return
 	}
 	p.registry.AddObserver(observer)
+}
+
+// SetCompletionHandler delegates terminal-call cleanup to an external lifecycle
+// coordinator. It must be configured before packet processing starts.
+func (p *Processor) SetCompletionHandler(handler func(callregistry.Call, callregistry.EndReason)) {
+	if p == nil {
+		return
+	}
+	p.eventMu.Lock()
+	p.completionHandler = handler
+	p.eventMu.Unlock()
 }
 
 // Process analyzes a packet and returns VoIP metadata if applicable.
@@ -331,6 +355,19 @@ func (p *Processor) ActiveCalls() []CallInfo {
 	return calls
 }
 
+// ActiveCallCount returns the number of calls without copying their metadata.
+func (p *Processor) ActiveCallCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.calls)
+}
+
+// EndpointAssociationCount returns the number of media endpoint-to-call
+// associations currently tracked by the processor.
+func (p *Processor) EndpointAssociationCount() int {
+	return p.registry.EndpointAssociationCount()
+}
+
 // Close releases resources held by the processor.
 func (p *Processor) Close() {
 	if p.sipFlow != nil {
@@ -389,30 +426,46 @@ func (p *Processor) janitorLoop() {
 // cleanupExpiredCalls removes calls that have exceeded the timeout.
 func (p *Processor) cleanupExpiredCalls() {
 	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
 	p.mu.Lock()
 
 	now := time.Now()
+	type pendingNotification struct {
+		call    callregistry.Call
+		handler func(callregistry.Call, callregistry.EndReason)
+	}
+	var notifications []pendingNotification
 	for callID, state := range p.calls {
 		if now.Sub(state.lastUpdated) > p.config.CallTimeout {
-			// Remove this callID from port mappings (multi-value for B2BUA)
+			if p.completionHandler != nil {
+				if _, pending := p.pendingCompletion[callID]; pending {
+					continue
+				}
+				p.pendingCompletion[callID] = callregistry.EndTimeout
+				notifications = append(notifications, pendingNotification{call: state.info, handler: p.completionHandler})
+				continue
+			}
 			delete(p.calls, callID)
 			p.registry.Remove(callID, callregistry.EndTimeout)
 		}
 	}
 	p.mu.Unlock()
+	p.eventMu.Unlock()
+
+	for _, notification := range notifications {
+		notification.handler(notification.call, callregistry.EndTimeout)
+	}
 }
 
 // getOrCreateCall gets or creates a call state for the given CallID.
 func (p *Processor) getOrCreateCall(callID string) *callState {
 	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
 	p.mu.Lock()
 
 	state, exists := p.calls[callID]
 	if !exists {
 		if p.janitorClosed {
 			p.mu.Unlock()
+			p.eventMu.Unlock()
 			return nil
 		}
 		now := time.Now()
@@ -426,22 +479,38 @@ func (p *Processor) getOrCreateCall(callID string) *callState {
 			lastUpdated: now,
 		}
 		p.calls[callID] = state
-		p.registry.Upsert(state.info)
 		// Evict oldest call if at capacity
+		var evicted CallInfo
+		var notifyEviction bool
 		if len(p.calls) > p.config.MaxCalls {
-			p.evictOldestCallLocked()
+			evicted, notifyEviction = p.evictOldestCallLocked(callID)
 		}
+		p.registry.Upsert(state.info)
+		p.mu.Unlock()
+		handler := p.completionHandler
+		p.eventMu.Unlock()
+		if notifyEviction && handler != nil {
+			handler(evicted, callregistry.EndEvicted)
+		}
+		return state
 	}
 	p.mu.Unlock()
+	p.eventMu.Unlock()
 	return state
 }
 
 // evictOldestCallLocked removes the oldest call (must hold mu lock).
-func (p *Processor) evictOldestCallLocked() (CallInfo, bool) {
+func (p *Processor) evictOldestCallLocked(excludeCallID string) (CallInfo, bool) {
 	var oldestID string
 	var oldestTime time.Time
 
 	for id, state := range p.calls {
+		if id == excludeCallID {
+			continue
+		}
+		if _, pending := p.pendingCompletion[id]; pending {
+			continue
+		}
 		if oldestID == "" || state.lastUpdated.Before(oldestTime) {
 			oldestID = id
 			oldestTime = state.lastUpdated
@@ -450,6 +519,10 @@ func (p *Processor) evictOldestCallLocked() (CallInfo, bool) {
 
 	if oldestID != "" {
 		state := p.calls[oldestID]
+		if p.completionHandler != nil {
+			p.pendingCompletion[oldestID] = callregistry.EndEvicted
+			return state.info, true
+		}
 		delete(p.calls, oldestID)
 		p.registry.Remove(oldestID, callregistry.EndEvicted)
 		return state.info, true
@@ -469,18 +542,9 @@ func (p *Processor) registerRTPPort(callID, port string) {
 	p.registry.TryAssociateEndpoint(callID, port)
 }
 
-// getCallIDForPort looks up the first CallID for an RTP port.
-// For B2BUA scenarios with multiple calls on same port, use getAllCallIDsForPort.
-func (p *Processor) getCallIDForPort(port string) (string, bool) {
-	callIDs := p.registry.CallIDsForEndpoint(port)
-	if len(callIDs) > 0 {
-		return callIDs[0], true
-	}
-	return "", false
-}
-
 // getAllCallIDsForPort returns all CallIDs associated with an RTP port.
-// This supports B2BUA scenarios where multiple call legs share the same port.
+// This diagnostic API is unsuitable for filtering, output attribution, or LI
+// correlation; use ResolveMediaEndpoints for authoritative ownership.
 func (p *Processor) getAllCallIDsForPort(port string) []string {
 	return p.registry.CallIDsForEndpoint(port)
 }
@@ -499,6 +563,11 @@ func (p *Processor) Call(callID string) (callregistry.Call, bool) {
 // CallIDsForEndpoint returns a copy of all calls associated with endpoint.
 func (p *Processor) CallIDsForEndpoint(endpoint string) []string {
 	return p.getAllCallIDsForPort(endpoint)
+}
+
+// ResolveMediaEndpoints returns the registry's atomic exact-endpoint result.
+func (p *Processor) ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint string) callregistry.MediaResolution {
+	return p.registry.ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint)
 }
 
 // AssociateEndpoint associates a media endpoint with an existing call.
@@ -523,12 +592,42 @@ func (p *Processor) CleanupCallPorts(callID string) {
 	p.registry.DissociateEndpoints(callID)
 }
 
-// CompleteCall removes RTP associations once SIP confirms that a dialog has
-// terminated. The call record is retained until normal timeout/eviction so
-// callers can still inspect its final metadata, but reused media endpoints can
-// no longer be attributed to the completed call.
+// CompleteCall reports that SIP confirmed a terminal dialog. Standalone
+// processors remove attribution immediately; processors with an external
+// completion handler retain it through that coordinator's trailing-media grace
+// period.
 func (p *Processor) CompleteCall(callID string) {
+	p.eventMu.Lock()
+	if p.completionHandler != nil {
+		if _, pending := p.pendingCompletion[callID]; pending {
+			p.eventMu.Unlock()
+			return
+		}
+		call, exists := p.registry.Call(callID)
+		if !exists {
+			p.eventMu.Unlock()
+			return
+		}
+		p.pendingCompletion[callID] = callregistry.EndCompleted
+		handler := p.completionHandler
+		p.eventMu.Unlock()
+		handler(call, callregistry.EndCompleted)
+		return
+	}
+	p.eventMu.Unlock()
 	p.removeCall(callID, callregistry.EndCompleted)
+}
+
+// FinalizeCallCleanup removes a call after an external lifecycle coordinator
+// has crossed its atomic finalization boundary.
+func (p *Processor) FinalizeCallCleanup(callID string) {
+	p.eventMu.Lock()
+	reason := p.pendingCompletion[callID]
+	p.eventMu.Unlock()
+	if reason == "" {
+		reason = callregistry.EndCompleted
+	}
+	p.removeCall(callID, reason)
 }
 
 func (p *Processor) removeCall(callID string, reason callregistry.EndReason) {
@@ -538,6 +637,7 @@ func (p *Processor) removeCall(callID string, reason callregistry.EndReason) {
 	_, exists := p.calls[callID]
 	if exists {
 		delete(p.calls, callID)
+		delete(p.pendingCompletion, callID)
 	}
 	p.mu.Unlock()
 	if exists {

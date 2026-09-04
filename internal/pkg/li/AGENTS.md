@@ -290,11 +290,12 @@ Binary PDU format per TS 103 221-2:
 
 ```go
 type PDUHeader struct {
-    Version       uint16      // Protocol version (5.0)
+    Version       uint16      // Protocol version (0.5, encoded as 0x0005)
     Type          PDUType     // X2 (1) or X3 (2)
-    HeaderLength  uint16      // Total header size
-    PayloadFormat PayloadFormat
+    HeaderLength  uint32      // Total header size
     PayloadLength uint32
+    PayloadFormat PayloadFormat
+    PayloadDirection PayloadDirection
     XID           uuid.UUID   // Task identifier
     CorrelationID uint64      // Links related PDUs
 }
@@ -309,14 +310,15 @@ type TLVAttribute struct {
 ```
 Offset  Size  Field
 ------  ----  -----
-0       2     Version
+0       2     Version (0.5, wire bytes 00 05)
 2       2     PDU Type
-4       2     Header Length
-6       2     Payload Format
+4       4     Header Length
 8       4     Payload Length
-12      16    XID (UUID)
-28      8     Correlation ID
-36      var   Conditional Attributes (TLV)
+12      2     Payload Format
+14      2     Payload Direction
+16      16    XID (UUID)
+32      8     Correlation ID
+40      var   Conditional Attributes (TLV)
 ```
 
 ### X2 Encoder
@@ -402,6 +404,23 @@ exposed via `Stats()`. Endpoints are only ever added, so a re-INVITE cannot
 invalidate an earlier verdict; re-INVITE/UPDATE SDP is attributed only when its
 connection address already belongs to one party.
 
+**Attribution security invariant.** Security-sensitive RTP attribution must use
+the exact-endpoint resolver and must produce one authoritative call or no inherited
+identity. Do not reconstruct ownership from an all-owner endpoint list, merge the
+filters of candidate calls, or choose a winner by insertion time, activity time,
+or recency. Unknown and multi-owner results fail closed for identity inheritance.
+Packet-level IP/CIDR matching is separate direct evidence and may remain eligible.
+Carry direct and inherited provenance separately through the LI boundary, where
+the inherited Call-ID must agree with the resolver's authoritative Call-ID.
+
+Counters have a single increment owner: the packet source owns endpoint-resolution
+results and per-packet inheritance suppression; the LI manager owns rejection of
+individual inherited filter IDs at the trust boundary; the processor LI admission
+site owns finalized/stale-generation X3 suppression; the lifecycle finalization
+subscriber owns the number of reorder entries discarded; and the lifecycle
+registry owns tombstone-capacity evictions. Downstream consumers expose snapshots
+only and must not increment or reclassify these events.
+
 ### Buffer Pooling
 
 Both encoders use `sync.Pool` for PDU buffers:
@@ -461,6 +480,11 @@ type Client struct {
 - Drop-oldest overflow with reason-labelled statistics
 - Batching for efficiency (default: 100 PDUs/batch)
 - Immutable PDU fan-out: every destination receives identical encoded bytes
+- Multi-destination fan-out is fail-closed but not atomic: destination zero
+  commits under the outer admissions, while later destinations re-admit. A
+  concurrent task or call finalization may therefore deliver to an earlier MDF
+  and suppress later MDFs; preserve this accounting and document the operational
+  asymmetry unless the delivery architecture gains an explicit atomic fan-out.
 - At-least-once retry semantics after ambiguous writes
 
 **Methods:**

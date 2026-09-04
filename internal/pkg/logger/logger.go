@@ -39,12 +39,15 @@ func Initialize() {
 			Level:     level,
 			AddSource: false,
 		})
+		disabledMux.Lock()
 		defaultLogger = slog.New(handler)
+		disabledMux.Unlock()
 	})
 }
 
 // Disable disables logging output (useful for TUI mode)
 func Disable() {
+	Initialize()
 	disabledMux.Lock()
 	defer disabledMux.Unlock()
 	disabled = true
@@ -57,6 +60,7 @@ func Disable() {
 
 // Enable re-enables logging output
 func Enable() {
+	Initialize()
 	disabledMux.Lock()
 	defer disabledMux.Unlock()
 	disabled = false
@@ -69,6 +73,10 @@ func Enable() {
 
 // UseStderr reconfigures the logger to write to stderr (useful for TUI debug mode)
 func UseStderr() {
+	Initialize()
+	disabledMux.Lock()
+	defer disabledMux.Unlock()
+	disabled = false
 	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level:     slog.LevelInfo,
 		AddSource: false,
@@ -79,6 +87,7 @@ func UseStderr() {
 // UseFile reconfigures the logger to write to a file (useful for TUI debug mode)
 // The caller is responsible for closing the file when done.
 func UseFile(w io.Writer) {
+	Initialize()
 	disabledMux.Lock()
 	defer disabledMux.Unlock()
 	disabled = false
@@ -99,7 +108,19 @@ func IsDisabled() bool {
 // Get returns the default structured logger
 func Get() *slog.Logger {
 	Initialize() // Always call Initialize, sync.Once ensures it only runs once
+	disabledMux.RLock()
+	defer disabledMux.RUnlock()
 	return defaultLogger
+}
+
+// Enabled reports whether the active logger handles records at level.
+// It also honors Disable, whose discard handler would otherwise report some
+// levels as enabled even though no record can be emitted.
+func Enabled(level slog.Level) bool {
+	Initialize()
+	disabledMux.RLock()
+	defer disabledMux.RUnlock()
+	return !disabled && defaultLogger.Enabled(context.Background(), level)
 }
 
 // Info logs an info level message

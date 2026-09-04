@@ -60,8 +60,9 @@ a=rtpmap:0 PCMU/8000
 	}
 
 	// Check that flow state was updated
-	assert.NotNil(t, flowCtx.State, "Flow state should be set")
-	if sipState, ok := flowCtx.State.(*SIPFlowState); ok {
+	flowState := flowCtx.GetState()
+	assert.NotNil(t, flowState, "Flow state should be set")
+	if sipState, ok := flowState.(*SIPFlowState); ok {
 		assert.Contains(t, sipState.MediaPorts, uint16(49170))
 		assert.Equal(t, "a84b4c76e66710@pc33.atlanta.com", sipState.CallID)
 	} else {

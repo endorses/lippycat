@@ -124,3 +124,44 @@ func TestEventStoreProtocolScopeIntersectsUserFiltersAndNewArrivals(t *testing.T
 	require.Len(t, store.Events(), 1)
 	assert.Equal(t, "http-b", store.Events()[0].Event.Envelope().EventID)
 }
+
+func TestEventStorePreservesArrivalOrderAndExactEvictionAccounting(t *testing.T) {
+	store := NewEventStore(3)
+	batch := []events.Event{
+		testEvent("one", "pcap", events.KindDNS),
+		testEvent("two", "pcap", events.KindHTTP),
+		testEvent("three", "eth0", events.KindConn),
+		testEvent("four", "eth0", events.KindDNS),
+		testEvent("five", "pcap", events.KindHTTP),
+	}
+
+	assert.Equal(t, len(batch), store.AddBatch(batch))
+	items := store.Events()
+	require.Len(t, items, 3)
+	for i, want := range []string{"three", "four", "five"} {
+		assert.Equal(t, want, items[i].Event.Envelope().EventID)
+		assert.Equal(t, uint64(i+3), items[i].ArrivalSequence)
+	}
+	assert.Equal(t, EventStoreStats{
+		Arrived:             5,
+		Retained:            3,
+		Evicted:             2,
+		TransportLossByKind: map[string]uint64{},
+	}, store.Stats())
+}
+
+func TestEventStoreRejectsUnsupportedEventsWithoutChangingRetention(t *testing.T) {
+	store := NewEventStore(2)
+
+	assert.Equal(t, 1, store.AddBatch([]events.Event{
+		nil,
+		testEvent("content", "pcap", events.KindFileContent),
+		testEvent("dns", "pcap", events.KindDNS),
+	}))
+
+	items := store.Events()
+	require.Len(t, items, 1)
+	assert.Equal(t, "dns", items[0].Event.Envelope().EventID)
+	assert.Equal(t, uint64(1), items[0].ArrivalSequence)
+	assert.Equal(t, uint64(1), store.Stats().Arrived)
+}

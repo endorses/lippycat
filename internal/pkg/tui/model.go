@@ -152,7 +152,8 @@ type Model struct {
 	metricsCollector sysmetrics.Collector
 
 	// Test state
-	testToastCycle int // Cycles through toast types for testing
+	testToastCycle     int    // Cycles through toast types for testing
+	eventViewSyncCount uint64 // Counts event presentation synchronizations for benchmarks and regression tests
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order

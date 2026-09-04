@@ -91,6 +91,161 @@ func TestTickPullsLocalEventsWithoutProgramSend(t *testing.T) {
 	require.Equal(t, "local", m.eventStore.Events()[0].Event.Envelope().EventID)
 }
 
+func TestTickCountsOneEventViewSynchronizationPerLocalBatch(t *testing.T) {
+	pendingLocalEvents.clear()
+	t.Cleanup(pendingLocalEvents.clear)
+	m := NewModel(128, 8, "test0", "", nil, false, false, "", false)
+	m.uiState.Capturing = true
+	m.uiState.ViewMode = "events"
+	for i := range 50 {
+		pendingLocalEvents.addBatch(types.EventBatch{Events: []events.Event{
+			events.NewDNSEvent(testEventEnvelope(fmt.Sprintf("local-%d", i), uint64(i+1))),
+		}})
+	}
+
+	m, _ = m.handleTickMsg(TickMsg{})
+
+	require.Equal(t, uint64(50), m.eventViewSyncCount)
+	require.Len(t, m.eventStore.Events(), 50)
+}
+
+func TestRemoteEventBatchSynchronizationCount(t *testing.T) {
+	for _, size := range []int{1, 128} {
+		t.Run(fmt.Sprintf("batch-%d", size), func(t *testing.T) {
+			m := NewModel(size, 8, "", "", nil, false, true, "", true)
+			m.uiState.ViewMode = "events"
+			batch := makeEventBatch(size, "remote")
+
+			m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: batch})
+
+			require.Equal(t, uint64(1), m.eventViewSyncCount)
+			require.Len(t, m.eventStore.Events(), size)
+		})
+	}
+}
+
+func TestEventLossAndCompatibilityAccountingRespectsCaptureOrigin(t *testing.T) {
+	batch := types.EventBatch{
+		Events:                 []events.Event{events.NewDNSEvent(testEventEnvelope("accepted", 1))},
+		Losses:                 []types.EventLoss{{Count: 3}},
+		CompatibilityOmissions: 2,
+	}
+
+	local := NewModel(8, 8, "test0", "", nil, false, false, "", false)
+	local, _ = local.handleEventBatchMsg(EventBatchMsg{Batch: batch})
+	require.Equal(t, store.EventStoreStats{TransportLossByKind: map[string]uint64{}}, local.eventStore.Stats())
+	local, _ = local.handleEventBatchMsg(EventBatchMsg{Batch: batch, Local: true})
+	require.Equal(t, uint64(1), local.eventStore.Stats().Arrived)
+	require.Equal(t, uint64(5), local.eventStore.Stats().TransportLost)
+
+	remote := NewModel(8, 8, "", "", nil, false, true, "", true)
+	remote, _ = remote.handleEventBatchMsg(EventBatchMsg{Batch: batch, Local: true})
+	require.Equal(t, store.EventStoreStats{TransportLossByKind: map[string]uint64{}}, remote.eventStore.Stats())
+	remote, _ = remote.handleEventBatchMsg(EventBatchMsg{Batch: batch})
+	require.Equal(t, uint64(1), remote.eventStore.Stats().Arrived)
+	require.Equal(t, uint64(5), remote.eventStore.Stats().TransportLost)
+}
+
+func BenchmarkModelEventBatchSynchronization(b *testing.B) {
+	for _, size := range []int{1, 128} {
+		b.Run(fmt.Sprintf("remote_batch_%d", size), func(b *testing.B) {
+			batch := makeEventBatch(size, "remote")
+			m := NewModel(10_000, 8, "", "", nil, false, true, "", true)
+			m.uiState.ViewMode = "events"
+			m.eventStore.AddBatch(makeEventBatch(10_000, "seed").Events)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: batch})
+			}
+		})
+	}
+
+	b.Run("local_50_singleton_batches", func(b *testing.B) {
+		m := NewModel(10_000, 8, "test0", "", nil, false, false, "", false)
+		m.uiState.Capturing = true
+		m.uiState.ViewMode = "events"
+		m.eventStore.AddBatch(makeEventBatch(10_000, "seed").Events)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			pendingLocalEvents.clear()
+			for i := range 50 {
+				pendingLocalEvents.addBatch(types.EventBatch{Events: []events.Event{
+					events.NewDNSEvent(testEventEnvelope(fmt.Sprintf("local-%d", i), uint64(i+1))),
+				}})
+			}
+			before := m.eventViewSyncCount
+			m, _ = m.handleTickMsg(TickMsg{})
+			if got := m.eventViewSyncCount - before; got != 50 {
+				b.Fatalf("got %d synchronizations, want 50", got)
+			}
+		}
+		pendingLocalEvents.clear()
+	})
+}
+
+func BenchmarkSyncEventsView(b *testing.B) {
+	for _, retained := range []int{1_000, 10_000} {
+		b.Run(fmt.Sprintf("retained_%d", retained), func(b *testing.B) {
+			m := NewModel(retained, 8, "", "", nil, false, true, "", true)
+			m.uiState.ViewMode = "events"
+			m.eventStore.AddBatch(makeEventBatch(retained, "profile").Events)
+			for i := range retained {
+				m.packetStore.AddPacket(components.PacketDisplay{
+					SrcIP:   "203.0.113.1",
+					DstIP:   "203.0.113.2",
+					SrcPort: fmt.Sprintf("%d", 10_000+i),
+					DstPort: "443",
+					NodeID:  "other-node",
+				})
+			}
+			m.syncEventsView()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				m.syncEventsView()
+			}
+		})
+	}
+}
+
+func BenchmarkHasRelatedPacketMiss(b *testing.B) {
+	event := events.NewDNSEvent(testEventEnvelope("selected", 1))
+	for _, retained := range []int{1_000, 10_000} {
+		b.Run(fmt.Sprintf("retained_%d", retained), func(b *testing.B) {
+			m := NewModel(retained, 8, "", "", nil, false, true, "", true)
+			for i := range retained {
+				m.packetStore.AddPacket(components.PacketDisplay{
+					SrcIP:   "203.0.113.1",
+					DstIP:   "203.0.113.2",
+					SrcPort: fmt.Sprintf("%d", 10_000+i),
+					DstPort: "443",
+					NodeID:  "other-node",
+				})
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if m.hasRelatedPacket(event) {
+					b.Fatal("unexpected related packet")
+				}
+			}
+		})
+	}
+}
+
+func makeEventBatch(size int, prefix string) types.EventBatch {
+	batch := types.EventBatch{Events: make([]events.Event, size)}
+	for i := range batch.Events {
+		batch.Events[i] = events.NewDNSEvent(testEventEnvelope(
+			fmt.Sprintf("%s-%d", prefix, i),
+			uint64(i+1),
+		))
+	}
+	return batch
+}
+
 func TestEventsViewPreservedAcrossCompatibleScopeChange(t *testing.T) {
 	m := NewModel(8, 8, "", "", nil, false, true, "", true)
 	m.uiState.ViewMode = "events"

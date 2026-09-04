@@ -307,3 +307,66 @@ func TestEventsViewRepeatedAvailabilitySyncPreservesDetailScroll(t *testing.T) {
 	assert.Contains(t, details, "Event Identity")
 	assert.Contains(t, details, "event")
 }
+
+func TestEventsViewSetEventsCopiesInputAndPreservesArrivalOrder(t *testing.T) {
+	items := []EventItem{
+		{Event: dnsEvent("first", "first.example"), ArrivalSequence: 1},
+		{Event: dnsEvent("second", "second.example"), ArrivalSequence: 2},
+	}
+	view := NewEventsView()
+	view.SetEvents(items)
+
+	items[0] = EventItem{Event: dnsEvent("replacement", "replacement.example"), ArrivalSequence: 3}
+	firstID, firstOK := view.EventIDAtVisibleRow(0)
+	secondID, secondOK := view.EventIDAtVisibleRow(1)
+	require.True(t, firstOK)
+	require.True(t, secondOK)
+	assert.Equal(t, "first", firstID)
+	assert.Equal(t, "second", secondID)
+}
+
+func TestEventsViewAppendPreservesPinnedSelectionAndVisibleRow(t *testing.T) {
+	items := make([]EventItem, 20)
+	for i := range items {
+		items[i] = EventItem{Event: dnsEvent(fmt.Sprintf("event-%d", i), "example.org"), ArrivalSequence: uint64(i + 1)}
+	}
+	view := NewEventsView()
+	view.SetEvents(items)
+	view.SetSelectedID("event-17")
+	view.RenderTimeline(100, 10, false)
+	selectedRow := 17 - view.offset
+	selectedID, ok := view.EventIDAtVisibleRow(selectedRow)
+	require.True(t, ok)
+	require.Equal(t, "event-17", selectedID)
+
+	items = append(items, EventItem{Event: dnsEvent("event-20", "new.example"), ArrivalSequence: 21})
+	view.SetEvents(items)
+
+	assert.Equal(t, "event-17", view.SelectedID())
+	visibleID, ok := view.EventIDAtVisibleRow(selectedRow)
+	require.True(t, ok)
+	assert.Equal(t, "event-17", visibleID, "append must not move a selection pinned in history")
+}
+
+func TestEventsViewRefreshAfterFrontEvictionKeepsSelectionAtVisibleRow(t *testing.T) {
+	items := make([]EventItem, 20)
+	for i := range items {
+		items[i] = EventItem{Event: dnsEvent(fmt.Sprintf("event-%d", i), "example.org"), ArrivalSequence: uint64(i + 1)}
+	}
+	view := NewEventsView()
+	view.SetEvents(items)
+	view.SetSelectedID("event-17")
+	view.RenderTimeline(100, 10, false)
+	selectedRow := 17 - view.offset
+
+	replacement := append([]EventItem(nil), items[5:]...)
+	for i := 20; i < 25; i++ {
+		replacement = append(replacement, EventItem{Event: dnsEvent(fmt.Sprintf("event-%d", i), "new.example"), ArrivalSequence: uint64(i + 1)})
+	}
+	view.SetEvents(replacement)
+
+	assert.Equal(t, "event-17", view.SelectedID())
+	visibleID, ok := view.EventIDAtVisibleRow(selectedRow)
+	require.True(t, ok)
+	assert.Equal(t, "event-17", visibleID, "front eviction must compensate the viewport offset")
+}

@@ -134,6 +134,7 @@ func (m *Model) syncEventsView() {
 	if m.eventStore == nil || m.uiState.EventsView == nil {
 		return
 	}
+	m.eventViewSyncCount++
 	m.uiState.EventsView.SetEvents(m.eventStore.Events())
 	m.uiState.EventsView.SetSelectedID(m.eventStore.SelectedID())
 	if selected, ok := m.eventStore.Selected(); ok {

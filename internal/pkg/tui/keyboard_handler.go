@@ -522,6 +522,7 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	if m.uiState.ViewMode == "events" && m.eventStore != nil {
 		stats := m.eventStore.Stats()
+		m.pendingRemoteEvents.clear()
 		m.eventStore.Reset()
 		m.syncEventsView()
 		return m, m.uiState.Toast.Show(
@@ -565,9 +566,17 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 
 // handlePauseResume toggles capture pause state
 func (m Model) handlePauseResume() (Model, tea.Cmd) {
+	// Apply queued remote deliveries under the pause state in which they arrived.
+	var eventCmd tea.Cmd
+	if m.captureMode == components.CaptureModeRemote {
+		m, eventCmd = m.handleEventBatchMsg(EventBatchMsg{Batches: m.pendingRemoteEvents.drain(0)})
+	}
 	m.uiState.Paused = !m.uiState.Paused
 	if m.eventStore != nil {
 		m.eventStore.SetPaused(m.uiState.Paused)
+	}
+	if m.uiState.ViewMode == "events" {
+		m.syncEventsView()
 	}
 	// Notify capture pipeline to pause/resume
 	pauseSignal := globalCaptureState.GetPauseSignal()
@@ -579,20 +588,20 @@ func (m Model) handlePauseResume() (Model, tea.Cmd) {
 	// Show toast and resume ticking when unpausing
 	if !m.uiState.Paused {
 		// Existing tick will transition to fast tick
-		return m, m.uiState.Toast.ShowWithKey(
+		return m, tea.Batch(eventCmd, m.uiState.Toast.ShowWithKey(
 			"Capture resumed",
 			components.ToastSuccess,
 			components.ToastDurationShort,
 			components.ToastKeyCaptureState,
-		)
+		))
 	}
 	// Show toast for pause
-	return m, m.uiState.Toast.ShowWithKey(
+	return m, tea.Batch(eventCmd, m.uiState.Toast.ShowWithKey(
 		"Capture paused",
 		components.ToastInfo,
 		components.ToastDurationShort,
 		components.ToastKeyCaptureState,
-	)
+	))
 }
 
 // handleDKey handles the 'd' key (context-sensitive)
@@ -606,6 +615,7 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 {
 		if m.uiState.ViewMode == "events" {
 			m.uiState.EventShowDetails = !m.uiState.EventShowDetails
+			m.syncEventsView()
 			if !m.uiState.EventShowDetails {
 				m.uiState.FocusedPane = "left"
 			}

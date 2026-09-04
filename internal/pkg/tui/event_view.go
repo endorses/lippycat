@@ -5,6 +5,7 @@ package tui
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/events"
@@ -19,17 +20,24 @@ func (m Model) handleEventBatchMsg(msg EventBatchMsg) (Model, tea.Cmd) {
 	if msg.Local == (m.captureMode == components.CaptureModeRemote) {
 		return m, nil
 	}
-	m.eventStore.AddBatch(msg.Batch.Events)
-	for _, loss := range msg.Batch.Losses {
-		m.eventStore.RecordTransportLoss(loss.Kind.String(), eventLossCount(loss))
+	batches := msg.Batches
+	if batches == nil {
+		batches = []types.EventBatch{msg.Batch}
 	}
-	if msg.Batch.CompatibilityOmissions > 0 {
-		m.eventStore.RecordTransportLoss("compatibility_omission", msg.Batch.CompatibilityOmissions)
+	hasLoss := false
+	for _, batch := range batches {
+		if m.eventStore.AddBatch(batch.Events) > 0 {
+			m.eventViewDirty = true
+		}
+		for _, loss := range batch.Losses {
+			m.eventStore.RecordTransportLoss(loss.Kind.String(), eventLossCount(loss))
+		}
+		if batch.CompatibilityOmissions > 0 {
+			m.eventStore.RecordTransportLoss("compatibility_omission", batch.CompatibilityOmissions)
+		}
+		hasLoss = hasLoss || len(batch.Losses) > 0 || batch.CompatibilityOmissions > 0
 	}
-	if m.uiState.ViewMode == "events" {
-		m.syncEventsView()
-	}
-	if len(msg.Batch.Losses) > 0 || msg.Batch.CompatibilityOmissions > 0 {
+	if hasLoss {
 		stats := m.eventStore.Stats()
 		return m, m.uiState.Toast.Show(
 			fmt.Sprintf("Event stream reported %d lost or omitted event(s)", stats.TransportLost),
@@ -131,9 +139,15 @@ func (m *Model) setCaptureView(view string) {
 }
 
 func (m *Model) syncEventsView() {
+	m.syncEventsViewAt(time.Now())
+}
+
+func (m *Model) syncEventsViewAt(now time.Time) {
 	if m.eventStore == nil || m.uiState.EventsView == nil {
 		return
 	}
+	m.eventViewDirty = false
+	m.lastEventViewUpdate = now
 	m.eventViewSyncCount++
 	m.uiState.EventsView.SetEvents(m.eventStore.Events())
 	m.uiState.EventsView.SetSelectedID(m.eventStore.SelectedID())

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/types"
@@ -62,6 +63,7 @@ func BenchmarkModelEventDNSReplay(b *testing.B) {
 	m.uiState.EventShowDetails = true
 	source := eventanalysis.Source{NodeID: "Local", CaptureSource: "pcap", InputFile: "generated-dns.pcap"}
 	sequence := 0
+	refreshTime := time.Now().Add(time.Hour)
 	replayBatch := func() {
 		packets := make([]types.PacketDisplay, 0, batchSize)
 		for range batchSize {
@@ -84,7 +86,8 @@ func BenchmarkModelEventDNSReplay(b *testing.B) {
 			b.Fatal(err)
 		}
 		handler.OnPacketBatch(packets)
-		m, _ = m.handleTickMsg(TickMsg{})
+		refreshTime = refreshTime.Add(constants.TUITickInterval)
+		m, _ = m.handleTickMsg(TickMsg{Time: refreshTime})
 	}
 	// Seed through the same analysis/delivery path with presentation inactive.
 	for range retained / batchSize {

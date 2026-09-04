@@ -54,6 +54,11 @@ var pendingLocalEvents = &pendingLocalEventBuffer{
 func (b *pendingLocalEventBuffer) addBatch(batch types.EventBatch) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// Keep a pressure report after all deliveries that preceded the loss and
+	// before any later accepted delivery, even across partial tick drains.
+	if b.dropped != 0 && len(b.batches) < maxPendingLocalEventBatches {
+		b.batches = append(b.batches, b.takeLossBatch())
+	}
 	if len(b.batches) >= maxPendingLocalEventBatches {
 		b.dropped += uint64(len(batch.Events))
 		for _, loss := range batch.Losses {
@@ -76,19 +81,28 @@ func (b *pendingLocalEventBuffer) drain(max int) []types.EventBatch {
 		count = max
 	}
 	result := append([]types.EventBatch(nil), b.batches[:count]...)
-	b.batches = append(b.batches[:0], b.batches[count:]...)
-	if b.dropped != 0 {
-		result = append(result, types.EventBatch{Losses: []types.EventLoss{{
-			Kind:  eventsv1.LossKind_LOSS_KIND_BUFFER,
-			Count: b.dropped,
-		}}})
-		b.dropped = 0
+	remaining := copy(b.batches, b.batches[count:])
+	clear(b.batches[remaining:])
+	b.batches = b.batches[:remaining]
+	if b.dropped != 0 && remaining == 0 {
+		result = append(result, b.takeLossBatch())
 	}
 	return result
 }
 
+// takeLossBatch is called only while holding mu.
+func (b *pendingLocalEventBuffer) takeLossBatch() types.EventBatch {
+	batch := types.EventBatch{Losses: []types.EventLoss{{
+		Kind:  eventsv1.LossKind_LOSS_KIND_BUFFER,
+		Count: b.dropped,
+	}}}
+	b.dropped = 0
+	return batch
+}
+
 func (b *pendingLocalEventBuffer) clear() {
 	b.mu.Lock()
+	clear(b.batches)
 	b.batches = b.batches[:0]
 	b.dropped = 0
 	b.mu.Unlock()

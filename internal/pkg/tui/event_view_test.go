@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
@@ -91,7 +92,7 @@ func TestTickPullsLocalEventsWithoutProgramSend(t *testing.T) {
 	require.Equal(t, "local", m.eventStore.Events()[0].Event.Envelope().EventID)
 }
 
-func TestTickCountsOneEventViewSynchronizationPerLocalBatch(t *testing.T) {
+func TestTickCoalescesLocalBatchesIntoOneEventViewSynchronization(t *testing.T) {
 	pendingLocalEvents.clear()
 	t.Cleanup(pendingLocalEvents.clear)
 	m := NewModel(128, 8, "test0", "", nil, false, false, "", false)
@@ -105,7 +106,7 @@ func TestTickCountsOneEventViewSynchronizationPerLocalBatch(t *testing.T) {
 
 	m, _ = m.handleTickMsg(TickMsg{})
 
-	require.Equal(t, uint64(50), m.eventViewSyncCount)
+	require.Equal(t, uint64(1), m.eventViewSyncCount)
 	require.Len(t, m.eventStore.Events(), 50)
 }
 
@@ -113,11 +114,14 @@ func TestRemoteEventBatchSynchronizationCount(t *testing.T) {
 	for _, size := range []int{1, 128} {
 		t.Run(fmt.Sprintf("batch-%d", size), func(t *testing.T) {
 			m := NewModel(size, 8, "", "", nil, false, true, "", true)
+			m.uiState.Tabs.SetActive(0)
 			m.uiState.ViewMode = "events"
 			batch := makeEventBatch(size, "remote")
 
 			m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: batch})
 
+			require.Zero(t, m.eventViewSyncCount, "remote delivery only updates retention")
+			m.refreshEventsView(time.Now())
 			require.Equal(t, uint64(1), m.eventViewSyncCount)
 			require.Len(t, m.eventStore.Events(), size)
 		})
@@ -153,13 +157,23 @@ func BenchmarkModelEventBatchSynchronization(b *testing.B) {
 			pool := makeEventBatch(((10_000/size)+1)*size, "remote").Events
 			next := 0
 			m := NewModel(10_000, 8, "", "", nil, false, true, "", true)
+			m.uiState.Tabs.SetActive(0)
+			m.uiState.Capturing = true
+			handler := newRemoteTUIEventHandler(nil, m.pendingRemoteEvents)
+			clock := time.Now().Add(time.Hour)
 			m.uiState.ViewMode = "events"
 			m.eventStore.AddBatch(makeEventBatch(10_000, "seed").Events)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
 				batch := types.EventBatch{Events: pool[next : next+size]}
-				m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: batch})
+				handler.OnEventBatch(batch)
+				clock = clock.Add(constants.TUITickInterval)
+				before := m.eventViewSyncCount
+				m, _ = m.handleTickMsg(TickMsg{Time: clock})
+				if got := m.eventViewSyncCount - before; got != 1 {
+					b.Fatalf("got %d synchronizations, want 1", got)
+				}
 				next = (next + size) % len(pool)
 			}
 		})
@@ -174,16 +188,18 @@ func BenchmarkModelEventBatchSynchronization(b *testing.B) {
 		m.uiState.Capturing = true
 		m.uiState.ViewMode = "events"
 		m.eventStore.AddBatch(makeEventBatch(10_000, "seed").Events)
+		clock := time.Now().Add(time.Hour)
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
+			clock = clock.Add(constants.TUITickInterval)
 			for i := range 50 {
 				pendingLocalEvents.addBatch(types.EventBatch{Events: pool[next+i : next+i+1]})
 			}
 			before := m.eventViewSyncCount
-			m, _ = m.handleTickMsg(TickMsg{})
-			if got := m.eventViewSyncCount - before; got != 50 {
-				b.Fatalf("got %d synchronizations, want 50", got)
+			m, _ = m.handleTickMsg(TickMsg{Time: clock})
+			if got := m.eventViewSyncCount - before; got != 1 {
+				b.Fatalf("got %d synchronizations, want 1", got)
 			}
 			next = (next + 50) % len(pool)
 		}
@@ -452,7 +468,7 @@ func TestEventsDetailsRecognizesBufferedRelatedPacket(t *testing.T) {
 	require.False(t, strings.Contains(m.renderCaptureTab(20), "no longer buffered"))
 }
 
-func TestEventDetailsScrollSurvivesRenderSynchronization(t *testing.T) {
+func TestEventDetailsScrollSurvivesRepeatedRendering(t *testing.T) {
 	m := NewModel(2, 8, "", "", nil, false, true, "", true)
 	m.uiState.Tabs.SetActive(0)
 	m.uiState.ViewMode = "events"
@@ -462,6 +478,7 @@ func TestEventDetailsScrollSurvivesRenderSynchronization(t *testing.T) {
 	event := events.NewDNSEvent(testEventEnvelope("dns-scroll", 1))
 	event.Query = "example.org"
 	m.eventStore.AddEvent(event)
+	m.syncEventsView()
 
 	// Initialize the viewport, then exercise the same focus-aware keyboard
 	// path used by packet details.
@@ -473,7 +490,7 @@ func TestEventDetailsScrollSurvivesRenderSynchronization(t *testing.T) {
 	require.Equal(t, "dns-scroll", m.eventStore.SelectedID())
 
 	// Mouse-wheel scrolling over the right pane must likewise survive the
-	// synchronization performed by the following render.
+	// following render.
 	m, _ = m.handleJumpToTop()
 	for range 50 {
 		m, _ = m.handleMouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: 170, Y: 10})

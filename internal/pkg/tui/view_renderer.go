@@ -99,7 +99,6 @@ func (m Model) View() string {
 func (m Model) renderCaptureTab(contentHeight int) string {
 	// Check if we should display calls view, queries view, or packets view
 	if m.uiState.ViewMode == "events" && m.uiState.EventsView != nil {
-		m.syncEventsView()
 		const minWidthForDetails = 160
 		if m.uiState.EventShowDetails && m.uiState.Width >= minWidthForDetails {
 			const detailsWidth = 77

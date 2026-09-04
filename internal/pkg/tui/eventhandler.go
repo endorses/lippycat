@@ -16,6 +16,7 @@ type TUIEventHandler struct {
 	program         *tea.Program
 	localPacketSink func([]types.PacketDisplay)
 	localEventSink  func(types.EventBatch)
+	pendingEvents   *pendingLocalEventBuffer
 }
 
 // newLocalTUIEventHandler publishes local capture packets through the same
@@ -32,7 +33,23 @@ func newLocalTUIEventHandler(program *tea.Program, preserveAll bool) *TUIEventHa
 
 // NewTUIEventHandler creates a new TUI event handler
 func NewTUIEventHandler(program *tea.Program) *TUIEventHandler {
-	return &TUIEventHandler{program: program}
+	return newRemoteTUIEventHandler(program, &pendingLocalEventBuffer{})
+}
+
+// newRemoteTUIEventHandler shares the model's bounded pull queue. Event arrivals
+// never send Bubble Tea messages: the regular model tick drains this queue.
+func newRemoteTUIEventHandler(program *tea.Program, pending *pendingLocalEventBuffer) *TUIEventHandler {
+	return &TUIEventHandler{program: program, pendingEvents: pending}
+}
+
+// DrainEventBatches returns ordered deliveries for one UI tick. Delivery
+// boundaries are retained because stream cursors and loss records belong to
+// their original batch.
+func (h *TUIEventHandler) DrainEventBatches() []types.EventBatch {
+	if h.pendingEvents == nil {
+		return nil
+	}
+	return h.pendingEvents.drain(50)
 }
 
 // OnPacketBatch sends PacketBatchMsg to TUI
@@ -48,14 +65,14 @@ func (h *TUIEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
 	}
 }
 
-// OnEventBatch sends normalized protocol events to the Bubble Tea event loop.
+// OnEventBatch queues normalized protocol events without triggering a render.
 func (h *TUIEventHandler) OnEventBatch(batch types.EventBatch) {
 	if h.localEventSink != nil {
 		h.localEventSink(batch)
 		return
 	}
-	if h.program != nil {
-		h.program.Send(EventBatchMsg{Batch: batch})
+	if h.pendingEvents != nil {
+		h.pendingEvents.addBatch(batch)
 	}
 }
 
@@ -119,6 +136,9 @@ type PacketBatchMsg struct {
 // not packet display records and have independent loss semantics.
 type EventBatchMsg struct {
 	Batch types.EventBatch
+	// Batches coalesces a tick's deliveries into one message without flattening
+	// stream cursors, losses, or compatibility omissions across boundaries.
+	Batches []types.EventBatch
 	// Local distinguishes batches produced by the active watch live/file
 	// runtime from remote processor subscriptions.
 	Local bool

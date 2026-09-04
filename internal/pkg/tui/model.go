@@ -55,11 +55,11 @@ type ProcessorReconnectMsg struct {
 }
 
 // TickMsg is sent periodically to trigger UI updates
-type TickMsg struct{}
+type TickMsg struct{ Time time.Time }
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(constants.TUITickInterval, func(t time.Time) tea.Msg {
-		return TickMsg{}
+		return TickMsg{Time: t}
 	})
 }
 
@@ -67,7 +67,7 @@ func tickCmd() tea.Cmd {
 // This allows TUI metrics (CPU chart) to continue updating without the overhead of 20 Hz ticks.
 func slowTickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return TickMsg{}
+		return TickMsg{Time: t}
 	})
 }
 
@@ -131,6 +131,11 @@ type Model struct {
 	// Performance optimization - throttle packet list updates during high packet rate
 	lastPacketListUpdate     time.Time     // Last time packet list was updated
 	packetListUpdateInterval time.Duration // Minimum interval between updates (e.g., 100ms = 10 Hz)
+
+	// Event presentation refreshes only on a dirty tick or a direct user action.
+	pendingRemoteEvents *pendingLocalEventBuffer
+	eventViewDirty      bool
+	lastEventViewUpdate time.Time
 
 	// Rate tracking - record rates every 1 second for statistics sparklines
 	lastRateRecord time.Time // Last time rate was recorded
@@ -275,7 +280,8 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 		insecure:                   insecure,
 		pcapFiles:                  pcapFiles,
 		callTracker:                NewCallTracker(),
-		detailsPanelUpdateInterval: 50 * time.Millisecond,     // 20 Hz throttle (imperceptible to user)
+		detailsPanelUpdateInterval: 50 * time.Millisecond, // 20 Hz throttle (imperceptible to user)
+		pendingRemoteEvents:        &pendingLocalEventBuffer{},
 		packetListUpdateInterval:   constants.TUITickInterval, // 10 Hz throttle for packet list (prevents freeze)
 		backgroundProcessor:        bgProcessor,
 		metricsCollector:           sysmetrics.New(),

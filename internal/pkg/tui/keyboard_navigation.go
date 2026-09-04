@@ -281,6 +281,9 @@ func (m Model) handleNextTab() (Model, tea.Cmd) {
 	totalTabs := 5 // Capture, Nodes, Statistics, Settings, Help
 	nextTab := (currentTab + 1) % totalTabs
 	m.uiState.Tabs.SetActive(nextTab)
+	if nextTab == 0 && m.uiState.ViewMode == "events" {
+		m.syncEventsView()
+	}
 	// Trigger async content loading when switching to Help tab
 	if nextTab == 4 && m.uiState.HelpView.NeedsContentLoad() {
 		return m, m.uiState.HelpView.LoadContentAsync()
@@ -294,6 +297,9 @@ func (m Model) handlePreviousTab() (Model, tea.Cmd) {
 	totalTabs := 5
 	prevTab := (currentTab - 1 + totalTabs) % totalTabs
 	m.uiState.Tabs.SetActive(prevTab)
+	if prevTab == 0 && m.uiState.ViewMode == "events" {
+		m.syncEventsView()
+	}
 	// Trigger async content loading when switching to Help tab
 	if prevTab == 4 && m.uiState.HelpView.NeedsContentLoad() {
 		return m, m.uiState.HelpView.LoadContentAsync()
@@ -319,6 +325,9 @@ func (m Model) handleAltNumberKey(key string) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.uiState.Tabs.SetActive(targetTab)
+	if targetTab == 0 && m.uiState.ViewMode == "events" {
+		m.syncEventsView()
+	}
 	// Trigger async content loading when switching to Help tab
 	if targetTab == 4 && m.uiState.HelpView.NeedsContentLoad() {
 		return m, m.uiState.HelpView.LoadContentAsync()

@@ -1,7 +1,7 @@
 # TUI Event View Performance Optimization Plan
 
 **Date:** 2026-09-04
-**Status:** Phase 1 verified; Phases 2–7 planned
+**Status:** Phases 1–2 verified; Phase 3 partially implemented; Phases 4–7 planned
 **Scope:** Normalized event ingestion, retention, projection, synchronization,
 and rendering in `internal/pkg/tui`
 
@@ -227,24 +227,24 @@ Likely files:
 
 Remove the largest multiplicative cost before redesigning storage.
 
-- [ ] Change local pending-event draining so all batches selected for one tick
+- [x] Change local pending-event draining so all batches selected for one tick
       are combined into one ordered `EventBatchMsg`, including loss records and
       compatibility omissions.
-- [ ] Verify coalescing does not reorder events or associate loss metadata with
+- [x] Verify coalescing does not reorder events or associate loss metadata with
       the wrong delivery boundary.
-- [ ] Introduce event-view dirty state and timestamps in `Model`.
-- [ ] Store every accepted event batch immediately, but synchronize presentation
+- [x] Introduce event-view dirty state and timestamps in `Model`.
+- [x] Store every accepted event batch immediately, but synchronize presentation
       state at a bounded cadence comparable to the packet list.
-- [ ] Extract or reuse the packet list's refresh-cadence and pressure decision
+- [x] Extract or reuse the packet list's refresh-cadence and pressure decision
       logic where its semantics are identical; do not duplicate its threshold
       calculation for events.
-- [ ] Start with the normal TUI refresh interval and the shared packet/event
+- [x] Start with the normal TUI refresh interval and the shared packet/event
       pressure policy rather than introducing event-specific magic intervals.
-- [ ] Permit user actions—view entry, filter changes, selection/navigation,
+- [x] Permit user actions—view entry, filter changes, selection/navigation,
       resize, pause/resume, and clear—to request an immediate synchronization.
-- [ ] Ensure remote singleton or small batches cannot drive an unbounded render
+- [x] Ensure remote singleton or small batches cannot drive an unbounded render
       rate through direct `program.Send` calls.
-- [ ] Add deterministic tests proving that many arrivals inside one refresh
+- [x] Add deterministic tests proving that many arrivals inside one refresh
       window produce one presentation synchronization while all accepted events
       reach the store.
 
@@ -256,11 +256,84 @@ Likely files:
 - `internal/pkg/tui/event_view.go`
 - `internal/pkg/tui/model.go`
 
+### Phase 2 implementation and verification
+
+Local ticks submit one `EventBatchMsg` containing the ordered original
+deliveries in `Batches`. Keeping those boundaries preserves event order,
+transport-loss records, compatibility omissions, and stream cursor metadata.
+Queue overflow reports follow the preceding accepted deliveries, including
+across partial drains, and precede later accepted deliveries.
+
+Remote callbacks now enqueue in a bounded model-owned queue rather than calling
+`Program.Send` for each event batch. Normal active ticks drain at most 50
+deliveries; paused and inactive remote ticks drain the final backlog completely.
+The model ingests each drained batch synchronously and marks presentation dirty
+only when retention changes. One recurring tick chain continues at a slow
+cadence while inactive/paused, preventing stranded deliveries across disconnect,
+reconnect, and mode changes without creating duplicate polling loops.
+
+Event refresh uses the normal 50 ms `TUITickInterval` and the same extracted
+pressure policy as the packet paths: double the base interval above 1% recent
+bridge drops, 250 ms above 10%, and 500 ms above 30%. Only the active Capture
+event view synchronizes on dirty ticks. Explicit view/tab entry, filters,
+selection, resize, pause/resume, clear, and capture completion can refresh
+immediately. Packet arrivals and retention changes mark the event view dirty
+so related-packet notices remain current. Pause transitions account for queued
+remote events under the preceding pause state; clear and restart clear queued
+remote data with the retained state.
+
+The unconditional `renderCaptureTab` synchronization was removed as a Phase 2
+dependency: retaining it would bypass the cadence limit on every render. The
+remaining component rendering mutations and full Phase 3 purity audit are still
+deferred. Full projection, linear selection maintenance, and packet scans remain
+later-phase work.
+
+Three sub-agents implemented/reviewed delivery, cadence, and interaction paths.
+Independent cross-review caught and verified fixes for disconnected backlogs,
+duplicate tick chains, and queued data reappearing after clear. Deterministic
+tests cover ordered coalescing/loss boundaries, 50 accepted arrivals with one
+refresh, idle ticks without synchronization, render calls inside a refresh
+window, pause/mode gating, immediate user actions, and packet-only eviction.
+
+On the same Intel Core i9-13900HX, one-second benchmark runs measured:
+
+| Workload | Phase 1 time/op | Phase 2 time/op | Phase 2 allocated bytes/op |
+| --- | ---: | ---: | ---: |
+| Local tick, 50 singleton batches, 10,000 retained | 67.54 ms | 12.26 ms | 499,379 |
+| Remote batch, 1 event, 10,000 retained | 1.57 ms | 1.38 ms | 485,049 |
+| Remote batch, 128 events, 10,000 retained | 30.31 ms | 31.75 ms | 511,147 |
+
+Remote benchmarks now include queue admission and tick processing; Phase 1
+called the batch handler directly. Both local and remote benchmarks advance
+`TickMsg.Time` by the normal refresh interval and assert exactly one sync per
+operation. This prevents fast benchmark iterations from accidentally measuring
+ingestion alone. Timings remain observational, not CI thresholds. The remaining
+128-event ingestion cost is consistent with the unchanged per-event store
+selection scans, which Phase 4 addresses.
+
+The 15-second DNS replay profile measured 21.63 ms/op, 5,016,548 bytes/op, and
+36,356 allocations/op, versus the recorded Phase 1 126.19 ms/op and 149,964,780
+bytes/op. It uses the same generated frames, retention, packet/event delivery,
+viewport, and loss assertions, with deterministic tick timestamps. Event
+synchronization now follows packet ingestion once per tick. CPU attribution
+shows synchronization at 14.10% cumulative and store selection maintenance at
+55.76% flat. Packet materialization and visible projection account for 44.63%
+and 9.03% of allocation volume respectively. Profiles still include setup;
+cumulative CPU percentages overlap. The workload still excludes terminal-driver
+and disk-I/O costs and is not a mixed-protocol capture.
+
+Verification passed: the full TUI correctness and race suites under `-tags all`,
+all Phase 1 benchmark workloads, the profiled replay, and builds with `tui` and
+`all` tags. Go files were formatted and the TUI architecture notes updated.
+Phase 2 profile artifacts are `/tmp/tui-event-phase2.cpu.pprof` and
+`/tmp/tui-event-phase2.allocs.pprof`; reproduce with the Phase 1 replay command
+using those output paths.
+
 ## 7. Phase 3 — Make Rendering Pure
 
 Eliminate redundant full synchronization and make update ownership explicit.
 
-- [ ] Remove `syncEventsView()` from `renderCaptureTab`.
+- [x] Remove `syncEventsView()` from `renderCaptureTab` (required by Phase 2 cadence).
 - [ ] Audit the complete TUI render path for other event-store reads or state
       mutations that belong in `Update` handlers.
 - [ ] Synchronize on entry to the event view and on explicit dirty refreshes.
@@ -402,7 +475,7 @@ Likely files:
 
 ## 12. Verification
 
-After each phase (checked below for Phase 1):
+After each phase (checked below for Phases 1–2):
 
 - [x] Format all modified Go files with `gofmt` before staging.
 - [x] Run focused event-store, event-view, and TUI tests with the appropriate

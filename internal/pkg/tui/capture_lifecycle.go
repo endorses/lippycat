@@ -69,6 +69,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	// partial flows from different inputs cannot be presented as one timeline.
 	m.eventStore.Reset()
 	m.eventStore.ClearUserFilters()
+	m.eventStore.SetPaused(false)
 
 	// Update settings based on mode and show toast
 	var toastCmd tea.Cmd
@@ -146,6 +147,8 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	voip.ResetTCPStreamMetrics()
 	ClearPendingPackets()
 	pendingLocalEvents.clear()
+	m.pendingRemoteEvents.clear()
+	m.syncEventsView()
 
 	// Start new capture in background using synchronized program reference
 	program := globalCaptureState.GetProgram()
@@ -192,12 +195,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 			// Remote mode: clear capture handle since we're not running local capture
 			globalCaptureState.ClearHandle()
 
-			// Load and connect to nodes from YAML file (if provided)
-			if msg.NodesFile != "" {
-				m.nodesFilePath = msg.NodesFile
-				return m, tea.Batch(toastCmd, loadNodesFile(msg.NodesFile))
-			}
-			// If no nodes file, check if we have connected processors already
+			// Check whether processors are already connected
 			// (user may have added nodes via Nodes tab before switching to remote mode)
 			hasConnectedProcessor := false
 			for _, proc := range m.connectionMgr.Processors {
@@ -209,6 +207,11 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 			// Mark capturing as active if we have at least one connected processor
 			if hasConnectedProcessor {
 				m.uiState.SetCapturing(true)
+			}
+			// Load and connect to nodes from YAML file (if provided).
+			if msg.NodesFile != "" {
+				m.nodesFilePath = msg.NodesFile
+				return m, tea.Batch(toastCmd, loadNodesFile(msg.NodesFile))
 			}
 			// If no nodes connected yet, capturing will be marked active when nodes connect successfully
 		}

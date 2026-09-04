@@ -248,6 +248,7 @@ func (m *Model) processPendingPackets(packets []components.PacketDisplay) {
 
 	// Add packets to store in batch (single lock acquisition)
 	m.packetStore.AddPacketBatch(filteredPackets)
+	m.eventViewDirty = true // Packet retention can change the selected event's related-packet notice.
 
 	// Live local statistics come from the exact pre-sampling ingress accumulator.
 	// Offline and remote modes still count their lossless/detail delivery paths.

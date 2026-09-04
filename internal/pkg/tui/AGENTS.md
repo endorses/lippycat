@@ -549,6 +549,38 @@ type NodesView struct {
 
 ## Performance Considerations
 
+### Normalized Event Delivery and Refresh
+
+Local event deliveries and remote processor deliveries use bounded pending
+queues. `EventBatchMsg.Batches` groups the deliveries drained for one tick while
+preserving each batch's event order, loss records, compatibility omissions, and
+stream cursor metadata. Live local and active remote ticks drain up to 50 queued
+batches; offline capture/completion, paused remote accounting, and inactive remote
+cleanup drain the remaining queue. Overflow is reported at its delivery boundary.
+
+Remote `OnEventBatch` callbacks enqueue through the model's shared queue instead
+of calling `Program.Send`. Capture mode gating and pause/loss accounting happen
+when the model ingests the drained deliveries. Explicit pause transitions drain
+remote deliveries under the previous pause state; clear and restart discard
+pending remote deliveries along with the retained event state.
+
+Event and packet arrivals mark event presentation dirty. `refreshEventsView`
+synchronizes the active Capture event view on ticks, using the packet list's
+shared `presentationRefreshPolicy` and normal `TUITickInterval`. Explicit view
+entry, filters, navigation, resize, pause/resume, clear, and capture completion
+can synchronize immediately. Packet-only retention changes also refresh the
+related-packet notice. Rendering the Capture tab must not call `syncEventsView`.
+
+`Init` starts one recurring tick chain. Active capture uses normal ticks; paused
+and inactive capture retain slow ticks so queued final deliveries, reconnects,
+and mode switches cannot strand event data. Connection and resume handlers must
+not start additional recurring tick chains. `TickMsg.Time` permits deterministic
+refresh-cadence tests without sleeps.
+
+Full event projection and packet scans still occur on each synchronization;
+incremental storage/projection and the remaining rendering-purity audit are
+later phases of `docs/plans/tui-event-view-performance-optimization.md`.
+
 ### Rendering Optimization
 
 **Viewport pattern** - only render visible rows:

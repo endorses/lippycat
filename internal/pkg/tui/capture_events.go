@@ -155,6 +155,7 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 
 		// Add packets to store in batch (single lock acquisition)
 		m.packetStore.AddPacketBatch(filteredPackets)
+		m.eventViewDirty = true
 
 		// Update statistics for all packets in batch (single view update at the end)
 		for i := range filteredPackets {
@@ -191,30 +192,9 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 			m.backgroundProcessor.SubmitBatch(filteredPackets, linkType)
 		}
 
-		// Adaptive throttling based on RECENT bridge backpressure
-		// Uses recent drop rate (last 5s) instead of cumulative to be responsive
-		bridgeStats := GetBridgeStats()
-		recentDropRate := float64(bridgeStats.RecentDropRate) / 1000.0 // Convert from 0-1000 to 0-1
-
-		// Multi-level pressure detection based on RECENT drop rate
-		// >1% drops: mild pressure, >10% drops: moderate, >30% drops: severe
-		mildPressure := recentDropRate > 0.01
-		moderatePressure := recentDropRate > 0.10
-		severePressure := recentDropRate > 0.30
-
-		// Update packet list with adaptive throttling and incremental updates
+		// Packet and event presentation share the same pressure policy.
+		updateInterval, moderatePressure := presentationRefreshPolicy(m.packetListUpdateInterval, GetBridgeStats().RecentDropRate)
 		now := time.Now()
-		updateInterval := m.packetListUpdateInterval
-		if severePressure {
-			// Severe pressure: update only every 500ms
-			updateInterval = 500 * time.Millisecond
-		} else if moderatePressure {
-			// Moderate pressure: update every 250ms
-			updateInterval = 250 * time.Millisecond
-		} else if mildPressure {
-			// Mild pressure: double the update interval (100ms -> 200ms)
-			updateInterval *= 2
-		}
 
 		if now.Sub(m.lastPacketListUpdate) >= updateInterval {
 			m.updatePacketListIncremental()
@@ -258,6 +238,7 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 
 		// Add packet using PacketStore method
 		m.packetStore.AddPacket(packet)
+		m.eventViewDirty = true
 
 		// Update statistics counters (lightweight, no view rebuild)
 		m.statistics.ProtocolCounts.Increment(packet.Protocol)
@@ -284,23 +265,9 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 			m.backgroundProcessor.Submit(packet, packet.LinkType)
 		}
 
-		// Adaptive throttling based on RECENT bridge backpressure
-		bridgeStats := GetBridgeStats()
-		recentDropRate := float64(bridgeStats.RecentDropRate) / 1000.0 // Convert from 0-1000 to 0-1
-		mildPressure := recentDropRate > 0.01
-		moderatePressure := recentDropRate > 0.10
-		severePressure := recentDropRate > 0.30
-
-		// Update packet list with adaptive throttling and incremental updates
+		// Packet and event presentation share the same pressure policy.
+		updateInterval, moderatePressure := presentationRefreshPolicy(m.packetListUpdateInterval, GetBridgeStats().RecentDropRate)
 		now := time.Now()
-		updateInterval := m.packetListUpdateInterval
-		if severePressure {
-			updateInterval = 500 * time.Millisecond
-		} else if moderatePressure {
-			updateInterval = 250 * time.Millisecond
-		} else if mildPressure {
-			updateInterval *= 2
-		}
 
 		if now.Sub(m.lastPacketListUpdate) >= updateInterval {
 			m.updatePacketListIncremental()
@@ -520,6 +487,11 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 	previousEventStreamID := proc.EventStreamID
 	previousEventDeliverySequence := proc.EventDeliverySeq
 
+	if m.pendingRemoteEvents == nil {
+		m.pendingRemoteEvents = &pendingLocalEventBuffer{}
+	}
+	pendingEvents := m.pendingRemoteEvents
+
 	// Attempt connection in background
 	go func() {
 		// Get program reference via synchronized CaptureState
@@ -530,7 +502,7 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 		}
 
 		// Create TUI event handler adapter
-		handler := NewTUIEventHandler(program)
+		handler := newRemoteTUIEventHandler(program, pendingEvents)
 
 		// Build client config with TLS settings from viper
 		// If --insecure flag is set, disable TLS entirely
@@ -659,7 +631,7 @@ func (m Model) handleProcessorConnectedMsg(msg ProcessorConnectedMsg) (Model, te
 		procInfos := m.getProcessorInfoList()
 		m.uiState.NodesView.SetProcessors(procInfos)
 
-		// If in remote mode, mark capturing as active when we have at least one connected processor
+		// The existing tick chain switches to fast polling once capture is active.
 		if m.captureMode == components.CaptureModeRemote {
 			m.uiState.SetCapturing(true)
 		}

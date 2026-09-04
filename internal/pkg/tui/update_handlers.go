@@ -87,6 +87,9 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 		m.uiState.DetailsPanel.SetSize(0, contentHeight) // Set to 0 when hidden
 	}
 
+	if m.uiState.ViewMode == "events" {
+		m.syncEventsView()
+	}
 	return m, helpCmd
 }
 
@@ -98,23 +101,39 @@ func (m Model) handleResumeMsg(msg tea.ResumeMsg) (Model, tea.Cmd) {
 		tea.EnableMouseAllMotion,
 		tea.EnterAltScreen,
 	)
-	if !m.uiState.Paused && m.uiState.Capturing {
-		cmd = tea.Batch(cmd, tickCmd())
-	}
+	// The existing polling command survives suspend; starting another here
+	// would create a second recurring tick chain after resume.
 	return m, cmd
 }
 
 // handleTickMsg handles periodic UI refresh ticks
 func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
+	now := msg.Time
+	if now.IsZero() {
+		now = time.Now()
+	}
+	var eventCmds []tea.Cmd
+	// Remote delivery is pulled even while paused so skipped events and
+	// transport losses are accounted for under the current capture state.
+	if m.pendingRemoteEvents != nil {
+		limit := 50
+		if !m.uiState.Capturing || m.uiState.Paused {
+			limit = 0 // Account for the final backlog and paused deliveries promptly.
+		}
+		var cmd tea.Cmd
+		m, cmd = m.handleEventBatchMsg(EventBatchMsg{Batches: m.pendingRemoteEvents.drain(limit)})
+		if cmd != nil {
+			eventCmds = append(eventCmds, cmd)
+		}
+	}
 	// When capturing and not paused: full processing
 	if !m.uiState.Paused && m.uiState.Capturing {
-		var eventCmds []tea.Cmd
-		for _, batch := range drainPendingLocalEvents(m.captureMode == components.CaptureModeOffline) {
-			var cmd tea.Cmd
-			m, cmd = m.handleEventBatchMsg(EventBatchMsg{Batch: batch, Local: true})
-			if cmd != nil {
-				eventCmds = append(eventCmds, cmd)
-			}
+		var cmd tea.Cmd
+		m, cmd = m.handleEventBatchMsg(EventBatchMsg{
+			Batches: drainPendingLocalEvents(m.captureMode == components.CaptureModeOffline), Local: true,
+		})
+		if cmd != nil {
+			eventCmds = append(eventCmds, cmd)
 		}
 
 		// Exact live ingress telemetry is independent of the sampled detail feed.
@@ -130,6 +149,7 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 		// Use incremental updates to avoid O(n) copies on every tick
 		// This only copies new packets instead of the entire buffer
 		m.updatePacketListIncremental()
+		m.refreshEventsView(now)
 
 		// Update details panel if showing details
 		if m.uiState.ShowDetails {
@@ -138,7 +158,6 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 
 		// Record rates for statistics sparklines (~1 Hz)
 		// Rate tracker expects samples at ~1 second intervals
-		now := time.Now()
 		if now.Sub(m.lastRateRecord) >= time.Second {
 			m.uiState.StatisticsView.RecordRates()
 
@@ -154,6 +173,7 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 		eventCmds = append(eventCmds, tickCmd())
 		return m, tea.Batch(eventCmds...)
 	}
+	m.refreshEventsView(now)
 
 	// When paused but still capturing: only update TUI metrics
 	if m.uiState.Paused && m.uiState.Capturing {
@@ -161,11 +181,15 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 			metrics := m.metricsCollector.Get()
 			m.uiState.StatisticsView.UpdateTUIMetrics(metrics.CPUPercent, metrics.MemoryRSSBytes)
 		}
-		return m, slowTickCmd()
+		eventCmds = append(eventCmds, slowTickCmd())
+		return m, tea.Batch(eventCmds...)
 	}
 
-	// When not capturing, stop ticking
-	return m, nil
+	// Keep one polling chain alive across disconnects and mode changes. Remote
+	// callbacks can enqueue before a connection notification reaches the model.
+	// Slow idle polling also flushes a final dirty projection after its deadline.
+	eventCmds = append(eventCmds, slowTickCmd())
+	return m, tea.Batch(eventCmds...)
 }
 
 // handleUpdateBufferSizeMsg handles buffer size change requests
@@ -173,6 +197,7 @@ func (m Model) handleUpdateBufferSizeMsg(msg components.UpdateBufferSizeMsg) (Mo
 	// Update buffer size on-the-fly without restarting capture
 	// ResizeBuffer handles the resize atomically to prevent races with AddPacket
 	m.packetStore.ResizeBuffer(msg.Size)
+	m.eventViewDirty = true
 
 	// Update packet list display
 	if !m.packetStore.HasFilter() {
@@ -505,16 +530,17 @@ func (m Model) handleCaptureCompleteMsg(msg CaptureCompleteMsg) (Model, tea.Cmd)
 		m.processPendingPackets(pendingPackets)
 	}
 	var eventCmds []tea.Cmd
-	for _, batch := range drainPendingLocalEvents(true) {
-		var cmd tea.Cmd
-		m, cmd = m.handleEventBatchMsg(EventBatchMsg{Batch: batch, Local: true})
-		if cmd != nil {
-			eventCmds = append(eventCmds, cmd)
-		}
+	var cmd tea.Cmd
+	m, cmd = m.handleEventBatchMsg(EventBatchMsg{Batches: drainPendingLocalEvents(true), Local: true})
+	if cmd != nil {
+		eventCmds = append(eventCmds, cmd)
 	}
 
 	// Do a final packet list update
 	m.updatePacketListIncremental()
+	if m.uiState.ViewMode == "events" {
+		m.syncEventsView()
+	}
 
 	// Update details panel if showing
 	if m.uiState.ShowDetails {

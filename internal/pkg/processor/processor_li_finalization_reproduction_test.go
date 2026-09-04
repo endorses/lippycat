@@ -3,10 +3,14 @@
 package processor
 
 import (
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket/layers"
 	"github.com/google/uuid"
@@ -118,4 +122,53 @@ func TestPhase4FinalizedCallWithoutPCAPIsRejectedByX3(t *testing.T) {
 	after := p.getLIEncodingStats()
 	assert.Equal(t, before.X3Encoded, after.X3Encoded)
 	assert.Equal(t, before.X3FinalizedSuppressed+1, after.X3FinalizedSuppressed)
+}
+
+func TestPacketScopedAdmissionKeepsLIAndPCAPOnSameSideOfFinalization(t *testing.T) {
+	p, filterID := newFinalizationReproductionProcessor(t, true)
+
+	finalizationStarted := make(chan struct{})
+	finalized := make(chan CallFinalizationResult, 1)
+	var hookOnce sync.Once
+	p.afterLIPacket = func() {
+		hookOnce.Do(func() {
+			go func() {
+				close(finalizationStarted)
+				finalized <- p.callLifecycle.Finalize(finalizedCallID, CallFinalizationProtocolComplete)
+			}()
+			<-finalizationStarted
+			require.Eventually(t, func() bool {
+				return p.callLifecycle.IsFinalized(finalizedCallID)
+			}, time.Second, time.Millisecond)
+		})
+	}
+
+	before := p.getLIEncodingStats()
+	p.processBatch(source.FromProtoBatch(&data.PacketBatch{
+		HunterId: "synthetic-hunter",
+		Packets: []*data.CapturedPacket{{
+			TimestampNs:               time.Now().UnixNano(),
+			Data:                      []byte("synthetic RTP packet"),
+			CaptureLength:             20,
+			OriginalLength:            20,
+			LinkType:                  uint32(layers.LinkTypeEthernet),
+			MatchedFilterIds:          []string{filterID},
+			InheritedMatchedFilterIds: []string{filterID},
+			Metadata: &data.PacketMetadata{
+				SrcIp: dirCoreAddr, DstIp: dirGWAddr,
+				SrcPort: 35448, DstPort: 40696,
+				Protocol: "RTP",
+				Sip:      &data.SIPMetadata{CallId: finalizedCallID, FromUser: "alice", ToUser: "bob"},
+				Rtp:      &data.RTPMetadata{Ssrc: 0x13572468, Sequence: 1},
+			},
+		}},
+	}))
+
+	result := <-finalized
+	require.True(t, result.Finalized)
+	pcapFiles, err := filepath.Glob(filepath.Join(p.config.PcapWriterConfig.OutputDir, "*_rtp.pcap"))
+	require.NoError(t, err)
+	assert.Len(t, pcapFiles, 1, "PCAP must accept under the same packet admission even after finalization starts")
+	after := p.getLIEncodingStats()
+	assert.Equal(t, before.X3Encoded+1, after.X3Encoded)
 }

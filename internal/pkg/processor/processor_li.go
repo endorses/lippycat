@@ -382,14 +382,20 @@ func (p *Processor) initLIManager() {
 
 			callID := pkt.VoIPData.CallID
 			var admission *CallAdmission
+			ownsAdmission := false
 			if callID != "" && p.callLifecycle != nil {
-				var admissionErr error
-				admission, admissionErr = p.callLifecycle.Admit(callID)
-				if admissionErr != nil {
-					recordLateX3Suppression(callID, 0, "initial_admission")
-					return
+				if shared, ok := p.liPacketAdmissions.Load(pkt); ok {
+					admission = shared.(*CallAdmission)
+				} else {
+					var admissionErr error
+					admission, admissionErr = p.callLifecycle.Admit(callID)
+					if admissionErr != nil {
+						recordLateX3Suppression(callID, 0, "initial_admission")
+						return
+					}
+					ownsAdmission = true
+					defer admission.Release()
 				}
-				defer admission.Release()
 			}
 			if callID != "" {
 				callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
@@ -431,13 +437,14 @@ func (p *Processor) initLIManager() {
 						did := destID // capture for closure
 						insertionTaskAdmission := taskAdmission
 						insertionCallAdmission := admission
+						insertionOwnsCallAdmission := ownsAdmission
 						if destinationIndex > 0 {
 							var taskStillActive bool
 							insertionTaskAdmission, taskStillActive = p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
 							if !taskStillActive {
 								return
 							}
-							if callID != "" && p.callLifecycle != nil {
+							if ownsAdmission && callID != "" && p.callLifecycle != nil {
 								var insertionErr error
 								insertionCallAdmission, insertionErr = p.callLifecycle.AdmitGeneration(callID, generation)
 								if insertionErr != nil {
@@ -445,6 +452,7 @@ func (p *Processor) initLIManager() {
 									recordLateX3Suppression(callID, generation, "destination_admission")
 									return
 								}
+								insertionOwnsCallAdmission = true
 							}
 						}
 						bufKey := fmt.Sprintf("%s-%s", task.XID, did)
@@ -484,7 +492,7 @@ func (p *Processor) initLIManager() {
 							// so that callback can safely re-admit even when a task
 							// deactivation writer is already waiting.
 							insertionTaskAdmission.Release()
-							if insertionCallAdmission != nil {
+							if insertionOwnsCallAdmission && insertionCallAdmission != nil {
 								insertionCallAdmission.Release()
 							}
 						})
@@ -671,13 +679,17 @@ func (p *Processor) processLIPacket(pkt *types.PacketDisplay, matchedFilterIDs [
 }
 
 func (p *Processor) processLIPacketWithProvenance(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string) {
+	p.processLIPacketWithAdmission(pkt, directFilterIDs, inheritedFilterIDs, nil)
+}
+
+func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission) {
 	if p.liManager == nil || !p.liManager.IsEnabled() {
 		return
 	}
 	// Finalization cleanup may already have removed the call's inherited LI
 	// filter, so account and reject terminal media before task lookup. The packet
 	// callback performs the admission that covers encoding for live calls.
-	if pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" && p.callLifecycle != nil {
+	if admission == nil && pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" && p.callLifecycle != nil {
 		admission, err := p.callLifecycle.Admit(pkt.VoIPData.CallID)
 		if err != nil {
 			recordLateX3Suppression(pkt.VoIPData.CallID, 0, "pipeline_admission")
@@ -694,6 +706,10 @@ func (p *Processor) processLIPacketWithProvenance(pkt *types.PacketDisplay, dire
 		// resolution, and inherited IDs come from that same single call cache.
 		provenance.AuthoritativeCallID = pkt.VoIPData.CallID
 		provenance.InheritedFromCallID = pkt.VoIPData.CallID
+	}
+	if admission != nil {
+		p.liPacketAdmissions.Store(pkt, admission)
+		defer p.liPacketAdmissions.Delete(pkt)
 	}
 	p.liManager.ProcessPacketWithProvenance(pkt, provenance)
 }

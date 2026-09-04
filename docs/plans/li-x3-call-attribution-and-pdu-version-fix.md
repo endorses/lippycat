@@ -1,7 +1,7 @@
 # LI X3 Call Attribution, Finalization, and PDU Version Fix Plan
 
 **Date:** 2026-09-03
-**Status:** Phase 6 complete
+**Status:** Phase 7 complete
 **Priority:** Critical interception-integrity fix for the first release after v0.11.4
 
 ## Overview
@@ -450,43 +450,54 @@ finalizer's buffered-entry count.
 
 ## Phase 7: Verification and Release Gate
 
-- [ ] Run `gofmt` on every changed Go file before staging.
-- [ ] Run focused call-registry, VoIP processor, local-source, PCAP lifecycle, LI
+- [x] Run `gofmt` on every changed Go file before staging.
+- [x] Run focused call-registry, VoIP processor, local-source, PCAP lifecycle, LI
   manager, X2/X3 encoder, reorder-buffer, and processor integration tests.
-- [ ] Run `GOCACHE=/tmp/lippycat-go-cache go test -tags li ./internal/pkg/li/... ./internal/pkg/processor/...`.
-- [ ] Run race-enabled tests for call registry, VoIP processor, processor
+- [x] Run `GOCACHE=/tmp/lippycat-go-cache go test -tags 'processor li' ./internal/pkg/li/... ./internal/pkg/processor/...`.
+- [x] Run race-enabled tests for call registry, VoIP processor, processor
   lifecycle, LI delivery, and X3 reorder/finalization paths.
-- [ ] Run the repository's supported `processor`, `tap`, and `all` tagged suites
+- [x] Run the repository's supported `processor`, `tap`, and `all` tagged suites
   to catch build-tag drift; request sandbox escalation if required.
-- [ ] Verify non-LI builds compile and retain no LI runtime dependency.
-- [ ] Verify all five corrected wire vectors start with `0005` and exact golden
+- [x] Verify non-LI builds compile and retain no LI runtime dependency.
+- [x] Verify all five corrected wire vectors start with `0005` and exact golden
   comparisons pass.
-- [ ] Verify no test or benchmark relies on insertion order, `callIDs[0]`, or
+- [x] Verify no production test or benchmark relies on insertion order, `callIDs[0]`, or
   multi-call filter union for attribution.
-- [ ] Verify PCAP and X3 make the same admission decision across the finalization
+- [x] Verify PCAP and X3 make the same admission decision across the finalization
   race, including PCAP-disabled LI operation.
-- [ ] Review counter behavior under rejection at source, initial LI admission,
+- [x] Review counter behavior under rejection at source, initial LI admission,
   reorder discard, task deactivation, and delivery failure to prevent gaps or
   double counting.
-- [ ] Update this plan by checking only tasks verified complete, then commit code,
+- [x] Update this plan by checking only tasks verified complete, then commit code,
   tests, documentation, generated artifacts, golden vectors, and this plan
   together as required by the project workflow.
 
 ## Acceptance Criteria
 
-- [ ] Shared or reused endpoints cannot cause media from one call to inherit
+- [x] Shared or reused endpoints cannot cause media from one call to inherit
   another call's identity filter, XID, Call-ID correlation, or direction state.
-- [ ] Ambiguous media fails closed for identity interception while valid direct
+- [x] Ambiguous media fails closed for identity interception while valid direct
   IP/CIDR interception remains functional and observable.
-- [ ] Eviction, completion, or timeout cannot create silent identity-selected X3
+- [x] Eviction, completion, or timeout cannot create silent identity-selected X3
   loss without a corresponding source or LI suppression counter.
-- [ ] No X3 PDU is encoded, buffered, or delivered after its call finalization
+- [x] No X3 PDU is encoded, buffered, or delivered after its call finalization
   boundary, including delayed reorder callbacks and PCAP-disabled deployments.
-- [ ] PCAP and X3 share an atomic lifecycle authority and cannot disagree because
+- [x] PCAP and X3 share an atomic lifecycle authority and cannot disagree because
   of pipeline ordering or a check-then-act race.
-- [ ] Call-ID reuse creates a new generation without allowing old buffered work to
+- [x] Call-ID reuse creates a new generation without allowing old buffered work to
   enter it or mutate finalized PCAP artifacts.
-- [ ] X2, X3, keepalive, and keepalive-ack headers encode version bytes `00 05`;
+- [x] X2, X3, keepalive, and keepalive-ack headers encode version bytes `00 05`;
   the legacy `05 00` encoding is rejected by regression coverage.
-- [ ] Tagged and race-enabled verification passes with no regressions in SIP
+- [x] Tagged and race-enabled verification passes with no regressions in SIP
   sticky selection, B2BUA handling, PCAP finalization, or LI task deactivation.
+
+Phase 7 implementation note: verification found and fixed a remaining pipeline
+race in which LI and per-call PCAP acquired separate lifecycle admissions. The
+processor now holds one packet-scoped, generation-bound admission across both
+irreversible sink-acceptance steps, with deterministic coverage that starts
+finalization between them. The Phase 0 `callIDs[0]` occurrence remains solely in
+the explicitly test-only v0.11.4 regression model. The LI package gate uses the
+required processor role tag because `li` is a feature tag, not a standalone
+product role. Focused, race-enabled, full `processor`, `tap`, and `all` suites,
+the corrected processor+LI suite, golden-vector checks, and `verify-no-li` all
+pass.

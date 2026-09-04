@@ -316,6 +316,9 @@ type LocalSource struct {
 	// When set, TCP packets are routed to the assembler instead of direct processing
 	tcpAssembler TCPAssembler
 
+	// Optional bounded TCP SIP telemetry supplied by the VoIP composition root.
+	tcpStreamTelemetryProvider func() TCPStreamTelemetry
+
 	// Stats tracking
 	stats *AtomicStats
 	// lastAmbiguousOwnershipWarning rate-limits a single bounded warning stream;
@@ -515,6 +518,33 @@ func (s *LocalSource) SetTCPAssembler(assembler TCPAssembler) {
 	s.tcpAssembler = assembler
 }
 
+// SetTCPStreamTelemetryProvider exposes bounded TCP SIP recovery counters
+// without importing the VoIP package into the generic source layer.
+func (s *LocalSource) SetTCPStreamTelemetryProvider(provider func() TCPStreamTelemetry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tcpStreamTelemetryProvider = provider
+}
+
+func (s *LocalSource) tcpStreamTelemetry() TCPStreamTelemetry {
+	s.mu.Lock()
+	provider := s.tcpStreamTelemetryProvider
+	s.mu.Unlock()
+	if provider == nil {
+		return TCPStreamTelemetry{}
+	}
+	return provider()
+}
+
+func (s *LocalSource) captureHeartbeatFields() []any {
+	telemetry := s.tcpStreamTelemetry()
+	return []any{
+		"tcp_established_idle_retentions", telemetry.EstablishedIdleRetentions,
+		"tcp_pre_rearm_discarded_chunks", telemetry.PreRearmDiscardedChunks,
+		"tcp_rearm_rejected_chunks", telemetry.RearmRejectedChunks,
+	}
+}
+
 // Start begins packet capture. Blocks until ctx is cancelled.
 func (s *LocalSource) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -569,7 +599,9 @@ func (s *LocalSource) Start(ctx context.Context) error {
 	}()
 
 	// Create packet buffer
-	s.packetBuffer.Store(capture.NewPacketBuffer(s.ctx, s.config.BufferSize))
+	packetBuffer := capture.NewPacketBuffer(s.ctx, s.config.BufferSize)
+	packetBuffer.SetHeartbeatFieldsProvider(s.captureHeartbeatFields)
+	s.packetBuffer.Store(packetBuffer)
 
 	// Create capture context (separate from main context for restart support)
 	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
@@ -1108,10 +1140,14 @@ func (s *LocalSource) Batches() <-chan *PacketBatch {
 // Stats returns current capture statistics.
 func (s *LocalSource) Stats() Stats {
 	st := s.stats.Snapshot()
+	tcpTelemetry := s.tcpStreamTelemetry()
 	st.CaptureBufferRegularDrops = s.captureBufferRegularDrops()
 	st.CaptureBufferSIPDrops = s.captureBufferSIPDrops()
 	st.BatchChannelDrops = s.stats.packetsDropped.Load()
 	st.PacketsDropped = st.CaptureBufferRegularDrops + st.CaptureBufferSIPDrops + st.BatchChannelDrops
+	st.TCPEstablishedIdleRetentions = tcpTelemetry.EstablishedIdleRetentions
+	st.TCPPreRearmDiscardedChunks = tcpTelemetry.PreRearmDiscardedChunks
+	st.TCPRearmRejectedChunks = tcpTelemetry.RearmRejectedChunks
 	return st
 }
 

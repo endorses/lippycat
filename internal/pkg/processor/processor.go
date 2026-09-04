@@ -760,6 +760,9 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 			RtpOwnershipUnresolved:        stats.RTPOwnershipUnresolved,
 			RtpOwnershipAmbiguous:         stats.RTPOwnershipAmbiguous,
 			IdentityInheritanceSuppressed: stats.IdentityInheritanceSuppressed,
+			TcpEstablishedIdleRetentions:  stats.TCPEstablishedIdleRetentions,
+			TcpPreRearmDiscardedChunks:    stats.TCPPreRearmDiscardedChunks,
+			TcpRearmRejectedChunks:        stats.TCPRearmRejectedChunks,
 			Detector: &management.DetectorTelemetry{
 				FlowEntries:                 detectorStats.FlowEntries,
 				CacheEntries:                detectorStats.CacheEntries,

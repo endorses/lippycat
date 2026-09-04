@@ -121,7 +121,27 @@ type PacketBuffer struct {
 	mergerWg      sync.WaitGroup // tracks merger goroutine
 	pauseFn       func() bool    // optional: if set and returns true, Send skips packet (for TUI pause)
 	pauseMu       sync.RWMutex   // protects pauseFn
+	heartbeatFn   func() []any   // optional bounded fields appended to capture heartbeats
+	heartbeatMu   sync.RWMutex   // protects heartbeatFn
 	sipFlows      *tcpSIPFlowClassifier
+}
+
+// SetHeartbeatFieldsProvider installs a callback for bounded, source-specific
+// telemetry appended to the periodic capture heartbeat.
+func (pb *PacketBuffer) SetHeartbeatFieldsProvider(provider func() []any) {
+	pb.heartbeatMu.Lock()
+	defer pb.heartbeatMu.Unlock()
+	pb.heartbeatFn = provider
+}
+
+func (pb *PacketBuffer) heartbeatFields() []any {
+	pb.heartbeatMu.RLock()
+	provider := pb.heartbeatFn
+	pb.heartbeatMu.RUnlock()
+	if provider == nil {
+		return nil
+	}
+	return provider()
 }
 
 func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
@@ -826,13 +846,13 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				if statsErr == nil {
 					snapshot := telemetry.report(iface.Name(), int64(pcapStats.PacketsReceived), int64(pcapStats.PacketsDropped), int64(pcapStats.PacketsIfDropped), buffer)
 					if tickTime.Second()%30 == 0 {
-						logger.Info("Capture heartbeat",
+						fields := []any{
 							"interface", iface.Name(),
 							"packets_processed", count,
 							"pcap_packets_received", pcapStats.PacketsReceived,
 							"pcap_kernel_dropped", pcapStats.PacketsDropped,
 							"pcap_interface_dropped", pcapStats.PacketsIfDropped,
-							"total_kernel_dropped", snapshot.KernelDrops+snapshot.InterfaceDrops,
+							"total_kernel_dropped", snapshot.KernelDrops + snapshot.InterfaceDrops,
 							"packet_buffer_dropped", snapshot.PacketBufferDrops,
 							"packet_buffer_regular_dropped", buffer.GetDropped(),
 							"packet_buffer_sip_dropped", buffer.GetSIPDropped(),
@@ -846,7 +866,10 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 							"ip_fragments", frags,
 							"reassembled", reassembled,
 							"buffer_len", buffer.Len(),
-							"buffer_closed", buffer.IsClosed())
+							"buffer_closed", buffer.IsClosed(),
+						}
+						fields = append(fields, buffer.heartbeatFields()...)
+						logger.Info("Capture heartbeat", fields...)
 					}
 				}
 			}

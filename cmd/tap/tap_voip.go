@@ -538,6 +538,14 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// Wire TCP injection channel and assembler to LocalSource
 	localSource.SetTCPInjectionChannel(tcpInjectionChan)
 	localSource.SetTCPAssembler(tapTCPAssemblerWrapper)
+	localSource.SetTCPStreamTelemetryProvider(func() source.TCPStreamTelemetry {
+		metrics := voip.GetTCPStreamMetrics()
+		return source.TCPStreamTelemetry{
+			EstablishedIdleRetentions: uint64(metrics.EstablishedIdleRetentions), // #nosec G115 -- monotonic non-negative counter
+			PreRearmDiscardedChunks:   uint64(metrics.PreRearmDiscardedChunks),   // #nosec G115 -- monotonic non-negative counter
+			RearmRejectedChunks:       uint64(metrics.RearmRejectedChunks),       // #nosec G115 -- monotonic non-negative counter
+		}
+	})
 
 	logger.Info("TCP SIP reassembly enabled for tap mode",
 		"tcp_handler", "TapTCPHandler",

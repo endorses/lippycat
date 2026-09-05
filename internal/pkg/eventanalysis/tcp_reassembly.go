@@ -15,11 +15,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	httpparser "github.com/endorses/lippycat/internal/pkg/http"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
+	"github.com/endorses/lippycat/internal/pkg/reassembly"
 	tlsparser "github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/reassembly"
 )
 
 const maxReassembledApplicationBytes = 1 << 20

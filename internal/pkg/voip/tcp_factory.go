@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/reassembly"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/reassembly"
 )
 
 // sipStreamFactory manages TCP stream creation and lifecycle

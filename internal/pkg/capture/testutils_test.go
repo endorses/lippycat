@@ -1,9 +1,9 @@
 package capture
 
 import (
+	"github.com/endorses/lippycat/internal/pkg/reassembly"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/reassembly"
 )
 
 // Common test utilities shared across all test files

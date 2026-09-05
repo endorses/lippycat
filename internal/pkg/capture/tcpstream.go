@@ -4,9 +4,9 @@ import (
 	"io"
 	"sync/atomic"
 
+	"github.com/endorses/lippycat/internal/pkg/reassembly"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/reassembly"
 )
 
 // tcpHalfStreamBufferChunks bounds the per-stream reassembled-chunk buffer.

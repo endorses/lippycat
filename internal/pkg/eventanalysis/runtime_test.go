@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -773,4 +774,37 @@ func testClientHello() []byte {
 	record := []byte{22, 3, 1}
 	record = binary.BigEndian.AppendUint16(record, uint16(len(handshake)))
 	return append(record, handshake...)
+}
+
+func TestRuntimeReassemblesLargeQueuedPacket(t *testing.T) {
+	for _, flush := range []bool{false, true} {
+		t.Run(fmt.Sprintf("flush=%t", flush), func(t *testing.T) {
+			r, dispatcher, sink := testRuntime(t, 32)
+			source := Source{NodeID: "node", CaptureSource: "pcap", InputFile: "large.pcap"}
+			base := time.Unix(100, 0)
+			payload := []byte("GET /large HTTP/1.1\r\nHost: example.test\r\nX-Padding: " + strings.Repeat("x", 6000) + "\r\n\r\n")
+			require.NoError(t, r.ObservePacket(source, tcpPacket(t, 40000, 80, 1000, true, nil, base)))
+			queuedAt := base.Add(time.Second)
+			queuedPayload := payload
+			if !flush {
+				queuedPayload = payload[1:]
+			}
+			require.NoError(t, r.ObservePacket(source, tcpPacket(t, 40000, 80, 1002, false, queuedPayload, queuedAt)))
+			if !flush {
+				require.NoError(t, r.ObservePacket(source, tcpPacket(t, 40000, 80, 1001, false, payload[:1], base.Add(2*time.Second))))
+			}
+			r.EOF()
+			require.NoError(t, dispatcher.Close(context.Background()))
+			var matched []events.HTTPEvent
+			for _, event := range sink.events {
+				if event.Kind() == events.KindHTTP {
+					matched = append(matched, event.(events.HTTPEvent))
+				}
+			}
+			require.Len(t, matched, 1)
+			require.Equal(t, "example.test", matched[0].Host)
+			require.Equal(t, queuedAt, matched[0].Envelope().Timestamp)
+			require.Equal(t, "large.pcap", matched[0].Envelope().Provenance.InputFile)
+		})
+	}
 }

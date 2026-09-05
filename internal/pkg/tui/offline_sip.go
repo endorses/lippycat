@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/offline"
+	"github.com/endorses/lippycat/internal/pkg/reassembly"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/reassembly"
 )
 
 // Offline SIP framing is synchronous: media endpoints discovered in one packet

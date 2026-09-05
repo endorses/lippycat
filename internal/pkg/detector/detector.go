@@ -33,6 +33,24 @@ func New() *Detector {
 	}
 }
 
+// NewWithLimits creates an independently owned detector with explicit hard
+// cache and flow limits, avoiding process-wide configuration reads. Non-positive
+// limits use bounded defaults of 100,000 entries each.
+func NewWithLimits(maxCacheEntries, maxFlows int) *Detector {
+	if maxCacheEntries <= 0 {
+		maxCacheEntries = 100000
+	}
+	if maxFlows <= 0 {
+		maxFlows = 100000
+	}
+	return &Detector{
+		signatures: make([]signatures.Signature, 0),
+		portMap:    make(map[uint16]signatures.Signature),
+		cache:      NewDetectionCacheWithMaxEntries(5*time.Minute, maxCacheEntries),
+		flows:      NewFlowTrackerWithMaxEntries(10*time.Minute, maxFlows),
+	}
+}
+
 // NewDetector is an alias for New() for compatibility
 func NewDetector() *Detector {
 	return New()

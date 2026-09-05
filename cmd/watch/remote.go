@@ -109,6 +109,17 @@ func runRemote(cmd *cobra.Command, args []string) {
 		insecureAllowed, // insecure
 		remoteProcessors...,
 	)
+	failed := false
+	defer func() {
+		if err := model.CloseOffline(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error cleaning up offline dataset: %v\n", err)
+			failed = true
+		}
+		model.Shutdown()
+		if failed {
+			os.Exit(1)
+		}
+	}()
 
 	// Full terminal reset (RIS) to clear any corrupted state including color palette
 	fmt.Print("\033c")
@@ -127,7 +138,7 @@ func runRemote(cmd *cobra.Command, args []string) {
 	// Run TUI
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-		os.Exit(1)
+		failed = true
 	}
 }
 

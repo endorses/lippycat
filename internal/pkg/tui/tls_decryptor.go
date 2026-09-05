@@ -23,6 +23,7 @@ type TLSDecryptor struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	mu             sync.RWMutex
+	stopOnce       sync.Once
 }
 
 // Global TLS decryptor for TUI (similar to callTracker)
@@ -70,21 +71,30 @@ func (d *TLSDecryptor) Stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// Cancel context to stop watcher
-	if d.cancel != nil {
-		d.cancel()
-	}
-	if d.keyWatcher != nil {
-		d.keyWatcher.Stop()
-	}
-	if d.sessionManager != nil {
-		d.sessionManager.Stop()
-	}
+	d.stopOnce.Do(func() {
+		// Cancel context to stop watcher
+		if d.cancel != nil {
+			d.cancel()
+		}
+		if d.keyWatcher != nil {
+			d.keyWatcher.Stop()
+		}
+		if d.sessionManager != nil {
+			d.sessionManager.Stop()
+		}
+		if d.keyStore != nil {
+			d.keyStore.Stop()
+		}
+	})
 }
 
 // ProcessTLSHandshake processes a TLS handshake packet (ClientHello or ServerHello).
 // It extracts the necessary information and feeds it to the session manager.
 func (d *TLSDecryptor) ProcessTLSHandshake(srcIP, dstIP, srcPort, dstPort string, rawData []byte, isClientHello bool) {
+	d.processTLSHandshakePayload(srcIP, dstIP, srcPort, dstPort, extractTLSPayload(rawData), isClientHello)
+}
+
+func (d *TLSDecryptor) processTLSHandshakePayload(srcIP, dstIP, srcPort, dstPort string, tlsData []byte, isClientHello bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -118,11 +128,8 @@ func (d *TLSDecryptor) ProcessTLSHandshake(srcIP, dstIP, srcPort, dstPort string
 		flowKey = decrypt.FlowKey(dstNetIP, srcNetIP, uint16(dstP), uint16(srcP))
 	}
 
-	// Parse TLS record from raw data
-	// Skip Ethernet (14) + IP (20 or 40) + TCP (20+) headers to get to TLS
-	// This is a simplified approach - in practice, the TLS data should be extracted
-	// from the application layer payload
-	tlsData := extractTLSPayload(rawData)
+	// Offline callers supply the decoded transport payload, including for
+	// reassembled packets and non-Ethernet captures.
 	if tlsData == nil || len(tlsData) < 5 {
 		return
 	}
@@ -149,6 +156,10 @@ func (d *TLSDecryptor) ProcessTLSHandshake(srcIP, dstIP, srcPort, dstPort string
 
 // ProcessApplicationData processes a TLS application data record and attempts decryption.
 func (d *TLSDecryptor) ProcessApplicationData(srcIP, dstIP, srcPort, dstPort string, rawData []byte) {
+	d.processApplicationPayload(srcIP, dstIP, srcPort, dstPort, extractTLSPayload(rawData))
+}
+
+func (d *TLSDecryptor) processApplicationPayload(srcIP, dstIP, srcPort, dstPort string, tlsData []byte) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -191,8 +202,7 @@ func (d *TLSDecryptor) ProcessApplicationData(srcIP, dstIP, srcPort, dstPort str
 		return // No session found
 	}
 
-	// Extract TLS payload
-	tlsData := extractTLSPayload(rawData)
+	// Parse the supplied transport payload.
 	if tlsData == nil || len(tlsData) < 5 {
 		return
 	}

@@ -15,9 +15,11 @@ import (
 
 // OfflineSettings encapsulates all settings for offline (PCAP file) capture mode
 type OfflineSettings struct {
-	pcapFileInput textinput.Model
-	bufferInput   textinput.Model
-	filterInput   textinput.Model
+	installedFiles []string
+	installedInput string
+	pcapFileInput  textinput.Model
+	bufferInput    textinput.Model
+	filterInput    textinput.Model
 
 	// For text input editing state (restore on Escape)
 	savedPcapFileValue string
@@ -43,9 +45,22 @@ func NewOfflineSettings(pcapFile string, bufferSize int, filter string, theme th
 	}
 }
 
+// NewOfflineSettingsFiles preserves exact input identities, including spaces,
+// until the user edits the file field.
+func NewOfflineSettingsFiles(files []string, bufferSize int, filter string, theme themes.Theme) *OfflineSettings {
+	input := strings.Join(files, " ")
+	s := NewOfflineSettings(input, bufferSize, filter, theme)
+	s.installedFiles = append([]string(nil), files...)
+	s.installedInput = input
+	return s
+}
+
 // parsePCAPFiles parses space-separated file paths from the input value.
 // Returns a slice of non-empty file paths.
 func (os *OfflineSettings) parsePCAPFiles() []string {
+	if os.installedFiles != nil && os.pcapFileInput.Value() == os.installedInput {
+		return append([]string(nil), os.installedFiles...)
+	}
 	input := strings.TrimSpace(os.pcapFileInput.Value())
 	if input == "" {
 		return nil

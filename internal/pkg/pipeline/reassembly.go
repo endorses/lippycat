@@ -214,6 +214,12 @@ func FlowShard(netFlow, transportFlow gopacket.Flow, shardCount int) int {
 
 // Assemble decodes and feeds a TCP envelope. Non-TCP envelopes are rejected.
 func (e *ReassemblyEngine) Assemble(env *PacketEnvelope) error {
+	return e.AssembleWithContext(env, nil)
+}
+
+// AssembleWithContext preserves immutable packet provenance through queued TCP
+// bytes, including EOF delivery. A nil context retains timestamp-only behavior.
+func (e *ReassemblyEngine) AssembleWithContext(env *PacketEnvelope, ac reassembly.AssemblerContext) error {
 	if env == nil {
 		return errors.New("cannot assemble nil packet envelope")
 	}
@@ -231,7 +237,12 @@ func (e *ReassemblyEngine) Assemble(env *PacketEnvelope) error {
 		return ErrReassemblyClosed
 	}
 	netFlow := packet.NetworkLayer().NetworkFlow()
-	e.shards[FlowShard(netFlow, tcp.TransportFlow(), len(e.shards))].Assemble(netFlow, tcp, env.CaptureTime)
+	shard := e.shards[FlowShard(netFlow, tcp.TransportFlow(), len(e.shards))]
+	if ac == nil {
+		shard.Assemble(netFlow, tcp, env.CaptureTime)
+	} else {
+		shard.AssembleWithContext(netFlow, tcp, ac)
+	}
 	e.agingMu.Lock()
 	if env.CaptureTime.After(e.latestCaptureTime) {
 		e.latestCaptureTime = env.CaptureTime

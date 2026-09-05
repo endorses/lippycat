@@ -122,6 +122,7 @@ type Builder struct {
 	done        bool
 	published   bool
 	failure     error
+	amended     bool
 }
 
 func (s *Storage) NewBuilder(generation DatasetGeneration, sources []SourcePosition) (*Builder, error) {
@@ -282,6 +283,11 @@ func (b *Builder) Finish(ctx context.Context) (dataset Dataset, finishErr error)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if b.amended {
+		if err := b.rebuildStatistics(ctx); err != nil {
+			return nil, err
+		}
 	}
 	for _, f := range []*os.File{b.d.summaries, b.d.details, b.d.offsets} {
 		if err := f.Sync(); err != nil {

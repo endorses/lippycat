@@ -40,9 +40,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m.handleDiagDump()
 		case "q", "ctrl+c":
 			// Still allow quit
-			m.Shutdown()
-			m.uiState.Quitting = true
-			return m, tea.Quit
+			return m.requestQuit()
 		default:
 			// Consume all other keys while console is visible
 			return m, nil
@@ -79,9 +77,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.uiState.SettingsView.IsEditing() {
 			switch msg.String() {
 			case "q", "ctrl+c":
-				m.Shutdown()
-				m.uiState.Quitting = true
-				return m, tea.Quit
+				return m.requestQuit()
 			case "ctrl+z":
 				// Suspend the process
 				return m, tea.Suspend
@@ -95,9 +91,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Normal settings tab key handling (when NOT editing)
 		switch msg.String() {
 		case "q", "ctrl+c":
-			m.Shutdown()
-			m.uiState.Quitting = true
-			return m, tea.Quit
+			return m.requestQuit()
 		case "ctrl+z":
 			// Suspend the process
 			return m, tea.Suspend
@@ -120,9 +114,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 2 {
 		switch msg.String() {
 		case "q", "ctrl+c":
-			m.Shutdown()
-			m.uiState.Quitting = true
-			return m, tea.Quit
+			return m.requestQuit()
 		case "ctrl+z":
 			return m, tea.Suspend
 		case "v": // Cycle sub-views
@@ -185,9 +177,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Normal Help tab key handling
 		switch msg.String() {
 		case "q", "ctrl+c":
-			m.Shutdown()
-			m.uiState.Quitting = true
-			return m, tea.Quit
+			return m.requestQuit()
 		case "ctrl+z":
 			return m, tea.Suspend
 		case "c": // Clear search
@@ -245,9 +235,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, tea.Suspend
 
 	case "q", "ctrl+c":
-		m.Shutdown()
-		m.uiState.Quitting = true
-		return m, tea.Quit
+		return m.requestQuit()
 
 	case "/": // Enter filter mode (Capture tab) or search mode (Help tab)
 		if m.uiState.Tabs.GetActive() == 0 {

@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-05
 
-**Status:** Phases 0–2 implemented and verified; phases 3–6 pending
+**Status:** Phases 0–3 implemented and verified; phases 4–6 pending
 
 **Code baseline:** `fff6c68f`
 
@@ -309,29 +309,74 @@ race suite and repeated focused query lifecycle race checks pass.
 
 ### Phase 3 — Unify indexing and analysis lifecycle
 
-- [ ] Introduce `OpenOfflineDatasetMsg` (or one equivalent shared controller)
+- [x] Introduce `OpenOfflineDatasetMsg` (or one equivalent shared controller)
       carrying inputs and frozen analysis configuration. Route startup,
       settings, file dialog, and offline restart through it.
-- [ ] Move the startup-specific replay ownership out of `cmd/watch/file.go`;
+- [x] Move the startup-specific replay ownership out of `cmd/watch/file.go`;
       retain CLI validation and configuration plumbing.
-- [ ] Extract/reuse bridge normalization and analyzer stages to write directly
+- [x] Extract/reuse bridge normalization and analyzer stages to write directly
       into the dataset. Eliminate authoritative offline packet delivery through
       the unbounded pending packet slice and per-packet UI statistics updates.
-- [ ] Make retained events/calls session-owned during indexing. Feed their
+- [x] Make retained events/calls session-owned during indexing. Feed their
       bounded stores directly through a synchronized adapter or context-aware
       bounded worker queue, bypassing `pendingLocalEventBuffer` drops. Preserve
       declared ring eviction, event IDs/order, compatibility/loss accounting,
       and analyzer EOF flush semantics; do not run presentation work per event.
-- [ ] Isolate call tracking, local aggregators, event analysis, and TLS decryptor
+- [x] Isolate call tracking, local aggregators, event analysis, and TLS decryptor
       state for replacement sessions; audit current global capture/bridge state
       to prevent old and new generations contaminating each other.
-- [ ] Add indexing modal, throttled progress, cancel/cleanup messages, worker
+- [x] Add indexing modal, throttled progress, cancel/cleanup messages, worker
       completion ownership, and atomic publication of all session state.
-- [ ] Cancel/join prior work asynchronously on reopen, mode switch, or quit;
+- [x] Cancel/join prior work asynchronously on reopen, mode switch, or quit;
       dispose of stale successful results and preserve the previous ready
       dataset on failure/cancel. Release storage only after readers/export stop.
-- [ ] Test startup/in-TUI equivalence, replacement failure, rapid repeated open,
+- [x] Test startup/in-TUI equivalence, replacement failure, rapid repeated open,
       cancellation in every stage, stale messages, and quit during cleanup.
+
+Phase 3 implementation notes:
+
+- Startup, settings, file dialogs, and restart now dispatch the same frozen
+  `OpenOfflineDatasetMsg`. A shared model-owned controller retains workers and
+  completed results even when Bubble Tea stops before consuming their messages.
+  Reopen, cancel, mode switches, and quit join and dispose outside `Update`.
+- Indexing writes packet records and complete statistics directly to storage.
+  Session-owned bounded event stores bypass presentation queues; call tracking,
+  detector/flow caches, ESP policy, and TLS key/decryption state are isolated.
+  Input identity hashing is cancellable and rejects non-regular sources.
+- Synchronous bounded SIP framing preserves ordered SIP/RTP analysis. Queued
+  reassembly pages carry packet identity through EOF, including equal timestamps
+  and retransmissions. Deferred metadata amendments append replacement disk
+  frames and update disk offsets before publication; amended datasets rebuild
+  final statistics once from summaries without rerunning stateful analysis.
+- The modal reports opening/indexing/cleanup progress without claiming physical
+  byte percentages. Failed/cancelled replacement keeps the prior ready packet,
+  statistics, event/call, details, and installed settings state. Obsolete legacy
+  packet/event/background results cannot enter the ready session.
+- Watch exposes the resource defaults documented in the
+  [offline contracts](../design/watch-file-offline-contracts.md). Ready and
+  replacement datasets share budgets. SIP frame buffers additionally cap at
+  16 MiB, 4,096 streams, and 64 KiB per message, with tighter frozen SIP limits
+  honored. TLS key logs use bounded, unwatched session snapshots.
+- Until phases 4–5 implement virtual browsing and complete interactive queries,
+  the UI explicitly labels its preview of up to 32 pinned packet details.
+  Preview retention uses at most one quarter of the configured cache budget;
+  packet navigation/filtering/saving still uses that preview. Dataset totals
+  and bounded retained events/calls are installed at Ready. This phase does
+  not claim complete-file browsing, interactive filtering, or export.
+
+Verification: capture, offline, events, detector, pipeline, all TUI packages,
+components/stores/filters, and watch pass under `all` and `tui`. Full capture,
+offline, events, detector, pipeline, and TUI suites pass with the race detector.
+Hunter, processor, tap, and CLI specialized builds pass. Tests cover startup and
+file-dialog equivalence, failed replacement/settings preservation, rapid reopen,
+stale and duplicate completion, abandoned command results, cancellation and
+cleanup errors, mode changes and quit during cleanup, bounded preview with
+complete totals, direct event retention/EOF drain, TLS snapshots, frozen ESP,
+cancellable identity hashing, deferred amendment failure/disk accounting, and
+SIP completion ownership across segments, queued EOF bytes, equal timestamps,
+and retransmissions. Independent sub-agent reviews and root review reproduced
+and corrected lifecycle, global-state, and EOF metadata issues before checking
+these tasks off.
 
 ### Phase 4 — Virtual packet browsing and event integration
 

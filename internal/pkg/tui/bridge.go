@@ -1438,6 +1438,10 @@ func convertEnvelopeFast(env *pipeline.PacketEnvelope, tracker ...*CallTracker) 
 // contract without reconstructing a capture-layer record. It uses shared
 // extraction logic enhanced with protocol detection.
 func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) components.PacketDisplay {
+	return convertEnvelopeWithState(env, tracker, detector.GetDefault(), liveSIPFlows{})
+}
+
+func convertEnvelopeWithState(env *pipeline.PacketEnvelope, tracker *CallTracker, protocols *detector.Detector, flows sipFlowState) components.PacketDisplay {
 	pkt := env.Packet()
 
 	// Use shared extraction for basic fields
@@ -1466,7 +1470,7 @@ func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) compone
 	}
 
 	// Use centralized detector for application layer protocols
-	detectionResult := detector.GetDefault().Detect(pkt)
+	detectionResult := protocols.Detect(pkt)
 
 	// DEBUG: Log UDP packets in RTP port range that aren't detected as RTP
 	if detectionResult != nil && detectionResult.Protocol != "unknown" {
@@ -1481,10 +1485,10 @@ func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) compone
 			if fields.Protocol == "TCP" {
 				// TCP packets may contain partial SIP messages - let TCP reassembly handle
 				// registration; only cache the flow here.
-				markTCPSIPFlow(flowKey)
+				flows.markTCP(flowKey)
 			} else if fields.Protocol == "UDP" {
 				// Mark UDP flow so non-first IPv6 fragment continuations are classified as SIP.
-				markUDPSIPFlow(flowKey)
+				flows.markUDP(flowKey)
 			}
 		}
 		// NOTE: UDP SIP endpoint registration is now handled in buildProtocolInfo() via detector path.
@@ -1498,8 +1502,8 @@ func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) compone
 	// This replaces heuristic detection (port-based, header-based) which caused false positives.
 	if fields.Protocol == "TCP" && (detectionResult == nil || detectionResult.Protocol == "unknown" || display.Protocol == "TCP") {
 		flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
-		if isTCPSIPFlow(flowKey) {
-			updateTCPSIPFlowTimestamp(flowKey)
+		if flows.isTCP(flowKey) {
+			flows.markTCP(flowKey)
 			display.Protocol = "SIP"
 			display.Info = "TCP SIP (continuation)"
 		}
@@ -1508,7 +1512,7 @@ func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) compone
 	// UDP SIP detection via flow cache (for non-first IPv6 fragment continuations).
 	if fields.Protocol == "UDP" && (detectionResult == nil || detectionResult.Protocol == "unknown" || display.Protocol == "UDP") {
 		flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
-		if isUDPSIPFlow(flowKey) {
+		if flows.isUDP(flowKey) {
 			display.Protocol = "SIP"
 			display.Info = "UDP SIP (continuation)"
 		}

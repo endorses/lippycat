@@ -47,13 +47,14 @@ type offlineCursor struct {
 	spiCache         *ttlCache[uint32, layers.IPProtocol]
 	fragCache        *ttlCache[uint32, ipv6FragInfo]
 	fragmentEstimate int
+	espConfig        OfflineESPConfig
 }
 
 func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter string, sourceIndex uint32) (_ *offlineCursor, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	c := &offlineCursor{path: dev.Name(), sourceIndex: sourceIndex, ip4: NewIPv4Defragmenter(), ip6: NewIPv6Defragmenter()}
+	c := &offlineCursor{espConfig: offlineESPConfigFromContext(ctx), path: dev.Name(), sourceIndex: sourceIndex, ip4: NewIPv4Defragmenter(), ip6: NewIPv6Defragmenter()}
 	c.spiCache = newTTLCache[uint32, layers.IPProtocol](5 * time.Minute)
 	c.fragCache = newTTLCache[uint32, ipv6FragInfo](30 * time.Second)
 	info, err := os.Stat(c.path)
@@ -294,12 +295,12 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 		// Handle ESP with NULL cipher - common in IMS/VoLTE where ESP transport
 		// mode provides integrity without encryption. Must run after VXLAN
 		// decapsulation so it sees the inner packets from VXLAN tunnels.
-		if ESPDecapEnabled() {
-			if inner, ok := decapsulateESPNullWithCache(newPacket, c.spiCache); ok {
+		if c.espConfig.Enabled {
+			if inner, ok := decapsulateESPNullWithCacheConfig(newPacket, c.spiCache, c.espConfig.Explicit, c.espConfig.ICVSize); ok {
 				newPacket = inner
 				newPacket.Metadata().CaptureLength = len(newPacket.Data())
 				newPacket.Metadata().Length = len(newPacket.Data())
-			} else if inner, ok := decapsulateIPv6FragmentESPWithCaches(newPacket, c.spiCache, c.fragCache); ok {
+			} else if inner, ok := decapsulateIPv6FragmentESPWithCachesConfig(newPacket, c.spiCache, c.fragCache, c.espConfig.Explicit, c.espConfig.ICVSize); ok {
 				newPacket = inner
 				newPacket.Metadata().CaptureLength = len(newPacket.Data())
 				newPacket.Metadata().Length = len(newPacket.Data())

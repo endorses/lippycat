@@ -151,9 +151,12 @@ Analysis and deferred metadata finalization remain the caller's responsibility.
 Provisional first-release configuration defaults are 64 MiB total display cache,
 4 GiB total session disk, 8 MiB maximum encoded record/allocation, and 64 open
 sources. The default parent is the OS temporary directory; create a private owned
-child and never clean the parent. Configuration will follow normal flag/Viper
-precedence when the session workflow is wired in phase 3; the storage package
-currently takes explicit validated limits and exposes no ineffective flags.
+child and never clean the parent. Configuration follows normal flag/Viper precedence. Watch exposes
+`--offline-session-dir`, `--offline-max-disk-bytes`, `--offline-cache-bytes`,
+`--offline-max-record-bytes`, and `--offline-max-sources`, bound respectively to
+`watch.offline.session_dir`, `max_disk_bytes`, `cache_bytes`,
+`max_record_bytes`, and `max_sources`. Budgets are shared across replacements;
+changing them while a dataset is installed requires leaving offline mode first.
 
 These are conservative starting limits, not measured storage amplification
 claims. Baseline ordered replay of 256-byte UDP fixtures grows from roughly

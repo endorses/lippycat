@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/endorses/lippycat/internal/pkg/pcap"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
@@ -102,6 +103,19 @@ type CaptureTelemetryMsg capture.Telemetry
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
+	offlineController    *offlineController
+	offlineSession       *offlineIndexedSession
+	offlineOpening       bool
+	offlineStarted       time.Time
+	offlineLeaving       bool
+	offlineQuitRequested bool
+	offlineQueued        *OpenOfflineDatasetMsg
+	offlineGeneration    offline.DatasetGeneration
+	offlineProgress      offline.Progress
+	offlinePending       OpenOfflineDatasetMsg
+	offlineInstalled     OpenOfflineDatasetMsg
+	maxOfflineCalls      int
+
 	// Data stores (thread-safe)
 	packetStore   *store.PacketStore
 	callStore     *store.CallStore
@@ -270,6 +284,8 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	bgProcessor.BeginGeneration()
 
 	m := Model{
+		offlineController:          newOfflineController(),
+		maxOfflineCalls:            maxCalls,
 		packetStore:                packetStore,
 		callStore:                  callStore,
 		eventStore:                 eventStore,
@@ -351,7 +367,13 @@ func (m Model) Init() tea.Cmd {
 		}
 		return tea.Batch(cmds...)
 	}
-	return tea.Batch(tickCmd(), cleanupProcessorsCmd(), m.backgroundProcessor.WaitForResult())
+	cmds := []tea.Cmd{tickCmd(), cleanupProcessorsCmd(), m.backgroundProcessor.WaitForResult()}
+	if m.captureMode == components.CaptureModeOffline {
+		capacity, _, _, _ := m.packetStore.GetBufferInfo()
+		msg := FreezeOfflineOpen(m.pcapFiles, m.bpfFilter, capacity)
+		cmds = append(cmds, func() tea.Msg { return msg })
+	}
+	return tea.Batch(cmds...)
 }
 
 // Shutdown cleans up resources before quitting.
@@ -391,6 +413,102 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}()
 
+	// Lifecycle messages bypass modal/settings routing so cleanup cannot stall.
+	switch value := msg.(type) {
+	case OpenOfflineDatasetMsg:
+		return m.openOffline(value)
+	case offlineOpenCompleteMsg:
+		return m.completeOffline(value)
+	case offlineProgressMsg:
+		if value.generation == m.offlineGeneration && m.offlineOpening {
+			m.offlineController.mu.Lock()
+			p := m.offlineController.progress
+			m.offlineController.mu.Unlock()
+			if m.offlineProgress.State != offline.Cancelling {
+				m.offlineProgress = p
+			}
+			m.offlineProgress.Elapsed = time.Since(m.offlineStarted)
+			return m, offlineProgressCmd(value.generation)
+		}
+		return m, nil
+	case offlineCleanupMsg:
+		if value.generation != 0 && value.generation == m.offlineGeneration && (value.cancelled || value.quit || value.restart != nil) {
+			m.offlineOpening = false
+			m.offlineLeaving = false
+			if value.cancelled {
+				if value.err != nil {
+					return m, m.uiState.Toast.Show("Offline cleanup failed: "+value.err.Error(), components.ToastError, components.ToastDurationLong)
+				}
+				return m, nil
+			}
+			if value.err != nil {
+				return m, m.uiState.Toast.Show("Offline cleanup failed: "+value.err.Error(), components.ToastError, components.ToastDurationLong)
+			}
+			m.offlineSession = nil
+			c := m.offlineController
+			c.mu.Lock()
+			c.closed = false
+			c.storage = nil
+			c.installed = nil
+			c.done = nil
+			c.cancel = nil
+			c.mu.Unlock()
+			if value.quit || m.offlineQuitRequested {
+				m.uiState.Quitting = true
+				return m, func() tea.Msg { m.Shutdown(); return tea.Quit() }
+			}
+			if m.offlineQueued != nil {
+				queued := *m.offlineQueued
+				m.offlineQueued = nil
+				return m.openOffline(queued)
+			}
+			if value.restart != nil {
+				return m.handleRestartCaptureMsg(*value.restart)
+			}
+		}
+		if value.err != nil {
+			return m, m.uiState.Toast.Show("Offline cleanup failed: "+value.err.Error(), components.ToastError, components.ToastDurationLong)
+		}
+		return m, nil
+	}
+	if m.offlineOpening || m.offlineSession != nil {
+		switch msg.(type) {
+		case PacketMsg, PacketBatchMsg, CallUpdateMsg, EventBatchMsg, CaptureCompleteMsg, CaptureTelemetryMsg:
+			return m, nil
+		case LocalCallPacketResultMsg, DNSPacketResultMsg, HTTPPacketResultMsg, EmailPacketResultMsg:
+			if m.backgroundProcessor != nil {
+				return m, m.backgroundProcessor.WaitForResult()
+			}
+			return m, nil
+		case TickMsg:
+			if m.offlineOpening {
+				m.offlineProgress.Elapsed = time.Since(m.offlineStarted)
+			}
+			if m.metricsCollector != nil {
+				metrics := m.metricsCollector.Get()
+				m.uiState.StatisticsView.UpdateTUIMetrics(metrics.CPUPercent, metrics.MemoryRSSBytes)
+			}
+			if !m.offlineOpening {
+				m.refreshEventsView(time.Now())
+			}
+			return m, slowTickCmd()
+		}
+	}
+	if m.offlineOpening {
+		switch value := msg.(type) {
+		case tea.KeyMsg:
+			switch value.String() {
+			case "ctrl+c", "q":
+				return m.leaveOffline(nil, true)
+			case "esc":
+				return m.cancelOffline()
+			}
+			return m, nil
+		case tea.MouseMsg:
+			return m, nil
+		}
+	}
+
 	// If settings tab is active and editing interface, pass messages to settings
 	// (this is needed for list filtering to work properly)
 	// Handle toast messages FIRST (even when modals are active)
@@ -412,9 +530,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if keyMsg, ok := msg.(tea.KeyMsg); ok {
 				switch keyMsg.String() {
 				case "q", "ctrl+c":
-					m.Shutdown()
-					m.uiState.Quitting = true
-					return m, tea.Quit
+					return m.requestQuit()
 				case "ctrl+z":
 					// Suspend the process
 					return m, tea.Suspend

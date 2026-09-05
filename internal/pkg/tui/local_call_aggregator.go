@@ -35,6 +35,7 @@ const rtpStalenessThreshold = 10 * time.Second
 
 // LocalCallAggregator wraps voip.CallAggregator for TUI local capture modes (live and offline)
 type LocalCallAggregator struct {
+	silent          bool // Offline indexing installs one final bounded snapshot.
 	aggregator      *voip.CallAggregator
 	program         *tea.Program
 	callTracker     *CallTracker
@@ -92,6 +93,9 @@ func (lca *LocalCallAggregator) ProcessPacket(pkt *types.PacketDisplay) {
 
 // scheduleCallUpdate schedules a throttled call update notification
 func (lca *LocalCallAggregator) scheduleCallUpdate() {
+	if lca.silent {
+		return
+	}
 	lca.mu.Lock()
 	defer lca.mu.Unlock()
 

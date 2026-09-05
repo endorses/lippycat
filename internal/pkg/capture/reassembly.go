@@ -170,9 +170,15 @@ func (a *TCPAssembler) Assemble(netFlow gopacket.Flow, tcp *layers.TCP, ts time.
 // AssembleCaptureInfo feeds a TCP packet to the assembler while preserving
 // caller-owned ancillary context for reassembled application messages.
 func (a *TCPAssembler) AssembleCaptureInfo(netFlow gopacket.Flow, tcp *layers.TCP, ci gopacket.CaptureInfo) {
+	a.AssembleWithContext(netFlow, tcp, timestampContext{ci: ci})
+}
+
+// AssembleWithContext preserves immutable caller context on queued TCP bytes.
+// Callers must keep the context and its ancillary values valid until flush.
+func (a *TCPAssembler) AssembleWithContext(netFlow gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.asm.AssembleWithContext(netFlow, tcp, timestampContext{ci: ci})
+	a.asm.AssembleWithContext(netFlow, tcp, ac)
 }
 
 // AssembleTCP implements the transitional packet-assembler contract used while

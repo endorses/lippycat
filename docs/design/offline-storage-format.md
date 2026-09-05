@@ -42,6 +42,14 @@ request handling supplies the token. Effective link type, raw bytes and all
 protocol metadata are preserved independently of the original source framing,
 including IP reassembly and decapsulation results.
 
+Before publication, analyzer finalization may append replacement summary/detail
+frames for an existing packet ID and rewrite that packet's fixed-width offset
+entry. Readers always follow the offset table, so superseded frames do not
+contribute packets, query matches, or statistics. All appended frames remain
+charged to the session disk budget until cleanup. Amendment errors prevent
+publication; final statistics are rebuilt from the updated offsets before the
+completion manifest is written.
+
 Every integer and float64 occupies eight bytes; signed integers use two's
 complement and floats use IEEE 754 bits. Narrow destination integers are range
 checked. Booleans occupy one byte (0 or 1). Pointers begin with one byte (0 for

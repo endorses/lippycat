@@ -5,6 +5,7 @@ package watch
 import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"os"
 )
 
 // WatchCmd is the base watch command that provides interactive TUI monitoring.
@@ -57,6 +58,24 @@ func init() {
 	// Shared flags (inherited by subcommands)
 	WatchCmd.PersistentFlags().IntVar(&bufferSize, "buffer-size", 10000, "maximum number of packets to keep in memory")
 	WatchCmd.PersistentFlags().IntVar(&maxCalls, "max-calls", 5000, "maximum number of VoIP calls to keep in memory")
+
+	// Offline limits are shared by the ready dataset and its replacement.
+	WatchCmd.PersistentFlags().String("offline-session-dir", os.TempDir(), "parent directory for private offline dataset storage")
+	WatchCmd.PersistentFlags().Uint64("offline-max-disk-bytes", 4<<30, "maximum combined offline dataset and query disk bytes")
+	WatchCmd.PersistentFlags().Uint64("offline-cache-bytes", 64<<20, "maximum offline display cache and read allocation bytes")
+	WatchCmd.PersistentFlags().Uint64("offline-max-record-bytes", 8<<20, "maximum encoded offline packet record bytes")
+	WatchCmd.PersistentFlags().Uint32("offline-max-sources", 64, "maximum simultaneous offline input files (up to 64)")
+	for key, flag := range map[string]string{
+		"session_dir":      "offline-session-dir",
+		"max_disk_bytes":   "offline-max-disk-bytes",
+		"cache_bytes":      "offline-cache-bytes",
+		"max_record_bytes": "offline-max-record-bytes",
+		"max_sources":      "offline-max-sources",
+	} {
+		if err := viper.BindPFlag("watch.offline."+key, WatchCmd.PersistentFlags().Lookup(flag)); err != nil {
+			panic(err)
+		}
+	}
 
 	// TLS configuration (enabled by default unless --insecure)
 	WatchCmd.PersistentFlags().BoolVar(&insecureAllowed, "insecure", false, "allow insecure connections without TLS (testing only)")

@@ -268,8 +268,10 @@ func (s *SettingsView) restartCapture() tea.Cmd {
 	// Clear error message on successful validation
 	s.errorMessage = ""
 
-	// Save buffer size to config
-	s.SaveBufferSize()
+	// Offline replacements persist only after successful dataset publication.
+	if s.modeType != settings.CaptureModeOffline {
+		s.SaveBufferSize()
+	}
 
 	// Convert mode's settings.RestartCaptureMsg to components.RestartCaptureMsg
 	modeMsg := s.currentMode.ToRestartMsg()
@@ -336,15 +338,7 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 			// PCAP file selected - create new offline mode with file
 			bufferSize := s.currentMode.GetBufferSize()
 			filter := s.currentMode.GetBPFFilter()
-			s.currentMode = s.factory.CreateMode(
-				settings.CaptureModeOffline,
-				bufferSize,
-				filter,
-				"",    // interface
-				false, // promiscuous
-				fullPath,
-				"", // nodesFile
-			)
+			s.currentMode = settings.NewOfflineSettingsFiles(fileMsg.Paths, bufferSize, filter, s.theme)
 			s.modeType = settings.CaptureModeOffline
 		} else if s.modeType == settings.CaptureModeRemote || s.nodesFileDialog.IsActive() {
 			// Nodes YAML file selected - create new remote mode with file

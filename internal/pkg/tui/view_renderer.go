@@ -13,6 +13,9 @@ import (
 
 // View renders the entire TUI based on current state
 func (m Model) View() string {
+	if m.offlineOpening {
+		return m.offlineModal()
+	}
 	if m.uiState.Quitting {
 		return "Goodbye!\n"
 	}
@@ -352,6 +355,10 @@ func (m *Model) prepareViewChrome() {
 			counts = fmt.Sprintf("Processed: %d | Retained: %d", processed, retained)
 			scope = "Packet filters/saves: retained only"
 		}
+		if m.offlineSession != nil {
+			counts = fmt.Sprintf("Indexed: %d packets | Preview: %d", m.offlineSession.Dataset.Count(), retained)
+			scope = "Packet browsing, filters and saves currently use this bounded preview. Events/calls retain bounded history."
+		}
 		m.uiState.OfflinePacketNotice = ansi.Truncate(counts, max(0, m.uiState.Width), "…") + "\n" + ansi.Truncate(scope, max(0, m.uiState.Width), "…")
 		m.uiState.FilterInput.SetPrompt("/ retained packets only:")
 		if m.uiState.Width < 40 {
@@ -364,7 +371,11 @@ func (m *Model) prepareViewChrome() {
 	// Use hunter count (not remote client count) for accurate node display
 	m.uiState.Header.SetNodeCount(m.uiState.NodesView.GetHunterCount())
 	m.uiState.Header.SetProcessorCount(m.uiState.NodesView.GetProcessorCount())
-	m.uiState.Header.SetTLSDecryption(viper.GetBool("watch.tls_decryption_enabled"))
+	if m.offlineSession != nil {
+		m.uiState.Header.SetTLSDecryption(m.offlineSession.TLSDecryptor != nil)
+	} else {
+		m.uiState.Header.SetTLSDecryption(viper.GetBool("watch.tls_decryption_enabled"))
+	}
 
 	// Update footer state
 	m.uiState.Footer.SetFilterMode(m.uiState.FilterMode)

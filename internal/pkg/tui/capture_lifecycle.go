@@ -22,6 +22,13 @@ import (
 
 // handleRestartCaptureMsg handles restarting capture with new settings
 func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model, tea.Cmd) {
+	if msg.Mode == components.CaptureModeOffline {
+		return m.openOffline(FreezeOfflineOpen(msg.PCAPFiles, msg.Filter, msg.BufferSize))
+	}
+	if m.offlineOpening || m.offlineSession != nil {
+		return m.leaveOffline(&msg, false)
+	}
+
 	// Stop any active streaming save before switching modes
 	if m.activeWriter != nil {
 		// Close writer synchronously (must complete before mode switch)

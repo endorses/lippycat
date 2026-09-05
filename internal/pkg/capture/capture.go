@@ -1308,6 +1308,11 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 
 // decapsulateESPNullWithCache permits isolated offline source state.
 func decapsulateESPNullWithCache(packet gopacket.Packet, espNullSPICache *ttlCache[uint32, layers.IPProtocol]) (gopacket.Packet, bool) {
+	espNull, icvSize := getESPNullConfig()
+	return decapsulateESPNullWithCacheConfig(packet, espNullSPICache, espNull, icvSize)
+}
+
+func decapsulateESPNullWithCacheConfig(packet gopacket.Packet, espNullSPICache *ttlCache[uint32, layers.IPProtocol], espNull bool, icvSize int) (gopacket.Packet, bool) {
 	espLayer := packet.Layer(layers.LayerTypeIPSecESP)
 	if espLayer == nil {
 		return packet, false
@@ -1342,7 +1347,6 @@ func decapsulateESPNullWithCache(packet gopacket.Packet, espNullSPICache *ttlCac
 	var innerLen int
 
 	// Check if explicit ESP-NULL mode is enabled (--esp-null flag).
-	espNull, icvSize := getESPNullConfig()
 
 	if !espNull {
 		// Default heuristic path: try content detection first.
@@ -1568,6 +1572,11 @@ func decapsulateIPv6FragmentESP(packet gopacket.Packet) (gopacket.Packet, bool) 
 
 // decapsulateIPv6FragmentESPWithCaches permits isolated offline source state.
 func decapsulateIPv6FragmentESPWithCaches(packet gopacket.Packet, espNullSPICache *ttlCache[uint32, layers.IPProtocol], ipv6FragIDCache *ttlCache[uint32, ipv6FragInfo]) (gopacket.Packet, bool) {
+	espNull, icvSize := getESPNullConfig()
+	return decapsulateIPv6FragmentESPWithCachesConfig(packet, espNullSPICache, ipv6FragIDCache, espNull, icvSize)
+}
+
+func decapsulateIPv6FragmentESPWithCachesConfig(packet gopacket.Packet, espNullSPICache *ttlCache[uint32, layers.IPProtocol], ipv6FragIDCache *ttlCache[uint32, ipv6FragInfo], espNull bool, icvSize int) (gopacket.Packet, bool) {
 	fragLayer := packet.Layer(layers.LayerTypeIPv6Fragment)
 	if fragLayer == nil {
 		return packet, false
@@ -1598,7 +1607,6 @@ func decapsulateIPv6FragmentESPWithCaches(packet gopacket.Packet, espNullSPICach
 	var syntheticTransport []byte
 
 	// Check if explicit ESP-NULL mode is enabled (--esp-null flag).
-	espNull, icvSize := getESPNullConfig()
 
 	if frag.FragmentOffset == 0 {
 		if !espNull {

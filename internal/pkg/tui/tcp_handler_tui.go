@@ -40,6 +40,7 @@ func GetTCPSIPTypeStats() (requests, responses, requestsWithSDP, responsesWithSD
 // It marks TCP flows as SIP when complete messages are detected via TCP reassembly.
 // This replaces the heuristic-based detection that caused false positives.
 type TUISIPHandler struct {
+	markFlow    func(string)
 	callTracker *CallTracker
 	aggregator  *LocalCallAggregator
 	flow        *sipflow.Orchestrator
@@ -134,7 +135,9 @@ func (h *TUISIPHandler) consumeSIPResult(result pipeline.SIPResult) {
 	}
 
 	// Increment SIP messages detected counter (diagnostic)
-	incrementSIPMessagesDetected()
+	if h.markFlow == nil {
+		incrementSIPMessagesDetected()
+	}
 
 	// Extract IP and port from endpoints to use getTCPFlowKey
 	// This ensures the same key format is used for marking and lookup
@@ -148,7 +151,11 @@ func (h *TUISIPHandler) consumeSIPResult(result pipeline.SIPResult) {
 	flowKey := getTCPFlowKey(srcIP, dstIP, srcPort, dstPort)
 
 	// Mark the flow as SIP (only need to mark once since key is symmetric)
-	markTCPSIPFlow(flowKey)
+	if h.markFlow != nil {
+		h.markFlow(flowKey)
+	} else {
+		markTCPSIPFlow(flowKey)
+	}
 
 	logger.Debug("TCP SIP message detected via reassembly",
 		"call_id", voip.SanitizeCallIDForLogging(callID),

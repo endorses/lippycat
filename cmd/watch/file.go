@@ -3,18 +3,12 @@
 package watch
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/endorses/lippycat/internal/pkg/capture"
-	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
-	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/endorses/lippycat/internal/pkg/tui"
 	"github.com/muesli/termenv"
@@ -83,11 +77,6 @@ func runFile(cmd *cobra.Command, args []string) {
 		defer logger.Enable()
 	}
 
-	// Initialize TLS decryptor if enabled
-	if tui.InitTLSDecryptorFromConfig() {
-		defer tui.ClearTLSDecryptor()
-	}
-
 	// Load buffer size from config, use flag value as fallback
 	configBufferSize := viper.GetInt("watch.buffer_size")
 	if configBufferSize > 0 {
@@ -113,85 +102,34 @@ func runFile(cmd *cobra.Command, args []string) {
 		"",              // nodesFilePath
 		insecureAllowed, // insecure - passed for remote mode switching
 	)
-	aggregator := model.PrepareLocalCallAggregator()
+
+	failed := false
+	defer func() {
+		if err := model.CloseOffline(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error cleaning up offline dataset: %v\n", err)
+			failed = true
+		}
+		model.Shutdown()
+		if failed {
+			os.Exit(1)
+		}
+	}()
 
 	// Force color profile since termenv may have detected wrong profile during init
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	// Start bubbletea program with mouse support
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
-	aggregator.SetProgram(p)
-	aggregator.Start()
-	defer aggregator.Stop()
-
 	// Store program reference for packet bridge
 	tui.SetCurrentProgram(p)
 
-	// Start packet capture in background using timestamp-ordered processing
-	// Earlier SIP signaling registers media ports before later RTP is analyzed.
-	// SIP packets are never prioritized ahead of earlier traffic.
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	tui.SetCaptureHandle(cancel, done)
-
-	go func() {
-		defer close(done)
-		// Wait for TUI to be fully initialized before starting capture.
-		// This prevents "kevent: bad file descriptor" errors that occur when
-		// capture runs before Bubbletea has completed terminal setup.
-		tui.WaitForTUIReady()
-
-		var replayErr error
-		openErr := capture.StartOfflineSnifferOrdered(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-			replayErr = startFileSnifferOrdered(ctx, devices, filter, p, model.CallTracker(), aggregator)
-		})
-		if ctx.Err() != nil {
-			return
-		}
-
-		// Notify TUI that capture is complete so it can drain remaining packets
-		stats := tui.GetBridgeStats()
-		p.Send(tui.CaptureCompleteMsg{PacketsReceived: stats.PacketsReceived, Err: errors.Join(openErr, replayErr)})
-	}()
+	// Offline indexing is owned by the model and starts from Model.Init.
 
 	// Run TUI
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-		os.Exit(1)
+		failed = true
 	}
-}
-
-// startFileSnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
-// Earlier SIP signaling registers media ports before later RTP is analyzed.
-// SIP packets are never prioritized ahead of earlier traffic.
-func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) error {
-	ordering := devicesToSourceOrdering(devices)
-	inputIdentity, err := events.OfflineInputIdentity(ordering)
-	if err != nil {
-		logger.Error("Failed to identify offline event inputs", "error", err)
-	}
-	pauseSignal := tui.GetGlobalPauseSignal()
-	processor := func(ch <-chan capture.PacketInfo) {
-		options := localEventAnalysisOptions(filter)
-		options.InputIdentity = inputIdentity
-		options.AnalysisProfile = watchFileAnalysisProfile(filter)
-		options.SourceOrdering = append([]string(nil), ordering...)
-		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator, options)
-	}
-	// Merge sequential sources in timestamp order with bounded reader state.
-	return capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
-}
-
-func watchFileAnalysisProfile(filter string) string {
-	return fmt.Sprintf("watch-eventanalysis-v1|filter=%s", filter)
-}
-
-func devicesToSourceOrdering(devices []pcaptypes.PcapInterface) []string {
-	ordering := make([]string, 0, len(devices))
-	for _, device := range devices {
-		ordering = append(ordering, device.Name())
-	}
-	return ordering
 }
 
 func init() {

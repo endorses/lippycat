@@ -1,8 +1,7 @@
 # Offline dataset storage
 
 This package supplies normalized temporary storage and complete packet queries.
-It is independent of Bubble Tea and packet analyzers. The TUI session adapter and
-command integration are separate phases of the
+It is independent of Bubble Tea and packet analyzers. The TUI session adapter implements indexing and atomic replacement as part of the
 [offline dataset plan](../../../docs/plans/watch-file-scalable-offline-dataset.md).
 
 Create one `Storage` with validated `ResourceLimits` and share it between the
@@ -14,8 +13,12 @@ Append finalized logical `Detail` records in order. The builder assigns
 zero-based packet IDs and ignores caller tokens/IDs.
 The caller supplies exact source identity, effective link type, raw bytes, and
 captured/original lengths after reassembly or decapsulation. Complete analyzer
-EOF processing and freeze deferred metadata before appending affected records.
-Storage does not run analysis or update packet metadata on reads.
+EOF processing before `Finish`. Use `Builder.UpdateDetail` for metadata released
+after its packet was appended; the callback updates one bounded detail, preserves
+its ID, and persists replacement summary/detail frames. Superseded frames remain
+charged to the disk budget. Final statistics are rebuilt once from the final
+summaries when amendments occurred. Storage does not run analysis or update
+packet metadata on reads.
 
 `Finish` publishes a dataset only after writing its completion manifest. On a
 failed build, close the builder to clean up its temporary files. A completed
@@ -56,7 +59,8 @@ addition to pages and pins. Exhaustion returns an explicit allocation error;
 workers never wait indefinitely for a pin held by the caller.
 
 The provisional deployment limits remain 64 MiB cache, 4 GiB disk, 8 MiB maximum
-record, and 64 sources. They are explicit construction parameters here; flags
-will be exposed when the session workflow consumes them. The precise framing,
+record, and 64 sources. The watch command exposes `--offline-session-dir`, `--offline-max-disk-bytes`,
+`--offline-cache-bytes`, `--offline-max-record-bytes`, and
+`--offline-max-sources`, also configurable through `watch.offline` in Viper. The precise framing,
 metadata projection, and ownership contract is documented in
 [offline contracts](../../../docs/design/watch-file-offline-contracts.md).

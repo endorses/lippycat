@@ -269,3 +269,38 @@ lc watch file signaling.pcap media.pcap
 - [docs/TUI_REMOTE_CAPTURE.md](../../docs/TUI_REMOTE_CAPTURE.md) - Remote capture setup guide
 - [docs/SECURITY.md](../../docs/SECURITY.md) - TLS/mTLS configuration
 - [internal/pkg/tui/CLAUDE.md](../../internal/pkg/tui/CLAUDE.md) - TUI architecture
+
+### Offline indexing lifecycle
+
+`watch file` indexes the complete accepted packet stream into private temporary
+storage before installing the dataset. Startup, file dialogs, settings, and
+restarts use the same indexing workflow. The progress modal reports phase,
+source count, logical packets, scanned logical bytes, elapsed time, and disk
+usage. Escape cancels and keeps the modal open until cleanup finishes. A failed
+or cancelled replacement preserves the previous ready dataset and its state.
+
+The current incremental implementation shows a preview of up to 32 packets.
+Packet navigation, interactive filters, and saves still operate on that preview;
+complete dataset browsing and export follow in later implementation phases.
+Statistics are accumulated over every indexed packet. Events and calls retain
+bounded histories, independently of packet completeness.
+
+Offline resource flags (also available when switching from live/remote mode):
+
+| Flag                         | Viper key                        | Default                |
+| ---------------------------- | -------------------------------- | ---------------------- |
+| `--offline-session-dir`      | `watch.offline.session_dir`      | OS temporary directory |
+| `--offline-max-disk-bytes`   | `watch.offline.max_disk_bytes`   | 4 GiB                  |
+| `--offline-cache-bytes`      | `watch.offline.cache_bytes`      | 64 MiB                 |
+| `--offline-max-record-bytes` | `watch.offline.max_record_bytes` | 8 MiB                  |
+| `--offline-max-sources`      | `watch.offline.max_sources`      | 64                     |
+
+The ready dataset and replacement share disk/cache budgets. Resource exhaustion
+fails the replacement without publishing a partial dataset. Leave offline mode
+before changing budgets. These limits do not constitute a process RSS limit:
+readers, analysis, retained history, and the Go runtime have separate overhead.
+Offline SIP framing additionally caps active TCP streams at 4,096, total frame
+buffers at 16 MiB, and SIP messages at 64 KiB; tighter configured SIP stream,
+message, and content limits also apply. A framing resource limit fails indexing
+explicitly. TLS key logs are read into a bounded session snapshot and are not
+watched for changes during replay.

@@ -22,61 +22,61 @@ sudo lc watch live -i eth0 -p
 
 **Key flags:**
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--interface` | `-i` | `any` | Network interface(s), comma-separated |
-| `--filter` | `-f` | — | BPF filter expression |
-| `--promiscuous` | `-p` | `false` | Promiscuous mode |
-| `--buffer-size` | — | `10000` | Maximum packets in memory |
-| `--max-calls` | — | `5000` | Maximum VoIP calls in memory |
-| `--enable-gpu` | — | `false` | Enable GPU-accelerated VoIP parsing |
-| `--gpu-backend` | `-g` | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd` |
-| `--gpu-batch-size` | — | `100` | Batch size for GPU processing |
-| `--debug-log` | — | — | Write debug logs to file |
+| Flag               | Short | Default | Description                                       |
+| ------------------ | ----- | ------- | ------------------------------------------------- |
+| `--interface`      | `-i`  | `any`   | Network interface(s), comma-separated             |
+| `--filter`         | `-f`  | —       | BPF filter expression                             |
+| `--promiscuous`    | `-p`  | `false` | Promiscuous mode                                  |
+| `--buffer-size`    | —     | `10000` | Maximum packets in memory                         |
+| `--max-calls`      | —     | `5000`  | Maximum VoIP calls in memory                      |
+| `--enable-gpu`     | —     | `false` | Enable GPU-accelerated VoIP parsing               |
+| `--gpu-backend`    | `-g`  | `auto`  | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd` |
+| `--gpu-batch-size` | —     | `100`   | Batch size for GPU processing                     |
+| `--debug-log`      | —     | —       | Write debug logs to file                          |
 
 ### TUI Layout
 
 The interface is organized into five tabs:
 
-| Tab | Shortcut | Purpose |
-|-----|----------|---------|
-| Capture | `Alt+1` | Packets, calls, DNS queries, email, HTTP traffic |
-| Nodes | `Alt+2` | Hunter/processor node management |
-| Statistics | `Alt+3` | Protocol breakdown, traffic analytics |
-| Settings | `Alt+4` | Capture configuration |
-| Help | `Alt+5` or `?` | Searchable keybindings and workflows |
+| Tab        | Shortcut       | Purpose                                          |
+| ---------- | -------------- | ------------------------------------------------ |
+| Capture    | `Alt+1`        | Packets, calls, DNS queries, email, HTTP traffic |
+| Nodes      | `Alt+2`        | Hunter/processor node management                 |
+| Statistics | `Alt+3`        | Protocol breakdown, traffic analytics            |
+| Settings   | `Alt+4`        | Capture configuration                            |
+| Help       | `Alt+5` or `?` | Searchable keybindings and workflows             |
 
 ### Global Keybindings
 
 These work on any tab:
 
-| Key | Action |
-|-----|--------|
-| `Space` | Pause/resume capture |
-| `p` | Open protocol selector |
-| `Tab` / `Shift+Tab` | Next / previous tab |
-| `Alt+1` through `Alt+5` | Jump to tab |
-| `?` | Jump to Help tab |
-| `q` / `Ctrl+C` | Quit |
+| Key                     | Action                 |
+| ----------------------- | ---------------------- |
+| `Space`                 | Pause/resume capture   |
+| `p`                     | Open protocol selector |
+| `Tab` / `Shift+Tab`     | Next / previous tab    |
+| `Alt+1` through `Alt+5` | Jump to tab            |
+| `?`                     | Jump to Help tab       |
+| `q` / `Ctrl+C`          | Quit                   |
 
 ### Capture Tab Navigation
 
 The Capture tab is the main view. Navigate with vim-style keys:
 
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Scroll down |
-| `k` / `↑` | Scroll up |
-| `g` / `Home` | Jump to first packet |
-| `G` / `End` | Jump to last packet |
-| `PgUp` / `PgDn` | Page up / down |
-| `h` / `←` | Focus left pane (packet list) |
-| `l` / `→` | Focus right pane (details/hex) |
-| `d` | Toggle details panel |
-| `t` | Toggle time display (clock / relative) |
-| `v` | Toggle view mode (packets / protocol-specific) |
-| `x` | Flush/clear all packets |
-| `w` | Save packets to PCAP |
+| Key             | Action                                         |
+| --------------- | ---------------------------------------------- |
+| `j` / `↓`       | Scroll down                                    |
+| `k` / `↑`       | Scroll up                                      |
+| `g` / `Home`    | Jump to first packet                           |
+| `G` / `End`     | Jump to last packet                            |
+| `PgUp` / `PgDn` | Page up / down                                 |
+| `h` / `←`       | Focus left pane (packet list)                  |
+| `l` / `→`       | Focus right pane (details/hex)                 |
+| `d`             | Toggle details panel                           |
+| `t`             | Toggle time display (clock / relative)         |
+| `v`             | Toggle view mode (packets / protocol-specific) |
+| `x`             | Flush/clear all packets                        |
+| `w`             | Save packets to PCAP                           |
 
 ### Filtering in the TUI
 
@@ -84,38 +84,38 @@ Press `/` on the Capture tab to enter filter mode. Type a filter expression and 
 
 **Filter types:**
 
-| Filter | Example | Description |
-|--------|---------|-------------|
-| Protocol | `protocol:voip` | Show only VoIP traffic |
-| Text (all) | `text:all alicent` | Search all fields |
-| Text (src) | `text:src 10.0.0.1` | Search source |
-| Text (dst) | `text:dst 10.0.0.1` | Search destination |
-| Text (info) | `text:info INVITE` | Search info field |
-| BPF port | `port 5060` | Specific port |
-| BPF host | `host 10.0.0.1` | Source or destination IP |
-| VoIP Call-ID | `callid abc123` | Specific call |
-| SIP method | `method:INVITE` | SIP method type |
+| Filter       | Example             | Description              |
+| ------------ | ------------------- | ------------------------ |
+| Protocol     | `protocol:voip`     | Show only VoIP traffic   |
+| Text (all)   | `text:all alicent`  | Search all fields        |
+| Text (src)   | `text:src 10.0.0.1` | Search source            |
+| Text (dst)   | `text:dst 10.0.0.1` | Search destination       |
+| Text (info)  | `text:info INVITE`  | Search info field        |
+| BPF port     | `port 5060`         | Specific port            |
+| BPF host     | `host 10.0.0.1`     | Source or destination IP |
+| VoIP Call-ID | `callid abc123`     | Specific call            |
+| SIP method   | `method:INVITE`     | SIP method type          |
 
 **Filter management:**
 
-| Key | Action |
-|-----|--------|
-| `/` | Enter filter mode |
-| `Enter` | Apply filter |
-| `Escape` | Cancel |
-| `c` | Remove last filter |
-| `C` (Shift) | Clear all filters |
+| Key         | Action             |
+| ----------- | ------------------ |
+| `/`         | Enter filter mode  |
+| `Enter`     | Apply filter       |
+| `Escape`    | Cancel             |
+| `c`         | Remove last filter |
+| `C` (Shift) | Clear all filters  |
 
 ### View Modes
 
 Press `v` to toggle between protocol-specific views:
 
-| Protocol | Views |
-|----------|-------|
-| VoIP | Packets ↔ Calls |
-| DNS | Packets ↔ Queries |
-| HTTP | Packets ↔ HTTP Traffic |
-| Email | Packets ↔ Emails |
+| Protocol | Views                  |
+| -------- | ---------------------- |
+| VoIP     | Packets ↔ Calls        |
+| DNS      | Packets ↔ Queries      |
+| HTTP     | Packets ↔ HTTP Traffic |
+| Email    | Packets ↔ Emails       |
 
 ## PCAP File Analysis
 
@@ -133,12 +133,29 @@ lc watch file sip.pcap rtp.pcap signaling.pcap
 
 When opening multiple files, packets are merged and displayed in timestamp order.
 
+The current offline TUI shows **processed** packets (packet-store ingestion since
+the last clear/restart) separately from **retained** packets available for
+browsing. `--buffer-size` / `watch.buffer_size` defaults to 10,000 and limits the
+recent packet ring. It does not limit total process memory: file input currently
+collects and sorts packets in memory before replay.
+
+Interactive packet filters, including removing or clearing filters, operate on
+retained packets only. They cannot recover packets evicted from the ring. During
+replay, the filtered display keeps a separate bounded history of matching
+arrivals. Offline saving exports the retained selection, which may omit earlier
+packets. Use the source-level `-f` BPF filter to restrict what is read. Packet
+statistics accumulate ingested packets; interactive filter changes rebuild the
+retained selection and match count, not the packet statistics. Processed counts
+are not an independently verified file total. Events and Calls retain separate
+bounded histories, and event delivery can also lose queued batches under
+pressure. These views do not provide complete file history.
+
 **File mode flags:**
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--filter` | `-f` | BPF filter expression |
-| `--tls-keylog` | — | SSLKEYLOGFILE for TLS decryption |
+| Flag           | Short | Description                      |
+| -------------- | ----- | -------------------------------- |
+| `--filter`     | `-f`  | BPF filter expression            |
+| `--tls-keylog` | —     | SSLKEYLOGFILE for TLS decryption |
 
 ### TLS Decryption
 

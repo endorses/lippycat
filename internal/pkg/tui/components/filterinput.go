@@ -47,6 +47,11 @@ func (f *FilterInput) SetWidth(width int) {
 	f.width = width
 }
 
+// SetPrompt describes the scope of the input without changing its filter text.
+func (f *FilterInput) SetPrompt(prompt string) {
+	f.prompt = prompt
+}
+
 // Activate shows the input
 func (f *FilterInput) Activate() {
 	f.active = true

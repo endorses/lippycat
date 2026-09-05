@@ -301,6 +301,8 @@ func (h *Header) View() string {
 	var rightText string
 	if widthClass == responsive.Narrow {
 		rightText = formatNumber(h.packets)
+	} else if h.captureMode == CaptureModeOffline {
+		rightText = fmt.Sprintf("Retained: %s", formatNumber(h.packets))
 	} else {
 		rightText = fmt.Sprintf("Packets: %s", formatNumber(h.packets))
 	}

@@ -3,7 +3,11 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/spf13/viper"
 )
 
@@ -246,6 +250,10 @@ func (m Model) renderBottomArea(footerView string) string {
 		return toastView + "\n" + footerView
 	}
 
+	if m.uiState.OfflinePacketNotice != "" {
+		return m.uiState.OfflinePacketNotice + "\n\n" + footerView
+	}
+
 	// All tabs: 3 blank lines + footer (2 lines) = 5 lines for bottomArea
 	// (Nodes tab hints bar is part of mainContent, not bottomArea)
 	return "\n\n\n" + footerView
@@ -334,6 +342,22 @@ func (m *Model) prepareViewChrome() {
 	// Update header state
 	m.uiState.Header.SetState(m.uiState.Capturing, m.uiState.Paused)
 	m.uiState.Header.SetPacketCount(m.packetStore.PacketsCount, m.packetStore.MaxPackets)
+	m.uiState.OfflinePacketNotice = ""
+	m.uiState.FilterInput.SetPrompt("/")
+	if m.captureMode == components.CaptureModeOffline {
+		_, retained, processed, _ := m.packetStore.GetBufferInfo()
+		counts := fmt.Sprintf("Processed: %d packets | Retained: %d", processed, retained)
+		scope := "Interactive packet filters and saves use retained packets only."
+		if m.uiState.Width < 64 {
+			counts = fmt.Sprintf("Processed: %d | Retained: %d", processed, retained)
+			scope = "Packet filters/saves: retained only"
+		}
+		m.uiState.OfflinePacketNotice = ansi.Truncate(counts, max(0, m.uiState.Width), "…") + "\n" + ansi.Truncate(scope, max(0, m.uiState.Width), "…")
+		m.uiState.FilterInput.SetPrompt("/ retained packets only:")
+		if m.uiState.Width < 40 {
+			m.uiState.FilterInput.SetPrompt(ansi.Truncate("/ retained:", max(1, m.uiState.Width-8), "…"))
+		}
+	}
 	m.uiState.Header.SetInterface(m.interfaceName)
 	m.uiState.Header.SetCaptureMode(m.captureMode)
 	m.uiState.Header.SetPCAPFileCount(len(m.pcapFiles))

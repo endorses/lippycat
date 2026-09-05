@@ -24,6 +24,7 @@ lc watch live -i eth0 -p
 ```
 
 **Flags:**
+
 - `-i, --interface` - Network interface(s) to monitor, comma separated (default: `any`)
 - `-f, --filter` - BPF filter expression
 - `-p, --promiscuous` - Enable promiscuous mode
@@ -53,12 +54,32 @@ lc watch file call1.pcap call2.pcap -f "udp"
 ```
 
 **Arguments:**
+
 - `files...` - One or more PCAP files to analyze (required)
 
 **Flags:**
+
 - `-f, --filter` - BPF filter expression
 - `--tls-keylog` - Path to SSLKEYLOGFILE for TLS decryption
-- `--buffer-size` - Maximum packets in memory (default: 10000)
+- `--buffer-size` - Recent packet ring capacity (default: 10000; not a total memory limit)
+
+**Current offline retention:** The TUI distinguishes packets processed by its
+packet store from packets retained for browsing. `--buffer-size` (or
+`watch.buffer_size`, default 10,000) limits the recent packet ring, not the
+number read from the input or the process's total memory. Offline input currently
+collects and sorts packets in memory before replay.
+
+Interactive packet filters (including removal and clearing) scan retained
+packets only; they do not search the entire file. During replay, the filtered
+display also retains a bounded history of matching arrivals. Offline saves write
+the retained packet selection, so an export may omit earlier input packets.
+The `-f` BPF filter is applied when reading the source and has a different scope.
+Processed counts describe ingestion since the last clear/restart, not an
+independently verified file total. Packet statistics accumulate ingested packets;
+interactive filter changes rebuild the retained selection and match count, not
+the packet statistics. Events and Calls have separate bounded histories;
+event delivery can also lose queued batches under pressure. Neither view promises
+complete file history.
 
 #### TLS Decryption
 
@@ -117,6 +138,7 @@ lc watch remote -P localhost:55555 --insecure
 ```
 
 **Flags:**
+
 - `-P, --processor` - Processor address (host:port) to connect directly
 - `-n, --nodes-file` - Path to nodes YAML file (default: `~/.config/lippycat/nodes.yaml` or `./nodes.yaml`)
 - `--insecure` - Allow insecure connections without TLS (testing only)
@@ -130,11 +152,13 @@ lc watch remote -P localhost:55555 --insecure
 ## TUI Navigation
 
 ### Global Keys
+
 - `Tab` - Switch between views
 - `q` / `Ctrl+C` - Quit
 - `?` - Help
 
 ### Packet View
+
 - `j` / `k` / `Up` / `Down` - Navigate packets
 - `g` / `Home` - Jump to first packet
 - `G` / `End` - Jump to last packet
@@ -153,11 +177,13 @@ subject to the later batch and ring limits. Offline PCAP replay uses a separate
 preserve-all path.
 
 ### Nodes View (Remote Mode)
+
 - `s` - Subscribe to hunters
 - `d` - Unsubscribe from hunters
 - `Enter` - Connect to processor
 
 ### Calls View (VoIP)
+
 - `j` / `k` - Navigate calls
 - `Enter` - View call details
 

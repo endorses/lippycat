@@ -640,6 +640,20 @@ fixture, empty/all-match scans with bounded resource accounting, and exact
 destination and clean up temporary files. Phase 5 is complete; phase 6 remains
 pending for release acceptance, benchmarks, and operator documentation.
 
+Phase 5 review correction (2026-09-05): three sub-agent reviews and root code
+verification confirmed one input regression: the offline filter branch bypassed
+the existing history update and persistence. It now records entered filters
+using the same behavior as the live input path. The regression failed before
+the fix and verifies in-memory history, temporary YAML persistence, and Up-arrow
+recall. Independent review verified the correction. No additional filtering,
+statistics, or export defects were confirmed.
+
+Verification: offline, all TUI packages, and watch checks pass under `all` and
+`tui`; the new regression also passes under both tags. Offline and component race
+checks pass. An initial full TUI race run failed with truncated diagnostics; a
+rerun with captured output passed, so the initial failure remains unexplained.
+Phase 6 release acceptance remains pending.
+
 ### Phase 6 — Acceptance, documentation, and release
 
 - [ ] Compare global/filtered statistics and selected details/raw bytes against

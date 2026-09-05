@@ -5,12 +5,44 @@ package tui
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/offline"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOfflineFilterInputPreservesHistory(t *testing.T) {
+	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
+	previousConfig := viper.ConfigFileUsed()
+	previousHistory := viper.Get("watch.filter_history")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	viper.SetConfigFile(configPath)
+	t.Cleanup(func() {
+		viper.SetConfigFile(previousConfig)
+		viper.Set("watch.filter_history", previousHistory)
+	})
+	m.uiState.FilterInput.SetHistory(nil)
+	m, _ = m.handleEnterFilterMode()
+	const expression = "NOT impossible"
+	for _, r := range expression {
+		m.uiState.FilterInput.InsertRune(r)
+	}
+	updated, cmd := m.handleFilterInput(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	require.Equal(t, []string{expression}, m.uiState.FilterInput.GetHistory())
+	persisted := viper.New()
+	persisted.SetConfigFile(configPath)
+	require.NoError(t, persisted.ReadInConfig())
+	require.Equal(t, []string{expression}, persisted.GetStringSlice("watch.filter_history"))
+	m = finishOfflineFilter(t, m, cmd)
+	m, _ = m.handleEnterFilterMode()
+	updated, _ = m.handleFilterInput(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	require.Equal(t, expression, m.uiState.FilterInput.Value())
+}
 
 func TestOfflineFilterDistantDetailAndRemove(t *testing.T) {
 	m := offlineRelatedModel(t)

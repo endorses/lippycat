@@ -26,7 +26,10 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if value == "" {
 				return m, m.startOfflineFilter(filters.NewFilterChain(), nil)
 			}
-			return m, m.parseAndApplyFilter(value)
+			cmd := m.parseAndApplyFilter(value)
+			m.uiState.FilterInput.AddToHistory(value)
+			saveFilterHistory(&m.uiState.FilterInput)
+			return m, cmd
 		}
 		// Apply the filter
 		filterValue := m.uiState.FilterInput.Value()

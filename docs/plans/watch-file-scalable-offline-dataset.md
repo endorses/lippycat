@@ -754,6 +754,56 @@ methodology. Fresh-process 100,000/1,000,000-packet storage runs used
 throughput gates. No runtime defects or other Phase 6 implementation gaps were
 confirmed.
 
+## Indexing performance follow-up
+
+- [x] Measure and remove redundant per-packet event flush barriers while preserving
+      lossless event admission and final EOF drain.
+- [x] Reduce per-record storage I/O overhead with bounded resource accounting;
+      benchmark and verify amendments, failures, queries, and cleanup.
+- [x] Narrow the opening modal while keeping content left aligned and the box
+      centered in the terminal.
+- [x] Record measurements, run relevant checks, format, and commit this follow-up.
+
+Implementation (2026-09-05): the indexer relies on the analyzer's lossless
+pre-admission drain and final dispatcher close, eliminating a redundant barrier
+after every packet. A 2,049-flow regression verifies EOF delivery beyond queue
+capacity with no transport loss. Storage maintains append offsets across both
+new records and deferred amendments, and writes each frame header and payload
+together. This reduces each packet append from five writes and two seeks to
+three writes and no seeks, without persistent buffering or a schema change.
+Frame-prefix allocation remains charged to the memory budget. The opening modal
+uses a stable 48-column content width, retaining left alignment and centering.
+
+Measurements on Linux/amd64, Intel i9-13900HX, five isolated one-iteration runs
+per version, comparing the prior committed implementation with this follow-up:
+
+| Benchmark (100,000 packets) | Before median | After median | Throughput gain |
+| -------------------------- | ------------- | ------------ | --------------- |
+| Storage indexing           | 170,217 pkt/s  | 213,199 pkt/s | 25.3%           |
+| Full indexer, one source    | 47,430 pkt/s   | 56,518 pkt/s  | 19.2%           |
+
+The full-indexer fixture mixes DNS and ordinary UDP. Before samples were
+48,025 / 46,974 / 48,149 / 44,206 / 47,430 pkt/s; after samples were
+59,505 / 56,169 / 58,266 / 56,518 / 56,447 pkt/s. Live heap stayed near 10 MB,
+sampled peak heap within 45–49 MB, and cancellation cleanup below 1.2 ms.
+Full-indexer disk amplification was 8.966 before and 8.955–8.966 after;
+storage-only amplification remained 2.773. These generated-fixture results do
+not predict an exact speedup for the screenshot's capture or reduce normalized
+storage amplification materially.
+
+Reproduce with `go test -tags all ./internal/pkg/tui -run '^$'
+-bench '^BenchmarkPhase6OfflineIndex/packets_100000$/sources_1$'
+-benchtime=1x -count=5`; the storage benchmark is `BenchmarkPhase6Dataset` in
+`internal/pkg/offline/phase6_benchmark_test.go`. Benchmark versions sequentially
+without concurrent tests or other benchmark processes.
+
+Verification: offline, all TUI packages, and watch tests pass under `all` and
+`tui`; full offline and TUI race suites pass under `all`. Existing amendment,
+corruption, allocation-limit, short-write, query, export, and cleanup coverage
+passes. Independent code review found no regressions in event drain,
+cancellation, offset maintenance, or frame accounting. Go files are formatted
+and the diff passes whitespace checks.
+
 ## Deferred optimizations and extensions
 
 These are follow-up work, not release blockers for phases 0–6.

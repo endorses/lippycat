@@ -417,7 +417,15 @@ func (m Model) offlineModal() string {
 		content += "\n\nCleanup failed: " + m.offlineCleanupError
 		footer = "Enter: Retry cleanup   Ctrl+C: Retry and quit"
 	}
-	return components.RenderModal(components.ModalRenderOptions{Title: "Opening offline dataset", Content: content, Footer: footer, Width: m.uiState.Width, Height: m.uiState.Height, Theme: m.uiState.Theme})
+	return components.RenderModal(components.ModalRenderOptions{
+		Title:      "Opening offline dataset",
+		Content:    content,
+		Footer:     footer,
+		Width:      m.uiState.Width,
+		Height:     m.uiState.Height,
+		Theme:      m.uiState.Theme,
+		ModalWidth: 48, // Fit progress counters without shifting the modal as they grow.
+	})
 }
 
 // Mode changes and quit join workers and release sessions in a command, keeping

@@ -229,7 +229,7 @@ func (e *encoder) value(v reflect.Value) error {
 }
 
 func writeRecord(w io.Writer, kind uint16, id PacketID, value any, max uint64) (uint64, error) {
-	if (kind != recordKindSummary && kind != recordKindDetail) || max > uint64(int(^uint(0)>>1)) {
+	if (kind != recordKindSummary && kind != recordKindDetail) || max > uint64(int(^uint(0)>>1)-frameHeaderBytes) {
 		return 0, fmt.Errorf("invalid offline record kind or budget")
 	}
 	wire, err := wireValue(value)
@@ -247,32 +247,27 @@ func writeRecord(w io.Writer, kind uint16, id PacketID, value any, max uint64) (
 		return 0, err
 	}
 	size := e.size
-	e = encoder{max: max, data: make([]byte, 0, int(size))}
+	// Reserve the frame prefix in the serializer allocation so each record
+	// reaches the file in one write, without copying the encoded payload.
+	e = encoder{max: max, data: make([]byte, frameHeaderBytes, frameHeaderBytes+int(size))}
 	if err = e.value(reflect.ValueOf(wire)); err != nil {
 		return 0, err
 	}
-	var h [frameHeaderBytes]byte
+	h := e.data[:frameHeaderBytes]
 	copy(h[:4], "LCOF")
 	binary.LittleEndian.PutUint16(h[4:6], RecordSchemaVersion)
 	binary.LittleEndian.PutUint16(h[6:8], kind)
 	binary.LittleEndian.PutUint64(h[8:16], size)
 	binary.LittleEndian.PutUint64(h[16:24], uint64(id))
-	binary.LittleEndian.PutUint32(h[24:28], crc32.ChecksumIEEE(e.data))
-	n, err := w.Write(h[:])
-	if err == nil && n != len(h) {
+	binary.LittleEndian.PutUint32(h[24:28], crc32.ChecksumIEEE(e.data[frameHeaderBytes:]))
+	n, err := w.Write(e.data)
+	if err == nil && n != len(e.data) {
 		err = io.ErrShortWrite
 	}
 	if err != nil {
 		return uint64(n), fmt.Errorf("write offline frame: %w", err)
 	}
-	m, err := w.Write(e.data)
-	if err == nil && m != len(e.data) {
-		err = io.ErrShortWrite
-	}
-	if err != nil {
-		return uint64(n + m), fmt.Errorf("write offline payload: %w", err)
-	}
-	return uint64(n + m), nil
+	return uint64(n), nil
 }
 
 type decoder struct {

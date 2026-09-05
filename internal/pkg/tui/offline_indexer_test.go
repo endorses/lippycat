@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	"github.com/google/gopacket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -86,6 +87,30 @@ func TestOfflineIndexerRepeatIdentityAndEOFFlush(t *testing.T) {
 	require.Positive(t, a.EventStore.Stats().Arrived)
 	require.NotSame(t, a.Tracker, b.Tracker)
 	require.NotSame(t, a.EventStore, b.EventStore)
+}
+
+func TestOfflineIndexerDrainsEOFBeyondEventQueueCapacity(t *testing.T) {
+	// Ordinary UDP produces connection events only at EOF. More distinct flows
+	// than either dispatcher queue can hold must all reach the published store.
+	const count = 2049
+	path := filepath.Join(t.TempDir(), "eof-flows.pcap")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	w := pcapgo.NewWriter(f)
+	require.NoError(t, w.WriteFileHeader(65535, layers.LinkTypeEthernet))
+	for i := 0; i < count; i++ {
+		raw := goldenUDPPacket(t, layers.UDPPort(20000+i), 32001, []byte("offline EOF flow"))
+		require.NoError(t, w.WritePacket(gopacket.CaptureInfo{
+			Timestamp: time.Unix(1700000000, int64(i)*1000), CaptureLength: len(raw), Length: len(raw),
+		}, raw))
+	}
+	require.NoError(t, f.Close())
+	session, err := indexOfflineDataset(context.Background(), testOfflineStorage(t), 1, OfflineAnalysisConfig{Inputs: []string{path}, EventCapacity: count + 1}, nil)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, session.Close()) }()
+	require.Equal(t, uint64(count), session.Dataset.Count())
+	require.Len(t, session.EventStore.Events(), count)
+	require.Zero(t, session.EventStore.Stats().TransportLost)
 }
 
 func TestOfflineTLSKeySnapshotAndRepeatedClose(t *testing.T) {

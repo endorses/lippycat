@@ -37,7 +37,7 @@ func (b *Builder) UpdateDetail(ctx context.Context, id PacketID, mutate func(*De
 	}
 	defer func() { d.storage.releaseMemory(held) }()
 	// Cover the decoded detail, callback growth, summary and both serializers.
-	reservation := 4 * d.storage.limits.MaxRecordBytes
+	reservation := 4*d.storage.limits.MaxRecordBytes + 2*frameHeaderBytes
 	if err = d.storage.reserveMemory(ctx, reservation-held); err != nil {
 		return err
 	}
@@ -59,14 +59,7 @@ func (b *Builder) UpdateDetail(ctx context.Context, id PacketID, mutate func(*De
 	if _, err = recordMemory(detail, d.storage.limits.MaxRecordBytes); err != nil {
 		return err
 	}
-	so, err := d.summaries.Seek(0, io.SeekEnd)
-	if err != nil {
-		return err
-	}
-	do, err := d.details.Seek(0, io.SeekEnd)
-	if err != nil {
-		return err
-	}
+	so, do := b.summaryEnd, b.detailEnd
 	sn, err := writeRecord(&builderWriter{b: b, f: d.summaries}, 1, id, summary, d.storage.limits.MaxRecordBytes)
 	if err != nil {
 		return err
@@ -93,6 +86,8 @@ func (b *Builder) UpdateDetail(ctx context.Context, id PacketID, mutate func(*De
 		}
 	}
 	d.storage.mu.Unlock()
+	b.summaryEnd += sn
+	b.detailEnd += dn
 	b.amended = true
 	return nil
 }

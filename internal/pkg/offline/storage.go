@@ -130,14 +130,17 @@ func statisticsForManifest(s Statistics) manifestStatistics {
 }
 
 type Builder struct {
-	mu          sync.Mutex
-	d           *diskDataset
-	sources     []SourcePosition
-	accumulator *statisticsAccumulator
-	done        bool
-	published   bool
-	failure     error
-	amended     bool
+	// Stream ends are maintained under mu by Append and UpdateDetail. Reads and
+	// offset-table amendments use ReadAt/WriteAt and never move these cursors.
+	summaryEnd, detailEnd uint64
+	mu                    sync.Mutex
+	d                     *diskDataset
+	sources               []SourcePosition
+	accumulator           *statisticsAccumulator
+	done                  bool
+	published             bool
+	failure               error
+	amended               bool
 }
 
 func (s *Storage) NewBuilder(generation DatasetGeneration, sources []SourcePosition) (*Builder, error) {
@@ -153,7 +156,7 @@ func (s *Storage) NewBuilder(generation DatasetGeneration, sources []SourcePosit
 		return nil, fmt.Errorf("create private offline session: %w", err)
 	}
 	d := &diskDataset{storage: s, dir: dir, generation: generation, queries: make(map[*diskQuery]struct{})}
-	b := &Builder{d: d, sources: append([]SourcePosition(nil), sources...), accumulator: newStatisticsAccumulator()}
+	b := &Builder{d: d, summaryEnd: streamHeaderBytes, detailEnd: streamHeaderBytes, sources: append([]SourcePosition(nil), sources...), accumulator: newStatisticsAccumulator()}
 	for _, entry := range []struct {
 		name   string
 		kind   uint16
@@ -232,19 +235,12 @@ func (b *Builder) append(ctx context.Context, detail Detail) error {
 	if err != nil {
 		return err
 	}
-	reservation := sm + dm + 2*d.storage.limits.MaxRecordBytes
+	reservation := sm + dm + 2*(d.storage.limits.MaxRecordBytes+frameHeaderBytes)
 	if err = d.storage.reserveMemory(ctx, reservation); err != nil {
 		return err
 	}
 	defer d.storage.releaseMemory(reservation)
-	so, err := d.summaries.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return err
-	}
-	do, err := d.details.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return err
-	}
+	so, do := b.summaryEnd, b.detailEnd
 	sw := &builderWriter{b: b, f: d.summaries}
 	sn, err := writeRecord(sw, 1, detail.ID, summary, d.storage.limits.MaxRecordBytes)
 	if err != nil {
@@ -262,6 +258,8 @@ func (b *Builder) append(ctx context.Context, detail Detail) error {
 	if err = b.write(d.offsets, offset[:]); err != nil {
 		return err
 	}
+	b.summaryEnd += sn
+	b.detailEnd += dn
 	b.accumulator.Add(summary)
 	d.count++
 	return nil

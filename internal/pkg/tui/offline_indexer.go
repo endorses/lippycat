@@ -329,9 +329,9 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 						return err
 					}
 				}
-				if err := dispatcher.Flush(readCtx); err != nil {
-					return err
-				}
+				// LosslessDelivery drains before every event admission. Packets
+				// without events need no barrier; Close drains the final event
+				// and EOF output before the session can be published.
 				packet := convertEnvelopeWithState(env, session.Tracker, protocols, flows)
 				if sipFactory != nil && sipFactory.LastEvent != nil {
 					applyOfflineSIPEvent(&packet, *sipFactory.LastEvent)

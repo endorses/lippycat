@@ -371,12 +371,13 @@ func (q *diskQuery) Iterate(ctx context.Context, visit func(Detail) error) error
 
 func (q *diskQuery) Close() error {
 	d := q.dataset
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return q.closeLocked()
 }
 
-// closeLocked is called while holding the dataset lock, after all readers join.
+// closeLocked holds a dataset lock to exclude dataset cleanup. The query lock
+// joins this query's readers without waiting for unrelated dataset detail pins.
 func (q *diskQuery) closeLocked() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()

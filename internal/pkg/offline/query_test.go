@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/stretchr/testify/require"
 )
 
 func queryDataset(t *testing.T, count int) *diskDataset {
@@ -388,4 +389,29 @@ func TestPageFailureDoesNotReturnUnaccountedRows(t *testing.T) {
 	if usage := d.Resources(); usage.PinnedBytes != 0 || usage.InFlightBytes != 0 {
 		t.Fatalf("failed page leaked memory: %+v", usage)
 	}
+}
+
+func TestQueryCloseDoesNotWaitForUnrelatedDetailPin(t *testing.T) {
+	s := newTestStorage(t)
+	d := testStorageDataset(t, s)
+	token := Token{Dataset: 1, Query: 1}
+	q, err := d.Query(context.Background(), QuerySpec{Token: token})
+	require.NoError(t, err)
+	pin, err := d.PinDetail(context.Background(), token, 0)
+	require.NoError(t, err)
+	closed := make(chan error, 1)
+	go func() { closed <- q.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		require.NoError(t, pin.Close())
+		require.NoError(t, <-closed)
+		require.NoError(t, d.Close())
+		require.NoError(t, s.Close())
+		t.Fatal("closing a query blocked on a dataset detail pin unrelated to that query")
+	}
+	require.NoError(t, pin.Close())
+	require.NoError(t, d.Close())
+	require.NoError(t, s.Close())
 }

@@ -296,6 +296,17 @@ check, all/empty/sparse queries, exact totals, related-flow parity, cancellation
 writer/manifest failure, cache eviction and mutation isolation, retained page and
 detail leases, concurrent readers, close joins, and retryable cleanup.
 
+Phase 2 review correction (2026-09-05): independent storage, query, and cache
+reviews identified one lifecycle defect, reproduced before correction. Closing
+a superseded query waited for unrelated selected-detail pins because it acquired
+the exclusive dataset lock. Query cleanup now holds a shared dataset lock and
+joins its own readers through the query lock; dataset cleanup still waits for
+all readers and pins. A regression test covers query closure while a detail is
+pinned, and existing coverage verifies closure waits for its own active iterator.
+Independent review verified the fix and found no further Phase 2 defects.
+Offline and TUI/watch checks pass under `all` and `tui`; the complete offline
+race suite and repeated focused query lifecycle race checks pass.
+
 ### Phase 3 — Unify indexing and analysis lifecycle
 
 - [ ] Introduce `OpenOfflineDatasetMsg` (or one equivalent shared controller)

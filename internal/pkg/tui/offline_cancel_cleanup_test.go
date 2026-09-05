@@ -114,3 +114,63 @@ func TestOfflineCancelCleanupReopenFailurePreservesReadySession(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, query.Close())
 }
+
+func TestOfflineFailedOpenCleanupRetainsRetryModal(t *testing.T) {
+	m, open := offlineLifecycleModel(t)
+	m, cmd := m.openOffline(open)
+	first := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
+	require.NoError(t, first.err)
+	m, cleanup := m.completeOffline(first)
+	cleanup()
+	ready := m.offlineSession
+
+	m, cmd = m.openOffline(open)
+	candidate := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
+	require.NoError(t, candidate.err)
+	candidate.session.Dataset = &offlineCloseAfterReleaseFailure{Dataset: candidate.session.Dataset}
+	candidate.err = errors.New("injected finalization failure")
+	m, cmd = m.completeOffline(candidate)
+	batch := cmd().(tea.BatchMsg)
+	next, _ := m.update(batch[1]())
+	m = next.(Model)
+	require.True(t, m.offlineOpening, "failed candidate cleanup must retain modal")
+	require.True(t, m.offlineCleanupFailed)
+	require.Contains(t, m.offlineModal(), "Retry cleanup")
+	require.Same(t, ready, m.offlineSession)
+	next, retry := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	require.NotNil(t, retry)
+	next, _ = m.update(retry())
+	m = next.(Model)
+	require.False(t, m.offlineOpening)
+	require.Same(t, ready, m.offlineSession)
+	m.offlineController.mu.Lock()
+	_, owned := m.offlineController.sessions[candidate.session]
+	m.offlineController.mu.Unlock()
+	require.False(t, owned)
+}
+
+func TestOfflineReopenRetainsObsoleteCleanupCandidate(t *testing.T) {
+	m, open := offlineLifecycleModel(t)
+	m, cmd := m.openOffline(open)
+	obsolete := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
+	require.NoError(t, obsolete.err)
+	obsolete.session.Dataset = &offlineCloseAfterReleaseFailure{Dataset: obsolete.session.Dataset}
+
+	// Reopen before the original completion is delivered. The next worker
+	// owns disposal of that abandoned result, including a failed disposal.
+	m, cmd = m.openOffline(open)
+	result := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
+	require.ErrorContains(t, result.err, "injected cleanup failure")
+	require.Same(t, obsolete.session, result.session)
+	m, cmd = m.completeOffline(result)
+	require.True(t, m.offlineOpening)
+	batch := cmd().(tea.BatchMsg)
+	next, _ := m.update(batch[1]())
+	m = next.(Model)
+	require.False(t, m.offlineOpening)
+	m.offlineController.mu.Lock()
+	_, owned := m.offlineController.sessions[obsolete.session]
+	m.offlineController.mu.Unlock()
+	require.False(t, owned)
+}

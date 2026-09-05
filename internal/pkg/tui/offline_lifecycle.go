@@ -201,7 +201,7 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 		c.mu.Unlock()
 		for _, session := range obsolete {
 			if err := c.dispose(session); err != nil {
-				return offlineOpenCompleteMsg{generation: g, err: err}
+				return offlineOpenCompleteMsg{generation: g, session: session, err: err}
 			}
 		}
 		// A previous live reader must stop before another analyzer is created.
@@ -307,6 +307,17 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 
 	if msg.err != nil {
 		toast := m.uiState.Toast.Show("Could not open offline dataset: "+msg.err.Error(), components.ToastError, components.ToastDurationLong)
+		if msg.session != nil {
+			// Failed finalization can leave a cleanup-only candidate. Keep
+			// the same retryable cleanup workflow used by cancellation until
+			// its resources are released, without touching the ready session.
+			m.offlineOpening = true
+			m.offlineProgress.State = offline.Cancelling
+			m.offlineCancelledSession = msg.session
+			return m, tea.Batch(toast, func() tea.Msg {
+				return offlineCleanupMsg{generation: msg.generation, cancelled: true, err: c.dispose(msg.session)}
+			})
+		}
 		return m, tea.Batch(toast, func() tea.Msg { return offlineCleanupMsg{err: c.dispose(msg.session)} })
 	}
 	old := m.offlineSession

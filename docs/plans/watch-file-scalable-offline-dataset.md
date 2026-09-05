@@ -450,6 +450,20 @@ Verification: offline, all TUI packages, watch, and pipeline checks pass under
 focused protocol-preservation and TLS mode-switch race checks. No further
 Phase 3 defects were confirmed.
 
+Further Phase 3 failure-cleanup review (2026-09-05): three sub-agent reviews
+and root verification confirmed one remaining cleanup-routing defect. A normal
+indexing failure with candidate resources dismissed the modal before cleanup
+succeeded; cleanup errors then showed only a toast without an explicit retry.
+Failed candidates now use the generation-aware cleanup modal and retry workflow,
+preserving the prior ready session. Failed disposal of an obsolete result during
+reopen also returns the owned candidate to that workflow.
+
+Root reproduced the regression before accepting the fix. Two regression tests
+cover failed-open cleanup retry and obsolete-result ownership. Offline, all TUI
+packages, and watch pass uncached under `all` and `tui`; independent review and
+repeated focused lifecycle race tests pass. No other Phase 3 defects were
+confirmed. Phases 4–6 remain pending.
+
 ### Phase 4 — Virtual packet browsing and event integration
 
 - [ ] Adapt `components/packetlist.go` to logical row counts and bounded page

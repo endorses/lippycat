@@ -654,6 +654,24 @@ checks pass. An initial full TUI race run failed with truncated diagnostics; a
 rerun with captured output passed, so the initial failure remains unexplained.
 Phase 6 release acceptance remains pending.
 
+Further Phase 5 review corrections (2026-09-05): three sub-agent reviews and
+root verification confirmed two export defects. The save key still returned a
+Phase 4 unavailable notice, preventing normal access to the implemented exporter.
+It now opens the save dialog and reaches the dataset export workflow. PCAP output
+also silently replaced missing timestamps with the current time and wrapped
+timestamps outside unsigned 32-bit Unix seconds. Export now explicitly rejects
+those values while preserving the destination and removing temporary output.
+
+Both regressions failed before correction. Coverage exercises the actual save
+key and file-selection dispatch, reads back the complete exported dataset,
+checks timestamp rejection after an earlier valid record, and verifies exact
+roundtrips at both supported timestamp boundaries. Independent review verified
+both fixes. No additional filtering, statistics, or export defects were confirmed.
+
+Verification: offline, all TUI packages, and watch pass uncached under `all` and
+`tui`; full offline and TUI race suites pass uncached under `all`. Phase 6 remains
+pending.
+
 ### Phase 6 — Acceptance, documentation, and release
 
 - [ ] Compare global/filtered statistics and selected details/raw bytes against

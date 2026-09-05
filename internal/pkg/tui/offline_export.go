@@ -149,6 +149,13 @@ func writeOfflinePCAP(ctx context.Context, output io.Writer, iterate offlineDeta
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// Classic PCAP stores unsigned 32-bit seconds. pcapgo silently wraps
+		// out-of-range values and substitutes the current time for missing
+		// timestamps, which PCAPNG simple packet blocks can legitimately carry.
+		seconds := d.Packet.Timestamp.Unix()
+		if d.Packet.Timestamp.IsZero() || seconds < 0 || seconds > math.MaxUint32 {
+			return fmt.Errorf("cannot export offline packet %d: timestamp %s cannot be represented in PCAP (requires seconds from 0 through %d since Unix epoch)", d.ID, d.Packet.Timestamp, uint64(math.MaxUint32))
+		}
 		if count == 0 {
 			link = d.Packet.LinkType
 			if err := w.WriteFileHeader(math.MaxUint32, link); err != nil {

@@ -732,9 +732,6 @@ func (m Model) handleToggleView() (Model, tea.Cmd) {
 
 // handleSavePackets initiates or stops packet saving
 func (m Model) handleSavePackets() (Model, tea.Cmd) {
-	if m.offlineSession != nil && m.uiState.Tabs.GetActive() == 0 {
-		return m, m.uiState.Toast.Show("Complete offline packet export is not available yet.", components.ToastInfo, components.ToastDurationLong)
-	}
 	// Only on capture tab (tab 0)
 	if m.uiState.Tabs.GetActive() == 0 {
 		// Check if streaming save is active

@@ -89,10 +89,11 @@ type SaveCompleteMsg struct {
 	Streaming    bool // True if this was a streaming save stop
 }
 
-// CaptureCompleteMsg is sent when offline capture finishes reading all files.
+// CaptureCompleteMsg is sent when offline capture finishes or fails.
 // This triggers a final drain of pending packets to ensure none are lost.
 type CaptureCompleteMsg struct {
 	PacketsReceived int64 // Total packets received by bridge
+	Err             error // Non-nil when the retained packets are an incomplete replay
 }
 
 // CaptureTelemetryMsg carries cumulative local capture health counters.

@@ -4,6 +4,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -223,17 +224,21 @@ func startLiveCapture(ctx context.Context, interfaceName string, filter string, 
 }
 
 // startOfflineCapture starts packet capture from PCAP files
-// Uses timestamp-ordered processing to ensure SIP packets register media ports
-// before their corresponding RTP packets are processed (critical for VoIP analysis)
+// Uses timestamp-ordered processing so earlier SIP signaling can register media
+// ports before later RTP is analyzed, without prioritizing later SIP packets.
 func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string, program *tea.Program, done chan struct{}, tracker *CallTracker, aggregator *LocalCallAggregator) {
 	defer close(done) // Signal completion when capture goroutine exits
 	inputIdentity, err := events.OfflineInputIdentity(pcapFiles)
 	if err != nil {
 		logger.Error("Failed to identify offline event inputs", "error", err)
 	}
-	capture.StartOfflineSnifferOrdered(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startTUISnifferOrdered(ctx, devices, filter, inputIdentity, program, tracker, aggregator)
+	var replayErr error
+	openErr := capture.StartOfflineSnifferOrdered(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		replayErr = startTUISnifferOrdered(ctx, devices, filter, inputIdentity, program, tracker, aggregator)
 	})
+	if ctx.Err() != nil {
+		return
+	}
 
 	// Notify TUI that capture is complete so it can drain remaining packets
 	// This is critical for offline capture where files are read quickly
@@ -241,6 +246,7 @@ func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string,
 	if program != nil {
 		program.Send(CaptureCompleteMsg{
 			PacketsReceived: stats.PacketsReceived,
+			Err:             errors.Join(openErr, replayErr),
 		})
 	}
 }
@@ -270,9 +276,9 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 }
 
 // startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
-// This ensures SIP packets are processed before their corresponding RTP packets,
-// which is essential for proper call tracking and RTP-to-CallID mapping.
-func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter, inputIdentity string, program *tea.Program, tracker *CallTracker, aggregator *LocalCallAggregator) {
+// Earlier SIP signaling registers media ports before later RTP is analyzed.
+// SIP packets are never prioritized ahead of earlier traffic.
+func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter, inputIdentity string, program *tea.Program, tracker *CallTracker, aggregator *LocalCallAggregator) error {
 	// Get pause signal for bridge to respect pause/resume
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
@@ -285,8 +291,8 @@ func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterfa
 		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator, options)
 	}
 
-	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes
-	capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
+	// Merge sequential sources in timestamp order with bounded reader state.
+	return capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
 }
 
 func localCaptureEventOptions(filter string) LocalEventAnalysisOptions {

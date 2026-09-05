@@ -1,10 +1,12 @@
 package capture
 
 import (
+	"context"
 	"encoding/binary"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -128,4 +130,50 @@ func TestReadAllPacketsFromDevice_ReassemblesIPv6Fragments(t *testing.T) {
 		assert.Equal(t, len(sip), len(full), "reassembled payload should equal the original SIP message")
 	}
 	assert.Equal(t, 1, reassembled, "expected exactly one reassembled SIP datagram")
+}
+
+func TestOfflineMergeFragmentCompletionTimestampAndSourceIsolation(t *testing.T) {
+	src, dst := net.ParseIP("2001:db8::1"), net.ParseIP("2001:db8::2")
+	base := time.Unix(100, 0).UTC()
+	writeFragments := func(payload string, first, last time.Time) string {
+		udp := make([]byte, 8+len(payload))
+		binary.BigEndian.PutUint16(udp[0:2], 5060)
+		binary.BigEndian.PutUint16(udp[2:4], 5060)
+		binary.BigEndian.PutUint16(udp[4:6], uint16(len(udp)))
+		copy(udp[8:], payload)
+		frames := [][]byte{
+			fragFrame(t, src, dst, 42, 0, true, udp[:16]),
+			fragFrame(t, src, dst, 42, 2, false, udp[16:]),
+		}
+		name := filepath.Join(t.TempDir(), "same.pcap")
+		file, err := os.Create(name)
+		require.NoError(t, err)
+		writer := pcapgo.NewWriter(file)
+		require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+		for i, timestamp := range []time.Time{first, last} {
+			require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: timestamp, CaptureLength: len(frames[i]), Length: len(frames[i])}, frames[i]))
+		}
+		require.NoError(t, file.Close())
+		return name
+	}
+	// Identical fragment keys from distinct sources must never share state.
+	first := writeFragments("first---payload1", base, base.Add(4*time.Second))
+	second := writeFragments("second--payload2", base.Add(time.Second), base.Add(2*time.Second))
+	ordinary := writeTimestampedTestPCAP(t, []time.Time{base.Add(3 * time.Second)})
+	var got []PacketInfo
+	err := RunOfflineOrderedContext(context.Background(), offlineTestDevices(t, first, second, ordinary), "", func(ch <-chan PacketInfo) {
+		for packet := range ch {
+			got = append(got, packet)
+		}
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	for i, packet := range got {
+		require.Equal(t, base.Add(time.Duration(i+2)*time.Second), packet.Packet.Metadata().Timestamp)
+	}
+	require.Equal(t, second, got[0].SourcePath)
+	require.Equal(t, first, got[2].SourcePath)
+	require.Equal(t, "second--payload2", string(got[0].Packet.Layer(layers.LayerTypeUDP).LayerPayload()))
+	require.Equal(t, "first---payload1", string(got[2].Packet.Layer(layers.LayerTypeUDP).LayerPayload()))
+	require.Equal(t, len(got[0].Packet.Data()), got[0].Packet.Metadata().CaptureLength)
 }

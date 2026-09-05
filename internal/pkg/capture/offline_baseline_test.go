@@ -15,7 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// BenchmarkOfflineOrderedBaseline measures the existing collect/sort/replay path.
+// BenchmarkOfflineOrderedBaseline compares streaming replay against the recorded
+// Phase 0 collect/sort baseline.
 // Generate fixtures outside the timer without retaining a packet-sized Go slice.
 // Run each size in a fresh test process and measure child peak RSS externally.
 // This excludes application analysis, bridge buffering, and terminal rendering.
@@ -42,7 +43,7 @@ func BenchmarkOfflineOrderedBaseline(b *testing.B) {
 				require.NoError(b, err)
 				started := time.Now()
 				seen := 0
-				RunOfflineOrderedContext(context.Background(), []pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(f)}, "", func(ch <-chan PacketInfo) {
+				err = RunOfflineOrderedContext(context.Background(), []pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(f)}, "", func(ch <-chan PacketInfo) {
 					for range ch {
 						if seen == 0 {
 							b.ReportMetric(float64(time.Since(started).Nanoseconds()), "first-packet-ns")
@@ -50,6 +51,7 @@ func BenchmarkOfflineOrderedBaseline(b *testing.B) {
 						seen++
 					}
 				})
+				require.NoError(b, err)
 				require.NoError(b, f.Close())
 				require.Equal(b, count, seen)
 			}

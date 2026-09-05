@@ -4,6 +4,7 @@ package watch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -127,8 +128,8 @@ func runFile(cmd *cobra.Command, args []string) {
 	tui.SetCurrentProgram(p)
 
 	// Start packet capture in background using timestamp-ordered processing
-	// This ensures SIP packets are processed before their corresponding RTP packets,
-	// which is essential for proper call tracking
+	// Earlier SIP signaling registers media ports before later RTP is analyzed.
+	// SIP packets are never prioritized ahead of earlier traffic.
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	tui.SetCaptureHandle(cancel, done)
@@ -140,13 +141,17 @@ func runFile(cmd *cobra.Command, args []string) {
 		// capture runs before Bubbletea has completed terminal setup.
 		tui.WaitForTUIReady()
 
-		capture.StartOfflineSnifferOrdered(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-			startFileSnifferOrdered(ctx, devices, filter, p, model.CallTracker(), aggregator)
+		var replayErr error
+		openErr := capture.StartOfflineSnifferOrdered(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
+			replayErr = startFileSnifferOrdered(ctx, devices, filter, p, model.CallTracker(), aggregator)
 		})
+		if ctx.Err() != nil {
+			return
+		}
 
 		// Notify TUI that capture is complete so it can drain remaining packets
 		stats := tui.GetBridgeStats()
-		tui.SendCaptureCompleteMsg(stats.PacketsReceived)
+		p.Send(tui.CaptureCompleteMsg{PacketsReceived: stats.PacketsReceived, Err: errors.Join(openErr, replayErr)})
 	}()
 
 	// Run TUI
@@ -157,9 +162,9 @@ func runFile(cmd *cobra.Command, args []string) {
 }
 
 // startFileSnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
-// This ensures SIP packets are processed before their corresponding RTP packets,
-// which is essential for proper call tracking and RTP-to-CallID mapping.
-func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) {
+// Earlier SIP signaling registers media ports before later RTP is analyzed.
+// SIP packets are never prioritized ahead of earlier traffic.
+func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) error {
 	ordering := devicesToSourceOrdering(devices)
 	inputIdentity, err := events.OfflineInputIdentity(ordering)
 	if err != nil {
@@ -173,8 +178,8 @@ func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterf
 		options.SourceOrdering = append([]string(nil), ordering...)
 		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator, options)
 	}
-	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
-	capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
+	// Merge sequential sources in timestamp order with bounded reader state.
+	return capture.RunOfflineOrderedContext(ctx, devices, filter, processor)
 }
 
 func watchFileAnalysisProfile(filter string) string {

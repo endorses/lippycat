@@ -18,10 +18,13 @@ import (
 )
 
 type PacketInfo struct {
-	LinkType   layers.LinkType
-	Packet     gopacket.Packet
-	Interface  string // Display name of the interface or offline input.
-	SourcePath string // Exact offline input path; empty for live capture.
+	LinkType          layers.LinkType
+	Packet            gopacket.Packet
+	Interface         string // Display name of the interface or offline input.
+	SourcePath        string // Exact offline input path; empty for live capture.
+	SourceIndex       uint32 // Zero-based offline input argument index.
+	SourceSequence    uint64 // Zero-based logical packet position within that input.
+	SourceInterfaceID uint32 // PCAPNG interface domain; zero for classic PCAP.
 }
 
 // espNullSPICache maps ESP SPIs confirmed as NULL-encrypted to their inner IP protocol.
@@ -1300,6 +1303,11 @@ func tryESPTrailerValidation(espPayload []byte, fixedICVSize int) (layers.IPProt
 // Returns (rebuilt packet, true) on success, or (original, false) if the packet is not
 // ESP-NULL-encapsulated, decapsulation fails, or the inner payload is not SIP/RTP.
 func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
+	return decapsulateESPNullWithCache(packet, espNullSPICache)
+}
+
+// decapsulateESPNullWithCache permits isolated offline source state.
+func decapsulateESPNullWithCache(packet gopacket.Packet, espNullSPICache *ttlCache[uint32, layers.IPProtocol]) (gopacket.Packet, bool) {
 	espLayer := packet.Layer(layers.LayerTypeIPSecESP)
 	if espLayer == nil {
 		return packet, false
@@ -1555,6 +1563,11 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 // when the SPI has already been cached from the first fragment, and we expose the raw
 // fragment bytes as a UDP payload so TCP reassembly or call-tracker see the continuation.
 func decapsulateIPv6FragmentESP(packet gopacket.Packet) (gopacket.Packet, bool) {
+	return decapsulateIPv6FragmentESPWithCaches(packet, espNullSPICache, ipv6FragIDCache)
+}
+
+// decapsulateIPv6FragmentESPWithCaches permits isolated offline source state.
+func decapsulateIPv6FragmentESPWithCaches(packet gopacket.Packet, espNullSPICache *ttlCache[uint32, layers.IPProtocol], ipv6FragIDCache *ttlCache[uint32, ipv6FragInfo]) (gopacket.Packet, bool) {
 	fragLayer := packet.Layer(layers.LayerTypeIPv6Fragment)
 	if fragLayer == nil {
 		return packet, false

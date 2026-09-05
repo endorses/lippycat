@@ -1,22 +1,19 @@
 package capture
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 )
 
 func StartLiveSniffer(interfaces, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
@@ -31,48 +28,43 @@ func StartLiveSniffer(interfaces, filter string, startSniffer func(devices []pca
 // StartOfflineSnifferOrdered opens PCAP files and starts a timestamp-ordered sniffer.
 // This ensures packets from multiple files are processed in chronological order,
 // which is essential for VoIP analysis where SIP signaling must precede RTP.
-func StartOfflineSnifferOrdered(readFiles []string, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
+func StartOfflineSnifferOrdered(readFiles []string, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) (err error) {
 	if len(readFiles) == 0 {
-		logger.Error("No files provided for offline capture")
-		return
+		return errors.New("no files provided for offline capture")
 	}
-
-	// Open all files and create interfaces
+	if len(readFiles) > MaxOfflineSources {
+		return fmt.Errorf("offline capture supports at most %d sources; use fewer input files", MaxOfflineSources)
+	}
 	var files []*os.File
 	var devices []pcaptypes.PcapInterface
-
-	for _, readFile := range readFiles {
-		// #nosec G304 -- readFile is from CLI positional args, intentional user-specified path
-		file, err := os.Open(readFile)
-		if err != nil {
-			logger.Error("Could not read file",
-				"file", readFile,
-				"error", err)
-			// Close any files we already opened
-			for _, f := range files {
-				f.Close()
+	defer func() {
+		for _, f := range files {
+			if closeErr := f.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("close offline source %q: %w", f.Name(), closeErr))
 			}
-			return
+		}
+		if err != nil {
+			logger.Error("Offline capture failed", "error", err)
+		}
+	}()
+	for _, readFile := range readFiles {
+		info, statErr := os.Stat(readFile)
+		if statErr != nil {
+			return fmt.Errorf("stat offline source %q: %w", readFile, statErr)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("offline source %q must be a regular capture file", readFile)
+		}
+		// #nosec G304 -- intentional user-specified capture path
+		file, openErr := os.Open(readFile)
+		if openErr != nil {
+			return fmt.Errorf("open offline source %q: %w", readFile, openErr)
 		}
 		files = append(files, file)
 		devices = append(devices, pcaptypes.CreateOfflineInterface(file))
 	}
-
-	// Log multi-file capture info
-	if len(readFiles) > 1 {
-		logger.Info("Starting timestamp-ordered multi-file offline capture",
-			"file_count", len(readFiles))
-	}
-
-	// Ensure all files are closed when done
-	defer func() {
-		for _, f := range files {
-			f.Close()
-		}
-	}()
-
-	// Run the sniffer (blocks until complete)
 	startSniffer(devices, filter)
+	return nil
 }
 
 // RunWithSignalHandler runs the capture in background and handles signals for graceful shutdown
@@ -145,227 +137,166 @@ func checkCapturePermissions(devices []pcaptypes.PcapInterface) bool {
 	return hasPermission
 }
 
-// RunOfflineOrdered reads all packets from multiple PCAP files, sorts them by timestamp,
-// and processes them in chronological order. This is essential for VoIP analysis where
-// SIP signaling must be processed before corresponding RTP packets to establish call mappings.
-//
-// It ensures proper temporal ordering across all files.
+// MaxOfflineSources bounds simultaneously open readers and merge lookahead.
+const MaxOfflineSources = 64
+
+// ErrOfflineConsumerStopped reports a consumer returning before input is drained.
+var ErrOfflineConsumerStopped = errors.New("offline consumer stopped before draining input")
+
+// RunOfflineOrdered streams files in timestamp order and logs replay failures for
+// legacy callers. New session owners should use the error-returning variants.
 func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	processor func(<-chan PacketInfo)) {
-	RunOfflineOrderedContext(context.Background(), devices, filter, processor)
+	if err := RunOfflineOrderedContext(context.Background(), devices, filter, processor); err != nil {
+		logger.Error("Timestamp-ordered offline capture failed", "error", err)
+	}
 }
 
-// RunOfflineOrderedContext is RunOfflineOrdered with cancellation for the
-// lossless producer send. Cancellation closes the input before waiting for the
-// processor, so a context-aware consumer cannot strand the replay producer.
+// RunOfflineOrderedContext streams ordered input to a legacy consumer. The
+// consumer must return after input closes or the supplied context is cancelled.
 func RunOfflineOrderedContext(ctx context.Context, devices []pcaptypes.PcapInterface, filter string,
-	processor func(<-chan PacketInfo)) {
+	processor func(<-chan PacketInfo)) error {
+	return RunOfflineOrderedStream(ctx, devices, filter, func(_ context.Context, ch <-chan PacketInfo) error {
+		processor(ch)
+		return nil
+	})
+}
 
-	logger.Info("Starting timestamp-ordered offline capture",
-		"file_count", len(devices))
-
-	// Phase 1: Read all packets from all files into memory
-	var allPackets []PacketInfo
-	for _, dev := range devices {
-		packets, err := readAllPacketsFromDeviceContext(ctx, dev, filter)
+// RunOfflineOrderedStream owns and joins the producer and consumer. Consumer
+// failure cancels reads and blocked sends; source failure closes input and
+// cancels the consumer context. Consumers must honor cancellation or input EOF.
+// Records already delivered before an error are partial input, never a completed
+// dataset. The caller must discard any unpublished session on failure.
+func RunOfflineOrderedStream(ctx context.Context, devices []pcaptypes.PcapInterface, filter string,
+	processor func(context.Context, <-chan PacketInfo) error) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(devices) > MaxOfflineSources {
+		return fmt.Errorf("offline capture supports at most %d sources (got %d); use fewer input files", MaxOfflineSources, len(devices))
+	}
+	parentCtx := ctx
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cursors := make([]*offlineCursor, 0, len(devices))
+	defer func() {
+		for _, cursor := range cursors {
+			err = errors.Join(err, cursor.Close())
+		}
+	}()
+	pending := offlinePacketHeap{}
+	for i, dev := range devices {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		cursor, err := newOfflineCursor(ctx, dev, filter, uint32(i))
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				logger.Info("Timestamp-ordered offline capture cancelled", "error", err)
-				return
-			}
-			logger.Error("Error reading packets from file",
-				"file", dev.Name(),
-				"error", err)
+			return err
+		}
+		cursors = append(cursors, cursor)
+		pkt, err := cursor.Next(ctx)
+		if errors.Is(err, io.EOF) {
 			continue
 		}
-		logger.Debug("Read packets from file",
-			"file", dev.Name(),
-			"count", len(packets))
-		allPackets = append(allPackets, packets...)
+		if err != nil {
+			return err
+		}
+		heap.Push(&pending, offlineHeapEntry{packet: pkt, source: i})
 	}
-
-	if len(allPackets) == 0 {
-		logger.Error("No packets read from any file")
-		return
-	}
-
-	// Phase 2: Sort all packets by timestamp
-	// Keep source/file order deterministic when capture timestamps are equal.
-	sort.SliceStable(allPackets, func(i, j int) bool {
-		return allPackets[i].Packet.Metadata().Timestamp.Before(
-			allPackets[j].Packet.Metadata().Timestamp)
-	})
-
-	logger.Info("Sorted packets by timestamp",
-		"total_packets", len(allPackets),
-		"first_timestamp", allPackets[0].Packet.Metadata().Timestamp,
-		"last_timestamp", allPackets[len(allPackets)-1].Packet.Metadata().Timestamp)
-
-	// Phase 3: Send packets through a plain channel in sorted order. The live
-	// PacketBuffer deliberately prioritizes SIP traffic, which is useful under
-	// load but would let a later SIP packet overtake an earlier non-SIP packet
-	// during lossless replay.
 	packetStream := make(chan PacketInfo)
-
-	// Start processor
-	var processorWg sync.WaitGroup
-	processorWg.Add(1)
+	consumerDone := make(chan struct{})
+	var consumerErr error
 	go func() {
-		defer processorWg.Done()
-		processor(packetStream)
+		defer close(consumerDone)
+		consumerErr = processor(ctx, packetStream)
+		cancel()
 	}()
-
-	// Send all packets in timestamp order using blocking sends so replay cannot
-	// drop packets or advance until the consumer accepts the preceding packet.
-	for _, pkt := range allPackets {
+	var producerErr error
+	for len(pending) > 0 {
+		entry := heap.Pop(&pending).(offlineHeapEntry)
 		select {
 		case <-ctx.Done():
-			close(packetStream)
-			processorWg.Wait()
-			logger.Info("Timestamp-ordered offline capture cancelled", "error", ctx.Err())
-			return
-		case packetStream <- pkt:
-			observePacket(pkt)
+			producerErr = ctx.Err()
+		case packetStream <- entry.packet:
+			observePacket(entry.packet)
 		}
+		if producerErr != nil {
+			break
+		}
+		pkt, readErr := cursors[entry.source].Next(ctx)
+		if errors.Is(readErr, io.EOF) {
+			continue
+		}
+		if readErr != nil {
+			producerErr = readErr
+			break
+		}
+		heap.Push(&pending, offlineHeapEntry{packet: pkt, source: entry.source})
 	}
 	close(packetStream)
-
-	// Wait for the processor to finish after packetStream closes.
-	processorWg.Wait()
-
-	logger.Info("Timestamp-ordered offline capture completed",
-		"total_packets", len(allPackets))
+	if producerErr != nil {
+		cancel()
+	}
+	<-consumerDone
+	if consumerErr != nil {
+		return errors.Join(producerErr, fmt.Errorf("offline consumer: %w", consumerErr))
+	}
+	if producerErr != nil {
+		// A consumer that returns without draining must not strand the producer or
+		// make an incomplete replay look successful.
+		if errors.Is(producerErr, context.Canceled) && parentCtx.Err() == nil {
+			return errors.Join(producerErr, ErrOfflineConsumerStopped)
+		}
+		return producerErr
+	}
+	return parentCtx.Err()
 }
 
-// readAllPacketsFromDevice reads all packets from a single PCAP device/file
+type offlineHeapEntry struct {
+	packet PacketInfo
+	source int
+}
+
+type offlinePacketHeap []offlineHeapEntry
+
+func (h offlinePacketHeap) Len() int { return len(h) }
+func (h offlinePacketHeap) Less(i, j int) bool {
+	a, b := h[i].packet.Packet.Metadata().Timestamp, h[j].packet.Packet.Metadata().Timestamp
+	if a.Equal(b) {
+		return h[i].source < h[j].source
+	}
+	return a.Before(b)
+}
+func (h offlinePacketHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *offlinePacketHeap) Push(v any)   { *h = append(*h, v.(offlineHeapEntry)) }
+func (h *offlinePacketHeap) Pop() any {
+	n := len(*h) - 1
+	v := (*h)[n]
+	(*h)[n] = offlineHeapEntry{}
+	*h = (*h)[:n]
+	return v
+}
+
+// readAllPacketsFromDevice is a collecting convenience for small test fixtures.
+// Production replay uses the cursor directly and never collects the input.
 func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]PacketInfo, error) {
 	return readAllPacketsFromDeviceContext(context.Background(), dev, filter)
 }
 
-func readAllPacketsFromDeviceContext(ctx context.Context, dev pcaptypes.PcapInterface, filter string) ([]PacketInfo, error) {
-	err := dev.SetHandle()
+func readAllPacketsFromDeviceContext(ctx context.Context, dev pcaptypes.PcapInterface, filter string) (packets []PacketInfo, err error) {
+	cursor, err := newOfflineCursor(ctx, dev, filter, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set handle: %w", err)
+		return nil, err
 	}
-
-	handle, err := dev.Handle()
-	if err != nil || handle == nil {
-		return nil, fmt.Errorf("failed to get handle: %w", err)
-	}
-	defer handle.Close()
-
-	// Apply BPF filter if specified
-	if filter != "" {
-		if err := handle.SetBPFFilter(filter); err != nil {
-			logger.Warn("Could not apply BPF filter",
-				"filter", filter,
-				"error", err)
+	defer func() { err = errors.Join(err, cursor.Close()) }()
+	for {
+		pkt, err := cursor.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			return packets, nil
 		}
-	}
-
-	linkType := handle.LinkType()
-	ifaceName := dev.Name()
-	displayName := filepath.Base(ifaceName)
-
-	packetSource := gopacket.NewPacketSource(handle, linkType)
-	packetSource.NoCopy = true
-	packetSource.DecodeStreamsAsDatagrams = true
-
-	// IP defragmenters for this file. Fragments of a single datagram never span
-	// files, so per-file defragmenters are sufficient. This mirrors the live
-	// capture path (captureFromInterface): without reassembly the second fragment
-	// of a large SIP INVITE/200 OK (containing the SDP media ports) is dropped,
-	// so RTP never correlates to its call and shows up as an RTP-only call.
-	defragmenter := NewIPv4Defragmenter()
-	v6defragmenter := NewIPv6Defragmenter()
-
-	var packets []PacketInfo
-	for packet := range packetSource.Packets() {
-		if err := ctx.Err(); err != nil {
+		if err != nil {
 			return nil, err
 		}
-		// Make a copy of the packet data since NoCopy=true
-		data := make([]byte, len(packet.Data()))
-		copy(data, packet.Data())
-
-		// Re-decode with the copied data
-		newPacket := gopacket.NewPacket(data, linkType, gopacket.Default)
-		// Copy metadata
-		newPacket.Metadata().Timestamp = packet.Metadata().Timestamp
-		newPacket.Metadata().CaptureLength = packet.Metadata().CaptureLength
-		newPacket.Metadata().Length = packet.Metadata().Length
-
-		// Reassemble IPv4 fragments before any further processing. A fragmented
-		// SIP message would otherwise have its SDP body stranded in a later
-		// fragment and never parsed.
-		if ipLayer := newPacket.Layer(layers.LayerTypeIPv4); ipLayer != nil {
-			ip4 := ipLayer.(*layers.IPv4)
-			if ip4.Flags&layers.IPv4MoreFragments != 0 || ip4.FragOffset > 0 {
-				reassembledIP, err := defragmenter.DefragIPv4(ip4)
-				if err != nil {
-					logger.Debug("IPv4 defragmentation error (offline)",
-						"error", err, "src", ip4.SrcIP, "dst", ip4.DstIP, "id", ip4.Id)
-					continue // Skip this fragment
-				}
-				if reassembledIP == nil {
-					continue // Still waiting for more fragments
-				}
-				reassembled := rebuildReassembledPacket(newPacket, reassembledIP, linkType)
-				reassembled.Metadata().Timestamp = newPacket.Metadata().Timestamp
-				newPacket = reassembled
-			}
-		}
-
-		// Reassemble plain (non-ESP) IPv6 fragments. gopacket has no built-in
-		// IPv6 reassembly; ESP-encapsulated fragments are handled by
-		// decapsulateIPv6FragmentESP below.
-		if fragLayer := newPacket.Layer(layers.LayerTypeIPv6Fragment); fragLayer != nil {
-			if frag, ok := fragLayer.(*layers.IPv6Fragment); ok && frag.NextHeader != layers.IPProtocolESP {
-				if ip6Layer := newPacket.Layer(layers.LayerTypeIPv6); ip6Layer != nil {
-					ip6 := ip6Layer.(*layers.IPv6)
-					reassembledIP6, err := v6defragmenter.DefragIPv6(ip6, frag)
-					if err != nil {
-						logger.Debug("IPv6 defragmentation error (offline)",
-							"error", err, "src", ip6.SrcIP, "dst", ip6.DstIP, "id", frag.Identification)
-						continue // Skip this fragment
-					}
-					if reassembledIP6 == nil {
-						continue // Still waiting for more fragments
-					}
-					reassembled := rebuildReassembledIPv6Packet(newPacket, reassembledIP6, linkType)
-					reassembled.Metadata().Timestamp = newPacket.Metadata().Timestamp
-					newPacket = reassembled
-				}
-			}
-		}
-
-		// Handle VXLAN decapsulation - extract the inner Ethernet frame so all
-		// downstream processing (SIP detection, RTP correlation, etc.) sees the
-		// real traffic rather than the VXLAN tunnel wrapper.
-		effectiveLinkType := linkType
-		if inner, ok := decapsulateVXLAN(newPacket); ok {
-			newPacket = inner
-			effectiveLinkType = layers.LinkTypeEthernet
-		}
-
-		// Handle ESP with NULL cipher - common in IMS/VoLTE where ESP transport
-		// mode provides integrity without encryption. Must run after VXLAN
-		// decapsulation so it sees the inner packets from VXLAN tunnels.
-		if ESPDecapEnabled() {
-			if inner, ok := decapsulateESPNull(newPacket); ok {
-				newPacket = inner
-			} else if inner, ok := decapsulateIPv6FragmentESP(newPacket); ok {
-				newPacket = inner
-			}
-		}
-
-		packets = append(packets, PacketInfo{
-			LinkType:   effectiveLinkType,
-			Packet:     newPacket,
-			Interface:  displayName,
-			SourcePath: ifaceName,
-		})
+		packets = append(packets, pkt)
 	}
-
-	return packets, nil
 }

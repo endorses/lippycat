@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -126,10 +127,9 @@ func TestRunOfflineOrderedContextCancelsBlockedProducer(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, file.Close()) })
 	ctx, cancel := context.WithCancel(context.Background())
 	consumerStarted := make(chan struct{})
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
-		RunOfflineOrderedContext(ctx, []pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(<-chan PacketInfo) {
+		done <- RunOfflineOrderedContext(ctx, []pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(<-chan PacketInfo) {
 			close(consumerStarted)
 			<-ctx.Done()
 		})
@@ -137,7 +137,8 @@ func TestRunOfflineOrderedContextCancelsBlockedProducer(t *testing.T) {
 	<-consumerStarted
 	cancel()
 	select {
-	case <-done:
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
 	case <-time.After(time.Second):
 		t.Fatal("cancelled ordered replay left its producer blocked")
 	}
@@ -501,4 +502,180 @@ func TestRunOfflineOrderedProcessing(t *testing.T) {
 			t.Fatal("RunOfflineOrdered timed out")
 		}
 	})
+}
+
+func offlineTestDevices(t *testing.T, names ...string) []pcaptypes.PcapInterface {
+	t.Helper()
+	devices := make([]pcaptypes.PcapInterface, 0, len(names))
+	for _, name := range names {
+		file, err := os.Open(name)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, file.Close()) })
+		devices = append(devices, pcaptypes.CreateOfflineInterface(file))
+	}
+	return devices
+}
+
+func TestRunOfflineOrderedStableTiesAndEmptySources(t *testing.T) {
+	stamp := time.Unix(10, 0)
+	first := writeTimestampedTestPCAPWithPayload(t, []timestampedPayload{{stamp, "first-1"}, {stamp, "first-2"}})
+	empty := writeTimestampedTestPCAP(t, nil)
+	second := writeTimestampedTestPCAPWithPayload(t, []timestampedPayload{{stamp, "second-1"}, {stamp, "second-2"}})
+	var payloads []string
+	err := RunOfflineOrderedContext(context.Background(), offlineTestDevices(t, first, empty, second), "", func(ch <-chan PacketInfo) {
+		for packet := range ch {
+			payloads = append(payloads, string(packet.Packet.Layer(layers.LayerTypeUDP).LayerPayload()))
+		}
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"first-1", "first-2", "second-1", "second-2"}, payloads)
+}
+
+func TestRunOfflineOrderedPropagatesSourceErrors(t *testing.T) {
+	for _, scenario := range []string{"regression", "truncated record", "invalid header", "invalid BPF", "open failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			input := writeTimestampedTestPCAP(t, []time.Time{time.Unix(2, 0), time.Unix(3, 0)})
+			filter := ""
+			switch scenario {
+			case "regression":
+				input = writeTimestampedTestPCAP(t, []time.Time{time.Unix(2, 0), time.Unix(1, 0)})
+			case "truncated record":
+				info, err := os.Stat(input)
+				require.NoError(t, err)
+				require.NoError(t, os.Truncate(input, info.Size()-1))
+			case "invalid header":
+				require.NoError(t, os.WriteFile(input, []byte("not a capture"), 0600))
+			case "invalid BPF":
+				filter = "udp and ("
+			}
+			devices := offlineTestDevices(t, input)
+			if scenario == "open failure" {
+				require.NoError(t, os.Remove(input))
+			}
+			err := RunOfflineOrderedContext(context.Background(), devices, filter, func(ch <-chan PacketInfo) {
+				for range ch {
+				}
+			})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), input, "errors must identify the exact source")
+			if scenario == "regression" {
+				require.Contains(t, strings.ToLower(err.Error()), "regress")
+				var regression *offline.TimestampRegressionError
+				require.ErrorAs(t, err, &regression)
+				require.Equal(t, uint64(1), regression.Source.Sequence)
+				require.Equal(t, uint32(0), regression.Source.ArgumentIndex)
+			}
+		})
+	}
+}
+
+func TestRunOfflineOrderedStreamConsumerFailure(t *testing.T) {
+	input := writeTimestampedTestPCAP(t, []time.Time{time.Unix(1, 0), time.Unix(2, 0)})
+	devices := offlineTestDevices(t, input)
+	failure := errors.New("downstream storage full")
+	done := make(chan error, 1)
+	go func() {
+		done <- RunOfflineOrderedStream(context.Background(), devices, "", func(context.Context, <-chan PacketInfo) error {
+			return failure
+		})
+	}()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, failure)
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumer failure did not unblock the producer")
+	}
+}
+
+func TestRunOfflineOrderedStreamConsumerEarlyReturn(t *testing.T) {
+	input := writeTimestampedTestPCAP(t, []time.Time{time.Unix(1, 0), time.Unix(2, 0)})
+	devices := offlineTestDevices(t, input)
+	done := make(chan error, 1)
+	go func() {
+		done <- RunOfflineOrderedStream(context.Background(), devices, "", func(context.Context, <-chan PacketInfo) error {
+			return nil
+		})
+	}()
+	select {
+	case err := <-done:
+		require.Error(t, err, "early return must not report a complete capture")
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumer early return did not unblock the producer")
+	}
+}
+
+func TestRunOfflineOrderedMixedCaptureFormats(t *testing.T) {
+	first := writeTimestampedTestPCAP(t, []time.Time{time.Unix(1, 0), time.Unix(3, 0)})
+	original := writeTimestampedTestPCAP(t, []time.Time{time.Unix(2, 0), time.Unix(4, 0)})
+	in, err := os.Open(original)
+	require.NoError(t, err)
+	reader, err := pcapgo.NewReader(in)
+	require.NoError(t, err)
+	name := filepath.Join(t.TempDir(), "capture.pcapng")
+	out, err := os.Create(name)
+	require.NoError(t, err)
+	writer, err := pcapgo.NewNgWriter(out, layers.LinkTypeEthernet)
+	require.NoError(t, err)
+	for i := 0; i < 2; i++ {
+		data, ci, err := reader.ReadPacketData()
+		require.NoError(t, err)
+		require.NoError(t, writer.WritePacket(ci, data))
+	}
+	require.NoError(t, writer.Flush())
+	require.NoError(t, out.Close())
+	require.NoError(t, in.Close())
+	var got []PacketInfo
+	err = RunOfflineOrderedContext(context.Background(), offlineTestDevices(t, first, name), "udp dst port 2000", func(ch <-chan PacketInfo) {
+		for packet := range ch {
+			got = append(got, packet)
+		}
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 4)
+	for i, packet := range got {
+		require.Equal(t, int64(i+1), packet.Packet.Metadata().Timestamp.Unix())
+		require.Equal(t, "test", string(packet.Packet.Layer(layers.LayerTypeUDP).LayerPayload()), "retained packet bytes must survive subsequent reads")
+	}
+	require.Equal(t, name, got[1].SourcePath)
+}
+
+func TestRunOfflineOrderedStreamsBeforeReadingLaterCorruption(t *testing.T) {
+	input := writeTimestampedTestPCAP(t, []time.Time{time.Unix(1, 0), time.Unix(2, 0)})
+	info, err := os.Stat(input)
+	require.NoError(t, err)
+	require.NoError(t, os.Truncate(input, info.Size()-1))
+	var got []PacketInfo
+	err = RunOfflineOrderedContext(context.Background(), offlineTestDevices(t, input), "", func(ch <-chan PacketInfo) {
+		for packet := range ch {
+			got = append(got, packet)
+		}
+	})
+	require.Error(t, err)
+	require.Len(t, got, 1, "the first packet must be delivered before reading the malformed second record")
+	require.Equal(t, int64(1), got[0].Packet.Metadata().Timestamp.Unix())
+}
+
+func TestRunOfflineOrderedSourceLimitBeforeOpening(t *testing.T) {
+	devices := make([]pcaptypes.PcapInterface, MaxOfflineSources+1)
+	for i := range devices {
+		devices[i] = &mockPcapInterface{name: "/nonexistent/never-open.pcap"}
+	}
+	called := false
+	err := RunOfflineOrderedContext(context.Background(), devices, "", func(<-chan PacketInfo) { called = true })
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "at most")
+	require.NotContains(t, err.Error(), "no such file")
+	require.False(t, called)
+}
+
+func TestRunOfflineOrderedCancellationDuringConsumerDrain(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := RunOfflineOrderedStream(ctx, nil, "", func(ctx context.Context, ch <-chan PacketInfo) error {
+		for range ch {
+		}
+		cancel()
+		return nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
 }

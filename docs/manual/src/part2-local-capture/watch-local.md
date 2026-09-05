@@ -136,8 +136,12 @@ When opening multiple files, packets are merged and displayed in timestamp order
 The current offline TUI shows **processed** packets (packet-store ingestion since
 the last clear/restart) separately from **retained** packets available for
 browsing. `--buffer-size` / `watch.buffer_size` defaults to 10,000 and limits the
-recent packet ring. It does not limit total process memory: file input currently
-collects and sorts packets in memory before replay.
+recent packet ring. It does not limit total process memory. File input uses a
+bounded timestamp merge with up to 64 sources; each source must have
+nondecreasing logical timestamps. Equal timestamps preserve argument and source
+order. Read errors, invalid BPF filters, and timestamp regressions fail replay
+explicitly. PCAP and single-section, single-interface PCAPNG files may be mixed;
+split PCAPNG files with multiple interfaces or sections before opening them.
 
 Interactive packet filters, including removing or clearing filters, operate on
 retained packets only. They cannot recover packets evicted from the ring. During

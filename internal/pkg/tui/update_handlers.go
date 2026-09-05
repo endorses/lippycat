@@ -550,10 +550,17 @@ func (m Model) handleCaptureCompleteMsg(msg CaptureCompleteMsg) (Model, tea.Cmd)
 	// Get final packet count from store for the toast message
 	_, _, totalPackets, _ := m.packetStore.GetBufferInfo()
 
-	// Show completion toast
+	// Show source failures without claiming that a partial replay is complete.
+	toastMessage := fmt.Sprintf("Capture complete: %d packets loaded", totalPackets)
+	toastType := components.ToastSuccess
+	if msg.Err != nil {
+		logger.Error("Offline capture failed", "error", msg.Err)
+		toastMessage = fmt.Sprintf("Capture failed (partial replay): %v", msg.Err)
+		toastType = components.ToastError
+	}
 	toastCmd := m.uiState.Toast.Show(
-		fmt.Sprintf("Capture complete: %d packets loaded", totalPackets),
-		components.ToastSuccess,
+		toastMessage,
+		toastType,
 		components.ToastDurationLong,
 	)
 

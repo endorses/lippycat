@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-05
 
-**Status:** Phase 0 implemented and verified; phases 1–6 pending
+**Status:** Phases 0–1 implemented and verified; phases 2–6 pending
 
 **Code baseline:** `fff6c68f`
 
@@ -171,19 +171,46 @@ phases; phase 0 does not claim that those behaviors have shipped.
 
 ### Phase 1 — Stream ordered input
 
-- [ ] Extract sequential, error-returning file cursors from
+- [x] Extract sequential, error-returning file cursors from
       `readAllPacketsFromDeviceContext`; distinguish EOF from malformed input and
       propagate open, read, and BPF errors. Check reader/PCAPNG interface support.
-- [ ] Implement deterministic k-way merge with context-aware reads/sends and
+- [x] Implement deterministic k-way merge with context-aware reads/sends and
       explicit timestamp-regression errors; remove full-input collection/sort.
-- [ ] Preserve IPv4/IPv6 reassembly, ESP/VXLAN handling, raw byte ownership,
+- [x] Preserve IPv4/IPv6 reassembly, ESP/VXLAN handling, raw byte ownership,
       exact source paths, BPF placement, and logical packet metadata.
-- [ ] Bound fragment state and reader concurrency; ensure downstream failure
+- [x] Bound fragment state and reader concurrency; ensure downstream failure
       cancels the producer and every owned reader is closed.
-- [ ] Extend `snifferstarter_test.go`, `defrag_offline_test.go`, and
+- [x] Extend `snifferstarter_test.go`, `defrag_offline_test.go`, and
       `offline_flow_test.go` for interleaved SIP/RTP, equal timestamps, empty
       sources, duplicate basenames, mixed formats, regression errors, malformed
       input, and cancellation of blocked consumers. No later-SIP prioritization.
+
+Phase 1 implementation notes:
+
+- Sequential PCAP/PCAPNG cursors and a deterministic one-packet-per-source heap
+  replace collection/sorting in production replay. Error-returning stream APIs
+  join consumers, close readers, and propagate source and downstream failures.
+- The supported limit is 64 regular-file sources. PCAPNG currently supports one
+  section and one interface per file; additional domains fail with instructions
+  to split the input, preventing accidental cross-interface reassembly.
+- Reader records/PCAPNG blocks are capped at 16 MiB. Per-source pending IP state
+  is bounded to 4,096 flows and 16 MiB with capture-time expiry; source-local ESP
+  caches are separately capped at 4,096 combined entries. Limit failures are
+  explicit. PCAPNG framing/options are validated before decoder allocation.
+- Startup and in-TUI replay surface failures as partial replay errors. Atomic
+  dataset publication and isolated analyzer lifecycle remain Phase 3 work.
+- The [reader baseline comparison](../research/watch-file-offline-baseline.md#phase-1-streaming-reader-comparison-2026-09-05)
+  records about 38 MiB peak RSS for both 100,000 and 1,000,000 packets. This does
+  not claim bounded analyzer or TUI presentation-queue memory.
+
+Verification: full capture, PCAP type, offline, TUI and watch checks pass under
+`all`; capture, TUI and watch checks also pass under `tui`. Focused ordered-reader,
+normalization, cancellation and failure-toast tests pass with the race detector.
+Hunter, processor, tap and CLI specialized builds pass. Tests cover bounded
+lookahead before later corruption, deterministic ties/SIP/RTP, empty sources,
+exact paths, mixed formats, malformed framing/BPF, regressions, fragment budgets,
+source-local IPv4/IPv6 and ESP state, VXLAN metadata, and blocked/failed consumers.
+Private capture fixtures were replaced with portable generated ordered inputs.
 
 ### Phase 2 — Implement session storage and complete queries
 

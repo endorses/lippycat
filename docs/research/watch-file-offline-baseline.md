@@ -140,3 +140,26 @@ state. Disk amplification, page/detail/filter/export latency, cancellation and
 multi-source throughput have no current dataset implementation to measure; record
 those in phases 2–6. The current replay throughput is a comparison point, not a
 requirement that indexing plus durable writes cost no additional time.
+
+## Phase 1 streaming-reader comparison (2026-09-05)
+
+The same benchmark now streams cursors through a one-packet-per-source heap.
+Two fresh test processes, one iteration each, produced these smoke measurements:
+
+| Packets   | Replay time | First packet | Peak RSS   |
+| --------- | ----------- | ------------ | ---------- |
+| 100,000   | 107 ms      | 89 µs        | 38,596 KiB |
+| 1,000,000 | 1.31 s      | 87 µs        | 38,928 KiB |
+
+Build with `GOCACHE=/tmp/lippycat-go-cache go test -tags all -c -o /tmp/lippycat-phase1-capture.test ./internal/pkg/capture`.
+Run each size separately with `-test.run '^$' -test.bench '^BenchmarkOfflineOrderedBaseline/packets_100000$' -test.benchtime=1x -test.count=1`
+(substitute `1000000` for the larger input). Peak RSS was read using Python's
+`resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss` after running each test
+binary via `subprocess.run` in a fresh Python process.
+
+The roughly 332 KiB RSS difference replaces the Phase 0 reader's count-dependent
+retention. This is a reader-only smoke comparison, not the repeated acceptance
+benchmark for the future dataset implementation. Cumulative allocation still
+scales with processed packets (about 123 MB and 1.23 GB respectively); retained
+reader memory does not. Analyzers, presentation queues, storage, and query/cache
+budgets remain outside this measurement.

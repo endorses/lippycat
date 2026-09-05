@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"errors"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -344,4 +345,23 @@ func TestHandleHuntersLoadedMsg(t *testing.T) {
 	assert.NotNil(t, updatedModel.uiState.HunterSelector,
 		"Hunter selector should exist")
 	assert.Nil(t, cmd, "Should not return any command")
+}
+
+func TestHandleCaptureCompleteMsgReportsSourceFailure(t *testing.T) {
+	ClearPendingPackets()
+	pendingLocalEvents.clear()
+	t.Cleanup(ClearPendingPackets)
+	t.Cleanup(pendingLocalEvents.clear)
+
+	m := NewModel(128, 8, "", "", []string{"capture.pcap"}, false, false, "", true)
+	m.uiState.Toast.Hide()
+	m, cmd := m.handleCaptureCompleteMsg(CaptureCompleteMsg{
+		Err: errors.New("capture.pcap source sequence 3: timestamp regression"),
+	})
+
+	assert.NotNil(t, cmd)
+	toast := m.uiState.Toast.View()
+	assert.Contains(t, toast, "Capture failed (partial replay)")
+	assert.Contains(t, toast, "timestamp regression")
+	assert.NotContains(t, toast, "Capture complete")
 }

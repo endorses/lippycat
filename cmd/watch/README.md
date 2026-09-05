@@ -66,8 +66,15 @@ lc watch file call1.pcap call2.pcap -f "udp"
 **Current offline retention:** The TUI distinguishes packets processed by its
 packet store from packets retained for browsing. `--buffer-size` (or
 `watch.buffer_size`, default 10,000) limits the recent packet ring, not the
-number read from the input or the process's total memory. Offline input currently
-collects and sorts packets in memory before replay.
+number read from the input or the process's total memory. Offline input streams
+through a bounded timestamp merge; presentation and analyzer memory have separate
+limits. Up to 64 source files are supported. Each source must have nondecreasing
+logical packet timestamps; equal timestamps preserve argument and source order.
+Timestamp regressions, malformed capture records, and invalid BPF filters fail
+replay explicitly. PCAP and single-section, single-interface PCAPNG files can be
+mixed; split multi-interface or multi-section PCAPNG captures into separate files
+first. Records/PCAPNG blocks are capped at 16 MiB. Per-source pending IP fragments
+are capped at 4,096 flows and 16 MiB, with a 30-second capture-time expiry.
 
 Interactive packet filters (including removal and clearing) scan retained
 packets only; they do not search the entire file. During replay, the filtered

@@ -4,7 +4,9 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,22 +14,16 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
+	"github.com/stretchr/testify/require"
 )
 
 // TestBridgeOfflinePacketCounting tests that the bridge correctly counts all packets
 // when processing offline PCAP files (simulating TUI mode).
 func TestBridgeOfflinePacketCounting(t *testing.T) {
-	files := []string{
-		"/home/grischa/Downloads/pcaps/gk_72_rtp_65f935f1-10d1-411a-8d6f-0ab721165c46.pcap",
-		"/home/grischa/Downloads/pcaps/gk_72_sip_65f935f1-10d1-411a-8d6f-0ab721165c46.pcap",
-	}
-
-	// Check files exist
-	for _, path := range files {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			t.Skipf("Test file not found: %s", path)
-		}
-	}
+	files := writeOrderedBridgeFixtures(t)
 
 	// Run test multiple times to check consistency
 	for run := 0; run < 5; run++ {
@@ -54,7 +50,7 @@ func TestBridgeOfflinePacketCounting(t *testing.T) {
 			}
 			defer func() {
 				for _, f := range openFiles {
-					f.Close()
+					require.NoError(t, f.Close())
 				}
 			}()
 
@@ -76,10 +72,7 @@ func TestBridgeOfflinePacketCounting(t *testing.T) {
 			}
 
 			// Run offline ordered capture
-			capture.RunOfflineOrdered(devices, "", processor)
-
-			// Allow time for consumer to finish
-			time.Sleep(100 * time.Millisecond)
+			require.NoError(t, capture.RunOfflineOrderedContext(context.Background(), devices, "", processor))
 
 			// Get bridge stats
 			stats := GetBridgeStats()
@@ -105,20 +98,9 @@ func TestBridgeOfflinePacketCounting(t *testing.T) {
 	}
 }
 
-// TestBridgeOfflineConsistency runs the bridge multiple times in parallel
-// to stress test for race conditions
+// TestBridgeOfflineConsistency repeats replay to check deterministic delivery.
 func TestBridgeOfflineConsistency(t *testing.T) {
-	files := []string{
-		"/home/grischa/Downloads/pcaps/gk_72_rtp_65f935f1-10d1-411a-8d6f-0ab721165c46.pcap",
-		"/home/grischa/Downloads/pcaps/gk_72_sip_65f935f1-10d1-411a-8d6f-0ab721165c46.pcap",
-	}
-
-	// Check files exist
-	for _, path := range files {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			t.Skipf("Test file not found: %s", path)
-		}
-	}
+	files := writeOrderedBridgeFixtures(t)
 
 	const numRuns = 10
 	results := make([]int64, numRuns)
@@ -151,17 +133,14 @@ func TestBridgeOfflineConsistency(t *testing.T) {
 			StartEnvelopeBridge(NormalizeCaptureStream(context.Background(), ch, pipeline.SourcePCAPReplay), nil, pauseSignal, callTracker, true, nil)
 		}
 
-		capture.RunOfflineOrdered(devices, "", processor)
-
-		// Wait for everything to settle
-		time.Sleep(50 * time.Millisecond)
+		require.NoError(t, capture.RunOfflineOrderedContext(context.Background(), devices, "", processor))
 
 		// Get results
 		results[i] = atomic.LoadInt64(&bridgeStats.PacketsReceived)
 
 		// Close files
 		for _, f := range openFiles {
-			f.Close()
+			require.NoError(t, f.Close())
 		}
 	}
 
@@ -180,4 +159,29 @@ func TestBridgeOfflineConsistency(t *testing.T) {
 	if first != expectedPackets {
 		t.Errorf("Expected %d packets, got %d", expectedPackets, first)
 	}
+}
+
+// Each file is monotonic and their timestamps interleave. These generated files
+// keep delivery tests independent of private captures and timestamp regressions.
+func writeOrderedBridgeFixtures(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	data := goldenUDPPacket(t, 32000, 32001, []byte("offline bridge fixture"))
+	var paths []string
+	for source, count := range []int{1023, 54} {
+		path := filepath.Join(dir, fmt.Sprintf("source-%d.pcap", source))
+		f, err := os.Create(path)
+		require.NoError(t, err)
+		writer := pcapgo.NewWriter(f)
+		require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+		for sequence := 0; sequence < count; sequence++ {
+			require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{
+				Timestamp:     time.Unix(1700000000, int64(2*sequence+source)*1000000),
+				CaptureLength: len(data), Length: len(data),
+			}, data))
+		}
+		require.NoError(t, f.Close())
+		paths = append(paths, path)
+	}
+	return paths
 }

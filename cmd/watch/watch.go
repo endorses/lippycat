@@ -56,7 +56,7 @@ func init() {
 	WatchCmd.AddCommand(remoteCmd)
 
 	// Shared flags (inherited by subcommands)
-	WatchCmd.PersistentFlags().IntVar(&bufferSize, "buffer-size", 10000, "maximum number of packets to keep in memory")
+	WatchCmd.PersistentFlags().IntVar(&bufferSize, "buffer-size", 10000, "live/remote packet ring and retained event capacity; does not limit offline packets")
 	WatchCmd.PersistentFlags().IntVar(&maxCalls, "max-calls", 5000, "maximum number of VoIP calls to keep in memory")
 
 	// Offline limits are shared by the ready dataset and its replacement.

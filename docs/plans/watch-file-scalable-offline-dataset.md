@@ -739,6 +739,22 @@ sub-agent reviews and root verification covered code, tests, benchmark methodolo
 and numerical results. Phase 6 is complete; only the deferred extensions below
 remain outside this release scope.
 
+Phase 6 review correction (2026-09-05): three sub-agent reviews and root
+verification confirmed one CLI-help omission. The inherited `--buffer-size`
+description still described only a packet memory limit. It now identifies the
+live/remote packet ring and retained event capacity and explicitly states that
+offline packets are not limited. Root reproduced the old `watch file --help`
+output and verified the corrected output under `all` and `tui`.
+
+Uncached capture/offline/all TUI packages/watch tests pass under both tags;
+the full offline/TUI race suites pass under `all`. Reviews verified independent
+statistics and raw-byte references, actual cache eviction, failure/publication
+and cleanup coverage, mixed-mode event behavior, documentation, and benchmark
+methodology. Fresh-process 100,000/1,000,000-packet storage runs used
+41,472/44,576 KiB peak RSS (+3.03 MiB) and passed the documented latency and
+throughput gates. No runtime defects or other Phase 6 implementation gaps were
+confirmed.
+
 ## Deferred optimizations and extensions
 
 These are follow-up work, not release blockers for phases 0–6.

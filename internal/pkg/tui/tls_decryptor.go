@@ -10,8 +10,22 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/tls/decrypt"
 	"github.com/endorses/lippycat/internal/pkg/tls/keylog"
+	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/spf13/viper"
 )
+
+// configureLiveTLSDetails restores the non-session getter after offline capture.
+func configureLiveTLSDetails(panel *components.DetailsPanel) {
+	panel.SetDecryptedDataGetter(nil)
+	if viper.GetBool("watch.tls_decryption_enabled") {
+		panel.SetDecryptedDataGetter(func(srcIP, dstIP, srcPort, dstPort string) ([]byte, []byte) {
+			if decryptor := GetTLSDecryptor(); decryptor != nil {
+				return decryptor.GetDecryptedData(srcIP, dstIP, srcPort, dstPort)
+			}
+			return nil, nil
+		})
+	}
+}
 
 // TLSDecryptor wraps the TLS decryption components for TUI use.
 // It provides thread-safe access to the session manager for packet processing

@@ -288,8 +288,13 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 					}
 				}
 				source := eventanalysis.Source{NodeID: analysis.NodeID, CaptureSource: "pcap", InputFile: info.SourcePath, InterfaceIndex: info.SourceInterfaceID, CaptureScope: analysis.CaptureScope, Partial: analysis.Partial}
-				if err := runtime.ObservePacket(source, info); err != nil {
-					return err
+				// The local event adapter currently enriches IP TCP/UDP flows
+				// only. Other logical packets still belong in the dataset even
+				// when they cannot produce a normalized connection event.
+				if offlinePacketSupportsEventAnalysis(info) {
+					if err := runtime.ObservePacket(source, info); err != nil {
+						return err
+					}
 				}
 				if err := dispatcher.Flush(readCtx); err != nil {
 					return err
@@ -366,6 +371,20 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	progress.State = offline.Ready
 	publish(true)
 	return session, nil
+}
+
+func offlinePacketSupportsEventAnalysis(info capture.PacketInfo) bool {
+	switch info.Packet.NetworkLayer().(type) {
+	case *layers.IPv4, *layers.IPv6:
+	default:
+		return false
+	}
+	switch info.Packet.TransportLayer().(type) {
+	case *layers.TCP, *layers.UDP:
+		return true
+	default:
+		return false
+	}
 }
 
 // Completed message metadata is immutable once applied, whether completion was

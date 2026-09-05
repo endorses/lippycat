@@ -28,6 +28,8 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	if m.offlineOpening || m.offlineSession != nil {
 		return m.leaveOffline(&msg, false)
 	}
+	configureLiveTLSDetails(&m.uiState.DetailsPanel)
+	m.uiState.DetailsPanel.SetPacket(nil)
 
 	// Stop any active streaming save before switching modes
 	if m.activeWriter != nil {

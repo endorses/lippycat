@@ -275,14 +275,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	}
 
 	// Set up TLS decryption data getter if decryption is enabled
-	if viper.GetBool("watch.tls_decryption_enabled") {
-		uiState.DetailsPanel.SetDecryptedDataGetter(func(srcIP, dstIP, srcPort, dstPort string) (clientData, serverData []byte) {
-			if decryptor := GetTLSDecryptor(); decryptor != nil {
-				return decryptor.GetDecryptedData(srcIP, dstIP, srcPort, dstPort)
-			}
-			return nil, nil
-		})
-	}
+	configureLiveTLSDetails(&uiState.DetailsPanel)
 
 	// Create background processor for non-critical packet processing
 	bgProcessor := NewBackgroundProcessor()

@@ -429,6 +429,27 @@ review also verified the telemetry correction. Offline, all TUI packages, and
 watch checks pass under `all` and `tui`; TUI and component race checks pass.
 No further Phase 3 defects were confirmed. Phases 4–6 remain pending.
 
+Further Phase 3 protocol and mode-switch review (2026-09-05): three sub-agent
+reviews and root verification confirmed two defects. Valid ARP, unknown Ethernet,
+ICMP, and IGMP packets failed indexing because the local event adapter requires
+decoded IP TCP/UDP flows. Indexing now retains and counts packets outside that
+adapter's supported protocols while continuing to propagate errors from supported
+analysis. Mixed-capture regression tests verify raw bytes, link types, complete
+totals, and supported UDP EOF events without transport loss.
+
+Leaving offline mode also retained the session's TLS details callback and cached
+plaintext. Live/remote restart now clears the selected details and restores the
+normal global TLS callback after successful cleanup. Regression tests reproduce
+the old plaintext appearing across both mode switches and verify that subsequent
+details use the current global decryptor. Independent review verified the fix;
+root reproduced both defects before accepting the corrections. Phases 4–6 remain
+pending.
+
+Verification: offline, all TUI packages, watch, and pipeline checks pass under
+`all` and `tui`. Full TUI and component race suites pass, along with repeated
+focused protocol-preservation and TLS mode-switch race checks. No further
+Phase 3 defects were confirmed.
+
 ### Phase 4 — Virtual packet browsing and event integration
 
 - [ ] Adapt `components/packetlist.go` to logical row counts and bounded page

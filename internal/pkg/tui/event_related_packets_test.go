@@ -45,6 +45,40 @@ func TestModelRelatedPacketIdentity(t *testing.T) {
 	}
 }
 
+func TestModelRelatedPacketCaptureIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		mode                          components.CaptureMode
+		eventNode, source, packetNode string
+		want                          bool
+	}{
+		{"live", components.CaptureModeLive, "watch-local", "live", "Local", true},
+		{"offline", components.CaptureModeOffline, "watch-local", "pcap", "Local", true},
+		{"custom local producer", components.CaptureModeLive, "custom", "live", "Local", true},
+		{"tap", components.CaptureModeRemote, "tap", "tap-local", "tap-local", true},
+		{"other tap", components.CaptureModeRemote, "tap", "tap-local", "other-local", false},
+		{"hunter shares processor ID", components.CaptureModeRemote, "tap", "tap-local", "tap", false},
+		{"hunter", components.CaptureModeRemote, "hunter", "hunter", "hunter", true},
+		{"interface provenance", components.CaptureModeRemote, "hunter", "hunter:eth0", "hunter", true},
+		{"unrelated provenance", components.CaptureModeRemote, "hunter", "other", "other", false},
+		{"missing event node", components.CaptureModeRemote, "", "-local", "hunter", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel(2, 8, "", "", nil, false, true, "", true)
+			m.captureMode = tc.mode
+			env, packet := testEventEnvelope("selected", 1), relatedTestPacket()
+			env.NodeID, env.Provenance.CaptureSource = tc.eventNode, tc.source
+			packet.NodeID = tc.packetNode
+			event := events.NewHTTPEvent(env)
+			m, _ = m.handlePacketMsg(PacketMsg{Packet: packet})
+			require.Equal(t, tc.want, m.hasRelatedPacket(event))
+			require.Equal(t, env, event.Envelope(), "lookup must preserve event identity")
+			m.packetStore.Clear()
+			require.False(t, m.hasRelatedPacket(event))
+		})
+	}
+}
+
 func TestModelRelatedPacketNoticeFollowsRetentionAndSelection(t *testing.T) {
 	m := NewModel(2, 8, "", "", nil, false, true, "", true)
 	m.uiState.ViewMode = "events"

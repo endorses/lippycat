@@ -181,6 +181,15 @@ func TestEnvelopeBridgePublishesOfflineEventsWithFileProvenanceBeforeEOF(t *test
 	require.NotEmpty(t, envelope.EventID)
 	require.NotEmpty(t, envelope.ProducerSessionID)
 	require.NotZero(t, envelope.EventSequence)
+
+	// Deliver the bridge's packet through the model's normal offline path.
+	// Event producer identity and packet display identity differ in production.
+	packets := pendingPackets.drainPackets(1)
+	require.Len(t, packets, 1)
+	m := NewModel(2, 8, "", "", []string{"fixture.pcap"}, false, false, "", false)
+	m, _ = m.handlePacketMsg(PacketMsg{Packet: packets[0]})
+	require.Equal(t, "Local", m.packetStore.GetPacketsInOrder()[0].NodeID)
+	require.True(t, m.hasRelatedPacket(dnsEvent), "the event's packet is still retained")
 }
 
 func TestWatchLiveAndFileSharedFixtureProduceEquivalentHTTPEvents(t *testing.T) {

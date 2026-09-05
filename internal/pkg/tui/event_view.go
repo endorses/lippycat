@@ -188,7 +188,17 @@ func (m Model) hasRelatedPacket(event events.Event) bool {
 	if event == nil || m.packetStore == nil {
 		return false
 	}
-	return m.packetStore.HasRelatedPacket(event.Envelope())
+	env := event.Envelope()
+	if m.captureMode != components.CaptureModeRemote {
+		// Local packet delivery uses the display node "Local", while event
+		// producers retain their stable identity (normally "watch-local").
+		env.NodeID = "Local"
+	} else if env.NodeID != "" && env.Provenance.CaptureSource == env.NodeID+"-local" {
+		// Tap/processor-local packets use the capture source as their batch
+		// node; their events use the processor's identity instead.
+		env.NodeID = env.Provenance.CaptureSource
+	}
+	return m.packetStore.HasRelatedPacket(env)
 }
 
 func eventMatchesProtocol(event events.Event, protocol string) bool {

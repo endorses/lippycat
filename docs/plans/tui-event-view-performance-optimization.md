@@ -755,6 +755,44 @@ passed. Go files were formatted and TUI architecture documentation updated.
 Phase 7 rendering work and the plan's final mixed-mode manual/CPU acceptance
 remain separate; this phase does not claim those gates are complete.
 
+### Phase 6 source-identity review
+
+Independent review found a preexisting integration defect that the original
+Phase 6 tests missed: local events use producer ID `watch-local`, but retained
+packets use display ID `Local`. Remote tap/processor-local events similarly use
+the processor ID while their packets use `<processor>-local`. Exact-node lookup
+therefore displayed a false missing-packet warning despite retaining the packet.
+
+- [x] Reproduce the local mismatch using the production bridge's generated
+      event and converted packet through normal model packet delivery.
+- [x] Normalize only the relationship query's node identity for local capture
+      and the exact remote processor-local source alias; preserve stored event
+      identity, ordinary remote node separation, and absent-node semantics.
+- [x] Cover live/offline, custom local producers, tap, unrelated remote nodes,
+      source provenance, and clear invalidation; independently review the fix.
+- [x] Correct the replay fixture to use production node identities and decoded
+      transport, and assert selected-event related-packet availability.
+- [x] Format changed Go files, run uncached race checks across TUI, capture,
+      and remote-capture packages, and build both `tui` and `all` variants.
+
+Root independently reproduced the failing bridge regression before applying the
+fix and verified both sub-agent reviews. Store reference counts, canonical keys,
+lazy activation, and selected-flow cache invalidation required no changes.
+
+One-second review benchmarks on the same i9-13900HX passed. The corrected DNS
+replay measured 1.575 ms and 1,112,688 bytes per 50 packets, with arrival,
+eviction, selection, loss, and relationship assertions passing. Unchanged
+synchronization measured 146–157 ns with zero allocations; related-packet misses
+measured 164–177 ns at 1,000/10,000 retained packets. The fixture correction
+changes node identity and transport metadata, so these replay timings are not
+an exact comparison with the original fixture.
+
+The ingestion controls again confirmed the documented tradeoff. At 1,000
+retained packets, a 64-packet batch measured 9.43 µs control, 9.18 µs inactive,
+and 37.61 µs active; at 10,000, results were 16.82, 18.47, and 44.23 µs.
+Churn measured 17.83 µs control versus 58.93 µs active. No timing thresholds or
+claims about Phase 7/manual acceptance were added.
+
 ## 11. Phase 7 — Optimize Visible-Row Rendering
 
 Only pursue this phase after profiling the preceding changes; storage and

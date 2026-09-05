@@ -23,7 +23,7 @@ import (
 // tick delivery, and a fixed 160x40 Events viewport. This is a controlled DNS
 // capture workload, not a mixed-protocol production capture or a terminal driver
 // benchmark. Rotating through 10,001 flows with 10,000 retained packets exercises
-// full related-packet scans as the newest events arrive before their packets.
+// related-packet index maintenance as the newest events and packets arrive.
 func BenchmarkModelEventDNSReplay(b *testing.B) {
 	const retained, batchSize = 10_000, 50
 	ctx := context.Background()
@@ -34,7 +34,8 @@ func BenchmarkModelEventDNSReplay(b *testing.B) {
 		DrainPendingPackets(true)
 	})
 
-	producer, err := events.NewOfflineProducer("Local", events.OfflineSession{
+	options := localCaptureEventOptions("")
+	producer, err := events.NewOfflineProducer(options.NodeID, events.OfflineSession{
 		InputIdentity: "generated-dns-udp-10001-flows-v1", AnalysisProfile: "watch-eventanalysis-v1",
 	})
 	require.NoError(b, err)
@@ -61,7 +62,7 @@ func BenchmarkModelEventDNSReplay(b *testing.B) {
 	m.uiState.Tabs.SetActive(0)
 	m.uiState.Width, m.uiState.Height = 160, 40
 	m.uiState.EventShowDetails = true
-	source := eventanalysis.Source{NodeID: "Local", CaptureSource: "pcap", InputFile: "generated-dns.pcap"}
+	source := eventanalysis.Source{NodeID: options.NodeID, CaptureSource: "pcap", InputFile: "generated-dns.pcap"}
 	sequence := 0
 	refreshTime := time.Now().Add(time.Hour)
 	replayBatch := func() {
@@ -79,7 +80,7 @@ func BenchmarkModelEventDNSReplay(b *testing.B) {
 			packets = append(packets, types.PacketDisplay{
 				Timestamp: packet.Metadata().Timestamp, SrcIP: fields.SrcIP, DstIP: fields.DstIP,
 				SrcPort: fields.SrcPort, DstPort: fields.DstPort, Protocol: "DNS",
-				Length: len(raw), NodeID: "Local",
+				Length: len(raw), Transport: fields.Transport,
 			})
 		}
 		if err := dispatcher.Flush(ctx); err != nil {
@@ -96,6 +97,9 @@ func BenchmarkModelEventDNSReplay(b *testing.B) {
 	require.Equal(b, uint64(retained), m.eventStore.Stats().Retained)
 	require.Equal(b, retained, m.packetStore.Count())
 	m.setCaptureView("events")
+	selected, ok := m.uiState.EventsView.Selected()
+	require.True(b, ok)
+	require.True(b, m.hasRelatedPacket(selected.Event))
 	_ = m.View()
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -111,9 +115,10 @@ func BenchmarkModelEventDNSReplay(b *testing.B) {
 	require.Equal(b, uint64(sequence-retained), stats.Evicted)
 	require.Zero(b, stats.TransportLost)
 	require.Zero(b, runtime.Stats().Dropped)
-	selected, ok := m.eventStore.Selected()
+	selected, ok = m.eventStore.Selected()
 	require.True(b, ok)
 	require.Equal(b, uint64(sequence), selected.ArrivalSequence)
+	require.True(b, m.hasRelatedPacket(selected.Event))
 	b.ReportMetric(batchSize, "packets/op")
 }
 

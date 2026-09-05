@@ -637,6 +637,12 @@ statistics counters do not affect membership. Resize/replacement rebuild active
 indexes; clear/restart use store reset APIs so retained references and cached
 availability cannot survive a reset.
 
+The model translates event producer identity to packet display identity for
+relationship queries only: local/live and offline packets use `Local`, while
+remote tap/processor-local events use their capture source when it is exactly
+`NodeID + "-local"`. Stored event identities remain unchanged; ordinary remote
+nodes keep exact-node matching and absent IDs retain wildcard behavior.
+
 ### Rendering Optimization
 
 **Viewport pattern** - only render visible rows:

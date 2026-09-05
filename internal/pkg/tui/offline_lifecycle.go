@@ -331,6 +331,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.lastSyncedFilteredCount = 0
 	m.lastFilterState = false
 	m.eventStore = msg.session.EventStore
+	m.eventStore.SetKindFilter(eventKindsForProtocol(m.uiState.SelectedProtocol.Name))
 	m.callTracker = msg.session.Tracker
 	m.callStore = store.NewCallStore(m.maxOfflineCalls)
 	m.uiState.CallsView.ClearCorrelatedCalls()

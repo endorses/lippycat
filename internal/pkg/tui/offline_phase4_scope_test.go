@@ -8,8 +8,40 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOfflineProtocolSelectionScopesEventsWithoutClaimingPacketFiltering(t *testing.T) {
+	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
+	total := m.offlineSession.Dataset.Count()
+	selected := m.uiState.PacketList.GetSelectedPacket()
+	require.NotNil(t, selected)
+	m.uiState.Toast.Hide()
+	m, _ = m.handleProtocolSelectedMsg(components.ProtocolSelectedMsg{
+		Protocol: components.Protocol{Name: "DNS", BPFFilter: "port 53"},
+	})
+	require.Contains(t, m.uiState.Toast.View(), "Selected DNS views")
+	require.Contains(t, m.uiState.Toast.View(), "Offline packet filtering is not available yet")
+	require.NotContains(t, m.uiState.Toast.View(), "Filtering: DNS")
+	require.Equal(t, "DNS", m.uiState.SelectedProtocol.Name)
+	require.True(t, m.uiState.PacketList.IsVirtual())
+	require.Equal(t, total, m.uiState.PacketList.LogicalCount())
+	require.Equal(t, selected, m.uiState.PacketList.GetSelectedPacket())
+	require.False(t, m.packetStore.HasFilter())
+
+	m.eventStore.Reset()
+	m.eventStore.AddBatch([]events.Event{
+		events.NewDNSEvent(testEventEnvelope("offline-dns-scope", 1)),
+		events.NewHTTPEvent(testEventEnvelope("offline-http-scope", 2)),
+	})
+	m, _ = m.handleToggleView()
+	require.Equal(t, "events", m.uiState.ViewMode)
+	require.Len(t, m.eventStore.Events(), 1)
+	require.Equal(t, events.KindDNS, m.eventStore.Events()[0].Event.Kind())
+	require.Equal(t, total, m.uiState.PacketList.LogicalCount())
+}
 
 func TestOfflinePhase4RejectsPartialPacketOperations(t *testing.T) {
 	m, open := offlineLifecycleModel(t)

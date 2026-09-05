@@ -338,6 +338,8 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 	var toastMsg string
 	if msg.Protocol.Name == "All" {
 		toastMsg = "Showing all protocols"
+	} else if m.offlineSession != nil {
+		toastMsg = fmt.Sprintf("Selected %s views. Offline packet filtering is not available yet.", msg.Protocol.Name)
 	} else {
 		toastMsg = fmt.Sprintf("Filtering: %s", msg.Protocol.Name)
 	}

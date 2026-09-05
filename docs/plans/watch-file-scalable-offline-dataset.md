@@ -557,6 +557,24 @@ was resolved by clearing the rebuildable cache and running checks sequentially.
 Phase 4 is complete; complete packet filtering/export and release acceptance
 remain phases 5–6.
 
+Phase 4 review corrections (2026-09-05): three sub-agent reviews and root
+verification confirmed two protocol-scope defects. Opening or replacing an
+offline dataset retained the selected event protocol but installed an unfiltered
+event projection. Publication now reapplies that protocol scope before the first
+projection, preserving it through subsequent incremental updates. Protocol
+selection also claimed to filter offline packets while leaving all rows visible;
+its notification now identifies the selected views and explicitly states that
+offline packet filtering is unavailable.
+
+Regression coverage checks initial and replacement publication, incremental
+event updates, accurate notifications, complete virtual packet counts, selected
+row preservation, and event filtering after protocol selection. Root reproduced
+the publication failure before accepting the fix and verified both corrections;
+independent review also verified the notification correction. Offline, all TUI
+packages, and watch checks pass under `all` and `tui`; full offline/TUI race
+checks and repeated focused regression race checks pass. No further phase 4
+defects were confirmed. Phases 5–6 remain pending.
+
 ### Phase 5 — Complete filtering, statistics, and export
 
 - [ ] Route all offline packet filter apply/remove/clear paths through dataset

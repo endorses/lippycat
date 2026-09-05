@@ -378,6 +378,24 @@ and retransmissions. Independent sub-agent reviews and root review reproduced
 and corrected lifecycle, global-state, and EOF metadata issues before checking
 these tasks off.
 
+Phase 3 review corrections (2026-09-05): independent reviews reproduced two
+defects. Failed mode-switch or quit cleanup could expose an already
+closed dataset and silently reject subsequent opens. Cleanup failures now keep
+the modal active, retain ownership, and support asynchronous retry while
+preserving restart, queued-open, and quit intent. Offline SIP reassembly also
+failed to expire idle connections, allowing fragments an hour apart to produce
+a false completed call. Indexing now expires streams on a deterministic
+capture-time cadence and preserves original packet identity for queued messages
+released during expiry. Regression tests cover cleanup recovery, stale SIP
+framing, expired stream capacity, and deferred metadata provenance.
+
+Verification: root review confirmed both reproductions and reviewed the fixes;
+a separate reviewer verified cleanup recovery. Offline, pipeline, all TUI
+packages, and watch pass under `all` and `tui`. Full TUI and pipeline race suites
+pass, as do repeated focused cleanup race checks. Capture, events, and detector
+checks and hunter, processor, tap, and CLI builds pass. No further Phase 3
+defects were found; phases 4–6 remain pending.
+
 ### Phase 4 — Virtual packet browsing and event integration
 
 - [ ] Adapt `components/packetlist.go` to logical row counts and bounded page

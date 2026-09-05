@@ -127,6 +127,9 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 		copy.Config.Inputs = append([]string(nil), msg.Config.Inputs...)
 		copy.Config.Analysis.SourceOrdering = append([]string(nil), msg.Config.Analysis.SourceOrdering...)
 		m.offlineQueued = &copy
+		if m.offlineCleanupFailed {
+			return m.leaveOffline(nil, false)
+		}
 		return m, nil
 	}
 	if m.offlineController == nil {
@@ -355,7 +358,13 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 }
 func (m Model) offlineModal() string {
 	p := m.offlineProgress
-	return components.RenderModal(components.ModalRenderOptions{Title: "Opening offline dataset", Content: fmt.Sprintf("Phase: %s\nSources: %d\nLogical packets: %d\nBytes scanned: %d\nTemporary disk: %d bytes\nElapsed: %s", p.State, p.Sources, p.LogicalPackets, p.ScannedBytes, p.DiskBytes, p.Elapsed.Round(time.Millisecond)), Footer: "Esc: Cancel   Ctrl+C: Quit", Width: m.uiState.Width, Height: m.uiState.Height, Theme: m.uiState.Theme})
+	content := fmt.Sprintf("Phase: %s\nSources: %d\nLogical packets: %d\nBytes scanned: %d\nTemporary disk: %d bytes\nElapsed: %s", p.State, p.Sources, p.LogicalPackets, p.ScannedBytes, p.DiskBytes, p.Elapsed.Round(time.Millisecond))
+	footer := "Esc: Cancel   Ctrl+C: Quit"
+	if m.offlineCleanupFailed {
+		content += "\n\nCleanup failed: " + m.offlineCleanupError
+		footer = "Enter: Retry cleanup   Ctrl+C: Retry and quit"
+	}
+	return components.RenderModal(components.ModalRenderOptions{Title: "Opening offline dataset", Content: content, Footer: footer, Width: m.uiState.Width, Height: m.uiState.Height, Theme: m.uiState.Theme})
 }
 
 // Mode changes and quit join workers and release sessions in a command, keeping
@@ -364,9 +373,18 @@ func (m Model) leaveOffline(restart *components.RestartCaptureMsg, quit bool) (M
 	if quit {
 		m.offlineQuitRequested = true
 	}
-	if m.offlineLeaving {
+	if m.offlineLeaving && !m.offlineCleanupFailed {
 		return m, nil
 	}
+	if restart != nil {
+		copy := *restart
+		copy.PCAPFiles = append([]string(nil), restart.PCAPFiles...)
+		m.offlineRestart = &copy
+	}
+	restart = m.offlineRestart
+	quit = m.offlineQuitRequested
+	m.offlineCleanupFailed = false
+	m.offlineCleanupError = ""
 	m.offlineLeaving = true
 	m.offlineStarted = time.Now()
 	m, _ = m.cancelOffline()

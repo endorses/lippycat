@@ -5,6 +5,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -323,4 +324,104 @@ func TestOfflineLifecycleQuitUpgradesModeCleanup(t *testing.T) {
 	m = updated.(Model)
 	require.True(t, m.uiState.Quitting)
 	require.IsType(t, tea.QuitMsg{}, quit())
+}
+
+// A real cleanup failure can occur after the dataset's readers are closed,
+// such as when removing its private directory fails. The UI must not resume
+// browsing that session while the controller retains cleanup ownership.
+type offlineCloseAfterReleaseFailure struct {
+	offline.Dataset
+	failed bool
+}
+
+func (d *offlineCloseAfterReleaseFailure) Close() error {
+	err := d.Dataset.Close()
+	if !d.failed {
+		d.failed = true
+		return errors.Join(err, errors.New("injected cleanup failure after close"))
+	}
+	return err
+}
+
+func failOfflineLeaving(t *testing.T, quit bool) (Model, OpenOfflineDatasetMsg) {
+	t.Helper()
+	m, open := offlineLifecycleModel(t)
+	m, cmd := m.openOffline(open)
+	result := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
+	require.NoError(t, result.err)
+	result.session.Dataset = &offlineCloseAfterReleaseFailure{Dataset: result.session.Dataset}
+	m, _ = m.completeOffline(result)
+	if quit {
+		m, cmd = m.leaveOffline(nil, true)
+	} else {
+		m, cmd = m.handleRestartCaptureMsg(components.RestartCaptureMsg{Mode: components.CaptureModeRemote, BufferSize: 8})
+	}
+	cleanup := cmd().(offlineCleanupMsg)
+	require.ErrorContains(t, cleanup.err, "injected cleanup failure after close")
+	updated, _ := m.update(cleanup)
+	m = updated.(Model)
+	require.True(t, m.offlineOpening, "closed dataset must not become browsable")
+	require.True(t, m.offlineLeaving)
+	require.True(t, m.offlineCleanupFailed)
+	require.False(t, m.uiState.Quitting)
+	require.Contains(t, m.offlineModal(), "Retry cleanup")
+	_, err := m.offlineSession.Dataset.Query(context.Background(), offline.QuerySpec{Token: offline.Token{Dataset: result.generation}})
+	require.Error(t, err, "exercise an installed dataset whose readers already closed")
+	return m, open
+}
+
+func TestOfflineLifecycleCleanupFailureRetryCompletesModeSwitch(t *testing.T) {
+	m, _ := failOfflineLeaving(t, false)
+	owner := m.offlineController
+	updated, retry := m.update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	require.NotNil(t, retry)
+	require.True(t, m.offlineOpening)
+	require.False(t, m.offlineCleanupFailed)
+	updated, _ = m.update(retry())
+	m = updated.(Model)
+	require.Same(t, owner, m.offlineController)
+	require.False(t, m.offlineOpening)
+	require.False(t, m.offlineLeaving)
+	require.Nil(t, m.offlineSession)
+	require.Nil(t, m.offlineRestart)
+	require.Equal(t, components.CaptureModeRemote, m.captureMode)
+}
+
+func TestOfflineLifecycleReopenRetriesFailedCleanup(t *testing.T) {
+	m, open := failOfflineLeaving(t, false)
+	m, retry := m.openOffline(open)
+	require.NotNil(t, retry)
+	require.True(t, m.offlineOpening)
+	require.NotNil(t, m.offlineQueued)
+	updated, cmd := m.update(retry())
+	m = updated.(Model)
+	require.True(t, m.offlineOpening)
+	require.Nil(t, m.offlineSession)
+	require.Nil(t, m.offlineQueued)
+	result := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
+	require.NoError(t, result.err)
+	m, _ = m.completeOffline(result)
+	require.NotNil(t, m.offlineSession)
+	require.False(t, m.offlineOpening)
+	require.Equal(t, open.Config.Inputs, m.pcapFiles)
+}
+
+func TestOfflineLifecycleCleanupFailureRetainsQuitIntent(t *testing.T) {
+	for _, initialQuit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("initial_quit_%t", initialQuit), func(t *testing.T) {
+			m, _ := failOfflineLeaving(t, initialQuit)
+			key := tea.KeyMsg{Type: tea.KeyCtrlC}
+			if initialQuit {
+				key.Type = tea.KeyEnter
+			}
+			updated, retry := m.update(key)
+			m = updated.(Model)
+			require.NotNil(t, retry)
+			updated, quit := m.update(retry())
+			m = updated.(Model)
+			require.True(t, m.uiState.Quitting)
+			require.IsType(t, tea.QuitMsg{}, quit())
+		})
+	}
 }

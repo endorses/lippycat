@@ -110,6 +110,9 @@ type Model struct {
 	offlineLeaving       bool
 	offlineQuitRequested bool
 	offlineQueued        *OpenOfflineDatasetMsg
+	offlineCleanupFailed bool
+	offlineCleanupError  string
+	offlineRestart       *components.RestartCaptureMsg
 	offlineGeneration    offline.DatasetGeneration
 	offlineProgress      offline.Progress
 	offlinePending       OpenOfflineDatasetMsg
@@ -433,6 +436,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case offlineCleanupMsg:
 		if value.generation != 0 && value.generation == m.offlineGeneration && (value.cancelled || value.quit || value.restart != nil) {
+			if !value.cancelled && value.err != nil {
+				// Close may already have released dataset files. Keep browsing
+				// blocked and retain ownership until cleanup can be retried.
+				m.offlineCleanupFailed = true
+				m.offlineCleanupError = value.err.Error()
+				return m, nil
+			}
 			m.offlineOpening = false
 			m.offlineLeaving = false
 			if value.cancelled {
@@ -441,9 +451,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if value.err != nil {
-				return m, m.uiState.Toast.Show("Offline cleanup failed: "+value.err.Error(), components.ToastError, components.ToastDurationLong)
-			}
+			m.offlineCleanupFailed = false
+			m.offlineCleanupError = ""
+			m.offlineRestart = nil
 			m.offlineSession = nil
 			c := m.offlineController
 			c.mu.Lock()
@@ -502,6 +512,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.leaveOffline(nil, true)
 			case "esc":
 				return m.cancelOffline()
+			case "enter":
+				if m.offlineCleanupFailed {
+					return m.leaveOffline(nil, false)
+				}
 			}
 			return m, nil
 		case tea.MouseMsg:

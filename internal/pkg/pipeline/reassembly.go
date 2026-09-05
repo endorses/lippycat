@@ -181,6 +181,23 @@ func (e *ReassemblyEngine) flushOlder() {
 	}
 	e.agingMu.Unlock()
 	cutoff := base.Add(-e.cfg.IdleTimeout)
+	e.flushOlderThan(cutoff)
+}
+
+// FlushOlderThan synchronously releases queued bytes and closes streams older
+// than cutoff. Offline callers advance this from capture time before admitting
+// the next packet, so expiry does not depend on replay speed or wall time.
+func (e *ReassemblyEngine) FlushOlderThan(cutoff time.Time) error {
+	e.stateMu.RLock()
+	defer e.stateMu.RUnlock()
+	if e.closed {
+		return ErrReassemblyClosed
+	}
+	e.flushOlderThan(cutoff)
+	return nil
+}
+
+func (e *ReassemblyEngine) flushOlderThan(cutoff time.Time) {
 	for _, shard := range e.shards {
 		shard.FlushCloseOlderThan(cutoff)
 	}

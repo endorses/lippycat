@@ -210,6 +210,8 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	var assembler *pipeline.ReassemblyEngine
 	var handler *TUISIPHandler
 	var sipFactory *offlineSIPFactory
+	reassemblyConfig := pipeline.DefaultReassemblyConfig()
+	var nextSIPFlush time.Time
 	if cfg.VoIP {
 		handler = NewTUISIPHandler(session.Tracker, agg)
 		handler.markFlow = flows.markTCP
@@ -221,7 +223,7 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 			}
 			return nil
 		}
-		assembler = pipeline.NewReassemblyEngine(sipFactory, pipeline.DefaultReassemblyConfig())
+		assembler = pipeline.NewReassemblyEngine(sipFactory, reassemblyConfig)
 		defer func() { err = errors.Join(err, assembler.Close()); handler.Close() }()
 	}
 	started := time.Now()
@@ -250,6 +252,17 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 				if sipFactory != nil {
 					sipFactory.LastEvent = nil
 					sipFactory.CurrentID = offline.PacketID(indexedPackets)
+					if nextSIPFlush.IsZero() || !env.CaptureTime.Before(nextSIPFlush) {
+						// Expiry may release old queued messages. Their completion
+						// belongs to the original packet, not the incoming packet.
+						sipFactory.Flushing = true
+						flushErr := assembler.FlushOlderThan(env.CaptureTime.Add(-reassemblyConfig.IdleTimeout))
+						sipFactory.Flushing = false
+						if err := errors.Join(flushErr, sipFactory.Err()); err != nil {
+							return err
+						}
+						nextSIPFlush = env.CaptureTime.Add(reassemblyConfig.FlushInterval)
+					}
 				}
 				if assembler != nil && info.Packet.NetworkLayer() != nil && info.Packet.Layer(layers.LayerTypeTCP) != nil {
 					if err := assembler.AssembleWithContext(env, offlineSIPContext(info.Packet.Metadata().CaptureInfo, sipFactory.CurrentID)); err != nil {

@@ -164,6 +164,7 @@ func TestReassemblyEngineCloseIsIdempotent(t *testing.T) {
 	assert.Equal(t, int32(1), factory.shutdowns.Load())
 	flow, tcp := testTCPPacket(1)
 	assert.ErrorIs(t, engine.AssembleTCP(flow, tcp, time.Now()), ErrReassemblyClosed)
+	assert.ErrorIs(t, engine.FlushOlderThan(time.Now()), ErrReassemblyClosed)
 }
 
 func TestReassemblyEngineReturnsFactoryShutdownError(t *testing.T) {

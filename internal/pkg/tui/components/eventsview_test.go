@@ -482,26 +482,28 @@ func (e detailProjectionCountingEvent) Kind() events.Kind {
 }
 
 func TestEventsViewPreparesDetailProjectionOnlyWhenInvalidated(t *testing.T) {
+	// A five-line timeline has no visible event rows, so Kind calls measure
+	// only detail projection rather than legitimate timeline row preparation.
 	view := NewEventsView()
 	kindCalls := 0
 	item := EventItem{Event: detailProjectionCountingEvent{Event: dnsEvent("first", "example.org"), kindCalls: &kindCalls}}
 	view.SetEvents([]EventItem{item})
 	view.SetRelatedPacketsAvailable(true)
-	view.PrepareLayout(100, 10, 77, 16)
+	view.PrepareLayout(100, 5, 77, 16)
 	require.Positive(t, kindCalls, "initial layout must prepare details")
 	preparedCalls := kindCalls
 	for range 5 {
 		view.SetEvents([]EventItem{item, {Event: dnsEvent("second", "second.example")}})
 		view.SetSelectedID("first")
 		view.SetRelatedPacketsAvailable(true)
-		view.PrepareLayout(100, 10, 77, 16)
+		view.PrepareLayout(100, 5, 77, 16)
 		view.RenderDetails(77, 16, false)
 	}
 	assert.Equal(t, preparedCalls, kindCalls, "unchanged details must not be projected again during updates or rendering")
 	view.SetRelatedPacketsAvailable(false)
-	view.PrepareLayout(100, 10, 77, 16)
+	view.PrepareLayout(100, 5, 77, 16)
 	assert.Equal(t, 2*preparedCalls, kindCalls, "one invalidation must cause exactly one detail projection")
-	view.PrepareLayout(100, 10, 77, 16)
+	view.PrepareLayout(100, 5, 77, 16)
 	view.RenderDetails(77, 16, false)
 	assert.Equal(t, 2*preparedCalls, kindCalls)
 }

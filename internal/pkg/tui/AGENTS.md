@@ -645,6 +645,18 @@ nodes keep exact-node matching and absent IDs retain wildcard behavior.
 
 ### Rendering Optimization
 
+`EventsView.PrepareLayout` prepares timeline styles, responsive column widths,
+and presentation strings for only the visible rows. Absolute projection positions
+reuse overlapping rows across append/trim and distinguish repeated event IDs;
+full snapshots, theme changes, and width changes invalidate row presentation.
+Selection reuses plain row text, while both focus border variants are cached.
+The shared `paneStyleCache` handles theme/dimension changes for packet and event
+panes. Cached rows contain strings, not event references, and are bounded by the
+viewport. An unchanged layout does no row formatting. Render-only geometry or
+state changes use a temporary local cache without mutating presentation state.
+Timeline fitting uses terminal cell widths for wide glyphs and combining
+sequences, with a fast path for ASCII; sanitization and field bounds still apply.
+
 **Viewport pattern** - only render visible rows:
 
 ```go

@@ -62,18 +62,23 @@ func BenchmarkEventsViewAppendViaSetEvents(b *testing.B) {
 
 func BenchmarkEventsViewRenderTimeline(b *testing.B) {
 	for _, retained := range []int{1_000, 10_000} {
-		b.Run(fmt.Sprintf("retained_%d", retained), func(b *testing.B) {
-			items := benchmarkEventItems(retained)
-			view := NewEventsView()
-			view.SetEvents(items)
-			view.SetSelectedID(items[retained-1].Event.Envelope().EventID)
-			view.RenderTimeline(160, 40, true)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				_ = view.RenderTimeline(160, 40, true)
-			}
-		})
+		for _, prepared := range []bool{false, true} {
+			b.Run(fmt.Sprintf("retained_%d/prepared_%t", retained, prepared), func(b *testing.B) {
+				items := benchmarkEventItems(retained)
+				view := NewEventsView()
+				view.SetEvents(items)
+				view.SetSelectedID(items[retained-1].Event.Envelope().EventID)
+				if prepared {
+					view.PrepareLayout(160, 40, 0, 0)
+				}
+				view.RenderTimeline(160, 40, true)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					_ = view.RenderTimeline(160, 40, true)
+				}
+			})
+		}
 	}
 }
 

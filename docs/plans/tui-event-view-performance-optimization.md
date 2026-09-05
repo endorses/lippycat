@@ -1,7 +1,7 @@
 # TUI Event View Performance Optimization Plan
 
 **Date:** 2026-09-04
-**Status:** Phases 1–6 verified; Phase 7 planned
+**Status:** Phases 1–7 verified; final mixed-mode acceptance remains separate
 **Scope:** Normalized event ingestion, retention, projection, synchronization,
 and rendering in `internal/pkg/tui`
 
@@ -798,28 +798,119 @@ claims about Phase 7/manual acceptance were added.
 Only pursue this phase after profiling the preceding changes; storage and
 synchronization are expected to dominate current CPU usage.
 
-- [ ] Re-profile the active event view and confirm timeline formatting remains
+- [x] Re-profile the active event view and confirm timeline formatting remains
       a material hotspot before changing it.
-- [ ] Reuse or extract the packet list's style-cache invalidation pattern for
+- [x] Reuse or extract the packet list's style-cache invalidation pattern for
       theme, width, and focus changes instead of creating a second cache
       lifecycle.
-- [ ] Cache reusable Lip Gloss styles and column-width calculations using that
+- [x] Cache reusable Lip Gloss styles and column-width calculations using that
       shared lifecycle.
-- [ ] Cache immutable row presentation fields or rendered rows when doing so
+- [x] Cache immutable row presentation fields or rendered rows when doing so
       reduces measured allocations without complicating invalidation.
-- [ ] Continue rendering only viewport-visible rows.
-- [ ] Preserve sanitization, Unicode width correctness, protocol colors, and
+- [x] Continue rendering only viewport-visible rows.
+- [x] Preserve sanitization, Unicode width correctness, protocol colors, and
       fixed column alignment.
-- [ ] Add allocation benchmarks and visual-output equivalence tests.
+- [x] Add allocation benchmarks and visual-output equivalence tests.
 
 Likely files:
 
 - `internal/pkg/tui/components/eventsview.go`
 - `internal/pkg/tui/components/eventsview_test.go`
 
+### Phase 7 implementation and verification
+
+The post-Phase 6 generated DNS replay profile confirmed the prerequisite:
+`RenderTimeline` consumed 14.14% cumulative sampled CPU and 11.73% of allocation
+volume. The 15-second run measured 1.616 ms per 50-packet operation, 1,083,855
+bytes/op, and 6,359 allocations/op. Profiles include setup; cumulative CPU
+attribution overlaps. The original unprepared fixed DNS viewport measured
+498–512 µs/op and 1,732 allocations/op at 1,000/10,000 retained events.
+
+`PrepareLayout` now caches column widths, header/protocol/selection styles, and
+only viewport-visible row strings. Overlapping rows reuse absolute projection
+positions across append/trim, including repeated stable IDs. Full snapshots,
+theme changes, and width changes invalidate row formatting; height changes reuse
+overlap and release the old row slice. Selection styles reuse prepared plain
+text. Unchanged preparation and focus changes do no row formatting. Cached rows
+hold no event references. A shared `paneStyleCache` handles theme/dimension
+invalidation and both focus border variants for packet and event panes.
+
+`RenderTimeline` remains read-only, including when called between setters and
+layout preparation or with alternate dimensions. Those calls build a temporary
+local cache. Sanitization and field bounds remain in place. Timeline fitting now
+uses terminal cells, correcting the previous rune-count alignment for CJK,
+emoji, and combining sequences; ASCII has a fast path. Detail formatting is
+unchanged.
+
+Two sub-agents implemented production changes and independent legacy-output
+controls; a third reviewed the implementation and added 350 randomized lifecycle
+comparisons. Root reviewed their code and tests. Review caught and fixed a
+duplicate-ID navigation case where recomputing an offset differed from the
+committed viewport offset. Frozen pre-cache renderers verify event and packet
+output across theme/focus/size transitions, navigation, delta updates, full
+replacement, empty/reset state, sanitization, and widths through 1,000 columns.
+Wide Unicode uses explicit cell-alignment assertions instead of preserving the
+old alignment bug. Deterministic tests verify bounded cache size, release on
+shrink, visible-only formatting, reuse on selection/focus, and pure fallback
+rendering. The existing detail-projection counter test isolates its timeline
+to zero data rows so its unchanged assertions measure only detail preparation.
+
+One-second runs on the same Intel Core i9-13900HX measured:
+
+| Workload | Retained | Time/op | Bytes/op | Allocations/op |
+| --- | ---: | ---: | ---: | ---: |
+| Prepared DNS timeline | 1,000 | 241 µs | 258,041 | 648 |
+| Prepared DNS timeline | 10,000 | 225 µs | 250,021 | 648 |
+| Mixed-kind legacy control | 1,000 | 720 µs | 439,852 | 1,880 |
+| Mixed-kind cached timeline | 1,000 | 330 µs | 273,287 | 649 |
+| Mixed-kind legacy control | 10,000 | 747 µs | 398,812 | 1,880 |
+| Mixed-kind cached timeline | 10,000 | 313 µs | 243,728 | 649 |
+| Append/trim/select/prepare/render | 1,000 | 368 µs | 277,254 | 701 |
+| Append/trim/select/prepare/render | 10,000 | 365 µs | 258,125 | 701 |
+
+The mixed-kind control is frozen Phase 6 code in the same test binary. The final
+two rows include cache preparation in timed work. The DNS benchmark now labels
+prepared and unprepared calls separately; unprepared fallback measured
+481–503 µs and 1,726 allocations/op. A relative allocation assertion compares
+cached rendering with its same-binary legacy control; no timing threshold is
+encoded in tests.
+
+Three isolated five-second DNS replay runs of saved before/after binaries had
+median times of 1.645 ms and 1.684 ms per 50 packets respectively, with ranges of
+1.640–1.749 ms and 1.670–1.883 ms. Allocations fell from 6,359 to 6,319 per
+operation; bytes varied across runs at approximately 1.03–1.09 MB/op. This
+workload replaces the complete visible viewport each tick and does not show a
+clear end-to-end speedup from row reuse. Arrival, eviction, latest-selection,
+related-packet availability, and zero-loss assertions pass. The substantial
+measured Phase 7 gain is repeated/incremental timeline rendering, not a claim
+about mixed-protocol production CPU or terminal-driver overhead.
+
+A final isolated 15-second profile measured 1.659 ms/op, 1,070,154 bytes/op,
+and 6,319 allocations/op. `RenderTimeline` accounted for 5.57% cumulative CPU;
+update-side `buildTimelineCache` accounted for 9.89%. Reporting both avoids
+mistaking moved formatting work for eliminated work when every row is new.
+
+Reproduce the component measurements with:
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -tags all -run '^$' -benchtime=1s -benchmem \
+  -bench '^BenchmarkEventsView(TimelineControl|TimelineAppendRender|RenderTimeline)$' \
+  ./internal/pkg/tui/components
+```
+
+Use the Phase 1 replay/profile command for end-to-end measurements. The plan's
+final manual live/offline/remote and Events/Packets/Statistics CPU acceptance
+gates remain unchecked; automated rendering and replay tests do not substitute
+for those checks.
+
+Verification passed: full TUI correctness tests under `-tags all`, uncached
+`go test -count=1 -race -tags all ./internal/pkg/tui/...`, both `make tui all`
+builds, component benchmarks, and generated DNS replay/profiles. All changed Go
+files were formatted and the TUI architecture notes updated.
+
 ## 12. Verification
 
-After each phase (checked below for Phases 1–6):
+After each phase (checked below for Phases 1–7):
 
 - [x] Format all modified Go files with `gofmt` before staging.
 - [x] Run focused event-store, event-view, and TUI tests with the appropriate

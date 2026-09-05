@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/internal/pkg/eventquery"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logschema"
@@ -59,6 +60,8 @@ type EventsView struct {
 	detailsViewport         viewport.Model
 	detailsViewportReady    bool
 	detailsSelectedID       string
+	timelineCache           eventTimelineCache
+	timelineGeneration      uint64
 }
 
 func NewEventsView() *EventsView { return &EventsView{theme: themes.Solarized()} }
@@ -81,6 +84,7 @@ func (v *EventsView) SetSize(width, height int) {
 // Zero detail dimensions leave the hidden detail pane and its scroll cache alone.
 func (v *EventsView) PrepareLayout(timelineWidth, timelineHeight, detailsWidth, detailsHeight int) {
 	v.SetSize(timelineWidth, timelineHeight)
+	v.prepareTimeline()
 	if detailsWidth <= 0 || detailsHeight <= 0 {
 		return
 	}
@@ -131,6 +135,7 @@ func (v *EventsView) timelineOffset(height, selected int) int {
 }
 
 func (v *EventsView) SetEvents(items []EventItem) {
+	v.timelineGeneration++
 	oldSelected := v.indexByID(v.selectedID)
 	oldStorage := v.itemStorage
 	v.itemStorage = append(v.itemStorage[:0], items...)
@@ -318,31 +323,18 @@ func (v *EventsView) RenderTimeline(width, height int, focused bool) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
-	contentWidth := max(1, width-6)        // border (2) and horizontal padding (4)
 	contentHeight := max(1, height-4)      // border (2) and vertical padding (2)
 	visibleRows := max(0, contentHeight-1) // table header
 
-	borderColor := v.theme.BorderColor
-	borderType := lipgloss.RoundedBorder()
-	if focused {
-		borderColor = v.theme.SelectionBg
-		borderType = lipgloss.ThickBorder()
+	cache := &v.timelineCache
+	if !cache.matches(v, width, height) {
+		local := v.buildTimelineCache(width, height, nil)
+		cache = &local
 	}
-	borderStyle := lipgloss.NewStyle().
-		Border(borderType).
-		BorderForeground(borderColor).
-		Padding(1, 2).
-		Width(width - 2).
-		Height(height - 2)
-
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(v.theme.HeaderBg).
-		Reverse(true).
-		Width(contentWidth)
+	borderStyle := cache.pane.border(focused)
 
 	var content strings.Builder
-	content.WriteString(headerStyle.Render(eventTimelineHeader(contentWidth)))
+	content.WriteString(cache.header)
 	if visibleRows > 0 {
 		content.WriteByte('\n')
 	}
@@ -363,23 +355,13 @@ func (v *EventsView) RenderTimeline(width, height int, focused bool) string {
 	}
 	end := min(offset+visibleRows, len(v.items))
 	for i := offset; i < end; i++ {
-		item := v.items[i]
-		env := item.Event.Envelope()
-		style := lipgloss.NewStyle().Foreground(v.eventColor(item.Event.Kind()))
+		row := cache.rows[i-offset]
 		if i == selected {
-			style = style.Foreground(v.theme.SelectionFg).Background(v.theme.SelectionBg).Bold(true)
+			content.WriteString(row.selected)
+		} else {
+			content.WriteString(row.normal)
 		}
-		endpoints := fmt.Sprintf("%s:%d -> %s:%d", env.Flow.SourceAddress, env.Flow.SourcePort, env.Flow.DestinationAddress, env.Flow.DestinationPort)
-		line := eventTimelineRow(
-			env.Timestamp.Format("15:04:05.000"),
-			string(item.Event.Kind()),
-			compactNode(env.NodeID),
-			endpoints,
-			eventSummary(item.Event),
-			contentWidth,
-		)
-		line = padRunes(truncateRunes(sanitizeEventText(line), contentWidth), contentWidth)
-		content.WriteString(style.Width(contentWidth).Render(line))
+
 		if i < end-1 {
 			content.WriteByte('\n')
 		}
@@ -627,16 +609,41 @@ func eventTimelineHeader(width int) string {
 }
 
 func eventTimelineRow(timestamp, kind, origin, flow, info string, width int) string {
+	return eventTimelineRowWithColumns(timestamp, kind, origin, flow, info, width, eventTimelineColumnWidths(width))
+}
+
+func eventTimelineRowWithColumns(timestamp, kind, origin, flow, info string, width int, columns eventTimelineWidths) string {
 	info = strings.TrimSpace(sanitizeEventText(info))
-	columns := eventTimelineColumnWidths(width)
 	row := strings.Join([]string{
-		fitRunes(timestamp, columns.time),
-		fitRunes(kind, columns.kind),
-		fitRunes(origin, columns.origin),
-		fitRunes(flow, columns.flow),
-		info,
+		fitEventCells(sanitizeEventText(timestamp), columns.time),
+		fitEventCells(sanitizeEventText(kind), columns.kind),
+		fitEventCells(sanitizeEventText(origin), columns.origin),
+		fitEventCells(sanitizeEventText(flow), columns.flow), info,
 	}, " ")
-	return padRunes(truncateRunes(row, width), width)
+	return fitEventCells(row, width)
+}
+
+// Input is already sanitized: ANSI sequences can never enter cached rows.
+func fitEventCells(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	// Most timeline cells are ASCII. Avoid the grapheme scanner on this path.
+	ascii := true
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		if len(value) > width {
+			return value[:width-1] + "…"
+		}
+		return value + strings.Repeat(" ", width-len(value))
+	}
+	value = ansi.Truncate(value, width, "…")
+	return value + strings.Repeat(" ", max(0, width-ansi.StringWidth(value)))
 }
 
 type eventTimelineWidths struct {

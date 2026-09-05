@@ -51,9 +51,10 @@ type PacketList struct {
 	// Cached rendering state (invalidated on size/theme change)
 	cachedStyles      map[string]lipgloss.Style // protocol -> style
 	cachedColWidths   [7]int                    // column widths cache
-	cachedBorderStyle lipgloss.Style            // border style cache
-	cachedHeaderStyle lipgloss.Style            // header style cache
-	sizeChanged       bool                      // flag to recalculate caches
+	paneStyles        paneStyleCache
+	cachedBorderStyle lipgloss.Style // border style cache
+	cachedHeaderStyle lipgloss.Style // header style cache
+	sizeChanged       bool           // flag to recalculate caches
 }
 
 // NewPacketList creates a new packet list component
@@ -642,13 +643,6 @@ func (p *PacketList) View(focused bool, detailsVisible bool) string {
 	// Wrap in border - the height should match our total height minus margins
 	// When details are hidden, always show unfocused (gray with rounded borders)
 	// When details are visible, show focused state based on focused parameter
-	borderColor := p.theme.BorderColor
-	borderType := lipgloss.RoundedBorder()
-	if focused && detailsVisible {
-		borderColor = p.theme.SelectionBg   // Cyan when focused
-		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
-	}
-
 	// Adaptive width: when details hidden, use full width (width - 2)
 	// When details visible (split mode), use width with padding (width - 4)
 	borderWidth := p.width - 4
@@ -656,12 +650,8 @@ func (p *PacketList) View(focused bool, detailsVisible bool) string {
 		borderWidth = p.width - 2
 	}
 
-	borderStyle := lipgloss.NewStyle().
-		Border(borderType).
-		BorderForeground(borderColor).
-		Padding(1, 2).
-		Width(borderWidth).
-		Height(contentHeight)
+	p.paneStyles.prepare(p.theme, borderWidth, contentHeight)
+	borderStyle := p.paneStyles.border(focused && detailsVisible)
 
 	return borderStyle.Render(sb.String())
 }

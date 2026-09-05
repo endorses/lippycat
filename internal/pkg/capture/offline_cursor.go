@@ -2,7 +2,9 @@ package capture
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +32,7 @@ type offlinePacketReader interface {
 type offlineCursor struct {
 	reader           offlinePacketReader
 	closer           io.Closer
+	decompressor     io.Closer
 	linkType         layers.LinkType
 	bpf              *pcap.BPF
 	path             string
@@ -76,12 +79,26 @@ func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter s
 		return nil, fmt.Errorf("read capture header: %w", err)
 	}
 	if string(magic) == "\x0a\x0d\x0d\x0a" {
-		r, e := pcapgo.NewNgReader(&checkedNGReader{reader: br, ctx: ctx}, pcapgo.NgReaderOptions{ErrorOnMismatchingLinkType: true})
+		framing := &checkedNGReader{reader: br, ctx: ctx}
+		r, e := pcapgo.NewNgReader(framing, pcapgo.NgReaderOptions{ErrorOnMismatchingLinkType: true})
 		if e != nil {
 			return nil, fmt.Errorf("read PCAPNG header: %w", e)
 		}
-		c.reader, c.linkType = r, r.LinkType()
+		c.reader, c.linkType = &offlineNGPacketReader{reader: r, framing: framing}, r.LinkType()
 	} else {
+		// Inspect the native link type before pcapgo narrows it to uint8.
+		// Keep its existing support for gzip-compressed classic PCAP inputs.
+		if magic[0] == 0x1f && magic[1] == 0x8b {
+			z, e := gzip.NewReader(br)
+			if e != nil {
+				return nil, fmt.Errorf("read compressed PCAP header: %w", e)
+			}
+			c.decompressor = z
+			br = bufio.NewReader(z)
+		}
+		if e := validateOfflinePCAPHeader(br); e != nil {
+			return nil, e
+		}
 		r, e := pcapgo.NewReader(br)
 		if e != nil {
 			return nil, fmt.Errorf("read PCAP header: %w", e)
@@ -100,6 +117,28 @@ func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter s
 	return c, nil
 }
 
+func validateOfflinePCAPHeader(reader *bufio.Reader) error {
+	header, err := reader.Peek(24)
+	if err != nil {
+		return fmt.Errorf("read PCAP header: %w", err)
+	}
+	var order binary.ByteOrder
+	switch string(header[:4]) {
+	case "\xd4\xc3\xb2\xa1", "\x4d\x3c\xb2\xa1":
+		order = binary.LittleEndian
+	case "\xa1\xb2\xc3\xd4", "\xa1\xb2\x3c\x4d":
+		order = binary.BigEndian
+	default:
+		return fmt.Errorf("unrecognized PCAP magic %x", header[:4])
+	}
+	// The upper 16 bits carry additional information such as FCS length.
+	linkType := order.Uint32(header[20:24]) & 0xffff
+	if linkType > 255 {
+		return fmt.Errorf("unsupported PCAP link type %d: packet decoder supports only 8-bit link types", linkType)
+	}
+	return nil
+}
+
 func (c *offlineCursor) Close() error {
 	if c.closed {
 		return nil
@@ -111,10 +150,14 @@ func (c *offlineCursor) Close() error {
 	c.fragCache = nil
 	c.reader = nil
 	c.bpf = nil
-	if c.closer != nil {
-		return c.closer.Close()
+	var err error
+	if c.decompressor != nil {
+		err = c.decompressor.Close()
 	}
-	return nil
+	if c.closer != nil {
+		err = errors.Join(err, c.closer.Close())
+	}
+	return err
 }
 
 func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {

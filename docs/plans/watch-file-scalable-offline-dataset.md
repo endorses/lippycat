@@ -221,6 +221,17 @@ tests cover both failures, including IPv6 hop-by-hop headers. Capture, PCAP type
 offline, TUI, and watch checks pass under `all` and `tui`; focused reader and
 reassembly race tests and hunter, processor, tap, and CLI builds also pass.
 
+Additional Phase 1 review (2026-09-05) reproduced two reader compatibility bugs:
+PCAPNG explicit seconds and binary timestamp resolutions were decoded inaccurately
+by the underlying reader, and native link types above 255 could silently wrap to
+a different decoder. The reader now converts PCAPNG ticks directly with integer
+precision and validates native PCAP/PCAPNG link types before narrowing them.
+Regression coverage includes cross-source merge ordering, timestamp offsets,
+multiple packets, and compressed PCAP header validation.
+Capture, PCAP type, offline, TUI, and watch checks pass under `all` and `tui`;
+focused reader/reassembly race checks and hunter, processor, tap, and CLI builds
+also pass. Independent review found no further Phase 1 defects.
+
 ### Phase 2 — Implement session storage and complete queries
 
 - [ ] Implement private temporary session directories, versioned framed streams,

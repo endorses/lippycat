@@ -1,7 +1,7 @@
 # TUI Event View Performance Optimization Plan
 
 **Date:** 2026-09-04
-**Status:** Phases 1–5 verified; Phases 6–7 planned
+**Status:** Phases 1–6 verified; Phase 7 planned
 **Scope:** Normalized event ingestion, retention, projection, synchronization,
 and rendering in `internal/pkg/tui`
 
@@ -188,8 +188,8 @@ GOCACHE=/tmp/lippycat-go-cache go run cmd/pprof -list 'EventStore.*AddEvent' /tm
 ```
 
 The installed toolchain lacks the `go tool pprof` binary, but its local
-`cmd/pprof` source works without installing a dependency. Profile binaries live
-in `/tmp`; the workload, commands, and attribution above preserve reproducibility.
+`cmd/pprof` source works without installing a dependency. The workload, commands,
+and attribution above preserve reproducibility.
 The TUI correctness suite and race suite pass. Rendering purity and bounded
 refresh cadence remain explicit later-phase changes, not passing Phase 1
 baseline invariants.
@@ -325,9 +325,7 @@ and disk-I/O costs and is not a mixed-protocol capture.
 Verification passed: the full TUI correctness and race suites under `-tags all`,
 all Phase 1 benchmark workloads, the profiled replay, and builds with `tui` and
 `all` tags. Go files were formatted and the TUI architecture notes updated.
-Phase 2 profile artifacts are `/tmp/tui-event-phase2.cpu.pprof` and
-`/tmp/tui-event-phase2.allocs.pprof`; reproduce with the Phase 1 replay command
-using those output paths.
+Reproduce the profiles with the Phase 1 replay command.
 
 ### Phase 2 navigation review
 
@@ -420,9 +418,8 @@ The final one-second DNS replay smoke measurement was 20.65 ms/op and
 runs have different durations and do not establish a new CPU-performance claim.
 The replay retains its arrival, eviction, selection, and zero-loss assertions.
 Append-via-SetEvents measured 81.60 µs/op and 940.23 µs/op at 1,000 and 10,000
-retained events, respectively, with zero steady-state allocations. Final benchmark
-output is `/tmp/tui-event-phase3-final-bench.txt`; use the Phase 1 commands to
-reproduce the workloads. No timing threshold was added to CI.
+retained events, respectively, with zero steady-state allocations. Use the Phase 1
+commands to reproduce the benchmark workloads. No timing threshold was added to CI.
 
 ### Phase 3 double-click review
 
@@ -552,9 +549,8 @@ Timings are observational, not CI thresholds; allocation assertions are determin
 The one-second generated DNS replay measured 5.66 ms/op and 5,243,130 bytes/op
 for 50 packets, versus Phase 3's 20.65 ms/op and 5,127,473 bytes/op. Arrival,
 eviction, selection, and zero-loss assertions passed. This phase primarily reduces
-ingestion CPU; full-projection and packet-scan allocations remain. Benchmark
-output is `/tmp/tui-event-phase4-bench.txt`, with the uncontended final focused run
-in `/tmp/tui-event-phase4-final-bench.txt`. Reproduce with the Phase 1 commands,
+ingestion CPU; full-projection and packet-scan allocations remain. Reproduce with
+the Phase 1 commands,
 adding `BenchmarkEventStorePinnedSelectionEviction` and the DNS replay workload.
 
 ## 9. Phase 5 — Introduce Incremental Event Projection
@@ -652,8 +648,7 @@ observations rather than CI thresholds; retained-capacity-independent work is
 also guarded by deterministic operation-count tests. Replay allocations still
 include full packet-buffer relationship scans, which Phase 6 addresses.
 
-Output is recorded in `/tmp/tui-event-phase5-bench.txt`. Reproduce using the
-Phase 1 benchmark command with
+Reproduce using the Phase 1 benchmark command with
 `Benchmark(EventStoreIncrementalProjection|EventsViewAppendIncremental|ModelEventBatchSynchronization|ModelEventDNSReplay)$`.
 
 ## 10. Phase 6 — Remove Full Packet-Buffer Scans
@@ -661,25 +656,104 @@ Phase 1 benchmark command with
 Make related-packet availability an indexed lookup that follows packet-buffer
 retention.
 
-- [ ] Define a canonical bidirectional flow key using node identity, transport,
+- [x] Define a canonical bidirectional flow key using node identity, transport,
       source/destination addresses, and ports.
-- [ ] Maintain reference counts or newest retained packet sequence per flow key
+- [x] Maintain reference counts or newest retained packet sequence per flow key
       as packets enter and leave the packet ring.
-- [ ] Query the index for the selected event rather than copying/scanning the
+- [x] Query the index for the selected event rather than copying/scanning the
       complete packet buffer.
-- [ ] Recompute related-packet availability only when selection changes or when
+- [x] Recompute related-packet availability only when selection changes or when
       packet eviction/addition affects the selected flow.
-- [ ] Handle incomplete event flow identity conservatively and preserve current
+- [x] Handle incomplete event flow identity conservatively and preserve current
       behavior for node IDs that are absent.
-- [ ] Add tests for forward/reverse flow matching, node separation, port reuse,
+- [x] Add tests for forward/reverse flow matching, node separation, port reuse,
       circular-buffer eviction, filtered packet views, and empty flow fields.
-- [ ] Verify the index adds negligible cost to packet ingestion benchmarks.
+- [x] Verify packet-only ingestion stays close to baseline with lazy activation,
+      and quantify active-index ingestion overhead alongside end-to-end gains.
+      See the measured tradeoff below; active maintenance is not cost-free.
 
 Likely files:
 
 - `internal/pkg/tui/store/packet_store.go`
 - `internal/pkg/tui/event_view.go`
 - related store and event-view tests
+
+### Phase 6 implementation and verification
+
+`PacketStore.HasRelatedPacket` replaces routine packet-buffer materialization
+and scanning with a canonical bidirectional endpoint key. TCP and UDP remain
+separate even when application labels are identical. `PacketDisplay.Transport`
+preserves the decoded transport through shared capture, local fast/full, and
+remote conversion; remote processor metadata supplies a fallback when raw bytes
+cannot provide it. Absent node IDs preserve the previous wildcard behavior.
+Unknown legacy transport also matches conservatively; missing/invalid addresses,
+missing/zero ports, and unsupported transports do not establish a relationship.
+IPv4-mapped addresses normalize to IPv4.
+
+The first valid relationship query activates the index with one traversal of
+retained ring slots, without allocating an ordered packet copy. Packet-only
+sessions skip index maintenance. Once activated, exact-node and all-node counts
+follow insertion and eviction, and empty entries are deleted. A single selected-
+flow cache is invalidated by matching membership changes, selection of another
+flow, or retention replacement. Unrelated packets, display filters, and statistics
+counter resets do not invalidate it. Activation persists across buffer resets;
+resize/replacement rebuild active indexes. Clear and capture restart now use the
+store's reset APIs, releasing retained references and invalidating availability.
+
+Two sub-agents implemented store/model changes, and a third independently
+reviewed them. Root reviewed the final code, integrated transport propagation,
+verified the tests and benchmarks, and avoided inactive-path packet copies before
+index helper calls. Permanent coverage includes forward/reverse matching, node
+and transport separation, port reuse, incomplete identity, IPv6 normalization,
+filtered display versus raw retention, selection-specific invalidation, lazy
+activation after wraparound, resize/replacement, clear/restart, and concurrent
+retention/query access. An independent reference test checks 10,000 randomized
+mutations and 400,000 cached/uncached queries. Cached store queries have a
+zero-allocation assertion.
+
+On the same Intel Core i9-13900HX, one-second runs measured:
+
+| Workload | Before Phase 6 | Phase 6 | Phase 6 allocated bytes/op |
+| --- | ---: | ---: | ---: |
+| Related-packet miss, 1,000 retained | 39.05 µs | 141.9 ns | 384 |
+| Related-packet miss, 10,000 retained | 502.27 µs | 135.1 ns | 384 |
+| Unchanged synchronization, 10,000 retained | — | 125.9 ns | 0 |
+| Generated DNS replay, 50 packets | 2.631 ms | 1.457 ms | 1,099,345 |
+
+The replay's arrival, eviction, selection, and zero-loss assertions pass. Replay
+allocation volume fell from 4,542,155 bytes/op by approximately 76%. The helper
+miss benchmark still includes one event-interface allocation; the store lookup
+and unchanged synchronization allocate nothing. These are observational timings,
+not CI thresholds or a mixed-protocol production performance claim.
+
+Same-binary controls preserve the previous `AddPacketBatch` implementation for
+comparison. At 1,000 retained packets, a 64-packet batch measured 9.84 µs for the
+control, 9.82 µs with the index inactive, and 35.30 µs with it active. At 10,000
+retained packets the measurements were 14.70, 15.65, and 38.78 µs respectively.
+A separate 20,000-flow churn workload into a 10,000-packet ring measured
+15.15 µs control versus 51.24 µs indexed per batch. Active maintenance therefore
+has measurable primitive-ingestion overhead, approximately 0.3–0.6 µs per packet;
+it is not a zero-cost operation. Lazy activation keeps packet-only overhead
+small, while the measured active event replay improves overall. Packet-buffer
+allocation volume remains comparable to the control; reported integer
+allocations/op round fractional backing-slice allocations and do not imply that
+packet ingestion allocates nothing.
+
+Reproduce the lookup/replay and ingestion measurements with:
+
+```bash
+go test -tags all -run '^$' -benchtime=1s -benchmem \
+  -bench 'Benchmark(HasRelatedPacketMiss|SyncEventsView|ModelEventDNSReplay)' \
+  ./internal/pkg/tui
+go test -tags all -run '^$' -benchtime=1s -benchmem \
+  -bench 'BenchmarkPacketFlow(Ingestion|IngestionChurn|InactiveIngestion)$' \
+  ./internal/pkg/tui/store
+```
+
+Full TUI, capture, and remote-capture correctness/race suites and `make tui all`
+passed. Go files were formatted and TUI architecture documentation updated.
+Phase 7 rendering work and the plan's final mixed-mode manual/CPU acceptance
+remain separate; this phase does not claim those gates are complete.
 
 ## 11. Phase 7 — Optimize Visible-Row Rendering
 
@@ -707,7 +781,7 @@ Likely files:
 
 ## 12. Verification
 
-After each phase (checked below for Phases 1–5):
+After each phase (checked below for Phases 1–6):
 
 - [x] Format all modified Go files with `gofmt` before staging.
 - [x] Run focused event-store, event-view, and TUI tests with the appropriate

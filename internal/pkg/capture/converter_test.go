@@ -16,6 +16,7 @@ func TestConvertPacketToDisplay_UDP(t *testing.T) {
 	display := ConvertPacketToDisplay(pkt)
 
 	assert.Equal(t, "UDP", display.Protocol, "Should identify UDP protocol")
+	assert.Equal(t, uint8(layers.IPProtocolUDP), display.Transport)
 	assert.Equal(t, "5060", display.SrcPort, "Should extract source port")
 	assert.Equal(t, "5060", display.DstPort, "Should extract destination port")
 	assert.Equal(t, "192.168.1.100", display.SrcIP, "Should extract source IP")
@@ -64,6 +65,7 @@ func TestConvertPacketToDisplay_TCP(t *testing.T) {
 
 	display := ConvertPacketToDisplay(pktInfo)
 
+	assert.Equal(t, uint8(layers.IPProtocolTCP), display.Transport)
 	assert.Equal(t, "TCP", display.Protocol, "Should identify TCP protocol")
 	assert.Equal(t, "12345", display.SrcPort, "Should extract source port")
 	assert.Equal(t, "80", display.DstPort, "Should extract destination port")
@@ -129,6 +131,7 @@ func TestConvertPacketToDisplay_TCPFlags(t *testing.T) {
 
 			display := ConvertPacketToDisplay(pktInfo)
 
+			assert.Equal(t, uint8(layers.IPProtocolTCP), display.Transport)
 			assert.Equal(t, "TCP", display.Protocol)
 			for _, flag := range tt.expectedFlags {
 				assert.Contains(t, display.Info, flag, "Should contain %s flag", flag)

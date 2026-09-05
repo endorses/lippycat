@@ -1373,6 +1373,7 @@ func convertEnvelopeFast(env *pipeline.PacketEnvelope, tracker ...*CallTracker) 
 		SrcPort:   fields.SrcPort,
 		DstPort:   fields.DstPort,
 		Protocol:  internProtocol(fields.Protocol),
+		Transport: fields.Transport,
 		Length:    pkt.Metadata().Length,
 		Info:      "",  // Skip info in fast mode
 		RawData:   nil, // Don't copy raw data for performance
@@ -1456,6 +1457,7 @@ func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) compone
 		SrcPort:   fields.SrcPort,
 		DstPort:   fields.DstPort,
 		Protocol:  fields.Protocol,
+		Transport: fields.Transport,
 		Length:    pkt.Metadata().Length,
 		Info:      fields.Info,
 		RawData:   rawData,

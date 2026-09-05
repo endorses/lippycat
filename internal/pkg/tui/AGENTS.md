@@ -617,9 +617,25 @@ new rows. A stable absolute-position index preserves first-match selection for
 repeated event IDs without rescanning surviving rows. Backing storage compacts
 amortized over trims. The model applies the final selection before preparing
 layout, preserving detail scrolling when a repeated ID survives the final delta.
-Rendering remains read-only. Related-packet lookup still scans the packet buffer;
-packet indexing remains Phase 6 of
-`docs/plans/tui-event-view-performance-optimization.md`.
+Rendering remains read-only.
+
+`PacketStore.HasRelatedPacket` uses a bidirectional address/port key with node
+identity and TCP/UDP transport. `PacketDisplay.Transport` carries the decoded
+transport separately from application labels such as DNS or SIP; shared capture,
+local fast/full, and remote converters preserve it. Remote conversion can recover
+transport from processor metadata when packet bytes cannot supply it. Missing
+node IDs preserve wildcard matching. Unknown legacy transport also matches
+conservatively; missing addresses or zero/missing ports do not establish a match.
+
+The first valid relationship query activates the index with one traversal of the
+retained ring, without materializing a packet slice. Subsequent insertions and
+evictions maintain bounded exact-node and all-node reference counts under the
+store lock. Packet-only sessions avoid index construction and maintenance.
+Availability is cached for one selected flow and recomputed only when that flow
+changes or a matching packet enters/leaves retention. Display filters and
+statistics counters do not affect membership. Resize/replacement rebuild active
+indexes; clear/restart use store reset APIs so retained references and cached
+availability cannot survive a reset.
 
 ### Rendering Optimization
 

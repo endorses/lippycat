@@ -4,7 +4,6 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -186,20 +185,10 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 }
 
 func (m Model) hasRelatedPacket(event events.Event) bool {
-	env := event.Envelope()
-	srcPort := strconv.Itoa(int(env.Flow.SourcePort))
-	dstPort := strconv.Itoa(int(env.Flow.DestinationPort))
-	for _, packet := range m.getPacketsInOrder() {
-		if env.NodeID != "" && packet.NodeID != "" && packet.NodeID != env.NodeID {
-			continue
-		}
-		forward := packet.SrcIP == env.Flow.SourceAddress.String() && packet.DstIP == env.Flow.DestinationAddress.String() && packet.SrcPort == srcPort && packet.DstPort == dstPort
-		reverse := packet.SrcIP == env.Flow.DestinationAddress.String() && packet.DstIP == env.Flow.SourceAddress.String() && packet.SrcPort == dstPort && packet.DstPort == srcPort
-		if forward || reverse {
-			return true
-		}
+	if event == nil || m.packetStore == nil {
+		return false
 	}
-	return false
+	return m.packetStore.HasRelatedPacket(event.Envelope())
 }
 
 func eventMatchesProtocol(event events.Event, protocol string) bool {

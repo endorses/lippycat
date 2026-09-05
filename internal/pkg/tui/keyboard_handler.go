@@ -534,12 +534,8 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	// Store count before clearing
 	packetCount := m.packetStore.PacketsCount
 
-	m.packetStore.Packets = make([]components.PacketDisplay, m.packetStore.MaxPackets)
-	m.packetStore.PacketsHead = 0
-	m.packetStore.PacketsCount = 0
-	m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
-	m.packetStore.TotalPackets = 0
-	m.packetStore.MatchedPackets = 0
+	m.packetStore.Clear()
+	m.eventViewDirty = true
 	m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 
 	// Reset incremental sync counters so new packets will be added

@@ -128,6 +128,11 @@ func TestConvertPacketFast_SIPDetection(t *testing.T) {
 
 			display := convertEnvelopeFast(captureadapter.FromPacketInfo(pktInfo))
 
+			// Application classification must preserve the original transport on both paths.
+			assert.Equal(t, uint8(ip.Protocol), display.Transport)
+			fullDisplay := convertEnvelope(captureadapter.FromPacketInfo(pktInfo), nil)
+			assert.Equal(t, uint8(ip.Protocol), fullDisplay.Transport)
+
 			// Verify protocol detection
 			assert.Equal(t, tt.expectedProto, display.Protocol,
 				"Protocol should be %s for %s", tt.expectedProto, tt.name)

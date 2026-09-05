@@ -13,12 +13,13 @@ import (
 // PacketFields contains extracted packet fields from gopacket parsing.
 // Used as intermediate result that callers can enhance with additional metadata.
 type PacketFields struct {
-	SrcIP    string
-	DstIP    string
-	SrcPort  string
-	DstPort  string
-	Protocol string
-	Info     string
+	SrcIP     string
+	DstIP     string
+	SrcPort   string
+	DstPort   string
+	Protocol  string
+	Transport uint8 // IP transport protocol number, independent of application classification.
+	Info      string
 	// HasTransport indicates if transport layer was found
 	HasTransport bool
 }
@@ -107,12 +108,14 @@ func ExtractPacketFields(pkt gopacket.Packet) PacketFields {
 		switch trans := transLayer.(type) {
 		case *layers.TCP:
 			fields.Protocol = "TCP"
+			fields.Transport = uint8(layers.IPProtocolTCP)
 			fields.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			fields.DstPort = strconv.Itoa(int(trans.DstPort))
 			flags := FormatTCPFlags(trans)
 			fields.Info = fmt.Sprintf("%s -> %s [%s]", fields.SrcPort, fields.DstPort, flags)
 		case *layers.UDP:
 			fields.Protocol = "UDP"
+			fields.Transport = uint8(layers.IPProtocolUDP)
 			fields.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			fields.DstPort = strconv.Itoa(int(trans.DstPort))
 			fields.Info = fmt.Sprintf("%s -> %s", fields.SrcPort, fields.DstPort)
@@ -301,6 +304,7 @@ func FieldsToPacketDisplay(fields PacketFields, pktInfo PacketInfo) types.Packet
 		SrcPort:   fields.SrcPort,
 		DstPort:   fields.DstPort,
 		Protocol:  fields.Protocol,
+		Transport: fields.Transport,
 		Length:    pkt.Metadata().Length,
 		Info:      fields.Info,
 		RawData:   nil, // Callers can set this if needed

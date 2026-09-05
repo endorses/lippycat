@@ -113,17 +113,11 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	if m.uiState != nil {
 		m.uiState.StatisticsView.SetL3L4ProtocolClassification(msg.Mode == components.CaptureModeLive)
 	}
-	m.packetStore.MaxPackets = msg.BufferSize    // Apply the new buffer size
 	m.uiState.Paused = false                     // Unpause when restarting capture
 	globalCaptureState.GetPauseSignal().Resume() // Reset pause state for new capture
 
 	// Clear old packets with new buffer size
-	m.packetStore.Packets = make([]components.PacketDisplay, m.packetStore.MaxPackets)
-	m.packetStore.PacketsHead = 0
-	m.packetStore.PacketsCount = 0
-	m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
-	m.packetStore.TotalPackets = 0
-	m.packetStore.MatchedPackets = 0
+	m.packetStore.ClearAndResize(msg.BufferSize)
 	m.uiState.PacketList.Reset() // Reset packet list including autoscroll state
 
 	// Reset incremental sync tracking

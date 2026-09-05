@@ -13,15 +13,19 @@ import (
 // Note: int64 counters ensure consistent behavior across 32-bit and 64-bit platforms
 // and prevent overflow for long-running capture sessions.
 type PacketStore struct {
-	mu              sync.RWMutex
-	Packets         []components.PacketDisplay // Ring buffer of packets (all captured)
-	PacketsHead     int                        // Head index for circular buffer
-	PacketsCount    int                        // Current number of packets in buffer
-	FilteredPackets []components.PacketDisplay // Filtered packets for display
-	MaxPackets      int                        // Maximum packets to keep in memory
-	FilterChain     *filters.FilterChain       // Active filters
-	TotalPackets    int64                      // Total packets seen
-	MatchedPackets  int64                      // Packets matching filter
+	mu               sync.RWMutex
+	flowIndexEnabled bool
+	flowCounts       map[packetFlowKey]int
+	flowSelection    packetFlowSelection
+	flowLookupCount  uint64                     // Counts actual availability recomputations for regression tests.
+	Packets          []components.PacketDisplay // Ring buffer of packets (all captured)
+	PacketsHead      int                        // Head index for circular buffer
+	PacketsCount     int                        // Current number of packets in buffer
+	FilteredPackets  []components.PacketDisplay // Filtered packets for display
+	MaxPackets       int                        // Maximum packets to keep in memory
+	FilterChain      *filters.FilterChain       // Active filters
+	TotalPackets     int64                      // Total packets seen
+	MatchedPackets   int64                      // Packets matching filter
 }
 
 // NewPacketStore creates a new packet store with the given buffer size
@@ -40,6 +44,12 @@ func (ps *PacketStore) AddPacket(packet components.PacketDisplay) {
 	defer ps.mu.Unlock()
 
 	// Add to ring buffer
+	if ps.flowIndexEnabled {
+		if ps.PacketsCount == ps.MaxPackets {
+			ps.updatePacketFlowLocked(ps.Packets[ps.PacketsHead], -1)
+		}
+		ps.updatePacketFlowLocked(packet, 1)
+	}
 	ps.Packets[ps.PacketsHead] = packet
 	ps.PacketsHead = (ps.PacketsHead + 1) % ps.MaxPackets
 	if ps.PacketsCount < ps.MaxPackets {
@@ -77,6 +87,12 @@ func (ps *PacketStore) AddPacketBatch(packets []components.PacketDisplay) {
 		packet := &packets[i]
 
 		// Add to ring buffer
+		if ps.flowIndexEnabled {
+			if ps.PacketsCount == ps.MaxPackets {
+				ps.updatePacketFlowLocked(ps.Packets[ps.PacketsHead], -1)
+			}
+			ps.updatePacketFlowLocked(*packet, 1)
+		}
 		ps.Packets[ps.PacketsHead] = *packet
 		ps.PacketsHead = (ps.PacketsHead + 1) % ps.MaxPackets
 		if ps.PacketsCount < ps.MaxPackets {
@@ -203,6 +219,8 @@ func (ps *PacketStore) ResizeBuffer(newSize int) []components.PacketDisplay {
 		}
 	}
 
+	ps.rebuildPacketFlowsLocked()
+
 	// Return the packets for display update
 	return orderedPackets
 }
@@ -263,6 +281,9 @@ func (ps *PacketStore) Clear() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
+	clear(ps.Packets)
+	ps.flowCounts = nil
+	ps.flowSelection = packetFlowSelection{}
 	ps.PacketsHead = 0
 	ps.PacketsCount = 0
 	ps.FilteredPackets = []components.PacketDisplay{}
@@ -340,6 +361,7 @@ func (ps *PacketStore) SetPackets(packets []components.PacketDisplay, head, coun
 	ps.Packets = packets
 	ps.PacketsHead = head
 	ps.PacketsCount = count
+	ps.rebuildPacketFlowsLocked()
 }
 
 // GetBufferInfo returns buffer metadata (maxPackets, packetsCount, totalPackets, matchedPackets)
@@ -368,13 +390,15 @@ func (ps *PacketStore) ResetCounts() {
 func (ps *PacketStore) ClearAndResize(newSize int) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	ps.Packets = make([]components.PacketDisplay, 0, newSize)
+	ps.Packets = make([]components.PacketDisplay, newSize)
 	ps.PacketsHead = 0
 	ps.PacketsCount = 0
 	ps.FilteredPackets = make([]components.PacketDisplay, 0)
 	ps.TotalPackets = 0
 	ps.MatchedPackets = 0
 	ps.MaxPackets = newSize
+	ps.flowCounts = nil
+	ps.flowSelection = packetFlowSelection{}
 }
 
 // UpdateMatchedCount updates the matched packet count based on filter status

@@ -33,6 +33,16 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 
 	// Use shared extraction logic for basic fields
 	fields := capture.ExtractPacketFields(packet)
+	// Truncated packet bytes may lack a decoded transport layer while the
+	// processor still supplies the original flow's transport metadata.
+	if fields.Transport == 0 && pkt.Metadata != nil {
+		switch strings.ToLower(pkt.Metadata.Transport) {
+		case "tcp":
+			fields.Transport = uint8(layers.IPProtocolTCP)
+		case "udp":
+			fields.Transport = uint8(layers.IPProtocolUDP)
+		}
+	}
 	srcIP := fields.SrcIP
 	dstIP := fields.DstIP
 	srcPort := fields.SrcPort
@@ -231,6 +241,7 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		DstIP:     dstIP,
 		DstPort:   dstPort,
 		Protocol:  protocol,
+		Transport: fields.Transport,
 		Length:    int(pkt.CaptureLength),
 		Info:      info,
 		RawData:   pkt.Data,

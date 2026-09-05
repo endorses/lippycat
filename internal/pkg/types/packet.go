@@ -16,6 +16,7 @@ type PacketDisplay struct {
 	SrcPort   string
 	DstPort   string
 	Protocol  string
+	Transport uint8 // IP transport protocol number; zero when unknown, independent of application Protocol.
 	Length    int
 	Info      string
 	RawData   []byte          // Raw packet bytes for hex dump

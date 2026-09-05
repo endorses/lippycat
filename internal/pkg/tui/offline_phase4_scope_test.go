@@ -3,8 +3,6 @@
 package tui
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,58 +11,69 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOfflineProtocolSelectionScopesEventsWithoutClaimingPacketFiltering(t *testing.T) {
+func finishOfflineFilter(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	require.NotNil(t, cmd)
+	batch := cmd().(tea.BatchMsg)
+	msg := batch[0]().(offlineFilterMsg)
+	require.NoError(t, msg.err)
+	m, cleanup := m.handleOfflineFilter(msg)
+	if cleanup != nil {
+		cleanup()
+	}
+	return m
+}
+func TestOfflineProtocolSelectionPublishesAtomically(t *testing.T) {
 	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
-	total := m.offlineSession.Dataset.Count()
-	selected := m.uiState.PacketList.GetSelectedPacket()
-	require.NotNil(t, selected)
-	m.uiState.Toast.Hide()
-	m, _ = m.handleProtocolSelectedMsg(components.ProtocolSelectedMsg{
-		Protocol: components.Protocol{Name: "DNS", BPFFilter: "port 53"},
-	})
-	require.Contains(t, m.uiState.Toast.View(), "Selected DNS views")
-	require.Contains(t, m.uiState.Toast.View(), "Offline packet filtering is not available yet")
-	require.NotContains(t, m.uiState.Toast.View(), "Filtering: DNS")
-	require.Equal(t, "DNS", m.uiState.SelectedProtocol.Name)
-	require.True(t, m.uiState.PacketList.IsVirtual())
+	total := m.offlinePacketCount()
+	previous := m.uiState.SelectedProtocol
+	m, cmd := m.handleProtocolSelectedMsg(components.ProtocolSelectedMsg{Protocol: components.Protocol{Name: "DNS", BPFFilter: "port 53"}})
+	require.Equal(t, previous, m.uiState.SelectedProtocol)
 	require.Equal(t, total, m.uiState.PacketList.LogicalCount())
-	require.Equal(t, selected, m.uiState.PacketList.GetSelectedPacket())
-	require.False(t, m.packetStore.HasFilter())
-
+	m = finishOfflineFilter(t, m, cmd)
+	require.Equal(t, "DNS", m.uiState.SelectedProtocol.Name)
+	require.True(t, m.packetStore.HasFilter())
+	require.Less(t, m.offlinePacketCount(), total)
 	m.eventStore.Reset()
-	m.eventStore.AddBatch([]events.Event{
-		events.NewDNSEvent(testEventEnvelope("offline-dns-scope", 1)),
-		events.NewHTTPEvent(testEventEnvelope("offline-http-scope", 2)),
-	})
+	m.eventStore.AddBatch([]events.Event{events.NewDNSEvent(testEventEnvelope("dns", 1)), events.NewHTTPEvent(testEventEnvelope("http", 2))})
 	m, _ = m.handleToggleView()
 	require.Equal(t, "events", m.uiState.ViewMode)
 	require.Len(t, m.eventStore.Events(), 1)
-	require.Equal(t, events.KindDNS, m.eventStore.Events()[0].Event.Kind())
-	require.Equal(t, total, m.uiState.PacketList.LogicalCount())
 }
-
-func TestOfflinePhase4RejectsPartialPacketOperations(t *testing.T) {
-	m, open := offlineLifecycleModel(t)
-	m, cmd := m.openOffline(open)
-	m, _ = m.completeOffline(offlineWorker(t, cmd)().(offlineOpenCompleteMsg))
-	require.NotNil(t, m.parseAndApplyFilter("udp"))
-	require.False(t, m.packetStore.HasFilter())
+func TestOfflineFilterActionsAndStalePublication(t *testing.T) {
+	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
+	total := m.offlinePacketCount()
 	m, _ = m.handleEnterFilterMode()
-	require.False(t, m.uiState.FilterMode)
-	m.uiState.FilterMode = true
-	m.uiState.FilterInput.Clear()
-	updated, _ := m.handleFilterInput(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(Model)
-	require.False(t, m.uiState.FilterMode)
-	m, _ = m.handleSavePackets()
-	require.False(t, m.uiState.FileDialog.IsActive())
-	path := filepath.Join(t.TempDir(), "partial.pcap")
-	m.proceedWithSave(path)
-	result := m.startOneShotSave(path)().(SaveCompleteMsg)
-	require.False(t, result.Success)
-	require.ErrorContains(t, result.Error, "not available yet")
-	_, err := os.Stat(path)
-	require.True(t, os.IsNotExist(err))
+	require.True(t, m.uiState.FilterMode)
+	first := m.parseAndApplyFilter("impossible-first-filter")
+	firstMessage := first().(tea.BatchMsg)[0]().(offlineFilterMsg)
+	second := m.parseAndApplyFilter("impossible-second-filter")
+	m, cleanup := m.handleOfflineFilter(firstMessage)
+	if cleanup != nil {
+		cleanup()
+	}
+	require.Equal(t, total, m.offlinePacketCount())
+	require.False(t, m.packetStore.HasFilter())
+	m = finishOfflineFilter(t, m, second)
+	require.Zero(t, m.offlinePacketCount())
+	require.Contains(t, m.packetStore.FilterChain.GetFilterDescriptions()[0], "second")
+	m = loadOfflineBrowser(t, m)
+	require.Nil(t, m.offlineBrowse.current.detail)
+	m, clear := m.handleClearAllFilters()
+	m = finishOfflineFilter(t, m, clear)
+	require.Equal(t, total, m.offlinePacketCount())
+	require.False(t, m.packetStore.HasFilter())
+	m = loadOfflineBrowser(t, m)
+	query := m.parseAndApplyFilter("impossible-cancelled-filter")
+	m.offlineFilter.cancelled = true
+	m.offlineFilter.owner.cancel()
+	message := query().(tea.BatchMsg)[0]().(offlineFilterMsg)
+	m, cleanup = m.handleOfflineFilter(message)
+	if cleanup != nil {
+		cleanup()
+	}
+	require.Equal(t, total, m.offlinePacketCount())
+	require.False(t, m.packetStore.HasFilter())
 }
 
 func TestOfflineEventJumpLoadsDistantDetail(t *testing.T) {

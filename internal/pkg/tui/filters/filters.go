@@ -133,3 +133,11 @@ func (fc *FilterChain) GetFilterDescriptions() []string {
 	}
 	return descriptions
 }
+
+// Clone snapshots the chain structure, preserving filter insertion order.
+// Filters are immutable once installed and may be shared by query workers.
+func (fc *FilterChain) Clone() *FilterChain {
+	copy := *fc
+	copy.filters = append([]filterWithOrder(nil), fc.filters...)
+	return &copy
+}

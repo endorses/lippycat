@@ -87,7 +87,7 @@ type SaveCompleteMsg struct {
 	Success      bool
 	Path         string
 	Error        error
-	PacketsSaved int
+	PacketsSaved uint64
 	Streaming    bool // True if this was a streaming save stop
 }
 
@@ -107,6 +107,9 @@ type Model struct {
 	offlineController       *offlineController
 	offlineSession          *offlineIndexedSession
 	offlineBrowse           *offlineBrowserState
+	offlineFilter           *offlineFilterState
+	offlineFilterGeneration offline.QueryGeneration
+	offlineExport           *offlineExportState
 	offlineLastClick        uint64
 	offlineLastClickValid   bool
 	offlineRelated          *offlineRelatedState
@@ -418,6 +421,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Lifecycle messages bypass modal/settings routing so cleanup cannot stall.
 	switch value := msg.(type) {
+	case offlineFilterMsg:
+		return m.handleOfflineFilter(value)
+	case offlineFilterProgressMsg:
+		if m.offlineFilter == value.state {
+			return m, offlineFilterTick(value.state)
+		}
+		return m, nil
 	case offlineBrowseMsg:
 		return m.handleOfflineBrowse(value)
 	case OpenOfflineDatasetMsg:
@@ -542,6 +552,28 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseMsg:
 			return m, nil
 		}
+	}
+
+	if m.offlineFilter != nil {
+		switch key := msg.(type) {
+		case tea.KeyMsg:
+			switch key.String() {
+			case "esc":
+				m.offlineFilter.cancelled = true
+				m.offlineFilter.owner.mu.Lock()
+				m.offlineFilter.owner.cancel()
+				m.offlineFilter.owner.mu.Unlock()
+			case "q", "ctrl+c":
+				return m.leaveOffline(nil, true)
+			}
+			return m, nil
+		case tea.MouseMsg:
+			return m, nil
+		}
+	}
+	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "esc" && m.exportRunning() {
+		m.cancelOfflineExport()
+		return m, nil
 	}
 
 	// If settings tab is active and editing interface, pass messages to settings

@@ -17,7 +17,15 @@ import (
 // This prevents UI freezing at 300-400+ Mbit/s by avoiding O(n) scans.
 func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 	if m.offlineSession != nil {
-		return m.offlineFilterUnavailable()
+		filter, err := filters.ParseBooleanExpression(filterStr, m.parseSimpleFilter)
+		if err != nil {
+			return m.uiState.Toast.Show("Invalid filter: "+err.Error(), components.ToastError, components.ToastDurationLong)
+		}
+		chain := m.packetStore.FilterChain.Clone()
+		if filter != nil {
+			chain.Add(filter)
+		}
+		return m.startOfflineFilter(chain, nil)
 	}
 	// NOTE: We do NOT clear existing filters - this allows filter stacking
 	// Use 'c' to clear all filters or 'C' to remove the last filter
@@ -220,10 +228,4 @@ func parseCallFilter(filterStr string) (filters.Filter, error) {
 
 	// Default: plain text search on all call fields
 	return filters.NewTextFilter(filterStr, []string{"all"}), nil
-}
-
-// Complete interactive dataset queries are integrated in the next phase.
-// Never silently filter only the resident page.
-func (m *Model) offlineFilterUnavailable() tea.Cmd {
-	return m.uiState.Toast.Show("Complete offline packet filtering is not available yet.", components.ToastInfo, components.ToastDurationLong)
 }

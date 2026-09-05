@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/endorses/lippycat/internal/pkg/tui/components/dashboard"
 	"github.com/endorses/lippycat/internal/pkg/tui/responsive"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
@@ -246,16 +247,18 @@ func (bs *BridgeStatistics) deliveredPackets() int64 {
 
 // StatisticsView displays statistics
 type StatisticsView struct {
-	viewport    viewport.Model
-	width       int
-	height      int
-	theme       themes.Theme
-	stats       *Statistics
-	bridgeStats *BridgeStatistics
-	ready       bool
-	dirty       bool      // Content needs re-render
-	lastRender  time.Time // Last time content was rendered
-	isVisible   bool      // Tab is currently visible
+	viewport        viewport.Model
+	width           int
+	height          int
+	theme           themes.Theme
+	stats           *Statistics
+	offlineGlobal   *offline.Statistics
+	offlineMatching *offline.Statistics
+	bridgeStats     *BridgeStatistics
+	ready           bool
+	dirty           bool      // Content needs re-render
+	lastRender      time.Time // Last time content was rendered
+	isVisible       bool      // Tab is currently visible
 
 	// Phase 1: Core infrastructure
 	rateTracker *RateTracker // Time-series rate sampling
@@ -896,7 +899,7 @@ func (s *StatisticsView) View() string {
 		return ""
 	}
 
-	if s.stats == nil || s.stats.TotalPackets == 0 {
+	if (s.stats == nil || s.stats.TotalPackets == 0) && s.offlineGlobal == nil {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
 			Align(lipgloss.Center, lipgloss.Center).
@@ -920,7 +923,7 @@ func (s *StatisticsView) View() string {
 // renderContent generates the statistics content based on current sub-view
 func (s *StatisticsView) renderContent() string {
 	if s.stats == nil || s.stats.TotalPackets == 0 {
-		return ""
+		return s.renderOfflineStatistics()
 	}
 
 	var result strings.Builder
@@ -928,6 +931,7 @@ func (s *StatisticsView) renderContent() string {
 	// Render sub-view navigation header
 	result.WriteString(s.renderSubViewHeader())
 	result.WriteString("\n\n")
+	result.WriteString(s.renderOfflineStatistics())
 
 	// Render content based on current sub-view
 	switch s.currentSubView {

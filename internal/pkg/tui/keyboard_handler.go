@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/tui/filters"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 )
@@ -416,9 +417,7 @@ func (m Model) handleThemeToggle() (Model, tea.Cmd) {
 
 // handleEnterFilterMode enters filter input mode
 func (m Model) handleEnterFilterMode() (Model, tea.Cmd) {
-	if m.offlineSession != nil {
-		return m, m.offlineFilterUnavailable()
-	}
+
 	m.uiState.FilterMode = true
 	m.uiState.FilterInput.Activate()
 	m.uiState.FilterInput.Clear()
@@ -432,7 +431,7 @@ func (m Model) handleEnterFilterMode() (Model, tea.Cmd) {
 // handleClearAllFilters clears all active filters
 func (m Model) handleClearAllFilters() (Model, tea.Cmd) {
 	if m.offlineSession != nil {
-		return m, m.offlineFilterUnavailable()
+		return m, m.startOfflineFilter(filters.NewFilterChain(), nil)
 	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
@@ -463,7 +462,9 @@ func (m Model) handleClearAllFilters() (Model, tea.Cmd) {
 // handleRemoveLastFilter removes the last filter in the stack
 func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 	if m.offlineSession != nil {
-		return m, m.offlineFilterUnavailable()
+		chain := m.packetStore.FilterChain.Clone()
+		chain.RemoveLast()
+		return m, m.startOfflineFilter(chain, nil)
 	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()

@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/tui/filters"
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
 )
 
@@ -287,6 +288,20 @@ func (m Model) handleNodesLoadFailedMsg(msg NodesLoadFailedMsg) (Model, tea.Cmd)
 
 // handleProtocolSelectedMsg handles protocol selection from protocol selector
 func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Model, tea.Cmd) {
+	if m.offlineSession != nil {
+		chain := filters.NewFilterChain()
+		if msg.Protocol.BPFFilter != "" {
+			f, err := filters.ParseBooleanExpression(msg.Protocol.BPFFilter, m.parseSimpleFilter)
+			if err != nil {
+				return m, m.uiState.Toast.Show(err.Error(), components.ToastError, components.ToastDurationLong)
+			}
+			if f != nil {
+				chain.Add(f)
+			}
+		}
+		protocol := msg.Protocol
+		return m, m.startOfflineFilter(chain, &protocol)
+	}
 	// User selected a protocol from the protocol selector
 	preserveEvents := m.uiState.ViewMode == "events" && eventScopeAvailable(msg.Protocol.Name)
 	m.uiState.SelectedProtocol = msg.Protocol

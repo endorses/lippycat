@@ -40,7 +40,9 @@ type OfflineAnalysisConfig struct {
 }
 
 type offlineIndexedSession struct {
+	export       *offlineExportState
 	browser      *offlineBrowser
+	filter       *offlineFilterOwner
 	related      *offlineRelatedOwner
 	Dataset      offline.Dataset
 	builder      *offline.Builder // Retained only until publication or successful cleanup.
@@ -55,6 +57,13 @@ func (s *offlineIndexedSession) Close() error {
 		return nil
 	}
 	var closeErr error
+	if s.export != nil {
+		s.export.cancel()
+		<-s.export.done
+	}
+	if s.filter != nil {
+		closeErr = errors.Join(closeErr, s.filter.close())
+	}
 	if s.related != nil {
 		s.related.close()
 	}

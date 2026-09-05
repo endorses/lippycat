@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-05
 
-**Status:** Phases 0–4 implemented and verified; phases 5–6 pending
+**Status:** Phases 0–5 implemented and verified; phase 6 pending
 
 **Code baseline:** `fff6c68f`
 
@@ -589,21 +589,56 @@ Complete packet filtering/export and release acceptance remain phases 5–6.
 
 ### Phase 5 — Complete filtering, statistics, and export
 
-- [ ] Route all offline packet filter apply/remove/clear paths through dataset
+- [x] Route all offline packet filter apply/remove/clear paths through dataset
       queries, preserving the previous completed query while a new scan runs.
-- [ ] Display cancellable scan/match progress; publish filter state, row count,
+- [x] Display cancellable scan/match progress; publish filter state, row count,
       selection, and filtered statistics together. Failed/cancelled filters leave
       the previous query and its visible filter description consistent.
-- [ ] Keep global and filtered statistics clearly distinguished; never recompute
+- [x] Keep global and filtered statistics clearly distinguished; never recompute
       dataset totals from a page or count page reloads as new packets.
-- [ ] Stream offline saves over a pinned dataset/query snapshot instead of
+- [x] Stream offline saves over a pinned dataset/query snapshot instead of
       `getPacketsToSave()` slices. Export every matching logical packet with
       bounded memory, cancellation, and surfaced errors. Define mixed-link-type
       output using a capable format or explicit rejection rather than silently
       using the first packet's link type for all records.
-- [ ] Test filters matching beginning/middle/end beyond the former ring capacity,
+- [x] Test filters matching beginning/middle/end beyond the former ring capacity,
       exact filter-adapter parity, atomic publication under rapid edits, empty
       results, full-match memory bounds, and complete filtered/unfiltered export.
+
+Phase 5 implementation notes:
+
+- Packet filter input, stacking, removal, clearing, statistics shortcuts, and
+  protocol selection use immutable asynchronous dataset queries. A cancellable
+  modal reports scanned and matching packets. Completed rows, filter description,
+  selection, and matching statistics publish together; failed, cancelled, and
+  obsolete scans preserve the previous completed query. Session ownership joins
+  workers and reclaims abandoned query results outside the update loop.
+- Filtered browsing resolves logical query rows to stable packet IDs, including
+  details beyond the former packet ring. Related-event navigation clears a packet
+  filter through the same query workflow before jumping to the related ID.
+  Replacement datasets clear packet filters while preserving event protocol scope.
+- Statistics explicitly separate global dataset and completed matching-query
+  counts, bytes, sizes, endpoints, capture intervals, and protocol counts. Bounded
+  cardinality estimates remain labelled separately. Page reads do not accumulate
+  statistics, and returning to live capture immediately clears offline labels.
+- Offline saves pin the installed dataset/query before starting a worker and
+  stream one record at a time. Nanosecond PCAP output preserves effective link
+  type, raw bytes, timestamps, and captured/original lengths. Mixed link types
+  are explicitly rejected; export those inputs separately. Empty queries report
+  no packets to save. Cancellation and write/read/flush/close errors remove the
+  temporary output and preserve an existing destination; only successful saves
+  atomically replace it. Escape cancels export, and session cleanup joins it.
+
+Verification: offline, all TUI packages, and watch pass under `all` and `tui`;
+the full offline and TUI race suites pass. Root review and independent sub-agent
+review verified snapshot ownership, query retirement, cancellation, stale and
+abandoned results, filtered row/detail identity, retained event scope, and
+immediate statistics reset on mode changes. Tests cover complete filter-adapter
+parity, beginning/middle/end matches in the 12,017-packet storage acceptance
+fixture, empty/all-match scans with bounded resource accounting, and exact
+4,097-packet filtered/unfiltered export roundtrips. Export failures preserve the
+destination and clean up temporary files. Phase 5 is complete; phase 6 remains
+pending for release acceptance, benchmarks, and operator documentation.
 
 ### Phase 6 — Acceptance, documentation, and release
 

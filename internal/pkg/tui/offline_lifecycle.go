@@ -309,7 +309,9 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.cancelOfflineRelated()
 	old := m.offlineSession
 	m.offlineSession = msg.session
+	m.publishOfflineStatistics(nil)
 	m.offlineBrowse = nil
+	m.offlineFilter = nil
 	m.offlineLastClickValid = false
 	c.mu.Lock()
 	c.installed = msg.session
@@ -325,6 +327,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.uiState.SetCapturing(false)
 	m.uiState.Paused = false
 	m.packetStore.ClearAndResize(m.offlinePending.Config.EventCapacity)
+	m.packetStore.ClearFilter()
 	m.uiState.PacketList.Reset()
 	m.uiState.PacketList.SetVirtualPackets(msg.session.Dataset.Count(), 0, nil)
 	m.lastSyncedTotal = 0

@@ -104,6 +104,12 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 		return nil, err
 	}
 	stats := newStatisticsAccumulator()
+	reportProgress := func(scanned uint64) {
+		if spec.Progress != nil {
+			spec.Progress(QueryProgress{Token: spec.Token, Scanned: scanned, Matched: q.count, Total: d.count})
+		}
+	}
+	reportProgress(0)
 	var idBytes [queryEntryBytes]byte
 	for id := PacketID(0); uint64(id) < d.count; id++ {
 		if err = ctx.Err(); err != nil {
@@ -121,14 +127,17 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 			}
 			return match
 		}()
-		if !matched {
-			continue
+		if matched {
+			binary.LittleEndian.PutUint64(idBytes[:8], uint64(id))
+			if err = q.write(idBytes[:]); err != nil {
+				return nil, err
+			}
+			q.count++
 		}
-		binary.LittleEndian.PutUint64(idBytes[:8], uint64(id))
-		if err = q.write(idBytes[:]); err != nil {
-			return nil, err
+		scanned := uint64(id) + 1
+		if scanned%1024 == 0 || scanned == d.count {
+			reportProgress(scanned)
 		}
-		q.count++
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
@@ -378,6 +387,12 @@ func (q *diskQuery) Iterate(ctx context.Context, visit func(Detail) error) error
 	defer d.mu.RUnlock()
 	q.mu.RLock()
 	defer q.mu.RUnlock()
+	return q.iterateLocked(ctx, visit)
+}
+
+// iterateLocked requires the dataset and query read locks for the entire visit.
+func (q *diskQuery) iterateLocked(ctx context.Context, visit func(Detail) error) error {
+	d := q.dataset
 	if err := q.validate(); err != nil {
 		return err
 	}

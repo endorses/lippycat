@@ -16,6 +16,9 @@ func (m Model) View() string {
 	if m.offlineOpening {
 		return m.offlineModal()
 	}
+	if m.offlineFilter != nil {
+		return m.offlineFilterModal()
+	}
 	if m.uiState.Quitting {
 		return "Goodbye!\n"
 	}
@@ -359,13 +362,13 @@ func (m *Model) prepareViewChrome() {
 		if m.offlineSession != nil {
 			usage := m.offlineSession.Dataset.Resources()
 			counts = fmt.Sprintf("Packets: %d | Matching: %d | Cached rows: %d | Cache: %d B | Index: %d B", m.offlineSession.Dataset.Count(), m.uiState.PacketList.LogicalCount(), len(m.uiState.PacketList.GetPackets()), usage.CachedBytes+usage.PinnedBytes+usage.PrefetchBytes+usage.InFlightBytes, usage.DiskBytes)
-			scope = "Events/calls: bounded retained history. Packet filtering/export pending."
+			scope = "Packet filters/saves: complete matching dataset. Events/calls: bounded retained history."
 			m.uiState.Header.SetDatasetPacketCount(m.offlineSession.Dataset.Count())
 		}
 		m.uiState.OfflinePacketNotice = ansi.Truncate(counts, max(0, m.uiState.Width), "…") + "\n" + ansi.Truncate(scope, max(0, m.uiState.Width), "…")
 		m.uiState.FilterInput.SetPrompt("/ retained packets only:")
 		if m.offlineSession != nil {
-			m.uiState.FilterInput.SetPrompt("/ offline filtering pending:")
+			m.uiState.FilterInput.SetPrompt("/ complete dataset:")
 		}
 		if m.uiState.Width < 40 && m.offlineSession == nil {
 			m.uiState.FilterInput.SetPrompt(ansi.Truncate("/ retained:", max(1, m.uiState.Width-8), "…"))

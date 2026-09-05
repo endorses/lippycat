@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/tui/filters"
 )
 
 // The session owns lookup cancellation and joins even abandoned command results.
@@ -207,6 +208,14 @@ func (m Model) navigateOfflineRelated() (Model, tea.Cmd) {
 		return m, m.uiState.Toast.Show("No related packets in this dataset", components.ToastInfo, components.ToastDurationShort)
 	}
 	s.navigate = false
+	if m.packetStore.HasFilter() {
+		cmd := m.startOfflineFilter(filters.NewFilterChain(), nil)
+		if m.offlineFilter != nil {
+			id := s.first
+			m.offlineFilter.jump = &id
+		}
+		return m, cmd
+	}
 	m.uiState.ViewMode = "packets"
 	m.uiState.PacketList.SetLogicalCursor(uint64(s.first))
 	m.updateDetailsPanel()

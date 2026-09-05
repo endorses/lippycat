@@ -65,10 +65,20 @@ type Statistics struct {
 // caller. The offline package never imports the build-tagged TUI filter package.
 type Predicate func(Summary) bool
 
+// QueryProgress reports cumulative scan and match counts. A final scan count
+// equal to Total does not publish a query: manifest completion can still fail.
+type QueryProgress struct {
+	Token                   Token
+	Scanned, Matched, Total uint64
+}
+
 type QuerySpec struct {
 	Token       Token
 	Description []string
 	Match       Predicate // nil matches all packets
+	// Progress runs synchronously at scan start, periodically, and at scan end.
+	// It must return promptly and must not call dataset or query methods.
+	Progress func(QueryProgress)
 }
 
 // Flow identifies a bidirectional TCP/UDP relationship. Empty node and transport

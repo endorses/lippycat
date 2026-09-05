@@ -28,7 +28,7 @@ func (m *Model) determineSaveMode() string {
 // proceedWithSave starts the save operation for the given file path
 func (m *Model) proceedWithSave(filePath string) tea.Cmd {
 	if m.offlineSession != nil {
-		return m.uiState.Toast.Show("Complete offline packet export is not available yet.", components.ToastInfo, components.ToastDurationLong)
+		return m.startOfflineExport(filePath)
 	}
 	// Determine save mode and start save
 	mode := m.determineSaveMode()
@@ -79,9 +79,7 @@ func (m *Model) getFilterFunction() func(components.PacketDisplay) bool {
 // startOneShotSave starts a one-shot save operation (offline/paused mode)
 func (m *Model) startOneShotSave(filePath string) tea.Cmd {
 	if m.offlineSession != nil {
-		return func() tea.Msg {
-			return SaveCompleteMsg{Path: filePath, Error: fmt.Errorf("complete offline packet export is not available yet")}
-		}
+		return m.startOfflineExport(filePath)
 	}
 	return func() tea.Msg {
 		// Get packets to save
@@ -141,7 +139,7 @@ func (m *Model) startOneShotSave(filePath string) tea.Cmd {
 		return SaveCompleteMsg{
 			Success:      true,
 			Path:         filePath,
-			PacketsSaved: writer.PacketCount(),
+			PacketsSaved: uint64(writer.PacketCount()),
 			Streaming:    false,
 		}
 	}
@@ -241,7 +239,7 @@ func (m *Model) stopStreamingSave() tea.Cmd {
 		return SaveCompleteMsg{
 			Success:      true,
 			Path:         path,
-			PacketsSaved: count,
+			PacketsSaved: uint64(count),
 			Streaming:    true,
 		}
 	}

@@ -144,6 +144,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	m.statistics.MinPacketSize = 999999
 	m.statistics.MaxPacketSize = 0
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
+	m.uiState.StatisticsView.ClearOfflineStatistics()
 	m.uiState.StatisticsView.GetDropStats().Reset()
 
 	// Reset bridge state (clears stale data from previous capture mode)

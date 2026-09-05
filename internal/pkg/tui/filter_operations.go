@@ -22,7 +22,11 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.offlineSession != nil {
 			m.uiState.FilterMode = false
 			m.uiState.FilterInput.Deactivate()
-			return m, m.offlineFilterUnavailable()
+			value := m.uiState.FilterInput.Value()
+			if value == "" {
+				return m, m.startOfflineFilter(filters.NewFilterChain(), nil)
+			}
+			return m, m.parseAndApplyFilter(value)
 		}
 		// Apply the filter
 		filterValue := m.uiState.FilterInput.Value()

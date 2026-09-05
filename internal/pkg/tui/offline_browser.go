@@ -144,16 +144,43 @@ func (b *offlineBrowser) load(token offline.Token, offset, cursor uint64, rows i
 		if err := ctx.Err(); err != nil {
 			r.err = err
 		} else {
+			b.mu.Lock()
 			if b.query == nil {
 				b.query, r.err = offline.AllPackets(ctx, b.dataset, offline.Token{Dataset: token.Dataset, Query: token.Query})
 			}
+			b.mu.Unlock()
 			if r.err == nil && !reuse {
 				// Fetch the viewport and one following viewport. Byte caps include retained
 				// summaries; details remain independently pinned under the shared budget.
 				r.page, r.err = b.query.Page(ctx, offline.PageRequest{Token: token, Row: offset, Limit: uint32(max(1, min(rows*2, 512))), MaxBytes: maxBytes})
 			}
-			if r.err == nil && b.dataset.Count() > 0 {
-				r.detail, r.err = b.dataset.PinDetail(ctx, token, offline.PacketID(cursor))
+			if r.err == nil && b.query.Count() > 0 {
+				var id offline.PacketID
+				page := r.page
+				if reuse {
+					b.mu.Lock()
+					if b.current != nil {
+						page = b.current.page
+					}
+					b.mu.Unlock()
+				}
+				if cursor >= page.Row && cursor < page.Row+uint64(len(page.Rows)) {
+					id = page.Rows[cursor-page.Row].ID
+				} else {
+					selected, err := b.query.Page(ctx, offline.PageRequest{Token: token, Row: cursor, Limit: 1, MaxBytes: maxBytes})
+					r.err = err
+					if err == nil {
+						if len(selected.Rows) == 1 {
+							id = selected.Rows[0].ID
+						} else {
+							r.err = errors.New("selected offline row unavailable")
+						}
+						r.err = errors.Join(r.err, selected.Close())
+					}
+				}
+				if r.err == nil {
+					r.detail, r.err = b.dataset.PinDetail(ctx, token, id)
+				}
 			}
 		}
 		b.mu.Lock()
@@ -182,7 +209,7 @@ func (b *offlineBrowser) drainBefore(done <-chan struct{}, cutoff offline.Reques
 }
 
 func (m *Model) syncOfflineBrowser() tea.Cmd {
-	if m.offlineSession == nil || m.offlineOpening || m.offlineLeaving || !m.uiState.PacketList.IsVirtual() {
+	if m.offlineSession == nil || m.offlineOpening || m.offlineLeaving || m.offlineFilter != nil || !m.uiState.PacketList.IsVirtual() {
 		return nil
 	}
 	if m.uiState.ViewMode != "packets" || m.uiState.Tabs.GetActive() != 0 {
@@ -192,7 +219,7 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 		}
 		m.cancelOfflineBrowserReads()
 		m.uiState.DetailsPanel.SetPacket(nil)
-		m.uiState.PacketList.SetVirtualPackets(m.offlineSession.Dataset.Count(), m.uiState.PacketList.LogicalOffset(), nil)
+		m.uiState.PacketList.SetVirtualPackets(m.offlinePacketCount(), m.uiState.PacketList.LogicalOffset(), nil)
 		err := s.owner.release(s.current)
 		s.current = nil
 		s.owner.mu.Lock()
@@ -209,7 +236,7 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 	}
 	s := m.offlineBrowse
 	cursor, offset, rows := m.uiState.PacketList.LogicalCursor(), m.uiState.PacketList.LogicalOffset(), m.uiState.PacketList.VisibleRows()
-	selectedMissing := s.current != nil && m.offlineSession.Dataset.Count() > 0 && (cursor < s.current.page.Row || cursor >= s.current.page.Row+uint64(len(s.current.page.Rows)))
+	selectedMissing := s.current != nil && m.offlinePacketCount() > 0 && (cursor < s.current.page.Row || cursor >= s.current.page.Row+uint64(len(s.current.page.Rows)))
 	if s.requested && s.cursor == cursor && s.offset == offset && s.rows == rows && !selectedMissing {
 		return nil
 	}
@@ -227,7 +254,7 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 		s.current.detail = nil
 	}
 	if !reuse && s.current != nil {
-		m.uiState.PacketList.SetVirtualPackets(m.offlineSession.Dataset.Count(), offset, nil)
+		m.uiState.PacketList.SetVirtualPackets(m.offlinePacketCount(), offset, nil)
 		if err := s.owner.release(s.current); err != nil {
 			return m.uiState.Toast.Show(err.Error(), components.ToastError, components.ToastDurationLong)
 		}
@@ -237,17 +264,17 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 	if selectedMissing {
 		loadOffset = cursor
 	}
-	if m.offlineSession.Dataset.Count() > 0 {
+	if m.offlinePacketCount() > 0 {
 		m.uiState.DetailsPanel.SetLoading()
 	}
-	return s.owner.load(offline.Token{Dataset: m.offlineSession.Dataset.Generation(), Query: 1, Request: s.request}, loadOffset, cursor, rows, offlinePageBudget(m.offlineInstalled.Limits), reuse)
+	return s.owner.load(offline.Token{Dataset: m.offlineSession.Dataset.Generation(), Query: m.offlineQueryGeneration(), Request: s.request}, loadOffset, cursor, rows, offlinePageBudget(m.offlineInstalled.Limits), reuse)
 }
 func (m Model) handleOfflineBrowse(msg offlineBrowseMsg) (Model, tea.Cmd) {
 	s, r := m.offlineBrowse, msg.result
 	if s != nil && s.current == r {
 		return m, nil
 	}
-	if s == nil || s.owner != msg.owner || s.request != r.token.Request || m.offlineSession == nil || r.token.Dataset != m.offlineSession.Dataset.Generation() || r.token.Query != 1 || m.offlineLeaving {
+	if s == nil || s.owner != msg.owner || s.request != r.token.Request || m.offlineSession == nil || r.token.Dataset != m.offlineSession.Dataset.Generation() || r.token.Query != m.offlineQueryGeneration() || m.offlineLeaving {
 		if err := msg.owner.release(r); err != nil {
 			return m, m.uiState.Toast.Show(err.Error(), components.ToastError, components.ToastDurationLong)
 		}
@@ -273,7 +300,7 @@ func (m Model) handleOfflineBrowse(msg offlineBrowseMsg) (Model, tea.Cmd) {
 	for i, row := range r.page.Rows {
 		packets[i] = row.DisplayFields()
 	}
-	m.uiState.PacketList.SetVirtualPackets(m.offlineSession.Dataset.Count(), r.page.Row, packets)
+	m.uiState.PacketList.SetVirtualPackets(m.offlinePacketCount(), r.page.Row, packets)
 	m.uiState.DetailsPanel.SetPacket(nil)
 	if r.detail != nil {
 		m.uiState.DetailsPanel.SetPacket(&r.detail.Value.Packet)

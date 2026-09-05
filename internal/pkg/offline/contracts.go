@@ -179,6 +179,8 @@ type State string
 
 const (
 	Opening    State = "opening"
+	Reading    State = "reading"
+	Sorting    State = "sorting"
 	Indexing   State = "indexing"
 	Ready      State = "ready"
 	Cancelling State = "cancelling"

@@ -134,16 +134,17 @@ lc watch file sip.pcap rtp.pcap signaling.pcap
 When opening multiple files, packets are merged and displayed in timestamp order.
 
 Opening indexes all accepted logical packets into private temporary storage.
-The progress modal shows source count, logical packets/bytes, elapsed time, and
-index disk usage. Escape cancels and waits for cleanup; failed or cancelled
+The progress modal shows reading, sorting and indexing phases, source count,
+logical packets/bytes, elapsed time, and temporary disk usage. Escape cancels and waits for cleanup; failed or cancelled
 replacement keeps the previous ready dataset. Browsing begins only after analysis
 finalizes successfully. Input BPF (`-f`) applies before indexing; reassembly and
 decapsulation can change logical packets relative to source records.
 
 Every indexed packet remains navigable, filterable, and exportable after cache
 eviction. `watch.buffer_size` / `--buffer-size` limits live/remote packet rings and
-retained event history, not offline packet completeness. The display separates
-total and matching packets from cached rows/bytes and index bytes. Global and
+retained event history, not offline packet completeness. The header shows total
+packets; Statistics separates total and matching packets from cached rows/bytes
+and index bytes. The bottom area remains reserved for notifications. Global and
 matching statistics cover their complete dataset/query; bounded endpoint estimates
 are labelled separately. Events and Calls still have bounded retained histories;
 their filters do not provide complete-file event or call history.
@@ -152,9 +153,12 @@ Interactive packet filters scan the whole dataset asynchronously. Escape cancels
 the scan. Failed/cancelled scans preserve the last completed query, filter labels,
 and statistics. Removing/clearing filters also queries the complete dataset.
 
-Each source must have nondecreasing logical timestamps. Equal timestamps preserve
-argument order, then source order. Regressions, malformed input, and invalid BPF
-fail indexing rather than publishing partial results. Up to 64 regular-file
+Backward timestamps are supported: normalized logical packets are ordered on disk
+before stateful analysis, preserving timestamps and using argument order, then
+original source sequence to break ties. Sorting uses bounded memory and shares
+the configured disk budget with datasets and queries. Malformed input, disk
+exhaustion and invalid BPF fail the open without publishing partial results.
+Up to 64 regular-file
 sources are supported; PCAP and single-section, single-interface PCAPNG files may
 be mixed. Split multi-section/interface PCAPNG captures before opening them.
 
@@ -165,7 +169,7 @@ be mixed. Split multi-section/interface PCAPNG captures before opening them.
 | `--filter`                   | `-f`  | none                   | Source-level BPF filter                                           |
 | `--tls-keylog`               | —     | none                   | SSLKEYLOGFILE for TLS decryption                                  |
 | `--offline-session-dir`      | —     | OS temporary directory | Existing writable parent of private session directories           |
-| `--offline-max-disk-bytes`   | —     | `4294967296` (4 GiB)   | Combined dataset/query disk budget                                |
+| `--offline-max-disk-bytes`   | —     | `4294967296` (4 GiB)   | Combined sorting/dataset/query disk budget                                |
 | `--offline-cache-bytes`      | —     | `67108864` (64 MiB)    | Display cache, pinned details, prefetch and in-flight read budget |
 | `--offline-max-record-bytes` | —     | `8388608` (8 MiB)      | Maximum encoded packet record; must fit cache/disk budgets        |
 | `--offline-max-sources`      | —     | `64`                   | Simultaneous sources, from 1 to 64                                |

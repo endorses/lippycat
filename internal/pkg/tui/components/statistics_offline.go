@@ -19,8 +19,20 @@ func (s *StatisticsView) SetOfflineStatistics(global, matching offline.Statistic
 	s.lastRender = time.Time{}
 }
 
+// SetOfflineResources keeps storage diagnostics in Statistics, leaving the
+// capture view's bottom area reserved for filters and toast notifications.
+func (s *StatisticsView) SetOfflineResources(rows int, usage offline.ResourceUsage) {
+	if s.offlineCachedRows == rows && s.offlineResources == usage {
+		return
+	}
+	s.offlineCachedRows, s.offlineResources = rows, usage
+	s.dirty = true
+	s.lastRender = time.Time{}
+}
+
 func (s *StatisticsView) ClearOfflineStatistics() {
 	s.offlineGlobal, s.offlineMatching = nil, nil
+	s.offlineCachedRows, s.offlineResources = 0, offline.ResourceUsage{}
 	s.dirty = true
 	s.lastRender = time.Time{}
 }
@@ -30,6 +42,8 @@ func (s *StatisticsView) renderOfflineStatistics() string {
 		return ""
 	}
 	var out strings.Builder
+	u := s.offlineResources
+	fmt.Fprintf(&out, "Cached rows: %d | Cache: %d B | Index: %d B\n", s.offlineCachedRows, u.CachedBytes+u.PinnedBytes+u.PrefetchBytes+u.InFlightBytes, u.DiskBytes)
 	for i, stats := range []*offline.Statistics{s.offlineGlobal, s.offlineMatching} {
 		scope := "Global dataset"
 		if i == 1 {

@@ -237,6 +237,10 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 	s := m.offlineBrowse
 	cursor, offset, rows := m.uiState.PacketList.LogicalCursor(), m.uiState.PacketList.LogicalOffset(), m.uiState.PacketList.VisibleRows()
 	selectedMissing := s.current != nil && m.offlinePacketCount() > 0 && (cursor < s.current.page.Row || cursor >= s.current.page.Row+uint64(len(s.current.page.Rows)))
+	// Only a completed read of this viewport can establish that its byte cap
+	// excluded the selection. A miss in an old viewport is ordinary navigation
+	// and must load from the new viewport's top, not skip straight to its cursor.
+	shortViewport := selectedMissing && s.current.token.Request == s.request && s.offset == offset && s.rows == rows && s.current.page.Row == offset
 	if s.requested && s.cursor == cursor && s.offset == offset && s.rows == rows && !selectedMissing {
 		return nil
 	}
@@ -261,7 +265,7 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 		s.current = nil
 	}
 	loadOffset := offset
-	if selectedMissing {
+	if shortViewport {
 		loadOffset = cursor
 	}
 	if m.offlinePacketCount() > 0 {

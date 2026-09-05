@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -45,6 +46,7 @@ type offlineIndexedSession struct {
 	filter       *offlineFilterOwner
 	related      *offlineRelatedOwner
 	Dataset      offline.Dataset
+	sortCleanup  io.Closer        // Per-open scratch cleanup retained only after removal failure.
 	builder      *offline.Builder // Retained only until publication or successful cleanup.
 	EventStore   *store.EventStore
 	Calls        []types.CallInfo
@@ -72,6 +74,13 @@ func (s *offlineIndexedSession) Close() error {
 	}
 	if s.TLSDecryptor != nil {
 		s.TLSDecryptor.Stop()
+	}
+	if s.sortCleanup != nil {
+		if err := s.sortCleanup.Close(); err != nil {
+			closeErr = errors.Join(closeErr, err)
+		} else {
+			s.sortCleanup = nil
+		}
 	}
 	if s.builder != nil {
 		if err := s.builder.Close(); err != nil {
@@ -251,7 +260,7 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	}
 	started := time.Now()
 	last := time.Time{}
-	progress := offline.Progress{Token: offline.Token{Dataset: generation}, State: offline.Indexing, Sources: uint32(len(cfg.Inputs))}
+	progress := offline.Progress{Token: offline.Token{Dataset: generation}, State: offline.Reading, Sources: uint32(len(cfg.Inputs))}
 	publish := func(force bool) {
 		if report != nil && (force || time.Since(last) >= 100*time.Millisecond) {
 			progress.Elapsed = time.Since(started)
@@ -263,7 +272,21 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	publish(true)
 	var readErr error
 	openErr := capture.StartOfflineSnifferOrdered(cfg.Inputs, cfg.BPFFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-		readErr = capture.RunOfflineOrderedStream(ctx, devices, filter, func(readCtx context.Context, ch <-chan capture.PacketInfo) error {
+		session.sortCleanup, readErr = capture.RunOfflineSortedStream(ctx, devices, filter, storage, func(p capture.OfflineSortProgress) {
+			switch p.Phase {
+			case "Reading":
+				progress.State = offline.Reading
+			case "Sorting":
+				progress.State = offline.Sorting
+			case "Replaying":
+				progress.State = offline.Indexing
+			}
+			progress.LogicalPackets, progress.ScannedBytes = p.LogicalPackets, p.BytesScanned
+			if progress.State == offline.Indexing {
+				progress.LogicalPackets, progress.ScannedBytes = 0, 0
+			}
+			publish(true)
+		}, func(readCtx context.Context, ch <-chan capture.PacketInfo) error {
 			for info := range ch {
 				if err := readCtx.Err(); err != nil {
 					return err

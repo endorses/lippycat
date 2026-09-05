@@ -24,6 +24,7 @@ type Storage struct {
 	closed   bool
 	cache    map[cacheKey]*list.Element
 	cacheLRU list.List
+	scratch  map[*ScratchFile]struct{}
 }
 
 func NewStorage(limits ResourceLimits) (*Storage, error) {
@@ -75,9 +76,23 @@ func (s *Storage) releaseMemory(n uint64) {
 }
 func (s *Storage) Resources() ResourceUsage { s.mu.Lock(); defer s.mu.Unlock(); return s.usage }
 func (s *Storage) Close() error {
+	// Failed scratch cleanup remains owned here, even after its caller returns.
+	s.mu.Lock()
+	files := make([]*ScratchFile, 0, len(s.scratch))
+	for f := range s.scratch {
+		files = append(files, f)
+	}
+	s.mu.Unlock()
+	var cleanupErr error
+	for _, f := range files {
+		cleanupErr = errors.Join(cleanupErr, f.Close())
+	}
+	if cleanupErr != nil {
+		return cleanupErr
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.usage.DiskBytes != 0 || s.usage.InFlightBytes != 0 || s.usage.PinnedBytes != 0 {
+	if s.usage.DiskBytes != 0 || s.usage.InFlightBytes != 0 || s.usage.PinnedBytes != 0 || len(s.scratch) != 0 {
 		return errors.New("offline storage still owns active datasets or readers")
 	}
 	s.closed = true

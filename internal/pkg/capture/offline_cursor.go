@@ -40,6 +40,7 @@ type offlineCursor struct {
 	sequence         uint64
 	previous         time.Time
 	hasPrevious      bool
+	allowRegression  bool // Only the external sorter may consume unordered logical records.
 	ip4              *IPv4Defragmenter
 	ip6              *IPv6Defragmenter
 	cleanup          time.Time
@@ -310,7 +311,7 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 		if c.spiCache.Len()+c.fragCache.Len() > offlineMaxFragmentFlows {
 			return PacketInfo{}, fmt.Errorf("offline source %q ESP state limit exceeded (%d entries)", c.path, offlineMaxFragmentFlows)
 		}
-		if c.hasPrevious && newPacket.Metadata().Timestamp.Before(c.previous) {
+		if !c.allowRegression && c.hasPrevious && newPacket.Metadata().Timestamp.Before(c.previous) {
 			return PacketInfo{}, &offline.TimestampRegressionError{Source: offline.SourcePosition{Path: c.path, ArgumentIndex: c.sourceIndex, Sequence: c.sequence}, Previous: c.previous, Current: newPacket.Metadata().Timestamp}
 		}
 		c.previous = newPacket.Metadata().Timestamp

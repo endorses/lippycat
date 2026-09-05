@@ -3,10 +3,7 @@
 package tui
 
 import (
-	"fmt"
-
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/spf13/viper"
 )
@@ -256,10 +253,6 @@ func (m Model) renderBottomArea(footerView string) string {
 		return toastView + "\n" + footerView
 	}
 
-	if m.uiState.OfflinePacketNotice != "" {
-		return m.uiState.OfflinePacketNotice + "\n\n" + footerView
-	}
-
 	// All tabs: 3 blank lines + footer (2 lines) = 5 lines for bottomArea
 	// (Nodes tab hints bar is part of mainContent, not bottomArea)
 	return "\n\n\n" + footerView
@@ -349,22 +342,12 @@ func (m *Model) prepareViewChrome() {
 	// Update header state
 	m.uiState.Header.SetState(m.uiState.Capturing, m.uiState.Paused)
 	m.uiState.Header.SetPacketCount(m.packetStore.PacketsCount, m.packetStore.MaxPackets)
-	m.uiState.OfflinePacketNotice = ""
 	m.uiState.FilterInput.SetPrompt("/")
-	if m.captureMode == components.CaptureModeOffline {
-		counts := "No completed offline dataset."
-		scope := "Open a capture file to index all accepted packets."
-		if m.offlineSession != nil {
-			usage := m.offlineSession.Dataset.Resources()
-			counts = fmt.Sprintf("Packets: %d | Matching: %d | Cached rows: %d | Cache: %d B | Index: %d B", m.offlineSession.Dataset.Count(), m.uiState.PacketList.LogicalCount(), len(m.uiState.PacketList.GetPackets()), usage.CachedBytes+usage.PinnedBytes+usage.PrefetchBytes+usage.InFlightBytes, usage.DiskBytes)
-			scope = "Packet filters/saves: complete matching dataset. Events/calls: bounded retained history."
-			m.uiState.Header.SetDatasetPacketCount(m.offlineSession.Dataset.Count())
-		}
-		m.uiState.OfflinePacketNotice = ansi.Truncate(counts, max(0, m.uiState.Width), "…") + "\n" + ansi.Truncate(scope, max(0, m.uiState.Width), "…")
-		m.uiState.FilterInput.SetPrompt("/")
-		if m.offlineSession != nil {
-			m.uiState.FilterInput.SetPrompt("/ complete dataset:")
-		}
+	if m.captureMode == components.CaptureModeOffline && m.offlineSession != nil {
+		usage := m.offlineSession.Dataset.Resources()
+		m.uiState.StatisticsView.SetOfflineResources(len(m.uiState.PacketList.GetPackets()), usage)
+		m.uiState.Header.SetDatasetPacketCount(m.offlineSession.Dataset.Count())
+		m.uiState.FilterInput.SetPrompt("/ complete dataset:")
 	}
 	m.uiState.Header.SetInterface(m.interfaceName)
 	m.uiState.Header.SetCaptureMode(m.captureMode)

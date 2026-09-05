@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-05
 
-**Status:** Phases 0–6 implemented and verified
+**Status:** Phases 0–6 implemented and verified; real-capture corrections completed
+in [ordering and navigation](watch-file-ordering-and-navigation.md).
 
 **Code baseline:** `fff6c68f`
 
@@ -96,17 +97,15 @@ query files, and concurrent replacement datasets. Include all streams and query
 results in disk accounting. Refuse oversized records explicitly if they cannot
 fit the configured allocation limit.
 
-A heap retains one logical packet per open source, ordered by timestamp, source
-argument index, then source sequence. Use source/interface-local reassembly and
-globally ordered TCP/application analysis. Preserve completion-packet timestamp
-semantics for reassembled packets and effective link type after decapsulation.
-
-For the initial release, fail indexing on a source timestamp regression, with
-source and sequence context. Warning and continuing would falsely claim global
-ordering after earlier packets had already been analyzed. External sorting or a
-bounded reorder policy is a later extension. Equal timestamps are supported;
-clock correction and deduplication are never implicit. Bound simultaneous readers
-with an explicit supported-source limit and actionable errors.
+The original implementation used a strict heap merge and rejected source timestamp
+regressions. The [ordering and navigation follow-up](watch-file-ordering-and-navigation.md)
+supersedes that policy for watch datasets: normalize sources in original record
+order, then externally sort logical packets by timestamp, source argument index
+and original logical sequence before stateful analysis. Scratch storage shares
+the session disk budget, with bounded-memory runs and merge passes. Preserve
+completion-packet timestamps, source/interface-local reassembly and effective link
+type. No clock correction or deduplication is implicit. Strict streaming remains
+available to existing non-dataset callers; the source count limit still applies.
 
 The cache budget is not a hard process RSS limit. Separately bound and measure
 reader/reassembly state, analyzer state, retained events/calls, serializers, and
@@ -114,7 +113,7 @@ Go/runtime overhead. Packet count must not produce hidden unbounded allocations.
 
 ### Lifecycle and presentation
 
-Use `Opening -> Indexing -> Ready`, with cancellation/failure cleanup branches.
+Use `Opening -> Reading -> Sorting -> Indexing -> Ready`, with cancellation/failure cleanup branches.
 Filtering is a separate operation on a ready dataset. The model owns contexts
 and sessions; workers own reader/writer resources. Cancellation and worker joins
 run outside `Update()` so the UI can continue displaying cleanup progress.
@@ -774,6 +773,6 @@ These are follow-up work, not release blockers for phases 0–6.
       and selection invariants; do not append the whole history to EventsView
       or treat duplicate event IDs as unique row positions. Assess call-history
       persistence separately and update completeness labels only when delivered.
-- [ ] Consider bounded external merge passes for very large source counts or
-      non-monotonic sources; research explicit clock offsets, reorder windows,
-      and optional deduplication as separate user-visible policies.
+- [ ] Extend the supported source count beyond 64; research explicit clock
+      offsets, reorder windows and optional deduplication as separate user-visible
+      policies. Non-monotonic watch sources are handled by the ordering follow-up.

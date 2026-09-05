@@ -13,9 +13,7 @@ import (
 
 // UIState manages UI components and state
 type UIState struct {
-	// OfflinePacketNotice is prepared during updates so rendering stays read-only.
-	OfflinePacketNotice string
-	mu                  sync.RWMutex
+	mu sync.RWMutex
 
 	// UI Components
 	PacketList       components.PacketList

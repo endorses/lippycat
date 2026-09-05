@@ -92,7 +92,8 @@ otherwise node identity must agree. The session adapter translates local event
 identity to Local. Lookup operates over the dataset independently of display
 filters/cache contents. A returned related query supports pagination and export.
 
-Session transitions are Opening → Indexing → Ready, or Cancelling → Cancelled /
+Session transitions are Opening → Reading → Sorting → Indexing → Ready, or
+Cancelling → Cancelled /
 Failed. Cancel signals promptly; workers join and clean up outside Update.
 Close reports cleanup errors. Wait succeeds exactly once after analyzer EOF
 flush, deferred detail metadata finalization, storage flush and completed manifest.
@@ -179,13 +180,16 @@ budgets and records larger than cache/disk budgets. Cache bytes are not a proces
 RSS bound: reader/reassembly, analyzers, bounded event/call histories, cardinality
 maps, serializers and Go runtime overhead need separate limits/measurements.
 
-Heap merge retains one logical packet per source, ordered by timestamp, source
-argument index, then logical sequence. Reassembly is source/interface-local;
-application/TCP analysis consumes the globally merged stream. Preserve completion
-packet timestamps and effective link type after decapsulation. Equal timestamps
-are valid. Each source must emit nondecreasing logical timestamps; any regression
-fails the entire session with exact path, argument/interface, logical sequence,
-previous/current timestamps (TimestampRegressionError). Do not warn-and-continue,
-implicitly deduplicate, apply clock correction, or preferentially reorder SIP.
-Reject more than the supported source limit before opening readers, with an
-error advising fewer inputs or an explicitly raised, validated resource limit.
+Offline watch datasets normalize each source in original record order, then sort
+logical packets on disk by timestamp, source argument index and original logical
+sequence before application/TCP analysis. Reassembly stays source/interface-local
+and preserves completion-frame timestamps and effective link type. Backward and
+equal timestamps are supported without clock correction, deduplication or SIP
+prioritization. Fixed-size key runs and pairwise disk merge passes bound memory;
+raw and index scratch files share the session disk budget and remain owned until
+cleanup succeeds. Reading, sorting and replay are cancellable. The existing
+strict heap-streaming API still rejects regressions for non-dataset callers.
+Reject more than the supported source limit before opening readers.
+
+See [ordering and navigation corrections](../plans/watch-file-ordering-and-navigation.md)
+for the change superseding the initial strict-rejection policy.

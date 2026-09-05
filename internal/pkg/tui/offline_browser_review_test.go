@@ -6,10 +6,51 @@ import (
 	"context"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOfflineBrowserKeyboardNavigationLoadsEntireViewport(t *testing.T) {
+	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
+	m.uiState.ViewMode = "packets"
+	m.uiState.FocusedPane = "left"
+	keys := []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("G")},
+		{Type: tea.KeyPgUp}, {Type: tea.KeyPgUp},
+		{Type: tea.KeyPgDown}, {Type: tea.KeyPgDown},
+		{Type: tea.KeyRunes, Runes: []rune("g")},
+		{Type: tea.KeyPgDown}, {Type: tea.KeyPgDown},
+		{Type: tea.KeyPgUp}, {Type: tea.KeyPgUp},
+		{Type: tea.KeyRunes, Runes: []rune("G")},
+		{Type: tea.KeyRunes, Runes: []rune("g")},
+	}
+	for _, key := range keys {
+		updated, _ := m.Update(key)
+		m = updated.(Model)
+		browser := m.offlineBrowse.owner
+		<-browser.done
+		browser.mu.Lock()
+		var result *offlineBrowseResult
+		for pending := range browser.results {
+			if pending.token.Request == m.offlineBrowse.request {
+				result = pending
+			}
+		}
+		browser.mu.Unlock()
+		require.NotNil(t, result, "key %s", key.String())
+		require.NoError(t, result.err)
+		m, _ = m.handleOfflineBrowse(offlineBrowseMsg{browser, result})
+		page := m.offlineBrowse.current.page
+		start := m.uiState.PacketList.LogicalOffset()
+		end := min(m.uiState.PacketList.LogicalCount(), start+uint64(m.uiState.PacketList.VisibleRows()))
+		require.LessOrEqual(t, page.Row, start, "key %s must load rows above selection", key.String())
+		require.GreaterOrEqual(t, page.Row+uint64(len(page.Rows)), end, "key %s must load rows below selection", key.String())
+		require.Equal(t, offline.PacketID(m.uiState.PacketList.LogicalCursor()), m.offlineBrowse.current.detail.Value.ID)
+		require.Nil(t, m.syncOfflineBrowser(), "key %s must leave a stable completed viewport", key.String())
+	}
+}
 
 func TestOfflineBrowserSupersededResultReleasesPinBudget(t *testing.T) {
 	limits := offline.ResourceLimits{Directory: t.TempDir(), DiskBytes: 64 << 20, CacheBytes: (3 << 20) + (128 << 10), MaxRecordBytes: 1 << 20, MaxSources: 1}

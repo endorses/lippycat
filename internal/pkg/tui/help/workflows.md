@@ -84,7 +84,10 @@ All accepted packets remain accessible regardless of `--buffer-size`. Events and
 Calls retain bounded histories. `--offline-cache-bytes` (64 MiB) controls display
 memory; `--offline-max-disk-bytes` (4 GiB) bounds temporary dataset/query storage.
 Set `--offline-session-dir` to an existing writable directory with enough space.
-Source timestamp regressions and disk/read errors fail indexing explicitly.
+Backward timestamps are ordered on disk before analysis without changing them.
+Sorting shares the session disk budget; Escape cancels reading, sorting or indexing.
+Disk/read errors fail the open explicitly. Cache and index diagnostics are in
+Statistics; the bottom area is reserved for notifications.
 
 1. Use `/` to filter the complete packet dataset; Escape cancels a scan
 2. Press `d` to view packet details

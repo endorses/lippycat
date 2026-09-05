@@ -247,18 +247,20 @@ func (bs *BridgeStatistics) deliveredPackets() int64 {
 
 // StatisticsView displays statistics
 type StatisticsView struct {
-	viewport        viewport.Model
-	width           int
-	height          int
-	theme           themes.Theme
-	stats           *Statistics
-	offlineGlobal   *offline.Statistics
-	offlineMatching *offline.Statistics
-	bridgeStats     *BridgeStatistics
-	ready           bool
-	dirty           bool      // Content needs re-render
-	lastRender      time.Time // Last time content was rendered
-	isVisible       bool      // Tab is currently visible
+	viewport          viewport.Model
+	width             int
+	height            int
+	theme             themes.Theme
+	stats             *Statistics
+	offlineGlobal     *offline.Statistics
+	offlineMatching   *offline.Statistics
+	offlineCachedRows int
+	offlineResources  offline.ResourceUsage
+	bridgeStats       *BridgeStatistics
+	ready             bool
+	dirty             bool      // Content needs re-render
+	lastRender        time.Time // Last time content was rendered
+	isVisible         bool      // Tab is currently visible
 
 	// Phase 1: Core infrastructure
 	rateTracker *RateTracker // Time-series rate sampling

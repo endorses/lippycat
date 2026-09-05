@@ -292,8 +292,10 @@ func TestOfflineLifecycleVirtualRowsAndTotalsComplete(t *testing.T) {
 	require.Equal(t, uint64(1077), m.offlineSession.Dataset.Count())
 	require.LessOrEqual(t, m.offlineSession.Dataset.Resources().PinnedBytes, open.Limits.CacheBytes/4)
 	m.uiState.Width = 180
+	m.uiState.Header.SetWidth(180)
 	m.prepareViewChrome()
-	require.Contains(t, m.uiState.OfflinePacketNotice, "Packets: 1077 | Matching: 1077")
+	require.Contains(t, m.uiState.Header.View(), "Packets: 1077")
+	require.Equal(t, "\n\n\nfooter", m.renderBottomArea("footer"))
 }
 func TestOfflineLifecycleOpenDuringModeCleanupQueuesLatest(t *testing.T) {
 	m, open := offlineLifecycleModel(t)

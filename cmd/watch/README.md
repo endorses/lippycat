@@ -69,15 +69,19 @@ Reassembly and decapsulation can change the logical packet count and effective
 link type relative to the original capture. Navigation, packet details,
 interactive filters (including removal and clearing), and saves cover the complete
 dataset, regardless of `watch.buffer_size` or display-cache eviction. The header
-separates total packets, matching packets, cached rows/cache bytes, and index bytes.
+shows total packets. Statistics separates global and matching counts from cached
+rows/cache bytes and index bytes; the bottom area stays reserved for notifications.
 Global statistics cover the dataset; matching statistics cover the last completed
 query. Endpoint/cardinality estimates remain bounded and are labelled separately.
 
-Sources merge by timestamp, then argument order and source sequence. Up to 64
-regular-file sources are supported. Each source must have nondecreasing logical
-timestamps; a regression fails indexing with source/sequence context. No implicit
-clock correction or deduplication is performed. Read errors and invalid BPF filters
-also fail indexing; a failed source never publishes a successful partial dataset.
+Normalized packets are ordered by timestamp, then argument order and original
+source sequence, using bounded temporary disk storage before analysis. Backward
+timestamps are supported without altering timestamps or deduplicating packets.
+The opening modal reports reading, sorting and indexing; Escape cancels any phase.
+Sorting files share the disk budget with current and replacement datasets and
+queries, so opening needs additional temporary disk space. Up to 64 regular-file
+sources are supported. Read errors and invalid BPF filters also fail indexing;
+a failed source never publishes a successful partial dataset.
 PCAP and single-section, single-interface PCAPNG files can be mixed; split
 multi-interface or multi-section PCAPNG captures first. Reader records/PCAPNG
 blocks are capped at 16 MiB. Per-source pending IP fragments are capped at 4,096

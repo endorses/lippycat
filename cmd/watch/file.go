@@ -23,6 +23,9 @@ var fileCmd = &cobra.Command{
 
 When multiple files are provided, packets are merged and displayed together.
 Each packet shows its source file in the interface column.
+Backward timestamps are ordered using temporary disk storage before analysis;
+timestamps are preserved. Escape cancels opening. All accepted logical packets
+remain available regardless of --buffer-size; event/call history is bounded.
 
 TLS Decryption:
   Use --tls-keylog to provide an SSLKEYLOGFILE for decrypting HTTPS traffic.

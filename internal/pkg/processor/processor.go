@@ -942,6 +942,9 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 			QueueLosses:                   eventDispatcherStats.Dropped + eventDispatcherStats.SinkDropped + upstreamLosses.Queue,
 			UnsupportedKindLosses:         upstreamLosses.UnsupportedKind,
 			TransportLosses:               upstreamLosses.Transport,
+			TcpEstablishedIdleRetentions:  stats.TCPEstablishedIdleRetentions,
+			TcpPreRearmDiscardedChunks:    stats.TCPPreRearmDiscardedChunks,
+			TcpRearmRejectedChunks:        stats.TCPRearmRejectedChunks,
 			Detector: &management.DetectorTelemetry{
 				FlowEntries:                 detectorStats.FlowEntries,
 				CacheEntries:                detectorStats.CacheEntries,

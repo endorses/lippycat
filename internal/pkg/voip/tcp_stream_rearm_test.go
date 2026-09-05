@@ -443,3 +443,34 @@ func TestRearm_InProgressMultiMessageNotRearmed(t *testing.T) {
 		t.Errorf("expected both live messages dispatched, got %d: %v", rec.count(), rec.callIDs)
 	}
 }
+
+// A confirmed SIP connection may multiplex many dialogs on a non-standard
+// port. The per-reader idle timeout must not turn it into a zombie stream;
+// idle eviction belongs to the assembler, which also owns its TCP sequence
+// state. This reproduces the access-leg pattern where the next INVITE arrives
+// after more than tcp_sip_idle_timeout on the same persistent connection.
+func TestEstablishedSIPStreamSurvivesReaderIdleTimeout(t *testing.T) {
+	rec := &recordingSIPHandler{}
+	s := newLiveStream(t, rec, 60421, 16413)
+	s.factory.config.TCPSIPIdleTimeout = 10 * time.Millisecond
+	before := GetTCPStreamMetrics()
+
+	s.ReassembledSG(&fakeScatterGather{data: moMessage("persistent-call-1", "00000000000")}, nil)
+	waitFor(t, func() bool { return rec.has("persistent-call-1") }, "first persistent-stream message dispatched")
+
+	// Allow several reader timeout periods to pass. Before the fix the reader
+	// exited, set discard, and depended on best-effort re-arm of the next chunk.
+	time.Sleep(50 * time.Millisecond)
+	if got := loadFinished(s); got != 0 {
+		t.Fatalf("established SIP reader exited after idle timeout (finished=%d)", got)
+	}
+	if got := loadDiscard(s); got != 0 {
+		t.Fatalf("established SIP stream was marked discarded after idle timeout (discard=%d)", got)
+	}
+	if got := GetTCPStreamMetrics().EstablishedIdleRetentions - before.EstablishedIdleRetentions; got == 0 {
+		t.Fatal("established SIP idle retention was not counted")
+	}
+
+	s.ReassembledSG(&fakeScatterGather{data: moMessage("persistent-call-2", "00000000000")}, nil)
+	waitFor(t, func() bool { return rec.has("persistent-call-2") }, "post-idle persistent-stream message dispatched")
+}

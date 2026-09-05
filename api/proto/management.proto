@@ -275,10 +275,19 @@ message HunterStats {
     uint64 rtp_ownership_ambiguous = 16;
     uint64 identity_inheritance_suppressed = 17;
 
+    // Established TCP SIP streams retained across a parser read timeout.
+    uint64 tcp_established_idle_retentions = 18;
+
+    // TCP chunks discarded while a timed-out stream had not finished cleanup.
+    uint64 tcp_pre_rearm_discarded_chunks = 19;
+
+    // TCP chunks rejected because dead-stream re-arm did not start at SIP.
+    uint64 tcp_rearm_rejected_chunks = 20;
+
     // Event-mode losses are separated by pipeline boundary.
-    uint64 capture_losses = 18;
-    uint64 analysis_losses = 19;
-    uint64 queue_losses = 20;
+    uint64 capture_losses = 23;
+    uint64 analysis_losses = 24;
+    uint64 queue_losses = 25;
     uint64 unsupported_kind_losses = 21;
     uint64 transport_losses = 22;
 }

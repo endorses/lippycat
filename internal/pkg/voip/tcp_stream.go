@@ -203,6 +203,7 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	// decided this connection is not SIP): stop buffering entirely without even
 	// copying the segment. A FINISHED stream is handled below (it may re-arm).
 	if atomic.LoadInt32(&s.finished) == 0 && atomic.LoadInt32(&s.discard) != 0 {
+		IncrementPreRearmDiscardedChunk()
 		return
 	}
 
@@ -244,6 +245,7 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	// existing, already-working per-message read loop.
 	if atomic.LoadInt32(&s.finished) != 0 {
 		if !looksLikeSIPStart(data) {
+			IncrementRearmRejectedChunk()
 			return // dead goroutine + non-SIP continuation: nothing can read it
 		}
 		s.rearm()
@@ -539,6 +541,18 @@ func (r *streamChunkReader) Read(dst []byte) (int, error) {
 				r.state = TCPStateEstablished
 			}
 		case <-timer.C:
+			// Once this connection has carried a complete SIP message, leave
+			// idle reclamation to the assembler. The assembler owns the TCP
+			// sequence state and can evict the stream atomically; terminating
+			// only this reader creates a zombie interval in which ReassembledSG
+			// can silently discard the first message after an idle period.
+			//
+			// The call-aware check remains useful before SIP lock-on for streams
+			// whose detector already identified a live dialog.
+			if r.gotData && atomic.LoadInt32(&r.stream.lockedOnSIP) != 0 {
+				IncrementEstablishedIdleRetention()
+				continue
+			}
 			if r.gotData && r.stream.isAssociatedCallActive() {
 				continue
 			}

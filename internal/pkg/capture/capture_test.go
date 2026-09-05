@@ -24,6 +24,17 @@ func TestNewPacketBuffer(t *testing.T) {
 	assert.Equal(t, int64(0), atomic.LoadInt64(&buffer.dropped), "Dropped count should start at 0")
 }
 
+func TestPacketBufferHeartbeatFieldsProvider(t *testing.T) {
+	buffer := NewPacketBuffer(t.Context(), 1)
+	defer buffer.Close()
+
+	buffer.SetHeartbeatFieldsProvider(func() []any {
+		return []any{"tcp_rearm_rejected_chunks", uint64(3)}
+	})
+
+	assert.Equal(t, []any{"tcp_rearm_rejected_chunks", uint64(3)}, buffer.heartbeatFields())
+}
+
 func TestPacketBuffer_Send_Success(t *testing.T) {
 	ctx := context.Background()
 	buffer := NewPacketBuffer(ctx, 10)

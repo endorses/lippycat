@@ -399,15 +399,37 @@ func (d *diskDataset) read(ctx context.Context, id PacketID, kind uint16, value 
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if err := readStreamHeader(d.offsets, 3); err != nil {
+	if err := d.validateStreams(); err != nil {
 		return 0, err
+	}
+	f := d.summaries
+	if kind == 2 {
+		f = d.details
+	}
+	st, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return d.readValidated(ctx, id, kind, uint64(st.Size()), value)
+}
+
+func (d *diskDataset) validateStreams() error {
+	if err := readStreamHeader(d.offsets, 3); err != nil {
+		return err
 	}
 	if err := readStreamHeader(d.summaries, 1); err != nil {
-		return 0, err
+		return err
 	}
 	if err := readStreamHeader(d.details, 2); err != nil {
-		return 0, err
+		return err
 	}
+	return nil
+}
+
+// readValidated checks each offset and frame against an already validated
+// stream. Completed datasets are immutable while their read lock is held, so
+// a query can validate headers and snapshot stream length once for its scan.
+func (d *diskDataset) readValidated(ctx context.Context, id PacketID, kind uint16, streamSize uint64, value any) (uint64, error) {
 	if uint64(id) >= d.count {
 		return 0, fmt.Errorf("offline packet ID %d out of range", id)
 	}
@@ -426,11 +448,7 @@ func (d *diskDataset) read(ctx context.Context, id PacketID, kind uint16, value 
 	}
 	off := binary.LittleEndian.Uint64(offset[pos:])
 	size := binary.LittleEndian.Uint64(offset[pos+8:])
-	st, err := f.Stat()
-	if err != nil {
-		return 0, err
-	}
-	if off < 16 || off > uint64(st.Size()) || size > uint64(st.Size())-off {
+	if off < 16 || off > streamSize || size > streamSize-off {
 		return 0, errors.New("offline corrupt record offset/length")
 	}
 	return d.readCachedRecord(ctx, f, off, size, kind, id, value)

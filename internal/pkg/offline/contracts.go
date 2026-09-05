@@ -182,6 +182,7 @@ const (
 	Reading    State = "reading"
 	Sorting    State = "sorting"
 	Indexing   State = "indexing"
+	Finalizing State = "finalizing"
 	Ready      State = "ready"
 	Cancelling State = "cancelling"
 	Cancelled  State = "cancelled"
@@ -193,8 +194,10 @@ type Progress struct {
 	State                                   State
 	Sources                                 uint32
 	LogicalPackets, ScannedBytes, DiskBytes uint64
-	ByteProgressKnown                       bool
-	Elapsed                                 time.Duration
+	// TotalPackets becomes known after normalization and sorting finish.
+	TotalPackets      uint64
+	ByteProgressKnown bool
+	Elapsed           time.Duration
 }
 
 // Session owns one isolated indexing operation. Cancel is nonblocking. Wait and

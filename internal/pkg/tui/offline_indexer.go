@@ -283,6 +283,7 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 			}
 			progress.LogicalPackets, progress.ScannedBytes = p.LogicalPackets, p.BytesScanned
 			if progress.State == offline.Indexing {
+				progress.TotalPackets = p.LogicalPackets
 				progress.LogicalPackets, progress.ScannedBytes = 0, 0
 			}
 			publish(true)
@@ -379,6 +380,7 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 		}
 		handler.Close()
 	}
+	progress.State = offline.Finalizing
 	publish(true)
 	if err = ctx.Err(); err != nil {
 		return nil, err

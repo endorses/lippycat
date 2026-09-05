@@ -412,6 +412,10 @@ func (m Model) retryOfflineCancellation() (Model, tea.Cmd) {
 func (m Model) offlineModal() string {
 	p := m.offlineProgress
 	content := fmt.Sprintf("Phase: %s\nSources: %d\nLogical packets: %d\nBytes scanned: %d\nTemporary disk: %d bytes\nElapsed: %s", p.State, p.Sources, p.LogicalPackets, p.ScannedBytes, p.DiskBytes, p.Elapsed.Round(time.Millisecond))
+	if p.State != offline.Cancelling && p.State != offline.Failed {
+		known := p.State == offline.Indexing || p.State == offline.Ready
+		content += "\n\n" + offlineProgressBar(p.LogicalPackets, p.TotalPackets, known, p.Elapsed)
+	}
 	footer := "Esc: Cancel   Ctrl+C: Quit"
 	if m.offlineCleanupFailed {
 		content += "\n\nCleanup failed: " + m.offlineCleanupError
@@ -424,7 +428,7 @@ func (m Model) offlineModal() string {
 		Width:      m.uiState.Width,
 		Height:     m.uiState.Height,
 		Theme:      m.uiState.Theme,
-		ModalWidth: 48, // Fit progress counters without shifting the modal as they grow.
+		ModalWidth: offlineProgressModalWidth,
 	})
 }
 

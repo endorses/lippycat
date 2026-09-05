@@ -58,6 +58,13 @@ func TestBuilderUpdateDetailPersistsLatestFramesAndStatistics(t *testing.T) {
 		physical += uint64(info.Size())
 	}
 	require.Equal(t, physical, storage.Resources().DiskBytes)
+	query, err := dataset.Query(ctx, QuerySpec{Token: Token{Dataset: 12, Query: 1}, Match: func(s Summary) bool {
+		return s.packet.Protocol == "SIP" && s.packet.VoIPData.CallID == "final"
+	}})
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), query.Count())
+	require.Equal(t, uint64(5), query.Statistics().Bytes)
+	require.NoError(t, query.Close())
 	require.NoError(t, dataset.Close())
 	require.Zero(t, storage.Resources().DiskBytes)
 	require.NoError(t, storage.Close())

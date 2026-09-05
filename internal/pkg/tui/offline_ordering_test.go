@@ -54,7 +54,7 @@ func TestOfflineOrderingPublishesSortedDatasetAndCancelsReplacement(t *testing.T
 	result := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
 	require.NoError(t, result.err)
 	require.Nil(t, m.offlineSession, "no publication before successful completion")
-	require.Equal(t, []offline.State{offline.Reading, offline.Sorting, offline.Indexing, offline.Ready}, phases)
+	require.Equal(t, []offline.State{offline.Reading, offline.Sorting, offline.Indexing, offline.Finalizing, offline.Ready}, phases)
 	m, cleanup := m.completeOffline(result)
 	cleanup()
 	require.False(t, m.offlineOpening)

@@ -113,7 +113,7 @@ Go/runtime overhead. Packet count must not produce hidden unbounded allocations.
 
 ### Lifecycle and presentation
 
-Use `Opening -> Reading -> Sorting -> Indexing -> Ready`, with cancellation/failure cleanup branches.
+Use `Opening -> Reading -> Sorting -> Indexing -> Finalizing -> Ready`, with cancellation/failure cleanup branches.
 Filtering is a separate operation on a ready dataset. The model owns contexts
 and sessions; workers own reader/writer resources. Cancellation and worker joins
 run outside `Update()` so the UI can continue displaying cleanup progress.
@@ -803,6 +803,48 @@ corruption, allocation-limit, short-write, query, export, and cleanup coverage
 passes. Independent code review found no regressions in event drain,
 cancellation, offset maintenance, or frame accounting. Go files are formatted
 and the diff passes whitespace checks.
+
+## Progress bars and query performance follow-up
+
+- [x] Show phase-specific percentage bars when indexing/filter totals are known,
+      and an activity indicator for opening/reading/sorting with unknown totals.
+- [x] Use the compact opening-modal width for filter progress and cancellation.
+- [x] Measure and reduce query scan overhead without weakening corruption checks,
+      memory bounds, cancellation, or deferred-amendment support.
+- [x] Verify, record measurements, format, and commit the follow-up.
+
+Implementation (2026-09-05): the sorter already knows the complete logical
+packet count before replay. The indexer now carries that total into progress
+messages, enabling an indexing-phase percentage bar. Reading and sorting show
+activity without claiming a percentage; filter scans use their existing exact
+scanned/total counts. Bars describe the current scan, not overall readiness:
+a finalizing phase shows activity during analyzer EOF drain and storage
+finalization before publication. Both modals share the stable 48-column width
+and suppress percentage bars during
+cancellation/cleanup. Tests cover known and unknown totals, near-completion
+rounding, empty datasets, indexer total propagation, and compact filter rendering.
+
+Queries now validate immutable stream headers and snapshot summary-stream size
+once per scan while holding the dataset read lock. Every record still validates
+its offset, length, frame identity/schema, checksum and allocation budget.
+There are no new scan buffers. Regression coverage rejects corrupt headers,
+offsets, lengths and frame IDs, cleans up failed partial match vectors, and
+filters the latest amended summary.
+
+Three isolated 100,000-packet `BenchmarkPhase6Dataset/100000$` runs measured
+filter throughput of 297,061 / 304,986 / 312,567 pkt/s before and
+467,257 / 429,699 / 438,975 pkt/s after. The median improved from 304,986 to
+438,975 pkt/s: **43.9% more throughput, 30.5% less scan time**. This generated
+all-match fixture measures query scanning, not full capture opening; capture
+contents and storage hardware affect the result. Reproduce with
+`go test ./internal/pkg/offline -run '^$' -bench 'BenchmarkPhase6Dataset/100000$'
+-benchtime=1x -count=3`, running versions sequentially.
+
+Verification: offline, all TUI packages, and watch pass under `all` and `tui`.
+Full offline/TUI race suites pass, with finalizing-phase changes additionally
+verified by focused indexer, progress, and ordering race tests. Independent
+review checked total propagation, phase semantics, and modal fit. Go files are
+formatted and whitespace checks pass.
 
 ## Deferred optimizations and extensions
 

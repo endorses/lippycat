@@ -2,6 +2,7 @@ package offline
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -13,6 +14,49 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestQueryScanRejectsCorruptStreams(t *testing.T) {
+	for _, corruption := range []string{"offset_header", "summary_header", "detail_header", "offset", "length", "truncated_offsets", "truncated_summary", "frame_id"} {
+		t.Run(corruption, func(t *testing.T) {
+			d := queryDataset(t, 3)
+			baseline := d.Resources().DiskBytes
+			file, offset, data := d.summaries, int64(8), []byte{255, 255}
+			switch corruption {
+			case "offset_header", "offset", "length", "truncated_offsets":
+				file = d.offsets
+			case "detail_header":
+				file = d.details
+			case "frame_id":
+				offset, data = 32, []byte{255}
+			}
+			writable, err := os.OpenFile(file.Name(), os.O_RDWR, 0)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, writable.Close()) })
+			switch corruption {
+			case "truncated_offsets", "truncated_summary":
+				require.NoError(t, writable.Truncate(20))
+			default:
+				if corruption == "offset" || corruption == "length" {
+					// Corrupt the second entry so a partially written match vector
+					// must be cleaned up as well as rejecting the bad record.
+					offset = 16 + 32
+					if corruption == "length" {
+						offset += 8
+					}
+					data = make([]byte, 8)
+					binary.LittleEndian.PutUint64(data, ^uint64(0))
+				}
+				_, err = writable.WriteAt(data, offset)
+				require.NoError(t, err)
+			}
+			q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 7, Query: 1}})
+			require.Error(t, err)
+			require.Nil(t, q)
+			require.Equal(t, baseline, d.Resources().DiskBytes)
+			require.Zero(t, d.Resources().InFlightBytes)
+		})
+	}
+}
 
 func queryDataset(t *testing.T, count int) *diskDataset {
 	t.Helper()

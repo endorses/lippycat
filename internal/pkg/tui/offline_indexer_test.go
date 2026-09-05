@@ -29,10 +29,20 @@ func TestOfflineIndexerCompleteIsolatedAndBounded(t *testing.T) {
 	paths := writeOrderedBridgeFixtures(t)
 	storage := testOfflineStorage(t)
 	before := GetBridgeStats()
-	session, err := indexOfflineDataset(context.Background(), storage, 7, OfflineAnalysisConfig{Inputs: paths, EventCapacity: 8, SIPConfig: *voip.GetConfig()}, nil)
+	var indexing, ready offline.Progress
+	session, err := indexOfflineDataset(context.Background(), storage, 7, OfflineAnalysisConfig{Inputs: paths, EventCapacity: 8, SIPConfig: *voip.GetConfig()}, func(p offline.Progress) {
+		if p.State == offline.Indexing {
+			indexing = p
+		}
+		if p.State == offline.Ready {
+			ready = p
+		}
+	})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, session.Close()) }()
 	require.Equal(t, uint64(1077), session.Dataset.Count())
+	require.Equal(t, uint64(1077), indexing.TotalPackets)
+	require.Equal(t, ready.TotalPackets, ready.LogicalPackets)
 	require.Equal(t, uint64(1077), session.Dataset.Statistics().Packets)
 	require.LessOrEqual(t, len(session.EventStore.Events()), 8)
 	require.Zero(t, session.EventStore.Stats().TransportLost)

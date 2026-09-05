@@ -74,6 +74,13 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err = d.validateStreams(); err != nil {
+		return nil, err
+	}
+	summaryStat, err := d.summaries.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat offline summaries: %w", err)
+	}
 	// Snapshot the mutable descriptor immediately; predicates are immutable by contract.
 	var descriptionBytes uint64
 	for _, description := range spec.Description {
@@ -115,7 +122,8 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		summary, size, readErr := d.readSummary(ctx, id)
+		var summary Summary
+		size, readErr := d.readValidated(ctx, id, 1, uint64(summaryStat.Size()), &summary)
 		if readErr != nil {
 			return nil, readErr
 		}

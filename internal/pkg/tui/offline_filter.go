@@ -291,5 +291,9 @@ func (m Model) offlineFilterModal() string {
 		title = "Cancelling filter"
 		footer = "Waiting for cleanup"
 	}
-	return components.RenderModal(components.ModalRenderOptions{Title: title, Content: fmt.Sprintf("Scanned: %d / %d\nMatches: %d", p.Scanned, p.Total, p.Matched), Footer: footer, Width: m.uiState.Width, Height: m.uiState.Height, Theme: m.uiState.Theme})
+	content := fmt.Sprintf("Scanned: %d / %d\nMatches: %d", p.Scanned, p.Total, p.Matched)
+	if !s.cancelled {
+		content += "\n\n" + offlineProgressBar(p.Scanned, p.Total, true, 0)
+	}
+	return components.RenderModal(components.ModalRenderOptions{Title: title, Content: content, Footer: footer, Width: m.uiState.Width, Height: m.uiState.Height, Theme: m.uiState.Theme, ModalWidth: offlineProgressModalWidth})
 }

@@ -62,6 +62,9 @@ var (
 	// ErrNoKeys indicates no decryption keys available.
 	ErrNoKeys = errors.New("no decryption keys available")
 
+	// ErrPlaintextLimit indicates that retained decrypted content exceeded its budget.
+	ErrPlaintextLimit = errors.New("TLS plaintext retention limit exceeded")
+
 	// ErrDecryptionFailed indicates decryption failure.
 	ErrDecryptionFailed = errors.New("decryption failed")
 

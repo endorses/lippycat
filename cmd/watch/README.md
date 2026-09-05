@@ -303,4 +303,8 @@ Offline SIP framing additionally caps active TCP streams at 4,096, total frame
 buffers at 16 MiB, and SIP messages at 64 KiB; tighter configured SIP stream,
 message, and content limits also apply. A framing resource limit fails indexing
 explicitly. TLS key logs are read into a bounded session snapshot and are not
-watched for changes during replay.
+watched for changes during replay. Retained TLS plaintext is capped at 16 MiB
+across all connections and both directions in each offline session. Exceeding
+this analyzer budget fails indexing explicitly and preserves the previous ready
+dataset. The plaintext budget is separate from the display cache; allocation
+overhead is additional.

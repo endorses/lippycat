@@ -9,8 +9,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/endorses/lippycat/internal/pkg/tls/decrypt"
 	"github.com/endorses/lippycat/internal/pkg/tls/keylog"
 )
+
+// Plaintext is retained by the analyzer separately from the display cache.
+// Fail indexing explicitly when this session-wide content budget is exhausted.
+const offlineTLSPlaintextLimit = 16 << 20
 
 // Offline keys are loaded once with bounded line memory. No file watcher can
 // change the meaning of a completed session after atomic publication.
@@ -37,7 +42,9 @@ func newOfflineTLSDecryptor(ctx context.Context, path string) (result *TLSDecryp
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("offline TLS key log must be a regular file")
 	}
-	d, err := NewTLSDecryptor("")
+	config := decrypt.DefaultSessionManagerConfig()
+	config.MaxPlaintextBytes = offlineTLSPlaintextLimit
+	d, err := newTLSDecryptorWithConfig("", config)
 	if err != nil {
 		return nil, err
 	}

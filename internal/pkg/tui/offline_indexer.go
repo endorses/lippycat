@@ -316,6 +316,9 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 					} else {
 						session.TLSDecryptor.processApplicationPayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload())
 					}
+					if err := session.TLSDecryptor.sessionManager.Err(); err != nil {
+						return fmt.Errorf("offline TLS analysis: %w", err)
+					}
 				}
 				if sipFactory == nil || sipFactory.LastEvent == nil {
 					agg.ProcessPacket(&packet)

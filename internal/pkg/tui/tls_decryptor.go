@@ -48,6 +48,10 @@ var (
 
 // NewTLSDecryptor creates a new TLS decryptor from a keylog file path.
 func NewTLSDecryptor(keylogPath string) (*TLSDecryptor, error) {
+	return newTLSDecryptorWithConfig(keylogPath, decrypt.DefaultSessionManagerConfig())
+}
+
+func newTLSDecryptorWithConfig(keylogPath string, sessionConfig decrypt.SessionManagerConfig) (*TLSDecryptor, error) {
 	// Create context for lifecycle management
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -56,7 +60,6 @@ func NewTLSDecryptor(keylogPath string) (*TLSDecryptor, error) {
 	keyStore := keylog.NewStore(storeConfig)
 
 	// Create session manager
-	sessionConfig := decrypt.DefaultSessionManagerConfig()
 	sessionManager := decrypt.NewSessionManager(sessionConfig, keyStore)
 
 	decryptor := &TLSDecryptor{

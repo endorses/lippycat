@@ -29,6 +29,11 @@ type SessionManagerConfig struct {
 	// Default: 100
 	PendingRecordLimit int
 
+	// MaxPlaintextBytes bounds retained application plaintext across all sessions
+	// and directions. Zero leaves retention unlimited. Exceeding the limit is a
+	// sticky error, available through Err even when pending records are drained.
+	MaxPlaintextBytes int
+
 	// CleanupInterval is how often to run the cleanup routine.
 	// Default: 1 minute
 	CleanupInterval time.Duration
@@ -70,6 +75,8 @@ type SessionManager struct {
 	failedDecryptions uint64
 	keysMatched       uint64
 	pendingDropped    uint64
+	plaintextBytes    int
+	plaintextErr      error
 }
 
 // NewSessionManager creates a new session manager.
@@ -312,6 +319,9 @@ func (sm *SessionManager) DecryptRecord(flowKey string, dir Direction, record *R
 
 // decryptRecordLocked performs the actual decryption.
 func (sm *SessionManager) decryptRecordLocked(session *DecryptionSession, dir Direction, record *Record) ([]byte, error) {
+	if sm.plaintextErr != nil {
+		return nil, sm.plaintextErr
+	}
 	state := session.State
 
 	// Get the appropriate cipher and IV for this direction
@@ -346,6 +356,11 @@ func (sm *SessionManager) decryptRecordLocked(session *DecryptionSession, dir Di
 
 	// Append to application data buffer
 	if record.ContentType == ContentTypeApplicationData {
+		if sm.config.MaxPlaintextBytes > 0 && len(plaintext) > sm.config.MaxPlaintextBytes-sm.plaintextBytes {
+			sm.plaintextErr = fmt.Errorf("%w: maximum %d bytes", ErrPlaintextLimit, sm.config.MaxPlaintextBytes)
+			return nil, sm.plaintextErr
+		}
+		sm.plaintextBytes += len(plaintext)
 		if dir == DirectionClient {
 			session.ClientAppData = append(session.ClientAppData, plaintext...)
 		} else {
@@ -360,6 +375,14 @@ func (sm *SessionManager) decryptRecordLocked(session *DecryptionSession, dir Di
 	}
 
 	return plaintext, nil
+}
+
+// Err reports a retained-plaintext limit failure, including failures encountered
+// while newly available keys drained pending records.
+func (sm *SessionManager) Err() error {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.plaintextErr
 }
 
 // decryptTLS12Record decrypts a TLS 1.2 record.
@@ -761,6 +784,7 @@ func (sm *SessionManager) cleanup() {
 	now := time.Now()
 	for flowKey, session := range sm.sessions {
 		if now.Sub(session.LastAccess) > sm.config.SessionTimeout {
+			sm.plaintextBytes -= len(session.ClientAppData) + len(session.ServerAppData)
 			// Remove reverse lookup
 			delete(sm.clientRandomToFlow, session.ClientRandom)
 			delete(sm.sessions, flowKey)
@@ -784,6 +808,7 @@ func (sm *SessionManager) evictOldestLocked() {
 
 	if !first {
 		session := sm.sessions[oldestKey]
+		sm.plaintextBytes -= len(session.ClientAppData) + len(session.ServerAppData)
 		delete(sm.clientRandomToFlow, session.ClientRandom)
 		delete(sm.sessions, oldestKey)
 	}

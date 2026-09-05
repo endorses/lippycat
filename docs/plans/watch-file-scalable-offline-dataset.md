@@ -464,6 +464,23 @@ packages, and watch pass uncached under `all` and `tui`; independent review and
 repeated focused lifecycle race tests pass. No other Phase 3 defects were
 confirmed. Phases 4–6 remain pending.
 
+Further Phase 3 TLS retention review (2026-09-05): independent analyzer review
+and root reproduction confirmed that a single decrypted TLS connection retained
+plaintext proportional to capture length. Offline sessions now enforce a 16 MiB
+aggregate plaintext budget across all connections and directions. Exhaustion
+fails indexing before publication, including failures while pending records drain;
+eviction and expiry release the retained-byte charge. This analyzer budget is
+separate from the display cache and does not include allocation overhead.
+Other decryption callers retain their existing configuration defaults.
+
+Verification: root reproduced the unbounded behavior with encrypted-record and
+full-indexing regressions before accepting the correction; independent review
+verified the fix. Tests cover cross-flow/direction accounting, eviction/expiry,
+pending-record errors, and failed-index cleanup. Offline, TLS, all TUI packages,
+and watch checks pass under `all` and `tui`; full TUI and TLS decryption race
+checks and hunter, processor, tap, and CLI builds pass. No other Phase 3 defects
+were confirmed. Phases 4–6 remain pending.
+
 ### Phase 4 — Virtual packet browsing and event integration
 
 - [ ] Adapt `components/packetlist.go` to logical row counts and bounded page

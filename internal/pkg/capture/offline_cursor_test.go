@@ -108,6 +108,45 @@ func TestOfflineCursorRejectsMalformedNGFrame(t *testing.T) {
 	}
 }
 
+func TestOfflineStreamRejectsPCAPNGTruncatedBlockBodies(t *testing.T) {
+	var out bytes.Buffer
+	w, err := pcapgo.NewNgWriter(&out, layers.LinkTypeEthernet)
+	require.NoError(t, err)
+	require.NoError(t, w.WritePacket(gopacket.CaptureInfo{Timestamp: time.Unix(100, 0), CaptureLength: 60, Length: 60}, make([]byte, 60)))
+	require.NoError(t, w.Flush())
+	complete := append([]byte(nil), out.Bytes()...)
+	packetOffset := 0
+	for binary.LittleEndian.Uint32(complete[packetOffset:]) != 6 {
+		packetOffset += int(binary.LittleEndian.Uint32(complete[packetOffset+4:]))
+	}
+	for _, tc := range []struct {
+		name string
+		tail []byte
+	}{
+		{"packet header without body", complete[packetOffset : packetOffset+8]},
+		{"section header without byte order", complete[:8]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "truncated.pcapng")
+			data := append(append([]byte(nil), complete...), tc.tail...)
+			require.NoError(t, os.WriteFile(path, data, 0600))
+			f, err := os.Open(path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, f.Close()) })
+			count := 0
+			err = RunOfflineOrderedStream(context.Background(), []pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(f)}, "", func(_ context.Context, packets <-chan PacketInfo) error {
+				for range packets {
+					count++
+				}
+				return nil
+			})
+			require.Equal(t, 1, count)
+			require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+			require.NotErrorIs(t, err, io.EOF, "a truncated block must never be mistaken for successful end of input")
+		})
+	}
+}
+
 func TestOfflineCursorFragmentBudget(t *testing.T) {
 	c := &offlineCursor{path: "budget.pcap", ip4: NewIPv4Defragmenter(), ip6: NewIPv6Defragmenter()}
 	for i := 0; i <= offlineMaxFragmentFlows; i++ {

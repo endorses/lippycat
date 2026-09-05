@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"io"
@@ -18,6 +19,67 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOfflineCursorIPv6FragmentCaptureLengths(t *testing.T) {
+	for _, extension := range []string{"plain", "hop-by-hop"} {
+		for _, truncation := range []string{"none", "first", "final"} {
+			t.Run(extension+"/"+truncation, func(t *testing.T) {
+				udp := make([]byte, 40)
+				binary.BigEndian.PutUint16(udp[0:2], 4000)
+				binary.BigEndian.PutUint16(udp[2:4], 4001)
+				binary.BigEndian.PutUint16(udp[4:6], uint16(len(udp)))
+				copy(udp[8:], bytes.Repeat([]byte{'x'}, len(udp)-8))
+				src, dst := net.ParseIP("2001:db8::1"), net.ParseIP("2001:db8::2")
+				frames := [][]byte{
+					fragFrame(t, src, dst, 42, 0, true, udp[:16]),
+					fragFrame(t, src, dst, 42, 2, false, udp[16:]),
+				}
+				if extension == "hop-by-hop" {
+					for i, frame := range frames {
+						const ipOffset = 14
+						const payloadOffset = ipOffset + 40
+						withExtension := append([]byte(nil), frame[:payloadOffset]...)
+						// Eight-byte hop-by-hop header followed by the fragment
+						// header; the remaining option bytes are Pad1 options.
+						withExtension = append(withExtension, byte(layers.IPProtocolIPv6Fragment), 0, 0, 0, 0, 0, 0, 0)
+						withExtension = append(withExtension, frame[payloadOffset:]...)
+						withExtension[ipOffset+6] = byte(layers.IPProtocolIPv6HopByHop)
+						binary.BigEndian.PutUint16(withExtension[ipOffset+4:], uint16(len(withExtension)-payloadOffset))
+						frames[i] = withExtension
+					}
+				}
+				var out bytes.Buffer
+				writer := pcapgo.NewWriter(&out)
+				require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+				for i, frame := range frames {
+					wireLength := len(frame)
+					if truncation == "first" && i == 0 {
+						frame = frame[:len(frame)-8]
+					} else if truncation == "final" && i == 1 {
+						frame = frame[:len(frame)-5]
+					}
+					require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{
+						Timestamp: time.Unix(int64(100+i), 0), CaptureLength: len(frame), Length: wireLength,
+					}, frame))
+				}
+				cursor, err := cursorFromBytes(t, out.Bytes())
+				require.NoError(t, err)
+				packet, err := cursor.Next(context.Background())
+				if truncation != "none" {
+					require.ErrorContains(t, err, "truncated IPv6 fragment")
+					require.ErrorContains(t, err, cursor.path)
+					return
+				}
+				require.NoError(t, err)
+				require.NotNil(t, packet.Packet.Layer(layers.LayerTypeUDP))
+				require.Equal(t, udp[8:], packet.Packet.Layer(layers.LayerTypeUDP).LayerPayload())
+				require.Equal(t, time.Unix(101, 0).UTC(), packet.Packet.Metadata().Timestamp)
+				_, err = cursor.Next(context.Background())
+				require.ErrorIs(t, err, io.EOF)
+			})
+		}
+	}
+}
 
 // fragFrame serializes one Ethernet/IPv6/IPv6Fragment frame carrying a raw
 // fragment payload.

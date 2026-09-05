@@ -185,6 +185,18 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 				if ip6Layer := newPacket.Layer(layers.LayerTypeIPv6); ip6Layer != nil {
 					ip6 := ip6Layer.(*layers.IPv6)
 					c.fragmentEstimate += 2 * len(data)
+					// The decoder clips truncated payloads to the captured bytes.
+					// Reject them before the final fragment's clipped length can
+					// be mistaken for the complete reassembled datagram length.
+					capturedPayload := len(ip6.Payload)
+					if ip6.HopByHop != nil {
+						// gopacket removes this extension from IPv6.Payload, but
+						// the advertised IPv6 length still includes its bytes.
+						capturedPayload += ip6.HopByHop.ActualLength
+					}
+					if int(ip6.Length) > capturedPayload {
+						return PacketInfo{}, fmt.Errorf("offline source %q contains a truncated IPv6 fragment", c.path)
+					}
 					reassembledIP6, err := c.ip6.DefragIPv6WithTimestamp(ip6, frag, ci.Timestamp)
 					if err != nil {
 						return PacketInfo{}, fmt.Errorf("offline source %q IPv6 reassembly: %w", c.path, err)

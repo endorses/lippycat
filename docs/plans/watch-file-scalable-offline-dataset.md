@@ -212,6 +212,15 @@ exact paths, mixed formats, malformed framing/BPF, regressions, fragment budgets
 source-local IPv4/IPv6 and ESP state, VXLAN metadata, and blocked/failed consumers.
 Private capture fixtures were replaced with portable generated ordered inputs.
 
+Phase 1 review corrections (2026-09-05): independent reviews confirmed the
+streaming merge, cancellation, ownership, and source bounds. Two malformed-input
+gaps were reproduced and corrected: PCAPNG EOF immediately after a block header
+now reports truncation instead of successful partial replay, and truncated IPv6
+fragments are rejected before reassembly, matching IPv4 validation. Regression
+tests cover both failures, including IPv6 hop-by-hop headers. Capture, PCAP type,
+offline, TUI, and watch checks pass under `all` and `tui`; focused reader and
+reassembly race tests and hunter, processor, tap, and CLI builds also pass.
+
 ### Phase 2 — Implement session storage and complete queries
 
 - [ ] Implement private temporary session directories, versioned framed streams,

@@ -35,6 +35,9 @@ func (r *checkedNGReader) Read(p []byte) (int, error) {
 		n := 8
 		if section {
 			if _, err := io.ReadFull(r.reader, header[8:]); err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
 				return 0, fmt.Errorf("truncated PCAPNG section: %w", err)
 			}
 			n = 12
@@ -75,6 +78,9 @@ func (r *checkedNGReader) Read(p []byte) (int, error) {
 		block := make([]byte, int(size))
 		copy(block, header[:n])
 		if _, err := io.ReadFull(r.reader, block[n:]); err != nil {
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
+			}
 			return 0, fmt.Errorf("truncated PCAPNG block: %w", err)
 		}
 		if r.order.Uint32(block[len(block)-4:]) != size {

@@ -61,32 +61,45 @@ lc watch file call1.pcap call2.pcap -f "udp"
 
 - `-f, --filter` - BPF filter expression
 - `--tls-keylog` - Path to SSLKEYLOGFILE for TLS decryption
-- `--buffer-size` - Recent packet ring capacity (default: 10000; not a total memory limit)
+- `--buffer-size` - Live/remote packet ring and retained event capacity (default: 10000); does not limit offline packets
 
-**Current offline retention:** The TUI distinguishes packets processed by its
-packet store from packets retained for browsing. `--buffer-size` (or
-`watch.buffer_size`, default 10,000) limits the recent packet ring, not the
-number read from the input or the process's total memory. Offline input streams
-through a bounded timestamp merge; presentation and analyzer memory have separate
-limits. Up to 64 source files are supported. Each source must have nondecreasing
-logical packet timestamps; equal timestamps preserve argument and source order.
-Timestamp regressions, malformed capture records, and invalid BPF filters fail
-replay explicitly. PCAP and single-section, single-interface PCAPNG files can be
-mixed; split multi-interface or multi-section PCAPNG captures into separate files
-first. Records/PCAPNG blocks are capped at 16 MiB. Per-source pending IP fragments
-are capped at 4,096 flows and 16 MiB, with a 30-second capture-time expiry.
+**Complete offline packets:** Every logical packet accepted by the source-level
+`-f` BPF filter is indexed in private temporary storage before browsing starts.
+Reassembly and decapsulation can change the logical packet count and effective
+link type relative to the original capture. Navigation, packet details,
+interactive filters (including removal and clearing), and saves cover the complete
+dataset, regardless of `watch.buffer_size` or display-cache eviction. The header
+separates total packets, matching packets, cached rows/cache bytes, and index bytes.
+Global statistics cover the dataset; matching statistics cover the last completed
+query. Endpoint/cardinality estimates remain bounded and are labelled separately.
 
-Interactive packet filters (including removal and clearing) scan retained
-packets only; they do not search the entire file. During replay, the filtered
-display also retains a bounded history of matching arrivals. Offline saves write
-the retained packet selection, so an export may omit earlier input packets.
-The `-f` BPF filter is applied when reading the source and has a different scope.
-Processed counts describe ingestion since the last clear/restart, not an
-independently verified file total. Packet statistics accumulate ingested packets;
-interactive filter changes rebuild the retained selection and match count, not
-the packet statistics. Events and Calls have separate bounded histories;
-event delivery can also lose queued batches under pressure. Neither view promises
-complete file history.
+Sources merge by timestamp, then argument order and source sequence. Up to 64
+regular-file sources are supported. Each source must have nondecreasing logical
+timestamps; a regression fails indexing with source/sequence context. No implicit
+clock correction or deduplication is performed. Read errors and invalid BPF filters
+also fail indexing; a failed source never publishes a successful partial dataset.
+PCAP and single-section, single-interface PCAPNG files can be mixed; split
+multi-interface or multi-section PCAPNG captures first. Reader records/PCAPNG
+blocks are capped at 16 MiB. Per-source pending IP fragments are capped at 4,096
+flows and 16 MiB, with a 30-second capture-time expiry.
+
+Packet filtering runs as a cancellable complete summary scan. The previous query
+remains installed until the new rows, description, and matching statistics are
+ready together. Escape cancels without changing that query. Events and Calls
+retain separate bounded histories; their filters only cover retained history.
+Stateful analysis consumes the full stream and finalizes before publication,
+but neither view promises complete file history.
+
+Press `w` to save all packets matching the completed packet query, or all dataset
+packets when no packet filter is active. Export streams a fixed snapshot to
+nanosecond PCAP, preserving normalized raw bytes, effective link type, timestamps,
+and captured/original lengths. Mixed effective link types are rejected; export
+those inputs separately. Missing timestamps or timestamps outside unsigned
+32-bit Unix seconds are rejected instead of altered. Empty results report no
+packets to save. Escape cancels export. Only a successful export replaces the
+destination atomically; failure or cancellation removes the temporary output and
+preserves any existing destination. Export needs additional disk space beside
+the destination, outside the offline session budget.
 
 #### TLS Decryption
 
@@ -279,11 +292,9 @@ source count, logical packets, scanned logical bytes, elapsed time, and disk
 usage. Escape cancels and keeps the modal open until cleanup finishes. A failed
 or cancelled replacement preserves the previous ready dataset and its state.
 
-The current incremental implementation shows a preview of up to 32 packets.
-Packet navigation, interactive filters, and saves still operate on that preview;
-complete dataset browsing and export follow in later implementation phases.
-Statistics are accumulated over every indexed packet. Events and calls retain
-bounded histories, independently of packet completeness.
+Browsing loads bounded pages and selected details asynchronously. Cache eviction
+does not discard logical packets or change packet/event loss counters. Events and
+calls retain bounded histories independently of the complete packet dataset.
 
 Offline resource flags (also available when switching from live/remote mode):
 
@@ -295,7 +306,31 @@ Offline resource flags (also available when switching from live/remote mode):
 | `--offline-max-record-bytes` | `watch.offline.max_record_bytes` | 8 MiB                  |
 | `--offline-max-sources`      | `watch.offline.max_sources`      | 64                     |
 
-The ready dataset and replacement share disk/cache budgets. Resource exhaustion
+Flags override their corresponding YAML/Viper keys. Byte settings are positive
+integer byte counts; maximum record bytes must fit both cache and disk budgets.
+`max_sources` must be between 1 and 64. The session parent directory must exist
+and be writable. For example:
+
+```yaml
+watch:
+  offline:
+    session_dir: /var/tmp
+    max_disk_bytes: 4294967296
+    cache_bytes: 67108864
+    max_record_bytes: 8388608
+    max_sources: 64
+```
+
+The ready dataset and replacement share disk/cache budgets. Disk accounting
+includes summaries, details, offsets, manifests, and completed/in-progress query
+files. Allow room for both datasets during replacement and for all-match query
+vectors. Normalized storage can be larger than the source capture. A configured
+budget limit, physical disk exhaustion, or permission error is surfaced explicitly;
+failed opens/queries preserve the previous completed dataset/query. Free space,
+choose a writable session directory, or raise the disk budget before retrying.
+Normal cancellation/shutdown removes owned temporary sessions; cleanup errors
+remain visible and failed-open cleanup can be retried. Never delete an active
+session directory manually. Resource exhaustion
 fails the replacement without publishing a partial dataset. Leave offline mode
 before changing budgets. These limits do not constitute a process RSS limit:
 readers, analysis, retained history, and the Go runtime have separate overhead.

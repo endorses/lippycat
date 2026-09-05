@@ -26,6 +26,7 @@ lc sniff -r capture.pcap
 ```
 
 **Common flags:**
+
 - `-i, --interface` - Network interface
 - `-r, --read` - Read from PCAP file
 - `--sipuser` - Filter by SIP user
@@ -59,6 +60,7 @@ lc watch remote --nodes-file nodes.yaml
 ```
 
 **Sub-commands:**
+
 - `watch live` - Live interface capture
 - `watch file` - PCAP file analysis
 - `watch remote` - Remote node monitoring
@@ -113,6 +115,7 @@ lc show summary    # System summary
 ## Common Options
 
 **TLS Options:**
+
 - `--tls` - Enable TLS
 - `--tls-cert` - TLS certificate file
 - `--tls-key` - TLS key file
@@ -120,16 +123,30 @@ lc show summary    # System summary
 - `--insecure` - Disable TLS (dev only)
 
 **Performance Options:**
+
 - `--tcp-performance-mode` - TCP performance profile
 - `--gpu-backend` - GPU acceleration (auto/cuda/opencl)
-- `--buffer-size` - Capture buffer size
+- `--buffer-size` - Live/remote packet ring and retained event capacity; offline packets remain complete
 
 ## Configuration
 
 Config file locations (priority order):
+
 1. `$HOME/.config/lippycat/config.yaml`
 2. `$HOME/.config/lippycat.yaml`
 3. `$HOME/.lippycat.yaml`
 
 Environment variables:
+
 - `LIPPYCAT_PRODUCTION=true` - Enforce TLS
+
+Offline file resource flags (also apply to files opened through Settings):
+
+- `--offline-session-dir` - Writable temporary-session parent directory
+- `--offline-max-disk-bytes` - Dataset/query disk budget (default 4 GiB)
+- `--offline-cache-bytes` - Display/read cache budget (default 64 MiB; not RSS)
+- `--offline-max-record-bytes` - Encoded record limit (default 8 MiB)
+- `--offline-max-sources` - Input source limit (default and maximum 64)
+
+These map to `watch.offline.session_dir`, `max_disk_bytes`, `cache_bytes`,
+`max_record_bytes`, and `max_sources` in YAML, with flags taking precedence.

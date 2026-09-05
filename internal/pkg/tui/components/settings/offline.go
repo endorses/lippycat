@@ -161,7 +161,7 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 		}
 	}
 	sections = append(sections, bufferStyle.Width(boxWidth).Render(
-		params.LabelStyle.Render("Buffer Size:")+" "+os.bufferInput.View(),
+		params.LabelStyle.Render("Live/remote & event buffer:")+" "+os.bufferInput.View(),
 	))
 
 	// Filter field (focus index 3)
@@ -177,6 +177,7 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 		params.LabelStyle.Render("Capture Filter:")+" "+os.filterInput.View(),
 	))
 
+	sections = append(sections, params.UnfocusedStyle.Width(boxWidth).Render("Offline packets: complete dataset. Storage/cache: --offline-* flags or watch.offline config."))
 	return sections
 }
 

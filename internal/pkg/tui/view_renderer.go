@@ -352,13 +352,8 @@ func (m *Model) prepareViewChrome() {
 	m.uiState.OfflinePacketNotice = ""
 	m.uiState.FilterInput.SetPrompt("/")
 	if m.captureMode == components.CaptureModeOffline {
-		_, retained, processed, _ := m.packetStore.GetBufferInfo()
-		counts := fmt.Sprintf("Processed: %d packets | Retained: %d", processed, retained)
-		scope := "Interactive packet filters and saves use retained packets only."
-		if m.uiState.Width < 64 {
-			counts = fmt.Sprintf("Processed: %d | Retained: %d", processed, retained)
-			scope = "Packet filters/saves: retained only"
-		}
+		counts := "No completed offline dataset."
+		scope := "Open a capture file to index all accepted packets."
 		if m.offlineSession != nil {
 			usage := m.offlineSession.Dataset.Resources()
 			counts = fmt.Sprintf("Packets: %d | Matching: %d | Cached rows: %d | Cache: %d B | Index: %d B", m.offlineSession.Dataset.Count(), m.uiState.PacketList.LogicalCount(), len(m.uiState.PacketList.GetPackets()), usage.CachedBytes+usage.PinnedBytes+usage.PrefetchBytes+usage.InFlightBytes, usage.DiskBytes)
@@ -366,12 +361,9 @@ func (m *Model) prepareViewChrome() {
 			m.uiState.Header.SetDatasetPacketCount(m.offlineSession.Dataset.Count())
 		}
 		m.uiState.OfflinePacketNotice = ansi.Truncate(counts, max(0, m.uiState.Width), "…") + "\n" + ansi.Truncate(scope, max(0, m.uiState.Width), "…")
-		m.uiState.FilterInput.SetPrompt("/ retained packets only:")
+		m.uiState.FilterInput.SetPrompt("/")
 		if m.offlineSession != nil {
 			m.uiState.FilterInput.SetPrompt("/ complete dataset:")
-		}
-		if m.uiState.Width < 40 && m.offlineSession == nil {
-			m.uiState.FilterInput.SetPrompt(ansi.Truncate("/ retained:", max(1, m.uiState.Width-8), "…"))
 		}
 	}
 	m.uiState.Header.SetInterface(m.interfaceName)

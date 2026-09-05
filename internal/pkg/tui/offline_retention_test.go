@@ -11,20 +11,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOfflineRetentionNoticeTracksIngestionAndMode(t *testing.T) {
+func TestOfflineNoticeBeforeDatasetAndModeChanges(t *testing.T) {
 	m := NewModel(2, 8, "", "", []string{"fixture.pcap"}, false, false, "", false)
 	m.packetStore.AddPacketBatch([]components.PacketDisplay{{}, {}, {}})
 	m.prepareViewChrome()
-	require.Contains(t, m.renderBottomArea("footer"), "Processed: 3 packets | Retained: 2")
-	require.Contains(t, m.renderBottomArea("footer"), "filters and saves use retained packets only")
+	require.Contains(t, m.renderBottomArea("footer"), "No completed offline dataset.")
+	require.NotContains(t, m.renderBottomArea("footer"), "retained packets only")
 	require.Contains(t, m.uiState.Header.View(), "Retained: 2")
 	m.uiState.FilterMode = true
 	m.uiState.FilterInput.Activate()
-	require.Contains(t, m.renderBottomArea("footer"), "/ retained packets only:")
+	require.NotContains(t, m.renderBottomArea("footer"), "retained packets only")
 	m.uiState.FilterMode = false
 	m.packetStore.Clear()
 	m.prepareViewChrome()
-	require.Contains(t, m.renderBottomArea("footer"), "Processed: 0 packets | Retained: 0")
+	require.Contains(t, m.renderBottomArea("footer"), "No completed offline dataset.")
 	for _, mode := range []components.CaptureMode{components.CaptureModeLive, components.CaptureModeRemote} {
 		m.captureMode = mode
 		m.prepareViewChrome()

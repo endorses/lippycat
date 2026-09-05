@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-05
 
-**Status:** Phases 0–5 implemented and verified; phase 6 pending
+**Status:** Phases 0–6 implemented and verified
 
 **Code baseline:** `fff6c68f`
 
@@ -39,7 +39,8 @@ explicit follow-up below, not a prerequisite for packet completeness.
 | Event delivery       | `local_event_sink.go` blocks at the offline sink queue, but `pendingLocalEventBuffer` can drop after 4,096 batches                                       | Do not use the UI delivery queue as authoritative offline analysis storage                                       |
 
 The [event performance plan](tui-event-view-performance-optimization.md) records
-phases 1–7 as implemented and verified, with final mixed-mode acceptance separate.
+phases 1–7 as implemented and verified; final mixed-mode presentation acceptance
+is recorded with Phase 6 below.
 The current implementation already provides:
 
 | Existing optimization                                                                                  | Files                                                            | Required preservation                                                                   |
@@ -674,33 +675,69 @@ pending.
 
 ### Phase 6 — Acceptance, documentation, and release
 
-- [ ] Compare global/filtered statistics and selected details/raw bytes against
+- [x] Compare global/filtered statistics and selected details/raw bytes against
       independent full-scan references, including reload after cache eviction.
-- [ ] Test disk-full, permission errors, truncated records, incompatible schema,
+- [x] Test disk-full, permission errors, truncated records, incompatible schema,
       failed replacement, analyzer finalization errors, and cleanup failures.
       A failed source must never produce a successful partial dataset.
-- [ ] Run focused capture/offline/TUI/store/component/watch tests under `all`
+- [x] Run focused capture/offline/TUI/store/component/watch tests under `all`
       and `tui` tags, race tests for session/query/cache concurrency, and relevant
       specialized-build checks if shared capture/types code changed. Request
       sandbox escalation when tests require it.
-- [ ] Re-run existing event incremental, rendering-equivalence/purity, related-
+- [x] Re-run existing event incremental, rendering-equivalence/purity, related-
       packet, and replay benchmarks; include final mixed-mode event acceptance
       that the earlier performance plan leaves separate. Preserve live/remote
       throughput, retention, pause, loss, and refresh behavior.
-- [ ] Benchmark increasing capture sizes at fixed budgets, multiple source counts,
+- [x] Benchmark increasing capture sizes at fixed budgets, multiple source counts,
       mixed protocols, and all-match filters. Record indexing throughput, peak
       RSS/heap, disk amplification, first-page/random-scroll/detail latency,
       filter throughput, cancellation latency, and active-event-view CPU.
-- [ ] Demonstrate no O(packet-count) RAM growth in dataset infrastructure and
+- [x] Demonstrate no O(packet-count) RAM growth in dataset infrastructure and
       document measured analyzer/runtime overhead separately. Establish numeric
       latency/regression acceptance thresholds from phase 0 measurements.
-- [ ] Update `cmd/watch/README.md`, offline settings/help, relevant config
+- [x] Update `cmd/watch/README.md`, offline settings/help, relevant config
       reference, and `docs/manual/src/part2-local-capture/watch-local.md` with
       packet completeness, retained event/call scope, resource settings,
       regression rejection, export semantics, and disk exhaustion behavior.
-- [ ] Remove transitional retained-packet warnings from the completed offline
+- [x] Remove transitional retained-packet warnings from the completed offline
       path; retain appropriate live/remote retention descriptions. Format,
       verify, check off actual completed work, and commit code plus this plan.
+
+Phase 6 implementation and acceptance (2026-09-05):
+
+- Independent full-scan references now compare every global/matching statistics
+  field and selected details against generated records and separately read PCAP
+  inputs. Beginning/middle/end reloads survive demonstrated cache eviction.
+- Failure acceptance includes real ENOSPC and permission denial, incompatible or
+  truncated storage, late source corruption, EOF-only analyzer errors, failed
+  replacement, and cleanup retry. No failed source publishes a partial dataset.
+- New fixed-budget storage and full-indexer benchmarks cover 100,000/1,000,000
+  packets, one/eight sources, DNS/ordinary UDP, complete all-match scans,
+  page/detail latency, cancellation cleanup, sampled peak/live heap and peak RSS.
+  Root independently repeated representative runs and inspected heap profiles.
+  All memory/latency/throughput investigation gates pass. See the
+  [measurement report](../research/watch-file-offline-phase6-benchmarks.md).
+- Five one-second event samples pass the Phase 0 replay/rendering time and
+  allocation gates. Incremental/related-packet costs remain bounded. Active
+  live/remote view and idle offline view measurements, CPU profiling, mixed-mode
+  interaction tests and real PTY checks are recorded in the
+  [acceptance report](../research/watch-file-offline-phase6-acceptance.md).
+- Operator README, manual, configuration reference, embedded help and offline
+  settings now describe complete packet scope and separately bounded event/call
+  history. Transitional retained-only/preview claims were removed. Export,
+  ordering, disk exhaustion and replacement/cancellation behavior are explicit.
+
+Verification: uncached capture/offline/all TUI packages/watch tests pass under
+`all` and `tui`; uncached full offline/TUI race suites pass under `all`. Both
+`all` and `tui` binaries build. Real offline terminal runs with an eight-packet
+buffer export every one of 86 matches from 257 input records, with exact independent
+readback. Connected remote terminal lifecycle and controlled live terminal
+delivery/navigation/pause/resize pass. Raw live capture requires OS privileges
+unavailable in this environment; the live terminal check is explicitly at the
+unchanged delivery/presentation boundary, not a NIC throughput claim. Independent
+sub-agent reviews and root verification covered code, tests, benchmark methodology
+and numerical results. Phase 6 is complete; only the deferred extensions below
+remain outside this release scope.
 
 ## Deferred optimizations and extensions
 

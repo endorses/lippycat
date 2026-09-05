@@ -1,7 +1,7 @@
 # TUI Event View Performance Optimization Plan
 
 **Date:** 2026-09-04
-**Status:** Phases 1–7 verified; final mixed-mode acceptance remains separate
+**Status:** Phases 1–7 and final mixed-mode presentation acceptance verified
 **Scope:** Normalized event ingestion, retention, projection, synchronization,
 and rendering in `internal/pkg/tui`
 
@@ -137,15 +137,15 @@ supersede the original ingestion baseline.
 
 On an Intel Core i9-13900HX, corrected one-second benchmark runs measured:
 
-| Workload | Time/op | Allocated bytes/op |
-| --- | ---: | ---: |
-| Remote batch, 1 event, 10,000 retained | 1.57 ms | 484,736 |
-| Remote batch, 128 events, 10,000 retained | 30.31 ms | 512,221 |
-| Local tick, 50 singleton batches, 10,000 retained | 67.54 ms | 24,232,643 |
-| Batch eviction, 128 events, capacity 1,000 | 2.90 ms | 184 |
-| Batch eviction, 128 events, capacity 10,000 | 31.87 ms | 18,618 |
-| Synchronization, 10,000 events and unrelated packets | 1.96 ms | 2,809,861 |
-| Related-packet miss, 10,000 retained packets | 0.58 ms | 2,326,918 |
+| Workload                                             |  Time/op | Allocated bytes/op |
+| ---------------------------------------------------- | -------: | -----------------: |
+| Remote batch, 1 event, 10,000 retained               |  1.57 ms |            484,736 |
+| Remote batch, 128 events, 10,000 retained            | 30.31 ms |            512,221 |
+| Local tick, 50 singleton batches, 10,000 retained    | 67.54 ms |         24,232,643 |
+| Batch eviction, 128 events, capacity 1,000           |  2.90 ms |                184 |
+| Batch eviction, 128 events, capacity 10,000          | 31.87 ms |             18,618 |
+| Synchronization, 10,000 events and unrelated packets |  1.96 ms |          2,809,861 |
+| Related-packet miss, 10,000 retained packets         |  0.58 ms |          2,326,918 |
 
 Eviction allocation figures amortize the initial backing-slice expansion over
 the measured iterations; they are not steady-state allocations per insertion.
@@ -297,11 +297,11 @@ window, pause/mode gating, immediate user actions, and packet-only eviction.
 
 On the same Intel Core i9-13900HX, one-second benchmark runs measured:
 
-| Workload | Phase 1 time/op | Phase 2 time/op | Phase 2 allocated bytes/op |
-| --- | ---: | ---: | ---: |
-| Local tick, 50 singleton batches, 10,000 retained | 67.54 ms | 12.26 ms | 499,379 |
-| Remote batch, 1 event, 10,000 retained | 1.57 ms | 1.38 ms | 485,049 |
-| Remote batch, 128 events, 10,000 retained | 30.31 ms | 31.75 ms | 511,147 |
+| Workload                                          | Phase 1 time/op | Phase 2 time/op | Phase 2 allocated bytes/op |
+| ------------------------------------------------- | --------------: | --------------: | -------------------------: |
+| Local tick, 50 singleton batches, 10,000 retained |        67.54 ms |        12.26 ms |                    499,379 |
+| Remote batch, 1 event, 10,000 retained            |         1.57 ms |         1.38 ms |                    485,049 |
+| Remote batch, 128 events, 10,000 retained         |        30.31 ms |        31.75 ms |                    511,147 |
 
 Remote benchmarks now include queue admission and tick processing; Phase 1
 called the batch handler directly. Both local and remote benchmarks advance
@@ -406,11 +406,11 @@ own component rendering behavior is outside this phase's event-state scope.
 
 Final one-second runs on the same Intel Core i9-13900HX measured:
 
-| Workload | Phase 2 time/op | Phase 3 time/op | Phase 3 allocated bytes/op |
-| --- | ---: | ---: | ---: |
-| Local tick, 50 singleton batches, 10,000 retained | 12.26 ms | 11.67 ms | 499,206 |
-| Remote batch, 1 event, 10,000 retained | 1.38 ms | 1.28 ms | 484,759 |
-| Remote batch, 128 events, 10,000 retained | 31.75 ms | 29.41 ms | 509,840 |
+| Workload                                          | Phase 2 time/op | Phase 3 time/op | Phase 3 allocated bytes/op |
+| ------------------------------------------------- | --------------: | --------------: | -------------------------: |
+| Local tick, 50 singleton batches, 10,000 retained |        12.26 ms |        11.67 ms |                    499,206 |
+| Remote batch, 1 event, 10,000 retained            |         1.38 ms |         1.28 ms |                    484,759 |
+| Remote batch, 128 events, 10,000 retained         |        31.75 ms |        29.41 ms |                    509,840 |
 
 The final one-second DNS replay smoke measurement was 20.65 ms/op and
 5,127,473 bytes/op (50 packets/op), compared with the recorded Phase 2
@@ -529,15 +529,15 @@ plan's final mixed-mode manual/CPU acceptance gates.
 Final one-second runs on the same Intel Core i9-13900HX, without concurrent test
 workloads, measured:
 
-| Workload | Before Phase 4 time/op | Phase 4 time/op | Phase 4 allocated bytes/op |
-| --- | ---: | ---: | ---: |
-| Batch eviction, 128 events, capacity 1,000 | 2.616 ms | 9.03 µs | 0 |
-| Batch eviction, 128 events, capacity 10,000 | 28.023 ms | 9.41 µs | 0 |
-| Single-event selection maintenance, following latest | 20.01 µs | 95.93 ns | 0 |
-| Single-event selection maintenance, pinned history | 6.26 µs | 88.95 ns | 0 |
-| Local tick, 50 singleton batches, 10,000 retained | 11.67 ms | 1.03 ms | 488,408 |
-| Remote batch, 1 event, 10,000 retained | 1.28 ms | 0.97 ms | 484,122 |
-| Remote batch, 128 events, 10,000 retained | 29.41 ms | 0.98 ms | 484,099 |
+| Workload                                             | Before Phase 4 time/op | Phase 4 time/op | Phase 4 allocated bytes/op |
+| ---------------------------------------------------- | ---------------------: | --------------: | -------------------------: |
+| Batch eviction, 128 events, capacity 1,000           |               2.616 ms |         9.03 µs |                          0 |
+| Batch eviction, 128 events, capacity 10,000          |              28.023 ms |         9.41 µs |                          0 |
+| Single-event selection maintenance, following latest |               20.01 µs |        95.93 ns |                          0 |
+| Single-event selection maintenance, pinned history   |                6.26 µs |        88.95 ns |                          0 |
+| Local tick, 50 singleton batches, 10,000 retained    |               11.67 ms |         1.03 ms |                    488,408 |
+| Remote batch, 1 event, 10,000 retained               |                1.28 ms |         0.97 ms |                    484,122 |
+| Remote batch, 128 events, 10,000 retained            |               29.41 ms |         0.98 ms |                    484,099 |
 
 Store baselines were measured immediately before this implementation; model
 baselines are the recorded Phase 3 runs. The new pinned-selection-eviction
@@ -631,12 +631,12 @@ manual/CPU acceptance claim is included in this phase.
 
 One-second runs on the same Intel Core i9-13900HX measured:
 
-| Workload | Phase 4 time/op | Phase 5 time/op | Phase 5 allocated bytes/op |
-| --- | ---: | ---: | ---: |
-| Local tick, 50 singleton batches, 10,000 retained | 1.03 ms | 16.20 µs | 12,218 |
-| Remote batch, 1 event, 10,000 retained | 0.97 ms | 1.13 µs | 423 |
-| Remote batch, 128 events, 10,000 retained | 0.98 ms | 34.75 µs | 16,141 |
-| Generated DNS replay, 50 packets | 5.66 ms | 3.61 ms | 4,669,859 |
+| Workload                                          | Phase 4 time/op | Phase 5 time/op | Phase 5 allocated bytes/op |
+| ------------------------------------------------- | --------------: | --------------: | -------------------------: |
+| Local tick, 50 singleton batches, 10,000 retained |         1.03 ms |        16.20 µs |                     12,218 |
+| Remote batch, 1 event, 10,000 retained            |         0.97 ms |         1.13 µs |                        423 |
+| Remote batch, 128 events, 10,000 retained         |         0.98 ms |        34.75 µs |                     16,141 |
+| Generated DNS replay, 50 packets                  |         5.66 ms |         3.61 ms |                  4,669,859 |
 
 Incremental component append/trim/selection measured 134.1 ns and 134.7 ns at
 1,000 and 10,000 retained events, with zero steady-state allocations. Store
@@ -713,12 +713,12 @@ zero-allocation assertion.
 
 On the same Intel Core i9-13900HX, one-second runs measured:
 
-| Workload | Before Phase 6 | Phase 6 | Phase 6 allocated bytes/op |
-| --- | ---: | ---: | ---: |
-| Related-packet miss, 1,000 retained | 39.05 µs | 141.9 ns | 384 |
-| Related-packet miss, 10,000 retained | 502.27 µs | 135.1 ns | 384 |
-| Unchanged synchronization, 10,000 retained | — | 125.9 ns | 0 |
-| Generated DNS replay, 50 packets | 2.631 ms | 1.457 ms | 1,099,345 |
+| Workload                                   | Before Phase 6 |  Phase 6 | Phase 6 allocated bytes/op |
+| ------------------------------------------ | -------------: | -------: | -------------------------: |
+| Related-packet miss, 1,000 retained        |       39.05 µs | 141.9 ns |                        384 |
+| Related-packet miss, 10,000 retained       |      502.27 µs | 135.1 ns |                        384 |
+| Unchanged synchronization, 10,000 retained |              — | 125.9 ns |                          0 |
+| Generated DNS replay, 50 packets           |       2.631 ms | 1.457 ms |                  1,099,345 |
 
 The replay's arrival, eviction, selection, and zero-loss assertions pass. Replay
 allocation volume fell from 4,542,155 bytes/op by approximately 76%. The helper
@@ -857,16 +857,16 @@ to zero data rows so its unchanged assertions measure only detail preparation.
 
 One-second runs on the same Intel Core i9-13900HX measured:
 
-| Workload | Retained | Time/op | Bytes/op | Allocations/op |
-| --- | ---: | ---: | ---: | ---: |
-| Prepared DNS timeline | 1,000 | 241 µs | 258,041 | 648 |
-| Prepared DNS timeline | 10,000 | 225 µs | 250,021 | 648 |
-| Mixed-kind legacy control | 1,000 | 720 µs | 439,852 | 1,880 |
-| Mixed-kind cached timeline | 1,000 | 330 µs | 273,287 | 649 |
-| Mixed-kind legacy control | 10,000 | 747 µs | 398,812 | 1,880 |
-| Mixed-kind cached timeline | 10,000 | 313 µs | 243,728 | 649 |
-| Append/trim/select/prepare/render | 1,000 | 368 µs | 277,254 | 701 |
-| Append/trim/select/prepare/render | 10,000 | 365 µs | 258,125 | 701 |
+| Workload                          | Retained | Time/op | Bytes/op | Allocations/op |
+| --------------------------------- | -------: | ------: | -------: | -------------: |
+| Prepared DNS timeline             |    1,000 |  241 µs |  258,041 |            648 |
+| Prepared DNS timeline             |   10,000 |  225 µs |  250,021 |            648 |
+| Mixed-kind legacy control         |    1,000 |  720 µs |  439,852 |          1,880 |
+| Mixed-kind cached timeline        |    1,000 |  330 µs |  273,287 |            649 |
+| Mixed-kind legacy control         |   10,000 |  747 µs |  398,812 |          1,880 |
+| Mixed-kind cached timeline        |   10,000 |  313 µs |  243,728 |            649 |
+| Append/trim/select/prepare/render |    1,000 |  368 µs |  277,254 |            701 |
+| Append/trim/select/prepare/render |   10,000 |  365 µs |  258,125 |            701 |
 
 The mixed-kind control is frozen Phase 6 code in the same test binary. The final
 two rows include cache preparation in timed work. The DNS benchmark now labels
@@ -920,21 +920,21 @@ After each phase (checked below for Phases 1–7):
 
 Before completion:
 
-- [ ] Run the repository's relevant full test suite.
-- [ ] Build at least the `tui` and `all` variants.
-- [ ] Replay the same representative capture used for the baseline.
-- [ ] Compare active Events, Packets, and Statistics tab CPU and memory usage.
-- [ ] Exercise live, offline, and remote capture modes.
-- [ ] Exercise protocol/source/user filters, pause/resume, clear, selection,
+- [x] Run the repository's relevant full test suite.
+- [x] Build at least the `tui` and `all` variants.
+- [x] Replay the same representative capture used for the baseline.
+- [x] Compare active Events, Packets, and Statistics tab CPU and memory usage.
+- [x] Exercise live, offline, and remote capture modes.
+- [x] Exercise protocol/source/user filters, pause/resume, clear, selection,
       mouse navigation, keyboard navigation, resizing, and details scrolling.
-- [ ] Confirm event arrival, retention, eviction, paused, and transport-loss
+- [x] Confirm event arrival, retention, eviction, paused, and transport-loss
       counters remain correct.
-- [ ] Confirm no accepted event is omitted except through an existing,
+- [x] Confirm no accepted event is omitted except through an existing,
       observable bounded-buffer or pressure policy.
-- [ ] Update relevant TUI architecture documentation if synchronization or
+- [x] Update relevant TUI architecture documentation if synchronization or
       store APIs change materially.
-- [ ] Check off only tasks verified as complete.
-- [ ] Commit the code, tests, documentation, and this updated plan together as
+- [x] Check off only tasks verified as complete.
+- [x] Commit the code, tests, documentation, and this updated plan together as
       required by the repository workflow.
 
 Suggested commands:
@@ -950,17 +950,30 @@ make all
 
 ## 13. Completion Criteria
 
-- [ ] The active event view has a bounded refresh rate under local and remote
+- [x] The active event view has a bounded refresh rate under local and remote
       event streams.
-- [ ] Ordinary event arrival does not trigger a full retained-event projection.
-- [ ] Bubble Tea rendering does not synchronize or mutate event state.
-- [ ] Steady-state event insertion and eviction do not shift the retained
+- [x] Ordinary event arrival does not trigger a full retained-event projection.
+- [x] Bubble Tea rendering does not synchronize or mutate event state.
+- [x] Steady-state event insertion and eviction do not shift the retained
       buffer.
-- [ ] Selection and related-packet checks avoid full-buffer scans on routine
+- [x] Selection and related-packet checks avoid full-buffer scans on routine
       refreshes.
-- [ ] Benchmarks and profiles demonstrate the targets in Section 4.
-- [ ] Existing and new correctness, race, build, and manual verification gates
+- [x] Benchmarks and profiles demonstrate the targets in Section 4.
+- [x] Existing and new correctness, race, build, and manual verification gates
       pass.
+
+Final mixed-mode acceptance (2026-09-05) is recorded in the
+[offline Phase 6 acceptance report](../research/watch-file-offline-phase6-acceptance.md).
+The same DNS replay and prepared-render workloads pass the original time and
+allocation gates over five one-second samples. Incremental/related-packet
+benchmarks and a CPU profile preserve the optimized behavior. Separate active
+live/remote and idle offline measurements compare Events/Packets/Statistics.
+Full TUI suites under `all`/`tui`, full race checks, both builds, controlled
+mixed-mode delivery/interaction tests and actual terminal checks pass. Offline
+terminal export and connected remote lifecycle were exercised with real binaries.
+Live terminal presentation used controlled delivery because raw loopback capture
+lacked OS permissions; no privileged NIC/transport throughput is claimed.
+No synchronization/store API changes were needed for this acceptance step.
 
 ## 14. Risks and Mitigations
 

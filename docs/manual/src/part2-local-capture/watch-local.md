@@ -133,33 +133,69 @@ lc watch file sip.pcap rtp.pcap signaling.pcap
 
 When opening multiple files, packets are merged and displayed in timestamp order.
 
-The current offline TUI shows **processed** packets (packet-store ingestion since
-the last clear/restart) separately from **retained** packets available for
-browsing. `--buffer-size` / `watch.buffer_size` defaults to 10,000 and limits the
-recent packet ring. It does not limit total process memory. File input uses a
-bounded timestamp merge with up to 64 sources; each source must have
-nondecreasing logical timestamps. Equal timestamps preserve argument and source
-order. Read errors, invalid BPF filters, and timestamp regressions fail replay
-explicitly. PCAP and single-section, single-interface PCAPNG files may be mixed;
-split PCAPNG files with multiple interfaces or sections before opening them.
+Opening indexes all accepted logical packets into private temporary storage.
+The progress modal shows source count, logical packets/bytes, elapsed time, and
+index disk usage. Escape cancels and waits for cleanup; failed or cancelled
+replacement keeps the previous ready dataset. Browsing begins only after analysis
+finalizes successfully. Input BPF (`-f`) applies before indexing; reassembly and
+decapsulation can change logical packets relative to source records.
 
-Interactive packet filters, including removing or clearing filters, operate on
-retained packets only. They cannot recover packets evicted from the ring. During
-replay, the filtered display keeps a separate bounded history of matching
-arrivals. Offline saving exports the retained selection, which may omit earlier
-packets. Use the source-level `-f` BPF filter to restrict what is read. Packet
-statistics accumulate ingested packets; interactive filter changes rebuild the
-retained selection and match count, not the packet statistics. Processed counts
-are not an independently verified file total. Events and Calls retain separate
-bounded histories, and event delivery can also lose queued batches under
-pressure. These views do not provide complete file history.
+Every indexed packet remains navigable, filterable, and exportable after cache
+eviction. `watch.buffer_size` / `--buffer-size` limits live/remote packet rings and
+retained event history, not offline packet completeness. The display separates
+total and matching packets from cached rows/bytes and index bytes. Global and
+matching statistics cover their complete dataset/query; bounded endpoint estimates
+are labelled separately. Events and Calls still have bounded retained histories;
+their filters do not provide complete-file event or call history.
+
+Interactive packet filters scan the whole dataset asynchronously. Escape cancels
+the scan. Failed/cancelled scans preserve the last completed query, filter labels,
+and statistics. Removing/clearing filters also queries the complete dataset.
+
+Each source must have nondecreasing logical timestamps. Equal timestamps preserve
+argument order, then source order. Regressions, malformed input, and invalid BPF
+fail indexing rather than publishing partial results. Up to 64 regular-file
+sources are supported; PCAP and single-section, single-interface PCAPNG files may
+be mixed. Split multi-section/interface PCAPNG captures before opening them.
 
 **File mode flags:**
 
-| Flag           | Short | Description                      |
-| -------------- | ----- | -------------------------------- |
-| `--filter`     | `-f`  | BPF filter expression            |
-| `--tls-keylog` | —     | SSLKEYLOGFILE for TLS decryption |
+| Flag                         | Short | Default                | Description                                                       |
+| ---------------------------- | ----- | ---------------------- | ----------------------------------------------------------------- |
+| `--filter`                   | `-f`  | none                   | Source-level BPF filter                                           |
+| `--tls-keylog`               | —     | none                   | SSLKEYLOGFILE for TLS decryption                                  |
+| `--offline-session-dir`      | —     | OS temporary directory | Existing writable parent of private session directories           |
+| `--offline-max-disk-bytes`   | —     | `4294967296` (4 GiB)   | Combined dataset/query disk budget                                |
+| `--offline-cache-bytes`      | —     | `67108864` (64 MiB)    | Display cache, pinned details, prefetch and in-flight read budget |
+| `--offline-max-record-bytes` | —     | `8388608` (8 MiB)      | Maximum encoded packet record; must fit cache/disk budgets        |
+| `--offline-max-sources`      | —     | `64`                   | Simultaneous sources, from 1 to 64                                |
+
+These flags override `watch.offline.*` [configuration keys](../appendices/config-reference.md#watch--watch-tui-settings).
+They also apply when switching into offline mode using Settings or a file dialog.
+Leave offline mode before changing resource budgets. Settings' buffer field is for
+live/remote packet rings and retained event history; configure offline storage
+through the flags or YAML keys above.
+
+Disk accounting includes summaries, details, offsets, manifests, and query files;
+the ready and replacement datasets share the budget. Allow space for both during
+replacement and for all-match query vectors. Normalized storage can exceed source
+size. Physical disk exhaustion, configured budget limits, and permission errors
+fail explicitly, preserving the last completed dataset/query. Free space or
+change the directory/budget and retry. Owned temporary files are removed on
+cancellation/shutdown; cleanup failures remain visible for retry. The cache budget
+is not a process RSS limit: reader/reassembly, analyzer, retained event/call, and
+Go runtime memory are additional. Offline TLS plaintext has a separate 16 MiB cap;
+exceeding it fails indexing.
+
+Press `w` to export the last completed matching query (or all packets with no
+packet filter). Export streams a fixed snapshot to nanosecond PCAP, preserving
+normalized raw bytes, effective link type, timestamps, and captured/original
+lengths. Mixed effective link types are rejected; export those inputs separately.
+Missing timestamps or timestamps outside unsigned 32-bit Unix seconds also fail
+explicitly. Empty queries report no packets to save. Escape cancels the export.
+The destination is replaced atomically only on success; cancellation or errors
+preserve an existing destination and remove temporary output. Export requires
+additional free space beside the destination, outside the session disk budget.
 
 ### TLS Decryption
 

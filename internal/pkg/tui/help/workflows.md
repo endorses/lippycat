@@ -45,6 +45,7 @@
 **Goal:** Monitor traffic across multiple network segments.
 
 ### On Each Edge Node (Hunter):
+
 ```bash
 sudo lc hunt voip -i eth0 \
   --processor central:55555 \
@@ -52,6 +53,7 @@ sudo lc hunt voip -i eth0 \
 ```
 
 ### On Central Node (Processor):
+
 ```bash
 lc process --listen 0.0.0.0:55555 \
   --per-call-pcap \
@@ -59,6 +61,7 @@ lc process --listen 0.0.0.0:55555 \
 ```
 
 ### From TUI (Remote Monitoring):
+
 ```bash
 lc watch remote --nodes-file nodes.yaml
 ```
@@ -73,13 +76,25 @@ lc watch remote --nodes-file nodes.yaml
 **Goal:** Review captured traffic offline.
 
 ```bash
-lc watch file -r capture.pcap
+lc watch file capture.pcap
 ```
 
-1. Use `/` to filter packets
+Wait for indexing to finish; Escape cancels and preserves a previous dataset.
+All accepted packets remain accessible regardless of `--buffer-size`. Events and
+Calls retain bounded histories. `--offline-cache-bytes` (64 MiB) controls display
+memory; `--offline-max-disk-bytes` (4 GiB) bounds temporary dataset/query storage.
+Set `--offline-session-dir` to an existing writable directory with enough space.
+Source timestamp regressions and disk/read errors fail indexing explicitly.
+
+1. Use `/` to filter the complete packet dataset; Escape cancels a scan
 2. Press `d` to view packet details
 3. Use `j`/`k` to navigate packets
 4. Press `v` to switch to calls view (VoIP)
+5. Press `w` to export the completed matching packet query; Escape cancels
+
+Offline export streams nanosecond PCAP and replaces the destination only on
+success. Mixed link types and unsupported timestamps fail explicitly. Export
+needs additional free disk space beside the destination.
 
 ## Managing Nodes
 
@@ -95,17 +110,20 @@ lc watch file -r capture.pcap
 ## Troubleshooting Steps
 
 ### No Packets Showing
+
 1. Check capture is not paused (press `Space`)
 2. Verify interface with `lc list interfaces`
 3. Check protocol filter with `p`
 4. Clear filters with `C`
 
 ### High CPU Usage
+
 1. Use `--udp-only` for VoIP capture
 2. Add BPF filter: `--bpf "port 5060"`
-3. Limit buffer: `--buffer-size 1000`
+3. Limit live/remote history: `--buffer-size 1000`
 
 ### TLS Connection Issues
+
 1. Verify certificates match
 2. Check `LIPPYCAT_PRODUCTION` environment
 3. Use `--insecure` for testing only

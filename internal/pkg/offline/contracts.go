@@ -35,6 +35,17 @@ type Page struct {
 	Token Token
 	Row   uint64
 	Rows  []Summary
+	lease *pageLease
+}
+
+// Close releases the shared byte budget for this page. Rows and any copies of
+// the page must no longer be used afterward. Page value copies share one lease;
+// closing more than once is safe. Empty and zero-value pages need no cleanup.
+func (p Page) Close() error {
+	if p.lease != nil {
+		p.lease.close()
+	}
+	return nil
 }
 
 // Statistics counts each logical packet once. Cardinality counters remain
@@ -92,6 +103,7 @@ type Dataset interface {
 	Query(context.Context, QuerySpec) (Query, error)
 	Related(context.Context, Token, Flow) (Query, error)
 	Detail(context.Context, Token, PacketID) (Detail, error)
+	PinDetail(context.Context, Token, PacketID) (*DetailPin, error)
 	Resources() ResourceUsage
 	Close() error
 }
@@ -113,8 +125,8 @@ type SourcePosition struct {
 	Sequence      uint64 // logical source sequence, zero-based
 }
 
-// RecordHeader describes the versioned framing contract; it is not a Go memory
-// layout to write with unsafe. The codec must specify endianness and validate
+// RecordHeader describes logical frame identity, not a Go memory layout to
+// write with unsafe. The codec adds magic, checksum and reserved fields and validates
 // PayloadBytes against the record/allocation budgets before allocating.
 type RecordHeader struct {
 	Version      uint16

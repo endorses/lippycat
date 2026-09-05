@@ -1,5 +1,5 @@
-// Package offline defines the contracts for complete, disk-backed capture datasets.
-// Storage and session implementations are introduced by subsequent plan phases.
+// Package offline provides bounded temporary storage and complete queries for
+// finalized capture datasets, independent of presentation and packet analysis.
 package offline
 
 import "github.com/endorses/lippycat/internal/pkg/types"

@@ -163,3 +163,32 @@ benchmark for the future dataset implementation. Cumulative allocation still
 scales with processed packets (about 123 MB and 1.23 GB respectively); retained
 reader memory does not. Analyzers, presentation queues, storage, and query/cache
 budgets remain outside this measurement.
+
+## Phase 2 storage/query comparison (2026-09-05)
+
+The public-API `BenchmarkCompleteDataset` builds a normalized dataset, publishes
+an all-match query, and measures live heap after GC. Inputs are 256-byte packets
+with fixed address/protocol cardinality; the shared cache is fixed at 2 MiB,
+maximum record size at 64 KiB, and disk budget at 128 MiB. This isolates storage
+infrastructure and does not measure analyzers, capture readers, or UI state.
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test ./internal/pkg/offline \
+  -run '^$' -bench '^BenchmarkCompleteDataset$' -benchtime=1x -benchmem
+```
+
+Observed on Linux/amd64, Intel Core i9-13900HX:
+
+| Packets | Build plus all-match query | Live heap after GC | Disk bytes per packet |
+| ------- | -------------------------- | ------------------ | --------------------- |
+| 1,000   | 21.0 ms                    | 1,814,320          | 710.9                 |
+| 10,000  | 144.1 ms                   | 3,287,800          | 710.1                 |
+| 100,000 | 1,146.2 ms                 | 3,633,488          | 710.0                 |
+
+The cache fills as input grows; the tenfold increase from 10,000 to 100,000
+packets adds about 346 KiB of live heap rather than retaining ten times as many
+records. Cumulative allocation volume still grows with work performed (about
+540 MB allocated during the 100,000-packet run); it is not retained heap or peak
+RSS. Disk amplification for this fixture is about 2.77 times raw packet bytes.
+These single-run measurements establish a storage-only comparison, not the
+phase-6 end-to-end performance acceptance or a hard process RSS guarantee.

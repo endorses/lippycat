@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-05
 
-**Status:** Phases 0–1 implemented and verified; phases 2–6 pending
+**Status:** Phases 0–2 implemented and verified; phases 3–6 pending
 
 **Code baseline:** `fff6c68f`
 
@@ -245,22 +245,56 @@ and reassembly race checks and hunter, processor, tap, and CLI builds also pass.
 
 ### Phase 2 — Implement session storage and complete queries
 
-- [ ] Implement private temporary session directories, versioned framed streams,
+- [x] Implement private temporary session directories, versioned framed streams,
       on-disk offsets, completion manifests, corruption checks, and safe cleanup.
-- [ ] Persist summary/detail records with schema round-trip coverage, including
+- [x] Persist summary/detail records with schema round-trip coverage, including
       reassembled and decapsulated packets and all supported protocol metadata.
-- [ ] Implement byte-bounded summary/detail caching, bounded serialization, and
+- [x] Implement byte-bounded summary/detail caching, bounded serialization, and
       selected-detail pinning; cap prefetch/in-flight reads under the same policy.
-- [ ] Add global statistics accumulation independent of display ingestion and
+- [x] Add global statistics accumulation independent of display ingestion and
       filtered statistics accumulated over complete query matches.
-- [ ] Implement cancellable sequential summary filtering with immutable filter
+- [x] Implement cancellable sequential summary filtering with immutable filter
       snapshots and disk-backed ordered match IDs; atomically publish only
       completed queries. Empty/all-match queries must remain memory-bounded.
-- [ ] Add paged query iteration and dataset-wide related-flow lookup using the
+- [x] Add paged query iteration and dataset-wide related-flow lookup using the
       existing bidirectional transport/node matching semantics. Use a bounded
       disk scan initially if needed; do not rebuild a full in-memory flow map.
-- [ ] Enforce disk limits for datasets and queries, propagate write/flush/close
+- [x] Enforce disk limits for datasets and queries, propagate write/flush/close
       errors, remove superseded query files, and test failure injection.
+
+Phase 2 implementation notes:
+
+- `internal/pkg/offline` now provides a shared-budget storage owner, private
+  dataset builders, complete packet queries, related-flow scans, and streaming
+  detail iteration. TUI session/analyzer integration remains Phase 3.
+- Normalized summaries and full details use checksummed binary frames, with
+  disk-backed offsets. This refines the provisional JSON codec contract to
+  validate decoded container allocations before allocation. A recursive schema
+  fingerprint prevents silent metadata layout changes; see the
+  [storage format](../design/offline-storage-format.md).
+- Read-only datasets and queries publish only after writer flush/close and
+  atomic completion-manifest publication. Disk charges include unfinished and
+  replacement datasets, queries, and manifests; failed cleanup remains charged
+  and dataset cleanup can be retried.
+- A shared byte-bounded frame cache returns independently decoded records.
+  Pages and selected details retain explicit leases; serialization and in-flight
+  reads reserve working space under the same budget. Storage schedules no
+  background prefetch; any prefetched page uses the same bounded API.
+- Global/query totals remain independent of display reads. Protocol/address
+  counters cap cardinality and retained key bytes, with explicit approximation
+  markers. All-match and empty queries keep match IDs on disk.
+- The [storage benchmark](../research/watch-file-offline-baseline.md#phase-2-storagequery-comparison-2026-09-05)
+  records bounded live heap at a fixed cache budget for 1k, 10k, and 100k packets;
+  full analyzer/UI performance acceptance remains Phase 6.
+
+Verification: offline and all TUI packages (including components, stores and
+filters), plus watch, pass under `all` and `tui`. The complete offline package
+passes the race detector under `all`. Coverage includes all metadata and
+nil/empty round-trips, transformed raw/link-type/source identity, schema drift,
+corruption and preallocation limits, a 12,017-packet public-API completeness
+check, all/empty/sparse queries, exact totals, related-flow parity, cancellation,
+writer/manifest failure, cache eviction and mutation isolation, retained page and
+detail leases, concurrent readers, close joins, and retryable cleanup.
 
 ### Phase 3 — Unify indexing and analysis lifecycle
 

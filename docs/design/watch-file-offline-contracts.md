@@ -1,9 +1,8 @@
-# Offline dataset contracts (phase 0)
+# Offline dataset contracts
 
-These contracts are scaffolding for phases 1–5, not an installed dataset path.
-`internal/pkg/offline` has no production dependency on Bubble Tea or TUI filters.
-The adapter is executable now; storage, codecs and lifecycle implementation are
-future work. The authoritative parity source is `types.PacketDisplay` and the
+Phase 2 implements storage, codecs, resource accounting, and complete queries in
+`internal/pkg/offline`, without a production dependency on Bubble Tea or TUI
+filters. Installing the dataset path and analyzer lifecycle remains phase 3. The authoritative parity source is `types.PacketDisplay` and the
 existing filter constructors, including their current quirks.
 
 ## Filter inventory and parity
@@ -70,7 +69,8 @@ and request ID (`Token`). Generation/request zero is reserved for synchronous
 construction; model-owned requests use monotonically increasing nonzero values.
 Page requests bound both rows and decoded bytes; only bounded page indices may
 be converted to int. An oversized first row fails explicitly rather than making
-pagination stall with an empty page. Summary field access never performs I/O.
+pagination stall with an empty page. Summary field access never performs I/O. Returned pages retain a shared memory
+lease until `Page.Close`; selected details use `PinDetail` and its explicit close.
 
 A Dataset exposes count/global statistics, completed Query creation, related-flow
 queries, details, accounting and Close. A nil predicate is all-match; an empty
@@ -79,7 +79,7 @@ snapshot (not the mutable FilterChain). Query exposes count/filtered statistics,
 pages and cancellable streaming iteration for export. Match IDs and record
 offsets stay on disk even for all-match queries. Statistics snapshots own their
 bounded maps (initially 1,000 protocols and 10,000 entries per address counter,
-matching the current UI); packet/byte totals and min/max packet sizes are exact,
+matching the current UI), plus 1 MiB of owned key bytes per map; packet/byte totals and min/max packet sizes are exact,
 capped source/destination frequency and cardinality metrics are identified
 separately. No page read updates statistics or reruns analysis.
 
@@ -111,50 +111,40 @@ physical byte percentages appear only when measurable.
 
 ## Record and disk schema v1
 
-This is the codec contract for phase 2, not a claim of implemented persistence.
-Use separate `summaries`, `details`, `offsets`, `matches-*` and `manifest` streams
-inside a private session directory. Each data stream starts with eight bytes
-`LCODATA\0`, a little-endian uint16 schema version (1), a little-endian uint16
-stream kind, and a little-endian uint32 reserved zero. Reject unknown versions,
-kinds and nonzero reserved fields. Kinds are summary=1, detail=2, offsets=3,
-matches=4. The data header is 16 bytes.
+Phase 2 refines the provisional JSON record proposal into the bounded binary
+[storage format](offline-storage-format.md). Binary decoding validates decoded
+container allocation before allocating; checksummed 32-byte frames replace the
+provisional 20-byte JSON frames. The schema layout is pinned by a recursive
+fingerprint test, so changing protocol metadata cannot silently change storage.
 
-Summary/detail frames use the 20-byte little-endian RecordHeader: uint16 version,
-uint16 kind, uint64 payload length, uint64 packet ID. Validate framing and remaining
-file length before allocating; check arithmetic overflow and configured maximum
-record/allocation size. Payloads use explicit versioned JSON DTOs (not Go memory
-layout, gob, or reflection over Summary's private packet). Unknown versions,
-truncated frames, invalid lengths/IDs, and malformed payloads fail the read.
+Private session directories contain separate `summaries`, `details`, `offsets`,
+query match vectors and completion manifests. Summary/detail streams use the
+16-byte `LCODATA` header, and offsets use kind 3 followed by fixed 32-byte
+entries: summary offset/length and detail offset/length, all little-endian uint64.
+The offsets stay on disk and frame reads validate stream headers, lengths,
+record IDs, checksums and allocation budgets before exposing decoded records.
 
-The summary DTO stores the base PacketDisplay scalars listed above plus exactly
-the projected metadata fields in NewSummary, with nullable metadata objects to
-preserve presence and a nullable first DNS TTL to preserve an empty answer list.
-Timestamp encoding is signed Unix seconds plus uint32 nanoseconds, without a
-monotonic clock. The codec reconstructs the private projection inside package
-offline; it must round-trip all field accessors. Summary's private fields are
-intentionally not a public JSON serialization interface.
+The completed JSON dataset manifest records schema/analysis versions,
+generation, source identities, count, statistics, stream lengths and
+`Complete=true`. Timestamps use seconds/nanoseconds DTOs. Data writers are
+synced, closed and reopened read-only before the manifest is flushed, closed and
+atomically renamed into place. This package does not reopen abandoned sessions;
+only a successfully completed builder returns a dataset. Any construction error
+makes the builder terminal, and its owner must close it to reclaim storage.
 
-The detail DTO stores source argument index, exact source path, source interface
-ID, logical source sequence, captured/original lengths, effective link type,
-timestamp and **all** finalized PacketDisplay metadata plus owned effective raw
-bytes (JSON byte fields use base64). Preserve nil/empty protocol metadata and
-all fields of VoIP, DNS, email, TLS and HTTP, including headers/bodies and
-reassembly/decryption-derived values needed by details. Version the schema when
-these representations change; phase 2 must test full round-trips. Captured and
-original lengths describe the normalized effective packet, so transformed raw
-bytes are not mislabeled with the source frame's link type/lengths.
+Query vectors use a 24-byte header: seven bytes `LCQUERY`, version byte 1,
+dataset generation and query generation as little-endian uint64. Ordered uint64
+match IDs follow; reads validate size, bounds and increasing IDs. A separate
+streamed binary completion manifest includes token, count, complete statistics
+and frozen descriptions, published by rename after flush and close. Empty and
+all-match queries never allocate a dataset-sized ID slice. Closing a superseded
+query removes its files; failed deletion remains charged to the dataset until
+its private directory is removed.
 
-After its stream header, offsets stores fixed 32-byte entries indexed by ID:
-summary offset, summary framed length, detail offset, detail framed length (four
-little-endian uint64 values). Match streams store ordered uint64 IDs after their
-header; empty/all-match outputs cannot allocate dataset-sized slices. The completed
-JSON manifest records version, generation, source identities, count, global
-statistics, analysis/schema versions, final stream lengths and complete=true.
-Write/flush data and offsets, then publish the completed manifest atomically;
-never interpret an unfinished directory as a ready dataset. Query manifests
-similarly publish count/statistics/descriptions only after match flush succeeds.
-Any source, BPF, analyzer, write, flush or close error prevents successful partial
-publication and is returned with context.
+Summary projections retain filter parity, while details preserve all finalized
+metadata, nil/empty containers, effective raw bytes, timestamps and source
+identity. The codec strips monotonic clock state and normalizes times to UTC.
+Analysis and deferred metadata finalization remain the caller's responsibility.
 
 ## Resource and ordering policy
 
@@ -162,7 +152,8 @@ Provisional first-release configuration defaults are 64 MiB total display cache,
 4 GiB total session disk, 8 MiB maximum encoded record/allocation, and 64 open
 sources. The default parent is the OS temporary directory; create a private owned
 child and never clean the parent. Configuration will follow normal flag/Viper
-precedence when wired in phase 2/3. Phase 0 does not expose ineffective flags.
+precedence when the session workflow is wired in phase 3; the storage package
+currently takes explicit validated limits and exposes no ineffective flags.
 
 These are conservative starting limits, not measured storage amplification
 claims. Baseline ordered replay of 256-byte UDP fixtures grows from roughly

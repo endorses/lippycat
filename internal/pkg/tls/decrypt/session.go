@@ -198,6 +198,7 @@ func (sm *SessionManager) ProcessClientHello(flowKey string, srcIP, dstIP net.IP
 	}
 
 	// Store client random
+	sm.removeClientRandomLookupLocked(session)
 	copy(session.ClientRandom[:], clientRandom)
 	session.HasClientHello = true
 	session.LastAccess = time.Now()
@@ -776,6 +777,15 @@ func (sm *SessionManager) cleanupLoop() {
 	}
 }
 
+// removeClientRandomLookupLocked releases a session's reverse lookup.
+func (sm *SessionManager) removeClientRandomLookupLocked(session *DecryptionSession) {
+	// A reused flow replaces its handshake identity. Identical randoms may
+	// also occur on other flows, so only remove the association we still own.
+	if session.HasClientHello && sm.clientRandomToFlow[session.ClientRandom] == session.FlowKey {
+		delete(sm.clientRandomToFlow, session.ClientRandom)
+	}
+}
+
 // cleanup removes expired sessions.
 func (sm *SessionManager) cleanup() {
 	sm.mu.Lock()
@@ -786,7 +796,7 @@ func (sm *SessionManager) cleanup() {
 		if now.Sub(session.LastAccess) > sm.config.SessionTimeout {
 			sm.plaintextBytes -= len(session.ClientAppData) + len(session.ServerAppData)
 			// Remove reverse lookup
-			delete(sm.clientRandomToFlow, session.ClientRandom)
+			sm.removeClientRandomLookupLocked(session)
 			delete(sm.sessions, flowKey)
 		}
 	}
@@ -809,7 +819,7 @@ func (sm *SessionManager) evictOldestLocked() {
 	if !first {
 		session := sm.sessions[oldestKey]
 		sm.plaintextBytes -= len(session.ClientAppData) + len(session.ServerAppData)
-		delete(sm.clientRandomToFlow, session.ClientRandom)
+		sm.removeClientRandomLookupLocked(session)
 		delete(sm.sessions, oldestKey)
 	}
 }

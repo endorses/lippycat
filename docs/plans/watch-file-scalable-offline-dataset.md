@@ -481,6 +481,20 @@ and watch checks pass under `all` and `tui`; full TUI and TLS decryption race
 checks and hunter, processor, tap, and CLI builds pass. No other Phase 3 defects
 were confirmed. Phases 4–6 remain pending.
 
+Further Phase 3 TLS lookup review (2026-09-05): three independent sub-agent
+reviews and root verification confirmed that repeated ClientHello messages on a
+reused flow retained obsolete client-random reverse lookups, allowing analyzer
+memory to grow despite the session limit. Replacing a handshake now removes its
+old lookup. Replacement, expiry, and eviction preserve lookups owned by another
+flow when client randoms coincide.
+
+Root reproduced the regression before accepting the correction, and independent
+review verified the fix. Regression coverage checks 1,000 handshake identities
+with a one-session limit and lookup ownership during replacement, expiry, and
+eviction. TLS, offline, all TUI packages, and watch checks pass under `all` and
+`tui`; full TUI and TLS decryption race checks and hunter, processor, tap, and CLI
+builds pass. No other Phase 3 defects were confirmed. Phases 4–6 remain pending.
+
 ### Phase 4 — Virtual packet browsing and event integration
 
 - [ ] Adapt `components/packetlist.go` to logical row counts and bounded page

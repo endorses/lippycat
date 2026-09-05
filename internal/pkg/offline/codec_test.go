@@ -242,3 +242,35 @@ func TestCodecDecodedAmplificationCheckedBeforeAllocation(t *testing.T) {
 	require.ErrorContains(t, d.value(reflect.ValueOf(&m).Elem()), "allocation limit")
 	require.Nil(t, m)
 }
+
+func TestBorrowedFrameValidationAndOwnership(t *testing.T) {
+	const budget = 16 << 10
+	var encoded bytes.Buffer
+	_, err := writeRecord(&encoded, recordKindDetail, 7, Detail{Packet: types.PacketDisplay{RawData: []byte("original"), Info: "metadata"}}, budget)
+	require.NoError(t, err)
+	good := encoded.Bytes()
+	var decoded Detail
+	_, err = readRecordAt(frameReader{Reader: bytes.NewReader(good), data: good}, 0, recordKindDetail, 7, budget, &decoded)
+	require.NoError(t, err)
+	decoded.Packet.RawData[0] = 'X'
+	_, err = readRecordAt(frameReader{Reader: bytes.NewReader(good), data: good}, 0, recordKindDetail, 7, budget, &decoded)
+	require.NoError(t, err)
+	require.Equal(t, "original", string(decoded.Packet.RawData))
+	for _, damage := range []string{"header", "truncated", "declared length", "checksum"} {
+		t.Run(damage, func(t *testing.T) {
+			data := append([]byte(nil), good...)
+			switch damage {
+			case "header":
+				data[0] = 0
+			case "truncated":
+				data = data[:len(data)-1]
+			case "declared length":
+				binary.LittleEndian.PutUint64(data[8:16], uint64(len(data)))
+			case "checksum":
+				data[len(data)-1] ^= 0xff
+			}
+			_, err := readRecordAt(frameReader{Reader: bytes.NewReader(data), data: data}, 0, recordKindDetail, 7, budget, &Detail{})
+			require.Error(t, err)
+		})
+	}
+}

@@ -18,6 +18,8 @@ type Header struct {
 	capturing      bool
 	paused         bool
 	iface          string
+	datasetPackets uint64
+	datasetReady   bool
 	packets        int
 	bufferSize     int // Maximum buffer capacity
 	captureMode    CaptureMode
@@ -64,8 +66,16 @@ func (h *Header) SetInterface(ifaceName string) {
 
 // SetPacketCount sets the packet count and buffer size
 func (h *Header) SetPacketCount(count, bufferSize int) {
+	h.datasetReady = false
 	h.packets = count
 	h.bufferSize = bufferSize
+}
+
+// SetDatasetPacketCount displays a logical count without ring utilization.
+func (h *Header) SetDatasetPacketCount(count uint64) {
+	h.datasetPackets = count
+	h.datasetReady = true
+	h.bufferSize = 0
 }
 
 // SetCaptureMode sets the capture mode
@@ -299,7 +309,12 @@ func (h *Header) View() string {
 	// Right part - packet count (fixed width) with color based on buffer utilization
 	// Narrow: just the number, Wide: "Packets: 1,234"
 	var rightText string
-	if widthClass == responsive.Narrow {
+	if h.datasetReady {
+		rightText = fmt.Sprintf("Packets: %d", h.datasetPackets)
+		if widthClass == responsive.Narrow {
+			rightText = fmt.Sprintf("%d", h.datasetPackets)
+		}
+	} else if widthClass == responsive.Narrow {
 		rightText = formatNumber(h.packets)
 	} else if h.captureMode == CaptureModeOffline {
 		rightText = fmt.Sprintf("Retained: %s", formatNumber(h.packets))

@@ -507,3 +507,23 @@ func TestEventsViewPreparesDetailProjectionOnlyWhenInvalidated(t *testing.T) {
 	view.RenderDetails(77, 16, false)
 	assert.Equal(t, 2*preparedCalls, kindCalls)
 }
+
+func TestEventsViewOfflineLookupPreservesDetailScroll(t *testing.T) {
+	view := NewEventsView()
+	view.SetEvents([]EventItem{{Event: dnsEvent("first", "first.example")}, {Event: dnsEvent("second", "second.example")}})
+	view.SetOfflinePacketNavigation(true)
+	view.SetRelatedPacketsPending()
+	view.PrepareLayout(100, 10, 77, 16)
+	view.ScrollDetailsToBottom()
+	before := view.detailsViewport.YOffset
+	require.Positive(t, before)
+	view.SetRelatedPacketsAvailable(true)
+	view.PrepareLayout(100, 10, 77, 16)
+	assert.Equal(t, before, view.detailsViewport.YOffset)
+	view.SetRelatedPacketsAvailable(false)
+	view.PrepareLayout(100, 10, 77, 16)
+	assert.Equal(t, before, view.detailsViewport.YOffset)
+	view.SetSelectedID("second")
+	view.PrepareLayout(100, 10, 77, 16)
+	assert.Zero(t, view.detailsViewport.YOffset, "selecting another event still resets detail scroll")
+}

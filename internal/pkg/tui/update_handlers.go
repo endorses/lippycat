@@ -204,7 +204,11 @@ func (m Model) handleUpdateBufferSizeMsg(msg components.UpdateBufferSizeMsg) (Mo
 		m.offlineInstalled.Config.EventCapacity = msg.Size
 	}
 
-	// Update packet list display
+	// Update packet list display. Offline rows are independent of ring size.
+	if m.offlineSession != nil {
+		m.uiState.SettingsView.SaveBufferSize()
+		return m, nil
+	}
 	if !m.packetStore.HasFilter() {
 		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 	} else {
@@ -292,7 +296,9 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 
 	// Apply BPF filter if protocol has one
 	var filterErrorCmd tea.Cmd
-	if msg.Protocol.BPFFilter != "" {
+	if m.offlineSession != nil {
+		// Complete packet filtering is installed in the next phase.
+	} else if msg.Protocol.BPFFilter != "" {
 		// Protocol selection REPLACES existing filters (not stacking)
 		m.packetStore.ClearFilter()
 		filterErrorCmd = m.parseAndApplyFilter(msg.Protocol.BPFFilter)

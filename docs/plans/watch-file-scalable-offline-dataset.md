@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-05
 
-**Status:** Phases 0–3 implemented and verified; phases 4–6 pending
+**Status:** Phases 0–4 implemented and verified; phases 5–6 pending
 
 **Code baseline:** `fff6c68f`
 
@@ -497,25 +497,65 @@ builds pass. No other Phase 3 defects were confirmed. Phases 4–6 remain pendin
 
 ### Phase 4 — Virtual packet browsing and event integration
 
-- [ ] Adapt `components/packetlist.go` to logical row counts and bounded page
+- [x] Adapt `components/packetlist.go` to logical row counts and bounded page
       input, keeping existing slice-backed behavior for live/remote modes.
-- [ ] Implement asynchronous viewport/prefetch loading, top/bottom/page jumps,
+- [x] Implement asynchronous viewport/prefetch loading, top/bottom/page jumps,
       selected packet details, and stable selection by dataset/query/packet ID.
       Show loading states without displaying details from an old selection.
-- [ ] Replace offline slice assumptions in helpers and keyboard/mouse handlers;
+- [x] Replace offline slice assumptions in helpers and keyboard/mouse handlers;
       cancel obsolete requests and reject responses from old generations.
-- [ ] Preserve shared pane styling and event viewport-cache/pure-render behavior;
+- [x] Preserve shared pane styling and event viewport-cache/pure-render behavior;
       neither View nor PrepareLayout may read files or scan the complete dataset.
-- [ ] Route event-related availability and packet navigation to the offline
+- [x] Route event-related availability and packet navigation to the offline
       dataset, preserving `Local`/remote identity translation and TCP/UDP rules.
       Cache eviction must not produce a false “related packets unavailable”.
       Verify an event can reach a packet far outside the current page cache;
       page eviction must not increment capture or event loss counters.
-- [ ] Install the session's bounded event projection once at Ready; invalidate
+- [x] Install the session's bounded event projection once at Ready; invalidate
       its delta cursor on store replacement and preserve existing subsequent
       incremental updates, filter behavior, selection, and detail-scroll rules.
-- [ ] Show total dataset packets, matching packets, cached rows/bytes, and index
+- [x] Show total dataset packets, matching packets, cached rows/bytes, and index
       bytes separately. Label retained event/call history and counters accurately.
+
+Phase 4 implementation notes:
+
+- Packet browsing uses logical `uint64` row counts and bounded summary pages.
+  An implicit unfiltered query maps rows to packet IDs without a full scan or
+  another match-vector file. Live and remote packet rings retain their existing
+  slice-backed behavior.
+- Session-owned workers load viewport/prefetch summaries and selected details
+  asynchronously. Navigation clears stale details, cancels obsolete requests,
+  rejects old generations, reuses prefetched summaries, and releases abandoned
+  results during replacement or shutdown. Relative timestamps use dataset start
+  time across page changes. Hidden packet views release their leases before
+  event scans; returning reloads the preserved logical selection.
+- Offline event availability uses a cancellable dataset scan and bounded
+  selected-flow cache, independently of page residency. Enter jumps to the first
+  related packet. Node translation and bidirectional TCP/UDP matching retain the
+  existing semantics; lookup completion preserves same-event detail scrolling.
+- Ready publication installs the bounded event projection and invalidates its
+  delta cursor. Packet page reads and evictions do not change global statistics
+  or capture/event loss counters. The header and status distinguish logical
+  totals, matching rows, resident rows, cache bytes, and temporary index bytes.
+- Cache reads borrow validated frame payloads during decoding, eliminating a
+  duplicate allocation while retaining checksum, schema, and decoded-allocation
+  bounds. Large-summary and large-detail regressions verify tight-cache browsing
+  and event lookup; page limits leave decoding headroom.
+- Complete interactive packet filtering and export remain Phase 5. Those legacy
+  operations are explicitly unavailable for ready datasets so they cannot
+  silently operate on only the resident page. Event/call filters remain usable,
+  and their history remains explicitly bounded.
+
+Verification: offline, all TUI packages, components/stores/filters, and watch
+pass under `all` and `tui`; the full offline and TUI race suites pass. Root
+review and independent sub-agent reviews verified logical navigation, stale and
+abandoned results, distant event-to-detail jumps, hidden-view cleanup, selected
+row recovery from byte-limited pages, identity/transport parity, event projection
+replacement/deltas, detail scrolling, pure component rendering, and low-cache
+large-record behavior. Temporary Go build-cache exhaustion during verification
+was resolved by clearing the rebuildable cache and running checks sequentially.
+Phase 4 is complete; complete packet filtering/export and release acceptance
+remain phases 5–6.
 
 ### Phase 5 — Complete filtering, statistics, and export
 

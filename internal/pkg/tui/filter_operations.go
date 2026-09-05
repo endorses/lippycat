@@ -19,6 +19,11 @@ import (
 func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
+		if m.offlineSession != nil {
+			m.uiState.FilterMode = false
+			m.uiState.FilterInput.Deactivate()
+			return m, m.offlineFilterUnavailable()
+		}
 		// Apply the filter
 		filterValue := m.uiState.FilterInput.Value()
 		var filterCmd tea.Cmd

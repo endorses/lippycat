@@ -34,6 +34,11 @@ type (
 
 // PacketList is a component that displays a list of packets
 type PacketList struct {
+	virtual        bool
+	logicalCount   uint64
+	logicalCursor  uint64
+	logicalOffset  uint64
+	pageStart      uint64
 	packets        []PacketDisplay
 	cursor         int // Currently selected packet
 	offset         int // Scroll offset
@@ -81,8 +86,123 @@ func (p *PacketList) SetTheme(theme themes.Theme) {
 	p.rebuildStyleCache() // Invalidate cache on theme change
 }
 
-// SetPackets updates the packet list
+// SetVirtualPackets installs a bounded page in a logical dataset. Page replacement
+// preserves selection and scroll position; the model owns dataset/query identity
+// and must reset selection when replacing that identity.
+func (p *PacketList) SetVirtualPackets(total, pageStart uint64, packets []PacketDisplay) {
+	if !p.virtual {
+		p.logicalCursor, p.logicalOffset = 0, 0
+		p.cursor, p.offset = 0, 0
+		p.autoScroll = false
+	}
+	p.virtual, p.logicalCount, p.pageStart = true, total, pageStart
+	if pageStart >= total {
+		packets = nil
+	} else if uint64(len(packets)) > total-pageStart {
+		packets = packets[:int(total-pageStart)]
+	}
+	p.packets = packets
+	if total == 0 {
+		p.logicalCursor, p.logicalOffset = 0, 0
+	} else {
+		p.logicalCursor = min(p.logicalCursor, total-1)
+		p.adjustLogicalOffset()
+	}
+}
+
+// IsVirtual reports whether packets represent a page of a logical dataset.
+func (p *PacketList) IsVirtual() bool { return p.virtual }
+
+// LogicalCount returns all navigable rows, independent of page residency.
+func (p *PacketList) LogicalCount() uint64 {
+	if p.virtual {
+		return p.logicalCount
+	}
+	return uint64(len(p.packets))
+}
+
+func (p *PacketList) LogicalCursor() uint64 {
+	if p.virtual {
+		return p.logicalCursor
+	}
+	return uint64(max(0, p.cursor))
+}
+
+func (p *PacketList) LogicalOffset() uint64 {
+	if p.virtual {
+		return p.logicalOffset
+	}
+	return uint64(max(0, p.offset))
+}
+
+// VisibleRows is the bounded number of packet rows in the viewport.
+func (p *PacketList) VisibleRows() int { return max(1, p.height-3-p.headerHeight) }
+
+func (p *PacketList) LogicalViewport() (uint64, int) {
+	return p.LogicalOffset(), p.VisibleRows()
+}
+
+func (p *PacketList) SetLogicalCursor(row uint64) {
+	if !p.virtual {
+		if len(p.packets) == 0 {
+			p.SetCursor(0)
+		} else {
+			p.SetCursor(int(min(row, uint64(len(p.packets)-1))))
+		}
+		return
+	}
+	if p.logicalCount == 0 {
+		p.logicalCursor, p.logicalOffset = 0, 0
+		return
+	}
+	p.logicalCursor = min(row, p.logicalCount-1)
+	p.adjustLogicalOffset()
+	p.autoScroll = p.logicalCursor == p.logicalCount-1
+}
+
+func (p *PacketList) adjustLogicalOffset() {
+	if p.logicalCount == 0 {
+		p.logicalOffset = 0
+		return
+	}
+	visible := uint64(p.VisibleRows())
+	if p.logicalCursor < p.logicalOffset {
+		p.logicalOffset = p.logicalCursor
+	}
+	if p.logicalCursor-p.logicalOffset >= visible {
+		p.logicalOffset = p.logicalCursor - visible + 1
+	}
+	// Keep the final page filled after enlarging the viewport or shrinking a query.
+	maxOffset := p.logicalCount - min(p.logicalCount, visible)
+	p.logicalOffset = min(p.logicalOffset, maxOffset)
+}
+
+func (p *PacketList) pageIndex(row uint64) (int, bool) {
+	start := uint64(0)
+	if p.virtual {
+		start = p.pageStart
+	}
+	if row < start || row-start >= uint64(len(p.packets)) {
+		return 0, false
+	}
+	return int(row - start), true
+}
+
+// GetSelectedPacket returns nil while the selected row is not loaded.
+func (p *PacketList) GetSelectedPacket() *PacketDisplay {
+	index, loaded := p.pageIndex(p.LogicalCursor())
+	if !loaded {
+		return nil
+	}
+	pkt := p.packets[index]
+	return &pkt
+}
+
+// SetPackets updates the slice-backed live/remote packet list.
 func (p *PacketList) SetPackets(packets []PacketDisplay) {
+	if p.virtual {
+		p.Reset()
+	}
 	oldLen := len(p.packets)
 	newLen := len(packets)
 	wasAtBottom := (oldLen == 0) || (p.cursor >= oldLen-1)
@@ -319,6 +439,8 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 
 // Reset resets the packet list to initial state
 func (p *PacketList) Reset() {
+	p.virtual = false
+	p.logicalCount, p.logicalCursor, p.logicalOffset, p.pageStart = 0, 0, 0, 0
 	p.packets = make([]PacketDisplay, 0, 10000) // Pre-allocate for typical buffer size
 	p.cursor = 0
 	p.offset = 0
@@ -425,6 +547,13 @@ func (p *PacketList) SetSize(width, height int) {
 
 // CursorUp moves the cursor up
 func (p *PacketList) CursorUp() {
+	if p.virtual {
+		if p.logicalCursor > 0 {
+			p.SetLogicalCursor(p.logicalCursor - 1)
+		}
+		p.autoScroll = false
+		return
+	}
 	if p.cursor > 0 {
 		p.cursor--
 		p.adjustOffset()
@@ -435,6 +564,12 @@ func (p *PacketList) CursorUp() {
 
 // CursorDown moves the cursor down
 func (p *PacketList) CursorDown() {
+	if p.virtual {
+		if p.logicalCount > 0 && p.logicalCursor < p.logicalCount-1 {
+			p.SetLogicalCursor(p.logicalCursor + 1)
+		}
+		return
+	}
 	if p.cursor < len(p.packets)-1 {
 		p.cursor++
 		p.adjustOffset()
@@ -449,6 +584,12 @@ func (p *PacketList) CursorDown() {
 
 // GotoTop moves to the first packet
 func (p *PacketList) GotoTop() {
+	if p.virtual {
+		p.logicalOffset = 0
+		p.SetLogicalCursor(0)
+		p.autoScroll = false
+		return
+	}
 	p.cursor = 0
 	p.offset = 0
 	// Disable auto-scroll when jumping to top
@@ -457,6 +598,12 @@ func (p *PacketList) GotoTop() {
 
 // GotoBottom moves to the last packet
 func (p *PacketList) GotoBottom() {
+	if p.virtual {
+		if p.logicalCount > 0 {
+			p.SetLogicalCursor(p.logicalCount - 1)
+		}
+		return
+	}
 	if len(p.packets) > 0 {
 		p.cursor = len(p.packets) - 1
 		p.adjustOffset()
@@ -467,6 +614,11 @@ func (p *PacketList) GotoBottom() {
 
 // PageUp moves up by one page
 func (p *PacketList) PageUp() {
+	if p.virtual {
+		p.SetLogicalCursor(p.logicalCursor - min(p.logicalCursor, uint64(p.VisibleRows())))
+		p.autoScroll = false
+		return
+	}
 	// Must match the calculation in View() and adjustOffset()
 	contentHeight := p.height - 3
 	pageSize := contentHeight - p.headerHeight
@@ -485,6 +637,12 @@ func (p *PacketList) PageUp() {
 
 // PageDown moves down by one page
 func (p *PacketList) PageDown() {
+	if p.virtual {
+		if p.logicalCount > 0 {
+			p.SetLogicalCursor(p.logicalCursor + min(p.logicalCount-1-p.logicalCursor, uint64(p.VisibleRows())))
+		}
+		return
+	}
 	// Must match the calculation in View() and adjustOffset()
 	contentHeight := p.height - 3
 	pageSize := contentHeight - p.headerHeight
@@ -510,6 +668,10 @@ func (p *PacketList) PageDown() {
 
 // adjustOffset ensures the cursor is visible
 func (p *PacketList) adjustOffset() {
+	if p.virtual {
+		p.adjustLogicalOffset()
+		return
+	}
 	// Must match the calculation in View()
 	// Box overhead: 3 lines to match details panel
 	// Header: 2 lines
@@ -558,6 +720,10 @@ func (p *PacketList) GetPackets() []PacketDisplay {
 
 // SetCursor sets the cursor position directly (for mouse clicks)
 func (p *PacketList) SetCursor(position int) {
+	if p.virtual {
+		p.SetLogicalCursor(uint64(max(0, position)))
+		return
+	}
 	position = max(0, position)
 	if position >= len(p.packets) {
 		position = len(p.packets) - 1
@@ -573,8 +739,23 @@ func (p *PacketList) SetCursor(position int) {
 	}
 }
 
-// View renders the packet list
-func (p *PacketList) View(focused bool, detailsVisible bool) string {
+// PrepareLayout prepares presentation caches during Update. It only inspects
+// dimensions and theme, never packets or dataset storage.
+func (p *PacketList) PrepareLayout(detailsVisible bool) {
+	if p.detailsVisible != detailsVisible {
+		p.detailsVisible = detailsVisible
+		p.sizeChanged = true
+	}
+	p.getColumnWidths()
+	borderWidth := p.width - 4
+	if !detailsVisible {
+		borderWidth = p.width - 2
+	}
+	p.paneStyles.prepare(p.theme, borderWidth, p.height-3)
+}
+
+// View renders a local value copy so cache preparation never mutates model state.
+func (p PacketList) View(focused bool, detailsVisible bool) string {
 	// Store detailsVisible for column width calculations
 	if p.detailsVisible != detailsVisible {
 		p.detailsVisible = detailsVisible
@@ -592,7 +773,7 @@ func (p *PacketList) View(focused bool, detailsVisible bool) string {
 
 	var sb strings.Builder
 
-	if len(p.packets) == 0 {
+	if p.LogicalCount() == 0 {
 		sb.WriteString(p.renderHeader())
 		sb.WriteString("\n")
 		sb.WriteString(lipgloss.NewStyle().
@@ -614,24 +795,27 @@ func (p *PacketList) View(focused bool, detailsVisible bool) string {
 			visibleLines = 1
 		}
 
-		start := p.offset
-		end := p.offset + visibleLines
-
-		if end > len(p.packets) {
-			end = len(p.packets)
-		}
-
-		// Render visible packets
-		for i := start; i < end; i++ {
-			line := p.renderPacket(i, i == p.cursor)
+		start := p.LogicalOffset()
+		linesRendered := int(min(uint64(visibleLines), p.LogicalCount()-start))
+		for i := 0; i < linesRendered; i++ {
+			row := start + uint64(i)
+			index, loaded := p.pageIndex(row)
+			line := "Loading packet..."
+			if loaded {
+				line = p.renderPacket(index, row == p.LogicalCursor())
+			} else {
+				style := lipgloss.NewStyle().Foreground(p.theme.Foreground)
+				if row == p.LogicalCursor() {
+					style = style.Background(p.theme.SelectionBg)
+				}
+				line = style.Render(line)
+			}
 			sb.WriteString(line)
-			if i < end-1 {
+			if i < linesRendered-1 {
 				sb.WriteString("\n")
 			}
 		}
 
-		// Fill remaining space to maintain consistent box size
-		linesRendered := end - start
 		for i := linesRendered; i < visibleLines; i++ {
 			if i > 0 || linesRendered > 0 {
 				sb.WriteString("\n")

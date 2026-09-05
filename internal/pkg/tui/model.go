@@ -106,6 +106,10 @@ type CaptureTelemetryMsg capture.Telemetry
 type Model struct {
 	offlineController       *offlineController
 	offlineSession          *offlineIndexedSession
+	offlineBrowse           *offlineBrowserState
+	offlineLastClick        uint64
+	offlineLastClickValid   bool
+	offlineRelated          *offlineRelatedState
 	offlineOpening          bool
 	offlineStarted          time.Time
 	offlineLeaving          bool
@@ -397,6 +401,7 @@ func (m *Model) Shutdown() {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.update(msg)
 	if next, ok := updated.(Model); ok {
+		cmd = tea.Batch(cmd, next.syncOfflineBrowser(), next.requestOfflineRelated())
 		next.prepareViewChrome()
 		return next, cmd
 	}
@@ -413,8 +418,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Lifecycle messages bypass modal/settings routing so cleanup cannot stall.
 	switch value := msg.(type) {
+	case offlineBrowseMsg:
+		return m.handleOfflineBrowse(value)
 	case OpenOfflineDatasetMsg:
 		return m.openOffline(value)
+	case offlineRelatedMsg:
+		return m.handleOfflineRelated(value)
 	case offlineOpenCompleteMsg:
 		return m.completeOffline(value)
 	case offlineProgressMsg:
@@ -461,6 +470,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.offlineCleanupError = ""
 			m.offlineRestart = nil
 			m.offlineSession = nil
+			m.offlineBrowse = nil
+			m.offlineLastClickValid = false
 			m.offlineCancelledSession = nil
 			c := m.offlineController
 			c.mu.Lock()

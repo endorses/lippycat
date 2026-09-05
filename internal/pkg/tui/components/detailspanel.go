@@ -28,6 +28,7 @@ type DetailsPanel struct {
 	height              int
 	theme               themes.Theme
 	ready               bool
+	loading             bool
 	decryptedDataGetter DecryptedDataGetter // Callback to get decrypted TLS data
 }
 
@@ -54,6 +55,7 @@ func (d *DetailsPanel) SetDecryptedDataGetter(getter DecryptedDataGetter) {
 
 // SetPacket sets the packet to display
 func (d *DetailsPanel) SetPacket(packet *PacketDisplay) {
+	d.loading = false
 	// Only update if packet actually changed
 	packetChanged := false
 	if d.packet == nil && packet != nil {
@@ -74,6 +76,12 @@ func (d *DetailsPanel) SetPacket(packet *PacketDisplay) {
 		d.viewport.SetContent(d.renderContent())
 		d.viewport.GotoTop()
 	}
+}
+
+// SetLoading clears the prior selection while its details are being read.
+func (d *DetailsPanel) SetLoading() {
+	d.SetPacket(nil)
+	d.loading = true
 }
 
 // SetSize sets the display size
@@ -140,7 +148,11 @@ func (d *DetailsPanel) View(focused bool) string {
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
 			Align(lipgloss.Center)
-		content := emptyStyle.Render("Select a packet to view details")
+		message := "Select a packet to view details"
+		if d.loading {
+			message = "Loading packet details..."
+		}
+		content := emptyStyle.Render(message)
 		return borderStyle.Render(content)
 	}
 

@@ -84,7 +84,9 @@ func (d *diskDataset) readCachedRecord(ctx context.Context, f *os.File, off, siz
 	if size < frameHeaderBytes || size-frameHeaderBytes > maxBytes {
 		return 0, fmt.Errorf("offline invalid framed record size %d", size)
 	}
-	reservation := 3*maxBytes + frameHeaderBytes
+	// Keep one encoded frame plus at most MaxRecordBytes of decoded allocations.
+	// The decoder borrows the frame payload instead of allocating a second copy.
+	reservation := size + maxBytes
 	if err := d.storage.reserveMemory(ctx, reservation); err != nil {
 		return 0, err
 	}
@@ -97,7 +99,7 @@ func (d *diskDataset) readCachedRecord(ctx context.Context, f *os.File, off, siz
 			return fail(fmt.Errorf("read offline frame: %w", err))
 		}
 	}
-	n, err := readRecordAt(bytes.NewReader(data), 0, kind, id, maxBytes, value)
+	n, err := readRecordAt(frameReader{Reader: bytes.NewReader(data), data: data}, 0, kind, id, maxBytes, value)
 	if err != nil {
 		return fail(err)
 	}

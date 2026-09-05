@@ -114,6 +114,7 @@ func (c *offlineController) close() error {
 
 // CloseOffline joins indexing and releases all dataset resources. Call outside Update.
 func (m Model) CloseOffline() error {
+	m.cancelOfflineRelated()
 	if m.offlineController == nil {
 		return nil
 	}
@@ -166,6 +167,7 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 	c.done = done
 	c.progress = offline.Progress{Token: offline.Token{Dataset: g}, State: offline.Opening, Sources: uint32(len(msg.Config.Inputs))}
 	c.mu.Unlock()
+	m.cancelOfflineBrowserReads()
 	m.offlineOpening = true
 	m.offlineStarted = time.Now()
 	m.uiState.SetCapturing(false)
@@ -249,22 +251,6 @@ func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
 			}
 			c.mu.Unlock()
 		})
-		if s != nil && err == nil {
-			base := s.Dataset.Resources().PinnedBytes
-			for id := uint64(0); id < min(s.Dataset.Count(), uint64(min(32, max(1, msg.Config.EventCapacity)))); id++ {
-				pin, e := s.Dataset.PinDetail(ctx, offline.Token{Dataset: g}, offline.PacketID(id))
-				if e != nil {
-					err = e
-					break
-				}
-				if s.Dataset.Resources().PinnedBytes-base > msg.Limits.CacheBytes/4 {
-					err = pin.Close()
-					break
-				}
-				s.previewPins = append(s.previewPins, pin)
-				s.Preview = append(s.Preview, pin.Value.Packet)
-			}
-		}
 		if s != nil {
 			c.mu.Lock()
 			c.sessions[s] = struct{}{}
@@ -320,8 +306,11 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 		}
 		return m, tea.Batch(toast, func() tea.Msg { return offlineCleanupMsg{err: c.dispose(msg.session)} })
 	}
+	m.cancelOfflineRelated()
 	old := m.offlineSession
 	m.offlineSession = msg.session
+	m.offlineBrowse = nil
+	m.offlineLastClickValid = false
 	c.mu.Lock()
 	c.installed = msg.session
 	c.mu.Unlock()
@@ -337,8 +326,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.uiState.Paused = false
 	m.packetStore.ClearAndResize(m.offlinePending.Config.EventCapacity)
 	m.uiState.PacketList.Reset()
-	m.packetStore.AddPacketBatch(msg.session.Preview)
-	m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+	m.uiState.PacketList.SetVirtualPackets(msg.session.Dataset.Count(), 0, nil)
 	m.lastSyncedTotal = 0
 	m.lastSyncedFilteredCount = 0
 	m.lastFilterState = false
@@ -356,6 +344,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.eventViewStore = nil
 	m.syncEventsView()
 	stats := msg.session.Dataset.Statistics()
+	m.uiState.PacketList.SetCaptureStartTime(stats.First)
 	convert := func(in map[string]uint64) map[string]int64 {
 		out := make(map[string]int64, len(in))
 		for k, v := range in {
@@ -430,6 +419,7 @@ func (m Model) offlineModal() string {
 // Mode changes and quit join workers and release sessions in a command, keeping
 // Update responsive throughout cleanup. The restart re-enters only after join.
 func (m Model) leaveOffline(restart *components.RestartCaptureMsg, quit bool) (Model, tea.Cmd) {
+	m.cancelOfflineRelated()
 	if quit {
 		m.offlineQuitRequested = true
 	}

@@ -129,7 +129,7 @@ func (m *Model) setCaptureView(view string) {
 		m.syncEventsView()
 		return
 	}
-	if view == "packets" {
+	if view == "packets" && m.offlineSession == nil {
 		if !m.packetStore.HasFilter() {
 			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 		} else {
@@ -159,6 +159,7 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 	if m.eventStore == nil || m.uiState.EventsView == nil {
 		return
 	}
+	m.uiState.EventsView.SetOfflinePacketNavigation(m.offlineSession != nil)
 	m.eventViewDirty = false
 	m.lastEventViewUpdate = now
 	m.eventViewSyncCount++
@@ -179,7 +180,11 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 	m.eventViewCursor = delta.Cursor
 	m.uiState.EventsView.SetSelectedID(delta.SelectedID)
 	if selected, ok := m.uiState.EventsView.Selected(); ok {
-		m.uiState.EventsView.SetRelatedPacketsAvailable(m.hasRelatedPacket(selected.Event))
+		if m.offlineSession == nil {
+			m.uiState.EventsView.SetRelatedPacketsAvailable(m.hasRelatedPacket(selected.Event))
+		} else {
+			m.presentOfflineRelated(selected.Event)
+		}
 	}
 	m.prepareEventsViewLayout()
 }
@@ -188,17 +193,22 @@ func (m Model) hasRelatedPacket(event events.Event) bool {
 	if event == nil || m.packetStore == nil {
 		return false
 	}
-	env := event.Envelope()
-	if m.captureMode != components.CaptureModeRemote {
-		// Local packet delivery uses the display node "Local", while event
-		// producers retain their stable identity (normally "watch-local").
-		env.NodeID = "Local"
-	} else if env.NodeID != "" && env.Provenance.CaptureSource == env.NodeID+"-local" {
-		// Tap/processor-local packets use the capture source as their batch
-		// node; their events use the processor's identity instead.
-		env.NodeID = env.Provenance.CaptureSource
+	env := m.relatedPacketEnvelope(event)
+	if m.offlineSession != nil {
+		flow := offlineEventFlow(env)
+		return m.offlineRelated != nil && m.offlineRelated.generation == m.offlineSession.Dataset.Generation() && m.offlineRelated.flow == flow && m.offlineRelated.known && m.offlineRelated.available
 	}
 	return m.packetStore.HasRelatedPacket(env)
+}
+
+func (m Model) relatedPacketEnvelope(event events.Event) events.Envelope {
+	env := event.Envelope()
+	if m.captureMode != components.CaptureModeRemote {
+		env.NodeID = "Local"
+	} else if env.NodeID != "" && env.Provenance.CaptureSource == env.NodeID+"-local" {
+		env.NodeID = env.Provenance.CaptureSource
+	}
+	return env
 }
 
 func eventMatchesProtocol(event events.Event, protocol string) bool {

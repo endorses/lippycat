@@ -78,6 +78,12 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			switch msg.String() {
 			case "q", "ctrl+c":
 				return m.requestQuit()
+			case "enter":
+				if m.uiState.Tabs.GetActive() == 0 && m.uiState.ViewMode == "events" && m.offlineSession != nil {
+					return m.navigateOfflineRelated()
+				}
+				return m, nil
+
 			case "ctrl+z":
 				// Suspend the process
 				return m, tea.Suspend
@@ -410,6 +416,9 @@ func (m Model) handleThemeToggle() (Model, tea.Cmd) {
 
 // handleEnterFilterMode enters filter input mode
 func (m Model) handleEnterFilterMode() (Model, tea.Cmd) {
+	if m.offlineSession != nil {
+		return m, m.offlineFilterUnavailable()
+	}
 	m.uiState.FilterMode = true
 	m.uiState.FilterInput.Activate()
 	m.uiState.FilterInput.Clear()
@@ -422,6 +431,9 @@ func (m Model) handleEnterFilterMode() (Model, tea.Cmd) {
 
 // handleClearAllFilters clears all active filters
 func (m Model) handleClearAllFilters() (Model, tea.Cmd) {
+	if m.offlineSession != nil {
+		return m, m.offlineFilterUnavailable()
+	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
 		m.packetStore.ClearFilter()
@@ -450,6 +462,9 @@ func (m Model) handleClearAllFilters() (Model, tea.Cmd) {
 
 // handleRemoveLastFilter removes the last filter in the stack
 func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
+	if m.offlineSession != nil {
+		return m, m.offlineFilterUnavailable()
+	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
 		if m.packetStore.FilterChain.RemoveLast() {
@@ -518,6 +533,9 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 			components.ToastInfo,
 			components.ToastDurationShort,
 		)
+	}
+	if m.offlineSession != nil {
+		return m, m.uiState.Toast.Show("Offline dataset packets cannot be cleared.", components.ToastInfo, components.ToastDurationShort)
 	}
 	// Store count before clearing
 	packetCount := m.packetStore.PacketsCount
@@ -713,6 +731,9 @@ func (m Model) handleToggleView() (Model, tea.Cmd) {
 
 // handleSavePackets initiates or stops packet saving
 func (m Model) handleSavePackets() (Model, tea.Cmd) {
+	if m.offlineSession != nil && m.uiState.Tabs.GetActive() == 0 {
+		return m, m.uiState.Toast.Show("Complete offline packet export is not available yet.", components.ToastInfo, components.ToastDurationLong)
+	}
 	// Only on capture tab (tab 0)
 	if m.uiState.Tabs.GetActive() == 0 {
 		// Check if streaming save is active

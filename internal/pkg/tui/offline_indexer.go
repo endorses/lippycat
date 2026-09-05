@@ -40,8 +40,8 @@ type OfflineAnalysisConfig struct {
 }
 
 type offlineIndexedSession struct {
-	Preview      []types.PacketDisplay
-	previewPins  []*offline.DetailPin
+	browser      *offlineBrowser
+	related      *offlineRelatedOwner
 	Dataset      offline.Dataset
 	builder      *offline.Builder // Retained only until publication or successful cleanup.
 	EventStore   *store.EventStore
@@ -55,11 +55,12 @@ func (s *offlineIndexedSession) Close() error {
 		return nil
 	}
 	var closeErr error
-	for _, pin := range s.previewPins {
-		closeErr = errors.Join(closeErr, pin.Close())
+	if s.related != nil {
+		s.related.close()
 	}
-	s.previewPins = nil
-	s.Preview = nil
+	if s.browser != nil {
+		closeErr = errors.Join(closeErr, s.browser.close())
+	}
 	if s.TLSDecryptor != nil {
 		s.TLSDecryptor.Stop()
 	}

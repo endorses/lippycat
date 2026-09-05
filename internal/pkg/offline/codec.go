@@ -281,6 +281,13 @@ type decoder struct {
 	memory, max uint64
 }
 
+// frameReader lends a validated payload directly to the decoder. Decoded strings
+// and slices own their data, so cached frames remain immutable after the read.
+type frameReader struct {
+	*bytes.Reader
+	data []byte
+}
+
 func (d *decoder) take(n uint64) ([]byte, error) {
 	if n > uint64(len(d.data)-d.pos) {
 		return nil, io.ErrUnexpectedEOF
@@ -497,9 +504,15 @@ func readRecordAt(r io.ReaderAt, offset int64, kind uint16, id PacketID, max uin
 			}
 		}
 	}
-	p := make([]byte, int(n))
-	if _, err := r.ReadAt(p, offset+frameHeaderBytes); err != nil {
-		return 0, fmt.Errorf("read offline payload: %w", err)
+	var p []byte
+	if frame, ok := r.(frameReader); ok {
+		// Stream bounds were checked above, before converting to bounded indices.
+		p = frame.data[int(offset)+frameHeaderBytes : int(end)]
+	} else {
+		p = make([]byte, int(n))
+		if _, err := r.ReadAt(p, offset+frameHeaderBytes); err != nil {
+			return 0, fmt.Errorf("read offline payload: %w", err)
+		}
 	}
 	if crc32.ChecksumIEEE(p) != binary.LittleEndian.Uint32(h[24:28]) {
 		return 0, fmt.Errorf("offline payload checksum mismatch")

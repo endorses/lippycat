@@ -278,7 +278,7 @@ func TestOfflineLifecycleCancelSurfacesCleanupFailure(t *testing.T) {
 	require.True(t, m.uiState.Toast.IsActive())
 	require.Nil(t, m.offlineSession)
 }
-func TestOfflineLifecyclePreviewIsBoundedAndTotalsComplete(t *testing.T) {
+func TestOfflineLifecycleVirtualRowsAndTotalsComplete(t *testing.T) {
 	m, open := offlineLifecycleModel(t)
 	open.Config.Inputs = writeOrderedBridgeFixtures(t)
 	m, cmd := m.openOffline(open)
@@ -286,13 +286,14 @@ func TestOfflineLifecyclePreviewIsBoundedAndTotalsComplete(t *testing.T) {
 	require.NoError(t, result.err)
 	m, _ = m.completeOffline(result)
 	_, count, _, _ := m.packetStore.GetBufferInfo()
-	require.Equal(t, 8, count)
+	require.Zero(t, count)
+	require.Equal(t, uint64(1077), m.uiState.PacketList.LogicalCount())
 	require.Equal(t, int64(1077), m.statistics.TotalPackets)
 	require.Equal(t, uint64(1077), m.offlineSession.Dataset.Count())
 	require.LessOrEqual(t, m.offlineSession.Dataset.Resources().PinnedBytes, open.Limits.CacheBytes/4)
 	m.uiState.Width = 180
 	m.prepareViewChrome()
-	require.Contains(t, m.uiState.OfflinePacketNotice, "Indexed: 1077 packets | Preview: 8")
+	require.Contains(t, m.uiState.OfflinePacketNotice, "Packets: 1077 | Matching: 1077")
 }
 func TestOfflineLifecycleOpenDuringModeCleanupQueuesLatest(t *testing.T) {
 	m, open := offlineLifecycleModel(t)

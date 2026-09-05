@@ -330,6 +330,7 @@ func (m Model) renderActiveModal() string {
 // prepareViewChrome snapshots presentation state during model updates. Rendering
 // must not read the event store or mutate the shared header and footer.
 func (m *Model) prepareViewChrome() {
+	m.uiState.PacketList.PrepareLayout(m.uiState.ShowDetails && m.uiState.Width >= 160)
 	if m.uiState == nil || m.packetStore == nil || m.callStore == nil || m.eventStore == nil {
 		return
 	}
@@ -356,12 +357,17 @@ func (m *Model) prepareViewChrome() {
 			scope = "Packet filters/saves: retained only"
 		}
 		if m.offlineSession != nil {
-			counts = fmt.Sprintf("Indexed: %d packets | Preview: %d", m.offlineSession.Dataset.Count(), retained)
-			scope = "Packet browsing, filters and saves currently use this bounded preview. Events/calls retain bounded history."
+			usage := m.offlineSession.Dataset.Resources()
+			counts = fmt.Sprintf("Packets: %d | Matching: %d | Cached rows: %d | Cache: %d B | Index: %d B", m.offlineSession.Dataset.Count(), m.uiState.PacketList.LogicalCount(), len(m.uiState.PacketList.GetPackets()), usage.CachedBytes+usage.PinnedBytes+usage.PrefetchBytes+usage.InFlightBytes, usage.DiskBytes)
+			scope = "Events/calls: bounded retained history. Packet filtering/export pending."
+			m.uiState.Header.SetDatasetPacketCount(m.offlineSession.Dataset.Count())
 		}
 		m.uiState.OfflinePacketNotice = ansi.Truncate(counts, max(0, m.uiState.Width), "…") + "\n" + ansi.Truncate(scope, max(0, m.uiState.Width), "…")
 		m.uiState.FilterInput.SetPrompt("/ retained packets only:")
-		if m.uiState.Width < 40 {
+		if m.offlineSession != nil {
+			m.uiState.FilterInput.SetPrompt("/ offline filtering pending:")
+		}
+		if m.uiState.Width < 40 && m.offlineSession == nil {
 			m.uiState.FilterInput.SetPrompt(ansi.Truncate("/ retained:", max(1, m.uiState.Width-8), "…"))
 		}
 	}

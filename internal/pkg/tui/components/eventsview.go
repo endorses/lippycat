@@ -55,6 +55,7 @@ type EventsView struct {
 	offset                  int
 	width, height           int
 	theme                   themes.Theme
+	offlinePacketNavigation bool
 	relatedPacketsKnown     bool
 	relatedPacketsAvailable bool
 	detailsViewport         viewport.Model
@@ -309,14 +310,45 @@ func (v *EventsView) SelectPrevious() {
 	}
 }
 
-// SetRelatedPacketsAvailable controls the explicit packet-eviction notice.
+// SetOfflinePacketNavigation enables the dataset navigation hint and absence label.
+func (v *EventsView) SetOfflinePacketNavigation(enabled bool) {
+	if v.offlinePacketNavigation != enabled {
+		v.offlinePacketNavigation = enabled
+		v.detailsSelectedID = ""
+	}
+}
+
+// SetRelatedPacketsPending hides the eviction notice until an asynchronous
+// dataset lookup has completed. Cache misses do not imply packet loss.
+func (v *EventsView) SetRelatedPacketsPending() {
+	if v.relatedPacketsKnown {
+		v.relatedPacketsKnown = false
+		v.invalidateRelatedDetails()
+	}
+}
+
+// SetRelatedPacketsAvailable controls the explicit packet-availability notice.
 func (v *EventsView) SetRelatedPacketsAvailable(available bool) {
 	changed := !v.relatedPacketsKnown || v.relatedPacketsAvailable != available
 	v.relatedPacketsKnown = true
 	v.relatedPacketsAvailable = available
 	if changed {
-		v.detailsSelectedID = ""
+		v.invalidateRelatedDetails()
 	}
+}
+
+// An asynchronous availability update belongs to the same selected event;
+// preserve the user's reading position while replacing only its notice.
+func (v *EventsView) invalidateRelatedDetails() {
+	if v.offlinePacketNavigation && v.detailsViewportReady && v.selectedID != "" && v.detailsSelectedID == v.selectedID {
+		if i := v.indexByID(v.selectedID); i >= 0 {
+			offset := v.detailsViewport.YOffset
+			v.detailsViewport.SetContent(v.renderEventDetailsContent(v.items[i], v.detailsViewport.Width))
+			v.detailsViewport.SetYOffset(offset)
+			return
+		}
+	}
+	v.detailsSelectedID = ""
 }
 
 func (v *EventsView) RenderTimeline(width, height int, focused bool) string {
@@ -437,9 +469,16 @@ func (v *EventsView) renderEventDetailsContent(item EventItem, width int) string
 
 	var content strings.Builder
 	content.WriteString(kindStyle.Render(eventKindIcon(item.Event.Kind()) + " " + strings.ToUpper(string(item.Event.Kind())) + " Event"))
+	if v.offlinePacketNavigation {
+		content.WriteString("\n" + mutedStyle.Render("Enter: jump to first related packet"))
+	}
 	if v.relatedPacketsKnown && !v.relatedPacketsAvailable {
 		content.WriteString("\n\n")
-		content.WriteString(warningStyle.Render("⚠ Related packets are no longer buffered."))
+		notice := "⚠ Related packets are no longer buffered."
+		if v.offlinePacketNavigation {
+			notice = "No related packets in this dataset."
+		}
+		content.WriteString(warningStyle.Render(notice))
 	}
 
 	writeSection := func(title string, rows []eventDetailRow) {

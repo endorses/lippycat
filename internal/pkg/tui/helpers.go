@@ -18,6 +18,13 @@ func (m *Model) getPacketsInOrder() []components.PacketDisplay {
 
 // updateDetailsPanel updates the details panel with the currently selected packet
 func (m *Model) updateDetailsPanel() {
+	if m.offlineSession != nil {
+		s := m.offlineBrowse
+		if s == nil || s.current == nil || s.current.detail == nil || s.current.cursor != m.uiState.PacketList.LogicalCursor() {
+			m.uiState.DetailsPanel.SetPacket(nil)
+		}
+		return
+	}
 	// Use the packet list that's already loaded in the PacketList component
 	// This ensures we're working with the exact same list that's displayed
 	packets := m.uiState.PacketList.GetPackets()
@@ -124,6 +131,9 @@ func (m *Model) generateDefaultFilename() string {
 // This is more efficient than full updates for normal packet flow.
 // Falls back to full update when filter changes or buffer wraps significantly.
 func (m *Model) updatePacketListIncremental() {
+	if m.offlineSession != nil {
+		return
+	}
 	hasFilter := m.packetStore.HasFilter()
 
 	// Detect filter state change (requires full refresh)
@@ -308,6 +318,9 @@ func (m *Model) processPendingPackets(packets []components.PacketDisplay) {
 
 // doFullPacketListRefresh performs a full packet list refresh
 func (m *Model) doFullPacketListRefresh(hasFilter bool) {
+	if m.offlineSession != nil {
+		return
+	}
 	if !hasFilter {
 		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 		_, _, total, _ := m.packetStore.GetBufferInfo()

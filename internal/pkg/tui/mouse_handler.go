@@ -294,6 +294,33 @@ func (m Model) handleEventsViewClick(msg tea.MouseMsg, contentStartY int) (Model
 
 // handlePacketListClick processes clicks on the packet list
 func (m Model) handlePacketListClick(msg tea.MouseMsg, contentStartY, contentHeight int) (Model, tea.Cmd) {
+	if m.offlineSession != nil {
+		if m.uiState.ShowDetails && m.uiState.Width >= 160 && msg.X >= m.uiState.Width-79 {
+			m.uiState.FocusedPane = "right"
+			return m, nil
+		}
+		m.uiState.FocusedPane = "left"
+		row := msg.Y - contentStartY - 2
+		if row < 0 || row >= m.uiState.PacketList.VisibleRows() {
+			return m, nil
+		}
+		index := m.uiState.PacketList.LogicalOffset() + uint64(row)
+		if index >= m.uiState.PacketList.LogicalCount() {
+			return m, nil
+		}
+		now := time.Now()
+		double := m.offlineLastClickValid && index == m.offlineLastClick && now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
+		m.offlineLastClick = index
+		m.offlineLastClickValid = true
+		m.uiState.LastClickTime = now
+		m.uiState.PacketList.SetLogicalCursor(index)
+		m.updateDetailsPanel()
+		if double {
+			m = m.toggleDetailsPanel()
+		}
+		return m, nil
+	}
+
 	minWidthForDetails := 120
 
 	// Check if we're in split pane mode

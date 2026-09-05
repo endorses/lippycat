@@ -21,6 +21,11 @@ func (m Model) handleFocusLeft() (Model, tea.Cmd) {
 
 // handleFocusRight focuses the right pane (details/hex)
 func (m Model) handleFocusRight() (Model, tea.Cmd) {
+	if m.offlineSession != nil && m.uiState.Tabs.GetActive() == 0 && m.uiState.ViewMode == "packets" && (!m.uiState.ShowDetails || m.uiState.Width < 160) {
+		m.uiState.FocusedPane = "left"
+		return m, nil
+	}
+
 	if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
 		// Use spatial navigation in graph mode
 		if m.uiState.NodesView.GetViewMode() == "graph" {
@@ -57,7 +62,7 @@ func (m Model) handleMoveDown() (Model, tea.Cmd) {
 			m.uiState.EmailView.SelectNext()
 		} else if m.uiState.ViewMode == "http" {
 			m.uiState.HTTPView.SelectNext()
-		} else if m.uiState.FocusedPane == "left" {
+		} else if m.packetListHasKeyboardFocus() {
 			m.uiState.PacketList.CursorDown()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
@@ -100,7 +105,7 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 			m.uiState.EmailView.SelectPrevious()
 		} else if m.uiState.ViewMode == "http" {
 			m.uiState.HTTPView.SelectPrevious()
-		} else if m.uiState.FocusedPane == "left" {
+		} else if m.packetListHasKeyboardFocus() {
 			m.uiState.PacketList.CursorUp()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
@@ -143,8 +148,8 @@ func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 			return m, m.uiState.EmailView.Update(tea.KeyMsg{Type: tea.KeyHome})
 		} else if m.uiState.ViewMode == "http" {
 			return m, m.uiState.HTTPView.Update(tea.KeyMsg{Type: tea.KeyHome})
-		} else if m.uiState.FocusedPane == "left" {
-			m.uiState.PacketList.SetCursor(0)
+		} else if m.packetListHasKeyboardFocus() {
+			m.uiState.PacketList.GotoTop()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
 			return m, m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyHome})
@@ -181,11 +186,8 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 			return m, m.uiState.EmailView.Update(tea.KeyMsg{Type: tea.KeyEnd})
 		} else if m.uiState.ViewMode == "http" {
 			return m, m.uiState.HTTPView.Update(tea.KeyMsg{Type: tea.KeyEnd})
-		} else if m.uiState.FocusedPane == "left" {
-			packets := m.uiState.PacketList.GetPackets()
-			if len(packets) > 0 {
-				m.uiState.PacketList.SetCursor(len(packets) - 1)
-			}
+		} else if m.packetListHasKeyboardFocus() {
+			m.uiState.PacketList.GotoBottom()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
 			return m, m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyEnd})
@@ -221,7 +223,7 @@ func (m Model) handlePageUp() (Model, tea.Cmd) {
 			return m, m.uiState.EmailView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
 		} else if m.uiState.ViewMode == "http" {
 			return m, m.uiState.HTTPView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
-		} else if m.uiState.FocusedPane == "left" {
+		} else if m.packetListHasKeyboardFocus() {
 			m.uiState.PacketList.PageUp()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
@@ -258,7 +260,7 @@ func (m Model) handlePageDown() (Model, tea.Cmd) {
 			return m, m.uiState.EmailView.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 		} else if m.uiState.ViewMode == "http" {
 			return m, m.uiState.HTTPView.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-		} else if m.uiState.FocusedPane == "left" {
+		} else if m.packetListHasKeyboardFocus() {
 			m.uiState.PacketList.PageDown()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
@@ -354,4 +356,9 @@ func (m Model) handleFilterManagerKey() (Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// A hidden offline details pane must not swallow packet navigation after resize.
+func (m Model) packetListHasKeyboardFocus() bool {
+	return m.uiState.FocusedPane == "left" || (m.offlineSession != nil && (!m.uiState.ShowDetails || m.uiState.Width < 160))
 }

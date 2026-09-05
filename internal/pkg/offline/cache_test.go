@@ -2,6 +2,7 @@ package offline
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -93,4 +94,40 @@ func TestConcurrentCacheReadersRemainBounded(t *testing.T) {
 	require.Zero(t, s.Resources().InFlightBytes)
 	require.NoError(t, d.Close())
 	require.NoError(t, s.Close())
+}
+
+func TestLargeSummaryPageAndDetailFitTightCache(t *testing.T) {
+	ctx := context.Background()
+	limits := ResourceLimits{Directory: t.TempDir(), DiskBytes: 16 << 20, CacheBytes: (3 << 20) + (128 << 10), MaxRecordBytes: 1 << 20, MaxSources: 1}
+	s, err := NewStorage(limits)
+	require.NoError(t, err)
+	b, err := s.NewBuilder(1, nil)
+	require.NoError(t, err)
+	info := strings.Repeat("x", 512<<10)
+	for i := 0; i < 3; i++ {
+		require.NoError(t, b.Append(ctx, Detail{Packet: types.PacketDisplay{Info: info, Length: i + 1}}))
+	}
+	d, err := b.Finish(ctx)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, d.Close()); require.NoError(t, s.Close()) }()
+	token := Token{Dataset: 1, Query: 1}
+	q, err := AllPackets(ctx, d, token)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, q.Close()) }()
+	for row := uint64(0); row < 3; row++ {
+		page, err := q.Page(ctx, PageRequest{Token: token, Row: row, Limit: 8, MaxBytes: limits.MaxRecordBytes + (4 << 10)})
+		require.NoError(t, err)
+		require.Len(t, page.Rows, int(min(uint64(2), 3-row)))
+		require.Equal(t, PacketID(row), page.Rows[0].ID)
+		pin, err := d.PinDetail(ctx, token, PacketID(row))
+		if err != nil {
+			require.NoError(t, page.Close())
+			t.Fatal(err)
+		}
+		require.Equal(t, info, pin.Value.Packet.Info)
+		u := s.Resources()
+		require.LessOrEqual(t, u.CachedBytes+u.PinnedBytes+u.InFlightBytes+u.PrefetchBytes, limits.CacheBytes)
+		require.NoError(t, pin.Close())
+		require.NoError(t, page.Close())
+	}
 }

@@ -33,6 +33,33 @@ type diskQuery struct {
 	bytes          uint64
 	manifestBytes  uint64
 	closed         bool
+	identity       bool
+}
+
+// AllPackets returns an unfiltered identity projection without scanning summaries
+// or creating a dataset-sized match vector. Wrapped/custom datasets can supply
+// their ordinary Query implementation; production storage uses implicit IDs.
+func AllPackets(ctx context.Context, dataset Dataset, token Token) (Query, error) {
+	d, ok := dataset.(*diskDataset)
+	if !ok {
+		return dataset.Query(ctx, QuerySpec{Token: token})
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if d.closed {
+		return nil, fmt.Errorf("offline dataset closed")
+	}
+	if token.Dataset != d.generation {
+		return nil, fmt.Errorf("offline query dataset generation mismatch")
+	}
+	q := &diskQuery{dataset: d, token: token, count: d.count, stats: d.stats, identity: true}
+	d.queryMu.Lock()
+	d.queries[q] = struct{}{}
+	d.queryMu.Unlock()
+	return q, nil
 }
 
 func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, err error) {
@@ -174,6 +201,9 @@ func (q *diskQuery) validate() error {
 	if q.closed || q.dataset.closed {
 		return fmt.Errorf("offline query closed")
 	}
+	if q.identity {
+		return nil
+	}
 	st, err := q.file.Stat()
 	if err != nil {
 		return fmt.Errorf("stat offline query: %w", err)
@@ -209,6 +239,9 @@ func (q *diskQuery) readID(row uint64) (PacketID, error) {
 	var b [queryEntryBytes]byte
 	if row >= q.count {
 		return 0, fmt.Errorf("query row out of bounds")
+	}
+	if q.identity {
+		return PacketID(row), nil
 	}
 	if _, err := q.file.ReadAt(b[:], int64(queryHeaderBytes+row*queryEntryBytes)); err != nil {
 		return 0, fmt.Errorf("read query ID: %w", err)
@@ -390,7 +423,11 @@ func (q *diskQuery) closeLocked() error {
 		errs = append(errs, q.file.Close())
 	}
 	clean := true
-	for _, path := range []string{q.path, q.manifest, q.manifest + ".tmp"} {
+	paths := []string{q.path, q.manifest}
+	if q.manifest != "" {
+		paths = append(paths, q.manifest+".tmp")
+	}
+	for _, path := range paths {
 		if path == "" {
 			continue
 		}

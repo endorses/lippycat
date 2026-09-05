@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/offline"
+	"github.com/endorses/lippycat/internal/pkg/tui/components/dashboard"
 )
 
 // SetOfflineStatistics installs completed snapshots. Query scans never update
@@ -66,6 +67,8 @@ func (s *StatisticsView) renderOfflineStatistics() string {
 			fmt.Fprintf(&out, "  Bounded cardinality estimates: %s\n", strings.Join(stats.TruncatedCardinality, ", "))
 		}
 	}
-	out.WriteString("\nOverview below: global dataset; events/calls: bounded retained history.\n\n")
-	return out.String()
+	out.WriteString("\nOverview: global dataset; events/calls: bounded retained history.")
+	card := dashboard.NewCard("OFFLINE DATASET", out.String(), s.theme,
+		dashboard.WithIcon("📄"), dashboard.WithWidth(max(1, s.width-2)))
+	return card.Render()
 }

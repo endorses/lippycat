@@ -8,7 +8,8 @@ steps from opening. The capture footer must also keep its reserved toast space.
 
 - [x] Load visible rows above and below selection after page and top/bottom jumps;
       preserve bounded-cache fallback and obsolete-request cancellation.
-- [x] Restore blank toast space; show dataset resource information in Statistics.
+- [x] Restore blank toast space; show dataset resource information in a card at
+      the bottom of Statistics, after the existing dashboard cards.
 - [x] Order normalized offline packets using bounded disk storage before analysis,
       preserving timestamps, source identity and deterministic ties. Account for
       sorting files under the shared session disk budget and clean up on failure.
@@ -43,3 +44,26 @@ already chronological files. Temporary raw bytes plus two 64-byte-per-packet key
 streams share the configured disk budget; the obsolete key stream is removed
 before replay and all sorting files are removed before Ready. The previous phase
 6 throughput measurements describe the earlier strict streaming path.
+
+Statistics placement follow-up (2026-09-05): offline diagnostics use the shared
+dashboard card component and follow the existing content instead of preceding
+it. Regression coverage verifies unchanged existing-card positions and card
+widths at 80, 120 and 200 columns. Component suites pass under `all` and `tui`.
+
+Performance investigation (2026-09-05): one CPU-profiled run of the original
+private capture completed in 67.39 seconds, processing 316,382 logical packets.
+The profile recorded 100.56 CPU-seconds (about 1.49 average cores, including GC).
+`CallTracker.touchCallLocked` accounted for 53.70% cumulative CPU, while background
+GC accounted for 26.42%. On each newly seen call, this function copies all active
+calls, inserts the new call, then looks up every previous call to discover which
+one was evicted. This makes insertion cost scale with retained call count and
+creates allocation pressure. Direct eviction reporting from the registry is the
+first optimization candidate; no speedup is claimed without implementing and
+measuring it. `Builder.Append` accounted for 4.76% cumulative CPU.
+
+Concurrency already exists in replay production, the ordered analysis/storage
+consumer, event dispatch and sink workers. Source preprocessing and sorting are
+sequential stages, and per-packet event flushing synchronizes the analysis path.
+The current runtime is not a demonstrated performance ceiling; reducing repeated
+call-registry scans is better supported by this profile than adding general
+packet workers. This follow-up changes presentation only, not call tracking.

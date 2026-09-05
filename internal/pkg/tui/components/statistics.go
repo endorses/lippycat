@@ -933,7 +933,6 @@ func (s *StatisticsView) renderContent() string {
 	// Render sub-view navigation header
 	result.WriteString(s.renderSubViewHeader())
 	result.WriteString("\n\n")
-	result.WriteString(s.renderOfflineStatistics())
 
 	// Render content based on current sub-view
 	switch s.currentSubView {
@@ -941,6 +940,10 @@ func (s *StatisticsView) renderContent() string {
 		result.WriteString(s.renderOverviewSubView())
 	case SubViewDistributed:
 		result.WriteString(s.renderDistributedSubView())
+	}
+	if diagnostics := s.renderOfflineStatistics(); diagnostics != "" {
+		result.WriteString("\n")
+		result.WriteString(diagnostics)
 	}
 
 	return result.String()

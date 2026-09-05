@@ -3,11 +3,35 @@
 package components
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOfflineDiagnosticsCardFollowsExistingStatistics(t *testing.T) {
+	for _, width := range []int{80, 120, 200} {
+		s := NewStatisticsView()
+		s.SetSize(width, 40)
+		s.SetStatistics(&Statistics{
+			TotalPackets: 10, ProtocolCounts: NewBoundedCounter(1000),
+			SourceCounts: NewBoundedCounter(10000), DestCounts: NewBoundedCounter(10000),
+		})
+		original := s.renderContent()
+		s.SetOfflineStatistics(offline.Statistics{Packets: 10}, offline.Statistics{Packets: 10})
+		content := s.renderContent()
+		require.True(t, strings.HasPrefix(content, original+"\n"), "existing cards must keep their position")
+		card := strings.TrimPrefix(content, original+"\n")
+		require.Contains(t, card, "OFFLINE DATASET")
+		require.Contains(t, card, "╭")
+		require.Contains(t, card, "╰")
+		for _, line := range strings.Split(card, "\n") {
+			require.LessOrEqual(t, lipgloss.Width(line), width)
+		}
+	}
+}
 
 func TestOfflineStatisticsScopesAndEmptyMatches(t *testing.T) {
 	s := NewStatisticsView()

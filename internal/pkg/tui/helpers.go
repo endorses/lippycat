@@ -20,6 +20,11 @@ func (m *Model) getPacketsInOrder() []components.PacketDisplay {
 func (m *Model) updateDetailsPanel() {
 	if m.offlineSession != nil {
 		s := m.offlineBrowse
+		// An unchanged selection already has its detail or loading/error state
+		// managed by the browser. Repeated navigation must preserve that state.
+		if s != nil && s.requested && s.cursor == m.uiState.PacketList.LogicalCursor() {
+			return
+		}
 		if s == nil || s.current == nil || s.current.detail == nil || s.current.cursor != m.uiState.PacketList.LogicalCursor() {
 			m.uiState.DetailsPanel.SetPacket(nil)
 		}

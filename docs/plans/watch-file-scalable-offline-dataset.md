@@ -575,6 +575,18 @@ packages, and watch checks pass under `all` and `tui`; full offline/TUI race
 checks and repeated focused regression race checks pass. No further phase 4
 defects were confirmed. Phases 5–6 remain pending.
 
+Further Phase 4 review (2026-09-05): three sub-agent reviews and root
+verification confirmed one loading-state defect. Repeating End while the
+selected packet's details were pending cleared the loading message without
+starting a replacement request. Unchanged selections now preserve the browser's
+detail state until completion or failure. Root reproduced the failing regression
+before fixing it, and independent review verified the correction. The regression
+also checks that completion installs the selected packet and ends loading.
+
+Verification: offline, all TUI packages, and watch checks pass under `all` and
+`tui`; full TUI race checks pass. No other Phase 4 defects were confirmed.
+Complete packet filtering/export and release acceptance remain phases 5–6.
+
 ### Phase 5 — Complete filtering, statistics, and export
 
 - [ ] Route all offline packet filter apply/remove/clear paths through dataset

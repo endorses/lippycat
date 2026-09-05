@@ -33,3 +33,26 @@ func TestOfflineBrowserSupersededResultReleasesPinBudget(t *testing.T) {
 	second := b.load(offline.Token{Dataset: 1, Query: 1, Request: 2}, 1, 1, 1, limits.CacheBytes/4, false)().(offlineBrowseMsg)
 	require.NoError(t, second.result.err)
 }
+
+func TestOfflineBrowserRepeatedEndPreservesPendingLoading(t *testing.T) {
+	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
+	m.uiState.ViewMode = "packets"
+	m.uiState.FocusedPane = "left"
+	m.uiState.DetailsPanel.SetSize(77, 25)
+	m, _ = m.handleJumpToBottom()
+	load := m.syncOfflineBrowser()
+	require.NotNil(t, load)
+	require.Contains(t, m.uiState.DetailsPanel.View(false), "Loading packet details")
+
+	// Repeat End before Bubble Tea delivers the pending read result. Selection
+	// is unchanged, so no replacement request should be needed.
+	m, _ = m.handleJumpToBottom()
+	require.Nil(t, m.syncOfflineBrowser())
+	require.Contains(t, m.uiState.DetailsPanel.View(false), "Loading packet details")
+
+	result := load().(offlineBrowseMsg)
+	require.NoError(t, result.result.err)
+	m, _ = m.handleOfflineBrowse(result)
+	require.Equal(t, offline.PacketID(m.uiState.PacketList.LogicalCursor()), m.offlineBrowse.current.detail.Value.ID)
+	require.NotContains(t, m.uiState.DetailsPanel.View(false), "Loading packet details")
+}

@@ -232,6 +232,17 @@ Capture, PCAP type, offline, TUI, and watch checks pass under `all` and `tui`;
 focused reader/reassembly race checks and hunter, processor, tap, and CLI builds
 also pass. Independent review found no further Phase 1 defects.
 
+Further Phase 1 review (2026-09-05) reproduced a BPF compatibility regression:
+raw-IP PCAP and PCAPNG sources passed portable file link types to libpcap's
+native-DLT filter compiler, causing valid filters to fail. Filter compilation
+now translates RAW, ATM RFC1483, and LOOP through libpcap's platform mapping,
+while decoding and packet metadata retain the file link type. Regression tests
+verify matching and rejected packets, raw bytes, timestamps, and supported UDP
+decoding in both formats, including raw IPv4 and IPv6. Independent review
+verified the correction and found no additional Phase 1 defects. Capture, PCAP
+type, offline, TUI, and watch checks pass under `all` and `tui`; focused reader
+and reassembly race checks and hunter, processor, tap, and CLI builds also pass.
+
 ### Phase 2 — Implement session storage and complete queries
 
 - [ ] Implement private temporary session directories, versioned framed streams,

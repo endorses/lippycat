@@ -109,12 +109,37 @@ func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter s
 		c.reader, c.linkType = r, r.LinkType()
 	}
 	if filter != "" {
-		c.bpf, err = pcap.NewBPF(c.linkType, offlineMaxPacketBytes, filter)
+		bpfLinkType, e := offlineBPFLinkType(c.linkType)
+		if e != nil {
+			return nil, e
+		}
+		c.bpf, err = pcap.NewBPF(bpfLinkType, offlineMaxPacketBytes, filter)
 		if err != nil {
 			return nil, fmt.Errorf("compile BPF %q: %w", filter, err)
 		}
 	}
 	return c, nil
+}
+
+// Capture files use portable LINKTYPE values, whereas libpcap's BPF compiler
+// takes native DLT values. Keep the file value for decoding and packet metadata.
+func offlineBPFLinkType(linkType layers.LinkType) (layers.LinkType, error) {
+	var name string
+	switch linkType {
+	case layers.LinkTypeRaw:
+		name = "RAW"
+	case layers.LinkTypeATM_RFC1483:
+		name = "ATM_RFC1483"
+	case layers.LinkTypeLoop:
+		name = "LOOP"
+	default:
+		return linkType, nil
+	}
+	native := pcap.DatalinkNameToVal(name)
+	if native < 0 || native > 255 {
+		return 0, fmt.Errorf("unsupported native BPF link type %d for %s", native, name)
+	}
+	return layers.LinkType(native), nil
 }
 
 func validateOfflinePCAPHeader(reader *bufio.Reader) error {

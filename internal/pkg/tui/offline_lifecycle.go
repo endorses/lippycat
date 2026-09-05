@@ -33,6 +33,7 @@ type offlineCleanupMsg struct {
 	quit       bool
 	cancelled  bool
 	err        error
+	reportErr  error
 }
 
 // Shared by Bubble Tea's model copies and the program owner, including when
@@ -122,6 +123,16 @@ func offlineProgressCmd(g offline.DatasetGeneration) tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return offlineProgressMsg{g} })
 }
 func (m Model) openOffline(msg OpenOfflineDatasetMsg) (Model, tea.Cmd) {
+	if !m.offlineLeaving && (m.offlineCleanupFailed || m.offlineCancelledSession != nil) {
+		copy := msg
+		copy.Config.Inputs = append([]string(nil), msg.Config.Inputs...)
+		copy.Config.Analysis.SourceOrdering = append([]string(nil), msg.Config.Analysis.SourceOrdering...)
+		m.offlineQueued = &copy
+		if m.offlineCleanupFailed {
+			return m.retryOfflineCancellation()
+		}
+		return m, nil
+	}
 	if m.offlineLeaving {
 		copy := msg
 		copy.Config.Inputs = append([]string(nil), msg.Config.Inputs...)
@@ -285,8 +296,11 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	}
 	if msg.generation != m.offlineGeneration || !m.offlineOpening || m.offlineProgress.State == offline.Cancelling {
 		cancelled := msg.generation == m.offlineGeneration && m.offlineOpening
+		if cancelled {
+			m.offlineCancelledSession = msg.session
+		}
 		return m, func() tea.Msg {
-			return offlineCleanupMsg{generation: msg.generation, cancelled: cancelled, err: c.dispose(msg.session)}
+			return offlineCleanupMsg{generation: msg.generation, cancelled: cancelled, err: c.dispose(msg.session), reportErr: offlineCancellationError(msg.err)}
 		}
 	}
 	m.offlineOpening = false
@@ -355,6 +369,36 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	})
 	m.updateDetailsPanel()
 	return m, func() tea.Msg { return offlineCleanupMsg{err: c.dispose(old)} }
+}
+
+// Cancellation is expected, but joined analyzer/cleanup failures still need to
+// reach the user even when disposal succeeds on its next attempt.
+func offlineCancellationError(err error) error {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var result error
+		for _, cause := range joined.Unwrap() {
+			result = errors.Join(result, offlineCancellationError(cause))
+		}
+		return result
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		if offlineCancellationError(wrapped.Unwrap()) == nil {
+			return nil
+		}
+	}
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return nil
+	}
+	return err
+}
+
+func (m Model) retryOfflineCancellation() (Model, tea.Cmd) {
+	m.offlineCleanupFailed = false
+	m.offlineCleanupError = ""
+	c, session, generation := m.offlineController, m.offlineCancelledSession, m.offlineGeneration
+	return m, func() tea.Msg {
+		return offlineCleanupMsg{generation: generation, cancelled: true, err: c.dispose(session)}
+	}
 }
 func (m Model) offlineModal() string {
 	p := m.offlineProgress

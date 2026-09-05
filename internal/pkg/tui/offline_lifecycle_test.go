@@ -218,6 +218,27 @@ func TestOfflineLifecycleRestoresSettingsWhileReplacementPending(t *testing.T) {
 	m, _ = m.completeOffline(result)
 	require.Equal(t, open.Config.Inputs, m.uiState.SettingsView.GetPCAPFiles())
 }
+
+func TestOfflineLifecyclePreservesResizedBufferOnFailedReplacement(t *testing.T) {
+	m, open := offlineLifecycleModel(t)
+	m, cmd := m.openOffline(open)
+	m, _ = m.completeOffline(offlineWorker(t, cmd)().(offlineOpenCompleteMsg))
+	// Apply the same settings edit and model message used by the buffer field.
+	m.uiState.SettingsView.InstallCaptureConfiguration(components.RestartCaptureMsg{
+		Mode: components.CaptureModeOffline, PCAPFiles: open.Config.Inputs, BufferSize: 16,
+	})
+	m, _ = m.handleUpdateBufferSizeMsg(components.UpdateBufferSizeMsg{Size: 16})
+	failed := open
+	failed.Config.Inputs = []string{filepath.Join(t.TempDir(), "missing.pcap")}
+	m, cmd = m.openOffline(failed)
+	result := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
+	require.Error(t, result.err)
+	m, _ = m.completeOffline(result)
+	capacity, _, _, _ := m.packetStore.GetBufferInfo()
+	require.Equal(t, 16, capacity)
+	require.Equal(t, 16, m.uiState.SettingsView.GetBufferSize())
+	require.Equal(t, 16, m.offlineInstalled.Config.EventCapacity)
+}
 func TestOfflineLifecycleDuplicateCompletionCannotClosePublishedSession(t *testing.T) {
 	m, open := offlineLifecycleModel(t)
 	m, cmd := m.openOffline(open)

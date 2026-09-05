@@ -4,6 +4,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,21 +104,22 @@ type CaptureTelemetryMsg capture.Telemetry
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
-	offlineController    *offlineController
-	offlineSession       *offlineIndexedSession
-	offlineOpening       bool
-	offlineStarted       time.Time
-	offlineLeaving       bool
-	offlineQuitRequested bool
-	offlineQueued        *OpenOfflineDatasetMsg
-	offlineCleanupFailed bool
-	offlineCleanupError  string
-	offlineRestart       *components.RestartCaptureMsg
-	offlineGeneration    offline.DatasetGeneration
-	offlineProgress      offline.Progress
-	offlinePending       OpenOfflineDatasetMsg
-	offlineInstalled     OpenOfflineDatasetMsg
-	maxOfflineCalls      int
+	offlineController       *offlineController
+	offlineSession          *offlineIndexedSession
+	offlineOpening          bool
+	offlineStarted          time.Time
+	offlineLeaving          bool
+	offlineQuitRequested    bool
+	offlineQueued           *OpenOfflineDatasetMsg
+	offlineCleanupFailed    bool
+	offlineCleanupError     string
+	offlineCancelledSession *offlineIndexedSession
+	offlineRestart          *components.RestartCaptureMsg
+	offlineGeneration       offline.DatasetGeneration
+	offlineProgress         offline.Progress
+	offlinePending          OpenOfflineDatasetMsg
+	offlineInstalled        OpenOfflineDatasetMsg
+	maxOfflineCalls         int
 
 	// Data stores (thread-safe)
 	packetStore   *store.PacketStore
@@ -436,25 +438,37 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case offlineCleanupMsg:
 		if value.generation != 0 && value.generation == m.offlineGeneration && (value.cancelled || value.quit || value.restart != nil) {
-			if !value.cancelled && value.err != nil {
+			if value.err != nil {
 				// Close may already have released dataset files. Keep browsing
 				// blocked and retain ownership until cleanup can be retried.
 				m.offlineCleanupFailed = true
 				m.offlineCleanupError = value.err.Error()
-				return m, nil
+				return m, m.uiState.Toast.Show("Offline cleanup failed: "+errors.Join(value.err, value.reportErr).Error(), components.ToastError, components.ToastDurationLong)
 			}
 			m.offlineOpening = false
 			m.offlineLeaving = false
 			if value.cancelled {
-				if value.err != nil {
-					return m, m.uiState.Toast.Show("Offline cleanup failed: "+value.err.Error(), components.ToastError, components.ToastDurationLong)
+				m.offlineCleanupFailed = false
+				m.offlineCleanupError = ""
+				m.offlineCancelledSession = nil
+				var toast tea.Cmd
+				if value.reportErr != nil {
+					toast = m.uiState.Toast.Show("Offline cleanup failed: "+value.reportErr.Error(), components.ToastError, components.ToastDurationLong)
 				}
-				return m, nil
+				if m.offlineQueued != nil {
+					queued := *m.offlineQueued
+					m.offlineQueued = nil
+					var open tea.Cmd
+					m, open = m.openOffline(queued)
+					return m, tea.Batch(toast, open)
+				}
+				return m, toast
 			}
 			m.offlineCleanupFailed = false
 			m.offlineCleanupError = ""
 			m.offlineRestart = nil
 			m.offlineSession = nil
+			m.offlineCancelledSession = nil
 			c := m.offlineController
 			c.mu.Lock()
 			c.closed = false
@@ -476,8 +490,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.handleRestartCaptureMsg(*value.restart)
 			}
 		}
-		if value.err != nil {
-			return m, m.uiState.Toast.Show("Offline cleanup failed: "+value.err.Error(), components.ToastError, components.ToastDurationLong)
+		if err := errors.Join(value.err, value.reportErr); err != nil {
+			return m, m.uiState.Toast.Show("Offline cleanup failed: "+err.Error(), components.ToastError, components.ToastDurationLong)
 		}
 		return m, nil
 	}
@@ -514,6 +528,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.cancelOffline()
 			case "enter":
 				if m.offlineCleanupFailed {
+					if !m.offlineLeaving {
+						return m.retryOfflineCancellation()
+					}
 					return m.leaveOffline(nil, false)
 				}
 			}

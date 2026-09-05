@@ -43,6 +43,7 @@ type offlineIndexedSession struct {
 	Preview      []types.PacketDisplay
 	previewPins  []*offline.DetailPin
 	Dataset      offline.Dataset
+	builder      *offline.Builder // Retained only until publication or successful cleanup.
 	EventStore   *store.EventStore
 	Calls        []types.CallInfo
 	Tracker      *CallTracker
@@ -61,6 +62,13 @@ func (s *offlineIndexedSession) Close() error {
 	s.Preview = nil
 	if s.TLSDecryptor != nil {
 		s.TLSDecryptor.Stop()
+	}
+	if s.builder != nil {
+		if err := s.builder.Close(); err != nil {
+			closeErr = errors.Join(closeErr, err)
+		} else {
+			s.builder = nil
+		}
 	}
 	if s.Dataset != nil {
 		return errors.Join(closeErr, s.Dataset.Close())
@@ -142,11 +150,16 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	if err != nil {
 		return nil, err
 	}
-	session := &offlineIndexedSession{EventStore: store.NewEventStore(cfg.EventCapacity), Tracker: NewCallTrackerWithCapacity(cfg.MaxCalls)}
+	session := &offlineIndexedSession{builder: builder, EventStore: store.NewEventStore(cfg.EventCapacity), Tracker: NewCallTrackerWithCapacity(cfg.MaxCalls)}
 	defer func() {
 		if err != nil {
-			err = errors.Join(err, builder.Close(), session.Close())
 			result = nil
+			if cleanupErr := session.Close(); cleanupErr != nil {
+				err = errors.Join(err, cleanupErr)
+				// The controller must own failed cleanup so cancellation,
+				// reopen, or shutdown can retry removal and release its budget.
+				result = session
+			}
 		}
 	}()
 	if cfg.TLSKeylog != "" {
@@ -349,6 +362,7 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	if err != nil {
 		return nil, err
 	}
+	session.builder = nil
 	progress.State = offline.Ready
 	publish(true)
 	return session, nil

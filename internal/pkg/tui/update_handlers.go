@@ -198,6 +198,11 @@ func (m Model) handleUpdateBufferSizeMsg(msg components.UpdateBufferSizeMsg) (Mo
 	// ResizeBuffer handles the resize atomically to prevent races with AddPacket
 	m.packetStore.ResizeBuffer(msg.Size)
 	m.eventViewDirty = true
+	if m.offlineSession != nil {
+		// A buffer edit takes effect immediately. Preserve that installed
+		// setting if a later dataset replacement fails or is cancelled.
+		m.offlineInstalled.Config.EventCapacity = msg.Size
+	}
 
 	// Update packet list display
 	if !m.packetStore.HasFilter() {

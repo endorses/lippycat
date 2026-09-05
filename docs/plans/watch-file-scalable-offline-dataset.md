@@ -396,6 +396,23 @@ pass, as do repeated focused cleanup race checks. Capture, events, and detector
 checks and hunter, processor, tap, and CLI builds pass. No further Phase 3
 defects were found; phases 4–6 remain pending.
 
+Additional Phase 3 review (2026-09-05): three independent sub-agent reviews and
+root verification reproduced cleanup and settings defects. Failed removal of an
+unfinished builder discarded its ownership, preventing subsequent cleanup from
+releasing the disk budget. The indexer now returns a cleanup-only session when
+removal fails. Cancellation now surfaces joined worker errors and keeps failed
+candidate cleanup retryable in the modal without closing the previous ready
+dataset. Reopens queue behind that cleanup. A buffer-size edit also updates the
+installed configuration snapshot, preserving the edited setting after failed
+replacement.
+
+Regression tests reproduce directory-permission cleanup failure, cancellation
+error reporting and retry, preservation of the ready dataset, and buffer-setting
+restoration. Offline, all TUI packages, and watch checks pass under `all` and
+`tui`; the full TUI race suite and repeated focused cancellation/lifecycle race
+checks pass. Independent review verified cleanup retries and rapid queued
+reopens. Phases 4–6 remain pending.
+
 ### Phase 4 — Virtual packet browsing and event integration
 
 - [ ] Adapt `components/packetlist.go` to logical row counts and bounded page

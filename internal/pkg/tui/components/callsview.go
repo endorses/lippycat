@@ -674,6 +674,14 @@ func (cv *CallsView) SetSelected(index int) {
 	}
 }
 
+// ClearCorrelatedCalls removes correlation state when a new capture is installed.
+func (cv *CallsView) ClearCorrelatedCalls() {
+	cv.correlatedCallMu.Lock()
+	clear(cv.correlatedCalls)
+	cv.correlatedCallMu.Unlock()
+	cv.lastSelectedCallID = ""
+}
+
 // SetCorrelatedCalls updates the correlated calls data
 func (cv *CallsView) SetCorrelatedCalls(correlatedCallsInfo []types.CorrelatedCallInfo) {
 	cv.correlatedCallMu.Lock()

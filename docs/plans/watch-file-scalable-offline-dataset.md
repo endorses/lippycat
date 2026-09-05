@@ -413,6 +413,22 @@ restoration. Offline, all TUI packages, and watch checks pass under `all` and
 checks pass. Independent review verified cleanup retries and rapid queued
 reopens. Phases 4–6 remain pending.
 
+Further Phase 3 review (2026-09-05): three sub-agent reviews and root
+verification reproduced two presentation-state isolation defects. Successful
+offline publication retained live capture drop counters and bridge health
+telemetry. It now clears both at publication, preserving them during indexing
+and failed/cancelled opens. Remote call correlations also survived publication
+or arrived through late remote messages, attaching foreign call legs to offline
+calls with matching Call-IDs. Publication now clears correlations and their
+detail cache, and indexing/ready sessions reject remote correlation updates.
+
+Regression coverage checks prior-state preservation, stale bridge refresh,
+same-ID call details, and late correlation delivery. Root reproduced the
+failures before fixing them and verified the sub-agent changes; independent
+review also verified the telemetry correction. Offline, all TUI packages, and
+watch checks pass under `all` and `tui`; TUI and component race checks pass.
+No further Phase 3 defects were confirmed. Phases 4–6 remain pending.
+
 ### Phase 4 — Virtual packet browsing and event integration
 
 - [ ] Adapt `components/packetlist.go` to logical row counts and bounded page

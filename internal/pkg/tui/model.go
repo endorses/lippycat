@@ -497,7 +497,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.offlineOpening || m.offlineSession != nil {
 		switch msg.(type) {
-		case PacketMsg, PacketBatchMsg, CallUpdateMsg, EventBatchMsg, CaptureCompleteMsg, CaptureTelemetryMsg:
+		case PacketMsg, PacketBatchMsg, CallUpdateMsg, CorrelatedCallUpdateMsg, EventBatchMsg, CaptureCompleteMsg, CaptureTelemetryMsg:
 			return m, nil
 		case LocalCallPacketResultMsg, DNSPacketResultMsg, HTTPPacketResultMsg, EmailPacketResultMsg:
 			if m.backgroundProcessor != nil {

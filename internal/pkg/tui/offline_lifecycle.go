@@ -334,6 +334,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.eventStore = msg.session.EventStore
 	m.callTracker = msg.session.Tracker
 	m.callStore = store.NewCallStore(m.maxOfflineCalls)
+	m.uiState.CallsView.ClearCorrelatedCalls()
 	m, _ = m.handleCallUpdateMsg(CallUpdateMsg{Calls: msg.session.Calls})
 	if m.backgroundProcessor != nil {
 		m.backgroundProcessor.BeginGeneration()
@@ -359,6 +360,10 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.statistics.MinPacketSize = int(stats.MinPacketSize)
 	m.statistics.MaxPacketSize = int(stats.MaxPacketSize)
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
+	// The dataset bypasses the live bridge. Publish its statistics without
+	// carrying capture loss or bridge health from the previous session.
+	m.uiState.StatisticsView.GetDropStats().Reset()
+	m.uiState.StatisticsView.SetBridgeStats(nil)
 	m.uiState.StatisticsView.SetL3L4ProtocolClassification(false)
 	decryptor := msg.session.TLSDecryptor
 	m.uiState.DetailsPanel.SetDecryptedDataGetter(func(a, b, c, d string) ([]byte, []byte) {

@@ -86,6 +86,12 @@ func compactColumnTypes(kind uint16) ([]byte, []int, error) {
 }
 
 func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, rows [][]byte) (uint64, uint64, error) {
+	return b.writeCompactBlockWithEnds(f, kind, first, rows, nil)
+}
+
+// recorded contains column boundaries from the trusted internal row encoder.
+// All other callers retain the complete parsing and validation path.
+func (b *Builder) writeCompactBlockWithEnds(f *os.File, kind uint16, first PacketID, rows [][]byte, recorded []uint32) (uint64, uint64, error) {
 	max := b.d.storage.limits.MaxRecordBytes
 	if len(rows) == 0 || len(rows) > 4096 {
 		return 0, 0, errors.New("compact invalid block row count")
@@ -104,8 +110,13 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 	}
 	count := len(rows) * len(wires)
 	scratch := max + encodedBytes*3 + uint64(count)*32
-	var ends []uint32
-	if b.d.storage.limits.CacheBytes >= 16<<20 {
+	var ends = recorded
+	if recorded != nil {
+		if kind != 1 || len(recorded) != count {
+			return 0, 0, errors.New("invalid recorded compact columns")
+		}
+		scratch -= uint64(count) * 4
+	} else if b.d.storage.limits.CacheBytes >= 16<<20 {
 		// Retained transposition offsets replace the same allowance in this
 		// block's transient reservation. Small budgets keep the old lifetime.
 		ends, err = b.compactColumnEnds(count)
@@ -114,7 +125,7 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 		}
 		scratch -= uint64(count) * 4
 	}
-	if err = b.d.storage.reserveMemory(context.Background(), scratch); err != nil {
+	if err = b.reserveCompactMemory(context.Background(), scratch); err != nil {
 		return 0, 0, err
 	}
 	defer b.d.storage.releaseMemory(scratch)
@@ -127,6 +138,25 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 		n += uint64(width * len(rows))
 	}
 	for i, row := range rows {
+		if recorded != nil {
+			var start uint32
+			for col, end := range ends[i*len(wires) : (i+1)*len(wires)] {
+				if end < start || uint64(end) > uint64(len(row)) {
+					return 0, 0, errors.New("invalid recorded compact column boundary")
+				}
+				length := int(end - start)
+				if wires[col] == 7 {
+					n += uint64(length)
+				} else if length != widths[col] {
+					return 0, 0, errors.New("compact fixed column width mismatch")
+				}
+				start = end
+			}
+			if uint64(start) != uint64(len(row)) {
+				return 0, 0, errors.New("invalid recorded compact trailing bytes")
+			}
+			continue
+		}
 		parts, splitErr := compactSplitRowInto(kind, row, max, fields[:0])
 		err = splitErr
 		if err != nil {
@@ -188,6 +218,9 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 		}
 		columnStart += widths[col] * len(rows)
 	}
+	if kind == 1 && b.d.compact.queueCompression && b.startCompactCompression(payload, first, len(rows), len(wires)) {
+		return 0, 0, nil
+	}
 	stored, flags, err := b.compressCompact(payload)
 	if err != nil {
 		return 0, 0, err
@@ -207,6 +240,10 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 	off, err := f.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return 0, 0, err
+	}
+	if kind == 1 {
+		b.d.storage.releaseDisk(b.d.compact.transferDisk)
+		b.d.compact.transferDisk = 0
 	}
 	if err = b.write(f, h[:]); err == nil {
 		err = b.write(f, stored)
@@ -390,7 +427,7 @@ func validateCompactBlockPayload(p []byte, wires []byte, widths []int) error {
 func (b *Builder) compactColumnEnds(n int) ([]uint32, error) {
 	c := b.d.compact
 	if cap(c.columnEnds) < n {
-		if err := b.d.storage.reserveMemory(context.Background(), uint64(n)*4); err != nil {
+		if err := b.reserveCompactMemory(context.Background(), uint64(n)*4); err != nil {
 			return nil, err
 		}
 		ends := make([]uint32, n)

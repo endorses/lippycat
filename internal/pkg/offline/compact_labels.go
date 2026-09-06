@@ -24,7 +24,7 @@ func (b *Builder) internCompactRow(ctx context.Context, row *compactRow) error {
 	registry := &c.registries
 	if registry.Labels == nil {
 		cost := uint64(compactRegistryEntries) * (uint64(reflect.TypeOf("").Size()) + uint64(reflect.TypeOf(CaptureContext{}).Size()))
-		if err := b.d.storage.reserveMemory(ctx, cost); err != nil {
+		if err := b.reserveCompactMemory(ctx, cost); err != nil {
 			return err
 		}
 		registry.Labels = make([]string, 0, compactRegistryEntries)
@@ -46,7 +46,7 @@ func (b *Builder) internCompactRow(ctx context.Context, row *compactRow) error {
 			return nil
 		}
 		cost := uint64(len(*value))
-		if err := b.d.storage.reserveMemory(ctx, cost); err != nil {
+		if err := b.reserveCompactMemory(ctx, cost); err != nil {
 			return err
 		}
 		registry.Labels = append(registry.Labels, strings.Clone(*value))

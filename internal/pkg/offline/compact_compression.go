@@ -35,7 +35,7 @@ func (b *Builder) compressCompact(payload []byte) ([]byte, uint16, error) {
 		return payload, 0, nil
 	}
 	if c.compressor == nil {
-		if err := b.d.storage.reserveMemory(context.Background(), compactCompressorMemory); err != nil {
+		if err := b.reserveCompactMemory(context.Background(), compactCompressorMemory); err != nil {
 			return nil, 0, err
 		}
 		w, err := fastflate.NewWriter(io.Discard, fastflate.BestSpeed)
@@ -74,7 +74,7 @@ func (b *Builder) compactBuffer(target *[]byte, n int) ([]byte, error) {
 		if uint64(n) <= b.d.storage.limits.MaxRecordBytes/2 {
 			capacity = n * 2
 		}
-		if err := b.d.storage.reserveMemory(context.Background(), uint64(capacity)); err != nil {
+		if err := b.reserveCompactMemory(context.Background(), uint64(capacity)); err != nil {
 			return nil, err
 		}
 		buffer := make([]byte, capacity)
@@ -85,9 +85,10 @@ func (b *Builder) compactBuffer(target *[]byte, n int) ([]byte, error) {
 }
 
 func (d *diskDataset) releaseCompactBuffers() {
+	d.stopCompactCompression()
 	c := d.compact
-	d.storage.releaseMemory(uint64(cap(c.blockBuffer)+cap(c.compressionBuffer)+cap(c.rowPool)) + uint64(cap(c.columnEnds))*4)
-	c.blockBuffer, c.compressionBuffer, c.columnEnds, c.rowPool = nil, nil, nil, nil
+	d.storage.releaseMemory(uint64(cap(c.blockBuffer)+cap(c.compressionBuffer)+cap(c.rowPool)) + uint64(cap(c.columnEnds)+cap(c.rowEnds))*4)
+	c.blockBuffer, c.compressionBuffer, c.columnEnds, c.rowPool, c.rowEnds = nil, nil, nil, nil, nil
 }
 
 func (d *diskDataset) releaseCompactCompressor() {

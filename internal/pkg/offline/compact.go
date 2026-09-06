@@ -32,6 +32,10 @@ const compactRowSlotBytes = 1024
 const compactIndexBytes = 64
 
 type compactState struct {
+	transferDisk       uint64
+	overlap            *compactCompressionOverlap
+	queueCompression   bool
+	overlapDisabled    bool
 	compressor         *flate.Writer
 	blockBuffer        []byte
 	compressionBuffer  []byte
@@ -42,6 +46,7 @@ type compactState struct {
 	sources            []SourcePosition
 	rows               [][]byte
 	rowPool            []byte
+	rowEnds            []uint32
 	rowMemory, rowDisk uint64
 	sourceMemory       uint64
 	pendingAmend       bool
@@ -254,7 +259,7 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	d := b.d
 	max := d.storage.limits.MaxRecordBytes
 	reservation := max*5 + 4096
-	if err := d.storage.reserveMemory(ctx, reservation); err != nil {
+	if err := b.reserveCompactMemory(ctx, reservation); err != nil {
 		return fmt.Errorf("compact row scratch: %w", err)
 	}
 	defer func() { d.storage.releaseMemory(reservation) }()
@@ -269,6 +274,9 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	overrides := metadataDifference(metadataOf(detail.Packet), metadataOf(decoded))
 	var off, size uint64
 	if overrides.Mask != 0 {
+		if err := b.finishCompactCompression(); err != nil {
+			return err
+		}
 		meta, err := encodeCompactValue(overrides, max)
 		if err != nil {
 			return err
@@ -289,18 +297,20 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 		// Slots correspond to pending row positions. Flush full blocks before
 		// choosing the next slot so no encoded pending row can be overwritten.
 		if len(c.rows) >= compactRows {
-			if err = b.flushCompact(); err != nil {
+			if err = b.queueCompactRows(); err != nil {
 				return err
 			}
 		}
-		if c.rowPool == nil {
-			const poolBytes = compactRows * compactRowSlotBytes
+		if c.rowPool == nil && len(c.rows) == 0 {
+			poolBytes := uint64(compactRows * compactRowSlotBytes)
+			endsBytes := uint64(compactRows * len(compactRowWires) * 4)
 			// Prove room for an ordinary maximum-sized row as well as the
 			// optional slab. Otherwise pooling could consume the last bytes
 			// needed by the existing per-row admission immediately below.
 			headroom := max + 4096
-			if poolErr := d.storage.reserveMemory(ctx, poolBytes+headroom); poolErr == nil {
+			if poolErr := d.storage.reserveMemory(ctx, poolBytes+endsBytes+headroom); poolErr == nil {
 				c.rowPool = make([]byte, poolBytes)
+				c.rowEnds = make([]uint32, compactRows*len(compactRowWires))
 				d.storage.releaseMemory(headroom)
 			} else if ctx.Err() != nil {
 				return ctx.Err()
@@ -313,7 +323,12 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 			slot = c.rowPool[start : start : start+compactRowSlotBytes]
 		}
 	}
-	encoded, err := encodeCompactRowInto(&r, max, 16, slot)
+	var ends []uint32
+	if c.rowEnds != nil {
+		start := len(c.rows) * len(compactRowWires)
+		ends = c.rowEnds[start : start+len(compactRowWires)]
+	}
+	encoded, err := encodeCompactRowWithEnds(&r, max, 16, slot, ends)
 	if err != nil {
 		return err
 	}
@@ -339,7 +354,7 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 		blockBudget = min(blockBudget, d.storage.limits.CacheBytes/16)
 	}
 	if len(c.rows) > 0 && (len(c.rows) >= compactRows || c.rowDisk+admission > blockBudget) {
-		if err = b.flushCompact(); err != nil {
+		if err = b.queueCompactRows(); err != nil {
 			return err
 		}
 		if pooled {
@@ -352,16 +367,28 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	if admission > max {
 		return errors.New("compact first row exceeds block limit")
 	}
-	if err = d.storage.reserveMemory(ctx, cost); err != nil {
+	if err = b.reserveCompactMemory(ctx, cost); err != nil {
 		return err
 	}
 	if err = d.storage.reserveDisk(admission); err != nil {
-		d.storage.releaseMemory(cost)
-		return err
+		if d.compact.overlap != nil && d.compact.overlap.pending {
+			if drainErr := b.finishCompactCompression(); drainErr != nil {
+				d.storage.releaseMemory(cost)
+				return drainErr
+			}
+			err = d.storage.reserveDisk(admission)
+		}
+		if err != nil {
+			d.storage.releaseMemory(cost)
+			return err
+		}
 	}
 	if len(c.rows) == 0 {
 		c.first = id
 		c.pendingAmend = amend
+	}
+	if ends != nil {
+		copy(c.rowEnds[len(c.rows)*len(ends):], ends)
 	}
 	c.rows = append(c.rows, encoded)
 	c.rowMemory += cost
@@ -415,6 +442,21 @@ func (o compactOverrides) apply(p *types.PacketDisplay) {
 }
 
 func (b *Builder) flushCompact() error {
+	if err := b.finishCompactCompression(); err != nil {
+		return err
+	}
+	b.d.stopCompactCompression()
+	return b.flushCompactRows(false)
+}
+
+func (b *Builder) queueCompactRows() error {
+	if err := b.finishCompactCompression(); err != nil {
+		return err
+	}
+	return b.flushCompactRows(true)
+}
+
+func (b *Builder) flushCompactRows(queue bool) error {
 	c := b.d.compact
 	if c == nil || len(c.rows) == 0 {
 		return nil
@@ -425,13 +467,33 @@ func (b *Builder) flushCompact() error {
 	if b.d.storage.limits.CacheBytes < 16<<20 {
 		scratch = uint64(len(c.rows)*compactIndexBytes + 8 + 32 + compactBlockHeaderBytes*4)
 	}
-	if err := b.d.storage.reserveMemory(context.Background(), scratch); err != nil {
+	if err := b.reserveCompactMemory(context.Background(), scratch); err != nil {
 		return err
 	}
 	defer b.d.storage.releaseMemory(scratch)
 	// Already-admitted bytes move from the pending buffer to the file owner.
-	b.d.storage.releaseDisk(c.rowDisk)
-	off, size, err := b.writeCompactBlock(b.d.summaries, 1, c.first, c.rows)
+	var ends []uint32
+	if c.rowEnds != nil {
+		ends = c.rowEnds[:len(c.rows)*len(compactRowWires)]
+	}
+	c.queueCompression = queue && !c.pendingAmend
+	// Keep disk ownership until the block is actually written. Preparation and
+	// asynchronous compression must not expose the reservation to other owners.
+	c.transferDisk = c.rowDisk
+	defer func() { b.d.storage.releaseDisk(c.transferDisk); c.transferDisk = 0 }()
+	off, size, err := b.writeCompactBlockWithEnds(b.d.summaries, 1, c.first, c.rows, ends)
+	c.queueCompression = false
+	if err == nil && c.overlap != nil && c.overlap.pending {
+		c.overlap.disk = c.transferDisk
+		c.transferDisk = 0
+		for i, row := range c.rows {
+			copy(c.overlap.entries[i*compactIndexBytes+16:], row[:16])
+		}
+		b.d.storage.releaseMemory(c.rowMemory)
+		c.rows, c.rowMemory, c.rowDisk = nil, 0, 0
+		c.pendingAmend = false
+		return nil
+	}
 	if err == nil {
 		entries := make([]byte, len(c.rows)*compactIndexBytes)
 		// Borrow this flush's already-admitted scratch. Only IndexChecksum is
@@ -653,6 +715,7 @@ func (d *diskDataset) readCompact(ctx context.Context, id PacketID, kind uint16,
 }
 
 func (d *diskDataset) closeCompact() error {
+	d.stopCompactCompression()
 	c := d.compact
 	d.releaseCompactCompressor()
 	d.releaseCompactBuffers()

@@ -31,7 +31,6 @@ type CallPartyInfo struct {
 // Keeping this boundary narrow also allows the RTP hot path to be tested for
 // accidental active-call collection materialization.
 type callTrackerRegistry interface {
-	ActiveCalls() []callregistry.Call
 	ActiveCallCount() int
 	EndpointAssociationCount() int
 	Call(string) (callregistry.Call, bool)
@@ -42,7 +41,7 @@ type callTrackerRegistry interface {
 	Remove(string, callregistry.EndReason) bool
 	Touch(string, time.Time) bool
 	TryAssociateEndpoint(string, string) bool
-	Upsert(callregistry.Call) bool
+	UpsertWithEviction(callregistry.Call) (bool, string)
 }
 
 // CallTracker tracks RTP-to-CallID mappings for TUI capture modes (live and offline)
@@ -90,15 +89,10 @@ func (t *CallTracker) touchCallLocked(callID string) {
 		t.registry.Touch(callID, time.Now())
 		return
 	}
-	before := t.registry.ActiveCalls()
-	t.registry.Upsert(callregistry.Call{CallID: callID, Created: time.Now(), LastUpdated: time.Now()})
-	if len(before) > 0 {
-		for _, call := range before {
-			if _, ok := t.registry.Call(call.CallID); !ok {
-				delete(t.callPartyInfo, call.CallID)
-				t.lastRTPTouch.Delete(call.CallID)
-			}
-		}
+	_, evictedID := t.registry.UpsertWithEviction(callregistry.Call{CallID: callID, Created: time.Now(), LastUpdated: time.Now()})
+	if evictedID != "" {
+		delete(t.callPartyInfo, evictedID)
+		t.lastRTPTouch.Delete(evictedID)
 	}
 }
 

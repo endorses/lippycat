@@ -153,20 +153,28 @@ func (c *Core) AddObserver(observer LifecycleObserver) {
 // callbacks are synchronous and ordered after the mutation. It returns false
 // after Close or for an empty Call-ID.
 func (c *Core) Upsert(call Call) bool {
+	accepted, _ := c.UpsertWithEviction(call)
+	return accepted
+}
+
+// UpsertWithEviction has the same mutation and observer ordering as Upsert.
+// It reports the call removed by this mutation so callers can discard their
+// associated state without taking and comparing full registry snapshots.
+func (c *Core) UpsertWithEviction(call Call) (accepted bool, evictedID string) {
 	if call.CallID == "" {
-		return false
+		return false, ""
 	}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
-		return false
+		return false, ""
 	}
 	_, existed := c.calls[call.CallID]
 	if existed {
 		c.calls[call.CallID] = call
 		c.touchLocked(call.CallID)
 		c.mu.Unlock()
-		return true
+		return true, ""
 	}
 	var evicted *Call
 	if len(c.calls) >= c.config.MaxCalls {
@@ -174,10 +182,11 @@ func (c *Core) Upsert(call Call) bool {
 		if oldest != nil {
 			removed := c.removeLocked(oldest.Value.(string))
 			evicted = &removed
+			evictedID = removed.CallID
 		}
 		if oldest == nil {
 			c.mu.Unlock()
-			return false
+			return false, ""
 		}
 	}
 	c.calls[call.CallID] = call
@@ -191,7 +200,7 @@ func (c *Core) Upsert(call Call) bool {
 	for _, observer := range observers {
 		observer.OnCallStarted(call)
 	}
-	return true
+	return true, evictedID
 }
 
 func (c *Core) evictionCandidateLocked() *list.Element {
@@ -201,6 +210,11 @@ func (c *Core) evictionCandidateLocked() *list.Element {
 		id := elem.Value.(string)
 		if c.pins[id] > 0 {
 			continue
+		}
+		// Without custom priorities every candidate has equal rank; the first
+		// unpinned entry from the LRU end is already the final answer.
+		if c.config.EvictionPriority == nil {
+			return elem
 		}
 		priority := 0
 		if c.config.EvictionPriority != nil {

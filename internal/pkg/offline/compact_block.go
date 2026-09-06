@@ -89,7 +89,7 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 	return b.writeCompactBlockWithEnds(f, kind, first, rows, nil)
 }
 
-// recorded contains column boundaries from the trusted internal row encoder.
+// recorded contains column boundaries from trusted internal typed encoders.
 // All other callers retain the complete parsing and validation path.
 func (b *Builder) writeCompactBlockWithEnds(f *os.File, kind uint16, first PacketID, rows [][]byte, recorded []uint32) (uint64, uint64, error) {
 	max := b.d.storage.limits.MaxRecordBytes
@@ -112,7 +112,7 @@ func (b *Builder) writeCompactBlockWithEnds(f *os.File, kind uint16, first Packe
 	scratch := max + encodedBytes*3 + uint64(count)*32
 	var ends = recorded
 	if recorded != nil {
-		if kind != 1 || len(recorded) != count {
+		if (kind != 1 && kind != 4) || len(recorded) != count {
 			return 0, 0, errors.New("invalid recorded compact columns")
 		}
 		scratch -= uint64(count) * 4

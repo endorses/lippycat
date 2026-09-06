@@ -1,0 +1,414 @@
+{
+  "baseline_revision": "099ba6ca2eeda85a4b85c8ce5704a041b93a380d",
+  "capture_bytes": 158436032,
+  "capture_sha256": "ff79696784871fe6b8f6bd2b44fbb9758c95f65d3a78eebbbc502ef5543486a3",
+  "host": "Intel Core i9-13900HX, linux/amd64",
+  "go": "go version go1.26.3-X:nodwarf5 linux/amd64",
+  "baseline_profile": {
+    "completed_ready_seconds": 55.06,
+    "allocated_bytes": 61108599304,
+    "total_cpu_seconds": 87.9,
+    "touch_call_cpu_seconds": 48.26,
+    "active_calls_cpu_seconds": 23.46,
+    "registry_call_cpu_seconds": 19.49,
+    "eviction_selection_cpu_seconds": 4.47
+  },
+  "initial_unprofiled_baseline": [
+    {
+      "name": "final",
+      "run": 0,
+      "wall": 56.748791188932955,
+      "returncode": 0,
+      "max_rss_kib": 188972,
+      "metrics": {
+        "ns/op": 56686349680.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 56.69,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 61110165624.0,
+        "allocs/op": 133404050.0
+      }
+    }
+  ],
+  "baseline_caveat": "Initial unprofiled screening overlapped a brief agent test/build; final comparison recorded separately after verification.",
+  "metadata_comparison": [
+    {
+      "name": "gtest6",
+      "run": 0,
+      "wall": 9.324873251840472,
+      "returncode": 0,
+      "max_rss_kib": 199944,
+      "metrics": {
+        "ns/op": 9262951058.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 9.263,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 7068757256.0,
+        "allocs/op": 133280483.0
+      }
+    },
+    {
+      "name": "gtest6-meta",
+      "run": 0,
+      "wall": 8.092621441930532,
+      "returncode": 0,
+      "max_rss_kib": 201992,
+      "metrics": {
+        "ns/op": 8031296939.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 8.031,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 5961569456.0,
+        "allocs/op": 105257623.0
+      }
+    },
+    {
+      "name": "gtest6-meta",
+      "run": 1,
+      "wall": 7.588316577021033,
+      "returncode": 0,
+      "max_rss_kib": 200520,
+      "metrics": {
+        "ns/op": 7527746861.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 7.528,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 5961811808.0,
+        "allocs/op": 105257687.0
+      }
+    },
+    {
+      "name": "gtest6",
+      "run": 1,
+      "wall": 9.403117091860622,
+      "returncode": 0,
+      "max_rss_kib": 198396,
+      "metrics": {
+        "ns/op": 9335327692.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 9.335,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 7069012856.0,
+        "allocs/op": 133280774.0
+      }
+    },
+    {
+      "name": "gtest6",
+      "run": 2,
+      "wall": 9.452864066697657,
+      "returncode": 0,
+      "max_rss_kib": 202264,
+      "metrics": {
+        "ns/op": 9377266738.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 9.377,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 7068786064.0,
+        "allocs/op": 133280670.0
+      }
+    },
+    {
+      "name": "gtest6-meta",
+      "run": 2,
+      "wall": 7.448076069355011,
+      "returncode": 0,
+      "max_rss_kib": 205196,
+      "metrics": {
+        "ns/op": 7389293894.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 7.389,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 5961567768.0,
+        "allocs/op": 105257750.0
+      }
+    }
+  ],
+  "final_comparison": [
+    {
+      "name": "gtest6-meta",
+      "run": 0,
+      "wall": 7.796965622808784,
+      "returncode": 0,
+      "max_rss_kib": 195104,
+      "metrics": {
+        "ns/op": 7734089840.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 7.734,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 5962362848.0,
+        "allocs/op": 105257751.0
+      }
+    },
+    {
+      "name": "final",
+      "run": 0,
+      "wall": 55.09866449283436,
+      "returncode": 0,
+      "max_rss_kib": 190704,
+      "metrics": {
+        "ns/op": 55038432516.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 55.04,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 61109098696.0,
+        "allocs/op": 133404019.0
+      }
+    },
+    {
+      "name": "gtest6-meta",
+      "run": 0,
+      "wall": 7.571805343963206,
+      "returncode": 0,
+      "max_rss_kib": 204740,
+      "metrics": {
+        "ns/op": 7492658089.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 7.493,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 5961476320.0,
+        "allocs/op": 105257603.0
+      }
+    },
+    {
+      "name": "gtest6-meta",
+      "run": 0,
+      "wall": 7.681730502285063,
+      "returncode": 0,
+      "max_rss_kib": 201520,
+      "metrics": {
+        "ns/op": 7616290380.0,
+        "accounted-disk-bytes/op": 314252031.0,
+        "accounted-memory-bytes/op": 15789.0,
+        "complete-bytes/op": 314252031.0,
+        "details-bytes/op": 242176549.0,
+        "events/op": 2500.0,
+        "manifest-bytes/op": 33814.0,
+        "offsets-bytes/op": 20248480.0,
+        "packets/op": 316382.0,
+        "ready-seconds/op": 7.616,
+        "summaries-bytes/op": 49447825.0,
+        "B/op": 5961478568.0,
+        "allocs/op": 105257533.0
+      }
+    }
+  ],
+  "final_method": "Three candidate fresh processes interspersed with one clean original process; untimed input warming; no competing agent tests/builds. Baseline is one sample, candidate summary is median.",
+  "source_sha256": {
+    "internal/pkg/callregistry/call_registry.go": "eb750d98ec0e3de03978b4e13bf86a40d7f6dc0ff1ae596366b1d304cef3044f",
+    "internal/pkg/callregistry/upsert_eviction_test.go": "fc9b90316e6a062088cc33db5d9ba50f734a984bb7bf640fb79fb727d8d36939",
+    "internal/pkg/callregistry/eviction_reference_review_test.go": "3671f6b16bbd5ebf40c2496398a85fae045a98ddfbb4f72842993a8afdc1cb35",
+    "internal/pkg/tui/call_tracker.go": "57f2d2b708ba3c3aa34902ad7263802cee6677869a906021ade957f423a42df2",
+    "internal/pkg/tui/call_tracker_eviction_test.go": "079c68338e4183cd8179de179eef95deb46a5fd354eb4d22305465d5327a4f50",
+    "internal/pkg/tui/call_tracker_probe_review_test.go": "5d947f4c3fb9315e0369dbe309e539986e22573937a43e8626cbde5a50c9f107",
+    "internal/pkg/offline/compact.go": "cd61e2e157c3a260d6a37c67450614d43dc9b56c1fbedaddd7cf3c6d52b5783a",
+    "internal/pkg/offline/compact_block.go": "3516c225c7d0c2a547cb9c048e13164a1a81cd936f76398e909759366652d951",
+    "internal/pkg/offline/compact_metadata_ends_test.go": "726e551b71c1a1fa0169adf66f2f0aa4d860f7f48f320305ac68a99c4aed55ca"
+  },
+  "baseline_binary_sha256": "f08ace39f3490ad5a66dda4e95ef9b83ccff52df962239b5ea15c4382483b796",
+  "candidate_binary_sha256": "f7ec22535320e9d8ddd1154d841a2d9515fa53eb0d03bbf85318f42aa06fba89",
+  "mixed_traffic_regression": [
+    {
+      "name": "final",
+      "run": 0,
+      "wall": 3.1423868546262383,
+      "returncode": 0,
+      "max_rss_kib": 118780,
+      "metrics": {
+        "ns/op": 3076333463.0,
+        "accounted-disk-bytes/op": 89246448.0,
+        "accounted-memory-bytes/op": 15844.0,
+        "complete-bytes/op": 89246448.0,
+        "details-bytes/op": 440149.0,
+        "events/op": 44873.0,
+        "manifest-bytes/op": 9580.0,
+        "offsets-bytes/op": 37119392.0,
+        "packets/op": 579990.0,
+        "ready-seconds/op": 3.076,
+        "summaries-bytes/op": 51675813.0,
+        "B/op": 1559156568.0,
+        "allocs/op": 17794559.0
+      }
+    },
+    {
+      "name": "gtest6-meta",
+      "run": 0,
+      "wall": 3.198733846191317,
+      "returncode": 0,
+      "max_rss_kib": 120660,
+      "metrics": {
+        "ns/op": 3131555752.0,
+        "accounted-disk-bytes/op": 89246448.0,
+        "accounted-memory-bytes/op": 15844.0,
+        "complete-bytes/op": 89246448.0,
+        "details-bytes/op": 440149.0,
+        "events/op": 44873.0,
+        "manifest-bytes/op": 9580.0,
+        "offsets-bytes/op": 37119392.0,
+        "packets/op": 579990.0,
+        "ready-seconds/op": 3.132,
+        "summaries-bytes/op": 51675813.0,
+        "B/op": 1557496448.0,
+        "allocs/op": 17777093.0
+      }
+    },
+    {
+      "name": "gtest6-meta",
+      "run": 1,
+      "wall": 3.239699747879058,
+      "returncode": 0,
+      "max_rss_kib": 121916,
+      "metrics": {
+        "ns/op": 3169270949.0,
+        "accounted-disk-bytes/op": 89246448.0,
+        "accounted-memory-bytes/op": 15844.0,
+        "complete-bytes/op": 89246448.0,
+        "details-bytes/op": 440149.0,
+        "events/op": 44873.0,
+        "manifest-bytes/op": 9580.0,
+        "offsets-bytes/op": 37119392.0,
+        "packets/op": 579990.0,
+        "ready-seconds/op": 3.169,
+        "summaries-bytes/op": 51675813.0,
+        "B/op": 1558310752.0,
+        "allocs/op": 17777266.0
+      }
+    },
+    {
+      "name": "final",
+      "run": 1,
+      "wall": 3.3490430219098926,
+      "returncode": 0,
+      "max_rss_kib": 124652,
+      "metrics": {
+        "ns/op": 3279314327.0,
+        "accounted-disk-bytes/op": 89246448.0,
+        "accounted-memory-bytes/op": 15844.0,
+        "complete-bytes/op": 89246448.0,
+        "details-bytes/op": 440149.0,
+        "events/op": 44873.0,
+        "manifest-bytes/op": 9580.0,
+        "offsets-bytes/op": 37119392.0,
+        "packets/op": 579990.0,
+        "ready-seconds/op": 3.279,
+        "summaries-bytes/op": 51675813.0,
+        "B/op": 1559484392.0,
+        "allocs/op": 17794693.0
+      }
+    },
+    {
+      "name": "final",
+      "run": 2,
+      "wall": 3.3243934172205627,
+      "returncode": 0,
+      "max_rss_kib": 121036,
+      "metrics": {
+        "ns/op": 3237828464.0,
+        "accounted-disk-bytes/op": 89246448.0,
+        "accounted-memory-bytes/op": 15844.0,
+        "complete-bytes/op": 89246448.0,
+        "details-bytes/op": 440149.0,
+        "events/op": 44873.0,
+        "manifest-bytes/op": 9580.0,
+        "offsets-bytes/op": 37119392.0,
+        "packets/op": 579990.0,
+        "ready-seconds/op": 3.238,
+        "summaries-bytes/op": 51675813.0,
+        "B/op": 1559143288.0,
+        "allocs/op": 17794643.0
+      }
+    },
+    {
+      "name": "gtest6-meta",
+      "run": 2,
+      "wall": 3.234723825007677,
+      "returncode": 0,
+      "max_rss_kib": 122988,
+      "metrics": {
+        "ns/op": 3168904838.0,
+        "accounted-disk-bytes/op": 89246448.0,
+        "accounted-memory-bytes/op": 15844.0,
+        "complete-bytes/op": 89246448.0,
+        "details-bytes/op": 440149.0,
+        "events/op": 44873.0,
+        "manifest-bytes/op": 9580.0,
+        "offsets-bytes/op": 37119392.0,
+        "packets/op": 579990.0,
+        "ready-seconds/op": 3.169,
+        "summaries-bytes/op": 51675813.0,
+        "B/op": 1558720568.0,
+        "allocs/op": 17777311.0
+      }
+    }
+  ],
+  "preserved_working_tree_patch_sha256": "d022938ebc2b5104f48a2caaf7cda76444e2fe80fbff89b2e95e2bb05ea01170"
+}

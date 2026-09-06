@@ -277,11 +277,7 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 		if err := b.finishCompactCompression(); err != nil {
 			return err
 		}
-		meta, err := encodeCompactValue(overrides, max)
-		if err != nil {
-			return err
-		}
-		off, size, err = b.writeCompactBlock(d.details, 4, id, [][]byte{meta})
+		off, size, err = b.writeCompactMetadata(id, overrides)
 		if err != nil {
 			return err
 		}
@@ -808,11 +804,7 @@ func (b *Builder) AmendVoIP(ctx context.Context, id PacketID, protocol, info str
 	row.Projection = projectionOf(p)
 	overrides.Mask |= 1
 	overrides.Metadata.VoIP = metadata
-	meta, err := encodeCompactValue(overrides, max)
-	if err != nil {
-		return err
-	}
-	off, size, err := b.writeCompactBlock(b.d.details, 4, id, [][]byte{meta})
+	off, size, err := b.writeCompactMetadata(id, overrides)
 	if err != nil {
 		return err
 	}
@@ -973,4 +965,20 @@ func (d *diskDataset) compactIndexChecksum(refs []byte, id PacketID) ([32]byte, 
 		}
 	}
 	return sha256.Sum256(input[:]), nil
+}
+
+// writeCompactMetadata receives typed overrides and validates their complete
+// graph through the encoder. The frozen schema has exactly two fields: a byte
+// mask followed by metadata. Retain those known boundaries instead of decoding
+// and reencoding the admitted graph merely to rediscover the same two fields.
+func (b *Builder) writeCompactMetadata(id PacketID, overrides compactOverrides) (uint64, uint64, error) {
+	encoded, err := encodeCompactValue(overrides, b.d.storage.limits.MaxRecordBytes)
+	if err != nil {
+		return 0, 0, err
+	}
+	if uint64(len(encoded)) > math.MaxUint32 {
+		return b.writeCompactBlock(b.d.details, 4, id, [][]byte{encoded})
+	}
+	ends := [2]uint32{1, uint32(len(encoded))}
+	return b.writeCompactBlockWithEnds(b.d.details, 4, id, [][]byte{encoded}, ends[:])
 }

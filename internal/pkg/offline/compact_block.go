@@ -17,7 +17,7 @@ import (
 // and a bounded block-local arena. Compound values and exact text use references;
 // the reference's block word is zero because arenas never escape their block.
 // This keeps random row lookup independent of a dataset-sized arena index.
-func compactColumnTypes(kind uint16) ([]byte, []int, error) {
+func buildCompactColumnTypes(kind uint16) ([]byte, []int, error) {
 	var sample any
 	if kind == 1 {
 		sample = compactRow{}
@@ -63,27 +63,28 @@ func compactColumnTypes(kind uint16) ([]byte, []int, error) {
 	}
 	return types, widths, nil
 }
-func compactSplitRow(kind uint16, data []byte, max uint64) ([][]byte, error) {
-	if kind == 1 {
-		if len(data) < 16 {
-			return nil, io.ErrUnexpectedEOF
-		}
-		var row compactRow
-		if err := decodeCompactValue(data[16:], &row, max); err != nil {
-			return nil, err
-		}
-		parts, err := encodeCompactFields(row, max)
-		if err != nil {
-			return nil, err
-		}
-		return append([][]byte{data[:8], data[8:16]}, parts...), nil
+
+func mustCompactColumnTypes(kind uint16) ([]byte, []int) {
+	wires, widths, err := buildCompactColumnTypes(kind)
+	if err != nil {
+		panic(err)
 	}
-	var overrides compactOverrides
-	if err := decodeCompactValue(data, &overrides, max); err != nil {
-		return nil, err
-	}
-	return encodeCompactFields(overrides, max)
+	return wires, widths
 }
+
+var compactRowWires, compactRowWidths = mustCompactColumnTypes(1)
+var compactMetadataWires, compactMetadataWidths = mustCompactColumnTypes(4)
+
+func compactColumnTypes(kind uint16) ([]byte, []int, error) {
+	if kind == 1 {
+		return compactRowWires, compactRowWidths, nil
+	}
+	if kind == 4 {
+		return compactMetadataWires, compactMetadataWidths, nil
+	}
+	return nil, nil, errors.New("unknown compact block kind")
+}
+
 func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, rows [][]byte) (uint64, uint64, error) {
 	max := b.d.storage.limits.MaxRecordBytes
 	if len(rows) == 0 || len(rows) > 4096 {
@@ -106,20 +107,28 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 		return 0, 0, err
 	}
 	defer b.d.storage.releaseMemory(scratch)
-	parts := make([][][]byte, len(rows))
+	ends := make([]uint32, len(rows)*len(wires))
+	var fields [64][]byte
 	n := uint64(len(wires)) * 24
 	for _, width := range widths {
 		n += uint64(width * len(rows))
 	}
 	for i, row := range rows {
-		parts[i], err = compactSplitRow(kind, row, max)
+		parts, splitErr := compactSplitRowInto(kind, row, max, fields[:0])
+		err = splitErr
 		if err != nil {
 			return 0, 0, err
 		}
-		if len(parts[i]) != len(wires) {
+		if len(parts) != len(wires) {
 			return 0, 0, errors.New("compact column count mismatch")
 		}
-		for col, p := range parts[i] {
+		var end uint64
+		for col, p := range parts {
+			end += uint64(len(p))
+			if end > math.MaxUint32 {
+				return 0, 0, errors.New("compact field offset overflow")
+			}
+			ends[i*len(wires)+col] = uint32(end)
 			if wires[col] == 7 {
 				n += uint64(len(p))
 			} else if len(p) != widths[col] {
@@ -130,7 +139,11 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 	if n > max || n > math.MaxUint32 {
 		return 0, 0, errors.New("compact block exceeds allocation limit")
 	}
-	payload := make([]byte, n)
+	payload, err := b.compactBuffer(&b.d.compact.blockBuffer, int(n))
+	if err != nil {
+		return 0, 0, err
+	}
+	clear(payload) // Reserved descriptor/reference words must stay zero on reuse.
 	columnStart := len(wires) * 24
 	arena := columnStart
 	for _, width := range widths {
@@ -145,7 +158,11 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 		binary.LittleEndian.PutUint64(desc[16:], uint64(widths[col]*len(rows)))
 		for row := range rows {
 			target := payload[columnStart+row*widths[col] : columnStart+(row+1)*widths[col]]
-			p := parts[row][col]
+			start := uint32(0)
+			if col > 0 {
+				start = ends[row*len(wires)+col-1]
+			}
+			p := rows[row][start:ends[row*len(wires)+col]]
 			if wire == 7 {
 				binary.LittleEndian.PutUint32(target[4:], uint32(arena))
 				binary.LittleEndian.PutUint32(target[8:], uint32(len(p)))
@@ -158,6 +175,10 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 		}
 		columnStart += widths[col] * len(rows)
 	}
+	stored, flags, err := b.compressCompact(payload)
+	if err != nil {
+		return 0, 0, err
+	}
 	var h [72]byte
 	copy(h[:], "LCB2")
 	binary.LittleEndian.PutUint16(h[4:], kind)
@@ -165,6 +186,7 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 	binary.LittleEndian.PutUint64(h[8:], uint64(first))
 	binary.LittleEndian.PutUint32(h[16:], uint32(len(rows)))
 	binary.LittleEndian.PutUint16(h[20:], uint16(len(wires)))
+	binary.LittleEndian.PutUint16(h[22:], flags)
 	binary.LittleEndian.PutUint64(h[24:], n)
 	binary.LittleEndian.PutUint64(h[32:], 1)
 	digest := sha256.Sum256(payload)
@@ -174,9 +196,9 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 		return 0, 0, err
 	}
 	if err = b.write(f, h[:]); err == nil {
-		err = b.write(f, payload)
+		err = b.write(f, stored)
 	}
-	return uint64(off), n + 72, err
+	return uint64(off), uint64(len(stored)) + 72, err
 }
 
 func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size uint64, kind uint16, id PacketID) ([]byte, uint64, error) {
@@ -191,7 +213,7 @@ func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size ui
 	if off+size > uint64(st.Size()) {
 		return nil, 0, io.ErrUnexpectedEOF
 	}
-	held := size + max*2
+	held := size + max*3 + compactInflaterMemory
 	if err = d.storage.reserveMemory(ctx, held); err != nil {
 		return nil, 0, err
 	}
@@ -204,8 +226,11 @@ func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size ui
 		if _, err = f.ReadAt(p, int64(off)); err != nil {
 			return fail(err)
 		}
-	} else if uint64(len(p)) != size {
-		return fail(errors.New("compact cached block reference mismatch"))
+	} else {
+		if len(p) < 80 || binary.LittleEndian.Uint64(p[:8]) != size {
+			return fail(errors.New("compact cached block reference mismatch"))
+		}
+		p = p[8:]
 	}
 	h := p[:72]
 	first := binary.LittleEndian.Uint64(h[8:])
@@ -216,8 +241,17 @@ func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size ui
 	if err != nil {
 		return fail(err)
 	}
-	if string(h[:4]) != "LCB2" || binary.LittleEndian.Uint16(h[4:]) != kind || binary.LittleEndian.Uint16(h[6:]) != 72 || binary.LittleEndian.Uint16(h[22:]) != 0 || binary.LittleEndian.Uint64(h[32:]) != 1 || count == 0 || count > 4096 || first > math.MaxUint64-count || uint64(id) < first || uint64(id)-first >= count || n != size-72 || columns != len(wires) || uint64(columns)*24 > n {
+	if string(h[:4]) != "LCB2" || binary.LittleEndian.Uint16(h[4:]) != kind || binary.LittleEndian.Uint16(h[6:]) != 72 || binary.LittleEndian.Uint16(h[22:]) > 1 || binary.LittleEndian.Uint64(h[32:]) != 1 || count == 0 || count > 4096 || first > math.MaxUint64-count || uint64(id) < first || uint64(id)-first >= count || n > max || (binary.LittleEndian.Uint16(h[22:]) == 0 && n != size-72) || columns != len(wires) || uint64(columns)*24 > n {
 		return fail(errors.New("compact invalid block header"))
+	}
+	if !cacheHit && binary.LittleEndian.Uint16(h[22:]) == 1 {
+		p, err = inflateCompact(p, n)
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if uint64(len(p)) != n+72 {
+		return fail(errors.New("compact cached block reference mismatch"))
 	}
 	payload := p[72:]
 	if cacheHit {
@@ -305,6 +339,11 @@ func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size ui
 	if err = ctx.Err(); err != nil {
 		return fail(err)
 	}
-	d.storage.cacheFrame(key, p)
+	// The cached payload is expanded, but references still carry physical sizes.
+	// Bind both so a cache hit cannot accept a malformed compressed reference.
+	cached := make([]byte, len(p)+8)
+	binary.LittleEndian.PutUint64(cached, size)
+	copy(cached[8:], p)
+	d.storage.cacheFrame(key, cached)
 	return result, held, nil
 }

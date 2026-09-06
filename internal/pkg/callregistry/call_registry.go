@@ -4,6 +4,7 @@ package callregistry
 
 import (
 	"container/list"
+	"sort"
 	"sync"
 	"time"
 )
@@ -404,6 +405,8 @@ func (c *Core) MostRecentCallIDForEndpoint(endpoint string) (string, bool) {
 	return callID, ok
 }
 
+// EndpointsForCall returns an owned snapshot in lexical order so presentation
+// and offline comparisons do not depend on map iteration order.
 func (c *Core) EndpointsForCall(callID string) []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -412,6 +415,7 @@ func (c *Core) EndpointsForCall(callID string) []string {
 	for endpoint := range endpoints {
 		result = append(result, endpoint)
 	}
+	sort.Strings(result)
 	return result
 }
 

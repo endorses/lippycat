@@ -2,6 +2,7 @@ package offline
 
 import (
 	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -24,11 +25,15 @@ import (
 type StatelessDecoder func(context.Context, []byte, Summary) (types.PacketDisplay, error)
 
 const compactHeaderBytes = 32
+const compactSchemaMinor = 1
 const compactBlockHeaderBytes = 72
 const compactRows = 128
 const compactIndexBytes = 64
 
 type compactState struct {
+	compressor         *flate.Writer
+	blockBuffer        []byte
+	compressionBuffer  []byte
 	registries         compactRegistries
 	registry           *BackingRegistry
 	decode             StatelessDecoder
@@ -139,6 +144,7 @@ func (s *Storage) NewCompactBuilder(g DatasetGeneration, sources []SourcePositio
 		var h [compactHeaderBytes]byte
 		copy(h[:], "LCOV2DAT")
 		binary.LittleEndian.PutUint16(h[8:], 2)
+		binary.LittleEndian.PutUint16(h[10:], compactSchemaMinor)
 		binary.LittleEndian.PutUint16(h[12:], uint16(kind+1))
 		binary.LittleEndian.PutUint64(h[16:], uint64(g))
 		if err = f.Truncate(0); err == nil {
@@ -258,12 +264,12 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 		return fmt.Errorf("compact stateless baseline: %w", err)
 	}
 	overrides := metadataDifference(metadataOf(detail.Packet), metadataOf(decoded))
-	meta, err := encodeCompactValue(overrides, max)
-	if err != nil {
-		return err
-	}
 	var off, size uint64
 	if overrides.Mask != 0 {
+		meta, err := encodeCompactValue(overrides, max)
+		if err != nil {
+			return err
+		}
 		off, size, err = b.writeCompactBlock(d.details, 4, id, [][]byte{meta})
 		if err != nil {
 			return err
@@ -274,17 +280,15 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	if err = b.internCompactRow(ctx, &r); err != nil {
 		return err
 	}
-	row, err := encodeCompactValue(r, max)
+	encoded, err := encodeCompactRow(&r, max, 16)
 	if err != nil {
 		return err
 	}
 	c := d.compact
 	// Each pending row includes its sparse metadata reference. Both owned heap
 	// capacity and eventual on-disk bytes are admitted before buffering.
-	encoded := make([]byte, 16+len(row))
 	binary.LittleEndian.PutUint64(encoded, off)
 	binary.LittleEndian.PutUint64(encoded[8:], size)
-	copy(encoded[16:], row)
 	cost := uint64(cap(encoded)) + 32
 	admission := uint64(len(encoded)) + uint64(len(compactFieldNames[reflect.TypeOf(compactRow{})])+2)*40 + compactBlockHeaderBytes + compactIndexBytes
 	if len(c.rows) > 0 && (len(c.rows) >= compactRows || c.rowDisk+admission > max) {
@@ -399,7 +403,7 @@ func (d *diskDataset) validateCompactStreams() error {
 		if _, err := f.ReadAt(h[:], 0); err != nil {
 			return err
 		}
-		if string(h[:8]) != "LCOV2DAT" || binary.LittleEndian.Uint16(h[8:]) != 2 || binary.LittleEndian.Uint16(h[10:]) != 0 || binary.LittleEndian.Uint16(h[12:]) != uint16(i+1) || binary.LittleEndian.Uint16(h[14:]) != 0 || binary.LittleEndian.Uint64(h[16:]) != uint64(d.generation) || binary.LittleEndian.Uint64(h[24:]) != 0 {
+		if string(h[:8]) != "LCOV2DAT" || binary.LittleEndian.Uint16(h[8:]) != 2 || binary.LittleEndian.Uint16(h[10:]) != compactSchemaMinor || binary.LittleEndian.Uint16(h[12:]) != uint16(i+1) || binary.LittleEndian.Uint16(h[14:]) != 0 || binary.LittleEndian.Uint64(h[16:]) != uint64(d.generation) || binary.LittleEndian.Uint64(h[24:]) != 0 {
 			return errors.New("invalid compact stream header/version")
 		}
 	}
@@ -606,6 +610,8 @@ func (d *diskDataset) readCompactRaw(ctx context.Context, id PacketID) (Detail, 
 
 func (d *diskDataset) closeCompact() error {
 	c := d.compact
+	d.releaseCompactCompressor()
+	d.releaseCompactBuffers()
 	d.releaseCompactRegistries()
 	if c.sourceMemory != 0 {
 		d.storage.releaseMemory(c.sourceMemory)
@@ -850,8 +856,11 @@ func (d *diskDataset) compactIndexChecksum(refs []byte, id PacketID) ([32]byte, 
 		if i == 1 {
 			kind = 20
 		}
-		if cached := d.storage.cached(cacheKey{dataset: d, id: PacketID(off), kind: kind}); len(cached) >= 72 {
-			copy(target, cached[:72])
+		if cached := d.storage.cached(cacheKey{dataset: d, id: PacketID(off), kind: kind}); len(cached) >= 80 {
+			if binary.LittleEndian.Uint64(cached[:8]) != size {
+				return [32]byte{}, errors.New("compact cached block reference mismatch")
+			}
+			copy(target, cached[8:80])
 		} else if _, err := f.ReadAt(target, int64(off)); err != nil {
 			return [32]byte{}, err
 		}

@@ -46,6 +46,23 @@ func TestCoreMultiValuedAssociationsAndCleanup(t *testing.T) {
 	require.Equal(t, []string{"two:completed"}, observer.ends)
 }
 
+func TestCoreEndpointsForCallStableAndOwned(t *testing.T) {
+	want := []string{"192.0.2.1:4000", "192.0.2.1:4001", "[2001:db8::1]:5000", "[2001:db8::1]:5001"}
+	for shift := range want {
+		core := New(Config{MaxCalls: 1, MaxEndpointsPerCall: len(want)})
+		require.True(t, core.Upsert(Call{CallID: "call"}))
+		for i := range want {
+			require.True(t, core.TryAssociateEndpoint("call", want[(i+shift)%len(want)]))
+		}
+		for range 32 {
+			got := core.EndpointsForCall("call")
+			require.Equal(t, want, got, "endpoint order must not depend on map iteration or insertion")
+			got[0] = "caller mutation"
+		}
+		require.Empty(t, core.EndpointsForCall("missing"))
+	}
+}
+
 func TestCoreMostRecentEndpointOwnerChangesOnTouch(t *testing.T) {
 	core := New(Config{MaxCalls: 3, MaxEndpointsPerCall: 1})
 	require.True(t, core.Upsert(Call{CallID: "one"}))

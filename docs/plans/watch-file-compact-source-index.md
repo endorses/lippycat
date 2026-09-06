@@ -201,6 +201,13 @@ publication, rejecting rows whose combined raw bytes and metadata exceed the
 record budget. The range uses constant memory; sparse amendments may validate
 intervening rows. See the verification document for regression evidence.
 
+The [performance follow-up](../research/watch-file-compact-performance.md)
+reduced measured compact readiness from 21.94 s to 10.56 s, completed storage
+from 301.8 MB to 89.5 MB and allocations from 9.24 GB to 6.10 GB. Full private
+parity passed after correcting nondeterministic SDP endpoint presentation.
+The three-second engineering target remains unmet; these results do not complete
+the remaining Phase 4 query and production-cutover gates.
+
 ## Phase 4 — Accelerate complete-file queries and cut over
 
 Touchpoints: `internal/pkg/offline/{query,query_pin,statistics,summary,contracts}.go`,

@@ -113,7 +113,7 @@ Each of the three indexed files begins with this 32-byte little-endian header:
 | ------ | ----- | ------------------ |
 | 0      | 8     | `LCOV2DAT`         |
 | 8      | 2     | Schema major: 2    |
-| 10     | 2     | Schema minor: 0    |
+| 10     | 2     | Schema minor: 1    |
 | 12     | 2     | Stream kind        |
 | 14     | 2     | Flags: zero        |
 | 16     | 8     | Dataset generation |
@@ -129,18 +129,18 @@ Ordering keys and query vectors retain their existing independent formats.
 
 Typed blocks begin with 72 bytes:
 
-| Offset | Width | Value                  |
-| ------ | ----- | ---------------------- |
-| 0      | 4     | `LCB2`                 |
-| 4      | 2     | Block kind: 1 or 4     |
-| 6      | 2     | Header size: 72        |
-| 8      | 8     | First packet ID        |
-| 16     | 4     | Row count              |
-| 20     | 2     | Column count           |
-| 22     | 2     | Flags: zero            |
-| 24     | 8     | Payload byte length    |
-| 32     | 8     | Analysis revision: 1   |
-| 40     | 32    | SHA-256 of the payload |
+| Offset | Width | Value                        |
+| ------ | ----- | ---------------------------- |
+| 0      | 4     | `LCB2`                       |
+| 4      | 2     | Block kind: 1 or 4           |
+| 6      | 2     | Header size: 72              |
+| 8      | 8     | First packet ID              |
+| 16     | 4     | Row count                    |
+| 20     | 2     | Column count                 |
+| 22     | 2     | Encoding: 0 raw, 1 DEFLATE   |
+| 24     | 8     | Expanded payload byte length |
+| 32     | 8     | Analysis revision: 1         |
+| 40     | 32    | SHA-256 of expanded payload  |
 
 Packet IDs are zero-based and implicit within a block as first ID plus row
 position. The writer buffers at most 128 rows and closes a block earlier when
@@ -148,6 +148,19 @@ byte admission would exceed `MaxRecordBytes`. Readers reject more than 4096 rows
 Metadata replacement blocks currently contain one row. Both encoded payload and
 decoded allocations must fit configured limits; an oversized first row fails
 explicitly. Buffered rows and eventual disk bytes are charged before admission.
+
+Schema 2.1 adds optional independent DEFLATE blocks. Readers reject other stream
+minor versions and unknown encoding flags. The directory stores physical block
+lengths; the header stores the exact expanded length, bounded before allocation.
+The reader rejects truncated streams, excess expansion and trailing compressed
+bytes, then checks the expanded payload checksum and all column/arena bounds.
+Cached blocks retain expanded bytes and bind their original physical size.
+
+Writers use a reused BestSpeed compressor for blocks of at least 4096 bytes when
+the configured cache budget is at least 16 MiB; blocks that do not shrink retain
+raw encoding. Compressor state is charged at 2 MiB; reader inflater scratch at
+256 KiB. Reusable payload/output buffers are admitted before growth and released
+at completion or cleanup. Compression never changes the row codec or projections.
 
 ### Columns and block-local arenas
 
@@ -331,7 +344,7 @@ The private JSON `manifest` has these actual top-level fields:
 `Version` (2), `Generation`, `Sources`, `Count`, `Statistics`, `StreamLengths`,
 `AnalysisVersion` (`"1"`), `Complete` (true), `CompactRegistries`, and `Compact`.
 `CompactRegistries` contains `Labels` and `Contexts`; internal accounting fields
-are not serialized. `Compact` contains `SchemaMajor` (2), `SchemaMinor` (0),
+are not serialized. `Compact` contains `SchemaMajor` (2), `SchemaMinor` (1),
 `NormalizationVersion`, `AnalyzerVersion`, `DecoderVersion`,
 `FilterSemanticsVersion` (each `"1"`), `BaseComplete` and `AnalysisComplete`
 (both true), `AnalysisRevision` (1), `FileSHA256`, and `Backings`.

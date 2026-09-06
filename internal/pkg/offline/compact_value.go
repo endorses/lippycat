@@ -33,6 +33,38 @@ var compactFieldNames = map[reflect.Type][]string{
 	reflect.TypeOf(types.HTTPMetadata{}):      {"Type", "IsServer", "Method", "Path", "Version", "StatusCode", "StatusReason", "Host", "Server", "ContentType", "ContentLength", "UserAgent", "SessionID", "RequestTime", "ResponseTime", "IsHTTPS", "HasAuth", "CorrelatedResponse", "RequestResponseTimeMs", "Headers", "QueryString", "BodyPreview", "BodySize", "BodyTruncated"},
 }
 
+// Resolve the frozen wire order once. These tables are immutable after package
+// initialization, so concurrent codecs need no locks or per-record name lookup.
+var compactFieldIndexes = func() map[reflect.Type][]int {
+	indexes := make(map[reflect.Type][]int, len(compactFieldNames))
+	for typ, names := range compactFieldNames {
+		indexes[typ] = compactSchemaIndexes(typ, names)
+	}
+	return indexes
+}()
+
+var compactProjectionType = reflect.TypeOf(compactProjection{})
+var compactProjectionPresenceIndex = compactSchemaIndexes(compactProjectionType, []string{"Presence"})[0]
+var compactProjectionGroupIndexes = func() [][]int {
+	groups := make([][]int, len(compactProjectionGroups))
+	for i, names := range compactProjectionGroups {
+		groups[i] = compactSchemaIndexes(compactProjectionType, names)
+	}
+	return groups
+}()
+
+func compactSchemaIndexes(typ reflect.Type, names []string) []int {
+	indexes := make([]int, len(names))
+	for i, name := range names {
+		field, ok := typ.FieldByName(name)
+		if !ok || len(field.Index) != 1 {
+			panic(fmt.Sprintf("invalid compact schema field %s.%s", typ, name))
+		}
+		indexes[i] = field.Index[0]
+	}
+	return indexes
+}
+
 type compactEncoder struct{ encoder }
 type compactDecoder struct{ decoder }
 
@@ -87,6 +119,9 @@ func (d *compactDecoder) integer(width int) (uint64, error) {
 }
 
 func encodeCompactValue(value any, max uint64) ([]byte, error) {
+	if row, ok := value.(compactRow); ok {
+		return encodeCompactRow(&row, max, 0)
+	}
 	v := reflect.ValueOf(value)
 	if !v.IsValid() || max > uint64(int(^uint(0)>>1)) {
 		return nil, fmt.Errorf("invalid compact value or budget")
@@ -130,18 +165,18 @@ func decodeCompactValue(data []byte, target any, max uint64) error {
 }
 
 func (e *compactEncoder) value(v reflect.Value) error {
-	if v.Type() == reflect.TypeOf(compactProjection{}) {
-		presence := v.FieldByName("Presence").Uint()
+	if v.Type() == compactProjectionType {
+		presence := v.Field(compactProjectionPresenceIndex).Uint()
 		if presence & ^uint64(31) != 0 {
 			return fmt.Errorf("invalid compact projection presence")
 		}
 		if err := e.integer(presence, 1); err != nil {
 			return err
 		}
-		for i, fields := range compactProjectionGroups {
+		for i, fields := range compactProjectionGroupIndexes {
 			if presence&(1<<i) != 0 {
-				for _, name := range fields {
-					if err := e.value(v.FieldByName(name)); err != nil {
+				for _, index := range fields {
+					if err := e.value(v.Field(index)); err != nil {
 						return err
 					}
 				}
@@ -158,15 +193,12 @@ func (e *compactEncoder) value(v reflect.Value) error {
 	}
 	switch v.Kind() {
 	case reflect.Struct:
-		fields, ok := compactFieldNames[v.Type()]
+		fields, ok := compactFieldIndexes[v.Type()]
 		if !ok {
 			return fmt.Errorf("unsupported compact struct %s", v.Type())
 		}
-		for _, name := range fields {
-			field := v.FieldByName(name)
-			if !field.IsValid() {
-				return fmt.Errorf("missing compact schema field %s.%s", v.Type(), name)
-			}
+		for _, index := range fields {
+			field := v.Field(index)
 			if err := e.value(field); err != nil {
 				return err
 			}
@@ -250,7 +282,7 @@ func (e *compactEncoder) value(v reflect.Value) error {
 }
 
 func (d *compactDecoder) value(v reflect.Value) error {
-	if v.Type() == reflect.TypeOf(compactProjection{}) {
+	if v.Type() == compactProjectionType {
 		presence, err := d.integer(1)
 		if err != nil {
 			return err
@@ -258,11 +290,11 @@ func (d *compactDecoder) value(v reflect.Value) error {
 		if presence & ^uint64(31) != 0 {
 			return fmt.Errorf("invalid compact projection presence")
 		}
-		v.FieldByName("Presence").SetUint(presence)
-		for i, fields := range compactProjectionGroups {
+		v.Field(compactProjectionPresenceIndex).SetUint(presence)
+		for i, fields := range compactProjectionGroupIndexes {
 			if presence&(1<<i) != 0 {
-				for _, name := range fields {
-					if err := d.value(v.FieldByName(name)); err != nil {
+				for _, index := range fields {
+					if err := d.value(v.Field(index)); err != nil {
 						return err
 					}
 				}
@@ -287,15 +319,12 @@ func (d *compactDecoder) value(v reflect.Value) error {
 	}
 	switch v.Kind() {
 	case reflect.Struct:
-		fields, ok := compactFieldNames[v.Type()]
+		fields, ok := compactFieldIndexes[v.Type()]
 		if !ok {
 			return fmt.Errorf("unsupported compact struct %s", v.Type())
 		}
-		for _, name := range fields {
-			field := v.FieldByName(name)
-			if !field.IsValid() {
-				return fmt.Errorf("missing compact schema field %s.%s", v.Type(), name)
-			}
+		for _, index := range fields {
+			field := v.Field(index)
 			if err := d.value(field); err != nil {
 				return err
 			}
@@ -449,7 +478,7 @@ func encodeCompactFields(value any, max uint64) ([][]byte, error) {
 	if !v.IsValid() {
 		return nil, fmt.Errorf("invalid compact column value")
 	}
-	names, ok := compactFieldNames[v.Type()]
+	indexes, ok := compactFieldIndexes[v.Type()]
 	if !ok {
 		return nil, fmt.Errorf("unsupported compact column type %s", v.Type())
 	}
@@ -460,13 +489,10 @@ func encodeCompactFields(value any, max uint64) ([][]byte, error) {
 	if err := measureMemory(v, &memory, max); err != nil {
 		return nil, err
 	}
-	columns := make([][]byte, 0, len(names))
+	columns := make([][]byte, 0, len(indexes))
 	var total uint64
-	for _, name := range names {
-		field := v.FieldByName(name)
-		if !field.IsValid() {
-			return nil, fmt.Errorf("missing compact column %s", name)
-		}
+	for _, index := range indexes {
+		field := v.Field(index)
 		e := compactEncoder{encoder: encoder{max: max - total}}
 		if err := e.value(field); err != nil {
 			return nil, err
@@ -500,8 +526,8 @@ func decodeCompactFields(parts [][]byte, target any, max uint64) error {
 	if !v.IsValid() || v.Kind() != reflect.Pointer || v.IsNil() {
 		return fmt.Errorf("invalid compact columns destination")
 	}
-	names, ok := compactFieldNames[v.Elem().Type()]
-	if !ok || len(names) != len(parts) {
+	indexes, ok := compactFieldIndexes[v.Elem().Type()]
+	if !ok || len(indexes) != len(parts) {
 		return fmt.Errorf("invalid compact column count")
 	}
 	var size uint64
@@ -515,9 +541,9 @@ func decodeCompactFields(parts [][]byte, target any, max uint64) error {
 	if memory > max {
 		return fmt.Errorf("compact columns exceed memory budget")
 	}
-	for i, name := range names {
+	for i, index := range indexes {
 		d := compactDecoder{decoder: decoder{data: parts[i], max: max, memory: memory}}
-		if err := d.value(result.FieldByName(name)); err != nil {
+		if err := d.value(result.Field(index)); err != nil {
 			return err
 		}
 		if d.pos != len(parts[i]) {

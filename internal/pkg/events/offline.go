@@ -69,3 +69,13 @@ func (r offlineIdentityReader) Read(p []byte) (int, error) {
 	}
 	return r.reader.Read(p)
 }
+
+// OfflineInputIdentityFromDigests aggregates original-byte SHA256 digests in
+// input-argument order using the same file boundaries as OfflineInputIdentity.
+func OfflineInputIdentityFromDigests(digests [][32]byte) string {
+	h := sha256.New()
+	for _, digest := range digests {
+		_, _ = h.Write(digest[:])
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}

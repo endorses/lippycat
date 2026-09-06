@@ -1,6 +1,6 @@
 # Compact source-backed offline index implementation plan
 
-Status: Phases 0–1 complete; phases 2–6 remain unchecked.
+Status: Phases 0–2 complete; phases 3–6 remain unchecked.
 Scope: `lc watch file`.
 
 Phase 0 establishes the baseline, injectable differential oracle, measurement
@@ -145,15 +145,19 @@ Touchpoints: `internal/pkg/capture/offline_sort.go`, `offline_cursor.go`,
 `internal/pkg/events` offline identity helpers, and
 `internal/pkg/tui/offline_indexer.go` (`indexOfflineDataset`).
 
-- [ ] Fuse original-byte SHA256 calculation into each mandatory source scan while preserving the existing per-file aggregation and input-argument ordering. Preserve caller-supplied input identity behavior. Split scan/order preparation from replay and move producer/runtime initialization after the hashes finalize; adding a hashing reader alone is insufficient. Complete identity before constructing deterministic event production.
-- [ ] Replace raw-spool offsets in sort keys with validated backing references and source context. Retain timestamp, argument index and logical sequence as the stable comparator.
-- [ ] Track monotonicity after normalization. Implement direct iteration for one ordered input, bounded heap merge for individually ordered inputs, and external compact-key sort when any input regresses, including at EOF.
-- [ ] Finalize packet IDs only after global ordering is known. Replay through the existing analysis envelope without changing BPF ordering, timestamps, reassembly domains or source attribution.
-- [ ] Add byte-bounded read coalescing/prefetch with explicit buffer ownership. Account for merge buffers, sort runs and temporary coexistence; propagate read, write, flush and cancellation failures.
-- [ ] Compare all three ordering paths against the legacy sorter for equal timestamps, duplicate arguments, interleaved inputs, late regressions, fragments and nested transformations. Compare TCP/SIP outcomes and deterministic event identities as well as packet order.
+- [x] Fuse original-byte SHA256 calculation into each mandatory source scan while preserving the existing per-file aggregation and input-argument ordering. Preserve caller-supplied input identity behavior. Split scan/order preparation from replay and move producer/runtime initialization after the hashes finalize; adding a hashing reader alone is insufficient. Complete identity before constructing deterministic event production.
+- [x] Replace raw-spool offsets in sort keys with validated backing references and source context. Retain timestamp, argument index and logical sequence as the stable comparator.
+- [x] Track monotonicity after normalization. Implement direct iteration for one ordered input, bounded heap merge for individually ordered inputs, and external compact-key sort when any input regresses, including at EOF.
+- [x] Finalize packet IDs only after global ordering is known. Replay through the existing analysis envelope without changing BPF ordering, timestamps, reassembly domains or source attribution.
+- [x] Add byte-bounded read coalescing/prefetch with explicit buffer ownership. Account for merge buffers, sort runs and temporary coexistence; propagate read, write, flush and cancellation failures.
+- [x] Compare all three ordering paths against the legacy sorter for equal timestamps, duplicate arguments, interleaved inputs, late regressions, fragments and nested transformations. Compare TCP/SIP outcomes and deterministic event identities as well as packet order.
 
 Gate: ordinary packets are no longer copied into an all-packet sorting spool;
 full-ready publication and analysis order still match the baseline.
+
+Phase-2 implementation and independent review: see [verification](../research/watch-file-phase2-validation.md).
+The prepared locator stream is internally opt-in; completed production datasets
+continue to use the legacy oracle until the later storage and cutover gates.
 
 ## Phase 3 — Store compact records and materialize details lazily
 

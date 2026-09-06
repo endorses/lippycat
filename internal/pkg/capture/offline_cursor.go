@@ -32,6 +32,7 @@ type offlinePacketReader interface {
 type offlineCursor struct {
 	backings         *offline.BackingRegistry
 	backingID        uint32
+	backingInput     *offline.BackingInput
 	reader           offlinePacketReader
 	closer           io.Closer
 	decompressor     io.Closer
@@ -63,12 +64,13 @@ func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter s
 	var input io.Reader
 	compressed := false
 	if cfg, ok := ctx.Value(offlineBackingsKey{}).(offlineBackingsConfig); ok && cfg.registry != nil {
-		backing, e := cfg.registry.Open(ctx, c.path, int(sourceIndex), cfg.policy, false)
+		backing, e := cfg.registry.OpenScan(ctx, c.path, int(sourceIndex), cfg.policy, false)
 		if e != nil {
 			return nil, e
 		}
 		c.backings, c.backingID, input = cfg.registry, backing.ID, backing.Reader
 		c.closer = backing
+		c.backingInput = backing
 		compressed = backing.Compressed
 	} else {
 		initial, e := os.Stat(c.path)
@@ -234,6 +236,11 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 				}
 			}
 			if err == io.EOF && ci.CaptureLength == 0 {
+				if c.backingInput != nil {
+					if e := c.backingInput.FinishScan(ctx); e != nil {
+						return PacketInfo{}, e
+					}
+				}
 				return PacketInfo{}, io.EOF
 			}
 			if err == io.EOF {

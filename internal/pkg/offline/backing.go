@@ -90,7 +90,8 @@ type BackingInput struct {
 	Compressed bool
 	lease      *BackingLease
 	ID         uint32
-	Reader     *io.SectionReader
+	Reader     io.Reader
+	scan       *backingScanReader
 	Size       int64
 	Digest     [32]byte
 }
@@ -98,16 +99,17 @@ type BackingInput struct {
 func (b *BackingInput) Close() error { return b.lease.Close() }
 
 type ownedBacking struct {
-	identity    SourceIdentity
-	kind        BackingKind
-	file        *os.File
-	scratch     *ScratchFile
-	sourceIndex int
-	path        string
-	info        os.FileInfo
-	size        int64
-	derived     bool
-	charge      uint64
+	identity      SourceIdentity
+	kind          BackingKind
+	file          *os.File
+	scratch       *ScratchFile
+	sourceIndex   int
+	path          string
+	info          os.FileInfo
+	size          int64
+	derived       bool
+	charge        uint64
+	identityReady bool
 }
 
 // BackingRegistry owns every handle until its last read lease is released.
@@ -161,6 +163,17 @@ func (r *BackingRegistry) check(b *ownedBacking, id uint32, op string) error {
 // Open validates the complete original source before returning a seekable parser
 // reader. gzip identity always hashes compressed bytes, even with snapshot policy.
 func (r *BackingRegistry) Open(ctx context.Context, path string, sourceIndex int, policy BackingPolicy, compressed bool) (*BackingInput, error) {
+	return r.open(ctx, path, sourceIndex, policy, compressed, false)
+}
+
+// OpenScan fuses identity with mandatory parsing, snapshot copying or decompression.
+// Plain source identity becomes available after FinishScan; snapshot and gzip
+// identity is ready when their mandatory preparation finishes.
+func (r *BackingRegistry) OpenScan(ctx context.Context, path string, sourceIndex int, policy BackingPolicy, compressed bool) (*BackingInput, error) {
+	return r.open(ctx, path, sourceIndex, policy, compressed, true)
+}
+
+func (r *BackingRegistry) open(ctx context.Context, path string, sourceIndex int, policy BackingPolicy, compressed, scan bool) (*BackingInput, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closing {
@@ -239,27 +252,32 @@ func (r *BackingRegistry) Open(ctx context.Context, path string, sourceIndex int
 		}
 		writer = io.MultiWriter(h, snapshot)
 	}
-	n, err := copyBacking(ctx, writer, io.NewSectionReader(f, 0, info.Size()), buf)
-	if err != nil {
-		if snapshot != nil {
-			err = errors.Join(err, snapshot.Close())
-		}
-		return fail(err)
-	}
-	if n != info.Size() {
-		if snapshot != nil {
-			err = snapshot.Close()
-		}
-		return fail(errors.Join(r.changed(b, id, "scan", "short_read", io.ErrUnexpectedEOF), err))
-	}
-	if err = r.check(b, id, "scan"); err != nil {
-		if snapshot != nil {
-			err = errors.Join(err, snapshot.Close())
-		}
-		return fail(err)
-	}
+	var n int64
 	var digest [32]byte
-	copy(digest[:], h.Sum(nil))
+	if !scan || policy == BackingSnapshot {
+		n, err = copyBacking(ctx, writer, io.NewSectionReader(f, 0, info.Size()), buf)
+		if err != nil {
+			if snapshot != nil {
+				err = errors.Join(err, snapshot.Close())
+			}
+			return fail(err)
+		}
+		if n != info.Size() {
+			if snapshot != nil {
+				err = snapshot.Close()
+			}
+			return fail(errors.Join(r.changed(b, id, "scan", "short_read", io.ErrUnexpectedEOF), err))
+		}
+		if err = r.check(b, id, "scan"); err != nil {
+			if snapshot != nil {
+				err = errors.Join(err, snapshot.Close())
+			}
+			return fail(err)
+		}
+		copy(digest[:], h.Sum(nil))
+
+		b.identityReady = true
+	}
 	if snapshot != nil {
 		if err = snapshot.file.Sync(); err == nil {
 			h.Reset()
@@ -293,12 +311,28 @@ func (r *BackingRegistry) Open(ctx context.Context, path string, sourceIndex int
 		if e != nil {
 			return fail(e)
 		}
-		gz, e := gzip.NewReader(io.NewSectionReader(b.file, 0, b.size))
+		var compressedReader io.Reader = io.NewSectionReader(b.file, 0, b.size)
+		var compressedScan *backingScanReader
+		if scan && policy != BackingSnapshot {
+			compressedScan = &backingScanReader{reader: compressedReader, hash: sha256.New()}
+			compressedReader = compressedScan
+		}
+		gz, e := gzip.NewReader(compressedReader)
 		if e != nil {
 			return fail(errors.Join(e, spool.Close()))
 		}
 		size, e := copyBacking(ctx, spool, gz, buf)
 		e = errors.Join(e, gz.Close())
+		if e == nil && compressedScan != nil {
+			_, e = copyBacking(ctx, io.Discard, compressedScan, buf)
+			if e == nil && compressedScan.bytes != info.Size() {
+				e = io.ErrUnexpectedEOF
+			}
+			if e == nil {
+				copy(digest[:], compressedScan.hash.Sum(nil))
+				b.identityReady = true
+			}
+		}
 		if e == nil {
 			e = r.check(b, id, "decompress")
 		}
@@ -335,7 +369,12 @@ func (r *BackingRegistry) Open(ctx context.Context, path string, sourceIndex int
 	}
 	b.identity = SourceIdentity{SourceID: uint32(sourceIndex) + 1, Info: info, SourceIndex: sourceIndex, Path: path, Size: info.Size(), Digest: digest, Policy: policy, Compressed: compressed}
 	r.leases++
-	return &BackingInput{ID: id, Reader: io.NewSectionReader(b.file, 0, b.size), Size: b.size, Digest: digest, Compressed: compressed, lease: &BackingLease{registry: r, size: 128}}, nil
+	input := &BackingInput{ID: id, Reader: io.NewSectionReader(b.file, 0, b.size), Size: b.size, Digest: digest, Compressed: compressed, lease: &BackingLease{registry: r, size: 128}}
+	if !b.identityReady {
+		input.scan = &backingScanReader{reader: input.Reader, hash: sha256.New()}
+		input.Reader = input.scan
+	}
+	return input, nil
 }
 func equalDigest(v []byte, d [32]byte) bool {
 	if len(v) != len(d) {
@@ -430,14 +469,16 @@ func (r *BackingRegistry) AppendDerived(ctx context.Context, sourceIndex int, da
 			r.storage.releaseMemory(512)
 			return Locator{}, err
 		}
+		identityReady := false
 		identity := SourceIdentity{SourceID: uint32(sourceIndex) + 1, SourceIndex: sourceIndex}
 		for _, v := range r.entries {
 			if !v.derived && v.sourceIndex == sourceIndex {
 				identity = v.identity
+				identityReady = v.identityReady
 				break
 			}
 		}
-		b = &ownedBacking{file: s.file, scratch: s, derived: true, sourceIndex: sourceIndex, charge: 512, identity: identity, kind: BackingKindDerived}
+		b = &ownedBacking{file: s.file, scratch: s, derived: true, sourceIndex: sourceIndex, charge: 512, identity: identity, identityReady: identityReady, kind: BackingKindDerived}
 		r.entries = append(r.entries, b)
 		id = uint32(len(r.entries))
 	}
@@ -593,6 +634,9 @@ func (r *BackingRegistry) Identity(id uint32) (SourceIdentity, error) {
 	defer r.mu.Unlock()
 	if id == 0 || uint64(id) > uint64(len(r.entries)) {
 		return SourceIdentity{}, ErrInvalidLocator
+	}
+	if !r.entries[id-1].identityReady {
+		return SourceIdentity{}, errors.New("offline source identity scan is incomplete")
 	}
 	return r.entries[id-1].identity, nil
 }

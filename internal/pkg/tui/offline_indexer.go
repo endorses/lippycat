@@ -29,16 +29,18 @@ import (
 // OfflineAnalysisConfig is captured by the model before starting a worker.
 // Workers never read UI settings or mutate the active capture's global state.
 type OfflineAnalysisConfig struct {
-	BackingPolicy offline.BackingPolicy
-	Inputs        []string
-	BPFFilter     string
-	VoIP          bool
-	TLSKeylog     string
-	EventCapacity int
-	MaxCalls      int
-	ESP           capture.OfflineESPConfig
-	Analysis      LocalEventAnalysisOptions
-	SIPConfig     voip.Config
+	// locatorOrdering selects the migration path internally until its production gate.
+	locatorOrdering bool
+	BackingPolicy   offline.BackingPolicy
+	Inputs          []string
+	BPFFilter       string
+	VoIP            bool
+	TLSKeylog       string
+	EventCapacity   int
+	MaxCalls        int
+	ESP             capture.OfflineESPConfig
+	Analysis        LocalEventAnalysisOptions
+	SIPConfig       voip.Config
 }
 
 type offlineIndexedSession struct {
@@ -204,6 +206,50 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 			}
 		}
 	}()
+	started := time.Now()
+	last := time.Time{}
+	progress := offline.Progress{Token: offline.Token{Dataset: generation}, State: offline.Reading, Sources: uint32(len(cfg.Inputs))}
+	publish := func(force bool) {
+		if report != nil && (force || time.Since(last) >= 100*time.Millisecond) {
+			progress.Elapsed = time.Since(started)
+			progress.DiskBytes = storage.Resources().DiskBytes
+			report(progress)
+			last = time.Now()
+		}
+	}
+	publish(true)
+	sortProgress := func(p capture.OfflineSortProgress) {
+		switch p.Phase {
+		case "Reading":
+			progress.State = offline.Reading
+		case "Sorting":
+			mark("ordering")
+			progress.State = offline.Sorting
+		case "Replaying":
+			mark("analysis_and_storage")
+			progress.State = offline.Indexing
+		}
+		progress.LogicalPackets, progress.ScannedBytes = p.LogicalPackets, p.BytesScanned
+		if progress.State == offline.Indexing {
+			progress.TotalPackets = p.LogicalPackets
+			progress.LogicalPackets, progress.ScannedBytes = 0, 0
+		}
+		publish(true)
+	}
+	var prepared *capture.OfflineLocatorStream
+	if cfg.locatorOrdering {
+		mark("scan")
+		var prepareErr error
+		openErr := capture.StartOfflineSnifferOrdered(cfg.Inputs, cfg.BPFFilter, func(devices []pcaptypes.PcapInterface, filter string) {
+			prepared, prepareErr = capture.PrepareOfflineLocatorStream(ctx, devices, filter, storage, sortProgress)
+			if prepared != nil {
+				session.sortCleanup = prepared
+			}
+		})
+		if err = errors.Join(openErr, prepareErr); err != nil {
+			return nil, err
+		}
+	}
 	if cfg.TLSKeylog != "" {
 		session.TLSDecryptor, err = newOfflineTLSDecryptor(ctx, cfg.TLSKeylog)
 		if err != nil {
@@ -228,7 +274,16 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 	}
 	mark("identity")
 	if analysis.InputIdentity == "" {
-		analysis.InputIdentity, err = events.OfflineInputIdentityContext(ctx, cfg.Inputs)
+		if prepared != nil {
+			identities := prepared.Identities()
+			digests := make([][32]byte, len(identities))
+			for i, identity := range identities {
+				digests[i] = identity.Digest
+			}
+			analysis.InputIdentity = events.OfflineInputIdentityFromDigests(digests)
+		} else {
+			analysis.InputIdentity, err = events.OfflineInputIdentityContext(ctx, cfg.Inputs)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -283,122 +338,104 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 		assembler = pipeline.NewReassemblyEngine(sipFactory, reassemblyConfig)
 		defer func() { err = errors.Join(err, assembler.Close()); handler.Close() }()
 	}
-	started := time.Now()
-	last := time.Time{}
-	progress := offline.Progress{Token: offline.Token{Dataset: generation}, State: offline.Reading, Sources: uint32(len(cfg.Inputs))}
-	publish := func(force bool) {
-		if report != nil && (force || time.Since(last) >= 100*time.Millisecond) {
-			progress.Elapsed = time.Since(started)
-			progress.DiskBytes = storage.Resources().DiskBytes
-			report(progress)
-			last = time.Now()
+	consume := func(readCtx context.Context, ch <-chan capture.PacketInfo) error {
+		for info := range ch {
+			if err := readCtx.Err(); err != nil {
+				return err
+			}
+			env := captureadapter.FromPacketInfo(info, pipeline.SourcePCAPReplay)
+			flows.mu.Lock()
+			flows.now = env.CaptureTime
+			flows.mu.Unlock()
+			if sipFactory != nil {
+				sipFactory.LastEvent = nil
+				sipFactory.CurrentID = offline.PacketID(indexedPackets)
+				if nextSIPFlush.IsZero() || !env.CaptureTime.Before(nextSIPFlush) {
+					// Expiry may release old queued messages. Their completion
+					// belongs to the original packet, not the incoming packet.
+					sipFactory.Flushing = true
+					flushErr := assembler.FlushOlderThan(env.CaptureTime.Add(-reassemblyConfig.IdleTimeout))
+					sipFactory.Flushing = false
+					if err := errors.Join(flushErr, sipFactory.Err()); err != nil {
+						return err
+					}
+					nextSIPFlush = env.CaptureTime.Add(reassemblyConfig.FlushInterval)
+				}
+			}
+			if assembler != nil && info.Packet.NetworkLayer() != nil && info.Packet.Layer(layers.LayerTypeTCP) != nil {
+				if err := assembler.AssembleWithContext(env, offlineSIPContext(info.Packet.Metadata().CaptureInfo, sipFactory.CurrentID)); err != nil {
+					return err
+				}
+			}
+			if sipFactory != nil {
+				if err := sipFactory.Err(); err != nil {
+					return err
+				}
+			}
+			source := eventanalysis.Source{NodeID: analysis.NodeID, CaptureSource: "pcap", InputFile: info.SourcePath, InterfaceIndex: info.SourceInterfaceID, CaptureScope: analysis.CaptureScope, Partial: analysis.Partial}
+			// The local event adapter currently enriches IP TCP/UDP flows
+			// only. Other logical packets still belong in the dataset even
+			// when they cannot produce a normalized connection event.
+			if offlinePacketSupportsEventAnalysis(info) {
+				if err := runtime.ObservePacket(source, info); err != nil {
+					return err
+				}
+			}
+			// LosslessDelivery drains before every event admission. Packets
+			// without events need no barrier; Close drains the final event
+			// and EOF output before the session can be published.
+			packet := convertEnvelopeWithState(env, session.Tracker, protocols, flows)
+			if sipFactory != nil && sipFactory.LastEvent != nil {
+				applyOfflineSIPEvent(&packet, *sipFactory.LastEvent)
+			}
+			if packet.Protocol == "DNS" {
+				packet.DNSData = parseDNSFromRawData(packet.RawData, packet.LinkType)
+			}
+			if packet.Protocol == "HTTP" {
+				packet.HTTPData = parseHTTPFromRawData(packet.RawData, packet.LinkType)
+			}
+			packet.TLSData = tlsParser.Parse(info.Packet)
+			if tcp, ok := info.Packet.TransportLayer().(*layers.TCP); session.TLSDecryptor != nil && ok {
+				if packet.TLSData != nil {
+					session.TLSDecryptor.processTLSHandshakePayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload(), !packet.TLSData.IsServer)
+				} else {
+					session.TLSDecryptor.processApplicationPayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload())
+				}
+				if err := session.TLSDecryptor.sessionManager.Err(); err != nil {
+					return fmt.Errorf("offline TLS analysis: %w", err)
+				}
+			}
+			if sipFactory == nil || sipFactory.LastEvent == nil {
+				agg.ProcessPacket(&packet)
+			}
+			meta := info.Packet.Metadata()
+			detail := offline.Detail{Source: offline.SourcePosition{ArgumentIndex: info.SourceIndex, Path: info.SourcePath, InterfaceID: info.SourceInterfaceID, Sequence: info.SourceSequence}, CapturedLength: uint32(meta.CaptureLength), OriginalLength: uint32(meta.Length), Packet: packet}
+			if err := builder.Append(readCtx, detail); err != nil {
+				return err
+			}
+			indexedPackets++
+			progress.LogicalPackets++
+			progress.ScannedBytes += uint64(meta.CaptureLength)
+			publish(false)
 		}
+		return nil
 	}
-	publish(true)
-	var readErr error
-	mark("scan")
-	openErr := capture.StartOfflineSnifferOrdered(cfg.Inputs, cfg.BPFFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-		session.sortCleanup, readErr = capture.RunOfflineSortedStream(ctx, devices, filter, storage, func(p capture.OfflineSortProgress) {
-			switch p.Phase {
-			case "Reading":
-				progress.State = offline.Reading
-			case "Sorting":
-				mark("ordering")
-				progress.State = offline.Sorting
-			case "Replaying":
-				mark("analysis_and_storage")
-				progress.State = offline.Indexing
-			}
-			progress.LogicalPackets, progress.ScannedBytes = p.LogicalPackets, p.BytesScanned
-			if progress.State == offline.Indexing {
-				progress.TotalPackets = p.LogicalPackets
-				progress.LogicalPackets, progress.ScannedBytes = 0, 0
-			}
-			publish(true)
-		}, func(readCtx context.Context, ch <-chan capture.PacketInfo) error {
-			for info := range ch {
-				if err := readCtx.Err(); err != nil {
-					return err
-				}
-				env := captureadapter.FromPacketInfo(info, pipeline.SourcePCAPReplay)
-				flows.mu.Lock()
-				flows.now = env.CaptureTime
-				flows.mu.Unlock()
-				if sipFactory != nil {
-					sipFactory.LastEvent = nil
-					sipFactory.CurrentID = offline.PacketID(indexedPackets)
-					if nextSIPFlush.IsZero() || !env.CaptureTime.Before(nextSIPFlush) {
-						// Expiry may release old queued messages. Their completion
-						// belongs to the original packet, not the incoming packet.
-						sipFactory.Flushing = true
-						flushErr := assembler.FlushOlderThan(env.CaptureTime.Add(-reassemblyConfig.IdleTimeout))
-						sipFactory.Flushing = false
-						if err := errors.Join(flushErr, sipFactory.Err()); err != nil {
-							return err
-						}
-						nextSIPFlush = env.CaptureTime.Add(reassemblyConfig.FlushInterval)
-					}
-				}
-				if assembler != nil && info.Packet.NetworkLayer() != nil && info.Packet.Layer(layers.LayerTypeTCP) != nil {
-					if err := assembler.AssembleWithContext(env, offlineSIPContext(info.Packet.Metadata().CaptureInfo, sipFactory.CurrentID)); err != nil {
-						return err
-					}
-				}
-				if sipFactory != nil {
-					if err := sipFactory.Err(); err != nil {
-						return err
-					}
-				}
-				source := eventanalysis.Source{NodeID: analysis.NodeID, CaptureSource: "pcap", InputFile: info.SourcePath, InterfaceIndex: info.SourceInterfaceID, CaptureScope: analysis.CaptureScope, Partial: analysis.Partial}
-				// The local event adapter currently enriches IP TCP/UDP flows
-				// only. Other logical packets still belong in the dataset even
-				// when they cannot produce a normalized connection event.
-				if offlinePacketSupportsEventAnalysis(info) {
-					if err := runtime.ObservePacket(source, info); err != nil {
-						return err
-					}
-				}
-				// LosslessDelivery drains before every event admission. Packets
-				// without events need no barrier; Close drains the final event
-				// and EOF output before the session can be published.
-				packet := convertEnvelopeWithState(env, session.Tracker, protocols, flows)
-				if sipFactory != nil && sipFactory.LastEvent != nil {
-					applyOfflineSIPEvent(&packet, *sipFactory.LastEvent)
-				}
-				if packet.Protocol == "DNS" {
-					packet.DNSData = parseDNSFromRawData(packet.RawData, packet.LinkType)
-				}
-				if packet.Protocol == "HTTP" {
-					packet.HTTPData = parseHTTPFromRawData(packet.RawData, packet.LinkType)
-				}
-				packet.TLSData = tlsParser.Parse(info.Packet)
-				if tcp, ok := info.Packet.TransportLayer().(*layers.TCP); session.TLSDecryptor != nil && ok {
-					if packet.TLSData != nil {
-						session.TLSDecryptor.processTLSHandshakePayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload(), !packet.TLSData.IsServer)
-					} else {
-						session.TLSDecryptor.processApplicationPayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload())
-					}
-					if err := session.TLSDecryptor.sessionManager.Err(); err != nil {
-						return fmt.Errorf("offline TLS analysis: %w", err)
-					}
-				}
-				if sipFactory == nil || sipFactory.LastEvent == nil {
-					agg.ProcessPacket(&packet)
-				}
-				meta := info.Packet.Metadata()
-				detail := offline.Detail{Source: offline.SourcePosition{ArgumentIndex: info.SourceIndex, Path: info.SourcePath, InterfaceID: info.SourceInterfaceID, Sequence: info.SourceSequence}, CapturedLength: uint32(meta.CaptureLength), OriginalLength: uint32(meta.Length), Packet: packet}
-				if err := builder.Append(readCtx, detail); err != nil {
-					return err
-				}
-				indexedPackets++
-				progress.LogicalPackets++
-				progress.ScannedBytes += uint64(meta.CaptureLength)
-				publish(false)
-			}
-			return nil
+	if prepared != nil {
+		err = prepared.Replay(ctx, consume)
+		if closeErr := prepared.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		} else {
+			session.sortCleanup = nil
+		}
+	} else {
+		var readErr error
+		mark("scan")
+		openErr := capture.StartOfflineSnifferOrdered(cfg.Inputs, cfg.BPFFilter, func(devices []pcaptypes.PcapInterface, filter string) {
+			session.sortCleanup, readErr = capture.RunOfflineSortedStream(ctx, devices, filter, storage, sortProgress, consume)
 		})
-	})
-	if err = errors.Join(openErr, readErr); err != nil {
+		err = errors.Join(openErr, readErr)
+	}
+	if err != nil {
 		return nil, err
 	}
 	mark("finalization")

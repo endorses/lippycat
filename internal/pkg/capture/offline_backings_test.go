@@ -95,6 +95,9 @@ func TestOfflineBackingNormalizedReread(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "capture.data")
 				require.NoError(t, os.WriteFile(path, provenanceCapture(t, tc.link, tc.frames, format == "ng", format == "gzip"), 0600))
 				base := WithOfflineESPConfig(context.Background(), OfflineESPConfig{Enabled: tc.name == "esp" || tc.name == "ipv4-fragment-vxlan-esp", Explicit: true, ICVSize: 12})
+				if format == "pcap" {
+					compareLocatorTransform(t, base, tc.link, tc.frames, tc.filter)
+				}
 				registry := sortTestStorage(t, 1<<20).NewBackingRegistry()
 				t.Cleanup(func() { require.NoError(t, registry.Close()) })
 				ctx := WithOfflineBackings(base, registry, offline.BackingSource)

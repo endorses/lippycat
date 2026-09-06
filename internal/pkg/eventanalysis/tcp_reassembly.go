@@ -53,8 +53,13 @@ type reassemblySourceKey struct {
 
 type reassemblyFlowKey struct {
 	namespace uint64
-	endpointA string
-	endpointB string
+	endpointA reassemblyEndpoint
+	endpointB reassemblyEndpoint
+}
+
+type reassemblyEndpoint struct {
+	network   gopacket.Endpoint
+	transport gopacket.Endpoint
 }
 
 func sourceReassemblyKey(source Source) reassemblySourceKey {
@@ -84,6 +89,7 @@ type applicationStream struct {
 	netFlow, tcpFlow  gopacket.Flow
 	flowKey           reassemblyFlowKey
 	buffer            []byte
+	bufferStorage     []byte
 	marks             []reassemblyMark
 	email             *emailparser.Parser
 	emailMetadata     types.EmailMetadata
@@ -137,8 +143,26 @@ func (s *applicationStream) ReassembledSG(sg reassembly.ScatterGather, _ reassem
 		return
 	}
 	s.appendMarks(sg, available)
-	s.buffer = append(s.buffer, chunk...)
+	s.appendBuffer(chunk)
 	s.parse()
+}
+
+// appendBuffer runs between parser invocations, after their frame aliases have
+// expired. Reclaim consumed prefixes here instead of repeatedly allocating when
+// partial frames move the buffer's start forward.
+func (s *applicationStream) appendBuffer(chunk []byte) {
+	needed := len(s.buffer) + len(chunk)
+	if needed > cap(s.buffer) {
+		if needed <= cap(s.bufferStorage) {
+			copy(s.bufferStorage, s.buffer)
+			s.buffer = s.bufferStorage[:len(s.buffer)]
+		} else {
+			s.buffer = append(s.buffer, chunk...)
+			s.bufferStorage = s.buffer[:cap(s.buffer)]
+			return
+		}
+	}
+	s.buffer = append(s.buffer, chunk...)
 }
 
 func (s *applicationStream) ReassemblyComplete(reassembly.AssemblerContext) bool {
@@ -591,6 +615,8 @@ func isSMTPPort(port uint16) bool {
 func (r *Runtime) resetReassembly() {
 	r.tcpAssembler = capture.NewTCPAssembler(&applicationFactory{runtime: r})
 	r.activeTCPFlows = make(map[reassemblyFlowKey]struct{})
+	r.namespaceSource = reassemblySourceKey{}
+	r.namespaceValid = false
 }
 
 func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp time.Time, scope events.CaptureScope, partial bool, protocolHint string) {
@@ -604,7 +630,7 @@ func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp ti
 	if scope == "" {
 		scope = events.CaptureScopeFull
 	}
-	namespace := sourceNamespace(source)
+	namespace := r.cachedSourceNamespace(source)
 	netFlow := packet.NetworkLayer().NetworkFlow()
 	portFlow := tcp.TransportFlow()
 	flowKey := canonicalReassemblyFlowKey(namespace, netFlow, portFlow)
@@ -615,10 +641,9 @@ func (r *Runtime) observeTCP(source Source, packet gopacket.Packet, timestamp ti
 		}
 		r.activeTCPFlows[flowKey] = struct{}{}
 	}
-	namespacedFlow := gopacket.NewFlow(endpointNamespacedNetwork,
-		namespacedEndpoint(namespace, netFlow.Src()),
-		namespacedEndpoint(namespace, netFlow.Dst()),
-	)
+	srcEndpoint := namespacedEndpoint(namespace, netFlow.Src())
+	dstEndpoint := namespacedEndpoint(namespace, netFlow.Dst())
+	namespacedFlow := gopacket.NewFlow(endpointNamespacedNetwork, srcEndpoint[:], dstEndpoint[:])
 	r.tcpAssembler.AssembleCaptureInfo(namespacedFlow, tcp, gopacket.CaptureInfo{
 		Timestamp:     timestamp,
 		AncillaryData: []interface{}{reassemblyContext{source: source, scope: scope, partial: partial, protocolHint: protocolHint, netFlow: netFlow, tcpFlow: portFlow, flowKey: flowKey}},
@@ -632,23 +657,36 @@ func sourceNamespace(source Source) uint64 {
 		_, _ = h.Write([]byte(value))
 		_, _ = h.Write([]byte{0})
 	}
-	return binary.BigEndian.Uint64(h.Sum(nil))
+	var digest [sha256.Size]byte
+	return binary.BigEndian.Uint64(h.Sum(digest[:0]))
+}
+
+// Capture sources are commonly repeated for an entire input. Keep only the
+// last key; multi-source replay never grows an auxiliary source cache.
+func (r *Runtime) cachedSourceNamespace(source Source) uint64 {
+	key := sourceReassemblyKey(source)
+	if !r.namespaceValid || key != r.namespaceSource {
+		r.namespaceSource = key
+		r.namespaceValue = sourceNamespace(source)
+		r.namespaceValid = true
+	}
+	return r.namespaceValue
 }
 
 func canonicalReassemblyFlowKey(namespace uint64, netFlow, tcpFlow gopacket.Flow) reassemblyFlowKey {
-	a := fmt.Sprintf("%d:%x:%d:%x", netFlow.Src().EndpointType(), netFlow.Src().Raw(), tcpFlow.Src().EndpointType(), tcpFlow.Src().Raw())
-	b := fmt.Sprintf("%d:%x:%d:%x", netFlow.Dst().EndpointType(), netFlow.Dst().Raw(), tcpFlow.Dst().EndpointType(), tcpFlow.Dst().Raw())
-	if b < a {
+	a := reassemblyEndpoint{network: netFlow.Src(), transport: tcpFlow.Src()}
+	b := reassemblyEndpoint{network: netFlow.Dst(), transport: tcpFlow.Dst()}
+	if b.network.LessThan(a.network) || (b.network == a.network && b.transport.LessThan(a.transport)) {
 		a, b = b, a
 	}
 	return reassemblyFlowKey{namespace: namespace, endpointA: a, endpointB: b}
 }
 
-func namespacedEndpoint(namespace uint64, endpoint gopacket.Endpoint) []byte {
-	identity := make([]byte, 16, 16+len(endpoint.Raw()))
-	binary.BigEndian.PutUint64(identity, namespace)
+func namespacedEndpoint(namespace uint64, endpoint gopacket.Endpoint) [16]byte {
+	var identity [16 + gopacket.MaxEndpointSize]byte
+	binary.BigEndian.PutUint64(identity[:], namespace)
 	binary.BigEndian.PutUint64(identity[8:], uint64(endpoint.EndpointType()))
-	identity = append(identity, endpoint.Raw()...)
-	sum := sha256.Sum256(identity)
-	return sum[:16]
+	n := copy(identity[16:], endpoint.Raw())
+	sum := sha256.Sum256(identity[:16+n])
+	return [16]byte(sum[:16])
 }

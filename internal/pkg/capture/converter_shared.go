@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
@@ -112,13 +113,13 @@ func ExtractPacketFields(pkt gopacket.Packet) PacketFields {
 			fields.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			fields.DstPort = strconv.Itoa(int(trans.DstPort))
 			flags := FormatTCPFlags(trans)
-			fields.Info = fmt.Sprintf("%s -> %s [%s]", fields.SrcPort, fields.DstPort, flags)
+			fields.Info = fields.SrcPort + " -> " + fields.DstPort + " [" + flags + "]"
 		case *layers.UDP:
 			fields.Protocol = "UDP"
 			fields.Transport = uint8(layers.IPProtocolUDP)
 			fields.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			fields.DstPort = strconv.Itoa(int(trans.DstPort))
-			fields.Info = fmt.Sprintf("%s -> %s", fields.SrcPort, fields.DstPort)
+			fields.Info = fields.SrcPort + " -> " + fields.DstPort
 		}
 	} else {
 		// Handle non-transport protocols (ICMP, IGMP)
@@ -162,30 +163,29 @@ func ExtractPacketFields(pkt gopacket.Packet) PacketFields {
 
 // FormatTCPFlags returns a string representation of TCP flags.
 // Used by multiple converters for consistent TCP flag display.
+var tcpFlagText = func() [64]string {
+	var text [64]string
+	for mask := range text {
+		var names []string
+		for bit, name := range []string{"SYN", "ACK", "FIN", "RST", "PSH", "URG"} {
+			if mask&(1<<bit) != 0 {
+				names = append(names, name)
+			}
+		}
+		text[mask] = strings.Join(names, " ")
+	}
+	text[0] = "NONE"
+	return text
+}()
+
 func FormatTCPFlags(tcp *layers.TCP) string {
-	flags := ""
-	if tcp.SYN {
-		flags += "SYN "
+	mask := 0
+	for bit, set := range [...]bool{tcp.SYN, tcp.ACK, tcp.FIN, tcp.RST, tcp.PSH, tcp.URG} {
+		if set {
+			mask |= 1 << bit
+		}
 	}
-	if tcp.ACK {
-		flags += "ACK "
-	}
-	if tcp.FIN {
-		flags += "FIN "
-	}
-	if tcp.RST {
-		flags += "RST "
-	}
-	if tcp.PSH {
-		flags += "PSH "
-	}
-	if tcp.URG {
-		flags += "URG "
-	}
-	if flags == "" {
-		return "NONE"
-	}
-	return flags[:len(flags)-1] // Remove trailing space
+	return tcpFlagText[mask]
 }
 
 // EtherTypeToProtocol converts an EthernetType to protocol name and info string.

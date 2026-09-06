@@ -1442,14 +1442,20 @@ func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) compone
 }
 
 func convertEnvelopeWithState(env *pipeline.PacketEnvelope, tracker *CallTracker, protocols *detector.Detector, flows sipFlowState) components.PacketDisplay {
+	return convertEnvelopeWithRawOwnership(env, tracker, protocols, flows, true)
+}
+
+// convertEnvelopeWithRawOwnership can borrow packet bytes for synchronous offline
+// indexing. Callers retaining the display after the packet's lifetime must copy.
+func convertEnvelopeWithRawOwnership(env *pipeline.PacketEnvelope, tracker *CallTracker, protocols *detector.Detector, flows sipFlowState, copyRaw bool) components.PacketDisplay {
 	pkt := env.Packet()
 
 	// Use shared extraction for basic fields
 	fields := capture.ExtractPacketFields(pkt)
 
 	// Copy raw data for packet display
-	var rawData []byte
-	if pkt.Data() != nil {
+	rawData := pkt.Data()
+	if copyRaw && rawData != nil {
 		rawData = make([]byte, len(pkt.Data()))
 		copy(rawData, pkt.Data())
 	}

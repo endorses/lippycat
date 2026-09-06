@@ -78,8 +78,24 @@ func (p *Parser) Parse(packet gopacket.Packet) *types.TLSMetadata {
 
 // ParsePayload parses TLS metadata from raw payload bytes.
 func (p *Parser) ParsePayload(payload []byte) *types.TLSMetadata {
-	if len(payload) < 6 {
+	recordVersion, handshake := payloadHandshake(payload)
+	if handshake == nil {
 		return nil
+	}
+	return p.ParseHandshake(recordVersion, handshake)
+}
+
+// RecognizesPayload reports whether ParsePayload would return metadata, without
+// calculating fingerprints or allocating hello fields. Reassembly uses this
+// packet-local hint before parsing the complete stream message.
+func (p *Parser) RecognizesPayload(payload []byte) bool {
+	_, handshake := payloadHandshake(payload)
+	return handshake != nil
+}
+
+func payloadHandshake(payload []byte) (uint16, []byte) {
+	if len(payload) < 6 {
+		return 0, nil
 	}
 
 	// TLS record header: ContentType(1) + Version(2) + Length(2) + data
@@ -89,7 +105,7 @@ func (p *Parser) ParsePayload(payload []byte) *types.TLSMetadata {
 
 	// Validate content type (must be Handshake)
 	if contentType != RecordTypeHandshake {
-		return nil
+		return 0, nil
 	}
 
 	// Validate TLS version
@@ -98,26 +114,26 @@ func (p *Parser) ParsePayload(payload []byte) *types.TLSMetadata {
 	if major != 0x03 || minor > 0x04 {
 		// Only accept SSL 3.0 through TLS 1.3
 		if major != 0x03 || minor < 0x00 {
-			return nil
+			return 0, nil
 		}
 	}
 
 	// Validate record length
 	if recordLength > 16384 || int(recordLength)+5 > len(payload) {
-		return nil
+		return 0, nil
 	}
 
 	// Parse a complete handshake message contained in this record. Stateful
 	// callers that reassemble a handshake spanning records use ParseHandshake.
 	if len(payload) < 10 {
-		return nil
+		return 0, nil
 	}
 	handshakeLength := int(payload[6])<<16 | int(payload[7])<<8 | int(payload[8])
 	messageEnd := 5 + 4 + handshakeLength
 	if messageEnd > int(recordLength)+5 {
-		return nil
+		return 0, nil
 	}
-	return p.ParseHandshake(recordVersion, payload[5:messageEnd])
+	return recordVersion, payload[5:messageEnd]
 }
 
 // ParseHandshake parses one complete TLS handshake message after record-layer

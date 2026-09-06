@@ -80,6 +80,12 @@ func (r *offlinePCAPReader) PacketLocation() offlinePacketLocation {
 }
 
 func (r *offlinePCAPReader) ReadPacketData() ([]byte, gopacket.CaptureInfo, error) {
+	return r.readPacketDataInto(nil)
+}
+
+// readPacketDataInto borrows scratch only when the complete record fits. The
+// ordered preparation caller finishes consuming it before the next read.
+func (r *offlinePCAPReader) readPacketDataInto(scratch []byte) ([]byte, gopacket.CaptureInfo, error) {
 	var header [16]byte
 	var ci gopacket.CaptureInfo
 	if _, err := io.ReadFull(r.reader, header[:]); err != nil {
@@ -102,7 +108,12 @@ func (r *offlinePCAPReader) ReadPacketData() ([]byte, gopacket.CaptureInfo, erro
 	if r.offset > math.MaxInt64-16-int64(ci.CaptureLength) || r.ordinal == math.MaxUint64 {
 		return nil, ci, fmt.Errorf("PCAP packet location overflow")
 	}
-	data := make([]byte, ci.CaptureLength)
+	var data []byte
+	if scratch != nil && ci.CaptureLength <= len(scratch) {
+		data = scratch[:ci.CaptureLength:ci.CaptureLength]
+	} else {
+		data = make([]byte, ci.CaptureLength)
+	}
 	if _, err := io.ReadFull(r.reader, data); err != nil {
 		if err == io.EOF {
 			err = io.ErrUnexpectedEOF

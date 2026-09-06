@@ -46,18 +46,24 @@ func (k locatorKey) less(b locatorKey) bool {
 	return binary.LittleEndian.Uint64(k[16:]) < binary.LittleEndian.Uint64(b[16:])
 }
 func encodeLocatorKey(p PacketInfo) (k locatorKey, err error) {
+	err = putLocatorKey(&k, p)
+	return
+}
+
+func putLocatorKey(k *locatorKey, p PacketInfo) error {
+	*k = locatorKey{}
 	v := p.Provenance
 	if v == nil {
-		return k, errors.New("normalized packet has no backing provenance")
+		return errors.New("normalized packet has no backing provenance")
 	}
 	ci, original := v.EffectiveCapture, v.OriginalCapture
 	for _, n := range []int{ci.CaptureLength, ci.Length, original.CaptureLength, original.Length} {
 		if n < 0 || uint64(n) > math.MaxUint32 {
-			return k, errors.New("invalid locator capture length")
+			return errors.New("invalid locator capture length")
 		}
 	}
 	if len(p.Packet.Data()) > offlineMaxPacketBytes {
-		return k, errors.New("locator packet exceeds supported allocation limit")
+		return errors.New("locator packet exceeds supported allocation limit")
 	}
 	put32 := func(off int, n uint32) { binary.LittleEndian.PutUint32(k[off:], n) }
 	put64 := func(off int, n uint64) { binary.LittleEndian.PutUint64(k[off:], n) }
@@ -97,9 +103,9 @@ func encodeLocatorKey(p PacketInfo) (k locatorKey, err error) {
 		k[148] = 1
 	}
 	put32(188, crc32.ChecksumIEEE(k[:188]))
-	return k, nil
+	return nil
 }
-func (k locatorKey) validate(sources int) error {
+func (k *locatorKey) validate(sources int) error {
 	if crc32.ChecksumIEEE(k[:188]) != binary.LittleEndian.Uint32(k[188:]) {
 		return errors.New("offline locator ordering checksum mismatch")
 	}
@@ -127,15 +133,29 @@ func (k locatorKey) locator() (l offline.Locator) {
 	return
 }
 func (k locatorKey) packet(data []byte, devices []pcaptypes.PcapInterface) PacketInfo {
+	return k.packetWithDecoder(data, devices, nil)
+}
+
+func (k locatorKey) packetWithDecoder(data []byte, devices []pcaptypes.PcapInterface, decoder *offlinePacketDecoder) PacketInfo {
 	u32 := func(off int) uint32 { return binary.LittleEndian.Uint32(k[off:]) }
 	u64 := func(off int) uint64 { return binary.LittleEndian.Uint64(k[off:]) }
 	ci := gopacket.CaptureInfo{Timestamp: time.Unix(int64(u64(0)), int64(u32(8))).UTC(), CaptureLength: int(u32(72)), Length: int(u32(76)), InterfaceIndex: int(u32(80))}
 	source := u32(12)
 	link := layers.LinkType(k[84])
-	packet := gopacket.NewPacket(data, link, gopacket.DecodeOptions{NoCopy: true, DecodeStreamsAsDatagrams: true})
+	var packet gopacket.Packet
+	if decoder == nil {
+		packet = gopacket.NewPacket(data, link, gopacket.DecodeOptions{NoCopy: true, DecodeStreamsAsDatagrams: true})
+	} else {
+		packet = decoder.decode(data, link)
+	}
 	packet.Metadata().CaptureInfo = ci
 	p := PacketInfo{Packet: packet, LinkType: link, SourceIndex: source, SourceSequence: u64(16), SourceInterfaceID: u32(116), SourcePath: devices[source].Name(), Interface: filepath.Base(devices[source].Name())}
-	p.Provenance = &offline.PacketProvenance{Locator: k.locator(), Derived: k[85] != 0, SourceIndex: source, SourcePath: p.SourcePath, LogicalSequence: p.SourceSequence, PhysicalOrdinal: u64(88), EffectiveCapture: ci, EffectiveLinkType: link, OriginalLinkType: layers.LinkType(k[86]), OriginalCapture: gopacket.CaptureInfo{Timestamp: time.Unix(int64(u64(96)), int64(u32(104))).UTC(), CaptureLength: int(u32(108)), Length: int(u32(112)), InterfaceIndex: int(u32(116))}, Context: offline.CaptureContext{Format: offline.CaptureFormat(k[120]), ByteOrder: offline.CaptureByteOrder(k[121]), TimestampResolutionBase: k[122], TimestampResolutionExponent: k[123], SectionID: u32(124), InterfaceID: u32(128), LinkType: u32(132), Snaplen: u32(136), TimestampOffset: int64(u64(140)), TimestampMissing: k[148] != 0}}
+	if decoder == nil {
+		p.Provenance = new(offline.PacketProvenance)
+	} else {
+		p.Provenance = &decoder.provenance
+	}
+	*p.Provenance = offline.PacketProvenance{Locator: k.locator(), Derived: k[85] != 0, SourceIndex: source, SourcePath: p.SourcePath, LogicalSequence: p.SourceSequence, PhysicalOrdinal: u64(88), EffectiveCapture: ci, EffectiveLinkType: link, OriginalLinkType: layers.LinkType(k[86]), OriginalCapture: gopacket.CaptureInfo{Timestamp: time.Unix(int64(u64(96)), int64(u32(104))).UTC(), CaptureLength: int(u32(108)), Length: int(u32(112)), InterfaceIndex: int(u32(116))}, Context: offline.CaptureContext{Format: offline.CaptureFormat(k[120]), ByteOrder: offline.CaptureByteOrder(k[121]), TimestampResolutionBase: k[122], TimestampResolutionExponent: k[123], SectionID: u32(124), InterfaceID: u32(128), LinkType: u32(132), Snaplen: u32(136), TimestampOffset: int64(u64(140)), TimestampMissing: k[148] != 0}}
 	return p
 }
 
@@ -246,6 +266,9 @@ func PrepareOfflineLocatorStream(ctx context.Context, devices []pcaptypes.PcapIn
 		return s, err
 	}
 	s.files.files = append(s.files.files, s.index)
+	if err = s.index.BufferWrites(ctx, min(uint64(32<<10), storage.MemoryLimit()/64)); err != nil {
+		return s, err
+	}
 	if _, err = s.index.Write(locatorHeader[:]); err != nil {
 		return s, err
 	}
@@ -261,19 +284,28 @@ func PrepareOfflineLocatorStream(ctx context.Context, devices []pcaptypes.PcapIn
 	}
 	report(true)
 	regressed := false
+	scanReservation, err := storage.ReserveTransient(ctx, 2048)
+	if err != nil {
+		return s, err
+	}
+	defer func() { err = errors.Join(err, scanReservation.Close()) }()
+	scanBuffer := make([]byte, 2048)
+	var scanDecoder offlinePacketDecoder
 	for source, device := range devices {
 		cursor, e := newOfflineCursor(ctx, device, filter, uint32(source))
 		if e != nil {
 			return s, e
 		}
 		cursor.allowRegression = true
+		cursor.scanBuffer = scanBuffer
 		r := locatorRange{start: s.count}
 		var previous locatorKey
 		hasPrevious := false
 		e = func() (readErr error) {
 			defer func() { readErr = errors.Join(readErr, cursor.Close()) }()
+			var key locatorKey
 			for {
-				p, e := cursor.Next(ctx)
+				p, e := cursor.next(ctx, &scanDecoder)
 				if errors.Is(e, io.EOF) {
 					identity, e := s.backings.Identity(cursor.backingID)
 					if e != nil {
@@ -285,7 +317,7 @@ func PrepareOfflineLocatorStream(ctx context.Context, devices []pcaptypes.PcapIn
 				if e != nil {
 					return e
 				}
-				key, e := encodeLocatorKey(p)
+				e = putLocatorKey(&key, p)
 				if e != nil {
 					return e
 				}
@@ -311,6 +343,9 @@ func PrepareOfflineLocatorStream(ctx context.Context, devices []pcaptypes.PcapIn
 		}
 		r.end = s.count
 		s.ranges = append(s.ranges, r)
+	}
+	if err = s.index.FlushWrites(); err != nil {
+		return s, err
 	}
 	state.Phase = "Sorting"
 	report(true)
@@ -435,7 +470,22 @@ func (h *locatorHeap) Pop() any          { a := *h; v := a[len(a)-1]; *h = a[:le
 // retention after receipt belongs to the analyzer's existing state budgets.
 // Replay is serialized with Close; consumers must not synchronously Close the
 // stream from inside their callback.
-func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(context.Context, <-chan PacketInfo) error) (err error) {
+func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(context.Context, <-chan PacketInfo) error) error {
+	return s.replay(parent, processor, nil)
+}
+
+// ReplayPackets visits ordered packets synchronously. Packet objects, layers,
+// bytes and provenance are borrowed until visit returns; consumers retaining
+// content must make their own copy.
+// This avoids a packet copy and goroutine handoff for synchronous analyzers.
+func (s *OfflineLocatorStream) ReplayPackets(parent context.Context, visit func(context.Context, PacketInfo) error) error {
+	if visit == nil {
+		return errors.New("offline locator replay requires a visitor")
+	}
+	return s.replay(parent, nil, visit)
+}
+
+func (s *OfflineLocatorStream) replay(parent context.Context, processor func(context.Context, <-chan PacketInfo) error, visit func(context.Context, PacketInfo) error) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -476,11 +526,12 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 	readers := make([]*bufio.Reader, len(ranges))
 	remaining := make([]uint64, len(ranges))
 	heads := make(locatorHeap, 0, len(ranges))
+	var keyScratch locatorKey
 	readHead := func(i int) error {
 		if remaining[i] == 0 {
 			return nil
 		}
-		var k locatorKey
+		k := &keyScratch
 		if _, err := io.ReadFull(readers[i], k[:]); err != nil {
 			return err
 		}
@@ -496,9 +547,9 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 		}
 		remaining[i]--
 		if s.ordering == "heap" {
-			heap.Push(&heads, locatorHead{k, i})
+			heap.Push(&heads, locatorHead{*k, i})
 		} else {
-			heads = append(heads, locatorHead{k, i})
+			heads = append(heads, locatorHead{*k, i})
 		}
 		return nil
 	}
@@ -513,8 +564,19 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 	defer cancel()
 	packets := make(chan PacketInfo)
 	done := make(chan error, 1)
-	go func() { defer cancel(); done <- processor(ctx, packets) }()
+	if visit == nil {
+		go func() { defer cancel(); done <- processor(ctx, packets) }()
+	}
 	var previous locatorKey
+	var decoder offlinePacketDecoder
+	var batchReader *offline.BackingBatchReader
+	if visit != nil && memoryLimit >= 16<<20 {
+		batchReader, err = s.backings.NewBatchReader(parent, min(uint64(64<<10), memoryLimit/1024))
+		if err != nil {
+			return err
+		}
+		defer func() { err = errors.Join(err, batchReader.Close()) }()
+	}
 	hasPrevious := false
 	produceErr := func() error {
 		// These scalar keys/locators are consumed before the batch lease closes;
@@ -562,13 +624,36 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 			if err != nil {
 				return err
 			}
-			lease, data, err := s.backings.ReadBatch(ctx, locs, max(prefetchBytes, bytes))
+			var lease io.Closer
+			var data [][]byte
+			if batchReader != nil {
+				lease, data, err = batchReader.ReadBatch(ctx, locs, max(prefetchBytes, bytes))
+			} else {
+				lease, data, err = s.backings.ReadBatch(ctx, locs, max(prefetchBytes, bytes))
+			}
 			if err != nil {
 				return errors.Join(err, copyReservation.Close())
 			}
 			err = func() (sendErr error) {
 				defer func() { sendErr = errors.Join(sendErr, lease.Close(), copyReservation.Close()) }()
 				for i, k := range keys {
+					if visit != nil {
+						if err := ctx.Err(); err != nil {
+							return err
+						}
+						if err := visit(ctx, k.packetWithDecoder(data[i], s.devices, &decoder)); err != nil {
+							return err
+						}
+						// The optional legacy observer may retain its packet. Give
+						// it owned bytes, preserving its existing contract.
+						packetObserver.RLock()
+						observer := packetObserver.fn
+						packetObserver.RUnlock()
+						if observer != nil {
+							observer(k.packet(append([]byte(nil), data[i]...), s.devices))
+						}
+						continue
+					}
 					owned := append([]byte(nil), data[i]...)
 					info := k.packet(owned, s.devices)
 					select {
@@ -589,6 +674,9 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 	close(packets)
 	if produceErr != nil {
 		cancel()
+	}
+	if visit != nil {
+		return errors.Join(produceErr, parent.Err())
 	}
 	consumerErr := <-done
 	if consumerErr != nil {

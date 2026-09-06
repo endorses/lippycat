@@ -11,6 +11,14 @@ import (
 // provenance. Callers replaying a PCAP must pass SourcePCAPReplay so replay and
 // live packets do not become indistinguishable after normalization.
 func FromPacketInfo(info capture.PacketInfo, kind ...pipeline.SourceKind) *pipeline.PacketEnvelope {
+	e := &pipeline.PacketEnvelope{}
+	ResetFromPacketInfo(e, info, kind...)
+	return e
+}
+
+// ResetFromPacketInfo is the synchronous borrowed-envelope counterpart of
+// FromPacketInfo. Previous consumers must finish before the envelope is reset.
+func ResetFromPacketInfo(e *pipeline.PacketEnvelope, info capture.PacketInfo, kind ...pipeline.SourceKind) {
 	sourceKind := pipeline.SourceLiveCapture
 	if len(kind) != 0 {
 		sourceKind = kind[0]
@@ -26,9 +34,8 @@ func FromPacketInfo(info capture.PacketInfo, kind ...pipeline.SourceKind) *pipel
 			linkType = layers.LinkTypeRaw
 		}
 	}
-	e := pipeline.NewDecodedPacketEnvelope(info.Packet, linkType)
+	e.ResetDecodedPacket(info.Packet, linkType)
 	e.Source = pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface, InputFile: info.SourcePath, InterfaceIndex: info.SourceInterfaceID, ArgumentIndex: info.SourceIndex, LogicalSequence: info.SourceSequence, PacketProvenance: info.Provenance}
-	return e
 }
 
 // ToPacketInfo converts an envelope back to the existing local capture record.

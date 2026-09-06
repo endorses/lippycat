@@ -1,6 +1,8 @@
 package offline
 
 import (
+	"bytes"
+	"compress/flate"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -214,5 +216,28 @@ func TestCompactCompressedBlockMalformedAndBudget(t *testing.T) {
 			require.Equal(t, before, s.Resources().InFlightBytes)
 			require.Zero(t, s.Resources().CachedBytes)
 		})
+	}
+}
+
+func TestCompactCompressionPreservesStandardDeflateCompatibility(t *testing.T) {
+	s, b, _, _ := compactReviewBuilder(t)
+	s.limits.CacheBytes = 32 << 20
+	payload := bytes.Repeat([]byte("schema-2 compatible column payload\x00"), 512)
+	var legacy bytes.Buffer
+	writer, err := flate.NewWriter(&legacy, flate.BestSpeed)
+	require.NoError(t, err)
+	_, err = writer.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	current, flags, err := b.compressCompact(payload)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, flags)
+	for _, compressed := range [][]byte{legacy.Bytes(), current} {
+		block := append(make([]byte, compactBlockHeaderBytes), compressed...)
+		decoded, err := inflateCompact(block, uint64(len(payload)))
+		require.NoError(t, err)
+		require.Equal(t, payload, decoded[compactBlockHeaderBytes:])
+		_, err = inflateCompact(append(block, 0), uint64(len(payload)))
+		require.Error(t, err, "both codecs reject trailing bytes")
 	}
 }

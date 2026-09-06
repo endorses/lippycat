@@ -1,6 +1,8 @@
 package offline
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +21,58 @@ type ScratchFile struct {
 	size            uint64
 	closed, removed bool
 	sealed          bool
+	buffer          *bufio.Writer
+	bufferBytes     uint64
+}
+
+// BufferWrites batches small ordering keys while charging both the buffer and
+// every admitted disk byte before copying. Reads flush pending keys first.
+func (f *ScratchFile) BufferWrites(ctx context.Context, size uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if f.closed || f.sealed || f.size != 0 || f.buffer != nil {
+		return errors.New("offline scratch buffering requires an empty open file")
+	}
+	size = min(size, f.storage.limits.MaxRecordBytes)
+	if size < 256 {
+		// Buffering is optional; small valid storage configurations retain
+		// their original unbuffered behavior.
+		return nil
+	}
+	if err := f.storage.reserveMemory(ctx, size+128); err != nil {
+		return err
+	}
+	f.bufferBytes = size + 128
+	f.buffer = bufio.NewWriterSize(f.file, int(size))
+	return nil
+}
+
+// FlushWrites finishes buffered appends and releases their memory before the
+// scratch stream enters its sorting/replay phase. A failed flush retains the
+// poisoned buffer and its charge so later reads cannot hide the write failure.
+func (f *ScratchFile) FlushWrites() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return errors.New("offline ordering scratch closed")
+	}
+	if err := f.flush(); err != nil {
+		return err
+	}
+	f.buffer = nil
+	f.storage.releaseMemory(f.bufferBytes)
+	f.bufferBytes = 0
+	return nil
+}
+
+func (f *ScratchFile) flush() error {
+	if f.buffer != nil {
+		return f.buffer.Flush()
+	}
+	return nil
 }
 
 func (s *Storage) NewScratchFile() (*ScratchFile, error) {
@@ -48,7 +102,13 @@ func (f *ScratchFile) Write(p []byte) (int, error) {
 	if err := f.storage.reserveDisk(uint64(len(p))); err != nil {
 		return 0, err
 	}
-	n, err := f.file.Write(p)
+	var n int
+	var err error
+	if f.buffer != nil {
+		n, err = f.buffer.Write(p)
+	} else {
+		n, err = f.file.Write(p)
+	}
 	f.size += uint64(n)
 	f.storage.releaseDisk(uint64(len(p) - n))
 	if err == nil && n != len(p) {
@@ -63,6 +123,9 @@ func (f *ScratchFile) ReadAt(p []byte, offset int64) (int, error) {
 	if f.closed {
 		return 0, errors.New("offline ordering scratch closed")
 	}
+	if err := f.flush(); err != nil {
+		return 0, err
+	}
 	return f.file.ReadAt(p, offset)
 }
 
@@ -75,6 +138,9 @@ func (f *ScratchFile) Reset() error {
 	}
 	if err := f.file.Truncate(0); err != nil {
 		return fmt.Errorf("truncate offline ordering scratch: %w", err)
+	}
+	if f.buffer != nil {
+		f.buffer.Reset(f.file)
 	}
 	f.storage.releaseDisk(f.size)
 	f.size = 0
@@ -91,7 +157,10 @@ func (f *ScratchFile) Close() error {
 	var err error
 	if !f.closed {
 		f.closed = true
-		err = f.file.Close()
+		err = errors.Join(f.flush(), f.file.Close())
+		f.buffer = nil
+		f.storage.releaseMemory(f.bufferBytes)
+		f.bufferBytes = 0
 	}
 	if removeErr := os.Remove(f.path); removeErr != nil && !os.IsNotExist(removeErr) {
 		return errors.Join(err, fmt.Errorf("remove offline ordering scratch: %w", removeErr))

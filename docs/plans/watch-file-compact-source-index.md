@@ -1,6 +1,6 @@
 # Compact source-backed offline index implementation plan
 
-Status: Phases 0–4 complete; phases 5–6 remain unchecked.
+Status: Phases 0–4 complete; phase 5 and the remaining phase-6 gates are pending.
 Scope: `lc watch file`.
 
 Phase 0 establishes the baseline, injectable differential oracle, measurement
@@ -263,14 +263,22 @@ as absent, and a pinned operation sees one immutable generation/revision pair.
 
 ## Phase 6 — Validate remaining costs and optional follow-ups
 
-- [ ] Profile the new completed-analysis path and remove duplicated protocol work only where measurements identify a worthwhile cost. Compare event/detail semantics after each change.
-- [ ] Evaluate bounded stateless parallel work with deterministic ordered output. Keep stateful analysis serial unless a separate design proves per-flow ownership, deterministic event admission and merge behavior.
+- [x] Profile the new completed-analysis path and remove duplicated protocol work only where measurements identify a worthwhile cost. Compare event/detail semantics after each change.
+- [x] Evaluate bounded stateless parallel work with deterministic ordered output. Keep stateful analysis serial unless a separate design proves per-flow ownership, deterministic event admission and merge behavior.
 - [ ] Decide whether persistent reuse is justified by repeat-open measurements. If deferred, record the reason; if implemented, key it by exact ordered input identity, schema/normalization/analyzer versions, BPF and frozen settings/key-material identity without persisting secrets.
 - [ ] For an implemented cache, require verified sources, atomic complete manifests, independent base/analysis completeness, bounded eviction and leases. Test stale/corrupt entries, source mutation, settings changes and concurrent readers. Report verification cost as part of repeat-open latency.
 - [ ] Run the final acceptance matrix, publish measurements and explicitly report unmet targets plus the next measured bottleneck. Update documentation and remove obsolete migration code once its oracle coverage is retained.
 - [ ] Format changed files before staging. Check off only verified tasks, and commit the implementation and updated plan in scoped commits as required by repository instructions; exclude unrelated baseline changes.
 
 ## Validation corpus and acceptance matrix
+
+The profile-driven completed-open follow-up was brought forward at the user's
+request, without implementing phase 5. Ordered stateful analysis remains serial;
+bounded analysis/storage workers and allocation reductions lower warm completion
+to a 3.622 s median. The 3.0 s target remains unmet. See
+[implementation and verification](../research/watch-file-three-second-open.md)
+and the [scoped plan](watch-file-three-second-open.md). This does not complete
+phase 6 or its phase-5-dependent acceptance gates.
 
 Synthetic fixtures must be distributable; keep the private capture and profile
 artifacts local. If the reported capture is unavailable, complete synthetic

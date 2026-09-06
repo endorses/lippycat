@@ -126,9 +126,18 @@ type BatchStats struct {
 // packet. The packet and its data must remain immutable after this call. Keeping
 // the packet avoids copying and decoding local capture records a second time.
 func NewDecodedPacketEnvelope(packet gopacket.Packet, linkType layers.LinkType) *PacketEnvelope {
-	e := &PacketEnvelope{LinkType: linkType}
+	e := &PacketEnvelope{}
+	e.ResetDecodedPacket(packet, linkType)
+	return e
+}
+
+// ResetDecodedPacket reuses an exclusively owned envelope between synchronous
+// callbacks. All consumers of the previous envelope must have finished; neither
+// the envelope nor its decoded packet may be used concurrently with this reset.
+func (e *PacketEnvelope) ResetDecodedPacket(packet gopacket.Packet, linkType layers.LinkType) {
+	*e = PacketEnvelope{LinkType: linkType}
 	if packet == nil {
-		return e
+		return
 	}
 
 	e.Data = packet.Data()
@@ -141,7 +150,6 @@ func NewDecodedPacketEnvelope(packet gopacket.Packet, linkType layers.LinkType) 
 		e.packet = packet
 	})
 	e.Stages = e.Stages.With(StageDecoded)
-	return e
 }
 
 // Packet lazily decodes the captured bytes and returns the same packet thereafter.

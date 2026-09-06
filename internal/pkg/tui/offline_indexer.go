@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/detector"
+	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/offline"
@@ -23,6 +24,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
@@ -164,7 +166,15 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 // indexOfflineDatasetBackend retains the legacy storage builder as a differential
 // test oracle. Production callers select one fixed backend in indexOfflineDataset;
 // backend selection is never part of the frozen configuration or user settings.
-func indexOfflineDatasetBackend(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage bool) (result *offlineIndexedSession, err error) {
+func indexOfflineDatasetBackend(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage bool) (*offlineIndexedSession, error) {
+	return indexOfflineDatasetBackendWithWorkers(ctx, storage, generation, cfg, report, observe, locatorOrdering, compactStorage, true, true)
+}
+
+func indexOfflineDatasetBackendWithAsync(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage, asynchronous bool) (result *offlineIndexedSession, err error) {
+	return indexOfflineDatasetBackendWithWorkers(ctx, storage, generation, cfg, report, observe, locatorOrdering, compactStorage, asynchronous, false)
+}
+
+func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage, asynchronous, asynchronousAnalysis bool) (result *offlineIndexedSession, err error) {
 	phase, phaseStart := "setup", time.Now()
 	mark := func(next string) {
 		if next == phase {
@@ -330,6 +340,28 @@ func indexOfflineDatasetBackend(ctx context.Context, storage *offline.Storage, g
 		return nil, errors.Join(err, dispatcher.Close(context.Background()))
 	}
 	defer func() { runtime.Close(); err = errors.Join(err, dispatcher.Close(context.Background())) }()
+	var analysisWorker *offlineAnalysisWorker
+	workerContext := ctx
+	if compactStorage && asynchronousAnalysis {
+		analysisWorker, err = newOfflineAnalysisWorker(ctx, storage, runtime.ObservePacket)
+		if err != nil {
+			return nil, err
+		}
+		if analysisWorker != nil {
+			defer func() { err = errors.Join(err, analysisWorker.Close()) }()
+			workerContext = analysisWorker.Context()
+		}
+	}
+	var asyncWriter *offline.AsyncCompactWriter
+	if compactStorage && asynchronous {
+		asyncWriter, err = offline.NewAsyncCompactWriter(workerContext, storage, builder)
+		if err != nil {
+			return nil, err
+		}
+		if asyncWriter != nil {
+			defer func() { err = errors.Join(err, asyncWriter.Close()) }()
+		}
+	}
 	var indexedPackets uint64
 	var assembler *pipeline.ReassemblyEngine
 	var handler *TUISIPHandler
@@ -344,6 +376,11 @@ func indexOfflineDatasetBackend(ctx context.Context, storage *offline.Storage, g
 			if uint64(id) < indexedPackets {
 				sipFactory.LastEvent = nil
 				if compactStorage {
+					if asyncWriter != nil {
+						if err := asyncWriter.Drain(); err != nil {
+							return err
+						}
+					}
 					var packet types.PacketDisplay
 					applyOfflineSIPEvent(&packet, event)
 					return builder.AmendVoIP(ctx, id, packet.Protocol, packet.Info, packet.VoIPData)
@@ -355,99 +392,125 @@ func indexOfflineDatasetBackend(ctx context.Context, storage *offline.Storage, g
 		assembler = pipeline.NewReassemblyEngine(sipFactory, reassemblyConfig)
 		defer func() { err = errors.Join(err, assembler.Close()); handler.Close() }()
 	}
-	consume := func(readCtx context.Context, ch <-chan capture.PacketInfo) error {
-		for info := range ch {
-			if err := readCtx.Err(); err != nil {
+	var replayEnvelope pipeline.PacketEnvelope
+	consumeOne := func(readCtx context.Context, info capture.PacketInfo) error {
+		if err := readCtx.Err(); err != nil {
+			return err
+		}
+		env := &replayEnvelope
+		captureadapter.ResetFromPacketInfo(env, info, pipeline.SourcePCAPReplay)
+		flows.mu.Lock()
+		flows.now = env.CaptureTime
+		flows.mu.Unlock()
+		if sipFactory != nil {
+			sipFactory.LastEvent = nil
+			sipFactory.CurrentID = offline.PacketID(indexedPackets)
+			if nextSIPFlush.IsZero() || !env.CaptureTime.Before(nextSIPFlush) {
+				// Expiry may release old queued messages. Their completion
+				// belongs to the original packet, not the incoming packet.
+				sipFactory.Flushing = true
+				flushErr := assembler.FlushOlderThan(env.CaptureTime.Add(-reassemblyConfig.IdleTimeout))
+				sipFactory.Flushing = false
+				if err := errors.Join(flushErr, sipFactory.Err()); err != nil {
+					return err
+				}
+				nextSIPFlush = env.CaptureTime.Add(reassemblyConfig.FlushInterval)
+			}
+		}
+		if assembler != nil && info.Packet.NetworkLayer() != nil && info.Packet.Layer(layers.LayerTypeTCP) != nil {
+			if err := assembler.AssembleWithContext(env, offlineSIPContext(info.Packet.Metadata().CaptureInfo, sipFactory.CurrentID)); err != nil {
 				return err
 			}
-			env := captureadapter.FromPacketInfo(info, pipeline.SourcePCAPReplay)
-			flows.mu.Lock()
-			flows.now = env.CaptureTime
-			flows.mu.Unlock()
-			if sipFactory != nil {
-				sipFactory.LastEvent = nil
-				sipFactory.CurrentID = offline.PacketID(indexedPackets)
-				if nextSIPFlush.IsZero() || !env.CaptureTime.Before(nextSIPFlush) {
-					// Expiry may release old queued messages. Their completion
-					// belongs to the original packet, not the incoming packet.
-					sipFactory.Flushing = true
-					flushErr := assembler.FlushOlderThan(env.CaptureTime.Add(-reassemblyConfig.IdleTimeout))
-					sipFactory.Flushing = false
-					if err := errors.Join(flushErr, sipFactory.Err()); err != nil {
-						return err
-					}
-					nextSIPFlush = env.CaptureTime.Add(reassemblyConfig.FlushInterval)
-				}
+		}
+		if sipFactory != nil {
+			if err := sipFactory.Err(); err != nil {
+				return err
 			}
-			if assembler != nil && info.Packet.NetworkLayer() != nil && info.Packet.Layer(layers.LayerTypeTCP) != nil {
-				if err := assembler.AssembleWithContext(env, offlineSIPContext(info.Packet.Metadata().CaptureInfo, sipFactory.CurrentID)); err != nil {
-					return err
-				}
+		}
+		source := eventanalysis.Source{NodeID: analysis.NodeID, CaptureSource: "pcap", InputFile: info.SourcePath, InterfaceIndex: info.SourceInterfaceID, CaptureScope: analysis.CaptureScope, Partial: analysis.Partial}
+		// The local event adapter currently enriches IP TCP/UDP flows
+		// only. Other logical packets still belong in the dataset even
+		// when they cannot produce a normalized connection event.
+		if offlinePacketSupportsEventAnalysis(info) {
+			observePacket := runtime.ObservePacket
+			if analysisWorker != nil {
+				observePacket = analysisWorker.Submit
 			}
-			if sipFactory != nil {
-				if err := sipFactory.Err(); err != nil {
-					return err
-				}
+			if err := observePacket(source, info); err != nil {
+				return err
 			}
-			source := eventanalysis.Source{NodeID: analysis.NodeID, CaptureSource: "pcap", InputFile: info.SourcePath, InterfaceIndex: info.SourceInterfaceID, CaptureScope: analysis.CaptureScope, Partial: analysis.Partial}
-			// The local event adapter currently enriches IP TCP/UDP flows
-			// only. Other logical packets still belong in the dataset even
-			// when they cannot produce a normalized connection event.
-			if offlinePacketSupportsEventAnalysis(info) {
-				if err := runtime.ObservePacket(source, info); err != nil {
-					return err
-				}
-			}
-			// LosslessDelivery drains before every event admission. Packets
-			// without events need no barrier; Close drains the final event
-			// and EOF output before the session can be published.
-			packet := convertEnvelopeWithState(env, session.Tracker, protocols, flows)
-			if sipFactory != nil && sipFactory.LastEvent != nil {
-				applyOfflineSIPEvent(&packet, *sipFactory.LastEvent)
-			}
-			if packet.Protocol == "DNS" {
-				packet.DNSData = parseDNSFromRawData(packet.RawData, packet.LinkType)
-			}
-			if packet.Protocol == "HTTP" {
-				packet.HTTPData = parseHTTPFromRawData(packet.RawData, packet.LinkType)
-			}
-			packet.TLSData = tlsParser.Parse(info.Packet)
-			if tcp, ok := info.Packet.TransportLayer().(*layers.TCP); session.TLSDecryptor != nil && ok {
-				if packet.TLSData != nil {
-					session.TLSDecryptor.processTLSHandshakePayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload(), !packet.TLSData.IsServer)
-				} else {
-					session.TLSDecryptor.processApplicationPayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload())
-				}
-				if err := session.TLSDecryptor.sessionManager.Err(); err != nil {
-					return fmt.Errorf("offline TLS analysis: %w", err)
-				}
-			}
-			if sipFactory == nil || sipFactory.LastEvent == nil {
-				agg.ProcessPacket(&packet)
-			}
-			meta := info.Packet.Metadata()
-			detail := offline.Detail{Source: offline.SourcePosition{ArgumentIndex: info.SourceIndex, Path: info.SourcePath, InterfaceID: info.SourceInterfaceID, Sequence: info.SourceSequence}, CapturedLength: uint32(meta.CaptureLength), OriginalLength: uint32(meta.Length), Packet: packet}
-			var appendErr error
-			if compactStorage {
-				if info.Provenance == nil {
-					return errors.New("compact offline packet has no effective-byte provenance")
-				}
-				appendErr = builder.AppendCompact(readCtx, detail, *info.Provenance)
+		}
+		// LosslessDelivery waits only when bounded event queues fill.
+		// Close drains all admitted events and EOF output before the
+		// completed session can be published.
+		// Compact append validates bytes synchronously and stores provenance;
+		// neither it nor call aggregation retains this raw packet buffer.
+		packet := convertEnvelopeWithRawOwnership(env, session.Tracker, protocols, flows, !compactStorage)
+		if sipFactory != nil && sipFactory.LastEvent != nil {
+			applyOfflineSIPEvent(&packet, *sipFactory.LastEvent)
+		}
+		if packet.Protocol == "DNS" {
+			packet.DNSData = parseOfflineDNSPacket(info.Packet, packet.LinkType)
+		}
+		if packet.Protocol == "HTTP" {
+			packet.HTTPData = parseHTTPFromPacket(info.Packet)
+		}
+		packet.TLSData = tlsParser.Parse(info.Packet)
+		if tcp, ok := info.Packet.TransportLayer().(*layers.TCP); session.TLSDecryptor != nil && ok {
+			if packet.TLSData != nil {
+				session.TLSDecryptor.processTLSHandshakePayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload(), !packet.TLSData.IsServer)
 			} else {
-				appendErr = builder.Append(readCtx, detail)
+				session.TLSDecryptor.processApplicationPayload(packet.SrcIP, packet.DstIP, packet.SrcPort, packet.DstPort, tcp.LayerPayload())
 			}
-			if appendErr != nil {
-				return appendErr
+			if err := session.TLSDecryptor.sessionManager.Err(); err != nil {
+				return fmt.Errorf("offline TLS analysis: %w", err)
 			}
-			indexedPackets++
-			progress.LogicalPackets++
-			progress.ScannedBytes += uint64(meta.CaptureLength)
-			publish(false)
+		}
+		if sipFactory == nil || sipFactory.LastEvent == nil {
+			agg.ProcessPacket(&packet)
+		}
+		meta := info.Packet.Metadata()
+		detail := offline.Detail{Source: offline.SourcePosition{ArgumentIndex: info.SourceIndex, Path: info.SourcePath, InterfaceID: info.SourceInterfaceID, Sequence: info.SourceSequence}, CapturedLength: uint32(meta.CaptureLength), OriginalLength: uint32(meta.Length), Packet: packet}
+		var appendErr error
+		if compactStorage {
+			if info.Provenance == nil {
+				return errors.New("compact offline packet has no effective-byte provenance")
+			}
+			if asyncWriter != nil {
+				appendErr = asyncWriter.Append(detail, *info.Provenance)
+			} else {
+				appendErr = builder.AppendCompact(readCtx, detail, *info.Provenance)
+			}
+		} else {
+			appendErr = builder.Append(readCtx, detail)
+		}
+		if appendErr != nil {
+			return appendErr
+		}
+		indexedPackets++
+		progress.LogicalPackets++
+		progress.ScannedBytes += uint64(meta.CaptureLength)
+		publish(false)
+		return nil
+	}
+	consume := func(readCtx context.Context, ch <-chan capture.PacketInfo) error {
+		for info := range ch {
+			if err := consumeOne(readCtx, info); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
 	if prepared != nil {
-		err = prepared.Replay(ctx, consume)
+		if compactStorage {
+			replayCtx := workerContext
+			if asyncWriter != nil {
+				replayCtx = asyncWriter.Context()
+			}
+			err = prepared.ReplayPackets(replayCtx, consumeOne)
+		} else {
+			err = prepared.Replay(ctx, consume)
+		}
 		if closeErr := prepared.Close(); closeErr != nil {
 			err = errors.Join(err, closeErr)
 		} else {
@@ -471,6 +534,16 @@ func indexOfflineDatasetBackend(ctx context.Context, storage *offline.Storage, g
 			return nil, err
 		}
 		handler.Close()
+	}
+	if asyncWriter != nil {
+		if err = asyncWriter.Close(); err != nil {
+			return nil, err
+		}
+	}
+	if analysisWorker != nil {
+		if err = analysisWorker.Close(); err != nil {
+			return nil, err
+		}
 	}
 	progress.State = offline.Finalizing
 	publish(true)
@@ -523,4 +596,14 @@ func applyOfflineSIPEvent(packet *types.PacketDisplay, event sharedsip.Event) {
 	packet.Protocol = "SIP"
 	packet.Info = event.StartLine
 	packet.VoIPData = &types.VoIPMetadata{CallID: event.CallID, Method: event.Method, Status: event.ResponseCode, From: event.From, To: event.To, FromTag: event.FromTag, ToTag: event.ToTag, User: event.FromUser, Headers: cloneStringMap(event.Headers)}
+}
+
+// TCP replay enables datagram dissection for other protocols. Its automatically
+// decoded DNS layer can include the two-byte TCP length prefix, so preserve the
+// original transport-aware DNS parsing for TCP while reusing UDP dissection.
+func parseOfflineDNSPacket(packet gopacket.Packet, linkType layers.LinkType) *types.DNSMetadata {
+	if _, tcp := packet.TransportLayer().(*layers.TCP); tcp {
+		return parseDNSFromRawData(packet.Data(), linkType)
+	}
+	return dns.NewParser().Parse(packet)
 }

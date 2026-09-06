@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"io"
+
+	fastflate "github.com/klauspost/compress/flate"
 )
 
 // BestSpeed's window, hash table, tokens and Huffman state fit within this
@@ -36,7 +38,7 @@ func (b *Builder) compressCompact(payload []byte) ([]byte, uint16, error) {
 		if err := b.d.storage.reserveMemory(context.Background(), compactCompressorMemory); err != nil {
 			return nil, 0, err
 		}
-		w, err := flate.NewWriter(io.Discard, flate.BestSpeed)
+		w, err := fastflate.NewWriter(io.Discard, fastflate.BestSpeed)
 		if err != nil {
 			b.d.storage.releaseMemory(compactCompressorMemory)
 			return nil, 0, err
@@ -84,8 +86,8 @@ func (b *Builder) compactBuffer(target *[]byte, n int) ([]byte, error) {
 
 func (d *diskDataset) releaseCompactBuffers() {
 	c := d.compact
-	d.storage.releaseMemory(uint64(cap(c.blockBuffer) + cap(c.compressionBuffer)))
-	c.blockBuffer, c.compressionBuffer = nil, nil
+	d.storage.releaseMemory(uint64(cap(c.blockBuffer)+cap(c.compressionBuffer)+cap(c.rowPool)) + uint64(cap(c.columnEnds))*4)
+	c.blockBuffer, c.compressionBuffer, c.columnEnds, c.rowPool = nil, nil, nil, nil
 }
 
 func (d *diskDataset) releaseCompactCompressor() {

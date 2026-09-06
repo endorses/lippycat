@@ -33,6 +33,26 @@ func Enrich(packet gopacket.Packet, metadata *data.PacketMetadata, includeHTTPHe
 	return metadata
 }
 
+// EnrichForReassembly extracts flow metadata and the same application hint as
+// Enrich, without constructing packet-local TLS/HTTP metadata that reassembly
+// immediately discards. Complete messages are parsed by the ordered stream path.
+func EnrichForReassembly(packet gopacket.Packet) (*data.PacketMetadata, string) {
+	if packet == nil {
+		return nil, ""
+	}
+	metadata := &data.PacketMetadata{}
+	populateFlow(packet, metadata)
+	if tcp, ok := packet.Layer(layers.LayerTypeTCP).(*layers.TCP); ok && len(tcp.Payload) > 0 {
+		if httpparser.NewParser().RecognizesPayload(tcp.Payload) {
+			return metadata, "http"
+		}
+		if tls.NewParser().RecognizesPayload(tcp.Payload) {
+			return metadata, "tls"
+		}
+	}
+	return metadata, ""
+}
+
 func populateFlow(packet gopacket.Packet, metadata *data.PacketMetadata) {
 	if network := packet.NetworkLayer(); network != nil {
 		metadata.SrcIp = network.NetworkFlow().Src().String()

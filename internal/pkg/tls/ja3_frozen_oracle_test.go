@@ -1,0 +1,299 @@
+//go:build cli || hunter || processor || tap || tui || all
+
+package tls
+
+// Frozen pre-optimization implementation, retained only as a differential oracle.
+
+import (
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/endorses/lippycat/internal/pkg/types"
+)
+
+// JA3 GREASE values that should be excluded from fingerprint calculation.
+// GREASE (Generate Random Extensions And Sustain Extensibility) values are
+// used to prevent implementation bugs from being baked into the TLS ecosystem.
+var frozenGreaseValues = map[uint16]bool{
+	0x0a0a: true, 0x1a1a: true, 0x2a2a: true, 0x3a3a: true,
+	0x4a4a: true, 0x5a5a: true, 0x6a6a: true, 0x7a7a: true,
+	0x8a8a: true, 0x9a9a: true, 0xaaaa: true, 0xbaba: true,
+	0xcaca: true, 0xdada: true, 0xeaea: true, 0xfafa: true,
+}
+
+// frozenCalculateJA3 calculates the JA3 fingerprint for a ClientHello.
+// JA3 = MD5(SSLVersion,Ciphers,Extensions,EllipticCurves,EllipticCurveFormats)
+//
+// Reference: https://github.com/salesforce/ja3
+func frozenCalculateJA3(metadata *types.TLSMetadata) (ja3String string, ja3Hash string) {
+	if metadata == nil || metadata.IsServer {
+		return "", ""
+	}
+
+	// Version
+	version := fmt.Sprintf("%d", metadata.VersionRaw)
+
+	// Ciphers (filter out GREASE)
+	var ciphers []string
+	for _, c := range metadata.CipherSuites {
+		if !frozenIsGREASE(c) {
+			ciphers = append(ciphers, strconv.Itoa(int(c)))
+		}
+	}
+	ciphersStr := strings.Join(ciphers, "-")
+
+	// Extensions (filter out GREASE)
+	var extensions []string
+	for _, e := range metadata.Extensions {
+		if !frozenIsGREASE(e) {
+			extensions = append(extensions, strconv.Itoa(int(e)))
+		}
+	}
+	extensionsStr := strings.Join(extensions, "-")
+
+	// Elliptic Curves / Supported Groups (filter out GREASE)
+	var curves []string
+	for _, c := range metadata.SupportedGroups {
+		if !frozenIsGREASE(c) {
+			curves = append(curves, strconv.Itoa(int(c)))
+		}
+	}
+	curvesStr := strings.Join(curves, "-")
+
+	// EC Point Formats
+	var formats []string
+	for _, f := range metadata.ECPointFormats {
+		formats = append(formats, strconv.Itoa(int(f)))
+	}
+	formatsStr := strings.Join(formats, "-")
+
+	// Build JA3 string
+	ja3String = fmt.Sprintf("%s,%s,%s,%s,%s", version, ciphersStr, extensionsStr, curvesStr, formatsStr)
+
+	// Calculate MD5 hash
+	hash := md5.Sum([]byte(ja3String))
+	ja3Hash = hex.EncodeToString(hash[:])
+
+	return ja3String, ja3Hash
+}
+
+// frozenCalculateJA3S calculates the JA3S fingerprint for a ServerHello.
+// JA3S = MD5(SSLVersion,Cipher,Extensions)
+//
+// Reference: https://github.com/salesforce/ja3
+func frozenCalculateJA3S(metadata *types.TLSMetadata) (ja3sString string, ja3sHash string) {
+	if metadata == nil || !metadata.IsServer {
+		return "", ""
+	}
+
+	// Version
+	version := fmt.Sprintf("%d", metadata.VersionRaw)
+
+	// Selected cipher
+	cipherStr := strconv.Itoa(int(metadata.SelectedCipher))
+
+	// Extensions (filter out GREASE)
+	var extensions []string
+	for _, e := range metadata.Extensions {
+		if !frozenIsGREASE(e) {
+			extensions = append(extensions, strconv.Itoa(int(e)))
+		}
+	}
+	extensionsStr := strings.Join(extensions, "-")
+
+	// Build JA3S string
+	ja3sString = fmt.Sprintf("%s,%s,%s", version, cipherStr, extensionsStr)
+
+	// Calculate MD5 hash
+	hash := md5.Sum([]byte(ja3sString))
+	ja3sHash = hex.EncodeToString(hash[:])
+
+	return ja3sString, ja3sHash
+}
+
+// frozenCalculateJA4 calculates the JA4 fingerprint for a ClientHello.
+// JA4 is a more modern fingerprint format that improves on JA3.
+//
+// Format: t{version}{sni}{ciphers}_{extensions}_{alpn}
+// Example: t13d1516h2_8daaf6152771_b186095e22bb
+//
+// Reference: https://github.com/FoxIO-LLC/ja4
+func frozenCalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint string) {
+	if metadata == nil || metadata.IsServer {
+		return "", ""
+	}
+
+	var parts []string
+
+	// Part 1: Protocol type (t=TLS, q=QUIC)
+	proto := "t"
+
+	// Part 2: highest advertised non-GREASE TLS version. ClientHello version
+	// lists are not required to be sorted, so using their first entry is wrong.
+	version := frozenHighestSupportedVersion(metadata.SupportedVersions)
+	if version == 0 {
+		version = metadata.VersionRaw
+	}
+	var versionCode string
+	switch version {
+	case VersionSSL30:
+		versionCode = "s3"
+	case VersionTLS10:
+		versionCode = "10"
+	case VersionTLS11:
+		versionCode = "11"
+	case VersionTLS12:
+		versionCode = "12"
+	case VersionTLS13:
+		versionCode = "13"
+	default:
+		if metadata.VersionRaw >= VersionTLS13D && metadata.VersionRaw < 0x7F20 {
+			versionCode = "13"
+		} else {
+			versionCode = "00"
+		}
+	}
+
+	// Part 3: SNI indicator (d=has domain, i=IP only)
+	sniIndicator := "i"
+	if frozenContainsUint16(metadata.Extensions, ExtensionSNI) {
+		sniIndicator = "d"
+	}
+
+	// Part 4: Number of cipher suites (2 digits, capped at 99)
+	cipherCount := len(metadata.CipherSuites)
+	for _, c := range metadata.CipherSuites {
+		if frozenIsGREASE(c) {
+			cipherCount--
+		}
+	}
+	if cipherCount > 99 {
+		cipherCount = 99
+	}
+
+	// Part 5: Number of extensions (2 digits, capped at 99)
+	extCount := len(metadata.Extensions)
+	for _, e := range metadata.Extensions {
+		if frozenIsGREASE(e) {
+			extCount--
+		}
+	}
+	if extCount > 99 {
+		extCount = 99
+	}
+
+	// Part 6: First and last bytes of the first ALPN protocol.
+	alpn := frozenJa4ALPN(metadata.ALPNProtocols)
+
+	// Build JA4_a (first part)
+	ja4a := fmt.Sprintf("%s%s%s%02d%02d%s", proto, versionCode, sniIndicator, cipherCount, extCount, alpn)
+	parts = append(parts, ja4a)
+
+	// Part 7: Sorted cipher suites hash (JA4_b)
+	var sortedCiphers []int
+	for _, c := range metadata.CipherSuites {
+		if !frozenIsGREASE(c) {
+			sortedCiphers = append(sortedCiphers, int(c))
+		}
+	}
+	sort.Ints(sortedCiphers)
+	var cipherStrs []string
+	for _, c := range sortedCiphers {
+		cipherStrs = append(cipherStrs, fmt.Sprintf("%04x", c))
+	}
+	cipherHash := frozenTruncatedHash(strings.Join(cipherStrs, ","))
+	parts = append(parts, cipherHash)
+
+	// Part 8: Sorted extensions hash (JA4_c), excluding SNI and ALPN
+	var sortedExts []int
+	for _, e := range metadata.Extensions {
+		if !frozenIsGREASE(e) && e != ExtensionSNI && e != ExtensionALPN {
+			sortedExts = append(sortedExts, int(e))
+		}
+	}
+	sort.Ints(sortedExts)
+	var extStrs []string
+	for _, e := range sortedExts {
+		extStrs = append(extStrs, fmt.Sprintf("%04x", e))
+	}
+
+	// Add signature algorithms to extension hash
+	var sigAlgStrs []string
+	for _, s := range metadata.SignatureAlgos {
+		if !frozenIsGREASE(s) {
+			sigAlgStrs = append(sigAlgStrs, fmt.Sprintf("%04x", s))
+		}
+	}
+	extInput := strings.Join(extStrs, ",")
+	if len(sigAlgStrs) > 0 {
+		extInput += "_" + strings.Join(sigAlgStrs, ",")
+	}
+	extHash := frozenTruncatedHash(extInput)
+	parts = append(parts, extHash)
+
+	// Build final JA4 fingerprint
+	ja4Fingerprint = strings.Join(parts, "_")
+	ja4String = ja4Fingerprint // JA4 string and fingerprint are the same
+
+	return ja4String, ja4Fingerprint
+}
+
+func frozenHighestSupportedVersion(versions []uint16) uint16 {
+	var highest uint16
+	for _, version := range versions {
+		if !frozenIsGREASE(version) && version > highest {
+			highest = version
+		}
+	}
+	return highest
+}
+
+// frozenIsGREASE checks if a value is a GREASE value.
+func frozenIsGREASE(value uint16) bool {
+	return frozenGreaseValues[value]
+}
+
+func frozenContainsUint16(values []uint16, target uint16) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+// frozenJa4ALPN applies JA4's first/last byte transformation to the first ALPN value.
+func frozenJa4ALPN(protocols []string) string {
+	if len(protocols) == 0 || len(protocols[0]) == 0 {
+		return "00"
+	}
+
+	value := []byte(protocols[0])
+	first, last := value[0], value[len(value)-1]
+	if frozenIsASCIIAlphanumeric(first) && frozenIsASCIIAlphanumeric(last) {
+		return string([]byte{first, last})
+	}
+
+	hexValue := hex.EncodeToString(value)
+	return string([]byte{hexValue[0], hexValue[len(hexValue)-1]})
+}
+
+func frozenIsASCIIAlphanumeric(value byte) bool {
+	return value >= '0' && value <= '9' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= 'a' && value <= 'z'
+}
+
+// frozenTruncatedHash computes a truncated SHA256 hash for JA4.
+func frozenTruncatedHash(input string) string {
+	if input == "" {
+		return "000000000000"
+	}
+	hash := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(hash[:6]) // First 12 hex chars (6 bytes)
+}

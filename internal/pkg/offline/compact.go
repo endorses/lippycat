@@ -2,7 +2,6 @@ package offline
 
 import (
 	"bytes"
-	"compress/flate"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -17,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/klauspost/compress/flate"
 )
 
 // StatelessDecoder reconstructs packet-local details from owned effective bytes.
@@ -28,17 +28,20 @@ const compactHeaderBytes = 32
 const compactSchemaMinor = 1
 const compactBlockHeaderBytes = 72
 const compactRows = 128
+const compactRowSlotBytes = 1024
 const compactIndexBytes = 64
 
 type compactState struct {
 	compressor         *flate.Writer
 	blockBuffer        []byte
 	compressionBuffer  []byte
+	columnEnds         []uint32
 	registries         compactRegistries
 	registry           *BackingRegistry
 	decode             StatelessDecoder
 	sources            []SourcePosition
 	rows               [][]byte
+	rowPool            []byte
 	rowMemory, rowDisk uint64
 	sourceMemory       uint64
 	pendingAmend       bool
@@ -255,7 +258,7 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 		return fmt.Errorf("compact row scratch: %w", err)
 	}
 	defer func() { d.storage.releaseMemory(reservation) }()
-	if _, err := compactRecordMemory(&detail, max); err != nil {
+	if _, err := compactDetailMemory(&detail, max); err != nil {
 		return err
 	}
 	summary := NewSummary(id, detail.Packet)
@@ -280,10 +283,41 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	if err = b.internCompactRow(ctx, &r); err != nil {
 		return err
 	}
-	encoded, err := encodeCompactRow(&r, max, 16)
+	c := d.compact
+	var slot []byte
+	if d.storage.limits.CacheBytes >= 16<<20 {
+		// Slots correspond to pending row positions. Flush full blocks before
+		// choosing the next slot so no encoded pending row can be overwritten.
+		if len(c.rows) >= compactRows {
+			if err = b.flushCompact(); err != nil {
+				return err
+			}
+		}
+		if c.rowPool == nil {
+			const poolBytes = compactRows * compactRowSlotBytes
+			// Prove room for an ordinary maximum-sized row as well as the
+			// optional slab. Otherwise pooling could consume the last bytes
+			// needed by the existing per-row admission immediately below.
+			headroom := max + 4096
+			if poolErr := d.storage.reserveMemory(ctx, poolBytes+headroom); poolErr == nil {
+				c.rowPool = make([]byte, poolBytes)
+				d.storage.releaseMemory(headroom)
+			} else if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// If optional pooling does not fit beside retained sessions, the
+			// original per-row admission remains authoritative.
+		}
+		if c.rowPool != nil {
+			start := len(c.rows) * compactRowSlotBytes
+			slot = c.rowPool[start : start : start+compactRowSlotBytes]
+		}
+	}
+	encoded, err := encodeCompactRowInto(&r, max, 16, slot)
 	if err != nil {
 		return err
 	}
+	pooled := slot != nil && &encoded[0] == &slot[:cap(slot)][0]
 	// Stateless decoding and metadata comparison are finished. Retain only the
 	// summary and encoded row allowance while flushing prior buffered rows.
 	if d.storage.limits.CacheBytes < 16<<20 {
@@ -291,12 +325,14 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 		d.storage.releaseMemory(reservation - rowReservation)
 		reservation = rowReservation
 	}
-	c := d.compact
 	// Each pending row includes its sparse metadata reference. Both owned heap
 	// capacity and eventual on-disk bytes are admitted before buffering.
 	binary.LittleEndian.PutUint64(encoded, off)
 	binary.LittleEndian.PutUint64(encoded[8:], size)
 	cost := uint64(cap(encoded)) + 32
+	if pooled {
+		cost = 32 // Encoded capacity belongs to the separately admitted slab.
+	}
 	admission := uint64(len(encoded)) + uint64(len(compactFieldNames[reflect.TypeOf(compactRow{})])+2)*40 + compactBlockHeaderBytes + compactIndexBytes
 	blockBudget := max
 	if d.storage.limits.CacheBytes < 16<<20 {
@@ -305,6 +341,12 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	if len(c.rows) > 0 && (len(c.rows) >= compactRows || c.rowDisk+admission > blockBudget) {
 		if err = b.flushCompact(); err != nil {
 			return err
+		}
+		if pooled {
+			// A byte-budget flush can occur after encoding into a later slot.
+			// Move that row into newly free slot zero before it is retained.
+			copy(c.rowPool, encoded)
+			encoded = c.rowPool[:len(encoded):compactRowSlotBytes]
 		}
 	}
 	if admission > max {
@@ -338,12 +380,25 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 
 func metadataDifference(a, b compactMetadata) compactOverrides {
 	result := compactOverrides{}
-	av, bv, rv := reflect.ValueOf(a), reflect.ValueOf(b), reflect.ValueOf(&result.Metadata).Elem()
-	for i := 0; i < 5; i++ {
-		if !reflect.DeepEqual(av.Field(i).Interface(), bv.Field(i).Interface()) {
-			result.Mask |= 1 << i
-			rv.Field(i).Set(av.Field(i))
-		}
+	if a.VoIP != b.VoIP && !reflect.DeepEqual(a.VoIP, b.VoIP) {
+		result.Mask |= 1 << 0
+		result.Metadata.VoIP = a.VoIP
+	}
+	if a.DNS != b.DNS && !reflect.DeepEqual(a.DNS, b.DNS) {
+		result.Mask |= 1 << 1
+		result.Metadata.DNS = a.DNS
+	}
+	if a.Email != b.Email && !reflect.DeepEqual(a.Email, b.Email) {
+		result.Mask |= 1 << 2
+		result.Metadata.Email = a.Email
+	}
+	if a.TLS != b.TLS && !reflect.DeepEqual(a.TLS, b.TLS) {
+		result.Mask |= 1 << 3
+		result.Metadata.TLS = a.TLS
+	}
+	if a.HTTP != b.HTTP && !reflect.DeepEqual(a.HTTP, b.HTTP) {
+		result.Mask |= 1 << 4
+		result.Metadata.HTTP = a.HTTP
 	}
 	return result
 }
@@ -365,10 +420,10 @@ func (b *Builder) flushCompact() error {
 		return nil
 	}
 	// Block transposition/output are admitted by writeCompactBlock. This loop
-	// only needs one directory entry and its fixed checksum scratch.
+	// needs a bounded directory batch and its fixed checksum/header scratch.
 	scratch := c.rowDisk + compactBlockHeaderBytes
 	if b.d.storage.limits.CacheBytes < 16<<20 {
-		scratch = uint64(compactIndexBytes + 8 + 32 + compactBlockHeaderBytes*2)
+		scratch = uint64(len(c.rows)*compactIndexBytes + 8 + 32 + compactBlockHeaderBytes*4)
 	}
 	if err := b.d.storage.reserveMemory(context.Background(), scratch); err != nil {
 		return err
@@ -378,29 +433,32 @@ func (b *Builder) flushCompact() error {
 	b.d.storage.releaseDisk(c.rowDisk)
 	off, size, err := b.writeCompactBlock(b.d.summaries, 1, c.first, c.rows)
 	if err == nil {
+		entries := make([]byte, len(c.rows)*compactIndexBytes)
+		// Borrow this flush's already-admitted scratch. Only IndexChecksum is
+		// used, so the scanner does not allocate block buffers or an inflater.
+		checksums := compactScanReader{dataset: b.d, held: scratch}
 		for i := range c.rows {
-			var entry [compactIndexBytes]byte
-			binary.LittleEndian.PutUint64(entry[:], off)
+			entry := entries[i*compactIndexBytes : (i+1)*compactIndexBytes]
+			binary.LittleEndian.PutUint64(entry, off)
 			binary.LittleEndian.PutUint64(entry[8:], size)
 			copy(entry[16:32], c.rows[i][:16])
 			id := uint64(c.first) + uint64(i)
-			checksum, e := b.d.compactIndexChecksum(entry[:32], PacketID(id))
+			checksum, e := checksums.IndexChecksum(entry[:32], PacketID(id))
 			if e != nil {
 				err = e
 				break
 			}
 			copy(entry[32:], checksum[:])
+		}
+		if err == nil {
 			if c.pendingAmend {
-				n, e := b.d.offsets.WriteAt(entry[:], compactHeaderBytes+int64(id)*compactIndexBytes)
-				if e == nil && n != len(entry) {
+				n, e := b.d.offsets.WriteAt(entries, compactHeaderBytes+int64(c.first)*compactIndexBytes)
+				if e == nil && n != len(entries) {
 					e = io.ErrShortWrite
 				}
 				err = e
 			} else {
-				err = b.write(b.d.offsets, entry[:])
-			}
-			if err != nil {
-				break
+				err = b.write(b.d.offsets, entries)
 			}
 		}
 	}

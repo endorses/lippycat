@@ -554,3 +554,27 @@ func decodeCompactFields(parts [][]byte, target any, max uint64) error {
 	v.Elem().Set(result)
 	return nil
 }
+
+// compactDetailMemory avoids boxing the complete hot-path Detail in reflection.
+// Metadata retains the generic recursive accounting, including maps and slices.
+func compactDetailMemory(detail *Detail, max uint64) (uint64, error) {
+	if detail == nil {
+		return 0, fmt.Errorf("nil compact detail")
+	}
+	n := uint64(reflect.TypeOf(Detail{}).Size())
+	p := &detail.Packet
+	for _, value := range [...]string{detail.Source.Path, p.SrcIP, p.DstIP, p.SrcPort, p.DstPort, p.Protocol, p.Info, p.NodeID, p.Interface} {
+		if err := addBudget(&n, uint64(len(value)), max); err != nil {
+			return n, err
+		}
+	}
+	if err := addBudget(&n, uint64(len(p.RawData)), max); err != nil {
+		return n, err
+	}
+	for _, metadata := range [...]any{p.VoIPData, p.DNSData, p.EmailData, p.TLSData, p.HTTPData} {
+		if err := measureMemory(reflect.ValueOf(metadata), &n, max); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}

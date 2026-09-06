@@ -50,7 +50,7 @@ type Config struct {
 	// idle. Leave it disabled for deterministic offline replay, where packet
 	// timestamps and EOF exclusively drive the capture clock.
 	LiveExpiry bool
-	// LosslessDelivery drains the dispatcher before every admission. It is
+	// LosslessDelivery waits for bounded dispatcher and sink queue space. It is
 	// intended for deterministic offline analysis only; live callers should
 	// retain the default non-blocking, drop-on-pressure behavior.
 	LosslessDelivery bool
@@ -59,20 +59,23 @@ type Config struct {
 type Stats struct{ Observed, Emitted, Invalid, Dropped, ReassemblyEvicted uint64 }
 
 type Runtime struct {
-	mu             sync.Mutex
-	cfg            Config
-	identity       *flowid.Cache
-	connections    *conntrack.Tracker
-	tcpAssembler   *capture.TCPAssembler
-	activeTCPFlows map[reassemblyFlowKey]struct{}
-	files          *fileanalysis.Analyzer
-	dns            *dnsparser.Parser
-	nextExpiry     time.Time
-	closed         bool
-	stats          Stats
-	expiryStop     chan struct{}
-	expiryDone     chan struct{}
-	stopExpiry     sync.Once
+	mu              sync.Mutex
+	cfg             Config
+	identity        *flowid.Cache
+	connections     *conntrack.Tracker
+	tcpAssembler    *capture.TCPAssembler
+	activeTCPFlows  map[reassemblyFlowKey]struct{}
+	namespaceSource reassemblySourceKey
+	namespaceValue  uint64
+	namespaceValid  bool
+	files           *fileanalysis.Analyzer
+	dns             *dnsparser.Parser
+	nextExpiry      time.Time
+	closed          bool
+	stats           Stats
+	expiryStop      chan struct{}
+	expiryDone      chan struct{}
+	stopExpiry      sync.Once
 }
 
 func New(cfg Config) (*Runtime, error) {
@@ -205,20 +208,13 @@ func (r *Runtime) ObservePacket(source Source, info capture.PacketInfo) error {
 	if source.InterfaceName == "" {
 		source.InterfaceName = info.Interface
 	}
-	meta := protocolmeta.Enrich(info.Packet, nil, r.cfg.IncludeHTTPHeaders)
+	meta, protocolHint := protocolmeta.EnrichForReassembly(info.Packet)
 	if meta == nil {
 		r.stats.Invalid++
 		return fmt.Errorf("capture packet metadata enrichment failed")
 	}
 	if parsed := r.dns.Parse(info.Packet); parsed != nil {
 		meta.Dns = dnsToProto(parsed)
-	}
-	protocolHint := applicationProtocolHint(meta)
-	// Stateful application protocols are emitted from the bounded TCP
-	// reassembly path below. Clear packet-local guesses to avoid premature or
-	// duplicate events when a message spans segments.
-	if _, ok := info.Packet.Layer(layers.LayerTypeTCP).(*layers.TCP); ok {
-		meta.Tls, meta.Http, meta.Email = nil, nil, nil
 	}
 	timestamp := time.Time{}
 	if packetMetadata := info.Packet.Metadata(); packetMetadata != nil {
@@ -372,10 +368,10 @@ func (r *Runtime) envelope(source Source, meta *data.PacketMetadata, ts time.Tim
 func (r *Runtime) emit(ev events.Event) {
 	r.stats.Emitted++
 	if r.cfg.LosslessDelivery {
-		if err := r.cfg.Dispatcher.Flush(context.Background()); err != nil {
+		if !r.cfg.Dispatcher.EnqueueLossless(context.Background(), ev) {
 			r.stats.Dropped++
-			return
 		}
+		return
 	}
 	if !r.cfg.Dispatcher.Enqueue(ev) {
 		r.stats.Dropped++

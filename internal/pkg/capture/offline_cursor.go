@@ -30,6 +30,7 @@ type offlinePacketReader interface {
 	ReadPacketData() ([]byte, gopacket.CaptureInfo, error)
 }
 type offlineCursor struct {
+	scanBuffer       []byte // Borrowed only by synchronous locator preparation.
 	backings         *offline.BackingRegistry
 	backingID        uint32
 	backingInput     *offline.BackingInput
@@ -221,6 +222,12 @@ func (c *offlineCursor) Close() error {
 }
 
 func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
+	return c.next(ctx, nil)
+}
+
+// next may borrow decoder state only for synchronous locator construction.
+// Public Next keeps returning independently owned layer objects.
+func (c *offlineCursor) next(ctx context.Context, decoder *offlinePacketDecoder) (PacketInfo, error) {
 	if c.closed {
 		return PacketInfo{}, errors.New("offline cursor is closed")
 	}
@@ -228,7 +235,16 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 		if err := ctx.Err(); err != nil {
 			return PacketInfo{}, err
 		}
-		data, ci, err := c.reader.ReadPacketData()
+		var data []byte
+		var ci gopacket.CaptureInfo
+		var err error
+		borrowed := false
+		if reader, ok := c.reader.(*offlinePCAPReader); ok && decoder != nil && c.scanBuffer != nil {
+			data, ci, err = reader.readPacketDataInto(c.scanBuffer)
+			borrowed = len(data) <= len(c.scanBuffer)
+		} else {
+			data, ci, err = c.reader.ReadPacketData()
+		}
 		if err != nil {
 			if c.backings != nil {
 				if e := c.backings.Validate(); e != nil {
@@ -273,7 +289,22 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 			c.fragCache.Sweep()
 			c.cleanup = ci.Timestamp
 		}
-		newPacket := gopacket.NewPacket(data, c.linkType, gopacket.DecodeOptions{NoCopy: true, DecodeStreamsAsDatagrams: true})
+		var newPacket gopacket.Packet
+		if decoder == nil {
+			newPacket = gopacket.NewPacket(data, c.linkType, gopacket.DecodeOptions{NoCopy: true, DecodeStreamsAsDatagrams: true})
+		} else {
+			// Fragmented, tunneled and application-decoded packets fall back
+			// to independent layers before any stateful normalization below.
+			newPacket = decoder.decode(data, c.linkType)
+			if borrowed && newPacket != decoder {
+				// Normalization may retain fragments or tunnel input. Preserve
+				// independent bytes for every fallback decoder.
+				owned := make([]byte, len(data))
+				copy(owned, data)
+				data = owned
+				newPacket = gopacket.NewPacket(data, c.linkType, gopacket.DecodeOptions{NoCopy: true, DecodeStreamsAsDatagrams: true})
+			}
+		}
 		newPacket.Metadata().CaptureInfo = ci
 		// Reassemble IPv4 fragments before any further processing. A fragmented
 		// SIP message would otherwise have its SDP body stranded in a later
@@ -388,7 +419,12 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 			if err != nil {
 				return PacketInfo{}, fmt.Errorf("locate normalized source %q: %w", c.path, err)
 			}
-			result.Provenance = &offline.PacketProvenance{Context: location.Context, Locator: locator, Derived: derived, SourceIndex: c.sourceIndex, SourcePath: c.path, PhysicalOrdinal: location.PhysicalOrdinal, LogicalSequence: c.sequence - 1, OriginalCapture: ci, OriginalLinkType: c.linkType, EffectiveCapture: newPacket.Metadata().CaptureInfo, EffectiveLinkType: effectiveLinkType}
+			if decoder == nil {
+				result.Provenance = new(offline.PacketProvenance)
+			} else {
+				result.Provenance = &decoder.provenance
+			}
+			*result.Provenance = offline.PacketProvenance{Context: location.Context, Locator: locator, Derived: derived, SourceIndex: c.sourceIndex, SourcePath: c.path, PhysicalOrdinal: location.PhysicalOrdinal, LogicalSequence: c.sequence - 1, OriginalCapture: ci, OriginalLinkType: c.linkType, EffectiveCapture: newPacket.Metadata().CaptureInfo, EffectiveLinkType: effectiveLinkType}
 		}
 		return result, nil
 	}

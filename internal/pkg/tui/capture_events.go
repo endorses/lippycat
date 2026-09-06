@@ -1185,7 +1185,10 @@ func parseHTTPFromRawData(rawData []byte, linkType layers.LinkType) *types.HTTPM
 		Lazy:   true,
 		NoCopy: true,
 	})
+	return parseHTTPFromPacket(packet)
+}
 
+func parseHTTPFromPacket(packet gopacket.Packet) *types.HTTPMetadata {
 	// Extract TCP layer to get payload
 	tcpLayer := packet.Layer(layers.LayerTypeTCP)
 	if tcpLayer == nil {

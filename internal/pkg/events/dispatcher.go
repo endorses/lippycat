@@ -64,6 +64,7 @@ type dispatchItem struct {
 	event      Event
 	admittedAt time.Time
 	barrier    chan struct{}
+	lossless   bool
 }
 type sinkItem struct {
 	event      Event
@@ -81,6 +82,9 @@ type Dispatcher struct {
 	queue                                                  chan dispatchItem
 	mu                                                     sync.RWMutex
 	admissionMu                                            sync.Mutex
+	losslessAdmission                                      chan struct{}
+	stopping                                               chan struct{}
+	stopAdmission                                          sync.Once
 	registrations                                          []*registration
 	started, stopped                                       bool
 	ctx                                                    context.Context
@@ -108,7 +112,7 @@ func NewDispatcher(cfg Config) (*Dispatcher, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = logger.Get()
 	}
-	return &Dispatcher{cfg: cfg, queue: make(chan dispatchItem, cfg.QueueSize)}, nil
+	return &Dispatcher{cfg: cfg, queue: make(chan dispatchItem, cfg.QueueSize), stopping: make(chan struct{}), losslessAdmission: make(chan struct{}, 1)}, nil
 }
 
 // Register subscribes sink to kinds. An empty kind list subscribes to all events.
@@ -285,6 +289,13 @@ func (d *Dispatcher) runDispatcher() {
 						continue
 					}
 				}
+				if item.lossless {
+					// Accepted offline work is drained even after admission is
+					// canceled. Backpressure bounds both dispatcher and sink queues.
+					reg.queue <- sinkItem{event: ev, admittedAt: item.admittedAt}
+					d.dispatched.Add(1)
+					continue
+				}
 				observer, observesDrops := reg.sink.(dropObserver)
 				if observesDrops {
 					observer.LockDropBoundary()
@@ -334,6 +345,8 @@ func (d *Dispatcher) runSink(reg *registration) {
 
 // Stop drains accepted events, then flushes every sink. It does not close sinks.
 func (d *Dispatcher) Stop(ctx context.Context) error {
+	// Wake blocked lossless producers before waiting for their read locks.
+	d.stopAdmission.Do(func() { close(d.stopping) })
 	d.mu.Lock()
 	if !d.started {
 		d.stopped = true
@@ -379,12 +392,20 @@ func (d *Dispatcher) Flush(ctx context.Context) error {
 	case <-ctx.Done():
 		d.mu.RUnlock()
 		return fmt.Errorf("queue event flush barrier: %w", ctx.Err())
+	case <-d.ctx.Done():
+		d.mu.RUnlock()
+		return fmt.Errorf("queue event flush barrier: %w", d.ctx.Err())
+	case <-d.stopping:
+		d.mu.RUnlock()
+		return errors.New("queue event flush barrier: dispatcher stopping")
 	}
 	for range d.registrations {
 		select {
 		case <-barrier:
 		case <-ctx.Done():
 			return fmt.Errorf("wait for event flush barrier: %w", ctx.Err())
+		case <-d.ctx.Done():
+			return fmt.Errorf("wait for event flush barrier: %w", d.ctx.Err())
 		}
 	}
 	var result error

@@ -42,6 +42,10 @@ func (r *BackingRegistry) Seal() (err error) {
 			f.mu.Unlock()
 			return errors.New("offline backing writer unavailable during finalization")
 		}
+		if err = f.flush(); err != nil {
+			f.mu.Unlock()
+			return fmt.Errorf("flush offline backing: %w", err)
+		}
 		originalInfo, statErr := f.file.Stat()
 		if statErr != nil {
 			f.mu.Unlock()
@@ -54,6 +58,9 @@ func (r *BackingRegistry) Seal() (err error) {
 		}
 		err = f.file.Close()
 		f.closed = true
+		f.buffer = nil
+		f.storage.releaseMemory(f.bufferBytes)
+		f.bufferBytes = 0
 		if err != nil {
 			f.mu.Unlock()
 			return fmt.Errorf("close offline backing writer: %w", err)

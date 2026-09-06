@@ -22,7 +22,7 @@ func TestEnrichHTTPHeadersOptIn(t *testing.T) {
 	require.Equal(t, uint32(50000), with.SrcPort)
 }
 
-func testTCPPacket(t *testing.T, payload []byte) gopacket.Packet {
+func testTCPPacket(t testing.TB, payload []byte) gopacket.Packet {
 	t.Helper()
 	buffer := gopacket.NewSerializeBuffer()
 	tcp := &layers.TCP{SrcPort: 50000, DstPort: 80}

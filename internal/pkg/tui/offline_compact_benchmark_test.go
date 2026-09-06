@@ -20,7 +20,11 @@ func BenchmarkOfflineCompactCompleted(b *testing.B) {
 	for _, candidate := range []struct {
 		name  string
 		build offlineOracleBuilder
-	}{{"legacy", indexOfflineLegacyDataset}, {"compact", indexOfflineCompactDataset}} {
+	}{{"legacy", indexOfflineLegacyDataset}, {"compact", indexOfflineCompactDataset}, {"compact-sync", func(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (*offlineIndexedSession, error) {
+		return indexOfflineDatasetBackendWithAsync(ctx, storage, generation, cfg, report, nil, true, true, false)
+	}}, {"compact-workers", func(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (*offlineIndexedSession, error) {
+		return indexOfflineDatasetBackendWithWorkers(ctx, storage, generation, cfg, report, nil, true, true, true, true)
+	}}} {
 		b.Run(candidate.name, func(b *testing.B) {
 			path := os.Getenv("LIPPYCAT_BENCH_PCAP")
 			if path == "" {

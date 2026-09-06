@@ -27,6 +27,24 @@ func TestFromPacketInfoPreservesCaptureRecord(t *testing.T) {
 	require.Equal(t, &p.Data()[0], &e.Data[0])
 }
 
+func TestResetFromPacketInfoClearsPreviousEnvelope(t *testing.T) {
+	first := gopacket.NewPacket([]byte{0x45, 0, 0, 20}, layers.LinkTypeRaw, gopacket.NoCopy)
+	second := gopacket.NewPacket([]byte{0x45, 0, 0, 21}, layers.LinkTypeRaw, gopacket.NoCopy)
+	first.Metadata().Timestamp = time.Unix(1, 0)
+	second.Metadata().Timestamp = time.Unix(2, 0)
+	env := FromPacketInfo(capture.PacketInfo{Packet: first, LinkType: layers.LinkTypeRaw, SourcePath: "first"})
+	env.MatchedFilterIDs = []string{"old"}
+	env.TLSKeys = &pipeline.TLSSessionKeys{}
+	ResetFromPacketInfo(env, capture.PacketInfo{Packet: second, LinkType: layers.LinkTypeRaw, SourcePath: "second"}, pipeline.SourcePCAPReplay)
+	require.Same(t, second, env.Packet())
+	require.Equal(t, second.Data(), env.Data)
+	require.Equal(t, time.Unix(2, 0), env.CaptureTime)
+	require.Equal(t, "second", env.Source.InputFile)
+	require.Equal(t, pipeline.SourcePCAPReplay, env.Source.Kind)
+	require.Nil(t, env.MatchedFilterIDs)
+	require.Nil(t, env.TLSKeys)
+}
+
 func TestEnvelopePacketRestoresCaptureMetadata(t *testing.T) {
 	ts := time.Unix(987, 654)
 	envelope := &pipeline.PacketEnvelope{

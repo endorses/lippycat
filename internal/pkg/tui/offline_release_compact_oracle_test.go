@@ -190,7 +190,7 @@ func compareOfflineOracleExports(t *testing.T, a, b offline.Query) {
 	nb, eb := exportOfflinePCAP(context.Background(), paths[1], func(ctx context.Context, visit func(offline.RawRecord) error) error {
 		return offline.IterateRaw(ctx, b, visit)
 	})
-	require.Equal(t, na, nb, "export count")
+	require.Equal(t, na, nb, "export count (legacy error: %v; candidate error: %v)", ea, eb)
 	if ea != nil || eb != nil {
 		require.Error(t, ea)
 		require.Error(t, eb)

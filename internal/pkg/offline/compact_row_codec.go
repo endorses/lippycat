@@ -122,6 +122,12 @@ func (e *compactRowEncoder) projection(p *compactProjection) {
 var compactRowMemory = uint64(reflect.TypeOf(compactRow{}).Size())
 
 func encodeCompactRow(r *compactRow, max uint64, prefix int) ([]byte, error) {
+	return encodeCompactRowInto(r, max, prefix, nil)
+}
+
+// encodeCompactRowInto reuses caller-admitted storage when the complete encoded
+// row fits. Oversized rows retain the exact-size allocation and budget checks.
+func encodeCompactRowInto(r *compactRow, max uint64, prefix int, buffer []byte) ([]byte, error) {
 	if r == nil || prefix < 0 || max > uint64(int(^uint(0)>>1)-prefix) || compactRowMemory > max {
 		return nil, errors.New("invalid compact row or memory budget")
 	}
@@ -140,7 +146,13 @@ func encodeCompactRow(r *compactRow, max uint64, prefix int) ([]byte, error) {
 	if e.err != nil {
 		return nil, e.err
 	}
-	e = compactRowEncoder{compactEncoder: compactEncoder{encoder: encoder{max: max, data: make([]byte, prefix, prefix+int(e.size))}}}
+	if cap(buffer) < prefix+int(e.size) {
+		buffer = make([]byte, prefix, prefix+int(e.size))
+	} else {
+		buffer = buffer[:prefix]
+		clear(buffer)
+	}
+	e = compactRowEncoder{compactEncoder: compactEncoder{encoder: encoder{max: max, data: buffer}}}
 	e.row(r)
 	return e.data, e.err
 }

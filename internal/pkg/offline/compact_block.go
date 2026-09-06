@@ -102,12 +102,25 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 		}
 		encodedBytes += uint64(len(row))
 	}
-	scratch := max + encodedBytes*3 + uint64(len(rows)*len(wires))*32
+	count := len(rows) * len(wires)
+	scratch := max + encodedBytes*3 + uint64(count)*32
+	var ends []uint32
+	if b.d.storage.limits.CacheBytes >= 16<<20 {
+		// Retained transposition offsets replace the same allowance in this
+		// block's transient reservation. Small budgets keep the old lifetime.
+		ends, err = b.compactColumnEnds(count)
+		if err != nil {
+			return 0, 0, err
+		}
+		scratch -= uint64(count) * 4
+	}
 	if err = b.d.storage.reserveMemory(context.Background(), scratch); err != nil {
 		return 0, 0, err
 	}
 	defer b.d.storage.releaseMemory(scratch)
-	ends := make([]uint32, len(rows)*len(wires))
+	if ends == nil {
+		ends = make([]uint32, count)
+	}
 	var fields [64][]byte
 	n := uint64(len(wires)) * 24
 	for _, width := range widths {
@@ -370,4 +383,19 @@ func validateCompactBlockPayload(p []byte, wires []byte, widths []int) error {
 		return errors.New("compact trailing arena bytes")
 	}
 	return nil
+}
+
+// compactColumnEnds reuses one block's offset table. Admit new capacity before
+// allocation, retain its charge between blocks, and release it at builder EOF.
+func (b *Builder) compactColumnEnds(n int) ([]uint32, error) {
+	c := b.d.compact
+	if cap(c.columnEnds) < n {
+		if err := b.d.storage.reserveMemory(context.Background(), uint64(n)*4); err != nil {
+			return nil, err
+		}
+		ends := make([]uint32, n)
+		b.d.storage.releaseMemory(uint64(cap(c.columnEnds)) * 4)
+		c.columnEnds = ends
+	}
+	return c.columnEnds[:n], nil
 }

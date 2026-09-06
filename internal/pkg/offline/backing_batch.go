@@ -12,6 +12,12 @@ import (
 // ascending locators on one backing are read together, including small headers
 // between packet payloads. Callers must release the lease after using every slice.
 func (r *BackingRegistry) ReadBatch(ctx context.Context, locs []Locator, maxBytes uint64) (*BackingLease, [][]byte, error) {
+	return r.readBatch(ctx, locs, maxBytes, nil)
+}
+
+// readBatch uses only an exclusively leased reusable buffer. All reference,
+// identity, digest and byte-limit checks are shared with the owned public API.
+func (r *BackingRegistry) readBatch(ctx context.Context, locs []Locator, maxBytes uint64, reusable []byte) (*BackingLease, [][]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closing {
@@ -77,7 +83,11 @@ func (r *BackingRegistry) ReadBatch(ctx context.Context, locs []Locator, maxByte
 	if total > uint64(math.MaxInt) {
 		return nil, nil, ErrInvalidLocator
 	}
+	reuse := reusable != nil && total <= uint64(len(reusable))
 	charge := total + 128 + uint64(len(locs))*24 + 64*40
+	if reuse {
+		charge -= total
+	} // Reader retains the admitted raw capacity.
 	if err := r.storage.reserveMemory(ctx, charge); err != nil {
 		return nil, nil, err
 	}
@@ -85,7 +95,12 @@ func (r *BackingRegistry) ReadBatch(ctx context.Context, locs []Locator, maxByte
 		r.storage.releaseMemory(charge)
 		return nil, nil, err
 	}
-	data := make([]byte, int(total))
+	var data []byte
+	if reuse {
+		data = reusable[:int(total):int(total)]
+	} else {
+		data = make([]byte, int(total))
+	}
 	packets := make([][]byte, len(locs))
 	offset := 0
 	for _, span := range spans[:count] {

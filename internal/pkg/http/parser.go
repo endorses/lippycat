@@ -92,35 +92,51 @@ func (p *Parser) Parse(packet gopacket.Packet) *types.HTTPMetadata {
 
 // ParsePayload parses HTTP metadata from raw payload bytes.
 func (p *Parser) ParsePayload(payload []byte) *types.HTTPMetadata {
-	if len(payload) < 10 {
+	metadata, idx := p.parsePayloadStart(payload)
+	if metadata == nil {
 		return nil
+	}
+	p.parseHeaders(payload[idx+1:], metadata)
+	if metadata.IsServer {
+		if bodyAt := bytes.Index(payload, []byte("\r\n\r\n")); bodyAt >= 0 && bodyAt+4 < len(payload) {
+			metadata.BodyPreview = string(payload[bodyAt+4:])
+			metadata.BodySize = len(payload) - bodyAt - 4
+		}
+	}
+	return metadata
+}
+
+// RecognizesPayload reports whether ParsePayload would return metadata, without
+// parsing headers or copying response bodies that stream reassembly will parse.
+func (p *Parser) RecognizesPayload(payload []byte) bool {
+	metadata, _ := p.parsePayloadStart(payload)
+	return metadata != nil
+}
+
+func (p *Parser) parsePayloadStart(payload []byte) (*types.HTTPMetadata, int) {
+	if len(payload) < 10 {
+		return nil, 0
 	}
 
 	// Find the first line (request line or status line)
 	idx := bytes.IndexByte(payload, '\n')
 	if idx == -1 || idx > 8192 {
-		return nil
+		return nil, 0
 	}
 
 	firstLine := strings.TrimRight(string(payload[:idx]), "\r")
 
 	// Try to parse as request
 	if metadata := p.parseRequestLine(firstLine); metadata != nil {
-		p.parseHeaders(payload[idx+1:], metadata)
-		return metadata
+		return metadata, idx
 	}
 
 	// Try to parse as response
 	if metadata := p.parseStatusLine(firstLine); metadata != nil {
-		p.parseHeaders(payload[idx+1:], metadata)
-		if bodyAt := bytes.Index(payload, []byte("\r\n\r\n")); bodyAt >= 0 && bodyAt+4 < len(payload) {
-			metadata.BodyPreview = string(payload[bodyAt+4:])
-			metadata.BodySize = len(payload) - bodyAt - 4
-		}
-		return metadata
+		return metadata, idx
 	}
 
-	return nil
+	return nil, 0
 }
 
 // parseRequestLine parses an HTTP request line.

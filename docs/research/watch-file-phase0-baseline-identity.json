@@ -1,0 +1,25 @@
+{
+  "files": {
+    "docs/plans/watch-file-compact-source-index.md": "4977dba3256daf3e3334f99d2d7fbc6fd3d415a25ed3071279de9357cf8ba9cc",
+    "docs/research/prototypes/offline_locator_scan.go": "e20c169898ce31889dda4d9cd63cd1bb991ad91c25b11fb3e2933f1db0bd7a1b",
+    "docs/research/watch-file-compact-index-design.md": "214ef76cf346b562d73f36b893cdb535e3cc2bbce786d2e29cce7cba2f2db95c",
+    "docs/research/watch-file-real-capture-performance.md": "4cd8bc39d3c65d4503528a9d3f4cb00d5819b16707c39ee912eec9e94cb1a3d3",
+    "internal/pkg/eventanalysis/decoded_packet_test.go": "f31f1b05529cc1f7b2a794b0d8f182368c9b7053f42b563347ba57df3b9d2a1b",
+    "internal/pkg/eventanalysis/runtime.go": "33e2cc8aed9ed3d0ae11b5e5015d8def1276b317fa9af50626bc076bffc6ebf1",
+    "internal/pkg/eventanalysis/tcp_buffer_test.go": "1fbff4f0e1c314da0c46af438b108f85a4e7c237f9cca00e657af17223ea45f7",
+    "internal/pkg/eventanalysis/tcp_marks_test.go": "9bcdedd8a11ae0dc13c9412e10ae3d0d75a1fd67de6cdfd4b910a3327ee3ec1b",
+    "internal/pkg/eventanalysis/tcp_reassembly.go": "87cd763828b7fddd71a625428db05ba16972e73bad196f863615773d8172e7df",
+    "internal/pkg/offline/amendment.go": "e4b0496e8a5b035304c5017db1a564fb266f7b8711517badc03b05b0cb22cb7c",
+    "internal/pkg/offline/cache.go": "2b6b912197d456c5f59e02a0f2121fa3ba5d59040eed04189e0b80bd08ede614",
+    "internal/pkg/offline/codec.go": "11e2f0fa408964dee1b53736d2b427c8ca25995a99038fa94c77efbe95ec23d2",
+    "internal/pkg/offline/codec_test.go": "09ddd6fdeb1a1fb26d0382119aadcc89ff3cabf0d517a43697d27f3b02cbbc2a",
+    "internal/pkg/offline/storage.go": "9af132812e79be8da14278ecdc34de00c8a28a80307f76a4029e6fac2a213a8e",
+    "internal/pkg/reassembly/README.md": "ac5e814920e26bf4ac7e5885bf0bfa2668907f9245eaec005871280779db4340",
+    "internal/pkg/reassembly/capture_context_regression_test.go": "4ffa9d9e94ed56aee41b2c2286af1959f798fea1816e1f5eba7910e99607bc31",
+    "internal/pkg/reassembly/capture_spans_test.go": "752006bae1b63b2c881b7ca13c04558590c2465df3900de66e2dfd7df6b74a87",
+    "internal/pkg/reassembly/tcpassembly.go": "7e95bf30ad61f0c1878ba6eeb3c813b8d4af71def11f3d6145d0838da34cb179",
+    "internal/pkg/tui/offline_file_benchmark_test.go": "c07af750d5fc52f15f3cb6143fd97afa9a4c18998202bb735e206c2c9fff6c3e"
+  },
+  "revision": "370761c7174064c694413371c233c16d185e270d",
+  "tracked_patch_sha256": "6a8f24a22adf641ac607268f8c79475a40d6005acbfcd992ea9f213c5fa95e23"
+}

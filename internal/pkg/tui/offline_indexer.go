@@ -156,7 +156,25 @@ func (f *offlineSIPFlows) isUDP(k string) bool {
 // indexOfflineDataset owns and joins all reader/analyzer resources. Only a fully
 // drained, flushed session transfers to the model. Packet records bypass the
 // presentation queues and contribute to storage statistics exactly once.
-func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (result *offlineIndexedSession, err error) {
+func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (*offlineIndexedSession, error) {
+	return indexOfflineDatasetObserved(ctx, storage, generation, cfg, report, nil)
+}
+
+// indexOfflineDatasetObserved exposes phase boundaries to the acceptance harness.
+// The optional observer runs synchronously and must not call storage methods.
+func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration)) (result *offlineIndexedSession, err error) {
+	phase, phaseStart := "setup", time.Now()
+	mark := func(next string) {
+		if next == phase {
+			return
+		}
+		if observe != nil {
+			observe(phase, time.Since(phaseStart))
+		}
+		phase, phaseStart = next, time.Now()
+	}
+	defer func() { mark("finished") }()
+
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -203,12 +221,14 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	if analysis.AnalysisProfile == "" {
 		analysis.AnalysisProfile = "watch-eventanalysis-v1"
 	}
+	mark("identity")
 	if analysis.InputIdentity == "" {
 		analysis.InputIdentity, err = events.OfflineInputIdentityContext(ctx, cfg.Inputs)
 		if err != nil {
 			return nil, err
 		}
 	}
+	mark("analysis_setup")
 	producer, err := events.NewOfflineProducer(analysis.NodeID, events.OfflineSession{InputIdentity: analysis.InputIdentity, AnalysisProfile: analysis.AnalysisProfile, SourceOrdering: append([]string(nil), cfg.Inputs...)})
 	if err != nil {
 		return nil, err
@@ -271,14 +291,17 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	}
 	publish(true)
 	var readErr error
+	mark("scan")
 	openErr := capture.StartOfflineSnifferOrdered(cfg.Inputs, cfg.BPFFilter, func(devices []pcaptypes.PcapInterface, filter string) {
 		session.sortCleanup, readErr = capture.RunOfflineSortedStream(ctx, devices, filter, storage, func(p capture.OfflineSortProgress) {
 			switch p.Phase {
 			case "Reading":
 				progress.State = offline.Reading
 			case "Sorting":
+				mark("ordering")
 				progress.State = offline.Sorting
 			case "Replaying":
+				mark("analysis_and_storage")
 				progress.State = offline.Indexing
 			}
 			progress.LogicalPackets, progress.ScannedBytes = p.LogicalPackets, p.BytesScanned
@@ -373,6 +396,7 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	if err = errors.Join(openErr, readErr); err != nil {
 		return nil, err
 	}
+	mark("finalization")
 	if assembler != nil {
 		sipFactory.Flushing = true
 		if err = assembler.Close(); err != nil {

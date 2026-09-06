@@ -8,6 +8,7 @@ No cold-cache claim is made. CPU/heap profiling is a separate optional process.
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -32,7 +33,7 @@ def sha256(path):
 
 def read_metrics(path):
     for line in path.read_text().splitlines():
-        if re.match(r"^BenchmarkOfflineAcceptance-\d+\s+1\s+", line):
+        if re.match(r"^BenchmarkOfflineAcceptance(?:-\d+)?\s+1\s+", line):
             columns = line.split()[2:]
             if len(columns) % 2:
                 raise ValueError("incomplete benchmark metric pairs")
@@ -40,6 +41,28 @@ def read_metrics(path):
                 columns[i + 1]: float(columns[i]) for i in range(0, len(columns), 2)
             }
     raise ValueError("acceptance benchmark did not emit completed metrics")
+
+
+def summarize_runs(runs):
+    unprofiled = [run["metrics"] for run in runs if not run["profiled"]]
+    if not unprofiled:
+        raise ValueError("no unprofiled acceptance measurements")
+    if any(sample.keys() != unprofiled[0].keys() for sample in unprofiled):
+        raise ValueError("acceptance metric set changed between runs")
+    return {
+        "runs": len(unprofiled),
+        "median": {
+            key: statistics.median(sample[key] for sample in unprofiled)
+            for key in sorted(unprofiled[0])
+        },
+        "p95": {
+            key: sorted(sample[key] for sample in unprofiled)[
+                math.ceil(0.95 * len(unprofiled)) - 1
+            ]
+            for key in sorted(unprofiled[0])
+        },
+        "note": "Unprofiled fresh-process medians and nearest-rank p95 only; raw samples in runs.json.",
+    }
 
 
 def main():
@@ -157,17 +180,7 @@ def main():
         )
         (output / "runs.json").write_text(json.dumps(runs, indent=2) + "\n")
         print(f"completed {label}", flush=True)
-    unprofiled = [run["metrics"] for run in runs if not run["profiled"]]
-    if any(sample.keys() != unprofiled[0].keys() for sample in unprofiled):
-        raise ValueError("acceptance metric set changed between runs")
-    summary = {
-        "runs": len(unprofiled),
-        "median": {
-            key: statistics.median(sample[key] for sample in unprofiled)
-            for key in sorted(unprofiled[0])
-        },
-        "note": "Unprofiled fresh-process medians only; raw samples in runs.json.",
-    }
+    summary = summarize_runs(runs)
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
 

@@ -100,6 +100,13 @@ Touchpoints: `internal/pkg/tui/offline_file_benchmark_test.go`, existing
 Gate: the oracle reproduces current behavior, and the schema accounts for all
 observable fields and all storage, not merely the illustrative 112-byte core.
 
+Phase-0 review (2026-09-06) confirmed the oracle and contracts and corrected two
+measurement-runner issues: accept Go's unsuffixed benchmark name for
+`GOMAXPROCS=1`, and include across-process nearest-rank p95 in `summary.json`,
+excluding profiled runs. The recorded baseline samples remain unchanged. Focused
+Python regression checks and the Go oracle/release tests, including the race
+detector, passed.
+
 ## Phase 1 — Add owned backings and normalization provenance
 
 Touchpoints: `internal/pkg/capture/pcaptypes/offline.go`,

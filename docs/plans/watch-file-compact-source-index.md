@@ -130,6 +130,15 @@ Phase-1 implementation and review: see [verification](../research/watch-file-pha
 The locator path is internally opt-in; legacy sorting and completed production
 datasets retain their existing behavior until the later migration gates.
 
+Phase-1 follow-up review (2026-09-06) used three independent agents for readers,
+backing ownership and normalization provenance, with parent verification. It
+found and fixed one reader defect: nested gzip was decompressed twice in the
+locator path, producing offsets into the wrong backing. Nested gzip now retains
+the legacy unsupported-format rejection. Regression coverage for legacy, source
+and snapshot modes failed before the fix and passed afterward. No other Phase-1
+defects were found. Package and race gates, the watch command check and the
+complete build passed; unrelated working-tree changes were preserved.
+
 ## Phase 2 — Replace raw sorting spools with locator ordering
 
 Touchpoints: `internal/pkg/capture/offline_sort.go`, `offline_cursor.go`,

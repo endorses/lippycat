@@ -115,7 +115,9 @@ func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter s
 	} else {
 		// Inspect the native link type before pcapgo narrows it to uint8.
 		// Keep its existing support for gzip-compressed classic PCAP inputs.
-		if magic[0] == 0x1f && magic[1] == 0x8b {
+		// Registry inputs already reference the decompressed spool. Unwrapping
+		// another gzip layer would make parser offsets refer to different bytes.
+		if !compressed && magic[0] == 0x1f && magic[1] == 0x8b {
 			z, e := gzip.NewReader(br)
 			if e != nil {
 				return nil, fmt.Errorf("read compressed PCAP header: %w", e)

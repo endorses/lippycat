@@ -141,6 +141,35 @@ func TestOfflineBackingRejectsGzipNG(t *testing.T) {
 	require.ErrorContains(t, err, "unrecognized PCAP magic")
 }
 
+func TestOfflineBackingRejectsNestedGzip(t *testing.T) {
+	compressed := provenanceCapture(t, layers.LinkTypeEthernet, [][]byte{{1, 2, 3}}, false, true)
+	var nested bytes.Buffer
+	z := gzip.NewWriter(&nested)
+	_, err := z.Write(compressed)
+	require.NoError(t, err)
+	require.NoError(t, z.Close())
+	path := filepath.Join(t.TempDir(), "nested.pcap.gz")
+	require.NoError(t, os.WriteFile(path, nested.Bytes(), 0600))
+	dev := offlineTestDevices(t, path)[0]
+
+	for _, policy := range []string{"legacy", string(offline.BackingSource), string(offline.BackingSnapshot)} {
+		t.Run(policy, func(t *testing.T) {
+			ctx := context.Background()
+			if policy != "legacy" {
+				r := sortTestStorage(t, 1<<20).NewBackingRegistry()
+				t.Cleanup(func() { require.NoError(t, r.Close()) })
+				ctx = WithOfflineBackings(ctx, r, offline.BackingPolicy(policy))
+			}
+			c, err := newOfflineCursor(ctx, dev, "", 0)
+			if c != nil {
+				t.Cleanup(func() { require.NoError(t, c.Close()) })
+			}
+			require.ErrorContains(t, err, "unrecognized PCAP magic")
+			require.Nil(t, c)
+		})
+	}
+}
+
 func TestOfflineBackingBPFPhysicalSequence(t *testing.T) {
 	raw := make([]byte, 60)
 	copy(raw, []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 8, 0, 0x45, 0, 0, 46, 0, 0, 0, 0, 64, 17, 0, 0, 192, 0, 2, 1, 192, 0, 2, 2, 0x27, 0x10, 0x4e, 0x20, 0, 26, 0, 0})

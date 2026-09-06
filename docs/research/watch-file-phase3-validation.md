@@ -25,6 +25,35 @@ transfer, buffered disk admission, overlapping decode reservations, sparse empty
 metadata elision, source/backing validation, read-only backing sealing, directory
 authentication and immutable block-cache reuse.
 
+## Follow-up assessment (2026-09-06)
+
+Three independent reviewers compared the phase-3 plan with storage validation,
+resource accounting, backing/query/export ownership and TUI materialization.
+The parent reproduced the findings and a separate reviewer checked the fixes.
+Two categories of defect were confirmed:
+
+- Invalid capture contexts could be accepted and published although later reads
+  rejected them. Generic amendments also accepted invalid lengths or source
+  references. Initial append and generic amendment now share validation, and
+  failure poisons the builder before a completed manifest can be published.
+- Summary projection objects and generic amendment callback growth could allocate
+  before budget admission. Projection objects now reserve their fixed footprint
+  before construction; callback growth stays charged through serialization.
+  The narrow VoIP amendment also admits its scratch before creating a projection.
+
+The new invalid-input and callback-accounting regressions fail against the
+original implementation using a Go source overlay and pass with the fixes.
+Projection tests cover every metadata-presence combination, exhausted budgets,
+cancellation and balanced release. The complete relevant package suite, race
+checks for offline/capture/TUI and `make build` passed. The exhaustive private
+capture comparison passed both before the fixes (215.606 seconds) and afterward
+(204.313 seconds), covering all 579,990 logical records and the same oracle
+operations described below. These are test durations, not readiness benchmarks.
+No additional substantiated TUI, lifecycle, format or export defect was found.
+The performance gaps below
+remain phase-4 cutover work; this assessment does not change readiness or enable
+the compact backend in production.
+
 ## Implemented contract
 
 The [storage specification](../design/offline-storage-format.md) documents the

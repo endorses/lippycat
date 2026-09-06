@@ -189,6 +189,12 @@ Private-capture parity passed, but readiness/allocation tolerances and the
 100 MB storage target were missed. The measured serialization/representation
 gaps must be addressed before phase-4 production cutover.
 
+Phase-3 follow-up assessment (2026-09-06) found and corrected invalid-input
+publication and allocation-before-admission gaps. Three independent reviewers
+and parent verification found no additional substantiated phase-3 defect. See
+the [follow-up assessment](../research/watch-file-phase3-validation.md#follow-up-assessment-2026-09-06)
+for reproductions, fixes and verification; the completed checklist remains valid.
+
 ## Phase 4 — Accelerate complete-file queries and cut over
 
 Touchpoints: `internal/pkg/offline/{query,query_pin,statistics,summary,contracts}.go`,

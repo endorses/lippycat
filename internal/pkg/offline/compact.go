@@ -178,14 +178,32 @@ func (b *Builder) AppendCompact(ctx context.Context, detail Detail, provenance P
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	if uint64(detail.Source.ArgumentIndex) >= uint64(len(b.d.compact.sources)) {
-		return errors.New("compact invalid source argument")
-	}
-	if detail.Packet.Length < 0 || uint64(detail.Packet.Length) > math.MaxUint64-b.accumulator.stats.Bytes {
-		return errors.New("compact invalid packet length")
+	if detail.Packet.Length >= 0 && uint64(detail.Packet.Length) > math.MaxUint64-b.accumulator.stats.Bytes {
+		return errors.New("compact packet byte total exceeds uint64 range")
 	}
 	if b.d.count >= (math.MaxInt64-compactHeaderBytes)/compactIndexBytes {
 		return errors.New("compact packet count overflow")
+	}
+	if err = b.validateCompactDetail(ctx, detail, provenance); err != nil {
+		return err
+	}
+	return b.storeCompact(ctx, PacketID(b.d.count), detail, provenance, false)
+}
+
+// Apply the same invariants to initial rows and generic amendments. Finish need
+// not reread every unamended row, so builders must reject unreadable values here.
+func (b *Builder) validateCompactDetail(ctx context.Context, detail Detail, provenance PacketProvenance) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if uint64(detail.Source.ArgumentIndex) >= uint64(len(b.d.compact.sources)) {
+		return errors.New("compact invalid source argument")
+	}
+	if detail.Packet.Length < 0 {
+		return errors.New("compact invalid packet length")
+	}
+	if err := validateCompactContext(provenance.Context, uint32(provenance.OriginalLinkType)); err != nil {
+		return err
 	}
 	if provenance.OriginalCapture.CaptureLength < 0 || provenance.OriginalCapture.Length < 0 || uint64(provenance.OriginalCapture.CaptureLength) > math.MaxUint32 || uint64(provenance.OriginalCapture.Length) > math.MaxUint32 {
 		return errors.New("compact invalid original capture lengths")
@@ -194,12 +212,12 @@ func (b *Builder) AppendCompact(ctx context.Context, detail Detail, provenance P
 	if detail.CapturedLength != locator.Length {
 		return errors.New("compact captured length differs from locator")
 	}
-	if uint32(len(detail.Packet.RawData)) != locator.Length || sha256.Sum256(detail.Packet.RawData) != locator.Digest {
+	if uint64(len(detail.Packet.RawData)) != uint64(locator.Length) || sha256.Sum256(detail.Packet.RawData) != locator.Digest {
 		return errors.New("compact locator does not match effective bytes")
 	}
-	desc, e := b.d.compact.registry.Describe(locator.BackingID)
-	if e != nil {
-		return e
+	desc, err := b.d.compact.registry.Describe(locator.BackingID)
+	if err != nil {
+		return err
 	}
 	if desc.Source.SourceIndex != int(detail.Source.ArgumentIndex) {
 		return errors.New("compact source argument does not match backing")
@@ -210,7 +228,14 @@ func (b *Builder) AppendCompact(ctx context.Context, detail Detail, provenance P
 	if locator.Offset < 0 || uint64(locator.Offset) > uint64(desc.Size) || uint64(locator.Length) > uint64(desc.Size)-uint64(locator.Offset) {
 		return errors.New("compact locator exceeds backing bounds")
 	}
-	return b.storeCompact(ctx, PacketID(b.d.count), detail, provenance, false)
+	return nil
+}
+
+func validateCompactContext(ctx CaptureContext, originalLink uint32) error {
+	if ctx.LinkType > math.MaxUint8 || originalLink > math.MaxUint8 || ctx.Format > CaptureFormatPCAPNG || ctx.ByteOrder > CaptureBigEndian {
+		return errors.New("compact invalid original decoding context")
+	}
+	return nil
 }
 
 func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, provenance PacketProvenance, amend bool) error {
@@ -433,9 +458,9 @@ func (d *diskDataset) readCompactRow(ctx context.Context, id PacketID, withMetad
 		d.storage.releaseMemory(held)
 		return row, overrides, 0, err
 	}
-	if row.Context.LinkType > math.MaxUint8 || row.OriginalLink > math.MaxUint8 || row.Context.Format > CaptureFormatPCAPNG || row.Context.ByteOrder > CaptureBigEndian {
+	if err = validateCompactContext(row.Context, row.OriginalLink); err != nil {
 		d.storage.releaseMemory(held)
-		return row, overrides, 0, errors.New("compact invalid original decoding context")
+		return row, overrides, 0, err
 	}
 	desc, e := d.compact.registry.Describe(row.Locator.BackingID)
 	if e != nil || row.Locator.Offset < 0 || uint64(row.Locator.Offset) > uint64(desc.Size) || uint64(row.Locator.Length) > uint64(desc.Size)-uint64(row.Locator.Offset) || desc.Source.SourceIndex != int(row.Argument) {
@@ -485,7 +510,11 @@ func (d *diskDataset) readCompact(ctx context.Context, id PacketID, kind uint16,
 		return 0, err
 	}
 	fail := func(e error) (uint64, error) { d.storage.releaseMemory(held); return 0, e }
-	summary := row.summary(id)
+	summary, summaryHeld, err := d.materializeCompactSummary(ctx, row, id)
+	if err != nil {
+		return fail(err)
+	}
+	held += summaryHeld
 	if kind == 1 {
 		target, ok := value.(*Summary)
 		if !ok {
@@ -607,14 +636,23 @@ func (b *Builder) updateCompact(ctx context.Context, id PacketID, mutate func(*D
 		return err
 	}
 	defer b.d.storage.releaseMemory(rowHeld)
+	// The callback may grow the detail up to MaxRecordBytes. Keep that
+	// capacity charged until serialization completes, alongside the source row.
+	callbackMemory := b.d.storage.limits.MaxRecordBytes
+	if err = b.d.storage.reserveMemory(ctx, callbackMemory); err != nil {
+		return err
+	}
+	defer b.d.storage.releaseMemory(callbackMemory)
 	if err = mutate(&detail); err != nil {
 		return err
 	}
-	if uint32(len(detail.Packet.RawData)) != row.Locator.Length || sha256.Sum256(detail.Packet.RawData) != row.Locator.Digest {
-		return errors.New("compact amendments cannot replace effective bytes")
+	detail.ID, detail.Token = id, Token{}
+	provenance := PacketProvenance{Locator: row.Locator, Context: row.Context, PhysicalOrdinal: row.PhysicalOrdinal, Derived: row.Derived, OriginalLinkType: layers.LinkType(row.OriginalLink), OriginalCapture: gopacket.CaptureInfo{CaptureLength: int(row.OriginalCaptured), Length: int(row.OriginalWire)}}
+	if err = b.validateCompactDetail(ctx, detail, provenance); err != nil {
+		return err
 	}
 	b.amended = true
-	return b.storeCompact(ctx, id, detail, PacketProvenance{Locator: row.Locator, Context: row.Context, PhysicalOrdinal: row.PhysicalOrdinal, Derived: row.Derived, OriginalLinkType: layers.LinkType(row.OriginalLink), OriginalCapture: gopacket.CaptureInfo{CaptureLength: int(row.OriginalCaptured), Length: int(row.OriginalWire)}}, true)
+	return b.storeCompact(ctx, id, detail, provenance, true)
 }
 
 // AmendVoIP finalizes SIP/EOF metadata without reading or decoding source bytes.
@@ -643,6 +681,11 @@ func (b *Builder) AmendVoIP(ctx context.Context, id PacketID, protocol, info str
 		return err
 	}
 	defer b.d.storage.releaseMemory(held)
+	max := b.d.storage.limits.MaxRecordBytes
+	if err = b.d.storage.reserveMemory(ctx, max*4); err != nil {
+		return err
+	}
+	defer b.d.storage.releaseMemory(max * 4)
 	row.Protocol = protocol
 	row.Info = info
 	p := row.summary(id).packet
@@ -650,11 +693,6 @@ func (b *Builder) AmendVoIP(ctx context.Context, id PacketID, protocol, info str
 	row.Projection = projectionOf(p)
 	overrides.Mask |= 1
 	overrides.Metadata.VoIP = metadata
-	max := b.d.storage.limits.MaxRecordBytes
-	if err = b.d.storage.reserveMemory(ctx, max*4); err != nil {
-		return err
-	}
-	defer b.d.storage.releaseMemory(max * 4)
 	meta, err := encodeCompactValue(overrides, max)
 	if err != nil {
 		return err

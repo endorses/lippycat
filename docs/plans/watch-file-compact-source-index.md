@@ -195,6 +195,12 @@ and parent verification found no additional substantiated phase-3 defect. See
 the [follow-up assessment](../research/watch-file-phase3-validation.md#follow-up-assessment-2026-09-06)
 for reproductions, fixes and verification; the completed checklist remains valid.
 
+A second phase-3 assessment confirmed a combined-detail budget defect in narrow
+VoIP amendments. Finalization now validates the materialized amended range before
+publication, rejecting rows whose combined raw bytes and metadata exceed the
+record budget. The range uses constant memory; sparse amendments may validate
+intervening rows. See the verification document for regression evidence.
+
 ## Phase 4 — Accelerate complete-file queries and cut over
 
 Touchpoints: `internal/pkg/offline/{query,query_pin,statistics,summary,contracts}.go`,

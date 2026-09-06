@@ -54,6 +54,31 @@ The performance gaps below
 remain phase-4 cutover work; this assessment does not change readiness or enable
 the compact backend in production.
 
+## Additional amendment-budget assessment (2026-09-06)
+
+Three independent reviewers checked storage, resource ownership and TUI parity;
+the parent verified their findings. One additional defect was reproduced: with
+a 65,536-byte record limit, a 30,000-byte Info field and a late 40,000-byte VoIP
+body each passed separate row/metadata validation. Completion succeeded, but
+reading the combined detail failed its allocation limit.
+
+Completion now materializes the range of narrowly amended packet IDs before
+publishing the manifest. This includes raw bytes and other decoded protocol
+metadata in validation. Range tracking uses constant memory; widely separated
+amendments may also validate intervening records. Amendment writes still avoid
+source reads, and failed finalization poisons the builder.
+
+The new regression fails against the prior implementation through a Go source
+overlay and passes with the fix. It covers valid and oversized combined details,
+reverse-order amendments, absent manifests after failure, poisoned retries and
+balanced resource cleanup. An independent reviewer reproduced the defect and
+verified the fix. No other substantiated phase-3 defect was found.
+
+Fresh complete package and offline/capture/TUI race suites passed, as did the
+watch command check and `make build`. The private-capture oracle was not rerun
+in this assessment; it requires `LIPPYCAT_BENCH_PCAP`. Performance was not
+remeasured, so the earlier timing results do not quantify the new validation cost.
+
 ## Implemented contract
 
 The [storage specification](../design/offline-storage-format.md) documents the

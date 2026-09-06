@@ -41,6 +41,17 @@ func (b *Builder) compactCompletion(ctx context.Context) (completion *compactCom
 	if err := b.d.validateCompactStreams(); err != nil {
 		return nil, 0, err
 	}
+	// Narrow VoIP amendments encode rows and overrides separately. Validate the
+	// combined decoded detail before publication, including raw bytes and other
+	// protocol metadata. A constant-sized ID range avoids an unbounded amended-ID
+	// set; sparse amendments may also validate intervening unchanged records.
+	for id := b.d.compact.amendmentFirst; id < b.d.compact.amendmentEnd; id++ {
+		_, memory, err := b.d.readDetail(ctx, id)
+		if err != nil {
+			return nil, 0, fmt.Errorf("validate amended compact detail %d: %w", id, err)
+		}
+		b.d.storage.releaseMemory(memory)
+	}
 	registry := b.d.compact.registry
 	registry.mu.Lock()
 	defer registry.mu.Unlock()

@@ -38,6 +38,8 @@ type compactState struct {
 	sourceMemory       uint64
 	pendingAmend       bool
 	first              PacketID
+	amendmentFirst     PacketID
+	amendmentEnd       PacketID
 }
 
 type compactRow struct {
@@ -730,6 +732,15 @@ func (b *Builder) AmendVoIP(ctx context.Context, id PacketID, protocol, info str
 		err = io.ErrShortWrite
 	}
 	b.amended = true
+	if err == nil {
+		c := b.d.compact
+		if c.amendmentEnd == 0 || id < c.amendmentFirst {
+			c.amendmentFirst = id
+		}
+		if id >= c.amendmentEnd {
+			c.amendmentEnd = id + 1
+		}
+	}
 	return err
 }
 

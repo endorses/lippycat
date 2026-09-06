@@ -1,6 +1,6 @@
 # Compact source-backed offline index implementation plan
 
-Status: Phases 0–3 complete; phases 4–6 remain unchecked.
+Status: Phases 0–4 complete; phases 5–6 remain unchecked.
 Scope: `lc watch file`.
 
 Phase 0 establishes the baseline, injectable differential oracle, measurement
@@ -213,16 +213,27 @@ the remaining Phase 4 query and production-cutover gates.
 Touchpoints: `internal/pkg/offline/{query,query_pin,statistics,summary,contracts}.go`,
 `internal/pkg/tui/filters/`, and the TUI offline filter/query adapters.
 
-- [ ] Add sequential block scanning and buffered ordered match output. Keep all-match queries implicit. Start with bounded sparse ID vectors; implement dense bitsets with block rank counts only if measured density/storage benefits justify the additional page-lookup path.
-- [ ] Define a validated filter expression in a package usable by offline storage without importing the TUI. Compile immutable TUI filter snapshots to it, preserving aliases, boolean/stack behavior, numeric epsilon, metadata presence, text matching and current BPF-subset quirks; retain opaque predicate fallback.
-- [ ] Select only required columns/arenas for supported expressions. Keep fallback materialization bounded and compare both paths against existing filter constructors, including missing/empty values and unsupported syntax.
-- [ ] Implement typed bidirectional related-flow comparison with mapped-IPv4 normalization, missing-node/unknown-transport wildcards and invalid-endpoint/zero-port rejection. Add lazy postings only after repeated-lookup benchmarks justify them.
-- [ ] Preserve completed full-match statistics, cancellation/progress semantics and the prior query on failed or cancelled filtering. Verify random result pages and concurrent pinned export for every chosen result representation.
-- [ ] Run milestone-A correctness, race and performance checks. Make the compact backend the production path only after parity and resource gates pass; remove migration-only production switches and keep a test oracle or frozen fixtures for regression coverage.
-- [ ] Update offline contracts, storage-format documentation and source-lifetime/operator documentation to describe actual completed-dataset behavior. Record measured gains and any remaining target gap.
+- [x] Add sequential block scanning and buffered ordered match output. Keep all-match queries implicit. Start with bounded sparse ID vectors; implement dense bitsets with block rank counts only if measured density/storage benefits justify the additional page-lookup path.
+- [x] Define a validated filter expression in a package usable by offline storage without importing the TUI. Compile immutable TUI filter snapshots to it, preserving aliases, boolean/stack behavior, numeric epsilon, metadata presence, text matching and current BPF-subset quirks; retain opaque predicate fallback.
+- [x] Select only required columns/arenas for supported expressions. Keep fallback materialization bounded and compare both paths against existing filter constructors, including missing/empty values and unsupported syntax.
+- [x] Implement typed bidirectional related-flow comparison with mapped-IPv4 normalization, missing-node/unknown-transport wildcards and invalid-endpoint/zero-port rejection. Add lazy postings only after repeated-lookup benchmarks justify them.
+- [x] Preserve completed full-match statistics, cancellation/progress semantics and the prior query on failed or cancelled filtering. Verify random result pages and concurrent pinned export for every chosen result representation.
+- [x] Run milestone-A correctness, race and performance checks. Make the compact backend the production path only after parity and resource gates pass; remove migration-only production switches and keep a test oracle or frozen fixtures for regression coverage.
+- [x] Update offline contracts, storage-format documentation and source-lifetime/operator documentation to describe actual completed-dataset behavior. Record measured gains and any remaining target gap.
 
 Gate: completed-ready production behavior remains equivalent, with end-to-end
 query/detail/export performance evaluated against the predeclared tolerances.
+
+Phase-4 implementation and independent sub-agent reviews were verified by the
+parent, including full package/race/build gates and exact private-capture parity.
+See [measurements and verification](../research/watch-file-phase4-validation.md).
+Production now uses completed compact datasets with structured block queries and
+bounded opaque fallback. Sparse vectors and implicit all-match results are the
+measured representations; dense bitsets and related postings remain deferred.
+Source and snapshot behavior is documented. Configured resource limits pass;
+remaining readiness and sparse-fallback timing gaps are explicitly recorded,
+without changing the tolerances or claiming the three-second target. Publication still
+waits for analyzer EOF; phase 5 has not begun.
 
 ## Phase 5 — Publish a complete base before analysis finishes
 

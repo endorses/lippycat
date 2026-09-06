@@ -293,8 +293,9 @@ lc watch file signaling.pcap media.pcap
 storage before installing the dataset. Startup, file dialogs, settings, and
 restarts use the same indexing workflow. The progress modal reports phase,
 source count, logical packets, scanned logical bytes, elapsed time, and disk
-usage. Escape cancels and keeps the modal open until cleanup finishes. A failed
-or cancelled replacement preserves the previous ready dataset and its state.
+usage, and the frozen backing policy. Escape cancels and keeps the modal open
+until cleanup finishes. A failed or cancelled replacement preserves the previous
+ready dataset and its state.
 
 Browsing loads bounded pages and selected details asynchronously. Cache eviction
 does not discard logical packets or change packet/event loss counters. Events and
@@ -313,9 +314,19 @@ Offline resource flags (also available when switching from live/remote mode):
 
 Flags override their corresponding YAML/Viper keys. Byte settings are positive
 integer byte counts; maximum record bytes must fit both cache and disk budgets.
-The backing policy accepts `source` or `snapshot` and is frozen per open. It is
-reserved for the compact backend currently under development; the production
-backend continues to store packet bytes independently of the input files.
+The backing policy accepts `source` or `snapshot` and is frozen per open.
+The default `source` policy keeps the original capture handles open and reads
+packet bytes on demand. Keep those files unchanged until the session and its
+exports finish. In-place edits or truncation cause explicit read/export errors;
+opening a replacement path never substitutes new bytes into the old session.
+Renamed or unlinked inputs remain readable through the original handle where
+the operating system permits it. Already returned owned details remain valid.
+
+Use `--offline-backing-policy snapshot` for independence from later input edits.
+It creates and validates a private copy before indexing, charging its full size
+to the session disk budget. Gzip classic PCAP uses an owned decompressed backing;
+snapshot mode also temporarily charges the compressed copy. Normalized/reassembled bytes
+are retained separately. There is no automatic copy after a source-change error.
 `max_sources` must be between 1 and 64. The session parent directory must exist
 and be writable. For example:
 
@@ -323,6 +334,7 @@ and be writable. For example:
 watch:
   offline:
     session_dir: /var/tmp
+    backing_policy: source
     max_disk_bytes: 4294967296
     cache_bytes: 67108864
     max_record_bytes: 8388608
@@ -331,8 +343,9 @@ watch:
 
 The ready dataset and replacement share disk/cache budgets. Disk accounting
 includes summaries, details, offsets, manifests, and completed/in-progress query
-files. Allow room for both datasets during replacement and for all-match query
-vectors. Normalized storage can be larger than the source capture. A configured
+files, source snapshots, decompressed inputs, and derived packet bytes. Allow
+room for both datasets during replacement and for filtered query vectors.
+All-match queries use implicit packet IDs without a per-packet query file. Normalized storage can be larger than the source capture. A configured
 budget limit, physical disk exhaustion, or permission error is surfaced explicitly;
 failed opens/queries preserve the previous completed dataset/query. Free space,
 choose a writable session directory, or raise the disk budget before retrying.

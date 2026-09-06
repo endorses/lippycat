@@ -89,7 +89,7 @@ func runOfflineCompactOracle(t *testing.T, cfg OfflineAnalysisConfig, candidate 
 		require.NoError(t, err)
 		return session
 	}
-	legacy, compact := build(indexOfflineDataset, 901), build(candidate, 902)
+	legacy, compact := build(indexOfflineLegacyDataset, 901), build(candidate, 902)
 	require.Equal(t, legacy.Dataset.Count(), compact.Dataset.Count(), "logical count")
 	require.NoError(t, offlineOracleEqual("dataset statistics", legacy.Dataset.Statistics(), compact.Dataset.Statistics()))
 	numeric, err := filters.NewNumericComparisonFilter("length", ">=64")
@@ -228,7 +228,7 @@ func TestOfflineCompactOracleLegacySanity(t *testing.T) {
 	paths := writeOrderedBridgeFixtures(t)
 	// Duplicate arguments and equal timestamps retain distinct source identity.
 	paths = append(paths, paths[0])
-	runOfflineCompactOracle(t, OfflineAnalysisConfig{Inputs: paths, EventCapacity: 32, MaxCalls: 32, SIPConfig: *voip.GetConfig()}, indexOfflineDataset)
+	runOfflineCompactOracle(t, OfflineAnalysisConfig{Inputs: paths, EventCapacity: 32, MaxCalls: 32, SIPConfig: *voip.GetConfig()}, indexOfflineLegacyDataset)
 }
 
 func TestOfflineCompactOraclePrivateLegacySanity(t *testing.T) {
@@ -237,7 +237,7 @@ func TestOfflineCompactOraclePrivateLegacySanity(t *testing.T) {
 		t.Skip("set LIPPYCAT_BENCH_PCAP for the private-capture differential oracle")
 	}
 	frozen := FreezeOfflineOpen([]string{path}, "", 10000)
-	runOfflineCompactOracle(t, frozen.Config, indexOfflineDataset)
+	runOfflineCompactOracle(t, frozen.Config, indexOfflineLegacyDataset)
 }
 
 // Independent pcapgo reference is valid only for these untransformed fixtures.

@@ -97,7 +97,7 @@ func TestOfflineCompactIndexerBackingOracle(t *testing.T) {
 func TestOfflineCompactDetailsFrozenAndOwned(t *testing.T) {
 	ctx := context.Background()
 	cfg := OfflineAnalysisConfig{Inputs: []string{writeCompactProtocolFixture(t)}, VoIP: true, EventCapacity: 32, SIPConfig: *voip.GetConfig()}
-	legacy, err := indexOfflineDataset(ctx, testOfflineStorage(t), 81, cfg, nil)
+	legacy, err := indexOfflineLegacyDataset(ctx, testOfflineStorage(t), 81, cfg, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, legacy.Close()) })
 	session, err := indexOfflineCompactDataset(ctx, testOfflineStorage(t), 82, cfg, nil)

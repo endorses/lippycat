@@ -21,8 +21,7 @@ import (
 )
 
 func indexOfflineLocatorCandidate(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (*offlineIndexedSession, error) {
-	cfg.locatorOrdering = true
-	return indexOfflineDataset(ctx, storage, generation, cfg, report)
+	return indexOfflineLocatorObserved(ctx, storage, generation, cfg, report, nil)
 }
 
 // The complete oracle compares order, packet IDs, source attribution, details,
@@ -82,8 +81,8 @@ func writeLocatorSIPFixtures(t *testing.T, mode string) []string {
 func TestOfflineLocatorIndexerScanBeforeAnalysis(t *testing.T) {
 	paths := writeLocatorSIPFixtures(t, "direct")
 	var phases []string
-	cfg := OfflineAnalysisConfig{Inputs: paths, locatorOrdering: true, EventCapacity: 32}
-	session, err := indexOfflineDatasetObserved(context.Background(), testOfflineStorage(t), 73, cfg, nil, func(phase string, _ time.Duration) { phases = append(phases, phase) })
+	cfg := OfflineAnalysisConfig{Inputs: paths, EventCapacity: 32}
+	session, err := indexOfflineLocatorObserved(context.Background(), testOfflineStorage(t), 73, cfg, nil, func(phase string, _ time.Duration) { phases = append(phases, phase) })
 	require.NoError(t, err)
 	require.NoError(t, session.Close())
 	position := func(phase string) int {
@@ -116,12 +115,11 @@ func TestOfflineLocatorIndexerScannedIdentitySurvivesRename(t *testing.T) {
 	identity, err := events.OfflineInputIdentityContext(context.Background(), paths)
 	require.NoError(t, err)
 	cfg := OfflineAnalysisConfig{Inputs: paths, EventCapacity: 32}
-	baseline, err := indexOfflineDataset(context.Background(), testOfflineStorage(t), 74, cfg, nil)
+	baseline, err := indexOfflineLegacyDataset(context.Background(), testOfflineStorage(t), 74, cfg, nil)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, baseline.Close()) }()
-	cfg.locatorOrdering = true
 	renamed := false
-	candidate, err := indexOfflineDatasetObserved(context.Background(), testOfflineStorage(t), 75, cfg, nil, func(phase string, _ time.Duration) {
+	candidate, err := indexOfflineLocatorObserved(context.Background(), testOfflineStorage(t), 75, cfg, nil, func(phase string, _ time.Duration) {
 		if phase == "scan" {
 			require.NoError(t, os.Rename(paths[0], paths[0]+".renamed"))
 			renamed = true
@@ -175,7 +173,7 @@ func TestOfflineLocatorIndexerScanFailurePreventsAnalysis(t *testing.T) {
 	require.NoError(t, os.Truncate(paths[0], info.Size()-1))
 	var phases []string
 	var ready bool
-	session, err := indexOfflineDatasetObserved(context.Background(), testOfflineStorage(t), 76, OfflineAnalysisConfig{Inputs: paths, locatorOrdering: true, EventCapacity: 32}, func(p offline.Progress) { ready = ready || p.State == offline.Ready }, func(phase string, _ time.Duration) { phases = append(phases, phase) })
+	session, err := indexOfflineLocatorObserved(context.Background(), testOfflineStorage(t), 76, OfflineAnalysisConfig{Inputs: paths, EventCapacity: 32}, func(p offline.Progress) { ready = ready || p.State == offline.Ready }, func(phase string, _ time.Duration) { phases = append(phases, phase) })
 	require.Error(t, err)
 	require.Nil(t, session)
 	require.NotContains(t, phases, "analysis_setup")

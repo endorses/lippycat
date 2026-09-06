@@ -65,6 +65,7 @@ func (s *Storage) cacheFrame(key cacheKey, data []byte) {
 	}
 	s.cache[key] = s.cacheLRU.PushFront(&cachedFrame{key: key, data: data, cost: cost})
 	s.usage.CachedBytes += cost
+	s.peaks.MemoryBytes = max(s.peaks.MemoryBytes, used+cost)
 }
 func (s *Storage) discardDatasetCache(d *diskDataset) {
 	s.mu.Lock()

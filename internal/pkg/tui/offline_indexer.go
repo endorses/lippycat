@@ -29,19 +29,16 @@ import (
 // OfflineAnalysisConfig is captured by the model before starting a worker.
 // Workers never read UI settings or mutate the active capture's global state.
 type OfflineAnalysisConfig struct {
-	// locatorOrdering selects the migration path internally until its production gate.
-	locatorOrdering bool
-	compactStorage  bool
-	BackingPolicy   offline.BackingPolicy
-	Inputs          []string
-	BPFFilter       string
-	VoIP            bool
-	TLSKeylog       string
-	EventCapacity   int
-	MaxCalls        int
-	ESP             capture.OfflineESPConfig
-	Analysis        LocalEventAnalysisOptions
-	SIPConfig       voip.Config
+	BackingPolicy offline.BackingPolicy
+	Inputs        []string
+	BPFFilter     string
+	VoIP          bool
+	TLSKeylog     string
+	EventCapacity int
+	MaxCalls      int
+	ESP           capture.OfflineESPConfig
+	Analysis      LocalEventAnalysisOptions
+	SIPConfig     voip.Config
 }
 
 type offlineIndexedSession struct {
@@ -161,19 +158,13 @@ func (f *offlineSIPFlows) isUDP(k string) bool {
 // drained, flushed session transfers to the model. Packet records bypass the
 // presentation queues and contribute to storage statistics exactly once.
 func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (*offlineIndexedSession, error) {
-	return indexOfflineDatasetObserved(ctx, storage, generation, cfg, report, nil)
+	return indexOfflineDatasetBackend(ctx, storage, generation, cfg, report, nil, true, true)
 }
 
-// indexOfflineCompactDataset is the internally selected migration candidate.
-// Production keeps its completed legacy backend until the phase-4 cutover gate.
-func indexOfflineCompactDataset(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (*offlineIndexedSession, error) {
-	cfg.locatorOrdering, cfg.compactStorage = true, true
-	return indexOfflineDataset(ctx, storage, generation, cfg, report)
-}
-
-// indexOfflineDatasetObserved exposes phase boundaries to the acceptance harness.
-// The optional observer runs synchronously and must not call storage methods.
-func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration)) (result *offlineIndexedSession, err error) {
+// indexOfflineDatasetBackend retains the legacy storage builder as a differential
+// test oracle. Production callers select one fixed backend in indexOfflineDataset;
+// backend selection is never part of the frozen configuration or user settings.
+func indexOfflineDatasetBackend(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration), locatorOrdering, compactStorage bool) (result *offlineIndexedSession, err error) {
 	phase, phaseStart := "setup", time.Now()
 	mark := func(next string) {
 		if next == phase {
@@ -199,7 +190,7 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 		sources[i] = offline.SourcePosition{ArgumentIndex: uint32(i), Path: path}
 	}
 	var builder *offline.Builder
-	if !cfg.compactStorage {
+	if !compactStorage {
 		builder, err = storage.NewBuilder(generation, sources)
 		if err != nil {
 			return nil, err
@@ -248,7 +239,7 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 		publish(true)
 	}
 	var prepared *capture.OfflineLocatorStream
-	if cfg.locatorOrdering || cfg.compactStorage {
+	if locatorOrdering || compactStorage {
 		mark("scan")
 		var prepareErr error
 		openErr := capture.StartOfflineSnifferOrdered(cfg.Inputs, cfg.BPFFilter, func(devices []pcaptypes.PcapInterface, filter string) {
@@ -261,7 +252,7 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 			return nil, err
 		}
 	}
-	if cfg.compactStorage {
+	if compactStorage {
 		builder, err = storage.NewCompactBuilder(generation, sources, prepared.Backings(), materializeOfflinePacket)
 		if err != nil {
 			return nil, err
@@ -352,7 +343,7 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 		sipFactory.OnEvent = func(id offline.PacketID, event sharedsip.Event) error {
 			if uint64(id) < indexedPackets {
 				sipFactory.LastEvent = nil
-				if cfg.compactStorage {
+				if compactStorage {
 					var packet types.PacketDisplay
 					applyOfflineSIPEvent(&packet, event)
 					return builder.AmendVoIP(ctx, id, packet.Protocol, packet.Info, packet.VoIPData)
@@ -437,7 +428,7 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 			meta := info.Packet.Metadata()
 			detail := offline.Detail{Source: offline.SourcePosition{ArgumentIndex: info.SourceIndex, Path: info.SourcePath, InterfaceID: info.SourceInterfaceID, Sequence: info.SourceSequence}, CapturedLength: uint32(meta.CaptureLength), OriginalLength: uint32(meta.Length), Packet: packet}
 			var appendErr error
-			if cfg.compactStorage {
+			if compactStorage {
 				if info.Provenance == nil {
 					return errors.New("compact offline packet has no effective-byte provenance")
 				}

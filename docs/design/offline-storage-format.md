@@ -1,6 +1,6 @@
 # Offline temporary storage formats
 
-## Schema 1: completed production backend and legacy oracle
+## Schema 1: legacy differential oracle
 
 Phase 2 replaces the provisional JSON payload and 20-byte frame from the initial
 contract with the binary format below. Standard JSON unmarshalling does not enforce decoded
@@ -81,11 +81,11 @@ the cache is not a hard RSS limit. Storage must reserve serialization and read
 working space under its shared cache policy before invoking the codec, in addition
 to accounting for retained and pinned records. Oversized records fail explicitly.
 
-## Schema 2: compact completed dataset migration backend
+## Schema 2: compact completed dataset
 
-Phase 3 implements the compact backend behind the internal `NewCompactBuilder`
-and TUI migration entry points. The production path still uses schema 1 until
-phase 4 passes its cutover gate. Both schemas publish only completed datasets.
+The production `watch file` path uses `NewCompactBuilder` and schema 2 after the
+phase-4 cutover gate. Schema 1 remains a differential test oracle. Both schemas
+publish only completed datasets.
 There is no persisted-session opener, cross-process reuse, or partial-analysis
 publication. Schema 1 is never interpreted as schema 2.
 
@@ -144,7 +144,10 @@ Typed blocks begin with 72 bytes:
 
 Packet IDs are zero-based and implicit within a block as first ID plus row
 position. The writer buffers at most 128 rows and closes a block earlier when
-byte admission would exceed `MaxRecordBytes`. Readers reject more than 4096 rows.
+byte admission would exceed `MaxRecordBytes`. With a cache below 16 MiB, the
+writer closes pending blocks earlier at one-sixteenth of the cache budget; a
+single admitted row can still use the full record allowance. Readers reject more
+than 4096 rows.
 Metadata replacement blocks currently contain one row. Both encoded payload and
 decoded allocations must fit configured limits; an oversized first row fails
 explicitly. Buffered rows and eventual disk bytes are charged before admission.
@@ -159,7 +162,8 @@ Cached blocks retain expanded bytes and bind their original physical size.
 Writers use a reused BestSpeed compressor for blocks of at least 4096 bytes when
 the configured cache budget is at least 16 MiB; blocks that do not shrink retain
 raw encoding. Compressor state is charged at 2 MiB; reader inflater scratch at
-256 KiB. Reusable payload/output buffers are admitted before growth and released
+256 KiB when used. Small-cache uncompressed reads omit that unused inflater
+reservation. Reusable payload/output buffers are admitted before growth and released
 at completion or cleanup. Compression never changes the row codec or projections.
 
 ### Columns and block-local arenas
@@ -370,9 +374,19 @@ writes/syncs/closes `manifest.tmp`, and atomically renames it to `manifest`.
 Write failures poison the builder; no failed build publishes a completed manifest.
 Cleanup retains ownership and accounting when removal must be retried.
 
-All-match queries can use implicit packet IDs; filtered queries retain the existing
-ordered u64 match vector and separate completion manifest. This does not implement
-phase-4 expression/block query acceleration or phase-5 analysis revisions. Source,
+All-match queries use implicit packet IDs; filtered queries use a bounded buffered
+ordered u64 match vector and separate completion manifest. Sequential queries read
+the authoritative directory and reuse validated expanded blocks, including
+replacement blocks from amendments. Structured expressions select decoded columns
+and arena values; the whole compression unit is still read and integrity-checked.
+Opaque predicates materialize the full bounded Summary projection. A sequential
+reader reuses bounded input/expanded buffers and inflater state, avoiding block
+cache copies. Its reservation covers both buffers, decoded row scratch and
+inflater state before allocation. Raw exports use the same block reader, decode
+only raw/provenance columns, and coalesce at most 64 owned source reads within
+256 KiB (larger admitted records use singleton reads). Every locator still gets
+its integrity check, and callback slices cannot grow into adjacent packet bytes.
+Query format is unchanged; there are no bitset/rank or posting files and no phase-5 revisions. Source,
 snapshot/decompression and derived bytes, buffered blocks, transposition scratch,
 queries, overrides, registries and retained replacement sessions remain part of
 resource accounting. No compact full `PacketDisplay` records or unchanged packet

@@ -21,6 +21,7 @@ type Storage struct {
 	mu       sync.Mutex
 	limits   ResourceLimits
 	usage    ResourceUsage
+	peaks    ResourcePeaks
 	closed   bool
 	cache    map[cacheKey]*list.Element
 	cacheLRU list.List
@@ -50,6 +51,7 @@ func (s *Storage) reserveDisk(n uint64) error {
 		return errors.New("offline session disk budget exhausted")
 	}
 	s.usage.DiskBytes += n
+	s.peaks.DiskBytes = max(s.peaks.DiskBytes, s.usage.DiskBytes)
 	return nil
 }
 func (s *Storage) releaseDisk(n uint64) { s.mu.Lock(); defer s.mu.Unlock(); s.usage.DiskBytes -= n }
@@ -68,6 +70,7 @@ func (s *Storage) reserveMemory(ctx context.Context, n uint64) error {
 		return errors.New("offline cache/allocation budget exhausted")
 	}
 	s.usage.InFlightBytes += n
+	s.peaks.MemoryBytes = max(s.peaks.MemoryBytes, used+n)
 	return nil
 }
 func (s *Storage) releaseMemory(n uint64) {

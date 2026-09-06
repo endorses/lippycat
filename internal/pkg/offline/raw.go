@@ -64,6 +64,9 @@ func (q *diskQuery) iterateRawLocked(ctx context.Context, visit func(RawRecord) 
 		return err
 	}
 	d := q.dataset
+	if d.compact != nil {
+		return q.iterateCompactRaw(ctx, visit)
+	}
 	for row := uint64(0); row < q.count; row++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -74,11 +77,7 @@ func (q *diskQuery) iterateRawLocked(ctx context.Context, visit func(RawRecord) 
 		}
 		var detail Detail
 		var held uint64
-		if d.compact != nil {
-			detail, held, err = d.readCompactRaw(ctx, id)
-		} else {
-			detail, held, err = d.readDetail(ctx, id)
-		}
+		detail, held, err = d.readDetail(ctx, id)
 		if err != nil {
 			return err
 		}

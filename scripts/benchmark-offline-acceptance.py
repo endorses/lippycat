@@ -71,6 +71,7 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--backend", choices=("legacy", "compact"), default="legacy")
     args = parser.parse_args()
     if args.runs < 3:
         parser.error("at least three unprofiled runs are required")
@@ -87,6 +88,7 @@ def main():
         .split("\0")
     )
     metadata = {
+        "backend": args.backend,
         "revision": command("git", "rev-parse", "HEAD"),
         "patch_sha256": hashlib.sha256(patch).hexdigest(),
         "untracked_sha256": {
@@ -110,7 +112,7 @@ def main():
             for k in ("GOMAXPROCS", "GOGC", "GOMEMLIMIT", "LIPPYCAT_BENCH_BPF")
         },
         "rss": "wait4 per-child maximum RSS (KiB on Linux), whole fresh benchmark process",
-        "disk": "benchmark sampled accounted index/scratch/query peak; export output separate; filesystem allocation peak unavailable",
+        "disk": "exact ledger index/scratch/query peak; export output separate; combined peak lower bound; filesystem allocation peak unavailable",
     }
     (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     binary = output / "offline-acceptance.test"
@@ -119,6 +121,7 @@ def main():
         GOCACHE="/tmp/lippycat-go-cache",
         LOG_LEVEL="ERROR",
         LIPPYCAT_BENCH_PCAP=str(capture),
+        LIPPYCAT_BENCH_BACKEND=args.backend,
     )
     subprocess.run(
         ["go", "test", "-c", "-tags", "all", "-o", str(binary), "./internal/pkg/tui"],

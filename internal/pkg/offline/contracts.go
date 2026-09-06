@@ -73,9 +73,11 @@ type QueryProgress struct {
 }
 
 type QuerySpec struct {
+	related     *Flow // internal typed flow comparison; never invokes an opaque predicate
 	Token       Token
 	Description []string
-	Match       Predicate // nil matches all packets
+	Match       Predicate   // opaque fallback; nil matches all packets
+	Expression  *Expression // validated immutable expression; takes precedence over Match
 	// Progress runs synchronously at scan start, periodically, and at scan end.
 	// It must return promptly and must not call dataset or query methods.
 	Progress func(QueryProgress)

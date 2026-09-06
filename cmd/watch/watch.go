@@ -61,7 +61,7 @@ func init() {
 
 	// Offline limits are shared by the ready dataset and its replacement.
 	WatchCmd.PersistentFlags().String("offline-session-dir", os.TempDir(), "parent directory for private offline dataset storage")
-	WatchCmd.PersistentFlags().String("offline-backing-policy", "source", "compact offline backing policy: source or snapshot (reserved until compact backend cutover)")
+	WatchCmd.PersistentFlags().String("offline-backing-policy", "source", "offline packet backing: source (keep inputs unchanged) or snapshot (validated private copies)")
 	WatchCmd.PersistentFlags().Uint64("offline-max-disk-bytes", 4<<30, "maximum combined offline sorting, dataset and query disk bytes")
 	WatchCmd.PersistentFlags().Uint64("offline-cache-bytes", 64<<20, "maximum offline display cache and read allocation bytes")
 	WatchCmd.PersistentFlags().Uint64("offline-max-record-bytes", 8<<20, "maximum encoded offline packet record bytes")

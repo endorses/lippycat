@@ -20,7 +20,7 @@ func BenchmarkOfflineCompactCompleted(b *testing.B) {
 	for _, candidate := range []struct {
 		name  string
 		build offlineOracleBuilder
-	}{{"legacy", indexOfflineDataset}, {"compact", indexOfflineCompactDataset}} {
+	}{{"legacy", indexOfflineLegacyDataset}, {"compact", indexOfflineCompactDataset}} {
 		b.Run(candidate.name, func(b *testing.B) {
 			path := os.Getenv("LIPPYCAT_BENCH_PCAP")
 			if path == "" {

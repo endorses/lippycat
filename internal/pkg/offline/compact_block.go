@@ -201,7 +201,7 @@ func (b *Builder) writeCompactBlock(f *os.File, kind uint16, first PacketID, row
 	return uint64(off), uint64(len(stored)) + 72, err
 }
 
-func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size uint64, kind uint16, id PacketID) ([]byte, uint64, error) {
+func (d *diskDataset) compactWholeBlock(ctx context.Context, f *os.File, off, size uint64, kind uint16, id PacketID) ([]byte, uint64, error) {
 	max := d.storage.limits.MaxRecordBytes
 	if size < 72 || size-72 > max || off < 32 || size > math.MaxInt64 || off > math.MaxInt64-size {
 		return nil, 0, errors.New("compact invalid block reference")
@@ -213,7 +213,11 @@ func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size ui
 	if off+size > uint64(st.Size()) {
 		return nil, 0, io.ErrUnexpectedEOF
 	}
-	held := size + max*3 + compactInflaterMemory
+	held := size + max*3
+	inflaterHeld := d.storage.limits.CacheBytes >= 16<<20
+	if inflaterHeld {
+		held += compactInflaterMemory
+	}
 	if err = d.storage.reserveMemory(ctx, held); err != nil {
 		return nil, 0, err
 	}
@@ -245,6 +249,12 @@ func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size ui
 		return fail(errors.New("compact invalid block header"))
 	}
 	if !cacheHit && binary.LittleEndian.Uint16(h[22:]) == 1 {
+		if !inflaterHeld {
+			if err = d.storage.reserveMemory(ctx, compactInflaterMemory); err != nil {
+				return fail(err)
+			}
+			held += compactInflaterMemory
+		}
 		p, err = inflateCompact(p, n)
 		if err != nil {
 			return fail(err)
@@ -253,88 +263,14 @@ func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size ui
 	if uint64(len(p)) != n+72 {
 		return fail(errors.New("compact cached block reference mismatch"))
 	}
-	payload := p[72:]
 	if cacheHit {
-		// Cached blocks passed all integrity, descriptor and arena checks before
-		// insertion and are immutable. Only materialize this row on repeated reads.
-		parts := make([][]byte, len(wires))
-		var length uint64
-		selectedRow := uint64(id) - first
-		for col, wire := range wires {
-			desc := payload[col*24 : (col+1)*24]
-			start := binary.LittleEndian.Uint64(desc[8:])
-			width := uint64(widths[col])
-			field := payload[start+selectedRow*width : start+(selectedRow+1)*width]
-			if wire == 7 {
-				offset := uint64(binary.LittleEndian.Uint32(field[4:]))
-				length := uint64(binary.LittleEndian.Uint32(field[8:]))
-				field = payload[offset : offset+length]
-			}
-			if uint64(len(field)) > max-length {
-				return fail(errors.New("compact selected row exceeds allocation limit"))
-			}
-			parts[col] = field
-			length += uint64(len(field))
-		}
-		result := make([]byte, 0, length)
-		for _, part := range parts {
-			result = append(result, part...)
-		}
 		if err = ctx.Err(); err != nil {
 			return fail(err)
 		}
-		return result, held, nil
+		return p, held, nil
 	}
-	digest := sha256.Sum256(payload)
-	if !bytes.Equal(digest[:], h[40:]) {
-		return fail(errors.New("compact block checksum mismatch"))
-	}
-	cursor := uint64(columns) * 24
-	for col, wire := range wires {
-		desc := payload[col*24 : (col+1)*24]
-		length := count * uint64(widths[col])
-		if binary.LittleEndian.Uint16(desc) != uint16(col+1) || desc[2] != wire || desc[3] != 0 || uint64(binary.LittleEndian.Uint32(desc[4:])) != count || binary.LittleEndian.Uint64(desc[8:]) != cursor || binary.LittleEndian.Uint64(desc[16:]) != length || cursor > n || length > n-cursor {
-			return fail(errors.New("compact invalid column descriptor"))
-		}
-		cursor += length
-	}
-	arena := cursor
-	selected := make([][]byte, columns)
-	row := uint64(id) - first
-	for col, wire := range wires {
-		desc := payload[col*24 : (col+1)*24]
-		start := binary.LittleEndian.Uint64(desc[8:])
-		width := uint64(widths[col])
-		if wire != 7 {
-			selected[col] = payload[start+row*width : start+(row+1)*width]
-			continue
-		}
-		for i := uint64(0); i < count; i++ {
-			ref := payload[start+i*16 : start+(i+1)*16]
-			offset := uint64(binary.LittleEndian.Uint32(ref[4:]))
-			length := uint64(binary.LittleEndian.Uint32(ref[8:]))
-			if binary.LittleEndian.Uint32(ref) != 0 || binary.LittleEndian.Uint32(ref[12:]) != 1 || offset != arena || offset > n || length > n-offset {
-				return fail(errors.New("compact invalid arena reference"))
-			}
-			if i == row {
-				selected[col] = payload[offset : offset+length]
-			}
-			arena += length
-		}
-	}
-	if arena != n {
-		return fail(errors.New("compact trailing arena bytes"))
-	}
-	length := uint64(0)
-	for _, part := range selected {
-		length += uint64(len(part))
-		if length > max {
-			return fail(errors.New("compact selected row exceeds allocation limit"))
-		}
-	}
-	result := make([]byte, 0, length)
-	for _, part := range selected {
-		result = append(result, part...)
+	if err = validateCompactBlockPayload(p, wires, widths); err != nil {
+		return fail(err)
 	}
 	if err = ctx.Err(); err != nil {
 		return fail(err)
@@ -345,5 +281,93 @@ func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size ui
 	binary.LittleEndian.PutUint64(cached, size)
 	copy(cached[8:], p)
 	d.storage.cacheFrame(key, cached)
+	return p, held, nil
+}
+
+// compactBlock materializes a single row from an authenticated block. Sequential
+// queries retain the whole block instead, amortizing validation and decompression.
+func (d *diskDataset) compactBlock(ctx context.Context, f *os.File, off, size uint64, kind uint16, id PacketID) ([]byte, uint64, error) {
+	p, held, err := d.compactWholeBlock(ctx, f, off, size, kind, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	wires, widths, err := compactColumnTypes(kind)
+	if err != nil {
+		d.storage.releaseMemory(held)
+		return nil, 0, err
+	}
+	row := uint64(id) - binary.LittleEndian.Uint64(p[8:])
+	var fields [64][]byte
+	var length uint64
+	for col := range wires {
+		fields[col] = compactBlockField(p, row, col, wires[col], widths[col])
+		length += uint64(len(fields[col]))
+		if length > d.storage.limits.MaxRecordBytes {
+			d.storage.releaseMemory(held)
+			return nil, 0, errors.New("compact selected row exceeds allocation limit")
+		}
+	}
+	result := make([]byte, 0, length)
+	for _, field := range fields[:len(wires)] {
+		result = append(result, field...)
+	}
 	return result, held, nil
+}
+
+// compactBlockField borrows a field from an already authenticated block.
+func compactBlockField(block []byte, row uint64, col int, wire byte, width int) []byte {
+	payload := block[compactBlockHeaderBytes:]
+	desc := payload[col*24 : (col+1)*24]
+	start := binary.LittleEndian.Uint64(desc[8:]) + row*uint64(width)
+	field := payload[start : start+uint64(width)]
+	if wire == 7 {
+		offset := uint64(binary.LittleEndian.Uint32(field[4:]))
+		length := uint64(binary.LittleEndian.Uint32(field[8:]))
+		field = payload[offset : offset+length]
+	}
+	return field
+}
+
+// validateCompactBlockPayload checks all columns and arena references even when
+// the caller will decode only a subset. Header bounds have already been checked.
+func validateCompactBlockPayload(p []byte, wires []byte, widths []int) error {
+	h := p[:compactBlockHeaderBytes]
+	payload := p[compactBlockHeaderBytes:]
+	count := uint64(binary.LittleEndian.Uint32(h[16:]))
+	columns := len(wires)
+	n := uint64(len(payload))
+	digest := sha256.Sum256(payload)
+	if !bytes.Equal(digest[:], h[40:]) {
+		return errors.New("compact block checksum mismatch")
+	}
+	cursor := uint64(columns) * 24
+	for col, wire := range wires {
+		desc := payload[col*24 : (col+1)*24]
+		length := count * uint64(widths[col])
+		if binary.LittleEndian.Uint16(desc) != uint16(col+1) || desc[2] != wire || desc[3] != 0 || uint64(binary.LittleEndian.Uint32(desc[4:])) != count || binary.LittleEndian.Uint64(desc[8:]) != cursor || binary.LittleEndian.Uint64(desc[16:]) != length || cursor > n || length > n-cursor {
+			return errors.New("compact invalid column descriptor")
+		}
+		cursor += length
+	}
+	arena := cursor
+	for col, wire := range wires {
+		desc := payload[col*24 : (col+1)*24]
+		start := binary.LittleEndian.Uint64(desc[8:])
+		if wire != 7 {
+			continue
+		}
+		for i := uint64(0); i < count; i++ {
+			ref := payload[start+i*16 : start+(i+1)*16]
+			offset := uint64(binary.LittleEndian.Uint32(ref[4:]))
+			length := uint64(binary.LittleEndian.Uint32(ref[8:]))
+			if binary.LittleEndian.Uint32(ref) != 0 || binary.LittleEndian.Uint32(ref[12:]) != 1 || offset != arena || offset > n || length > n-offset {
+				return errors.New("compact invalid arena reference")
+			}
+			arena += length
+		}
+	}
+	if arena != n {
+		return errors.New("compact trailing arena bytes")
+	}
+	return nil
 }

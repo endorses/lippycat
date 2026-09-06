@@ -105,3 +105,44 @@ func TestCompactRawCancellationAndCallbackRelease(t *testing.T) {
 	require.Equal(t, 1, visits)
 	require.Equal(t, baseline, storage.Resources().InFlightBytes)
 }
+
+func TestCompactRawBatchCallbackOwnershipAndFailure(t *testing.T) {
+	d := compactQueryFixture(t, 130)
+	query, err := AllPackets(context.Background(), d, Token{Dataset: 17, Query: 1})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, query.Close()) }()
+	detail, err := d.Detail(context.Background(), query.Token(), 0)
+	require.NoError(t, err)
+	baseline := d.Resources().InFlightBytes
+	visits := 0
+	require.NoError(t, IterateRaw(context.Background(), query, func(record RawRecord) error {
+		require.Equal(t, detail.Packet.RawData, record.RawData)
+		require.Equal(t, len(record.RawData), cap(record.RawData), "callback append must not access another record")
+		record.RawData[0] ^= 0xff
+		visits++
+		return nil
+	}))
+	require.Equal(t, 130, visits)
+	require.Equal(t, baseline, d.Resources().InFlightBytes)
+	callbackError := errors.New("stop export")
+	visits = 0
+	err = IterateRaw(context.Background(), query, func(RawRecord) error { visits++; return callbackError })
+	require.ErrorIs(t, err, callbackError)
+	require.Equal(t, 1, visits)
+	require.Equal(t, baseline, d.Resources().InFlightBytes)
+	for _, stopAt := range []int{1, 130} {
+		ctx, cancel := context.WithCancel(context.Background())
+		visits = 0
+		err = IterateRaw(ctx, query, func(RawRecord) error {
+			visits++
+			if visits == stopAt {
+				cancel()
+			}
+			return nil
+		})
+		cancel()
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, stopAt, visits)
+		require.Equal(t, baseline, d.Resources().InFlightBytes)
+	}
+}

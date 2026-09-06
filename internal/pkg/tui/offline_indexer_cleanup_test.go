@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/offline"
@@ -29,8 +30,17 @@ func TestOfflineIndexerRetainsFailedBuilderCleanup(t *testing.T) {
 		}
 		entries, readErr := os.ReadDir(directory)
 		require.NoError(t, readErr)
-		require.Len(t, entries, 1)
-		sessionDirectory = filepath.Join(directory, entries[0].Name())
+		// Compact construction validates/orders sources before creating its
+		// builder. Wait for that directory rather than the first scan progress.
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), "lippycat-offline-") {
+				sessionDirectory = filepath.Join(directory, entry.Name())
+				break
+			}
+		}
+		if sessionDirectory == "" {
+			return
+		}
 		require.NoError(t, os.Chmod(sessionDirectory, 0500))
 		cancel()
 	})

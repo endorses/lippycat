@@ -1,8 +1,8 @@
 # Offline dataset contracts
 
-Phase 2 implements storage, codecs, resource accounting, and complete queries in
-`internal/pkg/offline`, without a production dependency on Bubble Tea or TUI
-filters. Installing the dataset path and analyzer lifecycle remains phase 3. The authoritative parity source is `types.PacketDisplay` and the
+The completed `watch file` dataset uses storage, codecs, resource accounting,
+and complete queries in `internal/pkg/offline`, without a dependency on Bubble Tea
+or TUI filters. The authoritative parity source is `types.PacketDisplay` and the
 existing filter constructors, including their current quirks.
 
 ## Filter inventory and parity
@@ -73,11 +73,11 @@ pagination stall with an empty page. Summary field access never performs I/O. Re
 lease until `Page.Close`; selected details use `PinDetail` and its explicit close.
 
 A Dataset exposes count/global statistics, completed Query creation, related-flow
-queries, details, accounting and Close. A nil predicate is all-match; an empty
+queries, details, accounting and Close. With no expression, a nil predicate is all-match; an empty
 result is a valid completed query. Predicate closures must capture an immutable
 snapshot (not the mutable FilterChain). Query exposes count/filtered statistics,
-pages and cancellable streaming iteration for export. Match IDs and record
-offsets stay on disk even for all-match queries. Statistics snapshots own their
+pages and cancellable streaming iteration for export. Filtered match IDs and record offsets stay on disk; all-match queries use
+implicit IDs without a per-packet vector. Statistics snapshots own their
 bounded maps (initially 1,000 protocols and 10,000 entries per address counter,
 matching the current UI), plus 1 MiB of owned key bytes per map; packet/byte totals and min/max packet sizes are exact,
 capped source/destination frequency and cardinality metrics are identified
@@ -194,12 +194,12 @@ Reject more than the supported source limit before opening readers.
 See [ordering and navigation corrections](../plans/watch-file-ordering-and-navigation.md)
 for the change superseding the initial strict-rejection policy.
 
-## Compact migration contracts
+## Compact source index contracts
 
-The following is the implementation contract for phases 1–5 of the compact
-source-index plan. Phase 3 implements an internally selected completed compact
-dataset; the existing v1 production behavior and completed-only publication
-remain unchanged until the phase-4 cutover gate. See the
+The compact source index is the completed production backend for `watch file`
+after the phase-4 acceptance gate. Schema 1 remains a differential test oracle.
+Publication still waits for complete ordered analysis and finalized metadata;
+phase-5 progressive readiness is separate work. See the
 [full field inventory](watch-file-packet-field-inventory.md) and
 [implemented v2 wire specification](offline-storage-format.md).
 The baseline environment and immutable revision/working-tree identity are recorded
@@ -265,10 +265,9 @@ Three-process medians are an engineering comparison, not statistical confidence.
 
 ### Explicit backing policy and source errors
 
-Phase 1 will add `--offline-backing-policy` bound to
-`watch.offline.backing_policy`, with exactly `source` and `snapshot`; default
-`source`. This policy takes effect only when the compact path is enabled after
-its gate, not in Phase 0. Snapshot is the explicit option for independence from
+`--offline-backing-policy` binds to `watch.offline.backing_policy`, with exactly
+`source` and `snapshot`; default `source`. This policy applies to every production
+file open. Snapshot is the explicit option for independence from
 later source edits; no implicit fallback or automatic copy after a source error.
 Use ordinary flag/Viper precedence and pass the validated value through watch
 configuration, the frozen offline session config and backend source construction.
@@ -295,7 +294,7 @@ the owned old file; path metadata is not used to switch identities. In-place
 truncation, changes to the owned file or short reads return a typed source-change
 error with source argument index, source/backing IDs, operation, reason
 (`identity`, `size`, `metadata`, `digest`, `short_read`) and wrapped underlying
-I/O error when present. The Phase-1 implementation should expose a stable
+I/O error when present. The implementation exposes the stable
 `ErrSourceChanged` sentinel and errors.Is support. Error output includes the
 original display path but no captured content or secrets. An invalid locator or
 corrupt private index is a distinct corruption error, not silently a source change.
@@ -368,3 +367,38 @@ retained totals, and any newly persisted copies are charged to disk as well.
 For benchmarks report completed index+metadata+sidecars+manifests, live query disk,
 sort/copy/spool temporary peak and combined peak, avoiding double-counting an
 artifact when it moves from temporary to completed ownership.
+
+### Completed block queries (phase 4)
+
+The TUI compiles constructed, immutable packet filters into validated expressions
+in `offline/filterexpr`. The backend never imports TUI packages. Boolean and stack
+semantics, aliases, numeric epsilon, metadata presence, text matching and the
+accepted BPF subset remain those of the existing filter constructors. Unknown
+custom filter implementations use the opaque `QuerySpec.Match` fallback.
+
+Queries scan the authenticated row directory in logical order and reuse expanded
+blocks. Compression and checksums require reading a whole block, but supported
+expressions decode only their needed columns/arena values plus the fields needed
+for complete match statistics. Opaque callbacks receive the full bounded Summary
+projection. Summary accessors perform no I/O. Amendments follow the authoritative
+directory, preserving finalized EOF metadata.
+
+Match IDs use bounded buffered ordered uint64 vectors, charged on admission.
+All-match results use implicit IDs. Dense bitsets and lazy related-flow postings
+remain deferred pending measured benefit. Related matching is bidirectional,
+normalizes mapped IPv4, preserves absent-node/unknown-transport wildcards, and
+rejects invalid endpoints and zero ports. Query publication remains atomic with
+complete statistics; failure or cancellation preserves the prior installed query.
+Pinned exports retain their completed query and dataset across replacement.
+
+`Storage.Peaks` reports exact monotonic admitted disk and cache/read memory peaks,
+including coexistence across queries and replacement sessions. These are ledger
+limits, not process RSS or analyzer-memory measurements. The phase-4 validation
+report records the measured acceptance matrix and remaining engineering target gap.
+
+Small-cache operation keeps the same hard limits. Below 16 MiB, compact builders
+release completed decoder scratch before flushing and use smaller pending blocks;
+uncompressed readers do not reserve an unused inflater. Locator replay scales
+optional read-ahead to the shared cache budget, leaving room for the consumer.
+The 128 KiB cache / 16 KiB record reference fixture still indexes, queries,
+materializes details and exports without increasing its budgets.

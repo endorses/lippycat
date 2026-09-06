@@ -460,7 +460,15 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 	if s.ordering != "heap" {
 		ranges = []locatorRange{{0, s.count}}
 	}
-	reservation, err := s.storage.ReserveTransient(parent, uint64(len(ranges))*(locatorReadBuffer+locatorKeyBytes+128)+64*(locatorKeyBytes+64))
+	// Replay and the analyzer/store share one memory owner. Scale optional
+	// read-ahead down for small budgets so producer buffers cannot consume the
+	// scratch needed to admit the next completed row. Default 64 MiB sessions
+	// retain the existing 16 KiB readers, 64 keys and 1 MiB prefetch.
+	memoryLimit := s.storage.MemoryLimit()
+	readBuffer := int(min(uint64(locatorReadBuffer), max(uint64(256), memoryLimit/(32*uint64(max(1, len(ranges)))))))
+	batchKeys := int(min(uint64(64), max(uint64(1), memoryLimit/(64*(locatorKeyBytes+64)))))
+	prefetchBytes := min(uint64(locatorPrefetchBytes), max(uint64(1), memoryLimit/32))
+	reservation, err := s.storage.ReserveTransient(parent, uint64(len(ranges))*(uint64(readBuffer)+locatorKeyBytes+128)+uint64(batchKeys)*(locatorKeyBytes+64))
 	if err != nil {
 		return err
 	}
@@ -495,7 +503,7 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 		return nil
 	}
 	for i, r := range ranges {
-		readers[i] = bufio.NewReaderSize(io.NewSectionReader(s.index, locatorHeaderBytes+int64(r.start*locatorKeyBytes), int64((r.end-r.start)*locatorKeyBytes)), locatorReadBuffer)
+		readers[i] = bufio.NewReaderSize(io.NewSectionReader(s.index, locatorHeaderBytes+int64(r.start*locatorKeyBytes), int64((r.end-r.start)*locatorKeyBytes)), readBuffer)
 		remaining[i] = r.end - r.start
 		if err := readHead(i); err != nil {
 			return err
@@ -509,17 +517,22 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 	var previous locatorKey
 	hasPrevious := false
 	produceErr := func() error {
+		// These scalar keys/locators are consumed before the batch lease closes;
+		// packet handoff owns independent byte slices and provenance. Reuse the
+		// admitted capacities instead of allocating them again for every batch.
+		keys := make([]locatorKey, 0, batchKeys)
+		locs := make([]offline.Locator, 0, batchKeys)
 		for len(heads) > 0 {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			keys := make([]locatorKey, 0, 64)
-			locs := make([]offline.Locator, 0, 64)
+			keys = keys[:0]
+			locs = locs[:0]
 			var bytes uint64
-			for len(heads) > 0 && len(keys) < 64 {
+			for len(heads) > 0 && len(keys) < batchKeys {
 				next := heads[0].key
 				length := uint64(next.locator().Length)
-				if len(keys) > 0 && bytes+length > locatorPrefetchBytes {
+				if len(keys) > 0 && bytes+length > prefetchBytes {
 					break
 				}
 				var head locatorHead
@@ -549,7 +562,7 @@ func (s *OfflineLocatorStream) Replay(parent context.Context, processor func(con
 			if err != nil {
 				return err
 			}
-			lease, data, err := s.backings.ReadBatch(ctx, locs, max(uint64(locatorPrefetchBytes), bytes))
+			lease, data, err := s.backings.ReadBatch(ctx, locs, max(prefetchBytes, bytes))
 			if err != nil {
 				return errors.Join(err, copyReservation.Close())
 			}

@@ -684,31 +684,32 @@ Settings for `lc sniff`. See [CLI Capture with `lc sniff`](../part2-local-captur
 
 Settings for `lc watch`. See [Interactive Capture with `lc watch`](../part2-local-capture/watch-local.md).
 
-| Key                              | Type    | Default                | Description                                                                                                                  |
-| -------------------------------- | ------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `watch.buffer_size`              | integer | `10000`                | Live/remote packet ring and retained event capacity; does not limit offline packet completeness.                             |
-| `watch.offline.session_dir`      | string  | OS temporary directory | Existing writable parent for private temporary offline sessions; flag `--offline-session-dir`.                               |
-| `watch.offline.max_disk_bytes`   | integer | `4294967296` (4 GiB)   | Positive combined sorting/dataset/query disk budget, including current and replacement sessions; flag `--offline-max-disk-bytes`.    |
-| `watch.offline.cache_bytes`      | integer | `67108864` (64 MiB)    | Positive cache, selected details, prefetch and in-flight read budget; not a process RSS limit; flag `--offline-cache-bytes`. |
-| `watch.offline.max_record_bytes` | integer | `8388608` (8 MiB)      | Positive maximum encoded packet record size, no larger than cache or disk budgets; flag `--offline-max-record-bytes`.        |
-| `watch.offline.max_sources`      | integer | `64`                   | Simultaneous offline source files, 1–64; flag `--offline-max-sources`.                                                       |
-| `watch.max_calls`                | integer | `5000`                 | Maximum VoIP calls to keep in memory.                                                                                        |
-| `watch.theme`                    | string  | `""`                   | TUI color theme (e.g., `"dark"`, `"light"`).                                                                                 |
-| `watch.file.tls_keylog`          | string  | `""`                   | TLS key log file for PCAP file analysis.                                                                                     |
-| `watch.tls_decryption_enabled`   | boolean | `false`                | Enable TLS decryption in TUI (set automatically).                                                                            |
-| `watch.tls_keylog`               | string  | `""`                   | Path to SSLKEYLOGFILE for TLS decryption.                                                                                    |
-| `watch.tls.enabled`              | boolean | `false`                | Enable TLS for remote connections.                                                                                           |
-| `watch.tls.ca_file`              | string  | `""`                   | CA certificate for server verification.                                                                                      |
-| `watch.tls.cert_file`            | string  | `""`                   | Client certificate for mTLS.                                                                                                 |
-| `watch.tls.key_file`             | string  | `""`                   | Client key for mTLS.                                                                                                         |
-| `watch.tls.skip_verify`          | boolean | `false`                | Skip TLS certificate verification (insecure).                                                                                |
-| `watch.tls.server_name_override` | string  | `""`                   | Override server name for TLS verification.                                                                                   |
-| `watch.gpu.enabled`              | boolean | `false`                | Enable GPU acceleration in TUI mode.                                                                                         |
-| `watch.gpu.backend`              | string  | `"auto"`               | GPU backend for TUI.                                                                                                         |
-| `watch.gpu.batch_size`           | integer | `100`                  | GPU batch size.                                                                                                              |
-| `watch.node_history`             | list    | `[]`                   | History of previously connected remote nodes (managed automatically).                                                        |
-| `watch.filter_history`           | list    | `[]`                   | History of packet filter strings (managed automatically).                                                                    |
-| `watch.call_filter_history`      | list    | `[]`                   | History of call filter strings (managed automatically).                                                                      |
+| Key                              | Type    | Default                | Description                                                                                                                       |
+| -------------------------------- | ------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `watch.buffer_size`              | integer | `10000`                | Live/remote packet ring and retained event capacity; does not limit offline packet completeness.                                  |
+| `watch.offline.backing_policy`   | string  | `source`               | Frozen per open: owned original handles (`source`) or validated private copies (`snapshot`); flag `--offline-backing-policy`.     |
+| `watch.offline.session_dir`      | string  | OS temporary directory | Existing writable parent for private temporary offline sessions; flag `--offline-session-dir`.                                    |
+| `watch.offline.max_disk_bytes`   | integer | `4294967296` (4 GiB)   | Positive combined sorting/dataset/query disk budget, including current and replacement sessions; flag `--offline-max-disk-bytes`. |
+| `watch.offline.cache_bytes`      | integer | `67108864` (64 MiB)    | Positive cache, selected details, prefetch and in-flight read budget; not a process RSS limit; flag `--offline-cache-bytes`.      |
+| `watch.offline.max_record_bytes` | integer | `8388608` (8 MiB)      | Positive maximum encoded packet record size, no larger than cache or disk budgets; flag `--offline-max-record-bytes`.             |
+| `watch.offline.max_sources`      | integer | `64`                   | Simultaneous offline source files, 1–64; flag `--offline-max-sources`.                                                            |
+| `watch.max_calls`                | integer | `5000`                 | Maximum VoIP calls to keep in memory.                                                                                             |
+| `watch.theme`                    | string  | `""`                   | TUI color theme (e.g., `"dark"`, `"light"`).                                                                                      |
+| `watch.file.tls_keylog`          | string  | `""`                   | TLS key log file for PCAP file analysis.                                                                                          |
+| `watch.tls_decryption_enabled`   | boolean | `false`                | Enable TLS decryption in TUI (set automatically).                                                                                 |
+| `watch.tls_keylog`               | string  | `""`                   | Path to SSLKEYLOGFILE for TLS decryption.                                                                                         |
+| `watch.tls.enabled`              | boolean | `false`                | Enable TLS for remote connections.                                                                                                |
+| `watch.tls.ca_file`              | string  | `""`                   | CA certificate for server verification.                                                                                           |
+| `watch.tls.cert_file`            | string  | `""`                   | Client certificate for mTLS.                                                                                                      |
+| `watch.tls.key_file`             | string  | `""`                   | Client key for mTLS.                                                                                                              |
+| `watch.tls.skip_verify`          | boolean | `false`                | Skip TLS certificate verification (insecure).                                                                                     |
+| `watch.tls.server_name_override` | string  | `""`                   | Override server name for TLS verification.                                                                                        |
+| `watch.gpu.enabled`              | boolean | `false`                | Enable GPU acceleration in TUI mode.                                                                                              |
+| `watch.gpu.backend`              | string  | `"auto"`               | GPU backend for TUI.                                                                                                              |
+| `watch.gpu.batch_size`           | integer | `100`                  | GPU batch size.                                                                                                                   |
+| `watch.node_history`             | list    | `[]`                   | History of previously connected remote nodes (managed automatically).                                                             |
+| `watch.filter_history`           | list    | `[]`                   | History of packet filter strings (managed automatically).                                                                         |
+| `watch.call_filter_history`      | list    | `[]`                   | History of call filter strings (managed automatically).                                                                           |
 
 ---
 

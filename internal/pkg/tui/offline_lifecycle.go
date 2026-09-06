@@ -412,6 +412,11 @@ func (m Model) retryOfflineCancellation() (Model, tea.Cmd) {
 func (m Model) offlineModal() string {
 	p := m.offlineProgress
 	content := fmt.Sprintf("Phase: %s\nSources: %d\nLogical packets: %d\nBytes scanned: %d\nTemporary disk: %d bytes\nElapsed: %s", p.State, p.Sources, p.LogicalPackets, p.ScannedBytes, p.DiskBytes, p.Elapsed.Round(time.Millisecond))
+	policy := m.offlinePending.Config.BackingPolicy
+	if policy == "" {
+		policy = offline.BackingSource
+	}
+	content += fmt.Sprintf("\nBacking policy: %s", policy)
 	if p.State != offline.Cancelling && p.State != offline.Failed {
 		known := p.State == offline.Indexing || p.State == offline.Ready
 		content += "\n\n" + offlineProgressBar(p.LogicalPackets, p.TotalPackets, known, p.Elapsed)

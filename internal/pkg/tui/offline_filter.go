@@ -115,6 +115,11 @@ func (m *Model) startOfflineFilter(chain *filters.FilterChain, protocol *compone
 		m.offlineSession.browser = b
 		m.offlineBrowse = &offlineBrowserState{owner: b}
 	}
+	chain = chain.Clone()
+	expression, compileErr := chain.OfflineExpression()
+	if compileErr != nil {
+		return m.uiState.Toast.Show(compileErr.Error(), components.ToastError, components.ToastDurationLong)
+	}
 	o := m.offlineSession.filter
 	if o == nil {
 		o = &offlineFilterOwner{queries: make(map[offline.Query]struct{})}
@@ -187,6 +192,7 @@ func (m *Model) startOfflineFilter(chain *filters.FilterChain, protocol *compone
 				o.mu.Unlock()
 			}}
 			if !chain.IsEmpty() {
+				spec.Expression = expression
 				spec.Match = func(summary offline.Summary) bool { return chain.Match(summary) }
 			}
 			q, err = dataset.Query(ctx, spec)

@@ -113,8 +113,8 @@ func (d *diskDataset) schemaVersion() uint16 {
 	return RecordSchemaVersion
 }
 
-// NewCompactBuilder is an internal migration entry point. Ownership of registry
-// transfers only on success. Persistent reuse and production cutover are separate.
+// NewCompactBuilder constructs a completed source-backed dataset. Ownership of
+// registry transfers only on success. Persistent reuse is not supported.
 func (s *Storage) NewCompactBuilder(g DatasetGeneration, sources []SourcePosition, registry *BackingRegistry, decode StatelessDecoder) (*Builder, error) {
 	if registry == nil || decode == nil {
 		return nil, errors.New("compact builder requires backing registry and stateless decoder")
@@ -252,9 +252,9 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	max := d.storage.limits.MaxRecordBytes
 	reservation := max*5 + 4096
 	if err := d.storage.reserveMemory(ctx, reservation); err != nil {
-		return err
+		return fmt.Errorf("compact row scratch: %w", err)
 	}
-	defer d.storage.releaseMemory(reservation)
+	defer func() { d.storage.releaseMemory(reservation) }()
 	if _, err := compactRecordMemory(&detail, max); err != nil {
 		return err
 	}
@@ -284,6 +284,13 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	if err != nil {
 		return err
 	}
+	// Stateless decoding and metadata comparison are finished. Retain only the
+	// summary and encoded row allowance while flushing prior buffered rows.
+	if d.storage.limits.CacheBytes < 16<<20 {
+		rowReservation := max*2 + 4096
+		d.storage.releaseMemory(reservation - rowReservation)
+		reservation = rowReservation
+	}
 	c := d.compact
 	// Each pending row includes its sparse metadata reference. Both owned heap
 	// capacity and eventual on-disk bytes are admitted before buffering.
@@ -291,7 +298,11 @@ func (b *Builder) storeCompact(ctx context.Context, id PacketID, detail Detail, 
 	binary.LittleEndian.PutUint64(encoded[8:], size)
 	cost := uint64(cap(encoded)) + 32
 	admission := uint64(len(encoded)) + uint64(len(compactFieldNames[reflect.TypeOf(compactRow{})])+2)*40 + compactBlockHeaderBytes + compactIndexBytes
-	if len(c.rows) > 0 && (len(c.rows) >= compactRows || c.rowDisk+admission > max) {
+	blockBudget := max
+	if d.storage.limits.CacheBytes < 16<<20 {
+		blockBudget = min(blockBudget, d.storage.limits.CacheBytes/16)
+	}
+	if len(c.rows) > 0 && (len(c.rows) >= compactRows || c.rowDisk+admission > blockBudget) {
 		if err = b.flushCompact(); err != nil {
 			return err
 		}
@@ -353,10 +364,15 @@ func (b *Builder) flushCompact() error {
 	if c == nil || len(c.rows) == 0 {
 		return nil
 	}
-	if err := b.d.storage.reserveMemory(context.Background(), c.rowDisk+compactBlockHeaderBytes); err != nil {
+	// Block transposition/output are admitted by writeCompactBlock. This loop
+	// only needs one directory entry and its fixed checksum scratch.
+	scratch := c.rowDisk + compactBlockHeaderBytes
+	if b.d.storage.limits.CacheBytes < 16<<20 {
+		scratch = uint64(compactIndexBytes + 8 + 32 + compactBlockHeaderBytes*2)
+	}
+	if err := b.d.storage.reserveMemory(context.Background(), scratch); err != nil {
 		return err
 	}
-	scratch := c.rowDisk + compactBlockHeaderBytes
 	defer b.d.storage.releaseMemory(scratch)
 	// Already-admitted bytes move from the pending buffer to the file owner.
 	b.d.storage.releaseDisk(c.rowDisk)
@@ -576,36 +592,6 @@ func (d *diskDataset) readCompact(ctx context.Context, id PacketID, kind uint16,
 		d.storage.releaseMemory(held - actual)
 	}
 	return actual, nil
-}
-
-func (d *diskDataset) readCompactRaw(ctx context.Context, id PacketID) (Detail, uint64, error) {
-	if err := d.validateCompactStreams(); err != nil {
-		return Detail{}, 0, err
-	}
-	row, _, held, err := d.readCompactRow(ctx, id, false)
-	if err != nil {
-		return Detail{}, 0, err
-	}
-	defer d.storage.releaseMemory(held)
-	lease, err := d.compact.registry.Read(ctx, row.Locator)
-	if err != nil {
-		return Detail{}, 0, err
-	}
-	n := uint64(len(lease.Bytes)) + 512
-	if err = d.storage.reserveMemory(ctx, n); err != nil {
-		return Detail{}, 0, errors.Join(err, lease.Close())
-	}
-	raw := append([]byte(nil), lease.Bytes...)
-	if err = lease.Close(); err != nil {
-		d.storage.releaseMemory(n)
-		return Detail{}, 0, err
-	}
-	source, err := row.source(d.compact)
-	if err != nil {
-		d.storage.releaseMemory(n)
-		return Detail{}, 0, err
-	}
-	return Detail{ID: id, Source: source, CapturedLength: row.Captured, OriginalLength: row.Original, Packet: types.PacketDisplay{Timestamp: row.Timestamp, LinkType: row.LinkType, RawData: raw}}, n, nil
 }
 
 func (d *diskDataset) closeCompact() error {

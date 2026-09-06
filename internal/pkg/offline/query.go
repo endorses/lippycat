@@ -74,6 +74,37 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
+	if spec.Expression != nil {
+		if err = spec.Expression.Validate(); err != nil {
+			return nil, err
+		}
+		if err = d.storage.reserveMemory(ctx, spec.Expression.AccountedBytes()); err != nil {
+			return nil, err
+		}
+		defer d.storage.releaseMemory(spec.Expression.AccountedBytes())
+	}
+	if d.compact != nil && spec.Match == nil && spec.Expression == nil && spec.related == nil {
+		if err = d.validateStreams(); err != nil {
+			return nil, err
+		}
+		q := &diskQuery{dataset: d, token: spec.Token, count: d.count, stats: d.stats, identity: true}
+		if spec.Progress != nil {
+			spec.Progress(QueryProgress{Token: spec.Token, Total: d.count})
+			if err = ctx.Err(); err != nil {
+				return nil, err
+			}
+			if d.count != 0 {
+				spec.Progress(QueryProgress{Token: spec.Token, Scanned: d.count, Matched: d.count, Total: d.count})
+			}
+		}
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
+		d.queryMu.Lock()
+		d.queries[q] = struct{}{}
+		d.queryMu.Unlock()
+		return q, nil
+	}
 	if err = d.validateStreams(); err != nil {
 		return nil, err
 	}
@@ -93,22 +124,30 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 	}
 	defer d.storage.releaseMemory(descriptionBytes)
 	spec.Description = append([]string(nil), spec.Description...)
-	f, err := os.CreateTemp(d.dir, "query-*.ids")
-	if err != nil {
-		return nil, fmt.Errorf("create offline query: %w", err)
-	}
-	q := &diskQuery{dataset: d, token: spec.Token, file: f, path: f.Name(), manifest: f.Name() + ".complete"}
+	var f *os.File
+	q := &diskQuery{dataset: d, token: spec.Token}
 	defer func() {
 		if result == nil {
 			err = errors.Join(err, q.closeLocked())
 		}
 	}()
-	header := make([]byte, queryHeaderBytes)
-	copy(header, queryMagic[:])
-	binary.LittleEndian.PutUint64(header[8:16], uint64(d.generation))
-	binary.LittleEndian.PutUint64(header[16:24], uint64(spec.Token.Query))
-	if err = q.write(header); err != nil {
-		return nil, err
+	createVector := func() error {
+		var err error
+		f, err = os.CreateTemp(d.dir, "query-*.ids")
+		if err != nil {
+			return fmt.Errorf("create offline query: %w", err)
+		}
+		q.file, q.path, q.manifest = f, f.Name(), f.Name()+".complete"
+		var header [queryHeaderBytes]byte
+		copy(header[:], queryMagic[:])
+		binary.LittleEndian.PutUint64(header[8:16], uint64(d.generation))
+		binary.LittleEndian.PutUint64(header[16:24], uint64(spec.Token.Query))
+		return q.write(header[:])
+	}
+	if d.compact == nil {
+		if err = createVector(); err != nil {
+			return nil, err
+		}
 	}
 	stats := newStatisticsAccumulator()
 	reportProgress := func(scanned uint64) {
@@ -117,38 +156,138 @@ func (d *diskDataset) Query(ctx context.Context, spec QuerySpec) (result Query, 
 		}
 	}
 	reportProgress(0)
-	var idBytes [queryEntryBytes]byte
-	for id := PacketID(0); uint64(id) < d.count; id++ {
-		if err = ctx.Err(); err != nil {
-			return nil, err
+	bufferBytes := min(uint64(32<<10), d.storage.limits.MaxRecordBytes)
+	bufferBytes -= bufferBytes % queryEntryBytes
+	if d.compact == nil {
+		bufferBytes = 0
+	}
+	if d.compact != nil && bufferBytes < queryEntryBytes {
+		return nil, fmt.Errorf("query buffer exceeds memory budget")
+	}
+	if err = d.storage.reserveMemory(ctx, bufferBytes); err != nil {
+		return nil, err
+	}
+	defer d.storage.releaseMemory(bufferBytes)
+	buffer := make([]byte, 0, int(bufferBytes))
+	flush := func() error {
+		if len(buffer) == 0 {
+			return nil
 		}
-		var summary Summary
-		size, readErr := d.readValidated(ctx, id, 1, uint64(summaryStat.Size()), &summary)
-		if readErr != nil {
-			return nil, readErr
+		n, err := f.Write(buffer)
+		if err == nil && n != len(buffer) {
+			err = io.ErrShortWrite
 		}
-		matched := func() bool {
-			defer d.storage.releaseMemory(size)
-			match := spec.Match == nil || spec.Match(summary)
-			if match {
-				stats.Add(summary)
-			}
-			return match
-		}()
+		buffer = buffer[:0]
+		return err
+	}
+	appendID := func(id PacketID) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Charge the vector on admission, before buffered writes reach disk.
+		if err := d.storage.reserveDisk(queryEntryBytes); err != nil {
+			return err
+		}
+		q.bytes += queryEntryBytes
+		buffer = binary.LittleEndian.AppendUint64(buffer, uint64(id))
+		if len(buffer) == cap(buffer) {
+			return flush()
+		}
+		return nil
+	}
+	// The built-in expression is immutable and does not retain its Record. Reuse
+	// this interface target to avoid boxing a complete Summary for each packet.
+	var expressionRecord Summary
+	visit := func(summary Summary) error {
+		matched := true
+		if spec.Expression != nil {
+			expressionRecord = summary
+			matched = spec.Expression.Match(&expressionRecord)
+			expressionRecord = Summary{}
+		} else if spec.Match != nil {
+			matched = spec.Match(summary)
+		}
+		if spec.related != nil {
+			matched = matchesNormalizedFlow(summary, *spec.related)
+		}
 		if matched {
-			binary.LittleEndian.PutUint64(idBytes[:8], uint64(id))
-			if err = q.write(idBytes[:]); err != nil {
-				return nil, err
+			stats.Add(summary)
+			if d.compact == nil {
+				var data [8]byte
+				binary.LittleEndian.PutUint64(data[:], uint64(summary.ID))
+				if err := q.write(data[:]); err != nil {
+					return err
+				}
+				q.count++
+				return ctx.Err()
+			}
+			if f != nil {
+				if err := appendID(summary.ID); err != nil {
+					return err
+				}
 			}
 			q.count++
+		} else if d.compact != nil && f == nil {
+			// A matching prefix is implicit until the first miss. All-match scans
+			// never create a vector or consume query disk, regardless of predicate.
+			if err := createVector(); err != nil {
+				return err
+			}
+			for id := PacketID(0); uint64(id) < q.count; id++ {
+				if err := appendID(id); err != nil {
+					return err
+				}
+			}
 		}
-		scanned := uint64(id) + 1
-		if scanned%1024 == 0 || scanned == d.count {
+		scanned := uint64(summary.ID) + 1
+		if d.compact != nil && (scanned%1024 == 0 || scanned == d.count) {
 			reportProgress(scanned)
 		}
+		return ctx.Err()
+	}
+	if d.compact != nil {
+		projection := spec.Expression
+		err = d.scanCompactSummaries(ctx, projection, spec.related != nil, visit)
+	} else {
+		for id := PacketID(0); uint64(id) < d.count; id++ {
+			if err = ctx.Err(); err != nil {
+				break
+			}
+			var summary Summary
+			var held uint64
+			held, err = d.readValidated(ctx, id, 1, uint64(summaryStat.Size()), &summary)
+			if err != nil {
+				break
+			}
+			err = visit(summary)
+			d.storage.releaseMemory(held)
+			scanned := uint64(id) + 1
+			if err == nil && (scanned%1024 == 0 || scanned == d.count) {
+				reportProgress(scanned)
+			}
+			if err != nil {
+				break
+			}
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = flush(); err != nil {
+		return nil, fmt.Errorf("flush offline query: %w", err)
 	}
 	if err = ctx.Err(); err != nil {
 		return nil, err
+	}
+	if d.compact != nil && q.count == d.count {
+		if err = q.closeLocked(); err != nil {
+			return nil, err
+		}
+		q = &diskQuery{dataset: d, token: spec.Token, count: d.count, stats: d.stats, identity: true}
+		d.queryMu.Lock()
+		d.queries[q] = struct{}{}
+		d.queryMu.Unlock()
+		return q, nil
 	}
 	if err = f.Sync(); err != nil {
 		return nil, fmt.Errorf("flush offline query: %w", err)
@@ -476,10 +615,26 @@ func (q *diskQuery) closeLocked() error {
 }
 
 func (d *diskDataset) Related(ctx context.Context, token Token, flow Flow) (Query, error) {
-	return d.Query(ctx, QuerySpec{Token: token, Match: func(s Summary) bool { return matchesFlow(s, flow) }})
+	if flow.Source.IsValid() {
+		flow.Source = netip.AddrPortFrom(flow.Source.Addr().Unmap(), flow.Source.Port())
+	}
+	if flow.Destination.IsValid() {
+		flow.Destination = netip.AddrPortFrom(flow.Destination.Addr().Unmap(), flow.Destination.Port())
+	}
+	return d.Query(ctx, QuerySpec{Token: token, related: &flow})
 }
 
 func matchesFlow(s Summary, f Flow) bool {
+	if f.Source.IsValid() {
+		f.Source = netip.AddrPortFrom(f.Source.Addr().Unmap(), f.Source.Port())
+	}
+	if f.Destination.IsValid() {
+		f.Destination = netip.AddrPortFrom(f.Destination.Addr().Unmap(), f.Destination.Port())
+	}
+	return matchesNormalizedFlow(s, f)
+}
+
+func matchesNormalizedFlow(s Summary, f Flow) bool {
 	if !f.Source.IsValid() || !f.Destination.IsValid() || f.Source.Port() == 0 || f.Destination.Port() == 0 || (f.Transport != 0 && f.Transport != 6 && f.Transport != 17) {
 		return false
 	}
@@ -510,7 +665,7 @@ func matchesFlow(s Summary, f Flow) bool {
 		return false
 	}
 	a, b := netip.AddrPortFrom(src.Unmap(), uint16(sp)), netip.AddrPortFrom(dst.Unmap(), uint16(dp))
-	x, y := netip.AddrPortFrom(f.Source.Addr().Unmap(), f.Source.Port()), netip.AddrPortFrom(f.Destination.Addr().Unmap(), f.Destination.Port())
+	x, y := f.Source, f.Destination
 	return (a == x && b == y) || (a == y && b == x)
 }
 

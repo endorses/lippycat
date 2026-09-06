@@ -34,6 +34,14 @@ func BenchmarkOfflineAcceptance(b *testing.B) {
 	ctx := context.Background()
 	open := FreezeOfflineOpen([]string{path}, os.Getenv("LIPPYCAT_BENCH_BPF"), 10000)
 	open.Limits.Directory = b.TempDir()
+	backend := os.Getenv("LIPPYCAT_BENCH_BACKEND")
+	switch backend {
+	case "", "legacy":
+	case "compact":
+	default:
+		b.Fatalf("unknown benchmark backend %q", backend)
+	}
+	b.Logf("backend=%s", backend)
 	cfg, err := json.Marshal(map[string]any{"inputs": open.Config.Inputs, "bpf": open.Config.BPFFilter, "voip": open.Config.VoIP, "event_capacity": open.Config.EventCapacity, "max_calls": open.Config.MaxCalls, "esp_enabled": open.Config.ESP.Enabled, "tls_keylog_enabled": open.Config.TLSKeylog != "", "limits": open.Limits, "analysis_profile": open.Config.Analysis.AnalysisProfile, "sip_config": open.Config.SIPConfig})
 	require.NoError(b, err)
 	b.Logf("frozen_configuration=%s", cfg)
@@ -46,13 +54,15 @@ func BenchmarkOfflineAcceptance(b *testing.B) {
 	runtime.ReadMemStats(&before)
 	started := time.Now()
 	var peakDisk uint64
-	session, err := indexOfflineDatasetObserved(ctx, storage, 1, open.Config, func(p offline.Progress) {
+	session, err := indexOfflineDatasetBackend(ctx, storage, 1, open.Config, func(p offline.Progress) {
 		peakDisk = max(peakDisk, p.DiskBytes)
-	}, func(phase string, duration time.Duration) { metrics[phase+"-ns"] += float64(duration.Nanoseconds()) })
+	}, func(phase string, duration time.Duration) { metrics[phase+"-ns"] += float64(duration.Nanoseconds()) }, backend == "compact", backend == "compact")
 	require.NoError(b, err)
 	defer func() { require.NoError(b, session.Close()) }()
 	metrics["full-ready-ns"] = float64(time.Since(started).Nanoseconds())
 	ds := session.Dataset
+	runtime.ReadMemStats(&after)
+	metrics["readiness-allocated-B"] = float64(after.TotalAlloc - before.TotalAlloc)
 	metrics["packets"] = float64(ds.Count())
 	metrics["events-arrived"] = float64(session.EventStore.Stats().Arrived)
 	metrics["completed-disk-B"] = float64(ds.Resources().DiskBytes)
@@ -135,7 +145,15 @@ func BenchmarkOfflineAcceptance(b *testing.B) {
 		for repetition := 0; repetition < 2; repetition++ {
 			token.Query++
 			t = time.Now()
-			result, err := ds.Query(ctx, offline.QuerySpec{Token: token, Match: func(s offline.Summary) bool { return workload.filter.Match(s) }})
+			spec := offline.QuerySpec{Token: token, Match: func(s offline.Summary) bool { return workload.filter.Match(s) }}
+			if backend == "compact" {
+				chain := filters.NewFilterChain()
+				chain.Add(workload.filter)
+				spec.Expression, err = chain.OfflineExpression()
+				require.NoError(b, err)
+				require.NotNil(b, spec.Expression, "acceptance workload must exercise structured expressions")
+			}
+			result, err := ds.Query(ctx, spec)
 			require.NoError(b, err)
 			metrics[fmt.Sprintf("%s-%d-ns", workload.name, repetition+1)] = float64(time.Since(t).Nanoseconds())
 			metrics[workload.name+"-matches"] = float64(result.Count())
@@ -234,7 +252,10 @@ func BenchmarkOfflineAcceptance(b *testing.B) {
 		}
 		return nil
 	}))
-	metrics["sampled-combined-disk-lower-bound-B"] = float64(max(peakDisk, completedWithExport))
+	metrics["accounted-peak-disk-B"] = float64(storage.Peaks().DiskBytes)
+	metrics["accounted-peak-memory-B"] = float64(storage.Peaks().MemoryBytes)
+	metrics["accounted-temporary-query-extra-B"] = float64(storage.Peaks().DiskBytes) - metrics["completed-disk-B"]
+	metrics["sampled-combined-disk-lower-bound-B"] = float64(max(storage.Peaks().DiskBytes, completedWithExport))
 	metrics["sampled-accounted-peak-disk-B"] = float64(peakDisk)
 	metrics["sampled-temporary-query-extra-B"] = float64(peakDisk) - metrics["completed-disk-B"]
 	runtime.ReadMemStats(&after)

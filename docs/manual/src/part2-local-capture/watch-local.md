@@ -168,8 +168,9 @@ be mixed. Split multi-section/interface PCAPNG captures before opening them.
 | ---------------------------- | ----- | ---------------------- | ----------------------------------------------------------------- |
 | `--filter`                   | `-f`  | none                   | Source-level BPF filter                                           |
 | `--tls-keylog`               | —     | none                   | SSLKEYLOGFILE for TLS decryption                                  |
+| `--offline-backing-policy`   | —     | `source`               | Original source handles, or validated private `snapshot` copies   |
 | `--offline-session-dir`      | —     | OS temporary directory | Existing writable parent of private session directories           |
-| `--offline-max-disk-bytes`   | —     | `4294967296` (4 GiB)   | Combined sorting/dataset/query disk budget                                |
+| `--offline-max-disk-bytes`   | —     | `4294967296` (4 GiB)   | Combined sorting/dataset/query disk budget                        |
 | `--offline-cache-bytes`      | —     | `67108864` (64 MiB)    | Display cache, pinned details, prefetch and in-flight read budget |
 | `--offline-max-record-bytes` | —     | `8388608` (8 MiB)      | Maximum encoded packet record; must fit cache/disk budgets        |
 | `--offline-max-sources`      | —     | `64`                   | Simultaneous sources, from 1 to 64                                |
@@ -182,7 +183,7 @@ through the flags or YAML keys above.
 
 Disk accounting includes summaries, details, offsets, manifests, and query files;
 the ready and replacement datasets share the budget. Allow space for both during
-replacement and for all-match query vectors. Normalized storage can exceed source
+replacement and for filtered query vectors; all-match queries use implicit IDs. Normalized storage can exceed source
 size. Physical disk exhaustion, configured budget limits, and permission errors
 fail explicitly, preserving the last completed dataset/query. Free space or
 change the directory/budget and retry. Owned temporary files are removed on
@@ -190,6 +191,19 @@ cancellation/shutdown; cleanup failures remain visible for retry. The cache budg
 is not a process RSS limit: reader/reassembly, analyzer, retained event/call, and
 Go runtime memory are additional. Offline TLS plaintext has a separate 16 MiB cap;
 exceeding it fails indexing.
+
+Offline file storage keeps compact searchable metadata and reads unchanged packet
+bytes from the originally opened files. Keep inputs unchanged until the session
+and any exports finish: edits or truncation fail reads explicitly. A replaced
+pathname never supplies bytes to an existing session. Rename/unlink can retain
+access through the owned handle where supported by the operating system.
+
+Choose `--offline-backing-policy snapshot` to create validated private input copies
+before indexing. Their full size counts against the disk budget. Gzip classic PCAP
+also needs a decompressed backing; transformed packets retain their effective
+bytes separately. There is no automatic snapshot fallback after a source error.
+The policy is frozen per open. Browsing and application filters become available
+only after the complete ordered analysis and its final metadata are ready.
 
 Press `w` to export the last completed matching query (or all packets with no
 packet filter). Export streams a fixed snapshot to nanosecond PCAP, preserving

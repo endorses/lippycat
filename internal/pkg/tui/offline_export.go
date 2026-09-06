@@ -87,19 +87,19 @@ func (m *Model) startOfflineExport(path string) tea.Cmd {
 	go func() {
 		defer close(s.done)
 		defer cancel()
-		count, err := exportOfflinePCAP(ctx, path, pin.Iterate)
+		count, err := exportOfflinePCAP(ctx, path, pin.IterateRaw)
 		err = errors.Join(err, pin.Close())
 		s.result = SaveCompleteMsg{Success: err == nil, Path: path, PacketsSaved: count, Error: err}
 	}()
 	return tea.Batch(m.uiState.Toast.ShowWithKey("Saving packets… Esc cancels export", components.ToastInfo, 0, components.ToastKeyFileSave), func() tea.Msg { <-s.done; return s.result })
 }
 
-type offlineDetailIterator func(context.Context, func(offline.Detail) error) error
+type offlineRawIterator func(context.Context, func(offline.RawRecord) error) error
 
 // Write beside the destination and publish only after every record and close
 // succeeds. Cancellation, mixed links, corruption and disk errors never leave a
 // successful-looking partial capture or replace an existing destination.
-func exportOfflinePCAP(ctx context.Context, path string, iterate offlineDetailIterator) (count uint64, err error) {
+func exportOfflinePCAP(ctx context.Context, path string, iterate offlineRawIterator) (count uint64, err error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -141,34 +141,34 @@ func exportOfflinePCAP(ctx context.Context, path string, iterate offlineDetailIt
 	return count, nil
 }
 
-func writeOfflinePCAP(ctx context.Context, output io.Writer, iterate offlineDetailIterator) (uint64, error) {
+func writeOfflinePCAP(ctx context.Context, output io.Writer, iterate offlineRawIterator) (uint64, error) {
 	w := pcapgo.NewWriterNanos(output)
 	var count uint64
 	var link layers.LinkType
-	err := iterate(ctx, func(d offline.Detail) error {
+	err := iterate(ctx, func(d offline.RawRecord) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		// Classic PCAP stores unsigned 32-bit seconds. pcapgo silently wraps
 		// out-of-range values and substitutes the current time for missing
 		// timestamps, which PCAPNG simple packet blocks can legitimately carry.
-		seconds := d.Packet.Timestamp.Unix()
-		if d.Packet.Timestamp.IsZero() || seconds < 0 || seconds > math.MaxUint32 {
-			return fmt.Errorf("cannot export offline packet %d: timestamp %s cannot be represented in PCAP (requires seconds from 0 through %d since Unix epoch)", d.ID, d.Packet.Timestamp, uint64(math.MaxUint32))
+		seconds := d.Timestamp.Unix()
+		if d.Timestamp.IsZero() || seconds < 0 || seconds > math.MaxUint32 {
+			return fmt.Errorf("cannot export offline packet %d: timestamp %s cannot be represented in PCAP (requires seconds from 0 through %d since Unix epoch)", d.ID, d.Timestamp, uint64(math.MaxUint32))
 		}
 		if count == 0 {
-			link = d.Packet.LinkType
+			link = d.LinkType
 			if err := w.WriteFileHeader(math.MaxUint32, link); err != nil {
 				return fmt.Errorf("write offline export header: %w", err)
 			}
-		} else if d.Packet.LinkType != link {
-			return fmt.Errorf("cannot export mixed link types to PCAP (packet %d has %s; expected %s); export inputs separately", d.ID, d.Packet.LinkType, link)
+		} else if d.LinkType != link {
+			return fmt.Errorf("cannot export mixed link types to PCAP (packet %d has %s; expected %s); export inputs separately", d.ID, d.LinkType, link)
 		}
-		if uint64(len(d.Packet.RawData)) != uint64(d.CapturedLength) || d.CapturedLength > d.OriginalLength {
+		if uint64(len(d.RawData)) != uint64(d.CapturedLength) || d.CapturedLength > d.OriginalLength {
 			return fmt.Errorf("invalid capture lengths for offline packet %d", d.ID)
 		}
-		info := gopacket.CaptureInfo{Timestamp: d.Packet.Timestamp, CaptureLength: int(d.CapturedLength), Length: int(d.OriginalLength)}
-		if err := w.WritePacket(info, d.Packet.RawData); err != nil {
+		info := gopacket.CaptureInfo{Timestamp: d.Timestamp, CaptureLength: int(d.CapturedLength), Length: int(d.OriginalLength)}
+		if err := w.WritePacket(info, d.RawData); err != nil {
 			return fmt.Errorf("write offline packet %d: %w", d.ID, err)
 		}
 		count++

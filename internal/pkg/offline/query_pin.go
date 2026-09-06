@@ -48,6 +48,20 @@ func (p *QueryPin) Iterate(ctx context.Context, visit func(Detail) error) error 
 	return p.query.iterateLocked(ctx, visit)
 }
 
+// IterateRaw streams effective capture records while retaining the query and
+// dataset ownership acquired before asynchronous export scheduling.
+func (p *QueryPin) IterateRaw(ctx context.Context, visit func(RawRecord) error) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.closed {
+		return fmt.Errorf("offline query pin closed")
+	}
+	if visit == nil {
+		return fmt.Errorf("offline raw iteration requires callback")
+	}
+	return p.query.iterateRawLocked(ctx, visit)
+}
+
 func (p *QueryPin) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

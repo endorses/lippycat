@@ -31,6 +31,7 @@ import (
 type OfflineAnalysisConfig struct {
 	// locatorOrdering selects the migration path internally until its production gate.
 	locatorOrdering bool
+	compactStorage  bool
 	BackingPolicy   offline.BackingPolicy
 	Inputs          []string
 	BPFFilter       string
@@ -163,6 +164,13 @@ func indexOfflineDataset(ctx context.Context, storage *offline.Storage, generati
 	return indexOfflineDatasetObserved(ctx, storage, generation, cfg, report, nil)
 }
 
+// indexOfflineCompactDataset is the internally selected migration candidate.
+// Production keeps its completed legacy backend until the phase-4 cutover gate.
+func indexOfflineCompactDataset(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress)) (*offlineIndexedSession, error) {
+	cfg.locatorOrdering, cfg.compactStorage = true, true
+	return indexOfflineDataset(ctx, storage, generation, cfg, report)
+}
+
 // indexOfflineDatasetObserved exposes phase boundaries to the acceptance harness.
 // The optional observer runs synchronously and must not call storage methods.
 func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, generation offline.DatasetGeneration, cfg OfflineAnalysisConfig, report func(offline.Progress), observe func(string, time.Duration)) (result *offlineIndexedSession, err error) {
@@ -190,9 +198,12 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 	for i, path := range cfg.Inputs {
 		sources[i] = offline.SourcePosition{ArgumentIndex: uint32(i), Path: path}
 	}
-	builder, err := storage.NewBuilder(generation, sources)
-	if err != nil {
-		return nil, err
+	var builder *offline.Builder
+	if !cfg.compactStorage {
+		builder, err = storage.NewBuilder(generation, sources)
+		if err != nil {
+			return nil, err
+		}
 	}
 	session := &offlineIndexedSession{builder: builder, EventStore: store.NewEventStore(cfg.EventCapacity), Tracker: NewCallTrackerWithCapacity(cfg.MaxCalls)}
 	defer func() {
@@ -237,7 +248,7 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 		publish(true)
 	}
 	var prepared *capture.OfflineLocatorStream
-	if cfg.locatorOrdering {
+	if cfg.locatorOrdering || cfg.compactStorage {
 		mark("scan")
 		var prepareErr error
 		openErr := capture.StartOfflineSnifferOrdered(cfg.Inputs, cfg.BPFFilter, func(devices []pcaptypes.PcapInterface, filter string) {
@@ -247,6 +258,16 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 			}
 		})
 		if err = errors.Join(openErr, prepareErr); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.compactStorage {
+		builder, err = storage.NewCompactBuilder(generation, sources, prepared.Backings(), materializeOfflinePacket)
+		if err != nil {
+			return nil, err
+		}
+		session.builder = builder
+		if err = prepared.TransferBackings(); err != nil {
 			return nil, err
 		}
 	}
@@ -331,6 +352,11 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 		sipFactory.OnEvent = func(id offline.PacketID, event sharedsip.Event) error {
 			if uint64(id) < indexedPackets {
 				sipFactory.LastEvent = nil
+				if cfg.compactStorage {
+					var packet types.PacketDisplay
+					applyOfflineSIPEvent(&packet, event)
+					return builder.AmendVoIP(ctx, id, packet.Protocol, packet.Info, packet.VoIPData)
+				}
 				return builder.UpdateDetail(ctx, id, func(detail *offline.Detail) error { applyOfflineSIPEvent(&detail.Packet, event); return nil })
 			}
 			return nil
@@ -410,8 +436,17 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 			}
 			meta := info.Packet.Metadata()
 			detail := offline.Detail{Source: offline.SourcePosition{ArgumentIndex: info.SourceIndex, Path: info.SourcePath, InterfaceID: info.SourceInterfaceID, Sequence: info.SourceSequence}, CapturedLength: uint32(meta.CaptureLength), OriginalLength: uint32(meta.Length), Packet: packet}
-			if err := builder.Append(readCtx, detail); err != nil {
-				return err
+			var appendErr error
+			if cfg.compactStorage {
+				if info.Provenance == nil {
+					return errors.New("compact offline packet has no effective-byte provenance")
+				}
+				appendErr = builder.AppendCompact(readCtx, detail, *info.Provenance)
+			} else {
+				appendErr = builder.Append(readCtx, detail)
+			}
+			if appendErr != nil {
+				return appendErr
 			}
 			indexedPackets++
 			progress.LogicalPackets++

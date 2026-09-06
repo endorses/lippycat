@@ -27,12 +27,12 @@ func TestOfflineExportRejectsUnrepresentableTimestamps(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "existing.pcap")
 			require.NoError(t, os.WriteFile(path, []byte("existing"), 0600))
-			_, err := exportOfflinePCAP(context.Background(), path, func(_ context.Context, visit func(offline.Detail) error) error {
-				if err := visit(exportTestDetail(0)); err != nil {
+			_, err := exportOfflinePCAP(context.Background(), path, func(_ context.Context, visit func(offline.RawRecord) error) error {
+				if err := visit(exportTestRaw(0)); err != nil {
 					return err
 				}
-				d := exportTestDetail(1)
-				d.Packet.Timestamp = tc.stamp
+				d := exportTestRaw(1)
+				d.Timestamp = tc.stamp
 				return visit(d)
 			})
 			require.ErrorContains(t, err, "timestamp")
@@ -50,9 +50,9 @@ func TestOfflineExportTimestampRangeBoundaries(t *testing.T) {
 	for _, stamp := range []time.Time{time.Unix(0, 0), time.Unix(1<<32-1, 999999999)} {
 		t.Run(stamp.UTC().Format(time.RFC3339Nano), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "boundary.pcap")
-			count, err := exportOfflinePCAP(context.Background(), path, func(_ context.Context, visit func(offline.Detail) error) error {
-				d := exportTestDetail(0)
-				d.Packet.Timestamp = stamp
+			count, err := exportOfflinePCAP(context.Background(), path, func(_ context.Context, visit func(offline.RawRecord) error) error {
+				d := exportTestRaw(0)
+				d.Timestamp = stamp
 				return visit(d)
 			})
 			require.NoError(t, err)

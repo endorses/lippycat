@@ -18,6 +18,7 @@ type ScratchFile struct {
 	path            string
 	size            uint64
 	closed, removed bool
+	sealed          bool
 }
 
 func (s *Storage) NewScratchFile() (*ScratchFile, error) {
@@ -41,7 +42,7 @@ func (s *Storage) NewScratchFile() (*ScratchFile, error) {
 func (f *ScratchFile) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.closed {
+	if f.closed || f.sealed {
 		return 0, errors.New("offline ordering scratch closed")
 	}
 	if err := f.storage.reserveDisk(uint64(len(p))); err != nil {
@@ -69,7 +70,7 @@ func (f *ScratchFile) ReadAt(p []byte, offset int64) (int, error) {
 func (f *ScratchFile) Reset() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.closed {
+	if f.closed || f.sealed {
 		return errors.New("offline ordering scratch closed")
 	}
 	if err := f.file.Truncate(0); err != nil {

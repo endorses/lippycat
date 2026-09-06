@@ -198,7 +198,9 @@ func BenchmarkOfflineAcceptance(b *testing.B) {
 	if ds.Count() > 0 {
 		exportPath := open.Limits.Directory + "/acceptance-export.pcap"
 		t = time.Now()
-		count, err := exportOfflinePCAP(ctx, exportPath, q.Iterate)
+		count, err := exportOfflinePCAP(ctx, exportPath, func(ctx context.Context, visit func(offline.RawRecord) error) error {
+			return offline.IterateRaw(ctx, q, visit)
+		})
 		require.NoError(b, err)
 		require.Equal(b, ds.Count(), count)
 		elapsed := time.Since(t)

@@ -30,6 +30,9 @@ func (b *Builder) UpdateDetail(ctx context.Context, id PacketID, mutate func(*De
 	if mutate == nil {
 		return errors.New("offline detail update callback is required")
 	}
+	if b.d.compact != nil {
+		return b.updateCompact(ctx, id, mutate)
+	}
 	d := b.d
 	detail, held, err := d.readDetail(ctx, id)
 	if err != nil {

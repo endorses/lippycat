@@ -23,6 +23,11 @@ func exportTestDetail(id int) offline.Detail {
 	return offline.Detail{ID: offline.PacketID(id), CapturedLength: 3, OriginalLength: 42, Packet: types.PacketDisplay{Timestamp: time.Unix(int64(id), 123456789), LinkType: layers.LinkTypeEthernet, RawData: []byte{byte(id), byte(id >> 8), byte(id >> 16)}}}
 }
 
+func exportTestRaw(id int) offline.RawRecord {
+	d := exportTestDetail(id)
+	return offline.RawRecord{ID: d.ID, Timestamp: d.Packet.Timestamp, CapturedLength: d.CapturedLength, OriginalLength: d.OriginalLength, LinkType: d.Packet.LinkType, RawData: d.Packet.RawData}
+}
+
 func TestOfflineExportCompleteFilteredAndUnfiltered(t *testing.T) {
 	s := testOfflineStorage(t)
 	b, err := s.NewBuilder(1, nil)
@@ -45,7 +50,7 @@ func TestOfflineExportCompleteFilteredAndUnfiltered(t *testing.T) {
 			pin, err := offline.PinQuery(q)
 			require.NoError(t, err)
 			path := filepath.Join(t.TempDir(), "result.pcap")
-			count, err := exportOfflinePCAP(context.Background(), path, pin.Iterate)
+			count, err := exportOfflinePCAP(context.Background(), path, pin.IterateRaw)
 			require.NoError(t, err)
 			require.Equal(t, q.Count(), count)
 			require.NoError(t, pin.Close())
@@ -86,19 +91,19 @@ func TestOfflineExportFailurePreservesDestination(t *testing.T) {
 			require.NoError(t, os.WriteFile(path, []byte("existing"), 0600))
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			iterate := func(ctx context.Context, visit func(offline.Detail) error) error {
+			iterate := func(ctx context.Context, visit func(offline.RawRecord) error) error {
 				if kind == "empty" {
 					return nil
 				}
-				if err := visit(exportTestDetail(0)); err != nil {
+				if err := visit(exportTestRaw(0)); err != nil {
 					return err
 				}
-				d := exportTestDetail(1)
+				d := exportTestRaw(1)
 				switch kind {
 				case "cancel":
 					cancel()
 				case "mixed_links":
-					d.Packet.LinkType = layers.LinkTypeRaw
+					d.LinkType = layers.LinkTypeRaw
 				case "read_error":
 					return errors.New("corrupt detail")
 				case "bad_lengths":
@@ -136,14 +141,14 @@ func (w *offlineExportFailWriter) Write(p []byte) (int, error) {
 
 func TestOfflineExportWriterErrorsAndOneRecordMemory(t *testing.T) {
 	for _, remaining := range []int{0, 24, 40} {
-		_, err := writeOfflinePCAP(context.Background(), &offlineExportFailWriter{remaining}, func(ctx context.Context, visit func(offline.Detail) error) error { return visit(exportTestDetail(0)) })
+		_, err := writeOfflinePCAP(context.Background(), &offlineExportFailWriter{remaining}, func(ctx context.Context, visit func(offline.RawRecord) error) error { return visit(exportTestRaw(0)) })
 		require.ErrorContains(t, err, io.ErrClosedPipe.Error())
 	}
 	var output bytes.Buffer
-	count, err := writeOfflinePCAP(context.Background(), &output, func(ctx context.Context, visit func(offline.Detail) error) error {
-		d := exportTestDetail(0)
+	count, err := writeOfflinePCAP(context.Background(), &output, func(ctx context.Context, visit func(offline.RawRecord) error) error {
+		d := exportTestRaw(0)
 		for i := 0; i < 10; i++ {
-			d.Packet.RawData[0] = byte(i)
+			d.RawData[0] = byte(i)
 			if err := visit(d); err != nil {
 				return err
 			}

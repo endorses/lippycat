@@ -1,6 +1,6 @@
 # Compact source-backed offline index implementation plan
 
-Status: Phases 0–2 complete; phases 3–6 remain unchecked.
+Status: Phases 0–3 complete; phases 4–6 remain unchecked.
 Scope: `lc watch file`.
 
 Phase 0 establishes the baseline, injectable differential oracle, measurement
@@ -165,20 +165,29 @@ Touchpoints: `internal/pkg/offline/{storage,codec,summary,amendment,cache,contra
 `internal/pkg/tui/{offline_indexer,offline_sip,offline_export}.go` and packet-local
 decoding helpers used by the indexer.
 
-- [ ] Implement schema-v2 buffered typed blocks, direct row/block lookup and checksums with bounded text arenas and sparse protocol metadata. Deduplicate low-cardinality source/interface/node data; spill high-cardinality text rather than retaining a dataset-sized map.
-- [ ] Persist the exact searchable projection, including Info text, address rendering, missing-versus-zero ports, metadata-presence bits and protocol-specific field quirks. Keep `Summary` accessors free of I/O after page/query materialization.
-- [ ] Replace `Builder.UpdateDetail` full-record rewrites with narrow packet-ID metadata amendments. Finalize late SIP/EOF updates before publication; retain reassembled messages, RTP attribution and TLS decryption results that cannot be decoded from one packet.
-- [ ] Define an injected stateless decoder contract in `offline`, configured by the TUI adapter. `capture` already imports `offline`, so the backend must not import capture or TUI helpers. Extract a stateless detail materializer using owned effective bytes, frozen settings and finalized metadata. Do not retain live protocol detectors or mutate stream state. Preserve owned `Detail.Packet` bytes and exact visible field semantics.
-- [ ] Adapt cache keys, `DetailPin`, page leases and transient accounting to compact blocks and materialized details. Bound cache, decode scratch, in-flight reads and pins together; fail explicitly on an oversized first row/record.
-- [ ] Introduce a raw-record iterator carrying packet ID, effective bytes, timestamp, lengths and link type. Route `exportOfflinePCAP`/`writeOfflinePCAP` through it while preserving query order, cancellation, mixed-link-type behavior and existing output-file failure handling.
-- [ ] Update `AllPackets`, `PinQuery`, query iteration and concrete backend helpers for the new storage. Preserve implicit identity queries and acquire export ownership before scheduling asynchronous work.
-- [ ] Preserve builder poisoning after write failure and the `Finish` flush/sync/close/read-only reopen/atomic manifest sequence. Rebuild finalized statistics after metadata amendments before publishing the completed dataset.
-- [ ] Validate malformed block headers/references, overflow, checksum failure, short reads/writes, flush/finalization failure, disk exhaustion and cleanup retry. A failed build must never publish a completed manifest.
-- [ ] Run the differential corpus, including random/repeated detail requests under changing live settings, EOF amendments, concurrent pinned export and session replacement. Measure complete index/sidecar size and full-ready time before changing readiness.
+- [x] Implement schema-v2 buffered typed blocks, direct row/block lookup and checksums with bounded text arenas and sparse protocol metadata. Deduplicate low-cardinality source/interface/node data; spill high-cardinality text rather than retaining a dataset-sized map.
+- [x] Persist the exact searchable projection, including Info text, address rendering, missing-versus-zero ports, metadata-presence bits and protocol-specific field quirks. Keep `Summary` accessors free of I/O after page/query materialization.
+- [x] Replace `Builder.UpdateDetail` full-record rewrites with narrow packet-ID metadata amendments. Finalize late SIP/EOF updates before publication; retain reassembled messages, RTP attribution and TLS decryption results that cannot be decoded from one packet.
+- [x] Define an injected stateless decoder contract in `offline`, configured by the TUI adapter. `capture` already imports `offline`, so the backend must not import capture or TUI helpers. Extract a stateless detail materializer using owned effective bytes, frozen settings and finalized metadata. Do not retain live protocol detectors or mutate stream state. Preserve owned `Detail.Packet` bytes and exact visible field semantics.
+- [x] Adapt cache keys, `DetailPin`, page leases and transient accounting to compact blocks and materialized details. Bound cache, decode scratch, in-flight reads and pins together; fail explicitly on an oversized first row/record.
+- [x] Introduce a raw-record iterator carrying packet ID, effective bytes, timestamp, lengths and link type. Route `exportOfflinePCAP`/`writeOfflinePCAP` through it while preserving query order, cancellation, mixed-link-type behavior and existing output-file failure handling.
+- [x] Update `AllPackets`, `PinQuery`, query iteration and concrete backend helpers for the new storage. Preserve implicit identity queries and acquire export ownership before scheduling asynchronous work.
+- [x] Preserve builder poisoning after write failure and the `Finish` flush/sync/close/read-only reopen/atomic manifest sequence. Rebuild finalized statistics after metadata amendments before publishing the completed dataset.
+- [x] Validate malformed block headers/references, overflow, checksum failure, short reads/writes, flush/finalization failure, disk exhaustion and cleanup retry. A failed build must never publish a completed manifest.
+- [x] Run the differential corpus, including random/repeated detail requests under changing live settings, EOF amendments, concurrent pinned export and session replacement. Measure complete index/sidecar size and full-ready time before changing readiness.
 
 Gate: compact completed datasets match the oracle for all existing operations;
 unchanged packet bytes and full presentation records are absent from persisted
 production storage. All exceptional retained content is included in accounting.
+
+Phase-3 implementation, independent review, full differential verification and
+measurements: see [verification](../research/watch-file-phase3-validation.md).
+The unshipped v2 layout was refined to combined typed columns, block-local arenas
+and an authenticated direct row directory; the storage specification describes
+the actual format. The compact candidate remains internal and completed-only.
+Private-capture parity passed, but readiness/allocation tolerances and the
+100 MB storage target were missed. The measured serialization/representation
+gaps must be addressed before phase-4 production cutover.
 
 ## Phase 4 — Accelerate complete-file queries and cut over
 

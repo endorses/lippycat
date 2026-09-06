@@ -1,4 +1,6 @@
-# Offline temporary storage format, schema 1
+# Offline temporary storage formats
+
+## Schema 1: completed production backend and legacy oracle
 
 Phase 2 replaces the provisional JSON payload and 20-byte frame from the initial
 contract with the binary format below. Standard JSON unmarshalling does not enforce decoded
@@ -79,182 +81,286 @@ the cache is not a hard RSS limit. Storage must reserve serialization and read
 working space under its shared cache policy before invoking the codec, in addition
 to accounting for retained and pinned records. Oversized records fail explicitly.
 
-## Compact schema v2 contract (specified, not implemented)
+## Schema 2: compact completed dataset migration backend
 
-The sections above describe the implemented v1 oracle. This section is the
-phase-0 design contract for the replacement, not a claim that v2 readers exist.
-The migration must add independent v2 shape/round-trip tests before production
-cutover; the v1 fingerprint remains unchanged. No v1 file is read as v2.
+Phase 3 implements the compact backend behind the internal `NewCompactBuilder`
+and TUI migration entry points. The production path still uses schema 1 until
+phase 4 passes its cutover gate. Both schemas publish only completed datasets.
+There is no persisted-session opener, cross-process reuse, or partial-analysis
+publication. Schema 1 is never interpreted as schema 2.
 
-All integers below are fixed-width little endian; signed values use two's
-complement and float64 uses IEEE 754 bits. There is no native Go struct encoding,
-implicit padding, reflection-dependent field order, or unbounded dictionary.
-IDs are uint64. Packet IDs, argument indexes, physical ordinals and logical
-sequences are zero-based. Registry IDs start at one; zero means no reference.
-Physical ordinal counts original frames before BPF/normalization, whereas logical
-sequence counts emitted normalized packets per argument. Repeated arguments
-have different source IDs even for the same inode/path. The packet ID is assigned
-only after sorting by timestamp, argument index, logical sequence.
+This implementation refines the **unshipped phase-0 layout proposal**. Base and
+analysis columns share completed row blocks; text and compound values use
+block-local arenas; a checksummed 64-byte entry per packet provides direct row
+lookup; bounded source, label and context registries are recorded in the manifest.
+The proposed separate base/analysis/text/registry streams and 72-byte global
+block-directory entries were not implemented. Combining finalized columns keeps
+row navigation and metadata amendments within the existing completed-dataset
+lifecycle. Block-local references avoid a dataset-sized arena index, while the
+row directory permits replacement blocks without copying unchanged packet bytes.
+A future revision-aware overlay or persistent cache requires an explicit format
+and API change rather than assuming the earlier proposal exists on disk.
 
-### Streams, blocks and references
+The implementation is defined by `internal/pkg/offline/compact.go`,
+`compact_block.go`, `compact_value.go`, `compact_labels.go`,
+`compact_manifest.go` and the compact branches of `storage.go`.
 
-Every v2 stream starts with 32 bytes: magic `LCOV2DAT` (8), schema major uint16
-(2), minor uint16 (0), stream kind uint16, flags uint16 (0), dataset generation
-uint64, reserved uint64 (0). Kinds are 1 base columns, 2 analysis columns,
-3 text arena, 4 sparse metadata, 5 source registry, 6 backing registry,
-7 context registry, 8 block directory, 9 derived bytes, 10 order keys,
-11 query matches. Snapshot/decompression files retain their original container
-framing and are registered backings, not typed streams.
+### Files and headers
 
-Each typed block starts with 72 bytes: magic `LCB2` (4), kind uint16,
-header bytes uint16 (72), first row/entry ID uint64, row count uint32,
-column count uint16, flags uint16 (0), payload bytes uint64,
-analysis revision uint64, payload SHA-256 (32). SHA-256 covers the payload. A directory entry records stream
-kind uint16, reserved uint16 (0), block number uint32, first ID uint64,
-row count uint32, reserved uint32 (0), offset uint64, total bytes uint64,
-and SHA-256 of the entire header plus payload (32): 72 bytes. The directory is a flat array of these fixed-width entries after its stream
-header, ordered by stream kind then block number, and does not index itself.
-The manifest stores each kind’s first entry/count, allowing checked binary search
-or fixed-position reads with one bounded entry buffer; kinds have at most 4096
-rows per block and contiguous IDs. The manifest authenticates the complete directory with its byte length and SHA-256. These hashes detect
-corruption/change, not malicious tampering by someone able to replace storage.
+Each of the three indexed files begins with this 32-byte little-endian header:
 
-Column payloads begin with `column count` 24-byte descriptors: field ID uint16,
-wire type uint8, flags uint8 (0), count uint32, payload-relative offset uint64,
-byte length uint64. Types are u8=1, u16=2, u32=3, u64=4, i64=5, f64=6,
-reference=7, fixed32=8. Fixed columns contain row-count values; sparse columns
-carry explicit packet IDs. Overlapping descriptors, duplicate/unknown fields,
-wrong type/count, trailing bytes, nonzero reserved fields and unsupported
-versions are errors. Rows per block are at most 4096 and encoded/decoded bytes
-must fit the configured record and shared memory limits; close a block earlier
-for long rows. Directory entries permit bounded direct block lookup; do not load
-a dataset-sized directory into heap memory.
+| Offset | Width | Value              |
+| ------ | ----- | ------------------ |
+| 0      | 8     | `LCOV2DAT`         |
+| 8      | 2     | Schema major: 2    |
+| 10     | 2     | Schema minor: 0    |
+| 12     | 2     | Stream kind        |
+| 14     | 2     | Flags: zero        |
+| 16     | 8     | Dataset generation |
+| 24     | 8     | Reserved: zero     |
 
-An arena reference is `(block uint32, offset uint32, length uint32, flags uint32)`.
-Flags 0 means absent with all other words zero; 1 means present, including an
-empty value. Other flags are invalid. References never straddle arena blocks;
-checked offset+length must fit the validated payload and decoded object budget.
-Text is exact string bytes, without normalization. Metadata values use explicit
-typed records, preserve nil versus empty slices/maps/pointers and map contents,
-and reject duplicate keys. Counts/lengths precede containers and are checked
-against remaining input and conservative allocation cost before allocation.
-Metadata field IDs are explicitly the one-based row numbers within each type
-in the linked [field inventory](watch-file-packet-field-inventory.md), frozen by
-this contract. They initially match Go declaration order but a future Go reorder
-does not change wire IDs. Changing wire names/types/order requires a schema
-decision and shape-test update; code must use explicit IDs, not reflection order. Integers use their declared
-width (Go int becomes i64), booleans are u8 0/1, strings/bytes use references,
-containers use uint32 counts and a presence byte, structs are typed field sequences.
-Times are i64 Unix seconds plus u32 nanoseconds (<1e9), UTC, without monotonic
-state; zero time and values outside UnixNano range remain representable.
+The filenames and stream kinds are `summaries` = 1 (combined completed row
+columns), `details` = 2 (sparse protocol overrides), and `offsets` = 3 (direct row
+directory). Block kinds are separate: row blocks use kind 1, and protocol-override
+blocks inside the `details` stream use kind 4. There are no typed stream kinds
+4–11 in this implementation. Original sources and owned snapshot, decompressed
+or derived backings remain backing-registry files, outside these typed streams.
+Ordering keys and query vectors retain their existing independent formats.
 
-### Base columns and registries
+Typed blocks begin with 72 bytes:
 
-Field IDs below start at one and are consecutive within their stream in the
-listed order.
+| Offset | Width | Value                  |
+| ------ | ----- | ---------------------- |
+| 0      | 4     | `LCB2`                 |
+| 4      | 2     | Block kind: 1 or 4     |
+| 6      | 2     | Header size: 72        |
+| 8      | 8     | First packet ID        |
+| 16     | 4     | Row count              |
+| 20     | 2     | Column count           |
+| 22     | 2     | Flags: zero            |
+| 24     | 8     | Payload byte length    |
+| 32     | 8     | Analysis revision: 1   |
+| 40     | 32    | SHA-256 of the payload |
 
-| Base fields (ordered)                               | Wire representation / meaning                                                                       |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| source_id, backing_id, context_id                   | u64 each; source argument, effective bytes owner, original parser context                           |
-| physical_ordinal, logical_sequence                  | u64 each; source attribution retained through normalization                                         |
-| payload_offset                                      | u64; parser-consumed position in registered backing, never buffered FD seek position                |
-| effective_capture_length, effective_original_length | u32 each; exported capture metadata, independently preserved                                        |
-| original_capture_length, original_wire_length       | u32 each; original physical frame, before transforms                                                |
-| timestamp_seconds, timestamp_nanoseconds            | i64/u32; effective normalized timestamp                                                             |
-| original_link_type, effective_link_type             | u32 each; validate against supported decoder range before narrowing                                 |
-| provenance_flags                                    | u32; bit 0 derived, bit 1 decompressed, bit 2 snapshot, bit 3 timestamp absent; remaining bits zero |
-| integrity                                           | fixed32 SHA-256 of exact effective bytes                                                            |
-| src_address, dst_address, src_port, dst_port        | reference each; exact legacy rendering, empty distinct from string 0                                |
-| transport                                           | u8; IP protocol number, 0 unknown                                                                   |
-| display_length                                      | i64; preserve PacketDisplay.Length separately from capture lengths                                  |
-| node, interface                                     | reference each; intern only under a bounded registry/dictionary budget                              |
+Packet IDs are zero-based and implicit within a block as first ID plus row
+position. The writer buffers at most 128 rows and closes a block earlier when
+byte admission would exceed `MaxRecordBytes`. Readers reject more than 4096 rows.
+Metadata replacement blocks currently contain one row. Both encoded payload and
+decoded allocations must fit configured limits; an oversized first row fails
+explicitly. Buffered rows and eventual disk bytes are charged before admission.
 
-Base ID is implicit `first row + row index`. Typed addresses/ports for query
-acceleration may be supplemental columns only after a minor-version decision;
-text columns above remain the rendering oracle. A locator must reference a known
-open backing and context; offset+capture length must not overflow or exceed its
-validated size. Validate original framing bounds/padding during scan and digest
-effective bytes before returning them. Transform-produced bytes default to derived
-backing, including nested subslices; source-backed subranges require proven
-unchanged provenance. One physical frame can yield multiple logical rows.
+### Columns and block-local arenas
 
-Source registry entries store source ID, argument index, exact display path,
-original byte size, SHA-256 of original input, source format, backing policy and
-OS identity (device/inode where available, size and modification/change times).
-Backing entries store backing ID, source ID, kind (source=1, snapshot=2,
-decompressed=3, derived=4), validated byte size/digest, owned-file identity and
-private filename when applicable. Registry variable strings are arena references.
-Contexts store context ID, source ID, section/interface IDs, original link type,
-snaplen, byte order, timestamp resolution base/exponent and signed time offset.
-Missing timestamps retain current reader semantics plus explicit absence. These
-fields do not extend supported PCAPNG sections/interfaces or gzip formats.
-Physical frame metadata for a reassembled output uses the same attribution as the
-legacy normalized CaptureInfo/SourcePosition; it must not invent a fragment origin.
+The payload begins with one 24-byte descriptor per column, in field-ID order:
+field ID u16, wire type u8, flags u8 (zero), count u32, payload-relative offset u64,
+byte length u64. Types are u8=1, u16=2, u32=3, u64=4, i64=5, f64=6,
+reference=7, fixed32=8. Descriptor counts equal the block row count. Fixed columns
+contain consecutive values; reference columns contain one 16-byte reference per
+row. Columns are contiguous in descriptor order, followed by the arena.
 
-### Analysis, exceptional content and completion
+A reference contains `(block u32, offset u32, length u32, flags u32)`. The block
+word must be zero and flags must be 1: references always select a present encoded
+value in the same block. Offsets are relative to the entire block payload.
+Arena values are contiguous in column order, then row order. Nil or absent
+protocol values are represented **inside the value codec**, not with absent arena
+references. Even an empty string has a four-byte encoded length in its referenced
+value. References cannot overlap, skip bytes, escape the payload or leave trailing
+arena data.
 
-Analysis field IDs in order: Protocol (reference), Info (reference), presence
-(u8: VoIP/DNS/Email/TLS/HTTP bits 0..4), then the exact Summary projection:
-VoIP User, From, To, CallID, Method, Codec, FromTag, ToTag, IMSI, IMEI (references),
-Status (i64), IsRTP (u8), SequenceNum (u16), SSRC (u32); DNS QueryName, QueryType
-(references), QueryResponseTimeMs (i64), first-answer-present (u8), first TTL
-(u32); TLS SNI, JA3Fingerprint (references); HTTP Host, Path, Method (references),
-StatusCode (i64), ContentLength (i64); finally five metadata references in presence
-bit order. All absent values must retain accessor semantics, including metadata
-present with empty contents. Summary accessors perform no I/O after materialization.
+The row block has these exact field IDs. `ref` denotes the block-local reference
+above; names correspond to the explicit schema table rather than Go declaration
+order.
 
-For a present protocol, a metadata reference with flag 0 means reconstruct its
-stateless fields from effective bytes; a reference with flag 1 supplies a typed
-field-override record with an explicit field-presence bitmap. An override can
-explicitly set a pointer/container to nil or empty. Protocol presence bits, not
-reference absence, decide whether the final PacketDisplay metadata pointer is nil.
-A populated F/D field must have an override even when its value is zero; applying
-overrides after stateless decoding preserves exact legacy fields.
+| ID  | Field                      | Wire type |
+| --- | -------------------------- | --------- |
+| 1   | Metadata block offset      | u64       |
+| 2   | Metadata block total bytes | u64       |
+| 3   | Argument                   | u32       |
+| 4   | Interface                  | u32       |
+| 5   | Sequence                   | u64       |
+| 6   | Locator                    | ref       |
+| 7   | Context                    | ref       |
+| 8   | PhysicalOrdinal            | u64       |
+| 9   | OriginalCaptured           | u32       |
+| 10  | OriginalWire               | u32       |
+| 11  | OriginalLink               | u32       |
+| 12  | Derived                    | u8        |
+| 13  | Captured                   | u32       |
+| 14  | Original                   | u32       |
+| 15  | Timestamp                  | ref       |
+| 16  | SrcIP                      | ref       |
+| 17  | DstIP                      | ref       |
+| 18  | SrcPort                    | ref       |
+| 19  | DstPort                    | ref       |
+| 20  | Protocol                   | ref       |
+| 21  | Info                       | ref       |
+| 22  | Node                       | ref       |
+| 23  | Device                     | ref       |
+| 24  | Transport                  | u8        |
+| 25  | Length                     | i64       |
+| 26  | LinkType                   | u8        |
+| 27  | Projection                 | ref       |
+| 28  | NodeRef                    | u32       |
+| 29  | DeviceRef                  | u32       |
+| 30  | ContextRef                 | u32       |
 
-Sparse metadata retains only finalized non-reconstructible results and necessary
-packet-local overrides. Full stateless metadata may be reconstructed from owned
-effective bytes plus frozen decoder configuration. Protocol-specific field IDs
-and nil/empty semantics are exhaustive in the inventory. Reassembled SIP, RTP
-attribution, TLS plaintext/connection results, opt-in retained bodies and other
-exceptional content use bounded metadata/derived arenas; they are never omitted
-from size reports. Normalized event/call snapshots are separate versioned analysis
-artifacts with their own checksums and bounded-history policy, not substitutes
-for packet-local metadata. No complete PacketDisplay record is persisted.
+`Argument` indexes the exact ordered source list, including repeated arguments.
+`Sequence` is the per-argument normalized logical sequence; `PhysicalOrdinal`
+counts original frames. `Interface` preserves source/reassembly attribution.
+`Captured`, `Original`, `Timestamp` and `LinkType` are effective export metadata;
+`Length` independently retains the display length. Address and port strings,
+Protocol and Info are exact presentation/search values, preserving empty ports
+versus the string `0` and all existing accessor quirks.
 
-The JSON manifest has `schema_major=2`, `schema_minor=0`, normalization,
-analyzer, decoder and filter-semantics versions; dataset generation; ordered
-source identities and aggregate input identity; frozen nonsecret configuration
-and key-material identity; backing policy; count; complete statistics; and every
-owned file's kind, byte size and SHA-256. It records `base_complete`,
-`analysis_complete`, `analysis_revision` and `complete`. Revision 0 is complete
-base without analysis; revision 1 is the first completed immutable overlay.
-Through milestone A all three completion booleans must be true before publication.
-Phase 5 may publish base_complete alone through an explicit revision-aware API.
-Unknown major/minor or semantic versions are rejected; no implicit v1 upgrade.
-Persistent reuse remains disabled.
+`Locator` encodes BackingID u32, Offset i64, Length u32 and Digest fixed32, in that
+order. Backing IDs start at one. Offsets refer to the originally owned handle or
+owned derived backing, never a replacement path. Original parser context encodes
+Format u8, ByteOrder u8, SectionID u32, InterfaceID u32, LinkType u32, Snaplen u32,
+TimestampResolutionBase u8, TimestampResolutionExponent u8, TimestampOffset i64
+and TimestampMissing u8. Source framing validation and supported-format limits
+remain the capture reader's responsibility. Derived provenance does not grant
+permission to reopen a source pathname.
 
-Flush all blocks/arenas and amendments, rebuild statistics, sync and close writers,
-validate/reopen read-only, then flush/sync/close and atomically rename the manifest.
-An error poisons the builder and prevents publication. Old amendments, replaced
-manifests and temporary copies remain charged while present. Order keys contain
-(seconds i64, nanos u32, argument u64, sequence u64, locator-row u64) with checked
-framing; query vectors contain ordered u64 packet IDs plus pinned generation and
-revision. All-match queries are implicit. Query completion uses its own atomic
-manifest and complete statistics. Query/sort format headers must reject v1 data.
-EOF, checksum, range and allocation validation precede any exposed row or bytes.
+### Direct row directory and integrity
 
-### Format cardinality limits
+`offsets` contains exactly one 64-byte entry per packet after its stream header.
+Entry position is `32 + packetID * 64`, with checked arithmetic. The entry holds
+row-block offset u64, row-block total bytes u64, metadata-block offset u64,
+metadata-block total bytes u64, then SHA-256 of packet ID (u64), those first 32
+bytes, the referenced 72-byte row-block header, and the 72-byte metadata-block
+header (all zeros when absent). Including the packet ID and headers prevents a
+changed header or swapped directory row from reinterpreting otherwise valid
+payload bytes. The metadata
+pair is `(0, 0)` when no override is needed. The row block's first two columns
+must agree with the directory's metadata pair.
 
-Block numbers and arena offsets/lengths are uint32; reject more than 2^32 blocks
-per stream, payloads above min(configured record limit, 2^32-1 bytes), or more
-than 4096 rows/descriptors per block. The record limit defaults to 8 MiB;
-configuration never relaxes wire widths. Reference arithmetic is promoted to
-checked uint64 before narrowing. Source IDs are u64 but simultaneous sources
-must fit configured MaxSources (default 64); repeated arguments count separately.
-Registry entries, paths and context values use the same bounded block/arena model,
-not an unlimited in-memory map. Manifest reading is limited to the record budget;
-its ordered input registry uses checked references if it cannot fit inline.
-Physical/logical ordinal and packet-count increments reject uint64 overflow.
-Snapshot/decompressed/derived byte offsets use u64 but must fit the platform
-ReadAt int64 range and configured disk budget before I/O. Unknown link types,
-invalid timestamp resolutions, flags and provenance combinations are rejected.
+A lookup validates directory checksum, block offset/size, kind, version, packet
+ID range, revision, payload checksum, descriptor identities/types/counts, reserved
+bits, column boundaries and exact arena consumption. Value decoding additionally
+checks lengths, scalar ranges, duplicate map keys and allocation limits before
+returning an owned result. Metadata blocks are read only when details need them;
+summary and raw iteration do not decode protocol overrides. Raw reads validate
+the effective source bytes with the backing registry, including source-change
+checks and the per-record SHA-256 digest.
+
+Block-cache keys use dataset identity, block offset and block kind; cached blocks
+remain immutable. Full column/arena and checksum validation occurs before cache
+admission; hits select the requested row from that validated encoding. Cached
+encodings, read/decode scratch, owned rows/details,
+page leases and detail pins share the storage memory budget. Query pins retain
+the completed query and dataset locks before asynchronous exports are scheduled.
+Raw callbacks receive one effective record at a time and do not invoke the
+stateless detail decoder.
+
+These hashes detect corruption, not authentication against an actor able to
+rewrite the private index and its checksums. The completed manifest also records
+full-stream digests, but no persisted-session reader currently consumes them to
+reopen or authenticate a cached dataset.
+
+### Value codec, searchable projection and overrides
+
+`compactFieldNames` explicitly freezes struct field order, independent of Go
+field declaration order. Integers use their declared widths; Go `int` is signed
+64-bit on the wire. Float64 uses IEEE 754 bits. Booleans are one byte (0 or 1).
+Pointers use one presence byte, followed by the value when present. Strings use
+a u32 byte length and exact bytes. Slices and maps use a presence byte and,
+when present, a u32 count; nil differs from non-nil empty. Byte slices contain
+raw bytes, other slices contain encoded elements, and string maps are serialized
+in sorted key order. Duplicate decoded keys are errors. Fixed arrays contain
+consecutive elements. Timestamps use i64 Unix seconds and u32 nanoseconds below
+one billion, normalized to UTC, without monotonic state.
+
+`Projection` begins with a u8 presence mask: VoIP/DNS/Email/TLS/HTTP use bits
+0–4; other bits are rejected. Only the groups selected by those bits follow, in
+this exact order:
+
+| Group | Encoded fields, in order                                                                                                     |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------- |
+| VoIP  | User, From, To, CallID, Method, Codec, FromTag, ToTag, IMSI, IMEI (strings); Status i64; IsRTP u8; SequenceNum u16; SSRC u32 |
+| DNS   | QueryName, QueryType (strings); QueryResponseTimeMs i64; AnswerPresent u8; TTL u32                                           |
+| Email | Presence only; no projection payload                                                                                         |
+| TLS   | SNI, JA3 (strings)                                                                                                           |
+| HTTP  | Host, Path, HTTPMethod (strings); StatusCode i64; ContentLength i64                                                          |
+
+No protocols therefore encode as a single zero byte. Metadata present with empty
+contents remains distinguishable from metadata absent. `Summary` materialization
+restores this exact projection and its accessors perform no further I/O.
+
+A kind-4 metadata block has field 1 `Mask` (u8) and field 2 `Metadata` (ref).
+`Metadata` is the explicit typed sequence of VoIP, DNS, Email, TLS and HTTP
+pointers, including each protocol's full supported fields in `compactFieldNames`.
+The mask uses the same five protocol bits. A set bit replaces the **entire
+protocol metadata pointer** after stateless decoding, including an explicit nil
+or empty value. This is a protocol-level override, not the per-field override
+bitmap proposed in phase 0. Unset bits leave decoded metadata unchanged.
+
+During append, the builder compares finalized protocol metadata with the injected
+stateless decoder's result and writes only differing protocol pointers. A zero
+mask writes no metadata block. On a detail read, the decoder reconstructs
+packet-local fields from owned effective bytes and the frozen projection; the
+backend restores persisted list fields, applies overrides, and returns owned raw
+bytes. Reassembled SIP messages, RTP attribution and other metadata that cannot
+be reproduced from one packet remain bounded retained content in overrides.
+Separate bounded session event/call and TLS-decryption state keep their existing
+ownership; this format does not serialize new event/call snapshot streams.
+
+`AmendVoIP` updates Protocol, Info, the narrow projection and the VoIP override
+without decoding or rewriting source bytes. It appends replacement row/metadata
+blocks and rewrites the one packet's directory entry. Superseded blocks remain
+charged until cleanup. Generic `UpdateDetail` also supports compact storage via
+reconstruction, but rejects replacement of effective raw bytes. Final statistics
+are rebuilt from amended rows before publication.
+
+`TestCompactValueSchemaFingerprint` pins field IDs/order, exact types, widths,
+value representation and sparse projection groups with SHA-256. Field coverage,
+round-trip, fixed-width golden-byte, nil/empty, malformed-container and truncation
+tests supplement this check. The schema-1 fingerprint remains independent.
+
+### Bounded registries and completion manifest
+
+Source paths are stored once in the bounded ordered source list. Node/interface
+labels share a registry capped at 256 entries and 64 KiB of text. Contexts have a
+separate 256-entry cap. Registries use bounded linear lookup; once a cap is reached,
+new values remain inline in their row's bounded arena instead of growing a global
+map. Registry references are one-based; zero selects the inline value. A nonzero
+label reference requires an empty inline label. For referenced contexts, only
+TimestampMissing remains in the inline context; parser-domain fields come from
+the registry. Inconsistent or out-of-range references are errors.
+
+The private JSON `manifest` has these actual top-level fields:
+`Version` (2), `Generation`, `Sources`, `Count`, `Statistics`, `StreamLengths`,
+`AnalysisVersion` (`"1"`), `Complete` (true), `CompactRegistries`, and `Compact`.
+`CompactRegistries` contains `Labels` and `Contexts`; internal accounting fields
+are not serialized. `Compact` contains `SchemaMajor` (2), `SchemaMinor` (0),
+`NormalizationVersion`, `AnalyzerVersion`, `DecoderVersion`,
+`FilterSemanticsVersion` (each `"1"`), `BaseComplete` and `AnalysisComplete`
+(both true), `AnalysisRevision` (1), `FileSHA256`, and `Backings`.
+
+`StreamLengths` and `FileSHA256` cover `summaries`, `details` and `offsets`, including
+headers and superseded blocks. Each backing entry records `ID`, `Kind`, `Size`,
+`SourceID`, `SourceIndex`, `SourceSize`, `SourceSHA256`, `Policy`, and `Compressed`.
+Owned snapshot, decompressed and derived files additionally have `OwnedSHA256`,
+computed over their complete retained bytes; external sources retain their
+scan-derived identity without another full-file hash pass.
+Backing kinds are source=1, snapshot=2, decompressed=3 and derived=4. Source paths
+come from `Sources`; OS handle identity and private-file ownership remain in the
+live backing registry. The manifest does not persist cryptographic secrets,
+key-material identity or a complete frozen settings object, and is not a reusable
+cache key. Backing handles are never reconstructed from this JSON.
+
+Completion flushes pending blocks, validates backings, seals owned backing writers
+with sync/close/read-only reopen and handle identity validation, rebuilds amended
+statistics, syncs and closes index writers, and reopens streams read-only. It then
+validates compact headers, computes stream SHA-256 values and bounded backing
+identity records, serializes the manifest under a preflight memory reservation,
+writes/syncs/closes `manifest.tmp`, and atomically renames it to `manifest`.
+Write failures poison the builder; no failed build publishes a completed manifest.
+Cleanup retains ownership and accounting when removal must be retried.
+
+All-match queries can use implicit packet IDs; filtered queries retain the existing
+ordered u64 match vector and separate completion manifest. This does not implement
+phase-4 expression/block query acceleration or phase-5 analysis revisions. Source,
+snapshot/decompression and derived bytes, buffered blocks, transposition scratch,
+queries, overrides, registries and retained replacement sessions remain part of
+resource accounting. No compact full `PacketDisplay` records or unchanged packet
+payload copies are written into the indexed streams.

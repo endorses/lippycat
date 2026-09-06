@@ -108,6 +108,7 @@ func (s *Storage) Close() error {
 }
 
 type diskDataset struct {
+	compact                     *compactState
 	mu                          sync.RWMutex
 	queryMu                     sync.Mutex
 	closed                      bool
@@ -212,7 +213,12 @@ func (b *Builder) Append(ctx context.Context, detail Detail) error {
 	if b.failure != nil {
 		return b.failure
 	}
-	err := b.append(ctx, detail)
+	var err error
+	if b.d.compact != nil {
+		err = errors.New("compact builder requires AppendCompact locator")
+	} else {
+		err = b.append(ctx, detail)
+	}
 	if err != nil {
 		b.failure = err
 	}
@@ -305,6 +311,17 @@ func (b *Builder) Finish(ctx context.Context) (dataset Dataset, finishErr error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if b.d.compact != nil {
+		if err := b.flushCompact(); err != nil {
+			return nil, err
+		}
+		if err := b.d.compact.registry.Validate(); err != nil {
+			return nil, err
+		}
+		if err := b.d.compact.registry.Seal(); err != nil {
+			return nil, err
+		}
+	}
 	if b.amended {
 		if err := b.rebuildStatistics(ctx); err != nil {
 			return nil, err
@@ -341,16 +358,27 @@ func (b *Builder) Finish(ctx context.Context) (dataset Dataset, finishErr error)
 		}
 		lengths[filepath.Base(f.Name())] = st.Size()
 	}
+	var registries *compactRegistries
+	if b.d.compact != nil {
+		registries = &b.d.compact.registries
+	}
+	completion, completionMemory, err := b.compactCompletion(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer b.d.storage.releaseMemory(completionMemory)
 	manifest := struct {
-		Version         uint16
-		Generation      DatasetGeneration
-		Sources         []SourcePosition
-		Count           uint64
-		Statistics      manifestStatistics
-		StreamLengths   map[string]int64
-		AnalysisVersion string
-		Complete        bool
-	}{RecordSchemaVersion, b.d.generation, b.sources, b.d.count, statisticsForManifest(b.d.stats), lengths, "1", true}
+		Version           uint16
+		Generation        DatasetGeneration
+		Sources           []SourcePosition
+		Count             uint64
+		Statistics        manifestStatistics
+		StreamLengths     map[string]int64
+		AnalysisVersion   string
+		Complete          bool
+		CompactRegistries *compactRegistries `json:",omitempty"`
+		Compact           *compactCompletion `json:",omitempty"`
+	}{b.d.schemaVersion(), b.d.generation, b.sources, b.d.count, statisticsForManifest(b.d.stats), lengths, "1", true, registries, completion}
 	// Preflight source/statistics strings and maps before JSON allocates escaped
 	// text. This independently bounds the manifest serializer, not just records.
 	var manifestMemory uint64
@@ -422,6 +450,9 @@ func (d *diskDataset) read(ctx context.Context, id PacketID, kind uint16, value 
 }
 
 func (d *diskDataset) validateStreams() error {
+	if d.compact != nil {
+		return d.validateCompactStreams()
+	}
 	if err := readStreamHeader(d.offsets, 3); err != nil {
 		return err
 	}
@@ -438,6 +469,9 @@ func (d *diskDataset) validateStreams() error {
 // stream. Completed datasets are immutable while their read lock is held, so
 // a query can validate headers and snapshot stream length once for its scan.
 func (d *diskDataset) readValidated(ctx context.Context, id PacketID, kind uint16, streamSize uint64, value any) (uint64, error) {
+	if d.compact != nil {
+		return d.readCompact(ctx, id, kind, value)
+	}
 	if uint64(id) >= d.count {
 		return 0, fmt.Errorf("offline packet ID %d out of range", id)
 	}
@@ -492,9 +526,15 @@ func (d *diskDataset) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.cleaned {
+		if d.compact != nil {
+			return d.closeCompact()
+		}
 		return nil
 	}
 	var err error
+	if d.compact != nil {
+		err = errors.Join(err, d.closeCompact())
+	}
 	if !d.closed {
 		d.closed = true
 		d.storage.discardDatasetCache(d)

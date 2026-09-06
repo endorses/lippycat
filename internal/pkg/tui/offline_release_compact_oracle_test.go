@@ -184,8 +184,12 @@ func runOfflineCompactOracle(t *testing.T, cfg OfflineAnalysisConfig, candidate 
 func compareOfflineOracleExports(t *testing.T, a, b offline.Query) {
 	t.Helper()
 	paths := []string{filepath.Join(t.TempDir(), "legacy.pcap"), filepath.Join(t.TempDir(), "candidate.pcap")}
-	na, ea := exportOfflinePCAP(context.Background(), paths[0], a.Iterate)
-	nb, eb := exportOfflinePCAP(context.Background(), paths[1], b.Iterate)
+	na, ea := exportOfflinePCAP(context.Background(), paths[0], func(ctx context.Context, visit func(offline.RawRecord) error) error {
+		return offline.IterateRaw(ctx, a, visit)
+	})
+	nb, eb := exportOfflinePCAP(context.Background(), paths[1], func(ctx context.Context, visit func(offline.RawRecord) error) error {
+		return offline.IterateRaw(ctx, b, visit)
+	})
 	require.Equal(t, na, nb, "export count")
 	if ea != nil || eb != nil {
 		require.Error(t, ea)

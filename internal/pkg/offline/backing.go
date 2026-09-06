@@ -121,6 +121,7 @@ type BackingRegistry struct {
 	entries []*ownedBacking
 	leases  int
 	closing bool
+	sealed  bool
 	failure error
 }
 
@@ -176,7 +177,7 @@ func (r *BackingRegistry) OpenScan(ctx context.Context, path string, sourceIndex
 func (r *BackingRegistry) open(ctx context.Context, path string, sourceIndex int, policy BackingPolicy, compressed, scan bool) (*BackingInput, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closing {
+	if r.closing || r.sealed {
 		return nil, errors.New("offline backings closed")
 	}
 	if r.failure != nil {
@@ -439,7 +440,7 @@ func (r *BackingRegistry) AppendDerived(ctx context.Context, sourceIndex int, da
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closing {
+	if r.closing || r.sealed {
 		return Locator{}, errors.New("offline backings closed")
 	}
 	if r.failure != nil {

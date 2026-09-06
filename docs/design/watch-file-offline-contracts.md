@@ -194,15 +194,34 @@ Reject more than the supported source limit before opening readers.
 See [ordering and navigation corrections](../plans/watch-file-ordering-and-navigation.md)
 for the change superseding the initial strict-rejection policy.
 
-## Compact migration: phase-0 contracts
+## Compact migration contracts
 
 The following is the implementation contract for phases 1–5 of the compact
-source-index plan. Phase 0 adds the oracle/design only; the existing v1 production
-behavior and completed-only publication remain unchanged. See the
+source-index plan. Phase 3 implements an internally selected completed compact
+dataset; the existing v1 production behavior and completed-only publication
+remain unchanged until the phase-4 cutover gate. See the
 [full field inventory](watch-file-packet-field-inventory.md) and
-[v2 wire specification](offline-storage-format.md#compact-schema-v2-contract-specified-not-implemented).
+[implemented v2 wire specification](offline-storage-format.md).
 The baseline environment and immutable revision/working-tree identity are recorded
 in [baseline identity](../research/watch-file-phase0-baseline-identity.json).
+
+The unshipped v2 layout was refined during implementation: finalized base and
+analysis columns share typed blocks, text uses block-local arenas, and a
+checksummed fixed-width row directory supports direct lookup and replacement
+rows. Bounded label/context registries live in the completion manifest. This
+preserves exact projections and source provenance without a dataset-sized arena
+map. The storage specification documents the actual fields and integrity checks.
+
+The injected decoder reconstructs DNS, HTTP and TLS packet-local metadata from
+owned effective bytes and the finalized projection. Whole-protocol overrides
+retain results that differ from that reconstruction, including VoIP and email
+metadata. SIP amendments replace sparse protocol metadata and a compact row;
+they never rewrite effective packet bytes or full presentation records. TLS
+plaintext remains in the separately bounded, stopped session analyzer (16 MiB
+session plaintext limit), as in the oracle; it is not copied into the index.
+Queries and raw export preserve their completed-generation ownership, with raw
+export bypassing the decoder. No progressive readiness or persistent reuse is
+introduced by phase 3.
 
 ### Predeclared regression tolerances
 

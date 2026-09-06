@@ -145,31 +145,58 @@ type locatorRange struct{ start, end uint64 }
 // Preparation finishes every normalized source and its hash before Replay can
 // construct an analysis consumer. Close remains retryable on cleanup failure.
 type OfflineLocatorStream struct {
-	mu          sync.Mutex
-	reservation io.Closer
-	progress    func(OfflineSortProgress)
-	state       OfflineSortProgress
-	storage     *offline.Storage
-	backings    *offline.BackingRegistry
-	files       offlineSortFiles
-	index       *offline.ScratchFile
-	devices     []pcaptypes.PcapInterface
-	identities  []offline.SourceIdentity
-	ranges      []locatorRange
-	count       uint64
-	ordering    string
-	closed      bool
+	mu                  sync.Mutex
+	reservation         io.Closer
+	progress            func(OfflineSortProgress)
+	state               OfflineSortProgress
+	storage             *offline.Storage
+	backings            *offline.BackingRegistry
+	backingsTransferred bool
+	files               offlineSortFiles
+	index               *offline.ScratchFile
+	devices             []pcaptypes.PcapInterface
+	identities          []offline.SourceIdentity
+	ranges              []locatorRange
+	count               uint64
+	ordering            string
+	closed              bool
 }
 
 func (s *OfflineLocatorStream) Identities() []offline.SourceIdentity {
 	return append([]offline.SourceIdentity(nil), s.identities...)
 }
 func (s *OfflineLocatorStream) Ordering() string { return s.ordering }
+
+// Backings borrows the prepared source registry while the stream remains open.
+// A completed-dataset builder may take ownership with TransferBackings after
+// successfully accepting this registry. Call outside Replay callbacks.
+func (s *OfflineLocatorStream) Backings() *offline.BackingRegistry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.backings
+}
+
+// TransferBackings gives the caller cleanup ownership of the source registry.
+// Replay continues borrowing it: its new owner must keep it open until Replay
+// and stream cleanup finish. Transfer is serialized with Replay and Close.
+func (s *OfflineLocatorStream) TransferBackings() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.backingsTransferred {
+		return errors.New("offline locator backings already closed or transferred")
+	}
+	s.backingsTransferred = true
+	return nil
+}
+
 func (s *OfflineLocatorStream) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
-	err := errors.Join(s.files.Close(), s.backings.Close())
+	err := s.files.Close()
+	if !s.backingsTransferred {
+		err = errors.Join(err, s.backings.Close())
+	}
 	if s.reservation != nil {
 		err = errors.Join(err, s.reservation.Close())
 		s.reservation = nil

@@ -235,6 +235,14 @@ remaining readiness and sparse-fallback timing gaps are explicitly recorded,
 without changing the tolerances or claiming the three-second target. Publication still
 waits for analyzer EOF; phase 5 has not begun.
 
+Phase-4 follow-up assessment (2026-09-06) used three independent sub-agents and
+parent verification. It found one compatibility defect: accepted filters that
+exceeded structured-expression limits aborted instead of using the opaque
+predicate fallback. The adapter now falls back only for representation-limit
+errors, preserving other compiler errors and backend budgets. See the
+[follow-up verification](../research/watch-file-phase4-validation.md#follow-up-assessment-2026-09-06).
+No additional phase-4 defect was substantiated.
+
 ## Phase 5 — Publish a complete base before analysis finishes
 
 Touchpoints: `internal/pkg/offline/contracts.go`, manifest/cache/query ownership,

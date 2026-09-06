@@ -249,3 +249,36 @@ the previous batch lease and independent packet handoff complete. Focused captur
 race and production/TUI release tests passed after this correction. A full
 three-process corrected compact condition replaces the preceding condition;
 the intervening samples remain under `budget_fix_matrix` in the measurement JSON.
+
+## Follow-up assessment (2026-09-06)
+
+Three independent sub-agents reviewed filter compilation, block queries and
+resource/ownership behavior, and production cutover/documentation. Parent review
+verified their findings against the implementation and tests. One compatibility
+defect was confirmed: a filter accepted by the existing parser could exceed the
+structured-expression representation limits, causing the TUI to reject it before
+starting a query instead of using its existing opaque predicate fallback.
+
+The reproduction uses 65 `NOT` operators followed by `impossible`. Parsing and
+the legacy predicate succeed, but the new TUI regression failed because no
+offline query started. Both the parent and a second reviewer reproduced that
+failure before the fix. Expression representation limits now have a dedicated
+error sentinel; the filter-chain adapter maps only that error to opaque fallback.
+Invalid-expression errors and backend resource limits remain enforced.
+
+Regression coverage includes expression depth, a 257-filter stack, oversized
+text, invalid numeric comparison errors, and end-to-end TUI query completion,
+match statistics and installed filter state. The formerly failing reproduction
+passes after the fix. No other phase-4 defect was substantiated.
+
+The parent ran the plan's full package gate, offline/capture/TUI race gate and
+complete build before the fix. After the fix, the full offline and TUI package
+trees, affected expression/filter/TUI race tests and complete build passed.
+A second reviewer independently reran the focused regressions and reviewed the
+final diff. Builds exited successfully with a nonfatal sandbox Go stat-cache
+write warning. Go files were formatted and the diff passed whitespace checks.
+
+This assessment did not rerun the private-capture oracle or performance matrix.
+Their recorded results and the explicitly deferred readiness/sparse-fallback
+timing gaps above remain unchanged. Preexisting unrelated working-tree changes
+were preserved.

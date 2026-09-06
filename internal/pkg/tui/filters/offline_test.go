@@ -3,12 +3,46 @@
 package filters
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOfflineExpressionLimitFallback(t *testing.T) {
+	for _, kind := range []string{"depth", "stack", "bytes"} {
+		t.Run(kind, func(t *testing.T) {
+			chain := NewFilterChain()
+			switch kind {
+			case "depth":
+				f, err := ParseBooleanExpression(strings.Repeat("NOT ", 65)+"impossible", func(s string) Filter {
+					return NewTextFilter(s, nil)
+				})
+				require.NoError(t, err)
+				chain.Add(f)
+			case "stack":
+				for i := 0; i < 257; i++ {
+					chain.Add(NewTextFilter("", nil))
+				}
+			case "bytes":
+				chain.Add(NewTextFilter(strings.Repeat("x", 1<<20), nil))
+			}
+			require.Equal(t, kind != "bytes", chain.Match(types.PacketDisplay{}))
+			e, err := chain.OfflineExpression()
+			require.NoError(t, err)
+			require.Nil(t, e, "storage expression limits must preserve opaque filtering")
+		})
+	}
+}
+
+func TestOfflineExpressionInvalidFilterStillFails(t *testing.T) {
+	chain := NewFilterChain()
+	chain.Add(&NumericComparisonFilter{field: "length", operator: "!="})
+	_, err := chain.OfflineExpression()
+	require.ErrorContains(t, err, "invalid numeric comparison")
+}
 
 func TestOfflineExpressionParity(t *testing.T) {
 	packets := []types.PacketDisplay{

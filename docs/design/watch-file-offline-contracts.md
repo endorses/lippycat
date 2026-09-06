@@ -374,7 +374,10 @@ The TUI compiles constructed, immutable packet filters into validated expression
 in `offline/filterexpr`. The backend never imports TUI packages. Boolean and stack
 semantics, aliases, numeric epsilon, metadata presence, text matching and the
 accepted BPF subset remain those of the existing filter constructors. Unknown
-custom filter implementations use the opaque `QuerySpec.Match` fallback.
+custom filter implementations and accepted filters exceeding the structured
+expression's representation limits use the opaque `QuerySpec.Match` fallback.
+Other expression compilation errors remain errors; fallback does not relax the
+backend's record, query or storage budgets.
 
 Queries scan the authenticated row directory in logical order and reuse expanded
 blocks. Compression and checksums require reading a whole block, but supported

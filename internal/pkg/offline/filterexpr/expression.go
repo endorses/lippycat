@@ -2,10 +2,15 @@
 package filterexpr
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 )
+
+// ErrExpressionLimit marks filters that exceed the bounded storage expression
+// representation. Adapters may retain their existing opaque predicate instead.
+var ErrExpressionLimit = errors.New("filter expression limit exceeded")
 
 type Record interface {
 	GetStringField(string) string
@@ -40,14 +45,14 @@ func NewExpression(s ExpressionSpec) (*Expression, error) {
 	// Bound input before copying slices or parsing text. Each expression tree is
 	// limited to 1 MiB including repeated child occurrences and dependencies.
 	if len(s.Fields) > 256 || len(s.Children) > 256 {
-		return nil, fmt.Errorf("expression exceeds dependency limit")
+		return nil, fmt.Errorf("%w: dependency count", ErrExpressionLimit)
 	}
 	size := uint64(2048 + len(s.Text) + len(s.Op) + len(s.Comparison) + len(s.Children)*8)
 	for _, f := range s.Fields {
 		size += uint64(32 + len(f))
 	}
 	if size > 1<<20 {
-		return nil, fmt.Errorf("expression exceeds byte limit")
+		return nil, fmt.Errorf("%w: bytes", ErrExpressionLimit)
 	}
 	switch s.Op {
 	case "node":
@@ -61,7 +66,7 @@ func NewExpression(s ExpressionSpec) (*Expression, error) {
 		}
 		size += c.bytes
 		if size > 1<<20 {
-			return nil, fmt.Errorf("expression exceeds byte limit")
+			return nil, fmt.Errorf("%w: bytes", ErrExpressionLimit)
 		}
 	}
 	e := &Expression{spec: s, bytes: size}
@@ -92,7 +97,7 @@ func NewExpression(s ExpressionSpec) (*Expression, error) {
 		return nil, fmt.Errorf("leaf expression has children")
 	}
 	if len(s.Fields) > 256 || len(s.Children) > 256 {
-		return nil, fmt.Errorf("expression exceeds dependency limit")
+		return nil, fmt.Errorf("%w: dependency count", ErrExpressionLimit)
 	}
 	if s.Op == "numeric" {
 		switch s.Comparison {
@@ -123,7 +128,7 @@ func NewExpression(s ExpressionSpec) (*Expression, error) {
 	visit = func(c *Expression, depth int) error {
 		nodes++
 		if nodes > 4096 || depth > 64 {
-			return fmt.Errorf("expression exceeds complexity limit")
+			return fmt.Errorf("%w: complexity", ErrExpressionLimit)
 		}
 		if c == nil || !c.valid {
 			return fmt.Errorf("invalid expression child")
@@ -144,7 +149,7 @@ func NewExpression(s ExpressionSpec) (*Expression, error) {
 		}
 	}
 	if len(e.fields) > 256 {
-		return nil, fmt.Errorf("expression exceeds aggregate dependency limit")
+		return nil, fmt.Errorf("%w: aggregate dependency count", ErrExpressionLimit)
 	}
 	e.valid = true
 	return e, nil

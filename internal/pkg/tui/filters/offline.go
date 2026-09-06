@@ -2,11 +2,24 @@
 
 package filters
 
-import offline "github.com/endorses/lippycat/internal/pkg/offline/filterexpr"
+import (
+	"errors"
+
+	offline "github.com/endorses/lippycat/internal/pkg/offline/filterexpr"
+)
 
 // OfflineExpression snapshots a packet filter chain into storage expressions.
 // Unknown external filter implementations retain the caller's opaque fallback.
-func (fc *FilterChain) OfflineExpression() (*offline.Expression, error) {
+func (fc *FilterChain) OfflineExpression() (expression *offline.Expression, err error) {
+	// These filters have already been constructed by the existing parser. A
+	// bounded storage representation cannot express every accepted chain, so
+	// preserve predicate fallback for representation limits, just as for custom
+	// filter implementations. Other compiler errors remain visible.
+	defer func() {
+		if errors.Is(err, offline.ErrExpressionLimit) {
+			expression, err = nil, nil
+		}
+	}()
 	children := make([]*offline.Expression, 0, len(fc.filters))
 	for _, f := range fc.filters {
 		e, err := CompileOffline(f.filter)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/offline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -18,6 +19,7 @@ import (
 )
 
 type PacketInfo struct {
+	Provenance        *offline.PacketProvenance // Immutable normalized-byte locator; nil on legacy/live paths.
 	LinkType          layers.LinkType
 	Packet            gopacket.Packet
 	Interface         string // Display name of the interface or offline input.

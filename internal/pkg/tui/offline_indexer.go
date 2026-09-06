@@ -29,6 +29,7 @@ import (
 // OfflineAnalysisConfig is captured by the model before starting a worker.
 // Workers never read UI settings or mutate the active capture's global state.
 type OfflineAnalysisConfig struct {
+	BackingPolicy offline.BackingPolicy
 	Inputs        []string
 	BPFFilter     string
 	VoIP          bool
@@ -178,7 +179,11 @@ func indexOfflineDatasetObserved(ctx context.Context, storage *offline.Storage, 
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
+	if cfg.BackingPolicy, err = offline.ParseBackingPolicy(string(cfg.BackingPolicy)); err != nil {
+		return nil, err
+	}
 	ctx = capture.WithOfflineESPConfig(ctx, cfg.ESP)
+	ctx = capture.WithOfflineBackingPolicy(ctx, cfg.BackingPolicy)
 	sources := make([]offline.SourcePosition, len(cfg.Inputs))
 	for i, path := range cfg.Inputs {
 		sources[i] = offline.SourcePosition{ArgumentIndex: uint32(i), Path: path}

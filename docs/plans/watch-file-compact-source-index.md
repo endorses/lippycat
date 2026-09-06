@@ -1,6 +1,6 @@
 # Compact source-backed offline index implementation plan
 
-Status: Phase 0 complete; phases 1–6 remain unchecked.
+Status: Phases 0–1 complete; phases 2–6 remain unchecked.
 Scope: `lc watch file`.
 
 Phase 0 establishes the baseline, injectable differential oracle, measurement
@@ -115,16 +115,20 @@ Touchpoints: `internal/pkg/capture/pcaptypes/offline.go`,
 and `internal/pkg/offline/{contracts,storage,scratch}.go`. Add focused backing and
 locator files in the existing packages rather than moving capture into the TUI.
 
-- [ ] Add parser-consumed classic-PCAP payload offsets and physical ordinals. Preserve byte order, micro/nanosecond precision, capture metadata and malformed/truncated-input errors. Never derive offsets from a buffered file descriptor's current seek position.
-- [ ] Add checked PCAPNG block/payload locators with existing interface, timestamp-resolution/time-offset and missing-timestamp semantics. Validate padding and block bounds; retain current unsupported-format errors.
-- [ ] Introduce a backing registry and bounded `ReadAt`-style reads with owned handles, source identity checks, per-record integrity verification and explicit close/lease behavior. Transfer ownership before `offlineCursor.Close` would close inputs at scan EOF. Validate indexes and referenced bytes before exposing them to detail/export readers.
-- [ ] Implement one seekable decompressed backing spool for gzip classic PCAP. Hash original compressed input, validate decompression completion, and account for both spool and temporary peak disk.
-- [ ] Propagate provenance through filtering, fragment completion, VXLAN extraction and ESP transformations. Unchanged output retains its source locator; changed/reassembled output receives derived backing. A subslice of derived data must remain derived through nested transformations.
-- [ ] Preserve original source context separately from effective decoding context and logical emission sequence. Repeated input arguments remain distinct even when their paths or underlying files are equal.
-- [ ] Implement the phase-0 backing policy and tests for rename, replacement, unlink where supported, truncation, same-size in-place mutation, snapshot failures, cancellation and pinned-reader shutdown. Preserve cleanup errors and retry ownership.
+- [x] Add parser-consumed classic-PCAP payload offsets and physical ordinals. Preserve byte order, micro/nanosecond precision, capture metadata and malformed/truncated-input errors. Never derive offsets from a buffered file descriptor's current seek position.
+- [x] Add checked PCAPNG block/payload locators with existing interface, timestamp-resolution/time-offset and missing-timestamp semantics. Validate padding and block bounds; retain current unsupported-format errors.
+- [x] Introduce a backing registry and bounded `ReadAt`-style reads with owned handles, source identity checks, per-record integrity verification and explicit close/lease behavior. Transfer ownership before `offlineCursor.Close` would close inputs at scan EOF. Validate indexes and referenced bytes before exposing them to detail/export readers.
+- [x] Implement one seekable decompressed backing spool for gzip classic PCAP. Hash original compressed input, validate decompression completion, and account for both spool and temporary peak disk.
+- [x] Propagate provenance through filtering, fragment completion, VXLAN extraction and ESP transformations. Unchanged output retains its source locator; changed/reassembled output receives derived backing. A subslice of derived data must remain derived through nested transformations.
+- [x] Preserve original source context separately from effective decoding context and logical emission sequence. Repeated input arguments remain distinct even when their paths or underlying files are equal.
+- [x] Implement the phase-0 backing policy and tests for rename, replacement, unlink where supported, truncation, same-size in-place mutation, snapshot failures, cancellation and pinned-reader shutdown. Preserve cleanup errors and retry ownership.
 
 Gate: every emitted normalized packet can be reread byte-for-byte with its exact
 capture metadata, and no reader obtains bytes from a replacement path.
+
+Phase-1 implementation and review: see [verification](../research/watch-file-phase1-validation.md).
+The locator path is internally opt-in; legacy sorting and completed production
+datasets retain their existing behavior until the later migration gates.
 
 ## Phase 2 — Replace raw sorting spools with locator ordering
 

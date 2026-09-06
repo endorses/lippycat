@@ -25,6 +25,7 @@ type Storage struct {
 	cache    map[cacheKey]*list.Element
 	cacheLRU list.List
 	scratch  map[*ScratchFile]struct{}
+	backings map[*BackingRegistry]struct{}
 }
 
 func NewStorage(limits ResourceLimits) (*Storage, error) {
@@ -78,12 +79,19 @@ func (s *Storage) Resources() ResourceUsage { s.mu.Lock(); defer s.mu.Unlock(); 
 func (s *Storage) Close() error {
 	// Failed scratch cleanup remains owned here, even after its caller returns.
 	s.mu.Lock()
+	registries := make([]*BackingRegistry, 0, len(s.backings))
+	for r := range s.backings {
+		registries = append(registries, r)
+	}
 	files := make([]*ScratchFile, 0, len(s.scratch))
 	for f := range s.scratch {
 		files = append(files, f)
 	}
 	s.mu.Unlock()
 	var cleanupErr error
+	for _, r := range registries {
+		cleanupErr = errors.Join(cleanupErr, r.Close())
+	}
 	for _, f := range files {
 		cleanupErr = errors.Join(cleanupErr, f.Close())
 	}

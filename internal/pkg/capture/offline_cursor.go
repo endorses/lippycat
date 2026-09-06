@@ -30,6 +30,8 @@ type offlinePacketReader interface {
 	ReadPacketData() ([]byte, gopacket.CaptureInfo, error)
 }
 type offlineCursor struct {
+	backings         *offline.BackingRegistry
+	backingID        uint32
 	reader           offlinePacketReader
 	closer           io.Closer
 	decompressor     io.Closer
@@ -58,29 +60,52 @@ func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter s
 	c := &offlineCursor{espConfig: offlineESPConfigFromContext(ctx), path: dev.Name(), sourceIndex: sourceIndex, ip4: NewIPv4Defragmenter(), ip6: NewIPv6Defragmenter()}
 	c.spiCache = newTTLCache[uint32, layers.IPProtocol](5 * time.Minute)
 	c.fragCache = newTTLCache[uint32, ipv6FragInfo](30 * time.Second)
-	info, err := os.Stat(c.path)
-	if err != nil {
-		return nil, fmt.Errorf("stat offline source %q: %w", c.path, err)
+	var input io.Reader
+	compressed := false
+	if cfg, ok := ctx.Value(offlineBackingsKey{}).(offlineBackingsConfig); ok && cfg.registry != nil {
+		backing, e := cfg.registry.Open(ctx, c.path, int(sourceIndex), cfg.policy, false)
+		if e != nil {
+			return nil, e
+		}
+		c.backings, c.backingID, input = cfg.registry, backing.ID, backing.Reader
+		c.closer = backing
+		compressed = backing.Compressed
+	} else {
+		initial, e := os.Stat(c.path)
+		if e != nil {
+			return nil, fmt.Errorf("stat offline source %q: %w", c.path, e)
+		}
+		if !initial.Mode().IsRegular() {
+			return nil, fmt.Errorf("offline source %q must be a regular capture file", c.path)
+		}
+		f, e := os.Open(c.path)
+		if e != nil {
+			return nil, fmt.Errorf("open offline source %q: %w", c.path, e)
+		}
+		c.closer = f
+		info, e := f.Stat()
+		if e != nil {
+			return nil, errors.Join(e, c.Close())
+		}
+		if !info.Mode().IsRegular() {
+			return nil, errors.Join(fmt.Errorf("offline source %q must be a regular capture file", c.path), c.Close())
+		}
+		input = f
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("offline source %q must be a regular capture file", c.path)
-	}
-	f, err := os.Open(c.path)
-	if err != nil {
-		return nil, fmt.Errorf("open offline source %q: %w", c.path, err)
-	}
-	c.closer = f
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("offline source %q: %w", c.path, errors.Join(err, c.Close()))
 		}
 	}()
-	br := bufio.NewReader(f)
+	br := bufio.NewReader(input)
 	magic, err := br.Peek(4)
 	if err != nil {
 		return nil, fmt.Errorf("read capture header: %w", err)
 	}
 	if string(magic) == "\x0a\x0d\x0d\x0a" {
+		if compressed {
+			return nil, fmt.Errorf("unrecognized PCAP magic %x", magic)
+		}
 		framing := &checkedNGReader{reader: br, ctx: ctx}
 		r, e := pcapgo.NewNgReader(framing, pcapgo.NgReaderOptions{ErrorOnMismatchingLinkType: true})
 		if e != nil {
@@ -101,12 +126,9 @@ func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter s
 		if e := validateOfflinePCAPHeader(br); e != nil {
 			return nil, e
 		}
-		r, e := pcapgo.NewReader(br)
+		r, e := newOfflinePCAPReader(br)
 		if e != nil {
 			return nil, fmt.Errorf("read PCAP header: %w", e)
-		}
-		if r.Snaplen() > offlineMaxPacketBytes {
-			r.SetSnaplen(offlineMaxPacketBytes)
 		}
 		c.reader, c.linkType = r, r.LinkType()
 	}
@@ -167,7 +189,7 @@ func validateOfflinePCAPHeader(reader *bufio.Reader) error {
 }
 
 func (c *offlineCursor) Close() error {
-	if c.closed {
+	if c.closed && c.closer == nil && c.decompressor == nil {
 		return nil
 	}
 	c.closed = true
@@ -180,9 +202,16 @@ func (c *offlineCursor) Close() error {
 	var err error
 	if c.decompressor != nil {
 		err = c.decompressor.Close()
+		if err == nil {
+			c.decompressor = nil
+		}
 	}
 	if c.closer != nil {
-		err = errors.Join(err, c.closer.Close())
+		closeErr := c.closer.Close()
+		err = errors.Join(err, closeErr)
+		if closeErr == nil {
+			c.closer = nil
+		}
 	}
 	return err
 }
@@ -197,6 +226,11 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 		}
 		data, ci, err := c.reader.ReadPacketData()
 		if err != nil {
+			if c.backings != nil {
+				if e := c.backings.Validate(); e != nil {
+					return PacketInfo{}, e
+				}
+			}
 			if err == io.EOF && ci.CaptureLength == 0 {
 				return PacketInfo{}, io.EOF
 			}
@@ -207,6 +241,17 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 		}
 		if err := ctx.Err(); err != nil {
 			return PacketInfo{}, err
+		}
+		// Provenance is explicit: every transform defaults to derived backing,
+		// including subslices of a previously reassembled or rewritten packet.
+		derived := false
+		var location offlinePacketLocation
+		if c.backings != nil {
+			located, ok := c.reader.(interface{ PacketLocation() offlinePacketLocation })
+			if !ok {
+				return PacketInfo{}, errors.New("offline reader does not expose a payload locator")
+			}
+			location = located.PacketLocation()
 		}
 		// Match original on-disk frames before reassembly/decapsulation, as libpcap does.
 		if c.bpf != nil && !c.bpf.Matches(ci, data) {
@@ -244,6 +289,7 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 				reassembled := rebuildReassembledPacket(newPacket, reassembledIP, c.linkType)
 				reassembled.Metadata().Timestamp = newPacket.Metadata().Timestamp
 				newPacket = reassembled
+				derived = true
 			}
 		}
 
@@ -280,6 +326,7 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 					reassembled := rebuildReassembledIPv6Packet(newPacket, reassembledIP6, c.linkType)
 					reassembled.Metadata().Timestamp = newPacket.Metadata().Timestamp
 					newPacket = reassembled
+					derived = true
 				}
 			}
 		}
@@ -290,6 +337,7 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 		effectiveLinkType := c.linkType
 		if inner, ok := decapsulateVXLAN(newPacket); ok {
 			newPacket = inner
+			derived = true
 			effectiveLinkType = layers.LinkTypeEthernet
 		}
 
@@ -299,10 +347,12 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 		if c.espConfig.Enabled {
 			if inner, ok := decapsulateESPNullWithCacheConfig(newPacket, c.spiCache, c.espConfig.Explicit, c.espConfig.ICVSize); ok {
 				newPacket = inner
+				derived = true
 				newPacket.Metadata().CaptureLength = len(newPacket.Data())
 				newPacket.Metadata().Length = len(newPacket.Data())
 			} else if inner, ok := decapsulateIPv6FragmentESPWithCachesConfig(newPacket, c.spiCache, c.fragCache, c.espConfig.Explicit, c.espConfig.ICVSize); ok {
 				newPacket = inner
+				derived = true
 				newPacket.Metadata().CaptureLength = len(newPacket.Data())
 				newPacket.Metadata().Length = len(newPacket.Data())
 			}
@@ -317,7 +367,21 @@ func (c *offlineCursor) Next(ctx context.Context) (PacketInfo, error) {
 		c.previous = newPacket.Metadata().Timestamp
 		c.hasPrevious = true
 		c.sequence++
-		return PacketInfo{LinkType: effectiveLinkType, Packet: newPacket, Interface: filepath.Base(c.path), SourcePath: c.path, SourceIndex: c.sourceIndex, SourceSequence: c.sequence - 1, SourceInterfaceID: uint32(ci.InterfaceIndex)}, nil
+		result := PacketInfo{LinkType: effectiveLinkType, Packet: newPacket, Interface: filepath.Base(c.path), SourcePath: c.path, SourceIndex: c.sourceIndex, SourceSequence: c.sequence - 1, SourceInterfaceID: uint32(ci.InterfaceIndex)}
+		if c.backings != nil {
+			var locator offline.Locator
+			var err error
+			if derived {
+				locator, err = c.backings.AppendDerived(ctx, int(c.sourceIndex), newPacket.Data())
+			} else {
+				locator, err = c.backings.Locator(c.backingID, location.PayloadOffset, data)
+			}
+			if err != nil {
+				return PacketInfo{}, fmt.Errorf("locate normalized source %q: %w", c.path, err)
+			}
+			result.Provenance = &offline.PacketProvenance{Context: location.Context, Locator: locator, Derived: derived, SourceIndex: c.sourceIndex, SourcePath: c.path, PhysicalOrdinal: location.PhysicalOrdinal, LogicalSequence: c.sequence - 1, OriginalCapture: ci, OriginalLinkType: c.linkType, EffectiveCapture: newPacket.Metadata().CaptureInfo, EffectiveLinkType: effectiveLinkType}
+		}
+		return result, nil
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -22,13 +23,16 @@ const (
 // SourceProvenance describes where a packet was observed. Batch fields are set
 // only for transports that batch packets.
 type SourceProvenance struct {
-	Kind           SourceKind
-	NodeID         string
-	InterfaceName  string
-	InputFile      string
-	InterfaceIndex uint32
-	BatchSequence  uint64
-	BatchTimestamp time.Time
+	PacketProvenance *offline.PacketProvenance
+	ArgumentIndex    uint32
+	LogicalSequence  uint64
+	Kind             SourceKind
+	NodeID           string
+	InterfaceName    string
+	InputFile        string
+	InterfaceIndex   uint32
+	BatchSequence    uint64
+	BatchTimestamp   time.Time
 }
 
 // Stage is a named pipeline capability. It is deliberately a bit set rather

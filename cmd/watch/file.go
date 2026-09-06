@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/endorses/lippycat/internal/pkg/tui"
 	"github.com/muesli/termenv"
@@ -46,6 +47,10 @@ var (
 )
 
 func runFile(cmd *cobra.Command, args []string) {
+	if _, err := offline.ParseBackingPolicy(viper.GetString("watch.offline.backing_policy")); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	// Validate all files exist
 	for _, filePath := range args {
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {

@@ -5,9 +5,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"math/bits"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcapgo"
 )
@@ -25,23 +27,32 @@ type checkedNGReader struct {
 	resolution           byte
 	timestampOffset      int64
 	packetTimestamp      time.Time
+	offset               int64
+	ordinal              uint64
+	location             offlinePacketLocation
+	linkType             uint32
 }
 
 // pcapgo v1.1.19 treats explicit second resolution as microseconds and rounds
 // binary resolutions before scaling, changing packet order across sources.
 // Use the framing reader's exact conversion of the original packet ticks.
 type offlineNGPacketReader struct {
-	reader  *pcapgo.NgReader
-	framing *checkedNGReader
+	reader   *pcapgo.NgReader
+	framing  *checkedNGReader
+	location offlinePacketLocation
 }
 
 func (r *offlineNGPacketReader) ReadPacketData() ([]byte, gopacket.CaptureInfo, error) {
 	data, ci, err := r.reader.ReadPacketData()
 	if err == nil {
 		ci.Timestamp = r.framing.packetTimestamp
+		r.location = r.framing.location
+		r.location.CaptureInfo = ci
 	}
 	return data, ci, err
 }
+
+func (r *offlineNGPacketReader) PacketLocation() offlinePacketLocation { return r.location }
 
 func (r *checkedNGReader) timestamp(ticks uint64) time.Time {
 	denominator := uint64(1)
@@ -114,6 +125,9 @@ func (r *checkedNGReader) Read(p []byte) (int, error) {
 		if size < minimum || size%4 != 0 || size > offlineMaxPacketBytes {
 			return 0, fmt.Errorf("invalid or oversized PCAPNG block length %d (limit %d)", size, offlineMaxPacketBytes)
 		}
+		if r.offset > math.MaxInt64-int64(size) {
+			return 0, fmt.Errorf("PCAPNG block location overflow")
+		}
 		block := make([]byte, int(size))
 		copy(block, header[:n])
 		if _, err := io.ReadFull(r.reader, block[n:]); err != nil {
@@ -138,23 +152,46 @@ func (r *checkedNGReader) Read(p []byte) (int, error) {
 				return 0, fmt.Errorf("unsupported PCAPNG link type %d: packet decoder supports only 8-bit link types", linkType)
 			}
 			r.snaplen = r.order.Uint32(block[12:16])
+			r.linkType = uint32(r.order.Uint16(block[8:10]))
 			r.resolution = 6 // Default applies only when if_tsresol is absent.
 			r.timestampOffset = 0
 			options = 16
 		case 2, 6:
+			interfaceID := r.order.Uint32(block[8:12])
+			if typ == 2 {
+				interfaceID = uint32(r.order.Uint16(block[8:10]))
+			}
+			if r.interfaces != 1 || interfaceID != 0 {
+				return 0, fmt.Errorf("PCAPNG packet references unknown interface %d", interfaceID)
+			}
 			caplen := r.order.Uint32(block[20:24])
 			original := r.order.Uint32(block[24:28])
+			if uint64(original) > uint64(math.MaxInt) {
+				return 0, fmt.Errorf("PCAPNG packet length exceeds addressable memory")
+			}
 			if caplen > original || uint64(caplen) > uint64(size)-32 {
 				return 0, fmt.Errorf("invalid PCAPNG captured length %d", caplen)
 			}
 			options = 28 + int((uint64(caplen)+3)&^3)
+			if options > len(block)-4 {
+				return 0, fmt.Errorf("PCAPNG packet padding exceeds block length")
+			}
 		case 3:
+			if r.interfaces != 1 {
+				return 0, fmt.Errorf("PCAPNG simple packet references missing interface")
+			}
 			caplen := r.order.Uint32(block[8:12])
+			if uint64(caplen) > uint64(math.MaxInt) {
+				return 0, fmt.Errorf("PCAPNG packet length exceeds addressable memory")
+			}
 			if r.snaplen != 0 && caplen > r.snaplen {
 				caplen = r.snaplen
 			}
 			if uint64(caplen) > uint64(size)-16 {
 				return 0, fmt.Errorf("invalid PCAPNG simple packet length %d", caplen)
+			}
+			if (uint64(caplen)+3)&^3 != uint64(size)-16 {
+				return 0, fmt.Errorf("invalid PCAPNG simple packet padding or block length")
 			}
 		case 5:
 			options = 20
@@ -166,7 +203,7 @@ func (r *checkedNGReader) Read(p []byte) (int, error) {
 			code := r.order.Uint16(block[options:])
 			length := int(r.order.Uint16(block[options+2:]))
 			options += 4
-			if options+length > len(block)-4 {
+			if options+((length+3)&^3) > len(block)-4 {
 				return 0, fmt.Errorf("PCAPNG option exceeds block length")
 			}
 			if code == 0 {
@@ -202,9 +239,27 @@ func (r *checkedNGReader) Read(p []byte) (int, error) {
 		case 2, 6:
 			ticks := uint64(r.order.Uint32(block[12:16]))<<32 | uint64(r.order.Uint32(block[16:20]))
 			r.packetTimestamp = r.timestamp(ticks)
+			r.location.PayloadOffset = r.offset + 28
 		case 3:
 			r.packetTimestamp = time.Time{}
+			r.location.PayloadOffset = r.offset + 12
 		}
+		if typ == 2 || typ == 3 || typ == 6 {
+			if r.ordinal == math.MaxUint64 {
+				return 0, fmt.Errorf("PCAPNG packet ordinal overflow")
+			}
+			r.location.PhysicalOrdinal = r.ordinal
+			r.location.Context = offline.CaptureContext{Format: offline.CaptureFormatPCAPNG, ByteOrder: offline.CaptureLittleEndian, LinkType: r.linkType, Snaplen: r.snaplen, TimestampResolutionBase: 10, TimestampResolutionExponent: r.resolution, TimestampOffset: r.timestampOffset, TimestampMissing: typ == 3}
+			if r.order == binary.BigEndian {
+				r.location.Context.ByteOrder = offline.CaptureBigEndian
+			}
+			if r.resolution&0x80 != 0 {
+				r.location.Context.TimestampResolutionBase = 2
+				r.location.Context.TimestampResolutionExponent = r.resolution & 0x7f
+			}
+			r.ordinal++
+		}
+		r.offset += int64(size)
 		r.pending = block
 	}
 	// Return at most one block per Read: pcapgo's buffered reads must not

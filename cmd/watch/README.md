@@ -305,6 +305,7 @@ Offline resource flags (also available when switching from live/remote mode):
 | Flag                         | Viper key                        | Default                |
 | ---------------------------- | -------------------------------- | ---------------------- |
 | `--offline-session-dir`      | `watch.offline.session_dir`      | OS temporary directory |
+| `--offline-backing-policy`   | `watch.offline.backing_policy`   | `source`               |
 | `--offline-max-disk-bytes`   | `watch.offline.max_disk_bytes`   | 4 GiB                  |
 | `--offline-cache-bytes`      | `watch.offline.cache_bytes`      | 64 MiB                 |
 | `--offline-max-record-bytes` | `watch.offline.max_record_bytes` | 8 MiB                  |
@@ -312,6 +313,9 @@ Offline resource flags (also available when switching from live/remote mode):
 
 Flags override their corresponding YAML/Viper keys. Byte settings are positive
 integer byte counts; maximum record bytes must fit both cache and disk budgets.
+The backing policy accepts `source` or `snapshot` and is frozen per open. It is
+reserved for the compact backend currently under development; the production
+backend continues to store packet bytes independently of the input files.
 `max_sources` must be between 1 and 64. The session parent directory must exist
 and be writable. For example:
 

@@ -305,8 +305,26 @@ func sortConnEvents(out []events.ConnEvent) {
 		if a.NodeID != b.NodeID {
 			return a.NodeID < b.NodeID
 		}
-		return flowTupleLess(a.Flow, b.Flow)
+		if a.Flow != b.Flow {
+			return flowTupleLess(a.Flow, b.Flow)
+		}
+		return sourceProvenanceLess(a.Provenance, b.Provenance)
 	})
+}
+
+// sourceProvenanceLess compares the source fields used in tracker identity.
+// Processor hops do not distinguish flows and therefore do not affect ordering.
+func sourceProvenanceLess(a, b events.SourceProvenance) bool {
+	if a.CaptureSource != b.CaptureSource {
+		return a.CaptureSource < b.CaptureSource
+	}
+	if a.InterfaceName != b.InterfaceName {
+		return a.InterfaceName < b.InterfaceName
+	}
+	if a.InterfaceIndex != b.InterfaceIndex {
+		return a.InterfaceIndex < b.InterfaceIndex
+	}
+	return a.InputFile < b.InputFile
 }
 
 func flowTupleLess(a, b events.FlowTuple) bool {
@@ -341,7 +359,13 @@ func trackerKeyLess(a, b trackerKey) bool {
 	if a.Flow.Port1 != b.Flow.Port1 {
 		return a.Flow.Port1 < b.Flow.Port1
 	}
-	return a.Flow.Port2 < b.Flow.Port2
+	if a.Flow.Port2 != b.Flow.Port2 {
+		return a.Flow.Port2 < b.Flow.Port2
+	}
+	return sourceProvenanceLess(
+		events.SourceProvenance{CaptureSource: a.CaptureSource, InterfaceName: a.InterfaceName, InterfaceIndex: a.InterfaceIndex, InputFile: a.InputFile},
+		events.SourceProvenance{CaptureSource: b.CaptureSource, InterfaceName: b.InterfaceName, InterfaceIndex: b.InterfaceIndex, InputFile: b.InputFile},
+	)
 }
 
 func (f *flow) event() events.ConnEvent {

@@ -790,7 +790,7 @@ message HunterStatusChangedEvent {
     HunterStatus new_status = 3;
 }
 
-// DetectorTelemetry reports bounded detector flow/cache behavior.
+// DetectorTelemetry reports bounded detector flow, cache, and SIP IP pair behavior.
 message DetectorTelemetry {
     uint64 flow_entries = 1;
     uint64 cache_entries = 2;
@@ -804,6 +804,11 @@ message DetectorTelemetry {
     uint64 cache_last_eviction_duration_ns = 10;
     uint64 flow_last_eviction_batch_size = 11;
     uint64 cache_last_eviction_batch_size = 12;
+    uint64 sip_ip_pair_entries = 13;
+    uint64 sip_ip_pair_max_entries = 14;
+    uint64 sip_ip_pair_ttl_evictions = 15;
+    // Nonzero means the cap has evicted SIP peers, degrading teardown classification.
+    uint64 sip_ip_pair_cap_evictions = 16;
 }
 
 message PcapWriterTelemetry {

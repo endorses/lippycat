@@ -3359,7 +3359,7 @@ func (x *HunterStatusChangedEvent) GetNewStatus() HunterStatus {
 	return HunterStatus_STATUS_HEALTHY
 }
 
-// DetectorTelemetry reports bounded detector flow/cache behavior.
+// DetectorTelemetry reports bounded detector flow, cache, and SIP IP pair behavior.
 type DetectorTelemetry struct {
 	state                       protoimpl.MessageState `protogen:"open.v1"`
 	FlowEntries                 uint64                 `protobuf:"varint,1,opt,name=flow_entries,json=flowEntries,proto3" json:"flow_entries,omitempty"`
@@ -3374,8 +3374,13 @@ type DetectorTelemetry struct {
 	CacheLastEvictionDurationNs uint64                 `protobuf:"varint,10,opt,name=cache_last_eviction_duration_ns,json=cacheLastEvictionDurationNs,proto3" json:"cache_last_eviction_duration_ns,omitempty"`
 	FlowLastEvictionBatchSize   uint64                 `protobuf:"varint,11,opt,name=flow_last_eviction_batch_size,json=flowLastEvictionBatchSize,proto3" json:"flow_last_eviction_batch_size,omitempty"`
 	CacheLastEvictionBatchSize  uint64                 `protobuf:"varint,12,opt,name=cache_last_eviction_batch_size,json=cacheLastEvictionBatchSize,proto3" json:"cache_last_eviction_batch_size,omitempty"`
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	SipIpPairEntries            uint64                 `protobuf:"varint,13,opt,name=sip_ip_pair_entries,json=sipIpPairEntries,proto3" json:"sip_ip_pair_entries,omitempty"`
+	SipIpPairMaxEntries         uint64                 `protobuf:"varint,14,opt,name=sip_ip_pair_max_entries,json=sipIpPairMaxEntries,proto3" json:"sip_ip_pair_max_entries,omitempty"`
+	SipIpPairTtlEvictions       uint64                 `protobuf:"varint,15,opt,name=sip_ip_pair_ttl_evictions,json=sipIpPairTtlEvictions,proto3" json:"sip_ip_pair_ttl_evictions,omitempty"`
+	// Nonzero means the cap has evicted SIP peers, degrading teardown classification.
+	SipIpPairCapEvictions uint64 `protobuf:"varint,16,opt,name=sip_ip_pair_cap_evictions,json=sipIpPairCapEvictions,proto3" json:"sip_ip_pair_cap_evictions,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *DetectorTelemetry) Reset() {
@@ -3488,6 +3493,34 @@ func (x *DetectorTelemetry) GetFlowLastEvictionBatchSize() uint64 {
 func (x *DetectorTelemetry) GetCacheLastEvictionBatchSize() uint64 {
 	if x != nil {
 		return x.CacheLastEvictionBatchSize
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetSipIpPairEntries() uint64 {
+	if x != nil {
+		return x.SipIpPairEntries
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetSipIpPairMaxEntries() uint64 {
+	if x != nil {
+		return x.SipIpPairMaxEntries
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetSipIpPairTtlEvictions() uint64 {
+	if x != nil {
+		return x.SipIpPairTtlEvictions
+	}
+	return 0
+}
+
+func (x *DetectorTelemetry) GetSipIpPairCapEvictions() uint64 {
+	if x != nil {
+		return x.SipIpPairCapEvictions
 	}
 	return 0
 }
@@ -3847,7 +3880,7 @@ const file_management_proto_rawDesc = "" +
 	"\n" +
 	"old_status\x18\x02 \x01(\x0e2!.lippycat.management.HunterStatusR\toldStatus\x12@\n" +
 	"\n" +
-	"new_status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\tnewStatus\"\x93\x05\n" +
+	"new_status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\tnewStatus\"\xec\x06\n" +
 	"\x11DetectorTelemetry\x12!\n" +
 	"\fflow_entries\x18\x01 \x01(\x04R\vflowEntries\x12#\n" +
 	"\rcache_entries\x18\x02 \x01(\x04R\fcacheEntries\x12%\n" +
@@ -3861,7 +3894,11 @@ const file_management_proto_rawDesc = "" +
 	"\x1fcache_last_eviction_duration_ns\x18\n" +
 	" \x01(\x04R\x1bcacheLastEvictionDurationNs\x12@\n" +
 	"\x1dflow_last_eviction_batch_size\x18\v \x01(\x04R\x19flowLastEvictionBatchSize\x12B\n" +
-	"\x1ecache_last_eviction_batch_size\x18\f \x01(\x04R\x1acacheLastEvictionBatchSize\"\x84\x04\n" +
+	"\x1ecache_last_eviction_batch_size\x18\f \x01(\x04R\x1acacheLastEvictionBatchSize\x12-\n" +
+	"\x13sip_ip_pair_entries\x18\r \x01(\x04R\x10sipIpPairEntries\x124\n" +
+	"\x17sip_ip_pair_max_entries\x18\x0e \x01(\x04R\x13sipIpPairMaxEntries\x128\n" +
+	"\x19sip_ip_pair_ttl_evictions\x18\x0f \x01(\x04R\x15sipIpPairTtlEvictions\x128\n" +
+	"\x19sip_ip_pair_cap_evictions\x18\x10 \x01(\x04R\x15sipIpPairCapEvictions\"\x84\x04\n" +
 	"\x13PcapWriterTelemetry\x12%\n" +
 	"\x0eactive_writers\x18\x01 \x01(\x04R\ractiveWriters\x12\x1e\n" +
 	"\n" +

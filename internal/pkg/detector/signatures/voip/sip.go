@@ -257,16 +257,37 @@ func (s *SIPSignature) sweepSIPIPPairs(now time.Time, limit int) int {
 	return removed
 }
 
-// SIPIPPairStats returns a consistent snapshot of retained pairs and cumulative
-// evictions. Capacity evictions can remove live teardown associations.
-func (s *SIPSignature) SIPIPPairStats() map[string]interface{} {
+// SIPIPPairTelemetry is a bounded snapshot of the SIP signature's retained pairs.
+// Entries and MaxEntries are gauges; eviction counters are cumulative for the
+// signature lifetime and are not reset by reads.
+type SIPIPPairTelemetry struct {
+	Entries      uint64
+	MaxEntries   uint64
+	TTLEvictions uint64
+	CapEvictions uint64
+}
+
+// SIPIPPairTelemetry returns a consistent snapshot without scanning entries.
+func (s *SIPSignature) SIPIPPairTelemetry() SIPIPPairTelemetry {
 	s.sipIPPairMu.Lock()
 	defer s.sipIPPairMu.Unlock()
+	return SIPIPPairTelemetry{
+		Entries:      uint64(len(s.knownSIPIPPairs)),
+		MaxEntries:   uint64(s.maxSIPIPPairs),
+		TTLEvictions: s.sipIPPairTTLEvictions,
+		CapEvictions: s.sipIPPairCapEvictions,
+	}
+}
+
+// SIPIPPairStats preserves the diagnostic map API. Runtime telemetry uses the
+// typed snapshot above so counters reach capture heartbeats and node status.
+func (s *SIPSignature) SIPIPPairStats() map[string]interface{} {
+	stats := s.SIPIPPairTelemetry()
 	return map[string]interface{}{
-		"entries":       len(s.knownSIPIPPairs),
-		"max_entries":   s.maxSIPIPPairs,
-		"ttl_evictions": s.sipIPPairTTLEvictions,
-		"cap_evictions": s.sipIPPairCapEvictions,
+		"entries":       int(stats.Entries),
+		"max_entries":   int(stats.MaxEntries),
+		"ttl_evictions": stats.TTLEvictions,
+		"cap_evictions": stats.CapEvictions,
 	}
 }
 

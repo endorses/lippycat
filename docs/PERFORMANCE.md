@@ -897,5 +897,18 @@ Pairs expire 30 minutes after their last SIP observation. The detector removes
 up to 1,024 expired pairs each second, including during idle traffic, and waits
 for cleanup to stop at shutdown. A backlog may delay physical removal, but
 lookups always enforce the TTL. Cleanup stops at the first live pair and never
-scans the whole map. `Detector.GetStats()` exposes `sip_ip_pairs` with `entries`,
-`max_entries`, `ttl_evictions`, and `cap_evictions` (cumulative since creation).
+scans the whole map.
+
+Capture heartbeat logs expose `sip_ip_pair_entries`, `sip_ip_pair_max_entries`,
+`sip_ip_pair_ttl_evictions`, and `sip_ip_pair_cap_evictions`. The same fields
+appear in gRPC `HunterStats.detector`, including tap's virtual hunter, and in
+`stats.detector` in `lc show hunter` and `lc list hunters` JSON output.
+
+A nonzero `sip_ip_pair_cap_evictions` means the configured cap has evicted live
+associations and teardown classification has lost that history. Monitor its
+increase between snapshots to detect ongoing capacity pressure; consider raising
+`detector.max_sip_ip_pairs` with sufficient memory headroom. TTL evictions are
+normal retention cleanup. Entry and maximum counts are gauges; eviction counts
+are cumulative for the SIP signature lifetime and reset on process restart.
+Capture heartbeats repeat process-wide counts per interface, so do not sum them
+across interfaces or successive heartbeats.

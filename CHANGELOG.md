@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.6] - 2026-09-07
+
+### Added
+- Expose TCP SIP stream recovery metrics and SIP IP-pair capacity pressure in
+  hunter, processor, tap, and status reporting
+
+### Changed
+- Bound SIP IP-pair retention and periodically reclaim expired entries to keep
+  detector memory use under control
+- Collect detector telemetry without instantiating detection on status-only
+  capture paths
+
+### Fixed
+- Preserve established TCP SIP streams while recovering from reassembly errors
+- Keep TLS keylog FIFO readers connected across writer lifecycle changes
+
 ## [Unreleased]
 
 ## [0.11.5] - 2026-09-04

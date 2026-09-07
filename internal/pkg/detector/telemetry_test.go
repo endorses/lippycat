@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
+	"github.com/endorses/lippycat/internal/pkg/detector/signatures/voip"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
 
@@ -91,4 +93,27 @@ func TestClearDoesNotResetDetectorTelemetryCounters(t *testing.T) {
 	require.Equal(t, uint64(1), got.CacheEvictions)
 	require.Equal(t, uint64(1), got.FlowPressureEpisodes)
 	require.Equal(t, uint64(1), got.CachePressureEpisodes)
+}
+
+func TestDetectorTelemetryReportsSIPIPPairCapacityPressure(t *testing.T) {
+	old := viper.Get("detector.max_sip_ip_pairs")
+	t.Cleanup(func() { viper.Set("detector.max_sip_ip_pairs", old) })
+	viper.Set("detector.max_sip_ip_pairs", 1)
+	d := New()
+	t.Cleanup(d.Shutdown)
+	require.Zero(t, d.Telemetry().SIPIPPairEntries)
+	sig := voip.NewSIPSignature()
+	d.RegisterSignature(sig)
+	payload := []byte("OPTIONS sip:proxy SIP/2.0\r\nFrom: <sip:a@example.com>\r\nTo: <sip:b@example.com>\r\nCall-ID: test\r\nCSeq: 1 OPTIONS\r\nContent-Length: 0\r\n\r\n")
+	for _, ip := range []string{"10.0.0.1", "10.0.0.2"} {
+		require.NotNil(t, sig.Detect(&signatures.DetectionContext{
+			SrcIP: ip, DstIP: "10.0.0.3", Transport: "UDP", Payload: payload,
+		}))
+	}
+	stats := d.Telemetry()
+	require.Equal(t, uint64(1), stats.SIPIPPairEntries)
+	require.Equal(t, uint64(1), stats.SIPIPPairMaxEntries)
+	require.Equal(t, uint64(1), stats.SIPIPPairCapEvictions)
+	require.Zero(t, stats.SIPIPPairTTLEvictions)
+	require.Equal(t, stats, d.Telemetry(), "runtime reads must not reset counters")
 }

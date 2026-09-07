@@ -1,10 +1,17 @@
 package detector
 
+import "github.com/endorses/lippycat/internal/pkg/detector/signatures/voip"
+
 // Telemetry is a point-in-time detector telemetry snapshot. Entry counts are
-// gauges. All counters are cumulative for the lifetime of the Detector and
-// reset only when a new Detector is constructed. Last-eviction fields describe
+// gauges. Flow/cache counters are cumulative for the Detector lifetime; SIP
+// pair counters are cumulative for the registered signature lifetime.
+// Last-eviction fields describe
 // the most recent pressure episode and must not be summed across snapshots.
 type Telemetry struct {
+	SIPIPPairEntries            uint64
+	SIPIPPairMaxEntries         uint64
+	SIPIPPairTTLEvictions       uint64
+	SIPIPPairCapEvictions       uint64
 	FlowEntries                 uint64
 	CacheEntries                uint64
 	FlowEvictions               uint64
@@ -19,10 +26,10 @@ type Telemetry struct {
 	CacheLastEvictionBatchSize  uint64
 }
 
-// Telemetry returns a non-destructive snapshot. Counter loads are lock-free;
-// entry gauges briefly take each component's read lock independently.
+// Telemetry returns a non-destructive snapshot. Components are sampled under
+// their own locks; SIP pair counters belong to the registered SIP signature.
 func (d *Detector) Telemetry() Telemetry {
-	return Telemetry{
+	stats := Telemetry{
 		FlowEntries:                 uint64(d.flows.Size()),
 		CacheEntries:                uint64(d.cache.Size()),
 		FlowEvictions:               d.flows.totalEvictions.Load(),
@@ -36,4 +43,17 @@ func (d *Detector) Telemetry() Telemetry {
 		FlowLastEvictionBatchSize:   d.flows.lastEvictionBatchSize.Load(),
 		CacheLastEvictionBatchSize:  d.cache.lastEvictionBatchSize.Load(),
 	}
+	for _, sig := range d.GetSignatures() {
+		if provider, ok := sig.(interface {
+			SIPIPPairTelemetry() voip.SIPIPPairTelemetry
+		}); ok {
+			pairs := provider.SIPIPPairTelemetry()
+			stats.SIPIPPairEntries = pairs.Entries
+			stats.SIPIPPairMaxEntries = pairs.MaxEntries
+			stats.SIPIPPairTTLEvictions = pairs.TTLEvictions
+			stats.SIPIPPairCapEvictions = pairs.CapEvictions
+			break
+		}
+	}
+	return stats
 }

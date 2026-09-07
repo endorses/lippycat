@@ -15,3 +15,19 @@ eviction remove the oldest observation without scanning live entries.
 
 Validation passed: `GOCACHE=/tmp/lippycat-go-cache go test -race ./internal/pkg/detector/...`.
 Code, tests, documentation, and this completed plan are committed together.
+
+## Runtime telemetry follow-up
+
+The diagnostic `GetStats` map has no runtime consumers. Complete operator
+visibility through the existing typed detector telemetry pipeline.
+
+- [x] Include SIP pair gauges and counters in typed detector snapshots.
+- [x] Emit all four values on capture heartbeats, including capacity evictions.
+- [x] Carry values through hunter and tap gRPC status and CLI JSON.
+- [x] Test nonzero capacity eviction propagation, document interpretation,
+      format and validate the affected packages.
+
+Follow-up validation passed: detector and capture race suites, the real SIP
+capacity-pressure regression, and all-tag race suites for hunter stats,
+processor, and statusclient. Processor tests required local sockets outside the
+sandbox. Protobuf round-trip and CLI JSON tests retain nonzero eviction counts.

@@ -148,6 +148,10 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 			CacheLastEvictionDurationNs: detectorStats.CacheLastEvictionDurationNs,
 			FlowLastEvictionBatchSize:   detectorStats.FlowLastEvictionBatchSize,
 			CacheLastEvictionBatchSize:  detectorStats.CacheLastEvictionBatchSize,
+			SipIpPairEntries:            detectorStats.SIPIPPairEntries,
+			SipIpPairMaxEntries:         detectorStats.SIPIPPairMaxEntries,
+			SipIpPairTtlEvictions:       detectorStats.SIPIPPairTTLEvictions,
+			SipIpPairCapEvictions:       detectorStats.SIPIPPairCapEvictions,
 		},
 	}
 }

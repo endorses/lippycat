@@ -776,6 +776,10 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 				CacheLastEvictionDurationNs: detectorStats.CacheLastEvictionDurationNs,
 				FlowLastEvictionBatchSize:   detectorStats.FlowLastEvictionBatchSize,
 				CacheLastEvictionBatchSize:  detectorStats.CacheLastEvictionBatchSize,
+				SipIpPairEntries:            detectorStats.SIPIPPairEntries,
+				SipIpPairMaxEntries:         detectorStats.SIPIPPairMaxEntries,
+				SipIpPairTtlEvictions:       detectorStats.SIPIPPairTTLEvictions,
+				SipIpPairCapEvictions:       detectorStats.SIPIPPairCapEvictions,
 			},
 			PcapWriter: &management.PcapWriterTelemetry{
 				ActiveWriters:              pcapStats.ActiveWriters,

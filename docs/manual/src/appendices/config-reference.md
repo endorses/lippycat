@@ -66,6 +66,7 @@ before admitting the key. A value of zero or less disables cap-based eviction.
 |-----|------|---------|-------------|
 | `detector.max_flows` | integer | `100000` | Maximum active flow contexts. Lower values reduce memory and eviction-pause size but retain less stateful protocol history under high cardinality. |
 | `detector.max_cache_entries` | integer | `100000` | Maximum cached detection results. Lower values reduce memory but cause more reclassification when the working set exceeds the cap. |
+| `detector.max_sip_ip_pairs` | integer | `100000` | Maximum SIP IP-pair associations; nonpositive values use the default. Evicts the oldest SIP observation when full. |
 
 See [Performance Optimization](../part5-advanced/performance.md#detector-capacity-and-retention)
 for production tuning and telemetry interpretation.

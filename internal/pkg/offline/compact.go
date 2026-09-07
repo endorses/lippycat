@@ -972,7 +972,7 @@ func (d *diskDataset) compactIndexChecksum(refs []byte, id PacketID) ([32]byte, 
 // mask followed by metadata. Retain those known boundaries instead of decoding
 // and reencoding the admitted graph merely to rediscover the same two fields.
 func (b *Builder) writeCompactMetadata(id PacketID, overrides compactOverrides) (uint64, uint64, error) {
-	encoded, err := encodeCompactValue(overrides, b.d.storage.limits.MaxRecordBytes)
+	encoded, err := encodeCompactOverrides(overrides, b.d.storage.limits.MaxRecordBytes)
 	if err != nil {
 		return 0, 0, err
 	}

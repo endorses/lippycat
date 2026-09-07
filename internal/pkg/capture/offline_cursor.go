@@ -293,9 +293,9 @@ func (c *offlineCursor) next(ctx context.Context, decoder *offlinePacketDecoder)
 		if decoder == nil {
 			newPacket = gopacket.NewPacket(data, c.linkType, gopacket.DecodeOptions{NoCopy: true, DecodeStreamsAsDatagrams: true})
 		} else {
-			// Fragmented, tunneled and application-decoded packets fall back
-			// to independent layers before any stateful normalization below.
-			newPacket = decoder.decode(data, c.linkType)
+			// Locator preparation may omit terminal SIP application parsing.
+			// Fragments and tunnels retain independent complete decode below.
+			newPacket = decoder.decodeScan(data, c.linkType)
 			if borrowed && newPacket != decoder {
 				// Normalization may retain fragments or tunnel input. Preserve
 				// independent bytes for every fallback decoder.

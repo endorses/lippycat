@@ -52,6 +52,14 @@ func provenanceCapture(t *testing.T, link layers.LinkType, frames [][]byte, ng, 
 }
 
 func TestOfflineBackingNormalizedReread(t *testing.T) {
+	testOfflineBackingNormalizedReread(t, false)
+}
+
+func TestOfflineBackingScanNormalizedReread(t *testing.T) {
+	testOfflineBackingNormalizedReread(t, true)
+}
+
+func testOfflineBackingNormalizedReread(t *testing.T, scan bool) {
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
 	ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2)}
 	udp := &layers.UDP{SrcPort: 1234, DstPort: 4789}
@@ -109,7 +117,14 @@ func TestOfflineBackingNormalizedReread(t *testing.T) {
 					require.NoError(t, err)
 					want, err := legacy.Next(base)
 					require.NoError(t, err)
-					got, err := c.Next(ctx)
+					var got PacketInfo
+					if scan {
+						var decoder offlinePacketDecoder
+						c.scanBuffer = make([]byte, 64<<10)
+						got, err = c.next(ctx, &decoder)
+					} else {
+						got, err = c.Next(ctx)
+					}
 					require.NoError(t, err)
 					require.Equal(t, want.Packet.Data(), got.Packet.Data())
 					require.Equal(t, want.Packet.Metadata().CaptureInfo, got.Packet.Metadata().CaptureInfo)

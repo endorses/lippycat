@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -376,6 +377,9 @@ func (s *OfflineLocatorStream) externalSort(ctx context.Context) (err error) {
 		return err
 	}
 	s.files.files = append(s.files.files, output)
+	if err := bufferLocatorSortOutput(ctx, output); err != nil {
+		return err
+	}
 	if _, err := output.Write(locatorHeader[:]); err != nil {
 		return err
 	}
@@ -400,9 +404,15 @@ func (s *OfflineLocatorStream) externalSort(ctx context.Context) (err error) {
 			}
 		}
 	}
+	if err := output.FlushWrites(); err != nil {
+		return err
+	}
 	input, output = output, input
 	for width := uint64(locatorRunKeys); width < s.count; width *= 2 {
 		if err := output.Reset(); err != nil {
+			return err
+		}
+		if err := bufferLocatorSortOutput(ctx, output); err != nil {
 			return err
 		}
 		if _, err := output.Write(locatorHeader[:]); err != nil {
@@ -414,11 +424,28 @@ func (s *OfflineLocatorStream) externalSort(ctx context.Context) (err error) {
 				return err
 			}
 		}
+		if err := output.FlushWrites(); err != nil {
+			return err
+		}
 		input, output = output, input
 	}
 	s.index = input
 	return output.Close()
 }
+
+// The writer admits each disk byte before buffering it. Buffer memory is
+// optional and separately charged; a tight budget keeps the original path.
+// Call only for a newly created or reset, empty output scratch file.
+func bufferLocatorSortOutput(ctx context.Context, output *offline.ScratchFile) error {
+	if err := output.BufferWrites(ctx, locatorReadBuffer); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		logger.Debug("Optional locator sort write buffer unavailable", "error", err)
+	}
+	return nil
+}
+
 func mergeLocatorRuns(ctx context.Context, input *offline.ScratchFile, output io.Writer, start, mid, end uint64) error {
 	readers := []*bufio.Reader{bufio.NewReaderSize(io.NewSectionReader(input, locatorHeaderBytes+int64(start*locatorKeyBytes), int64((mid-start)*locatorKeyBytes)), locatorReadBuffer), bufio.NewReaderSize(io.NewSectionReader(input, locatorHeaderBytes+int64(mid*locatorKeyBytes), int64((end-mid)*locatorKeyBytes)), locatorReadBuffer)}
 	positions, ends := [2]uint64{start, mid}, [2]uint64{mid, end}

@@ -735,7 +735,10 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 	if p.filterTarget != nil {
 		activeFilters = uint32(len(p.filterTarget.GetActiveFilters())) // #nosec G115
 	}
-	detectorStats := detector.GetDefault().Telemetry()
+	var detectorStats detector.Telemetry
+	if d := detector.GetDefaultIfInitialized(); d != nil {
+		detectorStats = d.Telemetry()
+	}
 	pcapStats := p.sessionOutputManager.Telemetry()
 
 	return &management.ConnectedHunter{

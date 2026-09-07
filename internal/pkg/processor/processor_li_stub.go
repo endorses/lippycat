@@ -34,3 +34,5 @@ func (p *Processor) processLIPacketWithAdmission(_ *types.PacketDisplay, _, _ []
 func (p *Processor) isLIEnabled() bool { return false }
 
 func (p *Processor) populateLIEncodingStats(_ *management.ProcessorStats) {}
+
+func (p *Processor) populateLIDeliveryStats(_ *management.ProcessorStats) {}

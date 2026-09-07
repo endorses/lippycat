@@ -172,6 +172,12 @@ func TestSocketBackedKeepalivePeerBehaviors(t *testing.T) {
 				stats, err := m.Stats(did)
 				return err == nil && stats.X2Keepalive.Acknowledged >= tc.wantACK && stats.X2Keepalive.Timeouts >= tc.wantTO && stats.X2Keepalive.Unexpected >= tc.wantUnexp && stats.X2Keepalive.Malformed >= tc.wantBad
 			}, 2*time.Second, 20*time.Millisecond)
+			if tc.wantTO > 0 {
+				snapshot := m.AllStats()[did]
+				assert.Positive(t, snapshot.X2Keepalive.Timeouts)
+				assert.Contains(t, snapshot.X2Keepalive.ReconnectReason, "acknowledgement timeout")
+				assert.True(t, snapshot.X2Keepalive.LastValidACK.IsZero())
+			}
 			// Close the peer first so the manager's TLS close_notify cannot block
 			// forever on net.Pipe after the peer responder has exited.
 			<-peerDone
@@ -518,6 +524,10 @@ func TestDestinationConnectionFailure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Greater(t, stats.ConnectAttempts, uint64(0))
 	assert.Greater(t, stats.ConnectFailures, uint64(0))
+	assert.NotEmpty(t, stats.LastError)
+	assert.Zero(t, stats.X2Connections)
+	assert.Zero(t, stats.X3Connections)
+	assert.NotEmpty(t, manager.AllStats()[did].LastError)
 }
 
 func TestExponentialBackoff(t *testing.T) {

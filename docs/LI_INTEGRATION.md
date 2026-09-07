@@ -533,6 +533,53 @@ All LI operations are logged with structured fields:
 - Delivery success/failures
 - X1 requests and responses
 
+### Delivery Telemetry
+
+Query a processor or standalone tap through its management endpoint:
+
+```bash
+lc show status -P processor.example.com:55555 --tls-ca ca.crt
+```
+
+When LI delivery is configured, the JSON response includes `li_delivery` alongside
+the separate `li_encoding` counters. The delivery object reports aggregate
+`x2_enqueue_calls`, `x3_enqueue_calls`, `x2_written`, `x3_written`, `x2_dropped`,
+`x3_dropped`, `retries`, and `queue_depth`. Enqueue counters count successful
+asynchronous calls into the delivery client, including calls with no eligible
+destinations. Written and dropped counters count destination copies: one
+enqueue can fan out to several destinations, so these counters do not directly
+reconcile with each other or with encoded counts.
+
+`li_delivery.destinations` is keyed by destination UUID. Each entry includes:
+
+| Fields                                                                                                                                  | Interpretation                                                                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `x2_queue_depth`, `x3_queue_depth`, `x2_queue_capacity`, `x3_queue_capacity`                                                            | Current backlog and capacity for each interface; capacity is not shared between X2 and X3.                                        |
+| `oldest_queued_age_ms`, `x2_oldest_age_ms`, `x3_oldest_age_ms`                                                                          | Current age of the oldest queued product, in milliseconds; use rising age to detect delay before overflow.                        |
+| `x2_written`, `x3_written`, `x2_dropped`, `x3_dropped`, `retries`, `dropped_by_reason`                                                  | Cumulative delivery outcomes and retry attempts, including `queue_overflow` losses.                                               |
+| `last_write_unix_ms`, `last_queue_error`                                                                                                | Last successful queued-product write timestamp and queue error; a zero timestamp means no such write has been observed.           |
+| `connection_state`, `last_connection_error`, `connect_attempts`, `connect_failures`, `write_errors`, `x2_connections`, `x3_connections` | Connection state, failures, and current connections for the destination.                                                          |
+| `x2_keepalive`, `x3_keepalive`                                                                                                          | Per-interface probe configuration, latest probe and ACK timestamps, ACK age, probe/ACK/timeout counts, and reconnect information. |
+
+Written counts mean successful **local TLS writes**, not receiver acceptance of
+individual products. Keepalive ACKs establish control responsiveness, not product
+acknowledgement. An empty queue alone therefore does not prove end-to-end receipt.
+Queue ages and depths describe current backlog; drops are cumulative loss, so
+compare successive samples to identify new losses. The last connection error is
+cleared on successful connect; the last queue error is cleared on successful
+queued-product write.
+
+These counters are volatile and reset when the delivery client restarts.
+Per-destination details disappear when a destination is removed; collect them
+externally if historical diagnostics are required. Zero-valued fields may be
+omitted from JSON. An absent `li_delivery` means delivery telemetry is unavailable,
+not that delivery has succeeded.
+
+Snapshots are observations taken during concurrent delivery, so aggregate and
+destination values can differ briefly. Keepalive timestamps describe connection
+observations and may reset on reconnection; a missing ACK timestamp means no ACK
+has been observed for that reported connection state.
+
 ## Troubleshooting
 
 ### X1 Server Not Starting

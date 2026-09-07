@@ -899,7 +899,7 @@ for cleanup to stop at shutdown. A backlog may delay physical removal, but
 lookups always enforce the TTL. Cleanup stops at the first live pair and never
 scans the whole map.
 
-Capture heartbeat logs expose `sip_ip_pair_entries`, `sip_ip_pair_max_entries`,
+When a detector has been initialized, capture heartbeat logs expose `sip_ip_pair_entries`, `sip_ip_pair_max_entries`,
 `sip_ip_pair_ttl_evictions`, and `sip_ip_pair_cap_evictions`. The same fields
 appear in gRPC `HunterStats.detector`, including tap's virtual hunter, and in
 `stats.detector` in `lc show hunter` and `lc list hunters` JSON output.
@@ -910,5 +910,6 @@ increase between snapshots to detect ongoing capacity pressure; consider raising
 `detector.max_sip_ip_pairs` with sufficient memory headroom. TTL evictions are
 normal retention cleanup. Entry and maximum counts are gauges; eviction counts
 are cumulative for the SIP signature lifetime and reset on process restart.
-Capture heartbeats repeat process-wide counts per interface, so do not sum them
+Heartbeat telemetry never initializes detection; these fields are omitted when
+no detector exists. Capture heartbeats repeat process-wide counts per interface, so do not sum them
 across interfaces or successive heartbeats.

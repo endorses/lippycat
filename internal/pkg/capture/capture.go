@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
-	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
@@ -869,7 +868,7 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 							"buffer_len", buffer.Len(),
 							"buffer_closed", buffer.IsClosed(),
 						}
-						fields = append(fields, sipIPPairHeartbeatFields(detector.GetDefault().Telemetry())...)
+						fields = append(fields, defaultSIPIPPairHeartbeatFields()...)
 						fields = append(fields, buffer.heartbeatFields()...)
 						logger.Info("Capture heartbeat", fields...)
 					}

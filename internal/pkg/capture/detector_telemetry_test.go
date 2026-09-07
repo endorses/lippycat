@@ -1,6 +1,8 @@
 package capture
 
 import (
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/detector"
@@ -19,25 +21,24 @@ func TestSIPIPPairHeartbeatFields(t *testing.T) {
 	}))
 }
 
-func TestHeartbeatDoesNotInitializeDetector(t *testing.T) {
-	previous := detector.DefaultDetector
-	detector.DefaultDetector = nil
-	t.Cleanup(func() { detector.DefaultDetector = previous })
+func TestHeartbeatDetectorLifecycle(t *testing.T) {
+	// Isolate the real singleton lifecycle from other tests in this package.
+	if os.Getenv("LIPPYCAT_DETECTOR_TELEMETRY_TEST") != t.Name() {
+		cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$", "-test.timeout=30s")
+		cmd.Env = append(os.Environ(), "LIPPYCAT_DETECTOR_TELEMETRY_TEST="+t.Name())
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		return
+	}
+	require.Nil(t, detector.GetDefaultIfInitialized())
 
 	for range 3 {
 		require.Empty(t, defaultSIPIPPairHeartbeatFields())
 		require.Nil(t, detector.GetDefaultIfInitialized(), "heartbeat must not enable detection")
 	}
-}
 
-func TestHeartbeatUsesExistingDetector(t *testing.T) {
-	previous := detector.DefaultDetector
-	d := detector.New()
-	detector.DefaultDetector = d
-	t.Cleanup(func() {
-		detector.DefaultDetector = previous
-		d.Shutdown()
-	})
+	d := detector.InitDefault()
+	t.Cleanup(d.Shutdown)
 	require.Equal(t, sipIPPairHeartbeatFields(d.Telemetry()), defaultSIPIPPairHeartbeatFields())
 	require.Same(t, d, detector.GetDefaultIfInitialized())
 }

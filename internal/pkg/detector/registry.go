@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	// DefaultDetector is the global detector instance
-	DefaultDetector *Detector
+	// defaultDetector is the global detector instance
+	defaultDetector *Detector
 	once            sync.Once
 	defaultMu       sync.RWMutex
 )
@@ -22,45 +22,45 @@ func InitDefault() *Detector {
 	once.Do(func() {
 		defaultMu.Lock()
 		defer defaultMu.Unlock()
-		DefaultDetector = New()
+		defaultDetector = New()
 
 		// Register VoIP signatures
-		DefaultDetector.RegisterSignature(voip.NewSIPSignature()) // Priority 150
-		DefaultDetector.RegisterSignature(voip.NewRTPSignature()) // Priority 140
+		defaultDetector.RegisterSignature(voip.NewSIPSignature()) // Priority 150
+		defaultDetector.RegisterSignature(voip.NewRTPSignature()) // Priority 140
 
 		// Register VPN/Tunneling signatures
-		DefaultDetector.RegisterSignature(vpn.NewOpenVPNSignature())   // Priority 100
-		DefaultDetector.RegisterSignature(vpn.NewWireGuardSignature()) // Priority 100
-		DefaultDetector.RegisterSignature(vpn.NewL2TPSignature())      // Priority 100
-		DefaultDetector.RegisterSignature(vpn.NewPPTPSignature())      // Priority 100
-		DefaultDetector.RegisterSignature(vpn.NewIKEv2Signature())     // Priority 100
+		defaultDetector.RegisterSignature(vpn.NewOpenVPNSignature())   // Priority 100
+		defaultDetector.RegisterSignature(vpn.NewWireGuardSignature()) // Priority 100
+		defaultDetector.RegisterSignature(vpn.NewL2TPSignature())      // Priority 100
+		defaultDetector.RegisterSignature(vpn.NewPPTPSignature())      // Priority 100
+		defaultDetector.RegisterSignature(vpn.NewIKEv2Signature())     // Priority 100
 
 		// Register application signatures (in priority order)
-		DefaultDetector.RegisterSignature(application.NewGRPCSignature())       // Priority 130
-		DefaultDetector.RegisterSignature(application.NewDNSSignature())        // Priority 120
-		DefaultDetector.RegisterSignature(application.NewQUICSignature())       // Priority 115
-		DefaultDetector.RegisterSignature(application.NewDHCPSignature())       // Priority 110
-		DefaultDetector.RegisterSignature(application.NewNTPSignature())        // Priority 105
-		DefaultDetector.RegisterSignature(application.NewSSHSignature())        // Priority 100
-		DefaultDetector.RegisterSignature(application.NewSNMPSignature())       // Priority 100
-		DefaultDetector.RegisterSignature(application.NewPOP3Signature())       // Priority 95
-		DefaultDetector.RegisterSignature(application.NewIMAPSignature())       // Priority 95
-		DefaultDetector.RegisterSignature(application.NewFTPSignature())        // Priority 95
-		DefaultDetector.RegisterSignature(application.NewSMTPSignature())       // Priority 95
-		DefaultDetector.RegisterSignature(application.NewWebSocketSignature())  // Priority 90
-		DefaultDetector.RegisterSignature(application.NewMySQLSignature())      // Priority 90
-		DefaultDetector.RegisterSignature(application.NewPostgreSQLSignature()) // Priority 90
-		DefaultDetector.RegisterSignature(application.NewMongoDBSignature())    // Priority 90
-		DefaultDetector.RegisterSignature(application.NewRedisSignature())      // Priority 90
-		DefaultDetector.RegisterSignature(application.NewTLSSignature())        // Priority 110
-		DefaultDetector.RegisterSignature(application.NewTelnetSignature())     // Priority 85
-		DefaultDetector.RegisterSignature(application.NewHTTPSignature())       // Priority 80
+		defaultDetector.RegisterSignature(application.NewGRPCSignature())       // Priority 130
+		defaultDetector.RegisterSignature(application.NewDNSSignature())        // Priority 120
+		defaultDetector.RegisterSignature(application.NewQUICSignature())       // Priority 115
+		defaultDetector.RegisterSignature(application.NewDHCPSignature())       // Priority 110
+		defaultDetector.RegisterSignature(application.NewNTPSignature())        // Priority 105
+		defaultDetector.RegisterSignature(application.NewSSHSignature())        // Priority 100
+		defaultDetector.RegisterSignature(application.NewSNMPSignature())       // Priority 100
+		defaultDetector.RegisterSignature(application.NewPOP3Signature())       // Priority 95
+		defaultDetector.RegisterSignature(application.NewIMAPSignature())       // Priority 95
+		defaultDetector.RegisterSignature(application.NewFTPSignature())        // Priority 95
+		defaultDetector.RegisterSignature(application.NewSMTPSignature())       // Priority 95
+		defaultDetector.RegisterSignature(application.NewWebSocketSignature())  // Priority 90
+		defaultDetector.RegisterSignature(application.NewMySQLSignature())      // Priority 90
+		defaultDetector.RegisterSignature(application.NewPostgreSQLSignature()) // Priority 90
+		defaultDetector.RegisterSignature(application.NewMongoDBSignature())    // Priority 90
+		defaultDetector.RegisterSignature(application.NewRedisSignature())      // Priority 90
+		defaultDetector.RegisterSignature(application.NewTLSSignature())        // Priority 110
+		defaultDetector.RegisterSignature(application.NewTelnetSignature())     // Priority 85
+		defaultDetector.RegisterSignature(application.NewHTTPSignature())       // Priority 80
 
 		// Register network-layer signatures
-		DefaultDetector.RegisterSignature(network.NewICMPSignature()) // Priority 90
+		defaultDetector.RegisterSignature(network.NewICMPSignature()) // Priority 90
 
 		// Register link-layer signatures
-		DefaultDetector.RegisterSignature(link.NewARPSignature()) // Priority 95
+		defaultDetector.RegisterSignature(link.NewARPSignature()) // Priority 95
 	})
 
 	return GetDefaultIfInitialized()
@@ -81,5 +81,5 @@ func GetDefault() *Detector {
 func GetDefaultIfInitialized() *Detector {
 	defaultMu.RLock()
 	defer defaultMu.RUnlock()
-	return DefaultDetector
+	return defaultDetector
 }

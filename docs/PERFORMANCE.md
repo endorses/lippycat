@@ -607,6 +607,7 @@ detection results. The defaults are 100,000 entries for each structure:
 detector:
   max_flows: 100000
   max_cache_entries: 100000
+  max_sip_ip_pairs: 100000
 ```
 
 Reaching either cap is **capacity pressure**, not a packet-drop counter. On a
@@ -883,3 +884,18 @@ lc sniff voip \
 - [docs/tcp-troubleshooting.md](tcp-troubleshooting.md) - TCP troubleshooting
 - [docs/GPU_ACCELERATION.md](GPU_ACCELERATION.md) - GPU acceleration guide
 - [docs/DISTRIBUTED_MODE.md](DISTRIBUTED_MODE.md) - Distributed mode guide
+
+### SIP endpoint association retention
+
+`detector.max_sip_ip_pairs` limits pairs retained for SIP TCP teardown detection
+(default 100,000; nonpositive values use the default). The limit is read when
+creating the SIP signature. At capacity, a new pair evicts the pair with the
+oldest SIP observation; teardown lookups do not refresh retention. Capacity
+pressure can therefore reduce teardown correlation for older pairs.
+
+Pairs expire 30 minutes after their last SIP observation. The detector removes
+up to 1,024 expired pairs each second, including during idle traffic, and waits
+for cleanup to stop at shutdown. A backlog may delay physical removal, but
+lookups always enforce the TTL. Cleanup stops at the first live pair and never
+scans the whole map. `Detector.GetStats()` exposes `sip_ip_pairs` with `entries`,
+`max_entries`, `ttl_evictions`, and `cap_evictions` (cumulative since creation).

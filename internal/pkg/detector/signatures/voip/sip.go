@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"container/list"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,19 +12,32 @@ import (
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/spf13/viper"
 )
 
-// sipIPEntry stores a timestamp for TTL-based eviction.
+const (
+	// DefaultMaxSIPIPPairs bounds retained SIP endpoint associations.
+	DefaultMaxSIPIPPairs    = 100000
+	sipIPPairSweepBatchSize = 1024
+)
+
+// sipIPEntry stores the last SIP observation for TTL and oldest-first eviction.
 type sipIPEntry struct {
+	key       string
 	timestamp time.Time
 }
 
 // SIPSignature detects SIP (Session Initiation Protocol) traffic
 type SIPSignature struct {
-	methods         []string
-	methodsBytes    [][]byte // Byte versions for SIMD matching
-	knownSIPIPPairs sync.Map // key: "ip1|ip2" (normalized) → sipIPEntry
-	sipIPPairTTL    time.Duration
+	methods               []string
+	methodsBytes          [][]byte // Byte versions for SIMD matching
+	sipIPPairMu           sync.Mutex
+	knownSIPIPPairs       map[string]*list.Element
+	sipIPPairOrder        *list.List // Oldest last observation first.
+	maxSIPIPPairs         int
+	sipIPPairTTLEvictions uint64
+	sipIPPairCapEvictions uint64
+	sipIPPairTTL          time.Duration
 }
 
 // NewSIPSignature creates a new SIP signature detector
@@ -37,10 +51,17 @@ func NewSIPSignature() *SIPSignature {
 		methodsBytes[i] = []byte(m)
 	}
 
+	maxPairs := viper.GetInt("detector.max_sip_ip_pairs")
+	if maxPairs <= 0 {
+		maxPairs = DefaultMaxSIPIPPairs
+	}
 	return &SIPSignature{
-		methods:      methods,
-		methodsBytes: methodsBytes,
-		sipIPPairTTL: 30 * time.Minute,
+		methods:         methods,
+		methodsBytes:    methodsBytes,
+		sipIPPairTTL:    30 * time.Minute,
+		knownSIPIPPairs: make(map[string]*list.Element),
+		sipIPPairOrder:  list.New(),
+		maxSIPIPPairs:   maxPairs,
 	}
 }
 
@@ -167,42 +188,86 @@ func normalizeSIPIPPair(ip1, ip2 string) string {
 	return ip2 + "|" + ip1
 }
 
-// recordSIPIPPair stores an IP pair as a known SIP endpoint pair.
+// recordSIPIPPair stores or refreshes a known pair. Taking time under the lock
+// keeps observation order consistent with the eviction list across goroutines.
 func (s *SIPSignature) recordSIPIPPair(srcIP, dstIP string) {
 	key := normalizeSIPIPPair(srcIP, dstIP)
-	s.knownSIPIPPairs.Store(key, sipIPEntry{timestamp: time.Now()})
+	s.sipIPPairMu.Lock()
+	defer s.sipIPPairMu.Unlock()
+	now := time.Now()
+	if element, ok := s.knownSIPIPPairs[key]; ok {
+		element.Value.(*sipIPEntry).timestamp = now
+		s.sipIPPairOrder.MoveToBack(element)
+		return
+	}
+	if len(s.knownSIPIPPairs) >= s.maxSIPIPPairs {
+		oldest := s.sipIPPairOrder.Front()
+		if now.Sub(oldest.Value.(*sipIPEntry).timestamp) > s.sipIPPairTTL {
+			s.sipIPPairTTLEvictions++
+		} else {
+			s.sipIPPairCapEvictions++
+		}
+		s.removeSIPIPPairLocked(oldest)
+	}
+	s.knownSIPIPPairs[key] = s.sipIPPairOrder.PushBack(&sipIPEntry{key: key, timestamp: now})
 }
 
-// isKnownSIPIPPair reports whether the given IP pair has previously been observed
-// carrying SIP traffic and the entry has not expired.
+// isKnownSIPIPPair checks TTL without refreshing the last SIP observation.
 func (s *SIPSignature) isKnownSIPIPPair(srcIP, dstIP string) bool {
 	key := normalizeSIPIPPair(srcIP, dstIP)
-	val, ok := s.knownSIPIPPairs.Load(key)
+	s.sipIPPairMu.Lock()
+	defer s.sipIPPairMu.Unlock()
+	element, ok := s.knownSIPIPPairs[key]
 	if !ok {
 		return false
 	}
-	entry := val.(sipIPEntry)
-	if time.Since(entry.timestamp) > s.sipIPPairTTL {
-		s.knownSIPIPPairs.Delete(key)
+	if time.Since(element.Value.(*sipIPEntry).timestamp) > s.sipIPPairTTL {
+		s.removeSIPIPPairLocked(element)
+		s.sipIPPairTTLEvictions++
 		return false
 	}
 	return true
 }
 
-// SweepSIPIPPairs removes expired SIP IP pair entries. Called periodically
-// by the detector to prevent unbounded growth.
+func (s *SIPSignature) removeSIPIPPairLocked(element *list.Element) {
+	delete(s.knownSIPIPPairs, element.Value.(*sipIPEntry).key)
+	s.sipIPPairOrder.Remove(element)
+}
+
+// SweepSIPIPPairs is called by the detector's background cleanup. Each call
+// removes at most 1,024 expired pairs. Observation ordering lets it stop at the
+// first live pair; no map scan or rotation through live entries is needed.
 func (s *SIPSignature) SweepSIPIPPairs() int {
-	now := time.Now()
+	return s.sweepSIPIPPairs(time.Now(), sipIPPairSweepBatchSize)
+}
+
+func (s *SIPSignature) sweepSIPIPPairs(now time.Time, limit int) int {
+	s.sipIPPairMu.Lock()
+	defer s.sipIPPairMu.Unlock()
 	removed := 0
-	s.knownSIPIPPairs.Range(func(key, value any) bool {
-		entry := value.(sipIPEntry)
-		if now.Sub(entry.timestamp) > s.sipIPPairTTL {
-			s.knownSIPIPPairs.Delete(key)
-			removed++
+	for removed < limit {
+		oldest := s.sipIPPairOrder.Front()
+		if oldest == nil || now.Sub(oldest.Value.(*sipIPEntry).timestamp) <= s.sipIPPairTTL {
+			break
 		}
-		return true
-	})
+		s.removeSIPIPPairLocked(oldest)
+		s.sipIPPairTTLEvictions++
+		removed++
+	}
 	return removed
+}
+
+// SIPIPPairStats returns a consistent snapshot of retained pairs and cumulative
+// evictions. Capacity evictions can remove live teardown associations.
+func (s *SIPSignature) SIPIPPairStats() map[string]interface{} {
+	s.sipIPPairMu.Lock()
+	defer s.sipIPPairMu.Unlock()
+	return map[string]interface{}{
+		"entries":       len(s.knownSIPIPPairs),
+		"max_entries":   s.maxSIPIPPairs,
+		"ttl_evictions": s.sipIPPairTTLEvictions,
+		"cap_evictions": s.sipIPPairCapEvictions,
+	}
 }
 
 // hasDSCPEF reports whether the packet carries DSCP Expedited Forwarding marking

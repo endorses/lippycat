@@ -229,6 +229,14 @@ type destinationState struct {
 
 // DestinationStats contains statistics for a destination.
 type DestinationStats struct {
+	// ConnectionState is disconnected, connecting, or connected. Interface
+	// connection counts include checked-out connections, not just idle pool entries.
+	ConnectionState string
+	X2Connections   uint64
+	X3Connections   uint64
+	// LastError is the most recent destination connection error, cleared on connect.
+	LastError string
+
 	// ConnectAttempts is the total number of connection attempts.
 	ConnectAttempts uint64
 
@@ -936,16 +944,7 @@ func (m *Manager) Stats(did uuid.UUID) (DestinationStats, error) {
 		return DestinationStats{}, ErrDestinationNotFound
 	}
 
-	state.mu.RLock()
-	defer state.mu.RUnlock()
-	stats := state.stats
-	if !stats.X2Keepalive.LastValidACK.IsZero() {
-		stats.X2Keepalive.ACKAge = time.Since(stats.X2Keepalive.LastValidACK)
-	}
-	if !stats.X3Keepalive.LastValidACK.IsZero() {
-		stats.X3Keepalive.ACKAge = time.Since(stats.X3Keepalive.LastValidACK)
-	}
-	return stats, nil
+	return m.snapshotStats(state, time.Now()), nil
 }
 
 // AllStats returns statistics for all destinations.
@@ -954,10 +953,50 @@ func (m *Manager) AllStats() map[uuid.UUID]DestinationStats {
 	defer m.mu.RUnlock()
 
 	stats := make(map[uuid.UUID]DestinationStats, len(m.destinations))
+	now := time.Now()
 	for did, state := range m.destinations {
-		state.mu.RLock()
-		stats[did] = state.stats
-		state.mu.RUnlock()
+		stats[did] = m.snapshotStats(state, now)
+	}
+	return stats
+}
+
+// snapshotStats computes live gauges without modifying accumulated counters.
+func (m *Manager) snapshotStats(state *destinationState, now time.Time) DestinationStats {
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	stats := state.stats
+	switch atomic.LoadInt32(&state.state) {
+	case connStateConnecting:
+		stats.ConnectionState = "connecting"
+	case connStateConnected:
+		stats.ConnectionState = "connected"
+	default:
+		stats.ConnectionState = "disconnected"
+	}
+	if state.lastError != nil {
+		stats.LastError = state.lastError.Error()
+	}
+	for conn := range state.connections {
+		if value, ok := m.connectionRuntime.Load(conn); ok {
+			switch value.(*connectionRuntime).iface {
+			case PDUTypeX2:
+				stats.X2Connections++
+			case PDUTypeX3:
+				stats.X3Connections++
+			}
+		}
+	}
+	stats.X2Keepalive.Enabled = m.config.X2KeepaliveEnabled
+	stats.X2Keepalive.TimeP1 = m.config.X2KeepaliveTimeP1
+	stats.X2Keepalive.TimeP2 = m.config.X2KeepaliveTimeP2
+	stats.X3Keepalive.Enabled = m.config.X3KeepaliveEnabled
+	stats.X3Keepalive.TimeP1 = m.config.X3KeepaliveTimeP1
+	stats.X3Keepalive.TimeP2 = m.config.X3KeepaliveTimeP2
+	if !stats.X2Keepalive.LastValidACK.IsZero() {
+		stats.X2Keepalive.ACKAge = max(now.Sub(stats.X2Keepalive.LastValidACK), 0)
+	}
+	if !stats.X3Keepalive.LastValidACK.IsZero() {
+		stats.X3Keepalive.ACKAge = max(now.Sub(stats.X3Keepalive.LastValidACK), 0)
 	}
 	return stats
 }

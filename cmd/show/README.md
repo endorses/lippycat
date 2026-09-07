@@ -34,6 +34,23 @@ lc show status -P localhost:55555 --insecure
 }
 ```
 
+When LI delivery is configured, status also includes `li_delivery` with aggregate
+X2/X3 enqueue, written, dropped, retry, and queue-depth statistics. Its
+`destinations` object is keyed by destination UUID and includes separate X2/X3
+queue depths and capacities, oldest queued ages, drop reasons, connection errors,
+and `x2_keepalive` / `x3_keepalive` health. `li_encoding` remains a separate set
+of encoding counters. Unavailable LI telemetry is omitted.
+
+`x2_enqueue_calls` and `x3_enqueue_calls` count successful asynchronous enqueue
+calls, including calls with no eligible destinations; written and dropped
+counters count destination copies, so fan-out prevents direct reconciliation.
+Written means a completed local TLS write, and keepalive ACKs indicate control
+responsiveness; neither proves the receiver accepted a product. Monitor queue age
+for current delay and changes in cumulative drop counters for loss. Counters reset
+on restart, and destination details disappear when that destination is removed.
+See [LI delivery telemetry](../../docs/LI_INTEGRATION.md#delivery-telemetry) for
+field semantics and troubleshooting.
+
 ### Hunter
 
 Show details for a specific hunter.

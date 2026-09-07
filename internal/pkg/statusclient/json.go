@@ -18,6 +18,7 @@ type StatusJSON struct {
 	TotalFilters      uint32                      `json:"total_filters"`
 	UpstreamProcessor string                      `json:"upstream_processor,omitempty"`
 	LIEncoding        *management.LIEncodingStats `json:"li_encoding,omitempty"`
+	LIDelivery        *management.LIDeliveryStats `json:"li_delivery,omitempty"`
 }
 
 // HunterJSON represents a connected hunter in JSON-friendly format
@@ -93,6 +94,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 		status.TotalFilters = resp.ProcessorStats.TotalFilters
 		status.UpstreamProcessor = resp.ProcessorStats.UpstreamProcessor
 		status.LIEncoding = resp.ProcessorStats.LiEncoding
+		status.LIDelivery = resp.ProcessorStats.LiDelivery
 	}
 
 	return output.MarshalJSONPretty(status, pretty)

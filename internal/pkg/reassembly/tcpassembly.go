@@ -106,6 +106,26 @@ type ScatterGather interface {
 	Stats() TCPAssemblyStats
 }
 
+// ForEachCaptureInfo visits consecutive byte ranges with their capture metadata.
+// end is the exclusive range end relative to the start of sg. Empty ranges are
+// skipped. Visits run synchronously while sg is valid during ReassembledSG.
+// Adjacent ranges may have identical metadata.
+//
+// The local assembler visits each byte container once. Other ScatterGather
+// implementations remain compatible and fall back to one range per byte.
+func ForEachCaptureInfo(sg ScatterGather, visit func(end int, ci gopacket.CaptureInfo)) {
+	if spans, ok := sg.(interface {
+		forEachCaptureInfo(func(int, gopacket.CaptureInfo))
+	}); ok {
+		spans.forEachCaptureInfo(visit)
+		return
+	}
+	available, _ := sg.Lengths()
+	for offset := 0; offset < available; offset++ {
+		visit(offset+1, sg.CaptureInfo(offset))
+	}
+}
+
 // byteContainer is either a page or a livePacket
 type byteContainer interface {
 	getBytes() []byte
@@ -171,6 +191,18 @@ func (rl *reassemblyObject) CaptureInfo(offset int) gopacket.CaptureInfo {
 	}
 	// Invalid offset
 	return gopacket.CaptureInfo{}
+}
+
+func (rl *reassemblyObject) forEachCaptureInfo(visit func(int, gopacket.CaptureInfo)) {
+	end := 0
+	for _, r := range rl.all {
+		length := r.length()
+		if length == 0 {
+			continue
+		}
+		end += length
+		visit(end, r.captureInfo())
+	}
 }
 
 func (rl *reassemblyObject) Info() (TCPFlowDirection, bool, bool, int) {

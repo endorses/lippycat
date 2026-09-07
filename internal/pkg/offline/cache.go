@@ -110,16 +110,7 @@ func (d *diskDataset) readCachedRecord(ctx context.Context, f *os.File, off, siz
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
-	var decoded any
-	switch v := value.(type) {
-	case *Summary:
-		decoded = *v
-	case *Detail:
-		decoded = *v
-	default:
-		return fail(errors.New("offline unsupported decoded value"))
-	}
-	actual, err := recordMemory(decoded, maxBytes)
+	actual, err := recordMemory(value, maxBytes)
 	if err != nil {
 		return fail(err)
 	}

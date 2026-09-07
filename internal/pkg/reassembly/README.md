@@ -14,6 +14,13 @@ The first-page marker remains separate so packet statistics do not count
 continuation pages as additional packets. Returning pages to the cache clears
 both context references.
 
-Upstream source is otherwise unchanged apart from gofmt. Keep this patch and
-its regression tests when updating the copied package; remove the local copy
-once a replacement dependency preserves metadata on every buffered page.
+The package also provides `ForEachCaptureInfo`, which visits capture metadata
+once per nonempty byte container using exclusive end offsets. Application
+reassembly uses these ranges to preserve frame completion timestamps and
+provenance without looking up metadata for every payload byte. The existing
+`ScatterGather` interface is unchanged; other implementations fall back to
+per-byte visits.
+
+Upstream source is otherwise unchanged apart from gofmt. Keep these patches and
+their regression tests when updating the copied package. A replacement must
+preserve metadata on every buffered page and support efficient metadata ranges.

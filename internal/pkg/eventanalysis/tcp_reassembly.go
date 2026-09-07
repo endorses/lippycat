@@ -81,7 +81,7 @@ func (f *applicationFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP
 			flowKey = ctx.flowKey
 		}
 	}
-	return &applicationStream{runtime: f.runtime, netFlow: netFlow, tcpFlow: tcpFlow, flowKey: flowKey, email: emailparser.NewParser(), partial: tcp == nil || !tcp.SYN}
+	return &applicationStream{runtime: f.runtime, netFlow: netFlow, tcpFlow: tcpFlow, flowKey: flowKey, partial: tcp == nil || !tcp.SYN}
 }
 
 type applicationStream struct {
@@ -142,7 +142,7 @@ func (s *applicationStream) ReassembledSG(sg reassembly.ScatterGather, _ reassem
 		s.runtime.stats.Invalid++
 		return
 	}
-	s.appendMarks(sg, available)
+	s.appendMarks(sg)
 	s.appendBuffer(chunk)
 	s.parse()
 }
@@ -368,6 +368,9 @@ func (s *applicationStream) parseTLS() {
 }
 
 func (s *applicationStream) parseSMTP(fromServer bool) {
+	if s.email == nil {
+		s.email = emailparser.NewParser()
+	}
 	for {
 		end := bytes.IndexByte(s.buffer, '\n')
 		if end < 0 {
@@ -417,21 +420,20 @@ func (s *applicationStream) parseSMTP(fromServer bool) {
 	}
 }
 
-func (s *applicationStream) appendMarks(sg reassembly.ScatterGather, available int) {
+func (s *applicationStream) appendMarks(sg reassembly.ScatterGather) {
 	base := len(s.buffer)
-	for offset := 0; offset < available; offset++ {
-		ci := sg.CaptureInfo(offset)
+	reassembly.ForEachCaptureInfo(sg, func(end int, ci gopacket.CaptureInfo) {
 		ctx, ok := captureContext(ci)
 		if !ok {
 			s.partial = true
-			continue
+			return
 		}
 		if len(s.marks) == 0 || !sameCaptureMark(s.marks[len(s.marks)-1], ctx, ci) {
-			s.marks = append(s.marks, reassemblyMark{end: base + offset + 1, ctx: ctx, ci: ci})
+			s.marks = append(s.marks, reassemblyMark{end: base + end, ctx: ctx, ci: ci})
 		} else {
-			s.marks[len(s.marks)-1].end = base + offset + 1
+			s.marks[len(s.marks)-1].end = base + end
 		}
-	}
+	})
 }
 
 func captureContext(ci gopacket.CaptureInfo) (reassemblyContext, bool) {
@@ -481,7 +483,13 @@ func (s *applicationStream) contextThrough(end int) reassemblyMark {
 }
 
 func (s *applicationStream) consume(count int) {
-	s.buffer = s.buffer[count:]
+	if count == len(s.buffer) {
+		// Reuse drained storage on the next callback. Do not compact partial
+		// buffers: callers may still reference the frame just consumed.
+		s.buffer = s.buffer[:0]
+	} else {
+		s.buffer = s.buffer[count:]
+	}
 	kept := s.marks[:0]
 	for _, mark := range s.marks {
 		if mark.end <= count {

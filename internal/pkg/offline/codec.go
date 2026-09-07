@@ -32,15 +32,24 @@ type detailWire struct {
 
 var timestampType = reflect.TypeOf(time.Time{})
 
-func wireValue(value any) (any, error) {
+// recordFields borrows record fields in schema-v1 wire order, avoiding a second
+// boxed copy of PacketDisplay. The framing code does not retain these values.
+func recordFields(value any) ([4]reflect.Value, int, uint16, error) {
 	switch v := value.(type) {
 	case Summary:
-		return summaryWire{v.packet}, nil
+		return recordFields(&v)
 	case Detail:
-		return detailWire{v.Source, v.CapturedLength, v.OriginalLength, v.Packet}, nil
-	default:
-		return nil, fmt.Errorf("unsupported offline record %T", value)
+		return recordFields(&v)
+	case *Summary:
+		if v != nil {
+			return [4]reflect.Value{reflect.ValueOf(&v.packet).Elem()}, 1, recordKindSummary, nil
+		}
+	case *Detail:
+		if v != nil {
+			return [4]reflect.Value{reflect.ValueOf(&v.Source).Elem(), reflect.ValueOf(&v.CapturedLength).Elem(), reflect.ValueOf(&v.OriginalLength).Elem(), reflect.ValueOf(&v.Packet).Elem()}, 4, recordKindDetail, nil
+		}
 	}
+	return [4]reflect.Value{}, 0, 0, fmt.Errorf("unsupported offline record %T", value)
 }
 
 // recordMemory conservatively counts the retained Go object, backing arrays,
@@ -52,7 +61,18 @@ func recordMemory(value any, max uint64) (uint64, error) {
 		v = reflect.ValueOf(p)
 	case Detail:
 		v = reflect.ValueOf(p)
+	case *Summary:
+		if p != nil {
+			v = reflect.ValueOf(p).Elem()
+		}
+	case *Detail:
+		if p != nil {
+			v = reflect.ValueOf(p).Elem()
+		}
 	default:
+		return 0, fmt.Errorf("unsupported offline record %T", value)
+	}
+	if !v.IsValid() {
 		return 0, fmt.Errorf("unsupported offline record %T", value)
 	}
 	n := uint64(v.Type().Size())
@@ -232,25 +252,42 @@ func writeRecord(w io.Writer, kind uint16, id PacketID, value any, max uint64) (
 	if (kind != recordKindSummary && kind != recordKindDetail) || max > uint64(int(^uint(0)>>1)-frameHeaderBytes) {
 		return 0, fmt.Errorf("invalid offline record kind or budget")
 	}
-	wire, err := wireValue(value)
+	if _, err := recordMemory(value, max); err != nil {
+		return 0, err
+	}
+	return writeValidatedRecord(w, kind, id, value, max)
+}
+
+// writeValidatedRecord requires recordMemory(value, max) to have succeeded.
+// Builders already measure each record to reserve its memory before encoding.
+func writeValidatedRecord(w io.Writer, kind uint16, id PacketID, value any, max uint64) (uint64, error) {
+	if (kind != recordKindSummary && kind != recordKindDetail) || max > uint64(int(^uint(0)>>1)-frameHeaderBytes) {
+		return 0, fmt.Errorf("invalid offline record kind or budget")
+	}
+	fields, count, actualKind, err := recordFields(value)
 	if err != nil {
 		return 0, err
 	}
-	if (kind == recordKindSummary) != (reflect.TypeOf(wire) == reflect.TypeOf(summaryWire{})) {
+	if kind != actualKind {
 		return 0, fmt.Errorf("offline record kind mismatch")
 	}
-	if _, err = recordMemory(value, max); err != nil {
-		return 0, err
+	encode := func(e *encoder) error {
+		for _, field := range fields[:count] {
+			if err := e.value(field); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	e := encoder{max: max}
-	if err = e.value(reflect.ValueOf(wire)); err != nil {
+	if err = encode(&e); err != nil {
 		return 0, err
 	}
 	size := e.size
 	// Reserve the frame prefix in the serializer allocation so each record
 	// reaches the file in one write, without copying the encoded payload.
 	e = encoder{max: max, data: make([]byte, frameHeaderBytes, frameHeaderBytes+int(size))}
-	if err = e.value(reflect.ValueOf(wire)); err != nil {
+	if err = encode(&e); err != nil {
 		return 0, err
 	}
 	h := e.data[:frameHeaderBytes]

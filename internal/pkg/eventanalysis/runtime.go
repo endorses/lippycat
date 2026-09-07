@@ -224,12 +224,12 @@ func (r *Runtime) ObservePacket(source Source, info capture.PacketInfo) error {
 	if !timestamp.IsZero() {
 		timestampNS = timestamp.UnixNano()
 	}
-	observedAt, err := r.observeCapturedWithHint(source, &data.CapturedPacket{
+	observedAt, err := r.observeDecodedCaptured(source, &data.CapturedPacket{
 		Data:        info.Packet.Data(),
 		TimestampNs: timestampNS,
 		LinkType:    uint32(info.LinkType),
 		Metadata:    meta,
-	}, protocolHint)
+	}, protocolHint, info.Packet)
 	if err != nil {
 		r.stats.Invalid++
 		return err
@@ -270,6 +270,12 @@ func (r *Runtime) observeCaptured(source Source, raw *data.CapturedPacket) (time
 }
 
 func (r *Runtime) observeCapturedWithHint(source Source, raw *data.CapturedPacket, protocolHint string) (time.Time, error) {
+	return r.observeDecodedCaptured(source, raw, protocolHint, nil)
+}
+
+// observeDecodedCaptured reuses local capture layers; transported captures are
+// decoded here when no packet is available.
+func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket, protocolHint string, packet gopacket.Packet) (time.Time, error) {
 	if raw == nil || raw.Metadata == nil {
 		return time.Time{}, fmt.Errorf("captured packet metadata is required")
 	}
@@ -298,7 +304,9 @@ func (r *Runtime) observeCapturedWithHint(source Source, raw *data.CapturedPacke
 		return time.Time{}, err
 	}
 	r.stats.Observed++
-	packet := gopacket.NewPacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.NoCopy)
+	if packet == nil {
+		packet = gopacket.NewPacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.NoCopy)
+	}
 	connEvents, err := r.connections.Observe(conntrack.FromPacket(packet, env, raw.Metadata.Protocol))
 	if err != nil {
 		return time.Time{}, fmt.Errorf("observe connection: %w", err)

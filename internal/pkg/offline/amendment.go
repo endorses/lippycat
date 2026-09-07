@@ -56,18 +56,18 @@ func (b *Builder) UpdateDetail(ctx context.Context, id PacketID, mutate func(*De
 		return errors.New("offline packet length must be nonnegative")
 	}
 	summary := NewSummary(id, detail.Packet)
-	if _, err = recordMemory(summary, d.storage.limits.MaxRecordBytes); err != nil {
+	if _, err = recordMemory(&summary, d.storage.limits.MaxRecordBytes); err != nil {
 		return err
 	}
-	if _, err = recordMemory(detail, d.storage.limits.MaxRecordBytes); err != nil {
+	if _, err = recordMemory(&detail, d.storage.limits.MaxRecordBytes); err != nil {
 		return err
 	}
 	so, do := b.summaryEnd, b.detailEnd
-	sn, err := writeRecord(&builderWriter{b: b, f: d.summaries}, 1, id, summary, d.storage.limits.MaxRecordBytes)
+	sn, err := writeValidatedRecord(&builderWriter{b: b, f: d.summaries}, 1, id, &summary, d.storage.limits.MaxRecordBytes)
 	if err != nil {
 		return err
 	}
-	dn, err := writeRecord(&builderWriter{b: b, f: d.details}, 2, id, detail, d.storage.limits.MaxRecordBytes)
+	dn, err := writeValidatedRecord(&builderWriter{b: b, f: d.details}, 2, id, &detail, d.storage.limits.MaxRecordBytes)
 	if err != nil {
 		return err
 	}

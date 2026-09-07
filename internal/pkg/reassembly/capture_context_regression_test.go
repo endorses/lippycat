@@ -53,6 +53,13 @@ func TestMultiPageCaptureInfoPreservesPacketContext(t *testing.T) {
 	require.Equal(t, want, saved.Fetch(len(want)))
 	require.Equal(t, ci, saved.CaptureInfo(0))
 	require.Equal(t, ci, saved.CaptureInfo(len(want)-1))
+	spanEnd := 0
+	ForEachCaptureInfo(&saved, func(end int, got gopacket.CaptureInfo) {
+		require.Greater(t, end, spanEnd)
+		require.Equal(t, ci, got)
+		spanEnd = end
+	})
+	require.Equal(t, len(want), spanEnd)
 	require.Equal(t, 0, saved.Stats().Packets, "retaining a continuation must not introduce a packet boundary")
 	for _, r := range retained {
 		p := r.(*page)

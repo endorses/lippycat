@@ -244,11 +244,11 @@ func (b *Builder) append(ctx context.Context, detail Detail) error {
 	detail.ID = PacketID(d.count)
 	detail.Token = Token{}
 	summary := NewSummary(detail.ID, detail.Packet)
-	sm, err := recordMemory(summary, d.storage.limits.MaxRecordBytes)
+	sm, err := recordMemory(&summary, d.storage.limits.MaxRecordBytes)
 	if err != nil {
 		return err
 	}
-	dm, err := recordMemory(detail, d.storage.limits.MaxRecordBytes)
+	dm, err := recordMemory(&detail, d.storage.limits.MaxRecordBytes)
 	if err != nil {
 		return err
 	}
@@ -259,12 +259,12 @@ func (b *Builder) append(ctx context.Context, detail Detail) error {
 	defer d.storage.releaseMemory(reservation)
 	so, do := b.summaryEnd, b.detailEnd
 	sw := &builderWriter{b: b, f: d.summaries}
-	sn, err := writeRecord(sw, 1, detail.ID, summary, d.storage.limits.MaxRecordBytes)
+	sn, err := writeValidatedRecord(sw, 1, detail.ID, &summary, d.storage.limits.MaxRecordBytes)
 	if err != nil {
 		return err
 	}
 	dw := &builderWriter{b: b, f: d.details}
-	dn, err := writeRecord(dw, 2, detail.ID, detail, d.storage.limits.MaxRecordBytes)
+	dn, err := writeValidatedRecord(dw, 2, detail.ID, &detail, d.storage.limits.MaxRecordBytes)
 	if err != nil {
 		return err
 	}

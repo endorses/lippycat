@@ -274,3 +274,44 @@ func TestBorrowedFrameValidationAndOwnership(t *testing.T) {
 		})
 	}
 }
+
+func TestBorrowedRecordFieldsPreserveSchemaAndBudgets(t *testing.T) {
+	var detail Detail
+	filledValue(reflect.ValueOf(&detail).Elem())
+	summary := NewSummary(detail.ID, detail.Packet)
+	for _, tc := range []struct {
+		name                  string
+		value, borrowed, wire any
+		kind                  uint16
+	}{
+		{"detail", detail, &detail, detailWire{detail.Source, detail.CapturedLength, detail.OriginalLength, detail.Packet}, recordKindDetail},
+		{"summary", summary, &summary, summaryWire{summary.packet}, recordKindSummary},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const max = 1 << 20
+			measured, err := recordMemory(tc.value, max)
+			require.NoError(t, err)
+			borrowedMemory, err := recordMemory(tc.borrowed, max)
+			require.NoError(t, err)
+			require.Equal(t, measured, borrowedMemory)
+			_, err = recordMemory(tc.borrowed, measured-1)
+			require.Error(t, err)
+			_, err = recordMemory(tc.borrowed, measured)
+			require.NoError(t, err)
+
+			// Compare the payload against the original declaration-order wire schema.
+			legacy := encoder{max: max, data: make([]byte, 0)}
+			require.NoError(t, legacy.value(reflect.ValueOf(tc.wire)))
+			var frame bytes.Buffer
+			_, err = writeValidatedRecord(&frame, tc.kind, 7, tc.borrowed, max)
+			require.NoError(t, err)
+			require.Equal(t, legacy.data, frame.Bytes()[frameHeaderBytes:])
+			var checked bytes.Buffer
+			_, err = writeRecord(&checked, tc.kind, 7, tc.borrowed, max)
+			require.NoError(t, err)
+			require.Equal(t, frame.Bytes(), checked.Bytes())
+			_, err = writeRecord(io.Discard, tc.kind, 7, tc.borrowed, measured-1)
+			require.Error(t, err)
+		})
+	}
+}

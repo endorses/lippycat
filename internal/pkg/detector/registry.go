@@ -14,11 +14,14 @@ var (
 	// DefaultDetector is the global detector instance
 	DefaultDetector *Detector
 	once            sync.Once
+	defaultMu       sync.RWMutex
 )
 
 // InitDefault initializes the default detector with all signatures
 func InitDefault() *Detector {
 	once.Do(func() {
+		defaultMu.Lock()
+		defer defaultMu.Unlock()
 		DefaultDetector = New()
 
 		// Register VoIP signatures
@@ -60,13 +63,23 @@ func InitDefault() *Detector {
 		DefaultDetector.RegisterSignature(link.NewARPSignature()) // Priority 95
 	})
 
-	return DefaultDetector
+	return GetDefaultIfInitialized()
 }
 
 // GetDefault returns the default detector instance
 func GetDefault() *Detector {
-	if DefaultDetector == nil {
-		return InitDefault()
+	if d := GetDefaultIfInitialized(); d != nil {
+		return d
 	}
+	return InitDefault()
+}
+
+// GetDefaultIfInitialized returns the existing default detector, or nil if
+// detection has never initialized it. Observability callers must use this
+// accessor to avoid creating detector state and cleanup goroutines. The lock
+// synchronizes reads with initialization and prevents partial publication.
+func GetDefaultIfInitialized() *Detector {
+	defaultMu.RLock()
+	defer defaultMu.RUnlock()
 	return DefaultDetector
 }

@@ -31,3 +31,11 @@ Follow-up validation passed: detector and capture race suites, the real SIP
 capacity-pressure regression, and all-tag race suites for hunter stats,
 processor, and statusclient. Processor tests required local sockets outside the
 sandbox. Protobuf round-trip and CLI JSON tests retain nonzero eviction counts.
+
+## Observe without initializing detection
+
+- [x] Add a synchronized non-constructing default detector accessor.
+- [x] Omit SIP pair heartbeat fields when detection has not initialized a detector.
+- [x] Verify absent and existing detector behavior and run detector/capture race tests.
+
+Validation passed: `GOCACHE=/tmp/lippycat-go-cache go test -race ./internal/pkg/detector/... ./internal/pkg/capture/...`.

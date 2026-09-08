@@ -1085,6 +1085,13 @@ func (c *Client) finishStoppedClaim(q *destinationQueue, t PDUType) {
 
 // RemoveDestination stops and removes delivery state for a deleted destination.
 func (c *Client) RemoveDestination(did uuid.UUID) {
+	if c.journal != nil {
+		// Serialize revocation with authorization decisions and replay publication.
+		// Held backlog may have no queue yet, but must lose its approval too.
+		c.journal.controlMu.Lock()
+		defer c.journal.controlMu.Unlock()
+		c.journal.revokeDestinationReplay(did)
+	}
 	c.admissionMu.Lock()
 	c.queuesMu.RLock()
 	q := c.queues[did]

@@ -789,6 +789,14 @@ live X2, live journal admissions for that destination are rejected until held re
 reconciled or explicitly purged; other destinations remain independent. When more than 10,000 records are held, repeat the bounded
 export/approval procedure after each approved group drains.
 
+The LI state file retains per-XID generation watermarks after task expiry and
+cleanup, so its metadata grows with historical XIDs. Keep this state with the X2
+journal; deleting or restoring it independently can erase the identities needed
+to distinguish old product from a later activation of the same XID.
+Task generations and destination identities are checkpointed before the changed
+delivery becomes eligible. Failure of that identity checkpoint prevents publishing
+the change.
+
 A manifest has this versioned shape (use exported values):
 
 ```json
@@ -807,13 +815,18 @@ A manifest has this versioned shape (use exported values):
 ```
 
 Managed memory reservations include a 16 MiB shared RTP reorder allowance,
-per-destination payload/owner reservations, and bounded journal index, pending
+per-destination payload/owner reservations, one shared incoming-payload allowance
+equal to the larger X2/X3 byte limit, and bounded journal index, pending
 operation, recovery and encryption working memory. Journal working memory is
 reserved conservatively even when the current journal is empty. Status exposes
 `memory_budget_bytes`, `reserved_memory_bytes` and `x3_max_age_ms`; aggregate
 reason counters and `first_dropped_unix_ms` remain available after destination
 removal. These reservations cover managed LI delivery/reorder allocations and do
 not bound total process RSS.
+
+The incoming-payload allowance covers admission while existing queues are full.
+Explicit memory budgets sized exactly to older reservation totals may need to
+increase by the larger interface byte limit before startup accepts them.
 
 `uncertain_writes` and `uncertain_bytes` count transport attempts whose remote
 acceptance is unknown, including attempts later retried successfully. They are

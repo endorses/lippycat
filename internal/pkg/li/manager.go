@@ -564,14 +564,7 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 				continue
 			}
 			snapshot.tasks[task.XID] = true
-			if restored := m.persistedActive[task.XID]; restored != nil {
-				generation := restored.ActivationGeneration
-				if generation > 0 && equivalentTaskDefinition(restored, task) {
-					generation-- // Only the same definition retains its confirmed generation.
-				}
-				m.registry.seedGeneration(task.XID, generation)
-			}
-			if activateErr := m.ActivateTask(task); activateErr != nil {
+			if activateErr := m.activateStartupTask(task); activateErr != nil {
 				// Task may already exist if sync is called multiple times.
 				if !errors.Is(activateErr, ErrTaskAlreadyExists) {
 					logger.Warn("Failed to activate ADMF task, skipping",
@@ -608,6 +601,28 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 	)
 
 	return nil
+}
+
+// activateStartupTask preserves an unchanged persisted activation only while
+// holding the same lifecycle barrier as normal activation. All other activations
+// must advance the durable watermark, including when ADMF never confirms a task.
+func (m *Manager) activateStartupTask(task *InterceptTask) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if restored := m.persistedActive[task.XID]; restored != nil {
+		generation := restored.ActivationGeneration
+		m.registry.seedGeneration(task.XID, generation)
+		if generation > 0 && equivalentTaskDefinition(restored, task) {
+			m.registry.mu.Lock()
+			if _, exists := m.registry.tasks[task.XID]; !exists && m.registry.generations[task.XID] == generation {
+				m.registry.generations[task.XID]--
+			}
+			m.registry.mu.Unlock()
+			// Restore the watermark even if validation or filter activation fails.
+			defer m.registry.seedGeneration(task.XID, generation)
+		}
+	}
+	return m.activateTask(task)
 }
 
 func (m *Manager) removeOrphanedDestinations(snapshot admfSnapshot) int {
@@ -1172,6 +1187,13 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 	if getErr != nil {
 		return fmt.Errorf("read activation identity for XID %s: %w", task.XID, getErr)
 	}
+	// Reserve the generation durably before installing enforcement or releasing
+	// lifecycle admission. A later state-write fault must not let product use a
+	// generation that a restart can allocate again.
+	if err := m.persistState(); err != nil {
+		return errors.Join(fmt.Errorf("reserve activation generation for XID %s: %w", task.XID, err),
+			m.registry.rollbackActivation(task.XID, registered.ActivatedAt))
+	}
 	if registered.Status == TaskStatusPending {
 		if err := m.commitActivation(task.XID, registered.ActivatedAt); err != nil {
 			return err
@@ -1237,6 +1259,16 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	if err := m.registry.ModifyTask(xid, mod); err != nil {
 		return err
 	}
+	current, getErr := m.registry.GetTaskDetails(xid)
+	if getErr != nil {
+		return getErr
+	}
+	if current.ActivationGeneration != previous.ActivationGeneration {
+		if err := m.persistState(); err != nil {
+			return errors.Join(fmt.Errorf("reserve modified generation for XID %s: %w", xid, err),
+				m.registry.restoreTask(previous))
+		}
+	}
 
 	// If targets changed, update filters
 	if mod.Targets != nil && previous.Status == TaskStatusActive {
@@ -1257,7 +1289,7 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		}
 	}
 
-	current, getErr := m.registry.GetTaskDetails(xid)
+	current, getErr = m.registry.GetTaskDetails(xid)
 	if getErr != nil {
 		return getErr
 	}
@@ -1370,10 +1402,10 @@ func (m *Manager) CreateDestination(dest *Destination) error {
 	if err := m.registry.CreateDestination(dest); err != nil {
 		return err
 	}
-	if err := m.notifyDestinationDefinition(dest.DID, false); err != nil {
+	if err := m.persistDestinationChange(dest.DID, nil); err != nil {
 		return err
 	}
-	return m.persistState()
+	return m.notifyDestinationDefinition(dest.DID, false)
 }
 
 // syncDestination applies an ADMF definition through the same serialized delivery
@@ -1397,6 +1429,9 @@ func (m *Manager) syncDestination(dest *Destination) error {
 	if err != nil {
 		return err
 	}
+	if err := m.persistDestinationChange(dest.DID, current); err != nil {
+		return err
+	}
 	return m.notifyDestinationDefinition(dest.DID, modified)
 }
 
@@ -1409,7 +1444,14 @@ func (m *Manager) GetDestination(did uuid.UUID) (*Destination, error) {
 func (m *Manager) RemoveDestination(did uuid.UUID) error {
 	m.destinationMu.Lock()
 	defer m.destinationMu.Unlock()
+	previous, err := m.registry.GetDestination(did)
+	if err != nil {
+		return err
+	}
 	if err := m.registry.RemoveDestination(did); err != nil {
+		return err
+	}
+	if err := m.persistDestinationChange(did, previous); err != nil {
 		return err
 	}
 	m.callbackMu.RLock()
@@ -1418,21 +1460,42 @@ func (m *Manager) RemoveDestination(did uuid.UUID) error {
 	if callback != nil {
 		callback(did)
 	}
-	return m.persistState()
+	return nil
 }
 
 // ModifyDestination updates the canonical destination and informs delivery owners.
 func (m *Manager) ModifyDestination(did uuid.UUID, dest *Destination) error {
 	m.destinationMu.Lock()
 	defer m.destinationMu.Unlock()
+	previous, err := m.registry.GetDestination(did)
+	if err != nil {
+		return err
+	}
 	if err := m.registry.ModifyDestination(did, dest); err != nil {
 		return err
 	}
-	if err := m.notifyDestinationDefinition(did, true); err != nil {
+	if err := m.persistDestinationChange(did, previous); err != nil {
 		return err
 	}
-	return m.persistState()
+	return m.notifyDestinationDefinition(did, true)
 }
+
+// Checkpoint delivery identity before a callback can install or remove its
+// transport. A failed write leaves the previously published definition in place.
+// The caller holds destinationMu across the registry mutation and callback.
+func (m *Manager) persistDestinationChange(did uuid.UUID, previous *Destination) error {
+	if err := m.persistState(); err != nil {
+		var rollbackErr error
+		if previous == nil {
+			rollbackErr = m.registry.RemoveDestination(did)
+		} else {
+			rollbackErr = m.registry.restoreDestination(previous)
+		}
+		return errors.Join(fmt.Errorf("persist destination change: %w", err), rollbackErr)
+	}
+	return nil
+}
+
 func (m *Manager) notifyDestinationDefinition(did uuid.UUID, modified bool) error {
 	registered, err := m.registry.GetDestination(did)
 	if err != nil {

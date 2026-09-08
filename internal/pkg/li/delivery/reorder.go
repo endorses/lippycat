@@ -105,6 +105,12 @@ func (rb *ReorderBuffer) DeliverCallX3AfterCommit(callID string, generation uint
 // DeliverEntryX3AfterCommit preserves the producer's immutable admission metadata.
 func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint32, seq uint16, afterCommit func()) {
 	now := time.Now()
+	// Start local residence at the first reorder admission when the producer
+	// has not supplied an earlier admission. Final delivery enqueue must not
+	// reset the age clock after an RTP gap has delayed this entry.
+	if entry.Metadata.AdmittedAt.IsZero() || entry.Metadata.AdmittedAt.After(now) {
+		entry.Metadata.AdmittedAt = now
+	}
 	pdu := entry.PDU
 	key := reorderStreamKey{callID: entry.CallID, generation: entry.Generation, ssrc: ssrc}
 	rb.mu.Lock()
@@ -120,6 +126,7 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 	}
 	entry.CallID = strings.Clone(entry.CallID)
 	entry.Metadata.CallID = entry.CallID
+	entry.Metadata.CallGeneration = entry.Generation
 	key.callID = entry.CallID
 	charge := int64(len(pdu)) + reorderPacketCharge
 	if !rb.budget.reserve(charge) {

@@ -256,6 +256,9 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 
 	// Only after every fallible validation has succeeded may reactivation add
 	// rollback and audit state. Both snapshots own their slices independently.
+	if r.generations[task.XID] == ^uint64(0) {
+		return fmt.Errorf("%w: task generation exhausted", ErrInvalidTask)
+	}
 	if exists {
 		rollback := cloneInterceptTask(existing)
 		audit := cloneInterceptTask(existing)

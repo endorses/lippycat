@@ -858,7 +858,9 @@ func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	m.mu.RUnlock()
 
 	if !exists || m.shuttingDown.Load() {
-		if err := conn.Close(); err != nil {
+		// Release runs on the delivery owner. Discarded transports must not
+		// extend its drain deadline waiting for a peer to read close_notify.
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing released connection", "error", err)
 		}
 		return
@@ -868,7 +870,7 @@ func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	_, healthy := state.connections[conn]
 	if !healthy {
 		state.mu.RUnlock()
-		if err := conn.Close(); err != nil {
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing invalid released connection", "error", err)
 		}
 		return
@@ -889,7 +891,7 @@ func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	put := pool.put(pooled)
 	state.mu.RUnlock()
 	if !put {
-		if err := conn.Close(); err != nil {
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing excess connection", "error", err)
 		}
 	}
@@ -1628,7 +1630,13 @@ func (m *Manager) writeFrameUntilContext(ctx context.Context, conn *tls.Conn, da
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUncertainWrite, err)
 	}
-	return clearErr
+	if clearErr != nil {
+		// The whole frame has already been accepted by TLS. A concurrent
+		// transport close can fail deadline cleanup, but must not turn a
+		// subsequent retry or terminal discard into a known unsent outcome.
+		return fmt.Errorf("%w: clear write deadline: %w", ErrUncertainWrite, clearErr)
+	}
+	return nil
 }
 
 // WritePDU serializes content with control frames on the TLS connection.

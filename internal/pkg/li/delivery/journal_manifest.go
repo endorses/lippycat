@@ -110,8 +110,27 @@ func (c *Client) ExportHeldJournalManifest(path string) error {
 	if err != nil {
 		return err
 	}
-	if filepath.Dir(abs) == spool {
+	parent, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return err
+	}
+	spool, err = filepath.EvalSymlinks(spool)
+	if err != nil {
+		return err
+	}
+	if parent == spool {
 		return fmt.Errorf("export replay manifest outside the spool directory")
+	}
+	key, err := filepath.Abs(c.journal.cfg.KeyFile)
+	if err != nil {
+		return err
+	}
+	key, err = filepath.EvalSymlinks(key)
+	if err != nil {
+		return err
+	}
+	if filepath.Join(parent, filepath.Base(abs)) == key {
+		return fmt.Errorf("export replay manifest must not replace the journal key")
 	}
 	f, err := os.CreateTemp(filepath.Dir(abs), ".li-replay-*.tmp")
 	if err != nil {

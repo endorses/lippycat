@@ -2,7 +2,9 @@
 
 Date: 2026-09-08
 
-Status: Planned; no implementation or acceptance checks completed.
+Status: Phase 0 local contracts and synthetic acceptance fixtures implemented;
+external MDF agreement and production operator mapping verification pending.
+Phases 1–7 are not implemented by this change.
 
 Source: [RADIUS POI implementation assessment](../research/radius-poi-implementation-assessment.md).
 
@@ -85,25 +87,48 @@ URI target type. Migrating active or persisted NAI tasks removes obsolete SIP
 filters and invalidates their authorization evidence; it never converts NAI
 targets into SIP URI targets. Phase 4 implements and verifies this decision.
 
-Dependent matching and LI work must wait for the remaining relevant decisions
-below.
-Decoder and ordinary output work can proceed once the observation contract is
-settled. Record decisions in this plan or a linked design document.
+The local profile is specified in the [identity and target contract](../design/radius-identity-contract.md)
+and [observation, association, and MDF acceptance contract](../design/radius-observation-contract.md).
+Decoder and ordinary output work can proceed against these contracts. External
+operator/MDF acceptance remains a deployment gate; the synthetic profile must
+not be represented as receiving-MDF agreement.
 
-- [ ] Specify exact User-Name semantics: default to byte-exact, case-sensitive matching with no realm stripping, Unicode normalization, or SIP substring behavior; define how textual X1 values map to bytes and how invalid encodings are rejected or represented.
-- [ ] Select the subscriber MAC attribute and accepted encodings for the deployment. Make Calling-Station-Id interpretation explicit, reject malformed or decorated values outside the selected convention, and never use mirrored Ethernet addresses as subscriber identity.
-- [ ] Finalize the required `radiusAttribute` contract: one complete hex-encoded AVP; User-Name, NAS-Port-Id, or a vendor 3561/type 1 VSA containing exactly one target sub-attribute. Validate outer/inner lengths and use exact value-byte matching; reject unsupported types, vendors, malformed encodings, and extra target sub-attributes.
-- [ ] Establish operator line-attribute mappings with documentation and known-line fixtures. Define necessary operator/NAS/access-node scope and how it is enforced through dedicated POI deployment or supported conjunctive X1 criteria. Accept explicitly provisioned resolved values; keep inventory lookup upstream and reject unresolved or insufficiently scoped targets.
-- [ ] Define repeated-attribute matching as an exact matching instance in a fully validated packet; match a VSA target by vendor/type/value regardless of captured sub-attribute grouping. Preserve AND semantics for all criteria within one X1 task and independent ownership across tasks; reject unsupported combinations.
-- [ ] Agree with the receiving MDF on X2 Correlation ID scope, lifetime, request/response reuse, and encoding. Do not equate it with the RADIUS Identifier. Keep Payload Direction unknown unless the service contract supports a stronger value.
-- [ ] Define fragment handling for IPv4 and IPv6. For the initial release, prefer rejecting fragmented datagrams from RADIUS analysis and LI attribution with a counter, while retaining them in independently configured generic packet outputs; require bounded reassembly if fragments must be supported.
-- [ ] Define timeout and capacity defaults, capture-scope identity across reconnects/restarts, retransmission retention, duplicate delivery policy, and behavior for responses observed before requests. Default to no retroactive inherited authorization without a separately bounded design.
-- [ ] Record that association without a RADIUS shared secret is observational, not cryptographic authentication; define fail-closed behavior for multiple plausible request instances.
-- [ ] Create synthetic, non-sensitive PCAP fixtures and expected observations for all six supported message codes, both IP families, accounting/custom ports, multiple clients, and multiple capture scopes. Include expected raw RADIUS payloads for X2 golden checks.
+- [x] Specify exact User-Name semantics: default to byte-exact, case-sensitive matching with no realm stripping, Unicode normalization, or SIP substring behavior; define how textual X1 values map to bytes and how invalid encodings are rejected or represented.
+- [x] Select the subscriber MAC attribute and accepted encodings for the deployment. Make Calling-Station-Id interpretation explicit, reject malformed or decorated values outside the selected convention, and never use mirrored Ethernet addresses as subscriber identity.
+- [x] Finalize the required `radiusAttribute` contract: one complete hex-encoded AVP; User-Name, NAS-Port-Id, or a vendor 3561/type 1 VSA containing exactly one target sub-attribute. Validate outer/inner lengths and use exact value-byte matching; reject unsupported types, vendors, malformed encodings, and extra target sub-attributes.
+- [x] Establish synthetic operator line-attribute mappings with documentation and known-line fixtures. Define necessary operator/NAS/access-node scope and how it is enforced through dedicated POI deployment or supported conjunctive X1 criteria. Accept explicitly provisioned resolved values; keep inventory lookup upstream and reject unresolved or insufficiently scoped targets.
+- [x] Define repeated-attribute matching as an exact matching instance in a fully validated packet; match a VSA target by vendor/type/value regardless of captured sub-attribute grouping. Preserve AND semantics for all criteria within one X1 task and independent ownership across tasks; reject unsupported combinations.
+- [x] Define a concrete local MDF acceptance profile for X2 Correlation ID scope, lifetime, request/response reuse, encoding, and Unknown Payload Direction; do not equate correlation with the RADIUS Identifier.
+- [ ] Obtain receiving-MDF agreement to that profile. No receiver or service contract has been supplied; local design and wire fixtures do not establish this agreement.
+- [ ] Validate production operator MAC/line mappings and isolation against operator documentation and known-line traces. Synthetic mappings and cross-scope fixtures establish the local acceptance convention only.
+- [x] Define fragment handling for IPv4 and IPv6. For the initial release, prefer rejecting fragmented datagrams from RADIUS analysis and LI attribution with a counter, while retaining them in independently configured generic packet outputs; require bounded reassembly if fragments must be supported.
+- [x] Define timeout and capacity defaults, capture-scope identity across reconnects/restarts, retransmission retention, duplicate delivery policy, and behavior for responses observed before requests. Default to no retroactive inherited authorization without a separately bounded design.
+- [x] Record that association without a RADIUS shared secret is observational, not cryptographic authentication; define fail-closed behavior for multiple plausible request instances.
+- [x] Create synthetic, non-sensitive PCAP fixtures and expected observations for all six supported message codes, both IP families, accounting/custom ports, multiple clients, and multiple capture scopes. Include expected raw RADIUS payloads for X2 golden checks.
 
 Exit criterion: target mapping, identity semantics, association policy, and MDF
 expectations are explicit; unsupported scope is documented rather than accepted
 implicitly.
+
+Phase 0 local verification (2026-09-08): the contracts received independent
+sub-agent review; identified memory-limit, late-delivery, and fragment issues
+were corrected and reviewed by the parent agent. The
+[fixture package](../../testdata/radius/README.md) contains 26 PCAP observations
+and 21 original RADIUS payload goldens, covering every supported code in both
+IP families, custom/accounting ports, clients/scopes, known-line collisions,
+VSA grouping, malformed data, and fragments.
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test ./testdata/radius -count=1
+GOCACHE=/tmp/lippycat-go-cache go run ./testdata/radius --check
+```
+
+Both checks passed. An additional independent Python wire check verified all
+26 records, payload goldens, IPv4/UDP checksums, fragment alignment, and complete
+code/family coverage. Changed Markdown and Go files were formatted and
+`git diff --check` passed. These checks do not exercise a production RADIUS
+implementation. External MDF agreement and operator verification remain the
+two unchecked Phase 0 acceptance gates above.
 
 ## Phase 1 — Shared decoder and observation model
 
@@ -249,6 +274,6 @@ transported provenance. Phase 5 requires Phase 4 and the MDF contract and is the
 tap POI milestone. Phase 6 can progress alongside integration once interfaces
 stabilize. Phase 7 is the distributed-support release gate.
 
-This plan is based on the supplied assessment and a limited local integration
-check. Creating it does not verify implementation, execute tests, or establish
-MDF interoperability.
+The initial plan was based on the supplied assessment and a limited local
+integration check. Phase 0 verification is recorded above; it validates design
+inputs and fixture integrity, not the future runtime or MDF interoperability.

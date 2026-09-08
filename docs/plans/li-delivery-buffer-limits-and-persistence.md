@@ -712,3 +712,46 @@ were formatted with gofmt and this plan with Prettier before staging. Performanc
 benchmarks were not rerun during this correctness audit. No confirmed findings
 remain open; these checks establish covered behavior, not proof that every
 possible defect is absent.
+
+## Tenth implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/transport/reorder ownership, journal persistence
+and replay, and lifecycle integration. The parent independently reviewed processor
+configuration and status integration, reproduced both confirmed defects against
+the original source, and verified the fixes. Both other agents cross-reviewed the
+transport changes.
+
+- [x] Preserve healthy destination connection state when a competing background
+      TLS handshake fails. Count the failed attempt without overwriting current
+      connection errors or starting an obsolete reconnect loop.
+- [x] Serialize transport invalidation's membership and connection-state update
+      with connection publication, destination removal and shutdown. Closing an
+      old transport can no longer mark its healthy replacement disconnected;
+      transport cleanup remains outside manager and state locks.
+- [x] Complete final race/build verification, format the changes and commit the
+      fixes with this audit record.
+
+The parent independently ran both deterministic regressions against the original
+transport source using a Go source overlay; both failed on the stale disconnected
+state. Both passed 30 race-enabled iterations against the fixes, independently
+repeated by the implementing agent and a reviewing agent. Queue/reorder and
+journal regressions passed 10 race-enabled iterations; lifecycle/persistence
+regressions passed 30. These reviews found no other confirmed defects.
+
+Final validation passed:
+
+```text
+go test -p 2 -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li/delivery -run 'TestFailedBackgroundDialPreservesPublishedConnectionState|TestInvalidationPreservesConnectionPublishedDuringClose' -count=30 -timeout 30s
+go test -p 2 -count=1 -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -p 2 -tags 'processor li' -o /tmp/li-tenth-audit-processor .
+go build -p 2 -tags 'tap li' -o /tmp/li-tenth-audit-tap .
+go build -p 2 -tags all -o /tmp/li-tenth-audit-all .
+git diff --check
+```
+
+Socket-backed tests and module-cache writes used sandbox escalation. Go sources
+were formatted with gofmt and this plan with Prettier before staging. Performance
+benchmarks were not rerun during this correctness audit. No confirmed findings
+remain open; these checks establish covered behavior, not proof that every
+possible defect is absent.

@@ -333,6 +333,95 @@ func TestJournalReplayBacklogLargerThanMemoryQueue(t *testing.T) {
 	require.Zero(t, c.Stats().X2Dropped)
 }
 
+func TestJournalDestinationRemovalRevokesEntireReplayBacklog(t *testing.T) {
+	cfg := journalTestConfig(t)
+	j, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	xid := uuid.New()
+	destinations := make(map[uuid.UUID]*destinationState)
+	var dids []uuid.UUID
+	for range 2 {
+		did := uuid.New()
+		dids = append(dids, did)
+		dest := &li.Destination{DID: did, ProtocolType: "X2", CreatedAt: time.Now()}
+		destinations[did] = &destinationState{dest: dest}
+		for n := range 3 {
+			journalAdmit(t, j, JournalRecord{DID: did, XID: xid, TaskGeneration: 7, DestinationGeneration: li.DestinationDeliveryGeneration(dest), Data: journalSequencePDU(t, xid, uint32(n))})
+		}
+	}
+	require.NoError(t, j.Close())
+	config := DefaultClientConfig()
+	config.QueueSize = 1
+	config.X2SpoolDir = cfg.Dir
+	config.X2SpoolKeyFile = cfg.KeyFile
+	config.X2SpoolMaxBytes = cfg.MaxBytes
+	c := NewClient(&Manager{destinations: destinations}, config)
+	require.NoError(t, c.Err())
+	defer c.Stop()
+	require.NoError(t, c.ReplayHeldX2(func(JournalRecord) bool { return true }))
+	require.Eventually(t, func() bool { return c.QueueDepth() == 2 }, time.Second, time.Millisecond)
+	require.Equal(t, 4, c.JournalStats().ReplayPending)
+
+	c.RemoveDestination(dids[0])
+	require.Equal(t, 1, c.QueueDepth())
+	require.Equal(t, 5, c.JournalStats().Held)
+	require.Equal(t, 2, c.JournalStats().ReplayPending)
+	c.journal.mu.Lock()
+	var removed, independent []journalEntry
+	for _, e := range c.journal.entries {
+		if e.did == dids[0] {
+			removed = append(removed, *e)
+		} else if e.held {
+			independent = append(independent, *e)
+		}
+	}
+	c.journal.mu.Unlock()
+	for _, e := range removed {
+		require.True(t, e.held)
+		require.False(t, e.authorized)
+	}
+	for _, e := range independent {
+		require.True(t, e.authorized)
+	}
+	require.Zero(t, c.Stats().X2Dropped)
+}
+
+func TestJournalDestinationRemovalRevokesReplayWithoutQueue(t *testing.T) {
+	cfg := journalTestConfig(t)
+	j, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	did, xid := uuid.New(), uuid.New()
+	dest := &li.Destination{DID: did, ProtocolType: "X2", CreatedAt: time.Now()}
+	for n := range 2 {
+		journalAdmit(t, j, JournalRecord{DID: did, XID: xid, TaskGeneration: 7, DestinationGeneration: li.DestinationDeliveryGeneration(dest), Data: journalSequencePDU(t, xid, uint32(n))})
+	}
+	require.NoError(t, j.Close())
+	config := DefaultClientConfig()
+	config.QueueSize = 1
+	config.X2QueueBytes, config.X3QueueBytes = 4096, 4096
+	config.X2SpoolDir = cfg.Dir
+	config.X2SpoolKeyFile = cfg.KeyFile
+	config.X2SpoolMaxBytes = cfg.MaxBytes
+	reserve, err := config.ReservedDestinationBytes()
+	require.NoError(t, err)
+	global, err := config.ReservedGlobalBytes()
+	require.NoError(t, err)
+	config.MemoryBudgetBytes = reserve + global
+	c := NewClient(&Manager{destinations: map[uuid.UUID]*destinationState{did: {dest: dest}}}, config)
+	require.NoError(t, c.Err())
+	defer c.Stop()
+	// Occupy the only destination reservation before approving the backlog.
+	require.NotNil(t, c.getOrCreateQueue(uuid.New()))
+	require.NoError(t, c.ReplayHeldX2(func(JournalRecord) bool { return true }))
+	require.Nil(t, c.getOrCreateQueue(did))
+	require.Equal(t, 2, c.JournalStats().ReplayPending)
+	c.RemoveDestination(did)
+	require.Zero(t, c.JournalStats().ReplayPending)
+	require.Equal(t, 2, c.JournalStats().Held)
+	require.Zero(t, c.QueueDepth())
+	require.Zero(t, c.Stats().X2Dropped)
+}
+
 func TestJournalReplayUnauthorizedHeadBlocksLaterAuthorizedProduct(t *testing.T) {
 	cfg := journalTestConfig(t)
 	j, err := OpenJournal(cfg)

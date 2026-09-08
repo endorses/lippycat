@@ -21,6 +21,7 @@ type persistedState struct {
 	Tasks        []*InterceptTask        `json:"tasks"`
 	Destinations []*persistedDestination `json:"destinations"`
 	Cleanup      map[uuid.UUID][]string  `json:"cleanup_needed,omitempty"`
+	Generations  map[uuid.UUID]uint64    `json:"generations,omitempty"`
 }
 
 // persistedDestination deliberately excludes TLSConfig and all key material.
@@ -103,7 +104,19 @@ func (m *Manager) persistState() error {
 	if m.config.StateFile == "" {
 		return nil
 	}
-	state := &persistedState{Cleanup: make(map[uuid.UUID][]string)}
+	state := &persistedState{Cleanup: make(map[uuid.UUID][]string), Generations: make(map[uuid.UUID]uint64)}
+	m.registry.mu.RLock()
+	for xid, generation := range m.registry.generations {
+		state.Generations[xid] = generation
+	}
+	m.registry.mu.RUnlock()
+	// Unconfirmed startup candidates are deliberately absent from the registry,
+	// but a crash before ADMF sync must not erase their generation watermark.
+	for xid, task := range m.persistedActive {
+		if task.ActivationGeneration > state.Generations[xid] {
+			state.Generations[xid] = task.ActivationGeneration
+		}
+	}
 	m.registry.ListTasks(func(task *InterceptTask) bool {
 		state.Tasks = append(state.Tasks, task)
 		return true
@@ -142,9 +155,17 @@ func (m *Manager) restorePersistedState() error {
 		}
 	}
 	now := time.Now()
+	if state.Generations == nil {
+		state.Generations = make(map[uuid.UUID]uint64)
+	}
 	for _, task := range state.Tasks {
 		if task == nil {
 			return fmt.Errorf("nil task in persisted LI state")
+		}
+		// Older state files stored generations only on task definitions. Preserve
+		// that watermark even when an expired task cannot be restored.
+		if task.ActivationGeneration > state.Generations[task.XID] {
+			state.Generations[task.XID] = task.ActivationGeneration
 		}
 		if !task.EndTime.IsZero() && !now.Before(task.EndTime) {
 			continue
@@ -163,6 +184,9 @@ func (m *Manager) restorePersistedState() error {
 			copyTask := *task
 			m.persistedActive[task.XID] = &copyTask
 		}
+	}
+	for xid, generation := range state.Generations {
+		m.registry.seedGeneration(xid, generation)
 	}
 	// Retry withdrawal before any task can be armed. These IDs are safe to
 	// remove because active tasks are not restored until ADMF confirmation.

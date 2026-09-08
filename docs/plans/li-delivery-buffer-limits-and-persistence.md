@@ -506,3 +506,65 @@ Socket-backed tests and module-cache writes used sandbox escalation. Go sources
 were formatted with gofmt and this plan with Prettier before staging. No confirmed
 findings remain open; the checks establish the covered behavior, not proof of the
 absence of every possible defect.
+
+## Sixth implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/reorder ownership, journal persistence/replay,
+and configuration/lifecycle integration. Parent review and agent cross-review
+identified additional gaps beyond the passing baseline race suite.
+
+- [x] Establish missing or future admission timestamps at reorder ingress, so
+      buffered delay counts against X3 age. Carry the reorder entry's authoritative
+      call generation into delivery cancellation metadata.
+- [x] Revoke replay approval for the entire held destination backlog during
+      removal/replacement, including destinations without a delivery queue.
+      Serialize revocation with authorization and replay publication.
+- [x] Reserve one incoming payload up to the larger interface byte limit in the
+      global memory budget, covering admission while existing queues remain
+      charged. Check reservation arithmetic for overflow.
+- [x] Preserve task generation watermarks independently of retained task
+      definitions, including expired legacy state, purged tombstones and startup
+      candidates not confirmed by ADMF. Preserve unchanged confirmed activations
+      while rejecting generation exhaustion and reuse.
+- [x] Checkpoint task generations before enabling their enforcement. Failed
+      state-file writes roll back provisional activation/modification instead of
+      allowing journal product to use an identity that restart could reuse.
+- [x] Checkpoint destination identity changes before notifying delivery owners;
+      roll back failed persistence without publishing an unrecorded revision.
+- [x] Independently verify all regressions, complete the race/build matrix,
+      format the changes and commit the fixes with this audit record.
+
+The parent independently reviewed every implementation and regression, and passed
+the new regressions for 30 race-enabled iterations. Agents cross-reviewed the
+changes and used source overlays to demonstrate failures in the original code.
+Coverage includes missing/future reorder admission, conflicting call metadata,
+held backlog beyond queue capacity and without a queue, exact memory reservation
+boundaries, expired/purged/unconfirmed task state, unchanged restart identities,
+generation exhaustion, and failed task/destination state-file writes before
+enforcement or delivery publication.
+
+Explicit memory budgets may now need an additional allowance equal to the larger
+interface byte limit. Per-XID generation watermarks remain in the LI state file
+after task cleanup; retain this state together with the journal. These policies
+are documented in the operator guide. Performance benchmarks were not rerun in
+this correctness audit.
+
+Final verification passed:
+
+```text
+go test -p 2 -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li/delivery -run 'TestReorderEstablishesAdmissionBeforeBufferedDelay|TestReorderCallIdentityReachesDeliveryCancellation|TestJournalDestinationRemovalRevokes|TestMemoryBudgetReservesAdmissionAlongsideFullQueues' -count=30 -timeout 60s
+go test -race -tags li ./internal/pkg/li -run 'TestDestinationPersistencePrecedesDeliveryPublication|TestPersistedGeneration|TestPersistedActiveGeneration|TestTaskGeneration' -count=30 -timeout 60s
+go test -p 2 -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -p 2 -tags 'processor li' -o /tmp/li-final-audit-processor .
+go build -p 2 -tags 'tap li' -o /tmp/li-final-audit-tap .
+go build -p 2 -tags all -o /tmp/li-final-audit-all .
+git diff --check
+```
+
+Socket-backed tests and module-cache writes used sandbox escalation. One matrix
+run compiled an intermediate regression test that compared serialized timestamps
+including monotonic state; the corrected timestamp-value assertion passed repeated
+regressions and the final full matrix. Go sources were formatted with gofmt and
+changed Markdown with Prettier before staging. No confirmed findings remain open;
+these checks establish the covered behavior, not proof that all defects are absent.

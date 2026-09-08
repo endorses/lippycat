@@ -73,7 +73,9 @@ func (c ClientConfig) Validate() error {
 	return nil
 }
 
-// ReservedGlobalBytes covers the shared RTP reorder stage and journal workers.
+// ReservedGlobalBytes covers the shared RTP reorder stage, journal workers, and
+// one incoming payload clone. admissionMu serializes producers, but their clone
+// exists before capacity checks can evict or reject against full queues.
 func (c ClientConfig) ReservedGlobalBytes() (int64, error) {
 	const reorderBytes = int64(16 << 20)
 	if c.QueueSize == 0 {
@@ -83,7 +85,12 @@ func (c ClientConfig) ReservedGlobalBytes() (int64, error) {
 	if journal > math.MaxInt64-reorderBytes {
 		return 0, fmt.Errorf("LI global reservation overflows")
 	}
-	return reorderBytes + journal, nil
+	total := reorderBytes + journal
+	admission := max(c.X2QueueBytes, c.X3QueueBytes)
+	if admission > math.MaxInt64-total {
+		return 0, fmt.Errorf("LI global admission reservation overflows")
+	}
+	return total + admission, nil
 }
 
 // ResourceLimits reports effective configured limits and conservative managed

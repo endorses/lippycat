@@ -723,6 +723,22 @@ func (j *Journal) HoldsDestination(did uuid.UUID) bool {
 	defer j.mu.Unlock()
 	return j.heldByDID[did] > 0
 }
+
+// revokeDestinationReplay invalidates approvals for backlog that has not yet
+// acquired a queue owner. The caller holds controlMu so an overlapping approval
+// cannot publish a decision made before destination removal.
+func (j *Journal) revokeDestinationReplay(did uuid.UUID) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for _, e := range j.entries {
+		if e.did == did && e.held && e.authorized {
+			e.authorized = false
+			j.stats.ReplayPending--
+		}
+	}
+	j.replayRevision++
+}
+
 func (j *Journal) decrementHeldLocked(did uuid.UUID) {
 	if j.heldByDID[did] <= 1 {
 		delete(j.heldByDID, did)

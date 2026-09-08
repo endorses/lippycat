@@ -3,6 +3,7 @@
 package delivery
 
 import (
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"math"
 	"testing"
@@ -43,6 +44,28 @@ func TestIndependentPDUCapacityOverrides(t *testing.T) {
 	x2, x3 = c.EffectiveQueueSizes()
 	require.Equal(t, 100, x2)
 	require.Equal(t, 7, x3)
+}
+
+func TestMemoryBudgetReservesAdmissionAlongsideFullQueues(t *testing.T) {
+	for _, limits := range [][2]int64{{32 << 20, 1 << 20}, {1 << 20, 32 << 20}} {
+		config := ClientConfig{QueueSize: 1, X2QueueBytes: limits[0], X3QueueBytes: limits[1]}
+		queues, err := config.ReservedDestinationBytes()
+		require.NoError(t, err)
+		// A full destination can coexist with one cloned incoming PDU while
+		// admission checks whether it can evict or must reject that PDU.
+		config.MemoryBudgetBytes = queues + DefaultReorderBudgetBytes
+		require.Error(t, config.Validate(), "queue-only sizing omits the admitted payload clone")
+		config.MemoryBudgetBytes += 32 << 20
+		require.NoError(t, config.Validate())
+		client := NewClient(nil, config)
+		defer client.Stop()
+		require.NoError(t, client.ReserveDestination(uuid.New()))
+		_, budget, reserved := client.ResourceLimits()
+		require.Equal(t, budget, reserved)
+		require.Error(t, client.ReserveDestination(uuid.New()))
+	}
+	_, err := (ClientConfig{X3QueueBytes: math.MaxInt64}).ReservedGlobalBytes()
+	require.Error(t, err, "admission scratch must not overflow global reservation")
 }
 
 func TestDocumentedDeliverySizingConfiguration(t *testing.T) {

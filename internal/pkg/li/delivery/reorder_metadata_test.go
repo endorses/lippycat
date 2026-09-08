@@ -3,12 +3,56 @@
 package delivery
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+func TestReorderEstablishesAdmissionBeforeBufferedDelay(t *testing.T) {
+	for _, initial := range []struct {
+		name string
+		time time.Time
+	}{
+		{name: "missing"},
+		{name: "future", time: time.Now().Add(time.Hour)},
+	} {
+		t.Run(initial.name, func(t *testing.T) {
+			did := uuid.New()
+			manager, _ := testKeepaliveManager(did)
+			config := DefaultClientConfig()
+			config.X3MaxAge = time.Millisecond
+			client := NewClient(manager, config)
+			defer client.Stop()
+			var delivered ReorderEntry
+			var deliveryErr error
+			rb := NewCallAwareReorderBuffer(func(entry ReorderEntry) {
+				if entry.PDU[0] == 3 {
+					delivered = entry
+					deliveryErr = client.SendX3WithMetadata(uuid.New(), []uuid.UUID{did}, entry.PDU, entry.Metadata)
+				}
+			}, time.Hour)
+			defer func() { rb.Stop(); rb.Wait() }()
+			rb.DeliverX3(1, 1, []byte{1})
+			before := time.Now()
+			rb.DeliverEntryX3AfterCommit(ReorderEntry{PDU: []byte{3}, Metadata: li.DeliveryMetadata{AdmittedAt: initial.time}}, 1, 3, nil)
+			after := time.Now()
+			// Final enqueue must include residence in the reorder gap, even
+			// when the caller has no admission timestamp of its own.
+			time.Sleep(5 * time.Millisecond)
+			rb.Stop()
+			rb.Wait()
+			require.False(t, delivered.Metadata.AdmittedAt.Before(before))
+			require.False(t, delivered.Metadata.AdmittedAt.After(after))
+			require.ErrorIs(t, deliveryErr, ErrExpired)
+			require.Zero(t, client.QueueDepth())
+			require.Equal(t, uint64(1), client.Stats().DroppedByReason["expired"])
+		})
+	}
+}
 
 func TestReorderPreservesAdmissionMetadata(t *testing.T) {
 	out := make(chan ReorderEntry, 3)
@@ -27,6 +71,29 @@ func TestReorderPreservesAdmissionMetadata(t *testing.T) {
 		require.Equal(t, []byte{3}, got.PDU)
 	case <-time.After(time.Second):
 		t.Fatal("reorder did not flush idle gap")
+	}
+}
+
+func TestReorderCallIdentityReachesDeliveryCancellation(t *testing.T) {
+	for _, metadataGeneration := range []uint64{0, 99} {
+		t.Run(fmt.Sprint(metadataGeneration), func(t *testing.T) {
+			did := uuid.New()
+			manager, _ := testKeepaliveManager(did)
+			client := NewClient(manager, DefaultClientConfig())
+			defer client.Stop()
+			rb := NewCallAwareReorderBuffer(func(entry ReorderEntry) {
+				require.NoError(t, client.SendX3WithMetadata(uuid.New(), []uuid.UUID{did}, entry.PDU, entry.Metadata))
+			}, time.Hour)
+			defer func() { rb.Stop(); rb.Wait() }()
+			rb.DeliverEntryX3AfterCommit(ReorderEntry{
+				CallID: "call", Generation: 7, PDU: []byte{1},
+				Metadata: li.DeliveryMetadata{CallGeneration: metadataGeneration},
+			}, 1, 1, nil)
+			require.Equal(t, 1, client.QueueDepth())
+			client.CancelCall("call", 7)
+			require.Zero(t, client.QueueDepth(), "delivery must cancel the same call generation admitted by reorder")
+			require.Equal(t, uint64(1), client.Stats().DroppedByReason["lifecycle_suppressed"])
+		})
 	}
 }
 

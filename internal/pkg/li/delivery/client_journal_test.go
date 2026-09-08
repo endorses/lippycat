@@ -17,6 +17,56 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestJournalReplayPublicationSerializedWithHold(t *testing.T) {
+	did := uuid.New()
+	j := &Journal{
+		entries:   map[uint64]*journalEntry{1: {did: did, held: true, persisted: true, authorized: true}},
+		heldByDID: map[uuid.UUID]int{did: 1},
+		stats:     JournalStats{Held: 1, Persisted: 1, ReplayPending: 1},
+	}
+	q := newDestinationQueue(did, 1)
+	q.preserveX2 = true
+	item := &deliveryItem{pduType: PDUTypeX2, data: []byte("IRI")}
+	item.journalID.Store(1)
+	item.persisted.Store(true)
+
+	// A removal owns the journal state while deciding whether this record is
+	// already held. Replay must not publish a sendable queue pointer during it.
+	j.mu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			j.mu.Unlock()
+		}
+	}()
+	started, done := make(chan struct{}), make(chan bool, 1)
+	go func() {
+		close(started)
+		_, ok := j.enqueueReplay(q, item)
+		done <- ok
+	}()
+	<-started
+	require.Never(t, func() bool {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		return q.items[0].Len() != 0
+	}, 30*time.Millisecond, time.Millisecond)
+	j.mu.Unlock()
+	locked = false
+	select {
+	case ok := <-done:
+		require.True(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("replay publication blocked")
+	}
+	for _, removed := range q.stopAndDrain("destination_removed") {
+		j.Hold(removed.journalID.Load())
+	}
+	require.Equal(t, 1, j.Stats().Held)
+	require.Zero(t, j.Stats().ReplayPending)
+	require.True(t, j.HoldsDestination(did))
+}
+
 func TestJournalManifestRequiresIdentityAndCurrentAuthorization(t *testing.T) {
 	cfg := journalTestConfig(t)
 	j, err := OpenJournal(cfg)

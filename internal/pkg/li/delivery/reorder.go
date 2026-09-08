@@ -53,15 +53,16 @@ type reorderStreamKey struct {
 	ssrc       uint32
 }
 type rtpStream struct {
-	budget      *ReorderBudget
-	buffer      map[uint16]bufferedPDU
-	bytes       int
-	lastFlushed uint16
-	hasBase     bool
-	timer       *time.Timer
-	timerDone   func()
-	deadline    time.Time
-	lastUsed    time.Time
+	budget          *ReorderBudget
+	buffer          map[uint16]bufferedPDU
+	bytes           int
+	lastFlushed     uint16
+	hasBase         bool
+	timer           *time.Timer
+	timerGeneration uint64
+	timerDone       func()
+	deadline        time.Time
+	lastUsed        time.Time
 }
 
 func NewReorderBuffer(deliverFn func([]byte), flushDelay time.Duration) *ReorderBuffer {
@@ -160,6 +161,9 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 			s.lastFlushed = seq
 			out = append(out, entry)
 			out = append(out, drainConsecutive(s)...)
+			if len(s.buffer) == 0 {
+				rb.disarmLocked(s)
+			}
 		case seqBefore(seq, next):
 			out = append(out, entry)
 		default:
@@ -250,9 +254,14 @@ func (rb *ReorderBuffer) armTimerLocked(key reorderStreamKey, s *rtpStream, now 
 		})
 	}
 	s.timerDone = done
-	s.timer = time.AfterFunc(delay, func() { defer done(); rb.flush(key, s) })
+	s.timerGeneration++
+	generation := s.timerGeneration
+	s.timer = time.AfterFunc(delay, func() { defer done(); rb.flush(key, s, generation) })
 }
 func (rb *ReorderBuffer) disarmLocked(s *rtpStream) {
+	// A timer that already fired may still be waiting for rb.mu. Revoke that
+	// invocation before a subsequent gap arms another timer on the same stream.
+	s.timerGeneration++
 	if s.timer != nil {
 		if s.timer.Stop() {
 			s.timerDone()
@@ -261,10 +270,10 @@ func (rb *ReorderBuffer) disarmLocked(s *rtpStream) {
 	}
 	s.deadline = time.Time{}
 }
-func (rb *ReorderBuffer) flush(key reorderStreamKey, expected *rtpStream) {
+func (rb *ReorderBuffer) flush(key reorderStreamKey, expected *rtpStream, generation uint64) {
 	rb.mu.Lock()
 	s := rb.streams[key]
-	if s == nil || s != expected {
+	if s == nil || s != expected || s.timerGeneration != generation {
 		rb.mu.Unlock()
 		return
 	}

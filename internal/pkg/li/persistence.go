@@ -98,6 +98,8 @@ func writePersistedState(path string, state *persistedState) error {
 }
 
 func (m *Manager) persistState() error {
+	m.persistenceMu.Lock()
+	defer m.persistenceMu.Unlock()
 	if m.config.StateFile == "" {
 		return nil
 	}

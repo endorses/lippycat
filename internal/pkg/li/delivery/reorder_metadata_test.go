@@ -58,3 +58,43 @@ func TestSharedReorderBudgetReleasedOnFlush(t *testing.T) {
 	rb.Stop()
 	require.Zero(t, budget.Used())
 }
+
+func TestReorderResolvedGapDisarmsDeadline(t *testing.T) {
+	rb := NewCallAwareReorderBuffer(func(ReorderEntry) {}, time.Hour)
+	defer func() { rb.Stop(); rb.Wait() }()
+	rb.DeliverCallX3("call", 1, 9, 1, []byte{1})
+	rb.DeliverCallX3("call", 1, 9, 3, []byte{3})
+	key := reorderStreamKey{callID: "call", generation: 1, ssrc: 9}
+	s := rb.streams[key]
+	require.NotNil(t, s.timer)
+	rb.DeliverCallX3("call", 1, 9, 2, []byte{2})
+	require.Nil(t, s.timer, "a resolved gap must not shorten the next gap's delay")
+	require.True(t, s.deadline.IsZero())
+}
+
+func TestReorderRejectsPreviousTimerOnSameStream(t *testing.T) {
+	var delivered []byte
+	rb := NewCallAwareReorderBuffer(func(entry ReorderEntry) { delivered = append(delivered, entry.PDU[0]) }, time.Hour)
+	defer func() { rb.Stop(); rb.Wait() }()
+	rb.DeliverCallX3("call", 1, 9, 1, []byte{1})
+	rb.DeliverCallX3("call", 1, 9, 3, []byte{3})
+	key := reorderStreamKey{callID: "call", generation: 1, ssrc: 9}
+	s := rb.streams[key]
+	oldGeneration := s.timerGeneration
+	rb.DeliverCallX3("call", 1, 9, 2, []byte{2})
+	rb.DeliverCallX3("call", 1, 9, 5, []byte{5})
+	newTimer := s.timer
+	newTimerDone := s.timerDone
+	defer func() {
+		if newTimer.Stop() {
+			newTimerDone()
+		}
+	}()
+	// Model an old timer callback that fired before cancellation but only
+	// acquires the buffer lock after a new gap has armed another timer.
+	rb.flush(key, s, oldGeneration)
+	packets, _ := rb.Buffered()
+	require.Equal(t, 1, packets)
+	require.Same(t, newTimer, s.timer)
+	require.Equal(t, []byte{1, 2, 3}, delivered)
+}

@@ -755,3 +755,50 @@ were formatted with gofmt and this plan with Prettier before staging. Performanc
 benchmarks were not rerun during this correctness audit. No confirmed findings
 remain open; these checks establish covered behavior, not proof that every
 possible defect is absent.
+
+## Eleventh implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/transport/reorder ownership, journal persistence
+and replay, and lifecycle integration. The parent reviewed processor integration,
+independently reproduced the findings, and verified the fixes. Agents also
+cross-reviewed lifecycle, transport and processor cleanup changes.
+
+- [x] Cancel expired delivery generations even when filter withdrawal or lifecycle
+      checkpointing fails. Keep the lifecycle barrier through processor cleanup.
+- [x] Reject stale expiration snapshots before cleanup, and guard registry fallback
+      finalization by activation generation. Expiry cannot remove a reactivated
+      task's filters or deactivate its newer suspended generation.
+- [x] Wake retired transport keepalive workers after invalidation, removal and
+      replacement; disabled keepalive workers exit immediately. Reconnect churn
+      no longer retains old workers until their P1/P2 timers expire.
+- [x] Delete idle reorder buffers only when the map still contains the observed
+      owner. Cleanup callbacks cannot remove a newer activation's replacement.
+- [x] Complete the final race/build matrix and format the audit changes.
+
+The parent reproduced all four lifecycle regression failures using original
+manager/registry sources with only the regression's helper-call signature adapted.
+Original transport source failed all four keepalive retirement cases. Restoring
+unconditional reorder deletion also failed its replacement-owner regression.
+All fixed regressions passed 30 race-enabled iterations, independently repeated
+by reviewing agents. Journal tests passed 10 race-enabled iterations with no
+additional confirmed findings. Performance benchmarks were not rerun during this
+correctness audit.
+
+Final validation passed:
+
+```text
+go test -p 2 -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li -run 'TestExpiry|TestStaleExpiry|TestPhase7Expiry|TestTaskAdmission' -count=30 -timeout 60s
+go test -race -tags li ./internal/pkg/li/delivery -run TestKeepaliveWorkerExitsWhenDisabledOrRetired -count=30 -timeout 60s
+go test -race -tags 'all li' ./internal/pkg/processor -run TestLIIdleReorderCleanupPreservesReplacement -count=30 -timeout 60s
+go test -p 2 -count=1 -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -p 2 -tags 'processor li' -o /tmp/li-eleventh-audit-processor .
+go build -p 2 -tags 'tap li' -o /tmp/li-eleventh-audit-tap .
+go build -p 2 -tags all -o /tmp/li-eleventh-audit-all .
+git diff --check
+```
+
+Socket-backed tests and Go module metadata cache writes used sandbox escalation.
+Go sources were formatted with gofmt and this plan with Prettier before staging.
+No confirmed findings remain open; these checks establish covered behavior, not
+proof that every possible defect is absent.

@@ -278,12 +278,19 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 	internalCallback := func(task *InterceptTask, reason DeactivationReason) {
 		if reason == DeactivationReasonExpired {
 			m.lifecycleMu.Lock()
-			if err := m.completeExpiration(task); err != nil {
-				logger.Error("LI task expiry enforcement failed", "xid", task.XID, "end_time", task.EndTime, "error", err)
-				m.lifecycleMu.Unlock()
+			defer m.lifecycleMu.Unlock()
+			current, err := m.registry.GetTaskDetails(task.XID)
+			if err != nil || current.ActivationGeneration != task.ActivationGeneration {
+				// A lifecycle transition won after the expiration snapshot. Its
+				// cleanup owns the old generation; do not touch its replacement.
 				return
 			}
-			m.lifecycleMu.Unlock()
+			if err := m.completeExpiration(task); err != nil {
+				logger.Error("LI task expiry enforcement failed", "xid", task.XID, "end_time", task.EndTime, "error", err)
+				// The expired generation is already gated. Delivery and reorder
+				// cancellation must still run when withdrawal or persistence fails;
+				// otherwise previously admitted X3 can survive task expiration.
+			}
 		}
 		// Report implicit deactivation to ADMF via X1 client.
 		if m.x1Client != nil && reason != DeactivationReasonADMF {
@@ -1267,7 +1274,7 @@ func (m *Manager) completeExpiration(task *InterceptTask) error {
 	if err := m.filters.RemoveFiltersForTask(task.XID); err != nil {
 		return fmt.Errorf("withdraw %d filters: %w", len(filterIDs), err)
 	}
-	if err := m.registry.finishExpiration(task.XID); err != nil {
+	if err := m.registry.finishExpiration(task.XID, task.ActivationGeneration); err != nil {
 		return err
 	}
 	logger.Info("LI task expired", "xid", task.XID, "end_time", task.EndTime, "filters", len(filterIDs), "cleanup", "complete")

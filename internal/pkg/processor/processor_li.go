@@ -776,21 +776,7 @@ func (p *Processor) startLIManager() (err error) {
 				return
 			case <-ticker.C:
 				liReorderBuffers.Range(func(key, value any) bool {
-					buf := value.(*delivery.ReorderBuffer)
-					lastUsed := buf.LastUsed()
-					if lastUsed.IsZero() || time.Since(lastUsed) > 60*time.Second {
-						buf.Stop()
-						liReorderBuffers.Delete(key)
-						logger.Debug("Cleaned up idle reorder buffer", "key", key)
-						return true
-					}
-					// Buffer still active overall, but prune per-SSRC streams whose
-					// calls have ended. Without this the streams map grows by ~2
-					// entries per completed call for the lifetime of the XID.
-					if buf.CleanupIdleStreams(60 * time.Second) {
-						buf.Stop()
-						liReorderBuffers.Delete(key)
-					}
+					cleanupLIReorderBuffer(key, value.(*delivery.ReorderBuffer), 60*time.Second)
 					return true
 				})
 			}
@@ -857,6 +843,22 @@ func (p *Processor) startLIManager() (err error) {
 		}
 	}
 	return nil
+}
+
+// cleanupLIReorderBuffer retires only the buffer observed by the idle sweep.
+// A lifecycle transition can replace the map entry while Stop flushes callbacks.
+func cleanupLIReorderBuffer(key any, buf *delivery.ReorderBuffer, maxIdle time.Duration) {
+	lastUsed := buf.LastUsed()
+	if lastUsed.IsZero() || time.Since(lastUsed) > maxIdle {
+		buf.Stop()
+		liReorderBuffers.CompareAndDelete(key, buf)
+		logger.Debug("Cleaned up idle reorder buffer", "key", key)
+		return
+	}
+	if buf.CleanupIdleStreams(maxIdle) {
+		buf.Stop()
+		liReorderBuffers.CompareAndDelete(key, buf)
+	}
 }
 
 // stopLIManager stops the LI Manager and delivery client.

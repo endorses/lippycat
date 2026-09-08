@@ -4,6 +4,7 @@ package delivery
 
 import (
 	"context"
+	"fmt"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -169,4 +170,83 @@ func TestExpiryHeapRemovesOnlyDueUnclaimedEntries(t *testing.T) {
 	require.Equal(t, uint64(1), c.Stats().X3Dropped)
 	c.Stop()
 	require.Empty(t, q.expiry)
+}
+
+func TestShutdownKeepsClaimChargedUntilTransportResolves(t *testing.T) {
+	for _, uncertain := range []bool{false, true} {
+		t.Run(fmt.Sprint(uncertain), func(t *testing.T) {
+			c := NewClient(nil, DefaultClientConfig())
+			q := c.getOrCreateQueue(uuid.New())
+			item := &deliveryItem{pduType: PDUTypeX3, data: []byte("active"), queued: time.Now(), metadata: DeliveryMetadata{Deadline: time.Now().Add(time.Hour)}}
+			item.persisted.Store(true)
+			c.attachPayload(item)
+			_, ok := q.enqueue(item)
+			require.True(t, ok)
+			c.stats.QueueDepth = 1
+			c.stats.QueueBytes = int64(len(item.data))
+			require.Same(t, item, q.claim(PDUTypeX3))
+			c.dropDestinationQueue(q, "shutdown_timeout")
+			require.False(t, item.terminal.Load())
+			require.Equal(t, int64(len(item.data)), c.Stats().QueueBytes)
+			require.Equal(t, int64(len(item.data)), c.Stats().PhysicalQueueBytes)
+			require.Equal(t, int64(len(item.data)), q.snapshot().X3InFlightBytes)
+			item.uncertain.Store(uncertain)
+			c.finishStoppedClaim(q, PDUTypeX3)
+			c.finishStoppedClaim(q, PDUTypeX3)
+			require.Zero(t, c.Stats().QueueDepth)
+			require.Zero(t, c.Stats().QueueBytes)
+			require.Zero(t, c.Stats().PhysicalQueueBytes)
+			reason := "shutdown_timeout"
+			if uncertain {
+				reason = "uncertain_write"
+			}
+			require.Equal(t, uint64(1), q.snapshot().DroppedByReason[reason])
+		})
+	}
+}
+
+func TestStoppedTransportClaimRecordsUncertainty(t *testing.T) {
+	for _, remove := range []bool{false, true} {
+		t.Run(fmt.Sprint(remove), func(t *testing.T) {
+			conn, peer := tlsPipe(t)
+			did := uuid.New()
+			manager, state := testKeepaliveManager(did)
+			manager.registerConnection(state, conn, PDUTypeX3)
+			manager.ReleaseConnection(did, conn)
+			runtimeValue, _ := manager.connectionRuntime.Load(conn)
+			runtime := runtimeValue.(*connectionRuntime)
+			config := DefaultClientConfig()
+			config.SendTimeout = time.Hour
+			config.ShutdownTimeout = 10 * time.Millisecond
+			client := NewClient(manager, config)
+			client.Start()
+			t.Cleanup(func() {
+				require.NoError(t, peer.NetConn().Close())
+				client.Stop()
+				manager.Stop()
+			})
+			require.NoError(t, client.SendX3(uuid.New(), []uuid.UUID{did}, []byte("blocked product")))
+			require.Eventually(t, func() bool {
+				if runtime.writeMu.TryLock() {
+					runtime.writeMu.Unlock()
+					return false
+				}
+				return true
+			}, time.Second, time.Millisecond)
+			if remove {
+				client.RemoveDestination(did)
+			} else {
+				client.Stop()
+			}
+			stats := client.Stats()
+			require.Zero(t, stats.QueueDepth)
+			require.Zero(t, stats.QueueBytes)
+			require.Zero(t, stats.PhysicalQueueBytes)
+			require.Equal(t, uint64(1), stats.UncertainWrites)
+			require.Equal(t, uint64(1), stats.X3Dropped)
+			require.Equal(t, uint64(1), stats.DroppedByReason["uncertain_write"])
+			require.Zero(t, stats.DroppedByReason["shutdown_timeout"])
+			require.Zero(t, stats.DroppedByReason["destination_removed"])
+		})
+	}
 }

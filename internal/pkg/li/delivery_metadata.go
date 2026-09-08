@@ -25,7 +25,12 @@ func DestinationDeliveryGeneration(d *Destination) uint64 {
 	if d == nil {
 		return 0
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d\x00%s\x00%d\x00%s\x00%t\x00%t", d.DID, d.CreatedAt.UnixNano(), d.Address, d.Port, d.ProtocolType, d.X2Enabled, d.X3Enabled)))
+	identity := fmt.Sprintf("%s\x00%d\x00%s\x00%d\x00%s\x00%t\x00%t", d.DID, d.CreatedAt.UnixNano(), d.Address, d.Port, d.ProtocolType, d.X2Enabled, d.X3Enabled)
+	// Keep legacy revision-zero identities stable across upgrades.
+	if d.DeliveryRevision != 0 {
+		identity += fmt.Sprintf("\x00%d", d.DeliveryRevision)
+	}
+	sum := sha256.Sum256([]byte(identity))
 	generation := binary.BigEndian.Uint64(sum[:8])
 	if generation == 0 {
 		return 1

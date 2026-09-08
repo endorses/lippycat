@@ -743,10 +743,7 @@ func (p *Processor) startLIManager() (err error) {
 			}
 		})
 		p.liManager.SetDestinationModifiedCallback(func(dest *li.Destination) {
-			if liDeliveryClient != nil {
-				liDeliveryClient.RemoveDestination(dest.DID)
-			}
-			if err := liDeliveryMgr.UpdateDestination(dest); err != nil {
+			if err := replaceLIDeliveryDestination(liDeliveryMgr, liDeliveryClient, dest); err != nil {
 				logger.Warn("Failed to update delivery destination",
 					"did", dest.DID,
 					"address", dest.Address,
@@ -1007,4 +1004,26 @@ func (p *Processor) populateLIEncodingStats(dst *management.ProcessorStats) {
 		dst.LiEncoding.RtpOwnershipAmbiguous = sourceStats.RTPOwnershipAmbiguous
 		dst.LiEncoding.IdentityInheritanceSuppressed = sourceStats.IdentityInheritanceSuppressed
 	}
+}
+
+// replaceLIDeliveryDestination revokes the previous endpoint before reserving and
+// activating its replacement. A previously capacity-refused destination may not
+// exist in the delivery manager, so replacement must also support first activation.
+func replaceLIDeliveryDestination(manager *delivery.Manager, client *delivery.Client, dest *li.Destination) error {
+	if err := manager.RemoveDestination(dest.DID); err != nil && !errors.Is(err, delivery.ErrDestinationNotFound) {
+		return err
+	}
+	if client != nil {
+		client.RemoveDestination(dest.DID)
+		if err := client.ReserveDestination(dest.DID); err != nil {
+			return fmt.Errorf("reserve replacement delivery destination: %w", err)
+		}
+	}
+	if err := manager.AddDestination(dest); err != nil {
+		if client != nil {
+			client.RemoveDestination(dest.DID)
+		}
+		return err
+	}
+	return nil
 }

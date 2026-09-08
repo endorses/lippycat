@@ -58,6 +58,15 @@ func (c *Client) persistItem(q *destinationQueue, item *deliveryItem) error {
 		}
 		item.journalID.Store(id)
 		item.persisted.Store(true)
+		q.mu.Lock()
+		stopped, reason := q.stopped, q.stopReason
+		q.mu.Unlock()
+		if stopped {
+			// A dispatcher can discover destination removal while this write
+			// is pending. The stopped owner keeps pending X2 charged until
+			// this callback can retain the now-durable product on disk.
+			c.dropDestinationQueue(q, reason)
+		}
 		q.signal()
 	}, false)
 	// journalID is published only by the callback before persisted.Store; the
@@ -159,7 +168,12 @@ func (c *Client) PurgeHeldX2() error {
 		if err := c.journal.Purge(r.ID); err != nil {
 			return err
 		}
-		q := c.getOrCreateQueue(r.DID)
+		// Purging historical product must not reserve a delivery queue for a
+		// destination that may no longer exist. Aggregate accounting survives
+		// removal; destination-local accounting is optional.
+		c.queuesMu.RLock()
+		q := c.queues[r.DID]
+		c.queuesMu.RUnlock()
 		c.recordTerminalDrop(r.DID, q, &deliveryItem{pduType: PDUTypeX2, xid: r.XID, data: r.Data, queued: r.AdmittedAt}, "administrative_purge")
 		return nil
 	})

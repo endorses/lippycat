@@ -285,8 +285,18 @@ func (j *Journal) admit(rec JournalRecord, cb func(uint64, error), clone bool) (
 	j.entries[rec.ID] = &journalEntry{did: rec.DID, payloadBytes: int64(len(rec.Data)), size: size}
 	j.stats.Bytes += size
 	j.stats.Pending++
-	j.ops <- journalOperation{record: rec, callback: cb}
-	return rec.ID, nil
+	// Flush can occupy the last channel slot without holding mu. Never wait
+	// here: the worker needs mu to finish its current operation and free space.
+	select {
+	case j.ops <- journalOperation{record: rec, callback: cb}:
+		return rec.ID, nil
+	default:
+		delete(j.entries, rec.ID)
+		j.stats.Bytes -= size
+		j.stats.Pending--
+		j.stats.Rejected++
+		return 0, ErrJournalFull
+	}
 }
 
 // Complete checkpoints local write completion. A crash before the checkpoint may

@@ -60,6 +60,7 @@ type deliveryItem struct {
 	metadata    DeliveryMetadata
 	claimed     bool
 	terminal    atomic.Bool
+	uncertain   atomic.Bool // any attempt may already have reached the transport
 	completion  chan error
 	cancel      context.CancelFunc
 	conn        *tls.Conn
@@ -189,6 +190,7 @@ type destinationQueue struct {
 	bytes           [2]int64
 	limits          [2]int64
 	stopped         bool
+	stopReason      string
 	stats           DestinationDeliveryStats
 	lastOverflowLog time.Time
 }
@@ -352,29 +354,34 @@ func (q *destinationQueue) snapshot() DestinationDeliveryStats {
 	}
 	return s
 }
-func (q *destinationQueue) stopAndDrain() []*deliveryItem {
+func (q *destinationQueue) stopAndDrain(reason string) []*deliveryItem {
 	q.mu.Lock()
 	if !q.stopped {
 		q.stopped = true
 		close(q.stop)
 	}
+	if q.stopReason == "" {
+		q.stopReason = reason
+	}
 	var out []*deliveryItem
 	var cancels []context.CancelFunc
 	for i := range q.items {
-		for e := q.items[i].Front(); e != nil; e = e.Next() {
+		for e := q.items[i].Front(); e != nil; {
+			next := e.Next()
 			item := e.Value.(*deliveryItem)
 			if item.cancel != nil {
 				cancels = append(cancels, item.cancel)
 			}
-			item.expiryIndex = -1
-			item.element = nil
-			out = append(out, item)
+			if !item.claimed && !(q.preserveX2 && item.pduType == PDUTypeX2 && !item.persisted.Load()) {
+				q.removeExpiryLocked(item)
+				q.items[i].Remove(e)
+				q.bytes[i] -= int64(len(item.data))
+				item.element = nil
+				out = append(out, item)
+			}
+			e = next
 		}
-		q.items[i].Init()
-		q.bytes[i] = 0
 	}
-	q.expiry = nil
-	q.nextExpiry = time.Time{}
 	q.updateDepthLocked()
 	q.mu.Unlock()
 	for _, cancel := range cancels {
@@ -702,6 +709,7 @@ func (c *Client) startDispatcher(q *destinationQueue) {
 func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 	defer c.wg.Done()
 	defer q.workers.Done()
+	defer c.finishStoppedClaim(q, t)
 	backoff := c.config.RetryInitialBackoff
 	notify := q.notify
 	if t == PDUTypeX3 {
@@ -714,6 +722,10 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 		item := q.claim(t)
 		if item != nil && !item.persisted.Load() {
 			q.mu.Lock()
+			if q.stopped {
+				q.mu.Unlock()
+				return
+			}
 			item.claimed = false
 			q.mu.Unlock()
 			item = nil
@@ -786,6 +798,7 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 		}
 		cancel()
 		if errors.Is(err, ErrUncertainWrite) {
+			item.uncertain.Store(true)
 			atomic.AddUint64(&c.stats.UncertainWrites, 1)
 			atomic.AddUint64(&c.stats.UncertainBytes, uint64(len(item.data)))
 			q.mu.Lock()
@@ -831,6 +844,10 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 			continue
 		}
 		q.mu.Lock()
+		if q.stopped {
+			q.mu.Unlock()
+			return
+		}
 		item.claimed = false
 		q.observeDeadlineLocked(item)
 		q.mu.Unlock()
@@ -909,6 +926,9 @@ func (c *Client) recordRetry(q *destinationQueue, err error) {
 }
 
 func (c *Client) recordTerminalDrop(did uuid.UUID, q *destinationQueue, item *deliveryItem, reason string) {
+	if item.uncertain.Load() {
+		reason = "uncertain_write"
+	}
 	if !item.terminal.CompareAndSwap(false, true) {
 		return
 	}
@@ -987,7 +1007,10 @@ func (c *Client) logOverflow(did uuid.UUID, q *destinationQueue, item *deliveryI
 }
 
 func (c *Client) dropDestinationQueue(q *destinationQueue, reason string) {
-	items := q.stopAndDrain()
+	items := q.stopAndDrain(reason)
+	q.mu.Lock()
+	reason = q.stopReason
+	q.mu.Unlock()
 	atomic.AddInt64(&c.stats.QueueDepth, -int64(len(items)))
 	for _, item := range items {
 		atomic.AddInt64(&c.stats.QueueBytes, -int64(len(item.data)))
@@ -1017,6 +1040,47 @@ func (c *Client) dropDestinationQueue(q *destinationQueue, reason string) {
 	}
 }
 
+// finishStoppedClaim resolves capacity only after the transport owner has exited.
+// Shutdown/removal cannot classify an active write as a known unsent drop.
+func (c *Client) finishStoppedClaim(q *destinationQueue, t PDUType) {
+	q.mu.Lock()
+	e := q.items[queueIndex(t)].Front()
+	if !q.stopped || e == nil || !e.Value.(*deliveryItem).claimed {
+		q.mu.Unlock()
+		return
+	}
+	item := e.Value.(*deliveryItem)
+	if q.preserveX2 && item.pduType == PDUTypeX2 && !item.persisted.Load() {
+		item.claimed = false
+		q.mu.Unlock()
+		return
+	}
+	reason := q.stopReason
+	if reason == "" {
+		reason = "destination_removed"
+	}
+	q.mu.Unlock()
+	if !q.pop(item) {
+		return
+	}
+	atomic.AddInt64(&c.stats.QueueDepth, -1)
+	atomic.AddInt64(&c.stats.QueueBytes, -int64(len(item.data)))
+	if item.pduType == PDUTypeX2 && item.journalID.Load() != 0 && c.journal != nil {
+		c.journal.Hold(item.journalID.Load())
+		if item.terminal.CompareAndSwap(false, true) {
+			item.payload.release()
+			if item.completion != nil {
+				item.completion <- ErrClientStopped
+			}
+		}
+		return
+	}
+	if item.uncertain.Load() {
+		reason = "uncertain_write"
+	}
+	c.recordTerminalDrop(q.did, q, item, reason)
+}
+
 // RemoveDestination stops and removes delivery state for a deleted destination.
 func (c *Client) RemoveDestination(did uuid.UUID) {
 	c.admissionMu.Lock()
@@ -1030,6 +1094,9 @@ func (c *Client) RemoveDestination(did uuid.UUID) {
 	// Prevent admissions before releasing the packet-path admission lock. Disk
 	// checkpointing and transport joins run without that lock.
 	q.mu.Lock()
+	if q.stopReason == "" {
+		q.stopReason = "destination_removed"
+	}
 	if !q.stopped {
 		q.stopped = true
 		close(q.stop)

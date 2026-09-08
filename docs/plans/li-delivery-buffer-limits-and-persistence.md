@@ -274,3 +274,45 @@ git diff --check
 Socket-backed tests and builds requiring the Go module metadata cache ran with
 sandbox escalation. Go sources were formatted with gofmt; changed Markdown was
 formatted with Prettier before staging.
+
+## Follow-up implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue ownership/transport, journal recovery, and
+configuration/lifecycle integration. Independent review and cross-review found
+and corrected the following gaps in the original completion:
+
+- [x] Make journal admission nonblocking when a concurrent flush fills its bounded
+      operation channel; roll back unpublished byte and entry reservations.
+- [x] Keep claimed entries charged until their transport owner resolves them,
+      preserving uncertain-write classification across retries and shutdown.
+- [x] Retain pending X2 through destination removal until persistence completes,
+      with exactly-once accounting and a stable removal reason.
+- [x] Avoid reserving delivery queues for historical destinations during journal
+      purge; aggregate purge accounting remains available.
+- [x] Persist a destination delivery revision so endpoint A-to-B-to-A changes
+      cannot restore an old replay identity. Unchanged restart identities and
+      revision-zero legacy hashes remain stable.
+- [x] Reserve capacity when replacing delivery destinations and allow previously
+      capacity-refused destinations to activate after capacity becomes available.
+
+New regressions cover blocked TLS writes during Stop/RemoveDestination, pending
+journal writes during removal, purge reservations, endpoint reversion/restart,
+and destination replacement after capacity refusal. The concurrent admission
+regression reproduced the original deadlock using a Go source overlay and passed
+500 race-enabled iterations with the fix.
+
+Final verification passed:
+
+```text
+go test -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -tags 'processor li' -o /tmp/li-buffer-audit-processor-li .
+go build -tags 'tap li' -o /tmp/li-buffer-audit-tap-li .
+go build -tags all -o /tmp/li-buffer-audit-all .
+git diff --check
+```
+
+Socket-backed tests and module-cache writes required sandbox escalation. The
+earlier performance measurements were not rerun as part of this correctness
+audit. These checks establish the covered behavior; they do not establish the
+absence of every possible defect or replace deployment-specific outage testing.

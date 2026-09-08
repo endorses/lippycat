@@ -232,6 +232,10 @@ type Destination struct {
 	// Description is an optional human-readable description.
 	Description string
 
+	// DeliveryRevision advances when the delivery endpoint or enabled interfaces change.
+	// It is persisted so reverting an endpoint never restores an old queue identity.
+	DeliveryRevision uint64
+
 	// CreatedAt records when the destination was created.
 	CreatedAt time.Time
 }

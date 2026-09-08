@@ -5,7 +5,8 @@ Date: 2026-09-08
 Status: Phase 0 local contracts and synthetic acceptance fixtures implemented;
 external MDF agreement and production operator mapping verification pending.
 Phase 1 shared decoder and observation foundation implemented and verified.
-Phases 2–7 remain pending.
+Phase 2 exact filters and bounded transaction association implemented and verified.
+Phases 3–7 remain pending.
 
 Source: [RADIUS POI implementation assessment](../research/radius-poi-implementation-assessment.md).
 
@@ -188,20 +189,67 @@ Primary locations: `internal/pkg/radius`, `internal/pkg/filtering`,
 `internal/pkg/hunter/application_filter.go`, `api/proto/management.proto`,
 and filter management/capability adapters.
 
-- [ ] Add ordinary RADIUS User-Name, subscriber MAC, and required-subset attribute filters with exact matchers, validation, serialization, and CLI management support. Reuse the AVP predicate implementation for ordinary and X1-derived filters while keeping authorization separate.
-- [ ] Implement structured AVP/VSA predicates and compound task criteria with scope binding. Preserve target kind, criterion grouping, and operator/NAS scope through filter distribution; never authorize a conjunctive task from one independently matched filter ID.
-- [ ] Extend protobuf enums additively without reusing field or enum numbers, regenerate bindings using repository tooling, and update distribution, supported-filter reporting, persistence, and display conversions.
-- [ ] Define behavior for older hunters/processors: unsupported RADIUS filters or missing required provenance must not silently degrade to broader LI matching. Test capability rejection and ordinary raw-packet compatibility.
-- [ ] Implement a concurrent bounded correlator keyed by capture scope, client/server IP and UDP ports, and Identifier, retaining request code, Authenticator, request-instance identity, matches, and filter/task generations.
-- [ ] Enforce compatible request/response code families. Distinguish retransmissions from distinct request instances, including same-Identifier reuse, and avoid overwriting competing candidates into a false unique match.
-- [ ] Define safe candidate retention after ambiguity, expiration, and capacity pressure so losing state cannot make a known competing request appear uniquely authorized; use bounded suppression/tombstone state or an equivalent conservative policy.
-- [ ] Keep direct attribute matches separate from inherited matches. Inherit only from a unique eligible request; preserve multiple target/task references on that request without combining competing owners.
-- [ ] Implement expiry, hard memory/candidate limits, cleanup/shutdown, and counters for collisions, ambiguity, expiration, and capacity loss. Ensure nonmatching competing requests participate in ambiguity detection.
-- [ ] Test simultaneous tuples/scopes, Identifier wrap/reuse, retransmissions, duplicate mirrors, reversed/reordered traffic, absent requests, incompatible codes, eviction, and concurrent filter changes with an injectable clock.
-- [ ] Test exact User-Name/NAS-Port-Id/Agent-Circuit-Id matches, malformed target hex and nested lengths, unsupported types/vendors, repeated attributes, VSA grouping variations, partial compound matches, and identical line values under different NAS/operator scopes.
+- [x] Add ordinary RADIUS User-Name, subscriber MAC, and required-subset attribute filters with exact matchers, validation, serialization, and CLI management support. Reuse the AVP predicate implementation for ordinary and X1-derived filters while keeping authorization separate.
+- [x] Implement structured AVP/VSA predicates and compound task criteria with scope binding. Preserve target kind, criterion grouping, and operator/NAS scope through filter distribution; never authorize a conjunctive task from one independently matched filter ID.
+- [x] Extend protobuf enums additively without reusing field or enum numbers, regenerate bindings using repository tooling, and update distribution, supported-filter reporting, persistence, and display conversions.
+- [x] Define behavior for older hunters/processors: unsupported RADIUS filters or missing required provenance must not silently degrade to broader LI matching. Test capability rejection and ordinary raw-packet compatibility.
+- [x] Implement a concurrent bounded correlator keyed by capture scope, client/server IP and UDP ports, and Identifier, retaining request code, Authenticator, request-instance identity, matches, and filter/task generations.
+- [x] Enforce compatible request/response code families. Distinguish retransmissions from distinct request instances, including same-Identifier reuse, and avoid overwriting competing candidates into a false unique match.
+- [x] Define safe candidate retention after ambiguity, expiration, and capacity pressure so losing state cannot make a known competing request appear uniquely authorized; use bounded suppression/tombstone state or an equivalent conservative policy.
+- [x] Keep direct attribute matches separate from inherited matches. Inherit only from a unique eligible request; preserve multiple target/task references on that request without combining competing owners.
+- [x] Implement expiry, hard memory/candidate limits, cleanup/shutdown, and counters for collisions, ambiguity, expiration, and capacity loss. Ensure nonmatching competing requests participate in ambiguity detection.
+- [x] Test simultaneous tuples/scopes, Identifier wrap/reuse, retransmissions, duplicate mirrors, reversed/reordered traffic, absent requests, incompatible codes, eviction, and concurrent filter changes with an injectable clock.
+- [x] Test exact User-Name/NAS-Port-Id/Agent-Circuit-Id matches, malformed target hex and nested lengths, unsupported types/vendors, repeated attributes, VSA grouping variations, partial compound matches, and identical line values under different NAS/operator scopes.
 
 Exit criterion: deterministic association is bounded in memory and never grants
 inherited attribution from missing, ambiguous, or stale evidence.
+
+Phase 2 verification (2026-09-09): specialized sub-agents implemented the
+shared predicates, correlator and management/distribution adapters. The parent
+reviewed the integrated changes and added a committed-PCAP acceptance test;
+independent cross-review found and corrected stale ordinary inheritance,
+callback storage aliasing, revision reuse, scope serialization and restoration
+failure behavior. All six message codes, both families and custom ports pass
+the shared fixture pipeline with exact packet/message byte preservation and
+operator-scoped line matching.
+
+The correlator bounds candidates, evidence bytes, guards and total charged
+state; lost state suppresses inheritance conservatively, including unmatched
+competitors. Injectable time, concurrent revision changes, Identifier wrap,
+retransmissions, duplicate responses, missing/reordered requests, expiry,
+per-key/total pressure, global suppression, callback mutation and shutdown are
+covered. Every inherited reference requires a current-generation callback;
+processor-side task admission remains Phase 4 work.
+
+Management enum values 18–21 and structured scope/criteria are additive.
+Filter-file serialization uses explicit snake_case fields and rejects misspelled
+RADIUS fields and invalid restoration. Positive revisions, compound revision
+consistency and bounded same-process deletion history prevent stale ordinary
+filter evidence from becoming current again. Management restart requires a
+fresh capture epoch and correlator, consistent with the existing scope contract.
+The [package README](../../internal/pkg/radius/README.md) documents these APIs,
+configuration limits, CLI examples and the compound file format.
+
+Version-1 RADIUS filter capability and the exact type string are both required
+for distribution. Explicit legacy targets and local tap targets reject RADIUS
+filters; current hunters do not advertise the version until Phase 3 provides
+capture ingress and provenance transport. The application-filter observation
+adapter is implemented and tested independently; it never places RADIUS
+attribution into the generic LI filter-ID path. Raw packet transport remains
+compatible without RADIUS metadata. These are Phase 2 foundations, not a claim
+that live RADIUS capture, tap POI or distributed LI are complete.
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags all ./internal/pkg/radius ./internal/pkg/filtering ./internal/pkg/hunter ./internal/pkg/hunter/connection ./internal/pkg/processor/filtering ./internal/pkg/tui/components/filtermanager ./internal/pkg/tui/components ./cmd/filter ./testdata/radius -count=1
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags all ./internal/pkg/filterclient -count=1
+GOCACHE=/tmp/lippycat-go-cache go vet -tags 'all li' ./internal/pkg/radius ./internal/pkg/filtering ./internal/pkg/hunter ./internal/pkg/processor/filtering ./cmd/filter ./internal/pkg/tui/components/filtermanager ./internal/pkg/tui/components
+```
+
+These checks passed. Filter-client tests required approved execution outside the
+sandbox for local gRPC sockets. Builds passed with `all`, `hunter`, `tap`,
+`all li` and `processor li`; CLI smoke checks confirmed RADIUS help and explicit
+MAC-profile validation. Changed Go/Markdown files were formatted and
+`git diff --check` passed. Phase 0 external MDF/operator gates remain pending.
 
 ## Phase 3 — Capture ingress, transport, and ordinary outputs
 

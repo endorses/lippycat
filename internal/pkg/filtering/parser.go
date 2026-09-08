@@ -40,6 +40,9 @@ func ParseFile(path string) (map[string]*management.Filter, error) {
 	for _, filterYAML := range config.Filters {
 		filter, err := YAMLToProto(filterYAML)
 		if err != nil {
+			if ft, typeErr := ParseFilterType(filterYAML.Type); typeErr == nil && IsRADIUSFilter(ft) {
+				return nil, fmt.Errorf("invalid RADIUS filter %q: %w", filterYAML.ID, err)
+			}
 			// Skip invalid filters with a warning (caller should log)
 			continue
 		}
@@ -76,6 +79,9 @@ func ParseFileWithErrors(path string) (map[string]*management.Filter, []error, e
 	for _, filterYAML := range config.Filters {
 		filter, err := YAMLToProto(filterYAML)
 		if err != nil {
+			if ft, typeErr := ParseFilterType(filterYAML.Type); typeErr == nil && IsRADIUSFilter(ft) {
+				return nil, nil, fmt.Errorf("invalid RADIUS filter %q: %w", filterYAML.ID, err)
+			}
 			parseErrors = append(parseErrors, fmt.Errorf("filter %q: %w", filterYAML.ID, err))
 			continue
 		}

@@ -2,6 +2,7 @@ package filtering
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -9,12 +10,15 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"google.golang.org/protobuf/proto"
 )
 
 // Manager manages filters and their distribution to hunters
 type Manager struct {
-	mu      sync.RWMutex
-	filters map[string]*management.Filter
+	mu              sync.RWMutex
+	filters         map[string]*management.Filter
+	radiusRevisions map[string]uint64
+	initialized     bool
 
 	channelsMu sync.RWMutex
 	channels   map[string]chan *management.FilterUpdate // hunterID -> channel
@@ -46,6 +50,7 @@ type CapabilityProvider interface {
 func NewManager(persistenceFile string, persistence PersistenceHandler, capabilityProvider CapabilityProvider, onFilterFailure func(string, bool), onFilterChange func()) *Manager {
 	return &Manager{
 		filters:            make(map[string]*management.Filter),
+		radiusRevisions:    make(map[string]uint64),
 		channels:           make(map[string]chan *management.FilterUpdate),
 		capabilityProvider: capabilityProvider,
 		onFilterFailure:    onFilterFailure,
@@ -55,7 +60,8 @@ func NewManager(persistenceFile string, persistence PersistenceHandler, capabili
 	}
 }
 
-// Load loads filters from persistence file
+// Load restores startup state exactly once, before any filter mutation.
+// Runtime reconciliation must use Update/Delete to preserve revision history.
 func (m *Manager) Load() error {
 	if m.persistence == nil {
 		return nil
@@ -67,7 +73,33 @@ func (m *Manager) Load() error {
 	}
 
 	m.mu.Lock()
-	m.filters = filters
+	if m.initialized {
+		m.mu.Unlock()
+		return fmt.Errorf("filter Load is startup-only; use Update/Delete after initialization")
+	}
+	revisions := make(map[string]uint64)
+	restored := make(map[string]*management.Filter, len(filters))
+	for id, f := range filters {
+		if f == nil {
+			m.mu.Unlock()
+			return fmt.Errorf("nil persisted filter %q", id)
+		}
+		if filtering.IsRADIUSFilter(f.Type) {
+			if err := filtering.ValidateFilter(f); err != nil {
+				m.mu.Unlock()
+				return fmt.Errorf("invalid persisted RADIUS filter: %w", err)
+			}
+			if len(revisions) >= 65536 {
+				m.mu.Unlock()
+				return fmt.Errorf("RADIUS revision history capacity reached")
+			}
+			revisions[strings.Clone(id)] = f.Revision
+		}
+		restored[id] = proto.Clone(f).(*management.Filter)
+	}
+	m.radiusRevisions = revisions
+	m.filters = restored
+	m.initialized = true
 	m.mu.Unlock()
 
 	logger.Info("Loaded filters from file", "count", len(filters), "file", m.persistenceFile)
@@ -83,7 +115,7 @@ func (m *Manager) Save() error {
 	m.mu.RLock()
 	filters := make(map[string]*management.Filter, len(m.filters))
 	for k, v := range m.filters {
-		filters[k] = v
+		filters[k] = proto.Clone(v).(*management.Filter)
 	}
 	m.mu.RUnlock()
 
@@ -92,6 +124,9 @@ func (m *Manager) Save() error {
 
 // hunterSupportsFilterType checks if a hunter supports a given filter type
 func hunterSupportsFilterType(capabilities *management.HunterCapabilities, filterType management.FilterType) bool {
+	if filtering.IsRADIUSFilter(filterType) && (capabilities == nil || capabilities.RadiusFilterVersion != 1) {
+		return false
+	}
 	if capabilities == nil {
 		// No capabilities info - this is a legacy hunter from before v0.2.8
 		// Assume it's a generic hunter (only supports BPF and IP filters)
@@ -149,14 +184,14 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 
 		// If no target hunters specified, apply to all
 		if len(filter.TargetHunters) == 0 {
-			filters = append(filters, filter)
+			filters = append(filters, proto.Clone(filter).(*management.Filter))
 			continue
 		}
 
 		// Check if this hunter is targeted
 		for _, target := range filter.TargetHunters {
 			if target == hunterID {
-				filters = append(filters, filter)
+				filters = append(filters, proto.Clone(filter).(*management.Filter))
 				break
 			}
 		}
@@ -167,6 +202,23 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 
 // Update adds or modifies a filter
 func (m *Manager) Update(filter *management.Filter) (uint32, error) {
+	if filter == nil {
+		return 0, fmt.Errorf("filter is required")
+	}
+	if filtering.IsRADIUSFilter(filter.Type) {
+		if err := filtering.ValidateFilter(filter); err != nil {
+			return 0, err
+		}
+		for _, hunterID := range filter.TargetHunters {
+			var caps *management.HunterCapabilities
+			if m.capabilityProvider != nil {
+				caps = m.capabilityProvider.GetCapabilities(hunterID)
+			}
+			if !hunterSupportsFilterType(caps, filter.Type) {
+				return 0, fmt.Errorf("hunter %s lacks RADIUS criteria/provenance capability v1", hunterID)
+			}
+		}
+	}
 	// Normalize phone number patterns before storage/distribution
 	// This ensures consistent matching regardless of input format
 	if filter.Type == management.FilterType_FILTER_PHONE_NUMBER {
@@ -188,7 +240,38 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 
 	// Determine if this is add or modify, and get old filter for scope comparison
 	oldFilter, exists := m.filters[filter.Id]
-	m.filters[filter.Id] = filter
+	if filtering.IsRADIUSFilter(filter.Type) {
+		previous, known := m.radiusRevisions[filter.Id]
+		if (!known && len(m.radiusRevisions) >= 65536) || ((!exists || !filtering.IsRADIUSFilter(oldFilter.Type)) && known && filter.Revision <= previous) {
+			m.mu.Unlock()
+			return 0, fmt.Errorf("RADIUS revision history requires newer revision or has reached capacity")
+		}
+	}
+
+	if exists && (filtering.IsRADIUSFilter(filter.Type) || filtering.IsRADIUSFilter(oldFilter.Type)) && !proto.Equal(oldFilter, filter) && filter.Revision <= oldFilter.Revision {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("RADIUS filter modification requires a newer revision")
+	}
+	if exists && filtering.IsRADIUSFilter(filter.Type) && oldFilter.Radius != nil && filter.Radius != nil && !proto.Equal(oldFilter.Radius, filter.Radius) {
+		oldR, newR := oldFilter.Radius, filter.Radius
+		if oldR.TaskId != "" && oldR.TaskId == newR.TaskId && newR.TaskGeneration <= oldR.TaskGeneration {
+			m.mu.Unlock()
+			return 0, fmt.Errorf("RADIUS task criteria modification requires a newer task generation")
+		}
+		for _, oldC := range oldR.Criteria {
+			for _, newC := range newR.Criteria {
+				if oldC != nil && newC != nil && oldC.FilterId == newC.FilterId && !proto.Equal(oldC, newC) && newC.FilterRevision <= oldC.FilterRevision {
+					m.mu.Unlock()
+					return 0, fmt.Errorf("RADIUS criterion modification requires a newer criterion revision")
+				}
+			}
+		}
+	}
+	m.initialized = true
+	m.filters[filter.Id] = proto.Clone(filter).(*management.Filter)
+	if filtering.IsRADIUSFilter(filter.Type) {
+		m.radiusRevisions[strings.Clone(filter.Id)] = filter.Revision
+	}
 
 	updateType := management.FilterUpdateType_UPDATE_ADD
 	if exists {
@@ -203,7 +286,7 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 		if len(huntersToRemove) > 0 {
 			deleteUpdate := &management.FilterUpdate{
 				UpdateType: management.FilterUpdateType_UPDATE_DELETE,
-				Filter:     filter, // Use new filter but with DELETE type
+				Filter:     proto.Clone(filter).(*management.Filter), // Use new filter but with DELETE type
 			}
 			m.pushFilterUpdateToSpecificHunters(huntersToRemove, deleteUpdate)
 		}
@@ -212,7 +295,7 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 	// Push filter update to affected hunters
 	update := &management.FilterUpdate{
 		UpdateType: updateType,
-		Filter:     filter,
+		Filter:     proto.Clone(filter).(*management.Filter),
 	}
 
 	huntersUpdated := m.pushFilterUpdate(filter, update)
@@ -240,7 +323,7 @@ func (m *Manager) Delete(filterID string) (uint32, error) {
 	// Push filter deletion to affected hunters
 	update := &management.FilterUpdate{
 		UpdateType: management.FilterUpdateType_UPDATE_DELETE,
-		Filter:     filter,
+		Filter:     proto.Clone(filter).(*management.Filter),
 	}
 
 	huntersUpdated := m.pushFilterUpdate(filter, update)
@@ -468,7 +551,7 @@ func (m *Manager) GetAll() []*management.Filter {
 
 	filters := make([]*management.Filter, 0, len(m.filters))
 	for _, filter := range m.filters {
-		filters = append(filters, filter)
+		filters = append(filters, proto.Clone(filter).(*management.Filter))
 	}
 	return filters
 }

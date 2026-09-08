@@ -540,21 +540,31 @@ func (pb *PacketBuffer) CloseInputs() {
 	close(pb.ch)
 }
 
-func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler) {
-	InitWithContext(context.Background(), ifaces, filter, packetProcessor, assembler, nil)
+// CaptureOptions selects transformations for a capture session. Generic capture
+// preserves original fragments so validation and packet sinks see captured bytes.
+// Dedicated VoIP capture opts into reassembly for SIP messages exceeding the MTU.
+type CaptureOptions struct {
+	ReassembleIPFragments bool
+	// ReassembleIPFragmentsWhen overrides the static option for interactive
+	// sessions. The callback must be safe for concurrent capture workers.
+	ReassembleIPFragmentsWhen func() bool
+}
+
+func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, options ...CaptureOptions) {
+	InitWithContext(context.Background(), ifaces, filter, packetProcessor, assembler, nil, options...)
 }
 
 // InitWithContext starts packet capture with a cancellable context.
 // The optional pauseFn parameter, if provided, allows the caller to pause packet capture.
 // When pauseFn returns true, packets are dropped at the source to reduce CPU usage.
 // Note: Signal handling should be done by the caller. This function only respects context cancellation.
-func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool) {
-	InitWithContextAndTelemetry(ctx, ifaces, filter, packetProcessor, assembler, pauseFn, nil)
+func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool, options ...CaptureOptions) {
+	InitWithContextAndTelemetry(ctx, ifaces, filter, packetProcessor, assembler, pauseFn, nil, options...)
 }
 
 // InitWithContextAndTelemetry starts packet capture and periodically reports
 // cumulative libpcap and PacketBuffer drop statistics.
-func InitWithContextAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool, telemetryCallback TelemetryCallback) {
+func InitWithContextAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool, telemetryCallback TelemetryCallback, options ...CaptureOptions) {
 	// Use a configurable buffer size with proper backpressure handling
 	bufferSize := getPacketBufferSize()
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
@@ -563,17 +573,17 @@ func InitWithContextAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInt
 	}
 	defer packetBuffer.Close()
 
-	initWithBufferAndTelemetry(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler, telemetryCallback)
+	initWithBufferAndTelemetry(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler, telemetryCallback, options...)
 }
 
 // InitWithBuffer starts packet capture with an external PacketBuffer
 // This allows the caller to own the buffer and read from it directly, avoiding
 // double-buffering when the processor would just copy packets to another buffer.
-func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler) {
-	initWithBufferAndTelemetry(ctx, ifaces, filter, buffer, packetProcessor, assembler, nil)
+func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, options ...CaptureOptions) {
+	initWithBufferAndTelemetry(ctx, ifaces, filter, buffer, packetProcessor, assembler, nil, options...)
 }
 
-func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, telemetryCallback TelemetryCallback) {
+func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, telemetryCallback TelemetryCallback, options ...CaptureOptions) {
 	packetBuffer := buffer
 	telemetry := newTelemetryCollector(telemetryCallback)
 
@@ -678,7 +688,7 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 				handle.Close() // This will cause packetSource.Packets() channel to close
 			}()
 
-			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu)
+			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu, options...)
 			close(captureDone)
 			<-cancelWatcherDone
 		}(iface)
@@ -716,6 +726,14 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 
 		close(captureFinishedCh)
 	}()
+
+	if packetProcessor == nil {
+		// External consumers own the buffer, but capture lifecycle callers still
+		// need completion to mean every reader and handle has stopped. There is
+		// no processor to wait for on this path: its WaitGroup is already done.
+		<-captureFinishedCh
+		return
+	}
 
 	shutdownCh := make(chan struct{})
 	go func() {
@@ -769,7 +787,7 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 	}
 }
 
-func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter, telemetry *telemetryCollector, handleMu *sync.Mutex) {
+func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter, telemetry *telemetryCollector, handleMu *sync.Mutex, options ...CaptureOptions) {
 	logger.Debug("captureFromInterface starting", "interface", iface.Name())
 	defer logger.Debug("captureFromInterface exiting", "interface", iface.Name())
 
@@ -920,98 +938,113 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				return
 			}
 
-			// Handle IPv4 fragmentation - reassemble fragmented packets
-			// This is critical for SIP messages that exceed MTU (>1500 bytes)
-			// Without reassembly, the second fragment (containing SDP with media ports)
-			// would be dropped, causing RTP-only calls
-			if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
-				ip4 := ipLayer.(*layers.IPv4)
-				// Check if this is a fragment (more fragments flag or non-zero offset)
-				if ip4.Flags&layers.IPv4MoreFragments != 0 || ip4.FragOffset > 0 {
-					fragmentsReceived.Add(1)
-
-					// Feed fragment to defragmenter
-					reassembledIP, err := defragmenter.DefragIPv4(ip4)
-					if err != nil {
-						logger.Debug("IPv4 defragmentation error",
-							"error", err,
-							"src", ip4.SrcIP,
-							"dst", ip4.DstIP,
-							"id", ip4.Id)
-						continue // Skip this fragment
-					}
-					if reassembledIP == nil {
-						// Still waiting for more fragments - don't forward yet
-						continue
-					}
-
-					// Successfully reassembled - rebuild the packet
-					packetsReassembled.Add(1)
-					logger.Debug("IPv4 packet reassembled",
-						"src", reassembledIP.SrcIP,
-						"dst", reassembledIP.DstIP,
-						"payload_len", len(reassembledIP.Payload))
-
-					// Rebuild packet from reassembled IP layer
-					packet = rebuildReassembledPacket(packet, reassembledIP, handle.LinkType())
+			linkType := handle.LinkType()
+			fragmented := isIPFragment(packet)
+			reassemble := false
+			if fragmented && len(options) > 0 {
+				option := options[len(options)-1]
+				reassemble = option.ReassembleIPFragments
+				if option.ReassembleIPFragmentsWhen != nil {
+					reassemble = option.ReassembleIPFragmentsWhen()
 				}
 			}
-
-			// Handle plain IPv6 fragmentation. gopacket has no IPv6 defragmenter,
-			// so a fragmented IPv6 datagram (e.g. a large SIP INVITE on an
-			// IMS/VXLAN tunnel) arrives with its transport header stranded behind
-			// the Fragment extension header and would otherwise be dropped.
-			// ESP-encapsulated IPv6 fragments are left to decapsulateIPv6FragmentESP
-			// below; only non-ESP fragments are reassembled here.
-			if fragLayer := packet.Layer(layers.LayerTypeIPv6Fragment); fragLayer != nil {
-				if frag, ok := fragLayer.(*layers.IPv6Fragment); ok && frag.NextHeader != layers.IPProtocolESP {
-					if ip6Layer := packet.Layer(layers.LayerTypeIPv6); ip6Layer != nil {
-						ip6 := ip6Layer.(*layers.IPv6)
+			if fragmented && !reassemble {
+				// Preserve even noninitial fragments: their service ports are unknown.
+				// Do not decapsulate them into apparently complete RADIUS messages.
+				fragmentsReceived.Add(1)
+			} else {
+				// Handle IPv4 fragmentation - reassemble fragmented packets
+				// This is critical for SIP messages that exceed MTU (>1500 bytes)
+				// Without reassembly, the second fragment (containing SDP with media ports)
+				// would be dropped, causing RTP-only calls
+				if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+					ip4 := ipLayer.(*layers.IPv4)
+					// Check if this is a fragment (more fragments flag or non-zero offset)
+					if ip4.Flags&layers.IPv4MoreFragments != 0 || ip4.FragOffset > 0 {
 						fragmentsReceived.Add(1)
 
-						reassembledIP6, err := v6defragmenter.DefragIPv6(ip6, frag)
+						// Feed fragment to defragmenter
+						reassembledIP, err := defragmenter.DefragIPv4(ip4)
 						if err != nil {
-							logger.Debug("IPv6 defragmentation error",
+							logger.Debug("IPv4 defragmentation error",
 								"error", err,
-								"src", ip6.SrcIP,
-								"dst", ip6.DstIP,
-								"id", frag.Identification)
+								"src", ip4.SrcIP,
+								"dst", ip4.DstIP,
+								"id", ip4.Id)
 							continue // Skip this fragment
 						}
-						if reassembledIP6 == nil {
+						if reassembledIP == nil {
 							// Still waiting for more fragments - don't forward yet
 							continue
 						}
 
 						// Successfully reassembled - rebuild the packet
 						packetsReassembled.Add(1)
-						logger.Debug("IPv6 packet reassembled",
-							"src", reassembledIP6.SrcIP,
-							"dst", reassembledIP6.DstIP,
-							"payload_len", len(reassembledIP6.Payload))
+						logger.Debug("IPv4 packet reassembled",
+							"src", reassembledIP.SrcIP,
+							"dst", reassembledIP.DstIP,
+							"payload_len", len(reassembledIP.Payload))
 
-						packet = rebuildReassembledIPv6Packet(packet, reassembledIP6, handle.LinkType())
+						// Rebuild packet from reassembled IP layer
+						packet = rebuildReassembledPacket(packet, reassembledIP, handle.LinkType())
 					}
 				}
-			}
 
-			// Handle VXLAN decapsulation - extract the inner Ethernet frame so all
-			// downstream processing (SIP detection, RTP correlation, etc.) sees the
-			// real traffic rather than the VXLAN tunnel wrapper.
-			linkType := handle.LinkType()
-			if inner, ok := decapsulateVXLAN(packet); ok {
-				packet = inner
-				linkType = layers.LinkTypeEthernet
-			}
+				// Handle plain IPv6 fragmentation. gopacket has no IPv6 defragmenter,
+				// so a fragmented IPv6 datagram (e.g. a large SIP INVITE on an
+				// IMS/VXLAN tunnel) arrives with its transport header stranded behind
+				// the Fragment extension header and would otherwise be dropped.
+				// ESP-encapsulated IPv6 fragments are left to decapsulateIPv6FragmentESP
+				// below; only non-ESP fragments are reassembled here.
+				if fragLayer := packet.Layer(layers.LayerTypeIPv6Fragment); fragLayer != nil {
+					if frag, ok := fragLayer.(*layers.IPv6Fragment); ok && frag.NextHeader != layers.IPProtocolESP {
+						if ip6Layer := packet.Layer(layers.LayerTypeIPv6); ip6Layer != nil {
+							ip6 := ip6Layer.(*layers.IPv6)
+							fragmentsReceived.Add(1)
 
-			// Handle ESP with NULL cipher - common in IMS/VoLTE where ESP transport
-			// mode provides integrity without encryption. Must run after VXLAN
-			// decapsulation so it sees the inner packets from VXLAN tunnels.
-			if ESPDecapEnabled() {
-				if inner, ok := decapsulateESPNull(packet); ok {
+							reassembledIP6, err := v6defragmenter.DefragIPv6(ip6, frag)
+							if err != nil {
+								logger.Debug("IPv6 defragmentation error",
+									"error", err,
+									"src", ip6.SrcIP,
+									"dst", ip6.DstIP,
+									"id", frag.Identification)
+								continue // Skip this fragment
+							}
+							if reassembledIP6 == nil {
+								// Still waiting for more fragments - don't forward yet
+								continue
+							}
+
+							// Successfully reassembled - rebuild the packet
+							packetsReassembled.Add(1)
+							logger.Debug("IPv6 packet reassembled",
+								"src", reassembledIP6.SrcIP,
+								"dst", reassembledIP6.DstIP,
+								"payload_len", len(reassembledIP6.Payload))
+
+							packet = rebuildReassembledIPv6Packet(packet, reassembledIP6, handle.LinkType())
+						}
+					}
+				}
+
+				// Handle VXLAN decapsulation - extract the inner Ethernet frame so all
+				// downstream processing (SIP detection, RTP correlation, etc.) sees the
+				// real traffic rather than the VXLAN tunnel wrapper.
+				if inner, ok := decapsulateVXLAN(packet); ok {
 					packet = inner
-				} else if inner, ok := decapsulateIPv6FragmentESP(packet); ok {
-					packet = inner
+					linkType = layers.LinkTypeEthernet
+				}
+
+				// Handle ESP with NULL cipher - common in IMS/VoLTE where ESP transport
+				// mode provides integrity without encryption. Must run after VXLAN
+				// decapsulation so it sees the inner packets from VXLAN tunnels.
+				if ESPDecapEnabled() {
+					if inner, ok := decapsulateESPNull(packet); ok {
+						packet = inner
+					} else if inner, ok := decapsulateIPv6FragmentESP(packet); ok {
+						packet = inner
+					}
 				}
 			}
 
@@ -1067,6 +1100,13 @@ func GetPcapTimeout() time.Duration {
 
 	// Fall back to default
 	return defaultTimeout
+}
+
+func isIPFragment(packet gopacket.Packet) bool {
+	if ip, ok := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4); ok && (ip.Flags&layers.IPv4MoreFragments != 0 || ip.FragOffset != 0) {
+		return true
+	}
+	return packet.Layer(layers.LayerTypeIPv6Fragment) != nil
 }
 
 // rebuildReassembledPacket creates a new gopacket.Packet from a reassembled IPv4 layer.

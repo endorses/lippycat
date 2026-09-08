@@ -682,7 +682,7 @@ func (s *LocalSource) capturePackets(ctx context.Context, filter string, done ch
 
 	// Use InitWithBuffer to capture packets into our buffer
 	// nil processor means we own the buffer and read from it externally
-	capture.InitWithBuffer(ctx, devices, filter, s.packetBuffer.Load(), nil, nil)
+	capture.InitWithBuffer(ctx, devices, filter, s.packetBuffer.Load(), nil, nil, capture.CaptureOptions{ReassembleIPFragments: s.config.ProtocolMode == "voip"})
 }
 
 // batchingLoop reads from packet buffer, applies filtering, and creates batches.
@@ -1231,9 +1231,6 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 		return nil
 	}
 
-	if err := s.radiusProcessor.AdvanceBoundary(time.Now()); err != nil {
-		return err
-	}
 	logger.Info("LocalSource updating BPF filter", "new_filter", filter)
 
 	// Update config
@@ -1248,6 +1245,12 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 	// old pcap_wait calls can overlap the new generation's pcap_setfilter calls.
 	if s.captureDone != nil {
 		<-s.captureDone
+	}
+	// Old handles can still enqueue packets while cancellation drains. Only
+	// establish the new epoch after every old handle has stopped, so those
+	// queued packets cannot seed association across the capture gap.
+	if err := s.radiusProcessor.AdvanceBoundary(time.Now()); err != nil {
+		return err
 	}
 
 	// Shutdown may have started while the previous capture generation drained.
@@ -1342,7 +1345,7 @@ func (s *LocalSource) SupportsRADIUS() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.appFilter.(radius.ObservationMatcher)
-	return s.radiusProcessor != nil && ok
+	return s.config.ProtocolMode != "voip" && s.radiusProcessor != nil && ok
 }
 
 // RADIUSCaptureBPF returns bidirectional service visibility for configured ports.

@@ -5,12 +5,52 @@ package capture
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRADIUSRestartBoundaryWaitsForOldCapture(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m := New(Config{BufferSize: 8}, ctx)
+	oldDone := make(chan struct{})
+	m.captureDone = oldDone
+	var lastOldPacket time.Time
+	m.captureCancel = func() {
+		assert.Equal(t, oldDone, m.captureDone, "new capture must not start before old readers stop")
+		assert.True(t, m.CaptureBoundary().IsZero(), "boundary must include old-reader drain")
+		lastOldPacket = time.Now()
+		close(oldDone)
+	}
+	require.NoError(t, m.Restart(nil))
+	defer m.Stop()
+	defer m.packetBuffer.Close()
+	require.True(t, m.CaptureBoundary().After(lastOldPacket))
+	require.NotEqual(t, oldDone, m.captureDone)
+	select {
+	case <-m.captureDone:
+	case <-time.After(time.Second):
+		t.Fatal("empty replacement capture did not stop")
+	}
+}
+
+func TestRADIUSRestartTimeoutDoesNotOpenNewCapture(t *testing.T) {
+	m := New(Config{BufferSize: 8}, context.Background())
+	oldDone := make(chan struct{})
+	m.captureDone = oldDone
+	cancelled := false
+	m.captureCancel = func() { cancelled = true }
+	require.ErrorContains(t, m.Restart(nil), "timeout waiting for old capture to stop")
+	require.True(t, cancelled)
+	require.Equal(t, oldDone, m.captureDone)
+	require.Nil(t, m.packetBuffer, "failed restart must not open a new generation")
+	require.True(t, m.CaptureBoundary().IsZero())
+	close(oldDone)
+}
 
 func TestExtractPortFromAddr(t *testing.T) {
 	tests := []struct {

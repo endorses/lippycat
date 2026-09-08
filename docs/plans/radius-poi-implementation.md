@@ -380,6 +380,41 @@ Phase 7; external MDF/operator acceptance gates remain pending. Dynamic RADIUS
 BPF can expand beyond base BPF, so operator/NAS isolation must not rely on that
 capture expression. See the package README for runtime and provenance details.
 
+### Phase 3 post-implementation audit (2026-09-09)
+
+Three specialized reviewers compared ingress, transport/provenance and ordinary
+outputs against the plan. Parent review independently reproduced two ingress
+defects that the original adapter-level tests did not cover:
+
+- [x] Prevent requests captured while old handles drain from seeding the next
+      capture epoch. Tap now establishes its boundary after old readers finish;
+      hunter stops and waits before publishing the boundary and starting replacement
+      capture. A timed-out hunter restart opens no replacement generation. The shared
+      external-consumer capture function now waits for reader completion rather than
+      returning immediately because no processor callback was supplied.
+- [x] Preserve original fragments through the actual capture loop. Previously an
+      incomplete IPv4 fragment disappeared, while an IPv6 atomic fragment was rebuilt
+      and accepted as an ordinary RADIUS request. Generic capture now preserves
+      fragments; explicit VoIP capture retains IP reassembly. VoIP hunter/tap modes
+      exclude RADIUS filtering capability, and live watch follows its selected mode.
+      Actual-loop regressions retain all 26 acceptance records, reject incomplete
+      IPv4 and atomic IPv6 fragments, and cover default/custom ports, reversed
+      fragment arrival, validation counters and explicit VoIP reassembly.
+
+No additional transport/provenance, safe presentation, schema/logging or sink
+defect was confirmed. The package README's stale Phase 1/2 introduction was
+corrected. Dedicated commands, X1/X2 admission and distributed snapshot convergence
+remain in their explicitly deferred phases.
+
+Parent-run regressions reproduced both defects before fixes, and independent
+cross-review verified the final changes. Full race suites passed for capture,
+hunter, local source, pipeline, RADIUS, events, schema/logstream, TUI and sniff.
+Targeted `all li` regressions passed for processor trees, detection, remote display,
+tap and VoIP. Vet passed for changed package trees with `all li`; all nine
+non-LI/LI build variants listed above built successfully. Build commands emitted
+a nonfatal read-only module-stat-cache warning but exited successfully. The known
+missing detector fixtures were not needed by these focused detector checks.
+
 ## Phase 4 — X1 targets and current-generation authorization
 
 Primary locations: `internal/pkg/li` target types, filters, registry, manager,

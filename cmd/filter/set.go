@@ -124,7 +124,7 @@ func init() {
 	SetFilterCmd.Flags().StringVar(&setFilterDescription, "description", "", "Filter description")
 	SetFilterCmd.Flags().BoolVar(&setFilterEnabled, "enabled", true, "Enable the filter")
 	SetFilterCmd.Flags().StringSliceVar(&setFilterHunters, "hunters", nil, "Target hunter IDs (comma-separated)")
-	SetFilterCmd.Flags().Uint64Var(&setFilterRevision, "revision", 1, "RADIUS filter revision (increment on changes)")
+	SetFilterCmd.Flags().Uint64Var(&setFilterRevision, "revision", 1, "Filter revision (increment when changing or replacing a RADIUS filter)")
 	SetFilterCmd.Flags().StringVar(&setRadiusMACProfile, "radius-mac-profile", "", "Subscriber MAC interpretation profile")
 	SetFilterCmd.Flags().StringVar(&setRadiusOperatorScope, "radius-operator-scope", "", "Dedicated operator/NAS deployment scope")
 	SetFilterCmd.Flags().StringVar(&setRadiusProfileRevision, "radius-profile-revision", "", "Deployment profile revision")
@@ -181,7 +181,7 @@ func runSetFilter(cmd *cobra.Command, args []string) {
 		TargetHunters: setFilterHunters,
 	}
 
-	if filtering.IsRADIUSFilterType(filter.Type) {
+	if filtering.IsRADIUSFilterType(filter.Type) || cmd.Flags().Changed("revision") {
 		filter.Revision = setFilterRevision
 	}
 	if setRadiusMACProfile != "" || setRadiusOperatorScope != "" || setRadiusProfileRevision != "" || setRadiusOriginNode != "" || setRadiusSource != "" {

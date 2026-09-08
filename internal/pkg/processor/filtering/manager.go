@@ -15,6 +15,10 @@ import (
 
 // Manager manages filters and their distribution to hunters
 type Manager struct {
+	// Serialize mutations through distribution and persistence so hunters cannot
+	// receive an older revision (or deletion) after a newer committed update.
+	// Keep mu separate: distribution callbacks may read the current filters.
+	mutationMu      sync.Mutex
 	mu              sync.RWMutex
 	filters         map[string]*management.Filter
 	radiusRevisions map[string]uint64
@@ -63,6 +67,9 @@ func NewManager(persistenceFile string, persistence PersistenceHandler, capabili
 // Load restores startup state exactly once, before any filter mutation.
 // Runtime reconciliation must use Update/Delete to preserve revision history.
 func (m *Manager) Load() error {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+
 	if m.persistence == nil {
 		return nil
 	}
@@ -108,6 +115,13 @@ func (m *Manager) Load() error {
 
 // Save saves filters to persistence file
 func (m *Manager) Save() error {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	return m.save()
+}
+
+// save requires mutationMu, keeping the snapshot and its write in mutation order.
+func (m *Manager) save() error {
 	if m.persistence == nil {
 		return nil
 	}
@@ -202,6 +216,9 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 
 // Update adds or modifies a filter
 func (m *Manager) Update(filter *management.Filter) (uint32, error) {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+
 	if filter == nil {
 		return 0, fmt.Errorf("filter is required")
 	}
@@ -301,7 +318,7 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 	huntersUpdated := m.pushFilterUpdate(filter, update)
 
 	// Persist filters to disk
-	if err := m.Save(); err != nil {
+	if err := m.save(); err != nil {
 		logger.Error("Failed to save filters to disk", "error", err)
 		// Don't fail the request - filter is already in memory
 	}
@@ -311,6 +328,9 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 
 // Delete removes a filter
 func (m *Manager) Delete(filterID string) (uint32, error) {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+
 	m.mu.Lock()
 	filter, exists := m.filters[filterID]
 	if !exists {
@@ -329,7 +349,7 @@ func (m *Manager) Delete(filterID string) (uint32, error) {
 	huntersUpdated := m.pushFilterUpdate(filter, update)
 
 	// Persist filters to disk
-	if err := m.Save(); err != nil {
+	if err := m.save(); err != nil {
 		logger.Error("Failed to save filters to disk", "error", err)
 		// Don't fail the request - filter is already removed from memory
 	}

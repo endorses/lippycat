@@ -4,15 +4,68 @@ package delivery
 
 import (
 	"bytes"
+	"errors"
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+func TestJournalConcurrentFlushAndAdmissionDoNotBlock(t *testing.T) {
+	cfg := journalTestConfig(t)
+	cfg.MaxPending = 1
+	cfg.MaxRecords = 4096
+	cfg.MaxBytes = 1 << 30
+	j, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	// Exercise channel admission independently of disk speed. The real worker
+	// still encodes and takes mu to publish completion, as with durable writes.
+	j.writeFile = func(string, []byte) error { return nil }
+	finished := make(chan error, 2)
+	go func() {
+		for range 2000 {
+			if err := j.Flush(); err != nil {
+				finished <- err
+				return
+			}
+			runtime.Gosched()
+		}
+		finished <- nil
+	}()
+	go func() {
+		data := bytes.Repeat([]byte{42}, 64<<10)
+		for range 2000 {
+			if _, err := j.Admit(JournalRecord{Data: data}, nil); err != nil && !errors.Is(err, ErrJournalFull) {
+				finished <- err
+				return
+			}
+			runtime.Gosched()
+		}
+		finished <- nil
+	}()
+	for range 2 {
+		select {
+		case err := <-finished:
+			require.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("concurrent flush and admission deadlocked")
+		}
+	}
+	require.NoError(t, j.Close())
+	require.Zero(t, j.Stats().Pending)
+	j.mu.Lock()
+	var reserved int64
+	for _, e := range j.entries {
+		reserved += e.size
+	}
+	j.mu.Unlock()
+	require.Equal(t, reserved, j.Stats().Bytes)
+}
 
 func journalTestConfig(t *testing.T) JournalConfig {
 	t.Helper()

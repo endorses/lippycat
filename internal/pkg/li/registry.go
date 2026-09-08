@@ -828,7 +828,15 @@ func (r *Registry) ModifyDestination(did uuid.UUID, dest *Destination) error {
 	// Update the destination (preserving CreatedAt)
 	existing := r.destinations[did]
 	dest.CreatedAt = existing.CreatedAt
-	r.destinations[did] = dest
+	dest.DeliveryRevision = existing.DeliveryRevision
+	if existing.Address != dest.Address || existing.Port != dest.Port || existing.ProtocolType != dest.ProtocolType || existing.X2Enabled != dest.X2Enabled || existing.X3Enabled != dest.X3Enabled {
+		if dest.DeliveryRevision == ^uint64(0) {
+			return fmt.Errorf("%w: destination delivery revision exhausted", ErrInvalidTask)
+		}
+		dest.DeliveryRevision++
+	}
+	destCopy := *dest
+	r.destinations[did] = &destCopy
 
 	return nil
 }

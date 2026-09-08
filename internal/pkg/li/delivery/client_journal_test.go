@@ -4,6 +4,7 @@ package delivery
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -79,6 +80,96 @@ func TestJournalHeldBlocksLiveAndPurgeAccountsOnce(t *testing.T) {
 	require.Zero(t, c.JournalStats().Held)
 	require.NoError(t, c.PurgeHeldX2())
 	require.Equal(t, before+1, c.Stats().X2Dropped)
+}
+
+func TestJournalStartupPurgeDoesNotReserveHistoricalDestinations(t *testing.T) {
+	cfg := journalTestConfig(t)
+	j, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	for range 3 {
+		journalAdmit(t, j, JournalRecord{DID: uuid.New(), XID: uuid.New(), Data: []byte("old")})
+	}
+	require.NoError(t, j.Close())
+	config := DefaultClientConfig()
+	config.X2SpoolDir = cfg.Dir
+	config.X2SpoolKeyFile = cfg.KeyFile
+	config.X2SpoolMaxBytes = cfg.MaxBytes
+	config.X2SpoolReplayPolicy = "purge"
+	c := NewClient(&Manager{destinations: make(map[uuid.UUID]*destinationState)}, config)
+	require.NoError(t, c.Err())
+	defer c.Stop()
+	require.Zero(t, c.JournalStats().Held)
+	require.Equal(t, uint64(3), c.Stats().X2Dropped)
+	require.Equal(t, uint64(9), c.Stats().DroppedBytes)
+	c.queuesMu.RLock()
+	queues := len(c.queues)
+	c.queuesMu.RUnlock()
+	require.Zero(t, queues, "historical destinations must not consume live queue reservations")
+}
+
+func TestJournalPendingPersistenceRetainedAfterQueueStops(t *testing.T) {
+	for _, remove := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remove_destination_%t", remove), func(t *testing.T) {
+			cfg := journalTestConfig(t)
+			config := DefaultClientConfig()
+			config.X2SpoolDir = cfg.Dir
+			config.X2SpoolKeyFile = cfg.KeyFile
+			config.X2SpoolMaxBytes = cfg.MaxBytes
+			did, xid := uuid.New(), uuid.New()
+			manager := &Manager{destinations: map[uuid.UUID]*destinationState{
+				did: {dest: &li.Destination{DID: did, ProtocolType: "X2ANDX3", CreatedAt: time.Now()}},
+			}}
+			c := NewClient(manager, config)
+			require.NoError(t, c.Err())
+			defer c.Stop()
+			entered, release := make(chan struct{}), make(chan struct{})
+			write := c.journal.writeFile
+			c.journal.writeFile = func(path string, data []byte) error {
+				if filepath.Ext(path) == ".x2" {
+					close(entered)
+					<-release
+				}
+				return write(path, data)
+			}
+			require.NoError(t, c.SendX2WithMetadata(xid, []uuid.UUID{did}, journalSequencePDU(t, xid, 0), DeliveryMetadata{TaskGeneration: 1}))
+			require.NoError(t, c.SendX3(xid, []uuid.UUID{did}, []byte("volatile")))
+			<-entered
+			q := c.getOrCreateQueue(did)
+			removed := make(chan struct{})
+			if remove {
+				go func() {
+					c.RemoveDestination(did)
+					close(removed)
+				}()
+				require.Eventually(t, func() bool {
+					q.mu.Lock()
+					defer q.mu.Unlock()
+					return q.stopped
+				}, time.Second, time.Millisecond)
+			} else {
+				c.dropDestinationQueue(q, "destination_removed")
+				close(removed)
+			}
+			// Pending storage must not be declared lost or release its reservation.
+			depth, dropped := c.QueueDepth(), c.Stats().X2Dropped
+			close(release)
+			if remove {
+				require.Equal(t, 2, depth)
+			} else {
+				require.Equal(t, 1, depth)
+			}
+			require.Zero(t, dropped)
+			require.NoError(t, c.journal.Flush())
+			<-removed
+			require.Zero(t, c.QueueDepth())
+			require.Zero(t, c.Stats().QueueBytes)
+			require.Zero(t, c.Stats().X2Dropped)
+			require.Equal(t, 1, c.JournalStats().Held)
+			require.Equal(t, 1, c.JournalStats().Persisted)
+			require.Equal(t, uint64(1), c.Stats().DroppedByReason["destination_removed"])
+			require.Zero(t, c.Stats().DroppedByReason[""])
+		})
+	}
 }
 
 func TestJournalRestartRetainsX2BeyondX3Lifetime(t *testing.T) {

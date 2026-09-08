@@ -25,14 +25,15 @@ type persistedState struct {
 
 // persistedDestination deliberately excludes TLSConfig and all key material.
 type persistedDestination struct {
-	DID          uuid.UUID `json:"did"`
-	Address      string    `json:"address"`
-	Port         int       `json:"port"`
-	X2Enabled    bool      `json:"x2_enabled"`
-	X3Enabled    bool      `json:"x3_enabled"`
-	ProtocolType string    `json:"protocol_type,omitempty"`
-	Description  string    `json:"description,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	DID              uuid.UUID `json:"did"`
+	Address          string    `json:"address"`
+	Port             int       `json:"port"`
+	X2Enabled        bool      `json:"x2_enabled"`
+	X3Enabled        bool      `json:"x3_enabled"`
+	ProtocolType     string    `json:"protocol_type,omitempty"`
+	Description      string    `json:"description,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	DeliveryRevision uint64    `json:"delivery_revision,omitempty"`
 }
 
 func loadPersistedState(path string) (*persistedState, error) {
@@ -109,7 +110,7 @@ func (m *Manager) persistState() error {
 		state.Destinations = append(state.Destinations, &persistedDestination{
 			DID: dest.DID, Address: dest.Address, Port: dest.Port,
 			X2Enabled: dest.X2Enabled, X3Enabled: dest.X3Enabled,
-			ProtocolType: dest.ProtocolType, Description: dest.Description, CreatedAt: dest.CreatedAt,
+			ProtocolType: dest.ProtocolType, Description: dest.Description, CreatedAt: dest.CreatedAt, DeliveryRevision: dest.DeliveryRevision,
 		})
 	}
 	m.filters.mu.RLock()
@@ -134,7 +135,7 @@ func (m *Manager) restorePersistedState() error {
 		}
 		if err := m.registry.restoreDestination(&Destination{DID: pd.DID, Address: pd.Address, Port: pd.Port,
 			X2Enabled: pd.X2Enabled, X3Enabled: pd.X3Enabled, ProtocolType: pd.ProtocolType,
-			Description: pd.Description, CreatedAt: pd.CreatedAt}); err != nil {
+			Description: pd.Description, CreatedAt: pd.CreatedAt, DeliveryRevision: pd.DeliveryRevision}); err != nil {
 			return err
 		}
 	}

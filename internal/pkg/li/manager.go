@@ -155,11 +155,15 @@ type Manager struct {
 
 	// orphanStreak counts consecutive polls in which a local task was absent
 	// from the ADMF response.
-	orphanMu         sync.Mutex
-	orphanStreak     map[uuid.UUID]int
-	persistedActive  map[uuid.UUID]*InterceptTask
-	replayConfirmed  map[uuid.UUID]uint64
-	commitActivation func(uuid.UUID, time.Time) error
+	orphanMu        sync.Mutex
+	orphanStreak    map[uuid.UUID]int
+	persistedActive map[uuid.UUID]*InterceptTask
+	// persistenceCandidates retains unconfirmed definitions across interrupted
+	// startups. Protected by persistenceMu after restore, unlike persistedActive
+	// which remains immutable evidence for replay authorization.
+	persistenceCandidates map[uuid.UUID]*InterceptTask
+	replayConfirmed       map[uuid.UUID]uint64
+	commitActivation      func(uuid.UUID, time.Time) error
 
 	// stopChan signals shutdown.
 	stopChan chan struct{}
@@ -238,12 +242,13 @@ func (m *Manager) AcquireTaskAdmission(xid uuid.UUID, generation uint64) (*TaskA
 // (e.g., EndTime expiration). This is used to notify ADMF via X1.
 func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback) *Manager {
 	m := &Manager{
-		config:          config,
-		filters:         NewFilterManager(config.FilterPusher),
-		stopChan:        make(chan struct{}),
-		orphanStreak:    make(map[uuid.UUID]int),
-		persistedActive: make(map[uuid.UUID]*InterceptTask),
-		replayConfirmed: make(map[uuid.UUID]uint64),
+		config:                config,
+		filters:               NewFilterManager(config.FilterPusher),
+		stopChan:              make(chan struct{}),
+		orphanStreak:          make(map[uuid.UUID]int),
+		persistedActive:       make(map[uuid.UUID]*InterceptTask),
+		persistenceCandidates: make(map[uuid.UUID]*InterceptTask),
+		replayConfirmed:       make(map[uuid.UUID]uint64),
 	}
 
 	// Create X1 client if ADMF endpoint is configured.
@@ -589,6 +594,18 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 	removedTasks := m.removeOrphanedTasks(snapshot, false)
 	removedDestinations := m.removeOrphanedDestinations(snapshot)
 	removedFilters := m.removeOrphanedLIFilters(snapshot)
+	if snapshot.complete() {
+		m.persistenceMu.Lock()
+		for xid := range m.persistenceCandidates {
+			if !snapshot.tasks[xid] {
+				delete(m.persistenceCandidates, xid)
+			}
+		}
+		m.persistenceMu.Unlock()
+		if err := m.persistState(); err != nil {
+			return fmt.Errorf("persist startup reconciliation: %w", err)
+		}
+	}
 
 	logger.Info("ADMF state sync complete",
 		"tasks", taskCount,
@@ -1198,6 +1215,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		if err := m.commitActivation(task.XID, registered.ActivatedAt); err != nil {
 			return err
 		}
+		m.retirePersistenceCandidate(task.XID)
 		logTaskActivation(isReactivation, registered, previousGeneration, 0)
 		return m.persistState()
 	}
@@ -1210,9 +1228,18 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		return errors.Join(fmt.Errorf("commit activation XID %s: %w", task.XID, err),
 			m.filters.RemoveFiltersForTask(task.XID), m.registry.rollbackActivation(task.XID, registered.ActivatedAt))
 	}
+	m.retirePersistenceCandidate(task.XID)
 
 	logTaskActivation(isReactivation, registered, previousGeneration, len(filterIDs))
 	return m.persistState()
+}
+
+// Only committed ownership replaces an unconfirmed startup candidate. Snapshot
+// writes can observe provisional activations that subsequently roll back.
+func (m *Manager) retirePersistenceCandidate(xid uuid.UUID) {
+	m.persistenceMu.Lock()
+	delete(m.persistenceCandidates, xid)
+	m.persistenceMu.Unlock()
 }
 
 func logTaskActivation(reactivation bool, task *InterceptTask, previousGeneration uint64, filterCount int) {

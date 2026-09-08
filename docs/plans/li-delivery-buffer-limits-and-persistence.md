@@ -611,3 +611,50 @@ Socket-backed tests and module-cache writes used sandbox escalation. Performance
 benchmarks were not rerun; immediate reorder delivery now copies payload bytes,
 covered by its existing memory reservation. These checks establish the covered
 behavior, not proof that every possible defect is absent.
+
+## Eighth implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/transport/reorder ownership, journal persistence
+and replay, and configuration/lifecycle integration. Parent review and independent
+cross-review confirmed and corrected two additional persistence defects.
+
+- [x] Preserve unconfirmed activation definitions across interrupted startup
+      checkpoints and provisional activation rollback. Keep candidates disarmed,
+      require the unchanged generation watermark, and retire them after successful
+      activation or a complete startup ADMF snapshot confirming their absence.
+      Deactivation and tombstone purge cannot resurrect old replay identities.
+- [x] Require an open state-directory handle before replacing a lifecycle
+      checkpoint, and propagate directory open, sync and close failures. A
+      write/search-only directory can no longer silently skip directory sync and
+      enable enforcement without a confirmed durable generation checkpoint.
+- [x] Independently review fixes and regressions, repeat new tests with the race
+      detector, run the complete race/build matrix and format the audit changes.
+
+Cross-review caught and corrected candidate retirement during provisional
+snapshot writes before final validation. Regressions cover repeated interrupted
+startups, unchanged ADMF confirmation, authoritative absence, deactivation/purge,
+checkpoint and activation-commit rollback, and directory permission failures.
+The parent independently restored the original persistence source through a Go
+source overlay and reproduced both defects: replay generation advanced from 7
+to 8, and the directory failure incorrectly allowed task activation with a filter.
+All new regressions passed 30 race-enabled iterations against the fixed code.
+Queue/reorder tests passed 10 race-enabled iterations and journal tests passed 30,
+with no additional confirmed findings.
+
+Final validation passed:
+
+```text
+go test -p 2 -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li -run 'TestPersistedReplayCandidate|TestPersistenceRequiresDirectorySyncBeforeActivation' -count=30 -timeout 60s
+go test -p 2 -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -p 2 -tags 'processor li' -o /tmp/li-eighth-audit-processor .
+go build -p 2 -tags 'tap li' -o /tmp/li-eighth-audit-tap .
+go build -p 2 -tags all -o /tmp/li-eighth-audit-all .
+git diff --check
+```
+
+Socket-backed tests and module-cache writes used sandbox escalation. Go sources
+were formatted with gofmt and this plan with Prettier before staging. Performance
+benchmarks were not rerun during this correctness audit. No confirmed findings
+remain open; these checks establish covered behavior, not proof that every
+possible defect is absent.

@@ -940,6 +940,9 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 	value, runtimeOK := m.connectionRuntime.Load(conn)
 	delete(state.connections, conn)
 	m.connectionRuntime.Delete(conn)
+	if runtimeOK {
+		wakeRetiredConnection(value.(*connectionRuntime))
+	}
 	state.stats.Disconnects++
 	remaining := len(state.connections)
 	// Resolve aggregate state while connection membership is still locked.
@@ -1401,6 +1404,9 @@ func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 		return
 	}
 	runtime := value.(*connectionRuntime)
+	if !runtime.keepalive.enabled {
+		return
+	}
 	timer := time.NewTimer(runtime.keepalive.timeP1)
 	defer timer.Stop()
 	for {
@@ -1740,7 +1746,9 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 	for conn := range state.connections {
 		connections = append(connections, conn)
 		delete(state.connections, conn)
-		m.connectionRuntime.Delete(conn)
+		if value, ok := m.connectionRuntime.LoadAndDelete(conn); ok {
+			wakeRetiredConnection(value.(*connectionRuntime))
+		}
 	}
 	pool := state.pool
 	interfacePools := state.interfacePools
@@ -1759,6 +1767,15 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 		}
 	}
 	atomic.StoreInt32(&state.state, connStateDisconnected)
+}
+
+// Wake a retired association's timer owner immediately. Otherwise reconnect
+// churn retains one goroutine and timer per old transport until its P1/P2 ends.
+func wakeRetiredConnection(runtime *connectionRuntime) {
+	select {
+	case runtime.keepaliveWake <- struct{}{}:
+	default:
+	}
 }
 
 // RecordBytesSent records bytes sent for statistics.

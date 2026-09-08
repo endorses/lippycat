@@ -177,16 +177,19 @@ func (r *Registry) checkExpiredTasks() {
 		}
 		// Manager callbacks normally complete this after enforcement withdrawal;
 		// a plain registry callback has no enforcement layer, so finalize here.
-		_ = r.finishExpiration(task.XID)
+		_ = r.finishExpiration(task.XID, task.ActivationGeneration)
 	}
 }
 
-func (r *Registry) finishExpiration(xid uuid.UUID) error {
+func (r *Registry) finishExpiration(xid uuid.UUID, generation uint64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	task, ok := r.tasks[xid]
 	if !ok {
 		return fmt.Errorf("%w: XID %s", ErrTaskNotFound, xid)
+	}
+	if task.ActivationGeneration != generation {
+		return nil // A newer activation owns this XID now.
 	}
 	if task.Status == TaskStatusDeactivated {
 		return nil

@@ -74,6 +74,39 @@ func TestReorderPreservesAdmissionMetadata(t *testing.T) {
 	}
 }
 
+func TestReorderOwnsPayloadBeforeAfterCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		base []uint16
+		seq  uint16
+	}{
+		{name: "initial", seq: 1},
+		{name: "consecutive", base: []uint16{1}, seq: 2},
+		{name: "late", base: []uint16{2}, seq: 1},
+		{name: "gap", base: []uint16{1}, seq: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var delivered []byte
+			rb := NewCallAwareReorderBuffer(func(entry ReorderEntry) {
+				delivered = append(delivered, entry.PDU...)
+			}, time.Hour)
+			for _, seq := range tc.base {
+				rb.DeliverX3(1, seq, []byte{0})
+			}
+			delivered = nil
+			payload := []byte{7}
+			rb.DeliverEntryX3AfterCommit(ReorderEntry{PDU: payload}, 1, tc.seq, func() {
+				// Admission has committed; releasing the producer's ownership
+				// must not change bytes waiting for their delivery callback.
+				payload[0] = 99
+			})
+			rb.Stop()
+			rb.Wait()
+			require.Equal(t, []byte{7}, delivered)
+		})
+	}
+}
+
 func TestReorderCallIdentityReachesDeliveryCancellation(t *testing.T) {
 	for _, metadataGeneration := range []uint64{0, 99} {
 		t.Run(fmt.Sprint(metadataGeneration), func(t *testing.T) {

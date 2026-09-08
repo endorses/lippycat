@@ -159,6 +159,10 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 		rb.streams[key] = s
 	}
 	s.lastUsed = now
+	// Even an immediately deliverable entry can wait behind an earlier callback
+	// after afterCommit releases producer ownership. Own its bytes before that
+	// boundary just as we do for entries retained across a sequence gap.
+	entry.PDU = append([]byte(nil), entry.PDU...)
 	var out []ReorderEntry
 	if !s.hasBase {
 		s.hasBase = true
@@ -178,7 +182,6 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 			out = append(out, entry)
 		default:
 			if _, dup := s.buffer[seq]; !dup {
-				entry.PDU = append([]byte(nil), entry.PDU...)
 				s.buffer[seq] = bufferedPDU{seqNum: seq, entry: entry, arrived: now}
 				s.bytes += len(pdu)
 			} else {

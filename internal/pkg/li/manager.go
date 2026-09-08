@@ -1362,7 +1362,14 @@ func (m *Manager) promotePendingTasks() {
 		current, err := m.registry.GetTaskDetails(task.XID)
 		if err == nil && current.Status == TaskStatusPending && current.ActivatedAt.Equal(task.ActivatedAt) {
 			var filterIDs []string
-			filterIDs, err = m.filters.CreateFiltersForTask(current)
+			for _, did := range current.DestinationIDs {
+				if _, err = m.registry.GetDestination(did); err != nil {
+					break
+				}
+			}
+			if err == nil {
+				filterIDs, err = m.filters.CreateFiltersForTask(current)
+			}
 			if err == nil {
 				err = m.registry.promotePending(current.XID, current.ActivatedAt)
 			}

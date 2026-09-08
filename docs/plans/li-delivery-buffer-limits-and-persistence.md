@@ -568,3 +568,46 @@ including monotonic state; the corrected timestamp-value assertion passed repeat
 regressions and the final full matrix. Go sources were formatted with gofmt and
 changed Markdown with Prettier before staging. No confirmed findings remain open;
 these checks establish the covered behavior, not proof that all defects are absent.
+
+## Seventh implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/transport/reorder ownership, journal recovery and
+replay, and configuration/lifecycle integration. The parent independently reviewed
+the fixes and regressions; agents also cross-reviewed both changes.
+
+- [x] Copy every admitted reorder payload before releasing producer ownership,
+      including initial, consecutive and late entries. These callbacks may wait
+      behind earlier callbacks after admission is released. Keep the copy within
+      the existing packet memory reservation.
+- [x] Restore retained deactivated, failed and pending task identities when their
+      destinations were subsequently removed, without blocking startup or enabling
+      enforcement. Revalidate destinations before pending filter installation;
+      missing destinations fail the task while preserving its generation.
+- [x] Complete final race/build verification, format changes and commit this audit
+      record with the fixes.
+
+The parent reproduced both defects using original-code source overlays and passed
+reorder and lifecycle regressions for 30 race-enabled iterations. A separate
+agent overlay confirmed that restoring only the old pending-promotion code arms
+a pending task whose destination was removed. Coverage verifies payload ownership
+at the admission-release boundary, preserved lifecycle identities after restart,
+denied replay, and disarmed pending tasks on both original and restarted owners.
+Journal regressions passed 30 race-enabled iterations with no additional findings.
+
+Final validation passed:
+
+```text
+go test -p 2 -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li/delivery -run 'TestReorder' -count=30 -timeout 90s
+go test -race -tags li ./internal/pkg/li -run 'TestPersistenceRestoresTasksAfterDestinationRemoval|TestPersistedGeneration|TestTaskGeneration|TestPending' -count=30 -timeout 90s
+go test -p 2 -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -p 2 -tags 'processor li' -o /tmp/li-seventh-audit-processor .
+go build -p 2 -tags 'tap li' -o /tmp/li-seventh-audit-tap .
+go build -p 2 -tags all -o /tmp/li-seventh-audit-all .
+git diff --check
+```
+
+Socket-backed tests and module-cache writes used sandbox escalation. Performance
+benchmarks were not rerun; immediate reorder delivery now copies payload bytes,
+covered by its existing memory reservation. These checks establish the covered
+behavior, not proof that every possible defect is absent.

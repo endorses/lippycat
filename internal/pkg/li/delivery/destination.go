@@ -800,6 +800,13 @@ func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, 
 	}
 
 	m.mu.RLock()
+	// Shutdown may have completed while the caller cancellation check or the
+	// manager lock was pending. Do not snapshot the closed generation and then
+	// install a fresh connection that shutdown can no longer close.
+	if m.shuttingDown.Load() {
+		m.mu.RUnlock()
+		return nil, ErrShuttingDown
+	}
 	state, exists := m.destinations[did]
 	m.mu.RUnlock()
 
@@ -827,20 +834,30 @@ func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	m.mu.RLock()
+	m.mu.Lock()
 	state.mu.RLock()
-	valid := m.destinations[did] == state && state.generation == generation
+	valid := !m.shuttingDown.Load() && m.destinations[did] == state && state.generation == generation
 	state.mu.RUnlock()
 	if !valid {
-		m.mu.RUnlock()
+		m.mu.Unlock()
 		if err := conn.NetConn().Close(); err != nil {
 			logger.Error("close stale LI transport", "error", err)
 		}
 		return nil, ErrNotConnected
 	}
+	// A background dial may have finished while this foreground dial was in
+	// progress. Reuse that association before sending any product on a second
+	// stream; a full pool must not force that stream to close after one write.
+	if pooled := pool.get(); pooled != nil {
+		m.mu.Unlock()
+		if err := conn.NetConn().Close(); err != nil {
+			logger.Debug("error closing redundant foreground connection", "error", err)
+		}
+		return pooled.conn, nil
+	}
 	m.registerConnection(state, conn, iface)
 	atomic.StoreInt32(&state.state, connStateConnected)
-	m.mu.RUnlock()
+	m.mu.Unlock()
 	m.recordInterfaceReconnect(did, iface)
 	m.watchConnection(did, conn)
 
@@ -1493,22 +1510,34 @@ func (m *Manager) reconnectInterface(did uuid.UUID, iface PDUType) {
 // publication so replacement/removal cannot close the old pools between checking
 // the generation and publishing the transport.
 func (m *Manager) publishPooledConnection(did uuid.UUID, state *destinationState, generation uint64, conn *tls.Conn, iface PDUType) bool {
-	m.mu.RLock()
+	m.mu.Lock()
 	state.mu.RLock()
 	valid := !m.shuttingDown.Load() && m.destinations[did] == state && state.generation == generation
 	pool := state.interfacePools[iface]
+	// A healthy association owns interface FIFO even while checked out. A
+	// late background dial must not replace it or occupy its return capacity.
+	for existing := range state.connections {
+		if runtime, ok := m.connectionRuntime.Load(existing); ok && runtime.(*connectionRuntime).iface == iface {
+			valid = false
+			break
+		}
+	}
 	state.mu.RUnlock()
+	registered := false
 	if valid {
 		m.registerConnection(state, conn, iface)
+		registered = true
 		valid = pool.put(&pooledConn{conn: conn, createdAt: time.Now(), lastUsed: time.Now()})
 		if valid {
 			atomic.StoreInt32(&state.state, connStateConnected)
 		}
 	}
-	m.mu.RUnlock()
+	m.mu.Unlock()
 	if !valid {
 		// Also releases registered state if a full pool refused the association.
-		m.invalidateConnection(did, conn, false)
+		if registered {
+			m.invalidateConnection(did, conn, false)
+		}
 		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing superseded destination connection", "error", err)
 		}

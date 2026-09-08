@@ -658,3 +658,57 @@ were formatted with gofmt and this plan with Prettier before staging. Performanc
 benchmarks were not rerun during this correctness audit. No confirmed findings
 remain open; these checks establish covered behavior, not proof that every
 possible defect is absent.
+
+## Ninth implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/transport/reorder ownership, journal persistence
+and replay, and lifecycle integration. Parent review and independent agent
+cross-review confirmed and corrected three additional defects.
+
+- [x] Serialize fault finalization with task admissions before cancelling the
+      delivery generation. An admitted producer can no longer enqueue X3 after
+      the fault cancellation sweep.
+- [x] Recheck shutdown during foreground destination lookup and transport
+      publication, preventing a caller from installing a new connection after
+      the manager has completed shutdown.
+- [x] Preserve a healthy interface transport across competing foreground and
+      background dials. Serialize publication, reject redundant background
+      associations even while the active connection is checked out, and reuse
+      a background winner before sending on a newly dialed foreground stream.
+      This prevents FIFO overtaking across healthy TCP streams and protects
+      return capacity in a one-connection pool.
+- [x] Independently review the fixes and regressions, repeat race tests, complete
+      the race/build matrix, and format the implementation and audit record.
+
+The parent reproduced the original fault-finalization and pool-publication
+failures using source overlays. An initial full suite also reproduced the
+foreground shutdown regression against the original transport code. A later
+full run exposed the FIFO defect in the unchanged mTLS outage/fan-out test;
+that failure was investigated and fixed before final verification. Deterministic
+regressions cover pool capacities one and two, idle and checked-out associations,
+and a foreground TLS handshake that loses publication to a background dial.
+
+The parent independently passed the new shutdown/lifecycle regressions for 30
+race-enabled iterations, then the final FIFO regressions and unchanged mTLS
+outage test for 30 iterations. Agents cross-reviewed both locking changes and
+independently repeated the relevant regressions. Journal tests passed 30
+race-enabled iterations with no additional confirmed findings.
+
+Final validation passed:
+
+```text
+go test -p 2 -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li/delivery ./internal/pkg/li -run 'TestForegroundConnectionCannotPublishAfterManagerStop|TestTaskAdmissionSerializesFaultCancellation' -count=30 -timeout 60s
+go test -race -tags li ./internal/pkg/li/delivery -run 'TestBackgroundConnectionPreservesActiveFIFOTransport|TestForegroundDialReusesConcurrentBackgroundConnection|TestAuditMutualTLSOutageFanoutDrainsUnderLiveTraffic' -count=30 -timeout 90s
+go test -p 2 -count=1 -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -p 2 -tags 'processor li' -o /tmp/li-ninth-audit-processor .
+go build -p 2 -tags 'tap li' -o /tmp/li-ninth-audit-tap .
+go build -p 2 -tags all -o /tmp/li-ninth-audit-all .
+git diff --check
+```
+
+Socket-backed tests and module-cache writes used sandbox escalation. Go sources
+were formatted with gofmt and this plan with Prettier before staging. Performance
+benchmarks were not rerun during this correctness audit. No confirmed findings
+remain open; these checks establish covered behavior, not proof that every
+possible defect is absent.

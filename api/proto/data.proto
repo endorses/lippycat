@@ -82,6 +82,9 @@ message CapturedPacket {
     // Filter IDs inherited from one authoritatively resolved call. This must be
     // empty for unresolved or ambiguous media.
     repeated string inherited_matched_filter_ids = 12;
+
+    // Capture-origin claims; validate against data and establish source trust.
+    RADIUSObservation radius = 13;
 }
 
 // PacketMetadata contains hunter-side analysis results
@@ -501,4 +504,46 @@ message TLSSessionKeys {
     uint32 src_port = 14;
     string dst_ip = 15;
     uint32 dst_port = 16;
+}
+
+// Captured bytes remain authoritative; these claims never independently authorize LI.
+message RADIUSIdentity {
+    bytes epoch = 1;
+    uint64 sequence = 2;
+}
+message RADIUSScope {
+    string origin_node_id = 1;
+    bytes epoch = 2;
+    string source_id = 3;
+    string operator_scope = 4;
+    string profile_revision = 5;
+}
+message RADIUSCriterion {
+    string target_kind = 1;
+    string filter_id = 2;
+    uint64 filter_revision = 3;
+    uint32 attribute_type = 4;
+    uint32 vendor_id = 5;
+    uint32 vendor_type = 6;
+    bytes value = 7;
+}
+message RADIUSAttribution {
+    string criterion_group_id = 1;
+    repeated RADIUSCriterion criteria = 2;
+    string task_id = 3;
+    uint64 task_generation = 4;
+    RADIUSScope scope = 5;
+}
+message RADIUSObservation {
+    uint32 version = 1;
+    RADIUSScope scope = 2;
+    RADIUSIdentity observation_id = 3;
+    bytes message = 4;
+    string association_status = 5;
+    RADIUSIdentity request_instance_id = 6;
+    RADIUSIdentity request_observation_id = 7;
+    int64 request_first_seen_ns = 8;
+    repeated RADIUSAttribution direct = 9;
+    repeated RADIUSAttribution inherited = 10;
+    uint32 service_port = 11;
 }

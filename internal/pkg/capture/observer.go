@@ -3,8 +3,9 @@ package capture
 import "sync"
 
 // PacketObserver receives packets as they enter the CLI capture pipeline. It is
-// intended for optional, output-only consumers such as structured protocol logs.
-type PacketObserver func(PacketInfo)
+// intended for optional consumers such as structured protocol logs. Observers may
+// attach owned protocol observations before the packet enters downstream queues.
+type PacketObserver func(*PacketInfo)
 
 var packetObserver struct {
 	sync.RWMutex
@@ -25,7 +26,7 @@ func SetPacketObserver(fn PacketObserver) func() {
 	}
 }
 
-func observePacket(info PacketInfo) {
+func observePacket(info *PacketInfo) {
 	packetObserver.RLock()
 	fn := packetObserver.fn
 	packetObserver.RUnlock()

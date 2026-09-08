@@ -204,7 +204,7 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	// Send all packets in timestamp order using blocking sends so replay cannot
 	// drop packets or advance until the consumer accepts the preceding packet.
 	for _, pkt := range allPackets {
-		observePacket(pkt)
+		observePacket(&pkt)
 		packetStream <- pkt
 	}
 	close(packetStream)

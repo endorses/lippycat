@@ -27,6 +27,7 @@ func FromPacketInfo(info capture.PacketInfo, kind ...pipeline.SourceKind) *pipel
 		}
 	}
 	e := pipeline.NewDecodedPacketEnvelope(info.Packet, linkType)
+	e.RADIUS = info.RADIUS.Clone()
 	e.Source = pipeline.SourceProvenance{Kind: sourceKind, InterfaceName: info.Interface}
 	return e
 }
@@ -38,7 +39,7 @@ func ToPacketInfo(e *pipeline.PacketEnvelope) capture.PacketInfo {
 	if e == nil {
 		return capture.PacketInfo{}
 	}
-	return capture.PacketInfo{Packet: e.Packet(), LinkType: e.LinkType, Interface: e.Source.InterfaceName}
+	return capture.PacketInfo{RADIUS: e.RADIUS.Clone(), Packet: e.Packet(), LinkType: e.LinkType, Interface: e.Source.InterfaceName}
 }
 
 // ForEach normalizes a local capture stream at its ingress boundary and invokes

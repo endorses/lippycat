@@ -194,8 +194,10 @@ type CapturedPacket struct {
 	// Filter IDs inherited from one authoritatively resolved call. This must be
 	// empty for unresolved or ambiguous media.
 	InheritedMatchedFilterIds []string `protobuf:"bytes,12,rep,name=inherited_matched_filter_ids,json=inheritedMatchedFilterIds,proto3" json:"inherited_matched_filter_ids,omitempty"`
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	// Capture-origin claims; validate against data and establish source trust.
+	Radius        *RADIUSObservation `protobuf:"bytes,13,opt,name=radius,proto3" json:"radius,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CapturedPacket) Reset() {
@@ -308,6 +310,13 @@ func (x *CapturedPacket) GetDirectMatchedFilterIds() []string {
 func (x *CapturedPacket) GetInheritedMatchedFilterIds() []string {
 	if x != nil {
 		return x.InheritedMatchedFilterIds
+	}
+	return nil
+}
+
+func (x *CapturedPacket) GetRadius() *RADIUSObservation {
+	if x != nil {
+		return x.Radius
 	}
 	return nil
 }
@@ -2281,6 +2290,427 @@ func (x *TLSSessionKeys) GetDstPort() uint32 {
 	return 0
 }
 
+// Captured bytes remain authoritative; these claims never independently authorize LI.
+type RADIUSIdentity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Epoch         []byte                 `protobuf:"bytes,1,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	Sequence      uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RADIUSIdentity) Reset() {
+	*x = RADIUSIdentity{}
+	mi := &file_data_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RADIUSIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RADIUSIdentity) ProtoMessage() {}
+
+func (x *RADIUSIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RADIUSIdentity.ProtoReflect.Descriptor instead.
+func (*RADIUSIdentity) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *RADIUSIdentity) GetEpoch() []byte {
+	if x != nil {
+		return x.Epoch
+	}
+	return nil
+}
+
+func (x *RADIUSIdentity) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+type RADIUSScope struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	OriginNodeId    string                 `protobuf:"bytes,1,opt,name=origin_node_id,json=originNodeId,proto3" json:"origin_node_id,omitempty"`
+	Epoch           []byte                 `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	SourceId        string                 `protobuf:"bytes,3,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	OperatorScope   string                 `protobuf:"bytes,4,opt,name=operator_scope,json=operatorScope,proto3" json:"operator_scope,omitempty"`
+	ProfileRevision string                 `protobuf:"bytes,5,opt,name=profile_revision,json=profileRevision,proto3" json:"profile_revision,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *RADIUSScope) Reset() {
+	*x = RADIUSScope{}
+	mi := &file_data_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RADIUSScope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RADIUSScope) ProtoMessage() {}
+
+func (x *RADIUSScope) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RADIUSScope.ProtoReflect.Descriptor instead.
+func (*RADIUSScope) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *RADIUSScope) GetOriginNodeId() string {
+	if x != nil {
+		return x.OriginNodeId
+	}
+	return ""
+}
+
+func (x *RADIUSScope) GetEpoch() []byte {
+	if x != nil {
+		return x.Epoch
+	}
+	return nil
+}
+
+func (x *RADIUSScope) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
+	}
+	return ""
+}
+
+func (x *RADIUSScope) GetOperatorScope() string {
+	if x != nil {
+		return x.OperatorScope
+	}
+	return ""
+}
+
+func (x *RADIUSScope) GetProfileRevision() string {
+	if x != nil {
+		return x.ProfileRevision
+	}
+	return ""
+}
+
+type RADIUSCriterion struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	TargetKind     string                 `protobuf:"bytes,1,opt,name=target_kind,json=targetKind,proto3" json:"target_kind,omitempty"`
+	FilterId       string                 `protobuf:"bytes,2,opt,name=filter_id,json=filterId,proto3" json:"filter_id,omitempty"`
+	FilterRevision uint64                 `protobuf:"varint,3,opt,name=filter_revision,json=filterRevision,proto3" json:"filter_revision,omitempty"`
+	AttributeType  uint32                 `protobuf:"varint,4,opt,name=attribute_type,json=attributeType,proto3" json:"attribute_type,omitempty"`
+	VendorId       uint32                 `protobuf:"varint,5,opt,name=vendor_id,json=vendorId,proto3" json:"vendor_id,omitempty"`
+	VendorType     uint32                 `protobuf:"varint,6,opt,name=vendor_type,json=vendorType,proto3" json:"vendor_type,omitempty"`
+	Value          []byte                 `protobuf:"bytes,7,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RADIUSCriterion) Reset() {
+	*x = RADIUSCriterion{}
+	mi := &file_data_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RADIUSCriterion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RADIUSCriterion) ProtoMessage() {}
+
+func (x *RADIUSCriterion) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RADIUSCriterion.ProtoReflect.Descriptor instead.
+func (*RADIUSCriterion) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *RADIUSCriterion) GetTargetKind() string {
+	if x != nil {
+		return x.TargetKind
+	}
+	return ""
+}
+
+func (x *RADIUSCriterion) GetFilterId() string {
+	if x != nil {
+		return x.FilterId
+	}
+	return ""
+}
+
+func (x *RADIUSCriterion) GetFilterRevision() uint64 {
+	if x != nil {
+		return x.FilterRevision
+	}
+	return 0
+}
+
+func (x *RADIUSCriterion) GetAttributeType() uint32 {
+	if x != nil {
+		return x.AttributeType
+	}
+	return 0
+}
+
+func (x *RADIUSCriterion) GetVendorId() uint32 {
+	if x != nil {
+		return x.VendorId
+	}
+	return 0
+}
+
+func (x *RADIUSCriterion) GetVendorType() uint32 {
+	if x != nil {
+		return x.VendorType
+	}
+	return 0
+}
+
+func (x *RADIUSCriterion) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+type RADIUSAttribution struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	CriterionGroupId string                 `protobuf:"bytes,1,opt,name=criterion_group_id,json=criterionGroupId,proto3" json:"criterion_group_id,omitempty"`
+	Criteria         []*RADIUSCriterion     `protobuf:"bytes,2,rep,name=criteria,proto3" json:"criteria,omitempty"`
+	TaskId           string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	TaskGeneration   uint64                 `protobuf:"varint,4,opt,name=task_generation,json=taskGeneration,proto3" json:"task_generation,omitempty"`
+	Scope            *RADIUSScope           `protobuf:"bytes,5,opt,name=scope,proto3" json:"scope,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *RADIUSAttribution) Reset() {
+	*x = RADIUSAttribution{}
+	mi := &file_data_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RADIUSAttribution) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RADIUSAttribution) ProtoMessage() {}
+
+func (x *RADIUSAttribution) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RADIUSAttribution.ProtoReflect.Descriptor instead.
+func (*RADIUSAttribution) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *RADIUSAttribution) GetCriterionGroupId() string {
+	if x != nil {
+		return x.CriterionGroupId
+	}
+	return ""
+}
+
+func (x *RADIUSAttribution) GetCriteria() []*RADIUSCriterion {
+	if x != nil {
+		return x.Criteria
+	}
+	return nil
+}
+
+func (x *RADIUSAttribution) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *RADIUSAttribution) GetTaskGeneration() uint64 {
+	if x != nil {
+		return x.TaskGeneration
+	}
+	return 0
+}
+
+func (x *RADIUSAttribution) GetScope() *RADIUSScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+type RADIUSObservation struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Version              uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	Scope                *RADIUSScope           `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
+	ObservationId        *RADIUSIdentity        `protobuf:"bytes,3,opt,name=observation_id,json=observationId,proto3" json:"observation_id,omitempty"`
+	Message              []byte                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	AssociationStatus    string                 `protobuf:"bytes,5,opt,name=association_status,json=associationStatus,proto3" json:"association_status,omitempty"`
+	RequestInstanceId    *RADIUSIdentity        `protobuf:"bytes,6,opt,name=request_instance_id,json=requestInstanceId,proto3" json:"request_instance_id,omitempty"`
+	RequestObservationId *RADIUSIdentity        `protobuf:"bytes,7,opt,name=request_observation_id,json=requestObservationId,proto3" json:"request_observation_id,omitempty"`
+	RequestFirstSeenNs   int64                  `protobuf:"varint,8,opt,name=request_first_seen_ns,json=requestFirstSeenNs,proto3" json:"request_first_seen_ns,omitempty"`
+	Direct               []*RADIUSAttribution   `protobuf:"bytes,9,rep,name=direct,proto3" json:"direct,omitempty"`
+	Inherited            []*RADIUSAttribution   `protobuf:"bytes,10,rep,name=inherited,proto3" json:"inherited,omitempty"`
+	ServicePort          uint32                 `protobuf:"varint,11,opt,name=service_port,json=servicePort,proto3" json:"service_port,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *RADIUSObservation) Reset() {
+	*x = RADIUSObservation{}
+	mi := &file_data_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RADIUSObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RADIUSObservation) ProtoMessage() {}
+
+func (x *RADIUSObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RADIUSObservation.ProtoReflect.Descriptor instead.
+func (*RADIUSObservation) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *RADIUSObservation) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *RADIUSObservation) GetScope() *RADIUSScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *RADIUSObservation) GetObservationId() *RADIUSIdentity {
+	if x != nil {
+		return x.ObservationId
+	}
+	return nil
+}
+
+func (x *RADIUSObservation) GetMessage() []byte {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *RADIUSObservation) GetAssociationStatus() string {
+	if x != nil {
+		return x.AssociationStatus
+	}
+	return ""
+}
+
+func (x *RADIUSObservation) GetRequestInstanceId() *RADIUSIdentity {
+	if x != nil {
+		return x.RequestInstanceId
+	}
+	return nil
+}
+
+func (x *RADIUSObservation) GetRequestObservationId() *RADIUSIdentity {
+	if x != nil {
+		return x.RequestObservationId
+	}
+	return nil
+}
+
+func (x *RADIUSObservation) GetRequestFirstSeenNs() int64 {
+	if x != nil {
+		return x.RequestFirstSeenNs
+	}
+	return 0
+}
+
+func (x *RADIUSObservation) GetDirect() []*RADIUSAttribution {
+	if x != nil {
+		return x.Direct
+	}
+	return nil
+}
+
+func (x *RADIUSObservation) GetInherited() []*RADIUSAttribution {
+	if x != nil {
+		return x.Inherited
+	}
+	return nil
+}
+
+func (x *RADIUSObservation) GetServicePort() uint32 {
+	if x != nil {
+		return x.ServicePort
+	}
+	return 0
+}
+
 var File_data_proto protoreflect.FileDescriptor
 
 const file_data_proto_rawDesc = "" +
@@ -2292,7 +2722,7 @@ const file_data_proto_rawDesc = "" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12!\n" +
 	"\ftimestamp_ns\x18\x03 \x01(\x03R\vtimestampNs\x127\n" +
 	"\apackets\x18\x04 \x03(\v2\x1d.lippycat.data.CapturedPacketR\apackets\x12/\n" +
-	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\xa3\x04\n" +
+	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\xdd\x04\n" +
 	"\x0eCapturedPacket\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12%\n" +
@@ -2306,7 +2736,8 @@ const file_data_proto_rawDesc = "" +
 	"\btls_keys\x18\n" +
 	" \x01(\v2\x1d.lippycat.data.TLSSessionKeysR\atlsKeys\x129\n" +
 	"\x19direct_matched_filter_ids\x18\v \x03(\tR\x16directMatchedFilterIds\x12?\n" +
-	"\x1cinherited_matched_filter_ids\x18\f \x03(\tR\x19inheritedMatchedFilterIds\"\xe1\x04\n" +
+	"\x1cinherited_matched_filter_ids\x18\f \x03(\tR\x19inheritedMatchedFilterIds\x128\n" +
+	"\x06radius\x18\r \x01(\v2 .lippycat.data.RADIUSObservationR\x06radius\"\xe1\x04\n" +
 	"\x0ePacketMetadata\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x15\n" +
 	"\x06src_ip\x18\x02 \x01(\tR\x05srcIp\x12\x15\n" +
@@ -2523,7 +2954,45 @@ const file_data_proto_rawDesc = "" +
 	"\x06src_ip\x18\r \x01(\tR\x05srcIp\x12\x19\n" +
 	"\bsrc_port\x18\x0e \x01(\rR\asrcPort\x12\x15\n" +
 	"\x06dst_ip\x18\x0f \x01(\tR\x05dstIp\x12\x19\n" +
-	"\bdst_port\x18\x10 \x01(\rR\adstPort*P\n" +
+	"\bdst_port\x18\x10 \x01(\rR\adstPort\"B\n" +
+	"\x0eRADIUSIdentity\x12\x14\n" +
+	"\x05epoch\x18\x01 \x01(\fR\x05epoch\x12\x1a\n" +
+	"\bsequence\x18\x02 \x01(\x04R\bsequence\"\xb8\x01\n" +
+	"\vRADIUSScope\x12$\n" +
+	"\x0eorigin_node_id\x18\x01 \x01(\tR\foriginNodeId\x12\x14\n" +
+	"\x05epoch\x18\x02 \x01(\fR\x05epoch\x12\x1b\n" +
+	"\tsource_id\x18\x03 \x01(\tR\bsourceId\x12%\n" +
+	"\x0eoperator_scope\x18\x04 \x01(\tR\roperatorScope\x12)\n" +
+	"\x10profile_revision\x18\x05 \x01(\tR\x0fprofileRevision\"\xf3\x01\n" +
+	"\x0fRADIUSCriterion\x12\x1f\n" +
+	"\vtarget_kind\x18\x01 \x01(\tR\n" +
+	"targetKind\x12\x1b\n" +
+	"\tfilter_id\x18\x02 \x01(\tR\bfilterId\x12'\n" +
+	"\x0ffilter_revision\x18\x03 \x01(\x04R\x0efilterRevision\x12%\n" +
+	"\x0eattribute_type\x18\x04 \x01(\rR\rattributeType\x12\x1b\n" +
+	"\tvendor_id\x18\x05 \x01(\rR\bvendorId\x12\x1f\n" +
+	"\vvendor_type\x18\x06 \x01(\rR\n" +
+	"vendorType\x12\x14\n" +
+	"\x05value\x18\a \x01(\fR\x05value\"\xf1\x01\n" +
+	"\x11RADIUSAttribution\x12,\n" +
+	"\x12criterion_group_id\x18\x01 \x01(\tR\x10criterionGroupId\x12:\n" +
+	"\bcriteria\x18\x02 \x03(\v2\x1e.lippycat.data.RADIUSCriterionR\bcriteria\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12'\n" +
+	"\x0ftask_generation\x18\x04 \x01(\x04R\x0etaskGeneration\x120\n" +
+	"\x05scope\x18\x05 \x01(\v2\x1a.lippycat.data.RADIUSScopeR\x05scope\"\xe2\x04\n" +
+	"\x11RADIUSObservation\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\rR\aversion\x120\n" +
+	"\x05scope\x18\x02 \x01(\v2\x1a.lippycat.data.RADIUSScopeR\x05scope\x12D\n" +
+	"\x0eobservation_id\x18\x03 \x01(\v2\x1d.lippycat.data.RADIUSIdentityR\robservationId\x12\x18\n" +
+	"\amessage\x18\x04 \x01(\fR\amessage\x12-\n" +
+	"\x12association_status\x18\x05 \x01(\tR\x11associationStatus\x12M\n" +
+	"\x13request_instance_id\x18\x06 \x01(\v2\x1d.lippycat.data.RADIUSIdentityR\x11requestInstanceId\x12S\n" +
+	"\x16request_observation_id\x18\a \x01(\v2\x1d.lippycat.data.RADIUSIdentityR\x14requestObservationId\x121\n" +
+	"\x15request_first_seen_ns\x18\b \x01(\x03R\x12requestFirstSeenNs\x128\n" +
+	"\x06direct\x18\t \x03(\v2 .lippycat.data.RADIUSAttributionR\x06direct\x12>\n" +
+	"\tinherited\x18\n" +
+	" \x03(\v2 .lippycat.data.RADIUSAttributionR\tinherited\x12!\n" +
+	"\fservice_port\x18\v \x01(\rR\vservicePort*P\n" +
 	"\vFlowControl\x12\x11\n" +
 	"\rFLOW_CONTINUE\x10\x00\x12\r\n" +
 	"\tFLOW_SLOW\x10\x01\x12\x0e\n" +
@@ -2548,7 +3017,7 @@ func file_data_proto_rawDescGZIP() []byte {
 }
 
 var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_data_proto_goTypes = []any{
 	(FlowControl)(0),             // 0: lippycat.data.FlowControl
 	(*PacketBatch)(nil),          // 1: lippycat.data.PacketBatch
@@ -2568,39 +3037,53 @@ var file_data_proto_goTypes = []any{
 	(*CorrelatedCallUpdate)(nil), // 15: lippycat.data.CorrelatedCallUpdate
 	(*CallLegInfo)(nil),          // 16: lippycat.data.CallLegInfo
 	(*TLSSessionKeys)(nil),       // 17: lippycat.data.TLSSessionKeys
-	nil,                          // 18: lippycat.data.PacketMetadata.DetailsEntry
-	nil,                          // 19: lippycat.data.HTTPMetadata.HeadersEntry
-	nil,                          // 20: lippycat.data.AccessNetworkInfo.ParametersEntry
+	(*RADIUSIdentity)(nil),       // 18: lippycat.data.RADIUSIdentity
+	(*RADIUSScope)(nil),          // 19: lippycat.data.RADIUSScope
+	(*RADIUSCriterion)(nil),      // 20: lippycat.data.RADIUSCriterion
+	(*RADIUSAttribution)(nil),    // 21: lippycat.data.RADIUSAttribution
+	(*RADIUSObservation)(nil),    // 22: lippycat.data.RADIUSObservation
+	nil,                          // 23: lippycat.data.PacketMetadata.DetailsEntry
+	nil,                          // 24: lippycat.data.HTTPMetadata.HeadersEntry
+	nil,                          // 25: lippycat.data.AccessNetworkInfo.ParametersEntry
 }
 var file_data_proto_depIdxs = []int32{
 	2,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
 	12, // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
 	3,  // 2: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
 	17, // 3: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
-	6,  // 4: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
-	8,  // 5: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
-	18, // 6: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
-	11, // 7: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
-	9,  // 8: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
-	4,  // 9: lippycat.data.PacketMetadata.tls:type_name -> lippycat.data.TLSMetadata
-	5,  // 10: lippycat.data.PacketMetadata.http:type_name -> lippycat.data.HTTPMetadata
-	19, // 11: lippycat.data.HTTPMetadata.headers:type_name -> lippycat.data.HTTPMetadata.HeadersEntry
-	7,  // 12: lippycat.data.SIPMetadata.access_network_info:type_name -> lippycat.data.AccessNetworkInfo
-	20, // 13: lippycat.data.AccessNetworkInfo.parameters:type_name -> lippycat.data.AccessNetworkInfo.ParametersEntry
-	10, // 14: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
-	0,  // 15: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
-	16, // 16: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
-	1,  // 17: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
-	14, // 18: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
-	14, // 19: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
-	13, // 20: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
-	1,  // 21: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
-	15, // 22: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
-	20, // [20:23] is the sub-list for method output_type
-	17, // [17:20] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	22, // 4: lippycat.data.CapturedPacket.radius:type_name -> lippycat.data.RADIUSObservation
+	6,  // 5: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
+	8,  // 6: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
+	23, // 7: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
+	11, // 8: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
+	9,  // 9: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
+	4,  // 10: lippycat.data.PacketMetadata.tls:type_name -> lippycat.data.TLSMetadata
+	5,  // 11: lippycat.data.PacketMetadata.http:type_name -> lippycat.data.HTTPMetadata
+	24, // 12: lippycat.data.HTTPMetadata.headers:type_name -> lippycat.data.HTTPMetadata.HeadersEntry
+	7,  // 13: lippycat.data.SIPMetadata.access_network_info:type_name -> lippycat.data.AccessNetworkInfo
+	25, // 14: lippycat.data.AccessNetworkInfo.parameters:type_name -> lippycat.data.AccessNetworkInfo.ParametersEntry
+	10, // 15: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
+	0,  // 16: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
+	16, // 17: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
+	20, // 18: lippycat.data.RADIUSAttribution.criteria:type_name -> lippycat.data.RADIUSCriterion
+	19, // 19: lippycat.data.RADIUSAttribution.scope:type_name -> lippycat.data.RADIUSScope
+	19, // 20: lippycat.data.RADIUSObservation.scope:type_name -> lippycat.data.RADIUSScope
+	18, // 21: lippycat.data.RADIUSObservation.observation_id:type_name -> lippycat.data.RADIUSIdentity
+	18, // 22: lippycat.data.RADIUSObservation.request_instance_id:type_name -> lippycat.data.RADIUSIdentity
+	18, // 23: lippycat.data.RADIUSObservation.request_observation_id:type_name -> lippycat.data.RADIUSIdentity
+	21, // 24: lippycat.data.RADIUSObservation.direct:type_name -> lippycat.data.RADIUSAttribution
+	21, // 25: lippycat.data.RADIUSObservation.inherited:type_name -> lippycat.data.RADIUSAttribution
+	1,  // 26: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
+	14, // 27: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
+	14, // 28: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
+	13, // 29: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
+	1,  // 30: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
+	15, // 31: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
+	29, // [29:32] is the sub-list for method output_type
+	26, // [26:29] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_data_proto_init() }
@@ -2614,7 +3097,7 @@ func file_data_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   20,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

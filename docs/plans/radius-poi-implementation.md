@@ -6,7 +6,8 @@ Status: Phase 0 local contracts and synthetic acceptance fixtures implemented;
 external MDF agreement and production operator mapping verification pending.
 Phase 1 shared decoder and observation foundation implemented and verified.
 Phase 2 exact filters and bounded transaction association implemented and verified.
-Phases 3–7 remain pending.
+Phase 3 capture ingress, transport, and ordinary outputs implemented and verified.
+Phases 4–7 remain pending.
 
 Source: [RADIUS POI implementation assessment](../research/radius-poi-implementation-assessment.md).
 
@@ -320,18 +321,64 @@ Primary locations: `internal/pkg/hunter/forwarding/manager.go`,
 `internal/pkg/processor`, `internal/pkg/events`, `internal/pkg/logschema`,
 `internal/pkg/logstream`, and the sniff/TUI presentation paths.
 
-- [ ] Invoke the shared decoder/matcher/correlator before the hunt forwarding and tap local-source unmatched-packet gates. Include both directions in BPF generation and preserve visibility of competing requests needed for safe correlation.
-- [ ] Extend the normalized packet envelope and protobuf metadata with RADIUS observations and provenance as needed; preserve capture scope, timestamp, link type, bytes, and attribution through local, gRPC, and upstream forwarding adapters.
-- [ ] Define trusted provenance boundaries and validate envelope consistency against captured bytes. Do not treat a transported filter ID alone as proof of a RADIUS transaction association.
-- [ ] Keep RADIUS handling protocol-neutral at `lc process`; integrate analyzer selection and protocol detection without requiring a separate processor command or an X1 task.
-- [ ] Add shared RADIUS display metadata, protocol summaries, and existing watch/TUI rendering support; expose decoded observations through sniff text/JSON conventions.
-- [ ] Add typed RADIUS observation events and a canonical `radius` log schema with versioned fields/types, transaction/association status, and documented attribute representation. Integrate TSV/JSONL encoding, rotation, configuration, and schema golden fixtures.
-- [ ] Document and test which attributes are exposed in text/log outputs, particularly credential-bearing and binary values; retain byte preservation for explicitly configured packet/X2 sinks without blindly dumping every raw attribute into routine summaries.
-- [ ] Verify unified/rotating PCAP, upstream forwarding, subscriber broadcast, and virtual-interface injection retain their existing behavior. Do not route RADIUS through per-call VoIP writers.
-- [ ] Verify independent sink enablement, bounded queues, overflow counters, graceful draining, and subscriber isolation; slow TUI clients must not drive hunter flow control.
+- [x] Invoke the shared decoder/matcher/correlator before the hunt forwarding and tap local-source unmatched-packet gates. Include both directions in BPF generation and preserve visibility of competing requests needed for safe correlation.
+- [x] Extend the normalized packet envelope and protobuf metadata with RADIUS observations and provenance as needed; preserve capture scope, timestamp, link type, bytes, and attribution through local, gRPC, and upstream forwarding adapters.
+- [x] Define trusted provenance boundaries and validate envelope consistency against captured bytes. Do not treat a transported filter ID alone as proof of a RADIUS transaction association.
+- [x] Keep RADIUS handling protocol-neutral at `lc process`; integrate analyzer selection and protocol detection without requiring a separate processor command or an X1 task.
+- [x] Add shared RADIUS display metadata, protocol summaries, and existing watch/TUI rendering support; expose decoded observations through sniff text/JSON conventions.
+- [x] Add typed RADIUS observation events and a canonical `radius` log schema with versioned fields/types, transaction/association status, and documented attribute representation. Integrate TSV/JSONL encoding, rotation, configuration, and schema golden fixtures.
+- [x] Document and test which attributes are exposed in text/log outputs, particularly credential-bearing and binary values; retain byte preservation for explicitly configured packet/X2 sinks without blindly dumping every raw attribute into routine summaries.
+- [x] Verify unified/rotating PCAP, upstream forwarding, subscriber broadcast, and virtual-interface injection retain their existing behavior. Do not route RADIUS through per-call VoIP writers.
+- [x] Verify independent sink enablement, bounded queues, overflow counters, graceful draining, and subscriber isolation; slow TUI clients must not drive hunter flow control.
 
 Exit criterion: non-LI capture and filtering work with useful metadata and all
 supported ordinary outputs, including identity-free correlated responses.
+
+Phase 3 verification (2026-09-09): specialized sub-agents implemented capture
+integration, transport/provenance, and typed logs; the parent reviewed and tested
+those changes. Independent cross-review found and corrected envelope refresh
+losing observations/restoring generic IDs, legacy interface-scope collisions,
+local filter mutation ordering, IPv6 extension-byte detection, and rejected
+packet timestamps advancing expiry. Dedicated fixtures cover those regressions.
+
+Hunt/tap observe competitors before selection and retain identity-free uniquely
+associated responses. Dynamic BPF includes both directions of configured service
+traffic; the broader IPv6 protocol-chain branch receives userspace validation.
+Capture changes create fresh epochs and exclude queued pre-boundary packets from
+association. Local capability requires an installed source and matcher. Routine
+summaries use an explicit attribute allowlist with hex encoding; credentials,
+authenticators and unknown values remain absent. Sniff logs/CLI share observations.
+The version-1 `radius` schema has field/type and TSV/JSONL golden coverage.
+
+Parent-run fixture integration verifies unified and rotating PCAP bytes/timestamps,
+subscriber output, identity-free association, and exclusion from VoIP per-call
+files. Separate tests exercise real upstream queue/wire transport and mock virtual
+interface injection. RADIUS log rotation/draining and independent stream selection
+pass; shared dispatcher/logstream overflow tests pass. A full slow RADIUS
+subscriber queue records drops without throttling hunters. Local and remote watch
+and sniff text/JSON tests cover safe binary values and credential omission.
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags all ./internal/pkg/radius ./internal/pkg/pipeline/... ./internal/pkg/hunter/... ./internal/pkg/processor/... ./internal/pkg/events ./internal/pkg/logschema ./internal/pkg/logstream/... ./internal/pkg/capture ./internal/pkg/detector ./internal/pkg/remotecapture ./internal/pkg/tui/... ./cmd/sniff ./cmd/tap ./cmd/process -skip '^TestComprehensivePcapDetection$'
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags 'all li' ./internal/pkg/radius ./internal/pkg/pipeline/... ./internal/pkg/processor ./cmd/sniff ./cmd/tap -run 'RADIUS|Radius' -count=1
+```
+
+Both suites passed, as did targeted final capture/detection/presentation tests and
+vet for the changed package trees with `all li`. All nine applicable non-LI/LI
+variants (`all`, `hunter`, `processor`, `tap`, `cli`, `tui`, `all li`, `processor li`,
+`tap li`) built successfully. Network tests and Go module-cache updates used
+approved execution outside the sandbox. The unfiltered detector suite cannot pass
+because its existing comprehensive test requires absent `http.pcap`, `tls.pcap`,
+`dns.pcap` and `rtp.pcap` fixtures; only that unrelated test was excluded above.
+
+This is the ordinary-output milestone. Dedicated commands/configuration remain
+Phase 6; X1/current task admission and X2 encoding remain Phases 4/5. Transported
+claims are byte-validated, not proof of origin trust or authorization, and cannot
+enter generic LI filter-ID admission. Legacy raw observations have no inherited
+authorization. Distributed reconnect/snapshot convergence and release parity remain
+Phase 7; external MDF/operator acceptance gates remain pending. Dynamic RADIUS
+BPF can expand beyond base BPF, so operator/NAS isolation must not rely on that
+capture expression. See the package README for runtime and provenance details.
 
 ## Phase 4 — X1 targets and current-generation authorization
 
@@ -388,7 +435,7 @@ implicit SIP behavior or undocumented identity conventions.
 
 - [ ] Replay equivalent fixtures through tap and hunt/process and compare target attribution, association status, ordinary outputs, and decoded X2 PDUs, accounting only for documented topology-specific fields.
 - [ ] Cover multiple hunters/interfaces, upstream processor forwarding, reconnect/restart scope changes, filter update races, dropped request transport, and legacy/missing evidence. No cross-scope target delivery is permitted.
-- [ ] Fix and regression-test registration/subscription filter snapshot reconciliation before claiming distributed RADIUS support. Reproduced in the shared hunter filter manager: registration installs revision 1, the filter changes to revision 2 before subscription, and the subscription snapshot sends `UPDATE_ADD`; the hunter ignores the existing ID and retains revision 1. Check deletions during the same gap and snapshot/live-update ordering as well. Verify convergence to current processor policy without retaining stale revisions or deleted filters, including reconnects and legacy-peer compatibility. Relevant paths: `internal/pkg/hunter/filtering/manager.go` (`SetInitialFilters`, `handleUpdate`) and `internal/pkg/processor/processor_grpc_handlers.go` (`SubscribeFilters`). This pre-existing shared-infrastructure concern was reproduced during Phase 2 review; current hunters do not advertise RADIUS capability, so live RADIUS verification remains pending.
+- [ ] Fix and regression-test registration/subscription filter snapshot reconciliation before claiming distributed RADIUS support. Reproduced in the shared hunter filter manager: registration installs revision 1, the filter changes to revision 2 before subscription, and the subscription snapshot sends `UPDATE_ADD`; the hunter ignores the existing ID and retains revision 1. Check deletions during the same gap and snapshot/live-update ordering as well. Verify convergence to current processor policy without retaining stale revisions or deleted filters, including reconnects and legacy-peer compatibility. Relevant paths: `internal/pkg/hunter/filtering/manager.go` (`SetInitialFilters`, `handleUpdate`) and `internal/pkg/processor/processor_grpc_handlers.go` (`SubscribeFilters`). This pre-existing shared-infrastructure concern was reproduced during Phase 2 review; Phase 3 now supplies live ingress capability; snapshot convergence remains unverified until this Phase 7 task passes.
 - [ ] Run the complete acceptance matrix below, targeted unit/integration suites, decoder fuzzing, and race tests for correlator, filter updates, task lifecycle, and queued delivery.
 - [ ] Build applicable non-LI variants (`all`, `hunter`, `processor`, `tap`, `cli`, `tui`) and LI variants (`all li`, `processor li`, `tap li`); run `make verify-no-li` and relevant vet checks.
 - [ ] Validate against the deployment MDF and representative BRAS traces before claiming production interoperability. Record external validation as pending if the receiver or traces are unavailable.

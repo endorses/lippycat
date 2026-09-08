@@ -36,7 +36,7 @@ func Register(flags *pflag.FlagSet, values *Values, includeEmitStage bool) {
 	flags.StringVar(&values.EventDropPolicy, "event-drop-policy", "drop_new", "Normalized event overflow policy (drop_new)")
 	flags.StringVar(&values.Directory, "log-dir", "", "Write structured protocol logs to this directory")
 	flags.StringVar(&values.Format, "log-format", "tsv", "Structured log format: tsv or json")
-	flags.StringSliceVar(&values.Streams, "log-streams", []string{"conn", "dns", "ssl", "http", "smtp", "files"}, "Structured log streams")
+	flags.StringSliceVar(&values.Streams, "log-streams", []string{"conn", "dns", "ssl", "http", "smtp", "files", "radius"}, "Structured log streams")
 	flags.BoolVar(&values.IncludeHTTPHeaders, "log-include-http-headers", false, "Include full HTTP header maps in structured logs")
 	flags.BoolVar(&values.IncludeEmailBodyPreview, "log-include-email-body-preview", false, "Permit captured email body previews for file analysis (sensitive)")
 	flags.DurationVar(&values.RotateInterval, "log-rotate-interval", time.Hour, "Structured log rotation interval")

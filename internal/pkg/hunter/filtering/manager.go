@@ -334,7 +334,10 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 	}
 }
 
-// containsBPFFilter checks if a filter is a BPF filter (requires capture restart)
+// containsBPFFilter checks whether a filter changes kernel capture visibility.
+// RADIUS filters expand visibility to competing requests and responses.
 func (m *Manager) containsBPFFilter(filter *management.Filter) bool {
-	return filter.Type == management.FilterType_FILTER_BPF
+	return filter.Type == management.FilterType_FILTER_BPF ||
+		filter.Type == management.FilterType_FILTER_RADIUS_USERNAME || filter.Type == management.FilterType_FILTER_RADIUS_MAC ||
+		filter.Type == management.FilterType_FILTER_RADIUS_ATTRIBUTE || filter.Type == management.FilterType_FILTER_RADIUS_COMPOUND
 }

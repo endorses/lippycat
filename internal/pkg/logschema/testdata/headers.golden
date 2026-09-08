@@ -22,3 +22,7 @@
 #path	files
 #fields	ts	fuid	uid	source	depth	analyzers	mime_type	filename	duration	local_orig	is_orig	seen_bytes	total_bytes	missing_bytes	overflow_bytes	timedout	parent_fuid	md5	sha1	sha256	hash_complete	extracted	community_id	node_id
 #types	time	string	string	string	count	set[string]	string	string	interval	bool	bool	count	count	count	count	bool	string	string	string	string	bool	string	string	string
+[radius.log]
+#path	radius
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	code	identifier	length	observation_id	request_instance_id	association	attributes	origin_node_id	source_id	capture_epoch	community_id	node_id
+#types	time	string	addr	port	addr	port	enum	count	count	count	string	string	enum	vector[string]	string	string	string	string	string

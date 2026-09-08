@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/pcapsink"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 )
@@ -25,7 +26,16 @@ type localEnvelopePipeline struct {
 }
 
 func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipeline.SourceKind) {
+	observer, err := radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "sniff", SourceID: "local"})
+	if err != nil {
+		logger.Error("Initialize RADIUS observations", "error", err)
+		return
+	}
+	defer observer.Close()
 	for info := range in {
+		if info.RADIUS == nil {
+			info.RADIUS = observer.Process(info.Packet, info.LinkType, info.Interface, nil)
+		}
 		env := captureadapter.FromPacketInfo(info, kind)
 		p.count++
 		for _, named := range p.fanout.Dispatch(context.Background(), env) {
@@ -65,13 +75,21 @@ func (s *cliEnvelopeSink) HandlePacket(_ context.Context, env *pipeline.PacketEn
 		return pipeline.Result{Outcome: pipeline.OutcomeFiltered}
 	}
 	info := captureadapter.ToPacketInfo(env)
+	display := capture.ConvertPacketToDisplay(info)
 	if s.json != nil {
-		if err := s.json.Encode(capture.ConvertPacketToDisplay(info)); err != nil {
+		if err := s.json.Encode(display); err != nil {
 			return pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: fmt.Errorf("encode packet JSON: %w", err)}
 		}
 		return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
 	}
-	if _, err := fmt.Fprintln(s.w, info.Packet); err != nil {
+	var text any = info.Packet
+	if display.RADIUSData == nil && radius.IsCaptureCandidate(info.Packet) {
+		text = "RADIUS invalid or unsupported datagram"
+	}
+	if display.RADIUSData != nil {
+		text = fmt.Sprintf("%s %s:%s -> %s:%s RADIUS %s", display.Timestamp.Format(time.RFC3339Nano), display.SrcIP, display.SrcPort, display.DstIP, display.DstPort, display.Info)
+	}
+	if _, err := fmt.Fprintln(s.w, text); err != nil {
 		return pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: fmt.Errorf("write packet text: %w", err)}
 	}
 	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}

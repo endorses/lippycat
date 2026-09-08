@@ -19,6 +19,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -45,6 +46,8 @@ func stableFilterIDUnion(direct, inherited []string) []string {
 
 // Config contains hunter configuration
 type Config struct {
+	RADIUSPorts    []uint16
+	RADIUSScope    radius.CaptureScope
 	ProcessorAddr  string
 	HunterID       string
 	Interfaces     []string
@@ -109,6 +112,11 @@ type Hunter struct {
 
 // New creates a new hunter instance
 func New(config Config) (*Hunter, error) {
+	for _, port := range config.RADIUSPorts {
+		if port == 0 {
+			return nil, fmt.Errorf("RADIUS service port must be nonzero")
+		}
+	}
 	if config.ProcessorAddr == "" {
 		return nil, fmt.Errorf("processor address is required")
 	}
@@ -131,6 +139,7 @@ func New(config Config) (*Hunter, error) {
 
 	// Create capture manager (will be recreated with proper context in Start())
 	captureManager := huntercapture.New(huntercapture.Config{
+		RADIUSPorts:   config.RADIUSPorts,
 		Interfaces:    config.Interfaces,
 		BaseFilter:    config.BPFFilter,
 		BufferSize:    config.BufferSize,
@@ -283,6 +292,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 			BatchTimeout:          h.config.BatchTimeout,
 			VoIPMode:              h.config.VoIPMode,
 			SupportedFilterTypes:  h.config.SupportedFilterTypes,
+			RADIUSIngress:         h.applicationFilter != nil && h.packetProcessor == nil,
 			TLSEnabled:            h.config.TLSEnabled,
 			TLSCertFile:           h.config.TLSCertFile,
 			TLSKeyFile:            h.config.TLSKeyFile,
@@ -324,6 +334,8 @@ func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.Da
 
 	fwdMgr := forwarding.New(
 		forwarding.Config{
+			RADIUSPorts:        h.config.RADIUSPorts,
+			RADIUSScope:        h.config.RADIUSScope,
 			HunterID:           h.config.HunterID,
 			BatchSize:          h.config.BatchSize,
 			BatchTimeout:       h.config.BatchTimeout,

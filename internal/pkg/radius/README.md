@@ -197,10 +197,65 @@ form cannot discard structured scope or revision data.
 
 Distribution requires both the exact type string and `radius_filter_version=1`.
 Explicit unsupported targets reject provisioning; broadcast distribution excludes
-unsupported peers. Local tap targets reject these filters until Phase 3 installs
-the ingress pipeline. Current hunters do not advertise version 1 yet, even if
-configured with a RADIUS type string. Existing raw packet transport is unchanged.
-`ApplicationFilter.MatchRADIUSObservation` is the integration API for direct
-matches; it keeps grouped references separate from generic packet filter IDs.
-These management and matcher foundations do not claim live RADIUS capture or LI
-support before the remaining phases.
+unsupported peers. Generic hunters with observation-aware forwarding advertise
+version 1; local tap targets accept RADIUS filters only with both the capture
+processor and observation matcher installed. `ApplicationFilter.MatchRADIUSObservation`
+keeps grouped references separate from generic packet filter IDs.
+
+### Ordinary capture and outputs
+
+Generic hunt and tap decode and correlate before application selection, so an
+unmatched competing request can prevent ambiguous response inheritance. Dedicated
+RADIUS subcommands and operator-facing port/profile flags remain Phase 6 work.
+The Go runtime configurations accept additional ports and capture scope; defaults
+observe UDP 1812/1813 with ordinary `local`/`unconfigured` scope labels. Those
+labels do not establish production operator isolation.
+
+An active dynamic RADIUS filter expands the effective BPF with **both directions**
+of the configured service ports. IPv6 UDP extension chains pass a broader
+`ip6 protochain 17` predicate and receive port validation in userspace. This
+expansion can admit traffic outside the base BPF: BPF selection is not an
+operator/NAS authorization boundary. Scope-bound criteria and deployment isolation
+remain required for scoped targets. Removing the filter restores ordinary BPF.
+
+Capture restarts create fresh epochs. Queued pre-boundary timestamps cannot seed
+or inherit a transaction across the gap. Correlation time follows monotonically
+advancing validated capture timestamps, including accelerated offline replay.
+Validation counters exclude unrelated traffic; noninitial UDP fragments have no
+visible ports and are conservatively counted as fragmented candidates.
+
+`lc process` validates and presents RADIUS without protocol mode or X1 tasks.
+Legacy raw traffic receives processor-local observational association separated
+by immediate source and interface; it has no capture-side authorization evidence.
+Legacy reconnect continuity is not a trusted capture epoch. Distributed reconnect
+and snapshot reconciliation acceptance remains Phase 7 work.
+
+Generic sniff text/JSON, local and remote watch metadata, and the optional
+`radius` TSV/JSONL stream use the public projection. Structured sniff logs and
+CLI packets share observations when logs are enabled. Packet, upstream and
+virtual-interface sinks preserve original bytes and link type independently;
+RADIUS never selects VoIP per-call files. Malformed/unsupported RADIUS text uses
+a rejection summary rather than gopacket's raw attribute dump.
+
+### Capture provenance transport
+
+`pipeline.PacketEnvelope.RADIUS` and additive `CapturedPacket.radius` version 1
+retain capture origin/epoch, opaque observation and request identities, association
+status, and complete generation-bearing criterion groups. Local capture adapters
+clone observations; protobuf adapters own their byte slices. Upstream relays keep
+the original scope instead of substituting their immediate transport identity.
+Captured packet data, capture timestamp, lengths and link type remain authoritative.
+The receiving adapter decodes attributes and endpoints again from those bytes and
+checks the claimed RADIUS message, association shape, scope, and direct criteria.
+Invalid claims are discarded while raw packet outputs remain available. Generic
+SIP/RTP filter-ID fields are cleared whenever a RADIUS claim is received.
+
+`ValidateProvenance` and `grpcadapter.RADIUSFromProto` establish consistency only.
+A self-declared origin, filter ID, or unique association is not authenticated by
+these checks. Inherited ownership cannot be proved from one response datagram.
+LI admission must separately establish the trusted capture origin/relay path and
+current task generations; this is Phase 4 work. Legacy packets without the
+versioned envelope carry no inherited attribution, regardless of generic IDs.
+The transport includes original message bytes and exact criteria for packet
+processing; routine display and log consumers must use the redacted presentation
+model rather than dumping the transport message.

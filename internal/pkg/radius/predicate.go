@@ -292,3 +292,32 @@ func (p *Predicate) Reference(observation *Observation) (AttributionReference, b
 	}
 	return group.Match(observation)
 }
+
+// CurrentReference verifies complete evidence against this immutable criterion.
+func (p *Predicate) CurrentReference(ref AttributionReference) bool {
+	if p == nil || ref.TaskID != "" || ref.TaskGeneration != 0 || ref.CriterionGroupID != p.spec.FilterID || len(ref.Criteria) != 1 {
+		return false
+	}
+	return p.currentCriterion(ref.Criteria[0])
+}
+
+func (p *Predicate) currentCriterion(c CriterionReference) bool {
+	return c.TargetKind == p.spec.TargetKind && c.FilterID == p.spec.FilterID && c.FilterRevision == p.spec.FilterRevision && c.AttributeType == p.attributeType && c.VendorID == p.vendorID && c.VendorType == p.vendorType && bytes.Equal(c.Value, p.value)
+}
+
+// CurrentReference requires the complete group and its current generation.
+func (g *Group) CurrentReference(ref AttributionReference) bool {
+	if g == nil || ref.CriterionGroupID != g.spec.ID || ref.TaskID != g.spec.TaskID || ref.TaskGeneration != g.spec.TaskGeneration || len(ref.Criteria) != len(g.predicates) {
+		return false
+	}
+	b, s := g.spec.Scope, ref.Scope
+	if s.OperatorScope != b.OperatorScope || s.ProfileRevision != b.ProfileRevision || (b.OriginNodeID != "" && b.OriginNodeID != s.OriginNodeID) || (b.SourceID != "" && b.SourceID != s.SourceID) {
+		return false
+	}
+	for i, p := range g.predicates {
+		if !p.currentCriterion(ref.Criteria[i]) {
+			return false
+		}
+	}
+	return true
+}

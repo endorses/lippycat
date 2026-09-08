@@ -60,3 +60,18 @@ func (af *ApplicationFilter) updateRADIUSFiltersLocked(filters []*management.Fil
 		af.radiusFilters = append(af.radiusFilters, radiusApplicationFilter{id: f.Id, predicate: p, group: g})
 	}
 }
+
+// SupportsRADIUS reports the observation-aware application matching capability.
+func (af *ApplicationFilter) SupportsRADIUS() bool { return true }
+
+// RADIUSEvidenceCurrent rejects removed or revised criteria before inheritance.
+func (af *ApplicationFilter) RADIUSEvidenceCurrent(ref radius.AttributionReference) bool {
+	af.mu.RLock()
+	defer af.mu.RUnlock()
+	for _, f := range af.radiusFilters {
+		if f.group != nil && f.group.CurrentReference(ref) || f.predicate != nil && f.predicate.CurrentReference(ref) {
+			return true
+		}
+	}
+	return false
+}

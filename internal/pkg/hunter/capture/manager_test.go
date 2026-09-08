@@ -264,3 +264,12 @@ func TestManagerConfigPropagation(t *testing.T) {
 	assert.Equal(t, config.BufferSize, m.bufferSize)
 	assert.Equal(t, config.ProcessorAddr, m.processorAddr)
 }
+
+func TestRADIUSFiltersPreserveBidirectionalCompetitors(t *testing.T) {
+	m := New(Config{BaseFilter: "src host 192.0.2.1", ProcessorAddr: "processor:55555"}, context.Background())
+	filter := m.buildCombinedBPFFilter([]*management.Filter{
+		{Id: "narrow", Enabled: true, Type: management.FilterType_FILTER_BPF, Pattern: "dst port 443"},
+		{Id: "radius", Enabled: true, Type: management.FilterType_FILTER_RADIUS_USERNAME, Pattern: "alice", Revision: 1},
+	})
+	require.Contains(t, filter, "or (udp port 1812 or udp port 1813", "identity filtering must see responses and all competing client requests")
+}

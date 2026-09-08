@@ -56,6 +56,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/stats"
 	"github.com/endorses/lippycat/internal/pkg/processor/subscriber"
 	"github.com/endorses/lippycat/internal/pkg/processor/upstream"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"google.golang.org/grpc"
@@ -170,7 +171,9 @@ type StructuredLogConfig struct {
 
 // Processor represents a processor node
 type Processor struct {
-	config Config
+	radiusMu      sync.Mutex
+	radiusCapture *radius.CaptureProcessor
+	config        Config
 
 	// Protocol detector (for centralized detection)
 	detector *detector.Detector
@@ -303,10 +306,12 @@ func New(config Config) (*Processor, error) {
 		}
 		streams := logCfg.Streams
 		if len(streams) == 0 {
-			streams = []string{"conn", "dns", "ssl", "http", "smtp"}
+			streams = []string{"conn", "dns", "ssl", "http", "smtp", "radius"}
 		}
 		for _, stream := range streams {
 			switch stream {
+			case "radius":
+				err = p.logSink.Register(events.KindRADIUS, "radius", logrecords.RADIUS)
 			case "dns":
 				err = p.logSink.Register(events.KindDNS, "dns", logrecords.DNS)
 			case "smtp":
@@ -330,7 +335,7 @@ func New(config Config) (*Processor, error) {
 		if coalesceErr != nil {
 			return nil, fmt.Errorf("initialize structured log event coalescer: %w", coalesceErr)
 		}
-		if err = p.eventDispatcher.Register(coalescedLogs, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
+		if err = p.eventDispatcher.Register(coalescedLogs, events.KindRADIUS, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
 			return nil, fmt.Errorf("register structured log event sink: %w", err)
 		}
 	}
@@ -740,6 +745,11 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		caps.FilterTypes = []string{"tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}
 	default: // "generic"
 		caps.FilterTypes = []string{"bpf", "ip_address"}
+	}
+
+	if localSource.SupportsRADIUS() {
+		caps.RadiusFilterVersion = 1
+		caps.FilterTypes = append(caps.FilterTypes, "radius_username", "radius_mac", "radius_attribute", "radius_compound")
 	}
 
 	// Get active filter count

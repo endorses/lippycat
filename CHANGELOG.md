@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.7] - 2026-09-08
+
+### Added
+
+- Expose LI delivery counters, queue pressure, journal state, and destination
+  health through processor and tap status reporting
+- Add configurable X2/X3 delivery byte limits, a shared memory reservation
+  budget, and X3 maximum delivery age
+- Add optional bounded X2 disk journaling with crash recovery, sequence
+  restoration, and explicitly authorized replay after startup reconciliation
+
+### Changed
+
+- Document LI delivery limits, persistence, replay authorization, and operational
+  telemetry, with expanded regression and concurrency coverage
+
+### Fixed
+
+- Preserve delivery FIFO ordering, reorder payload ownership, and buffer budgets
+  across retries, replay, destination replacement, and cleanup
+- Preserve durable task and destination identities and retained replay candidates
+  across restarts, with durable state checkpoints and journal ownership checks
+- Prevent stale connection work from replacing healthy transport state or
+  delivering content after task expiry and lifecycle finalization
+- Close delivery worker shutdown races and cancel stale transports while
+  preserving lifecycle shutdown barriers
+
 ## [0.11.6] - 2026-09-07
 
 ### Added

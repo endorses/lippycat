@@ -318,11 +318,9 @@ func (r *Registry) restoreNonEnforcingTask(task *InterceptTask) error {
 	if _, exists := r.tasks[task.XID]; exists {
 		return fmt.Errorf("%w: XID %s", ErrTaskAlreadyExists, task.XID)
 	}
-	for _, did := range task.DestinationIDs {
-		if _, ok := r.destinations[did]; !ok {
-			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
-		}
-	}
+	// Destinations may legitimately have been removed after this task was
+	// retained. Restore its identity without enforcement; pending promotion
+	// validates destinations again before installing any filters.
 	copyTask := *task
 	copyTask.Targets = append([]TargetIdentity(nil), task.Targets...)
 	copyTask.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)

@@ -384,7 +384,7 @@ func (p *connPool) close() {
 
 	p.closed = true
 	for _, conn := range p.conns {
-		if err := conn.conn.Close(); err != nil {
+		if err := conn.conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing pooled connection", "error", err)
 		}
 	}
@@ -433,8 +433,10 @@ type Manager struct {
 	stopChan chan struct{}
 
 	// wg tracks background goroutines.
-	wg       sync.WaitGroup
-	workerMu sync.Mutex
+	wg          sync.WaitGroup
+	workerMu    sync.Mutex
+	dialContext context.Context
+	cancelDials context.CancelFunc
 
 	// shuttingDown indicates shutdown is in progress.
 	shuttingDown      atomic.Bool
@@ -615,6 +617,9 @@ func (m *Manager) Start() {
 func (m *Manager) Stop() {
 	m.workerMu.Lock()
 	m.shuttingDown.Store(true)
+	if m.cancelDials != nil {
+		m.cancelDials()
+	}
 	close(m.stopChan)
 	m.workerMu.Unlock()
 
@@ -642,6 +647,7 @@ func (m *Manager) admitWorkers(count int) bool {
 
 // AddDestination adds a new destination and initiates connection.
 func (m *Manager) AddDestination(dest *li.Destination) error {
+	dest = copyDeliveryDestination(dest)
 	if m.shuttingDown.Load() {
 		return ErrShuttingDown
 	}
@@ -703,6 +709,7 @@ func (m *Manager) RemoveDestination(did uuid.UUID) error {
 // UpdateDestination updates a destination's configuration.
 // If address or port changed, connections are re-established.
 func (m *Manager) UpdateDestination(dest *li.Destination) error {
+	dest = copyDeliveryDestination(dest)
 	if m.shuttingDown.Load() {
 		return ErrShuttingDown
 	}
@@ -759,7 +766,15 @@ func (m *Manager) GetDestination(did uuid.UUID) (*li.Destination, error) {
 
 	state.mu.RLock()
 	defer state.mu.RUnlock()
-	return state.dest, nil
+	return copyDeliveryDestination(state.dest), nil
+}
+
+func copyDeliveryDestination(dest *li.Destination) *li.Destination {
+	copy := *dest
+	if dest.TLSConfig != nil {
+		copy.TLSConfig = dest.TLSConfig.Clone()
+	}
+	return &copy
 }
 
 // GetConnection acquires a connection to the destination.
@@ -1049,13 +1064,21 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 	state.mu.RUnlock()
 	if currentGeneration != generation {
 		if conn != nil {
-			if closeErr := conn.Close(); closeErr != nil {
+			if closeErr := conn.NetConn().Close(); closeErr != nil {
 				logger.Debug("error closing superseded destination connection", "error", closeErr)
 			}
 		}
 		return
 	}
 	if err != nil {
+		m.mu.RLock()
+		state.mu.RLock()
+		valid := !m.shuttingDown.Load() && m.destinations[did] == state && state.generation == generation
+		state.mu.RUnlock()
+		if !valid {
+			m.mu.RUnlock()
+			return
+		}
 		atomic.StoreInt32(&state.state, connStateDisconnected)
 
 		state.mu.Lock()
@@ -1079,6 +1102,7 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 		}
 
 		m.scheduleReconnect(did, state)
+		m.mu.RUnlock()
 		return
 	}
 
@@ -1087,19 +1111,10 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 	if !m.config.X2KeepaliveEnabled && m.config.X3KeepaliveEnabled {
 		iface = PDUTypeX3
 	}
-	m.registerConnection(state, conn, iface)
-	m.recordInterfaceReconnect(did, iface)
-	pooled := &pooledConn{
-		conn:      conn,
-		createdAt: time.Now(),
-		lastUsed:  time.Now(),
+	if !m.publishPooledConnection(did, state, generation, conn, iface) {
+		return
 	}
-	state.mu.RLock()
-	pool := state.interfacePools[iface]
-	state.mu.RUnlock()
-	pool.put(pooled)
-
-	atomic.StoreInt32(&state.state, connStateConnected)
+	m.recordInterfaceReconnect(did, iface)
 
 	state.mu.Lock()
 	state.stats.ConnectSuccesses++
@@ -1118,9 +1133,18 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 }
 
 // dialDestination creates a new TLS connection to the destination.
-// Uses a background context with the configured dial timeout.
+// Uses a shutdown-cancelable context with the configured dial timeout.
 func (m *Manager) dialDestination(state *destinationState) (*tls.Conn, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), m.config.DialTimeout)
+	m.workerMu.Lock()
+	if m.dialContext == nil {
+		m.dialContext, m.cancelDials = context.WithCancel(context.Background())
+	}
+	if m.shuttingDown.Load() {
+		m.cancelDials()
+	}
+	parent := m.dialContext
+	m.workerMu.Unlock()
+	ctx, cancel := context.WithTimeout(parent, m.config.DialTimeout)
 	defer cancel()
 	return m.dialDestinationWithContext(ctx, state)
 }
@@ -1193,7 +1217,7 @@ func (m *Manager) dialDestinationWithContext(ctx context.Context, state *destina
 	default:
 	}
 
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		if closeErr := tcpConn.Close(); closeErr != nil {
 			logger.Debug("error closing connection after handshake error", "error", closeErr)
 		}
@@ -1445,24 +1469,49 @@ func (m *Manager) reconnectInterface(did uuid.UUID, iface PDUType) {
 		if !exists || m.shuttingDown.Load() {
 			return
 		}
+		state.mu.RLock()
+		generation := state.generation
+		state.mu.RUnlock()
 		conn, err := m.dialDestination(state)
 		if err != nil {
 			backoff = min(time.Duration(float64(backoff)*m.config.BackoffMultiplier), m.config.MaxBackoff)
 			continue
 		}
-		m.registerConnection(state, conn, iface)
-		m.recordInterfaceReconnect(did, iface)
-		m.watchConnection(did, conn)
-		state.mu.RLock()
-		pool := state.interfacePools[iface]
-		state.mu.RUnlock()
-		if !pool.put(&pooledConn{conn: conn, createdAt: time.Now(), lastUsed: time.Now()}) {
-			m.InvalidateConnection(did, conn)
+		if !m.publishPooledConnection(did, state, generation, conn, iface) {
 			return
 		}
-		atomic.StoreInt32(&state.state, connStateConnected)
+		m.recordInterfaceReconnect(did, iface)
+		m.watchConnection(did, conn)
 		return
 	}
+}
+
+// publishPooledConnection commits a background dial only while its destination
+// identity and generation remain current. Hold the manager lock through pool
+// publication so replacement/removal cannot close the old pools between checking
+// the generation and publishing the transport.
+func (m *Manager) publishPooledConnection(did uuid.UUID, state *destinationState, generation uint64, conn *tls.Conn, iface PDUType) bool {
+	m.mu.RLock()
+	state.mu.RLock()
+	valid := !m.shuttingDown.Load() && m.destinations[did] == state && state.generation == generation
+	pool := state.interfacePools[iface]
+	state.mu.RUnlock()
+	if valid {
+		m.registerConnection(state, conn, iface)
+		valid = pool.put(&pooledConn{conn: conn, createdAt: time.Now(), lastUsed: time.Now()})
+		if valid {
+			atomic.StoreInt32(&state.state, connStateConnected)
+		}
+	}
+	m.mu.RUnlock()
+	if !valid {
+		// Also releases registered state if a full pool refused the association.
+		m.invalidateConnection(did, conn, false)
+		if err := conn.NetConn().Close(); err != nil {
+			logger.Debug("error closing superseded destination connection", "error", err)
+		}
+	}
+	return valid
 }
 
 // recordInterfaceReconnect pairs a successful replacement association with a
@@ -1652,7 +1701,7 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 		interfacePool.close()
 	}
 	for _, conn := range connections {
-		if err := conn.Close(); err != nil {
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing destination connection",
 				"did", did,
 				"error", err,

@@ -1012,6 +1012,15 @@ func (p *Processor) populateLIEncodingStats(dst *management.ProcessorStats) {
 // activating its replacement. A previously capacity-refused destination may not
 // exist in the delivery manager, so replacement must also support first activation.
 func replaceLIDeliveryDestination(manager *delivery.Manager, client *delivery.Client, dest *li.Destination) error {
+	current, err := manager.GetDestination(dest.DID)
+	if err == nil && li.DestinationDeliveryGeneration(current) == li.DestinationDeliveryGeneration(dest) {
+		// X1 retries and descriptive edits do not revoke a delivery incarnation.
+		// Keep its queued product, replay authorization, and transport owners.
+		return nil
+	}
+	if err != nil && !errors.Is(err, delivery.ErrDestinationNotFound) {
+		return err
+	}
 	if err := manager.RemoveDestination(dest.DID); err != nil && !errors.Is(err, delivery.ErrDestinationNotFound) {
 		return err
 	}

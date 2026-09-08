@@ -49,3 +49,35 @@ func TestLIDeliveryReplacementReservesCapacityAndRecoversRefusedDestination(t *t
 	require.NoError(t, replaceLIDeliveryDestination(manager, client, second), "modification must recover a previously refused destination once capacity is available")
 	require.Contains(t, client.DestinationStats(), second.DID)
 }
+
+func TestLIDeliveryUnchangedDestinationPreservesQueuedProduct(t *testing.T) {
+	cfg := delivery.DefaultConfig()
+	certDir := filepath.Join("..", "..", "..", "test", "testcerts", "li")
+	cfg.TLSCertFile = filepath.Join(certDir, "delivery-client-cert.pem")
+	cfg.TLSKeyFile = filepath.Join(certDir, "delivery-client-key.pem")
+	cfg.TLSCAFile = filepath.Join(certDir, "ca-cert.pem")
+	manager, err := delivery.NewManager(cfg)
+	require.NoError(t, err)
+	t.Cleanup(manager.Stop)
+	limits := delivery.DefaultClientConfig()
+	limits.ShutdownTimeout = time.Millisecond
+	client := delivery.NewClient(manager, limits)
+	require.NoError(t, client.Err())
+	t.Cleanup(client.Stop)
+	dest := &li.Destination{DID: uuid.New(), Address: "127.0.0.1", Port: 1, X2Enabled: true, X3Enabled: true, CreatedAt: time.Now()}
+	require.NoError(t, replaceLIDeliveryDestination(manager, client, dest))
+	xid := uuid.New()
+	require.NoError(t, client.SendX2(xid, []uuid.UUID{dest.DID}, []byte("queued X2")))
+	require.NoError(t, client.SendX3(xid, []uuid.UUID{dest.DID}, []byte("queued X3")))
+	before := client.Stats()
+	for _, description := range []string{"", "updated operator description"} {
+		updated := *dest
+		updated.Description = description
+		require.NoError(t, replaceLIDeliveryDestination(manager, client, &updated))
+		after := client.Stats()
+		require.Equal(t, before.QueueDepth, after.QueueDepth)
+		require.Equal(t, before.QueueBytes, after.QueueBytes)
+		require.Equal(t, before.X2Dropped, after.X2Dropped)
+		require.Equal(t, before.X3Dropped, after.X3Dropped)
+	}
+}

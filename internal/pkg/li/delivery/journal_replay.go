@@ -136,7 +136,7 @@ func (c *Client) feedJournalRecord(candidate replayCandidate) bool {
 	c.attachPayload(item)
 	atomic.AddInt64(&c.stats.QueueDepth, 1)
 	atomic.AddInt64(&c.stats.QueueBytes, int64(len(r.Data)))
-	dropped, ok := q.enqueue(item)
+	dropped, ok := c.journal.enqueueReplay(q, item)
 	if !ok {
 		atomic.AddInt64(&c.stats.QueueDepth, -1)
 		atomic.AddInt64(&c.stats.QueueBytes, -int64(len(r.Data)))
@@ -146,6 +146,18 @@ func (c *Client) feedJournalRecord(candidate replayCandidate) bool {
 	if dropped != nil {
 		c.resolveDrop(q, dropped, "queue_overflow")
 	}
-	c.journal.Release(r.ID)
 	return true
+}
+
+// enqueueReplay transfers held product to the queue before removal can return it
+// to a hold. Publishing first and calling Release separately lets a concurrent
+// drain call Hold while the record is still held, then clear that only owner.
+func (j *Journal) enqueueReplay(q *destinationQueue, item *deliveryItem) (*deliveryItem, bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	dropped, ok := q.enqueue(item)
+	if ok {
+		j.releaseLocked(item.journalID.Load())
+	}
+	return dropped, ok
 }

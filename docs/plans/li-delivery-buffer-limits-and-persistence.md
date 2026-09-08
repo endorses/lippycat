@@ -316,3 +316,53 @@ Socket-backed tests and module-cache writes required sandbox escalation. The
 earlier performance measurements were not rerun as part of this correctness
 audit. These checks establish the covered behavior; they do not establish the
 absence of every possible defect or replace deployment-specific outage testing.
+
+## Second implementation audit (2026-09-08)
+
+Three sub-agents independently reviewed queue/transport ownership, journal replay,
+and configuration/lifecycle integration. Parent review and cross-review confirmed
+and corrected these additional concurrency gaps:
+
+- [x] Disarm reorder timers when a sequence gap closes, so the next gap receives
+      its own reorder window. Validate each timer invocation with an arm generation
+      so an already-fired callback cannot flush or overwrite a newer timer on the
+      same stream.
+- [x] Transfer replayed X2 from held journal state into a delivery queue atomically
+      with respect to journal hold operations. Concurrent destination removal can
+      no longer strand durable product with neither a queue owner nor held status.
+- [x] Serialize destination mutations and their delivery callbacks across X1 and
+      ADMF reconciliation, preventing older callbacks from restoring stale
+      endpoints after newer modifications or removal. Use canonical registry
+      definitions for callbacks and retain unchanged destination queues.
+- [x] Serialize state snapshots and writes so concurrent persistence calls cannot
+      install an older lifecycle snapshot after a newer one.
+- [x] Complete final race/build verification and format the audit record for the
+      accompanying implementation commit.
+
+New regressions cover resolved and stale same-stream reorder timers, replay
+publication against journal holds, and overlapping destination modification,
+reconciliation and removal. Review checked timer worker joins, journal/queue lock
+ordering and destination callback reentrancy: callbacks may read state and update
+callback registrations, but must not recursively mutate destinations.
+
+Source overlays restoring the original timer behavior, replay publication order
+and unserialized destination callbacks fail the corresponding new regressions.
+After auditing the agent changes, the parent independently passed all new
+regressions for 30 race-enabled iterations and the complete validation matrix:
+
+```text
+go test -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li/delivery ./internal/pkg/li -run 'TestReorderResolvedGapDisarmsDeadline|TestReorderRejectsPreviousTimerOnSameStream|TestJournalReplayPublicationSerializedWithHold|TestDestinationUpdatesSerializeDeliveryCallbacks' -count=30 -timeout 60s
+go test -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -tags 'processor li' -o /tmp/li-review-processor-li .
+go build -tags 'tap li' -o /tmp/li-review-tap-li .
+go build -tags all -o /tmp/li-review-all .
+git diff --check
+```
+
+Socket-backed tests and builds needing module-cache writes used sandbox escalation.
+Changed Go sources were formatted with gofmt and the plan with Prettier.
+
+Performance benchmarks were not rerun because this audit targets concurrency
+correctness. These tests establish the covered behavior, not proof of the absence
+of all defects.

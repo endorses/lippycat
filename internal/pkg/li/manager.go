@@ -121,6 +121,10 @@ type Manager struct {
 	stopOnce       sync.Once
 	mu             sync.RWMutex
 	lifecycleMu    sync.RWMutex
+	// destinationMu serializes registry changes with delivery callbacks. Callbacks
+	// may read manager state but must not recursively mutate destinations.
+	destinationMu sync.Mutex
+	persistenceMu sync.Mutex
 
 	config   ManagerConfig
 	registry *Registry
@@ -537,23 +541,10 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 				continue
 			}
 			snapshot.destinations[dest.DID] = true
-			if createErr := m.registry.CreateDestination(dest); createErr != nil {
-				// Destination may already exist if sync is called multiple times.
-				if errors.Is(createErr, ErrDestinationAlreadyExists) {
-					current, getErr := m.registry.GetDestination(dest.DID)
-					if getErr == nil {
-						dest.CreatedAt = current.CreatedAt
-						if modifyErr := m.registry.ModifyDestination(dest.DID, dest); modifyErr != nil {
-							destErrors++
-						}
-					}
-				} else {
-					logger.Warn("Failed to register ADMF destination, skipping",
-						"did", dest.DID,
-						"error", createErr,
-					)
-					destErrors++
-				}
+			if syncErr := m.syncDestination(dest); syncErr != nil {
+				logger.Warn("Failed to register ADMF destination", "did", dest.DID, "error", syncErr)
+				destErrors++
+				snapshot.destinationConvErrors++
 				continue
 			}
 			destCount++
@@ -636,15 +627,9 @@ func (m *Manager) removeOrphanedDestinations(snapshot admfSnapshot) int {
 		if snapshot.destinations[dest.DID] {
 			continue
 		}
-		if err := m.registry.RemoveDestination(dest.DID); err != nil {
+		if err := m.RemoveDestination(dest.DID); err != nil {
 			logger.Error("Reconciliation: failed to remove orphan destination", "did", dest.DID, "error", err)
 			continue
-		}
-		m.callbackMu.RLock()
-		cb := m.onDestinationRemoved
-		m.callbackMu.RUnlock()
-		if cb != nil {
-			cb(dest.DID)
 		}
 		removed++
 	}
@@ -930,31 +915,9 @@ func (m *Manager) reconcileWithADMF() {
 				continue
 			}
 			snapshot.destinations[dest.DID] = true
-			if current, getErr := m.registry.GetDestination(dest.DID); getErr != nil {
-				if err := m.registry.CreateDestination(dest); err == nil {
-					registered, lookupErr := m.registry.GetDestination(dest.DID)
-					if lookupErr != nil {
-						logger.Warn("Failed to read reconciled destination", "did", dest.DID, "error", lookupErr)
-						snapshot.destinationConvErrors++
-						continue
-					}
-					m.callbackMu.RLock()
-					cb := m.onDestinationCreated
-					m.callbackMu.RUnlock()
-					if cb != nil {
-						cb(registered)
-					}
-				}
-			} else if current.Address != dest.Address || current.Port != dest.Port || current.X2Enabled != dest.X2Enabled || current.X3Enabled != dest.X3Enabled || current.ProtocolType != dest.ProtocolType || current.Description != dest.Description {
-				dest.CreatedAt = current.CreatedAt
-				if err := m.registry.ModifyDestination(dest.DID, dest); err == nil {
-					m.callbackMu.RLock()
-					cb := m.onDestinationModified
-					m.callbackMu.RUnlock()
-					if cb != nil {
-						cb(dest)
-					}
-				}
+			if err := m.syncDestination(dest); err != nil {
+				logger.Warn("Failed to reconcile destination", "did", dest.DID, "error", err)
+				snapshot.destinationConvErrors++
 			}
 		}
 	}
@@ -973,17 +936,6 @@ func (m *Manager) reconcileWithADMF() {
 
 			// If task is in ADMF but not in local registry, activate it.
 			if _, getErr := m.registry.GetTaskDetails(task.XID); getErr != nil {
-				// Register any missing destinations first.
-				if resp.ListOfDestinationResponseDetails != nil {
-					for _, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
-						dest, destErr := DestinationResponseDetailsToDestination(dd)
-						if destErr != nil {
-							continue
-						}
-						_ = m.registry.CreateDestination(dest) // Ignore already-exists
-					}
-				}
-
 				if activateErr := m.ActivateTask(task); activateErr != nil {
 					logger.Warn("Reconciliation: failed to activate missing task",
 						"xid", task.XID,
@@ -1413,6 +1365,8 @@ func (m *Manager) GetActiveTasks() []*InterceptTask {
 
 // CreateDestination adds a new X2/X3 delivery destination.
 func (m *Manager) CreateDestination(dest *Destination) error {
+	m.destinationMu.Lock()
+	defer m.destinationMu.Unlock()
 	if err := m.registry.CreateDestination(dest); err != nil {
 		return err
 	}
@@ -1422,6 +1376,30 @@ func (m *Manager) CreateDestination(dest *Destination) error {
 	return m.persistState()
 }
 
+// syncDestination applies an ADMF definition through the same serialized delivery
+// boundary as X1 updates. Unchanged snapshots leave live delivery queues intact.
+func (m *Manager) syncDestination(dest *Destination) error {
+	m.destinationMu.Lock()
+	defer m.destinationMu.Unlock()
+	current, err := m.registry.GetDestination(dest.DID)
+	modified := err == nil
+	if err != nil && !errors.Is(err, ErrDestinationNotFound) {
+		return err
+	}
+	if modified {
+		if current.Address == dest.Address && current.Port == dest.Port && current.X2Enabled == dest.X2Enabled && current.X3Enabled == dest.X3Enabled && current.ProtocolType == dest.ProtocolType && current.Description == dest.Description {
+			return nil
+		}
+		err = m.registry.ModifyDestination(dest.DID, dest)
+	} else {
+		err = m.registry.CreateDestination(dest)
+	}
+	if err != nil {
+		return err
+	}
+	return m.notifyDestinationDefinition(dest.DID, modified)
+}
+
 // GetDestination retrieves a destination by its DID.
 func (m *Manager) GetDestination(did uuid.UUID) (*Destination, error) {
 	return m.registry.GetDestination(did)
@@ -1429,6 +1407,8 @@ func (m *Manager) GetDestination(did uuid.UUID) (*Destination, error) {
 
 // RemoveDestination removes a delivery destination.
 func (m *Manager) RemoveDestination(did uuid.UUID) error {
+	m.destinationMu.Lock()
+	defer m.destinationMu.Unlock()
 	if err := m.registry.RemoveDestination(did); err != nil {
 		return err
 	}
@@ -1443,6 +1423,8 @@ func (m *Manager) RemoveDestination(did uuid.UUID) error {
 
 // ModifyDestination updates the canonical destination and informs delivery owners.
 func (m *Manager) ModifyDestination(did uuid.UUID, dest *Destination) error {
+	m.destinationMu.Lock()
+	defer m.destinationMu.Unlock()
 	if err := m.registry.ModifyDestination(did, dest); err != nil {
 		return err
 	}

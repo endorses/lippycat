@@ -123,7 +123,7 @@ func TestReorderOwnsDelayedPayloadAndRejectsStaleTimer(t *testing.T) {
 	mutable := []byte("original")
 	rb.DeliverCallX3("call", 1, 9, 12, mutable)
 	copy(mutable, []byte("modified"))
-	rb.flush(key, old)
+	rb.flush(key, old, old.timerGeneration)
 	packets, _ := rb.Buffered()
 	require.Equal(t, 1, packets, "stale timer must not flush reused stream")
 	rb.Stop()

@@ -329,6 +329,10 @@ func (j *Journal) Stats() JournalStats { j.mu.Lock(); defer j.mu.Unlock(); retur
 func (j *Journal) Release(id uint64) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	j.releaseLocked(id)
+}
+
+func (j *Journal) releaseLocked(id uint64) {
 	if e := j.entries[id]; e != nil && e.held {
 		e.held = false
 		if e.authorized {

@@ -286,7 +286,7 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 		if len(huntersToRemove) > 0 {
 			deleteUpdate := &management.FilterUpdate{
 				UpdateType: management.FilterUpdateType_UPDATE_DELETE,
-				Filter:     proto.Clone(filter).(*management.Filter), // Use new filter but with DELETE type
+				Filter:     proto.Clone(oldFilter).(*management.Filter), // The recipient understands the previously installed type.
 			}
 			m.pushFilterUpdateToSpecificHunters(huntersToRemove, deleteUpdate)
 		}
@@ -361,40 +361,40 @@ func (m *Manager) RemoveChannel(hunterID string, ch chan *management.FilterUpdat
 	m.channelsMu.Unlock()
 }
 
-// getHuntersToRemove determines which hunters should receive DELETE when filter scope changes
+// getHuntersToRemove finds connected hunters that could receive the old filter
+// but cannot receive its replacement because of target scope or capability.
 func (m *Manager) getHuntersToRemove(oldFilter, newFilter *management.Filter) []string {
 	m.channelsMu.RLock()
 	defer m.channelsMu.RUnlock()
 
-	// Build set of hunters that should receive the new filter
-	newTargets := make(map[string]bool)
-	if len(newFilter.TargetHunters) == 0 {
-		// New filter applies to all hunters - no one needs DELETE
-		return nil
-	}
-	for _, hunterID := range newFilter.TargetHunters {
-		newTargets[hunterID] = true
+	targetsHunter := func(filter *management.Filter, hunterID string) bool {
+		if len(filter.TargetHunters) == 0 {
+			return true
+		}
+		for _, target := range filter.TargetHunters {
+			if target == hunterID {
+				return true
+			}
+		}
+		return false
 	}
 
-	// Find hunters that were receiving the old filter but won't receive new one
 	var huntersToRemove []string
-
-	if len(oldFilter.TargetHunters) == 0 {
-		// Old filter applied to all hunters - remove from all except new targets
-		for hunterID := range m.channels {
-			if !newTargets[hunterID] {
-				huntersToRemove = append(huntersToRemove, hunterID)
-			}
+	for hunterID := range m.channels {
+		if !targetsHunter(oldFilter, hunterID) {
+			continue
 		}
-	} else {
-		// Old filter applied to specific hunters - remove from old targets not in new targets
-		for _, hunterID := range oldFilter.TargetHunters {
-			if !newTargets[hunterID] {
-				huntersToRemove = append(huntersToRemove, hunterID)
-			}
+		var caps *management.HunterCapabilities
+		if m.capabilityProvider != nil {
+			caps = m.capabilityProvider.GetCapabilities(hunterID)
+		}
+		if !hunterSupportsFilterType(caps, oldFilter.Type) {
+			continue
+		}
+		if !targetsHunter(newFilter, hunterID) || !hunterSupportsFilterType(caps, newFilter.Type) {
+			huntersToRemove = append(huntersToRemove, hunterID)
 		}
 	}
-
 	return huntersToRemove
 }
 

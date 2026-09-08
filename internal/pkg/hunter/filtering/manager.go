@@ -198,6 +198,15 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 
 	m.mu.Lock()
 	filtersChanged := false
+	// A type change can remove a BPF restriction even when the replacement is
+	// an application filter. Inspect the installed filter before replacing it.
+	needsRestart := m.containsBPFFilter(update.Filter)
+	for _, f := range m.filters {
+		if f.Id == update.Filter.Id && m.containsBPFFilter(f) {
+			needsRestart = true
+			break
+		}
+	}
 
 	switch update.UpdateType {
 	case management.FilterUpdateType_UPDATE_ADD:
@@ -293,10 +302,12 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 
 	// Apply filters based on type
 	if filtersChanged {
-		// Check if this is a BPF filter change (requires capture restart)
-		needsRestart := m.containsBPFFilter(update.Filter)
-
 		if needsRestart {
+			// Restart rebuilds capture BPF only. Also install/remove application
+			// predicates when a filter changes between BPF and another type.
+			if appFilterUpdater != nil {
+				appFilterUpdater.UpdateFilters(currentFilters)
+			}
 			// BPF filter changed - must restart capture
 			logger.Info("BPF filter changed, restarting capture", "active_filters", len(currentFilters))
 

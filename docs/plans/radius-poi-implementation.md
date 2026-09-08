@@ -251,6 +251,22 @@ sandbox for local gRPC sockets. Builds passed with `all`, `hunter`, `tap`,
 MAC-profile validation. Changed Go/Markdown files were formatted and
 `git diff --check` passed. Phase 0 external MDF/operator gates remain pending.
 
+Phase 2 follow-up assessment (2026-09-09): three sub-agents reviewed correlation,
+matching and management against the plan and contracts. Parent verification
+reproduced two filter-replacement defects: incompatible hunters retained the
+previous filter when a global filter changed to RADIUS, and capable hunters did
+not restart capture when a RADIUS filter replaced BPF. Distribution now removes
+obsolete filters using their previous type, and hunter updates refresh application
+matchers and account for the installed BPF type before replacement. Regression tests cover legacy peers,
+RADIUS capability differences, target scope changes and idempotent capture
+restart. No additional matcher or correlator defects were confirmed.
+
+The Phase 2 race suite listed above passed during assessment. After fixes,
+the full processor filtering and hunter/filtering, hunter and hunter/capture
+race suites passed, as did vet for the changed packages with `all li`.
+Independent cross-review checked the fixes; Go/Markdown formatting and
+`git diff --check` passed.
+
 ## Phase 3 — Capture ingress, transport, and ordinary outputs
 
 Primary locations: `internal/pkg/hunter/forwarding/manager.go`,

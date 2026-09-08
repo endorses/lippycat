@@ -267,6 +267,29 @@ race suites passed, as did vet for the changed packages with `all li`.
 Independent cross-review checked the fixes; Go/Markdown formatting and
 `git diff --check` passed.
 
+Phase 2 second assessment (2026-09-09): three sub-agents reviewed correlation,
+predicates and management against the plan and contracts. Parent verification
+confirmed two remaining management defects. Concurrent mutations could deliver
+revision 3 before revision 2, resurrect a deleted filter, or delete a newly
+recreated filter. A dedicated mutation lock now preserves commit, distribution
+and persistence order while allowing callbacks to read filter state. The CLI
+also discarded explicit `--revision` when replacing RADIUS with another filter
+type; it now preserves that flag and documents its use for replacements.
+
+Parent-run regressions failed without each fix and passed with the fixes.
+Ordering coverage includes modify/modify, modify/delete and delete/recreate;
+the CLI regression sends a BPF replacement through a local gRPC server into the
+real filter manager. The existing concurrent-send test now consumes updates and
+asserts every delivery, avoiding serialized queue timeouts already covered by
+the separate timeout test. No additional predicate or correlator defects were
+confirmed. Live ingress and LI admission remain assigned to later phases.
+
+The full Phase 2 race suite above passed before changes. After fixes, race tests
+passed for processor filtering, hunter filtering, hunter, filterclient and the
+CLI replacement regression. Vet passed for changed packages with `all li`.
+Local gRPC tests used approved execution outside the sandbox. The plan's Phase 2
+completion status remains unchanged.
+
 ## Phase 3 — Capture ingress, transport, and ordinary outputs
 
 Primary locations: `internal/pkg/hunter/forwarding/manager.go`,

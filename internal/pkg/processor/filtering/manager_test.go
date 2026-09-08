@@ -257,10 +257,24 @@ func TestManager_Update_ConcurrentSends(t *testing.T) {
 	manager := NewManager("", nil, nil, nil, nil)
 
 	numHunters := 10
+	numUpdates := 50
+	var receivers sync.WaitGroup
 	channels := make(map[string]chan *management.FilterUpdate)
 	for i := 0; i < numHunters; i++ {
 		hunterID := "hunter-" + string(rune('0'+i))
-		channels[hunterID] = manager.AddChannel(hunterID)
+		ch := manager.AddChannel(hunterID)
+		channels[hunterID] = ch
+		// Model connected hunters consuming updates. Timeout behavior is covered
+		// separately; unread queues obscure the concurrent delivery assertion.
+		receivers.Add(1)
+		go func() {
+			defer receivers.Done()
+			count := 0
+			for range ch {
+				count++
+			}
+			assert.Equal(t, numUpdates, count, "hunter %s must receive every update", hunterID)
+		}()
 	}
 
 	filter := &management.Filter{
@@ -272,7 +286,6 @@ func TestManager_Update_ConcurrentSends(t *testing.T) {
 
 	// Send multiple updates concurrently
 	var wg sync.WaitGroup
-	numUpdates := 50
 	for i := 0; i < numUpdates; i++ {
 		wg.Add(1)
 		go func() {
@@ -283,11 +296,11 @@ func TestManager_Update_ConcurrentSends(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify all hunters received at least one update
+	// Close streams after all sends, then verify each hunter drained its updates.
 	for hunterID, filterChan := range channels {
-		assert.Greater(t, len(filterChan), 0,
-			"hunter %s should have received updates", hunterID)
+		manager.RemoveChannel(hunterID, filterChan)
 	}
+	receivers.Wait()
 }
 
 func TestManager_Update_NoHuntersConnected(t *testing.T) {

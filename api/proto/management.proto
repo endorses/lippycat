@@ -599,6 +599,18 @@ message LIDeliveryStats {
     int64 queue_depth = 8;
     // Destination UUID keys; details disappear when destinations are removed.
     map<string, LIDestinationDeliveryStats> destinations = 9;
+    int64 queue_bytes = 10;
+    uint64 dropped_bytes = 11;
+    LIJournalStats x2_journal = 12;
+    int64 x3_max_age_ms = 13;
+    int64 memory_budget_bytes = 14;
+    int64 reserved_memory_bytes = 15;
+    map<string, uint64> dropped_by_reason = 16;
+    map<string, uint64> dropped_bytes_by_reason = 17;
+    int64 first_dropped_unix_ms = 18;
+    uint64 uncertain_writes = 19;
+    uint64 uncertain_bytes = 20;
+    int64 physical_queue_bytes = 21;
 }
 
 message LIDestinationDeliveryStats {
@@ -629,6 +641,30 @@ message LIDestinationDeliveryStats {
     uint64 x3_connections = 23;
     LIInterfaceKeepaliveStats x2_keepalive = 24;
     LIInterfaceKeepaliveStats x3_keepalive = 25;
+    int64 x2_queue_bytes = 26;
+    int64 x3_queue_bytes = 27;
+    int64 x2_in_flight_bytes = 28;
+    int64 x3_in_flight_bytes = 29;
+    int64 x2_queue_byte_capacity = 30;
+    int64 x3_queue_byte_capacity = 31;
+    uint64 dropped_bytes = 32;
+    map<string, uint64> dropped_bytes_by_reason = 33;
+    uint64 x3_expired = 34;
+    uint64 uncertain_writes = 35;
+    uint64 uncertain_bytes = 36;
+}
+
+// Journal bytes include pending reservations; enqueue success is not a sync ACK.
+message LIJournalStats {
+    int64 bytes = 1;
+    int64 max_bytes = 2;
+    uint64 pending = 3;
+    uint64 persisted = 4;
+    uint64 held = 5;
+    uint64 rejected = 6;
+    string last_error = 7;
+    uint64 replay_pending = 8;
+    uint64 uncertain = 9;
 }
 
 // Keepalive ACKs establish control responsiveness, not product acknowledgement.

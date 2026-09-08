@@ -71,11 +71,11 @@ limit while its warning log is rate-limited.
 
 lippycat implements the following ETSI interfaces for lawful interception:
 
-| Interface | Purpose | Protocol | Specification |
-|-----------|---------|----------|---------------|
-| **X1** | Administration (ADMF ↔ NE) | XML/HTTPS | TS 103 221-1 |
-| **X2** | IRI delivery (signaling metadata) | Binary TLV/TLS | TS 103 221-2 |
-| **X3** | CC delivery (content) | Binary TLV/TLS | TS 103 221-2 |
+| Interface | Purpose                           | Protocol       | Specification |
+| --------- | --------------------------------- | -------------- | ------------- |
+| **X1**    | Administration (ADMF ↔ NE)        | XML/HTTPS      | TS 103 221-1  |
+| **X2**    | IRI delivery (signaling metadata) | Binary TLV/TLS | TS 103 221-2  |
+| **X3**    | CC delivery (content)             | Binary TLV/TLS | TS 103 221-2  |
 
 **Architecture:**
 
@@ -121,6 +121,7 @@ LI code is completely excluded from standard builds through dead code eliminatio
 ### 1. Generate Certificates
 
 LI interfaces require mutual TLS. Generate certificates for:
+
 - X1 server (processor ↔ ADMF)
 - X2/X3 delivery (processor → MDF)
 
@@ -177,7 +178,7 @@ processor:
     delivery_tls_key: "/etc/lippycat/li/delivery.key"
     delivery_tls_ca: "/etc/lippycat/li/mdf-ca.crt"
     delivery_tls_pinned_cert:
-      - "sha256:abc123..."  # Optional: pin MDF certificates
+      - "sha256:abc123..." # Optional: pin MDF certificates
 ```
 
 ## X1 Interface (Administration)
@@ -186,16 +187,16 @@ The X1 interface provides task and destination management.
 
 ### Supported Operations
 
-| Operation | HTTP Method | Path | Description |
-|-----------|-------------|------|-------------|
-| Ping | GET | /Ping | Health check |
-| CreateDestination | POST | / | Register MDF endpoint |
-| ModifyDestination | POST | / | Update MDF endpoint |
-| RemoveDestination | DELETE | / | Remove MDF endpoint |
-| ActivateTask | POST | / | Create intercept task |
-| ModifyTask | POST | / | Update intercept task |
-| DeactivateTask | POST | / | Stop intercept task |
-| GetTaskDetails | GET | / | Query task status |
+| Operation         | HTTP Method | Path  | Description           |
+| ----------------- | ----------- | ----- | --------------------- |
+| Ping              | GET         | /Ping | Health check          |
+| CreateDestination | POST        | /     | Register MDF endpoint |
+| ModifyDestination | POST        | /     | Update MDF endpoint   |
+| RemoveDestination | DELETE      | /     | Remove MDF endpoint   |
+| ActivateTask      | POST        | /     | Create intercept task |
+| ModifyTask        | POST        | /     | Update intercept task |
+| DeactivateTask    | POST        | /     | Stop intercept task   |
+| GetTaskDetails    | GET         | /     | Query task status     |
 
 ### X1 Request Format
 
@@ -228,38 +229,38 @@ Requests use XML per ETSI TS 103 221-1 schema:
 
 ### Supported Target Types
 
-| Target Type | X1 Element | Example | Filter Type |
-|-------------|------------|---------|-------------|
-| SIP URI | `<sipUri>` | `sip:alice@example.com` | FILTER_SIP_URI |
-| TEL URI | `<telUri>` | `tel:+15551234567` | FILTER_PHONE_NUMBER |
-| E.164 Number | `<e164Number>` | `+15551234567` | FILTER_PHONE_NUMBER |
-| IPv4 Address | `<ipv4Address>` | `192.168.1.100` | FILTER_IP_ADDRESS |
-| IPv4 CIDR | `<ipv4Cidr>` | `10.0.0.0/8` | FILTER_IP_ADDRESS |
-| IPv6 Address | `<ipv6Address>` | `2001:db8::1` | FILTER_IP_ADDRESS |
-| IPv6 CIDR | `<ipv6Cidr>` | `2001:db8::/32` | FILTER_IP_ADDRESS |
-| NAI | `<nai>` | `user@realm.example.com` | FILTER_SIP_URI |
+| Target Type  | X1 Element      | Example                  | Filter Type         |
+| ------------ | --------------- | ------------------------ | ------------------- |
+| SIP URI      | `<sipUri>`      | `sip:alice@example.com`  | FILTER_SIP_URI      |
+| TEL URI      | `<telUri>`      | `tel:+15551234567`       | FILTER_PHONE_NUMBER |
+| E.164 Number | `<e164Number>`  | `+15551234567`           | FILTER_PHONE_NUMBER |
+| IPv4 Address | `<ipv4Address>` | `192.168.1.100`          | FILTER_IP_ADDRESS   |
+| IPv4 CIDR    | `<ipv4Cidr>`    | `10.0.0.0/8`             | FILTER_IP_ADDRESS   |
+| IPv6 Address | `<ipv6Address>` | `2001:db8::1`            | FILTER_IP_ADDRESS   |
+| IPv6 CIDR    | `<ipv6Cidr>`    | `2001:db8::/32`          | FILTER_IP_ADDRESS   |
+| NAI          | `<nai>`         | `user@realm.example.com` | FILTER_SIP_URI      |
 
 ### Delivery Types
 
-| Type | Description | X2 (IRI) | X3 (CC) |
-|------|-------------|----------|---------|
-| X2Only | Signaling metadata only | ✓ | |
-| X3Only | Content only | | ✓ |
-| X2andX3 | Both signaling and content | ✓ | ✓ |
+| Type    | Description                | X2 (IRI) | X3 (CC) |
+| ------- | -------------------------- | -------- | ------- |
+| X2Only  | Signaling metadata only    | ✓        |         |
+| X3Only  | Content only               |          | ✓       |
+| X2andX3 | Both signaling and content | ✓        | ✓       |
 
 ### X1 Error Codes
 
-| Code | Name | Description |
-|------|------|-------------|
-| 100 | GenericError | General error; reactivation identity differs from retained task |
-| 101 | RequestSyntaxError | Invalid XML |
-| 300 | XIDAlreadyExists | Task XID exists |
-| 301 | XIDNotFound | Task XID not found |
-| 302 | DIDAlreadyExists | Destination DID exists |
-| 303 | DIDNotFound | Destination DID not found |
-| 400 | DeliveryNotPossible | Cannot deliver to MDF |
-| 401 | TargetNotSupported | Unsupported target type |
-| 402 | DeliveryTypeNotSupported | Unsupported delivery type |
+| Code | Name                     | Description                                                     |
+| ---- | ------------------------ | --------------------------------------------------------------- |
+| 100  | GenericError             | General error; reactivation identity differs from retained task |
+| 101  | RequestSyntaxError       | Invalid XML                                                     |
+| 300  | XIDAlreadyExists         | Task XID exists                                                 |
+| 301  | XIDNotFound              | Task XID not found                                              |
+| 302  | DIDAlreadyExists         | Destination DID exists                                          |
+| 303  | DIDNotFound              | Destination DID not found                                       |
+| 400  | DeliveryNotPossible      | Cannot deliver to MDF                                           |
+| 401  | TargetNotSupported       | Unsupported target type                                         |
+| 402  | DeliveryTypeNotSupported | Unsupported delivery type                                       |
 
 A repeated `ActivateTask` for an equivalent active or pending task is an
 idempotent retry: it returns success without reinstalling filters or changing
@@ -283,31 +284,32 @@ The fixed PDU header is 40 bytes; conditional TLV attributes extend it.
 
 ### PDU Structure
 
-| Offset | Field | Size |
-|--------|-------|------|
-| 0 | Version (`0.5`, wire bytes `00 05`) | 2 bytes |
-| 2 | Type | 2 bytes |
-| 4 | HeaderLen | 4 bytes |
-| 8 | PayloadLength | 4 bytes |
-| 12 | PayloadFmt | 2 bytes |
-| 14 | PayloadDirection | 2 bytes |
-| 16 | XID (UUID) | 16 bytes |
-| 32 | CorrelationID | 8 bytes |
-| 40+ | Conditional Attributes (TLV) | variable |
-| ... | Payload | variable |
+| Offset | Field                               | Size     |
+| ------ | ----------------------------------- | -------- |
+| 0      | Version (`0.5`, wire bytes `00 05`) | 2 bytes  |
+| 2      | Type                                | 2 bytes  |
+| 4      | HeaderLen                           | 4 bytes  |
+| 8      | PayloadLength                       | 4 bytes  |
+| 12     | PayloadFmt                          | 2 bytes  |
+| 14     | PayloadDirection                    | 2 bytes  |
+| 16     | XID (UUID)                          | 16 bytes |
+| 32     | CorrelationID                       | 8 bytes  |
+| 40+    | Conditional Attributes (TLV)        | variable |
+| ...    | Payload                             | variable |
 
 ### X2 IRI Events
 
-| Event | SIP Trigger | Description |
-|-------|-------------|-------------|
-| SessionBegin | INVITE | Call initiated |
-| SessionAnswer | 200 OK to INVITE | Call answered |
-| SessionEnd | BYE | Call terminated |
-| SessionAttempt | CANCEL/4xx/5xx/6xx | Call attempt failed |
-| Registration | REGISTER | User registration |
+| Event           | SIP Trigger           | Description         |
+| --------------- | --------------------- | ------------------- |
+| SessionBegin    | INVITE                | Call initiated      |
+| SessionAnswer   | 200 OK to INVITE      | Call answered       |
+| SessionEnd      | BYE                   | Call terminated     |
+| SessionAttempt  | CANCEL/4xx/5xx/6xx    | Call attempt failed |
+| Registration    | REGISTER              | User registration   |
 | RegistrationEnd | REGISTER (Expires: 0) | User deregistration |
 
 **X2 PDU Attributes:**
+
 - Timestamp (POSIX timespec)
 - Sequence Number
 - Source/Destination IP and Port
@@ -317,12 +319,13 @@ The fixed PDU header is 40 bytes; conditional TLV attributes extend it.
 
 ### X3 CC Content
 
-| Content Type | Description |
-|--------------|-------------|
-| RTP Payload | Voice/video media packets |
-| DTMF | Telephone keypad signals |
+| Content Type | Description               |
+| ------------ | ------------------------- |
+| RTP Payload  | Voice/video media packets |
+| DTMF         | Telephone keypad signals  |
 
 **X3 PDU Attributes:**
+
 - Timestamp
 - Sequence Number
 - RTP SSRC, Sequence, Timestamp
@@ -340,10 +343,10 @@ correlates by XID instead.
 
 How it is derived:
 
-| Target type | Signaling (X2) | Media (X3) |
-|-------------|----------------|------------|
-| IP address / CIDR | packet source and destination address | packet source and destination address |
-| SIP URI, tel URI, NAI, username | SIP `From` / `To` identity | the call's SDP, resolved once per RTP SSRC |
+| Target type                     | Signaling (X2)                        | Media (X3)                                 |
+| ------------------------------- | ------------------------------------- | ------------------------------------------ |
+| IP address / CIDR               | packet source and destination address | packet source and destination address      |
+| SIP URI, tel URI, NAI, username | SIP `From` / `To` identity            | the call's SDP, resolved once per RTP SSRC |
 
 For identity targets the media direction comes from the signalling of the same call:
 which party of the dialog the target is, and which media endpoints each party
@@ -392,13 +395,13 @@ outside lippycat and reconcile per-destination sequence and drop metrics.
 
 ### Task States
 
-| State | Description |
-|-------|-------------|
-| Pending | Received but StartTime not reached |
-| Active | Actively intercepting traffic |
-| Suspended | Temporarily paused |
-| Deactivated | Explicitly stopped |
-| Failed | Fatal error occurred |
+| State       | Description                        |
+| ----------- | ---------------------------------- |
+| Pending     | Received but StartTime not reached |
+| Active      | Actively intercepting traffic      |
+| Suspended   | Temporarily paused                 |
+| Deactivated | Explicitly stopped                 |
+| Failed      | Fatal error occurred               |
 
 `GetTaskDetails` keeps the ETSI `provisioningStatus` enumeration unchanged:
 pending tasks use `awaitingProvisioning`, failed tasks use `failed`, and active,
@@ -427,16 +430,19 @@ not as a cue to modify the target under the retained XID.
 ### Implicit Deactivation
 
 When `ImplicitDeactivationAllowed=true`:
+
 - NE may autonomously deactivate when `EndTime` is reached
 - Status notification sent to ADMF via X1
 
 When `ImplicitDeactivationAllowed=false`:
+
 - NE ignores `EndTime`
 - Only ADMF `DeactivateTask` or fatal error can end task
 
 ### Task Modification
 
 Modifiable fields (via `ModifyTask`):
+
 - Targets (adds/removes filter criteria)
 - DestinationIDs (changes delivery endpoints)
 - DeliveryType (changes X2/X3 delivery mode)
@@ -444,6 +450,7 @@ Modifiable fields (via `ModifyTask`):
 - ImplicitDeactivationAllowed
 
 Non-modifiable:
+
 - XID (task identity)
 - StartTime (after activation)
 
@@ -451,17 +458,18 @@ Non-modifiable:
 
 The processor sends notifications to ADMF via X1:
 
-| Notification | Trigger |
-|--------------|---------|
-| Startup | Processor starts |
-| Shutdown | Processor stops |
-| KeepAlive | Periodic heartbeat |
-| TaskProgress | Task activation progress |
-| ErrorReport | Task execution errors |
-| DeliveryNotification | X2/X3 delivery issues |
-| ImplicitDeactivation | Task auto-expired |
+| Notification         | Trigger                  |
+| -------------------- | ------------------------ |
+| Startup              | Processor starts         |
+| Shutdown             | Processor stops          |
+| KeepAlive            | Periodic heartbeat       |
+| TaskProgress         | Task activation progress |
+| ErrorReport          | Task execution errors    |
+| DeliveryNotification | X2/X3 delivery issues    |
+| ImplicitDeactivation | Task auto-expired        |
 
 Configure keepalive interval:
+
 ```bash
 --li-admf-keepalive 30s  # Send keepalive every 30 seconds
 --li-admf-keepalive 0    # Disable keepalive
@@ -471,14 +479,15 @@ Configure keepalive interval:
 
 LI tasks integrate with lippycat's optimized filter system:
 
-| LI Target Type | Filter System | Optimization |
-|----------------|---------------|--------------|
-| SIP URI | Aho-Corasick | Pattern matching |
-| Phone Number | PhoneNumberMatcher | Bloom filter + suffix matching |
-| IP Address | Hash Map | O(1) lookup |
-| IP CIDR | Radix/Patricia Trie | O(prefix) lookup |
+| LI Target Type | Filter System       | Optimization                   |
+| -------------- | ------------------- | ------------------------------ |
+| SIP URI        | Aho-Corasick        | Pattern matching               |
+| Phone Number   | PhoneNumberMatcher  | Bloom filter + suffix matching |
+| IP Address     | Hash Map            | O(1) lookup                    |
+| IP CIDR        | Radix/Patricia Trie | O(prefix) lookup               |
 
 **Filter Flow:**
+
 1. ADMF activates task via X1
 2. LI Manager creates filters for each target
 3. Filters pushed to hunters
@@ -490,19 +499,20 @@ LI tasks integrate with lippycat's optimized filter system:
 
 ### Encoding Benchmarks
 
-| Operation | Throughput | Latency |
-|-----------|------------|---------|
-| X2 Encode (IRI) | ~500K PDUs/s | ~2µs |
-| X3 Encode (CC) | ~1M PDUs/s | ~1µs |
+| Operation       | Throughput   | Latency |
+| --------------- | ------------ | ------- |
+| X2 Encode (IRI) | ~500K PDUs/s | ~2µs    |
+| X3 Encode (CC)  | ~1M PDUs/s   | ~1µs    |
 
 ### Delivery
 
-| Configuration | Throughput |
-|---------------|------------|
-| Single destination | ~100K PDUs/s |
+| Configuration         | Throughput           |
+| --------------------- | -------------------- |
+| Single destination    | ~100K PDUs/s         |
 | Multiple destinations | ~50K PDUs/s per dest |
 
 Delivery uses:
+
 - Async queue with backpressure (default: 10K items)
 - Batching (default: 100 PDUs per batch)
 - Connection pooling per destination
@@ -511,11 +521,11 @@ Delivery uses:
 
 ### TLS Requirements
 
-| Interface | Minimum TLS | Mutual TLS |
-|-----------|-------------|------------|
-| X1 Server | TLS 1.3 | Required; `--li-x1-tls-ca` must trust the ADMF client CA |
-| X1 Client | TLS 1.2 | Required |
-| X2/X3 Delivery | TLS 1.2 | Required |
+| Interface      | Minimum TLS | Mutual TLS                                               |
+| -------------- | ----------- | -------------------------------------------------------- |
+| X1 Server      | TLS 1.3     | Required; `--li-x1-tls-ca` must trust the ADMF client CA |
+| X1 Client      | TLS 1.2     | Required                                                 |
+| X2/X3 Delivery | TLS 1.2     | Required                                                 |
 
 ### Certificate Pinning
 
@@ -528,6 +538,7 @@ For X2/X3 delivery, optionally pin MDF certificates:
 ### Audit Logging
 
 All LI operations are logged with structured fields:
+
 - Task activations/deactivations
 - Target modifications
 - Delivery success/failures
@@ -585,6 +596,7 @@ has been observed for that reported connection state.
 ### X1 Server Not Starting
 
 Check:
+
 1. TLS certificates are valid and not expired
 2. CA certificate matches ADMF client certs
 3. Port is not in use
@@ -593,18 +605,23 @@ Check:
 ### X2/X3 Delivery Failures
 
 Check:
+
 1. Destination created via X1 `CreateDestination`
 2. MDF server is reachable
 3. Client certificates match MDF CA
 4. Per-destination queue depth, oldest queued age, retries, and overflow drops
 5. Reconnect and peer-close logs for the destination DID
 
-Short MDF outages are buffered and flushed in order. A full queue drops the
-oldest PDU and increments the destination's `queue_overflow` drop counter.
+Short MDF outages are buffered and flushed in interface FIFO order. With
+journaling disabled, capacity pressure can evict an unclaimed oldest PDU
+(`queue_overflow`); claimed heads and admissions that cannot fit are protected by
+rejecting the new PDU (`capacity_rejected`). Journaled X2 rejects new admissions
+instead of evicting retained product. Oversized PDUs are rejected explicitly.
 
 ### Task Not Matching
 
 Check:
+
 1. Task status is "Active"
 2. Target format matches traffic (e.g., full SIP URI vs user only)
 3. Filters pushed to hunters
@@ -614,6 +631,7 @@ Check:
 
 If CC PDUs carry no Payload Direction, the LEMF cannot pair the two audio channels
 automatically. Check:
+
 1. The task has exactly one target — direction is not set for multi-target tasks
 2. The call's INVITE and its answer were intercepted; a task activated mid-call has
    no signalling to derive from
@@ -627,14 +645,14 @@ automatically. Check:
 These are intentional fail-closed outcomes, not evidence of packet loss. Monitor
 the processor/source status counters and structured warnings:
 
-| Signal | Increment owner and interpretation |
-|--------|------------------------------------|
+| Signal                                                 | Increment owner and interpretation                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `rtp_ownership_unresolved` / `rtp_ownership_ambiguous` | The local source or distributed hunter increments one exceptional-outcome counter when exact-endpoint lookup cannot identify one authoritative call. `ambiguous` means multiple live calls own the evidence; `unresolved` means none does. Resolved packets do not increment either counter. |
-| `identity_inheritance_suppressed` | The local source or distributed hunter increments once per classified media packet whose identity inheritance is denied. Direct IP/CIDR matches may still pass. |
-| `inherited_provenance_rejected` | The LI manager increments once per inherited filter ID rejected at the LI trust boundary, including non-authoritative or mismatched Call-ID provenance. |
-| `x3_finalized_or_stale_suppressed` | The processor LI path increments at the admission check that rejects X3 work for a finalized or stale call generation. It is not incremented again by a downstream layer for the same rejection. |
-| `x3_buffered_discarded` | The call-finalization subscriber increments by the number of queued reorder entries removed for that exact Call-ID and generation. |
-| lifecycle tombstone capacity evictions | The lifecycle registry increments once for each terminal tombstone removed to enforce its bound. Sustained growth shortens effective late-content protection. |
+| `identity_inheritance_suppressed`                      | The local source or distributed hunter increments once per classified media packet whose identity inheritance is denied. Direct IP/CIDR matches may still pass.                                                                                                                              |
+| `inherited_provenance_rejected`                        | The LI manager increments once per inherited filter ID rejected at the LI trust boundary, including non-authoritative or mismatched Call-ID provenance.                                                                                                                                      |
+| `x3_finalized_or_stale_suppressed`                     | The processor LI path increments at the admission check that rejects X3 work for a finalized or stale call generation. It is not incremented again by a downstream layer for the same rejection.                                                                                             |
+| `x3_buffered_discarded`                                | The call-finalization subscriber increments by the number of queued reorder entries removed for that exact Call-ID and generation.                                                                                                                                                           |
+| lifecycle tombstone capacity evictions                 | The lifecycle registry increments once for each terminal tombstone removed to enforce its bound. Sustained growth shortens effective late-content protection.                                                                                                                                |
 
 Warnings for ambiguous ownership and rejected late X3 content are rate limited.
 They use sanitized or hashed identifiers rather than raw SIP identities or Call-IDs;
@@ -647,11 +665,13 @@ either condition by selecting the newest candidate or merging candidate owners.
 ### Logs
 
 Enable debug logging:
+
 ```bash
 LOG_LEVEL=debug lc process --li-enabled ...
 ```
 
 Key log fields:
+
 - `xid`: Task identifier
 - `did`: Destination identifier
 - `filter_id`: Internal filter ID
@@ -662,3 +682,164 @@ Key log fields:
 - [LI_CERTIFICATES.md](LI_CERTIFICATES.md) - Certificate management
 - [SECURITY.md](SECURITY.md) - General security configuration
 - [internal/pkg/li/CLAUDE.md](../internal/pkg/li/CLAUDE.md) - Architecture details
+
+### Delivery byte limits, age and X2 persistence
+
+Processor and tap accept the same LI delivery options. Existing deployments keep
+10,000 PDUs per destination **and interface**, with no byte limit, age expiry or
+journal unless configured. `--li-delivery-queue-size` remains the fallback PDU cap;
+`--li-delivery-x2-queue-size` and `--li-delivery-x3-queue-size` independently override
+it (zero inherits the fallback).
+
+| Option                                 | Unit/default   | Behavior                                                        |
+| -------------------------------------- | -------------- | --------------------------------------------------------------- |
+| `--li-delivery-x2-queue-size`          | PDUs / `0`     | X2 cap per destination; zero inherits queue-size                |
+| `--li-delivery-x3-queue-size`          | PDUs / `0`     | X3 cap per destination; zero inherits queue-size                |
+| `--li-delivery-x2-queue-bytes`         | bytes / `0`    | Per-destination X2 encoded payload budget; zero disables it     |
+| `--li-delivery-x3-queue-bytes`         | bytes / `0`    | Independent X3 encoded payload budget                           |
+| `--li-delivery-x3-max-age`             | duration / `0` | Maximum local X3 residence; zero disables expiry                |
+| `--li-delivery-memory-budget-bytes`    | bytes / `0`    | Reservation ceiling; requires both byte budgets when enabled    |
+| `--li-delivery-x2-spool-dir`           | path / empty   | Enables the encrypted X2 journal                                |
+| `--li-delivery-x2-spool-max-bytes`     | bytes / `0`    | Required positive disk budget when journaling is enabled        |
+| `--li-delivery-x2-spool-key-file`      | path / empty   | Required private file containing a raw 32-byte AES key          |
+| `--li-delivery-x2-spool-replay-policy` | `hold`         | Recovered records remain held; `purge` explicitly discards them |
+
+Byte and PDU limits both apply, including claimed writes. Oversized PDUs are
+rejected. X2 and X3 have independent FIFO delivery and retry workers, so an X3
+outage does not reserve X2 capacity. The memory budget reserves each destination's
+full configured payload capacities plus conservative queue and worker overhead;
+a destination cannot borrow another destination's reservation. This is an LI
+delivery reservation estimate, not a process RSS limit: packet capture, encoding,
+TLS, Go runtime and other processor services need separate memory headroom.
+
+Size each interface for **peak encoded bytes/second × desired outage seconds**,
+then add headroom and a sufficient PDU cap. For example, 200,000 encoded X3
+bytes/second for five minutes needs at least 60,000,000 bytes, before headroom.
+Recovery throughput must exceed ongoing traffic to drain backlog.
+
+```yaml
+processor: # use tap: for standalone capture
+  li:
+    delivery_queue_size: 100000
+    delivery_x2_queue_bytes: 67108864
+    delivery_x3_queue_bytes: 83886080
+    delivery_x3_max_age: 5m
+    delivery_memory_budget_bytes: 4294967296
+    delivery_x2_spool_dir: /var/lib/lippycat/x2
+    delivery_x2_spool_max_bytes: 1073741824
+    delivery_x2_spool_key_file: /etc/lippycat/x2.key
+    delivery_x2_spool_replay_policy: hold
+```
+
+For these new options, environment names are
+`LIPPYCAT_PROCESSOR_LI_DELIVERY_X3_MAX_AGE`,
+`LIPPYCAT_TAP_LI_DELIVERY_X3_MAX_AGE`, and equivalently the uppercase underscored
+option names under the matching role. Explicit flags override environment values,
+which override YAML. Integer capacities are bytes, not MiB strings.
+
+X3 age begins at first local LI admission, includes RTP reorder and retries, and
+is independent of diagnostic capture timestamps. Expiry remains active during an
+outage and is checked again at the transport write lock. Task/call cancellation
+can close an active write. A partial or uncertain write is reported separately
+from a known queue discard. A successful local write does not prove MDF receipt.
+X2 does not inherit X3 expiry; X3 is never written to the journal.
+
+Journal directories must be private (`0700`) and journal/key files private
+(`0600`). Keep the key across restarts: losing it prevents recovery. Journal
+records preserve the immutable encoded PDU, sequence and lifecycle identity.
+Asynchronous enqueue acknowledges memory admission only. A crash before the
+journal worker syncs can lose pending records; status separates pending from
+persisted records. Full journal capacity rejects new admissions while retaining
+persisted records.
+
+Recovered X2 is **held by default**, including records whose task has ended or
+whose destination was removed or replaced. Neither a reused XID nor a reused
+destination UUID authorizes replay. Authorized replay is an embedding/control-plane
+operation through `ReplayHeldX2` with an explicit identity reconciliation callback;
+the command-line application can authorize an exact private replay manifest only after ADMF startup reconciliation.
+`PurgeHeldX2` provides explicit administrative removal; the startup `purge` policy
+removes recovered records. Held records remain inside the journal byte budget.
+Retained sequences are reserved before new encoding. Preserve the default `hold`
+policy until the controlling application can verify the original identities with
+ADMF. Use the export/replay procedure below to approve recovered backlog after restart.
+
+`lc show status` exposes encoded queue/in-flight bytes, effective per-interface
+byte capacities, expired X3 counts, reason-labelled dropped bytes, and X2 journal
+bytes, limit, pending/persisted/held counts, rejection count and last error.
+Aggregate dropped-byte counts survive destination removal. Shutdown uses the
+configured delivery drain deadline; persistent X2 retained on disk is distinct
+from volatile loss. Existing status field meanings remain unchanged.
+
+#### Approving held X2 from the command line
+
+Start with the usual spool/key configuration and
+`--li-delivery-x2-spool-export-manifest=/secure/held-x2.json`. The export is a
+private JSON identity manifest, bounded to 10,000 records per export. Keep it
+outside the journal directory. Review its exact record IDs, XIDs, destination
+UUIDs and lifecycle generations against ADMF authorization, retaining only the
+records approved for delivery in a separate private file.
+
+On the next startup, pass
+`--li-delivery-x2-spool-replay-manifest=/secure/approved-x2.json`, together with
+`--li-state-file`, ADMF endpoint and enabled startup synchronization. Replay needs
+both exact manifest identity and current reconciled authorization; UUID equality
+alone does not suffice. Export and approval paths must differ. Records not
+approved remain held and consume journal capacity. Because held product precedes
+live X2, live journal admissions for that destination are rejected until held records are
+reconciled or explicitly purged; other destinations remain independent. When more than 10,000 records are held, repeat the bounded
+export/approval procedure after each approved group drains.
+
+A manifest has this versioned shape (use exported values):
+
+```json
+{
+  "version": 1,
+  "records": [
+    {
+      "id": 123,
+      "xid": "00000000-0000-0000-0000-000000000001",
+      "did": "00000000-0000-0000-0000-000000000002",
+      "task_generation": 8,
+      "destination_generation": 9
+    }
+  ]
+}
+```
+
+Managed memory reservations include a 16 MiB shared RTP reorder allowance,
+per-destination payload/owner reservations, and bounded journal index, pending
+operation, recovery and encryption working memory. Journal working memory is
+reserved conservatively even when the current journal is empty. Status exposes
+`memory_budget_bytes`, `reserved_memory_bytes` and `x3_max_age_ms`; aggregate
+reason counters and `first_dropped_unix_ms` remain available after destination
+removal. These reservations cover managed LI delivery/reorder allocations and do
+not bound total process RSS.
+
+`uncertain_writes` and `uncertain_bytes` count transport attempts whose remote
+acceptance is unknown, including attempts later retried successfully. They are
+separate from terminal drop counters: a retry can duplicate bytes accepted by MDF
+before the connection failed. No exactly-once remote receipt is implied.
+
+Journal sequence high-water marks survive successful delivery and product purge,
+so sequence continuity also covers a restart after the backlog has drained.
+Sequence contexts consume a bounded journal budget; exhausting that metadata
+capacity fails closed rather than forgetting previously used sequence values.
+
+`queue_bytes` counts logical encoded destination copies; `physical_queue_bytes`
+counts the shared encoded payload allocation once while any destination retains
+it. Per-destination budgets still charge each copy independently.
+
+ShutdownTimeout bounds the eligible delivery drain and transport cancellation.
+The journal then checkpoints and joins its filesystem worker on a functioning
+local filesystem. A filesystem syscall stuck in the kernel cannot be forcibly
+cancelled by this deadline; a failed or unresponsive storage device can delay
+shutdown. Pending records are not durability acknowledgements.
+
+`x2_journal.replay_pending` counts held records already authorized but awaiting
+memory capacity for replay; remaining held records still need authorization.
+`x2_journal.uncertain` counts records possibly durable after a later checkpoint
+failure. Programmatic persistent X2 producers must supply nonzero task activation
+generation through `SendX2WithMetadata`; built-in processor/tap producers do so.
+Journal file budgets charge filesystem block-rounded allocations and reserve
+fault/checkpoint metadata; directory, inode and filesystem journal overhead need
+separate disk headroom. Sequence identity fields are bounded to 512 combined bytes.

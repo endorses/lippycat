@@ -101,6 +101,23 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 		},
 	}
 
+	// LI builds include inherited delivery flags in protocol help. Keep separate
+	// complete-help snapshots so non-LI help remains an independent contract.
+	if TapCmd.PersistentFlags().Lookup("li-enabled") != nil {
+		liHashes := map[string]string{
+			"dns":   "a8924df93e855c19b4049126310521b1228bd771a49f8e1975cb7d91eb64f2cc",
+			"http":  "ba983d39bc82d98e9a418ac51ee53cddb5bd61858330c8875757b96138ac41df",
+			"tls":   "c2ae1e4483f87a48991f83d21c67fd27bf89c40d9353e3182ee27db30e9997f2",
+			"email": "57f2bd07412f10cdc6a0f04e65a9b71b4a32e3d9b161b6b127a9d01cc6653458",
+			"voip":  "06e019ff48cfaffc256b49d10a29e7ff9ef926ffcfa5b891837a1002622a00b9",
+		}
+		for name, hash := range liHashes {
+			contract := contracts[name]
+			contract.helpHash = hash
+			contracts[name] = contract
+		}
+	}
+
 	for name, contract := range contracts {
 		t.Run(name, func(t *testing.T) {
 			require.Equal(t, name, contract.cmd.Use)

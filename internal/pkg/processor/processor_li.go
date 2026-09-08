@@ -27,6 +27,23 @@ import (
 	"github.com/google/uuid"
 )
 
+// deferredMetadataSender lets the event sink register before startup without
+// opening journal files or workers in the processor constructor.
+type deferredMetadataSender struct {
+	client atomic.Pointer[delivery.Client]
+}
+
+func (s *deferredMetadataSender) SendX2(xid uuid.UUID, dids []uuid.UUID, data []byte) error {
+	return s.SendX2WithMetadata(xid, dids, data, li.DeliveryMetadata{})
+}
+func (s *deferredMetadataSender) SendX2WithMetadata(xid uuid.UUID, dids []uuid.UUID, data []byte, metadata li.DeliveryMetadata) error {
+	client := s.client.Load()
+	if client == nil {
+		return delivery.ErrClientStopped
+	}
+	return client.SendX2WithMetadata(xid, dids, data, metadata)
+}
+
 // LI encoders and delivery - initialized when LI is enabled
 var (
 	liX2Encoder      *x2x3.X2Encoder
@@ -34,6 +51,9 @@ var (
 	liSequencer      *x2x3.Sequencer
 	liDeliveryMgr    *delivery.Manager
 	liDeliveryClient *delivery.Client
+	liMetadataSender *deferredMetadataSender
+	liReorderBudget  *delivery.ReorderBudget
+	liReorderWorkers *sync.WaitGroup
 	liReorderBuffers sync.Map // map[string]*delivery.ReorderBuffer keyed by "xid-destID"
 	// liMediaDirection derives the Payload Direction of RTP media for
 	// identity-based targets from the call's observed SIP signalling.
@@ -156,6 +176,10 @@ func (p *Processor) initLIManager() {
 		return
 	}
 
+	liDeliveryClient = nil
+	liDeliveryMgr = nil
+	liMetadataSender = &deferredMetadataSender{}
+
 	// Create filter pusher adapter
 	filterPusher := &processorFilterPusher{p: p}
 
@@ -199,9 +223,16 @@ func (p *Processor) initLIManager() {
 	// (e.g., EndTime expiration with ImplicitDeactivationAllowed=true)
 	// The LI Manager automatically reports these to ADMF via X1 client.
 	deactivationCallback := func(task *li.InterceptTask, reason li.DeactivationReason) {
+		if liDeliveryClient != nil {
+			liDeliveryClient.CancelTask(task.XID, task.ActivationGeneration)
+		}
 		liPinnedCalls.Delete(task.XID)
 		if liSequencer != nil {
-			liSequencer.ClearXID(task.XID)
+			if p.config.LIDeliveryX2SpoolDir != "" {
+				liSequencer.ClearX3XID(task.XID)
+			} else {
+				liSequencer.ClearXID(task.XID)
+			}
 		}
 		if liMediaDirection != nil {
 			liMediaDirection.ClearXID(task.XID)
@@ -225,6 +256,29 @@ func (p *Processor) initLIManager() {
 
 	// Create LI manager
 	p.liManager = li.NewManager(config, deactivationCallback)
+	p.liManager.SetTaskModifiedCallback(func(previous *li.InterceptTask) {
+		liPinnedCalls.Delete(previous.XID)
+		if liDeliveryClient != nil {
+			liDeliveryClient.CancelTask(previous.XID, previous.ActivationGeneration)
+		}
+		prefix := previous.XID.String() + "-"
+		liReorderBuffers.Range(func(key, value any) bool {
+			if name, ok := key.(string); ok && strings.HasPrefix(name, prefix) {
+				recordBufferedX3Discard(value.(*delivery.ReorderBuffer).DiscardCount())
+				liReorderBuffers.Delete(key)
+			}
+			return true
+		})
+		if liMediaDirection != nil {
+			liMediaDirection.ClearXID(previous.XID)
+		}
+	})
+
+	liReorderWorkers = &sync.WaitGroup{}
+	liReorderBudget = nil
+	if p.config.LIDeliveryMemoryBudgetBytes > 0 {
+		liReorderBudget = delivery.NewReorderBudget(delivery.DefaultReorderBudgetBytes)
+	}
 
 	// Initialize X2/X3 encoders
 	liSequencer = x2x3.NewSequencer(0)
@@ -237,6 +291,9 @@ func (p *Processor) initLIManager() {
 	liMediaDirection = li.NewMediaDirectionResolver(li.MediaDirectionConfig{})
 	if p.callLifecycle != nil {
 		p.callLifecycle.Subscribe(func(event CallFinalizationEvent) {
+			if liDeliveryClient != nil {
+				liDeliveryClient.CancelCall(event.CallID, event.Generation)
+			}
 			liMediaDirection.ClearCall(event.CallID)
 			liPinnedCalls.Range(func(_, value any) bool {
 				value.(*sync.Map).Delete(event.CallID)
@@ -279,12 +336,7 @@ func (p *Processor) initLIManager() {
 		if err != nil {
 			logger.Error("Failed to create LI delivery manager", "error", err)
 		} else {
-			clientConfig := delivery.DefaultClientConfig()
-			clientConfig.QueueSize = p.config.LIDeliveryQueueSize
-			clientConfig.SendTimeout = p.config.LIDeliverySendTimeout
-			clientConfig.ShutdownTimeout = p.config.LIDeliveryShutdownTimeout
-			liDeliveryClient = delivery.NewClient(liDeliveryMgr, clientConfig)
-			logger.Info("LI delivery client initialized",
+			logger.Info("LI delivery transport configured",
 				"cert", p.config.LIDeliveryTLSCertFile,
 				"ca", p.config.LIDeliveryTLSCAFile,
 			)
@@ -294,7 +346,11 @@ func (p *Processor) initLIManager() {
 	}
 
 	if p.config.LIMetadataEventsEnabled {
-		sink, err := li.NewMetadataSink(li.MetadataSinkConfig{Enabled: true, Profile: p.config.LIMetadataDeliveryProfile, Manager: p.liManager, Sender: liDeliveryClient, NFID: p.config.ProcessorID, AllowFileMetadata: p.config.LIMetadataAllowFileMetadata})
+		var metadataSender li.MetadataSender
+		if liDeliveryMgr != nil {
+			metadataSender = liMetadataSender
+		}
+		sink, err := li.NewMetadataSink(li.MetadataSinkConfig{Enabled: true, Profile: p.config.LIMetadataDeliveryProfile, Manager: p.liManager, Sender: metadataSender, Sequencer: liSequencer, NFID: p.config.ProcessorID, AllowFileMetadata: p.config.LIMetadataAllowFileMetadata})
 		if err != nil {
 			logger.Error("Failed to initialize LI metadata event sink", "error", err)
 		} else if err := p.eventDispatcher.Register(sink, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata, events.KindFileContent); err != nil {
@@ -306,9 +362,21 @@ func (p *Processor) initLIManager() {
 
 	// Set packet processor callback for X2/X3 encoding and delivery
 	p.liManager.SetPacketProcessor(func(task *li.InterceptTask, pkt *types.PacketDisplay) {
+		metadata := li.DeliveryMetadata{AdmittedAt: time.Now(), CapturedAt: pkt.Timestamp, TaskGeneration: task.ActivationGeneration}
+		if shared, ok := p.liPacketAdmissions.Load(pkt); ok {
+			metadata.AdmittedAt = shared.(*CallAdmission).admittedAt
+		}
 		// Determine what to deliver based on task configuration
 		deliverX2 := task.DeliveryType == li.DeliveryX2Only || task.DeliveryType == li.DeliveryX2andX3
 		deliverX3 := task.DeliveryType == li.DeliveryX3Only || task.DeliveryType == li.DeliveryX2andX3
+		if pkt.VoIPData != nil && !pkt.VoIPData.IsRTP {
+			signalingAdmission, active := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+			if !active {
+				return
+			}
+			defer signalingAdmission.Release()
+		}
+
 		if deliverX3 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP && pkt.VoIPData.CallID != "" {
 			callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
 			calls := callsAny.(*sync.Map)
@@ -350,7 +418,7 @@ func (p *Processor) initLIManager() {
 				if err != nil {
 					logger.Warn("X2 PDU marshal error", "xid", task.XID, "error", err)
 				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
-					if err := liDeliveryClient.SendX2(task.XID, task.DestinationIDs, data); err != nil {
+					if err := liDeliveryClient.SendX2WithMetadata(task.XID, task.DestinationIDs, data, metadata); err != nil {
 						logger.Debug("X2 delivery queued failed", "xid", task.XID, "error", err)
 					} else {
 						logger.Debug("X2 IRI queued",
@@ -455,38 +523,68 @@ func (p *Processor) initLIManager() {
 								insertionOwnsCallAdmission = true
 							}
 						}
+						destination, destinationErr := liDeliveryMgr.GetDestination(did)
+						if destinationErr != nil {
+							insertionTaskAdmission.Release()
+							if insertionOwnsCallAdmission && insertionCallAdmission != nil {
+								insertionCallAdmission.Release()
+							}
+							recordBufferedX3Discard(1)
+							continue
+						}
 						bufKey := fmt.Sprintf("%s-%s", task.XID, did)
-						buf, _ := liReorderBuffers.LoadOrStore(bufKey, delivery.NewCallAwareReorderBuffer(
-							func(entry delivery.ReorderEntry) {
-								deliveryTaskAdmission, taskStillActive := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
-								if !taskStillActive {
-									// The reorder buffer may have drained this entry just
-									// before task finalization acquired its barrier. In that
-									// case DiscardCount cannot see it, so this callback owns
-									// the entry's single terminal accounting event.
-									recordBufferedX3Discard(1)
-									return
-								}
-								defer deliveryTaskAdmission.Release()
-
-								var sendAdmission *CallAdmission
-								if entry.CallID != "" && p.callLifecycle != nil {
-									var sendErr error
-									sendAdmission, sendErr = p.callLifecycle.AdmitGeneration(entry.CallID, entry.Generation)
-									if sendErr != nil {
-										recordLateX3Suppression(entry.CallID, entry.Generation, "delayed_send_admission")
+						buf, loaded := liReorderBuffers.Load(bufKey)
+						if !loaded {
+							candidate := delivery.NewBudgetedCallAwareReorderBuffer(
+								func(entry delivery.ReorderEntry) {
+									deliveryTaskAdmission, taskStillActive := p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+									if !taskStillActive {
+										// The reorder buffer may have drained this entry just
+										// before task finalization acquired its barrier. In that
+										// case DiscardCount cannot see it, so this callback owns
+										// the entry's single terminal accounting event.
+										recordBufferedX3Discard(1)
 										return
 									}
-									defer sendAdmission.Release()
+									defer deliveryTaskAdmission.Release()
+
+									var sendAdmission *CallAdmission
+									if entry.CallID != "" && p.callLifecycle != nil {
+										var sendErr error
+										sendAdmission, sendErr = p.callLifecycle.AdmitGeneration(entry.CallID, entry.Generation)
+										if sendErr != nil {
+											recordLateX3Suppression(entry.CallID, entry.Generation, "delayed_send_admission")
+											return
+										}
+										defer sendAdmission.Release()
+									}
+									dids := []uuid.UUID{did}
+									if sendErr := liDeliveryClient.SendX3WithMetadata(task.XID, dids, entry.PDU, entry.Metadata); sendErr != nil {
+										logger.Debug("X3 delivery failed", "xid", task.XID, "error", sendErr)
+									}
+								},
+								60*time.Millisecond, liReorderBudget, recordBufferedX3Discard,
+							)
+							if candidate == nil {
+								insertionTaskAdmission.Release()
+								if insertionOwnsCallAdmission && insertionCallAdmission != nil {
+									insertionCallAdmission.Release()
 								}
-								dids := []uuid.UUID{did}
-								if sendErr := liDeliveryClient.SendX3(task.XID, dids, entry.PDU); sendErr != nil {
-									logger.Debug("X3 delivery failed", "xid", task.XID, "error", sendErr)
-								}
-							},
-							60*time.Millisecond,
-						))
-						buf.(*delivery.ReorderBuffer).DeliverCallX3AfterCommit(callID, generation, ssrc, rtpSeq, data, func() {
+								recordBufferedX3Discard(1)
+								continue
+							}
+							candidate.SetWorkerGroup(liReorderWorkers)
+							var alreadyLoaded bool
+							buf, alreadyLoaded = liReorderBuffers.LoadOrStore(bufKey, candidate)
+							if alreadyLoaded {
+								candidate.Discard()
+							}
+						}
+						entryMetadata := metadata
+						entryMetadata.DestinationGeneration = li.DestinationDeliveryGeneration(destination)
+						entryMetadata.CallID = callID
+						entryMetadata.CallGeneration = generation
+						buf.(*delivery.ReorderBuffer).DeliverEntryX3AfterCommit(delivery.ReorderEntry{CallID: callID, Generation: generation, PDU: data, Metadata: entryMetadata}, ssrc, rtpSeq, func() {
 							// DeliverCallX3 may synchronously invoke its delivery
 							// callback. Release the outer admissions after insertion
 							// so that callback can safely re-admit even when a task
@@ -526,18 +624,89 @@ func (p *Processor) initLIManager() {
 	)
 }
 
+func (p *Processor) liDeliveryConfig() delivery.ClientConfig {
+	clientConfig := delivery.DefaultClientConfig()
+	clientConfig.QueueSize = p.config.LIDeliveryQueueSize
+	clientConfig.X2QueueSize = p.config.LIDeliveryX2QueueSize
+	clientConfig.X3QueueSize = p.config.LIDeliveryX3QueueSize
+	clientConfig.X2QueueBytes = p.config.LIDeliveryX2QueueBytes
+	clientConfig.X3QueueBytes = p.config.LIDeliveryX3QueueBytes
+	clientConfig.X3MaxAge = p.config.LIDeliveryX3MaxAge
+	clientConfig.MemoryBudgetBytes = p.config.LIDeliveryMemoryBudgetBytes
+	clientConfig.X2SpoolDir = p.config.LIDeliveryX2SpoolDir
+	clientConfig.X2SpoolMaxBytes = p.config.LIDeliveryX2SpoolMaxBytes
+	clientConfig.X2SpoolKeyFile = p.config.LIDeliveryX2SpoolKeyFile
+	clientConfig.X2SpoolReplayPolicy = p.config.LIDeliveryX2SpoolReplayPolicy
+	clientConfig.X2SpoolReplayManifest = p.config.LIDeliveryX2SpoolReplayManifest
+	clientConfig.X2SpoolExportManifest = p.config.LIDeliveryX2SpoolExportManifest
+	clientConfig.SendTimeout = p.config.LIDeliverySendTimeout
+	clientConfig.ShutdownTimeout = p.config.LIDeliveryShutdownTimeout
+	return clientConfig
+}
+
 func (p *Processor) validateLIConfiguration() error {
 	if p.liManager == nil {
 		return nil
+	}
+	if err := p.liDeliveryConfig().Validate(); err != nil {
+		return fmt.Errorf("invalid LI delivery limits: %w", err)
+	}
+	if p.config.LIDeliveryX2SpoolDir != "" && liDeliveryMgr == nil {
+		return fmt.Errorf("LI X2 persistence requires configured delivery TLS credentials")
+	}
+	if p.config.LIDeliveryX2SpoolReplayManifest != "" && (!p.config.LIADMFSyncOnStartup || p.config.LIStateFile == "") {
+		return fmt.Errorf("LI X2 replay manifest requires ADMF startup sync and persisted LI state")
+	}
+	if liDeliveryClient != nil && liDeliveryClient.Err() != nil {
+		return fmt.Errorf("initialize LI delivery: %w", liDeliveryClient.Err())
 	}
 	return p.liManager.ValidateConfiguration()
 }
 
 // startLIManager starts the LI Manager and delivery client.
 // Called during processor startup.
-func (p *Processor) startLIManager() error {
+func (p *Processor) startLIManager() (err error) {
 	if p.liManager == nil {
 		return nil
+	}
+
+	startedManager := false
+	defer func() {
+		if err != nil {
+			if liMetadataSender != nil {
+				liMetadataSender.client.Store(nil)
+			}
+			if startedManager {
+				p.liManager.Stop()
+			}
+			if liDeliveryClient != nil {
+				liDeliveryClient.Stop()
+			}
+			if liDeliveryMgr != nil {
+				liDeliveryMgr.Stop()
+			}
+		}
+	}()
+
+	if liDeliveryMgr != nil {
+		liDeliveryClient = delivery.NewClient(liDeliveryMgr, p.liDeliveryConfig())
+		if liMetadataSender != nil {
+			liMetadataSender.client.Store(liDeliveryClient)
+		}
+	}
+
+	if liDeliveryClient != nil {
+		if err := liDeliveryClient.Err(); err != nil {
+			return fmt.Errorf("initialize LI delivery: %w", err)
+		}
+		if p.config.LIDeliveryX2SpoolExportManifest != "" {
+			if err := liDeliveryClient.ExportHeldJournalManifest(p.config.LIDeliveryX2SpoolExportManifest); err != nil {
+				return fmt.Errorf("export LI X2 replay identities: %w", err)
+			}
+		}
+		if err := liDeliveryClient.RestoreJournalSequences(liSequencer); err != nil {
+			return fmt.Errorf("restore LI X2 sequences: %w", err)
+		}
 	}
 
 	// Start delivery infrastructure
@@ -551,6 +720,13 @@ func (p *Processor) startLIManager() error {
 	// Register destination callback to bridge new destinations to delivery manager
 	if liDeliveryMgr != nil {
 		p.liManager.SetDestinationCreatedCallback(func(dest *li.Destination) {
+			if liDeliveryClient != nil {
+				if err := liDeliveryClient.ReserveDestination(dest.DID); err != nil {
+					logger.Error("LI destination capacity unavailable", "did", dest.DID, "error", err)
+					return
+				}
+			}
+
 			if err := liDeliveryMgr.AddDestination(dest); err != nil {
 				logger.Warn("Failed to add delivery destination",
 					"did", dest.DID,
@@ -567,6 +743,9 @@ func (p *Processor) startLIManager() error {
 			}
 		})
 		p.liManager.SetDestinationModifiedCallback(func(dest *li.Destination) {
+			if liDeliveryClient != nil {
+				liDeliveryClient.RemoveDestination(dest.DID)
+			}
 			if err := liDeliveryMgr.UpdateDestination(dest); err != nil {
 				logger.Warn("Failed to update delivery destination",
 					"did", dest.DID,
@@ -625,11 +804,17 @@ func (p *Processor) startLIManager() error {
 	if err := p.liManager.Start(); err != nil {
 		return err
 	}
+	startedManager = true
 
 	// Bridge existing destinations from LI Manager registry to delivery manager
 	if liDeliveryMgr != nil {
 		dests := p.liManager.ListDestinations()
 		for _, dest := range dests {
+			if liDeliveryClient != nil {
+				if err := liDeliveryClient.ReserveDestination(dest.DID); err != nil {
+					return fmt.Errorf("reserve LI delivery destination %s: %w", dest.DID, err)
+				}
+			}
 			if err := liDeliveryMgr.AddDestination(dest); err != nil {
 				logger.Warn("Failed to add delivery destination",
 					"did", dest.DID,
@@ -647,6 +832,31 @@ func (p *Processor) startLIManager() error {
 		}
 	}
 
+	if liDeliveryClient != nil && p.config.LIDeliveryX2SpoolReplayManifest != "" {
+		if err := liDeliveryClient.ReplayJournalManifest(p.config.LIDeliveryX2SpoolReplayManifest, func(record delivery.JournalRecord) bool {
+			if !p.liManager.ReplayTaskAuthorized(record.XID, record.TaskGeneration) {
+				return false
+			}
+			task, err := p.liManager.GetTaskDetails(record.XID)
+			if err != nil || !task.IsActive() || task.ActivationGeneration != record.TaskGeneration {
+				return false
+			}
+			found := false
+			for _, did := range task.DestinationIDs {
+				if did == record.DID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+			dest, err := liDeliveryMgr.GetDestination(record.DID)
+			return err == nil && li.DestinationDeliveryGeneration(dest) == record.DestinationGeneration
+		}); err != nil {
+			return fmt.Errorf("authorize LI X2 replay: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -657,6 +867,21 @@ func (p *Processor) stopLIManager() {
 		return
 	}
 	p.liManager.Stop()
+	var reorderBuffers []*delivery.ReorderBuffer
+	liReorderBuffers.Range(func(key, value any) bool {
+		buffer := value.(*delivery.ReorderBuffer)
+		reorderBuffers = append(reorderBuffers, buffer)
+		buffer.Stop()
+		liReorderBuffers.Delete(key)
+		return true
+	})
+
+	for _, buffer := range reorderBuffers {
+		buffer.Wait()
+	}
+	if liReorderWorkers != nil {
+		liReorderWorkers.Wait()
+	}
 
 	if liDeliveryClient != nil {
 		liDeliveryClient.Stop()

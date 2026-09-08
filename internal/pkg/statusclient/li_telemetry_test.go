@@ -78,3 +78,21 @@ func TestLIDeliveryTelemetrySurvivesWireAndStatusJSON(t *testing.T) {
 		}`, string(got["li_delivery"]))
 	}
 }
+
+func TestLIBufferTelemetryWireAndJSON(t *testing.T) {
+	original := &management.StatusResponse{ProcessorStats: &management.ProcessorStats{LiDelivery: &management.LIDeliveryStats{
+		QueueBytes: 1234, PhysicalQueueBytes: 617, DroppedBytes: 5678, UncertainWrites: 2, UncertainBytes: 123, X3MaxAgeMs: 300000, MemoryBudgetBytes: 1000000000, ReservedMemoryBytes: 500000000, FirstDroppedUnixMs: 1234567, DroppedByReason: map[string]uint64{"expired": 1}, DroppedBytesByReason: map[string]uint64{"expired": 5678},
+		X2Journal:    &management.LIJournalStats{Bytes: 100, MaxBytes: 1000, Pending: 1, Persisted: 2, Held: 1, ReplayPending: 1, Uncertain: 1, Rejected: 3, LastError: "full"},
+		Destinations: map[string]*management.LIDestinationDeliveryStats{"d": {X2QueueBytes: 10, X3QueueBytes: 20, X2InFlightBytes: 5, X3InFlightBytes: 6, X2QueueByteCapacity: 100, X3QueueByteCapacity: 200, DroppedBytes: 50, DroppedBytesByReason: map[string]uint64{"expired": 50}, X3Expired: 1}},
+	}}}
+	wire, err := proto.Marshal(original)
+	require.NoError(t, err)
+	received := &management.StatusResponse{}
+	require.NoError(t, proto.Unmarshal(wire, received))
+	require.True(t, proto.Equal(original, received))
+	body, err := StatusResponseToJSON(received, false)
+	require.NoError(t, err)
+	for _, field := range []string{"replay_pending", "uncertain", "physical_queue_bytes", "uncertain_writes", "uncertain_bytes", "x3_max_age_ms", "memory_budget_bytes", "reserved_memory_bytes", "first_dropped_unix_ms", "queue_bytes", "dropped_bytes", "x2_journal", "x2_in_flight_bytes", "x3_expired", "dropped_bytes_by_reason", "held", "pending", "persisted"} {
+		require.Contains(t, string(body), `"`+field+`"`)
+	}
+}

@@ -8,11 +8,11 @@ lippycat implements ETSI-standard lawful interception (LI) interfaces, allowing 
 
 lippycat implements three ETSI interfaces defined in TS 103 221-1 and TS 103 221-2:
 
-| Interface | Purpose | Protocol | Specification |
-|-----------|---------|----------|---------------|
-| **X1** | Administration (ADMF to NE) | XML/HTTPS | TS 103 221-1 |
-| **X2** | IRI delivery (signaling metadata) | Binary TLV/TLS | TS 103 221-2 |
-| **X3** | CC delivery (communication content) | Binary TLV/TLS | TS 103 221-2 |
+| Interface | Purpose                             | Protocol       | Specification |
+| --------- | ----------------------------------- | -------------- | ------------- |
+| **X1**    | Administration (ADMF to NE)         | XML/HTTPS      | TS 103 221-1  |
+| **X2**    | IRI delivery (signaling metadata)   | Binary TLV/TLS | TS 103 221-2  |
+| **X3**    | CC delivery (communication content) | Binary TLV/TLS | TS 103 221-2  |
 
 The **X1** interface carries administrative commands: the ADMF sends task activation, modification, and deactivation requests to the processor (acting as the Network Element). The **X2** interface delivers Intercept Related Information (IRI), including SIP signaling events and, when explicitly enabled, authorized normalized internet metadata. The **X3** interface delivers Content of Communication (CC) -- the actual media payloads such as RTP audio.
 
@@ -127,8 +127,8 @@ processor:
     admf_keepalive: "30s"
 
     # ADMF state synchronization
-    admf_sync_on_startup: true    # Query ADMF for state on startup
-    admf_sync_timeout: "30s"      # Timeout for startup sync
+    admf_sync_on_startup: true # Query ADMF for state on startup
+    admf_sync_timeout: "30s" # Timeout for startup sync
     admf_reconcile_interval: "5m" # Periodic reconciliation (0 = disabled)
 
     # X2/X3 delivery — sends intercept data to MDF
@@ -136,7 +136,7 @@ processor:
     delivery_tls_key: "/etc/lippycat/li/delivery.key"
     delivery_tls_ca: "/etc/lippycat/li/mdf-ca.crt"
     delivery_tls_pinned_cert:
-      - "sha256:A1B2C3D4E5F6..."  # Optional: pin MDF certificates
+      - "sha256:A1B2C3D4E5F6..." # Optional: pin MDF certificates
 ```
 
 ### LI Certificate Setup
@@ -174,14 +174,14 @@ flowchart TB
 
 The certificates required on the processor side are:
 
-| Certificate | Flag | Purpose |
-|-------------|------|---------|
-| X1 Server Cert + Key | `--li-x1-tls-cert`, `--li-x1-tls-key` | Serve the X1 HTTPS endpoint |
-| ADMF CA | `--li-x1-tls-ca` | Verify ADMF client certificates |
-| X1 Client Cert + Key | `--li-admf-tls-cert`, `--li-admf-tls-key` | Authenticate to ADMF for notifications |
-| ADMF Server CA | `--li-admf-tls-ca` | Verify ADMF server certificate |
-| Delivery Cert + Key | `--li-delivery-tls-cert`, `--li-delivery-tls-key` | Authenticate to MDF for X2/X3 delivery |
-| MDF CA | `--li-delivery-tls-ca` | Verify MDF server certificates |
+| Certificate          | Flag                                              | Purpose                                |
+| -------------------- | ------------------------------------------------- | -------------------------------------- |
+| X1 Server Cert + Key | `--li-x1-tls-cert`, `--li-x1-tls-key`             | Serve the X1 HTTPS endpoint            |
+| ADMF CA              | `--li-x1-tls-ca`                                  | Verify ADMF client certificates        |
+| X1 Client Cert + Key | `--li-admf-tls-cert`, `--li-admf-tls-key`         | Authenticate to ADMF for notifications |
+| ADMF Server CA       | `--li-admf-tls-ca`                                | Verify ADMF server certificate         |
+| Delivery Cert + Key  | `--li-delivery-tls-cert`, `--li-delivery-tls-key` | Authenticate to MDF for X2/X3 delivery |
+| MDF CA               | `--li-delivery-tls-ca`                            | Verify MDF server certificates         |
 
 All certificates must use RSA 2048+ or ECDSA P-256+ keys with SHA-256 or stronger hashing. The X1 server requires TLS 1.3 and a trusted ADMF client CA; it will not start if its listen address, certificate, key, or client CA is missing. The outbound X1 and X2/X3 interfaces require TLS 1.2 or newer.
 
@@ -215,18 +215,18 @@ The X1 interface is the control plane between the ADMF and the processor. The AD
 
 ### Supported Operations
 
-| Operation | Direction | Description |
-|-----------|-----------|-------------|
-| Ping | ADMF to NE | Health check |
-| CreateDestination | ADMF to NE | Register an MDF endpoint for delivery |
-| ModifyDestination | ADMF to NE | Update an MDF endpoint |
-| RemoveDestination | ADMF to NE | Remove an MDF endpoint |
-| ActivateTask | ADMF to NE | Start an interception task |
-| ModifyTask | ADMF to NE | Update task targets, destinations, or delivery type |
-| DeactivateTask | ADMF to NE | Stop an interception task |
-| GetTaskDetails | ADMF to NE | Query current task status |
-| GetAllDetails | NE to ADMF | Query all tasks, destinations, and NE status |
-| GetAllTaskDetails | NE to ADMF | Query all task details |
+| Operation         | Direction  | Description                                         |
+| ----------------- | ---------- | --------------------------------------------------- |
+| Ping              | ADMF to NE | Health check                                        |
+| CreateDestination | ADMF to NE | Register an MDF endpoint for delivery               |
+| ModifyDestination | ADMF to NE | Update an MDF endpoint                              |
+| RemoveDestination | ADMF to NE | Remove an MDF endpoint                              |
+| ActivateTask      | ADMF to NE | Start an interception task                          |
+| ModifyTask        | ADMF to NE | Update task targets, destinations, or delivery type |
+| DeactivateTask    | ADMF to NE | Stop an interception task                           |
+| GetTaskDetails    | ADMF to NE | Query current task status                           |
+| GetAllDetails     | NE to ADMF | Query all tasks, destinations, and NE status        |
+| GetAllTaskDetails | NE to ADMF | Query all task details                              |
 
 All requests use XML encoding per ETSI TS 103 221-1. For example, an `ActivateTask` request includes the task identifier (XID), target identifiers, destination IDs, and the delivery type:
 
@@ -258,13 +258,13 @@ All requests use XML encoding per ETSI TS 103 221-1. For example, an `ActivateTa
 
 Tasks progress through the following states:
 
-| State | Description |
-|-------|-------------|
-| Pending | Task received but `StartTime` has not yet been reached |
-| Active | Actively intercepting matching traffic |
-| Suspended | Temporarily paused by the ADMF |
+| State       | Description                                                    |
+| ----------- | -------------------------------------------------------------- |
+| Pending     | Task received but `StartTime` has not yet been reached         |
+| Active      | Actively intercepting matching traffic                         |
+| Suspended   | Temporarily paused by the ADMF                                 |
 | Deactivated | Explicitly stopped via `DeactivateTask` or implicit expiration |
-| Failed | A fatal error prevented continued interception |
+| Failed      | A fatal error prevented continued interception                 |
 
 `GetTaskDetails` reports the schema-defined provisioning value
 `awaitingProvisioning` for pending tasks, `failed` for failed tasks, and
@@ -310,25 +310,25 @@ underlying error is corrected.
 
 Each task specifies what information to deliver:
 
-| Type | X2 (IRI) | X3 (CC) | Use Case |
-|------|----------|---------|----------|
-| X2Only | Yes | No | Signaling metadata only (call records, registration events) |
-| X3Only | No | Yes | Content only (media streams) |
-| X2andX3 | Yes | Yes | Both signaling and content (full interception) |
+| Type    | X2 (IRI) | X3 (CC) | Use Case                                                    |
+| ------- | -------- | ------- | ----------------------------------------------------------- |
+| X2Only  | Yes      | No      | Signaling metadata only (call records, registration events) |
+| X3Only  | No       | Yes     | Content only (media streams)                                |
+| X2andX3 | Yes      | Yes     | Both signaling and content (full interception)              |
 
 ### ADMF Notifications
 
 The processor sends notifications to the ADMF to report operational status:
 
-| Notification | Trigger |
-|--------------|---------|
-| Startup | Processor started with LI enabled |
-| Shutdown | Processor shutting down gracefully |
-| KeepAlive | Periodic heartbeat (configurable interval) |
-| TaskProgress | Task activation progress updates |
-| ErrorReport | Task execution errors |
-| DeliveryNotification | X2/X3 delivery issues to MDF |
-| ImplicitDeactivation | Task auto-expired due to EndTime |
+| Notification         | Trigger                                    |
+| -------------------- | ------------------------------------------ |
+| Startup              | Processor started with LI enabled          |
+| Shutdown             | Processor shutting down gracefully         |
+| KeepAlive            | Periodic heartbeat (configurable interval) |
+| TaskProgress         | Task activation progress updates           |
+| ErrorReport          | Task execution errors                      |
+| DeliveryNotification | X2/X3 delivery issues to MDF               |
+| ImplicitDeactivation | Task auto-expired due to EndTime           |
 
 Configure the keepalive interval with `--li-admf-keepalive`:
 
@@ -363,11 +363,11 @@ The sync is designed for graceful degradation:
 
 **Configuration flags:**
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--li-admf-sync-on-startup` | bool | `true` | Query ADMF for state on startup |
-| `--li-admf-sync-timeout` | duration | `30s` | Timeout for the startup sync request |
-| `--li-admf-reconcile-interval` | duration | `5m` | Periodic ADMF reconciliation interval (0 = disabled) |
+| Flag                           | Type     | Default | Description                                          |
+| ------------------------------ | -------- | ------- | ---------------------------------------------------- |
+| `--li-admf-sync-on-startup`    | bool     | `true`  | Query ADMF for state on startup                      |
+| `--li-admf-sync-timeout`       | duration | `30s`   | Timeout for the startup sync request                 |
+| `--li-admf-reconcile-interval` | duration | `5m`    | Periodic ADMF reconciliation interval (0 = disabled) |
 
 To disable startup sync (for example, in environments where the ADMF always pushes state):
 
@@ -402,24 +402,24 @@ processor:
   li:
     admf_sync_on_startup: true
     admf_sync_timeout: "30s"
-    admf_reconcile_interval: "5m"  # 0 disables; drift is then never corrected
+    admf_reconcile_interval: "5m" # 0 disables; drift is then never corrected
 ```
 
 ### X1 Error Codes
 
 When the processor cannot fulfil an X1 request, it returns a structured error:
 
-| Code | Name | Description |
-|------|------|-------------|
-| 100 | GenericError | General processing error; retained reactivation identity differs |
-| 101 | RequestSyntaxError | Invalid XML in request |
-| 300 | XIDAlreadyExists | A task with this XID is already active |
-| 301 | XIDNotFound | No task found for the given XID |
-| 302 | DIDAlreadyExists | A destination with this DID is already registered |
-| 303 | DIDNotFound | No destination found for the given DID |
-| 400 | DeliveryNotPossible | Cannot reach MDF for delivery |
-| 401 | TargetNotSupported | Target identifier type not supported |
-| 402 | DeliveryTypeNotSupported | Requested delivery type not available |
+| Code | Name                     | Description                                                      |
+| ---- | ------------------------ | ---------------------------------------------------------------- |
+| 100  | GenericError             | General processing error; retained reactivation identity differs |
+| 101  | RequestSyntaxError       | Invalid XML in request                                           |
+| 300  | XIDAlreadyExists         | A task with this XID is already active                           |
+| 301  | XIDNotFound              | No task found for the given XID                                  |
+| 302  | DIDAlreadyExists         | A destination with this DID is already registered                |
+| 303  | DIDNotFound              | No destination found for the given DID                           |
+| 400  | DeliveryNotPossible      | Cannot reach MDF for delivery                                    |
+| 401  | TargetNotSupported       | Target identifier type not supported                             |
+| 402  | DeliveryTypeNotSupported | Requested delivery type not available                            |
 
 When reactivation changes a protected target or delivery type, code 100 has the
 stable description `retained task's interception identity differs` followed by
@@ -442,14 +442,14 @@ X2 destination.
 
 X2 PDUs carry signaling metadata derived from SIP messages:
 
-| IRI Event | SIP Trigger | Description |
-|-----------|-------------|-------------|
-| SessionBegin | INVITE | A call has been initiated |
-| SessionAnswer | 200 OK to INVITE | The call was answered |
-| SessionEnd | BYE | The call was terminated |
-| SessionAttempt | CANCEL, 4xx, 5xx, 6xx | A call attempt failed |
-| Registration | REGISTER | User registered with the network |
-| RegistrationEnd | REGISTER (Expires: 0) | User deregistered |
+| IRI Event       | SIP Trigger           | Description                      |
+| --------------- | --------------------- | -------------------------------- |
+| SessionBegin    | INVITE                | A call has been initiated        |
+| SessionAnswer   | 200 OK to INVITE      | The call was answered            |
+| SessionEnd      | BYE                   | The call was terminated          |
+| SessionAttempt  | CANCEL, 4xx, 5xx, 6xx | A call attempt failed            |
+| Registration    | REGISTER              | User registered with the network |
+| RegistrationEnd | REGISTER (Expires: 0) | User deregistered                |
 
 Each X2 PDU includes structured attributes: timestamp, source/destination IP and port, SIP Call-ID, From/To headers, and a correlation number that links related events within the same session.
 
@@ -474,15 +474,15 @@ The required X1 and X2/X3 TLS options are omitted from this focused example.
 The `internet_metadata` profile is currently the only supported profile. It
 allows the following content-free observations:
 
-| Event | X2 metadata behavior |
-|-------|----------------------|
-| Connection | Flow endpoints, protocol, timing, counters, and identifiers |
-| DNS | Query and response metadata |
-| TLS | Handshake, certificate identity, and fingerprint metadata |
-| HTTP | Transaction metadata; arbitrary header maps are removed |
-| SMTP | Transport envelope only; message headers, body previews, attachment IDs, and content are removed |
-| File metadata | Disabled unless `--li-metadata-allow-file-metadata` is set |
-| File content | Always rejected by the metadata profile |
+| Event         | X2 metadata behavior                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------ |
+| Connection    | Flow endpoints, protocol, timing, counters, and identifiers                                      |
+| DNS           | Query and response metadata                                                                      |
+| TLS           | Handshake, certificate identity, and fingerprint metadata                                        |
+| HTTP          | Transaction metadata; arbitrary header maps are removed                                          |
+| SMTP          | Transport envelope only; message headers, body previews, attachment IDs, and content are removed |
+| File metadata | Disabled unless `--li-metadata-allow-file-metadata` is set                                       |
+| File content  | Always rejected by the metadata profile                                                          |
 
 Delivery requires more than enabling the sink. An active LI task must match the
 event target, use `X2 only` or `X2 and X3` delivery, and reference an enabled X2
@@ -498,10 +498,10 @@ local log files.
 
 X3 PDUs carry communication content; X3 is not a structured-log transport:
 
-| Content Type | Description |
-|--------------|-------------|
-| RTP Payload | Voice or video media packets |
-| DTMF | Telephone keypad signals |
+| Content Type | Description                  |
+| ------------ | ---------------------------- |
+| RTP Payload  | Voice or video media packets |
+| DTMF         | Telephone keypad signals     |
 
 X3 PDUs include RTP-specific attributes (SSRC, sequence number, timestamp, payload type) and a stream ID that correlates back to the X2 session events.
 
@@ -523,12 +523,12 @@ old buffered content cannot cross into it.
 
 The delivery subsystem uses asynchronous queuing with backpressure to handle high throughput:
 
-| Metric | Value |
-|--------|-------|
-| X2 encoding throughput | ~500K PDUs/s (~2 us per PDU) |
-| X3 encoding throughput | ~1M PDUs/s (~1 us per PDU) |
-| Delivery throughput (single destination) | ~100K PDUs/s |
-| Delivery throughput (multiple destinations) | ~50K PDUs/s per destination |
+| Metric                                      | Value                        |
+| ------------------------------------------- | ---------------------------- |
+| X2 encoding throughput                      | ~500K PDUs/s (~2 us per PDU) |
+| X3 encoding throughput                      | ~1M PDUs/s (~1 us per PDU)   |
+| Delivery throughput (single destination)    | ~100K PDUs/s                 |
+| Delivery throughput (multiple destinations) | ~50K PDUs/s per destination  |
 
 Delivery uses connection pooling, one ordered dispatcher per MDF destination,
 batching (default: 100 PDUs per batch), and a bounded queue per destination
@@ -553,16 +553,16 @@ When the ADMF activates a task, the LI Manager translates target identifiers int
 
 ### Target-to-Filter Mapping
 
-| LI Target Type | X1 Element | Example | Filter System | Algorithm |
-|----------------|------------|---------|---------------|-----------|
-| SIP URI | `<sipUri>` | `sip:alicent@example.com` | FILTER_SIP_URI | Aho-Corasick pattern matching |
-| TEL URI | `<telUri>` | `tel:+15551234567` | FILTER_PHONE_NUMBER | Bloom filter + suffix matching |
-| E.164 Number | `<e164Number>` | `+15551234567` | FILTER_PHONE_NUMBER | Bloom filter + suffix matching |
-| IPv4 Address | `<ipv4Address>` | `192.168.1.100` | FILTER_IP_ADDRESS | Hash map, O(1) lookup |
-| IPv4 CIDR | `<ipv4Cidr>` | `10.0.0.0/8` | FILTER_IP_ADDRESS | Radix trie, O(prefix) lookup |
-| IPv6 Address | `<ipv6Address>` | `2001:db8::1` | FILTER_IP_ADDRESS | Hash map, O(1) lookup |
-| IPv6 CIDR | `<ipv6Cidr>` | `2001:db8::/32` | FILTER_IP_ADDRESS | Radix trie, O(prefix) lookup |
-| NAI | `<nai>` | `user@realm.example.com` | FILTER_SIP_URI | Aho-Corasick pattern matching |
+| LI Target Type | X1 Element      | Example                   | Filter System       | Algorithm                      |
+| -------------- | --------------- | ------------------------- | ------------------- | ------------------------------ |
+| SIP URI        | `<sipUri>`      | `sip:alicent@example.com` | FILTER_SIP_URI      | Aho-Corasick pattern matching  |
+| TEL URI        | `<telUri>`      | `tel:+15551234567`        | FILTER_PHONE_NUMBER | Bloom filter + suffix matching |
+| E.164 Number   | `<e164Number>`  | `+15551234567`            | FILTER_PHONE_NUMBER | Bloom filter + suffix matching |
+| IPv4 Address   | `<ipv4Address>` | `192.168.1.100`           | FILTER_IP_ADDRESS   | Hash map, O(1) lookup          |
+| IPv4 CIDR      | `<ipv4Cidr>`    | `10.0.0.0/8`              | FILTER_IP_ADDRESS   | Radix trie, O(prefix) lookup   |
+| IPv6 Address   | `<ipv6Address>` | `2001:db8::1`             | FILTER_IP_ADDRESS   | Hash map, O(1) lookup          |
+| IPv6 CIDR      | `<ipv6Cidr>`    | `2001:db8::/32`           | FILTER_IP_ADDRESS   | Radix trie, O(prefix) lookup   |
+| NAI            | `<nai>`         | `user@realm.example.com`  | FILTER_SIP_URI      | Aho-Corasick pattern matching  |
 
 ### Filter Flow
 
@@ -615,12 +615,12 @@ For production environments, consider using a Hardware Security Module (HSM) for
 
 All LI operations are recorded in the processor's structured logs. Key log fields for LI events include:
 
-| Field | Description |
-|-------|-------------|
-| `xid` | Task identifier |
-| `did` | Destination identifier |
-| `filter_id` | Internal filter identifier |
-| `packets_matched` | Count of matched packets |
+| Field             | Description                |
+| ----------------- | -------------------------- |
+| `xid`             | Task identifier            |
+| `did`             | Destination identifier     |
+| `filter_id`       | Internal filter identifier |
+| `packets_matched` | Count of matched packets   |
 
 These logs should be forwarded to a secure, tamper-evident log management system as part of your organization's LI audit requirements.
 
@@ -695,3 +695,36 @@ openssl s_client -connect mdf.example.com:443 \
   -cert delivery.crt -key delivery.key \
   -CAfile mdf-ca.crt
 ```
+
+### Bounded delivery and restart recovery
+
+Processor and tap support independent X2/X3 encoded-byte limits via
+`--li-delivery-x2-queue-bytes` and `--li-delivery-x3-queue-bytes`. Both byte and PDU
+caps apply per destination and interface, including claimed writes. The optional
+`--li-delivery-memory-budget-bytes` reserves capacity across destinations and
+requires explicit byte caps. Size budgets as peak encoded bytes/second multiplied
+by outage duration, with headroom and sufficient PDU capacity. Recovery bandwidth
+must exceed live traffic. Other processor memory needs separate sizing.
+
+`--li-delivery-x3-max-age=5m` expires X3 five minutes after local admission, including
+reordering and retries, even while disconnected. The default is no expiry. X2 does
+not inherit X3 age. Local write completion does not prove remote receipt.
+
+Encrypted X2 persistence is opt-in through `--li-delivery-x2-spool-dir`, a positive
+`--li-delivery-x2-spool-max-bytes` and `--li-delivery-x2-spool-key-file` containing
+a private raw 32-byte AES key. X3 stays memory-only. Enqueue success is memory
+admission, not a durability acknowledgement; a crash can lose not-yet-synced
+records. Full journals reject new product while retaining persisted records.
+
+Recovered X2 is held by default and requires explicit identity reconciliation and
+authorization through the embedding control-plane API before replay. Reusing an
+XID or destination UUID does not authorize old records. The CLI accepts an explicit private replay manifest after ADMF startup reconciliation. `--li-delivery-x2-spool-replay-policy=purge` explicitly removes
+recovered records; keep the default `hold` unless discarding them is intended.
+`lc show status` reports byte budgets, queue and in-flight bytes, expired product,
+reason-labelled dropped bytes, and journal pending, persisted and held counts.
+Existing deployments retain their prior limits until new options are configured.
+
+Independent PDU caps are available through `--li-delivery-x2-queue-size` and
+`--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy
+`--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
+once, while `queue_bytes` counts every destination copy.

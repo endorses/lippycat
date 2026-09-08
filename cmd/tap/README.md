@@ -262,12 +262,14 @@ lc tap voip -i eth0 \
 ```
 
 **Output:**
+
 ```
 20250123_143022_abc123_sip.pcap   # SIP signaling
 20250123_143022_abc123_rtp.pcap   # RTP media
 ```
 
 **Pattern Placeholders:**
+
 - `{callid}` - SIP Call-ID
 - `{from}` - SIP From user
 - `{to}` - SIP To user
@@ -409,17 +411,18 @@ sudo lc tap dns -i eth0 \
 
 **Tunneling Command Placeholders:**
 
-| Placeholder | Description | Example |
-|-------------|-------------|---------|
-| `%domain%` | Suspicious domain (or parent) | `evil.example.com` |
-| `%score%` | Tunneling score (0.0-1.0) | `0.85` |
-| `%entropy%` | Entropy score | `4.20` |
-| `%queries%` | Query count observed | `1523` |
-| `%srcips%` | Source IPs (comma-separated) | `192.168.1.10,192.168.1.20` |
-| `%hunter%` | Hunter ID ("local" for tap mode) | `local` |
-| `%timestamp%` | Detection time (RFC3339) | `2025-01-11T14:30:22Z` |
+| Placeholder   | Description                      | Example                     |
+| ------------- | -------------------------------- | --------------------------- |
+| `%domain%`    | Suspicious domain (or parent)    | `evil.example.com`          |
+| `%score%`     | Tunneling score (0.0-1.0)        | `0.85`                      |
+| `%entropy%`   | Entropy score                    | `4.20`                      |
+| `%queries%`   | Query count observed             | `1523`                      |
+| `%srcips%`    | Source IPs (comma-separated)     | `192.168.1.10,192.168.1.20` |
+| `%hunter%`    | Hunter ID ("local" for tap mode) | `local`                     |
+| `%timestamp%` | Detection time (RFC3339)         | `2025-01-11T14:30:22Z`      |
 
 **Alerting Behavior:**
+
 - Alerts trigger when a domain's tunneling score crosses the threshold
 - Debounce prevents alert fatigue (same domain won't alert again until debounce expires)
 - Commands execute asynchronously (don't block packet processing)
@@ -439,6 +442,7 @@ sudo lc tap voip -i eth0 \
 ```
 
 Monitor via TUI:
+
 ```bash
 lc watch remote --addr localhost:55555 --tls-ca ca.crt
 ```
@@ -457,6 +461,7 @@ sudo lc tap dns -i eth0 \
 ```
 
 Monitor via TUI:
+
 ```bash
 lc watch remote --addr localhost:55555 --tls-ca ca.crt
 ```
@@ -525,6 +530,7 @@ lc tap -i eth0 --tls-cert server.crt --tls-key server.key  # OK
 ### TLS Configuration
 
 **Server TLS (One-Way Authentication):**
+
 ```bash
 lc tap -i eth0 \
   --tls-cert /etc/lippycat/certs/server.crt \
@@ -532,6 +538,7 @@ lc tap -i eth0 \
 ```
 
 **Mutual TLS (Two-Way Authentication):**
+
 ```bash
 lc tap -i eth0 \
   --tls-cert /etc/lippycat/certs/server.crt \
@@ -621,19 +628,19 @@ processor:
 
 ## Comparison with Other Modes
 
-| Feature | `lc sniff` | `lc tap` | `lc tap voip` | `lc tap dns` | `lc tap email` | `lc tap http` | `lc tap tls` | `lc hunt` + `lc process` |
-|---------|-----------|----------|---------------|--------------|----------------|---------------|--------------|--------------------------|
-| Local capture | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Hunt only |
-| TUI server | No | Yes | Yes | Yes | Yes | Yes | Yes | Process only |
-| Per-call PCAP | No | No | Yes (default) | No | No | No | No | Process only |
-| Auto-rotate PCAP | No | Yes | Yes | Yes (default) | Yes (default) | Yes (default) | Yes (default) | Process only |
-| DNS tunneling detection | No | No | No | Yes | No | No | No | Process only |
-| HTTPS decryption | No | No | No | No | No | Yes | No | Process only |
-| Fingerprinting | No | No | No | No | No | No | JA3/JA3S/JA4 | Process only |
-| Upstream forwarding | No | Yes | Yes | Yes | Yes | Yes | Yes | Process only |
-| Distributed capture | No | No | No | No | No | No | No | Yes |
-| Deployment | Single machine | Single machine | Single machine | Single machine | Single machine | Single machine | Single machine | Multi-machine |
-| Use case | Quick analysis | General capture | VoIP calls | DNS monitoring | Email capture | HTTP/HTTPS | TLS analysis | Distributed production |
+| Feature                 | `lc sniff`     | `lc tap`        | `lc tap voip`  | `lc tap dns`   | `lc tap email` | `lc tap http`  | `lc tap tls`   | `lc hunt` + `lc process` |
+| ----------------------- | -------------- | --------------- | -------------- | -------------- | -------------- | -------------- | -------------- | ------------------------ |
+| Local capture           | Yes            | Yes             | Yes            | Yes            | Yes            | Yes            | Yes            | Hunt only                |
+| TUI server              | No             | Yes             | Yes            | Yes            | Yes            | Yes            | Yes            | Process only             |
+| Per-call PCAP           | No             | No              | Yes (default)  | No             | No             | No             | No             | Process only             |
+| Auto-rotate PCAP        | No             | Yes             | Yes            | Yes (default)  | Yes (default)  | Yes (default)  | Yes (default)  | Process only             |
+| DNS tunneling detection | No             | No              | No             | Yes            | No             | No             | No             | Process only             |
+| HTTPS decryption        | No             | No              | No             | No             | No             | Yes            | No             | Process only             |
+| Fingerprinting          | No             | No              | No             | No             | No             | No             | JA3/JA3S/JA4   | Process only             |
+| Upstream forwarding     | No             | Yes             | Yes            | Yes            | Yes            | Yes            | Yes            | Process only             |
+| Distributed capture     | No             | No              | No             | No             | No             | No             | No             | Yes                      |
+| Deployment              | Single machine | Single machine  | Single machine | Single machine | Single machine | Single machine | Single machine | Multi-machine            |
+| Use case                | Quick analysis | General capture | VoIP calls     | DNS monitoring | Email capture  | HTTP/HTTPS     | TLS analysis   | Distributed production   |
 
 ## Performance Tuning
 
@@ -711,3 +718,26 @@ lc tap -i eth0 --buffer-size 5000 --max-subscribers 20 --insecure
 - [docs/SECURITY.md](../../docs/SECURITY.md) - TLS/mTLS setup
 - [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) - Performance tuning
 - [docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) - Virtual interface guide
+
+### LI delivery buffer limits
+
+LI builds accept independent `--li-delivery-x2-queue-bytes` and
+`--li-delivery-x3-queue-bytes` budgets per destination/interface, optional
+`--li-delivery-x3-max-age` (for example `5m`) and
+`--li-delivery-memory-budget-bytes`. The existing queue-size flag limits PDUs per
+destination **and interface**. New byte/age limits default to disabled.
+
+Optional encrypted X2 persistence uses `--li-delivery-x2-spool-dir`,
+`--li-delivery-x2-spool-max-bytes` and `--li-delivery-x2-spool-key-file`. Recovery
+defaults to held records; `--li-delivery-x2-spool-export-manifest` exports identities
+for review and `--li-delivery-x2-spool-replay-manifest` requests exact authorized
+replay after ADMF startup synchronization;
+`--li-delivery-x2-spool-replay-policy=purge` explicitly discards recovered records.
+Enqueue success does not acknowledge disk sync. X3 is memory-only. See the
+[delivery sizing, configuration and recovery policy](../../docs/LI_INTEGRATION.md#delivery-byte-limits-age-and-x2-persistence)
+before enabling persistence.
+
+Independent PDU caps are available through `--li-delivery-x2-queue-size` and
+`--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy
+`--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
+once, while `queue_bytes` counts every destination copy.

@@ -180,7 +180,7 @@ type InterceptTask struct {
 	// LastError contains the most recent error message (if any).
 	LastError string
 
-	// ActivationGeneration distinguishes successive activations of the same XID.
+	// ActivationGeneration distinguishes activations and enforcement-definition revisions of an XID.
 	// It is persisted so cleanup from an older activation cannot affect a newer one.
 	ActivationGeneration uint64
 }

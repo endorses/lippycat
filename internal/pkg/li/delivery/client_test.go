@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"io"
 	"net"
 	"os"
@@ -99,6 +100,7 @@ func TestSendX2QueueFull(t *testing.T) {
 
 	xid := uuid.New()
 	destIDs := []uuid.UUID{uuid.New()}
+	require.NoError(t, manager.AddDestination(&li.Destination{DID: destIDs[0], Address: "127.0.0.1", Port: 1}))
 	data := []byte("test-pdu")
 
 	// First should succeed.
@@ -128,6 +130,7 @@ func TestSendX3QueueFull(t *testing.T) {
 
 	xid := uuid.New()
 	destIDs := []uuid.UUID{uuid.New()}
+	require.NoError(t, manager.AddDestination(&li.Destination{DID: destIDs[0], Address: "127.0.0.1", Port: 1}))
 	data := []byte("test-pdu")
 
 	err = client.SendX3(xid, destIDs, data)
@@ -154,6 +157,9 @@ func TestPerDestinationQueueIsolation(t *testing.T) {
 	did1 := uuid.New()
 	did2 := uuid.New()
 	xid := uuid.New()
+	for _, did := range []uuid.UUID{did1, did2} {
+		require.NoError(t, manager.AddDestination(&li.Destination{DID: did, Address: "127.0.0.1", Port: 1}))
+	}
 
 	require.NoError(t, client.SendX2(xid, []uuid.UUID{did1}, []byte("old1")))
 	require.NoError(t, client.SendX2(xid, []uuid.UUID{did2}, []byte("keep")))
@@ -319,6 +325,7 @@ func TestSendAfterStop(t *testing.T) {
 
 	xid := uuid.New()
 	destIDs := []uuid.UUID{uuid.New()}
+	require.NoError(t, manager.AddDestination(&li.Destination{DID: destIDs[0], Address: "127.0.0.1", Port: 1}))
 	data := []byte("test-pdu")
 
 	err = client.SendX2(xid, destIDs, data)
@@ -343,6 +350,7 @@ func TestQueueDepth(t *testing.T) {
 
 	xid := uuid.New()
 	destIDs := []uuid.UUID{uuid.New()}
+	require.NoError(t, manager.AddDestination(&li.Destination{DID: destIDs[0], Address: "127.0.0.1", Port: 1}))
 
 	// Queue some items.
 	for i := 0; i < 10; i++ {
@@ -688,6 +696,7 @@ func TestSendSyncAfterStop(t *testing.T) {
 	ctx := context.Background()
 	xid := uuid.New()
 	destIDs := []uuid.UUID{uuid.New()}
+	require.NoError(t, manager.AddDestination(&li.Destination{DID: destIDs[0], Address: "127.0.0.1", Port: 1}))
 
 	err = client.SendX2Sync(ctx, xid, destIDs, []byte("test-pdu"))
 	assert.ErrorIs(t, err, ErrClientStopped)
@@ -792,6 +801,7 @@ func TestDeliveryBufferedAcrossDestinationRestart(t *testing.T) {
 		X2Enabled: true,
 		TLSConfig: &tls.Config{
 			RootCAs:            certPool,
+			Certificates:       manager.tlsConfig.Certificates,
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS12,
 		},
@@ -865,6 +875,8 @@ type countingListener struct {
 }
 
 type restartableMDF struct {
+	clientCAs *x509.CertPool
+	verified  atomic.Int64
 	cert      tls.Certificate
 	frameSize int
 	address   string
@@ -879,7 +891,11 @@ func newRestartableMDF(t *testing.T, certPEM, keyPEM []byte, frameSize int) *res
 	t.Helper()
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	require.NoError(t, err)
-	return &restartableMDF{
+	caBytes, err := os.ReadFile(testConfigWithCerts(t).TLSCAFile)
+	require.NoError(t, err)
+	clientCAs := x509.NewCertPool()
+	require.True(t, clientCAs.AppendCertsFromPEM(caBytes))
+	return &restartableMDF{clientCAs: clientCAs,
 		cert:      cert,
 		frameSize: frameSize,
 		received:  make(chan string, 32),
@@ -904,7 +920,8 @@ func (s *restartableMDF) Start(t *testing.T) {
 	}
 	s.listener = tls.NewListener(raw, &tls.Config{
 		Certificates: []tls.Certificate{s.cert},
-		ClientAuth:   tls.NoClientCert,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    s.clientCAs,
 		MinVersion:   tls.VersionTLS12,
 	})
 	go s.accept(s.listener)
@@ -968,8 +985,27 @@ func (s *restartableMDF) read(conn net.Conn) {
 		s.mu.Unlock()
 		_ = conn.Close()
 	}()
+	tlsConn := conn.(*tls.Conn)
+	if err := tlsConn.Handshake(); err != nil {
+		return
+	}
+	if len(tlsConn.ConnectionState().VerifiedChains) == 0 {
+		return
+	}
+	s.verified.Add(1)
 	buf := make([]byte, s.frameSize)
 	for {
+		if s.frameSize == 0 {
+			var header [4]byte
+			if _, err := io.ReadFull(conn, header[:]); err != nil {
+				return
+			}
+			size := binary.BigEndian.Uint32(header[:])
+			if size > 1<<20 {
+				return
+			}
+			buf = make([]byte, int(size))
+		}
 		if _, err := io.ReadFull(conn, buf); err != nil {
 			return
 		}

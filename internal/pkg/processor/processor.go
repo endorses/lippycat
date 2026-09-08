@@ -112,6 +112,18 @@ type Config struct {
 	LIDeliveryTLSCAFile                     string   // Path to CA certificate for verifying MDF servers
 	LIDeliveryTLSPinnedCert                 []string // Pinned certificate fingerprints for MDF servers (SHA256, hex encoded)
 	LIDeliveryQueueSize                     int
+	LIDeliveryX2QueueSize                   int
+	LIDeliveryX3QueueSize                   int
+	LIDeliveryX2QueueBytes                  int64
+	LIDeliveryX3QueueBytes                  int64
+	LIDeliveryX3MaxAge                      time.Duration
+	LIDeliveryMemoryBudgetBytes             int64
+	LIDeliveryX2SpoolDir                    string
+	LIDeliveryX2SpoolMaxBytes               int64
+	LIDeliveryX2SpoolKeyFile                string
+	LIDeliveryX2SpoolReplayPolicy           string
+	LIDeliveryX2SpoolReplayManifest         string
+	LIDeliveryX2SpoolExportManifest         string
 	LIDeliverySendTimeout                   time.Duration
 	LIDeliveryInitialBackoff                time.Duration
 	LIDeliveryMaxBackoff                    time.Duration

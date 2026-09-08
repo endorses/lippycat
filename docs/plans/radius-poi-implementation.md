@@ -4,7 +4,8 @@ Date: 2026-09-08
 
 Status: Phase 0 local contracts and synthetic acceptance fixtures implemented;
 external MDF agreement and production operator mapping verification pending.
-Phases 1–7 are not implemented by this change.
+Phase 1 shared decoder and observation foundation implemented and verified.
+Phases 2–7 remain pending.
 
 Source: [RADIUS POI implementation assessment](../research/radius-poi-implementation-assessment.md).
 
@@ -135,15 +136,51 @@ two unchecked Phase 0 acceptance gates above.
 Primary locations: new `internal/pkg/radius`, `internal/pkg/types`,
 `internal/pkg/protocolmeta`, and `internal/pkg/protocolcatalog`.
 
-- [ ] Audit the pinned gopacket RADIUS decoder and wrap it with explicit UDP payload decoding for authentication, accounting, and configured ports; do not depend on the default 1812 registration.
-- [ ] Validate header, declared message length, attribute boundaries, packet truncation, and supported message codes. Preserve the exact validated header, Authenticator, and attribute bytes, including unknown and repeated attributes in wire order.
-- [ ] Define an observation carrying capture time/scope, endpoints, separate NAS identity fields, original message bytes, decoded attributes, opaque transaction identity, association status, and direct/inherited attribution references with generation information.
-- [ ] Specify ownership and copying at asynchronous boundaries so capture-buffer reuse cannot change observations or packet payloads; avoid making non-LI packages depend on LI implementation types.
-- [ ] Implement explicit outcomes for malformed, unsupported, fragmented, unmatched, and ambiguous observations, with one counter owner per outcome.
-- [ ] Add unit tests and bounded fuzz runs for decoder length handling, unknown/repeated attributes, malformed vendor attributes, truncation, and arbitrary input; verify no panic or false identity extraction.
+- [x] Audit the pinned gopacket RADIUS decoder and wrap it with explicit UDP payload decoding for authentication, accounting, and configured ports; do not depend on the default 1812 registration.
+- [x] Validate header, declared message length, attribute boundaries, packet truncation, and supported message codes. Preserve the exact validated header, Authenticator, and attribute bytes, including unknown and repeated attributes in wire order.
+- [x] Define an observation carrying capture time/scope, endpoints, separate NAS identity fields, original message bytes, decoded attributes, opaque transaction identity, association status, and direct/inherited attribution references with generation information.
+- [x] Specify ownership and copying at asynchronous boundaries so capture-buffer reuse cannot change observations or packet payloads; avoid making non-LI packages depend on LI implementation types.
+- [x] Implement explicit outcomes for malformed, unsupported, fragmented, unmatched, and ambiguous observations, with one counter owner per outcome.
+- [x] Add unit tests and bounded fuzz runs for decoder length handling, unknown/repeated attributes, malformed vendor attributes, truncation, and arbitrary input; verify no panic or false identity extraction.
 
 Exit criterion: valid packets produce stable byte-preserving observations and
 invalid input cannot enter target attribution.
+
+Phase 1 verification (2026-09-09): implemented the shared foundation in
+`internal/pkg/radius`. The pinned gopacket audit, explicit UDP/IP validation,
+owned observations, scope/epoch IDs, grouped generation-bearing evidence, and
+counter ownership are documented in the [package README](../../internal/pkg/radius/README.md).
+Valid observations start with `unprocessed` association status; unmatched and
+ambiguous statuses are defined, while their decisions and counters belong to
+the Phase 2 correlator. No decoder rejection exposes message attributes, NAS
+identity or attribution evidence.
+
+The foundation remains in a single non-LI package. Shared display/protobuf
+adapters in `types`/`protocolmeta` and capability registration in
+`protocolcatalog` are deferred to Phases 3/6; registering command/filter support
+now would advertise capabilities not yet implemented.
+
+Specialized sub-agents implemented decoder and observation components, and an
+independent reviewer checked their integration. Parent review verified the
+changes and fixed acceptance of malformed IPv4/IPv6 option boundaries with
+regression tests. All 26 committed PCAP observations match expected validation,
+endpoints, ordered attributes and raw payload goldens; mutation checks verify
+capture-buffer independence. Tests cover deep-cloned evidence, concurrent epoch
+IDs/counters, sequence exhaustion, all six codes, unknown/repeated AVPs, malformed
+vendor data, custom ports, truncation and fragment precedence.
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags all ./internal/pkg/radius ./internal/pkg/protocolmeta ./internal/pkg/protocolcatalog ./internal/pkg/types ./testdata/radius -count=1
+GOCACHE=/tmp/lippycat-go-cache go test ./internal/pkg/radius -run '^$' -fuzz '^FuzzDecode$' -fuzztime=10s -parallel=2
+GOCACHE=/tmp/lippycat-go-cache go test ./internal/pkg/radius -run '^$' -fuzz '^FuzzDecodePacket$' -fuzztime=15s -parallel=2
+GOCACHE=/tmp/lippycat-go-cache go vet ./internal/pkg/radius
+GOCACHE=/tmp/lippycat-go-cache go run ./testdata/radius --check
+```
+
+All checks passed. Payload fuzzing completed 270,099 executions; the final packet
+fuzz run completed 253,407 executions after the option-validation fixes. Go and
+Markdown files were formatted before staging. Phase 0 external MDF/operator
+acceptance gates remain pending and do not block this decoder foundation.
 
 ## Phase 2 — Exact filters and bounded transaction association
 

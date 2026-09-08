@@ -163,6 +163,9 @@ func (d *Detector) GetSignatures() []signatures.Signature {
 
 // Detect performs protocol detection on a packet
 func (d *Detector) Detect(packet gopacket.Packet) *signatures.DetectionResult {
+	if result := detectRADIUS(packet); result != nil {
+		return result
+	}
 	ctx := d.buildContext(packet)
 
 	// Check cache only for flow/session protocols, not for single-packet protocols
@@ -258,6 +261,9 @@ func isWellKnownPort(port uint16) bool {
 
 // DetectWithoutCache performs detection without using or updating cache
 func (d *Detector) DetectWithoutCache(packet gopacket.Packet) *signatures.DetectionResult {
+	if result := detectRADIUS(packet); result != nil {
+		return result
+	}
 	ctx := d.buildContext(packet)
 
 	d.mu.RLock()

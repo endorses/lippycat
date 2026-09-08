@@ -11,6 +11,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -18,6 +19,7 @@ import (
 )
 
 type PacketInfo struct {
+	RADIUS    *radius.Observation
 	LinkType  layers.LinkType
 	Packet    gopacket.Packet
 	Interface string // Name of the interface where packet was captured
@@ -1018,7 +1020,7 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				Packet:    packet,
 				Interface: filepath.Base(iface.Name()), // Use basename for display (removes path for PCAP files)
 			}
-			observePacket(pktInfo)
+			observePacket(&pktInfo)
 			buffer.Send(pktInfo)
 
 			// Batched atomic update: increment local counter

@@ -3,6 +3,8 @@ package pipeline
 
 import (
 	"sync"
+
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"time"
 
 	"github.com/google/gopacket"
@@ -94,6 +96,9 @@ type PacketEnvelope struct {
 	InheritedMatchedFilterIDs []string
 	Metadata                  *Metadata
 	TLSKeys                   *TLSSessionKeys
+	RADIUS                    *radius.Observation
+	// RADIUSValidationError rejects metadata claims without suppressing raw packet sinks.
+	RADIUSValidationError error
 
 	decodeOnce sync.Once
 	packet     gopacket.Packet

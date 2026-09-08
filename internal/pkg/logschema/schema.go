@@ -62,6 +62,13 @@ var Streams = []Stream{
 		{"parent_fuid", "string"}, {"md5", "string"}, {"sha1", "string"}, {"sha256", "string"}, {"hash_complete", "bool"}, {"extracted", "string"},
 		{"community_id", "string"}, {"node_id", "string"},
 	}),
+	stream("radius", []Field{
+		{"ts", "time"}, {"uid", "string"}, {"id.orig_h", "addr"}, {"id.orig_p", "port"}, {"id.resp_h", "addr"}, {"id.resp_p", "port"},
+		{"proto", "enum"}, {"code", "count"}, {"identifier", "count"}, {"length", "count"},
+		{"observation_id", "string"}, {"request_instance_id", "string"}, {"association", "enum"},
+		{"attributes", "vector[string]"}, {"origin_node_id", "string"}, {"source_id", "string"}, {"capture_epoch", "string"},
+		{"community_id", "string"}, {"node_id", "string"},
+	}),
 }
 
 func stream(name string, fields []Field) Stream {

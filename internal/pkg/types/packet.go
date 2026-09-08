@@ -10,23 +10,24 @@ import (
 // PacketDisplay represents a packet for display purposes.
 // This type is shared between capture, remote capture, and TUI components.
 type PacketDisplay struct {
-	Timestamp time.Time
-	SrcIP     string
-	DstIP     string
-	SrcPort   string
-	DstPort   string
-	Protocol  string
-	Length    int
-	Info      string
-	RawData   []byte          // Raw packet bytes for hex dump
-	NodeID    string          // Source node identifier: "Local", hunter_id, or processor_id
-	Interface string          // Network interface where packet was captured
-	VoIPData  *VoIPMetadata   // Parsed VoIP metadata (nil if not VoIP)
-	DNSData   *DNSMetadata    // Parsed DNS metadata (nil if not DNS)
-	EmailData *EmailMetadata  // Parsed Email metadata (nil if not email)
-	TLSData   *TLSMetadata    // Parsed TLS metadata (nil if not TLS handshake)
-	HTTPData  *HTTPMetadata   // Parsed HTTP metadata (nil if not HTTP)
-	LinkType  layers.LinkType // Link layer type for PCAP writing
+	Timestamp  time.Time
+	SrcIP      string
+	DstIP      string
+	SrcPort    string
+	DstPort    string
+	Protocol   string
+	Length     int
+	Info       string
+	RawData    []byte          // Raw packet bytes for hex dump
+	NodeID     string          // Source node identifier: "Local", hunter_id, or processor_id
+	Interface  string          // Network interface where packet was captured
+	VoIPData   *VoIPMetadata   // Parsed VoIP metadata (nil if not VoIP)
+	RADIUSData *RADIUSMetadata `json:",omitempty"` // Safe RADIUS observation summary
+	DNSData    *DNSMetadata    // Parsed DNS metadata (nil if not DNS)
+	EmailData  *EmailMetadata  // Parsed Email metadata (nil if not email)
+	TLSData    *TLSMetadata    // Parsed TLS metadata (nil if not TLS handshake)
+	HTTPData   *HTTPMetadata   // Parsed HTTP metadata (nil if not HTTP)
+	LinkType   layers.LinkType // Link layer type for PCAP writing
 }
 
 // AccessNetworkInfo contains parsed P-Access-Network-Info header data (3GPP TS 24.229).

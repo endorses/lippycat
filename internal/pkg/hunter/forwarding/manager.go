@@ -16,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
@@ -80,6 +81,8 @@ type PacketBufferProvider interface {
 
 // Config contains forwarding configuration
 type Config struct {
+	RADIUSPorts        []uint16
+	RADIUSScope        radius.CaptureScope
 	HunterID           string
 	BatchSize          int
 	BatchTimeout       time.Duration
@@ -123,7 +126,8 @@ func (t realTicker) Chan() <-chan time.Time        { return t.C }
 
 // Manager handles packet batching and forwarding to processor
 type Manager struct {
-	config Config
+	radiusProcessor *radius.CaptureProcessor
+	config          Config
 
 	// Streaming
 	stream   data.DataService_StreamPacketsClient
@@ -190,6 +194,12 @@ func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBu
 		flowChanged:      make(chan struct{}, 1),
 		slowSendInterval: config.SlowSendInterval,
 		clock:            config.Clock,
+	}
+
+	var radiusErr error
+	m.radiusProcessor, radiusErr = radius.NewCaptureProcessor(captureScope(config), config.RADIUSPorts...)
+	if radiusErr != nil {
+		logger.Error("Failed to initialize RADIUS capture", "error", radiusErr)
 	}
 
 	// Initialize disk overflow buffer if enabled
@@ -325,6 +335,15 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 			// Track matched filter IDs for LI correlation
 			var matchedFilterIDs []string
 
+			if boundary, ok := m.packetBufferProv.(interface{ CaptureBoundary() time.Time }); ok {
+				if err := m.radiusProcessor.AdvanceBoundary(boundary.CaptureBoundary()); err != nil {
+					logger.Error("Failed to reset RADIUS capture epoch", "error", err)
+				}
+			}
+			radiusMatcher, _ := m.applicationFilter.(radius.ObservationMatcher)
+			radiusObservation := m.radiusProcessor.Process(pktInfo.Packet, pktInfo.LinkType, pktInfo.Interface, radiusMatcher)
+			radiusSelected := radiusObservation != nil && (len(radiusObservation.Direct) > 0 || len(radiusObservation.Inherited) > 0)
+
 			// Apply custom packet processor if set (for VoIP buffering, etc.)
 			if m.packetProcessor != nil {
 				forward := m.packetProcessor.ProcessPacket(pktInfo)
@@ -334,7 +353,7 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 						sink.SetRTPAttribution(attribution.OwnershipUnresolved, attribution.OwnershipAmbiguous, attribution.InheritanceSuppressed)
 					}
 				}
-				if !forward {
+				if !forward && !radiusSelected {
 					// Packet was buffered or filtered out by processor
 					continue
 				}
@@ -345,7 +364,7 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				// Fall back to application-layer filter if no custom processor
 				// Use MatchPacketWithIDs to get filter IDs for LI correlation
 				matched, filterIDs := m.applicationFilter.MatchPacketWithIDs(pktInfo.Packet)
-				if !matched {
+				if !matched && !radiusSelected {
 					// Packet didn't match application filter - skip it
 					continue
 				}
@@ -355,6 +374,7 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 			}
 
 			envelope := convertPacket(pktInfo, matchedFilterIDs)
+			envelope.RADIUS = radiusObservation
 			metadata := protocolmeta.Enrich(pktInfo.Packet, nil, m.config.IncludeHTTPHeaders)
 
 			// Add DNS metadata if DNS processor is set
@@ -719,6 +739,7 @@ func (m *Manager) IsPaused() bool {
 
 // Close cleans up resources (disk buffer, etc.)
 func (m *Manager) Close() error {
+	m.radiusProcessor.Close()
 	if m.diskBuffer != nil {
 		return m.diskBuffer.Close()
 	}
@@ -732,4 +753,10 @@ func (m *Manager) GetDiskBufferMetrics() *buffer.DiskBufferMetrics {
 	}
 	metrics := m.diskBuffer.GetMetrics()
 	return &metrics
+}
+
+func captureScope(config Config) radius.CaptureScope {
+	scope := config.RADIUSScope
+	scope.OriginNodeID = config.HunterID
+	return scope
 }

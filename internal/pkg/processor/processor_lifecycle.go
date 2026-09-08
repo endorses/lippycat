@@ -296,6 +296,9 @@ func (p *Processor) Start(ctx context.Context) error {
 // Safe to call multiple times — only the first call performs cleanup.
 func (p *Processor) Shutdown() error {
 	p.shutdownOnce.Do(func() {
+		p.radiusMu.Lock()
+		p.radiusCapture.Close()
+		p.radiusMu.Unlock()
 		logger.Info("Shutting down processor")
 
 		if p.connTracker != nil && p.eventDispatcher != nil {

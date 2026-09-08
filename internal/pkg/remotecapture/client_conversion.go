@@ -16,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -224,21 +225,33 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		}
 	}
 
+	var radiusData *types.RADIUSMetadata
+	if o, err := grpcadapter.RADIUSFromProto(pkt); err == nil && o != nil {
+		radiusData = types.RADIUSMetadataFromObservation(o)
+	} else {
+		packet.Metadata().CaptureInfo = gopacket.CaptureInfo{Timestamp: ts, CaptureLength: int(pkt.CaptureLength), Length: int(pkt.OriginalLength)}
+		radiusData = capture.RADIUSDisplay(capture.PacketInfo{Packet: packet, LinkType: linkType})
+	}
+	if radiusData != nil {
+		protocol, info = "RADIUS", radiusData.Summary()
+	}
+
 	return types.PacketDisplay{
-		Timestamp: ts,
-		SrcIP:     srcIP,
-		SrcPort:   srcPort,
-		DstIP:     dstIP,
-		DstPort:   dstPort,
-		Protocol:  protocol,
-		Length:    int(pkt.CaptureLength),
-		Info:      info,
-		RawData:   pkt.Data,
-		NodeID:    hunterID,  // Set node ID from batch
-		Interface: ifaceName, // Interface where packet was captured
-		VoIPData:  voipData,  // VoIP metadata if applicable
-		DNSData:   dnsData,   // DNS metadata if applicable
-		LinkType:  linkType,  // Link layer type
+		Timestamp:  ts,
+		SrcIP:      srcIP,
+		SrcPort:    srcPort,
+		DstIP:      dstIP,
+		DstPort:    dstPort,
+		Protocol:   protocol,
+		Length:     int(pkt.CaptureLength),
+		Info:       info,
+		RawData:    pkt.Data,
+		NodeID:     hunterID,  // Set node ID from batch
+		Interface:  ifaceName, // Interface where packet was captured
+		VoIPData:   voipData,  // VoIP metadata if applicable
+		RADIUSData: radiusData,
+		DNSData:    dnsData,  // DNS metadata if applicable
+		LinkType:   linkType, // Link layer type
 	}
 }
 

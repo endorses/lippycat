@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 )
 
 func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.CapturedPacket) {
@@ -42,6 +43,11 @@ func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.Captu
 		if err != nil {
 			logger.Warn("Failed to assign protocol event flow identity", "error", err)
 			continue
+		}
+		if observation, radiusErr := grpcadapter.RADIUSFromProto(packet); radiusErr != nil {
+			logger.Debug("Skipping inconsistent RADIUS event provenance", "error", radiusErr)
+		} else if event, ok := events.RADIUSFromObservation(env, observation); ok {
+			p.eventDispatcher.Enqueue(event)
 		}
 		if meta.Dns != nil {
 			dnsEvent := mapDNSEvent(env, meta.Dns)

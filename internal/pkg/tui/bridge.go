@@ -1306,6 +1306,9 @@ func convertEnvelopeFast(env *pipeline.PacketEnvelope, tracker ...*CallTracker) 
 		}
 	}
 
+	if m := capture.RADIUSDisplay(capture.PacketInfo{Packet: pkt, LinkType: env.LinkType, RADIUS: env.RADIUS}); m != nil {
+		display.RADIUSData, display.Protocol, display.Info = m, "RADIUS", m.Summary()
+	}
 	return display
 }
 
@@ -1412,6 +1415,9 @@ func convertEnvelope(env *pipeline.PacketEnvelope, tracker *CallTracker) compone
 		}
 	}
 
+	if m := capture.RADIUSDisplay(capture.PacketInfo{Packet: pkt, LinkType: env.LinkType, RADIUS: env.RADIUS}); m != nil {
+		display.RADIUSData, display.Protocol, display.Info = m, "RADIUS", m.Summary()
+	}
 	return display
 }
 

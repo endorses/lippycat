@@ -32,6 +32,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
@@ -278,6 +279,7 @@ func credibleSIPMethod(method []byte) bool {
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
 type LocalSource struct {
+	radiusProcessor *radius.CaptureProcessor
 	// Configuration
 	config LocalSourceConfig
 
@@ -342,6 +344,8 @@ type LocalSource struct {
 
 // LocalSourceConfig contains configuration for LocalSource.
 type LocalSourceConfig struct {
+	RADIUSPorts []uint16
+	RADIUSScope radius.CaptureScope
 	// Interfaces to capture from (e.g., "eth0", "eth0,eth1")
 	Interfaces []string
 
@@ -407,7 +411,19 @@ func NewLocalSource(cfg LocalSourceConfig) *LocalSource {
 		cfg.CallFilterCacheSize = defaultCallFilterCacheSize
 	}
 
+	scope := cfg.RADIUSScope
+	if scope.OriginNodeID == "" {
+		scope.OriginNodeID = "local"
+		if cfg.ProcessorID != "" {
+			scope.OriginNodeID = cfg.ProcessorID + "-local"
+		}
+	}
+	radiusProcessor, err := radius.NewCaptureProcessor(scope, cfg.RADIUSPorts...)
+	if err != nil {
+		logger.Error("Failed to initialize RADIUS capture", "error", err)
+	}
 	return &LocalSource{
+		radiusProcessor: radiusProcessor,
 		config:          cfg,
 		currentBatch:    make([]*pipeline.PacketEnvelope, 0, cfg.BatchSize),
 		batches:         make(chan *PacketBatch, cfg.BatchBuffer),
@@ -630,6 +646,7 @@ func (s *LocalSource) Start(ctx context.Context) error {
 
 	// Wait for goroutines
 	s.wg.Wait()
+	s.radiusProcessor.Close()
 
 	// Close batches channel
 	close(s.batches)
@@ -902,6 +919,9 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			selectionPolicy := s.selectionPolicy
 			s.mu.Unlock()
 			filterConfigured := filter != nil
+			radiusMatcher, _ := filter.(radius.ObservationMatcher)
+			radiusObservation := s.radiusProcessor.Process(pktInfo.Packet, pktInfo.LinkType, pktInfo.Interface, radiusMatcher)
+			radiusSelected := radiusObservation != nil && (len(radiusObservation.Direct) > 0 || len(radiusObservation.Inherited) > 0)
 
 			// Convert to protobuf format first
 			pbPkt := convertPacketInfo(pktInfo)
@@ -959,7 +979,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				if !reuseVerdict {
 					matched, filterIDs = filter.MatchPacketWithIDs(pktInfo.Packet)
 				}
-				if !matched {
+				if !matched && !radiusSelected {
 					continue
 				}
 				matchedFilterIDs = filterIDs
@@ -1056,6 +1076,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				logger.Error("Failed to normalize local packet", "error", err)
 				continue
 			}
+			envelope.RADIUS = radiusObservation
 			// A packet is forwarded only after it can be admitted to a batch.
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 			s.batchMu.Lock()
@@ -1210,6 +1231,9 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 		return nil
 	}
 
+	if err := s.radiusProcessor.AdvanceBoundary(time.Now()); err != nil {
+		return err
+	}
 	logger.Info("LocalSource updating BPF filter", "new_filter", filter)
 
 	// Update config
@@ -1312,3 +1336,14 @@ func convertPacketInfo(pktInfo capture.PacketInfo) *data.CapturedPacket {
 
 // Ensure LocalSource implements PacketSource.
 var _ PacketSource = (*LocalSource)(nil)
+
+// SupportsRADIUS reports whether observation processing and matching are installed.
+func (s *LocalSource) SupportsRADIUS() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.appFilter.(radius.ObservationMatcher)
+	return s.radiusProcessor != nil && ok
+}
+
+// RADIUSCaptureBPF returns bidirectional service visibility for configured ports.
+func (s *LocalSource) RADIUSCaptureBPF() string { return radius.CaptureBPF(s.config.RADIUSPorts...) }

@@ -17,6 +17,14 @@ func FromCapturedPacket(p *data.CapturedPacket, source pipeline.SourceProvenance
 	}
 	source.InterfaceName, source.InterfaceIndex = p.InterfaceName, p.InterfaceIndex
 	e := &pipeline.PacketEnvelope{Data: append([]byte(nil), p.Data...), LinkType: layers.LinkType(p.LinkType), CaptureTime: time.Unix(0, p.TimestampNs), CaptureLength: int(p.CaptureLength), OriginalLength: int(p.OriginalLength), Source: source, MatchedFilterIDs: append([]string(nil), p.MatchedFilterIds...), DirectMatchedFilterIDs: append([]string(nil), p.DirectMatchedFilterIds...), InheritedMatchedFilterIDs: append([]string(nil), p.InheritedMatchedFilterIds...), TLSKeys: fromTLSKeys(p.TlsKeys)}
+	e.RADIUS, e.RADIUSValidationError = RADIUSFromProto(p)
+	if p.Radius != nil {
+		// RADIUS claims never authorize through the generic SIP/RTP ID path,
+		// including rejected claims that are dropped before the next adapter.
+		e.MatchedFilterIDs = nil
+		e.DirectMatchedFilterIDs = nil
+		e.InheritedMatchedFilterIDs = nil
+	}
 	if p.Metadata != nil {
 		metadata, err := MetadataFromProto(p.Metadata)
 		if err != nil {
@@ -93,6 +101,15 @@ func ToCapturedPacket(e *pipeline.PacketEnvelope) (*data.CapturedPacket, error) 
 		return nil, fmt.Errorf("convert packet envelope: nil envelope")
 	}
 	p := &data.CapturedPacket{Data: append([]byte(nil), e.Data...), TimestampNs: unixNano(e.CaptureTime), CaptureLength: uint32(e.CaptureLength), OriginalLength: uint32(e.OriginalLength), InterfaceIndex: e.Source.InterfaceIndex, LinkType: uint32(e.LinkType), InterfaceName: e.Source.InterfaceName, MatchedFilterIds: append([]string(nil), e.MatchedFilterIDs...), DirectMatchedFilterIds: append([]string(nil), e.DirectMatchedFilterIDs...), InheritedMatchedFilterIds: append([]string(nil), e.InheritedMatchedFilterIDs...), TlsKeys: toTLSKeys(e.TLSKeys)} // #nosec G115 -- pcap lengths and link type are wire fields
+	if e.RADIUS != nil {
+		if !e.RADIUS.Capture.Timestamp.Equal(e.CaptureTime) || e.RADIUS.Capture.LinkType != e.LinkType || e.RADIUS.Capture.CapturedLength != e.CaptureLength || e.RADIUS.Capture.OriginalLength != e.OriginalLength {
+			return nil, fmt.Errorf("RADIUS capture metadata differs from packet envelope")
+		}
+		p.Radius = RADIUSToProto(e.RADIUS)
+		if _, err := RADIUSFromProto(p); err != nil {
+			return nil, fmt.Errorf("encode RADIUS provenance: %w", err)
+		}
+	}
 	if e.Metadata != nil {
 		if e.Metadata.Encoding != pipeline.MetadataProtobuf {
 			return nil, fmt.Errorf("convert metadata: unsupported encoding %d", e.Metadata.Encoding)

@@ -91,6 +91,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		p.enricher.Enrich(packets)
 	}
 
+	p.normalizeRADIUS(sourceID, packets)
+
 	p.trackConnections(sourceID, packets)
 
 	// Normalize protocol metadata after enrichment and before forwarding/broadcasting.
@@ -360,6 +362,10 @@ func refreshEnvelopes(batch *source.PacketBatch, packets []*data.CapturedPacket)
 		if err != nil {
 			return fmt.Errorf("normalize projected packet %d: %w", i, err)
 		}
+		current.RADIUS, current.RADIUSValidationError = normalized.RADIUS, normalized.RADIUSValidationError
+		current.MatchedFilterIDs = normalized.MatchedFilterIDs
+		current.DirectMatchedFilterIDs = normalized.DirectMatchedFilterIDs
+		current.InheritedMatchedFilterIDs = normalized.InheritedMatchedFilterIDs
 		current.Metadata = normalized.Metadata
 		current.TLSKeys = normalized.TLSKeys
 		current.Stages = current.Stages.With(pipeline.StageAnalyzed)

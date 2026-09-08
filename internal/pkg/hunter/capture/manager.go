@@ -6,17 +6,22 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 )
 
 // Manager handles packet capture lifecycle
 type Manager struct {
+	radiusPorts    []uint16
+	radiusBoundary atomic.Int64
 	// Configuration
 	interfaces    []string
 	baseFilter    string
@@ -35,6 +40,7 @@ type Manager struct {
 
 // Config contains capture manager configuration
 type Config struct {
+	RADIUSPorts   []uint16
 	Interfaces    []string // Network interfaces to capture on
 	BaseFilter    string   // Base BPF filter
 	BufferSize    int      // Packet buffer size
@@ -44,6 +50,7 @@ type Config struct {
 // New creates a new capture manager
 func New(config Config, mainCtx context.Context) *Manager {
 	return &Manager{
+		radiusPorts:   append([]uint16(nil), config.RADIUSPorts...),
 		interfaces:    config.Interfaces,
 		baseFilter:    config.BaseFilter,
 		bufferSize:    config.BufferSize,
@@ -108,6 +115,7 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 
 // Restart stops and restarts packet capture with updated filters
 func (m *Manager) Restart(dynamicFilters []*management.Filter) error {
+	m.radiusBoundary.Store(time.Now().UnixNano())
 	logger.Info("Restarting packet capture to apply filter changes")
 
 	// Save references to old capture state BEFORE Start() overwrites them
@@ -173,11 +181,16 @@ func (m *Manager) buildProcessorPortExclusionFilter() string {
 // buildCombinedBPFFilter builds a combined BPF filter from config and dynamic filters
 func (m *Manager) buildCombinedBPFFilter(filters []*management.Filter) string {
 	var dynamicFilters []string
+	hasRADIUS := false
 
 	// Collect dynamic BPF filters (only enabled ones)
 	for _, filter := range filters {
 		if !filter.Enabled {
 			continue
+		}
+
+		if sharedfilter.IsRADIUSFilter(filter.Type) {
+			hasRADIUS = true
 		}
 
 		// Only BPF type filters are applied directly
@@ -233,5 +246,19 @@ func (m *Manager) buildCombinedBPFFilter(filters []*management.Filter) string {
 		}
 	}
 
+	if hasRADIUS && finalFilter != "" {
+		// Preserve both directions and all competing requests, including configured
+		// service ports. Exact RADIUS selection happens only after correlation.
+		finalFilter = fmt.Sprintf("(%s) or %s", finalFilter, radius.CaptureBPF(m.radiusPorts...))
+	}
 	return finalFilter
+}
+
+// CaptureBoundary distinguishes queued packets from a previous capture configuration.
+func (m *Manager) CaptureBoundary() time.Time {
+	n := m.radiusBoundary.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
 }

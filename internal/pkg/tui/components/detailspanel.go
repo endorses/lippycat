@@ -316,6 +316,16 @@ func (d *DetailsPanel) renderContent() string {
 	}
 
 	// DNS Details Section (only for DNS packets)
+	if m := d.packet.RADIUSData; m != nil {
+		content.WriteString("\nRADIUS\n")
+		content.WriteString(valueStyle.Render(m.Summary()))
+		content.WriteString("\n")
+		for _, attribute := range m.Attributes {
+			content.WriteString(valueStyle.Render(attribute))
+			content.WriteString("\n")
+		}
+	}
+
 	if d.packet.DNSData != nil {
 		content.WriteString("\n\n")
 		content.WriteString(sectionStyle.Render("🔍 DNS Details"))

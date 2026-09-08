@@ -22,6 +22,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logstream"
 	logrecords "github.com/endorses/lippycat/internal/pkg/logstream/records"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -34,6 +35,7 @@ func registerStructuredLogFlags(cmd *cobra.Command) {
 }
 
 type sniffLogSession struct {
+	radius         *radius.CaptureProcessor
 	dispatcher     *events.Dispatcher
 	identity       *flowid.Cache
 	connections    *conntrack.Tracker
@@ -56,6 +58,7 @@ func withStructuredLogs(run func()) {
 	restore := capture.SetPacketObserver(s.observe)
 	defer restore()
 	defer func() {
+		s.radius.Close()
 		for _, ev := range s.connections.Close() {
 			s.dispatcher.Enqueue(ev)
 		}
@@ -89,7 +92,8 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 		kind  events.Kind
 		build logstream.Builder
 	}{
-		"dns": {events.KindDNS, logrecords.DNS}, "ssl": {events.KindTLS, logrecords.SSL},
+		"radius": {events.KindRADIUS, logrecords.RADIUS},
+		"dns":    {events.KindDNS, logrecords.DNS}, "ssl": {events.KindTLS, logrecords.SSL},
 		"http": {events.KindHTTP, logrecords.HTTP}, "smtp": {events.KindSMTP, logrecords.SMTP},
 		"conn":  {events.KindConn, logrecords.Conn},
 		"files": {events.KindFileMetadata, logrecords.Files},
@@ -107,7 +111,7 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := d.Register(coalescedLogs, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
+	if err := d.Register(coalescedLogs, events.KindRADIUS, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
 		return nil, err
 	}
 	identity, err := flowid.NewCache(flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute})
@@ -122,6 +126,10 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	radiusCapture, err := radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "local"})
+	if err != nil {
+		return nil, err
+	}
 	if err := sink.Start(context.Background()); err != nil {
 		return nil, err
 	}
@@ -129,10 +137,10 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 		_ = sink.Close(context.Background())
 		return nil, err
 	}
-	return &sniffLogSession{dispatcher: d, identity: identity, connections: connections, dns: dnsparser.NewParser(), includeHeaders: viper.GetBool("logs.include_http_headers"), files: files}, nil
+	return &sniffLogSession{radius: radiusCapture, dispatcher: d, identity: identity, connections: connections, dns: dnsparser.NewParser(), includeHeaders: viper.GetBool("logs.include_http_headers"), files: files}, nil
 }
 
-func (s *sniffLogSession) observe(info capture.PacketInfo) {
+func (s *sniffLogSession) observe(info *capture.PacketInfo) {
 	pkt := info.Packet
 	if pkt == nil {
 		return
@@ -149,6 +157,16 @@ func (s *sniffLogSession) observe(info capture.PacketInfo) {
 	env, err := s.identity.Enrich(events.Envelope{Timestamp: ts, NodeID: "local", Flow: flow, CaptureScope: events.CaptureScopeFull})
 	if err != nil {
 		return
+	}
+	if s.radius != nil {
+		observation := info.RADIUS
+		if observation == nil {
+			observation = s.radius.Process(pkt, info.LinkType, info.Interface, nil)
+			info.RADIUS = observation
+		}
+		if event, ok := events.RADIUSFromObservation(env, observation); ok {
+			s.dispatcher.Enqueue(event)
+		}
 	}
 	for _, ev := range observeConnection(s.connections, conntrack.FromPacket(pkt, env, meta.Protocol)) {
 		s.dispatcher.Enqueue(ev)

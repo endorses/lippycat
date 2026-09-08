@@ -8,14 +8,14 @@ schema version.
 
 ## Streams and compatibility
 
-| Stream | File | Compatibility |
-|---|---|---|
-| `conn` | `conn.log` | Zeek `Conn::Info` fields followed by lippycat extensions |
-| `dns` | `dns.log` | Zeek `DNS::Info` fields followed by lippycat extensions |
-| `ssl` | `ssl.log` | Zeek `SSL::Info` fields, common JA3 fields, then lippycat extensions |
-| `http` | `http.log` | Zeek `HTTP::Info` fields followed by lippycat extensions |
-| `smtp` | `smtp.log` | Zeek `SMTP::Info` fields followed by lippycat extensions |
-| `files` | `files.log` | Zeek `Files::Info` fields followed by lippycat extensions |
+| Stream  | File        | Compatibility                                                        |
+| ------- | ----------- | -------------------------------------------------------------------- |
+| `conn`  | `conn.log`  | Zeek `Conn::Info` fields followed by lippycat extensions             |
+| `dns`   | `dns.log`   | Zeek `DNS::Info` fields followed by lippycat extensions              |
+| `ssl`   | `ssl.log`   | Zeek `SSL::Info` fields, common JA3 fields, then lippycat extensions |
+| `http`  | `http.log`  | Zeek `HTTP::Info` fields followed by lippycat extensions             |
+| `smtp`  | `smtp.log`  | Zeek `SMTP::Info` fields followed by lippycat extensions             |
+| `files` | `files.log` | Zeek `Files::Info` fields followed by lippycat extensions            |
 
 “Zeek-compatible” means the field has the same name, Zeek TSV type, and
 meaning. It does not promise that lippycat observes every value Zeek would.
@@ -48,15 +48,15 @@ them for all event kinds so future schemas can expose them without inference.
 
 Every event has this envelope:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `timestamp` | timestamp | UTC observation time; packet time for replay |
-| `uid` | string | `C` plus 17 base62 characters, stable for the observed flow |
-| `community_id` | string | Community ID v1 for the normalized flow |
-| `node_id` | string | originating capture source (`batch.SourceID`) |
-| `flow` | `FlowTuple` | IP protocol, source/destination addresses and ports; ICMP type/code occupy the port slots for identity purposes |
-| `partial` | bool | incomplete-visibility indicator defined above |
-| `capture_scope` | enum | `full` or `filtered` |
+| Field           | Type        | Meaning                                                                                                         |
+| --------------- | ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `timestamp`     | timestamp   | UTC observation time; packet time for replay                                                                    |
+| `uid`           | string      | `C` plus 17 base62 characters, stable for the observed flow                                                     |
+| `community_id`  | string      | Community ID v1 for the normalized flow                                                                         |
+| `node_id`       | string      | originating capture source (`batch.SourceID`)                                                                   |
+| `flow`          | `FlowTuple` | IP protocol, source/destination addresses and ports; ICMP type/code occupy the port slots for identity purposes |
+| `partial`       | bool        | incomplete-visibility indicator defined above                                                                   |
+| `capture_scope` | enum        | `full` or `filtered`                                                                                            |
 
 The closed v1 event-kind set is `dns`, `smtp`, `tls`, `http`, `conn`,
 `file_metadata`, and `file_content`. The corresponding concrete types are
@@ -115,3 +115,34 @@ packets are excluded. File/TSV/JSON configuration has no effect on authorization
   object per stream, including explicit nulls for unset data.
 - `go test ./internal/pkg/logschema` verifies stream/file names, field order,
   types, fixture coverage, and duplicate fields.
+
+## RADIUS observation stream (v1 additive extension)
+
+`radius.log` is a lippycat observation schema, not Zeek RADIUS compatibility.
+The new stream leaves all existing v1 field orders and meanings unchanged.
+Every valid message produces its own record; responses are not coalesced with
+requests. Endpoints retain observed packet direction. The numeric `identifier`
+is the eight-bit wire value, while `observation_id` and `request_instance_id`
+are opaque capture-epoch/sequence identities. Missing request identity is unset.
+`association` reports the shared correlator status, including `request`, `unique`,
+`missing`, `ambiguous`, `expired`, `incompatible`, and `capacity_suppressed`.
+Association is observational and does not authenticate a message.
+
+`attributes` is an ordered vector of allowlisted instances. Ordinary attributes
+use `TYPE:hex:VALUE`; DSL Forum Agent-Circuit-Id uses `26/3561/1:hex:VALUE`.
+Hex is lowercase, preserves arbitrary bytes and empty values, and prevents
+terminal/control-character injection. Repeated attributes remain separate and
+in wire order. The allowlist is User-Name (1), NAS-IP-Address (4), NAS-Port (5),
+Service-Type (6), Framed-IP-Address (8), Called-Station-Id (30),
+Calling-Station-Id (31), NAS-Identifier (32), Acct-Status-Type (40),
+Acct-Session-Id (44), NAS-Port-Type (61), NAS-Port-Id (87), NAS-IPv6-Address (95),
+and vendor 3561/type 1. These values can contain subscriber identities.
+Password/CHAP/EAP attributes, State/Class, authenticators, other vendor data,
+and unknown attributes are omitted. Filter/task evidence is also omitted.
+Routine display and text/JSON summaries use the same allowlist.
+Explicit packet sinks preserve captured bytes, including omitted attributes;
+this presentation policy never rewrites packet data.
+
+`origin_node_id`, `source_id`, and `capture_epoch` retain capture provenance;
+`node_id` follows the existing event envelope convention. Relayed provenance is
+validated against captured bytes but remains a claim, not LI authorization.

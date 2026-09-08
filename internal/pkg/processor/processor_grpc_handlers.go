@@ -671,7 +671,7 @@ func (p *Processor) SubscribeTopology(req *management.TopologySubscribeRequest, 
 }
 
 // validateLocalRADIUSFilter checks local capability before committing any filter
-// state. Local tap ingress cannot enforce RADIUS criteria yet.
+// state. Both local capture ingress and matching must be available.
 func (p *Processor) validateLocalRADIUSFilter(filter *management.Filter) error {
 	if filter == nil || !sharedfilter.IsRADIUSFilter(filter.Type) {
 		return nil

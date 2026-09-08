@@ -805,14 +805,13 @@ func (p *Processor) startLIManager() (err error) {
 
 	// Bridge existing destinations from LI Manager registry to delivery manager
 	if liDeliveryMgr != nil {
-		dests := p.liManager.ListDestinations()
-		for _, dest := range dests {
+		if err := p.liManager.VisitDestinations(func(dest *li.Destination) error {
 			if liDeliveryClient != nil {
 				if err := liDeliveryClient.ReserveDestination(dest.DID); err != nil {
 					return fmt.Errorf("reserve LI delivery destination %s: %w", dest.DID, err)
 				}
 			}
-			if err := liDeliveryMgr.AddDestination(dest); err != nil {
+			if err := liDeliveryMgr.AddDestination(dest); err != nil && !errors.Is(err, delivery.ErrDestinationExists) {
 				logger.Warn("Failed to add delivery destination",
 					"did", dest.DID,
 					"address", dest.Address,
@@ -826,6 +825,9 @@ func (p *Processor) startLIManager() (err error) {
 					"port", dest.Port,
 				)
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 

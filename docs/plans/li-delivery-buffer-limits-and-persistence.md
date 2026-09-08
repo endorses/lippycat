@@ -366,3 +366,45 @@ Changed Go sources were formatted with gofmt and the plan with Prettier.
 Performance benchmarks were not rerun because this audit targets concurrency
 correctness. These tests establish the covered behavior, not proof of the absence
 of all defects.
+
+## Third implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/reorder ownership, journal recovery, and
+configuration/lifecycle integration. Parent review and independent cross-review
+confirmed and corrected four additional defects:
+
+- [x] Preserve committed RTP callback order across concurrent arrivals, timer
+      flushes, cleanup and shutdown. Reserve callback order under the reorder
+      lock, then release producer admission before waiting outside that lock.
+      Independent destination buffers remain independent, and pending callbacks
+      retain their memory charges.
+- [x] Repair sequence checkpoints and the record-ID watermark from recovered X2
+      before replay or purge can remove the surviving product. A crash after
+      product sync but before checkpoint sync can no longer cause sequence or ID
+      reuse after purge and another restart. Recovery respects the journal budget
+      and preserves product and releases its lock when repair cannot fit.
+- [x] Serialize the startup destination bridge with destination mutations and
+      delivery callbacks, preventing a concurrent removal from being undone by
+      installation of a stale startup snapshot.
+- [x] Return copied destination definitions from manager listings so callers
+      cannot change endpoint fields outside lifecycle generation tracking.
+
+New regressions fail with source overlays restoring the original behavior.
+Agents cross-reviewed one another's changes, and the parent independently passed
+all new regressions for 30 race-enabled iterations and the full validation matrix:
+
+```text
+go test -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li/delivery ./internal/pkg/li -run 'TestReorderCallbacksPreserveCommittedOrder|TestJournalRecoveryRepairsCheckpointsBeforePurge|TestDestinationStartupVisitSerializedWithRemoval|TestListDestinationsReturnsCopies' -count=30 -timeout 60s
+go test -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -tags 'processor li' -o /tmp/li-third-audit-processor .
+go build -tags 'tap li' -o /tmp/li-third-audit-tap .
+go build -tags all -o /tmp/li-third-audit-all .
+git diff --check
+```
+
+Socket-backed tests and builds needing module-cache writes used sandbox escalation.
+Changed Go sources were formatted with gofmt and this plan with Prettier before
+staging. Performance measurements were not rerun during this correctness audit.
+No confirmed findings remain open; the checks cover the tested behavior and do
+not establish the absence of every possible defect.

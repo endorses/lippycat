@@ -244,8 +244,58 @@ func OpenJournal(cfg JournalConfig) (*Journal, error) {
 	if j.stats.Bytes > cfg.MaxBytes-j.faultReserve || len(j.entries) > cfg.MaxRecords || len(j.sequences) > cfg.MaxRecords {
 		return fail(fmt.Errorf("recovered journal exceeds configured capacity"))
 	}
+	if err := j.repairRecoveredCheckpoints(); err != nil {
+		return fail(fmt.Errorf("repair recovered journal checkpoints: %w", err))
+	}
 	go j.run()
 	return j, nil
+}
+
+// A crash may leave a durable product without its sequence checkpoint or ID
+// watermark. Repair both before callers can purge or deliver that last evidence.
+// Otherwise another restart could reuse an already observed sequence or record ID.
+func (j *Journal) repairRecoveredCheckpoints() error {
+	ids := make([]uint64, 0, len(j.entries))
+	for id := range j.entries {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(a, b int) bool { return ids[a] < ids[b] })
+	if j.cfg.PreserveSequences {
+		for _, id := range ids {
+			data, err := os.ReadFile(j.path(id))
+			if err != nil {
+				return err
+			}
+			rec, err := j.decode(data)
+			if err != nil {
+				return err
+			}
+			seq, err := j.prepareSequence(rec.Data)
+			if err != nil {
+				return err
+			}
+			if seq == nil {
+				continue
+			}
+			size := j.diskSize(int64(len(seq.data)))
+			if size-seq.oldSize > j.cfg.MaxBytes-j.faultReserve-j.stats.Bytes {
+				return ErrJournalFull
+			}
+			if err := j.writeFile(filepath.Join(j.cfg.Dir, seq.key+".seq"), seq.data); err != nil {
+				return err
+			}
+			j.sequences[seq.key] = journalSequenceEntry{size: size, next: seq.checkpoint.Next}
+			j.stats.Bytes += size - seq.oldSize
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	state, err := j.encode(JournalRecord{ID: j.next})
+	if err != nil {
+		return err
+	}
+	return j.writeFile(filepath.Join(j.cfg.Dir, ".state"), state)
 }
 func checkJournalMode(path string, dir bool) error {
 	st, err := os.Lstat(path)

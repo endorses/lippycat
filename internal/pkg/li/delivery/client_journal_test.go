@@ -74,7 +74,7 @@ func TestJournalManifestRequiresIdentityAndCurrentAuthorization(t *testing.T) {
 	did, xid := uuid.New(), uuid.New()
 	dest := &li.Destination{DID: did, ProtocolType: "X2", CreatedAt: time.Now()}
 	gen := li.DestinationDeliveryGeneration(dest)
-	id := journalAdmit(t, j, JournalRecord{DID: did, XID: xid, TaskGeneration: 7, DestinationGeneration: gen, Data: []byte("original"), AdmittedAt: time.Now()})
+	id := journalAdmit(t, j, JournalRecord{DID: did, XID: xid, TaskGeneration: 7, DestinationGeneration: gen, Data: journalSequencePDU(t, xid, 0), AdmittedAt: time.Now()})
 	require.NoError(t, j.Close())
 	config := DefaultClientConfig()
 	config.X2SpoolDir = cfg.Dir
@@ -113,7 +113,8 @@ func TestJournalHeldBlocksLiveAndPurgeAccountsOnce(t *testing.T) {
 	j, err := OpenJournal(cfg)
 	require.NoError(t, err)
 	did := uuid.New()
-	journalAdmit(t, j, JournalRecord{DID: did, XID: uuid.New(), Data: []byte("old")})
+	xid := uuid.New()
+	journalAdmit(t, j, JournalRecord{DID: did, XID: xid, Data: journalSequencePDU(t, xid, 0)})
 	require.NoError(t, j.Close())
 	config := DefaultClientConfig()
 	config.X2SpoolDir = cfg.Dir
@@ -136,8 +137,12 @@ func TestJournalStartupPurgeDoesNotReserveHistoricalDestinations(t *testing.T) {
 	cfg := journalTestConfig(t)
 	j, err := OpenJournal(cfg)
 	require.NoError(t, err)
+	var bytes uint64
 	for range 3 {
-		journalAdmit(t, j, JournalRecord{DID: uuid.New(), XID: uuid.New(), Data: []byte("old")})
+		xid := uuid.New()
+		data := journalSequencePDU(t, xid, 0)
+		bytes += uint64(len(data))
+		journalAdmit(t, j, JournalRecord{DID: uuid.New(), XID: xid, Data: data})
 	}
 	require.NoError(t, j.Close())
 	config := DefaultClientConfig()
@@ -150,7 +155,7 @@ func TestJournalStartupPurgeDoesNotReserveHistoricalDestinations(t *testing.T) {
 	defer c.Stop()
 	require.Zero(t, c.JournalStats().Held)
 	require.Equal(t, uint64(3), c.Stats().X2Dropped)
-	require.Equal(t, uint64(9), c.Stats().DroppedBytes)
+	require.Equal(t, bytes, c.Stats().DroppedBytes)
 	c.queuesMu.RLock()
 	queues := len(c.queues)
 	c.queuesMu.RUnlock()

@@ -98,3 +98,50 @@ func TestReorderRejectsPreviousTimerOnSameStream(t *testing.T) {
 	require.Same(t, newTimer, s.timer)
 	require.Equal(t, []byte{1, 2, 3}, delivered)
 }
+
+func TestReorderCallbacksPreserveCommittedOrder(t *testing.T) {
+	out := make(chan byte, 3)
+	rb := NewCallAwareReorderBuffer(func(entry ReorderEntry) { out <- entry.PDU[0] }, time.Hour)
+	defer func() { rb.Stop(); rb.Wait() }()
+	firstCommitted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		rb.DeliverCallX3AfterCommit("call", 1, 9, 1, []byte{1}, func() {
+			close(firstCommitted)
+			<-releaseFirst
+		})
+	}()
+	<-firstCommitted
+	secondCommitted := make(chan struct{})
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		rb.DeliverCallX3AfterCommit("call", 1, 9, 2, []byte{2}, func() { close(secondCommitted) })
+	}()
+	<-secondCommitted
+	// The second admission must be released before waiting on the first
+	// callback; lifecycle callbacks may need that admission barrier.
+	select {
+	case value := <-out:
+		close(releaseFirst)
+		<-firstDone
+		<-secondDone
+		t.Fatalf("later committed callback overtook first packet: %d", value)
+	case <-time.After(20 * time.Millisecond):
+	}
+	// Processor destinations own separate reorder buffers. A blocked callback
+	// at one MDF must not delay another MDF's local delivery admission.
+	otherOutput := make(chan byte, 1)
+	other := NewCallAwareReorderBuffer(func(entry ReorderEntry) { otherOutput <- entry.PDU[0] }, time.Hour)
+	other.DeliverCallX3("call", 1, 9, 7, []byte{7})
+	require.Equal(t, byte(7), <-otherOutput)
+	other.Stop()
+	other.Wait()
+	close(releaseFirst)
+	<-firstDone
+	<-secondDone
+	require.Equal(t, byte(1), <-out)
+	require.Equal(t, byte(2), <-out)
+}

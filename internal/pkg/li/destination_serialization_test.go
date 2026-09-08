@@ -80,3 +80,67 @@ func TestDestinationUpdatesSerializeDeliveryCallbacks(t *testing.T) {
 		})
 	}
 }
+
+func TestDestinationStartupVisitSerializedWithRemoval(t *testing.T) {
+	m := NewManager(ManagerConfig{Enabled: true}, nil)
+	did := uuid.New()
+	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "initial", Port: 443}))
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	var mu sync.Mutex
+	installed := false
+	m.SetDestinationRemovedCallback(func(uuid.UUID) {
+		mu.Lock()
+		installed = false
+		mu.Unlock()
+	})
+	visited := make(chan error, 1)
+	go func() {
+		visited <- m.VisitDestinations(func(dest *Destination) error {
+			close(entered)
+			<-release
+			mu.Lock()
+			installed = true
+			mu.Unlock()
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("startup visitor did not start")
+	}
+	removed := make(chan error, 1)
+	go func() { removed <- m.RemoveDestination(did) }()
+	var early bool
+	select {
+	case err := <-removed:
+		require.NoError(t, err)
+		early = true
+	case <-time.After(30 * time.Millisecond):
+	}
+	unblock()
+	require.NoError(t, <-visited)
+	if !early {
+		require.NoError(t, <-removed)
+	}
+	mu.Lock()
+	actual := installed
+	mu.Unlock()
+	require.False(t, actual, "startup must not resurrect a removed destination")
+	require.False(t, early, "removal must wait for the startup visitor")
+}
+
+func TestListDestinationsReturnsCopies(t *testing.T) {
+	m := NewManager(ManagerConfig{Enabled: true}, nil)
+	did := uuid.New()
+	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "initial", Port: 443}))
+	snapshot := m.ListDestinations()
+	require.Len(t, snapshot, 1)
+	snapshot[0].Address = "changed"
+	current, err := m.GetDestination(did)
+	require.NoError(t, err)
+	require.Equal(t, "initial", current.Address, "snapshots must not permit mutation outside the generation boundary")
+}

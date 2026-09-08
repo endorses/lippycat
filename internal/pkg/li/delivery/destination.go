@@ -922,9 +922,9 @@ func (m *Manager) InvalidateConnection(did uuid.UUID, conn *tls.Conn) {
 func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectDestination bool) {
 	m.mu.RLock()
 	state, exists := m.destinations[did]
-	m.mu.RUnlock()
 
 	if !exists {
+		m.mu.RUnlock()
 		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing invalidated connection", "error", err)
 		}
@@ -934,6 +934,7 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 	state.mu.Lock()
 	if _, exists := state.connections[conn]; !exists {
 		state.mu.Unlock()
+		m.mu.RUnlock()
 		return
 	}
 	value, runtimeOK := m.connectionRuntime.Load(conn)
@@ -941,6 +942,9 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 	m.connectionRuntime.Delete(conn)
 	state.stats.Disconnects++
 	remaining := len(state.connections)
+	// Resolve aggregate state while connection membership is still locked.
+	// A new publication must not be marked disconnected by this older removal.
+	reconnect := remaining == 0 && atomic.CompareAndSwapInt32(&state.state, connStateConnected, connStateDisconnected) && reconnectDestination
 	pool := state.pool
 	if runtimeOK {
 		runtime := value.(*connectionRuntime)
@@ -954,6 +958,7 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 		}
 	}
 	state.mu.Unlock()
+	m.mu.RUnlock()
 	pool.remove(conn)
 
 	if err := conn.NetConn().Close(); err != nil {
@@ -961,7 +966,7 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 	}
 
 	// Check if we need to reconnect.
-	if remaining == 0 && atomic.CompareAndSwapInt32(&state.state, connStateConnected, connStateDisconnected) && reconnectDestination {
+	if reconnect {
 		m.scheduleReconnect(did, state)
 	}
 }
@@ -1098,10 +1103,18 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 			m.mu.RUnlock()
 			return
 		}
-		atomic.StoreInt32(&state.state, connStateDisconnected)
-
 		state.mu.Lock()
 		state.stats.ConnectFailures++
+		state.mu.Unlock()
+		// A foreground dial may have published a healthy association while
+		// this background handshake was pending. Its connected state wins;
+		// this obsolete failure must not overwrite it or start another retry.
+		if !atomic.CompareAndSwapInt32(&state.state, connStateConnecting, connStateDisconnected) {
+			m.mu.RUnlock()
+			return
+		}
+
+		state.mu.Lock()
 		state.lastError = err
 		state.failuresSinceLog++
 		failures := state.failuresSinceLog

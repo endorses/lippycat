@@ -15,13 +15,19 @@ import (
 )
 
 var (
-	setFilterID          string
-	setFilterType        string
-	setFilterPattern     string
-	setFilterDescription string
-	setFilterEnabled     bool
-	setFilterHunters     []string
-	setFilterFile        string
+	setFilterID              string
+	setFilterType            string
+	setFilterPattern         string
+	setFilterDescription     string
+	setFilterEnabled         bool
+	setFilterHunters         []string
+	setFilterFile            string
+	setFilterRevision        uint64
+	setRadiusMACProfile      string
+	setRadiusOperatorScope   string
+	setRadiusProfileRevision string
+	setRadiusOriginNode      string
+	setRadiusSource          string
 )
 
 // SetFilterResult represents the result of a set operation
@@ -76,6 +82,12 @@ Filter types:
     http_host     - Match HTTP Host header (glob patterns)
     http_url      - Match HTTP URL path (glob patterns)
 
+  RADIUS (exact, case-sensitive):
+    radius_username  - Complete UTF-8 User-Name
+    radius_mac       - Subscriber Calling-Station-Id; requires --radius-mac-profile
+    radius_attribute - One complete hex AVP (User-Name, NAS-Port-Id, Agent-Circuit-Id)
+    radius_compound  - Scoped conjunction, configured using --file
+
   Universal:
     ip_address    - Match IP address or CIDR
     bpf           - Raw BPF filter expression
@@ -112,6 +124,12 @@ func init() {
 	SetFilterCmd.Flags().StringVar(&setFilterDescription, "description", "", "Filter description")
 	SetFilterCmd.Flags().BoolVar(&setFilterEnabled, "enabled", true, "Enable the filter")
 	SetFilterCmd.Flags().StringSliceVar(&setFilterHunters, "hunters", nil, "Target hunter IDs (comma-separated)")
+	SetFilterCmd.Flags().Uint64Var(&setFilterRevision, "revision", 1, "RADIUS filter revision (increment on changes)")
+	SetFilterCmd.Flags().StringVar(&setRadiusMACProfile, "radius-mac-profile", "", "Subscriber MAC interpretation profile")
+	SetFilterCmd.Flags().StringVar(&setRadiusOperatorScope, "radius-operator-scope", "", "Dedicated operator/NAS deployment scope")
+	SetFilterCmd.Flags().StringVar(&setRadiusProfileRevision, "radius-profile-revision", "", "Deployment profile revision")
+	SetFilterCmd.Flags().StringVar(&setRadiusOriginNode, "radius-origin-node", "", "Restrict scope to origin node")
+	SetFilterCmd.Flags().StringVar(&setRadiusSource, "radius-source", "", "Restrict scope to capture source")
 	SetFilterCmd.Flags().StringVarP(&setFilterFile, "file", "f", "", "YAML file containing filters (batch mode)")
 }
 
@@ -140,9 +158,11 @@ func runSetFilter(cmd *cobra.Command, args []string) {
 	}
 
 	// Validate pattern for the filter type
-	if err := filtering.ValidatePattern(filterType, setFilterPattern); err != nil {
-		OutputError(err, ExitValidationError)
-		return
+	if !filtering.IsRADIUSFilterType(filterType) {
+		if err := filtering.ValidatePattern(filterType, setFilterPattern); err != nil {
+			OutputError(err, ExitValidationError)
+			return
+		}
 	}
 
 	// Generate ID if not provided
@@ -159,6 +179,20 @@ func runSetFilter(cmd *cobra.Command, args []string) {
 		Description:   setFilterDescription,
 		Enabled:       setFilterEnabled,
 		TargetHunters: setFilterHunters,
+	}
+
+	if filtering.IsRADIUSFilterType(filter.Type) {
+		filter.Revision = setFilterRevision
+	}
+	if setRadiusMACProfile != "" || setRadiusOperatorScope != "" || setRadiusProfileRevision != "" || setRadiusOriginNode != "" || setRadiusSource != "" {
+		filter.Radius = &management.RadiusFilterCriteria{MacProfile: setRadiusMACProfile}
+		if setRadiusOperatorScope != "" || setRadiusProfileRevision != "" || setRadiusOriginNode != "" || setRadiusSource != "" {
+			filter.Radius.Scope = &management.RadiusScopeBinding{OperatorScope: setRadiusOperatorScope, ProfileRevision: setRadiusProfileRevision, OriginNodeId: setRadiusOriginNode, SourceId: setRadiusSource}
+		}
+	}
+	if err := filtering.ValidateFilter(filter); err != nil {
+		OutputError(err, ExitValidationError)
+		return
 	}
 
 	// Connect and set

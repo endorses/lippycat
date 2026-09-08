@@ -33,7 +33,7 @@ func ValidateFilterYAML(filter *FilterYAML) error {
 	if filter.ID == "" {
 		return &ValidationError{Field: "id", Message: "filter ID is required"}
 	}
-	if filter.Pattern == "" {
+	if filter.Pattern == "" && filter.Type != "radius_compound" && filter.Type != "FILTER_RADIUS_COMPOUND" {
 		return &ValidationError{Field: "pattern", Message: "filter pattern is required"}
 	}
 	if filter.Type == "" {
@@ -47,6 +47,16 @@ func ValidateFilterYAML(filter *FilterYAML) error {
 
 // ValidateFilter validates a protobuf Filter structure
 func ValidateFilter(filter *management.Filter) error {
+	if filter == nil {
+		return &ValidationError{Field: "filter", Message: "filter is required"}
+	}
+	if IsRADIUSFilter(filter.Type) {
+		_, _, err := CompileRADIUSFilter(filter)
+		return err
+	}
+	if filter.Radius != nil {
+		return &ValidationError{Field: "radius", Message: "RADIUS criteria require a RADIUS filter type"}
+	}
 	if filter.Id == "" {
 		return &ValidationError{Field: "id", Message: "filter ID is required"}
 	}
@@ -78,6 +88,11 @@ func ValidatePattern(filterType management.FilterType, pattern string) error {
 	}
 
 	switch filterType {
+	case management.FilterType_FILTER_RADIUS_USERNAME:
+		_, _, err := CompileRADIUSFilter(&management.Filter{Id: "validation", Revision: 1, Type: filterType, Pattern: pattern})
+		return err
+	case management.FilterType_FILTER_RADIUS_MAC, management.FilterType_FILTER_RADIUS_ATTRIBUTE, management.FilterType_FILTER_RADIUS_COMPOUND:
+		return &ValidationError{Field: "radius", Message: "structured RADIUS validation required"}
 	case management.FilterType_FILTER_TLS_JA3:
 		return ValidateJA3Pattern(pattern)
 	case management.FilterType_FILTER_TLS_JA3S:

@@ -73,7 +73,8 @@ func (t *HunterTarget) SupportsFilterType(filterType management.FilterType) bool
 	// Individual hunter capabilities are checked by the Manager when distributing.
 	// This allows centralized filter management with per-hunter capability filtering.
 	switch filterType {
-	case management.FilterType_FILTER_BPF,
+	case management.FilterType_FILTER_RADIUS_USERNAME, management.FilterType_FILTER_RADIUS_MAC, management.FilterType_FILTER_RADIUS_ATTRIBUTE, management.FilterType_FILTER_RADIUS_COMPOUND,
+		management.FilterType_FILTER_BPF,
 		management.FilterType_FILTER_IP_ADDRESS,
 		management.FilterType_FILTER_SIP_USER,
 		management.FilterType_FILTER_PHONE_NUMBER,

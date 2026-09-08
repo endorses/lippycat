@@ -1,9 +1,9 @@
-# Shared RADIUS decoding
+# Shared RADIUS decoding, matching and association
 
-This package implements the Phase 1 validation and observation foundation for
-the [RADIUS plan](../../../docs/plans/radius-poi-implementation.md). Matching,
-transaction correlation, command wiring, distributed transport and X2 delivery
-belong to later phases. Observational decoding does not authenticate RADIUS
+This package implements Phases 1–2 of the
+[RADIUS plan](../../../docs/plans/radius-poi-implementation.md): validation,
+owned observations, exact predicates and bounded transaction association.
+Capture ingress wiring, observation transport and X2 delivery remain later work. Observational decoding does not authenticate RADIUS
 Authenticators or prove subscriber ownership.
 
 ## Pinned gopacket audit
@@ -50,7 +50,7 @@ types or confer authorization.
 The pure decoder never increments counters. The first observation ingress owns
 one validation outcome per attempt. Downstream validation and cloning must not
 increment origin counters. Association outcomes and counters are separately
-owned by the future correlator; sinks and LI admission own their respective
+owned by the correlator; sinks and LI admission own their respective
 delivery and rejection counters.
 
 `DecodePacket` accepts original captured bytes, link type, capture metadata and
@@ -70,8 +70,8 @@ proof of authenticated origin or authorization.
 
 The model declares request identities, association statuses and separate direct
 and inherited criterion groups with filter revisions and task generations.
-Matching and association state are Phase 2 work: decoding cannot fabricate an
-unmatched/ambiguous decision or inherited evidence. `Observation.Clone` deeply
+Matching and association are separate from decoding: decoding cannot fabricate
+an unmatched/ambiguous decision or inherited evidence. `Observation.Clone` deeply
 copies packet, message, NAS and evidence storage for mutable asynchronous users.
 All these shared contracts live in this non-LI package; display/protobuf adapters
 in `types`/`protocolmeta` and command capability registration in `protocolcatalog`
@@ -90,3 +90,117 @@ codes, exact minimum/maximum lengths, ignored padding, repeated/empty/opaque
 attributes, invalid UTF-8, malformed vendor boundaries, circuit bounds, and
 capture-buffer reuse. Fuzz invariants require no partial message on error and
 exact reconstruction from all retained AVPs on success.
+
+## Exact filters and complete groups
+
+`CompilePredicate` accepts literal UTF-8 User-Name, a subscriber MAC with the
+explicit `calling-station-id-uppercase-hyphen-v1` profile, or one complete hex
+AVP. Supported AVPs are User-Name, NAS-Port-Id and vendor 3561/type 1
+Agent-Circuit-Id. Matching revalidates the entire original message, uses exact
+value bytes, and handles repeated attributes and grouped VSAs without rewriting
+them. `Spec` serializes AVP targets as uppercase hex. NAI grammar validation
+belongs to the future X1 adapter; the shared predicate retains target kind.
+
+`CompileGroup` binds a complete conjunction to operator scope/profile revision
+and optionally origin/source. It requires criterion IDs and positive revisions;
+task ID and generation must appear together. `Group.Match` returns one complete
+reference only when every criterion matches the same observation with valid
+capture identity. Two groups never merge partial criteria. Ordinary references
+have no task ID and cannot authorize LI. Scope fields describe the configured
+boundary; callers still need to authenticate capture provenance.
+
+## Bounded correlator
+
+`NewCorrelator(CorrelatorConfig{})` uses the contract defaults: 30-second lifetime
+and quiet guard, 65,536 candidates, four candidates per tuple, 64 MiB candidate
+budget, 65,536 suppression keys and 96 MiB total charged state. Invalid limits
+return an error. `Now` injects logical time; backward values are clamped. Replay
+callers advance it using packet timestamps while retaining original capture time.
+
+Call `Process` for every valid request and response before ordinary application
+filter rejection. The result owns its storage. Identical request bytes reuse the
+first instance without extending its lifetime or changing its evidence snapshot.
+Distinct requests, including nonmatching ones and different code families,
+prevent unique inheritance. Responses remain unbuffered. Every response has one
+association outcome; direct evidence is independent of inheritance.
+
+Expiry and capacity loss suppress the whole tuple. Traffic extends the quiet
+guard; no surviving candidate becomes falsely unique. If guards cannot fit, the
+correlator clears state and suppresses inheritance globally until a full quiet
+period. Charged storage includes message/evidence copies, strings and conservative
+map/backing-storage overhead. `Stats` exposes state occupancy and counters.
+`Process` checks expiry synchronously and periodically sweeps; owners may also
+call `Cleanup` while idle. `Close` releases state and permanently stops association;
+there is no background goroutine to drain.
+
+`EvidenceCurrent` must validate every member of a reference against one current
+filter/task snapshot. With no callback, no references inherit, even when a unique
+request is known. The callback runs under the correlator lock, receives owned
+reference storage and must not reenter the correlator. Downstream task admission
+must check generations again because filters can change after association.
+
+## Management boundary
+
+The additive management enum values 18–21 are `radius_username`, `radius_mac`,
+`radius_attribute` and `radius_compound`. Structured criteria, complete ownership,
+scope and revision survive protobuf and filter-file conversions. For example:
+
+```bash
+lc set filter -P localhost:55555 --insecure \
+  --type radius_username --pattern 'alice@example.test' --revision 1
+lc set filter -P localhost:55555 --insecure \
+  --type radius_mac --pattern '02-00-00-00-00-01' --revision 1 \
+  --radius-mac-profile calling-station-id-uppercase-hyphen-v1
+lc set filter -P localhost:55555 --insecure \
+  --type radius_attribute --pattern 57086C696E652D61 --revision 1 \
+  --radius-operator-scope operator-a/nas-a --radius-profile-revision v1
+```
+
+Compound filters use `lc set filter --file`; every criterion's `filter_revision`
+must equal the enclosing filter's `revision`. Increment all of them when modifying
+criteria, scope or enablement. Task changes also require a new task generation.
+The manager retains up to 65,536 revision records for its lifetime, including
+deleted IDs, and rejects stale recreation or additional IDs at capacity. A
+management restart must start fresh capture epochs and correlators before
+accepting observations: deleted revision history is not persisted. `Manager.Load` is a startup-only
+operation and rejects calls after successful restoration or an update.
+
+A compound ordinary filter file can contain:
+
+```yaml
+filters:
+  - id: radius-line-and-account
+    type: radius_compound
+    enabled: true
+    revision: 1
+    radius:
+      group_id: line-and-account
+      scope:
+        operator_scope: operator-a/nas-a
+        profile_revision: v1
+      criteria:
+        - filter_id: account
+          filter_revision: 1
+          kind: username
+          value: alice@example.test
+          target_kind: account
+        - filter_id: line
+          filter_revision: 1
+          kind: attribute
+          value: "57086C696E652D61"
+          target_kind: line
+```
+
+Malformed RADIUS filter files fail restoration; misspelled RADIUS fields do not
+silently disappear. The TUI displays RADIUS types and directs edits to the CLI so its simple
+form cannot discard structured scope or revision data.
+
+Distribution requires both the exact type string and `radius_filter_version=1`.
+Explicit unsupported targets reject provisioning; broadcast distribution excludes
+unsupported peers. Local tap targets reject these filters until Phase 3 installs
+the ingress pipeline. Current hunters do not advertise version 1 yet, even if
+configured with a RADIUS type string. Existing raw packet transport is unchanged.
+`ApplicationFilter.MatchRADIUSObservation` is the integration API for direct
+matches; it keeps grouped references separate from generic packet filter IDs.
+These management and matcher foundations do not claim live RADIUS capture or LI
+support before the remaining phases.

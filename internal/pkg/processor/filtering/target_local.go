@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -101,6 +102,11 @@ func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
 		return 0, nil
 	}
 
+	// Capture ingress does not yet carry scoped observations into the matcher.
+	// Reject rather than store a filter that the local source cannot enforce.
+	if sharedfilter.IsRADIUSFilter(filter.Type) {
+		return 0, fmt.Errorf("local RADIUS ingress capability is not available")
+	}
 	t.mu.Lock()
 	// Store or update the filter
 	_, exists := t.filters[filter.Id]
@@ -138,6 +144,11 @@ func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, er
 		return 0, nil
 	}
 
+	for _, f := range filters {
+		if f != nil && sharedfilter.IsRADIUSFilter(f.Type) {
+			return 0, fmt.Errorf("local RADIUS ingress capability is not available")
+		}
+	}
 	t.mu.Lock()
 	var count uint32
 	for _, filter := range filters {

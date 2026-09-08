@@ -49,6 +49,7 @@ type parsedFilter struct {
 // ApplicationFilter handles GPU-accelerated application-layer packet filtering
 // Supports multiple protocols via the detector and can be extended with protocol-specific filters
 type ApplicationFilter struct {
+	radiusFilters  []radiusApplicationFilter
 	gpuAccel       *gpuaccel.GPUAccelerator
 	detector       *detector.Detector // Protocol detector for accurate protocol detection
 	config         *gpuaccel.GPUConfig
@@ -199,6 +200,8 @@ func filteringToGPUPatternType(pt filtering.PatternType) gpuaccel.PatternType {
 func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	af.mu.Lock()
 	defer af.mu.Unlock()
+
+	af.updateRADIUSFiltersLocked(filters)
 
 	// Clear existing
 	af.sipUsers = af.sipUsers[:0]
@@ -526,7 +529,7 @@ func (af *ApplicationFilter) matchPacketLocked(packet gopacket.Packet, scope pac
 	hasIPFilters := len(af.ipAddresses) > 0
 
 	// If no filters, use the no-filter policy
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters && !hasIMSIFilters && !hasIMEIFilters {
+	if len(af.radiusFilters) == 0 && !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters && !hasIMSIFilters && !hasIMEIFilters {
 		return af.noFilterPolicy == NoFilterPolicyAllow, nil
 	}
 
@@ -713,7 +716,7 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
 	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
-	hasOtherFilters := len(af.ipAddresses) > 0 || hasDNSFilters || hasEmailFilters || hasTLSFilters ||
+	hasOtherFilters := len(af.radiusFilters) > 0 || len(af.ipAddresses) > 0 || hasDNSFilters || hasEmailFilters || hasTLSFilters ||
 		len(af.imsiFilters) > 0 || len(af.imeiFilters) > 0
 	if !hasVoIPFilters && !hasOtherFilters {
 		matchAll := af.noFilterPolicy == NoFilterPolicyAllow

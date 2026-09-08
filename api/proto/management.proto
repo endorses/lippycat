@@ -122,6 +122,9 @@ message HunterCapabilities {
 
     // Supports AF_XDP
     bool af_xdp = 4;
+
+    // Exact RADIUS criteria/provenance contract version; zero means unsupported.
+    uint32 radius_filter_version = 5;
 }
 
 // RegistrationResponse from processor after registration
@@ -314,6 +317,36 @@ message Filter {
 
     // Filter description
     string description = 6;
+
+    // RADIUS structured exact criteria; never interpreted as independent OR filters.
+    RadiusFilterCriteria radius = 7;
+    uint64 revision = 8;
+}
+
+message RadiusScopeBinding {
+    string operator_scope = 1;
+    string profile_revision = 2;
+    string origin_node_id = 3;
+    string source_id = 4;
+}
+
+message RadiusCriterion {
+    string filter_id = 1;
+    uint64 filter_revision = 2;
+    string kind = 3;
+    string value = 4;
+    string mac_profile = 5;
+    string target_kind = 6;
+}
+
+message RadiusFilterCriteria {
+    string mac_profile = 1;
+    string target_kind = 2;
+    string group_id = 3;
+    string task_id = 4;
+    uint64 task_generation = 5;
+    RadiusScopeBinding scope = 6;
+    repeated RadiusCriterion criteria = 7;
 }
 
 // FilterType enum
@@ -388,6 +421,11 @@ enum FilterType {
     // Format in SIP: urn:gsma:imei:<TAC>-<SNR>-<CD>
     // Example: 353456789012345 (normalized, without dashes)
     FILTER_IMEI = 17;
+
+    FILTER_RADIUS_USERNAME = 18;
+    FILTER_RADIUS_MAC = 19;
+    FILTER_RADIUS_ATTRIBUTE = 20;
+    FILTER_RADIUS_COMPOUND = 21;
 }
 
 // FilterUpdate pushed to hunters in real-time

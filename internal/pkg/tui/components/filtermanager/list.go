@@ -188,6 +188,14 @@ func AbbreviateType(t management.FilterType) string {
 		return "HTTP Host"
 	case management.FilterType_FILTER_HTTP_URL:
 		return "HTTP URL"
+	case management.FilterType_FILTER_RADIUS_USERNAME:
+		return "RADIUS User"
+	case management.FilterType_FILTER_RADIUS_MAC:
+		return "RADIUS MAC"
+	case management.FilterType_FILTER_RADIUS_ATTRIBUTE:
+		return "RADIUS AVP"
+	case management.FilterType_FILTER_RADIUS_COMPOUND:
+		return "RADIUS AND"
 	default:
 		return "Unknown"
 	}

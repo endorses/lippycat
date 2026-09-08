@@ -350,6 +350,11 @@ func (fm *FilterManager) toggleFilterEnabled() tea.Cmd {
 		return nil
 	}
 
+	if selectedFilter.Type >= management.FilterType_FILTER_RADIUS_USERNAME && selectedFilter.Type <= management.FilterType_FILTER_RADIUS_COMPOUND {
+		fm.filterList.NewStatusMessage("Change RADIUS enablement and revision with lc set filter --file")
+		return nil
+	}
+
 	// Use pure function to calculate new state
 	result := filtermanager.ToggleFilterEnabled(filtermanager.ToggleFilterEnabledParams{
 		Filter: selectedFilter,
@@ -699,6 +704,10 @@ func (fm *FilterManager) initializeAddForm() {
 
 // initializeEditForm initializes the form for editing an existing filter
 func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
+	if filter.Type >= management.FilterType_FILTER_RADIUS_USERNAME && filter.Type <= management.FilterType_FILTER_RADIUS_COMPOUND {
+		fm.filterList.NewStatusMessage("Edit RADIUS criteria and revisions with lc set filter --file")
+		return
+	}
 	patternInput := textinput.New()
 	patternInput.SetValue(filter.Pattern)
 	patternInput.CharLimit = 200

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
 
@@ -64,6 +65,9 @@ func IsUniversalFilterType(filterType management.FilterType) bool {
 // GetRequiredProtocolMode returns the protocol mode required for a filter type.
 // Returns "generic" for universal filters that work with all hunters.
 func GetRequiredProtocolMode(filterType management.FilterType) string {
+	if filtering.IsRADIUSFilterType(filterType) {
+		return "radius"
+	}
 	if IsVoIPFilterType(filterType) {
 		return "voip"
 	}
@@ -84,6 +88,17 @@ func GetRequiredProtocolMode(filterType management.FilterType) string {
 
 // HunterSupportsFilterType checks if a hunter supports a given filter type based on capabilities
 func HunterSupportsFilterType(hunter HunterSelectorItem, filterType management.FilterType) bool {
+	if filtering.IsRADIUSFilterType(filterType) {
+		if hunter.Capabilities.GetRadiusFilterVersion() != 1 {
+			return false
+		}
+		for _, supported := range hunter.Capabilities.GetFilterTypes() {
+			if supported == filtering.FilterTypeToString(filterType) {
+				return true
+			}
+		}
+		return false
+	}
 	requiredMode := GetRequiredProtocolMode(filterType)
 
 	// Universal filters (BPF, IP) are supported by all hunters

@@ -112,6 +112,11 @@ func TestReorderDiscardCallIsGenerationSelective(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
+	for i := range delivered {
+		assert.False(t, delivered[i].Metadata.AdmittedAt.IsZero())
+		assert.Equal(t, delivered[i].Generation, delivered[i].Metadata.CallGeneration)
+		delivered[i].Metadata = DeliveryMetadata{}
+	}
 	assert.Equal(t, []ReorderEntry{
 		{CallID: "call-a", Generation: 1, PDU: []byte("a-first")},
 		{CallID: "call-b", Generation: 2, PDU: []byte("b-first")},

@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
@@ -36,6 +37,7 @@ type MetadataSinkConfig struct {
 	Manager           *Manager
 	Sender            MetadataSender
 	NFID              string
+	Sequencer         *x2x3.Sequencer
 	AllowFileMetadata bool
 }
 
@@ -45,7 +47,6 @@ type MetadataSinkStats struct{ Delivered, Skipped, Rejected atomic.Uint64 }
 type MetadataSink struct {
 	config MetadataSinkConfig
 	attrs  *x2x3.AttributeBuilder
-	seq    atomic.Uint32
 	stats  MetadataSinkStats
 }
 
@@ -56,10 +57,14 @@ func NewMetadataSink(config MetadataSinkConfig) (*MetadataSink, error) {
 	if config.Profile != InternetMetadataProfile {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownMetadataProfile, config.Profile)
 	}
+	if config.Sequencer == nil {
+		config.Sequencer = x2x3.NewSequencer(0)
+	}
 	return &MetadataSink{config: config, attrs: x2x3.NewAttributeBuilder()}, nil
 }
 
 func (s *MetadataSink) HandleEvent(_ context.Context, ev events.Event) error {
+	admittedAt := time.Now()
 	if !s.config.Enabled || s.config.Manager == nil || !s.config.Manager.IsEnabled() {
 		s.stats.Skipped.Add(1)
 		s.audit("skipped", ev, uuid.Nil, "metadata delivery disabled")
@@ -108,7 +113,20 @@ func (s *MetadataSink) HandleEvent(_ context.Context, ev events.Event) error {
 			s.audit("rejected", ev, task.XID, err.Error())
 			return fmt.Errorf("marshal metadata X2 PDU: %w", err)
 		}
-		if err := s.config.Sender.SendX2(task.XID, task.DestinationIDs, data); err != nil {
+		admission, active := s.config.Manager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+		if !active {
+			s.stats.Skipped.Add(1)
+			continue
+		}
+		if sender, ok := s.config.Sender.(interface {
+			SendX2WithMetadata(uuid.UUID, []uuid.UUID, []byte, DeliveryMetadata) error
+		}); ok {
+			err = sender.SendX2WithMetadata(task.XID, task.DestinationIDs, data, DeliveryMetadata{AdmittedAt: admittedAt, CapturedAt: ev.Envelope().Timestamp, TaskGeneration: task.ActivationGeneration})
+		} else {
+			err = s.config.Sender.SendX2(task.XID, task.DestinationIDs, data)
+		}
+		admission.Release()
+		if err != nil {
 			s.stats.Rejected.Add(1)
 			s.audit("rejected", ev, task.XID, err.Error())
 			return fmt.Errorf("queue metadata X2 PDU: %w", err)
@@ -163,7 +181,11 @@ func (s *MetadataSink) encode(ev events.Event, xid uuid.UUID, target TargetIdent
 	pdu.Header.PayloadFormat = x2x3.PayloadFormatProprietary
 	pdu.Header.PayloadDirection = directionForTarget(target, ev.Envelope().Flow)
 	pdu.AddAttribute(s.attrs.Timestamp(ev.Envelope().Timestamp))
-	pdu.AddAttribute(s.attrs.SequenceNumber(s.seq.Add(1)))
+	sequence, err := s.config.Sequencer.Next(x2x3.SequenceContext{PDUType: x2x3.PDUTypeX2, XID: xid, NFID: s.config.NFID, IPID: ev.Envelope().NodeID, CorrelationID: h.Sum64()})
+	if err != nil {
+		return nil, fmt.Errorf("assign metadata sequence: %w", err)
+	}
+	pdu.AddAttribute(s.attrs.SequenceNumber(sequence))
 	addFlowAttrs(pdu, s.attrs, ev.Envelope().Flow)
 	if s.config.NFID != "" {
 		pdu.AddAttribute(s.attrs.NFID(s.config.NFID))

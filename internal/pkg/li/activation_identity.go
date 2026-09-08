@@ -1,5 +1,3 @@
-//go:build li
-
 package li
 
 import (
@@ -80,4 +78,11 @@ func equivalentTaskDefinition(a, b *InterceptTask) bool {
 		ca.EndTimeSet == cb.EndTimeSet && ca.EndTimeUnixNano == cb.EndTimeUnixNano &&
 		ca.ImplicitDeactivationAllowed == cb.ImplicitDeactivationAllowed &&
 		slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs)
+}
+
+// equivalentDeliveryDefinition identifies changes that revoke buffered product.
+// Timing-only extensions do not invalidate already admitted delivery.
+func equivalentDeliveryDefinition(a, b *InterceptTask) bool {
+	ca, cb := canonicalizeTaskDefinition(a), canonicalizeTaskDefinition(b)
+	return ca.XID == cb.XID && ca.DeliveryType == cb.DeliveryType && slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs)
 }

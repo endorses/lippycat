@@ -30,6 +30,18 @@ var (
 	liDeliveryTLSCAFile                     string
 	liDeliveryTLSPinnedCert                 []string
 	liDeliveryQueueSize                     int
+	liDeliveryX2QueueSize                   int
+	liDeliveryX3QueueSize                   int
+	liDeliveryX2QueueBytes                  int64
+	liDeliveryX3QueueBytes                  int64
+	liDeliveryX3MaxAge                      time.Duration
+	liDeliveryMemoryBudgetBytes             int64
+	liDeliveryX2SpoolDir                    string
+	liDeliveryX2SpoolMaxBytes               int64
+	liDeliveryX2SpoolKeyFile                string
+	liDeliveryX2SpoolReplayPolicy           string
+	liDeliveryX2SpoolReplayManifest         string
+	liDeliveryX2SpoolExportManifest         string
 	liDeliverySendTimeout                   time.Duration
 	liDeliveryInitialBackoff                time.Duration
 	liDeliveryMaxBackoff                    time.Duration
@@ -74,6 +86,18 @@ type LIConfig struct {
 	DeliveryTLSCAFile                     string
 	DeliveryTLSPinnedCert                 []string
 	DeliveryQueueSize                     int
+	DeliveryX2QueueSize                   int
+	DeliveryX3QueueSize                   int
+	DeliveryX2QueueBytes                  int64
+	DeliveryX3QueueBytes                  int64
+	DeliveryX3MaxAge                      time.Duration
+	DeliveryMemoryBudgetBytes             int64
+	DeliveryX2SpoolDir                    string
+	DeliveryX2SpoolMaxBytes               int64
+	DeliveryX2SpoolKeyFile                string
+	DeliveryX2SpoolReplayPolicy           string
+	DeliveryX2SpoolReplayManifest         string
+	DeliveryX2SpoolExportManifest         string
 	DeliverySendTimeout                   time.Duration
 	DeliveryInitialBackoff                time.Duration
 	DeliveryMaxBackoff                    time.Duration
@@ -118,7 +142,19 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&liDeliveryTLSKeyFile, "li-delivery-tls-key", "", "Path to client TLS key for X2/X3 delivery")
 	cmd.PersistentFlags().StringVar(&liDeliveryTLSCAFile, "li-delivery-tls-ca", "", "Path to CA certificate for verifying MDF servers")
 	cmd.PersistentFlags().StringSliceVar(&liDeliveryTLSPinnedCert, "li-delivery-tls-pinned-cert", nil, "Pinned certificate fingerprints for MDF servers (SHA256, hex encoded, comma-separated)")
-	cmd.PersistentFlags().IntVar(&liDeliveryQueueSize, "li-delivery-queue-size", 10000, "Maximum queued X2/X3 PDUs per destination")
+	cmd.PersistentFlags().IntVar(&liDeliveryQueueSize, "li-delivery-queue-size", 10000, "Maximum queued X2/X3 PDUs per destination and interface")
+	cmd.PersistentFlags().IntVar(&liDeliveryX2QueueSize, "li-delivery-x2-queue-size", 0, "Maximum X2 PDUs per destination (0 inherits li-delivery-queue-size)")
+	cmd.PersistentFlags().IntVar(&liDeliveryX3QueueSize, "li-delivery-x3-queue-size", 0, "Maximum X3 PDUs per destination (0 inherits li-delivery-queue-size)")
+	cmd.PersistentFlags().Int64Var(&liDeliveryX2QueueBytes, "li-delivery-x2-queue-bytes", 0, "Encoded X2 byte capacity per destination and interface (0 disables byte limit)")
+	cmd.PersistentFlags().Int64Var(&liDeliveryX3QueueBytes, "li-delivery-x3-queue-bytes", 0, "Encoded X3 byte capacity per destination and interface (0 disables byte limit)")
+	cmd.PersistentFlags().DurationVar(&liDeliveryX3MaxAge, "li-delivery-x3-max-age", 0, "Maximum local X3 residence including retries (0 disables expiry)")
+	cmd.PersistentFlags().Int64Var(&liDeliveryMemoryBudgetBytes, "li-delivery-memory-budget-bytes", 0, "Overall reserved LI delivery memory budget in bytes (0 disables reservation validation)")
+	cmd.PersistentFlags().StringVar(&liDeliveryX2SpoolDir, "li-delivery-x2-spool-dir", "", "Directory for encrypted X2 journal (empty disables persistence)")
+	cmd.PersistentFlags().Int64Var(&liDeliveryX2SpoolMaxBytes, "li-delivery-x2-spool-max-bytes", 0, "Maximum X2 journal bytes including pending reservations")
+	cmd.PersistentFlags().StringVar(&liDeliveryX2SpoolKeyFile, "li-delivery-x2-spool-key-file", "", "Path to private 32-byte raw AES key for X2 journal")
+	cmd.PersistentFlags().StringVar(&liDeliveryX2SpoolReplayPolicy, "li-delivery-x2-spool-replay-policy", "hold", "Recovered X2 policy: hold for explicit authorization or purge")
+	cmd.PersistentFlags().StringVar(&liDeliveryX2SpoolReplayManifest, "li-delivery-x2-spool-replay-manifest", "", "Private JSON manifest authorizing exact recovered X2 identities after ADMF startup sync")
+	cmd.PersistentFlags().StringVar(&liDeliveryX2SpoolExportManifest, "li-delivery-x2-spool-export-manifest", "", "Export private JSON identity manifest of held X2 records at startup")
 	cmd.PersistentFlags().DurationVar(&liDeliverySendTimeout, "li-delivery-send-timeout", 5*time.Second, "Timeout for each X2/X3 delivery write")
 	cmd.PersistentFlags().DurationVar(&liDeliveryInitialBackoff, "li-delivery-reconnect-initial-backoff", 500*time.Millisecond, "Initial MDF reconnect backoff")
 	cmd.PersistentFlags().DurationVar(&liDeliveryMaxBackoff, "li-delivery-reconnect-max-backoff", 5*time.Second, "Maximum MDF reconnect backoff")
@@ -158,11 +194,35 @@ func BindLIViperFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("tap.li.admf_tls_ca", cmd.PersistentFlags().Lookup("li-admf-tls-ca"))
 	_ = viper.BindPFlag("tap.li.admf_keepalive", cmd.PersistentFlags().Lookup("li-admf-keepalive"))
 	// LI Delivery (X2/X3) viper bindings
+	_ = viper.BindEnv("tap.li.delivery_x2_queue_bytes", "LIPPYCAT_TAP_LI_DELIVERY_X2_QUEUE_BYTES")
+	_ = viper.BindEnv("tap.li.delivery_x3_queue_bytes", "LIPPYCAT_TAP_LI_DELIVERY_X3_QUEUE_BYTES")
+	_ = viper.BindEnv("tap.li.delivery_x3_max_age", "LIPPYCAT_TAP_LI_DELIVERY_X3_MAX_AGE")
+	_ = viper.BindEnv("tap.li.delivery_memory_budget_bytes", "LIPPYCAT_TAP_LI_DELIVERY_MEMORY_BUDGET_BYTES")
+	_ = viper.BindEnv("tap.li.delivery_x2_spool_dir", "LIPPYCAT_TAP_LI_DELIVERY_X2_SPOOL_DIR")
+	_ = viper.BindEnv("tap.li.delivery_x2_spool_max_bytes", "LIPPYCAT_TAP_LI_DELIVERY_X2_SPOOL_MAX_BYTES")
+	_ = viper.BindEnv("tap.li.delivery_x2_spool_key_file", "LIPPYCAT_TAP_LI_DELIVERY_X2_SPOOL_KEY_FILE")
 	_ = viper.BindPFlag("tap.li.delivery_tls_cert", cmd.PersistentFlags().Lookup("li-delivery-tls-cert"))
 	_ = viper.BindPFlag("tap.li.delivery_tls_key", cmd.PersistentFlags().Lookup("li-delivery-tls-key"))
 	_ = viper.BindPFlag("tap.li.delivery_tls_ca", cmd.PersistentFlags().Lookup("li-delivery-tls-ca"))
 	_ = viper.BindPFlag("tap.li.delivery_tls_pinned_cert", cmd.PersistentFlags().Lookup("li-delivery-tls-pinned-cert"))
 	_ = viper.BindPFlag("tap.li.delivery_queue_size", cmd.PersistentFlags().Lookup("li-delivery-queue-size"))
+	_ = viper.BindPFlag("tap.li.delivery_x2_queue_size", cmd.PersistentFlags().Lookup("li-delivery-x2-queue-size"))
+	_ = viper.BindEnv("tap.li.delivery_x2_queue_size", "LIPPYCAT_TAP_LI_DELIVERY_X2_QUEUE_SIZE")
+	_ = viper.BindPFlag("tap.li.delivery_x3_queue_size", cmd.PersistentFlags().Lookup("li-delivery-x3-queue-size"))
+	_ = viper.BindEnv("tap.li.delivery_x3_queue_size", "LIPPYCAT_TAP_LI_DELIVERY_X3_QUEUE_SIZE")
+	_ = viper.BindPFlag("tap.li.delivery_x2_queue_bytes", cmd.PersistentFlags().Lookup("li-delivery-x2-queue-bytes"))
+	_ = viper.BindPFlag("tap.li.delivery_x3_queue_bytes", cmd.PersistentFlags().Lookup("li-delivery-x3-queue-bytes"))
+	_ = viper.BindPFlag("tap.li.delivery_x3_max_age", cmd.PersistentFlags().Lookup("li-delivery-x3-max-age"))
+	_ = viper.BindPFlag("tap.li.delivery_memory_budget_bytes", cmd.PersistentFlags().Lookup("li-delivery-memory-budget-bytes"))
+	_ = viper.BindPFlag("tap.li.delivery_x2_spool_dir", cmd.PersistentFlags().Lookup("li-delivery-x2-spool-dir"))
+	_ = viper.BindPFlag("tap.li.delivery_x2_spool_max_bytes", cmd.PersistentFlags().Lookup("li-delivery-x2-spool-max-bytes"))
+	_ = viper.BindPFlag("tap.li.delivery_x2_spool_key_file", cmd.PersistentFlags().Lookup("li-delivery-x2-spool-key-file"))
+	_ = viper.BindPFlag("tap.li.delivery_x2_spool_replay_policy", cmd.PersistentFlags().Lookup("li-delivery-x2-spool-replay-policy"))
+	_ = viper.BindPFlag("tap.li.delivery_x2_spool_replay_manifest", cmd.PersistentFlags().Lookup("li-delivery-x2-spool-replay-manifest"))
+	_ = viper.BindPFlag("tap.li.delivery_x2_spool_export_manifest", cmd.PersistentFlags().Lookup("li-delivery-x2-spool-export-manifest"))
+	_ = viper.BindEnv("tap.li.delivery_x2_spool_export_manifest", "LIPPYCAT_TAP_LI_DELIVERY_X2_SPOOL_EXPORT_MANIFEST")
+	_ = viper.BindEnv("tap.li.delivery_x2_spool_replay_manifest", "LIPPYCAT_TAP_LI_DELIVERY_X2_SPOOL_REPLAY_MANIFEST")
+	_ = viper.BindEnv("tap.li.delivery_x2_spool_replay_policy", "LIPPYCAT_TAP_LI_DELIVERY_X2_SPOOL_REPLAY_POLICY")
 	_ = viper.BindPFlag("tap.li.delivery_send_timeout", cmd.PersistentFlags().Lookup("li-delivery-send-timeout"))
 	_ = viper.BindPFlag("tap.li.delivery_reconnect_initial_backoff", cmd.PersistentFlags().Lookup("li-delivery-reconnect-initial-backoff"))
 	_ = viper.BindPFlag("tap.li.delivery_reconnect_max_backoff", cmd.PersistentFlags().Lookup("li-delivery-reconnect-max-backoff"))
@@ -206,6 +266,18 @@ func GetLIConfig() *LIConfig {
 		DeliveryTLSCAFile:                     cmdutil.GetStringConfig("tap.li.delivery_tls_ca", liDeliveryTLSCAFile),
 		DeliveryTLSPinnedCert:                 cmdutil.GetStringSliceConfig("tap.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
 		DeliveryQueueSize:                     cmdutil.GetIntConfig("tap.li.delivery_queue_size", liDeliveryQueueSize),
+		DeliveryX2QueueSize:                   viper.GetInt("tap.li.delivery_x2_queue_size"),
+		DeliveryX3QueueSize:                   viper.GetInt("tap.li.delivery_x3_queue_size"),
+		DeliveryX2QueueBytes:                  viper.GetInt64("tap.li.delivery_x2_queue_bytes"),
+		DeliveryX3QueueBytes:                  viper.GetInt64("tap.li.delivery_x3_queue_bytes"),
+		DeliveryX3MaxAge:                      viper.GetDuration("tap.li.delivery_x3_max_age"),
+		DeliveryMemoryBudgetBytes:             viper.GetInt64("tap.li.delivery_memory_budget_bytes"),
+		DeliveryX2SpoolDir:                    viper.GetString("tap.li.delivery_x2_spool_dir"),
+		DeliveryX2SpoolMaxBytes:               viper.GetInt64("tap.li.delivery_x2_spool_max_bytes"),
+		DeliveryX2SpoolKeyFile:                viper.GetString("tap.li.delivery_x2_spool_key_file"),
+		DeliveryX2SpoolReplayPolicy:           viper.GetString("tap.li.delivery_x2_spool_replay_policy"),
+		DeliveryX2SpoolReplayManifest:         viper.GetString("tap.li.delivery_x2_spool_replay_manifest"),
+		DeliveryX2SpoolExportManifest:         viper.GetString("tap.li.delivery_x2_spool_export_manifest"),
 		DeliverySendTimeout:                   viper.GetDuration("tap.li.delivery_send_timeout"),
 		DeliveryInitialBackoff:                viper.GetDuration("tap.li.delivery_reconnect_initial_backoff"),
 		DeliveryMaxBackoff:                    viper.GetDuration("tap.li.delivery_reconnect_max_backoff"),
@@ -238,6 +310,18 @@ func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {
 	config.LIMetadataAllowFileMetadata = liConfig.MetadataAllowFileMetadata
 	config.LIStateFile = liConfig.StateFile
 	config.LIDeliveryQueueSize = liConfig.DeliveryQueueSize
+	config.LIDeliveryX2QueueSize = liConfig.DeliveryX2QueueSize
+	config.LIDeliveryX3QueueSize = liConfig.DeliveryX3QueueSize
+	config.LIDeliveryX2QueueBytes = liConfig.DeliveryX2QueueBytes
+	config.LIDeliveryX3QueueBytes = liConfig.DeliveryX3QueueBytes
+	config.LIDeliveryX3MaxAge = liConfig.DeliveryX3MaxAge
+	config.LIDeliveryMemoryBudgetBytes = liConfig.DeliveryMemoryBudgetBytes
+	config.LIDeliveryX2SpoolDir = liConfig.DeliveryX2SpoolDir
+	config.LIDeliveryX2SpoolMaxBytes = liConfig.DeliveryX2SpoolMaxBytes
+	config.LIDeliveryX2SpoolKeyFile = liConfig.DeliveryX2SpoolKeyFile
+	config.LIDeliveryX2SpoolReplayPolicy = liConfig.DeliveryX2SpoolReplayPolicy
+	config.LIDeliveryX2SpoolReplayManifest = liConfig.DeliveryX2SpoolReplayManifest
+	config.LIDeliveryX2SpoolExportManifest = liConfig.DeliveryX2SpoolExportManifest
 	config.LIDeliverySendTimeout = liConfig.DeliverySendTimeout
 	config.LIDeliveryInitialBackoff = liConfig.DeliveryInitialBackoff
 	config.LIDeliveryMaxBackoff = liConfig.DeliveryMaxBackoff

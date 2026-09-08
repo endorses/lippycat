@@ -28,6 +28,18 @@ type LIConfig struct {
 	DeliveryTLSCAFile                     string
 	DeliveryTLSPinnedCert                 []string
 	DeliveryQueueSize                     int
+	DeliveryX2QueueSize                   int
+	DeliveryX3QueueSize                   int
+	DeliveryX2QueueBytes                  int64
+	DeliveryX3QueueBytes                  int64
+	DeliveryX3MaxAge                      time.Duration
+	DeliveryMemoryBudgetBytes             int64
+	DeliveryX2SpoolDir                    string
+	DeliveryX2SpoolMaxBytes               int64
+	DeliveryX2SpoolKeyFile                string
+	DeliveryX2SpoolReplayPolicy           string
+	DeliveryX2SpoolReplayManifest         string
+	DeliveryX2SpoolExportManifest         string
 	DeliverySendTimeout                   time.Duration
 	DeliveryInitialBackoff                time.Duration
 	DeliveryMaxBackoff                    time.Duration

@@ -116,8 +116,11 @@ type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 //
 // The Manager is the main entry point for LI operations in the processor.
 type Manager struct {
-	mu          sync.RWMutex
-	lifecycleMu sync.RWMutex
+	callbackMu     sync.RWMutex
+	onTaskModified func(previous *InterceptTask)
+	stopOnce       sync.Once
+	mu             sync.RWMutex
+	lifecycleMu    sync.RWMutex
 
 	config   ManagerConfig
 	registry *Registry
@@ -151,6 +154,7 @@ type Manager struct {
 	orphanMu         sync.Mutex
 	orphanStreak     map[uuid.UUID]int
 	persistedActive  map[uuid.UUID]*InterceptTask
+	replayConfirmed  map[uuid.UUID]uint64
 	commitActivation func(uuid.UUID, time.Time) error
 
 	// stopChan signals shutdown.
@@ -235,6 +239,7 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 		stopChan:        make(chan struct{}),
 		orphanStreak:    make(map[uuid.UUID]int),
 		persistedActive: make(map[uuid.UUID]*InterceptTask),
+		replayConfirmed: make(map[uuid.UUID]uint64),
 	}
 
 	// Create X1 client if ADMF endpoint is configured.
@@ -455,7 +460,9 @@ func (m *Manager) ValidateConfiguration() error {
 }
 
 // Stop halts LI Manager operation.
-func (m *Manager) Stop() {
+func (m *Manager) Stop() { m.stopOnce.Do(m.stop) }
+
+func (m *Manager) stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -568,8 +575,8 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 			snapshot.tasks[task.XID] = true
 			if restored := m.persistedActive[task.XID]; restored != nil {
 				generation := restored.ActivationGeneration
-				if generation > 0 {
-					generation-- // ActivateTask increments to the confirmed generation.
+				if generation > 0 && equivalentTaskDefinition(restored, task) {
+					generation-- // Only the same definition retains its confirmed generation.
 				}
 				m.registry.seedGeneration(task.XID, generation)
 			}
@@ -583,6 +590,10 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 					taskErrors++
 				}
 				continue
+			}
+			if restored := m.persistedActive[task.XID]; restored != nil && restored.ActivationGeneration > 0 && equivalentTaskDefinition(restored, task) {
+				// Start holds m.mu for the complete startup reconciliation.
+				m.replayConfirmed[task.XID] = restored.ActivationGeneration
 			}
 			taskCount++
 		}
@@ -629,9 +640,9 @@ func (m *Manager) removeOrphanedDestinations(snapshot admfSnapshot) int {
 			logger.Error("Reconciliation: failed to remove orphan destination", "did", dest.DID, "error", err)
 			continue
 		}
-		m.mu.RLock()
+		m.callbackMu.RLock()
 		cb := m.onDestinationRemoved
-		m.mu.RUnlock()
+		m.callbackMu.RUnlock()
 		if cb != nil {
 			cb(dest.DID)
 		}
@@ -921,19 +932,25 @@ func (m *Manager) reconcileWithADMF() {
 			snapshot.destinations[dest.DID] = true
 			if current, getErr := m.registry.GetDestination(dest.DID); getErr != nil {
 				if err := m.registry.CreateDestination(dest); err == nil {
-					m.mu.RLock()
+					registered, lookupErr := m.registry.GetDestination(dest.DID)
+					if lookupErr != nil {
+						logger.Warn("Failed to read reconciled destination", "did", dest.DID, "error", lookupErr)
+						snapshot.destinationConvErrors++
+						continue
+					}
+					m.callbackMu.RLock()
 					cb := m.onDestinationCreated
-					m.mu.RUnlock()
+					m.callbackMu.RUnlock()
 					if cb != nil {
-						cb(dest)
+						cb(registered)
 					}
 				}
 			} else if current.Address != dest.Address || current.Port != dest.Port || current.X2Enabled != dest.X2Enabled || current.X3Enabled != dest.X3Enabled || current.ProtocolType != dest.ProtocolType || current.Description != dest.Description {
 				dest.CreatedAt = current.CreatedAt
 				if err := m.registry.ModifyDestination(dest.DID, dest); err == nil {
-					m.mu.RLock()
+					m.callbackMu.RLock()
 					cb := m.onDestinationModified
-					m.mu.RUnlock()
+					m.callbackMu.RUnlock()
 					if cb != nil {
 						cb(dest)
 					}
@@ -1019,22 +1036,22 @@ func (m *Manager) SetPacketProcessor(processor PacketProcessor) {
 
 // SetDestinationCreatedCallback sets a callback invoked when destinations are created via X1.
 func (m *Manager) SetDestinationCreatedCallback(cb func(dest *Destination)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.callbackMu.Lock()
+	defer m.callbackMu.Unlock()
 	m.onDestinationCreated = cb
 }
 
 // SetDestinationModifiedCallback sets a callback invoked when destinations are modified via X1.
 func (m *Manager) SetDestinationModifiedCallback(cb func(dest *Destination)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.callbackMu.Lock()
+	defer m.callbackMu.Unlock()
 	m.onDestinationModified = cb
 }
 
 // SetDestinationRemovedCallback sets a callback invoked when destinations are removed via X1.
 func (m *Manager) SetDestinationRemovedCallback(cb func(did uuid.UUID)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.callbackMu.Lock()
+	defer m.callbackMu.Unlock()
 	m.onDestinationRemoved = cb
 }
 
@@ -1278,6 +1295,9 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		if err := m.filters.UpdateFiltersForTask(task); err != nil {
 			var cleanupErr *FilterCleanupError
 			if errors.As(err, &cleanupErr) {
+				if task.ActivationGeneration != previous.ActivationGeneration {
+					m.notifyTaskModified(previous)
+				}
 				markErr := m.registry.MarkTaskFailed(xid, err.Error())
 				return errors.Join(fmt.Errorf("modify XID %s filter enforcement degraded: %w", xid, err), markErr)
 			}
@@ -1285,6 +1305,13 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		}
 	}
 
+	current, getErr := m.registry.GetTaskDetails(xid)
+	if getErr != nil {
+		return getErr
+	}
+	if current.ActivationGeneration != previous.ActivationGeneration {
+		m.notifyTaskModified(previous)
+	}
 	logger.Info("LI task modified", "xid", xid)
 	return m.persistState()
 }
@@ -1389,6 +1416,9 @@ func (m *Manager) CreateDestination(dest *Destination) error {
 	if err := m.registry.CreateDestination(dest); err != nil {
 		return err
 	}
+	if err := m.notifyDestinationDefinition(dest.DID, false); err != nil {
+		return err
+	}
 	return m.persistState()
 }
 
@@ -1402,15 +1432,40 @@ func (m *Manager) RemoveDestination(did uuid.UUID) error {
 	if err := m.registry.RemoveDestination(did); err != nil {
 		return err
 	}
+	m.callbackMu.RLock()
+	callback := m.onDestinationRemoved
+	m.callbackMu.RUnlock()
+	if callback != nil {
+		callback(did)
+	}
 	return m.persistState()
 }
 
-// ModifyDestination updates an existing delivery destination.
+// ModifyDestination updates the canonical destination and informs delivery owners.
 func (m *Manager) ModifyDestination(did uuid.UUID, dest *Destination) error {
 	if err := m.registry.ModifyDestination(did, dest); err != nil {
 		return err
 	}
+	if err := m.notifyDestinationDefinition(did, true); err != nil {
+		return err
+	}
 	return m.persistState()
+}
+func (m *Manager) notifyDestinationDefinition(did uuid.UUID, modified bool) error {
+	registered, err := m.registry.GetDestination(did)
+	if err != nil {
+		return fmt.Errorf("read destination incarnation: %w", err)
+	}
+	m.callbackMu.RLock()
+	callback := m.onDestinationCreated
+	if modified {
+		callback = m.onDestinationModified
+	}
+	m.callbackMu.RUnlock()
+	if callback != nil {
+		callback(registered)
+	}
+	return nil
 }
 
 // ListDestinations returns all registered destinations.
@@ -1466,7 +1521,7 @@ func (m *Manager) CreateDestinationX1(dest *x1.Destination) error {
 		ProtocolType: dest.ProtocolType,
 		Description:  dest.Description,
 	}
-	err := m.registry.CreateDestination(liDest)
+	err := m.CreateDestination(liDest)
 	if err != nil {
 		// Convert to x1 error type
 		if errors.Is(err, ErrDestinationAlreadyExists) {
@@ -1475,14 +1530,7 @@ func (m *Manager) CreateDestinationX1(dest *x1.Destination) error {
 		return err
 	}
 
-	// Notify delivery manager about new destination
-	m.mu.RLock()
-	cb := m.onDestinationCreated
-	m.mu.RUnlock()
-	if cb != nil {
-		cb(liDest)
-	}
-	return m.persistState()
+	return nil
 }
 
 // GetDestinationX1 retrieves a destination for X1 response.
@@ -1507,20 +1555,14 @@ func (m *Manager) GetDestinationX1(did uuid.UUID) (*x1.Destination, error) {
 
 // RemoveDestinationX1 removes a destination via X1 request.
 func (m *Manager) RemoveDestinationX1(did uuid.UUID) error {
-	err := m.registry.RemoveDestination(did)
+	err := m.RemoveDestination(did)
 	if err != nil {
 		if errors.Is(err, ErrDestinationNotFound) {
 			return x1.ErrDestinationNotFound
 		}
 		return err
 	}
-	m.mu.RLock()
-	cb := m.onDestinationRemoved
-	m.mu.RUnlock()
-	if cb != nil {
-		cb(did)
-	}
-	return m.persistState()
+	return nil
 }
 
 // ModifyDestinationX1 modifies a destination via X1 request.
@@ -1534,20 +1576,14 @@ func (m *Manager) ModifyDestinationX1(did uuid.UUID, dest *x1.Destination) error
 		ProtocolType: dest.ProtocolType,
 		Description:  dest.Description,
 	}
-	err := m.registry.ModifyDestination(did, liDest)
+	err := m.ModifyDestination(did, liDest)
 	if err != nil {
 		if errors.Is(err, ErrDestinationNotFound) {
 			return x1.ErrDestinationNotFound
 		}
 		return err
 	}
-	m.mu.RLock()
-	cb := m.onDestinationModified
-	m.mu.RUnlock()
-	if cb != nil {
-		cb(liDest)
-	}
-	return m.persistState()
+	return nil
 }
 
 // managerTaskAdapter adapts the Manager to the x1.TaskManager interface.
@@ -1952,4 +1988,21 @@ func (m *Manager) IsADMFConnected() bool {
 		return false
 	}
 	return m.x1Client.IsConnected()
+}
+
+// SetTaskModifiedCallback receives the revoked generation after an enforcement
+// definition change, while the task admission barrier is still held.
+func (m *Manager) SetTaskModifiedCallback(callback func(previous *InterceptTask)) {
+	m.callbackMu.Lock()
+	defer m.callbackMu.Unlock()
+	m.onTaskModified = callback
+}
+
+func (m *Manager) notifyTaskModified(previous *InterceptTask) {
+	m.callbackMu.RLock()
+	callback := m.onTaskModified
+	m.callbackMu.RUnlock()
+	if callback != nil {
+		callback(previous)
+	}
 }

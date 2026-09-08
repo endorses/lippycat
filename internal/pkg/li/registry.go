@@ -470,6 +470,10 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return err
 	}
 
+	deliveryChanged := !equivalentDeliveryDefinition(task, &candidate)
+	if deliveryChanged && r.generations[xid] == ^uint64(0) {
+		return fmt.Errorf("%w: task generation exhausted", ErrInvalidTask)
+	}
 	// Apply modifications atomically
 	if mod.Targets != nil {
 		task.Targets = candidate.Targets
@@ -489,6 +493,10 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 
 	if mod.ImplicitDeactivationAllowed != nil {
 		task.ImplicitDeactivationAllowed = *mod.ImplicitDeactivationAllowed
+	}
+	if deliveryChanged {
+		r.generations[xid]++
+		task.ActivationGeneration = r.generations[xid]
 	}
 
 	return nil

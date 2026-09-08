@@ -794,6 +794,7 @@ func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, 
 
 	state.mu.RLock()
 	pool := state.interfacePools[iface]
+	generation := state.generation
 	state.mu.RUnlock()
 	if pool == nil {
 		return nil, fmt.Errorf("unsupported delivery interface %d", iface)
@@ -804,17 +805,27 @@ func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, 
 		return pooled.conn, nil
 	}
 
-	// Check if connected.
-	if atomic.LoadInt32(&state.state) != connStateConnected {
-		return nil, ErrNotConnected
-	}
+	// Each interface dials independently even when the other is disconnected.
 
 	// Create a new connection using the provided context.
 	conn, err := m.dialDestinationWithContext(ctx, state)
 	if err != nil {
 		return nil, err
 	}
+	m.mu.RLock()
+	state.mu.RLock()
+	valid := m.destinations[did] == state && state.generation == generation
+	state.mu.RUnlock()
+	if !valid {
+		m.mu.RUnlock()
+		if err := conn.NetConn().Close(); err != nil {
+			logger.Error("close stale LI transport", "error", err)
+		}
+		return nil, ErrNotConnected
+	}
 	m.registerConnection(state, conn, iface)
+	atomic.StoreInt32(&state.state, connStateConnected)
+	m.mu.RUnlock()
 	m.recordInterfaceReconnect(did, iface)
 	m.watchConnection(did, conn)
 
@@ -880,7 +891,7 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 	m.mu.RUnlock()
 
 	if !exists {
-		if err := conn.Close(); err != nil {
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing invalidated connection", "error", err)
 		}
 		return
@@ -911,7 +922,7 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 	state.mu.Unlock()
 	pool.remove(conn)
 
-	if err := conn.Close(); err != nil {
+	if err := conn.NetConn().Close(); err != nil {
 		logger.Debug("error closing invalidated connection", "error", err)
 	}
 
@@ -1525,10 +1536,39 @@ func (m *Manager) writeFrame(conn *tls.Conn, data []byte, timeout time.Duration)
 	if !ok {
 		return ErrNotConnected
 	}
+	_ = value
+	return m.writeFrameUntil(conn, data, time.Now().Add(timeout))
+}
+
+func (m *Manager) writeFrameUntil(conn *tls.Conn, data []byte, deadline time.Time) error {
+	return m.writeFrameUntilContext(context.Background(), conn, data, deadline)
+}
+func (m *Manager) writeFrameUntilContext(ctx context.Context, conn *tls.Conn, data []byte, deadline time.Time) error {
+	value, ok := m.connectionRuntime.Load(conn)
+	if !ok {
+		return ErrNotConnected
+	}
 	runtime := value.(*connectionRuntime)
-	runtime.writeMu.Lock()
+	for !runtime.writeMu.TryLock() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !time.Now().Before(deadline) {
+			return context.DeadlineExceeded
+		}
+		time.Sleep(min(time.Millisecond, max(time.Until(deadline), 0)))
+	}
 	defer runtime.writeMu.Unlock()
-	if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+	if !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	n, err := conn.Write(data)
@@ -1537,7 +1577,7 @@ func (m *Manager) writeFrame(conn *tls.Conn, data []byte, timeout time.Duration)
 	}
 	clearErr := conn.SetWriteDeadline(time.Time{})
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrUncertainWrite, err)
 	}
 	return clearErr
 }
@@ -1545,6 +1585,10 @@ func (m *Manager) writeFrame(conn *tls.Conn, data []byte, timeout time.Duration)
 // WritePDU serializes content with control frames on the TLS connection.
 func (m *Manager) WritePDU(conn *tls.Conn, data []byte, timeout time.Duration) error {
 	return m.writeFrame(conn, data, timeout)
+}
+
+func (m *Manager) WritePDUUntil(conn *tls.Conn, data []byte, deadline time.Time) error {
+	return m.writeFrameUntil(conn, data, deadline)
 }
 
 // scheduleReconnect schedules a reconnection attempt with exponential backoff.
@@ -1653,3 +1697,25 @@ func (m *Manager) RecordWriteError(did uuid.UUID) {
 		state.mu.Unlock()
 	}
 }
+
+// WritePDUContext bounds lock waiting and cancels an active transport write.
+func (m *Manager) WritePDUContext(ctx context.Context, conn *tls.Conn, data []byte, deadline time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		if err := conn.SetDeadline(time.Now()); err != nil {
+			logger.Error("cancel delivery write", "error", err)
+		}
+	})
+	defer func() {
+		if !stop() {
+			<-done
+		}
+	}()
+	return m.writeFrameUntilContext(ctx, conn, data, deadline)
+}
+
+var ErrUncertainWrite = errors.New("transport write outcome uncertain")

@@ -15,19 +15,37 @@ func (p *Processor) populateLIDeliveryStats(dst *management.ProcessorStats) {
 	}
 	stats := liDeliveryClient.Stats()
 	dst.LiDelivery = &management.LIDeliveryStats{
-		X2EnqueueCalls: stats.X2Queued,
-		X3EnqueueCalls: stats.X3Queued,
-		X2Written:      stats.X2Sent,
-		X3Written:      stats.X3Sent,
-		X2Dropped:      stats.X2Dropped,
-		X3Dropped:      stats.X3Dropped,
-		Retries:        stats.Retries,
-		QueueDepth:     stats.QueueDepth,
-		Destinations:   make(map[string]*management.LIDestinationDeliveryStats),
+		X2EnqueueCalls:  stats.X2Queued,
+		UncertainWrites: stats.UncertainWrites, UncertainBytes: stats.UncertainBytes,
+		X3EnqueueCalls:     stats.X3Queued,
+		X2Written:          stats.X2Sent,
+		X3Written:          stats.X3Sent,
+		X2Dropped:          stats.X2Dropped,
+		X3Dropped:          stats.X3Dropped,
+		Retries:            stats.Retries,
+		QueueDepth:         stats.QueueDepth,
+		QueueBytes:         stats.QueueBytes,
+		PhysicalQueueBytes: stats.PhysicalQueueBytes,
+		DroppedBytes:       stats.DroppedBytes,
+		Destinations:       make(map[string]*management.LIDestinationDeliveryStats),
 	}
+	maxAge, budget, reserved := liDeliveryClient.ResourceLimits()
+	dst.LiDelivery.X3MaxAgeMs = maxAge.Milliseconds()
+	dst.LiDelivery.MemoryBudgetBytes = budget
+	dst.LiDelivery.ReservedMemoryBytes = reserved
+	dst.LiDelivery.DroppedByReason = stats.DroppedByReason
+	dst.LiDelivery.DroppedBytesByReason = stats.DroppedBytesByReason
+	dst.LiDelivery.FirstDroppedUnixMs = deliveryUnixMillis(stats.FirstDroppedAt)
+	journal := liDeliveryClient.JournalStats()
+	dst.LiDelivery.X2Journal = &management.LIJournalStats{Bytes: journal.Bytes, MaxBytes: journal.MaxBytes, Pending: uint64(journal.Pending), Persisted: uint64(journal.Persisted), Held: uint64(journal.Held), Rejected: journal.Rejected, LastError: journal.LastError, ReplayPending: uint64(journal.ReplayPending), Uncertain: uint64(journal.Uncertain)}
 	for did, queue := range liDeliveryClient.DestinationStats() {
 		dst.LiDelivery.Destinations[did.String()] = &management.LIDestinationDeliveryStats{
-			QueueDepth:        uint64(queue.QueueDepth),
+			QueueDepth:      uint64(queue.QueueDepth),
+			UncertainWrites: queue.UncertainWrites, UncertainBytes: queue.UncertainBytes,
+			X2QueueBytes: queue.X2QueueBytes, X3QueueBytes: queue.X3QueueBytes,
+			X2InFlightBytes: queue.X2InFlightBytes, X3InFlightBytes: queue.X3InFlightBytes,
+			X2QueueByteCapacity: queue.X2QueueByteCapacity, X3QueueByteCapacity: queue.X3QueueByteCapacity,
+			DroppedBytes: queue.DroppedBytes, DroppedBytesByReason: queue.DroppedBytesByReason, X3Expired: queue.X3Expired,
 			X2QueueCapacity:   uint64(queue.X2QueueCapacity),
 			X3QueueCapacity:   uint64(queue.X3QueueCapacity),
 			X2QueueDepth:      uint64(queue.X2QueueDepth),

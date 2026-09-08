@@ -174,3 +174,17 @@ func (m *Manager) restorePersistedState() error {
 	}
 	return nil
 }
+
+// ReplayTaskAuthorized requires an unchanged persisted activation confirmed by
+// the startup ADMF snapshot. UUID/generation equality without that evidence is
+// insufficient. Call after Start; lifecycle state is revalidated on every call.
+func (m *Manager) ReplayTaskAuthorized(xid uuid.UUID, generation uint64) bool {
+	m.mu.RLock()
+	confirmed := m.replayConfirmed[xid]
+	m.mu.RUnlock()
+	if generation == 0 || confirmed != generation {
+		return false
+	}
+	task, err := m.GetTaskDetails(xid)
+	return err == nil && task.IsActive() && task.ActivationGeneration == generation && equivalentTaskDefinition(m.persistedActive[xid], task)
+}

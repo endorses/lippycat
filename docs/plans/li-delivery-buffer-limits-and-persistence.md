@@ -408,3 +408,50 @@ Changed Go sources were formatted with gofmt and this plan with Prettier before
 staging. Performance measurements were not rerun during this correctness audit.
 No confirmed findings remain open; the checks cover the tested behavior and do
 not establish the absence of every possible defect.
+
+## Fourth implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/transport ownership, journal persistence/replay,
+and configuration/lifecycle integration. The parent independently reviewed the
+findings and regression tests; agents also cross-reviewed the transport changes.
+
+- [x] Preserve queued X2/X3 when a destination update leaves its delivery identity
+      unchanged, including repeated X1 requests and description-only edits.
+- [x] Honor cancellation during TLS handshakes and stop background connection
+      attempts during manager shutdown. Forced removal and shutdown close the
+      underlying transport without waiting for TLS close notifications.
+- [x] Serialize background connection publication with destination replacement
+      and removal, rejecting superseded transports and stale failed-dial state
+      updates.
+- [x] Keep delivery destination definitions private so external mutations cannot
+      bypass lifecycle generation tracking.
+- [x] Complete independent regression, race-suite and build verification, format
+      changes and commit the fixes with this audit record.
+
+The parent independently passed the new transport and queue-retention regressions
+for 30 race-enabled iterations. Source overlays restoring the original code fail
+the queue-retention, handshake-cancellation, interface-reconnect and blocked
+close-notification regressions. Atomic initial-dial publication was also verified
+by lock-order review; its existing handshake-time generation check already passes
+the new replacement test, so that test alone does not establish coverage of the
+later check-to-publication window.
+
+Final verification passed:
+
+```text
+go test -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -race -tags li ./internal/pkg/li/delivery -run 'TestDialCancellationInterruptsTLSHandshake|TestBackgroundDialRejectsReplacedDestination|TestManagerStopCancelsBackgroundTLSHandshake|TestDeliveryDestinationDefinitionsAreCopies|TestManagerStopDoesNotWaitForTLSCloseNotify' -count=30 -timeout 90s
+go test -race -tags 'all li' ./internal/pkg/processor -run 'TestLIDelivery(UnchangedDestinationPreservesQueuedProduct|ReplacementReservesCapacityAndRecoversRefusedDestination)' -count=30 -timeout 60s
+go test -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -tags 'processor li' -o /tmp/li-fourth-audit-processor .
+go build -tags 'tap li' -o /tmp/li-fourth-audit-tap .
+go build -tags all -o /tmp/li-fourth-audit-all .
+git diff --check
+```
+
+Socket-backed tests and module-cache writes required sandbox escalation. Changed
+Go sources were formatted with gofmt and this plan with Prettier before staging.
+Journal review found no additional confirmed defects; its focused persistence and
+replay race tests passed. Performance benchmarks were not rerun during this
+correctness audit. No confirmed findings remain open; these checks establish the
+covered behavior, not proof that every possible defect is absent.

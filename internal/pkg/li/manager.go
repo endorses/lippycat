@@ -1986,6 +1986,10 @@ func (m *Manager) Config() ManagerConfig {
 
 // MarkTaskFailed marks a task as failed with an error message.
 func (m *Manager) MarkTaskFailed(xid uuid.UUID, errMsg string) error {
+	// Fault finalization must wait for admitted producers before its callback
+	// cancels delivery. Otherwise those producers can enqueue after the sweep.
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	// Remove filters
 	if err := m.filters.RemoveFiltersForTask(xid); err != nil {
 		logger.Error("Failed to remove filters for failed task",

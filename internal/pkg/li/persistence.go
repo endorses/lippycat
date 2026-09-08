@@ -55,7 +55,7 @@ func loadPersistedState(path string) (*persistedState, error) {
 	return &state, nil
 }
 
-func writePersistedState(path string, state *persistedState) error {
+func writePersistedState(path string, state *persistedState) (result error) {
 	state.Version, state.WrittenAt = persistenceSchemaVersion, time.Now().UTC()
 	b, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
@@ -65,6 +65,17 @@ func writePersistedState(path string, state *persistedState) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create LI state directory %q: %w", dir, err)
 	}
+	// Open before replacing state: write/search permissions alone permit the
+	// rename, but cannot provide the directory handle needed to make it durable.
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open LI state directory for sync: %w", err)
+	}
+	defer func() {
+		if err := d.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("close LI state directory: %w", err))
+		}
+	}()
 	tmp, err := os.CreateTemp(dir, ".li-state-*")
 	if err != nil {
 		return fmt.Errorf("create temporary LI state: %w", err)
@@ -89,11 +100,8 @@ func writePersistedState(path string, state *persistedState) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("replace LI state %q: %w", path, err)
 	}
-	if d, err := os.Open(dir); err == nil {
-		defer d.Close()
-		if err := d.Sync(); err != nil {
-			return fmt.Errorf("sync LI state directory: %w", err)
-		}
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("sync LI state directory: %w", err)
 	}
 	return nil
 }
@@ -117,10 +125,17 @@ func (m *Manager) persistState() error {
 			state.Generations[xid] = task.ActivationGeneration
 		}
 	}
+	registered := make(map[uuid.UUID]bool)
 	m.registry.ListTasks(func(task *InterceptTask) bool {
 		state.Tasks = append(state.Tasks, task)
+		registered[task.XID] = true
 		return true
 	})
+	for xid, task := range m.persistenceCandidates {
+		if !registered[xid] && state.Generations[xid] == task.ActivationGeneration {
+			state.Tasks = append(state.Tasks, task)
+		}
+	}
 	for _, dest := range m.ListDestinations() {
 		state.Destinations = append(state.Destinations, &persistedDestination{
 			DID: dest.DID, Address: dest.Address, Port: dest.Port,
@@ -183,6 +198,7 @@ func (m *Manager) restorePersistedState() error {
 			// Active state is only a candidate until a complete ADMF snapshot confirms it.
 			copyTask := *task
 			m.persistedActive[task.XID] = &copyTask
+			m.persistenceCandidates[task.XID] = &copyTask
 		}
 	}
 	for xid, generation := range state.Generations {

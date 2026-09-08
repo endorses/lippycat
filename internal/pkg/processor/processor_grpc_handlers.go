@@ -45,6 +45,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
@@ -669,9 +670,24 @@ func (p *Processor) SubscribeTopology(req *management.TopologySubscribeRequest, 
 	}
 }
 
+// validateLocalRADIUSFilter checks local capability before committing any filter
+// state. Local tap ingress cannot enforce RADIUS criteria yet.
+func (p *Processor) validateLocalRADIUSFilter(filter *management.Filter) error {
+	if filter == nil || !sharedfilter.IsRADIUSFilter(filter.Type) {
+		return nil
+	}
+	if localTarget, ok := p.filterTarget.(*filtering.LocalTarget); ok && !localTarget.SupportsFilterType(filter.Type) {
+		return status.Error(codes.FailedPrecondition, "local RADIUS ingress capability is not available")
+	}
+	return nil
+}
+
 // UpdateFilter adds or modifies a filter (Management Service)
 func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter) (*management.FilterUpdateResult, error) {
 	logger.Info("Update filter request", "filter_id", filter.Id, "type", filter.Type, "pattern", filter.Pattern)
+	if err := p.validateLocalRADIUSFilter(filter); err != nil {
+		return nil, err
+	}
 
 	// Store filter and distribute to hunters (distributed mode)
 	huntersUpdated, err := p.filterManager.Update(filter)
@@ -773,6 +789,12 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 	if routingDecision.IsLocal {
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
+		if err := p.validateLocalRADIUSFilter(req.Filter); err != nil {
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"filter_id", req.Filter.Id,
+				"chain_depth", 0)
+			return nil, err
+		}
 
 		huntersUpdated, err := p.filterManager.Update(req.Filter)
 		if err != nil {

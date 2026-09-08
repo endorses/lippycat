@@ -290,6 +290,28 @@ CLI replacement regression. Vet passed for changed packages with `all li`.
 Local gRPC tests used approved execution outside the sandbox. The plan's Phase 2
 completion status remains unchanged.
 
+Phase 2 third assessment (2026-09-09): three sub-agents reviewed correlation,
+predicates and management; parent review confirmed a local tap capability gap
+in both management RPC paths. `UpdateFilter` stored, persisted and distributed
+RADIUS filters before local rejection, while local `UpdateFilterOnProcessor`
+requests bypassed that rejection and reported success. Both paths now check
+local RADIUS capability before manager mutation. Scoped requests perform this
+check only after routing identifies the local processor.
+
+Parent-run regressions reproduced the defect for creation and BPF replacement
+through both RPCs. They verify rejection leaves manager/local policy, persisted
+bytes, hunter update queues and available revisions intact. Independent
+cross-review verified the fix. Positive regression cases confirm ordinary
+processors still accept and distribute RADIUS filters through both RPCs.
+No additional predicate or correlator defects
+were confirmed; live ingress and LI admission remain later-phase work.
+
+The Phase 2 race suite passed before changes. After the fix, the full processor
+and processor-filtering race suites passed, along with the new regressions under
+`tap` and `processor li` tags and processor vet under `all li`. Network tests
+used approved execution outside the sandbox. Go/Markdown formatting and
+`git diff --check` passed. Phase 2 completion status remains unchanged.
+
 ## Phase 3 — Capture ingress, transport, and ordinary outputs
 
 Primary locations: `internal/pkg/hunter/forwarding/manager.go`,
@@ -366,6 +388,7 @@ implicit SIP behavior or undocumented identity conventions.
 
 - [ ] Replay equivalent fixtures through tap and hunt/process and compare target attribution, association status, ordinary outputs, and decoded X2 PDUs, accounting only for documented topology-specific fields.
 - [ ] Cover multiple hunters/interfaces, upstream processor forwarding, reconnect/restart scope changes, filter update races, dropped request transport, and legacy/missing evidence. No cross-scope target delivery is permitted.
+- [ ] Fix and regression-test registration/subscription filter snapshot reconciliation before claiming distributed RADIUS support. Reproduced in the shared hunter filter manager: registration installs revision 1, the filter changes to revision 2 before subscription, and the subscription snapshot sends `UPDATE_ADD`; the hunter ignores the existing ID and retains revision 1. Check deletions during the same gap and snapshot/live-update ordering as well. Verify convergence to current processor policy without retaining stale revisions or deleted filters, including reconnects and legacy-peer compatibility. Relevant paths: `internal/pkg/hunter/filtering/manager.go` (`SetInitialFilters`, `handleUpdate`) and `internal/pkg/processor/processor_grpc_handlers.go` (`SubscribeFilters`). This pre-existing shared-infrastructure concern was reproduced during Phase 2 review; current hunters do not advertise RADIUS capability, so live RADIUS verification remains pending.
 - [ ] Run the complete acceptance matrix below, targeted unit/integration suites, decoder fuzzing, and race tests for correlator, filter updates, task lifecycle, and queued delivery.
 - [ ] Build applicable non-LI variants (`all`, `hunter`, `processor`, `tap`, `cli`, `tui`) and LI variants (`all li`, `processor li`, `tap li`); run `make verify-no-li` and relevant vet checks.
 - [ ] Validate against the deployment MDF and representative BRAS traces before claiming production interoperability. Record external validation as pending if the receiver or traces are unavailable.

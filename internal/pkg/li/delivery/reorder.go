@@ -17,10 +17,13 @@ const (
 )
 
 // ReorderBuffer orders X3 RTP PDUs independently per SSRC. Delivery callbacks
-// are always invoked without the buffer lock held.
+// are always invoked without the buffer lock held, in committed batch order.
+// A callback may discard lifecycle state, but must not recursively deliver,
+// flush, stop, or wait on this same buffer: those operations may wait for it.
 type ReorderBuffer struct {
 	sharedWorkers      *sync.WaitGroup
 	callbackWG         sync.WaitGroup
+	callbackTail       <-chan struct{}
 	timerWG            sync.WaitGroup
 	budget             *ReorderBudget
 	budgeted           bool
@@ -181,17 +184,12 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 			}
 		}
 	}
-	if len(out) > 0 {
-		rb.callbackWG.Add(1)
-		if rb.sharedWorkers != nil {
-			rb.sharedWorkers.Add(1)
-		}
-	}
+	previous, done := rb.reserveDeliveryLocked(out)
 	rb.mu.Unlock()
 	if afterCommit != nil {
 		afterCommit()
 	}
-	rb.deliver(out)
+	rb.deliver(out, previous, done)
 }
 func drainConsecutive(s *rtpStream) (out []ReorderEntry) {
 	for {
@@ -280,16 +278,34 @@ func (rb *ReorderBuffer) flush(key reorderStreamKey, expected *rtpStream, genera
 	s.timer = nil
 	s.deadline = time.Time{}
 	out := drainAll(s)
-	if len(out) > 0 {
-		rb.callbackWG.Add(1)
-		if rb.sharedWorkers != nil {
-			rb.sharedWorkers.Add(1)
+	previous, done := rb.reserveDeliveryLocked(out)
+	rb.mu.Unlock()
+	rb.deliver(out, previous, done)
+}
+
+// reserveDeliveryLocked fixes callback order at the same point as RTP order.
+// Waiting happens only after afterCommit releases producer admission barriers.
+func (rb *ReorderBuffer) reserveDeliveryLocked(out []ReorderEntry) (<-chan struct{}, chan struct{}) {
+	if len(out) == 0 {
+		return nil, nil
+	}
+	previous := rb.callbackTail
+	done := make(chan struct{})
+	rb.callbackTail = done
+	rb.callbackWG.Add(1)
+	if rb.sharedWorkers != nil {
+		rb.sharedWorkers.Add(1)
+	}
+	return previous, done
+}
+
+func (rb *ReorderBuffer) deliver(out []ReorderEntry, previous <-chan struct{}, done chan struct{}) {
+	if done != nil {
+		defer close(done)
+		if previous != nil {
+			<-previous
 		}
 	}
-	rb.mu.Unlock()
-	rb.deliver(out)
-}
-func (rb *ReorderBuffer) deliver(out []ReorderEntry) {
 	if len(out) > 0 {
 		defer rb.callbackWG.Done()
 		if rb.sharedWorkers != nil {
@@ -325,14 +341,9 @@ func (rb *ReorderBuffer) CleanupIdleStreams(maxIdle time.Duration) bool {
 		}
 	}
 	empty := len(rb.streams) == 0
-	if len(out) > 0 {
-		rb.callbackWG.Add(1)
-		if rb.sharedWorkers != nil {
-			rb.sharedWorkers.Add(1)
-		}
-	}
+	previous, done := rb.reserveDeliveryLocked(out)
 	rb.mu.Unlock()
-	rb.deliver(out)
+	rb.deliver(out, previous, done)
 	return empty
 }
 func (rb *ReorderBuffer) Stop() {
@@ -353,14 +364,9 @@ func (rb *ReorderBuffer) Stop() {
 		rb.budgeted = false
 	}
 	clear(rb.streams)
-	if len(out) > 0 {
-		rb.callbackWG.Add(1)
-		if rb.sharedWorkers != nil {
-			rb.sharedWorkers.Add(1)
-		}
-	}
+	previous, done := rb.reserveDeliveryLocked(out)
 	rb.mu.Unlock()
-	rb.deliver(out)
+	rb.deliver(out, previous, done)
 }
 
 // DiscardCall drops queued PDUs for exactly one call generation. It leaves

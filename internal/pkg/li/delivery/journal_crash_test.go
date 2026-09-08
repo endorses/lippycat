@@ -4,6 +4,7 @@ package delivery
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,9 +12,64 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+func TestJournalRecoveryRepairsCheckpointsBeforePurge(t *testing.T) {
+	for _, preserve := range []bool{false, true} {
+		t.Run(fmt.Sprint(preserve), func(t *testing.T) {
+			cfg := journalTestConfig(t)
+			cfg.PreserveSequences = preserve
+			j, err := OpenJournal(cfg)
+			require.NoError(t, err)
+			xid := uuid.New()
+			// Leave a real durable product, then fail the first checkpoint write.
+			// This is the same storage state as a crash after product sync.
+			write := j.writeFile
+			j.writeFile = func(path string, data []byte) error {
+				if !strings.HasSuffix(path, ".x2") {
+					return syscall.ENOSPC
+				}
+				return write(path, data)
+			}
+			done := make(chan error, 1)
+			id, err := j.Admit(JournalRecord{XID: xid, Data: journalSequencePDU(t, xid, 9)}, func(_ uint64, err error) { done <- err })
+			require.NoError(t, err)
+			require.ErrorIs(t, <-done, ErrPersistenceUncertain)
+			require.Error(t, j.Close())
+			if preserve {
+				// The surviving product fits, but repairing its missing sequence
+				// checkpoint must not consume the fault/scratch reservation.
+				tight := cfg
+				tight.MaxBytes = j.faultReserve + j.diskSize(1)
+				_, err = OpenJournal(tight)
+				require.ErrorIs(t, err, ErrJournalFull)
+				_, err = os.Stat(j.path(id))
+				require.NoError(t, err, "failed recovery must preserve product")
+			}
+
+			// Successful reopen also verifies failed repair releases the lock.
+			j, err = OpenJournal(cfg)
+			require.NoError(t, err)
+			require.NoError(t, j.Purge(id))
+			require.NoError(t, j.Close())
+			j, err = OpenJournal(cfg)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, j.Close()) }()
+			if preserve {
+				s := x2x3.NewSequencer(10)
+				require.NoError(t, j.VisitSequences(s.RestoreCheckpoint))
+				next, err := s.Next(x2x3.SequenceContext{PDUType: x2x3.PDUTypeX2, XID: xid, CorrelationID: 42})
+				require.NoError(t, err)
+				require.Equal(t, uint32(10), next)
+			}
+			nextID := journalAdmit(t, j, JournalRecord{XID: xid, Data: journalSequencePDU(t, xid, 10)})
+			require.Greater(t, nextID, id)
+		})
+	}
+}
 
 func TestJournalENOSPCPreservesExistingAndUncertainReservation(t *testing.T) {
 	cfg := journalTestConfig(t)

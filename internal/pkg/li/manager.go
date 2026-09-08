@@ -1450,13 +1450,29 @@ func (m *Manager) notifyDestinationDefinition(did uuid.UUID, modified bool) erro
 	return nil
 }
 
-// ListDestinations returns all registered destinations.
+// VisitDestinations visits the current destinations while serializing with
+// destination mutations and their delivery callbacks. Startup delivery bridges
+// must use this boundary so a concurrent removal cannot be undone by a stale
+// snapshot. The visitor may read state but must not mutate destinations.
+func (m *Manager) VisitDestinations(visit func(*Destination) error) error {
+	m.destinationMu.Lock()
+	defer m.destinationMu.Unlock()
+	for _, dest := range m.ListDestinations() {
+		if err := visit(dest); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListDestinations returns copies of all registered destinations.
 func (m *Manager) ListDestinations() []*Destination {
 	m.registry.mu.RLock()
 	defer m.registry.mu.RUnlock()
 	dests := make([]*Destination, 0, len(m.registry.destinations))
 	for _, d := range m.registry.destinations {
-		dests = append(dests, d)
+		copy := *d
+		dests = append(dests, &copy)
 	}
 	return dests
 }

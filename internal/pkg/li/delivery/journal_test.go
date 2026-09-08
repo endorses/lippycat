@@ -256,3 +256,116 @@ func journalRecords(j *Journal) ([]JournalRecord, error) {
 	err := j.VisitHeld(func(r JournalRecord) error { records = append(records, r); return nil })
 	return records, err
 }
+
+func TestJournalRecoveryBoundsDirectoryBatchesAndPayloadReads(t *testing.T) {
+	cfg := journalTestConfig(t)
+	cfg.MaxRecords = 256
+	cfg.MaxBytes = 8 << 20
+	j, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	for range 130 {
+		journalAdmit(t, j, JournalRecord{Data: []byte("IRI")})
+	}
+	largeID := journalAdmit(t, j, JournalRecord{Data: bytes.Repeat([]byte{42}, 128<<10)})
+	require.NoError(t, j.Close())
+
+	limited := cfg
+	limited.MaxRecords = 1
+	_, err = OpenJournal(limited)
+	require.ErrorContains(t, err, "exceeds configured capacity")
+
+	// All directory batches must be read, regardless of filesystem enumeration
+	// order, and replay must still visit the original FIFO order.
+	j, err = OpenJournal(cfg)
+	require.NoError(t, err)
+	var previous uint64
+	require.NoError(t, j.VisitHeld(func(r JournalRecord) error {
+		require.Greater(t, r.ID, previous)
+		previous = r.ID
+		return nil
+	}))
+	require.Equal(t, largeID, previous)
+	require.Equal(t, 131, j.Stats().Held)
+	for id := uint64(1); id < largeID; id++ {
+		require.NoError(t, j.Purge(id))
+	}
+	require.NoError(t, j.Close())
+
+	// A record that cannot fit the recovery budget must be rejected before
+	// allocating/decrypting its payload, even if its ciphertext is invalid.
+	path := j.path(largeID)
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	b[len(b)-1] ^= 1
+	require.NoError(t, os.WriteFile(path, b, 0600))
+	limited = cfg
+	limited.MaxBytes = journalFaultReserve + 4096
+	_, err = OpenJournal(limited)
+	require.ErrorContains(t, err, "exceeds configured capacity")
+	// Failed recovery leaves durable product untouched and releases ownership.
+	b[len(b)-1] ^= 1
+	require.NoError(t, os.WriteFile(path, b, 0600))
+	j, err = OpenJournal(cfg)
+	require.NoError(t, err)
+	require.Equal(t, 1, j.Stats().Held)
+	require.NoError(t, j.Close())
+}
+
+func TestJournalClosedOwnerCannotPurgeReopenedProduct(t *testing.T) {
+	cfg := journalTestConfig(t)
+	j, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	id := journalAdmit(t, j, JournalRecord{Data: []byte("retained IRI")})
+	require.NoError(t, j.Close())
+
+	previousOwner, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	require.Equal(t, 1, previousOwner.Stats().Held)
+	require.NoError(t, previousOwner.Close())
+
+	currentOwner, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, currentOwner.Close()) })
+	require.ErrorIs(t, previousOwner.Purge(id), ErrJournalClosed)
+	records, err := journalRecords(currentOwner)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.Equal(t, "retained IRI", string(records[0].Data))
+	require.NoError(t, currentOwner.Purge(id))
+	require.Zero(t, currentOwner.Stats().Held)
+}
+
+func TestJournalCloseRetainsOwnershipUntilPurgeFinishes(t *testing.T) {
+	cfg := journalTestConfig(t)
+	j, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	// Model a purge already inside its filesystem operation. Admission closes
+	// immediately, but another process cannot acquire the spool until it ends.
+	j.purgeMu.RLock()
+	locked := true
+	defer func() {
+		if locked {
+			j.purgeMu.RUnlock()
+		}
+	}()
+	done := make(chan error, 1)
+	go func() { done <- j.Close() }()
+	require.Eventually(t, func() bool {
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		return j.closed
+	}, time.Second, time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("close released ownership before purge finished: %v", err)
+	default:
+	}
+	_, err = OpenJournal(cfg)
+	require.ErrorContains(t, err, "lock journal")
+	j.purgeMu.RUnlock()
+	locked = false
+	require.NoError(t, <-done)
+	j, err = OpenJournal(cfg)
+	require.NoError(t, err)
+	require.NoError(t, j.Close())
+}

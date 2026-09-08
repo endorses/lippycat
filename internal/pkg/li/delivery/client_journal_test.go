@@ -108,6 +108,33 @@ func TestJournalManifestRequiresIdentityAndCurrentAuthorization(t *testing.T) {
 	require.NoError(t, c.ReplayJournalManifest(export, func(JournalRecord) bool { return true }))
 	require.Equal(t, 1, c.QueueDepth())
 }
+
+func TestJournalManifestExportCannotReplaceSpoolOrKeyThroughAlias(t *testing.T) {
+	cfg := journalTestConfig(t)
+	j, err := OpenJournal(cfg)
+	require.NoError(t, err)
+	id := journalAdmit(t, j, JournalRecord{Data: []byte("retained IRI")})
+	require.NoError(t, j.Close())
+	j, err = OpenJournal(cfg)
+	require.NoError(t, err)
+	c := &Client{journal: j}
+	alias := filepath.Join(t.TempDir(), "spool-alias")
+	require.NoError(t, os.Symlink(cfg.Dir, alias))
+	for _, name := range []string{"manifest.json", ".state", ".lock", filepath.Base(j.path(id))} {
+		require.ErrorContains(t, c.ExportHeldJournalManifest(filepath.Join(alias, name)), "outside the spool")
+	}
+	keyAlias := filepath.Join(t.TempDir(), "key-alias")
+	require.NoError(t, os.Symlink(filepath.Dir(cfg.KeyFile), keyAlias))
+	for _, path := range []string{cfg.KeyFile, filepath.Join(keyAlias, filepath.Base(cfg.KeyFile))} {
+		require.ErrorContains(t, c.ExportHeldJournalManifest(path), "must not replace the journal key")
+	}
+	require.NoError(t, c.ExportHeldJournalManifest(filepath.Join(t.TempDir(), "manifest.json")))
+	require.NoError(t, j.Close())
+	j, err = OpenJournal(cfg)
+	require.NoError(t, err)
+	require.Equal(t, 1, j.Stats().Held)
+	require.NoError(t, j.Close())
+}
 func TestJournalHeldBlocksLiveAndPurgeAccountsOnce(t *testing.T) {
 	cfg := journalTestConfig(t)
 	j, err := OpenJournal(cfg)

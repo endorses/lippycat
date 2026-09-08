@@ -455,3 +455,54 @@ Journal review found no additional confirmed defects; its focused persistence an
 replay race tests passed. Performance benchmarks were not rerun during this
 correctness audit. No confirmed findings remain open; these checks establish the
 covered behavior, not proof that every possible defect is absent.
+
+## Fifth implementation audit (2026-09-08)
+
+Three sub-agents reviewed queue/transport ownership, journal persistence/replay,
+and configuration/lifecycle integration. Parent review and independent agent
+cross-review verified the existing uncommitted fixes and corrected further gaps.
+
+- [x] Classify completed local writes correctly when lifecycle cancellation races
+      completion; retain uncertain-write classification if deadline cleanup fails
+      after the transport accepted the frame.
+- [x] Bound journal recovery directory enumeration and reject records that exceed
+      remaining capacity before reading or decrypting their payloads. Preserve FIFO
+      replay across directory batches and release ownership after failed recovery.
+- [x] Close discarded underlying transports during connection release without
+      waiting for TLS close notifications, covering removed destinations, shutdown,
+      invalid connections and full pools.
+- [x] Reject purges from closed journal owners and retain exclusive spool ownership
+      until an ongoing purge finishes. Keep purge lifetime locking independent of
+      worker admission and callback locks.
+- [x] Resolve directory aliases before exporting replay manifests, preventing
+      exports from overwriting spool records, checkpoints or the encryption key.
+- [x] Complete final race/build verification, format the audit record and commit
+      the verified changes with this plan.
+
+The parent independently passed all seven audit regressions for 30 race-enabled
+iterations. Agent source overlays restoring the original write accounting, purge
+and manifest behavior fail the corresponding regressions; the connection-release
+test also failed all four cleanup branches before its fix. Cross-review checked
+purge/close lock ordering and valid outside-spool manifest exports. Configuration,
+processor/tap parity and lifecycle integration had no additional confirmed findings.
+
+An initial full race suite passed, but a subsequent final run exhausted temporary
+disk space during linking. After the user authorized cache cleanup, final
+verification resumed with package parallelism limited to two. Performance benchmarks
+were not rerun during this correctness audit.
+
+Final verification passed:
+
+```text
+go test -p 2 -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -p 2 -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -p 2 -tags 'processor li' -o /tmp/li-final-audit-processor .
+go build -p 2 -tags 'tap li' -o /tmp/li-final-audit-tap .
+go build -p 2 -tags all -o /tmp/li-final-audit-all .
+git diff --check
+```
+
+Socket-backed tests and module-cache writes used sandbox escalation. Go sources
+were formatted with gofmt and this plan with Prettier before staging. No confirmed
+findings remain open; the checks establish the covered behavior, not proof of the
+absence of every possible defect.

@@ -810,6 +810,17 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 		item.cancel = nil
 		item.conn = nil
 		q.mu.Unlock()
+		if err == nil {
+			// A lifecycle cancellation racing completed local transport output
+			// cannot recall that output or classify it as a known unsent drop.
+			if q.pop(item) {
+				atomic.AddInt64(&c.stats.QueueDepth, -1)
+				atomic.AddInt64(&c.stats.QueueBytes, -int64(len(item.data)))
+				c.recordSuccess(q, item)
+			}
+			backoff = c.config.RetryInitialBackoff
+			continue
+		}
 		if item.canceled.Load() {
 			if q.pop(item) {
 				reason := "lifecycle_suppressed"
@@ -818,15 +829,6 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 				}
 				c.resolveDrop(q, item, reason)
 			}
-			continue
-		}
-		if err == nil {
-			if q.pop(item) {
-				atomic.AddInt64(&c.stats.QueueDepth, -1)
-				atomic.AddInt64(&c.stats.QueueBytes, -int64(len(item.data)))
-				c.recordSuccess(q, item)
-			}
-			backoff = c.config.RetryInitialBackoff
 			continue
 		}
 		if errors.Is(err, ErrDestinationNotFound) {

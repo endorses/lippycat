@@ -802,3 +802,33 @@ Socket-backed tests and Go module metadata cache writes used sandbox escalation.
 Go sources were formatted with gofmt and this plan with Prettier before staging.
 No confirmed findings remain open; these checks establish covered behavior, not
 proof that every possible defect is absent.
+
+## Twelfth implementation audit (2026-09-08)
+
+- [x] Independently review queue/transport/reorder ownership, journal recovery and
+      replay, and task/destination lifecycle integration with three sub-agents.
+- [x] Audit the agents' conclusions against source and independently verify the
+      complete LI race suite, processor/tap configuration and status integration,
+      and LI/non-LI build variants.
+- [x] Record the result and format this audit record before committing it.
+
+No new confirmed defects were found and no implementation changes were needed.
+Each agent passed its focused queue/reorder, journal/replay, or
+lifecycle/persistence regressions for ten race-enabled iterations. Parent source
+review covered producer admission metadata, task and call cancellation, replay
+authorization, processor/tap option propagation, status mapping and shutdown.
+The parent independently passed the complete verification matrix:
+
+```text
+go test -p 2 -count=1 -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 180s
+go test -p 2 -count=1 -tags all ./cmd/process ./cmd/tap ./internal/pkg/statusclient -timeout 60s
+go build -p 2 -tags 'processor li' -o /tmp/li-twelfth-audit-processor .
+go build -p 2 -tags 'tap li' -o /tmp/li-twelfth-audit-tap .
+go build -p 2 -tags all -o /tmp/li-twelfth-audit-all .
+```
+
+Socket-backed tests and Go module metadata cache writes used sandbox escalation.
+Performance benchmarks and physical-storage experiments were not rerun;
+their earlier evidence and deployment-specific limitations remain unchanged.
+These reviews and passing checks support the implementation within the tested
+scope; they do not prove the absence of every possible defect.

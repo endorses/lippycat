@@ -1,9 +1,11 @@
 # Shared RADIUS decoding, matching and association
 
-This package implements Phases 1–2 of the
+This package implements the shared RADIUS components for Phases 1–3 of the
 [RADIUS plan](../../../docs/plans/radius-poi-implementation.md): validation,
-owned observations, exact predicates and bounded transaction association.
-Capture ingress wiring, observation transport and X2 delivery remain later work. Observational decoding does not authenticate RADIUS
+owned observations, exact predicates, bounded transaction association, capture
+ingress, provenance validation and safe presentation. Capture and transport
+adapters integrate these components into ordinary outputs; X2 delivery remains
+later work. Observational decoding does not authenticate RADIUS
 Authenticators or prove subscriber ownership.
 
 ## Pinned gopacket audit
@@ -73,10 +75,9 @@ and inherited criterion groups with filter revisions and task generations.
 Matching and association are separate from decoding: decoding cannot fabricate
 an unmatched/ambiguous decision or inherited evidence. `Observation.Clone` deeply
 copies packet, message, NAS and evidence storage for mutable asynchronous users.
-All these shared contracts live in this non-LI package; display/protobuf adapters
-in `types`/`protocolmeta` and command capability registration in `protocolcatalog`
-remain deferred to their integration phases so they do not advertise unavailable
-RADIUS processing or filtering.
+All these shared contracts live in this non-LI package. Phase 3 integrates display
+metadata in `types` and observation transport in `pipeline/grpcadapter`.
+Dedicated protocol commands and their catalog registration remain Phase 6 work.
 
 ## Validation
 
@@ -211,6 +212,13 @@ The Go runtime configurations accept additional ports and capture scope; default
 observe UDP 1812/1813 with ordinary `local`/`unconfigured` scope labels. Those
 labels do not establish production operator isolation.
 
+Generic capture preserves original IPv4 and IPv6 fragments, including atomic
+fragments, for independently selected packet outputs. They reach the RADIUS
+decoder unchanged and cannot seed attribution. IP reassembly is an explicit
+VoIP capture option; dedicated VoIP hunter/tap modes do not advertise RADIUS
+filtering. Watch follows its selected VoIP mode. Generic capture also retains
+fragmented SIP as original packets; select VoIP mode when SIP reassembly is needed.
+
 An active dynamic RADIUS filter expands the effective BPF with **both directions**
 of the configured service ports. IPv6 UDP extension chains pass a broader
 `ip6 protochain 17` predicate and receive port validation in userspace. This
@@ -218,7 +226,9 @@ expansion can admit traffic outside the base BPF: BPF selection is not an
 operator/NAS authorization boundary. Scope-bound criteria and deployment isolation
 remain required for scoped targets. Removing the filter restores ordinary BPF.
 
-Capture restarts create fresh epochs. Queued pre-boundary timestamps cannot seed
+Capture restarts wait for old readers and handles to finish before establishing
+the new epoch and opening replacement capture. A hunter restart that times out
+does not open a replacement generation. Queued pre-boundary timestamps cannot seed
 or inherit a transaction across the gap. Correlation time follows monotonically
 advancing validated capture timestamps, including accelerated offline replay.
 Validation counters exclude unrelated traffic; noninitial UDP fragments have no

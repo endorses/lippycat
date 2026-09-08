@@ -256,7 +256,7 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 		if program != nil {
 			program.Send(CaptureTelemetryMsg(stats))
 		}
-	})
+	}, capture.CaptureOptions{ReassembleIPFragmentsWhen: IsVoIPModeEnabled})
 }
 
 // startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.

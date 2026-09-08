@@ -16,6 +16,19 @@ import (
 
 type radiusSourceFilter struct{ predicate *radius.Predicate }
 
+func TestLocalRADIUSCapabilityExcludesVoIPReassemblyMode(t *testing.T) {
+	for _, mode := range []string{"", "generic", "dns", "voip"} {
+		t.Run(mode, func(t *testing.T) {
+			config := DefaultLocalSourceConfig()
+			config.ProtocolMode = mode
+			s := NewLocalSource(config)
+			defer s.radiusProcessor.Close()
+			s.SetApplicationFilter(&radiusSourceFilter{})
+			require.Equal(t, mode != "voip", s.SupportsRADIUS())
+		})
+	}
+}
+
 func (*radiusSourceFilter) MatchPacket(gopacket.Packet) bool                    { return false }
 func (*radiusSourceFilter) MatchPacketWithIDs(gopacket.Packet) (bool, []string) { return false, nil }
 func (*radiusSourceFilter) MatchPacketLevelWithIDs(gopacket.Packet) (bool, []string) {
@@ -119,4 +132,57 @@ func TestRADIUSCaptureBoundaryRejectsQueuedOldRequest(t *testing.T) {
 	require.NoError(t, processor.AdvanceBoundary(boundary))
 	next := processor.Process(packets[1], reader.LinkType(), "mirror", nil)
 	require.Equal(t, response.Scope.Epoch, next.Scope.Epoch)
+}
+
+func TestRADIUSCaptureBoundaryIncludesDrainingOldHandle(t *testing.T) {
+	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, file.Close()) }()
+	reader, err := pcapgo.NewReader(file)
+	require.NoError(t, err)
+	var packets []gopacket.Packet
+	for i := 0; i < 2; i++ {
+		raw, ci, err := reader.ReadPacketData()
+		require.NoError(t, err)
+		packet := gopacket.NewPacket(raw, reader.LinkType(), gopacket.Default)
+		packet.Metadata().CaptureInfo = ci
+		packets = append(packets, packet)
+	}
+	predicate, err := radius.CompilePredicate(radius.PredicateSpec{Kind: radius.PredicateUserName, Value: "alice@example.test", FilterID: "user", FilterRevision: 1})
+	require.NoError(t, err)
+	matcher := &radiusSourceFilter{predicate: predicate}
+	s := NewLocalSource(DefaultLocalSourceConfig())
+	defer s.radiusProcessor.Close()
+	s.started = true
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	defer s.cancel()
+	s.captureDone = make(chan struct{})
+	s.captureCancel = func() {
+		// An old handle can return its last packet after the restart begins,
+		// while cancellation and handle closure are still draining. The batching
+		// worker processes that queued packet after SetBPFFilter releases s.mu.
+		packets[0].Metadata().Timestamp = time.Now()
+		close(s.captureDone)
+		// Avoid opening a real live handle in this unit test.
+		s.cancel()
+	}
+	require.NoError(t, s.SetBPFFilter("udp"))
+	request := s.radiusProcessor.Process(packets[0], reader.LinkType(), "mirror", matcher)
+	require.NotNil(t, request)
+	require.Len(t, request.Direct, 1)
+	packets[1].Metadata().Timestamp = time.Now()
+	response := s.radiusProcessor.Process(packets[1], reader.LinkType(), "mirror", matcher)
+	require.NotNil(t, response)
+	require.Empty(t, response.Inherited, "an old-handle request must not survive the capture restart gap")
+	require.Equal(t, radius.AssociationMissing, response.Association.Status)
+
+	// Fresh traffic can associate normally within the replacement generation.
+	packets[0].Metadata().Timestamp = time.Now()
+	fresh := s.radiusProcessor.Process(packets[0], reader.LinkType(), "mirror", matcher)
+	require.Equal(t, radius.AssociationRequest, fresh.Association.Status)
+	packets[1].Metadata().Timestamp = time.Now()
+	response = s.radiusProcessor.Process(packets[1], reader.LinkType(), "mirror", matcher)
+	require.Equal(t, radius.AssociationUnique, response.Association.Status)
+	require.Len(t, response.Inherited, 1)
+	require.Equal(t, fresh.Association.RequestInstanceID, response.Association.RequestInstanceID)
 }

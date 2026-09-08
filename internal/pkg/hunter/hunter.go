@@ -139,11 +139,12 @@ func New(config Config) (*Hunter, error) {
 
 	// Create capture manager (will be recreated with proper context in Start())
 	captureManager := huntercapture.New(huntercapture.Config{
-		RADIUSPorts:   config.RADIUSPorts,
-		Interfaces:    config.Interfaces,
-		BaseFilter:    config.BPFFilter,
-		BufferSize:    config.BufferSize,
-		ProcessorAddr: config.ProcessorAddr,
+		ReassembleIPFragments: config.VoIPMode,
+		RADIUSPorts:           config.RADIUSPorts,
+		Interfaces:            config.Interfaces,
+		BaseFilter:            config.BPFFilter,
+		BufferSize:            config.BufferSize,
+		ProcessorAddr:         config.ProcessorAddr,
 	}, ctx)
 
 	// Determine batch queue size (default or configured)
@@ -292,7 +293,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 			BatchTimeout:          h.config.BatchTimeout,
 			VoIPMode:              h.config.VoIPMode,
 			SupportedFilterTypes:  h.config.SupportedFilterTypes,
-			RADIUSIngress:         h.applicationFilter != nil && h.packetProcessor == nil,
+			RADIUSIngress:         !h.config.VoIPMode && h.applicationFilter != nil && h.packetProcessor == nil,
 			TLSEnabled:            h.config.TLSEnabled,
 			TLSCertFile:           h.config.TLSCertFile,
 			TLSKeyFile:            h.config.TLSKeyFile,

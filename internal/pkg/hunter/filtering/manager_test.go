@@ -79,6 +79,36 @@ func TestModifyIsIdempotentUpsertForApplicationFilters(t *testing.T) {
 	require.Zero(t, restarter.calls)
 }
 
+func TestModifyBPFToRADIUSRestartsCapture(t *testing.T) {
+	restarter := &recordingRestarter{}
+	updater := &recordingApplicationUpdater{}
+	manager := New("hunter", restarter, noopDisconnectMarker{})
+	manager.SetApplicationFilterUpdater(updater)
+	manager.handleUpdate(&management.FilterUpdate{
+		UpdateType: management.FilterUpdateType_UPDATE_ADD,
+		Filter:     &management.Filter{Id: "shared", Type: management.FilterType_FILTER_BPF, Pattern: "tcp", Enabled: true},
+	})
+	require.Equal(t, 1, restarter.calls)
+
+	replacement := &management.Filter{Id: "shared", Type: management.FilterType_FILTER_RADIUS_USERNAME, Pattern: "alice", Enabled: true, Revision: 1}
+	update := &management.FilterUpdate{UpdateType: management.FilterUpdateType_UPDATE_MODIFY, Filter: replacement}
+	manager.handleUpdate(update)
+	require.Equal(t, 2, restarter.calls, "replacing BPF must remove the old capture restriction")
+	require.Equal(t, []*management.Filter{replacement}, restarter.filters[1])
+	require.Equal(t, 2, updater.calls)
+	require.Equal(t, []*management.Filter{replacement}, updater.filters[1])
+	manager.handleUpdate(update)
+	require.Equal(t, 2, restarter.calls, "replayed replacement must remain idempotent")
+	require.Equal(t, 2, updater.calls)
+
+	bpf := &management.Filter{Id: "shared", Type: management.FilterType_FILTER_BPF, Pattern: "udp", Enabled: true, Revision: 2}
+	manager.handleUpdate(&management.FilterUpdate{UpdateType: management.FilterUpdateType_UPDATE_MODIFY, Filter: bpf})
+	require.Equal(t, 3, restarter.calls)
+	require.Equal(t, []*management.Filter{bpf}, restarter.filters[2])
+	require.Equal(t, 3, updater.calls, "switching back to BPF must remove the RADIUS matcher")
+	require.Equal(t, []*management.Filter{bpf}, updater.filters[2])
+}
+
 func TestModifyUpsertCoversCPU_GPUCapableAndLIFilterTypes(t *testing.T) {
 	tests := []struct {
 		name       string

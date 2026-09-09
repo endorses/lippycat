@@ -1066,5 +1066,6 @@ lc completion powershell > lc.ps1
 `sniff radius`, `hunt radius` and `tap radius` share the flags listed in the
 [RADIUS operations reference](../part5-advanced/radius.md#shared-flags-and-configuration).
 `process` and `watch` keep their existing command structure. Ordinary commands
-work without LI; X1/X2 flags exist only in LI builds. The RADIUS distributed
-release gate remains Phase 7.
+work without LI; X1/X2 flags exist only in LI builds. Synthetic direct
+hunt/process verification has passed with upgraded peers; external MDF/operator
+acceptance remains pending and relays cannot authorize X2.

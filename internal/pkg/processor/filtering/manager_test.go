@@ -8,6 +8,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestManager_AddAndRemoveChannel(t *testing.T) {
@@ -218,7 +219,8 @@ func TestManager_Update_ChannelFull(t *testing.T) {
 	hunterID := "hunter-slow"
 	// Create channel with capacity 1
 	manager.channelsMu.Lock()
-	manager.channels[hunterID] = make(chan *management.FilterUpdate, 1)
+	failedChannel := make(chan *management.FilterUpdate, 1)
+	manager.channels[hunterID] = failedChannel
 	manager.channelsMu.Unlock()
 
 	filter := &management.Filter{
@@ -251,6 +253,20 @@ func TestManager_Update_ChannelFull(t *testing.T) {
 	// Verify failure was tracked
 	assert.Greater(t, atomic.LoadUint32(&failureCount), uint32(0),
 		"should track filter update failure")
+	// Drain the already queued update, then observe EOF: the hunter must
+	// reconnect instead of retaining the policy whose update was dropped.
+	<-failedChannel
+	_, open := <-failedChannel
+	require.False(t, open)
+	reconnect, snapshot := manager.SubscribeSnapshot(hunterID)
+	require.Len(t, snapshot, 1)
+	require.Equal(t, filter2.Id, snapshot[0].Id)
+	manager.RemoveChannel(hunterID, failedChannel)
+	_, err = manager.Delete(filter2.Id)
+	require.NoError(t, err)
+	require.Equal(t, management.FilterUpdateType_UPDATE_DELETE, (<-reconnect).UpdateType)
+	manager.RemoveChannel(hunterID, reconnect)
+
 }
 
 func TestManager_Update_ConcurrentSends(t *testing.T) {

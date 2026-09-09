@@ -10,7 +10,8 @@ Phase 3 capture ingress, transport, and ordinary outputs implemented and verifie
 Phase 4 X1 targets and current-generation authorization implemented and verified.
 Phase 5 raw RADIUS X2 and local tap POI implemented and verified.
 Phase 6 commands, configuration, counters and operator documentation implemented and verified.
-Phase 7 remains pending.
+Phase 7 synthetic distributed release verification implemented and verified;
+production MDF/operator acceptance remains pending.
 
 Source: [RADIUS POI implementation assessment](../research/radius-poi-implementation-assessment.md).
 
@@ -649,13 +650,87 @@ agreement remain external acceptance gates.
 
 ## Phase 7 — Distributed parity and release verification
 
-- [ ] Replay equivalent fixtures through tap and hunt/process and compare target attribution, association status, ordinary outputs, and decoded X2 PDUs, accounting only for documented topology-specific fields.
-- [ ] Cover multiple hunters/interfaces, upstream processor forwarding, reconnect/restart scope changes, filter update races, dropped request transport, and legacy/missing evidence. No cross-scope target delivery is permitted.
-- [ ] Fix and regression-test registration/subscription filter snapshot reconciliation before claiming distributed RADIUS support. Reproduced in the shared hunter filter manager: registration installs revision 1, the filter changes to revision 2 before subscription, and the subscription snapshot sends `UPDATE_ADD`; the hunter ignores the existing ID and retains revision 1. Check deletions during the same gap and snapshot/live-update ordering as well. Verify convergence to current processor policy without retaining stale revisions or deleted filters, including reconnects and legacy-peer compatibility. Relevant paths: `internal/pkg/hunter/filtering/manager.go` (`SetInitialFilters`, `handleUpdate`) and `internal/pkg/processor/processor_grpc_handlers.go` (`SubscribeFilters`). This pre-existing shared-infrastructure concern was reproduced during Phase 2 review; Phase 3 now supplies live ingress capability; snapshot convergence remains unverified until this Phase 7 task passes.
-- [ ] Run the complete acceptance matrix below, targeted unit/integration suites, decoder fuzzing, and race tests for correlator, filter updates, task lifecycle, and queued delivery.
-- [ ] Build applicable non-LI variants (`all`, `hunter`, `processor`, `tap`, `cli`, `tui`) and LI variants (`all li`, `processor li`, `tap li`); run `make verify-no-li` and relevant vet checks.
-- [ ] Validate against the deployment MDF and representative BRAS traces before claiming production interoperability. Record external validation as pending if the receiver or traces are unavailable.
-- [ ] Format changed files before staging, verify each completed task before checking it off, and commit implementation changes together with this updated plan in reviewable increments.
+- [x] Replay equivalent fixtures through tap and hunt/process and compare target attribution, association status, ordinary outputs, and decoded X2 PDUs, accounting only for documented topology-specific fields.
+- [x] Cover multiple hunters/interfaces, upstream processor forwarding, reconnect/restart scope changes, filter update races, dropped request transport, and legacy/missing evidence. No cross-scope target delivery is permitted.
+- [x] Fix and regression-test registration/subscription filter snapshot reconciliation before claiming distributed RADIUS support. Reproduced in the shared hunter filter manager: registration installs revision 1, the filter changes to revision 2 before subscription, and the subscription snapshot sends `UPDATE_ADD`; the hunter ignores the existing ID and retains revision 1. Check deletions during the same gap and snapshot/live-update ordering as well. Verify convergence to current processor policy without retaining stale revisions or deleted filters, including reconnects and legacy-peer compatibility. Relevant paths: `internal/pkg/hunter/filtering/manager.go` (`SetInitialFilters`, `handleUpdate`) and `internal/pkg/processor/processor_grpc_handlers.go` (`SubscribeFilters`). This pre-existing shared-infrastructure concern was reproduced during Phase 2 review; Phase 3 now supplies live ingress capability; snapshot convergence remains unverified until this Phase 7 task passes.
+- [x] Run the complete acceptance matrix below, targeted unit/integration suites, decoder fuzzing, and race tests for correlator, filter updates, task lifecycle, and queued delivery.
+- [x] Build applicable non-LI variants (`all`, `hunter`, `processor`, `tap`, `cli`, `tui`) and LI variants (`all li`, `processor li`, `tap li`); run `make verify-no-li` and relevant vet checks.
+- [ ] Validate against the deployment MDF and representative BRAS traces before claiming production interoperability. Record external validation as pending if the receiver or traces are unavailable. **Pending:** neither a deployment MDF nor representative production BRAS traces was supplied; synthetic tests do not establish production interoperability.
+- [x] Format changed files before staging, verify each completed task before checking it off, and commit implementation changes together with this updated plan in reviewable increments.
+
+Phase 7 verification (2026-09-09): three specialized sub-agents implemented
+snapshot reconciliation and distributed regression tests. The parent reviewed
+the changes, requested independent cross-review and reran the integrated suites.
+Review expanded parity to all six codes and added subscription recovery after a
+dropped policy update. Independent review also corrected a test comparison of
+UTC-normalized wire timestamps; captured instants and bytes are unchanged.
+
+Upgraded hunters negotiate an additive authoritative snapshot. The processor
+captures policy and subscribes under its mutation lock, and the hunter serializes
+complete replacement with later live publication. Empty snapshots remove deleted
+filters; ADD is an idempotent replacement for legacy streams. A timed-out update,
+including target-scope removal, invalidates its channel so reconnect obtains
+current policy. Channel identity checks protect replacement subscriptions from
+old stream cleanup. Both endpoints must support snapshots for registration-gap
+deletion convergence; legacy wire compatibility does not promise that guarantee.
+
+The parity test replays eight request/response pairs from the committed fixtures,
+covering all supported codes in both IP families, accounting and custom ports.
+The hunter path uses the actual capture buffer, forwarding worker, asynchronous
+sender and mutual-TLS gRPC ingress, then the real queued mutual-TLS MDF receiver.
+The tap baseline uses the shared capture processor and local envelopes; existing
+LocalSource regressions verify its adapter separately. Tests compare direct and
+inherited attribution, association, packet bytes/link type/timestamps, PCAP,
+broadcast, JSON logs and fully decoded PDUs, normalizing only documented local
+XIDs/correlation IDs and scope-derived identifiers.
+
+Scope tests reject cross-hunter/interface/epoch association and stale or missing
+provenance while preserving ordinary output. Forwarding-manager reconstruction
+starts a fresh epoch and retains the original scope of already queued packets.
+A transported response may carry unique capture-side request evidence even if
+its request was lost in transport; current task admission still applies.
+Upstream verification is compositional: the real asynchronous upstream sender
+preserves the protobuf batch, and a real relay mTLS receiving stream preserves
+ordinary outputs but cannot authorize the original hunter's X2. This does not
+claim a single live multi-processor deployment test or relay-origin authority.
+
+Acceptance matrix evidence combines the new tests with the existing complete
+suites: `radius` decoder/predicate/correlator and fixture tests cover decoding,
+identity, access-line mapping, conjunction and bounded association; LI core/X1
+suites cover NAI migration, target round-trips, restoration and lifecycle admission;
+X2/delivery suites cover golden payloads, queues, sequencing and shutdown.
+Processor output/virtual-interface and protocol/log schema suites cover independent
+outputs. Hunter/processor filter suites and distributed integration tests cover
+compatibility, snapshot ordering, dropped updates and multi-hunter policy changes.
+Command suites cover ordinary text/JSON, configuration and non-LI operation.
+
+Parent-run validation:
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/radius ./internal/pkg/radiusconfig ./internal/pkg/pipeline/... ./internal/pkg/protocolmeta ./internal/pkg/protocolcatalog ./internal/pkg/logstream ./internal/pkg/logschema ./testdata/radius -count=1
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags 'all li' ./internal/pkg/processor/... ./internal/pkg/hunter/... ./cmd ./cmd/sniff ./cmd/hunt ./cmd/tap ./cmd/process ./internal/pkg/logflags -count=1
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags all ./cmd ./cmd/sniff ./cmd/hunt ./cmd/tap ./cmd/process ./internal/pkg/radiusconfig ./internal/pkg/logflags ./internal/pkg/protocolcatalog ./internal/pkg/radius ./internal/pkg/pipeline/... -count=1
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags all ./test -run 'FilterDistribution|Filter.*(Update|Delete|Subscribe|Capability)' -count=1
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags all ./internal/pkg/tui ./internal/pkg/tui/components/filtermanager ./internal/pkg/events ./internal/pkg/types -run 'RADIUS|Radius' -count=1
+GOCACHE=/tmp/lippycat-go-cache go test ./internal/pkg/radius -run '^$' -fuzz '^FuzzDecode$' -fuzztime=10s -parallel=2
+GOCACHE=/tmp/lippycat-go-cache go test ./internal/pkg/radius -run '^$' -fuzz '^FuzzDecodePacket$' -fuzztime=15s -parallel=2
+GOCACHE=/tmp/lippycat-go-cache go vet -tags 'all li' ./cmd/sniff ./cmd/hunt ./cmd/tap ./cmd/process ./internal/pkg/li/... ./internal/pkg/processor/... ./internal/pkg/hunter/... ./internal/pkg/radius ./internal/pkg/radiusconfig ./internal/pkg/pipeline/...
+GOCACHE=/tmp/lippycat-go-cache make verify-no-li
+mdbook build docs/manual --dest-dir /tmp/radius-phase7-manual
+```
+
+All checks passed. Decoder fuzzing completed 165,593 payload executions and
+99,321 packet executions without failure. All nine applicable variants (`all`,
+`hunter`, `processor`, `tap`, `cli`, `tui`, `all li`, `processor li`, `tap li`)
+built successfully. Tests needing local sockets used approved execution outside
+the sandbox. Builds emitted only the previously documented nonfatal read-only
+module-stat-cache warning. Changed files were formatted and `git diff --check`
+passed before staging. The operator guide and manual now describe direct
+hunt/process support, mixed-version limitations and the relay trust boundary.
+
+This completes Phase 7's local synthetic release work. The unchecked deployment
+MDF/production-trace task and the two Phase 0 external acceptance gates remain
+pending; production interoperability is not claimed.
 
 ## Acceptance matrix
 

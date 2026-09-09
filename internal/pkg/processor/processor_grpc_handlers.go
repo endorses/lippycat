@@ -233,7 +233,7 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	logger.Info("Filter subscription started", "hunter_id", hunterID)
 
 	// Create filter update channel for this hunter
-	filterChan := p.filterManager.AddChannel(hunterID)
+	filterChan, currentFilters := p.filterManager.SubscribeSnapshot(hunterID)
 
 	// Cleanup on disconnect
 	defer func() {
@@ -243,18 +243,23 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	}()
 
 	// Send current filters immediately
-	currentFilters := p.filterManager.GetForHunter(hunterID)
-	for _, filter := range currentFilters {
-		update := &management.FilterUpdate{
-			UpdateType: management.FilterUpdateType_UPDATE_ADD,
-			Filter:     filter,
-		}
-		if err := stream.Send(update); err != nil {
-			logger.Error("Failed to send initial filter", "error", err, "filter_id", filter.Id)
+	if req.SupportsSnapshot {
+		if err := stream.Send(&management.FilterUpdate{Snapshot: true, Filters: currentFilters}); err != nil {
 			return err
 		}
-	}
+	} else {
+		for _, filter := range currentFilters {
+			update := &management.FilterUpdate{
+				UpdateType: management.FilterUpdateType_UPDATE_ADD,
+				Filter:     filter,
+			}
+			if err := stream.Send(update); err != nil {
+				logger.Error("Failed to send initial filter", "error", err, "filter_id", filter.Id)
+				return err
+			}
+		}
 
+	}
 	logger.Info("Sent initial filters", "hunter_id", hunterID, "count", len(currentFilters))
 
 	// Stream filter updates

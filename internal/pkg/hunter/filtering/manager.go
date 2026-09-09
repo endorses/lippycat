@@ -32,8 +32,10 @@ type ApplicationFilterUpdater interface {
 // Manager handles filter subscription and updates from processor
 type Manager struct {
 	hunterID string
-	mu       sync.RWMutex
-	filters  []*management.Filter
+	// Serialize state changes through capture/application publication.
+	applyMu sync.Mutex
+	mu      sync.RWMutex
+	filters []*management.Filter
 
 	// Dependencies
 	captureRestarter CaptureRestarter
@@ -79,6 +81,8 @@ func (m *Manager) GetFilterCount() int {
 
 // SetInitialFilters sets the initial filters from registration response
 func (m *Manager) SetInitialFilters(filters []*management.Filter) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	m.mu.Lock()
 	m.filters = filters
 	appFilterUpdater := m.appFilterUpdater
@@ -97,7 +101,8 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 	logger.Info("Subscribing to filter updates")
 
 	req := &management.FilterRequest{
-		HunterId: m.hunterID,
+		HunterId:         m.hunterID,
+		SupportsSnapshot: true,
 	}
 
 	stream, err := mgmtClient.SubscribeFilters(ctx, req)
@@ -186,6 +191,12 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 // handleUpdate applies filter updates from processor
 // Routes updates by filter type: BPF filters require restart, app-level filters hot-reload
 func (m *Manager) handleUpdate(update *management.FilterUpdate) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	if update != nil && update.Snapshot {
+		m.replaceSnapshot(update.Filters)
+		return
+	}
 	if update == nil || update.Filter == nil {
 		logger.Warn("Ignoring invalid filter update", "operation", "no-op")
 		return
@@ -209,34 +220,7 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 	}
 
 	switch update.UpdateType {
-	case management.FilterUpdateType_UPDATE_ADD:
-		// Check if filter already exists (prevent duplicates)
-		exists := false
-		for _, f := range m.filters {
-			if f.Id == update.Filter.Id {
-				exists = true
-				logger.Debug("Filter already exists, skipping duplicate add",
-					"filter_id", update.Filter.Id)
-				break
-			}
-		}
-
-		if !exists {
-			// Add new filter
-			m.filters = append(m.filters, update.Filter)
-			filtersChanged = true
-			logger.Info("Filter added",
-				"operation", "add",
-				"filter_id", update.Filter.Id,
-				"pattern", update.Filter.Pattern)
-		} else {
-			logger.Info("Filter update made no change",
-				"operation", "no-op",
-				"filter_id", update.Filter.Id,
-				"update_type", update.UpdateType)
-		}
-
-	case management.FilterUpdateType_UPDATE_MODIFY:
+	case management.FilterUpdateType_UPDATE_ADD, management.FilterUpdateType_UPDATE_MODIFY:
 		// MODIFY is an idempotent upsert. This is important when a filter's
 		// target scope expands: newly included hunters have never seen the ID.
 		found := false
@@ -340,4 +324,37 @@ func (m *Manager) containsBPFFilter(filter *management.Filter) bool {
 	return filter.Type == management.FilterType_FILTER_BPF ||
 		filter.Type == management.FilterType_FILTER_RADIUS_USERNAME || filter.Type == management.FilterType_FILTER_RADIUS_MAC ||
 		filter.Type == management.FilterType_FILTER_RADIUS_ATTRIBUTE || filter.Type == management.FilterType_FILTER_RADIUS_COMPOUND
+}
+
+// replaceSnapshot replaces the complete registration/reconnect policy, including
+// deleted filters. Publish once so application matching never sees partial policy.
+func (m *Manager) replaceSnapshot(filters []*management.Filter) {
+	m.mu.Lock()
+	needsRestart := false
+	for _, f := range m.filters {
+		if m.containsBPFFilter(f) {
+			needsRestart = true
+		}
+	}
+	current := make([]*management.Filter, 0, len(filters))
+	for _, f := range filters {
+		if f == nil {
+			continue
+		}
+		current = append(current, proto.Clone(f).(*management.Filter))
+		if m.containsBPFFilter(f) {
+			needsRestart = true
+		}
+	}
+	m.filters = current
+	updater := m.appFilterUpdater
+	m.mu.Unlock()
+	if updater != nil {
+		updater.UpdateFilters(current)
+	}
+	if needsRestart || updater == nil {
+		if err := m.captureRestarter.Restart(current); err != nil {
+			logger.Error("Failed to restart capture with filter snapshot", "error", err)
+		}
+	}
 }

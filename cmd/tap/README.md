@@ -753,5 +753,6 @@ variables configure the same profiles and bounded transaction state.
 
 See the [RADIUS operator guide](../../docs/RADIUS.md) for flag defaults, supported
 messages, MAC and line mapping rules, mirrored BRAS/BNG deployment, counters and
-local tap POI setup. Distributed release support remains gated on Phase 7;
-external operator and MDF acceptance are pending.
+local tap and direct mutual-TLS hunt/process POI setup. Synthetic distributed
+release verification has passed with upgraded peers; external operator and MDF
+acceptance remain pending. Relays preserve ordinary outputs but cannot authorize X2.

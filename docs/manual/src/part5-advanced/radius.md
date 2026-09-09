@@ -6,11 +6,13 @@ Ordinary capture requires neither an LI build nor an activated X1 task.
 `lc process` remains protocol-neutral; use existing `lc watch live`, `watch file`,
 and `watch remote` commands to view RADIUS metadata.
 
-The local tap POI and ordinary command surfaces are implemented. Distributed
-RADIUS release support is gated on Phase 7 reconnect, snapshot convergence, and
-end-to-end parity tests. The presence of `hunt radius` is not a claim that this
-release gate has passed. Production known-line verification and receiving-MDF
-acceptance are still pending; repository fixtures are synthetic.
+Local tap and directly authenticated hunt/process RADIUS paths have passed
+synthetic release verification, including filter snapshots, reconnect scope
+isolation, ordinary outputs and decoded X2 parity. Upgrade both hunter and
+processor for authoritative filter snapshots. Relays preserve ordinary traffic
+but do not convey capture-origin authority for X2. Production known-line
+verification and receiving-MDF acceptance remain pending; repository fixtures
+are synthetic.
 
 ## Capture topology and supported scope
 
@@ -53,6 +55,35 @@ suppress inheritance. A challenge does not authorize the next exchange, and
 authentication does not authorize later identity-free accounting. Responses seen
 before their requests are not buffered or retrospectively authorized.
 
+## Distributed trust and filter synchronization
+
+For RADIUS X2, connect the hunter directly using mutual TLS. Its verified client
+certificate SAN must match its hunter ID; that ID must also match the observation
+origin. Server-only TLS and insecure transport support ordinary capture but do
+not authorize X2. Upstream processors preserve original bytes, capture scope and
+attribution evidence, but a relay certificate proves only the relay identity.
+Deliver X2 at the directly connected POI; relay-origin authorization is not part
+of this release.
+
+Upgraded hunters request an authoritative filter snapshot when subscribing.
+The processor captures current policy and attaches the update stream atomically;
+the hunter replaces its entire registration policy before applying later live
+updates. Empty snapshots remove deleted filters. A missed update caused by a full
+queue closes that subscription so reconnect can obtain current policy.
+
+Legacy peers retain their existing update protocol. An upgraded hunter treats
+legacy ADD updates as replacements, but an old processor cannot communicate
+registration-gap deletions as an authoritative snapshot. Upgrade both endpoints
+for distributed RADIUS release guarantees; older peers without RADIUS capability
+cannot receive RADIUS filters. Legacy raw packets remain available to ordinary
+outputs and cannot authorize X2 without validated current evidence.
+
+Request association remains local to one hunter, interface and capture epoch.
+Recreating capture/forwarding state starts a new epoch, while already queued
+observations retain their original scope. A request lost in transport can still
+have a response authorized from unique capture-side evidence, subject to current
+processor task admission; a request never observed at capture cannot.
+
 ## Ordinary capture
 
 ```bash
@@ -66,7 +97,7 @@ sudo lc sniff radius -i mirror0 --radius-username 'alice@example.test'
 sudo lc tap radius -i mirror0 --insecure --radius-port 1645,1646 \
   --log-dir ./logs --log-streams radius
 
-# Hunter command surface (distributed release acceptance remains Phase 7).
+# Ordinary distributed capture; X2 additionally requires authenticated origin.
 sudo lc hunt radius -i mirror0 --processor processor.example:55555 \
   --tls-ca ca.crt --radius-username 'alice@example.test'
 ```

@@ -357,6 +357,16 @@ func (m *Manager) Delete(filterID string) (uint32, error) {
 	return huntersUpdated, nil
 }
 
+// SubscribeSnapshot atomically captures policy and attaches the live stream.
+// mutationMu ensures no committed mutation can be queued before its snapshot.
+func (m *Manager) SubscribeSnapshot(hunterID string) (chan *management.FilterUpdate, []*management.Filter) {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	filters := m.GetForHunter(hunterID)
+	ch := m.AddChannel(hunterID)
+	return ch, filters
+}
+
 // AddChannel creates and adds a filter update channel for a hunter
 func (m *Manager) AddChannel(hunterID string) chan *management.FilterUpdate {
 	ch := make(chan *management.FilterUpdate, constants.FilterUpdateChannelBuffer)
@@ -421,7 +431,15 @@ func (m *Manager) getHuntersToRemove(oldFilter, newFilter *management.Filter) []
 // pushFilterUpdateToSpecificHunters sends filter update to a specific list of hunters
 func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *management.FilterUpdate) uint32 {
 	m.channelsMu.RLock()
-	defer m.channelsMu.RUnlock()
+	// A missed policy update invalidates the stream. Remove it after releasing
+	// the read lock, using channel identity so reconnect replacements survive.
+	failedChannels := make(map[string]chan *management.FilterUpdate)
+	defer func() {
+		m.channelsMu.RUnlock()
+		for id, ch := range failedChannels {
+			m.RemoveChannel(id, ch)
+		}
+	}()
 
 	var huntersUpdated uint32
 	const sendTimeout = 2 * time.Second
@@ -441,6 +459,7 @@ func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *
 			return true
 
 		case <-timer.C:
+			failedChannels[hunterID] = ch
 			// Timeout - track failure
 			if m.onFilterFailure != nil {
 				m.onFilterFailure(hunterID, true)
@@ -469,7 +488,15 @@ func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *
 // pushFilterUpdate sends filter update to affected hunters
 func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management.FilterUpdate) uint32 {
 	m.channelsMu.RLock()
-	defer m.channelsMu.RUnlock()
+	// A missed policy update invalidates the stream. Remove it after releasing
+	// the read lock, using channel identity so reconnect replacements survive.
+	failedChannels := make(map[string]chan *management.FilterUpdate)
+	defer func() {
+		m.channelsMu.RUnlock()
+		for id, ch := range failedChannels {
+			m.RemoveChannel(id, ch)
+		}
+	}()
 
 	var huntersUpdated uint32
 	const sendTimeout = 2 * time.Second
@@ -491,6 +518,7 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 			return true
 
 		case <-timer.C:
+			failedChannels[hunterID] = ch
 			// Timeout - track failure
 			if m.onFilterFailure != nil {
 				m.onFilterFailure(hunterID, true)

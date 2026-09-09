@@ -8,7 +8,8 @@ Phase 1 shared decoder and observation foundation implemented and verified.
 Phase 2 exact filters and bounded transaction association implemented and verified.
 Phase 3 capture ingress, transport, and ordinary outputs implemented and verified.
 Phase 4 X1 targets and current-generation authorization implemented and verified.
-Phases 5–7 remain pending.
+Phase 5 raw RADIUS X2 and local tap POI implemented and verified.
+Phases 6–7 remain pending.
 
 Source: [RADIUS POI implementation assessment](../research/radius-poi-implementation-assessment.md).
 
@@ -487,22 +488,70 @@ All checks passed. All nine applicable variants (`all`, `hunter`, `processor`,
 Network integration tests used approved execution outside the sandbox; builds
 emitted only the known nonfatal read-only module-stat-cache warning. Changed Go
 and Markdown files were formatted, and `git diff --check` passed. External
-MDF/operator acceptance and Phases 5–7 remain pending.
+MDF/operator acceptance and Phase 5 raw RADIUS X2 and local tap POI implemented and verified.
+Phases 6–7 remain pending.
 
 ## Phase 5 — Raw RADIUS X2 encoding and tap POI
 
 Primary locations: `internal/pkg/li/x2x3`,
 `internal/pkg/processor/processor_li.go`, and the LI packet ingress path.
 
-- [ ] Add a RADIUS encoder consuming an attributed observation without requiring VoIP metadata or Call-ID and without owning matching/correlation state.
-- [ ] Use `PayloadFormatRADIUS = 11` and the original bytes bounded by validated RADIUS Length; exclude Ethernet/IP/UDP and padding, and never reconstruct payload from decoded attributes.
-- [ ] Reuse common PDU attributes, shared sequencing, capture timestamps, endpoint metadata, approved Correlation ID semantics, and queued TLS X2 delivery; keep subscriber-relative direction unknown unless justified.
-- [ ] Dispatch RADIUS separately from SIP packet IRI and proprietary normalized metadata delivery. Verify ingress reaches RADIUS provenance validation before generic LI filter-ID handling can discard or admit it incorrectly.
-- [ ] Add golden PDU tests for all supported exchanges, repeated/unknown attributes, non-VoIP observations, byte identity, format, sequencing, correlation, direction, timestamps, and endpoint attributes.
-- [ ] Run tap fixture integration against a local test MDF receiver; test delivery pressure, encoder failures, destination lifecycle, and shutdown while ordinary packet/log sinks remain active.
+- [x] Add a RADIUS encoder consuming an attributed observation without requiring VoIP metadata or Call-ID and without owning matching/correlation state.
+- [x] Use `PayloadFormatRADIUS = 11` and the original bytes bounded by validated RADIUS Length; exclude Ethernet/IP/UDP and padding, and never reconstruct payload from decoded attributes.
+- [x] Reuse common PDU attributes, shared sequencing, capture timestamps, endpoint metadata, approved Correlation ID semantics, and queued TLS X2 delivery; keep subscriber-relative direction unknown unless justified.
+- [x] Dispatch RADIUS separately from SIP packet IRI and proprietary normalized metadata delivery. Verify ingress reaches RADIUS provenance validation before generic LI filter-ID handling can discard or admit it incorrectly.
+- [x] Add golden PDU tests for all supported exchanges, repeated/unknown attributes, non-VoIP observations, byte identity, format, sequencing, correlation, direction, timestamps, and endpoint attributes.
+- [x] Run tap fixture integration against a local test MDF receiver; test delivery pressure, encoder failures, destination lifecycle, and shutdown while ordinary packet/log sinks remain active.
 
 Exit criterion: tap delivers authorized requests and uniquely associated
 responses as format-11 PDUs with exact original RADIUS payloads.
+
+Phase 5 verification (2026-09-09): specialized sub-agents implemented the
+stateless encoder, dedicated processor callback and local MDF integration tests.
+The parent implemented durable correlation allocation, reviewed every component,
+and requested independent cross-review of allocation, encoding and integration.
+All six supported message codes have complete independently packed PDU goldens
+(21 vectors), including IPv4/IPv6, custom ports and repeated/unknown attributes.
+Tests verify original message bytes, capture time, endpoints, format 11, Unknown
+direction, shared sequencing, concurrent encoding and buffer independence.
+
+Correlation ranges are atomically persisted and synced before use, with exclusive
+state ownership, restart range skipping and no wrap. Bounded allocations reuse
+request instances across task XIDs and reject expired, inconsistent or
+capacity-lost allocations. Tests cover request/response and orphan reuse, scope
+isolation, concurrent allocation, byte/count limits, corrupt storage, persistence
+failure, restart and subprocess lock contention. Cleanup is throttled to one
+sweep per second. The processor uses its configured identity for NFID/IPID and
+requires durable storage; missing storage fails closed for X2. State configuration
+and multi-encoder identity constraints are documented in
+[LI integration](../LI_INTEGRATION.md#raw-radius-x2-delivery).
+
+The integration harness runs synthetic request/response fixtures through the
+shared local capture processor, protobuf adapter and actual processor batch path
+to a mutual-TLS MDF receiver. It verifies exact payloads, exchange correlation,
+sequence and shutdown draining with broadcast, PCAP and RADIUS JSON logs active.
+Additional tests cover queue overflow, destination transport removal, exhausted
+encoder capacity, stale task generations and stopped delivery. Destination tests
+exercise the shared transport lifecycle methods; they do not start an X1 server.
+Existing X1 and delivery lifecycle regression suites also pass.
+
+Parent-run final validation:
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./internal/pkg/radius -count=1
+GOCACHE=/tmp/lippycat-go-cache go vet -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./internal/pkg/radius
+```
+
+All checks passed, as did all nine builds (`all`, `hunter`, `processor`, `tap`,
+`cli`, `tui`, `all li`, `processor li`, `tap li`). Network tests used approved
+execution outside the sandbox. Builds emitted only the previously documented
+nonfatal read-only module-stat-cache warning. Changed Go/Markdown files were
+formatted and `git diff --check` passed before staging.
+
+This completes the local synthetic tap POI milestone. Receiving-MDF agreement
+and production operator traces remain external acceptance gates. Dedicated
+commands/configuration and distributed release parity remain Phases 6/7; no
+production interoperability or distributed completion is claimed.
 
 ## Phase 6 — Commands, configuration, and operator documentation
 

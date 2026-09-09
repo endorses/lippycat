@@ -20,7 +20,8 @@ func (m *Manager) processRADIUSPacket(pkt *types.PacketDisplay, provenance Packe
 	}
 	m.stats.packetsProcessed.Add(1)
 	holder := m.onPacketMatch.Load()
-	if holder == nil {
+	radiusHolder := m.onRADIUSMatch.Load()
+	if holder == nil && radiusHolder == nil {
 		return
 	}
 	seen := make(map[uuid.UUID]bool)
@@ -60,6 +61,10 @@ func (m *Manager) processRADIUSPacket(pkt *types.PacketDisplay, provenance Packe
 			}
 			seen[xid] = true
 			m.stats.packetsMatched.Add(1)
+			if radiusHolder != nil {
+				radiusHolder.fn(task, o)
+				continue
+			}
 			// Presentation metadata must not reinterpret the validated RADIUS
 			// payload as SIP/RTP. Copy before sanitizing to preserve other sinks.
 			admittedPacket := *pkt

@@ -47,6 +47,7 @@ func (s *deferredMetadataSender) SendX2WithMetadata(xid uuid.UUID, dids []uuid.U
 // LI encoders and delivery - initialized when LI is enabled
 var (
 	liX2Encoder      *x2x3.X2Encoder
+	liRADIUSEncoder  *x2x3.RADIUSEncoder
 	liX3Encoder      *x2x3.X3Encoder
 	liSequencer      *x2x3.Sequencer
 	liDeliveryMgr    *delivery.Manager
@@ -286,6 +287,8 @@ func (p *Processor) initLIManager() {
 	liSequencer = x2x3.NewSequencer(0)
 	liX2Encoder = x2x3.NewX2EncoderWithSequencer(liSequencer, "", p.config.ProcessorID)
 	liX3Encoder = x2x3.NewX3EncoderWithSequencer(liSequencer, "", p.config.ProcessorID)
+	liRADIUSEncoder = x2x3.NewRADIUSEncoder(liSequencer, "", p.config.ProcessorID, p.config.ProcessorID)
+	p.liManager.SetRADIUSPacketProcessor(p.deliverLIRADIUS)
 	logger.Info("LI X2/X3 encoders initialized")
 
 	// Media direction resolver: RTP carries no SIP identity, so the direction of
@@ -364,7 +367,7 @@ func (p *Processor) initLIManager() {
 
 	// Set packet processor callback for X2/X3 encoding and delivery
 	p.liManager.SetPacketProcessor(func(task *li.InterceptTask, pkt *types.PacketDisplay) {
-		// The raw RADIUS X2 encoder belongs to the next implementation phase.
+		// Raw RADIUS is dispatched through its dedicated observation callback.
 		// Never route an admitted RADIUS task into a SIP or RTP encoder.
 		if li.IsRADIUSTask(task) {
 			return
@@ -871,6 +874,7 @@ func cleanupLIReorderBuffer(key any, buf *delivery.ReorderBuffer, maxIdle time.D
 // stopLIManager stops the LI Manager and delivery client.
 // Called during processor shutdown.
 func (p *Processor) stopLIManager() {
+	p.closeLIRADIUS()
 	if p.liManager == nil {
 		return
 	}

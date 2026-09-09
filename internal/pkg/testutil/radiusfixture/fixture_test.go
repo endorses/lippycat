@@ -1,4 +1,4 @@
-package main
+package radiusfixture
 
 import (
 	"bytes"
@@ -9,14 +9,16 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
 
-// This checker reads the committed wire files independently of the builder.
+// This checker reads the generated wire files independently of the builder.
 // It verifies fixture truth; it does not test production decoder behavior.
 func TestAcceptanceWire(t *testing.T) {
-	b, err := os.ReadFile("expected.json")
+	dir := Write(t)
+	b, err := os.ReadFile(filepath.Join(dir, "expected.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +26,7 @@ func TestAcceptanceWire(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	b, err = os.ReadFile("acceptance.pcap")
+	b, err = os.ReadFile(filepath.Join(dir, "acceptance.pcap"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +153,7 @@ func TestAcceptanceWire(t *testing.T) {
 					}
 				}
 				codes[o.Code], families[version], scopes[o.Scope] = true, true, true
-				golden, err := os.ReadFile(o.RawFile)
+				golden, err := os.ReadFile(filepath.Join(dir, o.RawFile))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -211,14 +213,8 @@ func TestAcceptanceWire(t *testing.T) {
 	}
 }
 
-func TestReproducible(t *testing.T) {
-	for name, want := range artifacts() {
-		got, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(got, want) {
-			t.Errorf("stale fixture %s", name)
-		}
+func TestExpectedManifest(t *testing.T) {
+	if !bytes.Equal(artifacts()["expected.json"], expected) {
+		t.Fatal("generated observations differ from the independent expected manifest")
 	}
 }

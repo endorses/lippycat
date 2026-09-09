@@ -4,6 +4,7 @@ package processor
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 type radiusVirtualInterface struct{ packets []types.PacketDisplay }
@@ -31,7 +34,7 @@ func (*radiusVirtualInterface) Shutdown() error         { return nil }
 func (*radiusVirtualInterface) Stats() vinterface.Stats { return vinterface.Stats{} }
 
 func TestRADIUSVirtualInterfaceRetainsCapture(t *testing.T) {
-	f, err := os.Open("../../../testdata/radius/acceptance.pcap")
+	f, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 	r, err := pcapgo.NewReader(f)

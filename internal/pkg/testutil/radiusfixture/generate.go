@@ -1,17 +1,18 @@
-// Command radius-fixtures generates deterministic synthetic acceptance inputs.
-// It is deliberately independent of the future production RADIUS decoder.
-package main
+// Package radiusfixture generates deterministic synthetic RADIUS inputs for tests.
+// It is independent of the production RADIUS decoder.
+package radiusfixture
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"testing"
 )
 
 type attribute struct {
@@ -233,21 +234,26 @@ func must(err error) {
 		panic(err)
 	}
 }
-func main() {
-	check := flag.Bool("check", false, "check committed fixtures without writing")
-	out := flag.String("out", "testdata/radius", "fixture directory relative to working directory")
-	flag.Parse()
-	for name, b := range artifacts() {
-		path := filepath.Join(*out, name)
-		if *check {
-			got, err := os.ReadFile(path)
-			must(err)
-			if !bytes.Equal(got, b) {
-				panic("stale fixture: " + path)
-			}
-			continue
+
+//go:embed testdata/expected.json
+var expected []byte
+
+// Write generates synthetic capture and raw RADIUS inputs in a fresh temporary
+// directory and copies the independent expected-observation golden alongside
+// them. The directory is removed automatically when the test completes.
+func Write(t testing.TB) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := artifacts()
+	files["expected.json"] = expected
+	for name, b := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("create RADIUS fixture directory: %v", err)
 		}
-		must(os.MkdirAll(filepath.Dir(path), 0755))
-		must(os.WriteFile(path, b, 0644))
+		if err := os.WriteFile(path, b, 0644); err != nil {
+			t.Fatalf("write RADIUS fixture %s: %v", name, err)
+		}
 	}
+	return dir
 }

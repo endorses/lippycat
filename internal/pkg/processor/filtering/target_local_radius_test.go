@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 type radiusBPFUpdater struct {
@@ -27,6 +30,7 @@ type radiusAppUpdater struct{ mockAppFilterUpdater }
 func (*radiusAppUpdater) SupportsRADIUS() bool { return true }
 
 func TestLocalTargetRADIUSCapabilitiesAndPacketVisibility(t *testing.T) {
+	root := radiusfixture.Write(t)
 	target := NewLocalTarget(LocalTargetConfig{BaseBPF: "host 203.0.113.99"})
 	source := &radiusBPFUpdater{ports: []uint16{19120}}
 	matcher := &radiusAppUpdater{}
@@ -42,14 +46,14 @@ func TestLocalTargetRADIUSCapabilitiesAndPacketVisibility(t *testing.T) {
 	require.EqualValues(t, 1, count)
 	require.Len(t, matcher.GetFilters(), 1)
 
-	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(root, "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)
 	require.NoError(t, err)
 	program, err := pcap.NewBPF(reader.LinkType(), 65535, source.LastFilter())
 	require.NoError(t, err)
-	expected, err := os.ReadFile("../../../../testdata/radius/expected.json")
+	expected, err := os.ReadFile(filepath.Join(root, "expected.json"))
 	require.NoError(t, err)
 	var fixtures struct {
 		Observations []struct {
@@ -63,7 +67,7 @@ func TestLocalTargetRADIUSCapabilitiesAndPacketVisibility(t *testing.T) {
 		packet, ci, err := reader.ReadPacketData()
 		require.NoError(t, err)
 		if fixture.Name == "access-request-v4" {
-			// The committed custom-port fixtures are IPv6; its broad protochain
+			// The generated custom-port fixtures are IPv6; its broad protochain
 			// branch cannot prove configured IPv4 port visibility. Change only
 			// the UDP destination port; BPF does not validate UDP checksums.
 			custom := append([]byte(nil), packet...)

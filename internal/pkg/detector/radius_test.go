@@ -3,16 +3,20 @@ package detector
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
-func TestRADIUSCommittedDetectionFixtures(t *testing.T) {
-	manifest, err := os.ReadFile("../../../testdata/radius/expected.json")
+func TestRADIUSGeneratedDetectionFixtures(t *testing.T) {
+	root := radiusfixture.Write(t)
+	manifest, err := os.ReadFile(filepath.Join(root, "expected.json"))
 	require.NoError(t, err)
 	var expected struct {
 		Observations []struct {
@@ -22,7 +26,7 @@ func TestRADIUSCommittedDetectionFixtures(t *testing.T) {
 		}
 	}
 	require.NoError(t, json.Unmarshal(manifest, &expected))
-	file, err := os.Open("../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(root, "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)
@@ -46,7 +50,7 @@ func TestRADIUSCommittedDetectionFixtures(t *testing.T) {
 			require.Equal(t, "RADIUS", detector.Detect(packet).Protocol)
 			require.Equal(t, "RADIUS", detector.DetectWithoutCache(packet).Protocol)
 			if ip, ok := packet.NetworkLayer().(*layers.IPv6); ok && ip.NextHeader == layers.IPProtocolUDP {
-				// Insert a valid eight-byte hop-by-hop header into the committed frame.
+				// Insert a valid eight-byte hop-by-hop header into the generated frame.
 				offset := len(raw) - len(ip.LayerContents()) - len(ip.LayerPayload())
 				extended := append([]byte(nil), raw[:offset+40]...)
 				extended = append(extended, 17, 0, 0, 0, 0, 0, 0, 0)

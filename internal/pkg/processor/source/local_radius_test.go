@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 type radiusSourceFilter struct{ predicate *radius.Predicate }
@@ -46,7 +49,7 @@ func (f *radiusSourceFilter) RADIUSEvidenceCurrent(r radius.AttributionReference
 }
 
 func TestLocalRADIUSSelectionBeforeUnmatchedGate(t *testing.T) {
-	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)
@@ -107,7 +110,7 @@ func TestRADIUSCaptureBoundaryRejectsQueuedOldRequest(t *testing.T) {
 	processor, err := radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "tap"})
 	require.NoError(t, err)
 	defer processor.Close()
-	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)
@@ -135,7 +138,7 @@ func TestRADIUSCaptureBoundaryRejectsQueuedOldRequest(t *testing.T) {
 }
 
 func TestRADIUSCaptureBoundaryIncludesDrainingOldHandle(t *testing.T) {
-	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)
@@ -188,7 +191,7 @@ func TestRADIUSCaptureBoundaryIncludesDrainingOldHandle(t *testing.T) {
 }
 
 func TestLocalRADIUSOnlyDropsUnrelatedAndMalformed(t *testing.T) {
-	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)

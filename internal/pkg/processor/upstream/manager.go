@@ -249,9 +249,11 @@ func (m *Manager) connectAndRegister() error {
 		}
 
 		// Store the upstream processor ID for topology reporting
+		m.mu.Lock()
 		m.upstreamProcessorID = regResp.UpstreamProcessorId
+		m.mu.Unlock()
 		logger.Info("Successfully registered with upstream processor",
-			"upstream_processor_id", m.upstreamProcessorID)
+			"upstream_processor_id", regResp.UpstreamProcessorId)
 	} else {
 		logger.Warn("ProcessorID or ListenAddress not configured, skipping processor registration")
 	}

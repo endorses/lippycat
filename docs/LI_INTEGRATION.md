@@ -73,7 +73,7 @@ lippycat implements the following ETSI interfaces for lawful interception:
 
 | Interface | Purpose                           | Protocol       | Specification |
 | --------- | --------------------------------- | -------------- | ------------- |
-| **X1**    | Administration (ADMF ↔ NE)        | XML/HTTPS      | TS 103 221-1  |
+| **X1**    | Administration (ADMF ↔ NE)       | XML/HTTPS      | TS 103 221-1  |
 | **X2**    | IRI delivery (signaling metadata) | Binary TLV/TLS | TS 103 221-2  |
 | **X3**    | CC delivery (content)             | Binary TLV/TLS | TS 103 221-2  |
 
@@ -298,8 +298,11 @@ Local tap batches establish capture origin internally. Direct hunter streams
 require verified mutual TLS with a certificate identity matching the batch hunter
 ID, which must also match the observation origin. Trust is internal and is not
 forwarded in protobuf. Insecure streams, server-only TLS and unverified relayed
-origins continue ordinary outputs but cannot authorize RADIUS LI. Distributed
-relay origin policy and reconnect/snapshot convergence remain Phase 7 gates.
+origins continue ordinary outputs but cannot authorize RADIUS LI. Synthetic
+direct hunt/process parity and reconnect/snapshot verification have passed.
+Upgrade both endpoints for authoritative filter snapshots; legacy processors
+cannot reconcile registration-gap deletions. Relay-origin authorization remains
+unsupported. Production MDF and operator acceptance remain external gates.
 
 ### Raw RADIUS X2 delivery
 

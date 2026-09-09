@@ -290,6 +290,9 @@ enum ProcessorStatus {
 message FilterRequest {
     // Hunter identifier
     string hunter_id = 1;
+
+    // Request an authoritative initial snapshot before live updates.
+    bool supports_snapshot = 2;
 }
 
 // FilterResponse contains filters for a hunter
@@ -435,6 +438,11 @@ message FilterUpdate {
 
     // Filter being added/modified/deleted
     Filter filter = 2;
+
+    // Authoritative replacement, including an empty policy. Only sent to peers
+    // that explicitly request supports_snapshot.
+    bool snapshot = 3;
+    repeated Filter filters = 4;
 }
 
 // FilterUpdateType enum

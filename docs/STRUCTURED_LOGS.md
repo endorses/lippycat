@@ -31,4 +31,5 @@ origin trust. Identity selection and transaction limits use shared `radius.*`
 configuration. Each selected valid observation has its own record; an identity-free
 response may carry a unique observational request association. Counters remain
 separate from record fields. See [RADIUS operations](RADIUS.md) for state pressure,
-scope and no-secret limitations. Distributed completion remains gated on Phase 7.
+scope and no-secret limitations. Synthetic direct hunt/process verification has
+passed; external MDF/operator acceptance remains pending.

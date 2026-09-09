@@ -348,5 +348,6 @@ X2Only task in an LI build.
 
 The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
 configuration examples, scope isolation, NatParas mappings, state limits and
-MDF setup. Distributed release support requires Phase 7 acceptance; external
-operator known-line verification and receiving-MDF agreement remain pending.
+MDF setup. Synthetic direct hunt/process verification has passed with upgraded
+peers; relay-origin X2 authorization is unsupported. External operator known-line
+verification and receiving-MDF agreement remain pending.

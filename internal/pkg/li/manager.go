@@ -150,6 +150,7 @@ type Manager struct {
 	// onPacketMatch is called when a packet matches an intercept task.
 	// This allows the processor to handle X2/X3 delivery.
 	onPacketMatch atomic.Pointer[packetProcessorHolder]
+	onRADIUSMatch atomic.Pointer[radiusProcessorHolder]
 
 	// onDestinationCreated is called when a new destination is created via X1.
 	// This allows the processor to bridge destinations to the delivery manager.
@@ -178,6 +179,21 @@ type Manager struct {
 }
 
 type packetProcessorHolder struct{ fn PacketProcessor }
+
+type radiusProcessorHolder struct {
+	fn func(*InterceptTask, *radius.Observation)
+}
+
+// SetRADIUSPacketProcessor installs the dedicated raw RADIUS delivery callback.
+// Observations remain separate from public packet presentation metadata.
+func (m *Manager) SetRADIUSPacketProcessor(fn func(*InterceptTask, *radius.Observation)) {
+	if fn == nil {
+		m.onRADIUSMatch.Store(nil)
+		return
+	}
+	m.onRADIUSMatch.Store(&radiusProcessorHolder{fn: fn})
+}
+
 type managerAtomicStats struct {
 	packetsProcessed            atomic.Uint64
 	packetsMatched              atomic.Uint64

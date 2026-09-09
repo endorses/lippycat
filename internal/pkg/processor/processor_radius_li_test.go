@@ -127,6 +127,44 @@ func TestRADIUSInitializedProcessorDoesNotUseVoIPEncoder(t *testing.T) {
 	before := p.getLIEncodingStats()
 	p.liManager.ProcessPacketWithProvenance(packet, li.PacketFilterProvenance{RADIUS: observation, RADIUSTrusted: true})
 	require.Equal(t, uint64(1), p.liManager.Stats().PacketsMatched)
-	require.Equal(t, before, p.getLIEncodingStats(), "admitted RADIUS must not invoke either VoIP encoder")
+	after := p.getLIEncodingStats()
+	require.Equal(t, before.X2Errors+1, after.X2Errors, "missing durable correlation storage must fail closed")
+	require.Equal(t, before.X2Encoded, after.X2Encoded)
+	require.Equal(t, before.X3Encoded, after.X3Encoded)
 	require.Equal(t, "spurious", packet.VoIPData.CallID)
+}
+
+// These callback tests exercise lifecycle checks before potentially expensive
+// allocation/encoding. The fake must never be called for stale authorization.
+type radiusForbiddenAllocator struct {
+	t      *testing.T
+	closed bool
+}
+
+func (a *radiusForbiddenAllocator) Allocate(*radius.Observation) (uint64, error) {
+	a.t.Fatal("unauthorized allocation")
+	return 0, nil
+}
+func (a *radiusForbiddenAllocator) Close() error { a.closed = true; return nil }
+
+func TestRADIUSDeliveryRejectsStaleGenerationAndShutdown(t *testing.T) {
+	p := &Processor{config: Config{ProcessorID: "radius-lifecycle"}}
+	p.liManager = li.NewManager(li.ManagerConfig{Enabled: true}, nil)
+	did := uuid.New()
+	require.NoError(t, p.liManager.CreateDestination(&li.Destination{DID: did, Address: "mdf.invalid", Port: 8443, X2Enabled: true, ProtocolType: "X2Only"}))
+	task := &li.InterceptTask{XID: uuid.New(), Targets: []li.TargetIdentity{{Type: li.TargetTypeNAI, Value: "alice@example.test"}}, DeliveryType: li.DeliveryX2Only, DestinationIDs: []uuid.UUID{did}, RADIUSScope: radius.ScopeBinding{OperatorScope: "operator", ProfileRevision: "v1"}}
+	require.NoError(t, p.liManager.ActivateTask(task))
+	active, err := p.liManager.GetTaskDetails(task.XID)
+	require.NoError(t, err)
+	allocator := &radiusForbiddenAllocator{t: t}
+	p.radiusLIAllocator = allocator
+	stale := *active
+	stale.ActivationGeneration++
+	p.deliverLIRADIUS(&stale, &radius.Observation{})
+	p.closeLIRADIUS()
+	require.True(t, allocator.closed)
+	p.deliverLIRADIUS(active, &radius.Observation{})
+	require.Nil(t, p.radiusLIAllocator, "shutdown must not reopen allocator")
+	require.NoError(t, p.liManager.DeactivateTask(task.XID))
+	p.deliverLIRADIUS(active, &radius.Observation{})
 }

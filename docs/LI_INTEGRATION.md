@@ -294,9 +294,44 @@ forwarded in protobuf. Insecure streams, server-only TLS and unverified relayed
 origins continue ordinary outputs but cannot authorize RADIUS LI. Distributed
 relay origin policy and reconnect/snapshot convergence remain Phase 7 gates.
 
-Phase 4 implements X1 validation and delivery admission. Raw format-11 X2 encoding
-and receiving-MDF integration remain Phase 5 work; this authorization support does
-not yet deliver RADIUS PDUs or establish production MDF interoperability.
+### Raw RADIUS X2 delivery
+
+Authorized RADIUS observations use a dedicated format-11 encoder and the shared
+queued TLS X2 delivery path. The payload is the original validated RADIUS message;
+Ethernet/IP/UDP encapsulation and padding remain only in ordinary packet outputs.
+Capture timestamps and UDP endpoints are conveyed separately. Subscriber-relative
+Payload Direction remains Unknown for both requests and responses. SIP metadata,
+Call-ID and normalized metadata output are not prerequisites.
+
+The authoritative processor reserves persistent Correlation ID ranges before use.
+Set `processor.Config.LIRADIUSCorrelationStateFile`, or configure `LIStateFile` to
+use its path plus `.radius-correlation`. The parent directory must exist and be
+writable. NFID and IPID both use `ProcessorID`; missing identity or storage causes
+RADIUS X2 encoding to fail closed and increments the existing X2 error counter.
+Ordinary outputs continue. Dedicated command/config bindings remain Phase 6 work.
+
+Keep the reservation file and its `.lock` file on durable storage supporting
+exclusive file locks and atomic rename. Every encoder sharing NFID/IPID must use
+the same shared state path; concurrent owners of that path are rejected. Different
+paths on different hosts cannot detect duplicate configured identities, so assign
+separate ProcessorIDs to independent POIs. Never delete or roll back reservation
+storage while retaining the same ProcessorID. Restart skips unused reserved IDs;
+resetting storage requires a new ProcessorID.
+
+Request retransmissions and uniquely associated responses share an allocation
+across task XIDs during the 30-second request lifetime. Orphan or ambiguous direct
+matches use observation-scoped allocations. The map is bounded by 65,536 entries
+and 16 MiB; expiration cleanup runs at most once per second. Expired exchange
+observations and allocation/encoding failures suppress X2 only. Each captured
+matching datagram remains a delivery opportunity; serialized retries retain their
+Correlation ID and sequence. Destination and task generations use the existing
+queue lifecycle safeguards. Persisted RADIUS product is not replay-authorized.
+
+Synthetic tap pipeline tests verify a local mutual-TLS MDF receiver, exact payloads,
+sequence/correlation, queue pressure, destination removal, encoder failure and
+shutdown with ordinary PCAP/log outputs active. Receiving-MDF agreement and
+production operator traces remain external acceptance gates; these tests do not
+establish production interoperability.
 
 ### Delivery Types
 

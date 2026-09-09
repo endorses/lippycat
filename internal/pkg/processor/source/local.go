@@ -1111,10 +1111,11 @@ func (s *LocalSource) sendBatch() {
 		envelope.Source.BatchTimestamp = batchTime
 	}
 	batch := &PacketBatch{
-		SourceID:    s.SourceID(),
-		Envelopes:   s.currentBatch,
-		Sequence:    s.batchSeq,
-		TimestampNs: batchTime.UnixNano(),
+		RADIUSSourceTrusted: true,
+		SourceID:            s.SourceID(),
+		Envelopes:           s.currentBatch,
+		Sequence:            s.batchSeq,
+		TimestampNs:         batchTime.UnixNano(),
 		Stats: &data.BatchStats{
 			TotalCaptured:             s.stats.packetsCaptured.Load(),
 			FilteredMatched:           s.stats.packetsForwarded.Load(),

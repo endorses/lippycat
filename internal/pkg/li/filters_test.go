@@ -174,7 +174,7 @@ func TestFilterManagerTargetTypeMapping(t *testing.T) {
 		{
 			name:         "NAI",
 			target:       TargetIdentity{Type: TargetTypeNAI, Value: "user@realm.example.com"},
-			expectedType: management.FilterType_FILTER_SIP_URI,
+			expectedType: management.FilterType_FILTER_RADIUS_USERNAME,
 			expectedPat:  "user@realm.example.com",
 		},
 		{
@@ -217,6 +217,13 @@ func TestFilterManagerTargetTypeMapping(t *testing.T) {
 				DeliveryType: DeliveryX2Only,
 			}
 
+			if tc.target.Type == TargetTypeNAI {
+				mapped, pattern, err := m.mapTargetToFilterType(tc.target)
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectedType, mapped)
+				assert.Equal(t, tc.expectedPat, pattern)
+				return
+			}
 			filterIDs, err := m.CreateFiltersForTask(task)
 			require.NoError(t, err)
 			require.Len(t, filterIDs, 1)

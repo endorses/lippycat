@@ -88,7 +88,9 @@ func (s *MetadataSink) HandleEvent(_ context.Context, ev events.Event) error {
 	tasks := s.config.Manager.GetActiveTasks()
 	matched := 0
 	for _, task := range tasks {
-		if task.DeliveryType != DeliveryX2Only && task.DeliveryType != DeliveryX2andX3 {
+		// RADIUS tasks authorize only the dedicated raw RADIUS X2 profile.
+		// They cannot authorize proprietary normalized protocol metadata.
+		if IsRADIUSTask(task) || (task.DeliveryType != DeliveryX2Only && task.DeliveryType != DeliveryX2andX3) {
 			continue
 		}
 		target, ok := matchingTarget(task.Targets, ev)
@@ -240,6 +242,8 @@ func matchingTarget(targets []TargetIdentity, ev events.Event) (TargetIdentity, 
 func targetMatches(target TargetIdentity, ev events.Event) bool {
 	flow := ev.Envelope().Flow
 	switch target.Type {
+	case TargetTypeNAI, TargetTypeMACAddress, TargetTypeRADIUSAttribute:
+		return false
 	case TargetTypeIPv4Address, TargetTypeIPv6Address:
 		addr, err := netip.ParseAddr(strings.TrimSpace(target.Value))
 		return err == nil && (flow.SourceAddress == addr || flow.DestinationAddress == addr)

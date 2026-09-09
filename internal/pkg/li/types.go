@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/endorses/lippycat/internal/pkg/radius"
 )
 
 // ErrUnsupportedDeliveryCombination identifies a target/delivery pairing for
@@ -104,6 +106,10 @@ const (
 	TargetTypeIMSI
 	// TargetTypeIMEI identifies a target by IMEI (International Mobile Equipment Identity).
 	TargetTypeIMEI
+	// TargetTypeMACAddress identifies six subscriber MAC octets encoded as hex.
+	TargetTypeMACAddress
+	// TargetTypeRADIUSAttribute identifies one complete supported hex-encoded RADIUS AVP.
+	TargetTypeRADIUSAttribute
 )
 
 // String returns the string representation of TargetType.
@@ -129,6 +135,10 @@ func (t TargetType) String() string {
 		return "IMSI"
 	case TargetTypeIMEI:
 		return "IMEI"
+	case TargetTypeMACAddress:
+		return "MACAddress"
+	case TargetTypeRADIUSAttribute:
+		return "RADIUSAttribute"
 	default:
 		return "Unknown"
 	}
@@ -147,6 +157,11 @@ type InterceptTask struct {
 
 	// Targets specifies the identities to intercept.
 	Targets []TargetIdentity
+
+	// RADIUSScope binds RADIUS criteria to an explicitly configured dedicated POI.
+	RADIUSScope radius.ScopeBinding
+	// RADIUSMACProfile selects the subscriber Calling-Station-Id convention.
+	RADIUSMACProfile string
 
 	// DestinationIDs references the Destination objects for X2/X3 delivery.
 	// These are DIDs (Destination Identifiers) that map to Destination structs.

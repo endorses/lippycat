@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 )
 
@@ -32,6 +33,10 @@ func TaskResponseDetailsToInterceptTask(details *schema.TaskResponseDetails) (*I
 	xid, err := uuid.Parse(string(*td.XId))
 	if err != nil {
 		return nil, fmt.Errorf("parse XID: %w", err)
+	}
+
+	if err := x1.ValidateRADIUSTaskDetails(td); err != nil {
+		return nil, fmt.Errorf("RADIUS task capabilities: %w", err)
 	}
 
 	// Extract target identifiers.
@@ -197,6 +202,22 @@ func convertTargetIdentifier(ti *schema.TargetIdentifier) (*TargetIdentity, erro
 		return nil, nil
 	}
 
+	if ti.Nai != nil || ti.MacAddress != nil || ti.RadiusAttribute != nil {
+		target, err := x1.ParseRADIUSTarget(ti)
+		if err != nil {
+			return nil, err
+		}
+		var kind TargetType
+		switch target.Type {
+		case x1.TargetTypeNAI:
+			kind = TargetTypeNAI
+		case x1.TargetTypeMACAddress:
+			kind = TargetTypeMACAddress
+		case x1.TargetTypeRADIUSAttribute:
+			kind = TargetTypeRADIUSAttribute
+		}
+		return &TargetIdentity{Type: kind, Value: target.Value}, nil
+	}
 	// SIP URI
 	if ti.SipUri != nil && *ti.SipUri != "" {
 		return &TargetIdentity{
@@ -252,14 +273,6 @@ func convertTargetIdentifier(ti *schema.TargetIdentifier) (*TargetIdentity, erro
 		return &TargetIdentity{
 			Type:  TargetTypeIPv6CIDR,
 			Value: string(*ti.Ipv6Cidr),
-		}, nil
-	}
-
-	// NAI (Network Access Identifier)
-	if ti.Nai != nil && *ti.Nai != "" {
-		return &TargetIdentity{
-			Type:  TargetTypeNAI,
-			Value: string(*ti.Nai),
 		}, nil
 	}
 

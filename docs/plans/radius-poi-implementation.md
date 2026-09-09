@@ -7,7 +7,8 @@ external MDF agreement and production operator mapping verification pending.
 Phase 1 shared decoder and observation foundation implemented and verified.
 Phase 2 exact filters and bounded transaction association implemented and verified.
 Phase 3 capture ingress, transport, and ordinary outputs implemented and verified.
-Phases 4–7 remain pending.
+Phase 4 X1 targets and current-generation authorization implemented and verified.
+Phases 5–7 remain pending.
 
 Source: [RADIUS POI implementation assessment](../research/radius-poi-implementation-assessment.md).
 
@@ -421,19 +422,72 @@ Primary locations: `internal/pkg/li` target types, filters, registry, manager,
 restoration/reconciliation paths, and `internal/pkg/li/x1` capabilities and
 target conversions. Read the LI package instructions before implementation.
 
-- [ ] Correct X1 `nai` mapping to the dedicated RADIUS User-Name filter and implement exact MAC target mapping. Keep SIP URI targets mapped to SIP filters, with no NAI-to-SIP fallback or VoIP dependency; keep unsupported attribute forms rejected.
-- [ ] Update target string representations, bidirectional X1 conversion, activation/modification validation, capability reporting, ADMF reconciliation, persisted restoration, and registry validation together.
-- [ ] Support the required AVP subset through all X1 lifecycle and round-trip paths, including hex-binary serialization and subset-aware capability/validation behavior. Preserve conjunctive criteria and current-generation scope evidence for direct requests and inherited responses; reject unsupported AVPs/combinations explicitly.
-- [ ] Apply the migration policy to existing NAI tasks and their distributed filters, including reconnect/restoration paths. Test that obsolete SIP filters and queued authorization cannot survive correction and that explicit SIP URI targets continue to work.
-- [ ] Document the corrected NAI mapping and migration behavior for operators, including the requirement to use explicit SIP URI targets for SIP filtering.
-- [ ] Reject RADIUS task requests for X3 or combined delivery; accept only the supported X2 service/profile and valid destination configuration.
-- [ ] Extend distributed filter evidence with the generation binding required for RADIUS. Define how capture-side filter revisions map to authoritative task generations, including updates racing packet transport.
-- [ ] Add RADIUS-specific provenance validation before the current non-RTP direct/inherited union can authorize delivery; verify direct matches and inherited transaction evidence separately.
-- [ ] Reuse `AcquireTaskAdmission`, activation generations, delivery metadata, and destination lifecycle safeguards. Reject stale evidence after modify, deactivate, expire, restore, and reactivate events, even when filter IDs are reused.
-- [ ] Test multiple tasks matching one valid request, removal of one owner, stale queued packets, destination changes, and generation changes between initial matching and delivery admission; ordinary outputs must remain unaffected by rejection.
+- [x] Correct X1 `nai` mapping to the dedicated RADIUS User-Name filter and implement exact MAC target mapping. Keep SIP URI targets mapped to SIP filters, with no NAI-to-SIP fallback or VoIP dependency; keep unsupported attribute forms rejected.
+- [x] Update target string representations, bidirectional X1 conversion, activation/modification validation, capability reporting, ADMF reconciliation, persisted restoration, and registry validation together.
+- [x] Support the required AVP subset through all X1 lifecycle and round-trip paths, including hex-binary serialization and subset-aware capability/validation behavior. Preserve conjunctive criteria and current-generation scope evidence for direct requests and inherited responses; reject unsupported AVPs/combinations explicitly.
+- [x] Apply the migration policy to existing NAI tasks and their distributed filters, including reconnect/restoration paths. Test that obsolete SIP filters and queued authorization cannot survive correction and that explicit SIP URI targets continue to work.
+- [x] Document the corrected NAI mapping and migration behavior for operators, including the requirement to use explicit SIP URI targets for SIP filtering.
+- [x] Reject RADIUS task requests for X3 or combined delivery; accept only the supported X2 service/profile and valid destination configuration.
+- [x] Extend distributed filter evidence with the generation binding required for RADIUS. Define how capture-side filter revisions map to authoritative task generations, including updates racing packet transport.
+- [x] Add RADIUS-specific provenance validation before the current non-RTP direct/inherited union can authorize delivery; verify direct matches and inherited transaction evidence separately.
+- [x] Reuse `AcquireTaskAdmission`, activation generations, delivery metadata, and destination lifecycle safeguards. Reject stale evidence after modify, deactivate, expire, restore, and reactivate events, even when filter IDs are reused.
+- [x] Test multiple tasks matching one valid request, removal of one owner, stale queued packets, destination changes, and generation changes between initial matching and delivery admission; ordinary outputs must remain unaffected by rejection.
 
 Exit criterion: only current authorized tasks can admit RADIUS X2 delivery;
 stale or ambiguous inherited references cannot bypass validation.
+
+Phase 4 verification (2026-09-09): specialized sub-agents implemented X1 target
+handling, scoped compound filters, and processor admission. The parent reviewed
+the combined changes, exercised the real processor filter store, and requested
+independent cross-review. NAI now matches exact RADIUS User-Name exclusively;
+MAC and the required AVP subset preserve their identity and bytes through X1,
+ADMF, registry and filter distribution. Unsupported mixed targets, service scope,
+X3/combined delivery and conflicting mediation profiles are rejected. Explicit
+StartTime changes that the modification model cannot represent are rejected.
+
+One compound filter owns the complete task conjunction. Its task, filter and
+criterion generations track authoritative activation generations, including
+destination and timing modifications. Current admission revalidates captured
+bytes, source/scope, complete direct predicates and unique inherited references.
+Tests cover multiple owners, partial matches, stale queued observations,
+reactivation with reused IDs, modification between matching and final admission,
+expiry checks, and ordinary-output independence. Generic SIP/RTP IDs and the
+proprietary metadata sink cannot authorize RADIUS; spurious SIP display metadata
+cannot send admitted RADIUS observations through the SIP encoder.
+
+Migration withdraws obsolete full and short filter IDs before startup, preserves
+generation watermarks, and requires fresh authorization after restart. Persisted
+RADIUS product is never replay-authorized. Pending legacy NAI tasks cannot
+promote automatically; retained failed/deactivated legacy identities remain
+inactive. Reconciliation revokes invalid replacements before remote cleanup,
+including malformed ADMF targets, unsupported scheduling, missing destinations
+and failed enforcement updates. Real filter-manager tests caught and corrected
+nonexistent-ID withdrawal and duplicate cleanup during restoration. Legacy
+migration without filter inventory fails closed. Operator migration and scope
+configuration are documented in [LI integration](../LI_INTEGRATION.md).
+
+Local tap batches establish their capture origin internally. Direct remote
+admission requires a verified mTLS certificate identity matching the batch hunter
+ID and observation origin; the trust marker is never serialized. Insecure,
+server-only TLS and unverified relay sources retain ordinary outputs but cannot
+admit RADIUS LI. The existing Phase 7 relay/reconnect/snapshot gate remains open.
+Phase 5 still owns format-11 encoding, sequencing/correlation allocation and
+MDF integration; Phase 4 does not claim RADIUS PDU delivery.
+
+Parent-run final validation:
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./internal/pkg/radius ./internal/pkg/pipeline/... ./internal/pkg/hunter/... -count=1
+GOCACHE=/tmp/lippycat-go-cache go test -tags all ./internal/pkg/li ./internal/pkg/processor ./internal/pkg/processor/source ./internal/pkg/radius -run 'RADIUS|Radius|Metadata' -count=1
+GOCACHE=/tmp/lippycat-go-cache go vet -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./internal/pkg/radius ./internal/pkg/pipeline/...
+```
+
+All checks passed. All nine applicable variants (`all`, `hunter`, `processor`,
+`tap`, `cli`, `tui`, `all li`, `processor li`, `tap li`) built successfully.
+Network integration tests used approved execution outside the sandbox; builds
+emitted only the known nonfatal read-only module-stat-cache warning. Changed Go
+and Markdown files were formatted, and `git diff --check` passed. External
+MDF/operator acceptance and Phases 5–7 remain pending.
 
 ## Phase 5 — Raw RADIUS X2 encoding and tap POI
 

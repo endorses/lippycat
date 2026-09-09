@@ -148,6 +148,8 @@ const (
 	TargetTypeNAI
 	// TargetTypeE164 identifies a target by E.164 number.
 	TargetTypeE164
+	TargetTypeMACAddress
+	TargetTypeRADIUSAttribute
 )
 
 // TargetIdentity specifies a single target to intercept.
@@ -1498,6 +1500,42 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 			ErrorCodeRequestSyntaxError, "invalid XID format: "+err.Error())
 	}
 
+	// A modification retains any omitted target family and start window.
+	// Validate RADIUS service declarations before conversion can discard them.
+	if details.ListOfMediationDetails != nil {
+		current, getErr := s.taskManager.GetTaskDetails(xid)
+		if getErr != nil || current == nil {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask, ErrorCodeXIDNotFound, "task not found: "+xid.String())
+		}
+		radiusTask := false
+		for _, target := range current.Targets {
+			if target.Type == TargetTypeNAI || target.Type == TargetTypeMACAddress || target.Type == TargetTypeRADIUSAttribute {
+				radiusTask = true
+			}
+		}
+		if details.TargetIdentifiers != nil {
+			for _, target := range details.TargetIdentifiers.TargetIdentifier {
+				if target != nil && (target.Nai != nil || target.MacAddress != nil || target.RadiusAttribute != nil) {
+					radiusTask = true
+				}
+			}
+		}
+		if radiusTask {
+			if capabilityErr := validateRADIUSMediation(details.ListOfMediationDetails); capabilityErr != nil {
+				return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask, capabilityErr.code, capabilityErr.Error())
+			}
+			startTime, _, windowErr := extractMediationWindow(details.ListOfMediationDetails)
+			if windowErr != nil {
+				return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask, ErrorCodeRequestSyntaxError, "invalid mediation window: "+windowErr.Error())
+			}
+			for _, mediation := range details.ListOfMediationDetails.MediationDetails {
+				if mediation != nil && mediation.StartTime != nil && string(*mediation.StartTime) != "" && !startTime.Equal(current.StartTime) {
+					return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask, ErrorCodeTargetNotSupported, "RADIUS StartTime changes require deactivation and reprovisioning")
+				}
+			}
+		}
+	}
+
 	// Build modification
 	mod := &TaskModification{}
 	if details.ListOfMediationDetails != nil {
@@ -1744,6 +1782,12 @@ func targetIdentifierResponse(target TargetIdentity) *schema.TargetIdentifier {
 	case TargetTypeNAI:
 		v := schema.NAI(target.Value)
 		result.Nai = &v
+	case TargetTypeMACAddress:
+		v := schema.MACAddress(macSchemaValue(target.Value))
+		result.MacAddress = &v
+	case TargetTypeRADIUSAttribute:
+		v := target.Value
+		result.RadiusAttribute = &v
 	case TargetTypeE164:
 		v := schema.InternationalE164(target.Value)
 		result.E164Number = &v
@@ -1801,6 +1845,13 @@ func parseTargetIdentifier(ti *schema.TargetIdentifier) (*TargetIdentity, error)
 		return nil, nil
 	}
 
+	if ti.Nai != nil || ti.MacAddress != nil || ti.RadiusAttribute != nil {
+		if err := validateTargetChoice(ti); err != nil {
+			return nil, err
+		}
+		return parseRADIUSTarget(ti)
+	}
+
 	// SIP URI
 	if ti.SipUri != nil && *ti.SipUri != "" {
 		return &TargetIdentity{
@@ -1856,14 +1907,6 @@ func parseTargetIdentifier(ti *schema.TargetIdentifier) (*TargetIdentity, error)
 		return &TargetIdentity{
 			Type:  TargetTypeIPv6CIDR,
 			Value: string(*ti.Ipv6Cidr),
-		}, nil
-	}
-
-	// NAI (Network Access Identifier)
-	if ti.Nai != nil && *ti.Nai != "" {
-		return &TargetIdentity{
-			Type:  TargetTypeNAI,
-			Value: string(*ti.Nai),
 		}, nil
 	}
 

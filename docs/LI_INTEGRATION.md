@@ -229,16 +229,74 @@ Requests use XML per ETSI TS 103 221-1 schema:
 
 ### Supported Target Types
 
-| Target Type  | X1 Element      | Example                  | Filter Type         |
-| ------------ | --------------- | ------------------------ | ------------------- |
-| SIP URI      | `<sipUri>`      | `sip:alice@example.com`  | FILTER_SIP_URI      |
-| TEL URI      | `<telUri>`      | `tel:+15551234567`       | FILTER_PHONE_NUMBER |
-| E.164 Number | `<e164Number>`  | `+15551234567`           | FILTER_PHONE_NUMBER |
-| IPv4 Address | `<ipv4Address>` | `192.168.1.100`          | FILTER_IP_ADDRESS   |
-| IPv4 CIDR    | `<ipv4Cidr>`    | `10.0.0.0/8`             | FILTER_IP_ADDRESS   |
-| IPv6 Address | `<ipv6Address>` | `2001:db8::1`            | FILTER_IP_ADDRESS   |
-| IPv6 CIDR    | `<ipv6Cidr>`    | `2001:db8::/32`          | FILTER_IP_ADDRESS   |
-| NAI          | `<nai>`         | `user@realm.example.com` | FILTER_SIP_URI      |
+| Target Type    | X1 Element          | Example                  | Filter Type                          |
+| -------------- | ------------------- | ------------------------ | ------------------------------------ |
+| SIP URI        | `<sipUri>`          | `sip:alice@example.com`  | FILTER_SIP_URI                       |
+| TEL URI        | `<telUri>`          | `tel:+15551234567`       | FILTER_PHONE_NUMBER                  |
+| E.164 Number   | `<e164Number>`      | `+15551234567`           | FILTER_PHONE_NUMBER                  |
+| IPv4 Address   | `<ipv4Address>`     | `192.168.1.100`          | FILTER_IP_ADDRESS                    |
+| IPv4 CIDR      | `<ipv4Cidr>`        | `10.0.0.0/8`             | FILTER_IP_ADDRESS                    |
+| IPv6 Address   | `<ipv6Address>`     | `2001:db8::1`            | FILTER_IP_ADDRESS                    |
+| IPv6 CIDR      | `<ipv6Cidr>`        | `2001:db8::/32`          | FILTER_IP_ADDRESS                    |
+| NAI            | `<nai>`             | `user@realm.example.com` | RADIUS compound / exact User-Name    |
+| Subscriber MAC | `<macAddress>`      | `02:00:00:00:00:01`      | RADIUS compound / Calling-Station-Id |
+| RADIUS AVP     | `<radiusAttribute>` | `57086C696E652D61`       | RADIUS compound / exact AVP          |
+
+### RADIUS X1 authorization and NAI migration
+
+X1 `nai` now selects the complete RADIUS User-Name bytes, case-sensitively,
+without stripping realms, normalization, substring matching, or SIP parsing.
+NAIs must satisfy the RFC 7542 grammar and already be NFC. Intentional non-NAI
+account bytes use a complete User-Name `radiusAttribute`. SIP interception must
+use an explicit `sipUri` target; existing NAI tasks are never converted to SIP
+URI tasks.
+
+The accepted `radiusAttribute` subset is one complete hexadecimal AVP: User-Name
+(type 1), NAS-Port-Id (87), or vendor 3561/type 1 Agent-Circuit-Id (26). Outer and
+inner lengths must match; unsupported vendors, types and concatenated AVPs are
+rejected. Serialization uses uppercase hex. All RADIUS targets within one task
+are conjunctive; a task cannot mix RADIUS and SIP/IP targets. See the
+[identity contract](design/radius-identity-contract.md) for binary examples.
+
+Provisioning requires an explicit dedicated POI scope. The embedding application
+sets `li.ManagerConfig.RADIUSScope` (operator scope, profile revision and optional
+origin/interface restrictions), or `processor.Config.LIRADIUSScope`. X1 and ADMF
+identifiers are bound to this deployment policy, never used to infer scope.
+MAC provisioning also requires `RADIUSMACProfile` / `LIRADIUSMACProfile` set to
+`calling-station-id-uppercase-hyphen-v1`. X1 MAC syntax is six lowercase
+colon-separated octets; captured Calling-Station-Id must use the configured
+uppercase hyphen convention. Dedicated command flags remain Phase 6 work.
+
+RADIUS tasks accept only `X2Only`, with explicitly X2-enabled destinations.
+One compound filter carries the task UUID, activation generation, complete
+criteria and scope. Its filter and criterion revisions equal that generation.
+Modification (including destination or timing changes), expiry, deactivation and
+reactivation invalidate old authorization. Direct criteria are checked against
+captured bytes; inherited criteria require a unique request association and the
+complete current generation. A generic filter ID never authorizes RADIUS.
+
+Restart withdraws persisted RADIUS/legacy NAI filter IDs before listeners start.
+Pending and active RADIUS tasks require ADMF confirmation or explicit provisioning
+and a fresh generation; old queued product is not replay-authorized. Legacy NAI
+tasks with missing scope or unsupported delivery remain disarmed until corrected.
+Retained deactivated/failed legacy NAI identities stay inactive; provision a new
+XID when the corrected scope or service differs from the retained identity.
+Reconciliation replaces valid scoped definitions and revokes invalid RADIUS
+replacements. Legacy migration requires filter inventory support to find obsolete short IDs.
+Failed filter withdrawal blocks startup; failed runtime withdrawal
+cannot preserve authorization for a rejected replacement. Keep durable LI state
+and filter state together so generation watermarks survive ID reuse.
+
+Local tap batches establish capture origin internally. Direct hunter streams
+require verified mutual TLS with a certificate identity matching the batch hunter
+ID, which must also match the observation origin. Trust is internal and is not
+forwarded in protobuf. Insecure streams, server-only TLS and unverified relayed
+origins continue ordinary outputs but cannot authorize RADIUS LI. Distributed
+relay origin policy and reconnect/snapshot convergence remain Phase 7 gates.
+
+Phase 4 implements X1 validation and delivery admission. Raw format-11 X2 encoding
+and receiving-MDF integration remain Phase 5 work; this authorization support does
+not yet deliver RADIUS PDUs or establish production MDF interoperability.
 
 ### Delivery Types
 
@@ -343,10 +401,10 @@ correlates by XID instead.
 
 How it is derived:
 
-| Target type                     | Signaling (X2)                        | Media (X3)                                 |
-| ------------------------------- | ------------------------------------- | ------------------------------------------ |
-| IP address / CIDR               | packet source and destination address | packet source and destination address      |
-| SIP URI, tel URI, NAI, username | SIP `From` / `To` identity            | the call's SDP, resolved once per RTP SSRC |
+| Target type                | Signaling (X2)                        | Media (X3)                                 |
+| -------------------------- | ------------------------------------- | ------------------------------------------ |
+| IP address / CIDR          | packet source and destination address | packet source and destination address      |
+| SIP URI, tel URI, username | SIP `From` / `To` identity            | the call's SDP, resolved once per RTP SSRC |
 
 For identity targets the media direction comes from the signalling of the same call:
 which party of the dialog the target is, and which media endpoints each party
@@ -372,7 +430,7 @@ Packet-level IP address and CIDR targets are independent direct evidence. They a
 matched against the RTP packet's source and destination addresses and remain
 eligible even when call ownership is ambiguous. Thus an ambiguous RTP packet can
 still be delivered to a directly matching IP/CIDR task, but it cannot enter a SIP
-URI, telephone-number, NAI, username, IMSI, or IMEI task by guessed inheritance.
+URI, telephone-number, username, IMSI, or IMEI task by guessed inheritance.
 
 Call finalization is also an enforcement boundary. A shared lifecycle registry
 prevents X3 encoding, reorder-buffer insertion, and delivery after BYE/CANCEL,

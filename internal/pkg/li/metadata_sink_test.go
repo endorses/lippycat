@@ -46,12 +46,13 @@ func activeMetadataManager(t *testing.T, target TargetIdentity, deliveryType Del
 }
 
 func TestMetadataSinkDeliversAuthorizedHTTPWithoutHeaders(t *testing.T) {
-	m, task := activeMetadataManager(t, TargetIdentity{Type: TargetTypeNAI, Value: "example.test"}, DeliveryX2Only)
+	m, task := activeMetadataManager(t, TargetIdentity{Type: TargetTypeUsername, Value: "example.test"}, DeliveryX2Only)
 	sender := &metadataTestSender{}
 	sink, err := NewMetadataSink(MetadataSinkConfig{Enabled: true, Profile: InternetMetadataProfile, Manager: m, Sender: sender, NFID: "processor-a"})
 	require.NoError(t, err)
 	event := events.NewHTTPEvent(metadataTestEnvelope())
 	event.Method, event.Host, event.URI = "GET", "example.test", "/private"
+	event.Username = "example.test"
 	event.Headers = map[string][]string{"authorization": {"secret"}}
 	require.NoError(t, sink.HandleEvent(context.Background(), event))
 	require.Equal(t, 1, sender.calls)
@@ -79,7 +80,7 @@ func TestMetadataSinkDeliversAuthorizedHTTPWithoutHeaders(t *testing.T) {
 }
 
 func TestMetadataSinkRequiresX2TaskAndTargetMatch(t *testing.T) {
-	m, _ := activeMetadataManager(t, TargetIdentity{Type: TargetTypeNAI, Value: "nomatch.example"}, DeliveryX3Only)
+	m, _ := activeMetadataManager(t, TargetIdentity{Type: TargetTypeUsername, Value: "nomatch.example"}, DeliveryX3Only)
 	sender := &metadataTestSender{}
 	sink, err := NewMetadataSink(MetadataSinkConfig{Enabled: true, Manager: m, Sender: sender})
 	require.NoError(t, err)
@@ -91,7 +92,7 @@ func TestMetadataSinkRequiresX2TaskAndTargetMatch(t *testing.T) {
 }
 
 func TestMetadataSinkRejectsContentAndGatesFileMetadata(t *testing.T) {
-	m, _ := activeMetadataManager(t, TargetIdentity{Type: TargetTypeNAI, Value: "example.test"}, DeliveryX2Only)
+	m, _ := activeMetadataManager(t, TargetIdentity{Type: TargetTypeUsername, Value: "example.test"}, DeliveryX2Only)
 	sender := &metadataTestSender{}
 	sink, err := NewMetadataSink(MetadataSinkConfig{Enabled: true, Manager: m, Sender: sender})
 	require.NoError(t, err)
@@ -108,4 +109,27 @@ func TestMetadataSinkRejectsContentAndGatesFileMetadata(t *testing.T) {
 func TestNewMetadataSinkRejectsUnknownProfile(t *testing.T) {
 	_, err := NewMetadataSink(MetadataSinkConfig{Profile: "everything"})
 	assert.ErrorIs(t, err, ErrUnknownMetadataProfile)
+}
+
+func TestMetadataSinkRADIUSTaskCannotAuthorizeNormalizedMetadata(t *testing.T) {
+	m, observation, _, did := radiusAdmissionFixture(t)
+	task := activateRadiusAdmissionTask(t, m, observation, did)
+	value := task.Targets[0].Value
+	sender := &metadataTestSender{}
+	sink, err := NewMetadataSink(MetadataSinkConfig{Enabled: true, Manager: m, Sender: sender})
+	require.NoError(t, err)
+	http := events.NewHTTPEvent(metadataTestEnvelope())
+	http.Username, http.Host = value, value
+	dns := events.NewDNSEvent(metadataTestEnvelope())
+	dns.Query = value
+	smtp := events.NewSMTPEvent(metadataTestEnvelope())
+	smtp.MailFrom = value
+	smtp.Recipients = []string{value}
+	for _, event := range []events.Event{http, dns, smtp} {
+		require.NoError(t, sink.HandleEvent(context.Background(), event))
+		require.False(t, targetMatches(task.Targets[0], event))
+	}
+	require.Zero(t, sender.calls)
+	require.Equal(t, uint64(3), sink.Stats().Skipped)
+	require.Zero(t, sink.Stats().Delivered)
 }

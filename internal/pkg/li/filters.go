@@ -2,6 +2,7 @@
 package li
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 )
 
 // FilterManager handles the mapping between LI intercept tasks and lippycat filters.
@@ -19,7 +22,7 @@ import (
 // It translates ETSI TS 103 280 target identities into the internal filter system:
 //   - SIPURI (sip:user@domain) → FILTER_SIP_URI
 //   - TELURI (tel:+number) → FILTER_PHONE_NUMBER
-//   - NAI (user@realm) → FILTER_SIP_URI
+//   - NAI (user@realm) → exact RADIUS compound criterion
 //   - IPv4Address/IPv6Address → FILTER_IP_ADDRESS
 //   - IPv4CIDR/IPv6CIDR → FILTER_IP_ADDRESS
 //   - Username → FILTER_SIP_USER
@@ -131,18 +134,12 @@ func (m *FilterManager) CreateFiltersForTask(task *InterceptTask) ([]string, err
 	var filterIDs []string
 	var createdFilters []*management.Filter
 
-	// Create a filter for each target
-	for i, target := range task.Targets {
-		filter, err := m.targetToFilter(task.XID, i, target)
-		if err != nil {
-			// Rollback: remove any filters we've already created
-			for _, f := range createdFilters {
-				delete(m.filterStore, f.Id)
-				delete(m.filterToXID, f.Id)
-			}
-			return nil, fmt.Errorf("failed to create filter for target %d: %w", i, err)
-		}
-
+	// RADIUS targets form one conjunction owned by the task.
+	definitions, err := m.filtersForTask(task)
+	if err != nil {
+		return nil, err
+	}
+	for _, filter := range definitions {
 		if owner, ok := m.filterToXID[filter.Id]; ok && owner != task.XID {
 			return nil, fmt.Errorf("create filters for XID %s: filter ID %s is owned by XID %s", task.XID, filter.Id, owner)
 		}
@@ -224,11 +221,11 @@ func (m *FilterManager) UpdateFiltersForTask(task *InterceptTask) error {
 	// allocating an ever-increasing index.
 	var newFilterIDs []string
 	var newFilters []*management.Filter
-	for i, target := range task.Targets {
-		filter, err := m.targetToFilter(task.XID, i, target)
-		if err != nil {
-			return fmt.Errorf("construct replacement filters for XID %s target %d: %w", task.XID, i, err)
-		}
+	definitions, err := m.filtersForTask(task)
+	if err != nil {
+		return err
+	}
+	for _, filter := range definitions {
 		if owner, ok := m.filterToXID[filter.Id]; ok && owner != task.XID {
 			return fmt.Errorf("replace filters for XID %s: filter ID %s is owned by XID %s", task.XID, filter.Id, owner)
 		}
@@ -418,8 +415,26 @@ func (m *FilterManager) mapTargetToFilterType(target TargetIdentity) (management
 		return management.FilterType_FILTER_PHONE_NUMBER, pattern, nil
 
 	case TargetTypeNAI:
-		// user@realm has same format as SIP URI (user@domain)
-		return management.FilterType_FILTER_SIP_URI, target.Value, nil
+		if err := radius.ValidateNAI(target.Value); err != nil {
+			return 0, "", err
+		}
+		return management.FilterType_FILTER_RADIUS_USERNAME, target.Value, nil
+	case TargetTypeMACAddress:
+		raw, err := hex.DecodeString(target.Value)
+		if err != nil || len(raw) != 6 {
+			return 0, "", fmt.Errorf("MAC target requires six hex-encoded octets")
+		}
+		parts := make([]string, 6)
+		for i, b := range raw {
+			parts[i] = fmt.Sprintf("%02X", b)
+		}
+		return management.FilterType_FILTER_RADIUS_MAC, strings.Join(parts, "-"), nil
+	case TargetTypeRADIUSAttribute:
+		p, err := radius.CompilePredicate(radius.PredicateSpec{Kind: radius.PredicateAttribute, Value: target.Value})
+		if err != nil {
+			return 0, "", err
+		}
+		return management.FilterType_FILTER_RADIUS_ATTRIBUTE, p.Spec().Value, nil
 
 	case TargetTypeIPv4Address, TargetTypeIPv6Address:
 		// Direct IP address
@@ -628,4 +643,92 @@ func (m *FilterManager) LookupMatches(matchedFilterIDs []string) []MatchResult {
 	}
 
 	return results
+}
+
+// IsRADIUSTask identifies tasks containing any RADIUS identity. Mixed protocol
+// tasks are recognized here so validation rejects them before filter creation.
+func IsRADIUSTask(task *InterceptTask) bool {
+	if task == nil {
+		return false
+	}
+	for _, target := range task.Targets {
+		if target.Type == TargetTypeNAI || target.Type == TargetTypeMACAddress || target.Type == TargetTypeRADIUSAttribute {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *FilterManager) filtersForTask(task *InterceptTask) ([]*management.Filter, error) {
+	if !IsRADIUSTask(task) {
+		var result []*management.Filter
+		for i, t := range task.Targets {
+			f, err := m.targetToFilter(task.XID, i, t)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, f)
+		}
+		return result, nil
+	}
+	f, err := m.radiusFilterForTask(task)
+	if err != nil {
+		return nil, err
+	}
+	return []*management.Filter{f}, nil
+}
+
+func (m *FilterManager) radiusFilterForTask(task *InterceptTask) (*management.Filter, error) {
+	if task.DeliveryType != DeliveryX2Only {
+		return nil, fmt.Errorf("%w: RADIUS requires X2Only", ErrUnsupportedDeliveryCombination)
+	}
+	if task.ActivationGeneration == 0 {
+		return nil, fmt.Errorf("RADIUS task requires positive activation generation")
+	}
+	id := fmt.Sprintf(liFilterIDPrefix+"%s-0", task.XID)
+	f := &management.Filter{Id: id, Type: management.FilterType_FILTER_RADIUS_COMPOUND, Enabled: true, Revision: task.ActivationGeneration, Description: fmt.Sprintf("LI RADIUS task %s", task.XID), Radius: &management.RadiusFilterCriteria{}}
+	f.Radius.GroupId = id
+	f.Radius.TaskId = task.XID.String()
+	f.Radius.TaskGeneration = task.ActivationGeneration
+	f.Radius.Scope = &management.RadiusScopeBinding{OperatorScope: task.RADIUSScope.OperatorScope, ProfileRevision: task.RADIUSScope.ProfileRevision, OriginNodeId: task.RADIUSScope.OriginNodeID, SourceId: task.RADIUSScope.SourceID}
+	for i, t := range canonicalizeTargets(task.Targets) {
+		ft, value, err := m.mapTargetToFilterType(t)
+		if err != nil {
+			return nil, err
+		}
+		c := &management.RadiusCriterion{Value: value, FilterId: fmt.Sprintf("%s/criterion-%d", id, i), FilterRevision: f.Revision}
+		switch ft {
+		case management.FilterType_FILTER_RADIUS_USERNAME:
+			c.Kind = radius.PredicateUserName
+			c.TargetKind = "nai"
+		case management.FilterType_FILTER_RADIUS_MAC:
+			c.Kind = radius.PredicateMAC
+			c.TargetKind = "mac"
+			c.MacProfile = task.RADIUSMACProfile
+		case management.FilterType_FILTER_RADIUS_ATTRIBUTE:
+			c.Kind = radius.PredicateAttribute
+		default:
+			return nil, fmt.Errorf("RADIUS criteria cannot combine with %s", t.Type)
+		}
+		p, err := radius.CompilePredicate(radius.PredicateSpec{Kind: c.Kind, Value: c.Value, MACProfile: c.MacProfile, TargetKind: c.TargetKind})
+		if err != nil {
+			return nil, err
+		}
+		c.TargetKind = p.Spec().TargetKind
+		f.Radius.Criteria = append(f.Radius.Criteria, c)
+	}
+	if _, _, err := filtering.CompileRADIUSFilter(f); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// LookupRADIUSGroup returns an immutable matcher for the installed task revision.
+func (m *FilterManager) LookupRADIUSGroup(filterID string) (*radius.Group, bool) {
+	f, ok := m.GetFilter(filterID)
+	if !ok {
+		return nil, false
+	}
+	_, g, err := filtering.CompileRADIUSFilter(f)
+	return g, err == nil && g != nil
 }

@@ -83,16 +83,10 @@ func (m *Manager) GetFilterCount() int {
 func (m *Manager) SetInitialFilters(filters []*management.Filter) {
 	m.applyMu.Lock()
 	defer m.applyMu.Unlock()
-	m.mu.Lock()
-	m.filters = filters
-	appFilterUpdater := m.appFilterUpdater
-	m.mu.Unlock()
-
-	// Update application filter if configured (for hot-reload support)
-	// Note: Phase 2 removed sipusers sync - ApplicationFilter handles all filter types
-	if appFilterUpdater != nil {
-		appFilterUpdater.UpdateFilters(filters)
-	}
+	// Capture remains active across reconnects. Reconcile against the installed
+	// policy before replacing it, so registration cannot hide a removed BPF
+	// restriction from the subsequent subscription snapshot (or a legacy peer).
+	m.replaceSnapshot(filters)
 }
 
 // Subscribe subscribes to filter updates from processor

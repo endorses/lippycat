@@ -236,6 +236,69 @@ func TestRADIUSTapPOIEncoderFailurePreservesOrdinarySinks(t *testing.T) {
 	assertRadiusPOIOrdinary(t, p, dir, 2)
 }
 
+func TestRADIUSTapPOIExpiredTaskPreservesOrdinarySinks(t *testing.T) {
+	p, task, dir := radiusPOIProcessor(t, 16)
+	end := time.Now().Add(100 * time.Millisecond)
+	implicit := true
+	require.NoError(t, p.liManager.ModifyTask(task.XID, &li.TaskModification{EndTime: &end, ImplicitDeactivationAllowed: &implicit}))
+	task, err := p.liManager.GetTaskDetails(task.XID)
+	require.NoError(t, err)
+	out := p.subscriberManager.Add("ordinary")
+	batch, _ := radiusPOIBatch(t, p, task)
+	// Admission must enforce the deadline even between registry expiry sweeps.
+	time.Sleep(time.Until(end) + time.Millisecond)
+	p.processBatch(batch)
+	requireRadiusPOIBroadcast(t, out)
+	require.Zero(t, liDeliveryClient.Stats().QueueDepth, "expired RADIUS authorization must not enqueue X2")
+	assertRadiusPOIOrdinary(t, p, dir, 2)
+}
+
+type radiusLifecycleAllocator struct{ allocate func() }
+
+func (a radiusLifecycleAllocator) Allocate(*radius.Observation) (uint64, error) {
+	a.allocate()
+	return 1, nil
+}
+
+func (radiusLifecycleAllocator) Close() error { return nil }
+
+func TestRADIUSTapPOITaskChangesDuringEncodingPreserveOrdinarySinks(t *testing.T) {
+	for _, change := range []string{"expire", "deactivate", "modify"} {
+		t.Run(change, func(t *testing.T) {
+			p, task, dir := radiusPOIProcessor(t, 16)
+			end := time.Now().Add(100 * time.Millisecond)
+			if change == "expire" {
+				implicit := true
+				require.NoError(t, p.liManager.ModifyTask(task.XID, &li.TaskModification{EndTime: &end, ImplicitDeactivationAllowed: &implicit}))
+				var err error
+				task, err = p.liManager.GetTaskDetails(task.XID)
+				require.NoError(t, err)
+			}
+			allocated := false
+			p.radiusLIAllocator = radiusLifecycleAllocator{allocate: func() {
+				allocated = true
+				switch change {
+				case "expire":
+					time.Sleep(time.Until(end) + time.Millisecond)
+				case "deactivate":
+					require.NoError(t, p.liManager.DeactivateTask(task.XID))
+				case "modify":
+					newEnd := time.Now().Add(time.Hour)
+					require.NoError(t, p.liManager.ModifyTask(task.XID, &li.TaskModification{EndTime: &newEnd}))
+				}
+			}}
+			out := p.subscriberManager.Add("ordinary")
+			batch, _ := radiusPOIBatch(t, p, task)
+			p.processBatch(batch)
+			p.radiusLIAllocator = nil
+			require.True(t, allocated, "task change must occur after preliminary admission")
+			requireRadiusPOIBroadcast(t, out)
+			require.Zero(t, liDeliveryClient.Stats().QueueDepth, "task changes before final admission must suppress X2")
+			assertRadiusPOIOrdinary(t, p, dir, 2)
+		})
+	}
+}
+
 func requireRadiusPOIBroadcast(t *testing.T, out <-chan *data.PacketBatch) {
 	t.Helper()
 	select {

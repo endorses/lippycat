@@ -256,7 +256,7 @@ func (m *Manager) AcquireTaskAdmission(xid uuid.UUID, generation uint64) (*TaskA
 	}
 	m.lifecycleMu.RLock()
 	task, err := m.registry.GetTaskDetails(xid)
-	if err != nil || !task.IsActive() || task.ActivationGeneration != generation {
+	if err != nil || !task.IsActive() || task.IsExpired() || task.ActivationGeneration != generation {
 		m.lifecycleMu.RUnlock()
 		return nil, false
 	}

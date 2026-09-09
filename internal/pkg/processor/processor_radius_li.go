@@ -26,8 +26,8 @@ func (p *Processor) processLIRADIUSPacket(display *types.PacketDisplay, packet *
 }
 
 // deliverLIRADIUS is called only after the manager has validated complete current
-// attribution. A task lease covers allocation, encoding and queue admission, so
-// task changes cannot re-arm a stale observation while it waits for encoding.
+// attribution. Check eligibility before encoding and acquire a fresh task lease
+// for queue admission so task changes during allocation or encoding take effect.
 func (p *Processor) deliverLIRADIUS(task *li.InterceptTask, observation *radius.Observation) {
 	if task == nil || observation == nil || !li.IsRADIUSTask(task) || task.DeliveryType != li.DeliveryX2Only {
 		return
@@ -36,7 +36,7 @@ func (p *Processor) deliverLIRADIUS(task *li.InterceptTask, observation *radius.
 	if !active {
 		return
 	}
-	defer admission.Release()
+	admission.Release()
 	// Serialize allocation/encoding/enqueue and shutdown for this POI. This also
 	// preserves sequence order when capture sources invoke callbacks concurrently.
 	p.radiusLIMu.Lock()
@@ -85,6 +85,12 @@ func (p *Processor) deliverLIRADIUS(task *li.InterceptTask, observation *radius.
 		liX2Skipped.Add(1)
 		return
 	}
+	admission, active = p.liManager.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
+	if !active {
+		liX2Skipped.Add(1)
+		return
+	}
+	defer admission.Release()
 	metadata := li.DeliveryMetadata{TaskGeneration: task.ActivationGeneration, CapturedAt: observation.Capture.Timestamp, AdmittedAt: time.Now()}
 	if err := liDeliveryClient.SendX2WithMetadata(task.XID, task.DestinationIDs, raw, metadata); err != nil {
 		liX2Errors.Add(1)

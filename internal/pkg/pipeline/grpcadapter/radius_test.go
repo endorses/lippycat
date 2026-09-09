@@ -3,6 +3,7 @@ package grpcadapter
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -11,11 +12,13 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 func radiusFixture(t *testing.T) *radius.Observation {
 	t.Helper()
-	f, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	f, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 	r, err := pcapgo.NewReader(f)
@@ -91,7 +94,7 @@ func TestRADIUSInvalidClaimsRetainRawPacket(t *testing.T) {
 	}
 }
 func TestRADIUSFixtureTransportAllValidMessages(t *testing.T) {
-	f, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	f, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 	r, err := pcapgo.NewReader(f)
@@ -144,7 +147,7 @@ func TestRADIUSIdentityFreeResponseInheritanceTransport(t *testing.T) {
 	ref, matched, err := predicate.Reference(request)
 	require.NoError(t, err)
 	require.True(t, matched)
-	f, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	f, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 	r, err := pcapgo.NewReader(f)

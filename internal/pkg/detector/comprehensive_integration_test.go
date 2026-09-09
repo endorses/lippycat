@@ -66,7 +66,7 @@ func TestComprehensivePcapDetection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testdataDir := findComprehensiveTestdataDir(t)
-			pcapPath := filepath.Join(testdataDir, "pcaps", tt.pcapFile)
+			pcapPath := filepath.Join(testdataDir, tt.pcapFile)
 
 			// Skip if PCAP doesn't exist and is optional
 			if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
@@ -169,20 +169,20 @@ func createComprehensiveDetector() *detector.Detector {
 
 func findComprehensiveTestdataDir(t *testing.T) string {
 	candidates := []string{
-		"../../../testdata",
-		"../../testdata",
-		"testdata",
-		"./testdata",
+		"../../../testdata/pcaps",
+		"../../testdata/pcaps",
+		"testdata/pcaps",
+		"./testdata/pcaps",
 	}
 	for _, candidate := range candidates {
 		absPath, err := filepath.Abs(candidate)
 		if err != nil {
 			continue
 		}
-		if _, err := os.Stat(absPath); err == nil {
+		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
 			return absPath
 		}
 	}
-	t.Skip("Skipping test: testdata directory not found (test data not available in this environment)")
+	t.Skip("Skipping test: external testdata/pcaps directory not found")
 	return ""
 }

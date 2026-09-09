@@ -15,10 +15,12 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 func TestAcceptancePackets(t *testing.T) {
-	root := "../../../testdata/radius"
+	root := radiusfixture.Write(t)
 	manifest, err := os.ReadFile(filepath.Join(root, "expected.json"))
 	require.NoError(t, err)
 	var expected struct {

@@ -11,9 +11,12 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 type radiusSourceFilter struct{ predicate *radius.Predicate }
@@ -45,7 +48,7 @@ func TestForwardRADIUSIdentityFreeResponse(t *testing.T) {
 	predicate, err := radius.CompilePredicate(radius.PredicateSpec{Kind: radius.PredicateUserName, Value: "alice@example.test", FilterID: "user", FilterRevision: 1})
 	require.NoError(t, err)
 	m := &Manager{config: Config{HunterID: "hunter", BatchSize: 2, BatchTimeout: time.Second}, connCtx: ctx, statsCollector: &flowStats{}, packetBufferProv: testPacketBufferProvider{buffer: buffer}, batchQueue: make(chan *pipeline.PacketBatch, 2), radiusProcessor: processor, applicationFilter: &radiusSourceFilter{predicate: predicate}}
-	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)
@@ -82,7 +85,7 @@ func TestForwardRADIUSOnlyDropsUnrelatedAndMalformed(t *testing.T) {
 	require.NoError(t, err)
 	defer processor.Close()
 	m := &Manager{config: Config{HunterID: "hunter", BatchSize: 2, BatchTimeout: time.Second, RADIUSOnly: true}, connCtx: ctx, statsCollector: &flowStats{}, packetBufferProv: testPacketBufferProvider{buffer: buffer}, batchQueue: make(chan *pipeline.PacketBatch, 2), radiusProcessor: processor}
-	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)

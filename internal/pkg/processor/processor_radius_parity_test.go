@@ -36,6 +36,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 type radiusParityBuffer struct{ buffer *capture.PacketBuffer }
@@ -74,7 +76,7 @@ func radiusParityStream(t *testing.T, p *Processor, origin string, ctx context.C
 // Tap enters through local envelopes; hunt runs the production capture buffer,
 // ForwardPackets, asynchronous sender, TLS gRPC ingress and processor pipeline.
 func TestRADIUSPhase7TapHunterDecodedDeliveryParity(t *testing.T) {
-	f, err := os.Open("../../../testdata/radius/acceptance.pcap")
+	f, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 	reader, err := pcapgo.NewReader(f)

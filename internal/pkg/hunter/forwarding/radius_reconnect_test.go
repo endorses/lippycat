@@ -5,6 +5,7 @@ package forwarding
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
@@ -12,10 +13,12 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 func TestRADIUSForwardingManagerReconnectStartsNewCaptureEpoch(t *testing.T) {
-	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)

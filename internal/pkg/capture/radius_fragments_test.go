@@ -17,6 +17,8 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 // Exercise the actual loop used by live capture with an offline libpcap handle.
@@ -137,7 +139,7 @@ func TestLiveCaptureVoIPFragmentReassemblyOptIn(t *testing.T) {
 }
 
 func TestRADIUSLiveCaptureAcceptanceFragments(t *testing.T) {
-	f, err := os.Open("../../../testdata/radius/acceptance.pcap")
+	f, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	reader, err := pcapgo.NewReader(f)
 	require.NoError(t, err)

@@ -11,6 +11,8 @@ captures
 !internal/pkg/tui/help/*.md
 nodes.yaml
 testdata/pcaps/*
+*.pcap
+*.pcapng
 scripts/*
 !scripts/bump-version.sh
 !scripts/check-build-matrix.sh

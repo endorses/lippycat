@@ -11,11 +11,13 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
-// Exercise the independent committed wire fixtures through both Phase 2 components.
+// Exercise the independent synthetic wire fixtures through both Phase 2 components.
 func TestPhase2AcceptanceFixtures(t *testing.T) {
-	root := "../../../testdata/radius"
+	root := radiusfixture.Write(t)
 	manifest, err := os.ReadFile(filepath.Join(root, "expected.json"))
 	require.NoError(t, err)
 	var expected struct {

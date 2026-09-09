@@ -16,12 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/endorses/lippycat/internal/pkg/radius"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 // These complete PDU vectors were packed independently of the Go encoders,
-// using the committed Phase 0 payloads and endpoint/timestamp expectations.
+// using the Phase 0 synthetic payloads and endpoint/timestamp expectations.
 func TestRADIUSEncoderGoldenFixtures(t *testing.T) {
-	root := "../../../../testdata/radius"
+	root := radiusfixture.Write(t)
 	data, err := os.ReadFile(filepath.Join(root, "expected.json"))
 	require.NoError(t, err)
 	var fixtures struct {

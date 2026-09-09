@@ -16,11 +16,13 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 func radiusOutputFixtures(t *testing.T) []*data.CapturedPacket {
 	t.Helper()
-	f, err := os.Open("../../../testdata/radius/acceptance.pcap")
+	f, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 	r, err := pcapgo.NewReader(f)

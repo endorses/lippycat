@@ -4,6 +4,7 @@ package li
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/radius"
@@ -11,11 +12,13 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 )
 
 func radiusAdmissionFixture(t *testing.T) (*Manager, *radius.Observation, *radius.Observation, uuid.UUID) {
 	t.Helper()
-	f, err := os.Open("../../../testdata/radius/acceptance.pcap")
+	f, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, f.Close()) }()
 	reader, err := pcapgo.NewReader(f)

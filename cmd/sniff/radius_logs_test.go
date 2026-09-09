@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/radiusconfig"
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/viper"
@@ -31,7 +32,7 @@ func TestRADIUSFixtureSniffStructuredLogs(t *testing.T) {
 	session.radius.Close()
 	session.radius, err = radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "local"}, 1812, 1813, 19120)
 	require.NoError(t, err)
-	file, err := os.Open("../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)
@@ -76,7 +77,7 @@ func TestConfiguredRADIUSPipelineOwnsLogObservation(t *testing.T) {
 	require.NoError(t, err)
 	p := &localEnvelopePipeline{fanout: fanout, radiusConfig: &config, logSession: session}
 	defer p.close()
-	file, err := os.Open("../../testdata/radius/acceptance.pcap")
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, file.Close()) }()
 	reader, err := pcapgo.NewReader(file)

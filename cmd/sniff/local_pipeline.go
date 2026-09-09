@@ -16,17 +16,26 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/pcapsink"
 	"github.com/endorses/lippycat/internal/pkg/radius"
+	"github.com/endorses/lippycat/internal/pkg/radiusconfig"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 )
 
 type localEnvelopePipeline struct {
-	fanout *pipeline.PacketFanout
-	count  int
+	fanout       *pipeline.PacketFanout
+	count        int
+	radiusConfig *radiusconfig.Config
+	logSession   *sniffLogSession
 }
 
 func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipeline.SourceKind) {
-	observer, err := radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "sniff", SourceID: "local"})
+	cfg := radiusconfig.Config{Scope: radius.CaptureScope{OriginNodeID: "sniff", SourceID: "local"}}
+	if p.radiusConfig != nil {
+		cfg = *p.radiusConfig
+		cfg.Scope.OriginNodeID = "sniff"
+		cfg.Scope.SourceID = "local"
+	}
+	observer, err := radius.NewCaptureProcessorWithConfig(cfg.Scope, cfg.Correlation, cfg.Ports...)
 	if err != nil {
 		logger.Error("Initialize RADIUS observations", "error", err)
 		return
@@ -34,7 +43,13 @@ func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipel
 	defer observer.Close()
 	for info := range in {
 		if info.RADIUS == nil {
-			info.RADIUS = observer.Process(info.Packet, info.LinkType, info.Interface, nil)
+			info.RADIUS = observer.Process(info.Packet, info.LinkType, info.Interface, cfg.Matcher)
+		}
+		if p.radiusConfig != nil && (info.RADIUS == nil || !radiusconfig.Selected(cfg.Matcher, info.RADIUS)) {
+			continue
+		}
+		if p.radiusConfig != nil && p.logSession != nil {
+			p.logSession.observe(&info)
 		}
 		env := captureadapter.FromPacketInfo(info, kind)
 		p.count++

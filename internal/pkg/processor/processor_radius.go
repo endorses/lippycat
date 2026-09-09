@@ -63,3 +63,9 @@ func (p *Processor) normalizeRADIUS(sourceID string, packets []*data.CapturedPac
 		packet.Metadata.Dns, packet.Metadata.Email, packet.Metadata.Tls, packet.Metadata.Http = nil, nil, nil, nil
 	}
 }
+
+// radiusDeliveryStats belongs to one processor. All fields count RADIUS callback
+// outcomes/PDUs, not per-destination delivery attempts; guarded by radiusLIMu.
+type radiusDeliveryStats struct {
+	StaleGeneration, EncodingErrors, AllocationErrors, Encoded, QueueAccepted, QueueErrors, Skipped uint64
+}

@@ -5,6 +5,7 @@ package process
 import (
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/spf13/cobra"
 )
 
@@ -75,3 +76,5 @@ func BindLIViperFlags(cmd *cobra.Command) {}
 func GetLIConfig() *LIConfig {
 	return nil
 }
+
+func applyRADIUSLIConfig(_ *cobra.Command, _ *processor.Config) error { return nil }

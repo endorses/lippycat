@@ -13,19 +13,22 @@ lc
 │   ├── dns                DNS-specific capture
 │   ├── tls                TLS-specific capture
 │   ├── http               HTTP-specific capture
-│   └── email              Email-specific capture
+│   ├── email              Email-specific capture
+│   └── radius             RADIUS UDP capture
 ├── tap                    Standalone capture + processor
 │   ├── voip               VoIP standalone capture
 │   ├── dns                DNS standalone capture
 │   ├── tls                TLS standalone capture
 │   ├── http               HTTP standalone capture
-│   └── email              Email standalone capture
+│   ├── email              Email standalone capture
+│   └── radius             RADIUS standalone capture
 ├── hunt                   Distributed edge capture
 │   ├── voip               VoIP hunter
 │   ├── dns                DNS hunter
 │   ├── tls                TLS hunter
 │   ├── http               HTTP hunter
-│   └── email              Email hunter
+│   ├── email              Email hunter
+│   └── radius             RADIUS hunter
 ├── process                Central aggregation node
 ├── watch                  Interactive TUI
 │   ├── live               Live capture TUI
@@ -56,11 +59,11 @@ lc
 
 These flags apply to all commands.
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--config` | `-c` | string | `$HOME/.config/lippycat/config.yaml` | Path to config file |
-| `--help` | `-h` | | | Help for the command |
-| `--version` | `-v` | | | Print version information |
+| Flag        | Short | Type   | Default                              | Description               |
+| ----------- | ----- | ------ | ------------------------------------ | ------------------------- |
+| `--config`  | `-c`  | string | `$HOME/.config/lippycat/config.yaml` | Path to config file       |
+| `--help`    | `-h`  |        |                                      | Help for the command      |
+| `--version` | `-v`  |        |                                      | Print version information |
 
 ---
 
@@ -72,36 +75,36 @@ Several flag groups appear across multiple commands. They are documented here on
 
 Used by `sniff`, `hunt`, and `tap` for packet capture configuration.
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--interface` | `-i` | string | `any` | Network interface to capture on |
-| `--filter` | `-f` | string | | BPF filter expression (see [Appendix C](bpf-reference.md)) |
-| `--promisc` / `--promiscuous` | `-p` | bool | `false` | Enable promiscuous mode |
-| `--pcap-buffer-size` | | int | `16777216` | PCAP kernel buffer size in bytes (16 MB) |
+| Flag                          | Short | Type   | Default    | Description                                                |
+| ----------------------------- | ----- | ------ | ---------- | ---------------------------------------------------------- |
+| `--interface`                 | `-i`  | string | `any`      | Network interface to capture on                            |
+| `--filter`                    | `-f`  | string |            | BPF filter expression (see [Appendix C](bpf-reference.md)) |
+| `--promisc` / `--promiscuous` | `-p`  | bool   | `false`    | Enable promiscuous mode                                    |
+| `--pcap-buffer-size`          |       | int    | `16777216` | PCAP kernel buffer size in bytes (16 MB)                   |
 
 ### TLS Client Flags
 
 Used by commands that connect to a remote processor as a client.
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--tls-ca` | string | | CA certificate file for server verification |
-| `--tls-cert` | string | | Client certificate file (for mTLS) |
-| `--tls-key` | string | | Client private key file (for mTLS) |
-| `--tls-skip-verify` | bool | `false` | Skip server certificate verification |
-| `--tls-server-name` | string | | Override server name for TLS verification |
-| `--insecure` | bool | `false` | Disable TLS (blocked when `LIPPYCAT_PRODUCTION=true`) |
+| Flag                | Type   | Default | Description                                           |
+| ------------------- | ------ | ------- | ----------------------------------------------------- |
+| `--tls-ca`          | string |         | CA certificate file for server verification           |
+| `--tls-cert`        | string |         | Client certificate file (for mTLS)                    |
+| `--tls-key`         | string |         | Client private key file (for mTLS)                    |
+| `--tls-skip-verify` | bool   | `false` | Skip server certificate verification                  |
+| `--tls-server-name` | string |         | Override server name for TLS verification             |
+| `--insecure`        | bool   | `false` | Disable TLS (blocked when `LIPPYCAT_PRODUCTION=true`) |
 
 ### TLS Server Flags
 
 Used by `process` and `tap` for serving gRPC with TLS.
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--tls-cert` | string | | Server certificate file |
-| `--tls-key` | string | | Server private key file |
-| `--tls-ca` | string | | CA certificate for client verification (mTLS) |
-| `--tls-client-auth` | bool | `false` | Require client certificates (mTLS) |
+| Flag                | Type   | Default | Description                                   |
+| ------------------- | ------ | ------- | --------------------------------------------- |
+| `--tls-cert`        | string |         | Server certificate file                       |
+| `--tls-key`         | string |         | Server private key file                       |
+| `--tls-ca`          | string |         | CA certificate for client verification (mTLS) |
+| `--tls-client-auth` | bool   | `false` | Require client certificates (mTLS)            |
 
 TLS is enabled by default for `process` and `tap` unless `--insecure` is set. Provide `--tls-cert` and `--tls-key` for encrypted serving.
 
@@ -109,10 +112,10 @@ TLS is enabled by default for `process` and `tap` unless `--insecure` is set. Pr
 
 Used by `list filters`, `show`, `set filter`, and `rm filter` to connect to a processor.
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | | Processor address (`host:port`) |
-| `--insecure` | | bool | `false` | Disable TLS |
+| Flag          | Short | Type   | Default | Description                     |
+| ------------- | ----- | ------ | ------- | ------------------------------- |
+| `--processor` | `-P`  | string |         | Processor address (`host:port`) |
+| `--insecure`  |       | bool   | `false` | Disable TLS                     |
 
 Plus the [TLS Client Flags](#tls-client-flags) above.
 
@@ -120,48 +123,48 @@ Plus the [TLS Client Flags](#tls-client-flags) above.
 
 Used by CUDA builds of `sniff voip`, `hunt`, and `tap` for GPU-accelerated filtering. In non-CUDA builds these flags are not registered, except `watch live` has its own local GPU flags.
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--gpu-backend` | `-g` | string | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
-| `--gpu-batch-size` | | int | varies | Packets per GPU batch (default 1024 for sniff, 100 for hunt) |
-| `--gpu-enable` | | bool | `true` | Enable GPU acceleration (`sniff voip`, CUDA builds only) |
-| `--gpu-max-memory` | | string | | Maximum GPU memory allocation |
-| `--enable-voip-filter` | | bool | `false` | Enable GPU-accelerated VoIP filtering on hunter/tap (CUDA builds only) |
+| Flag                   | Short | Type   | Default | Description                                                            |
+| ---------------------- | ----- | ------ | ------- | ---------------------------------------------------------------------- |
+| `--gpu-backend`        | `-g`  | string | `auto`  | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled`          |
+| `--gpu-batch-size`     |       | int    | varies  | Packets per GPU batch (default 1024 for sniff, 100 for hunt)           |
+| `--gpu-enable`         |       | bool   | `true`  | Enable GPU acceleration (`sniff voip`, CUDA builds only)               |
+| `--gpu-max-memory`     |       | string |         | Maximum GPU memory allocation                                          |
+| `--enable-voip-filter` |       | bool   | `false` | Enable GPU-accelerated VoIP filtering on hunter/tap (CUDA builds only) |
 
 ### Virtual Interface Flags
 
 Used by `sniff`, `process`, and `tap` for virtual network interface output.
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--virtual-interface` | `-V` | bool | `false` | Enable virtual interface output |
-| `--vif-name` | | string | `lc0` | Virtual interface name |
-| `--vif-type` | | string | `tap` | Interface type: `tap` or `tun` |
-| `--vif-buffer-size` | | int | `65536` | Write buffer size in bytes |
-| `--vif-drop-privileges` | | string | | Drop privileges to this user after interface creation |
-| `--vif-netns` | | string | | Target network namespace |
-| `--vif-replay-timing` | | bool | `false` | Replay with original packet timing (sniff only) |
-| `--vif-startup-delay` | | duration | `3s` | Delay before writing to allow consumers to attach (sniff only) |
+| Flag                    | Short | Type     | Default | Description                                                    |
+| ----------------------- | ----- | -------- | ------- | -------------------------------------------------------------- |
+| `--virtual-interface`   | `-V`  | bool     | `false` | Enable virtual interface output                                |
+| `--vif-name`            |       | string   | `lc0`   | Virtual interface name                                         |
+| `--vif-type`            |       | string   | `tap`   | Interface type: `tap` or `tun`                                 |
+| `--vif-buffer-size`     |       | int      | `65536` | Write buffer size in bytes                                     |
+| `--vif-drop-privileges` |       | string   |         | Drop privileges to this user after interface creation          |
+| `--vif-netns`           |       | string   |         | Target network namespace                                       |
+| `--vif-replay-timing`   |       | bool     | `false` | Replay with original packet timing (sniff only)                |
+| `--vif-startup-delay`   |       | duration | `3s`    | Delay before writing to allow consumers to attach (sniff only) |
 
 ### PCAP Output Flags
 
 Used by `tap` and `process` for writing captured packets to disk.
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--write-file` | string | | Write all packets to a single PCAP file |
-| `--per-call-pcap` | bool | `false` | Write per-call PCAP files (VoIP) |
-| `--per-call-pcap-dir` | string | `./pcaps` | Directory for per-call PCAP files |
-| `--per-call-pcap-pattern` | string | | Filename pattern for per-call PCAPs |
-| `--auto-rotate-pcap` | bool | `false` | Enable auto-rotating PCAP files |
-| `--auto-rotate-pcap-dir` | string | | Directory for rotated PCAP files |
-| `--auto-rotate-pcap-pattern` | string | | Filename pattern for rotated PCAPs |
-| `--auto-rotate-max-size` | string | | Maximum file size before rotation |
-| `--auto-rotate-idle-timeout` | duration | | Close file after idle period |
-| `--pcap-command` | string | | Command to run on completed PCAP files (`%pcap%` placeholder) |
-| `--voip-command` | string | | Command to run on completed VoIP calls (`%callid%`, `%dirname%` placeholders) |
-| `--command-concurrency` | int | `10` | Maximum concurrent command executions |
-| `--command-timeout` | duration | `30s` | Timeout for command execution |
+| Flag                         | Type     | Default   | Description                                                                   |
+| ---------------------------- | -------- | --------- | ----------------------------------------------------------------------------- |
+| `--write-file`               | string   |           | Write all packets to a single PCAP file                                       |
+| `--per-call-pcap`            | bool     | `false`   | Write per-call PCAP files (VoIP)                                              |
+| `--per-call-pcap-dir`        | string   | `./pcaps` | Directory for per-call PCAP files                                             |
+| `--per-call-pcap-pattern`    | string   |           | Filename pattern for per-call PCAPs                                           |
+| `--auto-rotate-pcap`         | bool     | `false`   | Enable auto-rotating PCAP files                                               |
+| `--auto-rotate-pcap-dir`     | string   |           | Directory for rotated PCAP files                                              |
+| `--auto-rotate-pcap-pattern` | string   |           | Filename pattern for rotated PCAPs                                            |
+| `--auto-rotate-max-size`     | string   |           | Maximum file size before rotation                                             |
+| `--auto-rotate-idle-timeout` | duration |           | Close file after idle period                                                  |
+| `--pcap-command`             | string   |           | Command to run on completed PCAP files (`%pcap%` placeholder)                 |
+| `--voip-command`             | string   |           | Command to run on completed VoIP calls (`%callid%`, `%dirname%` placeholders) |
+| `--command-concurrency`      | int      | `10`      | Maximum concurrent command executions                                         |
+| `--command-timeout`          | duration | `30s`     | Timeout for command execution                                                 |
 
 ### Structured Protocol Log Flags
 
@@ -169,23 +172,23 @@ Used by `sniff`, `process`, and `tap`. Logging remains disabled until
 `--log-dir` is set. See [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
 for stream schemas, completeness semantics, rotation, and privacy guidance.
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--event-queue-size` | int | `20000` | Normalized protocol-event queue capacity |
-| `--event-drop-policy` | string | `drop_new` | Normalized event overflow policy |
-| `--log-dir` | string | | Directory for structured log files; enables logging |
-| `--log-format` | string | `tsv` | Output format: `tsv` or `json` (JSONL) |
-| `--log-streams` | strings | `conn,dns,ssl,http,smtp,files` | Enabled streams |
-| `--log-include-http-headers` | bool | `false` | Preserve full HTTP header maps in normalized events |
-| `--log-include-email-body-preview` | bool | `false` | Permit sensitive email body previews for file analysis |
-| `--log-rotate-interval` | duration | `1h` | Periodic rotation interval; `0` disables it |
-| `--log-queue-size` | int | `10000` | Queue capacity for each output stream |
-| `--log-post-rotate-command` | string | | Command after rotation; `%log%` is the rotated path |
-| `--log-emit-stage` | string | `terminal` | `process`/`tap` only: `terminal`, `all`, or `none` |
-| `--extract-files` | bool | `false` | Extract bounded HTTP and SMTP files |
-| `--extract-files-dir` | string | | Required output directory when extraction is enabled |
-| `--extract-files-max-size` | int64 | `10485760` | Maximum bytes analyzed or extracted per file |
-| `--extract-files-total-size` | int64 | `104857600` | Process-lifetime extracted-byte limit |
+| Flag                               | Type     | Default                        | Description                                            |
+| ---------------------------------- | -------- | ------------------------------ | ------------------------------------------------------ |
+| `--event-queue-size`               | int      | `20000`                        | Normalized protocol-event queue capacity               |
+| `--event-drop-policy`              | string   | `drop_new`                     | Normalized event overflow policy                       |
+| `--log-dir`                        | string   |                                | Directory for structured log files; enables logging    |
+| `--log-format`                     | string   | `tsv`                          | Output format: `tsv` or `json` (JSONL)                 |
+| `--log-streams`                    | strings  | `conn,dns,ssl,http,smtp,files` | Enabled streams                                        |
+| `--log-include-http-headers`       | bool     | `false`                        | Preserve full HTTP header maps in normalized events    |
+| `--log-include-email-body-preview` | bool     | `false`                        | Permit sensitive email body previews for file analysis |
+| `--log-rotate-interval`            | duration | `1h`                           | Periodic rotation interval; `0` disables it            |
+| `--log-queue-size`                 | int      | `10000`                        | Queue capacity for each output stream                  |
+| `--log-post-rotate-command`        | string   |                                | Command after rotation; `%log%` is the rotated path    |
+| `--log-emit-stage`                 | string   | `terminal`                     | `process`/`tap` only: `terminal`, `all`, or `none`     |
+| `--extract-files`                  | bool     | `false`                        | Extract bounded HTTP and SMTP files                    |
+| `--extract-files-dir`              | string   |                                | Required output directory when extraction is enabled   |
+| `--extract-files-max-size`         | int64    | `10485760`                     | Maximum bytes analyzed or extracted per file           |
+| `--extract-files-total-size`       | int64    | `104857600`                    | Process-lifetime extracted-byte limit                  |
 
 ### LI Flags
 
@@ -196,35 +199,35 @@ startup to fail.
 
 See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) for details.
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--li-enabled` | bool | `false` | Enable Lawful Interception support |
-| `--li-x1-listen` | string | | X1 (ADMF) HTTPS listen address |
-| `--li-x1-tls-cert` | string | | X1 server TLS certificate |
-| `--li-x1-tls-key` | string | | X1 server TLS private key |
-| `--li-x1-tls-ca` | string | | **Required when LI is enabled.** CA certificate used to verify ADMF client certificates |
-| `--li-delivery-tls-cert` | string | | X2/X3 delivery client certificate |
-| `--li-delivery-tls-key` | string | | X2/X3 delivery client private key |
-| `--li-delivery-tls-ca` | string | | X2/X3 delivery CA certificate (MDF verification) |
-| `--li-delivery-queue-size` | int | `10000` | Maximum queued X2/X3 PDUs per destination |
-| `--li-delivery-send-timeout` | duration | `5s` | Timeout for each delivery write |
-| `--li-delivery-reconnect-initial-backoff` | duration | `500ms` | Initial MDF reconnect backoff |
-| `--li-delivery-reconnect-max-backoff` | duration | `5s` | Maximum MDF reconnect backoff |
-| `--li-delivery-keepalive-idle` | duration | `15s` | Idle time before TCP keepalive probes |
-| `--li-delivery-keepalive-interval` | duration | `5s` | TCP keepalive probe interval |
-| `--li-delivery-keepalive-count` | int | `3` | Failed probes before disconnect |
-| `--li-delivery-shutdown-timeout` | duration | `10s` | Maximum LI queue flush time during shutdown |
-| `--li-admf-endpoint` | string | | ADMF HTTPS endpoint URL |
-| `--li-admf-tls-cert` | string | | Client certificate for ADMF connection |
-| `--li-admf-tls-key` | string | | Client private key for ADMF connection |
-| `--li-admf-tls-ca` | string | | CA certificate for ADMF server verification |
-| `--li-admf-keepalive` | duration | `30s` | ADMF keepalive interval (0 = disabled) |
-| `--li-admf-sync-on-startup` | bool | `true` | Query ADMF for state on startup |
-| `--li-admf-sync-timeout` | duration | `30s` | Timeout for startup state sync |
-| `--li-admf-reconcile-interval` | duration | `5m` | Periodic ADMF reconciliation interval (0 = disabled) |
-| `--li-metadata-events` | bool | `false` | Deliver authorized normalized protocol metadata over X2 |
-| `--li-metadata-delivery-profile` | string | `internet_metadata` | Metadata authorization and redaction profile |
-| `--li-metadata-allow-file-metadata` | bool | `false` | Permit file metadata over X2; file content is always rejected |
+| Flag                                      | Type     | Default             | Description                                                                             |
+| ----------------------------------------- | -------- | ------------------- | --------------------------------------------------------------------------------------- |
+| `--li-enabled`                            | bool     | `false`             | Enable Lawful Interception support                                                      |
+| `--li-x1-listen`                          | string   |                     | X1 (ADMF) HTTPS listen address                                                          |
+| `--li-x1-tls-cert`                        | string   |                     | X1 server TLS certificate                                                               |
+| `--li-x1-tls-key`                         | string   |                     | X1 server TLS private key                                                               |
+| `--li-x1-tls-ca`                          | string   |                     | **Required when LI is enabled.** CA certificate used to verify ADMF client certificates |
+| `--li-delivery-tls-cert`                  | string   |                     | X2/X3 delivery client certificate                                                       |
+| `--li-delivery-tls-key`                   | string   |                     | X2/X3 delivery client private key                                                       |
+| `--li-delivery-tls-ca`                    | string   |                     | X2/X3 delivery CA certificate (MDF verification)                                        |
+| `--li-delivery-queue-size`                | int      | `10000`             | Maximum queued X2/X3 PDUs per destination                                               |
+| `--li-delivery-send-timeout`              | duration | `5s`                | Timeout for each delivery write                                                         |
+| `--li-delivery-reconnect-initial-backoff` | duration | `500ms`             | Initial MDF reconnect backoff                                                           |
+| `--li-delivery-reconnect-max-backoff`     | duration | `5s`                | Maximum MDF reconnect backoff                                                           |
+| `--li-delivery-keepalive-idle`            | duration | `15s`               | Idle time before TCP keepalive probes                                                   |
+| `--li-delivery-keepalive-interval`        | duration | `5s`                | TCP keepalive probe interval                                                            |
+| `--li-delivery-keepalive-count`           | int      | `3`                 | Failed probes before disconnect                                                         |
+| `--li-delivery-shutdown-timeout`          | duration | `10s`               | Maximum LI queue flush time during shutdown                                             |
+| `--li-admf-endpoint`                      | string   |                     | ADMF HTTPS endpoint URL                                                                 |
+| `--li-admf-tls-cert`                      | string   |                     | Client certificate for ADMF connection                                                  |
+| `--li-admf-tls-key`                       | string   |                     | Client private key for ADMF connection                                                  |
+| `--li-admf-tls-ca`                        | string   |                     | CA certificate for ADMF server verification                                             |
+| `--li-admf-keepalive`                     | duration | `30s`               | ADMF keepalive interval (0 = disabled)                                                  |
+| `--li-admf-sync-on-startup`               | bool     | `true`              | Query ADMF for state on startup                                                         |
+| `--li-admf-sync-timeout`                  | duration | `30s`               | Timeout for startup state sync                                                          |
+| `--li-admf-reconcile-interval`            | duration | `5m`                | Periodic ADMF reconciliation interval (0 = disabled)                                    |
+| `--li-metadata-events`                    | bool     | `false`             | Deliver authorized normalized protocol metadata over X2                                 |
+| `--li-metadata-delivery-profile`          | string   | `internet_metadata` | Metadata authorization and redaction profile                                            |
+| `--li-metadata-allow-file-metadata`       | bool     | `false`             | Permit file metadata over X2; file content is always rejected                           |
 
 ---
 
@@ -238,15 +241,15 @@ Capture and display packets from a network interface or PCAP file. Output is wri
 lc sniff [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--interface` | `-i` | string | `any` | Network interface to capture on |
-| `--filter` | `-f` | string | | BPF filter expression |
-| `--promiscuous` | `-p` | bool | `false` | Enable promiscuous mode |
-| `--read-file` | `-r` | string | | Read packets from PCAP file |
-| `--write-file` | `-w` | string | | Write packets to PCAP file |
-| `--format` | | string | `json` | Output format: `json` or `text` |
-| `--quiet` | `-q` | bool | `false` | Suppress non-packet output |
+| Flag            | Short | Type   | Default | Description                     |
+| --------------- | ----- | ------ | ------- | ------------------------------- |
+| `--interface`   | `-i`  | string | `any`   | Network interface to capture on |
+| `--filter`      | `-f`  | string |         | BPF filter expression           |
+| `--promiscuous` | `-p`  | bool   | `false` | Enable promiscuous mode         |
+| `--read-file`   | `-r`  | string |         | Read packets from PCAP file     |
+| `--write-file`  | `-w`  | string |         | Write packets to PCAP file      |
+| `--format`      |       | string | `json`  | Output format: `json` or `text` |
+| `--quiet`       | `-q`  | bool   | `false` | Suppress non-packet output      |
 
 Plus [Virtual Interface Flags](#virtual-interface-flags) and
 [Structured Protocol Log Flags](#structured-protocol-log-flags).
@@ -267,35 +270,35 @@ Inherits all `lc sniff` flags, plus:
 
 **VoIP Filtering**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--sip-user` | | string | | Filter by SIP user |
-| `--sip-port` | `-S` | string | | SIP signaling port(s), comma-separated |
-| `--rtp-port-range` | `-R` | string | | RTP port range (e.g., `10000-20000`) |
+| Flag               | Short | Type   | Default | Description                            |
+| ------------------ | ----- | ------ | ------- | -------------------------------------- |
+| `--sip-user`       |       | string |         | Filter by SIP user                     |
+| `--sip-port`       | `-S`  | string |         | SIP signaling port(s), comma-separated |
+| `--rtp-port-range` | `-R`  | string |         | RTP port range (e.g., `10000-20000`)   |
 
 `--udp-only` still exists for backward compatibility, but is hidden and deprecated in VoIP modes because it can miss TCP SIP traffic. Prefer `--sip-port` and `--rtp-port-range` for BPF narrowing.
 
 **TCP Performance**
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
+| Flag                     | Type   | Default    | Description                                             |
+| ------------------------ | ------ | ---------- | ------------------------------------------------------- |
 | `--tcp-performance-mode` | string | `balanced` | TCP mode: `balanced`, `throughput`, `latency`, `memory` |
-| `--tcp-*` | | | Various TCP reassembly tuning flags |
+| `--tcp-*`                |        |            | Various TCP reassembly tuning flags                     |
 
 **GPU Acceleration**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--gpu-backend` | `-g` | string | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
-| `--gpu-batch-size` | | int | `1024` | Packets per GPU batch |
-| `--gpu-enable` | | bool | `true` | Enable GPU acceleration |
-| `--gpu-max-memory` | | string | | Maximum GPU memory allocation |
+| Flag               | Short | Type   | Default | Description                                                   |
+| ------------------ | ----- | ------ | ------- | ------------------------------------------------------------- |
+| `--gpu-backend`    | `-g`  | string | `auto`  | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
+| `--gpu-batch-size` |       | int    | `1024`  | Packets per GPU batch                                         |
+| `--gpu-enable`     |       | bool   | `true`  | Enable GPU acceleration                                       |
+| `--gpu-max-memory` |       | string |         | Maximum GPU memory allocation                                 |
 
 **PCAP Output**
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--pcap-grace-period` | duration | `5s` | Grace period before closing call PCAP files after call end |
+| Flag                  | Type     | Default | Description                                                |
+| --------------------- | -------- | ------- | ---------------------------------------------------------- |
+| `--pcap-grace-period` | duration | `5s`    | Grace period before closing call PCAP files after call end |
 
 See [Chapter 4: CLI Capture with `lc sniff`](../part2-local-capture/sniff.md) and [Chapter 13: Performance Optimization](../part5-advanced/performance.md).
 
@@ -311,14 +314,14 @@ lc sniff dns [flags]
 
 Inherits all `lc sniff` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--dns-port` | string | `53` | DNS port(s) to monitor |
-| `--domain` | string | | Filter by domain name |
-| `--domains-file` | string | | File containing domains (one per line) |
-| `--detect-tunneling` | bool | `true` | Enable DNS tunneling detection |
-| `--track-queries` | bool | `true` | Track query/response pairs |
-| `--udp-only` | bool | `false` | Capture UDP only |
+| Flag                 | Type   | Default | Description                            |
+| -------------------- | ------ | ------- | -------------------------------------- |
+| `--dns-port`         | string | `53`    | DNS port(s) to monitor                 |
+| `--domain`           | string |         | Filter by domain name                  |
+| `--domains-file`     | string |         | File containing domains (one per line) |
+| `--detect-tunneling` | bool   | `true`  | Enable DNS tunneling detection         |
+| `--track-queries`    | bool   | `true`  | Track query/response pairs             |
+| `--udp-only`         | bool   | `false` | Capture UDP only                       |
 
 ---
 
@@ -332,18 +335,18 @@ lc sniff tls [flags]
 
 Inherits all `lc sniff` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--tls-port` | string | `443` | TLS port(s) to monitor |
-| `--sni` | string | | Filter by SNI (Server Name Indication) |
-| `--sni-file` | string | | File containing SNI values |
-| `--ja3` | string | | Filter by JA3 fingerprint |
-| `--ja3-file` | string | | File containing JA3 fingerprints |
-| `--ja3s` | string | | Filter by JA3S (server) fingerprint |
-| `--ja3s-file` | string | | File containing JA3S fingerprints |
-| `--ja4` | string | | Filter by JA4 fingerprint |
-| `--ja4-file` | string | | File containing JA4 fingerprints |
-| `--track-connections` | bool | `true` | Track TLS connection state |
+| Flag                  | Type   | Default | Description                            |
+| --------------------- | ------ | ------- | -------------------------------------- |
+| `--tls-port`          | string | `443`   | TLS port(s) to monitor                 |
+| `--sni`               | string |         | Filter by SNI (Server Name Indication) |
+| `--sni-file`          | string |         | File containing SNI values             |
+| `--ja3`               | string |         | Filter by JA3 fingerprint              |
+| `--ja3-file`          | string |         | File containing JA3 fingerprints       |
+| `--ja3s`              | string |         | Filter by JA3S (server) fingerprint    |
+| `--ja3s-file`         | string |         | File containing JA3S fingerprints      |
+| `--ja4`               | string |         | Filter by JA4 fingerprint              |
+| `--ja4-file`          | string |         | File containing JA4 fingerprints       |
+| `--track-connections` | bool   | `true`  | Track TLS connection state             |
 
 ---
 
@@ -357,25 +360,25 @@ lc sniff http [flags]
 
 Inherits all `lc sniff` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--http-port` | string | `80,8080,8000,3000,8888` | HTTP port(s) to monitor |
-| `--host` | string | | Filter by Host header |
-| `--hosts-file` | string | | File containing hostnames |
-| `--path` | string | | Filter by URL path |
-| `--paths-file` | string | | File containing URL paths |
-| `--method` | string | | Filter by HTTP method |
-| `--status` | string | | Filter by response status code |
-| `--user-agent` | string | | Filter by User-Agent header |
-| `--user-agents-file` | string | | File containing User-Agent patterns |
-| `--content-type` | string | | Filter by Content-Type header |
-| `--content-types-file` | string | | File containing Content-Type values |
-| `--keywords-file` | string | | File containing body keyword filters |
-| `--capture-body` | bool | `false` | Capture HTTP request/response body |
-| `--max-body-size` | int | `65536` | Maximum body size to capture (bytes) |
-| `--track-requests` | bool | `true` | Track request/response pairs |
-| `--tls-keylog` | string | | TLS key log file for HTTPS decryption |
-| `--tls-keylog-pipe` | string | | Named pipe for TLS key log |
+| Flag                   | Type   | Default                  | Description                           |
+| ---------------------- | ------ | ------------------------ | ------------------------------------- |
+| `--http-port`          | string | `80,8080,8000,3000,8888` | HTTP port(s) to monitor               |
+| `--host`               | string |                          | Filter by Host header                 |
+| `--hosts-file`         | string |                          | File containing hostnames             |
+| `--path`               | string |                          | Filter by URL path                    |
+| `--paths-file`         | string |                          | File containing URL paths             |
+| `--method`             | string |                          | Filter by HTTP method                 |
+| `--status`             | string |                          | Filter by response status code        |
+| `--user-agent`         | string |                          | Filter by User-Agent header           |
+| `--user-agents-file`   | string |                          | File containing User-Agent patterns   |
+| `--content-type`       | string |                          | Filter by Content-Type header         |
+| `--content-types-file` | string |                          | File containing Content-Type values   |
+| `--keywords-file`      | string |                          | File containing body keyword filters  |
+| `--capture-body`       | bool   | `false`                  | Capture HTTP request/response body    |
+| `--max-body-size`      | int    | `65536`                  | Maximum body size to capture (bytes)  |
+| `--track-requests`     | bool   | `true`                   | Track request/response pairs          |
+| `--tls-keylog`         | string |                          | TLS key log file for HTTPS decryption |
+| `--tls-keylog-pipe`    | string |                          | Named pipe for TLS key log            |
 
 ---
 
@@ -391,36 +394,36 @@ Inherits all `lc sniff` flags, plus:
 
 **Port Configuration**
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--smtp-port` | string | `25,587,465` | SMTP port(s) |
-| `--pop3-port` | string | `110,995` | POP3 port(s) |
-| `--imap-port` | string | `143,993` | IMAP port(s) |
-| `--protocol` | string | `all` | Protocol filter: `all`, `smtp`, `pop3`, `imap` |
+| Flag          | Type   | Default      | Description                                    |
+| ------------- | ------ | ------------ | ---------------------------------------------- |
+| `--smtp-port` | string | `25,587,465` | SMTP port(s)                                   |
+| `--pop3-port` | string | `110,995`    | POP3 port(s)                                   |
+| `--imap-port` | string | `143,993`    | IMAP port(s)                                   |
+| `--protocol`  | string | `all`        | Protocol filter: `all`, `smtp`, `pop3`, `imap` |
 
 **Address Filtering**
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--sender` | string | | Filter by sender address |
-| `--senders-file` | string | | File containing sender addresses |
-| `--recipient` | string | | Filter by recipient address |
-| `--recipients-file` | string | | File containing recipient addresses |
-| `--address` | string | | Filter by any address (sender or recipient) |
-| `--addresses-file` | string | | File containing addresses |
+| Flag                | Type   | Default | Description                                 |
+| ------------------- | ------ | ------- | ------------------------------------------- |
+| `--sender`          | string |         | Filter by sender address                    |
+| `--senders-file`    | string |         | File containing sender addresses            |
+| `--recipient`       | string |         | Filter by recipient address                 |
+| `--recipients-file` | string |         | File containing recipient addresses         |
+| `--address`         | string |         | Filter by any address (sender or recipient) |
+| `--addresses-file`  | string |         | File containing addresses                   |
 
 **Content Filtering**
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--subject` | string | | Filter by subject |
-| `--subjects-file` | string | | File containing subjects |
-| `--command` | string | | Filter by SMTP command |
-| `--mailbox` | string | | Filter by IMAP mailbox |
-| `--capture-body` | bool | `false` | Capture message body |
-| `--max-body-size` | int | `65536` | Maximum body size to capture (bytes) |
-| `--keywords-file` | string | | File containing body keyword filters |
-| `--track-sessions` | bool | `true` | Track protocol sessions |
+| Flag               | Type   | Default | Description                          |
+| ------------------ | ------ | ------- | ------------------------------------ |
+| `--subject`        | string |         | Filter by subject                    |
+| `--subjects-file`  | string |         | File containing subjects             |
+| `--command`        | string |         | Filter by SMTP command               |
+| `--mailbox`        | string |         | Filter by IMAP mailbox               |
+| `--capture-body`   | bool   | `false` | Capture message body                 |
+| `--max-body-size`  | int    | `65536` | Maximum body size to capture (bytes) |
+| `--keywords-file`  | string |         | File containing body keyword filters |
+| `--track-sessions` | bool   | `true`  | Track protocol sessions              |
 
 ---
 
@@ -434,47 +437,47 @@ lc tap [flags]
 
 **Capture**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--interface` | `-i` | string | `any` | Network interface(s) to capture on |
-| `--filter` | `-f` | string | | BPF filter expression |
-| `--promisc` | `-p` | bool | `false` | Enable promiscuous mode |
-| `--pcap-buffer-size` | | int | `16777216` | PCAP kernel buffer size (bytes) |
+| Flag                 | Short | Type   | Default    | Description                        |
+| -------------------- | ----- | ------ | ---------- | ---------------------------------- |
+| `--interface`        | `-i`  | string | `any`      | Network interface(s) to capture on |
+| `--filter`           | `-f`  | string |            | BPF filter expression              |
+| `--promisc`          | `-p`  | bool   | `false`    | Enable promiscuous mode            |
+| `--pcap-buffer-size` |       | int    | `16777216` | PCAP kernel buffer size (bytes)    |
 
 **Batching**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--buffer-size` | `-b` | int | `10000` | Internal packet buffer size |
-| `--batch-size` | | int | `100` | Packets per batch |
-| `--batch-timeout` | | duration | `100ms` | Maximum batch wait time |
+| Flag              | Short | Type     | Default | Description                 |
+| ----------------- | ----- | -------- | ------- | --------------------------- |
+| `--buffer-size`   | `-b`  | int      | `10000` | Internal packet buffer size |
+| `--batch-size`    |       | int      | `100`   | Packets per batch           |
+| `--batch-timeout` |       | duration | `100ms` | Maximum batch wait time     |
 
 **Server**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--listen` | `-l` | string | `:55555` | gRPC listen address for hunter and TUI clients |
-| `--id` | `-I` | string | | Node identifier |
-| `--max-hunters` | | int | `0` | Maximum concurrent hunters (0 = unlimited) |
-| `--max-subscribers` | | int | `100` | Maximum concurrent TUI subscribers (0 = unlimited) |
-| `--insecure` | | bool | `false` | Disable TLS for gRPC server |
-| `--api-key-auth` | | bool | `false` | Enable API key authentication |
-| `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |
-| `--debug-allow-non-loopback` | | bool | `false` | Permit pprof listener on non-loopback addresses |
+| Flag                         | Short | Type   | Default  | Description                                        |
+| ---------------------------- | ----- | ------ | -------- | -------------------------------------------------- |
+| `--listen`                   | `-l`  | string | `:55555` | gRPC listen address for hunter and TUI clients     |
+| `--id`                       | `-I`  | string |          | Node identifier                                    |
+| `--max-hunters`              |       | int    | `0`      | Maximum concurrent hunters (0 = unlimited)         |
+| `--max-subscribers`          |       | int    | `100`    | Maximum concurrent TUI subscribers (0 = unlimited) |
+| `--insecure`                 |       | bool   | `false`  | Disable TLS for gRPC server                        |
+| `--api-key-auth`             |       | bool   | `false`  | Enable API key authentication                      |
+| `--debug-listen`             |       | string |          | Enable pprof listener, loopback-only by default    |
+| `--debug-allow-non-loopback` |       | bool   | `false`  | Permit pprof listener on non-loopback addresses    |
 
 **Upstream Forwarding**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | | Upstream processor address for forwarding |
+| Flag          | Short | Type   | Default | Description                               |
+| ------------- | ----- | ------ | ------- | ----------------------------------------- |
+| `--processor` | `-P`  | string |         | Upstream processor address for forwarding |
 
 **Detection**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--detect` | `-d` | bool | `true` | Enable protocol detection |
-| `--filter-file` | | string | | Filter definition file |
-| `--no-filter-policy` | | string | `deny` | Behavior when no filters exist: `allow` or `deny` |
+| Flag                 | Short | Type   | Default | Description                                       |
+| -------------------- | ----- | ------ | ------- | ------------------------------------------------- |
+| `--detect`           | `-d`  | bool   | `true`  | Enable protocol detection                         |
+| `--filter-file`      |       | string |         | Filter definition file                            |
+| `--no-filter-policy` |       | string | `deny`  | Behavior when no filters exist: `allow` or `deny` |
 
 Plus [PCAP Output Flags](#pcap-output-flags), [TLS Server Flags](#tls-server-flags),
 [Virtual Interface Flags](#virtual-interface-flags), [GPU Flags](#gpu-flags), and
@@ -494,15 +497,15 @@ lc tap voip [flags]
 
 Inherits all `lc tap` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--sip-user` | string | | Filter by SIP user |
-| `--sip-port` | int | `5060` | SIP signaling port |
-| `--rtp-port-range` | string | | RTP port range |
-| `--tcp-performance-mode` | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency` |
-| `--tcp-reassembly-shards` | int | `1` | Flow-sharded TCP reassembly assembler count |
-| `--pattern-algorithm` | string | `auto` | Pattern matching algorithm: `auto`, `linear`, `aho-corasick` |
-| `--pattern-buffer-mb` | int | `64` | Pattern buffer size (MB) |
+| Flag                      | Type   | Default    | Description                                                        |
+| ------------------------- | ------ | ---------- | ------------------------------------------------------------------ |
+| `--sip-user`              | string |            | Filter by SIP user                                                 |
+| `--sip-port`              | int    | `5060`     | SIP signaling port                                                 |
+| `--rtp-port-range`        | string |            | RTP port range                                                     |
+| `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency` |
+| `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                        |
+| `--pattern-algorithm`     | string | `auto`     | Pattern matching algorithm: `auto`, `linear`, `aho-corasick`       |
+| `--pattern-buffer-mb`     | int    | `64`       | Pattern buffer size (MB)                                           |
 
 ---
 
@@ -516,16 +519,16 @@ lc tap dns [flags]
 
 Inherits all `lc tap` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--dns-port` | string | `53` | DNS port(s) to monitor |
-| `--domain` | string | | Filter by domain pattern |
-| `--domains-file` | string | | File containing domain patterns |
-| `--detect-tunneling` | bool | `true` | Enable DNS tunneling detection |
-| `--udp-only` | bool | `false` | Capture UDP DNS only |
-| `--tunneling-command` | string | | Command to execute when tunneling is detected |
-| `--tunneling-threshold` | float | `0.7` | DNS tunneling score threshold |
-| `--tunneling-debounce` | duration | `5m` | Minimum time between alerts per domain |
+| Flag                    | Type     | Default | Description                                   |
+| ----------------------- | -------- | ------- | --------------------------------------------- |
+| `--dns-port`            | string   | `53`    | DNS port(s) to monitor                        |
+| `--domain`              | string   |         | Filter by domain pattern                      |
+| `--domains-file`        | string   |         | File containing domain patterns               |
+| `--detect-tunneling`    | bool     | `true`  | Enable DNS tunneling detection                |
+| `--udp-only`            | bool     | `false` | Capture UDP DNS only                          |
+| `--tunneling-command`   | string   |         | Command to execute when tunneling is detected |
+| `--tunneling-threshold` | float    | `0.7`   | DNS tunneling score threshold                 |
+| `--tunneling-debounce`  | duration | `5m`    | Minimum time between alerts per domain        |
 
 ---
 
@@ -551,11 +554,11 @@ lc tap tls [flags]
 
 Inherits all `lc tap` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--tls-port` | string | `443` | TLS port(s) to monitor |
-| `--sni` | string | | Filter by SNI pattern |
-| `--sni-file` | string | | File containing SNI patterns |
+| Flag         | Type   | Default | Description                  |
+| ------------ | ------ | ------- | ---------------------------- |
+| `--tls-port` | string | `443`   | TLS port(s) to monitor       |
+| `--sni`      | string |         | Filter by SNI pattern        |
+| `--sni-file` | string |         | File containing SNI patterns |
 
 ---
 
@@ -579,28 +582,28 @@ Hunter node for distributed edge capture. Captures packets and forwards them to 
 lc hunt [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | **required** | Processor address (`host:port`) |
-| `--id` | `-I` | string | | Hunter identifier |
-| `--interface` | `-i` | string | `any` | Network interface(s) to capture on |
-| `--filter` | `-f` | string | | BPF filter expression |
-| `--promisc` | `-p` | bool | `false` | Enable promiscuous mode |
-| `--buffer-size` | `-b` | int | `10000` | Internal packet buffer size |
-| `--batch-size` | | int | `64` | Packets per batch |
-| `--batch-timeout` | | duration | `100ms` | Maximum batch wait time |
-| `--batch-queue-size` | | int | `1000` | Batch queue depth (0 defaults to 1000) |
-| `--pcap-buffer-size` | | int | `16777216` | PCAP kernel buffer size (bytes) |
-| `--disk-buffer` | | bool | `false` | Enable disk-based buffer for backpressure |
-| `--disk-buffer-dir` | | string | | Directory for disk buffer files |
-| `--disk-buffer-max-mb` | | int | `1024` | Maximum disk buffer size (MB) |
-| `--enable-voip-filter` | | bool | `false` | Enable VoIP packet filtering |
-| `--gpu-backend` | `-g` | string | `auto` | GPU backend |
-| `--gpu-batch-size` | | int | `100` | Packets per GPU batch |
-| `--no-filter-policy` | | string | `deny` | Behavior when no filters exist: `allow` or `deny` |
-| `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |
-| `--debug-allow-non-loopback` | | bool | `false` | Permit pprof listener on non-loopback addresses |
-| `--insecure` | | bool | `false` | Disable TLS |
+| Flag                         | Short | Type     | Default      | Description                                       |
+| ---------------------------- | ----- | -------- | ------------ | ------------------------------------------------- |
+| `--processor`                | `-P`  | string   | **required** | Processor address (`host:port`)                   |
+| `--id`                       | `-I`  | string   |              | Hunter identifier                                 |
+| `--interface`                | `-i`  | string   | `any`        | Network interface(s) to capture on                |
+| `--filter`                   | `-f`  | string   |              | BPF filter expression                             |
+| `--promisc`                  | `-p`  | bool     | `false`      | Enable promiscuous mode                           |
+| `--buffer-size`              | `-b`  | int      | `10000`      | Internal packet buffer size                       |
+| `--batch-size`               |       | int      | `64`         | Packets per batch                                 |
+| `--batch-timeout`            |       | duration | `100ms`      | Maximum batch wait time                           |
+| `--batch-queue-size`         |       | int      | `1000`       | Batch queue depth (0 defaults to 1000)            |
+| `--pcap-buffer-size`         |       | int      | `16777216`   | PCAP kernel buffer size (bytes)                   |
+| `--disk-buffer`              |       | bool     | `false`      | Enable disk-based buffer for backpressure         |
+| `--disk-buffer-dir`          |       | string   |              | Directory for disk buffer files                   |
+| `--disk-buffer-max-mb`       |       | int      | `1024`       | Maximum disk buffer size (MB)                     |
+| `--enable-voip-filter`       |       | bool     | `false`      | Enable VoIP packet filtering                      |
+| `--gpu-backend`              | `-g`  | string   | `auto`       | GPU backend                                       |
+| `--gpu-batch-size`           |       | int      | `100`        | Packets per GPU batch                             |
+| `--no-filter-policy`         |       | string   | `deny`       | Behavior when no filters exist: `allow` or `deny` |
+| `--debug-listen`             |       | string   |              | Enable pprof listener, loopback-only by default   |
+| `--debug-allow-non-loopback` |       | bool     | `false`      | Permit pprof listener on non-loopback addresses   |
+| `--insecure`                 |       | bool     | `false`      | Disable TLS                                       |
 
 Plus [TLS Client Flags](#tls-client-flags) (`--tls-ca`, `--tls-cert`, `--tls-key`, `--tls-skip-verify`).
 
@@ -618,13 +621,13 @@ lc hunt voip [flags]
 
 Inherits all `lc hunt` flags, plus:
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--sip-port` | `-S` | int | `5060` | SIP signaling port |
-| `--rtp-port-range` | `-R` | string | | RTP port range |
-| `--pattern-algorithm` | | string | `auto` | Pattern matching: `auto`, `linear`, `aho-corasick` |
-| `--pattern-buffer-mb` | | int | `64` | Pattern buffer size (MB) |
-| `--tcp-sip-idle-timeout` | | duration | | Idle timeout for SIP TCP connections |
+| Flag                     | Short | Type     | Default | Description                                        |
+| ------------------------ | ----- | -------- | ------- | -------------------------------------------------- |
+| `--sip-port`             | `-S`  | int      | `5060`  | SIP signaling port                                 |
+| `--rtp-port-range`       | `-R`  | string   |         | RTP port range                                     |
+| `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick` |
+| `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                           |
+| `--tcp-sip-idle-timeout` |       | duration |         | Idle timeout for SIP TCP connections               |
 
 `--udp-only` is hidden and deprecated for VoIP hunters; use `--sip-port` and `--rtp-port-range` instead.
 
@@ -640,10 +643,10 @@ lc hunt dns [flags]
 
 Inherits all `lc hunt` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--dns-port` | string | `53` | DNS port(s) to monitor |
-| `--udp-only` | bool | `false` | Capture UDP only |
+| Flag         | Type   | Default | Description            |
+| ------------ | ------ | ------- | ---------------------- |
+| `--dns-port` | string | `53`    | DNS port(s) to monitor |
+| `--udp-only` | bool   | `false` | Capture UDP only       |
 
 ---
 
@@ -657,18 +660,18 @@ lc hunt http [flags]
 
 Inherits all `lc hunt` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--http-port` | string | `80,8080,8000,3000,8888` | HTTP port(s) to monitor |
-| `--host` | string | | Host patterns |
-| `--path` | string | | Path patterns |
-| `--method` | string | | HTTP methods |
-| `--status` | string | | Status codes |
-| `--keywords` | string | | Body/URL keywords |
-| `--capture-body` | bool | `false` | Enable body capture |
-| `--max-body-size` | int | `65536` | Maximum body capture size |
-| `--tls-keylog` | string | | TLS key log file |
-| `--tls-keylog-pipe` | string | | TLS key log named pipe |
+| Flag                | Type   | Default                  | Description               |
+| ------------------- | ------ | ------------------------ | ------------------------- |
+| `--http-port`       | string | `80,8080,8000,3000,8888` | HTTP port(s) to monitor   |
+| `--host`            | string |                          | Host patterns             |
+| `--path`            | string |                          | Path patterns             |
+| `--method`          | string |                          | HTTP methods              |
+| `--status`          | string |                          | Status codes              |
+| `--keywords`        | string |                          | Body/URL keywords         |
+| `--capture-body`    | bool   | `false`                  | Enable body capture       |
+| `--max-body-size`   | int    | `65536`                  | Maximum body capture size |
+| `--tls-keylog`      | string |                          | TLS key log file          |
+| `--tls-keylog-pipe` | string |                          | TLS key log named pipe    |
 
 ---
 
@@ -682,9 +685,9 @@ lc hunt tls [flags]
 
 Inherits all `lc hunt` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--tls-port` | string | `443` | TLS port(s) to monitor |
+| Flag         | Type   | Default | Description            |
+| ------------ | ------ | ------- | ---------------------- |
+| `--tls-port` | string | `443`   | TLS port(s) to monitor |
 
 ---
 
@@ -698,20 +701,20 @@ lc hunt email [flags]
 
 Inherits all `lc hunt` flags, plus:
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--protocol` | string | `all` | Email protocol: `smtp`, `imap`, `pop3`, or `all` |
-| `--smtp-port` | string | `25,587,465` | SMTP ports |
-| `--imap-port` | string | `143,993` | IMAP ports |
-| `--pop3-port` | string | `110,995` | POP3 ports |
-| `--sender` | string | | Sender patterns |
-| `--recipient` | string | | Recipient patterns |
-| `--subject` | string | | Subject patterns |
-| `--mailbox` | string | | IMAP mailbox patterns |
-| `--command` | string | | IMAP/POP3 command patterns |
-| `--keywords` | string | | Body/subject keywords |
-| `--capture-body` | bool | `false` | Enable body capture |
-| `--max-body-size` | int | `65536` | Maximum body capture size |
+| Flag              | Type   | Default      | Description                                      |
+| ----------------- | ------ | ------------ | ------------------------------------------------ |
+| `--protocol`      | string | `all`        | Email protocol: `smtp`, `imap`, `pop3`, or `all` |
+| `--smtp-port`     | string | `25,587,465` | SMTP ports                                       |
+| `--imap-port`     | string | `143,993`    | IMAP ports                                       |
+| `--pop3-port`     | string | `110,995`    | POP3 ports                                       |
+| `--sender`        | string |              | Sender patterns                                  |
+| `--recipient`     | string |              | Recipient patterns                               |
+| `--subject`       | string |              | Subject patterns                                 |
+| `--mailbox`       | string |              | IMAP mailbox patterns                            |
+| `--command`       | string |              | IMAP/POP3 command patterns                       |
+| `--keywords`      | string |              | Body/subject keywords                            |
+| `--capture-body`  | bool   | `false`      | Enable body capture                              |
+| `--max-body-size` | int    | `65536`      | Maximum body capture size                        |
 
 ---
 
@@ -725,41 +728,41 @@ lc process [flags]
 
 **Server**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--listen` | `-l` | string | `:55555` | gRPC listen address |
-| `--id` | `-I` | string | | Processor identifier |
-| `--max-hunters` | `-m` | int | `100` | Maximum connected hunters |
-| `--max-subscribers` | | int | `100` | Maximum TUI subscribers |
-| `--insecure` | | bool | `false` | Disable TLS |
-| `--api-key-auth` | | bool | `false` | Enable API key authentication |
-| `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |
-| `--debug-allow-non-loopback` | | bool | `false` | Permit pprof listener on non-loopback addresses |
+| Flag                         | Short | Type   | Default  | Description                                     |
+| ---------------------------- | ----- | ------ | -------- | ----------------------------------------------- |
+| `--listen`                   | `-l`  | string | `:55555` | gRPC listen address                             |
+| `--id`                       | `-I`  | string |          | Processor identifier                            |
+| `--max-hunters`              | `-m`  | int    | `100`    | Maximum connected hunters                       |
+| `--max-subscribers`          |       | int    | `100`    | Maximum TUI subscribers                         |
+| `--insecure`                 |       | bool   | `false`  | Disable TLS                                     |
+| `--api-key-auth`             |       | bool   | `false`  | Enable API key authentication                   |
+| `--debug-listen`             |       | string |          | Enable pprof listener, loopback-only by default |
+| `--debug-allow-non-loopback` |       | bool   | `false`  | Permit pprof listener on non-loopback addresses |
 
 **Detection & Filtering**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--enable-detection` | `-d` | bool | `true` | Enable protocol detection |
-| `--filter-file` | `-f` | string | | Filter definition file |
+| Flag                 | Short | Type   | Default | Description               |
+| -------------------- | ----- | ------ | ------- | ------------------------- |
+| `--enable-detection` | `-d`  | bool   | `true`  | Enable protocol detection |
+| `--filter-file`      | `-f`  | string |         | Filter definition file    |
 
 **Upstream Forwarding**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | | Upstream processor for hierarchical topology |
+| Flag          | Short | Type   | Default | Description                                  |
+| ------------- | ----- | ------ | ------- | -------------------------------------------- |
+| `--processor` | `-P`  | string |         | Upstream processor for hierarchical topology |
 
 **Statistics**
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--stats` | `-s` | bool | `true` | Enable statistics collection |
+| Flag      | Short | Type | Default | Description                  |
+| --------- | ----- | ---- | ------- | ---------------------------- |
+| `--stats` | `-s`  | bool | `true`  | Enable statistics collection |
 
 **TLS Key Logging**
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--tls-keylog-dir` | string | | Directory for TLS key log files from hunters |
+| Flag               | Type   | Default | Description                                  |
+| ------------------ | ------ | ------- | -------------------------------------------- |
+| `--tls-keylog-dir` | string |         | Directory for TLS key log files from hunters |
 
 Plus [PCAP Output Flags](#pcap-output-flags), [TLS Server Flags](#tls-server-flags),
 [Virtual Interface Flags](#virtual-interface-flags), [Structured Protocol Log Flags](#structured-protocol-log-flags),
@@ -779,10 +782,10 @@ lc watch [subcommand] [flags]
 
 **Persistent flags** (inherited by all subcommands):
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--buffer-size` | int | `10000` | TUI packet buffer size |
-| `--max-calls` | int | | Maximum displayed VoIP calls |
+| Flag            | Type | Default | Description                  |
+| --------------- | ---- | ------- | ---------------------------- |
+| `--buffer-size` | int  | `10000` | TUI packet buffer size       |
+| `--max-calls`   | int  |         | Maximum displayed VoIP calls |
 
 Plus [TLS Client Flags](#tls-client-flags).
 
@@ -798,14 +801,14 @@ Live packet capture in the TUI. Requires elevated privileges.
 lc watch live [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--interface` | `-i` | string | `any` | Network interface to capture on |
-| `--filter` | `-f` | string | | BPF filter expression |
-| `--promiscuous` | `-p` | bool | `false` | Enable promiscuous mode |
-| `--enable-gpu` | | bool | `false` | Enable GPU acceleration |
-| `--gpu-backend` | | string | | GPU backend |
-| `--gpu-batch-size` | | int | | Packets per GPU batch |
+| Flag               | Short | Type   | Default | Description                     |
+| ------------------ | ----- | ------ | ------- | ------------------------------- |
+| `--interface`      | `-i`  | string | `any`   | Network interface to capture on |
+| `--filter`         | `-f`  | string |         | BPF filter expression           |
+| `--promiscuous`    | `-p`  | bool   | `false` | Enable promiscuous mode         |
+| `--enable-gpu`     |       | bool   | `false` | Enable GPU acceleration         |
+| `--gpu-backend`    |       | string |         | GPU backend                     |
+| `--gpu-batch-size` |       | int    |         | Packets per GPU batch           |
 
 ---
 
@@ -817,9 +820,9 @@ Analyze PCAP files in the TUI. Accepts one or more PCAP files (merged display).
 lc watch file <file> [file...] [flags]
 ```
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--tls-keylog` | string | | TLS key log file for decryption |
+| Flag           | Type   | Default | Description                     |
+| -------------- | ------ | ------- | ------------------------------- |
+| `--tls-keylog` | string |         | TLS key log file for decryption |
 
 ---
 
@@ -831,11 +834,11 @@ Monitor remote processor nodes in the TUI. Connects via gRPC.
 lc watch remote [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | | Processor address (host:port) to connect directly |
-| `--nodes-file` | `-n` | string | | YAML file listing remote nodes |
-| `--insecure` | | bool | `false` | Disable TLS |
+| Flag           | Short | Type   | Default | Description                                       |
+| -------------- | ----- | ------ | ------- | ------------------------------------------------- |
+| `--processor`  | `-P`  | string |         | Processor address (host:port) to connect directly |
+| `--nodes-file` | `-n`  | string |         | YAML file listing remote nodes                    |
+| `--insecure`   |       | bool   | `false` | Disable TLS                                       |
 
 See [Chapter 11: Remote TUI Monitoring](../part4-administration/watch-remote.md).
 
@@ -849,8 +852,8 @@ List available network interfaces with their addresses and status.
 lc list interfaces
 ```
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
+| Flag     | Type | Default | Description                   |
+| -------- | ---- | ------- | ----------------------------- |
 | `--json` | bool | `false` | Output interface data as JSON |
 
 ---
@@ -863,10 +866,10 @@ List active filters on a processor node.
 lc list filters [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | | Processor address |
-| `--hunter` | | string | | Filter by hunter ID |
+| Flag          | Short | Type   | Default | Description         |
+| ------------- | ----- | ------ | ------- | ------------------- |
+| `--processor` | `-P`  | string |         | Processor address   |
+| `--hunter`    |       | string |         | Filter by hunter ID |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -882,9 +885,9 @@ List connected hunters on a processor node.
 lc list hunters [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | | Processor address |
+| Flag          | Short | Type   | Default | Description       |
+| ------------- | ----- | ------ | ------- | ----------------- |
+| `--processor` | `-P`  | string |         | Processor address |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -900,9 +903,9 @@ Display processor node status.
 lc show status [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | **required** | Processor address |
+| Flag          | Short | Type   | Default      | Description       |
+| ------------- | ----- | ------ | ------------ | ----------------- |
+| `--processor` | `-P`  | string | **required** | Processor address |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -916,10 +919,10 @@ Display details for a specific hunter.
 lc show hunter [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | **required** | Processor address |
-| `--id` | | string | **required** | Hunter ID to display |
+| Flag          | Short | Type   | Default      | Description          |
+| ------------- | ----- | ------ | ------------ | -------------------- |
+| `--processor` | `-P`  | string | **required** | Processor address    |
+| `--id`        |       | string | **required** | Hunter ID to display |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -933,9 +936,9 @@ Display the distributed topology (hunters, processors, connections).
 lc show topology [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | **required** | Processor address |
+| Flag          | Short | Type   | Default      | Description       |
+| ------------- | ----- | ------ | ------------ | ----------------- |
+| `--processor` | `-P`  | string | **required** | Processor address |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -949,10 +952,10 @@ Display details of a specific filter.
 lc show filter [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | **required** | Processor address |
-| `--id` | | string | | Filter ID to display |
+| Flag          | Short | Type   | Default      | Description          |
+| ------------- | ----- | ------ | ------------ | -------------------- |
+| `--processor` | `-P`  | string | **required** | Processor address    |
+| `--id`        |       | string |              | Filter ID to display |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -978,16 +981,16 @@ Create or update a filter on a processor node.
 lc set filter [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | **required** | Processor address |
-| `--id` | | string | | Filter ID (auto-generated if omitted) |
-| `--type` | `-t` | string | | Filter type |
-| `--pattern` | | string | | Filter pattern |
-| `--description` | | string | | Human-readable description |
-| `--enabled` | | bool | `true` | Enable the filter |
-| `--hunters` | | string | | Comma-separated hunter IDs to apply filter to |
-| `--file` | `-f` | string | | Load filter definition from file |
+| Flag            | Short | Type   | Default      | Description                                   |
+| --------------- | ----- | ------ | ------------ | --------------------------------------------- |
+| `--processor`   | `-P`  | string | **required** | Processor address                             |
+| `--id`          |       | string |              | Filter ID (auto-generated if omitted)         |
+| `--type`        | `-t`  | string |              | Filter type                                   |
+| `--pattern`     |       | string |              | Filter pattern                                |
+| `--description` |       | string |              | Human-readable description                    |
+| `--enabled`     |       | bool   | `true`       | Enable the filter                             |
+| `--hunters`     |       | string |              | Comma-separated hunter IDs to apply filter to |
+| `--file`        | `-f`  | string |              | Load filter definition from file              |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -1003,11 +1006,11 @@ Remove a filter from a processor node.
 lc rm filter [flags]
 ```
 
-| Flag | Short | Type | Default | Description |
-|------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | **required** | Processor address |
-| `--id` | | string | | Filter ID to remove |
-| `--file` | `-f` | string | | Load filter IDs from file |
+| Flag          | Short | Type   | Default      | Description               |
+| ------------- | ----- | ------ | ------------ | ------------------------- |
+| `--processor` | `-P`  | string | **required** | Processor address         |
+| `--id`        |       | string |              | Filter ID to remove       |
+| `--file`      | `-f`  | string |              | Load filter IDs from file |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -1043,17 +1046,25 @@ lc completion powershell > lc.ps1
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `LIPPYCAT_PRODUCTION` | Set to `true` to enforce TLS on all gRPC connections. Blocks the `--insecure` flag. |
-| `SSLKEYLOGFILE` | Path to TLS key log file for decrypting captured TLS traffic. See [Chapter 12: Security](../part5-advanced/security.md). |
+| Variable              | Description                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `LIPPYCAT_PRODUCTION` | Set to `true` to enforce TLS on all gRPC connections. Blocks the `--insecure` flag.                                      |
+| `SSLKEYLOGFILE`       | Path to TLS key log file for decrypting captured TLS traffic. See [Chapter 12: Security](../part5-advanced/security.md). |
 
 ---
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | General error (runtime failure, connection refused, etc.) |
-| `2` | Usage error (invalid flags, missing required arguments) |
+| Code | Meaning                                                   |
+| ---- | --------------------------------------------------------- |
+| `0`  | Success                                                   |
+| `1`  | General error (runtime failure, connection refused, etc.) |
+| `2`  | Usage error (invalid flags, missing required arguments)   |
+
+## RADIUS protocol commands
+
+`sniff radius`, `hunt radius` and `tap radius` share the flags listed in the
+[RADIUS operations reference](../part5-advanced/radius.md#shared-flags-and-configuration).
+`process` and `watch` keep their existing command structure. Ordinary commands
+work without LI; X1/X2 flags exist only in LI builds. The RADIUS distributed
+release gate remains Phase 7.

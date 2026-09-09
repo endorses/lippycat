@@ -741,3 +741,17 @@ Independent PDU caps are available through `--li-delivery-x2-queue-size` and
 `--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy
 `--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
 once, while `queue_bytes` counts every destination copy.
+
+## RADIUS capture
+
+`lc tap radius` observes visible UDP authentication and accounting on 1812/1813
+and additional `--radius-port` ports. Shared `--radius-username`, `--radius-mac`,
+`--radius-attribute`, and scoped `--radius-line-profile` / `--radius-line-id`
+predicates use exact, conjunctive matching. Ordinary capture needs no LI build
+or task. The shared `radius.*` YAML keys and `LIPPYCAT_RADIUS_*` environment
+variables configure the same profiles and bounded transaction state.
+
+See the [RADIUS operator guide](../../docs/RADIUS.md) for flag defaults, supported
+messages, MAC and line mapping rules, mirrored BRAS/BNG deployment, counters and
+local tap POI setup. Distributed release support remains gated on Phase 7;
+external operator and MDF acceptance are pending.

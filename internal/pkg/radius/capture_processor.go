@@ -2,9 +2,11 @@ package radius
 
 import (
 	"encoding/binary"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -18,6 +20,7 @@ type ObservationMatcher interface {
 // CaptureProcessor owns validation and bounded association for one capture epoch.
 // Process must run before selection, including for nonmatching competitors.
 type CaptureProcessor struct {
+	lastReport time.Time
 	boundary   time.Time
 	now        time.Time
 	mu         sync.Mutex
@@ -27,6 +30,11 @@ type CaptureProcessor struct {
 }
 
 func NewCaptureProcessor(scope CaptureScope, ports ...uint16) (*CaptureProcessor, error) {
+	return NewCaptureProcessorWithConfig(scope, CorrelatorConfig{}, ports...)
+}
+
+// NewCaptureProcessorWithConfig applies bounded transaction policy at capture ingress.
+func NewCaptureProcessorWithConfig(scope CaptureScope, config CorrelatorConfig, ports ...uint16) (*CaptureProcessor, error) {
 	if scope.OperatorScope == "" {
 		scope.OperatorScope = "local"
 	}
@@ -38,9 +46,9 @@ func NewCaptureProcessor(scope CaptureScope, ports ...uint16) (*CaptureProcessor
 		return nil, err
 	}
 	p := &CaptureProcessor{ingress: ingress}
-	p.correlator, err = NewCorrelator(CorrelatorConfig{Now: func() time.Time { return p.now }, EvidenceCurrent: func(ref AttributionReference) bool {
-		return p.matcher != nil && p.matcher.RADIUSEvidenceCurrent(ref)
-	}})
+	config.Now = func() time.Time { return p.now }
+	config.EvidenceCurrent = func(ref AttributionReference) bool { return p.matcher != nil && p.matcher.RADIUSEvidenceCurrent(ref) }
+	p.correlator, err = NewCorrelator(config)
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +64,12 @@ func (p *CaptureProcessor) Process(packet gopacket.Packet, linkType layers.LinkT
 	if !captureCandidate(packet, p.ingress.ports) {
 		return nil
 	}
+	defer func() {
+		if time.Since(p.lastReport) >= time.Minute {
+			p.logStats()
+			p.lastReport = time.Now()
+		}
+	}()
 	p.matcher = matcher
 	defer func() { p.matcher = nil }()
 	observation, _, err := p.ingress.Observe(packet.Data(), linkType, packet.Metadata().CaptureInfo)
@@ -91,6 +105,7 @@ func (p *CaptureProcessor) Close() {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.logStats()
 	p.correlator.Close()
 }
 
@@ -117,12 +132,14 @@ func (p *CaptureProcessor) AdvanceBoundary(boundary time.Time) error {
 		p.correlator.Close()
 		return err
 	}
+	p.logStats()
 	p.correlator.Close()
 	correlator, err := NewCorrelator(p.correlator.config)
 	if err != nil {
 		return err
 	}
 	p.ingress, p.correlator, p.boundary = ingress, correlator, boundary
+	p.lastReport = time.Time{}
 	return nil
 }
 
@@ -158,4 +175,41 @@ func captureCandidate(packet gopacket.Packet, ports []uint16) bool {
 // rejection summary; it never establishes that a message is valid.
 func IsCaptureCandidate(packet gopacket.Packet, ports ...uint16) bool {
 	return packet != nil && captureCandidate(packet, ports)
+}
+
+// logStats exposes epoch-local counters at shutdown and capture-boundary rotation.
+func (p *CaptureProcessor) logStats() {
+	v, c := p.ingress.Snapshot(), p.correlator.Stats()
+	if v == (ValidationStats{}) {
+		return
+	}
+	scope := p.ingress.Scope()
+	logger.Info("RADIUS capture counters", "scope", scope.OperatorScope, "epoch", fmt.Sprintf("%x", scope.Epoch), "origin", scope.OriginNodeID, "source", scope.SourceID,
+		"valid", v.Valid, "malformed", v.Malformed, "fragmented", v.Fragmented, "unsupported", v.Unsupported,
+		"requests", c.Requests, "matched_requests", c.MatchedRequests, "correlated_responses", c.Unique,
+		"unmatched_responses", c.Missing, "ambiguous_responses", c.Ambiguous, "expired_responses", c.Expired,
+		"incompatible_responses", c.Incompatible, "capacity_suppressed_responses", c.CapacitySuppressed,
+		"stale_references", c.StaleReferences, "state_exhaustion", c.CapacityLosses)
+}
+
+// CombineMatchers preserves independent ordinary and task attribution groups.
+func CombineMatchers(a, b ObservationMatcher) ObservationMatcher {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return combinedMatcher{a, b}
+}
+
+type combinedMatcher struct{ a, b ObservationMatcher }
+
+func (m combinedMatcher) MatchRADIUSObservation(o *Observation) (bool, []string, []AttributionReference) {
+	am, ai, ar := m.a.MatchRADIUSObservation(o)
+	bm, bi, br := m.b.MatchRADIUSObservation(o)
+	return am || bm, append(append([]string(nil), ai...), bi...), append(cloneReferences(ar), cloneReferences(br)...)
+}
+func (m combinedMatcher) RADIUSEvidenceCurrent(r AttributionReference) bool {
+	return m.a.RADIUSEvidenceCurrent(r) || m.b.RADIUSEvidenceCurrent(r)
 }

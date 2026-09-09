@@ -83,6 +83,9 @@ type PacketBufferProvider interface {
 type Config struct {
 	RADIUSPorts        []uint16
 	RADIUSScope        radius.CaptureScope
+	RADIUSOnly         bool
+	RADIUSCorrelation  radius.CorrelatorConfig
+	RADIUSMatcher      radius.ObservationMatcher
 	HunterID           string
 	BatchSize          int
 	BatchTimeout       time.Duration
@@ -197,7 +200,7 @@ func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBu
 	}
 
 	var radiusErr error
-	m.radiusProcessor, radiusErr = radius.NewCaptureProcessor(captureScope(config), config.RADIUSPorts...)
+	m.radiusProcessor, radiusErr = radius.NewCaptureProcessorWithConfig(captureScope(config), config.RADIUSCorrelation, config.RADIUSPorts...)
 	if radiusErr != nil {
 		logger.Error("Failed to initialize RADIUS capture", "error", radiusErr)
 	}
@@ -341,8 +344,15 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				}
 			}
 			radiusMatcher, _ := m.applicationFilter.(radius.ObservationMatcher)
+			radiusMatcher = radius.CombineMatchers(radiusMatcher, m.config.RADIUSMatcher)
 			radiusObservation := m.radiusProcessor.Process(pktInfo.Packet, pktInfo.LinkType, pktInfo.Interface, radiusMatcher)
+			if m.config.RADIUSOnly && radiusObservation == nil {
+				continue
+			}
 			radiusSelected := radiusObservation != nil && (len(radiusObservation.Direct) > 0 || len(radiusObservation.Inherited) > 0)
+			if m.config.RADIUSMatcher != nil && !radiusSelected {
+				continue
+			}
 
 			// Apply custom packet processor if set (for VoIP buffering, etc.)
 			if m.packetProcessor != nil {

@@ -12,6 +12,7 @@ func TestCatalog(t *testing.T) {
 
 	want := map[string][]string{
 		"generic": nil,
+		"radius":  {"bpf", "ip_address", "radius_username", "radius_mac", "radius_attribute", "radius_compound"},
 		"dns":     {"bpf", "ip_address", "dns_domain"},
 		"email":   {"bpf", "ip_address", "email_address", "email_subject"},
 		"http":    {"bpf", "ip_address", "http_host", "http_path"},
@@ -56,4 +57,13 @@ func TestVoIPHunterPolicyIsPartOfRegistration(t *testing.T) {
 		IncludeDiskBuffer:   true,
 		IncludeFilterPolicy: true,
 	}, MustLookup("generic").Hunter)
+}
+
+func TestRADIUSHunterPolicy(t *testing.T) {
+	spec := MustLookup("radius")
+	assert.False(t, spec.Hunter.VoIPMode)
+	assert.False(t, spec.Hunter.EnableVoIPFilter)
+	assert.False(t, spec.Hunter.UseGPUConfig)
+	assert.True(t, spec.Hunter.IncludeDiskBuffer)
+	assert.True(t, spec.Hunter.IncludeFilterPolicy)
 }

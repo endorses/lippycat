@@ -25,23 +25,23 @@ lc sniff http -r capture.pcap --log-dir ./logs --log-streams conn,http,files
 
 The shared flags are:
 
-| Flag | Default | Meaning |
-|---|---:|---|
-| `--event-queue-size` | `20000` | Normalized-event queue capacity |
-| `--event-drop-policy` | `drop_new` | Overflow policy for the normalized-event queue |
-| `--log-dir` | unset | Output directory; setting it enables logging |
-| `--log-format` | `tsv` | `tsv` or `json` |
-| `--log-streams` | all six streams | Comma-separated enabled streams |
-| `--log-rotate-interval` | `1h` | Time between rotations; `0` disables periodic rotation |
-| `--log-queue-size` | `10000` | Queue capacity for each stream |
-| `--log-post-rotate-command` | unset | Shell command run after rotation; `%log%` is the safely quoted rotated path |
-| `--log-include-http-headers` | `false` | Preserve arbitrary HTTP header maps in normalized events; fixed log columns do not change |
-| `--log-include-email-body-preview` | `false` | Permit captured email body previews for file analysis; potentially sensitive |
-| `--extract-files` | `false` | Write bounded HTTP/SMTP file content to disk |
-| `--extract-files-dir` | unset | Extraction directory; required when extraction is enabled |
-| `--extract-files-max-size` | `10 MiB` | Maximum bytes analyzed or extracted per file |
-| `--extract-files-total-size` | `100 MiB` | Maximum bytes extracted during the process lifetime |
-| `--log-emit-stage` | `terminal` | `process`/`tap` only: `terminal`, `all`, or `none` |
+| Flag                               |         Default | Meaning                                                                                   |
+| ---------------------------------- | --------------: | ----------------------------------------------------------------------------------------- |
+| `--event-queue-size`               |         `20000` | Normalized-event queue capacity                                                           |
+| `--event-drop-policy`              |      `drop_new` | Overflow policy for the normalized-event queue                                            |
+| `--log-dir`                        |           unset | Output directory; setting it enables logging                                              |
+| `--log-format`                     |           `tsv` | `tsv` or `json`                                                                           |
+| `--log-streams`                    | all six streams | Comma-separated enabled streams                                                           |
+| `--log-rotate-interval`            |            `1h` | Time between rotations; `0` disables periodic rotation                                    |
+| `--log-queue-size`                 |         `10000` | Queue capacity for each stream                                                            |
+| `--log-post-rotate-command`        |           unset | Shell command run after rotation; `%log%` is the safely quoted rotated path               |
+| `--log-include-http-headers`       |         `false` | Preserve arbitrary HTTP header maps in normalized events; fixed log columns do not change |
+| `--log-include-email-body-preview` |         `false` | Permit captured email body previews for file analysis; potentially sensitive              |
+| `--extract-files`                  |         `false` | Write bounded HTTP/SMTP file content to disk                                              |
+| `--extract-files-dir`              |           unset | Extraction directory; required when extraction is enabled                                 |
+| `--extract-files-max-size`         |        `10 MiB` | Maximum bytes analyzed or extracted per file                                              |
+| `--extract-files-total-size`       |       `100 MiB` | Maximum bytes extracted during the process lifetime                                       |
+| `--log-emit-stage`                 |      `terminal` | `process`/`tap` only: `terminal`, `all`, or `none`                                        |
 
 Equivalent YAML keys are `events.queue_size`, `events.drop_policy`, `logs.dir`, `logs.format`,
 `logs.streams`, `logs.rotate_interval`, `logs.queue_size`, `logs.emit_stage`,
@@ -107,15 +107,15 @@ not necessarily the processor writing the file. Unavailable values are unset.
 
 One lifecycle summary per observed flow (expiry, eviction, or graceful shutdown).
 
-| Fields | Zeek types |
-|---|---|
-| `ts`, `uid` | `time`, `string` |
-| `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p` | `addr`, `port`, `addr`, `port` |
-| `proto`, `service`, `duration` | `enum`, `string`, `interval` |
-| `orig_bytes`, `resp_bytes` | `count`, `count` |
+| Fields                                                              | Zeek types                                  |
+| ------------------------------------------------------------------- | ------------------------------------------- |
+| `ts`, `uid`                                                         | `time`, `string`                            |
+| `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p`                  | `addr`, `port`, `addr`, `port`              |
+| `proto`, `service`, `duration`                                      | `enum`, `string`, `interval`                |
+| `orig_bytes`, `resp_bytes`                                          | `count`, `count`                            |
 | `conn_state`, `local_orig`, `local_resp`, `missed_bytes`, `history` | `string`, `bool`, `bool`, `count`, `string` |
-| `orig_pkts`, `orig_ip_bytes`, `resp_pkts`, `resp_ip_bytes` | `count`, `count`, `count`, `count` |
-| `community_id`, `node_id`, `capture_scope`, `partial` | `string`, `string`, `enum`, `bool` |
+| `orig_pkts`, `orig_ip_bytes`, `resp_pkts`, `resp_ip_bytes`          | `count`, `count`, `count`, `count`          |
+| `community_id`, `node_id`, `capture_scope`, `partial`               | `string`, `string`, `enum`, `bool`          |
 
 Originator/responder orientation follows the TCP SYN when visible and otherwise
 the first observed packet. Byte and packet values are observed counts. `service`
@@ -138,14 +138,14 @@ numeric and descriptive values. `AA`, `TC`, `RD`, `RA`, and `Z` are DNS header
 flags; `answers` and `TTLs` are response vectors; `rejected` marks a rejected
 transaction.
 
-| Fields | Zeek types |
-|---|---|
-| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p`, `proto` | `time`, `string`, `addr`, `port`, `addr`, `port`, `enum` |
-| `trans_id`, `rtt`, `query` | `count`, `interval`, `string` |
-| `qclass`, `qclass_name`, `qtype`, `qtype_name` | `count`, `string`, `count`, `string` |
-| `rcode`, `rcode_name`, `AA`, `TC`, `RD`, `RA`, `Z` | `count`, `string`, `bool`, `bool`, `bool`, `bool`, `count` |
-| `answers`, `TTLs`, `rejected` | `vector[string]`, `vector[interval]`, `bool` |
-| `community_id`, `node_id` | `string`, `string` |
+| Fields                                                                   | Zeek types                                                 |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p`, `proto` | `time`, `string`, `addr`, `port`, `addr`, `port`, `enum`   |
+| `trans_id`, `rtt`, `query`                                               | `count`, `interval`, `string`                              |
+| `qclass`, `qclass_name`, `qtype`, `qtype_name`                           | `count`, `string`, `count`, `string`                       |
+| `rcode`, `rcode_name`, `AA`, `TC`, `RD`, `RA`, `Z`                       | `count`, `string`, `bool`, `bool`, `bool`, `bool`, `count` |
+| `answers`, `TTLs`, `rejected`                                            | `vector[string]`, `vector[interval]`, `bool`               |
+| `community_id`, `node_id`                                                | `string`, `string`                                         |
 
 ### `ssl.log`
 
@@ -154,14 +154,14 @@ One TLS handshake observation. It includes negotiated `version`, `cipher`,
 certificate file IDs and identities, validation result, and JA3/JA3S/JA4
 fingerprints. Fingerprints are common lippycat extensions, not base Zeek fields.
 
-| Fields | Zeek types |
-|---|---|
-| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p` | `time`, `string`, `addr`, `port`, `addr`, `port` |
-| `version`, `cipher`, `curve`, `server_name` | `string`, `string`, `string`, `string` |
-| `resumed`, `last_alert`, `next_protocol`, `established` | `bool`, `string`, `string`, `bool` |
-| `cert_chain_fuids`, `client_cert_chain_fuids` | `vector[string]`, `vector[string]` |
+| Fields                                                                      | Zeek types                                       |
+| --------------------------------------------------------------------------- | ------------------------------------------------ |
+| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p`             | `time`, `string`, `addr`, `port`, `addr`, `port` |
+| `version`, `cipher`, `curve`, `server_name`                                 | `string`, `string`, `string`, `string`           |
+| `resumed`, `last_alert`, `next_protocol`, `established`                     | `bool`, `string`, `string`, `bool`               |
+| `cert_chain_fuids`, `client_cert_chain_fuids`                               | `vector[string]`, `vector[string]`               |
 | `subject`, `issuer`, `client_subject`, `client_issuer`, `validation_status` | `string`, `string`, `string`, `string`, `string` |
-| `ja3`, `ja3s`, `ja4`, `community_id`, `node_id` | `string`, `string`, `string`, `string`, `string` |
+| `ja3`, `ja3s`, `ja4`, `community_id`, `node_id`                             | `string`, `string`, `string`, `string`, `string` |
 
 ### `http.log`
 
@@ -171,16 +171,16 @@ selected standard headers, version, observed body lengths, response status and
 informational response. `tags` and `proxied` carry analyzer/proxy annotations;
 file vectors join to `files.log`. `password` is not collected by default.
 
-| Fields | Zeek types |
-|---|---|
-| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p` | `time`, `string`, `addr`, `port`, `addr`, `port` |
-| `trans_depth`, `method`, `host`, `uri`, `referrer`, `version` | `count`, `string`, `string`, `string`, `string`, `string` |
-| `user_agent`, `origin`, `request_body_len`, `response_body_len` | `string`, `string`, `count`, `count` |
-| `status_code`, `status_msg`, `info_code`, `info_msg` | `count`, `string`, `count`, `string` |
-| `tags`, `username`, `password`, `proxied` | `set[enum]`, `string`, `string`, `vector[string]` |
-| `orig_fuids`, `orig_filenames`, `orig_mime_types` | `vector[string]`, `vector[string]`, `vector[string]` |
-| `resp_fuids`, `resp_filenames`, `resp_mime_types` | `vector[string]`, `vector[string]`, `vector[string]` |
-| `community_id`, `node_id` | `string`, `string` |
+| Fields                                                          | Zeek types                                                |
+| --------------------------------------------------------------- | --------------------------------------------------------- |
+| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p` | `time`, `string`, `addr`, `port`, `addr`, `port`          |
+| `trans_depth`, `method`, `host`, `uri`, `referrer`, `version`   | `count`, `string`, `string`, `string`, `string`, `string` |
+| `user_agent`, `origin`, `request_body_len`, `response_body_len` | `string`, `string`, `count`, `count`                      |
+| `status_code`, `status_msg`, `info_code`, `info_msg`            | `count`, `string`, `count`, `string`                      |
+| `tags`, `username`, `password`, `proxied`                       | `set[enum]`, `string`, `string`, `vector[string]`         |
+| `orig_fuids`, `orig_filenames`, `orig_mime_types`               | `vector[string]`, `vector[string]`, `vector[string]`      |
+| `resp_fuids`, `resp_filenames`, `resp_mime_types`               | `vector[string]`, `vector[string]`, `vector[string]`      |
+| `community_id`, `node_id`                                       | `string`, `string`                                        |
 
 ### `smtp.log`
 
@@ -189,15 +189,15 @@ sender/recipients, selected message headers and routing hops, last server reply,
 TLS state, attachment file IDs, and webmail classification. It does not log the
 message body.
 
-| Fields | Zeek types |
-|---|---|
-| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p` | `time`, `string`, `addr`, `port`, `addr`, `port` |
-| `trans_depth`, `helo`, `mailfrom`, `rcptto` | `count`, `string`, `string`, `set[string]` |
-| `date`, `from`, `to`, `cc`, `reply_to` | `string`, `string`, `set[string]`, `set[string]`, `string` |
-| `msg_id`, `in_reply_to`, `subject`, `x_originating_ip` | `string`, `string`, `string`, `addr` |
-| `first_received`, `second_received`, `last_reply`, `path` | `string`, `string`, `string`, `vector[string]` |
-| `user_agent`, `tls`, `fuids`, `is_webmail` | `string`, `bool`, `vector[string]`, `bool` |
-| `community_id`, `node_id` | `string`, `string` |
+| Fields                                                          | Zeek types                                                 |
+| --------------------------------------------------------------- | ---------------------------------------------------------- |
+| `ts`, `uid`, `id.orig_h`, `id.orig_p`, `id.resp_h`, `id.resp_p` | `time`, `string`, `addr`, `port`, `addr`, `port`           |
+| `trans_depth`, `helo`, `mailfrom`, `rcptto`                     | `count`, `string`, `string`, `set[string]`                 |
+| `date`, `from`, `to`, `cc`, `reply_to`                          | `string`, `string`, `set[string]`, `set[string]`, `string` |
+| `msg_id`, `in_reply_to`, `subject`, `x_originating_ip`          | `string`, `string`, `string`, `addr`                       |
+| `first_received`, `second_received`, `last_reply`, `path`       | `string`, `string`, `string`, `vector[string]`             |
+| `user_agent`, `tls`, `fuids`, `is_webmail`                      | `string`, `bool`, `vector[string]`, `bool`                 |
+| `community_id`, `node_id`                                       | `string`, `string`                                         |
 
 ### `files.log`
 
@@ -210,13 +210,13 @@ decoded entity. A false value means the hashes identify an observed prefix and
 must not be compared as whole-file hashes. `extracted` is set only when explicit
 extraction succeeds.
 
-| Fields | Zeek types |
-|---|---|
-| `ts`, `fuid`, `uid`, `source`, `depth`, `analyzers` | `time`, `string`, `string`, `string`, `count`, `set[string]` |
-| `mime_type`, `filename`, `duration`, `local_orig`, `is_orig` | `string`, `string`, `interval`, `bool`, `bool` |
-| `seen_bytes`, `total_bytes`, `missing_bytes`, `overflow_bytes`, `timedout` | `count`, `count`, `count`, `count`, `bool` |
-| `parent_fuid`, `md5`, `sha1`, `sha256`, `hash_complete`, `extracted` | `string`, `string`, `string`, `string`, `bool`, `string` |
-| `community_id`, `node_id` | `string`, `string` |
+| Fields                                                                     | Zeek types                                                   |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `ts`, `fuid`, `uid`, `source`, `depth`, `analyzers`                        | `time`, `string`, `string`, `string`, `count`, `set[string]` |
+| `mime_type`, `filename`, `duration`, `local_orig`, `is_orig`               | `string`, `string`, `interval`, `bool`, `bool`               |
+| `seen_bytes`, `total_bytes`, `missing_bytes`, `overflow_bytes`, `timedout` | `count`, `count`, `count`, `count`, `bool`                   |
+| `parent_fuid`, `md5`, `sha1`, `sha256`, `hash_complete`, `extracted`       | `string`, `string`, `string`, `string`, `bool`, `string`     |
+| `community_id`, `node_id`                                                  | `string`, `string`                                           |
 
 ## Rotation and operations
 
@@ -293,3 +293,15 @@ file extraction creates separate content files and requires correspondingly
 stronger access controls. Structured file settings do not authorize LI delivery;
 LI metadata remains independently gated by build, runtime, active task, target,
 and delivery profile.
+
+## RADIUS observations
+
+`lc sniff radius -r radius.pcap --log-dir ./logs --log-streams radius` selects
+the additive version-1 RADIUS observation stream. Each valid selected message
+has its own record; attributes use ordered allowlisted hexadecimal instances.
+Dedicated `sniff radius` applies ordinary selection before writing logs and shares
+the same observation/scope with CLI and packet outputs, without duplicate
+validation counts.
+Credentials, authenticators, task evidence and unknown attributes are omitted
+from routine logs. PCAP and X2 retain their separate byte-output contracts.
+See [RADIUS operations](radius.md) for selection, scope, state and counters.

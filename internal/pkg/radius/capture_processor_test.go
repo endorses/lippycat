@@ -87,3 +87,22 @@ func TestCaptureProcessorMissingInterfaceRemainsTransportable(t *testing.T) {
 	require.Equal(t, "unknown", observation.Scope.SourceID)
 	require.NoError(t, ValidateProvenance(observation))
 }
+
+func TestCaptureProcessorCustomBounds(t *testing.T) {
+	_, err := NewCaptureProcessorWithConfig(CaptureScope{}, CorrelatorConfig{Lifetime: time.Millisecond})
+	require.Error(t, err)
+	p, err := NewCaptureProcessorWithConfig(CaptureScope{OriginNodeID: "node"}, CorrelatorConfig{Lifetime: 2 * time.Second, MaxCandidates: 1})
+	require.NoError(t, err)
+	defer p.Close()
+	timestamp := time.Unix(100, 0)
+	raw := testIPPacket(false, 1812)
+	require.NotNil(t, p.Process(captureTestPacket(raw, timestamp), layers.LinkTypeRaw, "eth0", nil))
+	other := append([]byte(nil), raw...)
+	other[29]++
+	require.Equal(t, AssociationCapacitySuppressed, p.Process(captureTestPacket(other, timestamp), layers.LinkTypeRaw, "eth0", nil).Association.Status)
+	_, stats := p.Stats()
+	require.EqualValues(t, 1, stats.CapacityLosses)
+	require.NoError(t, p.AdvanceBoundary(timestamp.Add(time.Second)))
+	require.Equal(t, 2*time.Second, p.correlator.config.Lifetime)
+	require.Equal(t, 1, p.correlator.config.MaxCandidates)
+}

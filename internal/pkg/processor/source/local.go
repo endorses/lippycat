@@ -344,8 +344,10 @@ type LocalSource struct {
 
 // LocalSourceConfig contains configuration for LocalSource.
 type LocalSourceConfig struct {
-	RADIUSPorts []uint16
-	RADIUSScope radius.CaptureScope
+	RADIUSPorts       []uint16
+	RADIUSScope       radius.CaptureScope
+	RADIUSCorrelation radius.CorrelatorConfig
+	RADIUSMatcher     radius.ObservationMatcher
 	// Interfaces to capture from (e.g., "eth0", "eth0,eth1")
 	Interfaces []string
 
@@ -418,7 +420,7 @@ func NewLocalSource(cfg LocalSourceConfig) *LocalSource {
 			scope.OriginNodeID = cfg.ProcessorID + "-local"
 		}
 	}
-	radiusProcessor, err := radius.NewCaptureProcessor(scope, cfg.RADIUSPorts...)
+	radiusProcessor, err := radius.NewCaptureProcessorWithConfig(scope, cfg.RADIUSCorrelation, cfg.RADIUSPorts...)
 	if err != nil {
 		logger.Error("Failed to initialize RADIUS capture", "error", err)
 	}
@@ -920,8 +922,15 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			s.mu.Unlock()
 			filterConfigured := filter != nil
 			radiusMatcher, _ := filter.(radius.ObservationMatcher)
+			radiusMatcher = radius.CombineMatchers(radiusMatcher, s.config.RADIUSMatcher)
 			radiusObservation := s.radiusProcessor.Process(pktInfo.Packet, pktInfo.LinkType, pktInfo.Interface, radiusMatcher)
+			if s.config.ProtocolMode == "radius" && radiusObservation == nil {
+				continue
+			}
 			radiusSelected := radiusObservation != nil && (len(radiusObservation.Direct) > 0 || len(radiusObservation.Inherited) > 0)
+			if s.config.RADIUSMatcher != nil && !radiusSelected {
+				continue
+			}
 
 			// Convert to protobuf format first
 			pbPkt := convertPacketInfo(pktInfo)

@@ -4,8 +4,8 @@ This package implements the shared RADIUS components for Phases 1–3 of the
 [RADIUS plan](../../../docs/plans/radius-poi-implementation.md): validation,
 owned observations, exact predicates, bounded transaction association, capture
 ingress, provenance validation and safe presentation. Capture and transport
-adapters integrate these components into ordinary outputs; X2 delivery remains
-later work. Observational decoding does not authenticate RADIUS
+adapters integrate these components into ordinary outputs; LI builds additionally
+provide authorized format-11 X2 delivery. Observational decoding does not authenticate RADIUS
 Authenticators or prove subscriber ownership.
 
 ## Pinned gopacket audit
@@ -77,7 +77,8 @@ an unmatched/ambiguous decision or inherited evidence. `Observation.Clone` deepl
 copies packet, message, NAS and evidence storage for mutable asynchronous users.
 All these shared contracts live in this non-LI package. Phase 3 integrates display
 metadata in `types` and observation transport in `pipeline/grpcadapter`.
-Dedicated protocol commands and their catalog registration remain Phase 6 work.
+Dedicated `sniff radius`, `hunt radius` and `tap radius` commands share the
+catalog/runtime path; see the [operator guide](../../../docs/RADIUS.md).
 
 ## Validation
 
@@ -100,7 +101,7 @@ AVP. Supported AVPs are User-Name, NAS-Port-Id and vendor 3561/type 1
 Agent-Circuit-Id. Matching revalidates the entire original message, uses exact
 value bytes, and handles repeated attributes and grouped VSAs without rewriting
 them. `Spec` serializes AVP targets as uppercase hex. NAI grammar validation
-belongs to the future X1 adapter; the shared predicate retains target kind.
+belongs to the LI X1 adapter; the shared predicate retains target kind.
 
 `CompileGroup` binds a complete conjunction to operator scope/profile revision
 and optionally origin/source. It requires criterion IDs and positive revisions;
@@ -207,7 +208,7 @@ keeps grouped references separate from generic packet filter IDs.
 
 Generic hunt and tap decode and correlate before application selection, so an
 unmatched competing request can prevent ambiguous response inheritance. Dedicated
-RADIUS subcommands and operator-facing port/profile flags remain Phase 6 work.
+RADIUS subcommands expose shared port, profile, scope and association limit flags.
 The Go runtime configurations accept additional ports and capture scope; defaults
 observe UDP 1812/1813 with ordinary `local`/`unconfigured` scope labels. Those
 labels do not establish production operator isolation.
@@ -264,7 +265,7 @@ SIP/RTP filter-ID fields are cleared whenever a RADIUS claim is received.
 A self-declared origin, filter ID, or unique association is not authenticated by
 these checks. Inherited ownership cannot be proved from one response datagram.
 LI admission must separately establish the trusted capture origin/relay path and
-current task generations; this is Phase 4 work. Legacy packets without the
+current task generations through LI admission. Legacy packets without the
 versioned envelope carry no inherited attribution, regardless of generic IDs.
 The transport includes original message bytes and exact criteria for packet
 processing; routine display and log consumers must use the redacted presentation

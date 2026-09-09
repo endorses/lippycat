@@ -161,6 +161,7 @@ func TestRADIUSDeliveryRejectsStaleGenerationAndShutdown(t *testing.T) {
 	stale := *active
 	stale.ActivationGeneration++
 	p.deliverLIRADIUS(&stale, &radius.Observation{})
+	require.EqualValues(t, 1, p.radiusLIStats.StaleGeneration)
 	p.closeLIRADIUS()
 	require.True(t, allocator.closed)
 	p.deliverLIRADIUS(active, &radius.Observation{})

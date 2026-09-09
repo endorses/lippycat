@@ -78,3 +78,5 @@ func GetLIConfig() *LIConfig {
 }
 
 func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {}
+
+func applyRADIUSLIConfig(_ *cobra.Command, _ *processor.Config) error { return nil }

@@ -163,6 +163,7 @@ func assertRadiusPOIOrdinary(t *testing.T, p *Processor, dir string, want int) {
 
 func TestRADIUSTapPOITLSFixtureAndShutdown(t *testing.T) {
 	p, task, dir := radiusPOIProcessor(t, 16)
+	p.config.LIRADIUSCorrelationLifetime = 60 * time.Second
 	port, received := radiusPOIMDF(t)
 	require.NoError(t, replaceLIDeliveryDestination(liDeliveryMgr, liDeliveryClient, &li.Destination{DID: task.DestinationIDs[0], Address: "127.0.0.1", Port: port, X2Enabled: true, ProtocolType: "X2Only"}))
 	liDeliveryClient.Start()
@@ -172,6 +173,9 @@ func TestRADIUSTapPOITLSFixtureAndShutdown(t *testing.T) {
 	requireRadiusPOIBroadcast(t, out)
 	// Shutdown drains already admitted RADIUS product while closing ordinary sinks.
 	assertRadiusPOIOrdinary(t, p, dir, 2)
+	require.EqualValues(t, 2, p.radiusLIStats.Encoded)
+	require.EqualValues(t, 2, p.radiusLIStats.QueueAccepted)
+	require.Zero(t, p.radiusLIStats.QueueErrors)
 	var correlation uint64
 	for i, o := range observations {
 		select {
@@ -232,6 +236,8 @@ func TestRADIUSTapPOIEncoderFailurePreservesOrdinarySinks(t *testing.T) {
 	p.processBatch(batch)
 	requireRadiusPOIBroadcast(t, out)
 	require.Equal(t, before+2, liX2Errors.Load())
+	require.EqualValues(t, 2, p.radiusLIStats.EncodingErrors)
+	require.Zero(t, p.radiusLIStats.QueueAccepted)
 	require.Zero(t, liDeliveryClient.Stats().QueueDepth)
 	assertRadiusPOIOrdinary(t, p, dir, 2)
 }

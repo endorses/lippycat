@@ -195,6 +195,7 @@ func (m *Manager) SetRADIUSPacketProcessor(fn func(*InterceptTask, *radius.Obser
 }
 
 type managerAtomicStats struct {
+	radiusStaleReferences       atomic.Uint64
 	packetsProcessed            atomic.Uint64
 	packetsMatched              atomic.Uint64
 	x2EventsSent                atomic.Uint64
@@ -206,6 +207,8 @@ type managerAtomicStats struct {
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
+	// RADIUSStaleReferences counts rejected task owner references at admission.
+	RADIUSStaleReferences       uint64
 	PacketsProcessed            uint64
 	PacketsMatched              uint64
 	X2EventsSent                uint64
@@ -541,6 +544,7 @@ func (m *Manager) stop() {
 	m.wg.Wait()
 
 	logger.Info("LI Manager stopped",
+		"radius_stale_references", m.stats.radiusStaleReferences.Load(),
 		"packets_processed", m.stats.packetsProcessed.Load(),
 		"packets_matched", m.stats.packetsMatched.Load(),
 	)
@@ -2033,6 +2037,7 @@ func convertTaskStatusToX1(s TaskStatus) x1.TaskStatus {
 // Stats returns current LI processing statistics.
 func (m *Manager) Stats() ManagerStats {
 	return ManagerStats{
+		RADIUSStaleReferences:       m.stats.radiusStaleReferences.Load(),
 		PacketsProcessed:            m.stats.packetsProcessed.Load(),
 		PacketsMatched:              m.stats.packetsMatched.Load(),
 		X2EventsSent:                m.stats.x2EventsSent.Load(),

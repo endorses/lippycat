@@ -50,6 +50,11 @@ func Register(flags *pflag.FlagSet, values *Values, includeEmitStage bool) {
 	flags.Int64Var(&values.FileMaxSize, "extract-files-max-size", 10<<20, "Maximum bytes analyzed or extracted per file")
 	flags.Int64Var(&values.FileTotalSize, "extract-files-total-size", 100<<20, "Maximum extracted bytes for this process")
 
+	Bind(flags)
+}
+
+// Bind selects the active command after all topology commands have registered flags.
+func Bind(flags *pflag.FlagSet) {
 	_ = viper.BindPFlag("events.queue_size", flags.Lookup("event-queue-size"))
 	_ = viper.BindPFlag("events.drop_policy", flags.Lookup("event-drop-policy"))
 	_ = viper.BindPFlag("logs.dir", flags.Lookup("log-dir"))
@@ -59,7 +64,7 @@ func Register(flags *pflag.FlagSet, values *Values, includeEmitStage bool) {
 	_ = viper.BindPFlag("logs.include_email_body_preview", flags.Lookup("log-include-email-body-preview"))
 	_ = viper.BindPFlag("logs.rotate_interval", flags.Lookup("log-rotate-interval"))
 	_ = viper.BindPFlag("logs.queue_size", flags.Lookup("log-queue-size"))
-	if includeEmitStage {
+	if flags.Lookup("log-emit-stage") != nil {
 		_ = viper.BindPFlag("logs.emit_stage", flags.Lookup("log-emit-stage"))
 	}
 	_ = viper.BindPFlag("logs.post_rotate_command", flags.Lookup("log-post-rotate-command"))

@@ -21,8 +21,9 @@ import (
 // tapRuntimeHooks binds flag-derived setup hooks to a catalog protocol. It is
 // topology wiring, not a second protocol specification.
 type tapRuntimeHooks struct {
-	ConfigureGPU    func(GPUConfig) GPUConfig
-	ConfigureSource func(*source.LocalSource)
+	ConfigureGPU          func(GPUConfig) GPUConfig
+	ConfigureSource       func(*source.LocalSource)
+	ConfigureSourceConfig func(*source.LocalSourceConfig)
 }
 
 type tapRuntime struct {
@@ -40,6 +41,46 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 	if protocol.Name == "" || protocol.Analyzer == "" {
 		return nil, fmt.Errorf("protocol catalog specification is incomplete")
 	}
+	if err := applyRADIUSLIConfig(nil, &config); err != nil {
+		return nil, err
+	}
+	sourceConfig := tapSourceConfig(config, effectiveBPF, protocol)
+	if hooks.ConfigureSourceConfig != nil {
+		hooks.ConfigureSourceConfig(&sourceConfig)
+	}
+	if protocol.Name == "radius" && config.LIEnabled {
+		scope := config.LIRADIUSScope
+		captureTimeout := sourceConfig.RADIUSCorrelation.Lifetime
+		if captureTimeout == 0 {
+			captureTimeout = 30 * time.Second
+		}
+		if config.LIRADIUSCorrelationLifetime != captureTimeout {
+			return nil, fmt.Errorf("RADIUS capture and LI transaction timeouts must agree")
+		}
+		if scope.OperatorScope == "" || scope.ProfileRevision == "" {
+			return nil, fmt.Errorf("tap radius LI requires explicit LI operator scope and profile revision")
+		}
+		if scope.OperatorScope != sourceConfig.RADIUSScope.OperatorScope || scope.ProfileRevision != sourceConfig.RADIUSScope.ProfileRevision {
+			return nil, fmt.Errorf("RADIUS capture and LI operator scope/profile revision must agree")
+		}
+		if scope.OriginNodeID != "" && scope.OriginNodeID != config.ProcessorID+"-local" {
+			return nil, fmt.Errorf("RADIUS LI origin node must match tap source ID (processor ID plus -local)")
+		}
+		if scope.SourceID != "" {
+			found := false
+			for _, name := range sourceConfig.Interfaces {
+				if name == scope.SourceID {
+					found = true
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("RADIUS LI source must name a configured tap interface")
+			}
+		}
+		if config.LIRADIUSCorrelationStateFile == "" && config.LIStateFile == "" {
+			return nil, fmt.Errorf("RADIUS X2 requires a durable correlation state file or LI state file")
+		}
+	}
 	p, err := processor.New(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create processor: %w", err)
@@ -51,7 +92,7 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 		logger.Info("Own-traffic BPF exclusion applied", "exclusion", exclusionFilter, "effective_filter", effectiveBPF)
 	}
 
-	sourceConfig := tapSourceConfig(config, effectiveBPF, protocol)
+	sourceConfig.BPFFilter = effectiveBPF
 	localSource := source.NewLocalSource(sourceConfig)
 	localTarget := filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF})
 	localTarget.SetBPFUpdater(localSource)

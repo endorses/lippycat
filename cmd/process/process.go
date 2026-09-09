@@ -559,6 +559,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		"enable_detection", config.EnableDetection)
 
 	// Create processor instance
+	if err := applyRADIUSLIConfig(cmd, &config); err != nil {
+		return err
+	}
 	p, err := processor.New(config)
 	if err != nil {
 		return fmt.Errorf("failed to create processor: %w", err)

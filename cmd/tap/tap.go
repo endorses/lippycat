@@ -388,7 +388,11 @@ func structuredLoggingConfig() (int, *processor.StructuredLogConfig) {
 }
 
 func runTap(cmd *cobra.Command, args []string) error {
-	logger.Info("Starting lippycat in standalone tap mode")
+	return runTapProtocol(cmd, args, protocolcatalog.MustLookup("generic"), cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter), tapRuntimeHooks{})
+}
+
+func runTapProtocol(cmd *cobra.Command, args []string, protocol protocolcatalog.Spec, effectiveBPF string, hooks tapRuntimeHooks) error {
+	logger.Info("Starting lippycat in standalone tap mode", "protocol", protocol.Name)
 
 	// Production mode enforcement: check early before creating config
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
@@ -582,8 +586,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 	// The shared runtime builds the processor/source/filter graph and applies
 	// own-traffic exclusions consistently with protocol-specific tap commands.
-	baseBPFFilter := cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter)
-	runtime, err := newTapRuntime(config, baseBPFFilter, protocolcatalog.MustLookup("generic"), tapRuntimeHooks{})
+	runtime, err := newTapRuntime(config, effectiveBPF, protocol, hooks)
 	if err != nil {
 		return err
 	}

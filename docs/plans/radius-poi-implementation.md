@@ -9,7 +9,8 @@ Phase 2 exact filters and bounded transaction association implemented and verifi
 Phase 3 capture ingress, transport, and ordinary outputs implemented and verified.
 Phase 4 X1 targets and current-generation authorization implemented and verified.
 Phase 5 raw RADIUS X2 and local tap POI implemented and verified.
-Phases 6–7 remain pending.
+Phase 6 commands, configuration, counters and operator documentation implemented and verified.
+Phase 7 remains pending.
 
 Source: [RADIUS POI implementation assessment](../research/radius-poi-implementation-assessment.md).
 
@@ -579,16 +580,72 @@ the Phase 6/7 gates remain pending.
 Primary locations: `cmd/sniff`, `cmd/hunt`, `cmd/tap`, shared protocol/runtime
 configuration, command READMEs, and `docs/manual`.
 
-- [ ] Add thin `lc sniff radius`, `lc hunt radius`, and `lc tap radius` protocol specifications using the shared catalog/runtime patterns; retain `lc process` and existing `lc watch` commands.
-- [ ] Expose capture ports, ordinary identity/attribute filters, MAC interpretation, operator line-mapping profiles and scope, transaction expiry/capacity, and supported protocol scope through consistent flags, YAML, and environment binding. Validate incompatible options and bounds; profiles select concrete attributes without querying inventory.
-- [ ] Keep X1/X2 configuration in LI build-tagged implementations and no-op stubs. Ensure ordinary RADIUS commands do not require LI or task activation.
-- [ ] Expose counters for malformed input, matched requests, correlated/unmatched/ambiguous responses, stale generation rejection, state exhaustion, and X2 encoding/delivery outcomes with documented ownership and units.
-- [ ] Document mirrored BRAS/BNG topology, capture-scope/proxy assumptions, sample non-LI and tap POI setups, MDF settings, unsupported transports/messages, no-secret association limits, and independent output enablement.
-- [ ] Document NatParas userName/lineID to X1 mappings, supported AVP/VSA encodings and examples, known-line verification, upstream inventory-resolution responsibility, scope uniqueness, conjunctive criteria, and explicit unsupported-form rejection.
-- [ ] Update command/config references, structured-log documentation and schema contract, and LI deployment guidance. Label distributed support complete only after Phase 7 passes.
+- [x] Add thin `lc sniff radius`, `lc hunt radius`, and `lc tap radius` protocol specifications using the shared catalog/runtime patterns; retain `lc process` and existing `lc watch` commands.
+- [x] Expose capture ports, ordinary identity/attribute filters, MAC interpretation, operator line-mapping profiles and scope, transaction expiry/capacity, and supported protocol scope through consistent flags, YAML, and environment binding. Validate incompatible options and bounds; profiles select concrete attributes without querying inventory.
+- [x] Keep X1/X2 configuration in LI build-tagged implementations and no-op stubs. Ensure ordinary RADIUS commands do not require LI or task activation.
+- [x] Expose counters for malformed input, matched requests, correlated/unmatched/ambiguous responses, stale generation rejection, state exhaustion, and X2 encoding/delivery outcomes with documented ownership and units.
+- [x] Document mirrored BRAS/BNG topology, capture-scope/proxy assumptions, sample non-LI and tap POI setups, MDF settings, unsupported transports/messages, no-secret association limits, and independent output enablement.
+- [x] Document NatParas userName/lineID to X1 mappings, supported AVP/VSA encodings and examples, known-line verification, upstream inventory-resolution responsibility, scope uniqueness, conjunctive criteria, and explicit unsupported-form rejection.
+- [x] Update command/config references, structured-log documentation and schema contract, and LI deployment guidance. Label distributed support complete only after Phase 7 passes.
 
 Exit criterion: operators can configure ordinary and LI-enabled capture without
 implicit SIP behavior or undocumented identity conventions.
+
+Phase 6 verification (2026-09-09): specialized sub-agents implemented the
+thin protocol commands/shared configuration, runtime plumbing/counters and
+operator documentation. The parent implemented LI-only configuration and
+reviewed all components; independent cross-review found and corrected tap
+origin identity validation and X2 correlation lifetime configuration. Tap LI
+requires explicit capture/authorization scope agreement, matching transaction
+timeouts and durable correlation storage. Its origin is the processor ID plus
+`-local`; X2 NFID/IPID remain the processor ID.
+
+All three ordinary commands share exact conjunctive criteria, MAC convention,
+resolved line profiles, ports, bounded transaction settings and strict
+flags/YAML/environment validation. Static ordinary groups survive dynamic
+filter updates; independent dynamic groups can also select traffic. Dedicated
+commands reject invalid or unrelated packets after bounded observation, while
+generic packet capture keeps its existing output behavior. Counter summaries
+identify capture epochs and distinguish validation, association, stale owner
+references, state loss, encoding and queue outcomes from actual transport
+statistics.
+
+Parent CLI tests verified matching requests and identity-free responses, exact
+case/realm behavior, MAC/profile rejection, scoped NAS-Port-Id and
+Agent-Circuit-Id, conjunctive rejection, custom ports and flags over environment
+over YAML. A real combined-binary output check found shared log flags bound to
+another command; active RADIUS command rebinding and regressions fix this.
+Configured sniff logs now consume the same observation after selection, with no
+second decoder/correlator or duplicate validation counters. The final CLI smoke
+produced two JSON packet records, two RADIUS JSONL records and byte-identical
+selected PCAP packet data simultaneously. Custom-port configured logging has
+additional regression coverage.
+
+Parent-run validation:
+
+```bash
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags 'all li' ./internal/pkg/li/... ./internal/pkg/processor/... ./internal/pkg/hunter/... ./internal/pkg/radius ./internal/pkg/radiusconfig ./internal/pkg/protocolcatalog
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags 'all li' ./cmd ./cmd/sniff ./cmd/hunt ./cmd/tap ./cmd/process ./internal/pkg/logflags
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags all ./cmd ./cmd/sniff ./cmd/hunt ./cmd/tap ./cmd/process ./internal/pkg/radiusconfig ./internal/pkg/logflags ./internal/pkg/protocolcatalog ./internal/pkg/radius
+GOCACHE=/tmp/lippycat-go-cache go vet -tags 'all li' ./cmd/sniff ./cmd/hunt ./cmd/tap ./cmd/process ./internal/pkg/radiusconfig ./internal/pkg/radius ./internal/pkg/logflags ./internal/pkg/li/... ./internal/pkg/processor/... ./internal/pkg/hunter/...
+GOCACHE=/tmp/lippycat-go-cache make verify-no-li
+mdbook build docs/manual --dest-dir /tmp/radius-phase6-smoke/manual
+```
+
+All checks passed. All nine applicable variants (`all`, `hunter`, `processor`,
+`tap`, `cli`, `tui`, `all li`, `processor li`, `tap li`) built successfully.
+An additional unstripped-binary symbol inspection confirmed LI manager/registry,
+X2 encoder and LI configuration resolver exclusion. TLS/gRPC integration tests
+used approved execution outside the sandbox. Builds emitted only the known
+nonfatal read-only module-stat-cache warning. Changed Go/Markdown files were
+formatted and `git diff --check` passed before staging.
+
+The [operator guide](../RADIUS.md), manual chapter, command/config references,
+structured-log/schema documentation and LI deployment guide describe exact
+identity conventions, NatParas mapping, isolated BRAS/BNG mirroring, counters,
+independent outputs and unsupported forms. This completes Phase 6. Phase 7
+remains the distributed release gate; production operator traces and receiving-MDF
+agreement remain external acceptance gates.
 
 ## Phase 7 — Distributed parity and release verification
 

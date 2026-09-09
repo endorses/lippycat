@@ -265,7 +265,14 @@ identifiers are bound to this deployment policy, never used to infer scope.
 MAC provisioning also requires `RADIUSMACProfile` / `LIRADIUSMACProfile` set to
 `calling-station-id-uppercase-hyphen-v1`. X1 MAC syntax is six lowercase
 colon-separated octets; captured Calling-Station-Id must use the configured
-uppercase hyphen convention. Dedicated command flags remain Phase 6 work.
+uppercase hyphen convention. CLI deployments bind these policies with
+`--li-radius-operator-scope`, `--li-radius-profile-revision`, optional
+`--li-radius-origin-node` / `--li-radius-source`, and `--li-radius-mac-profile`.
+Shared YAML uses `li.radius.*` and environment uses `LIPPYCAT_LI_RADIUS_*`.
+For local tap capture, ordinary `--radius-operator-scope` and
+`--radius-profile-revision` must match the LI binding. See the
+[RADIUS operator guide](RADIUS.md#tap-poi-and-mdf-setup) for a complete tap POI
+example, exact flag/key reference, NatParas resolution and known-line verification.
 
 RADIUS tasks accept only `X2Only`, with explicitly X2-enabled destinations.
 One compound filter carries the task UUID, activation generation, complete
@@ -308,7 +315,15 @@ Set `processor.Config.LIRADIUSCorrelationStateFile`, or configure `LIStateFile` 
 use its path plus `.radius-correlation`. The parent directory must exist and be
 writable. NFID and IPID both use `ProcessorID`; missing identity or storage causes
 RADIUS X2 encoding to fail closed and increments the existing X2 error counter.
-Ordinary outputs continue. Dedicated command/config bindings remain Phase 6 work.
+Ordinary outputs continue. CLI deployments use
+`--li-radius-correlation-state-file`, YAML `li.radius.correlation_state_file`, or
+`LIPPYCAT_LI_RADIUS_CORRELATION_STATE_FILE`; the default is empty and retains the
+LI-state-path fallback. Set `--li-radius-transaction-timeout` (YAML `li.radius.transaction_timeout`,
+environment `LIPPYCAT_LI_RADIUS_TRANSACTION_TIMEOUT`) to the capture association
+lifetime; it defaults to 30 seconds and accepts 1 second through 5 minutes.
+`tap radius` rejects mismatched capture/LI lifetimes. Remote processors must use
+their hunter deployment lifetime;
+see [RADIUS configuration](RADIUS.md#shared-flags-and-configuration).
 
 Keep the reservation file and its `.lock` file on durable storage supporting
 exclusive file locks and atomic rename. Every encoder sharing NFID/IPID must use
@@ -319,7 +334,7 @@ storage while retaining the same ProcessorID. Restart skips unused reserved IDs;
 resetting storage requires a new ProcessorID.
 
 Request retransmissions and uniquely associated responses share an allocation
-across task XIDs during the 30-second request lifetime. Orphan or ambiguous direct
+across task XIDs during the configured request lifetime (30 seconds by default). Orphan or ambiguous direct
 matches use observation-scoped allocations. The map is bounded by 65,536 entries
 and 16 MiB; expiration cleanup runs at most once per second. Expired exchange
 observations and allocation/encoding failures suppress X2 only. Each captured

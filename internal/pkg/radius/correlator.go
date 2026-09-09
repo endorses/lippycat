@@ -47,6 +47,10 @@ type transactionState struct {
 // Collisions (new competing instances), and CapacityLosses (state-loss events).
 // RetainedBytes is conservative charged storage, including map/entry overhead.
 type CorrelatorStats struct {
+	// MatchedRequests counts observations with direct attribution once, regardless of owners.
+	MatchedRequests uint64
+	// StaleReferences counts rejected inherited attribution references.
+	StaleReferences                                                                                  uint64
 	Requests, Retransmissions, Unique, Missing, Ambiguous, Expired, Incompatible, CapacitySuppressed uint64
 	Collisions, Expirations, CapacityLosses                                                          uint64
 	Candidates, SuppressionKeys                                                                      int
@@ -157,6 +161,9 @@ func (c *Correlator) Process(input *Observation) *Observation {
 	request := m.Code == 1 || m.Code == 4
 	if request {
 		c.stats.Requests++
+		if len(o.Direct) > 0 {
+			c.stats.MatchedRequests++
+		}
 	}
 	finish := func(status AssociationStatus) *Observation {
 		o.Association.Status = status
@@ -209,6 +216,7 @@ func (c *Correlator) Process(input *Observation) *Observation {
 				continue
 			}
 			if c.config.EvidenceCurrent == nil || !c.config.EvidenceCurrent(cloneReferences([]AttributionReference{ref})[0]) {
+				c.stats.StaleReferences++
 				continue
 			}
 			o.Inherited = append(o.Inherited, cloneReferences([]AttributionReference{ref})...)

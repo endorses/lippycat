@@ -20,34 +20,34 @@ Most capture flags (`-i`, `-f`, `--sip-port`, `--rtp-port-range`) carry over. Wh
 
 ### What Stays the Same
 
-| Flag | Sniff | Hunt | Same? |
-|------|-------|------|-------|
-| `-i, --interface` | Network interface(s) | Network interface(s) | Yes |
-| `-f, --filter` | BPF filter | BPF filter | Yes |
-| `-p, --promisc` | Promiscuous mode | Promiscuous mode | Yes |
-| `--esp-null` | ESP-NULL decapsulation | ESP-NULL decapsulation | Yes |
-| `--esp-heuristic` | ESP-NULL detection by content | ESP-NULL detection by content | Yes |
-| `--esp-icv-size` | ESP ICV size | ESP ICV size | Yes |
-| `--sip-user` | Local SIP-user filter | Processor-managed filter | No |
-| `--sip-port` | SIP port restriction (VoIP) | SIP port restriction (VoIP) | Yes |
-| `--rtp-port-range` | RTP port range (VoIP) | RTP port range (VoIP) | Yes |
-| `--gpu-backend` | GPU acceleration in CUDA builds | GPU acceleration in CUDA builds | Yes |
+| Flag               | Sniff                           | Hunt                            | Same? |
+| ------------------ | ------------------------------- | ------------------------------- | ----- |
+| `-i, --interface`  | Network interface(s)            | Network interface(s)            | Yes   |
+| `-f, --filter`     | BPF filter                      | BPF filter                      | Yes   |
+| `-p, --promisc`    | Promiscuous mode                | Promiscuous mode                | Yes   |
+| `--esp-null`       | ESP-NULL decapsulation          | ESP-NULL decapsulation          | Yes   |
+| `--esp-heuristic`  | ESP-NULL detection by content   | ESP-NULL detection by content   | Yes   |
+| `--esp-icv-size`   | ESP ICV size                    | ESP ICV size                    | Yes   |
+| `--sip-user`       | Local SIP-user filter           | Processor-managed filter        | No    |
+| `--sip-port`       | SIP port restriction (VoIP)     | SIP port restriction (VoIP)     | Yes   |
+| `--rtp-port-range` | RTP port range (VoIP)           | RTP port range (VoIP)           | Yes   |
+| `--gpu-backend`    | GPU acceleration in CUDA builds | GPU acceleration in CUDA builds | Yes   |
 
 ### What's New
 
-| Flag | Purpose |
-|------|---------|
-| `-P, --processor` | Processor address (host:port) — **required** |
-| `-I, --id` | Hunter identifier (default: hostname) |
-| `-b, --buffer-size` | Packet buffer size (default: 10000) |
-| `--batch-size` | Packets per gRPC batch (default: 64) |
-| `--batch-timeout` | Batch send timeout in ms (default: 100) |
-| `--batch-queue-size` | Batch queue buffer (default: 1000) |
-| `--tls-cert`, `--tls-key`, `--tls-ca` | TLS certificates |
-| `--insecure` | Disable TLS (testing only) |
-| `--disk-buffer` | Enable disk overflow buffer |
-| `--no-filter-policy` | Whether to forward all or no packets when no filters exist (`deny` by default) |
-| `--debug-listen` | Optional pprof listener for diagnostics |
+| Flag                                  | Purpose                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------ |
+| `-P, --processor`                     | Processor address (host:port) — **required**                                   |
+| `-I, --id`                            | Hunter identifier (default: hostname)                                          |
+| `-b, --buffer-size`                   | Packet buffer size (default: 10000)                                            |
+| `--batch-size`                        | Packets per gRPC batch (default: 64)                                           |
+| `--batch-timeout`                     | Batch send timeout in ms (default: 100)                                        |
+| `--batch-queue-size`                  | Batch queue buffer (default: 1000)                                             |
+| `--tls-cert`, `--tls-key`, `--tls-ca` | TLS certificates                                                               |
+| `--insecure`                          | Disable TLS (testing only)                                                     |
+| `--disk-buffer`                       | Enable disk overflow buffer                                                    |
+| `--no-filter-policy`                  | Whether to forward all or no packets when no filters exist (`deny` by default) |
+| `--debug-listen`                      | Optional pprof listener for diagnostics                                        |
 
 ### Your First Distributed Capture
 
@@ -181,12 +181,12 @@ Hunters are designed to survive network disruptions and processor outages.
 
 The processor sends flow control signals to hunters via heartbeat responses:
 
-| State | Meaning | Hunter Response |
-|-------|---------|-----------------|
-| `CONTINUE` | Normal operation | Send at full rate |
-| `SLOW` | Processor queue 30-70% full | Increase batch timeout |
-| `PAUSE` | Processor queue >90% full | Stop sending, buffer locally |
-| `RESUME` | Queue below threshold | Resume normal operation |
+| State      | Meaning                     | Hunter Response              |
+| ---------- | --------------------------- | ---------------------------- |
+| `CONTINUE` | Normal operation            | Send at full rate            |
+| `SLOW`     | Processor queue 30-70% full | Increase batch timeout       |
+| `PAUSE`    | Processor queue >90% full   | Stop sending, buffer locally |
+| `RESUME`   | Queue below threshold       | Resume normal operation      |
 
 Flow control is based on the processor's PCAP write queue utilization. Slow TUI clients do not trigger flow control — they receive selective packet drops instead.
 
@@ -195,14 +195,14 @@ Flow control is based on the processor's PCAP write queue utilization. Slow TUI 
 When the connection to the processor is lost, the hunter reconnects automatically:
 
 | Attempt | Backoff | Total Time |
-|---------|---------|------------|
-| 1 | 1s | 1s |
-| 2 | 2s | 3s |
-| 3 | 4s | 7s |
-| 4 | 8s | 15s |
-| 5 | 16s | 31s |
-| 6 | 32s | 63s |
-| 7-10 | 60s | ~5 minutes |
+| ------- | ------- | ---------- |
+| 1       | 1s      | 1s         |
+| 2       | 2s      | 3s         |
+| 3       | 4s      | 7s         |
+| 4       | 8s      | 15s        |
+| 5       | 16s     | 31s        |
+| 6       | 32s     | 63s        |
+| 7-10    | 60s     | ~5 minutes |
 
 During reconnection, packet capture continues. Packets are buffered up to `--buffer-size` (default: 10,000 packets). Once the buffer is full, new packets are dropped.
 
@@ -249,11 +249,11 @@ sudo lc hunt --processor processor:55555 -i eth0 \
   --batch-size 64 --batch-timeout 100 --tls-ca ca.crt
 ```
 
-| Profile | Batch Size | Timeout | Use Case |
-|---------|-----------|---------|----------|
-| Low latency | 16-32 | 50-100ms | Real-time analysis |
-| Balanced | 64-128 | 100-200ms | General monitoring |
-| High throughput | 256-512 | 500-1000ms | Bulk capture, archival |
+| Profile         | Batch Size | Timeout    | Use Case               |
+| --------------- | ---------- | ---------- | ---------------------- |
+| Low latency     | 16-32      | 50-100ms   | Real-time analysis     |
+| Balanced        | 64-128     | 100-200ms  | General monitoring     |
+| High throughput | 256-512    | 500-1000ms | Bulk capture, archival |
 
 ### GPU Acceleration
 
@@ -336,3 +336,17 @@ hunter:
 ```
 
 Flag values take precedence over config file values.
+
+## RADIUS
+
+Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
+authentication and accounting capture. `lc process` stays protocol-neutral and
+existing watch commands display RADIUS metadata. Ordinary capture does not need
+an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
+across commands; optional raw format-11 X2 delivery requires a current authorized
+X2Only task in an LI build.
+
+The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
+configuration examples, scope isolation, NatParas mappings, state limits and
+MDF setup. Distributed release support requires Phase 7 acceptance; external
+operator known-line verification and receiving-MDF agreement remain pending.

@@ -19,6 +19,7 @@ lc sniff -i eth0 --format text
 ```
 
 **Common Flags:**
+
 - `-i, --interface` - Network interface to capture from
 - `-f, --filter` - BPF filter expression
 - `-r, --read-file` - Read from PCAP file instead of live capture
@@ -60,21 +61,39 @@ lc sniff -r testdata/pcaps/sip.pcap 2>/dev/null | head -1
 ```
 
 **Output:**
+
 ```json
-{"Timestamp":"2025-09-28T18:59:18.000001+02:00","SrcIP":"192.168.1.100","DstIP":"192.168.1.101","SrcPort":"5060","DstPort":"5060","Protocol":"TCP","Length":74,"Info":"Flags: [SYN]","RawData":null,"NodeID":"Local","Interface":"sip.pcap","VoIPData":null,"LinkType":1}
+{
+  "Timestamp": "2025-09-28T18:59:18.000001+02:00",
+  "SrcIP": "192.168.1.100",
+  "DstIP": "192.168.1.101",
+  "SrcPort": "5060",
+  "DstPort": "5060",
+  "Protocol": "TCP",
+  "Length": 74,
+  "Info": "Flags: [SYN]",
+  "RawData": null,
+  "NodeID": "Local",
+  "Interface": "sip.pcap",
+  "VoIPData": null,
+  "LinkType": 1
+}
 ```
 
 **Parse with jq:**
+
 ```bash
 lc sniff -r capture.pcap 2>/dev/null | jq -r '"\(.Timestamp) \(.SrcIP):\(.SrcPort) → \(.DstIP):\(.DstPort) \(.Protocol) \(.Info)"'
 ```
 
 **Output:**
+
 ```
 2025-09-28T18:59:18.000001+02:00 192.168.1.100:5060 → 192.168.1.101:5060 TCP Flags: [SYN]
 ```
 
 **Filter with jq:**
+
 ```bash
 # Only TCP packets
 lc sniff -r capture.pcap 2>/dev/null | jq 'select(.Protocol == "TCP")'
@@ -97,6 +116,7 @@ lc sniff -r capture.pcap --format text 2>/dev/null | head -1
 ### stdout/stderr Separation
 
 Following Unix conventions:
+
 - **stdout**: Packet data only (JSON or text format)
 - **stderr**: Structured logs (JSON format)
 
@@ -112,6 +132,7 @@ lc sniff -r capture.pcap --quiet
 ```
 
 **Example stderr logs:**
+
 ```json
 {"time":"2025-10-19T13:18:04.33104697+02:00","level":"INFO","msg":"Starting packet sniffer"}
 {"time":"2025-10-19T13:18:04.332556652+02:00","level":"INFO","msg":"Packet processing completed","total_packets":5}
@@ -120,6 +141,7 @@ lc sniff -r capture.pcap --quiet
 ## Offline Mode (PCAP Files)
 
 When reading from PCAP files (`--read-file`), the command automatically:
+
 - Exits cleanly when all packets are processed (no need for Ctrl+C)
 - Works with pipes and `head` commands
 - Processes at maximum speed (no rate limiting)
@@ -158,6 +180,7 @@ lc sniff dns -i eth0 -w dns-output.pcap
 ```
 
 **DNS-Specific Flags:**
+
 - `--domain` - Filter by domain pattern (glob-style, e.g., `*.example.com`)
 - `--domains-file` - Load domain patterns from file (one per line, # for comments)
 - `--udp-only` - Capture UDP DNS only (ignore TCP DNS)
@@ -167,6 +190,7 @@ lc sniff dns -i eth0 -w dns-output.pcap
 - `-w, --write-file` - Write captured DNS packets to PCAP file
 
 **Features:**
+
 - Query/response correlation with response time tracking
 - DNS tunneling detection via entropy analysis
 - Domain pattern filtering (glob-style wildcards)
@@ -204,6 +228,7 @@ lc sniff email -r capture.pcap
 ```
 
 **Email-Specific Flags:**
+
 - `--protocol` - Email protocol to capture: `smtp`, `imap`, `pop3`, `all` (default: `all`)
 - `--address` - Filter by email address pattern (matches sender OR recipient, glob-style)
 - `--sender` - Filter by sender address pattern (MAIL FROM, glob-style)
@@ -221,9 +246,11 @@ lc sniff email -r capture.pcap
 - `-w, --write-file` - Write captured email packets to PCAP file
 
 **Pattern Files:** Load patterns from files (one per line, # for comments):
+
 - `--addresses-file`, `--senders-file`, `--recipients-file`, `--subjects-file`
 
 **Features:**
+
 - SMTP command/response parsing
 - IMAP command/response parsing
 - POP3 command/response parsing
@@ -261,6 +288,7 @@ lc sniff http -r capture.pcap --tls-keylog keys.log
 ```
 
 **HTTP-Specific Flags:**
+
 - `--host` - Filter by host pattern (glob-style, e.g., `*.example.com`)
 - `--path` - Filter by path/URL pattern (glob-style, e.g., `/api/*`)
 - `--method` - Filter by HTTP methods (comma-separated, e.g., `GET,POST`)
@@ -277,9 +305,11 @@ lc sniff http -r capture.pcap --tls-keylog keys.log
 - `-w, --write-file` - Write captured HTTP packets to PCAP file
 
 **Pattern Files:** Load patterns from files (one per line, # for comments):
+
 - `--hosts-file`, `--paths-file`, `--user-agents-file`, `--content-types-file`
 
 **Features:**
+
 - HTTP request/response parsing
 - Request/response correlation with RTT measurement
 - TCP stream reassembly
@@ -310,6 +340,7 @@ lc sniff tls -i eth0 -w tls-output.pcap
 ```
 
 **TLS-Specific Flags:**
+
 - `--sni` - Filter by SNI pattern (glob-style, e.g., `*.example.com`)
 - `--sni-file` - Load SNI patterns from file (one per line)
 - `--ja3` - Filter by JA3 fingerprint hash (32-char hex)
@@ -323,6 +354,7 @@ lc sniff tls -i eth0 -w tls-output.pcap
 - `-w, --write-file` - Write captured TLS packets to PCAP file
 
 **Features:**
+
 - JA3/JA3S/JA4 fingerprint calculation
 - SNI (Server Name Indication) extraction
 - ClientHello/ServerHello correlation
@@ -360,13 +392,13 @@ lc sniff voip -i eth0 --sip-user alicent
 
 Wildcard patterns allow flexible matching for international phone number formats and username variations:
 
-| Pattern | Type | Description |
-|---------|------|-------------|
-| `alice` | Contains | Substring match (backward compatible) |
-| `*456789` | Suffix | Matches any prefix + `456789` |
-| `alice*` | Prefix | Matches `alice` + any suffix |
+| Pattern   | Type     | Description                              |
+| --------- | -------- | ---------------------------------------- |
+| `alice`   | Contains | Substring match (backward compatible)    |
+| `*456789` | Suffix   | Matches any prefix + `456789`            |
+| `alice*`  | Prefix   | Matches `alice` + any suffix             |
 | `*alice*` | Contains | Explicit contains (same as no wildcards) |
-| `\*alice` | Literal | Escaped `*` treated as literal character |
+| `\*alice` | Literal  | Escaped `*` treated as literal character |
 
 **Examples:**
 
@@ -393,6 +425,7 @@ lc sniff voip -i eth0 --sip-user '\*31#'
 **Purpose:** Optimize BPF filters for high-traffic networks where TCP overhead overwhelms SIP handling.
 
 **Flags:**
+
 - `--udp-only` - Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)
 - `--sip-port` - Restrict SIP capture to specific port(s), comma-separated
 - `--rtp-port-range` - Custom RTP port range(s), comma-separated (default: 10000-32768)
@@ -424,15 +457,16 @@ lc sniff voip -i eth0 --filter "host 10.0.0.1" --sip-port 5060
 
 **Generated BPF Filters:**
 
-| Input | Generated BPF Filter |
-|-------|---------------------|
-| `--udp-only` | `udp` |
-| `--sip-port 5060` | `(port 5060) or (udp portrange 10000-32768)` |
-| `--sip-port 5060 --udp-only` | `udp and ((port 5060) or (portrange 10000-32768))` |
-| `--rtp-port-range 8000-9000` | `(udp portrange 8000-9000)` |
+| Input                                      | Generated BPF Filter                                               |
+| ------------------------------------------ | ------------------------------------------------------------------ |
+| `--udp-only`                               | `udp`                                                              |
+| `--sip-port 5060`                          | `(port 5060) or (udp portrange 10000-32768)`                       |
+| `--sip-port 5060 --udp-only`               | `udp and ((port 5060) or (portrange 10000-32768))`                 |
+| `--rtp-port-range 8000-9000`               | `(udp portrange 8000-9000)`                                        |
 | `--filter "host 10.0.0.1" --sip-port 5060` | `(host 10.0.0.1) and ((port 5060) or (udp portrange 10000-32768))` |
 
 **When to use:**
+
 - Networks with high non-VoIP TCP traffic (web servers, databases)
 - UDP-only SIP environments (most SIP deployments)
 - Custom SIP port configurations
@@ -455,6 +489,7 @@ lc sniff voip -i eth0 -u alicent --write-file
 These flags are available on `sniff voip` only in CUDA builds. Non-CUDA builds do not register them.
 
 **Flags:**
+
 - `--gpu-enable` - Enable GPU acceleration (default: true)
 - `--gpu-backend` - Backend selection: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled`
 - `--gpu-batch-size` - Batch size for GPU processing (default: 1024)
@@ -477,6 +512,7 @@ lc sniff voip -i eth0 --gpu-enable=false
 ```
 
 **Backend Selection:**
+
 - `auto` - Automatically selects CUDA when available, then CPU SIMD
 - `cuda` - NVIDIA GPU acceleration (requires CUDA)
 - `opencl` - Reserved compatibility value; the backend is not implemented and falls back to CPU
@@ -488,15 +524,17 @@ lc sniff voip -i eth0 --gpu-enable=false
 **Purpose:** Select the algorithm for matching SIP usernames and phone numbers against filter patterns.
 
 **Flags:**
+
 - `--pattern-algorithm` - Pattern matching algorithm: `auto`, `linear`, `aho-corasick` (default: auto)
 - `--pattern-buffer-mb` - Memory budget for pattern buffer in MB (default: 64)
 
 **Algorithm Selection:**
-| Algorithm | Complexity | Best For | Description |
-|-----------|------------|----------|-------------|
-| `auto` | Adaptive | General use | Selects Aho-Corasick for ≥100 patterns, linear otherwise |
-| `linear` | O(n×m) | <100 patterns | Simple linear scan, low memory overhead |
-| `aho-corasick` | O(n+m+z) | ≥100 patterns | Trie-based automaton, ~265x faster at 10K patterns |
+
+| Algorithm      | Complexity | Best For      | Description                                              |
+| -------------- | ---------- | ------------- | -------------------------------------------------------- |
+| `auto`         | Adaptive   | General use   | Selects Aho-Corasick for ≥100 patterns, linear otherwise |
+| `linear`       | O(n×m)     | <100 patterns | Simple linear scan, low memory overhead                  |
+| `aho-corasick` | O(n+m+z)   | ≥100 patterns | Trie-based automaton, ~265x faster at 10K patterns       |
 
 **Examples:**
 
@@ -537,12 +575,12 @@ lc sniff voip -i eth0 --tcp-performance-mode low_latency
 
 **Profile Characteristics:**
 
-| Profile | Memory | Throughput | Latency | Use Case |
-|---------|--------|------------|---------|----------|
-| `minimal` | 25MB | Low | Medium | Embedded systems, low traffic |
-| `balanced` | 100MB | Medium | Medium | General purpose (default) |
-| `high_performance` | 500MB | High | Higher | High-traffic production |
-| `low_latency` | 200MB | Medium | Low | Real-time analysis |
+| Profile            | Memory | Throughput | Latency | Use Case                      |
+| ------------------ | ------ | ---------- | ------- | ----------------------------- |
+| `minimal`          | 25MB   | Low        | Medium  | Embedded systems, low traffic |
+| `balanced`         | 100MB  | Medium     | Medium  | General purpose (default)     |
+| `high_performance` | 500MB  | High       | Higher  | High-traffic production       |
+| `low_latency`      | 200MB  | Medium     | Low     | Real-time analysis            |
 
 See [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) for detailed profile specifications.
 
@@ -551,17 +589,20 @@ See [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) for detailed profile specif
 For advanced users, individual TCP parameters can be overridden:
 
 **Resource Limits:**
+
 - `--tcp-max-goroutines` - Maximum concurrent TCP stream processing goroutines (0 = auto)
 - `--max-tcp-buffers` - Maximum number of TCP packet buffers (0 = use profile default)
 - `--tcp-assembler-max-pages` - Maximum pages for TCP assembler (0 = use profile default)
 
 **Timing Parameters:**
+
 - `--tcp-cleanup-interval` - Resource cleanup interval (0 = use profile default)
 - `--tcp-buffer-max-age` - Maximum age for TCP packet buffers (0 = use profile default)
 - `--tcp-stream-max-queue-time` - Maximum time a stream can wait in queue (0 = use profile default)
 - `--tcp-stream-timeout` - Timeout for TCP stream processing (0 = use profile default)
 
 **Strategy Options:**
+
 - `--tcp-buffer-strategy` - Buffering strategy: `adaptive`, `fixed`, `ring` (default: adaptive)
 - `--enable-backpressure` - Enable backpressure handling for TCP streams
 - `--memory-optimization` - Enable memory usage optimizations
@@ -603,8 +644,8 @@ voip:
   gpu_max_memory: 0
 
   # Pattern matching algorithm
-  pattern_algorithm: "auto"    # auto, linear, or aho-corasick
-  pattern_buffer_mb: 64        # Memory budget for pattern buffer in MB
+  pattern_algorithm: "auto" # auto, linear, or aho-corasick
+  pattern_buffer_mb: 64 # Memory budget for pattern buffer in MB
 
   # TCP performance
   tcp_performance_mode: "balanced"
@@ -641,6 +682,7 @@ wireshark -i lc0
 ### Use Cases
 
 #### 1. PCAP Replay Filtering
+
 ```bash
 # Replay large PCAP, filter for specific user
 sudo lc sniff voip -r 10GB-capture.pcap --sip-user alice --virtual-interface
@@ -650,6 +692,7 @@ tcpdump -i lc0 -w alice-calls.pcap
 ```
 
 #### 2. Live VoIP Monitoring
+
 ```bash
 # Capture only VoIP traffic
 sudo lc sniff voip -i eth0 --virtual-interface
@@ -660,6 +703,7 @@ snort -i lc0 -c voip-rules.conf &
 ```
 
 #### 3. Timing Replay
+
 ```bash
 # Preserve PCAP timing (like tcpreplay)
 sudo lc sniff voip -r capture.pcap --virtual-interface --vif-replay-timing
@@ -708,3 +752,17 @@ sudo lc sniff voip -i eth0 --virtual-interface
 - [docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) - Virtual interface guide and tool integration
 - [cmd/show/README.md](../show/README.md) - Show commands for diagnostics
 - [docs/SECURITY.md](../../docs/SECURITY.md) - Security features and configuration
+
+## RADIUS capture
+
+`lc sniff radius` observes visible UDP authentication and accounting on 1812/1813
+and additional `--radius-port` ports. Shared `--radius-username`, `--radius-mac`,
+`--radius-attribute`, and scoped `--radius-line-profile` / `--radius-line-id`
+predicates use exact, conjunctive matching. Ordinary capture needs no LI build
+or task. The shared `radius.*` YAML keys and `LIPPYCAT_RADIUS_*` environment
+variables configure the same profiles and bounded transaction state.
+
+See the [RADIUS operator guide](../../docs/RADIUS.md) for flag defaults, supported
+messages, MAC and line mapping rules, mirrored BRAS/BNG deployment, counters and
+local tap POI setup. Distributed release support remains gated on Phase 7;
+external operator and MDF acceptance are pending.

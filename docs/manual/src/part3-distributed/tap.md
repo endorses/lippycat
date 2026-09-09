@@ -22,13 +22,13 @@ flowchart LR
 
 ## When to Use Tap
 
-| Scenario | Use | Why |
-|----------|-----|-----|
-| Quick packet inspection | `lc sniff` | Simplest, CLI output only |
-| VoIP monitoring on one machine | `lc tap voip` | Per-call PCAP, TUI, no infrastructure |
-| Capture + TUI on one machine | `lc tap` | Full processor features locally |
-| Edge node with local + central capture | `lc tap --processor` | Standalone + upstream forwarding |
-| Multi-segment distributed capture | `lc hunt` + `lc process` | Multiple capture points required |
+| Scenario                               | Use                      | Why                                   |
+| -------------------------------------- | ------------------------ | ------------------------------------- |
+| Quick packet inspection                | `lc sniff`               | Simplest, CLI output only             |
+| VoIP monitoring on one machine         | `lc tap voip`            | Per-call PCAP, TUI, no infrastructure |
+| Capture + TUI on one machine           | `lc tap`                 | Full processor features locally       |
+| Edge node with local + central capture | `lc tap --processor`     | Standalone + upstream forwarding      |
+| Multi-segment distributed capture      | `lc hunt` + `lc process` | Multiple capture points required      |
 
 The key question: **do you need to capture from multiple machines?** If yes, use hunt + process. If no, tap is simpler.
 
@@ -255,7 +255,7 @@ tap:
   batch_timeout_ms: 100
   listen_addr: ":55555"
   id: "edge-tap-01"
-  processor_addr: ""  # Empty for standalone, set for upstream forwarding
+  processor_addr: "" # Empty for standalone, set for upstream forwarding
 
   per_call_pcap:
     enabled: true
@@ -284,3 +284,17 @@ tap:
     tcp_performance_mode: "balanced"
     tcp_reassembly_shards: 1
 ```
+
+## RADIUS
+
+Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
+authentication and accounting capture. `lc process` stays protocol-neutral and
+existing watch commands display RADIUS metadata. Ordinary capture does not need
+an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
+across commands; optional raw format-11 X2 delivery requires a current authorized
+X2Only task in an LI build.
+
+The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
+configuration examples, scope isolation, NatParas mappings, state limits and
+MDF setup. Distributed release support requires Phase 7 acceptance; external
+operator known-line verification and receiving-MDF agreement remain pending.

@@ -35,7 +35,11 @@ func (m *Manager) processRADIUSPacket(pkt *types.PacketDisplay, provenance Packe
 				continue
 			}
 			group, ok := m.filters.LookupRADIUSGroup(ref.CriterionGroupID)
-			if !ok || ref.TaskID == "" || !group.CurrentReference(ref) {
+			if ref.TaskID == "" {
+				continue
+			}
+			if !ok || !group.CurrentReference(ref) {
+				m.stats.radiusStaleReferences.Add(1)
 				continue
 			}
 			if !inherited {
@@ -50,6 +54,7 @@ func (m *Manager) processRADIUSPacket(pkt *types.PacketDisplay, provenance Packe
 			}
 			admission, active := m.AcquireTaskAdmission(xid, ref.TaskGeneration)
 			if !active {
+				m.stats.radiusStaleReferences.Add(1)
 				continue
 			}
 			task, err := m.registry.GetTaskDetails(xid)

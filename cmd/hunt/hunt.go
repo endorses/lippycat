@@ -9,6 +9,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
+	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -165,7 +166,11 @@ func init() {
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {
-	logger.Info("Starting lippycat in hunter mode")
+	return runHuntProtocol(cmd, args, "generic", cmdutil.GetStringConfig("hunter.bpf_filter", bpfFilter), nil)
+}
+
+func runHuntProtocol(cmd *cobra.Command, args []string, protocol, effectiveBPF string, configure func(*hunter.Config)) error {
+	logger.Info("Starting lippycat in hunter mode", "protocol", protocol)
 
 	// Production mode enforcement: check early before creating config
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
@@ -177,7 +182,10 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (flags override config file)
-	config := buildHunterConfig(genericHunterConfigSpec(cmdutil.GetStringConfig("hunter.bpf_filter", bpfFilter)))
+	config := buildHunterConfig(protocolHunterConfigSpec(protocol, effectiveBPF))
+	if configure != nil {
+		configure(&config)
+	}
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -226,7 +234,7 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	logger.Info("Hunter started successfully",
 		"processor", config.ProcessorAddr,
 		"hunter_id", config.HunterID)
-	return runCatalogHunterRuntime(config, "generic", hunterRuntimeHooks{shutdownDelay: constants.GracefulShutdownTimeout})
+	return runCatalogHunterRuntime(config, protocol, hunterRuntimeHooks{shutdownDelay: constants.GracefulShutdownTimeout})
 }
 
 func genericHunterConfigSpec(filter string) hunterConfigSpec {

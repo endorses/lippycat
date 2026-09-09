@@ -26,18 +26,19 @@ Hunters connect to the processor automatically. No configuration is needed on th
 
 ### Key Flags
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-l, --listen` | `:55555` | Listen address for hunter and TUI connections |
-| `-I, --id` | hostname | Processor identifier |
-| `-m, --max-hunters` | 100 | Maximum concurrent hunter connections |
-| `--max-subscribers` | 100 | Maximum TUI subscribers (0 = unlimited) |
-| `-s, --stats` | true | Display periodic statistics |
-| `-d, --enable-detection` | true | Enable protocol detection on received packets |
+| Flag                     | Default  | Description                                   |
+| ------------------------ | -------- | --------------------------------------------- |
+| `-l, --listen`           | `:55555` | Listen address for hunter and TUI connections |
+| `-I, --id`               | hostname | Processor identifier                          |
+| `-m, --max-hunters`      | 100      | Maximum concurrent hunter connections         |
+| `--max-subscribers`      | 100      | Maximum TUI subscribers (0 = unlimited)       |
+| `-s, --stats`            | true     | Display periodic statistics                   |
+| `-d, --enable-detection` | true     | Enable protocol detection on received packets |
 
 ### Hunter Management
 
 When hunters connect, the processor:
+
 1. Registers the hunter and assigns it to the connection pool
 2. Starts receiving packet batches via gRPC streaming
 3. Sends heartbeat responses with flow control signals
@@ -61,17 +62,17 @@ flowchart LR
     P --> LI["LI Delivery<br/>(X2/X3 to MDF)"]
 ```
 
-| Channel | Flag(s) | Description |
-|---------|---------|-------------|
-| **Unified PCAP** | `-w` | All packets to a single file |
-| **Per-Call PCAP** | `--per-call-pcap` | Separate files per VoIP call (SIP + RTP) |
-| **Auto-Rotating PCAP** | `--auto-rotate-pcap` | Non-VoIP packets to time/size-rotated files |
-| **Structured logs** | `--log-dir` | Zeek-compatible connection and protocol metadata |
-| **TUI subscribers** | (always on) | Real-time streaming to `lc watch remote` clients |
-| **Virtual interface** | `-V` | Inject into a tap/tun device for external tools |
-| **Upstream forwarding** | `-P` | Forward to another processor (hierarchical mode) |
-| **Command hooks** | `--pcap-command`, `--voip-command` | Run scripts on PCAP close or call completion |
-| **LI delivery** | `--li-enabled` | X2/X3 PDUs to MDF (requires `-tags li` build) |
+| Channel                 | Flag(s)                            | Description                                      |
+| ----------------------- | ---------------------------------- | ------------------------------------------------ |
+| **Unified PCAP**        | `-w`                               | All packets to a single file                     |
+| **Per-Call PCAP**       | `--per-call-pcap`                  | Separate files per VoIP call (SIP + RTP)         |
+| **Auto-Rotating PCAP**  | `--auto-rotate-pcap`               | Non-VoIP packets to time/size-rotated files      |
+| **Structured logs**     | `--log-dir`                        | Zeek-compatible connection and protocol metadata |
+| **TUI subscribers**     | (always on)                        | Real-time streaming to `lc watch remote` clients |
+| **Virtual interface**   | `-V`                               | Inject into a tap/tun device for external tools  |
+| **Upstream forwarding** | `-P`                               | Forward to another processor (hierarchical mode) |
+| **Command hooks**       | `--pcap-command`, `--voip-command` | Run scripts on PCAP close or call completion     |
+| **LI delivery**         | `--li-enabled`                     | X2/X3 PDUs to MDF (requires `-tags li` build)    |
 
 `lc tap` supports all the same output channels (see [Standalone Mode with `lc tap`](tap.md)).
 
@@ -139,13 +140,13 @@ Files rotate independently when reaching 100MB. Per-call PCAP only applies to Vo
 The per-call writer manager owns the logical lifetime of every Call-ID. Its
 state machine is:
 
-| State | Writer admission and packet behavior |
-|---|---|
-| **Live** | One manager-owned writer generation accepts SIP and RTP packets. Rotation remains part of that same generation. |
-| **Finalizing** | The writer has been removed from the live set and a tombstone installed in one atomic transition. No new normal writer can be admitted while files are synced and closed, endpoint mappings are cleaned up, and completion hooks run. |
+| State                      | Writer admission and packet behavior                                                                                                                                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Live**                   | One manager-owned writer generation accepts SIP and RTP packets. Rotation remains part of that same generation.                                                                                                                                                                  |
+| **Finalizing**             | The writer has been removed from the live set and a tombstone installed in one atomic transition. No new normal writer can be admitted while files are synced and closed, endpoint mappings are cleaned up, and completion hooks run.                                            |
 | **Finalized / tombstoned** | Packets arriving for the Call-ID are expected late traffic and are suppressed. This is reported as a typed, non-fatal finalized-call result, with a warning at most once per minute and an atomic suppressed-late-packet counter; it is not reported as a file-creation failure. |
-| **Expired** | After tombstone expiry, reuse of the Call-ID may start a new writer generation. The new generation receives a collision-proof filename and never overwrites or appends to an earlier call artifact. |
-| **Manager shutdown** | Writer admission stops, live writers transition to finalizing, and their files are flushed and closed. Use `SIGTERM` or `SIGINT` to allow this drain to complete. |
+| **Expired**                | After tombstone expiry, reuse of the Call-ID may start a new writer generation. The new generation receives a collision-proof filename and never overwrites or appends to an earlier call artifact.                                                                              |
+| **Manager shutdown**       | Writer admission stops, live writers transition to finalizing, and their files are flushed and closed. Use `SIGTERM` or `SIGINT` to allow this drain to complete.                                                                                                                |
 
 Finalized Call-IDs are retained for one hour, matching the closed-call
 compatibility window. The manager also applies a hard internal limit of 100,000
@@ -189,6 +190,7 @@ lc process --listen :55555 \
 ```
 
 Rotation triggers:
+
 - **Idle timeout**: close file after 30 seconds of inactivity (configurable)
 - **File size**: rotate when file reaches 100MB (configurable)
 - **Duration**: rotate after 1 hour maximum
@@ -250,13 +252,13 @@ lc process --listen :55555 --per-call-pcap \
 
 **Placeholders**:
 
-| Placeholder | Description |
-|-------------|-------------|
-| `%callid%` | SIP Call-ID |
-| `%dirname%` | Directory containing the call's PCAP files |
-| `%caller%` | Caller (SIP From user) |
-| `%called%` | Called party (SIP To user) |
-| `%calldate%` | Call start time (RFC3339 format) |
+| Placeholder  | Description                                |
+| ------------ | ------------------------------------------ |
+| `%callid%`   | SIP Call-ID                                |
+| `%dirname%`  | Directory containing the call's PCAP files |
+| `%caller%`   | Caller (SIP From user)                     |
+| `%called%`   | Called party (SIP To user)                 |
+| `%calldate%` | Call start time (RFC3339 format)           |
 
 ### DNS Tunneling Hook
 
@@ -335,14 +337,14 @@ filters:
 
 Filters cover all supported protocol categories:
 
-| Category | Common Types | Example Pattern |
-|----------|-------------|-----------------|
-| **VoIP** | `sip_user`, `phone_number`, `call_id`, `imsi`, `imei` | `alicent@example.com` |
-| **DNS** | `dns_domain` | `*.malware-domain.com` |
-| **TLS** | `tls_sni`, `tls_ja3`, `tls_ja4` | `*.example.com` |
-| **HTTP** | `http_host`, `http_url` | `api.example.com` |
-| **Email** | `email_address`, `email_subject` | `*@example.com` |
-| **Universal** | `ip_address`, `bpf` | `10.0.1.0/24` |
+| Category      | Common Types                                          | Example Pattern        |
+| ------------- | ----------------------------------------------------- | ---------------------- |
+| **VoIP**      | `sip_user`, `phone_number`, `call_id`, `imsi`, `imei` | `alicent@example.com`  |
+| **DNS**       | `dns_domain`                                          | `*.malware-domain.com` |
+| **TLS**       | `tls_sni`, `tls_ja3`, `tls_ja4`                       | `*.example.com`        |
+| **HTTP**      | `http_host`, `http_url`                               | `api.example.com`      |
+| **Email**     | `email_address`, `email_subject`                      | `*@example.com`        |
+| **Universal** | `ip_address`, `bpf`                                   | `10.0.1.0/24`          |
 
 For the complete list of filter types, wildcard patterns, and matching details, see [Appendix E: Filter Type Reference](../appendices/filter-reference.md).
 
@@ -459,3 +461,17 @@ processor:
 ```
 
 For production deployment procedures (systemd services, monitoring, health checks), see [Chapter 12: Operations Runbook](../part4-administration/operations.md).
+
+## RADIUS
+
+Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
+authentication and accounting capture. `lc process` stays protocol-neutral and
+existing watch commands display RADIUS metadata. Ordinary capture does not need
+an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
+across commands; optional raw format-11 X2 delivery requires a current authorized
+X2Only task in an LI build.
+
+The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
+configuration examples, scope isolation, NatParas mappings, state limits and
+MDF setup. Distributed release support requires Phase 7 acceptance; external
+operator known-line verification and receiving-MDF agreement remain pending.

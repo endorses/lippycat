@@ -45,20 +45,28 @@ type sniffLogSession struct {
 }
 
 func withStructuredLogs(run func()) {
+	withStructuredLogsMode(false, func(*sniffLogSession) { run() })
+}
+
+func withStructuredLogsMode(pipelineOwned bool, run func(*sniffLogSession)) {
 	dir := viper.GetString("logs.dir")
 	if dir == "" {
-		run()
+		run(nil)
 		return
 	}
-	s, err := newSniffLogSession(dir)
+	s, err := newSniffLogSessionMode(dir, pipelineOwned)
 	if err != nil {
 		logger.Error("Failed to initialize structured protocol logs", "error", err)
 		return
 	}
-	restore := capture.SetPacketObserver(s.observe)
-	defer restore()
+	if !pipelineOwned {
+		restore := capture.SetPacketObserver(s.observe)
+		defer restore()
+	}
 	defer func() {
-		s.radius.Close()
+		if s.radius != nil {
+			s.radius.Close()
+		}
 		for _, ev := range s.connections.Close() {
 			s.dispatcher.Enqueue(ev)
 		}
@@ -68,10 +76,14 @@ func withStructuredLogs(run func()) {
 			logger.Error("Failed to close structured protocol logs", "error", err)
 		}
 	}()
-	run()
+	run(s)
 }
 
 func newSniffLogSession(dir string) (*sniffLogSession, error) {
+	return newSniffLogSessionMode(dir, false)
+}
+
+func newSniffLogSessionMode(dir string, pipelineOwned bool) (*sniffLogSession, error) {
 	eventSize := viper.GetInt("events.queue_size")
 	if eventSize <= 0 {
 		eventSize = 20000
@@ -126,9 +138,12 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	radiusCapture, err := radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "local"})
-	if err != nil {
-		return nil, err
+	var radiusCapture *radius.CaptureProcessor
+	if !pipelineOwned {
+		radiusCapture, err = radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "local"})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := sink.Start(context.Background()); err != nil {
 		return nil, err
@@ -158,9 +173,9 @@ func (s *sniffLogSession) observe(info *capture.PacketInfo) {
 	if err != nil {
 		return
 	}
-	if s.radius != nil {
+	if s.radius != nil || info.RADIUS != nil {
 		observation := info.RADIUS
-		if observation == nil {
+		if observation == nil && s.radius != nil {
 			observation = s.radius.Process(pkt, info.LinkType, info.Interface, nil)
 			info.RADIUS = observation
 		}

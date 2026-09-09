@@ -7,9 +7,12 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/processor"
+	"github.com/endorses/lippycat/internal/pkg/radiusconfig"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+var radiusLICommand *cobra.Command
 
 var (
 	// LI (Lawful Interception) flags - requires -tags li build
@@ -125,6 +128,10 @@ type LIConfig struct {
 
 // RegisterLIFlags adds LI-related flags to the command.
 func RegisterLIFlags(cmd *cobra.Command) {
+	if radiusLICommand == nil {
+		radiusLICommand = cmd
+	}
+	radiusconfig.RegisterLIFlags(cmd)
 	// LI (Lawful Interception) flags - requires build with -tags li
 	cmd.PersistentFlags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
 	cmd.PersistentFlags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
@@ -337,4 +344,20 @@ func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {
 	config.LIDeliveryX2AcknowledgeInboundKeepalive = liConfig.DeliveryX2AcknowledgeInboundKeepalive
 	config.LIDeliveryX3AcknowledgeInboundKeepalive = liConfig.DeliveryX3AcknowledgeInboundKeepalive
 	config.LIDeliveryShutdownTimeout = liConfig.DeliveryShutdownTimeout
+}
+
+// applyRADIUSLIConfig keeps the authorization profile in LI builds only.
+func applyRADIUSLIConfig(cmd *cobra.Command, config *processor.Config) error {
+	if cmd == nil {
+		cmd = radiusLICommand
+	}
+	c, err := radiusconfig.ResolveLI(cmd, viper.GetViper())
+	if err != nil {
+		return err
+	}
+	config.LIRADIUSScope = c.Scope
+	config.LIRADIUSMACProfile = c.MACProfile
+	config.LIRADIUSCorrelationStateFile = c.CorrelationStateFile
+	config.LIRADIUSCorrelationLifetime = c.TransactionTimeout
+	return nil
 }

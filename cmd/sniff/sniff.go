@@ -10,6 +10,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/radiusconfig"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -48,6 +49,10 @@ var (
 )
 
 func sniff(cmd *cobra.Command, args []string) {
+	sniffConfigured(cmd, args, nil, filter)
+}
+
+func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconfig.Config, effectiveFilter string) {
 	// Set quiet mode in viper so it's accessible globally
 	viper.Set("sniff.quiet", quiet)
 	viper.Set("sniff.format", format)
@@ -80,7 +85,7 @@ func sniff(cmd *cobra.Command, args []string) {
 	}
 
 	files := collectReadFiles(readFile, args)
-	withStructuredLogs(func() {
+	withStructuredLogsMode(radiusConfig != nil, func(logSession *sniffLogSession) {
 		registrations := []pipeline.SinkRegistration{{Name: "cli", Sink: newCLIEnvelopeSink(os.Stdout, format, quiet)}}
 		if writeFile != "" {
 			pcapSink, err := newPCAPEnvelopeSink(writeFile)
@@ -115,18 +120,18 @@ func sniff(cmd *cobra.Command, args []string) {
 			logger.Error("Failed to compose local packet sinks", "error", err)
 			return
 		}
-		localPipeline := &localEnvelopePipeline{fanout: fanout}
+		localPipeline := &localEnvelopePipeline{fanout: fanout, radiusConfig: radiusConfig, logSession: logSession}
 		defer localPipeline.close()
 
 		processor := func(kind pipeline.SourceKind) func(<-chan capture.PacketInfo) {
 			return func(ch <-chan capture.PacketInfo) { localPipeline.process(ch, kind) }
 		}
 		if len(files) == 0 {
-			capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+			capture.StartLiveSniffer(interfaces, effectiveFilter, func(devices []pcaptypes.PcapInterface, filter string) {
 				capture.RunWithSignalHandler(devices, filter, processor(pipeline.SourceLiveCapture))
 			})
 		} else {
-			capture.StartOfflineSnifferOrdered(files, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+			capture.StartOfflineSnifferOrdered(files, effectiveFilter, func(devices []pcaptypes.PcapInterface, filter string) {
 				capture.RunOfflineOrdered(devices, filter, processor(pipeline.SourcePCAPReplay))
 			})
 		}

@@ -186,3 +186,36 @@ func TestRADIUSCaptureBoundaryIncludesDrainingOldHandle(t *testing.T) {
 	require.Len(t, response.Inherited, 1)
 	require.Equal(t, fresh.Association.RequestInstanceID, response.Association.RequestInstanceID)
 }
+
+func TestLocalRADIUSOnlyDropsUnrelatedAndMalformed(t *testing.T) {
+	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, file.Close()) }()
+	reader, err := pcapgo.NewReader(file)
+	require.NoError(t, err)
+	raw, ci, err := reader.ReadPacketData()
+	require.NoError(t, err)
+	cfg := DefaultLocalSourceConfig()
+	cfg.ProtocolMode = "radius"
+	s := NewLocalSource(cfg)
+	defer s.radiusProcessor.Close()
+	s.ctx = context.Background()
+	input := make(chan capture.PacketInfo, 3)
+	for _, kind := range []string{"unrelated", "malformed", "valid"} {
+		data := append([]byte(nil), raw...)
+		if kind == "unrelated" {
+			data[14+20], data[14+20+1], data[14+20+2], data[14+20+3] = 0, 53, 0, 53
+		}
+		if kind == "malformed" {
+			data[14+20+8+2], data[14+20+8+3] = 0, 19
+		}
+		packet := gopacket.NewPacket(data, reader.LinkType(), gopacket.Default)
+		packet.Metadata().CaptureInfo = ci
+		input <- capture.PacketInfo{Packet: packet, LinkType: reader.LinkType(), Interface: "mirror0"}
+	}
+	close(input)
+	s.batchingWorker(input)
+	batch := <-s.Batches()
+	require.Len(t, batch.Envelopes, 1)
+	require.Equal(t, raw, batch.Envelopes[0].Data)
+}

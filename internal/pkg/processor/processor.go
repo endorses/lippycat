@@ -93,6 +93,7 @@ type Config struct {
 	LIMetadataDeliveryProfile    string
 	LIRADIUSScope                radius.ScopeBinding
 	LIRADIUSMACProfile           string
+	LIRADIUSCorrelationLifetime  time.Duration
 	LIRADIUSCorrelationStateFile string // Durable raw RADIUS correlation reservations; defaults to LIStateFile + .radius-correlation
 	LIMetadataAllowFileMetadata  bool
 	LIX1ListenAddr               string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
@@ -234,10 +235,12 @@ type Processor struct {
 	vifManager vinterface.Manager
 
 	// LI (Lawful Interception) manager
-	liManager         *li.Manager
-	radiusLIMu        sync.Mutex
-	radiusLIStopped   bool
-	radiusLIAllocator interface {
+	liManager          *li.Manager
+	radiusLIStats      radiusDeliveryStats
+	radiusLILastReport time.Time
+	radiusLIMu         sync.Mutex
+	radiusLIStopped    bool
+	radiusLIAllocator  interface {
 		Allocate(*radius.Observation) (uint64, error)
 		Close() error
 	}

@@ -148,8 +148,10 @@ func TestCorrelatorCurrentGenerationsAndConcurrency(t *testing.T) {
 	req.Direct = append(req.Direct, second)
 	c.Process(req)
 	require.Len(t, c.Process(correlationObservation(t, 2, 1, 1, 2)).Inherited, 2)
+	require.EqualValues(t, 1, c.Stats().MatchedRequests)
 	generation.Store(2)
 	require.Empty(t, c.Process(correlationObservation(t, 2, 1, 1, 3)).Inherited)
+	require.EqualValues(t, 2, c.Stats().StaleReferences)
 	req.Direct[0].TaskGeneration = 2
 	c.Process(req) // Retransmission cannot refresh the snapshot.
 	require.Empty(t, c.Process(correlationObservation(t, 2, 1, 1, 4)).Inherited)

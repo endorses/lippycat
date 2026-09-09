@@ -146,3 +146,10 @@ this presentation policy never rewrites packet data.
 `origin_node_id`, `source_id`, and `capture_epoch` retain capture provenance;
 `node_id` follows the existing event envelope convention. Relayed provenance is
 validated against captured bytes but remains a claim, not LI authorization.
+
+The Phase 6 command/configuration surface does not change this schema version or
+field order. Capture profiles and state limits configure observation production;
+queue loss, malformed-input and LI delivery counters are operational statistics,
+not additional record fields. `radius` output requires independent log enablement
+with `--log-dir`; an X1 task does not turn it on. See the
+[RADIUS operator guide](RADIUS.md) for supported scope and counter ownership.

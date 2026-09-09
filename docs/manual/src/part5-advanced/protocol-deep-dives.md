@@ -33,15 +33,15 @@ sequenceDiagram
 
 lippycat parses each SIP message and extracts:
 
-| Field | Description | JSON Path |
-|-------|-------------|-----------|
-| Call-ID | Unique dialog identifier | `.VoIPData.CallID` |
-| Method | SIP request method | `.VoIPData.Method` |
-| Status | Response code (e.g., 200) | `.VoIPData.Status` |
-| From / To | SIP URI endpoints | `.VoIPData.From`, `.VoIPData.To` |
-| From-Tag / To-Tag | Dialog correlation tags | `.VoIPData.FromTag`, `.VoIPData.ToTag` |
-| User | Username extracted from URI | `.VoIPData.User` |
-| Content-Type | Body type (e.g., `application/sdp`) | `.VoIPData.ContentType` |
+| Field             | Description                         | JSON Path                              |
+| ----------------- | ----------------------------------- | -------------------------------------- |
+| Call-ID           | Unique dialog identifier            | `.VoIPData.CallID`                     |
+| Method            | SIP request method                  | `.VoIPData.Method`                     |
+| Status            | Response code (e.g., 200)           | `.VoIPData.Status`                     |
+| From / To         | SIP URI endpoints                   | `.VoIPData.From`, `.VoIPData.To`       |
+| From-Tag / To-Tag | Dialog correlation tags             | `.VoIPData.FromTag`, `.VoIPData.ToTag` |
+| User              | Username extracted from URI         | `.VoIPData.User`                       |
+| Content-Type      | Body type (e.g., `application/sdp`) | `.VoIPData.ContentType`                |
 
 **SIP methods lippycat recognizes:** INVITE, ACK, BYE, CANCEL, REGISTER, OPTIONS, PRACK, UPDATE, INFO, REFER, SUBSCRIBE, NOTIFY, MESSAGE, PUBLISH.
 
@@ -105,13 +105,13 @@ Once a SIP dialog is established, media flows as RTP (Real-time Transport Protoc
 
 Each RTP packet carries metadata that lippycat extracts:
 
-| Field | Description | JSON Path |
-|-------|-------------|-----------|
-| SSRC | Synchronization Source identifier | `.VoIPData.SSRC` |
-| Sequence Number | Packet ordering | `.VoIPData.SequenceNum` |
-| Timestamp | Media timing | `.VoIPData.Timestamp` |
-| Payload Type | Codec identifier | `.VoIPData.PayloadType` |
-| Codec | Codec name (from SDP) | `.VoIPData.Codec` |
+| Field           | Description                       | JSON Path               |
+| --------------- | --------------------------------- | ----------------------- |
+| SSRC            | Synchronization Source identifier | `.VoIPData.SSRC`        |
+| Sequence Number | Packet ordering                   | `.VoIPData.SequenceNum` |
+| Timestamp       | Media timing                      | `.VoIPData.Timestamp`   |
+| Payload Type    | Codec identifier                  | `.VoIPData.PayloadType` |
+| Codec           | Codec name (from SDP)             | `.VoIPData.Codec`       |
 
 lippycat correlates RTP streams with their controlling SIP dialog using the Call-ID. When RTP packets arrive before the corresponding SIP INVITE (which happens when capture starts mid-call), lippycat creates a synthetic call record and merges it when the SIP signaling appears.
 
@@ -287,15 +287,15 @@ sudo lc sniff dns -i eth0 --domains-file watchlist.txt
 
 Each DNS packet includes structured metadata:
 
-| Field | Description | JSON Path |
-|-------|-------------|-----------|
-| Transaction ID | Query/response correlator | `.DNSData.TransactionID` |
-| Query Name | Domain being queried | `.DNSData.QueryName` |
-| Query Type | Record type (A, AAAA, MX, etc.) | `.DNSData.QueryType` |
-| Response Code | NOERROR, NXDOMAIN, SERVFAIL, etc. | `.DNSData.ResponseCode` |
-| Answers | Array of answer records | `.DNSData.Answers[]` |
-| RTT | Query-to-response latency (ms) | `.DNSData.QueryResponseTimeMs` |
-| Tunneling Score | DNS tunneling probability (0.0-1.0) | `.DNSData.TunnelingScore` |
+| Field           | Description                         | JSON Path                      |
+| --------------- | ----------------------------------- | ------------------------------ |
+| Transaction ID  | Query/response correlator           | `.DNSData.TransactionID`       |
+| Query Name      | Domain being queried                | `.DNSData.QueryName`           |
+| Query Type      | Record type (A, AAAA, MX, etc.)     | `.DNSData.QueryType`           |
+| Response Code   | NOERROR, NXDOMAIN, SERVFAIL, etc.   | `.DNSData.ResponseCode`        |
+| Answers         | Array of answer records             | `.DNSData.Answers[]`           |
+| RTT             | Query-to-response latency (ms)      | `.DNSData.QueryResponseTimeMs` |
+| Tunneling Score | DNS tunneling probability (0.0-1.0) | `.DNSData.TunnelingScore`      |
 
 ### Common DNS Investigations
 
@@ -404,13 +404,13 @@ JA3S applies the same concept to the ServerHello, fingerprinting the server's re
 
 lippycat computes both automatically:
 
-| Field | Description | JSON Path |
-|-------|-------------|-----------|
-| JA3 String | Raw fingerprint input | `.TLSData.JA3String` |
-| JA3 Fingerprint | MD5 hash | `.TLSData.JA3Fingerprint` |
-| JA3S String | Raw server fingerprint input | `.TLSData.JA3SString` |
-| JA3S Fingerprint | MD5 hash | `.TLSData.JA3SFingerprint` |
-| JA4 Fingerprint | Modern fingerprint format | `.TLSData.JA4Fingerprint` |
+| Field            | Description                  | JSON Path                  |
+| ---------------- | ---------------------------- | -------------------------- |
+| JA3 String       | Raw fingerprint input        | `.TLSData.JA3String`       |
+| JA3 Fingerprint  | MD5 hash                     | `.TLSData.JA3Fingerprint`  |
+| JA3S String      | Raw server fingerprint input | `.TLSData.JA3SString`      |
+| JA3S Fingerprint | MD5 hash                     | `.TLSData.JA3SFingerprint` |
+| JA4 Fingerprint  | Modern fingerprint format    | `.TLSData.JA4Fingerprint`  |
 
 > **JA4 compatibility note:** Builds containing the standards-correctness fix
 > use SHA-256 (truncated to 12 hexadecimal characters) and the first/last ALPN
@@ -444,16 +444,16 @@ sudo lc sniff tls -i eth0 2>/dev/null | \
 
 ### TLS Metadata Fields
 
-| Field | Description | JSON Path |
-|-------|-------------|-----------|
-| Handshake Type | ClientHello, ServerHello, Certificate | `.TLSData.HandshakeType` |
-| TLS Version | Negotiated version (e.g., "TLS 1.3") | `.TLSData.Version` |
-| SNI | Server Name Indication | `.TLSData.SNI` |
-| Cipher Suites | Offered cipher suites (ClientHello) | `.TLSData.CipherSuites` |
-| Selected Cipher | Chosen cipher suite (ServerHello) | `.TLSData.SelectedCipher` |
-| ALPN Protocols | Application protocols (e.g., h2, http/1.1) | `.TLSData.ALPNProtocols` |
-| Handshake Time | ClientHello to ServerHello latency (ms) | `.TLSData.HandshakeTimeMs` |
-| Risk Score | Security risk assessment (0.0-1.0) | `.TLSData.RiskScore` |
+| Field           | Description                                | JSON Path                  |
+| --------------- | ------------------------------------------ | -------------------------- |
+| Handshake Type  | ClientHello, ServerHello, Certificate      | `.TLSData.HandshakeType`   |
+| TLS Version     | Negotiated version (e.g., "TLS 1.3")       | `.TLSData.Version`         |
+| SNI             | Server Name Indication                     | `.TLSData.SNI`             |
+| Cipher Suites   | Offered cipher suites (ClientHello)        | `.TLSData.CipherSuites`    |
+| Selected Cipher | Chosen cipher suite (ServerHello)          | `.TLSData.SelectedCipher`  |
+| ALPN Protocols  | Application protocols (e.g., h2, http/1.1) | `.TLSData.ALPNProtocols`   |
+| Handshake Time  | ClientHello to ServerHello latency (ms)    | `.TLSData.HandshakeTimeMs` |
+| Risk Score      | Security risk assessment (0.0-1.0)         | `.TLSData.RiskScore`       |
 
 ### Common TLS Investigations
 
@@ -520,14 +520,14 @@ sudo lc sniff http -i eth0 --host api.example.com --method POST --status "5xx"
 
 ### HTTP Metadata Fields
 
-| Field | Description | JSON Path |
-|-------|-------------|-----------|
-| Method | GET, POST, PUT, DELETE, etc. | `.HTTPData.Method` |
-| Path | URL path | `.HTTPData.Path` |
-| Host | Host header | `.HTTPData.Host` |
-| Status Code | Response status | `.HTTPData.StatusCode` |
-| Content-Type | Response content type | `.HTTPData.ContentType` |
-| User-Agent | Client identifier | `.HTTPData.UserAgent` |
+| Field         | Description                      | JSON Path                         |
+| ------------- | -------------------------------- | --------------------------------- |
+| Method        | GET, POST, PUT, DELETE, etc.     | `.HTTPData.Method`                |
+| Path          | URL path                         | `.HTTPData.Path`                  |
+| Host          | Host header                      | `.HTTPData.Host`                  |
+| Status Code   | Response status                  | `.HTTPData.StatusCode`            |
+| Content-Type  | Response content type            | `.HTTPData.ContentType`           |
+| User-Agent    | Client identifier                | `.HTTPData.UserAgent`             |
 | Response Time | Request-to-response latency (ms) | `.HTTPData.RequestResponseTimeMs` |
 
 ### Common HTTP Investigations
@@ -636,17 +636,17 @@ sudo lc sniff email -i eth0 --recipient bob@example.com
 
 ### Email Metadata Fields
 
-| Field | Description | JSON Path |
-|-------|-------------|-----------|
-| Protocol | SMTP, IMAP, or POP3 | `.EmailData.Protocol` |
-| MAIL FROM | Sender address | `.EmailData.MailFrom` |
-| RCPT TO | Recipient addresses | `.EmailData.RcptTo` |
-| Subject | Message subject | `.EmailData.Subject` |
-| Command | Current SMTP/IMAP/POP3 command | `.EmailData.Command` |
-| Response Code | Server response code | `.EmailData.ResponseCode` |
-| STARTTLS Offered | Server supports STARTTLS | `.EmailData.STARTTLSOffered` |
-| Auth Method | Authentication type used | `.EmailData.AuthMethod` |
-| Session ID | Correlation identifier | `.EmailData.SessionID` |
+| Field            | Description                    | JSON Path                    |
+| ---------------- | ------------------------------ | ---------------------------- |
+| Protocol         | SMTP, IMAP, or POP3            | `.EmailData.Protocol`        |
+| MAIL FROM        | Sender address                 | `.EmailData.MailFrom`        |
+| RCPT TO          | Recipient addresses            | `.EmailData.RcptTo`          |
+| Subject          | Message subject                | `.EmailData.Subject`         |
+| Command          | Current SMTP/IMAP/POP3 command | `.EmailData.Command`         |
+| Response Code    | Server response code           | `.EmailData.ResponseCode`    |
+| STARTTLS Offered | Server supports STARTTLS       | `.EmailData.STARTTLSOffered` |
+| Auth Method      | Authentication type used       | `.EmailData.AuthMethod`      |
+| Session ID       | Correlation identifier         | `.EmailData.SessionID`       |
 
 ### IMAP and POP3
 
@@ -737,3 +737,17 @@ lc sniff tls -r dns-traffic.pcap
 ```
 
 The PCAP file contains the raw packets and can be re-analyzed with any protocol subcommand or opened in Wireshark.
+
+## RADIUS
+
+Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
+authentication and accounting capture. `lc process` stays protocol-neutral and
+existing watch commands display RADIUS metadata. Ordinary capture does not need
+an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
+across commands; optional raw format-11 X2 delivery requires a current authorized
+X2Only task in an LI build.
+
+The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
+configuration examples, scope isolation, NatParas mappings, state limits and
+MDF setup. Distributed release support requires Phase 7 acceptance; external
+operator known-line verification and receiving-MDF agreement remain pending.

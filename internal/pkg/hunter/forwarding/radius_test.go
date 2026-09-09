@@ -72,3 +72,54 @@ func TestForwardRADIUSIdentityFreeResponse(t *testing.T) {
 	cancel()
 	wg.Wait()
 }
+
+func TestForwardRADIUSOnlyDropsUnrelatedAndMalformed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	buffer := capture.NewPacketBuffer(ctx, 10)
+	defer buffer.Close()
+	processor, err := radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "hunter"})
+	require.NoError(t, err)
+	defer processor.Close()
+	m := &Manager{config: Config{HunterID: "hunter", BatchSize: 2, BatchTimeout: time.Second, RADIUSOnly: true}, connCtx: ctx, statsCollector: &flowStats{}, packetBufferProv: testPacketBufferProvider{buffer: buffer}, batchQueue: make(chan *pipeline.PacketBatch, 2), radiusProcessor: processor}
+	file, err := os.Open("../../../../testdata/radius/acceptance.pcap")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, file.Close()) }()
+	reader, err := pcapgo.NewReader(file)
+	require.NoError(t, err)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go m.ForwardPackets(&wg)
+	for i := 0; i < 2; i++ {
+		raw, ci, err := reader.ReadPacketData()
+		require.NoError(t, err)
+
+		if i == 0 {
+			for _, malformed := range []bool{false, true} {
+				rejected := append([]byte(nil), raw...)
+				if malformed {
+					rejected[14+20+8+2], rejected[14+20+8+3] = 0, 19
+				} else {
+					rejected[14+20], rejected[14+20+1], rejected[14+20+2], rejected[14+20+3] = 0, 53, 0, 53
+				}
+				packet := gopacket.NewPacket(rejected, reader.LinkType(), gopacket.Default)
+				packet.Metadata().CaptureInfo = ci
+				buffer.Send(capture.PacketInfo{Packet: packet, LinkType: reader.LinkType(), Interface: "mirror"})
+			}
+		}
+		packet := gopacket.NewPacket(raw, reader.LinkType(), gopacket.Default)
+		packet.Metadata().CaptureInfo = ci
+		buffer.Send(capture.PacketInfo{Packet: packet, LinkType: reader.LinkType(), Interface: "mirror"})
+	}
+	select {
+	case batch := <-m.batchQueue:
+		require.Len(t, batch.Packets, 2)
+		require.Equal(t, radius.AssociationUnique, batch.Packets[1].RADIUS.Association.Status)
+		require.Empty(t, batch.Packets[1].RADIUS.Inherited)
+		require.Empty(t, batch.Packets[1].MatchedFilterIDs)
+	case <-time.After(3 * time.Second):
+		t.Fatal("identity-free response did not pass forwarding gate")
+	}
+	cancel()
+	wg.Wait()
+}

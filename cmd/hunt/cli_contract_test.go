@@ -118,7 +118,7 @@ func bindingFixture(flagType, original string) string {
 
 func TestHuntRenderedHelpSnapshots(t *testing.T) {
 	want := map[string]string{
-		"hunt":  "182eb36e5c7df71544938fe1a4ed7a5e2faa3b20e10dfee0a3ebb07129120af1",
+		"hunt":  "d686580316c588c0173b2487ecdec9207cd8e81408e10180b9fca0937e6a5bb9",
 		"dns":   "adbc29a0e80452449786b14d9461338635ca4758a9b1f6e578a32729e006b93a",
 		"http":  "b440b35caac98873397fd23532f54e799e254c26e10a5c0cb48a9b2dc58e0322",
 		"tls":   "05fd4c020a4808319490cf34c1eb28af371e3ebc8451e03223e40ba7497864a4",

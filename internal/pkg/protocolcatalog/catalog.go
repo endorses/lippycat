@@ -19,6 +19,7 @@ type AnalyzerKind string
 const (
 	AnalyzerGeneric AnalyzerKind = "generic"
 	AnalyzerDNS     AnalyzerKind = "dns"
+	AnalyzerRADIUS  AnalyzerKind = "radius"
 	AnalyzerEmail   AnalyzerKind = "email"
 	AnalyzerHTTP    AnalyzerKind = "http"
 	AnalyzerTLS     AnalyzerKind = "tls"
@@ -46,6 +47,12 @@ var specs = map[string]Spec{
 			IncludeDiskBuffer:   true,
 			IncludeFilterPolicy: true,
 		},
+	},
+	"radius": {
+		Name:                 "radius",
+		Analyzer:             AnalyzerRADIUS,
+		SupportedFilterTypes: []string{"bpf", "ip_address", "radius_username", "radius_mac", "radius_attribute", "radius_compound"},
+		Hunter:               HunterSpec{IncludeDiskBuffer: true, IncludeFilterPolicy: true},
 	},
 	"dns": {
 		Name:                 "dns",

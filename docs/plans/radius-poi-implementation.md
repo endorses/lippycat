@@ -732,6 +732,27 @@ This completes Phase 7's local synthetic release work. The unchecked deployment
 MDF/production-trace task and the two Phase 0 external acceptance gates remain
 pending; production interoperability is not claimed.
 
+### Phase 7 follow-up audit (2026-09-09)
+
+Three specialized reviewers compared the implementation and tests against the
+phase and acceptance matrix. Parent verification reproduced one reconnect
+convergence bug: registration replaced the remembered filter list without
+rebuilding capture. If a BPF or RADIUS filter disappeared while disconnected,
+the following empty snapshot no longer knew to remove its installed capture
+policy. Replacement with an application-only filter had the same problem.
+
+- [x] Reconcile registration through the same serialized capture/application policy replacement as subscription snapshots, retaining the old policy until restart requirements have been determined.
+- [x] Reproduce and regression-test BPF/RADIUS deletion and replacement with application-only filters during reconnect, including registration before modern snapshots and legacy peers without snapshots.
+
+All four new regression cases failed before the fix and passed afterward. The
+existing snapshot test now includes the actual reconnect registration step.
+Parent-run hunter and processor filtering race suites and relevant vet checks
+passed. The processor RADIUS, parity and subscription race tests passed with
+approved local-socket access. Independent reviewers also verified the scope,
+adapter, forwarding, upstream, schema and fixture tests; no further defects were
+found in distributed parity or acceptance coverage. External MDF and production
+BRAS validation remain pending as recorded above.
+
 ## Acceptance matrix
 
 | Area                 | Required evidence                                                                                                                                                                                        |

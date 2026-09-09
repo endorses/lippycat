@@ -553,6 +553,27 @@ and production operator traces remain external acceptance gates. Dedicated
 commands/configuration and distributed release parity remain Phases 6/7; no
 production interoperability or distributed completion is claimed.
 
+Phase 5 assessment follow-up (2026-09-09): three specialized sub-agents compared
+the encoder, durable correlation allocator and tap delivery path with this plan.
+The parent verified their findings. Independent parsing of all 21 PDU goldens
+found no wire-format defects, and the correlation implementation matched the
+local contract. The review reproduced an authorization gap: expired tasks could
+enqueue X2 before the registry expiry sweep. Allocation and encoding also held
+the lifecycle admission barrier, delaying task changes until after enqueue.
+
+- [x] Enforce expiration at task admission while preserving the existing implicit-deactivation policy.
+- [x] Release preliminary admission before allocation/encoding and reacquire it immediately before RADIUS queue admission; verify expiry, deactivation and modification during allocation suppress X2 while broadcast, PCAP and JSON logs continue.
+- [x] Fix the independently discovered default processor filter teardown bug after explicit authorization: avoid updating/deleting the same manager twice through its HunterTarget, while preserving separate local target operations. Verify single distributed notifications and local BPF installation/removal.
+
+The parent reproduced the original expired-task failure (two queued PDUs),
+reviewed the fixes and obtained independent cross-review. Full LI, processor and
+RADIUS race suites passed across the audit runs, with the processor suite rerun
+successfully after the teardown fix. The additional admission-policy regression,
+non-LI RADIUS tests and relevant LI/processor/RADIUS vet checks passed. The
+`all li`, `processor li` and `tap li` binaries built successfully, with only the
+known nonfatal module-stat-cache warning. External MDF/operator acceptance and
+the Phase 6/7 gates remain pending.
+
 ## Phase 6 — Commands, configuration, and operator documentation
 
 Primary locations: `cmd/sniff`, `cmd/hunt`, `cmd/tap`, shared protocol/runtime

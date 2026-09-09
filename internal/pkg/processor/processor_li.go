@@ -22,6 +22,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/li/delivery"
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/uuid"
@@ -116,6 +117,10 @@ type processorFilterPusher struct {
 // UpdateFilter implements li.FilterPusher.
 func (pfp *processorFilterPusher) UpdateFilter(filter *management.Filter) error {
 	_, err := pfp.p.filterManager.Update(filter)
+	if target, ok := pfp.p.filterTarget.(*filtering.HunterTarget); ok && target.Manager() == pfp.p.filterManager {
+		// The default target delegates to the manager already updated above.
+		return err
+	}
 
 	// In tap/local mode, also apply the filter directly to the local capture engine.
 	// filterManager.Update() only broadcasts to hunters via gRPC channels, which are
@@ -149,6 +154,10 @@ func (pfp *processorFilterPusher) ListFilterIDs() []string {
 // DeleteFilter implements li.FilterPusher.
 func (pfp *processorFilterPusher) DeleteFilter(filterID string) error {
 	_, err := pfp.p.filterManager.Delete(filterID)
+	if target, ok := pfp.p.filterTarget.(*filtering.HunterTarget); ok && target.Manager() == pfp.p.filterManager {
+		// Removing through this target again would delete the same filter twice.
+		return err
+	}
 
 	// Also remove from local capture target (see UpdateFilter comment).
 	if pfp.p.filterTarget != nil {

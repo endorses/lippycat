@@ -12,6 +12,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTaskAdmissionEnforcesExpiryBeforeRegistrySweep(t *testing.T) {
+	m, _, did := phase2Manager(t)
+	task := phase2Task(did)
+	require.NoError(t, m.ActivateTask(task))
+	active, err := m.GetTaskDetails(task.XID)
+	require.NoError(t, err)
+	for _, implicit := range []bool{true, false} {
+		// Keep the stored status active to model admission between expiry sweeps.
+		m.registry.mu.Lock()
+		m.registry.tasks[task.XID].EndTime = time.Now().Add(-time.Second)
+		m.registry.tasks[task.XID].ImplicitDeactivationAllowed = implicit
+		m.registry.mu.Unlock()
+		admission, allowed := m.AcquireTaskAdmission(task.XID, active.ActivationGeneration)
+		admission.Release()
+		require.Equal(t, !implicit, allowed, "admission must respect the task's implicit-deactivation policy")
+	}
+}
+
 func TestExpiryRevokesDeliveryDespiteCleanupFailure(t *testing.T) {
 	for _, fault := range []string{"filter_withdrawal", "state_checkpoint"} {
 		t.Run(fault, func(t *testing.T) {

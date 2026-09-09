@@ -86,6 +86,7 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 		if err != nil {
 			return status.Errorf(codes.InvalidArgument, "invalid packet batch: %v", err)
 		}
+		internalBatch.RADIUSSourceTrusted = radiusStreamSourceTrusted(stream.Context(), batch.HunterId)
 		p.processBatch(internalBatch)
 
 		// Determine flow control state based on processor load
@@ -1435,4 +1436,19 @@ func logAuditOperationResult(audit auditContext, targetProcessorID string, succe
 	} else {
 		logger.Warn("AUDIT: Operation failed", fields...)
 	}
+}
+
+// radiusStreamSourceTrusted admits only direct sources whose origin ID is bound
+// to a verified client certificate DNS SAN. Relayed origins require a separate
+// trust policy; a peer-supplied batch ID or registration is not source proof.
+func radiusStreamSourceTrusted(ctx context.Context, sourceID string) bool {
+	remote, ok := peer.FromContext(ctx)
+	if !ok || sourceID == "" {
+		return false
+	}
+	tlsInfo, ok := remote.AuthInfo.(credentials.TLSInfo)
+	if !ok || len(tlsInfo.State.VerifiedChains) == 0 || len(tlsInfo.State.PeerCertificates) == 0 {
+		return false
+	}
+	return tlsInfo.State.PeerCertificates[0].VerifyHostname(sourceID) == nil
 }

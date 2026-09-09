@@ -91,6 +91,8 @@ type Config struct {
 	LIEnabled                   bool // Enable LI processing
 	LIMetadataEventsEnabled     bool
 	LIMetadataDeliveryProfile   string
+	LIRADIUSScope               radius.ScopeBinding
+	LIRADIUSMACProfile          string
 	LIMetadataAllowFileMetadata bool
 	LIX1ListenAddr              string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
 	LIX1TLSCertFile             string // Path to X1 server TLS certificate

@@ -15,8 +15,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -95,6 +97,11 @@ type ManagerConfig struct {
 
 	// StateFile enables atomic local lifecycle persistence. Empty disables it.
 	StateFile string
+
+	// RADIUSScope binds X1 targets to an explicitly configured dedicated POI.
+	// It is deployment policy, never inferred from an administrative line value.
+	RADIUSScope      radius.ScopeBinding
+	RADIUSMACProfile string
 }
 
 // defaultReconcileOrphanPolls trades one reconcile interval of over-collection
@@ -196,6 +203,10 @@ type ManagerStats struct {
 // trust boundary. AuthoritativeCallID must be populated only by the exact-media
 // endpoint resolver; an RTP packet's display Call-ID is not proof by itself.
 type PacketFilterProvenance struct {
+	// RADIUS is a byte-validated capture observation. RADIUSTrusted is set only
+	// by an ingress that establishes the capture source, never from wire fields.
+	RADIUS              *radius.Observation
+	RADIUSTrusted       bool
 	DirectFilterIDs     []string
 	InheritedFilterIDs  []string
 	AuthoritativeCallID string
@@ -575,6 +586,7 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 				snapshot.convErrors++
 				continue
 			}
+			m.bindRADIUSDeployment(task)
 			snapshot.tasks[task.XID] = true
 			if activateErr := m.activateStartupTask(task); activateErr != nil {
 				// Task may already exist if sync is called multiple times.
@@ -587,7 +599,7 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 				}
 				continue
 			}
-			if restored := m.persistedActive[task.XID]; restored != nil && restored.ActivationGeneration > 0 && equivalentTaskDefinition(restored, task) {
+			if restored := m.persistedActive[task.XID]; restored != nil && !IsRADIUSTask(task) && restored.ActivationGeneration > 0 && equivalentTaskDefinition(restored, task) {
 				// Start holds m.mu for the complete startup reconciliation.
 				m.replayConfirmed[task.XID] = restored.ActivationGeneration
 			}
@@ -636,7 +648,7 @@ func (m *Manager) activateStartupTask(task *InterceptTask) error {
 	if restored := m.persistedActive[task.XID]; restored != nil {
 		generation := restored.ActivationGeneration
 		m.registry.seedGeneration(task.XID, generation)
-		if generation > 0 && equivalentTaskDefinition(restored, task) {
+		if !IsRADIUSTask(task) && generation > 0 && equivalentTaskDefinition(restored, task) {
 			m.registry.mu.Lock()
 			if _, exists := m.registry.tasks[task.XID]; !exists && m.registry.generations[task.XID] == generation {
 				m.registry.generations[task.XID]--
@@ -783,7 +795,11 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 			return true
 		}
 		activeTasks++
-		for i := range task.Targets {
+		targets := len(task.Targets)
+		if IsRADIUSTask(task) {
+			targets = 1
+		}
+		for i := 0; i < targets; i++ {
 			expected[fmt.Sprintf(liFilterIDPrefix+"%s-%d", task.XID.String(), i)] = true
 		}
 		xid := task.XID
@@ -965,13 +981,28 @@ func (m *Manager) reconcileWithADMF() {
 		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
 			task, convErr := TaskResponseDetailsToInterceptTask(td)
 			if convErr != nil {
+				if td != nil && td.TaskDetails != nil && td.TaskDetails.XId != nil {
+					if xid, parseErr := uuid.Parse(string(*td.TaskDetails.XId)); parseErr == nil {
+						if revokeErr := m.rejectRADIUSReplacement(xid, convErr); revokeErr != nil {
+							logger.Error("Revoke invalid RADIUS replacement", "xid", xid, "error", revokeErr)
+						}
+					}
+				}
 				logger.Warn("Reconciliation: failed to convert ADMF task, skipping",
 					"error", convErr,
 				)
 				snapshot.convErrors++
 				continue
 			}
+			m.bindRADIUSDeployment(task)
 			snapshot.tasks[task.XID] = true
+
+			if handled, err := m.reconcileRADIUSTask(task); handled {
+				if err != nil {
+					logger.Error("RADIUS task reconciliation rejected", "xid", task.XID, "error", err)
+				}
+				continue
+			}
 
 			// If task is in ADMF but not in local registry, activate it.
 			if _, getErr := m.registry.GetTaskDetails(task.XID); getErr != nil {
@@ -1069,6 +1100,10 @@ func (m *Manager) ProcessPacket(pkt *types.PacketDisplay, matchedFilterIDs []str
 // single authoritatively resolved call, and the resolver's Call-ID must agree
 // with the Call-ID carried by the packet.
 func (m *Manager) ProcessPacketWithProvenance(pkt *types.PacketDisplay, provenance PacketFilterProvenance) {
+	if provenance.RADIUS != nil || (pkt != nil && (pkt.RADIUSData != nil || pkt.Protocol == "RADIUS")) {
+		m.processRADIUSPacket(pkt, provenance)
+		return
+	}
 	matchedFilterIDs := m.validatedFilterIDs(pkt, provenance)
 	if pkt == nil || len(matchedFilterIDs) == 0 {
 		return
@@ -1105,7 +1140,7 @@ func (m *Manager) ProcessPacketWithProvenance(pkt *types.PacketDisplay, provenan
 			continue
 		}
 
-		if !task.IsActive() {
+		if !task.IsActive() || IsRADIUSTask(task) {
 			continue
 		}
 
@@ -1115,7 +1150,14 @@ func (m *Manager) ProcessPacketWithProvenance(pkt *types.PacketDisplay, provenan
 
 func (m *Manager) validatedFilterIDs(pkt *types.PacketDisplay, provenance PacketFilterProvenance) []string {
 	if pkt == nil || pkt.VoIPData == nil || !pkt.VoIPData.IsRTP {
-		return stableFilterUnion(provenance.DirectFilterIDs, provenance.InheritedFilterIDs)
+		ids := stableFilterUnion(provenance.DirectFilterIDs, provenance.InheritedFilterIDs)
+		valid := ids[:0]
+		for _, id := range ids {
+			if match, ok := m.filters.LookupFilter(id); !ok || !sharedfilter.IsRADIUSFilter(match.Filter.Type) {
+				valid = append(valid, id)
+			}
+		}
+		return valid
 	}
 
 	valid := make([]string, 0, len(provenance.DirectFilterIDs)+len(provenance.InheritedFilterIDs))
@@ -1131,7 +1173,7 @@ func (m *Manager) validatedFilterIDs(pkt *types.PacketDisplay, provenance Packet
 		provenance.InheritedFromCallID == provenance.AuthoritativeCallID
 	for _, filterID := range provenance.InheritedFilterIDs {
 		match, exists := m.filters.LookupFilter(filterID)
-		if authoritative && exists && match.Filter.Type != management.FilterType_FILTER_IP_ADDRESS {
+		if authoritative && exists && match.Filter.Type != management.FilterType_FILTER_IP_ADDRESS && !sharedfilter.IsRADIUSFilter(match.Filter.Type) {
 			valid = append(valid, match.FilterID)
 		} else if exists {
 			m.stats.inheritedProvenanceRejected.Add(1)
@@ -1285,6 +1327,10 @@ func (m *Manager) completeExpiration(task *InterceptTask) error {
 func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	return m.modifyTask(xid, mod)
+}
+
+func (m *Manager) modifyTask(xid uuid.UUID, mod *TaskModification) error {
 	previous, err := m.registry.GetTaskDetails(xid)
 	if err != nil {
 		return err
@@ -1305,7 +1351,7 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 
 	// If targets changed, update filters
-	if mod.Targets != nil && previous.Status == TaskStatusActive {
+	if previous.Status == TaskStatusActive && (mod.Targets != nil || (IsRADIUSTask(current) && current.ActivationGeneration != previous.ActivationGeneration)) {
 		task, err := m.registry.GetTaskDetails(xid)
 		if err != nil {
 			return err
@@ -1738,6 +1784,8 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 		})
 	}
 
+	m.bindRADIUSDeployment(liTask)
+
 	// Convert delivery type
 	liTask.DeliveryType = convertDeliveryType(task.DeliveryType)
 
@@ -1796,6 +1844,11 @@ func (m *Manager) ModifyTaskX1(xid uuid.UUID, mod *x1.TaskModification) error {
 			}
 		}
 		liMod.Targets = &targets
+		candidate := &InterceptTask{Targets: targets}
+		if IsRADIUSTask(candidate) {
+			liMod.RADIUSScope = &m.config.RADIUSScope
+			liMod.RADIUSMACProfile = &m.config.RADIUSMACProfile
+		}
 	}
 
 	// Convert delivery type if provided
@@ -1878,10 +1931,14 @@ func convertTargetType(t x1.TargetType) TargetType {
 		return TargetTypeIPv6CIDR
 	case x1.TargetTypeNAI:
 		return TargetTypeNAI
+	case x1.TargetTypeMACAddress:
+		return TargetTypeMACAddress
+	case x1.TargetTypeRADIUSAttribute:
+		return TargetTypeRADIUSAttribute
 	case x1.TargetTypeE164:
 		return TargetTypeTELURI // E.164 is essentially TEL URI without prefix
 	default:
-		return TargetTypeSIPURI // Default to SIPURI
+		return 0 // Unknown targets must fail registry validation.
 	}
 }
 
@@ -1902,6 +1959,10 @@ func convertTargetTypeToX1(t TargetType) x1.TargetType {
 		return x1.TargetTypeIPv6CIDR
 	case TargetTypeNAI:
 		return x1.TargetTypeNAI
+	case TargetTypeMACAddress:
+		return x1.TargetTypeMACAddress
+	case TargetTypeRADIUSAttribute:
+		return x1.TargetTypeRADIUSAttribute
 	default:
 		return x1.TargetTypeSIPURI
 	}

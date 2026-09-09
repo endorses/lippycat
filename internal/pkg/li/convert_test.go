@@ -25,7 +25,6 @@ func TestTaskResponseDetailsToInterceptTask_FullyPopulated(t *testing.T) {
 	ipv6 := schema.IPv6Address("2001:db8::1")
 	ipv4CIDR := "10.0.0.0/8"
 	ipv6CIDR := schema.IPv6CIDR("2001:db8::/32")
-	nai := schema.NAI("user@realm.example.com")
 
 	details := &schema.TaskResponseDetails{
 		TaskDetails: &schema.TaskDetails{
@@ -39,7 +38,6 @@ func TestTaskResponseDetailsToInterceptTask_FullyPopulated(t *testing.T) {
 					{Ipv6Address: &ipv6},
 					{Ipv4Cidr: &schema.IPCIDR{IPv4CIDR: &ipv4CIDR}},
 					{Ipv6Cidr: &ipv6CIDR},
-					{Nai: &nai},
 				},
 			},
 			DeliveryType: "X2andX3",
@@ -61,7 +59,7 @@ func TestTaskResponseDetailsToInterceptTask_FullyPopulated(t *testing.T) {
 	assert.Equal(t, uuid.MustParse("a1b2c3d4-e5f6-7890-abcd-ef1234567890"), task.XID)
 
 	// Verify targets.
-	require.Len(t, task.Targets, 8)
+	require.Len(t, task.Targets, 7)
 	assert.Equal(t, TargetTypeSIPURI, task.Targets[0].Type)
 	assert.Equal(t, "sip:alice@example.com", task.Targets[0].Value)
 
@@ -83,9 +81,6 @@ func TestTaskResponseDetailsToInterceptTask_FullyPopulated(t *testing.T) {
 
 	assert.Equal(t, TargetTypeIPv6CIDR, task.Targets[6].Type)
 	assert.Equal(t, "2001:db8::/32", task.Targets[6].Value)
-
-	assert.Equal(t, TargetTypeNAI, task.Targets[7].Type)
-	assert.Equal(t, "user@realm.example.com", task.Targets[7].Value)
 
 	// Verify delivery type.
 	assert.Equal(t, DeliveryX2andX3, task.DeliveryType)
@@ -253,6 +248,8 @@ func TestTaskResponseDetailsToInterceptTask_TargetIdentifierTypes(t *testing.T) 
 	ipv4CIDR := "10.0.0.0/8"
 	ipv6CIDR := schema.IPv6CIDR("2001:db8::/32")
 	nai := schema.NAI("user@realm.example.com")
+	mac := schema.MACAddress("02:ab:00:00:00:01")
+	avp := " 0104ff00 "
 
 	tests := []struct {
 		name         string
@@ -268,6 +265,8 @@ func TestTaskResponseDetailsToInterceptTask_TargetIdentifierTypes(t *testing.T) 
 		{"IPv4 CIDR", &schema.TargetIdentifier{Ipv4Cidr: &schema.IPCIDR{IPv4CIDR: &ipv4CIDR}}, TargetTypeIPv4CIDR, "10.0.0.0/8"},
 		{"IPv6 CIDR", &schema.TargetIdentifier{Ipv6Cidr: &ipv6CIDR}, TargetTypeIPv6CIDR, "2001:db8::/32"},
 		{"NAI", &schema.TargetIdentifier{Nai: &nai}, TargetTypeNAI, "user@realm.example.com"},
+		{"MAC", &schema.TargetIdentifier{MacAddress: &mac}, TargetTypeMACAddress, "02AB00000001"},
+		{"AVP", &schema.TargetIdentifier{RadiusAttribute: &avp}, TargetTypeRADIUSAttribute, "0104FF00"},
 	}
 
 	for _, tt := range tests {

@@ -5,6 +5,7 @@ This document describes the architecture and implementation patterns for the law
 ## Purpose
 
 The `internal/pkg/li` package implements ETSI X1/X2/X3 interfaces for lawful interception:
+
 - **X1**: Administration interface (XML/HTTPS) for task and destination management
 - **X2**: IRI (Intercept Related Information) delivery - signaling metadata
 - **X3**: CC (Content of Communication) delivery - media content
@@ -73,15 +74,18 @@ The LI package uses build tags to enable conditional compilation:
 ```
 
 **Files without build tags** (always included):
+
 - `types.go` - Shared type definitions
 
 **Files with `//go:build li`:**
+
 - `manager.go` - Full LI Manager implementation
 - `registry.go` - Task/destination storage
 - `filters.go` - Filter mapping
 - All x1/, x2x3/, delivery/ files
 
 **Files with `//go:build !li`:**
+
 - `manager_stub.go` - No-op Manager that does nothing
 
 This ensures non-LI builds have zero LI code through dead code elimination.
@@ -105,12 +109,14 @@ type Manager struct {
 ```
 
 **Responsibilities:**
+
 - Aggregates all LI components
 - Provides unified API for processor integration
 - Handles task activation/deactivation/modification
 - Routes matched packets to delivery
 
 **Key Methods:**
+
 - `NewManager(config, callback)` - Creates manager with deactivation callback
 - `Start()` - Starts X1 server and client, registry background tasks
 - `Stop()` - Graceful shutdown with ADMF notification
@@ -133,7 +139,7 @@ response while tasks are active locally. Periodic reconciliation also requires
 first response, since its state came off disk unverified. Every automatic
 deactivation is logged at WARN with the XID.
 
-Orphaned *filters* are swept only at startup, via the optional `FilterLister`
+Orphaned _filters_ are swept only at startup, via the optional `FilterLister`
 capability on `FilterPusher`: filters outlive the registry across restarts, so an LI
 filter can exist with no task pointing at it. Non-LI filter IDs are never touched.
 
@@ -153,12 +159,14 @@ type Registry struct {
 ```
 
 **Key Features:**
+
 - Atomic task modification (all-or-nothing updates)
 - Automatic expiration checking for implicit deactivation
 - Deactivation callback for ADMF notification
 - Deep copies on read to prevent external modification
 
 **Task Lifecycle States:**
+
 - `Pending` - Task received but StartTime not reached
 - `Active` - Actively intercepting
 - `Suspended` - Temporarily paused
@@ -182,15 +190,16 @@ type FilterManager struct {
 
 **Target Type Mapping:**
 
-| ETSI Target | lippycat Filter | Notes |
-|-------------|-----------------|-------|
-| SIPURI | FILTER_SIP_URI | user@domain matching |
-| TELURI | FILTER_PHONE_NUMBER | Phone number matching |
-| NAI | FILTER_SIP_URI | Same as SIP URI |
-| IPv4Address | FILTER_IP_ADDRESS | Hash map lookup |
-| IPv4CIDR | FILTER_IP_ADDRESS | Radix tree lookup |
-| IPv6Address | FILTER_IP_ADDRESS | Hash map lookup |
-| IPv6CIDR | FILTER_IP_ADDRESS | Radix tree lookup |
+| ETSI Target                  | lippycat Filter        | Notes                                                             |
+| ---------------------------- | ---------------------- | ----------------------------------------------------------------- |
+| SIPURI                       | FILTER_SIP_URI         | user@domain matching                                              |
+| TELURI                       | FILTER_PHONE_NUMBER    | Phone number matching                                             |
+| NAI                          | FILTER_RADIUS_COMPOUND | Exact RADIUS User-Name; scoped X2-only task                       |
+| MACAddress / RADIUSAttribute | FILTER_RADIUS_COMPOUND | Explicit MAC profile / supported AVP subset; conjunctive criteria |
+| IPv4Address                  | FILTER_IP_ADDRESS      | Hash map lookup                                                   |
+| IPv4CIDR                     | FILTER_IP_ADDRESS      | Radix tree lookup                                                 |
+| IPv6Address                  | FILTER_IP_ADDRESS      | Hash map lookup                                                   |
+| IPv6CIDR                     | FILTER_IP_ADDRESS      | Radix tree lookup                                                 |
 
 **Filter ID Format:** `li-{xid_prefix}-{index}`
 
@@ -215,18 +224,19 @@ type Server struct {
 
 **Supported Operations:**
 
-| Request Type | Handler | Description |
-|--------------|---------|-------------|
-| CreateDestinationRequest | handleCreateDestination | Register MDF |
-| ModifyDestinationRequest | handleModifyDestination | Update MDF |
-| RemoveDestinationRequest | handleRemoveDestination | Delete MDF |
-| ActivateTaskRequest | handleActivateTask | Start intercept |
-| DeactivateTaskRequest | handleDeactivateTask | Stop intercept |
-| ModifyTaskRequest | handleModifyTask | Update intercept |
-| GetTaskDetailsRequest | handleGetTaskDetails | Query status |
-| PingRequest | handlePing | Health check |
+| Request Type             | Handler                 | Description      |
+| ------------------------ | ----------------------- | ---------------- |
+| CreateDestinationRequest | handleCreateDestination | Register MDF     |
+| ModifyDestinationRequest | handleModifyDestination | Update MDF       |
+| RemoveDestinationRequest | handleRemoveDestination | Delete MDF       |
+| ActivateTaskRequest      | handleActivateTask      | Start intercept  |
+| DeactivateTaskRequest    | handleDeactivateTask    | Stop intercept   |
+| ModifyTaskRequest        | handleModifyTask        | Update intercept |
+| GetTaskDetailsRequest    | handleGetTaskDetails    | Query status     |
+| PingRequest              | handlePing              | Health check     |
 
 **XML Parsing:**
+
 1. Detect root element to determine request type
 2. Unmarshal into schema type
 3. Validate required fields
@@ -248,6 +258,7 @@ type Client struct {
 ```
 
 **Notifications:**
+
 - `ReportStartup()` - NE started
 - `ReportShutdown()` - NE stopping
 - `ReportTaskError()` - Task execution error
@@ -307,6 +318,7 @@ type TLVAttribute struct {
 ```
 
 **Wire Format (Big-Endian):**
+
 ```
 Offset  Size  Field
 ------  ----  -----
@@ -340,14 +352,14 @@ func (e *X2Encoder) EncodeSessionEnd(xid uuid.UUID, sip *SIPInfo) ([]byte, error
 
 **IRI Event Types:**
 
-| Event | SIP Trigger | IRIType Value |
-|-------|-------------|---------------|
-| SessionBegin | INVITE | 1 |
-| SessionAnswer | 200 OK to INVITE | 2 |
-| SessionEnd | BYE | 3 |
-| SessionAttempt | CANCEL/4xx/5xx | 4 |
-| Registration | REGISTER | 5 |
-| RegistrationEnd | REGISTER (Exp: 0) | 6 |
+| Event           | SIP Trigger       | IRIType Value |
+| --------------- | ----------------- | ------------- |
+| SessionBegin    | INVITE            | 1             |
+| SessionAnswer   | 200 OK to INVITE  | 2             |
+| SessionEnd      | BYE               | 3             |
+| SessionAttempt  | CANCEL/4xx/5xx    | 4             |
+| Registration    | REGISTER          | 5             |
+| RegistrationEnd | REGISTER (Exp: 0) | 6             |
 
 ### X3 Encoder
 
@@ -365,6 +377,7 @@ func (e *X3Encoder) Encode(xid uuid.UUID, rtp *RTPInfo, payload []byte) ([]byte,
 ```
 
 **CC Attributes:**
+
 - RTP SSRC (4 bytes)
 - RTP Sequence Number (2 bytes)
 - RTP Timestamp (4 bytes)
@@ -379,22 +392,22 @@ the task has exactly one target (with several targets the matched identity is
 ambiguous, so the MDF falls back to the XID). LI product must never carry a guessed
 direction, so anything unresolvable stays `PayloadDirectionUnknown`.
 
-| Target type | Packet | Resolution |
-|-------------|--------|------------|
-| `IPv4/IPv6Address`, `IPv4/IPv6CIDR` | any | `direction.go` — match packet src/dst against the target |
-| `SIPURI`, `TELURI`, `NAI`, `Username` | SIP | `direction.go` — match target against the SIP `From` / `To` |
-| `SIPURI`, `TELURI`, `NAI`, `Username` | RTP | `mediadirection.go` — derived from the call's signalling, per SSRC |
-| `IMSI`, `IMEI` | any | none (Unknown) |
+| Target type                         | Packet | Resolution                                                         |
+| ----------------------------------- | ------ | ------------------------------------------------------------------ |
+| `IPv4/IPv6Address`, `IPv4/IPv6CIDR` | any    | `direction.go` — match packet src/dst against the target           |
+| `SIPURI`, `TELURI`, `Username`      | SIP    | `direction.go` — match target against the SIP `From` / `To`        |
+| `SIPURI`, `TELURI`, `Username`      | RTP    | `mediadirection.go` — derived from the call's signalling, per SSRC |
+| `IMSI`, `IMEI`                      | any    | none (Unknown)                                                     |
 
 **Media direction (`mediadirection.go`).** RTP carries no SIP identity, so for an
 identity target the direction comes from the SDP of the call: `ObserveSIP()` records
 which party of the dialog is the target (`From` / `To` match) and which media
 endpoints each party advertised; `PayloadDirection()` then resolves RTP.
 
-Resolution is **per SSRC**, not per packet, and only on the leg where *both*
+Resolution is **per SSRC**, not per packet, and only on the leg where _both_
 endpoints are known from SDP. This matters where the target sits behind a media
 gateway: the SDP the network sees carries the gateway's address, so on the
-gateway→handset leg the target's own SDP address is the packet *source* even though
+gateway→handset leg the target's own SDP address is the packet _source_ even though
 the audio is arriving at the target. Per-packet matching inverts that leg; requiring
 both endpoints excludes it from resolution, and — because relays preserve SSRC — the
 verdict from the network-side leg supplies its direction.
@@ -455,6 +468,7 @@ type destinationState struct {
 ```
 
 **Connection Management:**
+
 - Pool of TLS connections per destination
 - Automatic reconnection with exponential backoff
 - Connection health checking
@@ -474,6 +488,7 @@ type Client struct {
 ```
 
 **Key Features:**
+
 - Bounded queue per destination (default: 10K)
 - FIFO delivery with one dispatcher per destination
 - Items remain queued across transient disconnects
@@ -488,6 +503,7 @@ type Client struct {
 - At-least-once retry semantics after ambiguous writes
 
 **Methods:**
+
 - `SendX2(xid, destIDs, data)` - Queue X2 PDU (async)
 - `SendX3(xid, destIDs, data)` - Queue X3 PDU (async)
 - `SendX2Sync(ctx, xid, destIDs, data)` - Synchronous X2 delivery
@@ -553,13 +569,13 @@ When LI tasks are activated/modified/deactivated, the FilterManager calls these 
 
 All components are thread-safe:
 
-| Component | Synchronization |
-|-----------|-----------------|
-| Manager | sync.RWMutex for config/stats access |
-| Registry | sync.RWMutex for task/dest maps |
-| FilterManager | sync.RWMutex for filter maps |
-| Delivery Client | Channels + atomic counters |
-| Destination Manager | sync.RWMutex for destination states |
+| Component           | Synchronization                      |
+| ------------------- | ------------------------------------ |
+| Manager             | sync.RWMutex for config/stats access |
+| Registry            | sync.RWMutex for task/dest maps      |
+| FilterManager       | sync.RWMutex for filter maps         |
+| Delivery Client     | Channels + atomic counters           |
+| Destination Manager | sync.RWMutex for destination states  |
 
 ## Error Handling
 
@@ -576,6 +592,7 @@ Errors cause task to enter Failed state.
 ### Delivery Errors
 
 Delivery errors:
+
 1. Logged with destination and error details
 2. Connection invalidated (reconnect on next use)
 3. Reported to ADMF if configured
@@ -589,12 +606,12 @@ Recovery is automatic on reconnection.
 
 From `*_bench_test.go` files:
 
-| Operation | Throughput | Latency |
-|-----------|------------|---------|
-| X2 Encode | ~500K/s | ~2µs |
-| X3 Encode | ~1M/s | ~1µs |
-| Filter Lookup | ~10M/s | ~100ns |
-| Delivery Queue | ~1M/s | ~1µs |
+| Operation      | Throughput | Latency |
+| -------------- | ---------- | ------- |
+| X2 Encode      | ~500K/s    | ~2µs    |
+| X3 Encode      | ~1M/s      | ~1µs    |
+| Filter Lookup  | ~10M/s     | ~100ns  |
+| Delivery Queue | ~1M/s      | ~1µs    |
 
 ### Memory
 
@@ -642,11 +659,13 @@ End-to-end tests with mock ADMF/MDF:
 ### Adding a New Target Type
 
 1. Add to `types.go`:
+
    ```go
    const TargetTypeNewType TargetType = ...
    ```
 
 2. Update `filters.go` mapping:
+
    ```go
    case TargetTypeNewType:
        return management.FilterType_FILTER_..., pattern, nil
@@ -659,6 +678,7 @@ End-to-end tests with mock ADMF/MDF:
 ### Adding a New X1 Operation
 
 1. Add handler in `x1/server.go`:
+
    ```go
    func (s *Server) handleNewOperation(req *schema.NewRequest) *schema.X1ResponseMessage
    ```
@@ -672,6 +692,7 @@ End-to-end tests with mock ADMF/MDF:
 ### Adding a New TLV Attribute
 
 1. Add constant in `x2x3/pdu.go`:
+
    ```go
    const AttrNewAttribute AttributeType = 0x...
    ```

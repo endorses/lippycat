@@ -1409,7 +1409,7 @@ func TestServer_HandleActivateTask_NAITarget(t *testing.T) {
         <nai>user@realm.example.com</nai>
       </targetIdentifier>
     </targetIdentifiers>
-    <deliveryType>X3Only</deliveryType>
+    <deliveryType>X2Only</deliveryType>
     <listOfDIDs>
       <dId>` + did.String() + `</dId>
     </listOfDIDs>
@@ -1428,7 +1428,7 @@ func TestServer_HandleActivateTask_NAITarget(t *testing.T) {
 	require.Len(t, task.Targets, 1)
 	assert.Equal(t, TargetTypeNAI, task.Targets[0].Type)
 	assert.Equal(t, "user@realm.example.com", task.Targets[0].Value)
-	assert.Equal(t, DeliveryX3Only, task.DeliveryType)
+	assert.Equal(t, DeliveryX2Only, task.DeliveryType)
 }
 
 // TestServer_HandleActivateTask_ImplicitDeactivationAllowed tests implicit deactivation flag.

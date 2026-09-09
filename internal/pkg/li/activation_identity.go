@@ -3,12 +3,16 @@ package li
 import (
 	"slices"
 	"sort"
+
+	"github.com/endorses/lippycat/internal/pkg/radius"
 )
 
 // canonicalTaskDefinition contains only enforcement-affecting activation
 // fields. Runtime lifecycle fields must never participate in retry identity.
 type canonicalTaskDefinition struct {
 	XID                         [16]byte
+	RADIUSScope                 radius.ScopeBinding
+	RADIUSMACProfile            string
 	Targets                     []TargetIdentity
 	DestinationIDs              [][16]byte
 	DeliveryType                DeliveryType
@@ -35,6 +39,8 @@ func canonicalizeTargets(targets []TargetIdentity) []TargetIdentity {
 func canonicalizeTaskDefinition(task *InterceptTask) canonicalTaskDefinition {
 	c := canonicalTaskDefinition{
 		XID:                         task.XID,
+		RADIUSScope:                 task.RADIUSScope,
+		RADIUSMACProfile:            task.RADIUSMACProfile,
 		DeliveryType:                task.DeliveryType,
 		ImplicitDeactivationAllowed: task.ImplicitDeactivationAllowed,
 	}
@@ -65,14 +71,14 @@ func equivalentReactivationIdentity(a, b *InterceptTask) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.XID == b.XID &&
+	return a.XID == b.XID && a.RADIUSScope == b.RADIUSScope && a.RADIUSMACProfile == b.RADIUSMACProfile &&
 		a.DeliveryType == b.DeliveryType &&
 		slices.Equal(canonicalizeTargets(a.Targets), canonicalizeTargets(b.Targets))
 }
 
 func equivalentTaskDefinition(a, b *InterceptTask) bool {
 	ca, cb := canonicalizeTaskDefinition(a), canonicalizeTaskDefinition(b)
-	return ca.XID == cb.XID &&
+	return ca.XID == cb.XID && ca.RADIUSScope == cb.RADIUSScope && ca.RADIUSMACProfile == cb.RADIUSMACProfile &&
 		ca.DeliveryType == cb.DeliveryType &&
 		ca.StartTimeSet == cb.StartTimeSet && ca.StartTimeUnixNano == cb.StartTimeUnixNano &&
 		ca.EndTimeSet == cb.EndTimeSet && ca.EndTimeUnixNano == cb.EndTimeUnixNano &&
@@ -81,8 +87,13 @@ func equivalentTaskDefinition(a, b *InterceptTask) bool {
 }
 
 // equivalentDeliveryDefinition identifies changes that revoke buffered product.
-// Timing-only extensions do not invalidate already admitted delivery.
+// Timing-only extensions retain admitted delivery for non-RADIUS tasks.
 func equivalentDeliveryDefinition(a, b *InterceptTask) bool {
+	// A RADIUS observation belongs to the complete authorization definition,
+	// including its validity window. Timing changes revoke buffered evidence.
+	if IsRADIUSTask(a) || IsRADIUSTask(b) {
+		return equivalentTaskDefinition(a, b)
+	}
 	ca, cb := canonicalizeTaskDefinition(a), canonicalizeTaskDefinition(b)
-	return ca.XID == cb.XID && ca.DeliveryType == cb.DeliveryType && slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs)
+	return ca.XID == cb.XID && ca.RADIUSScope == cb.RADIUSScope && ca.RADIUSMACProfile == cb.RADIUSMACProfile && ca.DeliveryType == cb.DeliveryType && slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs)
 }

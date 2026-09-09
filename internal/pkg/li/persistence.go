@@ -182,6 +182,21 @@ func (m *Manager) restorePersistedState() error {
 		if task.ActivationGeneration > state.Generations[task.XID] {
 			state.Generations[task.XID] = task.ActivationGeneration
 		}
+		if IsRADIUSTask(task) {
+			if err := m.withdrawPersistedRADIUS(task, state.Cleanup[task.XID]); err != nil {
+				return err
+			}
+			delete(state.Cleanup, task.XID) // Already withdrawn, including retained cleanup IDs.
+			// Pending legacy NAI tasks must not auto-promote into either SIP
+			// interception or a newly inferred RADIUS scope. ADMF must confirm
+			// them, and all RADIUS capture evidence starts a fresh generation.
+			if task.Status == TaskStatusPending || task.Status == TaskStatusActive || task.Status == TaskStatusSuspended {
+				copyTask := *task
+				m.persistedActive[task.XID] = &copyTask
+				m.persistenceCandidates[task.XID] = &copyTask
+				continue
+			}
+		}
 		if !task.EndTime.IsZero() && !now.Before(task.EndTime) {
 			continue
 		}
@@ -229,5 +244,5 @@ func (m *Manager) ReplayTaskAuthorized(xid uuid.UUID, generation uint64) bool {
 		return false
 	}
 	task, err := m.GetTaskDetails(xid)
-	return err == nil && task.IsActive() && task.ActivationGeneration == generation && equivalentTaskDefinition(m.persistedActive[xid], task)
+	return err == nil && !IsRADIUSTask(task) && task.IsActive() && task.ActivationGeneration == generation && equivalentTaskDefinition(m.persistedActive[xid], task)
 }

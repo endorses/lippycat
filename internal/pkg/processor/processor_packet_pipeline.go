@@ -163,7 +163,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	if p.isLIEnabled() {
 		for index, pkt := range packets {
 			// Skip packets without matched filter IDs (not targeted by LI)
-			if len(pkt.MatchedFilterIds) == 0 {
+			if len(pkt.MatchedFilterIds) == 0 && pkt.Radius == nil {
 				continue
 			}
 			logger.Info("LI processing packet with filter IDs",
@@ -235,7 +235,11 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				// filters for RTP and therefore still fails closed for identities.
 				directFilterIDs = pkt.MatchedFilterIds
 			}
-			p.processLIPacketWithAdmission(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index])
+			if pkt.Radius != nil {
+				p.processLIRADIUSPacket(&display, pkt, batch)
+			} else {
+				p.processLIPacketWithAdmission(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index])
+			}
 			if p.afterLIPacket != nil {
 				p.afterLIPacket()
 			}

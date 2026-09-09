@@ -76,6 +76,23 @@ func validateTaskCapabilities(details *schema.TaskDetails, modification bool) *c
 			return err
 		}
 	}
+	radiusTargets := 0
+	for _, target := range details.TargetIdentifiers.TargetIdentifier {
+		if target.Nai != nil || target.MacAddress != nil || target.RadiusAttribute != nil {
+			radiusTargets++
+		}
+	}
+	if radiusTargets > 0 {
+		if err := validateRADIUSMediation(details.ListOfMediationDetails); err != nil {
+			return err
+		}
+		if radiusTargets != len(details.TargetIdentifiers.TargetIdentifier) {
+			return unsupportedCapability("RADIUS targets cannot be combined with other target families")
+		}
+		if details.DeliveryType != "X2Only" && !(modification && details.DeliveryType == "") {
+			return unsupportedCapability("RADIUS targets support X2Only delivery")
+		}
+	}
 	return nil
 }
 
@@ -108,7 +125,12 @@ func validateTargetChoice(target *schema.TargetIdentifier) *capabilityError {
 	}
 
 	switch {
-	case target.SipUri != nil, target.TelUri != nil, target.E164Number != nil, target.Nai != nil:
+	case target.Nai != nil, target.MacAddress != nil, target.RadiusAttribute != nil:
+		if _, err := parseRADIUSTarget(target); err != nil {
+			return invalidCapability("%v", err)
+		}
+		return nil
+	case target.SipUri != nil, target.TelUri != nil, target.E164Number != nil:
 		var value string
 		switch {
 		case target.SipUri != nil:
@@ -117,8 +139,6 @@ func validateTargetChoice(target *schema.TargetIdentifier) *capabilityError {
 			value = string(*target.TelUri)
 		case target.E164Number != nil:
 			value = string(*target.E164Number)
-		default:
-			value = string(*target.Nai)
 		}
 		if strings.TrimSpace(value) == "" {
 			return invalidCapability("target identifier value is empty")
@@ -205,6 +225,20 @@ func validateDestinationCapabilities(details *schema.DestinationDetails, modific
 	}
 	if *ipap.Port.TCPPort < 1 || *ipap.Port.TCPPort > 65535 {
 		return invalidCapability("destination TCP port is out of range")
+	}
+	return nil
+}
+
+// validateRADIUSMediation prevents a task-level X2 profile from hiding a
+// contradictory mediation-level content request.
+func validateRADIUSMediation(list *schema.ListOfMediationDetails) *capabilityError {
+	if list == nil {
+		return nil
+	}
+	for i, mediation := range list.MediationDetails {
+		if mediation != nil && mediation.DeliveryType != "" && mediation.DeliveryType != "HI2Only" {
+			return unsupportedCapability("RADIUS mediation entry %d supports HI2Only delivery", i)
+		}
 	}
 	return nil
 }

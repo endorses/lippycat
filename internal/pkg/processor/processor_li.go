@@ -199,13 +199,15 @@ func (p *Processor) initLIManager() {
 
 	// Create LI manager config
 	config := li.ManagerConfig{
-		Enabled:       true,
-		X1ListenAddr:  p.config.LIX1ListenAddr,
-		X1TLSCertFile: p.config.LIX1TLSCertFile,
-		X1TLSKeyFile:  p.config.LIX1TLSKeyFile,
-		X1TLSCAFile:   p.config.LIX1TLSCAFile,
-		ADMFEndpoint:  p.config.LIADMFEndpoint,
-		NEIdentifier:  p.config.ProcessorID,
+		RADIUSScope:      p.config.LIRADIUSScope,
+		RADIUSMACProfile: p.config.LIRADIUSMACProfile,
+		Enabled:          true,
+		X1ListenAddr:     p.config.LIX1ListenAddr,
+		X1TLSCertFile:    p.config.LIX1TLSCertFile,
+		X1TLSKeyFile:     p.config.LIX1TLSKeyFile,
+		X1TLSCAFile:      p.config.LIX1TLSCAFile,
+		ADMFEndpoint:     p.config.LIADMFEndpoint,
+		NEIdentifier:     p.config.ProcessorID,
 		X1Client: li.X1ClientConfig{
 			TLSCertFile:       p.config.LIADMFTLSCertFile,
 			TLSKeyFile:        p.config.LIADMFTLSKeyFile,
@@ -362,6 +364,11 @@ func (p *Processor) initLIManager() {
 
 	// Set packet processor callback for X2/X3 encoding and delivery
 	p.liManager.SetPacketProcessor(func(task *li.InterceptTask, pkt *types.PacketDisplay) {
+		// The raw RADIUS X2 encoder belongs to the next implementation phase.
+		// Never route an admitted RADIUS task into a SIP or RTP encoder.
+		if li.IsRADIUSTask(task) {
+			return
+		}
 		metadata := li.DeliveryMetadata{AdmittedAt: time.Now(), CapturedAt: pkt.Timestamp, TaskGeneration: task.ActivationGeneration}
 		if shared, ok := p.liPacketAdmissions.Load(pkt); ok {
 			metadata.AdmittedAt = shared.(*CallAdmission).admittedAt

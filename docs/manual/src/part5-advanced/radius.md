@@ -18,16 +18,12 @@ are synthetic.
 
 Mirror the visible BRAS/BNG-to-AAA UDP link into a dedicated POI interface:
 
-```text
-BRAS/BNG <------ UDP RADIUS ------> AAA server
-                    |
-                 mirror
-                    |
-             dedicated tap POI ---- X2/TLS ----> MDF
-                    ^
-                  X1/mTLS
-                    |
-                   ADMF
+```mermaid
+flowchart TB
+    BNG["BRAS/BNG"] <--> RADIUS["UDP RADIUS link"] <--> AAA["AAA server"]
+    RADIUS -->|"mirror"| POI["Dedicated tap POI"]
+    POI -->|"X2/TLS"| MDF["MDF"]
+    ADMF["ADMF"] -->|"X1/mTLS"| POI
 ```
 
 Observe both request and response directions on the same isolated capture feed.

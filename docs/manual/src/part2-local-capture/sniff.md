@@ -40,6 +40,8 @@ Press `Ctrl+C` to stop. lippycat prints a summary of packets captured.
 sudo lc sniff -i eth0 --format text
 ```
 
+See [Working with JSON Output](#working-with-json-output) for piping, filtering, and saving packet output.
+
 Use `-q` (quiet mode) to suppress packet output for better performance when you only need PCAP file output.
 
 ### Basic Filtering
@@ -91,6 +93,53 @@ Logging is off by default. Output is Zeek-style TSV by default, or JSONL with
 `--log-format json`. Queues are bounded, so heed drop warnings and use graceful
 shutdown to flush files. See [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
 for all schemas, flags, rotation, completeness semantics, and privacy guidance.
+
+## Working with JSON Output
+
+All protocol analyzers share the same JSON output structure based on `PacketDisplay`. Every packet has common fields (timestamp, source/destination IP and port, protocol, length) plus an optional protocol-specific metadata object (`VoIPData`, `DNSData`, `TLSData`, `HTTPData`, or `EmailData`).
+
+### stdout/stderr Separation
+
+lippycat follows Unix conventions: packet data goes to stdout, log messages go to stderr. This means you can pipe packet data cleanly while still seeing logs:
+
+```bash
+# Pipe packets to jq, logs still visible on terminal
+sudo lc sniff dns -i eth0 | jq '.DNSData.QueryName'
+
+# Redirect logs to a file, pipe packets to processing
+sudo lc sniff dns -i eth0 2>dns-capture.log | jq '.DNSData.QueryName'
+
+# Discard logs entirely
+sudo lc sniff dns -i eth0 2>/dev/null | jq '.DNSData.QueryName'
+```
+
+### Cross-Protocol Analysis
+
+Because all protocols share the same base fields, you can capture without a protocol subcommand and filter by protocol-specific metadata in `jq`:
+
+```bash
+# General capture, then filter for DNS and TLS
+sudo lc sniff -i eth0 2>/dev/null | \
+  jq -r 'if .DNSData then
+    "DNS: " + .DNSData.QueryName
+  elif .TLSData then
+    "TLS: " + (.TLSData.SNI // "no-sni")
+  else empty end'
+```
+
+### Saving and Replaying
+
+Combine JSON output with PCAP writing for both structured analysis and full packet fidelity:
+
+```bash
+# Write PCAP and JSON simultaneously
+sudo lc sniff dns -i eth0 -w dns-traffic.pcap 2>/dev/null > dns-analysis.jsonl
+
+# Replay the PCAP later with a different protocol analyzer
+lc sniff tls -r dns-traffic.pcap
+```
+
+The PCAP file contains the raw packets and can be re-analyzed with any protocol subcommand or opened in Wireshark.
 
 ## Protocol Modes
 

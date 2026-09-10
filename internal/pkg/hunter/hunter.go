@@ -25,6 +25,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -51,14 +52,19 @@ func stableFilterIDUnion(direct, inherited []string) []string {
 
 // Config contains hunter configuration
 type Config struct {
-	ProcessorAddr  string
-	HunterID       string
-	Interfaces     []string
-	BPFFilter      string
-	BufferSize     int
-	BatchSize      int
-	BatchTimeout   time.Duration
-	BatchQueueSize int // Number of batches to buffer for async sending (0 = default: 1000)
+	RADIUSPorts       []uint16
+	RADIUSScope       radius.CaptureScope
+	RADIUSOnly        bool
+	RADIUSCorrelation radius.CorrelatorConfig
+	RADIUSMatcher     radius.ObservationMatcher
+	ProcessorAddr     string
+	HunterID          string
+	Interfaces        []string
+	BPFFilter         string
+	BufferSize        int
+	BatchSize         int
+	BatchTimeout      time.Duration
+	BatchQueueSize    int // Number of batches to buffer for async sending (0 = default: 1000)
 	// Flow control settings
 	MaxBufferedBatches int           // Max batches to buffer before blocking (0 = unlimited)
 	SendTimeout        time.Duration // Timeout for sending batches (0 = no timeout)
@@ -131,6 +137,14 @@ type Hunter struct {
 
 // New creates a new hunter instance
 func New(config Config) (*Hunter, error) {
+	if _, err := radius.NewCorrelator(config.RADIUSCorrelation); err != nil {
+		return nil, err
+	}
+	for _, port := range config.RADIUSPorts {
+		if port == 0 {
+			return nil, fmt.Errorf("RADIUS service port must be nonzero")
+		}
+	}
 	if config.ProcessorAddr == "" {
 		return nil, fmt.Errorf("processor address is required")
 	}
@@ -153,10 +167,12 @@ func New(config Config) (*Hunter, error) {
 
 	// Create capture manager (will be recreated with proper context in Start())
 	captureManager := huntercapture.New(huntercapture.Config{
-		Interfaces:    config.Interfaces,
-		BaseFilter:    config.BPFFilter,
-		BufferSize:    config.BufferSize,
-		ProcessorAddr: config.ProcessorAddr,
+		ReassembleIPFragments: config.VoIPMode,
+		RADIUSPorts:           config.RADIUSPorts,
+		Interfaces:            config.Interfaces,
+		BaseFilter:            config.BPFFilter,
+		BufferSize:            config.BufferSize,
+		ProcessorAddr:         config.ProcessorAddr,
 	}, ctx)
 
 	// Determine batch queue size (default or configured)
@@ -333,6 +349,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 			BatchTimeout:          h.config.BatchTimeout,
 			VoIPMode:              h.config.VoIPMode,
 			SupportedFilterTypes:  h.config.SupportedFilterTypes,
+			RADIUSIngress:         !h.config.VoIPMode && h.applicationFilter != nil && h.packetProcessor == nil,
 			TLSEnabled:            h.config.TLSEnabled,
 			TLSCertFile:           h.config.TLSCertFile,
 			TLSKeyFile:            h.config.TLSKeyFile,
@@ -456,7 +473,7 @@ func (h *Hunter) newEventPipeline(spool *eventspool.Spool, producer *events.Prod
 	if h.config.EventDeliveryProfile == "memory_only" {
 		profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
 	}
-	forwarder, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: producer.SessionID(), EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_FILE_METADATA}, Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
+	forwarder, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: producer.SessionID(), EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_FILE_METADATA, eventsv1.EventKind_EVENT_KIND_RADIUS}, Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
 		switch kind {
 		case eventsv1.LossKind_LOSS_KIND_TRANSPORT:
 			h.statsCollector.IncrementTransportLoss(count)
@@ -630,6 +647,11 @@ func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.Da
 
 	fwdMgr := forwarding.New(
 		forwarding.Config{
+			RADIUSPorts:        h.config.RADIUSPorts,
+			RADIUSScope:        h.config.RADIUSScope,
+			RADIUSOnly:         h.config.RADIUSOnly,
+			RADIUSCorrelation:  h.config.RADIUSCorrelation,
+			RADIUSMatcher:      h.config.RADIUSMatcher,
 			HunterID:           h.config.HunterID,
 			BatchSize:          h.config.BatchSize,
 			BatchTimeout:       h.config.BatchTimeout,

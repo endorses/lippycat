@@ -75,7 +75,7 @@ func TestRegisterHunterAcceptsMixedPacketAndEventModes(t *testing.T) {
 		EventForwarding: &management.EventForwardingCapabilities{
 			RequestedMode:            management.ForwardingMode_FORWARDING_MODE_EVENTS,
 			EventApiMajors:           []uint32{1},
-			EventKinds:               []int32{1, 2, 3, 4, 5, 6},
+			EventKinds:               []int32{1, 2, 3, 4, 5, 6, 7},
 			SemanticProfileRevision:  1,
 			StatefulAnalysisFeatures: []string{"tcp_reassembly", "connection_tracking", "file_metadata"},
 		},

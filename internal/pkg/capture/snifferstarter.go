@@ -70,7 +70,7 @@ func StartOfflineSnifferOrdered(readFiles []string, filter string, startSniffer 
 // RunWithSignalHandler runs the capture in background and handles signals for graceful shutdown
 // This is the common pattern used by hunt, sniff, and sniff voip commands
 func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
-	processor func(<-chan PacketInfo)) {
+	processor func(<-chan PacketInfo), options ...CaptureOptions) {
 
 	// Create cancellable context for capture
 	ctx, cancel := context.WithCancel(context.Background())
@@ -87,7 +87,7 @@ func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
 	go func() {
 		InitWithContext(ctx, devices, filter, func(ch <-chan PacketInfo, _ *TCPAssembler) {
 			processor(ch)
-		}, nil, nil)
+		}, nil, nil, options...)
 		close(captureDone)
 	}()
 
@@ -214,11 +214,11 @@ func RunOfflineOrderedStream(ctx context.Context, devices []pcaptypes.PcapInterf
 	var producerErr error
 	for len(pending) > 0 {
 		entry := heap.Pop(&pending).(offlineHeapEntry)
+		observePacket(&entry.packet)
 		select {
 		case <-ctx.Done():
 			producerErr = ctx.Err()
 		case packetStream <- entry.packet:
-			observePacket(entry.packet)
 		}
 		if producerErr != nil {
 			break

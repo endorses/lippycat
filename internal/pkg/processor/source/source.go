@@ -52,6 +52,9 @@ type DNSProcessor interface {
 
 // PacketBatch contains a normalized batch of packets from a source.
 type PacketBatch struct {
+	// RADIUSSourceTrusted is set only at local or authenticated direct ingress.
+	// It is never accepted from, or forwarded onto, the wire.
+	RADIUSSourceTrusted bool
 	// SourceID identifies where this batch came from.
 	// For hunters, this is the hunter ID.
 	// For local capture, this is "local" or the interface name.

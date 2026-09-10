@@ -21,18 +21,20 @@ type persistedState struct {
 	Tasks        []*InterceptTask        `json:"tasks"`
 	Destinations []*persistedDestination `json:"destinations"`
 	Cleanup      map[uuid.UUID][]string  `json:"cleanup_needed,omitempty"`
+	Generations  map[uuid.UUID]uint64    `json:"generations,omitempty"`
 }
 
 // persistedDestination deliberately excludes TLSConfig and all key material.
 type persistedDestination struct {
-	DID          uuid.UUID `json:"did"`
-	Address      string    `json:"address"`
-	Port         int       `json:"port"`
-	X2Enabled    bool      `json:"x2_enabled"`
-	X3Enabled    bool      `json:"x3_enabled"`
-	ProtocolType string    `json:"protocol_type,omitempty"`
-	Description  string    `json:"description,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	DID              uuid.UUID `json:"did"`
+	Address          string    `json:"address"`
+	Port             int       `json:"port"`
+	X2Enabled        bool      `json:"x2_enabled"`
+	X3Enabled        bool      `json:"x3_enabled"`
+	ProtocolType     string    `json:"protocol_type,omitempty"`
+	Description      string    `json:"description,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	DeliveryRevision uint64    `json:"delivery_revision,omitempty"`
 }
 
 func loadPersistedState(path string) (*persistedState, error) {
@@ -53,7 +55,7 @@ func loadPersistedState(path string) (*persistedState, error) {
 	return &state, nil
 }
 
-func writePersistedState(path string, state *persistedState) error {
+func writePersistedState(path string, state *persistedState) (result error) {
 	state.Version, state.WrittenAt = persistenceSchemaVersion, time.Now().UTC()
 	b, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
@@ -63,6 +65,17 @@ func writePersistedState(path string, state *persistedState) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create LI state directory %q: %w", dir, err)
 	}
+	// Open before replacing state: write/search permissions alone permit the
+	// rename, but cannot provide the directory handle needed to make it durable.
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open LI state directory for sync: %w", err)
+	}
+	defer func() {
+		if err := d.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("close LI state directory: %w", err))
+		}
+	}()
 	tmp, err := os.CreateTemp(dir, ".li-state-*")
 	if err != nil {
 		return fmt.Errorf("create temporary LI state: %w", err)
@@ -87,29 +100,47 @@ func writePersistedState(path string, state *persistedState) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("replace LI state %q: %w", path, err)
 	}
-	if d, err := os.Open(dir); err == nil {
-		defer d.Close()
-		if err := d.Sync(); err != nil {
-			return fmt.Errorf("sync LI state directory: %w", err)
-		}
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("sync LI state directory: %w", err)
 	}
 	return nil
 }
 
 func (m *Manager) persistState() error {
+	m.persistenceMu.Lock()
+	defer m.persistenceMu.Unlock()
 	if m.config.StateFile == "" {
 		return nil
 	}
-	state := &persistedState{Cleanup: make(map[uuid.UUID][]string)}
+	state := &persistedState{Cleanup: make(map[uuid.UUID][]string), Generations: make(map[uuid.UUID]uint64)}
+	m.registry.mu.RLock()
+	for xid, generation := range m.registry.generations {
+		state.Generations[xid] = generation
+	}
+	m.registry.mu.RUnlock()
+	// Unconfirmed startup candidates are deliberately absent from the registry,
+	// but a crash before ADMF sync must not erase their generation watermark.
+	for xid, task := range m.persistedActive {
+		if task.ActivationGeneration > state.Generations[xid] {
+			state.Generations[xid] = task.ActivationGeneration
+		}
+	}
+	registered := make(map[uuid.UUID]bool)
 	m.registry.ListTasks(func(task *InterceptTask) bool {
 		state.Tasks = append(state.Tasks, task)
+		registered[task.XID] = true
 		return true
 	})
+	for xid, task := range m.persistenceCandidates {
+		if !registered[xid] && state.Generations[xid] == task.ActivationGeneration {
+			state.Tasks = append(state.Tasks, task)
+		}
+	}
 	for _, dest := range m.ListDestinations() {
 		state.Destinations = append(state.Destinations, &persistedDestination{
 			DID: dest.DID, Address: dest.Address, Port: dest.Port,
 			X2Enabled: dest.X2Enabled, X3Enabled: dest.X3Enabled,
-			ProtocolType: dest.ProtocolType, Description: dest.Description, CreatedAt: dest.CreatedAt,
+			ProtocolType: dest.ProtocolType, Description: dest.Description, CreatedAt: dest.CreatedAt, DeliveryRevision: dest.DeliveryRevision,
 		})
 	}
 	m.filters.mu.RLock()
@@ -134,14 +165,37 @@ func (m *Manager) restorePersistedState() error {
 		}
 		if err := m.registry.restoreDestination(&Destination{DID: pd.DID, Address: pd.Address, Port: pd.Port,
 			X2Enabled: pd.X2Enabled, X3Enabled: pd.X3Enabled, ProtocolType: pd.ProtocolType,
-			Description: pd.Description, CreatedAt: pd.CreatedAt}); err != nil {
+			Description: pd.Description, CreatedAt: pd.CreatedAt, DeliveryRevision: pd.DeliveryRevision}); err != nil {
 			return err
 		}
 	}
 	now := time.Now()
+	if state.Generations == nil {
+		state.Generations = make(map[uuid.UUID]uint64)
+	}
 	for _, task := range state.Tasks {
 		if task == nil {
 			return fmt.Errorf("nil task in persisted LI state")
+		}
+		// Older state files stored generations only on task definitions. Preserve
+		// that watermark even when an expired task cannot be restored.
+		if task.ActivationGeneration > state.Generations[task.XID] {
+			state.Generations[task.XID] = task.ActivationGeneration
+		}
+		if IsRADIUSTask(task) {
+			if err := m.withdrawPersistedRADIUS(task, state.Cleanup[task.XID]); err != nil {
+				return err
+			}
+			delete(state.Cleanup, task.XID) // Already withdrawn, including retained cleanup IDs.
+			// Pending legacy NAI tasks must not auto-promote into either SIP
+			// interception or a newly inferred RADIUS scope. ADMF must confirm
+			// them, and all RADIUS capture evidence starts a fresh generation.
+			if task.Status == TaskStatusPending || task.Status == TaskStatusActive || task.Status == TaskStatusSuspended {
+				copyTask := *task
+				m.persistedActive[task.XID] = &copyTask
+				m.persistenceCandidates[task.XID] = &copyTask
+				continue
+			}
 		}
 		if !task.EndTime.IsZero() && !now.Before(task.EndTime) {
 			continue
@@ -159,7 +213,11 @@ func (m *Manager) restorePersistedState() error {
 			// Active state is only a candidate until a complete ADMF snapshot confirms it.
 			copyTask := *task
 			m.persistedActive[task.XID] = &copyTask
+			m.persistenceCandidates[task.XID] = &copyTask
 		}
+	}
+	for xid, generation := range state.Generations {
+		m.registry.seedGeneration(xid, generation)
 	}
 	// Retry withdrawal before any task can be armed. These IDs are safe to
 	// remove because active tasks are not restored until ADMF confirmation.
@@ -173,4 +231,18 @@ func (m *Manager) restorePersistedState() error {
 		}
 	}
 	return nil
+}
+
+// ReplayTaskAuthorized requires an unchanged persisted activation confirmed by
+// the startup ADMF snapshot. UUID/generation equality without that evidence is
+// insufficient. Call after Start; lifecycle state is revalidated on every call.
+func (m *Manager) ReplayTaskAuthorized(xid uuid.UUID, generation uint64) bool {
+	m.mu.RLock()
+	confirmed := m.replayConfirmed[xid]
+	m.mu.RUnlock()
+	if generation == 0 || confirmed != generation {
+		return false
+	}
+	task, err := m.GetTaskDetails(xid)
+	return err == nil && !IsRADIUSTask(task) && task.IsActive() && task.ActivationGeneration == generation && equivalentTaskDefinition(m.persistedActive[xid], task)
 }

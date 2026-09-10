@@ -139,3 +139,41 @@ func TestTaskAdmissionReleaseIsIdempotent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestTaskAdmissionSerializesFaultCancellation(t *testing.T) {
+	m, xid, _, _, _ := phase4BoundaryManager(t)
+	task, err := m.GetTaskDetails(xid)
+	require.NoError(t, err)
+	admission, ok := m.AcquireTaskAdmission(xid, task.ActivationGeneration)
+	require.True(t, ok)
+	defer admission.Release()
+
+	cancelled := make(chan *InterceptTask, 1)
+	m.registry.onDeactivation = func(task *InterceptTask, reason DeactivationReason) {
+		if reason == DeactivationReasonFault {
+			cancelled <- task
+		}
+	}
+	failed := make(chan error, 1)
+	go func() { failed <- m.MarkTaskFailed(xid, "enforcement fault") }()
+
+	select {
+	case <-cancelled:
+		t.Fatal("fault cancellation crossed an admitted enqueue step")
+	case <-time.After(20 * time.Millisecond):
+	}
+	// The producer completes its enqueue before cancellation may sweep the
+	// generation. Otherwise that enqueue could escape the terminal sweep.
+	admission.Release()
+	require.NoError(t, <-failed)
+	require.Equal(t, task.ActivationGeneration, (<-cancelled).ActivationGeneration)
+	require.Empty(t, m.filters.GetFiltersForXID(xid))
+	current, err := m.GetTaskDetails(xid)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusFailed, current.Status)
+	late, ok := m.AcquireTaskAdmission(xid, task.ActivationGeneration)
+	if late != nil {
+		late.Release()
+	}
+	require.False(t, ok, "faulted generation must reject subsequent admissions")
+}

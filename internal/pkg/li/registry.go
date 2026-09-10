@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/google/uuid"
 )
 
@@ -68,7 +69,9 @@ type DeactivationCallback func(task *InterceptTask, reason DeactivationReason)
 // nil values indicate no change; non-nil values indicate the new value.
 type TaskModification struct {
 	// Targets replaces the target list if non-nil.
-	Targets *[]TargetIdentity
+	Targets          *[]TargetIdentity
+	RADIUSScope      *radius.ScopeBinding
+	RADIUSMACProfile *string
 	// DestinationIDs replaces the destination list if non-nil.
 	DestinationIDs *[]uuid.UUID
 	// DeliveryType changes the delivery type if non-nil.
@@ -177,16 +180,19 @@ func (r *Registry) checkExpiredTasks() {
 		}
 		// Manager callbacks normally complete this after enforcement withdrawal;
 		// a plain registry callback has no enforcement layer, so finalize here.
-		_ = r.finishExpiration(task.XID)
+		_ = r.finishExpiration(task.XID, task.ActivationGeneration)
 	}
 }
 
-func (r *Registry) finishExpiration(xid uuid.UUID) error {
+func (r *Registry) finishExpiration(xid uuid.UUID, generation uint64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	task, ok := r.tasks[xid]
 	if !ok {
 		return fmt.Errorf("%w: XID %s", ErrTaskNotFound, xid)
+	}
+	if task.ActivationGeneration != generation {
+		return nil // A newer activation owns this XID now.
 	}
 	if task.Status == TaskStatusDeactivated {
 		return nil
@@ -256,6 +262,9 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 
 	// Only after every fallible validation has succeeded may reactivation add
 	// rollback and audit state. Both snapshots own their slices independently.
+	if r.generations[task.XID] == ^uint64(0) {
+		return fmt.Errorf("%w: task generation exhausted", ErrInvalidTask)
+	}
 	if exists {
 		rollback := cloneInterceptTask(existing)
 		audit := cloneInterceptTask(existing)
@@ -304,7 +313,14 @@ func (r *Registry) restorePendingTask(task *InterceptTask) error {
 // enforcement. Retained deactivated and failed tasks must survive restart so
 // reactivation identity and fail-closed lifecycle rules remain enforceable.
 func (r *Registry) restoreNonEnforcingTask(task *InterceptTask) error {
-	if err := r.validateTask(task); err != nil {
+	// Old NAI definitions are retained solely as inactive lifecycle identities.
+	// Requiring the new scope/profile here would prevent startup after migration;
+	// activation still passes full current validation and reactivation identity.
+	if isRetainedLegacyNAI(task) {
+		if err := validateRetainedLegacyNAI(task); err != nil {
+			return err
+		}
+	} else if err := r.validateTask(task); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -315,17 +331,51 @@ func (r *Registry) restoreNonEnforcingTask(task *InterceptTask) error {
 	if _, exists := r.tasks[task.XID]; exists {
 		return fmt.Errorf("%w: XID %s", ErrTaskAlreadyExists, task.XID)
 	}
-	for _, did := range task.DestinationIDs {
-		if _, ok := r.destinations[did]; !ok {
-			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
-		}
-	}
+	// Destinations may legitimately have been removed after this task was
+	// retained. Restore its identity without enforcement; pending promotion
+	// validates destinations again before installing any filters.
 	copyTask := *task
 	copyTask.Targets = append([]TargetIdentity(nil), task.Targets...)
 	copyTask.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
 	r.tasks[task.XID] = &copyTask
 	if r.generations[task.XID] < task.ActivationGeneration {
 		r.generations[task.XID] = task.ActivationGeneration
+	}
+	return nil
+}
+
+// isRetainedLegacyNAI deliberately excludes pending tasks and new RADIUS target
+// types. The exception must never make malformed modern AVPs restorable.
+func isRetainedLegacyNAI(task *InterceptTask) bool {
+	if task == nil || (task.Status != TaskStatusDeactivated && task.Status != TaskStatusFailed) || task.RADIUSScope != (radius.ScopeBinding{}) || task.RADIUSMACProfile != "" {
+		return false
+	}
+	hasNAI := false
+	for _, target := range task.Targets {
+		if target.Type < TargetTypeSIPURI || target.Type > TargetTypeIMEI {
+			return false
+		}
+		hasNAI = hasNAI || target.Type == TargetTypeNAI
+	}
+	return hasNAI
+}
+
+func validateRetainedLegacyNAI(task *InterceptTask) error {
+	if task.XID == uuid.Nil || len(task.Targets) == 0 || len(task.DestinationIDs) == 0 {
+		return fmt.Errorf("%w: retained legacy NAI requires XID, targets and destinations", ErrInvalidTask)
+	}
+	for _, target := range task.Targets {
+		if target.Value == "" {
+			return fmt.Errorf("%w: retained legacy NAI has empty target", ErrInvalidTask)
+		}
+	}
+	for _, did := range task.DestinationIDs {
+		if did == uuid.Nil {
+			return fmt.Errorf("%w: retained legacy NAI has nil destination ID", ErrInvalidTask)
+		}
+	}
+	if task.DeliveryType != DeliveryX2Only && task.DeliveryType != DeliveryX3Only && task.DeliveryType != DeliveryX2andX3 {
+		return fmt.Errorf("%w: retained legacy NAI has invalid delivery type", ErrInvalidTask)
 	}
 	return nil
 }
@@ -455,6 +505,12 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	if mod.ImplicitDeactivationAllowed != nil {
 		candidate.ImplicitDeactivationAllowed = *mod.ImplicitDeactivationAllowed
 	}
+	if mod.RADIUSScope != nil {
+		candidate.RADIUSScope = *mod.RADIUSScope
+	}
+	if mod.RADIUSMACProfile != nil {
+		candidate.RADIUSMACProfile = *mod.RADIUSMACProfile
+	}
 	if err := r.validateTask(&candidate); err != nil {
 		return err
 	}
@@ -470,7 +526,13 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return err
 	}
 
+	deliveryChanged := !equivalentDeliveryDefinition(task, &candidate)
+	if deliveryChanged && r.generations[xid] == ^uint64(0) {
+		return fmt.Errorf("%w: task generation exhausted", ErrInvalidTask)
+	}
 	// Apply modifications atomically
+	task.RADIUSScope = candidate.RADIUSScope
+	task.RADIUSMACProfile = candidate.RADIUSMACProfile
 	if mod.Targets != nil {
 		task.Targets = candidate.Targets
 	}
@@ -490,6 +552,10 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	if mod.ImplicitDeactivationAllowed != nil {
 		task.ImplicitDeactivationAllowed = *mod.ImplicitDeactivationAllowed
 	}
+	if deliveryChanged {
+		r.generations[xid]++
+		task.ActivationGeneration = r.generations[xid]
+	}
 
 	return nil
 }
@@ -500,6 +566,9 @@ func validateDestinationDelivery(task *InterceptTask, destinations []*Destinatio
 	for _, destination := range destinations {
 		if destination == nil {
 			return fmt.Errorf("%w: destination is nil", ErrUnsupportedDeliveryCombination)
+		}
+		if IsRADIUSTask(task) && (!destination.X2Enabled || (destination.ProtocolType != "X2Only" && destination.ProtocolType != "X2andX3")) {
+			return fmt.Errorf("%w: RADIUS destination %s requires explicit X2 capability", ErrUnsupportedDeliveryCombination, destination.DID)
 		}
 		// Destinations created by older internal APIs did not carry capability
 		// metadata. Their capabilities are unknown, so retain the historical
@@ -709,9 +778,18 @@ func (r *Registry) validateTask(task *InterceptTask) error {
 		switch target.Type {
 		case TargetTypeIPv4Address, TargetTypeIPv4CIDR, TargetTypeIPv6Address, TargetTypeIPv6CIDR:
 			return fmt.Errorf("%w: %s targets require raw-IP interception, whose correlated IRI/CC session model is not implemented", ErrUnsupportedDeliveryCombination, target.Type)
-		case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeNAI, TargetTypeUsername, TargetTypeIMSI, TargetTypeIMEI:
+		case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeNAI, TargetTypeUsername, TargetTypeIMSI, TargetTypeIMEI, TargetTypeMACAddress, TargetTypeRADIUSAttribute:
 		default:
 			return fmt.Errorf("%w: target type %d has no encoder", ErrUnsupportedDeliveryCombination, target.Type)
+		}
+	}
+	if IsRADIUSTask(task) {
+		candidate := *task
+		if candidate.ActivationGeneration == 0 {
+			candidate.ActivationGeneration = 1
+		}
+		if _, err := NewFilterManager(nil).radiusFilterForTask(&candidate); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidTask, err)
 		}
 	}
 	if !task.EndTime.IsZero() {
@@ -820,7 +898,15 @@ func (r *Registry) ModifyDestination(did uuid.UUID, dest *Destination) error {
 	// Update the destination (preserving CreatedAt)
 	existing := r.destinations[did]
 	dest.CreatedAt = existing.CreatedAt
-	r.destinations[did] = dest
+	dest.DeliveryRevision = existing.DeliveryRevision
+	if existing.Address != dest.Address || existing.Port != dest.Port || existing.ProtocolType != dest.ProtocolType || existing.X2Enabled != dest.X2Enabled || existing.X3Enabled != dest.X3Enabled {
+		if dest.DeliveryRevision == ^uint64(0) {
+			return fmt.Errorf("%w: destination delivery revision exhausted", ErrInvalidTask)
+		}
+		dest.DeliveryRevision++
+	}
+	destCopy := *dest
+	r.destinations[did] = &destCopy
 
 	return nil
 }

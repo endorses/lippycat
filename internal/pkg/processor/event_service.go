@@ -366,7 +366,7 @@ func controlMessage(sequence uint64, control *eventsv1.EventSubscriptionControl)
 
 func requestedEventKinds(input []eventsv1.EventKind, includeFileMetadata bool) ([]events.Kind, error) {
 	if len(input) == 0 {
-		kinds := []events.Kind{events.KindConn, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP}
+		kinds := []events.Kind{events.KindConn, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindRADIUS}
 		if includeFileMetadata {
 			kinds = append(kinds, events.KindFileMetadata)
 		}
@@ -386,6 +386,8 @@ func requestedEventKinds(input []eventsv1.EventKind, includeFileMetadata bool) (
 			mapped = events.KindHTTP
 		case eventsv1.EventKind_EVENT_KIND_SMTP:
 			mapped = events.KindSMTP
+		case eventsv1.EventKind_EVENT_KIND_RADIUS:
+			mapped = events.KindRADIUS
 		case eventsv1.EventKind_EVENT_KIND_FILE_METADATA:
 			if !includeFileMetadata {
 				return nil, fmt.Errorf("file metadata kind requires include_file_metadata")
@@ -400,7 +402,7 @@ func requestedEventKinds(input []eventsv1.EventKind, includeFileMetadata bool) (
 }
 
 func supportedEventKinds(includeFileMetadata bool) []eventsv1.EventKind {
-	kinds := []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP}
+	kinds := []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_RADIUS}
 	if includeFileMetadata {
 		kinds = append(kinds, eventsv1.EventKind_EVENT_KIND_FILE_METADATA)
 	}
@@ -456,6 +458,13 @@ func safeEventProjector(includeSensitiveFields, includeFileMetadata bool) broadc
 			copy.MailFrom, copy.Recipients, copy.From, copy.To, copy.CC = "", nil, "", nil, nil
 			copy.ReplyTo, copy.MessageID, copy.InReplyTo, copy.Subject = "", "", "", ""
 			copy.OriginatingIP, copy.Received, copy.Path = netip.Addr{}, nil, nil
+			return copy, true, nil
+		case events.RADIUSEvent:
+			value.Attributes = nil
+			return value, true, nil
+		case *events.RADIUSEvent:
+			copy := *value
+			copy.Attributes = nil
 			return copy, true, nil
 		case events.FileMetadataEvent:
 			value.Filename, value.ExtractedPath = "", ""

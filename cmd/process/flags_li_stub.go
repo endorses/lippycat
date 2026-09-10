@@ -5,6 +5,7 @@ package process
 import (
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +29,18 @@ type LIConfig struct {
 	DeliveryTLSCAFile                     string
 	DeliveryTLSPinnedCert                 []string
 	DeliveryQueueSize                     int
+	DeliveryX2QueueSize                   int
+	DeliveryX3QueueSize                   int
+	DeliveryX2QueueBytes                  int64
+	DeliveryX3QueueBytes                  int64
+	DeliveryX3MaxAge                      time.Duration
+	DeliveryMemoryBudgetBytes             int64
+	DeliveryX2SpoolDir                    string
+	DeliveryX2SpoolMaxBytes               int64
+	DeliveryX2SpoolKeyFile                string
+	DeliveryX2SpoolReplayPolicy           string
+	DeliveryX2SpoolReplayManifest         string
+	DeliveryX2SpoolExportManifest         string
 	DeliverySendTimeout                   time.Duration
 	DeliveryInitialBackoff                time.Duration
 	DeliveryMaxBackoff                    time.Duration
@@ -60,3 +73,5 @@ func BindLIViperFlags(cmd *cobra.Command) {}
 func GetLIConfig() *LIConfig {
 	return nil
 }
+
+func applyRADIUSLIConfig(_ *cobra.Command, _ *processor.Config) error { return nil }

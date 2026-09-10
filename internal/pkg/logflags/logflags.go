@@ -36,7 +36,7 @@ func Register(flags *pflag.FlagSet, values *Values, includeEmitStage bool) {
 	flags.StringVar(&values.EventDropPolicy, "event-drop-policy", "drop_new", "Normalized event overflow policy (drop_new)")
 	flags.StringVar(&values.Directory, "log-dir", "", "Write structured protocol logs to this directory")
 	flags.StringVar(&values.Format, "log-format", "tsv", "Structured log format: tsv or json")
-	flags.StringSliceVar(&values.Streams, "log-streams", []string{"conn", "dns", "ssl", "http", "smtp", "files"}, "Structured log streams")
+	flags.StringSliceVar(&values.Streams, "log-streams", []string{"conn", "dns", "ssl", "http", "smtp", "files", "radius"}, "Structured log streams")
 	flags.BoolVar(&values.IncludeHTTPHeaders, "log-include-http-headers", false, "Include full HTTP header maps in structured logs")
 	flags.BoolVar(&values.IncludeEmailBodyPreview, "log-include-email-body-preview", false, "Permit captured email body previews for file analysis (sensitive)")
 	flags.DurationVar(&values.RotateInterval, "log-rotate-interval", time.Hour, "Structured log rotation interval")
@@ -50,6 +50,11 @@ func Register(flags *pflag.FlagSet, values *Values, includeEmitStage bool) {
 	flags.Int64Var(&values.FileMaxSize, "extract-files-max-size", 10<<20, "Maximum bytes analyzed or extracted per file")
 	flags.Int64Var(&values.FileTotalSize, "extract-files-total-size", 100<<20, "Maximum extracted bytes for this process")
 
+	Bind(flags)
+}
+
+// Bind selects the active command after all topology commands have registered flags.
+func Bind(flags *pflag.FlagSet) {
 	_ = viper.BindPFlag("events.queue_size", flags.Lookup("event-queue-size"))
 	_ = viper.BindPFlag("events.drop_policy", flags.Lookup("event-drop-policy"))
 	_ = viper.BindPFlag("logs.dir", flags.Lookup("log-dir"))
@@ -59,7 +64,7 @@ func Register(flags *pflag.FlagSet, values *Values, includeEmitStage bool) {
 	_ = viper.BindPFlag("logs.include_email_body_preview", flags.Lookup("log-include-email-body-preview"))
 	_ = viper.BindPFlag("logs.rotate_interval", flags.Lookup("log-rotate-interval"))
 	_ = viper.BindPFlag("logs.queue_size", flags.Lookup("log-queue-size"))
-	if includeEmitStage {
+	if flags.Lookup("log-emit-stage") != nil {
 		_ = viper.BindPFlag("logs.emit_stage", flags.Lookup("log-emit-stage"))
 	}
 	_ = viper.BindPFlag("logs.post_rotate_command", flags.Lookup("log-post-rotate-command"))

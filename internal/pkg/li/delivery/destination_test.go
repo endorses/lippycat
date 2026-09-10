@@ -139,7 +139,12 @@ func TestSocketBackedKeepalivePeerBehaviors(t *testing.T) {
 		{name: "ignore", respond: func(*tls.Conn, uint32) {}, wantTO: 1},
 		{name: "delay", respond: func(c *tls.Conn, seq uint32) {
 			time.Sleep(700 * time.Millisecond)
-			writeTestPDU(t, c, x2x3.NewKeepaliveAckPDU(seq))
+			wire, err := x2x3.NewKeepaliveAckPDU(seq).MarshalBinary()
+			if !assert.NoError(t, err) {
+				return
+			}
+			_, err = c.Write(wire)
+			assert.Error(t, err, "late ACK must encounter canceled transport")
 		}, wantTO: 1},
 		{name: "duplicate", respond: func(c *tls.Conn, seq uint32) {
 			writeTestPDU(t, c, x2x3.NewKeepaliveAckPDU(seq))
@@ -172,10 +177,16 @@ func TestSocketBackedKeepalivePeerBehaviors(t *testing.T) {
 				stats, err := m.Stats(did)
 				return err == nil && stats.X2Keepalive.Acknowledged >= tc.wantACK && stats.X2Keepalive.Timeouts >= tc.wantTO && stats.X2Keepalive.Unexpected >= tc.wantUnexp && stats.X2Keepalive.Malformed >= tc.wantBad
 			}, 2*time.Second, 20*time.Millisecond)
-			// Close the peer first so the manager's TLS close_notify cannot block
-			// forever on net.Pipe after the peer responder has exited.
+			if tc.wantTO > 0 {
+				snapshot := m.AllStats()[did]
+				assert.Positive(t, snapshot.X2Keepalive.Timeouts)
+				assert.Contains(t, snapshot.X2Keepalive.ReconnectReason, "acknowledgement timeout")
+				assert.True(t, snapshot.X2Keepalive.LastValidACK.IsZero())
+			}
+			// Timeout invalidation aborts the underlying transport to bound shutdown.
+			// Cleanup must not require TLS close_notify on an already aborted pipe.
 			<-peerDone
-			require.NoError(t, peer.Close())
+			require.NoError(t, peer.NetConn().Close())
 			m.Stop()
 		})
 	}
@@ -518,6 +529,10 @@ func TestDestinationConnectionFailure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Greater(t, stats.ConnectAttempts, uint64(0))
 	assert.Greater(t, stats.ConnectFailures, uint64(0))
+	assert.NotEmpty(t, stats.LastError)
+	assert.Zero(t, stats.X2Connections)
+	assert.Zero(t, stats.X3Connections)
+	assert.NotEmpty(t, manager.AllStats()[did].LastError)
 }
 
 func TestExponentialBackoff(t *testing.T) {

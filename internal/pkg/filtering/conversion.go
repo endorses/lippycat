@@ -12,7 +12,7 @@ func YAMLToProto(yaml *FilterYAML) (*management.Filter, error) {
 	if yaml.ID == "" {
 		return nil, &ValidationError{Field: "id", Message: "filter ID is required"}
 	}
-	if yaml.Pattern == "" {
+	if yaml.Pattern == "" && yaml.Type != "radius_compound" && yaml.Type != "FILTER_RADIUS_COMPOUND" {
 		return nil, &ValidationError{Field: "pattern", Message: "filter pattern is required"}
 	}
 
@@ -21,19 +21,25 @@ func YAMLToProto(yaml *FilterYAML) (*management.Filter, error) {
 		return nil, err
 	}
 
-	return &management.Filter{
+	result := &management.Filter{
+		Radius: radiusYAMLToProto(yaml.Radius), Revision: yaml.Revision,
 		Id:            yaml.ID,
 		Type:          filterType,
 		Pattern:       yaml.Pattern,
 		TargetHunters: yaml.TargetHunters,
 		Enabled:       yaml.Enabled,
 		Description:   yaml.Description,
-	}, nil
+	}
+	if err := ValidateFilter(result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // ProtoToYAML converts a protobuf Filter to FilterYAML
 func ProtoToYAML(proto *management.Filter) *FilterYAML {
 	return &FilterYAML{
+		Radius: radiusProtoToYAML(proto.Radius), Revision: proto.Revision,
 		ID:            proto.Id,
 		Type:          FilterTypeToString(proto.Type),
 		Pattern:       proto.Pattern,
@@ -63,6 +69,14 @@ func ProtoSliceToJSON(filters []*management.Filter, pretty bool) ([]byte, error)
 // ParseFilterType converts a string to FilterType enum
 func ParseFilterType(typeStr string) (management.FilterType, error) {
 	switch typeStr {
+	case "radius_username", "FILTER_RADIUS_USERNAME":
+		return management.FilterType_FILTER_RADIUS_USERNAME, nil
+	case "radius_mac", "FILTER_RADIUS_MAC":
+		return management.FilterType_FILTER_RADIUS_MAC, nil
+	case "radius_attribute", "FILTER_RADIUS_ATTRIBUTE":
+		return management.FilterType_FILTER_RADIUS_ATTRIBUTE, nil
+	case "radius_compound", "FILTER_RADIUS_COMPOUND":
+		return management.FilterType_FILTER_RADIUS_COMPOUND, nil
 	// VoIP filters
 	case "FILTER_SIP_USER", "sip_user":
 		return management.FilterType_FILTER_SIP_USER, nil
@@ -112,6 +126,14 @@ func ParseFilterType(typeStr string) (management.FilterType, error) {
 // FilterTypeToString converts FilterType enum to string
 func FilterTypeToString(filterType management.FilterType) string {
 	switch filterType {
+	case management.FilterType_FILTER_RADIUS_USERNAME:
+		return "radius_username"
+	case management.FilterType_FILTER_RADIUS_MAC:
+		return "radius_mac"
+	case management.FilterType_FILTER_RADIUS_ATTRIBUTE:
+		return "radius_attribute"
+	case management.FilterType_FILTER_RADIUS_COMPOUND:
+		return "radius_compound"
 	// VoIP filters
 	case management.FilterType_FILTER_SIP_USER:
 		return "sip_user"

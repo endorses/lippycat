@@ -3,10 +3,12 @@ package protoadapter
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/netip"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -159,6 +161,17 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 			return DecodedEvent{}, errors.New("decode HTTP event: too many header values")
 		}
 		ev = e
+	case *eventsv1.ProtocolEvent_Radius:
+		p := payload.Radius
+		if p == nil || p.Code > 255 || p.Identifier > 255 || p.Length > 65535 {
+			return DecodedEvent{}, errors.New("decode RADIUS event: invalid payload or numeric range")
+		}
+		e := events.NewRADIUSEvent(env)
+		e.Code, e.Identifier, e.Length = uint8(p.Code), uint8(p.Identifier), uint16(p.Length)
+		e.ObservationID, e.RequestInstanceID, e.Association = p.ObservationId, p.RequestInstanceId, p.Association
+		e.OriginNodeID, e.SourceID, e.CaptureEpoch = p.OriginNodeId, p.SourceId, p.CaptureEpoch
+		e.Attributes = cloneStrings(p.Attributes)
+		ev = e
 	case *eventsv1.ProtocolEvent_Smtp:
 		if payload.Smtp == nil {
 			return DecodedEvent{}, errors.New("decode SMTP event: nil payload")
@@ -242,6 +255,8 @@ func ToProto(ev events.Event) (*eventsv1.ProtocolEvent, error) {
 	}
 	out := &eventsv1.ProtocolEvent{EventId: ev.Envelope().EventID, EventSequence: ev.Envelope().EventSequence, Envelope: env}
 	switch e := ev.(type) {
+	case events.RADIUSEvent:
+		out.Payload = &eventsv1.ProtocolEvent_Radius{Radius: &eventsv1.RADIUSEvent{Code: uint32(e.Code), Identifier: uint32(e.Identifier), Length: uint32(e.Length), ObservationId: e.ObservationID, RequestInstanceId: e.RequestInstanceID, Association: e.Association, OriginNodeId: e.OriginNodeID, SourceId: e.SourceID, CaptureEpoch: e.CaptureEpoch, Attributes: cloneStrings(e.Attributes)}}
 	case events.ConnEvent:
 		out.Payload = &eventsv1.ProtocolEvent_Conn{Conn: &eventsv1.ConnEvent{Service: e.Service, Duration: durationpb.New(e.Duration), OriginBytes: e.OriginBytes, ResponseBytes: e.ResponseBytes, State: e.State, LocalOrigin: e.LocalOrigin, LocalResponse: e.LocalResponse, MissedBytes: e.MissedBytes, History: e.History, OriginPackets: e.OriginPackets, OriginIpBytes: e.OriginIPBytes, ResponsePackets: e.ResponsePackets, ResponseIpBytes: e.ResponseIPBytes}}
 	case events.DNSEvent:
@@ -465,6 +480,23 @@ func validateEventCollections(ev events.Event) error {
 		if n > MaxHeaderValues {
 			return errors.New("HTTP header values exceed limit")
 		}
+	case events.RADIUSEvent:
+		values = []string{e.ObservationID, e.RequestInstanceID, e.Association, e.OriginNodeID, e.SourceID, e.CaptureEpoch}
+		collections = [][]string{e.Attributes}
+		for _, attribute := range e.Attributes {
+			kind, value, ok := strings.Cut(attribute, ":hex:")
+			if !ok {
+				return errors.New("RADIUS attribute must use public hex representation")
+			}
+			switch kind {
+			case "1", "4", "5", "6", "8", "30", "31", "32", "40", "44", "61", "87", "95", "26/3561/1":
+			default:
+				return errors.New("RADIUS attribute is outside public allowlist")
+			}
+			if _, err := hex.DecodeString(value); err != nil {
+				return fmt.Errorf("RADIUS attribute hex: %w", err)
+			}
+		}
 	case events.SMTPEvent:
 		values = []string{e.HELO, e.MailFrom, e.Date, e.From, e.ReplyTo, e.MessageID, e.InReplyTo, e.Subject, e.LastReply, e.UserAgent}
 		collections = [][]string{e.Recipients, e.To, e.CC, e.Received, e.Path, e.FileIDs}
@@ -520,6 +552,11 @@ func eventValue(ev events.Event) (events.Event, error) {
 	case *events.HTTPEvent:
 		if e == nil {
 			return nil, errors.New("event is a nil HTTP pointer")
+		}
+		return *e, nil
+	case *events.RADIUSEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil RADIUS pointer")
 		}
 		return *e, nil
 	case *events.SMTPEvent:

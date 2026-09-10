@@ -34,6 +34,7 @@ const (
 	EventKind_EVENT_KIND_HTTP          EventKind = 4
 	EventKind_EVENT_KIND_SMTP          EventKind = 5
 	EventKind_EVENT_KIND_FILE_METADATA EventKind = 6
+	EventKind_EVENT_KIND_RADIUS        EventKind = 7
 )
 
 // Enum value maps for EventKind.
@@ -46,6 +47,7 @@ var (
 		4: "EVENT_KIND_HTTP",
 		5: "EVENT_KIND_SMTP",
 		6: "EVENT_KIND_FILE_METADATA",
+		7: "EVENT_KIND_RADIUS",
 	}
 	EventKind_value = map[string]int32{
 		"EVENT_KIND_UNSPECIFIED":   0,
@@ -55,6 +57,7 @@ var (
 		"EVENT_KIND_HTTP":          4,
 		"EVENT_KIND_SMTP":          5,
 		"EVENT_KIND_FILE_METADATA": 6,
+		"EVENT_KIND_RADIUS":        7,
 	}
 )
 
@@ -1782,6 +1785,124 @@ func (x *FileMetadataEvent) GetHashComplete() bool {
 	return false
 }
 
+// One RADIUS message observation; no raw packet, authenticator or LI evidence.
+type RADIUSEvent struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Code              uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Identifier        uint32                 `protobuf:"varint,2,opt,name=identifier,proto3" json:"identifier,omitempty"`
+	Length            uint32                 `protobuf:"varint,3,opt,name=length,proto3" json:"length,omitempty"`
+	ObservationId     string                 `protobuf:"bytes,4,opt,name=observation_id,json=observationId,proto3" json:"observation_id,omitempty"`
+	RequestInstanceId string                 `protobuf:"bytes,5,opt,name=request_instance_id,json=requestInstanceId,proto3" json:"request_instance_id,omitempty"`
+	Association       string                 `protobuf:"bytes,6,opt,name=association,proto3" json:"association,omitempty"`
+	OriginNodeId      string                 `protobuf:"bytes,7,opt,name=origin_node_id,json=originNodeId,proto3" json:"origin_node_id,omitempty"`
+	SourceId          string                 `protobuf:"bytes,8,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	CaptureEpoch      string                 `protobuf:"bytes,9,opt,name=capture_epoch,json=captureEpoch,proto3" json:"capture_epoch,omitempty"`
+	// Routine-output allowlist encoded as type:hex:value; never credentials.
+	Attributes    []string `protobuf:"bytes,10,rep,name=attributes,proto3" json:"attributes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RADIUSEvent) Reset() {
+	*x = RADIUSEvent{}
+	mi := &file_events_v1_events_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RADIUSEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RADIUSEvent) ProtoMessage() {}
+
+func (x *RADIUSEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_events_v1_events_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RADIUSEvent.ProtoReflect.Descriptor instead.
+func (*RADIUSEvent) Descriptor() ([]byte, []int) {
+	return file_events_v1_events_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *RADIUSEvent) GetCode() uint32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *RADIUSEvent) GetIdentifier() uint32 {
+	if x != nil {
+		return x.Identifier
+	}
+	return 0
+}
+
+func (x *RADIUSEvent) GetLength() uint32 {
+	if x != nil {
+		return x.Length
+	}
+	return 0
+}
+
+func (x *RADIUSEvent) GetObservationId() string {
+	if x != nil {
+		return x.ObservationId
+	}
+	return ""
+}
+
+func (x *RADIUSEvent) GetRequestInstanceId() string {
+	if x != nil {
+		return x.RequestInstanceId
+	}
+	return ""
+}
+
+func (x *RADIUSEvent) GetAssociation() string {
+	if x != nil {
+		return x.Association
+	}
+	return ""
+}
+
+func (x *RADIUSEvent) GetOriginNodeId() string {
+	if x != nil {
+		return x.OriginNodeId
+	}
+	return ""
+}
+
+func (x *RADIUSEvent) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
+	}
+	return ""
+}
+
+func (x *RADIUSEvent) GetCaptureEpoch() string {
+	if x != nil {
+		return x.CaptureEpoch
+	}
+	return ""
+}
+
+func (x *RADIUSEvent) GetAttributes() []string {
+	if x != nil {
+		return x.Attributes
+	}
+	return nil
+}
+
 type ProtocolEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// event_id is an opaque, retry-stable representation of node ID, producer
@@ -1797,6 +1918,7 @@ type ProtocolEvent struct {
 	//	*ProtocolEvent_Http
 	//	*ProtocolEvent_Smtp
 	//	*ProtocolEvent_FileMetadata
+	//	*ProtocolEvent_Radius
 	Payload       isProtocolEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1804,7 +1926,7 @@ type ProtocolEvent struct {
 
 func (x *ProtocolEvent) Reset() {
 	*x = ProtocolEvent{}
-	mi := &file_events_v1_events_proto_msgTypes[10]
+	mi := &file_events_v1_events_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1816,7 +1938,7 @@ func (x *ProtocolEvent) String() string {
 func (*ProtocolEvent) ProtoMessage() {}
 
 func (x *ProtocolEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[10]
+	mi := &file_events_v1_events_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1829,7 +1951,7 @@ func (x *ProtocolEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolEvent.ProtoReflect.Descriptor instead.
 func (*ProtocolEvent) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{10}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ProtocolEvent) GetEventId() string {
@@ -1914,6 +2036,15 @@ func (x *ProtocolEvent) GetFileMetadata() *FileMetadataEvent {
 	return nil
 }
 
+func (x *ProtocolEvent) GetRadius() *RADIUSEvent {
+	if x != nil {
+		if x, ok := x.Payload.(*ProtocolEvent_Radius); ok {
+			return x.Radius
+		}
+	}
+	return nil
+}
+
 type isProtocolEvent_Payload interface {
 	isProtocolEvent_Payload()
 }
@@ -1942,6 +2073,10 @@ type ProtocolEvent_FileMetadata struct {
 	FileMetadata *FileMetadataEvent `protobuf:"bytes,15,opt,name=file_metadata,json=fileMetadata,proto3,oneof"`
 }
 
+type ProtocolEvent_Radius struct {
+	Radius *RADIUSEvent `protobuf:"bytes,16,opt,name=radius,proto3,oneof"`
+}
+
 func (*ProtocolEvent_Conn) isProtocolEvent_Payload() {}
 
 func (*ProtocolEvent_Dns) isProtocolEvent_Payload() {}
@@ -1954,6 +2089,8 @@ func (*ProtocolEvent_Smtp) isProtocolEvent_Payload() {}
 
 func (*ProtocolEvent_FileMetadata) isProtocolEvent_Payload() {}
 
+func (*ProtocolEvent_Radius) isProtocolEvent_Payload() {}
+
 type SequenceRange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	First         uint64                 `protobuf:"varint,1,opt,name=first,proto3" json:"first,omitempty"`
@@ -1964,7 +2101,7 @@ type SequenceRange struct {
 
 func (x *SequenceRange) Reset() {
 	*x = SequenceRange{}
-	mi := &file_events_v1_events_proto_msgTypes[11]
+	mi := &file_events_v1_events_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1976,7 +2113,7 @@ func (x *SequenceRange) String() string {
 func (*SequenceRange) ProtoMessage() {}
 
 func (x *SequenceRange) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[11]
+	mi := &file_events_v1_events_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1989,7 +2126,7 @@ func (x *SequenceRange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SequenceRange.ProtoReflect.Descriptor instead.
 func (*SequenceRange) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{11}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SequenceRange) GetFirst() uint64 {
@@ -2020,7 +2157,7 @@ type EventLoss struct {
 
 func (x *EventLoss) Reset() {
 	*x = EventLoss{}
-	mi := &file_events_v1_events_proto_msgTypes[12]
+	mi := &file_events_v1_events_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2032,7 +2169,7 @@ func (x *EventLoss) String() string {
 func (*EventLoss) ProtoMessage() {}
 
 func (x *EventLoss) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[12]
+	mi := &file_events_v1_events_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2045,7 +2182,7 @@ func (x *EventLoss) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventLoss.ProtoReflect.Descriptor instead.
 func (*EventLoss) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{12}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *EventLoss) GetKind() LossKind {
@@ -2092,7 +2229,7 @@ type EventBatchStats struct {
 
 func (x *EventBatchStats) Reset() {
 	*x = EventBatchStats{}
-	mi := &file_events_v1_events_proto_msgTypes[13]
+	mi := &file_events_v1_events_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2104,7 +2241,7 @@ func (x *EventBatchStats) String() string {
 func (*EventBatchStats) ProtoMessage() {}
 
 func (x *EventBatchStats) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[13]
+	mi := &file_events_v1_events_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2117,7 +2254,7 @@ func (x *EventBatchStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventBatchStats.ProtoReflect.Descriptor instead.
 func (*EventBatchStats) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{13}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *EventBatchStats) GetLosses() []*EventLoss {
@@ -2143,7 +2280,7 @@ type ProtocolEventBatch struct {
 
 func (x *ProtocolEventBatch) Reset() {
 	*x = ProtocolEventBatch{}
-	mi := &file_events_v1_events_proto_msgTypes[14]
+	mi := &file_events_v1_events_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2155,7 +2292,7 @@ func (x *ProtocolEventBatch) String() string {
 func (*ProtocolEventBatch) ProtoMessage() {}
 
 func (x *ProtocolEventBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[14]
+	mi := &file_events_v1_events_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2168,7 +2305,7 @@ func (x *ProtocolEventBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolEventBatch.ProtoReflect.Descriptor instead.
 func (*ProtocolEventBatch) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{14}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ProtocolEventBatch) GetSourceNodeId() string {
@@ -2244,7 +2381,7 @@ type EventIngressOpen struct {
 
 func (x *EventIngressOpen) Reset() {
 	*x = EventIngressOpen{}
-	mi := &file_events_v1_events_proto_msgTypes[15]
+	mi := &file_events_v1_events_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2256,7 +2393,7 @@ func (x *EventIngressOpen) String() string {
 func (*EventIngressOpen) ProtoMessage() {}
 
 func (x *EventIngressOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[15]
+	mi := &file_events_v1_events_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2269,7 +2406,7 @@ func (x *EventIngressOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventIngressOpen.ProtoReflect.Descriptor instead.
 func (*EventIngressOpen) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{15}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *EventIngressOpen) GetSourceNodeId() string {
@@ -2334,7 +2471,7 @@ type EventIngressMessage struct {
 
 func (x *EventIngressMessage) Reset() {
 	*x = EventIngressMessage{}
-	mi := &file_events_v1_events_proto_msgTypes[16]
+	mi := &file_events_v1_events_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2346,7 +2483,7 @@ func (x *EventIngressMessage) String() string {
 func (*EventIngressMessage) ProtoMessage() {}
 
 func (x *EventIngressMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[16]
+	mi := &file_events_v1_events_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2359,7 +2496,7 @@ func (x *EventIngressMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventIngressMessage.ProtoReflect.Descriptor instead.
 func (*EventIngressMessage) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{16}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *EventIngressMessage) GetMessage() isEventIngressMessage_Message {
@@ -2419,7 +2556,7 @@ type EventIngressControl struct {
 
 func (x *EventIngressControl) Reset() {
 	*x = EventIngressControl{}
-	mi := &file_events_v1_events_proto_msgTypes[17]
+	mi := &file_events_v1_events_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2431,7 +2568,7 @@ func (x *EventIngressControl) String() string {
 func (*EventIngressControl) ProtoMessage() {}
 
 func (x *EventIngressControl) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[17]
+	mi := &file_events_v1_events_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2444,7 +2581,7 @@ func (x *EventIngressControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventIngressControl.ProtoReflect.Descriptor instead.
 func (*EventIngressControl) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{17}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *EventIngressControl) GetKind() EventIngressControlKind {
@@ -2515,7 +2652,7 @@ type EventSubscribeRequest struct {
 
 func (x *EventSubscribeRequest) Reset() {
 	*x = EventSubscribeRequest{}
-	mi := &file_events_v1_events_proto_msgTypes[18]
+	mi := &file_events_v1_events_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2527,7 +2664,7 @@ func (x *EventSubscribeRequest) String() string {
 func (*EventSubscribeRequest) ProtoMessage() {}
 
 func (x *EventSubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[18]
+	mi := &file_events_v1_events_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2540,7 +2677,7 @@ func (x *EventSubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventSubscribeRequest.ProtoReflect.Descriptor instead.
 func (*EventSubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{18}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *EventSubscribeRequest) GetEventKinds() []EventKind {
@@ -2631,7 +2768,7 @@ type EventSubscriptionControl struct {
 
 func (x *EventSubscriptionControl) Reset() {
 	*x = EventSubscriptionControl{}
-	mi := &file_events_v1_events_proto_msgTypes[19]
+	mi := &file_events_v1_events_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2643,7 +2780,7 @@ func (x *EventSubscriptionControl) String() string {
 func (*EventSubscriptionControl) ProtoMessage() {}
 
 func (x *EventSubscriptionControl) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[19]
+	mi := &file_events_v1_events_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2656,7 +2793,7 @@ func (x *EventSubscriptionControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventSubscriptionControl.ProtoReflect.Descriptor instead.
 func (*EventSubscriptionControl) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{19}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *EventSubscriptionControl) GetKind() SubscriptionControlKind {
@@ -2730,7 +2867,7 @@ type EventSubscriptionMessage struct {
 
 func (x *EventSubscriptionMessage) Reset() {
 	*x = EventSubscriptionMessage{}
-	mi := &file_events_v1_events_proto_msgTypes[20]
+	mi := &file_events_v1_events_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2742,7 +2879,7 @@ func (x *EventSubscriptionMessage) String() string {
 func (*EventSubscriptionMessage) ProtoMessage() {}
 
 func (x *EventSubscriptionMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_events_v1_events_proto_msgTypes[20]
+	mi := &file_events_v1_events_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2755,7 +2892,7 @@ func (x *EventSubscriptionMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventSubscriptionMessage.ProtoReflect.Descriptor instead.
 func (*EventSubscriptionMessage) Descriptor() ([]byte, []int) {
-	return file_events_v1_events_proto_rawDescGZIP(), []int{20}
+	return file_events_v1_events_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *EventSubscriptionMessage) GetDeliverySequence() uint64 {
@@ -2979,7 +3116,23 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x04sha1\x18\x11 \x01(\tR\x04sha1\x12\x16\n" +
 	"\x06sha256\x18\x12 \x01(\tR\x06sha256\x12%\n" +
 	"\x0eextracted_path\x18\x13 \x01(\tR\rextractedPath\x12#\n" +
-	"\rhash_complete\x18\x14 \x01(\bR\fhashComplete\"\x82\x04\n" +
+	"\rhash_complete\x18\x14 \x01(\bR\fhashComplete\"\xda\x02\n" +
+	"\vRADIUSEvent\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x1e\n" +
+	"\n" +
+	"identifier\x18\x02 \x01(\rR\n" +
+	"identifier\x12\x16\n" +
+	"\x06length\x18\x03 \x01(\rR\x06length\x12%\n" +
+	"\x0eobservation_id\x18\x04 \x01(\tR\robservationId\x12.\n" +
+	"\x13request_instance_id\x18\x05 \x01(\tR\x11requestInstanceId\x12 \n" +
+	"\vassociation\x18\x06 \x01(\tR\vassociation\x12$\n" +
+	"\x0eorigin_node_id\x18\a \x01(\tR\foriginNodeId\x12\x1b\n" +
+	"\tsource_id\x18\b \x01(\tR\bsourceId\x12#\n" +
+	"\rcapture_epoch\x18\t \x01(\tR\fcaptureEpoch\x12\x1e\n" +
+	"\n" +
+	"attributes\x18\n" +
+	" \x03(\tR\n" +
+	"attributes\"\xbd\x04\n" +
 	"\rProtocolEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12%\n" +
 	"\x0eevent_sequence\x18\x02 \x01(\x04R\reventSequence\x12=\n" +
@@ -2990,7 +3143,8 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x03tls\x18\f \x01(\v2\x1c.lippycat.events.v1.TLSEventH\x00R\x03tls\x123\n" +
 	"\x04http\x18\r \x01(\v2\x1d.lippycat.events.v1.HTTPEventH\x00R\x04http\x123\n" +
 	"\x04smtp\x18\x0e \x01(\v2\x1d.lippycat.events.v1.SMTPEventH\x00R\x04smtp\x12L\n" +
-	"\rfile_metadata\x18\x0f \x01(\v2%.lippycat.events.v1.FileMetadataEventH\x00R\ffileMetadataB\t\n" +
+	"\rfile_metadata\x18\x0f \x01(\v2%.lippycat.events.v1.FileMetadataEventH\x00R\ffileMetadata\x129\n" +
+	"\x06radius\x18\x10 \x01(\v2\x1f.lippycat.events.v1.RADIUSEventH\x00R\x06radiusB\t\n" +
 	"\apayloadJ\x04\b\x04\x10\x05R\x0eobservation_id\"9\n" +
 	"\rSequenceRange\x12\x14\n" +
 	"\x05first\x18\x01 \x01(\x04R\x05first\x12\x12\n" +
@@ -3058,7 +3212,7 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x11delivery_sequence\x18\x01 \x01(\x04R\x10deliverySequence\x12H\n" +
 	"\acontrol\x18\x02 \x01(\v2,.lippycat.events.v1.EventSubscriptionControlH\x00R\acontrol\x12>\n" +
 	"\x05batch\x18\x03 \x01(\v2&.lippycat.events.v1.ProtocolEventBatchH\x00R\x05batchB\t\n" +
-	"\amessage*\xac\x01\n" +
+	"\amessage*\xc3\x01\n" +
 	"\tEventKind\x12\x1a\n" +
 	"\x16EVENT_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fEVENT_KIND_CONN\x10\x01\x12\x12\n" +
@@ -3066,7 +3220,8 @@ const file_events_v1_events_proto_rawDesc = "" +
 	"\x0eEVENT_KIND_TLS\x10\x03\x12\x13\n" +
 	"\x0fEVENT_KIND_HTTP\x10\x04\x12\x13\n" +
 	"\x0fEVENT_KIND_SMTP\x10\x05\x12\x1c\n" +
-	"\x18EVENT_KIND_FILE_METADATA\x10\x06*a\n" +
+	"\x18EVENT_KIND_FILE_METADATA\x10\x06\x12\x15\n" +
+	"\x11EVENT_KIND_RADIUS\x10\a*a\n" +
 	"\fCaptureScope\x12\x1d\n" +
 	"\x19CAPTURE_SCOPE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12CAPTURE_SCOPE_FULL\x10\x01\x12\x1a\n" +
@@ -3114,7 +3269,7 @@ func file_events_v1_events_proto_rawDescGZIP() []byte {
 }
 
 var file_events_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_events_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_events_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_events_v1_events_proto_goTypes = []any{
 	(EventKind)(0),                   // 0: lippycat.events.v1.EventKind
 	(CaptureScope)(0),                // 1: lippycat.events.v1.CaptureScope
@@ -3132,31 +3287,32 @@ var file_events_v1_events_proto_goTypes = []any{
 	(*HTTPEvent)(nil),                // 13: lippycat.events.v1.HTTPEvent
 	(*SMTPEvent)(nil),                // 14: lippycat.events.v1.SMTPEvent
 	(*FileMetadataEvent)(nil),        // 15: lippycat.events.v1.FileMetadataEvent
-	(*ProtocolEvent)(nil),            // 16: lippycat.events.v1.ProtocolEvent
-	(*SequenceRange)(nil),            // 17: lippycat.events.v1.SequenceRange
-	(*EventLoss)(nil),                // 18: lippycat.events.v1.EventLoss
-	(*EventBatchStats)(nil),          // 19: lippycat.events.v1.EventBatchStats
-	(*ProtocolEventBatch)(nil),       // 20: lippycat.events.v1.ProtocolEventBatch
-	(*EventIngressOpen)(nil),         // 21: lippycat.events.v1.EventIngressOpen
-	(*EventIngressMessage)(nil),      // 22: lippycat.events.v1.EventIngressMessage
-	(*EventIngressControl)(nil),      // 23: lippycat.events.v1.EventIngressControl
-	(*EventSubscribeRequest)(nil),    // 24: lippycat.events.v1.EventSubscribeRequest
-	(*EventSubscriptionControl)(nil), // 25: lippycat.events.v1.EventSubscriptionControl
-	(*EventSubscriptionMessage)(nil), // 26: lippycat.events.v1.EventSubscriptionMessage
-	nil,                              // 27: lippycat.events.v1.HTTPEvent.HeadersEntry
-	(*timestamppb.Timestamp)(nil),    // 28: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),      // 29: google.protobuf.Duration
+	(*RADIUSEvent)(nil),              // 16: lippycat.events.v1.RADIUSEvent
+	(*ProtocolEvent)(nil),            // 17: lippycat.events.v1.ProtocolEvent
+	(*SequenceRange)(nil),            // 18: lippycat.events.v1.SequenceRange
+	(*EventLoss)(nil),                // 19: lippycat.events.v1.EventLoss
+	(*EventBatchStats)(nil),          // 20: lippycat.events.v1.EventBatchStats
+	(*ProtocolEventBatch)(nil),       // 21: lippycat.events.v1.ProtocolEventBatch
+	(*EventIngressOpen)(nil),         // 22: lippycat.events.v1.EventIngressOpen
+	(*EventIngressMessage)(nil),      // 23: lippycat.events.v1.EventIngressMessage
+	(*EventIngressControl)(nil),      // 24: lippycat.events.v1.EventIngressControl
+	(*EventSubscribeRequest)(nil),    // 25: lippycat.events.v1.EventSubscribeRequest
+	(*EventSubscriptionControl)(nil), // 26: lippycat.events.v1.EventSubscriptionControl
+	(*EventSubscriptionMessage)(nil), // 27: lippycat.events.v1.EventSubscriptionMessage
+	nil,                              // 28: lippycat.events.v1.HTTPEvent.HeadersEntry
+	(*timestamppb.Timestamp)(nil),    // 29: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),      // 30: google.protobuf.Duration
 }
 var file_events_v1_events_proto_depIdxs = []int32{
-	28, // 0: lippycat.events.v1.EventEnvelope.timestamp:type_name -> google.protobuf.Timestamp
+	29, // 0: lippycat.events.v1.EventEnvelope.timestamp:type_name -> google.protobuf.Timestamp
 	6,  // 1: lippycat.events.v1.EventEnvelope.flow:type_name -> lippycat.events.v1.FlowTuple
 	1,  // 2: lippycat.events.v1.EventEnvelope.capture_scope:type_name -> lippycat.events.v1.CaptureScope
 	7,  // 3: lippycat.events.v1.EventEnvelope.provenance:type_name -> lippycat.events.v1.SourceProvenance
-	29, // 4: lippycat.events.v1.ConnEvent.duration:type_name -> google.protobuf.Duration
-	29, // 5: lippycat.events.v1.DNSEvent.rtt:type_name -> google.protobuf.Duration
-	29, // 6: lippycat.events.v1.DNSEvent.ttls:type_name -> google.protobuf.Duration
-	27, // 7: lippycat.events.v1.HTTPEvent.headers:type_name -> lippycat.events.v1.HTTPEvent.HeadersEntry
-	29, // 8: lippycat.events.v1.FileMetadataEvent.duration:type_name -> google.protobuf.Duration
+	30, // 4: lippycat.events.v1.ConnEvent.duration:type_name -> google.protobuf.Duration
+	30, // 5: lippycat.events.v1.DNSEvent.rtt:type_name -> google.protobuf.Duration
+	30, // 6: lippycat.events.v1.DNSEvent.ttls:type_name -> google.protobuf.Duration
+	28, // 7: lippycat.events.v1.HTTPEvent.headers:type_name -> lippycat.events.v1.HTTPEvent.HeadersEntry
+	30, // 8: lippycat.events.v1.FileMetadataEvent.duration:type_name -> google.protobuf.Duration
 	8,  // 9: lippycat.events.v1.ProtocolEvent.envelope:type_name -> lippycat.events.v1.EventEnvelope
 	9,  // 10: lippycat.events.v1.ProtocolEvent.conn:type_name -> lippycat.events.v1.ConnEvent
 	10, // 11: lippycat.events.v1.ProtocolEvent.dns:type_name -> lippycat.events.v1.DNSEvent
@@ -3164,35 +3320,36 @@ var file_events_v1_events_proto_depIdxs = []int32{
 	13, // 13: lippycat.events.v1.ProtocolEvent.http:type_name -> lippycat.events.v1.HTTPEvent
 	14, // 14: lippycat.events.v1.ProtocolEvent.smtp:type_name -> lippycat.events.v1.SMTPEvent
 	15, // 15: lippycat.events.v1.ProtocolEvent.file_metadata:type_name -> lippycat.events.v1.FileMetadataEvent
-	2,  // 16: lippycat.events.v1.EventLoss.kind:type_name -> lippycat.events.v1.LossKind
-	17, // 17: lippycat.events.v1.EventLoss.event_sequence_ranges:type_name -> lippycat.events.v1.SequenceRange
-	18, // 18: lippycat.events.v1.EventBatchStats.losses:type_name -> lippycat.events.v1.EventLoss
-	16, // 19: lippycat.events.v1.ProtocolEventBatch.events:type_name -> lippycat.events.v1.ProtocolEvent
-	19, // 20: lippycat.events.v1.ProtocolEventBatch.stats:type_name -> lippycat.events.v1.EventBatchStats
-	0,  // 21: lippycat.events.v1.EventIngressOpen.event_kinds:type_name -> lippycat.events.v1.EventKind
-	3,  // 22: lippycat.events.v1.EventIngressOpen.profile:type_name -> lippycat.events.v1.IngressProfile
-	21, // 23: lippycat.events.v1.EventIngressMessage.open:type_name -> lippycat.events.v1.EventIngressOpen
-	20, // 24: lippycat.events.v1.EventIngressMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
-	4,  // 25: lippycat.events.v1.EventIngressControl.kind:type_name -> lippycat.events.v1.EventIngressControlKind
-	17, // 26: lippycat.events.v1.EventIngressControl.nack_batch_ranges:type_name -> lippycat.events.v1.SequenceRange
-	3,  // 27: lippycat.events.v1.EventIngressControl.accepted_profile:type_name -> lippycat.events.v1.IngressProfile
-	0,  // 28: lippycat.events.v1.EventSubscribeRequest.event_kinds:type_name -> lippycat.events.v1.EventKind
-	5,  // 29: lippycat.events.v1.EventSubscriptionControl.kind:type_name -> lippycat.events.v1.SubscriptionControlKind
-	28, // 30: lippycat.events.v1.EventSubscriptionControl.live_boundary:type_name -> google.protobuf.Timestamp
-	18, // 31: lippycat.events.v1.EventSubscriptionControl.losses:type_name -> lippycat.events.v1.EventLoss
-	0,  // 32: lippycat.events.v1.EventSubscriptionControl.supported_event_kinds:type_name -> lippycat.events.v1.EventKind
-	25, // 33: lippycat.events.v1.EventSubscriptionMessage.control:type_name -> lippycat.events.v1.EventSubscriptionControl
-	20, // 34: lippycat.events.v1.EventSubscriptionMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
-	12, // 35: lippycat.events.v1.HTTPEvent.HeadersEntry.value:type_name -> lippycat.events.v1.HeaderValues
-	22, // 36: lippycat.events.v1.EventService.StreamEvents:input_type -> lippycat.events.v1.EventIngressMessage
-	24, // 37: lippycat.events.v1.EventService.SubscribeEvents:input_type -> lippycat.events.v1.EventSubscribeRequest
-	23, // 38: lippycat.events.v1.EventService.StreamEvents:output_type -> lippycat.events.v1.EventIngressControl
-	26, // 39: lippycat.events.v1.EventService.SubscribeEvents:output_type -> lippycat.events.v1.EventSubscriptionMessage
-	38, // [38:40] is the sub-list for method output_type
-	36, // [36:38] is the sub-list for method input_type
-	36, // [36:36] is the sub-list for extension type_name
-	36, // [36:36] is the sub-list for extension extendee
-	0,  // [0:36] is the sub-list for field type_name
+	16, // 16: lippycat.events.v1.ProtocolEvent.radius:type_name -> lippycat.events.v1.RADIUSEvent
+	2,  // 17: lippycat.events.v1.EventLoss.kind:type_name -> lippycat.events.v1.LossKind
+	18, // 18: lippycat.events.v1.EventLoss.event_sequence_ranges:type_name -> lippycat.events.v1.SequenceRange
+	19, // 19: lippycat.events.v1.EventBatchStats.losses:type_name -> lippycat.events.v1.EventLoss
+	17, // 20: lippycat.events.v1.ProtocolEventBatch.events:type_name -> lippycat.events.v1.ProtocolEvent
+	20, // 21: lippycat.events.v1.ProtocolEventBatch.stats:type_name -> lippycat.events.v1.EventBatchStats
+	0,  // 22: lippycat.events.v1.EventIngressOpen.event_kinds:type_name -> lippycat.events.v1.EventKind
+	3,  // 23: lippycat.events.v1.EventIngressOpen.profile:type_name -> lippycat.events.v1.IngressProfile
+	22, // 24: lippycat.events.v1.EventIngressMessage.open:type_name -> lippycat.events.v1.EventIngressOpen
+	21, // 25: lippycat.events.v1.EventIngressMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
+	4,  // 26: lippycat.events.v1.EventIngressControl.kind:type_name -> lippycat.events.v1.EventIngressControlKind
+	18, // 27: lippycat.events.v1.EventIngressControl.nack_batch_ranges:type_name -> lippycat.events.v1.SequenceRange
+	3,  // 28: lippycat.events.v1.EventIngressControl.accepted_profile:type_name -> lippycat.events.v1.IngressProfile
+	0,  // 29: lippycat.events.v1.EventSubscribeRequest.event_kinds:type_name -> lippycat.events.v1.EventKind
+	5,  // 30: lippycat.events.v1.EventSubscriptionControl.kind:type_name -> lippycat.events.v1.SubscriptionControlKind
+	29, // 31: lippycat.events.v1.EventSubscriptionControl.live_boundary:type_name -> google.protobuf.Timestamp
+	19, // 32: lippycat.events.v1.EventSubscriptionControl.losses:type_name -> lippycat.events.v1.EventLoss
+	0,  // 33: lippycat.events.v1.EventSubscriptionControl.supported_event_kinds:type_name -> lippycat.events.v1.EventKind
+	26, // 34: lippycat.events.v1.EventSubscriptionMessage.control:type_name -> lippycat.events.v1.EventSubscriptionControl
+	21, // 35: lippycat.events.v1.EventSubscriptionMessage.batch:type_name -> lippycat.events.v1.ProtocolEventBatch
+	12, // 36: lippycat.events.v1.HTTPEvent.HeadersEntry.value:type_name -> lippycat.events.v1.HeaderValues
+	23, // 37: lippycat.events.v1.EventService.StreamEvents:input_type -> lippycat.events.v1.EventIngressMessage
+	25, // 38: lippycat.events.v1.EventService.SubscribeEvents:input_type -> lippycat.events.v1.EventSubscribeRequest
+	24, // 39: lippycat.events.v1.EventService.StreamEvents:output_type -> lippycat.events.v1.EventIngressControl
+	27, // 40: lippycat.events.v1.EventService.SubscribeEvents:output_type -> lippycat.events.v1.EventSubscriptionMessage
+	39, // [39:41] is the sub-list for method output_type
+	37, // [37:39] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_events_v1_events_proto_init() }
@@ -3200,19 +3357,20 @@ func file_events_v1_events_proto_init() {
 	if File_events_v1_events_proto != nil {
 		return
 	}
-	file_events_v1_events_proto_msgTypes[10].OneofWrappers = []any{
+	file_events_v1_events_proto_msgTypes[11].OneofWrappers = []any{
 		(*ProtocolEvent_Conn)(nil),
 		(*ProtocolEvent_Dns)(nil),
 		(*ProtocolEvent_Tls)(nil),
 		(*ProtocolEvent_Http)(nil),
 		(*ProtocolEvent_Smtp)(nil),
 		(*ProtocolEvent_FileMetadata)(nil),
+		(*ProtocolEvent_Radius)(nil),
 	}
-	file_events_v1_events_proto_msgTypes[16].OneofWrappers = []any{
+	file_events_v1_events_proto_msgTypes[17].OneofWrappers = []any{
 		(*EventIngressMessage_Open)(nil),
 		(*EventIngressMessage_Batch)(nil),
 	}
-	file_events_v1_events_proto_msgTypes[20].OneofWrappers = []any{
+	file_events_v1_events_proto_msgTypes[21].OneofWrappers = []any{
 		(*EventSubscriptionMessage_Control)(nil),
 		(*EventSubscriptionMessage_Batch)(nil),
 	}
@@ -3222,7 +3380,7 @@ func file_events_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_events_v1_events_proto_rawDesc), len(file_events_v1_events_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -301,3 +301,15 @@ file extraction creates separate content files and requires correspondingly
 stronger access controls. Structured file settings do not authorize LI delivery;
 LI metadata remains independently gated by build, runtime, active task, target,
 and delivery profile.
+
+## RADIUS observations
+
+`lc sniff radius -r radius.pcap --log-dir ./logs --log-streams radius` selects
+the additive version-1 RADIUS observation stream. Each valid selected message
+has its own record; attributes use ordered allowlisted hexadecimal instances.
+Dedicated `sniff radius` applies ordinary selection before writing logs and shares
+the same observation/scope with CLI and packet outputs, without duplicate
+validation counts.
+Credentials, authenticators, task evidence and unknown attributes are omitted
+from routine logs. PCAP and X2 retain their separate byte-output contracts.
+See [RADIUS operations](radius.md) for selection, scope, state and counters.

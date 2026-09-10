@@ -2,6 +2,7 @@ package filtering
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -9,12 +10,19 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"google.golang.org/protobuf/proto"
 )
 
 // Manager manages filters and their distribution to hunters
 type Manager struct {
-	mu      sync.RWMutex
-	filters map[string]*management.Filter
+	// Serialize mutations through distribution and persistence so hunters cannot
+	// receive an older revision (or deletion) after a newer committed update.
+	// Keep mu separate: distribution callbacks may read the current filters.
+	mutationMu      sync.Mutex
+	mu              sync.RWMutex
+	filters         map[string]*management.Filter
+	radiusRevisions map[string]uint64
+	initialized     bool
 
 	channelsMu sync.RWMutex
 	channels   map[string]chan *management.FilterUpdate // hunterID -> channel
@@ -46,6 +54,7 @@ type CapabilityProvider interface {
 func NewManager(persistenceFile string, persistence PersistenceHandler, capabilityProvider CapabilityProvider, onFilterFailure func(string, bool), onFilterChange func()) *Manager {
 	return &Manager{
 		filters:            make(map[string]*management.Filter),
+		radiusRevisions:    make(map[string]uint64),
 		channels:           make(map[string]chan *management.FilterUpdate),
 		capabilityProvider: capabilityProvider,
 		onFilterFailure:    onFilterFailure,
@@ -55,8 +64,12 @@ func NewManager(persistenceFile string, persistence PersistenceHandler, capabili
 	}
 }
 
-// Load loads filters from persistence file
+// Load restores startup state exactly once, before any filter mutation.
+// Runtime reconciliation must use Update/Delete to preserve revision history.
 func (m *Manager) Load() error {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+
 	if m.persistence == nil {
 		return nil
 	}
@@ -67,7 +80,33 @@ func (m *Manager) Load() error {
 	}
 
 	m.mu.Lock()
-	m.filters = filters
+	if m.initialized {
+		m.mu.Unlock()
+		return fmt.Errorf("filter Load is startup-only; use Update/Delete after initialization")
+	}
+	revisions := make(map[string]uint64)
+	restored := make(map[string]*management.Filter, len(filters))
+	for id, f := range filters {
+		if f == nil {
+			m.mu.Unlock()
+			return fmt.Errorf("nil persisted filter %q", id)
+		}
+		if filtering.IsRADIUSFilter(f.Type) {
+			if err := filtering.ValidateFilter(f); err != nil {
+				m.mu.Unlock()
+				return fmt.Errorf("invalid persisted RADIUS filter: %w", err)
+			}
+			if len(revisions) >= 65536 {
+				m.mu.Unlock()
+				return fmt.Errorf("RADIUS revision history capacity reached")
+			}
+			revisions[strings.Clone(id)] = f.Revision
+		}
+		restored[id] = proto.Clone(f).(*management.Filter)
+	}
+	m.radiusRevisions = revisions
+	m.filters = restored
+	m.initialized = true
 	m.mu.Unlock()
 
 	logger.Info("Loaded filters from file", "count", len(filters), "file", m.persistenceFile)
@@ -76,6 +115,13 @@ func (m *Manager) Load() error {
 
 // Save saves filters to persistence file
 func (m *Manager) Save() error {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	return m.save()
+}
+
+// save requires mutationMu, keeping the snapshot and its write in mutation order.
+func (m *Manager) save() error {
 	if m.persistence == nil {
 		return nil
 	}
@@ -83,7 +129,7 @@ func (m *Manager) Save() error {
 	m.mu.RLock()
 	filters := make(map[string]*management.Filter, len(m.filters))
 	for k, v := range m.filters {
-		filters[k] = v
+		filters[k] = proto.Clone(v).(*management.Filter)
 	}
 	m.mu.RUnlock()
 
@@ -92,6 +138,9 @@ func (m *Manager) Save() error {
 
 // hunterSupportsFilterType checks if a hunter supports a given filter type
 func hunterSupportsFilterType(capabilities *management.HunterCapabilities, filterType management.FilterType) bool {
+	if filtering.IsRADIUSFilter(filterType) && (capabilities == nil || capabilities.RadiusFilterVersion != 1) {
+		return false
+	}
 	if capabilities == nil {
 		// No capabilities info - this is a legacy hunter from before v0.2.8
 		// Assume it's a generic hunter (only supports BPF and IP filters)
@@ -149,14 +198,14 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 
 		// If no target hunters specified, apply to all
 		if len(filter.TargetHunters) == 0 {
-			filters = append(filters, filter)
+			filters = append(filters, proto.Clone(filter).(*management.Filter))
 			continue
 		}
 
 		// Check if this hunter is targeted
 		for _, target := range filter.TargetHunters {
 			if target == hunterID {
-				filters = append(filters, filter)
+				filters = append(filters, proto.Clone(filter).(*management.Filter))
 				break
 			}
 		}
@@ -167,6 +216,26 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 
 // Update adds or modifies a filter
 func (m *Manager) Update(filter *management.Filter) (uint32, error) {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+
+	if filter == nil {
+		return 0, fmt.Errorf("filter is required")
+	}
+	if filtering.IsRADIUSFilter(filter.Type) {
+		if err := filtering.ValidateFilter(filter); err != nil {
+			return 0, err
+		}
+		for _, hunterID := range filter.TargetHunters {
+			var caps *management.HunterCapabilities
+			if m.capabilityProvider != nil {
+				caps = m.capabilityProvider.GetCapabilities(hunterID)
+			}
+			if !hunterSupportsFilterType(caps, filter.Type) {
+				return 0, fmt.Errorf("hunter %s lacks RADIUS criteria/provenance capability v1", hunterID)
+			}
+		}
+	}
 	// Normalize phone number patterns before storage/distribution
 	// This ensures consistent matching regardless of input format
 	if filter.Type == management.FilterType_FILTER_PHONE_NUMBER {
@@ -188,7 +257,38 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 
 	// Determine if this is add or modify, and get old filter for scope comparison
 	oldFilter, exists := m.filters[filter.Id]
-	m.filters[filter.Id] = filter
+	if filtering.IsRADIUSFilter(filter.Type) {
+		previous, known := m.radiusRevisions[filter.Id]
+		if (!known && len(m.radiusRevisions) >= 65536) || ((!exists || !filtering.IsRADIUSFilter(oldFilter.Type)) && known && filter.Revision <= previous) {
+			m.mu.Unlock()
+			return 0, fmt.Errorf("RADIUS revision history requires newer revision or has reached capacity")
+		}
+	}
+
+	if exists && (filtering.IsRADIUSFilter(filter.Type) || filtering.IsRADIUSFilter(oldFilter.Type)) && !proto.Equal(oldFilter, filter) && filter.Revision <= oldFilter.Revision {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("RADIUS filter modification requires a newer revision")
+	}
+	if exists && filtering.IsRADIUSFilter(filter.Type) && oldFilter.Radius != nil && filter.Radius != nil && !proto.Equal(oldFilter.Radius, filter.Radius) {
+		oldR, newR := oldFilter.Radius, filter.Radius
+		if oldR.TaskId != "" && oldR.TaskId == newR.TaskId && newR.TaskGeneration <= oldR.TaskGeneration {
+			m.mu.Unlock()
+			return 0, fmt.Errorf("RADIUS task criteria modification requires a newer task generation")
+		}
+		for _, oldC := range oldR.Criteria {
+			for _, newC := range newR.Criteria {
+				if oldC != nil && newC != nil && oldC.FilterId == newC.FilterId && !proto.Equal(oldC, newC) && newC.FilterRevision <= oldC.FilterRevision {
+					m.mu.Unlock()
+					return 0, fmt.Errorf("RADIUS criterion modification requires a newer criterion revision")
+				}
+			}
+		}
+	}
+	m.initialized = true
+	m.filters[filter.Id] = proto.Clone(filter).(*management.Filter)
+	if filtering.IsRADIUSFilter(filter.Type) {
+		m.radiusRevisions[strings.Clone(filter.Id)] = filter.Revision
+	}
 
 	updateType := management.FilterUpdateType_UPDATE_ADD
 	if exists {
@@ -203,7 +303,7 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 		if len(huntersToRemove) > 0 {
 			deleteUpdate := &management.FilterUpdate{
 				UpdateType: management.FilterUpdateType_UPDATE_DELETE,
-				Filter:     filter, // Use new filter but with DELETE type
+				Filter:     proto.Clone(oldFilter).(*management.Filter), // The recipient understands the previously installed type.
 			}
 			m.pushFilterUpdateToSpecificHunters(huntersToRemove, deleteUpdate)
 		}
@@ -212,13 +312,13 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 	// Push filter update to affected hunters
 	update := &management.FilterUpdate{
 		UpdateType: updateType,
-		Filter:     filter,
+		Filter:     proto.Clone(filter).(*management.Filter),
 	}
 
 	huntersUpdated := m.pushFilterUpdate(filter, update)
 
 	// Persist filters to disk
-	if err := m.Save(); err != nil {
+	if err := m.save(); err != nil {
 		logger.Error("Failed to save filters to disk", "error", err)
 		// Don't fail the request - filter is already in memory
 	}
@@ -228,6 +328,9 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 
 // Delete removes a filter
 func (m *Manager) Delete(filterID string) (uint32, error) {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+
 	m.mu.Lock()
 	filter, exists := m.filters[filterID]
 	if !exists {
@@ -240,18 +343,28 @@ func (m *Manager) Delete(filterID string) (uint32, error) {
 	// Push filter deletion to affected hunters
 	update := &management.FilterUpdate{
 		UpdateType: management.FilterUpdateType_UPDATE_DELETE,
-		Filter:     filter,
+		Filter:     proto.Clone(filter).(*management.Filter),
 	}
 
 	huntersUpdated := m.pushFilterUpdate(filter, update)
 
 	// Persist filters to disk
-	if err := m.Save(); err != nil {
+	if err := m.save(); err != nil {
 		logger.Error("Failed to save filters to disk", "error", err)
 		// Don't fail the request - filter is already removed from memory
 	}
 
 	return huntersUpdated, nil
+}
+
+// SubscribeSnapshot atomically captures policy and attaches the live stream.
+// mutationMu ensures no committed mutation can be queued before its snapshot.
+func (m *Manager) SubscribeSnapshot(hunterID string) (chan *management.FilterUpdate, []*management.Filter) {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	filters := m.GetForHunter(hunterID)
+	ch := m.AddChannel(hunterID)
+	return ch, filters
 }
 
 // AddChannel creates and adds a filter update channel for a hunter
@@ -278,47 +391,55 @@ func (m *Manager) RemoveChannel(hunterID string, ch chan *management.FilterUpdat
 	m.channelsMu.Unlock()
 }
 
-// getHuntersToRemove determines which hunters should receive DELETE when filter scope changes
+// getHuntersToRemove finds connected hunters that could receive the old filter
+// but cannot receive its replacement because of target scope or capability.
 func (m *Manager) getHuntersToRemove(oldFilter, newFilter *management.Filter) []string {
 	m.channelsMu.RLock()
 	defer m.channelsMu.RUnlock()
 
-	// Build set of hunters that should receive the new filter
-	newTargets := make(map[string]bool)
-	if len(newFilter.TargetHunters) == 0 {
-		// New filter applies to all hunters - no one needs DELETE
-		return nil
-	}
-	for _, hunterID := range newFilter.TargetHunters {
-		newTargets[hunterID] = true
+	targetsHunter := func(filter *management.Filter, hunterID string) bool {
+		if len(filter.TargetHunters) == 0 {
+			return true
+		}
+		for _, target := range filter.TargetHunters {
+			if target == hunterID {
+				return true
+			}
+		}
+		return false
 	}
 
-	// Find hunters that were receiving the old filter but won't receive new one
 	var huntersToRemove []string
-
-	if len(oldFilter.TargetHunters) == 0 {
-		// Old filter applied to all hunters - remove from all except new targets
-		for hunterID := range m.channels {
-			if !newTargets[hunterID] {
-				huntersToRemove = append(huntersToRemove, hunterID)
-			}
+	for hunterID := range m.channels {
+		if !targetsHunter(oldFilter, hunterID) {
+			continue
 		}
-	} else {
-		// Old filter applied to specific hunters - remove from old targets not in new targets
-		for _, hunterID := range oldFilter.TargetHunters {
-			if !newTargets[hunterID] {
-				huntersToRemove = append(huntersToRemove, hunterID)
-			}
+		var caps *management.HunterCapabilities
+		if m.capabilityProvider != nil {
+			caps = m.capabilityProvider.GetCapabilities(hunterID)
+		}
+		if !hunterSupportsFilterType(caps, oldFilter.Type) {
+			continue
+		}
+		if !targetsHunter(newFilter, hunterID) || !hunterSupportsFilterType(caps, newFilter.Type) {
+			huntersToRemove = append(huntersToRemove, hunterID)
 		}
 	}
-
 	return huntersToRemove
 }
 
 // pushFilterUpdateToSpecificHunters sends filter update to a specific list of hunters
 func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *management.FilterUpdate) uint32 {
 	m.channelsMu.RLock()
-	defer m.channelsMu.RUnlock()
+	// A missed policy update invalidates the stream. Remove it after releasing
+	// the read lock, using channel identity so reconnect replacements survive.
+	failedChannels := make(map[string]chan *management.FilterUpdate)
+	defer func() {
+		m.channelsMu.RUnlock()
+		for id, ch := range failedChannels {
+			m.RemoveChannel(id, ch)
+		}
+	}()
 
 	var huntersUpdated uint32
 	const sendTimeout = 2 * time.Second
@@ -338,6 +459,7 @@ func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *
 			return true
 
 		case <-timer.C:
+			failedChannels[hunterID] = ch
 			// Timeout - track failure
 			if m.onFilterFailure != nil {
 				m.onFilterFailure(hunterID, true)
@@ -366,7 +488,15 @@ func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *
 // pushFilterUpdate sends filter update to affected hunters
 func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management.FilterUpdate) uint32 {
 	m.channelsMu.RLock()
-	defer m.channelsMu.RUnlock()
+	// A missed policy update invalidates the stream. Remove it after releasing
+	// the read lock, using channel identity so reconnect replacements survive.
+	failedChannels := make(map[string]chan *management.FilterUpdate)
+	defer func() {
+		m.channelsMu.RUnlock()
+		for id, ch := range failedChannels {
+			m.RemoveChannel(id, ch)
+		}
+	}()
 
 	var huntersUpdated uint32
 	const sendTimeout = 2 * time.Second
@@ -388,6 +518,7 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 			return true
 
 		case <-timer.C:
+			failedChannels[hunterID] = ch
 			// Timeout - track failure
 			if m.onFilterFailure != nil {
 				m.onFilterFailure(hunterID, true)
@@ -468,7 +599,7 @@ func (m *Manager) GetAll() []*management.Filter {
 
 	filters := make([]*management.Filter, 0, len(m.filters))
 	for _, filter := range m.filters {
-		filters = append(filters, filter)
+		filters = append(filters, proto.Clone(filter).(*management.Filter))
 	}
 	return filters
 }

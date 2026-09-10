@@ -111,6 +111,8 @@ func isNilEvent(event Event) bool {
 	switch ev := event.(type) {
 	case *DNSEvent:
 		return ev == nil
+	case *RADIUSEvent:
+		return ev == nil
 	case *SMTPEvent:
 		return ev == nil
 	case *TLSEvent:
@@ -223,6 +225,16 @@ func (p *Producer) Assign(event Event) Event {
 		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
 		return ev
 	case *DNSEvent:
+		if ev == nil {
+			return ev
+		}
+		copy := *ev
+		copy.eventBase.EventEnvelope = p.envelope(copy.EventEnvelope)
+		return copy
+	case RADIUSEvent:
+		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
+		return ev
+	case *RADIUSEvent:
 		if ev == nil {
 			return ev
 		}
@@ -346,3 +358,5 @@ func (p *Producer) NewFileMetadataEvent(env Envelope) FileMetadataEvent {
 func (p *Producer) NewFileContentEvent(env Envelope) FileContentEvent {
 	return NewFileContentEvent(p.envelope(env))
 }
+
+func (p *Producer) NewRADIUSEvent(env Envelope) RADIUSEvent { return NewRADIUSEvent(p.envelope(env)) }

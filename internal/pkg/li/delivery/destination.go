@@ -229,6 +229,14 @@ type destinationState struct {
 
 // DestinationStats contains statistics for a destination.
 type DestinationStats struct {
+	// ConnectionState is disconnected, connecting, or connected. Interface
+	// connection counts include checked-out connections, not just idle pool entries.
+	ConnectionState string
+	X2Connections   uint64
+	X3Connections   uint64
+	// LastError is the most recent destination connection error, cleared on connect.
+	LastError string
+
 	// ConnectAttempts is the total number of connection attempts.
 	ConnectAttempts uint64
 
@@ -376,7 +384,7 @@ func (p *connPool) close() {
 
 	p.closed = true
 	for _, conn := range p.conns {
-		if err := conn.conn.Close(); err != nil {
+		if err := conn.conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing pooled connection", "error", err)
 		}
 	}
@@ -425,8 +433,10 @@ type Manager struct {
 	stopChan chan struct{}
 
 	// wg tracks background goroutines.
-	wg       sync.WaitGroup
-	workerMu sync.Mutex
+	wg          sync.WaitGroup
+	workerMu    sync.Mutex
+	dialContext context.Context
+	cancelDials context.CancelFunc
 
 	// shuttingDown indicates shutdown is in progress.
 	shuttingDown      atomic.Bool
@@ -607,6 +617,9 @@ func (m *Manager) Start() {
 func (m *Manager) Stop() {
 	m.workerMu.Lock()
 	m.shuttingDown.Store(true)
+	if m.cancelDials != nil {
+		m.cancelDials()
+	}
 	close(m.stopChan)
 	m.workerMu.Unlock()
 
@@ -634,6 +647,7 @@ func (m *Manager) admitWorkers(count int) bool {
 
 // AddDestination adds a new destination and initiates connection.
 func (m *Manager) AddDestination(dest *li.Destination) error {
+	dest = copyDeliveryDestination(dest)
 	if m.shuttingDown.Load() {
 		return ErrShuttingDown
 	}
@@ -695,6 +709,7 @@ func (m *Manager) RemoveDestination(did uuid.UUID) error {
 // UpdateDestination updates a destination's configuration.
 // If address or port changed, connections are re-established.
 func (m *Manager) UpdateDestination(dest *li.Destination) error {
+	dest = copyDeliveryDestination(dest)
 	if m.shuttingDown.Load() {
 		return ErrShuttingDown
 	}
@@ -751,7 +766,15 @@ func (m *Manager) GetDestination(did uuid.UUID) (*li.Destination, error) {
 
 	state.mu.RLock()
 	defer state.mu.RUnlock()
-	return state.dest, nil
+	return copyDeliveryDestination(state.dest), nil
+}
+
+func copyDeliveryDestination(dest *li.Destination) *li.Destination {
+	copy := *dest
+	if dest.TLSConfig != nil {
+		copy.TLSConfig = dest.TLSConfig.Clone()
+	}
+	return &copy
 }
 
 // GetConnection acquires a connection to the destination.
@@ -777,6 +800,13 @@ func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, 
 	}
 
 	m.mu.RLock()
+	// Shutdown may have completed while the caller cancellation check or the
+	// manager lock was pending. Do not snapshot the closed generation and then
+	// install a fresh connection that shutdown can no longer close.
+	if m.shuttingDown.Load() {
+		m.mu.RUnlock()
+		return nil, ErrShuttingDown
+	}
 	state, exists := m.destinations[did]
 	m.mu.RUnlock()
 
@@ -786,6 +816,7 @@ func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, 
 
 	state.mu.RLock()
 	pool := state.interfacePools[iface]
+	generation := state.generation
 	state.mu.RUnlock()
 	if pool == nil {
 		return nil, fmt.Errorf("unsupported delivery interface %d", iface)
@@ -796,17 +827,37 @@ func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, 
 		return pooled.conn, nil
 	}
 
-	// Check if connected.
-	if atomic.LoadInt32(&state.state) != connStateConnected {
-		return nil, ErrNotConnected
-	}
+	// Each interface dials independently even when the other is disconnected.
 
 	// Create a new connection using the provided context.
 	conn, err := m.dialDestinationWithContext(ctx, state)
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	state.mu.RLock()
+	valid := !m.shuttingDown.Load() && m.destinations[did] == state && state.generation == generation
+	state.mu.RUnlock()
+	if !valid {
+		m.mu.Unlock()
+		if err := conn.NetConn().Close(); err != nil {
+			logger.Error("close stale LI transport", "error", err)
+		}
+		return nil, ErrNotConnected
+	}
+	// A background dial may have finished while this foreground dial was in
+	// progress. Reuse that association before sending any product on a second
+	// stream; a full pool must not force that stream to close after one write.
+	if pooled := pool.get(); pooled != nil {
+		m.mu.Unlock()
+		if err := conn.NetConn().Close(); err != nil {
+			logger.Debug("error closing redundant foreground connection", "error", err)
+		}
+		return pooled.conn, nil
+	}
 	m.registerConnection(state, conn, iface)
+	atomic.StoreInt32(&state.state, connStateConnected)
+	m.mu.Unlock()
 	m.recordInterfaceReconnect(did, iface)
 	m.watchConnection(did, conn)
 
@@ -824,7 +875,9 @@ func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	m.mu.RUnlock()
 
 	if !exists || m.shuttingDown.Load() {
-		if err := conn.Close(); err != nil {
+		// Release runs on the delivery owner. Discarded transports must not
+		// extend its drain deadline waiting for a peer to read close_notify.
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing released connection", "error", err)
 		}
 		return
@@ -834,7 +887,7 @@ func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	_, healthy := state.connections[conn]
 	if !healthy {
 		state.mu.RUnlock()
-		if err := conn.Close(); err != nil {
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing invalid released connection", "error", err)
 		}
 		return
@@ -855,7 +908,7 @@ func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	put := pool.put(pooled)
 	state.mu.RUnlock()
 	if !put {
-		if err := conn.Close(); err != nil {
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing excess connection", "error", err)
 		}
 	}
@@ -869,10 +922,10 @@ func (m *Manager) InvalidateConnection(did uuid.UUID, conn *tls.Conn) {
 func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectDestination bool) {
 	m.mu.RLock()
 	state, exists := m.destinations[did]
-	m.mu.RUnlock()
 
 	if !exists {
-		if err := conn.Close(); err != nil {
+		m.mu.RUnlock()
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing invalidated connection", "error", err)
 		}
 		return
@@ -881,13 +934,20 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 	state.mu.Lock()
 	if _, exists := state.connections[conn]; !exists {
 		state.mu.Unlock()
+		m.mu.RUnlock()
 		return
 	}
 	value, runtimeOK := m.connectionRuntime.Load(conn)
 	delete(state.connections, conn)
 	m.connectionRuntime.Delete(conn)
+	if runtimeOK {
+		wakeRetiredConnection(value.(*connectionRuntime))
+	}
 	state.stats.Disconnects++
 	remaining := len(state.connections)
+	// Resolve aggregate state while connection membership is still locked.
+	// A new publication must not be marked disconnected by this older removal.
+	reconnect := remaining == 0 && atomic.CompareAndSwapInt32(&state.state, connStateConnected, connStateDisconnected) && reconnectDestination
 	pool := state.pool
 	if runtimeOK {
 		runtime := value.(*connectionRuntime)
@@ -901,14 +961,15 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 		}
 	}
 	state.mu.Unlock()
+	m.mu.RUnlock()
 	pool.remove(conn)
 
-	if err := conn.Close(); err != nil {
+	if err := conn.NetConn().Close(); err != nil {
 		logger.Debug("error closing invalidated connection", "error", err)
 	}
 
 	// Check if we need to reconnect.
-	if remaining == 0 && atomic.CompareAndSwapInt32(&state.state, connStateConnected, connStateDisconnected) && reconnectDestination {
+	if reconnect {
 		m.scheduleReconnect(did, state)
 	}
 }
@@ -936,16 +997,7 @@ func (m *Manager) Stats(did uuid.UUID) (DestinationStats, error) {
 		return DestinationStats{}, ErrDestinationNotFound
 	}
 
-	state.mu.RLock()
-	defer state.mu.RUnlock()
-	stats := state.stats
-	if !stats.X2Keepalive.LastValidACK.IsZero() {
-		stats.X2Keepalive.ACKAge = time.Since(stats.X2Keepalive.LastValidACK)
-	}
-	if !stats.X3Keepalive.LastValidACK.IsZero() {
-		stats.X3Keepalive.ACKAge = time.Since(stats.X3Keepalive.LastValidACK)
-	}
-	return stats, nil
+	return m.snapshotStats(state, time.Now()), nil
 }
 
 // AllStats returns statistics for all destinations.
@@ -954,10 +1006,50 @@ func (m *Manager) AllStats() map[uuid.UUID]DestinationStats {
 	defer m.mu.RUnlock()
 
 	stats := make(map[uuid.UUID]DestinationStats, len(m.destinations))
+	now := time.Now()
 	for did, state := range m.destinations {
-		state.mu.RLock()
-		stats[did] = state.stats
-		state.mu.RUnlock()
+		stats[did] = m.snapshotStats(state, now)
+	}
+	return stats
+}
+
+// snapshotStats computes live gauges without modifying accumulated counters.
+func (m *Manager) snapshotStats(state *destinationState, now time.Time) DestinationStats {
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	stats := state.stats
+	switch atomic.LoadInt32(&state.state) {
+	case connStateConnecting:
+		stats.ConnectionState = "connecting"
+	case connStateConnected:
+		stats.ConnectionState = "connected"
+	default:
+		stats.ConnectionState = "disconnected"
+	}
+	if state.lastError != nil {
+		stats.LastError = state.lastError.Error()
+	}
+	for conn := range state.connections {
+		if value, ok := m.connectionRuntime.Load(conn); ok {
+			switch value.(*connectionRuntime).iface {
+			case PDUTypeX2:
+				stats.X2Connections++
+			case PDUTypeX3:
+				stats.X3Connections++
+			}
+		}
+	}
+	stats.X2Keepalive.Enabled = m.config.X2KeepaliveEnabled
+	stats.X2Keepalive.TimeP1 = m.config.X2KeepaliveTimeP1
+	stats.X2Keepalive.TimeP2 = m.config.X2KeepaliveTimeP2
+	stats.X3Keepalive.Enabled = m.config.X3KeepaliveEnabled
+	stats.X3Keepalive.TimeP1 = m.config.X3KeepaliveTimeP1
+	stats.X3Keepalive.TimeP2 = m.config.X3KeepaliveTimeP2
+	if !stats.X2Keepalive.LastValidACK.IsZero() {
+		stats.X2Keepalive.ACKAge = max(now.Sub(stats.X2Keepalive.LastValidACK), 0)
+	}
+	if !stats.X3Keepalive.LastValidACK.IsZero() {
+		stats.X3Keepalive.ACKAge = max(now.Sub(stats.X3Keepalive.LastValidACK), 0)
 	}
 	return stats
 }
@@ -999,17 +1091,33 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 	state.mu.RUnlock()
 	if currentGeneration != generation {
 		if conn != nil {
-			if closeErr := conn.Close(); closeErr != nil {
+			if closeErr := conn.NetConn().Close(); closeErr != nil {
 				logger.Debug("error closing superseded destination connection", "error", closeErr)
 			}
 		}
 		return
 	}
 	if err != nil {
-		atomic.StoreInt32(&state.state, connStateDisconnected)
-
+		m.mu.RLock()
+		state.mu.RLock()
+		valid := !m.shuttingDown.Load() && m.destinations[did] == state && state.generation == generation
+		state.mu.RUnlock()
+		if !valid {
+			m.mu.RUnlock()
+			return
+		}
 		state.mu.Lock()
 		state.stats.ConnectFailures++
+		state.mu.Unlock()
+		// A foreground dial may have published a healthy association while
+		// this background handshake was pending. Its connected state wins;
+		// this obsolete failure must not overwrite it or start another retry.
+		if !atomic.CompareAndSwapInt32(&state.state, connStateConnecting, connStateDisconnected) {
+			m.mu.RUnlock()
+			return
+		}
+
+		state.mu.Lock()
 		state.lastError = err
 		state.failuresSinceLog++
 		failures := state.failuresSinceLog
@@ -1029,6 +1137,7 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 		}
 
 		m.scheduleReconnect(did, state)
+		m.mu.RUnlock()
 		return
 	}
 
@@ -1037,19 +1146,10 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 	if !m.config.X2KeepaliveEnabled && m.config.X3KeepaliveEnabled {
 		iface = PDUTypeX3
 	}
-	m.registerConnection(state, conn, iface)
-	m.recordInterfaceReconnect(did, iface)
-	pooled := &pooledConn{
-		conn:      conn,
-		createdAt: time.Now(),
-		lastUsed:  time.Now(),
+	if !m.publishPooledConnection(did, state, generation, conn, iface) {
+		return
 	}
-	state.mu.RLock()
-	pool := state.interfacePools[iface]
-	state.mu.RUnlock()
-	pool.put(pooled)
-
-	atomic.StoreInt32(&state.state, connStateConnected)
+	m.recordInterfaceReconnect(did, iface)
 
 	state.mu.Lock()
 	state.stats.ConnectSuccesses++
@@ -1068,9 +1168,18 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 }
 
 // dialDestination creates a new TLS connection to the destination.
-// Uses a background context with the configured dial timeout.
+// Uses a shutdown-cancelable context with the configured dial timeout.
 func (m *Manager) dialDestination(state *destinationState) (*tls.Conn, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), m.config.DialTimeout)
+	m.workerMu.Lock()
+	if m.dialContext == nil {
+		m.dialContext, m.cancelDials = context.WithCancel(context.Background())
+	}
+	if m.shuttingDown.Load() {
+		m.cancelDials()
+	}
+	parent := m.dialContext
+	m.workerMu.Unlock()
+	ctx, cancel := context.WithTimeout(parent, m.config.DialTimeout)
 	defer cancel()
 	return m.dialDestinationWithContext(ctx, state)
 }
@@ -1143,7 +1252,7 @@ func (m *Manager) dialDestinationWithContext(ctx context.Context, state *destina
 	default:
 	}
 
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		if closeErr := tcpConn.Close(); closeErr != nil {
 			logger.Debug("error closing connection after handshake error", "error", closeErr)
 		}
@@ -1295,6 +1404,9 @@ func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 		return
 	}
 	runtime := value.(*connectionRuntime)
+	if !runtime.keepalive.enabled {
+		return
+	}
 	timer := time.NewTimer(runtime.keepalive.timeP1)
 	defer timer.Stop()
 	for {
@@ -1395,24 +1507,61 @@ func (m *Manager) reconnectInterface(did uuid.UUID, iface PDUType) {
 		if !exists || m.shuttingDown.Load() {
 			return
 		}
+		state.mu.RLock()
+		generation := state.generation
+		state.mu.RUnlock()
 		conn, err := m.dialDestination(state)
 		if err != nil {
 			backoff = min(time.Duration(float64(backoff)*m.config.BackoffMultiplier), m.config.MaxBackoff)
 			continue
 		}
-		m.registerConnection(state, conn, iface)
-		m.recordInterfaceReconnect(did, iface)
-		m.watchConnection(did, conn)
-		state.mu.RLock()
-		pool := state.interfacePools[iface]
-		state.mu.RUnlock()
-		if !pool.put(&pooledConn{conn: conn, createdAt: time.Now(), lastUsed: time.Now()}) {
-			m.InvalidateConnection(did, conn)
+		if !m.publishPooledConnection(did, state, generation, conn, iface) {
 			return
 		}
-		atomic.StoreInt32(&state.state, connStateConnected)
+		m.recordInterfaceReconnect(did, iface)
+		m.watchConnection(did, conn)
 		return
 	}
+}
+
+// publishPooledConnection commits a background dial only while its destination
+// identity and generation remain current. Hold the manager lock through pool
+// publication so replacement/removal cannot close the old pools between checking
+// the generation and publishing the transport.
+func (m *Manager) publishPooledConnection(did uuid.UUID, state *destinationState, generation uint64, conn *tls.Conn, iface PDUType) bool {
+	m.mu.Lock()
+	state.mu.RLock()
+	valid := !m.shuttingDown.Load() && m.destinations[did] == state && state.generation == generation
+	pool := state.interfacePools[iface]
+	// A healthy association owns interface FIFO even while checked out. A
+	// late background dial must not replace it or occupy its return capacity.
+	for existing := range state.connections {
+		if runtime, ok := m.connectionRuntime.Load(existing); ok && runtime.(*connectionRuntime).iface == iface {
+			valid = false
+			break
+		}
+	}
+	state.mu.RUnlock()
+	registered := false
+	if valid {
+		m.registerConnection(state, conn, iface)
+		registered = true
+		valid = pool.put(&pooledConn{conn: conn, createdAt: time.Now(), lastUsed: time.Now()})
+		if valid {
+			atomic.StoreInt32(&state.state, connStateConnected)
+		}
+	}
+	m.mu.Unlock()
+	if !valid {
+		// Also releases registered state if a full pool refused the association.
+		if registered {
+			m.invalidateConnection(did, conn, false)
+		}
+		if err := conn.NetConn().Close(); err != nil {
+			logger.Debug("error closing superseded destination connection", "error", err)
+		}
+	}
+	return valid
 }
 
 // recordInterfaceReconnect pairs a successful replacement association with a
@@ -1486,10 +1635,39 @@ func (m *Manager) writeFrame(conn *tls.Conn, data []byte, timeout time.Duration)
 	if !ok {
 		return ErrNotConnected
 	}
+	_ = value
+	return m.writeFrameUntil(conn, data, time.Now().Add(timeout))
+}
+
+func (m *Manager) writeFrameUntil(conn *tls.Conn, data []byte, deadline time.Time) error {
+	return m.writeFrameUntilContext(context.Background(), conn, data, deadline)
+}
+func (m *Manager) writeFrameUntilContext(ctx context.Context, conn *tls.Conn, data []byte, deadline time.Time) error {
+	value, ok := m.connectionRuntime.Load(conn)
+	if !ok {
+		return ErrNotConnected
+	}
 	runtime := value.(*connectionRuntime)
-	runtime.writeMu.Lock()
+	for !runtime.writeMu.TryLock() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !time.Now().Before(deadline) {
+			return context.DeadlineExceeded
+		}
+		time.Sleep(min(time.Millisecond, max(time.Until(deadline), 0)))
+	}
 	defer runtime.writeMu.Unlock()
-	if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+	if !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	n, err := conn.Write(data)
@@ -1498,14 +1676,24 @@ func (m *Manager) writeFrame(conn *tls.Conn, data []byte, timeout time.Duration)
 	}
 	clearErr := conn.SetWriteDeadline(time.Time{})
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrUncertainWrite, err)
 	}
-	return clearErr
+	if clearErr != nil {
+		// The whole frame has already been accepted by TLS. A concurrent
+		// transport close can fail deadline cleanup, but must not turn a
+		// subsequent retry or terminal discard into a known unsent outcome.
+		return fmt.Errorf("%w: clear write deadline: %w", ErrUncertainWrite, clearErr)
+	}
+	return nil
 }
 
 // WritePDU serializes content with control frames on the TLS connection.
 func (m *Manager) WritePDU(conn *tls.Conn, data []byte, timeout time.Duration) error {
 	return m.writeFrame(conn, data, timeout)
+}
+
+func (m *Manager) WritePDUUntil(conn *tls.Conn, data []byte, deadline time.Time) error {
+	return m.writeFrameUntil(conn, data, deadline)
 }
 
 // scheduleReconnect schedules a reconnection attempt with exponential backoff.
@@ -1558,7 +1746,9 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 	for conn := range state.connections {
 		connections = append(connections, conn)
 		delete(state.connections, conn)
-		m.connectionRuntime.Delete(conn)
+		if value, ok := m.connectionRuntime.LoadAndDelete(conn); ok {
+			wakeRetiredConnection(value.(*connectionRuntime))
+		}
 	}
 	pool := state.pool
 	interfacePools := state.interfacePools
@@ -1569,7 +1759,7 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 		interfacePool.close()
 	}
 	for _, conn := range connections {
-		if err := conn.Close(); err != nil {
+		if err := conn.NetConn().Close(); err != nil {
 			logger.Debug("error closing destination connection",
 				"did", did,
 				"error", err,
@@ -1577,6 +1767,15 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 		}
 	}
 	atomic.StoreInt32(&state.state, connStateDisconnected)
+}
+
+// Wake a retired association's timer owner immediately. Otherwise reconnect
+// churn retains one goroutine and timer per old transport until its P1/P2 ends.
+func wakeRetiredConnection(runtime *connectionRuntime) {
+	select {
+	case runtime.keepaliveWake <- struct{}{}:
+	default:
+	}
 }
 
 // RecordBytesSent records bytes sent for statistics.
@@ -1614,3 +1813,25 @@ func (m *Manager) RecordWriteError(did uuid.UUID) {
 		state.mu.Unlock()
 	}
 }
+
+// WritePDUContext bounds lock waiting and cancels an active transport write.
+func (m *Manager) WritePDUContext(ctx context.Context, conn *tls.Conn, data []byte, deadline time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		if err := conn.SetDeadline(time.Now()); err != nil {
+			logger.Error("cancel delivery write", "error", err)
+		}
+	})
+	defer func() {
+		if !stop() {
+			<-done
+		}
+	}()
+	return m.writeFrameUntilContext(ctx, conn, data, deadline)
+}
+
+var ErrUncertainWrite = errors.New("transport write outcome uncertain")

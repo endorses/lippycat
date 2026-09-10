@@ -668,26 +668,29 @@ func (s *OfflineLocatorStream) replay(parent context.Context, processor func(con
 						if err := ctx.Err(); err != nil {
 							return err
 						}
-						if err := visit(ctx, k.packetWithDecoder(data[i], s.devices, &decoder)); err != nil {
-							return err
-						}
-						// The optional legacy observer may retain its packet. Give
-						// it owned bytes, preserving its existing contract.
+						// Mutable observers run before delivery, with owned bytes
+						// they may retain. Preserve the borrowed fast path otherwise.
 						packetObserver.RLock()
 						observer := packetObserver.fn
 						packetObserver.RUnlock()
+						info := k.packetWithDecoder(data[i], s.devices, &decoder)
 						if observer != nil {
-							observer(k.packet(append([]byte(nil), data[i]...), s.devices))
+							observed := k.packet(append([]byte(nil), data[i]...), s.devices)
+							observer(&observed)
+							info.RADIUS = observed.RADIUS
+						}
+						if err := visit(ctx, info); err != nil {
+							return err
 						}
 						continue
 					}
 					owned := append([]byte(nil), data[i]...)
 					info := k.packet(owned, s.devices)
+					observePacket(&info)
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
 					case packets <- info:
-						observePacket(info)
 					}
 				}
 				return nil

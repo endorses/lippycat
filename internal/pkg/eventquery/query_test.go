@@ -98,3 +98,17 @@ func TestDurationBooleanAndInvalidQueries(t *testing.T) {
 		assert.Error(t, err, q)
 	}
 }
+
+func TestRADIUSProjectionUsesObservationSchema(t *testing.T) {
+	event := events.NewRADIUSEvent(envelope())
+	event.Code, event.Identifier = 2, 42
+	event.ObservationID, event.Association = "observation", "unique"
+	event.Attributes = []string{"1:hex:616c696365"}
+	projection := Project(event)
+	require.Equal(t, events.KindRADIUS, projection.Kind)
+	require.Contains(t, projection.Summary, "code=2 id=42")
+	require.Equal(t, []any{"observation"}, projection.Fields["observation_id"].Values)
+	pred, err := Compile("616c696365")
+	require.NoError(t, err)
+	require.True(t, pred(event))
+}

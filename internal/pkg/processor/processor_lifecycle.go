@@ -316,6 +316,9 @@ func (p *Processor) registerGRPCServices(registrar grpc.ServiceRegistrar) {
 // Safe to call multiple times — only the first call performs cleanup.
 func (p *Processor) Shutdown() error {
 	p.shutdownOnce.Do(func() {
+		p.radiusMu.Lock()
+		p.radiusCapture.Close()
+		p.radiusMu.Unlock()
 		logger.Info("Shutting down processor")
 
 		if p.cancel != nil {

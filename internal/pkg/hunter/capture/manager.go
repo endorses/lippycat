@@ -7,17 +7,23 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 )
 
 // Manager handles packet capture lifecycle
 type Manager struct {
+	captureOptions capture.CaptureOptions
+	radiusPorts    []uint16
+	radiusBoundary atomic.Int64
 	// Configuration
 	interfaces    []string
 	baseFilter    string
@@ -36,20 +42,24 @@ type Manager struct {
 
 // Config contains capture manager configuration
 type Config struct {
-	Interfaces    []string // Network interfaces to capture on
-	BaseFilter    string   // Base BPF filter
-	BufferSize    int      // Packet buffer size
-	ProcessorAddr string   // Processor address (for automatic port exclusion)
+	ReassembleIPFragments bool
+	RADIUSPorts           []uint16
+	Interfaces            []string // Network interfaces to capture on
+	BaseFilter            string   // Base BPF filter
+	BufferSize            int      // Packet buffer size
+	ProcessorAddr         string   // Processor address (for automatic port exclusion)
 }
 
 // New creates a new capture manager
 func New(config Config, mainCtx context.Context) *Manager {
 	return &Manager{
-		interfaces:    config.Interfaces,
-		baseFilter:    config.BaseFilter,
-		bufferSize:    config.BufferSize,
-		processorAddr: config.ProcessorAddr,
-		mainCtx:       mainCtx,
+		captureOptions: capture.CaptureOptions{ReassembleIPFragments: config.ReassembleIPFragments},
+		radiusPorts:    append([]uint16(nil), config.RADIUSPorts...),
+		interfaces:     config.Interfaces,
+		baseFilter:     config.BaseFilter,
+		bufferSize:     config.BufferSize,
+		processorAddr:  config.ProcessorAddr,
+		mainCtx:        mainCtx,
 	}
 }
 
@@ -100,7 +110,7 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 		//
 		// By passing nil as the processor, we indicate that we own the buffer and
 		// will read from it externally (via the forwarding manager).
-		capture.InitWithBuffer(m.captureCtx, devices, bpfFilter, m.packetBuffer, nil, nil)
+		capture.InitWithBuffer(m.captureCtx, devices, bpfFilter, m.packetBuffer, nil, nil, m.captureOptions)
 	}()
 
 	logger.Info("Packet capture started", "interfaces", m.interfaces)
@@ -116,14 +126,8 @@ func (m *Manager) Restart(dynamicFilters []*management.Filter) error {
 	oldCaptureCancel := m.captureCancel
 	logger.Debug("Saved old capture state", "has_done_channel", oldCaptureDone != nil, "has_cancel_func", oldCaptureCancel != nil)
 
-	// Start new capture first (this creates new context and cancel function)
-	// We do this BEFORE cancelling the old one so we don't lose the cancel function
-	logger.Debug("Starting new capture with updated filters")
-	if err := m.Start(dynamicFilters); err != nil {
-		return err
-	}
-
-	// Now cancel the OLD capture context (after Start() created the new one)
+	// Stop the old generation before opening replacement handles. Its final
+	// packets must remain on the old side of the RADIUS capture boundary.
 	if oldCaptureCancel != nil {
 		logger.Debug("Cancelling old capture context")
 		oldCaptureCancel()
@@ -137,13 +141,17 @@ func (m *Manager) Restart(dynamicFilters []*management.Filter) error {
 		case <-oldCaptureDone:
 			logger.Debug("Old capture goroutines exited cleanly")
 		case <-time.After(5 * time.Second):
-			logger.Warn("Timeout waiting for old capture to stop, proceeding anyway")
+			return fmt.Errorf("timeout waiting for old capture to stop")
 		}
 	} else {
 		logger.Debug("No old capture to wait for (first start)")
 	}
 
-	return nil
+	// Publish the boundary only after old readers have stopped. Queued packets
+	// from their drain cannot seed or inherit association in the new epoch.
+	m.radiusBoundary.Store(time.Now().UnixNano())
+	logger.Debug("Starting new capture with updated filters")
+	return m.Start(dynamicFilters)
 }
 
 // ApplyInitialFilters installs the processor's first BPF policy after capture
@@ -227,11 +235,16 @@ func (m *Manager) buildProcessorPortExclusionFilter() string {
 // buildCombinedBPFFilter builds a combined BPF filter from config and dynamic filters
 func (m *Manager) buildCombinedBPFFilter(filters []*management.Filter) string {
 	var dynamicFilters []string
+	hasRADIUS := false
 
 	// Collect dynamic BPF filters (only enabled ones)
 	for _, filter := range filters {
 		if !filter.Enabled {
 			continue
+		}
+
+		if sharedfilter.IsRADIUSFilter(filter.Type) {
+			hasRADIUS = true
 		}
 
 		// Only BPF type filters are applied directly
@@ -287,5 +300,19 @@ func (m *Manager) buildCombinedBPFFilter(filters []*management.Filter) string {
 		}
 	}
 
+	if hasRADIUS && finalFilter != "" {
+		// Preserve both directions and all competing requests, including configured
+		// service ports. Exact RADIUS selection happens only after correlation.
+		finalFilter = fmt.Sprintf("(%s) or %s", finalFilter, radius.CaptureBPF(m.radiusPorts...))
+	}
 	return finalFilter
+}
+
+// CaptureBoundary distinguishes queued packets from a previous capture configuration.
+func (m *Manager) CaptureBoundary() time.Time {
+	n := m.radiusBoundary.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
 }

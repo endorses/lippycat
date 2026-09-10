@@ -18,9 +18,10 @@ import (
 // Strings and containers have uint32 lengths; containers, pointers and bools
 // use one-byte presence/value markers. Timestamps use int64 seconds + uint32 ns.
 var compactFieldNames = map[reflect.Type][]string{
+	reflect.TypeOf(types.RADIUSMetadata{}):    {"Code", "CodeName", "Identifier", "MessageLength", "Association", "ObservationID", "RequestID", "Attributes"},
 	reflect.TypeOf(compactRow{}):              {"Argument", "Interface", "Sequence", "Locator", "Context", "PhysicalOrdinal", "OriginalCaptured", "OriginalWire", "OriginalLink", "Derived", "Captured", "Original", "Timestamp", "SrcIP", "DstIP", "SrcPort", "DstPort", "Protocol", "Info", "Node", "Device", "Transport", "Length", "LinkType", "Projection", "NodeRef", "DeviceRef", "ContextRef"},
 	reflect.TypeOf(compactProjection{}):       {"Presence", "User", "From", "To", "CallID", "Method", "Codec", "FromTag", "ToTag", "IMSI", "IMEI", "Status", "IsRTP", "SequenceNum", "SSRC", "QueryName", "QueryType", "QueryResponseTimeMs", "AnswerPresent", "TTL", "SNI", "JA3", "Host", "Path", "HTTPMethod", "StatusCode", "ContentLength"},
-	reflect.TypeOf(compactMetadata{}):         {"VoIP", "DNS", "Email", "TLS", "HTTP"},
+	reflect.TypeOf(compactMetadata{}):         {"VoIP", "DNS", "Email", "TLS", "HTTP", "RADIUS"},
 	reflect.TypeOf(compactOverrides{}):        {"Mask", "Metadata"},
 	reflect.TypeOf(Locator{}):                 {"BackingID", "Offset", "Length", "Digest"},
 	reflect.TypeOf(CaptureContext{}):          {"Format", "ByteOrder", "SectionID", "InterfaceID", "LinkType", "Snaplen", "TimestampResolutionBase", "TimestampResolutionExponent", "TimestampOffset", "TimestampMissing"},
@@ -571,7 +572,7 @@ func compactDetailMemory(detail *Detail, max uint64) (uint64, error) {
 	if err := addBudget(&n, uint64(len(p.RawData)), max); err != nil {
 		return n, err
 	}
-	for _, metadata := range [...]any{p.VoIPData, p.DNSData, p.EmailData, p.TLSData, p.HTTPData} {
+	for _, metadata := range [...]any{p.VoIPData, p.DNSData, p.EmailData, p.TLSData, p.HTTPData, p.RADIUSData} {
 		if err := measureMemory(reflect.ValueOf(metadata), &n, max); err != nil {
 			return n, err
 		}

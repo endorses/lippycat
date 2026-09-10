@@ -80,6 +80,8 @@ func canonicalRecord(event events.Event) (logstream.Record, bool) {
 		build = records.SSL
 	case events.KindHTTP:
 		build = records.HTTP
+	case events.KindRADIUS:
+		build = records.RADIUS
 	case events.KindSMTP:
 		build = records.SMTP
 	case events.KindFileMetadata:
@@ -122,6 +124,8 @@ func Summary(event events.Event) string {
 		return strings.TrimSpace(fmt.Sprintf("%s %s%s status=%d", e.Method, e.Host, e.URI, e.StatusCode))
 	case events.TLSEvent:
 		return strings.TrimSpace(fmt.Sprintf("%s %s %s", e.ServerName, e.Version, e.ValidationStatus))
+	case events.RADIUSEvent:
+		return fmt.Sprintf("RADIUS code=%d id=%d %s", e.Code, e.Identifier, e.Association)
 	case events.SMTPEvent:
 		return strings.TrimSpace(fmt.Sprintf("%s -> %s %s", e.MailFrom, strings.Join(e.Recipients, ","), e.Subject))
 	case events.ConnEvent:

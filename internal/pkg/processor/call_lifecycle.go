@@ -105,6 +105,7 @@ type CallLifecycleRegistry struct {
 // CallAdmission represents one accepted critical section. Release must be
 // called when the irreversible sink-acceptance step has completed.
 type CallAdmission struct {
+	admittedAt  time.Time
 	registry    *CallLifecycleRegistry
 	call        *lifecycleCall
 	releaseOnce sync.Once
@@ -188,7 +189,7 @@ func (r *CallLifecycleRegistry) admit(callID string, requiredGeneration uint64) 
 	}
 	call.inflight++
 	r.totalInflight++
-	return &CallAdmission{registry: r, call: call}, nil
+	return &CallAdmission{registry: r, call: call, admittedAt: now}, nil
 }
 
 func (r *CallLifecycleRegistry) release(call *lifecycleCall) {

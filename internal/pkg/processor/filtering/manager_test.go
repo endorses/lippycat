@@ -8,6 +8,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestManager_AddAndRemoveChannel(t *testing.T) {
@@ -218,7 +219,8 @@ func TestManager_Update_ChannelFull(t *testing.T) {
 	hunterID := "hunter-slow"
 	// Create channel with capacity 1
 	manager.channelsMu.Lock()
-	manager.channels[hunterID] = make(chan *management.FilterUpdate, 1)
+	failedChannel := make(chan *management.FilterUpdate, 1)
+	manager.channels[hunterID] = failedChannel
 	manager.channelsMu.Unlock()
 
 	filter := &management.Filter{
@@ -251,16 +253,44 @@ func TestManager_Update_ChannelFull(t *testing.T) {
 	// Verify failure was tracked
 	assert.Greater(t, atomic.LoadUint32(&failureCount), uint32(0),
 		"should track filter update failure")
+	// Drain the already queued update, then observe EOF: the hunter must
+	// reconnect instead of retaining the policy whose update was dropped.
+	<-failedChannel
+	_, open := <-failedChannel
+	require.False(t, open)
+	reconnect, snapshot := manager.SubscribeSnapshot(hunterID)
+	require.Len(t, snapshot, 1)
+	require.Equal(t, filter2.Id, snapshot[0].Id)
+	manager.RemoveChannel(hunterID, failedChannel)
+	_, err = manager.Delete(filter2.Id)
+	require.NoError(t, err)
+	require.Equal(t, management.FilterUpdateType_UPDATE_DELETE, (<-reconnect).UpdateType)
+	manager.RemoveChannel(hunterID, reconnect)
+
 }
 
 func TestManager_Update_ConcurrentSends(t *testing.T) {
 	manager := NewManager("", nil, nil, nil, nil)
 
 	numHunters := 10
+	numUpdates := 50
+	var receivers sync.WaitGroup
 	channels := make(map[string]chan *management.FilterUpdate)
 	for i := 0; i < numHunters; i++ {
 		hunterID := "hunter-" + string(rune('0'+i))
-		channels[hunterID] = manager.AddChannel(hunterID)
+		ch := manager.AddChannel(hunterID)
+		channels[hunterID] = ch
+		// Model connected hunters consuming updates. Timeout behavior is covered
+		// separately; unread queues obscure the concurrent delivery assertion.
+		receivers.Add(1)
+		go func() {
+			defer receivers.Done()
+			count := 0
+			for range ch {
+				count++
+			}
+			assert.Equal(t, numUpdates, count, "hunter %s must receive every update", hunterID)
+		}()
 	}
 
 	filter := &management.Filter{
@@ -272,7 +302,6 @@ func TestManager_Update_ConcurrentSends(t *testing.T) {
 
 	// Send multiple updates concurrently
 	var wg sync.WaitGroup
-	numUpdates := 50
 	for i := 0; i < numUpdates; i++ {
 		wg.Add(1)
 		go func() {
@@ -283,11 +312,11 @@ func TestManager_Update_ConcurrentSends(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify all hunters received at least one update
+	// Close streams after all sends, then verify each hunter drained its updates.
 	for hunterID, filterChan := range channels {
-		assert.Greater(t, len(filterChan), 0,
-			"hunter %s should have received updates", hunterID)
+		manager.RemoveChannel(hunterID, filterChan)
 	}
+	receivers.Wait()
 }
 
 func TestManager_Update_NoHuntersConnected(t *testing.T) {

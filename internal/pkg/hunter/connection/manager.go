@@ -41,6 +41,7 @@ type Config struct {
 	BatchTimeout  time.Duration
 	VoIPMode      bool // Determines filter capabilities advertised to processor (legacy)
 	// Filter capabilities advertised to processor
+	RADIUSIngress        bool     // Observation-aware capture and provenance transport are installed.
 	SupportedFilterTypes []string // If set, overrides VoIPMode-based defaults
 	// TLS settings
 	TLSEnabled            bool
@@ -522,20 +523,27 @@ func (m *Manager) register() error {
 	if m.config.ForwardMode == "events" {
 		requestedMode = management.ForwardingMode_FORWARDING_MODE_EVENTS
 	}
+	var radiusVersion uint32
+	if m.config.RADIUSIngress {
+		radiusVersion = 1
+		filterTypes = append(append([]string(nil), filterTypes...), "radius_username", "radius_mac", "radius_attribute", "radius_compound")
+	}
+
 	req := &management.HunterRegistration{
 		HunterId:   m.config.HunterID,
 		Hostname:   hostname,
 		Interfaces: m.config.Interfaces,
 		Version:    version.GetVersion(),
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:     filterTypes,
-			MaxBufferSize:   uint64(m.config.BufferSize * 2048), // #nosec G115 - Assume 2KB avg packet
-			GpuAcceleration: false,                              // TODO: detect GPU
-			AfXdp:           false,                              // TODO: detect AF_XDP
+			FilterTypes:         filterTypes,
+			RadiusFilterVersion: radiusVersion,
+			MaxBufferSize:       uint64(m.config.BufferSize * 2048), // #nosec G115 - Assume 2KB avg packet
+			GpuAcceleration:     false,                              // TODO: detect GPU
+			AfXdp:               false,                              // TODO: detect AF_XDP
 		},
 		EventForwarding: &management.EventForwardingCapabilities{
 			RequestedMode: requestedMode, EventApiMajors: []uint32{1},
-			EventKinds: []int32{1, 2, 3, 4, 5, 6}, SemanticProfileRevision: 1,
+			EventKinds: []int32{1, 2, 3, 4, 5, 6, 7}, SemanticProfileRevision: 1,
 			StatefulAnalysisFeatures: []string{"tcp_reassembly", "connection_tracking", "file_metadata"},
 			SensitiveEnrichment:      viper.GetBool("logs.include_http_headers"),
 			MaxSpoolBytes:            m.config.EventSpoolMaxBytes, MaxSpoolAgeSeconds: uint64(max(m.config.EventSpoolMaxAge/time.Second, 0)),
@@ -604,7 +612,7 @@ func validateAcceptedEventProfile(resp *management.RegistrationResponse) error {
 	for _, kind := range resp.GetAcceptedEventKinds() {
 		acceptedKinds[kind] = struct{}{}
 	}
-	for _, required := range []int32{1, 2, 3, 4, 5, 6} {
+	for _, required := range []int32{1, 2, 3, 4, 5, 6, 7} {
 		if _, ok := acceptedKinds[required]; !ok {
 			return fmt.Errorf("required event kind %d was not accepted", required)
 		}

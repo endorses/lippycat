@@ -12,13 +12,14 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestValidateAcceptedEventProfile(t *testing.T) {
 	valid := &management.ProcessorRegistrationResponse{
 		AcceptedEventApiMajor:           1,
 		AcceptedSemanticProfileRevision: 1,
-		AcceptedEventKinds:              []int32{1, 2, 3, 4, 5, 6},
+		AcceptedEventKinds:              []int32{1, 2, 3, 4, 5, 6, 7},
 	}
 	require.NoError(t, validateAcceptedEventProfile(valid))
 
@@ -33,10 +34,9 @@ func TestValidateAcceptedEventProfile(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response := *valid
-			response.AcceptedEventKinds = append([]int32(nil), valid.AcceptedEventKinds...)
-			test.mutate(&response)
-			require.ErrorContains(t, validateAcceptedEventProfile(&response), test.want)
+			response := proto.Clone(valid).(*management.ProcessorRegistrationResponse)
+			test.mutate(response)
+			require.ErrorContains(t, validateAcceptedEventProfile(response), test.want)
 		})
 	}
 }

@@ -40,6 +40,8 @@ Press `Ctrl+C` to stop. lippycat prints a summary of packets captured.
 sudo lc sniff -i eth0 --format text
 ```
 
+See [Working with JSON Output](#working-with-json-output) for piping, filtering, and saving packet output.
+
 Use `-q` (quiet mode) to suppress packet output for better performance when you only need PCAP file output.
 
 ### Basic Filtering
@@ -92,6 +94,53 @@ Logging is off by default. Output is Zeek-style TSV by default, or JSONL with
 shutdown to flush files. See [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
 for all schemas, flags, rotation, completeness semantics, and privacy guidance.
 
+## Working with JSON Output
+
+All protocol analyzers share the same JSON output structure based on `PacketDisplay`. Every packet has common fields (timestamp, source/destination IP and port, protocol, length) plus an optional protocol-specific metadata object (`VoIPData`, `DNSData`, `TLSData`, `HTTPData`, or `EmailData`).
+
+### stdout/stderr Separation
+
+lippycat follows Unix conventions: packet data goes to stdout, log messages go to stderr. This means you can pipe packet data cleanly while still seeing logs:
+
+```bash
+# Pipe packets to jq, logs still visible on terminal
+sudo lc sniff dns -i eth0 | jq '.DNSData.QueryName'
+
+# Redirect logs to a file, pipe packets to processing
+sudo lc sniff dns -i eth0 2>dns-capture.log | jq '.DNSData.QueryName'
+
+# Discard logs entirely
+sudo lc sniff dns -i eth0 2>/dev/null | jq '.DNSData.QueryName'
+```
+
+### Cross-Protocol Analysis
+
+Because all protocols share the same base fields, you can capture without a protocol subcommand and filter by protocol-specific metadata in `jq`:
+
+```bash
+# General capture, then filter for DNS and TLS
+sudo lc sniff -i eth0 2>/dev/null | \
+  jq -r 'if .DNSData then
+    "DNS: " + .DNSData.QueryName
+  elif .TLSData then
+    "TLS: " + (.TLSData.SNI // "no-sni")
+  else empty end'
+```
+
+### Saving and Replaying
+
+Combine JSON output with PCAP writing for both structured analysis and full packet fidelity:
+
+```bash
+# Write PCAP and JSON simultaneously
+sudo lc sniff dns -i eth0 -w dns-traffic.pcap 2>/dev/null > dns-analysis.jsonl
+
+# Replay the PCAP later with a different protocol analyzer
+lc sniff tls -r dns-traffic.pcap
+```
+
+The PCAP file contains the raw packets and can be re-analyzed with any protocol subcommand or opened in Wireshark.
+
 ## Protocol Modes
 
 `lc sniff` has protocol-specific subcommands that enable deep analysis. Each adds protocol-aware filtering, correlation, and output.
@@ -106,14 +155,14 @@ Captures DNS queries and responses with query/response correlation and response 
 
 **Key flags:**
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--domain` | — | Filter by domain pattern (glob: `*.example.com`) |
-| `--domains-file` | — | Load domain patterns from file |
-| `--dns-port` | `53` | DNS port(s), comma-separated |
-| `--udp-only` | `false` | Capture UDP DNS only (skip TCP) |
-| `--track-queries` | `true` | Query/response correlation with RTT |
-| `--detect-tunneling` | `true` | DNS tunneling detection via entropy analysis |
+| Flag                 | Default | Description                                      |
+| -------------------- | ------- | ------------------------------------------------ |
+| `--domain`           | —       | Filter by domain pattern (glob: `*.example.com`) |
+| `--domains-file`     | —       | Load domain patterns from file                   |
+| `--dns-port`         | `53`    | DNS port(s), comma-separated                     |
+| `--udp-only`         | `false` | Capture UDP DNS only (skip TCP)                  |
+| `--track-queries`    | `true`  | Query/response correlation with RTT              |
+| `--detect-tunneling` | `true`  | DNS tunneling detection via entropy analysis     |
 
 ### TLS Inspection
 
@@ -125,15 +174,15 @@ Analyzes TLS handshakes without decrypting traffic. Extracts SNI, certificate de
 
 **Key flags:**
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--sni` | — | Filter by SNI pattern (glob: `*.example.com`) |
-| `--sni-file` | — | Load SNI patterns from file |
-| `--ja3` | — | Filter by JA3 fingerprint hash |
-| `--ja3s` | — | Filter by JA3S fingerprint hash |
-| `--ja4` | — | Filter by JA4 fingerprint |
-| `--tls-port` | `443` | TLS port(s), comma-separated |
-| `--track-connections` | `true` | ClientHello/ServerHello correlation |
+| Flag                  | Default | Description                                   |
+| --------------------- | ------- | --------------------------------------------- |
+| `--sni`               | —       | Filter by SNI pattern (glob: `*.example.com`) |
+| `--sni-file`          | —       | Load SNI patterns from file                   |
+| `--ja3`               | —       | Filter by JA3 fingerprint hash                |
+| `--ja3s`              | —       | Filter by JA3S fingerprint hash               |
+| `--ja4`               | —       | Filter by JA4 fingerprint                     |
+| `--tls-port`          | `443`   | TLS port(s), comma-separated                  |
+| `--track-connections` | `true`  | ClientHello/ServerHello correlation           |
 
 Each fingerprint flag has a corresponding `-file` variant for bulk loading from files.
 
@@ -147,19 +196,19 @@ Reconstructs HTTP request/response pairs from TCP streams with RTT measurement.
 
 **Key flags:**
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--host` | — | Filter by host pattern (glob) |
-| `--path` | — | Filter by URL path pattern (glob) |
-| `--method` | — | Filter by HTTP methods (`GET,POST`) |
-| `--status` | — | Filter by status codes (`404`, `4xx`, `400-499`) |
-| `--user-agent` | — | Filter by User-Agent pattern |
-| `--content-type` | — | Filter by Content-Type pattern |
-| `--capture-body` | `false` | Enable body capture for keyword matching |
-| `--max-body-size` | `65536` | Max body size in bytes |
-| `--http-port` | `80,8080,8000,3000,8888` | HTTP port(s) |
-| `--tls-keylog` | — | SSLKEYLOGFILE path for HTTPS decryption |
-| `--track-requests` | `true` | Request/response correlation with RTT |
+| Flag               | Default                  | Description                                      |
+| ------------------ | ------------------------ | ------------------------------------------------ |
+| `--host`           | —                        | Filter by host pattern (glob)                    |
+| `--path`           | —                        | Filter by URL path pattern (glob)                |
+| `--method`         | —                        | Filter by HTTP methods (`GET,POST`)              |
+| `--status`         | —                        | Filter by status codes (`404`, `4xx`, `400-499`) |
+| `--user-agent`     | —                        | Filter by User-Agent pattern                     |
+| `--content-type`   | —                        | Filter by Content-Type pattern                   |
+| `--capture-body`   | `false`                  | Enable body capture for keyword matching         |
+| `--max-body-size`  | `65536`                  | Max body size in bytes                           |
+| `--http-port`      | `80,8080,8000,3000,8888` | HTTP port(s)                                     |
+| `--tls-keylog`     | —                        | SSLKEYLOGFILE path for HTTPS decryption          |
+| `--track-requests` | `true`                   | Request/response correlation with RTT            |
 
 Each pattern flag has a corresponding `-file` variant for bulk loading (e.g., `--hosts-file`, `--paths-file`). Bulk keyword matching uses the Aho-Corasick algorithm via `--keywords-file`.
 
@@ -173,18 +222,18 @@ Captures SMTP, IMAP, and POP3 sessions with session tracking.
 
 **Key flags:**
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--address` | — | Filter by email address (sender OR recipient) |
-| `--sender` | — | Filter by sender address (MAIL FROM) |
-| `--recipient` | — | Filter by recipient address (RCPT TO) |
-| `--subject` | — | Filter by subject pattern |
-| `--protocol` | `all` | Protocol: `smtp`, `imap`, `pop3`, `all` |
-| `--smtp-port` | `25,587,465` | SMTP port(s) |
-| `--imap-port` | `143,993` | IMAP port(s) |
-| `--pop3-port` | `110,995` | POP3 port(s) |
-| `--capture-body` | `false` | Enable body capture |
-| `--track-sessions` | `true` | Session tracking and correlation |
+| Flag               | Default      | Description                                   |
+| ------------------ | ------------ | --------------------------------------------- |
+| `--address`        | —            | Filter by email address (sender OR recipient) |
+| `--sender`         | —            | Filter by sender address (MAIL FROM)          |
+| `--recipient`      | —            | Filter by recipient address (RCPT TO)         |
+| `--subject`        | —            | Filter by subject pattern                     |
+| `--protocol`       | `all`        | Protocol: `smtp`, `imap`, `pop3`, `all`       |
+| `--smtp-port`      | `25,587,465` | SMTP port(s)                                  |
+| `--imap-port`      | `143,993`    | IMAP port(s)                                  |
+| `--pop3-port`      | `110,995`    | POP3 port(s)                                  |
+| `--capture-body`   | `false`      | Enable body capture                           |
+| `--track-sessions` | `true`       | Session tracking and correlation              |
 
 ### VoIP Analysis
 
@@ -208,18 +257,18 @@ sudo lc sniff voip -i eth0 -R 8000-9000
 
 **Key flags:**
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--sip-user` | `-u` | — | SIP user/phone to match (wildcards, comma-separated) |
-| `--sip-port` | `-S` | — | SIP port(s), comma-separated |
-| `--rtp-port-range` | `-R` | `10000-32768` | RTP port range(s) |
-| `--udp-only` | `-U` | `false` | Legacy UDP-only mode; hidden and deprecated |
-| `--tcp-performance-mode` | `-M` | — | TCP profile: `balanced`, `throughput`, `latency`, `memory` |
-| `--gpu-backend` | `-g` | `auto` | GPU backend in CUDA builds: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
-| `--pcap-grace-period` | — | `5s` | Grace period before closing per-call PCAPs |
-| `--esp-null` | — | `false` | Decapsulate ESP via trailer/SPI validation |
-| `--esp-heuristic` | — | `false` | Decapsulate ESP by sniffing payload content |
-| `--esp-icv-size` | — | `-1` (auto) | ICV size in bytes: `0`, `8`, `12`, or `16` |
+| Flag                     | Short | Default       | Description                                                                  |
+| ------------------------ | ----- | ------------- | ---------------------------------------------------------------------------- |
+| `--sip-user`             | `-u`  | —             | SIP user/phone to match (wildcards, comma-separated)                         |
+| `--sip-port`             | `-S`  | —             | SIP port(s), comma-separated                                                 |
+| `--rtp-port-range`       | `-R`  | `10000-32768` | RTP port range(s)                                                            |
+| `--udp-only`             | `-U`  | `false`       | Legacy UDP-only mode; hidden and deprecated                                  |
+| `--tcp-performance-mode` | `-M`  | —             | TCP profile: `balanced`, `throughput`, `latency`, `memory`                   |
+| `--gpu-backend`          | `-g`  | `auto`        | GPU backend in CUDA builds: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
+| `--pcap-grace-period`    | —     | `5s`          | Grace period before closing per-call PCAPs                                   |
+| `--esp-null`             | —     | `false`       | Decapsulate ESP via trailer/SPI validation                                   |
+| `--esp-heuristic`        | —     | `false`       | Decapsulate ESP by sniffing payload content                                  |
+| `--esp-icv-size`         | —     | `-1` (auto)   | ICV size in bytes: `0`, `8`, `12`, or `16`                                   |
 
 #### ESP-NULL Decapsulation
 
@@ -273,12 +322,12 @@ For more advanced per-call PCAP features (directory organization, filename patte
 
 TCP reassembly is needed for SIP-over-TCP and HTTP. lippycat offers pre-configured performance profiles via `-M` / `--tcp-performance-mode`:
 
-| Profile | Memory Budget | Best For |
-|---------|--------------|----------|
-| `balanced` | 100 MB | Most use cases (default) |
-| `throughput` | 500 MB | High-traffic environments |
-| `latency` | 200 MB | Real-time analysis |
-| `memory` | 25 MB | Embedded systems, low traffic |
+| Profile      | Memory Budget | Best For                      |
+| ------------ | ------------- | ----------------------------- |
+| `balanced`   | 100 MB        | Most use cases (default)      |
+| `throughput` | 500 MB        | High-traffic environments     |
+| `latency`    | 200 MB        | Real-time analysis            |
+| `memory`     | 25 MB         | Embedded systems, low traffic |
 
 ```bash
 sudo lc sniff voip -i eth0 -M throughput
@@ -306,11 +355,11 @@ sudo lc sniff voip -i eth0 -g auto
 
 The `sniff voip` GPU flags are registered only in CUDA builds, such as binaries built with `make build-cuda`.
 
-| Backend | Flag Value | Requirements |
-|---------|-----------|-------------|
-| CUDA | `cuda` | NVIDIA GPU + CUDA toolkit, `make build-cuda` |
-| CPU SIMD | `cpu-simd` | AVX2 or SSE4.2 support |
-| Auto-detect | `auto` | Selects best available |
+| Backend     | Flag Value | Requirements                                 |
+| ----------- | ---------- | -------------------------------------------- |
+| CUDA        | `cuda`     | NVIDIA GPU + CUDA toolkit, `make build-cuda` |
+| CPU SIMD    | `cpu-simd` | AVX2 or SSE4.2 support                       |
+| Auto-detect | `auto`     | Selects best available                       |
 
 OpenCL is not currently implemented. The value is accepted for configuration compatibility but falls back to CPU matching. SIP parsing and Call-ID extraction also remain CPU operations.
 
@@ -326,13 +375,28 @@ sudo lc sniff voip -i eth0 -V --vif-name lc0
 
 This creates a `lc0` TAP interface that other tools (Wireshark, tcpdump) can capture from, seeing only the filtered traffic lippycat selected.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-V` / `--virtual-interface` | `false` | Enable virtual interface |
-| `--vif-name` | `lc0` | Interface name |
-| `--vif-type` | `tap` | Type: `tap` (Layer 2) or `tun` (Layer 3) |
-| `--vif-startup-delay` | `3s` | Delay before injection starts |
-| `--vif-replay-timing` | `false` | Respect original PCAP packet timing |
-| `--vif-buffer-size` | `65536` | Injection queue size (packets) |
-| `--vif-netns` | — | Network namespace for isolation |
-| `--vif-drop-privileges` | — | Drop to this user after interface creation |
+| Flag                         | Default | Description                                |
+| ---------------------------- | ------- | ------------------------------------------ |
+| `-V` / `--virtual-interface` | `false` | Enable virtual interface                   |
+| `--vif-name`                 | `lc0`   | Interface name                             |
+| `--vif-type`                 | `tap`   | Type: `tap` (Layer 2) or `tun` (Layer 3)   |
+| `--vif-startup-delay`        | `3s`    | Delay before injection starts              |
+| `--vif-replay-timing`        | `false` | Respect original PCAP packet timing        |
+| `--vif-buffer-size`          | `65536` | Injection queue size (packets)             |
+| `--vif-netns`                | —       | Network namespace for isolation            |
+| `--vif-drop-privileges`      | —       | Drop to this user after interface creation |
+
+## RADIUS
+
+Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
+authentication and accounting capture. `lc process` stays protocol-neutral and
+existing watch commands display RADIUS metadata. Ordinary capture does not need
+an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
+across commands; optional raw format-11 X2 delivery requires a current authorized
+X2Only task in an LI build.
+
+The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
+configuration examples, scope isolation, NatParas mappings, state limits and
+MDF setup. Synthetic direct hunt/process verification has passed with upgraded
+peers; relay-origin X2 authorization is unsupported. External operator known-line
+verification and receiving-MDF agreement remain pending.

@@ -238,7 +238,7 @@ func startVoipSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 		capture.RunOfflineOrdered(devices, filter, processor)
 	} else {
 		// For live mode, run with signal handler (waits for Ctrl+C)
-		capture.RunWithSignalHandler(devices, filter, processor)
+		capture.RunWithSignalHandler(devices, filter, processor, capture.CaptureOptions{ReassembleIPFragments: true})
 	}
 }
 

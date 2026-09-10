@@ -1,0 +1,224 @@
+package source
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/radius"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
+	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/testutil/radiusfixture"
+)
+
+type radiusSourceFilter struct{ predicate *radius.Predicate }
+
+func TestLocalRADIUSCapabilityExcludesVoIPReassemblyMode(t *testing.T) {
+	for _, mode := range []string{"", "generic", "dns", "voip"} {
+		t.Run(mode, func(t *testing.T) {
+			config := DefaultLocalSourceConfig()
+			config.ProtocolMode = mode
+			s := NewLocalSource(config)
+			defer s.radiusProcessor.Close()
+			s.SetApplicationFilter(&radiusSourceFilter{})
+			require.Equal(t, mode != "voip", s.SupportsRADIUS())
+		})
+	}
+}
+
+func (*radiusSourceFilter) MatchPacket(gopacket.Packet) bool                    { return false }
+func (*radiusSourceFilter) MatchPacketWithIDs(gopacket.Packet) (bool, []string) { return false, nil }
+func (*radiusSourceFilter) MatchPacketLevelWithIDs(gopacket.Packet) (bool, []string) {
+	return false, nil
+}
+func (f *radiusSourceFilter) MatchRADIUSObservation(o *radius.Observation) (bool, []string, []radius.AttributionReference) {
+	ref, ok, err := f.predicate.Reference(o)
+	if err != nil || !ok {
+		return false, nil, nil
+	}
+	return true, []string{"user"}, []radius.AttributionReference{ref}
+}
+func (f *radiusSourceFilter) RADIUSEvidenceCurrent(r radius.AttributionReference) bool {
+	return f.predicate.CurrentReference(r)
+}
+
+func TestLocalRADIUSSelectionBeforeUnmatchedGate(t *testing.T) {
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, file.Close()) }()
+	reader, err := pcapgo.NewReader(file)
+	require.NoError(t, err)
+	var packets []capture.PacketInfo
+	for i := 0; i < 2; i++ {
+		raw, ci, err := reader.ReadPacketData()
+		require.NoError(t, err)
+		packet := gopacket.NewPacket(raw, reader.LinkType(), gopacket.Default)
+		packet.Metadata().CaptureInfo = ci
+		packets = append(packets, capture.PacketInfo{Packet: packet, LinkType: reader.LinkType(), Interface: "mirror0"})
+	}
+	predicate, err := radius.CompilePredicate(radius.PredicateSpec{Kind: radius.PredicateUserName, Value: "alice@example.test", FilterID: "user", FilterRevision: 1})
+	require.NoError(t, err)
+	for _, competitor := range []bool{false, true} {
+		name := "unique"
+		if competitor {
+			name = "unmatched_competitor"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := NewLocalSource(DefaultLocalSourceConfig())
+			defer s.radiusProcessor.Close()
+			s.ctx = context.Background()
+			s.SetApplicationFilter(&radiusSourceFilter{predicate: predicate})
+			require.True(t, s.SupportsRADIUS())
+			input := make(chan capture.PacketInfo, 3)
+			input <- packets[0]
+			if competitor {
+				raw := append([]byte(nil), packets[0].Packet.Data()...)
+				// Ethernet + IPv4 + UDP, then Authenticator and the first User-Name AVP.
+				raw[14+20+8+4] ^= 1
+				raw[14+20+8+20+2] = 'b'
+				packet := gopacket.NewPacket(raw, layers.LinkTypeEthernet, gopacket.Default)
+				packet.Metadata().CaptureInfo = packets[0].Packet.Metadata().CaptureInfo
+				input <- capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: "mirror0"}
+			}
+			input <- packets[1]
+			close(input)
+			s.batchingWorker(input)
+			batch := <-s.Batches()
+			if competitor {
+				require.Len(t, batch.Envelopes, 1)
+				return
+			}
+			require.Len(t, batch.Envelopes, 2)
+			request, response := batch.Envelopes[0], batch.Envelopes[1]
+			require.Equal(t, radius.AssociationUnique, response.RADIUS.Association.Status)
+			require.Len(t, response.RADIUS.Inherited, 1)
+			require.Equal(t, request.RADIUS.Association.RequestInstanceID, response.RADIUS.Association.RequestInstanceID)
+			require.Equal(t, packets[1].Packet.Data(), response.Data)
+			require.True(t, packets[1].Packet.Metadata().Timestamp.Equal(response.CaptureTime))
+			require.Empty(t, response.MatchedFilterIDs, "RADIUS references must never enter generic LI IDs")
+		})
+	}
+}
+
+func TestRADIUSCaptureBoundaryRejectsQueuedOldRequest(t *testing.T) {
+	processor, err := radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "tap"})
+	require.NoError(t, err)
+	defer processor.Close()
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, file.Close()) }()
+	reader, err := pcapgo.NewReader(file)
+	require.NoError(t, err)
+	var packets []gopacket.Packet
+	for i := 0; i < 2; i++ {
+		raw, ci, err := reader.ReadPacketData()
+		require.NoError(t, err)
+		packet := gopacket.NewPacket(raw, reader.LinkType(), gopacket.Default)
+		packet.Metadata().CaptureInfo = ci
+		packets = append(packets, packet)
+	}
+	request := processor.Process(packets[0], reader.LinkType(), "mirror", nil)
+	require.Equal(t, radius.AssociationRequest, request.Association.Status)
+	boundary := packets[0].Metadata().Timestamp.Add(time.Millisecond)
+	require.NoError(t, processor.AdvanceBoundary(boundary))
+	old := processor.Process(packets[0], reader.LinkType(), "mirror", nil)
+	require.Equal(t, radius.AssociationMissing, old.Association.Status)
+	response := processor.Process(packets[1], reader.LinkType(), "mirror", nil)
+	require.Equal(t, radius.AssociationMissing, response.Association.Status)
+	require.NotEqual(t, request.Scope.Epoch, response.Scope.Epoch)
+	require.NoError(t, processor.AdvanceBoundary(boundary))
+	next := processor.Process(packets[1], reader.LinkType(), "mirror", nil)
+	require.Equal(t, response.Scope.Epoch, next.Scope.Epoch)
+}
+
+func TestRADIUSCaptureBoundaryIncludesDrainingOldHandle(t *testing.T) {
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, file.Close()) }()
+	reader, err := pcapgo.NewReader(file)
+	require.NoError(t, err)
+	var packets []gopacket.Packet
+	for i := 0; i < 2; i++ {
+		raw, ci, err := reader.ReadPacketData()
+		require.NoError(t, err)
+		packet := gopacket.NewPacket(raw, reader.LinkType(), gopacket.Default)
+		packet.Metadata().CaptureInfo = ci
+		packets = append(packets, packet)
+	}
+	predicate, err := radius.CompilePredicate(radius.PredicateSpec{Kind: radius.PredicateUserName, Value: "alice@example.test", FilterID: "user", FilterRevision: 1})
+	require.NoError(t, err)
+	matcher := &radiusSourceFilter{predicate: predicate}
+	s := NewLocalSource(DefaultLocalSourceConfig())
+	defer s.radiusProcessor.Close()
+	s.started = true
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	defer s.cancel()
+	s.captureDone = make(chan struct{})
+	s.captureCancel = func() {
+		// An old handle can return its last packet after the restart begins,
+		// while cancellation and handle closure are still draining. The batching
+		// worker processes that queued packet after SetBPFFilter releases s.mu.
+		packets[0].Metadata().Timestamp = time.Now()
+		close(s.captureDone)
+		// Avoid opening a real live handle in this unit test.
+		s.cancel()
+	}
+	require.NoError(t, s.SetBPFFilter("udp"))
+	request := s.radiusProcessor.Process(packets[0], reader.LinkType(), "mirror", matcher)
+	require.NotNil(t, request)
+	require.Len(t, request.Direct, 1)
+	packets[1].Metadata().Timestamp = time.Now()
+	response := s.radiusProcessor.Process(packets[1], reader.LinkType(), "mirror", matcher)
+	require.NotNil(t, response)
+	require.Empty(t, response.Inherited, "an old-handle request must not survive the capture restart gap")
+	require.Equal(t, radius.AssociationMissing, response.Association.Status)
+
+	// Fresh traffic can associate normally within the replacement generation.
+	packets[0].Metadata().Timestamp = time.Now()
+	fresh := s.radiusProcessor.Process(packets[0], reader.LinkType(), "mirror", matcher)
+	require.Equal(t, radius.AssociationRequest, fresh.Association.Status)
+	packets[1].Metadata().Timestamp = time.Now()
+	response = s.radiusProcessor.Process(packets[1], reader.LinkType(), "mirror", matcher)
+	require.Equal(t, radius.AssociationUnique, response.Association.Status)
+	require.Len(t, response.Inherited, 1)
+	require.Equal(t, fresh.Association.RequestInstanceID, response.Association.RequestInstanceID)
+}
+
+func TestLocalRADIUSOnlyDropsUnrelatedAndMalformed(t *testing.T) {
+	file, err := os.Open(filepath.Join(radiusfixture.Write(t), "acceptance.pcap"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, file.Close()) }()
+	reader, err := pcapgo.NewReader(file)
+	require.NoError(t, err)
+	raw, ci, err := reader.ReadPacketData()
+	require.NoError(t, err)
+	cfg := DefaultLocalSourceConfig()
+	cfg.ProtocolMode = "radius"
+	s := NewLocalSource(cfg)
+	defer s.radiusProcessor.Close()
+	s.ctx = context.Background()
+	input := make(chan capture.PacketInfo, 3)
+	for _, kind := range []string{"unrelated", "malformed", "valid"} {
+		data := append([]byte(nil), raw...)
+		if kind == "unrelated" {
+			data[14+20], data[14+20+1], data[14+20+2], data[14+20+3] = 0, 53, 0, 53
+		}
+		if kind == "malformed" {
+			data[14+20+8+2], data[14+20+8+3] = 0, 19
+		}
+		packet := gopacket.NewPacket(data, reader.LinkType(), gopacket.Default)
+		packet.Metadata().CaptureInfo = ci
+		input <- capture.PacketInfo{Packet: packet, LinkType: reader.LinkType(), Interface: "mirror0"}
+	}
+	close(input)
+	s.batchingWorker(input)
+	batch := <-s.Batches()
+	require.Len(t, batch.Envelopes, 1)
+	require.Equal(t, raw, batch.Envelopes[0].Data)
+}

@@ -25,7 +25,7 @@ import (
 type StatelessDecoder func(context.Context, []byte, Summary) (types.PacketDisplay, error)
 
 const compactHeaderBytes = 32
-const compactSchemaMinor = 1
+const compactSchemaMinor = 2
 const compactBlockHeaderBytes = 72
 const compactRows = 128
 const compactRowSlotBytes = 1024
@@ -77,11 +77,12 @@ type compactRow struct {
 }
 
 type compactMetadata struct {
-	VoIP  *types.VoIPMetadata
-	DNS   *types.DNSMetadata
-	Email *types.EmailMetadata
-	TLS   *types.TLSMetadata
-	HTTP  *types.HTTPMetadata
+	VoIP   *types.VoIPMetadata
+	DNS    *types.DNSMetadata
+	Email  *types.EmailMetadata
+	TLS    *types.TLSMetadata
+	HTTP   *types.HTTPMetadata
+	RADIUS *types.RADIUSMetadata
 }
 
 type compactOverrides struct {
@@ -90,7 +91,7 @@ type compactOverrides struct {
 }
 
 func metadataOf(p types.PacketDisplay) compactMetadata {
-	return compactMetadata{p.VoIPData, p.DNSData, p.EmailData, p.TLSData, p.HTTPData}
+	return compactMetadata{p.VoIPData, p.DNSData, p.EmailData, p.TLSData, p.HTTPData, p.RADIUSData}
 }
 func (m compactMetadata) apply(p *types.PacketDisplay) {
 	p.VoIPData = m.VoIP
@@ -98,6 +99,7 @@ func (m compactMetadata) apply(p *types.PacketDisplay) {
 	p.EmailData = m.Email
 	p.TLSData = m.TLS
 	p.HTTPData = m.HTTP
+	p.RADIUSData = m.RADIUS
 }
 func (r compactRow) summary(id PacketID) Summary {
 	p := types.PacketDisplay{Timestamp: r.Timestamp, SrcIP: r.SrcIP, DstIP: r.DstIP, SrcPort: r.SrcPort, DstPort: r.DstPort, Protocol: r.Protocol, Info: r.Info, NodeID: r.Node, Interface: r.Device, Transport: r.Transport, Length: r.Length, LinkType: r.LinkType}
@@ -423,13 +425,17 @@ func metadataDifference(a, b compactMetadata) compactOverrides {
 		result.Mask |= 1 << 4
 		result.Metadata.HTTP = a.HTTP
 	}
+	if a.RADIUS != b.RADIUS && !reflect.DeepEqual(a.RADIUS, b.RADIUS) {
+		result.Mask |= 1 << 5
+		result.Metadata.RADIUS = a.RADIUS
+	}
 	return result
 }
 func (o compactOverrides) apply(p *types.PacketDisplay) {
 	v := reflect.ValueOf(&o.Metadata).Elem()
 	m := metadataOf(*p)
 	target := reflect.ValueOf(&m).Elem()
-	for i := 0; i < 5; i++ {
+	for i := 0; i < v.NumField(); i++ {
 		if o.Mask&(1<<i) != 0 {
 			target.Field(i).Set(v.Field(i))
 		}
@@ -628,7 +634,7 @@ func (d *diskDataset) readCompactRow(ctx context.Context, id PacketID, withMetad
 	}
 	err = decodeCompactValue(p2, &overrides, d.storage.limits.MaxRecordBytes)
 	held += more
-	if err != nil || overrides.Mask&^uint8(31) != 0 {
+	if err != nil || overrides.Mask&^uint8(63) != 0 {
 		d.storage.releaseMemory(held)
 		return row, overrides, 0, errors.Join(err, errors.New("compact invalid metadata override"))
 	}

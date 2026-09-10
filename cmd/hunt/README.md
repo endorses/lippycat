@@ -5,6 +5,7 @@ The `hunt` command runs lippycat as a hunter node - a lightweight edge capture a
 ## Overview
 
 Hunters capture packets at the network edge and forward matched packets to processor nodes via gRPC. This distributed architecture allows:
+
 - Scalable packet capture across multiple network segments
 - Edge filtering to reduce bandwidth
 - Centralized analysis and monitoring
@@ -72,9 +73,11 @@ credential-adjacent data.
 Captures all packets (or BPF-filtered packets) and forwards to processor.
 
 **Required Flags:**
+
 - `-P, --processor` - Processor address (host:port) **[REQUIRED]**
 
 **Hunter Configuration:**
+
 - `-I, --id` - Unique hunter identifier (default: hostname)
 - `-i, --interface` - Network interfaces to capture (comma-separated, default: any)
 - `-f, --filter` - BPF filter expression
@@ -84,17 +87,20 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--esp-icv-size` - ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires `--esp-null`
 
 **Performance Tuning:**
+
 - `-b, --buffer-size` - Packet buffer size (default: 10000)
 - `--batch-size` - Packets per batch sent to processor (default: 64)
 - `--batch-timeout` - Batch timeout in milliseconds (default: 100ms)
 - `--batch-queue-size` - Batch queue buffer size (default: 1000, 0 = auto)
 
 **VoIP Filtering:**
+
 - `--enable-voip-filter` - Enable GPU-accelerated VoIP filtering at edge
 - `--gpu-backend` - GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd` (default: auto)
 - `--gpu-batch-size` - Batch size for GPU processing (default: 100)
 
 **Pattern Matching Algorithm:**
+
 - `--pattern-algorithm` - Pattern matching algorithm: `auto`, `linear`, `aho-corasick` (default: auto)
   - `auto`: Selects Aho-Corasick for 100+ patterns, linear scan otherwise
   - `linear`: O(n×m) linear scan - simple, low memory, good for <100 patterns
@@ -102,6 +108,7 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--pattern-buffer-mb` - Memory budget for pattern buffer in MB (default: 64)
 
 **Disk Buffer (Nuclear-Proof Resilience):**
+
 - `--disk-buffer` - Enable disk overflow buffer for extended disconnections
 - `--disk-buffer-dir` - Directory for buffer files (default: /var/tmp/lippycat-buffer)
 - `--disk-buffer-max-mb` - Maximum disk buffer size in MB (default: 1024)
@@ -116,6 +123,7 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--event-spool-exhaustion-policy` - `drop_oldest` (default) or `drop_new`
 
 **TLS/Security (TLS enabled by default):**
+
 - `--tls-cert` - Path to client TLS certificate (for mutual TLS)
 - `--tls-key` - Path to client TLS key (for mutual TLS)
 - `--tls-ca` - Path to CA certificate for server verification (required for TLS)
@@ -127,12 +135,14 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 DNS hunter mode captures and forwards DNS queries/responses to the processor.
 
 **Features:**
+
 - DNS query/response capture
 - Domain pattern filtering at edge
 - DNS tunneling detection forwarding
 - UDP and TCP DNS support
 
 **DNS-Specific Flags:**
+
 - `--dns-port` - DNS port(s) to capture, comma-separated (default: `53`)
 - `--udp-only` - Capture UDP DNS only (ignore TCP DNS)
 
@@ -159,12 +169,14 @@ lc hunt dns \
 Email hunter mode captures and forwards email protocol traffic (SMTP, IMAP, POP3) to the processor.
 
 **Features:**
+
 - SMTP, IMAP, POP3 capture
 - Protocol-specific filtering at edge
 - Session correlation forwarding
 - Address pattern matching
 
 **Email-Specific Flags:**
+
 - `--protocol` - Email protocol: `smtp`, `imap`, `pop3`, `all` (default: `all`)
 - `--smtp-port` - SMTP port(s) (default: `25,587,465`)
 - `--imap-port` - IMAP port(s) (default: `143,993`)
@@ -196,12 +208,14 @@ lc hunt email \
 HTTP hunter mode captures and forwards HTTP traffic to the processor for content analysis.
 
 **Features:**
+
 - HTTP request/response capture
 - Host/path filtering at edge
 - Method and status filtering
 - TCP stream forwarding
 
 **HTTP-Specific Flags:**
+
 - `--http-port` - HTTP port(s) (default: `80,8080,8000,3000,8888`)
 - `--host` - Filter by host pattern (glob-style)
 - `--path` - Filter by path pattern (glob-style)
@@ -230,6 +244,7 @@ lc hunt http \
 TLS hunter mode captures TLS handshakes and forwards them to the processor for fingerprint analysis.
 
 **Features:**
+
 - TLS ClientHello/ServerHello capture
 - JA3/JA3S/JA4 fingerprint extraction
 - SNI filtering at edge
@@ -238,6 +253,7 @@ TLS hunter mode captures TLS handshakes and forwards them to the processor for f
 **Note:** SNI and fingerprint filtering is managed by the processor and pushed to hunters.
 
 **TLS-Specific Flags:**
+
 - `--tls-port` - TLS port(s) to capture, comma-separated (default: `443`)
 
 **Example:**
@@ -262,6 +278,7 @@ lc hunt tls \
 VoIP hunter mode provides intelligent call buffering and filtering:
 
 **Features:**
+
 - SIP header extraction (From, To, P-Asserted-Identity)
 - SDP parsing for RTP port discovery
 - Per-call packet buffering (SIP + RTP packets)
@@ -271,6 +288,7 @@ VoIP hunter mode provides intelligent call buffering and filtering:
 - BPF filter optimization for high-traffic networks
 
 **BPF Filter Optimization Flags:**
+
 - `--udp-only` - Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)
 - `--sip-port` - Restrict SIP capture to specific port(s), comma-separated
 - `--rtp-port-range` - Custom RTP port range(s), comma-separated (default: 10000-32768)
@@ -330,11 +348,11 @@ Filters are managed centrally by the processor and pushed to hunters via the fil
 
 Filters support wildcard patterns for flexible matching:
 
-| Pattern | Type | Description |
-|---------|------|-------------|
-| `alice` | Contains | Substring match (backward compatible) |
-| `*456789` | Suffix | Matches any prefix + `456789` |
-| `alice*` | Prefix | Matches `alice` + any suffix |
+| Pattern   | Type     | Description                           |
+| --------- | -------- | ------------------------------------- |
+| `alice`   | Contains | Substring match (backward compatible) |
+| `*456789` | Suffix   | Matches any prefix + `456789`         |
+| `alice*`  | Prefix   | Matches `alice` + any suffix          |
 
 This is particularly useful for phone number matching where the same number may appear in different formats (E.164, 00-prefix, tech prefixes like `*31#`).
 
@@ -402,6 +420,7 @@ lc hunt --processor processor:55555 \
 ```
 
 **Behavior:**
+
 - Memory queue holds ~64K packets (1000 batches × 64 packets)
 - When memory queue is full, batches overflow to disk
 - Disk buffer can hold millions of packets (1GB ≈ 15M packets)
@@ -410,6 +429,7 @@ lc hunt --processor processor:55555 \
 - Graceful degradation: If disk is full, oldest batches are dropped
 
 **Use Cases:**
+
 - Laptop sleep/resume scenarios
 - Extended network outages (hours/days)
 - Processor maintenance windows
@@ -418,6 +438,7 @@ lc hunt --processor processor:55555 \
 ### Circuit Breaker
 
 Automatically prevents connection thrashing when processor is down:
+
 - Opens circuit after 5 consecutive connection failures
 - Waits 30s before retry (prevents resource exhaustion)
 - Half-open state: Limited test connections before full recovery
@@ -446,6 +467,7 @@ lc hunt --processor processor:55555 \
 ```
 
 **Guidelines:**
+
 - **Low latency**: batch-size 16-32, timeout 50-100ms
 - **Balanced**: batch-size 64-128, timeout 100-200ms
 - **High throughput**: batch-size 256-512, timeout 500-1000ms
@@ -466,6 +488,7 @@ lc hunt --enable-voip-filter --gpu-backend cpu-simd
 ```
 
 **When to use:**
+
 - High packet rates (>10,000 pps)
 - Many concurrent SIP calls
 - Hunter has dedicated GPU
@@ -497,8 +520,8 @@ hunter:
     gpu_batch_size: 100
 
   # Pattern matching algorithm (for VoIP user/phone filtering)
-  pattern_algorithm: "auto"    # auto, linear, or aho-corasick
-  pattern_buffer_mb: 64        # Memory budget for pattern buffer
+  pattern_algorithm: "auto" # auto, linear, or aho-corasick
+  pattern_buffer_mb: 64 # Memory budget for pattern buffer
 
   # VoIP BPF filter optimization (for lc hunt voip)
   voip:
@@ -574,3 +597,18 @@ lc hunt --enable-voip-filter --gpu-backend cpu-simd  # Fallback to CPU
 - [docs/SECURITY.md](../../docs/SECURITY.md) - TLS/mTLS setup and certificate management
 - [docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md) - Production deployment patterns
 - [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) - Performance tuning guide
+
+## RADIUS capture
+
+`lc hunt radius` observes visible UDP authentication and accounting on 1812/1813
+and additional `--radius-port` ports. Shared `--radius-username`, `--radius-mac`,
+`--radius-attribute`, and scoped `--radius-line-profile` / `--radius-line-id`
+predicates use exact, conjunctive matching. Ordinary capture needs no LI build
+or task. The shared `radius.*` YAML keys and `LIPPYCAT_RADIUS_*` environment
+variables configure the same profiles and bounded transaction state.
+
+See the [RADIUS operator guide](../../docs/RADIUS.md) for flag defaults, supported
+messages, MAC and line mapping rules, mirrored BRAS/BNG deployment, counters and
+local tap and direct mutual-TLS hunt/process POI setup. Synthetic distributed
+release verification has passed with upgraded peers; external operator and MDF
+acceptance remain pending. Relays preserve ordinary outputs but cannot authorize X2.

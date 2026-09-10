@@ -46,6 +46,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
@@ -99,6 +100,7 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 		if err != nil {
 			return status.Errorf(codes.InvalidArgument, "invalid packet batch: %v", err)
 		}
+		internalBatch.RADIUSSourceTrusted = radiusStreamSourceTrusted(stream.Context(), batch.HunterId)
 		p.processBatch(internalBatch)
 
 		// Determine flow control state based on processor load
@@ -187,7 +189,7 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 
 const supportedEventSemanticProfile uint32 = 1
 
-var supportedIngressEventKinds = []int32{1, 2, 3, 4, 5, 6}
+var supportedIngressEventKinds = []int32{1, 2, 3, 4, 5, 6, 7}
 
 func negotiateEventForwarding(c *management.EventForwardingCapabilities) (management.ForwardingMode, uint32, []int32, uint32, string, error) {
 	if c == nil || c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_UNSPECIFIED || c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
@@ -319,7 +321,7 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	logger.Info("Filter subscription started", "hunter_id", hunterID)
 
 	// Create filter update channel for this hunter
-	filterChan := p.filterManager.AddChannel(hunterID)
+	filterChan, currentFilters := p.filterManager.SubscribeSnapshot(hunterID)
 
 	// Cleanup on disconnect
 	defer func() {
@@ -329,18 +331,23 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	}()
 
 	// Send current filters immediately
-	currentFilters := p.filterManager.GetForHunter(hunterID)
-	for _, filter := range currentFilters {
-		update := &management.FilterUpdate{
-			UpdateType: management.FilterUpdateType_UPDATE_ADD,
-			Filter:     filter,
-		}
-		if err := stream.Send(update); err != nil {
-			logger.Error("Failed to send initial filter", "error", err, "filter_id", filter.Id)
+	if req.SupportsSnapshot {
+		if err := stream.Send(&management.FilterUpdate{Snapshot: true, Filters: currentFilters}); err != nil {
 			return err
 		}
-	}
+	} else {
+		for _, filter := range currentFilters {
+			update := &management.FilterUpdate{
+				UpdateType: management.FilterUpdateType_UPDATE_ADD,
+				Filter:     filter,
+			}
+			if err := stream.Send(update); err != nil {
+				logger.Error("Failed to send initial filter", "error", err, "filter_id", filter.Id)
+				return err
+			}
+		}
 
+	}
 	logger.Info("Sent initial filters", "hunter_id", hunterID, "count", len(currentFilters))
 
 	// Stream filter updates
@@ -454,6 +461,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 
 	processorStats := p.statsCollector.GetProto()
 	p.populateLIEncodingStats(processorStats)
+	p.populateLIDeliveryStats(processorStats)
 
 	return &management.StatusResponse{
 		Hunters:        connectedHunters,
@@ -773,9 +781,24 @@ func (p *Processor) SubscribeTopology(req *management.TopologySubscribeRequest, 
 	}
 }
 
+// validateLocalRADIUSFilter checks local capability before committing any filter
+// state. Both local capture ingress and matching must be available.
+func (p *Processor) validateLocalRADIUSFilter(filter *management.Filter) error {
+	if filter == nil || !sharedfilter.IsRADIUSFilter(filter.Type) {
+		return nil
+	}
+	if localTarget, ok := p.filterTarget.(*filtering.LocalTarget); ok && !localTarget.SupportsFilterType(filter.Type) {
+		return status.Error(codes.FailedPrecondition, "local RADIUS ingress capability is not available")
+	}
+	return nil
+}
+
 // UpdateFilter adds or modifies a filter (Management Service)
 func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter) (*management.FilterUpdateResult, error) {
 	logger.Info("Update filter request", "filter_id", filter.Id, "type", filter.Type, "pattern", filter.Pattern)
+	if err := p.validateLocalRADIUSFilter(filter); err != nil {
+		return nil, err
+	}
 
 	// For tap mode (LocalTarget), also apply the filter locally to restart capture
 	// with updated BPF filter and application-layer filters
@@ -875,6 +898,12 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 	if routingDecision.IsLocal {
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
+		if err := p.validateLocalRADIUSFilter(req.Filter); err != nil {
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"filter_id", req.Filter.Id,
+				"chain_depth", 0)
+			return nil, err
+		}
 
 		huntersUpdated, err := p.filterManager.Update(req.Filter)
 		if err != nil {
@@ -1520,4 +1549,19 @@ func logAuditOperationResult(audit auditContext, targetProcessorID string, succe
 	} else {
 		logger.Warn("AUDIT: Operation failed", fields...)
 	}
+}
+
+// radiusStreamSourceTrusted admits only direct sources whose origin ID is bound
+// to a verified client certificate DNS SAN. Relayed origins require a separate
+// trust policy; a peer-supplied batch ID or registration is not source proof.
+func radiusStreamSourceTrusted(ctx context.Context, sourceID string) bool {
+	remote, ok := peer.FromContext(ctx)
+	if !ok || sourceID == "" {
+		return false
+	}
+	tlsInfo, ok := remote.AuthInfo.(credentials.TLSInfo)
+	if !ok || len(tlsInfo.State.VerifiedChains) == 0 || len(tlsInfo.State.PeerCertificates) == 0 {
+		return false
+	}
+	return tlsInfo.State.PeerCertificates[0].VerifyHostname(sourceID) == nil
 }

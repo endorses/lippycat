@@ -105,6 +105,7 @@ func TestCompactValueFixedWidthsAndCanonicalMaps(t *testing.T) {
 // Pin schema-v2 field order, field types, integer widths and sparse projection
 // groups. A declaration edit must never silently reinterpret completed blocks.
 func TestCompactValueSchemaFingerprint(t *testing.T) {
+	require.Equal(t, 2, compactSchemaMinor)
 	var schema bytes.Buffer
 	schema.WriteString("schema-v2; little-endian; int=8; timestamp=seconds8+nanos4; string=length4+bytes; container=presence1+length4; pointer=presence1; bool=1; float64=8; array=fixed-elements\n")
 	var structs []reflect.Type
@@ -131,7 +132,7 @@ func TestCompactValueSchemaFingerprint(t *testing.T) {
 		require.NoError(t, err)
 	}
 	digest := sha256.Sum256(schema.Bytes())
-	require.Equal(t, "4890bccf4a0cb30d4893d916e1e18f25fe6590b914bdc0f79d9ba40cbd7c8701", hex.EncodeToString(digest[:]), "schema-v2 changed: review compatibility and explicitly version the format")
+	require.Equal(t, "bfe061672c599bc200746a490a7f33c6d5b4d1f686b24781917386344a753fd9", hex.EncodeToString(digest[:]), "schema-v2 changed: review compatibility and explicitly version the format")
 }
 
 func TestCompactValueRejectsDuplicateMapKeys(t *testing.T) {

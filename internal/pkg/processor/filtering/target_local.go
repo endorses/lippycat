@@ -21,7 +21,9 @@ import (
 	"sync"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -75,7 +77,6 @@ func (t *LocalTarget) ApplyApplicationPolicy(policy LocalFilterPolicy) {
 // to an ApplicationFilter for userspace matching.
 type LocalTarget struct {
 	mu         sync.RWMutex
-	bpfApplyMu sync.Mutex
 	mutationMu sync.Mutex
 
 	// Active filters indexed by ID
@@ -121,6 +122,8 @@ func NewLocalTarget(cfg LocalTargetConfig) *LocalTarget {
 // SetBPFUpdater sets the BPF updater for applying kernel-level filters.
 // The updater is typically a LocalSource instance.
 func (t *LocalTarget) SetBPFUpdater(updater BPFUpdater) {
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.bpfUpdater = updater
@@ -132,6 +135,8 @@ func (t *LocalTarget) SetBPFUpdater(updater BPFUpdater) {
 // SetApplicationFilter sets the application filter for VoIP filtering.
 // The filter is typically a hunter.ApplicationFilter instance.
 func (t *LocalTarget) SetApplicationFilter(filter AppFilterUpdater) {
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.appFilterFunc = filter
@@ -140,12 +145,16 @@ func (t *LocalTarget) SetApplicationFilter(filter AppFilterUpdater) {
 // ApplyFilter adds or updates a filter.
 // Returns 1 if the filter was applied successfully, 0 otherwise.
 func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
 	if filter == nil || filter.Id == "" {
 		return 0, nil
 	}
 
-	t.mutationMu.Lock()
-	defer t.mutationMu.Unlock()
+	// Reject before mutation unless both capture ingress and matching are available.
+	if sharedfilter.IsRADIUSFilter(filter.Type) && !t.SupportsFilterType(filter.Type) {
+		return 0, fmt.Errorf("local RADIUS ingress capability is not available")
+	}
 
 	previous, next := t.candidateState(func(filters map[string]*management.Filter) {
 		filters[filter.Id] = cloneFilter(filter)
@@ -175,13 +184,17 @@ func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
 // rebuilds the Aho-Corasick automaton once at the end.
 // Returns the number of filters applied successfully.
 func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, error) {
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
 	if len(filters) == 0 {
 		return 0, nil
 	}
 
-	t.mutationMu.Lock()
-	defer t.mutationMu.Unlock()
-
+	for _, f := range filters {
+		if f != nil && sharedfilter.IsRADIUSFilter(f.Type) && !t.SupportsFilterType(f.Type) {
+			return 0, fmt.Errorf("local RADIUS ingress capability is not available")
+		}
+	}
 	var count uint32
 	previous, next := t.candidateState(func(candidate map[string]*management.Filter) {
 		for _, filter := range filters {
@@ -204,7 +217,9 @@ func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, er
 		case management.FilterType_FILTER_SIP_USER,
 			management.FilterType_FILTER_PHONE_NUMBER,
 			management.FilterType_FILTER_CALL_ID,
-			management.FilterType_FILTER_CODEC:
+			management.FilterType_FILTER_CODEC,
+			management.FilterType_FILTER_RADIUS_USERNAME, management.FilterType_FILTER_RADIUS_MAC,
+			management.FilterType_FILTER_RADIUS_ATTRIBUTE, management.FilterType_FILTER_RADIUS_COMPOUND:
 			enabledApp++
 		}
 	}
@@ -225,12 +240,11 @@ func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, er
 // RemoveFilter removes a filter by ID.
 // Returns 1 if the filter was removed successfully, 0 if not found.
 func (t *LocalTarget) RemoveFilter(filterID string) (uint32, error) {
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
 	if filterID == "" {
 		return 0, nil
 	}
-
-	t.mutationMu.Lock()
-	defer t.mutationMu.Unlock()
 
 	previous, next := t.candidateState(func(filters map[string]*management.Filter) {
 		delete(filters, filterID)
@@ -267,6 +281,13 @@ func (t *LocalTarget) GetActiveFilters() []*management.Filter {
 // LocalTarget supports BPF and IP_ADDRESS at kernel level, and VoIP filters
 // via ApplicationFilter.
 func (t *LocalTarget) SupportsFilterType(filterType management.FilterType) bool {
+	if sharedfilter.IsRADIUSFilter(filterType) {
+		t.mu.RLock()
+		defer t.mu.RUnlock()
+		source, ok := t.bpfUpdater.(interface{ SupportsRADIUS() bool })
+		matcher, matchOK := t.appFilterFunc.(interface{ SupportsRADIUS() bool })
+		return ok && matchOK && source.SupportsRADIUS() && matcher.SupportsRADIUS()
+	}
 	switch filterType {
 	case management.FilterType_FILTER_BPF,
 		management.FilterType_FILTER_IP_ADDRESS:
@@ -275,7 +296,9 @@ func (t *LocalTarget) SupportsFilterType(filterType management.FilterType) bool 
 	case management.FilterType_FILTER_SIP_USER,
 		management.FilterType_FILTER_PHONE_NUMBER,
 		management.FilterType_FILTER_CALL_ID,
-		management.FilterType_FILTER_CODEC:
+		management.FilterType_FILTER_CODEC,
+		management.FilterType_FILTER_RADIUS_USERNAME, management.FilterType_FILTER_RADIUS_MAC,
+		management.FilterType_FILTER_RADIUS_ATTRIBUTE, management.FilterType_FILTER_RADIUS_COMPOUND:
 		// These require ApplicationFilter (userspace)
 		// Only supported if we have an app filter configured
 		t.mu.RLock()
@@ -310,10 +333,7 @@ func (t *LocalTarget) applyPolicy(policy LocalFilterPolicy, bpfUpdater BPFUpdate
 	// Apply BPF only when its effective expression changed. Phone-number, SIP
 	// URI, Call-ID, and codec filters are userspace-only and must not restart
 	// live capture when their reconciliation leaves BPF unchanged.
-	t.bpfApplyMu.Lock()
-	defer t.bpfApplyMu.Unlock()
-	// Another reconciliation may have completed while this one was building its
-	// expression, so refresh the applied state after entering the serial region.
+	// mutationMu keeps the policy snapshot and updater stable through application.
 	var lastAppliedBPF string
 	var hasAppliedBPF bool
 	t.mu.RLock()
@@ -416,14 +436,32 @@ func (t *LocalTarget) buildPolicy(baseBPF string, filters map[string]*management
 		case management.FilterType_FILTER_BPF, management.FilterType_FILTER_IP_ADDRESS:
 			bpfFilters = append(bpfFilters, f)
 		case management.FilterType_FILTER_SIP_USER, management.FilterType_FILTER_PHONE_NUMBER,
-			management.FilterType_FILTER_CALL_ID, management.FilterType_FILTER_CODEC:
+			management.FilterType_FILTER_CALL_ID, management.FilterType_FILTER_CODEC,
+			management.FilterType_FILTER_RADIUS_USERNAME, management.FilterType_FILTER_RADIUS_MAC,
+			management.FilterType_FILTER_RADIUS_ATTRIBUTE, management.FilterType_FILTER_RADIUS_COMPOUND:
 			appFilters = append(appFilters, f)
 		}
 	}
 	sortFilters(all)
 	sortFilters(bpfFilters)
 	sortFilters(appFilters)
-	return LocalFilterPolicy{BaseBPF: baseBPF, BPFExpression: t.buildBPFExpression(baseBPF, bpfFilters), Filters: all, ApplicationFilters: appFilters}
+	bpfExpr := t.buildBPFExpression(baseBPF, bpfFilters)
+	for _, f := range appFilters {
+		if sharedfilter.IsRADIUSFilter(f.Type) {
+			if bpfExpr != "" {
+				visibility := radius.CaptureBPF()
+				t.mu.RLock()
+				source, ok := t.bpfUpdater.(interface{ RADIUSCaptureBPF() string })
+				t.mu.RUnlock()
+				if ok {
+					visibility = source.RADIUSCaptureBPF()
+				}
+				bpfExpr = "(" + bpfExpr + ") or " + visibility
+			}
+			break
+		}
+	}
+	return LocalFilterPolicy{BaseBPF: baseBPF, BPFExpression: bpfExpr, Filters: all, ApplicationFilters: appFilters}
 }
 
 func sortFilters(filters []*management.Filter) {
@@ -436,7 +474,7 @@ func effectivePoliciesEqual(a, b LocalFilterPolicy) bool {
 	}
 	for i := range a.ApplicationFilters {
 		af, bf := a.ApplicationFilters[i], b.ApplicationFilters[i]
-		if af.Id != bf.Id || af.Type != bf.Type || af.Pattern != bf.Pattern || af.Enabled != bf.Enabled {
+		if af.Id != bf.Id || af.Type != bf.Type || af.Pattern != bf.Pattern || af.Enabled != bf.Enabled || af.Revision != bf.Revision || !proto.Equal(af.Radius, bf.Radius) {
 			return false
 		}
 	}

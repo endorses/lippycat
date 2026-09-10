@@ -58,6 +58,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/stats"
 	"github.com/endorses/lippycat/internal/pkg/processor/subscriber"
 	"github.com/endorses/lippycat/internal/pkg/processor/upstream"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"google.golang.org/grpc"
@@ -98,12 +99,16 @@ type Config struct {
 	// API Key Authentication (for non-mTLS deployments)
 	AuthConfig *auth.Config // API key authentication configuration (alternative to mTLS)
 	// LI (Lawful Interception) settings - only functional with -tags li build
-	LIEnabled       bool   // Enable LI processing
-	LIX1ListenAddr  string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
-	LIX1TLSCertFile string // Path to X1 server TLS certificate
-	LIX1TLSKeyFile  string // Path to X1 server TLS key
-	LIX1TLSCAFile   string // Path to CA certificate for X1 client verification (mutual TLS)
-	LIADMFEndpoint  string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
+	LIEnabled                    bool // Enable LI processing
+	LIRADIUSScope                radius.ScopeBinding
+	LIRADIUSMACProfile           string
+	LIRADIUSCorrelationLifetime  time.Duration
+	LIRADIUSCorrelationStateFile string // Durable raw RADIUS correlation reservations; defaults to LIStateFile + .radius-correlation
+	LIX1ListenAddr               string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
+	LIX1TLSCertFile              string // Path to X1 server TLS certificate
+	LIX1TLSKeyFile               string // Path to X1 server TLS key
+	LIX1TLSCAFile                string // Path to CA certificate for X1 client verification (mutual TLS)
+	LIADMFEndpoint               string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
 	// LI ADMF client (X1 notifications) TLS settings - for connecting to ADMF
 	LIADMFTLSCertFile string // Path to client TLS certificate for ADMF notifications (mutual TLS)
 	LIADMFTLSKeyFile  string // Path to client TLS key for ADMF notifications
@@ -120,6 +125,18 @@ type Config struct {
 	LIDeliveryTLSCAFile                     string   // Path to CA certificate for verifying MDF servers
 	LIDeliveryTLSPinnedCert                 []string // Pinned certificate fingerprints for MDF servers (SHA256, hex encoded)
 	LIDeliveryQueueSize                     int
+	LIDeliveryX2QueueSize                   int
+	LIDeliveryX3QueueSize                   int
+	LIDeliveryX2QueueBytes                  int64
+	LIDeliveryX3QueueBytes                  int64
+	LIDeliveryX3MaxAge                      time.Duration
+	LIDeliveryMemoryBudgetBytes             int64
+	LIDeliveryX2SpoolDir                    string
+	LIDeliveryX2SpoolMaxBytes               int64
+	LIDeliveryX2SpoolKeyFile                string
+	LIDeliveryX2SpoolReplayPolicy           string
+	LIDeliveryX2SpoolReplayManifest         string
+	LIDeliveryX2SpoolExportManifest         string
 	LIDeliverySendTimeout                   time.Duration
 	LIDeliveryInitialBackoff                time.Duration
 	LIDeliveryMaxBackoff                    time.Duration
@@ -172,7 +189,9 @@ type StructuredLogConfig struct {
 
 // Processor represents a processor node
 type Processor struct {
-	config Config
+	radiusMu      sync.Mutex
+	radiusCapture *radius.CaptureProcessor
+	config        Config
 
 	// Protocol detector (for centralized detection)
 	detector *detector.Detector
@@ -230,7 +249,15 @@ type Processor struct {
 	vifManager vinterface.Manager
 
 	// LI (Lawful Interception) manager
-	liManager *li.Manager
+	liManager          *li.Manager
+	radiusLIStats      radiusDeliveryStats
+	radiusLILastReport time.Time
+	radiusLIMu         sync.Mutex
+	radiusLIStopped    bool
+	radiusLIAllocator  interface {
+		Allocate(*radius.Observation) (uint64, error)
+		Close() error
+	}
 
 	// TLS keylog writer for session key storage and file output
 	tlsKeylogWriter     *TLSKeylogWriter
@@ -340,10 +367,12 @@ func New(config Config) (*Processor, error) {
 		}
 		streams := logCfg.Streams
 		if len(streams) == 0 {
-			streams = []string{"conn", "dns", "ssl", "http", "smtp"}
+			streams = []string{"conn", "dns", "ssl", "http", "smtp", "radius"}
 		}
 		for _, stream := range streams {
 			switch stream {
+			case "radius":
+				err = p.logSink.Register(events.KindRADIUS, "radius", logrecords.RADIUS)
 			case "dns":
 				err = p.logSink.Register(events.KindDNS, "dns", logrecords.DNS)
 			case "smtp":
@@ -367,7 +396,7 @@ func New(config Config) (*Processor, error) {
 		if coalesceErr != nil {
 			return nil, fmt.Errorf("initialize structured log event coalescer: %w", coalesceErr)
 		}
-		if err = p.eventDispatcher.Register(coalescedLogs, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
+		if err = p.eventDispatcher.Register(coalescedLogs, events.KindRADIUS, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
 			return nil, fmt.Errorf("register structured log event sink: %w", err)
 		}
 	}
@@ -872,8 +901,14 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 	}
 
 	stats := localSource.Stats()
-	eventRuntimeStats := p.eventRuntime.Stats()
-	eventDispatcherStats := p.eventDispatcher.Stats()
+	var eventRuntimeStats eventanalysis.Stats
+	if p.eventRuntime != nil {
+		eventRuntimeStats = p.eventRuntime.Stats()
+	}
+	var eventDispatcherStats events.Stats
+	if p.eventDispatcher != nil {
+		eventDispatcherStats = p.eventDispatcher.Stats()
+	}
 	var upstreamLosses upstream.LossSnapshot
 	if p.upstreamEventRouter != nil {
 		upstreamLosses = p.upstreamEventRouter.Losses()
@@ -904,12 +939,20 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		caps.FilterTypes = []string{"bpf", "ip_address"}
 	}
 
+	if localSource.SupportsRADIUS() {
+		caps.RadiusFilterVersion = 1
+		caps.FilterTypes = append(caps.FilterTypes, "radius_username", "radius_mac", "radius_attribute", "radius_compound")
+	}
+
 	// Get active filter count
 	var activeFilters uint32
 	if p.filterTarget != nil {
 		activeFilters = uint32(len(p.filterTarget.GetActiveFilters())) // #nosec G115
 	}
-	detectorStats := detector.GetDefault().Telemetry()
+	var detectorStats detector.Telemetry
+	if d := detector.GetDefaultIfInitialized(); d != nil {
+		detectorStats = d.Telemetry()
+	}
 	pcapStats := p.sessionOutputManager.Telemetry()
 
 	return &management.ConnectedHunter{
@@ -955,6 +998,10 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 				CacheLastEvictionDurationNs: detectorStats.CacheLastEvictionDurationNs,
 				FlowLastEvictionBatchSize:   detectorStats.FlowLastEvictionBatchSize,
 				CacheLastEvictionBatchSize:  detectorStats.CacheLastEvictionBatchSize,
+				SipIpPairEntries:            detectorStats.SIPIPPairEntries,
+				SipIpPairMaxEntries:         detectorStats.SIPIPPairMaxEntries,
+				SipIpPairTtlEvictions:       detectorStats.SIPIPPairTTLEvictions,
+				SipIpPairCapEvictions:       detectorStats.SIPIPPairCapEvictions,
 			},
 			PcapWriter: &management.PcapWriterTelemetry{
 				ActiveWriters:              pcapStats.ActiveWriters,

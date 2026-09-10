@@ -71,34 +71,51 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 	contracts := map[string]tapProtocolContract{
 		"dns": {
 			cmd: dnsTapCmd, short: "Standalone DNS capture with full processor capabilities",
-			helpHash: "4124dc42b5258e687ffb3edc7380c32d6ac3f7ef4aa57d574349999ef5b298a0",
+			helpHash: "c99c83ff6b225c563b80a008648fbf9f07b1309115b861257ff37a4d9c723bb0",
 			flags:    tapFlagDefaults("detect-tunneling", "true", "dns-port", "53", "domain", "", "domains-file", "", "tunneling-command", "", "tunneling-debounce", "5m", "tunneling-threshold", "0.7", "udp-only", "false"),
 			bindings: tapBindings("detect-tunneling", "dns.detect_tunneling", "dns-port", "tap.dns.ports", "domain", "tap.dns.domain_pattern", "domains-file", "tap.dns.domains_file", "tunneling-command", "processor.tunneling_command", "tunneling-debounce", "processor.tunneling_debounce", "tunneling-threshold", "processor.tunneling_threshold", "udp-only", "tap.dns.udp_only"),
 		},
 		"http": {
 			cmd: httpTapCmd, short: "Standalone HTTP capture with full processor capabilities",
-			helpHash: "ff9907b780d29f68030505a33816f0dd6c165561833392051531e9eac82aaae7",
+			helpHash: "a8ae606521fa23af88b2d1a2316210e94e2cbfda5ef466813f772a5fe9527944",
 			flags:    tapFlagDefaults("capture-body", "false", "content-type", "", "content-types-file", "", "host", "", "hosts-file", "", "http-port", "80,8080,8000,3000,8888", "keywords-file", "", "max-body-size", "65536", "method", "", "path", "", "paths-file", "", "status", "", "tls-keylog", "", "tls-keylog-pipe", "", "user-agent", "", "user-agents-file", ""),
 			bindings: tapBindings("capture-body", "tap.http.capture_body", "content-type", "tap.http.content_type_pattern", "content-types-file", "tap.http.content_types_file", "host", "tap.http.host_pattern", "hosts-file", "tap.http.hosts_file", "http-port", "tap.http.ports", "keywords-file", "tap.http.keywords_file", "max-body-size", "tap.http.max_body_size", "method", "tap.http.methods", "path", "tap.http.path_pattern", "paths-file", "tap.http.paths_file", "status", "tap.http.status_codes", "tls-keylog", "tap.http.tls_keylog", "tls-keylog-pipe", "tap.http.tls_keylog_pipe", "user-agent", "tap.http.user_agent_pattern", "user-agents-file", "tap.http.user_agents_file"),
 		},
 		"tls": {
 			cmd: tlsTapCmd, short: "Standalone TLS capture with full processor capabilities",
-			helpHash: "af5d5df4ced3bb0753f852c100c9ea92ba479a8fb62649cfa32161a59696e5a2",
+			helpHash: "e7ebcda98ba27171dcda93ff9ced6d4c93bd89811ad09e13b363cb2d2ee53899",
 			flags:    tapFlagDefaults("sni", "", "sni-file", "", "tls-port", "443"),
 			bindings: tapBindings("sni", "tap.tls.sni_pattern", "sni-file", "tap.tls.sni_file", "tls-port", "tap.tls.ports"),
 		},
 		"email": {
 			cmd: emailTapCmd, short: "Standalone email capture with full processor capabilities",
-			helpHash: "3e072a2ad88e98bb79f54b6a4971c2f47f17e3ece7af13e842db54df3cbc651e",
+			helpHash: "601e73228f6c69dd047643705aaebb1d0aa8215e62c5ee4c89912d25c8aac533",
 			flags:    tapFlagDefaults("address", "", "addresses-file", "", "capture-body", "false", "command", "", "imap-port", "143,993", "keywords-file", "", "mailbox", "", "max-body-size", "65536", "pop3-port", "110,995", "protocol", "all", "recipient", "", "recipients-file", "", "sender", "", "senders-file", "", "smtp-port", "25,587,465", "subject", "", "subjects-file", ""),
 			bindings: tapBindings("address", "tap.email.address_pattern", "addresses-file", "tap.email.addresses_file", "capture-body", "tap.email.capture_body", "command", "tap.email.command_pattern", "imap-port", "tap.email.imap_ports", "keywords-file", "tap.email.keywords_file", "mailbox", "tap.email.mailbox_pattern", "max-body-size", "tap.email.max_body_size", "pop3-port", "tap.email.pop3_ports", "protocol", "tap.email.protocol", "recipient", "tap.email.recipient_pattern", "recipients-file", "tap.email.recipients_file", "sender", "tap.email.sender_pattern", "senders-file", "tap.email.senders_file", "smtp-port", "tap.email.smtp_ports", "subject", "tap.email.subject_pattern", "subjects-file", "tap.email.subjects_file"),
 		},
 		"voip": {
 			cmd: voipTapCmd, short: "Standalone VoIP capture with full processor capabilities",
-			helpHash: "f9acf7762316f92673b664408e932383fe848df351dbb0bfb02fd916e2d08fd3",
+			helpHash: "e32704527ba7ea5d8d01881e66c16a08436273b79c1d67410fe5ee5f4bbaf3ef",
 			flags:    tapFlagDefaults("pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-user", "", "sipuser", "", "tcp-performance-mode", "balanced", "tcp-reassembly-shards", "1", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
 			bindings: tapBindings("pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-user", "tap.voip.sip_user", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-reassembly-shards", "tap.voip.tcp_reassembly_shards", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
 		},
+	}
+
+	// LI builds include inherited delivery flags in protocol help. Keep separate
+	// complete-help snapshots so non-LI help remains an independent contract.
+	if TapCmd.PersistentFlags().Lookup("li-enabled") != nil {
+		liHashes := map[string]string{
+			"dns":   "39086ea79608d44d7eb4e08618521f25a8b33afd910fa82a2afa94e345a4b1e2",
+			"http":  "306dd56d357038979a0d0dced9c156722b36ebb24a24d985c433891686cee491",
+			"tls":   "259b88d4cb974bedb908f51e1a7b37bd0272de7a2294d7121d6a4afe930c8a7a",
+			"email": "544df278c61c31e5425f26212f8e82513e19291283644e2c837fcd93d8cf26b6",
+			"voip":  "a04218f073983a0d8f5cd62e12159de4abe7a29b37ca452c26655e05fb04f437",
+		}
+		for name, hash := range liHashes {
+			contract := contracts[name]
+			contract.helpHash = hash
+			contracts[name] = contract
+		}
 	}
 
 	for name, contract := range contracts {

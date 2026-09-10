@@ -26,9 +26,9 @@ func TestOfflineLocatorVisitorOrderAndObserverOwnership(t *testing.T) {
 	defer func() { require.NoError(t, stream.Close()) }()
 	var retained []PacketInfo
 	var borrowed *byte
-	restore := SetPacketObserver(func(info PacketInfo) {
+	restore := SetPacketObserver(func(info *PacketInfo) {
 		require.NotSame(t, borrowed, &info.Packet.Data()[0], "observers must receive owned raw bytes")
-		retained = append(retained, info)
+		retained = append(retained, *info)
 	})
 	defer restore()
 	visited := 0

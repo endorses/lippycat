@@ -11,18 +11,21 @@ import (
 )
 
 var (
-	// DefaultDetector is the global detector instance
-	DefaultDetector *Detector
+	// defaultDetector is the global detector instance
+	defaultDetector *Detector
 	once            sync.Once
+	defaultMu       sync.RWMutex
 )
 
 // InitDefault initializes the default detector with all signatures
 func InitDefault() *Detector {
 	once.Do(func() {
-		DefaultDetector = registerDefaultSignatures(New())
+		defaultMu.Lock()
+		defer defaultMu.Unlock()
+		defaultDetector = registerDefaultSignatures(New())
 	})
 
-	return DefaultDetector
+	return GetDefaultIfInitialized()
 }
 
 // NewWithDefaultSignatures creates an independently owned detector with the
@@ -76,8 +79,18 @@ func registerDefaultSignatures(d *Detector) *Detector {
 
 // GetDefault returns the default detector instance
 func GetDefault() *Detector {
-	if DefaultDetector == nil {
-		return InitDefault()
+	if d := GetDefaultIfInitialized(); d != nil {
+		return d
 	}
-	return DefaultDetector
+	return InitDefault()
+}
+
+// GetDefaultIfInitialized returns the existing default detector, or nil if
+// detection has never initialized it. Observability callers must use this
+// accessor to avoid creating detector state and cleanup goroutines. The lock
+// synchronizes reads with initialization and prevents partial publication.
+func GetDefaultIfInitialized() *Detector {
+	defaultMu.RLock()
+	defer defaultMu.RUnlock()
+	return defaultDetector
 }

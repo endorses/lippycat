@@ -18,6 +18,7 @@ type StatusJSON struct {
 	TotalFilters      uint32                      `json:"total_filters"`
 	UpstreamProcessor string                      `json:"upstream_processor,omitempty"`
 	LIEncoding        *management.LIEncodingStats `json:"li_encoding,omitempty"`
+	LIDelivery        *management.LIDeliveryStats `json:"li_delivery,omitempty"`
 }
 
 // HunterJSON represents a connected hunter in JSON-friendly format
@@ -34,24 +35,25 @@ type HunterJSON struct {
 
 // HunterStatsJSON represents hunter statistics in JSON-friendly format
 type HunterStatsJSON struct {
-	PacketsCaptured               uint64  `json:"packets_captured"`
-	PacketsMatched                uint64  `json:"packets_matched"`
-	PacketsForwarded              uint64  `json:"packets_forwarded"`
-	PacketsDropped                uint64  `json:"packets_dropped"`
-	CaptureBufferRegularDrops     uint64  `json:"capture_buffer_regular_drops"`
-	CaptureBufferSIPDrops         uint64  `json:"capture_buffer_sip_drops"`
-	BatchChannelDrops             uint64  `json:"batch_channel_drops"`
-	BufferBytes                   uint64  `json:"buffer_bytes"`
-	ActiveFilters                 uint32  `json:"active_filters"`
-	CPUPercent                    float64 `json:"cpu_percent"`
-	MemoryRSSBytes                uint64  `json:"memory_rss_bytes"`
-	MemoryLimitBytes              uint64  `json:"memory_limit_bytes,omitempty"`
-	RTPOwnershipUnresolved        uint64  `json:"rtp_ownership_unresolved"`
-	RTPOwnershipAmbiguous         uint64  `json:"rtp_ownership_ambiguous"`
-	IdentityInheritanceSuppressed uint64  `json:"identity_inheritance_suppressed"`
-	TCPEstablishedIdleRetentions  uint64  `json:"tcp_established_idle_retentions"`
-	TCPPreRearmDiscardedChunks    uint64  `json:"tcp_pre_rearm_discarded_chunks"`
-	TCPRearmRejectedChunks        uint64  `json:"tcp_rearm_rejected_chunks"`
+	Detector                      *management.DetectorTelemetry `json:"detector,omitempty"`
+	PacketsCaptured               uint64                        `json:"packets_captured"`
+	PacketsMatched                uint64                        `json:"packets_matched"`
+	PacketsForwarded              uint64                        `json:"packets_forwarded"`
+	PacketsDropped                uint64                        `json:"packets_dropped"`
+	CaptureBufferRegularDrops     uint64                        `json:"capture_buffer_regular_drops"`
+	CaptureBufferSIPDrops         uint64                        `json:"capture_buffer_sip_drops"`
+	BatchChannelDrops             uint64                        `json:"batch_channel_drops"`
+	BufferBytes                   uint64                        `json:"buffer_bytes"`
+	ActiveFilters                 uint32                        `json:"active_filters"`
+	CPUPercent                    float64                       `json:"cpu_percent"`
+	MemoryRSSBytes                uint64                        `json:"memory_rss_bytes"`
+	MemoryLimitBytes              uint64                        `json:"memory_limit_bytes,omitempty"`
+	RTPOwnershipUnresolved        uint64                        `json:"rtp_ownership_unresolved"`
+	RTPOwnershipAmbiguous         uint64                        `json:"rtp_ownership_ambiguous"`
+	IdentityInheritanceSuppressed uint64                        `json:"identity_inheritance_suppressed"`
+	TCPEstablishedIdleRetentions  uint64                        `json:"tcp_established_idle_retentions"`
+	TCPPreRearmDiscardedChunks    uint64                        `json:"tcp_pre_rearm_discarded_chunks"`
+	TCPRearmRejectedChunks        uint64                        `json:"tcp_rearm_rejected_chunks"`
 }
 
 // CapabilitiesJSON represents hunter capabilities in JSON-friendly format
@@ -92,6 +94,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 		status.TotalFilters = resp.ProcessorStats.TotalFilters
 		status.UpstreamProcessor = resp.ProcessorStats.UpstreamProcessor
 		status.LIEncoding = resp.ProcessorStats.LiEncoding
+		status.LIDelivery = resp.ProcessorStats.LiDelivery
 	}
 
 	return output.MarshalJSONPretty(status, pretty)
@@ -135,6 +138,7 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 
 	if h.Stats != nil {
 		hunter.Stats = &HunterStatsJSON{
+			Detector:                      h.Stats.Detector,
 			PacketsCaptured:               h.Stats.PacketsCaptured,
 			PacketsMatched:                h.Stats.PacketsMatched,
 			PacketsForwarded:              h.Stats.PacketsForwarded,

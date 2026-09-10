@@ -157,7 +157,7 @@ func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 		if program != nil {
 			program.Send(tui.CaptureTelemetryMsg(stats))
 		}
-	})
+	}, capture.CaptureOptions{ReassembleIPFragmentsWhen: tui.IsVoIPModeEnabled})
 }
 
 func localEventAnalysisOptions(filter string) tui.LocalEventAnalysisOptions {

@@ -13,19 +13,22 @@ lc
 │   ├── dns                DNS-specific capture
 │   ├── tls                TLS-specific capture
 │   ├── http               HTTP-specific capture
-│   └── email              Email-specific capture
+│   ├── email              Email-specific capture
+│   └── radius             RADIUS UDP capture
 ├── tap                    Standalone capture + processor
 │   ├── voip               VoIP standalone capture
 │   ├── dns                DNS standalone capture
 │   ├── tls                TLS standalone capture
 │   ├── http               HTTP standalone capture
-│   └── email              Email standalone capture
+│   ├── email              Email standalone capture
+│   └── radius             RADIUS standalone capture
 ├── hunt                   Distributed edge capture
 │   ├── voip               VoIP hunter
 │   ├── dns                DNS hunter
 │   ├── tls                TLS hunter
 │   ├── http               HTTP hunter
-│   └── email              Email hunter
+│   ├── email              Email hunter
+│   └── radius             RADIUS hunter
 ├── process                Central aggregation node
 ├── watch                  Interactive TUI
 │   ├── live               Live capture TUI
@@ -1080,3 +1083,12 @@ lc completion powershell > lc.ps1
 | `0`  | Success                                                   |
 | `1`  | General error (runtime failure, connection refused, etc.) |
 | `2`  | Usage error (invalid flags, missing required arguments)   |
+
+## RADIUS protocol commands
+
+`sniff radius`, `hunt radius` and `tap radius` share the flags listed in the
+[RADIUS operations reference](../part5-advanced/radius.md#shared-flags-and-configuration).
+`process` and `watch` keep their existing command structure. Ordinary commands
+work without LI; X1/X2 flags exist only in LI builds. Synthetic direct
+hunt/process verification has passed with upgraded peers; external MDF/operator
+acceptance remains pending and relays cannot authorize X2.

@@ -68,12 +68,12 @@ func TestCapabilityMatrix_CoversEveryAcceptedSchemaElement(t *testing.T) {
 
 	targets := map[string]string{
 		"E164Number": "supported", "SipUri": "supported", "TelUri": "supported", "Nai": "supported",
-		"Imsi": "rejected", "Imei": "rejected", "MacAddress": "rejected",
+		"Imsi": "rejected", "Imei": "rejected", "MacAddress": "supported",
 		"Ipv4Address": "rejected", "Ipv6Address": "rejected", "Ipv4Cidr": "rejected", "Ipv6Cidr": "rejected",
 		"TcpPort": "rejected", "TcpPortRange": "rejected", "TcpPortList": "rejected",
 		"UdpPort": "rejected", "UdpPortRange": "rejected", "UdpPortList": "rejected",
 		"EmailAddress": "rejected", "InternationalizedEmailAddress": "rejected",
-		"H323Uri": "rejected", "Impu": "rejected", "Impi": "rejected", "RadiusAttribute": "rejected",
+		"H323Uri": "rejected", "Impu": "rejected", "Impi": "rejected", "RadiusAttribute": "supported-partially",
 		"GtpuTunnelId": "rejected", "GtpcTunnelId": "rejected", "CallPartyRole": "rejected",
 		"NonLocalIdentifier": "rejected", "Supiimsi": "rejected", "Supinai": "rejected", "Suci": "rejected",
 		"PeiImei": "rejected", "PeiImeiCheckDigit": "rejected", "PeiImeisv": "rejected",

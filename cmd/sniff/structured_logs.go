@@ -19,6 +19,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/logstream"
 	logrecords "github.com/endorses/lippycat/internal/pkg/logstream/records"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -32,6 +33,7 @@ func registerStructuredLogFlags(cmd *cobra.Command) {
 type sniffEventSession struct {
 	dispatcher *events.Dispatcher
 	analysis   *eventanalysis.Runtime
+	radius     *radius.CaptureProcessor
 	filtered   bool
 }
 
@@ -39,17 +41,22 @@ type sniffEventSession struct {
 // optional structured-log output. The observer is best-effort and cannot block
 // the packet display/output pipeline.
 func withEventAnalysis(inputFiles []string, analysisProfile, effectiveFilter string, run func()) {
+	withEventAnalysisMode(inputFiles, analysisProfile, effectiveFilter, false, func(*sniffEventSession) { run() })
+}
+
+func withEventAnalysisMode(inputFiles []string, analysisProfile, effectiveFilter string, pipelineOwned bool, run func(*sniffEventSession)) {
 	dir := viper.GetString("logs.dir")
 	s, err := newSniffEventSession(dir, inputFiles, analysisProfile, nil)
 	if err != nil {
 		logger.Error("Failed to initialize normalized event analysis", "error", err)
-		run()
+		run(nil)
 		return
 	}
 	s.filtered = strings.TrimSpace(effectiveFilter) != ""
-	restore := capture.SetPacketObserver(s.observe)
-	defer restore()
 	defer func() {
+		if s.radius != nil {
+			s.radius.Close()
+		}
 		s.analysis.EOF()
 		s.analysis.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -58,7 +65,17 @@ func withEventAnalysis(inputFiles []string, analysisProfile, effectiveFilter str
 			logger.Error("Failed to close normalized event analysis", "error", err)
 		}
 	}()
-	run()
+	if !pipelineOwned {
+		s.radius, err = radius.NewCaptureProcessor(radius.CaptureScope{OriginNodeID: "local"})
+		if err != nil {
+			logger.Error("Failed to initialize RADIUS observations", "error", err)
+			run(nil)
+			return
+		}
+		restore := capture.SetPacketObserver(s.observe)
+		defer restore()
+	}
+	run(s)
 }
 
 func newSniffEventSession(dir string, inputFiles []string, analysisProfile string, additionalSink events.Sink) (*sniffEventSession, error) {
@@ -129,7 +146,7 @@ func registerSniffLogSink(d *events.Dispatcher, dir string, queueSize int) (*log
 		kind  events.Kind
 		build logstream.Builder
 	}{
-		"dns": {events.KindDNS, logrecords.DNS}, "ssl": {events.KindTLS, logrecords.SSL}, "http": {events.KindHTTP, logrecords.HTTP}, "smtp": {events.KindSMTP, logrecords.SMTP}, "conn": {events.KindConn, logrecords.Conn}, "files": {events.KindFileMetadata, logrecords.Files},
+		"radius": {events.KindRADIUS, logrecords.RADIUS}, "dns": {events.KindDNS, logrecords.DNS}, "ssl": {events.KindTLS, logrecords.SSL}, "http": {events.KindHTTP, logrecords.HTTP}, "smtp": {events.KindSMTP, logrecords.SMTP}, "conn": {events.KindConn, logrecords.Conn}, "files": {events.KindFileMetadata, logrecords.Files},
 	}
 	for _, stream := range viper.GetStringSlice("logs.streams") {
 		binding, ok := builders[strings.ToLower(stream)]
@@ -144,7 +161,7 @@ func registerSniffLogSink(d *events.Dispatcher, dir string, queueSize int) (*log
 	if err != nil {
 		return nil, err
 	}
-	if err := d.Register(coalescedLogs, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
+	if err := d.Register(coalescedLogs, events.KindRADIUS, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
 		return nil, err
 	}
 	return sink, nil
@@ -171,7 +188,13 @@ func structuredLogAnalysisProfile(scope, effectiveFilter string) string {
 		viper.GetInt64("files.total_size"), viper.GetBool("files.extract"), viper.GetString("files.extract_dir"))
 }
 
-func (s *sniffEventSession) observe(info capture.PacketInfo) {
+func (s *sniffEventSession) observe(info *capture.PacketInfo) {
+	// Generic sniff observes before packet fan-out. Attach the same stateful
+	// observation that logs and downstream packet sinks will share. Dedicated
+	// radius capture attaches its configured observation before calling us.
+	if info.RADIUS == nil && s.radius != nil {
+		info.RADIUS = s.radius.Process(info.Packet, info.LinkType, info.Interface, nil)
+	}
 	source := eventanalysis.Source{NodeID: "local", CaptureSource: info.Interface}
 	if s.filtered {
 		source.CaptureScope = events.CaptureScopeFiltered
@@ -182,7 +205,7 @@ func (s *sniffEventSession) observe(info capture.PacketInfo) {
 	} else {
 		source.InterfaceName = info.Interface
 	}
-	if err := s.analysis.ObservePacket(source, info); err != nil {
+	if err := s.analysis.ObservePacket(source, *info); err != nil {
 		logger.Debug("Skipping invalid packet during normalized event analysis", "source", info.Interface, "error", err)
 	}
 }

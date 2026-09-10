@@ -1,0 +1,791 @@
+{
+  "version": 1,
+  "link_type": 1,
+  "configured_ports": [
+    1812,
+    1813,
+    19120
+  ],
+  "observations": [
+    {
+      "record": 1,
+      "timestamp": "1700000000.123456",
+      "association": "request",
+      "name": "access-request-v4",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.1",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 31,
+          "value_hex": "30322d30302d30302d30302d30302d3031"
+        },
+        {
+          "type": 87,
+          "value_hex": "6c696e652d61"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9010b636972637569742d61"
+        },
+        {
+          "type": 4,
+          "value_hex": "c0000201"
+        },
+        {
+          "type": 32,
+          "value_hex": "6e61732d61"
+        }
+      ],
+      "raw_radius_file": "raw/access-request-v4.bin",
+      "matches_operator_a_nas_line": true,
+      "matches_operator_a_circuit_line": true
+    },
+    {
+      "record": 2,
+      "timestamp": "1700000001.123456",
+      "association": "unique",
+      "associated_request": "access-request-v4",
+      "name": "access-accept-v4",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "198.51.100.10",
+      "destination_ip": "192.0.2.1",
+      "source_port": 1812,
+      "destination_port": 40000,
+      "code": 2,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [],
+      "raw_radius_file": "raw/access-accept-v4.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 3,
+      "timestamp": "1700000002.123456",
+      "association": "request",
+      "name": "access-request-client2-v6",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:1::2",
+      "destination_ip": "2001:db8:2::10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 31,
+          "value_hex": "30322d30302d30302d30302d30302d3031"
+        },
+        {
+          "type": 87,
+          "value_hex": "6c696e652d61"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9010b636972637569742d61"
+        },
+        {
+          "type": 4,
+          "value_hex": "c0000201"
+        },
+        {
+          "type": 32,
+          "value_hex": "6e61732d61"
+        }
+      ],
+      "raw_radius_file": "raw/access-request-client2-v6.bin",
+      "matches_operator_a_nas_line": true,
+      "matches_operator_a_circuit_line": true
+    },
+    {
+      "record": 4,
+      "timestamp": "1700000003.123456",
+      "association": "unique",
+      "associated_request": "access-request-client2-v6",
+      "name": "access-reject-v6",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:2::10",
+      "destination_ip": "2001:db8:1::2",
+      "source_port": 1812,
+      "destination_port": 40000,
+      "code": 3,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [],
+      "raw_radius_file": "raw/access-reject-v6.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 5,
+      "timestamp": "1700000004.123456",
+      "association": "request",
+      "name": "custom-request-v6",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:1::3",
+      "destination_ip": "2001:db8:2::10",
+      "source_port": 40000,
+      "destination_port": 19120,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 31,
+          "value_hex": "30322d30302d30302d30302d30302d3031"
+        },
+        {
+          "type": 87,
+          "value_hex": "6c696e652d61"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9010b636972637569742d61"
+        },
+        {
+          "type": 4,
+          "value_hex": "c0000201"
+        },
+        {
+          "type": 32,
+          "value_hex": "6e61732d61"
+        }
+      ],
+      "raw_radius_file": "raw/custom-request-v6.bin",
+      "matches_operator_a_nas_line": true,
+      "matches_operator_a_circuit_line": true
+    },
+    {
+      "record": 6,
+      "timestamp": "1700000005.123456",
+      "association": "unique",
+      "associated_request": "custom-request-v6",
+      "name": "access-challenge-custom-v6",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:2::10",
+      "destination_ip": "2001:db8:1::3",
+      "source_port": 19120,
+      "destination_port": 40000,
+      "code": 11,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 24,
+          "value_hex": "6368616c6c656e67652d7374617465"
+        }
+      ],
+      "raw_radius_file": "raw/access-challenge-custom-v6.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 7,
+      "timestamp": "1700000006.123456",
+      "association": "request",
+      "name": "accounting-request-v4",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.4",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1813,
+      "code": 4,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 40,
+          "value_hex": "00000001"
+        },
+        {
+          "type": 44,
+          "value_hex": "73657373696f6e2d73796e746865746963"
+        }
+      ],
+      "raw_radius_file": "raw/accounting-request-v4.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 8,
+      "timestamp": "1700000007.123456",
+      "association": "unique",
+      "associated_request": "accounting-request-v4",
+      "name": "accounting-response-v4",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "198.51.100.10",
+      "destination_ip": "192.0.2.4",
+      "source_port": 1813,
+      "destination_port": 40000,
+      "code": 5,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [],
+      "raw_radius_file": "raw/accounting-response-v4.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 9,
+      "timestamp": "1700000008.123456",
+      "association": "request",
+      "name": "accounting-request-v6",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:1::5",
+      "destination_ip": "2001:db8:2::10",
+      "source_port": 40000,
+      "destination_port": 1813,
+      "code": 4,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        }
+      ],
+      "raw_radius_file": "raw/accounting-request-v6.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 10,
+      "timestamp": "1700000009.123456",
+      "association": "unique",
+      "associated_request": "accounting-request-v6",
+      "name": "accounting-response-v6",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:2::10",
+      "destination_ip": "2001:db8:1::5",
+      "source_port": 1813,
+      "destination_port": 40000,
+      "code": 5,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [],
+      "raw_radius_file": "raw/accounting-response-v6.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 11,
+      "timestamp": "1700000010.123456",
+      "association": "request",
+      "name": "accept-request-v6",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:1::10",
+      "destination_ip": "2001:db8:2::10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 31,
+          "value_hex": "30322d30302d30302d30302d30302d3031"
+        },
+        {
+          "type": 87,
+          "value_hex": "6c696e652d61"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9010b636972637569742d61"
+        },
+        {
+          "type": 4,
+          "value_hex": "c0000201"
+        },
+        {
+          "type": 32,
+          "value_hex": "6e61732d61"
+        }
+      ],
+      "raw_radius_file": "raw/accept-request-v6.bin",
+      "matches_operator_a_nas_line": true,
+      "matches_operator_a_circuit_line": true
+    },
+    {
+      "record": 12,
+      "timestamp": "1700000011.123456",
+      "association": "unique",
+      "associated_request": "accept-request-v6",
+      "name": "access-accept-v6",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:2::10",
+      "destination_ip": "2001:db8:1::10",
+      "source_port": 1812,
+      "destination_port": 40000,
+      "code": 2,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [],
+      "raw_radius_file": "raw/access-accept-v6.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 13,
+      "timestamp": "1700000012.123456",
+      "association": "request",
+      "name": "reject-request-v4",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.11",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 31,
+          "value_hex": "30322d30302d30302d30302d30302d3031"
+        },
+        {
+          "type": 87,
+          "value_hex": "6c696e652d61"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9010b636972637569742d61"
+        },
+        {
+          "type": 4,
+          "value_hex": "c0000201"
+        },
+        {
+          "type": 32,
+          "value_hex": "6e61732d61"
+        }
+      ],
+      "raw_radius_file": "raw/reject-request-v4.bin",
+      "matches_operator_a_nas_line": true,
+      "matches_operator_a_circuit_line": true
+    },
+    {
+      "record": 14,
+      "timestamp": "1700000013.123456",
+      "association": "unique",
+      "associated_request": "reject-request-v4",
+      "name": "access-reject-v4",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "198.51.100.10",
+      "destination_ip": "192.0.2.11",
+      "source_port": 1812,
+      "destination_port": 40000,
+      "code": 3,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [],
+      "raw_radius_file": "raw/access-reject-v4.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 15,
+      "timestamp": "1700000014.123456",
+      "association": "request",
+      "name": "challenge-request-v4",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.12",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 19120,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 31,
+          "value_hex": "30322d30302d30302d30302d30302d3031"
+        },
+        {
+          "type": 87,
+          "value_hex": "6c696e652d61"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9010b636972637569742d61"
+        },
+        {
+          "type": 4,
+          "value_hex": "c0000201"
+        },
+        {
+          "type": 32,
+          "value_hex": "6e61732d61"
+        }
+      ],
+      "raw_radius_file": "raw/challenge-request-v4.bin",
+      "matches_operator_a_nas_line": true,
+      "matches_operator_a_circuit_line": true
+    },
+    {
+      "record": 16,
+      "timestamp": "1700000015.123456",
+      "association": "unique",
+      "associated_request": "challenge-request-v4",
+      "name": "access-challenge-v4",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "198.51.100.10",
+      "destination_ip": "192.0.2.12",
+      "source_port": 19120,
+      "destination_port": 40000,
+      "code": 11,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [],
+      "raw_radius_file": "raw/access-challenge-v4.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 17,
+      "timestamp": "1700000016.123456",
+      "association": "request",
+      "name": "line-collision-other-scope",
+      "capture_scope": "poi-b",
+      "operator": "operator-b",
+      "nas": "nas-b",
+      "ip_version": 4,
+      "source_ip": "192.0.2.1",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 31,
+          "value_hex": "30322d30302d30302d30302d30302d3031"
+        },
+        {
+          "type": 87,
+          "value_hex": "6c696e652d61"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9010b636972637569742d61"
+        },
+        {
+          "type": 4,
+          "value_hex": "c0000201"
+        },
+        {
+          "type": 32,
+          "value_hex": "6e61732d61"
+        }
+      ],
+      "raw_radius_file": "raw/line-collision-other-scope.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 18,
+      "timestamp": "1700000017.123456",
+      "association": "unique",
+      "associated_request": "line-collision-other-scope",
+      "name": "access-accept-other-scope",
+      "capture_scope": "poi-b",
+      "operator": "operator-b",
+      "nas": "nas-b",
+      "ip_version": 4,
+      "source_ip": "198.51.100.10",
+      "destination_ip": "192.0.2.1",
+      "source_port": 1812,
+      "destination_port": 40000,
+      "code": 2,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [],
+      "raw_radius_file": "raw/access-accept-other-scope.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 19,
+      "timestamp": "1700000018.123456",
+      "association": "request",
+      "name": "repeated-grouped-vsa",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.6",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "6f74686572406578616d706c652e74657374"
+        },
+        {
+          "type": 1,
+          "value_hex": "616c696365406578616d706c652e74657374"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9020a72656d6f74652d61010b636972637569742d61"
+        },
+        {
+          "type": 222,
+          "value_hex": "00ff"
+        }
+      ],
+      "raw_radius_file": "raw/repeated-grouped-vsa.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": true
+    },
+    {
+      "record": 20,
+      "timestamp": "1700000019.123456",
+      "association": "request",
+      "name": "repeated-split-vsa",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.7",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 26,
+          "value_hex": "00000de9020a72656d6f74652d61"
+        },
+        {
+          "type": 26,
+          "value_hex": "00000de9010b636972637569742d61"
+        }
+      ],
+      "raw_radius_file": "raw/repeated-split-vsa.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": true
+    },
+    {
+      "record": 21,
+      "timestamp": "1700000020.123456",
+      "association": "request",
+      "name": "binary-user-name",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.8",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "valid",
+      "attributes": [
+        {
+          "type": 1,
+          "value_hex": "ff0041"
+        }
+      ],
+      "raw_radius_file": "raw/binary-user-name.bin",
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 22,
+      "timestamp": "1700000021.123456",
+      "association": "not_applicable",
+      "name": "malformed-avp",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.9",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "malformed",
+      "attributes": [],
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 23,
+      "timestamp": "1700000022.123456",
+      "association": "not_applicable",
+      "name": "malformed-vsa",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.9",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "malformed",
+      "attributes": [],
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 24,
+      "timestamp": "1700000023.123456",
+      "association": "not_applicable",
+      "diagnostic": "declared_length_exceeds_udp_payload",
+      "name": "truncated-radius",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.9",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "malformed",
+      "attributes": [],
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 25,
+      "timestamp": "1700000024.123456",
+      "association": "not_applicable",
+      "name": "ipv4-first-fragment",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 4,
+      "source_ip": "192.0.2.9",
+      "destination_ip": "198.51.100.10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "fragmented",
+      "attributes": [],
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    },
+    {
+      "record": 26,
+      "timestamp": "1700000025.123456",
+      "association": "not_applicable",
+      "name": "ipv6-atomic-fragment",
+      "capture_scope": "poi-a",
+      "operator": "operator-a",
+      "nas": "nas-a",
+      "ip_version": 6,
+      "source_ip": "2001:db8:1::9",
+      "destination_ip": "2001:db8:2::10",
+      "source_port": 40000,
+      "destination_port": 1812,
+      "code": 1,
+      "identifier": 7,
+      "outcome": "fragmented",
+      "attributes": [],
+      "matches_operator_a_nas_line": false,
+      "matches_operator_a_circuit_line": false
+    }
+  ]
+}

@@ -5,6 +5,7 @@ The `process` command runs lippycat as a processor node - a central aggregation 
 ## Overview
 
 Processors are the central hub in lippycat's distributed architecture. They:
+
 - Receive packets from multiple hunter nodes via gRPC
 - Perform centralized protocol detection and analysis
 - Distribute filters to connected hunters
@@ -107,12 +108,14 @@ lc process --listen :55555 \
 ```
 
 **Output:** Creates `{pattern}_sip.pcap` and `{pattern}_rtp.pcap` for each call:
+
 ```
 20250123_143022_abc123_sip.pcap   # SIP signaling
 20250123_143022_abc123_rtp.pcap   # RTP media
 ```
 
 **Pattern Placeholders:**
+
 - `{callid}` - SIP Call-ID
 - `{from}` - SIP From user
 - `{to}` - SIP To user
@@ -139,12 +142,14 @@ lc process --listen :55555 \
 ```
 
 **Output:** Creates timestamped files for traffic bursts:
+
 ```
 20250123_143022.pcap   # First burst
 20250123_144530.pcap   # Next burst after 30s idle
 ```
 
 **Rotation Triggers:**
+
 - **Idle timeout:** Close file after N seconds of inactivity (default: 30s)
 - **File size:** Rotate when file reaches size limit (default: 100MB)
 - **Duration:** Rotate after maximum file duration (1 hour)
@@ -184,21 +189,22 @@ lc process --listen :55555 \
 
 **PCAP Command Placeholders:**
 
-| Placeholder | Description |
-|-------------|-------------|
-| `%pcap%` | Full path to the PCAP file |
+| Placeholder | Description                |
+| ----------- | -------------------------- |
+| `%pcap%`    | Full path to the PCAP file |
 
 **VoIP Command Placeholders:**
 
-| Placeholder | Description |
-|-------------|-------------|
-| `%callid%` | SIP Call-ID |
-| `%dirname%` | Directory containing the call's PCAP files |
-| `%caller%` | Caller (From user) |
-| `%called%` | Called party (To user) |
-| `%calldate%` | Call start time (RFC3339 format) |
+| Placeholder  | Description                                |
+| ------------ | ------------------------------------------ |
+| `%callid%`   | SIP Call-ID                                |
+| `%dirname%`  | Directory containing the call's PCAP files |
+| `%caller%`   | Caller (From user)                         |
+| `%called%`   | Called party (To user)                     |
+| `%calldate%` | Call start time (RFC3339 format)           |
 
 **Execution Details:**
+
 - Commands execute asynchronously (don't block packet processing)
 - Commands run via shell (`sh -c`)
 - Failed commands are logged but don't affect processing
@@ -206,6 +212,7 @@ lc process --listen :55555 \
 - Concurrency is limited by `--command-concurrency`
 
 **Use Cases:**
+
 - Compress PCAP files after writing: `gzip %pcap%`
 - Upload to cloud storage: `aws s3 cp %pcap% s3://bucket/`
 - Send notifications: `curl -X POST -d "call=%callid%" webhook.example.com`
@@ -244,17 +251,18 @@ lc process --listen :55555 \
 
 **Tunneling Command Placeholders:**
 
-| Placeholder | Description | Example |
-|-------------|-------------|---------|
-| `%domain%` | Suspicious domain (or parent) | `evil.example.com` |
-| `%score%` | Tunneling score (0.0-1.0) | `0.85` |
-| `%entropy%` | Entropy score | `4.20` |
-| `%queries%` | Query count observed | `1523` |
-| `%srcips%` | Source IPs (comma-separated) | `192.168.1.10,192.168.1.20` |
-| `%hunter%` | Hunter ID (distributed) or "local" | `hunter-01` |
-| `%timestamp%` | Detection time (RFC3339) | `2025-01-11T14:30:22Z` |
+| Placeholder   | Description                        | Example                     |
+| ------------- | ---------------------------------- | --------------------------- |
+| `%domain%`    | Suspicious domain (or parent)      | `evil.example.com`          |
+| `%score%`     | Tunneling score (0.0-1.0)          | `0.85`                      |
+| `%entropy%`   | Entropy score                      | `4.20`                      |
+| `%queries%`   | Query count observed               | `1523`                      |
+| `%srcips%`    | Source IPs (comma-separated)       | `192.168.1.10,192.168.1.20` |
+| `%hunter%`    | Hunter ID (distributed) or "local" | `hunter-01`                 |
+| `%timestamp%` | Detection time (RFC3339)           | `2025-01-11T14:30:22Z`      |
 
 **Alerting Behavior:**
+
 - Alerts trigger when a domain's tunneling score crosses the threshold
 - Debounce prevents alert fatigue (same domain won't alert again until debounce expires)
 - Source IPs are tracked across all hunters for cross-hunter correlation
@@ -265,6 +273,7 @@ lc process --listen :55555 \
 - `-d, --enable-detection` - Enable centralized protocol detection (default: true)
 
 When enabled, the processor performs protocol detection on received packets to identify:
+
 - HTTP
 - DNS
 - TLS/SSL
@@ -306,19 +315,20 @@ filters:
 ```
 
 **Filter Types:**
+
 - `sipuser` - Match SIP user (From, To, P-Asserted-Identity headers)
 - `callid` - Match SIP Call-ID
 - `ip` - Match IP address or CIDR range
 
 **Wildcard Pattern Matching (sipuser filters):**
 
-| Pattern | Type | Description |
-|---------|------|-------------|
-| `alice` | Contains | Substring match (backward compatible) |
-| `*456789` | Suffix | Matches any prefix + `456789` |
-| `alice*` | Prefix | Matches `alice` + any suffix |
+| Pattern   | Type     | Description                              |
+| --------- | -------- | ---------------------------------------- |
+| `alice`   | Contains | Substring match (backward compatible)    |
+| `*456789` | Suffix   | Matches any prefix + `456789`            |
+| `alice*`  | Prefix   | Matches `alice` + any suffix             |
 | `*alice*` | Contains | Explicit contains (same as no wildcards) |
-| `\*alice` | Literal | Escaped `*` treated as literal character |
+| `\*alice` | Literal  | Escaped `*` treated as literal character |
 
 **Wildcard Examples:**
 
@@ -347,6 +357,7 @@ filters:
 
 **Management:**
 Filters can be managed via:
+
 1. Direct YAML file editing (requires processor restart)
 2. gRPC management API (future)
 3. TUI interface (future)
@@ -474,6 +485,7 @@ Processors can forward filtered traffic to upstream processors for multi-tier ag
 ```
 
 **Edge Processor:**
+
 ```bash
 lc process --listen :55555 \
   --id edge-01 \
@@ -482,6 +494,7 @@ lc process --listen :55555 \
 ```
 
 **Regional Processor:**
+
 ```bash
 lc process --listen :55555 \
   --id regional-west \
@@ -490,6 +503,7 @@ lc process --listen :55555 \
 ```
 
 **Central Processor:**
+
 ```bash
 lc process --listen :55555 \
   --id central \
@@ -498,6 +512,7 @@ lc process --listen :55555 \
 ```
 
 **Use Cases:**
+
 - Geographic distribution
 - Network segmentation
 - Gradual aggregation with filtering
@@ -513,7 +528,7 @@ All flags can be specified in `~/.config/lippycat/config.yaml`:
 processor:
   listen_addr: "0.0.0.0:55555"
   id: "prod-processor-01"
-  processor_addr: ""  # Empty for no upstream
+  processor_addr: "" # Empty for no upstream
   max_hunters: 100
   max_subscribers: 100
   write_file: "/var/capture/packets.pcap"
@@ -552,7 +567,7 @@ processor:
     cert_file: "/etc/lippycat/certs/server.crt"
     key_file: "/etc/lippycat/certs/server.key"
     ca_file: "/etc/lippycat/certs/ca.crt"
-    client_auth: true  # Mutual TLS
+    client_auth: true # Mutual TLS
 ```
 
 ## Monitoring
@@ -587,6 +602,7 @@ See [cmd/tui/CLAUDE.md](../tui/CLAUDE.md) for TUI usage.
 ### 3. Hunter Health Monitoring
 
 Processors track hunter health via heartbeat streaming:
+
 - Connection status
 - Packet statistics
 - Flow control state
@@ -605,6 +621,7 @@ lc process --max-subscribers 0
 ```
 
 **Guidelines:**
+
 - Each hunter: ~5-10MB RAM
 - Each subscriber: ~2-5MB RAM
 - Monitor system resources under load
@@ -624,6 +641,7 @@ lc process --write-file /fast-disk/capture.pcap
 ### Flow Control
 
 Processors automatically manage flow control with hunters:
+
 - `CONTINUE` - Normal operation
 - `SLOW` - Queue 30-70% full, slow down
 - `PAUSE` - Queue >90% full, stop sending
@@ -638,6 +656,7 @@ Processors are designed to survive network disruptions and temporary outages:
 ### Network Interruption Tolerance
 
 **Lenient keepalive settings** tolerate temporary delays (laptop standby, network hiccups):
+
 - 30s ping interval (vs. aggressive 10s)
 - 20s timeout for acknowledgment
 - Combined with TCP keepalive on hunter connections
@@ -647,6 +666,7 @@ Processors are designed to survive network disruptions and temporary outages:
 ### Stale Hunter Detection
 
 **Fast cleanup** removes truly dead hunters while allowing recovery:
+
 - 2min cleanup interval (check for stale hunters)
 - 5min grace period (hunter must be unresponsive for 5min to be removed)
 
@@ -737,6 +757,7 @@ wireshark -i lc0
 ```
 
 YAML configuration:
+
 ```yaml
 virtual_interface:
   enabled: true
@@ -783,3 +804,26 @@ snort -i lc0 -c /etc/snort/snort.conf
 - [docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) - Virtual interface guide and tool integration
 - [docs/SECURITY.md](../../docs/SECURITY.md) - TLS/mTLS setup and security best practices
 - [docs/operational-procedures.md](../../docs/operational-procedures.md) - Production operations guide
+
+### LI delivery buffer limits
+
+LI builds accept independent `--li-delivery-x2-queue-bytes` and
+`--li-delivery-x3-queue-bytes` budgets per destination/interface, optional
+`--li-delivery-x3-max-age` (for example `5m`) and
+`--li-delivery-memory-budget-bytes`. The existing queue-size flag limits PDUs per
+destination **and interface**. New byte/age limits default to disabled.
+
+Optional encrypted X2 persistence uses `--li-delivery-x2-spool-dir`,
+`--li-delivery-x2-spool-max-bytes` and `--li-delivery-x2-spool-key-file`. Recovery
+defaults to held records; `--li-delivery-x2-spool-export-manifest` exports identities
+for review and `--li-delivery-x2-spool-replay-manifest` requests exact authorized
+replay after ADMF startup synchronization;
+`--li-delivery-x2-spool-replay-policy=purge` explicitly discards recovered records.
+Enqueue success does not acknowledge disk sync. X3 is memory-only. See the
+[delivery sizing, configuration and recovery policy](../../docs/LI_INTEGRATION.md#delivery-byte-limits-age-and-x2-persistence)
+before enabling persistence.
+
+Independent PDU caps are available through `--li-delivery-x2-queue-size` and
+`--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy
+`--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
+once, while `queue_bytes` counts every destination copy.

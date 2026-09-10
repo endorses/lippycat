@@ -284,7 +284,7 @@ func (m *Manager) connectAndRegister() error {
 			ProcessorId:     m.config.ProcessorID,
 			ListenAddress:   m.config.ListenAddress,
 			Version:         "dev", // TODO: Use actual version
-			EventForwarding: &management.EventForwardingCapabilities{RequestedMode: requestedMode, EventApiMajors: []uint32{1}, EventKinds: []int32{1, 2, 3, 4, 5, 6}, SemanticProfileRevision: 1, StatefulAnalysisFeatures: []string{"relay"}, AllowPacketFallback: allowFallback},
+			EventForwarding: &management.EventForwardingCapabilities{RequestedMode: requestedMode, EventApiMajors: []uint32{1}, EventKinds: []int32{1, 2, 3, 4, 5, 6, 7}, SemanticProfileRevision: 1, StatefulAnalysisFeatures: []string{"relay"}, AllowPacketFallback: allowFallback},
 		})
 		if err != nil {
 			grpcpool.Release(m.connPool, m.config.Address)
@@ -321,9 +321,11 @@ func (m *Manager) connectAndRegister() error {
 		m.modeNegotiated.Store(true)
 
 		// Store the upstream processor ID for topology reporting
+		m.mu.Lock()
 		m.upstreamProcessorID = regResp.UpstreamProcessorId
+		m.mu.Unlock()
 		logger.Info("Successfully registered with upstream processor",
-			"upstream_processor_id", m.upstreamProcessorID)
+			"upstream_processor_id", regResp.UpstreamProcessorId)
 	} else {
 		logger.Warn("ProcessorID or ListenAddress not configured, skipping processor registration")
 	}
@@ -374,7 +376,7 @@ func validateAcceptedEventProfile(resp *management.ProcessorRegistrationResponse
 	for _, kind := range resp.GetAcceptedEventKinds() {
 		acceptedKinds[kind] = struct{}{}
 	}
-	for _, required := range []int32{1, 2, 3, 4, 5, 6} {
+	for _, required := range []int32{1, 2, 3, 4, 5, 6, 7} {
 		if _, ok := acceptedKinds[required]; !ok {
 			return fmt.Errorf("required event kind %d was not accepted", required)
 		}

@@ -126,7 +126,10 @@ func (c *Collector) GetAll() (captured, matched, forwarded, dropped, bufferBytes
 // ToProto converts statistics to protobuf HunterStats message
 func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 	batchDrops := c.packetsDropped.Load()
-	detectorStats := detector.GetDefault().Telemetry()
+	var detectorStats detector.Telemetry
+	if d := detector.GetDefaultIfInitialized(); d != nil {
+		detectorStats = d.Telemetry()
+	}
 	return &management.HunterStats{
 		PacketsCaptured:               c.packetsCaptured.Load(),
 		PacketsMatched:                c.packetsMatched.Load(),
@@ -159,6 +162,10 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 			CacheLastEvictionDurationNs: detectorStats.CacheLastEvictionDurationNs,
 			FlowLastEvictionBatchSize:   detectorStats.FlowLastEvictionBatchSize,
 			CacheLastEvictionBatchSize:  detectorStats.CacheLastEvictionBatchSize,
+			SipIpPairEntries:            detectorStats.SIPIPPairEntries,
+			SipIpPairMaxEntries:         detectorStats.SIPIPPairMaxEntries,
+			SipIpPairTtlEvictions:       detectorStats.SIPIPPairTTLEvictions,
+			SipIpPairCapEvictions:       detectorStats.SIPIPPairCapEvictions,
 		},
 	}
 }

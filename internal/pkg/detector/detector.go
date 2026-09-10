@@ -16,20 +16,53 @@ import (
 
 // Detector is the central protocol detection service
 type Detector struct {
-	signatures []signatures.Signature
-	portMap    map[uint16]signatures.Signature // Port → signature fast lookup
-	cache      *DetectionCache
-	flows      *FlowTracker
-	mu         sync.RWMutex
+	signatures   []signatures.Signature
+	portMap      map[uint16]signatures.Signature // Port → signature fast lookup
+	cache        *DetectionCache
+	flows        *FlowTracker
+	mu           sync.RWMutex
+	cleanupStop  chan struct{}
+	cleanupWG    sync.WaitGroup
+	shutdownOnce sync.Once
 }
+
+const signatureCleanupInterval = time.Second
 
 // New creates a new protocol detector
 func New() *Detector {
-	return &Detector{
-		signatures: make([]signatures.Signature, 0),
-		portMap:    make(map[uint16]signatures.Signature),
-		cache:      NewDetectionCache(5 * time.Minute),
-		flows:      NewFlowTracker(10 * time.Minute),
+	d := &Detector{
+		signatures:  make([]signatures.Signature, 0),
+		portMap:     make(map[uint16]signatures.Signature),
+		cache:       NewDetectionCache(5 * time.Minute),
+		flows:       NewFlowTracker(10 * time.Minute),
+		cleanupStop: make(chan struct{}),
+	}
+	d.cleanupWG.Add(1)
+	go d.cleanupSignatures()
+	return d
+}
+
+// cleanupSignatures runs bounded signature maintenance outside packet handling.
+func (d *Detector) cleanupSignatures() {
+	defer d.cleanupWG.Done()
+	ticker := time.NewTicker(signatureCleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.cleanupStop:
+			return
+		case <-ticker.C:
+			for _, sig := range d.GetSignatures() {
+				select {
+				case <-d.cleanupStop:
+					return
+				default:
+				}
+				if sweeper, ok := sig.(interface{ SweepSIPIPPairs() int }); ok {
+					sweeper.SweepSIPIPPairs()
+				}
+			}
+		}
 	}
 }
 
@@ -148,6 +181,9 @@ func (d *Detector) GetSignatures() []signatures.Signature {
 
 // Detect performs protocol detection on a packet
 func (d *Detector) Detect(packet gopacket.Packet) *signatures.DetectionResult {
+	if result := detectRADIUS(packet); result != nil {
+		return result
+	}
 	ctx := d.buildContext(packet)
 
 	// Check cache only for flow/session protocols, not for single-packet protocols
@@ -243,6 +279,9 @@ func isWellKnownPort(port uint16) bool {
 
 // DetectWithoutCache performs detection without using or updating cache
 func (d *Detector) DetectWithoutCache(packet gopacket.Packet) *signatures.DetectionResult {
+	if result := detectRADIUS(packet); result != nil {
+		return result
+	}
 	ctx := d.buildContext(packet)
 
 	d.mu.RLock()
@@ -409,14 +448,19 @@ func generateFlowID(srcIP, dstIP string, srcPort, dstPort uint16, transport stri
 
 // GetStats returns detector statistics
 func (d *Detector) GetStats() map[string]interface{} {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	return map[string]interface{}{
-		"signatures_registered": len(d.signatures),
+	sigs := d.GetSignatures()
+	stats := map[string]interface{}{
+		"signatures_registered": len(sigs),
 		"cache_size":            d.cache.Size(),
 		"active_flows":          d.flows.Size(),
 	}
+	for _, sig := range sigs {
+		if provider, ok := sig.(interface{ SIPIPPairStats() map[string]interface{} }); ok {
+			stats["sip_ip_pairs"] = provider.SIPIPPairStats()
+			break
+		}
+	}
+	return stats
 }
 
 // ClearCache clears the detection cache
@@ -431,12 +475,18 @@ func (d *Detector) ClearFlows() {
 
 // Shutdown stops all background goroutines and cleans up resources
 func (d *Detector) Shutdown() {
-	if d.cache != nil {
-		d.cache.Close()
-	}
-	if d.flows != nil {
-		d.flows.Close()
-	}
+	d.shutdownOnce.Do(func() {
+		if d.cleanupStop != nil {
+			close(d.cleanupStop)
+		}
+		d.cleanupWG.Wait()
+		if d.cache != nil {
+			d.cache.Close()
+		}
+		if d.flows != nil {
+			d.flows.Close()
+		}
+	})
 }
 
 // Helper function

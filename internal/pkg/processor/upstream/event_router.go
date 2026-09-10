@@ -195,7 +195,7 @@ func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64,
 	if err := spool.BindSessionPolicy(r.sessionPolicy(nodeID, sessionID)); err != nil {
 		return nil, fmt.Errorf("bind upstream event route session policy: %w", err)
 	}
-	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: nodeID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{1, 2, 3, 4, 5, 6}, Profile: r.config.Profile, RelayNodeID: r.manager.config.ProcessorID, OnLoss: r.recordLoss}, spool)
+	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: nodeID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{1, 2, 3, 4, 5, 6, 7}, Profile: r.config.Profile, RelayNodeID: r.manager.config.ProcessorID, OnLoss: r.recordLoss}, spool)
 	if err != nil {
 		return nil, err
 	}

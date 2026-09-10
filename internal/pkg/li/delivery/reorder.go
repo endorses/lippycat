@@ -4,8 +4,11 @@ package delivery
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/endorses/lippycat/internal/pkg/li"
 )
 
 const (
@@ -14,8 +17,17 @@ const (
 )
 
 // ReorderBuffer orders X3 RTP PDUs independently per SSRC. Delivery callbacks
-// are always invoked without the buffer lock held.
+// are always invoked without the buffer lock held, in committed batch order.
+// A callback may discard lifecycle state, but must not recursively deliver,
+// flush, stop, or wait on this same buffer: those operations may wait for it.
 type ReorderBuffer struct {
+	sharedWorkers      *sync.WaitGroup
+	callbackWG         sync.WaitGroup
+	callbackTail       <-chan struct{}
+	timerWG            sync.WaitGroup
+	budget             *ReorderBudget
+	budgeted           bool
+	onDiscard          func(int)
 	mu                 sync.Mutex
 	streams            map[reorderStreamKey]*rtpStream
 	deliverFn          func(ReorderEntry)
@@ -32,9 +44,11 @@ type bufferedPDU struct {
 // ReorderEntry carries the immutable call lifecycle identity associated with an
 // X3 PDU. CallID and Generation are empty for callers using the legacy API.
 type ReorderEntry struct {
-	CallID     string
-	Generation uint64
-	PDU        []byte
+	budgetCharge int64
+	Metadata     li.DeliveryMetadata
+	CallID       string
+	Generation   uint64
+	PDU          []byte
 }
 type reorderStreamKey struct {
 	callID     string
@@ -42,13 +56,16 @@ type reorderStreamKey struct {
 	ssrc       uint32
 }
 type rtpStream struct {
-	buffer      map[uint16]bufferedPDU
-	bytes       int
-	lastFlushed uint16
-	hasBase     bool
-	timer       *time.Timer
-	deadline    time.Time
-	lastUsed    time.Time
+	budget          *ReorderBudget
+	buffer          map[uint16]bufferedPDU
+	bytes           int
+	lastFlushed     uint16
+	hasBase         bool
+	timer           *time.Timer
+	timerGeneration uint64
+	timerDone       func()
+	deadline        time.Time
+	lastUsed        time.Time
 }
 
 func NewReorderBuffer(deliverFn func([]byte), flushDelay time.Duration) *ReorderBuffer {
@@ -82,23 +99,70 @@ func (rb *ReorderBuffer) DeliverCallX3(callID string, generation uint64, ssrc ui
 // only then invokes delivery callbacks. This lets callers release admission
 // barriers before a synchronous callback re-admits around its final enqueue.
 func (rb *ReorderBuffer) DeliverCallX3AfterCommit(callID string, generation uint64, ssrc uint32, seq uint16, pdu []byte, afterCommit func()) {
+	rb.DeliverEntryX3AfterCommit(ReorderEntry{CallID: callID, Generation: generation, PDU: pdu, Metadata: li.DeliveryMetadata{AdmittedAt: time.Now(), CallID: callID, CallGeneration: generation}}, ssrc, seq, afterCommit)
+}
+
+// DeliverEntryX3AfterCommit preserves the producer's immutable admission metadata.
+func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint32, seq uint16, afterCommit func()) {
 	now := time.Now()
-	key := reorderStreamKey{callID: callID, generation: generation, ssrc: ssrc}
+	// Start local residence at the first reorder admission when the producer
+	// has not supplied an earlier admission. Final delivery enqueue must not
+	// reset the age clock after an RTP gap has delayed this entry.
+	if entry.Metadata.AdmittedAt.IsZero() || entry.Metadata.AdmittedAt.After(now) {
+		entry.Metadata.AdmittedAt = now
+	}
+	pdu := entry.PDU
+	key := reorderStreamKey{callID: entry.CallID, generation: entry.Generation, ssrc: ssrc}
 	rb.mu.Lock()
-	if rb.stopped {
+	if rb.stopped || len(entry.CallID) > 128 {
 		rb.mu.Unlock()
 		if afterCommit != nil {
 			afterCommit()
 		}
+		if rb.onDiscard != nil {
+			rb.onDiscard(1)
+		}
 		return
+	}
+	entry.CallID = strings.Clone(entry.CallID)
+	entry.Metadata.CallID = entry.CallID
+	entry.Metadata.CallGeneration = entry.Generation
+	key.callID = entry.CallID
+	charge := int64(len(pdu)) + reorderPacketCharge
+	if !rb.budget.reserve(charge) {
+		rb.mu.Unlock()
+		if afterCommit != nil {
+			afterCommit()
+		}
+		if rb.onDiscard != nil {
+			rb.onDiscard(1)
+		}
+		return
+	}
+	if rb.budget != nil {
+		entry.budgetCharge = charge
 	}
 	s := rb.streams[key]
 	if s == nil {
-		s = &rtpStream{buffer: make(map[uint16]bufferedPDU)}
+		if !rb.budget.reserve(reorderStreamCharge) {
+			rb.budget.release(charge)
+			rb.mu.Unlock()
+			if afterCommit != nil {
+				afterCommit()
+			}
+			if rb.onDiscard != nil {
+				rb.onDiscard(1)
+			}
+			return
+		}
+		s = &rtpStream{budget: rb.budget, buffer: make(map[uint16]bufferedPDU)}
 		rb.streams[key] = s
 	}
 	s.lastUsed = now
-	entry := ReorderEntry{CallID: callID, Generation: generation, PDU: pdu}
+	// Even an immediately deliverable entry can wait behind an earlier callback
+	// after afterCommit releases producer ownership. Own its bytes before that
+	// boundary just as we do for entries retained across a sequence gap.
+	entry.PDU = append([]byte(nil), entry.PDU...)
 	var out []ReorderEntry
 	if !s.hasBase {
 		s.hasBase = true
@@ -111,12 +175,17 @@ func (rb *ReorderBuffer) DeliverCallX3AfterCommit(callID string, generation uint
 			s.lastFlushed = seq
 			out = append(out, entry)
 			out = append(out, drainConsecutive(s)...)
+			if len(s.buffer) == 0 {
+				rb.disarmLocked(s)
+			}
 		case seqBefore(seq, next):
 			out = append(out, entry)
 		default:
 			if _, dup := s.buffer[seq]; !dup {
 				s.buffer[seq] = bufferedPDU{seqNum: seq, entry: entry, arrived: now}
 				s.bytes += len(pdu)
+			} else {
+				rb.budget.release(entry.budgetCharge)
 			}
 			rb.armTimerLocked(key, s, now)
 			if len(s.buffer) > rb.packetCap || s.bytes > rb.byteCap {
@@ -125,11 +194,12 @@ func (rb *ReorderBuffer) DeliverCallX3AfterCommit(callID string, generation uint
 			}
 		}
 	}
+	previous, done := rb.reserveDeliveryLocked(out)
 	rb.mu.Unlock()
 	if afterCommit != nil {
 		afterCommit()
 	}
-	rb.deliver(out)
+	rb.deliver(out, previous, done)
 }
 func drainConsecutive(s *rtpStream) (out []ReorderEntry) {
 	for {
@@ -178,31 +248,83 @@ func (rb *ReorderBuffer) armTimerLocked(key reorderStreamKey, s *rtpStream, now 
 	if delay < 0 {
 		delay = 0
 	}
-	s.timer = time.AfterFunc(delay, func() { rb.flush(key) })
+	rb.timerWG.Add(1)
+	if rb.sharedWorkers != nil {
+		rb.sharedWorkers.Add(1)
+	}
+	once := &sync.Once{}
+	done := func() {
+		once.Do(func() {
+			rb.timerWG.Done()
+			if rb.sharedWorkers != nil {
+				rb.sharedWorkers.Done()
+			}
+		})
+	}
+	s.timerDone = done
+	s.timerGeneration++
+	generation := s.timerGeneration
+	s.timer = time.AfterFunc(delay, func() { defer done(); rb.flush(key, s, generation) })
 }
 func (rb *ReorderBuffer) disarmLocked(s *rtpStream) {
+	// A timer that already fired may still be waiting for rb.mu. Revoke that
+	// invocation before a subsequent gap arms another timer on the same stream.
+	s.timerGeneration++
 	if s.timer != nil {
-		s.timer.Stop()
+		if s.timer.Stop() {
+			s.timerDone()
+		}
 		s.timer = nil
 	}
 	s.deadline = time.Time{}
 }
-func (rb *ReorderBuffer) flush(key reorderStreamKey) {
+func (rb *ReorderBuffer) flush(key reorderStreamKey, expected *rtpStream, generation uint64) {
 	rb.mu.Lock()
 	s := rb.streams[key]
-	if s == nil {
+	if s == nil || s != expected || s.timerGeneration != generation {
 		rb.mu.Unlock()
 		return
 	}
 	s.timer = nil
 	s.deadline = time.Time{}
 	out := drainAll(s)
+	previous, done := rb.reserveDeliveryLocked(out)
 	rb.mu.Unlock()
-	rb.deliver(out)
+	rb.deliver(out, previous, done)
 }
-func (rb *ReorderBuffer) deliver(out []ReorderEntry) {
+
+// reserveDeliveryLocked fixes callback order at the same point as RTP order.
+// Waiting happens only after afterCommit releases producer admission barriers.
+func (rb *ReorderBuffer) reserveDeliveryLocked(out []ReorderEntry) (<-chan struct{}, chan struct{}) {
+	if len(out) == 0 {
+		return nil, nil
+	}
+	previous := rb.callbackTail
+	done := make(chan struct{})
+	rb.callbackTail = done
+	rb.callbackWG.Add(1)
+	if rb.sharedWorkers != nil {
+		rb.sharedWorkers.Add(1)
+	}
+	return previous, done
+}
+
+func (rb *ReorderBuffer) deliver(out []ReorderEntry, previous <-chan struct{}, done chan struct{}) {
+	if done != nil {
+		defer close(done)
+		if previous != nil {
+			<-previous
+		}
+	}
+	if len(out) > 0 {
+		defer rb.callbackWG.Done()
+		if rb.sharedWorkers != nil {
+			defer rb.sharedWorkers.Done()
+		}
+	}
 	for _, entry := range out {
 		rb.deliverFn(entry)
+		rb.budget.release(entry.budgetCharge)
 	}
 }
 func (rb *ReorderBuffer) LastUsed() time.Time {
@@ -224,12 +346,14 @@ func (rb *ReorderBuffer) CleanupIdleStreams(maxIdle time.Duration) bool {
 		if now.Sub(s.lastUsed) > maxIdle {
 			rb.disarmLocked(s)
 			out = append(out, drainAll(s)...)
+			rb.budget.release(reorderStreamCharge)
 			delete(rb.streams, id)
 		}
 	}
 	empty := len(rb.streams) == 0
+	previous, done := rb.reserveDeliveryLocked(out)
 	rb.mu.Unlock()
-	rb.deliver(out)
+	rb.deliver(out, previous, done)
 	return empty
 }
 func (rb *ReorderBuffer) Stop() {
@@ -243,10 +367,16 @@ func (rb *ReorderBuffer) Stop() {
 	for _, s := range rb.streams {
 		rb.disarmLocked(s)
 		out = append(out, drainAll(s)...)
+		rb.budget.release(reorderStreamCharge)
+	}
+	if rb.budgeted {
+		rb.budget.release(reorderBufferCharge)
+		rb.budgeted = false
 	}
 	clear(rb.streams)
+	previous, done := rb.reserveDeliveryLocked(out)
 	rb.mu.Unlock()
-	rb.deliver(out)
+	rb.deliver(out, previous, done)
 }
 
 // DiscardCall drops queued PDUs for exactly one call generation. It leaves
@@ -262,6 +392,7 @@ func (rb *ReorderBuffer) DiscardCall(callID string, generation uint64) int {
 		}
 		rb.disarmLocked(stream)
 		discarded += len(stream.buffer)
+		rb.budget.release(reorderStreamCharge + int64(stream.bytes) + int64(len(stream.buffer))*reorderPacketCharge)
 		delete(rb.streams, key)
 	}
 	return discarded
@@ -286,10 +417,15 @@ func (rb *ReorderBuffer) DiscardCount() int {
 	for _, s := range rb.streams {
 		rb.disarmLocked(s)
 		discarded += len(s.buffer)
+		rb.budget.release(reorderStreamCharge + int64(s.bytes) + int64(len(s.buffer))*reorderPacketCharge)
 		clear(s.buffer)
 		s.bytes = 0
 	}
 	clear(rb.streams)
+	if rb.budgeted {
+		rb.budget.release(reorderBufferCharge)
+		rb.budgeted = false
+	}
 	return discarded
 }
 func (rb *ReorderBuffer) Buffered() (packets, bytes int) {
@@ -302,3 +438,10 @@ func (rb *ReorderBuffer) Buffered() (packets, bytes int) {
 	return
 }
 func seqBefore(a, b uint16) bool { return int16(a-b) < 0 }
+
+// Wait joins callbacks after Stop or Discard. Do not call from a delivery
+// callback: lifecycle finalization uses Discard alone; processor shutdown joins.
+func (rb *ReorderBuffer) Wait() { rb.timerWG.Wait(); rb.callbackWG.Wait() }
+
+// SetWorkerGroup attaches the processor shutdown barrier before publication.
+func (rb *ReorderBuffer) SetWorkerGroup(group *sync.WaitGroup) { rb.sharedWorkers = group }

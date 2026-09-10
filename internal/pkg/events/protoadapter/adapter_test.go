@@ -358,3 +358,39 @@ func TestNilPayloadIsMalformedWithoutUnknownKind(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, errors.Is(err, ErrFileContentDisallowed))
 }
+
+func TestRADIUSRoundTripAndPublicAttributeBoundary(t *testing.T) {
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	event := events.NewRADIUSEvent(testEnvelope(1))
+	event.EventEnvelope.EventID = ""
+	event = producer.Assign(event).(events.RADIUSEvent)
+	require.True(t, events.HasValidDeliveryIdentity(event.Envelope()))
+	event.Code, event.Identifier, event.Length = 2, 255, 28
+	event.ObservationID, event.RequestInstanceID, event.Association = "observation", "request", "unique"
+	event.OriginNodeID, event.SourceID, event.CaptureEpoch = "origin", "interface", "epoch"
+	event.Attributes = []string{"1:hex:616c696365", "8:hex:c0000201", "26/3561/1:hex:01"}
+	wire, err := ToProto(&event)
+	require.NoError(t, err)
+	decoded, omission, err := FromProto(wire)
+	require.NoError(t, err)
+	require.Nil(t, omission)
+	require.Equal(t, event, decoded)
+	wire.GetRadius().Attributes[0] = "1:hex:626f62"
+	require.Equal(t, "1:hex:616c696365", decoded.(events.RADIUSEvent).Attributes[0])
+	for _, attr := range []string{"2:hex:736563726574", "80:hex:00", "26/999/1:hex:00", "1:hex:zz", "1:alice"} {
+		event.Attributes = []string{attr}
+		_, err := ToProto(event)
+		require.Error(t, err, attr)
+		wire.GetRadius().Attributes = []string{attr}
+		_, _, err = FromProto(wire)
+		require.Error(t, err, attr)
+	}
+	wire.GetRadius().Attributes = nil
+	wire.GetRadius().Identifier = 256
+	_, _, err = FromProto(wire)
+	require.Error(t, err)
+	var nilEvent *events.RADIUSEvent
+	_, err = ToProto(nilEvent)
+	require.ErrorContains(t, err, "nil RADIUS pointer")
+}

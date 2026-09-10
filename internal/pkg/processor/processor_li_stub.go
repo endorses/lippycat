@@ -7,7 +7,9 @@
 package processor
 
 import (
+	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -34,3 +36,8 @@ func (p *Processor) processLIPacketWithAdmission(_ *types.PacketDisplay, _, _ []
 func (p *Processor) isLIEnabled() bool { return false }
 
 func (p *Processor) populateLIEncodingStats(_ *management.ProcessorStats) {}
+
+func (p *Processor) populateLIDeliveryStats(_ *management.ProcessorStats) {}
+
+func (p *Processor) processLIRADIUSPacket(_ *types.PacketDisplay, _ *data.CapturedPacket, _ *source.PacketBatch) {
+}

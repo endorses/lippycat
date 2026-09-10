@@ -97,6 +97,36 @@ func TestModifyIsIdempotentUpsertForApplicationFilters(t *testing.T) {
 	require.Equal(t, 2, coordinator.calls)
 }
 
+func TestModifyBPFToRADIUSRestartsCapture(t *testing.T) {
+	restarter := &recordingRestarter{}
+	updater := &recordingApplicationUpdater{}
+	manager := New("hunter", restarter, noopDisconnectMarker{})
+	manager.SetApplicationFilterUpdater(updater)
+	manager.handleUpdate(&management.FilterUpdate{
+		UpdateType: management.FilterUpdateType_UPDATE_ADD,
+		Filter:     &management.Filter{Id: "shared", Type: management.FilterType_FILTER_BPF, Pattern: "tcp", Enabled: true},
+	})
+	require.Equal(t, 1, restarter.calls)
+
+	replacement := &management.Filter{Id: "shared", Type: management.FilterType_FILTER_RADIUS_USERNAME, Pattern: "alice", Enabled: true, Revision: 1}
+	update := &management.FilterUpdate{UpdateType: management.FilterUpdateType_UPDATE_MODIFY, Filter: replacement}
+	manager.handleUpdate(update)
+	require.Equal(t, 2, restarter.calls, "replacing BPF must remove the old capture restriction")
+	require.Equal(t, []*management.Filter{replacement}, restarter.filters[1])
+	require.Equal(t, 2, updater.calls)
+	require.Equal(t, []*management.Filter{replacement}, updater.filters[1])
+	manager.handleUpdate(update)
+	require.Equal(t, 2, restarter.calls, "replayed replacement must remain idempotent")
+	require.Equal(t, 2, updater.calls)
+
+	bpf := &management.Filter{Id: "shared", Type: management.FilterType_FILTER_BPF, Pattern: "udp", Enabled: true, Revision: 2}
+	manager.handleUpdate(&management.FilterUpdate{UpdateType: management.FilterUpdateType_UPDATE_MODIFY, Filter: bpf})
+	require.Equal(t, 3, restarter.calls)
+	require.Equal(t, []*management.Filter{bpf}, restarter.filters[2])
+	require.Equal(t, 3, updater.calls, "switching back to BPF must remove the RADIUS matcher")
+	require.Equal(t, []*management.Filter{bpf}, updater.filters[2])
+}
+
 func TestModifyUpsertCoversCPU_GPUCapableAndLIFilterTypes(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -233,4 +263,40 @@ func TestInvalidUpdateIsNoOp(t *testing.T) {
 	require.NotPanics(t, func() { manager.handleUpdate(&management.FilterUpdate{}) })
 	require.Empty(t, manager.GetFilters())
 	require.Zero(t, restarter.calls)
+}
+
+func TestEmptyReconnectPolicyUsesCoordinator(t *testing.T) {
+	restarter := &recordingRestarter{}
+	updater := &recordingApplicationUpdater{}
+	coordinator := &recordingPolicyCoordinator{}
+	manager := New("hunter", restarter, noopDisconnectMarker{})
+	manager.SetApplicationFilterUpdater(updater)
+	manager.SetPolicyChangeCoordinator(coordinator)
+	initial := []*management.Filter{{Id: "radius", Type: management.FilterType_FILTER_RADIUS_USERNAME, Pattern: "alice"}}
+	require.NoError(t, manager.SetInitialFilters(initial))
+	require.Equal(t, 1, restarter.calls)
+	require.NoError(t, manager.SetInitialFilters(nil))
+	require.Equal(t, initial, manager.GetFilters())
+	manager.ApplyPendingInitial()
+	require.Empty(t, manager.GetFilters())
+	require.Empty(t, updater.filters[len(updater.filters)-1])
+	require.Equal(t, 1, coordinator.calls)
+	require.Equal(t, 2, restarter.calls)
+}
+
+func TestSnapshotPolicyUsesCoordinator(t *testing.T) {
+	restarter := &recordingRestarter{}
+	updater := &recordingApplicationUpdater{}
+	coordinator := &recordingPolicyCoordinator{}
+	manager := New("hunter", restarter, noopDisconnectMarker{})
+	manager.SetApplicationFilterUpdater(updater)
+	manager.SetPolicyChangeCoordinator(coordinator)
+	initial := []*management.Filter{{Id: "sip", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice"}}
+	require.NoError(t, manager.SetInitialFilters(initial))
+	manager.handleUpdate(&management.FilterUpdate{Snapshot: true, Filters: initial})
+	require.Zero(t, coordinator.calls)
+	manager.handleUpdate(&management.FilterUpdate{Snapshot: true})
+	require.Empty(t, manager.GetFilters())
+	require.Equal(t, 1, coordinator.calls)
+	require.Equal(t, 1, restarter.calls)
 }

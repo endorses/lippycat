@@ -122,7 +122,7 @@ func TestValidateAcceptedEventProfile(t *testing.T) {
 		return &management.RegistrationResponse{
 			AcceptedEventApiMajor:           1,
 			AcceptedSemanticProfileRevision: 1,
-			AcceptedEventKinds:              []int32{1, 2, 3, 4, 5, 6},
+			AcceptedEventKinds:              []int32{1, 2, 3, 4, 5, 6, 7},
 		}
 	}
 

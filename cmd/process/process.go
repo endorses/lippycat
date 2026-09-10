@@ -491,6 +491,18 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryTLSCAFile = liConfig.DeliveryTLSCAFile
 		config.LIDeliveryTLSPinnedCert = liConfig.DeliveryTLSPinnedCert
 		config.LIDeliveryQueueSize = liConfig.DeliveryQueueSize
+		config.LIDeliveryX2QueueSize = liConfig.DeliveryX2QueueSize
+		config.LIDeliveryX3QueueSize = liConfig.DeliveryX3QueueSize
+		config.LIDeliveryX2QueueBytes = liConfig.DeliveryX2QueueBytes
+		config.LIDeliveryX3QueueBytes = liConfig.DeliveryX3QueueBytes
+		config.LIDeliveryX3MaxAge = liConfig.DeliveryX3MaxAge
+		config.LIDeliveryMemoryBudgetBytes = liConfig.DeliveryMemoryBudgetBytes
+		config.LIDeliveryX2SpoolDir = liConfig.DeliveryX2SpoolDir
+		config.LIDeliveryX2SpoolMaxBytes = liConfig.DeliveryX2SpoolMaxBytes
+		config.LIDeliveryX2SpoolKeyFile = liConfig.DeliveryX2SpoolKeyFile
+		config.LIDeliveryX2SpoolReplayPolicy = liConfig.DeliveryX2SpoolReplayPolicy
+		config.LIDeliveryX2SpoolReplayManifest = liConfig.DeliveryX2SpoolReplayManifest
+		config.LIDeliveryX2SpoolExportManifest = liConfig.DeliveryX2SpoolExportManifest
 		config.LIDeliverySendTimeout = liConfig.DeliverySendTimeout
 		config.LIDeliveryInitialBackoff = liConfig.DeliveryInitialBackoff
 		config.LIDeliveryMaxBackoff = liConfig.DeliveryMaxBackoff
@@ -579,6 +591,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("event ingress limits must be non-negative and max batch bytes must be positive")
 	}
 
+	if err := applyRADIUSLIConfig(cmd, &config); err != nil {
+		return err
+	}
 	p, err := processor.New(config)
 	if err != nil {
 		return fmt.Errorf("failed to create processor: %w", err)

@@ -33,6 +33,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
@@ -279,6 +280,7 @@ func credibleSIPMethod(method []byte) bool {
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
 type LocalSource struct {
+	radiusProcessor *radius.CaptureProcessor
 	// Configuration
 	config LocalSourceConfig
 
@@ -345,6 +347,10 @@ type LocalSource struct {
 
 // LocalSourceConfig contains configuration for LocalSource.
 type LocalSourceConfig struct {
+	RADIUSPorts       []uint16
+	RADIUSScope       radius.CaptureScope
+	RADIUSCorrelation radius.CorrelatorConfig
+	RADIUSMatcher     radius.ObservationMatcher
 	// Interfaces to capture from (e.g., "eth0", "eth0,eth1")
 	Interfaces []string
 
@@ -410,7 +416,19 @@ func NewLocalSource(cfg LocalSourceConfig) *LocalSource {
 		cfg.CallFilterCacheSize = defaultCallFilterCacheSize
 	}
 
+	scope := cfg.RADIUSScope
+	if scope.OriginNodeID == "" {
+		scope.OriginNodeID = "local"
+		if cfg.ProcessorID != "" {
+			scope.OriginNodeID = cfg.ProcessorID + "-local"
+		}
+	}
+	radiusProcessor, err := radius.NewCaptureProcessorWithConfig(scope, cfg.RADIUSCorrelation, cfg.RADIUSPorts...)
+	if err != nil {
+		logger.Error("Failed to initialize RADIUS capture", "error", err)
+	}
 	return &LocalSource{
+		radiusProcessor: radiusProcessor,
 		config:          cfg,
 		currentBatch:    make([]*pipeline.PacketEnvelope, 0, cfg.BatchSize),
 		batches:         make(chan *PacketBatch, cfg.BatchBuffer),
@@ -637,6 +655,7 @@ func (s *LocalSource) Start(ctx context.Context) error {
 
 	// Wait for goroutines
 	s.wg.Wait()
+	s.radiusProcessor.Close()
 
 	// Close batches channel
 	close(s.batches)
@@ -672,7 +691,7 @@ func (s *LocalSource) capturePackets(ctx context.Context, filter string, done ch
 
 	// Use InitWithBuffer to capture packets into our buffer
 	// nil processor means we own the buffer and read from it externally
-	capture.InitWithBuffer(ctx, devices, filter, s.packetBuffer.Load(), nil, nil)
+	capture.InitWithBuffer(ctx, devices, filter, s.packetBuffer.Load(), nil, nil, capture.CaptureOptions{ReassembleIPFragments: s.config.ProtocolMode == "voip"})
 }
 
 // batchingLoop reads from packet buffer, applies filtering, and creates batches.
@@ -909,6 +928,16 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			selectionPolicy := s.selectionPolicy
 			s.mu.Unlock()
 			filterConfigured := filter != nil
+			radiusMatcher, _ := filter.(radius.ObservationMatcher)
+			radiusMatcher = radius.CombineMatchers(radiusMatcher, s.config.RADIUSMatcher)
+			radiusObservation := s.radiusProcessor.Process(pktInfo.Packet, pktInfo.LinkType, pktInfo.Interface, radiusMatcher)
+			if s.config.ProtocolMode == "radius" && radiusObservation == nil {
+				continue
+			}
+			radiusSelected := radiusObservation != nil && (len(radiusObservation.Direct) > 0 || len(radiusObservation.Inherited) > 0)
+			if s.config.RADIUSMatcher != nil && !radiusSelected {
+				continue
+			}
 
 			// Convert to protobuf format first
 			pbPkt := convertPacketInfo(pktInfo)
@@ -966,7 +995,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				if !reuseVerdict {
 					matched, filterIDs = filter.MatchPacketWithIDs(pktInfo.Packet)
 				}
-				if !matched {
+				if !matched && !radiusSelected {
 					continue
 				}
 				matchedFilterIDs = filterIDs
@@ -1063,6 +1092,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				logger.Error("Failed to normalize local packet", "error", err)
 				continue
 			}
+			envelope.RADIUS = radiusObservation
 			// A packet is forwarded only after it can be admitted to a batch.
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 			s.batchMu.Lock()
@@ -1097,10 +1127,11 @@ func (s *LocalSource) sendBatch() {
 		envelope.Source.BatchTimestamp = batchTime
 	}
 	batch := &PacketBatch{
-		SourceID:    s.SourceID(),
-		Envelopes:   s.currentBatch,
-		Sequence:    s.batchSeq,
-		TimestampNs: batchTime.UnixNano(),
+		RADIUSSourceTrusted: true,
+		SourceID:            s.SourceID(),
+		Envelopes:           s.currentBatch,
+		Sequence:            s.batchSeq,
+		TimestampNs:         batchTime.UnixNano(),
 		Stats: &data.BatchStats{
 			TotalCaptured:             s.stats.packetsCaptured.Load(),
 			FilteredMatched:           s.stats.packetsForwarded.Load(),
@@ -1231,6 +1262,12 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 	// old pcap_wait calls can overlap the new generation's pcap_setfilter calls.
 	if s.captureDone != nil {
 		<-s.captureDone
+	}
+	// Old handles can still enqueue packets while cancellation drains. Only
+	// establish the new epoch after every old handle has stopped, so those
+	// queued packets cannot seed association across the capture gap.
+	if err := s.radiusProcessor.AdvanceBoundary(time.Now()); err != nil {
+		return err
 	}
 
 	// Shutdown may have started while the previous capture generation drained.
@@ -1402,3 +1439,14 @@ func convertPacketInfo(pktInfo capture.PacketInfo) *data.CapturedPacket {
 
 // Ensure LocalSource implements PacketSource.
 var _ PacketSource = (*LocalSource)(nil)
+
+// SupportsRADIUS reports whether observation processing and matching are installed.
+func (s *LocalSource) SupportsRADIUS() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.appFilter.(radius.ObservationMatcher)
+	return s.config.ProtocolMode != "voip" && s.radiusProcessor != nil && ok
+}
+
+// RADIUSCaptureBPF returns bidirectional service visibility for configured ports.
+func (s *LocalSource) RADIUSCaptureBPF() string { return radius.CaptureBPF(s.config.RADIUSPorts...) }

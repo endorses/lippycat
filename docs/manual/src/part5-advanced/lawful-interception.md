@@ -653,3 +653,51 @@ openssl s_client -connect mdf.example.com:443 \
   -cert delivery.crt -key delivery.key \
   -CAfile mdf-ca.crt
 ```
+
+### Bounded delivery and restart recovery
+
+Processor and tap support independent X2/X3 encoded-byte limits via
+`--li-delivery-x2-queue-bytes` and `--li-delivery-x3-queue-bytes`. Both byte and PDU
+caps apply per destination and interface, including claimed writes. The optional
+`--li-delivery-memory-budget-bytes` reserves capacity across destinations and
+requires explicit byte caps. Size budgets as peak encoded bytes/second multiplied
+by outage duration, with headroom and sufficient PDU capacity. Recovery bandwidth
+must exceed live traffic. Other processor memory needs separate sizing.
+
+`--li-delivery-x3-max-age=5m` expires X3 five minutes after local admission, including
+reordering and retries, even while disconnected. The default is no expiry. X2 does
+not inherit X3 age. Local write completion does not prove remote receipt.
+
+Encrypted X2 persistence is opt-in through `--li-delivery-x2-spool-dir`, a positive
+`--li-delivery-x2-spool-max-bytes` and `--li-delivery-x2-spool-key-file` containing
+a private raw 32-byte AES key. X3 stays memory-only. Enqueue success is memory
+admission, not a durability acknowledgement; a crash can lose not-yet-synced
+records. Full journals reject new product while retaining persisted records.
+
+Recovered X2 is held by default and requires explicit identity reconciliation and
+authorization through the embedding control-plane API before replay. Reusing an
+XID or destination UUID does not authorize old records. The CLI accepts an explicit private replay manifest after ADMF startup reconciliation. `--li-delivery-x2-spool-replay-policy=purge` explicitly removes
+recovered records; keep the default `hold` unless discarding them is intended.
+`lc show status` reports byte budgets, queue and in-flight bytes, expired product,
+reason-labelled dropped bytes, and journal pending, persisted and held counts.
+Existing deployments retain their prior limits until new options are configured.
+
+Independent PDU caps are available through `--li-delivery-x2-queue-size` and
+`--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy
+`--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
+once, while `queue_bytes` counts every destination copy.
+
+## RADIUS
+
+Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
+authentication and accounting capture. `lc process` stays protocol-neutral and
+existing watch commands display RADIUS metadata. Ordinary capture does not need
+an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
+across commands; optional raw format-11 X2 delivery requires a current authorized
+X2Only task in an LI build.
+
+The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
+configuration examples, scope isolation, NatParas mappings, state limits and
+MDF setup. Synthetic direct hunt/process verification has passed with upgraded
+peers; relay-origin X2 authorization is unsupported. External operator known-line
+verification and receiving-MDF agreement remain pending.

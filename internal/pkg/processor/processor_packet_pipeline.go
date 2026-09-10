@@ -88,6 +88,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		p.enricher.Enrich(packets)
 	}
 
+	p.normalizeRADIUS(sourceID, packets)
+
 	// Normalize protocol metadata after enrichment and before forwarding/broadcasting.
 	p.emitProtocolEvents(sourceID, packets)
 
@@ -156,7 +158,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	if p.isLIEnabled() {
 		for index, pkt := range packets {
 			// Skip packets without matched filter IDs (not targeted by LI)
-			if len(pkt.MatchedFilterIds) == 0 {
+			if len(pkt.MatchedFilterIds) == 0 && pkt.Radius == nil {
 				continue
 			}
 			logger.Info("LI processing packet with filter IDs",
@@ -228,7 +230,11 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				// filters for RTP and therefore still fails closed for identities.
 				directFilterIDs = pkt.MatchedFilterIds
 			}
-			p.processLIPacketWithAdmission(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index])
+			if pkt.Radius != nil {
+				p.processLIRADIUSPacket(&display, pkt, batch)
+			} else {
+				p.processLIPacketWithAdmission(&display, directFilterIDs, pkt.InheritedMatchedFilterIds, packetAdmissions[index])
+			}
 			if p.afterLIPacket != nil {
 				p.afterLIPacket()
 			}
@@ -355,6 +361,10 @@ func refreshEnvelopes(batch *source.PacketBatch, packets []*data.CapturedPacket)
 		if err != nil {
 			return fmt.Errorf("normalize projected packet %d: %w", i, err)
 		}
+		current.RADIUS, current.RADIUSValidationError = normalized.RADIUS, normalized.RADIUSValidationError
+		current.MatchedFilterIDs = normalized.MatchedFilterIDs
+		current.DirectMatchedFilterIDs = normalized.DirectMatchedFilterIDs
+		current.InheritedMatchedFilterIDs = normalized.InheritedMatchedFilterIDs
 		current.Metadata = normalized.Metadata
 		current.TLSKeys = normalized.TLSKeys
 		current.Stages = current.Stages.With(pipeline.StageAnalyzed)

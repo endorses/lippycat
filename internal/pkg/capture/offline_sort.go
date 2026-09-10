@@ -286,11 +286,11 @@ func replayOfflineSorted(parent context.Context, devices []pcaptypes.PcapInterfa
 				CaptureLength: int(binary.LittleEndian.Uint32(key[36:])), Length: int(binary.LittleEndian.Uint32(key[40:])), InterfaceIndex: int(binary.LittleEndian.Uint32(key[44:])),
 			}
 			info := PacketInfo{Packet: packet, LinkType: link, Interface: filepath.Base(devices[source].Name()), SourcePath: devices[source].Name(), SourceIndex: source, SourceSequence: binary.LittleEndian.Uint64(key[16:]), SourceInterfaceID: binary.LittleEndian.Uint32(key[44:])}
+			observePacket(&info)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case packets <- info:
-				observePacket(info)
 			}
 		}
 		return nil

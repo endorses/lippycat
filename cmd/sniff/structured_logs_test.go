@@ -96,7 +96,7 @@ func TestSniffProducesNormalizedEventsWithoutLogDirectory(t *testing.T) {
 
 	packet := gopacket.NewPacket(dnsPacket(t), layers.LayerTypeEthernet, gopacket.Default)
 	packet.Metadata().Timestamp = time.Unix(10, 123)
-	session.observe(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: filepath.Base(input), SourcePath: input})
+	session.observe(&capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: filepath.Base(input), SourcePath: input})
 	session.analysis.EOF()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -141,7 +141,7 @@ func TestSniffSharedFixtureProducesReassembledHTTPEvent(t *testing.T) {
 	require.NoError(t, err)
 	for _, packet := range packets {
 		packet.SourcePath = input
-		session.observe(packet)
+		session.observe(&packet)
 	}
 	session.analysis.EOF()
 	require.NoError(t, session.dispatcher.Close(context.Background()))
@@ -182,7 +182,7 @@ func TestSniffDistinguishesOfflineInputsWithSameBasename(t *testing.T) {
 	for index, input := range []string{first, second} {
 		packet := gopacket.NewPacket(dnsPacket(t), layers.LayerTypeEthernet, gopacket.Default)
 		packet.Metadata().Timestamp = time.Unix(int64(10+index), 0)
-		session.observe(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: "capture.pcap", SourcePath: input})
+		session.observe(&capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet, Interface: "capture.pcap", SourcePath: input})
 	}
 	session.analysis.EOF()
 	require.NoError(t, session.dispatcher.Close(context.Background()))

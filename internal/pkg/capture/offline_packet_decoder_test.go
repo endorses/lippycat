@@ -239,9 +239,9 @@ func TestOfflineReusablePacketVisitorAndObserverOwnership(t *testing.T) {
 	defer func() { require.NoError(t, stream.Close()) }()
 	var borrowed *offlinePacketDecoder
 	var retained []PacketInfo
-	restore := SetPacketObserver(func(info PacketInfo) {
+	restore := SetPacketObserver(func(info *PacketInfo) {
 		require.NotSame(t, borrowed, info.Packet)
-		retained = append(retained, info)
+		retained = append(retained, *info)
 	})
 	defer restore()
 	visited := 0

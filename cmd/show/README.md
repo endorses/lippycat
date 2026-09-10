@@ -19,6 +19,7 @@ lc show status -P localhost:55555 --insecure
 ```
 
 **Output:**
+
 ```json
 {
   "processor_id": "central-proc",
@@ -33,6 +34,23 @@ lc show status -P localhost:55555 --insecure
   "upstream_processor": ""
 }
 ```
+
+When LI delivery is configured, status also includes `li_delivery` with aggregate
+X2/X3 enqueue, written, dropped, retry, and queue-depth statistics. Its
+`destinations` object is keyed by destination UUID and includes separate X2/X3
+queue depths and capacities, oldest queued ages, drop reasons, connection errors,
+and `x2_keepalive` / `x3_keepalive` health. `li_encoding` remains a separate set
+of encoding counters. Unavailable LI telemetry is omitted.
+
+`x2_enqueue_calls` and `x3_enqueue_calls` count successful asynchronous enqueue
+calls, including calls with no eligible destinations; written and dropped
+counters count destination copies, so fan-out prevents direct reconciliation.
+Written means a completed local TLS write, and keepalive ACKs indicate control
+responsiveness; neither proves the receiver accepted a product. Monitor queue age
+for current delay and changes in cumulative drop counters for loss. Counters reset
+on restart, and destination details disappear when that destination is removed.
+See [LI delivery telemetry](../../docs/LI_INTEGRATION.md#delivery-telemetry) for
+field semantics and troubleshooting.
 
 ### Hunter
 
@@ -49,6 +67,7 @@ lc show hunter --id edge-01 -P localhost:55555 --insecure
 > **Note:** To list all connected hunters, use `lc list hunters -P processor:55555 --tls-ca ca.crt`.
 
 **Output (list):**
+
 ```json
 [
   {
@@ -88,6 +107,7 @@ lc show topology -P localhost:55555 --insecure
 ```
 
 **Output:**
+
 ```json
 {
   "processor_id": "central-proc",
@@ -137,14 +157,14 @@ lc show config --json
 
 All remote commands support these flags. **TLS is enabled by default.**
 
-| Flag | Description |
-|------|-------------|
-| `-P, --processor` | Processor address (host:port) - **required** |
-| `--insecure` | Allow insecure connections without TLS (must be explicitly set) |
-| `--tls-ca` | Path to CA certificate file |
-| `--tls-cert` | Path to client certificate file (mTLS) |
-| `--tls-key` | Path to client key file (mTLS) |
-| `--tls-skip-verify` | Skip TLS certificate verification (INSECURE - testing only) |
+| Flag                | Description                                                     |
+| ------------------- | --------------------------------------------------------------- |
+| `-P, --processor`   | Processor address (host:port) - **required**                    |
+| `--insecure`        | Allow insecure connections without TLS (must be explicitly set) |
+| `--tls-ca`          | Path to CA certificate file                                     |
+| `--tls-cert`        | Path to client certificate file (mTLS)                          |
+| `--tls-key`         | Path to client key file (mTLS)                                  |
+| `--tls-skip-verify` | Skip TLS certificate verification (INSECURE - testing only)     |
 
 ## Usage Examples
 
@@ -181,19 +201,25 @@ lc show topology -P processor:55555 --tls-ca ca.crt > topology-$(date +%Y%m%d).j
 Errors are output as JSON to stderr with appropriate exit codes:
 
 ```json
-{"error":"processor address is required","code":"UNAVAILABLE"}
+{ "error": "processor address is required", "code": "UNAVAILABLE" }
 ```
 
-| Exit Code | Meaning |
-|-----------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Connection error |
-| 3 | Validation error |
-| 4 | Not found |
+| Exit Code | Meaning          |
+| --------- | ---------------- |
+| 0         | Success          |
+| 1         | General error    |
+| 2         | Connection error |
+| 3         | Validation error |
+| 4         | Not found        |
 
 ## See Also
 
 - [cmd/filter/README.md](../filter/README.md) - Filter management commands
 - [docs/DISTRIBUTED_MODE.md](../../docs/DISTRIBUTED_MODE.md) - Distributed architecture
 - [docs/SECURITY.md](../../docs/SECURITY.md) - TLS/mTLS configuration
+
+LI delivery status also includes `queue_bytes`, `dropped_bytes`, per-destination
+X2/X3 queued and in-flight bytes and byte capacities, `x3_expired`, and
+`dropped_bytes_by_reason`. `x2_journal` reports byte pressure and
+`pending`/`persisted`/`held` counts. Pending admission is not a durability
+acknowledgement; held records require explicit replay authorization.

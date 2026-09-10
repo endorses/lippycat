@@ -19,10 +19,14 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/flowid"
+	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
+	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"google.golang.org/protobuf/proto"
 )
 
 // Source identifies the analysis authority and capture provenance for an input.
@@ -225,10 +229,13 @@ func (r *Runtime) ObservePacket(source Source, info capture.PacketInfo) error {
 		timestampNS = timestamp.UnixNano()
 	}
 	observedAt, err := r.observeDecodedCaptured(source, &data.CapturedPacket{
-		Data:        info.Packet.Data(),
-		TimestampNs: timestampNS,
-		LinkType:    uint32(info.LinkType),
-		Metadata:    meta,
+		Data:           info.Packet.Data(),
+		TimestampNs:    timestampNS,
+		LinkType:       uint32(info.LinkType),
+		Metadata:       meta,
+		CaptureLength:  uint32(info.Packet.Metadata().CaptureLength),
+		OriginalLength: uint32(info.Packet.Metadata().Length),
+		Radius:         grpcadapter.RADIUSToProto(info.RADIUS),
 	}, protocolHint, info.Packet)
 	if err != nil {
 		r.stats.Invalid++
@@ -304,6 +311,21 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 		return time.Time{}, err
 	}
 	r.stats.Observed++
+	observation, radiusErr := grpcadapter.RADIUSFromProto(raw)
+	if radiusErr != nil {
+		logger.Debug("Skipping inconsistent RADIUS event provenance", "error", radiusErr)
+	} else {
+		if observation == nil {
+			// Generic capture can report RADIUS without creating attribution state.
+			decoded, _, decodeErr := radius.DecodePacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.CaptureInfo{Timestamp: ts, CaptureLength: int(raw.CaptureLength), Length: int(raw.OriginalLength)}, radius.CaptureScope{OriginNodeID: source.NodeID, SourceID: source.InterfaceName}, radius.Identity{})
+			if decodeErr == nil {
+				observation = decoded
+			}
+		}
+		if event, ok := events.RADIUSFromObservation(env, observation); ok {
+			r.emit(event)
+		}
+	}
 	if packet == nil {
 		packet = gopacket.NewPacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.NoCopy)
 	}
@@ -319,12 +341,12 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 		// for bounded reassembly so all paths emit the same canonical event at
 		// the final-byte timestamp. The result remains useful as a parser hint
 		// for protocols detected on non-standard ports.
-		metadata := *raw.Metadata
+		metadata := proto.Clone(raw.Metadata).(*data.PacketMetadata)
 		if protocolHint == "" {
 			protocolHint = applicationProtocolHint(raw.Metadata)
 		}
 		metadata.Tls, metadata.Http, metadata.Email = nil, nil, nil
-		r.emitMetadata(env, &metadata)
+		r.emitMetadata(env, metadata)
 		r.observeTCP(source, packet, ts, scope, source.Partial || scope == events.CaptureScopeFiltered, protocolHint)
 	} else {
 		// Keep compatibility with metadata-only captured packets.

@@ -222,6 +222,11 @@ func cloneCompactDetail(d Detail, raw []byte) Detail {
 		m.IMAPFlags = cloneCompactSlice(m.IMAPFlags)
 		p.EmailData = &m
 	}
+	if p.RADIUSData != nil {
+		m := *p.RADIUSData
+		m.Attributes = cloneCompactSlice(m.Attributes)
+		p.RADIUSData = &m
+	}
 	if p.HTTPData != nil {
 		m := *p.HTTPData
 		m.Headers = maps.Clone(m.Headers)

@@ -9,5 +9,9 @@ import (
 // Uses shared extraction logic from converter_shared.go.
 func ConvertPacketToDisplay(pktInfo PacketInfo) types.PacketDisplay {
 	fields := ExtractPacketFields(pktInfo.Packet)
-	return FieldsToPacketDisplay(fields, pktInfo)
+	display := FieldsToPacketDisplay(fields, pktInfo)
+	if m := RADIUSDisplay(pktInfo); m != nil {
+		display.RADIUSData, display.Protocol, display.Info = m, "RADIUS", m.Summary()
+	}
+	return display
 }

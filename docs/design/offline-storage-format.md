@@ -1,6 +1,11 @@
 # Offline temporary storage formats
 
-## Schema 1: legacy differential oracle
+## Schema 3: legacy differential oracle
+
+Version 3 includes the RADIUS presentation metadata in `PacketDisplay`. Readers
+reject the previous version 1 before decoding its payload. Version 2 identifies
+the separate compact format below; no migration or persisted-session reuse is
+provided.
 
 Phase 2 replaces the provisional JSON payload and 20-byte frame from the initial
 contract with the binary format below. Standard JSON unmarshalling does not enforce decoded
@@ -15,7 +20,7 @@ All integers are little endian. Each stream starts with a 16-byte header:
 | Byte offset | Width | Value                             |
 | ----------- | ----- | --------------------------------- |
 | 0           | 8     | `LCODATA` followed by a zero byte |
-| 8           | 2     | Schema version, currently 1       |
+| 8           | 2     | Schema version, currently 3       |
 | 10          | 2     | Stream kind                       |
 | 12          | 4     | Reserved, must be zero            |
 
@@ -66,7 +71,7 @@ normalized to UTC on decode. Monotonic clock readings and display time zones are
 not persisted. This retains precision beyond UnixNano's range and supports the
 zero time and timestamps outside JSON's four-digit year restriction.
 
-`TestCodecSchemaV1Shape` pins a SHA-256 fingerprint of both wire structures and
+`TestCodecSchemaV3Shape` pins a SHA-256 fingerprint of both wire structures and
 all recursively included protocol metadata field names, types and order. Any
 metadata field addition or layout change fails the test and requires an explicit
 schema-version decision. `TestCodecAllMetadataRoundTrip` fills every supported
@@ -84,10 +89,10 @@ to accounting for retained and pinned records. Oversized records fail explicitly
 ## Schema 2: compact completed dataset
 
 The production `watch file` path uses `NewCompactBuilder` and schema 2 after the
-phase-4 cutover gate. Schema 1 remains a differential test oracle. Both schemas
+phase-4 cutover gate. Schema 3 remains a differential test oracle. Both schemas
 publish only completed datasets.
 There is no persisted-session opener, cross-process reuse, or partial-analysis
-publication. Schema 1 is never interpreted as schema 2.
+publication. Schema 3 is never interpreted as schema 2.
 
 This implementation refines the **unshipped phase-0 layout proposal**. Base and
 analysis columns share completed row blocks; text and compound values use
@@ -113,7 +118,7 @@ Each of the three indexed files begins with this 32-byte little-endian header:
 | ------ | ----- | ------------------ |
 | 0      | 8     | `LCOV2DAT`         |
 | 8      | 2     | Schema major: 2    |
-| 10     | 2     | Schema minor: 1    |
+| 10     | 2     | Schema minor: 2    |
 | 12     | 2     | Stream kind        |
 | 14     | 2     | Flags: zero        |
 | 16     | 8     | Dataset generation |
@@ -152,8 +157,11 @@ Metadata replacement blocks currently contain one row. Both encoded payload and
 decoded allocations must fit configured limits; an oversized first row fails
 explicitly. Buffered rows and eventual disk bytes are charged before admission.
 
-Schema 2.1 adds optional independent DEFLATE blocks. Readers reject other stream
-minor versions and unknown encoding flags. The directory stores physical block
+Schema 2.2 appends RADIUS to the sparse metadata override sequence, using mask
+bit 5. Its owned attribute slices participate in cloning and memory accounting.
+Readers reject earlier minor versions, including 2.1, before reading blocks.
+The optional independent DEFLATE blocks introduced in 2.1 remain supported;
+unknown encoding flags are rejected. The directory stores physical block
 lengths; the header stores the exact expanded length, bounded before allocation.
 The reader rejects truncated streams, excess expansion and trailing compressed
 bytes, then checks the expanded payload checksum and all column/arena bounds.
@@ -304,9 +312,11 @@ contents remains distinguishable from metadata absent. `Summary` materialization
 restores this exact projection and its accessors perform no further I/O.
 
 A kind-4 metadata block has field 1 `Mask` (u8) and field 2 `Metadata` (ref).
-`Metadata` is the explicit typed sequence of VoIP, DNS, Email, TLS and HTTP
+`Metadata` is the explicit typed sequence of VoIP, DNS, Email, TLS, HTTP and RADIUS
 pointers, including each protocol's full supported fields in `compactFieldNames`.
-The mask uses the same five protocol bits. A set bit replaces the **entire
+The mask uses bits 0–4 for the five projected protocols and bit 5 for RADIUS.
+RADIUS retains its public observation metadata in details, including association
+and request identifiers; the narrow filter projection is unchanged. A set bit replaces the **entire
 protocol metadata pointer** after stateless decoding, including an explicit nil
 or empty value. This is a protocol-level override, not the per-field override
 bitmap proposed in phase 0. Unset bits leave decoded metadata unchanged.
@@ -331,7 +341,7 @@ are rebuilt from amended rows before publication.
 `TestCompactValueSchemaFingerprint` pins field IDs/order, exact types, widths,
 value representation and sparse projection groups with SHA-256. Field coverage,
 round-trip, fixed-width golden-byte, nil/empty, malformed-container and truncation
-tests supplement this check. The schema-1 fingerprint remains independent.
+tests supplement this check. The schema-3 fingerprint remains independent.
 
 ### Bounded registries and completion manifest
 
@@ -348,7 +358,7 @@ The private JSON `manifest` has these actual top-level fields:
 `Version` (2), `Generation`, `Sources`, `Count`, `Statistics`, `StreamLengths`,
 `AnalysisVersion` (`"1"`), `Complete` (true), `CompactRegistries`, and `Compact`.
 `CompactRegistries` contains `Labels` and `Contexts`; internal accounting fields
-are not serialized. `Compact` contains `SchemaMajor` (2), `SchemaMinor` (1),
+are not serialized. `Compact` contains `SchemaMajor` (2), `SchemaMinor` (2),
 `NormalizationVersion`, `AnalyzerVersion`, `DecoderVersion`,
 `FilterSemanticsVersion` (each `"1"`), `BaseComplete` and `AnalysisComplete`
 (both true), `AnalysisRevision` (1), `FileSHA256`, and `Backings`.

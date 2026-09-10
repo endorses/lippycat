@@ -102,3 +102,41 @@ content-bearing types. `files.log` is built from `FileMetadataEvent`, never
   object per stream, including explicit nulls for unset data.
 - `go test ./internal/pkg/logschema` verifies stream/file names, field order,
   types, fixture coverage, and duplicate fields.
+
+## RADIUS observation stream (v1 additive extension)
+
+`radius.log` is a lippycat observation schema, not Zeek RADIUS compatibility.
+The new stream leaves all existing v1 field orders and meanings unchanged.
+Every valid message produces its own record; responses are not coalesced with
+requests. Endpoints retain observed packet direction. The numeric `identifier`
+is the eight-bit wire value, while `observation_id` and `request_instance_id`
+are opaque capture-epoch/sequence identities. Missing request identity is unset.
+`association` reports the shared correlator status, including `request`, `unique`,
+`missing`, `ambiguous`, `expired`, `incompatible`, and `capacity_suppressed`.
+Association is observational and does not authenticate a message.
+
+`attributes` is an ordered vector of allowlisted instances. Ordinary attributes
+use `TYPE:hex:VALUE`; DSL Forum Agent-Circuit-Id uses `26/3561/1:hex:VALUE`.
+Hex is lowercase, preserves arbitrary bytes and empty values, and prevents
+terminal/control-character injection. Repeated attributes remain separate and
+in wire order. The allowlist is User-Name (1), NAS-IP-Address (4), NAS-Port (5),
+Service-Type (6), Framed-IP-Address (8), Called-Station-Id (30),
+Calling-Station-Id (31), NAS-Identifier (32), Acct-Status-Type (40),
+Acct-Session-Id (44), NAS-Port-Type (61), NAS-Port-Id (87), NAS-IPv6-Address (95),
+and vendor 3561/type 1. These values can contain subscriber identities.
+Password/CHAP/EAP attributes, State/Class, authenticators, other vendor data,
+and unknown attributes are omitted. Filter/task evidence is also omitted.
+Routine display and text/JSON summaries use the same allowlist.
+Explicit packet sinks preserve captured bytes, including omitted attributes;
+this presentation policy never rewrites packet data.
+
+`origin_node_id`, `source_id`, and `capture_epoch` retain capture provenance;
+`node_id` follows the existing event envelope convention. Relayed provenance is
+validated against captured bytes but remains a claim, not LI authorization.
+
+The Phase 6 command/configuration surface does not change this schema version or
+field order. Capture profiles and state limits configure observation production;
+queue loss, malformed-input and LI delivery counters are operational statistics,
+not additional record fields. `radius` output requires independent log enablement
+with `--log-dir`; an X1 task does not turn it on. See the
+[RADIUS operator guide](RADIUS.md) for supported scope and counter ownership.

@@ -271,6 +271,8 @@ func ingressEventKind(kind eventsv1.EventKind) (events.Kind, bool) {
 		return events.KindHTTP, true
 	case eventsv1.EventKind_EVENT_KIND_SMTP:
 		return events.KindSMTP, true
+	case eventsv1.EventKind_EVENT_KIND_RADIUS:
+		return events.KindRADIUS, true
 	case eventsv1.EventKind_EVENT_KIND_FILE_METADATA:
 		return events.KindFileMetadata, true
 	default:

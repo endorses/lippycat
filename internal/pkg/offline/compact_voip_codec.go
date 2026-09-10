@@ -12,7 +12,7 @@ import (
 // The generic encoder remains the frozen oracle and handles mixed protocols.
 func encodeCompactOverrides(value compactOverrides, max uint64) ([]byte, error) {
 	m := value.Metadata
-	if m.VoIP == nil || m.DNS != nil || m.Email != nil || m.TLS != nil || m.HTTP != nil {
+	if m.VoIP == nil || m.DNS != nil || m.Email != nil || m.TLS != nil || m.HTTP != nil || m.RADIUS != nil {
 		return encodeCompactValue(value, max)
 	}
 	if max > uint64(int(^uint(0)>>1)) {
@@ -68,5 +68,5 @@ func (e *compactRowEncoder) voipOverride(mask uint8, p *types.VoIPMetadata) {
 	e.uint(uint64(p.Timestamp), 4)
 	e.text(p.Codec)
 	e.text(p.MergeFromCallID)
-	e.uint(0, 4) // nil DNS, Email, TLS and HTTP pointers
+	e.uint(0, 5) // nil DNS, Email, TLS, HTTP and RADIUS pointers
 }

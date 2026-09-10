@@ -66,6 +66,7 @@ before admitting the key. A value of zero or less disables cap-based eviction.
 | ---------------------------- | ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `detector.max_flows`         | integer | `100000` | Maximum active flow contexts. Lower values reduce memory and eviction-pause size but retain less stateful protocol history under high cardinality. |
 | `detector.max_cache_entries` | integer | `100000` | Maximum cached detection results. Lower values reduce memory but cause more reclassification when the working set exceeds the cap.                 |
+| `detector.max_sip_ip_pairs`  | integer | `100000` | Maximum SIP IP-pair associations; nonpositive values use the default. Evicts the oldest SIP observation when full.                                 |
 
 See [Performance Optimization](../part5-advanced/performance.md#detector-capacity-and-retention)
 for production tuning and telemetry interpretation.
@@ -816,3 +817,15 @@ promiscuous: true
 ```
 
 For more on performance tuning, see [Performance Optimization](../part5-advanced/performance.md). For TLS certificate setup, see [Security](../part5-advanced/security.md).
+
+## RADIUS (`radius`)
+
+RADIUS uses one shared configuration section across sniff, hunt and tap. See the
+[complete flag/key/default table](../part5-advanced/radius.md#shared-flags-and-configuration)
+and its YAML example. Environment keys use `LIPPYCAT_RADIUS_`, for example
+`LIPPYCAT_RADIUS_OPERATOR_SCOPE=operator-a/nas-a` and
+`LIPPYCAT_RADIUS_TRANSACTION_TIMEOUT=30s`. Extra capture ports supplement
+1812/1813. Profiles select concrete attributes; no inventory lookup occurs.
+
+LI-only RADIUS settings use the shared `li.radius` section and
+are documented in the [POI setup](../part5-advanced/radius.md#tap-poi-and-mdf-setup).

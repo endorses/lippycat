@@ -16,6 +16,7 @@ enum EventKind {
   EVENT_KIND_HTTP = 4;
   EVENT_KIND_SMTP = 5;
   EVENT_KIND_FILE_METADATA = 6;
+  EVENT_KIND_RADIUS = 7;
 }
 
 enum CaptureScope {
@@ -202,6 +203,21 @@ message FileMetadataEvent {
   bool hash_complete = 20;
 }
 
+// One RADIUS message observation; no raw packet, authenticator or LI evidence.
+message RADIUSEvent {
+  uint32 code = 1;
+  uint32 identifier = 2;
+  uint32 length = 3;
+  string observation_id = 4;
+  string request_instance_id = 5;
+  string association = 6;
+  string origin_node_id = 7;
+  string source_id = 8;
+  string capture_epoch = 9;
+  // Routine-output allowlist encoded as type:hex:value; never credentials.
+  repeated string attributes = 10;
+}
+
 message ProtocolEvent {
   // event_id is an opaque, retry-stable representation of node ID, producer
   // session ID, and event sequence.
@@ -220,6 +236,7 @@ message ProtocolEvent {
     HTTPEvent http = 13;
     SMTPEvent smtp = 14;
     FileMetadataEvent file_metadata = 15;
+    RADIUSEvent radius = 16;
   }
 }
 

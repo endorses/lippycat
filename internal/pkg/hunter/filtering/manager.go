@@ -37,8 +37,10 @@ type PolicyChangeCoordinator interface {
 // Manager handles filter subscription and updates from processor
 type Manager struct {
 	hunterID string
-	mu       sync.RWMutex
-	filters  []*management.Filter
+	// Serialize state changes through capture/application publication.
+	applyMu sync.Mutex
+	mu      sync.RWMutex
+	filters []*management.Filter
 
 	// Dependencies
 	captureRestarter  CaptureRestarter
@@ -47,6 +49,7 @@ type Manager struct {
 	policyCoordinator PolicyChangeCoordinator
 	initialApplied    bool
 	pendingInitial    []*management.Filter
+	hasPendingInitial bool
 }
 
 func (m *Manager) SetPolicyChangeCoordinator(coordinator PolicyChangeCoordinator) {
@@ -93,13 +96,22 @@ func (m *Manager) GetFilterCount() int {
 
 // SetInitialFilters sets the initial filters from registration response
 func (m *Manager) SetInitialFilters(filters []*management.Filter) error {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	m.mu.Lock()
+	// Packet forwarding can reconcile immediately. Event forwarding waits for
+	// the transport to start before publishing a new policy/session boundary.
+	if m.policyCoordinator == nil && (m.initialApplied || len(m.filters) > 0) {
+		m.mu.Unlock()
+		return m.replaceSnapshot(filters)
+	}
 	if m.initialApplied {
 		if filtersEqual(m.filters, filters) {
 			m.mu.Unlock()
 			return nil
 		}
-		m.pendingInitial = append([]*management.Filter(nil), filters...)
+		m.pendingInitial = cloneFilters(filters)
+		m.hasPendingInitial = true
 		m.mu.Unlock()
 		return nil
 	}
@@ -124,41 +136,20 @@ func (m *Manager) SetInitialFilters(filters []*management.Filter) error {
 }
 
 func (m *Manager) ApplyPendingInitial() {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
 	m.mu.Lock()
-	if len(m.pendingInitial) == 0 {
+	if !m.hasPendingInitial {
 		m.mu.Unlock()
 		return
 	}
-	next := append([]*management.Filter(nil), m.pendingInitial...)
+	next := m.pendingInitial
 	m.pendingInitial = nil
-	previous := append([]*management.Filter(nil), m.filters...)
-	updater := m.appFilterUpdater
-	coordinator := m.policyCoordinator
+	m.hasPendingInitial = false
 	m.mu.Unlock()
-
-	apply := func() error {
-		if updater != nil && !containsAnyBPF(previous) && !containsAnyBPF(next) {
-			updater.UpdateFilters(next)
-			if coordinator != nil {
-				return m.captureRestarter.Restart(next)
-			}
-			return nil
-		}
-		return m.captureRestarter.Restart(next)
-	}
-	var err error
-	if coordinator != nil {
-		err = coordinator.ApplyPolicyChange(apply)
-	} else {
-		err = apply()
-	}
-	if err != nil {
+	if err := m.replaceSnapshot(next); err != nil {
 		logger.Error("Failed to apply changed registration filter policy", "error", err)
-		return
 	}
-	m.mu.Lock()
-	m.filters = next
-	m.mu.Unlock()
 }
 
 func filtersEqual(left, right []*management.Filter) bool {
@@ -175,7 +166,9 @@ func filtersEqual(left, right []*management.Filter) bool {
 
 func containsAnyBPF(filters []*management.Filter) bool {
 	for _, filter := range filters {
-		if filter != nil && filter.Type == management.FilterType_FILTER_BPF {
+		if filter != nil && (filter.Type == management.FilterType_FILTER_BPF ||
+			filter.Type == management.FilterType_FILTER_RADIUS_USERNAME || filter.Type == management.FilterType_FILTER_RADIUS_MAC ||
+			filter.Type == management.FilterType_FILTER_RADIUS_ATTRIBUTE || filter.Type == management.FilterType_FILTER_RADIUS_COMPOUND) {
 			return true
 		}
 	}
@@ -188,7 +181,8 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 	logger.Info("Subscribing to filter updates")
 
 	req := &management.FilterRequest{
-		HunterId: m.hunterID,
+		HunterId:         m.hunterID,
+		SupportsSnapshot: true,
 	}
 
 	stream, err := mgmtClient.SubscribeFilters(ctx, req)
@@ -277,6 +271,14 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 // handleUpdate applies filter updates from processor
 // Routes updates by filter type: BPF filters require restart, app-level filters hot-reload
 func (m *Manager) handleUpdate(update *management.FilterUpdate) {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+	if update != nil && update.Snapshot {
+		if err := m.replaceSnapshot(update.Filters); err != nil {
+			logger.Error("Failed to apply filter snapshot", "error", err)
+		}
+		return
+	}
 	if update == nil || update.Filter == nil {
 		logger.Warn("Ignoring invalid filter update", "operation", "no-op")
 		return
@@ -290,36 +292,18 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 	m.mu.Lock()
 	previousFilters := append([]*management.Filter(nil), m.filters...)
 	filtersChanged := false
+	// A type change can remove a BPF restriction even when the replacement is
+	// an application filter. Inspect the installed filter before replacing it.
+	needsRestart := m.containsBPFFilter(update.Filter)
+	for _, f := range m.filters {
+		if f.Id == update.Filter.Id && m.containsBPFFilter(f) {
+			needsRestart = true
+			break
+		}
+	}
 
 	switch update.UpdateType {
-	case management.FilterUpdateType_UPDATE_ADD:
-		// Check if filter already exists (prevent duplicates)
-		exists := false
-		for _, f := range m.filters {
-			if f.Id == update.Filter.Id {
-				exists = true
-				logger.Debug("Filter already exists, skipping duplicate add",
-					"filter_id", update.Filter.Id)
-				break
-			}
-		}
-
-		if !exists {
-			// Add new filter
-			m.filters = append(m.filters, update.Filter)
-			filtersChanged = true
-			logger.Info("Filter added",
-				"operation", "add",
-				"filter_id", update.Filter.Id,
-				"pattern", update.Filter.Pattern)
-		} else {
-			logger.Info("Filter update made no change",
-				"operation", "no-op",
-				"filter_id", update.Filter.Id,
-				"update_type", update.UpdateType)
-		}
-
-	case management.FilterUpdateType_UPDATE_MODIFY:
+	case management.FilterUpdateType_UPDATE_ADD, management.FilterUpdateType_UPDATE_MODIFY:
 		// MODIFY is an idempotent upsert. This is important when a filter's
 		// target scope expands: newly included hunters have never seen the ID.
 		found := false
@@ -386,12 +370,11 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 
 	// Apply filters based on type
 	if filtersChanged {
-		// Check if this is a BPF filter change (requires capture restart)
-		needsRestart := m.containsBPFFilter(update.Filter)
-
 		apply := func() error {
 			if needsRestart {
-				// BPF filter changed - must restart capture
+				if appFilterUpdater != nil {
+					appFilterUpdater.UpdateFilters(currentFilters)
+				}
 				logger.Info("BPF filter changed, restarting capture", "active_filters", len(currentFilters))
 
 				return m.captureRestarter.Restart(currentFilters)
@@ -430,7 +413,58 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 	}
 }
 
-// containsBPFFilter checks if a filter is a BPF filter (requires capture restart)
+// containsBPFFilter checks whether a filter changes kernel capture visibility.
+// RADIUS filters expand visibility to competing requests and responses.
 func (m *Manager) containsBPFFilter(filter *management.Filter) bool {
-	return filter.Type == management.FilterType_FILTER_BPF
+	return filter.Type == management.FilterType_FILTER_BPF ||
+		filter.Type == management.FilterType_FILTER_RADIUS_USERNAME || filter.Type == management.FilterType_FILTER_RADIUS_MAC ||
+		filter.Type == management.FilterType_FILTER_RADIUS_ATTRIBUTE || filter.Type == management.FilterType_FILTER_RADIUS_COMPOUND
+}
+
+func cloneFilters(filters []*management.Filter) []*management.Filter {
+	var current []*management.Filter
+	for _, f := range filters {
+		if f != nil {
+			current = append(current, proto.Clone(f).(*management.Filter))
+		}
+	}
+	return current
+}
+
+// replaceSnapshot replaces the complete registration/reconnect policy, including
+// deleted filters. Publish once so application matching never sees partial policy.
+func (m *Manager) replaceSnapshot(filters []*management.Filter) error {
+	current := cloneFilters(filters)
+	m.mu.Lock()
+	previous := m.filters
+	updater := m.appFilterUpdater
+	coordinator := m.policyCoordinator
+	unchanged := filtersEqual(previous, current)
+	m.mu.Unlock()
+	if unchanged {
+		return nil
+	}
+	needsRestart := containsAnyBPF(previous) || containsAnyBPF(current)
+	apply := func() error {
+		if updater != nil {
+			updater.UpdateFilters(current)
+		}
+		if needsRestart || updater == nil || coordinator != nil {
+			return m.captureRestarter.Restart(current)
+		}
+		return nil
+	}
+	var err error
+	if coordinator != nil {
+		err = coordinator.ApplyPolicyChange(apply)
+	} else {
+		err = apply()
+	}
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.filters = current
+	m.mu.Unlock()
+	return nil
 }

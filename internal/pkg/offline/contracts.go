@@ -147,7 +147,9 @@ type RecordHeader struct {
 	ID           PacketID
 }
 
-const RecordSchemaVersion uint16 = 1
+// RecordSchemaVersion identifies the declaration-order oracle format. Version 3
+// adds RADIUS metadata; major 2 identifies the separate compact format.
+const RecordSchemaVersion uint16 = 3
 
 // ResourceLimits are explicit validated budgets, shared across the current and
 // replacement session. Zero is invalid; defaults are selected after baselines.

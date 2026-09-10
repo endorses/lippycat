@@ -4,9 +4,10 @@
 
 **Status:** Deferred research
 
-**Decision:** Defer first-class email lawful-interception support. Completing
-email IRI over X2 is a bounded extension of the current normalized metadata
-path. Email content over X3 requires a new bounded stream-content architecture
+**Decision:** Defer first-class email lawful-interception support. Email IRI over
+X2 requires a service-specific mapping from normalized observations, with an
+agreed target, authorization, correlation, and MDF contract. Email content over
+X3 requires a new bounded stream-content architecture
 and must not be implemented as a small extension of the RTP encoder.
 
 ## Executive summary
@@ -15,24 +16,14 @@ lippycat can capture, reassemble, filter, and analyze email traffic through the
 `sniff email`, `hunt email`, and `tap email` command families. That capability
 does not automatically make email an LI interception product.
 
-The current LI implementation has two relevant paths:
-
-- Native VoIP delivery encodes SIP-derived IRI on X2 and RTP content on X3.
-- The optional `internet_metadata` sink maps normalized DNS, TLS, HTTP, SMTP,
-  connection, and optional file-metadata observations to proprietary metadata
-  payloads in X2 PDUs.
-
-SMTP therefore has limited X2 delivery today. With `--li-metadata-events`, the
-sink can deliver transaction depth, HELO, envelope sender, recipients, and TLS
-state for an event matching an active X2-authorized task. It removes message
-headers, body previews, attachment identifiers, and content. File content is
-always rejected.
+The current LI implementation encodes SIP-derived IRI on X2 and RTP content on
+X3. Normalized SMTP observations are available for monitoring and structured
+logs; they have no email LI delivery mapping.
 
 This is not yet first-class email LI:
 
 - X1 rejects `emailAddress` and internationalized email-address targets.
 - There is no dedicated email IRI event model or interoperable email encoder.
-- The X2 payload uses lippycat's proprietary `internet_metadata` JSON profile.
 - X3 accepts RTP content only; it cannot deliver SMTP messages or attachments.
 
 First-class X2 email IRI is feasible as a focused project. Correct X3 email CC
@@ -42,9 +33,6 @@ semantics, and fail-closed authorization.
 
 This report refines the older
 [`li-multi-protocol-expansion.md`](li-multi-protocol-expansion.md) assessment.
-That document predates the normalized event and LI metadata sink now present in
-the repository; its statements that non-VoIP X2 metadata is wholly absent are
-no longer current.
 
 ## 1. Current implementation
 
@@ -59,29 +47,13 @@ These are monitoring capabilities. They do not establish an LI task, associate
 data with an XID, authorize content collection, select an MDF destination, or
 encode X2/X3 PDUs.
 
-### 1.2 Existing SMTP metadata delivery on X2
+### 1.2 Normalized SMTP observations
 
-`internal/pkg/li/metadata_sink.go` registers for normalized SMTP events when LI
-metadata delivery is enabled. Its `internet_metadata` projection deliberately
-retains only:
-
-- transaction depth;
-- HELO identity;
-- SMTP envelope sender;
-- SMTP envelope recipients; and
-- TLS state.
-
-An event is delivered only when:
-
-1. LI and the metadata sink are enabled;
-2. an active task matches the event;
-3. the task delivery type is `X2Only` or `X2andX3`;
-4. the task references an X2-capable destination; and
-5. the delivery client can enqueue the PDU.
-
-The sink strips SMTP message headers, sender/recipient header fields, subject,
-body previews, attachment identifiers, and content. File metadata is separately
-opt-in. File-content events are rejected rather than routed to X3.
+`internal/pkg/events` exposes SMTP observations through typed, output-neutral
+events. These can support a future service-specific email IRI adapter, but event
+fields do not by themselves establish an LI product or authorize delivery.
+The adapter must define its projection, target evidence, transaction/session
+correlation, and MDF representation independently of structured log formatting.
 
 ### 1.3 Current target limitation
 
@@ -90,10 +62,6 @@ The X1 schema contains email-address choices, but
 accepted identity targets are currently SIP URI, TEL URI, E.164 number, and
 NAI. Address and CIDR targets are also rejected until a raw-IP correlated
 IRI/CC model is implemented.
-
-The metadata matcher can compare supported identity values with SMTP envelope
-addresses. An email-shaped NAI may therefore match an SMTP event, but this is
-not a substitute for declared and tested `emailAddress` target support.
 
 ### 1.4 Current X3 limitation
 
@@ -113,7 +81,7 @@ A useful first phase would support SMTP envelope IRI only:
 - translate them into exact `FILTER_EMAIL_ADDRESS` filters;
 - match normalized SMTP envelope identities;
 - produce defined SMTP transaction IRI events; and
-- preserve the current metadata-only redaction boundary.
+- define and enforce the selected service profile's metadata/content boundary.
 
 IMAP and POP3 should not be implied by the name "email IRI." Their identities,
 commands, sessions, and content-access semantics require separate event models
@@ -130,8 +98,8 @@ Before implementation, specify:
 - SMTP envelope identities versus RFC message-header identities;
 - how multiple recipients map to target direction and correlation;
 - transaction BEGIN, CONTINUE, END, failure, and partial-capture semantics;
-- whether the MDF profile accepts the existing proprietary payload or requires
-  another standardized or deployment-specific email IRI representation; and
+- which standardized or deployment-specific email IRI representation the MDF
+  profile requires; and
 - destination capability negotiation for that representation.
 
 The code must not acknowledge an email-target task unless every selected
@@ -145,7 +113,7 @@ destination can consume the configured email IRI profile.
   identities without lossy normalization.
 - `internal/pkg/li/filters.go`: map email targets to
   `FILTER_EMAIL_ADDRESS` and preserve LI filter ownership.
-- `internal/pkg/li/metadata_sink.go` or a dedicated email IRI encoder: enforce
+- A dedicated email IRI adapter and encoder: enforce
   target matching, redaction, event typing, and destination profile.
 - `internal/pkg/events`: expose any missing SMTP lifecycle fields without body
   content.
@@ -156,10 +124,9 @@ destination can consume the configured email IRI profile.
 
 ### 2.4 Complexity assessment
 
-If the existing proprietary `internet_metadata` payload is retained, adding
-first-class email-address targeting is moderate work. If interoperable email IRI
-requires a different payload or service-specific LI architecture, standards and
-MDF-profile work becomes the dominant task.
+Normalized SMTP analysis and shared LI transport provide reusable building
+blocks. The service-specific IRI representation, target authorization, and
+session correlation require explicit design and MDF interoperability testing.
 
 ## 3. Email content over X3
 
@@ -277,10 +244,10 @@ At minimum, future implementation must include:
 
 ## 6. Deferred conclusion
 
-lippycat already has a useful, tightly redacted SMTP metadata path over X2. The
-next logical increment is first-class email-address targeting and an explicit
-email IRI destination profile. That work should be considered separately from
-email CC.
+lippycat has normalized SMTP observations and reusable LI transport. Email IRI
+requires first-class email-address targeting, an explicit email IRI destination
+profile, and a service-specific adapter. That work should be considered
+separately from email CC.
 
 Email content over X3 is feasible, but only after defining an interoperable
 profile and building an authorization-aware, bounded stream-content pipeline.

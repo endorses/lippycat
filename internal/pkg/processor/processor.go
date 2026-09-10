@@ -98,15 +98,12 @@ type Config struct {
 	// API Key Authentication (for non-mTLS deployments)
 	AuthConfig *auth.Config // API key authentication configuration (alternative to mTLS)
 	// LI (Lawful Interception) settings - only functional with -tags li build
-	LIEnabled                   bool // Enable LI processing
-	LIMetadataEventsEnabled     bool
-	LIMetadataDeliveryProfile   string
-	LIMetadataAllowFileMetadata bool
-	LIX1ListenAddr              string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
-	LIX1TLSCertFile             string // Path to X1 server TLS certificate
-	LIX1TLSKeyFile              string // Path to X1 server TLS key
-	LIX1TLSCAFile               string // Path to CA certificate for X1 client verification (mutual TLS)
-	LIADMFEndpoint              string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
+	LIEnabled       bool   // Enable LI processing
+	LIX1ListenAddr  string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
+	LIX1TLSCertFile string // Path to X1 server TLS certificate
+	LIX1TLSKeyFile  string // Path to X1 server TLS key
+	LIX1TLSCAFile   string // Path to CA certificate for X1 client verification (mutual TLS)
+	LIADMFEndpoint  string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
 	// LI ADMF client (X1 notifications) TLS settings - for connecting to ADMF
 	LIADMFTLSCertFile string // Path to client TLS certificate for ADMF notifications (mutual TLS)
 	LIADMFTLSKeyFile  string // Path to client TLS key for ADMF notifications

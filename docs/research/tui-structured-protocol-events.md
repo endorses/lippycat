@@ -21,9 +21,8 @@ event store.
 
 lippycat now produces normalized structured protocol events for connection,
 DNS, TLS, HTTP, SMTP, and file observations. The same events can feed rotating
-structured log files or, in LI builds and under an authorized delivery profile,
-X2 metadata delivery. The TUI currently exposes packets and several
-protocol-specific projections, but it does not expose this normalized event
+structured log files and other event consumers. The TUI currently exposes
+packets and several protocol-specific projections, but it does not expose this normalized event
 stream directly.
 
 The structured records should be presented as an interactive **Events** view on
@@ -47,11 +46,11 @@ Statistics:     Aggregate dashboards for the same traffic scope
 The Events component and its interaction model can be shared across all watch
 commands. The ingestion path differs:
 
-| Command | Event source | Required work |
-|---------|--------------|---------------|
-| `lc watch live` | Local packet analysis | Feed normalized events into a bounded in-memory TUI sink |
-| `lc watch file` | Local PCAP analysis | Reuse the live path and flush lifecycle state deterministically at EOF |
-| `lc watch remote` | Processor event pipeline | Add a bounded gRPC event subscription |
+| Command           | Event source             | Required work                                                          |
+| ----------------- | ------------------------ | ---------------------------------------------------------------------- |
+| `lc watch live`   | Local packet analysis    | Feed normalized events into a bounded in-memory TUI sink               |
+| `lc watch file`   | Local PCAP analysis      | Reuse the live path and flush lifecycle state deterministically at EOF |
+| `lc watch remote` | Processor event pipeline | Add a bounded gRPC event subscription                                  |
 
 ## 1. Motivation
 
@@ -114,14 +113,14 @@ not recommended.
 
 Examples:
 
-| Selected scope | Available Capture views |
-|----------------|-------------------------|
-| All | Packets, Events |
-| DNS | Packets, Events |
-| HTTP | Packets, Events |
-| TLS | Packets, Events |
-| Email | Packets, Events |
-| VoIP | Packets, Calls, Events when VoIP event classes exist |
+| Selected scope | Available Capture views                              |
+| -------------- | ---------------------------------------------------- |
+| All            | Packets, Events                                      |
+| DNS            | Packets, Events                                      |
+| HTTP           | Packets, Events                                      |
+| TLS            | Packets, Events                                      |
+| Email          | Packets, Events                                      |
+| VoIP           | Packets, Calls, Events when VoIP event classes exist |
 
 Selecting a protocol should preserve the current view where possible. For
 example, changing from DNS Events to HTTP should remain in Events. If the new
@@ -301,7 +300,6 @@ The TUI must be an independent consumer of the event dispatcher:
 ```text
 Analyzer -> normalized event dispatcher
               |-- structured log sink
-              |-- LI metadata sink
               `-- TUI event subscriber(s)
 ```
 
@@ -327,7 +325,6 @@ configured or built-in consumer requires it:
 
 ```text
 file logs enabled
-OR LI metadata delivery enabled
 OR TUI event delivery is available
 OR an event-derived statistics consumer is enabled
 ```
@@ -508,14 +505,14 @@ Packet filters and event filters are related but not identical.
 
 The protocol selector can apply a shared traffic scope:
 
-| Selector entry | Packet projection | Event projection |
-|----------------|-------------------|------------------|
-| All | All buffered packets | All permitted event kinds |
-| DNS | DNS-related packets | `dns` events, optionally related `conn` records |
-| HTTP | HTTP-related packets | `http` and related `files`; optionally `conn` |
-| TLS | TLS-related packets | `tls`; optionally `conn` |
-| Email | Email-related packets | `smtp` and related `files`; optionally `conn` |
-| VoIP | SIP/RTP packets | Future VoIP events or Calls view |
+| Selector entry | Packet projection     | Event projection                                |
+| -------------- | --------------------- | ----------------------------------------------- |
+| All            | All buffered packets  | All permitted event kinds                       |
+| DNS            | DNS-related packets   | `dns` events, optionally related `conn` records |
+| HTTP           | HTTP-related packets  | `http` and related `files`; optionally `conn`   |
+| TLS            | TLS-related packets   | `tls`; optionally `conn`                        |
+| Email          | Email-related packets | `smtp` and related `files`; optionally `conn`   |
+| VoIP           | SIP/RTP packets       | Future VoIP events or Calls view                |
 
 Whether related `conn` and `files` records follow a selected application
 protocol is a UX policy that should be made explicit. The initial implementation
@@ -697,8 +694,6 @@ For a fixture event, verify that:
 
 - the Events details panel represents the normalized value accurately;
 - the structured log record uses the canonical schema projection;
-- an LI metadata projection, when enabled and authorized, applies its stricter
-  field policy independently;
 - none of the sinks modifies the event observed by another sink.
 
 ## 15. Open decisions

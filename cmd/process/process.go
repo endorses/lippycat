@@ -506,9 +506,6 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryX2AcknowledgeInboundKeepalive = liConfig.DeliveryX2AcknowledgeInboundKeepalive
 		config.LIDeliveryX3AcknowledgeInboundKeepalive = liConfig.DeliveryX3AcknowledgeInboundKeepalive
 		config.LIDeliveryShutdownTimeout = liConfig.DeliveryShutdownTimeout
-		config.LIMetadataEventsEnabled = liConfig.MetadataEventsEnabled
-		config.LIMetadataDeliveryProfile = liConfig.MetadataDeliveryProfile
-		config.LIMetadataAllowFileMetadata = liConfig.MetadataAllowFileMetadata
 		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
 		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
 		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval

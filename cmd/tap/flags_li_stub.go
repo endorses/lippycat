@@ -45,13 +45,10 @@ type LIConfig struct {
 	DeliveryX2AcknowledgeInboundKeepalive bool
 	DeliveryX3AcknowledgeInboundKeepalive bool
 	// ADMF state sync
-	ADMFSyncOnStartup         bool
-	ADMFSyncTimeout           time.Duration
-	ADMFReconcileInterval     time.Duration
-	MetadataEventsEnabled     bool
-	MetadataDeliveryProfile   string
-	MetadataAllowFileMetadata bool
-	StateFile                 string
+	ADMFSyncOnStartup     bool
+	ADMFSyncTimeout       time.Duration
+	ADMFReconcileInterval time.Duration
+	StateFile             string
 }
 
 // RegisterLIFlags is a no-op in non-LI builds.

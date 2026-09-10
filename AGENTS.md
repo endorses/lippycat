@@ -1,6 +1,7 @@
 # lippycat - Network Traffic Sniffer
 
 ## Project Overview
+
 lippycat is a Go-based CLI tool for sniffing and analyzing network traffic. It captures traffic from network interfaces or PCAP files and provides both CLI and TUI modes for real-time monitoring.
 
 **Protocol Subcommands**: `sniff`, `hunt`, and `tap` have protocol-specific subcommands (dns, tls, http, email, voip) with dedicated filtering and analysis.
@@ -8,6 +9,7 @@ lippycat is a Go-based CLI tool for sniffing and analyzing network traffic. It c
 ## Architecture
 
 ### Distributed Architecture
+
 lippycat supports a distributed capture architecture with two node types:
 
 - **Hunter Nodes**: Lightweight capture agents that sniff and filter packets on network interfaces and forward them to processor nodes for analysis. Hunters can be deployed across multiple network segments or hosts.
@@ -15,12 +17,14 @@ lippycat supports a distributed capture architecture with two node types:
 - **Tap Nodes**: Standalone nodes combining hunter and processor capabilities. **`tap = process + hunt - gRPC`** — tap must have all features of both node types, running locally without gRPC overhead.
 
 This architecture allows for:
+
 - **Distributed packet capture** across multiple network segments
 - **Centralized analysis and monitoring** through a single TUI interface
 - **Scalable deployment** with multiple hunters feeding one or more processors
 - **Network segmentation** where hunters capture in restricted zones and processors analyze in monitoring zones
 
 ### Core Architecture
+
 - **CLI Framework**: Uses Cobra CLI framework with Viper for configuration
 - **Plugin System**: Extensible architecture allowing protocol-specific analyzers to be added
 - **Build Tags**: Go build tags enable specialized binary variants (hunter, processor, tap, cli, tui, all)
@@ -69,6 +73,7 @@ This architecture allows for:
   - `api/gen/management/`: Generated gRPC code for management services
 
 ## Key Dependencies
+
 - `github.com/spf13/cobra`: CLI framework
 - `github.com/spf13/viper`: Configuration management
 - `github.com/google/gopacket`: Network packet capture and analysis
@@ -79,6 +84,7 @@ This architecture allows for:
 ## Build and Development Commands
 
 ### Build
+
 ```bash
 # Development build (complete suite, unstripped)
 make build        # ~31 MB with debug symbols
@@ -119,6 +125,7 @@ make build-pgo
 ```
 
 **Build Tags:** The project uses Go build tags to create specialized binaries:
+
 - `all`: Complete suite with all commands (default)
 - `hunter`: Hunter node only - includes GPU acceleration and protocol detection
 - `processor`: Processor node only - includes protocol analysis and gRPC server
@@ -130,18 +137,21 @@ make build-pgo
 Each specialized build is stripped (`-s -w`) and optimized to reduce binary size while maintaining full functionality for its role. Hunter nodes include all protocol detectors and GPU acceleration for edge filtering. LI support is optional and excluded from non-LI builds via dead code elimination.
 
 **CUDA Build Tag Pattern:** The `cuda` build tag controls GPU acceleration. Files follow this pattern:
+
 - `gpu_cuda_backend_impl.go` (`//go:build cuda`) - **Full CUDA implementation** with CGo bindings
 - `gpu_cuda_backend.go` (`//go:build !cuda`) - Stub for non-CUDA builds (returns `ErrGPUNotAvailable`)
 
 The stub file is NOT an indicator of missing GPU support - it exists only so non-CUDA builds compile cleanly.
 
 **LI Build Tag Pattern:** The `li` build tag controls Lawful Interception support. CLI flags follow this pattern:
+
 - `flags_li.go` (`//go:build li`) - Flag variables, `RegisterLIFlags()`, `BindLIViperFlags()`, `GetLIConfig()`
 - `flags_li_stub.go` (`//go:build !li`) - No-op stubs, `GetLIConfig()` returns `nil`
 
 Commands call `RegisterLIFlags(cmd)` and `BindLIViperFlags(cmd)` in `init()`, and use `GetLIConfig()` to retrieve configuration (checking for `nil` in non-LI builds).
 
 ### Install
+
 ```bash
 # Install to GOPATH/bin
 make install
@@ -151,6 +161,7 @@ make install-system
 ```
 
 ### Test
+
 ```bash
 make test          # Run all tests
 make test-verbose  # Verbose test output
@@ -159,17 +170,20 @@ make bench         # Run benchmarks
 ```
 
 ### Format and Lint
+
 ```bash
 make fmt   # Format code
 make vet   # Run go vet
 ```
 
 ### Module Management
+
 ```bash
 make tidy  # Run go mod tidy
 ```
 
 ### Clean
+
 ```bash
 make clean          # Remove build artifacts
 make clean-binaries # Remove all specialized binaries
@@ -177,6 +191,7 @@ make clean-cuda     # Remove CUDA artifacts
 ```
 
 ### Version Management
+
 ```bash
 # Bump version (updates VERSION, README.md, creates changelog entry)
 ./scripts/bump-version.sh [flags] <version> [changelog-message]
@@ -218,6 +233,7 @@ make clean-cuda     # Remove CUDA artifacts
 6. **12-Factor App**: Follow the 12 factors.
 
 ## Security Considerations
+
 - This is a **defensive security tool** for network monitoring and protocol analysis
 - Requires appropriate permissions for network interface access
 - Used for legitimate network diagnostics, troubleshooting, and security monitoring
@@ -286,6 +302,7 @@ VERBS:
 ### Quick Start Examples
 
 **CLI VoIP Capture:**
+
 ```bash
 # VoIP capture with balanced performance
 sudo lc sniff voip --interface eth0 --sip-user alicent
@@ -300,6 +317,7 @@ sudo lc sniff voip -i eth0 --udp-only --sip-port 5060
 ```
 
 **Standalone Tap Mode (Single Machine with TUI/PCAP):**
+
 ```bash
 # Standalone VoIP capture with TUI serving and per-call PCAP
 sudo lc tap voip -i eth0 --sip-user alicent --insecure
@@ -316,6 +334,7 @@ sudo lc tap voip -i eth0 \
 ```
 
 **Distributed Capture:**
+
 ```bash
 # Processor (central aggregation)
 lc process --listen 0.0.0.0:55555 \
@@ -343,6 +362,7 @@ sudo lc hunt voip --processor processor:55555 \
 ```
 
 **Interactive Monitoring:**
+
 ```bash
 # Local TUI (live capture)
 sudo lc watch
@@ -364,11 +384,13 @@ lc watch remote --nodes-file nodes.yaml
 ### Configuration
 
 Configuration via YAML file (in priority order):
+
 1. `$HOME/.config/lippycat/config.yaml` (preferred)
 2. `$HOME/.config/lippycat.yaml` (XDG standard)
 3. `$HOME/.lippycat.yaml` (legacy)
 
 **See command-specific documentation:**
+
 - User Documentation (README.md files):
   - [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage
   - [cmd/tap/README.md](cmd/tap/README.md) - Tap (standalone) command usage
@@ -391,6 +413,7 @@ Configuration via YAML file (in priority order):
 ## Architecture Patterns
 
 ### EventHandler Pattern
+
 The `internal/pkg/remotecapture` package uses the EventHandler pattern to decouple infrastructure from presentation:
 
 ```go
@@ -408,7 +431,9 @@ type EventHandler interface {
 This allows the remote capture client to work with different frontends (TUI, CLI, Web) without coupling to specific UI frameworks.
 
 ### Shared Types
+
 `internal/pkg/types` provides domain types shared across packages:
+
 - `PacketDisplay`: Common packet representation
 - `VoIPMetadata`: VoIP-specific packet metadata
 - `CallInfo`: VoIP call state (from/to, duration, codec, packet loss, jitter, MOS)
@@ -429,9 +454,8 @@ lifecycle summaries from `internal/pkg/conntrack`, and file observations from
 
 - `internal/pkg/logstream` writes bounded, rotating `conn`, `dns`, `ssl`, `http`,
   `smtp`, and `files` streams as Zeek-style TSV or JSONL.
-- LI builds can map authorized metadata events directly to X2 IRI without
-  depending on file output; content events are separate and denied to the
-  metadata-only profile.
+- Event consumers use typed metadata and separate content-bearing events; event
+  schemas remain independent of output encoding and LI authorization.
 
 Packet processing never waits for log I/O. Event and per-stream queues drop on
 overflow, expose pressure for processor flow control, and drain during graceful
@@ -440,7 +464,9 @@ redefine schemas in writers. See `docs/STRUCTURED_LOGS.md` for operator behavior
 and `docs/structured-protocol-log-schema.md` for the compatibility contract.
 
 ### Build Tag Architecture
+
 Each command has build-tagged root files:
+
 - `cmd/root_all.go`: Complete suite (`//go:build all`)
 - `cmd/root_hunter.go`: Hunter only (`//go:build hunter && !all`)
 - `cmd/root_processor.go`: Processor only (`//go:build processor && !all`)
@@ -451,32 +477,39 @@ Each command has build-tagged root files:
 Commands register themselves in their respective root files, allowing the compiler to exclude unused code paths.
 
 ### Flow Control Architecture
+
 Flow control in the distributed system follows a hierarchical principle:
 
 **Processor-Level Flow Control:**
+
 - Hunters respond to processor-level overload (PCAP write queue, upstream backlog)
 - Flow control states: CONTINUE, SLOW, PAUSE, RESUME
 - Based on queue utilization thresholds (30%, 70%, 90%)
 
 **Critical Architectural Decision (v0.2.4):**
 TUI client drops do NOT affect hunter flow control because:
+
 1. Multiple TUI clients may be connected simultaneously
 2. Processor may be writing to PCAP files or forwarding upstream
 3. There may be multiple downstream consumers
 4. Slow clients are handled by per-subscriber channel buffering and selective drops
 
 **Implementation:**
+
 - `internal/pkg/processor/processor.go`: `determineFlowControl()` only checks PCAP queue
 - Per-subscriber buffering prevents slow clients from blocking others
 - Packet batches are cloned before broadcasting to prevent concurrent serialization races
 
 ### TLS/mTLS Security
+
 The distributed system supports TLS encryption with mutual authentication for all gRPC connections (hunter→processor, processor→processor, TUI→processor).
 
 **See [docs/SECURITY.md](docs/SECURITY.md#tls-transport-encryption) for complete TLS/mTLS configuration, certificate requirements, and troubleshooting.**
 
 ### TUI Architecture
+
 The TUI (Terminal User Interface) provides interactive real-time packet monitoring with support for:
+
 - Hunter subscription management (selective monitoring of specific hunters)
 - Unified modal architecture for consistent dialogs
 - FileDialog component for file operations
@@ -485,6 +518,7 @@ The TUI (Terminal User Interface) provides interactive real-time packet monitori
 **For TUI architecture and development, see [internal/pkg/tui/CLAUDE.md](internal/pkg/tui/CLAUDE.md) (Bubbletea patterns, EventHandler integration, component architecture).**
 
 ## Protocol Detection
+
 The hunter node includes signature-based protocol detection (HTTP, DNS, TLS, MySQL, PostgreSQL, VoIP, VPN, and more) with GPU acceleration support for filtering at the edge.
 
 ## Lawful Interception (LI)
@@ -492,6 +526,7 @@ The hunter node includes signature-based protocol detection (HTTP, DNS, TLS, MyS
 lippycat supports ETSI X1/X2/X3 lawful interception interfaces for authorized interception.
 
 **Build Requirement:** LI support requires the `li` build tag:
+
 ```bash
 make processor-li   # Processor with LI support
 make build-li       # Complete suite with LI
@@ -499,11 +534,11 @@ make build-li       # Complete suite with LI
 
 ### ETSI Interfaces
 
-| Interface | Purpose | Protocol | Specification |
-|-----------|---------|----------|---------------|
-| **X1** | Administration (ADMF ↔ NE) | XML/HTTPS | TS 103 221-1 |
-| **X2** | IRI delivery (signaling) | Binary TLV/TLS | TS 103 221-2 |
-| **X3** | CC delivery (content) | Binary TLV/TLS | TS 103 221-2 |
+| Interface | Purpose                    | Protocol       | Specification |
+| --------- | -------------------------- | -------------- | ------------- |
+| **X1**    | Administration (ADMF ↔ NE) | XML/HTTPS      | TS 103 221-1  |
+| **X2**    | IRI delivery (signaling)   | Binary TLV/TLS | TS 103 221-2  |
+| **X3**    | CC delivery (content)      | Binary TLV/TLS | TS 103 221-2  |
 
 ### Architecture
 
@@ -550,16 +585,17 @@ lc process --listen :55555 \
 
 LI tasks integrate with lippycat's optimized filter system:
 
-| LI Target Type | Filter System | Description |
-|----------------|---------------|-------------|
-| SIP URI | Aho-Corasick | Pattern matching |
-| Phone Number | PhoneNumberMatcher | Bloom filter + suffix |
-| IP Address | Hash Map | O(1) lookup |
-| IP CIDR | Radix Trie | O(prefix) lookup |
+| LI Target Type | Filter System      | Description           |
+| -------------- | ------------------ | --------------------- |
+| SIP URI        | Aho-Corasick       | Pattern matching      |
+| Phone Number   | PhoneNumberMatcher | Bloom filter + suffix |
+| IP Address     | Hash Map           | O(1) lookup           |
+| IP CIDR        | Radix Trie         | O(prefix) lookup      |
 
 When tasks are activated via X1, the LI Manager creates filters that are pushed to hunters. Matched packets are encoded as X2 (IRI) or X3 (CC) PDUs and delivered to MDF endpoints.
 
 **For detailed documentation, see:**
+
 - [docs/LI_INTEGRATION.md](docs/LI_INTEGRATION.md) - Deployment guide
 - [docs/LI_CERTIFICATES.md](docs/LI_CERTIFICATES.md) - Certificate management
 - [internal/pkg/li/CLAUDE.md](internal/pkg/li/CLAUDE.md) - Architecture details
@@ -567,6 +603,7 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 ## Documentation Index
 
 ### User Manual (mdBook)
+
 - [docs/manual/](docs/manual/) - Comprehensive mdBook documentation site (`mdbook serve` to preview)
   - Part I: Foundations (introduction, core concepts, installation)
   - Part II: Local Capture (sniff, watch local)
@@ -576,6 +613,7 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
   - Appendices: Command reference, config reference, BPF filters, filter types, glossary
 
 ### User Documentation (README.md)
+
 - [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage, flags, examples
 - [cmd/tap/README.md](cmd/tap/README.md) - Tap (standalone) command usage
 - [cmd/watch/README.md](cmd/watch/README.md) - Watch (TUI) command usage and keybindings
@@ -585,6 +623,7 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 - [cmd/show/README.md](cmd/show/README.md) - Show (diagnostics) command usage
 
 ### Architecture Documentation (CLAUDE.md - for AI assistants)
+
 - [cmd/sniff/CLAUDE.md](cmd/sniff/CLAUDE.md) - Sniff architecture, Viper patterns, TCP reassembly
 - [cmd/tap/CLAUDE.md](cmd/tap/CLAUDE.md) - Tap architecture & patterns
 - [cmd/watch/CLAUDE.md](cmd/watch/CLAUDE.md) - Watch command architecture
@@ -597,12 +636,14 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 - [internal/pkg/processor/proxy/CLAUDE.md](internal/pkg/processor/proxy/CLAUDE.md) - Hierarchical processor proxy
 
 ### Operational Guides
+
 - [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) - Complete distributed architecture guide (hub-and-spoke, hierarchical)
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) - Performance tuning, TCP profiles, GPU optimization
 - [docs/SECURITY.md](docs/SECURITY.md) - TLS/mTLS setup, certificate management, security features
 - [docs/operational-procedures.md](docs/operational-procedures.md) - Production operations and procedures
 
 ### Specialized Topics
+
 - [docs/TLS_DECRYPTION.md](docs/TLS_DECRYPTION.md) - TLS decryption with SSLKEYLOGFILE, Wireshark integration
 - [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md) - GPU backends (CUDA, OpenCL, SIMD), benchmarks
 - [docs/GPU_TROUBLESHOOTING.md](docs/GPU_TROUBLESHOOTING.md) - GPU-specific troubleshooting
@@ -613,6 +654,7 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 - [docs/voip-build-tag-optimization.md](docs/voip-build-tag-optimization.md) - VoIP build tag optimization
 
 ### Lawful Interception (LI)
+
 - [docs/LI_INTEGRATION.md](docs/LI_INTEGRATION.md) - LI deployment guide, X1/X2/X3 operations
 - [docs/LI_CERTIFICATES.md](docs/LI_CERTIFICATES.md) - LI certificate generation and management
 - [internal/pkg/li/CLAUDE.md](internal/pkg/li/CLAUDE.md) - LI package architecture

@@ -8,14 +8,14 @@ schema version.
 
 ## Streams and compatibility
 
-| Stream | File | Compatibility |
-|---|---|---|
-| `conn` | `conn.log` | Zeek `Conn::Info` fields followed by lippycat extensions |
-| `dns` | `dns.log` | Zeek `DNS::Info` fields followed by lippycat extensions |
-| `ssl` | `ssl.log` | Zeek `SSL::Info` fields, common JA3 fields, then lippycat extensions |
-| `http` | `http.log` | Zeek `HTTP::Info` fields followed by lippycat extensions |
-| `smtp` | `smtp.log` | Zeek `SMTP::Info` fields followed by lippycat extensions |
-| `files` | `files.log` | Zeek `Files::Info` fields followed by lippycat extensions |
+| Stream  | File        | Compatibility                                                        |
+| ------- | ----------- | -------------------------------------------------------------------- |
+| `conn`  | `conn.log`  | Zeek `Conn::Info` fields followed by lippycat extensions             |
+| `dns`   | `dns.log`   | Zeek `DNS::Info` fields followed by lippycat extensions              |
+| `ssl`   | `ssl.log`   | Zeek `SSL::Info` fields, common JA3 fields, then lippycat extensions |
+| `http`  | `http.log`  | Zeek `HTTP::Info` fields followed by lippycat extensions             |
+| `smtp`  | `smtp.log`  | Zeek `SMTP::Info` fields followed by lippycat extensions             |
+| `files` | `files.log` | Zeek `Files::Info` fields followed by lippycat extensions            |
 
 “Zeek-compatible” means the field has the same name, Zeek TSV type, and
 meaning. It does not promise that lippycat observes every value Zeek would.
@@ -48,15 +48,15 @@ them for all event kinds so future schemas can expose them without inference.
 
 Every event has this envelope:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `timestamp` | timestamp | UTC observation time; packet time for replay |
-| `uid` | string | `C` plus 17 base62 characters, stable for the observed flow |
-| `community_id` | string | Community ID v1 for the normalized flow |
-| `node_id` | string | originating capture source (`batch.SourceID`) |
-| `flow` | `FlowTuple` | IP protocol, source/destination addresses and ports; ICMP type/code occupy the port slots for identity purposes |
-| `partial` | bool | incomplete-visibility indicator defined above |
-| `capture_scope` | enum | `full` or `filtered` |
+| Field           | Type        | Meaning                                                                                                         |
+| --------------- | ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `timestamp`     | timestamp   | UTC observation time; packet time for replay                                                                    |
+| `uid`           | string      | `C` plus 17 base62 characters, stable for the observed flow                                                     |
+| `community_id`  | string      | Community ID v1 for the normalized flow                                                                         |
+| `node_id`       | string      | originating capture source (`batch.SourceID`)                                                                   |
+| `flow`          | `FlowTuple` | IP protocol, source/destination addresses and ports; ICMP type/code occupy the port slots for identity purposes |
+| `partial`       | bool        | incomplete-visibility indicator defined above                                                                   |
+| `capture_scope` | enum        | `full` or `filtered`                                                                                            |
 
 The closed v1 event-kind set is `dns`, `smtp`, `tls`, `http`, `conn`,
 `file_metadata`, and `file_content`. The corresponding concrete types are
@@ -93,19 +93,6 @@ content-bearing types. `files.log` is built from `FileMetadataEvent`, never
   records are lifecycle summaries.
 - Passwords and bodies are not captured by default. `http.password` remains
   unset unless an explicit future credential policy authorizes collection.
-
-## LI profile: `internet_metadata`
-
-The profile is metadata-only and deny-by-default. It may deliver X2 IRI derived
-from `dns`, `tls`, `http`, `smtp`, and `conn` events after an active task and
-target match. It may deliver `file_metadata` only when the task explicitly adds
-the `file_metadata` capability. It always rejects `file_content`.
-
-Allowed HTTP data is method, host, URI, protocol version, referrer, user agent,
-status, content metadata, and byte counts. Allowed SMTP data is envelope,
-routing/header metadata, replies, TLS state, and file identifiers. Arbitrary
-headers, HTTP/email bodies, extracted bytes, raw payloads, RTP/media, and mirrored
-packets are excluded. File/TSV/JSON configuration has no effect on authorization.
 
 ## Fixtures
 

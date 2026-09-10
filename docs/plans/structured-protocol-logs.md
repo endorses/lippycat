@@ -1,14 +1,14 @@
 # Structured Protocol Logs Implementation Plan
 
 **Date:** 2026-08-22
-**Status:** Substantially complete (follow-up work remains in Phases 1, 4, 5, 9,
-and 10)
+**Status:** Substantially complete (follow-up work remains in Phases 1, 4, 5, 8,
+and 9)
 **Priority:** High
 
 ## Overview
 
 Add a normalized protocol event layer to lippycat, then use that layer to drive
-Zeek-compatible structured logs, LI metadata delivery, and future event sinks.
+Zeek-compatible structured logs and future event sinks.
 
 The first sink is structured file logging alongside PCAP output, TUI monitoring,
 virtual interface injection, and LI delivery.
@@ -16,13 +16,13 @@ virtual interface injection, and LI delivery.
 The first target is Zeek-compatible file naming and field semantics for the core
 streams operators already expect:
 
-| Stream | File |
-|--------|------|
-| Connection summary | `conn.log` |
-| DNS | `dns.log` |
-| TLS/SSL handshake metadata | `ssl.log` |
-| HTTP | `http.log` |
-| SMTP/email envelope | `smtp.log` |
+| Stream                         | File        |
+| ------------------------------ | ----------- |
+| Connection summary             | `conn.log`  |
+| DNS                            | `dns.log`   |
+| TLS/SSL handshake metadata     | `ssl.log`   |
+| HTTP                           | `http.log`  |
+| SMTP/email envelope            | `smtp.log`  |
 | File transfers and attachments | `files.log` |
 
 File logs are append-only, rotate on a configured interval, and support both
@@ -43,8 +43,6 @@ from SIEMs, tests, and local tools.
 - Emit useful DNS and email logs before building the full connection tracker.
 - Add TLS and HTTP distributed metadata so `ssl.log` and `http.log` work in hunter
   to processor deployments.
-- Allow LI builds to map authorized metadata events to X2 IRI delivery without
-  coupling LI to file logs.
 - Build `conn.log` with explicit partial-visibility semantics for filtered capture.
 - Defer `files.log` until HTTP body recovery and SMTP attachment parsing are ready.
 
@@ -54,28 +52,24 @@ from SIEMs, tests, and local tools.
 - Do not claim full Zeek protocol breadth or script compatibility.
 - Do not add log shipping. lippycat writes files; Filebeat, Vector, Fluent Bit, or
   similar tools ship them.
-- Do not treat Zeek log rows as the internal LI data model. LI delivery maps from
-  normalized events, not from files.
-- Do not send packet payloads, bodies, files, or media as part of metadata-only LI
-  delivery.
+- Keep event schemas independent of delivery-specific encoding and authorization.
 - Do not replace the virtual-interface-to-Zeek workflow. That remains valid for
   users who want Zeek's broader analyzer ecosystem.
 - Do not build full Zeek file-analysis parity in the first release.
 
 ## Current State
 
-| Area | Current support | Gap |
-|------|-----------------|-----|
-| DNS metadata | `internal/pkg/dns` correlates query/response metadata and tunneling scores | Needs normalized event mapping and sinks |
-| Email metadata | `internal/pkg/email` tracks SMTP envelope and IMAP/POP3 command state | Needs normalized event mapping and sinks |
-| TLS metadata | `internal/pkg/tls` parses ClientHello/ServerHello, SNI, JA3/JA3S/JA4, ALPN, risk flags | Not present in `api/proto/data.proto` or local/tap processor metadata path |
-| HTTP metadata | `internal/pkg/http` parses request/response fields and headers | Not present in `api/proto/data.proto` or local/tap processor metadata path |
-| Connection tracking | `internal/pkg/detector.FlowTracker` tracks protocol-detection context | No direction normalization, packet/byte counters, TCP state, UID lifecycle, or scale controls |
-| File logs | Body previews exist in places | No carving, MIME sniffing, hashing, dedup, extraction limits, or SMTP attachment walking |
-| Processor pipeline | `processBatch()` already fans out to PCAP, enrichment, aggregators, LI, upstream, TUI, virtual interface | Needs an event dispatcher at the same non-blocking fan-out layer |
-| Sniff CLI path | `lc sniff <protocol>` already performs local capture and protocol analysis for CLI output | Needs event emission and logstream wiring after processor/tap support is proven |
-| Flow control | Processor flow control can use PCAP queue pressure and upstream backlog | Needs support for multiple named processor-level pressure sources |
-| LI delivery | LI packages already provide X1/X2/X3 concepts for authorized interception | Needs a metadata-event mapper for internet usage IRI tasks |
+| Area                | Current support                                                                                          | Gap                                                                                           |
+| ------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| DNS metadata        | `internal/pkg/dns` correlates query/response metadata and tunneling scores                               | Needs normalized event mapping and sinks                                                      |
+| Email metadata      | `internal/pkg/email` tracks SMTP envelope and IMAP/POP3 command state                                    | Needs normalized event mapping and sinks                                                      |
+| TLS metadata        | `internal/pkg/tls` parses ClientHello/ServerHello, SNI, JA3/JA3S/JA4, ALPN, risk flags                   | Not present in `api/proto/data.proto` or local/tap processor metadata path                    |
+| HTTP metadata       | `internal/pkg/http` parses request/response fields and headers                                           | Not present in `api/proto/data.proto` or local/tap processor metadata path                    |
+| Connection tracking | `internal/pkg/detector.FlowTracker` tracks protocol-detection context                                    | No direction normalization, packet/byte counters, TCP state, UID lifecycle, or scale controls |
+| File logs           | Body previews exist in places                                                                            | No carving, MIME sniffing, hashing, dedup, extraction limits, or SMTP attachment walking      |
+| Processor pipeline  | `processBatch()` already fans out to PCAP, enrichment, aggregators, LI, upstream, TUI, virtual interface | Needs an event dispatcher at the same non-blocking fan-out layer                              |
+| Sniff CLI path      | `lc sniff <protocol>` already performs local capture and protocol analysis for CLI output                | Needs event emission and logstream wiring after processor/tap support is proven               |
+| Flow control        | Processor flow control can use PCAP queue pressure and upstream backlog                                  | Needs support for multiple named processor-level pressure sources                             |
 
 ## Architecture
 
@@ -112,7 +106,6 @@ packet/protocol analyzers
 normalized protocol events
         |
         +--> logstream sink: conn.log / dns.log / ssl.log / http.log / smtp.log
-        +--> LI metadata mapper sink: authorized X2 IRI delivery
         +--> future sinks: metrics, streaming export, TUI summaries
 ```
 
@@ -151,9 +144,8 @@ Initial concrete event classes:
 - `FileMetadataEvent`
 - `FileContentEvent` only when content extraction is explicitly enabled
 
-Metadata and content must be distinct event classes. This prevents an IRI-only LI
-task from accidentally receiving bodies, payloads, files, or media through a generic
-"file" or "HTTP" event.
+Metadata and content must be distinct event classes. Consumers must explicitly
+subscribe to content-bearing types to receive bodies, payloads, files, or media.
 
 The event dispatcher should use bounded queues and async fan-out. Packet processing
 enqueues events and moves on. Sinks do their own serialization or mapping outside
@@ -222,43 +214,6 @@ This layer should:
 This identity layer is intentionally smaller than `conntrack`. It lets `dns.log`,
 `smtp.log`, `ssl.log`, and `http.log` ship before `conn.log` is complete.
 
-### LI Metadata Sink
-
-In LI builds, add an optional sink that consumes normalized metadata events and maps
-them to authorized X2 IRI delivery. This is for ADMF tasks where the requested
-product is internet usage metadata, not full traffic content.
-
-The LI sink must be gated by:
-
-- `li` build tag.
-- LI runtime enablement.
-- Active ADMF/X1 task.
-- Target match.
-- Delivery profile authorizing the event kind.
-- Metadata-only policy for IRI tasks.
-
-Suggested first metadata mappings:
-
-| Event | LI delivery class |
-|-------|-------------------|
-| `DNSEvent` | X2 IRI |
-| `TLSEvent` | X2 IRI |
-| `HTTPEvent` metadata fields | X2 IRI |
-| `SMTPEvent` envelope fields | X2 IRI |
-| `ConnEvent` | X2 IRI |
-| `FileMetadataEvent` | X2 IRI if profile allows file metadata |
-
-Explicitly excluded from metadata-only delivery:
-
-- HTTP request/response bodies.
-- Email bodies.
-- Extracted file content.
-- RTP/media.
-- Raw packet payloads.
-- Mirrored packet streams.
-
-The LI sink must not depend on file rotation, Zeek TSV output, or JSONL output.
-
 ### Backpressure and Flow Control
 
 Event dispatch and sink processing must not block packet processing. When an event
@@ -317,11 +272,6 @@ logs:
   post_rotate_command: ""
   include_http_headers: false
   include_email_body_preview: false
-
-li:
-  metadata_events:
-    enabled: false
-    delivery_profile: internet_metadata
 ```
 
 Flags:
@@ -336,8 +286,6 @@ Flags:
 - `--log-post-rotate-command`
 - `--log-include-http-headers`
 - `--log-include-email-body-preview`
-- LI flags should follow the existing `flags_li.go` / `flags_li_stub.go` pattern
-  and should not appear in non-LI builds.
 
 Defaults should be conservative:
 
@@ -346,9 +294,7 @@ Defaults should be conservative:
 - TSV output by default when enabled.
 - Do not include full HTTP headers by default.
 - Do not include email body previews by default.
-- Do not enable `files.log` until Phase 9 is implemented.
-- Do not enable LI metadata-event delivery unless LI is built, enabled, and an ADMF
-  task authorizes it.
+- Do not enable `files.log` until Phase 8 is implemented.
 
 ## Phase 0: Schema and Compatibility Decisions
 
@@ -362,13 +308,12 @@ Finalize the minimum viable schema before writing code.
       `http.log`, `smtp.log`, `files.log`.
 - [x] Define TSV fields and types for Phase 4 streams: `dns`, `smtp`.
 - [x] Define TSV fields and types for Phase 5 streams: `ssl`, `http`.
-- [x] Define TSV fields and types for Phase 8 stream: `conn`.
+- [x] Define TSV fields and types for Phase 7 stream: `conn`.
 - [x] Decide which fields are Zeek-compatible and which are lippycat extensions.
 - [x] Document extension fields: `node_id`, `community_id`, `capture_scope`,
       `partial`.
 - [x] Define the normalized event envelope fields and event kinds.
 - [x] Define which event fields are metadata and which are content.
-- [x] Define the first LI metadata profile: `internet_metadata`.
 - [x] Add schema fixtures for TSV header output and JSONL objects.
 
 The Phase 0 compatibility contract is documented in
@@ -400,8 +345,8 @@ Build the typed event model and async dispatcher before any output sink.
 - [x] Implement drop accounting and periodic warnings.
 - [x] Implement lifecycle: `Start`, `Stop`, `Flush`, and `Close`.
 - [x] Expose dispatcher queue depth/capacity for flow control, including the
-	  per-sink queues. Queue metrics now include the dispatcher input and one
-	  named metric for every registered bounded sink queue.
+      per-sink queues. Queue metrics now include the dispatcher input and one
+      named metric for every registered bounded sink queue.
 - [x] Add unit tests for dispatch, sink filtering, shutdown flush, queue-full
       behavior, and sink error handling.
 
@@ -491,14 +436,14 @@ in the processor path.
 - [x] Update processor initialization and shutdown lifecycle.
 - [x] Update `flow.Controller` to accept multiple named queue pressure sources.
 - [x] Register all active event and log queues with flow control. The dispatcher
-	  input, dispatcher per-sink queues, and lazy logstream queues are registered.
+      input, dispatcher per-sink queues, and lazy logstream queues are registered.
 - [x] Add config and flags for `process` and `tap`. Most planned settings are
-	  implemented, including explicit `events.drop_policy` and the sensitive
-	  email-body-preview opt-in.
+      implemented, including explicit `events.drop_policy` and the sensitive
+      email-body-preview opt-in.
 - [x] Add packet-metadata integration tests asserting record counts and key fields.
 - [x] Propagate filtered-capture provenance to every normalized event. Connection
-	  and protocol/file events derive the same scope from
-	  `CapturedPacket.MatchedFilterIds`.
+      and protocol/file events derive the same scope from
+      `CapturedPacket.MatchedFilterIds`.
 
 ### Acceptance Criteria
 
@@ -596,40 +541,7 @@ lc sniff http --log-dir ./logs --log-format json
 - Existing `sniff` stdout behavior is unchanged when logging is disabled.
 - `logs` is not added as a `sniff` object.
 
-## Phase 7: LI Metadata Event Sink
-
-**Priority:** Medium-high
-
-Allow LI builds to deliver authorized internet usage metadata in real time without
-coupling LI to Zeek log files.
-
-### Tasks
-
-- [x] Add an LI-only sink implementation behind the `li` build tag.
-- [x] Add a no-op non-LI stub following the existing LI flag/config pattern.
-- [x] Define `internet_metadata` delivery profile.
-- [x] Map `DNSEvent` to X2 IRI records.
-- [x] Map `TLSEvent` to X2 IRI records.
-- [x] Map metadata-only `HTTPEvent` fields to X2 IRI records.
-- [x] Map `SMTPEvent` envelope fields to X2 IRI records.
-- [x] Map `ConnEvent` to X2 IRI records after Phase 8 is available.
-- [x] Map `FileMetadataEvent` to X2 IRI only if the profile explicitly allows file
-      metadata.
-- [x] Enforce that `FileContentEvent`, bodies, media, and raw payloads cannot be
-      delivered by metadata-only profiles.
-- [x] Gate delivery by active ADMF/X1 task and target match.
-- [x] Add per-event audit logging for delivered, skipped, and rejected events.
-- [x] Add tests for profile gating and content-exclusion behavior.
-
-### Acceptance Criteria
-
-- LI metadata delivery works only in LI builds with LI enabled and an authorizing
-  task.
-- Metadata events can be delivered in real time without waiting for log rotation.
-- Content-bearing events are rejected by metadata-only profiles.
-- `logstream` and file configuration are not required for LI metadata delivery.
-
-## Phase 8: Connection Tracker and `conn.log`
+## Phase 7: Connection Tracker and `conn.log`
 
 **Priority:** Medium-high
 
@@ -654,7 +566,6 @@ cache.
 - [x] Add eviction counters and tracker depth metrics.
 - [x] Emit `events.ConnEvent` on flow expiry and graceful shutdown.
 - [x] Map `events.ConnEvent` into `conn.log` records.
-- [x] Add `ConnEvent` delivery to the LI metadata sink where authorized.
 - [x] Add tests for common states and accounting.
 - [x] Benchmark with a 100k-flow hard cap.
 
@@ -665,12 +576,12 @@ cache.
 - Partial observations are explicitly marked.
 - Known TCP state fixtures produce expected `conn_state` values.
 
-## Phase 9: File Metadata Events and `files.log`
+## Phase 8: File Metadata Events and `files.log`
 
 **Priority:** Medium
 
-Add file observations only after the event layer, structured log sink, LI metadata
-sink, and protocol logs are stable.
+Add file observations only after the event layer, structured log sink, and
+protocol logs are stable.
 
 ### Scope
 
@@ -701,11 +612,10 @@ Out of scope:
       enabled.
 - [x] Add `records/files.go`.
 - [x] Map `events.FileMetadataEvent` into `files.log`.
-- [x] Add LI metadata sink support for `FileMetadataEvent` only where authorized.
 - [x] Add tests for hash correctness, MIME detection, truncation, and extraction
       limits.
 - [x] Define and implement honest hash semantics for partial bodies. File analysis
-	  exposes `hash_complete`; false means hashes cover only recovered bytes.
+      exposes `hash_complete`; false means hashes cover only recovered bytes.
 - [ ] Make distributed file analysis operationally configurable from the logging
       feature. Processor-side file analysis requires hunters to opt into
       protocol-specific body capture separately; enabling `files` logging or
@@ -719,9 +629,8 @@ Out of scope:
   **Not yet satisfied end-to-end:** hashing uses streaming hash writers, but the
   HTTP/SMTP body has already been accumulated into a bounded in-memory preview
   before `fileanalysis` receives it.
-- Metadata-only LI profiles cannot receive file content.
 
-## Phase 10: Documentation and Operations
+## Phase 9: Documentation and Operations
 
 **Priority:** High
 
@@ -769,7 +678,6 @@ and filtered capture.
 - UID generation and cache behavior.
 - Community ID known vectors.
 - Record builder field order and missing-field handling.
-- LI metadata profile gating in LI builds.
 
 ### Integration Tests
 
@@ -781,8 +689,6 @@ and filtered capture.
 - `sniff` PCAP input to DNS/TLS/HTTP logs where protocol sniff commands support
   file input.
 - Simulated hunter protobuf metadata to processor logs.
-- LI metadata sink receives only authorized metadata events in LI builds.
-- LI metadata sink rejects content-bearing events for metadata-only profiles.
 - Logging disabled path.
 - Event sink disabled path.
 - Queue-full path under load.
@@ -859,12 +765,6 @@ events. Bodies, extracted files, RTP/media, and raw payloads need separate
 content-bearing event classes so metadata-only sinks cannot accidentally receive
 them.
 
-### LI Scope Creep
-
-The LI metadata sink must be task- and profile-gated. It should never become a
-generic "send all logs to LI" switch, because operational logs and legally authorized
-IRI delivery have different authorization, audit, and retention requirements.
-
 ### Event Bus Over-Generalization
 
 A fully dynamic map-based event bus would make sinks brittle and increase the chance
@@ -873,22 +773,22 @@ sink mappings until real extension pressure justifies something more generic.
 
 ## Suggested Delivery Order
 
-1. Phase 0: schema decisions.
-2. Phase 1: normalized event framework.
-3. Phase 2: flow identity.
-4. Phase 3: logstream sink.
-5. Phase 4: DNS and SMTP events/logs.
-6. Phase 5: TLS and HTTP metadata plus `ssl.log` and `http.log`.
-7. Phase 6: `sniff` command integration.
-8. Phase 7: LI metadata event sink.
-9. Phase 8: `conn.log`.
-10. Phase 9: `files.log`.
-11. Phase 10: complete user and operator documentation.
+| Phase | Scope                                               |
+| ----- | --------------------------------------------------- |
+| 0     | schema decisions                                    |
+| 1     | normalized event framework                          |
+| 2     | flow identity                                       |
+| 3     | logstream sink                                      |
+| 4     | DNS and SMTP events/logs                            |
+| 5     | TLS and HTTP metadata plus `ssl.log` and `http.log` |
+| 6     | `sniff` command integration                         |
+| 7     | `conn.log`                                          |
+| 8     | `files.log`                                         |
+| 9     | complete user and operator documentation            |
 
 Phases 1 through 4 are the smallest useful release: they provide a typed event
 layer, stable flow identity, a tested log sink, and useful DNS/email output without
 changing the protobuf wire format. Phase 5 makes distributed TLS and HTTP logging
-complete. Phase 6 brings the same sink stack to `sniff`. Phase 7 adds real-time
-authorized metadata delivery for LI builds without coupling it to file logs. Phase 8
+complete. Phase 6 brings the same sink stack to `sniff`. Phase 7
 should only ship after benchmarks show the tracker behaves well under realistic flow
 cardinality.

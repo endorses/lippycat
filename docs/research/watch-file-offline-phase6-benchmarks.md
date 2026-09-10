@@ -145,7 +145,7 @@ The phase 0 regression gates remain unchanged: at least five 1-second samples,
 median DNS replay at most 1.79 ms per 50 packets and 6,952 allocations; prepared
 10,000-event rendering at most 0.280 ms and 713 allocations. Event replay,
 rendering, and active-view CPU results are recorded with mixed-mode acceptance
-in the [companion phase 6 acceptance report](watch-file-offline-phase6-acceptance.md).
+in the [event performance results below](#repeated-event-performance).
 
 The fixed-budget 100,000→1,000,000 infrastructure RSS gate is at most +64 MiB;
 these observations pass. Because phase 0 had no dataset implementation, the
@@ -168,3 +168,97 @@ packets/s, and cancelled with cleanup in 0.505 ms. These independent observation
 also pass the gates. Root inspected both retained heap profiles and confirmed
 bounded frame-cache/LRU and retained-event allocations rather than count-sized
 offset or match vectors.
+
+## Repeated event performance
+
+Same host and workload as the [phase 0 baseline](watch-file-offline-baseline.md):
+Linux amd64, Core i9-13900HX, Go 1.26.3, GOMAXPROCS 32, `all`, no race
+instrumentation, 160×40 viewport. Five one-second samples per benchmark; reported
+values are medians. These timings exclude a physical terminal driver and network
+transport. DNS replay includes decoding, the production analyzer and bounded
+delivery, 50 packets per iteration. Component benchmarks isolate their named
+operation.
+
+| Workload                                                  |           Median | Allocations/op | Acceptance                                      |
+| --------------------------------------------------------- | ---------------: | -------------: | ----------------------------------------------- |
+| DNS analysis/delivery, tick and Events render, 50 packets |         1.618 ms |          6,319 | Pass: ≤1.79 ms and ≤6,952 allocations           |
+| Prepared timeline, 1,000 retained                         |         0.225 ms |            648 | Comparable to 10,000-row viewport cost          |
+| Prepared timeline, 10,000 retained                        |         0.223 ms |            648 | Pass: ≤0.280 ms and ≤713 allocations            |
+| Unprepared timeline, 10,000 retained                      |         0.466 ms |          1,726 | Control; prepared rendering is about 52% faster |
+| Incremental append, 1,000 / 10,000 retained               |   137 / 169.5 ns |          0 / 0 | No full retained-history rebuild                |
+| Unfiltered store delta, 1,000 / 10,000 capacity           | 140.4 / 144.0 ns |          1 / 1 | Approximately constant per delta                |
+| Filtered store delta, 1,000 / 10,000 capacity             | 124.2 / 124.4 ns |          0 / 0 | Approximately constant per delta                |
+| Cached related-packet miss, 1,000 / 10,000 retained       |   207 / 206.1 ns |          1 / 1 | Independent of retained packet count            |
+
+Run the repeated comparison with:
+
+```sh
+GOCACHE=/tmp/lippycat-go-cache go test -tags all \
+  ./internal/pkg/tui ./internal/pkg/tui/components ./internal/pkg/tui/store \
+  -run '^$' -bench 'BenchmarkModelEventDNSReplay$|BenchmarkEventsViewRenderTimeline$|BenchmarkEventStoreIncrementalProjection$|BenchmarkEventsViewAppendIncremental$|BenchmarkHasRelatedPacketMiss$|BenchmarkEventPhase6' \
+  -benchtime=1s -count=5 -benchmem
+```
+
+A separate five-second DNS replay CPU profile measured 1.466 ms/op and 6,319
+allocations. `RenderTimeline` accounted for 6.09% cumulative CPU and update-side
+`buildTimelineCache` for 9.88%; reporting both includes formatting work moved out
+of rendering. The prior event-plan profile reported 5.57% and 9.89%, respectively.
+This is consistent with preserving the optimized path, not a claim of another
+Phase 6 rendering speedup. Reproduce with the same replay selector,
+`-benchtime=5s -cpuprofile=/tmp/lippycat-phase6-events.cpu`, then
+`/tmp/lippycat-phase6-pprof -top -cum /tmp/lippycat-phase6-events.cpu` (tool build
+instructions are in the dataset report).
+
+## Per-view CPU and allocations
+
+`BenchmarkEventPhase6ModeViews` feeds the same 50-packet/50-event batch into
+10,000-entry live/remote stores, ticks and renders each active view. Live mode
+also receives its separate exact ingress-telemetry snapshot. Assertions verify
+packet/event arrivals, retained counts, and that only the Events view projects
+the stream. This measures delivery/model/presentation work, not NIC or gRPC
+throughput. Fixed-flow fixtures intentionally isolate presentation costs.
+
+| Mode   | Active view | Median per 50-packet cycle | Allocated bytes/op | Allocations/op |
+| ------ | ----------- | -------------------------: | -----------------: | -------------: |
+| Live   | Events      |                   0.787 ms |            499,459 |          2,051 |
+| Live   | Packets     |                   0.464 ms |            306,839 |          1,391 |
+| Live   | Statistics  |                   0.284 ms |            209,793 |            692 |
+| Remote | Events      |                   0.732 ms |            505,786 |          2,031 |
+| Remote | Packets     |                   0.462 ms |            312,468 |          1,431 |
+| Remote | Statistics  |                   0.295 ms |            209,458 |            672 |
+
+Both modes keep exactly 10,000 events/packets and account for every supplied
+batch. Statistics and Packets do not spend CPU projecting hidden event history.
+The benchmark passes synthetic packets without raw bytes to the existing
+background processor; full background protocol analysis and transport throughput
+are outside this measurement. Every model is shut down after its sample.
+Initial development samples with the remote model still on its default Nodes tab
+or missing the remote packet identity were discarded. Final assertions prevent
+either setup error from silently producing reassuring timings.
+
+`BenchmarkEventPhase6OfflineReadyViews` indexes 20,000 DNS/ordinary-UDP packets,
+publishes the actual session and loads the selected page/detail/relationship
+before timing idle ticks and rendering. It asserts that idle ticks never
+reproject event history. Each ready-mode iteration costs 0.751 ms / 0.436 ms /
+0.243 ms for Events / Packets / Statistics, respectively, with 1,600 / 1,410 /
+657 allocations. Median allocated bytes are 322,711 / 146,688 / 48,126 per
+iteration, not retained memory. At the idle one-second tick interval the Events
+measurement represents about 0.075% of one CPU core for this work alone; terminal,
+runtime and input activity are additional. Storage/analyzer retained and sampled
+peak memory are reported separately in the dataset measurements.
+
+## Interactive terminal reproduction
+
+The historical live terminal check exercised controlled delivery, not privileged
+NIC capture. Reproduce the opt-in presentation test in an interactive terminal:
+
+```sh
+GOCACHE=/tmp/lippycat-go-cache go test -c -tags tui \
+  -o /tmp/lippycat-phase6-terminal.test ./internal/pkg/tui
+LIPPYCAT_PHASE6_TERMINAL_SMOKE=1 /tmp/lippycat-phase6-terminal.test \
+  -test.run '^TestPhase6LiveTerminalSmoke$' -test.v
+```
+
+Use `v`, arrows, `d`, Space twice, resize, switch tabs and `q`. Normal suites skip
+this opt-in test. Controlled live/remote/offline interaction coverage also lives
+in `TestEventPhase6MixedModeAcceptance`.

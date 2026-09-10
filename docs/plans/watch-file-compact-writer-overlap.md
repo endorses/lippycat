@@ -20,5 +20,4 @@ Outcome: final paired completed-ready median 3.178 s versus 3.712 s (14.4% faste
 complete acceptance median 3.171 s. The index remains 89,246,448 bytes. Full private
 record/query/export parity, affected race suites, isolated integration and build
 checks passed. Preexisting tracked edits retain their original patch hash.
-See [results](../research/watch-file-compact-writer-results.md) and
-[measurements](../research/watch-file-compact-writer-measurements.json).
+See the [measured results](../research/watch-file-compact-writer-results.md).

@@ -719,8 +719,9 @@ Phase 6 implementation and acceptance (2026-09-05):
 - Five one-second event samples pass the Phase 0 replay/rendering time and
   allocation gates. Incremental/related-packet costs remain bounded. Active
   live/remote view and idle offline view measurements, CPU profiling, mixed-mode
-  interaction tests and real PTY checks are recorded in the
-  [acceptance report](../research/watch-file-offline-phase6-acceptance.md).
+  interaction tests and real PTY checks passed. Benchmark results and terminal
+  reproduction are in the
+  [measurement report](../research/watch-file-offline-phase6-benchmarks.md#repeated-event-performance).
 - Operator README, manual, configuration reference, embedded help and offline
   settings now describe complete packet scope and separately bounded event/call
   history. Transitional retained-only/preview claims were removed. Export,
@@ -777,10 +778,10 @@ uses a stable 48-column content width, retaining left alignment and centering.
 Measurements on Linux/amd64, Intel i9-13900HX, five isolated one-iteration runs
 per version, comparing the prior committed implementation with this follow-up:
 
-| Benchmark (100,000 packets) | Before median | After median | Throughput gain |
-| -------------------------- | ------------- | ------------ | --------------- |
-| Storage indexing           | 170,217 pkt/s  | 213,199 pkt/s | 25.3%           |
-| Full indexer, one source    | 47,430 pkt/s   | 56,518 pkt/s  | 19.2%           |
+| Benchmark (100,000 packets) | Before median | After median  | Throughput gain |
+| --------------------------- | ------------- | ------------- | --------------- |
+| Storage indexing            | 170,217 pkt/s | 213,199 pkt/s | 25.3%           |
+| Full indexer, one source    | 47,430 pkt/s  | 56,518 pkt/s  | 19.2%           |
 
 The full-indexer fixture mixes DNS and ordinary UDP. Before samples were
 48,025 / 46,974 / 48,149 / 44,206 / 47,430 pkt/s; after samples were

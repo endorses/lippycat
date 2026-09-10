@@ -962,8 +962,8 @@ make all
 - [x] Existing and new correctness, race, build, and manual verification gates
       pass.
 
-Final mixed-mode acceptance (2026-09-05) is recorded in the
-[offline Phase 6 acceptance report](../research/watch-file-offline-phase6-acceptance.md).
+Final mixed-mode acceptance (2026-09-05) passed. Measurements are retained in the
+[offline Phase 6 benchmark report](../research/watch-file-offline-phase6-benchmarks.md#repeated-event-performance).
 The same DNS replay and prepared-render workloads pass the original time and
 allocation gates over five one-second samples. Incremental/related-packet
 benchmarks and a CPU profile preserve the optimized behavior. Separate active

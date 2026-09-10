@@ -45,8 +45,17 @@ counts agree across repetitions. These measurements do not establish cold-cache
 performance, terminal I/O latency or a controlled Wireshark comparison. The page
 endpoint includes `PacketList.View` at 120 by 40, as in the existing harness.
 
-[Sanitized samples, configuration identity and full matrix](watch-file-three-second-measurements.json)
-record the measured revision plus working-tree patch and binary hashes. Existing
+Historical measurement identity:
+
+```json
+{
+  "baseline_revision": "6f73ac5254d6722f0bcd3d1aa8472ecc542e59f6",
+  "measured_working_tree_patch_sha256": "b4f65113bc04588fa3054f80d51292b84d550e188e0aa389f96898986ed8ab2d",
+  "benchmark_binary_sha256": "04a3dead68e631af8be0c152be87a2c9eec657df6d319f019329396bb123b55a"
+}
+```
+
+Existing
 uncommitted baseline changes were retained for both measurements and verification;
 they are excluded from this implementation's commit. Private input paths,
 exported captures and profiles remain local.

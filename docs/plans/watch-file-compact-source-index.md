@@ -126,7 +126,10 @@ locator files in the existing packages rather than moving capture into the TUI.
 Gate: every emitted normalized packet can be reread byte-for-byte with its exact
 capture metadata, and no reader obtains bytes from a replacement path.
 
-Phase-1 implementation and review: see [verification](../research/watch-file-phase1-validation.md).
+Phase-1 review verified parser offsets, normalization provenance, source mutation,
+backing budgets and lease cleanup. The retained
+[offline contracts](../design/watch-file-offline-contracts.md) define ownership
+and source-lifetime guarantees.
 The locator path is internally opt-in; legacy sorting and completed production
 datasets retain their existing behavior until the later migration gates.
 
@@ -155,7 +158,10 @@ Touchpoints: `internal/pkg/capture/offline_sort.go`, `offline_cursor.go`,
 Gate: ordinary packets are no longer copied into an all-packet sorting spool;
 full-ready publication and analysis order still match the baseline.
 
-Phase-2 implementation and independent review: see [verification](../research/watch-file-phase2-validation.md).
+Phase-2 review verified direct, heap and external ordering against the legacy
+oracle, including normalization, deterministic identities and private-capture
+parity. The [storage format](../design/offline-storage-format.md) records the
+locator-ordering format and its validation contract.
 The prepared locator stream is internally opt-in; completed production datasets
 continue to use the legacy oracle until the later storage and cutover gates.
 
@@ -180,8 +186,10 @@ Gate: compact completed datasets match the oracle for all existing operations;
 unchanged packet bytes and full presentation records are absent from persisted
 production storage. All exceptional retained content is included in accounting.
 
-Phase-3 implementation, independent review, full differential verification and
-measurements: see [verification](../research/watch-file-phase3-validation.md).
+Phase-3 implementation and independent review passed the full differential
+oracle, including all 579,990 private-capture logical records. Benchmark and
+oracle commands are retained in the
+[performance investigation](../research/watch-file-compact-performance.md#reproduction).
 The unshipped v2 layout was refined to combined typed columns, block-local arenas
 and an authenticated direct row directory; the storage specification describes
 the actual format. The compact candidate remains internal and completed-only.
@@ -191,15 +199,16 @@ gaps must be addressed before phase-4 production cutover.
 
 Phase-3 follow-up assessment (2026-09-06) found and corrected invalid-input
 publication and allocation-before-admission gaps. Three independent reviewers
-and parent verification found no additional substantiated phase-3 defect. See
-the [follow-up assessment](../research/watch-file-phase3-validation.md#follow-up-assessment-2026-09-06)
-for reproductions, fixes and verification; the completed checklist remains valid.
+and parent verification found no additional substantiated phase-3 defect.
+Invalid-input and allocation-accounting regressions failed against the earlier
+implementation and passed with the fixes; the completed checklist remains valid.
 
 A second phase-3 assessment confirmed a combined-detail budget defect in narrow
 VoIP amendments. Finalization now validates the materialized amended range before
 publication, rejecting rows whose combined raw bytes and metadata exceed the
 record budget. The range uses constant memory; sparse amendments may validate
-intervening rows. See the verification document for regression evidence.
+intervening rows. Regressions cover oversized combined details, reverse-order
+amendments, absent manifests after failure and balanced cleanup.
 
 The [performance follow-up](../research/watch-file-compact-performance.md)
 reduced measured compact readiness from 21.94 s to 10.56 s, completed storage
@@ -226,21 +235,30 @@ query/detail/export performance evaluated against the predeclared tolerances.
 
 Phase-4 implementation and independent sub-agent reviews were verified by the
 parent, including full package/race/build gates and exact private-capture parity.
-See [measurements and verification](../research/watch-file-phase4-validation.md).
+The [storage format](../design/offline-storage-format.md) and
+[offline contracts](../design/watch-file-offline-contracts.md) describe the
+completed query and publication behavior.
 Production now uses completed compact datasets with structured block queries and
 bounded opaque fallback. Sparse vectors and implicit all-match results are the
 measured representations; dense bitsets and related postings remain deferred.
-Source and snapshot behavior is documented. Configured resource limits pass;
-remaining readiness and sparse-fallback timing gaps are explicitly recorded,
-without changing the tolerances or claiming the three-second target. Publication still
+Source and snapshot behavior is documented. Configured resource limits pass.
+The historical three-process warm-cache matrix measured compact readiness at
+10.120556 s versus 8.978829 s legacy (+12.716%), and opaque sparse-repeat queries
+at 1.179381 s versus 1.063784 s (+10.864%). Both missed the unchanged timing
+tolerances; storage was 89,456,432 bytes and export reached 163.417203 MB/s versus
+128.771119 MB/s legacy. These measurements justified cutover on parity, resource
+and storage gains while retaining the timing gaps for further work, without
+claiming the three-second target. The reproduction command is retained in the
+[performance investigation](../research/watch-file-compact-performance.md#reproduction). Publication still
 waits for analyzer EOF; phase 5 has not begun.
 
 Phase-4 follow-up assessment (2026-09-06) used three independent sub-agents and
 parent verification. It found one compatibility defect: accepted filters that
 exceeded structured-expression limits aborted instead of using the opaque
 predicate fallback. The adapter now falls back only for representation-limit
-errors, preserving other compiler errors and backend budgets. See the
-[follow-up verification](../research/watch-file-phase4-validation.md#follow-up-assessment-2026-09-06).
+errors, preserving other compiler errors and backend budgets. The regression
+uses 65 `NOT` operators followed by `impossible`; coverage also includes a
+257-filter stack, oversized text and invalid numeric comparisons.
 No additional phase-4 defect was substantiated.
 
 ## Phase 5 — Publish a complete base before analysis finishes

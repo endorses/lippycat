@@ -134,10 +134,44 @@ enable the compact candidate for production.
 
 ## Reproduction
 
-Use the existing reproduction commands in
-[Phase 3 verification](watch-file-phase3-validation.md#reproduction), setting
-`LIPPYCAT_BENCH_PCAP` to the private capture. Compile once, then run
-`BenchmarkOfflineCompactCompleted/compact` and `/legacy` in separate fresh
-processes with `-test.benchtime=1x -test.benchmem`, three times each. Run profiling
-separately and exclude it from the timing medians. Local raw outputs for this
-assessment are in `/tmp/lippycat-compact-performance/`.
+From the repository root, set `LIPPYCAT_BENCH_PCAP` to the private capture.
+Compile once, then run each backend three times in separate fresh processes with
+an untimed full input read to warm filesystem caches. Run profiling separately
+and exclude it from the timing medians. Local raw outputs for this historical
+assessment were in `/tmp/lippycat-compact-performance/`. Reproducing the recorded
+numbers requires the code and measurement identities above; current code may
+produce different results.
+
+```sh
+GOCACHE=/tmp/lippycat-go-cache go test -c -tags all ./internal/pkg/tui \
+  -o /tmp/lippycat-compact.test
+LOG_LEVEL=ERROR LIPPYCAT_BENCH_PCAP=/path/to/capture.pcap \
+  /tmp/lippycat-compact.test -test.run '^TestOfflineCompactIndexerPrivateOracle$' \
+  -test.count=1 -test.timeout=30m
+
+# Run each backend three times in separate processes, without profiling.
+LOG_LEVEL=ERROR LIPPYCAT_BENCH_PCAP=/path/to/capture.pcap \
+  /tmp/lippycat-compact.test -test.run '^$' \
+  -test.bench '^BenchmarkOfflineCompactCompleted/compact$' \
+  -test.benchtime=1x -test.benchmem -test.timeout=10m
+# Substitute /legacy$ for the comparison runs.
+
+# Profile separately; exclude this run from timing samples.
+LOG_LEVEL=ERROR LIPPYCAT_BENCH_PCAP=/path/to/capture.pcap \
+  /tmp/lippycat-compact.test -test.run '^$' \
+  -test.bench '^BenchmarkOfflineCompactCompleted/compact$' -test.benchtime=1x \
+  -test.cpuprofile=/tmp/lippycat-compact.cpu \
+  -test.memprofile=/tmp/lippycat-compact.mem
+GOCACHE=/tmp/lippycat-go-cache go run cmd/pprof -top -cum \
+  /tmp/lippycat-compact.test /tmp/lippycat-compact.cpu
+```
+
+The subsequent production-cutover matrix used the complete acceptance runner,
+including query/detail/export and resource measurements:
+
+```sh
+python3 scripts/benchmark-offline-acceptance.py /path/to/capture.pcap \
+  /tmp/compact-acceptance-legacy --backend legacy
+python3 scripts/benchmark-offline-acceptance.py /path/to/capture.pcap \
+  /tmp/compact-acceptance-compact --backend compact
+```

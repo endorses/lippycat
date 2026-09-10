@@ -174,13 +174,21 @@ runner. The 18 unrelated baseline files still match their original SHA-256s.
 ## Final Phase-0 measurement matrix
 
 All three warm, unprofiled processes completed successfully, followed by one
-separate CPU/heap-profiled process. The complete numeric samples, per-process RSS,
-medians and nearest-rank p95s are in
-[the measurement artifact](watch-file-phase0-measurements.json). Profiling is
-excluded from that artifact's timing statistics. These measurements include the
-authorized ordering correction (`52456e0e`) plus the recorded performance patch
-and Phase-0 observer/harness; the artifact records exact patch, binary and runner
-SHA-256s. Exact patches and raw logs remain under
+separate CPU/heap-profiled process. The table below retains the timing samples;
+profiling is excluded from its statistics. These historical measurements include
+the authorized ordering correction (`52456e0e`), recorded performance patch and
+Phase-0 observer/harness. Measurement identity:
+
+```json
+{
+  "revision": "52456e0e665f06fad42f309553089a6eabed744b",
+  "patch_sha256": "fdb801261cc87b629f0e3889aa7689d8ab41a462148dd48dc72b92bc205cccc7",
+  "benchmark_binary_sha256": "edd5264f8f65ed3721d1b59dd3dcb563d4281df23692c72f4ec8a21de59ed32b",
+  "runner_sha256": "f432a4dff1194ed5a9383e97d0b0279dac0fddf5778cb06f84edd1a380732ed0"
+}
+```
+
+Exact patches and raw logs were recorded under
 `/tmp/lippycat-phase0-private-final` on the measurement host.
 
 | Endpoint                              |   Run 1 |   Run 2 |   Run 3 |  Median |

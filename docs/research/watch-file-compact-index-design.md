@@ -29,13 +29,13 @@ events. The previous three-run median, after the small performance fixes, is
 
 A fresh run with per-stream metrics measured:
 
-| Current storage | Bytes | Decimal MB |
-|---|---:|---:|
-| Details, including effective packet bytes | 526,285,829 | 526.3 |
-| Filter/list summaries | 138,583,049 | 138.6 |
-| Record offsets | 18,559,696 | 18.6 |
-| Manifest and other overhead | 8,358 | 0.008 |
-| Total | 683,436,932 | 683.4 |
+| Current storage                           |       Bytes | Decimal MB |
+| ----------------------------------------- | ----------: | ---------: |
+| Details, including effective packet bytes | 526,285,829 |      526.3 |
+| Filter/list summaries                     | 138,583,049 |      138.6 |
+| Record offsets                            |  18,559,696 |       18.6 |
+| Manifest and other overhead               |       8,358 |      0.008 |
+| Total                                     | 683,436,932 |      683.4 |
 
 The source contains 314,174,625 captured frame bytes, excluding PCAP framing.
 Merely removing the duplicated raw bytes would still leave approximately
@@ -52,8 +52,7 @@ The detail record duplicates many summary fields as well as raw data. See
 
 ### Bounded feasibility prototype
 
-[offline_locator_scan.go](prototypes/offline_locator_scan.go) is a standalone,
-research-only scanner. It reads the entire source, hashes it, writes fixed-size
+The feasibility experiment used a standalone, research-only locator scanner. It reads the entire source, hashes it, writes fixed-size
 rows through a bounded buffer, syncs the output, and checks 64 sampled locators
 by reading the original packet bytes back and comparing checksums. Temporary
 indexes are removed after each run. Twelve synthetic validation cases also
@@ -62,10 +61,10 @@ and rejection of truncated packet payloads.
 
 Three warm-filesystem runs on the same i9-13900HX development host:
 
-| Prototype | Elapsed runs | Median | Index bytes |
-|---|---|---:|---:|
-| 32-byte timestamp/offset/length locators | 0.213, 0.206, 0.207 s | 0.207 s | 18,559,712 |
-| 96-byte locators plus basic header columns | 0.250, 0.251, 0.238 s | 0.250 s | 55,679,136 |
+| Prototype                                  | Elapsed runs          |  Median | Index bytes |
+| ------------------------------------------ | --------------------- | ------: | ----------: |
+| 32-byte timestamp/offset/length locators   | 0.213, 0.206, 0.207 s | 0.207 s |  18,559,712 |
+| 96-byte locators plus basic header columns | 0.250, 0.251, 0.238 s | 0.250 s |  55,679,136 |
 
 These are **not equivalent to complete lippycat loading**. The prototype omits
 normalization, BPF, application labels, searchable Info text, stateful protocol
@@ -141,21 +140,21 @@ a source subslice inside an already-reassembled datagram is still derived data.
 Use fixed-width, typed blocks rather than a serialized Go presentation object.
 A conservative illustrative direct-address core is 112 bytes per logical packet:
 
-| Fields | Bytes |
-|---|---:|
-| Signed timestamp seconds and nanoseconds | 12 |
-| Backing byte offset | 8 |
-| Captured/original lengths | 8 |
-| Backing ID | 4 |
-| Logical source sequence | 8 |
-| Source-context ID | 4 |
-| Raw integrity checksum | 4 |
-| IPv4/IPv6 source and destination slots | 32 |
-| Ports | 4 |
-| Address/transport/presence flags and protocol ID | 8 |
-| Searchable text offset/length | 12 |
-| Sparse metadata reference | 8 |
-| Total | 112 |
+| Fields                                           | Bytes |
+| ------------------------------------------------ | ----: |
+| Signed timestamp seconds and nanoseconds         |    12 |
+| Backing byte offset                              |     8 |
+| Captured/original lengths                        |     8 |
+| Backing ID                                       |     4 |
+| Logical source sequence                          |     8 |
+| Source-context ID                                |     4 |
+| Raw integrity checksum                           |     4 |
+| IPv4/IPv6 source and destination slots           |    32 |
+| Ports                                            |     4 |
+| Address/transport/presence flags and protocol ID |     8 |
+| Searchable text offset/length                    |    12 |
+| Sparse metadata reference                        |     8 |
+| Total                                            |   112 |
 
 For 579,990 logical packets this is about 65.0 MB, **before** variable text,
 protocol metadata, block headers/checksums, order mappings, query results, or
@@ -220,15 +219,15 @@ normalized export bytes, not the original fragment or outer tunnel frame.
 
 ## Input format and normalization feasibility
 
-| Input or operation | Initial backing strategy |
-|---|---|
-| Unchanged uncompressed classic PCAP | Direct source payload offset |
-| Currently supported uncompressed PCAPNG | Direct offset plus parsed source/interface context |
-| IPv4/IPv6 fragment completion | Store only the completed logical bytes in a derived sidecar |
-| VXLAN extraction | Derived sidecar initially; direct inner subrange when proven source-backed |
-| ESP rewriting/decapsulation | Derived sidecar for changed effective bytes |
-| Gzip classic PCAP | One seekable decompressed backing spool plus compact locators |
-| Unsupported formats | Keep existing explicit rejection |
+| Input or operation                      | Initial backing strategy                                                   |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| Unchanged uncompressed classic PCAP     | Direct source payload offset                                               |
+| Currently supported uncompressed PCAPNG | Direct offset plus parsed source/interface context                         |
+| IPv4/IPv6 fragment completion           | Store only the completed logical bytes in a derived sidecar                |
+| VXLAN extraction                        | Derived sidecar initially; direct inner subrange when proven source-backed |
+| ESP rewriting/decapsulation             | Derived sidecar for changed effective bytes                                |
+| Gzip classic PCAP                       | One seekable decompressed backing spool plus compact locators              |
+| Unsupported formats                     | Keep existing explicit rejection                                           |
 
 Current PCAPNG support rejects multiple sections/interfaces, and gzip PCAPNG
 is not supported. Preserve those boundaries during the storage migration;
@@ -301,10 +300,10 @@ makes total-ready comparisons fair and isolates storage correctness.
 
 For progressive opening, introduce two explicit immutable views:
 
-| View | Ready when | Complete operations |
-|---|---|---|
+| View             | Ready when                                             | Complete operations                                                                                              |
+| ---------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | Base packet view | Normalization, compact scan and global ordering finish | Packet navigation, header/byte inspection, base-field filters, base statistics, unfiltered effective-byte export |
-| Analyzed view | Ordered analysis and EOF/amendments finish | Application-dependent filters, finalized protocol statistics, event/call results, stateful detail |
+| Analyzed view    | Ordered analysis and EOF/amendments finish             | Application-dependent filters, finalized protocol statistics, event/call results, stateful detail                |
 
 An unfinished field means pending, not absent or a failed match. Protocol names
 and Info text may themselves depend on analysis; do not call filters on those
@@ -380,11 +379,12 @@ not implement those stages or change production loading semantics.
 
 ## Reproducing the prototype
 
-From the repository root:
+Retrieve the historical experiment from Git, then build it:
 
 ```sh
+git show 0f107d93:docs/research/prototypes/offline_locator_scan.go > /tmp/offline_locator_scan.go
 GOCACHE=/tmp/lippycat-go-cache go build -o /tmp/lippycat-locator-prototype \
-  docs/research/prototypes/offline_locator_scan.go
+  /tmp/offline_locator_scan.go
 /tmp/lippycat-locator-prototype -pcap /path/to/capture.pcap -width 32
 /tmp/lippycat-locator-prototype -pcap /path/to/capture.pcap -width 96
 ```

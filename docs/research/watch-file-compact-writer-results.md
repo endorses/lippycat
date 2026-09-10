@@ -39,11 +39,11 @@ i9-13900HX host, default Go runtime settings and the existing completed-ready
 endpoint. Runs use fresh processes and datasets, with an untimed complete input
 read beforehand. Agent tests and builds are paused during timing.
 
-| Five-run comparison | Baseline median | Candidate median |
-| --- | ---: | ---: |
-| Recorded column boundaries and single-pass encoding | 3.716 s | 3.575 s |
-| Add bounded compression overlap | 3.602 s | 3.127 s |
-| Final combined change versus original baseline | 3.712 s | 3.178 s |
+| Five-run comparison                                 | Baseline median | Candidate median |
+| --------------------------------------------------- | --------------: | ---------------: |
+| Recorded column boundaries and single-pass encoding |         3.716 s |          3.575 s |
+| Add bounded compression overlap                     |         3.602 s |          3.127 s |
+| Final combined change versus original baseline      |         3.712 s |          3.178 s |
 
 The second comparison alternates the recorded-boundary candidate and the combined
 candidate. Separate rounds have different baselines; their deltas should not be
@@ -92,7 +92,16 @@ analysis time; performance on other traffic mixes and machines still requires
 measurement. In particular, early amendments or memory pressure may retire the
 optional worker and leave the serial path in use for the rest of that builder.
 
-[Sanitized measurements](watch-file-compact-writer-measurements.json) include raw
-paired samples and the memory-budget sweep. The earlier
+Historical measurement identity:
+
+```json
+{
+  "baseline_revision": "3a80772de4e66b2b8acf351692e5cc25fcab7ab2",
+  "preserved_working_tree_patch_sha256": "d022938ebc2b5104f48a2caaf7cda76444e2fe80fbff89b2e95e2bb05ea01170",
+  "final_binary_sha256": "f08ace39f3490ad5a66dda4e95ef9b83ccff52df962239b5ea15c4382483b796"
+}
+```
+
+The earlier
 [performance investigation](watch-file-next-performance-investigation.md)
 documents the rejected PGO, GC and uncompressed-storage experiments.

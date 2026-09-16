@@ -77,16 +77,27 @@ TSV/JSONL behavior, rotation, lower-bound observations, and privacy controls.
 
 TLS is enabled by default for the management interface (TUI connections):
 
+Standalone capture with TLS:
+
 ```bash
-# Standalone capture with TLS
 sudo lc tap -i eth0 --tls-cert server.crt --tls-key server.key
+```
 
-# For local testing without TLS
+For local testing without TLS:
+
+```bash
 sudo lc tap -i eth0 --insecure
+```
 
-# Connect TUI to tap node
+Connect the TUI to the tap node:
+
+```bash
 lc watch remote -P tap-host:55555 --tls-ca ca.crt
-# Or without TLS:
+```
+
+Alternatively, connect without TLS:
+
+```bash
 lc watch remote -P localhost:55555 --insecure
 ```
 
@@ -100,19 +111,29 @@ Like `sniff` and `hunt`, `tap` has protocol-specific subcommands.
 
 The most common tap mode. Per-call PCAP is enabled by default:
 
-```bash
-# VoIP capture with SIP user filtering
-sudo lc tap voip -i eth0 --sip-user alicent --insecure
+VoIP capture with SIP user filtering:
 
-# VoIP capture with TLS and per-call PCAP directory
+```bash
+sudo lc tap voip -i eth0 --sip-user alicent --insecure
+```
+
+VoIP capture with TLS and a per-call PCAP directory:
+
+```bash
 sudo lc tap voip -i eth0 \
   --per-call-pcap-dir /var/voip/calls \
   --tls-cert server.crt --tls-key server.key
+```
 
-# VoIP capture narrowed to a SIP port
+VoIP capture narrowed to a SIP port:
+
+```bash
 sudo lc tap voip -i eth0 --sip-port 5060 --insecure
+```
 
-# High-performance VoIP capture
+High-performance VoIP capture:
+
+```bash
 sudo lc tap voip -i eth0 --tcp-performance-mode high_performance --insecure
 ```
 
@@ -135,14 +156,18 @@ sudo lc tap voip -i eth0 \
 
 DNS capture with tunneling detection and alerting:
 
+DNS capture with tunneling alerts:
+
 ```bash
-# DNS capture with tunneling alerts
 sudo lc tap dns -i eth0 \
   --tunneling-command 'echo "ALERT: %domain% score=%score%" >> /var/log/tunneling.log' \
   --tunneling-threshold 0.7 \
   --insecure
+```
 
-# DNS capture with custom ports
+DNS capture with custom ports:
+
+```bash
 sudo lc tap dns -i eth0 --dns-port 53,5353 --udp-only --insecure
 ```
 
@@ -150,11 +175,15 @@ sudo lc tap dns -i eth0 --dns-port 53,5353 --udp-only --insecure
 
 HTTP capture with host, path, and method filtering:
 
-```bash
-# HTTP capture with host filtering
-sudo lc tap http -i eth0 --host "*.example.com" --insecure
+HTTP capture with host filtering:
 
-# HTTP capture with HTTPS decryption
+```bash
+sudo lc tap http -i eth0 --host "*.example.com" --insecure
+```
+
+HTTP capture with HTTPS decryption:
+
+```bash
 sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log --insecure
 ```
 
@@ -162,8 +191,9 @@ sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log --insecure
 
 TLS handshake capture with JA3/JA3S/JA4 fingerprinting:
 
+TLS capture with SNI filtering:
+
 ```bash
-# TLS capture with SNI filtering
 sudo lc tap tls -i eth0 --sni "*.example.com" --insecure
 ```
 
@@ -171,11 +201,15 @@ sudo lc tap tls -i eth0 --sni "*.example.com" --insecure
 
 SMTP, IMAP, and POP3 capture with address filtering:
 
-```bash
-# Email capture, SMTP only
-sudo lc tap email -i eth0 --protocol smtp --insecure
+SMTP-only email capture:
 
-# Email capture with sender filtering
+```bash
+sudo lc tap email -i eth0 --protocol smtp --insecure
+```
+
+Email capture with sender filtering:
+
+```bash
 sudo lc tap email -i eth0 --sender "*@suspicious.com" --insecure
 ```
 
@@ -183,15 +217,22 @@ sudo lc tap email -i eth0 --sender "*@suspicious.com" --insecure
 
 Tap supports all three PCAP modes from the processor (see [Chapter 8](process.md) for details):
 
-```bash
-# Unified PCAP
-sudo lc tap -i eth0 --write-file /var/capture/all.pcap --insecure
+Unified PCAP:
 
-# Per-call PCAP (VoIP, enabled by default for tap voip)
+```bash
+sudo lc tap -i eth0 --write-file /var/capture/all.pcap --insecure
+```
+
+Per-call PCAP, which is enabled by default for `tap voip`:
+
+```bash
 sudo lc tap voip -i eth0 \
   --per-call-pcap --per-call-pcap-dir /var/capture/calls --insecure
+```
 
-# Auto-rotating PCAP
+Auto-rotating PCAP:
+
+```bash
 sudo lc tap -i eth0 \
   --auto-rotate-pcap --auto-rotate-pcap-dir /var/capture/bursts \
   --auto-rotate-idle-timeout 30s --auto-rotate-max-size 100M --insecure
@@ -203,11 +244,15 @@ Command hooks (`--pcap-command`, `--voip-command`) work identically to the proce
 
 Tap nodes serve a management gRPC API on `--listen` (default: `:55555`), allowing TUI clients to connect for real-time monitoring:
 
-```bash
-# Start tap with TLS
-sudo lc tap voip -i eth0 --tls-cert server.crt --tls-key server.key
+Start the tap with TLS:
 
-# Connect TUI from another terminal
+```bash
+sudo lc tap voip -i eth0 --tls-cert server.crt --tls-key server.key
+```
+
+Connect the TUI from another terminal:
+
+```bash
 lc watch remote -P tap-host:55555 --tls-ca ca.crt
 ```
 
@@ -215,6 +260,9 @@ For local development, use `--insecure` on both tap and TUI:
 
 ```bash
 sudo lc tap voip -i eth0 --insecure
+```
+
+```bash
 lc watch remote -P localhost:55555 --insecure
 ```
 
@@ -222,8 +270,9 @@ lc watch remote -P localhost:55555 --insecure
 
 Tap nodes can forward captured traffic to a central processor, acting as edge nodes in a hierarchical deployment:
 
+An edge tap captures locally and forwards to the central processor:
+
 ```bash
-# Edge tap: captures locally AND forwards to central
 sudo lc tap voip -i eth0 \
   --processor central-processor:55555 \
   --tls-cert edge.crt --tls-key edge.key --tls-ca ca.crt
@@ -254,14 +303,21 @@ flowchart LR
 
 Expose filtered traffic to third-party tools via a virtual network interface:
 
+Capture and expose traffic on a virtual interface:
+
 ```bash
-# Capture and expose on virtual interface
 sudo lc tap voip -i eth0 --virtual-interface --insecure
+```
 
-# Monitor with Wireshark
+Monitor with Wireshark:
+
+```bash
 wireshark -i lc0
+```
 
-# Or run tcpdump
+Alternatively, run tcpdump:
+
+```bash
 tcpdump -i lc0 -w filtered.pcap
 ```
 

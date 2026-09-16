@@ -33,18 +33,33 @@ sequenceDiagram
 
 Start email capture:
 
+For all email protocols:
+
 ```bash
-# All email protocols
 sudo lc sniff email -i eth0
+```
 
-# SMTP only
+For SMTP only:
+
+```bash
 sudo lc sniff email -i eth0 --protocol smtp
+```
 
-# Filter by address
+To filter by address:
+
+```bash
 sudo lc sniff email -i eth0 --address alice@example.com
+```
 
-# Filter by sender or recipient specifically
+To filter by sender specifically:
+
+```bash
 sudo lc sniff email -i eth0 --sender alice@example.com
+```
+
+To filter by recipient specifically:
+
+```bash
 sudo lc sniff email -i eth0 --recipient bob@example.com
 ```
 
@@ -66,11 +81,15 @@ sudo lc sniff email -i eth0 --recipient bob@example.com
 
 IMAP and POP3 capture tracks mailbox operations:
 
-```bash
-# IMAP only
-sudo lc sniff email -i eth0 --protocol imap
+For IMAP only:
 
-# Custom ports
+```bash
+sudo lc sniff email -i eth0 --protocol imap
+```
+
+For custom ports:
+
+```bash
 sudo lc sniff email -i eth0 --imap-port "143,993" --pop3-port "110,995"
 ```
 

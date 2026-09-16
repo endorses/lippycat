@@ -6,17 +6,27 @@
 
 ### Starting Live Capture
 
+Start live capture in the default mode:
+
 ```bash
-# Start live capture (default mode)
 sudo lc watch
+```
 
-# Explicitly specify live mode
+Explicitly specify live mode:
+
+```bash
 sudo lc watch live
+```
 
-# Capture on a specific interface with a BPF filter
+Capture on a specific interface with a BPF filter:
+
+```bash
 sudo lc watch live -i eth0 -f "port 5060"
+```
 
-# Enable promiscuous mode
+Enable promiscuous mode:
+
+```bash
 sudo lc watch live -i eth0 -p
 ```
 
@@ -123,11 +133,15 @@ Press `v` to toggle between protocol-specific views:
 
 Analyze previously captured traffic — no elevated privileges needed:
 
-```bash
-# Open a single PCAP file
-lc watch file capture.pcap
+Open a single PCAP file:
 
-# Open multiple PCAP files (merged display)
+```bash
+lc watch file capture.pcap
+```
+
+Open multiple PCAP files in a merged display:
+
+```bash
 lc watch file sip.pcap rtp.pcap signaling.pcap
 ```
 

@@ -7,17 +7,33 @@ Requirements:
 - Make
 - libpcap development headers (`libpcap-dev` on Debian/Ubuntu, `libpcap-devel` on RHEL/Fedora)
 
+Clone the repository:
+
 ```bash
 git clone https://github.com/endorses/lippycat.git
+```
+
+Enter the project directory:
+
+```bash
 cd lippycat
+```
 
-# Development build (complete suite, with debug symbols)
+Create a development build (complete suite, with debug symbols):
+
+```bash
 make build
+```
 
-# Optimized release build (stripped)
+Alternatively, create an optimized release build (stripped):
+
+```bash
 make build-release
+```
 
-# Quick dev build (no version info)
+For a quick development build without version information:
+
+```bash
 make dev
 ```
 
@@ -25,8 +41,9 @@ make dev
 
 lippycat uses Go build tags to create smaller, purpose-specific binaries. If you only need a subset of functionality:
 
+Build all variants in `bin/`:
+
 ```bash
-# Build all variants to bin/
 make binaries
 ```
 
@@ -53,11 +70,15 @@ See [Performance Optimization](../part5-advanced/performance.md) for details on 
 
 ## Install Targets
 
-```bash
-# Install to $GOPATH/bin
-make install
+Install to `$GOPATH/bin`:
 
-# Install system-wide to /usr/local/bin (requires sudo)
+```bash
+make install
+```
+
+Install system-wide to `/usr/local/bin` (requires sudo):
+
+```bash
 make install-system
 ```
 
@@ -135,14 +156,21 @@ A comprehensive `example-config.yaml` is included in the repository root with al
 
 After installation, verify everything works:
 
+Check the version:
+
 ```bash
-# Check version
 lc version
+```
 
-# List available network interfaces
+List available network interfaces:
+
+```bash
 lc list interfaces
+```
 
-# Show current configuration
+Show the current configuration:
+
+```bash
 lc show config
 ```
 

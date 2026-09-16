@@ -1051,17 +1051,27 @@ No additional flags. Output the completion script to stdout; source it in your s
 
 **Examples:**
 
+Bash:
+
 ```bash
-# Bash
 lc completion bash > ~/.local/share/bash-completion/completions/lc
+```
 
-# Zsh
+Zsh:
+
+```bash
 lc completion zsh > "${fpath[1]}/_lc"
+```
 
-# Fish
+Fish:
+
+```bash
 lc completion fish > ~/.config/fish/completions/lc.fish
+```
 
-# PowerShell
+PowerShell:
+
+```bash
 lc completion powershell > lc.ps1
 ```
 

@@ -32,8 +32,9 @@ Verify the capabilities are set:
 
 ```bash
 getcap /usr/local/bin/lc
-# Expected: /usr/local/bin/lc cap_net_admin,cap_net_raw=eip
 ```
+
+Expected output: `/usr/local/bin/lc cap_net_admin,cap_net_raw=eip`.
 
 After setting capabilities, any non-root user can run captures. Note that `setcap` must be reapplied after reinstalling or upgrading the binary.
 
@@ -66,11 +67,15 @@ heartbeat values are cumulative snapshots and must not be summed across reports.
 
 **Diagnosis:**
 
-```bash
-# List all interfaces with their current state
-ip link show
+List all interfaces with their current state:
 
-# Or use lippycat's built-in listing
+```bash
+ip link show
+```
+
+Or use lippycat's built-in listing:
+
+```bash
 lc list interfaces
 ```
 
@@ -97,15 +102,27 @@ The `any` pseudo-interface captures from all active interfaces simultaneously. T
 
 **Diagnosis:**
 
+Confirm traffic exists on the interface with tcpdump:
+
 ```bash
-# Confirm traffic exists on the interface with tcpdump
 sudo tcpdump -i eth0 -c 10 -n
+```
 
-# If capturing VoIP, check for SIP traffic specifically
+If capturing VoIP, check for SIP traffic specifically:
+
+```bash
 sudo tcpdump -i eth0 -n port 5060
+```
 
-# Check firewall rules
+Check firewall rules:
+
+```bash
 sudo iptables -L -n -v
+```
+
+For nftables:
+
+```bash
 sudo nft list ruleset
 ```
 
@@ -128,14 +145,21 @@ sudo nft list ruleset
 
 **Diagnosis:**
 
+Check disk space:
+
 ```bash
-# Check disk space
 df -h /var/capture/
+```
 
-# Check directory permissions
+Check directory permissions:
+
+```bash
 ls -la /var/capture/
+```
 
-# Verify file integrity with capinfos (Wireshark tools)
+Verify file integrity with capinfos (Wireshark tools):
+
+```bash
 capinfos capture.pcap
 ```
 
@@ -158,14 +182,21 @@ TCP reassembly issues primarily affect SIP-over-TCP capture. See [Chapter 4](../
 
 **Diagnosis:**
 
+Verify TCP SIP traffic reaches the interface:
+
 ```bash
-# Verify TCP SIP traffic reaches the interface
 sudo tcpdump -i eth0 -n port 5060 and tcp -c 5
+```
 
-# Run lippycat with debug logging to trace processing
+Run lippycat with debug logging to trace processing:
+
+```bash
 LOG_LEVEL=debug sudo lc sniff voip -i eth0 --tcp-performance-mode latency 2> debug.log
+```
 
-# Search for TCP-related messages
+Search for TCP-related messages:
+
+```bash
 grep -i "tcp\|sip\|stream" debug.log
 ```
 
@@ -192,6 +223,11 @@ If `tcpdump` shows no traffic:
 
 ```bash
 LOG_LEVEL=debug sudo lc sniff voip -i eth0 --tcp-performance-mode latency 2> debug.log
+```
+
+Then search the log for fragmentation, reassembly, content-length, or malformed-message errors:
+
+```bash
 grep -i "fragment\|reassembl\|content-length\|malform" debug.log
 ```
 
@@ -259,11 +295,11 @@ rejections as ordinary loss recovery.
 
 **Diagnosis:**
 
+Monitor memory usage:
+
 ```bash
-# Monitor memory usage
 watch -n 2 'ps -o pid,rss,vsz,comm -p $(pgrep lc)'
 ```
-
 **Solution:**
 
 Switch to memory-optimized mode and set explicit limits:
@@ -356,14 +392,21 @@ These issues affect hunter-to-processor and processor-to-processor communication
 
 **Diagnosis:**
 
+Check certificate expiry and SANs:
+
 ```bash
-# Check certificate expiry and SANs
 openssl x509 -in server.crt -noout -dates -ext subjectAltName
+```
 
-# Test TLS connection manually
+Test TLS connection manually:
+
+```bash
 openssl s_client -connect processor.example.com:55555 -CAfile ca.crt
+```
 
-# Check if the CA matches
+Check if the CA matches:
+
+```bash
 openssl verify -CAfile ca.crt server.crt
 ```
 
@@ -373,14 +416,14 @@ For expired certificates, regenerate them. See [Chapter 13: Security](security.m
 
 For missing SANs, regenerate the server certificate with the correct entries. The SAN must include every name or IP that hunters use to connect:
 
+Example: certificate extensions file with SANs:
+
 ```bash
-# Example: certificate extensions file with SANs
 cat > server-ext.conf <<EOF
 subjectAltName = DNS:processor.example.com,DNS:processor,IP:10.0.1.50,IP:127.0.0.1
 extendedKeyUsage = serverAuth
 EOF
 ```
-
 For hostname mismatch, either regenerate the certificate with the correct SAN entries or change the hunter's `--processor` address to match what the certificate contains.
 
 ### Mutual TLS (mTLS) Rejection
@@ -411,14 +454,21 @@ Ensure the hunter certificate was signed by the CA specified in the processor's 
 
 **Diagnosis:**
 
+Test basic connectivity:
+
 ```bash
-# Test basic connectivity
 nc -zv processor.example.com 55555
+```
 
-# Check DNS resolution
+Check DNS resolution:
+
+```bash
 dig processor.example.com
+```
 
-# Check if the processor is listening
+Check if the processor is listening:
+
+```bash
 ss -tlnp | grep 55555
 ```
 
@@ -436,14 +486,21 @@ ss -tlnp | grep 55555
 
 **Diagnosis:**
 
+Check processor status:
+
 ```bash
-# Check processor status
 lc show status -P processor:55555 --tls-ca ca.crt
+```
 
-# Check disk I/O on the processor
+Check disk I/O on the processor:
+
+```bash
 iostat -x 1 5
+```
 
-# Check PCAP write queue depth in processor logs
+Check PCAP write queue depth in processor logs:
+
+```bash
 journalctl -u lippycat-processor --since "10 minutes ago" | grep -i "queue\|flow"
 ```
 
@@ -510,30 +567,47 @@ lippycat automatically falls back to SIMD if no GPU backend is available. You do
 
 **Diagnosis:**
 
+Check if NVIDIA kernel modules are loaded:
+
 ```bash
-# Check if NVIDIA kernel modules are loaded
 lsmod | grep nvidia
+```
 
-# Check if device nodes exist
+Check if device nodes exist:
+
+```bash
 ls -l /dev/nvidia*
+```
 
-# Check PCI device visibility
+Check PCI device visibility:
+
+```bash
 lspci | grep -i nvidia
+```
 
-# Check GPU status (if nvidia-smi is available)
+Check GPU status (if nvidia-smi is available):
+
+```bash
 nvidia-smi
 ```
 
 **Solution (quick, no reboot):**
 
+Force the GPU on via sysfs:
+
 ```bash
-# Force the GPU on via sysfs
 echo on | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control
+```
 
-# Start the NVIDIA persistence daemon
+Start the NVIDIA persistence daemon:
+
+```bash
 sudo nvidia-persistenced --verbose
+```
 
-# Enable compute mode
+Enable compute mode:
+
+```bash
 sudo nvidia-smi -pm 1
 ```
 
@@ -549,13 +623,19 @@ options nvidia NVreg_DynamicPowerManagement=0x00
 
 Then regenerate initramfs and reboot:
 
+Arch Linux / Manjaro:
+
 ```bash
-# Arch Linux / Manjaro
 sudo mkinitcpio -P
+```
 
-# Debian / Ubuntu
+Debian / Ubuntu:
+
+```bash
 sudo update-initramfs -u
+```
 
+```bash
 sudo reboot
 ```
 
@@ -567,21 +647,34 @@ sudo reboot
 
 **Diagnosis:**
 
-```bash
-# Check if nouveau is loaded (it conflicts with nvidia)
-lsmod | grep nouveau
+Check if nouveau is loaded (it conflicts with nvidia):
 
-# Check CUDA environment
-echo $CUDA_VISIBLE_DEVICES
+```bash
+lsmod | grep nouveau
 ```
 
+Check CUDA environment:
+
+```bash
+echo $CUDA_VISIBLE_DEVICES
+```
 **Solution:**
 
 If nouveau is loaded, blacklist it:
 
 ```bash
 echo "blacklist nouveau" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf
-sudo mkinitcpio -P   # or update-initramfs -u
+```
+
+Rebuild the initramfs on Arch Linux or Manjaro:
+
+```bash
+sudo mkinitcpio -P
+```
+
+On Debian or Ubuntu, use `sudo update-initramfs -u` instead. Then reboot:
+
+```bash
 sudo reboot
 ```
 
@@ -589,7 +682,13 @@ Set CUDA environment variables:
 
 ```bash
 export __NV_PRIME_RENDER_OFFLOAD=1
+```
+
+```bash
 export __GLX_VENDOR_LIBRARY_NAME=nvidia
+```
+
+```bash
 export CUDA_VISIBLE_DEVICES=0
 ```
 
@@ -605,16 +704,29 @@ Add these to your shell profile for persistence.
 
 Install the appropriate OpenCL runtime for your GPU:
 
-```bash
-# AMD (ROCr)
-sudo apt install rocm-opencl-runtime   # Debian/Ubuntu
-sudo pacman -S rocm-opencl-runtime     # Arch
+AMD (ROCr):
 
-# Intel
-sudo apt install intel-opencl-icd      # Debian/Ubuntu
-sudo pacman -S intel-compute-runtime   # Arch
+```bash
+sudo apt install rocm-opencl-runtime
 ```
 
+On Arch Linux:
+
+```bash
+sudo pacman -S rocm-opencl-runtime
+```
+
+Intel:
+
+```bash
+sudo apt install intel-opencl-icd
+```
+
+On Arch Linux:
+
+```bash
+sudo pacman -S intel-compute-runtime
+```
 Verify with:
 
 ```bash
@@ -629,11 +741,11 @@ clinfo | head -20
 
 **Diagnosis:**
 
+Run with debug logging to see backend selection:
+
 ```bash
-# Run with debug logging to see backend selection
 LOG_LEVEL=debug sudo lc sniff voip -i eth0 --gpu-backend auto 2>&1 | grep -i "gpu\|cuda\|opencl\|simd\|backend"
 ```
-
 **Solution:**
 
 If you need GPU acceleration, fix the underlying GPU issue using the sections above. If SIMD performance is sufficient (30K packets/second pattern matching), no action is needed. To explicitly force a backend and see the error:
@@ -677,14 +789,17 @@ use counter deltas—not warning counts—to quantify the condition.
 
 **Diagnosis:**
 
-```bash
-# Check what ports the SDP negotiates (look at m= lines)
-sudo tcpdump -i eth0 -n -A port 5060 | grep "m=audio"
+Check what ports the SDP negotiates (look at m= lines):
 
-# Check if RTP traffic exists on those ports
-sudo tcpdump -i eth0 -n udp portrange 10000-20000 -c 10
+```bash
+sudo tcpdump -i eth0 -n -A port 5060 | grep "m=audio"
 ```
 
+Check if RTP traffic exists on those ports:
+
+```bash
+sudo tcpdump -i eth0 -n udp portrange 10000-20000 -c 10
+```
 **Solution:**
 
 Ensure the RTP port range covers the ports your PBX uses:
@@ -709,14 +824,17 @@ If you applied a custom BPF filter with `-f`, verify it does not exclude UDP tra
 
 Check the SDP `c=` (connection) lines against actual packet source IPs:
 
-```bash
-# Look at SDP connection lines
-sudo tcpdump -i eth0 -n -A port 5060 | grep "c=IN"
+Look at SDP connection lines:
 
-# Compare with actual RTP source IPs
-sudo tcpdump -i eth0 -n udp portrange 10000-20000 | head -20
+```bash
+sudo tcpdump -i eth0 -n -A port 5060 | grep "c=IN"
 ```
 
+Compare with actual RTP source IPs:
+
+```bash
+sudo tcpdump -i eth0 -n udp portrange 10000-20000 | head -20
+```
 If the SDP says `c=IN IP4 10.0.1.100` but actual RTP comes from `203.0.113.50`, NAT is in play.
 
 **Solution:**
@@ -750,14 +868,17 @@ If the SDP says `c=IN IP4 10.0.1.100` but actual RTP comes from `203.0.113.50`, 
 
 **Diagnosis:**
 
-```bash
-# Check kernel drop statistics
-cat /proc/net/dev | grep eth0
+Check kernel drop statistics:
 
-# Check for ring buffer overflows in system logs
-dmesg | grep -i "drop\|overflow"
+```bash
+cat /proc/net/dev | grep eth0
 ```
 
+Check for ring buffer overflows in system logs:
+
+```bash
+dmesg | grep -i "drop\|overflow"
+```
 **Solution:**
 
 1. Narrow capture to known SIP and RTP ports so unrelated traffic is dropped in the kernel:
@@ -799,14 +920,17 @@ dmesg | grep -i "drop\|overflow"
 
 **Diagnosis:**
 
-```bash
-# Check which config file is being loaded
-lc show config
+Check which config file is being loaded:
 
-# Validate YAML syntax
-python3 -c "import yaml; yaml.safe_load(open('config.yaml'))"
+```bash
+lc show config
 ```
 
+Validate YAML syntax:
+
+```bash
+python3 -c "import yaml; yaml.safe_load(open('config.yaml'))"
+```
 **Solution:**
 
 1. Place the config file in one of the expected locations (in priority order):
@@ -834,49 +958,79 @@ LOG_LEVEL=debug sudo lc sniff voip -i eth0 2> debug.log
 
 Filter log output for specific subsystems:
 
+TCP reassembly issues:
+
 ```bash
-# TCP reassembly issues
 grep -i "tcp\|stream\|reassembl" debug.log
+```
 
-# SIP parsing
+SIP parsing:
+
+```bash
 grep -i "sip\|invite\|call.id" debug.log
+```
 
-# gRPC / distributed connectivity
+gRPC / distributed connectivity:
+
+```bash
 grep -i "grpc\|connect\|tls\|handshake" debug.log
+```
 
-# GPU backend selection
+GPU backend selection:
+
+```bash
 grep -i "gpu\|cuda\|opencl\|simd" debug.log
 ```
 
 ### System Resource Monitoring
 
+Monitor lippycat resource usage:
+
 ```bash
-# Monitor lippycat resource usage
 watch -n 2 'ps -o pid,rss,vsz,%cpu,%mem,comm -p $(pgrep lc)'
+```
 
-# Monitor network interface statistics (drops, errors)
+Monitor network interface statistics (drops, errors):
+
+```bash
 watch -n 1 'ip -s link show eth0'
+```
 
-# Monitor disk I/O (relevant for PCAP writing)
+Monitor disk I/O (relevant for PCAP writing):
+
+```bash
 iostat -x 1
+```
 
-# Monitor open file descriptors
+Monitor open file descriptors:
+
+```bash
 ls /proc/$(pgrep -f "lc ")/fd | wc -l
 ```
 
 ### Distributed Deployment Diagnostics
 
+Processor status overview:
+
 ```bash
-# Processor status overview
 lc show status -P processor:55555 --tls-ca ca.crt
+```
 
-# List connected hunters
+List connected hunters:
+
+```bash
 lc list hunters -P processor:55555 --tls-ca ca.crt
+```
 
-# View network topology
+View network topology:
+
+```bash
 lc show topology -P processor:55555 --tls-ca ca.crt
+```
 
-# Check active filters
+Check active filters:
+
+```bash
 lc show filter -P processor:55555 --tls-ca ca.crt
 ```
 

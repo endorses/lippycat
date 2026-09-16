@@ -92,7 +92,6 @@ lc show status -P processor:55555 --tls-ca ca.crt
 Display details for a specific hunter:
 
 ```bash
-# Specific hunter
 lc show hunter --id edge-01 -P processor:55555 --tls-ca ca.crt
 ```
 
@@ -165,6 +164,9 @@ Display local configuration. This is the only `show` subcommand that doesn't req
 
 ```bash
 lc show config
+```
+
+```bash
 lc show config --json
 ```
 
@@ -195,8 +197,9 @@ sudo lc list interfaces
 
 List connected hunters on a remote processor:
 
+List all connected hunters:
+
 ```bash
-# All connected hunters
 lc list hunters -P processor:55555 --tls-ca ca.crt
 ```
 
@@ -204,11 +207,15 @@ lc list hunters -P processor:55555 --tls-ca ca.crt
 
 List filters configured on a remote processor:
 
-```bash
-# All filters
-lc list filters -P processor:55555 --tls-ca ca.crt
+List all filters:
 
-# Filters for a specific hunter
+```bash
+lc list filters -P processor:55555 --tls-ca ca.crt
+```
+
+List filters for a specific hunter:
+
+```bash
 lc list filters -P processor:55555 --tls-ca ca.crt --hunter hunter-1
 ```
 
@@ -220,30 +227,46 @@ The `set filter` command creates or updates filters on a processor (upsert seman
 
 Specify filter properties directly via flags:
 
+Create a SIP user filter:
+
 ```bash
-# SIP user filter
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --type sip_user --pattern "alicent@example.com"
+```
 
-# DNS domain wildcard
+Create a DNS domain wildcard filter:
+
+```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --type dns_domain --pattern "*.malware-domain.com"
+```
 
-# TLS JA3 fingerprint
+Create a TLS JA3 fingerprint filter:
+
+```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --type tls_ja3 --pattern e7d705a3286e19ea42f587b344ee6865
+```
 
-# IP CIDR range
+Create an IP CIDR range filter:
+
+```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --type ip_address --pattern "192.168.1.0/24"
+```
 
-# With custom ID and description
+Create a filter with a custom ID and description:
+
+```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --id voip-monitor-01 \
   --type sip_user --pattern "*456789" \
   --description "Monitor calls to 456789"
+```
 
-# Target specific hunters
+Target specific hunters:
+
+```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --type sip_user --pattern "robb@example.com" \
   --hunters edge-01,edge-02
@@ -365,17 +388,27 @@ lc show topology -P processor:55555 --tls-ca ca.crt \
 
 ### Filter Lifecycle
 
+Create a filter:
+
 ```bash
-# Create a filter
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --id suspect-01 --type sip_user --pattern "*456789"
+```
 
-# Verify it exists
+Verify that it exists:
+
+```bash
 lc show filter --id suspect-01 -P processor:55555 --tls-ca ca.crt
+```
 
-# List all filters
+List all filters:
+
+```bash
 lc list filters -P processor:55555 --tls-ca ca.crt
+```
 
-# Remove when done
+Remove the filter when done:
+
+```bash
 lc rm filter --id suspect-01 -P processor:55555 --tls-ca ca.crt
 ```

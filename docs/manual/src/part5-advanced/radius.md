@@ -82,18 +82,28 @@ processor task admission; a request never observed at capture cannot.
 
 ## Ordinary capture
 
+Decode an offline recording; no LI build or task is required:
+
 ```bash
-# Decode an offline recording; no LI build or task is required.
 lc sniff radius -r radius.pcap --format text
+```
 
-# Observe an exact complete User-Name, including realm and case.
+Observe an exact complete User-Name, including realm and case:
+
+```bash
 sudo lc sniff radius -i mirror0 --radius-username 'alice@example.test'
+```
 
-# Capture additional service ports and write the optional observation stream.
+Capture additional service ports and write the optional observation stream:
+
+```bash
 sudo lc tap radius -i mirror0 --insecure --radius-port 1645,1646 \
   --log-dir ./logs --log-streams radius
+```
 
-# Ordinary distributed capture; X2 additionally requires authenticated origin.
+Use ordinary distributed capture; X2 additionally requires authenticated origin:
+
+```bash
 sudo lc hunt radius -i mirror0 --processor processor.example:55555 \
   --tls-ca ca.crt --radius-username 'alice@example.test'
 ```

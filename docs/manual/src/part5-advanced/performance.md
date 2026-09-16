@@ -38,18 +38,25 @@ For `tap voip`, the four profiles target different operating points:
 
 Profiles set a baseline. You can override any individual parameter on top:
 
+Use the balanced profile with more buffers for a bursty network:
+
 ```bash
-# Balanced profile with more buffers for a bursty network
 sudo lc sniff voip -i eth0 \
   --tcp-performance-mode balanced \
   --max-tcp-buffers 10000
+```
 
-# High performance with backpressure re-enabled for safety
+Use the high-performance profile with backpressure re-enabled for safety:
+
+```bash
 sudo lc sniff voip -i eth0 \
   --tcp-performance-mode throughput \
   --enable-backpressure
+```
 
-# Memory profile with a longer stream timeout for slow SIP dialogs
+Use the memory profile with a longer stream timeout for slow SIP dialogs:
+
+```bash
 sudo lc sniff voip -i eth0 \
   --tcp-performance-mode memory \
   --tcp-stream-timeout 300s
@@ -213,15 +220,27 @@ flowchart LR
 
 Select a backend explicitly or let auto-detection choose:
 
+Auto-detect the backend (recommended):
+
 ```bash
-# Auto-detect (recommended)
 sudo lc sniff voip -i eth0 --gpu-backend auto
+```
 
-# Force a specific backend
+Force CUDA:
+
+```bash
 sudo lc sniff voip -i eth0 --gpu-backend cuda
-sudo lc sniff voip -i eth0 --gpu-backend cpu-simd
+```
 
-# Disable acceleration entirely
+Force CPU SIMD:
+
+```bash
+sudo lc sniff voip -i eth0 --gpu-backend cpu-simd
+```
+
+Disable acceleration entirely:
+
+```bash
 sudo lc sniff voip -i eth0 --gpu-backend disabled
 ```
 
@@ -252,14 +271,21 @@ CPU SIMD performance is comparable to GPU batching at moderate packet rates. Tre
 
 Batch size controls the trade-off between throughput and latency:
 
+For low-latency, real-time monitoring:
+
 ```bash
-# Low latency (real-time monitoring)
 --gpu-batch-size 256
+```
 
-# Balanced (general production use)
+For balanced, general production use:
+
+```bash
 --gpu-batch-size 1024
+```
 
-# Maximum throughput (high-volume capture)
+For maximum throughput in high-volume captures:
+
+```bash
 --gpu-batch-size 4096
 ```
 
@@ -311,16 +337,23 @@ Aho-Corasick match time remains nearly constant regardless of pattern count beca
 
 ### Configuration
 
-```bash
-# Auto-select (recommended for most deployments)
-sudo lc sniff voip -i eth0 --pattern-algorithm auto
+Use automatic selection for most deployments:
 
-# Force Aho-Corasick for large filter lists
+```bash
+sudo lc sniff voip -i eth0 --pattern-algorithm auto
+```
+
+Force Aho-Corasick for large filter lists:
+
+```bash
 sudo lc hunt voip --processor central:55555 \
   --pattern-algorithm aho-corasick \
   --pattern-buffer-mb 128
+```
 
-# Linear scan for a handful of patterns
+Use a linear scan for a handful of patterns:
+
+```bash
 sudo lc sniff voip -i eth0 --pattern-algorithm linear
 ```
 
@@ -338,15 +371,22 @@ Memory usage for Aho-Corasick is modest: 100,000 patterns averaging 20 character
 
 BPF (Berkeley Packet Filter) filters run in kernel space, discarding unwanted packets before they reach lippycat. This is the most efficient form of filtering because rejected packets never cross the kernel-userspace boundary.
 
-```bash
-# Capture only SIP traffic
-sudo lc sniff voip -i eth0 -f "port 5060"
+Capture only SIP traffic:
 
-# SIP + RTP port range
+```bash
+sudo lc sniff voip -i eth0 -f "port 5060"
+```
+
+Capture SIP and an RTP port range:
+
+```bash
 sudo lc hunt voip --processor central:55555 \
   -i eth0 -f "port 5060 or portrange 10000-20000"
+```
 
-# Specific host
+Capture traffic for a specific host:
+
+```bash
 sudo lc sniff voip -i eth0 -f "host 192.168.1.100 and port 5060"
 ```
 
@@ -367,16 +407,23 @@ Distributed deployments ([Chapter 6](../part3-distributed/architecture.md)) intr
 
 Hunters batch packets before sending them to the processor over gRPC. Tune `--batch-size` and `--batch-timeout` based on the latency-throughput trade-off you need:
 
+For low-latency monitoring with few calls:
+
 ```bash
-# Low latency (real-time monitoring, few calls)
 sudo lc hunt voip --processor central:55555 \
   --batch-size 16 --batch-timeout 50
+```
 
-# Balanced (production default)
+For the balanced production default:
+
+```bash
 sudo lc hunt voip --processor central:55555 \
   --batch-size 64 --batch-timeout 100
+```
 
-# High throughput (bulk capture, high call volume)
+For high-throughput bulk capture:
+
+```bash
 sudo lc hunt voip --processor central:55555 \
   --batch-size 256 --batch-timeout 500
 ```
@@ -387,11 +434,16 @@ Larger batches reduce gRPC overhead per packet but increase the maximum time a p
 
 One of the biggest performance wins in distributed mode is filtering at the edge. When hunters use VoIP-specific subcommands and GPU-accelerated filtering, they can reduce the volume of traffic forwarded to the processor by over 90%:
 
+Create the edge filter:
+
 ```bash
-# Hunter with edge filtering and GPU acceleration
 lc set filter -P central:55555 --tls-ca ca.crt \
   --type sip_user --pattern alicent
+```
 
+Start the hunter with edge filtering and GPU acceleration:
+
+```bash
 sudo lc hunt voip --processor central:55555 \
   --sip-port 5060 \
   --rtp-port-range 10000-20000
@@ -500,8 +552,11 @@ When tuning, it helps to observe actual memory usage. Enable pprof for Go's buil
 
 ```bash
 sudo lc tap voip -i eth0 --debug-listen 127.0.0.1:6060
+```
 
-# In another terminal, capture a heap profile
+In another terminal, capture a heap profile:
+
+```bash
 go tool pprof http://localhost:6060/debug/pprof/heap
 ```
 
@@ -512,8 +567,9 @@ address, add `--debug-allow-non-loopback`. Existing deployments can keep using
 
 For quick checks without pprof:
 
+Watch memory usage over time:
+
 ```bash
-# Watch memory usage over time
 watch -n 10 'ps -o rss,vsz,comm -p $(pgrep -f "lc (sniff|hunt|process|tap)")'
 ```
 

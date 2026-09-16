@@ -6,13 +6,22 @@ Hunters are lightweight capture agents that run at the network edge. If you've u
 
 The transition from local capture to distributed capture is small. Compare:
 
-```bash
-# What you learned with sniff:
-sudo lc sniff voip -i eth0 --sip-user alicent -w calls.pcap
+What you learned with `sniff`:
 
-# The distributed equivalent:
+```bash
+sudo lc sniff voip -i eth0 --sip-user alicent -w calls.pcap
+```
+
+The distributed equivalent starts by creating a filter:
+
+```bash
 lc set filter -P central:55555 --tls-ca ca.crt \
   --type sip_user --pattern alicent
+```
+
+Then start the hunter:
+
+```bash
 sudo lc hunt voip -i eth0 --processor central:55555 --tls-ca ca.crt
 ```
 
@@ -53,16 +62,16 @@ Most capture flags (`-i`, `-f`, `--sip-port`, `--rtp-port-range`) carry over. Wh
 
 Start a processor (see [Chapter 8](process.md) for full details):
 
+In Terminal 1, start the processor:
+
 ```bash
-# Terminal 1: Start processor
 lc process --listen :55555 --write-file /tmp/captured.pcap \
   --tls-cert server.crt --tls-key server.key
 ```
 
-Start a hunter:
+In Terminal 2, start a hunter:
 
 ```bash
-# Terminal 2: Start hunter
 sudo lc hunt --processor localhost:55555 -i eth0 --tls-ca ca.crt
 ```
 
@@ -102,11 +111,15 @@ restrict and encrypt spool storage, and apply retention limits.
 
 For quick local testing without TLS:
 
-```bash
-# Processor (insecure, testing only)
-lc process --listen :55555 --write-file /tmp/captured.pcap --insecure
+Start the processor in insecure mode (testing only):
 
-# Hunter (insecure, testing only)
+```bash
+lc process --listen :55555 --write-file /tmp/captured.pcap --insecure
+```
+
+Then start the hunter in insecure mode (testing only):
+
+```bash
 sudo lc hunt --processor localhost:55555 -i eth0 --insecure
 ```
 
@@ -118,19 +131,29 @@ Like `sniff`, `hunt` has protocol subcommands that add specialized filtering and
 
 The VoIP hunter is the most commonly used mode. It captures SIP/RTP traffic with intelligent call buffering — packets are held locally until a call matches the processor's filters, then forwarded. Unmatched calls are dropped at the edge, reducing bandwidth by 90%+.
 
-```bash
-# VoIP hunter with TLS
-sudo lc hunt voip --processor processor:55555 -i eth0 --tls-ca ca.crt
+VoIP hunter with TLS:
 
-# VoIP hunter with BPF optimization (specific SIP port)
+```bash
+sudo lc hunt voip --processor processor:55555 -i eth0 --tls-ca ca.crt
+```
+
+VoIP hunter with BPF optimization for a specific SIP port:
+
+```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --sip-port 5060 --tls-ca ca.crt
+```
 
-# VoIP hunter with custom RTP port range
+VoIP hunter with a custom RTP port range:
+
+```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --rtp-port-range 8000-9000 --tls-ca ca.crt
+```
 
-# VoIP hunter with mutual TLS
+VoIP hunter with mutual TLS:
+
+```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --tls-cert hunter.crt --tls-key hunter.key --tls-ca ca.crt
 ```
@@ -158,11 +181,15 @@ Filters are managed centrally by the processor and pushed to hunters. Hunters do
 
 Captures DNS queries and responses for forwarding to the processor.
 
-```bash
-# DNS hunter
-sudo lc hunt dns --processor processor:55555 -i eth0 --tls-ca ca.crt
+DNS hunter:
 
-# DNS hunter, UDP-only with custom ports
+```bash
+sudo lc hunt dns --processor processor:55555 -i eth0 --tls-ca ca.crt
+```
+
+UDP-only DNS hunter with custom ports:
+
+```bash
 sudo lc hunt dns --processor processor:55555 -i eth0 \
   --dns-port 53,5353 --udp-only --tls-ca ca.crt
 ```
@@ -173,8 +200,9 @@ sudo lc hunt dns --processor processor:55555 -i eth0 \
 
 Captures HTTP traffic with optional host/path/method filtering at the edge.
 
+HTTP hunter with host filtering:
+
 ```bash
-# HTTP hunter with host filtering
 sudo lc hunt http --processor processor:55555 -i eth0 \
   --host "*.example.com" --http-port 80,8080 --tls-ca ca.crt
 ```
@@ -185,8 +213,9 @@ sudo lc hunt http --processor processor:55555 -i eth0 \
 
 Captures TLS handshakes for fingerprint analysis (JA3/JA3S/JA4).
 
+TLS hunter on multiple ports:
+
 ```bash
-# TLS hunter on multiple ports
 sudo lc hunt tls --processor processor:55555 -i eth0 \
   --tls-port 443,8443 --tls-ca ca.crt
 ```
@@ -197,8 +226,9 @@ sudo lc hunt tls --processor processor:55555 -i eth0 \
 
 Captures SMTP, IMAP, and POP3 traffic with address filtering.
 
+SMTP-only email hunter with sender filtering:
+
 ```bash
-# Email hunter, SMTP only with sender filtering
 sudo lc hunt email --processor processor:55555 -i eth0 \
   --protocol smtp --sender "*@suspicious.com" --tls-ca ca.crt
 ```
@@ -267,16 +297,23 @@ When the processor is down for an extended period, the circuit breaker prevents 
 
 Batching controls how packets are aggregated before sending. Larger batches reduce gRPC overhead but increase latency:
 
+For low-latency, real-time monitoring:
+
 ```bash
-# Low latency (real-time monitoring)
 sudo lc hunt --processor processor:55555 -i eth0 \
   --batch-size 16 --batch-timeout 50 --tls-ca ca.crt
+```
 
-# High throughput (bulk capture)
+For high-throughput bulk capture:
+
+```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
   --batch-size 256 --batch-timeout 500 --tls-ca ca.crt
+```
 
-# Balanced (default)
+For the balanced default profile:
+
+```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
   --batch-size 64 --batch-timeout 100 --tls-ca ca.crt
 ```
@@ -293,16 +330,23 @@ These flags are available in CUDA builds.
 
 Enable GPU-accelerated VoIP pattern matching at the edge:
 
+To auto-detect the best backend:
+
 ```bash
-# Auto-detect best backend
 sudo lc hunt --processor processor:55555 -i eth0 \
   --enable-voip-filter --gpu-backend auto --tls-ca ca.crt
+```
 
-# Force CUDA (NVIDIA GPUs)
+To force CUDA on NVIDIA GPUs:
+
+```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
   --enable-voip-filter --gpu-backend cuda --gpu-batch-size 200 --tls-ca ca.crt
+```
 
-# CPU SIMD only (no GPU required)
+To use CPU SIMD without requiring a GPU:
+
+```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
   --enable-voip-filter --gpu-backend cpu-simd --tls-ca ca.crt
 ```
@@ -313,12 +357,16 @@ GPU acceleration is most valuable at high packet rates (>10,000 pps) with many c
 
 For VoIP hunters on TCP-heavy networks, use BPF flags to skip TCP traffic and focus on SIP/RTP:
 
+To restrict capture to a specific SIP port:
+
 ```bash
-# Restrict to a specific SIP port
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --sip-port 5060 --tls-ca ca.crt
+```
 
-# Restrict SIP and RTP ranges
+To restrict both the SIP port and RTP range:
+
+```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --sip-port 5060 --rtp-port-range 10000-20000 --tls-ca ca.crt
 ```
@@ -329,12 +377,16 @@ The older VoIP `--udp-only` flag is still accepted for compatibility but hidden 
 
 For large filter sets, the Aho-Corasick algorithm provides ~265x faster matching than linear scan:
 
+To auto-select Aho-Corasick for 100 or more patterns and linear matching otherwise:
+
 ```bash
-# Auto-select (Aho-Corasick for 100+ patterns, linear otherwise)
 sudo lc hunt --processor processor:55555 -i eth0 \
   --pattern-algorithm auto --tls-ca ca.crt
+```
 
-# Force Aho-Corasick for smaller filter sets
+To force Aho-Corasick for smaller filter sets:
+
+```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
   --pattern-algorithm aho-corasick --tls-ca ca.crt
 ```

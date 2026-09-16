@@ -49,27 +49,38 @@ sudo lc sniff voip -i eth0
 
 Filter by SIP user to focus on specific endpoints:
 
+For a single user:
+
 ```bash
-# Single user
 sudo lc sniff voip -i eth0 -u alicent
+```
 
-# Multiple users
+For multiple users:
+
+```bash
 sudo lc sniff voip -i eth0 -u "alicent,robb"
+```
 
-# Wildcard suffix match (all numbers ending in 456789)
+For a wildcard suffix match (all numbers ending in `456789`):
+
+```bash
 sudo lc sniff voip -i eth0 -u "*456789"
 ```
 
 Extract call setup information with `jq`:
 
+To show all INVITE requests with caller and callee:
+
 ```bash
-# Show all INVITE requests with caller and callee
 sudo lc sniff voip -i eth0 2>/dev/null | \
   jq -r 'select(.VoIPData.Method == "INVITE") |
     [.Timestamp, .VoIPData.From, .VoIPData.To, .VoIPData.CallID] |
     @tsv'
+```
 
-# Track call state transitions for a specific Call-ID
+To track call state transitions for a specific Call-ID:
+
+```bash
 sudo lc sniff voip -i eth0 2>/dev/null | \
   jq -r 'select(.VoIPData.CallID == "abc123@pbx.local") |
     [.Timestamp, .VoIPData.Method // ("Response " + (.VoIPData.Status|tostring))] |
@@ -82,8 +93,9 @@ SIP runs over both UDP and TCP. UDP is more common for signaling, but TCP is use
 
 By default, lippycat captures both UDP and TCP SIP traffic. TCP SIP requires stream reassembly, which adds CPU overhead. On networks with heavy TCP traffic that is not SIP, you can skip TCP processing entirely:
 
+UDP-only mode generates an optimized BPF filter that excludes TCP:
+
 ```bash
-# UDP-only mode -- generates optimized BPF filter excluding TCP
 sudo lc sniff voip -i eth0 -U -S 5060
 ```
 
@@ -111,14 +123,18 @@ lippycat correlates RTP streams with their controlling SIP dialog using the Call
 
 **Monitoring RTP streams:**
 
+To show active RTP streams with SSRC and codec:
+
 ```bash
-# Show active RTP streams with SSRC and codec
 sudo lc sniff voip -i eth0 2>/dev/null | \
   jq -r 'select(.VoIPData.IsRTP) |
     [.SrcIP, .DstIP, .VoIPData.SSRC, .VoIPData.Codec, .VoIPData.SequenceNum] |
     @tsv'
+```
 
-# Detect RTP sequence gaps (potential packet loss)
+To detect RTP sequence gaps (potential packet loss):
+
+```bash
 sudo lc sniff voip -i eth0 2>/dev/null | \
   jq -r 'select(.VoIPData.IsRTP) |
     [.VoIPData.SSRC, .VoIPData.SequenceNum] | @tsv' | \
@@ -135,6 +151,9 @@ If your PBX uses non-standard RTP ports, specify the range explicitly:
 
 ```bash
 sudo lc sniff voip -i eth0 -R 8000-9000
+```
+
+```bash
 sudo lc sniff voip -i eth0 -R "8000-9000,40000-50000"
 ```
 
@@ -149,6 +168,8 @@ RTP sequence numbers and timestamps enable call quality analysis. While lippycat
 **MOS (Mean Opinion Score)**: An estimated voice quality rating from 1.0 (bad) to 5.0 (excellent). MOS is derived from the R-factor, which accounts for codec, packet loss, jitter, and delay. A MOS above 4.0 is considered good quality.
 
 Example: calculate packet loss percentage per SSRC from a PCAP file:
+
+The following command analyzes a recording by SSRC. The comment inside the `awk` program is part of that program and remains with it:
 
 ```bash
 lc sniff voip -r call-recording.pcap 2>/dev/null | \

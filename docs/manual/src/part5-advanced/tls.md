@@ -33,14 +33,21 @@ sudo lc sniff tls -i eth0
 
 Filter by Server Name Indication (SNI):
 
+For a specific domain:
+
 ```bash
-# Specific domain
 sudo lc sniff tls -i eth0 --sni example.com
+```
 
-# Wildcard
+For a wildcard:
+
+```bash
 sudo lc sniff tls -i eth0 --sni "*.example.com"
+```
 
-# Bulk filtering from file
+For bulk filtering from a file:
+
+```bash
 sudo lc sniff tls -i eth0 --sni-file domains.txt
 ```
 
@@ -78,18 +85,23 @@ lippycat computes both automatically:
 
 **Filter by known fingerprint:**
 
-```bash
-# Capture traffic matching a known malware JA3 fingerprint
-sudo lc sniff tls -i eth0 --ja3 "e7d705a3286e19ea42f587b344ee6865"
+To capture traffic matching a known malware JA3 fingerprint:
 
-# Load multiple fingerprints from a threat intelligence file
+```bash
+sudo lc sniff tls -i eth0 --ja3 "e7d705a3286e19ea42f587b344ee6865"
+```
+
+To load multiple fingerprints from a threat intelligence file:
+
+```bash
 sudo lc sniff tls -i eth0 --ja3-file known-bad-ja3.txt
 ```
 
 **Build a fingerprint inventory:**
 
+To list unique JA3 fingerprints with SNI:
+
 ```bash
-# List unique JA3 fingerprints with SNI
 sudo lc sniff tls -i eth0 2>/dev/null | \
   jq -r 'select(.TLSData.HandshakeType == "ClientHello") |
     [.SrcIP, .TLSData.SNI, .TLSData.JA3Fingerprint] | @tsv' | \

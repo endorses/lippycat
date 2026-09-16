@@ -401,6 +401,14 @@ func (m Model) handleFileSelectedMsg(msg components.FileSelectedMsg) (Model, tea
 
 // handleConfirmDialogResult handles confirmation dialog responses
 func (m Model) handleConfirmDialogResult(msg components.ConfirmDialogResult) (Model, tea.Cmd) {
+	// Check if this is an application quit confirmation.
+	if _, ok := msg.UserData.(quitConfirmationData); ok {
+		if msg.Confirmed {
+			return m.requestQuit()
+		}
+		return m, nil
+	}
+
 	// Check if this is a node deletion confirmation
 	if nodeDeletion, ok := msg.UserData.(NodeDeletionData); ok {
 		if msg.Confirmed {

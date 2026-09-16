@@ -24,11 +24,15 @@ sudo lc sniff dns -i eth0
 
 Filter by domain:
 
-```bash
-# Exact domain
-sudo lc sniff dns -i eth0 --domain example.com
+For an exact domain:
 
-# Wildcard matching
+```bash
+sudo lc sniff dns -i eth0 --domain example.com
+```
+
+For wildcard matching:
+
+```bash
 sudo lc sniff dns -i eth0 --domain "*.example.com"
 ```
 
@@ -73,14 +77,18 @@ sudo lc sniff dns -i eth0 2>/dev/null | \
 
 **Track specific record types:**
 
+For MX record lookups (email server discovery):
+
 ```bash
-# MX record lookups (email server discovery)
 sudo lc sniff dns -i eth0 2>/dev/null | \
   jq -r 'select(.DNSData.QueryType == "MX") |
     [.Timestamp, .DNSData.QueryName, (.DNSData.Answers[]?.Data // "pending")] |
     @tsv'
+```
 
-# TXT records (often used for SPF, DKIM, domain verification)
+For TXT records, which are often used for SPF, DKIM, and domain verification:
+
+```bash
 sudo lc sniff dns -i eth0 2>/dev/null | \
   jq 'select(.DNSData.QueryType == "TXT")'
 ```
@@ -89,8 +97,9 @@ sudo lc sniff dns -i eth0 2>/dev/null | \
 
 lippycat includes entropy-based DNS tunneling detection. Tunneling encodes data in DNS queries, producing domain names with unusually high entropy (randomness). The analyzer scores each query from 0.0 (normal) to 1.0 (highly suspicious):
 
+To flag potential DNS tunneling:
+
 ```bash
-# Flag potential DNS tunneling
 sudo lc sniff dns -i eth0 --detect-tunneling 2>/dev/null | \
   jq -r 'select(.DNSData.TunnelingScore > 0.7) |
     [.Timestamp, .SrcIP, .DNSData.QueryName,

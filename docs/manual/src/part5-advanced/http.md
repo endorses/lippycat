@@ -14,20 +14,33 @@ sudo lc sniff http -i eth0
 
 Filter by host, path, method, or status code:
 
+To filter by host:
+
 ```bash
-# Filter by host
 sudo lc sniff http -i eth0 --host "*.example.com"
+```
 
-# Filter by path pattern
+To filter by path pattern:
+
+```bash
 sudo lc sniff http -i eth0 --path "/api/*"
+```
 
-# Only POST and PUT requests
+To capture only POST and PUT requests:
+
+```bash
 sudo lc sniff http -i eth0 --method "POST,PUT"
+```
 
-# Error responses only
+To capture only error responses:
+
+```bash
 sudo lc sniff http -i eth0 --status "4xx,5xx"
+```
 
-# Combine filters
+To combine filters:
+
+```bash
 sudo lc sniff http -i eth0 --host api.example.com --method POST --status "5xx"
 ```
 

@@ -15,6 +15,22 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip"
 )
 
+// quitConfirmationData identifies results from the application quit dialog.
+type quitConfirmationData struct{}
+
+// requestQuitConfirmation asks the user to confirm before shutting down the TUI.
+func (m Model) requestQuitConfirmation() (Model, tea.Cmd) {
+	cmd := m.uiState.ConfirmDialog.Show(components.ConfirmDialogOptions{
+		Type:        components.ConfirmDialogWarning,
+		Title:       "Quit lippycat?",
+		Message:     "Are you sure you want to quit?",
+		ConfirmText: "y",
+		CancelText:  "n",
+		UserData:    quitConfirmationData{},
+	})
+	return m, cmd
+}
+
 // handleKeyboard processes keyboard events for the TUI
 func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	// Dev console has highest priority when visible (LOG_LEVEL=DEBUG only)
@@ -41,7 +57,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m.handleDiagDump()
 		case "q", "ctrl+c":
 			// Still allow quit
-			return m.requestQuit()
+			return m.requestQuitConfirmation()
 		default:
 			// Consume all other keys while console is visible
 			return m, nil
@@ -78,13 +94,12 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.uiState.SettingsView.IsEditing() {
 			switch msg.String() {
 			case "q", "ctrl+c":
-				return m.requestQuit()
+				return m.requestQuitConfirmation()
 			case "enter":
 				if m.uiState.Tabs.GetActive() == 0 && m.uiState.ViewMode == "events" && m.offlineSession != nil {
 					return m.navigateOfflineRelated()
 				}
 				return m, nil
-
 			case "ctrl+z":
 				// Suspend the process
 				return m, tea.Suspend
@@ -98,7 +113,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Normal settings tab key handling (when NOT editing)
 		switch msg.String() {
 		case "q", "ctrl+c":
-			return m.requestQuit()
+			return m.requestQuitConfirmation()
 		case "ctrl+z":
 			// Suspend the process
 			return m, tea.Suspend
@@ -121,7 +136,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 2 {
 		switch msg.String() {
 		case "q", "ctrl+c":
-			return m.requestQuit()
+			return m.requestQuitConfirmation()
 		case "ctrl+z":
 			return m, tea.Suspend
 		case "v": // Cycle sub-views
@@ -184,7 +199,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Normal Help tab key handling
 		switch msg.String() {
 		case "q", "ctrl+c":
-			return m.requestQuit()
+			return m.requestQuitConfirmation()
 		case "ctrl+z":
 			return m, tea.Suspend
 		case "c": // Clear search
@@ -242,7 +257,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, tea.Suspend
 
 	case "q", "ctrl+c":
-		return m.requestQuit()
+		return m.requestQuitConfirmation()
 
 	case "/": // Enter filter mode (Capture tab) or search mode (Help tab)
 		if m.uiState.Tabs.GetActive() == 0 {

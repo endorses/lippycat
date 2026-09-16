@@ -539,8 +539,16 @@ func TestQuitFromAuxiliaryTabsStopsActiveCapture(t *testing.T) {
 			globalCaptureState.SetHandle(cancel, done)
 
 			updated, cmd := m.handleKeyboard(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+			require.Nil(t, cmd)
+			require.True(t, updated.uiState.ConfirmDialog.IsActive())
+			require.False(t, updated.uiState.Quitting)
 
-			require.NotNil(t, cmd)
+			confirmCmd := updated.uiState.ConfirmDialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+			require.NotNil(t, confirmCmd)
+			confirmed, quitCmd := updated.Update(confirmCmd())
+			updated = confirmed.(Model)
+
+			require.NotNil(t, quitCmd)
 			require.True(t, updated.uiState.Quitting)
 			require.False(t, globalCaptureState.HasActiveCapture())
 		})

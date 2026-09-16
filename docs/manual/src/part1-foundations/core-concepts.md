@@ -57,14 +57,21 @@ This grants only the specific capability needed, following the principle of leas
 
 **Berkeley Packet Filters (BPF)** let you tell the kernel which packets to capture, reducing CPU load by filtering at the lowest level before packets reach userspace.
 
+Only capture DNS traffic:
+
 ```bash
-# Only capture DNS traffic
 lc sniff -i eth0 -f "port 53"
+```
 
-# Only traffic to/from a specific host
+Only capture traffic to or from a specific host:
+
+```bash
 lc sniff -i eth0 -f "host 10.0.0.1"
+```
 
-# Combine filters
+Combine filters:
+
+```bash
 lc sniff -i eth0 -f "host 10.0.0.1 and port 5060"
 ```
 
@@ -74,11 +81,15 @@ BPF filters use a standard syntax shared with tcpdump and Wireshark. See [Append
 
 **PCAP (Packet Capture)** is the standard file format for storing captured packets. Files written by lippycat can be opened in Wireshark, analyzed with tshark, or replayed with tcpreplay.
 
-```bash
-# Write captured packets to a file
-lc sniff -i eth0 -w capture.pcap
+Write captured packets to a file:
 
-# Read a PCAP file in the TUI
+```bash
+lc sniff -i eth0 -w capture.pcap
+```
+
+Read a PCAP file in the TUI:
+
+```bash
 lc watch file capture.pcap
 ```
 

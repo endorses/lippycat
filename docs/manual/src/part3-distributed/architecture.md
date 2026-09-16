@@ -103,12 +103,16 @@ flowchart TB
 
 **When to use**: Small to medium deployments (up to ~50 hunters), single site, simple requirements.
 
+Processor:
+
 ```bash
-# Processor
 lc process --listen :55555 --write-file /var/capture/all.pcap \
   --tls-cert server.crt --tls-key server.key
+```
 
-# Hunters
+Hunters:
+
+```bash
 sudo lc hunt --processor processor:55555 -i eth0 --tls-ca ca.crt
 ```
 
@@ -135,16 +139,23 @@ flowchart LR
 
 **When to use**: Multi-site deployments, geographic distribution, DMZ/internal segmentation, gradual aggregation with filtering at each tier.
 
+Central processor:
+
 ```bash
-# Central processor
 lc process --listen :55555 --write-file /var/capture/central.pcap \
   --tls-cert server.crt --tls-key server.key
+```
 
-# Regional processor (forwards to central)
+Regional processor (forwards to central):
+
+```bash
 lc process --listen :55555 --processor central:55555 \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
+```
 
-# Edge processor (forwards to regional)
+Edge processor (forwards to regional):
+
+```bash
 lc process --listen :55555 --processor regional:55555 \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
 ```

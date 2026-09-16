@@ -35,8 +35,11 @@ Modern Go requires Subject Alternative Names (SANs) on all certificates. Certifi
 
 ```bash
 mkdir -p /etc/lippycat/certs && cd /etc/lippycat/certs
+```
 
-# Generate CA key and self-signed certificate
+Generate the CA key and self-signed certificate:
+
+```bash
 openssl req -x509 -newkey rsa:4096 -days 3650 -nodes \
   -keyout ca-key.pem -out ca-cert.pem \
   -subj "/C=US/ST=State/L=City/O=YourOrg/CN=Lippycat CA"
@@ -44,21 +47,31 @@ openssl req -x509 -newkey rsa:4096 -days 3650 -nodes \
 
 #### Step 2: Generate the Processor (Server) Certificate
 
-```bash
-# Private key
-openssl genrsa -out server-key.pem 4096
+Generate the private key:
 
-# Certificate signing request
+```bash
+openssl genrsa -out server-key.pem 4096
+```
+
+Create the certificate signing request:
+
+```bash
 openssl req -new -key server-key.pem -out server-req.pem \
   -subj "/CN=processor.example.com"
+```
 
-# Extensions file — SANs are required
+Create the extensions file; SANs are required:
+
+```bash
 cat > server-ext.conf <<EOF
 subjectAltName = DNS:processor.example.com,DNS:localhost,IP:127.0.0.1
 extendedKeyUsage = serverAuth
 EOF
+```
 
-# Sign with the CA
+Sign the certificate with the CA:
+
+```bash
 openssl x509 -req -in server-req.pem -days 365 \
   -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
   -out server-cert.pem -extfile server-ext.conf
@@ -76,14 +89,20 @@ For mTLS, each hunter needs its own certificate:
 
 ```bash
 openssl genrsa -out hunter01-key.pem 4096
+```
 
+```bash
 openssl req -new -key hunter01-key.pem -out hunter01-req.pem \
   -subj "/CN=hunter-01.example.com"
+```
 
+```bash
 cat > client-ext.conf <<EOF
 extendedKeyUsage = clientAuth
 EOF
+```
 
+```bash
 openssl x509 -req -in hunter01-req.pem -days 365 \
   -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
   -out hunter01-cert.pem -extfile client-ext.conf
@@ -93,7 +112,13 @@ openssl x509 -req -in hunter01-req.pem -days 365 \
 
 ```bash
 chmod 600 *-key.pem
+```
+
+```bash
 chmod 644 *-cert.pem
+```
+
+```bash
 rm -f *.conf *-req.pem
 ```
 
@@ -101,13 +126,17 @@ rm -f *.conf *-req.pem
 
 With certificates in place, start the distributed deployment:
 
+Start the processor with server TLS:
+
 ```bash
-# Processor — server TLS
 lc process --listen 0.0.0.0:55555 \
   --tls-cert /etc/lippycat/certs/server-cert.pem \
   --tls-key /etc/lippycat/certs/server-key.pem
+```
 
-# Hunter — verify processor identity
+Start the hunter and verify the processor's identity:
+
+```bash
 sudo lc hunt voip -i eth0 \
   --processor processor.example.com:55555 \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
@@ -151,22 +180,29 @@ All certificates are signed by the same CA. Each node trusts any certificate sig
 
 ### Enabling mTLS
 
+Start the processor and require client certificates:
+
 ```bash
-# Processor — require client certificates
 lc process --listen 0.0.0.0:55555 \
   --tls-cert /etc/lippycat/certs/server-cert.pem \
   --tls-key /etc/lippycat/certs/server-key.pem \
   --tls-client-auth \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
+```
 
-# Hunter — present client certificate
+Start a hunter that presents a client certificate:
+
+```bash
 sudo lc hunt voip -i eth0 \
   --processor processor.example.com:55555 \
   --tls-cert /etc/lippycat/certs/hunter01-cert.pem \
   --tls-key /etc/lippycat/certs/hunter01-key.pem \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
+```
 
-# TUI client — also presents a client certificate
+Connect a TUI client that also presents a client certificate:
+
+```bash
 lc watch remote -P processor.example.com:55555 \
   --tls-cert /etc/lippycat/certs/tui-cert.pem \
   --tls-key /etc/lippycat/certs/tui-key.pem \
@@ -203,7 +239,6 @@ hunter:
 If the processor uses a certificate from a well-known CA (Let's Encrypt, DigiCert, etc.), hunters do not need `--tls-ca` — the system trust store already includes the issuing CA:
 
 ```bash
-# No --tls-ca needed with commercial certificates
 sudo lc hunt voip -i eth0 --processor processor.example.com:55555
 ```
 
@@ -215,11 +250,15 @@ This simplifies hunter deployment but does not provide client authentication. Co
 
 Check certificate validity dates and set up automated monitoring:
 
-```bash
-# Check a certificate's dates
-openssl x509 -in /etc/lippycat/certs/server-cert.pem -noout -dates
+Check a certificate's dates:
 
-# Verify SANs are present (Go requires them)
+```bash
+openssl x509 -in /etc/lippycat/certs/server-cert.pem -noout -dates
+```
+
+Verify that SANs are present, as Go requires them:
+
+```bash
 openssl x509 -in /etc/lippycat/certs/server-cert.pem -noout -text \
   | grep -A1 "Subject Alternative Name"
 ```
@@ -247,23 +286,46 @@ To rotate certificates without dropping connections:
 2. Update the configuration file with the new paths.
 3. Reload the service gracefully:
 
+Generate the replacement key:
+
 ```bash
-# Generate replacement
 openssl genrsa -out server-key-new.pem 4096
+```
+
+Create its signing request:
+
+```bash
 openssl req -new -key server-key-new.pem -out server-req-new.pem \
   -subj "/CN=processor.example.com"
+```
+
+Sign the replacement certificate:
+
+```bash
 openssl x509 -req -in server-req-new.pem -days 365 \
   -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
   -out server-cert-new.pem -extfile server-ext.conf
+```
 
-# Swap in place
+Swap the certificate into place:
+
+```bash
 mv server-cert-new.pem server-cert.pem
+```
+
+```bash
 mv server-key-new.pem server-key.pem
+```
 
-# Reload
+Reload the service:
+
+```bash
 systemctl reload lippycat-processor
+```
 
-# Verify
+Verify the replacement certificate:
+
+```bash
 openssl s_client -connect processor:55555 -showcerts </dev/null 2>/dev/null \
   | openssl x509 -noout -dates
 ```
@@ -310,6 +372,9 @@ For local development and testing, `--insecure` disables TLS entirely. Both side
 
 ```bash
 lc process --listen :55555 --insecure
+```
+
+```bash
 sudo lc hunt voip -i eth0 --processor localhost:55555 --insecure
 ```
 
@@ -381,16 +446,33 @@ Most modern applications support key logging:
 
 Point lippycat at a key log file produced by the target application:
 
+For standalone live capture:
+
 ```bash
-# Live capture with key log — standalone
 sudo lc sniff http -i eth0 --tls-keylog /tmp/sslkeys.log
+```
 
-# Live capture with key log — tap mode
+For live capture in tap mode:
+
+```bash
 sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log
+```
 
-# Real-time key injection via named pipe
+For real-time key injection via a named pipe, create the pipe:
+
+```bash
 mkfifo /tmp/sslkeys.pipe
+```
+
+Start tap with the pipe:
+
+```bash
 sudo lc tap http -i eth0 --tls-keylog-pipe /tmp/sslkeys.pipe &
+```
+
+Start the target application with the same pipe:
+
+```bash
 SSLKEYLOGFILE=/tmp/sslkeys.pipe ./myserver
 ```
 
@@ -411,14 +493,18 @@ flowchart LR
     Hunter -->|"gRPC (TLS-encrypted)<br/>packets + session keys"| Processor
 ```
 
+Capture with the key log on the hunter:
+
 ```bash
-# Hunter — capture with key log
 sudo lc hunt http -i eth0 \
   --processor central:55555 \
   --tls-keylog /tmp/sslkeys.log \
   --tls-ca ca.crt
+```
 
-# Processor — store keys alongside PCAPs
+On the processor, store keys alongside PCAPs:
+
+```bash
 lc process --listen :55555 \
   --tls-keylog-dir /var/capture/keys \
   --tls-cert server.crt --tls-key server.key
@@ -428,11 +514,15 @@ lc process --listen :55555 \
 
 Re-analyze stored captures with the paired key log:
 
-```bash
-# CLI analysis
-lc sniff http -r /var/capture/session.pcap --tls-keylog /var/capture/keys/session.keys
+For CLI analysis:
 
-# TUI analysis
+```bash
+lc sniff http -r /var/capture/session.pcap --tls-keylog /var/capture/keys/session.keys
+```
+
+For TUI analysis:
+
+```bash
 lc watch file /var/capture/session.pcap --tls-keylog /var/capture/keys/session.keys
 ```
 
@@ -465,6 +555,9 @@ Key log files contain session secrets that can decrypt all associated captured t
 
 ```bash
 chmod 600 /var/capture/keys/*.keys
+```
+
+```bash
 chown lippycat:lippycat /var/capture/keys/
 ```
 
@@ -513,10 +606,17 @@ voip:
 
 If the key file does not exist, lippycat generates one automatically with `0600` permissions. For production, generate and manage the key manually:
 
+Generate a 256-bit encryption key:
+
 ```bash
-# Generate a 256-bit encryption key
 openssl rand -out /etc/lippycat/keys/pcap.key 32
+```
+
+```bash
 chmod 600 /etc/lippycat/keys/pcap.key
+```
+
+```bash
 chown lippycat:lippycat /etc/lippycat/keys/pcap.key
 ```
 
@@ -532,7 +632,13 @@ Set up the output directory with matching restrictions:
 
 ```bash
 sudo mkdir -p /var/lib/lippycat/pcaps
+```
+
+```bash
 sudo chmod 700 /var/lib/lippycat/pcaps
+```
+
+```bash
 sudo chown lippycat:lippycat /var/lib/lippycat/pcaps
 ```
 
@@ -572,15 +678,23 @@ As described in [Chapter 4](../part2-local-capture/sniff.md), lippycat can creat
 
 The recommended approach uses Linux file capabilities to grant only the `CAP_NET_ADMIN` capability:
 
+Grant the minimum required capability:
+
 ```bash
-# Grant the minimum required capability
 sudo setcap cap_net_admin+ep /usr/local/bin/lc
+```
 
-# Verify
+Verify the capability:
+
+```bash
 getcap /usr/local/bin/lc
-# /usr/local/bin/lc = cap_net_admin+ep
+```
 
-# Now runs without sudo
+The expected output is `/usr/local/bin/lc = cap_net_admin+ep`.
+
+The command can now run without `sudo`:
+
+```bash
 lc sniff voip -i eth0 --virtual-interface
 ```
 
@@ -600,16 +714,23 @@ The process creates the interface as root, then drops to the `lippycat` user's U
 
 For production deployments with strict security requirements, run the virtual interface in an isolated network namespace:
 
-```bash
-# Create namespace
-sudo ip netns add lippycat-isolated
+Create the namespace:
 
-# Run with namespace isolation
+```bash
+sudo ip netns add lippycat-isolated
+```
+
+Run with namespace isolation:
+
+```bash
 sudo lc sniff voip -i eth0 \
   --virtual-interface \
   --vif-netns lippycat-isolated
+```
 
-# Only tools in the namespace can see the interface
+Only tools in the namespace can see the interface:
+
+```bash
 sudo ip netns exec lippycat-isolated wireshark -i lc0
 ```
 
@@ -619,8 +740,9 @@ The interface is invisible to the host network stack, preventing unauthorized sn
 
 For Docker or Kubernetes, grant `CAP_NET_ADMIN` without running the entire container as root:
 
+For Docker:
+
 ```bash
-# Docker
 docker run --cap-add=NET_ADMIN lippycat:latest
 ```
 
@@ -698,14 +820,21 @@ The processor requires mTLS (`--tls-client-auth`) but the hunter did not present
 
 Certificate validation failed. Common causes:
 
+Check whether the certificate has expired:
+
 ```bash
-# Check if the certificate is expired
 openssl x509 -in cert.pem -noout -enddate
+```
 
-# Check if the hostname matches the SANs
+Check whether the hostname matches the SANs:
+
+```bash
 openssl x509 -in cert.pem -noout -text | grep -A2 "Subject Alternative Name"
+```
 
-# Verify the certificate chain
+Verify the certificate chain:
+
+```bash
 openssl verify -CAfile ca-cert.pem server-cert.pem
 ```
 

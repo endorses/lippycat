@@ -48,17 +48,27 @@ Use `-q` (quiet mode) to suppress packet output for better performance when you 
 
 Use BPF filters with `-f` / `--filter` to focus on specific traffic (see [Appendix C: BPF Filter Reference](../appendices/bpf-reference.md) for the full syntax):
 
+Only capture DNS traffic:
+
 ```bash
-# Only DNS traffic
 sudo lc sniff -i eth0 -f "port 53"
+```
 
-# Traffic to/from a specific host
+Capture traffic to or from a specific host:
+
+```bash
 sudo lc sniff -i eth0 -f "host 10.0.0.1"
+```
 
-# Only TCP traffic on port 5060 (SIP)
+Only capture TCP traffic on port 5060 (SIP):
+
+```bash
 sudo lc sniff -i eth0 -f "tcp port 5060"
+```
 
-# Combine conditions
+Combine conditions:
+
+```bash
 sudo lc sniff -i eth0 -f "host 10.0.0.1 and port 5060"
 ```
 
@@ -102,14 +112,21 @@ All protocol analyzers share the same JSON output structure based on `PacketDisp
 
 lippycat follows Unix conventions: packet data goes to stdout, log messages go to stderr. This means you can pipe packet data cleanly while still seeing logs:
 
+Pipe packets to `jq` while keeping logs visible on the terminal:
+
 ```bash
-# Pipe packets to jq, logs still visible on terminal
 sudo lc sniff dns -i eth0 | jq '.DNSData.QueryName'
+```
 
-# Redirect logs to a file, pipe packets to processing
+Redirect logs to a file and pipe packets to processing:
+
+```bash
 sudo lc sniff dns -i eth0 2>dns-capture.log | jq '.DNSData.QueryName'
+```
 
-# Discard logs entirely
+Discard logs entirely:
+
+```bash
 sudo lc sniff dns -i eth0 2>/dev/null | jq '.DNSData.QueryName'
 ```
 
@@ -117,8 +134,9 @@ sudo lc sniff dns -i eth0 2>/dev/null | jq '.DNSData.QueryName'
 
 Because all protocols share the same base fields, you can capture without a protocol subcommand and filter by protocol-specific metadata in `jq`:
 
+Capture general traffic, then filter for DNS and TLS:
+
 ```bash
-# General capture, then filter for DNS and TLS
 sudo lc sniff -i eth0 2>/dev/null | \
   jq -r 'if .DNSData then
     "DNS: " + .DNSData.QueryName
@@ -131,11 +149,15 @@ sudo lc sniff -i eth0 2>/dev/null | \
 
 Combine JSON output with PCAP writing for both structured analysis and full packet fidelity:
 
-```bash
-# Write PCAP and JSON simultaneously
-sudo lc sniff dns -i eth0 -w dns-traffic.pcap 2>/dev/null > dns-analysis.jsonl
+Write PCAP and JSON simultaneously:
 
-# Replay the PCAP later with a different protocol analyzer
+```bash
+sudo lc sniff dns -i eth0 -w dns-traffic.pcap 2>/dev/null > dns-analysis.jsonl
+```
+
+Replay the PCAP later with a different protocol analyzer:
+
+```bash
 lc sniff tls -r dns-traffic.pcap
 ```
 
@@ -239,19 +261,39 @@ Captures SMTP, IMAP, and POP3 sessions with session tracking.
 
 VoIP is lippycat's most feature-rich protocol mode:
 
+Start a basic VoIP capture:
+
 ```bash
-# Basic VoIP capture
 sudo lc sniff voip -i eth0
+```
 
-# Filter by SIP user (supports wildcards)
+Filter by a SIP user (wildcards are supported):
+
+```bash
 sudo lc sniff voip -i eth0 -u alicent
-sudo lc sniff voip -i eth0 -u "*456789"    # suffix match
-sudo lc sniff voip -i eth0 -u "alicent,robb"  # multiple users
+```
 
-# Restrict to specific SIP port
+Use a suffix match:
+
+```bash
+sudo lc sniff voip -i eth0 -u "*456789"
+```
+
+Filter for multiple users:
+
+```bash
+sudo lc sniff voip -i eth0 -u "alicent,robb"
+```
+
+Restrict capture to a specific SIP port:
+
+```bash
 sudo lc sniff voip -i eth0 -S 5060
+```
 
-# Custom RTP port range
+Use a custom RTP port range:
+
+```bash
 sudo lc sniff voip -i eth0 -R 8000-9000
 ```
 
@@ -291,7 +333,6 @@ lippycat strips the ESP header and ICV trailer, exposing the inner UDP/SIP/RTP p
 Save captured packets for offline analysis with `-w`:
 
 ```bash
-# Write all captured packets to a single file
 sudo lc sniff -i eth0 -w capture.pcap
 ```
 
@@ -299,8 +340,15 @@ The resulting file can be opened in Wireshark, analyzed with tshark, or read bac
 
 Each protocol subcommand also supports `-w`:
 
+For DNS:
+
 ```bash
 sudo lc sniff dns -i eth0 -w dns-traffic.pcap
+```
+
+For VoIP:
+
+```bash
 sudo lc sniff voip -i eth0 -w voip-traffic.pcap
 ```
 
@@ -310,9 +358,9 @@ In VoIP mode, the `-w` flag automatically creates separate PCAP files per call, 
 
 ```bash
 sudo lc sniff voip -i eth0 --sip-user alicent -w /var/capture/alicent
-# Creates: /var/capture/alicent_sip_<callid>.pcap
-#          /var/capture/alicent_rtp_<callid>.pcap
 ```
+
+This creates `/var/capture/alicent_sip_<callid>.pcap` and `/var/capture/alicent_rtp_<callid>.pcap`.
 
 For more advanced per-call PCAP features (directory organization, filename patterns, completion hooks), see [Central Aggregation with `lc process`](../part3-distributed/process.md) and [Standalone Mode with `lc tap`](../part3-distributed/tap.md).
 

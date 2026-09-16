@@ -8,17 +8,24 @@ Processors are the central hub of the distributed architecture. They receive pac
 
 A processor needs a listen address and TLS certificates:
 
+Minimal processor with TLS:
+
 ```bash
-# Minimal processor with TLS
 lc process --listen :55555 \
   --tls-cert server.crt --tls-key server.key
+```
 
-# Processor with PCAP writing
+Processor with PCAP writing:
+
+```bash
 lc process --listen 0.0.0.0:55555 \
   --write-file /var/capture/packets.pcap \
   --tls-cert server.crt --tls-key server.key
+```
 
-# For local testing without TLS
+For local testing without TLS:
+
+```bash
 lc process --listen :55555 --insecure
 ```
 
@@ -226,13 +233,17 @@ Execute custom commands when PCAP files are written or VoIP calls complete.
 
 Runs when any PCAP file is closed:
 
+To compress PCAP files:
+
 ```bash
-# Compress PCAP files
 lc process --listen :55555 --per-call-pcap \
   --pcap-command 'gzip %pcap%' \
   --tls-cert server.crt --tls-key server.key
+```
 
-# Upload to cloud storage
+To upload PCAP files to cloud storage:
+
+```bash
 lc process --listen :55555 --per-call-pcap \
   --pcap-command 'aws s3 cp %pcap% s3://captures/' \
   --tls-cert server.crt --tls-key server.key
@@ -357,7 +368,9 @@ For live changes, use the administration commands:
 ```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --type sip_user --pattern alicent
+```
 
+```bash
 lc rm filter -P processor:55555 --tls-ca ca.crt --id filter-001
 ```
 
@@ -369,18 +382,25 @@ The YAML filter file remains useful for startup state and batch import, but rout
 
 Processors can forward traffic to upstream processors, creating multi-tier architectures:
 
+Edge processor, which receives from hunters and forwards to regional:
+
 ```bash
-# Edge processor (receives from hunters, forwards to regional)
 lc process --listen :55555 \
   --processor regional-processor:55555 \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
+```
 
-# Regional processor (receives from edge, forwards to central)
+Regional processor, which receives from edge and forwards to central:
+
+```bash
 lc process --listen :55555 \
   --processor central-processor:55555 \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
+```
 
-# Central processor (final aggregation)
+Central processor for final aggregation:
+
+```bash
 lc process --listen :55555 \
   --write-file /var/capture/all-traffic.pcap \
   --tls-cert server.crt --tls-key server.key
@@ -407,15 +427,22 @@ Each processor in the chain can write PCAP locally in addition to forwarding ups
 
 Expose aggregated traffic from all connected hunters on a virtual network interface, enabling integration with third-party tools:
 
+Start a processor with a virtual interface:
+
 ```bash
-# Processor with virtual interface
 lc process --listen :55555 --virtual-interface \
   --tls-cert server.crt --tls-key server.key
+```
 
-# Monitor with Wireshark
+Monitor the interface with Wireshark:
+
+```bash
 wireshark -i lc0
+```
 
-# Or run IDS on aggregated stream
+Alternatively, run an IDS on the aggregated stream:
+
+```bash
 snort -i lc0 -c /etc/snort/snort.conf
 ```
 

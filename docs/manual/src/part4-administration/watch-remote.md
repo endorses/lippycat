@@ -22,23 +22,39 @@ flowchart LR
 
 ## Quick Start
 
+Connect directly to one processor:
+
 ```bash
-# Connect directly to one processor
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
+```
 
-# Connect using a nodes file
+Connect using a nodes file:
+
+```bash
 lc watch remote --nodes-file nodes.yaml
+```
 
-# Or use the default location (~/.config/lippycat/nodes.yaml)
+Alternatively, use the default location at `~/.config/lippycat/nodes.yaml`:
+
+```bash
 lc watch remote
+```
 
-# With TLS
+Connect with TLS:
+
+```bash
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
+```
 
-# With mutual TLS
+Connect with mutual TLS:
+
+```bash
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
+```
 
-# For local testing
+For local testing:
+
+```bash
 lc watch remote -P localhost:55555 --insecure
 ```
 
@@ -210,18 +226,28 @@ The TUI supports all filter types available via the CLI (VoIP, DNS, TLS, HTTP, E
 
 For scripted or batch filter operations, use the CLI commands instead (see [CLI Administration](cli-admin.md)):
 
-```bash
-# List current filters
-lc list filters -P processor:55555 --tls-ca ca.crt
+List current filters:
 
-# Create a filter
+```bash
+lc list filters -P processor:55555 --tls-ca ca.crt
+```
+
+Create a filter:
+
+```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --type sip_user --pattern "alicent@example.com"
+```
 
-# Show filter details
+Show filter details:
+
+```bash
 lc show filter --id myfilter -P processor:55555 --tls-ca ca.crt
+```
 
-# Delete a filter
+Delete a filter:
+
+```bash
 lc rm filter --id myfilter -P processor:55555 --tls-ca ca.crt
 ```
 
@@ -229,17 +255,27 @@ lc rm filter --id myfilter -P processor:55555 --tls-ca ca.crt
 
 ### Command-Line Flags
 
+Use server TLS to verify the processor certificate:
+
 ```bash
-# Server TLS (verify processor certificate)
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
+```
 
-# Mutual TLS (both sides authenticate)
+Use mutual TLS so both sides authenticate:
+
+```bash
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
+```
 
-# Skip verification (encrypted but no identity check, testing only)
+Skip verification for an encrypted connection without an identity check (testing only):
+
+```bash
 lc watch remote -P processor.example.com:55555 --tls-skip-verify
+```
 
-# No TLS at all (testing only, blocked in production mode)
+Disable TLS entirely for testing. Production mode blocks this option:
+
+```bash
 lc watch remote -P localhost:55555 --insecure
 ```
 
@@ -331,14 +367,21 @@ processors:
 
 ### "Failed to connect to node"
 
+Verify that the processor is running and listening:
+
 ```bash
-# Verify the processor is running and listening
 ss -tlnp | grep 55555
+```
 
-# Test network connectivity
+Test network connectivity:
+
+```bash
 nc -zv processor-host 55555
+```
 
-# Check firewall rules
+Check firewall rules:
+
+```bash
 sudo iptables -L -n | grep 55555
 ```
 

@@ -60,17 +60,27 @@ The flow works as follows:
 
 LI support is controlled by the `li` build tag. Standard builds exclude all LI code through dead code elimination -- no LI types, handlers, or configuration paths exist in non-LI binaries.
 
+Build the processor with LI support:
+
 ```bash
-# Build processor with LI support
 make processor-li
+```
 
-# Build complete suite with LI support
+Build the complete suite with LI support:
+
+```bash
 make build-li
+```
 
-# Build tap with LI support (standalone capture + LI delivery)
+Build tap with LI support for standalone capture and LI delivery:
+
+```bash
 make tap-li
+```
 
-# Verify that non-LI builds contain no LI code
+Verify that non-LI builds contain no LI code:
+
+```bash
 make verify-no-li
 ```
 
@@ -191,19 +201,32 @@ For general TLS concepts and certificate generation, refer to [Chapter 13: Secur
 
 ```bash
 chmod 600 /etc/lippycat/li/*.key
+```
+
+```bash
 chmod 644 /etc/lippycat/li/*.crt
+```
+
+```bash
 chmod 700 /etc/lippycat/li/
+```
+
+```bash
 chown root:root /etc/lippycat/li/*
 ```
 
 **Certificate pinning.** For additional assurance on the X2/X3 delivery path, you can pin the MDF server certificate by its SHA-256 fingerprint:
 
+Obtain the fingerprint:
+
 ```bash
-# Obtain the fingerprint
 openssl x509 -in mdf-server.crt -noout -fingerprint -sha256 | \
   sed 's/://g' | cut -d= -f2
+```
 
-# Configure pinning
+Configure pinning with the resulting fingerprint:
+
+```bash
 --li-delivery-tls-pinned-cert sha256:A1B2C3D4E5F6...
 ```
 
@@ -332,9 +355,16 @@ The processor sends notifications to the ADMF to report operational status:
 
 Configure the keepalive interval with `--li-admf-keepalive`:
 
+Send a keepalive every 30 seconds:
+
 ```bash
---li-admf-keepalive 30s   # Send keepalive every 30 seconds
---li-admf-keepalive 0     # Disable keepalive
+--li-admf-keepalive 30s
+```
+
+Disable keepalives:
+
+```bash
+--li-admf-keepalive 0
 ```
 
 ### ADMF State Synchronization
@@ -390,9 +420,16 @@ A task must also be absent from two consecutive polls before it is removed (`Rec
 
 The same reconciliation runs during startup sync, where it acts on the first response: filters persist to disk and are reloaded before the registry exists, so a stale filter would otherwise be re-armed on every restart. Filters not owned by LI are never touched.
 
+Reconcile every five minutes (the default):
+
 ```bash
---li-admf-reconcile-interval 5m   # Reconcile every 5 minutes (default)
---li-admf-reconcile-interval 0    # Disable; drift is then never corrected
+--li-admf-reconcile-interval 5m
+```
+
+Disable reconciliation, so drift is never corrected:
+
+```bash
+--li-admf-reconcile-interval 0
 ```
 
 YAML configuration:
@@ -597,8 +634,9 @@ LI infrastructure should be deployed on a dedicated management network, separate
 
 LI certificates should have short validity periods (one year or less) and be rotated before expiration. Monitor certificate expiration as part of your regular operations:
 
+Check whether a certificate expires within 30 days:
+
 ```bash
-# Check if a certificate expires within 30 days
 openssl x509 -in /etc/lippycat/li/x1-server.crt -noout -checkend 2592000
 ```
 
@@ -684,13 +722,17 @@ LOG_LEVEL=debug lc process --li-enabled ...
 
 To verify TLS connectivity to the X1 or delivery endpoints manually:
 
+Test the X1 server:
+
 ```bash
-# Test X1 server
 openssl s_client -connect localhost:8443 \
   -cert x1-client.crt -key x1-client.key \
   -CAfile li-ca.crt
+```
 
-# Test delivery to MDF
+Test delivery to the MDF:
+
+```bash
 openssl s_client -connect mdf.example.com:443 \
   -cert delivery.crt -key delivery.key \
   -CAfile mdf-ca.crt

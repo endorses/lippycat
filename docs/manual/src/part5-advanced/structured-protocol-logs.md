@@ -11,15 +11,22 @@ lower-bound observations rather than complete connection measurements.
 Logging is off by default. Supplying `--log-dir` enables it for `process`, `tap`,
 and `sniff`; the directory is created if necessary.
 
-```bash
-# Terminal processor in a distributed deployment
-lc process --listen :55555 --log-dir /var/log/lippycat
+For a terminal processor in a distributed deployment:
 
-# Local capture, JSONL, selected streams
+```bash
+lc process --listen :55555 --log-dir /var/log/lippycat
+```
+
+For local capture with JSONL and selected streams:
+
+```bash
 sudo lc tap dns -i eth0 --insecure \
   --log-dir /var/log/lippycat --log-format json --log-streams conn,dns
+```
 
-# Offline or live CLI capture; packet stdout is unchanged
+For offline or live CLI capture, where packet standard output is unchanged:
+
+```bash
 lc sniff http -r capture.pcap --log-dir ./logs --log-streams conn,http,files
 ```
 

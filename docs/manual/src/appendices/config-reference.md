@@ -38,8 +38,16 @@ Configuration keys can be set via environment variables using the pattern `LIPPY
 
 ```bash
 export LIPPYCAT_VOIP_SIP_PORTS="5060,5061"
+```
+
+```bash
 export LIPPYCAT_PROCESSOR_LISTEN_ADDR=":55555"
-export LIPPYCAT_PRODUCTION=true   # Enforces TLS encryption
+```
+
+The following setting enforces TLS encryption:
+
+```bash
+export LIPPYCAT_PRODUCTION=true
 ```
 
 ---

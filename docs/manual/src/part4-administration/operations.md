@@ -16,13 +16,23 @@ This chapter covers deploying, monitoring, and maintaining lippycat in productio
 
 ### Install the Binary
 
-```bash
-# Build from source
-make build-release
-sudo cp bin/lc /usr/local/bin/
-sudo chmod +x /usr/local/bin/lc
+Build from source:
 
-# Grant capture capabilities (avoids running as root)
+```bash
+make build-release
+```
+
+```bash
+sudo cp bin/lc /usr/local/bin/
+```
+
+```bash
+sudo chmod +x /usr/local/bin/lc
+```
+
+Grant capture capabilities to avoid running as root:
+
+```bash
 sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lc
 ```
 
@@ -30,8 +40,17 @@ sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lc
 
 ```bash
 sudo mkdir -p /etc/lippycat/certs
+```
+
+```bash
 sudo cp config.yaml /etc/lippycat/
+```
+
+```bash
 sudo chown root:root /etc/lippycat/config.yaml
+```
+
+```bash
 sudo chmod 600 /etc/lippycat/config.yaml
 ```
 
@@ -111,8 +130,17 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
+```
+
+```bash
 sudo systemctl enable lippycat-processor
+```
+
+```bash
 sudo systemctl start lippycat-processor
+```
+
+```bash
 sudo systemctl status lippycat-processor
 ```
 
@@ -120,14 +148,21 @@ sudo systemctl status lippycat-processor
 
 ### Quick Status Check
 
+Check whether the service is running:
+
 ```bash
-# Service running?
 systemctl is-active lippycat-processor
+```
 
-# Processor healthy?
+Check whether the processor is healthy:
+
+```bash
 lc show status -P localhost:55555 --tls-ca ca.crt
+```
 
-# Hunters connected?
+Check which hunters are connected:
+
+```bash
 lc list hunters -P localhost:55555 --tls-ca ca.crt
 ```
 
@@ -165,12 +200,16 @@ echo -e "\n=== Health Check Complete ==="
 
 ### Monitoring Hunter Connections
 
+Watch the hunter count in real time:
+
 ```bash
-# Watch hunter count in real time
 watch -n 5 'lc show status -P localhost:55555 --tls-ca ca.crt | \
   jq "{total: .total_hunters, healthy: .healthy_hunters}"'
+```
 
-# Alert on missing hunters
+Use this script to alert on missing hunters:
+
+```bash
 #!/bin/bash
 expected=3
 actual=$(lc show status -P localhost:55555 --tls-ca ca.crt 2>/dev/null | \
@@ -187,17 +226,27 @@ lippycat uses structured logging to stdout/stderr. When running under systemd, l
 
 ### Viewing Logs
 
+Follow live logs:
+
 ```bash
-# Follow live logs
 journalctl -u lippycat-processor -f
+```
 
-# Last hour of logs
+Show logs from the last hour:
+
+```bash
 journalctl -u lippycat-processor --since "1 hour ago"
+```
 
-# Errors only
+Show errors only:
+
+```bash
 journalctl -u lippycat-processor --priority=err
+```
 
-# Logs from all lippycat services
+Show logs from all lippycat services:
+
+```bash
 journalctl -u 'lippycat*' --since today
 ```
 

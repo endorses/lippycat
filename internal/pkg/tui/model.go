@@ -375,7 +375,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// BUT: Don't intercept PacketMsg, TickMsg, or RestartCaptureMsg - those need to be handled by the main model
-	if m.uiState.Tabs.GetActive() == 3 && m.uiState.SettingsView.IsEditingInterface() {
+	if m.uiState.Tabs.GetActive() == 3 &&
+		m.uiState.SettingsView.IsEditingInterface() &&
+		!m.uiState.ConfirmDialog.IsActive() {
 		switch msg.(type) {
 		case PacketMsg, TickMsg, components.RestartCaptureMsg,
 			DNSPacketResultMsg, HTTPPacketResultMsg, EmailPacketResultMsg,
@@ -386,9 +388,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if keyMsg, ok := msg.(tea.KeyMsg); ok {
 				switch keyMsg.String() {
 				case "q", "ctrl+c":
-					m.Shutdown()
-					m.uiState.Quitting = true
-					return m, tea.Quit
+					return m.requestQuitConfirmation()
 				case "ctrl+z":
 					// Suspend the process
 					return m, tea.Suspend

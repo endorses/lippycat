@@ -454,6 +454,9 @@ func (h *Hunter) initializeEventForwarding() error {
 		if source != h.config.HunterID {
 			return fmt.Errorf("event spool belongs to node %q, configured node is %q", source, h.config.HunterID)
 		}
+		if lastEvent == ^uint64(0) {
+			return errors.New("event spool event sequence is exhausted; rotate the producer session")
+		}
 		producer, err = events.ResumeLiveProducer(source, session, lastEvent)
 	}
 	if err != nil {

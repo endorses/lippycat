@@ -24,6 +24,20 @@ func TestLiveProducerAssignsIdentityBeforeConstruction(t *testing.T) {
 	require.NotEqual(t, first.Envelope().EventID, second.Envelope().EventID)
 }
 
+func TestLiveProducerSequenceExhaustionNeverWraps(t *testing.T) {
+	const session = "30313233343536373839616263646566"
+	_, err := ResumeLiveProducer("node", session, ^uint64(0))
+	require.ErrorContains(t, err, "sequence is exhausted")
+
+	producer, err := ResumeLiveProducer("node", session, ^uint64(0)-1)
+	require.NoError(t, err)
+	last := producer.Assign(NewDNSEvent(Envelope{}))
+	require.Equal(t, ^uint64(0), last.Envelope().EventSequence)
+	next := producer.Assign(NewDNSEvent(Envelope{}))
+	require.Zero(t, next.Envelope().EventSequence)
+	require.Empty(t, next.Envelope().EventID)
+}
+
 func TestLiveProducerUsesIndependentRandomSessions(t *testing.T) {
 	first, err := newLiveProducer("node", strings.NewReader("0123456789abcdef"))
 	require.NoError(t, err)

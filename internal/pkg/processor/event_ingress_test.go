@@ -38,6 +38,11 @@ func ingressBatch(t *testing.T, batch, sequence uint64) *eventsv1.ProtocolEventB
 	return wire
 }
 
+func TestEventIngressRejectsLimitBelowDurableSenderContract(t *testing.T) {
+	_, err := newEventIngress(EventIngressPolicy{Profile: "memory_only", MaxBatchBytes: protoadapter.MaxEncodedBatchBytes - 1})
+	require.ErrorContains(t, err, "below the durable forwarding contract")
+}
+
 func TestNegotiateEventForwardingRejectsAndExplicitlyFallsBack(t *testing.T) {
 	bad := &management.EventForwardingCapabilities{RequestedMode: management.ForwardingMode_FORWARDING_MODE_EVENTS, EventApiMajors: []uint32{2}, SemanticProfileRevision: 1, EventKinds: []int32{1}, StatefulAnalysisFeatures: []string{"tcp_reassembly", "connection_tracking", "file_metadata"}}
 	_, _, _, _, _, err := negotiateEventForwarding(bad)

@@ -105,8 +105,8 @@ be lost if the processor crashes. Configure byte/age limits and choose
 The default maximum encoded record payload is 4 MiB. This safety bound still
 applies when `--event-spool-max-bytes=0` disables the total logical byte limit. It is
 checked after loss reports are attached, together with the transport's event,
-loss-entry, and loss-range limits. Keep the receiving processor's
-`--event-ingress-max-batch-bytes` at least as large as the sender limit.
+loss-entry, and loss-range limits. The receiving processor enforces
+`--event-ingress-max-batch-bytes` at or above this shared 4 MiB contract.
 Oversized events are rejected before publication and their exact loss coverage
 is retained. Fragmented coverage that cannot accompany a normal record is sent
 in bounded loss-only batches; it is never truncated. If storage cannot persist

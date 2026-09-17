@@ -10,9 +10,9 @@ tests.
 ## Limits and accounting
 
 The default maximum deterministic `ProtocolEventBatch` payload is 4 MiB. The
-limit applies even when the total spool byte limit is unlimited. It matches the
-default processor event-ingress limit. Operators that change either limit must
-keep the receiver limit greater than or equal to the sender limit. Both values
+limit applies even when the total spool byte limit is unlimited. It is the
+minimum processor event-ingress limit; processors reject lower configured
+values at startup, while operators may raise the receiver ceiling. Both values
 remain below the 10 MiB gRPC message ceiling so the enclosing ingress message
 has headroom.
 
@@ -91,11 +91,18 @@ mutations; enqueue and one-record ACK do not rewrite or traverse the entire
 active set each time. Recovery work is bounded by the retained checkpoint plus
 the configured journal threshold.
 
+A mutation whose exact metadata exceeds one bounded journal frame is committed
+as the first checkpoint of a fresh journal generation. The old generation
+remains authoritative until that checkpoint is durable, preserving atomic
+cumulative ACK and replacement semantics without an unbounded frame.
+
 Legacy directories without a checkpoint are migrated only after every record
 has been validated and the set has one unambiguous identity and ordering.
 Migration publishes the initial checkpoint and journal generation before
 allowing mutation. Malformed, duplicate, mixed-session, or ambiguous legacy
-data stops startup.
+data stops startup. A missing checkpoint alongside current-format journal
+history is never treated as legacy; only the header-only generation-one journal
+from an interrupted initial migration is a safe retry.
 
 ## Failure outcomes
 
@@ -146,13 +153,23 @@ loss-only prefixes before accepting more events. A valid event encountering a
 recovered oversized pending set triggers the same drain-and-retry behavior.
 Loss-only records obey the configured byte and age exhaustion policy: drop-new
 stops when no record fits, while drop-oldest atomically retains coverage for any
-record it replaces. Inherited wire loss reports are not counted again in local
-loss counters when their carrier record is later evicted.
+record it replaces and proceeds only when replacement strictly reduces the
+remaining bounded loss work. A non-progressing replacement fails stopped, so a
+one-record spool cannot alternate loss carriers forever. Inherited wire loss
+reports are not counted again in local loss counters when their carrier record
+is later evicted.
 
 If neither an event nor its exact loss report can be committed because storage
 is exhausted or unhealthy, the spool enters terminal backpressure/fail-stop.
 It does not acknowledge the event, delete victims, or silently forget the
 range. Restart replays the durable state before normal forwarding resumes.
+
+Producer event and batch sequences never wrap. Committing the final batch
+sequence exhausts that producer authority: the final batch remains deliverable,
+subsequent admission fails terminally without acknowledgement, and the operator
+must drain it and rotate to a new producer session. Already queued events remain
+the responsibility of their upstream admission boundary; no impossible batch
+zero or reused identity is synthesized.
 
 ## Retrieval and wire behavior
 

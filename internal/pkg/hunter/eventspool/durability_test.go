@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,6 +104,7 @@ func TestDurabilityUncertainBarrierAndRecovery(t *testing.T) {
 	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
 	require.ErrorIs(t, err, ErrDurabilityUncertain)
 	require.True(t, s.Status().DurabilityUncertain)
+	require.Positive(t, s.PhysicalBytes(), "the visible unreferenced record remains physical storage during uncertainty")
 	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
 	require.ErrorIs(t, err, ErrDurabilityUncertain)
 	_, err = s.BatchesAfter("node", "session", 0, 1)
@@ -111,6 +113,7 @@ func TestDurabilityUncertainBarrierAndRecovery(t *testing.T) {
 	require.NoError(t, s.Recover())
 	require.False(t, s.Status().DurabilityUncertain)
 	require.Empty(t, s.Batches(), "record published before failed directory sync was never referenced")
+	require.Zero(t, s.PhysicalBytes())
 	require.NoError(t, s.Close())
 }
 
@@ -273,7 +276,7 @@ func TestFlushPendingLossesHonorsCapacityPolicy(t *testing.T) {
 		require.True(t, s.HasPendingLosses())
 	})
 
-	t.Run("drop oldest replaces atomically", func(t *testing.T) {
+	t.Run("drop oldest fails stop instead of cycling carriers", func(t *testing.T) {
 		s, err := Open(Config{Directory: t.TempDir(), Policy: DropOldest})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
@@ -284,12 +287,116 @@ func TestFlushPendingLossesHonorsCapacityPolicy(t *testing.T) {
 		require.NoError(t, err)
 		result, err := s.FlushPendingLosses("node", "session", 2, 1)
 		require.NoError(t, err)
-		require.True(t, result.Stored)
+		require.Equal(t, RejectionExhausted, result.Rejection)
 		require.LessOrEqual(t, s.Bytes(), s.config.MaxBytes)
-		require.False(t, s.Contains("node", "session", 1))
-		require.True(t, s.Contains("node", "session", 2))
-		require.True(t, s.HasPendingLosses(), "the evicted event remains exact durable coverage")
+		require.True(t, s.Contains("node", "session", 1))
+		require.False(t, s.Contains("node", "session", 2))
+		require.True(t, s.HasPendingLosses(), "the active carrier and new pending coverage must both remain durable")
 	})
+}
+
+func TestMissingManifestDoesNotReactivateCurrentFormatRecords(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	s.fs.remove = func(path string) error {
+		if strings.HasSuffix(path, recordExtension) {
+			return errors.New("retain acknowledged orphan")
+		}
+		return os.Remove(path)
+	}
+	err = s.Ack("node", "session", 1)
+	var cleanupErr *CleanupError
+	require.ErrorAs(t, err, &cleanupErr)
+	require.NoError(t, s.Close())
+	require.NoError(t, os.Remove(filepath.Join(dir, manifestFileName)))
+
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "manifest is missing")
+	require.FileExists(t, filepath.Join(dir, journalFileName), "ambiguous mutation history must remain for operator recovery")
+}
+
+func TestMissingInitialMigrationCheckpointReusesHeaderOnlyJournal(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+	require.NoError(t, os.Remove(filepath.Join(dir, manifestFileName)))
+
+	reopened, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.False(t, reopened.HasPending())
+	require.NoError(t, reopened.Close())
+}
+
+func TestMissingManifestRejectsOversizedJournalWithoutReadingIt(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+	require.NoError(t, os.Remove(filepath.Join(dir, manifestFileName)))
+	journal := filepath.Join(dir, journalFileName)
+	require.NoError(t, os.Truncate(journal, 1<<30))
+
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "non-empty or invalid journal")
+	info, statErr := os.Stat(journal)
+	require.NoError(t, statErr)
+	require.Equal(t, int64(1<<30), info.Size(), "corrupt evidence must remain untouched")
+}
+
+func TestOversizedTransactionUsesAtomicCheckpointFallback(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir, journalFrameLimit: 256})
+	require.NoError(t, err)
+	losses := make([]*eventsv1.EventLoss, 0, 16)
+	for i := uint64(1); i <= 16; i++ {
+		sequence := i * 2
+		losses = append(losses, &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: sequence, Last: sequence}}})
+	}
+	result, err := s.RetainLosses(losses)
+	require.NoError(t, err)
+	require.True(t, result.Committed)
+	require.False(t, s.Status().DurabilityUncertain)
+	require.NoError(t, s.Close())
+
+	reopened, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.Equal(t, 1, reopened.Status().PendingLosses)
+	require.NoError(t, reopened.Close())
+}
+
+func TestOversizedTransactionCheckpointFailureRestoresFixedIdentity(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	policy := SessionPolicy{Version: 1, SourceNodeID: "node", ProducerSessionID: "session", DeliveryProfile: "reliable", SemanticRevision: 1}
+	require.NoError(t, s.BindSessionPolicy(policy))
+	s.config.journalFrameLimit = 256
+	originalCreate := s.fs.createTemp
+	creates := 0
+	s.fs.createTemp = func(directory, pattern string) (spoolFile, error) {
+		creates++
+		if creates == 2 {
+			return nil, errors.New("injected oversized checkpoint create")
+		}
+		return originalCreate(directory, pattern)
+	}
+	losses := make([]*eventsv1.EventLoss, 0, 16)
+	for i := uint64(1); i <= 16; i++ {
+		sequence := i * 2
+		losses = append(losses, &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: sequence, Last: sequence}}})
+	}
+	_, err = s.RetainLosses(losses)
+	require.ErrorContains(t, err, "injected oversized checkpoint create")
+	require.False(t, s.Status().DurabilityUncertain)
+	source, session, _, _, stateErr := s.RecoveryState()
+	require.NoError(t, stateErr)
+	require.Equal(t, "node", source)
+	require.Equal(t, "session", session)
+	require.False(t, s.HasPending())
 }
 
 func TestDuplicateBatchIsRejectedBeforeJournalPublication(t *testing.T) {

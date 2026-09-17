@@ -22,6 +22,10 @@ import (
 )
 
 const (
+	// MaxEncodedBatchBytes is the shared sender/receiver payload contract. A
+	// receiver may raise this ceiling, but lowering it would strand durable
+	// records already admitted by default-configured forwarding spools.
+	MaxEncodedBatchBytes = 4 << 20
 	MaxBatchEvents       = 4096
 	MaxStringBytes       = 1 << 20
 	MaxCollectionEntries = 4096

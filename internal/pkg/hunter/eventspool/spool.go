@@ -35,7 +35,7 @@ const (
 	defaultRetrievalLimit  = 128
 	maxJournalFramePayload = 16 << 20
 	journalFrameHeaderSize = 36
-	MaxRecordPayloadBytes  = uint64(4 << 20)
+	MaxRecordPayloadBytes  = uint64(protoadapter.MaxEncodedBatchBytes)
 	maxCollectionEntries   = 4096
 )
 
@@ -83,8 +83,9 @@ type Config struct {
 	Clock          func() time.Time
 	// CheckpointEvery is the minimum journal-frame trigger. The active-set
 	// checkpoint base raises it so full checkpoint rewrites remain amortized linear.
-	CheckpointEvery uint64
-	fs              *fsOps
+	CheckpointEvery   uint64
+	fs                *fsOps
+	journalFrameLimit int
 }
 
 type record struct {
@@ -207,6 +208,9 @@ func Open(config Config) (_ *Spool, retErr error) {
 	}
 	if config.CheckpointEvery == 0 {
 		config.CheckpointEvery = defaultCheckpointEvery
+	}
+	if config.journalFrameLimit == 0 {
+		config.journalFrameLimit = maxJournalFramePayload
 	}
 	fs := config.fs
 	if fs == nil {
@@ -354,6 +358,10 @@ func (s *Spool) migrateLegacy() error {
 	if err != nil {
 		return fmt.Errorf("open event spool: read directory: %w", err)
 	}
+	reuseJournal, err := inspectLegacyJournal(entries, s.config.Directory)
+	if err != nil {
+		return fmt.Errorf("migrate event spool: %w", err)
+	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), recordExtension) {
 			continue
@@ -388,13 +396,60 @@ func (s *Spool) migrateLegacy() error {
 	} else if !errors.Is(policyErr, os.ErrNotExist) {
 		return fmt.Errorf("migrate event spool policy: %w", policyErr)
 	}
-	if err = s.createJournal(s.generation); err != nil {
-		return fmt.Errorf("migrate event spool: %w", err)
+	if !reuseJournal {
+		if err = s.createJournal(s.generation); err != nil {
+			return fmt.Errorf("migrate event spool: %w", err)
+		}
 	}
 	if err = s.publishCheckpoint(); err != nil {
 		return fmt.Errorf("migrate event spool: %w", err)
 	}
 	return s.refreshPhysical()
+}
+
+// inspectLegacyJournal distinguishes a genuinely legacy record-only directory
+// from a damaged current-format spool. The sole safe retry case is the empty
+// generation-one journal durably published immediately before the initial
+// migration checkpoint. Any transaction frame (or any other journal artifact)
+// makes a missing manifest ambiguous and must be left for operator recovery.
+func inspectLegacyJournal(entries []os.DirEntry, directory string) (bool, error) {
+	var journals []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == journalFileName || (strings.HasPrefix(name, "journal-") && strings.HasSuffix(name, ".log")) {
+			journals = append(journals, name)
+		}
+	}
+	if len(journals) == 0 {
+		return false, nil
+	}
+	if len(journals) != 1 || journals[0] != journalFileName {
+		return false, fmt.Errorf("manifest is missing while journal artifacts exist: %v", journals)
+	}
+	path := filepath.Join(directory, journalFileName)
+	file, err := os.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("inspect migration journal: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return false, fmt.Errorf("inspect migration journal: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != 20 {
+		return false, errors.New("manifest is missing while a non-empty or invalid journal exists")
+	}
+	payload := make([]byte, 20)
+	if _, err = io.ReadFull(file, payload); err != nil {
+		return false, fmt.Errorf("inspect migration journal: %w", err)
+	}
+	if !bytes.Equal(payload[:8], journalMagic[:]) || binary.BigEndian.Uint32(payload[8:12]) != manifestVersion || binary.BigEndian.Uint64(payload[12:20]) != 1 {
+		return false, errors.New("manifest is missing while a non-empty or invalid journal exists")
+	}
+	return true, nil
 }
 
 func journalPath(directory string, generation uint64) string {
@@ -754,6 +809,12 @@ func (s *Spool) FlushPendingLosses(source, session string, batchSequence uint64,
 			remainingBytes -= victim.size
 			remaining = normalizeLosses(append(remaining, lossesFor(victim.batch)...))
 			newLosses = normalizeLosses(append(newLosses, ownRangeLoss(victim.batch)...))
+		}
+		// Replacement is allowed only when it strictly reduces the bounded
+		// pending-loss work. Without this monotonic measure, a one-record spool
+		// can alternate two loss-only carriers forever.
+		if len(victims) > 0 && lossSplitUnits(remaining) >= lossSplitUnits(s.pendingLosses) {
+			return EnqueueResult{Rejection: RejectionExhausted}, nil
 		}
 	}
 	r, err := s.writeRecord(s.config.Clock(), batch, payload)

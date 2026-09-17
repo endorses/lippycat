@@ -25,7 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const defaultIngressMaxBatchBytes = 4 << 20
+const defaultIngressMaxBatchBytes = protoadapter.MaxEncodedBatchBytes
 
 type EventIngressPolicy struct {
 	Dispatcher    *events.Dispatcher
@@ -67,6 +67,9 @@ func newEventIngress(p EventIngressPolicy) (*eventIngress, error) {
 	}
 	if p.MaxBatchBytes <= 0 {
 		p.MaxBatchBytes = defaultIngressMaxBatchBytes
+	}
+	if p.MaxBatchBytes < protoadapter.MaxEncodedBatchBytes {
+		return nil, fmt.Errorf("event ingress maximum batch bytes %d is below the durable forwarding contract %d", p.MaxBatchBytes, protoadapter.MaxEncodedBatchBytes)
 	}
 	i := &eventIngress{
 		dispatcher: p.Dispatcher, profile: profile, maxBatchBytes: p.MaxBatchBytes,

@@ -74,7 +74,7 @@ guidance.
 - `--event-ingress-profile` - Event acknowledgement profile: `memory-only` (default) or `reliable`
 - `--event-ingress-wal-dir` - Recoverable ingress WAL directory (required for `reliable`)
 - `--event-ingress-wal-max-bytes` - Ingress WAL size limit (default: 1 GiB)
-- `--event-ingress-max-batch-bytes` - Maximum accepted event batch (default: 4 MiB)
+- `--event-ingress-max-batch-bytes` - Maximum accepted event batch (default and minimum: 4 MiB; may be raised)
 
 ### PCAP File Writing
 

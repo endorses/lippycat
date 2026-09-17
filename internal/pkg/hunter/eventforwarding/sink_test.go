@@ -295,6 +295,59 @@ func TestSinkCommittedRejectionClearsVolatileLossAndStopsOnUncertainty(t *testin
 	require.Equal(t, uint64(7), sink.nextBatchSequence, "a rejection does not consume a batch sequence")
 }
 
+func TestSinkStopsAfterFinalBatchSequenceWithoutWrapping(t *testing.T) {
+	const session = "30313233343536373839616263646566"
+	spool, err := eventspool.Open(eventspool.Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spool.Close()) })
+	producer, err := events.ResumeLiveProducer("hunter-a", session, ^uint64(0)-1)
+	require.NoError(t, err)
+	client, err := New(Config{SourceNodeID: "hunter-a", ProducerSessionID: session}, spool)
+	require.NoError(t, err)
+	sink, err := NewSink(client, ^uint64(0), 1)
+	require.NoError(t, err)
+
+	event := producer.Assign(events.NewDNSEvent(events.Envelope{
+		Timestamp: time.Unix(1, 0), NodeID: "hunter-a", CaptureScope: events.CaptureScopeFiltered,
+		Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.53"), SourcePort: 53000, DestinationPort: 53},
+	}))
+	require.NoError(t, sink.HandleEvent(context.Background(), event))
+	require.Equal(t, ^uint64(0), sink.nextBatchSequence)
+	require.ErrorIs(t, sink.failed, errBatchSequenceExhausted)
+	require.ErrorIs(t, sink.Flush(context.Background()), errBatchSequenceExhausted)
+	batches := spool.Batches()
+	require.Len(t, batches, 1)
+	require.Equal(t, ^uint64(0), batches[0].GetBatchSequence())
+}
+
+func TestSinkFlushFailsStopWhenLossCarrierReplacementCannotProgress(t *testing.T) {
+	dir := t.TempDir()
+	spool, err := eventspool.Open(eventspool.Config{Directory: dir, Policy: eventspool.DropOldest})
+	require.NoError(t, err)
+	first := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}}}
+	_, err = spool.RetainLosses([]*eventsv1.EventLoss{first})
+	require.NoError(t, err)
+	_, err = spool.FlushPendingLosses("node", "session", 1, 1)
+	require.NoError(t, err)
+	limit := spool.Bytes()
+	require.NoError(t, spool.Close())
+
+	spool, err = eventspool.Open(eventspool.Config{Directory: dir, Policy: eventspool.DropOldest, MaxBytes: limit})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spool.Close()) })
+	second := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 3, Last: 3}}}
+	_, err = spool.RetainLosses([]*eventsv1.EventLoss{second})
+	require.NoError(t, err)
+	client, err := New(Config{SourceNodeID: "node", ProducerSessionID: "session"}, spool)
+	require.NoError(t, err)
+	sink, err := NewSink(client, 2, 1)
+	require.NoError(t, err)
+	err = sink.Flush(context.Background())
+	require.ErrorContains(t, err, "made no progress")
+	require.True(t, spool.Contains("node", "session", 1))
+	require.True(t, spool.HasPendingLosses())
+}
+
 func TestDispatcherStopsForwardingAfterFatalSpoolErrorAndRetainsQueuedRanges(t *testing.T) {
 	spool, err := eventspool.Open(eventspool.Config{Directory: t.TempDir()})
 	require.NoError(t, err)

@@ -28,6 +28,8 @@ type Sink struct {
 
 type fatalForwardingError struct{ err error }
 
+var errBatchSequenceExhausted = errors.New("event forwarding batch sequence is exhausted; rotate the producer session")
+
 func (e *fatalForwardingError) Error() string {
 	return fmt.Sprintf("event forwarding stopped: %v", e.err)
 }
@@ -95,6 +97,10 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 					s.retainFailedEventLocked(event)
 					return s.failLocked(flushErr)
 				}
+				if s.failed != nil {
+					s.retainFailedEventLocked(event)
+					return &fatalForwardingError{err: s.failed}
+				}
 				batch.BatchSequence = s.nextBatchSequence
 				continue
 			}
@@ -111,6 +117,11 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 			}
 			return s.failLocked(err)
 		}
+		if s.failed != nil {
+			// The current event is durably stored in the final usable batch. Stop
+			// future admission without reporting this event as lost.
+			return nil
+		}
 		if err = s.flushRequiredPendingLossesLocked(); err != nil {
 			return s.failLocked(err)
 		}
@@ -119,6 +130,9 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 }
 
 func (s *Sink) flushRequiredPendingLossesLocked() error {
+	if s.failed != nil {
+		return s.failed
+	}
 	for {
 		required, err := s.client.pendingLossesRequireFlush(s.nextBatchSequence, s.semanticProfileRevision)
 		if err != nil || !required {
@@ -128,6 +142,9 @@ func (s *Sink) flushRequiredPendingLossesLocked() error {
 		if result.Stored {
 			if flushErr = s.applyEnqueueResult(result, flushErr); flushErr != nil {
 				return flushErr
+			}
+			if s.failed != nil {
+				return nil
 			}
 			continue
 		}
@@ -198,7 +215,11 @@ func (s *Sink) HandleFailedEvent(event events.Event) {
 
 func (s *Sink) applyEnqueueResult(result eventspool.EnqueueResult, err error) error {
 	if result.Stored {
-		s.nextBatchSequence++
+		if s.nextBatchSequence == ^uint64(0) {
+			s.failed = errBatchSequenceExhausted
+		} else {
+			s.nextBatchSequence++
+		}
 		// Drop-oldest losses are attached to the newly stored batch by the
 		// spool, so they must not be deferred to a later batch.
 		s.pendingLosses = nil
@@ -217,6 +238,9 @@ func (s *Sink) applyEnqueueResult(result eventspool.EnqueueResult, err error) er
 func (s *Sink) Flush(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failed != nil {
+		return &fatalForwardingError{err: s.failed}
+	}
 	if len(s.pendingLosses) > 0 {
 		batch := &eventsv1.ProtocolEventBatch{
 			SourceNodeId: s.client.config.SourceNodeID, ProducerSessionId: s.client.config.ProducerSessionID,

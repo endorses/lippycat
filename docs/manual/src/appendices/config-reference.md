@@ -410,7 +410,7 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 | `processor.events.ingress.profile`         | string   | `"memory-only"` | Event acknowledgement profile: `"memory-only"` or `"reliable"`.                                              |
 | `processor.events.ingress.wal_dir`         | string   | `""`            | Recoverable event-ingress WAL directory; required for reliable ingress.                                      |
 | `processor.events.ingress.wal_max_bytes`   | integer  | `1073741824`    | Maximum event-ingress WAL size.                                                                              |
-| `processor.events.ingress.max_batch_bytes` | integer  | `4194304`       | Maximum accepted serialized event batch.                                                                     |
+| `processor.events.ingress.max_batch_bytes` | integer  | `4194304`       | Maximum accepted serialized event batch; minimum 4194304 for durable sender compatibility.                    |
 | `processor.filter_file`                    | string   | `""`            | Path to a YAML filter file for packet filtering rules.                                                       |
 | `processor.write_file`                     | string   | `""`            | Path for unified PCAP output (all traffic to one file).                                                      |
 | `processor.command_concurrency`            | integer  | `10`            | Maximum concurrent command hook executions.                                                                  |
@@ -542,7 +542,7 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 | `tap.events.ingress.profile`         | string  | `"memory-only"` | Downstream event-ingress acknowledgement profile: `"memory-only"` or `"reliable"`.     |
 | `tap.events.ingress.wal_dir`         | string  | `""`            | Recoverable event-ingress WAL directory; required for reliable ingress.                |
 | `tap.events.ingress.wal_max_bytes`   | integer | `1073741824`    | Maximum event-ingress WAL size.                                                        |
-| `tap.events.ingress.max_batch_bytes` | integer | `4194304`       | Maximum accepted serialized event batch.                                               |
+| `tap.events.ingress.max_batch_bytes` | integer | `4194304`       | Maximum accepted serialized event batch; minimum 4194304 for durable sender compatibility. |
 | `tap.tls.cert_file`                  | string  | `""`            | Server TLS certificate.                                                                |
 | `tap.tls.key_file`                   | string  | `""`            | Server TLS private key.                                                                |
 | `tap.tls.ca_file`                    | string  | `""`            | CA certificate for client verification.                                                |

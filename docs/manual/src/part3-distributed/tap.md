@@ -63,8 +63,8 @@ mode remains interoperable with packet-only upstream versions.
 The default maximum encoded record payload is 4 MiB, including attached loss
 reports. That bound still applies when the total logical spool byte limit is unlimited,
 and admission also checks the transport's event, loss-entry, and loss-range
-limits. Keep the upstream processor's `--event-ingress-max-batch-bytes` at least
-as large as the sender limit. Oversized events are rejected before publication,
+limits. The upstream processor enforces `--event-ingress-max-batch-bytes` at or
+above this shared 4 MiB contract. Oversized events are rejected before publication,
 with exact loss coverage retained. When the coverage cannot fit beside normal
 events it is sent in bounded loss-only batches. If storage cannot persist the
 event or its exact loss report, upstream forwarding fails stopped instead of

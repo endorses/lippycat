@@ -240,9 +240,8 @@ func (s *Spool) commit(tx transaction) error {
 	if err != nil {
 		return fmt.Errorf("commit event spool transaction: marshal: %w", err)
 	}
-	if len(payload) > maxJournalFramePayload {
-		s.uncertain = true
-		return fmt.Errorf("%w: exact transaction metadata exceeds frame limit", ErrDurabilityUncertain)
+	if len(payload) > s.config.journalFrameLimit {
+		return s.commitLargeTransaction(tx)
 	}
 	frame := make([]byte, journalFrameHeaderSize+len(payload)+4)
 	copy(frame[:8], journalMagic[:])
@@ -283,6 +282,78 @@ func (s *Spool) commit(tx transaction) error {
 		return s.rotateCheckpoint()
 	}
 	return nil
+}
+
+// commitLargeTransaction publishes an oversized logical mutation as the first
+// checkpoint of a fresh journal generation. This keeps cumulative ACK and
+// replacement atomic without permitting an unbounded journal frame. The old
+// checkpoint/journal remain authoritative until the replacement checkpoint is
+// renamed and its directory entry is synced.
+func (s *Spool) commitLargeTransaction(tx transaction) error {
+	if s.generation == ^uint64(0) {
+		return errors.New("commit event spool transaction: journal generation is exhausted")
+	}
+	oldGeneration := s.generation
+	newGeneration := oldGeneration + 1
+	if err := s.createJournal(newGeneration); err != nil {
+		return err
+	}
+
+	type stateSnapshot struct {
+		records                                  []record
+		bytes, generation, txSequence            uint64
+		transactionsSinceCheckpoint, commitCount uint64
+		pendingLosses                            []*eventsv1.EventLoss
+		identitySet, homogeneous                 bool
+		singleSource, singleProducer             string
+		lastEventSequence, lastBatchSequence     uint64
+		checkpointRecordBase                     int
+		sessionPolicy                            *SessionPolicy
+	}
+	snapshot := stateSnapshot{
+		records: append([]record(nil), s.records...), bytes: s.bytes,
+		generation: s.generation, txSequence: s.txSequence,
+		transactionsSinceCheckpoint: s.transactionsSinceCheckpoint, commitCount: s.commitCount,
+		pendingLosses: cloneLosses(s.pendingLosses), identitySet: s.identitySet, homogeneous: s.homogeneous,
+		singleSource: s.singleSource, singleProducer: s.singleProducer,
+		lastEventSequence: s.lastEventSequence, lastBatchSequence: s.lastBatchSequence,
+		checkpointRecordBase: s.checkpointRecordBase,
+	}
+	if s.sessionPolicy != nil {
+		copyPolicy := *s.sessionPolicy
+		snapshot.sessionPolicy = &copyPolicy
+	}
+	restore := func() {
+		s.records, s.bytes = snapshot.records, snapshot.bytes
+		s.rebuildIndex()
+		s.generation, s.txSequence = snapshot.generation, snapshot.txSequence
+		s.transactionsSinceCheckpoint, s.commitCount = snapshot.transactionsSinceCheckpoint, snapshot.commitCount
+		s.pendingLosses = snapshot.pendingLosses
+		s.identitySet, s.homogeneous = snapshot.identitySet, snapshot.homogeneous
+		s.singleSource, s.singleProducer = snapshot.singleSource, snapshot.singleProducer
+		s.lastEventSequence, s.lastBatchSequence = snapshot.lastEventSequence, snapshot.lastBatchSequence
+		s.checkpointRecordBase, s.sessionPolicy = snapshot.checkpointRecordBase, snapshot.sessionPolicy
+	}
+
+	if err := s.applyTransaction(tx); err != nil {
+		restore()
+		cleanupErr := s.retryCleanup([]string{filepath.Base(journalPath(s.config.Directory, newGeneration))})
+		return errors.Join(fmt.Errorf("commit event spool transaction: apply oversized mutation: %w", err), cleanupErr)
+	}
+	s.generation, s.txSequence = newGeneration, 0
+	if err := s.publishCheckpoint(); err != nil {
+		if !errors.Is(err, ErrDurabilityUncertain) {
+			restore()
+			cleanupErr := s.retryCleanup([]string{filepath.Base(journalPath(s.config.Directory, newGeneration))})
+			return errors.Join(err, cleanupErr)
+		}
+		return err
+	}
+	s.transactionsSinceCheckpoint = 0
+	s.metrics.JournalFrames = 0
+	s.checkpointRecordBase = len(s.records)
+	s.metrics.Rotations++
+	return s.retryCleanup([]string{filepath.Base(journalPath(s.config.Directory, oldGeneration))})
 }
 
 func (s *Spool) shouldCheckpoint() bool {
@@ -505,13 +576,16 @@ func (s *Spool) writeRecord(created time.Time, b *eventsv1.ProtocolEventBatch, p
 	if err = s.fs.rename(name, final); err != nil {
 		return record{}, errors.Join(fmt.Errorf("enqueue event batch: publish record: %w", err), cleanup())
 	}
+	recordSize := uint64(headerSize + len(payload))
+	// The rename makes the record visible to this process even if the following
+	// directory sync leaves power-loss durability uncertain. Status must account
+	// for that physical orphan throughout the uncertainty barrier.
+	s.physicalBytes += recordSize
 	if err = s.fs.syncDir(s.config.Directory); err != nil {
 		s.uncertain = true
 		return record{}, fmt.Errorf("%w: record directory sync: %v", ErrDurabilityUncertain, err)
 	}
 	s.metrics.Syncs++
-	recordSize := uint64(headerSize + len(payload))
-	s.physicalBytes += recordSize
 	return record{name: finalName, path: final, created: created, size: recordSize, payloadSize: uint64(len(payload)), batch: proto.Clone(b).(*eventsv1.ProtocolEventBatch)}, nil
 }
 

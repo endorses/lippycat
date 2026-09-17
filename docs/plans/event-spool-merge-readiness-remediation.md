@@ -537,6 +537,21 @@ and race tests for `eventspool`, `eventforwarding`, `processor/upstream`, and
 corrections. The complete `make test` target, including the `all` and `li`
 partitions and loopback integration tests, also passed outside the sandbox.
 
+A second source-to-plan audit on 2026-09-17 corrected six remaining boundary
+conditions: a missing manifest can no longer cause current-format journal
+history to be mistaken for legacy records; journal transactions larger than one
+bounded frame use an atomic fresh-generation checkpoint instead of entering a
+false uncertainty/retry loop; loss-only drop-oldest replacement must strictly
+reduce pending-loss work and therefore cannot cycle carriers forever; live event
+and batch sequences stop at `MaxUint64` without wrapping; and processors reject
+an ingress byte limit below the shared 4 MiB durable-sender contract. Physical
+record bytes are now reported immediately after a visible rename even when the
+following directory sync makes durability uncertain. Regression tests cover
+each case, including oversized-checkpoint rollback of a drained fixed session.
+Focused normal and race tests for events, protoadapter, eventspool,
+eventforwarding, and processor upstream routing passed, as did the tagged
+processor event-ingress tests.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/logflags"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -587,8 +588,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	if config.EventIngressProfile == "reliable" && config.EventIngressWALDirectory == "" {
 		return fmt.Errorf("reliable event ingress requires --event-ingress-wal-dir")
 	}
-	if config.EventIngressWALMaxBytes < 0 || config.EventIngressMaxBatchBytes <= 0 {
-		return fmt.Errorf("event ingress limits must be non-negative and max batch bytes must be positive")
+	if config.EventIngressWALMaxBytes < 0 || config.EventIngressMaxBatchBytes < protoadapter.MaxEncodedBatchBytes {
+		return fmt.Errorf("event ingress WAL bytes must be non-negative and max batch bytes must be at least %d", protoadapter.MaxEncodedBatchBytes)
 	}
 
 	if err := applyRADIUSLIConfig(cmd, &config); err != nil {

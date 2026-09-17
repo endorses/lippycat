@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -146,6 +147,9 @@ func ResumeLiveProducer(nodeID, sessionID string, lastSequence uint64) (*Produce
 	if _, err := hex.DecodeString(sessionID); err != nil || len(sessionID) != producerSessionBytes*2 {
 		return nil, fmt.Errorf("resume live event producer: invalid session ID")
 	}
+	if lastSequence == ^uint64(0) {
+		return nil, errors.New("resume live event producer: event sequence is exhausted; rotate the producer session")
+	}
 	p := &Producer{nodeID: nodeID, sessionID: sessionID}
 	p.sequence.Store(lastSequence)
 	return p, nil
@@ -201,7 +205,20 @@ func (p *Producer) envelope(env Envelope) Envelope {
 	if HasValidDeliveryIdentity(env) {
 		return env
 	}
-	sequence := p.sequence.Add(1)
+	var sequence uint64
+	for {
+		previous := p.sequence.Load()
+		if previous == ^uint64(0) {
+			// Keep the event unassigned rather than wrapping to a duplicate/zero
+			// identity. Dispatch admission rejects this value and callers must
+			// rotate the producer session.
+			return env
+		}
+		sequence = previous + 1
+		if p.sequence.CompareAndSwap(previous, sequence) {
+			break
+		}
+	}
 	if env.NodeID != "" && env.NodeID != p.nodeID && env.Provenance.CaptureSource == "" {
 		env.Provenance.CaptureSource = env.NodeID
 	}

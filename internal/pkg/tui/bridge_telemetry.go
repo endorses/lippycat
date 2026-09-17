@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -17,9 +18,9 @@ const (
 )
 
 // IngressTelemetrySnapshot is exact for packets and bytes accepted by the TUI
-// bridge. ProtocolCounts intentionally describes inexpensive L3/L4
-// classification; application protocols remain attributes of the sampled detail
-// feed. Talker maps are bounded and may omit new cardinalities after the limit.
+// bridge. ProtocolCounts uses the same cached application-protocol detector as
+// the packet detail feed, with L3/L4 classification as its fallback. Talker maps
+// are bounded and may omit new cardinalities after the limit.
 type IngressTelemetrySnapshot struct {
 	Packets        int64
 	Bytes          int64
@@ -115,6 +116,13 @@ func ingressClassification(pkt gopacket.Packet) (protocol, src, dst string) {
 		protocol = "ICMPv6"
 	case pkt.Layer(layers.LayerTypeARP) != nil:
 		protocol = "ARP"
+	}
+
+	// Keep exact live statistics consistent with the protocol shown in the
+	// packet table. Detector results are flow-cached, so classifying every
+	// ingress packet also makes conversion of retained detail packets cheap.
+	if result := detector.GetDefault().Detect(pkt); result != nil && result.Protocol != "unknown" {
+		protocol = result.Protocol
 	}
 	return protocol, src, dst
 }

@@ -368,7 +368,6 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	// carrying capture loss or bridge health from the previous session.
 	m.uiState.StatisticsView.GetDropStats().Reset()
 	m.uiState.StatisticsView.SetBridgeStats(nil)
-	m.uiState.StatisticsView.SetL3L4ProtocolClassification(false)
 	decryptor := msg.session.TLSDecryptor
 	m.uiState.DetailsPanel.SetDecryptedDataGetter(func(a, b, c, d string) ([]byte, []byte) {
 		if decryptor == nil {

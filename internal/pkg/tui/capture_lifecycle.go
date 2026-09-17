@@ -120,9 +120,6 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 
 	// Update mode BEFORE starting new capture so packet handlers check the right mode
 	m.captureMode = msg.Mode
-	if m.uiState != nil {
-		m.uiState.StatisticsView.SetL3L4ProtocolClassification(msg.Mode == components.CaptureModeLive)
-	}
 	m.uiState.Paused = false                     // Unpause when restarting capture
 	globalCaptureState.GetPauseSignal().Resume() // Reset pause state for new capture
 

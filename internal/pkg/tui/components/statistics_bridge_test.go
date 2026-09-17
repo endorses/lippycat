@@ -84,10 +84,7 @@ func TestSetBridgeStatsUpdatesDropHealthSummary(t *testing.T) {
 	assert.Equal(t, 70.0, summary.DisplayRetentionRate)
 }
 
-func TestLiveIngressLabelsExactProtocolClassification(t *testing.T) {
+func TestProtocolDistributionUsesApplicationProtocolLabel(t *testing.T) {
 	view := NewStatisticsView()
 	assert.Equal(t, "🔌 Protocol Distribution", view.protocolDistributionTitle())
-
-	view.SetL3L4ProtocolClassification(true)
-	assert.Equal(t, "🔌 L3/L4 Protocol Distribution", view.protocolDistributionTitle())
 }

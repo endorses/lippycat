@@ -39,6 +39,25 @@ func TestIngressTelemetryAccumulatorCountsEveryValidEnvelope(t *testing.T) {
 	require.Equal(t, two.OriginalLength, snapshot.MaxPacketSize)
 }
 
+func TestIngressTelemetryUsesApplicationProtocolClassification(t *testing.T) {
+	start := time.Unix(11, 0)
+	acc := newIngressTelemetryAccumulator(start)
+	packet := gopacket.NewPacket(
+		goldenTCPPacket(t, 49152, 443, goldenTLSClientHello()),
+		layers.LayerTypeEthernet,
+		gopacket.Default,
+	)
+	envelope := pipeline.NewDecodedPacketEnvelope(packet, layers.LinkTypeEthernet)
+	envelope.Source.Kind = pipeline.SourceLiveCapture
+	envelope.Source.InterfaceName = "test0"
+
+	require.True(t, acc.observe(envelope))
+	snapshot, published := acc.snapshot(start.Add(ingressPublishInterval), false)
+	require.True(t, published)
+	require.Equal(t, int64(1), snapshot.Packets)
+	require.Equal(t, map[string]int64{"TLS": 1}, snapshot.ProtocolCounts)
+}
+
 func TestIngressTelemetrySnapshotDoesNotExposeMutableMaps(t *testing.T) {
 	t.Parallel()
 	acc := newIngressTelemetryAccumulator(time.Time{})

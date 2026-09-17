@@ -75,6 +75,9 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 			if retainErr = nonCleanupError(retainErr); retainErr != nil {
 				return s.failLocked(retainErr)
 			}
+			if retainErr = s.flushRequiredPendingLossesLocked(); retainErr != nil {
+				return s.failLocked(retainErr)
+			}
 			return nil
 		}
 		s.pendingLosses = append(s.pendingLosses, loss)
@@ -83,15 +86,56 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 		}
 		return nil
 	}
-	result, err := s.client.Enqueue(batch)
-	err = s.applyEnqueueResult(result, err)
-	if err != nil {
-		if !result.Stored && result.Rejection == eventspool.RejectionNone {
+	for {
+		result, enqueueErr := s.client.Enqueue(batch)
+		if result.Rejection == eventspool.RejectionPendingLossFlush {
+			flushResult, flushErr := s.client.flushPendingLosses(s.nextBatchSequence, s.semanticProfileRevision)
+			if flushResult.Stored {
+				if flushErr = s.applyEnqueueResult(flushResult, flushErr); flushErr != nil {
+					s.retainFailedEventLocked(event)
+					return s.failLocked(flushErr)
+				}
+				batch.BatchSequence = s.nextBatchSequence
+				continue
+			}
 			s.retainFailedEventLocked(event)
+			if flushErr == nil {
+				flushErr = errors.New("flush pending event losses: spool made no progress")
+			}
+			return s.failLocked(flushErr)
 		}
-		return s.failLocked(err)
+		err = s.applyEnqueueResult(result, enqueueErr)
+		if err != nil {
+			if !result.Stored && result.Rejection == eventspool.RejectionNone {
+				s.retainFailedEventLocked(event)
+			}
+			return s.failLocked(err)
+		}
+		if err = s.flushRequiredPendingLossesLocked(); err != nil {
+			return s.failLocked(err)
+		}
+		return nil
 	}
-	return nil
+}
+
+func (s *Sink) flushRequiredPendingLossesLocked() error {
+	for {
+		required, err := s.client.pendingLossesRequireFlush(s.nextBatchSequence, s.semanticProfileRevision)
+		if err != nil || !required {
+			return err
+		}
+		result, flushErr := s.client.flushPendingLosses(s.nextBatchSequence, s.semanticProfileRevision)
+		if result.Stored {
+			if flushErr = s.applyEnqueueResult(result, flushErr); flushErr != nil {
+				return flushErr
+			}
+			continue
+		}
+		if flushErr != nil {
+			return flushErr
+		}
+		return errors.New("flush pending event losses: spool made no progress")
+	}
 }
 
 func (s *Sink) failLocked(err error) error {

@@ -11,7 +11,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 )
 
 func batch(source, session string, batchSequence, first, last uint64) *eventsv1.ProtocolEventBatch {
@@ -155,15 +154,13 @@ func TestDropOldestPreservesInheritedLossesAcrossRepeatedEviction(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, result.Stored)
 	require.Len(t, result.Losses, 1)
-	require.Len(t, result.Losses[0].GetEventSequenceRanges(), 2)
-	require.Equal(t, uint64(10), result.Losses[0].GetEventSequenceRanges()[0].GetFirst())
-	require.Equal(t, uint64(12), result.Losses[0].GetEventSequenceRanges()[0].GetLast())
-	require.Equal(t, uint64(20), result.Losses[0].GetEventSequenceRanges()[1].GetFirst())
-	require.Equal(t, uint64(21), result.Losses[0].GetEventSequenceRanges()[1].GetLast())
-	require.True(t, proto.Equal(
-		&eventsv1.EventBatchStats{Losses: result.Losses},
-		&eventsv1.EventBatchStats{Losses: s.Batches()[0].GetStats().GetLosses()},
-	))
+	require.Equal(t, uint64(20), result.Losses[0].GetEventSequenceRanges()[0].GetFirst())
+	require.Equal(t, uint64(21), result.Losses[0].GetEventSequenceRanges()[0].GetLast())
+	wireLosses := s.Batches()[0].GetStats().GetLosses()
+	require.Len(t, wireLosses, 1)
+	require.Len(t, wireLosses[0].GetEventSequenceRanges(), 2)
+	require.Equal(t, uint64(10), wireLosses[0].GetEventSequenceRanges()[0].GetFirst())
+	require.Equal(t, uint64(20), wireLosses[0].GetEventSequenceRanges()[1].GetFirst())
 }
 
 func TestDropOldestPreservesLossOnlyBatch(t *testing.T) {
@@ -184,14 +181,12 @@ func TestDropOldestPreservesLossOnlyBatch(t *testing.T) {
 	result, err := s.Enqueue(batch("hunter", "session", 2, 6, 6))
 	require.NoError(t, err)
 	require.True(t, result.Stored)
-	require.Len(t, result.Losses, 1)
-	require.Equal(t, eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, result.Losses[0].GetKind())
-	require.Equal(t, uint64(4), result.Losses[0].GetEventSequenceRanges()[0].GetFirst())
-	require.Equal(t, uint64(5), result.Losses[0].GetEventSequenceRanges()[0].GetLast())
-	require.True(t, proto.Equal(
-		&eventsv1.EventBatchStats{Losses: result.Losses},
-		&eventsv1.EventBatchStats{Losses: s.Batches()[0].GetStats().GetLosses()},
-	))
+	require.Empty(t, result.Losses, "inherited losses must not be counted again locally")
+	wireLosses := s.Batches()[0].GetStats().GetLosses()
+	require.Len(t, wireLosses, 1)
+	require.Equal(t, eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, wireLosses[0].GetKind())
+	require.Equal(t, uint64(4), wireLosses[0].GetEventSequenceRanges()[0].GetFirst())
+	require.Equal(t, uint64(5), wireLosses[0].GetEventSequenceRanges()[0].GetLast())
 }
 
 func TestDropOldestWriteFailurePreservesExistingRecords(t *testing.T) {

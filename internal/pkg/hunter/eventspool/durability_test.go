@@ -77,6 +77,22 @@ func TestPublishedBatchesAreImmutableToCallers(t *testing.T) {
 	require.Equal(t, uint64(1), got[0].GetBatchSequence())
 }
 
+func TestPhysicalBytesConsistentlyCountRecordStorage(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.Zero(t, s.PhysicalBytes(), "manifest, journal, and lock metadata are not record storage")
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	require.Equal(t, s.Bytes(), s.PhysicalBytes())
+	require.NoError(t, s.Close())
+
+	reopened, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.Equal(t, reopened.Bytes(), reopened.PhysicalBytes())
+	require.NoError(t, reopened.Close())
+}
+
 func TestDurabilityUncertainBarrierAndRecovery(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})
@@ -207,6 +223,115 @@ func TestPendingLossSurvivesRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, flush.Stored)
 	require.NoError(t, reopened.Close())
+}
+
+func TestPendingLossAPIsRejectInvalidIdentityBeforeCommit(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	valid := func(source, session string, sequence uint64) *eventsv1.EventLoss {
+		return &eventsv1.EventLoss{
+			Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+			SourceNodeId: source, ProducerSessionId: session,
+			EventSequenceRanges: []*eventsv1.SequenceRange{{First: sequence, Last: sequence}},
+		}
+	}
+	_, err = s.RetainLosses([]*eventsv1.EventLoss{valid("node", "one", 1), valid("node", "two", 2)})
+	require.ErrorContains(t, err, "producer identity")
+	require.False(t, s.HasPending())
+
+	invalid := valid("node", "one", 1)
+	invalid.Kind = eventsv1.LossKind_LOSS_KIND_UNSPECIFIED
+	_, err = s.RetainLosses([]*eventsv1.EventLoss{invalid})
+	require.ErrorContains(t, err, "invalid loss")
+	require.False(t, s.HasPending())
+
+	_, err = s.RetainLosses([]*eventsv1.EventLoss{valid("node", "one", 1)})
+	require.NoError(t, err)
+	_, err = s.FlushPendingLosses("node", "two", 1, 1)
+	require.ErrorContains(t, err, "fixed spool session")
+	require.True(t, s.HasPendingLosses())
+}
+
+func TestFlushPendingLossesHonorsCapacityPolicy(t *testing.T) {
+	loss := &eventsv1.EventLoss{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: "node", ProducerSessionId: "session",
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}},
+	}
+	t.Run("drop new remains bounded", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir(), Policy: DropNew, MaxBytes: 1})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		_, err = s.RetainLosses([]*eventsv1.EventLoss{loss})
+		require.NoError(t, err)
+		result, err := s.FlushPendingLosses("node", "session", 1, 1)
+		require.NoError(t, err)
+		require.Equal(t, RejectionExhausted, result.Rejection)
+		require.Zero(t, s.Bytes())
+		require.True(t, s.HasPendingLosses())
+	})
+
+	t.Run("drop oldest replaces atomically", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir(), Policy: DropOldest})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		_, err = s.Enqueue(batch("node", "session", 1, 2, 2))
+		require.NoError(t, err)
+		s.config.MaxBytes = s.Bytes()
+		_, err = s.RetainLosses([]*eventsv1.EventLoss{loss})
+		require.NoError(t, err)
+		result, err := s.FlushPendingLosses("node", "session", 2, 1)
+		require.NoError(t, err)
+		require.True(t, result.Stored)
+		require.LessOrEqual(t, s.Bytes(), s.config.MaxBytes)
+		require.False(t, s.Contains("node", "session", 1))
+		require.True(t, s.Contains("node", "session", 2))
+		require.True(t, s.HasPendingLosses(), "the evicted event remains exact durable coverage")
+	})
+}
+
+func TestDuplicateBatchIsRejectedBeforeJournalPublication(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("node", "session", 1, 2, 2))
+	require.ErrorContains(t, err, "duplicate batch identity")
+	require.False(t, s.Status().DurabilityUncertain)
+	require.NoError(t, s.Close())
+	reopened, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.Len(t, reopened.Batches(), 1)
+	require.NoError(t, reopened.Close())
+}
+
+func TestNormalizeLossesHandlesMaxUint64EndingRange(t *testing.T) {
+	losses := normalizeLosses([]*eventsv1.EventLoss{
+		{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: ^uint64(0) - 1, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: ^uint64(0)}}},
+		{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 5, Last: 5}}},
+	})
+	require.Len(t, losses, 1)
+	require.Equal(t, uint64(2), losses[0].GetEventSequenceRanges()[0].GetFirst())
+	require.Equal(t, ^uint64(0), losses[0].GetEventSequenceRanges()[0].GetLast())
+	require.Equal(t, ^uint64(0)-1, losses[0].GetCount())
+}
+
+func TestRetainLossesRejectsAggregateCountOverflow(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	loss := func(count uint64) *eventsv1.EventLoss {
+		return &eventsv1.EventLoss{
+			Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: count,
+			SourceNodeId: "node", ProducerSessionId: "session",
+		}
+	}
+	_, err = s.RetainLosses([]*eventsv1.EventLoss{loss(^uint64(0)), loss(1)})
+	require.ErrorContains(t, err, "overflows exact accounting")
+	require.False(t, s.HasPending())
 }
 
 func TestJournalIncompleteTailIsIgnoredButInteriorCorruptionFails(t *testing.T) {

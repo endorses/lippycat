@@ -181,11 +181,15 @@ func (r *EventRouter) loadExisting() error {
 				}
 				continue
 			}
+			key := eventRouteKey{nodeID: source, sessionID: session}
+			if _, exists := r.routes[key]; exists {
+				return errors.Join(fmt.Errorf("duplicate upstream event spool for producer %q session %q", source, session), spool.Close())
+			}
 			route, err := r.routeFromSpool(source, session, lastBatch, spool)
 			if err != nil {
 				return err
 			}
-			r.routes[eventRouteKey{nodeID: source, sessionID: session}] = route
+			r.routes[key] = route
 		}
 	}
 	return nil
@@ -247,6 +251,9 @@ func (r *EventRouter) newRoute(nodeID, sessionID string) (*eventRoute, error) {
 }
 
 func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64, spool *eventspool.Spool) (*eventRoute, error) {
+	if lastBatch == ^uint64(0) {
+		return nil, errors.Join(errors.New("upstream event spool batch sequence is exhausted; rotate the producer session"), spool.Close())
+	}
 	if err := spool.BindSessionPolicy(r.sessionPolicy(nodeID, sessionID)); err != nil {
 		return nil, errors.Join(fmt.Errorf("bind upstream event route session policy: %w", err), spool.Close())
 	}

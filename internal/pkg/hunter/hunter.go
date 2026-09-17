@@ -4,6 +4,7 @@ package hunter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -460,6 +461,9 @@ func (h *Hunter) initializeEventForwarding() error {
 	}
 	if err := spool.BindSessionPolicy(h.eventSessionPolicy(producer.SessionID())); err != nil {
 		return err
+	}
+	if lastBatch == ^uint64(0) {
+		return errors.New("event spool batch sequence is exhausted; rotate the producer session")
 	}
 	h.eventSpool = spool
 	forwarder, dispatcher, runtime, err := h.newEventPipeline(spool, producer, lastBatch+1)

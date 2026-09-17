@@ -399,7 +399,8 @@ func (s *Spool) rotateCheckpoint() error {
 	if err := s.publishCheckpoint(); err != nil {
 		if !errors.Is(err, ErrDurabilityUncertain) {
 			s.generation, s.txSequence = oldGeneration, oldSequence
-			_ = s.fs.remove(journalPath(s.config.Directory, newGeneration))
+			cleanupErr := s.retryCleanup([]string{filepath.Base(journalPath(s.config.Directory, newGeneration))})
+			return errors.Join(err, cleanupErr)
 		}
 		return err
 	}
@@ -424,19 +425,17 @@ func (s *Spool) publishCheckpoint() error {
 		return fmt.Errorf("publish event spool manifest: create: %w", err)
 	}
 	name := tmp.Name()
-	cleanup := func() { _ = s.fs.remove(name) }
-	if _, err = tmp.Write(payload); err == nil {
+	cleanup := func() error { return s.retryCleanup([]string{filepath.Base(name)}) }
+	if err = writeSpoolFile(tmp, payload); err == nil {
 		err = tmp.Sync()
 		s.metrics.Syncs++
 	}
 	closeErr := tmp.Close()
 	if err != nil || closeErr != nil {
-		cleanup()
-		return fmt.Errorf("publish event spool manifest: write: %v %v", err, closeErr)
+		return errors.Join(fmt.Errorf("publish event spool manifest: write: %v %v", err, closeErr), cleanup())
 	}
 	if err = s.fs.rename(name, filepath.Join(s.config.Directory, manifestFileName)); err != nil {
-		cleanup()
-		return fmt.Errorf("publish event spool manifest: rename: %w", err)
+		return errors.Join(fmt.Errorf("publish event spool manifest: rename: %w", err), cleanup())
 	}
 	if err = s.fs.syncDir(s.config.Directory); err != nil {
 		s.uncertain = true
@@ -452,23 +451,21 @@ func (s *Spool) createJournal(generation uint64) error {
 		return fmt.Errorf("create event spool journal: %w", err)
 	}
 	name := tmp.Name()
-	cleanup := func() { _ = s.fs.remove(name) }
+	cleanup := func() error { return s.retryCleanup([]string{filepath.Base(name)}) }
 	header := make([]byte, 20)
 	copy(header, journalMagic[:])
 	binary.BigEndian.PutUint32(header[8:12], manifestVersion)
 	binary.BigEndian.PutUint64(header[12:20], generation)
-	if _, err = tmp.Write(header); err == nil {
+	if err = writeSpoolFile(tmp, header); err == nil {
 		err = tmp.Sync()
 		s.metrics.Syncs++
 	}
 	closeErr := tmp.Close()
 	if err != nil || closeErr != nil {
-		cleanup()
-		return fmt.Errorf("create event spool journal: write: %v %v", err, closeErr)
+		return errors.Join(fmt.Errorf("create event spool journal: write: %v %v", err, closeErr), cleanup())
 	}
 	if err = s.fs.rename(name, journalPath(s.config.Directory, generation)); err != nil {
-		cleanup()
-		return fmt.Errorf("create event spool journal: rename: %w", err)
+		return errors.Join(fmt.Errorf("create event spool journal: rename: %w", err), cleanup())
 	}
 	if err = s.fs.syncDir(s.config.Directory); err != nil {
 		s.uncertain = true
@@ -485,15 +482,15 @@ func (s *Spool) writeRecord(created time.Time, b *eventsv1.ProtocolEventBatch, p
 		return record{}, fmt.Errorf("enqueue event batch: create temporary record: %w", err)
 	}
 	name := tmp.Name()
-	cleanup := func() { _ = s.fs.remove(name) }
+	cleanup := func() error { return s.retryCleanup([]string{filepath.Base(name)}) }
 	header := make([]byte, headerSize)
 	copy(header, recordMagic[:])
 	binary.BigEndian.PutUint16(header[8:10], recordVersion)
 	binary.BigEndian.PutUint64(header[10:18], uint64(createdNano))
 	binary.BigEndian.PutUint64(header[18:26], uint64(len(payload)))
 	binary.BigEndian.PutUint32(header[26:30], crc32.ChecksumIEEE(payload))
-	if _, err = tmp.Write(header); err == nil {
-		_, err = tmp.Write(payload)
+	if err = writeSpoolFile(tmp, header); err == nil {
+		err = writeSpoolFile(tmp, payload)
 	}
 	if err == nil {
 		err = tmp.Sync()
@@ -501,14 +498,12 @@ func (s *Spool) writeRecord(created time.Time, b *eventsv1.ProtocolEventBatch, p
 	}
 	closeErr := tmp.Close()
 	if err != nil || closeErr != nil {
-		cleanup()
-		return record{}, fmt.Errorf("enqueue event batch: write record: %v %v", err, closeErr)
+		return record{}, errors.Join(fmt.Errorf("enqueue event batch: write record: %v %v", err, closeErr), cleanup())
 	}
 	finalName := fmt.Sprintf("%020d-%s%s", createdNano, filepath.Base(name), recordExtension)
 	final := filepath.Join(s.config.Directory, finalName)
 	if err = s.fs.rename(name, final); err != nil {
-		cleanup()
-		return record{}, fmt.Errorf("enqueue event batch: publish record: %w", err)
+		return record{}, errors.Join(fmt.Errorf("enqueue event batch: publish record: %w", err), cleanup())
 	}
 	if err = s.fs.syncDir(s.config.Directory); err != nil {
 		s.uncertain = true
@@ -537,8 +532,10 @@ func (s *Spool) retryCleanup(names []string) error {
 			if first == nil {
 				first = &CleanupError{Operation: "remove", Path: path, Err: removeErr}
 			}
-		} else if removeErr == nil && removedBytes <= s.physicalBytes {
-			s.physicalBytes -= removedBytes
+		} else if removeErr == nil {
+			if countsAsPhysicalRecord(name) && removedBytes <= s.physicalBytes {
+				s.physicalBytes -= removedBytes
+			}
 			delete(s.orphanFailures, name)
 		} else if errors.Is(removeErr, os.ErrNotExist) {
 			delete(s.orphanFailures, name)
@@ -606,13 +603,28 @@ func (s *Spool) cleanupOrphans() error {
 	activeJournal := filepath.Base(journalPath(s.config.Directory, s.generation))
 	for _, e := range entries {
 		orphanRecord := strings.HasSuffix(e.Name(), recordExtension) && !active[e.Name()]
+		temporary := strings.HasPrefix(e.Name(), ".eventbatch-") || strings.HasPrefix(e.Name(), ".manifest-") || strings.HasPrefix(e.Name(), ".journal-")
 		journalCandidate := (e.Name() == journalFileName) || (strings.HasPrefix(e.Name(), "journal-") && strings.HasSuffix(e.Name(), ".log"))
 		orphanJournal := journalCandidate && e.Name() != activeJournal
-		if !e.IsDir() && (orphanRecord || orphanJournal) {
+		if !e.IsDir() && (orphanRecord || orphanJournal || temporary) {
 			names = append(names, e.Name())
 		}
 	}
 	return s.retryCleanup(names)
+}
+
+func writeSpoolFile(file spoolFile, payload []byte) error {
+	for len(payload) > 0 {
+		n, err := file.Write(payload)
+		if err != nil {
+			return err
+		}
+		if n <= 0 || n > len(payload) {
+			return io.ErrShortWrite
+		}
+		payload = payload[n:]
+	}
+	return nil
 }
 func (s *Spool) refreshPhysical() error {
 	entries, err := os.ReadDir(s.config.Directory)
@@ -621,7 +633,7 @@ func (s *Spool) refreshPhysical() error {
 	}
 	var total uint64
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || !countsAsPhysicalRecord(e.Name()) {
 			continue
 		}
 		info, err := e.Info()
@@ -629,9 +641,16 @@ func (s *Spool) refreshPhysical() error {
 			return err
 		}
 		if info.Size() > 0 {
+			if uint64(info.Size()) > ^uint64(0)-total {
+				return errors.New("refresh event spool physical bytes: overflow")
+			}
 			total += uint64(info.Size())
 		}
 	}
 	s.physicalBytes = total
 	return nil
+}
+
+func countsAsPhysicalRecord(name string) bool {
+	return strings.HasSuffix(name, recordExtension) || strings.HasPrefix(name, ".eventbatch-")
 }

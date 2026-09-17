@@ -25,7 +25,8 @@ configured byte limit.
 set. It controls `MaxBytes`, pending status, and drain completion.
 `physical_bytes` includes active records and unreferenced record or temporary
 files retained for retryable cleanup. Physical bytes are reported separately
-and never make an orphan logically pending.
+and never make an orphan logically pending. Manifest, journal, policy, and lock
+metadata are not part of this record-storage counter.
 
 ## Record format
 
@@ -138,6 +139,15 @@ them. Coverage is never truncated. When normalized coverage cannot accompany a
 normal batch within byte or collection limits, it is emitted in ordered
 loss-only batches, each independently satisfying receiver validation. A batch
 sequence advances only after the corresponding record is committed.
+
+The forwarding sink checks the durable pending set after each rejection. Once
+the complete set no longer fits one receiver-valid record, it publishes bounded
+loss-only prefixes before accepting more events. A valid event encountering a
+recovered oversized pending set triggers the same drain-and-retry behavior.
+Loss-only records obey the configured byte and age exhaustion policy: drop-new
+stops when no record fits, while drop-oldest atomically retains coverage for any
+record it replaces. Inherited wire loss reports are not counted again in local
+loss counters when their carrier record is later evicted.
 
 If neither an event nor its exact loss report can be committed because storage
 is exhausted or unhealthy, the spool enters terminal backpressure/fail-stop.

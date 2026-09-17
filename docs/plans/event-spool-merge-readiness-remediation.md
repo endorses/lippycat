@@ -520,6 +520,23 @@ Final verification passed:
   severity finding remains; the final multi-orphan cleanup finding was fixed
   and covered by regression tests.
 
+### Post-completion source audit
+
+A source-to-plan audit on 2026-09-17 found and corrected several gaps that the
+initial verification had not exercised: steady-state fragmented-loss draining,
+loss-only capacity enforcement, retained-loss identity validation, aggregate
+loss-count overflow, duplicate batch publication, inherited-loss counter
+duplication, recovery-state reset, short-write handling, record-only physical
+byte accounting, definite pre-publication orphan cleanup, and batch-sequence
+wrap guards. New regressions cover more than 4,096 fragmented loss ranges,
+bounded drop-new/drop-oldest loss flushing, restart-safe duplicate rejection,
+mixed identity rejection, aggregate counter overflow, maximum-range
+normalization, short writes, and stable physical-byte semantics. Focused normal
+and race tests for `eventspool`, `eventforwarding`, `processor/upstream`, and
+`protoadapter`, plus hunter and processor event-ingress tests, passed after the
+corrections. The complete `make test` target, including the `all` and `li`
+partitions and loopback integration tests, also passed outside the sandbox.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

@@ -166,6 +166,31 @@ func TestJournalWriteAndSyncFailureRecoveryOutcomes(t *testing.T) {
 	}
 }
 
+func TestDefiniteJournalFailureCleansPublishedRecordImmediately(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	fs := defaultFS()
+	open := fs.openFile
+	fs.openFile = func(path string, flags int, mode os.FileMode) (spoolFile, error) {
+		if filepath.Base(path) == journalFileName {
+			return nil, errors.New("injected journal open failure")
+		}
+		return open(path, flags, mode)
+	}
+	s.fs = fs
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.ErrorContains(t, err, "journal open failure")
+	require.False(t, result.Stored)
+	require.False(t, s.Status().DurabilityUncertain)
+	require.Zero(t, s.PhysicalBytes())
+	records, globErr := filepath.Glob(filepath.Join(dir, "*"+recordExtension))
+	require.NoError(t, globErr)
+	require.Empty(t, records)
+	s.fs = defaultFS()
+	require.NoError(t, s.Close())
+}
+
 func TestModeledPowerLossAtUnsyncedJournalBoundaryAllowsOnlyCompleteStates(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})
@@ -292,6 +317,73 @@ func TestRecordPublicationFailureMatrix(t *testing.T) {
 			require.NoError(t, s.Close())
 		})
 	}
+}
+
+func TestPublicationHandlesShortWritesWithoutError(t *testing.T) {
+	shorten := func(file spoolFile) spoolFile {
+		return &faultFile{spoolFile: file, write: func(payload []byte) (int, error) {
+			if len(payload) == 0 {
+				return 0, nil
+			}
+			limit := max(1, len(payload)/2)
+			return file.Write(payload[:limit])
+		}}
+	}
+
+	t.Run("initial journal", func(t *testing.T) {
+		fs := defaultFS()
+		create := fs.createTemp
+		fs.createTemp = func(directory, pattern string) (spoolFile, error) {
+			file, err := create(directory, pattern)
+			if err == nil && strings.HasPrefix(pattern, ".journal-") {
+				file = shorten(file)
+			}
+			return file, err
+		}
+		s, err := Open(Config{Directory: t.TempDir(), fs: fs})
+		require.NoError(t, err)
+		require.NoError(t, s.Close())
+	})
+
+	t.Run("record", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir()})
+		require.NoError(t, err)
+		fs := defaultFS()
+		create := fs.createTemp
+		fs.createTemp = func(directory, pattern string) (spoolFile, error) {
+			file, createErr := create(directory, pattern)
+			if createErr == nil && strings.HasPrefix(pattern, ".eventbatch-") {
+				file = shorten(file)
+			}
+			return file, createErr
+		}
+		s.fs = fs
+		_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+		require.NoError(t, err)
+		require.Len(t, s.Batches(), 1)
+		s.fs = defaultFS()
+		require.NoError(t, s.Close())
+	})
+
+	t.Run("checkpoint", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir(), CheckpointEvery: 1})
+		require.NoError(t, err)
+		fs := defaultFS()
+		create := fs.createTemp
+		fs.createTemp = func(directory, pattern string) (spoolFile, error) {
+			file, createErr := create(directory, pattern)
+			if createErr == nil && strings.HasPrefix(pattern, ".manifest-") {
+				file = shorten(file)
+			}
+			return file, createErr
+		}
+		s.fs = fs
+		result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+		require.True(t, result.Stored)
+		require.NoError(t, err)
+		s.fs = defaultFS()
+		require.NoError(t, s.Close())
+	})
 }
 
 func TestDropOldestCleanupFailureAtEachVictim(t *testing.T) {

@@ -100,6 +100,10 @@ func (c *Client) retainLosses(losses []*eventsv1.EventLoss) (eventspool.Retentio
 	return result, err
 }
 
+func (c *Client) pendingLossesRequireFlush(batchSequence uint64, semanticProfileRevision uint32) (bool, error) {
+	return c.spool.PendingLossesRequireFlush(c.config.SourceNodeID, c.config.ProducerSessionID, batchSequence, semanticProfileRevision)
+}
+
 func (c *Client) afterEnqueue(result eventspool.EnqueueResult, err error) {
 	if (result.Stored || result.Rejection != eventspool.RejectionNone || err == nil || errors.Is(err, eventspool.ErrRecordTooLarge)) && c.config.OnLoss != nil {
 		for _, loss := range result.Losses {

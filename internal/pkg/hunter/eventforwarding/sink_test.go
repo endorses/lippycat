@@ -159,6 +159,88 @@ func TestSinkOversizedEventRetainsLossAndReusesSequenceForValidEvent(t *testing.
 	require.Equal(t, uint64(1), batches[0].GetStats().GetLosses()[0].GetEventSequenceRanges()[0].GetFirst())
 }
 
+func TestSinkFlushesFragmentedDurableLossesBeforeValidEvent(t *testing.T) {
+	spool, err := eventspool.Open(eventspool.Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spool.Close()) })
+	producer, err := events.NewLiveProducer("hunter-a")
+	require.NoError(t, err)
+	client, err := New(Config{SourceNodeID: "hunter-a", ProducerSessionID: producer.SessionID()}, spool)
+	require.NoError(t, err)
+	sink, err := NewSink(client, 1, 1)
+	require.NoError(t, err)
+
+	losses := make([]*eventsv1.EventLoss, 0, 4097)
+	for i := uint64(0); i < 4097; i++ {
+		sequence := uint64(10_000) + i*2
+		losses = append(losses, &eventsv1.EventLoss{
+			Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+			SourceNodeId: "hunter-a", ProducerSessionId: producer.SessionID(),
+			EventSequenceRanges: []*eventsv1.SequenceRange{{First: sequence, Last: sequence}},
+		})
+	}
+	retained, err := client.retainLosses(losses)
+	require.NoError(t, err)
+	require.True(t, retained.Committed)
+
+	envelope := events.Envelope{
+		Timestamp: time.Unix(1, 0), NodeID: "hunter-a", CaptureScope: events.CaptureScopeFiltered,
+		Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.53"), SourcePort: 53000, DestinationPort: 53},
+	}
+	require.NoError(t, sink.HandleEvent(context.Background(), producer.Assign(events.NewDNSEvent(envelope))))
+
+	batches, err := spool.BatchesAfter("hunter-a", producer.SessionID(), 0, 3)
+	require.NoError(t, err)
+	require.Len(t, batches, 2)
+	require.Empty(t, batches[0].GetEvents())
+	require.Len(t, batches[0].GetStats().GetLosses()[0].GetEventSequenceRanges(), 4096)
+	require.Len(t, batches[1].GetEvents(), 1)
+	require.Equal(t, uint64(1), batches[1].GetEvents()[0].GetEventSequence())
+	require.Equal(t, uint64(2), batches[1].GetBatchSequence())
+	require.Len(t, batches[1].GetStats().GetLosses()[0].GetEventSequenceRanges(), 1)
+	require.False(t, spool.HasPendingLosses())
+}
+
+func TestSinkDoesNotRecountInheritedLossesOnRepeatedEviction(t *testing.T) {
+	now := time.Unix(1, 0)
+	spool, err := eventspool.Open(eventspool.Config{
+		Directory: t.TempDir(), Policy: eventspool.DropOldest, MaxAge: time.Second,
+		Clock: func() time.Time { return now },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spool.Close()) })
+	producer, err := events.NewLiveProducer("hunter-a")
+	require.NoError(t, err)
+	var transportLoss uint64
+	client, err := New(Config{
+		SourceNodeID: "hunter-a", ProducerSessionID: producer.SessionID(),
+		OnLoss: func(kind eventsv1.LossKind, count uint64) {
+			if kind == eventsv1.LossKind_LOSS_KIND_TRANSPORT {
+				transportLoss += count
+			}
+		},
+	}, spool)
+	require.NoError(t, err)
+	sink, err := NewSink(client, 1, 1)
+	require.NoError(t, err)
+	envelope := events.Envelope{
+		Timestamp: time.Unix(1, 0), NodeID: "hunter-a", CaptureScope: events.CaptureScopeFiltered,
+		Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.53"), SourcePort: 53000, DestinationPort: 53},
+	}
+
+	require.NoError(t, sink.HandleEvent(context.Background(), producer.Assign(events.NewDNSEvent(envelope))))
+	now = now.Add(2 * time.Second)
+	require.NoError(t, sink.HandleEvent(context.Background(), producer.Assign(events.NewDNSEvent(envelope))))
+	require.Equal(t, uint64(1), transportLoss)
+	now = now.Add(2 * time.Second)
+	require.NoError(t, sink.HandleEvent(context.Background(), producer.Assign(events.NewDNSEvent(envelope))))
+	require.Equal(t, uint64(2), transportLoss, "the inherited first loss must not be counted again")
+
+	wireLosses := spool.Batches()[0].GetStats().GetLosses()
+	require.Len(t, wireLosses, 1)
+	require.Equal(t, uint64(2), wireLosses[0].GetCount())
+}
+
 func TestSinkFlushesRecoveredOversizedLossAsLossOnlyBatch(t *testing.T) {
 	dir := t.TempDir()
 	producer, err := events.NewLiveProducer("hunter-a")

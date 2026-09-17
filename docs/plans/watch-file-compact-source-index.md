@@ -1,6 +1,10 @@
 # Compact source-backed offline index implementation plan
 
-Status: Phases 0–4 complete; phase 5 and the remaining phase-6 gates are pending.
+Status: Phases 0–4 and the completed-open performance follow-ups are complete;
+Phase 5 and the remaining Phase 6 gates are pending.
+
+All unqualified phase references in this document refer to this compact
+source-backed index plan, not the earlier scalable offline dataset plan.
 Scope: `lc watch file`.
 
 Phase 0 establishes the baseline, injectable differential oracle, measurement
@@ -23,10 +27,10 @@ Read these documents before implementation:
 
 | Document                                                                                     | Role                                                                                |
 | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [Compact index investigation](../research/watch-file-compact-index-design.md)                | Primary design, feasibility measurements, source lifetime and readiness constraints |
-| [Real-capture performance investigation](../research/watch-file-real-capture-performance.md) | Production baseline, profiling and reproduction command                             |
-| [Offline contracts](../design/watch-file-offline-contracts.md)                               | Field/filter semantics, ownership, budgets and publication behavior                 |
-| [Current storage format](../design/offline-storage-format.md)                                | Existing codec and integrity contract to replace explicitly                         |
+| [Compact index investigation](../research/watch-file-compact-index-design.md) | Primary design, feasibility measurements, source lifetime and readiness constraints |
+| [Compact-index performance record](../research/watch-file-compact-performance.md) | Production baseline, optimization history, profiling and reproduction commands |
+| [Offline contracts](../design/watch-file-offline-contracts.md) | Field/filter semantics, ownership, budgets and publication behavior |
+| [Current storage format](../design/offline-storage-format.md) | Existing codec and integrity contract to replace explicitly |
 
 The reported capture is 323,454,505 bytes. The current normalizer emits 579,990
 logical packets and 44,873 events; the measured warm full-index median is 10.26 s
@@ -189,7 +193,7 @@ production storage. All exceptional retained content is included in accounting.
 Phase-3 implementation and independent review passed the full differential
 oracle, including all 579,990 private-capture logical records. Benchmark and
 oracle commands are retained in the
-[performance investigation](../research/watch-file-compact-performance.md#reproduction).
+[performance investigation](../research/watch-file-compact-performance.md#phase-3-reproduction).
 The unshipped v2 layout was refined to combined typed columns, block-local arenas
 and an authenticated direct row directory; the storage specification describes
 the actual format. The compact candidate remains internal and completed-only.
@@ -210,12 +214,30 @@ record budget. The range uses constant memory; sparse amendments may validate
 intervening rows. Regressions cover oversized combined details, reverse-order
 amendments, absent manifests after failure and balanced cleanup.
 
-The [performance follow-up](../research/watch-file-compact-performance.md)
-reduced measured compact readiness from 21.94 s to 10.56 s, completed storage
-from 301.8 MB to 89.5 MB and allocations from 9.24 GB to 6.10 GB. Full private
-parity passed after correcting nondeterministic SDP endpoint presentation.
-The three-second engineering target remains unmet; these results do not complete
-the remaining Phase 4 query and production-cutover gates.
+### Phase 3 compact-storage performance follow-up
+
+This completed follow-up addressed Phase 3's measured serialization, allocation
+and storage gaps without changing completed-only readiness or selecting the
+production backend.
+
+- [x] Record a current baseline and capture identity using fresh benchmark processes.
+- [x] Remove repeated schema reflection and row decode/re-encode work from block
+      construction.
+- [x] Reduce completed block storage with bounded encoding while preserving
+      checksums and direct lookup.
+- [x] Verify semantic parity, malformed-input handling, budgets, ownership and
+      race checks.
+- [x] Measure three fresh runs per backend, document gains and remaining
+      bottlenecks.
+- [x] Format and commit only these changes and the verified plan/results.
+
+The [measured results](../research/watch-file-compact-performance.md) reduced
+compact readiness from 21.94 s to 10.56 s, completed storage from 301.8 MB to
+89.5 MB and allocations from 9.24 GB to 6.10 GB. Full private parity passed after
+correcting nondeterministic SDP endpoint presentation. The 100 MB storage target
+and sampled 10% legacy regression tolerances were met. The three-second
+engineering target remained unmet, and this work did not complete the remaining
+Phase 4 query and production-cutover gates.
 
 ## Phase 4 — Accelerate complete-file queries and cut over
 
@@ -249,7 +271,7 @@ tolerances; storage was 89,456,432 bytes and export reached 163.417203 MB/s vers
 128.771119 MB/s legacy. These measurements justified cutover on parity, resource
 and storage gains while retaining the timing gaps for further work, without
 claiming the three-second target. The reproduction command is retained in the
-[performance investigation](../research/watch-file-compact-performance.md#reproduction). Publication still
+[performance investigation](../research/watch-file-compact-performance.md#phase-3-reproduction). Publication still
 waits for analyzer EOF; phase 5 has not begun.
 
 Phase-4 follow-up assessment (2026-09-06) used three independent sub-agents and
@@ -260,6 +282,103 @@ errors, preserving other compiler errors and backend budgets. The regression
 uses 65 `NOT` operators followed by `impossible`; coverage also includes a
 257-filter stack, oversized text and invalid numeric comparisons.
 No additional phase-4 defect was substantiated.
+
+## Completed-open performance follow-ups
+
+These completed follow-ups were performed after the Phase 4 production cutover.
+They optimize the completed-analysis path and do not implement Phase 5's
+progressive base publication. Each follow-up kept preexisting working-tree edits
+separate. Private captures and profiles remain outside Git.
+
+### Three-second usable capture opening
+
+Target: open the reported 323,454,505-byte capture and provide complete usable
+packet browsing, filtering and navigation in approximately three seconds while
+preserving normalized identity, protocol semantics, source integrity, bounded
+resources and cancellation.
+
+- [x] Establish fresh-process completed-ready measurements and profile the
+      private capture.
+- [x] Remove measured construction and analysis overhead without weakening
+      correctness or resource limits.
+- [x] Independently review changes and run synthetic and private-capture
+      differential verification.
+- [x] Measure at least three fresh unprofiled runs and usable-page/query endpoints;
+      report any remaining gap honestly.
+- [x] Update verification documentation, format changed files and commit only
+      scoped changes.
+
+The existing compact completed benchmark and acceptance runner were used. No
+base-only or partial result was relabeled as completed analysis. Three warm
+fresh-process completed-ready samples were 3.603, 3.622 and 3.723 seconds, for a
+3.622-second median. Full private-capture differential verification, the affected
+package race suite and the complete build passed. The target remained unmet; see
+the [measurements and remaining gap](../research/watch-file-compact-performance.md#completed-open-optimization).
+
+### Bounded writer construction and compression overlap
+
+This follow-up improved completed capture opening without changing schema bytes,
+source integrity, ordered analysis, bounded resources or small-budget behavior.
+
+- [x] Establish a fresh comparison binary and capture measurements before editing.
+- [x] Record column boundaries during encoding to avoid reparsing completed rows;
+      verify exact block/schema and budget parity.
+- [x] Prototype bounded overlap of block compression with construction, preserving
+      FIFO output, amendments, failure cleanup and finalization.
+- [x] Compare candidates in interleaved fresh-process runs; discard changes
+      without a worthwhile measured benefit.
+- [x] Independently review retained changes and run affected package/race tests
+      plus the private capture differential oracle.
+- [x] Run the complete acceptance matrix, document results and remaining
+      limitations, and format the scoped implementation and plan files.
+
+Experiments that could not meet ownership or resource requirements stayed in
+temporary overlays. Production retained its compression and integrity checks.
+
+The final paired completed-ready median was 3.178 seconds versus 3.712 seconds,
+a 14.4% improvement; complete acceptance median was 3.171 seconds. The index
+remained 89,246,448 bytes. Full private record/query/export parity, affected race
+suites, isolated integration and build checks passed. See the
+[measured results](../research/watch-file-compact-performance.md#writer-construction-and-compression-overlap).
+
+### VoIP-heavy capture opening
+
+The initial investigation reproduced the reported roughly 51-second opening of
+`gtest6.pcap` and preserved protocol analysis, call state, source integrity and
+bounded storage.
+
+- [x] Reproduce the slow completed-open path and identify its dominant cost with
+      a CPU profile.
+- [x] Implement only evidence-backed improvements and compare fresh-process measurements.
+- [x] Verify record, metadata, call, query and export parity, resource behavior,
+      and relevant race tests.
+- [x] Check the previous mixed-traffic capture for regression, rebuild, and
+      document results.
+
+The clean original sample took 55.04 seconds; the final three-run candidate
+median was 7.616 seconds. Allocations fell from 61.1 GB to 5.96 GB and the index
+remained 314,252,031 bytes. The previous mixed-traffic capture remained around
+3.2 seconds. Full private-oracle, broad race, isolated integration and build
+checks passed. The few-second goal for this VoIP capture remained unmet. See the
+[results and measurement identity](../research/watch-file-compact-performance.md#voip-heavy-capture).
+
+### Remaining VoIP opening costs
+
+This second VoIP follow-up targeted the remaining completed-open costs after the
+call-registry and metadata-boundary fixes while preserving normalization,
+ordering, protocol metadata, integrity checks and resource limits.
+
+- [x] Profile the current implementation and identify avoidable remaining work.
+- [x] Prototype measured improvements and retain only demonstrated wins.
+- [x] Independently verify correctness, resource behavior and relevant race tests.
+- [x] Compare both private captures, rebuild, and document measured results and
+      limits.
+
+Completed VoIP opening improved from a 7.643-second median to 5.398 seconds;
+mixed traffic measured 3.106 versus 3.144 seconds. Both final private-capture
+parity checks, focused and broad race tests, independent isolated verification,
+and the build passed. See the
+[measurements and limitations](../research/watch-file-compact-performance.md#remaining-voip-costs).
 
 ## Phase 5 — Publish a complete base before analysis finishes
 
@@ -290,13 +409,11 @@ as absent, and a pinned operation sees one immutable generation/revision pair.
 
 ## Validation corpus and acceptance matrix
 
-The profile-driven completed-open follow-up was brought forward at the user's
-request, without implementing phase 5. Ordered stateful analysis remains serial;
-bounded analysis/storage workers and allocation reductions lower warm completion
-to a 3.622 s median. The 3.0 s target remains unmet. See
-[implementation and verification](../research/watch-file-three-second-open.md)
-and the [scoped plan](watch-file-three-second-open.md). This does not complete
-phase 6 or its phase-5-dependent acceptance gates.
+The profile-driven completed-open work above was brought forward at the user's
+request without implementing Phase 5. Ordered stateful analysis remains serial;
+bounded analysis/storage workers and allocation reductions first lowered warm
+completion to a 3.622-second median, with later follow-ups recorded above. This
+does not complete Phase 6 or its Phase-5-dependent acceptance gates.
 
 Synthetic fixtures must be distributable; keep the private capture and profile
 artifacts local. If the reported capture is unavailable, complete synthetic

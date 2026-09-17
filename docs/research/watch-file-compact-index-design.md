@@ -1,7 +1,8 @@
 # Compact capture indexing: design and feasibility
 
-Date: 2026-09-06. This is a design investigation, not an implemented replacement
-for the offline backend. The earlier performance changes remain separate.
+Date: 2026-09-06. This is the design and feasibility record. Implementation
+measurements and later optimization follow-ups are consolidated in the
+[compact-index performance record](watch-file-compact-performance.md).
 
 ## Recommendation
 

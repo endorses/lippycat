@@ -1,8 +1,9 @@
-# Offline dataset phase 0 baseline
+# Offline dataset baseline and Phase 1–2 comparisons
 
 Measured 2026-09-05 against the existing reader and event implementation at
 `fff6c68f`, with the phase 0 benchmark harness added. These measurements establish
 comparison workloads, not a claim that a disk-backed index already exists.
+Phase references in this report belong to the scalable offline dataset plan.
 
 ## Environment and method
 

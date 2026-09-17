@@ -2,8 +2,11 @@
 
 **Date:** 2026-09-05
 
-**Status:** Phases 0–6 implemented and verified; real-capture corrections completed
-in [ordering and navigation](watch-file-ordering-and-navigation.md).
+**Status:** Phases 0–6 implemented and verified; real-capture corrections completed.
+
+Phase references in this document refer to the scalable offline dataset phases
+defined below. Later compact-index phases are tracked separately in
+[the compact source-backed index plan](watch-file-compact-source-index.md).
 
 **Code baseline:** `fff6c68f`
 
@@ -98,7 +101,7 @@ results in disk accounting. Refuse oversized records explicitly if they cannot
 fit the configured allocation limit.
 
 The original implementation used a strict heap merge and rejected source timestamp
-regressions. The [ordering and navigation follow-up](watch-file-ordering-and-navigation.md)
+regressions. The [ordering and navigation correction](#ordering-and-navigation-correction)
 supersedes that policy for watch datasets: normalize sources in original record
 order, then externally sort logical packets by timestamp, source argument index
 and original logical sequence before stateful analysis. Scratch storage shares
@@ -755,6 +758,74 @@ methodology. Fresh-process 100,000/1,000,000-packet storage runs used
 throughput gates. No runtime defects or other Phase 6 implementation gaps were
 confirmed.
 
+## Ordering and navigation correction
+
+Real-capture testing after Phase 6 exposed incomplete viewport loads after page
+and end jumps, and showed that the strict timestamp policy rejected valid captures
+with small backward steps. The capture footer also needed to retain its reserved
+toast space. This is a post-release correction to this plan, not another numbered
+phase.
+
+- [x] Load visible rows above and below selection after page and top/bottom jumps;
+      preserve bounded-cache fallback and obsolete-request cancellation.
+- [x] Restore blank toast space; show dataset resource information in a card at
+      the bottom of Statistics, after the existing dashboard cards.
+- [x] Order normalized offline packets using bounded disk storage before analysis,
+      preserving timestamps, source identity and deterministic ties. Account for
+      sorting files under the shared session disk budget and clean up on failure.
+- [x] Integrate cancellable ordering progress into the model-owned open workflow;
+      update operator documentation and the previous strict-ordering contract.
+- [x] Verify synthetic regressions, both build tags, concurrency, and the user's
+      original capture. Independently review changes, format and commit.
+
+The strict streaming reader remains available for existing non-dataset callers.
+Offline watch datasets accept arbitrary timestamp order without silently changing
+timestamps, dropping packets or allocating packet-count-sized arrays in RAM.
+
+Verification completed on 2026-09-05:
+
+- Full capture/offline/TUI/watch suites passed uncached under `all` and `tui`.
+  Full offline/TUI race suites and focused capture sorting race checks passed.
+- Hunter, processor, tap, CLI, all and TUI binaries built successfully.
+- Independent reviews checked the viewport regression, exact ordering/metadata,
+  bounded scratch ownership, cancellation and cleanup retry, and Statistics.
+- The original private `gtest6.pcap` indexed directly into 316,382 logical packets,
+  matching the previously ordered copy; first/last details loaded successfully.
+  No private capture data was added to the repository.
+- Fresh-process one-source indexer runs at 100,000 and 1,000,000 packets used
+  93,580 and 95,820 KiB peak RSS (+2.19 MiB), with 9,986,080 and 10,052,416 bytes
+  live heap. Throughput was 46,096 and 46,146 packets/s; cooperative cancellation
+  and cleanup took 0.816 and 1.902 ms. Each retained 10,000 events. Root checked
+  the raw benchmark logs and confirmed the previous scaling/cancellation gates.
+
+These are fixed-flow, warm-filesystem reference runs, not universal RSS or latency
+limits. Sorting adds a read/spool and merge pass before analysis, including for
+already chronological files. Temporary raw bytes plus two 64-byte-per-packet key
+streams share the configured disk budget; the obsolete key stream is removed
+before replay and all sorting files are removed before Ready. The previous Phase 6
+throughput measurements describe the earlier strict streaming path.
+
+The Statistics placement follow-up moved offline diagnostics into the shared
+dashboard card component after existing content. Regression coverage verifies
+unchanged existing-card positions and card widths at 80, 120 and 200 columns;
+component suites pass under `all` and `tui`.
+
+A CPU-profiled run of the original private capture completed in 67.39 seconds for
+316,382 logical packets. The profile recorded 100.56 CPU-seconds (about 1.49
+average cores, including GC). `CallTracker.touchCallLocked` accounted for 53.70%
+cumulative CPU, while background GC accounted for 26.42%. Each newly seen call
+copied all active calls and rescanned them to discover eviction, making insertion
+cost scale with retained call count and creating allocation pressure. Direct
+eviction reporting from the registry was therefore the first supported follow-up;
+`Builder.Append` accounted for 4.76% cumulative CPU.
+
+Concurrency already existed in replay production, the ordered analysis/storage
+consumer, event dispatch and sink workers. Source preprocessing and sorting were
+sequential, and per-packet event flushing synchronized the analysis path. The
+profile supported removing the repeated call-registry scans before adding general
+packet workers. The later implementation and measurements are recorded in the
+[compact-index completed-open follow-ups](watch-file-compact-source-index.md#completed-open-performance-follow-ups).
+
 ## Indexing performance follow-up
 
 - [x] Measure and remove redundant per-packet event flush barriers while preserving
@@ -868,4 +939,5 @@ These are follow-up work, not release blockers for phases 0–6.
       persistence separately and update completeness labels only when delivered.
 - [ ] Extend the supported source count beyond 64; research explicit clock
       offsets, reorder windows and optional deduplication as separate user-visible
-      policies. Non-monotonic watch sources are handled by the ordering follow-up.
+      policies. Non-monotonic watch sources are handled by the ordering correction
+      above.

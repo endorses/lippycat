@@ -191,7 +191,8 @@ cleanup succeeds. Reading, sorting and replay are cancellable. The existing
 strict heap-streaming API still rejects regressions for non-dataset callers.
 Reject more than the supported source limit before opening readers.
 
-See [ordering and navigation corrections](../plans/watch-file-ordering-and-navigation.md)
+See the
+[ordering and navigation correction](../plans/watch-file-scalable-offline-dataset.md#ordering-and-navigation-correction)
 for the change superseding the initial strict-rejection policy.
 
 ## Compact source index contracts
@@ -202,8 +203,8 @@ Publication still waits for complete ordered analysis and finalized metadata;
 phase-5 progressive readiness is separate work. See the
 [full field inventory](watch-file-packet-field-inventory.md) and
 [implemented v2 wire specification](offline-storage-format.md).
-The baseline environment and immutable revision/working-tree identity are recorded
-in [baseline identity](../research/watch-file-phase0-baseline-identity.json).
+The baseline environment and revision/working-tree identity are recorded in the
+[Phase 0 baseline](../research/watch-file-phase0-baseline.md#baseline-identity-and-environment).
 
 The unshipped v2 layout was refined during implementation: finalized base and
 analysis columns share typed blocks, text uses block-local arenas, and a

@@ -35,15 +35,6 @@ The baseline is commit `370761c7174064c694413371c233c16d185e270d` plus the
 pre-existing performance working tree. The binary `git diff --binary HEAD`
 over its ten modified tracked files has SHA-256
 `6a8f24a22adf641ac607268f8c79475a40d6005acbfcd992ea9f213c5fa95e23`.
-[The baseline identity manifest](watch-file-phase0-baseline-identity.json)
-records every modified and untracked baseline file separately, including the
-original benchmark and research. Its original canonical JSON bytes have SHA-256
-`483502ed7c04ebd17f0b593a94075d8550b0d718a6049c5b2bb00b9a045e8210` (before
-documentation formatting). These pre-existing files are preserved and excluded
-from the Phase 0 implementation commit, except the explicitly requested plan.
-Local recovery copies and the exact patch are in `/tmp/lippycat-phase0-baseline`;
-hashes identify the baseline but do not make an uncommitted patch retrievable
-from Git alone. Preserve that patch alongside results when moving hosts.
 
 | Setting                     | Recorded value                                                                                                                                              |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |

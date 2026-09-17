@@ -743,6 +743,10 @@ The following decisions are recommended:
 
 ## Related Documents
 
+- [Implementation plan](../plans/watch-file-scalable-offline-dataset.md)
+- [Consumer and retained-history audit](watch-file-offline-consumer-audit.md)
+- [Phase 0 baseline and Phase 1–2 comparisons](watch-file-offline-baseline.md)
+- [Phase 6 acceptance measurements](watch-file-offline-phase6-benchmarks.md)
 - `docs/research/multi-file-pcap-support.md`
 - `docs/research/tui-generic-filtering.md`
 - `docs/research/tui-packet-freeze-analysis.md`

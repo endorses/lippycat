@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 )
 
 // Sink connects the shared event dispatcher to the durable forwarding client.
@@ -21,7 +23,16 @@ type Sink struct {
 	nextBatchSequence       uint64
 	semanticProfileRevision uint32
 	pendingLosses           []*eventsv1.EventLoss
+	failed                  error
 }
+
+type fatalForwardingError struct{ err error }
+
+func (e *fatalForwardingError) Error() string {
+	return fmt.Sprintf("event forwarding stopped: %v", e.err)
+}
+func (e *fatalForwardingError) Unwrap() error         { return e.err }
+func (*fatalForwardingError) TerminalSinkError() bool { return true }
 
 func NewSink(client *Client, firstBatchSequence uint64, semanticProfileRevision uint32) (*Sink, error) {
 	if client == nil {
@@ -39,6 +50,10 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failed != nil {
+		s.retainFailedEventLocked(event)
+		return &fatalForwardingError{err: s.failed}
+	}
 	env := event.Envelope()
 	if env.NodeID != s.client.config.SourceNodeID || env.ProducerSessionID != s.client.config.ProducerSessionID || env.EventSequence == 0 {
 		return fmt.Errorf("forward event: missing or mismatched assigned producer identity")
@@ -50,53 +65,159 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 			return fmt.Errorf("forward event: encode batch: %w", err)
 		}
 		s.client.reportLoss(eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, 1)
-		s.pendingLosses = append(s.pendingLosses, &eventsv1.EventLoss{
+		loss := &eventsv1.EventLoss{
 			Kind: eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, Count: 1,
 			SourceNodeId: env.NodeID, ProducerSessionId: env.ProducerSessionID,
 			EventSequenceRanges: []*eventsv1.SequenceRange{{First: env.EventSequence, Last: env.EventSequence}},
-		})
+		}
+		retention, retainErr := s.client.retainLosses([]*eventsv1.EventLoss{loss})
+		if retention.Committed {
+			if retainErr = nonCleanupError(retainErr); retainErr != nil {
+				return s.failLocked(retainErr)
+			}
+			return nil
+		}
+		s.pendingLosses = append(s.pendingLosses, loss)
+		if retainErr != nil {
+			return s.failLocked(retainErr)
+		}
 		return nil
 	}
 	result, err := s.client.Enqueue(batch)
+	err = s.applyEnqueueResult(result, err)
 	if err != nil {
-		return err
+		if !result.Stored && result.Rejection == eventspool.RejectionNone {
+			s.retainFailedEventLocked(event)
+		}
+		return s.failLocked(err)
 	}
+	return nil
+}
+
+func (s *Sink) failLocked(err error) error {
+	if s.failed == nil {
+		s.failed = err
+	}
+	return &fatalForwardingError{err: err}
+}
+
+func (s *Sink) retainFailedEventLocked(event events.Event) {
+	if event == nil {
+		return
+	}
+	env := event.Envelope()
+	if env.NodeID != s.client.config.SourceNodeID || env.ProducerSessionID != s.client.config.ProducerSessionID || env.EventSequence == 0 {
+		return
+	}
+	s.client.reportLoss(eventsv1.LossKind_LOSS_KIND_TRANSPORT, 1)
+	s.appendPendingLossLocked(&eventsv1.EventLoss{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: env.NodeID, ProducerSessionId: env.ProducerSessionID,
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: env.EventSequence, Last: env.EventSequence}},
+	})
+}
+
+func (s *Sink) appendPendingLossLocked(loss *eventsv1.EventLoss) {
+	if loss == nil || len(loss.GetEventSequenceRanges()) != 1 {
+		s.pendingLosses = append(s.pendingLosses, loss)
+		return
+	}
+	if len(s.pendingLosses) != 0 {
+		previous := s.pendingLosses[len(s.pendingLosses)-1]
+		previousRanges := previous.GetEventSequenceRanges()
+		next := loss.GetEventSequenceRanges()[0]
+		adjacent := false
+		if len(previousRanges) == 1 {
+			adjacent = next.GetFirst() <= previousRanges[0].GetLast() || (previousRanges[0].GetLast() != ^uint64(0) && next.GetFirst() == previousRanges[0].GetLast()+1)
+		}
+		if previous.GetKind() == loss.GetKind() && previous.GetSourceNodeId() == loss.GetSourceNodeId() && previous.GetProducerSessionId() == loss.GetProducerSessionId() && adjacent {
+			if next.GetLast() > previousRanges[0].GetLast() {
+				previousRanges[0].Last = next.GetLast()
+			}
+			previous.Count = previousRanges[0].GetLast() - previousRanges[0].GetFirst() + 1
+			return
+		}
+	}
+	s.pendingLosses = append(s.pendingLosses, loss)
+}
+
+func (s *Sink) LockDropBoundary()   { s.mu.Lock() }
+func (s *Sink) UnlockDropBoundary() { s.mu.Unlock() }
+func (s *Sink) HandleDroppedEventLocked(event events.Event, _ time.Time) {
+	s.retainFailedEventLocked(event)
+}
+func (s *Sink) HandleFailedEvent(event events.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retainFailedEventLocked(event)
+}
+
+func (s *Sink) applyEnqueueResult(result eventspool.EnqueueResult, err error) error {
 	if result.Stored {
 		s.nextBatchSequence++
 		// Drop-oldest losses are attached to the newly stored batch by the
 		// spool, so they must not be deferred to a later batch.
 		s.pendingLosses = nil
-	} else {
-		// drop_new loses this event; preserve both earlier and current exact
-		// ranges for the next successfully admitted batch.
-		s.pendingLosses = append(s.pendingLosses, cloneLosses(result.Losses)...)
+		return nonCleanupError(err)
 	}
-	return nil
+	if result.Rejection != eventspool.RejectionNone {
+		// Rejected batches retain their exact event and inherited loss coverage
+		// durably in the spool. The next admitted batch keeps this sequence and
+		// receives that coverage exactly once.
+		s.pendingLosses = nil
+		return handledRejectionError(err)
+	}
+	return err
 }
 
 func (s *Sink) Flush(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.pendingLosses) == 0 {
-		return nil
+	if len(s.pendingLosses) > 0 {
+		batch := &eventsv1.ProtocolEventBatch{
+			SourceNodeId: s.client.config.SourceNodeID, ProducerSessionId: s.client.config.ProducerSessionID,
+			BatchSequence: s.nextBatchSequence, SemanticProfileRevision: s.semanticProfileRevision,
+			Stats: &eventsv1.EventBatchStats{Losses: cloneLosses(s.pendingLosses)},
+		}
+		result, err := s.client.Enqueue(batch)
+		if err = s.applyEnqueueResult(result, err); err != nil {
+			return err
+		}
+		if !result.Stored && result.Rejection == eventspool.RejectionNone {
+			return fmt.Errorf("flush event loss reports: spool made no progress")
+		}
 	}
-	batch := &eventsv1.ProtocolEventBatch{
-		SourceNodeId: s.client.config.SourceNodeID, ProducerSessionId: s.client.config.ProducerSessionID,
-		BatchSequence: s.nextBatchSequence, SemanticProfileRevision: s.semanticProfileRevision,
-		Stats: &eventsv1.EventBatchStats{Losses: cloneLosses(s.pendingLosses)},
+	for s.client.spool.HasPendingLosses() {
+		result, err := s.client.flushPendingLosses(s.nextBatchSequence, s.semanticProfileRevision)
+		if result.Stored {
+			if err = s.applyEnqueueResult(result, err); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("flush event loss reports: spool made no progress")
 	}
-	result, err := s.client.Enqueue(batch)
-	if err != nil {
-		return err
-	}
-	if !result.Stored {
-		return fmt.Errorf("flush unsupported-event loss report: event spool rejected batch")
-	}
-	s.nextBatchSequence++
-	s.pendingLosses = nil
 	return nil
 }
-func (s *Sink) Close(context.Context) error { return nil }
+func (s *Sink) Close(ctx context.Context) error { return s.Flush(ctx) }
+
+func nonCleanupError(err error) error {
+	var cleanupErr *eventspool.CleanupError
+	if errors.As(err, &cleanupErr) {
+		return nil
+	}
+	return err
+}
+
+func handledRejectionError(err error) error {
+	if errors.Is(err, eventspool.ErrRecordTooLarge) {
+		return nil
+	}
+	return nonCleanupError(err)
+}
 
 func cloneLosses(input []*eventsv1.EventLoss) []*eventsv1.EventLoss {
 	out := make([]*eventsv1.EventLoss, len(input))

@@ -44,6 +44,14 @@ type QueueMetric struct {
 
 type flowControlExcludedSink interface{ ExcludeFromFlowControl() }
 
+// terminalSinkError marks a durable sink failure after which admitting more
+// locally produced events would silently widen an unrecorded delivery gap.
+type terminalSinkError interface{ TerminalSinkError() bool }
+
+// failedEventSink records the exact identity of events that were already
+// accepted before a terminal sink failure was observed.
+type failedEventSink interface{ HandleFailedEvent(Event) }
+
 // admissionAwareSink can reject work that predates a live-only consumer's
 // admission boundary even when the event waited in a dispatcher sink queue.
 type admissionAwareSink interface {
@@ -91,6 +99,7 @@ type Dispatcher struct {
 	cancel                                                 context.CancelFunc
 	dispatchWG, sinkWG                                     sync.WaitGroup
 	enqueued, dispatched, dropped, sinkDropped, sinkErrors atomic.Uint64
+	terminal                                               atomic.Bool
 }
 
 func NewDispatcher(cfg Config) (*Dispatcher, error) {
@@ -177,6 +186,11 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 	item := dispatchItem{event: ev, admittedAt: time.Now()}
 	observers := d.lockDropObservers(ev)
 	defer unlockDropObservers(observers)
+	if d.terminal.Load() {
+		d.dropped.Add(1)
+		notifyDropObserversLocked(observers, ev, item.admittedAt)
+		return false
+	}
 	select {
 	case d.queue <- item:
 		d.enqueued.Add(1)
@@ -214,6 +228,9 @@ func (d *Dispatcher) EnqueueBatch(input []Event) bool {
 			}
 		}
 		events = append(events, event)
+	}
+	if d.terminal.Load() {
+		return false
 	}
 	if cap(d.queue)-len(d.queue) < len(events) {
 		return false
@@ -325,9 +342,16 @@ func (d *Dispatcher) runDispatcher() {
 
 func (d *Dispatcher) runSink(reg *registration) {
 	defer d.sinkWG.Done()
+	failed := false
 	for item := range reg.queue {
 		if item.barrier != nil {
 			item.barrier <- struct{}{}
+			continue
+		}
+		if failed {
+			if sink, ok := reg.sink.(failedEventSink); ok {
+				sink.HandleFailedEvent(item.event)
+			}
 			continue
 		}
 		var err error
@@ -339,6 +363,11 @@ func (d *Dispatcher) runSink(reg *registration) {
 		if err != nil {
 			d.sinkErrors.Add(1)
 			d.cfg.Logger.Error("normalized event sink failed", "kind", item.event.Kind(), "error", err)
+			var terminal terminalSinkError
+			if errors.As(err, &terminal) && terminal.TerminalSinkError() {
+				d.terminal.Store(true)
+				failed = true
+			}
 		}
 	}
 }

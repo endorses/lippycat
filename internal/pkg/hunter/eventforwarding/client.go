@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
 type Stream interface {
@@ -37,13 +39,21 @@ type Client struct {
 	config Config
 	spool  *eventspool.Spool
 	wake   chan struct{}
+
+	batchFetches atomic.Uint64
+	// controlReceived is a deterministic test seam invoked after a received
+	// control is queued for Serve. Production clients leave it nil.
+	controlReceived func()
 }
+
+const batchFetchLimit = 128
 
 func (c *Client) ProducerSessionID() string { return c.config.ProducerSessionID }
 
 // HasPending reports whether the durable spool contains unacknowledged event
-// batches. A forwarding-mode fallback must not strand these records.
-func (c *Client) HasPending() bool { return c.spool.Bytes() != 0 }
+// batches or loss coverage awaiting a bounded loss-only batch. A forwarding-
+// mode fallback must not strand either form of durable state.
+func (c *Client) HasPending() bool { return c.spool.HasPending() }
 
 func New(config Config, spool *eventspool.Spool) (*Client, error) {
 	if spool == nil {
@@ -72,17 +82,50 @@ func (c *Client) Enqueue(batch *eventsv1.ProtocolEventBatch) (eventspool.Enqueue
 		return eventspool.EnqueueResult{}, errors.New("enqueue forwarded event batch: producer identity does not match fixed session")
 	}
 	result, err := c.spool.Enqueue(batch)
-	if err == nil && c.config.OnLoss != nil {
+	c.afterEnqueue(result, err)
+	return result, err
+}
+
+func (c *Client) flushPendingLosses(batchSequence uint64, semanticProfileRevision uint32) (eventspool.EnqueueResult, error) {
+	result, err := c.spool.FlushPendingLosses(c.config.SourceNodeID, c.config.ProducerSessionID, batchSequence, semanticProfileRevision)
+	c.afterEnqueue(result, err)
+	return result, err
+}
+
+func (c *Client) retainLosses(losses []*eventsv1.EventLoss) (eventspool.RetentionResult, error) {
+	result, err := c.spool.RetainLosses(losses)
+	if result.Committed {
+		logCommittedCleanup(err)
+	}
+	return result, err
+}
+
+func (c *Client) afterEnqueue(result eventspool.EnqueueResult, err error) {
+	if (result.Stored || result.Rejection != eventspool.RejectionNone || err == nil || errors.Is(err, eventspool.ErrRecordTooLarge)) && c.config.OnLoss != nil {
 		for _, loss := range result.Losses {
 			if loss != nil {
 				c.config.OnLoss(loss.GetKind(), loss.GetCount())
 			}
 		}
 	}
-	if err == nil && result.Stored {
+	if result.Stored {
 		c.notify()
 	}
-	return result, err
+	if result.Stored {
+		logCommittedCleanup(err)
+	}
+}
+
+func logCommittedCleanup(err error) {
+	var cleanupErr *eventspool.CleanupError
+	if errors.As(err, &cleanupErr) {
+		logger.Warn("Event spool cleanup deferred after committed enqueue",
+			"operation", cleanupErr.Operation,
+			"path", cleanupErr.Path,
+			"error", cleanupErr.Err,
+			"logical_commit", true,
+		)
+	}
 }
 
 func (c *Client) Serve(ctx context.Context, stream Stream) error {
@@ -105,36 +148,60 @@ func (c *Client) Serve(ctx context.Context, stream Stream) error {
 	}
 
 	controls := make(chan controlResult, 1)
-	go receiveControls(ctx, stream, controls)
+	go receiveControls(ctx, stream, controls, c.controlReceived)
+	// The initial retrieval observes everything committed before Serve starts;
+	// discard the coalesced historical wake so an empty suffix does not cause a
+	// redundant fetch. A concurrent enqueue is still visible in that retrieval.
+	select {
+	case <-c.wake:
+	default:
+	}
 	highestSent := uint64(0)
 	paused := false
+	var cached []*eventsv1.ProtocolEventBatch
+	needFetch := true
+serveLoop:
 	for {
 		// Give ACK/NACK and flow-control messages priority between batches. This
 		// bounds overshoot to one batch when the processor asks us to pause.
 		select {
 		case result := <-controls:
 			var handleErr error
-			paused, highestSent, handleErr = c.handleControl(ctx, result, paused, highestSent)
+			var rewind bool
+			paused, highestSent, rewind, handleErr = c.handleControl(ctx, result, paused, highestSent)
 			if handleErr != nil {
 				return handleErr
+			}
+			if rewind {
+				cached = nil
+				needFetch = true
 			}
 			continue
 		default:
 		}
 		if !paused {
-			var next *eventsv1.ProtocolEventBatch
-			for _, b := range c.spool.Batches() {
-				if b.GetBatchSequence() > highestSent {
-					next = b
-					break
+			if len(cached) == 0 && needFetch {
+				var err error
+				cached, err = c.spool.BatchesAfter(c.config.SourceNodeID, c.config.ProducerSessionID, highestSent, batchFetchLimit)
+				c.batchFetches.Add(1)
+				if err != nil {
+					return fmt.Errorf("serve event forwarding: retrieve batches after %d: %w", highestSent, err)
 				}
+				needFetch = len(cached) == batchFetchLimit
 			}
-			if next != nil {
-				if err := stream.Send(&eventsv1.EventIngressMessage{Message: &eventsv1.EventIngressMessage_Batch{Batch: next}}); err != nil {
-					return fmt.Errorf("serve event forwarding: send batch %d: %w", next.GetBatchSequence(), err)
+			for len(cached) > 0 {
+				next := cached[0]
+				cached[0] = nil
+				cached = cached[1:]
+				sequence := next.GetBatchSequence()
+				if sequence <= highestSent || !c.spool.Contains(c.config.SourceNodeID, c.config.ProducerSessionID, sequence) {
+					continue
 				}
-				highestSent = next.GetBatchSequence()
-				continue
+				if err := stream.Send(&eventsv1.EventIngressMessage{Message: &eventsv1.EventIngressMessage_Batch{Batch: next}}); err != nil {
+					return fmt.Errorf("serve event forwarding: send batch %d: %w", sequence, err)
+				}
+				highestSent = sequence
+				continue serveLoop
 			}
 		}
 
@@ -142,22 +209,28 @@ func (c *Client) Serve(ctx context.Context, stream Stream) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-c.wake:
+			needFetch = true
 		case result := <-controls:
 			var handleErr error
-			paused, highestSent, handleErr = c.handleControl(ctx, result, paused, highestSent)
+			var rewind bool
+			paused, highestSent, rewind, handleErr = c.handleControl(ctx, result, paused, highestSent)
 			if handleErr != nil {
 				return handleErr
+			}
+			if rewind {
+				cached = nil
+				needFetch = true
 			}
 		}
 	}
 }
 
-func (c *Client) handleControl(ctx context.Context, result controlResult, paused bool, highestSent uint64) (bool, uint64, error) {
+func (c *Client) handleControl(ctx context.Context, result controlResult, paused bool, highestSent uint64) (bool, uint64, bool, error) {
 	if result.err != nil {
 		if errors.Is(result.err, io.EOF) && ctx.Err() != nil {
-			return paused, highestSent, ctx.Err()
+			return paused, highestSent, false, ctx.Err()
 		}
-		return paused, highestSent, fmt.Errorf("serve event forwarding: receive control: %w", result.err)
+		return paused, highestSent, false, fmt.Errorf("serve event forwarding: receive control: %w", result.err)
 	}
 	ctrl := result.control
 	switch ctrl.GetFlowControl() {
@@ -170,25 +243,28 @@ func (c *Client) handleControl(ctx context.Context, result controlResult, paused
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return paused, highestSent, ctx.Err()
+			return paused, highestSent, false, ctx.Err()
 		case <-timer.C:
 		}
 	}
 	switch ctrl.GetKind() {
 	case eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK:
 		if err := c.spool.Ack(c.config.SourceNodeID, c.config.ProducerSessionID, ctrl.GetCumulativeAckSequence()); err != nil {
-			return paused, highestSent, err
+			return paused, highestSent, false, err
 		}
 	case eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK:
+		rewind := false
 		for _, r := range ctrl.GetNackBatchRanges() {
 			if r.GetFirst() > 0 && r.GetFirst() <= highestSent {
 				highestSent = r.GetFirst() - 1
+				rewind = true
 			}
 		}
+		return paused, highestSent, rewind, nil
 	case eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_FLOW:
 		// Flow state is handled above because processors may attach it to ACKs.
 	}
-	return paused, highestSent, nil
+	return paused, highestSent, false, nil
 }
 
 type controlResult struct {
@@ -196,11 +272,14 @@ type controlResult struct {
 	err     error
 }
 
-func receiveControls(ctx context.Context, stream Stream, output chan<- controlResult) {
+func receiveControls(ctx context.Context, stream Stream, output chan<- controlResult, received func()) {
 	for {
 		ctrl, err := stream.Recv()
 		select {
 		case output <- controlResult{control: ctrl, err: err}:
+			if received != nil {
+				received()
+			}
 		case <-ctx.Done():
 			return
 		}

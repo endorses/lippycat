@@ -53,6 +53,47 @@ processor crashes. Bound the spool with `--event-spool-max-bytes` and
 `--event-spool-max-age`; exhaustion defaults to `drop_oldest`, with exact loss
 ranges reported, or can use `drop_new`.
 
+### Reliable event spool operation
+
+Each encoded spool record payload is limited to 4 MiB by default, even when
+`--event-spool-max-bytes=0` makes the total logical spool unlimited. The final
+record, including carried loss reports, must also satisfy the event transport's
+collection and range limits. Keep the processor's
+`--event-ingress-max-batch-bytes` at least as large as the sender record limit.
+An oversized event is rejected before a record is published; reliable mode
+retains its exact loss coverage for delivery. If that coverage cannot fit with
+a normal event batch, the hunter sends bounded loss-only batches rather than
+truncating it. If neither the event nor its loss report can be persisted, the
+hunter stops normal forwarding instead of acknowledging unrecorded loss.
+
+The spool uses immutable record files plus a versioned active-set manifest
+checkpoint and checksummed mutation journal. The checkpoint and committed
+journal, rather than every record file present in the directory, define pending
+delivery.
+Startup replays complete journal transactions, ignores only an incomplete final
+append, and migrates a fully valid legacy record directory before accepting new
+events. Interior corruption, missing referenced records, unsafe manifest paths,
+mixed or ambiguous legacy sessions, and unsupported formats fail startup while
+leaving the evidence in place.
+
+Only one process may own a spool directory. Point each hunter instance at a
+separate directory and do not edit, copy individual files from, or run a second
+instance against a live spool. Checkpoint replacement and journal commits are
+synced before they become successful logical mutations. If a later sync makes
+durability uncertain, the spool blocks sends, mutations, and cleanup; stop the
+hunter and reopen the same directory so recovery can resolve the visible
+complete state. Do not clear the directory or reuse the affected sequence.
+
+`--event-spool-max-bytes` applies to logical pending bytes: immutable records
+still referenced by the active set. Physical disk use can be higher because an
+already committed ACK or eviction may leave an unreferenced record or temporary
+file after cleanup failure. Such files are retryable orphans, never pending
+events; startup and later safe mutations retry their removal. Monitor free disk
+space separately from the logical limit. A startup error names the failed path
+and operation: stop any competing owner first; otherwise preserve the complete
+directory for diagnosis or restore it as a unit. Move it aside and start empty
+only after explicitly accepting the reported undelivered events as loss.
+
 Event mode requires a compatible event-capable processor and negotiated
 analysis profile. Negotiation fails closed by default. Add
 `--event-fallback-to-packets` only when raw-packet fallback is acceptable; the
@@ -114,6 +155,7 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--disk-buffer-max-mb` - Maximum disk buffer size in MB (default: 1024)
 
 **Upstream Forwarding:**
+
 - `--forward-mode` - `packets` (default) or `events`
 - `--event-fallback-to-packets` - Explicitly allow packet fallback after event negotiation fails
 - `--event-delivery-profile` - `reliable` (default) or `memory-only`

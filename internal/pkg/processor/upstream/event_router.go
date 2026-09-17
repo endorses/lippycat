@@ -21,6 +21,7 @@ import (
 type EventRouterConfig struct {
 	SpoolDirectory string
 	MaxBytes       uint64
+	MaxRecordBytes uint64
 	MaxAge         time.Duration
 	Policy         eventspool.ExhaustionPolicy
 	Profile        eventsv1.IngressProfile
@@ -34,6 +35,7 @@ type EventRouter struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	losses  EventLossStats
+	closed  bool
 }
 
 // EventLossStats contains cumulative event-forwarding losses by pipeline
@@ -55,7 +57,7 @@ func (r *EventRouter) HasPendingDurableBatches() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, route := range r.routes {
-		if route.spool.Bytes() != 0 {
+		if route.spool.HasPending() {
 			return true
 		}
 	}
@@ -86,7 +88,48 @@ type eventRoute struct {
 	sink     *eventforwarding.Sink
 	spool    *eventspool.Spool
 	cancel   context.CancelFunc
+	done     chan struct{}
 	retiring bool
+
+	admissionMu  sync.Mutex
+	admission    *sync.Cond
+	accepting    bool
+	active       int
+	beforeHandle func()
+}
+
+func (r *eventRoute) beginHandle() bool {
+	r.admissionMu.Lock()
+	defer r.admissionMu.Unlock()
+	if !r.accepting {
+		return false
+	}
+	r.active++
+	return true
+}
+
+func (r *eventRoute) endHandle() {
+	r.admissionMu.Lock()
+	r.active--
+	if r.active == 0 {
+		r.admission.Broadcast()
+	}
+	r.admissionMu.Unlock()
+}
+
+func (r *eventRoute) stopAdmission() {
+	r.admissionMu.Lock()
+	r.accepting = false
+	r.retiring = true
+	r.admissionMu.Unlock()
+}
+
+func (r *eventRoute) waitForHandlers() {
+	r.admissionMu.Lock()
+	for r.active != 0 {
+		r.admission.Wait()
+	}
+	r.admissionMu.Unlock()
 }
 
 func NewEventRouter(manager *Manager, config EventRouterConfig) (*EventRouter, error) {
@@ -97,6 +140,7 @@ func NewEventRouter(manager *Manager, config EventRouterConfig) (*EventRouter, e
 	r := &EventRouter{manager: manager, config: config, routes: make(map[eventRouteKey]*eventRoute), ctx: ctx, cancel: cancel}
 	if err := r.loadExisting(); err != nil {
 		cancel()
+		_ = r.closeRoutes(context.Background())
 		return nil, err
 	}
 	return r, nil
@@ -123,15 +167,18 @@ func (r *EventRouter) loadExisting() error {
 				continue
 			}
 			dir := filepath.Join(r.config.SpoolDirectory, node.Name(), sessionDir.Name())
-			spool, err := eventspool.Open(eventspool.Config{Directory: dir, MaxBytes: r.config.MaxBytes, MaxAge: r.config.MaxAge, Policy: r.config.Policy})
+			spool, err := eventspool.Open(eventspool.Config{Directory: dir, MaxBytes: r.config.MaxBytes, MaxRecordBytes: r.config.MaxRecordBytes, MaxAge: r.config.MaxAge, Policy: r.config.Policy})
 			if err != nil {
 				return err
 			}
 			source, session, _, lastBatch, err := spool.RecoveryState()
 			if err != nil {
-				return err
+				return errors.Join(err, spool.Close())
 			}
 			if session == "" {
+				if err := spool.Close(); err != nil {
+					return err
+				}
 				continue
 			}
 			route, err := r.routeFromSpool(source, session, lastBatch, spool)
@@ -157,6 +204,10 @@ func (r *EventRouter) HandleEvent(ctx context.Context, event events.Event) error
 	}
 	key := eventRouteKey{nodeID: env.NodeID, sessionID: env.ProducerSessionID}
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return fmt.Errorf("route upstream event: router is closed")
+	}
 	route := r.routes[key]
 	if route == nil {
 		var err error
@@ -167,45 +218,55 @@ func (r *EventRouter) HandleEvent(ctx context.Context, event events.Event) error
 		}
 		r.routes[key] = route
 	}
-	if route.retiring {
+	if !route.beginHandle() {
 		r.mu.Unlock()
 		return fmt.Errorf("route upstream event: producer session is retiring")
 	}
 	r.mu.Unlock()
+	defer route.endHandle()
+	if route.beforeHandle != nil {
+		route.beforeHandle()
+	}
 	return route.sink.HandleEvent(ctx, event)
 }
 
 func (r *EventRouter) newRoute(nodeID, sessionID string) (*eventRoute, error) {
 	dir := filepath.Join(r.config.SpoolDirectory, identityPathPart(nodeID), identityPathPart(sessionID))
-	spool, err := eventspool.Open(eventspool.Config{Directory: dir, MaxBytes: r.config.MaxBytes, MaxAge: r.config.MaxAge, Policy: r.config.Policy})
+	spool, err := eventspool.Open(eventspool.Config{Directory: dir, MaxBytes: r.config.MaxBytes, MaxRecordBytes: r.config.MaxRecordBytes, MaxAge: r.config.MaxAge, Policy: r.config.Policy})
 	if err != nil {
 		return nil, err
 	}
 	source, session, _, lastBatch, err := spool.RecoveryState()
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, spool.Close())
 	}
 	if session != "" && (source != nodeID || session != sessionID) {
-		return nil, fmt.Errorf("upstream event spool identity mismatch")
+		return nil, errors.Join(fmt.Errorf("upstream event spool identity mismatch"), spool.Close())
 	}
 	return r.routeFromSpool(nodeID, sessionID, lastBatch, spool)
 }
 
 func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64, spool *eventspool.Spool) (*eventRoute, error) {
 	if err := spool.BindSessionPolicy(r.sessionPolicy(nodeID, sessionID)); err != nil {
-		return nil, fmt.Errorf("bind upstream event route session policy: %w", err)
+		return nil, errors.Join(fmt.Errorf("bind upstream event route session policy: %w", err), spool.Close())
 	}
 	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: nodeID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{1, 2, 3, 4, 5, 6, 7}, Profile: r.config.Profile, RelayNodeID: r.manager.config.ProcessorID, OnLoss: r.recordLoss}, spool)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, spool.Close())
 	}
 	sink, err := eventforwarding.NewSink(client, lastBatch+1, 1)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, spool.Close())
 	}
 	routeCtx, cancel := context.WithCancel(r.ctx)
-	go r.serve(routeCtx, client)
-	return &eventRoute{sink: sink, spool: spool, cancel: cancel}, nil
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.serve(routeCtx, client)
+	}()
+	route := &eventRoute{sink: sink, spool: spool, cancel: cancel, done: done, accepting: true}
+	route.admission = sync.NewCond(&route.admissionMu)
+	return route, nil
 }
 
 func (r *EventRouter) sessionPolicy(nodeID, sessionID string) eventspool.SessionPolicy {
@@ -283,14 +344,15 @@ func (r *EventRouter) DrainAndRetire(ctx context.Context, nodeID, sessionID stri
 		r.mu.Unlock()
 		return nil
 	}
-	route.retiring = true
+	route.stopAdmission()
 	r.mu.Unlock()
+	route.waitForHandlers()
 	if err := route.sink.Flush(ctx); err != nil {
 		return fmt.Errorf("flush retiring upstream event route: %w", err)
 	}
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	for route.spool.Bytes() != 0 {
+	for route.spool.HasPending() {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("drain retiring upstream event route: %w", ctx.Err())
@@ -303,10 +365,50 @@ func (r *EventRouter) DrainAndRetire(ctx context.Context, nodeID, sessionID stri
 	}
 	r.mu.Unlock()
 	route.cancel()
-	return nil
+	<-route.done
+	return route.spool.Close()
 }
 
-func (r *EventRouter) Close(context.Context) error { r.cancel(); return nil }
+func (r *EventRouter) Close(ctx context.Context) error {
+	r.mu.Lock()
+	r.closed = true
+	routes := make([]*eventRoute, 0, len(r.routes))
+	for _, route := range r.routes {
+		route.stopAdmission()
+		routes = append(routes, route)
+	}
+	r.mu.Unlock()
+	for _, route := range routes {
+		route.waitForHandlers()
+	}
+	flushErr := r.Flush(ctx)
+	r.cancel()
+	return errors.Join(flushErr, r.closeRoutes(ctx))
+}
+
+func (r *EventRouter) closeRoutes(ctx context.Context) error {
+	r.mu.Lock()
+	r.closed = true
+	routes := make([]*eventRoute, 0, len(r.routes))
+	for key, route := range r.routes {
+		route.stopAdmission()
+		routes = append(routes, route)
+		delete(r.routes, key)
+	}
+	r.mu.Unlock()
+	for _, route := range routes {
+		route.waitForHandlers()
+		route.cancel()
+	}
+	var errs []error
+	for _, route := range routes {
+		<-route.done
+		if err := route.spool.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
 
 func identityPathPart(value string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))

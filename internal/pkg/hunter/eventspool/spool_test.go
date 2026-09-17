@@ -1,18 +1,33 @@
 package eventspool
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
+	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
 
 func batch(source, session string, batchSequence, first, last uint64) *eventsv1.ProtocolEventBatch {
-	return &eventsv1.ProtocolEventBatch{SourceNodeId: source, ProducerSessionId: session, BatchSequence: batchSequence, FirstEventSequence: first, LastEventSequence: last}
+	if last < first {
+		first, last = last, first
+	}
+	var input []events.Event
+	for sequence := first; sequence != 0 && sequence <= last; sequence++ {
+		env := events.Envelope{Timestamp: time.Unix(1, 0).UTC(), EventID: events.DeliveryEventID(source, session, sequence), ProducerSessionID: session, EventSequence: sequence, UID: "uid", NodeID: source, Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.2"), SourcePort: 53, DestinationPort: 53000}, CaptureScope: events.CaptureScopeFiltered, Provenance: events.SourceProvenance{CaptureSource: "test"}}
+		input = append(input, events.NewDNSEvent(env))
+	}
+	b, err := protoadapter.ToProtoBatch(source, session, batchSequence, input, nil, 1)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 func sessionPolicy(session, profile string, headers bool) SessionPolicy {
@@ -27,6 +42,7 @@ func TestSessionPolicyRecoveryRequiresExactMatch(t *testing.T) {
 	require.NoError(t, s.BindSessionPolicy(policy))
 	_, err = s.Enqueue(batch("hunter", "session", 1, 1, 1))
 	require.NoError(t, err)
+	require.NoError(t, s.Close())
 
 	reopened, err := Open(Config{Directory: dir})
 	require.NoError(t, err)
@@ -46,6 +62,7 @@ func TestSessionPolicyLegacyPendingRecordsFailSafe(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Enqueue(batch("hunter", "legacy", 1, 1, 1))
 	require.NoError(t, err)
+	require.NoError(t, s.Close())
 
 	reopened, err := Open(Config{Directory: dir})
 	require.NoError(t, err)
@@ -70,6 +87,7 @@ func TestOpenRetainsExistingRecordsDespiteLimits(t *testing.T) {
 	result, err := s.Enqueue(batch("hunter", "session", 1, 10, 12))
 	require.NoError(t, err)
 	require.True(t, result.Stored)
+	require.NoError(t, s.Close())
 
 	now = now.Add(24 * time.Hour)
 	reopened, err := Open(Config{Directory: dir, MaxBytes: 1, MaxAge: time.Second, Clock: func() time.Time { return now }})
@@ -91,6 +109,7 @@ func TestChecksumCorruptionIsReportedAndNotDeleted(t *testing.T) {
 	_, err = f.WriteAt([]byte{0xff}, headerSize)
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
+	require.NoError(t, s.Close())
 
 	_, err = Open(Config{Directory: dir})
 	require.ErrorContains(t, err, "checksum mismatch")
@@ -135,11 +154,12 @@ func TestDropOldestPreservesInheritedLossesAcrossRepeatedEviction(t *testing.T) 
 	result, err := s.Enqueue(batch("hunter", "session", 3, 30, 30))
 	require.NoError(t, err)
 	require.True(t, result.Stored)
-	require.Len(t, result.Losses, 2)
+	require.Len(t, result.Losses, 1)
+	require.Len(t, result.Losses[0].GetEventSequenceRanges(), 2)
 	require.Equal(t, uint64(10), result.Losses[0].GetEventSequenceRanges()[0].GetFirst())
 	require.Equal(t, uint64(12), result.Losses[0].GetEventSequenceRanges()[0].GetLast())
-	require.Equal(t, uint64(20), result.Losses[1].GetEventSequenceRanges()[0].GetFirst())
-	require.Equal(t, uint64(21), result.Losses[1].GetEventSequenceRanges()[0].GetLast())
+	require.Equal(t, uint64(20), result.Losses[0].GetEventSequenceRanges()[1].GetFirst())
+	require.Equal(t, uint64(21), result.Losses[0].GetEventSequenceRanges()[1].GetLast())
 	require.True(t, proto.Equal(
 		&eventsv1.EventBatchStats{Losses: result.Losses},
 		&eventsv1.EventBatchStats{Losses: s.Batches()[0].GetStats().GetLosses()},
@@ -226,21 +246,21 @@ func TestCumulativeAckIsScopedToProducerSession(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})
 	require.NoError(t, err)
-	for _, b := range []*eventsv1.ProtocolEventBatch{
-		batch("hunter", "one", 1, 1, 1), batch("hunter", "two", 1, 1, 1), batch("hunter", "one", 2, 2, 2),
-	} {
+	for _, b := range []*eventsv1.ProtocolEventBatch{batch("hunter", "one", 1, 1, 1), batch("hunter", "one", 2, 2, 2)} {
 		_, err = s.Enqueue(b)
 		require.NoError(t, err)
 	}
+	require.NoError(t, s.Ack("hunter", "two", 99))
+	require.Len(t, s.Batches(), 2, "ACK from another session must not remove records")
 	require.NoError(t, s.Ack("hunter", "one", 1))
 	remaining := s.Batches()
-	require.Len(t, remaining, 2)
-	require.Equal(t, "two", remaining[0].ProducerSessionId)
-	require.Equal(t, uint64(2), remaining[1].BatchSequence)
+	require.Len(t, remaining, 1)
+	require.Equal(t, uint64(2), remaining[0].BatchSequence)
+	require.NoError(t, s.Close())
 
 	reopened, err := Open(Config{Directory: dir})
 	require.NoError(t, err)
-	require.Len(t, reopened.Batches(), 2)
+	require.Len(t, reopened.Batches(), 1)
 }
 
 func TestRecoveryStateResumesIdentityAndSequences(t *testing.T) {
@@ -274,15 +294,13 @@ func TestRecoveryStateIncludesLossOnlyEventHighWater(t *testing.T) {
 	require.Equal(t, uint64(3), batchSequence)
 }
 
-func TestRecoveryStateRejectsMixedSessions(t *testing.T) {
+func TestSpoolRejectsMixedSessions(t *testing.T) {
 	s, err := Open(Config{Directory: t.TempDir()})
 	require.NoError(t, err)
 	_, err = s.Enqueue(batch("hunter", "one", 1, 1, 1))
 	require.NoError(t, err)
 	_, err = s.Enqueue(batch("hunter", "two", 1, 1, 1))
-	require.NoError(t, err)
-	_, _, _, _, err = s.RecoveryState()
-	require.ErrorContains(t, err, "multiple producer sessions")
+	require.ErrorContains(t, err, "fixed spool session")
 }
 
 func TestRecoveryOrdersOneSessionByBatchSequence(t *testing.T) {
@@ -290,21 +308,11 @@ func TestRecoveryOrdersOneSessionByBatchSequence(t *testing.T) {
 	now := time.Unix(1000, 0)
 	s, err := Open(Config{Directory: dir, Clock: func() time.Time { return now }})
 	require.NoError(t, err)
-	_, err = s.Enqueue(batch("hunter", "session", 1, 1, 1))
-	require.NoError(t, err)
-	paths, err := filepath.Glob(filepath.Join(dir, "*"+recordExtension))
-	require.NoError(t, err)
-	require.Len(t, paths, 1)
-	require.NoError(t, os.Rename(paths[0], filepath.Join(dir, "z"+recordExtension)))
 	_, err = s.Enqueue(batch("hunter", "session", 2, 2, 2))
 	require.NoError(t, err)
-	paths, err = filepath.Glob(filepath.Join(dir, "*"+recordExtension))
+	_, err = s.Enqueue(batch("hunter", "session", 1, 1, 1))
 	require.NoError(t, err)
-	for _, path := range paths {
-		if filepath.Base(path) != "z"+recordExtension {
-			require.NoError(t, os.Rename(path, filepath.Join(dir, "a"+recordExtension)))
-		}
-	}
+	require.NoError(t, s.Close())
 	reopened, err := Open(Config{Directory: dir})
 	require.NoError(t, err)
 	batches := reopened.Batches()

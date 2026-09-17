@@ -100,6 +100,49 @@ edge spool. `memory-only` lowers disk use but acknowledged queue admissions may
 be lost if the processor crashes. Configure byte/age limits and choose
 `drop_oldest` or `drop_new`; loss remains visible in hunter status.
 
+### Operating the reliable event spool
+
+The default maximum encoded record payload is 4 MiB. This safety bound still
+applies when `--event-spool-max-bytes=0` disables the total logical byte limit. It is
+checked after loss reports are attached, together with the transport's event,
+loss-entry, and loss-range limits. Keep the receiving processor's
+`--event-ingress-max-batch-bytes` at least as large as the sender limit.
+Oversized events are rejected before publication and their exact loss coverage
+is retained. Fragmented coverage that cannot accompany a normal record is sent
+in bounded loss-only batches; it is never truncated. If storage cannot persist
+either an event or its exact loss report, forwarding fails stopped rather than
+acknowledging data it cannot account for.
+
+Record files are immutable. A versioned manifest checkpoint and checksummed
+mutation journal define the ordered active set, logical byte total, sequence
+high-water marks, and pending loss coverage. Startup replays committed
+transactions and ignores only an incomplete final journal append. It validates
+and migrates a
+legacy record-only directory before admitting new events. Corrupt journal
+content, a missing referenced record, unsafe manifest entries, unsupported
+versions, or mixed and ambiguous legacy sessions stop startup without deleting
+the affected files.
+
+A spool directory has one exclusive owner. Assign a distinct directory to each
+hunter and never manipulate individual files while it runs. If a journal or
+checkpoint operation becomes durability-uncertain after data may be visible,
+the hunter blocks sending, mutation, and cleanup. Stop it and reopen the same
+directory; recovery resolves the visible complete transaction before forwarding
+continues. Do not erase the directory or reuse the affected sequence.
+
+The configured byte limit and pending status use **logical bytes**, the active
+records awaiting acknowledgement. **Physical bytes** also include retryable
+orphans and temporary files left by failed cleanup, so actual disk use may be
+higher. A committed ACK or eviction remains committed if unlinking fails; the
+orphan is not resent, and cleanup is retried during startup and later safe
+mutations. Monitor filesystem free space independently.
+
+Startup errors include the path and failed operation. First stop a competing
+process if ownership failed. For corruption or recovery errors, preserve the
+entire spool, repair permissions or restore the directory as one unit, and
+restart. Moving the directory aside creates an empty spool and should be done
+only after the operator explicitly accepts the outstanding events as lost.
+
 Event capability and analysis policy are negotiated. Incompatibility fails
 closed unless `--event-fallback-to-packets` explicitly permits raw-packet
 fallback. Keep that flag off where event mode is a privacy boundary. Existing

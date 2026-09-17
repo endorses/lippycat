@@ -1,11 +1,26 @@
 # Compact source-backed offline index implementation plan
 
-Status: Phases 0–4 and the completed-open performance follow-ups are complete;
-Phase 5 and the remaining Phase 6 gates are pending.
+Status: Milestone A (Phases 0–4 and completed-open performance follow-ups) is
+complete. Milestone B (Phases 5–6) is deferred and pending.
 
 All unqualified phase references in this document refer to this compact
 source-backed index plan, not the earlier scalable offline dataset plan.
 Scope: `lc watch file`.
+
+## Merge boundary
+
+This branch delivers milestone A: the compact source-backed index is the
+production path for a completed analysis. Dataset publication still waits for
+analyzer EOF, so users do not browse a complete base while analysis continues.
+
+Milestone B is deferred beyond this merge. It comprises Phase 5's complete-base
+publication, analysis revisions, pending-field behavior, revision-pinned
+queries/exports, and background-analysis lifecycle. Every Phase 5 task remains
+unchecked until that behavior and its lifecycle tests are implemented.
+
+The completed milestone-A profiling and optimization work recorded below is
+evidence for the completed-analysis path only. It does not satisfy milestone B
+or the Phase-5-dependent final acceptance work.
 
 Phase 0 establishes the baseline, injectable differential oracle, measurement
 runner, v2 schema, field inventory and source/resource contracts. Verification
@@ -79,10 +94,10 @@ Do not silently switch to a fresh copy after detecting mutation.
 | 3     | Compact completed dataset, lazy details and raw export     | 2            | Full semantic parity and bounded resource accounting              |
 | 4     | Block queries and production cutover: milestone A          | 3            | Correctness suite and measured completed-ready performance        |
 | 5     | Complete-base browsing: milestone B                        | 4            | Revision-safe operations and failure/cancellation lifecycle       |
-| 6     | Profile-driven follow-ups and final acceptance             | 5            | Documented measurements and explicit disposition of optional work |
+| 6     | Milestone-B acceptance and optional persistent reuse       | 5            | Revision-aware measurements and disposition of optional work      |
 
 Each phase is a reviewable implementation unit; split it into smaller commits as
-needed. Keep the completed-dataset gate intact until phase 5. A missed performance
+needed. Keep the completed-dataset gate intact through milestone A. A missed performance
 target requires profiling and a documented gap; a correctness or resource-budget
 failure blocks production cutover.
 
@@ -380,6 +395,15 @@ parity checks, focused and broad race tests, independent isolated verification,
 and the build passed. See the
 [measurements and limitations](../research/watch-file-compact-performance.md#remaining-voip-costs).
 
+### Completed milestone-A profiling disposition
+
+- [x] Profile the completed-analysis path and remove duplicated protocol work
+      only where measurements identify a worthwhile cost. Compare event/detail
+      semantics after each change.
+- [x] Evaluate bounded stateless parallel work with deterministic ordered
+      output. Keep stateful analysis serial unless a separate design proves
+      per-flow ownership, deterministic event admission, and merge behavior.
+
 ## Phase 5 — Publish a complete base before analysis finishes
 
 Touchpoints: `internal/pkg/offline/contracts.go`, manifest/cache/query ownership,
@@ -398,11 +422,23 @@ offline page/detail/filter message handlers and watch-file user documentation.
 Gate: no partial query is presented as complete, no unfinished metadata is treated
 as absent, and a pinned operation sees one immutable generation/revision pair.
 
-## Phase 6 — Validate remaining costs and optional follow-ups
+## Phase 6 — Deferred milestone-B acceptance and optional reuse
 
-- [x] Profile the new completed-analysis path and remove duplicated protocol work only where measurements identify a worthwhile cost. Compare event/detail semantics after each change.
-- [x] Evaluate bounded stateless parallel work with deterministic ordered output. Keep stateful analysis serial unless a separate design proves per-flow ownership, deterministic event admission and merge behavior.
-- [ ] Decide whether persistent reuse is justified by repeat-open measurements. If deferred, record the reason; if implemented, key it by exact ordered input identity, schema/normalization/analyzer versions, BPF and frozen settings/key-material identity without persisting secrets.
+Phase 6 follows Phase 5 and is outside this merge boundary. Its final acceptance
+matrix includes complete-base and analysis-revision behavior and therefore
+cannot be completed against milestone A alone.
+
+Persistent index reuse is also deferred. Current measurements establish the
+completed-open cost, but do not yet demonstrate that reuse is worth the source
+verification, invalidation, secret-safe identity, eviction, and lease machinery
+required for a trustworthy cache. Reconsider it after milestone B has separate
+base and analysis completeness identities and repeat-open measurements can
+include verification cost.
+
+- [ ] Re-evaluate persistent reuse using repeat-open measurements. If
+      implemented, key it by exact ordered input identity,
+      schema/normalization/analyzer versions, BPF, and frozen
+      settings/key-material identity without persisting secrets.
 - [ ] For an implemented cache, require verified sources, atomic complete manifests, independent base/analysis completeness, bounded eviction and leases. Test stale/corrupt entries, source mutation, settings changes and concurrent readers. Report verification cost as part of repeat-open latency.
 - [ ] Run the final acceptance matrix, publish measurements and explicitly report unmet targets plus the next measured bottleneck. Update documentation and remove obsolete migration code once its oracle coverage is retained.
 - [ ] Format changed files before staging. Check off only verified tasks, and commit the implementation and updated plan in scoped commits as required by repository instructions; exclude unrelated baseline changes.

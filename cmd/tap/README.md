@@ -223,6 +223,42 @@ mTLS in transit. Event negotiation fails closed unless
 fallback. Packet-only upstream nodes remain compatible with the default packet
 mode.
 
+#### Reliable upstream event spool operation
+
+Each encoded spool record payload is limited to 4 MiB by default, even when the
+total logical spool limit is unlimited. The final record, including loss reports,
+must satisfy the event transport's collection and range limits. Keep the
+upstream processor's `--event-ingress-max-batch-bytes` at least as large as the
+tap's record limit. Oversized events are rejected before record publication,
+with exact loss coverage retained for bounded loss-only delivery when it cannot
+fit a normal batch. If neither an event nor its exact loss report can be
+persisted, reliable forwarding stops rather than acknowledging unrecorded loss.
+
+Immutable record files are indexed by a versioned active-set manifest checkpoint
+and a checksummed mutation journal. Those metadata files, not directory contents
+by themselves, define pending delivery. Startup replays complete transactions,
+ignores only an incomplete final journal append, and migrates only a completely
+valid, unambiguous legacy directory. Corruption, missing referenced records,
+unsafe manifest paths, mixed legacy sessions, and unsupported formats are
+actionable startup failures; the tap leaves the evidence in place.
+
+Give every tap instance its own spool directory. An exclusive ownership lock
+prevents concurrent recovery or mutation. A commit whose final durability is
+uncertain blocks sending, mutation, and garbage collection; stop the tap and
+reopen the same directory so recovery can choose the visible complete state.
+Do not delete files or reuse the affected sequence while uncertainty is
+reported.
+
+The configured spool byte limit counts logical pending records. Physical disk
+use can be higher when a committed ACK or eviction leaves an unreferenced file
+or temporary file after cleanup failure. These retryable orphans are not sent
+again and do not become logically pending; startup and later safe mutations
+retry cleanup. Monitor filesystem capacity separately. For startup failures,
+stop any competing owner, preserve the whole directory, and use the reported
+path and operation to repair permissions or restore the directory as one unit.
+Move it aside and start empty only after explicitly accepting the undelivered
+event range as loss.
+
 ### PCAP Writing
 
 #### Unified PCAP

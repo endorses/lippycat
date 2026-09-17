@@ -229,6 +229,11 @@ func (h *Hunter) Start(ctx context.Context) error {
 					logger.Error("Failed to close hunter event dispatcher", "error", err)
 				}
 			}
+			if h.eventSpool != nil {
+				if err := h.eventSpool.Close(); err != nil {
+					logger.Error("Failed to close hunter event spool", "error", err)
+				}
+			}
 		}()
 	}
 
@@ -429,6 +434,14 @@ func (h *Hunter) initializeEventForwarding() error {
 	if err != nil {
 		return fmt.Errorf("initialize hunter event spool: %w", err)
 	}
+	initialized := false
+	defer func() {
+		if !initialized {
+			if closeErr := spool.Close(); closeErr != nil {
+				logger.Error("Failed to close hunter event spool after initialization error", "error", closeErr)
+			}
+		}
+	}()
 	source, session, lastEvent, lastBatch, err := spool.RecoveryState()
 	if err != nil {
 		return err
@@ -454,6 +467,7 @@ func (h *Hunter) initializeEventForwarding() error {
 		return err
 	}
 	h.eventForwarder, h.eventDispatcher, h.eventRuntime = forwarder, dispatcher, runtime
+	initialized = true
 	return nil
 }
 
@@ -588,7 +602,7 @@ func (h *Hunter) ApplyPolicyChange(apply func() error) error {
 	h.sampleEventQueueLosses(h.eventDispatcher)
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	for h.eventSpool.Bytes() != 0 {
+	for h.eventSpool.HasPending() {
 		select {
 		case <-drainCtx.Done():
 			if h.cancel != nil {
@@ -605,7 +619,7 @@ func (h *Hunter) ApplyPolicyChange(apply func() error) error {
 		}
 		return err
 	}
-	if err := h.eventSpool.BindSessionPolicy(h.eventSessionPolicy(producer.SessionID())); err != nil {
+	if err := h.eventSpool.ResetSession(h.eventSessionPolicy(producer.SessionID())); err != nil {
 		if h.cancel != nil {
 			h.cancel()
 		}

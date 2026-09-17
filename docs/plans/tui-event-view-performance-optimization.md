@@ -45,38 +45,37 @@ drop.
 Use the packet path as the reference implementation rather than designing a
 second, unrelated performance architecture:
 
-- [ ] Reuse the algorithms and control flow from `PacketStore.AddPacketBatch`,
-      `PacketStore.GetNewPackets`, `updatePacketListIncremental`,
-      `PacketList.AppendPackets`, and `PacketList.TrimOldPackets`.
-- [ ] Prefer a shared refresh/throttling helper when packet and event refresh
-      semantics are identical, so cadence and pressure behavior cannot drift.
-- [ ] Keep event filtering, stable-ID selection, follow-latest behavior, loss
-      accounting, and detail state event-specific.
-- [ ] Do not make `EventStore` wrap `PacketStore` or represent events as
-      packets; their filtering and identity contracts differ.
-- [ ] Initially port the proven ring-buffer algorithm into `EventStore` rather
-      than refactoring the working packet store in the same performance change.
-- [ ] Consider extracting a small generic `boundedRing[T]` only after both
-      typed implementations and their equivalence tests demonstrate a stable
-      common API. Treat that extraction as an optional follow-up, not a
-      prerequisite for fixing event-view CPU usage.
+- Reuse the algorithms and control flow from `PacketStore.AddPacketBatch`,
+  `PacketStore.GetNewPackets`, `updatePacketListIncremental`,
+  `PacketList.AppendPackets`, and `PacketList.TrimOldPackets`.
+- Prefer a shared refresh/throttling helper when packet and event refresh
+  semantics are identical, so cadence and pressure behavior cannot drift.
+- Keep event filtering, stable-ID selection, follow-latest behavior, loss
+  accounting, and detail state event-specific.
+- Keep `EventStore` separate from `PacketStore`; their filtering and identity
+  contracts differ.
+- Port the proven ring-buffer algorithm into `EventStore` without refactoring
+  the working packet store in the same performance change.
+- A generic `boundedRing[T]` extraction remains a deferred non-goal. Consider
+  it only after both typed implementations and their equivalence tests
+  demonstrate a stable common API.
 
 ## 3. Required Invariants
 
-- [ ] Preserve arrival ordering for retained events.
-- [ ] Preserve the configured retention capacity and exact eviction accounting.
-- [ ] Preserve capture-mode gating for local and remote event batches.
-- [ ] Preserve pause accounting and transport-loss reporting.
-- [ ] Preserve protocol, source, and stacked user-filter semantics.
-- [ ] Preserve stable selection while navigating history and follow-latest
+- [x] Preserve arrival ordering for retained events.
+- [x] Preserve the configured retention capacity and exact eviction accounting.
+- [x] Preserve capture-mode gating for local and remote event batches.
+- [x] Preserve pause accounting and transport-loss reporting.
+- [x] Preserve protocol, source, and stacked user-filter semantics.
+- [x] Preserve stable selection while navigating history and follow-latest
       behavior at the live edge.
-- [ ] Preserve detail-pane scroll caching until selection or relevant detail
+- [x] Preserve detail-pane scroll caching until selection or relevant detail
       state changes.
-- [ ] Preserve the warning when packets related to the selected event have
+- [x] Preserve the warning when packets related to the selected event have
       actually left the packet buffer.
-- [ ] Keep Bubble Tea `View()` functions free of data synchronization and
+- [x] Keep Bubble Tea `View()` functions free of data synchronization and
       model mutation.
-- [ ] Do not make event ingestion wait on terminal rendering.
+- [x] Do not make event ingestion wait on terminal rendering.
 
 ## 4. Performance Targets
 
@@ -84,18 +83,18 @@ Establish the exact baseline before setting a hard regression threshold. The
 implementation is complete only when all of the following are demonstrated on
 the same machine and workload:
 
-- [ ] Active event-view CPU is materially lower than the baseline under a
+- [x] Active event-view CPU is materially lower than the baseline under a
       sustained high-rate event stream.
-- [ ] Event-view synchronization occurs no more frequently than the configured
+- [x] Event-view synchronization occurs no more frequently than the configured
       UI refresh cadence, except for direct user interactions that require an
       immediate refresh.
-- [ ] Ingestion and eviction benchmarks remain approximately constant-time as
+- [x] Ingestion and eviction benchmarks remain approximately constant-time as
       retained capacity grows from 1,000 to 10,000 events; no per-event slice
       shift remains at capacity.
-- [ ] Allocation volume per refresh is proportional to new/visible event data,
+- [x] Allocation volume per refresh is proportional to new/visible event data,
       not the complete retained event capacity.
-- [ ] Packet ingestion throughput and Statistics-tab CPU do not regress.
-- [ ] Race-enabled tests show no new data races.
+- [x] Packet ingestion throughput and Statistics-tab CPU do not regress.
+- [x] Race-enabled tests show no new data races.
 
 Record the baseline and final benchmark results in the pull request or commit
 description. Do not encode timing thresholds that are too noisy for routine CI;
@@ -898,10 +897,10 @@ GOCACHE=/tmp/lippycat-go-cache go test -tags all -run '^$' -benchtime=1s -benchm
   ./internal/pkg/tui/components
 ```
 
-Use the Phase 1 replay/profile command for end-to-end measurements. The plan's
-final manual live/offline/remote and Events/Packets/Statistics CPU acceptance
-gates remain unchecked; automated rendering and replay tests do not substitute
-for those checks.
+Use the Phase 1 replay/profile command for end-to-end measurements. The later
+final mixed-mode acceptance completed the manual live/offline/remote and
+Events/Packets/Statistics checks; its controlled-live limitation is recorded in
+Section 13.
 
 Verification passed: full TUI correctness tests under `-tags all`, uncached
 `go test -count=1 -race -tags all ./internal/pkg/tui/...`, both `make tui all`
@@ -998,3 +997,4 @@ No synchronization/store API changes were needed for this acceptance step.
 - Increasing the default event retention capacity.
 - Coupling TUI subscriber pressure to hunter or processor flow control.
 - Optimizing unrelated Calls, Queries, Email, HTTP, or Statistics views.
+- Extracting the packet and event stores into a generic ring abstraction.

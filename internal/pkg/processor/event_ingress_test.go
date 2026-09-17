@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/hunter/eventforwarding"
+	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -125,6 +128,49 @@ func eventIngressOpen(nodeID string, kinds ...eventsv1.EventKind) *eventsv1.Even
 		SemanticProfileRevision: 1,
 		EventKinds:              kinds,
 	}
+}
+
+func TestOversizedForwardedEventThenValidEventIsAdmittedAndACKed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dispatcher, err := events.NewDispatcher(events.Config{QueueSize: 4, SinkQueueSize: 4})
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Start(ctx))
+	t.Cleanup(func() { require.NoError(t, dispatcher.Close(context.Background())) })
+	ingress, err := newEventIngress(EventIngressPolicy{Dispatcher: dispatcher, Profile: "memory_only"})
+	require.NoError(t, err)
+
+	spool, err := eventspool.Open(eventspool.Config{Directory: t.TempDir(), MaxRecordBytes: 1024})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spool.Close()) })
+	producer, err := events.NewLiveProducer("hunter-a")
+	require.NoError(t, err)
+	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: "hunter-a", ProducerSessionID: producer.SessionID()}, spool)
+	require.NoError(t, err)
+	sink, err := eventforwarding.NewSink(client, 1, 1)
+	require.NoError(t, err)
+	envelope := events.Envelope{
+		Timestamp: time.Unix(1, 0), NodeID: "hunter-a", CaptureScope: events.CaptureScopeFiltered,
+		Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.53"), SourcePort: 53000, DestinationPort: 53},
+	}
+	oversized := events.NewDNSEvent(envelope)
+	oversized.Query = strings.Repeat("x", 2048)
+	require.NoError(t, sink.HandleEvent(ctx, producer.Assign(oversized)))
+	valid := events.NewDNSEvent(envelope)
+	valid.Query = "example.test"
+	require.NoError(t, sink.HandleEvent(ctx, producer.Assign(valid)))
+
+	batches, err := spool.BatchesAfter("hunter-a", producer.SessionID(), 0, 2)
+	require.NoError(t, err)
+	require.Len(t, batches, 1)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: "hunter-a", ProducerSessionId: producer.SessionID(), SemanticProfileRevision: 1}
+	key := ingressKey(open.GetSourceNodeId(), open.GetProducerSessionId())
+	ctrl, err := ingress.admit(ctx, key, open, map[events.Kind]struct{}{events.KindDNS: {}}, batches[0])
+	require.NoError(t, err)
+	require.Equal(t, eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, ctrl.GetKind())
+	require.Equal(t, uint64(1), ctrl.GetCumulativeAckSequence())
+	require.NoError(t, spool.Ack(open.GetSourceNodeId(), open.GetProducerSessionId(), ctrl.GetCumulativeAckSequence()))
+	require.False(t, spool.HasPending())
 }
 
 func TestEventIngressAuthorizationRejectsPacketAndFallbackRegistrations(t *testing.T) {

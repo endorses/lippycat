@@ -95,11 +95,6 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			switch msg.String() {
 			case "q", "ctrl+c":
 				return m.requestQuitConfirmation()
-			case "enter":
-				if m.uiState.Tabs.GetActive() == 0 && m.uiState.ViewMode == "events" && m.offlineSession != nil {
-					return m.navigateOfflineRelated()
-				}
-				return m, nil
 			case "ctrl+z":
 				// Suspend the process
 				return m, tea.Suspend

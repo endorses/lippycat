@@ -68,6 +68,46 @@ func TestSinkReportsUnsupportedContentAndCarriesExactGap(t *testing.T) {
 	require.Equal(t, uint64(1), losses[0].GetEventSequenceRanges()[0].GetLast())
 }
 
+func TestSinkRetainsTransportInvalidEventAndContinues(t *testing.T) {
+	spool, err := eventspool.Open(eventspool.Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spool.Close()) })
+	producer, err := events.NewLiveProducer("hunter-a")
+	require.NoError(t, err)
+	var unsupported uint64
+	client, err := New(Config{
+		SourceNodeID: "hunter-a", ProducerSessionID: producer.SessionID(),
+		OnLoss: func(kind eventsv1.LossKind, count uint64) {
+			if kind == eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT {
+				unsupported += count
+			}
+		},
+	}, spool)
+	require.NoError(t, err)
+	sink, err := NewSink(client, 1, 1)
+	require.NoError(t, err)
+	envelope := events.Envelope{
+		Timestamp: time.Unix(1, 0), NodeID: "hunter-a", CaptureScope: events.CaptureScopeFiltered,
+		Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.53"), SourcePort: 53000, DestinationPort: 53},
+	}
+	invalid := events.NewDNSEvent(envelope)
+	invalid.Answers = make([]string, 4097)
+	require.NoError(t, sink.HandleEvent(context.Background(), producer.Assign(invalid)))
+	require.Equal(t, uint64(1), unsupported)
+	require.True(t, spool.HasPendingLosses())
+
+	valid := events.NewDNSEvent(envelope)
+	valid.Query = "example.test"
+	require.NoError(t, sink.HandleEvent(context.Background(), producer.Assign(valid)))
+	batches := spool.Batches()
+	require.Len(t, batches, 1)
+	require.Equal(t, uint64(2), batches[0].GetEvents()[0].GetEventSequence())
+	require.Len(t, batches[0].GetStats().GetLosses(), 1)
+	require.Equal(t, eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, batches[0].GetStats().GetLosses()[0].GetKind())
+	require.Equal(t, uint64(1), batches[0].GetStats().GetLosses()[0].GetEventSequenceRanges()[0].GetFirst())
+	require.False(t, spool.HasPendingLosses())
+}
+
 func TestSinkFlushPersistsTerminalUnsupportedLoss(t *testing.T) {
 	spool, err := eventspool.Open(eventspool.Config{Directory: t.TempDir()})
 	require.NoError(t, err)

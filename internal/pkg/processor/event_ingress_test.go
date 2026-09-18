@@ -344,6 +344,64 @@ func TestEventIngressLossOnlyBatchBridgesRetiredBatchGap(t *testing.T) {
 	require.Equal(t, uint64(1), i.sessions[key].event)
 }
 
+func TestEventIngressRejectsLossOnlyHighWaterGap(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "memory_only"})
+	require.NoError(t, err)
+	first := ingressBatch(t, 1, 10)
+	key := ingressKey(first.SourceNodeId, first.ProducerSessionId)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId, SemanticProfileRevision: 1}
+	_, err = i.admit(context.Background(), key, open, nil, first)
+	require.NoError(t, err)
+
+	lossOnly := &eventsv1.ProtocolEventBatch{
+		SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId,
+		BatchSequence: 2, SemanticProfileRevision: 1,
+		Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+			Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+			SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId,
+			EventSequenceRanges: []*eventsv1.SequenceRange{{First: 12, Last: 12}},
+		}}},
+	}
+	_, err = i.admit(context.Background(), key, open, nil, lossOnly)
+	require.ErrorContains(t, err, "leaves a gap")
+	require.Equal(t, uint64(10), i.sessions[key].event)
+
+	lossOnly.Stats.Losses[0].Count = 2
+	lossOnly.Stats.Losses[0].EventSequenceRanges[0].First = 11
+	ack, err := i.admit(context.Background(), key, open, nil, lossOnly)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), ack.GetCumulativeAckSequence())
+	require.Equal(t, uint64(12), i.sessions[key].event)
+}
+
+func TestEventIngressRejectsTrailingLossHighWaterGap(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "memory_only"})
+	require.NoError(t, err)
+	first := ingressBatch(t, 1, 10)
+	key := ingressKey(first.SourceNodeId, first.ProducerSessionId)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId, SemanticProfileRevision: 1}
+	_, err = i.admit(context.Background(), key, open, nil, first)
+	require.NoError(t, err)
+
+	next := ingressBatch(t, 2, 11)
+	next.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId,
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 13, Last: 13}},
+	}}}
+	_, err = i.admit(context.Background(), key, open, nil, next)
+	require.ErrorContains(t, err, "leaves a gap")
+	require.Equal(t, uint64(10), i.sessions[key].event)
+}
+
 func TestEventIngressRejectsLossOverlappingPriorCoverage(t *testing.T) {
 	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
 	require.NoError(t, err)

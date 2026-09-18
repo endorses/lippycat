@@ -117,7 +117,8 @@ func TestManifestCheckpointFailureMatrixAfterCommittedTransaction(t *testing.T) 
 			result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
 			require.Error(t, err)
 			require.True(t, result.Stored)
-			require.True(t, s.Contains("node", "session", 1) || s.Status().DurabilityUncertain)
+			status := s.Status()
+			require.True(t, s.Contains("node", "session", 1) || status.DurabilityUncertain || status.CheckpointRequired)
 			s.fs = defaultFS()
 			if s.Status().DurabilityUncertain {
 				require.NoError(t, s.Recover())
@@ -126,6 +127,77 @@ func TestManifestCheckpointFailureMatrixAfterCommittedTransaction(t *testing.T) 
 			require.NoError(t, s.Close())
 		})
 	}
+}
+
+func TestCheckpointFailureBlocksFurtherWorkUntilRecovery(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir, CheckpointEvery: 1})
+	require.NoError(t, err)
+
+	fs := defaultFS()
+	originalCreate := fs.createTemp
+	fs.createTemp = func(directory, pattern string) (spoolFile, error) {
+		if strings.HasPrefix(pattern, ".manifest-") {
+			return nil, errors.New("injected persistent checkpoint failure")
+		}
+		return originalCreate(directory, pattern)
+	}
+	s.fs = fs
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.ErrorIs(t, err, ErrCheckpointRequired)
+	require.True(t, result.Stored)
+	require.True(t, s.Status().CheckpointRequired)
+	require.True(t, s.HasPending())
+	_, err = s.BatchesAfter("node", "session", 0, 1)
+	require.ErrorIs(t, err, ErrCheckpointRequired)
+
+	journalInfo, err := os.Stat(filepath.Join(dir, journalFileName))
+	require.NoError(t, err)
+	result, err = s.Enqueue(batch("node", "session", 2, 2, 2))
+	require.ErrorIs(t, err, ErrCheckpointRequired)
+	require.False(t, result.Stored)
+	afterInfo, err := os.Stat(filepath.Join(dir, journalFileName))
+	require.NoError(t, err)
+	require.Equal(t, journalInfo.Size(), afterInfo.Size(), "blocked mutations must not grow replay work")
+
+	s.fs = defaultFS()
+	require.NoError(t, s.Recover())
+	require.False(t, s.Status().CheckpointRequired)
+	result, err = s.Enqueue(batch("node", "session", 2, 2, 2))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.NoError(t, s.Close())
+}
+
+func TestCleanupENOENTReconcilesPhysicalBytes(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+
+	fs := defaultFS()
+	fs.remove = func(path string) error {
+		if filepath.Ext(path) == recordExtension {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
+			return errors.New("injected ambiguous unlink result")
+		}
+		return os.Remove(path)
+	}
+	s.fs = fs
+	err = s.Ack("node", "session", 1)
+	require.Error(t, err)
+	require.Positive(t, s.PhysicalBytes(), "ambiguous cleanup remains accounted until reconciliation")
+
+	s.fs = defaultFS()
+	// The next safe mutation point retries cleanup. ENOENT must reconcile the
+	// physical counter instead of merely forgetting the failed orphan.
+	require.NoError(t, s.Ack("node", "session", 1))
+	require.Zero(t, s.PhysicalBytes())
+	require.Empty(t, s.orphanFailures)
+	require.NoError(t, s.Close())
 }
 
 func TestJournalWriteAndSyncFailureRecoveryOutcomes(t *testing.T) {

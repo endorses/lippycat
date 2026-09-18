@@ -63,9 +63,10 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	stats := &eventsv1.EventBatchStats{Losses: cloneLosses(s.pendingLosses)}
 	batch, err := protoadapter.ToProtoBatch(env.NodeID, env.ProducerSessionID, s.nextBatchSequence, []events.Event{event}, stats, s.semanticProfileRevision)
 	if err != nil {
-		if !errors.Is(err, protoadapter.ErrFileContentDisallowed) {
-			return fmt.Errorf("forward event: encode batch: %w", err)
-		}
+		// Identity was validated above, so any remaining encoding failure means
+		// this assigned event cannot be represented by the transport contract.
+		// Retain its exact sequence as an omission instead of returning an
+		// ordinary sink error that the dispatcher would log and then forget.
 		s.client.reportLoss(eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, 1)
 		loss := &eventsv1.EventLoss{
 			Kind: eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, Count: 1,

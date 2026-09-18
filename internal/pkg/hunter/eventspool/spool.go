@@ -44,6 +44,7 @@ var (
 	journalMagic           = [8]byte{'L', 'C', 'E', 'V', 'J', 'N', 'L', '1'}
 	ErrRecordTooLarge      = errors.New("event spool record exceeds maximum payload")
 	ErrDurabilityUncertain = errors.New("event spool durability is uncertain; recovery required")
+	ErrCheckpointRequired  = errors.New("event spool checkpoint maintenance is required before further mutation")
 	ErrClosed              = errors.New("event spool is closed")
 )
 
@@ -130,10 +131,10 @@ type EnqueueResult struct {
 }
 type RetentionResult struct{ Committed bool }
 type Status struct {
-	LogicalBytes, PhysicalBytes   uint64
-	PendingRecords, PendingLosses int
-	DurabilityUncertain, Closed   bool
-	CleanupError                  string
+	LogicalBytes, PhysicalBytes                     uint64
+	PendingRecords, PendingLosses                   int
+	DurabilityUncertain, CheckpointRequired, Closed bool
+	CleanupError                                    string
 }
 type Metrics struct{ RetrievalCalls, RetrievalClones, RetrievalVisits, ACKRemovalVisits, MetadataBytes, Syncs, Checkpoints, Rotations, JournalFrames, MaxJournalFrames uint64 }
 type CleanupError struct {
@@ -161,7 +162,13 @@ type spoolFile interface {
 }
 
 func defaultFS() *fsOps {
-	return &fsOps{func(d, p string) (spoolFile, error) { return os.CreateTemp(d, p) }, func(p string, f int, m os.FileMode) (spoolFile, error) { return os.OpenFile(p, f, m) }, os.Rename, os.Remove, syncDirectory}
+	return &fsOps{
+		func(d, p string) (spoolFile, error) { return os.CreateTemp(d, p) },
+		func(p string, f int, _ os.FileMode) (spoolFile, error) { return openRegularNoFollow(p, f) },
+		os.Rename,
+		os.Remove,
+		syncDirectory,
+	}
 }
 
 type Spool struct {
@@ -172,7 +179,8 @@ type Spool struct {
 	index                                                                     map[string]int
 	bytes, physicalBytes, generation, txSequence, transactionsSinceCheckpoint uint64
 	pendingLosses                                                             []*eventsv1.EventLoss
-	uncertain, closed                                                         bool
+	uncertain, checkpointRequired, closed                                     bool
+	checkpointErr                                                             error
 	cleanupErr                                                                error
 	orphanFailures                                                            map[string]error
 	unaccountedPhysical                                                       map[string]bool
@@ -257,15 +265,30 @@ func (s *Spool) load() error {
 		return err
 	}
 	s.transactionsSinceCheckpoint = replayed
+	s.checkpointRecordBase = len(m.Records)
+	if s.shouldCheckpoint() {
+		generation := s.generation
+		if err = s.rotateCheckpoint(); err != nil {
+			if s.generation == generation {
+				return fmt.Errorf("open event spool: compact recovered journal: %w", err)
+			}
+			s.cleanupErr = err
+		}
+	}
 	if err = s.cleanupOrphans(); err != nil {
 		s.cleanupErr = err
 	}
 	return s.refreshPhysical()
 }
 func readManifest(path string) (manifest, error) {
-	payload, err := os.ReadFile(path)
+	f, err := openRegularNoFollow(path, os.O_RDONLY)
 	if err != nil {
 		return manifest{}, err
+	}
+	defer f.Close()
+	payload, err := io.ReadAll(f)
+	if err != nil {
+		return manifest{}, fmt.Errorf("read event spool manifest %q: %w", path, err)
 	}
 	var m manifest
 	if err = json.Unmarshal(payload, &m); err != nil {
@@ -715,6 +738,9 @@ func (s *Spool) BatchesAfter(source, session string, after uint64, limit int) ([
 	if s.uncertain {
 		return nil, ErrDurabilityUncertain
 	}
+	if s.checkpointRequired {
+		return nil, fmt.Errorf("%w: %v", ErrCheckpointRequired, s.checkpointErr)
+	}
 	if limit <= 0 {
 		limit = defaultRetrievalLimit
 	}
@@ -748,7 +774,7 @@ func (s *Spool) Contains(source, session string, seq uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.index[identityKey(source, session, seq)]
-	return ok && !s.closed && !s.uncertain
+	return ok && !s.closed && !s.uncertain && !s.checkpointRequired
 }
 func (s *Spool) IsActive(source, session string, seq uint64) bool {
 	return s.Contains(source, session, seq)
@@ -767,7 +793,7 @@ func (s *Spool) PhysicalBytes() uint64 { s.mu.Lock(); defer s.mu.Unlock(); retur
 func (s *Spool) HasPending() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.uncertain || s.bytes != 0 || len(s.pendingLosses) != 0
+	return s.uncertain || s.checkpointRequired || s.bytes != 0 || len(s.pendingLosses) != 0
 }
 
 func (s *Spool) HasPendingLosses() bool {
@@ -787,6 +813,9 @@ func (s *Spool) PendingLossesRequireFlush(source, session string, batchSequence 
 	}
 	if s.uncertain {
 		return false, ErrDurabilityUncertain
+	}
+	if s.checkpointRequired {
+		return false, fmt.Errorf("%w: %v", ErrCheckpointRequired, s.checkpointErr)
 	}
 	if len(s.pendingLosses) == 0 {
 		return false, nil
@@ -897,7 +926,7 @@ func (s *Spool) FlushPendingLosses(source, session string, batchSequence uint64,
 func (s *Spool) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := Status{LogicalBytes: s.bytes, PhysicalBytes: s.physicalBytes, PendingRecords: len(s.records), PendingLosses: len(s.pendingLosses), DurabilityUncertain: s.uncertain, Closed: s.closed}
+	st := Status{LogicalBytes: s.bytes, PhysicalBytes: s.physicalBytes, PendingRecords: len(s.records), PendingLosses: len(s.pendingLosses), DurabilityUncertain: s.uncertain, CheckpointRequired: s.checkpointRequired, Closed: s.closed}
 	if s.cleanupErr != nil {
 		st.CleanupError = s.cleanupErr.Error()
 	}
@@ -924,6 +953,8 @@ func (s *Spool) Recover() error {
 	s.cleanupErr = nil
 	s.orphanFailures = nil
 	s.unaccountedPhysical = nil
+	s.checkpointRequired = false
+	s.checkpointErr = nil
 	s.uncertain = false
 	if err := s.load(); err != nil {
 		s.uncertain = true
@@ -959,6 +990,9 @@ func (s *Spool) RecoveryState() (source, session string, lastEvent, lastBatch ui
 	defer s.mu.Unlock()
 	if s.uncertain {
 		return "", "", 0, 0, ErrDurabilityUncertain
+	}
+	if s.checkpointRequired {
+		return "", "", 0, 0, fmt.Errorf("%w: %v", ErrCheckpointRequired, s.checkpointErr)
 	}
 	if s.closed {
 		return "", "", 0, 0, ErrClosed
@@ -1072,6 +1106,9 @@ func (s *Spool) mutable() error {
 	}
 	if s.uncertain {
 		return ErrDurabilityUncertain
+	}
+	if s.checkpointRequired {
+		return fmt.Errorf("%w: %v", ErrCheckpointRequired, s.checkpointErr)
 	}
 	return nil
 }

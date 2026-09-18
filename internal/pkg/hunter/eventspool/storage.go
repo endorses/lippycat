@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
@@ -21,7 +22,7 @@ import (
 // still names the retired immutable files.
 func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 	path := journalPath(s.config.Directory, base.Generation)
-	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	f, err := openRegularNoFollow(path, os.O_RDWR)
 	if errors.Is(err, os.ErrNotExist) {
 		return manifest{}, 0, errors.New("open event spool: manifest exists without journal")
 	}
@@ -92,9 +93,19 @@ func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 				return manifest{}, 0, fmt.Errorf("read event spool journal: sequence gap at %d", tx.Sequence)
 			}
 			remove := map[string]bool{}
+			active := make(map[string]bool, len(records))
+			for _, record := range records {
+				active[record.Name] = true
+			}
 			for _, name := range tx.Remove {
 				if !safeBasename(name) {
 					return manifest{}, 0, fmt.Errorf("journal contains unsafe path %q", name)
+				}
+				if remove[name] {
+					return manifest{}, 0, fmt.Errorf("journal transaction contains duplicate removal %q", name)
+				}
+				if !active[name] {
+					return manifest{}, 0, fmt.Errorf("journal transaction removes inactive record %q", name)
 				}
 				remove[name] = true
 			}
@@ -214,7 +225,18 @@ func (s *Spool) commit(tx transaction) error {
 	s.metrics.JournalFrames++
 	s.metrics.MaxJournalFrames = max(s.metrics.MaxJournalFrames, s.metrics.JournalFrames)
 	if s.shouldCheckpoint() {
-		return s.rotateCheckpoint()
+		generation := s.generation
+		if err = s.rotateCheckpoint(); err != nil {
+			if s.generation != generation {
+				return err
+			}
+			if !errors.Is(err, ErrDurabilityUncertain) {
+				s.checkpointRequired = true
+				s.checkpointErr = err
+				return errors.Join(ErrCheckpointRequired, err)
+			}
+			return err
+		}
 	}
 	return nil
 }
@@ -317,9 +339,19 @@ func (s *Spool) shouldCheckpoint() bool {
 
 func (s *Spool) applyTransaction(tx transaction) error {
 	remove := map[string]bool{}
+	active := make(map[string]bool, len(s.records))
+	for _, record := range s.records {
+		active[record.name] = true
+	}
 	for _, name := range tx.Remove {
 		if !safeBasename(name) {
 			return fmt.Errorf("event spool transaction contains unsafe path %q", name)
+		}
+		if remove[name] {
+			return fmt.Errorf("event spool transaction contains duplicate removal %q", name)
+		}
+		if !active[name] {
+			return fmt.Errorf("event spool transaction removes inactive record %q", name)
 		}
 		remove[name] = true
 	}
@@ -599,6 +631,7 @@ func (s *Spool) retryCleanup(names []string) error {
 		s.orphanFailures = make(map[string]error)
 	}
 	var first error
+	refreshPhysical := false
 	for _, name := range names {
 		path := filepath.Join(s.config.Directory, name)
 		var removedBytes uint64
@@ -618,8 +651,14 @@ func (s *Spool) retryCleanup(names []string) error {
 			delete(s.unaccountedPhysical, name)
 			delete(s.orphanFailures, name)
 		} else if errors.Is(removeErr, os.ErrNotExist) {
+			refreshPhysical = true
 			delete(s.unaccountedPhysical, name)
 			delete(s.orphanFailures, name)
+		}
+	}
+	if refreshPhysical {
+		if err := s.refreshPhysical(); err != nil && first == nil {
+			first = &CleanupError{Operation: "reconcile physical bytes", Path: s.config.Directory, Err: err}
 		}
 	}
 	if len(names) > 0 {
@@ -735,4 +774,28 @@ func (s *Spool) refreshPhysical() error {
 
 func countsAsPhysicalRecord(name string) bool {
 	return strings.HasSuffix(name, recordExtension) || strings.HasPrefix(name, ".eventbatch-")
+}
+
+func openRegularNoFollow(path string, flags int) (*os.File, error) {
+	entryInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !entryInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("open event spool metadata %q: file is not regular", path)
+	}
+	f, err := os.OpenFile(path, flags|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(entryInfo, info) {
+		_ = f.Close()
+		return nil, fmt.Errorf("open event spool metadata %q: file changed while opening", path)
+	}
+	return f, nil
 }

@@ -317,6 +317,37 @@ func TestEventRouterOversizedThenValidBatchAdvancesThroughAck(t *testing.T) {
 	require.False(t, router.HasPendingDurableBatches())
 }
 
+func TestEventRouterTransportInvalidThenValidBatchAdvancesThroughAck(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewManager(Config{ForwardMode: "events"}, nil)
+	router, err := NewEventRouter(manager, EventRouterConfig{
+		SpoolDirectory: dir, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, router.Close(context.Background())) })
+	node, session := "tap-node", "30313233343536373839616263646566"
+
+	invalid := routedDNS(node, session, 1).(events.DNSEvent)
+	invalid.Answers = make([]string, protoadapter.MaxCollectionEntries+1)
+	require.NoError(t, router.HandleEvent(context.Background(), invalid))
+	require.Equal(t, uint64(1), router.Losses().UnsupportedKind)
+
+	require.NoError(t, router.HandleEvent(context.Background(), routedDNS(node, session, 2)))
+	router.mu.Lock()
+	route := router.routes[eventRouteKey{nodeID: node, sessionID: session}]
+	router.mu.Unlock()
+	require.NotNil(t, route)
+	batches, err := route.spool.BatchesAfter(node, session, 0, 2)
+	require.NoError(t, err)
+	require.Len(t, batches, 1)
+	require.Equal(t, uint64(2), batches[0].GetEvents()[0].GetEventSequence())
+	require.Equal(t, eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, batches[0].GetStats().GetLosses()[0].GetKind())
+	require.Equal(t, uint64(1), batches[0].GetStats().GetLosses()[0].GetEventSequenceRanges()[0].GetFirst())
+
+	require.NoError(t, route.spool.Ack(node, session, 1))
+	require.False(t, router.HasPendingDurableBatches())
+}
+
 func TestDrainAndRetireWaitsForAdmittedHandleBeforeFinalFlush(t *testing.T) {
 	dir := t.TempDir()
 	manager := NewManager(Config{ForwardMode: "events"}, nil)

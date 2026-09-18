@@ -799,6 +799,114 @@ func TestManifestRejectsUnsafeRecordPath(t *testing.T) {
 	require.ErrorContains(t, err, "unsafe")
 }
 
+func TestOpenRejectsSymlinkedAuthoritativeMetadata(t *testing.T) {
+	for _, name := range []string{manifestFileName, journalFileName} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := Open(Config{Directory: dir})
+			require.NoError(t, err)
+			require.NoError(t, s.Close())
+
+			path := filepath.Join(dir, name)
+			target := filepath.Join(t.TempDir(), "metadata")
+			payload, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(target, payload, 0o600))
+			require.NoError(t, os.Remove(path))
+			require.NoError(t, os.Symlink(target, path))
+
+			_, err = Open(Config{Directory: dir})
+			require.ErrorContains(t, err, "not regular")
+			after, readErr := os.ReadFile(target)
+			require.NoError(t, readErr)
+			require.Equal(t, payload, after, "recovery must not mutate a symlink target")
+		})
+	}
+}
+
+func TestEnqueueRejectsJournalSwappedToSymlink(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+
+	journal := filepath.Join(dir, journalFileName)
+	target := filepath.Join(t.TempDir(), "external-journal")
+	payload, err := os.ReadFile(journal)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(target, payload, 0o600))
+	require.NoError(t, os.Rename(journal, journal+".saved"))
+	require.NoError(t, os.Symlink(target, journal))
+
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.ErrorContains(t, err, "not regular")
+	require.False(t, result.Stored)
+	after, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	require.Equal(t, payload, after, "enqueue must not append to a swapped symlink target")
+	require.NoError(t, s.Close())
+}
+
+func TestJournalReplayRejectsInvalidRemovalSet(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prepare func(t *testing.T, s *Spool) []string
+		want    string
+	}{
+		{
+			name: "inactive",
+			prepare: func(_ *testing.T, _ *Spool) []string {
+				return []string{"missing" + recordExtension}
+			},
+			want: "removes inactive record",
+		},
+		{
+			name: "duplicate",
+			prepare: func(t *testing.T, s *Spool) []string {
+				result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+				require.NoError(t, err)
+				require.True(t, result.Stored)
+				name := s.records[0].name
+				return []string{name, name}
+			},
+			want: "duplicate removal",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := Open(Config{Directory: dir})
+			require.NoError(t, err)
+			remove := tc.prepare(t, s)
+			generation, sequence := s.generation, s.txSequence+1
+			require.NoError(t, s.Close())
+
+			tx := transaction{Version: manifestVersion, Generation: generation, Sequence: sequence, Remove: remove}
+			appendTestJournalTransaction(t, journalPath(dir, generation), tx)
+			_, err = Open(Config{Directory: dir})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func appendTestJournalTransaction(t *testing.T, path string, tx transaction) {
+	t.Helper()
+	payload, err := json.Marshal(tx)
+	require.NoError(t, err)
+	frame := make([]byte, journalFrameHeaderSize+len(payload)+4)
+	copy(frame[:8], journalMagic[:])
+	binary.BigEndian.PutUint32(frame[8:12], manifestVersion)
+	binary.BigEndian.PutUint64(frame[12:20], tx.Generation)
+	binary.BigEndian.PutUint64(frame[20:28], tx.Sequence)
+	binary.BigEndian.PutUint32(frame[28:32], uint32(len(payload)))
+	binary.BigEndian.PutUint32(frame[32:36], crc32.ChecksumIEEE(frame[:32]))
+	copy(frame[journalFrameHeaderSize:], payload)
+	binary.BigEndian.PutUint32(frame[journalFrameHeaderSize+len(payload):], crc32.ChecksumIEEE(payload))
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	require.NoError(t, err)
+	_, err = f.Write(frame)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+}
+
 func TestAckCleanupFailureAtEachVictimKeepsLogicalCommit(t *testing.T) {
 	for _, failAt := range []int{1, 2, 3} {
 		t.Run(fmt.Sprintf("victim_%d", failAt), func(t *testing.T) {

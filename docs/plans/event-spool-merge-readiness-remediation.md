@@ -617,6 +617,23 @@ barrier instead of allowing mutation with stale status. Focused normal and race
 tests for `eventspool`, `eventforwarding`, `processor/upstream`, and
 `protoadapter` passed after the correction.
 
+A sixth source-to-plan audit on 2026-09-18 corrected the remaining receiver,
+forwarding, and storage-boundary gaps. Processor ingress now rejects loss-only
+and normal batches whose reported loss ranges would advance the event high-water
+across an uncovered trailing sequence. Assigned events that cannot satisfy the
+transport representation limits are durably recorded as exact unsupported-event
+losses instead of being logged and forgotten, and both hunter and upstream paths
+continue with the next valid event using the unconsumed batch sequence.
+Authoritative manifest and journal opens now reject symlinks and replacement,
+including steady-state journal append. Replay rejects duplicate or inactive
+removal names. Ambiguous cleanup followed by `ENOENT` reconciles physical bytes
+instead of leaving the counter inflated. Finally, a definite checkpoint
+publication failure after a committed transaction enters an explicit
+checkpoint-required barrier: committed state and pending status remain visible,
+further mutation and sending stop, and recovery compacts the bounded journal
+before resuming. Focused normal and race tests for `eventspool`, focused
+forwarding and upstream tests, and tagged processor-ingress regressions passed.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

@@ -181,6 +181,13 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 		}
 		if batch.FirstEventSequence > 0 {
 			state.event = batch.FirstEventSequence - 1
+		} else if firstLossSequence := firstReportedLossSequence(batch.GetStats().GetLosses()); firstLossSequence > 0 {
+			// A fresh memory-only processor may first see a retained loss-only
+			// carrier after earlier batches were ACKed before restart. Treat its
+			// first reported sequence as the new baseline, just as a normal batch
+			// uses FirstEventSequence above. Coverage within the retained carrier
+			// must still be exact from this point onward.
+			state.event = firstLossSequence - 1
 		}
 	}
 	if batch.BatchSequence <= state.batch {
@@ -217,6 +224,18 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	if hasEventGap && !gapCovered {
 		return nil, status.Error(codes.InvalidArgument, "event sequence leaves a gap after previously admitted events")
 	}
+	admittedHighWater := admittedEventHighWater(batch, state.event)
+	trailingFirst := eventGapFirst
+	if batch.LastEventSequence > 0 {
+		if batch.LastEventSequence == ^uint64(0) {
+			trailingFirst = 0
+		} else {
+			trailingFirst = batch.LastEventSequence + 1
+		}
+	}
+	if trailingFirst > 0 && admittedHighWater >= trailingFirst && !lossRangeCovered(batch.GetStats().GetLosses(), open.SourceNodeId, open.ProducerSessionId, trailingFirst, admittedHighWater) {
+		return nil, status.Error(codes.InvalidArgument, "event loss coverage leaves a gap before its high-water mark")
+	}
 	if i.wal != nil {
 		if err := i.wal.append(batch); err != nil {
 			return nil, status.Errorf(codes.ResourceExhausted, "recoverable event admission failed: %v", err)
@@ -243,6 +262,18 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	state.event = admittedEventHighWater(batch, state.event)
 	i.sessions[key] = state
 	return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
+}
+
+func firstReportedLossSequence(losses []*eventsv1.EventLoss) uint64 {
+	first := uint64(0)
+	for _, loss := range losses {
+		for _, eventRange := range loss.GetEventSequenceRanges() {
+			if eventRange.GetFirst() > 0 && (first == 0 || eventRange.GetFirst() < first) {
+				first = eventRange.GetFirst()
+			}
+		}
+	}
+	return first
 }
 
 func admittedEventHighWater(batch *eventsv1.ProtocolEventBatch, current uint64) uint64 {

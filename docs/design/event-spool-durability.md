@@ -129,6 +129,12 @@ Every storage operation has one of four outcomes:
    later safe mutation points. It never reactivates a record or invites a
    caller retry.
 
+A definite checkpoint-maintenance failure after a journal transaction commits
+does not undo that transaction. The spool exposes a checkpoint-required state,
+blocks further mutation and sending, and remains pending until recovery compacts
+the bounded journal successfully. This prevents repeated checkpoint failures
+from growing replay work without bound while preserving the committed result.
+
 Process reopen observes the filesystem state that is visible at that time.
 Power-loss tests model unsynced boundaries separately and permit only the old
 or new complete transaction state. Files needed by either state are retained
@@ -137,6 +143,10 @@ until uncertainty is resolved.
 One process owns a spool directory at a time. The owner holds an exclusive
 directory lock throughout recovery and mutation and releases it on `Close` or
 failed startup.
+
+Authoritative manifest and journal files must be regular files opened without
+following symlinks, and the opened descriptor must still identify the inspected
+file. This applies both during recovery and to steady-state journal appends.
 
 ## Loss accounting and exhaustion
 

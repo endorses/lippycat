@@ -607,6 +607,16 @@ separately:
 | Sustained replacement 1,000 | 61.9 ms | 25.68 MB | n/a | 473,970 | n/a | n/a / 7 | 4,038 |
 | Sustained replacement 10,000 | 668.8 ms | 256.85 MB | n/a | 4,801,072 | n/a | n/a / 78 | 40,393 |
 
+A fifth source-to-plan audit on 2026-09-18 corrected physical-byte accounting
+for a fully written temporary record when publication rename and subsequent
+cleanup both fail. The retryable temporary file is now reflected immediately
+in status and subtracted exactly once when later cleanup succeeds. A focused
+regression covers the failure and retry path. Accounting overflow is checked
+before addition, and a failed disk reconciliation now enters the recovery
+barrier instead of allowing mutation with stale status. Focused normal and race
+tests for `eventspool`, `eventforwarding`, `processor/upstream`, and
+`protoadapter` passed after the correction.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

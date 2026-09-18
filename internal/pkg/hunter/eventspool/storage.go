@@ -524,30 +524,28 @@ func (s *Spool) writeRecord(created time.Time, b *eventsv1.ProtocolEventBatch, p
 	}
 	closeErr := tmp.Close()
 	if err != nil || closeErr != nil {
-		var accountingErr error
-		if info, statErr := os.Stat(name); statErr == nil && info.Size() > 0 {
-			visibleBytes := uint64(info.Size())
-			if visibleBytes > ^uint64(0)-s.physicalBytes {
-				accountingErr = errors.New("enqueue event batch: physical bytes overflow")
-			} else {
-				// retryCleanup subtracts these bytes if removal succeeds. If it
-				// fails, status continues to include the retryable temporary file.
-				s.physicalBytes += visibleBytes
-			}
-		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			accountingErr = fmt.Errorf("enqueue event batch: stat failed temporary record %q: %w", name, statErr)
-		}
-		return record{}, errors.Join(fmt.Errorf("enqueue event batch: write record: %v %v", err, closeErr), accountingErr, cleanup())
+		accountingErr := s.accountTemporaryRecord(name)
+		cleanupErr := cleanup()
+		return record{}, errors.Join(fmt.Errorf("enqueue event batch: write record: %v %v", err, closeErr), accountingErr, cleanupErr, s.reconcileFailedPhysicalAccounting(accountingErr))
 	}
 	finalName := fmt.Sprintf("%020d-%s%s", createdNano, filepath.Base(name), recordExtension)
 	final := filepath.Join(s.config.Directory, finalName)
 	if err = s.fs.rename(name, final); err != nil {
-		return record{}, errors.Join(fmt.Errorf("enqueue event batch: publish record: %w", err), cleanup())
+		// A failed rename leaves the fully written temporary record behind. Count
+		// it before cleanup so a cleanup failure remains visible in physical-byte
+		// status and a later successful retry can subtract it exactly once.
+		accountingErr := s.accountTemporaryRecord(name)
+		cleanupErr := cleanup()
+		return record{}, errors.Join(fmt.Errorf("enqueue event batch: publish record: %w", err), accountingErr, cleanupErr, s.reconcileFailedPhysicalAccounting(accountingErr))
 	}
 	recordSize := uint64(headerSize + len(payload))
 	// The rename makes the record visible to this process even if the following
 	// directory sync leaves power-loss durability uncertain. Status must account
 	// for that physical orphan throughout the uncertainty barrier.
+	if recordSize > ^uint64(0)-s.physicalBytes {
+		s.uncertain = true
+		return record{}, fmt.Errorf("%w: published record physical bytes overflow", ErrDurabilityUncertain)
+	}
 	s.physicalBytes += recordSize
 	if err = s.fs.syncDir(s.config.Directory); err != nil {
 		s.uncertain = true
@@ -555,6 +553,45 @@ func (s *Spool) writeRecord(created time.Time, b *eventsv1.ProtocolEventBatch, p
 	}
 	s.metrics.Syncs++
 	return record{name: finalName, path: final, created: created, size: recordSize, payloadSize: uint64(len(payload)), batch: proto.Clone(b).(*eventsv1.ProtocolEventBatch)}, nil
+}
+
+func (s *Spool) accountTemporaryRecord(path string) error {
+	name := filepath.Base(path)
+	if s.unaccountedPhysical == nil {
+		s.unaccountedPhysical = make(map[string]bool)
+	}
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		delete(s.unaccountedPhysical, name)
+		return nil
+	}
+	if err != nil {
+		s.unaccountedPhysical[name] = true
+		return fmt.Errorf("enqueue event batch: stat failed temporary record %q: %w", path, err)
+	}
+	if info.Size() <= 0 {
+		delete(s.unaccountedPhysical, name)
+		return nil
+	}
+	visibleBytes := uint64(info.Size())
+	if visibleBytes > ^uint64(0)-s.physicalBytes {
+		s.unaccountedPhysical[name] = true
+		return errors.New("enqueue event batch: physical bytes overflow")
+	}
+	s.physicalBytes += visibleBytes
+	delete(s.unaccountedPhysical, name)
+	return nil
+}
+
+func (s *Spool) reconcileFailedPhysicalAccounting(accountingErr error) error {
+	if accountingErr == nil {
+		return nil
+	}
+	if err := s.refreshPhysical(); err != nil {
+		s.uncertain = true
+		return fmt.Errorf("%w: reconcile event spool physical bytes: %v", ErrDurabilityUncertain, err)
+	}
+	return nil
 }
 
 func (s *Spool) retryCleanup(names []string) error {
@@ -575,11 +612,13 @@ func (s *Spool) retryCleanup(names []string) error {
 				first = &CleanupError{Operation: "remove", Path: path, Err: removeErr}
 			}
 		} else if removeErr == nil {
-			if countsAsPhysicalRecord(name) && removedBytes <= s.physicalBytes {
+			if countsAsPhysicalRecord(name) && !s.unaccountedPhysical[name] && removedBytes <= s.physicalBytes {
 				s.physicalBytes -= removedBytes
 			}
+			delete(s.unaccountedPhysical, name)
 			delete(s.orphanFailures, name)
 		} else if errors.Is(removeErr, os.ErrNotExist) {
+			delete(s.unaccountedPhysical, name)
 			delete(s.orphanFailures, name)
 		}
 	}
@@ -690,6 +729,7 @@ func (s *Spool) refreshPhysical() error {
 		}
 	}
 	s.physicalBytes = total
+	s.unaccountedPhysical = nil
 	return nil
 }
 

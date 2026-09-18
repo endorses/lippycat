@@ -175,6 +175,7 @@ type Spool struct {
 	uncertain, closed                                                         bool
 	cleanupErr                                                                error
 	orphanFailures                                                            map[string]error
+	unaccountedPhysical                                                       map[string]bool
 	lock                                                                      *os.File
 	metrics                                                                   Metrics
 	identitySet, homogeneous                                                  bool
@@ -922,6 +923,7 @@ func (s *Spool) Recover() error {
 	s.sessionPolicy = nil
 	s.cleanupErr = nil
 	s.orphanFailures = nil
+	s.unaccountedPhysical = nil
 	s.uncertain = false
 	if err := s.load(); err != nil {
 		s.uncertain = true

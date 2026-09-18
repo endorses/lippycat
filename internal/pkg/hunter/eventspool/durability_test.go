@@ -197,6 +197,125 @@ func TestFailedTemporaryRecordCleanupRemainsInPhysicalBytes(t *testing.T) {
 	require.Empty(t, s.Status().CleanupError)
 }
 
+func TestFailedRecordRenameCleanupRemainsInPhysicalBytes(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	fs := defaultFS()
+	originalRename := fs.rename
+	fs.rename = func(from, to string) error {
+		if strings.HasSuffix(to, recordExtension) {
+			return errors.New("injected record rename failure")
+		}
+		return originalRename(from, to)
+	}
+	originalRemove := fs.remove
+	fs.remove = func(path string) error {
+		if strings.HasPrefix(filepath.Base(path), ".eventbatch-") {
+			return errors.New("injected temporary cleanup failure")
+		}
+		return originalRemove(path)
+	}
+	s.fs = fs
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.Error(t, err)
+	require.False(t, result.Stored)
+	require.Positive(t, s.PhysicalBytes())
+	require.NotEmpty(t, s.Status().CleanupError)
+
+	s.fs = defaultFS()
+	result, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.Equal(t, s.Bytes(), s.PhysicalBytes())
+	require.Empty(t, s.Status().CleanupError)
+}
+
+func TestFailedTemporaryAccountingDoesNotSubtractActiveBytes(t *testing.T) {
+	for _, cleanupFails := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cleanup_fails_%t", cleanupFails), func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := Open(Config{Directory: dir})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, s.Close()) })
+			first, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+			require.NoError(t, err)
+			require.True(t, first.Stored)
+
+			fs := defaultFS()
+			originalRename := fs.rename
+			fs.rename = func(from, to string) error {
+				if strings.HasSuffix(to, recordExtension) {
+					return errors.New("injected record rename failure")
+				}
+				return originalRename(from, to)
+			}
+			if cleanupFails {
+				originalRemove := fs.remove
+				fs.remove = func(path string) error {
+					if strings.HasPrefix(filepath.Base(path), ".eventbatch-") {
+						return errors.New("injected temporary cleanup failure")
+					}
+					return originalRemove(path)
+				}
+			}
+			s.fs = fs
+			s.physicalBytes = ^uint64(0)
+			result, err := s.Enqueue(batch("node", "session", 2, 2, 2))
+			require.ErrorContains(t, err, "physical bytes overflow")
+			require.False(t, result.Stored)
+			if cleanupFails {
+				require.Greater(t, s.PhysicalBytes(), s.Bytes())
+			} else {
+				require.Equal(t, s.Bytes(), s.PhysicalBytes())
+			}
+
+			s.fs = defaultFS()
+			result, err = s.Enqueue(batch("node", "session", 2, 2, 2))
+			require.NoError(t, err)
+			require.True(t, result.Stored)
+			require.Equal(t, s.Bytes(), s.PhysicalBytes())
+		})
+	}
+}
+
+func TestFailedPhysicalReconciliationRequiresRecovery(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	moved := dir + "-moved"
+	require.NoError(t, os.Rename(dir, moved))
+	err = s.reconcileFailedPhysicalAccounting(errors.New("injected accounting failure"))
+	require.ErrorIs(t, err, ErrDurabilityUncertain)
+	require.True(t, s.Status().DurabilityUncertain)
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.ErrorIs(t, err, ErrDurabilityUncertain)
+
+	require.NoError(t, os.Rename(moved, dir))
+	require.NoError(t, s.Recover())
+	require.False(t, s.Status().DurabilityUncertain)
+}
+
+func TestPublishedRecordPhysicalOverflowRequiresRecovery(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	s.physicalBytes = ^uint64(0)
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.ErrorIs(t, err, ErrDurabilityUncertain)
+	require.False(t, result.Stored)
+	require.True(t, s.Status().DurabilityUncertain)
+	require.NoError(t, s.Recover())
+	require.False(t, s.HasPending())
+	require.Zero(t, s.PhysicalBytes())
+}
+
 func TestDurabilityUncertainBarrierAndRecovery(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})

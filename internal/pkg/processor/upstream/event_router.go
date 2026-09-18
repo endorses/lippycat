@@ -251,9 +251,6 @@ func (r *EventRouter) newRoute(nodeID, sessionID string) (*eventRoute, error) {
 }
 
 func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64, spool *eventspool.Spool) (*eventRoute, error) {
-	if lastBatch == ^uint64(0) {
-		return nil, errors.Join(errors.New("upstream event spool batch sequence is exhausted; rotate the producer session"), spool.Close())
-	}
 	if err := spool.BindSessionPolicy(r.sessionPolicy(nodeID, sessionID)); err != nil {
 		return nil, errors.Join(fmt.Errorf("bind upstream event route session policy: %w", err), spool.Close())
 	}
@@ -261,7 +258,15 @@ func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64,
 	if err != nil {
 		return nil, errors.Join(err, spool.Close())
 	}
-	sink, err := eventforwarding.NewSink(client, lastBatch+1, 1)
+	firstBatch := lastBatch + 1
+	accepting := true
+	if lastBatch == ^uint64(0) {
+		// Keep the final committed batch drainable after restart, but never wrap
+		// admission back to batch one for the exhausted producer session.
+		firstBatch = lastBatch
+		accepting = false
+	}
+	sink, err := eventforwarding.NewSink(client, firstBatch, 1)
 	if err != nil {
 		return nil, errors.Join(err, spool.Close())
 	}
@@ -271,7 +276,7 @@ func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64,
 		defer close(done)
 		r.serve(routeCtx, client)
 	}()
-	route := &eventRoute{sink: sink, spool: spool, cancel: cancel, done: done, accepting: true}
+	route := &eventRoute{sink: sink, spool: spool, cancel: cancel, done: done, accepting: accepting}
 	route.admission = sync.NewCond(&route.admissionMu)
 	return route, nil
 }

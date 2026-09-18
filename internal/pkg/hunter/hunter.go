@@ -134,6 +134,7 @@ type Hunter struct {
 	eventLossMu     sync.Mutex
 	eventLossSource *events.Dispatcher
 	eventLossCount  uint64
+	eventLastBatch  uint64
 }
 
 // New creates a new hunter instance
@@ -383,6 +384,18 @@ func (h *Hunter) Start(ctx context.Context) error {
 				h.analyzeEvents()
 			}
 		}()
+	} else if h.eventForwarder != nil {
+		// Recovery of a committed final sequence starts forwarding-only. Consume
+		// the current connection's negotiated mode, drain that final record, then
+		// rotate the exhausted identity before enabling analysis again.
+		h.wg.Add(1)
+		go func() {
+			defer h.wg.Done()
+			mode, err := h.connectionManager.WaitAcceptedMode(h.ctx)
+			if err == nil && mode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+				h.resumeEventsAfterExhaustedDrain(h.eventLastBatch)
+			}
+		}()
 	}
 
 	logger.Info("Hunter started successfully", "hunter_id", h.config.HunterID)
@@ -395,6 +408,101 @@ func (h *Hunter) Start(ctx context.Context) error {
 
 	logger.Info("Hunter stopped", "hunter_id", h.config.HunterID)
 	return nil
+}
+
+func (h *Hunter) resumeEventsAfterExhaustedDrain(lastBatch uint64) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		status := h.eventSpool.Status()
+		if err := exhaustedRecoveryStatusError(status); err != nil {
+			logger.Error("Exhausted event producer cannot continue durable recovery", "error", err)
+			if h.cancel != nil {
+				h.cancel()
+			}
+			return
+		}
+		if !h.eventSpool.HasPending() {
+			break
+		}
+		if status.PendingLosses > 0 && lastBatch != ^uint64(0) {
+			result, err := h.eventForwarder.FlushPendingLosses(lastBatch+1, 1)
+			if recoveryErr := exhaustedRecoveryPublicationError(result, err); recoveryErr != nil {
+				logger.Error("Failed to publish recovered terminal event losses", "error", recoveryErr)
+				if h.cancel != nil {
+					h.cancel()
+				}
+				return
+			}
+			if result.Stored {
+				lastBatch++
+				if err != nil {
+					logger.Warn("Event spool cleanup deferred after recovered terminal loss publication", "error", err, "logical_commit", true)
+				}
+				continue
+			}
+		}
+		if status.PendingRecords == 0 && status.PendingLosses > 0 {
+			logger.Error("Exhausted event producer drained its final carrier but exact pending loss coverage cannot be assigned another batch sequence", "pending_loss_records", status.PendingLosses)
+			if h.cancel != nil {
+				h.cancel()
+			}
+			return
+		}
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+	h.eventMu.Lock()
+	producer, err := events.NewLiveProducer(h.config.HunterID)
+	if err == nil {
+		err = h.eventSpool.ResetSession(h.eventSessionPolicy(producer.SessionID()))
+	}
+	var forwarder *eventforwarding.Client
+	var dispatcher *events.Dispatcher
+	var runtime *eventanalysis.Runtime
+	if err == nil {
+		forwarder, dispatcher, runtime, err = h.newEventPipeline(h.eventSpool, producer, 1)
+	}
+	if err != nil {
+		h.eventMu.Unlock()
+		logger.Error("Failed to rotate exhausted event producer after draining final batch", "error", err)
+		if h.cancel != nil {
+			h.cancel()
+		}
+		return
+	}
+	h.eventForwarder, h.eventDispatcher, h.eventRuntime = forwarder, dispatcher, runtime
+	h.connectionManager.SetEventForwarder(forwarder)
+	h.connectionManager.MarkDisconnected()
+	h.eventMu.Unlock()
+	mode, err := h.connectionManager.WaitAcceptedMode(h.ctx)
+	if err == nil && mode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+		h.analyzeEvents()
+	}
+}
+
+func exhaustedRecoveryStatusError(status eventspool.Status) error {
+	if status.DurabilityUncertain {
+		return eventspool.ErrDurabilityUncertain
+	}
+	return nil
+}
+
+func exhaustedRecoveryPublicationError(result eventspool.EnqueueResult, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, eventspool.ErrDurabilityUncertain) {
+		return err
+	}
+	var cleanupErr *eventspool.CleanupError
+	if result.Stored && errors.As(err, &cleanupErr) {
+		return nil
+	}
+	return err
 }
 
 func (h *Hunter) updateCaptureLossStats(previous *int64) {
@@ -454,8 +562,20 @@ func (h *Hunter) initializeEventForwarding() error {
 		if source != h.config.HunterID {
 			return fmt.Errorf("event spool belongs to node %q, configured node is %q", source, h.config.HunterID)
 		}
-		if lastEvent == ^uint64(0) {
-			return errors.New("event spool event sequence is exhausted; rotate the producer session")
+		if lastEvent == ^uint64(0) || lastBatch == ^uint64(0) {
+			if err := spool.BindSessionPolicy(h.eventSessionPolicy(session)); err != nil {
+				return err
+			}
+			forwarder, forwardErr := h.newEventForwarder(spool, session)
+			if forwardErr != nil {
+				return forwardErr
+			}
+			// The exhausted session cannot admit another event or batch, but its
+			// committed records must remain drainable after restart. Pending loss
+			// carriers are staged as ACKs free capacity, then the session rotates.
+			h.eventSpool, h.eventForwarder, h.eventLastBatch = spool, forwarder, lastBatch
+			initialized = true
+			return nil
 		}
 		producer, err = events.ResumeLiveProducer(source, session, lastEvent)
 	}
@@ -464,9 +584,6 @@ func (h *Hunter) initializeEventForwarding() error {
 	}
 	if err := spool.BindSessionPolicy(h.eventSessionPolicy(producer.SessionID())); err != nil {
 		return err
-	}
-	if lastBatch == ^uint64(0) {
-		return errors.New("event spool batch sequence is exhausted; rotate the producer session")
 	}
 	h.eventSpool = spool
 	forwarder, dispatcher, runtime, err := h.newEventPipeline(spool, producer, lastBatch+1)
@@ -490,18 +607,7 @@ func (h *Hunter) eventSessionPolicy(sessionID string) eventspool.SessionPolicy {
 }
 
 func (h *Hunter) newEventPipeline(spool *eventspool.Spool, producer *events.Producer, firstBatch uint64) (*eventforwarding.Client, *events.Dispatcher, *eventanalysis.Runtime, error) {
-	profile := eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE
-	if h.config.EventDeliveryProfile == "memory_only" {
-		profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
-	}
-	forwarder, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: producer.SessionID(), EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_FILE_METADATA, eventsv1.EventKind_EVENT_KIND_RADIUS}, Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
-		switch kind {
-		case eventsv1.LossKind_LOSS_KIND_TRANSPORT:
-			h.statsCollector.IncrementTransportLoss(count)
-		case eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT:
-			h.statsCollector.IncrementUnsupportedKindLoss(count)
-		}
-	}}, spool)
+	forwarder, err := h.newEventForwarder(spool, producer.SessionID())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -525,6 +631,21 @@ func (h *Hunter) newEventPipeline(spool *eventspool.Spool, producer *events.Prod
 		return nil, nil, nil, err
 	}
 	return forwarder, dispatcher, runtime, nil
+}
+
+func (h *Hunter) newEventForwarder(spool *eventspool.Spool, sessionID string) (*eventforwarding.Client, error) {
+	profile := eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE
+	if h.config.EventDeliveryProfile == "memory_only" {
+		profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
+	}
+	return eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_FILE_METADATA, eventsv1.EventKind_EVENT_KIND_RADIUS}, Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
+		switch kind {
+		case eventsv1.LossKind_LOSS_KIND_TRANSPORT:
+			h.statsCollector.IncrementTransportLoss(count)
+		case eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT:
+			h.statsCollector.IncrementUnsupportedKindLoss(count)
+		}
+	}}, spool)
 }
 
 func (h *Hunter) analyzeEvents() {
@@ -570,7 +691,17 @@ func (h *Hunter) ApplyPolicyChange(apply func() error) error {
 	if apply == nil {
 		return nil
 	}
-	if h.config.ForwardMode != "events" || h.eventRuntime == nil {
+	if h.config.ForwardMode != "events" {
+		return apply()
+	}
+	h.eventMu.RLock()
+	runtimeReady := h.eventRuntime != nil
+	drainingExhaustedSession := !runtimeReady && h.eventForwarder != nil
+	h.eventMu.RUnlock()
+	if drainingExhaustedSession {
+		return errors.New("apply event policy change: exhausted producer session is still draining; retry after session rotation")
+	}
+	if !runtimeReady {
 		return apply()
 	}
 	boundaryCtx, boundaryCancel := context.WithTimeout(h.ctx, 30*time.Second)

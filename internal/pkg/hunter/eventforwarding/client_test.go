@@ -461,6 +461,37 @@ func TestHasPendingTracksDurableAcknowledgement(t *testing.T) {
 	require.False(t, client.HasPending())
 }
 
+func TestServeDrainsRecoveredFinalBatchSequence(t *testing.T) {
+	dir := t.TempDir()
+	spool, err := eventspool.Open(eventspool.Config{Directory: dir})
+	require.NoError(t, err)
+	client, err := New(Config{SourceNodeID: "hunter", ProducerSessionID: "session", Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE}, spool)
+	require.NoError(t, err)
+	result, err := client.Enqueue(ingressBatch(^uint64(0)))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.NoError(t, spool.Close())
+
+	recovered, err := eventspool.Open(eventspool.Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, recovered.Close()) })
+	recoveredClient, err := New(Config{SourceNodeID: "hunter", ProducerSessionID: "session", Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE}, recovered)
+	require.NoError(t, err)
+	stream := &fakeStream{controls: make(chan *eventsv1.EventIngressControl, 2)}
+	stream.controls <- &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE}
+	stream.onSend = func(message *eventsv1.EventIngressMessage) {
+		if message.GetBatch().GetBatchSequence() == ^uint64(0) {
+			stream.controls <- &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: ^uint64(0)}
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- recoveredClient.Serve(ctx, stream) }()
+	require.Eventually(t, func() bool { return !recovered.HasPending() }, time.Second, time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
 func TestACKCarriesFlowControl(t *testing.T) {
 	client, _ := newTestClient(t)
 	paused, _, _, err := client.handleControl(context.Background(), controlResult{control: &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, FlowControl: int32(data.FlowControl_FLOW_PAUSE)}}, false, 1)
@@ -474,6 +505,7 @@ func TestACKCarriesFlowControl(t *testing.T) {
 func BenchmarkServeBacklogDrain(b *testing.B) {
 	for _, batchCount := range []int{1_000, 10_000} {
 		b.Run(fmt.Sprintf("batches_%d", batchCount), func(b *testing.B) {
+			var syncs, checkpoints, rotations float64
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				spool, err := eventspool.Open(eventspool.Config{Directory: b.TempDir(), CheckpointEvery: 256})
@@ -508,10 +540,16 @@ func BenchmarkServeBacklogDrain(b *testing.B) {
 				b.ReportMetric(float64(metrics.RetrievalClones), "retrieval_clones/op")
 				b.ReportMetric(float64(metrics.ACKRemovalVisits), "ack_visits/op")
 				b.ReportMetric(float64(metrics.MetadataBytes), "metadata_bytes/op")
+				syncs += float64(metrics.Syncs)
+				checkpoints += float64(metrics.Checkpoints)
+				rotations += float64(metrics.Rotations)
 				cancel()
 				require.ErrorIs(b, <-done, context.Canceled)
 				require.NoError(b, spool.Close())
 			}
+			b.ReportMetric(syncs/float64(b.N), "syncs/op")
+			b.ReportMetric(checkpoints/float64(b.N), "checkpoints/op")
+			b.ReportMetric(rotations/float64(b.N), "rotations/op")
 		})
 	}
 }

@@ -51,6 +51,64 @@ func TestReadRecordAcceptsExactPayloadBoundary(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestReadRecordRejectsSymlink(t *testing.T) {
+	payload, err := proto.Marshal(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "outside-record")
+	writeRawRecord(t, target, uint64(len(payload)), payload)
+	link := filepath.Join(dir, "linked"+recordExtension)
+	require.NoError(t, os.Symlink(target, link))
+
+	_, err = readRecord(link, MaxRecordPayloadBytes)
+	require.ErrorContains(t, err, "not a regular file")
+	require.FileExists(t, target, "rejecting a link must not remove its target")
+}
+
+func TestLegacyMigrationRejectsInvalidSessionPolicyBeforePublication(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		policy SessionPolicy
+	}{
+		{name: "mismatched identity", policy: SessionPolicy{Version: 1, SourceNodeID: "node", ProducerSessionID: "other", DeliveryProfile: "reliable", SemanticRevision: 1}},
+		{name: "incomplete", policy: SessionPolicy{Version: 1, SourceNodeID: "node", ProducerSessionID: "session", DeliveryProfile: "reliable"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			payload, err := proto.Marshal(batch("node", "session", 1, 1, 1))
+			require.NoError(t, err)
+			writeRawRecord(t, filepath.Join(dir, "legacy"+recordExtension), uint64(len(payload)), payload)
+			policyPayload, err := json.Marshal(tc.policy)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, policyFileName), policyPayload, 0o600))
+
+			_, err = Open(Config{Directory: dir})
+			require.Error(t, err)
+			require.NoFileExists(t, filepath.Join(dir, manifestFileName))
+			require.NoFileExists(t, filepath.Join(dir, journalFileName))
+		})
+	}
+}
+
+func TestManifestRecordSymlinkIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+	records, err := filepath.Glob(filepath.Join(dir, "*"+recordExtension))
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	target := filepath.Join(t.TempDir(), "external"+recordExtension)
+	require.NoError(t, os.Rename(records[0], target))
+	require.NoError(t, os.Symlink(target, records[0]))
+
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "not a regular file")
+	require.FileExists(t, target)
+}
+
 func TestOpenEnforcesExclusiveOwnership(t *testing.T) {
 	dir := t.TempDir()
 	first, err := Open(Config{Directory: dir})
@@ -696,6 +754,28 @@ func TestSustainedReplacementBoundsJournalFrames(t *testing.T) {
 	require.NoError(t, s.Close())
 }
 
+func TestDrainBoundsRecoveryFramesByRetainedSet(t *testing.T) {
+	const checkpointEvery = uint64(4)
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir, CheckpointEvery: checkpointEvery})
+	require.NoError(t, err)
+	for sequence := uint64(1); sequence <= 64; sequence++ {
+		_, err = s.Enqueue(batch("node", "session", sequence, sequence, sequence))
+		require.NoError(t, err)
+	}
+	for sequence := uint64(1); sequence <= 50; sequence++ {
+		require.NoError(t, s.Ack("node", "session", sequence))
+		require.LessOrEqual(t, s.transactionsSinceCheckpoint, uint64(len(s.records))+checkpointEvery)
+	}
+	require.NoError(t, s.Close())
+
+	reopened, err := Open(Config{Directory: dir, CheckpointEvery: checkpointEvery})
+	require.NoError(t, err)
+	require.LessOrEqual(t, reopened.transactionsSinceCheckpoint, uint64(len(reopened.records))+checkpointEvery)
+	require.Len(t, reopened.records, 14)
+	require.NoError(t, reopened.Close())
+}
+
 func writeRawRecord(t *testing.T, path string, declared uint64, payload []byte) {
 	t.Helper()
 	header := make([]byte, headerSize)
@@ -723,6 +803,7 @@ func FuzzReadRecordHeader(f *testing.F) {
 func BenchmarkSpoolBuildDrain(b *testing.B) {
 	for _, count := range []int{1000, 10000} {
 		b.Run(fmt.Sprintf("records_%d", count), func(b *testing.B) {
+			var metadataBytes, ackVisits, syncs, checkpoints, rotations float64
 			for iteration := 0; iteration < b.N; iteration++ {
 				s, err := Open(Config{Directory: b.TempDir(), CheckpointEvery: 128})
 				if err != nil {
@@ -738,10 +819,21 @@ func BenchmarkSpoolBuildDrain(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
+				metrics := s.SnapshotMetrics()
+				metadataBytes += float64(metrics.MetadataBytes)
+				ackVisits += float64(metrics.ACKRemovalVisits)
+				syncs += float64(metrics.Syncs)
+				checkpoints += float64(metrics.Checkpoints)
+				rotations += float64(metrics.Rotations)
 				if err = s.Close(); err != nil {
 					b.Fatal(err)
 				}
 			}
+			b.ReportMetric(metadataBytes/float64(b.N), "metadata-bytes/op")
+			b.ReportMetric(ackVisits/float64(b.N), "ack-visits/op")
+			b.ReportMetric(syncs/float64(b.N), "syncs/op")
+			b.ReportMetric(checkpoints/float64(b.N), "checkpoints/op")
+			b.ReportMetric(rotations/float64(b.N), "rotations/op")
 		})
 	}
 }
@@ -749,6 +841,7 @@ func BenchmarkSpoolBuildDrain(b *testing.B) {
 func BenchmarkSpoolSustainedReplacement(b *testing.B) {
 	for _, count := range []int{1000, 10000} {
 		b.Run(fmt.Sprintf("records_%d", count), func(b *testing.B) {
+			var metadataBytes, syncs, rotations float64
 			for iteration := 0; iteration < b.N; iteration++ {
 				now := time.Unix(1, 0)
 				s, err := Open(Config{Directory: b.TempDir(), MaxAge: time.Nanosecond, CheckpointEvery: 128, Clock: func() time.Time { return now }})
@@ -765,12 +858,16 @@ func BenchmarkSpoolSustainedReplacement(b *testing.B) {
 				if metrics.Rotations == 0 {
 					b.Fatal("expected forced journal rotation")
 				}
-				b.ReportMetric(float64(metrics.MetadataBytes), "metadata-bytes")
-				b.ReportMetric(float64(metrics.Rotations), "rotations")
+				metadataBytes += float64(metrics.MetadataBytes)
+				syncs += float64(metrics.Syncs)
+				rotations += float64(metrics.Rotations)
 				if err = s.Close(); err != nil {
 					b.Fatal(err)
 				}
 			}
+			b.ReportMetric(metadataBytes/float64(b.N), "metadata-bytes/op")
+			b.ReportMetric(syncs/float64(b.N), "syncs/op")
+			b.ReportMetric(rotations/float64(b.N), "rotations/op")
 		})
 	}
 }

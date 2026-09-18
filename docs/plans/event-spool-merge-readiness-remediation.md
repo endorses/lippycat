@@ -569,6 +569,44 @@ upstream sink/client path. Focused normal and race tests for `eventspool`,
 `eventforwarding`, `processor/upstream`, and `protoadapter` passed after these
 corrections.
 
+A fourth source-to-plan audit on 2026-09-18 found and corrected five final
+contract gaps: legacy migration now rejects malformed or record-mismatched
+session policy before publishing a checkpoint; authoritative record loading
+rejects symlinks and detects replacement during open; the checkpoint trigger
+now bounds replay frames by the current retained set plus the configured
+threshold during partial drains; processor ingress accepts exact loss-only
+coverage across a retired batch gap while rejecting ranges that overlap prior
+admission; and a recovered `MaxUint64` final batch starts in drain-only mode
+instead of being rejected before forwarding. The hunter rotates to a fresh
+producer session after that final batch is ACKed, while upstream routes remain
+closed to wrapped admission. New regressions cover each boundary, including
+restart and ACK retirement of the final batch. A final adversarial review also
+verified multi-carrier loss recovery at `MaxUint64-1`: the last available
+carrier remains forwardable, residual exact coverage remains durable and
+fail-stops explicitly after that carrier drains, and normalized durable loss
+sets above 4,096 ranges remain restart-valid even though each wire carrier is
+bounded to the transport collection limit. The terminal recovery path also
+starts forwarding before it publishes pending-loss carriers: on a byte-full
+drop-new spool, ACK drain first frees capacity, the bounded carrier is then
+committed and wakes the active stream, and only a carrier that still cannot be
+stored after all older records drain causes an explicit terminal stop. Any ACK
+or carrier publication that leaves durability uncertain also fails closed
+instead of leaving the drain-only recovery loop waiting indefinitely; only a
+post-commit physical-cleanup error remains non-terminal.
+
+The audit also completed the benchmark evidence required by Phase 6. One-iteration
+measurements on the recorded i9-13900HX host reported the deterministic counters
+separately:
+
+| Workload | Time | Allocated | ACK visits | Metadata bytes | Retrieval clones/calls | Checkpoints/rotations | Syncs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Build + one-ACK drain 1,000 | 65.6 ms | 23.93 MB | 1,999 | 1,165,066 | n/a | 8 / 7 | 5,039 |
+| Build + one-ACK drain 10,000 | 552.4 ms | 245.40 MB | 19,999 | 12,264,870 | n/a | 14 / 13 | 50,069 |
+| Forwarding drain 1,000 | 14.6 ms | 4.73 MB | 1,999 | 1,114,235 | 1,000 / 8 | 6 / 5 | 5,029 |
+| Forwarding drain 10,000 | 114.1 ms | 53.04 MB | 19,999 | 12,203,399 | 10,000 / 79 | 12 / 11 | 50,059 |
+| Sustained replacement 1,000 | 61.9 ms | 25.68 MB | n/a | 473,970 | n/a | n/a / 7 | 4,038 |
+| Sustained replacement 10,000 | 668.8 ms | 256.85 MB | n/a | 4,801,072 | n/a | n/a / 78 | 40,393 |
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

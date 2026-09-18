@@ -168,6 +168,7 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	state, knownSession := i.sessions[key]
+	previousAdmittedEvent := state.event
 	// Memory-only ingress deliberately loses its admitted high-water marks when
 	// the processor restarts. The producer has already deleted cumulatively
 	// ACKed batches, so a fresh processor must treat the first retained batch as
@@ -185,9 +186,28 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	if batch.BatchSequence <= state.batch {
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
 	}
-	eventGapFirst := state.event + 1
+	for _, loss := range batch.GetStats().GetLosses() {
+		for _, eventRange := range loss.GetEventSequenceRanges() {
+			if eventRange.GetFirst() <= previousAdmittedEvent {
+				return nil, status.Error(codes.InvalidArgument, "event loss range overlaps previously admitted event coverage")
+			}
+		}
+	}
+	eventGapFirst := state.event
+	if eventGapFirst != ^uint64(0) {
+		eventGapFirst++
+	}
 	hasEventGap := batch.FirstEventSequence > eventGapFirst
-	gapCovered := hasEventGap && lossRangeCovered(batch.GetStats().GetLosses(), open.SourceNodeId, open.ProducerSessionId, eventGapFirst, batch.FirstEventSequence-1)
+	gapLast := uint64(0)
+	if hasEventGap {
+		gapLast = batch.FirstEventSequence - 1
+	} else if batch.FirstEventSequence == 0 {
+		// A loss-only replacement may retire older unsent batches. Its exact
+		// ranges are the proof that lets the receiver advance across that batch
+		// gap without NACKing a sequence the sender has durably retired.
+		gapLast = admittedEventHighWater(batch, state.event)
+	}
+	gapCovered := gapLast >= eventGapFirst && lossRangeCovered(batch.GetStats().GetLosses(), open.SourceNodeId, open.ProducerSessionId, eventGapFirst, gapLast)
 	if batch.BatchSequence != state.batch+1 && !gapCovered {
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, CumulativeAckSequence: state.batch, NackBatchRanges: []*eventsv1.SequenceRange{{First: state.batch + 1, Last: batch.BatchSequence - 1}}, FlowControl: i.currentFlowControl()}, nil
 	}

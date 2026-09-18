@@ -324,6 +324,45 @@ func TestEventIngressLossOnlyBatchAdvancesEventHighWater(t *testing.T) {
 	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
 }
 
+func TestEventIngressLossOnlyBatchBridgesRetiredBatchGap(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "memory_only"})
+	require.NoError(t, err)
+	next := ingressBatch(t, 2, 2)
+	key := ingressKey(next.SourceNodeId, next.ProducerSessionId)
+	i.sessions[key] = ingressSession{}
+	lossOnly := &eventsv1.ProtocolEventBatch{SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, BatchSequence: 2, SemanticProfileRevision: 1, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}}}}}}
+	open := &eventsv1.EventIngressOpen{SourceNodeId: next.SourceNodeId, ProducerSessionId: next.ProducerSessionId, SemanticProfileRevision: 1}
+
+	ack, err := i.admit(context.Background(), key, open, nil, lossOnly)
+	require.NoError(t, err)
+	require.Equal(t, eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, ack.Kind)
+	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
+	require.Equal(t, uint64(1), i.sessions[key].event)
+}
+
+func TestEventIngressRejectsLossOverlappingPriorCoverage(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	defer d.Close(context.Background())
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "memory_only"})
+	require.NoError(t, err)
+	first := ingressBatch(t, 1, 1)
+	key := ingressKey(first.SourceNodeId, first.ProducerSessionId)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId, SemanticProfileRevision: 1}
+	_, err = i.admit(context.Background(), key, open, nil, first)
+	require.NoError(t, err)
+	overlap := ingressBatch(t, 2, 2)
+	overlap.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: overlap.SourceNodeId, ProducerSessionId: overlap.ProducerSessionId, EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}}}}}
+
+	_, err = i.admit(context.Background(), key, open, nil, overlap)
+	require.ErrorContains(t, err, "overlaps previously admitted")
+}
+
 func TestEventIngressRejectsPartialCrossBatchOverlap(t *testing.T) {
 	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
 	require.NoError(t, err)

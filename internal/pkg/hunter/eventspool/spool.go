@@ -305,6 +305,11 @@ func (s *Spool) loadManifest(m manifest) error {
 	if m.SessionPolicy != nil && (m.SessionPolicy.SourceNodeID != m.SourceNodeID || m.SessionPolicy.ProducerSessionID != m.ProducerSessionID) {
 		return errors.New("read event spool manifest: session policy identity does not match fixed identity")
 	}
+	if m.SessionPolicy != nil {
+		if err := validateSessionPolicy(*m.SessionPolicy); err != nil {
+			return fmt.Errorf("read event spool manifest: invalid session policy: %w", err)
+		}
+	}
 	if len(m.PendingLosses) > 0 {
 		if err := validateRetainedLosses(m.PendingLosses, m.SourceNodeID, m.ProducerSessionID); err != nil {
 			return fmt.Errorf("read event spool manifest: %w", err)
@@ -396,6 +401,13 @@ func (s *Spool) migrateLegacy() error {
 	s.rebuildIndex()
 	s.updateHighWater()
 	if legacyPolicy, policyErr := readSessionPolicy(filepath.Join(s.config.Directory, policyFileName)); policyErr == nil {
+		if s.identitySet && (legacyPolicy.SourceNodeID != s.singleSource || legacyPolicy.ProducerSessionID != s.singleProducer) {
+			return errors.New("migrate event spool policy: identity does not match legacy records")
+		}
+		if !s.identitySet {
+			s.singleSource, s.singleProducer = legacyPolicy.SourceNodeID, legacyPolicy.ProducerSessionID
+			s.identitySet = true
+		}
 		s.sessionPolicy = &legacyPolicy
 	} else if !errors.Is(policyErr, os.ErrNotExist) {
 		return fmt.Errorf("migrate event spool policy: %w", policyErr)
@@ -979,11 +991,11 @@ func (s *Spool) updateHighWater() {
 }
 
 func (s *Spool) BindSessionPolicy(policy SessionPolicy) error {
-	if policy.SourceNodeID == "" || policy.ProducerSessionID == "" || policy.DeliveryProfile == "" || policy.SemanticRevision == 0 {
-		return errors.New("bind event spool session policy: incomplete policy")
-	}
 	if policy.Version == 0 {
 		policy.Version = 1
+	}
+	if err := validateSessionPolicy(policy); err != nil {
+		return fmt.Errorf("bind event spool session policy: %w", err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1006,11 +1018,11 @@ func (s *Spool) BindSessionPolicy(policy SessionPolicy) error {
 // ResetSession durably establishes a new fixed producer identity, zeroes the
 // drained session's high-water marks, and binds its policy in one transaction.
 func (s *Spool) ResetSession(policy SessionPolicy) error {
-	if policy.SourceNodeID == "" || policy.ProducerSessionID == "" || policy.DeliveryProfile == "" || policy.SemanticRevision == 0 {
-		return errors.New("reset event spool session: incomplete policy")
-	}
 	if policy.Version == 0 {
 		policy.Version = 1
+	}
+	if err := validateSessionPolicy(policy); err != nil {
+		return fmt.Errorf("reset event spool session: %w", err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1036,10 +1048,20 @@ func readSessionPolicy(path string) (SessionPolicy, error) {
 	if err = json.Unmarshal(payload, &p); err != nil {
 		return SessionPolicy{}, fmt.Errorf("read event spool session policy: %w", err)
 	}
-	if p.Version != 1 {
-		return SessionPolicy{}, fmt.Errorf("read event spool session policy: unsupported version %d", p.Version)
+	if err = validateSessionPolicy(p); err != nil {
+		return SessionPolicy{}, fmt.Errorf("read event spool session policy: %w", err)
 	}
 	return p, nil
+}
+
+func validateSessionPolicy(policy SessionPolicy) error {
+	if policy.Version != 1 {
+		return fmt.Errorf("unsupported version %d", policy.Version)
+	}
+	if policy.SourceNodeID == "" || policy.ProducerSessionID == "" || policy.DeliveryProfile == "" || policy.SemanticRevision == 0 {
+		return errors.New("incomplete policy")
+	}
+	return nil
 }
 
 func (s *Spool) mutable() error {
@@ -1276,12 +1298,31 @@ func validateRetainedLosses(losses []*eventsv1.EventLoss, source, session string
 		if loss.GetSourceNodeId() != source || loss.GetProducerSessionId() != session {
 			return errors.New("producer identity does not match fixed spool session")
 		}
-		probe := &eventsv1.ProtocolEventBatch{
-			SourceNodeId: source, ProducerSessionId: session, BatchSequence: 1,
-			Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{loss}},
-		}
-		if err := protoadapter.ValidateBatch(probe); err != nil {
+		shapeProbe := &eventsv1.ProtocolEventBatch{Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{loss}}}
+		if err := validateLossShape(shapeProbe); err != nil {
 			return fmt.Errorf("invalid loss: %w", err)
+		}
+		ranges := loss.GetEventSequenceRanges()
+		for start := 0; start < max(1, len(ranges)); start += maxCollectionEntries {
+			part := proto.Clone(loss).(*eventsv1.EventLoss)
+			if len(ranges) > 0 {
+				end := min(start+maxCollectionEntries, len(ranges))
+				part.EventSequenceRanges = cloneRanges(ranges[start:end])
+				part.Count = rangedCount(part.EventSequenceRanges)
+				if start == 0 {
+					part.Count += loss.GetCount() - rangedCount(ranges)
+				}
+			}
+			probe := &eventsv1.ProtocolEventBatch{
+				SourceNodeId: source, ProducerSessionId: session, BatchSequence: 1,
+				Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{part}},
+			}
+			if err := protoadapter.ValidateBatch(probe); err != nil {
+				return fmt.Errorf("invalid loss: %w", err)
+			}
+			if len(ranges) == 0 {
+				break
+			}
 		}
 	}
 	return validateLossAccounting(losses)
@@ -1463,7 +1504,16 @@ func syncDirectory(path string) error {
 // before allocating. The 4 MiB default matches processor ingress; gRPC's 10 MiB
 // ceiling therefore always has room for the enclosing ingress message.
 func readRecord(path string, maxPayload uint64) (record, error) {
-	f, err := os.Open(path)
+	entryInfo, err := os.Lstat(path)
+	if err != nil {
+		return record{}, fmt.Errorf("inspect event spool record %q: %w", path, err)
+	}
+	if !entryInfo.Mode().IsRegular() {
+		return record{}, fmt.Errorf("inspect event spool record %q: record is not a regular file", path)
+	}
+	// O_NOFOLLOW closes the Lstat/open replacement window: even a symlink to the
+	// same inode must never become an authoritative record outside this spool.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return record{}, fmt.Errorf("open event spool record %q: %w", path, err)
 	}
@@ -1471,6 +1521,9 @@ func readRecord(path string, maxPayload uint64) (record, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return record{}, fmt.Errorf("stat event spool record %q: %w", path, err)
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(entryInfo, info) {
+		return record{}, fmt.Errorf("stat event spool record %q: record changed while opening", path)
 	}
 	if info.Size() < headerSize {
 		return record{}, fmt.Errorf("read event spool record %q: file is smaller than header", path)

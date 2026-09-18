@@ -92,6 +92,13 @@ func (c *Client) flushPendingLosses(batchSequence uint64, semanticProfileRevisio
 	return result, err
 }
 
+// FlushPendingLosses publishes one bounded durable loss carrier and wakes an
+// active forwarding stream when the carrier commits. Terminal-sequence
+// recovery uses this after older records drain enough capacity from the spool.
+func (c *Client) FlushPendingLosses(batchSequence uint64, semanticProfileRevision uint32) (eventspool.EnqueueResult, error) {
+	return c.flushPendingLosses(batchSequence, semanticProfileRevision)
+}
+
 func (c *Client) retainLosses(losses []*eventsv1.EventLoss) (eventspool.RetentionResult, error) {
 	result, err := c.spool.RetainLosses(losses)
 	if result.Committed {

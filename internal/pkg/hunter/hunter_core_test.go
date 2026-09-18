@@ -4,11 +4,17 @@ package hunter
 
 import (
 	"context"
+	"errors"
+	"net/netip"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -162,6 +168,156 @@ func TestEventPolicyChangeRotatesProducerSession(t *testing.T) {
 	require.NotEqual(t, oldSession, hunter.eventForwarder.ProducerSessionID())
 	hunter.eventRuntime.Close()
 	require.NoError(t, hunter.eventDispatcher.Close(context.Background()))
+}
+
+func TestInitializeEventForwardingAllowsRecoveredFinalSequenceToDrain(t *testing.T) {
+	const session = "30313233343536373839616263646566"
+	dir := t.TempDir()
+	spool, err := eventspool.Open(eventspool.Config{Directory: dir})
+	require.NoError(t, err)
+	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}
+	require.NoError(t, spool.BindSessionPolicy(policy))
+	event := events.NewDNSEvent(events.Envelope{Timestamp: time.Unix(1, 0), EventID: events.DeliveryEventID("hunter-final", session, ^uint64(0)), ProducerSessionID: session, EventSequence: ^uint64(0), UID: "uid", NodeID: "hunter-final", Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.2"), SourcePort: 53, DestinationPort: 53000}, CaptureScope: events.CaptureScopeFiltered})
+	batch, err := protoadapter.ToProtoBatch("hunter-final", session, ^uint64(0), []events.Event{event}, nil, 1)
+	require.NoError(t, err)
+	result, err := spool.Enqueue(batch)
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.NoError(t, spool.Close())
+
+	hunter, err := New(Config{ProcessorAddr: "processor:55555", HunterID: "hunter-final", ForwardMode: "events", EventSpoolDir: dir, EventDeliveryProfile: "reliable"})
+	require.NoError(t, err)
+	hunter.ctx = context.Background()
+	require.NoError(t, hunter.initializeEventForwarding())
+	require.NotNil(t, hunter.eventForwarder)
+	require.Nil(t, hunter.eventRuntime, "an exhausted recovered session must remain drain-only until its final batch is ACKed")
+	require.Equal(t, session, hunter.eventForwarder.ProducerSessionID())
+	applied := false
+	err = hunter.ApplyPolicyChange(func() error { applied = true; return nil })
+	require.ErrorContains(t, err, "still draining")
+	require.False(t, applied, "policy authority must not change while pre-change durable events are draining")
+	require.NoError(t, hunter.eventSpool.Close())
+}
+
+func TestInitializeEventForwardingStagesRecoveredTerminalLosses(t *testing.T) {
+	const session = "30313233343536373839616263646566"
+	dir := t.TempDir()
+	spool, err := eventspool.Open(eventspool.Config{Directory: dir})
+	require.NoError(t, err)
+	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-loss-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}
+	require.NoError(t, spool.BindSessionPolicy(policy))
+	retention, err := spool.RetainLosses([]*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: "hunter-loss-final", ProducerSessionId: session, EventSequenceRanges: []*eventsv1.SequenceRange{{First: ^uint64(0), Last: ^uint64(0)}}}})
+	require.NoError(t, err)
+	require.True(t, retention.Committed)
+	require.NoError(t, spool.Close())
+
+	hunter, err := New(Config{ProcessorAddr: "processor:55555", HunterID: "hunter-loss-final", ForwardMode: "events", EventSpoolDir: dir, EventDeliveryProfile: "reliable"})
+	require.NoError(t, err)
+	hunter.ctx = context.Background()
+	require.NoError(t, hunter.initializeEventForwarding())
+	require.True(t, hunter.eventSpool.HasPendingLosses())
+	require.Empty(t, hunter.eventSpool.Batches(), "terminal loss publication waits until forwarding has started")
+	result, err := hunter.eventForwarder.FlushPendingLosses(1, 1)
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.False(t, hunter.eventSpool.HasPendingLosses())
+	batches := hunter.eventSpool.Batches()
+	require.Len(t, batches, 1)
+	require.Equal(t, uint64(1), batches[0].GetBatchSequence())
+	require.Equal(t, ^uint64(0), batches[0].GetStats().GetLosses()[0].GetEventSequenceRanges()[0].GetFirst())
+	require.Nil(t, hunter.eventRuntime)
+	require.NoError(t, hunter.eventSpool.Close())
+}
+
+func TestInitializeEventForwardingDrainsFinalCarrierBeforeTerminalResidualLoss(t *testing.T) {
+	const session = "30313233343536373839616263646566"
+	dir := t.TempDir()
+	spool, err := eventspool.Open(eventspool.Config{Directory: dir})
+	require.NoError(t, err)
+	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-fragmented-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}
+	require.NoError(t, spool.BindSessionPolicy(policy))
+	seed := &eventsv1.ProtocolEventBatch{SourceNodeId: policy.SourceNodeID, ProducerSessionId: session, BatchSequence: ^uint64(0) - 1, SemanticProfileRevision: 1}
+	result, err := spool.Enqueue(seed)
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.NoError(t, spool.Ack(policy.SourceNodeID, session, seed.BatchSequence))
+
+	ranges := make([]*eventsv1.SequenceRange, 5000)
+	for i := range ranges {
+		sequence := ^uint64(0) - uint64(2*(len(ranges)-1-i))
+		ranges[i] = &eventsv1.SequenceRange{First: sequence, Last: sequence}
+	}
+	losses := []*eventsv1.EventLoss{
+		{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 2500, SourceNodeId: policy.SourceNodeID, ProducerSessionId: session, EventSequenceRanges: ranges[:2500]},
+		{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 2500, SourceNodeId: policy.SourceNodeID, ProducerSessionId: session, EventSequenceRanges: ranges[2500:]},
+	}
+	retention, err := spool.RetainLosses(losses)
+	require.NoError(t, err)
+	require.True(t, retention.Committed)
+	require.NoError(t, spool.Close())
+
+	hunter, err := New(Config{ProcessorAddr: "processor:55555", HunterID: policy.SourceNodeID, ForwardMode: "events", EventSpoolDir: dir, EventDeliveryProfile: "reliable"})
+	require.NoError(t, err)
+	hunter.ctx = context.Background()
+	require.NoError(t, hunter.initializeEventForwarding(), "the committed final carrier must remain forwardable even when residual exact loss cannot receive another sequence")
+	result, err = hunter.eventForwarder.FlushPendingLosses(^uint64(0), 1)
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	batches := hunter.eventSpool.Batches()
+	require.Len(t, batches, 1)
+	require.Equal(t, ^uint64(0), batches[0].GetBatchSequence())
+	require.True(t, hunter.eventSpool.HasPendingLosses(), "coverage beyond the final carrier remains durable and triggers terminal fail-stop after that carrier drains")
+	require.Nil(t, hunter.eventRuntime)
+	require.NoError(t, hunter.eventSpool.Close())
+}
+
+func TestInitializeEventForwardingStartsDrainBeforeTerminalLossOnFullDropNewSpool(t *testing.T) {
+	const session = "30313233343536373839616263646566"
+	dir := t.TempDir()
+	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-full-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}
+	spool, err := eventspool.Open(eventspool.Config{Directory: dir, Policy: eventspool.DropNew})
+	require.NoError(t, err)
+	require.NoError(t, spool.BindSessionPolicy(policy))
+	event := events.NewDNSEvent(events.Envelope{Timestamp: time.Unix(1, 0), EventID: events.DeliveryEventID(policy.SourceNodeID, session, ^uint64(0)-1), ProducerSessionID: session, EventSequence: ^uint64(0) - 1, UID: "uid", NodeID: policy.SourceNodeID, Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.2"), SourcePort: 53, DestinationPort: 53000}, CaptureScope: events.CaptureScopeFiltered})
+	batch, err := protoadapter.ToProtoBatch(policy.SourceNodeID, session, 1, []events.Event{event}, nil, 1)
+	require.NoError(t, err)
+	result, err := spool.Enqueue(batch)
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	maxBytes := spool.Bytes()
+	retention, err := spool.RetainLosses([]*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: policy.SourceNodeID, ProducerSessionId: session, EventSequenceRanges: []*eventsv1.SequenceRange{{First: ^uint64(0), Last: ^uint64(0)}}}})
+	require.NoError(t, err)
+	require.True(t, retention.Committed)
+	require.NoError(t, spool.Close())
+
+	hunter, err := New(Config{ProcessorAddr: "processor:55555", HunterID: policy.SourceNodeID, ForwardMode: "events", EventSpoolDir: dir, EventSpoolMaxBytes: maxBytes, EventSpoolExhaustionPolicy: string(eventspool.DropNew), EventDeliveryProfile: "reliable"})
+	require.NoError(t, err)
+	hunter.ctx = context.Background()
+	require.NoError(t, hunter.initializeEventForwarding(), "recovery must start the forwarder before a full spool has capacity for the terminal loss carrier")
+	require.Len(t, hunter.eventSpool.Batches(), 1)
+	require.True(t, hunter.eventSpool.HasPendingLosses())
+
+	result, err = hunter.eventForwarder.FlushPendingLosses(2, 1)
+	require.NoError(t, err)
+	require.False(t, result.Stored)
+	require.Equal(t, eventspool.RejectionExhausted, result.Rejection)
+	require.NoError(t, hunter.eventSpool.Ack(policy.SourceNodeID, session, 1))
+	result, err = hunter.eventForwarder.FlushPendingLosses(2, 1)
+	require.NoError(t, err)
+	require.True(t, result.Stored, "the staged terminal carrier must commit once ACK drain frees capacity")
+	require.False(t, hunter.eventSpool.HasPendingLosses())
+	require.NoError(t, hunter.eventSpool.Close())
+}
+
+func TestExhaustedRecoveryFailsClosedOnDurabilityUncertainty(t *testing.T) {
+	require.ErrorIs(t, exhaustedRecoveryStatusError(eventspool.Status{DurabilityUncertain: true}), eventspool.ErrDurabilityUncertain)
+	require.NoError(t, exhaustedRecoveryStatusError(eventspool.Status{}))
+
+	committed := eventspool.EnqueueResult{Stored: true}
+	require.ErrorIs(t, exhaustedRecoveryPublicationError(committed, eventspool.ErrDurabilityUncertain), eventspool.ErrDurabilityUncertain)
+	cleanupErr := &eventspool.CleanupError{Operation: "remove", Path: "record", Err: errors.New("injected cleanup failure")}
+	require.NoError(t, exhaustedRecoveryPublicationError(committed, cleanupErr), "committed cleanup-only failures remain forwardable")
+	require.Error(t, exhaustedRecoveryPublicationError(eventspool.EnqueueResult{}, cleanupErr), "pre-commit errors must fail closed")
 }
 
 // TestStatsAtomic tests that stats can be safely updated from multiple goroutines

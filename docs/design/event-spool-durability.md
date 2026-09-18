@@ -89,10 +89,12 @@ memory changes. Physical cleanup happens only after logical commit.
 Checkpoint replacement uses a same-directory temporary file, file sync,
 close, rename, and directory sync. Journal generation handoff and retirement
 wait until the replacement checkpoint and successor journal are durable.
-Checkpoint work is triggered by a bounded journal threshold and amortized over
-mutations; enqueue and one-record ACK do not rewrite or traverse the entire
-active set each time. Recovery work is bounded by the retained checkpoint plus
-the configured journal threshold.
+Checkpoint work is triggered both by a geometrically growing active-set base
+and when journal frames reach the current retained-record count plus the
+configured threshold. The two triggers keep checkpoint bytes amortized linear
+during growth, replacement, and drain; enqueue and one-record ACK do not rewrite
+or traverse the entire active set each time. Recovery work is bounded by the
+retained checkpoint plus the configured journal threshold.
 
 A mutation whose exact metadata exceeds one bounded journal frame is committed
 as the first checkpoint of a fresh journal generation. The old generation

@@ -298,7 +298,21 @@ func (s *Spool) shouldCheckpoint() bool {
 	if uint64(s.checkpointRecordBase) > threshold {
 		threshold = uint64(s.checkpointRecordBase)
 	}
-	return s.transactionsSinceCheckpoint >= threshold
+	if s.transactionsSinceCheckpoint >= threshold {
+		return true
+	}
+	// A checkpoint taken with a large active set must not leave nearly that
+	// many retirement frames to replay after the set has drained. This second
+	// trigger keeps outstanding replay work bounded by the records still active
+	// plus the configured threshold, while the base trigger preserves geometric
+	// checkpointing during growth and replacement.
+	activeBound := uint64(len(s.records))
+	if activeBound > ^uint64(0)-s.config.CheckpointEvery {
+		activeBound = ^uint64(0)
+	} else {
+		activeBound += s.config.CheckpointEvery
+	}
+	return s.transactionsSinceCheckpoint >= activeBound
 }
 
 func (s *Spool) applyTransaction(tx transaction) error {

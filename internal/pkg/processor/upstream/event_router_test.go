@@ -11,6 +11,7 @@ import (
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/stretchr/testify/require"
 )
@@ -124,6 +125,34 @@ func TestEventRouterRejectsRecoveredSessionPolicyMismatch(t *testing.T) {
 	memoryOnly.Profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
 	_, err = NewEventRouter(manager, memoryOnly)
 	require.ErrorContains(t, err, "pending records use policy")
+}
+
+func TestEventRouterRecoversFinalBatchAsDrainOnly(t *testing.T) {
+	const (
+		node    = "tap-final"
+		session = "30313233343536373839616263646566"
+	)
+	dir := t.TempDir()
+	routeDir := filepath.Join(dir, identityPathPart(node), identityPathPart(session))
+	spool, err := eventspool.Open(eventspool.Config{Directory: routeDir})
+	require.NoError(t, err)
+	require.NoError(t, spool.BindSessionPolicy(eventspool.SessionPolicy{Version: 1, SourceNodeID: node, ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}))
+	batch, err := protoadapter.ToProtoBatch(node, session, ^uint64(0), []events.Event{routedDNS(node, session, ^uint64(0))}, nil, 1)
+	require.NoError(t, err)
+	result, err := spool.Enqueue(batch)
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.NoError(t, spool.Close())
+
+	manager := NewManager(Config{ForwardMode: "events"}, nil)
+	router, err := NewEventRouter(manager, EventRouterConfig{SpoolDirectory: dir, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, router.Close(context.Background())) })
+	route := router.routes[eventRouteKey{nodeID: node, sessionID: session}]
+	require.NotNil(t, route)
+	require.False(t, route.accepting)
+	require.True(t, route.spool.HasPending())
+	require.ErrorContains(t, router.HandleEvent(context.Background(), routedDNS(node, session, 1)), "retiring")
 }
 
 func TestEventRouterKeepsSanitizedIdentityCollisionsIndependent(t *testing.T) {

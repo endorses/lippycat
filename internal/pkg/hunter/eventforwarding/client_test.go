@@ -10,6 +10,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/stretchr/testify/require"
 )
@@ -223,6 +224,122 @@ func TestServePauseEvictResumeSkipsRemovedCachedBatch(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return len(stream.messages()) == 3 }, time.Second, time.Millisecond)
 	require.Equal(t, uint64(3), stream.messages()[2].GetBatch().GetBatchSequence())
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestServePauseDropOldestEvictResumeSkipsCachedVictimWithLossCoverage(t *testing.T) {
+	calibration, err := eventspool.Open(eventspool.Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	for sequence := uint64(1); sequence <= 3; sequence++ {
+		result, enqueueErr := calibration.Enqueue(ingressBatch(sequence))
+		require.NoError(t, enqueueErr)
+		require.True(t, result.Stored)
+	}
+	maxBytes := calibration.Bytes()
+	require.NoError(t, calibration.Close())
+
+	spool, err := eventspool.Open(eventspool.Config{
+		Directory: t.TempDir(),
+		MaxBytes:  maxBytes,
+		Policy:    eventspool.DropOldest,
+	})
+	require.NoError(t, err)
+	client, err := New(Config{
+		SourceNodeID:      "hunter",
+		ProducerSessionID: "session",
+		Profile:           eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE,
+	}, spool)
+	require.NoError(t, err)
+	for sequence := uint64(1); sequence <= 3; sequence++ {
+		result, enqueueErr := client.Enqueue(ingressBatch(sequence))
+		require.NoError(t, enqueueErr)
+		require.True(t, result.Stored)
+	}
+
+	firstSelected := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	controlQueued := make(chan struct{}, 2)
+	client.controlReceived = func() { controlQueued <- struct{}{} }
+	stream := &fakeStream{controls: make(chan *eventsv1.EventIngressControl, 2)}
+	stream.onSend = func(message *eventsv1.EventIngressMessage) {
+		if message.GetBatch().GetBatchSequence() == 1 {
+			close(firstSelected)
+			<-releaseFirst
+		}
+	}
+	stream.controls <- &eventsv1.EventIngressControl{
+		Kind:            eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED,
+		AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- client.Serve(ctx, stream) }()
+	select {
+	case <-firstSelected:
+	case <-time.After(time.Second):
+		t.Fatal("first batch was not selected")
+	}
+	stream.controls <- &eventsv1.EventIngressControl{
+		Kind:        eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_FLOW,
+		FlowControl: int32(data.FlowControl_FLOW_PAUSE),
+	}
+	select {
+	case <-controlQueued:
+	case <-time.After(time.Second):
+		t.Fatal("pause was not queued for Serve")
+	}
+	close(releaseFirst)
+	require.Eventually(t, func() bool { return len(stream.messages()) == 2 }, time.Second, time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
+	require.Len(t, stream.messages(), 2, "pause may overshoot by only the selected batch")
+
+	// Force actual drop-oldest replacement while batches 2 and 3 are cached.
+	// Continue only until cached batch 2 is a committed victim.
+	for sequence := uint64(4); spool.IsActive("hunter", "session", 2); sequence++ {
+		result, enqueueErr := client.Enqueue(ingressBatch(sequence))
+		require.NoError(t, enqueueErr)
+		require.True(t, result.Stored)
+		require.Less(t, sequence, uint64(10), "bounded spool should evict cached batch 2 promptly")
+	}
+	require.False(t, spool.IsActive("hunter", "session", 2))
+
+	active := spool.Batches()
+	expected := make([]uint64, 0, len(active))
+	coveredVictim := false
+	for _, activeBatch := range active {
+		require.NoError(t, protoadapter.ValidateBatch(activeBatch))
+		if activeBatch.GetBatchSequence() > 1 {
+			expected = append(expected, activeBatch.GetBatchSequence())
+		}
+		for _, loss := range activeBatch.GetStats().GetLosses() {
+			for _, eventRange := range loss.GetEventSequenceRanges() {
+				if eventRange.GetFirst() <= 2 && eventRange.GetLast() >= 2 {
+					coveredVictim = true
+				}
+			}
+		}
+	}
+	require.True(t, coveredVictim, "a surviving replacement must report the evicted cached batch's coverage")
+
+	stream.controls <- &eventsv1.EventIngressControl{
+		Kind:        eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_FLOW,
+		FlowControl: int32(data.FlowControl_FLOW_RESUME),
+	}
+	select {
+	case <-controlQueued:
+	case <-time.After(time.Second):
+		t.Fatal("resume was not queued for Serve")
+	}
+	require.Eventually(t, func() bool { return len(stream.messages()) == len(expected)+2 }, time.Second, time.Millisecond)
+	got := make([]uint64, 0, len(expected))
+	for _, message := range stream.messages()[2:] {
+		batch := message.GetBatch()
+		require.NoError(t, protoadapter.ValidateBatch(batch))
+		got = append(got, batch.GetBatchSequence())
+	}
+	require.Equal(t, expected, got)
+	require.NotContains(t, got, uint64(2))
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
 }

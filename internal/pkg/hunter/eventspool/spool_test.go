@@ -1,6 +1,7 @@
 package eventspool
 
 import (
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 func batch(source, session string, batchSequence, first, last uint64) *eventsv1.ProtocolEventBatch {
@@ -220,6 +222,126 @@ func TestDropNewPreservesExistingAndReportsIncomingRange(t *testing.T) {
 	require.False(t, result.Stored)
 	require.Equal(t, uint64(5), result.Losses[0].Count)
 	require.Equal(t, uint64(1), s.Batches()[0].BatchSequence)
+}
+
+func TestDropNewRepeatedRejectionRetainsExactLossOnceAndMakesProgress(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir(), Policy: DropNew})
+	require.NoError(t, err)
+	first, err := s.Enqueue(batch("hunter", "session", 1, 1, 2))
+	require.NoError(t, err)
+	require.True(t, first.Stored)
+
+	s.config.MaxBytes = s.Bytes()
+	for _, rejected := range []*eventsv1.ProtocolEventBatch{
+		batch("hunter", "session", 2, 3, 4),
+		batch("hunter", "session", 3, 5, 6),
+	} {
+		result, enqueueErr := s.Enqueue(rejected)
+		require.NoError(t, enqueueErr)
+		require.False(t, result.Stored)
+		require.Equal(t, RejectionExhausted, result.Rejection)
+		require.Len(t, result.Losses, 1)
+		require.Equal(t, uint64(2), result.Losses[0].GetCount())
+	}
+
+	// Once capacity is available, pending coverage is attached exactly once and
+	// normal enqueue/ACK progress resumes.
+	require.NoError(t, s.Ack("hunter", "session", 1))
+	s.config.MaxBytes = 0
+	result, err := s.Enqueue(batch("hunter", "session", 4, 7, 7))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.Empty(t, result.Losses, "previously counted losses are inherited wire coverage")
+
+	stored := s.Batches()
+	require.Len(t, stored, 1)
+	losses := stored[0].GetStats().GetLosses()
+	require.Len(t, losses, 1)
+	require.Equal(t, uint64(4), losses[0].GetCount())
+	require.Equal(t, []*eventsv1.SequenceRange{{First: 3, Last: 6}}, losses[0].GetEventSequenceRanges())
+	require.NoError(t, s.Ack("hunter", "session", 4))
+	require.False(t, s.HasPending())
+}
+
+func TestDropOldestCoalescesMoreThanCollectionLimitEvictions(t *testing.T) {
+	now := time.Unix(1000, 0)
+	s, err := Open(Config{
+		Directory: t.TempDir(),
+		MaxAge:    time.Second,
+		Policy:    DropOldest,
+		Clock:     func() time.Time { return now },
+	})
+	require.NoError(t, err)
+
+	// Install a large active set directly so this regression tests loss
+	// normalization and final transport validation without performing thousands
+	// of unrelated fsyncs. Enqueue still commits the real replacement and the
+	// complete victim set through the production transaction path.
+	const victimCount = maxCollectionEntries + 1
+	s.records = make([]record, 0, victimCount)
+	for sequence := uint64(1); sequence <= victimCount; sequence++ {
+		b := batch("hunter", "session", sequence, sequence, sequence)
+		s.records = append(s.records, record{
+			name:    fmt.Sprintf("synthetic-%05d%s", sequence, recordExtension),
+			created: now,
+			size:    1,
+			batch:   b,
+		})
+	}
+	s.bytes = victimCount
+	s.identitySet = true
+	s.homogeneous = true
+	s.singleSource = "hunter"
+	s.singleProducer = "session"
+	s.lastEventSequence = victimCount
+	s.lastBatchSequence = victimCount
+	s.rebuildIndex()
+
+	now = now.Add(2 * time.Second)
+	result, err := s.Enqueue(batch("hunter", "session", victimCount+1, victimCount+1, victimCount+1))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.Len(t, result.Losses, 1)
+	require.Equal(t, uint64(victimCount), result.Losses[0].GetCount())
+	require.Equal(t, []*eventsv1.SequenceRange{{First: 1, Last: victimCount}}, result.Losses[0].GetEventSequenceRanges())
+
+	stored := s.Batches()
+	require.Len(t, stored, 1)
+	require.Len(t, stored[0].GetStats().GetLosses(), 1)
+	require.Equal(t, []*eventsv1.SequenceRange{{First: 1, Last: victimCount}}, stored[0].GetStats().GetLosses()[0].GetEventSequenceRanges())
+}
+
+func TestDropOldestRevalidatesFinalReplacementPayloadBoundary(t *testing.T) {
+	now := time.Unix(1000, 0)
+	s, err := Open(Config{
+		Directory: t.TempDir(),
+		MaxAge:    time.Second,
+		Policy:    DropOldest,
+		Clock:     func() time.Time { return now },
+	})
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("hunter", "session", 1, 10, 12))
+	require.NoError(t, err)
+
+	incoming := batch("hunter", "session", 2, 20, 21)
+	finalWithoutEvictionLoss := proto.Clone(incoming).(*eventsv1.ProtocolEventBatch)
+	finalWithoutEvictionLoss.Stats = appendLosses(finalWithoutEvictionLoss.GetStats(), nil)
+	payload, err := marshalAndValidate(finalWithoutEvictionLoss, MaxRecordPayloadBytes)
+	require.NoError(t, err)
+	s.config.MaxRecordBytes = uint64(len(payload))
+	now = now.Add(2 * time.Second)
+
+	result, err := s.Enqueue(incoming)
+	require.ErrorIs(t, err, ErrRecordTooLarge)
+	require.False(t, result.Stored)
+	require.Equal(t, RejectionRecordTooLarge, result.Rejection)
+	require.Len(t, result.Losses, 1)
+	require.Equal(t, uint64(2), result.Losses[0].GetCount())
+	require.True(t, s.HasPendingLosses(), "the rejected incoming range must remain durable")
+
+	stored := s.Batches()
+	require.Len(t, stored, 1, "a final-payload rejection must not evict the old record")
+	require.Equal(t, uint64(1), stored[0].GetBatchSequence())
 }
 
 func TestAgeLimitDropsOnlyCompleteOldBatches(t *testing.T) {

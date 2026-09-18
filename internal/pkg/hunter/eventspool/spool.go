@@ -103,24 +103,24 @@ type manifestRecord struct {
 	BatchSequence     uint64 `json:"batch_sequence"`
 }
 type manifest struct {
-	Version                                       uint32 `json:"version"`
-	Generation, AppliedTransactions, LogicalBytes uint64
-	Records                                       []manifestRecord      `json:"records"`
-	PendingLosses                                 []*eventsv1.EventLoss `json:"pending_losses,omitempty"`
-	SourceNodeID, ProducerSessionID               string
-	LastEventSequence, LastBatchSequence          uint64
-	SessionPolicy                                 *SessionPolicy `json:"session_policy,omitempty"`
+	Version                                                    uint32 `json:"version"`
+	Generation, AppliedTransactions, LogicalBytes              uint64
+	Records                                                    []manifestRecord      `json:"records"`
+	PendingLosses                                              []*eventsv1.EventLoss `json:"pending_losses,omitempty"`
+	SourceNodeID, ProducerSessionID                            string
+	LastEventSequence, LastBatchSequence, RetiredBatchSequence uint64
+	SessionPolicy                                              *SessionPolicy `json:"session_policy,omitempty"`
 }
 type transaction struct {
-	Version                              uint32 `json:"version"`
-	Generation, Sequence                 uint64
-	Add                                  []manifestRecord      `json:"add,omitempty"`
-	Remove                               []string              `json:"remove,omitempty"`
-	PendingLosses                        []*eventsv1.EventLoss `json:"pending_losses,omitempty"`
-	SourceNodeID, ProducerSessionID      string
-	LastEventSequence, LastBatchSequence uint64
-	SessionPolicy                        *SessionPolicy `json:"session_policy,omitempty"`
-	ResetSession                         bool           `json:"reset_session,omitempty"`
+	Version                                                    uint32 `json:"version"`
+	Generation, Sequence                                       uint64
+	Add                                                        []manifestRecord      `json:"add,omitempty"`
+	Remove                                                     []string              `json:"remove,omitempty"`
+	PendingLosses                                              []*eventsv1.EventLoss `json:"pending_losses,omitempty"`
+	SourceNodeID, ProducerSessionID                            string
+	LastEventSequence, LastBatchSequence, RetiredBatchSequence uint64
+	SessionPolicy                                              *SessionPolicy `json:"session_policy,omitempty"`
+	ResetSession                                               bool           `json:"reset_session,omitempty"`
 }
 
 type EnqueueResult struct {
@@ -179,7 +179,7 @@ type Spool struct {
 	metrics                                                                   Metrics
 	identitySet, homogeneous                                                  bool
 	singleSource, singleProducer                                              string
-	lastEventSequence, lastBatchSequence                                      uint64
+	lastEventSequence, lastBatchSequence, retiredBatchSequence                uint64
 	checkpointRecordBase                                                      int
 	commitCount                                                               uint64
 	sessionPolicy                                                             *SessionPolicy
@@ -335,6 +335,9 @@ func (s *Spool) loadManifest(m manifest) error {
 	if m.LastEventSequence < observedEvent || m.LastBatchSequence < observedBatch {
 		return errors.New("read event spool manifest: high-water marks underreport active state")
 	}
+	if m.RetiredBatchSequence > m.LastBatchSequence {
+		return errors.New("read event spool manifest: retired batch sequence exceeds high-water mark")
+	}
 	s.bytes = total
 	s.pendingLosses = normalizeLosses(m.PendingLosses)
 	s.generation = m.Generation
@@ -343,6 +346,7 @@ func (s *Spool) loadManifest(m manifest) error {
 	s.rebuildIndex()
 	s.singleSource, s.singleProducer = m.SourceNodeID, m.ProducerSessionID
 	s.lastEventSequence, s.lastBatchSequence = m.LastEventSequence, m.LastBatchSequence
+	s.retiredBatchSequence = m.RetiredBatchSequence
 	if m.SessionPolicy != nil {
 		copyPolicy := *m.SessionPolicy
 		s.sessionPolicy = &copyPolicy
@@ -479,6 +483,9 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	if _, exists := s.index[key]; exists {
 		return EnqueueResult{}, fmt.Errorf("enqueue event batch: duplicate batch identity %s", key)
 	}
+	if s.identitySet && batch.GetBatchSequence() <= s.retiredBatchSequence {
+		return EnqueueResult{}, fmt.Errorf("enqueue event batch: batch sequence %d does not advance durable retirement mark %d", batch.GetBatchSequence(), s.retiredBatchSequence)
+	}
 	now := s.config.Clock()
 	incoming := proto.Clone(batch).(*eventsv1.ProtocolEventBatch)
 	var newLosses []*eventsv1.EventLoss
@@ -498,7 +505,11 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	}
 	if errors.Is(err, ErrRecordTooLarge) {
 		own := ownRangeLoss(batch)
-		if committed, e := s.commitPendingLosses(normalizeLosses(append(cloneLosses(s.pendingLosses), lossesFor(batch)...))); e != nil {
+		retained, retainErr := mergeLossesChecked(s.pendingLosses, lossesForBatch(batch))
+		if retainErr != nil {
+			return EnqueueResult{}, fmt.Errorf("enqueue oversized event batch: retain exact loss coverage: %w", retainErr)
+		}
+		if committed, e := s.commitPendingLosses(retained); e != nil {
 			if committed {
 				return EnqueueResult{Losses: own, Rejection: RejectionRecordTooLarge}, e
 			}
@@ -508,7 +519,11 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	}
 	if err != nil {
 		own := ownRangeLoss(batch)
-		committed, commitErr := s.commitPendingLosses(normalizeLosses(append(cloneLosses(s.pendingLosses), lossesFor(batch)...)))
+		retained, retainErr := mergeLossesChecked(s.pendingLosses, lossesForBatch(batch))
+		if retainErr != nil {
+			return EnqueueResult{}, fmt.Errorf("reject event batch: retain exact loss coverage: %w", retainErr)
+		}
+		committed, commitErr := s.commitPendingLosses(retained)
 		if commitErr != nil {
 			if committed {
 				return EnqueueResult{Losses: own, Rejection: RejectionExhausted}, commitErr
@@ -520,7 +535,11 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	recordBytes := uint64(headerSize) + uint64(len(payload))
 	if s.config.Policy == DropNew && (s.wouldExceedByteLimit(s.bytes, recordBytes) || s.hasExpired(now)) {
 		own := ownRangeLoss(batch)
-		if committed, e := s.commitPendingLosses(normalizeLosses(append(cloneLosses(s.pendingLosses), lossesFor(batch)...))); e != nil {
+		retained, retainErr := mergeLossesChecked(s.pendingLosses, lossesForBatch(batch))
+		if retainErr != nil {
+			return EnqueueResult{}, fmt.Errorf("drop new event batch: retain exact loss coverage: %w", retainErr)
+		}
+		if committed, e := s.commitPendingLosses(retained); e != nil {
 			if committed {
 				return EnqueueResult{Losses: own, Rejection: RejectionExhausted}, e
 			}
@@ -535,13 +554,19 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 			v := s.records[len(victims)]
 			victims = append(victims, v)
 			remaining -= v.size
-			wireLosses := lossesFor(v.batch)
+			wireLosses := lossesForBatch(v.batch)
+			if _, lossErr := normalizeLossesChecked(wireLosses); lossErr != nil {
+				return EnqueueResult{}, fmt.Errorf("drop oldest event batch: preserve victim loss coverage: %w", lossErr)
+			}
 			// Only the victim's delivered events are newly lost locally. Losses
 			// inherited by that record remain wire coverage but were counted when
 			// they were first incurred.
 			newLosses = normalizeLosses(append(newLosses, ownRangeLoss(v.batch)...))
 			incoming.Stats = appendLosses(incoming.GetStats(), wireLosses)
-			incoming.Stats.Losses = normalizeLosses(incoming.Stats.GetLosses())
+			incoming.Stats.Losses, err = normalizeLossesChecked(incoming.Stats.GetLosses())
+			if err != nil {
+				return EnqueueResult{}, fmt.Errorf("drop oldest event batch: merge exact loss coverage: %w", err)
+			}
 			payload, err = marshalAndValidate(incoming, s.config.MaxRecordBytes)
 			if err != nil {
 				break
@@ -550,7 +575,11 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 		}
 		if err != nil || s.overByteLimit(recordBytes) {
 			own := ownRangeLoss(batch)
-			if committed, e := s.commitPendingLosses(normalizeLosses(append(cloneLosses(s.pendingLosses), lossesFor(batch)...))); e != nil {
+			retained, retainErr := mergeLossesChecked(s.pendingLosses, lossesForBatch(batch))
+			if retainErr != nil {
+				return EnqueueResult{}, fmt.Errorf("reject replacement event batch: retain exact loss coverage: %w", retainErr)
+			}
+			if committed, e := s.commitPendingLosses(retained); e != nil {
 				if committed {
 					return EnqueueResult{Losses: own, Rejection: RejectionExhausted}, e
 				}
@@ -569,6 +598,7 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	tx := transaction{Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1, Add: []manifestRecord{toManifestRecord(r)}}
 	for _, v := range victims {
 		tx.Remove = append(tx.Remove, v.name)
+		tx.RetiredBatchSequence = max(tx.RetiredBatchSequence, v.batch.GetBatchSequence())
 	}
 	beforeCommit := s.commitCount
 	if err = s.commit(tx); err != nil {
@@ -614,10 +644,10 @@ func (s *Spool) RetainLosses(losses []*eventsv1.EventLoss) (RetentionResult, err
 		return RetentionResult{}, fmt.Errorf("retain event losses: %w", err)
 	}
 	combined := append(cloneLosses(s.pendingLosses), losses...)
-	if err := validateLossAccounting(combined); err != nil {
+	normalized, err := normalizeLossesChecked(combined)
+	if err != nil {
 		return RetentionResult{}, fmt.Errorf("retain event losses: %w", err)
 	}
-	normalized := normalizeLosses(combined)
 	committed, err := s.commitPendingLosses(normalized)
 	return RetentionResult{Committed: committed}, err
 }
@@ -630,6 +660,7 @@ func (s *Spool) Ack(source, session string, sequence uint64) error {
 	}
 	s.retryKnownCleanup()
 	var remove []string
+	retired := s.retiredBatchSequence
 	if s.singleSession(source, session) {
 		end := 0
 		for end < len(s.records) {
@@ -641,6 +672,7 @@ func (s *Spool) Ack(source, session string, sequence uint64) error {
 		}
 		for _, r := range s.records[:end] {
 			remove = append(remove, r.name)
+			retired = max(retired, r.batch.GetBatchSequence())
 		}
 	} else {
 		for _, r := range s.records {
@@ -648,13 +680,14 @@ func (s *Spool) Ack(source, session string, sequence uint64) error {
 			b := r.batch
 			if b.GetSourceNodeId() == source && b.GetProducerSessionId() == session && b.GetBatchSequence() <= sequence {
 				remove = append(remove, r.name)
+				retired = max(retired, b.GetBatchSequence())
 			}
 		}
 	}
 	if len(remove) == 0 {
 		return nil
 	}
-	if err := s.commit(transaction{Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1, Remove: remove, PendingLosses: cloneLosses(s.pendingLosses)}); err != nil {
+	if err := s.commit(transaction{Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1, Remove: remove, PendingLosses: cloneLosses(s.pendingLosses), RetiredBatchSequence: retired}); err != nil {
 		return err
 	}
 	return s.retryCleanup(remove)
@@ -780,6 +813,9 @@ func (s *Spool) FlushPendingLosses(source, session string, batchSequence uint64,
 	if _, exists := s.index[key]; exists {
 		return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: duplicate batch identity %s", key)
 	}
+	if s.identitySet && batchSequence <= s.retiredBatchSequence {
+		return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: batch sequence %d does not advance durable retirement mark %d", batchSequence, s.retiredBatchSequence)
+	}
 	prefix, remaining := splitPendingLosses(s.pendingLosses, maxCollectionEntries)
 	batch := &eventsv1.ProtocolEventBatch{SourceNodeId: source, ProducerSessionId: session, BatchSequence: batchSequence, SemanticProfileRevision: semanticRevision, Stats: &eventsv1.EventBatchStats{Losses: prefix}}
 	payload, err := marshalAndValidate(batch, s.config.MaxRecordBytes)
@@ -807,7 +843,10 @@ func (s *Spool) FlushPendingLosses(source, session string, batchSequence uint64,
 			victim := s.records[len(victims)]
 			victims = append(victims, victim)
 			remainingBytes -= victim.size
-			remaining = normalizeLosses(append(remaining, lossesFor(victim.batch)...))
+			remaining, err = mergeLossesChecked(remaining, lossesForBatch(victim.batch))
+			if err != nil {
+				return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: preserve victim loss coverage: %w", err)
+			}
 			newLosses = normalizeLosses(append(newLosses, ownRangeLoss(victim.batch)...))
 		}
 		// Replacement is allowed only when it strictly reduces the bounded
@@ -824,6 +863,7 @@ func (s *Spool) FlushPendingLosses(source, session string, batchSequence uint64,
 	tx := transaction{Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1, Add: []manifestRecord{toManifestRecord(r)}, PendingLosses: remaining}
 	for _, victim := range victims {
 		tx.Remove = append(tx.Remove, victim.name)
+		tx.RetiredBatchSequence = max(tx.RetiredBatchSequence, victim.batch.GetBatchSequence())
 	}
 	beforeCommit := s.commitCount
 	if err = s.commit(tx); err != nil {
@@ -866,6 +906,7 @@ func (s *Spool) Recover() error {
 	s.identitySet, s.homogeneous = false, true
 	s.singleSource, s.singleProducer = "", ""
 	s.lastEventSequence, s.lastBatchSequence = 0, 0
+	s.retiredBatchSequence = 0
 	s.sessionPolicy = nil
 	s.cleanupErr = nil
 	s.orphanFailures = nil
@@ -1121,8 +1162,22 @@ func ownRangeLoss(batch *eventsv1.ProtocolEventBatch) []*eventsv1.EventLoss {
 	}
 	return []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: count, SourceNodeId: batch.GetSourceNodeId(), ProducerSessionId: batch.GetProducerSessionId(), EventSequenceRanges: ranges}}
 }
-func lossesFor(batch *eventsv1.ProtocolEventBatch) []*eventsv1.EventLoss {
-	return normalizeLosses(append(cloneLosses(batch.GetStats().GetLosses()), ownRangeLoss(batch)...))
+func lossesForBatch(batch *eventsv1.ProtocolEventBatch) []*eventsv1.EventLoss {
+	return append(cloneLosses(batch.GetStats().GetLosses()), ownRangeLoss(batch)...)
+}
+
+func mergeLossesChecked(left, right []*eventsv1.EventLoss) ([]*eventsv1.EventLoss, error) {
+	return normalizeLossesChecked(append(cloneLosses(left), right...))
+}
+
+func normalizeLossesChecked(input []*eventsv1.EventLoss) ([]*eventsv1.EventLoss, error) {
+	if err := validateLossAccounting(input); err != nil {
+		return nil, err
+	}
+	if err := validateDisjointLossRanges(input); err != nil {
+		return nil, err
+	}
+	return normalizeLosses(input), nil
 }
 
 type lossKey struct {
@@ -1291,6 +1346,43 @@ func validateLossAccounting(losses []*eventsv1.EventLoss) error {
 			if count > ^uint64(0)-total {
 				return errors.New("event loss count overflows exact accounting")
 			}
+		}
+	}
+	return nil
+}
+
+func validateDisjointLossRanges(losses []*eventsv1.EventLoss) error {
+	type keyedRange struct {
+		key         lossKey
+		first, last uint64
+	}
+	var ranges []keyedRange
+	for _, loss := range losses {
+		if loss != nil {
+			key := lossKey{source: loss.GetSourceNodeId(), session: loss.GetProducerSessionId(), kind: loss.GetKind()}
+			for _, eventRange := range loss.GetEventSequenceRanges() {
+				if eventRange != nil {
+					ranges = append(ranges, keyedRange{key: key, first: eventRange.GetFirst(), last: eventRange.GetLast()})
+				}
+			}
+		}
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		if ranges[i].first == ranges[j].first {
+			return ranges[i].last > ranges[j].last
+		}
+		return ranges[i].first < ranges[j].first
+	})
+	if len(ranges) == 0 {
+		return nil
+	}
+	activeKey, activeLast := ranges[0].key, ranges[0].last
+	for _, eventRange := range ranges[1:] {
+		if eventRange.first <= activeLast && eventRange.key != activeKey {
+			return errors.New("event loss ranges overlap across loss kinds")
+		}
+		if eventRange.last > activeLast {
+			activeKey, activeLast = eventRange.key, eventRange.last
 		}
 	}
 	return nil

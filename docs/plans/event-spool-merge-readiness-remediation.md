@@ -552,6 +552,23 @@ Focused normal and race tests for events, protoadapter, eventspool,
 eventforwarding, and processor upstream routing passed, as did the tagged
 processor event-ingress tests.
 
+A third source-to-plan audit on 2026-09-18 corrected the remaining recovery
+and accounting gaps: exact loss normalization now fails stopped before an
+aggregate counter can overflow; pending ranges that overlap across different
+loss kinds are rejected before they can become durable but unforwardable;
+cumulative acknowledgement and eviction retirement state is checkpointed and
+journaled so a retired batch identity cannot be reused after cleanup or
+restart; journal transaction and generation counters fail before wraparound;
+and failed cleanup of a
+partially written temporary record remains included in physical-byte status.
+The audit also removed the obsolete unused journal replay implementation and
+added the previously missing regressions for repeated drop-new, more than
+4,096 coalescible evictions, final replacement growth at the record limit,
+real cached drop-oldest eviction, and committed cleanup failure through the
+upstream sink/client path. Focused normal and race tests for `eventspool`,
+`eventforwarding`, `processor/upstream`, and `protoadapter` passed after these
+corrections.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

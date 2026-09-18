@@ -94,6 +94,51 @@ func TestPhysicalBytesConsistentlyCountRecordStorage(t *testing.T) {
 	require.NoError(t, reopened.Close())
 }
 
+func TestFailedTemporaryRecordCleanupRemainsInPhysicalBytes(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	fs := defaultFS()
+	originalCreate := fs.createTemp
+	fs.createTemp = func(directory, pattern string) (spoolFile, error) {
+		file, createErr := originalCreate(directory, pattern)
+		if createErr != nil || !strings.HasPrefix(pattern, ".eventbatch-") {
+			return file, createErr
+		}
+		failed := false
+		return &faultFile{spoolFile: file, write: func(payload []byte) (int, error) {
+			if failed {
+				return 0, errors.New("injected record write failure")
+			}
+			failed = true
+			n, _ := file.Write(payload[:min(5, len(payload))])
+			return n, errors.New("injected record write failure")
+		}}, nil
+	}
+	originalRemove := fs.remove
+	fs.remove = func(path string) error {
+		if strings.HasPrefix(filepath.Base(path), ".eventbatch-") {
+			return errors.New("injected temporary cleanup failure")
+		}
+		return originalRemove(path)
+	}
+	s.fs = fs
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.Error(t, err)
+	require.False(t, result.Stored)
+	require.Equal(t, uint64(5), s.PhysicalBytes())
+	require.NotEmpty(t, s.Status().CleanupError)
+
+	s.fs = defaultFS()
+	result, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.Equal(t, s.Bytes(), s.PhysicalBytes())
+	require.Empty(t, s.Status().CleanupError)
+}
+
 func TestDurabilityUncertainBarrierAndRecovery(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})
@@ -413,6 +458,100 @@ func TestDuplicateBatchIsRejectedBeforeJournalPublication(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, reopened.Batches(), 1)
 	require.NoError(t, reopened.Close())
+}
+
+func TestAcknowledgedBatchCannotBeRepublishedAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir, CheckpointEvery: 1})
+	require.NoError(t, err)
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	require.NoError(t, s.Ack("node", "session", 1))
+	require.NoError(t, s.Close())
+
+	s, err = Open(Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.ErrorContains(t, err, "durable retirement mark")
+	require.False(t, result.Stored)
+	require.Empty(t, s.Batches())
+}
+
+func TestEvictedBatchCannotBeRepublished(t *testing.T) {
+	now := time.Unix(1000, 0)
+	s, err := Open(Config{Directory: t.TempDir(), Policy: DropOldest, MaxAge: time.Second, Clock: func() time.Time { return now }})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	now = now.Add(2 * time.Second)
+	result, err := s.Enqueue(batch("node", "session", 2, 2, 2))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	require.False(t, s.Contains("node", "session", 1))
+
+	result, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.ErrorContains(t, err, "durable retirement mark")
+	require.False(t, result.Stored)
+}
+
+func TestDropOldestRejectsUnrepresentableAggregateLossWithoutMutation(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir(), Policy: DropOldest})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	old := batch("node", "session", 1, 1, 1)
+	old.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: ^uint64(0),
+		SourceNodeId: "node", ProducerSessionId: "session",
+	}}}
+	_, err = s.Enqueue(old)
+	require.NoError(t, err)
+	s.config.MaxBytes = s.Bytes()
+
+	result, err := s.Enqueue(batch("node", "session", 2, 2, 2))
+	require.ErrorContains(t, err, "preserve victim loss coverage")
+	require.False(t, result.Stored)
+	require.True(t, s.Contains("node", "session", 1))
+	require.False(t, s.Contains("node", "session", 2))
+}
+
+func TestRetainLossesRejectsRangesOverlappingAcrossKinds(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	losses := []*eventsv1.EventLoss{
+		{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 2, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 7, Last: 8}}},
+		{Kind: eventsv1.LossKind_LOSS_KIND_POLICY_OMISSION, Count: 2, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 8, Last: 9}}},
+	}
+	result, err := s.RetainLosses(losses)
+	require.ErrorContains(t, err, "overlap across loss kinds")
+	require.False(t, result.Committed)
+	require.False(t, s.HasPending())
+}
+
+func TestMetadataCounterExhaustionFailsBeforePublication(t *testing.T) {
+	t.Run("transaction sequence", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir()})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		s.txSequence = ^uint64(0)
+		result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+		require.ErrorContains(t, err, "transaction sequence is exhausted")
+		require.False(t, result.Stored)
+		require.Empty(t, s.Batches())
+		require.Zero(t, s.PhysicalBytes())
+	})
+	t.Run("journal generation", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir()})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		s.generation = ^uint64(0)
+		err = s.rotateCheckpoint()
+		require.ErrorContains(t, err, "generation is exhausted")
+		require.Equal(t, ^uint64(0), s.generation)
+	})
 }
 
 func TestNormalizeLossesHandlesMaxUint64EndingRange(t *testing.T) {

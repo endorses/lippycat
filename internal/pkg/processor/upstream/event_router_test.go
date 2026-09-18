@@ -52,6 +52,65 @@ func TestEventRouterPersistsIndependentProducerSessions(t *testing.T) {
 	require.True(t, recovered.HasPendingDurableBatches())
 }
 
+func TestEventRouterAdvancesOnceAfterCommittedCleanupFailure(t *testing.T) {
+	const (
+		node    = "tap-node"
+		session = "30313233343536373839616263646566"
+	)
+	manager := NewManager(Config{ForwardMode: "events"}, nil)
+
+	// Measure two ordinary records so the real route below is guaranteed to
+	// replace old records when the third record also inherits eviction losses.
+	calibrationDir := t.TempDir()
+	calibration, err := NewEventRouter(manager, EventRouterConfig{SpoolDirectory: calibrationDir, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE})
+	require.NoError(t, err)
+	for sequence := uint64(1); sequence <= 2; sequence++ {
+		require.NoError(t, calibration.HandleEvent(context.Background(), routedDNS(node, session, sequence)))
+	}
+	calibrationRecords, err := filepath.Glob(filepath.Join(calibrationDir, identityPathPart(node), identityPathPart(session), "*.eventbatch"))
+	require.NoError(t, err)
+	require.Len(t, calibrationRecords, 2)
+	var maxBytes uint64
+	for _, path := range calibrationRecords {
+		info, statErr := os.Stat(path)
+		require.NoError(t, statErr)
+		maxBytes += uint64(info.Size())
+	}
+	require.NoError(t, calibration.Close(context.Background()))
+
+	dir := t.TempDir()
+	router, err := NewEventRouter(manager, EventRouterConfig{SpoolDirectory: dir, MaxBytes: maxBytes, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, router.Close(context.Background())) })
+	for sequence := uint64(1); sequence <= 2; sequence++ {
+		require.NoError(t, router.HandleEvent(context.Background(), routedDNS(node, session, sequence)))
+	}
+
+	routeDir := filepath.Join(dir, identityPathPart(node), identityPathPart(session))
+	records, err := filepath.Glob(filepath.Join(routeDir, "*.eventbatch"))
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	// A non-empty directory at the victim pathname makes the post-commit
+	// os.Remove fail without relying on eventspool's private fault hooks.
+	require.NoError(t, os.Remove(records[0]))
+	require.NoError(t, os.Mkdir(records[0], 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(records[0], "blocker"), []byte("x"), 0o600))
+
+	require.NoError(t, router.HandleEvent(context.Background(), routedDNS(node, session, 3)), "cleanup failure follows a committed enqueue and must not retry the event")
+	router.mu.Lock()
+	route := router.routes[eventRouteKey{nodeID: node, sessionID: session}]
+	router.mu.Unlock()
+	require.NotNil(t, route)
+	require.NotEmpty(t, route.spool.Status().CleanupError)
+	batches := route.spool.Batches()
+	require.Len(t, batches, 1)
+	require.Equal(t, uint64(3), batches[0].GetBatchSequence())
+	require.Equal(t, uint64(3), batches[0].GetFirstEventSequence())
+	require.Equal(t, uint64(3), batches[0].GetLastEventSequence())
+	require.Len(t, batches[0].GetStats().GetLosses(), 1)
+	require.Equal(t, []*eventsv1.SequenceRange{{First: 1, Last: 2}}, batches[0].GetStats().GetLosses()[0].GetEventSequenceRanges())
+}
+
 func TestEventRouterRejectsRecoveredSessionPolicyMismatch(t *testing.T) {
 	dir := t.TempDir()
 	manager := NewManager(Config{ForwardMode: "events"}, nil)

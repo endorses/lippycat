@@ -110,6 +110,7 @@ func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 			sequence = tx.Sequence
 			base.SourceNodeID, base.ProducerSessionID = tx.SourceNodeID, tx.ProducerSessionID
 			base.LastEventSequence, base.LastBatchSequence = tx.LastEventSequence, tx.LastBatchSequence
+			base.RetiredBatchSequence = tx.RetiredBatchSequence
 			base.SessionPolicy = tx.SessionPolicy
 			replayed++
 		}
@@ -129,83 +130,17 @@ func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 	return base, replayed, nil
 }
 
-func (s *Spool) replayJournal() error {
-	path := journalPath(s.config.Directory, s.generation)
-	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
-	if errors.Is(err, os.ErrNotExist) {
-		return errors.New("open event spool: manifest exists without journal")
-	}
-	if err != nil {
-		return fmt.Errorf("open event spool journal: %w", err)
-	}
-	defer f.Close()
-	header := make([]byte, 20)
-	if _, err = io.ReadFull(f, header); err != nil {
-		return fmt.Errorf("read event spool journal header: %w", err)
-	}
-	if string(header[:8]) != string(journalMagic[:]) || binary.BigEndian.Uint32(header[8:12]) != manifestVersion || binary.BigEndian.Uint64(header[12:20]) != s.generation {
-		return errors.New("read event spool journal: invalid format or generation")
-	}
-	offset := int64(20)
-	for {
-		var size [4]byte
-		n, readErr := io.ReadFull(f, size[:])
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if errors.Is(readErr, io.ErrUnexpectedEOF) {
-			if err = f.Truncate(offset); err != nil {
-				return fmt.Errorf("truncate journal tail: %w", err)
-			}
-			break
-		}
-		if readErr != nil || n != 4 {
-			return fmt.Errorf("read journal frame header: %w", readErr)
-		}
-		length := binary.BigEndian.Uint32(size[:])
-		if length == 0 || length > maxJournalFramePayload {
-			return fmt.Errorf("read event spool journal: invalid frame length %d", length)
-		}
-		frame := make([]byte, int(length)+4)
-		if _, readErr = io.ReadFull(f, frame); readErr != nil {
-			if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
-				if err = f.Truncate(offset); err != nil {
-					return fmt.Errorf("truncate journal tail: %w", err)
-				}
-				break
-			}
-			return fmt.Errorf("read journal frame: %w", readErr)
-		}
-		if crc32.ChecksumIEEE(frame[:length]) != binary.BigEndian.Uint32(frame[length:]) {
-			return fmt.Errorf("read event spool journal: checksum mismatch at offset %d", offset)
-		}
-		var tx transaction
-		if err = json.Unmarshal(frame[:length], &tx); err != nil {
-			return fmt.Errorf("read event spool journal transaction: %w", err)
-		}
-		if tx.Version != manifestVersion || tx.Generation != s.generation {
-			return errors.New("read event spool journal: transaction format mismatch")
-		}
-		if tx.Sequence <= s.txSequence {
-			offset += int64(8 + length)
-			continue
-		}
-		if tx.Sequence != s.txSequence+1 {
-			return fmt.Errorf("read event spool journal: sequence gap at %d", tx.Sequence)
-		}
-		if err = s.applyTransaction(tx); err != nil {
-			return err
-		}
-		s.transactionsSinceCheckpoint++
-		offset += int64(8 + length)
-	}
-	return nil
-}
-
 func (s *Spool) commit(tx transaction) error {
+	if s.txSequence == ^uint64(0) || tx.Sequence == 0 {
+		return errors.New("commit event spool transaction: journal transaction sequence is exhausted")
+	}
+	if tx.Generation != s.generation || tx.Sequence != s.txSequence+1 {
+		return errors.New("commit event spool transaction: invalid generation or transaction sequence")
+	}
 	if !tx.ResetSession {
 		tx.SourceNodeID, tx.ProducerSessionID = s.singleSource, s.singleProducer
 		tx.LastEventSequence, tx.LastBatchSequence = s.lastEventSequence, s.lastBatchSequence
+		tx.RetiredBatchSequence = max(tx.RetiredBatchSequence, s.retiredBatchSequence)
 		if s.sessionPolicy != nil {
 			copyPolicy := *s.sessionPolicy
 			tx.SessionPolicy = &copyPolicy
@@ -300,15 +235,15 @@ func (s *Spool) commitLargeTransaction(tx transaction) error {
 	}
 
 	type stateSnapshot struct {
-		records                                  []record
-		bytes, generation, txSequence            uint64
-		transactionsSinceCheckpoint, commitCount uint64
-		pendingLosses                            []*eventsv1.EventLoss
-		identitySet, homogeneous                 bool
-		singleSource, singleProducer             string
-		lastEventSequence, lastBatchSequence     uint64
-		checkpointRecordBase                     int
-		sessionPolicy                            *SessionPolicy
+		records                                                    []record
+		bytes, generation, txSequence                              uint64
+		transactionsSinceCheckpoint, commitCount                   uint64
+		pendingLosses                                              []*eventsv1.EventLoss
+		identitySet, homogeneous                                   bool
+		singleSource, singleProducer                               string
+		lastEventSequence, lastBatchSequence, retiredBatchSequence uint64
+		checkpointRecordBase                                       int
+		sessionPolicy                                              *SessionPolicy
 	}
 	snapshot := stateSnapshot{
 		records: append([]record(nil), s.records...), bytes: s.bytes,
@@ -317,6 +252,7 @@ func (s *Spool) commitLargeTransaction(tx transaction) error {
 		pendingLosses: cloneLosses(s.pendingLosses), identitySet: s.identitySet, homogeneous: s.homogeneous,
 		singleSource: s.singleSource, singleProducer: s.singleProducer,
 		lastEventSequence: s.lastEventSequence, lastBatchSequence: s.lastBatchSequence,
+		retiredBatchSequence: s.retiredBatchSequence,
 		checkpointRecordBase: s.checkpointRecordBase,
 	}
 	if s.sessionPolicy != nil {
@@ -332,6 +268,7 @@ func (s *Spool) commitLargeTransaction(tx transaction) error {
 		s.identitySet, s.homogeneous = snapshot.identitySet, snapshot.homogeneous
 		s.singleSource, s.singleProducer = snapshot.singleSource, snapshot.singleProducer
 		s.lastEventSequence, s.lastBatchSequence = snapshot.lastEventSequence, snapshot.lastBatchSequence
+		s.retiredBatchSequence = snapshot.retiredBatchSequence
 		s.checkpointRecordBase, s.sessionPolicy = snapshot.checkpointRecordBase, snapshot.sessionPolicy
 	}
 
@@ -448,6 +385,7 @@ func (s *Spool) applyTransaction(tx transaction) error {
 	s.commitCount++
 	s.singleSource, s.singleProducer = tx.SourceNodeID, tx.ProducerSessionID
 	s.lastEventSequence, s.lastBatchSequence = tx.LastEventSequence, tx.LastBatchSequence
+	s.retiredBatchSequence = tx.RetiredBatchSequence
 	if tx.SessionPolicy != nil {
 		copyPolicy := *tx.SessionPolicy
 		s.sessionPolicy = &copyPolicy
@@ -461,6 +399,9 @@ func (s *Spool) applyTransaction(tx transaction) error {
 }
 
 func (s *Spool) rotateCheckpoint() error {
+	if s.generation == ^uint64(0) {
+		return errors.New("rotate event spool checkpoint: journal generation is exhausted")
+	}
 	oldGeneration, oldSequence := s.generation, s.txSequence
 	newGeneration := oldGeneration + 1
 	if err := s.createJournal(newGeneration); err != nil {
@@ -482,7 +423,7 @@ func (s *Spool) rotateCheckpoint() error {
 	return s.retryCleanup([]string{filepath.Base(journalPath(s.config.Directory, oldGeneration))})
 }
 func (s *Spool) publishCheckpoint() error {
-	m := manifest{Version: manifestVersion, Generation: s.generation, AppliedTransactions: s.txSequence, LogicalBytes: s.bytes, PendingLosses: cloneLosses(s.pendingLosses), SourceNodeID: s.singleSource, ProducerSessionID: s.singleProducer, LastEventSequence: s.lastEventSequence, LastBatchSequence: s.lastBatchSequence, SessionPolicy: s.sessionPolicy}
+	m := manifest{Version: manifestVersion, Generation: s.generation, AppliedTransactions: s.txSequence, LogicalBytes: s.bytes, PendingLosses: cloneLosses(s.pendingLosses), SourceNodeID: s.singleSource, ProducerSessionID: s.singleProducer, LastEventSequence: s.lastEventSequence, LastBatchSequence: s.lastBatchSequence, RetiredBatchSequence: s.retiredBatchSequence, SessionPolicy: s.sessionPolicy}
 	for _, r := range s.records {
 		m.Records = append(m.Records, toManifestRecord(r))
 	}
@@ -569,7 +510,20 @@ func (s *Spool) writeRecord(created time.Time, b *eventsv1.ProtocolEventBatch, p
 	}
 	closeErr := tmp.Close()
 	if err != nil || closeErr != nil {
-		return record{}, errors.Join(fmt.Errorf("enqueue event batch: write record: %v %v", err, closeErr), cleanup())
+		var accountingErr error
+		if info, statErr := os.Stat(name); statErr == nil && info.Size() > 0 {
+			visibleBytes := uint64(info.Size())
+			if visibleBytes > ^uint64(0)-s.physicalBytes {
+				accountingErr = errors.New("enqueue event batch: physical bytes overflow")
+			} else {
+				// retryCleanup subtracts these bytes if removal succeeds. If it
+				// fails, status continues to include the retryable temporary file.
+				s.physicalBytes += visibleBytes
+			}
+		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			accountingErr = fmt.Errorf("enqueue event batch: stat failed temporary record %q: %w", name, statErr)
+		}
+		return record{}, errors.Join(fmt.Errorf("enqueue event batch: write record: %v %v", err, closeErr), accountingErr, cleanup())
 	}
 	finalName := fmt.Sprintf("%020d-%s%s", createdNano, filepath.Base(name), recordExtension)
 	final := filepath.Join(s.config.Directory, finalName)

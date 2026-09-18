@@ -59,7 +59,9 @@ The checkpoint contains:
 - the fixed source node and producer session, when bound;
 - ordered active record basenames with size, creation time, batch sequence,
   and event high-water metadata;
-- logical byte total and sequence high-water marks; and
+- logical byte total, sequence high-water marks, and the durable cumulative
+  retirement mark that prevents acknowledged or evicted batch identities from
+  being published again; and
 - normalized pending loss ranges.
 
 Only safe basenames are accepted. Absolute paths, separators, traversal,
@@ -71,6 +73,7 @@ version fields, generation, monotonically increasing transaction number,
 payload length, and payload checksum. Its payload describes one complete
 logical mutation: additions, removals, high-water changes, and the replacement
 pending-loss state. Replay is idempotent by generation and transaction number.
+Generation and transaction counters fail stopped before wraparound.
 An incomplete final frame is an interrupted append and is ignored. A checksum
 failure or malformed frame before the final incomplete tail is corruption and
 stops recovery without deleting evidence.

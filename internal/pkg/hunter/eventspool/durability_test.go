@@ -1316,6 +1316,21 @@ func appendTestJournalTransaction(t *testing.T, path string, tx transaction) {
 	require.NoError(t, f.Close())
 }
 
+func TestJournalReplayRejectsInflatedBatchHighWater(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	generation, sequence := s.generation, s.txSequence+1
+	require.NoError(t, s.Close())
+
+	appendTestJournalTransaction(t, journalPath(dir, generation), transaction{
+		Version: manifestVersion, Generation: generation, Sequence: sequence,
+		SourceNodeID: "node", ProducerSessionID: "session", LastBatchSequence: 7,
+	})
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "batch high-water mark 7 differs from active and retired state 0")
+}
+
 func TestAckCleanupFailureAtEachVictimKeepsLogicalCommit(t *testing.T) {
 	for _, failAt := range []int{1, 2, 3} {
 		t.Run(fmt.Sprintf("victim_%d", failAt), func(t *testing.T) {

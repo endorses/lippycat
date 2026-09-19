@@ -80,6 +80,34 @@ func TestSessionPolicyCanRotateAfterAckDrain(t *testing.T) {
 	require.NoError(t, s.BindSessionPolicy(sessionPolicy("new", "memory_only", true)))
 }
 
+func TestAdmissionRejectsSequencesBelowCommittedHighWater(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	result, err := s.Enqueue(batch("hunter", "session", 2, 1, 1))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+
+	result, err = s.Enqueue(batch("hunter", "session", 1, 2, 2))
+	require.ErrorContains(t, err, "does not advance committed high-water mark 2")
+	require.False(t, result.Stored)
+
+	retained, err := s.RetainLosses([]*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: "hunter", ProducerSessionId: "session",
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}},
+	}})
+	require.NoError(t, err)
+	require.True(t, retained.Committed)
+
+	result, err = s.FlushPendingLosses("hunter", "session", 1, 1)
+	require.ErrorContains(t, err, "does not advance committed high-water mark 2")
+	require.False(t, result.Stored)
+	require.Len(t, s.Batches(), 1)
+	require.True(t, s.HasPendingLosses())
+}
+
 func TestRetirementReleasesRecordBackingStorage(t *testing.T) {
 	for _, nonPrefix := range []bool{false, true} {
 		t.Run(fmt.Sprintf("non_prefix_%t", nonPrefix), func(t *testing.T) {
@@ -465,18 +493,17 @@ func TestSpoolRejectsMixedSessions(t *testing.T) {
 	require.ErrorContains(t, err, "fixed spool session")
 }
 
-func TestRecoveryOrdersOneSessionByBatchSequence(t *testing.T) {
+func TestLegacyRecoveryOrdersOneSessionByBatchSequence(t *testing.T) {
 	dir := t.TempDir()
-	now := time.Unix(1000, 0)
-	s, err := Open(Config{Directory: dir, Clock: func() time.Time { return now }})
-	require.NoError(t, err)
-	_, err = s.Enqueue(batch("hunter", "session", 2, 2, 2))
-	require.NoError(t, err)
-	_, err = s.Enqueue(batch("hunter", "session", 1, 1, 1))
-	require.NoError(t, err)
-	require.NoError(t, s.Close())
+	for _, sequence := range []uint64{2, 1} {
+		payload, err := proto.Marshal(batch("hunter", "session", sequence, sequence, sequence))
+		require.NoError(t, err)
+		writeRawRecord(t, filepath.Join(dir, fmt.Sprintf("legacy-%d%s", sequence, recordExtension)), uint64(len(payload)), payload)
+	}
+
 	reopened, err := Open(Config{Directory: dir})
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reopened.Close()) })
 	batches := reopened.Batches()
 	require.Equal(t, []uint64{1, 2}, []uint64{batches[0].BatchSequence, batches[1].BatchSequence})
 }

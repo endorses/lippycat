@@ -887,6 +887,20 @@ sequence is consumed. A restart regression verifies that the recovered event
 high-water includes the displaced event rather than leaving its loss coverage
 only in volatile sink memory.
 
+A twenty-first source-to-plan audit on 2026-09-19 corrected batch high-water
+enforcement. The spool previously allowed a newly committed batch or loss-only
+carrier below the session's highest committed batch sequence. If a forwarding
+client had already sent that high-water batch, the late lower sequence sorted
+behind its cursor and could remain pending indefinitely. Live admission now
+requires every new batch identity to advance the committed high-water, while
+legacy migration still sorts and preserves older pre-manifest backlogs.
+Recovery also rejects a checkpoint or replayed journal whose batch high-water
+does not exactly equal the maximum active or durably retired batch sequence.
+Regressions cover late admission after a real send, loss-carrier admission,
+legacy ordering, and both checkpoint and journal high-water corruption.
+Focused normal and `all`-tag race tests passed for `eventspool`,
+`eventforwarding`, `processor/upstream`, and `protoadapter`.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

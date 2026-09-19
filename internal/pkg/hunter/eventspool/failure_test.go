@@ -795,7 +795,7 @@ func TestResetSessionIsDurableAndAtomicWhenDrained(t *testing.T) {
 }
 
 func TestManifestRejectsIdentityAndHighWaterContradictions(t *testing.T) {
-	for _, kind := range []string{"identity", "event_high_water", "batch_high_water", "policy_identity"} {
+	for _, kind := range []string{"identity", "event_high_water", "batch_high_water_low", "batch_high_water_high", "policy_identity"} {
 		t.Run(kind, func(t *testing.T) {
 			dir := t.TempDir()
 			s, err := Open(Config{Directory: dir, CheckpointEvery: 1})
@@ -813,8 +813,10 @@ func TestManifestRejectsIdentityAndHighWaterContradictions(t *testing.T) {
 				m.SourceNodeID = "other"
 			case "event_high_water":
 				m.LastEventSequence = 1
-			case "batch_high_water":
+			case "batch_high_water_low":
 				m.LastBatchSequence = 1
+			case "batch_high_water_high":
+				m.LastBatchSequence = 4
 			case "policy_identity":
 				m.SessionPolicy.SourceNodeID = "other"
 			}

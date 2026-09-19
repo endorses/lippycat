@@ -382,11 +382,14 @@ func (s *Spool) loadManifest(m manifest) error {
 			observedEvent = max(observedEvent, eventRange.GetLast())
 		}
 	}
-	if m.LastEventSequence < observedEvent || m.LastBatchSequence < observedBatch {
+	if m.LastEventSequence < observedEvent {
 		return errors.New("read event spool manifest: high-water marks underreport active state")
 	}
 	if m.RetiredBatchSequence > m.LastBatchSequence {
 		return errors.New("read event spool manifest: retired batch sequence exceeds high-water mark")
+	}
+	if expectedBatch := max(observedBatch, m.RetiredBatchSequence); m.LastBatchSequence != expectedBatch {
+		return fmt.Errorf("read event spool manifest: batch high-water mark %d differs from active and retired state %d", m.LastBatchSequence, expectedBatch)
 	}
 	s.bytes = total
 	s.pendingLosses = normalizeLosses(m.PendingLosses)
@@ -551,6 +554,9 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	}
 	if s.identitySet && batch.GetBatchSequence() <= s.retiredBatchSequence {
 		return EnqueueResult{}, fmt.Errorf("enqueue event batch: batch sequence %d does not advance durable retirement mark %d", batch.GetBatchSequence(), s.retiredBatchSequence)
+	}
+	if s.identitySet && batch.GetBatchSequence() <= s.lastBatchSequence {
+		return EnqueueResult{}, fmt.Errorf("enqueue event batch: batch sequence %d does not advance committed high-water mark %d", batch.GetBatchSequence(), s.lastBatchSequence)
 	}
 	now := s.config.Clock()
 	incoming := proto.Clone(batch).(*eventsv1.ProtocolEventBatch)
@@ -899,6 +905,9 @@ func (s *Spool) FlushPendingLosses(source, session string, batchSequence uint64,
 	}
 	if s.identitySet && batchSequence <= s.retiredBatchSequence {
 		return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: batch sequence %d does not advance durable retirement mark %d", batchSequence, s.retiredBatchSequence)
+	}
+	if s.identitySet && batchSequence <= s.lastBatchSequence {
+		return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: batch sequence %d does not advance committed high-water mark %d", batchSequence, s.lastBatchSequence)
 	}
 	coverage := cloneLosses(s.pendingLosses)
 	batch := &eventsv1.ProtocolEventBatch{SourceNodeId: source, ProducerSessionId: session, BatchSequence: batchSequence, SemanticProfileRevision: semanticRevision, Stats: &eventsv1.EventBatchStats{}}

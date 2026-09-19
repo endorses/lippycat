@@ -93,6 +93,32 @@ func TestServeRetriesPersistedIdentityAndDeletesOnlyAfterAck(t *testing.T) {
 	require.ErrorIs(t, <-done, context.Canceled)
 }
 
+func TestServeRejectsLateBatchBelowSentHighWater(t *testing.T) {
+	client, spool := newTestClient(t)
+	result, err := client.Enqueue(ingressBatch(2))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+
+	stream := &fakeStream{controls: make(chan *eventsv1.EventIngressControl, 1)}
+	stream.controls <- &eventsv1.EventIngressControl{
+		Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- client.Serve(ctx, stream) }()
+	require.Eventually(t, func() bool { return len(stream.messages()) == 2 }, time.Second, time.Millisecond)
+	require.Equal(t, uint64(2), stream.messages()[1].GetBatch().GetBatchSequence())
+
+	result, err = client.Enqueue(ingressBatch(1))
+	require.ErrorContains(t, err, "does not advance committed high-water mark 2")
+	require.False(t, result.Stored)
+	require.Len(t, spool.Batches(), 1)
+	require.Never(t, func() bool { return len(stream.messages()) > 2 }, 25*time.Millisecond, time.Millisecond)
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
 func TestServeNackResendsRequestedBatch(t *testing.T) {
 	client, _ := newTestClient(t)
 	_, err := client.Enqueue(ingressBatch(1))

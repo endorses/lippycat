@@ -771,9 +771,16 @@ lc process [flags]
 
 **Upstream Forwarding**
 
-| Flag          | Short | Type   | Default | Description                                  |
-| ------------- | ----- | ------ | ------- | -------------------------------------------- |
-| `--processor` | `-P`  | string |         | Upstream processor for hierarchical topology |
+| Flag                              | Short | Type     | Default                                   | Description                                                     |
+| --------------------------------- | ----- | -------- | ----------------------------------------- | --------------------------------------------------------------- |
+| `--processor`                     | `-P`  | string   |                                           | Upstream processor for hierarchical topology                    |
+| `--forward-mode`                  |       | string   | `packets`                                 | Upstream representation: `packets` or `events`                  |
+| `--event-fallback-to-packets`     |       | bool     | `false`                                   | Explicitly allow packet fallback after failed event negotiation |
+| `--event-delivery-profile`        |       | string   | `reliable`                                | `reliable` or `memory-only` event delivery                      |
+| `--event-spool-dir`               |       | string   | `/var/tmp/lippycat-processor-event-spool` | Recoverable upstream event spool                                |
+| `--event-spool-max-bytes`         |       | uint     | `1073741824`                              | Spool byte limit (0 = unlimited)                                |
+| `--event-spool-max-age`           |       | duration | `24h`                                     | Spool age limit (0 = unlimited)                                 |
+| `--event-spool-exhaustion-policy` |       | string   | `drop_oldest`                             | `drop_oldest` or `drop_new`                                     |
 
 **Statistics**
 

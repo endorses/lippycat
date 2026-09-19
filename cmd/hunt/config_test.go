@@ -3,11 +3,13 @@
 package hunt
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,6 +84,58 @@ func TestBuildHunterConfigProtocolFixtures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHunterEventTransportConfigHonorsYAMLAndFlagPrecedence(t *testing.T) {
+	flagNames := []string{"forward-mode", "event-fallback-to-packets", "event-delivery-profile", "event-spool-dir", "event-spool-max-bytes", "event-spool-max-age", "event-spool-exhaustion-policy"}
+	type flagState struct {
+		value   string
+		changed bool
+	}
+	states := make(map[string]flagState, len(flagNames))
+	for _, name := range flagNames {
+		flag := HuntCmd.PersistentFlags().Lookup(name)
+		states[name] = flagState{value: flag.Value.String(), changed: flag.Changed}
+		require.NoError(t, flag.Value.Set(flag.DefValue))
+		flag.Changed = false
+	}
+	viper.SetConfigType("yaml")
+	require.NoError(t, viper.ReadConfig(strings.NewReader(`
+hunter:
+  forward_mode: events
+  events:
+    fallback_to_packets: false
+    delivery_profile: memory-only
+    spool:
+      dir: /yaml/hunter-spool
+      max_bytes: 4321
+      max_age: 2m
+      exhaustion_policy: drop_new
+`)))
+	t.Cleanup(func() {
+		for name, state := range states {
+			flag := HuntCmd.PersistentFlags().Lookup(name)
+			require.NoError(t, flag.Value.Set(state.value))
+			flag.Changed = state.changed
+		}
+		require.NoError(t, viper.ReadConfig(strings.NewReader("{}")))
+	})
+
+	config := buildHunterConfig(hunterConfigSpec{})
+	require.NoError(t, validateHunterForwardingConfig(config))
+	require.Equal(t, "events", config.ForwardMode)
+	require.Equal(t, "memory_only", config.EventDeliveryProfile)
+	require.Equal(t, "/yaml/hunter-spool", config.EventSpoolDir)
+	require.Equal(t, uint64(4321), config.EventSpoolMaxBytes)
+	require.Equal(t, 2*time.Minute, config.EventSpoolMaxAge)
+	require.Equal(t, "drop_new", config.EventSpoolExhaustionPolicy)
+
+	modeFlag := HuntCmd.PersistentFlags().Lookup("forward-mode")
+	require.NoError(t, modeFlag.Value.Set("packets"))
+	modeFlag.Changed = true
+	config = buildHunterConfig(hunterConfigSpec{})
+	require.NoError(t, validateHunterForwardingConfig(config))
+	require.Equal(t, "packets", config.ForwardMode)
 }
 
 func TestBuildHunterConfigCopiesFilterCapabilities(t *testing.T) {

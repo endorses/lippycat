@@ -7,8 +7,11 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
@@ -227,4 +230,71 @@ func TestApplyTapEventTransportConfigRejectsImplicitFallback(t *testing.T) {
 
 	err := applyTapEventTransportConfig(&processor.Config{})
 	require.ErrorContains(t, err, "only valid with --forward-mode=events")
+}
+
+func TestApplyTapEventTransportConfigRejectsIngressBelowDurableContract(t *testing.T) {
+	oldLimit := eventIngressMaxBatchBytes
+	t.Cleanup(func() { eventIngressMaxBatchBytes = oldLimit })
+	eventIngressMaxBatchBytes = protoadapter.MaxEncodedBatchBytes - 1
+
+	err := applyTapEventTransportConfig(&processor.Config{})
+	require.ErrorContains(t, err, "max batch bytes must be at least")
+}
+
+func TestTapEventTransportConfigHonorsYAMLAndFlagPrecedence(t *testing.T) {
+	flagNames := []string{"forward-mode", "event-fallback-to-packets", "event-delivery-profile", "event-spool-dir", "event-spool-max-bytes", "event-spool-max-age", "event-spool-exhaustion-policy", "event-ingress-profile", "event-ingress-wal-dir", "event-ingress-wal-max-bytes", "event-ingress-max-batch-bytes"}
+	type flagState struct {
+		value   string
+		changed bool
+	}
+	states := make(map[string]flagState, len(flagNames))
+	for _, name := range flagNames {
+		flag := TapCmd.PersistentFlags().Lookup(name)
+		states[name] = flagState{value: flag.Value.String(), changed: flag.Changed}
+		require.NoError(t, flag.Value.Set(flag.DefValue))
+		flag.Changed = false
+	}
+	viper.SetConfigType("yaml")
+	require.NoError(t, viper.ReadConfig(strings.NewReader(`
+tap:
+  forward_mode: events
+  events:
+    fallback_to_packets: false
+    delivery_profile: memory-only
+    spool:
+      dir: /yaml/tap-spool
+      max_bytes: 4321
+      max_age: 2m
+      exhaustion_policy: drop_new
+    ingress:
+      profile: reliable
+      wal_dir: /yaml/tap-wal
+      wal_max_bytes: 5678
+      max_batch_bytes: 4194304
+`)))
+	t.Cleanup(func() {
+		for name, state := range states {
+			flag := TapCmd.PersistentFlags().Lookup(name)
+			require.NoError(t, flag.Value.Set(state.value))
+			flag.Changed = state.changed
+		}
+		require.NoError(t, viper.ReadConfig(strings.NewReader("{}")))
+	})
+
+	config := processor.Config{}
+	require.NoError(t, applyTapEventTransportConfig(&config))
+	require.Equal(t, "events", config.UpstreamForwardMode)
+	require.Equal(t, "memory_only", config.UpstreamEventDeliveryProfile)
+	require.Equal(t, "/yaml/tap-spool", config.UpstreamEventSpoolDirectory)
+	require.Equal(t, uint64(4321), config.UpstreamEventSpoolMaxBytes)
+	require.Equal(t, 2*time.Minute, config.UpstreamEventSpoolMaxAge)
+	require.Equal(t, "drop_new", config.UpstreamEventSpoolExhaustionPolicy)
+	require.Equal(t, "reliable", config.EventIngressProfile)
+	require.Equal(t, "/yaml/tap-wal", config.EventIngressWALDirectory)
+
+	modeFlag := TapCmd.PersistentFlags().Lookup("forward-mode")
+	require.NoError(t, modeFlag.Value.Set("packets"))
+	modeFlag.Changed = true
+	require.NoError(t, applyTapEventTransportConfig(&config))
+	require.Equal(t, "packets", config.UpstreamForwardMode)
 }

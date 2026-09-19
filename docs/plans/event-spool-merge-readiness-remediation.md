@@ -801,6 +801,32 @@ cleanup after the checkpoint is durable and before reconciling physical bytes.
 A regression verifies that a stale temporary record is removed on the first
 open and that physical-byte and cleanup status are immediately accurate.
 
+A seventeenth source-to-plan audit on 2026-09-19 corrected the remaining CLI
+and forwarding-control boundaries. The processor core already implemented
+durable processor-to-processor event relay, but `lc process` did not expose or
+load its forwarding mode, delivery profile, fallback, or event-spool settings;
+hierarchical processors therefore always selected packet mode. Processor flags,
+configuration keys, validation, operator documentation, and CLI regressions now
+cover that path. Hunter, tap, and processor event-transport strings now use
+Viper's flag/config precedence directly, so non-empty flag defaults no longer
+mask YAML settings. Tap ingress validation also enforces the shared 4 MiB
+durable-sender minimum before processor construction.
+
+The same audit tightened control and recovery validation without changing the
+wire contract: structurally invalid supplied NACK ranges are rejected before
+rewind, unordered or overlapping valid ranges and an empty no-op remain
+accepted, and a reconnect can still accept a cumulative ACK for batches the
+receiver durably admitted on the previous stream. Live transaction application
+now preflights every removal and addition before mutating memory, validates
+immutable record creation metadata exactly as checkpoint recovery does, and
+leaves active state intact if any record is invalid. New regressions cover each
+changed boundary. Focused normal and
+`all`-tag race tests passed for the event spool, forwarding client, upstream
+router, CLI roles, and proto adapter.
+The complete `make test` suite (including loopback tests), LI partition, vet,
+manual build, supported build matrix, Go formatting, and `git diff --check`
+passed on the corrected tree.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

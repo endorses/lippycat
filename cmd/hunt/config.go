@@ -58,13 +58,13 @@ func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 		TLSKeyFile:                 cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),
 		TLSCAFile:                  cmdutil.GetStringConfig("hunter.tls.ca_file", tlsCAFile),
 		TLSSkipVerify:              cmdutil.GetBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
-		ForwardMode:                strings.ToLower(cmdutil.GetStringConfig("hunter.forward_mode", forwardMode)),
-		EventFallbackToPackets:     cmdutil.GetBoolConfig("hunter.events.fallback_to_packets", eventFallbackToPackets),
-		EventDeliveryProfile:       strings.ReplaceAll(strings.ToLower(cmdutil.GetStringConfig("hunter.events.delivery_profile", eventDeliveryProfile)), "-", "_"),
-		EventSpoolDir:              cmdutil.GetStringConfig("hunter.events.spool.dir", eventSpoolDir),
+		ForwardMode:                strings.ToLower(viper.GetString("hunter.forward_mode")),
+		EventFallbackToPackets:     viper.GetBool("hunter.events.fallback_to_packets"),
+		EventDeliveryProfile:       strings.ReplaceAll(strings.ToLower(viper.GetString("hunter.events.delivery_profile")), "-", "_"),
+		EventSpoolDir:              viper.GetString("hunter.events.spool.dir"),
 		EventSpoolMaxBytes:         viper.GetUint64("hunter.events.spool.max_bytes"),
 		EventSpoolMaxAge:           viper.GetDuration("hunter.events.spool.max_age"),
-		EventSpoolExhaustionPolicy: strings.ToLower(cmdutil.GetStringConfig("hunter.events.spool.exhaustion_policy", eventSpoolExhaustionPolicy)),
+		EventSpoolExhaustionPolicy: strings.ToLower(viper.GetString("hunter.events.spool.exhaustion_policy")),
 	}
 
 	if spec.useGPUFlag {

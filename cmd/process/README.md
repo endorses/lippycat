@@ -490,8 +490,19 @@ Processors can forward filtered traffic to upstream processors for multi-tier ag
 lc process --listen :55555 \
   --id edge-01 \
   --processor regional-processor:55555 \
+  --forward-mode events \
+  --event-delivery-profile reliable \
+  --event-spool-dir /var/lib/lippycat/event-spool \
   --max-hunters 50
 ```
+
+`--forward-mode packets` remains the compatibility default. Event mode keeps
+the originating node, producer session, and event sequence across the next hop
+and uses a per-producer durable spool before forwarding. Use
+`--event-fallback-to-packets` only when sending raw packets after failed event
+negotiation is explicitly acceptable. Bound retention with
+`--event-spool-max-bytes`, `--event-spool-max-age`, and
+`--event-spool-exhaustion-policy`.
 
 **Regional Processor:**
 
@@ -529,6 +540,15 @@ processor:
   listen_addr: "0.0.0.0:55555"
   id: "prod-processor-01"
   processor_addr: "" # Empty for no upstream
+  forward_mode: "packets"
+  events:
+    fallback_to_packets: false
+    delivery_profile: "reliable"
+    spool:
+      dir: "/var/tmp/lippycat-processor-event-spool"
+      max_bytes: 1073741824
+      max_age: "24h"
+      exhaustion_policy: "drop_oldest"
   max_hunters: 100
   max_subscribers: 100
   write_file: "/var/capture/packets.pcap"

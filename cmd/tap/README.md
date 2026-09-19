@@ -197,7 +197,7 @@ sudo lc tap tls -i eth0 \
 - `--event-ingress-profile` - Downstream event ingress: `memory-only` (default) or `reliable`
 - `--event-ingress-wal-dir` - Recoverable ingress WAL (required for reliable ingress)
 - `--event-ingress-wal-max-bytes` - Ingress WAL limit (default: 1 GiB)
-- `--event-ingress-max-batch-bytes` - Maximum accepted event batch (default: 4 MiB)
+- `--event-ingress-max-batch-bytes` - Maximum accepted event batch (default and minimum: 4 MiB)
 
 Packet mode preserves every upstream feature that requires raw bytes. Event
 mode analyzes locally and sends normalized metadata without raw packet bytes or

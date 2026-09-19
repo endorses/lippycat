@@ -445,6 +445,23 @@ flowchart LR
 
 Each processor in the chain can write PCAP locally in addition to forwarding upstream.
 
+Packet forwarding is the compatibility default. To relay normalized events
+with a recoverable per-hop admission boundary, configure each non-terminal
+processor explicitly:
+
+```bash
+lc process --listen :55555 --id regional \
+  --processor central:55555 --forward-mode events \
+  --event-delivery-profile reliable \
+  --event-spool-dir /var/lib/lippycat/processor-event-spool \
+  --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
+```
+
+The relay preserves the originating producer identity and sequence. Reliable
+mode retains unacknowledged batches in the event spool; memory-only mode can
+lose acknowledged work on a crash. Packet fallback is disabled unless
+`--event-fallback-to-packets` is explicitly set.
+
 ### Virtual Interface
 
 Expose aggregated traffic from all connected hunters on a virtual network interface, enabling integration with third-party tools:

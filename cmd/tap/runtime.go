@@ -10,6 +10,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -132,14 +133,14 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 }
 
 func applyTapEventTransportConfig(config *processor.Config) error {
-	config.UpstreamForwardMode = strings.ToLower(cmdutil.GetStringConfig("tap.forward_mode", forwardMode))
-	config.UpstreamEventFallbackToPackets = cmdutil.GetBoolConfig("tap.events.fallback_to_packets", eventFallbackToPackets)
-	config.UpstreamEventDeliveryProfile = normalizeEventProfile(cmdutil.GetStringConfig("tap.events.delivery_profile", eventDeliveryProfile))
-	config.UpstreamEventSpoolDirectory = cmdutil.GetStringConfig("tap.events.spool.dir", eventSpoolDir)
+	config.UpstreamForwardMode = strings.ToLower(viper.GetString("tap.forward_mode"))
+	config.UpstreamEventFallbackToPackets = viper.GetBool("tap.events.fallback_to_packets")
+	config.UpstreamEventDeliveryProfile = normalizeEventProfile(viper.GetString("tap.events.delivery_profile"))
+	config.UpstreamEventSpoolDirectory = viper.GetString("tap.events.spool.dir")
 	config.UpstreamEventSpoolMaxBytes = viper.GetUint64("tap.events.spool.max_bytes")
 	config.UpstreamEventSpoolMaxAge = viper.GetDuration("tap.events.spool.max_age")
-	config.UpstreamEventSpoolExhaustionPolicy = strings.ToLower(cmdutil.GetStringConfig("tap.events.spool.exhaustion_policy", eventSpoolExhaustionPolicy))
-	config.EventIngressProfile = normalizeEventProfile(cmdutil.GetStringConfig("tap.events.ingress.profile", eventIngressProfile))
+	config.UpstreamEventSpoolExhaustionPolicy = strings.ToLower(viper.GetString("tap.events.spool.exhaustion_policy"))
+	config.EventIngressProfile = normalizeEventProfile(viper.GetString("tap.events.ingress.profile"))
 	config.EventIngressWALDirectory = cmdutil.GetStringConfig("tap.events.ingress.wal_dir", eventIngressWALDir)
 	config.EventIngressWALMaxBytes = viper.GetInt64("tap.events.ingress.wal_max_bytes")
 	config.EventIngressMaxBatchBytes = cmdutil.GetIntConfig("tap.events.ingress.max_batch_bytes", eventIngressMaxBatchBytes)
@@ -165,8 +166,8 @@ func applyTapEventTransportConfig(config *processor.Config) error {
 	if config.EventIngressProfile == "reliable" && config.EventIngressWALDirectory == "" {
 		return fmt.Errorf("reliable event ingress requires --event-ingress-wal-dir")
 	}
-	if config.EventIngressWALMaxBytes < 0 || config.EventIngressMaxBatchBytes <= 0 {
-		return fmt.Errorf("event ingress limits must be non-negative and max batch bytes must be positive")
+	if config.EventIngressWALMaxBytes < 0 || config.EventIngressMaxBatchBytes < protoadapter.MaxEncodedBatchBytes {
+		return fmt.Errorf("event ingress WAL bytes must be non-negative and max batch bytes must be at least %d", protoadapter.MaxEncodedBatchBytes)
 	}
 	return nil
 }

@@ -83,23 +83,30 @@ Examples:
 }
 
 var (
-	listenAddr                string
-	processorID               string // renamed from processor-id, now --id
-	processorIDDeprecated     string // deprecated, use processorID
-	processorAddr             string // renamed from upstreamAddr
-	upstreamAddrDeprecated    string // deprecated, use processorAddr
-	maxHunters                int
-	maxSubscribers            int
-	eventAllowSensitiveFields bool
-	eventAllowFileMetadata    bool
-	eventIngressProfile       string
-	eventIngressWALDir        string
-	eventIngressWALMaxBytes   int64
-	eventIngressMaxBatchBytes int
-	writeFile                 string
-	displayStats              bool
-	enableDetection           bool
-	filterFile                string
+	listenAddr                 string
+	processorID                string // renamed from processor-id, now --id
+	processorIDDeprecated      string // deprecated, use processorID
+	processorAddr              string // renamed from upstreamAddr
+	upstreamAddrDeprecated     string // deprecated, use processorAddr
+	forwardMode                string
+	eventFallbackToPackets     bool
+	eventDeliveryProfile       string
+	eventSpoolDir              string
+	eventSpoolMaxBytes         uint64
+	eventSpoolMaxAge           time.Duration
+	eventSpoolExhaustionPolicy string
+	maxHunters                 int
+	maxSubscribers             int
+	eventAllowSensitiveFields  bool
+	eventAllowFileMetadata     bool
+	eventIngressProfile        string
+	eventIngressWALDir         string
+	eventIngressWALMaxBytes    int64
+	eventIngressMaxBatchBytes  int
+	writeFile                  string
+	displayStats               bool
+	enableDetection            bool
+	filterFile                 string
 	// TLS flags (TLS is enabled by default unless --insecure is set)
 	tlsCertFile     string
 	tlsKeyFile      string
@@ -160,6 +167,13 @@ func init() {
 	ProcessCmd.Flags().StringVar(&upstreamAddrDeprecated, "upstream", "", "")
 	ProcessCmd.Flags().Lookup("upstream").Deprecated = "use --processor instead"
 	ProcessCmd.Flags().Lookup("upstream").Hidden = true
+	ProcessCmd.Flags().StringVar(&forwardMode, "forward-mode", "packets", "Upstream forwarding mode: packets or events")
+	ProcessCmd.Flags().BoolVar(&eventFallbackToPackets, "event-fallback-to-packets", false, "Allow an event-mode upstream session to visibly fall back to packet forwarding when negotiation fails")
+	ProcessCmd.Flags().StringVar(&eventDeliveryProfile, "event-delivery-profile", "reliable", "Upstream event delivery profile: reliable or memory-only")
+	ProcessCmd.Flags().StringVar(&eventSpoolDir, "event-spool-dir", "/var/tmp/lippycat-processor-event-spool", "Crash-recoverable upstream event spool directory")
+	ProcessCmd.Flags().Uint64Var(&eventSpoolMaxBytes, "event-spool-max-bytes", 1<<30, "Maximum upstream event spool size in bytes (0 = unlimited)")
+	ProcessCmd.Flags().DurationVar(&eventSpoolMaxAge, "event-spool-max-age", 24*time.Hour, "Maximum age of upstream event batches in the spool (0 = unlimited)")
+	ProcessCmd.Flags().StringVar(&eventSpoolExhaustionPolicy, "event-spool-exhaustion-policy", "drop_oldest", "Upstream event spool exhaustion policy: drop_oldest or drop_new")
 	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", constants.DefaultMaxHunters, "Maximum number of concurrent hunter connections (0 = unlimited)")
 	ProcessCmd.Flags().IntVarP(&maxSubscribers, "max-subscribers", "", constants.DefaultMaxSubscribers, "Maximum number of concurrent TUI/monitoring subscribers (0 = unlimited)")
 	ProcessCmd.Flags().BoolVar(&eventAllowSensitiveFields, "event-allow-sensitive-fields", false, "Allow event subscribers to request sensitive HTTP, SMTP, and file fields")
@@ -235,6 +249,13 @@ func init() {
 	_ = viper.BindPFlag("processor.processor_addr", ProcessCmd.Flags().Lookup("processor"))
 	// Also bind to old key for backward compatibility with config files
 	_ = viper.BindPFlag("processor.upstream_addr", ProcessCmd.Flags().Lookup("processor"))
+	_ = viper.BindPFlag("processor.forward_mode", ProcessCmd.Flags().Lookup("forward-mode"))
+	_ = viper.BindPFlag("processor.events.fallback_to_packets", ProcessCmd.Flags().Lookup("event-fallback-to-packets"))
+	_ = viper.BindPFlag("processor.events.delivery_profile", ProcessCmd.Flags().Lookup("event-delivery-profile"))
+	_ = viper.BindPFlag("processor.events.spool.dir", ProcessCmd.Flags().Lookup("event-spool-dir"))
+	_ = viper.BindPFlag("processor.events.spool.max_bytes", ProcessCmd.Flags().Lookup("event-spool-max-bytes"))
+	_ = viper.BindPFlag("processor.events.spool.max_age", ProcessCmd.Flags().Lookup("event-spool-max-age"))
+	_ = viper.BindPFlag("processor.events.spool.exhaustion_policy", ProcessCmd.Flags().Lookup("event-spool-exhaustion-policy"))
 	_ = viper.BindPFlag("processor.max_hunters", ProcessCmd.Flags().Lookup("max-hunters"))
 	_ = viper.BindPFlag("processor.max_subscribers", ProcessCmd.Flags().Lookup("max-subscribers"))
 	_ = viper.BindPFlag("processor.events.allow_sensitive_fields", ProcessCmd.Flags().Lookup("event-allow-sensitive-fields"))
@@ -442,7 +463,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		MaxSubscribers:              cmdutil.GetIntConfig("processor.max_subscribers", maxSubscribers),
 		EventAllowSensitiveFields:   cmdutil.GetBoolConfig("processor.events.allow_sensitive_fields", eventAllowSensitiveFields),
 		EventAllowFileMetadata:      cmdutil.GetBoolConfig("processor.events.allow_file_metadata", eventAllowFileMetadata),
-		EventIngressProfile:         strings.ReplaceAll(strings.ToLower(cmdutil.GetStringConfig("processor.events.ingress.profile", eventIngressProfile)), "-", "_"),
+		EventIngressProfile:         normalizeEventProfile(viper.GetString("processor.events.ingress.profile")),
 		EventIngressWALDirectory:    cmdutil.GetStringConfig("processor.events.ingress.wal_dir", eventIngressWALDir),
 		EventIngressWALMaxBytes:     viper.GetInt64("processor.events.ingress.wal_max_bytes"),
 		EventIngressMaxBatchBytes:   cmdutil.GetIntConfig("processor.events.ingress.max_batch_bytes", eventIngressMaxBatchBytes),
@@ -473,6 +494,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		VifDropPrivilegesUser: cmdutil.GetStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
 		// TLS keylog configuration (for decryption support)
 		TLSKeylogConfig: tlsKeylogConfig,
+	}
+	if err := applyProcessEventTransportConfig(&config); err != nil {
+		return err
 	}
 
 	// Apply LI configuration (only available in -tags li builds)
@@ -591,7 +615,6 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	if config.EventIngressWALMaxBytes < 0 || config.EventIngressMaxBatchBytes < protoadapter.MaxEncodedBatchBytes {
 		return fmt.Errorf("event ingress WAL bytes must be non-negative and max batch bytes must be at least %d", protoadapter.MaxEncodedBatchBytes)
 	}
-
 	if err := applyRADIUSLIConfig(cmd, &config); err != nil {
 		return err
 	}
@@ -652,5 +675,39 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.Info("Processor stopped")
+	return nil
+}
+
+func normalizeEventProfile(profile string) string {
+	return strings.ReplaceAll(strings.ToLower(profile), "-", "_")
+}
+
+func applyProcessEventTransportConfig(config *processor.Config) error {
+	config.UpstreamForwardMode = strings.ToLower(viper.GetString("processor.forward_mode"))
+	config.UpstreamEventFallbackToPackets = viper.GetBool("processor.events.fallback_to_packets")
+	config.UpstreamEventDeliveryProfile = normalizeEventProfile(viper.GetString("processor.events.delivery_profile"))
+	config.UpstreamEventSpoolDirectory = viper.GetString("processor.events.spool.dir")
+	config.UpstreamEventSpoolMaxBytes = viper.GetUint64("processor.events.spool.max_bytes")
+	config.UpstreamEventSpoolMaxAge = viper.GetDuration("processor.events.spool.max_age")
+	config.UpstreamEventSpoolExhaustionPolicy = strings.ToLower(viper.GetString("processor.events.spool.exhaustion_policy"))
+	return validateProcessEventTransportConfig(*config)
+}
+
+func validateProcessEventTransportConfig(config processor.Config) error {
+	if config.UpstreamForwardMode != "packets" && config.UpstreamForwardMode != "events" {
+		return fmt.Errorf("invalid forward mode %q: must be packets or events", config.UpstreamForwardMode)
+	}
+	if config.UpstreamEventDeliveryProfile != "reliable" && config.UpstreamEventDeliveryProfile != "memory_only" {
+		return fmt.Errorf("invalid event delivery profile %q: must be reliable or memory-only", config.UpstreamEventDeliveryProfile)
+	}
+	if config.UpstreamEventFallbackToPackets && config.UpstreamForwardMode != "events" {
+		return fmt.Errorf("event fallback to packets is only valid with --forward-mode=events")
+	}
+	if config.UpstreamEventSpoolExhaustionPolicy != "drop_oldest" && config.UpstreamEventSpoolExhaustionPolicy != "drop_new" {
+		return fmt.Errorf("invalid event spool exhaustion policy %q: must be drop_oldest or drop_new", config.UpstreamEventSpoolExhaustionPolicy)
+	}
+	if config.UpstreamForwardMode == "events" && config.UpstreamEventDeliveryProfile == "reliable" && config.UpstreamEventSpoolDirectory == "" {
+		return fmt.Errorf("reliable upstream event delivery requires a non-empty event spool directory")
+	}
 	return nil
 }

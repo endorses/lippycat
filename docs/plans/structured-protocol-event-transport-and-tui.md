@@ -548,8 +548,9 @@ phase.
       and diagnostic events incrementally with their analyzers and log schemas.
 - [ ] Evaluate cross-sensor observation identity only with protocol-specific
       equivalence rules; version 1 deduplicates retries only.
-- [ ] Add hierarchical processor event relay with immutable origin identity,
-      per-hop WAL/ACK/dedup, appended hop provenance, and existing
-      `terminal|all|none` emission semantics.
+- [ ] Append explicit hop provenance to the delivered hierarchical processor
+      event relay. Immutable origin identity, per-hop durable admission,
+      acknowledgement/deduplication, and existing `terminal|all|none` emission
+      semantics are delivered.
 - [ ] Consider a prospective evidence-capture RPC only when an event-mode hunter
       must provide packets and deployment as a tap is not possible.

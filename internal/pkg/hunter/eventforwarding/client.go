@@ -271,9 +271,14 @@ func (c *Client) handleControl(ctx context.Context, result controlResult, paused
 			return paused, highestSent, false, err
 		}
 	case eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK:
+		for _, r := range ctrl.GetNackBatchRanges() {
+			if r == nil || r.GetFirst() == 0 || r.GetLast() < r.GetFirst() || r.GetLast() > highestSent {
+				return paused, highestSent, false, errors.New("serve event forwarding: invalid NACK batch ranges")
+			}
+		}
 		rewind := false
 		for _, r := range ctrl.GetNackBatchRanges() {
-			if r.GetFirst() > 0 && r.GetFirst() <= highestSent {
+			if r.GetFirst() <= highestSent {
 				highestSent = r.GetFirst() - 1
 				rewind = true
 			}

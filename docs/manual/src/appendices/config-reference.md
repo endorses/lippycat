@@ -401,6 +401,13 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 | `processor.listen_addr`                    | string   | `":55555"`      | Address to listen on for hunter and TUI connections.                                                         |
 | `processor.processor_addr`                 | string   | `""`            | Address of an upstream processor for hierarchical forwarding.                                                |
 | `processor.upstream_addr`                  | string   | `""`            | Alias for `processor.processor_addr`.                                                                        |
+| `processor.forward_mode`                   | string   | `"packets"`     | Upstream representation: `"packets"` or normalized `"events"`.                                            |
+| `processor.events.fallback_to_packets`     | boolean  | `false`         | Explicitly allow visible packet fallback after failed event negotiation.                                     |
+| `processor.events.delivery_profile`        | string   | `"reliable"`    | Upstream event delivery: `"reliable"` or `"memory-only"`.                                                 |
+| `processor.events.spool.dir`               | string   | `"/var/tmp/lippycat-processor-event-spool"` | Recoverable per-producer upstream event spool root.                                      |
+| `processor.events.spool.max_bytes`         | integer  | `1073741824`    | Logical event spool byte limit (0 = unlimited).                                                              |
+| `processor.events.spool.max_age`           | duration | `"24h"`         | Maximum retained event-batch age (0 = unlimited).                                                            |
+| `processor.events.spool.exhaustion_policy` | string   | `"drop_oldest"` | Event spool exhaustion policy: `"drop_oldest"` or `"drop_new"`.                                           |
 | `processor.max_hunters`                    | integer  | `100`           | Maximum concurrent hunter connections (0 = unlimited).                                                       |
 | `processor.max_subscribers`                | integer  | `100`           | Maximum TUI subscriber connections (0 = unlimited).                                                          |
 | `processor.events.allow_sensitive_fields`  | boolean  | `false`         | Permit authorized event subscribers to request sensitive HTTP, SMTP, and file fields.                        |

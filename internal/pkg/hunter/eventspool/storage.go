@@ -415,6 +415,49 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		total -= s.records[prefix].size
 		prefix++
 	}
+	if prefix != len(remove) {
+		total = s.bytes
+		for _, r := range s.records {
+			s.metrics.TransactionRecordVisits++
+			if remove[r.name] {
+				total -= r.size
+			}
+		}
+	}
+
+	// Validate and open every addition before changing the in-memory active set.
+	// Journal publication can make this transaction authoritative before apply;
+	// a validation failure must leave memory unchanged behind the recovery
+	// barrier rather than exposing a partially applied replacement.
+	additions := make([]record, 0, len(tx.Add))
+	addIdentities := make(map[string]bool, len(tx.Add))
+	for _, mr := range tx.Add {
+		s.metrics.TransactionRecordVisits++
+		if !safeBasename(mr.Name) {
+			return fmt.Errorf("event spool transaction contains unsafe path %q", mr.Name)
+		}
+		key := identityKey(mr.SourceNodeID, mr.ProducerSessionID, mr.BatchSequence)
+		if addIdentities[key] {
+			return fmt.Errorf("event spool transaction duplicates identity %s", key)
+		}
+		if index, exists := s.index[key]; exists && !remove[s.records[index].name] {
+			return fmt.Errorf("event spool transaction duplicates identity %s", key)
+		}
+		r, err := readRecord(filepath.Join(s.config.Directory, mr.Name), s.config.MaxRecordBytes)
+		if err != nil {
+			return err
+		}
+		if r.size != mr.Size || r.created.UnixNano() != mr.CreatedUnixNano || r.batch.GetSourceNodeId() != mr.SourceNodeID || r.batch.GetProducerSessionId() != mr.ProducerSessionID || r.batch.GetBatchSequence() != mr.BatchSequence {
+			return fmt.Errorf("event spool transaction: metadata mismatch for %q", mr.Name)
+		}
+		if r.size > ^uint64(0)-total {
+			return errors.New("event spool transaction: logical bytes overflow")
+		}
+		total += r.size
+		addIdentities[key] = true
+		additions = append(additions, r)
+	}
+
 	if prefix == len(remove) {
 		for _, r := range s.records[:prefix] {
 			s.metrics.TransactionRecordVisits++
@@ -426,14 +469,12 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		clear(s.records[:prefix])
 		s.records = s.records[prefix:]
 	} else {
-		total = s.bytes
 		kept := s.records[:0]
 		for _, r := range s.records {
 			s.metrics.TransactionRecordVisits++
 			if remove[r.name] {
 				delete(s.activeNames, r.name)
 				delete(s.index, identityKey(r.batch.GetSourceNodeId(), r.batch.GetProducerSessionId(), r.batch.GetBatchSequence()))
-				total -= r.size
 				continue
 			}
 			kept = append(kept, r)
@@ -449,25 +490,8 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		s.singleProducer = ""
 	}
 	needsSort := false
-	for _, mr := range tx.Add {
-		s.metrics.TransactionRecordVisits++
-		if !safeBasename(mr.Name) {
-			return fmt.Errorf("event spool transaction contains unsafe path %q", mr.Name)
-		}
-		key := identityKey(mr.SourceNodeID, mr.ProducerSessionID, mr.BatchSequence)
-		if _, exists := s.index[key]; exists {
-			return fmt.Errorf("event spool transaction duplicates identity %s", key)
-		}
-		r, err := readRecord(filepath.Join(s.config.Directory, mr.Name), s.config.MaxRecordBytes)
-		if err != nil {
-			return err
-		}
-		if r.size != mr.Size || r.batch.GetSourceNodeId() != mr.SourceNodeID || r.batch.GetProducerSessionId() != mr.ProducerSessionID || r.batch.GetBatchSequence() != mr.BatchSequence {
-			return fmt.Errorf("event spool transaction: metadata mismatch for %q", mr.Name)
-		}
-		if r.size > ^uint64(0)-total {
-			return errors.New("event spool transaction: logical bytes overflow")
-		}
+	for _, r := range additions {
+		key := identityKey(r.batch.GetSourceNodeId(), r.batch.GetProducerSessionId(), r.batch.GetBatchSequence())
 		if len(s.records) > 0 {
 			previous := s.records[len(s.records)-1].batch
 			if previous.GetSourceNodeId() == r.batch.GetSourceNodeId() && previous.GetProducerSessionId() == r.batch.GetProducerSessionId() && previous.GetBatchSequence() > r.batch.GetBatchSequence() {
@@ -476,14 +500,13 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		}
 		s.records = append(s.records, r)
 		s.activeNames[r.name] = true
-		total += r.size
 		s.index[key] = len(s.records) - 1
 		if !s.identitySet {
 			s.identitySet = true
 			s.homogeneous = true
-			s.singleSource = mr.SourceNodeID
-			s.singleProducer = mr.ProducerSessionID
-		} else if mr.SourceNodeID != s.singleSource || mr.ProducerSessionID != s.singleProducer {
+			s.singleSource = r.batch.GetSourceNodeId()
+			s.singleProducer = r.batch.GetProducerSessionId()
+		} else if r.batch.GetSourceNodeId() != s.singleSource || r.batch.GetProducerSessionId() != s.singleProducer {
 			s.homogeneous = false
 		}
 	}

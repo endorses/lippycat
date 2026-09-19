@@ -813,6 +813,61 @@ func TestApplyTransactionRejectsLogicalByteOverflowBeforeMutation(t *testing.T) 
 	require.False(t, s.Contains("node", "session", 1))
 }
 
+func TestApplyTransactionRejectsCreatedTimeMismatchBeforeMutation(t *testing.T) {
+	write := func(t *testing.T, s *Spool, sequence uint64) record {
+		t.Helper()
+		incoming := batch("node", "session", sequence, sequence, sequence)
+		payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(incoming)
+		require.NoError(t, err)
+		r, err := s.writeRecord(time.Unix(int64(sequence), 0), incoming, payload)
+		require.NoError(t, err)
+		return r
+	}
+
+	t.Run("replacement preserves removal", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir()})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+		require.NoError(t, err)
+		require.True(t, result.Stored)
+		beforeBytes := s.Bytes()
+		activeName := s.records[0].name
+
+		replacement := write(t, s, 2)
+		metadata := toManifestRecord(replacement)
+		metadata.CreatedUnixNano++
+		err = s.applyTransaction(transaction{
+			Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1,
+			Add: []manifestRecord{metadata}, Remove: []string{activeName},
+			SourceNodeID: "node", ProducerSessionID: "session",
+		})
+		require.ErrorContains(t, err, "metadata mismatch")
+		require.Equal(t, beforeBytes, s.Bytes())
+		require.True(t, s.Contains("node", "session", 1))
+		require.False(t, s.Contains("node", "session", 2))
+	})
+
+	t.Run("multiple additions remain atomic", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir()})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		first, second := write(t, s, 1), write(t, s, 2)
+		firstMetadata, secondMetadata := toManifestRecord(first), toManifestRecord(second)
+		secondMetadata.CreatedUnixNano++
+
+		err = s.applyTransaction(transaction{
+			Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1,
+			Add:          []manifestRecord{firstMetadata, secondMetadata},
+			SourceNodeID: "node", ProducerSessionID: "session",
+		})
+		require.ErrorContains(t, err, "metadata mismatch")
+		require.Zero(t, s.Bytes())
+		require.False(t, s.Contains("node", "session", 1))
+		require.False(t, s.Contains("node", "session", 2))
+	})
+}
+
 func TestMetadataCounterExhaustionFailsBeforePublication(t *testing.T) {
 	t.Run("transaction sequence", func(t *testing.T) {
 		s, err := Open(Config{Directory: t.TempDir()})

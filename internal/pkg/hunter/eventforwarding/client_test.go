@@ -110,6 +110,65 @@ func TestServeNackResendsRequestedBatch(t *testing.T) {
 	require.ErrorIs(t, <-done, context.Canceled)
 }
 
+func TestHandleControlAcceptsCumulativeAckFromPreviousStream(t *testing.T) {
+	client, spool := newTestClient(t)
+	for sequence := uint64(1); sequence <= 3; sequence++ {
+		result, err := client.Enqueue(ingressBatch(sequence))
+		require.NoError(t, err)
+		require.True(t, result.Stored)
+	}
+
+	// On reconnect, the receiver can deduplicate the first retransmission and
+	// cumulatively ACK later batches that it durably admitted on the old stream.
+	_, highest, rewind, err := client.handleControl(context.Background(), controlResult{control: &eventsv1.EventIngressControl{
+		Kind:                  eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK,
+		CumulativeAckSequence: 3,
+	}}, false, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), highest)
+	require.False(t, rewind)
+	require.Empty(t, spool.Batches())
+}
+
+func TestHandleControlRejectsMalformedNackRanges(t *testing.T) {
+	client, _ := newTestClient(t)
+	tests := []struct {
+		name   string
+		ranges []*eventsv1.SequenceRange
+	}{
+		{name: "nil", ranges: []*eventsv1.SequenceRange{nil}},
+		{name: "zero", ranges: []*eventsv1.SequenceRange{{First: 0, Last: 1}}},
+		{name: "inverted", ranges: []*eventsv1.SequenceRange{{First: 3, Last: 2}}},
+		{name: "unsent", ranges: []*eventsv1.SequenceRange{{First: 4, Last: 4}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, highest, rewind, err := client.handleControl(context.Background(), controlResult{control: &eventsv1.EventIngressControl{
+				Kind:            eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK,
+				NackBatchRanges: tt.ranges,
+			}}, false, 3)
+			require.ErrorContains(t, err, "invalid NACK batch ranges")
+			require.Equal(t, uint64(3), highest)
+			require.False(t, rewind)
+		})
+	}
+}
+
+func TestHandleControlAcceptsUnorderedOverlappingNackRanges(t *testing.T) {
+	client, _ := newTestClient(t)
+	_, highest, rewind, err := client.handleControl(context.Background(), controlResult{control: &eventsv1.EventIngressControl{
+		Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK,
+		NackBatchRanges: []*eventsv1.SequenceRange{
+			{First: 3, Last: 3},
+			{First: 1, Last: 2},
+			{First: 2, Last: 3},
+		},
+	}}, false, 3)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), highest)
+	require.True(t, rewind)
+}
+
 func TestServeFetchesFixedBacklogInBoundedChunks(t *testing.T) {
 	client, spool := newTestClient(t)
 	const batchCount = 300

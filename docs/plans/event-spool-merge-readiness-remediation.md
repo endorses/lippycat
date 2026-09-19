@@ -717,6 +717,27 @@ passed, followed by race tests with the `all` tag for `eventspool`,
 `git diff --check` passed. Full-suite and build-matrix results remain the
 historical checks above.
 
+An eleventh source-to-plan audit on 2026-09-19 corrected cleanup retry and
+queue-loss boundary gaps. A committed mutation whose checkpoint journal cleanup
+fails now also collects or registers every retired record for retry, covering
+ACK, eviction, and loss-only replacement without bypassing recovery barriers.
+Queue-drop notifications can precede older buffered events or arrive out of
+sequence. The forwarding sink now preserves exact ranges, defers future loss
+coverage, and durably retains eligible local losses before carrier splitting.
+Shutdown flush likewise persists local coverage before splitting, preventing
+loss when durable and local reports exceed one transport batch. Intermediate
+carriers preserve local ownership, and cleanup or oversized errors cannot hide
+an accompanying durability or checkpoint barrier.
+
+Regressions cover cleanup retry through all three retirement paths, reverse
+drop notification order, local loss overflow, unsupported-event handling,
+carrier ownership, and joined recovery errors. Real memory-only and reliable
+ingress tests verify that older queued events and their later loss report are
+accepted, delivered, and ACKed. Normal focused tests and race tests with the
+`all` tag passed for events, hunter, spool, forwarding, and all processor
+packages. Go formatting and `git diff --check` passed. Full-suite and build-matrix
+results remain the historical checks above.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

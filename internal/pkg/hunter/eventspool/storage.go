@@ -187,7 +187,18 @@ func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 	return base, replayed, nil
 }
 
-func (s *Spool) commit(tx transaction) error {
+func (s *Spool) commit(tx transaction) (retErr error) {
+	beforeCommit := s.commitCount
+	defer func() {
+		// Maintenance may fail after the logical mutation is durable (for
+		// example, unlinking the old journal after checkpoint rotation). Callers
+		// return that error before their normal record cleanup, so collect or
+		// register every retired record here. Recovery barriers must preserve
+		// those files until the authoritative state has been settled.
+		if retErr != nil && s.commitCount > beforeCommit && !s.uncertain && !s.checkpointRequired {
+			retErr = errors.Join(retErr, s.retryCleanup(tx.Remove))
+		}
+	}()
 	if s.txSequence == ^uint64(0) || tx.Sequence == 0 {
 		return errors.New("commit event spool transaction: journal transaction sequence is exhausted")
 	}

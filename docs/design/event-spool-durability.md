@@ -210,6 +210,13 @@ receiver before their ACK reaches the sender. Such historical coverage is
 accepted without advancing the event high-water mark; every newly covered
 sequence must still satisfy the receiver's exact gap checks.
 
+Dispatcher queue drops can be reported before older queued events reach the
+forwarding sink. The sink attaches only loss coverage preceding the event
+currently being handled, retaining later coverage until those older events
+have been processed. Shutdown flush first persists all remaining local loss
+coverage before partitioning it into bounded carriers. Out-of-order drop
+notifications preserve exact disjoint ranges.
+
 ACK and flow-control messages have priority between sends. NACK rewinds the
 cache to the requested sequence. Append wakes expose later batches after cache
 exhaustion. Reconnect, pause/resume, sequence holes, cumulative ACK scope, and

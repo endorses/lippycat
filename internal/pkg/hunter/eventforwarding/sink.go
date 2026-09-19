@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -60,6 +61,29 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	if env.NodeID != s.client.config.SourceNodeID || env.ProducerSessionID != s.client.config.ProducerSessionID || env.EventSequence == 0 {
 		return fmt.Errorf("forward event: missing or mismatched assigned producer identity")
 	}
+	// Queue overflow can be observed before older buffered events reach this
+	// sink. Keep future omissions out of the current batch: advertising them
+	// would advance the receiver past events that are still queued.
+	ready, future := splitPendingLosses(s.pendingLosses, env.EventSequence)
+	s.pendingLosses = ready
+	defer func() { s.appendPendingLossesLocked(future) }()
+	if len(s.pendingLosses) > 0 {
+		// Local coverage can exceed a wire batch's collection limit. Adopt it
+		// durably before encoding the event so the spool can split carriers
+		// without misclassifying an otherwise valid event as unsupported.
+		retention, retainErr := s.client.retainLosses(s.pendingLosses)
+		if retention.Committed {
+			s.pendingLosses = nil
+		}
+		if retainErr = nonCleanupError(retainErr); retainErr != nil {
+			s.retainFailedEventLocked(event)
+			return s.failLocked(retainErr)
+		}
+		if !retention.Committed {
+			s.retainFailedEventLocked(event)
+			return s.failLocked(errors.New("retain queued event losses: spool made no progress"))
+		}
+	}
 	stats := &eventsv1.EventBatchStats{Losses: cloneLosses(s.pendingLosses)}
 	batch, err := protoadapter.ToProtoBatch(env.NodeID, env.ProducerSessionID, s.nextBatchSequence, []events.Event{event}, stats, s.semanticProfileRevision)
 	if err != nil {
@@ -73,8 +97,9 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 			SourceNodeId: env.NodeID, ProducerSessionId: env.ProducerSessionID,
 			EventSequenceRanges: []*eventsv1.SequenceRange{{First: env.EventSequence, Last: env.EventSequence}},
 		}
-		retention, retainErr := s.client.retainLosses([]*eventsv1.EventLoss{loss})
+		retention, retainErr := s.client.retainLosses(append(cloneLosses(s.pendingLosses), loss))
 		if retention.Committed {
+			s.pendingLosses = nil
 			if retainErr = nonCleanupError(retainErr); retainErr != nil {
 				return s.failLocked(retainErr)
 			}
@@ -94,7 +119,8 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 		if result.Rejection == eventspool.RejectionPendingLossFlush {
 			flushResult, flushErr := s.client.flushPendingLosses(s.nextBatchSequence, s.semanticProfileRevision)
 			if flushResult.Stored {
-				if flushErr = s.applyEnqueueResult(flushResult, flushErr); flushErr != nil {
+				flushErr = s.applyCarrierResult(flushResult, flushErr)
+				if flushErr != nil {
 					s.retainFailedEventLocked(event)
 					return s.failLocked(flushErr)
 				}
@@ -141,7 +167,7 @@ func (s *Sink) flushRequiredPendingLossesLocked() error {
 		}
 		result, flushErr := s.client.flushPendingLosses(s.nextBatchSequence, s.semanticProfileRevision)
 		if result.Stored {
-			if flushErr = s.applyEnqueueResult(result, flushErr); flushErr != nil {
+			if flushErr = s.applyCarrierResult(result, flushErr); flushErr != nil {
 				return flushErr
 			}
 			if s.failed != nil {
@@ -179,28 +205,77 @@ func (s *Sink) retainFailedEventLocked(event events.Event) {
 	})
 }
 
+// splitPendingLosses returns independent coverage before and after the event
+// currently being handled. A dropped event cannot be that current event.
+func splitPendingLosses(losses []*eventsv1.EventLoss, sequence uint64) (ready, future []*eventsv1.EventLoss) {
+	for _, loss := range cloneLosses(losses) {
+		for _, r := range loss.GetEventSequenceRanges() {
+			appendRange := func(target *[]*eventsv1.EventLoss, first, last uint64) {
+				*target = append(*target, &eventsv1.EventLoss{
+					Kind: loss.Kind, SourceNodeId: loss.SourceNodeId, ProducerSessionId: loss.ProducerSessionId,
+					Count: last - first + 1, EventSequenceRanges: []*eventsv1.SequenceRange{{First: first, Last: last}},
+				})
+			}
+			if r.GetFirst() < sequence {
+				appendRange(&ready, r.GetFirst(), min(r.GetLast(), sequence-1))
+			}
+			if r.GetLast() >= sequence {
+				appendRange(&future, max(r.GetFirst(), sequence), r.GetLast())
+			}
+		}
+	}
+	return ready, future
+}
+
 func (s *Sink) appendPendingLossLocked(loss *eventsv1.EventLoss) {
-	if loss == nil || len(loss.GetEventSequenceRanges()) != 1 {
-		s.pendingLosses = append(s.pendingLosses, loss)
+	s.appendPendingLossesLocked([]*eventsv1.EventLoss{loss})
+}
+
+func (s *Sink) appendPendingLossesLocked(losses []*eventsv1.EventLoss) {
+	if len(losses) == 0 {
 		return
 	}
-	if len(s.pendingLosses) != 0 {
-		previous := s.pendingLosses[len(s.pendingLosses)-1]
-		previousRanges := previous.GetEventSequenceRanges()
-		next := loss.GetEventSequenceRanges()[0]
-		adjacent := false
-		if len(previousRanges) == 1 {
-			adjacent = next.GetFirst() <= previousRanges[0].GetLast() || (previousRanges[0].GetLast() != ^uint64(0) && next.GetFirst() == previousRanges[0].GetLast()+1)
-		}
-		if previous.GetKind() == loss.GetKind() && previous.GetSourceNodeId() == loss.GetSourceNodeId() && previous.GetProducerSessionId() == loss.GetProducerSessionId() && adjacent {
-			if next.GetLast() > previousRanges[0].GetLast() {
-				previousRanges[0].Last = next.GetLast()
-			}
-			previous.Count = previousRanges[0].GetLast() - previousRanges[0].GetFirst() + 1
-			return
+	// Dispatcher admission and per-sink queue drops may arrive in different
+	// sequence order. Sort before merging so earlier, disjoint ranges are never
+	// mistaken for overlap, and preserve both ends of overlapping coverage.
+	for _, loss := range losses {
+		for _, r := range loss.GetEventSequenceRanges() {
+			s.pendingLosses = append(s.pendingLosses, &eventsv1.EventLoss{
+				Kind: loss.Kind, SourceNodeId: loss.SourceNodeId, ProducerSessionId: loss.ProducerSessionId,
+				Count:               r.GetLast() - r.GetFirst() + 1,
+				EventSequenceRanges: []*eventsv1.SequenceRange{{First: r.GetFirst(), Last: r.GetLast()}},
+			})
 		}
 	}
-	s.pendingLosses = append(s.pendingLosses, loss)
+	sort.Slice(s.pendingLosses, func(i, j int) bool {
+		a, b := s.pendingLosses[i], s.pendingLosses[j]
+		if a.SourceNodeId != b.SourceNodeId {
+			return a.SourceNodeId < b.SourceNodeId
+		}
+		if a.ProducerSessionId != b.ProducerSessionId {
+			return a.ProducerSessionId < b.ProducerSessionId
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		return a.EventSequenceRanges[0].First < b.EventSequenceRanges[0].First
+	})
+	merged := s.pendingLosses[:0]
+	for _, next := range s.pendingLosses {
+		if len(merged) > 0 {
+			previous := merged[len(merged)-1]
+			a, b := previous.EventSequenceRanges[0], next.EventSequenceRanges[0]
+			if previous.Kind == next.Kind && previous.SourceNodeId == next.SourceNodeId && previous.ProducerSessionId == next.ProducerSessionId &&
+				(b.First <= a.Last || (a.Last != ^uint64(0) && b.First == a.Last+1)) {
+				a.Last = max(a.Last, b.Last)
+				previous.Count = a.Last - a.First + 1
+				continue
+			}
+		}
+		merged = append(merged, next)
+	}
+	clear(s.pendingLosses[len(merged):])
+	s.pendingLosses = merged
 }
 
 func (s *Sink) LockDropBoundary()   { s.mu.Lock() }
@@ -236,6 +311,15 @@ func (s *Sink) applyEnqueueResult(result eventspool.EnqueueResult, err error) er
 	return err
 }
 
+// A loss carrier adopts only durable spool coverage. Local queue omissions
+// remain owned by the sink until their own batch or retention commit succeeds.
+func (s *Sink) applyCarrierResult(result eventspool.EnqueueResult, err error) error {
+	pending := s.pendingLosses
+	err = s.applyEnqueueResult(result, err)
+	s.pendingLosses = pending
+	return err
+}
+
 func (s *Sink) Flush(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -243,23 +327,27 @@ func (s *Sink) Flush(context.Context) error {
 		return &fatalForwardingError{err: s.failed}
 	}
 	if len(s.pendingLosses) > 0 {
-		batch := &eventsv1.ProtocolEventBatch{
-			SourceNodeId: s.client.config.SourceNodeID, ProducerSessionId: s.client.config.ProducerSessionID,
-			BatchSequence: s.nextBatchSequence, SemanticProfileRevision: s.semanticProfileRevision,
-			Stats: &eventsv1.EventBatchStats{Losses: cloneLosses(s.pendingLosses)},
+		// Persist local omissions before splitting them into bounded carriers.
+		// Enqueue may request a pending-loss flush without adopting these local
+		// ranges, so its rejection path must not be used to clear them.
+		result, err := s.client.retainLosses(s.pendingLosses)
+		if result.Committed {
+			s.pendingLosses = nil
 		}
-		result, err := s.client.Enqueue(batch)
-		if err = s.applyEnqueueResult(result, err); err != nil {
+		if err = nonCleanupError(err); err != nil {
 			return err
 		}
-		if !result.Stored && result.Rejection == eventspool.RejectionNone {
+		if !result.Committed {
 			return fmt.Errorf("flush event loss reports: spool made no progress")
 		}
 	}
 	for s.client.spool.HasPendingLosses() {
+		if s.failed != nil {
+			return &fatalForwardingError{err: s.failed}
+		}
 		result, err := s.client.flushPendingLosses(s.nextBatchSequence, s.semanticProfileRevision)
 		if result.Stored {
-			if err = s.applyEnqueueResult(result, err); err != nil {
+			if err = s.applyCarrierResult(result, err); err != nil {
 				return err
 			}
 			continue
@@ -274,6 +362,9 @@ func (s *Sink) Flush(context.Context) error {
 func (s *Sink) Close(ctx context.Context) error { return s.Flush(ctx) }
 
 func nonCleanupError(err error) error {
+	if errors.Is(err, eventspool.ErrDurabilityUncertain) || errors.Is(err, eventspool.ErrCheckpointRequired) {
+		return err
+	}
 	var cleanupErr *eventspool.CleanupError
 	if errors.As(err, &cleanupErr) {
 		return nil
@@ -282,6 +373,9 @@ func nonCleanupError(err error) error {
 }
 
 func handledRejectionError(err error) error {
+	if errors.Is(err, eventspool.ErrDurabilityUncertain) || errors.Is(err, eventspool.ErrCheckpointRequired) {
+		return err
+	}
 	if errors.Is(err, eventspool.ErrRecordTooLarge) {
 		return nil
 	}

@@ -22,6 +22,56 @@ type faultFile struct {
 	sync  func() error
 }
 
+func TestRetiredRecordsRetryCleanupAfterJournalCleanupFailure(t *testing.T) {
+	for _, operation := range []string{"ack", "enqueue", "flush"} {
+		t.Run(operation, func(t *testing.T) {
+			now := time.Unix(100, 0)
+			s, err := Open(Config{Directory: t.TempDir(), CheckpointEvery: 1, MaxAge: time.Second, Clock: func() time.Time { return now }})
+			require.NoError(t, err)
+			defer s.Close()
+			_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+			require.NoError(t, err)
+			victim := s.records[0].path
+			if operation == "flush" {
+				_, err = s.RetainLosses(ownRangeLoss(batch("node", "session", 2, 2, 2)))
+				require.NoError(t, err)
+			}
+			oldJournal := journalPath(s.config.Directory, s.generation)
+			fs := defaultFS()
+			fs.remove = func(path string) error {
+				if path == oldJournal || path == victim {
+					return errors.New("injected cleanup failure")
+				}
+				return os.Remove(path)
+			}
+			s.fs = fs
+			now = now.Add(2 * time.Second)
+			switch operation {
+			case "ack":
+				err = s.Ack("node", "session", 1)
+			case "enqueue":
+				var result EnqueueResult
+				result, err = s.Enqueue(batch("node", "session", 2, 2, 2))
+				require.True(t, result.Stored)
+			case "flush":
+				var result EnqueueResult
+				result, err = s.FlushPendingLosses("node", "session", 2, 1)
+				require.True(t, result.Stored)
+			}
+			var cleanupErr *CleanupError
+			require.ErrorAs(t, err, &cleanupErr)
+			require.False(t, s.Contains("node", "session", 1))
+			require.FileExists(t, victim)
+			s.fs = defaultFS()
+			require.NoError(t, s.Ack("node", "session", 1))
+			require.NoFileExists(t, victim, "retired records must be registered for retry even when journal cleanup fails first")
+			require.NoFileExists(t, oldJournal)
+			require.Equal(t, s.Bytes(), s.PhysicalBytes())
+			require.Empty(t, s.Status().CleanupError)
+		})
+	}
+}
+
 func TestRecoverySyncsVisibleJournalBeforeRetiringRecords(t *testing.T) {
 	for _, boundary := range []string{"journal", "directory"} {
 		t.Run(boundary, func(t *testing.T) {

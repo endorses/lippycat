@@ -145,7 +145,7 @@ func TestOfflineSortEmptyInputs(t *testing.T) {
 
 func TestOfflineSortSignedTimestampComparison(t *testing.T) {
 	var keys []offlineSortKey
-	for _, at := range []time.Time{time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC), time.Time{}, time.Unix(-1, 999), time.Unix(0, 0)} {
+	for _, at := range []time.Time{time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC), {}, time.Unix(-1, 999), time.Unix(0, 0)} {
 		var key offlineSortKey
 		binary.LittleEndian.PutUint64(key[:], uint64(at.Unix()))
 		binary.LittleEndian.PutUint32(key[8:], uint32(at.Nanosecond()))

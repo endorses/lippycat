@@ -188,17 +188,17 @@ func TestReorder(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{7, 8, 9}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Skip:  -1,
 					Bytes: []byte{1, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{4, 5, 6},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{7, 8, 9},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{10, 11, 12},
 				},
 			},
@@ -229,13 +229,13 @@ func TestReorder(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Bytes: []byte{1, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{2, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{3, 2, 3},
 				},
 			},
@@ -254,7 +254,7 @@ func TestMaxPerSkip(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3},
 				},
@@ -295,17 +295,17 @@ func TestMaxPerSkip(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{6, 2, 3}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Skip:  3,
 					Bytes: []byte{3, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{4, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{5, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{6, 2, 3},
 				},
 			},
@@ -324,7 +324,7 @@ func TestReorderFast(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3},
 				},
@@ -347,10 +347,10 @@ func TestReorderFast(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{2, 2, 3}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Bytes: []byte{2, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{3, 2, 3},
 				},
 			},
@@ -369,7 +369,7 @@ func TestOverlap(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 				},
@@ -383,7 +383,7 @@ func TestOverlap(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{7, 8, 9, 0, 1, 2, 3, 4, 5}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Bytes: []byte{1, 2, 3, 4, 5},
 				},
 			},
@@ -396,7 +396,7 @@ func TestOverlap(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{0, 1, 2, 3, 4, 5, 6, 7}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Bytes: []byte{6, 7},
 				},
 			},
@@ -433,14 +433,14 @@ func TestBufferedOverlap1(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{1, 2, 3, 4, 5},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{6, 7},
 				},
 			},
@@ -477,11 +477,11 @@ func TestBufferedOverlapCase6(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{11, 12, 13, 14, 5},
 				},
 			},
@@ -500,7 +500,7 @@ func TestBufferedOverlapExisting(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3, 4, 5, 6, 7}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3, 4, 5, 6, 7},
 				},
@@ -514,7 +514,7 @@ func TestBufferedOverlapExisting(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{5, 6, 7, 8, 9, 10}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Bytes: []byte{8, 9, 10},
 				},
 			},
@@ -533,7 +533,7 @@ func TestBufferedOverlapReemit(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3, 4, 5, 6, 7}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3, 4, 5, 6, 7},
 				},
@@ -597,17 +597,17 @@ func TestReorderRetransmission2(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{6, 6, 6, 2, 2}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Skip:  -1,
 					Bytes: []byte{1, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{6, 6, 6},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{2, 2, 3},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{10, 11},
 				},
 			},
@@ -626,7 +626,7 @@ func TestOverrun1(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 				},
@@ -640,7 +640,7 @@ func TestOverrun1(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3, 4}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Bytes: []byte{1, 2, 3, 4},
 				},
 			},
@@ -668,11 +668,11 @@ func TestOverrun2(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0},
 				},
-				Reassembly{
+				{
 					Bytes: []byte{1, 2, 3, 4},
 				},
 			},
@@ -701,17 +701,17 @@ func TestCacheLargePacket(t *testing.T) {
 				BaseLayer: layers.BaseLayer{Payload: []byte{}},
 			},
 			want: []Reassembly{
-				Reassembly{
+				{
 					Start: true,
 					Bytes: []byte{},
 				},
-				Reassembly{
+				{
 					Bytes: data[:pageBytes],
 				},
-				Reassembly{
+				{
 					Bytes: data[pageBytes : pageBytes*2],
 				},
-				Reassembly{
+				{
 					Bytes: data[pageBytes*2 : pageBytes*3],
 				},
 			},
@@ -789,7 +789,7 @@ func TestFlush(t *testing.T) {
 					},
 					want: []Reassembly{
 						// flushed after flush interval.
-						Reassembly{
+						{
 							Skip:  -1,
 							Bytes: []byte{1, 2, 3},
 						},
@@ -804,7 +804,7 @@ func TestFlush(t *testing.T) {
 					},
 					want: []Reassembly{
 						// flushed after flush interval.
-						Reassembly{
+						{
 							Skip:  -1,
 							Bytes: []byte{4, 5, 6, 7},
 						},
@@ -835,7 +835,7 @@ func TestFlush(t *testing.T) {
 					},
 					want: []Reassembly{
 						// First half is flushed after flush interval.
-						Reassembly{
+						{
 							Skip:  -1,
 							Bytes: []byte{1, 2, 3},
 						},
@@ -850,7 +850,7 @@ func TestFlush(t *testing.T) {
 					},
 					want: []Reassembly{
 						// continues data is flushed.
-						Reassembly{
+						{
 							Skip:  -1,
 							Bytes: []byte{11, 22, 33, 44, 55, 66, 77},
 						},
@@ -864,7 +864,7 @@ func TestFlush(t *testing.T) {
 						BaseLayer: layers.BaseLayer{Payload: []byte{8, 9}},
 					},
 					want: []Reassembly{
-						Reassembly{
+						{
 							// Should be flushed because is continues.
 							Bytes: []byte{8, 9},
 						},
@@ -908,7 +908,7 @@ func TestFlush(t *testing.T) {
 						BaseLayer: layers.BaseLayer{Payload: []byte{10, 11, 12}},
 					},
 					want: []Reassembly{
-						Reassembly{
+						{
 							Skip:  -1,
 							End:   true,
 							Bytes: []byte{1, 2, 3},

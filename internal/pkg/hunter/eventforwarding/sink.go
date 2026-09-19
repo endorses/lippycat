@@ -117,21 +117,48 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	for {
 		result, enqueueErr := s.client.Enqueue(batch)
 		if result.Rejection == eventspool.RejectionPendingLossFlush {
+			terminalCoverageRetained := false
+			if s.nextBatchSequence == ^uint64(0) {
+				// The final batch sequence can carry only a bounded prefix of the
+				// durable losses. Before consuming it, durably classify the current
+				// event and any deferred future omissions as lost. Otherwise sequence
+				// exhaustion would leave them only in this process's memory.
+				s.retainFailedEventLocked(event)
+				s.appendPendingLossesLocked(future)
+				future = nil
+				retention, retainErr := s.client.retainLosses(s.pendingLosses)
+				if retention.Committed {
+					s.pendingLosses = nil
+					terminalCoverageRetained = true
+				}
+				if retainErr = nonCleanupError(retainErr); retainErr != nil {
+					return s.failLocked(retainErr)
+				}
+				if !retention.Committed {
+					return s.failLocked(errors.New("retain final event loss: spool made no progress"))
+				}
+			}
 			flushResult, flushErr := s.client.flushPendingLosses(s.nextBatchSequence, s.semanticProfileRevision)
 			if flushResult.Stored {
 				flushErr = s.applyCarrierResult(flushResult, flushErr)
 				if flushErr != nil {
-					s.retainFailedEventLocked(event)
+					if !terminalCoverageRetained {
+						s.retainFailedEventLocked(event)
+					}
 					return s.failLocked(flushErr)
 				}
 				if s.failed != nil {
-					s.retainFailedEventLocked(event)
+					if !terminalCoverageRetained {
+						s.retainFailedEventLocked(event)
+					}
 					return &fatalForwardingError{err: s.failed}
 				}
 				batch.BatchSequence = s.nextBatchSequence
 				continue
 			}
-			s.retainFailedEventLocked(event)
+			if !terminalCoverageRetained {
+				s.retainFailedEventLocked(event)
+			}
 			if flushErr == nil {
 				flushErr = errors.New("flush pending event losses: spool made no progress")
 			}

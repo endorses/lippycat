@@ -112,3 +112,46 @@ func TestSinkFragmentedLocalLossesDoNotRejectValidEvent(t *testing.T) {
 	require.Zero(t, newLosses, "existing omission coverage must not cause a new valid-event loss")
 	require.Empty(t, sink.pendingLosses)
 }
+
+func TestSinkFinalLossCarrierDurablyRetainsCurrentEvent(t *testing.T) {
+	dir := t.TempDir()
+	spool, err := eventspool.Open(eventspool.Config{Directory: dir})
+	require.NoError(t, err)
+	producer, err := events.NewLiveProducer("node")
+	require.NoError(t, err)
+	producer, err = events.ResumeLiveProducer("node", producer.SessionID(), 4097)
+	require.NoError(t, err)
+	client, err := New(Config{SourceNodeID: "node", ProducerSessionID: producer.SessionID()}, spool)
+	require.NoError(t, err)
+	sink, err := NewSink(client, ^uint64(0), 1)
+	require.NoError(t, err)
+	for sequence := uint64(1); sequence <= 4097; sequence++ {
+		kind := eventsv1.LossKind_LOSS_KIND_TRANSPORT
+		if sequence%2 == 0 {
+			kind = eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT
+		}
+		sink.pendingLosses = append(sink.pendingLosses, &eventsv1.EventLoss{
+			Kind: kind, Count: 1, SourceNodeId: "node", ProducerSessionId: producer.SessionID(),
+			EventSequenceRanges: []*eventsv1.SequenceRange{{First: sequence, Last: sequence}},
+		})
+	}
+	event := producer.Assign(events.NewDNSEvent(events.Envelope{
+		Timestamp: time.Unix(1, 0), CaptureScope: events.CaptureScopeFiltered,
+		Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.53"), SourcePort: 53000, DestinationPort: 53},
+	}))
+
+	err = sink.HandleEvent(context.Background(), event)
+	require.ErrorIs(t, err, errBatchSequenceExhausted)
+	require.Len(t, spool.Batches(), 1)
+	require.Equal(t, ^uint64(0), spool.Batches()[0].GetBatchSequence())
+	require.True(t, spool.HasPendingLosses())
+	require.NoError(t, spool.Close())
+
+	recovered, err := eventspool.Open(eventspool.Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, recovered.Close()) })
+	_, _, lastEvent, lastBatch, err := recovered.RecoveryState()
+	require.NoError(t, err)
+	require.Equal(t, uint64(4098), lastEvent, "the event displaced by the final carrier must remain durably covered")
+	require.Equal(t, ^uint64(0), lastBatch)
+}

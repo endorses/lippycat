@@ -686,7 +686,11 @@ func (s *Spool) accountTemporaryRecord(path string) error {
 	if s.unaccountedPhysical == nil {
 		s.unaccountedPhysical = make(map[string]bool)
 	}
-	info, err := os.Stat(path)
+	// Account the directory entry that cleanup will remove. Following a
+	// replacement symlink here would charge the external target's bytes, while
+	// retryCleanup and refreshPhysical charge only the link itself, leaving
+	// PhysicalBytes permanently inflated after a successful cleanup.
+	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		delete(s.unaccountedPhysical, name)
 		return nil

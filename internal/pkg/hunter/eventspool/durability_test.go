@@ -347,6 +347,33 @@ func TestFailedRecordRenameCleanupRemainsInPhysicalBytes(t *testing.T) {
 	require.Empty(t, s.Status().CleanupError)
 }
 
+func TestFailedRecordPublicationAccountsReplacementSymlinkEntry(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	target := filepath.Join(t.TempDir(), "external-target")
+	require.NoError(t, os.WriteFile(target, make([]byte, 4096), 0o600))
+	fs := defaultFS()
+	originalRename := fs.rename
+	fs.rename = func(from, to string) error {
+		if !strings.HasSuffix(to, recordExtension) {
+			return originalRename(from, to)
+		}
+		require.NoError(t, os.Remove(from))
+		require.NoError(t, os.Symlink(target, from))
+		return errors.New("injected record rename failure after path replacement")
+	}
+	s.fs = fs
+
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.ErrorContains(t, err, "injected record rename failure")
+	require.False(t, result.Stored)
+	require.Zero(t, s.PhysicalBytes(), "successful cleanup must subtract the replacement link entry exactly")
+	require.FileExists(t, target, "temporary cleanup must not remove the external symlink target")
+}
+
 func TestFailedTemporaryAccountingDoesNotSubtractActiveBytes(t *testing.T) {
 	for _, cleanupFails := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cleanup_fails_%t", cleanupFails), func(t *testing.T) {

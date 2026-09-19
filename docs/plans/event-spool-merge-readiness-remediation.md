@@ -873,6 +873,20 @@ including loopback integration tests and the LI partition, passed outside the
 sandbox on the corrected tree. `make vet`, `make build-matrix`, Go formatting,
 and `git diff --check` also passed.
 
+A twentieth source-to-plan audit on 2026-09-19 corrected temporary-record
+physical-byte accounting when a failed publication path is replaced by a
+symlink before cleanup. Initial accounting now measures the directory entry
+itself, matching retry cleanup and recovery reconciliation, so removal cannot
+leave `PhysicalBytes` inflated by the external target's size. A regression
+also verifies that cleanup preserves the external symlink target.
+
+The same audit corrected final-sequence loss-carrier handling. When fragmented
+durable coverage requires a carrier at batch sequence `MaxUint64`, the current
+event and deferred queue omissions are now retained durably before that final
+sequence is consumed. A restart regression verifies that the recovered event
+high-water includes the displaced event rather than leaving its loss coverage
+only in volatile sink memory.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

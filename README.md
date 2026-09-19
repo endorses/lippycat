@@ -1,6 +1,6 @@
 # lippycat 🫦🐱
 
-[![Version](https://img.shields.io/badge/version-0.11.8-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.12.0-blue)](CHANGELOG.md)
 [![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux)](#installation)
@@ -10,9 +10,9 @@
 [![TLS/mTLS](https://img.shields.io/badge/TLS%2FmTLS-supported-success)](docs/SECURITY.md)
 [![Distributed](https://img.shields.io/badge/architecture-distributed-blue)](docs/DISTRIBUTED_MODE.md)
 
-Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, HTTP, TLS/JA3, and Email (SMTP/IMAP/POP3) analysis with distributed capture capabilities.
+Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, HTTP, TLS/JA3, Email (SMTP/IMAP/POP3), and RADIUS analysis with distributed capture capabilities.
 
-**[Read the Manual](https://🫦🐱.ws)** | **Status:** v0.11.8 - Early development. Expect breaking changes.
+**[Read the Manual](https://🫦🐱.ws)** | **Status:** v0.12.0 - Early development. Expect breaking changes.
 
 ## Table of Contents
 
@@ -39,6 +39,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
   - **HTTP**: Request/response tracking, method/path/host filtering, status code analysis
   - **TLS**: JA3/JA3S fingerprinting, certificate extraction, SNI filtering, [traffic decryption](docs/TLS_DECRYPTION.md)
   - **Email**: SMTP/IMAP/POP3 session tracking, sender/recipient/mailbox filtering, content keywords
+  - **RADIUS**: Authentication/accounting capture, exact identity and AVP filtering, request/response correlation ([details](docs/RADIUS.md))
 - **Distributed Capture**: Multi-node architecture with hunter/processor nodes
 - **Virtual Interface**: Replay filtered streams to Wireshark, tcpdump, Snort (Linux only)
 - **Secure by Default**: TLS enabled for all gRPC connections, with optional mTLS

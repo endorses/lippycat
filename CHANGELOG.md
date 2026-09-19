@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-09-19
+
+### Added
+
+- Add a versioned normalized-event protobuf contract, processor subscription
+  service, remote TUI Events view, and negotiated event-only forwarding for
+  hunters, taps, and upstream processors
+- Add crash-safe, bounded disk spooling for reliable event forwarding, with
+  recovery, loss accounting, flow control, and operational telemetry
+- Make every accepted packet in `watch file` navigable, filterable, and
+  exportable through a bounded disk-backed dataset and compact source-backed
+  index
+- Add RADIUS capture commands, decoding, exact identity filters, bounded
+  request/response association, structured logs, TUI events, and distributed
+  transport
+- Add LI RADIUS targets and current-generation admission, plus ETSI payload
+  format 11 delivery over X2 for tap and distributed capture paths
+
+### Changed
+
+- Make packet and normalized-event forwarding mutually exclusive negotiated
+  modes for each producer session, keeping event analysis authoritative at the
+  edge in event mode; event mode is opt-in and cannot reconstruct upstream raw
+  PCAP or virtual-interface output
+- Give LI X1 `nai` targets strict RADIUS User-Name semantics instead of legacy
+  SIP matching and normalization; use `sipUri` for SIP interception, and
+  reprovision legacy NAI/RADIUS tasks with explicit scope and supported delivery
+- Reduce TUI event and offline-analysis CPU, allocation, serialization, sorting,
+  and rendering costs through batched ingestion, incremental projections,
+  compact indexes, lazy details, and bounded caches
+- Split protocol deep-dive documentation into dedicated DNS, email, HTTP,
+  RADIUS, TLS, and VoIP chapters and expand operator guidance for event spools
+  and offline datasets
+
+### Fixed
+
+- Harden event spool publication, recovery, ownership, eviction, acknowledgement,
+  orphan cleanup, corruption checks, batch limits, and active-index consistency
+- Preserve offline capture ordering, timestamps, link types, BPF behavior,
+  fragment handling, source ownership, filter history, export fidelity, and
+  atomic publication after successful analysis
+- Reconcile hunter filters after reconnect and preserve event identity,
+  provenance, loss coverage, and stateful analysis isolation across local and
+  distributed paths
+- Correct TUI event selection, detail scrolling, settings edits, quit
+  confirmation, live protocol statistics, and offline navigation behavior
+- Resolve CI lint, formatting, and dependency vulnerability failures
+
+### Removed
+
+- Remove the non-standard normalized LI metadata export and its
+  `--li-metadata-*` flags; standards-based protocol-specific X2 delivery remains
+  available
+
 ## [0.11.8] - 2026-09-09
 
 ### Fixed

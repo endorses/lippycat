@@ -20,6 +20,7 @@ lippycat captures packets at the link layer and dissects them through each proto
 | TLS | `lc sniff tls` | Handshakes, certificates, cipher suites |
 | HTTP | `lc sniff http` | Requests, responses, headers |
 | Email | `lc sniff email` | SMTP/IMAP/POP3 sessions |
+| RADIUS | `lc sniff radius` | Authentication/accounting messages and request association |
 | VoIP | `lc sniff voip` | SIP signaling, RTP media streams |
 
 ## Network Interfaces
@@ -107,6 +108,7 @@ Beyond simple packet capture, lippycat performs **protocol analysis** — it und
 - **VoIP**: Tracks SIP dialogs, correlates RTP streams, and computes call quality metrics
 - **HTTP**: Reconstructs request/response pairs from TCP streams (with optional TLS decryption)
 - **Email**: Tracks SMTP, IMAP, and POP3 sessions with sender/recipient correlation
+- **RADIUS**: Decodes visible UDP authentication/accounting messages and associates responses with requests
 
 This analysis happens in real time during capture and is displayed in both CLI and TUI modes.
 

@@ -38,7 +38,7 @@ The shared flags are:
 | `--event-drop-policy`              |      `drop_new` | Overflow policy for the normalized-event queue                                            |
 | `--log-dir`                        |           unset | Output directory; setting it enables logging                                              |
 | `--log-format`                     |           `tsv` | `tsv` or `json`                                                                           |
-| `--log-streams`                    | all six streams | Comma-separated enabled streams                                                           |
+| `--log-streams`                    | all seven streams | Comma-separated enabled streams                                                         |
 | `--log-rotate-interval`            |            `1h` | Time between rotations; `0` disables periodic rotation                                    |
 | `--log-queue-size`                 |         `10000` | Queue capacity for each stream                                                            |
 | `--log-post-rotate-command`        |           unset | Shell command run after rotation; `%log%` is the safely quoted rotated path               |
@@ -63,7 +63,7 @@ events:
 logs:
   dir: /var/log/lippycat
   format: tsv
-  streams: [conn, dns, ssl, http, smtp, files]
+  streams: [conn, dns, ssl, http, smtp, files, radius]
   rotate_interval: 1h
   queue_size: 10000
   emit_stage: terminal

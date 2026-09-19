@@ -32,7 +32,7 @@ Deploy lightweight hunter nodes across network segments and aggregate traffic at
 | GPU acceleration | No | No | No | Yes |
 | Remote monitoring | No | No | No | Yes |
 
-*lippycat focuses on DNS, TLS, HTTP, email, and VoIP protocols with deep analysis for each.
+*lippycat* focuses on DNS, TLS, HTTP, email, RADIUS, and VoIP protocols with deep analysis for each.
 
 **When to use lippycat over alternatives:**
 - You need distributed capture across multiple network segments

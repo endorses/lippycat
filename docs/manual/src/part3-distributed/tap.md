@@ -222,6 +222,21 @@ Email capture with sender filtering:
 sudo lc tap email -i eth0 --sender "*@suspicious.com" --insecure
 ```
 
+### RADIUS (`tap radius`)
+
+RADIUS mode combines local authentication/accounting capture with processor
+outputs such as PCAP, structured logs, and remote TUI display:
+
+```bash
+sudo lc tap radius -i mirror0 --radius-port 1645,1646 \
+  --log-dir /var/log/lippycat --log-streams radius --insecure
+```
+
+Exact account, MAC, attribute, and scoped line criteria use the same flags as
+`sniff radius` and `hunt radius`. Ordinary RADIUS capture does not require an LI
+build; optional authorized X2 delivery is configured independently. See
+[RADIUS capture and POI](../part5-advanced/radius.md) for the complete setup.
+
 ## PCAP Writing
 
 Tap supports all three PCAP modes from the processor (see [Chapter 8](process.md) for details):
@@ -375,18 +390,3 @@ tap:
     tcp_performance_mode: "balanced"
     tcp_reassembly_shards: 1
 ```
-
-## RADIUS
-
-Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
-authentication and accounting capture. `lc process` stays protocol-neutral and
-existing watch commands display RADIUS metadata. Ordinary capture does not need
-an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
-across commands; optional raw format-11 X2 delivery requires a current authorized
-X2Only task in an LI build.
-
-The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
-configuration examples, scope isolation, NatParas mappings, state limits and
-MDF setup. Synthetic direct hunt/process verification has passed with upgraded
-peers; relay-origin X2 authorization is unsupported. External operator known-line
-verification and receiving-MDF agreement remain pending.

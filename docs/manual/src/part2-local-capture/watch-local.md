@@ -127,6 +127,10 @@ Press `v` to toggle between protocol-specific views:
 | HTTP     | Packets ↔ HTTP Traffic |
 | Email    | Packets ↔ Emails       |
 
+RADIUS does not have a separate aggregate view. Its decoded, credential-redacted
+metadata appears in the normal packet list and detail panel in live and file
+sessions.
+
 ## PCAP File Analysis
 
 ### Opening PCAP Files

@@ -1,6 +1,9 @@
 # Filter Type Reference
 
-This appendix documents all filter types supported by lippycat. Filters control which traffic hunters capture and forward to processors. They can be managed via the CLI (`lc set filter`, `lc list filters`) or interactively through the TUI.
+This appendix documents all filter types supported by lippycat. Filters control
+which traffic hunters capture and forward to processors. Use `lc set filter` and
+`lc list filters` for every type. The TUI can edit simple filter types and display
+RADIUS filters, but structured RADIUS changes remain CLI/YAML-only.
 
 ## Filter Types
 
@@ -22,8 +25,52 @@ This appendix documents all filter types supported by lippycat. Filters control 
 | | `http_url` | URL path (glob) | `/api/v1/*` |
 | **Email** | `email_address` | Sender/recipient (glob) | `*@suspicious.com` |
 | | `email_subject` | Subject line (glob) | `*confidential*` |
+| **RADIUS** | `radius_username` | Complete UTF-8 User-Name (exact) | `alice@example.test` |
+| | `radius_mac` | Calling-Station-Id under an explicit MAC profile | `02-00-00-00-00-01` |
+| | `radius_attribute` | Complete supported AVP encoded as hex | `57086c696e652d61` |
+| | `radius_compound` | Scoped conjunction configured in YAML | See YAML below |
 | **Universal** | `ip_address` | IP address or CIDR | `192.168.1.0/24` |
 | | `bpf` | Raw BPF expression | `port 5060` |
+
+## RADIUS Filters
+
+RADIUS filters are exact rather than wildcard-based. User-Name matching is
+case-sensitive, supported attribute hex accepts either case, and `radius_mac`
+requires the exact uppercase-hyphen convention with
+`calling-station-id-uppercase-hyphen-v1`. Inline filters use `--revision` and
+the `--radius-*` scope flags documented under
+[`lc set filter`](../part4-administration/cli-admin.md#set-filter-flags).
+
+Compound filters use `lc set filter --file`. Every criterion revision must equal
+the enclosing filter revision; increment them together when changing criteria,
+scope, or enablement:
+
+```yaml
+filters:
+  - id: radius-line-and-account
+    type: radius_compound
+    enabled: true
+    revision: 1
+    radius:
+      group_id: line-and-account
+      scope:
+        operator_scope: operator-a/nas-a
+        profile_revision: v1
+      criteria:
+        - filter_id: account
+          filter_revision: 1
+          kind: username
+          value: alice@example.test
+          target_kind: account
+        - filter_id: line
+          filter_revision: 1
+          kind: attribute
+          value: "57086C696E652D61"
+          target_kind: line
+```
+
+See [RADIUS capture and POI](../part5-advanced/radius.md#distributed-trust-and-filter-synchronization)
+for distribution compatibility and scope isolation.
 
 ## Wildcard Patterns
 

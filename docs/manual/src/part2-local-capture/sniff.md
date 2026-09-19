@@ -106,7 +106,7 @@ for all schemas, flags, rotation, completeness semantics, and privacy guidance.
 
 ## Working with JSON Output
 
-All protocol analyzers share the same JSON output structure based on `PacketDisplay`. Every packet has common fields (timestamp, source/destination IP and port, protocol, length) plus an optional protocol-specific metadata object (`VoIPData`, `DNSData`, `TLSData`, `HTTPData`, or `EmailData`).
+All protocol analyzers share the same JSON output structure based on `PacketDisplay`. Every packet has common fields (timestamp, source/destination IP and port, protocol, length) plus an optional protocol-specific metadata object (`VoIPData`, `DNSData`, `TLSData`, `HTTPData`, `EmailData`, or `RADIUSData`).
 
 ### stdout/stderr Separation
 
@@ -256,6 +256,37 @@ Captures SMTP, IMAP, and POP3 sessions with session tracking.
 | `--pop3-port`      | `110,995`    | POP3 port(s)                                  |
 | `--capture-body`   | `false`      | Enable body capture                           |
 | `--track-sessions` | `true`       | Session tracking and correlation              |
+
+### RADIUS Authentication and Accounting
+
+```bash
+sudo lc sniff radius -i eth0
+```
+
+Captures visible UDP RADIUS authentication and accounting messages, associates
+responses with observed requests, and redacts credential-bearing attributes
+from routine output. Narrow capture to an exact account or deployment-bound
+line identity when required:
+
+```bash
+sudo lc sniff radius -i eth0 --radius-username 'alice@example.test'
+```
+
+**Key flags:**
+
+| Flag                           | Default     | Description                                                       |
+| ------------------------------ | ----------- | ----------------------------------------------------------------- |
+| `--radius-port`                | `1812,1813` | Additional RADIUS UDP ports                                       |
+| `--radius-username`            | —           | Exact complete User-Name                                          |
+| `--radius-mac`                 | —           | Exact uppercase-hyphen Calling-Station-Id                          |
+| `--radius-mac-profile`         | —           | Required with MAC: `calling-station-id-uppercase-hyphen-v1`       |
+| `--radius-attribute`           | —           | Complete hex AVP; repeat for conjunctive matching                  |
+| `--radius-line-profile`        | —           | Line identity source: `nas-port-id` or `agent-circuit-id`          |
+| `--radius-line-id`             | —           | Exact line identity value                                         |
+| `--radius-transaction-timeout` | `30s`       | Request/response association lifetime                             |
+
+The [RADIUS capture and POI chapter](../part5-advanced/radius.md) documents all
+shared flags, scope binding, state limits, and optional LI delivery.
 
 ### VoIP Analysis
 
@@ -433,18 +464,3 @@ This creates a `lc0` TAP interface that other tools (Wireshark, tcpdump) can cap
 | `--vif-buffer-size`          | `65536` | Injection queue size (packets)             |
 | `--vif-netns`                | —       | Network namespace for isolation            |
 | `--vif-drop-privileges`      | —       | Drop to this user after interface creation |
-
-## RADIUS
-
-Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
-authentication and accounting capture. `lc process` stays protocol-neutral and
-existing watch commands display RADIUS metadata. Ordinary capture does not need
-an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
-across commands; optional raw format-11 X2 delivery requires a current authorized
-X2Only task in an LI build.
-
-The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
-configuration examples, scope isolation, NatParas mappings, state limits and
-MDF setup. Synthetic direct hunt/process verification has passed with upgraded
-peers; relay-origin X2 authorization is unsupported. External operator known-line
-verification and receiving-MDF agreement remain pending.

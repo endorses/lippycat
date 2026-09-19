@@ -729,17 +729,14 @@ Independent PDU caps are available through `--li-delivery-x2-queue-size` and
 `--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
 once, while `queue_bytes` counts every destination copy.
 
-## RADIUS
+## RADIUS X2 Delivery
 
-Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
-authentication and accounting capture. `lc process` stays protocol-neutral and
-existing watch commands display RADIUS metadata. Ordinary capture does not need
-an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
-across commands; optional raw format-11 X2 delivery requires a current authorized
-X2Only task in an LI build.
+Ordinary `sniff radius`, `hunt radius`, and `tap radius` capture does not require
+an LI build or X1 task. In an LI build, raw format-11 X2 delivery is a separate
+authorized output and requires a current `X2Only` task whose scope matches the
+capture deployment. See [RADIUS capture and POI](radius.md#tap-poi-and-mdf-setup)
+for NatParas mappings, scope isolation, correlation state, and MDF setup.
 
-The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
-configuration examples, scope isolation, NatParas mappings, state limits and
-MDF setup. Synthetic direct hunt/process verification has passed with upgraded
-peers; relay-origin X2 authorization is unsupported. External operator known-line
-verification and receiving-MDF agreement remain pending.
+Direct hunt/process verification has passed with upgraded peers. Relay-origin
+X2 authorization is unsupported; external operator known-line verification and
+receiving-MDF agreement remain deployment acceptance items.

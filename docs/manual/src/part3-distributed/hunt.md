@@ -84,7 +84,8 @@ receives raw packets, owns protocol analysis, and can provide PCAP output,
 packet-oriented TUI views, virtual-interface injection, and later reanalysis.
 
 With `--forward-mode events`, analysis moves to the hunter. Only normalized
-connection, DNS, TLS, HTTP, SMTP, and file-metadata events cross the network;
+connection, DNS, TLS, HTTP, SMTP, RADIUS, and file-metadata events cross the
+network;
 raw packets and file content do not. The central processor can log and display
 the negotiated events, but cannot reconstruct packet evidence, rerun analysis,
 or provide packet-dependent output for that producer.
@@ -243,6 +244,23 @@ sudo lc hunt email --processor processor:55555 -i eth0 \
 ```
 
 **Email-specific flags**: `--protocol` (smtp/imap/pop3/all), `--smtp-port`, `--imap-port`, `--pop3-port`, `--address`, `--sender`, `--recipient`.
+
+### RADIUS Hunter (`hunt radius`)
+
+Captures visible UDP RADIUS authentication and accounting traffic, applies
+exact identity criteria at the edge, and forwards selected packets and their
+validated observation and provenance metadata to the processor. Routine display
+and structured-log projections redact credential-bearing attributes:
+
+```bash
+sudo lc hunt radius --processor processor:55555 -i mirror0 \
+  --radius-username 'alice@example.test' --tls-ca ca.crt
+```
+
+The RADIUS subcommand shares its port, identity, scope, and bounded-correlation
+flags with `sniff radius` and `tap radius`. See
+[RADIUS capture and POI](../part5-advanced/radius.md) for the complete flag table
+and distributed deployment constraints.
 
 ## Resilience and Flow Control
 
@@ -429,18 +447,3 @@ hunter:
 ```
 
 Flag values take precedence over config file values.
-
-## RADIUS
-
-Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
-authentication and accounting capture. `lc process` stays protocol-neutral and
-existing watch commands display RADIUS metadata. Ordinary capture does not need
-an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
-across commands; optional raw format-11 X2 delivery requires a current authorized
-X2Only task in an LI build.
-
-The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
-configuration examples, scope isolation, NatParas mappings, state limits and
-MDF setup. Synthetic direct hunt/process verification has passed with upgraded
-peers; relay-origin X2 authorization is unsupported. External operator known-line
-verification and receiving-MDF agreement remain pending.

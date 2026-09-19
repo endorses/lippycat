@@ -311,6 +311,7 @@ lippycat provides protocol-aware flags that generate optimized BPF filters. Thes
 | `--rtp-port-range 10000-20000` | RTP port range narrowing | `sniff voip`, `hunt voip`, `tap voip` |
 | `--udp-only` | Adds `udp` to the filter | `sniff dns`, `hunt dns`, `tap dns`; legacy hidden flag in VoIP modes |
 | `--dns-port 53,5353` | `udp port 53 or udp port 5353` | `sniff dns`, `hunt dns`, `tap dns` |
+| `--radius-port 1812,1813,1912` | Listed UDP ports plus IPv6 UDP candidates for userspace RADIUS validation | `sniff radius`, `hunt radius`, `tap radius` |
 | `--http-port 80,8080` | `tcp port 80 or tcp port 8080` | `sniff http`, `tap http` |
 | `--tls-port 443,8443` | `tcp port 443 or tcp port 8443` | `sniff tls`, `tap tls` |
 

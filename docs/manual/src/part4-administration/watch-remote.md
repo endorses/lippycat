@@ -118,6 +118,10 @@ Each node can have its own TLS configuration, allowing mixed environments (e.g.,
 
 ### Packet View
 
+The packet list and detail panel include decoded, credential-redacted RADIUS
+metadata received from hunters and tap nodes; RADIUS does not require a separate
+watch subcommand.
+
 | Key | Action |
 |-----|--------|
 | `j` / `k` / `↑` / `↓` | Navigate packets |
@@ -218,9 +222,17 @@ From the Nodes tab, press `f` to open the filter management view. This lets you:
 
 Filter changes take effect immediately — the processor pushes updated filters to all connected hunters.
 
+The interactive editor handles the simple VoIP, DNS, TLS, HTTP, email, and
+universal filter types. It can display and delete existing RADIUS filters, but
+creating, editing, enabling, disabling, or revising them requires `lc set filter`
+so their structured scope and revision data are preserved.
+
 ### Filter Types
 
-The TUI supports all filter types available via the CLI (VoIP, DNS, TLS, HTTP, Email, and Universal filters). See [Appendix E: Filter Type Reference](../appendices/filter-reference.md) for the complete list.
+The TUI editor supports VoIP, DNS, TLS, HTTP, email, and universal filters.
+RADIUS creation and modification remain CLI/YAML-only. See
+[Appendix E: Filter Type Reference](../appendices/filter-reference.md) for the
+complete CLI-managed type list.
 
 ### CLI Alternative
 

@@ -40,6 +40,15 @@ Event mode is opt-in and edge-authoritative: normalized metadata is accepted
 from the producer without raw packet bytes or file content, and the processor
 does not create a second canonical event stream for that session.
 
+`lc process` is protocol-neutral and therefore has no protocol subcommands.
+Packets and metadata from `hunt radius` and `tap radius` use the same ingestion,
+PCAP, structured-log, and TUI paths as other supported protocols. RADIUS capture
+selection is enforced at the producer; processor-managed filters are distributed
+to compatible RADIUS hunters. The processor displays and logs a
+credential-redacted projection. See
+[RADIUS capture and POI](../part5-advanced/radius.md) for distributed scope and
+optional LI delivery requirements.
+
 Registration negotiates the event API, kinds, stateful-analysis profile,
 enrichment, and limits. An incompatible request is rejected unless the producer
 explicitly allows visible packet fallback. This lets older packet-only nodes
@@ -109,9 +118,9 @@ The following sections cover each channel in detail. For LI delivery, see [Lawfu
 
 ### Structured protocol logs
 
-Set `--log-dir` to enable normalized `conn`, `dns`, `ssl`, `http`, `smtp`, and
-`files` streams. Logging is off by default and uses Zeek-style TSV unless
-`--log-format json` is selected:
+Set `--log-dir` to enable the default normalized `conn`, `dns`, `ssl`, `http`,
+`smtp`, `files`, and `radius` streams. Logging is off by default and uses
+Zeek-style TSV unless `--log-format json` is selected:
 
 ```bash
 lc process --listen :55555 --log-dir /var/log/lippycat \
@@ -377,6 +386,7 @@ Filters cover all supported protocol categories:
 | **TLS**       | `tls_sni`, `tls_ja3`, `tls_ja4`                       | `*.example.com`        |
 | **HTTP**      | `http_host`, `http_url`                               | `api.example.com`      |
 | **Email**     | `email_address`, `email_subject`                      | `*@example.com`        |
+| **RADIUS**    | `radius_username`, `radius_mac`, `radius_attribute`, `radius_compound` | `alice@example.test` |
 | **Universal** | `ip_address`, `bpf`                                   | `10.0.1.0/24`          |
 
 For the complete list of filter types, wildcard patterns, and matching details, see [Appendix E: Filter Type Reference](../appendices/filter-reference.md).
@@ -538,18 +548,3 @@ processor:
 ```
 
 For production deployment procedures (systemd services, monitoring, health checks), see [Chapter 12: Operations Runbook](../part4-administration/operations.md).
-
-## RADIUS
-
-Use `lc sniff radius`, `lc hunt radius`, or `lc tap radius` for visible UDP
-authentication and accounting capture. `lc process` stays protocol-neutral and
-existing watch commands display RADIUS metadata. Ordinary capture does not need
-an LI build or X1 task. Exact account, MAC and scoped line predicates are shared
-across commands; optional raw format-11 X2 delivery requires a current authorized
-X2Only task in an LI build.
-
-The [RADIUS operations chapter](../part5-advanced/radius.md) covers command and
-configuration examples, scope isolation, NatParas mappings, state limits and
-MDF setup. Synthetic direct hunt/process verification has passed with upgraded
-peers; relay-origin X2 authorization is unsupported. External operator known-line
-verification and receiving-MDF agreement remain pending.

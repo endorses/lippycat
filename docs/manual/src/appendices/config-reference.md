@@ -94,7 +94,7 @@ stream schemas, hierarchy behavior, rotation, and privacy guidance.
 | `events.drop_policy`              | string   | `"drop_new"`                          | Overflow policy for normalized events.                                     |
 | `logs.dir`                        | string   | `""`                                  | Structured-log directory; an empty value disables logging.                 |
 | `logs.format`                     | string   | `"tsv"`                               | Output encoding: `"tsv"` or `"json"` (JSONL).                              |
-| `logs.streams`                    | list     | `[conn, dns, ssl, http, smtp, files]` | Enabled log streams.                                                       |
+| `logs.streams`                    | list     | `[conn, dns, ssl, http, smtp, files, radius]` | Enabled log streams.                                               |
 | `logs.include_http_headers`       | boolean  | `false`                               | Preserve full HTTP header maps in normalized events.                       |
 | `logs.include_email_body_preview` | boolean  | `false`                               | Permit potentially sensitive email body previews for file analysis.        |
 | `logs.rotate_interval`            | duration | `"1h"`                                | Periodic rotation interval; `0` disables periodic rotation.                |
@@ -110,7 +110,10 @@ stream schemas, hierarchy behavior, rotation, and privacy guidance.
 
 ## Protocol Capture Settings
 
-These sections configure protocol-specific analysis for `lc sniff <protocol>` subcommands. They control which ports to monitor, what patterns to match, and whether to capture payload content.
+These sections configure protocol-specific analysis. DNS, email, HTTP, and TLS
+use the `lc sniff <protocol>` namespace shown below; RADIUS uses one shared
+namespace across `sniff radius`, `hunt radius`, and `tap radius`. The settings
+control ports, matching criteria, correlation, and optional content capture.
 
 ### `dns` — DNS Capture
 
@@ -190,6 +193,20 @@ Used by `lc sniff tls`. Captures TLS handshakes and extracts fingerprints.
 | `tls.ja3s_file`         | string  | `""`    | Path to file containing JA3S hashes.                     |
 | `tls.ja4`               | string  | `""`    | Comma-separated JA4 fingerprints to match.               |
 | `tls.ja4_file`          | string  | `""`    | Path to file containing JA4 fingerprints.                |
+
+### `radius` — RADIUS Capture
+
+RADIUS uses one shared configuration section across `sniff radius`,
+`hunt radius`, and `tap radius`, rather than command-prefixed copies. See the
+[complete flag/key/default table](../part5-advanced/radius.md#shared-flags-and-configuration)
+and its YAML example. Environment keys use `LIPPYCAT_RADIUS_`, for example
+`LIPPYCAT_RADIUS_OPERATOR_SCOPE=operator-a/nas-a` and
+`LIPPYCAT_RADIUS_TRANSACTION_TIMEOUT=30s`. Extra capture ports supplement UDP
+1812/1813; profiles select concrete attributes and never perform inventory
+lookup.
+
+LI-only RADIUS settings use the shared `li.radius` section and are documented in
+the [POI setup](../part5-advanced/radius.md#tap-poi-and-mdf-setup).
 
 ---
 
@@ -321,7 +338,11 @@ Hunter nodes capture packets at the network edge and forward them to a processor
 
 #### Hunter Protocol Filters
 
-Hunters support protocol-specific subcommands (`lc hunt dns`, `lc hunt voip`, etc.) with dedicated filter settings:
+Hunters support protocol-specific subcommands (`lc hunt dns`, `lc hunt voip`,
+etc.) with dedicated filter settings. `lc hunt radius` instead uses the
+[shared RADIUS settings](../part5-advanced/radius.md#shared-flags-and-configuration),
+so the same criteria and correlation policy can be reused by sniff, hunt, and
+tap:
 
 **`hunter.dns` — DNS filtering:**
 
@@ -622,7 +643,9 @@ metadata specifically.
 
 #### Tap Protocol Filters
 
-Tap supports the same protocol-specific subcommands as hunter. The configuration keys mirror the hunter protocol filter settings:
+Tap supports the same protocol-specific subcommands as hunter. The configuration
+keys mirror the hunter protocol filter settings. `lc tap radius` uses the
+[shared RADIUS settings](../part5-advanced/radius.md#shared-flags-and-configuration):
 
 **`tap.dns`:**
 
@@ -832,15 +855,3 @@ promiscuous: true
 ```
 
 For more on performance tuning, see [Performance Optimization](../part5-advanced/performance.md). For TLS certificate setup, see [Security](../part5-advanced/security.md).
-
-## RADIUS (`radius`)
-
-RADIUS uses one shared configuration section across sniff, hunt and tap. See the
-[complete flag/key/default table](../part5-advanced/radius.md#shared-flags-and-configuration)
-and its YAML example. Environment keys use `LIPPYCAT_RADIUS_`, for example
-`LIPPYCAT_RADIUS_OPERATOR_SCOPE=operator-a/nas-a` and
-`LIPPYCAT_RADIUS_TRANSACTION_TIMEOUT=30s`. Extra capture ports supplement
-1812/1813. Profiles select concrete attributes; no inventory lookup occurs.
-
-LI-only RADIUS settings use the shared `li.radius` section and
-are documented in the [POI setup](../part5-advanced/radius.md#tap-poi-and-mdf-setup).

@@ -255,6 +255,21 @@ lc set filter -P processor:55555 --tls-ca ca.crt \
   --type ip_address --pattern "192.168.1.0/24"
 ```
 
+Create an exact RADIUS account filter with an explicit revision:
+
+```bash
+lc set filter -P processor:55555 --tls-ca ca.crt \
+  --type radius_username --pattern 'alice@example.test' --revision 1
+```
+
+MAC filters require the exact supported interpretation profile:
+
+```bash
+lc set filter -P processor:55555 --tls-ca ca.crt \
+  --type radius_mac --pattern '02-00-00-00-00-01' --revision 1 \
+  --radius-mac-profile calling-station-id-uppercase-hyphen-v1
+```
+
 Create a filter with a custom ID and description:
 
 ```bash
@@ -282,7 +297,9 @@ Import multiple filters from a YAML file:
 lc set filter -P processor:55555 --tls-ca ca.crt -f filters.yaml
 ```
 
-The YAML file uses the same format as the processor's filter file (see [Chapter 8: Filter Management](../part3-distributed/process.md#filter-management)).
+The YAML file uses the same format as the processor's filter file. Compound
+RADIUS criteria must use file mode; see the
+[RADIUS filter schema and example](../appendices/filter-reference.md#radius-filters).
 
 ### Filter Types
 
@@ -293,6 +310,7 @@ The YAML file uses the same format as the processor's filter file (see [Chapter 
 | **TLS** | `tls_sni`, `tls_ja3`, `tls_ja4` | `*.example.com` |
 | **HTTP** | `http_host`, `http_url` | `*.example.com` |
 | **Email** | `email_address`, `email_subject` | `*@suspicious.com` |
+| **RADIUS** | `radius_username`, `radius_mac`, `radius_attribute`, `radius_compound` | `alice@example.test` |
 | **Universal** | `ip_address`, `bpf` | `192.168.1.0/24` |
 
 For the complete list of all filter types, descriptions, wildcard patterns, and matching details, see [Appendix E: Filter Type Reference](../appendices/filter-reference.md).
@@ -308,6 +326,12 @@ For the complete list of all filter types, descriptions, wildcard patterns, and 
 | `--enabled` | Enable the filter (default: true) |
 | `--hunters` | Target specific hunter IDs (comma-separated) |
 | `-f, --file` | YAML file for batch import |
+| `--revision` | RADIUS filter revision; increment when changing the filter |
+| `--radius-mac-profile` | Required interpretation profile for `radius_mac` |
+| `--radius-operator-scope` | Operator/NAS deployment scope |
+| `--radius-profile-revision` | Deployment profile revision |
+| `--radius-origin-node` | Restrict RADIUS scope to an origin node |
+| `--radius-source` | Restrict RADIUS scope to a capture source |
 
 ## Removing Filters with `lc rm`
 

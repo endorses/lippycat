@@ -178,7 +178,7 @@ for stream schemas, completeness semantics, rotation, and privacy guidance.
 | `--event-drop-policy`              | string   | `drop_new`                     | Normalized event overflow policy                       |
 | `--log-dir`                        | string   |                                | Directory for structured log files; enables logging    |
 | `--log-format`                     | string   | `tsv`                          | Output format: `tsv` or `json` (JSONL)                 |
-| `--log-streams`                    | strings  | `conn,dns,ssl,http,smtp,files` | Enabled streams                                        |
+| `--log-streams`                    | strings  | `conn,dns,ssl,http,smtp,files,radius` | Enabled streams                                 |
 | `--log-include-http-headers`       | bool     | `false`                        | Preserve full HTTP header maps in normalized events    |
 | `--log-include-email-body-preview` | bool     | `false`                        | Permit sensitive email body previews for file analysis |
 | `--log-rotate-interval`            | duration | `1h`                           | Periodic rotation interval; `0` disables it            |
@@ -424,6 +424,21 @@ Inherits all `lc sniff` flags, plus:
 
 ---
 
+### `lc sniff radius`
+
+Capture visible UDP RADIUS authentication and accounting traffic with bounded
+request/response association and exact identity criteria.
+
+```
+lc sniff radius [flags]
+```
+
+Inherits all `lc sniff` flags and adds the
+[shared RADIUS flags](../part5-advanced/radius.md#shared-flags-and-configuration).
+It also supports `-w` / `--write-file` for selected-packet PCAP output.
+
+---
+
 ### `lc tap`
 
 Standalone capture node that combines hunter and processor capabilities. Captures packets locally, runs protocol analysis, serves a TUI interface via gRPC, and writes PCAP files -- all without requiring a separate processor.
@@ -584,6 +599,21 @@ Inherits all `lc tap` flags, plus the same email filtering flags as `lc sniff em
 
 ---
 
+### `lc tap radius`
+
+Standalone RADIUS capture with processor outputs, including PCAP, structured
+logs, and remote TUI display.
+
+```
+lc tap radius [flags]
+```
+
+Inherits all `lc tap` flags and adds the
+[shared RADIUS flags](../part5-advanced/radius.md#shared-flags-and-configuration).
+LI builds can independently enable authorized format-11 X2 delivery.
+
+---
+
 ### `lc hunt`
 
 Hunter node for distributed edge capture. Captures packets and forwards them to a processor node via gRPC.
@@ -732,6 +762,21 @@ Inherits all `lc hunt` flags, plus:
 | `--keywords`      | string |              | Body/subject keywords                            |
 | `--capture-body`  | bool   | `false`      | Enable body capture                              |
 | `--max-body-size` | int    | `65536`      | Maximum body capture size                        |
+
+---
+
+### `lc hunt radius`
+
+Capture selected RADIUS traffic at the edge and forward packets plus validated
+observation and provenance metadata to a processor. Routine display and log
+output use a credential-redacted projection.
+
+```
+lc hunt radius [flags]
+```
+
+Inherits all `lc hunt` flags and adds the
+[shared RADIUS flags](../part5-advanced/radius.md#shared-flags-and-configuration).
 
 ---
 
@@ -1011,16 +1056,22 @@ Create or update a filter on a processor node.
 lc set filter [flags]
 ```
 
-| Flag            | Short | Type   | Default      | Description                                   |
-| --------------- | ----- | ------ | ------------ | --------------------------------------------- |
-| `--processor`   | `-P`  | string | **required** | Processor address                             |
-| `--id`          |       | string |              | Filter ID (auto-generated if omitted)         |
-| `--type`        | `-t`  | string |              | Filter type                                   |
-| `--pattern`     |       | string |              | Filter pattern                                |
-| `--description` |       | string |              | Human-readable description                    |
-| `--enabled`     |       | bool   | `true`       | Enable the filter                             |
-| `--hunters`     |       | string |              | Comma-separated hunter IDs to apply filter to |
-| `--file`        | `-f`  | string |              | Load filter definition from file              |
+| Flag                        | Short | Type    | Default      | Description                                      |
+| --------------------------- | ----- | ------- | ------------ | ------------------------------------------------ |
+| `--processor`               | `-P`  | string  | **required** | Processor address                                |
+| `--id`                      |       | string  |              | Filter ID (auto-generated if omitted)            |
+| `--type`                    | `-t`  | string  |              | Filter type                                      |
+| `--pattern`                 |       | string  |              | Filter pattern                                   |
+| `--description`             |       | string  |              | Human-readable description                       |
+| `--enabled`                 |       | bool    | `true`       | Enable the filter                                |
+| `--hunters`                 |       | strings |              | Target hunter IDs                                |
+| `--file`                    | `-f`  | string  |              | YAML file for batch or structured RADIUS filters |
+| `--revision`                |       | uint64  | `1`          | RADIUS filter revision                           |
+| `--radius-mac-profile`      |       | string  |              | Subscriber MAC interpretation profile            |
+| `--radius-operator-scope`   |       | string  |              | Operator/NAS deployment scope                    |
+| `--radius-profile-revision` |       | string  |              | Deployment profile revision                      |
+| `--radius-origin-node`      |       | string  |              | Restrict RADIUS scope to an origin node           |
+| `--radius-source`           |       | string  |              | Restrict RADIUS scope to a capture source         |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
@@ -1100,12 +1151,3 @@ lc completion powershell > lc.ps1
 | `0`  | Success                                                   |
 | `1`  | General error (runtime failure, connection refused, etc.) |
 | `2`  | Usage error (invalid flags, missing required arguments)   |
-
-## RADIUS protocol commands
-
-`sniff radius`, `hunt radius` and `tap radius` share the flags listed in the
-[RADIUS operations reference](../part5-advanced/radius.md#shared-flags-and-configuration).
-`process` and `watch` keep their existing command structure. Ordinary commands
-work without LI; X1/X2 flags exist only in LI builds. Synthetic direct
-hunt/process verification has passed with upgraded peers; external MDF/operator
-acceptance remains pending and relays cannot authorize X2.

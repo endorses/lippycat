@@ -755,6 +755,21 @@ delivery, and cumulative ACK drain. Focused normal and race tests passed;
 the complete processor race suite passed outside the sandbox. Full-suite and
 build-matrix results remain the historical checks above.
 
+A thirteenth source-to-plan audit on 2026-09-19 corrected physical-byte
+reconciliation for retryable orphan symlinks. Cleanup previously measured a
+candidate with a symlink-following stat even though physical accounting and
+removal apply to the directory entry itself. A failed cleanup followed by a
+successful retry could therefore leave `PhysicalBytes` stale. Cleanup now uses
+the link entry's own size, and a regression verifies exact accounting while
+also proving that the external symlink target is preserved.
+
+Verification was rerun on the corrected tree rather than relying on the
+historical pre-audit gates. Focused `all`-tag race tests passed for
+`eventspool`, `eventforwarding`, `processor/upstream`, `protoadapter`, and the
+complete processor package. `make test`, `make vet`, and `make build-matrix`
+also passed, covering the supported non-CUDA and LI partitions. Go formatting
+and `git diff --check` passed.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

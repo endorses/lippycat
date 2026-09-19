@@ -885,3 +885,40 @@ func TestCleanupTracksEveryFailedRemoval(t *testing.T) {
 	require.Empty(t, s.Status().CleanupError)
 	require.NoError(t, s.Close())
 }
+
+func TestOrphanSymlinkCleanupRetryReconcilesPhysicalBytes(t *testing.T) {
+	dir := t.TempDir()
+	initial, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.NoError(t, initial.Close())
+
+	target := filepath.Join(t.TempDir(), "external-target")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o600))
+	orphan := filepath.Join(dir, "orphan"+recordExtension)
+	require.NoError(t, os.Symlink(target, orphan))
+	linkInfo, err := os.Lstat(orphan)
+	require.NoError(t, err)
+
+	fs := defaultFS()
+	remove := fs.remove
+	failed := false
+	fs.remove = func(path string) error {
+		if path == orphan && !failed {
+			failed = true
+			return errors.New("injected orphan cleanup failure")
+		}
+		return remove(path)
+	}
+
+	s, err := Open(Config{Directory: dir, fs: fs})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+	require.Equal(t, uint64(linkInfo.Size()), s.PhysicalBytes())
+	require.FileExists(t, target)
+
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	require.NoFileExists(t, orphan)
+	require.FileExists(t, target)
+	require.Equal(t, s.Bytes(), s.PhysicalBytes(), "cleanup retry must remove exactly the symlink entry's accounted bytes")
+}

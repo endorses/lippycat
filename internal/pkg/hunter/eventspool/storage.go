@@ -700,7 +700,10 @@ func (s *Spool) retryCleanup(names []string) error {
 	for _, name := range names {
 		path := filepath.Join(s.config.Directory, name)
 		var removedBytes uint64
-		if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 {
+		// Cleanup removes the directory entry itself. Use Lstat so a retry for
+		// an orphan symlink reconciles the bytes counted by refreshPhysical
+		// instead of subtracting the size of its external target.
+		if info, statErr := os.Lstat(path); statErr == nil && info.Size() > 0 {
 			removedBytes = uint64(info.Size())
 		}
 		removeErr := s.fs.remove(path)

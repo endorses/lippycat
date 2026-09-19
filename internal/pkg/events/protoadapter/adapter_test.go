@@ -242,8 +242,7 @@ func TestValidationBoundsAndBatchOrdering(t *testing.T) {
 func TestBatchRoundTripAndLossValidation(t *testing.T) {
 	input := allEvents()[:2]
 	// Give the second event the next producer sequence.
-	dns := input[1].(events.DNSEvent)
-	dns = events.NewDNSEvent(testEnvelope(2))
+	dns := events.NewDNSEvent(testEnvelope(2))
 	input[1] = dns
 	stats := &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_CAPTURE, Count: 2, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 3, Last: 4}}}}}
 	b, err := ToProtoBatch("node", "session", 1, input, stats, 1)

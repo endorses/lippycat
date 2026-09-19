@@ -210,7 +210,6 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 				}
 			}
 			event := pending
-			pending = nil
 			deliverySequence, batchSequence, pending, err = s.sendEventBatch(stream, sub, event, maxBatchEvents, maxMessageBytes, streamID, deliverySequence, batchSequence)
 			if err != nil {
 				return err

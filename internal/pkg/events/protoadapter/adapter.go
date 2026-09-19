@@ -446,7 +446,7 @@ func validateEventCollections(ev events.Event) error {
 	if err := validateEnvelope(ev.Envelope()); err != nil {
 		return err
 	}
-	values := []string{}
+	var values []string
 	collections := [][]string{}
 	switch e := ev.(type) {
 	case events.DNSEvent:

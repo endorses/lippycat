@@ -166,6 +166,27 @@ its bandwidth and privacy impact. Keep sensitive-field and file-metadata gates
 disabled unless required, and protect event spools, WALs, logs, and TUI transport
 as capture evidence.
 
+### Event spool storage and recovery
+
+Reliable event forwarding stores unacknowledged batches in an exclusive spool
+directory. Never share that directory between processes or edit its files while
+the owner is running. The 4 MiB encoded-payload limit remains active when the
+total logical byte limit is disabled.
+
+The configured limit and pending status describe logical bytes awaiting
+acknowledgement. Physical disk use can be higher while acknowledged or evicted
+files await cleanup, so monitor filesystem free space separately. Cleanup is
+retried on startup and during later spool updates; retired records are not sent
+again.
+
+If storage cannot retain an event and its exact loss coverage, forwarding stops
+instead of reporting successful delivery. A durability-uncertain error likewise
+blocks forwarding and spool changes. Stop the affected node and reopen the same
+directory to recover its last complete state. On ownership, corruption, or
+recovery errors, preserve the entire directory, correct the reported cause, and
+restart. Move it aside only when you explicitly accept all outstanding events
+as lost.
+
 ### Quick Status Check
 
 Check whether the service is running:

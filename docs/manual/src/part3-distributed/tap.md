@@ -60,48 +60,12 @@ mode remains interoperable with packet-only upstream versions.
 
 ### Operating the reliable upstream event spool
 
-The default maximum encoded record payload is 4 MiB, including attached loss
-reports. That bound still applies when the total logical spool byte limit is unlimited,
-and admission also checks the transport's event, loss-entry, and loss-range
-limits. The upstream processor enforces `--event-ingress-max-batch-bytes` at or
-above this shared 4 MiB contract. Oversized events are rejected before publication,
-with exact loss coverage retained. When the coverage cannot fit beside normal
-events it is sent in bounded loss-only batches. If storage cannot persist the
-event or its exact loss report, upstream forwarding fails stopped instead of
-silently acknowledging loss.
-Pending fragmented coverage is limited to 65,536 normalized ranges or
-count-only losses and 16 MiB of encoded statistics. Exhausting either metadata
-budget fails admission explicitly until durable loss carriers drain, preventing
-unbounded manifest growth.
-
-Immutable records are tracked by a versioned active-set manifest checkpoint and
-a checksummed mutation journal. These metadata files, rather than all files
-found in the directory, define pending delivery. Startup replays complete
-committed transactions, ignores only an incomplete final append, and migrates
-only a
-fully valid and unambiguous legacy record directory. Corruption, missing
-referenced records, unsafe manifest entries, unsupported versions, and mixed
-legacy sessions stop startup and leave the evidence intact.
-
-Only one tap process may own a spool directory. Do not share it or manipulate
-individual files while the tap runs. A journal or checkpoint result that may be
-visible but is not known durable puts the spool into an uncertain state and
-blocks sending, mutation, and cleanup. Stop the tap and reopen the same
-directory so recovery resolves the visible complete transaction. Do not erase
-files or reuse the affected sequence.
-
-The configured byte limit counts **logical bytes** in active pending records.
-**Physical bytes** also count retryable orphan and temporary files, so disk use
-may exceed the logical limit after a committed ACK or eviction encounters a
-cleanup failure. These orphans are not pending and are never resent; startup
-and later safe mutations retry their removal. Monitor filesystem free space
-separately from the spool limit.
-
-Startup errors identify the failed path and operation. Stop a competing owner
-first. Otherwise preserve the whole directory, repair permissions or restore it
-as one unit, and restart. Moving it aside starts with an empty spool and is
-appropriate only after explicitly accepting all outstanding event ranges as
-lost.
+Give each tap its own spool directory and monitor both its configured limit and
+filesystem free space. Encoded record payloads are limited to 4 MiB even when
+total spool storage is unlimited; if an event or its exact loss report cannot
+be stored, forwarding stops instead of hiding the loss. For recovery behavior
+and the safe response to startup or durability errors, see
+[Event spool storage and recovery](../part4-administration/operations.md#event-spool-storage-and-recovery).
 
 ## Basic Usage
 

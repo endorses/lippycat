@@ -168,7 +168,6 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	state, knownSession := i.sessions[key]
-	previousAdmittedEvent := state.event
 	// Memory-only ingress deliberately loses its admitted high-water marks when
 	// the processor restarts. The producer has already deleted cumulatively
 	// ACKed batches, so a fresh processor must treat the first retained batch as
@@ -193,13 +192,11 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	if batch.BatchSequence <= state.batch {
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
 	}
-	for _, loss := range batch.GetStats().GetLosses() {
-		for _, eventRange := range loss.GetEventSequenceRanges() {
-			if eventRange.GetFirst() <= previousAdmittedEvent {
-				return nil, status.Error(codes.InvalidArgument, "event loss range overlaps previously admitted event coverage")
-			}
-		}
-	}
+	// A sender can retire a batch after this receiver admitted it but before
+	// its ACK reaches the spool. Its immutable replacement must retain that
+	// loss coverage for receivers that did not admit the original. Already
+	// admitted loss prefixes are therefore harmless; the checks below still
+	// require exact coverage for every newly skipped event sequence.
 	eventGapFirst := state.event
 	if eventGapFirst != ^uint64(0) {
 		eventGapFirst++
@@ -215,7 +212,12 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 		gapLast = admittedEventHighWater(batch, state.event)
 	}
 	gapCovered := gapLast >= eventGapFirst && lossRangeCovered(batch.GetStats().GetLosses(), open.SourceNodeId, open.ProducerSessionId, eventGapFirst, gapLast)
-	if batch.BatchSequence != state.batch+1 && !gapCovered {
+	// Coalesced loss-only carriers can also skip batch identities after all
+	// of their reported event coverage was already admitted. Such a report
+	// explains a retired batch gap without advancing the event high-water.
+	retiredCoverage := firstReportedLossSequence(batch.GetStats().GetLosses()) > 0 &&
+		firstReportedLossSequence(batch.GetStats().GetLosses()) <= state.event
+	if batch.BatchSequence != state.batch+1 && !gapCovered && !(retiredCoverage && !hasEventGap) {
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, CumulativeAckSequence: state.batch, NackBatchRanges: []*eventsv1.SequenceRange{{First: state.batch + 1, Last: batch.BatchSequence - 1}}, FlowControl: i.currentFlowControl()}, nil
 	}
 	if batch.FirstEventSequence != 0 && batch.FirstEventSequence <= state.event {

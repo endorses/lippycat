@@ -650,6 +650,39 @@ The more-than-4,096 coalescible-eviction regression now publishes its synthetic
 base as an authoritative checkpoint and reopens the replacement transaction,
 so it exercises journal replay as well as live normalization.
 
+An eighth source-to-plan audit on 2026-09-19 corrected six remaining issues:
+live transaction validation and journal replay scanned the complete active set;
+recovery could retire the old journal after uncertain checkpoint publication;
+replay recomputed and thereby masked inconsistent checkpoint byte totals;
+loss-carrier splitting followed loss-kind order instead of event sequence;
+loss-only eviction deferred earlier victim coverage behind the outgoing
+carrier; and ingress rejected valid historical loss coverage when eviction
+raced a delayed ACK. Live membership and replay now use incrementally updated
+maps, uncertain recovery preserves both journal generations, checkpoint totals
+are validated before replay, and carrier partitions include victim coverage in
+event sequence order across kinds. Ingress accepts historical coverage while
+continuing to reject every uncovered new event gap.
+
+Regression tests cover deterministic transaction/replay work, uncertain
+recovery with the old checkpoint restored to model power loss, corrupt byte
+totals, more than 4,096 interleaved mixed-kind ranges through real ingress,
+loss-only eviction, and delayed-ACK eviction with both memory-only and reliable
+receivers. Focused normal and race tests passed for `eventspool`,
+`eventforwarding`, `processor/upstream`, and `protoadapter`; tagged processor
+ingress and carrier tests also passed under the race detector. The full suite
+and build matrix above remain historical verification, not reruns of this
+audit. Formatting and `git diff --check` passed.
+
+One-iteration measurements on the same host add counters for the previously
+unmeasured transaction and replay traversal:
+
+| Workload | Time | Allocated | Transaction visits | Replay visits |
+| --- | ---: | ---: | ---: | ---: |
+| Build + one-ACK drain 1,000 | 80.6 ms | 25.04 MB | 3,000 | n/a |
+| Build + one-ACK drain 10,000 | 604.3 ms | 256.54 MB | 30,000 | n/a |
+| Replay half-drained backlog 1,000 | 16.1 ms | 4.36 MB | n/a | 2,000 |
+| Replay half-drained backlog 10,000 | 92.0 ms | 42.94 MB | n/a | 20,000 |
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

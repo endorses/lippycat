@@ -136,7 +136,7 @@ type Status struct {
 	DurabilityUncertain, CheckpointRequired, Closed bool
 	CleanupError                                    string
 }
-type Metrics struct{ RetrievalCalls, RetrievalClones, RetrievalVisits, ACKRemovalVisits, MetadataBytes, Syncs, Checkpoints, Rotations, JournalFrames, MaxJournalFrames uint64 }
+type Metrics struct{ TransactionRecordVisits, ReplayRecordVisits, RetrievalCalls, RetrievalClones, RetrievalVisits, ACKRemovalVisits, MetadataBytes, Syncs, Checkpoints, Rotations, JournalFrames, MaxJournalFrames uint64 }
 type CleanupError struct {
 	Operation, Path string
 	Err             error
@@ -177,6 +177,7 @@ type Spool struct {
 	fs                                                                        *fsOps
 	records                                                                   []record
 	index                                                                     map[string]int
+	activeNames                                                               map[string]bool
 	bytes, physicalBytes, generation, txSequence, transactionsSinceCheckpoint uint64
 	pendingLosses                                                             []*eventsv1.EventLoss
 	uncertain, checkpointRequired, closed                                     bool
@@ -269,7 +270,7 @@ func (s *Spool) load() error {
 	if s.shouldCheckpoint() {
 		generation := s.generation
 		if err = s.rotateCheckpoint(); err != nil {
-			if s.generation == generation {
+			if s.generation == generation || errors.Is(err, ErrDurabilityUncertain) {
 				return fmt.Errorf("open event spool: compact recovered journal: %w", err)
 			}
 			s.cleanupErr = err
@@ -870,14 +871,22 @@ func (s *Spool) FlushPendingLosses(source, session string, batchSequence uint64,
 	if s.identitySet && batchSequence <= s.retiredBatchSequence {
 		return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: batch sequence %d does not advance durable retirement mark %d", batchSequence, s.retiredBatchSequence)
 	}
-	prefix, remaining := splitPendingLosses(s.pendingLosses, maxCollectionEntries)
-	batch := &eventsv1.ProtocolEventBatch{SourceNodeId: source, ProducerSessionId: session, BatchSequence: batchSequence, SemanticProfileRevision: semanticRevision, Stats: &eventsv1.EventBatchStats{Losses: prefix}}
-	payload, err := marshalAndValidate(batch, s.config.MaxRecordBytes)
-	for errors.Is(err, ErrRecordTooLarge) && lossSplitUnits(prefix) > 1 {
-		prefix, remaining = splitPendingLosses(s.pendingLosses, lossSplitUnits(prefix)/2)
+	coverage := cloneLosses(s.pendingLosses)
+	batch := &eventsv1.ProtocolEventBatch{SourceNodeId: source, ProducerSessionId: session, BatchSequence: batchSequence, SemanticProfileRevision: semanticRevision, Stats: &eventsv1.EventBatchStats{}}
+	var remaining []*eventsv1.EventLoss
+	buildCarrier := func() ([]byte, error) {
+		prefix, rest := splitPendingLosses(coverage, maxCollectionEntries)
 		batch.Stats.Losses = prefix
-		payload, err = marshalAndValidate(batch, s.config.MaxRecordBytes)
+		payload, err := marshalAndValidate(batch, s.config.MaxRecordBytes)
+		for errors.Is(err, ErrRecordTooLarge) && lossSplitUnits(prefix) > 1 {
+			prefix, rest = splitPendingLosses(coverage, lossSplitUnits(prefix)/2)
+			batch.Stats.Losses = prefix
+			payload, err = marshalAndValidate(batch, s.config.MaxRecordBytes)
+		}
+		remaining = rest
+		return payload, err
 	}
+	payload, err := buildCarrier()
 	if err != nil {
 		return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: %w", err)
 	}
@@ -897,11 +906,22 @@ func (s *Spool) FlushPendingLosses(source, session string, batchSequence uint64,
 			victim := s.records[len(victims)]
 			victims = append(victims, victim)
 			remainingBytes -= victim.size
-			remaining, err = mergeLossesChecked(remaining, lossesForBatch(victim.batch))
+			coverage, err = mergeLossesChecked(coverage, lossesForBatch(victim.batch))
 			if err != nil {
 				return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: preserve victim loss coverage: %w", err)
 			}
 			newLosses = normalizeLosses(append(newLosses, ownRangeLoss(victim.batch)...))
+			// An evicted record can precede every pending range. Repartition
+			// the complete coverage so this carrier explains that new gap,
+			// rather than deferring it behind the receiver's high-water mark.
+			payload, err = buildCarrier()
+			if err != nil {
+				return EnqueueResult{}, fmt.Errorf("flush event spool pending losses: replacement carrier: %w", err)
+			}
+			recordBytes = uint64(headerSize) + uint64(len(payload))
+			if s.overByteLimit(recordBytes) {
+				return EnqueueResult{Rejection: RejectionExhausted}, nil
+			}
 		}
 		// Replacement is allowed only when it strictly reduces the bounded
 		// pending-loss work. Without this monotonic measure, a one-record spool
@@ -954,6 +974,7 @@ func (s *Spool) Recover() error {
 	}
 	s.records = nil
 	s.index = map[string]int{}
+	s.activeNames = map[string]bool{}
 	s.bytes, s.physicalBytes = 0, 0
 	s.pendingLosses = nil
 	s.generation, s.txSequence, s.transactionsSinceCheckpoint = 0, 0, 0
@@ -1136,11 +1157,13 @@ func (s *Spool) hasExpired(now time.Time) bool {
 }
 func (s *Spool) rebuildIndex() {
 	s.index = map[string]int{}
+	s.activeNames = map[string]bool{}
 	s.identitySet = false
 	s.homogeneous = true
 	s.singleSource = ""
 	s.singleProducer = ""
 	for i, r := range s.records {
+		s.activeNames[r.name] = true
 		s.index[identityKey(r.batch.GetSourceNodeId(), r.batch.GetProducerSessionId(), r.batch.GetBatchSequence())] = i
 		if !s.identitySet {
 			s.identitySet = true
@@ -1484,41 +1507,44 @@ func splitPendingLosses(losses []*eventsv1.EventLoss, maxRanges int) (prefix, re
 	if maxRanges < 1 {
 		maxRanges = 1
 	}
-	left := maxRanges
+	// Normalization groups ranges by kind, but carrier publication must follow
+	// event order across all kinds. Otherwise an earlier kind can advance the
+	// receiver's high-water beyond ranges left for a subsequent carrier.
+	var units []*eventsv1.EventLoss
 	for _, loss := range losses {
 		if loss == nil {
 			continue
 		}
 		ranges := loss.GetEventSequenceRanges()
 		if len(ranges) == 0 {
-			if left > 0 {
-				prefix = append(prefix, proto.Clone(loss).(*eventsv1.EventLoss))
-				left--
-			} else {
-				remaining = append(remaining, proto.Clone(loss).(*eventsv1.EventLoss))
-			}
+			units = append(units, proto.Clone(loss).(*eventsv1.EventLoss))
 			continue
 		}
-		take := min(left, len(ranges))
 		extra := loss.GetCount() - rangedCount(ranges)
-		if take > 0 {
-			part := proto.Clone(loss).(*eventsv1.EventLoss)
-			part.EventSequenceRanges = cloneRanges(ranges[:take])
-			part.Count = rangedCount(part.EventSequenceRanges) + extra
-			prefix = append(prefix, part)
-			left -= take
-		}
-		if take < len(ranges) {
-			part := proto.Clone(loss).(*eventsv1.EventLoss)
-			part.EventSequenceRanges = cloneRanges(ranges[take:])
-			part.Count = rangedCount(part.EventSequenceRanges)
-			if take == 0 {
+		for index, eventRange := range ranges {
+			part := &eventsv1.EventLoss{
+				Kind: loss.Kind, SourceNodeId: loss.SourceNodeId, ProducerSessionId: loss.ProducerSessionId,
+				Count:               eventRange.Last - eventRange.First + 1,
+				EventSequenceRanges: []*eventsv1.SequenceRange{{First: eventRange.First, Last: eventRange.Last}},
+			}
+			if index == 0 {
 				part.Count += extra
 			}
-			remaining = append(remaining, part)
+			units = append(units, part)
 		}
 	}
-	return normalizeLosses(prefix), normalizeLosses(remaining)
+	sort.SliceStable(units, func(i, j int) bool {
+		left, right := units[i].GetEventSequenceRanges(), units[j].GetEventSequenceRanges()
+		if len(left) == 0 {
+			return false
+		}
+		if len(right) == 0 {
+			return true
+		}
+		return left[0].First < right[0].First
+	})
+	boundary := min(maxRanges, len(units))
+	return normalizeLosses(units[:boundary]), normalizeLosses(units[boundary:])
 }
 
 func cloneRanges(input []*eventsv1.SequenceRange) []*eventsv1.SequenceRange {

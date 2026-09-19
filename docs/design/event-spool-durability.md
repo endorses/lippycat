@@ -161,6 +161,8 @@ them. Coverage is never truncated. When normalized coverage cannot accompany a
 normal batch within byte or collection limits, it is emitted in ordered
 loss-only batches, each independently satisfying receiver validation. A batch
 sequence advances only after the corresponding record is committed.
+Carrier prefixes follow event sequence order across loss kinds, so splitting
+cannot advance the receiver past coverage reserved for a later carrier.
 
 The forwarding sink checks the durable pending set after each rejection. Once
 the complete set no longer fits one receiver-valid record, it publishes bounded
@@ -169,7 +171,9 @@ recovered oversized pending set triggers the same drain-and-retry behavior.
 Loss-only records obey the configured byte and age exhaustion policy: drop-new
 stops when no record fits, while drop-oldest atomically retains coverage for any
 record it replaces and proceeds only when replacement strictly reduces the
-remaining bounded loss work. A non-progressing replacement fails stopped, so a
+remaining bounded loss work. Coverage from victims is merged before splitting
+the outgoing carrier, so earlier evicted events cannot be deferred behind that
+carrier's high-water mark. A non-progressing replacement fails stopped, so a
 one-record spool cannot alternate loss carriers forever. Inherited wire loss
 reports are not counted again in local loss counters when their carrier record
 is later evicted.
@@ -195,6 +199,10 @@ the complete active set for every send. Before selecting a cached record it
 checks active membership so a concurrent ACK or eviction makes stale unsent
 entries ineligible. The selection point may race only with eviction of the one
 already selected in-flight batch; network I/O never holds the spool lock.
+An eviction report can therefore overlap events already admitted by the
+receiver before their ACK reaches the sender. Such historical coverage is
+accepted without advancing the event high-water mark; every newly covered
+sequence must still satisfy the receiver's exact gap checks.
 
 ACK and flow-control messages have priority between sends. NACK rewinds the
 cache to the requested sequence. Append wakes expose later batches after cache

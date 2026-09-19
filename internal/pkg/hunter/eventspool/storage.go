@@ -37,7 +37,25 @@ func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 	if string(header[:8]) != string(journalMagic[:]) || binary.BigEndian.Uint32(header[8:12]) != manifestVersion || binary.BigEndian.Uint64(header[12:20]) != base.Generation {
 		return manifest{}, 0, errors.New("read event spool journal: invalid format or generation")
 	}
-	records := append([]manifestRecord(nil), base.Records...)
+	records := make(map[string]manifestRecord, len(base.Records))
+	var checkpointBytes uint64
+	for _, mr := range base.Records {
+		s.metrics.ReplayRecordVisits++
+		if !safeBasename(mr.Name) {
+			return manifest{}, 0, fmt.Errorf("manifest contains unsafe path %q", mr.Name)
+		}
+		if _, exists := records[mr.Name]; exists {
+			return manifest{}, 0, fmt.Errorf("manifest contains duplicate record %q", mr.Name)
+		}
+		if mr.Size > ^uint64(0)-checkpointBytes {
+			return manifest{}, 0, errors.New("manifest logical bytes overflow")
+		}
+		checkpointBytes += mr.Size
+		records[mr.Name] = mr
+	}
+	if checkpointBytes != base.LogicalBytes {
+		return manifest{}, 0, errors.New("manifest logical bytes differ from records")
+	}
 	pending := cloneLosses(base.PendingLosses)
 	sequence := base.AppliedTransactions
 	offset := int64(20)
@@ -93,10 +111,6 @@ func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 				return manifest{}, 0, fmt.Errorf("read event spool journal: sequence gap at %d", tx.Sequence)
 			}
 			remove := map[string]bool{}
-			active := make(map[string]bool, len(records))
-			for _, record := range records {
-				active[record.Name] = true
-			}
 			for _, name := range tx.Remove {
 				if !safeBasename(name) {
 					return manifest{}, 0, fmt.Errorf("journal contains unsafe path %q", name)
@@ -104,19 +118,25 @@ func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 				if remove[name] {
 					return manifest{}, 0, fmt.Errorf("journal transaction contains duplicate removal %q", name)
 				}
-				if !active[name] {
+				s.metrics.ReplayRecordVisits++
+				if _, exists := records[name]; !exists {
 					return manifest{}, 0, fmt.Errorf("journal transaction removes inactive record %q", name)
 				}
 				remove[name] = true
 			}
-			kept := records[:0]
-			for _, mr := range records {
-				if !remove[mr.Name] {
-					kept = append(kept, mr)
-				}
+			for name := range remove {
+				delete(records, name)
 			}
-			records = kept
-			records = append(records, tx.Add...)
+			for _, mr := range tx.Add {
+				s.metrics.ReplayRecordVisits++
+				if !safeBasename(mr.Name) {
+					return manifest{}, 0, fmt.Errorf("journal contains unsafe path %q", mr.Name)
+				}
+				if _, exists := records[mr.Name]; exists {
+					return manifest{}, 0, fmt.Errorf("journal transaction adds duplicate record %q", mr.Name)
+				}
+				records[mr.Name] = mr
+			}
 			pending = cloneLosses(tx.PendingLosses)
 			sequence = tx.Sequence
 			base.SourceNodeID, base.ProducerSessionID = tx.SourceNodeID, tx.ProducerSessionID
@@ -128,13 +148,15 @@ func (s *Spool) resolveJournal(base manifest) (manifest, uint64, error) {
 		offset += int64(journalFrameHeaderSize+4) + int64(length)
 	}
 	var logical uint64
+	base.Records = nil
 	for _, mr := range records {
+		s.metrics.ReplayRecordVisits++
+		base.Records = append(base.Records, mr)
 		if logical > ^uint64(0)-mr.Size {
 			return manifest{}, 0, errors.New("journal logical bytes overflow")
 		}
 		logical += mr.Size
 	}
-	base.Records = records
 	base.PendingLosses = pending
 	base.AppliedTransactions = sequence
 	base.LogicalBytes = logical
@@ -339,10 +361,6 @@ func (s *Spool) shouldCheckpoint() bool {
 
 func (s *Spool) applyTransaction(tx transaction) error {
 	remove := map[string]bool{}
-	active := make(map[string]bool, len(s.records))
-	for _, record := range s.records {
-		active[record.name] = true
-	}
 	for _, name := range tx.Remove {
 		if !safeBasename(name) {
 			return fmt.Errorf("event spool transaction contains unsafe path %q", name)
@@ -350,7 +368,8 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		if remove[name] {
 			return fmt.Errorf("event spool transaction contains duplicate removal %q", name)
 		}
-		if !active[name] {
+		s.metrics.TransactionRecordVisits++
+		if !s.activeNames[name] {
 			return fmt.Errorf("event spool transaction removes inactive record %q", name)
 		}
 		remove[name] = true
@@ -363,6 +382,8 @@ func (s *Spool) applyTransaction(tx transaction) error {
 	}
 	if prefix == len(remove) {
 		for _, r := range s.records[:prefix] {
+			s.metrics.TransactionRecordVisits++
+			delete(s.activeNames, r.name)
 			delete(s.index, identityKey(r.batch.GetSourceNodeId(), r.batch.GetProducerSessionId(), r.batch.GetBatchSequence()))
 		}
 		s.records = s.records[prefix:]
@@ -370,7 +391,9 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		total = s.bytes
 		kept := s.records[:0]
 		for _, r := range s.records {
+			s.metrics.TransactionRecordVisits++
 			if remove[r.name] {
+				delete(s.activeNames, r.name)
 				delete(s.index, identityKey(r.batch.GetSourceNodeId(), r.batch.GetProducerSessionId(), r.batch.GetBatchSequence()))
 				total -= r.size
 				continue
@@ -387,6 +410,7 @@ func (s *Spool) applyTransaction(tx transaction) error {
 	}
 	needsSort := false
 	for _, mr := range tx.Add {
+		s.metrics.TransactionRecordVisits++
 		if !safeBasename(mr.Name) {
 			return fmt.Errorf("event spool transaction contains unsafe path %q", mr.Name)
 		}
@@ -408,6 +432,7 @@ func (s *Spool) applyTransaction(tx transaction) error {
 			}
 		}
 		s.records = append(s.records, r)
+		s.activeNames[r.name] = true
 		total += r.size
 		s.index[key] = len(s.records) - 1
 		if !s.identitySet {

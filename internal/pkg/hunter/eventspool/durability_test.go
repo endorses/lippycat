@@ -498,7 +498,7 @@ func TestFlushPendingLossesHonorsCapacityPolicy(t *testing.T) {
 		require.True(t, s.HasPendingLosses())
 	})
 
-	t.Run("drop oldest fails stop instead of cycling carriers", func(t *testing.T) {
+	t.Run("drop oldest coalesces victim into outgoing carrier", func(t *testing.T) {
 		s, err := Open(Config{Directory: t.TempDir(), Policy: DropOldest})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
@@ -509,11 +509,33 @@ func TestFlushPendingLossesHonorsCapacityPolicy(t *testing.T) {
 		require.NoError(t, err)
 		result, err := s.FlushPendingLosses("node", "session", 2, 1)
 		require.NoError(t, err)
-		require.Equal(t, RejectionExhausted, result.Rejection)
+		require.True(t, result.Stored)
 		require.LessOrEqual(t, s.Bytes(), s.config.MaxBytes)
+		require.False(t, s.Contains("node", "session", 1))
+		require.True(t, s.Contains("node", "session", 2))
+		require.False(t, s.HasPendingLosses())
+		require.Equal(t, uint64(2), s.Batches()[0].Stats.Losses[0].Count)
+	})
+
+	t.Run("drop oldest refuses nonprogressing carrier", func(t *testing.T) {
+		s, err := Open(Config{Directory: t.TempDir(), Policy: DropOldest})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		_, err = s.Enqueue(batch("node", "session", 1, 3, 3))
+		require.NoError(t, err)
+		s.config.MaxBytes = s.Bytes()
+		// Force a one-range carrier: replacing the victim would merely trade
+		// pending range 1 for range 3, with no reduction in pending work.
+		carrier := &eventsv1.ProtocolEventBatch{SourceNodeId: "node", ProducerSessionId: "session", BatchSequence: 2, SemanticProfileRevision: 1, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{loss}}}
+		s.config.MaxRecordBytes = uint64(proto.Size(carrier))
+		_, err = s.RetainLosses([]*eventsv1.EventLoss{loss})
+		require.NoError(t, err)
+		result, err := s.FlushPendingLosses("node", "session", 2, 1)
+		require.NoError(t, err)
+		require.Equal(t, RejectionExhausted, result.Rejection)
 		require.True(t, s.Contains("node", "session", 1))
 		require.False(t, s.Contains("node", "session", 2))
-		require.True(t, s.HasPendingLosses(), "the active carrier and new pending coverage must both remain durable")
+		require.True(t, s.HasPendingLosses())
 	})
 }
 
@@ -1093,7 +1115,7 @@ func FuzzReadRecordHeader(f *testing.F) {
 func BenchmarkSpoolBuildDrain(b *testing.B) {
 	for _, count := range []int{1000, 10000} {
 		b.Run(fmt.Sprintf("records_%d", count), func(b *testing.B) {
-			var metadataBytes, ackVisits, syncs, checkpoints, rotations float64
+			var metadataBytes, ackVisits, transactionVisits, syncs, checkpoints, rotations float64
 			for iteration := 0; iteration < b.N; iteration++ {
 				s, err := Open(Config{Directory: b.TempDir(), CheckpointEvery: 128})
 				if err != nil {
@@ -1112,6 +1134,7 @@ func BenchmarkSpoolBuildDrain(b *testing.B) {
 				metrics := s.SnapshotMetrics()
 				metadataBytes += float64(metrics.MetadataBytes)
 				ackVisits += float64(metrics.ACKRemovalVisits)
+				transactionVisits += float64(metrics.TransactionRecordVisits)
 				syncs += float64(metrics.Syncs)
 				checkpoints += float64(metrics.Checkpoints)
 				rotations += float64(metrics.Rotations)
@@ -1121,6 +1144,7 @@ func BenchmarkSpoolBuildDrain(b *testing.B) {
 			}
 			b.ReportMetric(metadataBytes/float64(b.N), "metadata-bytes/op")
 			b.ReportMetric(ackVisits/float64(b.N), "ack-visits/op")
+			b.ReportMetric(transactionVisits/float64(b.N), "transaction-visits/op")
 			b.ReportMetric(syncs/float64(b.N), "syncs/op")
 			b.ReportMetric(checkpoints/float64(b.N), "checkpoints/op")
 			b.ReportMetric(rotations/float64(b.N), "rotations/op")
@@ -1160,4 +1184,137 @@ func BenchmarkSpoolSustainedReplacement(b *testing.B) {
 			b.ReportMetric(rotations/float64(b.N), "rotations/op")
 		})
 	}
+}
+
+func TestTransactionAndReplayRecordWorkIsLinear(t *testing.T) {
+	const count = 512
+	s, err := Open(Config{Directory: t.TempDir(), CheckpointEvery: count * 4})
+	require.NoError(t, err)
+	defer s.Close()
+	before := s.SnapshotMetrics()
+	for sequence := uint64(1); sequence <= count; sequence++ {
+		result, err := s.Enqueue(batch("node", "session", sequence, sequence, sequence))
+		require.NoError(t, err)
+		require.True(t, result.Stored)
+	}
+	require.NoError(t, s.Recover())
+	afterBuild := s.SnapshotMetrics()
+	require.Equal(t, uint64(count), afterBuild.TransactionRecordVisits-before.TransactionRecordVisits)
+	require.Equal(t, uint64(count*2), afterBuild.ReplayRecordVisits-before.ReplayRecordVisits)
+	for sequence := uint64(1); sequence <= count; sequence++ {
+		require.NoError(t, s.Ack("node", "session", sequence))
+	}
+	require.NoError(t, s.Recover())
+	afterDrain := s.SnapshotMetrics()
+	require.Equal(t, uint64(count*2), afterDrain.TransactionRecordVisits-afterBuild.TransactionRecordVisits)
+	require.Equal(t, uint64(count*2), afterDrain.ReplayRecordVisits-afterBuild.ReplayRecordVisits)
+	require.Empty(t, s.Batches())
+	require.Empty(t, s.activeNames)
+}
+
+func TestRecoveryUncertainCheckpointPreservesOldJournal(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir, CheckpointEvery: 100})
+	require.NoError(t, err)
+	defer s.Close()
+	result, err := s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	require.True(t, result.Stored)
+	oldJournal := journalPath(dir, s.generation)
+	oldManifest, err := os.ReadFile(filepath.Join(dir, manifestFileName))
+	require.NoError(t, err)
+	s.config.CheckpointEvery = 1
+	fs := defaultFS()
+	originalRename := fs.rename
+	manifestRenamed := false
+	fs.rename = func(old, new string) error {
+		err := originalRename(old, new)
+		if err == nil && filepath.Base(new) == manifestFileName {
+			manifestRenamed = true
+		}
+		return err
+	}
+	fs.syncDir = func(path string) error {
+		if manifestRenamed {
+			return errors.New("injected checkpoint directory sync failure")
+		}
+		return syncDirectory(path)
+	}
+	s.fs = fs
+	require.ErrorIs(t, s.Recover(), ErrDurabilityUncertain)
+	require.True(t, s.Status().DurabilityUncertain)
+	require.FileExists(t, oldJournal)
+	_, err = s.BatchesAfter("node", "session", 0, 1)
+	require.ErrorIs(t, err, ErrDurabilityUncertain)
+
+	// Model the permitted old directory entry after power loss. The old
+	// checkpoint must still have its journal available to recover the enqueue.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, manifestFileName), oldManifest, 0o600))
+	s.fs = defaultFS()
+	require.NoError(t, s.Recover())
+	require.True(t, s.Contains("node", "session", 1))
+}
+
+func TestRecoveryRejectsCheckpointLogicalByteMismatch(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+	path := filepath.Join(dir, manifestFileName)
+	m, err := readManifest(path)
+	require.NoError(t, err)
+	m.LogicalBytes = 1
+	payload, err := json.Marshal(m)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, payload, 0o600))
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "logical bytes differ")
+}
+
+func BenchmarkSpoolReplay(b *testing.B) {
+	for _, count := range []int{1000, 10000} {
+		b.Run(fmt.Sprintf("records_%d", count), func(b *testing.B) {
+			s, err := Open(Config{Directory: b.TempDir(), CheckpointEvery: uint64(count * 4)})
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer s.Close()
+			for i := 1; i <= count; i++ {
+				if _, err = s.Enqueue(batch("node", "session", uint64(i), uint64(i), uint64(i))); err != nil {
+					b.Fatal(err)
+				}
+			}
+			// Leave addition and retirement frames pending replay together.
+			for i := 1; i <= count/2; i++ {
+				if err = s.Ack("node", "session", uint64(i)); err != nil {
+					b.Fatal(err)
+				}
+			}
+			before := s.SnapshotMetrics().ReplayRecordVisits
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if err = s.Recover(); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(s.SnapshotMetrics().ReplayRecordVisits-before)/float64(b.N), "replay-visits/op")
+		})
+	}
+}
+
+func TestSplitPendingLossesPreservesEventOrderAcrossKinds(t *testing.T) {
+	losses := normalizeLosses([]*eventsv1.EventLoss{
+		{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, SourceNodeId: "node", ProducerSessionId: "session", Count: 2, EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}, {First: 4, Last: 4}}},
+		{Kind: eventsv1.LossKind_LOSS_KIND_UNSUPPORTED_EVENT, SourceNodeId: "node", ProducerSessionId: "session", Count: 2, EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}, {First: 3, Last: 3}}},
+	})
+	for sequence := uint64(1); sequence <= 4; sequence++ {
+		prefix, remaining := splitPendingLosses(losses, 1)
+		require.Len(t, prefix, 1)
+		require.Equal(t, uint64(1), prefix[0].Count)
+		require.Equal(t, sequence, prefix[0].EventSequenceRanges[0].First)
+		require.Equal(t, sequence, prefix[0].EventSequenceRanges[0].Last)
+		losses = remaining
+	}
+	require.Empty(t, losses)
 }

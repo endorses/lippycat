@@ -440,7 +440,7 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		if addIdentities[key] {
 			return fmt.Errorf("event spool transaction duplicates identity %s", key)
 		}
-		if index, exists := s.index[key]; exists && !remove[s.records[index].name] {
+		if activeName, exists := s.index[key]; exists && !remove[activeName] {
 			return fmt.Errorf("event spool transaction duplicates identity %s", key)
 		}
 		r, err := readRecord(filepath.Join(s.config.Directory, mr.Name), s.config.MaxRecordBytes)
@@ -500,7 +500,7 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		}
 		s.records = append(s.records, r)
 		s.activeNames[r.name] = true
-		s.index[key] = len(s.records) - 1
+		s.index[key] = r.name
 		if !s.identitySet {
 			s.identitySet = true
 			s.homogeneous = true

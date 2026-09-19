@@ -42,6 +42,66 @@ func TestReadRecordRejectsUntrustedLengthsWithoutRemovingEvidence(t *testing.T) 
 	}
 }
 
+func TestReadRecordRejectsMalformedFixedHeaderAndPayload(t *testing.T) {
+	tests := []struct {
+		name    string
+		content func() []byte
+		error   string
+	}{
+		{
+			name: "short header",
+			content: func() []byte {
+				return make([]byte, headerSize-1)
+			},
+			error: "smaller than header",
+		},
+		{
+			name: "bad magic",
+			content: func() []byte {
+				header := make([]byte, headerSize)
+				binary.BigEndian.PutUint16(header[8:10], recordVersion)
+				return header
+			},
+			error: "invalid format",
+		},
+		{
+			name: "bad version",
+			content: func() []byte {
+				header := make([]byte, headerSize)
+				copy(header, recordMagic[:])
+				binary.BigEndian.PutUint16(header[8:10], recordVersion+1)
+				return header
+			},
+			error: "invalid format",
+		},
+		{
+			name: "malformed protobuf",
+			content: func() []byte {
+				payload := []byte{0xff}
+				header := make([]byte, headerSize)
+				copy(header, recordMagic[:])
+				binary.BigEndian.PutUint16(header[8:10], recordVersion)
+				binary.BigEndian.PutUint64(header[18:26], uint64(len(payload)))
+				binary.BigEndian.PutUint32(header[26:30], crc32.ChecksumIEEE(payload))
+				return append(header, payload...)
+			},
+			error: "protobuf",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bad"+recordExtension)
+			require.NoError(t, os.WriteFile(path, test.content(), 0o600))
+
+			_, err := readRecord(path, MaxRecordPayloadBytes)
+			require.ErrorContains(t, err, test.error)
+			require.ErrorContains(t, err, path)
+			require.FileExists(t, path)
+		})
+	}
+}
+
 func TestReadRecordAcceptsExactPayloadBoundary(t *testing.T) {
 	payload, err := proto.Marshal(batch("node", "session", 1, 0, 0))
 	require.NoError(t, err)
@@ -63,6 +123,37 @@ func TestReadRecordRejectsSymlink(t *testing.T) {
 	_, err = readRecord(link, MaxRecordPayloadBytes)
 	require.ErrorContains(t, err, "not a regular file")
 	require.FileExists(t, target, "rejecting a link must not remove its target")
+}
+
+func TestApplyTransactionKeepsIdentityIndexConsistentAfterPrefixRetirement(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir(), CheckpointEvery: 100})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	for sequence := uint64(1); sequence <= 3; sequence++ {
+		_, err = s.Enqueue(batch("node", "session", sequence, sequence, sequence))
+		require.NoError(t, err)
+	}
+	require.NoError(t, s.Ack("node", "session", 1))
+	require.Len(t, s.records, 2)
+
+	replacementBatch := batch("node", "session", 3, 3, 3)
+	payload, err := marshalAndValidate(replacementBatch, s.config.MaxRecordBytes)
+	require.NoError(t, err)
+	replacement, err := s.writeRecord(time.Now().Add(time.Second), replacementBatch, payload)
+	require.NoError(t, err)
+	retiredName := s.records[1].name
+
+	err = s.applyTransaction(transaction{
+		Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1,
+		Remove: []string{retiredName}, Add: []manifestRecord{toManifestRecord(replacement)},
+		SourceNodeID: "node", ProducerSessionID: "session",
+		LastEventSequence: 3, LastBatchSequence: 3, RetiredBatchSequence: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, replacement.name, s.index[identityKey("node", "session", 3)])
+	require.False(t, s.activeNames[retiredName])
+	require.True(t, s.activeNames[replacement.name])
 }
 
 func TestLegacyMigrationRejectsInvalidSessionPolicyBeforePublication(t *testing.T) {
@@ -1238,14 +1329,15 @@ func writeRawRecord(t *testing.T, path string, declared uint64, payload []byte) 
 }
 
 func FuzzReadRecordHeader(f *testing.F) {
-	f.Add(uint64(0), []byte{})
-	f.Add(^uint64(0), []byte{1})
-	f.Fuzz(func(t *testing.T, declared uint64, payload []byte) {
-		if len(payload) > 1024 {
+	f.Add([]byte{})
+	f.Add(append([]byte(nil), recordMagic[:]...))
+	f.Add(make([]byte, headerSize))
+	f.Fuzz(func(t *testing.T, content []byte) {
+		if len(content) > headerSize+1024 {
 			t.Skip()
 		}
 		path := filepath.Join(t.TempDir(), "fuzz"+recordExtension)
-		writeRawRecord(t, path, declared, payload)
+		require.NoError(t, os.WriteFile(path, content, 0o600))
 		_, _ = readRecord(path, 1024)
 	})
 }

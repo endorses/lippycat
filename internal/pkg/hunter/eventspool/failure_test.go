@@ -278,12 +278,22 @@ func TestManifestCheckpointFailureMatrixAfterCommittedTransaction(t *testing.T) 
 			require.Error(t, err)
 			require.True(t, result.Stored)
 			status := s.Status()
-			require.True(t, s.Contains("node", "session", 1) || status.DurabilityUncertain || status.CheckpointRequired)
-			s.fs = defaultFS()
-			if s.Status().DurabilityUncertain {
-				require.NoError(t, s.Recover())
-				require.Len(t, s.Batches(), 1)
+			if kind == "dirsync" {
+				require.True(t, status.DurabilityUncertain)
+				require.False(t, status.CheckpointRequired)
+				require.ErrorIs(t, err, ErrDurabilityUncertain)
+			} else {
+				require.False(t, status.DurabilityUncertain)
+				require.True(t, status.CheckpointRequired)
+				require.ErrorIs(t, err, ErrCheckpointRequired)
 			}
+			require.False(t, s.Contains("node", "session", 1), "barrier must suspend sends")
+			_, _, _, _, stateErr := s.RecoveryState()
+			require.Error(t, stateErr)
+			s.fs = defaultFS()
+			require.NoError(t, s.Recover())
+			require.Len(t, s.Batches(), 1)
+			require.True(t, s.Contains("node", "session", 1))
 			require.NoError(t, s.Close())
 		})
 	}

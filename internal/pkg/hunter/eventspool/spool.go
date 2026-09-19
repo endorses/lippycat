@@ -176,7 +176,7 @@ type Spool struct {
 	config                                                                    Config
 	fs                                                                        *fsOps
 	records                                                                   []record
-	index                                                                     map[string]int
+	index                                                                     map[string]string
 	activeNames                                                               map[string]bool
 	bytes, physicalBytes, generation, txSequence, transactionsSinceCheckpoint uint64
 	pendingLosses                                                             []*eventsv1.EventLoss
@@ -237,7 +237,7 @@ func Open(config Config) (_ *Spool, retErr error) {
 		_ = lock.Close()
 		return nil, fmt.Errorf("open event spool: directory is already owned: %w", err)
 	}
-	s := &Spool{config: config, fs: fs, lock: lock, index: map[string]int{}}
+	s := &Spool{config: config, fs: fs, lock: lock, index: map[string]string{}}
 	defer func() {
 		if retErr != nil {
 			_ = s.releaseLock()
@@ -982,7 +982,7 @@ func (s *Spool) Recover() error {
 		return ErrClosed
 	}
 	s.records = nil
-	s.index = map[string]int{}
+	s.index = map[string]string{}
 	s.activeNames = map[string]bool{}
 	s.bytes, s.physicalBytes = 0, 0
 	s.pendingLosses = nil
@@ -1170,15 +1170,15 @@ func (s *Spool) hasExpired(now time.Time) bool {
 	return len(s.records) > 0 && s.recordExpired(s.records[0], now)
 }
 func (s *Spool) rebuildIndex() {
-	s.index = map[string]int{}
+	s.index = map[string]string{}
 	s.activeNames = map[string]bool{}
 	s.identitySet = false
 	s.homogeneous = true
 	s.singleSource = ""
 	s.singleProducer = ""
-	for i, r := range s.records {
+	for _, r := range s.records {
 		s.activeNames[r.name] = true
-		s.index[identityKey(r.batch.GetSourceNodeId(), r.batch.GetProducerSessionId(), r.batch.GetBatchSequence())] = i
+		s.index[identityKey(r.batch.GetSourceNodeId(), r.batch.GetProducerSessionId(), r.batch.GetBatchSequence())] = r.name
 		if !s.identitySet {
 			s.identitySet = true
 			s.singleSource = r.batch.GetSourceNodeId()

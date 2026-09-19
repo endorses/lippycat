@@ -827,6 +827,31 @@ The complete `make test` suite (including loopback tests), LI partition, vet,
 manual build, supported build matrix, Go formatting, and `git diff --check`
 passed on the corrected tree.
 
+An eighteenth source-to-plan audit on 2026-09-19 corrected an in-memory active-
+set indexing defect and two verification gaps. ACK or eviction compaction removed
+records from the ordered slice without updating the surviving identity-to-index
+values. Membership checks remained correct, but a later atomic replacement that
+removed and re-added an existing identity could dereference a stale slice index.
+The identity index now stores immutable record basenames, preserving constant-
+time membership and replacement validation without reindexing the retained
+suffix after every cumulative ACK. A regression exercises replacement after
+prefix retirement.
+
+The malformed-record fuzz target now mutates the complete raw file content
+instead of constructing a valid fixed header around fuzzed length and payload
+fields. Deterministic regressions also cover a genuinely short header, invalid
+magic, invalid version, and malformed protobuf while asserting contextual errors
+and preservation of corrupt evidence. The checkpoint failure matrix now proves
+that pre-rename create/write/sync/rename failures enter the checkpoint-required
+barrier, post-rename directory-sync failure enters the durability-uncertain
+barrier, both suspend sends, and recovery restores the committed batch.
+
+Focused normal and `all`-tag race tests passed for `eventspool`,
+`eventforwarding`, `processor/upstream`, and `protoadapter`. The complete
+processor package passed outside the sandbox so its loopback gRPC tests could
+run. The corrected fuzz target completed 110,036 executions in a bounded run.
+Go formatting and `git diff --check` passed.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

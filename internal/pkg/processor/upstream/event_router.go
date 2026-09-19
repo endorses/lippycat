@@ -428,9 +428,12 @@ func (r *EventRouter) serve(ctx context.Context, client *eventforwarding.Client)
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		stream, err := service.StreamEvents(ctx)
+		attemptCtx, cancelAttempt := context.WithCancel(ctx)
+		stream, err := service.StreamEvents(attemptCtx)
 		if err == nil {
-			err = client.Serve(ctx, stream)
+			err = client.Serve(attemptCtx, stream, cancelAttempt)
+		} else {
+			cancelAttempt()
 		}
 		if err != nil && ctx.Err() == nil {
 			logger.Warn("Upstream event route disconnected", "error", err)

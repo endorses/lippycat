@@ -462,6 +462,43 @@ mode retains unacknowledged batches in the event spool; memory-only mode can
 lose acknowledged work on a crash. Packet fallback is disabled unless
 `--event-fallback-to-packets` is explicitly set.
 
+### Operating the reliable upstream event spool
+
+Each encoded spool record payload is limited to 4 MiB, including inherited
+loss reports, even when `--event-spool-max-bytes=0` makes total logical storage
+unlimited. The receiving processor's `--event-ingress-max-batch-bytes` must be
+at least 4 MiB. Raising that receiver validation limit does not raise the
+sender's fixed record limit or gRPC's 10 MiB receive ceiling.
+`--event-queue-size` must also be at least the largest incoming batch's event
+count (up to 4,096); ingress rejects an impossible whole-batch admission before
+writing or ACKing it, and startup reports the required size for an older WAL.
+
+Oversized events are rejected before publication and their exact sequence
+coverage is retained durably. Coverage that cannot accompany a normal event is
+sent in bounded loss-only batches; it is never truncated. Fragmented pending
+coverage is capped at 65,536 normalized ranges or count-only reports and 16 MiB
+of encoded statistics. If the spool cannot persist an event or its exact loss
+coverage, forwarding stops explicitly until durable carriers can drain.
+
+Immutable record files are tracked by a versioned manifest checkpoint and a
+checksummed mutation journal. Those metadata files, not every record present in
+the directory, define the logical pending set. Startup replays complete journal
+transactions, ignores only an incomplete final append, and fails without
+deleting evidence on corruption, missing records, unsafe paths, ambiguous
+legacy state, or unsupported formats.
+
+Only one process may own a spool directory. A sync failure that leaves
+durability uncertain blocks sends, mutations, and cleanup; stop the processor
+and reopen the same directory to resolve the visible complete state. Do not
+clear the directory or reuse the affected sequence. Startup errors identify
+the failed path or operation; preserve the directory as a unit for diagnosis.
+
+`--event-spool-max-bytes` limits logical bytes referenced by the active set.
+Physical disk use may be higher when acknowledged or evicted records and
+temporary files await retryable cleanup. These orphans are not pending events;
+startup and later safe mutations retry their removal. Monitor filesystem space
+separately from the logical limit.
+
 ### Virtual Interface
 
 Expose aggregated traffic from all connected hunters on a virtual network interface, enabling integration with third-party tools:

@@ -78,7 +78,10 @@ func TestUpstreamOversizedThenValidEventReachesIngressAndACKs(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, dispatcher.Close(ctx)) })
 	ingress, err := newEventIngress(EventIngressPolicy{Dispatcher: dispatcher, Profile: "reliable", WALDirectory: t.TempDir()})
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, ingress.wal.close()) })
+	t.Cleanup(func() {
+		ingress.stopRetry()
+		require.NoError(t, ingress.wal.close())
+	})
 
 	const (
 		node    = "upstream-node"
@@ -120,7 +123,7 @@ func TestUpstreamOversizedThenValidEventReachesIngressAndACKs(t *testing.T) {
 	serveCtx, cancel := context.WithCancel(ctx)
 	stream := &upstreamIngressTestStream{ctx: serveCtx, ingress: ingress, controls: make(chan *eventsv1.EventIngressControl, 2)}
 	served := make(chan error, 1)
-	go func() { served <- client.Serve(serveCtx, stream) }()
+	go func() { served <- client.Serve(serveCtx, stream, cancel) }()
 	require.Eventually(t, func() bool { return !spool.HasPending() }, time.Second, time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-served, context.Canceled)

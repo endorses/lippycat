@@ -908,6 +908,42 @@ while the first owner remains live and verifies that a second open still fails.
 Focused normal and `all`-tag race tests passed for `eventspool`,
 `eventforwarding`, `processor/upstream`, and `protoadapter`.
 
+A twenty-third source-to-plan audit on 2026-09-19 corrected two live-delivery
+resource gaps. Reliable processor ingress could durably ACK a batch rejected by
+the full volatile dispatcher queue, but it had no live retry path; that batch
+and every later batch in the producer session remained undispatched until a
+processor restart. WAL-backed ingress now uses one bounded retry worker,
+preserves per-session order, advances the delivered checkpoint only after
+atomic dispatcher admission, and stops the worker before shutdown checkpointing
+and WAL close. Event-forwarding reconnects could also leave a control receiver
+blocked on the previous `Serve` invocation's full result channel. Each `Serve`
+now owns a cancellable delivery context, so return and reconnect release the
+old receiver. Deterministic regressions reproduce both failures and verify live
+ordered delivery, no duplication, and receiver exit.
+
+Final adversarial review tightened both corrections. Stream attempts now carry
+the cancel function for the context that created the gRPC stream, so `Serve`
+also releases a receiver blocked inside `Recv`, not only one blocked while
+publishing a control result. Processor ingress rejects a decoded batch whose
+event count exceeds the dispatcher's total queue capacity before WAL append or
+ACK; older WALs with such a record fail startup with the required capacity in
+the error instead of retrying an impossible admission forever. Regressions
+cover the blocked-`Recv`, pre-WAL rejection, loss-only acceptance, and legacy
+recovery cases. Recovery skips WAL records already covered by its durable
+checkpoint before applying the capacity check, so a failed WAL reset does not
+make a later queue-size reduction reject already delivered work.
+
+The same audit completed the missing processor-upstream operator guidance for
+record limits, exact loss overflow, manifest/journal recovery, uncertain
+durability, orphan cleanup, and logical versus physical capacity. It also
+clarified that increasing processor validation does not increase the fixed
+4 MiB durable sender limit or gRPC's separate 10 MiB receive ceiling.
+
+Verification was rerun on the final corrected tree. Focused changed-path race
+tests, the complete `make test` suite outside the sandbox (including loopback
+integration tests and the LI partition), `make vet`, `make build-matrix`,
+`make manual`, Go formatting, and `git diff --check` passed.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

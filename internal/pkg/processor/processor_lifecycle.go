@@ -351,6 +351,12 @@ func (p *Processor) Shutdown() error {
 		if p.eventRuntime != nil {
 			p.eventRuntime.Close()
 		}
+		// Stop reliable-ingress retries before closing the dispatcher. Any batch
+		// that has not crossed the volatile queue boundary remains in the WAL and
+		// is excluded from the delivered checkpoint below.
+		if p.eventIngress != nil {
+			p.eventIngress.stopRetry()
+		}
 		eventsDrained := p.eventDispatcher == nil
 		if p.eventDispatcher != nil {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

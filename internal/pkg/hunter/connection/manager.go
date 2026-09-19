@@ -291,9 +291,12 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 				m.connWg.Add(1)
 				go func() {
 					defer m.connWg.Done()
-					stream, streamErr := m.eventClient.StreamEvents(m.connCtx)
+					attemptCtx, cancelAttempt := context.WithCancel(m.connCtx)
+					stream, streamErr := m.eventClient.StreamEvents(attemptCtx)
 					if streamErr == nil {
-						streamErr = forwarder.Serve(m.connCtx, stream)
+						streamErr = forwarder.Serve(attemptCtx, stream, cancelAttempt)
+					} else {
+						cancelAttempt()
 					}
 					if streamErr != nil && m.connCtx.Err() == nil {
 						logger.Error("Event stream failed", "error", streamErr)

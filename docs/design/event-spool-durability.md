@@ -12,9 +12,15 @@ tests.
 The default maximum deterministic `ProtocolEventBatch` payload is 4 MiB. The
 limit applies even when the total spool byte limit is unlimited. It is the
 minimum processor event-ingress limit; processors reject lower configured
-values at startup, while operators may raise the receiver ceiling. Both values
-remain below the 10 MiB gRPC message ceiling so the enclosing ingress message
-has headroom.
+values at startup. Operators may raise the receiver's validation limit, but
+durable senders remain fixed at 4 MiB and gRPC still enforces its separate
+10 MiB receive ceiling. The default therefore leaves headroom for the enclosing
+ingress message.
+
+The processor's normalized event queue must be large enough to admit the event
+collection atomically. A decoded batch larger than the queue's total capacity
+is rejected before reliable WAL append or ACK. Recovery reports the required
+capacity if an older WAL contains such a batch.
 
 Admission validates the final batch after inherited and newly incurred loss
 reports have been attached. It must satisfy the protobuf adapter limits of

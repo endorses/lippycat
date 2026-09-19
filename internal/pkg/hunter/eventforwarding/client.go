@@ -44,6 +44,9 @@ type Client struct {
 	// controlReceived is a deterministic test seam invoked after a received
 	// control is queued for Serve. Production clients leave it nil.
 	controlReceived func()
+	// controlReceiverExited is a deterministic test seam invoked when a
+	// per-Serve control receiver exits. Production clients leave it nil.
+	controlReceiverExited func()
 }
 
 const batchFetchLimit = 128
@@ -139,7 +142,14 @@ func logCommittedCleanup(err error) {
 	}
 }
 
-func (c *Client) Serve(ctx context.Context, stream Stream) error {
+// Serve runs one stream attempt. cancelStream must cancel the context used to
+// create stream; Serve calls it on every return path so a concurrent Recv is
+// released before the caller reconnects with a replacement stream.
+func (c *Client) Serve(ctx context.Context, stream Stream, cancelStream context.CancelFunc) error {
+	if cancelStream == nil {
+		return errors.New("serve event forwarding: stream cancel is required")
+	}
+	defer cancelStream()
 	if stream == nil {
 		return errors.New("serve event forwarding: stream is required")
 	}
@@ -158,8 +168,10 @@ func (c *Client) Serve(ctx context.Context, stream Stream) error {
 		return fmt.Errorf("serve event forwarding: processor accepted profile %s, requested %s", accepted.GetAcceptedProfile(), c.config.Profile)
 	}
 
+	serveCtx, cancelServe := context.WithCancel(ctx)
+	defer cancelServe()
 	controls := make(chan controlResult, 1)
-	go receiveControls(ctx, stream, controls, c.controlReceived)
+	go receiveControls(serveCtx, stream, controls, c.controlReceived, c.controlReceiverExited)
 	// The initial retrieval observes everything committed before Serve starts;
 	// discard the coalesced historical wake so an empty suffix does not cause a
 	// redundant fetch. A concurrent enqueue is still visible in that retrieval.
@@ -295,7 +307,10 @@ type controlResult struct {
 	err     error
 }
 
-func receiveControls(ctx context.Context, stream Stream, output chan<- controlResult, received func()) {
+func receiveControls(ctx context.Context, stream Stream, output chan<- controlResult, received, exited func()) {
+	if exited != nil {
+		defer exited()
+	}
 	for {
 		ctrl, err := stream.Recv()
 		select {

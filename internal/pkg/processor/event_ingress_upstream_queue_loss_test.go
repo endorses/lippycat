@@ -30,7 +30,10 @@ func TestEventIngressAcceptsUpstreamQueueLossBeforeRouteCreation(t *testing.T) {
 			ingress, err := newEventIngress(EventIngressPolicy{Dispatcher: dispatcher, Profile: profile, WALDirectory: t.TempDir()})
 			require.NoError(t, err)
 			if ingress.wal != nil {
-				t.Cleanup(func() { require.NoError(t, ingress.wal.close()) })
+				t.Cleanup(func() {
+					ingress.stopRetry()
+					require.NoError(t, ingress.wal.close())
+				})
 			}
 
 			var assigned []events.Event

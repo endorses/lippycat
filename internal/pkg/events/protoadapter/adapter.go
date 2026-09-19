@@ -23,8 +23,9 @@ import (
 
 const (
 	// MaxEncodedBatchBytes is the shared sender/receiver payload contract. A
-	// receiver may raise this ceiling, but lowering it would strand durable
-	// records already admitted by default-configured forwarding spools.
+	// receiver may raise its validation limit, but doing so does not raise this
+	// durable sender limit or gRPC's separate message ceiling. Lowering the
+	// receiver limit would strand records admitted by default forwarding spools.
 	MaxEncodedBatchBytes = 4 << 20
 	MaxBatchEvents       = 4096
 	MaxStringBytes       = 1 << 20

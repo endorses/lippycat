@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/events"
@@ -26,6 +27,8 @@ import (
 )
 
 const defaultIngressMaxBatchBytes = protoadapter.MaxEncodedBatchBytes
+
+const eventIngressRetryInterval = 10 * time.Millisecond
 
 type EventIngressPolicy struct {
 	Dispatcher    *events.Dispatcher
@@ -41,18 +44,30 @@ type ingressSessionKey struct {
 	producerSessionID string
 }
 
+type pendingIngressBatch struct {
+	events []events.Event
+	state  ingressSession
+}
+
 func ingressKey(sourceNodeID, producerSessionID string) ingressSessionKey {
 	return ingressSessionKey{sourceNodeID: sourceNodeID, producerSessionID: producerSessionID}
 }
 
 type eventIngress struct {
 	dispatcher    *events.Dispatcher
+	enqueueBatch  func([]events.Event) bool
 	profile       eventsv1.IngressProfile
 	maxBatchBytes int
 	wal           *eventWAL
 	mu            sync.Mutex
 	sessions      map[ingressSessionKey]ingressSession
 	delivered     map[ingressSessionKey]ingressSession
+	pending       map[ingressSessionKey][]pendingIngressBatch
+	retryStop     chan struct{}
+	retryWG       sync.WaitGroup
+	retryRunning  bool
+	closed        bool
+	stopRetryOnce sync.Once
 	authorize     func(*eventsv1.EventIngressOpen) bool
 	flowControl   func() int32
 }
@@ -74,6 +89,10 @@ func newEventIngress(p EventIngressPolicy) (*eventIngress, error) {
 	i := &eventIngress{
 		dispatcher: p.Dispatcher, profile: profile, maxBatchBytes: p.MaxBatchBytes,
 		sessions: make(map[ingressSessionKey]ingressSession), delivered: make(map[ingressSessionKey]ingressSession),
+		pending: make(map[ingressSessionKey][]pendingIngressBatch), retryStop: make(chan struct{}),
+	}
+	if p.Dispatcher != nil {
+		i.enqueueBatch = p.Dispatcher.EnqueueBatch
 	}
 	if profile == eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE {
 		if p.WALDirectory == "" {
@@ -164,6 +183,13 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 				return nil, status.Errorf(codes.PermissionDenied, "event kind %s was not negotiated", event.Kind())
 			}
 		}
+	}
+	if len(decoded) > i.dispatcher.QueueCapacity() {
+		return nil, status.Errorf(
+			codes.ResourceExhausted,
+			"event batch contains %d events but processor ingress queue capacity is %d; split the batch or increase the processor event queue size",
+			len(decoded), i.dispatcher.QueueCapacity(),
+		)
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -256,8 +282,11 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 		// Validated loss coverage may retire batch identities that were never
 		// admitted. Only previously admitted but undispatched batches block
 		// dispatch; numeric adjacency would stall after a legitimate gap.
-		if delivered.batch == previousBatch && i.dispatcher.EnqueueBatch(decoded) {
+		if delivered.batch == previousBatch && len(i.pending[key]) == 0 && i.enqueueBatch(decoded) {
 			i.delivered[key] = state
+		} else {
+			i.pending[key] = append(i.pending[key], pendingIngressBatch{events: decoded, state: state})
+			i.startRetryLocked()
 		}
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
 	}
@@ -268,6 +297,83 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	state.event = admittedEventHighWater(batch, state.event)
 	i.sessions[key] = state
 	return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil
+}
+
+// startRetryLocked starts the single bounded retry worker when durable work is
+// waiting for dispatcher capacity. The WAL bounds the number and encoded size
+// of admitted batches; this queue only retains their already decoded form.
+func (i *eventIngress) startRetryLocked() {
+	if i.closed || i.retryRunning {
+		return
+	}
+	i.retryRunning = true
+	i.retryWG.Add(1)
+	go i.retryPending()
+}
+
+func (i *eventIngress) retryPending() {
+	defer i.retryWG.Done()
+	ticker := time.NewTicker(eventIngressRetryInterval)
+	defer ticker.Stop()
+	for {
+		if i.drainPending() {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-i.retryStop:
+			i.mu.Lock()
+			i.retryRunning = false
+			i.mu.Unlock()
+			return
+		}
+	}
+}
+
+// drainPending makes one non-blocking pass. A full dispatcher stops a
+// session's drain at its head, preserving per-producer order and preventing a
+// later batch from being delivered twice or ahead of an earlier batch.
+func (i *eventIngress) drainPending() bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.closed {
+		i.retryRunning = false
+		return true
+	}
+	remaining := false
+	for key, queue := range i.pending {
+		for len(queue) > 0 {
+			if !i.enqueueBatch(queue[0].events) {
+				remaining = true
+				break
+			}
+			i.delivered[key] = queue[0].state
+			queue = queue[1:]
+		}
+		if len(queue) == 0 {
+			delete(i.pending, key)
+		} else {
+			i.pending[key] = queue
+		}
+	}
+	if !remaining && len(i.pending) == 0 {
+		i.retryRunning = false
+		return true
+	}
+	return false
+}
+
+// stopRetry terminates live retry before shutdown checkpoints and WAL close.
+// It is idempotent so construction failures and tests can share cleanup.
+func (i *eventIngress) stopRetry() {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	i.closed = true
+	i.mu.Unlock()
+	i.stopRetryOnce.Do(func() { close(i.retryStop) })
+	i.retryWG.Wait()
 }
 
 func firstReportedLossSequence(losses []*eventsv1.EventLoss) uint64 {
@@ -361,15 +467,21 @@ func (i *eventIngress) recover() error {
 		i.delivered[key] = state
 	}
 	return i.wal.replay(func(batch *eventsv1.ProtocolEventBatch) error {
-		decoded, _, err := protoadapter.DecodeBatch(batch)
-		if err != nil {
-			return fmt.Errorf("decode recovered event batch: %w", err)
-		}
 		key := ingressKey(batch.SourceNodeId, batch.ProducerSessionId)
 		if state := i.sessions[key]; batch.BatchSequence <= state.batch {
 			return nil
 		}
-		if !i.dispatcher.EnqueueBatch(decoded) {
+		decoded, _, err := protoadapter.DecodeBatch(batch)
+		if err != nil {
+			return fmt.Errorf("decode recovered event batch: %w", err)
+		}
+		if len(decoded) > i.dispatcher.QueueCapacity() {
+			return fmt.Errorf(
+				"recover event batch %d for source %q session %q: batch contains %d events but dispatcher queue capacity is %d; increase the processor event queue size to at least %d before restarting",
+				batch.BatchSequence, batch.SourceNodeId, batch.ProducerSessionId, len(decoded), i.dispatcher.QueueCapacity(), len(decoded),
+			)
+		}
+		if !i.enqueueBatch(decoded) {
 			return errors.New("event queue full during WAL recovery")
 		}
 		i.mu.Lock()

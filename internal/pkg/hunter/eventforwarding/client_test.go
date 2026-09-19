@@ -2,6 +2,7 @@ package eventforwarding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -20,6 +21,47 @@ type fakeStream struct {
 	sent     []*eventsv1.EventIngressMessage
 	controls chan *eventsv1.EventIngressControl
 	onSend   func(*eventsv1.EventIngressMessage)
+}
+
+type blockedControlStream struct {
+	mu           sync.Mutex
+	sendCount    int
+	recvCount    int
+	recvBlocked  chan struct{}
+	canceled     chan struct{}
+	batchSendErr error
+}
+
+func (s *blockedControlStream) Send(message *eventsv1.EventIngressMessage) error {
+	s.mu.Lock()
+	s.sendCount++
+	sendCount := s.sendCount
+	s.mu.Unlock()
+	if sendCount == 1 {
+		return nil
+	}
+	<-s.recvBlocked
+	return s.batchSendErr
+}
+
+func (s *blockedControlStream) Recv() (*eventsv1.EventIngressControl, error) {
+	s.mu.Lock()
+	s.recvCount++
+	recvCount := s.recvCount
+	s.mu.Unlock()
+	switch recvCount {
+	case 1:
+		return &eventsv1.EventIngressControl{
+			Kind:            eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED,
+			AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE,
+		}, nil
+	case 2:
+		close(s.recvBlocked)
+		<-s.canceled
+		return nil, context.Canceled
+	default:
+		return nil, io.EOF
+	}
 }
 
 func (s *fakeStream) Send(message *eventsv1.EventIngressMessage) error {
@@ -44,6 +86,13 @@ func (s *fakeStream) messages() []*eventsv1.EventIngressMessage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]*eventsv1.EventIngressMessage(nil), s.sent...)
+}
+
+func fakeStreamCancel(stream *fakeStream) context.CancelFunc {
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(stream.controls) })
+	}
 }
 
 func newTestClient(t *testing.T) (*Client, *eventspool.Spool) {
@@ -74,7 +123,7 @@ func TestServeRetriesPersistedIdentityAndDeletesOnlyAfterAck(t *testing.T) {
 	first.controls <- &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, first) }()
+	go func() { done <- client.Serve(ctx, first, fakeStreamCancel(first)) }()
 	require.Eventually(t, func() bool { return len(first.messages()) == 2 }, time.Second, time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
@@ -83,7 +132,7 @@ func TestServeRetriesPersistedIdentityAndDeletesOnlyAfterAck(t *testing.T) {
 	second := &fakeStream{controls: make(chan *eventsv1.EventIngressControl, 4)}
 	second.controls <- &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE}
 	ctx, cancel = context.WithCancel(context.Background())
-	go func() { done <- client.Serve(ctx, second) }()
+	go func() { done <- client.Serve(ctx, second, fakeStreamCancel(second)) }()
 	require.Eventually(t, func() bool { return len(second.messages()) == 2 }, time.Second, time.Millisecond)
 	require.Equal(t, first.messages()[1].GetBatch().ProducerSessionId, second.messages()[1].GetBatch().ProducerSessionId)
 	require.Equal(t, first.messages()[1].GetBatch().BatchSequence, second.messages()[1].GetBatch().BatchSequence)
@@ -91,6 +140,28 @@ func TestServeRetriesPersistedIdentityAndDeletesOnlyAfterAck(t *testing.T) {
 	require.Eventually(t, func() bool { return len(spool.Batches()) == 0 }, time.Second, time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestServeSendFailureCancelsBlockedControlDelivery(t *testing.T) {
+	client, _ := newTestClient(t)
+	_, err := client.Enqueue(ingressBatch(1))
+	require.NoError(t, err)
+
+	receiverExited := make(chan struct{})
+	client.controlReceiverExited = func() { close(receiverExited) }
+	stream := &blockedControlStream{
+		recvBlocked:  make(chan struct{}),
+		canceled:     make(chan struct{}),
+		batchSendErr: errors.New("send failed"),
+	}
+
+	err = client.Serve(context.Background(), stream, func() { close(stream.canceled) })
+	require.ErrorContains(t, err, "serve event forwarding: send batch 1: send failed")
+	select {
+	case <-receiverExited:
+	case <-time.After(time.Second):
+		t.Fatal("control receiver did not exit after Serve returned")
+	}
 }
 
 func TestServeRejectsLateBatchBelowSentHighWater(t *testing.T) {
@@ -105,7 +176,7 @@ func TestServeRejectsLateBatchBelowSentHighWater(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, stream) }()
+	go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	require.Eventually(t, func() bool { return len(stream.messages()) == 2 }, time.Second, time.Millisecond)
 	require.Equal(t, uint64(2), stream.messages()[1].GetBatch().GetBatchSequence())
 
@@ -127,7 +198,7 @@ func TestServeNackResendsRequestedBatch(t *testing.T) {
 	stream.controls <- &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, stream) }()
+	go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	require.Eventually(t, func() bool { return len(stream.messages()) == 2 }, time.Second, time.Millisecond)
 	stream.controls <- &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_NACK, NackBatchRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}}}
 	require.Eventually(t, func() bool { return len(stream.messages()) == 3 }, time.Second, time.Millisecond)
@@ -210,7 +281,7 @@ func TestServeFetchesFixedBacklogInBoundedChunks(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, stream) }()
+	go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	require.Eventually(t, func() bool { return len(stream.messages()) == batchCount+1 }, 5*time.Second, time.Millisecond)
 	// Three bounded non-empty fetches cover the fixed backlog. One final empty
 	// fetch is permitted before Serve waits for a wake or control message.
@@ -248,7 +319,7 @@ func TestServeOrdersBacklogsIncludingSequenceHoles(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan error, 1)
-			go func() { done <- client.Serve(ctx, stream) }()
+			go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 			require.Eventually(t, func() bool { return len(stream.messages()) == len(tt.sequences)+1 }, time.Second, time.Millisecond)
 			var got []uint64
 			for _, message := range stream.messages()[1:] {
@@ -283,7 +354,7 @@ func TestServePauseEvictResumeSkipsRemovedCachedBatch(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, stream) }()
+	go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	select {
 	case <-selected:
 	case <-time.After(time.Second):
@@ -359,7 +430,7 @@ func TestServePauseDropOldestEvictResumeSkipsCachedVictimWithLossCoverage(t *tes
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, stream) }()
+	go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	select {
 	case <-firstSelected:
 	case <-time.After(time.Second):
@@ -447,7 +518,7 @@ func TestServeSeesSustainedEnqueueWakesDuringDrain(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, stream) }()
+	go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	select {
 	case <-selected:
 	case <-time.After(time.Second):
@@ -490,7 +561,7 @@ func TestServeSkipsCachedBatchRemovedDuringDrain(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, stream) }()
+	go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	select {
 	case <-firstSelected:
 	case <-time.After(time.Second):
@@ -538,9 +609,8 @@ func TestServeRefillsAfterEntireCachedSuffixRemoved(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	defer close(stream.controls)
 	done := make(chan error, 1)
-	go func() { done <- client.Serve(ctx, stream) }()
+	go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	select {
 	case <-firstSelected:
 	case <-time.After(time.Second):
@@ -572,7 +642,7 @@ func TestServeRejectsProfileDowngrade(t *testing.T) {
 	client, _ := newTestClient(t)
 	stream := &fakeStream{controls: make(chan *eventsv1.EventIngressControl, 1)}
 	stream.controls <- &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY}
-	err := client.Serve(context.Background(), stream)
+	err := client.Serve(context.Background(), stream, fakeStreamCancel(stream))
 	require.ErrorContains(t, err, "accepted profile")
 }
 
@@ -621,7 +691,7 @@ func TestServeDrainsRecoveredFinalBatchSequence(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- recoveredClient.Serve(ctx, stream) }()
+	go func() { done <- recoveredClient.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 	require.Eventually(t, func() bool { return !recovered.HasPending() }, time.Second, time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
@@ -664,7 +734,7 @@ func BenchmarkServeBacklogDrain(b *testing.B) {
 				ctx, cancel := context.WithCancel(context.Background())
 				done := make(chan error, 1)
 				b.StartTimer()
-				go func() { done <- client.Serve(ctx, stream) }()
+				go func() { done <- client.Serve(ctx, stream, fakeStreamCancel(stream)) }()
 				require.Eventually(b, func() bool { return len(stream.messages()) == batchCount+1 && !spool.HasPending() }, 30*time.Second, time.Millisecond)
 				b.StopTimer()
 				metrics := spool.SnapshotMetrics()

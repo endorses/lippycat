@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +23,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func ingressBatch(t *testing.T, batch, sequence uint64) *eventsv1.ProtocolEventBatch {
@@ -34,6 +38,20 @@ func ingressBatch(t *testing.T, batch, sequence uint64) *eventsv1.ProtocolEventB
 		ev = producer.Assign(events.NewDNSEvent(envelope))
 	}
 	wire, err := protoadapter.ToProtoBatch("node-a", ev.Envelope().ProducerSessionID, batch, []events.Event{ev}, nil, 1)
+	require.NoError(t, err)
+	return wire
+}
+
+func ingressBatchWithEventCount(t *testing.T, batch uint64, count int) *eventsv1.ProtocolEventBatch {
+	t.Helper()
+	producer, err := events.NewOfflineProducer("node-a", events.OfflineSession{InputIdentity: "fixture", AnalysisProfile: "profile-1", SourceOrdering: []string{"fixture"}})
+	require.NoError(t, err)
+	envelope := events.Envelope{Timestamp: time.Unix(1, 0), NodeID: "node-a", CaptureScope: events.CaptureScopeFull, Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.53"), SourcePort: 53000, DestinationPort: 53}}
+	batchEvents := make([]events.Event, 0, count)
+	for range count {
+		batchEvents = append(batchEvents, producer.Assign(events.NewDNSEvent(envelope)))
+	}
+	wire, err := protoadapter.ToProtoBatch("node-a", producer.SessionID(), batch, batchEvents, nil, 1)
 	require.NoError(t, err)
 	return wire
 }
@@ -506,7 +524,10 @@ func TestReliableEventIngressDispatchesAfterDurableAdmission(t *testing.T) {
 	defer d.Close(context.Background())
 	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: t.TempDir()})
 	require.NoError(t, err)
-	defer i.wal.close()
+	defer func() {
+		i.stopRetry()
+		require.NoError(t, i.wal.close())
+	}()
 	b := ingressBatch(t, 1, 1)
 	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
 	ack, err := i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, b)
@@ -515,12 +536,182 @@ func TestReliableEventIngressDispatchesAfterDurableAdmission(t *testing.T) {
 	require.Eventually(t, func() bool { return broadcaster.Stats().Published == 1 }, time.Second, time.Millisecond)
 }
 
+func TestReliableEventIngressRejectsBatchLargerThanDispatcherCapacityBeforeWALAppend(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 1})
+	require.NoError(t, err)
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		i.stopRetry()
+		require.NoError(t, i.wal.close())
+	})
+
+	b := ingressBatchWithEventCount(t, 1, 2)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
+	ctrl, err := i.admit(context.Background(), ingressKey(b.SourceNodeId, b.ProducerSessionId), open, nil, b)
+	require.Nil(t, ctrl)
+	require.Equal(t, codes.ResourceExhausted, status.Code(err))
+	require.ErrorContains(t, err, "contains 2 events")
+	require.ErrorContains(t, err, "capacity is 1")
+	require.Zero(t, i.wal.size, "an impossible batch must not cross the durable ACK boundary")
+	require.Empty(t, i.sessions)
+	require.Empty(t, i.pending)
+}
+
+func TestReliableEventIngressCapacityCheckAllowsEmptyAndLossOnlyBatches(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 1})
+	require.NoError(t, err)
+	require.NoError(t, d.Start(context.Background()))
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		i.stopRetry()
+		require.NoError(t, d.Close(context.Background()))
+		require.NoError(t, i.wal.close())
+	})
+
+	empty := &eventsv1.ProtocolEventBatch{SourceNodeId: "node-a", ProducerSessionId: "session-a", BatchSequence: 1, SemanticProfileRevision: 1}
+	open := &eventsv1.EventIngressOpen{SourceNodeId: empty.SourceNodeId, ProducerSessionId: empty.ProducerSessionId, SemanticProfileRevision: 1}
+	ack, err := i.admit(context.Background(), ingressKey(empty.SourceNodeId, empty.ProducerSessionId), open, nil, empty)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), ack.CumulativeAckSequence)
+
+	lossOnly := &eventsv1.ProtocolEventBatch{
+		SourceNodeId: "node-a", ProducerSessionId: "session-a", BatchSequence: 2, SemanticProfileRevision: 1,
+		Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+			Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 2, SourceNodeId: "node-a", ProducerSessionId: "session-a",
+			EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 2}},
+		}}},
+	}
+	ack, err = i.admit(context.Background(), ingressKey(lossOnly.SourceNodeId, lossOnly.ProducerSessionId), open, nil, lossOnly)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
+}
+
+func TestReliableEventIngressRecoveryExplainsBatchLargerThanDispatcherCapacity(t *testing.T) {
+	dir := t.TempDir()
+	w, err := openEventWAL(dir, 1<<20)
+	require.NoError(t, err)
+	require.NoError(t, w.append(ingressBatchWithEventCount(t, 1, 2)))
+	require.NoError(t, w.close())
+
+	d, err := events.NewDispatcher(events.Config{QueueSize: 1})
+	require.NoError(t, err)
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, i.wal.close()) })
+
+	err = i.recover()
+	require.ErrorContains(t, err, "batch contains 2 events but dispatcher queue capacity is 1")
+	require.ErrorContains(t, err, "increase the processor event queue size to at least 2")
+	require.Empty(t, i.sessions)
+}
+
+func TestReliableEventIngressRecoverySkipsCheckpointedBatchAboveCurrentCapacity(t *testing.T) {
+	dir := t.TempDir()
+	batch := ingressBatchWithEventCount(t, 1, 2)
+	key := ingressKey(batch.SourceNodeId, batch.ProducerSessionId)
+	w, err := openEventWAL(dir, 1<<20)
+	require.NoError(t, err)
+	require.NoError(t, w.append(batch))
+	require.NoError(t, w.checkpoint(map[ingressSessionKey]ingressSession{
+		key: {batch: 1, event: batch.LastEventSequence},
+	}))
+	require.NoError(t, w.close())
+
+	d, err := events.NewDispatcher(events.Config{QueueSize: 1})
+	require.NoError(t, err)
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, i.wal.close()) })
+
+	require.NoError(t, i.recover())
+	require.Equal(t, ingressSession{batch: 1, event: batch.LastEventSequence}, i.sessions[key])
+	require.Equal(t, i.sessions, i.delivered)
+}
+
+type gatedIngressSink struct {
+	gate        chan struct{}
+	releaseOnce sync.Once
+	mu          sync.Mutex
+	events      []events.Event
+}
+
+func (s *gatedIngressSink) HandleEvent(_ context.Context, event events.Event) error {
+	<-s.gate
+	s.mu.Lock()
+	s.events = append(s.events, event)
+	s.mu.Unlock()
+	return nil
+}
+
+func (*gatedIngressSink) Flush(context.Context) error { return nil }
+func (*gatedIngressSink) Close(context.Context) error { return nil }
+func (s *gatedIngressSink) release()                  { s.releaseOnce.Do(func() { close(s.gate) }) }
+
+func TestReliableEventIngressRetriesFullDispatcherWithoutRestart(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 2, SinkQueueSize: 2})
+	require.NoError(t, err)
+	sink := &gatedIngressSink{gate: make(chan struct{})}
+	require.NoError(t, d.Register(sink))
+	require.NoError(t, d.Start(context.Background()))
+
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		sink.release()
+		i.stopRetry()
+		require.NoError(t, d.Close(context.Background()))
+		require.NoError(t, i.wal.close())
+	})
+	var dispatcherFull atomic.Bool
+	dispatcherFull.Store(true)
+	realEnqueue := i.enqueueBatch
+	i.enqueueBatch = func(batch []events.Event) bool {
+		return !dispatcherFull.Load() && realEnqueue(batch)
+	}
+	first := ingressBatch(t, 1, 1)
+	key := ingressKey(first.SourceNodeId, first.ProducerSessionId)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId, SemanticProfileRevision: 1}
+	ack, err := i.admit(context.Background(), key, open, nil, first)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), ack.CumulativeAckSequence)
+	second := ingressBatch(t, 2, 2)
+	ack, err = i.admit(context.Background(), key, open, nil, second)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), ack.CumulativeAckSequence)
+	i.mu.Lock()
+	deliveredBeforeRetry := len(i.delivered)
+	i.mu.Unlock()
+	require.Zero(t, deliveredBeforeRetry, "a full dispatcher must leave both durable batches pending")
+
+	dispatcherFull.Store(false)
+	sink.release()
+	require.Eventually(t, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		var sequences []uint64
+		for _, event := range sink.events {
+			if event.Envelope().NodeID == first.SourceNodeId {
+				sequences = append(sequences, event.Envelope().EventSequence)
+			}
+		}
+		return len(sequences) == 2 && sequences[0] == 1 && sequences[1] == 2
+	}, time.Second, time.Millisecond)
+	i.mu.Lock()
+	delivered := i.delivered[key]
+	i.mu.Unlock()
+	require.Equal(t, ingressSession{batch: 2, event: 2}, delivered)
+
+}
+
 func TestReliableEventIngressRetainsAckedUndispatchedBatchForRecovery(t *testing.T) {
 	dir := t.TempDir()
 	stopped, err := events.NewDispatcher(events.Config{QueueSize: 1})
 	require.NoError(t, err)
 	ingress, err := newEventIngress(EventIngressPolicy{Dispatcher: stopped, Profile: "reliable", WALDirectory: dir})
 	require.NoError(t, err)
+	defer ingress.stopRetry()
 	b := ingressBatch(t, 1, 1)
 	open := &eventsv1.EventIngressOpen{SourceNodeId: b.SourceNodeId, ProducerSessionId: b.ProducerSessionId, SemanticProfileRevision: 1}
 	key := ingressKey(b.SourceNodeId, b.ProducerSessionId)
@@ -530,6 +721,7 @@ func TestReliableEventIngressRetainsAckedUndispatchedBatchForRecovery(t *testing
 	require.Equal(t, ingressSession{batch: 1, event: 1}, ingress.sessions[key])
 	require.Empty(t, ingress.delivered)
 	require.False(t, ingressSessionsEqual(ingress.sessions, ingress.delivered))
+	ingress.stopRetry()
 	require.NoError(t, ingress.wal.checkpoint(ingress.delivered))
 	require.NoError(t, ingress.wal.close())
 
@@ -539,7 +731,10 @@ func TestReliableEventIngressRetainsAckedUndispatchedBatchForRecovery(t *testing
 	defer recoveredDispatcher.Close(context.Background())
 	recovered, err := newEventIngress(EventIngressPolicy{Dispatcher: recoveredDispatcher, Profile: "reliable", WALDirectory: dir})
 	require.NoError(t, err)
-	defer recovered.wal.close()
+	defer func() {
+		recovered.stopRetry()
+		require.NoError(t, recovered.wal.close())
+	}()
 	require.NoError(t, recovered.recover())
 	require.Equal(t, ingressSession{batch: 1, event: 1}, recovered.sessions[key])
 	require.Equal(t, recovered.sessions, recovered.delivered)
@@ -552,7 +747,10 @@ func TestReliableEventIngressGapPreservesUndispatchedOrdering(t *testing.T) {
 	require.NoError(t, d.Register(broadcaster))
 	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: t.TempDir()})
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, i.wal.close()) })
+	t.Cleanup(func() {
+		i.stopRetry()
+		require.NoError(t, i.wal.close())
+	})
 	first := ingressBatch(t, 1, 1)
 	key := ingressKey(first.SourceNodeId, first.ProducerSessionId)
 	open := &eventsv1.EventIngressOpen{SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId, SemanticProfileRevision: 1}
@@ -570,8 +768,11 @@ func TestReliableEventIngressGapPreservesUndispatchedOrdering(t *testing.T) {
 	ack, err := i.admit(context.Background(), key, open, nil, replacement)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), ack.CumulativeAckSequence)
-	require.Empty(t, i.delivered, "the validated gap must not bypass admitted batch one")
-	require.Equal(t, uint64(0), broadcaster.Stats().Published)
+	require.Eventually(t, func() bool { return broadcaster.Stats().Published == 2 }, time.Second, time.Millisecond)
+	i.mu.Lock()
+	delivered := i.delivered[key]
+	i.mu.Unlock()
+	require.Equal(t, ingressSession{batch: 3, event: 3}, delivered)
 }
 
 func TestWALRecoveryDoesNotAdvanceDedupBeforeQueueAdmission(t *testing.T) {
@@ -596,7 +797,10 @@ func TestWALRecoveryRestoresLossOnlyEventHighWater(t *testing.T) {
 
 	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: t.TempDir()})
 	require.NoError(t, err)
-	defer i.wal.close()
+	defer func() {
+		i.stopRetry()
+		require.NoError(t, i.wal.close())
+	}()
 	lossOnly := &eventsv1.ProtocolEventBatch{
 		SourceNodeId: "node-a", ProducerSessionId: "session-a", BatchSequence: 1,
 		SemanticProfileRevision: 1,
@@ -702,7 +906,10 @@ func TestEventIngressAcceptsEvictionBeforeDelayedACK(t *testing.T) {
 			i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: profile, WALDirectory: t.TempDir()})
 			require.NoError(t, err)
 			if i.wal != nil {
-				t.Cleanup(func() { require.NoError(t, i.wal.close()) })
+				t.Cleanup(func() {
+					i.stopRetry()
+					require.NoError(t, i.wal.close())
+				})
 			}
 			now := time.Unix(1000, 0)
 			spool, err := eventspool.Open(eventspool.Config{Directory: t.TempDir(), Policy: eventspool.DropOldest, MaxAge: time.Hour, Clock: func() time.Time { return now }})

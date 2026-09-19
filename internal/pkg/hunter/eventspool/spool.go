@@ -265,6 +265,9 @@ func (s *Spool) load() error {
 	if err = s.loadManifest(resolved); err != nil {
 		return err
 	}
+	if err = s.syncRecoveredState(); err != nil {
+		return err
+	}
 	s.transactionsSinceCheckpoint = replayed
 	s.checkpointRecordBase = len(m.Records)
 	if s.shouldCheckpoint() {

@@ -214,6 +214,13 @@ serveLoop:
 				highestSent = sequence
 				continue serveLoop
 			}
+			// Removal may consume the entire cached suffix without sending a
+			// batch. Fetch the next window before waiting: the enqueue wake may
+			// already have been consumed while paused, and older ACK retirement
+			// does not produce a wake at all.
+			if needFetch {
+				continue serveLoop
+			}
 		}
 
 		select {

@@ -140,6 +140,12 @@ Power-loss tests model unsynced boundaries separately and permit only the old
 or new complete transaction state. Files needed by either state are retained
 until uncertainty is resolved.
 
+Recovery syncs the replayed journal, including any truncated incomplete tail,
+and the spool directory before retiring orphan records or obsolete journals.
+This makes the visible recovery state durable before deleting files required
+by the alternative pre-failure state. A failed recovery sync preserves those
+files and keeps the spool unavailable until recovery succeeds.
+
 One process owns a spool directory at a time. The owner holds an exclusive
 directory lock throughout recovery and mutation and releases it on `Close` or
 failed startup.

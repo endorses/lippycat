@@ -683,6 +683,24 @@ unmeasured transaction and replay traversal:
 | Replay half-drained backlog 1,000 | 16.1 ms | 4.36 MB | n/a | 2,000 |
 | Replay half-drained backlog 10,000 | 92.0 ms | 42.94 MB | n/a | 20,000 |
 
+A ninth source-to-plan audit on 2026-09-19 found two additional boundary gaps.
+Forwarding could wait indefinitely when removal consumed an entire cached
+suffix even though another retrieval window remained pending. The client now
+refills before waiting for another wake. Recovery also needed to sync the
+visible replayed journal and spool directory before deleting retired records
+or obsolete journals; without that barrier, a second crash could restore old
+metadata after its required files had been deleted. Failed recovery syncs now
+preserve those files and leave the durability barrier active.
+
+Regressions cover complete cached-window retirement, failed recovery journal
+and directory syncs, and a second crash restoring the older journal or
+checkpoint. These tests reproduce the gaps before the fixes.
+Focused normal and race suites passed for `eventspool`, `eventforwarding`,
+`processor/upstream`, and `protoadapter`. Tagged processor ingress regressions
+also passed under the race detector. Go formatting and `git diff --check`
+passed; the full suite and build matrix remain the historical checks recorded
+above.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

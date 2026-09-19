@@ -22,6 +22,116 @@ type faultFile struct {
 	sync  func() error
 }
 
+func TestRecoverySyncsVisibleJournalBeforeRetiringRecords(t *testing.T) {
+	for _, boundary := range []string{"journal", "directory"} {
+		t.Run(boundary, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := Open(Config{Directory: dir})
+			require.NoError(t, err)
+			defer s.Close()
+			_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+			require.NoError(t, err)
+			victim := s.records[0].path
+			journal := journalPath(dir, s.generation)
+			beforeACK, err := os.ReadFile(journal)
+			require.NoError(t, err)
+			fs := defaultFS()
+			open := fs.openFile
+			fs.openFile = func(path string, flags int, mode os.FileMode) (spoolFile, error) {
+				f, err := open(path, flags, mode)
+				if err != nil {
+					return nil, err
+				}
+				return &faultFile{spoolFile: f, sync: func() error { return errors.New("injected journal sync failure") }}, nil
+			}
+			s.fs = fs
+			require.ErrorIs(t, s.Ack("node", "session", 1), ErrDurabilityUncertain)
+			require.FileExists(t, victim)
+			if boundary == "directory" {
+				fs = defaultFS()
+				fs.syncDir = func(string) error { return errors.New("injected recovery directory sync failure") }
+				s.fs = fs
+			}
+			require.ErrorIs(t, s.Recover(), ErrDurabilityUncertain)
+			require.True(t, s.Status().DurabilityUncertain)
+			require.FileExists(t, victim, "failed recovery must preserve records required by the old durable journal")
+			if boundary == "journal" {
+				// A second crash can lose the still-unsynced ACK transaction.
+				require.NoError(t, os.WriteFile(journal, beforeACK, 0o600))
+			}
+			fs = defaultFS()
+			open = fs.openFile
+			journalSynced, directorySynced := false, false
+			fs.openFile = func(path string, flags int, mode os.FileMode) (spoolFile, error) {
+				f, err := open(path, flags, mode)
+				if err != nil {
+					return nil, err
+				}
+				return &faultFile{spoolFile: f, sync: func() error {
+					err := f.Sync()
+					journalSynced = err == nil
+					return err
+				}}, nil
+			}
+			fs.syncDir = func(path string) error {
+				require.True(t, journalSynced, "recovery must sync journal contents before the directory")
+				err := syncDirectory(path)
+				directorySynced = err == nil
+				return err
+			}
+			fs.remove = func(path string) error {
+				require.True(t, journalSynced && directorySynced, "cleanup must follow both recovery durability barriers")
+				return os.Remove(path)
+			}
+			s.fs = fs
+			require.NoError(t, s.Recover())
+			if boundary == "journal" {
+				require.True(t, s.Contains("node", "session", 1))
+			} else {
+				require.False(t, s.HasPending())
+				require.NoFileExists(t, victim)
+			}
+		})
+	}
+}
+
+func TestRecoverySyncsVisibleCheckpointBeforeRetiringJournal(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	defer s.Close()
+	_, err = s.Enqueue(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	oldJournal := journalPath(dir, s.generation)
+	oldManifest, err := os.ReadFile(filepath.Join(dir, manifestFileName))
+	require.NoError(t, err)
+	fs := defaultFS()
+	rename := fs.rename
+	manifestRenamed := false
+	fs.rename = func(from, to string) error {
+		err := rename(from, to)
+		if err == nil && filepath.Base(to) == manifestFileName {
+			manifestRenamed = true
+		}
+		return err
+	}
+	fs.syncDir = func(path string) error {
+		if manifestRenamed {
+			return errors.New("injected directory sync failure")
+		}
+		return syncDirectory(path)
+	}
+	s.fs = fs
+	require.ErrorIs(t, s.rotateCheckpoint(), ErrDurabilityUncertain)
+	require.ErrorIs(t, s.Recover(), ErrDurabilityUncertain)
+	require.FileExists(t, oldJournal, "the visible replacement checkpoint is not yet durable")
+	// Model losing the unsynced checkpoint rename at a second crash.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, manifestFileName), oldManifest, 0o600))
+	s.fs = defaultFS()
+	require.NoError(t, s.Recover())
+	require.True(t, s.Contains("node", "session", 1))
+}
+
 func (f *faultFile) Write(p []byte) (int, error) {
 	if f.write != nil {
 		return f.write(p)

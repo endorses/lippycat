@@ -17,6 +17,30 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// syncRecoveredState makes the visible recovery outcome durable before any
+// obsolete records or journals are collected. A process reopen can still see a
+// complete journal frame or checkpoint rename whose previous sync failed. Reads
+// alone do not settle that uncertainty, and cleanup must not destroy the files
+// required if a subsequent power loss restores the older durable state.
+func (s *Spool) syncRecoveredState() error {
+	f, err := s.fs.openFile(journalPath(s.config.Directory, s.generation), os.O_WRONLY, 0o600)
+	if err == nil {
+		syncErr := f.Sync()
+		s.metrics.Syncs++
+		err = errors.Join(syncErr, f.Close())
+	}
+	if err != nil {
+		s.uncertain = true
+		return fmt.Errorf("%w: sync recovered journal: %v", ErrDurabilityUncertain, err)
+	}
+	if err = s.fs.syncDir(s.config.Directory); err != nil {
+		s.uncertain = true
+		return fmt.Errorf("%w: sync recovered directory: %v", ErrDurabilityUncertain, err)
+	}
+	s.metrics.Syncs++
+	return nil
+}
+
 // resolveJournal applies journal metadata before opening record files. This is
 // what permits post-commit garbage collection even while an older checkpoint
 // still names the retired immutable files.

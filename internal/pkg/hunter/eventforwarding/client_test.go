@@ -433,6 +433,56 @@ func TestServeSkipsCachedBatchRemovedDuringDrain(t *testing.T) {
 	require.ErrorIs(t, <-done, context.Canceled)
 }
 
+func TestServeRefillsAfterEntireCachedSuffixRemoved(t *testing.T) {
+	client, spool := newTestClient(t)
+	for sequence := uint64(1); sequence <= batchFetchLimit+1; sequence++ {
+		_, err := client.Enqueue(ingressBatch(sequence))
+		require.NoError(t, err)
+	}
+	firstSelected := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	stream := &fakeStream{controls: make(chan *eventsv1.EventIngressControl, 4)}
+	stream.onSend = func(message *eventsv1.EventIngressMessage) {
+		if message.GetBatch().GetBatchSequence() == 1 {
+			close(firstSelected)
+			<-releaseFirst
+		}
+	}
+	stream.controls <- &eventsv1.EventIngressControl{
+		Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACCEPTED, AcceptedProfile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer close(stream.controls)
+	done := make(chan error, 1)
+	go func() { done <- client.Serve(ctx, stream) }()
+	select {
+	case <-firstSelected:
+	case <-time.After(time.Second):
+		t.Fatal("first batch was not selected")
+	}
+
+	// Retire the entire cached window while the first send is in flight. The
+	// next window remains pending and must not require another enqueue wake.
+	require.NoError(t, spool.Ack("hunter", "session", batchFetchLimit))
+	close(releaseFirst)
+	require.Eventually(t, func() bool {
+		for _, message := range stream.messages()[1:] {
+			if message.GetBatch().GetBatchSequence() == batchFetchLimit+1 {
+				return true
+			}
+		}
+		return false
+	}, time.Second, time.Millisecond)
+	sequences := make([]uint64, 0, 2)
+	for _, message := range stream.messages()[1:] {
+		sequences = append(sequences, message.GetBatch().GetBatchSequence())
+	}
+	require.Equal(t, []uint64{1, batchFetchLimit + 1}, sequences)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
 func TestServeRejectsProfileDowngrade(t *testing.T) {
 	client, _ := newTestClient(t)
 	stream := &fakeStream{controls: make(chan *eventsv1.EventIngressControl, 1)}

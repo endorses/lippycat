@@ -782,6 +782,15 @@ and `all`-tag race tests passed for `eventspool`, `eventforwarding`,
 `processor/upstream`, and `protoadapter`; the malformed-record fuzz target also
 passed a bounded run. Go formatting and `git diff --check` passed.
 
+A fifteenth source-to-plan audit on 2026-09-19 found that the checked upstream
+oversized-rejection acceptance test stopped at the route spool and applied an
+ACK directly. The implementation was correct, but this did not substantiate
+the plan's stronger source-to-receiver integration claim. A new regression now
+routes an oversized event followed by a valid event through the upstream
+router, reopens its durable route, drains it with the real forwarding client,
+admits the replacement through processor ingress, returns the processor ACK,
+and verifies exact loss coverage, delivery, and spool retirement.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

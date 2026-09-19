@@ -598,6 +598,19 @@ func TestMissingInitialMigrationCheckpointReusesHeaderOnlyJournal(t *testing.T) 
 	require.NoError(t, reopened.Close())
 }
 
+func TestInitialMigrationRetriesTemporaryRecordCleanup(t *testing.T) {
+	dir := t.TempDir()
+	temporary := filepath.Join(dir, ".eventbatch-interrupted")
+	require.NoError(t, os.WriteFile(temporary, []byte("partial record"), 0o600))
+
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.NoFileExists(t, temporary)
+	require.Zero(t, s.PhysicalBytes())
+	require.Empty(t, s.Status().CleanupError)
+	require.NoError(t, s.Close())
+}
+
 func TestMissingManifestRejectsOversizedJournalWithoutReadingIt(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})

@@ -791,6 +791,16 @@ router, reopens its durable route, drains it with the real forwarding client,
 admits the replacement through processor ingress, returns the processor ACK,
 and verifies exact loss coverage, delivery, and spool retirement.
 
+A sixteenth source-to-plan audit on 2026-09-19 corrected startup cleanup on the
+initial migration path. Normal checkpoint recovery retried orphan cleanup
+during `Open`, but a new or legacy directory returned immediately after
+publishing its first checkpoint. A temporary record left by an interrupted
+pre-manifest write therefore remained on disk and inflated physical-byte
+status until a later mutation or reopen. Initial migration now retries orphan
+cleanup after the checkpoint is durable and before reconciling physical bytes.
+A regression verifies that a stale temporary record is removed on the first
+open and that physical-byte and cleanup status are immediately accurate.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

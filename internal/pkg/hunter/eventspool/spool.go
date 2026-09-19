@@ -448,6 +448,12 @@ func (s *Spool) migrateLegacy() error {
 	if err = s.publishCheckpoint(); err != nil {
 		return fmt.Errorf("migrate event spool: %w", err)
 	}
+	// Once the initial checkpoint is durable, migration has the same
+	// authoritative active set as normal recovery. Retry any temporary files
+	// left by an interrupted pre-manifest write before reporting physical usage.
+	if err = s.cleanupOrphans(); err != nil {
+		s.cleanupErr = err
+	}
 	return s.refreshPhysical()
 }
 

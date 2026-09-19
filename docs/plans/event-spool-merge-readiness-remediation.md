@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-17
 
-**Status:** Complete — verified 2026-09-17
+**Status:** Complete — verified 2026-09-19
 
 **Scope:** Reliable normalized-event forwarding from hunters and upstream
 processors, plus merge-boundary documentation cleanup
@@ -633,6 +633,22 @@ checkpoint-required barrier: committed state and pending status remain visible,
 further mutation and sending stop, and recovery compacts the bounded journal
 before resuming. Focused normal and race tests for `eventspool`, focused
 forwarding and upstream tests, and tagged processor-ingress regressions passed.
+
+A seventh source-to-plan audit on 2026-09-19 corrected three recovery and
+identity-boundary gaps. Hunter terminal-sequence recovery now treats a
+checkpoint-required spool as a fail-closed recovery barrier instead of waiting
+forever while the spool reports committed pending state but refuses sends and
+mutations. Missing-manifest migration also opens the initial journal with the
+same no-follow, regular-file validation used by normal authoritative metadata
+recovery, so a symlink cannot be trusted as the generation-one migration
+journal. Finally, every loss record must carry the enclosing producer session
+before transport admission or durable spool publication; record recovery and
+pending-loss commits defensively enforce the same rule, preventing unusable
+gap coverage and self-inconsistent manifests after restart. Regression tests
+cover all three cases, including preservation of the external symlink target.
+The more-than-4,096 coalescible-eviction regression now publishes its synthetic
+base as an authoritative checkpoint and reopens the replacement transaction,
+so it exercises journal replay as well as live normalization.
 
 ## Explicit non-goals
 

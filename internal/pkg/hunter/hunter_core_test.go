@@ -309,8 +309,9 @@ func TestInitializeEventForwardingStartsDrainBeforeTerminalLossOnFullDropNewSpoo
 	require.NoError(t, hunter.eventSpool.Close())
 }
 
-func TestExhaustedRecoveryFailsClosedOnDurabilityUncertainty(t *testing.T) {
+func TestExhaustedRecoveryFailsClosedOnSpoolRecoveryBarrier(t *testing.T) {
 	require.ErrorIs(t, exhaustedRecoveryStatusError(eventspool.Status{DurabilityUncertain: true}), eventspool.ErrDurabilityUncertain)
+	require.ErrorIs(t, exhaustedRecoveryStatusError(eventspool.Status{CheckpointRequired: true}), eventspool.ErrCheckpointRequired)
 	require.NoError(t, exhaustedRecoveryStatusError(eventspool.Status{}))
 
 	committed := eventspool.EnqueueResult{Stored: true}

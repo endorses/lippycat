@@ -470,7 +470,7 @@ func inspectLegacyJournal(entries []os.DirEntry, directory string) (bool, error)
 		return false, fmt.Errorf("manifest is missing while journal artifacts exist: %v", journals)
 	}
 	path := filepath.Join(directory, journalFileName)
-	file, err := os.Open(path)
+	file, err := openRegularNoFollow(path, os.O_RDONLY)
 	if err != nil {
 		return false, fmt.Errorf("inspect migration journal: %w", err)
 	}
@@ -513,6 +513,9 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 		return EnqueueResult{}, errors.New("enqueue event batch: producer identity does not match fixed spool session")
 	}
 	if err := validateLossShape(batch); err != nil {
+		return EnqueueResult{}, fmt.Errorf("enqueue event batch: %w", err)
+	}
+	if err := validateBatchLossIdentity(batch); err != nil {
 		return EnqueueResult{}, fmt.Errorf("enqueue event batch: %w", err)
 	}
 	key := identityKey(batch.GetSourceNodeId(), batch.GetProducerSessionId(), batch.GetBatchSequence())
@@ -656,6 +659,15 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	return EnqueueResult{Stored: true, Losses: newLosses}, nil
 }
 func (s *Spool) commitPendingLosses(losses []*eventsv1.EventLoss) (bool, error) {
+	if len(losses) > 0 {
+		source, session := s.singleSource, s.singleProducer
+		if !s.identitySet {
+			source, session = losses[0].GetSourceNodeId(), losses[0].GetProducerSessionId()
+		}
+		if err := validateRetainedLosses(losses, source, session); err != nil {
+			return false, fmt.Errorf("commit event spool pending losses: %w", err)
+		}
+	}
 	if proto.Equal(&eventsv1.EventBatchStats{Losses: s.pendingLosses}, &eventsv1.EventBatchStats{Losses: losses}) {
 		return true, nil
 	}
@@ -1596,11 +1608,17 @@ func readRecord(path string, maxPayload uint64) (record, error) {
 	if err = protoadapter.ValidateBatch(b); err != nil {
 		return record{}, fmt.Errorf("read event spool record %q transport validation: %w", path, err)
 	}
+	if err = validateBatchLossIdentity(b); err != nil {
+		return record{}, fmt.Errorf("read event spool record %q durable loss identity: %w", path, err)
+	}
 	return record{name: filepath.Base(path), path: path, created: time.Unix(0, int64(binary.BigEndian.Uint64(header[10:18]))), size: uint64(info.Size()), payloadSize: length, batch: b}, nil
 }
 func marshalAndValidate(batch *eventsv1.ProtocolEventBatch, maxPayload uint64) ([]byte, error) {
 	if err := protoadapter.ValidateBatch(batch); err != nil {
 		return nil, fmt.Errorf("enqueue event batch: transport validation: %w", err)
+	}
+	if err := validateBatchLossIdentity(batch); err != nil {
+		return nil, fmt.Errorf("enqueue event batch: durable loss identity: %w", err)
 	}
 	if len(batch.GetEvents()) > maxCollectionEntries || len(batch.GetStats().GetLosses()) > maxCollectionEntries {
 		return nil, errors.New("enqueue event batch: transport collection limit exceeded")
@@ -1620,6 +1638,18 @@ func marshalAndValidate(batch *eventsv1.ProtocolEventBatch, maxPayload uint64) (
 		return nil, fmt.Errorf("%w: %d > %d", ErrRecordTooLarge, len(payload), maxPayload)
 	}
 	return payload, nil
+}
+
+func validateBatchLossIdentity(batch *eventsv1.ProtocolEventBatch) error {
+	for _, loss := range batch.GetStats().GetLosses() {
+		if loss == nil {
+			continue
+		}
+		if loss.GetSourceNodeId() != batch.GetSourceNodeId() || loss.GetProducerSessionId() != batch.GetProducerSessionId() {
+			return errors.New("event loss producer identity does not match batch identity")
+		}
+	}
+	return nil
 }
 
 func validateLossShape(batch *eventsv1.ProtocolEventBatch) error {

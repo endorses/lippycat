@@ -180,6 +180,7 @@ func TestBatchUnknownFieldsAreBounded(t *testing.T) {
 		Kind:                eventsv1.LossKind_LOSS_KIND_CAPTURE,
 		Count:               1,
 		SourceNodeId:        "node",
+		ProducerSessionId:   "session",
 		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}},
 	}
 	loss.EventSequenceRanges[0].ProtoReflect().SetUnknown(make([]byte, MaxUnknownBytes+1))
@@ -244,7 +245,7 @@ func TestBatchRoundTripAndLossValidation(t *testing.T) {
 	dns := input[1].(events.DNSEvent)
 	dns = events.NewDNSEvent(testEnvelope(2))
 	input[1] = dns
-	stats := &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_CAPTURE, Count: 2, SourceNodeId: "node", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 3, Last: 4}}}}}
+	stats := &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_CAPTURE, Count: 2, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 3, Last: 4}}}}}
 	b, err := ToProtoBatch("node", "session", 1, input, stats, 1)
 	require.NoError(t, err)
 	got, omissions, err := DecodeBatch(b)
@@ -269,6 +270,7 @@ func TestBatchValidationAllowsReportedSequenceGaps(t *testing.T) {
 		Kind:                eventsv1.LossKind_LOSS_KIND_DISPATCH,
 		Count:               1,
 		SourceNodeId:        "node",
+		ProducerSessionId:   "session",
 		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}},
 	}
 	batch := &eventsv1.ProtocolEventBatch{
@@ -313,7 +315,7 @@ func TestBatchValidationRejectsContradictoryLossAccounting(t *testing.T) {
 	last.EventId = events.DeliveryEventID("node", "session", 3)
 	last.Envelope.EventSequence = 3
 	last.Envelope.EventId = last.EventId
-	loss := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_DISPATCH, Count: 1, SourceNodeId: "other", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}}}
+	loss := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_DISPATCH, Count: 1, SourceNodeId: "other", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}}}
 	batch := &eventsv1.ProtocolEventBatch{SourceNodeId: "node", ProducerSessionId: "session", BatchSequence: 1, Events: []*eventsv1.ProtocolEvent{first, last}, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{loss}}, FirstEventSequence: 1, LastEventSequence: 3}
 
 	require.ErrorContains(t, ValidateBatch(batch), "source does not match")
@@ -340,7 +342,7 @@ func TestBatchValidationRejectsContradictoryLossAccounting(t *testing.T) {
 func TestBatchValidationRejectsInvalidCountOnlyLoss(t *testing.T) {
 	event, err := ToProto(allEvents()[0])
 	require.NoError(t, err)
-	loss := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_CAPTURE, Count: 1, SourceNodeId: "other"}
+	loss := &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_CAPTURE, Count: 1, SourceNodeId: "other", ProducerSessionId: "session"}
 	batch := &eventsv1.ProtocolEventBatch{
 		SourceNodeId: "node", ProducerSessionId: "session", BatchSequence: 1,
 		Events: []*eventsv1.ProtocolEvent{event}, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{loss}},
@@ -351,6 +353,20 @@ func TestBatchValidationRejectsInvalidCountOnlyLoss(t *testing.T) {
 	loss.SourceNodeId = "node"
 	loss.Count = 0
 	require.ErrorContains(t, ValidateBatch(batch), "count must be positive")
+}
+
+func TestBatchValidationRejectsUnscopedLoss(t *testing.T) {
+	event, err := ToProto(allEvents()[0])
+	require.NoError(t, err)
+	batch := &eventsv1.ProtocolEventBatch{
+		SourceNodeId: "node", ProducerSessionId: "session", BatchSequence: 1,
+		Events: []*eventsv1.ProtocolEvent{event}, Stats: &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+			Kind: eventsv1.LossKind_LOSS_KIND_CAPTURE, Count: 1, SourceNodeId: "node",
+		}}},
+		FirstEventSequence: 1, LastEventSequence: 1,
+	}
+
+	require.ErrorContains(t, ValidateBatch(batch), "producer session does not match")
 }
 
 func TestNilPayloadIsMalformedWithoutUnknownKind(t *testing.T) {

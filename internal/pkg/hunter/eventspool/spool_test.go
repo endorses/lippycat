@@ -296,6 +296,7 @@ func TestDropOldestCoalescesMoreThanCollectionLimitEvictions(t *testing.T) {
 	s.lastEventSequence = victimCount
 	s.lastBatchSequence = victimCount
 	s.rebuildIndex()
+	require.NoError(t, s.publishCheckpoint(), "the synthetic active set must be authoritative before testing journal retirement")
 
 	now = now.Add(2 * time.Second)
 	result, err := s.Enqueue(batch("hunter", "session", victimCount+1, victimCount+1, victimCount+1))
@@ -309,6 +310,15 @@ func TestDropOldestCoalescesMoreThanCollectionLimitEvictions(t *testing.T) {
 	require.Len(t, stored, 1)
 	require.Len(t, stored[0].GetStats().GetLosses(), 1)
 	require.Equal(t, []*eventsv1.SequenceRange{{First: 1, Last: victimCount}}, stored[0].GetStats().GetLosses()[0].GetEventSequenceRanges())
+	require.NoError(t, s.Close())
+
+	reopened, err := Open(Config{Directory: s.config.Directory, MaxAge: time.Second, Policy: DropOldest, Clock: func() time.Time { return now }})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+	recovered := reopened.Batches()
+	require.Len(t, recovered, 1)
+	require.Equal(t, uint64(victimCount+1), recovered[0].GetBatchSequence())
+	require.Equal(t, []*eventsv1.SequenceRange{{First: 1, Last: victimCount}}, recovered[0].GetStats().GetLosses()[0].GetEventSequenceRanges())
 }
 
 func TestDropOldestRevalidatesFinalReplacementPayloadBoundary(t *testing.T) {

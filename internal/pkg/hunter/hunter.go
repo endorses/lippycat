@@ -488,6 +488,9 @@ func exhaustedRecoveryStatusError(status eventspool.Status) error {
 	if status.DurabilityUncertain {
 		return eventspool.ErrDurabilityUncertain
 	}
+	if status.CheckpointRequired {
+		return eventspool.ErrCheckpointRequired
+	}
 	return nil
 }
 

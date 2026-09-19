@@ -757,6 +757,47 @@ func TestRetainLossesRejectsAggregateCountOverflow(t *testing.T) {
 	require.False(t, s.HasPending())
 }
 
+func TestEnqueueRejectsUnscopedLossWithoutPersistingIt(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir, MaxRecordBytes: 128})
+	require.NoError(t, err)
+
+	incoming := batch("node", "session", 1, 1, 1)
+	incoming.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: "node", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}},
+	}}}
+	result, err := s.Enqueue(incoming)
+	require.ErrorContains(t, err, "producer identity does not match")
+	require.False(t, result.Stored)
+	require.Equal(t, RejectionNone, result.Rejection)
+	require.False(t, s.HasPending())
+	require.NoError(t, s.Close())
+
+	reopened, err := Open(Config{Directory: dir, MaxRecordBytes: 128})
+	require.NoError(t, err)
+	require.False(t, reopened.HasPending())
+	require.NoError(t, reopened.Close())
+}
+
+func TestLegacyMigrationRejectsRecordWithUnscopedLoss(t *testing.T) {
+	dir := t.TempDir()
+	incoming := batch("node", "session", 1, 1, 1)
+	incoming.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: "node", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}},
+	}}}
+	payload, err := proto.Marshal(incoming)
+	require.NoError(t, err)
+	path := filepath.Join(dir, "unscoped"+recordExtension)
+	writeRawRecord(t, path, uint64(len(payload)), payload)
+
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "producer session does not match")
+	_, statErr := os.Stat(path)
+	require.NoError(t, statErr, "rejected legacy evidence must remain on disk")
+}
+
 func TestJournalIncompleteTailIsIgnoredButInteriorCorruptionFails(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})
@@ -822,6 +863,28 @@ func TestOpenRejectsSymlinkedAuthoritativeMetadata(t *testing.T) {
 			require.Equal(t, payload, after, "recovery must not mutate a symlink target")
 		})
 	}
+}
+
+func TestLegacyMigrationRejectsSymlinkedStartupJournal(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+
+	journal := filepath.Join(dir, journalFileName)
+	payload, err := os.ReadFile(journal)
+	require.NoError(t, err)
+	target := filepath.Join(t.TempDir(), "journal")
+	require.NoError(t, os.WriteFile(target, payload, 0o600))
+	require.NoError(t, os.Remove(filepath.Join(dir, manifestFileName)))
+	require.NoError(t, os.Remove(journal))
+	require.NoError(t, os.Symlink(target, journal))
+
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "not regular")
+	after, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	require.Equal(t, payload, after, "migration must not trust or mutate a symlink target")
 }
 
 func TestEnqueueRejectsJournalSwappedToSymlink(t *testing.T) {

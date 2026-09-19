@@ -395,6 +395,9 @@ func (s *Spool) shouldCheckpoint() bool {
 }
 
 func (s *Spool) applyTransaction(tx transaction) error {
+	if err := validatePendingLossCapacity(tx.PendingLosses, s.config.pendingLossLimit, s.config.pendingLossBytesLimit); err != nil {
+		return fmt.Errorf("event spool transaction: %w", err)
+	}
 	remove := map[string]bool{}
 	for _, name := range tx.Remove {
 		if !safeBasename(name) {

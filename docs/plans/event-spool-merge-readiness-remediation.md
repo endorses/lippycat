@@ -852,6 +852,27 @@ processor package passed outside the sandbox so its loopback gRPC tests could
 run. The corrected fuzz target completed 110,036 executions in a bounded run.
 Go formatting and `git diff --check` passed.
 
+A nineteenth source-to-plan audit on 2026-09-19 corrected the remaining
+bounded-loss and upstream-lifecycle gaps. Durable fragmented pending-loss
+metadata now has explicit 65,536-unit and 16 MiB encoded-size limits, where a
+unit is an exact range or count-only report. Exceeding either limit preserves
+the previous authoritative state and fails admission explicitly instead of
+allowing unbounded manifest and memory growth; recovery enforces the same
+limits. Upstream route shutdown and
+session retirement now honor caller cancellation while keeping an active
+handler's spool open and exclusively owned for a safe retry. Partial-startup
+cleanup errors are joined with the original load failure instead of being
+discarded.
+
+Regressions cover pending-loss capacity exhaustion and restart, rejection of an
+over-limit recovered state, close and retirement deadlines, retained ownership,
+and successful retry after the active handler exits. Focused normal and
+`all`-tag race tests passed for `eventspool`, `eventforwarding`,
+`processor/upstream`, and `protoadapter`. The complete `make test` suite,
+including loopback integration tests and the LI partition, passed outside the
+sandbox on the corrected tree. `make vet`, `make build-matrix`, Go formatting,
+and `git diff --check` also passed.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

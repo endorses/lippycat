@@ -37,6 +37,12 @@ const (
 	journalFrameHeaderSize = 36
 	MaxRecordPayloadBytes  = uint64(protoadapter.MaxEncodedBatchBytes)
 	maxCollectionEntries   = 4096
+	// maxPendingLossUnits bounds durable loss metadata independently from
+	// record storage. A unit is either one exact range or one count-only loss.
+	// The bound permits multiple receiver-sized carriers while preventing an
+	// adversarially fragmented loss set from growing the manifest without limit.
+	maxPendingLossUnits = 65536
+	maxPendingLossBytes = 16 << 20
 )
 
 var (
@@ -45,6 +51,7 @@ var (
 	ErrRecordTooLarge      = errors.New("event spool record exceeds maximum payload")
 	ErrDurabilityUncertain = errors.New("event spool durability is uncertain; recovery required")
 	ErrCheckpointRequired  = errors.New("event spool checkpoint maintenance is required before further mutation")
+	ErrPendingLossCapacity = errors.New("event spool pending loss metadata capacity exhausted")
 	ErrClosed              = errors.New("event spool is closed")
 )
 
@@ -84,9 +91,10 @@ type Config struct {
 	Clock          func() time.Time
 	// CheckpointEvery is the minimum journal-frame trigger. The active-set
 	// checkpoint base raises it so full checkpoint rewrites remain amortized linear.
-	CheckpointEvery   uint64
-	fs                *fsOps
-	journalFrameLimit int
+	CheckpointEvery                         uint64
+	fs                                      *fsOps
+	journalFrameLimit                       int
+	pendingLossLimit, pendingLossBytesLimit int
 }
 
 type record struct {
@@ -222,6 +230,12 @@ func Open(config Config) (_ *Spool, retErr error) {
 	if config.journalFrameLimit == 0 {
 		config.journalFrameLimit = maxJournalFramePayload
 	}
+	if config.pendingLossLimit == 0 {
+		config.pendingLossLimit = maxPendingLossUnits
+	}
+	if config.pendingLossBytesLimit == 0 {
+		config.pendingLossBytesLimit = maxPendingLossBytes
+	}
 	fs := config.fs
 	if fs == nil {
 		fs = defaultFS()
@@ -340,6 +354,9 @@ func (s *Spool) loadManifest(m manifest) error {
 	}
 	if len(m.PendingLosses) > 0 {
 		if err := validateRetainedLosses(m.PendingLosses, m.SourceNodeID, m.ProducerSessionID); err != nil {
+			return fmt.Errorf("read event spool manifest: %w", err)
+		}
+		if err := validatePendingLossCapacity(m.PendingLosses, s.config.pendingLossLimit, s.config.pendingLossBytesLimit); err != nil {
 			return fmt.Errorf("read event spool manifest: %w", err)
 		}
 	}
@@ -669,6 +686,9 @@ func (s *Spool) Enqueue(batch *eventsv1.ProtocolEventBatch) (EnqueueResult, erro
 	return EnqueueResult{Stored: true, Losses: newLosses}, nil
 }
 func (s *Spool) commitPendingLosses(losses []*eventsv1.EventLoss) (bool, error) {
+	if err := validatePendingLossCapacity(losses, s.config.pendingLossLimit, s.config.pendingLossBytesLimit); err != nil {
+		return false, fmt.Errorf("commit event spool pending losses: %w", err)
+	}
 	if len(losses) > 0 {
 		source, session := s.singleSource, s.singleProducer
 		if !s.identitySet {
@@ -1373,6 +1393,28 @@ func lossSplitUnits(losses []*eventsv1.EventLoss) int {
 		}
 	}
 	return total
+}
+
+func validatePendingLossCapacity(losses []*eventsv1.EventLoss, unitLimit, byteLimit int) error {
+	if unitLimit < 1 || byteLimit < 1 {
+		return ErrPendingLossCapacity
+	}
+	units := 0
+	for _, loss := range losses {
+		count := 1
+		if loss != nil && len(loss.GetEventSequenceRanges()) > 0 {
+			count = len(loss.GetEventSequenceRanges())
+		}
+		if count > unitLimit-units {
+			return fmt.Errorf("%w: %d units exceeds limit %d", ErrPendingLossCapacity, units+count, unitLimit)
+		}
+		units += count
+	}
+	encodedBytes := proto.Size(&eventsv1.EventBatchStats{Losses: losses})
+	if encodedBytes > byteLimit {
+		return fmt.Errorf("%w: %d encoded bytes exceeds limit %d", ErrPendingLossCapacity, encodedBytes, byteLimit)
+	}
+	return nil
 }
 
 func validateRetainedLosses(losses []*eventsv1.EventLoss, source, session string) error {

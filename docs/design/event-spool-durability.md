@@ -28,6 +28,15 @@ files retained for retryable cleanup. Physical bytes are reported separately
 and never make an orphan logically pending. Manifest, journal, policy, and lock
 metadata are not part of this record-storage counter.
 
+Durable pending-loss metadata is bounded separately to 65,536 normalized units
+and 16 MiB of protobuf-encoded statistics. A unit is one exact event-sequence
+range or one count-only loss. This permits multiple maximum-sized wire carriers
+while preventing fragmented or large-identity coverage from growing checkpoint
+memory and disk use without limit. Reaching either bound rejects the next
+logical mutation with an explicit terminal capacity error; the existing
+authoritative state is preserved and normal admission must stop until its loss
+carriers are drained.
+
 ## Record format
 
 Published record files are immutable. A record contains a fixed-size header
@@ -187,7 +196,9 @@ is later evicted.
 If neither an event nor its exact loss report can be committed because storage
 is exhausted or unhealthy, the spool enters terminal backpressure/fail-stop.
 It does not acknowledge the event, delete victims, or silently forget the
-range. Restart replays the durable state before normal forwarding resumes.
+range. The same fail-stop applies when the 65,536-unit or 16 MiB pending-loss
+metadata bound is exhausted. Restart replays the durable state before normal
+forwarding resumes.
 
 Producer event and batch sequences never wrap. Committing the final batch
 sequence exhausts that producer authority: the final batch remains deliverable,

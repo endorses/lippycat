@@ -69,6 +69,10 @@ with exact loss coverage retained. When the coverage cannot fit beside normal
 events it is sent in bounded loss-only batches. If storage cannot persist the
 event or its exact loss report, upstream forwarding fails stopped instead of
 silently acknowledging loss.
+Pending fragmented coverage is limited to 65,536 normalized ranges or
+count-only losses and 16 MiB of encoded statistics. Exhausting either metadata
+budget fails admission explicitly until durable loss carriers drain, preventing
+unbounded manifest growth.
 
 Immutable records are tracked by a versioned active-set manifest checkpoint and
 a checksummed mutation journal. These metadata files, rather than all files

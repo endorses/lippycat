@@ -653,6 +653,74 @@ func TestFlushPendingLossesHonorsCapacityPolicy(t *testing.T) {
 	})
 }
 
+func TestPendingLossMetadataCapacityFailsStoppedAndRecovers(t *testing.T) {
+	dir := t.TempDir()
+	config := Config{Directory: dir, Policy: DropNew, pendingLossLimit: 2}
+	s, err := Open(config)
+	require.NoError(t, err)
+
+	losses := []*eventsv1.EventLoss{
+		{
+			Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 2,
+			SourceNodeId: "node", ProducerSessionId: "session",
+			EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}, {First: 3, Last: 3}},
+		},
+	}
+	result, err := s.RetainLosses(losses)
+	require.NoError(t, err)
+	require.True(t, result.Committed)
+
+	result, err = s.RetainLosses([]*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: "node", ProducerSessionId: "session",
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 5, Last: 5}},
+	}})
+	require.ErrorIs(t, err, ErrPendingLossCapacity)
+	require.False(t, result.Committed)
+	require.Equal(t, 1, s.Status().PendingLosses)
+	require.NoError(t, s.Close())
+
+	reopened, err := Open(config)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+	require.True(t, reopened.HasPendingLosses())
+	require.True(t, proto.Equal(
+		&eventsv1.EventBatchStats{Losses: losses},
+		&eventsv1.EventBatchStats{Losses: reopened.pendingLosses},
+	))
+}
+
+func TestRecoveryRejectsPendingLossMetadataOverConfiguredCapacity(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir, pendingLossLimit: 3})
+	require.NoError(t, err)
+	_, err = s.RetainLosses([]*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 3,
+		SourceNodeId: "node", ProducerSessionId: "session",
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}, {First: 3, Last: 3}, {First: 5, Last: 5}},
+	}})
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+
+	_, err = Open(Config{Directory: dir, pendingLossLimit: 2})
+	require.ErrorIs(t, err, ErrPendingLossCapacity)
+}
+
+func TestPendingLossEncodedBytesAreBounded(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir(), pendingLossBytesLimit: 1})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	result, err := s.RetainLosses([]*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: "node", ProducerSessionId: "session",
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 1, Last: 1}},
+	}})
+	require.ErrorIs(t, err, ErrPendingLossCapacity)
+	require.False(t, result.Committed)
+	require.False(t, s.HasPending())
+}
+
 func TestMissingManifestDoesNotReactivateCurrentFormatRecords(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})

@@ -65,6 +65,10 @@ retains its exact loss coverage for delivery. If that coverage cannot fit with
 a normal event batch, the hunter sends bounded loss-only batches rather than
 truncating it. If neither the event nor its loss report can be persisted, the
 hunter stops normal forwarding instead of acknowledging unrecorded loss.
+Pending fragmented coverage is capped at 65,536 normalized ranges or count-only
+losses and 16 MiB of encoded statistics. Reaching either metadata bound also
+stops admission explicitly until durable loss carriers drain; it never grows
+the manifest without limit.
 
 The spool uses immutable record files plus a versioned active-set manifest
 checkpoint and checksummed mutation journal. The checkpoint and committed

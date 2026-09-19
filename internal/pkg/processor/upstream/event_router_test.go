@@ -265,6 +265,45 @@ func TestEventRouterDrainAndRetireHonorsContext(t *testing.T) {
 	require.ErrorIs(t, router.DrainAndRetire(ctx, node, session), context.Canceled)
 }
 
+func TestEventRouterDrainAndRetireDeadlinePreservesActiveHandlerAndAllowsRetry(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewManager(Config{ForwardMode: "events"}, nil)
+	router, err := NewEventRouter(manager, EventRouterConfig{SpoolDirectory: dir, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, router.Close(context.Background())) })
+	const node, session = "tap-node", "30313233343536373839616263646566"
+	require.NoError(t, router.HandleEvent(context.Background(), routedDNS(node, session, 1)))
+	key := eventRouteKey{nodeID: node, sessionID: session}
+	route := router.routes[key]
+	require.NoError(t, route.spool.Ack(node, session, 1))
+
+	admitted := make(chan struct{})
+	release := make(chan struct{})
+	route.beforeHandle = func() {
+		close(admitted)
+		<-release
+	}
+	handled := make(chan error, 1)
+	go func() { handled <- router.HandleEvent(context.Background(), routedDNS(node, session, 2)) }()
+	select {
+	case <-admitted:
+	case <-time.After(time.Second):
+		t.Fatal("event was not admitted")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, router.DrainAndRetire(ctx, node, session), context.DeadlineExceeded)
+	require.Same(t, route, router.routes[key], "a timed-out retirement must retain ownership of the active route")
+	require.False(t, route.spool.Status().Closed, "the spool must remain open while a handler can still publish")
+
+	close(release)
+	require.NoError(t, <-handled)
+	require.NoError(t, route.spool.Ack(node, session, 2))
+	require.NoError(t, router.DrainAndRetire(context.Background(), node, session))
+	require.NotContains(t, router.routes, key)
+}
+
 func TestEventRouterCloseReleasesSpoolOwnership(t *testing.T) {
 	dir := t.TempDir()
 	manager := NewManager(Config{ForwardMode: "events"}, nil)
@@ -276,9 +315,7 @@ func TestEventRouterCloseReleasesSpoolOwnership(t *testing.T) {
 
 	_, err = eventspool.Open(eventspool.Config{Directory: spoolDir})
 	require.Error(t, err, "an active route must retain exclusive spool ownership")
-	closeCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-	require.NoError(t, router.Close(closeCtx))
+	require.NoError(t, router.Close(context.Background()))
 
 	reopened, err := eventspool.Open(eventspool.Config{Directory: spoolDir})
 	require.NoError(t, err)
@@ -438,6 +475,45 @@ func TestEventRouterCloseWaitsForAdmittedHandleAndReleasesOwnership(t *testing.T
 
 	spoolDir := filepath.Join(dir, identityPathPart(node), identityPathPart(session))
 	reopened, err := eventspool.Open(eventspool.Config{Directory: spoolDir})
+	require.NoError(t, err)
+	require.NoError(t, reopened.Close())
+}
+
+func TestEventRouterCloseDeadlineDoesNotCloseSpoolUnderActiveHandler(t *testing.T) {
+	dir := t.TempDir()
+	manager := NewManager(Config{ForwardMode: "events"}, nil)
+	router, err := NewEventRouter(manager, EventRouterConfig{SpoolDirectory: dir, Policy: eventspool.DropOldest, Profile: eventsv1.IngressProfile_INGRESS_PROFILE_RELIABLE})
+	require.NoError(t, err)
+	const node, session = "tap-node", "30313233343536373839616263646566"
+	require.NoError(t, router.HandleEvent(context.Background(), routedDNS(node, session, 1)))
+	key := eventRouteKey{nodeID: node, sessionID: session}
+	route := router.routes[key]
+
+	admitted := make(chan struct{})
+	release := make(chan struct{})
+	route.beforeHandle = func() {
+		close(admitted)
+		<-release
+	}
+	handled := make(chan error, 1)
+	go func() { handled <- router.HandleEvent(context.Background(), routedDNS(node, session, 2)) }()
+	select {
+	case <-admitted:
+	case <-time.After(time.Second):
+		t.Fatal("event was not admitted")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, router.Close(ctx), context.DeadlineExceeded)
+	require.False(t, route.spool.Status().Closed, "a timed-out close must not race an admitted handler")
+	_, err = eventspool.Open(eventspool.Config{Directory: filepath.Join(dir, identityPathPart(node), identityPathPart(session))})
+	require.Error(t, err, "the timed-out close must retain exclusive spool ownership")
+
+	close(release)
+	require.NoError(t, <-handled)
+	require.NoError(t, router.Close(context.Background()))
+	reopened, err := eventspool.Open(eventspool.Config{Directory: filepath.Join(dir, identityPathPart(node), identityPathPart(session))})
 	require.NoError(t, err)
 	require.NoError(t, reopened.Close())
 }

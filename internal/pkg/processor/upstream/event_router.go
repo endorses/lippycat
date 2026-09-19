@@ -168,10 +168,10 @@ type eventRoute struct {
 	spool    *eventspool.Spool
 	cancel   context.CancelFunc
 	done     chan struct{}
+	drained  chan struct{}
 	retiring bool
 
 	admissionMu  sync.Mutex
-	admission    *sync.Cond
 	accepting    bool
 	active       int
 	beforeHandle func()
@@ -191,24 +191,61 @@ func (r *eventRoute) endHandle() {
 	r.admissionMu.Lock()
 	r.active--
 	if r.active == 0 {
-		r.admission.Broadcast()
+		if r.retiring {
+			close(r.drained)
+		}
 	}
 	r.admissionMu.Unlock()
 }
 
 func (r *eventRoute) stopAdmission() {
 	r.admissionMu.Lock()
-	r.accepting = false
-	r.retiring = true
+	if !r.retiring {
+		r.accepting = false
+		r.retiring = true
+		if r.active == 0 {
+			close(r.drained)
+		}
+	}
 	r.admissionMu.Unlock()
 }
 
-func (r *eventRoute) waitForHandlers() {
-	r.admissionMu.Lock()
-	for r.active != 0 {
-		r.admission.Wait()
+func (r *eventRoute) waitForHandlers(ctx context.Context) error {
+	select {
+	case <-r.drained:
+		return nil
+	default:
 	}
-	r.admissionMu.Unlock()
+	select {
+	case <-r.drained:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-r.drained:
+			return nil
+		default:
+			return ctx.Err()
+		}
+	}
+}
+
+func waitForRoute(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-done:
+			return nil
+		default:
+			return ctx.Err()
+		}
+	}
 }
 
 func NewEventRouter(manager *Manager, config EventRouterConfig) (*EventRouter, error) {
@@ -219,8 +256,7 @@ func NewEventRouter(manager *Manager, config EventRouterConfig) (*EventRouter, e
 	r := &EventRouter{manager: manager, config: config, routes: make(map[eventRouteKey]*eventRoute), ctx: ctx, cancel: cancel}
 	if err := r.loadExisting(); err != nil {
 		cancel()
-		_ = r.closeRoutes(context.Background())
-		return nil, err
+		return nil, errors.Join(err, r.closeRoutes(context.Background()))
 	}
 	return r, nil
 }
@@ -357,8 +393,7 @@ func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64,
 		defer close(done)
 		r.serve(routeCtx, client)
 	}()
-	route := &eventRoute{sink: sink, spool: spool, cancel: cancel, done: done, accepting: accepting}
-	route.admission = sync.NewCond(&route.admissionMu)
+	route := &eventRoute{sink: sink, spool: spool, cancel: cancel, done: done, drained: make(chan struct{}), accepting: accepting}
 	return route, nil
 }
 
@@ -476,7 +511,9 @@ func (r *EventRouter) DrainAndRetire(ctx context.Context, nodeID, sessionID stri
 	route.stopAdmission()
 	r.adoptDrops(key, route)
 	r.mu.Unlock()
-	route.waitForHandlers()
+	if err := route.waitForHandlers(ctx); err != nil {
+		return fmt.Errorf("wait for retiring upstream event handlers: %w", err)
+	}
 	r.mu.Lock()
 	r.adoptDrops(key, route)
 	r.mu.Unlock()
@@ -492,14 +529,17 @@ func (r *EventRouter) DrainAndRetire(ctx context.Context, nodeID, sessionID stri
 		case <-ticker.C:
 		}
 	}
+	route.cancel()
+	if err := waitForRoute(ctx, route.done); err != nil {
+		return fmt.Errorf("stop retiring upstream event route: %w", err)
+	}
+	closeErr := route.spool.Close()
 	r.mu.Lock()
 	if r.routes[key] == route {
 		delete(r.routes, key)
 	}
 	r.mu.Unlock()
-	route.cancel()
-	<-route.done
-	return route.spool.Close()
+	return closeErr
 }
 
 func (r *EventRouter) Close(ctx context.Context) error {
@@ -516,7 +556,10 @@ func (r *EventRouter) Close(ctx context.Context) error {
 	}
 	r.mu.Unlock()
 	for _, route := range routes {
-		route.waitForHandlers()
+		if err := route.waitForHandlers(ctx); err != nil {
+			r.cancel()
+			return fmt.Errorf("wait for upstream event handlers: %w", err)
+		}
 	}
 	flushErr := r.Flush(ctx)
 	r.cancel()
@@ -526,25 +569,38 @@ func (r *EventRouter) Close(ctx context.Context) error {
 func (r *EventRouter) closeRoutes(ctx context.Context) error {
 	r.mu.Lock()
 	r.closed = true
-	r.routesClosed = true
 	routes := make([]*eventRoute, 0, len(r.routes))
-	for key, route := range r.routes {
+	for _, route := range r.routes {
 		route.stopAdmission()
 		routes = append(routes, route)
-		delete(r.routes, key)
 	}
 	r.mu.Unlock()
 	for _, route := range routes {
-		route.waitForHandlers()
+		if err := route.waitForHandlers(ctx); err != nil {
+			return fmt.Errorf("wait for upstream event handlers: %w", err)
+		}
 		route.cancel()
 	}
 	var errs []error
 	for _, route := range routes {
-		<-route.done
+		if err := waitForRoute(ctx, route.done); err != nil {
+			return errors.Join(errors.Join(errs...), fmt.Errorf("stop upstream event route: %w", err))
+		}
 		if err := route.spool.Close(); err != nil {
 			errs = append(errs, err)
 		}
+		r.mu.Lock()
+		for key, registered := range r.routes {
+			if registered == route {
+				delete(r.routes, key)
+				break
+			}
+		}
+		r.mu.Unlock()
 	}
+	r.mu.Lock()
+	r.routesClosed = len(r.routes) == 0
+	r.mu.Unlock()
 	return errors.Join(errs...)
 }
 

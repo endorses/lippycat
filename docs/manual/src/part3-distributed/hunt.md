@@ -112,6 +112,10 @@ is retained. Fragmented coverage that cannot accompany a normal record is sent
 in bounded loss-only batches; it is never truncated. If storage cannot persist
 either an event or its exact loss report, forwarding fails stopped rather than
 acknowledging data it cannot account for.
+Pending fragmented coverage is limited to 65,536 normalized ranges or
+count-only losses and 16 MiB of encoded statistics. Exhausting either metadata
+budget fails admission explicitly until durable loss carriers drain, preventing
+unbounded manifest growth.
 
 Record files are immutable. A versioned manifest checkpoint and checksummed
 mutation journal define the ordered active set, logical byte total, sequence

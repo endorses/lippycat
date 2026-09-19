@@ -410,6 +410,9 @@ func (s *Spool) applyTransaction(tx transaction) error {
 			delete(s.activeNames, r.name)
 			delete(s.index, identityKey(r.batch.GetSourceNodeId(), r.batch.GetProducerSessionId(), r.batch.GetBatchSequence()))
 		}
+		// The GC scans the backing array even after its prefix is sliced away.
+		// Release retired batches without retaining the drained backlog in memory.
+		clear(s.records[:prefix])
 		s.records = s.records[prefix:]
 	} else {
 		total = s.bytes
@@ -424,9 +427,11 @@ func (s *Spool) applyTransaction(tx transaction) error {
 			}
 			kept = append(kept, r)
 		}
+		clear(s.records[len(kept):])
 		s.records = kept
 	}
 	if len(s.records) == 0 {
+		s.records = nil
 		s.identitySet = false
 		s.homogeneous = true
 		s.singleSource = ""

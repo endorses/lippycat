@@ -80,6 +80,41 @@ func TestSessionPolicyCanRotateAfterAckDrain(t *testing.T) {
 	require.NoError(t, s.BindSessionPolicy(sessionPolicy("new", "memory_only", true)))
 }
 
+func TestRetirementReleasesRecordBackingStorage(t *testing.T) {
+	for _, nonPrefix := range []bool{false, true} {
+		t.Run(fmt.Sprintf("non_prefix_%t", nonPrefix), func(t *testing.T) {
+			s, err := Open(Config{Directory: t.TempDir()})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, s.Close()) })
+			for sequence := uint64(1); sequence <= 3; sequence++ {
+				_, err = s.Enqueue(batch("hunter", "session", sequence, sequence, sequence))
+				require.NoError(t, err)
+			}
+			// Keep a view of the allocation so this checks references invisible
+			// through the active slice without relying on GC timing or heap sizes.
+			backing := s.records
+			if nonPrefix {
+				require.NoError(t, s.commit(transaction{
+					Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1,
+					Remove: []string{s.records[1].name},
+				}))
+				require.True(t, backing[2] == (record{}), "compacted tail retains a retired record")
+				require.Equal(t, uint64(1), s.records[0].batch.GetBatchSequence())
+			} else {
+				require.NoError(t, s.Ack("hunter", "session", 1))
+				require.True(t, backing[0] == (record{}), "sliced prefix retains a retired record")
+				require.Equal(t, uint64(2), s.records[0].batch.GetBatchSequence())
+			}
+			require.Equal(t, uint64(3), s.records[1].batch.GetBatchSequence())
+			require.NoError(t, s.Ack("hunter", "session", 3))
+			require.Nil(t, s.records)
+			for _, retired := range backing {
+				require.True(t, retired == (record{}), "drained backing storage retains a record")
+			}
+		})
+	}
+}
+
 func TestOpenRetainsExistingRecordsDespiteLimits(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1000, 0)

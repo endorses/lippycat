@@ -246,13 +246,17 @@ func (i *eventIngress) admit(_ context.Context, key ingressSessionKey, open *eve
 	// Reliable admission is complete once the checksummed record is synced. A
 	// retry must not append it again even if the volatile dispatcher is full.
 	if i.wal != nil {
+		previousBatch := state.batch
 		state.batch = batch.BatchSequence
 		state.event = admittedEventHighWater(batch, state.event)
 		i.sessions[key] = state
 		// Once a durable session has an undispatched batch, preserve ordering by
 		// leaving subsequent batches in the WAL for recovery as well.
 		delivered := i.delivered[key]
-		if delivered.batch+1 == batch.BatchSequence && i.dispatcher.EnqueueBatch(decoded) {
+		// Validated loss coverage may retire batch identities that were never
+		// admitted. Only previously admitted but undispatched batches block
+		// dispatch; numeric adjacency would stall after a legitimate gap.
+		if delivered.batch == previousBatch && i.dispatcher.EnqueueBatch(decoded) {
 			i.delivered[key] = state
 		}
 		return &eventsv1.EventIngressControl{Kind: eventsv1.EventIngressControlKind_EVENT_INGRESS_CONTROL_KIND_ACK, CumulativeAckSequence: state.batch, FlowControl: i.currentFlowControl()}, nil

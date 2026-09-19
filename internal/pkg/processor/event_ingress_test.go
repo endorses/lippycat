@@ -545,6 +545,35 @@ func TestReliableEventIngressRetainsAckedUndispatchedBatchForRecovery(t *testing
 	require.Equal(t, recovered.sessions, recovered.delivered)
 }
 
+func TestReliableEventIngressGapPreservesUndispatchedOrdering(t *testing.T) {
+	d, err := events.NewDispatcher(events.Config{QueueSize: 8})
+	require.NoError(t, err)
+	broadcaster := broadcast.New()
+	require.NoError(t, d.Register(broadcaster))
+	i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: "reliable", WALDirectory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, i.wal.close()) })
+	first := ingressBatch(t, 1, 1)
+	key := ingressKey(first.SourceNodeId, first.ProducerSessionId)
+	open := &eventsv1.EventIngressOpen{SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId, SemanticProfileRevision: 1}
+	_, err = i.admit(context.Background(), key, open, nil, first)
+	require.NoError(t, err)
+	require.Empty(t, i.delivered, "the stopped dispatcher leaves batch one in the WAL")
+	require.NoError(t, d.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, d.Close(context.Background())) })
+	replacement := ingressBatch(t, 3, 3)
+	replacement.Stats = &eventsv1.EventBatchStats{Losses: []*eventsv1.EventLoss{{
+		Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1,
+		SourceNodeId: first.SourceNodeId, ProducerSessionId: first.ProducerSessionId,
+		EventSequenceRanges: []*eventsv1.SequenceRange{{First: 2, Last: 2}},
+	}}}
+	ack, err := i.admit(context.Background(), key, open, nil, replacement)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), ack.CumulativeAckSequence)
+	require.Empty(t, i.delivered, "the validated gap must not bypass admitted batch one")
+	require.Equal(t, uint64(0), broadcaster.Stats().Published)
+}
+
 func TestWALRecoveryDoesNotAdvanceDedupBeforeQueueAdmission(t *testing.T) {
 	d, err := events.NewDispatcher(events.Config{QueueSize: 1})
 	require.NoError(t, err)
@@ -666,6 +695,8 @@ func TestEventIngressAcceptsEvictionBeforeDelayedACK(t *testing.T) {
 		t.Run(profile, func(t *testing.T) {
 			d, err := events.NewDispatcher(events.Config{QueueSize: 8})
 			require.NoError(t, err)
+			broadcaster := broadcast.New()
+			require.NoError(t, d.Register(broadcaster))
 			require.NoError(t, d.Start(context.Background()))
 			t.Cleanup(func() { require.NoError(t, d.Close(context.Background())) })
 			i, err := newEventIngress(EventIngressPolicy{Dispatcher: d, Profile: profile, WALDirectory: t.TempDir()})
@@ -701,6 +732,13 @@ func TestEventIngressAcceptsEvictionBeforeDelayedACK(t *testing.T) {
 			require.Equal(t, uint64(3), ack.CumulativeAckSequence)
 			require.NoError(t, spool.Ack(first.SourceNodeId, first.ProducerSessionId, ack.CumulativeAckSequence))
 			require.False(t, spool.HasPending())
+			require.Eventually(t, func() bool { return broadcaster.Stats().Published == 2 }, time.Second, time.Millisecond,
+				"the replacement must dispatch immediately across the validated retired batch gap")
+			ack, err = i.admit(context.Background(), key, open, nil, ingressBatch(t, 4, 4))
+			require.NoError(t, err)
+			require.Equal(t, uint64(4), ack.CumulativeAckSequence)
+			require.Eventually(t, func() bool { return broadcaster.Stats().Published == 3 }, time.Second, time.Millisecond,
+				"normal dispatch must continue after the retired batch gap")
 		})
 	}
 }

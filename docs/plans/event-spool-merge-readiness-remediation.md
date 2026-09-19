@@ -476,25 +476,25 @@ send path called `Batches()` once per batch and cloned the complete remaining
 active set. One-ACK-per-batch drain therefore made `N(N+1)/2` retrieval clones
 and the same order of ACK visits.
 
-| Workload | Time | Bytes allocated | Allocations | Deterministic old-path work |
-| --- | ---: | ---: | ---: | ---: |
-| Build 1,000 | 9.23 ms | 2.14 MB | 22,445 | 1,000 record publications |
-| Build 10,000 | 95.3 ms | 21.35 MB | 220,097 | 10,000 record publications |
-| Drain 1,000 | 67.2 ms | 76.65 MB | 505,522 | 500,500 clones plus full-scan ACK work |
-| Drain 10,000 | 5.60 s | 7.63 GB | 50,055,135 | 50,005,000 clones plus full-scan ACK work |
+| Workload     |    Time | Bytes allocated | Allocations |               Deterministic old-path work |
+| ------------ | ------: | --------------: | ----------: | ----------------------------------------: |
+| Build 1,000  | 9.23 ms |         2.14 MB |      22,445 |                 1,000 record publications |
+| Build 10,000 | 95.3 ms |        21.35 MB |     220,097 |                10,000 record publications |
+| Drain 1,000  | 67.2 ms |        76.65 MB |     505,522 |    500,500 clones plus full-scan ACK work |
+| Drain 10,000 |  5.60 s |         7.63 GB |  50,055,135 | 50,005,000 clones plus full-scan ACK work |
 
 Final implementation measurements used one benchmark iteration on the same
 host. Filesystem latency dominates the absolute timings, while the counters
 show the scaling change directly.
 
-| Workload | Time | Bytes allocated | Allocations | Deterministic final-path work |
-| --- | ---: | ---: | ---: | ---: |
-| Build + one-ACK drain 1,000 | 56.9 ms | 22.24 MB | 288,516 | checkpointed transaction path |
-| Build + one-ACK drain 10,000 | 550.5 ms | 225.05 MB | 2,870,824 | checkpointed transaction path |
-| Forwarding drain 1,000 | 13.3 ms | 4.08 MB | 34,743 | 1,000 clones, 1,999 ACK visits, 8 retrievals |
-| Forwarding drain 10,000 | 115.9 ms | 42.49 MB | 350,056 | 10,000 clones, 19,999 ACK visits, 79 retrievals |
-| Sustained replacement 1,000 | 73.1 ms | 23.47 MB | 390,857 | 446,876 metadata bytes, 7 rotations |
-| Sustained replacement 10,000 | 514.9 ms | 234.81 MB | 3,913,460 | 4,519,980 metadata bytes, 78 rotations |
+| Workload                     |     Time | Bytes allocated | Allocations |                   Deterministic final-path work |
+| ---------------------------- | -------: | --------------: | ----------: | ----------------------------------------------: |
+| Build + one-ACK drain 1,000  |  56.9 ms |        22.24 MB |     288,516 |                   checkpointed transaction path |
+| Build + one-ACK drain 10,000 | 550.5 ms |       225.05 MB |   2,870,824 |                   checkpointed transaction path |
+| Forwarding drain 1,000       |  13.3 ms |         4.08 MB |      34,743 |    1,000 clones, 1,999 ACK visits, 8 retrievals |
+| Forwarding drain 10,000      | 115.9 ms |        42.49 MB |     350,056 | 10,000 clones, 19,999 ACK visits, 79 retrievals |
+| Sustained replacement 1,000  |  73.1 ms |        23.47 MB |     390,857 |             446,876 metadata bytes, 7 rotations |
+| Sustained replacement 10,000 | 514.9 ms |       234.81 MB |   3,913,460 |          4,519,980 metadata bytes, 78 rotations |
 
 The fixed-backlog forwarding path changed from 500,500 to 1,000 clones at
 1,000 batches and from 50,005,000 to 10,000 clones at 10,000 batches. ACK
@@ -598,14 +598,14 @@ The audit also completed the benchmark evidence required by Phase 6. One-iterati
 measurements on the recorded i9-13900HX host reported the deterministic counters
 separately:
 
-| Workload | Time | Allocated | ACK visits | Metadata bytes | Retrieval clones/calls | Checkpoints/rotations | Syncs |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Build + one-ACK drain 1,000 | 65.6 ms | 23.93 MB | 1,999 | 1,165,066 | n/a | 8 / 7 | 5,039 |
-| Build + one-ACK drain 10,000 | 552.4 ms | 245.40 MB | 19,999 | 12,264,870 | n/a | 14 / 13 | 50,069 |
-| Forwarding drain 1,000 | 14.6 ms | 4.73 MB | 1,999 | 1,114,235 | 1,000 / 8 | 6 / 5 | 5,029 |
-| Forwarding drain 10,000 | 114.1 ms | 53.04 MB | 19,999 | 12,203,399 | 10,000 / 79 | 12 / 11 | 50,059 |
-| Sustained replacement 1,000 | 61.9 ms | 25.68 MB | n/a | 473,970 | n/a | n/a / 7 | 4,038 |
-| Sustained replacement 10,000 | 668.8 ms | 256.85 MB | n/a | 4,801,072 | n/a | n/a / 78 | 40,393 |
+| Workload                     |     Time | Allocated | ACK visits | Metadata bytes | Retrieval clones/calls | Checkpoints/rotations |  Syncs |
+| ---------------------------- | -------: | --------: | ---------: | -------------: | ---------------------: | --------------------: | -----: |
+| Build + one-ACK drain 1,000  |  65.6 ms |  23.93 MB |      1,999 |      1,165,066 |                    n/a |                 8 / 7 |  5,039 |
+| Build + one-ACK drain 10,000 | 552.4 ms | 245.40 MB |     19,999 |     12,264,870 |                    n/a |               14 / 13 | 50,069 |
+| Forwarding drain 1,000       |  14.6 ms |   4.73 MB |      1,999 |      1,114,235 |              1,000 / 8 |                 6 / 5 |  5,029 |
+| Forwarding drain 10,000      | 114.1 ms |  53.04 MB |     19,999 |     12,203,399 |            10,000 / 79 |               12 / 11 | 50,059 |
+| Sustained replacement 1,000  |  61.9 ms |  25.68 MB |        n/a |        473,970 |                    n/a |               n/a / 7 |  4,038 |
+| Sustained replacement 10,000 | 668.8 ms | 256.85 MB |        n/a |      4,801,072 |                    n/a |              n/a / 78 | 40,393 |
 
 A fifth source-to-plan audit on 2026-09-18 corrected physical-byte accounting
 for a fully written temporary record when publication rename and subsequent
@@ -676,12 +676,12 @@ audit. Formatting and `git diff --check` passed.
 One-iteration measurements on the same host add counters for the previously
 unmeasured transaction and replay traversal:
 
-| Workload | Time | Allocated | Transaction visits | Replay visits |
-| --- | ---: | ---: | ---: | ---: |
-| Build + one-ACK drain 1,000 | 80.6 ms | 25.04 MB | 3,000 | n/a |
-| Build + one-ACK drain 10,000 | 604.3 ms | 256.54 MB | 30,000 | n/a |
-| Replay half-drained backlog 1,000 | 16.1 ms | 4.36 MB | n/a | 2,000 |
-| Replay half-drained backlog 10,000 | 92.0 ms | 42.94 MB | n/a | 20,000 |
+| Workload                           |     Time | Allocated | Transaction visits | Replay visits |
+| ---------------------------------- | -------: | --------: | -----------------: | ------------: |
+| Build + one-ACK drain 1,000        |  80.6 ms |  25.04 MB |              3,000 |           n/a |
+| Build + one-ACK drain 10,000       | 604.3 ms | 256.54 MB |             30,000 |           n/a |
+| Replay half-drained backlog 1,000  |  16.1 ms |   4.36 MB |                n/a |         2,000 |
+| Replay half-drained backlog 10,000 |  92.0 ms |  42.94 MB |                n/a |        20,000 |
 
 A ninth source-to-plan audit on 2026-09-19 found two additional boundary gaps.
 Forwarding could wait indefinitely when removal consumed an entire cached
@@ -700,6 +700,22 @@ Focused normal and race suites passed for `eventspool`, `eventforwarding`,
 also passed under the race detector. Go formatting and `git diff --check`
 passed; the full suite and build matrix remain the historical checks recorded
 above.
+
+A tenth source-to-plan audit on 2026-09-19 corrected two additional gaps.
+Retired records retained protobuf payloads through the spool slice's backing
+array after ACK or eviction; retirement now clears removed slots and releases
+the backing array when drained. Reliable processor ingress also ACKed valid
+eviction replacements across batch-sequence gaps without dispatching them.
+Dispatch now checks whether all previously admitted batches were dispatched,
+allowing validated gaps while preserving ordering behind deferred WAL records.
+
+Deterministic retention tests and the delayed-ACK eviction delivery regression
+failed before the fixes and passed afterward. Coverage also verifies subsequent
+delivery and ordering behind an undispatched WAL batch. Focused normal tests
+passed, followed by race tests with the `all` tag for `eventspool`,
+`eventforwarding`, all processor packages, and `protoadapter`. Go formatting and
+`git diff --check` passed. Full-suite and build-matrix results remain the
+historical checks above.
 
 ## Explicit non-goals
 

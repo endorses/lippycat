@@ -289,6 +289,14 @@ func (s *Sink) HandleFailedEvent(event events.Event) {
 	s.retainFailedEventLocked(event)
 }
 
+// HandleDroppedLosses adopts compact queue-loss coverage from a routing sink.
+// The router already accounts for these losses when it observes the drop.
+func (s *Sink) HandleDroppedLosses(loss *eventsv1.EventLoss) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendPendingLossLocked(loss)
+}
+
 func (s *Sink) applyEnqueueResult(result eventspool.EnqueueResult, err error) error {
 	if result.Stored {
 		if s.nextBatchSequence == ^uint64(0) {

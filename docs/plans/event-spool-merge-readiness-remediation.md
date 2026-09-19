@@ -738,6 +738,23 @@ accepted, delivered, and ACKed. Normal focused tests and race tests with the
 packages. Go formatting and `git diff --check` passed. Full-suite and build-matrix
 results remain the historical checks above.
 
+A twelfth source-to-plan audit on 2026-09-19 corrected an upstream routing
+integration gap: the router registered with the dispatcher did not implement
+queue-drop or terminal-failure callbacks, so assigned events could disappear
+without exact loss coverage. The router now retains compact, ordered ranges
+without disk I/O in those callbacks and transfers them to the forwarding sink
+before event handling, flush, or retirement. Drop-only sessions acquire a spool
+during flush, pending drops prevent packet fallback, and route-creation failures
+retain the affected identity and stop dispatcher admission. Closed routers do
+not reopen routes during a later flush.
+
+New regressions failed before the fix and passed afterward. Coverage includes
+out-of-order drops before older queued events, drop-only flush, route-creation
+failure, and real memory-only and reliable ingress with durable reopen,
+delivery, and cumulative ACK drain. Focused normal and race tests passed;
+the complete processor race suite passed outside the sandbox. Full-suite and
+build-matrix results remain the historical checks above.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

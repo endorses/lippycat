@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,14 +29,85 @@ type EventRouterConfig struct {
 }
 
 type EventRouter struct {
-	mu      sync.Mutex
-	manager *Manager
-	config  EventRouterConfig
-	routes  map[eventRouteKey]*eventRoute
-	ctx     context.Context
-	cancel  context.CancelFunc
-	losses  EventLossStats
-	closed  bool
+	mu           sync.Mutex
+	manager      *Manager
+	config       EventRouterConfig
+	routes       map[eventRouteKey]*eventRoute
+	ctx          context.Context
+	cancel       context.CancelFunc
+	losses       EventLossStats
+	closed       bool
+	routesClosed bool
+	// Drop callbacks never acquire mu or perform spool I/O. In particular,
+	// newRoute and a slow durable enqueue cannot block dispatcher admission.
+	dropMu       sync.Mutex
+	pendingDrops map[eventRouteKey]*eventsv1.EventLoss
+}
+
+type terminalRouteError struct{ error }
+
+func (*terminalRouteError) TerminalSinkError() bool { return true }
+func (e *terminalRouteError) Unwrap() error         { return e.error }
+
+func (r *EventRouter) LockDropBoundary()   { r.dropMu.Lock() }
+func (r *EventRouter) UnlockDropBoundary() { r.dropMu.Unlock() }
+func (r *EventRouter) HandleDroppedEventLocked(event events.Event, _ time.Time) {
+	if event == nil || !r.manager.ForwardingEvents() {
+		return
+	}
+	env := event.Envelope()
+	if !events.HasValidDeliveryIdentity(env) {
+		return
+	}
+	key := eventRouteKey{env.NodeID, env.ProducerSessionID}
+	if r.pendingDrops == nil {
+		r.pendingDrops = make(map[eventRouteKey]*eventsv1.EventLoss)
+	}
+	loss := r.pendingDrops[key]
+	if loss == nil {
+		loss = &eventsv1.EventLoss{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, SourceNodeId: env.NodeID, ProducerSessionId: env.ProducerSessionID}
+		r.pendingDrops[key] = loss
+	}
+	// Notifications may arrive out of order. Keep only exact disjoint ranges,
+	// so sustained contiguous drops need constant memory.
+	sequence := env.EventSequence
+	i := sort.Search(len(loss.EventSequenceRanges), func(i int) bool { return loss.EventSequenceRanges[i].Last >= sequence })
+	if i < len(loss.EventSequenceRanges) && loss.EventSequenceRanges[i].First <= sequence {
+		return
+	}
+	if i > 0 && loss.EventSequenceRanges[i-1].Last == sequence-1 {
+		loss.EventSequenceRanges[i-1].Last = sequence
+		if i < len(loss.EventSequenceRanges) && sequence != ^uint64(0) && loss.EventSequenceRanges[i].First == sequence+1 {
+			loss.EventSequenceRanges[i-1].Last = loss.EventSequenceRanges[i].Last
+			loss.EventSequenceRanges = append(loss.EventSequenceRanges[:i], loss.EventSequenceRanges[i+1:]...)
+		}
+	} else if i < len(loss.EventSequenceRanges) && sequence != ^uint64(0) && loss.EventSequenceRanges[i].First == sequence+1 {
+		loss.EventSequenceRanges[i].First = sequence
+	} else {
+		loss.EventSequenceRanges = append(loss.EventSequenceRanges, nil)
+		copy(loss.EventSequenceRanges[i+1:], loss.EventSequenceRanges[i:])
+		loss.EventSequenceRanges[i] = &eventsv1.SequenceRange{First: sequence, Last: sequence}
+	}
+	loss.Count++
+	r.recordLoss(eventsv1.LossKind_LOSS_KIND_TRANSPORT, 1)
+}
+
+func (r *EventRouter) HandleFailedEvent(event events.Event) {
+	r.dropMu.Lock()
+	defer r.dropMu.Unlock()
+	r.HandleDroppedEventLocked(event, time.Time{})
+}
+
+// Called under mu, after successful route creation. Ownership remains local
+// on creation failure and moves to the sink before any event or final flush.
+func (r *EventRouter) adoptDrops(key eventRouteKey, route *eventRoute) {
+	r.dropMu.Lock()
+	loss := r.pendingDrops[key]
+	delete(r.pendingDrops, key)
+	r.dropMu.Unlock()
+	if loss != nil {
+		route.sink.HandleDroppedLosses(loss)
+	}
 }
 
 // EventLossStats contains cumulative event-forwarding losses by pipeline
@@ -52,10 +124,17 @@ func (r *EventRouter) Losses() LossSnapshot {
 }
 
 // HasPendingDurableBatches reports whether any producer route still owns
-// unacknowledged spool data. Packet fallback must not strand these batches.
+// unacknowledged spool data or exact queue losses awaiting durable retention.
+// Packet fallback must not strand either form of pending work.
 func (r *EventRouter) HasPendingDurableBatches() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.dropMu.Lock()
+	hasDrops := len(r.pendingDrops) != 0
+	r.dropMu.Unlock()
+	if hasDrops {
+		return true
+	}
 	for _, route := range r.routes {
 		if route.spool.HasPending() {
 			return true
@@ -218,7 +297,8 @@ func (r *EventRouter) HandleEvent(ctx context.Context, event events.Event) error
 		route, err = r.newRoute(env.NodeID, env.ProducerSessionID)
 		if err != nil {
 			r.mu.Unlock()
-			return err
+			r.HandleFailedEvent(event)
+			return &terminalRouteError{err}
 		}
 		r.routes[key] = route
 	}
@@ -226,6 +306,7 @@ func (r *EventRouter) HandleEvent(ctx context.Context, event events.Event) error
 		r.mu.Unlock()
 		return fmt.Errorf("route upstream event: producer session is retiring")
 	}
+	r.adoptDrops(key, route)
 	r.mu.Unlock()
 	defer route.endHandle()
 	if route.beforeHandle != nil {
@@ -330,13 +411,37 @@ func (r *EventRouter) serve(ctx context.Context, client *eventforwarding.Client)
 
 func (r *EventRouter) Flush(ctx context.Context) error {
 	r.mu.Lock()
+	if r.routesClosed {
+		r.mu.Unlock()
+		return fmt.Errorf("flush upstream event router: router is closed")
+	}
+	// A session may have only dropped events and therefore no open route yet.
+	r.dropMu.Lock()
+	keys := make([]eventRouteKey, 0, len(r.pendingDrops))
+	for key := range r.pendingDrops {
+		keys = append(keys, key)
+	}
+	r.dropMu.Unlock()
+	var errs []error
+	for _, key := range keys {
+		route := r.routes[key]
+		if route == nil {
+			var err error
+			route, err = r.newRoute(key.nodeID, key.sessionID)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			r.routes[key] = route
+		}
+		r.adoptDrops(key, route)
+	}
 	routes := make([]*eventforwarding.Sink, 0, len(r.routes))
 	for _, route := range r.routes {
 		routes = append(routes, route.sink)
 	}
 	r.mu.Unlock()
 
-	var errs []error
 	for _, sink := range routes {
 		if err := sink.Flush(ctx); err != nil {
 			errs = append(errs, err)
@@ -353,12 +458,28 @@ func (r *EventRouter) DrainAndRetire(ctx context.Context, nodeID, sessionID stri
 	r.mu.Lock()
 	route := r.routes[key]
 	if route == nil {
-		r.mu.Unlock()
-		return nil
+		r.dropMu.Lock()
+		hasDrops := r.pendingDrops[key] != nil
+		r.dropMu.Unlock()
+		if !hasDrops {
+			r.mu.Unlock()
+			return nil
+		}
+		var err error
+		route, err = r.newRoute(nodeID, sessionID)
+		if err != nil {
+			r.mu.Unlock()
+			return err
+		}
+		r.routes[key] = route
 	}
 	route.stopAdmission()
+	r.adoptDrops(key, route)
 	r.mu.Unlock()
 	route.waitForHandlers()
+	r.mu.Lock()
+	r.adoptDrops(key, route)
+	r.mu.Unlock()
 	if err := route.sink.Flush(ctx); err != nil {
 		return fmt.Errorf("flush retiring upstream event route: %w", err)
 	}
@@ -383,6 +504,10 @@ func (r *EventRouter) DrainAndRetire(ctx context.Context, nodeID, sessionID stri
 
 func (r *EventRouter) Close(ctx context.Context) error {
 	r.mu.Lock()
+	if r.routesClosed {
+		r.mu.Unlock()
+		return nil
+	}
 	r.closed = true
 	routes := make([]*eventRoute, 0, len(r.routes))
 	for _, route := range r.routes {
@@ -401,6 +526,7 @@ func (r *EventRouter) Close(ctx context.Context) error {
 func (r *EventRouter) closeRoutes(ctx context.Context) error {
 	r.mu.Lock()
 	r.closed = true
+	r.routesClosed = true
 	routes := make([]*eventRoute, 0, len(r.routes))
 	for key, route := range r.routes {
 		route.stopAdmission()

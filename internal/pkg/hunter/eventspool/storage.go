@@ -465,6 +465,9 @@ func (s *Spool) applyTransaction(tx transaction) error {
 		if r.size != mr.Size || r.batch.GetSourceNodeId() != mr.SourceNodeID || r.batch.GetProducerSessionId() != mr.ProducerSessionID || r.batch.GetBatchSequence() != mr.BatchSequence {
 			return fmt.Errorf("event spool transaction: metadata mismatch for %q", mr.Name)
 		}
+		if r.size > ^uint64(0)-total {
+			return errors.New("event spool transaction: logical bytes overflow")
+		}
 		if len(s.records) > 0 {
 			previous := s.records[len(s.records)-1].batch
 			if previous.GetSourceNodeId() == r.batch.GetSourceNodeId() && previous.GetProducerSessionId() == r.batch.GetProducerSessionId() && previous.GetBatchSequence() > r.batch.GetBatchSequence() {

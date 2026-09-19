@@ -90,6 +90,29 @@ func TestLegacyMigrationRejectsInvalidSessionPolicyBeforePublication(t *testing.
 	}
 }
 
+func TestLegacyMigrationRejectsSymlinkedSessionPolicy(t *testing.T) {
+	dir := t.TempDir()
+	payload, err := proto.Marshal(batch("node", "session", 1, 1, 1))
+	require.NoError(t, err)
+	writeRawRecord(t, filepath.Join(dir, "legacy"+recordExtension), uint64(len(payload)), payload)
+
+	policyPayload, err := json.Marshal(SessionPolicy{
+		Version: 1, SourceNodeID: "node", ProducerSessionID: "session",
+		DeliveryProfile: "reliable", SemanticRevision: 1,
+	})
+	require.NoError(t, err)
+	target := filepath.Join(t.TempDir(), policyFileName)
+	require.NoError(t, os.WriteFile(target, policyPayload, 0o600))
+	require.NoError(t, os.Symlink(target, filepath.Join(dir, policyFileName)))
+
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "not regular")
+	require.NoFileExists(t, filepath.Join(dir, manifestFileName))
+	after, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	require.Equal(t, policyPayload, after, "migration must not trust or mutate a symlink target")
+}
+
 func TestManifestRecordSymlinkIsRejected(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Directory: dir})
@@ -728,6 +751,53 @@ func TestRetainLossesRejectsRangesOverlappingAcrossKinds(t *testing.T) {
 	require.ErrorContains(t, err, "overlap across loss kinds")
 	require.False(t, result.Committed)
 	require.False(t, s.HasPending())
+}
+
+func TestRecoveryRejectsPendingRangesOverlappingAcrossKinds(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Config{Directory: dir, CheckpointEvery: 1})
+	require.NoError(t, err)
+	require.NoError(t, s.BindSessionPolicy(SessionPolicy{
+		Version: 1, SourceNodeID: "node", ProducerSessionID: "session",
+		DeliveryProfile: "reliable", SemanticRevision: 1,
+	}))
+	require.NoError(t, s.Close())
+
+	m, err := readManifest(filepath.Join(dir, manifestFileName))
+	require.NoError(t, err)
+	m.LastEventSequence = 9
+	m.PendingLosses = []*eventsv1.EventLoss{
+		{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 2, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 7, Last: 8}}},
+		{Kind: eventsv1.LossKind_LOSS_KIND_POLICY_OMISSION, Count: 2, SourceNodeId: "node", ProducerSessionId: "session", EventSequenceRanges: []*eventsv1.SequenceRange{{First: 8, Last: 9}}},
+	}
+	payload, err := json.Marshal(m)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, manifestFileName), payload, 0o600))
+
+	_, err = Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "overlap across loss kinds")
+}
+
+func TestApplyTransactionRejectsLogicalByteOverflowBeforeMutation(t *testing.T) {
+	s, err := Open(Config{Directory: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	incoming := batch("node", "session", 1, 1, 1)
+	payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(incoming)
+	require.NoError(t, err)
+	r, err := s.writeRecord(time.Unix(1, 0), incoming, payload)
+	require.NoError(t, err)
+	s.bytes = ^uint64(0) - r.size + 1
+	before := s.bytes
+
+	err = s.applyTransaction(transaction{
+		Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1,
+		Add: []manifestRecord{toManifestRecord(r)}, SourceNodeID: "node", ProducerSessionID: "session",
+	})
+	require.ErrorContains(t, err, "logical bytes overflow")
+	require.Equal(t, before, s.bytes)
+	require.False(t, s.Contains("node", "session", 1))
 }
 
 func TestMetadataCounterExhaustionFailsBeforePublication(t *testing.T) {

@@ -770,6 +770,18 @@ complete processor package. `make test`, `make vet`, and `make build-matrix`
 also passed, covering the supported non-CUDA and LI partitions. Go formatting
 and `git diff --check` passed.
 
+A fourteenth source-to-plan audit on 2026-09-19 corrected three validation
+boundaries. Recovery now rejects pending loss ranges that overlap across loss
+kinds instead of accepting durable coverage that no receiver-valid carrier can
+represent. Legacy migration opens `session-policy.json` with the same
+no-follow, regular-file validation used for authoritative spool metadata, so an
+external symlink target cannot define the fixed session policy. Live
+transaction application also checks logical-byte addition for overflow before
+mutating the active set. Regression tests cover all three cases. Focused normal
+and `all`-tag race tests passed for `eventspool`, `eventforwarding`,
+`processor/upstream`, and `protoadapter`; the malformed-record fuzz target also
+passed a bounded run. Go formatting and `git diff --check` passed.
+
 ## Explicit non-goals
 
 - Implementing compact-index milestone B or marking its Phase 5 complete.

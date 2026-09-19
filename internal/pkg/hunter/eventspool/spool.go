@@ -1112,9 +1112,14 @@ func (s *Spool) resetSessionLocked(policy SessionPolicy) error {
 	return s.commit(tx)
 }
 func readSessionPolicy(path string) (SessionPolicy, error) {
-	payload, err := os.ReadFile(path)
+	f, err := openRegularNoFollow(path, os.O_RDONLY)
 	if err != nil {
 		return SessionPolicy{}, err
+	}
+	payload, readErr := io.ReadAll(f)
+	closeErr := f.Close()
+	if readErr != nil || closeErr != nil {
+		return SessionPolicy{}, fmt.Errorf("read event spool session policy: %w", errors.Join(readErr, closeErr))
 	}
 	var p SessionPolicy
 	if err = json.Unmarshal(payload, &p); err != nil {
@@ -1402,7 +1407,10 @@ func validateRetainedLosses(losses []*eventsv1.EventLoss, source, session string
 			}
 		}
 	}
-	return validateLossAccounting(losses)
+	if err := validateLossAccounting(losses); err != nil {
+		return err
+	}
+	return validateDisjointLossRanges(losses)
 }
 
 func validateLossAccounting(losses []*eventsv1.EventLoss) error {

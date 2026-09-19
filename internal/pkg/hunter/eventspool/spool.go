@@ -27,7 +27,6 @@ const (
 	policyFileName         = "session-policy.json"
 	manifestFileName       = "manifest.json"
 	journalFileName        = "journal.log"
-	lockFileName           = ".owner.lock"
 	recordVersion          = uint16(1)
 	manifestVersion        = uint32(1)
 	headerSize             = 30
@@ -243,7 +242,10 @@ func Open(config Config) (_ *Spool, retErr error) {
 	if err := os.MkdirAll(config.Directory, 0o700); err != nil {
 		return nil, fmt.Errorf("open event spool: create directory: %w", err)
 	}
-	lock, err := os.OpenFile(filepath.Join(config.Directory, lockFileName), os.O_CREATE|os.O_RDWR, 0o600)
+	// Lock the directory inode itself. A separate lock file can be unlinked or
+	// replaced while its descriptor remains locked, allowing another opener to
+	// acquire a lock on a new inode and race recovery or mutation.
+	lock, err := os.Open(config.Directory)
 	if err != nil {
 		return nil, fmt.Errorf("open event spool: ownership lock: %w", err)
 	}

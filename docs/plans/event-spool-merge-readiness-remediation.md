@@ -898,6 +898,13 @@ Recovery also rejects a checkpoint or replayed journal whose batch high-water
 does not exactly equal the maximum active or durably retired batch sequence.
 Regressions cover late admission after a real send, loss-carrier admission,
 legacy ordering, and both checkpoint and journal high-water corruption.
+
+A twenty-second source-to-plan audit on 2026-09-19 corrected exclusive spool
+ownership. The previous `.owner.lock` child file could be unlinked and replaced
+while its original inode remained locked, allowing a second opener to acquire a
+different lock and race recovery or mutation. Ownership now locks the stable
+spool-directory inode itself. A regression replaces the legacy lock pathname
+while the first owner remains live and verifies that a second open still fails.
 Focused normal and `all`-tag race tests passed for `eventspool`,
 `eventforwarding`, `processor/upstream`, and `protoadapter`.
 

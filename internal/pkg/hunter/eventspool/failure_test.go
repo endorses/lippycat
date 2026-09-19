@@ -488,7 +488,7 @@ func snapshotSpoolFiles(t *testing.T, dir string) map[string][]byte {
 	require.NoError(t, err)
 	files := make(map[string][]byte)
 	for _, entry := range entries {
-		if entry.IsDir() || entry.Name() == lockFileName {
+		if entry.IsDir() {
 			continue
 		}
 		payload, readErr := os.ReadFile(filepath.Join(dir, entry.Name()))

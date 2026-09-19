@@ -155,9 +155,11 @@ This makes the visible recovery state durable before deleting files required
 by the alternative pre-failure state. A failed recovery sync preserves those
 files and keeps the spool unavailable until recovery succeeds.
 
-One process owns a spool directory at a time. The owner holds an exclusive
-directory lock throughout recovery and mutation and releases it on `Close` or
-failed startup.
+One process owns a spool directory at a time. The owner holds an exclusive lock
+on the stable directory inode throughout recovery and mutation and releases it
+on `Close` or failed startup. The lock is not stored in a replaceable child
+file, so unlinking or replacing a legacy `.owner.lock` path cannot create a
+second concurrent owner.
 
 Authoritative manifest and journal files must be regular files opened without
 following symlinks, and the opened descriptor must still identify the inspected

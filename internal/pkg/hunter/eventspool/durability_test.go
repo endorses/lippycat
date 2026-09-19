@@ -235,6 +235,24 @@ func TestOpenEnforcesExclusiveOwnership(t *testing.T) {
 	require.NoError(t, second.Close())
 }
 
+func TestOpenOwnershipCannotBeBypassedByReplacingLegacyLockFile(t *testing.T) {
+	dir := t.TempDir()
+	first, err := Open(Config{Directory: dir})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, first.Close()) })
+
+	// Older implementations locked this replaceable path. Its presence,
+	// removal, or replacement must not affect ownership of the directory.
+	legacyLock := filepath.Join(dir, ".owner.lock")
+	require.NoError(t, os.WriteFile(legacyLock, []byte("replacement"), 0o600))
+	require.NoError(t, os.Remove(legacyLock))
+	require.NoError(t, os.WriteFile(legacyLock, []byte("another inode"), 0o600))
+
+	second, err := Open(Config{Directory: dir})
+	require.ErrorContains(t, err, "already owned")
+	require.Nil(t, second)
+}
+
 func TestPublishedBatchesAreImmutableToCallers(t *testing.T) {
 	s, err := Open(Config{Directory: t.TempDir()})
 	require.NoError(t, err)

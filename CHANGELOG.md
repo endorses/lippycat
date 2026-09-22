@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-09-22
+
+### Added
+
+- Add configurable SIP priority-lane sizing for hunt, tap, and local capture,
+  with automatic sizing and explicit overrides
+- Expose SIP classifications, demotions, final drops, and per-lane queue
+  occupancy/capacity through capture heartbeats, distributed status, JSON, and
+  the TUI
+
+### Changed
+
+- Replace fixed SIP-lane capacity and packet-count-based overflow warnings with
+  resolved runtime sizing and time-gated pressure summaries
+- Document SIP priority degradation, bounded-burst tuning, and overload
+  troubleshooting across command and operator guides
+
+### Fixed
+
+- Preserve admitted packets and cumulative drop/demotion totals across local
+  capture buffer replacement and policy restarts
+- Correct hunter buffer-health calculations and strengthen protobuf
+  compatibility, configuration-precedence, and end-to-end telemetry coverage
+
 ## [0.12.0] - 2026-09-19
 
 ### Added

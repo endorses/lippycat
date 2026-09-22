@@ -285,12 +285,19 @@ type LocalSource struct {
 	config LocalSourceConfig
 
 	// Capture state (packetBuffer is atomic: Stats() reads it concurrently with Start())
-	packetBuffer  atomic.Pointer[capture.PacketBuffer]
-	captureCtx    context.Context
-	captureCancel context.CancelFunc
-	captureDone   chan struct{}
-	batchingDone  chan struct{}
-	boundaryMu    sync.Mutex
+	packetBuffer atomic.Pointer[capture.PacketBuffer]
+	// captureTelemetryMu makes retiring one buffer and publishing its replacement
+	// atomic to Stats()/batch snapshots. PacketBuffer counters are per-buffer;
+	// retired totals preserve the longer-lived PacketSource counter contract.
+	captureTelemetryMu    sync.RWMutex
+	retiredRegularDropped int64
+	retiredSIPDropped     int64
+	retiredSIPDemoted     int64
+	captureCtx            context.Context
+	captureCancel         context.CancelFunc
+	captureDone           chan struct{}
+	batchingDone          chan struct{}
+	boundaryMu            sync.Mutex
 
 	// Batching
 	batchMu      sync.Mutex
@@ -1230,10 +1237,32 @@ func (s *LocalSource) Stats() Stats {
 }
 
 func (s *LocalSource) captureBufferSnapshot() capture.PacketBufferSnapshot {
+	s.captureTelemetryMu.RLock()
+	defer s.captureTelemetryMu.RUnlock()
+
+	var snapshot capture.PacketBufferSnapshot
 	if pb := s.packetBuffer.Load(); pb != nil {
-		return pb.Snapshot()
+		snapshot = pb.Snapshot()
 	}
-	return capture.PacketBufferSnapshot{}
+	snapshot.RegularDropped += s.retiredRegularDropped
+	snapshot.SIPDropped += s.retiredSIPDropped
+	snapshot.SIPDemoted += s.retiredSIPDemoted
+	return snapshot
+}
+
+// replacePacketBuffer retires the old buffer's cumulative counters and makes
+// the replacement visible as one telemetry transition. Queue gauges and
+// capacities always describe the current buffer generation.
+func (s *LocalSource) replacePacketBuffer(old, replacement *capture.PacketBuffer) {
+	s.captureTelemetryMu.Lock()
+	defer s.captureTelemetryMu.Unlock()
+	if old != nil {
+		snapshot := old.Snapshot()
+		s.retiredRegularDropped += snapshot.RegularDropped
+		s.retiredSIPDropped += snapshot.SIPDropped
+		s.retiredSIPDemoted += snapshot.SIPDemoted
+	}
+	s.packetBuffer.Store(replacement)
 }
 
 func (s *LocalSource) captureBufferRegularDrops() uint64 {
@@ -1361,9 +1390,17 @@ func (s *LocalSource) ApplyPolicyBoundary(ctx context.Context, filter string, ap
 		return fmt.Errorf("quiesce local capture: %w", err)
 	}
 	if packetBuffer != nil {
-		packetBuffer.Close()
+		// Producers have quiesced, so close only the input lanes. The batching
+		// worker must consume every packet already admitted before the policy
+		// boundary is allowed to advance.
+		packetBuffer.CloseInputs()
 	}
 	if err := waitDone(ctx, batchingDone); err != nil {
+		if packetBuffer != nil {
+			// A stalled consumer must not leak the merger indefinitely. Close is
+			// the forced-cancellation path after graceful draining has timed out.
+			packetBuffer.Close()
+		}
 		return fmt.Errorf("drain local capture workers: %w", err)
 	}
 
@@ -1392,7 +1429,7 @@ func (s *LocalSource) ApplyPolicyBoundary(ctx context.Context, filter string, ap
 	if err != nil {
 		return fmt.Errorf("recreate packet buffer: %w", err)
 	}
-	s.packetBuffer.Store(replacementBuffer)
+	s.replacePacketBuffer(packetBuffer, replacementBuffer)
 	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
 	s.captureDone = make(chan struct{})
 	s.batchingDone = make(chan struct{})

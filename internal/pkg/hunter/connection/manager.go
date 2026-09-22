@@ -851,8 +851,9 @@ func (m *Manager) calculateStatus() management.HunterStatus {
 	// Check buffer usage
 	if m.captureManager != nil && m.captureManager.GetPacketBuffer() != nil {
 		buffer := m.captureManager.GetPacketBuffer()
-		bufferUsage := buffer.Len()
-		bufferCapacity := buffer.Cap()
+		snapshot := buffer.Snapshot()
+		bufferUsage := snapshot.TotalLength()
+		bufferCapacity := snapshot.TotalCapacity()
 
 		if bufferCapacity > 0 {
 			usagePercent := (bufferUsage * 100) / bufferCapacity

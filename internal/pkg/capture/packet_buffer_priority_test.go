@@ -1,11 +1,14 @@
 package capture
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -201,4 +204,44 @@ func TestPacketBufferCloseInputsFinalSummaryOnce(t *testing.T) {
 	pb.CloseInputs()
 	pb.Close()
 	require.Equal(t, int64(1), emitted.Load())
+}
+
+func TestLogOverflowSummaryIncludesPressureAndLaneFields(t *testing.T) {
+	var output bytes.Buffer
+	logger.UseFile(&output)
+	t.Cleanup(logger.Enable)
+
+	logOverflowSummary(overflowSummary{
+		Final:                true,
+		IntervalRegularDrops: 2,
+		IntervalSIPDemotions: 3,
+		IntervalSIPDrops:     5,
+		Snapshot: PacketBufferSnapshot{
+			RegularLength: 7, RegularCapacity: 17,
+			SIPLength: 11, SIPCapacity: 19,
+			OutputLength: 13, OutputCapacity: 23,
+			RegularDropped: 29, SIPDemoted: 31, SIPDropped: 37,
+		},
+	})
+
+	var record map[string]any
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(output.Bytes()), &record))
+	require.Equal(t, "Packet buffer pressure summary", record["msg"])
+	require.Equal(t, true, record["final"])
+	for field, want := range map[string]float64{
+		"interval_regular_dropped": 2,
+		"interval_sip_demoted":     3,
+		"interval_sip_dropped":     5,
+		"regular_dropped":          29,
+		"sip_demoted":              31,
+		"sip_dropped":              37,
+		"regular_len":              7,
+		"regular_cap":              17,
+		"sip_len":                  11,
+		"sip_cap":                  19,
+		"output_len":               13,
+		"output_cap":               23,
+	} {
+		require.Equal(t, want, record[field], field)
+	}
 }

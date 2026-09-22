@@ -506,6 +506,36 @@ func TestCalculateStatus_NoStats(t *testing.T) {
 	assert.Equal(t, management.HunterStatus_STATUS_HEALTHY, status)
 }
 
+func TestCalculateStatusUsesAggregatePacketBufferCapacity(t *testing.T) {
+	buffer, err := capture.NewPacketBufferWithConfig(t.Context(), capture.PacketBufferConfig{
+		RegularCapacity: 100,
+		SIPCapacity:     1000,
+		OutputCapacity:  100,
+	})
+	require.NoError(t, err)
+	defer buffer.Close()
+
+	for i := 0; i < 90; i++ {
+		require.True(t, buffer.Send(captureTestUDPPacketInfo(t, "ordinary synthetic payload")))
+	}
+	require.Eventually(t, func() bool {
+		// One packet may be held by the merger while it waits for output space.
+		return buffer.Snapshot().TotalLength() >= 89
+	}, time.Second, time.Millisecond)
+
+	manager := &Manager{
+		ctx:            context.Background(),
+		statsCollector: &mockStatsCollector{},
+		captureManager: &mockCaptureManager{buffer: buffer},
+	}
+
+	// The queued packets are at least 89% of the regular lane alone, but under
+	// 8% of
+	// the configured aggregate capacity. Mixing those units produced a false
+	// warning when the SIP override was larger than the regular lane.
+	require.Equal(t, management.HunterStatus_STATUS_HEALTHY, manager.calculateStatus())
+}
+
 func TestMin(t *testing.T) {
 	tests := []struct {
 		a, b     int

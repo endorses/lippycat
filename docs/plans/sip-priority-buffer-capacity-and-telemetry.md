@@ -251,3 +251,22 @@ Documentation targets:
       previous aggregate fields.
 - [x] Tests demonstrate bounded-burst behavior and accounting invariants without
       claiming that finite buffering solves sustained overload.
+
+## Closure audit remediation
+
+- [x] Drain every packet admitted before a successful local-source policy
+      boundary by closing packet-buffer inputs without cancelling the merger.
+- [x] Preserve cumulative regular-drop, SIP-drop, and SIP-demotion totals across
+      local-source buffer replacement while keeping lane gauges generation-local.
+- [x] Calculate hunter buffer health from aggregate occupancy and aggregate
+      capacity rather than mixing aggregate occupancy with regular-lane capacity.
+- [x] Add mutation-sensitive policy-boundary coverage proving cancellation-based
+      close loses admitted packets and graceful input close does not.
+- [x] Strengthen compatibility and vertical-path evidence for legacy protobuf
+      readers, positive hunter telemetry, hunter/tap configuration threading,
+      explicit-zero precedence, generic command validation, and summary fields.
+- [x] Re-run focused and race tests, the full `all` and LI suites, `all`/`hunter`/
+      `tap` builds, formatting checks, and vet for the supported partitions.
+- [x] Complete an independent integrated review of the production fixes, field
+      semantics, restart branches, and updated regression evidence with no
+      unresolved scoped findings.

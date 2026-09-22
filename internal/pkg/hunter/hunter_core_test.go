@@ -165,6 +165,23 @@ func TestCaptureLossStatsSampleBufferOverflowOnce(t *testing.T) {
 	require.Equal(t, first, hunter.statsCollector.ToProto(0).GetCaptureLosses())
 }
 
+func TestHunterThreadsSIPBufferCapacityToCaptureManager(t *testing.T) {
+	hunter, err := New(Config{
+		ProcessorAddr: "processor.example.invalid:55555",
+		HunterID:      "hunter-buffer-config",
+		BufferSize:    2,
+		SIPBufferSize: 3,
+	})
+	require.NoError(t, err)
+	require.NoError(t, hunter.captureManager.Start(nil))
+	defer hunter.captureManager.Stop()
+
+	snapshot := hunter.captureManager.GetPacketBuffer().Snapshot()
+	require.Equal(t, 2, snapshot.RegularCapacity)
+	require.Equal(t, 3, snapshot.SIPCapacity)
+	require.Equal(t, 2, snapshot.OutputCapacity)
+}
+
 func TestEventPolicyChangeRotatesProducerSession(t *testing.T) {
 	hunter, err := New(Config{ProcessorAddr: "processor:55555", HunterID: "hunter-rotate", ForwardMode: "events", EventSpoolDir: t.TempDir(), EventDeliveryProfile: "memory_only"})
 	require.NoError(t, err)

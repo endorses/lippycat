@@ -86,6 +86,12 @@ func TestTapSIPBufferConfigPrecedence(t *testing.T) {
 	require.NoError(t, os.Setenv("LIPPYCAT_TAP_SIP_BUFFER_SIZE", "43"))
 	require.Equal(t, 43, tapSourceConfig(processor.Config{}, "", protocolcatalog.MustLookup("generic")).SIPBufferSize)
 
+	require.NoError(t, flag.Value.Set("0"))
+	flag.Changed = true
+	zeroConfig, err := tapSourceConfigChecked(processor.Config{}, "", protocolcatalog.MustLookup("generic"))
+	require.NoError(t, err)
+	require.Zero(t, zeroConfig.SIPBufferSize, "an explicit CLI zero must override config and environment values")
+
 	require.NoError(t, flag.Value.Set("47"))
 	flag.Changed = true
 	require.Equal(t, 47, tapSourceConfig(processor.Config{}, "", protocolcatalog.MustLookup("generic")).SIPBufferSize)

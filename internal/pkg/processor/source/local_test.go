@@ -778,6 +778,93 @@ func TestApplyPolicyBoundaryDrainsProcessorBeforeApplyAndResumes(t *testing.T) {
 	<-consumerDone
 }
 
+func TestApplyPolicyBoundaryDrainsAdmittedPacketsAndPreservesPressureTotals(t *testing.T) {
+	s := NewLocalSource(LocalSourceConfig{
+		Interfaces:    []string{"synthetic0"},
+		BPFFilter:     "old",
+		BatchSize:     100,
+		BatchTimeout:  time.Hour,
+		BufferSize:    4,
+		SIPBufferSize: 1,
+		BatchBuffer:   8,
+	})
+	sourceCtx, cancelSource := context.WithCancel(context.Background())
+	defer cancelSource()
+
+	pb, err := capture.NewPacketBufferWithConfig(sourceCtx, capture.PacketBufferConfig{
+		RegularCapacity: 4,
+		SIPCapacity:     1,
+		OutputCapacity:  1,
+	})
+	require.NoError(t, err)
+
+	// Saturate the output and input lanes before the batching worker starts.
+	// Some sends are deliberately rejected so the retired counter continuity is
+	// proved by the same policy-boundary transition.
+	accepted := 0
+	for i := 0; i < 32; i++ {
+		if pb.Send(buildUDPPacket(t, 5060, "OPTIONS sip:boundary@example.invalid SIP/2.0\r\n")) {
+			accepted++
+		}
+	}
+	require.Positive(t, accepted)
+	require.Eventually(t, func() bool { return pb.Snapshot().OutputLength == 1 }, time.Second, time.Millisecond)
+	oldSnapshot := pb.Snapshot()
+	require.Positive(t, oldSnapshot.SIPDemoted)
+	require.Positive(t, oldSnapshot.SIPDropped)
+
+	s.mu.Lock()
+	s.started = true
+	s.ctx = sourceCtx
+	s.captureDone = make(chan struct{})
+	close(s.captureDone)
+	s.batchingDone = make(chan struct{})
+	s.packetBuffer.Store(pb)
+	s.wg.Add(1)
+	s.mu.Unlock()
+
+	var processed atomic.Int64
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		for batch := range s.batches {
+			processed.Add(int64(len(batch.Envelopes)))
+			batch.RunAfterProcess()
+		}
+	}()
+
+	boundaryDone := make(chan error, 1)
+	go func() {
+		boundaryDone <- s.ApplyPolicyBoundary(t.Context(), "new", func() error { return nil })
+	}()
+
+	// ApplyPolicyBoundary must first close only the inputs, then wait for the
+	// batching worker. Starting the worker after that point makes the drain
+	// behavior deterministic and catches cancellation-based packet abandonment.
+	require.Eventually(t, pb.IsClosed, time.Second, time.Millisecond)
+	go func(done chan struct{}) {
+		defer close(done)
+		s.batchingLoop()
+	}(s.batchingDone)
+
+	require.NoError(t, <-boundaryDone)
+	require.Equal(t, int64(accepted), processed.Load(), "every admitted old-generation packet must cross the policy boundary")
+
+	stats := s.Stats()
+	require.Equal(t, uint64(oldSnapshot.RegularDropped), stats.CaptureBufferRegularDrops)
+	require.Equal(t, uint64(oldSnapshot.SIPDropped), stats.CaptureBufferSIPDrops)
+	require.Equal(t, uint64(oldSnapshot.SIPDemoted), stats.CaptureBufferSIPDemotions)
+	require.Equal(t, stats.CaptureBufferRegularDrops+stats.CaptureBufferSIPDrops+stats.BatchChannelDrops, stats.PacketsDropped)
+
+	cancelSource()
+	if current := s.packetBuffer.Load(); current != nil {
+		current.Close()
+	}
+	s.wg.Wait()
+	close(s.batches)
+	<-consumerDone
+}
+
 func TestLocalSourceRejectsNegativeSIPBufferSizeBeforeCapture(t *testing.T) {
 	s := NewLocalSource(LocalSourceConfig{SIPBufferSize: -1})
 	err := s.Start(t.Context())

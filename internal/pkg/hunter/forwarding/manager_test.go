@@ -4,6 +4,7 @@ package forwarding
 
 import (
 	"context"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,8 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
@@ -67,6 +70,29 @@ type testPacketBufferProvider struct{ buffer *capture.PacketBuffer }
 
 func (p testPacketBufferProvider) GetPacketBuffer() *capture.PacketBuffer { return p.buffer }
 
+func sipPacketInfo(t *testing.T) capture.PacketInfo {
+	t.Helper()
+
+	eth := &layers.Ethernet{
+		SrcMAC:       []byte{0x02, 0, 0, 0, 0, 1},
+		DstMAC:       []byte{0x02, 0, 0, 0, 0, 2},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip := &layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		Protocol: layers.IPProtocolUDP,
+		SrcIP:    net.IPv4(192, 0, 2, 1),
+		DstIP:    net.IPv4(198, 51, 100, 2),
+	}
+	udp := &layers.UDP{SrcPort: 5060, DstPort: 5060}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	serialized := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(serialized, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true},
+		eth, ip, udp, gopacket.Payload("OPTIONS sip:telemetry@example.invalid SIP/2.0\r\n\r\n")))
+	return capture.PacketInfo{Packet: gopacket.NewPacket(serialized.Bytes(), layers.LayerTypeEthernet, gopacket.Default)}
+}
+
 func TestSendBatchReconcilesNamedLossCounters(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	packetBuffer := capture.NewPacketBuffer(ctx, 1)
@@ -92,6 +118,56 @@ func TestSendBatchReconcilesNamedLossCounters(t *testing.T) {
 	require.Equal(t, uint64(packetBuffer.Cap()), batch.Stats.CaptureBufferRegularCapacity)
 	require.Equal(t, uint64(packetBuffer.SIPCap()), batch.Stats.CaptureBufferSIPCapacity)
 	require.Equal(t, batch.Stats.CaptureBufferRegularDrops+batch.Stats.CaptureBufferSIPDrops+batch.Stats.BatchChannelDrops, batch.Stats.Dropped)
+
+	cancel()
+	m.Wait()
+}
+
+func TestSendBatchPropagatesSIPDemotionAndLaneGauges(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	packetBuffer, err := capture.NewPacketBufferWithConfig(ctx, capture.PacketBufferConfig{
+		RegularCapacity: 1,
+		SIPCapacity:     1,
+		OutputCapacity:  1,
+	})
+	require.NoError(t, err)
+	defer packetBuffer.Close()
+
+	sip := sipPacketInfo(t)
+	require.True(t, packetBuffer.Send(sip))
+	require.Eventually(t, func() bool {
+		return packetBuffer.Snapshot().OutputLength == 1
+	}, time.Second, time.Millisecond)
+	require.True(t, packetBuffer.Send(sip))
+	require.Eventually(t, func() bool {
+		return packetBuffer.Snapshot().SIPLength == 0
+	}, time.Second, time.Millisecond)
+	require.True(t, packetBuffer.Send(sip))
+	require.True(t, packetBuffer.Send(sip))
+
+	snapshot := packetBuffer.Snapshot()
+	require.Equal(t, int64(1), snapshot.SIPDemoted)
+	require.Equal(t, 1, snapshot.RegularLength)
+	require.Equal(t, 1, snapshot.SIPLength)
+	require.Equal(t, 1, snapshot.OutputLength)
+
+	queue := make(chan *pipeline.PacketBatch, 1)
+	m := New(Config{BatchSize: 1}, &flowStats{}, testPacketBufferProvider{buffer: packetBuffer}, ctx, queue)
+	m.HandleFlowControl(&data.StreamControl{FlowControl: data.FlowControl_FLOW_PAUSE})
+	require.True(t, m.AddPacketToBatch(packet()))
+	m.SendBatch()
+
+	batch := <-queue
+	require.Equal(t, uint64(1), batch.Stats.CaptureBufferSIPDemotions)
+	require.Zero(t, batch.Stats.Dropped, "priority demotion must not be reported as packet loss")
+	require.Equal(t, uint64(snapshot.RegularLength), batch.Stats.CaptureBufferRegularLen)
+	require.Equal(t, uint64(snapshot.RegularCapacity), batch.Stats.CaptureBufferRegularCapacity)
+	require.Equal(t, uint64(snapshot.SIPLength), batch.Stats.CaptureBufferSIPLen)
+	require.Equal(t, uint64(snapshot.SIPCapacity), batch.Stats.CaptureBufferSIPCapacity)
+	require.Equal(t, uint64(snapshot.OutputLength), batch.Stats.CaptureBufferOutputLen)
+	require.Equal(t, uint64(snapshot.OutputCapacity), batch.Stats.CaptureBufferOutputCapacity)
+	require.Equal(t, uint32(100), batch.Stats.BufferUsage)
 
 	cancel()
 	m.Wait()

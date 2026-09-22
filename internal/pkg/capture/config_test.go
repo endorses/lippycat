@@ -2,10 +2,12 @@ package capture
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetPacketBufferConfig(t *testing.T) {
@@ -63,6 +65,67 @@ func TestGetPacketBufferConfigRejectsMalformedSIPCapacity(t *testing.T) {
 	viper.Set("sip_buffer_size", "not-a-number")
 	_, err := getPacketBufferConfig()
 	assert.ErrorContains(t, err, "sip_buffer_size")
+}
+
+func TestGetPacketBufferConfigPresenceSemantics(t *testing.T) {
+	originalValue := viper.Get("sip_buffer_size")
+	originalEnv, hadEnv := os.LookupEnv("LIPPYCAT_SIP_BUFFER_SIZE")
+	t.Cleanup(func() {
+		viper.Set("sip_buffer_size", originalValue)
+		require.NoError(t, viper.ReadConfig(strings.NewReader("{}")))
+		if hadEnv {
+			require.NoError(t, os.Setenv("LIPPYCAT_SIP_BUFFER_SIZE", originalEnv))
+		} else {
+			require.NoError(t, os.Unsetenv("LIPPYCAT_SIP_BUFFER_SIZE"))
+		}
+	})
+
+	viper.SetConfigType("yaml")
+	require.NoError(t, os.Unsetenv("LIPPYCAT_SIP_BUFFER_SIZE"))
+
+	for _, tc := range []struct {
+		name      string
+		document  string
+		wantValue int
+		wantError bool
+	}{
+		{name: "absent selects automatic", document: "{}", wantValue: 0},
+		{name: "null is treated as absent", document: "sip_buffer_size: null\n", wantValue: 0},
+		{name: "empty string is malformed", document: "sip_buffer_size: \"\"\n", wantError: true},
+		{name: "boolean is malformed", document: "sip_buffer_size: true\n", wantError: true},
+		{name: "fractional number is malformed", document: "sip_buffer_size: 1.5\n", wantError: true},
+		{name: "integer overflow is malformed", document: "sip_buffer_size: \"999999999999999999999999999999\"\n", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.Set("sip_buffer_size", nil)
+			require.NoError(t, viper.ReadConfig(strings.NewReader(tc.document)))
+
+			config, err := getPacketBufferConfig()
+			if tc.wantError {
+				require.ErrorContains(t, err, "sip_buffer_size")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantValue, config.SIPCapacity)
+		})
+	}
+
+	t.Run("malformed environment is rejected", func(t *testing.T) {
+		viper.Set("sip_buffer_size", nil)
+		require.NoError(t, viper.ReadConfig(strings.NewReader("{}")))
+		require.NoError(t, os.Setenv("LIPPYCAT_SIP_BUFFER_SIZE", "not-an-integer"))
+		_, err := getPacketBufferConfig()
+		require.ErrorContains(t, err, "sip_buffer_size")
+	})
+
+	t.Run("empty environment is treated as absent", func(t *testing.T) {
+		viper.Set("sip_buffer_size", nil)
+		require.NoError(t, viper.ReadConfig(strings.NewReader("{}")))
+		require.NoError(t, os.Setenv("LIPPYCAT_SIP_BUFFER_SIZE", ""))
+		config, err := getPacketBufferConfig()
+		require.NoError(t, err)
+		require.Zero(t, config.SIPCapacity)
+	})
 }
 
 func TestGetPacketBufferSize(t *testing.T) {

@@ -196,6 +196,12 @@ func TestHunterSIPBufferConfigPrecedence(t *testing.T) {
 	require.NoError(t, os.Setenv("LIPPYCAT_HUNTER_SIP_BUFFER_SIZE", "37"))
 	require.Equal(t, 37, buildHunterConfig(hunterConfigSpec{}).SIPBufferSize)
 
+	require.NoError(t, flag.Value.Set("0"))
+	flag.Changed = true
+	zeroConfig, err := buildHunterConfigChecked(hunterConfigSpec{})
+	require.NoError(t, err)
+	require.Zero(t, zeroConfig.SIPBufferSize, "an explicit CLI zero must override config and environment values")
+
 	require.NoError(t, flag.Value.Set("41"))
 	flag.Changed = true
 	require.Equal(t, 41, buildHunterConfig(hunterConfigSpec{}).SIPBufferSize)

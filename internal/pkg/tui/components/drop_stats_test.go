@@ -62,6 +62,23 @@ func TestDropStats_BufferDropStagesPreserveNamedCountersAndAggregate(t *testing.
 	assert.Zero(t, summary.BufferDrops)
 }
 
+func TestCaptureBufferPressureDoesNotCountAsLoss(t *testing.T) {
+	ds := NewDropStats()
+	ds.SetBufferDropStages(2, 1)
+	ds.SetCaptureBufferPressure(9, 3, 10, 4, 11, 5, 12)
+
+	summary := ds.GetSummary()
+	assert.Equal(t, int64(3), summary.BufferDrops)
+	assert.Equal(t, int64(3), summary.TotalDrops)
+	assert.Equal(t, int64(9), summary.SIPDemotions)
+	assert.Equal(t, 3, summary.BufferRegularLength)
+	assert.Equal(t, 10, summary.BufferRegularCapacity)
+	assert.Equal(t, 4, summary.BufferSIPLength)
+	assert.Equal(t, 11, summary.BufferSIPCapacity)
+	assert.Equal(t, 5, summary.BufferOutputLength)
+	assert.Equal(t, 12, summary.BufferOutputCapacity)
+}
+
 func TestDropStats_QueueDrops(t *testing.T) {
 	ds := NewDropStats()
 	ds.SetTotalPackets(1000)

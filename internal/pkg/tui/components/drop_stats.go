@@ -17,11 +17,18 @@ type DropStats struct {
 	KernelReceived int64 // For calculating drop rate
 
 	// Application level
-	BufferDrops        int64 // Compatible aggregate of regular and SIP PacketBuffer overflow
-	BufferRegularDrops int64 // Regular-lane PacketBuffer overflow
-	BufferSIPDrops     int64 // Protected SIP-lane PacketBuffer overflow
-	QueueDrops         int64 // TCP assembler queue full
-	FilterDrops        int64 // Filtered out (intentional, not counted in total)
+	BufferDrops           int64 // Compatible aggregate of regular and SIP PacketBuffer overflow
+	BufferRegularDrops    int64 // Regular-lane PacketBuffer overflow
+	BufferSIPDrops        int64 // Protected SIP-lane PacketBuffer overflow
+	SIPDemotions          int64 // Priority degradation; explicitly not packet loss
+	BufferRegularLength   int
+	BufferRegularCapacity int
+	BufferSIPLength       int
+	BufferSIPCapacity     int
+	BufferOutputLength    int
+	BufferOutputCapacity  int
+	QueueDrops            int64 // TCP assembler queue full
+	FilterDrops           int64 // Filtered out (intentional, not counted in total)
 
 	// Distributed mode
 	HunterDrops  int64 // Aggregated from all hunters
@@ -74,6 +81,20 @@ func (ds *DropStats) SetBufferDropStages(regular, sip int64) {
 	ds.BufferRegularDrops = regular
 	ds.BufferSIPDrops = sip
 	ds.BufferDrops = regular + sip
+}
+
+// SetCaptureBufferPressure records priority degradation and approximate queue
+// gauges. SIP demotions are intentionally excluded from all loss aggregates.
+func (ds *DropStats) SetCaptureBufferPressure(demotions int64, regularLength, regularCapacity, sipLength, sipCapacity, outputLength, outputCapacity int) {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	ds.SIPDemotions = demotions
+	ds.BufferRegularLength = regularLength
+	ds.BufferRegularCapacity = regularCapacity
+	ds.BufferSIPLength = sipLength
+	ds.BufferSIPCapacity = sipCapacity
+	ds.BufferOutputLength = outputLength
+	ds.BufferOutputCapacity = outputCapacity
 }
 
 // AddQueueDrops adds to the queue drop counter.
@@ -132,6 +153,13 @@ type DropSummary struct {
 	BufferDrops           int64
 	BufferRegularDrops    int64
 	BufferSIPDrops        int64
+	SIPDemotions          int64
+	BufferRegularLength   int
+	BufferRegularCapacity int
+	BufferSIPLength       int
+	BufferSIPCapacity     int
+	BufferOutputLength    int
+	BufferOutputCapacity  int
 	BufferDropRate        float64
 	QueueDrops            int64
 	QueueDropRate         float64
@@ -169,6 +197,13 @@ func (ds *DropStats) GetSummary() DropSummary {
 		BufferDrops:           ds.BufferDrops,
 		BufferRegularDrops:    ds.BufferRegularDrops,
 		BufferSIPDrops:        ds.BufferSIPDrops,
+		SIPDemotions:          ds.SIPDemotions,
+		BufferRegularLength:   ds.BufferRegularLength,
+		BufferRegularCapacity: ds.BufferRegularCapacity,
+		BufferSIPLength:       ds.BufferSIPLength,
+		BufferSIPCapacity:     ds.BufferSIPCapacity,
+		BufferOutputLength:    ds.BufferOutputLength,
+		BufferOutputCapacity:  ds.BufferOutputCapacity,
 		QueueDrops:            ds.QueueDrops,
 		HunterDrops:           ds.HunterDrops,
 		NetworkDrops:          ds.NetworkDrops,
@@ -222,6 +257,13 @@ func (ds *DropStats) Reset() {
 	ds.BufferDrops = 0
 	ds.BufferRegularDrops = 0
 	ds.BufferSIPDrops = 0
+	ds.SIPDemotions = 0
+	ds.BufferRegularLength = 0
+	ds.BufferRegularCapacity = 0
+	ds.BufferSIPLength = 0
+	ds.BufferSIPCapacity = 0
+	ds.BufferOutputLength = 0
+	ds.BufferOutputCapacity = 0
 	ds.QueueDrops = 0
 	ds.FilterDrops = 0
 	ds.HunterDrops = 0

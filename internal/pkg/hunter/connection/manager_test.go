@@ -5,6 +5,7 @@ package connection
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,10 +16,14 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	processorhunter "github.com/endorses/lippycat/internal/pkg/processor/hunter"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 )
 
 // Mock implementations for testing
@@ -28,6 +33,16 @@ type mockStatsCollector struct {
 	forwarded uint64
 	matched   uint64
 	dropped   uint64
+}
+
+func captureTestUDPPacketInfo(t testing.TB, payload string) capture.PacketInfo {
+	t.Helper()
+	ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2)}
+	udp := &layers.UDP{SrcPort: 5060, DstPort: 5060}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	buffer := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, ip, udp, gopacket.Payload(payload)))
+	return capture.PacketInfo{Packet: gopacket.NewPacket(buffer.Bytes(), layers.LayerTypeIPv4, gopacket.Default)}
 }
 
 func (m *mockStatsCollector) GetCaptured() uint64                              { return m.captured }
@@ -115,6 +130,62 @@ type mockCaptureManager struct {
 
 func (m *mockCaptureManager) GetPacketBuffer() *capture.PacketBuffer {
 	return m.buffer
+}
+
+func TestApplyCaptureBufferStatsPreservesDropAggregate(t *testing.T) {
+	buffer, err := capture.NewPacketBufferWithConfig(t.Context(), capture.PacketBufferConfig{
+		RegularCapacity: 2,
+		SIPCapacity:     3,
+		OutputCapacity:  4,
+	})
+	require.NoError(t, err)
+	defer buffer.Close()
+
+	stats := &management.HunterStats{BatchChannelDrops: 5}
+	applyCaptureBufferStats(stats, buffer)
+
+	require.Equal(t, uint64(2), stats.CaptureBufferRegularCapacity)
+	require.Equal(t, uint64(3), stats.CaptureBufferSipCapacity)
+	require.Equal(t, uint64(4), stats.CaptureBufferOutputCapacity)
+	require.Zero(t, stats.CaptureBufferSipDemotions)
+	require.Equal(t, stats.CaptureBufferRegularDrops+stats.CaptureBufferSipDrops+stats.BatchChannelDrops, stats.PacketsDropped)
+}
+
+func TestSIPDemotionTelemetryReachesProcessorHunterState(t *testing.T) {
+	buffer, err := capture.NewPacketBufferWithConfig(t.Context(), capture.PacketBufferConfig{
+		RegularCapacity: 1,
+		SIPCapacity:     1,
+		OutputCapacity:  1,
+	})
+	require.NoError(t, err)
+	defer buffer.Close()
+
+	regular := captureTestUDPPacketInfo(t, "ordinary payload")
+	sip := captureTestUDPPacketInfo(t, "INVITE sip:pressure@example.invalid SIP/2.0\r\n")
+	require.True(t, buffer.Send(regular))
+	require.Eventually(t, func() bool { return buffer.Snapshot().OutputLength == 1 }, time.Second, time.Millisecond)
+	require.True(t, buffer.Send(regular))
+	require.Eventually(t, func() bool { return buffer.Snapshot().RegularLength == 0 }, time.Second, time.Millisecond)
+	require.True(t, buffer.Send(sip))
+	require.True(t, buffer.Send(sip), "second SIP packet should be admitted through regular fallback")
+
+	stats := &management.HunterStats{}
+	applyCaptureBufferStats(stats, buffer)
+	require.Equal(t, uint64(1), stats.CaptureBufferSipDemotions)
+
+	wire, err := proto.Marshal(stats)
+	require.NoError(t, err)
+	decoded := &management.HunterStats{}
+	require.NoError(t, proto.Unmarshal(wire, decoded))
+
+	processorManager := processorhunter.NewManager("processor-test", 1, nil)
+	_, _, err = processorManager.Register("hunter-test", "host-test", []string{"eth0"}, nil)
+	require.NoError(t, err)
+	processorManager.UpdateHeartbeat("hunter-test", 1, management.HunterStatus_STATUS_WARNING, decoded)
+	connected, ok := processorManager.Get("hunter-test")
+	require.True(t, ok)
+	require.Equal(t, uint64(1), connected.CaptureBufferSIPDemotions)
+	require.Zero(t, connected.PacketsDropped, "demotion pressure must not be counted as loss")
 }
 
 func TestValidateAcceptedEventProfile(t *testing.T) {

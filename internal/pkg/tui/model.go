@@ -773,6 +773,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		stats := m.uiState.StatisticsView.GetDropStats()
 		stats.SetKernelStats(msg.PacketsReceived, msg.KernelDrops+msg.InterfaceDrops)
 		stats.SetBufferDropStages(msg.PacketBufferRegularDrops, msg.PacketBufferSIPDrops)
+		stats.SetCaptureBufferPressure(msg.PacketBufferSIPDemotions,
+			msg.PacketBufferRegularLength, msg.PacketBufferRegularCap,
+			msg.PacketBufferSIPLength, msg.PacketBufferSIPCap,
+			msg.PacketBufferOutputLength, msg.PacketBufferOutputCap)
 		return m, nil
 	}
 

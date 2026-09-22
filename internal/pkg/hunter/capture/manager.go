@@ -28,6 +28,7 @@ type Manager struct {
 	interfaces    []string
 	baseFilter    string
 	bufferSize    int
+	sipBufferSize int
 	processorAddr string // Processor address (for automatic port exclusion)
 
 	// Packet buffer (shared with forwarding)
@@ -47,6 +48,7 @@ type Config struct {
 	Interfaces            []string // Network interfaces to capture on
 	BaseFilter            string   // Base BPF filter
 	BufferSize            int      // Packet buffer size
+	SIPBufferSize         int      // SIP priority buffer size (0 = match BufferSize)
 	ProcessorAddr         string   // Processor address (for automatic port exclusion)
 }
 
@@ -58,6 +60,7 @@ func New(config Config, mainCtx context.Context) *Manager {
 		interfaces:     config.Interfaces,
 		baseFilter:     config.BaseFilter,
 		bufferSize:     config.BufferSize,
+		sipBufferSize:  config.SIPBufferSize,
 		processorAddr:  config.ProcessorAddr,
 		mainCtx:        mainCtx,
 	}
@@ -84,7 +87,17 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 	// Don't recreate on restart - forwardPackets() is already reading from it
 	// IMPORTANT: Use mainCtx (not captureCtx) so buffer survives capture restarts
 	if m.packetBuffer == nil {
-		m.packetBuffer = capture.NewPacketBuffer(m.mainCtx, m.bufferSize)
+		packetBuffer, err := capture.NewPacketBufferWithConfig(m.mainCtx, capture.PacketBufferConfig{
+			RegularCapacity: m.bufferSize,
+			SIPCapacity:     m.sipBufferSize,
+		})
+		if err != nil {
+			m.captureCancel()
+			m.captureCtx = nil
+			m.captureCancel = nil
+			return fmt.Errorf("create packet buffer: %w", err)
+		}
+		m.packetBuffer = packetBuffer
 	}
 
 	// Create PCAP interfaces
@@ -193,6 +206,17 @@ func (m *Manager) ApplyInitialFilters(dynamicFilters []*management.Filter) error
 func (m *Manager) Stop() {
 	if m.captureCancel != nil {
 		m.captureCancel()
+	}
+	if m.captureDone != nil {
+		select {
+		case <-m.captureDone:
+		case <-time.After(5 * time.Second):
+			logger.Error("Timed out waiting for packet capture to stop before closing buffer")
+			return
+		}
+	}
+	if m.packetBuffer != nil {
+		m.packetBuffer.Close()
 	}
 }
 

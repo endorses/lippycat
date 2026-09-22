@@ -1282,8 +1282,20 @@ type HunterStats struct {
 	QueueLosses           uint64 `protobuf:"varint,25,opt,name=queue_losses,json=queueLosses,proto3" json:"queue_losses,omitempty"`
 	UnsupportedKindLosses uint64 `protobuf:"varint,21,opt,name=unsupported_kind_losses,json=unsupportedKindLosses,proto3" json:"unsupported_kind_losses,omitempty"`
 	TransportLosses       uint64 `protobuf:"varint,22,opt,name=transport_losses,json=transportLosses,proto3" json:"transport_losses,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Recognized SIP packets admitted to the regular lane after the priority
+	// lane was full. Demotions indicate priority pressure, not packet loss and
+	// are excluded from packets_dropped.
+	CaptureBufferSipDemotions uint64 `protobuf:"varint,26,opt,name=capture_buffer_sip_demotions,json=captureBufferSipDemotions,proto3" json:"capture_buffer_sip_demotions,omitempty"`
+	// Instantaneous approximate queue gauges. Capacities are immutable for a
+	// capture-buffer lifetime.
+	CaptureBufferRegularLen      uint64 `protobuf:"varint,27,opt,name=capture_buffer_regular_len,json=captureBufferRegularLen,proto3" json:"capture_buffer_regular_len,omitempty"`
+	CaptureBufferRegularCapacity uint64 `protobuf:"varint,28,opt,name=capture_buffer_regular_capacity,json=captureBufferRegularCapacity,proto3" json:"capture_buffer_regular_capacity,omitempty"`
+	CaptureBufferSipLen          uint64 `protobuf:"varint,29,opt,name=capture_buffer_sip_len,json=captureBufferSipLen,proto3" json:"capture_buffer_sip_len,omitempty"`
+	CaptureBufferSipCapacity     uint64 `protobuf:"varint,30,opt,name=capture_buffer_sip_capacity,json=captureBufferSipCapacity,proto3" json:"capture_buffer_sip_capacity,omitempty"`
+	CaptureBufferOutputLen       uint64 `protobuf:"varint,31,opt,name=capture_buffer_output_len,json=captureBufferOutputLen,proto3" json:"capture_buffer_output_len,omitempty"`
+	CaptureBufferOutputCapacity  uint64 `protobuf:"varint,32,opt,name=capture_buffer_output_capacity,json=captureBufferOutputCapacity,proto3" json:"capture_buffer_output_capacity,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *HunterStats) Reset() {
@@ -1487,6 +1499,55 @@ func (x *HunterStats) GetUnsupportedKindLosses() uint64 {
 func (x *HunterStats) GetTransportLosses() uint64 {
 	if x != nil {
 		return x.TransportLosses
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferSipDemotions() uint64 {
+	if x != nil {
+		return x.CaptureBufferSipDemotions
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferRegularLen() uint64 {
+	if x != nil {
+		return x.CaptureBufferRegularLen
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferRegularCapacity() uint64 {
+	if x != nil {
+		return x.CaptureBufferRegularCapacity
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferSipLen() uint64 {
+	if x != nil {
+		return x.CaptureBufferSipLen
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferSipCapacity() uint64 {
+	if x != nil {
+		return x.CaptureBufferSipCapacity
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferOutputLen() uint64 {
+	if x != nil {
+		return x.CaptureBufferOutputLen
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCaptureBufferOutputCapacity() uint64 {
+	if x != nil {
+		return x.CaptureBufferOutputCapacity
 	}
 	return 0
 }
@@ -5100,8 +5161,7 @@ const file_management_proto_rawDesc = "" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x129\n" +
 	"\x06status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\x06status\x126\n" +
-	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\x89\n" +
-	"\n" +
+	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xc2\r\n" +
 	"\vHunterStats\x12)\n" +
 	"\x10packets_captured\x18\x01 \x01(\x04R\x0fpacketsCaptured\x12'\n" +
 	"\x0fpackets_matched\x18\x02 \x01(\x04R\x0epacketsMatched\x12+\n" +
@@ -5130,7 +5190,14 @@ const file_management_proto_rawDesc = "" +
 	"\x0fanalysis_losses\x18\x18 \x01(\x04R\x0eanalysisLosses\x12!\n" +
 	"\fqueue_losses\x18\x19 \x01(\x04R\vqueueLosses\x126\n" +
 	"\x17unsupported_kind_losses\x18\x15 \x01(\x04R\x15unsupportedKindLosses\x12)\n" +
-	"\x10transport_losses\x18\x16 \x01(\x04R\x0ftransportLosses\"\x90\x02\n" +
+	"\x10transport_losses\x18\x16 \x01(\x04R\x0ftransportLosses\x12?\n" +
+	"\x1ccapture_buffer_sip_demotions\x18\x1a \x01(\x04R\x19captureBufferSipDemotions\x12;\n" +
+	"\x1acapture_buffer_regular_len\x18\x1b \x01(\x04R\x17captureBufferRegularLen\x12E\n" +
+	"\x1fcapture_buffer_regular_capacity\x18\x1c \x01(\x04R\x1ccaptureBufferRegularCapacity\x123\n" +
+	"\x16capture_buffer_sip_len\x18\x1d \x01(\x04R\x13captureBufferSipLen\x12=\n" +
+	"\x1bcapture_buffer_sip_capacity\x18\x1e \x01(\x04R\x18captureBufferSipCapacity\x129\n" +
+	"\x19capture_buffer_output_len\x18\x1f \x01(\x04R\x16captureBufferOutputLen\x12C\n" +
+	"\x1ecapture_buffer_output_capacity\x18  \x01(\x04R\x1bcaptureBufferOutputCapacity\"\x90\x02\n" +
 	"\x12ProcessorHeartbeat\x12!\n" +
 	"\ftimestamp_ns\x18\x01 \x01(\x03R\vtimestampNs\x12<\n" +
 	"\x06status\x18\x02 \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\x12+\n" +

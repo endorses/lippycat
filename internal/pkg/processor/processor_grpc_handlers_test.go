@@ -1951,7 +1951,11 @@ func TestGetHunterStatus_GRPCHandler(t *testing.T) {
 					PacketsDropped:            9,
 					CaptureBufferRegularDrops: 4,
 					CaptureBufferSipDrops:     2,
+					CaptureBufferSipDemotions: 8,
 					BatchChannelDrops:         3,
+					CaptureBufferRegularLen:   10, CaptureBufferRegularCapacity: 20,
+					CaptureBufferSipLen: 11, CaptureBufferSipCapacity: 21,
+					CaptureBufferOutputLen: 12, CaptureBufferOutputCapacity: 22,
 				})
 			},
 			request: &management.StatusRequest{HunterId: "hunter-loss"},
@@ -1962,7 +1966,14 @@ func TestGetHunterStatus_GRPCHandler(t *testing.T) {
 				assert.Equal(t, uint64(9), stats.PacketsDropped)
 				assert.Equal(t, uint64(4), stats.CaptureBufferRegularDrops)
 				assert.Equal(t, uint64(2), stats.CaptureBufferSipDrops)
+				assert.Equal(t, uint64(8), stats.CaptureBufferSipDemotions)
 				assert.Equal(t, uint64(3), stats.BatchChannelDrops)
+				assert.Equal(t, uint64(10), stats.CaptureBufferRegularLen)
+				assert.Equal(t, uint64(20), stats.CaptureBufferRegularCapacity)
+				assert.Equal(t, uint64(11), stats.CaptureBufferSipLen)
+				assert.Equal(t, uint64(21), stats.CaptureBufferSipCapacity)
+				assert.Equal(t, uint64(12), stats.CaptureBufferOutputLen)
+				assert.Equal(t, uint64(22), stats.CaptureBufferOutputCapacity)
 			},
 			expectHunters: 1,
 		},
@@ -2912,6 +2923,11 @@ func TestHunterEventLossStatsAppearInStatusAndTopology(t *testing.T) {
 		QueueLosses:           3,
 		UnsupportedKindLosses: 4,
 		TransportLosses:       5,
+		PacketsDropped:        6, CaptureBufferRegularDrops: 2, CaptureBufferSipDrops: 1, BatchChannelDrops: 3,
+		CaptureBufferSipDemotions: 9,
+		CaptureBufferRegularLen:   10, CaptureBufferRegularCapacity: 20,
+		CaptureBufferSipLen: 11, CaptureBufferSipCapacity: 21,
+		CaptureBufferOutputLen: 12, CaptureBufferOutputCapacity: 22,
 	})
 
 	status, err := processor.GetHunterStatus(context.Background(), &management.StatusRequest{HunterId: "hunter-losses"})
@@ -2933,6 +2949,16 @@ func assertHunterEventLossStats(t *testing.T, stats *management.HunterStats) {
 	assert.Equal(t, uint64(3), stats.QueueLosses)
 	assert.Equal(t, uint64(4), stats.UnsupportedKindLosses)
 	assert.Equal(t, uint64(5), stats.TransportLosses)
+	assert.Equal(t, uint64(6), stats.PacketsDropped)
+	assert.Equal(t, uint64(9), stats.CaptureBufferSipDemotions)
+	assert.Equal(t, uint64(10), stats.CaptureBufferRegularLen)
+	assert.Equal(t, uint64(20), stats.CaptureBufferRegularCapacity)
+	assert.Equal(t, uint64(11), stats.CaptureBufferSipLen)
+	assert.Equal(t, uint64(21), stats.CaptureBufferSipCapacity)
+	assert.Equal(t, uint64(12), stats.CaptureBufferOutputLen)
+	assert.Equal(t, uint64(22), stats.CaptureBufferOutputCapacity)
+	assert.Equal(t, stats.PacketsDropped,
+		stats.CaptureBufferRegularDrops+stats.CaptureBufferSipDrops+stats.BatchChannelDrops)
 }
 
 // TestRequestAuthToken tests the RequestAuthToken gRPC handler

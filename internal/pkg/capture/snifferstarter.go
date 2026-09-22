@@ -85,10 +85,12 @@ func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
 
 	// Run capture in background (like hunter nodes do)
 	go func() {
-		InitWithContext(ctx, devices, filter, func(ch <-chan PacketInfo, _ *TCPAssembler) {
+		defer close(captureDone)
+		if err := InitWithContextAndTelemetryChecked(ctx, devices, filter, func(ch <-chan PacketInfo, _ *TCPAssembler) {
 			processor(ch)
-		}, nil, nil, options...)
-		close(captureDone)
+		}, nil, nil, nil, options...); err != nil {
+			logger.Error("Packet capture configuration rejected", "error", err)
+		}
 	}()
 
 	// Wait for signal OR capture completion (e.g., all captures failed)

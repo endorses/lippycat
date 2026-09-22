@@ -3,6 +3,8 @@ package cmdutil
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -37,6 +39,22 @@ func GetIntConfig(key string, flagValue int) int {
 		return viper.GetInt(key)
 	}
 	return flagValue
+}
+
+// GetIntConfigStrict returns an integer configuration value without Viper's
+// permissive string-to-zero coercion. It is intended for settings where an
+// invalid environment or configuration-file value must fail startup.
+func GetIntConfigStrict(key string, flagValue int) (int, error) {
+	if !viper.IsSet(key) {
+		return flagValue, nil
+	}
+
+	raw := strings.TrimSpace(viper.GetString(key))
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer, got %q: %w", key, raw, err)
+	}
+	return value, nil
 }
 
 // GetBoolConfig returns the config value for key, or flagValue if the key is not set.

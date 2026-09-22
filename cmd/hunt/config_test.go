@@ -3,6 +3,7 @@
 package hunt
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ func TestBuildHunterConfigProtocolFixtures(t *testing.T) {
 	hunterID = "edge-01"
 	interfaces = []string{"eth0", "eth1"}
 	bufferSize = 1234
+	sipBufferSize = 321
 	batchSize = 42
 	batchTimeout = 75
 	batchQueueSize = 91
@@ -66,6 +68,7 @@ func TestBuildHunterConfigProtocolFixtures(t *testing.T) {
 			assert.Equal(t, []string{"eth0", "eth1"}, config.Interfaces)
 			assert.Equal(t, filterFixture, config.BPFFilter)
 			assert.Equal(t, 1234, config.BufferSize)
+			assert.Equal(t, 321, config.SIPBufferSize)
 			assert.Equal(t, 42, config.BatchSize)
 			assert.Equal(t, 75*time.Millisecond, config.BatchTimeout)
 			assert.Equal(t, 91, config.BatchQueueSize)
@@ -165,4 +168,49 @@ func TestValidateHunterForwardingConfig(t *testing.T) {
 			require.Error(t, validateHunterForwardingConfig(config))
 		})
 	}
+}
+
+func TestHunterSIPBufferConfigPrecedence(t *testing.T) {
+	flag := HuntCmd.PersistentFlags().Lookup("sip-buffer-size")
+	require.NotNil(t, flag)
+	originalValue, originalChanged := flag.Value.String(), flag.Changed
+	originalEnv, hadEnv := os.LookupEnv("LIPPYCAT_HUNTER_SIP_BUFFER_SIZE")
+	t.Cleanup(func() {
+		require.NoError(t, flag.Value.Set(originalValue))
+		flag.Changed = originalChanged
+		require.NoError(t, viper.ReadConfig(strings.NewReader("{}")))
+		if hadEnv {
+			require.NoError(t, os.Setenv("LIPPYCAT_HUNTER_SIP_BUFFER_SIZE", originalEnv))
+		} else {
+			require.NoError(t, os.Unsetenv("LIPPYCAT_HUNTER_SIP_BUFFER_SIZE"))
+		}
+	})
+
+	require.NoError(t, flag.Value.Set(flag.DefValue))
+	flag.Changed = false
+	require.NoError(t, os.Unsetenv("LIPPYCAT_HUNTER_SIP_BUFFER_SIZE"))
+	viper.SetConfigType("yaml")
+	require.NoError(t, viper.ReadConfig(strings.NewReader("hunter:\n  sip_buffer_size: 23\n")))
+	require.Equal(t, 23, buildHunterConfig(hunterConfigSpec{}).SIPBufferSize)
+
+	require.NoError(t, os.Setenv("LIPPYCAT_HUNTER_SIP_BUFFER_SIZE", "37"))
+	require.Equal(t, 37, buildHunterConfig(hunterConfigSpec{}).SIPBufferSize)
+
+	require.NoError(t, flag.Value.Set("41"))
+	flag.Changed = true
+	require.Equal(t, 41, buildHunterConfig(hunterConfigSpec{}).SIPBufferSize)
+}
+
+func TestValidateHunterSIPBufferSize(t *testing.T) {
+	err := validateHunterForwardingConfig(hunter.Config{SIPBufferSize: -1})
+	require.ErrorContains(t, err, "hunter.sip_buffer_size")
+}
+
+func TestBuildHunterConfigRejectsMalformedSIPBufferSize(t *testing.T) {
+	original := viper.Get("hunter.sip_buffer_size")
+	t.Cleanup(func() { viper.Set("hunter.sip_buffer_size", original) })
+
+	viper.Set("hunter.sip_buffer_size", "not-a-number")
+	_, err := buildHunterConfigChecked(hunterConfigSpec{})
+	require.ErrorContains(t, err, "hunter.sip_buffer_size")
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPacketBuffer_Len tests the Len() method
@@ -603,7 +604,8 @@ func TestPacketBuffer_SendBlocking_ContextCancellation(t *testing.T) {
 func TestPacketBuffer_SIPPrioritization(t *testing.T) {
 	ctx := context.Background()
 	// Very small buffer to force drops
-	buffer := NewPacketBuffer(ctx, 1)
+	buffer, err := NewPacketBufferWithConfig(ctx, PacketBufferConfig{RegularCapacity: 1, SIPCapacity: 1000})
+	require.NoError(t, err)
 	defer buffer.Close()
 
 	// Create a SIP INVITE packet
@@ -636,14 +638,14 @@ func TestPacketBuffer_SIPPrioritization(t *testing.T) {
 	}
 
 	// Check drops - SIP should have fewer drops than regular packets
-	// because SIP has its own priority channel (1000 capacity by default)
+	// because this test gives SIP an explicit 1000-packet priority lane
 	sipDropped := buffer.GetSIPDropped()
 	regularDropped := buffer.GetDropped()
 
 	t.Logf("SIP: sent=%d, dropped=%d", sipSent, sipDropped)
 	t.Logf("Regular: sent=%d, dropped=%d", regularSent, regularDropped)
 
-	// SIP drops should be very low (ideally zero) since SIP channel has 1000 capacity
+	// SIP drops should be very low (ideally zero) since this fixture's SIP channel has 1000 capacity
 	assert.LessOrEqual(t, sipDropped, int64(10), "SIP drops should be minimal (priority channel)")
 	// Regular drops will be higher due to small buffer
 	assert.Greater(t, regularDropped, int64(0), "Some regular packets should be dropped")

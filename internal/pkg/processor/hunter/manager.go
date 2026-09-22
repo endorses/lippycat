@@ -39,7 +39,14 @@ type ConnectedHunter struct {
 	TransportLosses               uint64 // Event transport losses reported by hunter
 	CaptureBufferRegularDrops     uint64
 	CaptureBufferSIPDrops         uint64
+	CaptureBufferSIPDemotions     uint64
 	BatchChannelDrops             uint64
+	CaptureBufferRegularLen       uint64
+	CaptureBufferRegularCapacity  uint64
+	CaptureBufferSIPLen           uint64
+	CaptureBufferSIPCapacity      uint64
+	CaptureBufferOutputLen        uint64
+	CaptureBufferOutputCapacity   uint64
 	BufferBytes                   uint64 // Hunter buffer occupancy (from heartbeat stats)
 	ActiveFilters                 uint32 // Active filter count from hunter stats
 	RTPOwnershipUnresolved        uint64
@@ -214,7 +221,14 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 			hunter.TransportLosses = stats.TransportLosses
 			hunter.CaptureBufferRegularDrops = stats.CaptureBufferRegularDrops
 			hunter.CaptureBufferSIPDrops = stats.CaptureBufferSipDrops
+			hunter.CaptureBufferSIPDemotions = stats.CaptureBufferSipDemotions
 			hunter.BatchChannelDrops = stats.BatchChannelDrops
+			hunter.CaptureBufferRegularLen = stats.CaptureBufferRegularLen
+			hunter.CaptureBufferRegularCapacity = stats.CaptureBufferRegularCapacity
+			hunter.CaptureBufferSIPLen = stats.CaptureBufferSipLen
+			hunter.CaptureBufferSIPCapacity = stats.CaptureBufferSipCapacity
+			hunter.CaptureBufferOutputLen = stats.CaptureBufferOutputLen
+			hunter.CaptureBufferOutputCapacity = stats.CaptureBufferOutputCapacity
 			hunter.BufferBytes = stats.BufferBytes
 			hunter.RTPOwnershipUnresolved = stats.RtpOwnershipUnresolved
 			hunter.RTPOwnershipAmbiguous = stats.RtpOwnershipAmbiguous

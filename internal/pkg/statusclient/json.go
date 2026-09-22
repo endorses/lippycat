@@ -42,7 +42,14 @@ type HunterStatsJSON struct {
 	PacketsDropped                uint64                        `json:"packets_dropped"`
 	CaptureBufferRegularDrops     uint64                        `json:"capture_buffer_regular_drops"`
 	CaptureBufferSIPDrops         uint64                        `json:"capture_buffer_sip_drops"`
+	CaptureBufferSIPDemotions     uint64                        `json:"capture_buffer_sip_demotions"`
 	BatchChannelDrops             uint64                        `json:"batch_channel_drops"`
+	CaptureBufferRegularLen       uint64                        `json:"capture_buffer_regular_len"`
+	CaptureBufferRegularCapacity  uint64                        `json:"capture_buffer_regular_capacity"`
+	CaptureBufferSIPLen           uint64                        `json:"capture_buffer_sip_len"`
+	CaptureBufferSIPCapacity      uint64                        `json:"capture_buffer_sip_capacity"`
+	CaptureBufferOutputLen        uint64                        `json:"capture_buffer_output_len"`
+	CaptureBufferOutputCapacity   uint64                        `json:"capture_buffer_output_capacity"`
 	BufferBytes                   uint64                        `json:"buffer_bytes"`
 	ActiveFilters                 uint32                        `json:"active_filters"`
 	CPUPercent                    float64                       `json:"cpu_percent"`
@@ -145,7 +152,14 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 			PacketsDropped:                h.Stats.PacketsDropped,
 			CaptureBufferRegularDrops:     h.Stats.CaptureBufferRegularDrops,
 			CaptureBufferSIPDrops:         h.Stats.CaptureBufferSipDrops,
+			CaptureBufferSIPDemotions:     h.Stats.CaptureBufferSipDemotions,
 			BatchChannelDrops:             h.Stats.BatchChannelDrops,
+			CaptureBufferRegularLen:       h.Stats.CaptureBufferRegularLen,
+			CaptureBufferRegularCapacity:  h.Stats.CaptureBufferRegularCapacity,
+			CaptureBufferSIPLen:           h.Stats.CaptureBufferSipLen,
+			CaptureBufferSIPCapacity:      h.Stats.CaptureBufferSipCapacity,
+			CaptureBufferOutputLen:        h.Stats.CaptureBufferOutputLen,
+			CaptureBufferOutputCapacity:   h.Stats.CaptureBufferOutputCapacity,
 			BufferBytes:                   h.Stats.BufferBytes,
 			ActiveFilters:                 h.Stats.ActiveFilters,
 			CPUPercent:                    float64(h.Stats.CpuPercent),

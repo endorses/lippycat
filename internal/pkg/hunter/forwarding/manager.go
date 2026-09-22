@@ -436,12 +436,17 @@ func (m *Manager) SendBatch() {
 	// Snapshot every cumulative local loss stage for the data-plane batch stats.
 	// The compatible aggregate must match the management heartbeat semantics.
 	batchDrops := m.statsCollector.GetDropped()
-	var regularDrops, sipDrops uint64
+	var captureSnapshot capture.PacketBufferSnapshot
 	if m.packetBufferProv != nil {
 		if packetBuffer := m.packetBufferProv.GetPacketBuffer(); packetBuffer != nil {
-			regularDrops = uint64(packetBuffer.GetDropped()) // #nosec G115 -- counters cannot be negative
-			sipDrops = uint64(packetBuffer.GetSIPDropped())  // #nosec G115 -- counters cannot be negative
+			captureSnapshot = packetBuffer.Snapshot()
 		}
+	}
+	regularDrops := uint64(captureSnapshot.RegularDropped) // #nosec G115 -- counters cannot be negative
+	sipDrops := uint64(captureSnapshot.SIPDropped)         // #nosec G115 -- counters cannot be negative
+	var bufferUsage uint32
+	if capacity := captureSnapshot.TotalCapacity(); capacity > 0 {
+		bufferUsage = uint32(captureSnapshot.TotalLength() * 100 / capacity) // #nosec G115 -- bounded percentage
 	}
 
 	// Create batch message
@@ -453,13 +458,20 @@ func (m *Manager) SendBatch() {
 		Packets:   m.currentBatch,
 		HasStats:  true,
 		Stats: pipeline.BatchStats{
-			TotalCaptured:             m.statsCollector.GetCaptured(),
-			FilteredMatched:           m.statsCollector.GetMatched(),
-			Dropped:                   regularDrops + sipDrops + batchDrops,
-			CaptureBufferRegularDrops: regularDrops,
-			CaptureBufferSIPDrops:     sipDrops,
-			BatchChannelDrops:         batchDrops,
-			BufferUsage:               0, // Will be set by caller if needed
+			TotalCaptured:                m.statsCollector.GetCaptured(),
+			FilteredMatched:              m.statsCollector.GetMatched(),
+			Dropped:                      regularDrops + sipDrops + batchDrops,
+			CaptureBufferRegularDrops:    regularDrops,
+			CaptureBufferSIPDrops:        sipDrops,
+			CaptureBufferSIPDemotions:    uint64(captureSnapshot.SIPDemoted), // #nosec G115 -- counters cannot be negative
+			BatchChannelDrops:            batchDrops,
+			BufferUsage:                  bufferUsage,
+			CaptureBufferRegularLen:      uint64(captureSnapshot.RegularLength),   // #nosec G115 -- channel lengths cannot be negative
+			CaptureBufferRegularCapacity: uint64(captureSnapshot.RegularCapacity), // #nosec G115 -- channel capacities cannot be negative
+			CaptureBufferSIPLen:          uint64(captureSnapshot.SIPLength),       // #nosec G115 -- channel lengths cannot be negative
+			CaptureBufferSIPCapacity:     uint64(captureSnapshot.SIPCapacity),     // #nosec G115 -- channel capacities cannot be negative
+			CaptureBufferOutputLen:       uint64(captureSnapshot.OutputLength),    // #nosec G115 -- channel lengths cannot be negative
+			CaptureBufferOutputCapacity:  uint64(captureSnapshot.OutputCapacity),  // #nosec G115 -- channel capacities cannot be negative
 		},
 	}
 

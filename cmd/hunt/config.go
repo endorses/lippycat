@@ -47,6 +47,7 @@ func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 		Interfaces:                 cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),
 		BPFFilter:                  spec.bpfFilter,
 		BufferSize:                 cmdutil.GetIntConfig("hunter.buffer_size", bufferSize),
+		SIPBufferSize:              cmdutil.GetIntConfig("hunter.sip_buffer_size", sipBufferSize),
 		BatchSize:                  cmdutil.GetIntConfig("hunter.batch_size", batchSize),
 		BatchTimeout:               time.Duration(cmdutil.GetIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
 		BatchQueueSize:             cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
@@ -86,7 +87,20 @@ func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 	return config
 }
 
+func buildHunterConfigChecked(spec hunterConfigSpec) (hunter.Config, error) {
+	config := buildHunterConfig(spec)
+	sipCapacity, err := cmdutil.GetIntConfigStrict("hunter.sip_buffer_size", sipBufferSize)
+	if err != nil {
+		return hunter.Config{}, err
+	}
+	config.SIPBufferSize = sipCapacity
+	return config, nil
+}
+
 func validateHunterForwardingConfig(config hunter.Config) error {
+	if config.SIPBufferSize < 0 {
+		return fmt.Errorf("hunter.sip_buffer_size must be non-negative, got %d", config.SIPBufferSize)
+	}
 	if config.ForwardMode == "" {
 		config.ForwardMode = "packets"
 	}

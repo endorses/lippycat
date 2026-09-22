@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/offline"
 	"github.com/endorses/lippycat/internal/pkg/radius"
@@ -60,9 +62,6 @@ var (
 	espHeuristicOn    bool // true when --esp-heuristic flag is set
 	espFixedICVSize   int  // -1 = auto-detect, >=0 = fixed ICV size in bytes
 )
-
-// Default SIP priority buffer size (SIP is low volume, doesn't need large buffer)
-const DefaultSIPBufferSize = 1000
 
 // getESPNullConfig returns the cached ESP-NULL configuration, initializing it
 // from Viper on first call. This avoids per-packet Viper reads.
@@ -118,11 +117,14 @@ type PacketBuffer struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	dropped    int64
-	sipDropped int64 // Separate counter for dropped SIP packets (should be rare)
+	sipDropped int64
+	sipDemoted int64
 	// sipClassified counts packets routed as recognized SIP, including UDP starts
 	// and every TCP segment protected by stateful flow classification.
 	sipClassified int64
 	bufferSize    int
+	resolved      ResolvedPacketBufferConfig
+	overflowGate  *overflowSummaryGate
 	closed        int32          // atomic flag: 0 = open, 1 = closed
 	sendersMu     sync.Mutex     // protects closed-check-and-add sequence to prevent race with Wait()
 	sendersWg     sync.WaitGroup // tracks active Send() operations to prevent race on channel close
@@ -153,33 +155,60 @@ func (pb *PacketBuffer) heartbeatFields() []any {
 }
 
 func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
-	ctx, cancel := context.WithCancel(ctx)
-	pb := &PacketBuffer{
-		ch:         make(chan PacketInfo, bufferSize),
-		sipCh:      make(chan PacketInfo, DefaultSIPBufferSize),
-		mergedCh:   make(chan PacketInfo, bufferSize), // Same size as main for smooth flow
-		ctx:        ctx,
-		cancel:     cancel,
-		bufferSize: bufferSize,
-		closed:     0,
-		sipFlows:   newTCPSIPFlowClassifier(),
+	pb, err := NewPacketBufferWithConfig(ctx, PacketBufferConfig{RegularCapacity: bufferSize})
+	if err != nil {
+		// Preserve the legacy constructor's panic for negative channel sizes while
+		// production configuration uses the error-returning constructor.
+		panic(err)
 	}
-
-	// Start merger goroutine that prioritizes SIP packets
-	pb.mergerWg.Add(1)
-	go pb.mergeChannels()
-
 	return pb
 }
 
-// mergeChannels reads from both sipCh and ch, prioritizing SIP packets.
-// This ensures SIP packets are delivered first even when the main buffer is full.
+// NewPacketBufferWithConfig validates and resolves all lane capacities before
+// starting the merger goroutine.
+func NewPacketBufferWithConfig(ctx context.Context, config PacketBufferConfig) (*PacketBuffer, error) {
+	return newPacketBufferWithRuntime(ctx, config, defaultOverflowSummaryInterval, time.Now, nil)
+}
+
+func newPacketBufferWithRuntime(ctx context.Context, config PacketBufferConfig, summaryInterval time.Duration, now func() time.Time, emit func(overflowSummary)) (*PacketBuffer, error) {
+	resolved, err := ResolvePacketBufferConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	pb := &PacketBuffer{
+		ch:         make(chan PacketInfo, resolved.RegularCapacity),
+		sipCh:      make(chan PacketInfo, resolved.SIPCapacity),
+		mergedCh:   make(chan PacketInfo, resolved.OutputCapacity),
+		ctx:        ctx,
+		cancel:     cancel,
+		bufferSize: resolved.RegularCapacity,
+		resolved:   resolved,
+		closed:     0,
+		sipFlows:   newTCPSIPFlowClassifier(),
+	}
+	pb.overflowGate = newOverflowSummaryGate(summaryInterval, now, emit)
+
+	// Start the merger goroutine, which provides preferential SIP service.
+	pb.mergerWg.Add(1)
+	go pb.mergeChannels()
+	logger.Info("Packet buffer capacities resolved",
+		"regular_capacity", resolved.RegularCapacity,
+		"sip_capacity", resolved.SIPCapacity,
+		"output_capacity", resolved.OutputCapacity,
+		"aggregate_capacity", resolved.RegularCapacity+resolved.SIPCapacity+resolved.OutputCapacity)
+
+	return pb, nil
+}
+
+// mergeChannels reads from both input lanes with preferential SIP service. Go
+// select does not provide strict global ordering between ready lanes.
 func (pb *PacketBuffer) mergeChannels() {
 	defer pb.mergerWg.Done()
 	defer close(pb.mergedCh)
 
 	for {
-		// Priority select: always check SIP channel first
+		// Preferential probe: check the SIP lane before the shared select.
 		select {
 		case pkt, ok := <-pb.sipCh:
 			if !ok {
@@ -193,7 +222,7 @@ func (pb *PacketBuffer) mergeChannels() {
 				return
 			}
 		default:
-			// No SIP packet available, check both channels
+			// No SIP packet was immediately available; check both lanes.
 			select {
 			case pkt, ok := <-pb.sipCh:
 				if !ok {
@@ -315,20 +344,18 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 		case <-pb.ctx.Done():
 			return false
 		default:
-			// SIP channel full - this is bad but rare
-			// Try main channel as fallback
+			// The priority lane is full; try the regular lane as fallback.
 			select {
 			case pb.ch <- pkt:
+				atomic.AddInt64(&pb.sipDemoted, 1)
+				pb.reportBufferPressure(false)
 				return true
 			case <-pb.ctx.Done():
 				return false
 			default:
-				// Both channels full - drop SIP packet (very rare)
-				dropped := atomic.AddInt64(&pb.sipDropped, 1)
-				if dropped%100 == 0 {
-					logger.Warn("SIP packets dropped due to buffer overflow (critical)",
-						"sip_dropped", dropped)
-				}
+				// Both input lanes are full: this is a final SIP drop.
+				atomic.AddInt64(&pb.sipDropped, 1)
+				pb.reportBufferPressure(false)
 				return false
 			}
 		}
@@ -342,11 +369,8 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 		return false
 	default:
 		// Non-blocking send failed - buffer full
-		dropped := atomic.AddInt64(&pb.dropped, 1)
-		if dropped%1000 == 0 {
-			logger.Warn("Packets dropped due to buffer overflow",
-				"total_dropped", dropped)
-		}
+		atomic.AddInt64(&pb.dropped, 1)
+		pb.reportBufferPressure(false)
 		return false
 	}
 }
@@ -447,7 +471,7 @@ func (pb *PacketBuffer) Receive() <-chan PacketInfo {
 
 // Len returns the current number of buffered packets (all channels including merged output)
 func (pb *PacketBuffer) Len() int {
-	return len(pb.ch) + len(pb.sipCh) + len(pb.mergedCh)
+	return pb.Snapshot().TotalLength()
 }
 
 // Cap returns the capacity of the packet buffer (main channel only)
@@ -465,9 +489,20 @@ func (pb *PacketBuffer) SIPCap() int {
 	return cap(pb.sipCh)
 }
 
-// GetSIPDropped returns the number of dropped SIP packets (should be rare/zero)
+// GetSIPDropped returns the cumulative number of final SIP drops.
 func (pb *PacketBuffer) GetSIPDropped() int64 {
 	return atomic.LoadInt64(&pb.sipDropped)
+}
+
+// GetSIPDemoted returns the cumulative number of SIP packets admitted to the
+// regular lane after the SIP lane rejected them due to capacity.
+func (pb *PacketBuffer) GetSIPDemoted() int64 {
+	return atomic.LoadInt64(&pb.sipDemoted)
+}
+
+// GetSIPDemotions is an alias using the counter's noun form.
+func (pb *PacketBuffer) GetSIPDemotions() int64 {
+	return pb.GetSIPDemoted()
 }
 
 // GetSIPClassified returns the cumulative number of packets routed to the SIP
@@ -482,6 +517,29 @@ func (pb *PacketBuffer) GetDropped() int64 {
 	return atomic.LoadInt64(&pb.dropped)
 }
 
+// Snapshot samples all lane gauges and cumulative counters once. Channel
+// lengths are approximate under concurrent send/receive operations.
+func (pb *PacketBuffer) Snapshot() PacketBufferSnapshot {
+	return PacketBufferSnapshot{
+		RegularLength:   len(pb.ch),
+		RegularCapacity: cap(pb.ch),
+		SIPLength:       len(pb.sipCh),
+		SIPCapacity:     cap(pb.sipCh),
+		OutputLength:    len(pb.mergedCh),
+		OutputCapacity:  cap(pb.mergedCh),
+		SIPClassified:   atomic.LoadInt64(&pb.sipClassified),
+		SIPDemoted:      atomic.LoadInt64(&pb.sipDemoted),
+		RegularDropped:  atomic.LoadInt64(&pb.dropped),
+		SIPDropped:      atomic.LoadInt64(&pb.sipDropped),
+	}
+}
+
+func (pb *PacketBuffer) reportBufferPressure(final bool) {
+	if pb.overflowGate != nil {
+		pb.overflowGate.report(pb.Snapshot(), final)
+	}
+}
+
 // GetSIPFlowClassifierStats returns cumulative classifier telemetry and the
 // current bounded flow-state cardinality.
 func (pb *PacketBuffer) GetSIPFlowClassifierStats() (SIPFlowClassifierStats, int) {
@@ -493,7 +551,6 @@ func (pb *PacketBuffer) Close() {
 	pb.sendersMu.Lock()
 	alreadyClosed := !atomic.CompareAndSwapInt32(&pb.closed, 0, 1)
 	pb.sendersMu.Unlock()
-
 	if !alreadyClosed {
 		// First Close() call - do full cleanup
 		pb.cancel()
@@ -505,7 +562,22 @@ func (pb *PacketBuffer) Close() {
 		// Close both input channels (order matters: close sipCh first to drain priority packets)
 		close(pb.sipCh)
 		close(pb.ch)
+	} else {
+		// CloseInputs intentionally leaves the merger alive for graceful draining.
+		// Give an active consumer a brief chance to finish, then force cancellation
+		// so a saturated output lane cannot make Close hang indefinitely.
+		mergerDone := make(chan struct{})
+		go func() {
+			pb.mergerWg.Wait()
+			close(mergerDone)
+		}()
+		select {
+		case <-mergerDone:
+		case <-time.After(100 * time.Millisecond):
+			pb.cancel()
+		}
 	}
+	pb.reportBufferPressure(true)
 
 	// Always wait for merger goroutine to finish (it will close mergedCh)
 	pb.mergerWg.Wait()
@@ -514,9 +586,11 @@ func (pb *PacketBuffer) Close() {
 	if !alreadyClosed {
 		dropped := atomic.LoadInt64(&pb.dropped)
 		sipDropped := atomic.LoadInt64(&pb.sipDropped)
-		if dropped > 0 || sipDropped > 0 {
-			logger.Info("Packet buffer closed with drops",
+		demoted := atomic.LoadInt64(&pb.sipDemoted)
+		if dropped > 0 || sipDropped > 0 || demoted > 0 {
+			logger.Info("Packet buffer closed with pressure",
 				"regular_dropped", dropped,
+				"sip_demoted", demoted,
 				"sip_dropped", sipDropped)
 		}
 	}
@@ -544,6 +618,7 @@ func (pb *PacketBuffer) CloseInputs() {
 	// Close input channels - merger will drain and close mergedCh
 	close(pb.sipCh)
 	close(pb.ch)
+	pb.reportBufferPressure(true)
 }
 
 // CaptureOptions selects transformations for a capture session. Generic capture
@@ -571,15 +646,30 @@ func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filt
 // InitWithContextAndTelemetry starts packet capture and periodically reports
 // cumulative libpcap and PacketBuffer drop statistics.
 func InitWithContextAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool, telemetryCallback TelemetryCallback, options ...CaptureOptions) {
-	// Use a configurable buffer size with proper backpressure handling
-	bufferSize := getPacketBufferSize()
-	packetBuffer := NewPacketBuffer(ctx, bufferSize)
+	if err := InitWithContextAndTelemetryChecked(ctx, ifaces, filter, packetProcessor, assembler, pauseFn, telemetryCallback, options...); err != nil {
+		logger.Error("Invalid packet buffer configuration", "error", err)
+	}
+}
+
+// InitWithContextAndTelemetryChecked is the error-returning generic capture
+// entry point. It resolves packet_buffer_size and sip_buffer_size before any
+// capture goroutine starts, allowing command owners to reject invalid values.
+func InitWithContextAndTelemetryChecked(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool, telemetryCallback TelemetryCallback, options ...CaptureOptions) error {
+	bufferConfig, err := getPacketBufferConfig()
+	if err != nil {
+		return err
+	}
+	packetBuffer, err := NewPacketBufferWithConfig(ctx, bufferConfig)
+	if err != nil {
+		return err
+	}
 	if pauseFn != nil {
 		packetBuffer.SetPauseFn(pauseFn)
 	}
 	defer packetBuffer.Close()
 
 	initWithBufferAndTelemetry(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler, telemetryCallback, options...)
+	return nil
 }
 
 // InitWithBuffer starts packet capture with an external PacketBuffer
@@ -880,8 +970,9 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 							"pcap_interface_dropped", pcapStats.PacketsIfDropped,
 							"total_kernel_dropped", snapshot.KernelDrops + snapshot.InterfaceDrops,
 							"packet_buffer_dropped", snapshot.PacketBufferDrops,
-							"packet_buffer_regular_dropped", buffer.GetDropped(),
-							"packet_buffer_sip_dropped", buffer.GetSIPDropped(),
+							"packet_buffer_regular_dropped", snapshot.PacketBufferRegularDrops,
+							"packet_buffer_sip_demoted", snapshot.PacketBufferSIPDemotions,
+							"packet_buffer_sip_dropped", snapshot.PacketBufferSIPDrops,
 							"sip_priority_classified", snapshot.SIPClassified,
 							"sip_flow_promotions", snapshot.SIPFlowPromotions,
 							"sip_flow_classified_segments", snapshot.SIPFlowClassifiedSegments,
@@ -891,7 +982,13 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 							"sip_flow_active", snapshot.SIPFlowActive,
 							"ip_fragments", frags,
 							"reassembled", reassembled,
-							"buffer_len", buffer.Len(),
+							"buffer_len", snapshot.PacketBufferRegularLength + snapshot.PacketBufferSIPLength + snapshot.PacketBufferOutputLength,
+							"buffer_regular_len", snapshot.PacketBufferRegularLength,
+							"buffer_regular_cap", snapshot.PacketBufferRegularCap,
+							"buffer_sip_len", snapshot.PacketBufferSIPLength,
+							"buffer_sip_cap", snapshot.PacketBufferSIPCap,
+							"buffer_output_len", snapshot.PacketBufferOutputLength,
+							"buffer_output_cap", snapshot.PacketBufferOutputCap,
 							"buffer_closed", buffer.IsClosed(),
 						}
 						fields = append(fields, defaultSIPIPPairHeartbeatFields()...)
@@ -1087,6 +1184,33 @@ func getPacketBufferSize() int {
 
 	// Fall back to default
 	return defaultBufferSize
+}
+
+// getPacketBufferConfig resolves generic direct-capture settings. SIP size 0
+// selects automatic sizing; a negative value is rejected before capture starts.
+func getPacketBufferConfig() (PacketBufferConfig, error) {
+	if err := viper.BindEnv("sip_buffer_size", "LIPPYCAT_SIP_BUFFER_SIZE"); err != nil {
+		return PacketBufferConfig{}, fmt.Errorf("bind sip_buffer_size environment variable: %w", err)
+	}
+	sipCapacity, err := cmdutil.GetIntConfigStrict("sip_buffer_size", 0)
+	if err != nil {
+		return PacketBufferConfig{}, err
+	}
+	config := PacketBufferConfig{
+		RegularCapacity: getPacketBufferSize(),
+		SIPCapacity:     sipCapacity,
+	}
+	if _, err := ResolvePacketBufferConfig(config); err != nil {
+		return PacketBufferConfig{}, err
+	}
+	return config, nil
+}
+
+// ValidatePacketBufferConfig checks generic live-capture buffer configuration
+// without starting capture goroutines.
+func ValidatePacketBufferConfig() error {
+	_, err := getPacketBufferConfig()
+	return err
 }
 
 // GetPcapTimeout returns the configured pcap read timeout

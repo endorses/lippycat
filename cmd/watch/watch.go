@@ -3,6 +3,7 @@
 package watch
 
 import (
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"os"
@@ -29,6 +30,9 @@ Examples:
   lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
   lc watch remote -n nodes.yaml --tls-ca ca.crt
   lc watch remote -P localhost:55555 --insecure  # Local testing only`,
+	PreRunE: func(_ *cobra.Command, _ []string) error {
+		return capture.ValidatePacketBufferConfig()
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// Default to live mode if no subcommand is specified
 		runLive(cmd, args)

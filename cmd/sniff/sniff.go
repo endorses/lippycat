@@ -17,10 +17,15 @@ import (
 )
 
 var SniffCmd = &cobra.Command{
-	Use:   "sniff",
-	Short: "Start lippycat in sniff mode",
-	Long:  `Start lippycat in sniff mode. Monitor the specified device`,
-	Run:   sniff,
+	Use:               "sniff",
+	Short:             "Start lippycat in sniff mode",
+	Long:              `Start lippycat in sniff mode. Monitor the specified device`,
+	PersistentPreRunE: validateLiveCaptureBufferConfig,
+	Run:               sniff,
+}
+
+func validateLiveCaptureBufferConfig(_ *cobra.Command, _ []string) error {
+	return capture.ValidatePacketBufferConfig()
 }
 
 var (

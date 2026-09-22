@@ -170,6 +170,8 @@ sudo lc tap tls -i eth0 \
 - `-f, --filter` - BPF filter expression
 - `-p, --promisc` - Enable promiscuous mode
 - `-b, --buffer-size` - Packet buffer size (default: 10000)
+- `--sip-buffer-size` - SIP priority-lane size (`0` automatically matches
+  `--buffer-size`; default: `0`)
 - `--batch-size` - Packets per batch (default: 100)
 - `--batch-timeout` - Batch timeout in milliseconds (default: 100)
 - `--esp-null` - Decapsulate ESP as NULL-encrypted using ESP trailer/SPI validation (off by default)
@@ -632,6 +634,7 @@ tap:
   bpf_filter: ""
   promiscuous: false
   buffer_size: 10000
+  sip_buffer_size: 0 # Automatic: match buffer_size
   batch_size: 100
   batch_timeout_ms: 100
 
@@ -716,6 +719,19 @@ processor:
 
 ## Performance Tuning
 
+### Capture Buffer Lanes
+
+Tap uses separate regular, SIP-priority, and merged-output lanes. Automatic mode
+(`--sip-buffer-size 0`) matches the SIP capacity to `--buffer-size`; a positive
+value is an explicit override. Larger capacities retain more packets during a
+bounded burst but consume more memory.
+
+`capture_buffer_sip_demotions` reports SIP packets accepted by the regular lane
+after the priority lane filled. It is a pressure indicator and is excluded from
+packet-loss totals. Final SIP drops are reported separately. Use the regular,
+SIP, and output length/capacity gauges to locate saturation. Persistent overload
+still requires more downstream throughput or a narrower capture filter.
+
 ### Batch Configuration
 
 ```bash
@@ -778,7 +794,7 @@ openssl s_client -connect localhost:55555 -CAfile ca.crt
 
 ```bash
 # Reduce buffer sizes
-lc tap -i eth0 --buffer-size 5000 --max-subscribers 20 --insecure
+lc tap -i eth0 --buffer-size 5000 --sip-buffer-size 2500 --max-subscribers 20 --insecure
 ```
 
 ## See Also

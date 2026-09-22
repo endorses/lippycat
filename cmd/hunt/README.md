@@ -134,6 +134,8 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 **Performance Tuning:**
 
 - `-b, --buffer-size` - Packet buffer size (default: 10000)
+- `--sip-buffer-size` - SIP priority-lane size (`0` automatically matches
+  `--buffer-size`; default: `0`)
 - `--batch-size` - Packets per batch sent to processor (default: 64)
 - `--batch-timeout` - Batch timeout in milliseconds (default: 100ms)
 - `--batch-queue-size` - Batch queue buffer size (default: 1000, 0 = auto)
@@ -491,6 +493,24 @@ Automatically prevents connection thrashing when processor is down:
 
 ## Performance Tuning
 
+### Capture Buffer Lanes
+
+The capture buffer has regular, SIP-priority, and merged-output lanes. By
+default, `--sip-buffer-size 0` gives the SIP lane the same packet capacity as
+`--buffer-size`. A positive value sets an explicit SIP capacity, which can
+reduce memory use at the cost of less protected burst headroom.
+
+`capture_buffer_sip_demotions` counts SIP packets that could not enter the
+priority lane but were accepted by the regular lane. A demotion is a priority
+pressure signal, not packet loss. `capture_buffer_sip_drops` increases only when
+neither input lane can accept a SIP packet. The per-lane length and capacity
+fields identify which queue is saturated.
+
+Finite buffers absorb bounded bursts. If traffic arrives faster than the
+downstream pipeline can process it for a sustained period, increase downstream
+throughput or narrow the capture filter instead of relying only on larger
+queues.
+
 ### Batch Configuration
 
 Batching controls how hunters aggregate packets before sending to processor:
@@ -555,6 +575,7 @@ hunter:
 
   # Performance
   buffer_size: 10000
+  sip_buffer_size: 0 # Automatic: match buffer_size
   batch_size: 64
   batch_timeout_ms: 100
   batch_queue_size: 1000
@@ -617,8 +638,11 @@ ping processor.example.com
 # Check if hunter is dropping packets
 # (look for drop statistics in logs)
 
-# Increase buffer sizes
+# Increase both input lanes automatically
 lc hunt --processor processor:55555 --buffer-size 20000 --batch-queue-size 2000
+
+# Or select a dedicated SIP priority capacity
+lc hunt --processor processor:55555 --buffer-size 20000 --sip-buffer-size 8000
 
 # Reduce batch timeout for lower latency
 lc hunt --processor processor:55555 --batch-timeout 50

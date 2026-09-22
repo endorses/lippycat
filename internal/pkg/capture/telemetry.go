@@ -11,6 +11,13 @@ type Telemetry struct {
 	PacketBufferDrops         int64
 	PacketBufferRegularDrops  int64
 	PacketBufferSIPDrops      int64
+	PacketBufferSIPDemotions  int64
+	PacketBufferRegularLength int
+	PacketBufferRegularCap    int
+	PacketBufferSIPLength     int
+	PacketBufferSIPCap        int
+	PacketBufferOutputLength  int
+	PacketBufferOutputCap     int
 	SIPClassified             int64
 	SIPFlowPromotions         uint64
 	SIPFlowClassifiedSegments uint64
@@ -65,10 +72,18 @@ func (c *telemetryCollector) report(interfaceName string, received, kernelDrops,
 		snapshot.InterfaceDrops += stats.interfaceDrops
 	}
 	if buffer != nil {
-		snapshot.PacketBufferRegularDrops = buffer.GetDropped()
-		snapshot.PacketBufferSIPDrops = buffer.GetSIPDropped()
+		bufferSnapshot := buffer.Snapshot()
+		snapshot.PacketBufferRegularDrops = bufferSnapshot.RegularDropped
+		snapshot.PacketBufferSIPDrops = bufferSnapshot.SIPDropped
+		snapshot.PacketBufferSIPDemotions = bufferSnapshot.SIPDemoted
 		snapshot.PacketBufferDrops = snapshot.PacketBufferRegularDrops + snapshot.PacketBufferSIPDrops
-		snapshot.SIPClassified = buffer.GetSIPClassified()
+		snapshot.PacketBufferRegularLength = bufferSnapshot.RegularLength
+		snapshot.PacketBufferRegularCap = bufferSnapshot.RegularCapacity
+		snapshot.PacketBufferSIPLength = bufferSnapshot.SIPLength
+		snapshot.PacketBufferSIPCap = bufferSnapshot.SIPCapacity
+		snapshot.PacketBufferOutputLength = bufferSnapshot.OutputLength
+		snapshot.PacketBufferOutputCap = bufferSnapshot.OutputCapacity
+		snapshot.SIPClassified = bufferSnapshot.SIPClassified
 		flowStats, active := buffer.GetSIPFlowClassifierStats()
 		snapshot.SIPFlowPromotions = flowStats.Promotions
 		snapshot.SIPFlowClassifiedSegments = flowStats.ClassifiedSegments

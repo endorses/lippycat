@@ -59,6 +59,7 @@ var (
 	bpfFilter          string
 	pcapBufferSize     int
 	bufferSize         int
+	sipBufferSize      int
 	batchSize          int
 	batchTimeout       int
 	batchQueueSize     int
@@ -111,6 +112,7 @@ func init() {
 
 	// Performance tuning (persistent for subcommands)
 	HuntCmd.PersistentFlags().IntVarP(&bufferSize, "buffer-size", "b", 10000, "Packet buffer size")
+	HuntCmd.PersistentFlags().IntVar(&sipBufferSize, "sip-buffer-size", 0, "SIP priority buffer size (0 = match packet buffer size)")
 	HuntCmd.PersistentFlags().IntVarP(&batchSize, "batch-size", "", 64, "Packets per batch sent to processor")
 	HuntCmd.PersistentFlags().IntVarP(&batchTimeout, "batch-timeout", "", 100, "Batch timeout in milliseconds")
 	HuntCmd.PersistentFlags().IntVarP(&batchQueueSize, "batch-queue-size", "", 0, "Batch queue buffer size (0 = default: 1000)")
@@ -156,6 +158,8 @@ func init() {
 	_ = viper.BindPFlag("hunter.interfaces", HuntCmd.PersistentFlags().Lookup("interface"))
 	_ = viper.BindPFlag("hunter.bpf_filter", HuntCmd.PersistentFlags().Lookup("filter"))
 	_ = viper.BindPFlag("hunter.buffer_size", HuntCmd.PersistentFlags().Lookup("buffer-size"))
+	_ = viper.BindPFlag("hunter.sip_buffer_size", HuntCmd.PersistentFlags().Lookup("sip-buffer-size"))
+	_ = viper.BindEnv("hunter.sip_buffer_size", "LIPPYCAT_HUNTER_SIP_BUFFER_SIZE")
 	_ = viper.BindPFlag("hunter.batch_size", HuntCmd.PersistentFlags().Lookup("batch-size"))
 	_ = viper.BindPFlag("hunter.batch_timeout_ms", HuntCmd.PersistentFlags().Lookup("batch-timeout"))
 	_ = viper.BindPFlag("hunter.batch_queue_size", HuntCmd.PersistentFlags().Lookup("batch-queue-size"))
@@ -205,7 +209,10 @@ func runHuntProtocol(cmd *cobra.Command, args []string, protocol, effectiveBPF s
 	}
 
 	// Get configuration (flags override config file)
-	config := buildHunterConfig(protocolHunterConfigSpec(protocol, effectiveBPF))
+	config, err := buildHunterConfigChecked(protocolHunterConfigSpec(protocol, effectiveBPF))
+	if err != nil {
+		return err
+	}
 	if configure != nil {
 		configure(&config)
 	}

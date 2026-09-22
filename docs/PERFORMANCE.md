@@ -470,6 +470,7 @@ lc hunt --processor processor:55555
 ```bash
 # Default (10,000 packets)
 --buffer-size 10000
+--sip-buffer-size 0  # SIP priority capacity automatically matches buffer-size
 
 # High traffic (increase buffer)
 --buffer-size 50000
@@ -477,6 +478,14 @@ lc hunt --processor processor:55555
 # Low traffic (reduce memory)
 --buffer-size 5000
 ```
+
+The capture path has regular, SIP-priority, and merged-output lanes. A positive
+`--sip-buffer-size` overrides automatic sizing when memory and SIP burst
+headroom need to be tuned independently. SIP demotions mean priority service
+degraded but the packet was retained; they are excluded from packet-drop
+totals. Use all three lane length/capacity gauges together. Larger buffers
+absorb bounded bursts but cannot compensate indefinitely when arrival exceeds
+downstream service capacity.
 
 ### BPF Filters
 

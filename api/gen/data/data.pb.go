@@ -1661,8 +1661,19 @@ type BatchStats struct {
 	CaptureBufferRegularDrops uint64 `protobuf:"varint,5,opt,name=capture_buffer_regular_drops,json=captureBufferRegularDrops,proto3" json:"capture_buffer_regular_drops,omitempty"`
 	CaptureBufferSipDrops     uint64 `protobuf:"varint,6,opt,name=capture_buffer_sip_drops,json=captureBufferSipDrops,proto3" json:"capture_buffer_sip_drops,omitempty"`
 	BatchChannelDrops         uint64 `protobuf:"varint,7,opt,name=batch_channel_drops,json=batchChannelDrops,proto3" json:"batch_channel_drops,omitempty"`
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	// Recognized SIP packets admitted to the regular lane after the priority
+	// lane was full. Demotions indicate priority pressure, not packet loss.
+	CaptureBufferSipDemotions uint64 `protobuf:"varint,8,opt,name=capture_buffer_sip_demotions,json=captureBufferSipDemotions,proto3" json:"capture_buffer_sip_demotions,omitempty"`
+	// Instantaneous approximate queue gauges. Capacities are immutable for a
+	// capture-buffer lifetime.
+	CaptureBufferRegularLen      uint64 `protobuf:"varint,9,opt,name=capture_buffer_regular_len,json=captureBufferRegularLen,proto3" json:"capture_buffer_regular_len,omitempty"`
+	CaptureBufferRegularCapacity uint64 `protobuf:"varint,10,opt,name=capture_buffer_regular_capacity,json=captureBufferRegularCapacity,proto3" json:"capture_buffer_regular_capacity,omitempty"`
+	CaptureBufferSipLen          uint64 `protobuf:"varint,11,opt,name=capture_buffer_sip_len,json=captureBufferSipLen,proto3" json:"capture_buffer_sip_len,omitempty"`
+	CaptureBufferSipCapacity     uint64 `protobuf:"varint,12,opt,name=capture_buffer_sip_capacity,json=captureBufferSipCapacity,proto3" json:"capture_buffer_sip_capacity,omitempty"`
+	CaptureBufferOutputLen       uint64 `protobuf:"varint,13,opt,name=capture_buffer_output_len,json=captureBufferOutputLen,proto3" json:"capture_buffer_output_len,omitempty"`
+	CaptureBufferOutputCapacity  uint64 `protobuf:"varint,14,opt,name=capture_buffer_output_capacity,json=captureBufferOutputCapacity,proto3" json:"capture_buffer_output_capacity,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *BatchStats) Reset() {
@@ -1740,6 +1751,55 @@ func (x *BatchStats) GetCaptureBufferSipDrops() uint64 {
 func (x *BatchStats) GetBatchChannelDrops() uint64 {
 	if x != nil {
 		return x.BatchChannelDrops
+	}
+	return 0
+}
+
+func (x *BatchStats) GetCaptureBufferSipDemotions() uint64 {
+	if x != nil {
+		return x.CaptureBufferSipDemotions
+	}
+	return 0
+}
+
+func (x *BatchStats) GetCaptureBufferRegularLen() uint64 {
+	if x != nil {
+		return x.CaptureBufferRegularLen
+	}
+	return 0
+}
+
+func (x *BatchStats) GetCaptureBufferRegularCapacity() uint64 {
+	if x != nil {
+		return x.CaptureBufferRegularCapacity
+	}
+	return 0
+}
+
+func (x *BatchStats) GetCaptureBufferSipLen() uint64 {
+	if x != nil {
+		return x.CaptureBufferSipLen
+	}
+	return 0
+}
+
+func (x *BatchStats) GetCaptureBufferSipCapacity() uint64 {
+	if x != nil {
+		return x.CaptureBufferSipCapacity
+	}
+	return 0
+}
+
+func (x *BatchStats) GetCaptureBufferOutputLen() uint64 {
+	if x != nil {
+		return x.CaptureBufferOutputLen
+	}
+	return 0
+}
+
+func (x *BatchStats) GetCaptureBufferOutputCapacity() uint64 {
+	if x != nil {
+		return x.CaptureBufferOutputCapacity
 	}
 	return 0
 }
@@ -2894,7 +2954,7 @@ const file_data_proto_rawDesc = "" +
 	"\fbody_preview\x18\x05 \x01(\tR\vbodyPreview\x12\x1b\n" +
 	"\tbody_size\x18\x06 \x01(\x05R\bbodySize\x12%\n" +
 	"\x0ebody_truncated\x18\a \x01(\bR\rbodyTruncated\x12!\n" +
-	"\fcontent_type\x18\b \x01(\tR\vcontentType\"\xc5\x02\n" +
+	"\fcontent_type\x18\b \x01(\tR\vcontentType\"\xfe\x05\n" +
 	"\n" +
 	"BatchStats\x12%\n" +
 	"\x0etotal_captured\x18\x01 \x01(\x04R\rtotalCaptured\x12)\n" +
@@ -2903,7 +2963,15 @@ const file_data_proto_rawDesc = "" +
 	"\fbuffer_usage\x18\x04 \x01(\rR\vbufferUsage\x12?\n" +
 	"\x1ccapture_buffer_regular_drops\x18\x05 \x01(\x04R\x19captureBufferRegularDrops\x127\n" +
 	"\x18capture_buffer_sip_drops\x18\x06 \x01(\x04R\x15captureBufferSipDrops\x12.\n" +
-	"\x13batch_channel_drops\x18\a \x01(\x04R\x11batchChannelDrops\"\x87\x01\n" +
+	"\x13batch_channel_drops\x18\a \x01(\x04R\x11batchChannelDrops\x12?\n" +
+	"\x1ccapture_buffer_sip_demotions\x18\b \x01(\x04R\x19captureBufferSipDemotions\x12;\n" +
+	"\x1acapture_buffer_regular_len\x18\t \x01(\x04R\x17captureBufferRegularLen\x12E\n" +
+	"\x1fcapture_buffer_regular_capacity\x18\n" +
+	" \x01(\x04R\x1ccaptureBufferRegularCapacity\x123\n" +
+	"\x16capture_buffer_sip_len\x18\v \x01(\x04R\x13captureBufferSipLen\x12=\n" +
+	"\x1bcapture_buffer_sip_capacity\x18\f \x01(\x04R\x18captureBufferSipCapacity\x129\n" +
+	"\x19capture_buffer_output_len\x18\r \x01(\x04R\x16captureBufferOutputLen\x12C\n" +
+	"\x1ecapture_buffer_output_capacity\x18\x0e \x01(\x04R\x1bcaptureBufferOutputCapacity\"\x87\x01\n" +
 	"\rStreamControl\x12!\n" +
 	"\fack_sequence\x18\x01 \x01(\x04R\vackSequence\x12=\n" +
 	"\fflow_control\x18\x02 \x01(\x0e2\x1a.lippycat.data.FlowControlR\vflowControl\x12\x14\n" +

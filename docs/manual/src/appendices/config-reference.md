@@ -59,6 +59,7 @@ These top-level keys apply to all commands.
 | Key                | Type    | Default            | Description                                                                                                                                          |
 | ------------------ | ------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pcap_buffer_size` | integer | `16777216` (16 MB) | Kernel buffer size for packet capture in bytes. Larger values reduce packet drops under high load.                                                   |
+| `sip_buffer_size`  | integer | `0`                | Generic live-capture SIP priority capacity. `0` automatically matches `packet_buffer_size`; positive values override it.                             |
 | `pcap_timeout_ms`  | integer | `200`              | Timeout in milliseconds for pcap reads. Lower values decrease latency; higher values improve batching efficiency.                                    |
 | `promiscuous`      | boolean | `false`            | Enable promiscuous mode on capture interfaces. When true, the interface captures all traffic on the segment, not just traffic addressed to the host. |
 
@@ -311,6 +312,7 @@ Hunter nodes capture packets at the network edge and forward them to a processor
 | `hunter.interfaces`                     | list     | `["any"]`                         | Network interfaces to capture from.                                                                        |
 | `hunter.bpf_filter`                     | string   | `""`                              | BPF filter expression for kernel-level packet filtering. See [BPF Filter Reference](bpf-reference.md).     |
 | `hunter.buffer_size`                    | integer  | `10000`                           | Internal packet buffer size (number of packets).                                                           |
+| `hunter.sip_buffer_size`                | integer  | `0`                               | SIP priority-lane capacity; `0` automatically matches `hunter.buffer_size`.                                |
 | `hunter.batch_size`                     | integer  | `64`                              | Number of packets per gRPC batch to the processor.                                                         |
 | `hunter.batch_timeout_ms`               | integer  | `100`                             | Maximum time in ms to wait before sending an incomplete batch.                                             |
 | `hunter.batch_queue_size`               | integer  | `0`                               | Size of the batch send queue (0 = default).                                                                |
@@ -546,6 +548,7 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 | `tap.interfaces`               | list     | `["any"]` | Network interfaces to capture from.                                                                       |
 | `tap.bpf_filter`               | string   | `""`      | BPF filter expression.                                                                                    |
 | `tap.buffer_size`              | integer  | `10000`   | Internal packet buffer size.                                                                              |
+| `tap.sip_buffer_size`          | integer  | `0`       | SIP priority-lane capacity; `0` automatically matches `tap.buffer_size`.                                  |
 | `tap.batch_size`               | integer  | `100`     | Packet batch size for internal processing.                                                                |
 | `tap.batch_timeout_ms`         | integer  | `100`     | Batch timeout in milliseconds.                                                                            |
 | `tap.promiscuous`              | boolean  | `false`   | Promiscuous mode for capture interfaces.                                                                  |

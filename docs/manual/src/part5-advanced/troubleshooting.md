@@ -45,7 +45,10 @@ source restarts. Classify the first non-zero local stage before assigning a root
 cause:
 
 - kernel/interface drops occur before lippycat receives a packet;
-- regular and SIP capture-buffer drops identify which admission lane saturated;
+- regular capture-buffer drops identify regular-lane loss;
+- SIP demotions identify priority-lane pressure where the packet was retained
+  by the regular lane and therefore are not packet loss;
+- SIP capture-buffer drops identify SIP packets rejected by both input lanes;
 - batch-channel drops occur while handing captured packets to processing or
   forwarding;
 - normal/page-pressure and explicit-flush TCP gaps both count absent TCP sequence
@@ -58,6 +61,13 @@ The compatible aggregate packet-drop counter is the sum of the named local packe
 drop stages. Do not infer an external capture-source fault merely because TCP
 sequence space is missing: first check every locally measured stage. Batch and
 heartbeat values are cumulative snapshots and must not be summed across reports.
+
+When capture-buffer pressure appears, compare the regular, SIP, and output lane
+lengths with their capacities. A full SIP lane with demotions but no SIP drops
+usually calls for more SIP priority headroom. A persistently full output lane
+indicates that downstream processing is not draining fast enough. Increasing a
+finite queue can absorb a bounded burst, but sustained overload requires higher
+processing/forwarding throughput or a narrower capture filter.
 
 ### Interface Not Found
 

@@ -798,11 +798,7 @@ func (m *Manager) sendHeartbeats() {
 
 			stats := m.statsCollector.ToProto(activeFilters)
 			if m.captureManager != nil {
-				if buffer := m.captureManager.GetPacketBuffer(); buffer != nil {
-					stats.CaptureBufferRegularDrops = uint64(buffer.GetDropped()) // #nosec G115
-					stats.CaptureBufferSipDrops = uint64(buffer.GetSIPDropped())  // #nosec G115
-					stats.PacketsDropped = stats.CaptureBufferRegularDrops + stats.CaptureBufferSipDrops + stats.BatchChannelDrops
-				}
+				applyCaptureBufferStats(stats, m.captureManager.GetPacketBuffer())
 			}
 			logger.Debug("Sending heartbeat",
 				"hunter_id", m.config.HunterID,
@@ -812,6 +808,13 @@ func (m *Manager) sendHeartbeats() {
 				"packets_dropped", stats.PacketsDropped,
 				"capture_buffer_regular_drops", stats.CaptureBufferRegularDrops,
 				"capture_buffer_sip_drops", stats.CaptureBufferSipDrops,
+				"capture_buffer_sip_demotions", stats.CaptureBufferSipDemotions,
+				"capture_buffer_regular_len", stats.CaptureBufferRegularLen,
+				"capture_buffer_regular_capacity", stats.CaptureBufferRegularCapacity,
+				"capture_buffer_sip_len", stats.CaptureBufferSipLen,
+				"capture_buffer_sip_capacity", stats.CaptureBufferSipCapacity,
+				"capture_buffer_output_len", stats.CaptureBufferOutputLen,
+				"capture_buffer_output_capacity", stats.CaptureBufferOutputCapacity,
 				"batch_channel_drops", stats.BatchChannelDrops,
 				"status", status)
 			hb := &management.HunterHeartbeat{
@@ -1087,4 +1090,21 @@ func getInterfaceIP(interfaces []string) string {
 
 	logger.Debug("getInterfaceIP: no IPv4 found on interface", "interface", ifaceName)
 	return ""
+}
+
+func applyCaptureBufferStats(stats *management.HunterStats, buffer *capture.PacketBuffer) {
+	if stats == nil || buffer == nil {
+		return
+	}
+	snapshot := buffer.Snapshot()
+	stats.CaptureBufferRegularDrops = uint64(snapshot.RegularDropped)     // #nosec G115 -- counters cannot be negative
+	stats.CaptureBufferSipDrops = uint64(snapshot.SIPDropped)             // #nosec G115 -- counters cannot be negative
+	stats.CaptureBufferSipDemotions = uint64(snapshot.SIPDemoted)         // #nosec G115 -- counters cannot be negative
+	stats.CaptureBufferRegularLen = uint64(snapshot.RegularLength)        // #nosec G115 -- channel lengths cannot be negative
+	stats.CaptureBufferRegularCapacity = uint64(snapshot.RegularCapacity) // #nosec G115 -- channel capacities cannot be negative
+	stats.CaptureBufferSipLen = uint64(snapshot.SIPLength)                // #nosec G115 -- channel lengths cannot be negative
+	stats.CaptureBufferSipCapacity = uint64(snapshot.SIPCapacity)         // #nosec G115 -- channel capacities cannot be negative
+	stats.CaptureBufferOutputLen = uint64(snapshot.OutputLength)          // #nosec G115 -- channel lengths cannot be negative
+	stats.CaptureBufferOutputCapacity = uint64(snapshot.OutputCapacity)   // #nosec G115 -- channel capacities cannot be negative
+	stats.PacketsDropped = stats.CaptureBufferRegularDrops + stats.CaptureBufferSipDrops + stats.BatchChannelDrops
 }

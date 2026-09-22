@@ -59,7 +59,7 @@ func FromPacketBatch(b *data.PacketBatch) (*pipeline.PacketBatch, error) {
 	out := &pipeline.PacketBatch{Source: source, Sequence: b.Sequence, CreatedAt: source.BatchTimestamp, Packets: make([]*pipeline.PacketEnvelope, 0, len(b.Packets))}
 	if b.Stats != nil {
 		out.HasStats = true
-		out.Stats = pipeline.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSIPDrops: b.Stats.CaptureBufferSipDrops, BatchChannelDrops: b.Stats.BatchChannelDrops}
+		out.Stats = pipeline.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSIPDrops: b.Stats.CaptureBufferSipDrops, CaptureBufferSIPDemotions: b.Stats.CaptureBufferSipDemotions, BatchChannelDrops: b.Stats.BatchChannelDrops, CaptureBufferRegularLen: b.Stats.CaptureBufferRegularLen, CaptureBufferRegularCapacity: b.Stats.CaptureBufferRegularCapacity, CaptureBufferSIPLen: b.Stats.CaptureBufferSipLen, CaptureBufferSIPCapacity: b.Stats.CaptureBufferSipCapacity, CaptureBufferOutputLen: b.Stats.CaptureBufferOutputLen, CaptureBufferOutputCapacity: b.Stats.CaptureBufferOutputCapacity}
 	}
 	for i, p := range b.Packets {
 		e, err := FromCapturedPacket(p, source)
@@ -84,7 +84,7 @@ func ToPacketBatch(b *pipeline.PacketBatch) (*data.PacketBatch, error) {
 	}
 	out := &data.PacketBatch{HunterId: b.Source.NodeID, Sequence: b.Sequence, TimestampNs: unixNano(b.CreatedAt), Packets: make([]*data.CapturedPacket, 0, len(b.Packets))}
 	if b.HasStats {
-		out.Stats = &data.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSipDrops: b.Stats.CaptureBufferSIPDrops, BatchChannelDrops: b.Stats.BatchChannelDrops}
+		out.Stats = &data.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSipDrops: b.Stats.CaptureBufferSIPDrops, CaptureBufferSipDemotions: b.Stats.CaptureBufferSIPDemotions, BatchChannelDrops: b.Stats.BatchChannelDrops, CaptureBufferRegularLen: b.Stats.CaptureBufferRegularLen, CaptureBufferRegularCapacity: b.Stats.CaptureBufferRegularCapacity, CaptureBufferSipLen: b.Stats.CaptureBufferSIPLen, CaptureBufferSipCapacity: b.Stats.CaptureBufferSIPCapacity, CaptureBufferOutputLen: b.Stats.CaptureBufferOutputLen, CaptureBufferOutputCapacity: b.Stats.CaptureBufferOutputCapacity}
 	}
 	for i, e := range b.Packets {
 		p, err := ToCapturedPacket(e)

@@ -30,7 +30,7 @@ func TestHuntPersistentFlagContract(t *testing.T) {
 		"event-spool-dir": "/var/tmp/lippycat-event-spool", "event-spool-exhaustion-policy": "drop_oldest",
 		"event-spool-max-age": "24h0m0s", "event-spool-max-bytes": "1073741824", "forward-mode": "packets",
 		"hunter-id": "", "id": "", "insecure": "false", "interface": "[any]",
-		"no-filter-policy": "deny", "pcap-buffer-size": "16777216", "processor": "", "promisc": "false",
+		"no-filter-policy": "deny", "pcap-buffer-size": "16777216", "processor": "", "promisc": "false", "sip-buffer-size": "0",
 		"tls-ca": "", "tls-cert": "", "tls-key": "", "tls-skip-verify": "false",
 	}
 	assert.Equal(t, want, flagDefaults(HuntCmd.PersistentFlags()))
@@ -71,7 +71,8 @@ func TestHuntViperBindingContract(t *testing.T) {
 	bindings := map[string]*pflag.Flag{
 		"hunter.processor_addr": HuntCmd.PersistentFlags().Lookup("processor"), "hunter.id": HuntCmd.PersistentFlags().Lookup("id"), "hunter.hunter_id": HuntCmd.PersistentFlags().Lookup("id"),
 		"hunter.interfaces": HuntCmd.PersistentFlags().Lookup("interface"), "hunter.bpf_filter": HuntCmd.PersistentFlags().Lookup("filter"), "hunter.buffer_size": HuntCmd.PersistentFlags().Lookup("buffer-size"),
-		"hunter.batch_size": HuntCmd.PersistentFlags().Lookup("batch-size"), "hunter.batch_timeout_ms": HuntCmd.PersistentFlags().Lookup("batch-timeout"), "hunter.batch_queue_size": HuntCmd.PersistentFlags().Lookup("batch-queue-size"),
+		"hunter.sip_buffer_size": HuntCmd.PersistentFlags().Lookup("sip-buffer-size"),
+		"hunter.batch_size":      HuntCmd.PersistentFlags().Lookup("batch-size"), "hunter.batch_timeout_ms": HuntCmd.PersistentFlags().Lookup("batch-timeout"), "hunter.batch_queue_size": HuntCmd.PersistentFlags().Lookup("batch-queue-size"),
 		"promiscuous": HuntCmd.PersistentFlags().Lookup("promisc"), "pcap_buffer_size": HuntCmd.PersistentFlags().Lookup("pcap-buffer-size"),
 		"hunter.disk_buffer.enabled": HuntCmd.PersistentFlags().Lookup("disk-buffer"), "hunter.disk_buffer.dir": HuntCmd.PersistentFlags().Lookup("disk-buffer-dir"), "hunter.disk_buffer.max_mb": HuntCmd.PersistentFlags().Lookup("disk-buffer-max-mb"),
 		"hunter.tls.cert_file": HuntCmd.PersistentFlags().Lookup("tls-cert"), "hunter.tls.key_file": HuntCmd.PersistentFlags().Lookup("tls-key"), "hunter.tls.ca_file": HuntCmd.PersistentFlags().Lookup("tls-ca"), "hunter.tls.skip_verify": HuntCmd.PersistentFlags().Lookup("tls-skip-verify"),
@@ -121,12 +122,12 @@ func bindingFixture(flagType, original string) string {
 
 func TestHuntRenderedHelpSnapshots(t *testing.T) {
 	want := map[string]string{
-		"hunt":  "b794308e4c6ba11adc64188c6667f50b4da1a65306efcffa4c1a95565ea8ce60",
-		"dns":   "176ac84328313d2191394248783ad43c9fc458a1171085ce907bc3f766b00df4",
-		"http":  "0f80f83cbb19af341b108d20884c95fc4656c602b0d99b4f9d2dc8b9d5974ace",
-		"tls":   "21b86049b07be0abad41385e3bd2b86bf4c476edcad941876238a015a3d1f961",
-		"email": "4ac2249ed1b0fd02ddf7e226e979b5071c90fd3b590aa1107db42b4db047d9bf",
-		"voip":  "bac4ac2b2727af11536689ba09af249d725cb1784632d7dfc8748f0ed7154b8b",
+		"hunt":  "edbf7d9548d24d2ec83158a38f2d530fca66140c01685bd4b69e86165809e3fe",
+		"dns":   "acc479ead183c0d797265ea2814b1ddfd41d555a4e7132f456cea1a0b6dd7a50",
+		"http":  "c587117ea302b8fb34450f0f7f09174b34a599547b2d21871aaf03066b395a02",
+		"tls":   "c7033a6e7274fa02f756b211c1372f9e58baf6ef91e3de7ced459ef72766a5ec",
+		"email": "ec8d19d2c21c9a47f4aed6d083a9b10f3b85abbb7f1b089d55e615fefd1942bc",
+		"voip":  "a8d07bae4baa0d04de20e962bbe096d3878f8e7ed2e1b5828f08e78510d96fae",
 	}
 	commands := map[string]*cobra.Command{"hunt": HuntCmd, "dns": dnsHuntCmd, "http": httpHuntCmd, "tls": tlsHuntCmd, "email": emailHuntCmd, "voip": voipHuntCmd}
 	for name, cmd := range commands {

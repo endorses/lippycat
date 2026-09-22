@@ -460,9 +460,10 @@ lc tap [flags]
 
 | Flag              | Short | Type     | Default | Description                 |
 | ----------------- | ----- | -------- | ------- | --------------------------- |
-| `--buffer-size`   | `-b`  | int      | `10000` | Internal packet buffer size |
-| `--batch-size`    |       | int      | `100`   | Packets per batch           |
-| `--batch-timeout` |       | duration | `100ms` | Maximum batch wait time     |
+| `--buffer-size`     | `-b`  | int      | `10000` | Internal packet buffer size                                |
+| `--sip-buffer-size` |       | int      | `0`     | SIP priority size; 0 automatically matches `--buffer-size` |
+| `--batch-size`      |       | int      | `100`   | Packets per batch                                          |
+| `--batch-timeout`   |       | duration | `100ms` | Maximum batch wait time                                    |
 
 **Server**
 
@@ -637,6 +638,7 @@ lc hunt [flags]
 | `--filter`                        | `-f`  | string   |                                 | BPF filter expression                                           |
 | `--promisc`                       | `-p`  | bool     | `false`                         | Enable promiscuous mode                                         |
 | `--buffer-size`                   | `-b`  | int      | `10000`                         | Internal packet buffer size                                     |
+| `--sip-buffer-size`               |       | int      | `0`                             | SIP priority size; 0 automatically matches `--buffer-size`      |
 | `--batch-size`                    |       | int      | `64`                            | Packets per batch                                               |
 | `--batch-timeout`                 |       | duration | `100ms`                         | Maximum batch wait time                                         |
 | `--batch-queue-size`              |       | int      | `1000`                          | Batch queue depth (0 defaults to 1000)                          |

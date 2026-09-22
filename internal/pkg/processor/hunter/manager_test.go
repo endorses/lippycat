@@ -29,7 +29,14 @@ func TestManagerHeartbeatPreservesNamedLossCounters(t *testing.T) {
 		PacketsDropped:                9,
 		CaptureBufferRegularDrops:     4,
 		CaptureBufferSipDrops:         2,
+		CaptureBufferSipDemotions:     8,
 		BatchChannelDrops:             3,
+		CaptureBufferRegularLen:       10,
+		CaptureBufferRegularCapacity:  20,
+		CaptureBufferSipLen:           11,
+		CaptureBufferSipCapacity:      21,
+		CaptureBufferOutputLen:        12,
+		CaptureBufferOutputCapacity:   22,
 		RtpOwnershipUnresolved:        5,
 		RtpOwnershipAmbiguous:         6,
 		IdentityInheritanceSuppressed: 7,
@@ -44,7 +51,14 @@ func TestManagerHeartbeatPreservesNamedLossCounters(t *testing.T) {
 	require.Equal(t, uint64(9), hunter.PacketsDropped)
 	require.Equal(t, uint64(4), hunter.CaptureBufferRegularDrops)
 	require.Equal(t, uint64(2), hunter.CaptureBufferSIPDrops)
+	require.Equal(t, uint64(8), hunter.CaptureBufferSIPDemotions)
 	require.Equal(t, uint64(3), hunter.BatchChannelDrops)
+	require.Equal(t, uint64(10), hunter.CaptureBufferRegularLen)
+	require.Equal(t, uint64(20), hunter.CaptureBufferRegularCapacity)
+	require.Equal(t, uint64(11), hunter.CaptureBufferSIPLen)
+	require.Equal(t, uint64(21), hunter.CaptureBufferSIPCapacity)
+	require.Equal(t, uint64(12), hunter.CaptureBufferOutputLen)
+	require.Equal(t, uint64(22), hunter.CaptureBufferOutputCapacity)
 	require.Equal(t, uint64(5), hunter.RTPOwnershipUnresolved)
 	require.Equal(t, uint64(6), hunter.RTPOwnershipAmbiguous)
 	require.Equal(t, uint64(7), hunter.IdentityInheritanceSuppressed)

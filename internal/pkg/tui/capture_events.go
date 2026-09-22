@@ -412,7 +412,14 @@ func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 					hunters[i].PacketsDropped = hunter.PacketsDropped
 					hunters[i].CaptureBufferRegularDrops = hunter.CaptureBufferRegularDrops
 					hunters[i].CaptureBufferSIPDrops = hunter.CaptureBufferSIPDrops
+					hunters[i].CaptureBufferSIPDemotions = hunter.CaptureBufferSIPDemotions
 					hunters[i].BatchChannelDrops = hunter.BatchChannelDrops
+					hunters[i].CaptureBufferRegularLen = hunter.CaptureBufferRegularLen
+					hunters[i].CaptureBufferRegularCapacity = hunter.CaptureBufferRegularCapacity
+					hunters[i].CaptureBufferSIPLen = hunter.CaptureBufferSIPLen
+					hunters[i].CaptureBufferSIPCapacity = hunter.CaptureBufferSIPCapacity
+					hunters[i].CaptureBufferOutputLen = hunter.CaptureBufferOutputLen
+					hunters[i].CaptureBufferOutputCapacity = hunter.CaptureBufferOutputCapacity
 					hunters[i].ActiveFilters = hunter.ActiveFilters
 					hunters[i].CPUPercent = hunter.CPUPercent
 					hunters[i].MemoryRSSBytes = hunter.MemoryRSSBytes
@@ -904,7 +911,14 @@ func (m *Model) addHunterFromTopologyUpdate(processorAddr string, hunter *manage
 		hunterInfo.PacketsDropped = hunter.Stats.PacketsDropped
 		hunterInfo.CaptureBufferRegularDrops = hunter.Stats.CaptureBufferRegularDrops
 		hunterInfo.CaptureBufferSIPDrops = hunter.Stats.CaptureBufferSipDrops
+		hunterInfo.CaptureBufferSIPDemotions = hunter.Stats.CaptureBufferSipDemotions
 		hunterInfo.BatchChannelDrops = hunter.Stats.BatchChannelDrops
+		hunterInfo.CaptureBufferRegularLen = hunter.Stats.CaptureBufferRegularLen
+		hunterInfo.CaptureBufferRegularCapacity = hunter.Stats.CaptureBufferRegularCapacity
+		hunterInfo.CaptureBufferSIPLen = hunter.Stats.CaptureBufferSipLen
+		hunterInfo.CaptureBufferSIPCapacity = hunter.Stats.CaptureBufferSipCapacity
+		hunterInfo.CaptureBufferOutputLen = hunter.Stats.CaptureBufferOutputLen
+		hunterInfo.CaptureBufferOutputCapacity = hunter.Stats.CaptureBufferOutputCapacity
 		hunterInfo.ActiveFilters = hunter.Stats.ActiveFilters
 	}
 
@@ -1020,7 +1034,14 @@ func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNo
 				hunterInfo.PacketsDropped = h.Stats.PacketsDropped
 				hunterInfo.CaptureBufferRegularDrops = h.Stats.CaptureBufferRegularDrops
 				hunterInfo.CaptureBufferSIPDrops = h.Stats.CaptureBufferSipDrops
+				hunterInfo.CaptureBufferSIPDemotions = h.Stats.CaptureBufferSipDemotions
 				hunterInfo.BatchChannelDrops = h.Stats.BatchChannelDrops
+				hunterInfo.CaptureBufferRegularLen = h.Stats.CaptureBufferRegularLen
+				hunterInfo.CaptureBufferRegularCapacity = h.Stats.CaptureBufferRegularCapacity
+				hunterInfo.CaptureBufferSIPLen = h.Stats.CaptureBufferSipLen
+				hunterInfo.CaptureBufferSIPCapacity = h.Stats.CaptureBufferSipCapacity
+				hunterInfo.CaptureBufferOutputLen = h.Stats.CaptureBufferOutputLen
+				hunterInfo.CaptureBufferOutputCapacity = h.Stats.CaptureBufferOutputCapacity
 				hunterInfo.ActiveFilters = h.Stats.ActiveFilters
 			}
 			hunters = append(hunters, hunterInfo)
@@ -1136,7 +1157,14 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 			hunterInfo.PacketsDropped = h.Stats.PacketsDropped
 			hunterInfo.CaptureBufferRegularDrops = h.Stats.CaptureBufferRegularDrops
 			hunterInfo.CaptureBufferSIPDrops = h.Stats.CaptureBufferSipDrops
+			hunterInfo.CaptureBufferSIPDemotions = h.Stats.CaptureBufferSipDemotions
 			hunterInfo.BatchChannelDrops = h.Stats.BatchChannelDrops
+			hunterInfo.CaptureBufferRegularLen = h.Stats.CaptureBufferRegularLen
+			hunterInfo.CaptureBufferRegularCapacity = h.Stats.CaptureBufferRegularCapacity
+			hunterInfo.CaptureBufferSIPLen = h.Stats.CaptureBufferSipLen
+			hunterInfo.CaptureBufferSIPCapacity = h.Stats.CaptureBufferSipCapacity
+			hunterInfo.CaptureBufferOutputLen = h.Stats.CaptureBufferOutputLen
+			hunterInfo.CaptureBufferOutputCapacity = h.Stats.CaptureBufferOutputCapacity
 			hunterInfo.ActiveFilters = h.Stats.ActiveFilters
 		}
 		hunters = append(hunters, hunterInfo)

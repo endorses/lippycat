@@ -87,7 +87,10 @@ func TestSendBatchReconcilesNamedLossCounters(t *testing.T) {
 	batch := <-queue
 	require.Equal(t, uint64(packetBuffer.GetDropped()), batch.Stats.CaptureBufferRegularDrops)
 	require.Zero(t, batch.Stats.CaptureBufferSIPDrops)
+	require.Zero(t, batch.Stats.CaptureBufferSIPDemotions)
 	require.Equal(t, uint64(3), batch.Stats.BatchChannelDrops)
+	require.Equal(t, uint64(packetBuffer.Cap()), batch.Stats.CaptureBufferRegularCapacity)
+	require.Equal(t, uint64(packetBuffer.SIPCap()), batch.Stats.CaptureBufferSIPCapacity)
 	require.Equal(t, batch.Stats.CaptureBufferRegularDrops+batch.Stats.CaptureBufferSIPDrops+batch.Stats.BatchChannelDrops, batch.Stats.Dropped)
 
 	cancel()

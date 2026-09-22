@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,7 @@ func TestDefaultLocalSourceConfig(t *testing.T) {
 	assert.Equal(t, 100, cfg.BatchSize)
 	assert.Equal(t, 100*time.Millisecond, cfg.BatchTimeout)
 	assert.Equal(t, 10000, cfg.BufferSize)
+	assert.Zero(t, cfg.SIPBufferSize)
 	assert.Equal(t, 1000, cfg.BatchBuffer)
 	assert.False(t, cfg.IncludeHTTPHeaders)
 }
@@ -192,7 +194,9 @@ func TestNewLocalSource_PreservesCustomConfig(t *testing.T) {
 }
 
 func TestLocalSource_SourceID(t *testing.T) {
-	s := NewLocalSource(DefaultLocalSourceConfig())
+	cfg := DefaultLocalSourceConfig()
+	require.Zero(t, cfg.SIPBufferSize)
+	s := NewLocalSource(cfg)
 	assert.Equal(t, "local", s.SourceID())
 }
 
@@ -263,6 +267,43 @@ func TestLocalSource_Stats_IncludesCaptureBufferDrops(t *testing.T) {
 	assert.Zero(t, stats.CaptureBufferSIPDrops)
 	assert.Equal(t, uint64(5), stats.BatchChannelDrops)
 	assert.Equal(t, stats.CaptureBufferRegularDrops+stats.CaptureBufferSIPDrops+stats.BatchChannelDrops, stats.PacketsDropped)
+}
+
+func TestLocalSourceStatsAndBatchExposeSIPPressureWithoutCountingItAsLoss(t *testing.T) {
+	s := NewLocalSource(DefaultLocalSourceConfig())
+	pb, err := capture.NewPacketBufferWithConfig(t.Context(), capture.PacketBufferConfig{
+		RegularCapacity: 2,
+		SIPCapacity:     1,
+		OutputCapacity:  1,
+	})
+	require.NoError(t, err)
+	defer pb.Close()
+	s.packetBuffer.Store(pb)
+
+	for i := 0; i < 100; i++ {
+		pb.Send(buildUDPPacket(t, 5060, "OPTIONS sip:pressure@example.invalid SIP/2.0\r\n"))
+	}
+	require.Positive(t, pb.GetSIPDemotions())
+	require.Positive(t, pb.GetSIPDropped())
+
+	stats := s.Stats()
+	assert.Equal(t, uint64(pb.GetSIPDemotions()), stats.CaptureBufferSIPDemotions)
+	assert.Equal(t, uint64(2), stats.CaptureBufferRegularCapacity)
+	assert.Equal(t, uint64(1), stats.CaptureBufferSIPCapacity)
+	assert.Equal(t, uint64(1), stats.CaptureBufferOutputCapacity)
+	assert.Equal(t, stats.CaptureBufferRegularDrops+stats.CaptureBufferSIPDrops+stats.BatchChannelDrops, stats.PacketsDropped)
+
+	s.batchMu.Lock()
+	s.currentBatch = append(s.currentBatch, &pipeline.PacketEnvelope{})
+	s.batchMu.Unlock()
+	s.sendBatch()
+	batch := <-s.batches
+	require.NotNil(t, batch.Stats)
+	assert.Equal(t, uint64(pb.GetSIPDemotions()), batch.Stats.CaptureBufferSipDemotions)
+	assert.Equal(t, uint64(2), batch.Stats.CaptureBufferRegularCapacity)
+	assert.Equal(t, uint64(1), batch.Stats.CaptureBufferSipCapacity)
+	assert.Equal(t, uint64(1), batch.Stats.CaptureBufferOutputCapacity)
+	assert.Equal(t, batch.Stats.CaptureBufferRegularDrops+batch.Stats.CaptureBufferSipDrops+batch.Stats.BatchChannelDrops, batch.Stats.Dropped)
 }
 
 func TestLocalSourceStatsIncludesTCPStreamTelemetry(t *testing.T) {
@@ -679,7 +720,7 @@ func TestLocalSource_ImplementsPacketSource(t *testing.T) {
 }
 
 func TestApplyPolicyBoundaryDrainsProcessorBeforeApplyAndResumes(t *testing.T) {
-	s := NewLocalSource(LocalSourceConfig{Interfaces: []string{"test0"}, BPFFilter: "old", BatchBuffer: 4})
+	s := NewLocalSource(LocalSourceConfig{Interfaces: []string{"test0"}, BPFFilter: "old", BufferSize: 5, SIPBufferSize: 3, BatchBuffer: 4})
 	sourceCtx, cancelSource := context.WithCancel(context.Background())
 	defer cancelSource()
 
@@ -721,6 +762,12 @@ func TestApplyPolicyBoundaryDrainsProcessorBeforeApplyAndResumes(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, applyCalled)
 	require.Equal(t, "new", s.config.BPFFilter)
+	replacement := s.packetBuffer.Load()
+	require.NotSame(t, pb, replacement)
+	require.Equal(t, 3, replacement.SIPCap())
+	require.Equal(t, 5, replacement.Cap())
+	require.False(t, reflect.ValueOf(replacement).Elem().FieldByName("heartbeatFn").IsNil(),
+		"replacement buffer must retain the local heartbeat provider")
 
 	cancelSource()
 	if current := s.packetBuffer.Load(); current != nil {
@@ -729,6 +776,13 @@ func TestApplyPolicyBoundaryDrainsProcessorBeforeApplyAndResumes(t *testing.T) {
 	s.wg.Wait()
 	close(s.batches)
 	<-consumerDone
+}
+
+func TestLocalSourceRejectsNegativeSIPBufferSizeBeforeCapture(t *testing.T) {
+	s := NewLocalSource(LocalSourceConfig{SIPBufferSize: -1})
+	err := s.Start(t.Context())
+	require.ErrorContains(t, err, "sip_buffer_size")
+	require.False(t, s.IsStarted())
 }
 
 func TestApplyPolicyBoundaryDoesNotApplyWhenDrainTimesOut(t *testing.T) {

@@ -50,9 +50,15 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 	if err := applyRADIUSLIConfig(nil, &config); err != nil {
 		return nil, err
 	}
-	sourceConfig := tapSourceConfig(config, effectiveBPF, protocol)
+	sourceConfig, err := tapSourceConfigChecked(config, effectiveBPF, protocol)
+	if err != nil {
+		return nil, err
+	}
 	if hooks.ConfigureSourceConfig != nil {
 		hooks.ConfigureSourceConfig(&sourceConfig)
+	}
+	if sourceConfig.SIPBufferSize < 0 {
+		return nil, fmt.Errorf("tap.sip_buffer_size must be non-negative, got %d", sourceConfig.SIPBufferSize)
 	}
 	if protocol.Name == "radius" && config.LIEnabled {
 		scope := config.LIRADIUSScope
@@ -184,11 +190,22 @@ func tapSourceConfig(config processor.Config, effectiveBPF string, protocol prot
 		BatchSize:          cmdutil.GetIntConfig("tap.batch_size", batchSize),
 		BatchTimeout:       time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
 		BufferSize:         cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
+		SIPBufferSize:      cmdutil.GetIntConfig("tap.sip_buffer_size", sipBufferSize),
 		BatchBuffer:        1000,
 		ProcessorID:        config.ProcessorID,
 		ProtocolMode:       string(protocol.Analyzer),
 		IncludeHTTPHeaders: includeHTTPHeaders,
 	}
+}
+
+func tapSourceConfigChecked(config processor.Config, effectiveBPF string, protocol protocolcatalog.Spec) (source.LocalSourceConfig, error) {
+	sourceConfig := tapSourceConfig(config, effectiveBPF, protocol)
+	sipCapacity, err := cmdutil.GetIntConfigStrict("tap.sip_buffer_size", sipBufferSize)
+	if err != nil {
+		return source.LocalSourceConfig{}, err
+	}
+	sourceConfig.SIPBufferSize = sipCapacity
+	return sourceConfig, nil
 }
 
 func (r *tapRuntime) run(nodeName string, config processor.Config) error {

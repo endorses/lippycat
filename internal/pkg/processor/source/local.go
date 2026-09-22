@@ -366,6 +366,9 @@ type LocalSourceConfig struct {
 	// BufferSize is the packet buffer size (default: 10000)
 	BufferSize int
 
+	// SIPBufferSize is the SIP priority buffer size. Zero matches BufferSize.
+	SIPBufferSize int
+
 	// BatchBuffer is the channel buffer size for batches (default: 1000)
 	BatchBuffer int
 
@@ -392,6 +395,7 @@ func DefaultLocalSourceConfig() LocalSourceConfig {
 		BatchSize:           100,
 		BatchTimeout:        100 * time.Millisecond,
 		BufferSize:          10000,
+		SIPBufferSize:       0,
 		BatchBuffer:         1000,
 		CallFilterCacheSize: defaultCallFilterCacheSize,
 	}
@@ -566,6 +570,18 @@ func (s *LocalSource) captureHeartbeatFields() []any {
 	}
 }
 
+func (s *LocalSource) newPacketBuffer() (*capture.PacketBuffer, error) {
+	packetBuffer, err := capture.NewPacketBufferWithConfig(s.ctx, capture.PacketBufferConfig{
+		RegularCapacity: s.config.BufferSize,
+		SIPCapacity:     s.config.SIPBufferSize,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sip_buffer_size: %w", err)
+	}
+	packetBuffer.SetHeartbeatFieldsProvider(s.captureHeartbeatFields)
+	return packetBuffer, nil
+}
+
 // Start begins packet capture. Blocks until ctx is cancelled.
 func (s *LocalSource) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -576,6 +592,16 @@ func (s *LocalSource) Start(ctx context.Context) error {
 	s.started = true
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.mu.Unlock()
+
+	packetBuffer, err := s.newPacketBuffer()
+	if err != nil {
+		s.mu.Lock()
+		s.started = false
+		s.cancel()
+		s.mu.Unlock()
+		return fmt.Errorf("start local capture: %w", err)
+	}
+	s.packetBuffer.Store(packetBuffer)
 
 	logger.Info("LocalSource starting",
 		"interfaces", s.config.Interfaces,
@@ -618,11 +644,6 @@ func (s *LocalSource) Start(ctx context.Context) error {
 			}
 		}
 	}()
-
-	// Create packet buffer
-	packetBuffer := capture.NewPacketBuffer(s.ctx, s.config.BufferSize)
-	packetBuffer.SetHeartbeatFieldsProvider(s.captureHeartbeatFields)
-	s.packetBuffer.Store(packetBuffer)
 
 	// Create capture context (separate from main context for restart support)
 	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
@@ -1126,6 +1147,10 @@ func (s *LocalSource) sendBatch() {
 		envelope.Source.BatchSequence = s.batchSeq
 		envelope.Source.BatchTimestamp = batchTime
 	}
+	captureSnapshot := s.captureBufferSnapshot()
+	regularDrops := uint64(captureSnapshot.RegularDropped) // #nosec G115 -- counters cannot be negative
+	sipDrops := uint64(captureSnapshot.SIPDropped)         // #nosec G115 -- counters cannot be negative
+	batchDrops := s.stats.packetsDropped.Load()
 	batch := &PacketBatch{
 		RADIUSSourceTrusted: true,
 		SourceID:            s.SourceID(),
@@ -1133,12 +1158,19 @@ func (s *LocalSource) sendBatch() {
 		Sequence:            s.batchSeq,
 		TimestampNs:         batchTime.UnixNano(),
 		Stats: &data.BatchStats{
-			TotalCaptured:             s.stats.packetsCaptured.Load(),
-			FilteredMatched:           s.stats.packetsForwarded.Load(),
-			Dropped:                   s.droppedTotal(),
-			CaptureBufferRegularDrops: s.captureBufferRegularDrops(),
-			CaptureBufferSipDrops:     s.captureBufferSIPDrops(),
-			BatchChannelDrops:         s.stats.packetsDropped.Load(),
+			TotalCaptured:                s.stats.packetsCaptured.Load(),
+			FilteredMatched:              s.stats.packetsForwarded.Load(),
+			Dropped:                      regularDrops + sipDrops + batchDrops,
+			CaptureBufferRegularDrops:    regularDrops,
+			CaptureBufferSipDrops:        sipDrops,
+			CaptureBufferSipDemotions:    uint64(captureSnapshot.SIPDemoted), // #nosec G115 -- counters cannot be negative
+			BatchChannelDrops:            batchDrops,
+			CaptureBufferRegularLen:      uint64(captureSnapshot.RegularLength),   // #nosec G115 -- channel lengths cannot be negative
+			CaptureBufferRegularCapacity: uint64(captureSnapshot.RegularCapacity), // #nosec G115 -- channel capacities cannot be negative
+			CaptureBufferSipLen:          uint64(captureSnapshot.SIPLength),       // #nosec G115 -- channel lengths cannot be negative
+			CaptureBufferSipCapacity:     uint64(captureSnapshot.SIPCapacity),     // #nosec G115 -- channel capacities cannot be negative
+			CaptureBufferOutputLen:       uint64(captureSnapshot.OutputLength),    // #nosec G115 -- channel lengths cannot be negative
+			CaptureBufferOutputCapacity:  uint64(captureSnapshot.OutputCapacity),  // #nosec G115 -- channel capacities cannot be negative
 		},
 		AfterProcess: s.currentBatchAfterProcess,
 	}
@@ -1179,8 +1211,16 @@ func (s *LocalSource) Batches() <-chan *PacketBatch {
 func (s *LocalSource) Stats() Stats {
 	st := s.stats.Snapshot()
 	tcpTelemetry := s.tcpStreamTelemetry()
-	st.CaptureBufferRegularDrops = s.captureBufferRegularDrops()
-	st.CaptureBufferSIPDrops = s.captureBufferSIPDrops()
+	captureSnapshot := s.captureBufferSnapshot()
+	st.CaptureBufferRegularDrops = uint64(captureSnapshot.RegularDropped)     // #nosec G115 -- counters cannot be negative
+	st.CaptureBufferSIPDrops = uint64(captureSnapshot.SIPDropped)             // #nosec G115 -- counters cannot be negative
+	st.CaptureBufferSIPDemotions = uint64(captureSnapshot.SIPDemoted)         // #nosec G115 -- counters cannot be negative
+	st.CaptureBufferRegularLen = uint64(captureSnapshot.RegularLength)        // #nosec G115 -- channel lengths cannot be negative
+	st.CaptureBufferRegularCapacity = uint64(captureSnapshot.RegularCapacity) // #nosec G115 -- channel capacities cannot be negative
+	st.CaptureBufferSIPLen = uint64(captureSnapshot.SIPLength)                // #nosec G115 -- channel lengths cannot be negative
+	st.CaptureBufferSIPCapacity = uint64(captureSnapshot.SIPCapacity)         // #nosec G115 -- channel capacities cannot be negative
+	st.CaptureBufferOutputLen = uint64(captureSnapshot.OutputLength)          // #nosec G115 -- channel lengths cannot be negative
+	st.CaptureBufferOutputCapacity = uint64(captureSnapshot.OutputCapacity)   // #nosec G115 -- channel capacities cannot be negative
 	st.BatchChannelDrops = s.stats.packetsDropped.Load()
 	st.PacketsDropped = st.CaptureBufferRegularDrops + st.CaptureBufferSIPDrops + st.BatchChannelDrops
 	st.TCPEstablishedIdleRetentions = tcpTelemetry.EstablishedIdleRetentions
@@ -1189,23 +1229,25 @@ func (s *LocalSource) Stats() Stats {
 	return st
 }
 
-func (s *LocalSource) captureBufferRegularDrops() uint64 {
+func (s *LocalSource) captureBufferSnapshot() capture.PacketBufferSnapshot {
 	if pb := s.packetBuffer.Load(); pb != nil {
-		return uint64(pb.GetDropped()) // #nosec G115 -- drop counters cannot be negative
+		return pb.Snapshot()
 	}
-	return 0
+	return capture.PacketBufferSnapshot{}
+}
+
+func (s *LocalSource) captureBufferRegularDrops() uint64 {
+	return uint64(s.captureBufferSnapshot().RegularDropped) // #nosec G115 -- counters cannot be negative
 }
 
 func (s *LocalSource) captureBufferSIPDrops() uint64 {
-	if pb := s.packetBuffer.Load(); pb != nil {
-		return uint64(pb.GetSIPDropped()) // #nosec G115 -- drop counters cannot be negative
-	}
-	return 0
+	return uint64(s.captureBufferSnapshot().SIPDropped) // #nosec G115 -- counters cannot be negative
 }
 
 // droppedTotal returns capture buffer overflow (regular + SIP) plus batch channel overflow.
 func (s *LocalSource) droppedTotal() uint64 {
-	return s.captureBufferRegularDrops() + s.captureBufferSIPDrops() + s.stats.packetsDropped.Load()
+	snapshot := s.captureBufferSnapshot()
+	return uint64(snapshot.RegularDropped+snapshot.SIPDropped) + s.stats.packetsDropped.Load() // #nosec G115 -- counters cannot be negative
 }
 
 // SourceID returns the source identifier for this local capture.
@@ -1346,7 +1388,11 @@ func (s *LocalSource) ApplyPolicyBoundary(ctx context.Context, filter string, ap
 	if s.ctx == nil || s.ctx.Err() != nil {
 		return nil
 	}
-	s.packetBuffer.Store(capture.NewPacketBuffer(s.ctx, s.config.BufferSize))
+	replacementBuffer, err := s.newPacketBuffer()
+	if err != nil {
+		return fmt.Errorf("recreate packet buffer: %w", err)
+	}
+	s.packetBuffer.Store(replacementBuffer)
 	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
 	s.captureDone = make(chan struct{})
 	s.batchingDone = make(chan struct{})

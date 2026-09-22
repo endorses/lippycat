@@ -394,14 +394,25 @@ func TestConvertToHunterInfoPreservesNamedLossCounters(t *testing.T) {
 			PacketsDropped:            9,
 			CaptureBufferRegularDrops: 4,
 			CaptureBufferSipDrops:     2,
+			CaptureBufferSipDemotions: 8,
 			BatchChannelDrops:         3,
+			CaptureBufferRegularLen:   10, CaptureBufferRegularCapacity: 20,
+			CaptureBufferSipLen: 11, CaptureBufferSipCapacity: 21,
+			CaptureBufferOutputLen: 12, CaptureBufferOutputCapacity: 22,
 		},
 	})
 
 	assert.Equal(t, uint64(9), info.PacketsDropped)
 	assert.Equal(t, uint64(4), info.CaptureBufferRegularDrops)
 	assert.Equal(t, uint64(2), info.CaptureBufferSIPDrops)
+	assert.Equal(t, uint64(8), info.CaptureBufferSIPDemotions)
 	assert.Equal(t, uint64(3), info.BatchChannelDrops)
+	assert.Equal(t, uint64(10), info.CaptureBufferRegularLen)
+	assert.Equal(t, uint64(20), info.CaptureBufferRegularCapacity)
+	assert.Equal(t, uint64(11), info.CaptureBufferSIPLen)
+	assert.Equal(t, uint64(21), info.CaptureBufferSIPCapacity)
+	assert.Equal(t, uint64(12), info.CaptureBufferOutputLen)
+	assert.Equal(t, uint64(22), info.CaptureBufferOutputCapacity)
 }
 
 func TestClient_CloseIdempotent(t *testing.T) {

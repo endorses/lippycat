@@ -22,6 +22,7 @@ func TestTelemetryCollectorAggregatesInterfacesWithoutDuplicatingBufferDrops(t *
 	collector.report("eth1", 200, 3, 4, buffer)
 	atomic.StoreInt64(&buffer.dropped, 8)
 	atomic.StoreInt64(&buffer.sipDropped, 1)
+	atomic.StoreInt64(&buffer.sipDemoted, 2)
 	collector.report("eth0", 150, 5, 2, buffer)
 
 	require.Len(t, snapshots, 3)
@@ -32,7 +33,32 @@ func TestTelemetryCollectorAggregatesInterfacesWithoutDuplicatingBufferDrops(t *
 		PacketBufferDrops:        9,
 		PacketBufferRegularDrops: 8,
 		PacketBufferSIPDrops:     1,
+		PacketBufferSIPDemotions: 2,
 	}, snapshots[2])
+}
+
+func TestTelemetryCollectorSamplesLaneStateOncePerSharedBuffer(t *testing.T) {
+	buffer := &PacketBuffer{
+		ch:       make(chan PacketInfo, 3),
+		sipCh:    make(chan PacketInfo, 2),
+		mergedCh: make(chan PacketInfo, 4),
+		sipFlows: newTCPSIPFlowClassifier(),
+	}
+	buffer.ch <- PacketInfo{}
+	buffer.sipCh <- PacketInfo{}
+	buffer.mergedCh <- PacketInfo{}
+	atomic.StoreInt64(&buffer.sipDemoted, 5)
+
+	collector := newTelemetryCollector(nil)
+	collector.report("eth0", 10, 0, 0, buffer)
+	snapshot := collector.report("eth1", 20, 0, 0, buffer)
+	require.Equal(t, int64(5), snapshot.PacketBufferSIPDemotions)
+	require.Equal(t, 1, snapshot.PacketBufferRegularLength)
+	require.Equal(t, 3, snapshot.PacketBufferRegularCap)
+	require.Equal(t, 1, snapshot.PacketBufferSIPLength)
+	require.Equal(t, 2, snapshot.PacketBufferSIPCap)
+	require.Equal(t, 1, snapshot.PacketBufferOutputLength)
+	require.Equal(t, 4, snapshot.PacketBufferOutputCap)
 }
 
 func TestTelemetryCollectorIncludesSIPClassifierState(t *testing.T) {

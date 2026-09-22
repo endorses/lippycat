@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/bpfutil"
+	capturepkg "github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,7 @@ import (
 func TestRADIUSRestartBoundaryWaitsForOldCapture(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	m := New(Config{BufferSize: 8}, ctx)
+	m := New(Config{BufferSize: 8, SIPBufferSize: 3}, ctx)
 	oldDone := make(chan struct{})
 	m.captureDone = oldDone
 	var lastOldPacket time.Time
@@ -28,14 +29,43 @@ func TestRADIUSRestartBoundaryWaitsForOldCapture(t *testing.T) {
 	}
 	require.NoError(t, m.Restart(nil))
 	defer m.Stop()
-	defer m.packetBuffer.Close()
+	buffer := m.packetBuffer
+	require.Equal(t, 3, buffer.SIPCap())
 	require.True(t, m.CaptureBoundary().After(lastOldPacket))
 	require.NotEqual(t, oldDone, m.captureDone)
+	require.Same(t, buffer, m.packetBuffer, "capture restart must retain the shared packet buffer")
 	select {
 	case <-m.captureDone:
 	case <-time.After(time.Second):
 		t.Fatal("empty replacement capture did not stop")
 	}
+}
+
+func TestStopClosesPacketBufferAfterCaptureStops(t *testing.T) {
+	m := New(Config{BufferSize: 8, SIPBufferSize: 3}, context.Background())
+	buffer, err := capturepkg.NewPacketBufferWithConfig(context.Background(), capturepkg.PacketBufferConfig{
+		RegularCapacity: 8,
+		SIPCapacity:     3,
+	})
+	require.NoError(t, err)
+	m.packetBuffer = buffer
+	m.captureDone = make(chan struct{})
+	close(m.captureDone)
+
+	m.Stop()
+
+	require.True(t, buffer.IsClosed())
+}
+
+func TestStartRejectsNegativeSIPBufferBeforeCapture(t *testing.T) {
+	m := New(Config{BufferSize: 8, SIPBufferSize: -1}, context.Background())
+
+	err := m.Start(nil)
+
+	require.ErrorContains(t, err, "sip_buffer_size")
+	require.Nil(t, m.packetBuffer)
+	require.Nil(t, m.captureCtx)
+	require.Nil(t, m.captureCancel)
 }
 
 func TestRADIUSRestartTimeoutDoesNotOpenNewCapture(t *testing.T) {

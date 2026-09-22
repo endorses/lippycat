@@ -357,6 +357,7 @@ tap:
     - eth0
   bpf_filter: ""
   buffer_size: 10000
+  sip_buffer_size: 0 # Automatic: match buffer_size
   batch_size: 100
   batch_timeout_ms: 100
   listen_addr: ":55555"

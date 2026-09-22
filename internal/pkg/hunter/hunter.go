@@ -63,6 +63,7 @@ type Config struct {
 	Interfaces        []string
 	BPFFilter         string
 	BufferSize        int
+	SIPBufferSize     int
 	BatchSize         int
 	BatchTimeout      time.Duration
 	BatchQueueSize    int // Number of batches to buffer for async sending (0 = default: 1000)
@@ -154,6 +155,9 @@ func New(config Config) (*Hunter, error) {
 	if config.HunterID == "" {
 		return nil, fmt.Errorf("hunter ID is required")
 	}
+	if config.SIPBufferSize < 0 {
+		return nil, fmt.Errorf("sip_buffer_size must be non-negative, got %d", config.SIPBufferSize)
+	}
 
 	// Set defaults for flow control if not configured
 	if config.MaxBufferedBatches == 0 {
@@ -174,6 +178,7 @@ func New(config Config) (*Hunter, error) {
 		Interfaces:            config.Interfaces,
 		BaseFilter:            config.BPFFilter,
 		BufferSize:            config.BufferSize,
+		SIPBufferSize:         config.SIPBufferSize,
 		ProcessorAddr:         config.ProcessorAddr,
 	}, ctx)
 

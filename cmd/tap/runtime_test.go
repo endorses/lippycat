@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -22,12 +23,13 @@ import (
 )
 
 func TestTapSourceConfigUsesSharedProtocol(t *testing.T) {
-	oldInterfaces, oldBatchSize, oldBatchTimeout, oldBufferSize := interfaces, batchSize, batchTimeout, bufferSize
+	oldInterfaces, oldBatchSize, oldBatchTimeout, oldBufferSize, oldSIPBufferSize := interfaces, batchSize, batchTimeout, bufferSize, sipBufferSize
 	t.Cleanup(func() {
-		interfaces, batchSize, batchTimeout, bufferSize = oldInterfaces, oldBatchSize, oldBatchTimeout, oldBufferSize
+		interfaces, batchSize, batchTimeout, bufferSize, sipBufferSize = oldInterfaces, oldBatchSize, oldBatchTimeout, oldBufferSize, oldSIPBufferSize
 	})
 	interfaces = []string{"eth0", "eth1"}
 	batchSize, batchTimeout, bufferSize = 42, 250, 2048
+	sipBufferSize = 512
 
 	got := tapSourceConfig(processor.Config{
 		ProcessorID: "tap-test",
@@ -38,6 +40,7 @@ func TestTapSourceConfigUsesSharedProtocol(t *testing.T) {
 	require.Equal(t, 42, got.BatchSize)
 	require.Equal(t, 250*time.Millisecond, got.BatchTimeout)
 	require.Equal(t, 2048, got.BufferSize)
+	require.Equal(t, 512, got.SIPBufferSize)
 	require.Equal(t, 1000, got.BatchBuffer)
 	require.Equal(t, "tap-test", got.ProcessorID)
 	require.Equal(t, "tls", got.ProtocolMode)
@@ -51,6 +54,59 @@ func TestTapSourceConfigSupportsGenericMode(t *testing.T) {
 	require.Equal(t, "generic", got.ProtocolMode)
 	require.Equal(t, "udp", got.BPFFilter)
 	require.False(t, got.IncludeHTTPHeaders)
+}
+
+func TestTapSIPBufferConfigPrecedence(t *testing.T) {
+	flag := TapCmd.PersistentFlags().Lookup("sip-buffer-size")
+	require.NotNil(t, flag)
+	originalValue, originalChanged := flag.Value.String(), flag.Changed
+	originalEnv, hadEnv := os.LookupEnv("LIPPYCAT_TAP_SIP_BUFFER_SIZE")
+	oldSIPBufferSize := sipBufferSize
+	t.Cleanup(func() {
+		require.NoError(t, flag.Value.Set(originalValue))
+		flag.Changed = originalChanged
+		sipBufferSize = oldSIPBufferSize
+		require.NoError(t, viper.ReadConfig(strings.NewReader("{}")))
+		if hadEnv {
+			require.NoError(t, os.Setenv("LIPPYCAT_TAP_SIP_BUFFER_SIZE", originalEnv))
+		} else {
+			require.NoError(t, os.Unsetenv("LIPPYCAT_TAP_SIP_BUFFER_SIZE"))
+		}
+	})
+
+	require.Equal(t, "0", flag.DefValue)
+	require.NoError(t, flag.Value.Set(flag.DefValue))
+	flag.Changed = false
+	sipBufferSize = 0
+	require.NoError(t, os.Unsetenv("LIPPYCAT_TAP_SIP_BUFFER_SIZE"))
+	viper.SetConfigType("yaml")
+	require.NoError(t, viper.ReadConfig(strings.NewReader("tap:\n  sip_buffer_size: 29\n")))
+	require.Equal(t, 29, tapSourceConfig(processor.Config{}, "", protocolcatalog.MustLookup("generic")).SIPBufferSize)
+
+	require.NoError(t, os.Setenv("LIPPYCAT_TAP_SIP_BUFFER_SIZE", "43"))
+	require.Equal(t, 43, tapSourceConfig(processor.Config{}, "", protocolcatalog.MustLookup("generic")).SIPBufferSize)
+
+	require.NoError(t, flag.Value.Set("47"))
+	flag.Changed = true
+	require.Equal(t, 47, tapSourceConfig(processor.Config{}, "", protocolcatalog.MustLookup("generic")).SIPBufferSize)
+}
+
+func TestTapRejectsNegativeSIPBufferSize(t *testing.T) {
+	oldSIPBufferSize := sipBufferSize
+	sipBufferSize = -1
+	t.Cleanup(func() { sipBufferSize = oldSIPBufferSize })
+
+	_, err := newTapRuntime(processor.Config{}, "", protocolcatalog.MustLookup("generic"), tapRuntimeHooks{})
+	require.ErrorContains(t, err, "tap.sip_buffer_size")
+}
+
+func TestTapRejectsMalformedSIPBufferSize(t *testing.T) {
+	original := viper.Get("tap.sip_buffer_size")
+	t.Cleanup(func() { viper.Set("tap.sip_buffer_size", original) })
+
+	viper.Set("tap.sip_buffer_size", "not-a-number")
+	_, err := newTapRuntime(processor.Config{}, "", protocolcatalog.MustLookup("generic"), tapRuntimeHooks{})
+	require.ErrorContains(t, err, "tap.sip_buffer_size")
 }
 
 func TestTapProtocolsComeFromSharedCatalog(t *testing.T) {
@@ -74,31 +130,31 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 	contracts := map[string]tapProtocolContract{
 		"dns": {
 			cmd: dnsTapCmd, short: "Standalone DNS capture with full processor capabilities",
-			helpHash: "c99c83ff6b225c563b80a008648fbf9f07b1309115b861257ff37a4d9c723bb0",
+			helpHash: "61f8d02dec22488bd00774c52a8168ef5e89c303ec703fad49e212068f07e63b",
 			flags:    tapFlagDefaults("detect-tunneling", "true", "dns-port", "53", "domain", "", "domains-file", "", "tunneling-command", "", "tunneling-debounce", "5m", "tunneling-threshold", "0.7", "udp-only", "false"),
 			bindings: tapBindings("detect-tunneling", "dns.detect_tunneling", "dns-port", "tap.dns.ports", "domain", "tap.dns.domain_pattern", "domains-file", "tap.dns.domains_file", "tunneling-command", "processor.tunneling_command", "tunneling-debounce", "processor.tunneling_debounce", "tunneling-threshold", "processor.tunneling_threshold", "udp-only", "tap.dns.udp_only"),
 		},
 		"http": {
 			cmd: httpTapCmd, short: "Standalone HTTP capture with full processor capabilities",
-			helpHash: "a8ae606521fa23af88b2d1a2316210e94e2cbfda5ef466813f772a5fe9527944",
+			helpHash: "d85bfee9b715678534cf697bad2d06cfed5900aa37c6eacaef22656a5c928a0e",
 			flags:    tapFlagDefaults("capture-body", "false", "content-type", "", "content-types-file", "", "host", "", "hosts-file", "", "http-port", "80,8080,8000,3000,8888", "keywords-file", "", "max-body-size", "65536", "method", "", "path", "", "paths-file", "", "status", "", "tls-keylog", "", "tls-keylog-pipe", "", "user-agent", "", "user-agents-file", ""),
 			bindings: tapBindings("capture-body", "tap.http.capture_body", "content-type", "tap.http.content_type_pattern", "content-types-file", "tap.http.content_types_file", "host", "tap.http.host_pattern", "hosts-file", "tap.http.hosts_file", "http-port", "tap.http.ports", "keywords-file", "tap.http.keywords_file", "max-body-size", "tap.http.max_body_size", "method", "tap.http.methods", "path", "tap.http.path_pattern", "paths-file", "tap.http.paths_file", "status", "tap.http.status_codes", "tls-keylog", "tap.http.tls_keylog", "tls-keylog-pipe", "tap.http.tls_keylog_pipe", "user-agent", "tap.http.user_agent_pattern", "user-agents-file", "tap.http.user_agents_file"),
 		},
 		"tls": {
 			cmd: tlsTapCmd, short: "Standalone TLS capture with full processor capabilities",
-			helpHash: "e7ebcda98ba27171dcda93ff9ced6d4c93bd89811ad09e13b363cb2d2ee53899",
+			helpHash: "adb79cdc644a5b224bef9326967bc910a12012d1d0dca8a27e0acd847ba91523",
 			flags:    tapFlagDefaults("sni", "", "sni-file", "", "tls-port", "443"),
 			bindings: tapBindings("sni", "tap.tls.sni_pattern", "sni-file", "tap.tls.sni_file", "tls-port", "tap.tls.ports"),
 		},
 		"email": {
 			cmd: emailTapCmd, short: "Standalone email capture with full processor capabilities",
-			helpHash: "601e73228f6c69dd047643705aaebb1d0aa8215e62c5ee4c89912d25c8aac533",
+			helpHash: "99b3339e2d72143172c90119d176af94ab1845a50958660e6aaa376f35046a5a",
 			flags:    tapFlagDefaults("address", "", "addresses-file", "", "capture-body", "false", "command", "", "imap-port", "143,993", "keywords-file", "", "mailbox", "", "max-body-size", "65536", "pop3-port", "110,995", "protocol", "all", "recipient", "", "recipients-file", "", "sender", "", "senders-file", "", "smtp-port", "25,587,465", "subject", "", "subjects-file", ""),
 			bindings: tapBindings("address", "tap.email.address_pattern", "addresses-file", "tap.email.addresses_file", "capture-body", "tap.email.capture_body", "command", "tap.email.command_pattern", "imap-port", "tap.email.imap_ports", "keywords-file", "tap.email.keywords_file", "mailbox", "tap.email.mailbox_pattern", "max-body-size", "tap.email.max_body_size", "pop3-port", "tap.email.pop3_ports", "protocol", "tap.email.protocol", "recipient", "tap.email.recipient_pattern", "recipients-file", "tap.email.recipients_file", "sender", "tap.email.sender_pattern", "senders-file", "tap.email.senders_file", "smtp-port", "tap.email.smtp_ports", "subject", "tap.email.subject_pattern", "subjects-file", "tap.email.subjects_file"),
 		},
 		"voip": {
 			cmd: voipTapCmd, short: "Standalone VoIP capture with full processor capabilities",
-			helpHash: "e32704527ba7ea5d8d01881e66c16a08436273b79c1d67410fe5ee5f4bbaf3ef",
+			helpHash: "0010166d9f02fd42df91ab4c32ee20e1ad11b200c60ec8acde28d612cc117b6e",
 			flags:    tapFlagDefaults("pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-user", "", "sipuser", "", "tcp-performance-mode", "balanced", "tcp-reassembly-shards", "1", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
 			bindings: tapBindings("pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-user", "tap.voip.sip_user", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-reassembly-shards", "tap.voip.tcp_reassembly_shards", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
 		},
@@ -108,11 +164,11 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 	// complete-help snapshots so non-LI help remains an independent contract.
 	if TapCmd.PersistentFlags().Lookup("li-enabled") != nil {
 		liHashes := map[string]string{
-			"dns":   "39086ea79608d44d7eb4e08618521f25a8b33afd910fa82a2afa94e345a4b1e2",
-			"http":  "306dd56d357038979a0d0dced9c156722b36ebb24a24d985c433891686cee491",
-			"tls":   "259b88d4cb974bedb908f51e1a7b37bd0272de7a2294d7121d6a4afe930c8a7a",
-			"email": "544df278c61c31e5425f26212f8e82513e19291283644e2c837fcd93d8cf26b6",
-			"voip":  "a04218f073983a0d8f5cd62e12159de4abe7a29b37ca452c26655e05fb04f437",
+			"dns":   "8bc9aa3a3f75001bc956e5cc190752d636e6e49c48f5b38debf2cc9b1e1c0269",
+			"http":  "d73743cab549fa32d39dd71615fd874f8ba133e41ef5b6d5219f3fb99f7b50de",
+			"tls":   "4a1939e1c2ed44a54c3299b79bce3073dbd069723573068a5c8cae9c475639e6",
+			"email": "d4e293b3af30734af6c1fbb9f511d87d0d7384b50d61af429753e1c7584ce274",
+			"voip":  "7f6dccb858fa9e2d2e1ff117ea6ad02ab5509f925f7d8c3d40b3cb84dea060aa",
 		}
 		for name, hash := range liHashes {
 			contract := contracts[name]

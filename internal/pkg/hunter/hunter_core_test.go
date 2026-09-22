@@ -59,6 +59,16 @@ func TestNew(t *testing.T) {
 			errContains: "processor address is required",
 		},
 		{
+			name: "negative SIP buffer size",
+			config: Config{
+				HunterID:      "test-hunter-1",
+				ProcessorAddr: "localhost:55555",
+				SIPBufferSize: -1,
+			},
+			wantErr:     true,
+			errContains: "sip_buffer_size",
+		},
+		{
 			name: "default flow control settings",
 			config: Config{
 				HunterID:      "test-hunter-1",

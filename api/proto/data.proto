@@ -359,6 +359,19 @@ message BatchStats {
     uint64 capture_buffer_regular_drops = 5;
     uint64 capture_buffer_sip_drops = 6;
     uint64 batch_channel_drops = 7;
+
+    // Recognized SIP packets admitted to the regular lane after the priority
+    // lane was full. Demotions indicate priority pressure, not packet loss.
+    uint64 capture_buffer_sip_demotions = 8;
+
+    // Instantaneous approximate queue gauges. Capacities are immutable for a
+    // capture-buffer lifetime.
+    uint64 capture_buffer_regular_len = 9;
+    uint64 capture_buffer_regular_capacity = 10;
+    uint64 capture_buffer_sip_len = 11;
+    uint64 capture_buffer_sip_capacity = 12;
+    uint64 capture_buffer_output_len = 13;
+    uint64 capture_buffer_output_capacity = 14;
 }
 
 // StreamControl messages from processor to hunter

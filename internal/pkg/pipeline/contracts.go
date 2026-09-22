@@ -123,8 +123,15 @@ type BatchStats struct {
 	TotalCaptured, FilteredMatched, Dropped uint64
 	CaptureBufferRegularDrops               uint64
 	CaptureBufferSIPDrops                   uint64
+	CaptureBufferSIPDemotions               uint64
 	BatchChannelDrops                       uint64
 	BufferUsage                             uint32
+	CaptureBufferRegularLen                 uint64
+	CaptureBufferRegularCapacity            uint64
+	CaptureBufferSIPLen                     uint64
+	CaptureBufferSIPCapacity                uint64
+	CaptureBufferOutputLen                  uint64
+	CaptureBufferOutputCapacity             uint64
 }
 
 // NewDecodedPacketEnvelope creates an envelope that retains an already-decoded

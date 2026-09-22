@@ -159,7 +159,10 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(protocolHunterConfigSpec("http", effectiveBPFFilter))
+	config, err := buildHunterConfigChecked(protocolHunterConfigSpec("http", effectiveBPFFilter))
+	if err != nil {
+		return err
+	}
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {

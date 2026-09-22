@@ -100,21 +100,28 @@ type ExportStatsMsg struct {
 
 // HunterContribution represents a hunter's contribution to overall traffic.
 type HunterContribution struct {
-	ID                        string
-	Hostname                  string
-	ProcessorAddr             string
-	Status                    string // "healthy", "warning", "error"
-	PacketsCaptured           uint64
-	PacketsForwarded          uint64
-	PacketsDropped            uint64
-	CaptureBufferRegularDrops uint64
-	CaptureBufferSIPDrops     uint64
-	BatchChannelDrops         uint64
-	DropRate                  float64 // Percentage of packets dropped
-	Contribution              float64 // Percentage of total fleet packets
-	CPUPercent                float64
-	MemoryRSSBytes            uint64
-	MemoryLimitBytes          uint64
+	ID                           string
+	Hostname                     string
+	ProcessorAddr                string
+	Status                       string // "healthy", "warning", "error"
+	PacketsCaptured              uint64
+	PacketsForwarded             uint64
+	PacketsDropped               uint64
+	CaptureBufferRegularDrops    uint64
+	CaptureBufferSIPDrops        uint64
+	CaptureBufferSIPDemotions    uint64
+	BatchChannelDrops            uint64
+	CaptureBufferRegularLen      uint64
+	CaptureBufferRegularCapacity uint64
+	CaptureBufferSIPLen          uint64
+	CaptureBufferSIPCapacity     uint64
+	CaptureBufferOutputLen       uint64
+	CaptureBufferOutputCapacity  uint64
+	DropRate                     float64 // Percentage of packets dropped
+	Contribution                 float64 // Percentage of total fleet packets
+	CPUPercent                   float64
+	MemoryRSSBytes               uint64
+	MemoryLimitBytes             uint64
 }
 
 // ProcessorSummary represents aggregated stats for a processor.
@@ -144,6 +151,7 @@ type DistributedStats struct {
 	TotalPacketsCaptured  uint64
 	TotalPacketsForwarded uint64
 	TotalPacketsDropped   uint64
+	TotalSIPDemotions     uint64
 	OverallDropRate       float64 // Percentage
 
 	// Resource usage
@@ -499,6 +507,7 @@ func (s *StatisticsView) UpdateDistributedStats(hunters []HunterInfo, processors
 	ds.TotalPacketsCaptured = 0
 	ds.TotalPacketsForwarded = 0
 	ds.TotalPacketsDropped = 0
+	ds.TotalSIPDemotions = 0
 	ds.FleetMemoryRSS = 0
 	ds.FleetMemoryLimit = 0
 
@@ -563,6 +572,7 @@ func (s *StatisticsView) UpdateDistributedStats(hunters []HunterInfo, processors
 		ds.TotalPacketsCaptured += hunter.PacketsCaptured
 		ds.TotalPacketsForwarded += hunter.PacketsForwarded
 		ds.TotalPacketsDropped += hunter.PacketsDropped
+		ds.TotalSIPDemotions += hunter.CaptureBufferSIPDemotions
 		ds.FleetMemoryRSS += hunter.MemoryRSSBytes
 		ds.FleetMemoryLimit += hunter.MemoryLimitBytes
 
@@ -593,20 +603,27 @@ func (s *StatisticsView) UpdateDistributedStats(hunters []HunterInfo, processors
 		}
 
 		contrib := HunterContribution{
-			ID:                        hunter.ID,
-			Hostname:                  hunter.Hostname,
-			ProcessorAddr:             hunter.ProcessorAddr,
-			Status:                    statusStr,
-			PacketsCaptured:           hunter.PacketsCaptured,
-			PacketsForwarded:          hunter.PacketsForwarded,
-			PacketsDropped:            hunter.PacketsDropped,
-			CaptureBufferRegularDrops: hunter.CaptureBufferRegularDrops,
-			CaptureBufferSIPDrops:     hunter.CaptureBufferSIPDrops,
-			BatchChannelDrops:         hunter.BatchChannelDrops,
-			DropRate:                  dropRate,
-			CPUPercent:                hunter.CPUPercent,
-			MemoryRSSBytes:            hunter.MemoryRSSBytes,
-			MemoryLimitBytes:          hunter.MemoryLimitBytes,
+			ID:                           hunter.ID,
+			Hostname:                     hunter.Hostname,
+			ProcessorAddr:                hunter.ProcessorAddr,
+			Status:                       statusStr,
+			PacketsCaptured:              hunter.PacketsCaptured,
+			PacketsForwarded:             hunter.PacketsForwarded,
+			PacketsDropped:               hunter.PacketsDropped,
+			CaptureBufferRegularDrops:    hunter.CaptureBufferRegularDrops,
+			CaptureBufferSIPDrops:        hunter.CaptureBufferSIPDrops,
+			CaptureBufferSIPDemotions:    hunter.CaptureBufferSIPDemotions,
+			BatchChannelDrops:            hunter.BatchChannelDrops,
+			CaptureBufferRegularLen:      hunter.CaptureBufferRegularLen,
+			CaptureBufferRegularCapacity: hunter.CaptureBufferRegularCapacity,
+			CaptureBufferSIPLen:          hunter.CaptureBufferSIPLen,
+			CaptureBufferSIPCapacity:     hunter.CaptureBufferSIPCapacity,
+			CaptureBufferOutputLen:       hunter.CaptureBufferOutputLen,
+			CaptureBufferOutputCapacity:  hunter.CaptureBufferOutputCapacity,
+			DropRate:                     dropRate,
+			CPUPercent:                   hunter.CPUPercent,
+			MemoryRSSBytes:               hunter.MemoryRSSBytes,
+			MemoryLimitBytes:             hunter.MemoryLimitBytes,
 		}
 		ds.HunterContributions = append(ds.HunterContributions, contrib)
 	}
@@ -2076,16 +2093,32 @@ func (s *StatisticsView) renderDistributedSubView() string {
 	}
 	result.WriteString("\n")
 	var regularDrops, sipDrops, batchDrops uint64
+	var regularLen, regularCapacity, sipLen, sipCapacity, outputLen, outputCapacity uint64
 	for _, hunter := range ds.HunterContributions {
 		regularDrops += hunter.CaptureBufferRegularDrops
 		sipDrops += hunter.CaptureBufferSIPDrops
 		batchDrops += hunter.BatchChannelDrops
+		regularLen += hunter.CaptureBufferRegularLen
+		regularCapacity += hunter.CaptureBufferRegularCapacity
+		sipLen += hunter.CaptureBufferSIPLen
+		sipCapacity += hunter.CaptureBufferSIPCapacity
+		outputLen += hunter.CaptureBufferOutputLen
+		outputCapacity += hunter.CaptureBufferOutputCapacity
 	}
 	result.WriteString(labelStyle.Render("  Capture buffer: "))
 	result.WriteString(valueStyle.Render(fmt.Sprintf("regular %s, SIP %s", formatNumber64(int64(regularDrops)), formatNumber64(int64(sipDrops)))))
 	result.WriteString("\n")
 	result.WriteString(labelStyle.Render("  Batch delivery: "))
 	result.WriteString(valueStyle.Render(formatNumber64(int64(batchDrops))))
+	result.WriteString("\n")
+	result.WriteString(labelStyle.Render("  SIP priority pressure: "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("%s demotions (not loss)", formatNumber64(int64(ds.TotalSIPDemotions)))))
+	result.WriteString("\n")
+	result.WriteString(labelStyle.Render("  Capture queues: "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("regular %s/%s, SIP %s/%s, output %s/%s",
+		formatNumber64(int64(regularLen)), formatNumber64(int64(regularCapacity)),
+		formatNumber64(int64(sipLen)), formatNumber64(int64(sipCapacity)),
+		formatNumber64(int64(outputLen)), formatNumber64(int64(outputCapacity)))))
 	result.WriteString("\n")
 
 	result.WriteString(labelStyle.Render("Total Memory RSS:  "))
@@ -2795,6 +2828,17 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 		if dropSummary.BufferSIPDrops > 0 {
 			rightLines = append(rightLines, labelStyle.Render("Capture SIP:     ")+
 				valueStyle.Render(fmt.Sprintf("%d packets", dropSummary.BufferSIPDrops)))
+		}
+		if dropSummary.SIPDemotions > 0 {
+			rightLines = append(rightLines, labelStyle.Render("SIP priority pressure: ")+
+				valueStyle.Render(fmt.Sprintf("%d demotions (not loss)", dropSummary.SIPDemotions)))
+		}
+		if dropSummary.BufferRegularCapacity > 0 || dropSummary.BufferSIPCapacity > 0 || dropSummary.BufferOutputCapacity > 0 {
+			rightLines = append(rightLines, labelStyle.Render("Capture queues: ")+
+				valueStyle.Render(fmt.Sprintf("regular %d/%d, SIP %d/%d, output %d/%d",
+					dropSummary.BufferRegularLength, dropSummary.BufferRegularCapacity,
+					dropSummary.BufferSIPLength, dropSummary.BufferSIPCapacity,
+					dropSummary.BufferOutputLength, dropSummary.BufferOutputCapacity)))
 		}
 
 		// Detail feed retention is packet-based and includes every local shedding stage.

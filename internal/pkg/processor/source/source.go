@@ -111,9 +111,16 @@ type Stats struct {
 
 	// Named loss counters are packet counts, cumulative and monotonic for the
 	// lifetime of this source. They reset only when a new source is constructed.
-	CaptureBufferRegularDrops uint64
-	CaptureBufferSIPDrops     uint64
-	BatchChannelDrops         uint64
+	CaptureBufferRegularDrops    uint64
+	CaptureBufferSIPDrops        uint64
+	CaptureBufferSIPDemotions    uint64
+	BatchChannelDrops            uint64
+	CaptureBufferRegularLen      uint64
+	CaptureBufferRegularCapacity uint64
+	CaptureBufferSIPLen          uint64
+	CaptureBufferSIPCapacity     uint64
+	CaptureBufferOutputLen       uint64
+	CaptureBufferOutputCapacity  uint64
 
 	// IdentityInheritanceSuppressed counts classified media packets for which
 	// identity-filter inheritance was denied because call ownership was not
@@ -311,7 +318,7 @@ func (b *PacketBatch) ToProtoBatchE() (*data.PacketBatch, error) {
 	}
 	if b.Stats != nil {
 		normalized.HasStats = true
-		normalized.Stats = pipeline.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSIPDrops: b.Stats.CaptureBufferSipDrops, BatchChannelDrops: b.Stats.BatchChannelDrops}
+		normalized.Stats = pipeline.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage, CaptureBufferRegularDrops: b.Stats.CaptureBufferRegularDrops, CaptureBufferSIPDrops: b.Stats.CaptureBufferSipDrops, CaptureBufferSIPDemotions: b.Stats.CaptureBufferSipDemotions, BatchChannelDrops: b.Stats.BatchChannelDrops, CaptureBufferRegularLen: b.Stats.CaptureBufferRegularLen, CaptureBufferRegularCapacity: b.Stats.CaptureBufferRegularCapacity, CaptureBufferSIPLen: b.Stats.CaptureBufferSipLen, CaptureBufferSIPCapacity: b.Stats.CaptureBufferSipCapacity, CaptureBufferOutputLen: b.Stats.CaptureBufferOutputLen, CaptureBufferOutputCapacity: b.Stats.CaptureBufferOutputCapacity}
 	}
 	pb, err := grpcadapter.ToPacketBatch(normalized)
 	if err != nil {

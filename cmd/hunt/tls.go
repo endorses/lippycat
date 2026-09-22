@@ -83,7 +83,10 @@ func runTLSHunt(cmd *cobra.Command, args []string) error {
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(protocolHunterConfigSpec("tls", effectiveBPFFilter))
+	config, err := buildHunterConfigChecked(protocolHunterConfigSpec("tls", effectiveBPFFilter))
+	if err != nil {
+		return err
+	}
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {

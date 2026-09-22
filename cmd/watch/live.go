@@ -32,6 +32,9 @@ Examples:
   lc watch live                   # Capture on default interface
   lc watch live -i eth0           # Capture on eth0
   lc watch live -i eth0 -f "port 5060"  # With BPF filter`,
+	PreRunE: func(_ *cobra.Command, _ []string) error {
+		return capture.ValidatePacketBufferConfig()
+	},
 	Run: runLive,
 }
 
@@ -153,11 +156,17 @@ func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 			localEventAnalysisOptions(filter))
 	}
 	// Pass pause function to drop packets at source when paused (reduces CPU)
-	capture.InitWithContextAndTelemetry(ctx, devices, filter, processor, nil, pauseSignal.IsPaused, func(stats capture.Telemetry) {
+	err := capture.InitWithContextAndTelemetryChecked(ctx, devices, filter, processor, nil, pauseSignal.IsPaused, func(stats capture.Telemetry) {
 		if program != nil {
 			program.Send(tui.CaptureTelemetryMsg(stats))
 		}
 	}, capture.CaptureOptions{ReassembleIPFragmentsWhen: tui.IsVoIPModeEnabled})
+	if err != nil {
+		logger.Error("Packet capture configuration rejected", "error", err)
+		if program != nil {
+			program.Send(tui.CaptureCompleteMsg{Err: err})
+		}
+	}
 }
 
 func localEventAnalysisOptions(filter string) tui.LocalEventAnalysisOptions {

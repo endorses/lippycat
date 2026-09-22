@@ -293,6 +293,20 @@ message HunterStats {
     uint64 queue_losses = 25;
     uint64 unsupported_kind_losses = 21;
     uint64 transport_losses = 22;
+
+    // Recognized SIP packets admitted to the regular lane after the priority
+    // lane was full. Demotions indicate priority pressure, not packet loss and
+    // are excluded from packets_dropped.
+    uint64 capture_buffer_sip_demotions = 26;
+
+    // Instantaneous approximate queue gauges. Capacities are immutable for a
+    // capture-buffer lifetime.
+    uint64 capture_buffer_regular_len = 27;
+    uint64 capture_buffer_regular_capacity = 28;
+    uint64 capture_buffer_sip_len = 29;
+    uint64 capture_buffer_sip_capacity = 30;
+    uint64 capture_buffer_output_len = 31;
+    uint64 capture_buffer_output_capacity = 32;
 }
 
 // ProcessorHeartbeat response from processor

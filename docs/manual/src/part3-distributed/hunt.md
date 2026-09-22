@@ -49,6 +49,7 @@ Most capture flags (`-i`, `-f`, `--sip-port`, `--rtp-port-range`) carry over. Wh
 | `-P, --processor`                     | Processor address (host:port) — **required**                                   |
 | `-I, --id`                            | Hunter identifier (default: hostname)                                          |
 | `-b, --buffer-size`                   | Packet buffer size (default: 10000)                                            |
+| `--sip-buffer-size`                   | SIP priority-lane size (default: 0, automatically matches `--buffer-size`)      |
 | `--batch-size`                        | Packets per gRPC batch (default: 64)                                           |
 | `--batch-timeout`                     | Batch send timeout in ms (default: 100)                                        |
 | `--batch-queue-size`                  | Batch queue buffer (default: 1000)                                             |
@@ -293,7 +294,11 @@ When the connection to the processor is lost, the hunter reconnects automaticall
 | 6       | 32s     | 63s        |
 | 7-10    | 60s     | ~5 minutes |
 
-During reconnection, packet capture continues. Packets are buffered up to `--buffer-size` (default: 10,000 packets). Once the buffer is full, new packets are dropped.
+During reconnection, packet capture continues. Regular and SIP-priority input
+lanes are bounded separately, followed by a bounded merged-output lane. The SIP
+lane automatically matches `--buffer-size` unless `--sip-buffer-size` is set to
+a positive override. Larger queues add burst headroom and memory use; they do
+not make sustained overload lossless.
 
 ### Disk Overflow Buffer
 
@@ -319,6 +324,15 @@ When the processor is down for an extended period, the circuit breaker prevents 
 - Half-open state: allows limited test connections before full recovery
 
 ## Performance Tuning
+
+### Capture Buffer Pressure
+
+Use the per-lane length and capacity gauges to identify whether the regular,
+SIP-priority, or merged-output lane is saturated. SIP demotions mean the
+priority lane filled but the packet was retained in the regular lane; they are
+not included in packet-drop totals. SIP drops mean both input lanes rejected the
+packet. Persistent growth in the output lane points to downstream processing or
+forwarding throughput rather than an input-capacity problem alone.
 
 ### Batch Configuration
 

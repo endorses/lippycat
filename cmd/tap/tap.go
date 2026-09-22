@@ -100,6 +100,7 @@ var (
 	promiscuous    bool
 	pcapBufferSize int
 	bufferSize     int
+	sipBufferSize  int
 	batchSize      int
 	batchTimeout   int
 
@@ -198,6 +199,7 @@ func init() {
 	TapCmd.PersistentFlags().BoolVarP(&promiscuous, "promisc", "p", false, "Enable promiscuous mode")
 	TapCmd.PersistentFlags().IntVar(&pcapBufferSize, "pcap-buffer-size", 16*1024*1024, "Kernel pcap buffer size in bytes (default 16MB, increase for high-traffic interfaces)")
 	TapCmd.PersistentFlags().IntVarP(&bufferSize, "buffer-size", "b", 10000, "Packet buffer size")
+	TapCmd.PersistentFlags().IntVar(&sipBufferSize, "sip-buffer-size", 0, "SIP priority buffer size (0 = match packet buffer size)")
 	TapCmd.PersistentFlags().IntVar(&batchSize, "batch-size", 100, "Packets per batch")
 	TapCmd.PersistentFlags().IntVar(&batchTimeout, "batch-timeout", 100, "Batch timeout in milliseconds")
 
@@ -320,6 +322,8 @@ func init() {
 	// Bind pcap buffer size for pcaptypes/live.go which reads this key
 	_ = viper.BindPFlag("pcap_buffer_size", TapCmd.PersistentFlags().Lookup("pcap-buffer-size"))
 	_ = viper.BindPFlag("tap.buffer_size", TapCmd.PersistentFlags().Lookup("buffer-size"))
+	_ = viper.BindPFlag("tap.sip_buffer_size", TapCmd.PersistentFlags().Lookup("sip-buffer-size"))
+	_ = viper.BindEnv("tap.sip_buffer_size", "LIPPYCAT_TAP_SIP_BUFFER_SIZE")
 	_ = viper.BindPFlag("tap.batch_size", TapCmd.PersistentFlags().Lookup("batch-size"))
 	_ = viper.BindPFlag("tap.batch_timeout_ms", TapCmd.PersistentFlags().Lookup("batch-timeout"))
 

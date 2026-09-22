@@ -726,11 +726,18 @@ Tap uses separate regular, SIP-priority, and merged-output lanes. Automatic mode
 value is an explicit override. Larger capacities retain more packets during a
 bounded burst but consume more memory.
 
-`capture_buffer_sip_demotions` reports SIP packets accepted by the regular lane
-after the priority lane filled. It is a pressure indicator and is excluded from
-packet-loss totals. Final SIP drops are reported separately. Use the regular,
-SIP, and output length/capacity gauges to locate saturation. Persistent overload
-still requires more downstream throughput or a narrower capture filter.
+The SIP counters describe successive outcomes rather than three independent
+loss totals:
+
+| Counter | Meaning |
+| --- | --- |
+| `sip_priority_classified` | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped. |
+| `capture_buffer_sip_demotions` | Classified SIP packets rejected by the full priority lane but accepted by the regular lane. This is priority pressure, not packet loss. |
+| `capture_buffer_sip_drops` | Classified SIP packets rejected by both input lanes. This is final packet loss. |
+
+Use the regular, SIP, and output length/capacity gauges to locate saturation.
+Persistent overload still requires more downstream throughput or a narrower
+capture filter.
 
 ### Batch Configuration
 

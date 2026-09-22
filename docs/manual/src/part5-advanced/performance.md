@@ -102,12 +102,16 @@ if resource use or integrity telemetry regresses.
 
 ### SIP Capture Priority and Its Limits
 
-The capture buffer gives recognized SIP signaling a separate 1,000-packet
-priority lane. For SIP over TCP, recognition is stateful: after a credible SIP
-start line is observed, later header and body segments in both directions of
-that connection use the priority lane. The flow classifier retains at most
-65,536 entries, keeps at most 1 KiB of possible start-line prefix per direction,
-expires idle entries after two minutes, and removes entries on TCP FIN or RST.
+The capture buffer gives recognized SIP signaling a separately sized priority
+lane. In automatic mode (`sip_buffer_size: 0` or `--sip-buffer-size 0`), its
+packet capacity matches the regular capture buffer. A positive value is an
+explicit override: larger values add bounded-burst headroom and consume more
+memory, while smaller values reduce memory and allow demotion sooner. For SIP
+over TCP, recognition is stateful: after a credible SIP start line is observed,
+later header and body segments in both directions of that connection use the
+priority lane. The flow classifier retains at most 65,536 entries, keeps at
+most 1 KiB of possible start-line prefix per direction, expires idle entries
+after two minutes, and removes entries on TCP FIN or RST.
 
 This protection starts only after a recognizable SIP start. When capture joins
 an established TCP connection midstream, or while a start line is still split
@@ -123,6 +127,13 @@ packet, but they do not by themselves identify an upstream network or kernel
 cause. If SIP drops increase, reduce offered traffic with a BPF filter, increase
 downstream service capacity, or investigate the other named capture and
 processing loss stages before assigning a root cause.
+
+`sip_priority_classified` is the inclusive number of packets recognized and
+routed through the SIP-priority path. It includes packets accepted by that lane,
+packets counted by `capture_buffer_sip_demotions` after falling back to the
+regular lane, and packets counted by `capture_buffer_sip_drops` after both input
+lanes reject them. Demotions indicate degraded priority service; only final SIP
+drops contribute to packet-loss totals.
 
 ## Detector Capacity and Retention
 

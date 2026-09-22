@@ -304,6 +304,20 @@ sudo lc tap voip -i eth0 \
 
 This gives you the best of both worlds: local PCAP writing and TUI access at the edge, plus central aggregation.
 
+### Capture Buffer Telemetry
+
+Tap uses regular, SIP-priority, and merged-output lanes. With
+`sip_buffer_size: 0`, the SIP capacity automatically matches `buffer_size`; a
+positive value is an explicit override.
+
+`sip_priority_classified` counts every packet recognized and routed through the
+SIP-priority path, including packets later demoted or finally dropped.
+`capture_buffer_sip_demotions` counts classified packets retained by the regular
+lane after the SIP lane filled and is not packet loss.
+`capture_buffer_sip_drops` counts classified packets rejected by both input
+lanes and is final packet loss. Use the three lane length/capacity pairs to
+locate the saturated stage.
+
 ```mermaid
 flowchart LR
     subgraph Edge["Edge Tap Node"]

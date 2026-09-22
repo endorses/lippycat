@@ -500,11 +500,16 @@ default, `--sip-buffer-size 0` gives the SIP lane the same packet capacity as
 `--buffer-size`. A positive value sets an explicit SIP capacity, which can
 reduce memory use at the cost of less protected burst headroom.
 
-`capture_buffer_sip_demotions` counts SIP packets that could not enter the
-priority lane but were accepted by the regular lane. A demotion is a priority
-pressure signal, not packet loss. `capture_buffer_sip_drops` increases only when
-neither input lane can accept a SIP packet. The per-lane length and capacity
-fields identify which queue is saturated.
+The SIP counters describe successive outcomes rather than three independent
+loss totals:
+
+| Counter | Meaning |
+| --- | --- |
+| `sip_priority_classified` | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped. |
+| `capture_buffer_sip_demotions` | Classified SIP packets rejected by the full priority lane but accepted by the regular lane. This is priority pressure, not packet loss. |
+| `capture_buffer_sip_drops` | Classified SIP packets rejected by both input lanes. This is final packet loss. |
+
+The per-lane length and capacity fields identify which queue is saturated.
 
 Finite buffers absorb bounded bursts. If traffic arrives faster than the
 downstream pipeline can process it for a sustained period, increase downstream

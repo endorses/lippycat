@@ -270,3 +270,7 @@ Documentation targets:
 - [x] Complete an independent integrated review of the production fixes, field
       semantics, restart branches, and updated regression evidence with no
       unresolved scoped findings.
+- [x] Remove the obsolete fixed 1,000-packet SIP-lane claim from the mdBook
+      performance guide and document automatic versus explicit sizing there.
+- [x] Document `sip_priority_classified`, SIP demotions, and final SIP drops as
+      successive outcomes across hunt, tap, and manual operator guidance.

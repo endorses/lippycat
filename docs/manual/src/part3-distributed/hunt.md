@@ -328,10 +328,16 @@ When the processor is down for an extended period, the circuit breaker prevents 
 ### Capture Buffer Pressure
 
 Use the per-lane length and capacity gauges to identify whether the regular,
-SIP-priority, or merged-output lane is saturated. SIP demotions mean the
-priority lane filled but the packet was retained in the regular lane; they are
-not included in packet-drop totals. SIP drops mean both input lanes rejected the
-packet. Persistent growth in the output lane points to downstream processing or
+SIP-priority, or merged-output lane is saturated. Interpret the SIP counters as
+successive outcomes:
+
+| Counter | Meaning |
+| --- | --- |
+| `sip_priority_classified` | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped. |
+| `capture_buffer_sip_demotions` | Classified SIP packets retained in the regular lane after the priority lane filled. Demotions are not packet loss. |
+| `capture_buffer_sip_drops` | Classified SIP packets rejected by both input lanes and therefore lost. |
+
+Persistent growth in the output lane points to downstream processing or
 forwarding throughput rather than an input-capacity problem alone.
 
 ### Batch Configuration

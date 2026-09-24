@@ -25,7 +25,7 @@ import (
 type StatelessDecoder func(context.Context, []byte, Summary) (types.PacketDisplay, error)
 
 const compactHeaderBytes = 32
-const compactSchemaMinor = 2
+const compactSchemaMinor = 3
 const compactBlockHeaderBytes = 72
 const compactRows = 128
 const compactRowSlotBytes = 1024

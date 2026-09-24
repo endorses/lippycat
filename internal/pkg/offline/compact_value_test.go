@@ -30,7 +30,7 @@ func TestCompactValueSchemaNamesCoverFields(t *testing.T) {
 func TestCompactValueRoundTripAndColumns(t *testing.T) {
 	values := []any{
 		compactRow{Argument: 3, Sequence: 1 << 40, Locator: Locator{BackingID: 2, Offset: 1 << 35, Length: 7, Digest: [32]byte{1, 2, 3}}, Timestamp: time.Unix(-123, 456).UTC(), SrcIP: "::ffff:192.0.2.1", SrcPort: "", DstPort: "0", Info: "unique arbitrary text", Projection: compactProjection{Presence: 31, User: "alice", QueryName: "example", AnswerPresent: true, SNI: "server", ContentLength: -1}},
-		compactOverrides{Mask: 31, Metadata: compactMetadata{VoIP: &types.VoIPMetadata{Headers: map[string]string{"b": "2", "a": "1"}, RawSIP: []byte{}, AccessNetworkInfo: &types.AccessNetworkInfo{Parameters: map[string]string{}}}, DNS: &types.DNSMetadata{Answers: []types.DNSAnswer{{TTL: 45, Data: "192.0.2.1"}}}, TLS: &types.TLSMetadata{CipherSuites: []uint16{1, 65535}, Extensions: []uint16{}, ALPNProtocols: []string{"h2"}}, Email: &types.EmailMetadata{Timestamp: time.Time{}, RcptTo: []string{}}, HTTP: &types.HTTPMetadata{Headers: map[string]string{}, ContentLength: -1}}},
+		compactOverrides{Mask: 31, Metadata: compactMetadata{VoIP: &types.VoIPMetadata{CSeqNumber: 42, ViaBranch: "z9hG4bK-test", Headers: map[string]string{"b": "2", "a": "1"}, RawSIP: []byte{}, AccessNetworkInfo: &types.AccessNetworkInfo{Parameters: map[string]string{}}}, DNS: &types.DNSMetadata{Answers: []types.DNSAnswer{{TTL: 45, Data: "192.0.2.1"}}}, TLS: &types.TLSMetadata{CipherSuites: []uint16{1, 65535}, Extensions: []uint16{}, ALPNProtocols: []string{"h2"}}, Email: &types.EmailMetadata{Timestamp: time.Time{}, RcptTo: []string{}}, HTTP: &types.HTTPMetadata{Headers: map[string]string{}, ContentLength: -1}}},
 	}
 	for _, value := range values {
 		wire, err := encodeCompactValue(value, 1<<20)
@@ -102,12 +102,12 @@ func TestCompactValueFixedWidthsAndCanonicalMaps(t *testing.T) {
 	}
 }
 
-// Pin schema-v2 field order, field types, integer widths and sparse projection
+// Pin schema-v2.3 field order, field types, integer widths and sparse projection
 // groups. A declaration edit must never silently reinterpret completed blocks.
 func TestCompactValueSchemaFingerprint(t *testing.T) {
-	require.Equal(t, 2, compactSchemaMinor)
+	require.Equal(t, 3, compactSchemaMinor)
 	var schema bytes.Buffer
-	schema.WriteString("schema-v2; little-endian; int=8; timestamp=seconds8+nanos4; string=length4+bytes; container=presence1+length4; pointer=presence1; bool=1; float64=8; array=fixed-elements\n")
+	schema.WriteString("schema-v2.3; little-endian; int=8; timestamp=seconds8+nanos4; string=length4+bytes; container=presence1+length4; pointer=presence1; bool=1; float64=8; array=fixed-elements\n")
 	var structs []reflect.Type
 	for typ := range compactFieldNames {
 		structs = append(structs, typ)
@@ -132,7 +132,7 @@ func TestCompactValueSchemaFingerprint(t *testing.T) {
 		require.NoError(t, err)
 	}
 	digest := sha256.Sum256(schema.Bytes())
-	require.Equal(t, "bfe061672c599bc200746a490a7f33c6d5b4d1f686b24781917386344a753fd9", hex.EncodeToString(digest[:]), "schema-v2 changed: review compatibility and explicitly version the format")
+	require.Equal(t, "a0457446d3761fa99d61da39e52ec76266249b0bca7863f9c84faec5a34ec7c4", hex.EncodeToString(digest[:]), "schema-v2.3 changed: review compatibility and explicitly version the format")
 }
 
 func TestCompactValueRejectsDuplicateMapKeys(t *testing.T) {

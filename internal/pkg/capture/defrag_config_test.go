@@ -69,3 +69,19 @@ func TestIPv4DefragConfigNullAndEmptyEnvironment(t *testing.T) {
 	_, err = IPv4DefragConfigFromViper()
 	require.ErrorContains(t, err, "must not be empty")
 }
+
+func TestIPv4DefragConfigEnvironmentOverridesViper(t *testing.T) {
+	key := "ipv4_defrag.max_datagrams"
+	original := viper.Get(key)
+	t.Cleanup(func() { viper.Set(key, original) })
+	viper.Set(key, 100)
+	t.Setenv("LIPPYCAT_IPV4_DEFRAG_MAX_DATAGRAMS", "2048")
+
+	config, err := IPv4DefragConfigFromViper()
+	require.NoError(t, err)
+	require.Equal(t, 2048, config.MaxDatagrams)
+
+	t.Setenv("LIPPYCAT_IPV4_DEFRAG_MAX_DATAGRAMS", "invalid")
+	_, err = IPv4DefragConfigFromViper()
+	require.ErrorContains(t, err, key)
+}

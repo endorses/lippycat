@@ -68,5 +68,7 @@ func (e *compactRowEncoder) voipOverride(mask uint8, p *types.VoIPMetadata) {
 	e.uint(uint64(p.Timestamp), 4)
 	e.text(p.Codec)
 	e.text(p.MergeFromCallID)
+	e.uint(p.CSeqNumber, 8)
+	e.text(p.ViaBranch)
 	e.uint(0, 5) // nil DNS, Email, TLS, HTTP and RADIUS pointers
 }

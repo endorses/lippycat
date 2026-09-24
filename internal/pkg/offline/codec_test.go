@@ -209,12 +209,12 @@ func schemaShape(t reflect.Type, b *strings.Builder) {
 	}
 	b.WriteByte(']')
 }
-func TestCodecSchemaV3Shape(t *testing.T) {
-	require.EqualValues(t, 3, RecordSchemaVersion)
+func TestCodecSchemaV4Shape(t *testing.T) {
+	require.EqualValues(t, 4, RecordSchemaVersion)
 	var b strings.Builder
 	schemaShape(reflect.TypeOf(summaryWire{}), &b)
 	schemaShape(reflect.TypeOf(detailWire{}), &b)
-	require.Equal(t, "b016d1634950ac6f08a8d7b76850950972518cf4b9eea8c5fb5b43a57bcfa3d9", fmt.Sprintf("%x", sha256.Sum256([]byte(b.String()))), "Persisted field layout changed: explicitly version the schema before accepting the new shape")
+	require.Equal(t, "8880fa7c173435252e30b98317436d81c7472acfea767182526162ae3080ce8b", fmt.Sprintf("%x", sha256.Sum256([]byte(b.String()))), "Persisted field layout changed: explicitly version the schema before accepting the new shape")
 }
 
 func TestCodecTruncatedPayloadCheckedBeforeAllocation(t *testing.T) {

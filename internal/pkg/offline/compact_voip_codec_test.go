@@ -12,7 +12,7 @@ import (
 
 func TestCompactTypedVoIPMatchesFrozenCodec(t *testing.T) {
 	full := types.VoIPMetadata{
-		CallID: "call\x00\xff", Method: "INVITE", CSeqMethod: "ACK", Status: -123,
+		CallID: "call\x00\xff", Method: "INVITE", CSeqMethod: "ACK", CSeqNumber: math.MaxUint64, ViaBranch: "z9hG4bK-branch", Status: -123,
 		From: "from", To: "to", FromTag: "from-tag", ToTag: "to-tag", User: "user", ContentType: "application/sdp", Body: "body\xfe",
 		Headers: map[string]string{"z-last": "last", "a-first": "first", "\xff": "\x00"}, RawSIP: []byte{0, 1, 128, 255}, IMSI: "imsi", IMEI: "imei",
 		AccessNetworkInfo: &types.AccessNetworkInfo{AccessType: "access", BSSID: "bssid", CellID: "cell", LocalIP: "local", Parameters: map[string]string{"z": "z", "a": "a"}},

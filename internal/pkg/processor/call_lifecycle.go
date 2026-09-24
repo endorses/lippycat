@@ -159,6 +159,54 @@ func (r *CallLifecycleRegistry) AdmitGeneration(callID string, generation uint64
 	return r.admit(callID, generation)
 }
 
+// RestartInvite replaces a completed call's tombstone only after the caller
+// has verified a distinct INVITE transaction. It never reuses a generation and
+// cannot race a still-running finalization callback.
+func (r *CallLifecycleRegistry) RestartInvite(callID string) (*CallAdmission, error) {
+	if r == nil {
+		return nil, ErrCallLifecycleShutdown
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.shutdown {
+		return nil, ErrCallLifecycleShutdown
+	}
+	if _, busy := r.finalizing[callID]; busy {
+		return nil, &FinalizedCallError{CallID: callID}
+	}
+	if r.tombstones[callID] == nil {
+		return nil, &FinalizedCallError{CallID: callID}
+	}
+	r.removeTombstoneLocked(callID)
+	r.nextGeneration++
+	call := &lifecycleCall{callID: callID, generation: r.nextGeneration, drained: make(chan struct{}), inflight: 1}
+	r.active[callID] = call
+	r.totalInflight++
+	return &CallAdmission{registry: r, call: call, admittedAt: time.Now()}, nil
+}
+
+// StartInviteAfterExpiry creates a new generation only after the old
+// tombstone has been evicted or expired and no live generation exists.
+// The caller must have verified a distinct INVITE against retained call state.
+func (r *CallLifecycleRegistry) StartInviteAfterExpiry(callID string) (*CallAdmission, error) {
+	if r == nil {
+		return nil, ErrCallLifecycleShutdown
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.shutdown {
+		return nil, ErrCallLifecycleShutdown
+	}
+	if r.active[callID] != nil || r.finalizing[callID] != nil || r.tombstones[callID] != nil {
+		return nil, &FinalizedCallError{CallID: callID}
+	}
+	r.nextGeneration++
+	call := &lifecycleCall{callID: callID, generation: r.nextGeneration, drained: make(chan struct{}), inflight: 1}
+	r.active[callID] = call
+	r.totalInflight++
+	return &CallAdmission{registry: r, call: call, admittedAt: time.Now()}, nil
+}
+
 func (r *CallLifecycleRegistry) admit(callID string, requiredGeneration uint64) (*CallAdmission, error) {
 	if r == nil {
 		return nil, ErrCallLifecycleShutdown
@@ -303,6 +351,17 @@ func (r *CallLifecycleRegistry) IsFinalized(callID string) bool {
 		return false
 	}
 	return entry != nil
+}
+
+// HasCompletedCall reports a retained completion even when its suppression
+// TTL has elapsed. A verified new INVITE may replace that record explicitly.
+func (r *CallLifecycleRegistry) HasCompletedCall(callID string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.finalizing[callID] != nil || r.tombstones[callID] != nil
 }
 
 // Telemetry returns current lifecycle gauges and monotonic counters.

@@ -777,6 +777,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.PacketBufferRegularLength, msg.PacketBufferRegularCap,
 			msg.PacketBufferSIPLength, msg.PacketBufferSIPCap,
 			msg.PacketBufferOutputLength, msg.PacketBufferOutputCap)
+		stats.SetIPv4Defrag(msg.IPv4Defrag)
 		return m, nil
 	}
 

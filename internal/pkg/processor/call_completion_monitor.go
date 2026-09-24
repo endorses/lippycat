@@ -6,16 +6,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 )
 
 // CallCompletionMonitorConfig configures the call completion monitor
 type CallCompletionMonitorConfig struct {
-	GracePeriod    time.Duration // Time to wait after call ends before closing PCAP (default: 5s)
-	CheckInterval  time.Duration // How often to check for ended calls (default: 1s)
-	RTPWaitTimeout time.Duration // Max time to wait for RTP after grace period (default: 60s)
-	ClosedCallTTL  time.Duration // Time to retain completed call IDs for suppression (default: 1h)
+	GracePeriod    time.Duration    // Time to wait after call ends before closing PCAP (default: 5s)
+	CheckInterval  time.Duration    // How often to check for ended calls (default: 1s)
+	RTPWaitTimeout time.Duration    // Max time to wait for RTP after grace period (default: 60s)
+	ClosedCallTTL  time.Duration    // Time to retain completed call IDs for suppression (default: 1h)
+	RetryWindow    time.Duration    // Time to await a distinct INVITE after a matched 503 (default: 2m)
+	Now            func() time.Time // Decision clock; defaults to time.Now
 }
 
 // DefaultCallCompletionMonitorConfig returns default configuration
@@ -25,14 +28,17 @@ func DefaultCallCompletionMonitorConfig() *CallCompletionMonitorConfig {
 		CheckInterval:  1 * time.Second,
 		RTPWaitTimeout: 60 * time.Second,
 		ClosedCallTTL:  1 * time.Hour,
+		RetryWindow:    2 * time.Minute,
 	}
 }
 
 // pendingCallInfo tracks timing for a call pending closure
 type pendingCallInfo struct {
-	scheduledAt time.Time // When the call was first scheduled for closure
-	rtpExpected bool      // Whether RTP is expected (call was ACTIVE)
-	reason      CallFinalizationReason
+	scheduledAt    time.Time // When the call was first scheduled for closure
+	rtpExpected    bool      // Whether RTP is expected (call was ACTIVE)
+	reason         CallFinalizationReason
+	attemptVersion uint64
+	retryFailure   bool
 }
 
 // VoIPPortCleaner is an interface for cleaning up VoIP port-to-call mappings.
@@ -51,6 +57,8 @@ type CallCompletionMonitor struct {
 	voipCleaner  VoIPPortCleaner             // Optional voip processor for port cleanup
 	pendingClose map[string]*pendingCallInfo // callID -> pending closure info
 	mu           sync.Mutex
+	transitionMu sync.Mutex
+	now          func() time.Time
 	checkTicker  *time.Ticker
 	stopChan     chan struct{}
 	wg           sync.WaitGroup
@@ -93,6 +101,16 @@ func NewCallCompletionMonitorWithLifecycle(
 	if config.ClosedCallTTL <= 0 {
 		config.ClosedCallTTL = 1 * time.Hour
 	}
+	if config.RetryWindow <= 0 {
+		config.RetryWindow = 2 * time.Minute
+	}
+	if config.Now == nil {
+		config.Now = time.Now
+	}
+	if aggregator != nil {
+		aggregator.SetRetryWindow(config.RetryWindow)
+		aggregator.SetClock(config.Now)
+	}
 	if lifecycle == nil && pcapManager != nil {
 		lifecycle = pcapManager.Lifecycle()
 	}
@@ -104,6 +122,11 @@ func NewCallCompletionMonitorWithLifecycle(
 	lifecycle.mu.Lock()
 	lifecycle.tombstoneTTL = config.ClosedCallTTL
 	lifecycle.mu.Unlock()
+	if aggregator != nil {
+		lifecycle.Subscribe(func(event CallFinalizationEvent) {
+			aggregator.MarkFinalized(event.CallID)
+		})
+	}
 
 	return &CallCompletionMonitor{
 		config:       config,
@@ -111,8 +134,59 @@ func NewCallCompletionMonitorWithLifecycle(
 		pcapManager:  pcapManager,
 		lifecycle:    lifecycle,
 		pendingClose: make(map[string]*pendingCallInfo),
+		now:          config.Now,
 		stopChan:     make(chan struct{}),
 	}
+}
+
+// ProcessPacket serializes call-state transitions with finalization decisions.
+func (m *CallCompletionMonitor) ProcessPacket(packet *data.CapturedPacket, sourceID string) bool {
+	if m == nil || m.aggregator == nil || packet == nil || packet.Metadata == nil {
+		return false
+	}
+	m.transitionMu.Lock()
+	defer m.transitionMu.Unlock()
+	if sip := packet.Metadata.Sip; sip != nil && m.lifecycle != nil && (m.lifecycle.HasCompletedCall(sip.CallId) || m.aggregator.WasFinalized(sip.CallId)) {
+		if !m.aggregator.CanRestartInvite(sip) {
+			return false
+		}
+		var admission *CallAdmission
+		var err error
+		if m.lifecycle.HasCompletedCall(sip.CallId) {
+			admission, err = m.lifecycle.RestartInvite(sip.CallId)
+		} else {
+			admission, err = m.lifecycle.StartInviteAfterExpiry(sip.CallId)
+		}
+		if err != nil {
+			return false
+		}
+		m.aggregator.ResetCall(sip.CallId)
+		m.mu.Lock()
+		delete(m.pendingClose, sip.CallId)
+		m.mu.Unlock()
+		admission.Release()
+	}
+	if !m.aggregator.AcceptSIP(packet.Metadata.Sip) {
+		return false
+	}
+	if !m.aggregator.AcceptRTP(packet) {
+		return false
+	}
+	m.aggregator.ProcessPacket(packet, sourceID)
+	if packet.Metadata == nil || packet.Metadata.Sip == nil {
+		return true
+	}
+	callID := packet.Metadata.Sip.CallId
+	call, exists := m.aggregator.GetCall(callID)
+	if !exists {
+		return true
+	}
+	m.mu.Lock()
+	if pending := m.pendingClose[callID]; pending != nil && pending.attemptVersion != call.AttemptVersion {
+		delete(m.pendingClose, callID)
+	}
+	m.mu.Unlock()
+	return true
 }
 
 // Start begins monitoring call completions
@@ -198,12 +272,15 @@ func (m *CallCompletionMonitor) checkEndedCalls() {
 	m.aggregator.ProcessTimewaitExpiry()
 
 	calls := m.aggregator.GetCalls()
-	now := time.Now()
+	now := m.now()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for _, call := range calls {
+		if m.aggregator.WasFinalized(call.CallID) {
+			continue
+		}
 		// Skip if already closed
 		if m.lifecycle.IsFinalized(call.CallID) {
 			continue
@@ -217,6 +294,9 @@ func (m *CallCompletionMonitor) checkEndedCalls() {
 		// Check if call has ended (any terminal state)
 		if call.State == voip.CallStateEnded || call.State == voip.CallStateFailed ||
 			call.State == voip.CallStateCancelled || call.State == voip.CallStateBusy {
+			if call.State == voip.CallStateFailed && !call.RetryDeadline.IsZero() && now.Before(call.RetryDeadline) {
+				continue
+			}
 			// RTP is expected for successful calls (ENDED state).
 			// Failed/cancelled/busy calls typically don't have RTP.
 			// For ENDED calls, we wait for RTP even if we haven't seen any yet,
@@ -224,9 +304,11 @@ func (m *CallCompletionMonitor) checkEndedCalls() {
 			rtpExpected := call.State == voip.CallStateEnded
 
 			m.pendingClose[call.CallID] = &pendingCallInfo{
-				scheduledAt: now,
-				rtpExpected: rtpExpected,
-				reason:      CallFinalizationProtocolComplete,
+				scheduledAt:    now,
+				rtpExpected:    rtpExpected,
+				reason:         CallFinalizationProtocolComplete,
+				attemptVersion: call.AttemptVersion,
+				retryFailure:   call.State == voip.CallStateFailed && !call.RetryDeadline.IsZero(),
 			}
 
 			logger.Debug("Scheduled call PCAP closure",
@@ -259,21 +341,35 @@ func (m *CallCompletionMonitor) ScheduleCloseReason(callID string, rtpExpected b
 	if _, pending := m.pendingClose[callID]; pending {
 		return
 	}
-	m.pendingClose[callID] = &pendingCallInfo{scheduledAt: time.Now(), rtpExpected: rtpExpected, reason: reason}
+	m.pendingClose[callID] = &pendingCallInfo{scheduledAt: m.now(), rtpExpected: rtpExpected, reason: reason}
 }
 
 // processPendingClose closes PCAP files for calls whose grace period has expired
 func (m *CallCompletionMonitor) processPendingClose() {
-	now := time.Now()
+	m.transitionMu.Lock()
+	defer m.transitionMu.Unlock()
+	now := m.now()
 
 	m.mu.Lock()
 	type pendingFinalization struct {
-		callID string
-		reason CallFinalizationReason
+		callID         string
+		reason         CallFinalizationReason
+		attemptVersion uint64
+		retryFailure   bool
 	}
 	toClose := make([]pendingFinalization, 0)
 	for callID, info := range m.pendingClose {
-		gracePeriodExpired := now.After(info.scheduledAt.Add(m.config.GracePeriod))
+		if info.attemptVersion != 0 && m.aggregator != nil {
+			if call, exists := m.aggregator.GetCall(callID); exists && (call.AttemptVersion != info.attemptVersion || (info.retryFailure && call.State != voip.CallStateFailed)) {
+				delete(m.pendingClose, callID)
+				continue
+			}
+		}
+		grace := m.config.GracePeriod
+		if info.retryFailure {
+			grace = 0
+		}
+		gracePeriodExpired := now.After(info.scheduledAt.Add(grace))
 		if !gracePeriodExpired {
 			continue
 		}
@@ -304,7 +400,7 @@ func (m *CallCompletionMonitor) processPendingClose() {
 		}
 
 		if shouldClose {
-			toClose = append(toClose, pendingFinalization{callID: callID, reason: info.reason})
+			toClose = append(toClose, pendingFinalization{callID: callID, reason: info.reason, attemptVersion: info.attemptVersion, retryFailure: info.retryFailure})
 			logger.Debug("Call ready to close",
 				"call_id", callID,
 				"reason", reason,
@@ -320,19 +416,27 @@ func (m *CallCompletionMonitor) processPendingClose() {
 
 	// Close PCAP files outside the lock
 	for _, pending := range toClose {
-		m.finalizeCall(pending.callID, pending.reason)
+		if pending.attemptVersion != 0 && m.aggregator != nil {
+			if call, exists := m.aggregator.GetCall(pending.callID); exists && call.AttemptVersion != pending.attemptVersion {
+				continue
+			}
+		}
+		if m.finalizeCall(pending.callID, pending.reason) && pending.retryFailure && m.aggregator != nil {
+			m.aggregator.RecordRetryExpiry()
+		}
 	}
 }
 
 // closeCallPcap closes the PCAP files for a call and fires the voipcommand callback
-func (m *CallCompletionMonitor) finalizeCall(callID string, reason CallFinalizationReason) {
+func (m *CallCompletionMonitor) finalizeCall(callID string, reason CallFinalizationReason) bool {
 	if m.lifecycle == nil {
-		return
+		return false
 	}
 	result := m.lifecycle.Finalize(callID, reason)
 	if result.Finalized {
 		logger.Info("Finalized completed call", "call_id", callID, "reason", reason)
 	}
+	return result.Finalized
 }
 
 func (m *CallCompletionMonitor) hasRTPPackets(callID string) bool {
@@ -356,7 +460,12 @@ func (m *CallCompletionMonitor) sweepIdleWriters() {
 		return
 	}
 
-	closed := m.pcapManager.SweepIdle(maxIdle)
+	m.transitionMu.Lock()
+	defer m.transitionMu.Unlock()
+	closed := m.pcapManager.sweepIdleExcept(maxIdle, func(callID string) bool {
+		call, exists := m.aggregator.GetCall(callID)
+		return exists && call.State == voip.CallStateFailed && !call.RetryDeadline.IsZero() && m.now().Before(call.RetryDeadline)
+	})
 	if closed > 0 {
 		logger.Warn("Closed idle per-call PCAP writers",
 			"count", closed,

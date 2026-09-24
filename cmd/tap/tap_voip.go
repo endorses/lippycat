@@ -94,6 +94,7 @@ var (
 	perCallPcapMaxIdle    time.Duration
 	perCallPcapMaxWriters int
 	pcapClosedCallTTL     time.Duration
+	sipRetryWindow        time.Duration
 )
 
 var voipTapCmd = &cobra.Command{
@@ -165,6 +166,7 @@ func init() {
 	voipTapCmd.Flags().DurationVar(&perCallPcapMaxIdle, "per-call-pcap-max-idle", 10*time.Minute, "Close per-call PCAP writers after this idle time (0 = disabled)")
 	voipTapCmd.Flags().IntVar(&perCallPcapMaxWriters, "per-call-pcap-max-writers", 0, "Soft active per-call PCAP writer pressure threshold (0 = disabled)")
 	voipTapCmd.Flags().DurationVar(&pcapClosedCallTTL, "pcap-closed-call-ttl", time.Hour, "How long to suppress duplicate PCAP close handling for completed calls")
+	voipTapCmd.Flags().DurationVar(&sipRetryWindow, "sip-retry-window", 2*time.Minute, "How long a failed INVITE can await a distinct retry under the same Call-ID")
 
 	// Bind VoIP-specific flags to viper
 	// Note: --voip-command is a persistent flag from TapCmd, already bound to tap.voip_command
@@ -186,6 +188,7 @@ func init() {
 	_ = viper.BindPFlag("tap.per_call_pcap.max_idle", voipTapCmd.Flags().Lookup("per-call-pcap-max-idle"))
 	_ = viper.BindPFlag("tap.per_call_pcap.max_writers", voipTapCmd.Flags().Lookup("per-call-pcap-max-writers"))
 	_ = viper.BindPFlag("tap.per_call_pcap.closed_call_ttl", voipTapCmd.Flags().Lookup("pcap-closed-call-ttl"))
+	_ = viper.BindPFlag("tap.voip.sip_retry_window", voipTapCmd.Flags().Lookup("sip-retry-window"))
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {
@@ -305,6 +308,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	callCompletionMonitorConfig := &processor.CallCompletionMonitorConfig{
 		GracePeriod:   viper.GetDuration("tap.per_call_pcap.grace_period"),
 		ClosedCallTTL: viper.GetDuration("tap.per_call_pcap.closed_call_ttl"),
+		RetryWindow:   viper.GetDuration("tap.voip.sip_retry_window"),
 	}
 
 	// Build auto-rotate PCAP config if enabled

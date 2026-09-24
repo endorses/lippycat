@@ -626,6 +626,7 @@ func (pb *PacketBuffer) CloseInputs() {
 // Dedicated VoIP capture opts into reassembly for SIP messages exceeding the MTU.
 type CaptureOptions struct {
 	ReassembleIPFragments bool
+	IPv4Defrag            IPv4DefragConfig
 	// ReassembleIPFragmentsWhen overrides the static option for interactive
 	// sessions. The callback must be safe for concurrent capture workers.
 	ReassembleIPFragmentsWhen func() bool
@@ -655,6 +656,10 @@ func InitWithContextAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInt
 // entry point. It resolves packet_buffer_size and sip_buffer_size before any
 // capture goroutine starts, allowing command owners to reject invalid values.
 func InitWithContextAndTelemetryChecked(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool, telemetryCallback TelemetryCallback, options ...CaptureOptions) error {
+	options, err := resolveIPv4CaptureOptions(options)
+	if err != nil {
+		return err
+	}
 	bufferConfig, err := getPacketBufferConfig()
 	if err != nil {
 		return err
@@ -676,7 +681,32 @@ func InitWithContextAndTelemetryChecked(ctx context.Context, ifaces []pcaptypes.
 // This allows the caller to own the buffer and read from it directly, avoiding
 // double-buffering when the processor would just copy packets to another buffer.
 func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, options ...CaptureOptions) {
+	var err error
+	options, err = resolveIPv4CaptureOptions(options)
+	if err != nil {
+		logger.Error("Invalid IPv4 defragmentation configuration", "error", err)
+		return
+	}
 	initWithBufferAndTelemetry(ctx, ifaces, filter, buffer, packetProcessor, assembler, nil, options...)
+}
+
+func resolveIPv4CaptureOptions(options []CaptureOptions) ([]CaptureOptions, error) {
+	config, err := IPv4DefragConfigFromViper()
+	if err != nil {
+		return nil, fmt.Errorf("IPv4 defragmentation configuration: %w", err)
+	}
+	if len(options) == 0 {
+		options = []CaptureOptions{{}}
+	}
+	last := &options[len(options)-1]
+	if last.IPv4Defrag != (IPv4DefragConfig{}) {
+		config, err = last.IPv4Defrag.Resolve()
+		if err != nil {
+			return nil, fmt.Errorf("IPv4 defragmentation configuration: %w", err)
+		}
+	}
+	last.IPv4Defrag = config
+	return options, nil
 }
 
 func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, telemetryCallback TelemetryCallback, options ...CaptureOptions) {
@@ -694,7 +724,23 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 	// This is critical for multi-interface capture: IP fragments from the same
 	// packet may arrive on different interfaces (e.g., due to port mirror splits).
 	// A per-interface defragmenter would never reassemble such packets.
-	sharedDefragmenter := NewIPv4Defragmenter()
+	defragConfig := IPv4DefragConfig{}
+	if len(options) > 0 {
+		defragConfig = options[len(options)-1].IPv4Defrag
+	}
+	sharedDefragmenter, err := NewIPv4DefragmenterWithConfig(defragConfig)
+	if err != nil {
+		logger.Error("Invalid IPv4 defragmentation configuration", "error", err)
+		return
+	}
+	telemetry.ipv4 = sharedDefragmenter
+	offlineInput := false
+	for _, iface := range ifaces {
+		if source, ok := iface.(interface{ IsOffline() bool }); ok && source.IsOffline() {
+			offlineInput = true
+			break
+		}
+	}
 
 	// Shared IPv6 defragmenter — same rationale. gopacket has no built-in
 	// IPv6 reassembly, so without this a fragmented IPv6 SIP INVITE is
@@ -702,15 +748,36 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 	sharedV6Defragmenter := NewIPv6Defragmenter()
 
 	// Start a single cleanup goroutine for stale fragments (shared across all interfaces)
+	cleanupCtx, stopCleanup := context.WithCancel(ctx)
+	cleanupDone := make(chan struct{})
+	defer func() { stopCleanup(); <-cleanupDone }()
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		defer close(cleanupDone)
+		ticker := time.NewTicker(sharedDefragmenter.config.SweepInterval)
 		defer ticker.Stop()
+		lastReport := time.Now()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-cleanupCtx.Done():
 				return
-			case <-ticker.C:
-				discarded := sharedDefragmenter.DiscardOlderThan(time.Now().Add(-30 * time.Second))
+			case tickTime := <-ticker.C:
+				discarded := 0
+				if !offlineInput {
+					discarded = sharedDefragmenter.DiscardOlderThan(time.Now().Add(-sharedDefragmenter.config.StaleAge))
+				}
+				if tickTime.Sub(lastReport) >= 30*time.Second {
+					lastReport = tickTime
+					s := sharedDefragmenter.Snapshot()
+					logger.Info("IPv4 defragmenter heartbeat",
+						"ipv4_fragments_observed", s.ObservedFragments,
+						"ipv4_datagrams_completed", s.CompletedDatagrams,
+						"ipv4_fragments_rejected", s.RejectedFragments,
+						"ipv4_datagrams_expired", s.ExpiredDatagrams,
+						"ipv4_datagrams_capacity_evicted", s.CapacityEvictions,
+						"ipv4_datagrams_in_flight", s.InFlightDatagrams,
+						"ipv4_fragments_in_flight", s.InFlightFragments,
+						"ipv4_payload_bytes_in_flight", s.InFlightPayloadBytes)
+				}
 				if discarded > 0 {
 					logger.Debug("Discarded stale IP fragments", "count", discarded)
 				}
@@ -903,6 +970,11 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 		return
 	}
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	offlineInput := false
+	if source, ok := iface.(interface{ IsOffline() bool }); ok {
+		offlineInput = source.IsOffline()
+	}
+	var lastOfflineSweep time.Time
 
 	// Note: defragmenter is shared across all interfaces to correctly reassemble
 	// IP fragments that may arrive on different interfaces (e.g., due to port mirror splits)
@@ -982,6 +1054,10 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 							"sip_flow_active", snapshot.SIPFlowActive,
 							"ip_fragments", frags,
 							"reassembled", reassembled,
+							"ipv4_fragments_observed_interface", snapshot.FragmentIngress[iface.Name()].IPv4Observed,
+							"ipv4_fragments_attempted_interface", snapshot.FragmentIngress[iface.Name()].IPv4Attempted,
+							"ipv6_fragments_observed_interface", snapshot.FragmentIngress[iface.Name()].IPv6Observed,
+							"ipv6_fragments_attempted_interface", snapshot.FragmentIngress[iface.Name()].IPv6Attempted,
 							"buffer_len", snapshot.PacketBufferRegularLength + snapshot.PacketBufferSIPLength + snapshot.PacketBufferOutputLength,
 							"buffer_regular_len", snapshot.PacketBufferRegularLength,
 							"buffer_regular_cap", snapshot.PacketBufferRegularCap,
@@ -1042,6 +1118,10 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 			}
 
 			linkType := handle.LinkType()
+			if offlineInput && (lastOfflineSweep.IsZero() || packet.Metadata().Timestamp.Sub(lastOfflineSweep) >= defragmenter.config.SweepInterval) {
+				defragmenter.DiscardOlderThan(packet.Metadata().Timestamp.Add(-defragmenter.config.StaleAge))
+				lastOfflineSweep = packet.Metadata().Timestamp
+			}
 			fragmented := isIPFragment(packet)
 			reassemble := false
 			if fragmented && len(options) > 0 {
@@ -1049,6 +1129,13 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				reassemble = option.ReassembleIPFragments
 				if option.ReassembleIPFragmentsWhen != nil {
 					reassemble = option.ReassembleIPFragmentsWhen()
+				}
+			}
+			if fragmented {
+				if packet.Layer(layers.LayerTypeIPv4) != nil {
+					telemetry.observeFragment(iface.Name(), true, reassemble)
+				} else if frag, ok := packet.Layer(layers.LayerTypeIPv6Fragment).(*layers.IPv6Fragment); ok {
+					telemetry.observeFragment(iface.Name(), false, reassemble && frag.NextHeader != layers.IPProtocolESP)
 				}
 			}
 			if fragmented && !reassemble {
@@ -1067,7 +1154,13 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 						fragmentsReceived.Add(1)
 
 						// Feed fragment to defragmenter
-						reassembledIP, err := defragmenter.DefragIPv4(ip4)
+						var reassembledIP *layers.IPv4
+						var err error
+						if offlineInput {
+							reassembledIP, err = defragmenter.DefragIPv4WithTimestamp(ip4, packet.Metadata().Timestamp)
+						} else {
+							reassembledIP, err = defragmenter.DefragIPv4(ip4)
+						}
 						if err != nil {
 							logger.Debug("IPv4 defragmentation error",
 								"error", err,

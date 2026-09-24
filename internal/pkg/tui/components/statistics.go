@@ -2840,6 +2840,12 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 					dropSummary.BufferSIPLength, dropSummary.BufferSIPCapacity,
 					dropSummary.BufferOutputLength, dropSummary.BufferOutputCapacity)))
 		}
+		if ip4 := dropSummary.IPv4Defrag; ip4.ObservedFragments > 0 {
+			rightLines = append(rightLines, labelStyle.Render("IPv4 defrag: ")+
+				valueStyle.Render(fmt.Sprintf("%d fragments, %d complete, %d rejected, %d expired, %d evicted, %d in flight",
+					ip4.ObservedFragments, ip4.CompletedDatagrams, ip4.RejectedFragments,
+					ip4.ExpiredDatagrams, ip4.CapacityEvictions, ip4.InFlightDatagrams)))
+		}
 
 		// Detail feed retention is packet-based and includes every local shedding stage.
 		displayedLine := labelStyle.Render("Retained:  ") +

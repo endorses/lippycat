@@ -25,6 +25,17 @@ type Telemetry struct {
 	SIPFlowCapacityEvictions  uint64
 	SIPFlowConnectionCloses   uint64
 	SIPFlowActive             int
+	// FragmentIngress is cumulative by interface for this capture session.
+	FragmentIngress map[string]FragmentIngress
+	// IPv4Defrag is one shared session snapshot, never summed across interfaces.
+	IPv4Defrag IPv4DefragSnapshot
+}
+
+type FragmentIngress struct {
+	IPv4Observed  uint64
+	IPv4Attempted uint64
+	IPv6Observed  uint64
+	IPv6Attempted uint64
 }
 
 // TelemetryCallback receives cumulative snapshots. Callbacks must return
@@ -32,10 +43,12 @@ type Telemetry struct {
 type TelemetryCallback func(Telemetry)
 
 type telemetryCollector struct {
-	mu         sync.Mutex
-	callbackMu sync.Mutex
-	interfaces map[string]interfaceTelemetry
-	callback   TelemetryCallback
+	mu              sync.Mutex
+	callbackMu      sync.Mutex
+	interfaces      map[string]interfaceTelemetry
+	callback        TelemetryCallback
+	fragmentIngress map[string]FragmentIngress
+	ipv4            *IPv4Defragmenter
 }
 
 type interfaceTelemetry struct {
@@ -46,9 +59,31 @@ type interfaceTelemetry struct {
 
 func newTelemetryCollector(callback TelemetryCallback) *telemetryCollector {
 	return &telemetryCollector{
-		interfaces: make(map[string]interfaceTelemetry),
-		callback:   callback,
+		interfaces:      make(map[string]interfaceTelemetry),
+		fragmentIngress: make(map[string]FragmentIngress),
+		callback:        callback,
 	}
+}
+
+func (c *telemetryCollector) observeFragment(name string, ipv4, attempted bool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s := c.fragmentIngress[name]
+	if ipv4 {
+		s.IPv4Observed++
+		if attempted {
+			s.IPv4Attempted++
+		}
+	} else {
+		s.IPv6Observed++
+		if attempted {
+			s.IPv6Attempted++
+		}
+	}
+	c.fragmentIngress[name] = s
 }
 
 func (c *telemetryCollector) report(interfaceName string, received, kernelDrops, interfaceDrops int64, buffer *PacketBuffer) Telemetry {
@@ -70,6 +105,15 @@ func (c *telemetryCollector) report(interfaceName string, received, kernelDrops,
 		snapshot.PacketsReceived += stats.received
 		snapshot.KernelDrops += stats.kernelDrops
 		snapshot.InterfaceDrops += stats.interfaceDrops
+	}
+	if len(c.fragmentIngress) != 0 {
+		snapshot.FragmentIngress = make(map[string]FragmentIngress, len(c.fragmentIngress))
+		for name, stats := range c.fragmentIngress {
+			snapshot.FragmentIngress[name] = stats
+		}
+	}
+	if c.ipv4 != nil {
+		snapshot.IPv4Defrag = c.ipv4.Snapshot()
 	}
 	if buffer != nil {
 		bufferSnapshot := buffer.Snapshot()

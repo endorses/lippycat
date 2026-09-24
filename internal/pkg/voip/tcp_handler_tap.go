@@ -130,7 +130,8 @@ func metadataFromSIPResult(r pipeline.SIPResult) *data.PacketMetadata {
 	return &data.PacketMetadata{Sip: &data.SIPMetadata{
 		CallId: r.CallID, FromUser: r.FromUser, ToUser: r.ToUser,
 		FromTag: r.FromTag, ToTag: r.ToTag, FromUri: r.FromURI, ToUri: r.ToURI,
-		Method: r.Method, CseqMethod: r.CSeqMethod, ResponseCode: uint32(r.ResponseCode),
+		Method: r.Method, CseqMethod: r.CSeqMethod, CseqNumber: r.CSeqNumber, ViaBranch: r.ViaBranch, ResponseCode: uint32(r.ResponseCode),
+		MediaPorts:        sharedsip.MediaPorts(r.SDP),
 		PAssertedIdentity: r.PAssertedIdentity,
 	}}
 }

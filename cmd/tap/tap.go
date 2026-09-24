@@ -12,6 +12,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/bpfutil"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
@@ -66,6 +67,9 @@ Examples:
     --li-x1-tls-cert x1-server.crt --li-x1-tls-key x1-server.key \
     --li-delivery-tls-cert delivery.crt --li-delivery-tls-key delivery.key`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := capture.ValidateIPv4DefragConfig(); err != nil {
+			return err
+		}
 		if err := debugserver.StartPprofFromConfig(
 			cmdutil.GetStringConfig("tap.debug_listen", debugListen),
 			cmdutil.GetBoolConfig("tap.debug_allow_non_loopback", debugAllowNonLoopback),

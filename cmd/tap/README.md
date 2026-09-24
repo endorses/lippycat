@@ -327,6 +327,10 @@ These flags are only available with the `lc tap voip` subcommand:
 - `--per-call-pcap-dir` - Output directory (default: `./pcaps`)
 - `--per-call-pcap-pattern` - Filename pattern (default: `{timestamp}_{callid}.pcap`)
 
+`--sip-retry-window` (default `2m`) keeps a call open after a matched `503` to an INVITE so a distinct INVITE under the same Call-ID can retain signalling and early media. An unanswered failure closes when this window expires. This window is separate from `--pcap-grace-period` for trailing media after call completion, the per-call writer idle timeout, and `--pcap-closed-call-ttl` for completed-call suppression. Older peers without CSeq number and Via branch use ordinary failure finalization.
+
+After finalization, a distinct INVITE can start a new generation. Its media waits for an answered INVITE and a matching newly advertised SDP port. Reused prior-generation SDP ports and observed SSRCs are conservatively rejected, even when legitimate; post-restart ACK/BYE requires matching dialog tags. The rejections are counted in SIP retry telemetry. The writer idle timeout cannot close a matched-503 call before its retry deadline.
+
 ```bash
 lc tap voip -i eth0 \
   --per-call-pcap \

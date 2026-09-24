@@ -94,17 +94,32 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	p.emitProtocolEvents(sourceID, packets)
 
 	// Aggregate VoIP call state from packet metadata
+	voipAllowed := make([]bool, len(packets))
+	for index := range voipAllowed {
+		voipAllowed[index] = true
+	}
 	if p.callAggregator != nil {
-		for _, packet := range packets {
+		for index, packet := range packets {
 			if packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil) {
-				p.callAggregator.ProcessPacket(packet, sourceID)
+				if p.sessionOutputManager != nil {
+					if monitor, ok := p.sessionOutputManager.monitor.(*CallCompletionMonitor); ok {
+						voipAllowed[index] = monitor.ProcessPacket(packet, sourceID)
+					} else {
+						p.callAggregator.ProcessPacket(packet, sourceID)
+					}
+				} else {
+					p.callAggregator.ProcessPacket(packet, sourceID)
+				}
 			}
 		}
 	}
 
 	// Correlate SIP calls across B2BUA boundaries
 	if p.callCorrelator != nil {
-		for _, packet := range packets {
+		for index, packet := range packets {
+			if !voipAllowed[index] {
+				continue
+			}
 			if packet.Metadata != nil && packet.Metadata.Sip != nil {
 				p.callCorrelator.ProcessPacket(packet, sourceID)
 			}
@@ -141,6 +156,9 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	packetAdmissions := make([]*CallAdmission, len(packets))
 	if p.isLIEnabled() && p.sessionOutputManager != nil && p.sessionOutputManager.writer != nil && p.callLifecycle != nil {
 		for index, packet := range packets {
+			if !voipAllowed[index] {
+				continue
+			}
 			if packet.Metadata == nil || packet.Metadata.Sip == nil || packet.Metadata.Sip.CallId == "" || len(packet.Data) == 0 {
 				continue
 			}
@@ -157,6 +175,9 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	}
 	if p.isLIEnabled() {
 		for index, pkt := range packets {
+			if !voipAllowed[index] {
+				continue
+			}
 			// Skip packets without matched filter IDs (not targeted by LI)
 			if len(pkt.MatchedFilterIds) == 0 && pkt.Radius == nil {
 				continue
@@ -201,6 +222,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 						CallID:     pkt.Metadata.Sip.CallId,
 						Method:     pkt.Metadata.Sip.Method,
 						CSeqMethod: pkt.Metadata.Sip.CseqMethod,
+						CSeqNumber: pkt.Metadata.Sip.CseqNumber,
+						ViaBranch:  pkt.Metadata.Sip.ViaBranch,
 						Status:     int(pkt.Metadata.Sip.ResponseCode),
 						From:       pkt.Metadata.Sip.FromUri,
 						To:         pkt.Metadata.Sip.ToUri,
@@ -245,6 +268,9 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Writes separate SIP and RTP files for each call
 	if p.sessionOutputManager != nil {
 		for index, packet := range packets {
+			if !voipAllowed[index] {
+				continue
+			}
 			// Check if packet has SIP metadata with call-id
 			if packet.Metadata != nil && packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" {
 				callID := packet.Metadata.Sip.CallId

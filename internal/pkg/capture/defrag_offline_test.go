@@ -16,9 +16,50 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOfflineIPv4ExpiryUsesConfiguredSweepInterval(t *testing.T) {
+	for _, key := range []string{"ipv4_defrag.stale_age", "ipv4_defrag.sweep_interval"} {
+		original := viper.Get(key)
+		t.Cleanup(func() { viper.Set(key, original) })
+	}
+	viper.Set("ipv4_defrag.stale_age", "1s")
+	viper.Set("ipv4_defrag.sweep_interval", "10s")
+	frames := udpFragmentFrames(t, false, 5060, []byte("INVITE sip:alice@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n"))
+	for _, tc := range []struct {
+		name        string
+		seconds     int64
+		wantPackets int
+	}{
+		{"inside sweep", 2, 1},
+		{"after sweep", 12, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fragments.pcap")
+			f, err := os.Create(path)
+			require.NoError(t, err)
+			writer := pcapgo.NewWriter(f)
+			require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeRaw))
+			for i, frame := range frames {
+				seconds := int64(0)
+				if i == 1 {
+					seconds = tc.seconds
+				}
+				require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: time.Unix(1700000000+seconds, 0), CaptureLength: len(frame), Length: len(frame)}, frame))
+			}
+			require.NoError(t, f.Close())
+			f, err = os.Open(path)
+			require.NoError(t, err)
+			defer f.Close()
+			packets, err := readAllPacketsFromDevice(pcaptypes.CreateOfflineInterface(f), "")
+			require.NoError(t, err)
+			require.Len(t, packets, tc.wantPackets)
+		})
+	}
+}
 
 func TestOfflineCursorIPv6FragmentCaptureLengths(t *testing.T) {
 	for _, extension := range []string{"plain", "hop-by-hop"} {

@@ -22,6 +22,7 @@ func TestCaptureTelemetryMsgPreservesNamedLocalBufferDrops(t *testing.T) {
 		PacketBufferRegularDrops:  6,
 		PacketBufferSIPDrops:      3,
 		PacketBufferSIPDemotions:  4,
+		IPv4Defrag:                capture.IPv4DefragSnapshot{ObservedFragments: 3, CompletedDatagrams: 1, InFlightDatagrams: 1},
 		PacketBufferRegularLength: 5, PacketBufferRegularCap: 15,
 		PacketBufferSIPLength: 6, PacketBufferSIPCap: 16,
 		PacketBufferOutputLength: 7, PacketBufferOutputCap: 17,
@@ -40,6 +41,8 @@ func TestCaptureTelemetryMsgPreservesNamedLocalBufferDrops(t *testing.T) {
 	require.Equal(t, 16, summary.BufferSIPCapacity)
 	require.Equal(t, 7, summary.BufferOutputLength)
 	require.Equal(t, 17, summary.BufferOutputCapacity)
+	require.Equal(t, uint64(1), summary.IPv4Defrag.CompletedDatagrams)
+	require.Equal(t, 1, summary.IPv4Defrag.InFlightDatagrams)
 }
 
 func TestHandleHunterStatusMsgUpdatesExistingHunterLossCounters(t *testing.T) {

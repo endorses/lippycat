@@ -2,6 +2,8 @@ package capture
 
 import (
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,6 +11,234 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestIPv4DefragmenterConcurrentFragmentsAndCleanup(t *testing.T) {
+	d := NewIPv4Defragmenter()
+	base := time.Unix(100, 0)
+	for run := 0; run < 50; run++ {
+		id := uint16(run)
+		first := createIPv4Fragment("192.0.2.1", "198.51.100.1", id, 0, true, []byte("AAAAAAAA"))
+		middle := createIPv4Fragment("192.0.2.1", "198.51.100.1", id, 8, true, []byte("BBBBBBBB"))
+		final := createIPv4Fragment("192.0.2.1", "198.51.100.1", id, 16, false, []byte("CCCC"))
+		_, err := d.DefragIPv4WithTimestamp(first, base)
+		require.NoError(t, err)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := d.DefragIPv4WithTimestamp(middle, base.Add(2*time.Second)); err != nil {
+				t.Errorf("insert middle: %v", err)
+			}
+		}()
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; d.DiscardOlderThan(base.Add(time.Second)) }()
+		close(start)
+		wg.Wait()
+		// A stale sweep may win and remove the first fragment, or insertion may
+		// refresh it first. In either order, the fresh middle must remain live.
+		_, err = d.DefragIPv4WithTimestamp(first, base.Add(2*time.Second))
+		require.NoError(t, err)
+		out, err := d.DefragIPv4WithTimestamp(final, base.Add(2*time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, out)
+		require.Equal(t, []byte("AAAAAAAABBBBBBBBCCCC"), out.Payload)
+	}
+	require.Equal(t, 0, d.Snapshot().InFlightDatagrams)
+	// Force the removal-first order too, independent of scheduler luck.
+	first := createIPv4Fragment("192.0.2.1", "198.51.100.1", 99, 0, true, []byte("AAAAAAAA"))
+	_, err := d.DefragIPv4WithTimestamp(first, base)
+	require.NoError(t, err)
+	require.Equal(t, 1, d.DiscardOlderThan(base.Add(time.Second)))
+	_, err = d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", 99, 8, false, []byte("DONE")), base.Add(2*time.Second))
+	require.NoError(t, err)
+	result, err := d.DefragIPv4WithTimestamp(first, base.Add(2*time.Second))
+	require.NoError(t, err)
+	require.Equal(t, []byte("AAAAAAAADONE"), result.Payload)
+}
+
+func TestIPv4DefragmenterBoundsAndRecovery(t *testing.T) {
+	d, err := NewIPv4DefragmenterWithConfig(IPv4DefragConfig{MaxDatagrams: 2, MaxFragments: 3, MaxPayloadBytes: 24, MaxFragmentsPerDatagram: 2})
+	require.NoError(t, err)
+	base := time.Unix(100, 0)
+	for id := uint16(1); id <= 3; id++ {
+		_, err := d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", id, 0, true, []byte("AAAAAAAA")), base.Add(time.Duration(id)*time.Second))
+		require.NoError(t, err)
+		s := d.Snapshot()
+		require.LessOrEqual(t, s.InFlightDatagrams, 2)
+		require.LessOrEqual(t, s.InFlightFragments, 3)
+		require.LessOrEqual(t, s.InFlightPayloadBytes, 24)
+	}
+	require.Equal(t, uint64(1), d.Snapshot().CapacityEvictions)
+	_, err = d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", 3, 8, true, []byte("BBBBBBBB")), base.Add(4*time.Second))
+	require.NoError(t, err)
+	_, err = d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", 3, 16, false, []byte("CCCC")), base.Add(5*time.Second))
+	require.ErrorContains(t, err, "fragment list exceeded maximum")
+	_, err = d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", 4, 0, true, []byte("AAAAAAAA")), base.Add(6*time.Second))
+	require.NoError(t, err)
+	result, err := d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", 4, 8, false, []byte("CCCC")), base.Add(7*time.Second))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, []byte("AAAAAAAACCCC"), result.Payload)
+}
+
+func TestIPv4DefragmenterCapacityProtectsIncomingExistingFlow(t *testing.T) {
+	d, err := NewIPv4DefragmenterWithConfig(IPv4DefragConfig{MaxDatagrams: 2, MaxFragments: 2, MaxPayloadBytes: 16, MaxFragmentsPerDatagram: 2})
+	require.NoError(t, err)
+	base := time.Unix(100, 0)
+	for _, id := range []uint16{1, 2} {
+		_, err := d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", id, 0, true, []byte("AAAAAAAA")), base.Add(time.Duration(id)*time.Second))
+		require.NoError(t, err)
+	}
+	result, err := d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", 1, 8, false, []byte("DONE")), base.Add(3*time.Second))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, []byte("AAAAAAAADONE"), result.Payload)
+	snapshot := d.Snapshot()
+	require.Equal(t, uint64(1), snapshot.CompletedDatagrams)
+	require.Equal(t, uint64(1), snapshot.CapacityEvictions)
+	require.Zero(t, snapshot.InFlightDatagrams)
+}
+
+func TestIPv4DefragmenterRejectsWhenOnlyProtectedFlowRemains(t *testing.T) {
+	d, err := NewIPv4DefragmenterWithConfig(IPv4DefragConfig{MaxDatagrams: 1, MaxFragments: 2, MaxPayloadBytes: 8, MaxFragmentsPerDatagram: 2})
+	require.NoError(t, err)
+	first := createIPv4Fragment("192.0.2.1", "198.51.100.1", 1, 0, true, []byte("AAAAAAAA"))
+	_, err = d.DefragIPv4(first)
+	require.NoError(t, err)
+	_, err = d.DefragIPv4(createIPv4Fragment("192.0.2.1", "198.51.100.1", 1, 8, false, []byte("DONE")))
+	require.ErrorContains(t, err, "protected datagram exceeds capacity")
+	snapshot := d.Snapshot()
+	require.Equal(t, 1, snapshot.InFlightDatagrams)
+	require.Equal(t, 1, snapshot.InFlightFragments)
+	require.Equal(t, 8, snapshot.InFlightPayloadBytes)
+	require.Zero(t, snapshot.CapacityEvictions)
+	require.Equal(t, uint64(1), snapshot.RejectedFragments)
+}
+
+func TestIPv4DefragmenterImpossibleProtectedGrowthDoesNotEvictOtherFlows(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		config            IPv4DefragConfig
+		first             []byte
+		second            []byte
+		shrinkFragmentCap bool
+	}{
+		{"payload bytes", IPv4DefragConfig{MaxDatagrams: 2, MaxFragments: 3, MaxPayloadBytes: 24, MaxFragmentsPerDatagram: 2}, []byte("AAAAAAAAAAAAAAAA"), []byte("BBBBBBBBBBBBBBBB"), false},
+		{"fragment count", IPv4DefragConfig{MaxDatagrams: 2, MaxFragments: 2, MaxPayloadBytes: 24, MaxFragmentsPerDatagram: 2}, []byte("AAAAAAAA"), []byte("BBBBBBBB"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := NewIPv4DefragmenterWithConfig(tc.config)
+			require.NoError(t, err)
+			a := createIPv4Fragment("192.0.2.1", "198.51.100.1", 1, 0, true, tc.first)
+			b := createIPv4Fragment("192.0.2.1", "198.51.100.1", 2, 0, true, []byte("BBBBBBBB"))
+			_, err = d.DefragIPv4(a)
+			require.NoError(t, err)
+			_, err = d.DefragIPv4(b)
+			require.NoError(t, err)
+			if tc.shrinkFragmentCap {
+				// With a fixed cap, A alone cannot already consume every fragment
+				// slot while B exists. Simulate a lowered cap to exercise the guard.
+				d.mu.Lock()
+				d.config.MaxFragments = 1
+				d.mu.Unlock()
+			}
+			_, err = d.DefragIPv4(createIPv4Fragment("192.0.2.1", "198.51.100.1", 1, uint16(len(tc.first)), false, tc.second))
+			require.ErrorContains(t, err, "protected datagram exceeds capacity")
+			snapshot := d.Snapshot()
+			require.Equal(t, 2, snapshot.InFlightDatagrams)
+			require.Zero(t, snapshot.CapacityEvictions)
+			require.Equal(t, uint64(1), snapshot.RejectedFragments)
+			d.mu.Lock()
+			require.NotNil(t, d.ipFlows[ipv4FlowKey{flow: b.NetworkFlow(), id: b.Id, protocol: b.Protocol}])
+			d.mu.Unlock()
+		})
+	}
+}
+
+func TestIPv4DefragmenterExpiryUsesLatestTimestamp(t *testing.T) {
+	d := NewIPv4Defragmenter()
+	base := time.Unix(100, 0)
+	first := createIPv4Fragment("192.0.2.1", "198.51.100.1", 42, 0, true, []byte("AAAAAAAA"))
+	_, err := d.DefragIPv4WithTimestamp(first, base.Add(10*time.Second))
+	require.NoError(t, err)
+	_, err = d.DefragIPv4WithTimestamp(createIPv4Fragment("192.0.2.1", "198.51.100.1", 42, 8, true, []byte("BBBBBBBB")), base)
+	require.NoError(t, err)
+	require.Zero(t, d.DiscardOlderThan(base.Add(5*time.Second)))
+	require.Equal(t, 1, d.Snapshot().InFlightDatagrams)
+	require.Equal(t, 1, d.DiscardOlderThan(base.Add(11*time.Second)))
+	require.Equal(t, uint64(1), d.Snapshot().ExpiredDatagrams)
+}
+
+func TestIPv4DefragmenterStaleRemovalCannotDeleteReplacement(t *testing.T) {
+	d := NewIPv4Defragmenter()
+	first := createIPv4Fragment("192.0.2.1", "198.51.100.1", 42, 0, true, []byte("AAAAAAAA"))
+	_, err := d.DefragIPv4(first)
+	require.NoError(t, err)
+	key := ipv4FlowKey{flow: first.NetworkFlow(), id: first.Id, protocol: first.Protocol}
+	d.mu.Lock()
+	stale := d.ipFlows[key]
+	require.True(t, d.removeLocked(stale))
+	d.mu.Unlock()
+	_, err = d.DefragIPv4(first)
+	require.NoError(t, err)
+	d.mu.Lock()
+	require.False(t, d.removeLocked(stale))
+	require.NotNil(t, d.ipFlows[key])
+	d.mu.Unlock()
+	require.Equal(t, 1, d.Snapshot().InFlightDatagrams)
+}
+
+func TestIPv4DefragmenterOverlapDoesNotOvercountRetention(t *testing.T) {
+	d := NewIPv4Defragmenter()
+	first := createIPv4Fragment("192.0.2.1", "198.51.100.1", 73, 0, true, []byte("ABCDEFGHIJKLMNOP"))
+	overlap := createIPv4Fragment("192.0.2.1", "198.51.100.1", 73, 8, false, []byte("xxxxxxxxYYYY"))
+	_, err := d.DefragIPv4(first)
+	require.NoError(t, err)
+	result, err := d.DefragIPv4(overlap)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, []byte("ABCDEFGHIJKLMNOPYYYY"), result.Payload)
+	snapshot := d.Snapshot()
+	require.Zero(t, snapshot.InFlightFragments)
+	require.Zero(t, snapshot.InFlightPayloadBytes)
+	require.Equal(t, uint64(1), snapshot.CompletedDatagrams)
+}
+
+func BenchmarkIPv4DefragmenterNonFragmented(b *testing.B) {
+	d := NewIPv4Defragmenter()
+	packet := createIPv4Fragment("192.0.2.1", "198.51.100.1", 7, 0, false, []byte("AAAAAAAA"))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = d.DefragIPv4(packet)
+	}
+}
+
+func BenchmarkIPv4DefragmenterFirstFragmentFlood(b *testing.B) {
+	d := NewIPv4Defragmenter()
+	payload := make([]byte, 512)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		packet := createIPv4Fragment("192.0.2.1", "198.51.100.1", uint16(i), 0, true, payload)
+		_, _ = d.DefragIPv4(packet)
+	}
+}
+
+func BenchmarkIPv4DefragmenterParallelFragments(b *testing.B) {
+	d := NewIPv4Defragmenter()
+	var next atomic.Uint32
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			id := uint16(next.Add(1))
+			first := createIPv4Fragment("192.0.2.1", "198.51.100.1", id, 0, true, []byte("AAAAAAAA"))
+			last := createIPv4Fragment("192.0.2.1", "198.51.100.1", id, 8, false, []byte("BBBB"))
+			_, _ = d.DefragIPv4(first)
+			_, _ = d.DefragIPv4(last)
+		}
+	})
+}
 
 // createIPv4Fragment creates a mock IPv4 fragment for testing
 func createIPv4Fragment(srcIP, dstIP string, id uint16, offset uint16, moreFragments bool, payload []byte) *layers.IPv4 {

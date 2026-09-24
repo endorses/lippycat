@@ -84,3 +84,26 @@ func TestTelemetryCollectorNilCallbackIsSafe(t *testing.T) {
 		InterfaceDrops:  3,
 	}, collector.report("eth0", 1, 2, 3, nil))
 }
+
+func TestTelemetryCollectorSeparatesIngressFromSharedIPv4Outcome(t *testing.T) {
+	collector := newTelemetryCollector(nil)
+	collector.ipv4 = NewIPv4Defragmenter()
+	first := createIPv4Fragment("192.0.2.1", "198.51.100.1", 7, 0, true, []byte("AAAAAAAA"))
+	last := createIPv4Fragment("192.0.2.1", "198.51.100.1", 7, 8, false, []byte("BBBB"))
+	collector.observeFragment("eth0", true, true)
+	_, err := collector.ipv4.DefragIPv4(first)
+	require.NoError(t, err)
+	collector.observeFragment("eth1", true, true)
+	completed, err := collector.ipv4.DefragIPv4(last)
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+	collector.observeFragment("eth0", false, false) // IPv6 observed with reassembly disabled.
+	collector.observeFragment("eth1", false, true)
+	firstSnapshot := collector.report("eth0", 10, 0, 0, nil)
+	secondSnapshot := collector.report("eth1", 10, 0, 0, nil)
+	require.Equal(t, FragmentIngress{IPv4Observed: 1, IPv4Attempted: 1, IPv6Observed: 1}, secondSnapshot.FragmentIngress["eth0"])
+	require.Equal(t, FragmentIngress{IPv4Observed: 1, IPv4Attempted: 1, IPv6Observed: 1, IPv6Attempted: 1}, secondSnapshot.FragmentIngress["eth1"])
+	require.Equal(t, uint64(2), secondSnapshot.IPv4Defrag.ObservedFragments)
+	require.Equal(t, uint64(1), secondSnapshot.IPv4Defrag.CompletedDatagrams)
+	require.Equal(t, firstSnapshot.IPv4Defrag, secondSnapshot.IPv4Defrag)
+}

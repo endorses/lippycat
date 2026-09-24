@@ -440,6 +440,23 @@ sudo systemctl start lippycat
 echo "Disaster recovery complete"
 ```
 
+## Fragmented SIP/SDP triage
+
+When a fragmented INVITE or response has missing SDP, compare the per-interface
+IPv4/IPv6 fragment ingress fields in `Capture heartbeat` with the session-wide
+`IPv4 defragmenter heartbeat`. The old `ip_fragments` and `reassembled`
+counters include both IP families and disabled-reassembly traffic; their ratio
+does not measure completion. The IPv4 snapshot reports cumulative completions,
+invalid or capacity-rejected fragments, stale expiry, capacity eviction, and
+in-flight state. Rising expiry or eviction means incomplete datagrams at this
+sensor. It does not identify where an individual fragment disappeared.
+
+Check the original PCAP's fragment ID, source and destination, protocol,
+offsets, and capture timestamps. Then compare kernel and PacketBuffer drops.
+For sustained eviction, reduce capture scope or tune the shared
+`ipv4_defrag` limits with memory headroom using the keys in
+[PERFORMANCE.md](PERFORMANCE.md#ipv4-fragment-retention-and-outcomes).
+
 ## Contact Information
 
 ### Support Escalation

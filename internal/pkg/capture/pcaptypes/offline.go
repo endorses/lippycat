@@ -32,3 +32,5 @@ func (iface offlineInterface) Name() string {
 	}
 	return "offline"
 }
+
+func (iface offlineInterface) IsOffline() bool { return true }

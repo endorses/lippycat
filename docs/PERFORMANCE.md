@@ -922,3 +922,76 @@ are cumulative for the SIP signature lifetime and reset on process restart.
 Heartbeat telemetry never initializes detection; these fields are omitted when
 no detector exists. Capture heartbeats repeat process-wide counts per interface, so do not sum them
 across interfaces or successive heartbeats.
+
+### IPv4 fragment retention and outcomes
+
+Live hunt, tap, sniff, and watch capture share one IPv4 defragmenter across
+interfaces. Incomplete datagrams are bounded by the common `ipv4_defrag`
+configuration. Defaults are 4,096 active datagrams, 16,384 retained fragments,
+16 MiB of retained payload, 128 fragments per datagram, 30 seconds stale age,
+and a 5 second sweep. A new fragment evicts the least recently observed
+datagram when a limit would be exceeded. When the fragment belongs to an
+existing datagram, that datagram is protected and the oldest other datagram is
+evicted; if no other datagram can free enough capacity, the incoming fragment
+is rejected. Equal timestamps evict in creation order. A fragment larger than
+the payload budget or beyond the per-datagram limit is rejected. Zero
+configuration values select defaults; negative and
+inconsistent values are rejected before live capture starts. Empty environment
+overrides and malformed integer or duration values are rejected. Viper treats
+an explicit YAML `null` as an absent key, so it selects the default; omit the
+key for clarity. These defaults
+bound payload retention, not the Go runtime's total memory use.
+
+All four command families use the same YAML keys and environment overrides:
+
+```yaml
+ipv4_defrag:
+  max_datagrams: 4096
+  max_fragments: 16384
+  max_payload_bytes: 16777216
+  max_fragments_per_datagram: 128
+  stale_age: 30s
+  sweep_interval: 5s
+```
+
+For example, `LIPPYCAT_IPV4_DEFRAG_MAX_DATAGRAMS=2048` overrides the first
+limit. Offline ordered PCAP scanning uses packet timestamps for expiry rather
+than wall time. It also retains its combined IPv4/IPv6 offline safety budget
+(4,096 flows and 16 MiB), so raising IPv4 limits alone does not raise that
+combined limit.
+
+The compatibility `ip_fragments` and `reassembled` fields in each interface's
+capture heartbeat still mix IPv4 and IPv6, including fragments observed while
+reassembly is disabled. Do not divide them to estimate completeness. New
+`ipv4_fragments_observed_interface` and
+`ipv4_fragments_attempted_interface` fields (and IPv6 equivalents) are ingress
+counts for that interface. The separate `IPv4 defragmenter heartbeat` is one
+shared session snapshot: observed fragment attempts, completed datagrams,
+rejected fragments, expired datagrams, capacity evictions, and current retained
+state. Its counters are cumulative and reset when capture starts; in-flight
+values are gauges. The local TUI statistics view shows the shared IPv4
+outcomes. These counters are not repeated per interface in distributed status.
+
+A completed datagram is known to have reassembled at the sensor. An expired or
+evicted datagram was incomplete there; counters alone cannot identify whether
+an upstream fragment was lost. For incomplete SIP/SDP, check kernel and buffer
+drops alongside IPv4 expiry and eviction, then inspect packet timestamps and
+fragment IDs in the original capture. A first-fragment flood that drives
+eviction is capacity pressure, even when the kernel reports no drops.
+
+On an i9-13900HX, a synthetic two-fragment benchmark measured 1,021–1,039
+ns/op and 4,560 B/op before the bounded implementation, versus 1,102–1,212
+ns/op and 4,656 B/op after it (200 ms runs, two samples each). The bounded
+version retained no more than its configured caps in the synthetic
+first-fragment flood test. Its mostly unfragmented path measured 24–25 ns/op
+and 0 B/op, versus 23 ns/op and 0 B/op before the change. These short
+microbenchmarks guide default selection; production throughput depends on
+traffic mix and packet sizes.
+
+For the parallel two-fragment workload, a temporary benchmark-only timer
+around the locked insertion path measured about 202 ns per lock hold at one
+worker and 210 ns at eight workers; throughput was about 811 and 933 ns per
+datagram, respectively. The timer itself adds overhead and was removed after
+measurement. This bounded synthetic workload did not justify sharding the
+shared defragmenter; remeasure under production-like packet sizes before
+changing that design.

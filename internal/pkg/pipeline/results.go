@@ -11,6 +11,8 @@ type DomainResult interface {
 type SIPResult struct {
 	Timestamp                      time.Time
 	CallID, Method, CSeqMethod     string
+	CSeqNumber                     uint64
+	ViaBranch                      string
 	ResponseCode                   int
 	From, To, FromUser, ToUser     string
 	FromURI, ToURI, FromTag, ToTag string

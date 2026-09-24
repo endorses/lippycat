@@ -101,6 +101,8 @@ func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInpu
 		CallId: input.Result.CallID, FromUser: input.Result.FromUser, ToUser: input.Result.ToUser,
 		FromTag: input.Result.FromTag, ToTag: input.Result.ToTag, FromUri: input.Result.FromURI,
 		ToUri: input.Result.ToURI, Method: input.Result.Method, CseqMethod: input.Result.CSeqMethod,
+		CseqNumber: input.Result.CSeqNumber, ViaBranch: input.Result.ViaBranch,
+		MediaPorts:   sharedsip.MediaPorts(input.Result.SDP),
 		ResponseCode: uint32(input.Result.ResponseCode), PAssertedIdentity: input.Result.PAssertedIdentity,
 	}}
 	if err := forwardPacketWithFilterProvenance(s.forwarder, packet, metadata, env.Source.InterfaceName, env.LinkType, env.DirectMatchedFilterIDs, env.InheritedMatchedFilterIDs); err != nil {

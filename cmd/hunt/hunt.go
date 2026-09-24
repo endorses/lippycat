@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
@@ -32,6 +33,9 @@ Example:
   lc hunt --processor 192.168.1.100:55555 --interface eth0
   lc hunt --processor processor:55555 --id edge-01`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := capture.ValidateIPv4DefragConfig(); err != nil {
+			return err
+		}
 		if err := debugserver.StartPprofFromConfig(
 			cmdutil.GetStringConfig("hunter.debug_listen", debugListen),
 			cmdutil.GetBoolConfig("hunter.debug_allow_non_loopback", debugAllowNonLoopback),

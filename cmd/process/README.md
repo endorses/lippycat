@@ -100,6 +100,12 @@ Write separate SIP and RTP PCAP files for each VoIP call:
 - `--per-call-pcap-dir` - Output directory (default: `./pcaps`)
 - `--per-call-pcap-pattern` - Filename pattern (default: `{timestamp}_{callid}.pcap`)
 
+`--sip-retry-window` (default `2m`) keeps a call open after a matched `503` to an INVITE so a distinct INVITE under the same Call-ID can retain signalling and early media. An unanswered failure closes when this window expires. This window is separate from trailing PCAP grace after BYE, the per-call writer idle timeout, and `--pcap-closed-call-ttl` (the completed-call tombstone). Older peers without CSeq number and Via branch cannot establish a retry transaction and use ordinary failure finalization.
+
+After a call has finalized, reuse of its Call-ID starts a new generation only with a distinct INVITE transaction. Media waits for an answered INVITE and a newly advertised SDP port. Reused prior-generation SDP ports and observed SSRCs are conservatively rejected, even when legitimate; post-restart ACK/BYE requires matching dialog tags. These rejections are counted in processor SIP retry telemetry. The writer idle timeout cannot close a matched-503 call before its retry deadline.
+
+The processor status API and heartbeat expose cumulative `sip_retry` counters for retries seen, recovered calls, retry-window expiries, rejected attempts, and rejected media. These counters have fixed cardinality and reset when the processor restarts.
+
 ```bash
 lc process --listen :55555 \
   --per-call-pcap \

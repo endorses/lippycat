@@ -178,6 +178,9 @@ func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *shared
 		PAssertedIdentity: result.PAssertedIdentity,
 		Method:            method,
 		CSeqMethod:        result.CSeqMethod,
+		CSeqNumber:        result.CSeqNumber,
+		ViaBranch:         result.ViaBranch,
+		MediaPorts:        sharedsip.MediaPorts(result.SDP),
 		ResponseCode:      uint32(result.ResponseCode),
 		SDPBody:           string(result.SDP),
 	}

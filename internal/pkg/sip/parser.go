@@ -61,6 +61,8 @@ func OptionsForEndpoints(timestamp time.Time, source, destination string) ParseO
 type SIPEvent struct {
 	Timestamp                                          time.Time
 	StartLine, Method, RequestURI, CSeqMethod          string
+	CSeqNumber                                         uint64
+	ViaBranch                                          string
 	ResponseCode                                       int
 	CallID, From, To, FromUser, ToUser, FromURI, ToURI string
 	FromTag, ToTag, PAssertedIdentity, ContentType     string
@@ -128,6 +130,7 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 	ev.Headers = make(map[string]string)
 	var contentLengths []string
 	var previousHeader string
+	var topVia string
 	for _, raw := range lines[1:] {
 		raw = bytes.TrimSuffix(raw, []byte("\r"))
 		if len(raw) > 0 && (raw[0] == ' ' || raw[0] == '\t') {
@@ -159,6 +162,9 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 		previousHeader = name
 		if name == "content-length" {
 			contentLengths = append(contentLengths, value)
+		}
+		if name == "via" && topVia == "" {
+			topVia = value
 		}
 		ev.Headers[name] = value
 	}
@@ -198,9 +204,46 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 	}
 	cseq := strings.Fields(ev.Headers["cseq"])
 	if len(cseq) >= 2 {
+		ev.CSeqNumber, _ = strconv.ParseUint(cseq[0], 10, 64)
 		ev.CSeqMethod = strings.ToUpper(cseq[1])
 	}
+	for _, parameter := range strings.Split(topVia, ";")[1:] {
+		key, value, ok := strings.Cut(strings.TrimSpace(parameter), "=")
+		if ok && strings.EqualFold(key, "branch") {
+			ev.ViaBranch = strings.Trim(value, "\" ")
+			break
+		}
+	}
 	return ev, nil
+}
+
+// MediaPorts extracts a bounded set of RTP media ports advertised by SDP.
+// Invalid and disabled (port zero) media descriptions are ignored.
+func MediaPorts(sdp []byte) []uint32 {
+	var ports []uint32
+	for _, line := range bytes.Split(sdp, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("m=")) {
+			continue
+		}
+		fields := bytes.Fields(line[2:])
+		if len(fields) < 2 {
+			continue
+		}
+		portText := string(fields[1])
+		if slash := strings.IndexByte(portText, '/'); slash >= 0 {
+			portText = portText[:slash]
+		}
+		port, err := strconv.ParseUint(portText, 10, 16)
+		if err != nil || port == 0 {
+			continue
+		}
+		ports = append(ports, uint32(port))
+		if len(ports) == 16 {
+			break
+		}
+	}
+	return ports
 }
 
 func URI(header string) string {

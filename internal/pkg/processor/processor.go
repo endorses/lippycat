@@ -454,35 +454,33 @@ func New(config Config) (*Processor, error) {
 			"debounce", debounce)
 	}
 
-	// Terminal call state is required by both per-call PCAP and LI. Keep the
-	// lifecycle monitor alive for LI even when no PCAP files are requested.
+	// A shared call lifecycle is required for every VoIP path, including tap
+	// and processor deployments with no per-call output enabled.
 	pcapEnabled := config.PcapWriterConfig != nil && config.PcapWriterConfig.Enabled
-	if pcapEnabled || config.LIEnabled {
-		// Wire command executor callbacks to PCAP writer config
-		if pcapEnabled && p.commandExecutor != nil {
-			config.PcapWriterConfig.OnFileClose = p.commandExecutor.OnFileClose()
-			config.PcapWriterConfig.OnCallComplete = p.commandExecutor.OnCallComplete()
-		}
-		manager, err := NewSessionOutputManager(
-			config.PcapWriterConfig,
-			config.CallCompletionMonitorConfig,
-			p.callAggregator,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize session output manager: %w", err)
-		}
-		p.sessionOutputManager = manager
-		p.callLifecycle = manager.lifecycle
-		if monitor, ok := manager.monitor.(*CallCompletionMonitor); ok {
-			logger.Info("Call completion monitor configured",
-				"grace_period", monitor.config.GracePeriod,
-				"check_interval", monitor.config.CheckInterval)
-		}
-		if pcapEnabled {
-			logger.Info("Per-call PCAP writing enabled",
-				"output_dir", config.PcapWriterConfig.OutputDir,
-				"pattern", config.PcapWriterConfig.FilePattern)
-		}
+	// Wire command executor callbacks to PCAP writer config
+	if pcapEnabled && p.commandExecutor != nil {
+		config.PcapWriterConfig.OnFileClose = p.commandExecutor.OnFileClose()
+		config.PcapWriterConfig.OnCallComplete = p.commandExecutor.OnCallComplete()
+	}
+	manager, err := NewSessionOutputManager(
+		config.PcapWriterConfig,
+		config.CallCompletionMonitorConfig,
+		p.callAggregator,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize session output manager: %w", err)
+	}
+	p.sessionOutputManager = manager
+	p.callLifecycle = manager.lifecycle
+	if monitor, ok := manager.monitor.(*CallCompletionMonitor); ok {
+		logger.Info("Call completion monitor configured",
+			"grace_period", monitor.config.GracePeriod,
+			"check_interval", monitor.config.CheckInterval)
+	}
+	if pcapEnabled {
+		logger.Info("Per-call PCAP writing enabled",
+			"output_dir", config.PcapWriterConfig.OutputDir,
+			"pattern", config.PcapWriterConfig.FilePattern)
 	}
 
 	// Initialize auto-rotate PCAP writer if configured
@@ -780,6 +778,23 @@ func (p *Processor) SetProxyTLSCredentials(cert, key []byte) {
 // GetStats returns current statistics
 func (p *Processor) GetStats() stats.Stats {
 	return p.statsCollector.Get()
+}
+
+// SIPRetryTelemetry exposes bounded retry outcomes for processor and tap.
+func (p *Processor) SIPRetryTelemetry() voip.SIPRetryTelemetry {
+	if p == nil || p.callAggregator == nil {
+		return voip.SIPRetryTelemetry{}
+	}
+	return p.callAggregator.RetryTelemetry()
+}
+
+func (p *Processor) sipRetryTelemetryProto() *management.SIPRetryTelemetry {
+	stats := p.SIPRetryTelemetry()
+	return &management.SIPRetryTelemetry{
+		RetriesSeen: stats.RetriesSeen, RecoveredCalls: stats.RecoveredCalls,
+		WindowExpiries: stats.WindowExpiries, RejectedAttempts: stats.RejectedAttempts,
+		RejectedMedia: stats.RejectedMedia,
+	}
 }
 
 // SetPacketSource sets the packet source for the processor.

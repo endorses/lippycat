@@ -19,3 +19,11 @@ func TestValidateLiveCaptureBufferConfigRejectsInvalidSIPCapacity(t *testing.T) 
 		require.ErrorContains(t, err, "sip_buffer_size")
 	}
 }
+
+func TestValidateLiveCaptureBufferConfigRejectsInvalidIPv4Defrag(t *testing.T) {
+	key := "ipv4_defrag.max_datagrams"
+	original := viper.Get(key)
+	t.Cleanup(func() { viper.Set(key, original) })
+	viper.Set(key, -1)
+	require.ErrorContains(t, validateLiveCaptureBufferConfig(nil, nil), "IPv4 defragmentation")
+}

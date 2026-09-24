@@ -122,6 +122,7 @@ var (
 	perCallPcapMaxIdle    time.Duration
 	perCallPcapMaxWriters int
 	pcapClosedCallTTL     time.Duration
+	sipRetryWindow        time.Duration
 	// Auto-rotate PCAP flags
 	autoRotatePcapEnabled     bool
 	autoRotatePcapDir         string
@@ -205,6 +206,7 @@ func init() {
 	ProcessCmd.Flags().DurationVar(&perCallPcapMaxIdle, "per-call-pcap-max-idle", 10*time.Minute, "Close per-call PCAP writers after this idle time (0 = disabled)")
 	ProcessCmd.Flags().IntVar(&perCallPcapMaxWriters, "per-call-pcap-max-writers", 0, "Soft active per-call PCAP writer pressure threshold (0 = disabled)")
 	ProcessCmd.Flags().DurationVar(&pcapClosedCallTTL, "pcap-closed-call-ttl", time.Hour, "How long to suppress duplicate PCAP close handling for completed calls")
+	ProcessCmd.Flags().DurationVar(&sipRetryWindow, "sip-retry-window", 2*time.Minute, "How long a failed INVITE can await a distinct retry under the same Call-ID")
 
 	// Auto-rotate PCAP writing
 	ProcessCmd.Flags().BoolVar(&autoRotatePcapEnabled, "auto-rotate-pcap", false, "Enable auto-rotating PCAP writing for non-VoIP traffic")
@@ -280,6 +282,7 @@ func init() {
 	_ = viper.BindPFlag("processor.per_call_pcap.max_idle", ProcessCmd.Flags().Lookup("per-call-pcap-max-idle"))
 	_ = viper.BindPFlag("processor.per_call_pcap.max_writers", ProcessCmd.Flags().Lookup("per-call-pcap-max-writers"))
 	_ = viper.BindPFlag("processor.per_call_pcap.closed_call_ttl", ProcessCmd.Flags().Lookup("pcap-closed-call-ttl"))
+	_ = viper.BindPFlag("processor.voip.sip_retry_window", ProcessCmd.Flags().Lookup("sip-retry-window"))
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.enabled", ProcessCmd.Flags().Lookup("auto-rotate-pcap"))
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.output_dir", ProcessCmd.Flags().Lookup("auto-rotate-pcap-dir"))
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.file_pattern", ProcessCmd.Flags().Lookup("auto-rotate-pcap-pattern"))
@@ -340,6 +343,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	callCompletionMonitorConfig := &processor.CallCompletionMonitorConfig{
 		ClosedCallTTL: viper.GetDuration("processor.per_call_pcap.closed_call_ttl"),
+		RetryWindow:   viper.GetDuration("processor.voip.sip_retry_window"),
 	}
 
 	// Build auto-rotate PCAP config if enabled

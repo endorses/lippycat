@@ -25,7 +25,10 @@ var SniffCmd = &cobra.Command{
 }
 
 func validateLiveCaptureBufferConfig(_ *cobra.Command, _ []string) error {
-	return capture.ValidatePacketBufferConfig()
+	if err := capture.ValidatePacketBufferConfig(); err != nil {
+		return err
+	}
+	return capture.ValidateIPv4DefragConfig()
 }
 
 var (

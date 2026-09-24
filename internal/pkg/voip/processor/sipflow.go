@@ -64,6 +64,8 @@ func callMetadataFromResult(result pipeline.SIPResult) *CallMetadata {
 	metadata := &CallMetadata{
 		CallID: result.CallID, From: result.From, To: result.To, FromTag: result.FromTag, ToTag: result.ToTag,
 		PAssertedIdentity: result.PAssertedIdentity, Method: result.Method, CSeqMethod: result.CSeqMethod,
+		CSeqNumber: result.CSeqNumber, ViaBranch: result.ViaBranch,
+		MediaPorts:   sharedsip.MediaPorts(result.SDP),
 		ResponseCode: uint32(result.ResponseCode), SDPBody: string(result.SDP), ContentType: result.ContentType,
 	}
 	if result.Method == "MESSAGE" && len(result.Body) != 0 {
@@ -83,6 +85,8 @@ func protobufMetadataFromResult(result pipeline.SIPResult, metadata *CallMetadat
 		CallId: result.CallID, FromUser: result.FromUser, ToUser: result.ToUser, FromTag: result.FromTag,
 		ToTag: result.ToTag, FromUri: result.FromURI, ToUri: result.ToURI, Method: result.Method,
 		CseqMethod: result.CSeqMethod, ResponseCode: uint32(result.ResponseCode),
+		CseqNumber: result.CSeqNumber, ViaBranch: result.ViaBranch,
+		MediaPorts:        sharedsip.MediaPorts(result.SDP),
 		PAssertedIdentity: result.PAssertedIdentity, VisitedNetworkId: metadata.VisitedNetworkID,
 	}}
 	if metadata.AccessType != "" {

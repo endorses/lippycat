@@ -23,6 +23,185 @@ func TestDefaultCallCompletionMonitorConfig(t *testing.T) {
 	assert.Equal(t, 5*time.Second, config.GracePeriod)
 	assert.Equal(t, 1*time.Second, config.CheckInterval)
 	assert.Equal(t, time.Hour, config.ClosedCallTTL)
+	assert.Equal(t, 2*time.Minute, config.RetryWindow)
+}
+
+func TestMonitorRetainsMatched503UntilRetryAndClosesWithoutRetry(t *testing.T) {
+	aggregator := voip.NewCallAggregator()
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{})
+	monitor := NewCallCompletionMonitorWithLifecycle(&CallCompletionMonitorConfig{RetryWindow: 2 * time.Minute}, aggregator, nil, lifecycle)
+	packet := func(method, cseqMethod string, code uint32, number uint64, branch string) *data.CapturedPacket {
+		return &data.CapturedPacket{TimestampNs: time.Now().UnixNano(), Metadata: &data.PacketMetadata{Sip: &data.SIPMetadata{
+			CallId: "synthetic-monitor", Method: method, CseqMethod: cseqMethod, ResponseCode: code,
+			CseqNumber: number, ViaBranch: branch,
+		}}}
+	}
+	require.True(t, monitor.ProcessPacket(packet("INVITE", "INVITE", 0, 1, "z9hG4bK-one"), "hunter-1"))
+	require.True(t, monitor.ProcessPacket(packet("RESPONSE", "INVITE", 503, 1, "z9hG4bK-one"), "hunter-1"))
+	monitor.checkEndedCalls()
+	require.Zero(t, monitor.GetPendingCount())
+	require.False(t, lifecycle.IsFinalized("synthetic-monitor"))
+
+	require.True(t, monitor.ProcessPacket(packet("INVITE", "INVITE", 0, 2, "z9hG4bK-two"), "hunter-1"))
+	monitor.checkEndedCalls()
+	require.Zero(t, monitor.GetPendingCount())
+	require.True(t, monitor.ProcessPacket(packet("RESPONSE", "INVITE", 200, 2, "z9hG4bK-two"), "hunter-1"))
+	call, _ := aggregator.GetCall("synthetic-monitor")
+	require.Equal(t, voip.CallStateActive, call.State)
+	require.EqualValues(t, 1, aggregator.RetryTelemetry().RetriesSeen)
+	require.EqualValues(t, 1, aggregator.RetryTelemetry().RecoveredCalls)
+
+	// A separate failed call with an expired retry deadline closes without
+	// borrowing the trailing-media grace period.
+	expiredAggregator := voip.NewCallAggregator()
+	expiredLifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{})
+	expiredMonitor := NewCallCompletionMonitorWithLifecycle(&CallCompletionMonitorConfig{RetryWindow: time.Nanosecond}, expiredAggregator, nil, expiredLifecycle)
+	other := packet("INVITE", "INVITE", 0, 1, "z9hG4bK-other")
+	other.Metadata.Sip.CallId = "synthetic-expired"
+	expiredMonitor.ProcessPacket(other, "hunter-1")
+	other = packet("RESPONSE", "INVITE", 503, 1, "z9hG4bK-other")
+	other.Metadata.Sip.CallId = "synthetic-expired"
+	expiredMonitor.ProcessPacket(other, "hunter-1")
+	late := packet("INVITE", "INVITE", 0, 2, "z9hG4bK-late")
+	late.Metadata.Sip.CallId = "synthetic-expired"
+	require.False(t, expiredMonitor.ProcessPacket(late, "hunter-1"))
+	expiredMonitor.checkEndedCalls()
+	expiredMonitor.processPendingClose()
+	require.True(t, expiredLifecycle.IsFinalized("synthetic-expired"))
+	require.EqualValues(t, 1, expiredAggregator.RetryTelemetry().WindowExpiries)
+}
+
+func TestMonitorRestartRejectsOldTransactionAndMedia(t *testing.T) {
+	aggregator := voip.NewCallAggregator()
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{})
+	monitor := NewCallCompletionMonitorWithLifecycle(&CallCompletionMonitorConfig{RetryWindow: time.Nanosecond}, aggregator, nil, lifecycle)
+	var finalizations atomic.Int32
+	lifecycle.Subscribe(func(CallFinalizationEvent) { finalizations.Add(1) })
+	packet := func(method string, code uint32, number uint64, branch string) *data.CapturedPacket {
+		return &data.CapturedPacket{TimestampNs: time.Now().UnixNano(), Metadata: &data.PacketMetadata{Sip: &data.SIPMetadata{
+			CallId: "synthetic-restart", Method: method, CseqMethod: "INVITE", ResponseCode: code,
+			CseqNumber: number, ViaBranch: branch,
+		}}}
+	}
+	oldInvite := packet("INVITE", 0, 1, "z9hG4bK-one")
+	oldInvite.Metadata.Sip.FromTag = "old-from"
+	require.True(t, monitor.ProcessPacket(oldInvite, "hunter"))
+	oldMedia := packet("", 0, 0, "")
+	oldMedia.Metadata.Rtp = &data.RTPMetadata{Ssrc: 100}
+	require.True(t, monitor.ProcessPacket(oldMedia, "hunter"))
+	require.True(t, monitor.ProcessPacket(packet("RESPONSE", 503, 1, "z9hG4bK-one"), "hunter"))
+	monitor.checkEndedCalls()
+	monitor.processPendingClose()
+	require.True(t, lifecycle.IsFinalized("synthetic-restart"))
+	require.EqualValues(t, 1, finalizations.Load())
+
+	require.False(t, monitor.ProcessPacket(packet("RESPONSE", 200, 1, "z9hG4bK-one"), "hunter"))
+	sameDialog := packet("INVITE", 0, 2, "z9hG4bK-same-dialog")
+	sameDialog.Metadata.Sip.FromTag = "old-from"
+	require.False(t, monitor.ProcessPacket(sameDialog, "hunter"))
+	newInvite := packet("INVITE", 0, 2, "z9hG4bK-two")
+	newInvite.Metadata.Sip.FromTag = "new-from"
+	require.True(t, monitor.ProcessPacket(newInvite, "hunter"))
+	require.False(t, lifecycle.IsFinalized("synthetic-restart"))
+	require.False(t, monitor.ProcessPacket(packet("INVITE", 0, 1, "z9hG4bK-one"), "hunter"))
+	require.False(t, monitor.ProcessPacket(packet("ACK", 0, 1, "z9hG4bK-old-ack"), "hunter"))
+	require.False(t, monitor.ProcessPacket(oldMedia, "hunter"))
+	answer := packet("RESPONSE", 200, 2, "z9hG4bK-two")
+	answer.Metadata.Sip.ToTag = "new-to"
+	answer.Metadata.Sip.MediaPorts = []uint32{18000}
+	require.True(t, monitor.ProcessPacket(answer, "hunter"))
+	oldAck := packet("ACK", 0, 2, "z9hG4bK-old-ack")
+	oldAck.Metadata.Sip.FromTag = "old-from"
+	oldAck.Metadata.Sip.ToTag = "old-to"
+	require.False(t, monitor.ProcessPacket(oldAck, "hunter"))
+	newAck := packet("ACK", 0, 2, "z9hG4bK-new-ack")
+	newAck.Metadata.Sip.FromTag = "new-from"
+	newAck.Metadata.Sip.ToTag = "new-to"
+	require.True(t, monitor.ProcessPacket(newAck, "hunter"))
+	oldBye := packet("BYE", 0, 3, "z9hG4bK-old-bye")
+	oldBye.Metadata.Sip.CseqMethod = "BYE"
+	oldBye.Metadata.Sip.FromTag = "old-from"
+	oldBye.Metadata.Sip.ToTag = "old-to"
+	require.False(t, monitor.ProcessPacket(oldBye, "hunter"))
+	missingTagsBye := packet("BYE", 0, 4, "z9hG4bK-ambiguous-bye")
+	missingTagsBye.Metadata.Sip.CseqMethod = "BYE"
+	require.False(t, monitor.ProcessPacket(missingTagsBye, "hunter"))
+	newMedia := packet("", 0, 0, "")
+	newMedia.Metadata.Rtp = &data.RTPMetadata{Ssrc: 200}
+	newMedia.Metadata.SrcPort = 9000
+	require.False(t, monitor.ProcessPacket(newMedia, "hunter"))
+	newMedia.Metadata.SrcPort = 18000
+	require.True(t, monitor.ProcessPacket(newMedia, "hunter"))
+	call, _ := aggregator.GetCall("synthetic-restart")
+	require.Equal(t, voip.CallStateActive, call.State)
+	require.Equal(t, 1, call.RTPStats.TotalPackets)
+	newBye := packet("BYE", 0, 3, "z9hG4bK-new-bye")
+	newBye.Metadata.Sip.CseqMethod = "BYE"
+	newBye.Metadata.Sip.FromTag = "new-from"
+	newBye.Metadata.Sip.ToTag = "new-to"
+	require.True(t, monitor.ProcessPacket(newBye, "hunter"))
+	call, _ = aggregator.GetCall("synthetic-restart")
+	require.Equal(t, voip.CallStateEnding, call.State)
+	require.EqualValues(t, 1, finalizations.Load())
+	require.GreaterOrEqual(t, aggregator.RetryTelemetry().RejectedAttempts, uint64(1))
+	require.GreaterOrEqual(t, aggregator.RetryTelemetry().RejectedMedia, uint64(2))
+}
+
+func TestMonitorExpiredTombstoneDoesNotRepeatCompletion(t *testing.T) {
+	aggregator := voip.NewCallAggregator()
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{TombstoneTTL: time.Nanosecond})
+	monitor := NewCallCompletionMonitorWithLifecycle(&CallCompletionMonitorConfig{RetryWindow: time.Nanosecond, ClosedCallTTL: time.Nanosecond}, aggregator, nil, lifecycle)
+	var completed atomic.Int32
+	lifecycle.Subscribe(func(CallFinalizationEvent) { completed.Add(1) })
+	packet := func(method string, code uint32, number uint64, branch string) *data.CapturedPacket {
+		return &data.CapturedPacket{TimestampNs: time.Now().UnixNano(), Metadata: &data.PacketMetadata{Sip: &data.SIPMetadata{
+			CallId: "synthetic-expired-tombstone", Method: method, CseqMethod: "INVITE",
+			CseqNumber: number, ViaBranch: branch, ResponseCode: code,
+		}}}
+	}
+	require.True(t, monitor.ProcessPacket(packet("INVITE", 0, 1, "z9hG4bK-one"), "hunter"))
+	require.True(t, monitor.ProcessPacket(packet("RESPONSE", 503, 1, "z9hG4bK-one"), "hunter"))
+	monitor.checkEndedCalls()
+	monitor.processPendingClose()
+	require.EqualValues(t, 1, completed.Load())
+	require.False(t, lifecycle.IsFinalized("synthetic-expired-tombstone"))
+	monitor.checkEndedCalls()
+	monitor.processPendingClose()
+	require.Zero(t, monitor.GetPendingCount())
+	require.EqualValues(t, 1, completed.Load())
+	require.True(t, monitor.ProcessPacket(packet("INVITE", 0, 2, "z9hG4bK-two"), "hunter"))
+	call, _ := aggregator.GetCall("synthetic-expired-tombstone")
+	require.Equal(t, voip.CallStateTrying, call.State)
+	require.EqualValues(t, 1, completed.Load())
+}
+
+func TestMonitorConcurrentRetryAndCompletionCheck(t *testing.T) {
+	aggregator := voip.NewCallAggregator()
+	lifecycle := NewCallLifecycleRegistry(CallLifecycleConfig{})
+	monitor := NewCallCompletionMonitorWithLifecycle(&CallCompletionMonitorConfig{RetryWindow: 2 * time.Minute}, aggregator, nil, lifecycle)
+	packet := func(method string, code uint32, number uint64, branch string) *data.CapturedPacket {
+		return &data.CapturedPacket{TimestampNs: time.Now().UnixNano(), Metadata: &data.PacketMetadata{Sip: &data.SIPMetadata{
+			CallId: "synthetic-race", Method: method, CseqMethod: "INVITE", ResponseCode: code,
+			CseqNumber: number, ViaBranch: branch,
+		}}}
+	}
+	monitor.ProcessPacket(packet("INVITE", 0, 1, "z9hG4bK-one"), "hunter")
+	monitor.ProcessPacket(packet("RESPONSE", 503, 1, "z9hG4bK-one"), "hunter")
+	var group sync.WaitGroup
+	group.Add(2)
+	go func() {
+		defer group.Done()
+		monitor.ProcessPacket(packet("INVITE", 0, 2, "z9hG4bK-two"), "hunter")
+	}()
+	go func() {
+		defer group.Done()
+		monitor.checkEndedCalls()
+		monitor.processPendingClose()
+	}()
+	group.Wait()
+	call, _ := aggregator.GetCall("synthetic-race")
+	require.Equal(t, voip.CallStateTrying, call.State)
+	require.False(t, lifecycle.IsFinalized("synthetic-race"))
 }
 
 func TestNewCallCompletionMonitor(t *testing.T) {

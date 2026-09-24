@@ -114,7 +114,32 @@ type AggregatedCall struct {
 	RTPStats         *RTPQualityStats
 	Hunters          []string // Which hunters saw this call
 	PacketCount      int
-	SIPMethod        string // Last SIP method seen
+	SIPMethod        string    // Last SIP method seen
+	RetryDeadline    time.Time // Wall-clock deadline for a matched failed INVITE
+	AttemptVersion   uint64    // Changes when a distinct INVITE attempt starts
+	currentAttempt   inviteAttempt
+	confirmedAttempt inviteAttempt
+	attempts         map[inviteAttempt]struct{}
+	failedAttempts   map[inviteAttempt]struct{}
+	seenSSRC         map[uint32]struct{}
+	mediaPorts       map[uint32]struct{}
+	fromTag          string
+	toTag            string
+	established      bool
+	retrying         bool
+	finalized        bool
+}
+
+type inviteAttempt struct {
+	cseq   uint64
+	branch string
+}
+
+func inviteAttemptFromSIP(sip *data.SIPMetadata) (inviteAttempt, bool) {
+	if sip == nil || sip.CseqNumber == 0 || sip.ViaBranch == "" {
+		return inviteAttempt{}, false
+	}
+	return inviteAttempt{cseq: sip.CseqNumber, branch: sip.ViaBranch}, true
 }
 
 // RTPQualityStats contains RTP quality metrics
@@ -132,15 +157,52 @@ type RTPQualityStats struct {
 
 // CallAggregator aggregates call state from packet streams
 type CallAggregator struct {
-	calls       map[string]*AggregatedCall // callID -> call state
-	lruList     *list.List                 // LRU list (front = most recently used)
-	lruIndex    map[string]*list.Element   // callID -> list element for O(1) lookup
-	maxCalls    int                        // Maximum calls to keep
-	byeTimewait time.Duration              // How long to wait after BYE before transitioning to ENDED
-	mu          sync.RWMutex
-	cachedCalls []AggregatedCall // Cached sorted copy of calls
-	callsDirty  bool             // True if cache needs rebuild
+	calls              map[string]*AggregatedCall            // callID -> call state
+	retired            map[string]map[inviteAttempt]struct{} // old generations' transaction keys
+	retiredSSRC        map[string]map[uint32]struct{}
+	retiredPorts       map[string]map[uint32]struct{}
+	retiredFromTags    map[string]map[string]struct{}
+	retiredTagBlock    map[string]bool
+	retiredPortBlock   map[string]bool
+	lruList            *list.List               // LRU list (front = most recently used)
+	lruIndex           map[string]*list.Element // callID -> list element for O(1) lookup
+	maxCalls           int                      // Maximum calls to keep
+	byeTimewait        time.Duration            // How long to wait after BYE before transitioning to ENDED
+	retryWindow        time.Duration
+	nextAttemptVersion uint64
+	now                func() time.Time
+	retriesSeen        atomic.Uint64
+	recoveredCalls     atomic.Uint64
+	retryExpiries      atomic.Uint64
+	rejectedAttempts   atomic.Uint64
+	rejectedMedia      atomic.Uint64
+	mu                 sync.RWMutex
+	cachedCalls        []AggregatedCall // Cached sorted copy of calls
+	callsDirty         bool             // True if cache needs rebuild
 }
+
+// SIPRetryTelemetry contains bounded, process-lifetime retry diagnostics.
+type SIPRetryTelemetry struct {
+	RetriesSeen      uint64
+	RecoveredCalls   uint64
+	WindowExpiries   uint64
+	RejectedAttempts uint64
+	RejectedMedia    uint64
+}
+
+func (ca *CallAggregator) RetryTelemetry() SIPRetryTelemetry {
+	if ca == nil {
+		return SIPRetryTelemetry{}
+	}
+	return SIPRetryTelemetry{
+		RetriesSeen: ca.retriesSeen.Load(), RecoveredCalls: ca.recoveredCalls.Load(),
+		WindowExpiries: ca.retryExpiries.Load(), RejectedAttempts: ca.rejectedAttempts.Load(),
+		RejectedMedia: ca.rejectedMedia.Load(),
+	}
+}
+
+// RecordRetryExpiry counts an actual failure finalization after its retry window.
+func (ca *CallAggregator) RecordRetryExpiry() { ca.retryExpiries.Add(1) }
 
 // NewCallAggregator creates a new call aggregator with default capacity (1000 calls)
 func NewCallAggregator() *CallAggregator {
@@ -154,13 +216,299 @@ func NewCallAggregatorWithCapacity(maxCalls int) *CallAggregator {
 		maxCalls = 1000
 	}
 	return &CallAggregator{
-		calls:       make(map[string]*AggregatedCall),
-		lruList:     list.New(),
-		lruIndex:    make(map[string]*list.Element),
-		maxCalls:    maxCalls,
-		byeTimewait: DefaultBYETimewait,
-		callsDirty:  true, // Start dirty so first GetCalls builds cache
+		calls:            make(map[string]*AggregatedCall),
+		retired:          make(map[string]map[inviteAttempt]struct{}),
+		retiredSSRC:      make(map[string]map[uint32]struct{}),
+		retiredPorts:     make(map[string]map[uint32]struct{}),
+		retiredFromTags:  make(map[string]map[string]struct{}),
+		retiredTagBlock:  make(map[string]bool),
+		retiredPortBlock: make(map[string]bool),
+		lruList:          list.New(),
+		lruIndex:         make(map[string]*list.Element),
+		maxCalls:         maxCalls,
+		byeTimewait:      DefaultBYETimewait,
+		retryWindow:      2 * time.Minute,
+		now:              time.Now,
+		callsDirty:       true, // Start dirty so first GetCalls builds cache
 	}
+}
+
+// SetClock configures the decision clock before packet processing starts.
+// The supplied function must be safe for concurrent callers.
+func (ca *CallAggregator) SetClock(now func() time.Time) {
+	if now == nil {
+		now = time.Now
+	}
+	ca.mu.Lock()
+	ca.now = now
+	ca.mu.Unlock()
+}
+
+// SetRetryWindow sets the maximum time a failed INVITE can await a new attempt.
+func (ca *CallAggregator) SetRetryWindow(window time.Duration) {
+	if window <= 0 {
+		window = 2 * time.Minute
+	}
+	ca.mu.Lock()
+	ca.retryWindow = window
+	ca.mu.Unlock()
+}
+
+// CanRestartInvite requires a previously observed, distinct transaction before
+// a completed Call-ID may be reused. Missing identity remains ambiguous.
+func (ca *CallAggregator) CanRestartInvite(sip *data.SIPMetadata) bool {
+	if sip == nil || sip.Method != "INVITE" {
+		return false
+	}
+	attempt, identified := inviteAttemptFromSIP(sip)
+	if !identified {
+		return false
+	}
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
+	call := ca.calls[sip.CallId]
+	if call == nil || call.currentAttempt == (inviteAttempt{}) || attempt == call.currentAttempt {
+		return false
+	}
+	if len(ca.retired[sip.CallId]) >= 8 {
+		return false // Retained generation fingerprints are full; do not reuse identity.
+	}
+	if ca.retiredTagBlock[sip.CallId] {
+		return false
+	}
+	if sip.FromTag != "" {
+		if sip.FromTag == call.fromTag {
+			return false
+		}
+		if _, reused := ca.retiredFromTags[sip.CallId][sip.FromTag]; reused {
+			return false
+		}
+	}
+	_, seen := call.attempts[attempt]
+	if seen {
+		return false
+	}
+	_, retired := ca.retired[sip.CallId][attempt]
+	return !retired
+}
+
+// AcceptSIP rejects transactions retired by a generation restart and delayed
+// responses that do not belong to the current INVITE attempt.
+func (ca *CallAggregator) AcceptSIP(sip *data.SIPMetadata) bool {
+	if sip == nil || sip.CallId == "" {
+		return true
+	}
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
+	call := ca.calls[sip.CallId]
+	if call == nil {
+		return true
+	}
+	attempt, identified := inviteAttemptFromSIP(sip)
+	if call.State == CallStateFailed {
+		if sip.ResponseCode >= 200 {
+			ca.rejectedAttempts.Add(1)
+			return false
+		}
+		if sip.Method == "INVITE" {
+			if !identified || call.RetryDeadline.IsZero() || !ca.now().Before(call.RetryDeadline) {
+				ca.rejectedAttempts.Add(1)
+				return false
+			}
+			if _, seen := call.attempts[attempt]; seen {
+				ca.rejectedAttempts.Add(1)
+				return false
+			}
+		}
+	}
+	if sip.Method == "INVITE" && identified && len(call.attempts) >= 8 {
+		if _, seen := call.attempts[attempt]; !seen {
+			ca.rejectedAttempts.Add(1)
+			return false
+		}
+	}
+	if identified {
+		if _, old := ca.retired[sip.CallId][attempt]; old {
+			ca.rejectedAttempts.Add(1)
+			return false
+		}
+	}
+	if call.currentAttempt == (inviteAttempt{}) {
+		return true
+	}
+	if sip.ResponseCode > 0 && sip.CseqMethod == "INVITE" {
+		_, known := call.attempts[attempt]
+		_, failed := call.failedAttempts[attempt]
+		accepted := identified && known && !failed
+		if !accepted {
+			ca.rejectedAttempts.Add(1)
+		}
+		return accepted
+	}
+	if sip.Method == "ACK" {
+		accepted := sip.CseqNumber != 0 && sip.CseqNumber == call.currentAttempt.cseq
+		if _, restarted := ca.retired[sip.CallId]; restarted {
+			accepted = accepted && call.fromTag != "" && call.toTag != "" && sip.FromTag == call.fromTag && sip.ToTag == call.toTag
+		}
+		if !accepted {
+			ca.rejectedAttempts.Add(1)
+		}
+		return accepted
+	}
+	terminalMethod := sip.Method
+	if sip.ResponseCode > 0 {
+		terminalMethod = sip.CseqMethod
+	}
+	if _, restarted := ca.retired[sip.CallId]; restarted && (terminalMethod == "BYE" || terminalMethod == "CANCEL") {
+		accepted := call.fromTag != "" && sip.FromTag == call.fromTag
+		if terminalMethod == "BYE" {
+			accepted = accepted && call.toTag != "" && sip.ToTag == call.toTag
+		} else {
+			accepted = accepted && sip.CseqNumber == call.currentAttempt.cseq && sip.ViaBranch == call.currentAttempt.branch
+		}
+		if !accepted {
+			ca.rejectedAttempts.Add(1)
+		}
+		return accepted
+	}
+	return true
+}
+
+// AcceptRTP keeps media already observed in an earlier generation out of a
+// restarted call. Fresh generations wait for a matching answer before media
+// admission; live retries retain their early-media associations.
+func (ca *CallAggregator) AcceptRTP(packet *data.CapturedPacket) bool {
+	if packet == nil || packet.Metadata == nil || packet.Metadata.Rtp == nil || packet.Metadata.Sip == nil {
+		return true
+	}
+	callID := packet.Metadata.Sip.CallId
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
+	if _, restarted := ca.retired[callID]; !restarted {
+		return true
+	}
+	if ca.retiredPortBlock[callID] {
+		ca.rejectedMedia.Add(1)
+		return false
+	}
+	retired := ca.retiredSSRC[callID]
+	if _, reused := ca.retiredPorts[callID][packet.Metadata.SrcPort]; reused {
+		ca.rejectedMedia.Add(1)
+		return false
+	}
+	if _, reused := ca.retiredPorts[callID][packet.Metadata.DstPort]; reused {
+		ca.rejectedMedia.Add(1)
+		return false
+	}
+	if _, old := retired[packet.Metadata.Rtp.Ssrc]; old {
+		ca.rejectedMedia.Add(1)
+		return false
+	}
+	call := ca.calls[callID]
+	if call == nil || call.State != CallStateActive || len(call.mediaPorts) == 0 {
+		ca.rejectedMedia.Add(1)
+		return false
+	}
+	_, source := call.mediaPorts[packet.Metadata.SrcPort]
+	_, destination := call.mediaPorts[packet.Metadata.DstPort]
+	if !source && !destination {
+		ca.rejectedMedia.Add(1)
+	}
+	return source || destination
+}
+
+// ResetCall removes old signaling and RTP statistics before a verified new
+// lifecycle generation starts receiving packets.
+func (ca *CallAggregator) ResetCall(callID string) {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	if old := ca.calls[callID]; old != nil {
+		retired := ca.retired[callID]
+		if retired == nil {
+			retired = make(map[inviteAttempt]struct{})
+		}
+		for attempt := range old.attempts {
+			if len(retired) >= 8 {
+				break
+			}
+			retired[attempt] = struct{}{}
+		}
+		ca.retired[callID] = retired
+		retiredMedia := ca.retiredSSRC[callID]
+		if retiredMedia == nil {
+			retiredMedia = make(map[uint32]struct{})
+		}
+		for ssrc := range old.seenSSRC {
+			if len(retiredMedia) >= 8 {
+				break
+			}
+			retiredMedia[ssrc] = struct{}{}
+		}
+		ca.retiredSSRC[callID] = retiredMedia
+		if old.fromTag != "" {
+			tags := ca.retiredFromTags[callID]
+			if tags == nil {
+				tags = make(map[string]struct{})
+			}
+			if len(tags) >= 8 {
+				ca.retiredTagBlock[callID] = true
+			} else {
+				tags[old.fromTag] = struct{}{}
+			}
+			ca.retiredFromTags[callID] = tags
+		}
+		retiredPorts := ca.retiredPorts[callID]
+		if retiredPorts == nil {
+			retiredPorts = make(map[uint32]struct{})
+		}
+		for port := range old.mediaPorts {
+			if len(retiredPorts) >= 128 {
+				ca.retiredPortBlock[callID] = true
+				break
+			}
+			retiredPorts[port] = struct{}{}
+		}
+		ca.retiredPorts[callID] = retiredPorts
+	}
+	delete(ca.calls, callID)
+	if elem := ca.lruIndex[callID]; elem != nil {
+		ca.lruList.Remove(elem)
+		delete(ca.lruIndex, callID)
+	}
+	ca.callsDirty = true
+}
+
+// MarkFinalized keeps a completed aggregate from being scheduled again after
+// its lifecycle tombstone expires. The attempt history remains for restart
+// validation until this call is evicted or explicitly reset.
+func (ca *CallAggregator) MarkFinalized(callID string) {
+	ca.mu.Lock()
+	if call := ca.calls[callID]; call != nil {
+		call.finalized = true
+		if len(call.attempts) > 0 {
+			retired := ca.retired[callID]
+			if retired == nil {
+				retired = make(map[inviteAttempt]struct{})
+			}
+			for attempt := range call.attempts {
+				if len(retired) >= 8 {
+					break
+				}
+				retired[attempt] = struct{}{}
+			}
+			ca.retired[callID] = retired
+			call.attempts = nil
+			call.failedAttempts = nil
+		}
+	}
+	ca.mu.Unlock()
+}
+
+func (ca *CallAggregator) WasFinalized(callID string) bool {
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
+	call := ca.calls[callID]
+	return call != nil && call.finalized
 }
 
 // ProcessPacket updates call state based on a received packet
@@ -211,6 +559,10 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 			CallId:       voip.CallID,
 			Method:       voip.Method,
 			CseqMethod:   voip.CSeqMethod,
+			CseqNumber:   voip.CSeqNumber,
+			ViaBranch:    voip.ViaBranch,
+			FromTag:      voip.FromTag,
+			ToTag:        voip.ToTag,
 			ResponseCode: responseCode,
 			FromUser:     voip.From,
 			ToUser:       voip.To,
@@ -361,6 +713,12 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 				ca.lruList.Remove(oldest)
 				delete(ca.lruIndex, oldestCallID)
 				delete(ca.calls, oldestCallID)
+				delete(ca.retired, oldestCallID)
+				delete(ca.retiredSSRC, oldestCallID)
+				delete(ca.retiredPorts, oldestCallID)
+				delete(ca.retiredFromTags, oldestCallID)
+				delete(ca.retiredTagBlock, oldestCallID)
+				delete(ca.retiredPortBlock, oldestCallID)
 				logger.Debug("Evicted LRU call (buffer full)",
 					"call_id", oldestCallID)
 			}
@@ -442,9 +800,92 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 	// Update last packet time
 	call.LastPacketTime = timestamp
 
+	// A response may only change this dialog when it belongs to the current
+	// INVITE transaction. Old peers lack this identity; they retain ordinary
+	// terminal handling, but cannot make a failed call retryable.
+	attempt, identified := inviteAttemptFromSIP(sip)
+	if sip.Method == "INVITE" && identified {
+		if call.attempts == nil {
+			call.attempts = make(map[inviteAttempt]struct{})
+			call.failedAttempts = make(map[inviteAttempt]struct{})
+		}
+		if _, seen := call.attempts[attempt]; !seen {
+			if len(call.attempts) >= 8 {
+				ca.rejectedAttempts.Add(1)
+				return
+			}
+			call.attempts[attempt] = struct{}{}
+			if call.State == CallStateFailed && !call.RetryDeadline.IsZero() && ca.now().Before(call.RetryDeadline) {
+				call.State = CallStateTrying
+				call.retrying = true
+				ca.retriesSeen.Add(1)
+				call.EndTime = time.Time{}
+				call.LastResponseCode = 0
+				call.RetryDeadline = time.Time{}
+			}
+			if call.State != CallStateFailed && call.State != CallStateEnded && call.State != CallStateCancelled {
+				call.currentAttempt = attempt
+				ca.nextAttemptVersion++
+				call.AttemptVersion = ca.nextAttemptVersion
+			}
+		}
+	}
+	if sip.ResponseCode > 0 && sip.CseqMethod == "INVITE" && call.currentAttempt != (inviteAttempt{}) {
+		_, known := call.attempts[attempt]
+		_, failed := call.failedAttempts[attempt]
+		if !identified || !known || failed {
+			return
+		}
+		if sip.ResponseCode >= 400 {
+			call.failedAttempts[attempt] = struct{}{}
+			if call.established {
+				call.currentAttempt = call.confirmedAttempt
+				return // A failed in-dialog re-INVITE cannot end the established call.
+			}
+			for other := range call.attempts {
+				if _, otherFailed := call.failedAttempts[other]; !otherFailed {
+					return // Another INVITE can still answer.
+				}
+			}
+		}
+		if sip.ResponseCode >= 200 && sip.ResponseCode < 300 {
+			call.established = true
+			call.confirmedAttempt = attempt
+			call.currentAttempt = attempt
+			for other := range call.attempts {
+				if other != attempt {
+					call.failedAttempts[other] = struct{}{}
+				}
+			}
+		}
+	}
+	if sip.ResponseCode == 503 && sip.CseqMethod == "INVITE" && identified {
+		call.RetryDeadline = ca.now().Add(ca.retryWindow)
+	}
+	if len(sip.MediaPorts) > 0 {
+		if call.mediaPorts == nil {
+			call.mediaPorts = make(map[uint32]struct{})
+		}
+		for _, port := range sip.MediaPorts {
+			if port > 0 && port <= 65535 && len(call.mediaPorts) < 16 {
+				call.mediaPorts[port] = struct{}{}
+			}
+		}
+	}
+	if sip.Method == "INVITE" && sip.FromTag != "" {
+		call.fromTag = sip.FromTag
+	}
+	if sip.CseqMethod == "INVITE" && sip.ResponseCode >= 200 && sip.ResponseCode < 300 && sip.ToTag != "" {
+		call.toTag = sip.ToTag
+	}
+
 	// Update state based on SIP method
 	call.SIPMethod = sip.Method
 	ca.updateCallState(call, sip.Method, sip.CseqMethod, sip.ResponseCode, timestamp)
+	if call.retrying && call.State == CallStateActive {
+		call.retrying = false
+		ca.recoveredCalls.Add(1)
+	}
 	call.PacketCount++
 }
 
@@ -573,6 +1014,9 @@ func (ca *CallAggregator) updateCallState(call *AggregatedCall, method, cseqMeth
 		call.State = CallStateCancelled
 		call.EndTime = timestamp
 	} else if responseCode >= 400 {
+		if cseqMethod != "" && cseqMethod != "INVITE" {
+			return
+		}
 		// Other 4xx/5xx errors - store the code for display (e.g., "E:401", "E:503")
 		call.State = CallStateFailed
 		call.LastResponseCode = responseCode
@@ -660,6 +1104,12 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 				ca.lruList.Remove(oldest)
 				delete(ca.lruIndex, oldestCallID)
 				delete(ca.calls, oldestCallID)
+				delete(ca.retired, oldestCallID)
+				delete(ca.retiredSSRC, oldestCallID)
+				delete(ca.retiredPorts, oldestCallID)
+				delete(ca.retiredFromTags, oldestCallID)
+				delete(ca.retiredTagBlock, oldestCallID)
+				delete(ca.retiredPortBlock, oldestCallID)
 				logger.Debug("Evicted LRU call (buffer full, RTP path)",
 					"call_id", oldestCallID)
 			}
@@ -683,6 +1133,12 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 
 	// Update last packet time
 	call.LastPacketTime = timestamp
+	if call.seenSSRC == nil {
+		call.seenSSRC = make(map[uint32]struct{})
+	}
+	if len(call.seenSSRC) < 8 {
+		call.seenSSRC[rtp.Ssrc] = struct{}{}
+	}
 
 	// Initialize RTP stats if not already done
 	if call.RTPStats == nil {
@@ -915,6 +1371,8 @@ func (ca *CallAggregator) deepCopyCall(call *AggregatedCall) AggregatedCall {
 		TimewaitStart:    call.TimewaitStart,
 		PacketCount:      call.PacketCount,
 		SIPMethod:        call.SIPMethod,
+		RetryDeadline:    call.RetryDeadline,
+		AttemptVersion:   call.AttemptVersion,
 	}
 
 	// Deep copy pointer fields (RTPStats)
@@ -1086,7 +1544,7 @@ func (ca *CallAggregator) IsTimewaitExpired(callID string) bool {
 	}
 
 	// Check if timewait has expired
-	return time.Since(call.TimewaitStart) >= ca.byeTimewait
+	return ca.now().Sub(call.TimewaitStart) >= ca.byeTimewait
 }
 
 // CompleteTimewait transitions a call from ENDING to ENDED state if timewait has expired.
@@ -1105,7 +1563,7 @@ func (ca *CallAggregator) CompleteTimewait(callID string) bool {
 	}
 
 	// Check if timewait has expired
-	if time.Since(call.TimewaitStart) < ca.byeTimewait {
+	if ca.now().Sub(call.TimewaitStart) < ca.byeTimewait {
 		return false
 	}
 
@@ -1118,7 +1576,7 @@ func (ca *CallAggregator) CompleteTimewait(callID string) bool {
 		"call_id", callID,
 		"from_state", oldState.String(),
 		"to_state", call.State.String(),
-		"timewait_duration", time.Since(call.TimewaitStart))
+		"timewait_duration", ca.now().Sub(call.TimewaitStart))
 
 	return true
 }
@@ -1151,7 +1609,7 @@ func (ca *CallAggregator) ProcessTimewaitExpiry() int {
 		}
 
 		// Check if timewait has expired
-		if time.Since(call.TimewaitStart) >= ca.byeTimewait {
+		if ca.now().Sub(call.TimewaitStart) >= ca.byeTimewait {
 			oldState := call.State
 			call.State = CallStateEnded
 			ca.callsDirty = true
@@ -1161,7 +1619,7 @@ func (ca *CallAggregator) ProcessTimewaitExpiry() int {
 				"call_id", callID,
 				"from_state", oldState.String(),
 				"to_state", call.State.String(),
-				"timewait_duration", time.Since(call.TimewaitStart))
+				"timewait_duration", ca.now().Sub(call.TimewaitStart))
 		}
 	}
 

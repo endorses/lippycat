@@ -3,6 +3,7 @@
 package components
 
 import (
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"sync"
 )
 
@@ -27,6 +28,7 @@ type DropStats struct {
 	BufferSIPCapacity     int
 	BufferOutputLength    int
 	BufferOutputCapacity  int
+	IPv4Defrag            capture.IPv4DefragSnapshot
 	QueueDrops            int64 // TCP assembler queue full
 	FilterDrops           int64 // Filtered out (intentional, not counted in total)
 
@@ -97,6 +99,12 @@ func (ds *DropStats) SetCaptureBufferPressure(demotions int64, regularLength, re
 	ds.BufferOutputCapacity = outputCapacity
 }
 
+func (ds *DropStats) SetIPv4Defrag(snapshot capture.IPv4DefragSnapshot) {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	ds.IPv4Defrag = snapshot
+}
+
 // AddQueueDrops adds to the queue drop counter.
 func (ds *DropStats) AddQueueDrops(count int64) {
 	ds.mu.Lock()
@@ -160,6 +168,7 @@ type DropSummary struct {
 	BufferSIPCapacity     int
 	BufferOutputLength    int
 	BufferOutputCapacity  int
+	IPv4Defrag            capture.IPv4DefragSnapshot
 	BufferDropRate        float64
 	QueueDrops            int64
 	QueueDropRate         float64
@@ -204,6 +213,7 @@ func (ds *DropStats) GetSummary() DropSummary {
 		BufferSIPCapacity:     ds.BufferSIPCapacity,
 		BufferOutputLength:    ds.BufferOutputLength,
 		BufferOutputCapacity:  ds.BufferOutputCapacity,
+		IPv4Defrag:            ds.IPv4Defrag,
 		QueueDrops:            ds.QueueDrops,
 		HunterDrops:           ds.HunterDrops,
 		NetworkDrops:          ds.NetworkDrops,

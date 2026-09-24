@@ -231,6 +231,13 @@ message SIPMetadata {
     // message is a response — capture started mid-call, or packets
     // reordered. Empty on hunters that predate this field.
     string cseq_method = 13;
+
+    // INVITE transaction identity. Zero/empty on older peers or malformed messages.
+    uint64 cseq_number = 14;
+    string via_branch = 15;
+
+    // Bounded RTP media ports advertised by this SIP message's SDP.
+    repeated uint32 media_ports = 16;
 }
 
 // AccessNetworkInfo contains parsed P-Access-Network-Info header data (3GPP TS 24.229).

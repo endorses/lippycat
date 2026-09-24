@@ -45,8 +45,10 @@ type AccessNetworkInfo struct {
 type VoIPMetadata struct {
 	// SIP fields
 	CallID      string
-	Method      string            // SIP method (INVITE, ACK, etc.)
-	CSeqMethod  string            // CSeq header method token (recovers a response's transaction method)
+	Method      string // SIP method (INVITE, ACK, etc.)
+	CSeqMethod  string // CSeq header method token (recovers a response's transaction method)
+	CSeqNumber  uint64
+	ViaBranch   string
 	Status      int               // SIP response code
 	From        string            // SIP From header
 	To          string            // SIP To header

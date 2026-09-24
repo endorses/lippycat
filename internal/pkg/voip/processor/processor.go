@@ -94,6 +94,9 @@ type CallMetadata struct {
 	PAssertedIdentity string
 	Method            string
 	CSeqMethod        string // CSeq header method token (recovers a response's transaction method)
+	CSeqNumber        uint64
+	ViaBranch         string
+	MediaPorts        []uint32
 	ResponseCode      uint32
 	SDPBody           string
 	ContentType       string // Content-Type header

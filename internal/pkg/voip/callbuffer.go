@@ -41,6 +41,9 @@ type CallMetadata struct {
 	CallID            string
 	Method            string
 	CSeqMethod        string // CSeq header method token (recovers a response's transaction method)
+	CSeqNumber        uint64
+	ViaBranch         string
+	MediaPorts        []uint32
 	ResponseCode      uint32 // SIP response code (e.g., 200, 180, 486)
 	SDPBody           string // For RTP port extraction
 }

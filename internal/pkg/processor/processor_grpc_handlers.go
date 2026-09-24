@@ -286,6 +286,7 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 			HuntersConnected: processorStats.TotalHunters,
 			ProcessorId:      p.config.ProcessorID,
 			PcapWriter:       p.pcapWriterTelemetryProto(),
+			SipRetry:         p.sipRetryTelemetryProto(),
 		}
 
 		if err := stream.Send(resp); err != nil {
@@ -469,6 +470,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 	processorStats := p.statsCollector.GetProto()
 	p.populateLIEncodingStats(processorStats)
 	p.populateLIDeliveryStats(processorStats)
+	processorStats.SipRetry = p.sipRetryTelemetryProto()
 
 	return &management.StatusResponse{
 		Hunters:        connectedHunters,

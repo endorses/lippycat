@@ -325,6 +325,8 @@ message ProcessorHeartbeat {
 
     // Processor-owned per-call output lifecycle telemetry.
     PcapWriterTelemetry pcap_writer = 5;
+
+    SIPRetryTelemetry sip_retry = 6;
 }
 
 // ProcessorStatus enum
@@ -682,6 +684,17 @@ message ProcessorStats {
     LIEncodingStats li_encoding = 11;
     // Local delivery observations; absent unless LI delivery is configured.
     LIDeliveryStats li_delivery = 12;
+
+    SIPRetryTelemetry sip_retry = 13;
+}
+
+// Bounded-cardinality counters for INVITE retry and restart decisions.
+message SIPRetryTelemetry {
+    uint64 retries_seen = 1;
+    uint64 recovered_calls = 2;
+    uint64 window_expiries = 3;
+    uint64 rejected_attempts = 4;
+    uint64 rejected_media = 5;
 }
 
 // Writes mean local TLS write completion, not receiver acceptance. Counters

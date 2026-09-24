@@ -33,7 +33,10 @@ Examples:
   lc watch live -i eth0           # Capture on eth0
   lc watch live -i eth0 -f "port 5060"  # With BPF filter`,
 	PreRunE: func(_ *cobra.Command, _ []string) error {
-		return capture.ValidatePacketBufferConfig()
+		if err := capture.ValidatePacketBufferConfig(); err != nil {
+			return err
+		}
+		return capture.ValidateIPv4DefragConfig()
 	},
 	Run: runLive,
 }

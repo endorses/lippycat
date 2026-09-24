@@ -1281,6 +1281,146 @@ func sipPacket(callID, method, cseqMethod string, responseCode uint32) *data.Cap
 	}
 }
 
+func transactionPacket(callID, method, cseqMethod string, code uint32, number uint64, branch string, at time.Time) *data.CapturedPacket {
+	packet := sipPacket(callID, method, cseqMethod, code)
+	packet.Metadata.Sip.CseqNumber = number
+	packet.Metadata.Sip.ViaBranch = branch
+	packet.TimestampNs = at.UnixNano()
+	return packet
+}
+
+func TestCallAggregatorMatched503RetryAfter88Seconds(t *testing.T) {
+	ca := NewCallAggregator()
+	start := time.Now().Add(-time.Minute)
+	first := transactionPacket("synthetic-retry", "INVITE", "INVITE", 0, 1, "z9hG4bK-one", start)
+	first.Metadata.Sip.FromUri = "sip:caller@example.test"
+	first.Metadata.Sip.ToUri = "sip:callee@example.test"
+	ca.ProcessPacket(first, "hunter-1")
+	ca.ProcessPacket(transactionPacket("synthetic-retry", "RESPONSE", "INVITE", 503, 1, "z9hG4bK-one", start.Add(time.Second)), "hunter-1")
+	failed, _ := ca.GetCall("synthetic-retry")
+	require.Equal(t, CallStateFailed, failed.State)
+	require.False(t, failed.RetryDeadline.IsZero())
+
+	ca.ProcessPacket(transactionPacket("synthetic-retry", "INVITE", "INVITE", 0, 2, "z9hG4bK-two", start.Add(88*time.Second)), "hunter-1")
+	trying, _ := ca.GetCall("synthetic-retry")
+	require.Equal(t, CallStateTrying, trying.State)
+	require.True(t, trying.EndTime.IsZero())
+	require.Equal(t, failed.StartTime, trying.StartTime)
+	require.Equal(t, "sip:caller@example.test", trying.From)
+	require.Equal(t, "sip:callee@example.test", trying.To)
+
+	ca.ProcessPacket(transactionPacket("synthetic-retry", "RESPONSE", "INVITE", 200, 1, "z9hG4bK-one", start.Add(89*time.Second)), "hunter-1")
+	stale, _ := ca.GetCall("synthetic-retry")
+	require.Equal(t, CallStateTrying, stale.State)
+	ca.ProcessPacket(transactionPacket("synthetic-retry", "RESPONSE", "INVITE", 200, 2, "z9hG4bK-two", start.Add(90*time.Second)), "hunter-1")
+	active, _ := ca.GetCall("synthetic-retry")
+	require.Equal(t, CallStateActive, active.State)
+}
+
+func TestCallAggregator503OtherMethodDoesNotFailInvite(t *testing.T) {
+	ca := NewCallAggregator()
+	start := time.Now()
+	ca.ProcessPacket(transactionPacket("synthetic-other", "INVITE", "INVITE", 0, 1, "z9hG4bK-one", start), "hunter-1")
+	ca.ProcessPacket(transactionPacket("synthetic-other", "RESPONSE", "OPTIONS", 503, 2, "z9hG4bK-other", start.Add(time.Second)), "hunter-1")
+	call, _ := ca.GetCall("synthetic-other")
+	require.Equal(t, CallStateTrying, call.State)
+	require.True(t, call.RetryDeadline.IsZero())
+}
+
+func TestCallAggregatorFailedReinviteKeepsEstablishedDialog(t *testing.T) {
+	ca := NewCallAggregator()
+	now := time.Now()
+	ca.ProcessPacket(transactionPacket("synthetic-established", "INVITE", "INVITE", 0, 1, "z9hG4bK-first", now), "hunter")
+	ca.ProcessPacket(transactionPacket("synthetic-established", "RESPONSE", "INVITE", 200, 1, "z9hG4bK-first", now.Add(time.Second)), "hunter")
+	ca.ProcessPacket(transactionPacket("synthetic-established", "INVITE", "INVITE", 0, 2, "z9hG4bK-reinvite", now.Add(2*time.Second)), "hunter")
+	ca.ProcessPacket(transactionPacket("synthetic-established", "RESPONSE", "INVITE", 503, 2, "z9hG4bK-reinvite", now.Add(3*time.Second)), "hunter")
+	call, ok := ca.GetCall("synthetic-established")
+	require.True(t, ok)
+	require.Equal(t, CallStateActive, call.State)
+	require.True(t, call.RetryDeadline.IsZero())
+}
+
+func TestCallAggregatorRestartRejectsReusedMediaPortBeyondSSRCLimit(t *testing.T) {
+	ca := NewCallAggregator()
+	now := time.Now()
+	ca.ProcessPacket(transactionPacket("synthetic-ports", "INVITE", "INVITE", 0, 1, "z9hG4bK-first", now), "hunter")
+	oldAnswer := transactionPacket("synthetic-ports", "RESPONSE", "INVITE", 200, 1, "z9hG4bK-first", now.Add(time.Second))
+	oldAnswer.Metadata.Sip.MediaPorts = []uint32{18000}
+	ca.ProcessPacket(oldAnswer, "hunter")
+	for ssrc := uint32(1); ssrc <= 9; ssrc++ {
+		ca.ProcessPacket(&data.CapturedPacket{TimestampNs: now.UnixNano(), Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{CallId: "synthetic-ports"}, Rtp: &data.RTPMetadata{Ssrc: ssrc}, SrcPort: 18000,
+		}}, "hunter")
+	}
+	ca.ResetCall("synthetic-ports")
+	ca.ProcessPacket(transactionPacket("synthetic-ports", "INVITE", "INVITE", 0, 2, "z9hG4bK-second", now.Add(2*time.Second)), "hunter")
+	newAnswer := transactionPacket("synthetic-ports", "RESPONSE", "INVITE", 200, 2, "z9hG4bK-second", now.Add(3*time.Second))
+	newAnswer.Metadata.Sip.MediaPorts = []uint32{18000, 19000}
+	ca.ProcessPacket(newAnswer, "hunter")
+	oldMedia := &data.CapturedPacket{Metadata: &data.PacketMetadata{
+		Sip: &data.SIPMetadata{CallId: "synthetic-ports"}, Rtp: &data.RTPMetadata{Ssrc: 9}, SrcPort: 18000,
+	}}
+	require.False(t, ca.AcceptRTP(oldMedia), "reused port must reject even an untracked ninth SSRC")
+	oldMedia.Metadata.Rtp.Ssrc = 10
+	require.False(t, ca.AcceptRTP(oldMedia), "unseen old SSRC cannot bypass retired port gate")
+	oldMedia.Metadata.SrcPort = 19000
+	require.True(t, ca.AcceptRTP(oldMedia), "distinct advertised new-generation port remains usable")
+}
+
+func TestCallAggregatorRestartRejectsHistoricDialogTag(t *testing.T) {
+	ca := NewCallAggregator()
+	now := time.Now()
+	for generation, tag := range []string{"tag-first", "tag-second"} {
+		if generation > 0 {
+			ca.ResetCall("synthetic-tags")
+		}
+		invite := transactionPacket("synthetic-tags", "INVITE", "INVITE", 0, uint64(generation+1), "z9hG4bK-"+tag, now)
+		invite.Metadata.Sip.FromTag = tag
+		ca.ProcessPacket(invite, "hunter")
+		ca.MarkFinalized("synthetic-tags")
+	}
+	reused := &data.SIPMetadata{CallId: "synthetic-tags", Method: "INVITE", CseqNumber: 3, ViaBranch: "z9hG4bK-new", FromTag: "tag-first"}
+	require.False(t, ca.CanRestartInvite(reused))
+	reused.FromTag = "tag-third"
+	require.True(t, ca.CanRestartInvite(reused))
+}
+
+func TestCallAggregatorOverlappingInviteFailureDoesNotEndOtherAttempt(t *testing.T) {
+	ca := NewCallAggregator()
+	start := time.Now()
+	ca.ProcessPacket(transactionPacket("synthetic-overlap", "INVITE", "INVITE", 0, 1, "z9hG4bK-one", start), "hunter")
+	ca.ProcessPacket(transactionPacket("synthetic-overlap", "INVITE", "INVITE", 0, 2, "z9hG4bK-two", start.Add(time.Second)), "hunter")
+	ca.ProcessPacket(transactionPacket("synthetic-overlap", "RESPONSE", "INVITE", 503, 1, "z9hG4bK-one", start.Add(2*time.Second)), "hunter")
+	call, _ := ca.GetCall("synthetic-overlap")
+	require.Equal(t, CallStateTrying, call.State)
+	require.True(t, call.RetryDeadline.IsZero())
+	ca.ProcessPacket(transactionPacket("synthetic-overlap", "RESPONSE", "INVITE", 200, 2, "z9hG4bK-two", start.Add(3*time.Second)), "hunter")
+	call, _ = ca.GetCall("synthetic-overlap")
+	require.Equal(t, CallStateActive, call.State)
+	require.True(t, call.EndTime.IsZero())
+}
+
+func TestCallAggregatorMissingTransactionIdentityCannotHold503(t *testing.T) {
+	ca := NewCallAggregator()
+	ca.ProcessPacket(sipPacket("synthetic-legacy", "INVITE", "INVITE", 0), "old-hunter")
+	ca.ProcessPacket(sipPacket("synthetic-legacy", "RESPONSE", "INVITE", 503), "old-hunter")
+	call, _ := ca.GetCall("synthetic-legacy")
+	require.Equal(t, CallStateFailed, call.State)
+	require.True(t, call.RetryDeadline.IsZero())
+}
+
+func TestCallAggregatorOtherServerFailuresDoNotOpen503RetryWindow(t *testing.T) {
+	for _, code := range []uint32{408, 500, 502} {
+		ca := NewCallAggregator()
+		start := time.Now()
+		ca.ProcessPacket(transactionPacket("synthetic-other-error", "INVITE", "INVITE", 0, 1, "z9hG4bK-one", start), "hunter")
+		ca.ProcessPacket(transactionPacket("synthetic-other-error", "RESPONSE", "INVITE", code, 1, "z9hG4bK-one", start.Add(time.Second)), "hunter")
+		call, _ := ca.GetCall("synthetic-other-error")
+		require.Equal(t, CallStateFailed, call.State, "response %d", code)
+		require.True(t, call.RetryDeadline.IsZero(), "response %d", code)
+	}
+}
+
 // A call whose first observed packet is an ACK — capture started mid-call,
 // or the INVITE was reordered behind the ACK — must still be created and
 // land in ACTIVE rather than being dropped.

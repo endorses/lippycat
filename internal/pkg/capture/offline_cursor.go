@@ -59,7 +59,15 @@ func newOfflineCursor(ctx context.Context, dev pcaptypes.PcapInterface, filter s
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	c := &offlineCursor{espConfig: offlineESPConfigFromContext(ctx), path: dev.Name(), sourceIndex: sourceIndex, ip4: NewIPv4Defragmenter(), ip6: NewIPv6Defragmenter()}
+	ipv4Config, err := IPv4DefragConfigFromViper()
+	if err != nil {
+		return nil, fmt.Errorf("IPv4 defragmentation configuration: %w", err)
+	}
+	ipv4Defrag, err := NewIPv4DefragmenterWithConfig(ipv4Config)
+	if err != nil {
+		return nil, err
+	}
+	c := &offlineCursor{espConfig: offlineESPConfigFromContext(ctx), path: dev.Name(), sourceIndex: sourceIndex, ip4: ipv4Defrag, ip6: NewIPv6Defragmenter()}
 	c.spiCache = newTTLCache[uint32, layers.IPProtocol](5 * time.Minute)
 	c.fragCache = newTTLCache[uint32, ipv6FragInfo](30 * time.Second)
 	var input io.Reader
@@ -282,8 +290,8 @@ func (c *offlineCursor) next(ctx context.Context, decoder *offlinePacketDecoder)
 		if c.bpf != nil && !c.bpf.Matches(ci, data) {
 			continue
 		}
-		if c.cleanup.IsZero() || ci.Timestamp.Sub(c.cleanup) >= time.Second {
-			c.ip4.DiscardOlderThan(ci.Timestamp.Add(-30 * time.Second))
+		if c.cleanup.IsZero() || ci.Timestamp.Sub(c.cleanup) >= c.ip4.config.SweepInterval {
+			c.ip4.DiscardOlderThan(ci.Timestamp.Add(-c.ip4.config.StaleAge))
 			c.ip6.DiscardOlderThan(ci.Timestamp.Add(-30 * time.Second))
 			c.spiCache.Sweep()
 			c.fragCache.Sweep()

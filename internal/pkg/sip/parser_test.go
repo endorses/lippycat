@@ -44,6 +44,24 @@ func TestResponses(t *testing.T) {
 	}
 }
 
+func TestInviteTransactionIdentity(t *testing.T) {
+	message := "INVITE sip:bob@example.test SIP/2.0\r\nVia: SIP/2.0/UDP proxy.example.test;branch=z9hG4bK-first\r\nVia: SIP/2.0/UDP upstream.example.test;branch=z9hG4bK-second\r\nCall-ID: retry-call\r\nCSeq: 42 INVITE\r\nContent-Length: 0\r\n\r\n"
+	event, err := Parse([]byte(message), ParseOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.CSeqNumber != 42 || event.ViaBranch != "z9hG4bK-first" {
+		t.Fatalf("transaction identity = (%d, %q)", event.CSeqNumber, event.ViaBranch)
+	}
+}
+
+func TestMediaPortsBoundedAndValidated(t *testing.T) {
+	ports := MediaPorts([]byte("v=0\r\nm=audio 18000 RTP/AVP 0\r\nm=video 19000/2 RTP/AVP 96\r\nm=audio 0 RTP/AVP 8\r\nm=audio invalid RTP/AVP 8\r\n"))
+	if len(ports) != 2 || ports[0] != 18000 || ports[1] != 19000 {
+		t.Fatalf("media ports = %v", ports)
+	}
+}
+
 func TestRejectsInvalidResponseStatus(t *testing.T) {
 	for _, code := range []string{"099", "700", "999"} {
 		_, err := Parse([]byte("SIP/2.0 "+code+" Invalid\r\nContent-Length: 0\r\n\r\n"), ParseOptions{})

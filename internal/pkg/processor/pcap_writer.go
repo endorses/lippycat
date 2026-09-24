@@ -608,6 +608,10 @@ func (writer *CallPcapWriter) writeRTPPacket(timestamp time.Time, data []byte, l
 
 // SweepIdle closes writers that have not received SIP or RTP packets within maxIdle.
 func (pwm *PcapWriterManager) SweepIdle(maxIdle time.Duration) int {
+	return pwm.sweepIdleExcept(maxIdle, nil)
+}
+
+func (pwm *PcapWriterManager) sweepIdleExcept(maxIdle time.Duration, keep func(string) bool) int {
 	if pwm == nil || maxIdle <= 0 {
 		return 0
 	}
@@ -621,6 +625,9 @@ func (pwm *PcapWriterManager) SweepIdle(maxIdle time.Duration) int {
 
 	closed := 0
 	for _, callID := range toClose {
+		if keep != nil && keep(callID) {
+			continue
+		}
 		result, err := pwm.finalizeCallIfIdle(callID, maxIdle)
 		if err != nil {
 			logger.Warn("Failed to close idle per-call PCAP writer",

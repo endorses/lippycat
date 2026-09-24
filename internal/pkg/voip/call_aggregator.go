@@ -123,6 +123,8 @@ type AggregatedCall struct {
 	failedAttempts   map[inviteAttempt]struct{}
 	seenSSRC         map[uint32]struct{}
 	mediaPorts       map[uint32]struct{}
+	observedRTPPairs map[rtpPortPair]struct{}
+	rtpPairOverflow  bool
 	fromTag          string
 	toTag            string
 	established      bool
@@ -133,6 +135,22 @@ type AggregatedCall struct {
 type inviteAttempt struct {
 	cseq   uint64
 	branch string
+}
+
+type rtpPortPair struct {
+	source      uint32
+	destination uint32
+}
+
+func rtpPortPairFromPacket(packet *data.CapturedPacket) (rtpPortPair, bool) {
+	if packet == nil || packet.Metadata == nil {
+		return rtpPortPair{}, false
+	}
+	source, destination := packet.Metadata.SrcPort, packet.Metadata.DstPort
+	if (source == 0 && destination == 0) || source > 65535 || destination > 65535 {
+		return rtpPortPair{}, false
+	}
+	return rtpPortPair{source: source, destination: destination}, true
 }
 
 func inviteAttemptFromSIP(sip *data.SIPMetadata) (inviteAttempt, bool) {
@@ -161,6 +179,7 @@ type CallAggregator struct {
 	retired            map[string]map[inviteAttempt]struct{} // old generations' transaction keys
 	retiredSSRC        map[string]map[uint32]struct{}
 	retiredPorts       map[string]map[uint32]struct{}
+	retiredRTPPairs    map[string]map[rtpPortPair]struct{}
 	retiredFromTags    map[string]map[string]struct{}
 	retiredTagBlock    map[string]bool
 	retiredPortBlock   map[string]bool
@@ -220,6 +239,7 @@ func NewCallAggregatorWithCapacity(maxCalls int) *CallAggregator {
 		retired:          make(map[string]map[inviteAttempt]struct{}),
 		retiredSSRC:      make(map[string]map[uint32]struct{}),
 		retiredPorts:     make(map[string]map[uint32]struct{}),
+		retiredRTPPairs:  make(map[string]map[rtpPortPair]struct{}),
 		retiredFromTags:  make(map[string]map[string]struct{}),
 		retiredTagBlock:  make(map[string]bool),
 		retiredPortBlock: make(map[string]bool),
@@ -400,6 +420,12 @@ func (ca *CallAggregator) AcceptRTP(packet *data.CapturedPacket) bool {
 		ca.rejectedMedia.Add(1)
 		return false
 	}
+	if pair, ok := rtpPortPairFromPacket(packet); ok {
+		if _, reused := ca.retiredRTPPairs[callID][pair]; reused {
+			ca.rejectedMedia.Add(1)
+			return false
+		}
+	}
 	if _, old := retired[packet.Metadata.Rtp.Ssrc]; old {
 		ca.rejectedMedia.Add(1)
 		return false
@@ -462,6 +488,9 @@ func (ca *CallAggregator) ResetCall(callID string) {
 			retiredPorts = make(map[uint32]struct{})
 		}
 		for port := range old.mediaPorts {
+			if _, known := retiredPorts[port]; known {
+				continue
+			}
 			if len(retiredPorts) >= 128 {
 				ca.retiredPortBlock[callID] = true
 				break
@@ -469,6 +498,24 @@ func (ca *CallAggregator) ResetCall(callID string) {
 			retiredPorts[port] = struct{}{}
 		}
 		ca.retiredPorts[callID] = retiredPorts
+		if old.rtpPairOverflow {
+			ca.retiredPortBlock[callID] = true
+		}
+		retiredPairs := ca.retiredRTPPairs[callID]
+		if retiredPairs == nil {
+			retiredPairs = make(map[rtpPortPair]struct{})
+		}
+		for pair := range old.observedRTPPairs {
+			if _, known := retiredPairs[pair]; known {
+				continue
+			}
+			if len(retiredPairs) >= 128 {
+				ca.retiredPortBlock[callID] = true
+				break
+			}
+			retiredPairs[pair] = struct{}{}
+		}
+		ca.retiredRTPPairs[callID] = retiredPairs
 	}
 	delete(ca.calls, callID)
 	if elem := ca.lruIndex[callID]; elem != nil {
@@ -716,6 +763,7 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 				delete(ca.retired, oldestCallID)
 				delete(ca.retiredSSRC, oldestCallID)
 				delete(ca.retiredPorts, oldestCallID)
+				delete(ca.retiredRTPPairs, oldestCallID)
 				delete(ca.retiredFromTags, oldestCallID)
 				delete(ca.retiredTagBlock, oldestCallID)
 				delete(ca.retiredPortBlock, oldestCallID)
@@ -1107,6 +1155,7 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 				delete(ca.retired, oldestCallID)
 				delete(ca.retiredSSRC, oldestCallID)
 				delete(ca.retiredPorts, oldestCallID)
+				delete(ca.retiredRTPPairs, oldestCallID)
 				delete(ca.retiredFromTags, oldestCallID)
 				delete(ca.retiredTagBlock, oldestCallID)
 				delete(ca.retiredPortBlock, oldestCallID)
@@ -1138,6 +1187,18 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 	}
 	if len(call.seenSSRC) < 8 {
 		call.seenSSRC[rtp.Ssrc] = struct{}{}
+	}
+	if pair, ok := rtpPortPairFromPacket(packet); ok {
+		if call.observedRTPPairs == nil {
+			call.observedRTPPairs = make(map[rtpPortPair]struct{})
+		}
+		if _, known := call.observedRTPPairs[pair]; !known {
+			if len(call.observedRTPPairs) >= 128 {
+				call.rtpPairOverflow = true
+			} else {
+				call.observedRTPPairs[pair] = struct{}{}
+			}
+		}
 	}
 
 	// Initialize RTP stats if not already done

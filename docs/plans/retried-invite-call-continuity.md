@@ -45,17 +45,19 @@ timeouts retain their separate existing behavior, except that a writer cannot
 idle-finalize a matched-503 call before its retry deadline.
 
 Media provenance is necessarily conservative: after a generation restart,
-RTP is admitted only after an answer advertises its port. Any port advertised
-by a prior generation and SSRCs observed in that generation are rejected. A
-legitimate new attempt that reuses either is therefore rejected. Retired port
-history is bounded to 128 entries; overflow blocks media conservatively.
+RTP is admitted only after an answer advertises its port. Prior-generation
+SDP ports, observed RTP port pairs, and observed SSRCs are rejected. A
+legitimate new attempt that reuses them is therefore rejected. Retired SDP
+ports and RTP port pairs are each bounded to 128 entries; overflow blocks
+media conservatively.
 Retired dialog tags are capped at eight, with further Call-ID restart denied
 if that history is exhausted.
 Post-restart ACK/BYE requires matching dialog tags, and CANCEL requires the
 current INVITE branch/CSeq. An INVITE reusing a known old From tag is rejected.
 Missing tags cannot terminate a restarted call. Packet metadata still has no
-cryptographic generation marker: old media on a previously unadvertised port
-that becomes the new SDP port is indistinguishable. The rejected counters
+cryptographic generation marker: old media on a port not previously advertised
+and a port pair not previously observed is indistinguishable if it matches
+the new SDP. The rejected counters
 expose the conservative policy, not universal stale-packet provenance.
 
 ## Design contract
@@ -194,6 +196,9 @@ Primary files: `internal/pkg/processor/call_lifecycle.go`,
 - [x] Verify a restarted Call-ID creates a distinct PCAP artifact and writer
       generation, and both completion hooks retain their own caller/callee
       metadata (`TestVerifiedCallIDRestartCreatesDistinctPcapAndCompletionMetadata`).
+- [x] Retire bounded observed RTP port pairs even when the old SDP was absent;
+      reject exact old pairs without dropping fresh media that shares only one
+      port. Verify conservative blocking on history overflow.
 
 ## Closure audit result
 
@@ -205,11 +210,20 @@ conservative overflow behavior. Focused and full affected tests passed under
 `-tags 'all li'`; processor and VoIP race suites passed; and `go build` passed
 for `processor`, `tap`, `all`, and `all li` after these fixes.
 
+A subsequent audit narrowed the provenance gap by retaining observed RTP port
+pairs when SDP was absent. A first attempt that saw `35448/18000` now rejects
+that same pair after restart, while fresh media on `35448/19000` remains
+eligible.
+The observed-pair history is bounded to 128 and blocks restarted media on
+overflow. The full VoIP/processor race suites and all four build variants
+passed again after this change.
+
 The two unchecked obligations above are deliberately not claimed as complete.
-SIP/RTP metadata has no trusted generation marker. A delayed old RTP packet on
-a port never advertised by the old generation, but advertised by the new one,
-is indistinguishable from new RTP. The implementation rejects known old ports
-and SSRCs, delays new media until an answer, and conservatively rejects reused
+SIP/RTP metadata has no trusted generation marker. A delayed old RTP packet
+whose port was not previously advertised and whose port pair was not observed
+can be indistinguishable from new RTP when it matches the new SDP. The
+implementation rejects known old SDP ports, RTP port pairs, and SSRCs, delays
+new media until an answer, and conservatively rejects reused
 ports or ambiguous dialog tags. Closing the remaining absolute attribution
 guarantee requires an explicit operator policy choice or a broader provenance
 protocol change; it cannot be inferred from the existing packets.

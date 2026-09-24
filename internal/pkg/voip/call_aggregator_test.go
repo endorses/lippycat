@@ -1367,6 +1367,48 @@ func TestCallAggregatorRestartRejectsReusedMediaPortBeyondSSRCLimit(t *testing.T
 	require.True(t, ca.AcceptRTP(oldMedia), "distinct advertised new-generation port remains usable")
 }
 
+func TestCallAggregatorRestartRetiresObservedRTPPortWithoutSDP(t *testing.T) {
+	ca := NewCallAggregator()
+	now := time.Now()
+	ca.ProcessPacket(transactionPacket("synthetic-observed-port", "INVITE", "INVITE", 0, 1, "z9hG4bK-first", now), "hunter")
+	ca.ProcessPacket(transactionPacket("synthetic-observed-port", "RESPONSE", "INVITE", 200, 1, "z9hG4bK-first", now.Add(time.Second)), "hunter")
+	ca.ProcessPacket(&data.CapturedPacket{TimestampNs: now.UnixNano(), Metadata: &data.PacketMetadata{
+		Sip: &data.SIPMetadata{CallId: "synthetic-observed-port"}, Rtp: &data.RTPMetadata{Ssrc: 1}, SrcPort: 35448, DstPort: 18000,
+	}}, "hunter")
+	ca.ResetCall("synthetic-observed-port")
+	ca.ProcessPacket(transactionPacket("synthetic-observed-port", "INVITE", "INVITE", 0, 2, "z9hG4bK-second", now.Add(2*time.Second)), "hunter")
+	answer := transactionPacket("synthetic-observed-port", "RESPONSE", "INVITE", 200, 2, "z9hG4bK-second", now.Add(3*time.Second))
+	answer.Metadata.Sip.MediaPorts = []uint32{18000, 19000}
+	ca.ProcessPacket(answer, "hunter")
+	media := &data.CapturedPacket{Metadata: &data.PacketMetadata{
+		Sip: &data.SIPMetadata{CallId: "synthetic-observed-port"}, Rtp: &data.RTPMetadata{Ssrc: 2}, SrcPort: 35448, DstPort: 18000,
+	}}
+	require.False(t, ca.AcceptRTP(media), "previously observed RTP port pair must be retired even without old SDP")
+	media.Metadata.DstPort = 19000
+	require.True(t, ca.AcceptRTP(media), "a distinct new SDP port remains usable despite a shared source port")
+}
+
+func TestCallAggregatorObservedRTPPortHistoryOverflowBlocksRestartMedia(t *testing.T) {
+	ca := NewCallAggregator()
+	now := time.Now()
+	ca.ProcessPacket(transactionPacket("synthetic-port-overflow", "INVITE", "INVITE", 0, 1, "z9hG4bK-first", now), "hunter")
+	for port := uint32(10000); port < 10129; port++ {
+		ca.ProcessPacket(&data.CapturedPacket{TimestampNs: now.UnixNano(), Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{CallId: "synthetic-port-overflow"}, Rtp: &data.RTPMetadata{Ssrc: port}, SrcPort: port,
+		}}, "hunter")
+	}
+	ca.ResetCall("synthetic-port-overflow")
+	require.True(t, ca.retiredPortBlock["synthetic-port-overflow"])
+	require.LessOrEqual(t, len(ca.retiredRTPPairs["synthetic-port-overflow"]), 128)
+	ca.ProcessPacket(transactionPacket("synthetic-port-overflow", "INVITE", "INVITE", 0, 2, "z9hG4bK-second", now.Add(time.Second)), "hunter")
+	answer := transactionPacket("synthetic-port-overflow", "RESPONSE", "INVITE", 200, 2, "z9hG4bK-second", now.Add(2*time.Second))
+	answer.Metadata.Sip.MediaPorts = []uint32{30000}
+	ca.ProcessPacket(answer, "hunter")
+	require.False(t, ca.AcceptRTP(&data.CapturedPacket{Metadata: &data.PacketMetadata{
+		Sip: &data.SIPMetadata{CallId: "synthetic-port-overflow"}, Rtp: &data.RTPMetadata{Ssrc: 500}, SrcPort: 30000,
+	}}), "overflow must conservatively reject even a distinct new SDP port")
+}
+
 func TestCallAggregatorRestartRejectsHistoricDialogTag(t *testing.T) {
 	ca := NewCallAggregator()
 	now := time.Now()

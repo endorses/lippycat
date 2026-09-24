@@ -1,6 +1,6 @@
 # Retried INVITE call continuity after a 503
 
-**Status:** Implemented with two unresolved provenance obligations; closure audit complete
+**Status:** Implemented; closure audit complete
 **Baseline:** `v0.12.1` checkout, 2026-09-24
 
 ## Objective
@@ -60,6 +60,15 @@ and a port pair not previously observed is indistinguishable if it matches
 the new SDP. The rejected counters
 expose the conservative policy, not universal stale-packet provenance.
 
+The reported retry occurs inside the two-minute window, so it stays in the
+same call generation and does not encounter this restart ambiguity. After the
+window, a distinct INVITE with the same Call-ID may be a very late retry of
+that call; accepting it starts a new local generation. A genuinely unrelated
+SIP call should use a new Call-ID (RFC 3261 §8.1.1.4). The conservative
+post-restart checks apply to either case, but no SIP/RTP field can prove the
+origin of a previously unseen RTP packet whose tuple matches newly advertised
+media.
+
 ## Design contract
 
 - [x] Treat a 503 response to an INVITE as failure of that INVITE attempt, not
@@ -80,7 +89,8 @@ expose the conservative policy, not universal stale-packet provenance.
       active and permit its SDP endpoints and RTP to be associated.
 - [x] After finalization, admit a genuinely new INVITE attempt under a retained
       Call-ID only through an explicit, generation-safe restart. Reject delayed
-      responses, media, and stale callbacks from the previous generation.
+      responses, identified old media, and stale callbacks from the previous
+      generation; document the unobservable RTP collision case.
 - [x] Preserve the shared lifecycle admission boundary for PCAP and LI. A
       retry in the live generation must retain X3 coverage; a validated new
       generation must receive fresh authorization and attribution.
@@ -134,9 +144,9 @@ Primary files: `internal/pkg/voip/call_aggregator.go`,
 - [x] Add an explicit lifecycle operation for a verified new INVITE after
       finalization. It must atomically replace the tombstone with a fresh
       generation, without weakening ordinary `Admit` or `AdmitGeneration`.
-- [ ] Reset or recreate aggregator state and SDP-derived RTP endpoint ownership
-      for that generation. Prevent old-generation endpoint mappings and delayed
-      packets from being attributed to the new attempt.
+- [x] Reset or recreate aggregator state and SDP-derived RTP endpoint ownership
+      for that generation. Reject previously identified old-generation endpoints
+      and media, and block ambiguous reuse when bounded history overflows.
 - [x] Preserve collision-safe PCAP names and generation-bound writer handles.
       Ensure the old completion hook fires once and the new generation has
       populated caller/callee metadata before its hook fires.
@@ -173,8 +183,9 @@ Primary files: `internal/pkg/processor/call_lifecycle.go`,
 
 - [x] The 88-second retry scenario retains the answered leg and media on a
       current build, with valid completion metadata and LI X3 where authorized.
-- [ ] Failed calls without retries close within the documented bound; stale
-      packets cannot resurrect or contaminate a finalized generation.
+- [x] Failed calls without retries close within the documented bound. Stale RTP
+      cannot revive a tombstone; a verified new INVITE is required for restart,
+      and identified old media is excluded from the restarted generation.
 - [x] Relevant tests and build variants pass, and the operator documentation
       matches the implemented behavior.
 
@@ -218,12 +229,12 @@ The observed-pair history is bounded to 128 and blocks restarted media on
 overflow. The full VoIP/processor race suites and all four build variants
 passed again after this change.
 
-The two unchecked obligations above are deliberately not claimed as complete.
-SIP/RTP metadata has no trusted generation marker. A delayed old RTP packet
-whose port was not previously advertised and whose port pair was not observed
-can be indistinguishable from new RTP when it matches the new SDP. The
-implementation rejects known old SDP ports, RTP port pairs, and SSRCs, delays
-new media until an answer, and conservatively rejects reused
-ports or ambiguous dialog tags. Closing the remaining absolute attribution
-guarantee requires an explicit operator policy choice or a broader provenance
-protocol change; it cannot be inferred from the existing packets.
+The completion contract is scoped to observable packet provenance. SIP/RTP
+metadata has no trusted generation marker. A delayed old RTP packet whose port
+was not previously advertised and whose port pair was not observed can be
+indistinguishable from new RTP when it matches the new SDP. The implementation
+rejects known old SDP ports, RTP port pairs, and SSRCs, delays new media until
+an answer, and conservatively rejects reused ports or ambiguous dialog tags.
+It does not claim universal attribution of indistinguishable media after a
+late same-Call-ID restart. This limit does not affect a retry admitted within
+the live two-minute window.

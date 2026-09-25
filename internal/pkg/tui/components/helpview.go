@@ -43,6 +43,7 @@ type HelpView struct {
 
 	// Click regions for mouse interaction
 	sectionRegions []ClickRegion // Click regions for section tabs (line 0)
+	scrollbarDrag  scrollbarDrag
 }
 
 // HelpContentLoadedMsg is sent when help content finishes loading
@@ -80,13 +81,13 @@ func (h *HelpView) SetSize(width, height int) tea.Cmd {
 	h.height = height
 
 	if !h.ready {
-		h.viewport = viewport.New(width, height-1)
+		h.viewport = viewport.New(max(1, width-1), height-1)
 		h.ready = true
 		// Don't load content here - use LoadContentAsync() to avoid blocking
 		return nil
 	}
 
-	h.viewport.Width = width
+	h.viewport.Width = max(1, width-1)
 	h.viewport.Height = height - 1
 
 	// Re-render content when width changes (glamour word-wrap depends on width)
@@ -269,6 +270,10 @@ func (h *HelpView) GetMatchInfo() (int, int) {
 func (h *HelpView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
+		if offset, handled := handleScrollbarMouse(msg, h.width-1, 6, h.viewport.TotalLineCount(), h.viewport.Height, h.viewport.YOffset, h.viewport.Height, &h.scrollbarDrag); handled {
+			h.viewport.SetYOffset(offset)
+			return nil
+		}
 		// Handle mouse clicks for section selection (only when not in search mode)
 		if !h.searchMode && msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
 			// Content starts at Y=5 (header=2 + tabs=3)
@@ -324,9 +329,12 @@ func (h *HelpView) View() string {
 			Italic(true).
 			Width(h.width).
 			Height(h.viewport.Height)
-		result.WriteString(loadingStyle.Render("Loading help content..."))
+		loading := loadingStyle.Render("Loading help content...")
+		result.WriteString(OverlayScrollbar(loading, h.width-1, 0, RenderScrollbar(0, h.viewport.Height, 0, h.viewport.Height, h.theme)))
 	} else {
-		result.WriteString(h.viewport.View())
+		view := h.viewport.View()
+		bar := RenderScrollbar(h.viewport.TotalLineCount(), h.viewport.Height, h.viewport.YOffset, h.viewport.Height, h.theme)
+		result.WriteString(OverlayScrollbar(view, h.width-1, 0, bar))
 	}
 
 	return result.String()

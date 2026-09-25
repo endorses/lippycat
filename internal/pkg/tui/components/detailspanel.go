@@ -124,6 +124,21 @@ func (d *DetailsPanel) Update(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+// ScrollState reports the content and visible lines used by the pane scrollbar.
+func (d *DetailsPanel) ScrollState() (total, visible, offset int) {
+	if !d.ready {
+		return 0, 0, 0
+	}
+	return d.viewport.TotalLineCount(), d.viewport.Height, d.viewport.YOffset
+}
+
+// SetScrollOffset moves the details viewport to a scrollbar position.
+func (d *DetailsPanel) SetScrollOffset(offset int) {
+	if d.ready {
+		d.viewport.SetYOffset(offset)
+	}
+}
+
 // View renders the details panel
 func (d *DetailsPanel) View(focused bool) string {
 	if !d.ready {

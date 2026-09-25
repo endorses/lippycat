@@ -65,6 +65,7 @@ type NodesView struct {
 	selectedIndex         int             // -1 means nothing selected, >= 0 means hunter is selected
 	selectedProcessorAddr string          // Non-empty means a processor is selected (instead of hunter)
 	width                 int
+	displayWidth          int
 	height                int
 	theme                 themes.Theme
 	nodeInput             textinput.Model // Input field for node address (used in modal)
@@ -101,6 +102,7 @@ type NodesView struct {
 
 	// Viewport scrolling
 	selectedNodeLine int // Line position of currently selected node in rendered content (-1 if no selection)
+	scrollbarDrag    scrollbarDrag
 
 	// Real-time topology updates
 	lastTopologyChange time.Time // Timestamp of last topology change (hunter/processor add/remove/status update)
@@ -122,6 +124,7 @@ func NewNodesView() NodesView {
 		selectedIndex:           -1, // Start with nothing selected
 		selectedProcessorAddr:   "",
 		width:                   80,
+		displayWidth:            80,
 		height:                  20,
 		theme:                   themes.Solarized(),
 		nodeInput:               ti,
@@ -247,20 +250,22 @@ func (n *NodesView) ToggleView() bool {
 
 // SetSize updates the view dimensions
 func (n *NodesView) SetSize(width, height int) {
-	widthChanged := n.width != width
-	n.width = width
+	contentWidth := max(1, width-1)
+	widthChanged := n.width != contentWidth
+	n.width = contentWidth
+	n.displayWidth = width
 	n.height = height
 
 	// Use full height for viewport (hints moved to context-aware footer)
 	viewportHeight := max(1, height)
 
 	if !n.ready {
-		n.viewport = viewport.New(width, viewportHeight)
+		n.viewport = viewport.New(contentWidth, viewportHeight)
 		n.ready = true
 		// Set initial content if we already have data
 		n.updateViewportContent()
 	} else {
-		n.viewport.Width = width
+		n.viewport.Width = contentWidth
 		n.viewport.Height = viewportHeight
 		// Re-render content when width changes (for centering, line wrapping, etc.)
 		if widthChanged {
@@ -756,6 +761,11 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 	case tea.MouseMsg:
 		// If modal is open, don't handle mouse events on the underlying content
 		if n.showModal {
+			n.scrollbarDrag.active = false
+			return nil
+		}
+		if offset, handled := handleScrollbarMouse(msg, n.displayWidth-1, 5, n.viewport.TotalLineCount(), n.viewport.Height, n.viewport.YOffset, n.viewport.Height, &n.scrollbarDrag); handled {
+			n.viewport.SetYOffset(offset)
 			return nil
 		}
 		// DEBUG: Uncomment to trace NodesView mouse event handling
@@ -1223,7 +1233,9 @@ func (n *NodesView) View() string {
 	}
 
 	// Just return viewport (hints now in context-aware footer)
-	return n.viewport.View()
+	view := n.viewport.View()
+	bar := RenderScrollbar(n.viewport.TotalLineCount(), n.viewport.Height, n.viewport.YOffset, n.viewport.Height, n.theme)
+	return OverlayScrollbar(view, n.displayWidth-1, 0, bar)
 }
 
 // RenderModal renders the add node modal if it's open (for top-level overlay)

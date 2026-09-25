@@ -23,6 +23,26 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	bottomHeight := 4                          // Footer/filter area
 	contentStartY := headerHeight + tabsHeight // Y=6
 	contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
+	if msg.Action == tea.MouseActionRelease && m.uiState.Tabs.GetActive() != 0 {
+		m.scrollDrag = ""
+	}
+	if m.uiState.Tabs.GetActive() == 0 && (m.uiState.ViewMode == "packets" || m.uiState.ViewMode == "calls" || m.uiState.ViewMode == "events") {
+		// Tabs render three rows, leaving the capture content at Y=5.
+		if next, cmd, handled := m.handleCaptureScrollbar(msg, contentStartY-1, contentHeight); handled {
+			return next, cmd
+		}
+	}
+	if msg.Action == tea.MouseActionMotion || msg.Action == tea.MouseActionRelease {
+		switch m.uiState.Tabs.GetActive() {
+		case 1:
+			return m, m.uiState.NodesView.Update(msg)
+		case 2:
+			return m, m.uiState.StatisticsView.Update(msg)
+		case 4:
+			return m, m.uiState.HelpView.Update(msg)
+		}
+		return m, nil
+	}
 
 	// Handle mouse wheel scrolling - based on hover position, not focus
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
@@ -46,7 +66,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 					// Split pane mode - check X position to determine which pane
 					detailsWidth := 79
 					listWidth := m.uiState.Width - detailsWidth
-					detailsContentStart := listWidth - 2
+					detailsContentStart := listWidth
 
 					if msg.X < detailsContentStart {
 						// Hovering over call list - scroll it
@@ -68,7 +88,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				// Split pane mode - check X position to determine which pane
 				detailsWidth := 77
 				listWidth := m.uiState.Width - detailsWidth
-				detailsContentStart := listWidth - 2
+				detailsContentStart := listWidth
 
 				if msg.X < detailsContentStart {
 					// Hovering over packet list - scroll it
@@ -121,7 +141,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 					// Split pane mode - check X position to determine which pane
 					detailsWidth := 79
 					listWidth := m.uiState.Width - detailsWidth
-					detailsContentStart := listWidth - 2
+					detailsContentStart := listWidth
 
 					if msg.X < detailsContentStart {
 						// Hovering over call list - scroll it
@@ -143,7 +163,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				// Split pane mode - check X position to determine which pane
 				detailsWidth := 77
 				listWidth := m.uiState.Width - detailsWidth
-				detailsContentStart := listWidth - 2
+				detailsContentStart := listWidth
 
 				if msg.X < detailsContentStart {
 					// Hovering over packet list - scroll it
@@ -186,6 +206,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		// Use the tab component's method to get the clicked tab
 		clickedTab := m.uiState.Tabs.GetTabAtX(msg.X)
 		if clickedTab >= 0 {
+			m.scrollDrag = ""
 			m.uiState.Tabs.SetActive(clickedTab)
 			if clickedTab == 0 && m.uiState.ViewMode == "events" {
 				m.syncEventsViewOnTabEntry()

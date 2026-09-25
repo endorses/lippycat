@@ -713,6 +713,25 @@ func (p *PacketList) GetOffset() int {
 	return p.offset
 }
 
+// SetScrollOffset moves the packet viewport and selects its first visible row.
+func (p *PacketList) SetScrollOffset(offset uint64) {
+	count := p.LogicalCount()
+	if count == 0 {
+		return
+	}
+	visible := uint64(p.VisibleRows())
+	maxOffset := count - min(count, visible)
+	offset = min(offset, maxOffset)
+	if p.virtual {
+		p.logicalOffset = offset
+		p.logicalCursor = offset
+	} else {
+		p.offset = int(offset)
+		p.cursor = int(offset)
+	}
+	p.autoScroll = false
+}
+
 // GetPackets returns the current packet list
 func (p *PacketList) GetPackets() []PacketDisplay {
 	return p.packets

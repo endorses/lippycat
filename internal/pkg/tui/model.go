@@ -104,6 +104,9 @@ type CaptureTelemetryMsg capture.Telemetry
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
+	scrollDrag              string
+	scrollDragRow           int
+	scrollDragOffset        int
 	offlineController       *offlineController
 	offlineSession          *offlineIndexedSession
 	offlineBrowse           *offlineBrowserState

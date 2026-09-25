@@ -84,12 +84,18 @@ func (m Model) renderCaptureTab(contentHeight int) string {
 			timelineWidth := m.uiState.Width - detailsWidth - 2
 			leftFocused := m.uiState.FocusedPane == "left"
 			rightFocused := m.uiState.FocusedPane == "right"
+			list := m.uiState.EventsView.RenderTimeline(timelineWidth, contentHeight, leftFocused)
+			details := m.uiState.EventsView.RenderDetails(detailsWidth, contentHeight, rightFocused)
+			listTotal, listVisible, listOffset := m.uiState.EventsView.TimelineScrollState(contentHeight)
+			detailTotal, detailVisible, detailOffset := m.uiState.EventsView.DetailsScrollState()
 			return lipgloss.JoinHorizontal(lipgloss.Top,
-				m.uiState.EventsView.RenderTimeline(timelineWidth, contentHeight, leftFocused),
-				m.uiState.EventsView.RenderDetails(detailsWidth, contentHeight, rightFocused),
+				m.captureScrollbar(list, listTotal, listVisible, listOffset, contentHeight),
+				m.captureScrollbar(details, detailTotal, detailVisible, detailOffset, contentHeight),
 			)
 		}
-		return m.uiState.EventsView.RenderTimeline(m.uiState.Width, contentHeight, false)
+		list := m.uiState.EventsView.RenderTimeline(m.uiState.Width, contentHeight, false)
+		total, visible, offset := m.uiState.EventsView.TimelineScrollState(contentHeight)
+		return m.captureScrollbar(list, total, visible, offset, contentHeight)
 	}
 
 	if m.uiState.ViewMode == "calls" {
@@ -112,11 +118,18 @@ func (m Model) renderCaptureTab(contentHeight int) string {
 			callsTableView := m.uiState.CallsView.RenderTable(tableWidth, contentHeight, leftFocused)
 			callDetailsView := m.uiState.CallsView.RenderDetails(detailsWidth, contentHeight, rightFocused)
 
-			return lipgloss.JoinHorizontal(lipgloss.Top, callsTableView, callDetailsView)
+			listTotal, listVisible, listOffset := m.uiState.CallsView.TableScrollState(contentHeight)
+			detailTotal, detailVisible, detailOffset := m.uiState.CallsView.DetailsScrollState()
+			return lipgloss.JoinHorizontal(lipgloss.Top,
+				m.captureScrollbar(callsTableView, listTotal, listVisible, listOffset, contentHeight),
+				m.captureScrollbar(callDetailsView, detailTotal, detailVisible, detailOffset, contentHeight),
+			)
 		}
 
 		// Full width calls table (size is set in handleWindowSizeMsg)
-		return m.uiState.CallsView.View()
+		list := m.uiState.CallsView.View()
+		total, visible, offset := m.uiState.CallsView.TableScrollState(contentHeight)
+		return m.captureScrollbar(list, total, visible, offset, contentHeight)
 	}
 
 	if m.uiState.ViewMode == "queries" {
@@ -211,11 +224,25 @@ func (m Model) renderCaptureTab(contentHeight int) string {
 		packetListView := m.uiState.PacketList.View(leftFocused, true)
 		detailsPanelView := m.uiState.DetailsPanel.View(rightFocused)
 
-		return lipgloss.JoinHorizontal(lipgloss.Top, packetListView, detailsPanelView)
+		listTotal := int(m.uiState.PacketList.LogicalCount())
+		listVisible := m.uiState.PacketList.VisibleRows()
+		listOffset := int(m.uiState.PacketList.LogicalOffset())
+		detailTotal, detailVisible, detailOffset := m.uiState.DetailsPanel.ScrollState()
+		return lipgloss.JoinHorizontal(lipgloss.Top,
+			m.captureScrollbar(packetListView, listTotal, listVisible, listOffset, contentHeight),
+			m.captureScrollbar(detailsPanelView, detailTotal, detailVisible, detailOffset, contentHeight),
+		)
 	}
 
 	// Full width packet list - always show unfocused when details are hidden
-	return m.uiState.PacketList.View(false, false)
+	list := m.uiState.PacketList.View(false, false)
+	return m.captureScrollbar(list, int(m.uiState.PacketList.LogicalCount()), m.uiState.PacketList.VisibleRows(), int(m.uiState.PacketList.LogicalOffset()), contentHeight)
+}
+
+func (m Model) captureScrollbar(pane string, total, visible, offset, height int) string {
+	trackHeight := max(0, height-4)
+	bar := components.RenderScrollbar(total, visible, offset, trackHeight, m.uiState.Theme)
+	return components.OverlayScrollbar(pane, lipgloss.Width(pane)-2, 2, bar)
 }
 
 // renderBottomArea renders the bottom area (footer + filter input or toast)

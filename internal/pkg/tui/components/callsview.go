@@ -648,6 +648,34 @@ func (cv *CallsView) GetOffset() int {
 	return cv.offset
 }
 
+func (cv *CallsView) TableScrollState(height int) (total, visible, offset int) {
+	return len(cv.calls), max(1, height-5), cv.offset
+}
+
+func (cv *CallsView) DetailsScrollState() (total, visible, offset int) {
+	if !cv.detailsViewportReady {
+		return 0, 0, 0
+	}
+	return cv.detailsViewport.TotalLineCount(), cv.detailsViewport.Height, cv.detailsViewport.YOffset
+}
+
+func (cv *CallsView) SetDetailsScrollOffset(offset int) {
+	if cv.detailsViewportReady {
+		cv.detailsViewport.SetYOffset(offset)
+	}
+}
+
+// SetTableScrollOffset scrolls the table and places selection at its first row.
+func (cv *CallsView) SetTableScrollOffset(offset, height int) {
+	if len(cv.calls) == 0 {
+		return
+	}
+	visible := max(1, height-5)
+	cv.offset = min(max(0, offset), max(0, len(cv.calls)-visible))
+	cv.selected = cv.offset
+	cv.autoScroll = false
+}
+
 // GetCalls returns the current call list
 func (cv *CallsView) GetCalls() []Call {
 	return cv.calls

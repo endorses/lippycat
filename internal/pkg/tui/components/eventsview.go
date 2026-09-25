@@ -284,6 +284,37 @@ func (v *EventsView) SetSelectedID(id string) {
 
 func (v *EventsView) SelectedID() string { return v.selectedID }
 
+func (v *EventsView) TimelineScrollState(height int) (total, visible, offset int) {
+	return len(v.items), max(0, height-5), v.offset
+}
+
+func (v *EventsView) DetailsScrollState() (total, visible, offset int) {
+	if !v.detailsViewportReady {
+		return 0, 0, 0
+	}
+	return v.detailsViewport.TotalLineCount(), v.detailsViewport.Height, v.detailsViewport.YOffset
+}
+
+func (v *EventsView) SetDetailsScrollOffset(offset int) {
+	if v.detailsViewportReady {
+		v.detailsViewport.SetYOffset(offset)
+	}
+}
+
+// EventIDAtIndex returns a stable selection target for scrollbar navigation.
+func (v *EventsView) EventIDAtIndex(index int) (string, bool) {
+	if index < 0 || index >= len(v.items) || v.items[index].Event == nil {
+		return "", false
+	}
+	return v.items[index].Event.Envelope().EventID, true
+}
+
+func (v *EventsView) SetTimelineScrollOffset(offset, height int) {
+	visible := max(0, height-5)
+	v.offset = min(max(0, offset), max(0, len(v.items)-visible))
+	v.prepareTimeline()
+}
+
 // EventIDAtVisibleRow returns the event at a zero-based data row in the
 // currently rendered viewport.
 func (v *EventsView) EventIDAtVisibleRow(row int) (string, bool) {

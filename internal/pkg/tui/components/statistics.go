@@ -256,7 +256,9 @@ func (bs *BridgeStatistics) deliveredPackets() int64 {
 // StatisticsView displays statistics
 type StatisticsView struct {
 	viewport          viewport.Model
+	scrollbarDrag     scrollbarDrag
 	width             int
+	displayWidth      int
 	height            int
 	theme             themes.Theme
 	stats             *Statistics
@@ -354,17 +356,23 @@ func (s *StatisticsView) SetTheme(theme themes.Theme) {
 
 // SetSize sets the display size
 func (s *StatisticsView) SetSize(width, height int) {
-	s.width = width
+	contentWidth := max(1, width-1)
+	if s.width != contentWidth {
+		s.dirty = true
+		s.lastRender = time.Time{}
+	}
+	s.width = contentWidth
+	s.displayWidth = width
 	s.height = height
 
 	// Resize trackers to match content width for sparklines
 	// For wide layout (>=120): contentWidth = (width - 2) / 2 - 2 (card padding)
 	// For narrow layout: use width - 4 (border + padding)
 	var targetCapacity int
-	if width >= 120 {
-		targetCapacity = (width-2)/2 - 2
+	if s.width >= 120 {
+		targetCapacity = (s.width-2)/2 - 2
 	} else {
-		targetCapacity = width - 4
+		targetCapacity = s.width - 4
 	}
 	if targetCapacity < 60 {
 		targetCapacity = 60 // minimum capacity
@@ -380,14 +388,14 @@ func (s *StatisticsView) SetSize(width, height int) {
 	}
 
 	if !s.ready {
-		s.viewport = viewport.New(width, height)
+		s.viewport = viewport.New(s.width, height)
 		s.ready = true
 		// Set initial content if stats are already available
 		if s.stats != nil {
 			s.viewport.SetContent(s.renderContent())
 		}
 	} else {
-		s.viewport.Width = width
+		s.viewport.Width = s.width
 		s.viewport.Height = height
 	}
 }
@@ -870,6 +878,10 @@ func (s *StatisticsView) ExportJSON() ([]byte, error) {
 func (s *StatisticsView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
+		if offset, handled := handleScrollbarMouse(msg, s.displayWidth-1, 5, s.viewport.TotalLineCount(), s.viewport.Height, s.viewport.YOffset, s.viewport.Height, &s.scrollbarDrag); handled {
+			s.viewport.SetYOffset(offset)
+			return nil
+		}
 		// Handle mouse clicks for sub-view and time window selection
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
 			// Content starts at Y=5 (header=2 + tabs=3)
@@ -912,7 +924,8 @@ func (s *StatisticsView) View() string {
 			Align(lipgloss.Center, lipgloss.Center).
 			Width(s.width).
 			Height(s.height)
-		return emptyStyle.Render("No statistics available yet...")
+		empty := emptyStyle.Render("No statistics available yet...")
+		return OverlayScrollbar(empty, s.displayWidth-1, 0, RenderScrollbar(0, s.height, 0, s.height, s.theme))
 	}
 
 	// Lazy rendering: only re-render if dirty and throttle to max 2Hz (500ms)
@@ -924,7 +937,9 @@ func (s *StatisticsView) View() string {
 		s.lastRender = time.Now()
 	}
 
-	return s.viewport.View()
+	view := s.viewport.View()
+	bar := RenderScrollbar(s.viewport.TotalLineCount(), s.viewport.Height, s.viewport.YOffset, s.viewport.Height, s.theme)
+	return OverlayScrollbar(view, s.displayWidth-1, 0, bar)
 }
 
 // renderContent generates the statistics content based on current sub-view

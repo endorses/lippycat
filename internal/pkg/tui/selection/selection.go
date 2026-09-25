@@ -98,9 +98,10 @@ func (s Selection) Text() string {
 	return strings.Join(lines, "\n")
 }
 
-// Explicit colors keep selection visible even over a row already using reverse
-// video. Reapply them after original SGR sequences, which may reset the colors.
-const highlight = "\x1b[0;30;47m"
+// Solarized violet (#6c71c4) with bold black text distinguishes text selection from
+// cyan-selected rows without relying on the terminal's configurable ANSI palette.
+// Reapply after original SGR sequences, which may reset colors or reverse video.
+const highlight = "\x1b[0;1;38;2;0;0;0;48;2;108;113;196m"
 const reset = "\x1b[0m"
 
 // View returns the frozen screen with the selection highlighted. Original

@@ -405,6 +405,11 @@ func (m *Model) Shutdown() {
 
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if mouse, ok := msg.(tea.MouseMsg); ok {
+		if key, hit := m.footerKeyAtMouse(mouse); hit {
+			msg = key
+		}
+	}
 	switch msg.(type) {
 	case tea.KeyMsg, tea.WindowSizeMsg, tea.ResumeMsg:
 		m.textSelection = nil

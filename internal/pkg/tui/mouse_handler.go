@@ -8,6 +8,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// footerKeyAtMouse translates visible hints before input routing, so settings
+// editors and filter inputs receive exactly the same message as a key press.
+func (m Model) footerKeyAtMouse(msg tea.MouseMsg) (tea.KeyMsg, bool) {
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress ||
+		m.uiState.Width <= 0 || m.uiState.Height <= 0 ||
+		msg.X < 0 || msg.X >= m.uiState.Width || msg.Y != m.uiState.Height-1 ||
+		!m.textSelectionAllowed() {
+		return tea.KeyMsg{}, false
+	}
+
+	// The footer is the final rendered row. Bubble Tea preserves the bottom
+	// rows when tall content (such as filter input or a toast) exceeds the screen.
+	return m.uiState.Footer.KeyAtX(msg.X)
+}
+
 // handleMouse processes mouse events for the TUI
 func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	// DEBUG: Uncomment to log mouse events to /tmp/lippycat-mouse-debug.log for troubleshooting

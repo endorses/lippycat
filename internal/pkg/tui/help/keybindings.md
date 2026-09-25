@@ -21,6 +21,9 @@ These keys work on all tabs.
 
 ## Navigation
 
+Click a footer keybinding hint (its key or description) to perform the same action
+as pressing that key. This works on every tab and for filter input controls.
+
 Drag with the left mouse button to select text; releasing copies it automatically.
 Selections stay in the pane where the drag started. In packet dumps, hex and
 ASCII are separate selection areas. The displayed text stays still during the

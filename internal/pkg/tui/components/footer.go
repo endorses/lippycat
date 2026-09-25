@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/tui/responsive"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
@@ -220,7 +221,8 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	case 2: // Statistics tab
 		keybinds := []TabKeybind{
 			{Key: "v", Description: "view", ShortDesc: "vw", Essential: true},
-			{Key: "1-2", Description: "sections", ShortDesc: "sec", Essential: false},
+			{Key: "1", Description: "overview", ShortDesc: "ovw", Essential: false},
+			{Key: "2", Description: "distributed", ShortDesc: "dist", Essential: false},
 			{Key: "e", Description: "export", ShortDesc: "exp", Essential: false},
 		}
 		return keybinds
@@ -229,7 +231,8 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		return []TabKeybind{
 			{Key: "Enter", Description: "edit/toggle", ShortDesc: "edit", Essential: true},
 			{Key: "Esc", Description: "cancel", ShortDesc: "esc", Essential: true},
-			{Key: "←/→", Description: "switch", ShortDesc: "sw", Essential: false},
+			{Key: "←", Description: "previous", ShortDesc: "prev", Essential: false},
+			{Key: "→", Description: "next", ShortDesc: "next", Essential: false},
 		}
 
 	case 4: // Help tab
@@ -238,11 +241,17 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		}
 		if f.hasHelpSearch {
 			keybinds = append(keybinds,
-				TabKeybind{Key: "n/N", Description: "next/prev", ShortDesc: "n/p", Essential: true},
+				TabKeybind{Key: "n", Description: "next", ShortDesc: "next", Essential: true},
+				TabKeybind{Key: "N", Description: "previous", ShortDesc: "prev", Essential: true},
 				TabKeybind{Key: "c", Description: "clear", ShortDesc: "clr", Essential: false},
 			)
 		}
-		keybinds = append(keybinds, TabKeybind{Key: "1-3", Description: "sections", ShortDesc: "sec", Essential: false})
+		keybinds = append(keybinds,
+			TabKeybind{Key: "1", Description: "keys", ShortDesc: "keys", Essential: false},
+			TabKeybind{Key: "2", Description: "filters", ShortDesc: "flt", Essential: false},
+			TabKeybind{Key: "3", Description: "commands", ShortDesc: "cmd", Essential: false},
+			TabKeybind{Key: "4", Description: "workflows", ShortDesc: "flow", Essential: false},
+		)
 		return keybinds
 
 	default:
@@ -290,230 +299,153 @@ func (f *Footer) getGeneralKeybinds() []TabKeybind {
 	}
 }
 
-// renderTabSpecificSection renders the tab-specific keybinds section (left side)
-func (f *Footer) renderTabSpecificSection(tabIndex int) string {
-	keybinds, widthClass := f.getResponsiveKeybinds(tabIndex)
-	if len(keybinds) == 0 {
-		return "" // No keybinds for this tab
-	}
-
-	// Get tab color for text (instead of background)
-	tabColor := f.getTabColor(tabIndex)
-
-	// Styles for keys and descriptions (no background, colored text for keys)
-	keyStyle := lipgloss.NewStyle().
-		Foreground(tabColor).
-		Bold(true)
-
-	descStyle := lipgloss.NewStyle().
-		Foreground(f.theme.Foreground)
-
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(f.theme.BorderColor)
-
-	// Build keybinds string with styled components based on width class
-	var parts []string
-	for _, kb := range keybinds {
-		switch widthClass {
-		case responsive.Narrow:
-			// Keys only, no description
-			parts = append(parts, keyStyle.Render(kb.Key))
-		case responsive.Medium:
-			// Use short description
-			desc := kb.ShortDesc
-			if desc == "" {
-				desc = kb.Description // Fall back to full description
-			}
-			parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(":"+desc))
-		default: // Wide
-			parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(": "+kb.Description))
-		}
-	}
-
-	// Join with separators (narrower separator for narrow width)
-	var content string
-	sep := separatorStyle.Render("  │  ")
-	if widthClass == responsive.Narrow {
-		sep = separatorStyle.Render(" │ ")
-	} else if widthClass == responsive.Medium {
-		sep = separatorStyle.Render(" │ ")
-	}
-
-	for i, part := range parts {
-		if i > 0 {
-			content += sep
-		}
-		content += part
-	}
-
-	// Wrap with padding
-	containerStyle := lipgloss.NewStyle().Padding(0, 1)
-
-	return containerStyle.Render(content)
+// footerHit describes the terminal cells occupied by one complete hint. Padding
+// and separators are deliberately outside these half-open ranges.
+type footerHit struct {
+	start int
+	end   int
+	key   string
 }
 
-// renderGeneralSection renders the general keybinds section (right side)
-func (f *Footer) renderGeneralSection() string {
-	widthClass := responsive.GetWidthClass(f.width)
-	keybinds := f.getGeneralKeybinds()
-
-	// Styles for general section (violet keys)
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c71c4")). // Solarized Violet
-		Bold(true)
-
-	descStyle := lipgloss.NewStyle().
-		Foreground(f.theme.Foreground)
-
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(f.theme.BorderColor)
-
-	// Build bindings based on width class
-	var parts []string
-	for _, kb := range keybinds {
-		switch widthClass {
-		case responsive.Narrow:
-			// Keys only, no description
-			parts = append(parts, keyStyle.Render(kb.Key))
-		case responsive.Medium:
-			// Use short description
-			desc := kb.ShortDesc
-			if desc == "" {
-				desc = kb.Description
-			}
-			parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(":"+desc))
-		default: // Wide
-			parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(": "+kb.Description))
-		}
-	}
-
-	// Join bindings with separators (narrower for narrow/medium)
-	sep := separatorStyle.Render("  │  ")
-	if widthClass == responsive.Narrow || widthClass == responsive.Medium {
-		sep = separatorStyle.Render(" │ ")
-	}
-
-	var content string
-	for i, part := range parts {
-		if i > 0 {
-			content += sep
-		}
-		content += part
-	}
-
-	// Add padding
-	containerStyle := lipgloss.NewStyle().
-		Padding(0, 1)
-
-	return containerStyle.Render(content)
+type footerLayout struct {
+	content string
+	hits    []footerHit
 }
 
-// View renders the footer with two lines: horizontal separator + keybindings
-func (f *Footer) View() string {
-	// Special case: filter mode shows filter keybinds only
-	if f.filterMode || f.callFilterMode || f.eventFilterMode {
-		return f.renderFilterModeFooter()
+// renderSection produces both styled text and hit regions from the same hints.
+// A nonnegative limit drops complete trailing hints that would exceed it.
+func (f *Footer) renderSection(bindings []TabKeybind, widthClass responsive.WidthClass, color lipgloss.Color, limit int) footerLayout {
+	keyStyle := lipgloss.NewStyle().Foreground(color).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(f.theme.Foreground)
+	separator := "  │  "
+	if widthClass != responsive.Wide {
+		separator = " │ "
 	}
-
-	// Render both sections
-	tabSection := f.renderTabSpecificSection(f.activeTab)
-	generalSection := f.renderGeneralSection()
-
-	// Separator between tab-specific and general sections
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(f.theme.BorderColor)
-	separator := separatorStyle.Render(" ║ ")
-
-	// Version info for far right (only show if enough space)
-	versionText := fmt.Sprintf("🫦🐱 v%s ", version.GetVersion())
-	versionStyle := lipgloss.NewStyle().
-		Foreground(f.theme.BorderColor)
-	versionRendered := versionStyle.Render(versionText)
-
-	// Calculate widths
-	tabSectionWidth := lipgloss.Width(tabSection)
 	separatorWidth := lipgloss.Width(separator)
-	generalSectionWidth := lipgloss.Width(generalSection)
-	versionWidth := lipgloss.Width(versionRendered)
+	separator = lipgloss.NewStyle().Foreground(f.theme.BorderColor).Render(separator)
 
-	// Build footer content with sections
-	var footerContent string
-
-	if tabSectionWidth+separatorWidth+generalSectionWidth+versionWidth <= f.width {
-		// Enough space for all: tab section, separator, general section, and version
-		spacerWidth := f.width - tabSectionWidth - separatorWidth - generalSectionWidth - versionWidth
-		spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-		footerContent = tabSection + separator + generalSection + spacer + versionRendered
-	} else if tabSectionWidth+separatorWidth+generalSectionWidth <= f.width {
-		// Enough space for both sections with separator, skip version
-		spacerWidth := f.width - tabSectionWidth - separatorWidth - generalSectionWidth
-		spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-		footerContent = tabSection + separator + generalSection + spacer
-	} else {
-		// Not enough space - show tab section only and pad to width
-		spacerWidth := f.width - tabSectionWidth
-		if spacerWidth > 0 {
-			spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-			footerContent = tabSection + spacer
-		} else {
-			footerContent = tabSection
+	layout := footerLayout{}
+	var content strings.Builder
+	content.WriteString(" ")
+	width := 1
+	for _, binding := range bindings {
+		hint := keyStyle.Render(binding.Key)
+		switch widthClass {
+		case responsive.Medium:
+			desc := binding.ShortDesc
+			if desc == "" {
+				desc = binding.Description
+			}
+			hint += descStyle.Render(":" + desc)
+		case responsive.Wide:
+			hint += descStyle.Render(": " + binding.Description)
 		}
+		hintWidth := lipgloss.Width(hint)
+		start := width
+		if len(layout.hits) > 0 {
+			start += separatorWidth
+		}
+		// Reserve the section's trailing padding, too.
+		if limit >= 0 && start+hintWidth+1 > limit {
+			break
+		}
+		if len(layout.hits) > 0 {
+			content.WriteString(separator)
+		}
+		content.WriteString(hint)
+		width = start + hintWidth
+		layout.hits = append(layout.hits, footerHit{start: start, end: width, key: binding.Key})
 	}
-
-	// Render horizontal line above footer content
-	lineStyle := lipgloss.NewStyle().Foreground(f.theme.BorderColor)
-	horizontalLine := lineStyle.Render(strings.Repeat("─", f.width))
-
-	return horizontalLine + "\n" + footerContent
+	if len(layout.hits) > 0 {
+		content.WriteString(" ")
+		layout.content = content.String()
+	}
+	return layout
 }
 
-// renderFilterModeFooter renders the footer when filter input is active
-func (f *Footer) renderFilterModeFooter() string {
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6c71c4")). // Solarized Violet
-		Bold(true)
-
-	descStyle := lipgloss.NewStyle().
-		Foreground(f.theme.Foreground)
-
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(f.theme.BorderColor).
-		Render("│")
-
-	// Filter mode keybindings
-	bindings := []string{
-		keyStyle.Render("Enter") + descStyle.Render(": apply"),
-		keyStyle.Render("Esc") + descStyle.Render(": cancel"),
-		keyStyle.Render("↑↓") + descStyle.Render(": history"),
-	}
-
-	// Join bindings with separators
-	var content string
-	for i, binding := range bindings {
-		if i > 0 {
-			content += "  " + separatorStyle + "  "
-		}
-		content += binding
-	}
-
-	// Add padding
-	baseStyle := lipgloss.NewStyle().Padding(0, 1)
-	leftContent := baseStyle.Render(content)
-	leftWidth := lipgloss.Width(leftContent)
-
-	// Pad to full width
-	var footerContent string
-	if leftWidth < f.width {
-		spacerWidth := f.width - leftWidth
-		spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-		footerContent = leftContent + spacer
+// layout is read-only so hit testing also works before the next View call.
+func (f *Footer) layout() footerLayout {
+	width := max(0, f.width)
+	widthClass := responsive.GetWidthClass(width)
+	generalColor := lipgloss.Color("#6c71c4") // Solarized Violet
+	var layout footerLayout
+	if f.filterMode || f.callFilterMode || f.eventFilterMode {
+		layout = f.renderSection([]TabKeybind{
+			{Key: "Enter", Description: "apply", ShortDesc: "apply"},
+			{Key: "Esc", Description: "cancel", ShortDesc: "esc"},
+			{Key: "↑", Description: "older history", ShortDesc: "older"},
+			{Key: "↓", Description: "newer history", ShortDesc: "newer"},
+		}, widthClass, generalColor, width)
 	} else {
-		footerContent = leftContent
+		bindings, _ := f.getResponsiveKeybinds(f.activeTab)
+		layout = f.renderSection(bindings, widthClass, f.getTabColor(f.activeTab), -1)
+		general := f.renderSection(f.getGeneralKeybinds(), widthClass, generalColor, -1)
+		separator := ""
+		if layout.content != "" {
+			separator = lipgloss.NewStyle().Foreground(f.theme.BorderColor).Render(" ║ ")
+		}
+		generalStart := lipgloss.Width(layout.content) + lipgloss.Width(separator)
+		if generalStart+lipgloss.Width(general.content) <= width {
+			layout.content += separator + general.content
+			for _, hit := range general.hits {
+				hit.start += generalStart
+				hit.end += generalStart
+				layout.hits = append(layout.hits, hit)
+			}
+			versionText := fmt.Sprintf("🫦🐱 v%s ", version.GetVersion())
+			spacerWidth := width - lipgloss.Width(layout.content) - lipgloss.Width(versionText)
+			if spacerWidth >= 0 {
+				layout.content += strings.Repeat(" ", spacerWidth) + lipgloss.NewStyle().Foreground(f.theme.BorderColor).Render(versionText)
+			}
+		} else if lipgloss.Width(layout.content) > width {
+			layout = f.renderSection(bindings, widthClass, f.getTabColor(f.activeTab), width)
+		}
 	}
+	layout.content += strings.Repeat(" ", width-lipgloss.Width(layout.content))
+	return layout
+}
 
-	// Render horizontal line above footer content
-	lineStyle := lipgloss.NewStyle().Foreground(f.theme.BorderColor)
-	horizontalLine := lineStyle.Render(strings.Repeat("─", f.width))
+// KeyAtX returns the key for a visible hint at a zero-based terminal column on
+// the footer's keybinding row. The caller is responsible for checking the row.
+func (f *Footer) KeyAtX(x int) (tea.KeyMsg, bool) {
+	if x < 0 || x >= f.width {
+		return tea.KeyMsg{}, false
+	}
+	for _, hit := range f.layout().hits {
+		if x >= hit.start && x < hit.end {
+			return footerKeyMessage(hit.key)
+		}
+	}
+	return tea.KeyMsg{}, false
+}
 
-	return horizontalLine + "\n" + footerContent
+func footerKeyMessage(key string) (tea.KeyMsg, bool) {
+	switch key {
+	case "Enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}, true
+	case "Esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}, true
+	case "Space":
+		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}, true
+	case "←":
+		return tea.KeyMsg{Type: tea.KeyLeft}, true
+	case "→":
+		return tea.KeyMsg{Type: tea.KeyRight}, true
+	case "↑":
+		return tea.KeyMsg{Type: tea.KeyUp}, true
+	case "↓":
+		return tea.KeyMsg{Type: tea.KeyDown}, true
+	default:
+		runes := []rune(key)
+		if len(runes) == 1 {
+			return tea.KeyMsg{Type: tea.KeyRunes, Runes: runes}, true
+		}
+		return tea.KeyMsg{}, false
+	}
+}
+
+// View renders the footer with two lines: horizontal separator + keybindings.
+func (f *Footer) View() string {
+	horizontalLine := lipgloss.NewStyle().Foreground(f.theme.BorderColor).Render(strings.Repeat("─", max(0, f.width)))
+	return horizontalLine + "\n" + f.layout().content
 }

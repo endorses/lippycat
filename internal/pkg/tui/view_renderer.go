@@ -19,6 +19,9 @@ func (m Model) View() string {
 	if m.uiState.Quitting {
 		return "Goodbye!\n"
 	}
+	if m.textSelection != nil && m.textSelectionAllowed() {
+		return m.textSelection.View()
+	}
 
 	// Render components
 	headerView := m.uiState.Header.View()

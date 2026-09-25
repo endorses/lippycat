@@ -86,7 +86,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 			minWidthForDetails := 160
 			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
 				// Split pane mode - check X position to determine which pane
-				detailsWidth := 77
+				detailsWidth := 79
 				listWidth := m.uiState.Width - detailsWidth
 				detailsContentStart := listWidth
 
@@ -161,7 +161,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 			minWidthForDetails := 160
 			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
 				// Split pane mode - check X position to determine which pane
-				detailsWidth := 77
+				detailsWidth := 79
 				listWidth := m.uiState.Width - detailsWidth
 				detailsContentStart := listWidth
 
@@ -342,21 +342,12 @@ func (m Model) handlePacketListClick(msg tea.MouseMsg, contentStartY, contentHei
 		return m, nil
 	}
 
-	minWidthForDetails := 120
+	minWidthForDetails := 160
 
 	// Check if we're in split pane mode
 	if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
-		// Split pane: packet list on left (65%), details on right (35%)
-		// Both panels have borders and padding, so calculate actual widths
-		listWidth := m.uiState.Width * 65 / 100
-
-		// The packet list renders at full listWidth
-		// The details panel starts immediately after the packet list
-		// Packet list has border(1) + padding(2) = 3 chars on right side
-		// So the actual packet list content ends at listWidth - 3
-		// Clicks from listWidth - 2 onwards should focus the details panel
-
-		detailsContentStart := listWidth - 2 // Move boundary left to account for packet list's right border/padding
+		// Match the fixed-width details pane used by rendering and selection.
+		detailsContentStart := m.uiState.Width - 79
 
 		if msg.X < detailsContentStart {
 			// Click in packet list area - switch focus to left pane

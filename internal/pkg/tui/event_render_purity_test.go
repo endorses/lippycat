@@ -136,6 +136,7 @@ func TestEventDoubleClickPreparesDetailsImmediately(t *testing.T) {
 	m = updateEventRenderModel(t, m, tea.MouseMsg{
 		X: 5, Y: 8, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
 	})
+	m = updateEventRenderModel(t, m, tea.MouseMsg{Action: tea.MouseActionRelease})
 	require.True(t, m.uiState.EventShowDetails)
 	require.Equal(t, initial+1, m.eventViewSyncCount)
 	require.Equal(t, id, m.uiState.EventsView.SelectedID())

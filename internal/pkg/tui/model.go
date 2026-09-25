@@ -104,6 +104,7 @@ type CaptureTelemetryMsg capture.Telemetry
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
+	textSelection           *mouseTextSelection
 	scrollDrag              string
 	scrollDragRow           int
 	scrollDragOffset        int
@@ -404,8 +405,15 @@ func (m *Model) Shutdown() {
 
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg.(type) {
+	case tea.KeyMsg, tea.WindowSizeMsg, tea.ResumeMsg:
+		m.textSelection = nil
+	}
 	updated, cmd := m.update(msg)
 	if next, ok := updated.(Model); ok {
+		if next.textSelection != nil && !next.textSelectionAllowed() {
+			next.textSelection = nil
+		}
 		cmd = tea.Batch(cmd, next.syncOfflineBrowser(), next.requestOfflineRelated())
 		next.prepareViewChrome()
 		return next, cmd
@@ -692,7 +700,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Route messages to appropriate handlers
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		return m.handleMouse(msg)
+		return m.handleTextSelectionMouse(msg)
+	case textCopiedMsg:
+		if msg.err != nil {
+			return m, m.uiState.Toast.Show("Copy failed: "+msg.err.Error(), components.ToastError, components.ToastDurationLong)
+		}
+		return m, m.uiState.Toast.Show("Text copied", components.ToastSuccess, components.ToastDurationShort)
 	case tea.KeyMsg:
 		return m.handleKeyboard(msg)
 	case tea.WindowSizeMsg:

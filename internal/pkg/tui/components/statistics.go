@@ -1157,7 +1157,7 @@ func (s *StatisticsView) renderOverviewMedium() string {
 	// 4. TUI Process (with CPU sparkline)
 	tuiContent := s.buildTUIContentWide(contentWidth, 0)
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
-		dashboard.WithIcon("🖥"),
+		dashboard.WithIcon("💻"),
 		dashboard.WithWidth(cardWidth))
 	result.WriteString(tuiCard.Render())
 	result.WriteString("\n")
@@ -1274,7 +1274,7 @@ func (s *StatisticsView) renderOverviewWideWithLimit(topListLimit int) string {
 		dashboard.WithIcon("🩺"),
 		dashboard.WithWidth(cardWidth))
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
-		dashboard.WithIcon("🖥"),
+		dashboard.WithIcon("💻"),
 		dashboard.WithWidth(cardWidth))
 
 	row2Height := maxInt(healthCard.ContentHeight(), tuiCard.ContentHeight())
@@ -2817,7 +2817,7 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 	titleStyle := lipgloss.NewStyle().Foreground(s.theme.InfoColor).Bold(true)
 
 	// Left column header
-	leftLines = append(leftLines, titleStyle.Render("🖥 Local"))
+	leftLines = append(leftLines, titleStyle.Render("🏠 Local"))
 	for _, item := range items {
 		leftLines = append(leftLines, hi.RenderWithLabel(item.Label, item.Level))
 	}
@@ -3030,7 +3030,7 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 func (s *StatisticsView) renderTUIMetrics(titleStyle, labelStyle, valueStyle lipgloss.Style) string {
 	var result strings.Builder
 
-	result.WriteString(titleStyle.Render("🖥 TUI Process"))
+	result.WriteString(titleStyle.Render("💻 TUI Process"))
 	result.WriteString("\n\n")
 
 	if s.tuiMetrics == nil {

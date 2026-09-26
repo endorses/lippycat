@@ -2,11 +2,14 @@
 
 Drafted: 2026-09-26. Code baseline: `77f7abfe`.
 
-Status: Implementation in progress. Storage contracts and compatibility fixtures
-are complete. Shared storage now backs X2 recovery and managed filter snapshots;
-transactional filter mutations and offline filter initialization/migration are
-verified. Managed filter runtime/CLI mode enforcement is complete; cross-store
-key validation and phases 4–9 remain open.
+Status: Implementation in progress. Phases 1, 3, and 4 are complete. Phase 2
+still awaits the four-store key-independence check with X3. Administrative state,
+transaction recovery, managed filters, explicit snapshot initialization/migration,
+and actual-owner filter/state/X2 key checks are implemented and verified. X3
+layout calibration has rejected the per-record protocol and all three measured
+immutable batch/head prototypes on the current ext4 platform. Phase 5 has no
+qualified production layout; durable X3, replay, rotation, telemetry, and final
+qualification remain open.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
 This plan extends the implemented
@@ -317,40 +320,40 @@ editing remains available with LI disabled; LI requires encrypted persistence.
 Primary areas: `internal/pkg/li/{persistence,manager,registry}.go`, destination
 mutation code, `internal/pkg/processor/{processor_li,processor_radius_li}.go`.
 
-- [ ] Store the complete administrative snapshot under its independent purpose/key,
+- [x] Store the complete administrative snapshot under its independent purpose/key,
       with store incarnation, task definitions/status/timestamps, activation generations,
       destination creation identities/revisions, cleanup IDs, and generation watermarks.
       Validate a detached complete snapshot before registry mutation or filter cleanup.
       Preserve legitimate retained tasks whose destination has since been removed.
-- [ ] Add exclusive state-store ownership, strict bounded decode, explicit encrypted
+- [x] Add exclusive state-store ownership, strict bounded decode, explicit encrypted
       initialization, and fail-closed startup. Preserve restore-as-unconfirmed behavior:
       decryption must not turn persisted active tasks into current authorization.
-- [ ] Serialize committed administrative snapshots consistently across task changes,
+- [x] Serialize committed administrative snapshots consistently across task changes,
       destination changes, pending promotion, expiry, purge, and background reconciliation.
       Prevent snapshots from observing another operation's provisional registry state.
-- [ ] Define and implement activation/modification transactions: reserve generation
+- [x] Define and implement activation/modification transactions: reserve generation
       durably; record recoverable intent/cleanup obligations; reconcile committed filter
       policy; persist final state before releasing effective admission. A failed final
       save faults the affected task. Equivalent retries must not report success while
       a previous failed/uncertain commit remains unresolved.
-- [ ] For deactivation/expiry/failure, keep authorization blocked once withdrawn;
+- [x] For deactivation/expiry/failure, keep authorization blocked once withdrawn;
       durably record cleanup/revocation and propagate failures. Retain generation
       watermarks and outstanding cleanup through task/tombstone purges.
-- [ ] Correct destination mutation rollback: restore the old candidate only after
+- [x] Correct destination mutation rollback: restore the old candidate only after
       definite pre-replacement failure; on uncertainty, gate delivery/replay and require
       reconciliation. Preserve destination revision identity during recovery.
-- [ ] Define the fault-returning journal revocation hook and registration points
+- [x] Define the fault-returning journal revocation hook and registration points
       for task/destination changes. Verify administrative/filter recovery using a
       controllable test implementation, including rejection and uncertainty. Wire the
       real journal controls and prove the combined acknowledgement boundary in phase 6.
-- [ ] Preserve `persistedActive`, `persistenceCandidates`, `replayConfirmed`, startup
+- [x] Preserve `persistedActive`, `persistenceCandidates`, `replayConfirmed`, startup
       ADMF reconciliation, orphan LI-filter cleanup, and non-LI filters. RADIUS tasks
       currently require fresh activation and cannot inherit unchanged-generation replay;
       keep that restriction explicit rather than bypassing it for X3.
-- [ ] Preserve the RADIUS correlation sidecar's reservation watermark. Changing the
+- [x] Preserve the RADIUS correlation sidecar's reservation watermark. Changing the
       administrative state path must pin the old sidecar path or migrate it under its
       own ownership contract; never silently derive a fresh allocator from the new path.
-- [ ] Extend persistence/destination/generation/idempotency/expiry tests with failure
+- [x] Extend persistence/destination/generation/idempotency/expiry tests with failure
       at each activation checkpoint, final modification, promotion, reconciliation,
       destination rename/sync, and cross-store cleanup boundary. Crash/restart must not
       reuse a generation, revive authorization, or silently reset the RADIUS allocator.
@@ -516,11 +519,11 @@ before implementation and update all references if an adjustment is necessary.
 - [ ] Register common migration commands in all/cli/processor/tap binaries, not just
       `cmd/filter` or `cmd/set` (currently CLI/all only). Add LI migration subcommands
       only in LI builds; verify non-LI binaries contain no LI implementation symbols.
-- [ ] Implement strict offline YAML→encrypted filter and JSON→encrypted LI-state
+- [x] Implement strict offline YAML→encrypted filter and JSON→encrypted LI-state
       migration under source/destination ownership locks acquired in stable order.
       Validate the entire input before writing; preserve identities/watermarks; encrypt
       before temporary output. No skipped records or automatic plaintext backups.
-- [ ] Make encrypted initialization refuse existing files and ambiguous defaults.
+- [x] Make encrypted initialization refuse existing files and ambiguous defaults.
       YAML-mode startup uses `filters.yaml` normally. Encrypted-mode startup finding
       only `filters.yaml` explains migration; YAML mode finding only `filters.enc`
       requires explicit mode/path selection rather than silently starting empty.
@@ -735,3 +738,75 @@ release after subsequent constructor failure. A bounded independent review of
 the initialization seam found and resolved a pre-authentication correlator worker
 leak and a latent tap factory-error ownership leak. Phase 3 is implemented; full
 release qualification remains phase 9.
+
+### Encrypted administrative state and bounded recovery closure (2026-09-26)
+
+Phase 4 now uses an independently encrypted, exclusively owned, strictly decoded
+complete snapshot. Administrative operations reserve generations and durable
+intents before policy effects, publish only committed candidates, and retain
+failed/uncertain cleanup and revocation obligations for recovery. Destination
+changes preserve exact endpoint identity. Restored pending tasks remain queryable
+but cannot promote or gain authority from a modification without fresh activation;
+legacy generation-zero reactivation advances the retained watermark.
+
+The bounded closure review fixed cleanup ownership checks, withdrawal planning
+failure admission, exact intent/control references, purge eligibility, and
+constructor effects preceding storage authentication. Its one supplemental fix
+binds unfinished destination controls to the retained prior endpoint's exact
+revision and delivery hash; finished historical controls remain inert. Processor
+construction now retains authenticated owners before creating outputs; failed
+preparation releases them without ADMF notification or disturbing an existing
+runtime. Current ADMF reconciliation still precedes capture and remote serving.
+
+Offline JSON migration and explicit empty initialization preserve task/destination
+identities, generation watermarks and the original RADIUS allocator pin, including
+changed-path and explicit in-place modes. Authenticated resume metadata binds the
+source, destination, keys and pin. Process/tap CLI, environment and YAML references
+support independent state/X2 active and prior keys, with explicit-empty precedence.
+Cross-store checks use the immutable rings retained by actual owners. This does
+not yet implement X3 configuration or encrypted key rotation.
+
+Verification passed: full LI race suite (32.601s), supplemental administrative/
+codec race suite (8.655s), affected all+li LI/processor/CLI/migration suites and vet,
+non-LI processor/process/tap suites, and the full shared-storage race suite
+(1.489s after the experimental helpers). CLI+li, processor+li, tap+li and non-LI all
+variants compile and pass migration registration/initialization checks. A real
+RADIUS allocator integration preserves its watermark across a state-path change.
+Isolated overlay mutations demonstrate sensitivity to startup ordering, cleanup,
+withdrawal, restored-pending authority, purge references and endpoint identity.
+
+The independent scope reconciliation covers 22 obligations, 64 union production
+loci, 48 field rows and 43 branch rows, including all 204 author persisted-field
+boundary rows and seven configuration rows. Zero unmatched loci or unresolved
+material findings remain in phase 4. Temporary inspectable closure evidence stays
+under `/tmp/li-admin-closure*.md`; no audit framework was added to the repository.
+Actual journal revocation/product acknowledgements remain phase 6; historical X3
+replay remains phase 7; process-kill/power-loss and full release qualification
+remain phase 9. Local injection/reopen tests do not substitute for those checks.
+
+### X3 layout calibration: no qualified layout yet (2026-09-26)
+
+The reproducible [measurement report](../research/li-x3-storage-benchmarks.md)
+records real encryption, usage reservations, product/control/head durability,
+filesystem/device details and callback timing. The original per-record X2
+protocol, used as an explicit size-equivalent X3 storage proxy, sustained only
+18.50 durable copies/s under a 200-copy/s offered calibration and accumulated a
+large backlog. It is not suitable for the frozen X3 workload on this device.
+
+Three benchmark-only alternatives were specified and tested in the
+[batch-layout design](../design/li-x3-batch-layout.md): separate immutable batch
+and head publication; grouped publication with parallel file syncs; and a single
+head-container inode with descriptor-owned exchange/archive publication. Their
+2/200-record probes all missed the frozen 25ms median durability gate. The final
+container prototype measured exact medians of 28.608/29.516ms, including actual
+usage renewal in the 200-record probe. None was adopted by production X2 or X3.
+
+The bounded helpers and kernels include fault, ownership, callback, malformed
+frame and interrupted-publication checks. Missing selected prerequisites stop
+recovery; no older-head fallback or generic cleanup deletes committed evidence.
+The exchange prototype only classifies staged evidence; its offline reconciliation
+is deliberately unsupported. Raw final measurements were retained for handoff,
+and owned disposable stores/caches were removed. The full 20,000-copy/s workload,
+40,000-copy/s recovery, simultaneous X2 contention, compaction/expiry, million-record
+startup and soak gates remain unrun. A new reviewed layout or supported durable
+platform is required before production layout selection and phases 5–7 proceed.

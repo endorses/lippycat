@@ -16,13 +16,18 @@ import (
 // initLIManager is a no-op when LI is not compiled in.
 func (p *Processor) initLIManager() {}
 
+type liStoragePreparation struct{}
+
+func (p *Processor) prepareLIStorage() error { return nil }
+func (p *Processor) initLIRuntime()          {}
+
 func (p *Processor) validateLIConfiguration() error { return nil }
 
 // startLIManager is a no-op when LI is not compiled in.
 func (p *Processor) startLIManager() error { return nil }
 
 // stopLIManager is a no-op when LI is not compiled in.
-func (p *Processor) stopLIManager() {}
+func (p *Processor) stopLIManager() error { return nil }
 
 // processLIPacket is a no-op when LI is not compiled in.
 func (p *Processor) processLIPacket(_ *types.PacketDisplay, _ []string) {}

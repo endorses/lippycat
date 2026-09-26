@@ -69,6 +69,11 @@ func (m *Manager) withdrawPersistedRADIUS(task *InterceptTask, cleanup []string)
 // barrier as X1 modification. Invalid replacement policy withdraws the old
 // authorization instead of retaining a legacy NAI/SIP task indefinitely.
 func (m *Manager) reconcileRADIUSTask(task *InterceptTask) (bool, error) {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return true, err
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	previous, err := m.registry.GetTaskDetails(task.XID)
@@ -83,12 +88,17 @@ func (m *Manager) reconcileRADIUSTask(task *InterceptTask) (bool, error) {
 		validationErr = errors.Join(validationErr, fmt.Errorf("RADIUS reconciliation cannot change StartTime; deactivate and reprovision"))
 	}
 	if err := validationErr; err != nil {
+		if m.stateStore != nil {
+			withdrawErr := m.withdrawPersistentTaskLocked(task.XID, StateTaskFail, "invalid RADIUS replacement")
+			m.faultAdministrative(withdrawErr)
+			return true, errors.Join(err, withdrawErr)
+		}
 		// Revoke admission before best-effort withdrawal; a failed remote
 		// filter deletion must not preserve the obsolete authorization.
 		markErr := m.registry.MarkTaskFailed(task.XID, err.Error())
 		m.notifyTaskModified(previous)
 		cleanupErr := m.filters.RemoveFiltersForTask(task.XID)
-		return true, errors.Join(err, markErr, cleanupErr, m.persistState())
+		return true, errors.Join(err, markErr, cleanupErr, m.persistStateLocked())
 	}
 	if equivalentTaskDefinition(previous, task) {
 		return true, nil
@@ -100,10 +110,18 @@ func (m *Manager) reconcileRADIUSTask(task *InterceptTask) (bool, error) {
 		RADIUSScope:                 &task.RADIUSScope, RADIUSMACProfile: &task.RADIUSMACProfile,
 	})
 	if modifyErr != nil {
+		if m.stateStore != nil {
+			if m.stateFault.Load() != nil {
+				return true, modifyErr
+			}
+			withdrawErr := m.withdrawPersistentTaskLocked(task.XID, StateTaskFail, "rejected RADIUS replacement")
+			m.faultAdministrative(withdrawErr)
+			return true, errors.Join(modifyErr, withdrawErr)
+		}
 		// A rejected ADMF replacement cannot leave the old target armed.
 		markErr := m.registry.MarkTaskFailed(task.XID, modifyErr.Error())
 		m.notifyTaskModified(previous)
-		return true, errors.Join(modifyErr, markErr, m.filters.RemoveFiltersForTask(task.XID), m.persistState())
+		return true, errors.Join(modifyErr, markErr, m.filters.RemoveFiltersForTask(task.XID), m.persistStateLocked())
 	}
 	return true, nil
 }
@@ -112,13 +130,23 @@ func (m *Manager) reconcileRADIUSTask(task *InterceptTask) (bool, error) {
 // readable. Preserve generic ADMF snapshot safeguards, but do not let a failed
 // RADIUS conversion leave the previous RADIUS authorization armed.
 func (m *Manager) rejectRADIUSReplacement(xid uuid.UUID, cause error) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	previous, err := m.registry.GetTaskDetails(xid)
 	if err != nil || !IsRADIUSTask(previous) {
 		return nil
 	}
+	if m.stateStore != nil {
+		withdrawErr := m.withdrawPersistentTaskLocked(xid, StateTaskFail, "invalid RADIUS replacement")
+		m.faultAdministrative(withdrawErr)
+		return withdrawErr
+	}
 	markErr := m.registry.MarkTaskFailed(xid, cause.Error())
 	m.notifyTaskModified(previous)
-	return errors.Join(markErr, m.filters.RemoveFiltersForTask(xid), m.persistState())
+	return errors.Join(markErr, m.filters.RemoveFiltersForTask(xid), m.persistStateLocked())
 }

@@ -75,17 +75,12 @@ func TestStaleExpiryPreservesReactivatedGeneration(t *testing.T) {
 	require.NoError(t, m.ActivateTask(task))
 	original, err := m.GetTaskDetails(task.XID)
 	require.NoError(t, err)
-	callback := m.registry.onDeactivation
-	m.registry.onDeactivation = func(expired *InterceptTask, reason DeactivationReason) {
-		if reason != DeactivationReasonExpired {
-			callback(expired, reason)
-			return
-		}
-		// Reproduce lifecycle changes after the checker's snapshot but before
-		// its callback acquires the manager's admission barrier.
+	callback := m.registry.onExpiration
+	m.registry.onExpiration = func(expired *InterceptTask) {
+		// Inject the race after snapshot and before the administrative barrier.
 		require.NoError(t, m.DeactivateTask(task.XID))
 		require.NoError(t, m.ActivateTask(task))
-		callback(expired, reason)
+		callback(expired)
 	}
 	m.registry.mu.Lock()
 	m.registry.tasks[task.XID].EndTime = time.Now().Add(-time.Second)

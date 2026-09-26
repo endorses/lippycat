@@ -16,7 +16,7 @@ func (c *Client) initJournal() {
 		return
 	}
 	x2, _ := c.config.EffectiveQueueSizes()
-	c.journal, c.initErr = OpenJournal(JournalConfig{PreserveSequences: true, Dir: c.config.X2SpoolDir, KeyFile: c.config.X2SpoolKeyFile, KeyID: c.config.X2SpoolKeyID, LegacyKeyID: c.config.X2SpoolLegacyKeyID, ReadKeys: c.config.X2SpoolReadKeys, MaxBytes: c.config.X2SpoolMaxBytes, MaxPending: x2, MaxRecords: int(min(c.config.X2SpoolMaxBytes/4096, 1_000_000))})
+	c.journal, c.initErr = OpenJournal(JournalConfig{PreserveSequences: true, Dir: c.config.X2SpoolDir, KeyFile: c.config.X2SpoolKeyFile, KeyID: c.config.X2SpoolKeyID, LegacyKeyID: c.config.X2SpoolLegacyKeyID, ReadKeys: c.config.X2SpoolReadKeys, ValidateKeys: c.config.X2SpoolValidateKeys, MaxBytes: c.config.X2SpoolMaxBytes, MaxPending: x2, MaxRecords: int(min(c.config.X2SpoolMaxBytes/4096, 1_000_000))})
 	if c.initErr == nil && c.journal.ReadOnly() {
 		c.initErr = errors.Join(ErrJournalMigrationRequired, c.journal.Close())
 	}

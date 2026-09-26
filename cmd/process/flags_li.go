@@ -5,6 +5,8 @@ package process
 import (
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/securestore"
+
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/radiusconfig"
@@ -93,6 +95,9 @@ type LIConfig struct {
 	DeliveryX2SpoolDir                    string
 	DeliveryX2SpoolMaxBytes               int64
 	DeliveryX2SpoolKeyFile                string
+	DeliveryX2SpoolKeyID                  string
+	DeliveryX2SpoolLegacyKeyID            string
+	DeliveryX2SpoolReadKeys               []securestore.KeyRef
 	DeliveryX2SpoolReplayPolicy           string
 	DeliveryX2SpoolReplayManifest         string
 	DeliveryX2SpoolExportManifest         string
@@ -116,6 +121,7 @@ type LIConfig struct {
 	ADMFSyncTimeout       time.Duration
 	ADMFReconcileInterval time.Duration
 	StateFile             string
+	StateKeys             securestore.KeyConfig
 }
 
 // RegisterLIFlags adds LI-related flags to the command.
@@ -170,7 +176,8 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&liADMFSyncOnStartup, "li-admf-sync-on-startup", true, "Query ADMF for task/destination state on startup")
 	cmd.Flags().DurationVar(&liADMFSyncTimeout, "li-admf-sync-timeout", 30*time.Second, "Timeout for startup state sync")
 	cmd.Flags().DurationVar(&liADMFReconcileInterval, "li-admf-reconcile-interval", 5*time.Minute, "Periodic ADMF reconciliation interval (0 = disabled; drift is not corrected while off)")
-	cmd.Flags().StringVar(&liStateFile, "li-state-file", "", "Path to atomic LI lifecycle state file (empty disables local persistence)")
+	cmd.Flags().StringVar(&liStateFile, "li-state-file", "", "Path to initialized encrypted LI lifecycle snapshot (empty disables local persistence)")
+	registerLIStoreKeyFlags(cmd)
 }
 
 // BindLIViperFlags binds LI flags to viper for config file support.

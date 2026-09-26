@@ -69,6 +69,7 @@ type fileOps struct {
 	sync      func(*os.File) error
 	close     func(*os.File) error
 	rename    func(int, string, int, string) error
+	exchange  func(int, string, int, string) error
 	noReplace func(int, string, int, string) (bool, bool, error)
 	unlink    func(int, string, int) error
 }
@@ -76,7 +77,7 @@ type fileOps struct {
 func defaultFileOps() fileOps {
 	return fileOps{
 		write: (*os.File).Write, sync: (*os.File).Sync, close: (*os.File).Close,
-		rename: unix.Renameat, noReplace: publishNoReplace, unlink: unix.Unlinkat,
+		rename: unix.Renameat, exchange: exchangeNames, noReplace: publishNoReplace, unlink: unix.Unlinkat,
 	}
 }
 

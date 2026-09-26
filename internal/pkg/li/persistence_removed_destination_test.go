@@ -15,7 +15,7 @@ func TestPersistenceRestoresTasksAfterDestinationRemoval(t *testing.T) {
 	for _, status := range []TaskStatus{TaskStatusDeactivated, TaskStatusFailed, TaskStatusPending} {
 		t.Run(status.String(), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.json")
-			m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			did, xid := uuid.New(), uuid.New()
 			require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 9443}))
 			task := &InterceptTask{XID: xid, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "alice@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only}
@@ -32,7 +32,8 @@ func TestPersistenceRestoresTasksAfterDestinationRemoval(t *testing.T) {
 			before, err := m.GetTaskDetails(xid)
 			require.NoError(t, err)
 			require.NoError(t, m.RemoveDestination(did))
-			restarted := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			m.Stop()
+			restarted := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			require.NoError(t, restarted.restorePersistedState())
 			restored, err := restarted.GetTaskDetails(xid)
 			require.NoError(t, err)
@@ -42,17 +43,18 @@ func TestPersistenceRestoresTasksAfterDestinationRemoval(t *testing.T) {
 			require.Zero(t, restarted.FilterCount())
 			require.False(t, restarted.ReplayTaskAuthorized(xid, restored.ActivationGeneration))
 			if status == TaskStatusPending {
-				// Advance the pending boundary without sleeping; missing destinations must
-				// fail promotion on both the original owner and the restarted owner.
-				for _, owner := range []*Manager{m, restarted} {
+				// Elapsed time cannot confirm restored authority. Explicit activation
+				// still validates the removed destination before creating any filters.
+				for _, owner := range []*Manager{restarted} {
 					owner.registry.mu.Lock()
 					owner.registry.tasks[xid].StartTime = time.Now().Add(-time.Second)
 					owner.registry.mu.Unlock()
 					owner.promotePendingTasks()
-					failed, err := owner.GetTaskDetails(xid)
+					pending, err := owner.GetTaskDetails(xid)
 					require.NoError(t, err)
-					require.Equal(t, TaskStatusFailed, failed.Status)
-					require.Contains(t, failed.LastError, ErrDestinationNotFound.Error())
+					require.Equal(t, TaskStatusPending, pending.Status)
+					require.True(t, owner.pendingNeedsConfirmation(xid))
+					require.ErrorIs(t, owner.ActivateTask(pending), ErrDestinationNotFound)
 					require.Zero(t, owner.FilterCount())
 				}
 			}

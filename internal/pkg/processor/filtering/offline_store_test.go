@@ -160,3 +160,25 @@ func TestOfflineInitializationNoClobberAndResumeBinding(t *testing.T) {
 	_, err = InitializeEncryptedFilterStore(path, keys, OfflineOptions{InPlace: true})
 	require.Error(t, err)
 }
+
+func TestOfflineInPlaceValidatesRawSourcePath(t *testing.T) {
+	directory := privateStoreTestDir(t)
+	target := filepath.Join(directory, "filters.yaml")
+	raw := []byte("filters: []\n")
+	require.NoError(t, os.WriteFile(target, raw, 0600))
+	link := filepath.Join(directory, "link")
+	require.NoError(t, os.Symlink(directory, link))
+	// The cleaned pathname equals target, but the raw source traverses a symlink.
+	source := link + "/../filters.yaml"
+	require.Equal(t, target, filepath.Clean(source))
+	out, err := MigrateYAMLFilterStore(source, target, storeTestKey(t, 77), OfflineOptions{InPlace: true})
+	require.Error(t, err)
+	require.Equal(t, securestore.NotCommitted, out)
+	require.Equal(t, out, securestore.OutcomeOf(err))
+	remaining, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, raw, remaining)
+	artifacts, err := filepath.Glob(filepath.Join(directory, ".filter-*"))
+	require.NoError(t, err)
+	require.Empty(t, artifacts)
+}

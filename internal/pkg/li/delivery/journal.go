@@ -26,10 +26,12 @@ const journalFaultReserve = int64(16384)
 const journalMaxRecord = int64(64 << 20)
 
 type JournalConfig struct {
-	PreserveSequences      bool
-	Dir, KeyFile           string
-	KeyID, LegacyKeyID     string
-	ReadKeys               []securestore.KeyRef
+	PreserveSequences  bool
+	Dir, KeyFile       string
+	KeyID, LegacyKeyID string
+	ReadKeys           []securestore.KeyRef
+	// ValidateKeys runs once with the actual owner ring before filesystem changes.
+	ValidateKeys           func(*securestore.Keyring) error
 	MaxBytes               int64
 	MaxPending, MaxRecords int
 }

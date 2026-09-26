@@ -534,6 +534,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryX2SpoolDir = liConfig.DeliveryX2SpoolDir
 		config.LIDeliveryX2SpoolMaxBytes = liConfig.DeliveryX2SpoolMaxBytes
 		config.LIDeliveryX2SpoolKeyFile = liConfig.DeliveryX2SpoolKeyFile
+		config.LIDeliveryX2SpoolKeyID = liConfig.DeliveryX2SpoolKeyID
+		config.LIDeliveryX2SpoolLegacyKeyID = liConfig.DeliveryX2SpoolLegacyKeyID
+		config.LIDeliveryX2SpoolReadKeys = liConfig.DeliveryX2SpoolReadKeys
 		config.LIDeliveryX2SpoolReplayPolicy = liConfig.DeliveryX2SpoolReplayPolicy
 		config.LIDeliveryX2SpoolReplayManifest = liConfig.DeliveryX2SpoolReplayManifest
 		config.LIDeliveryX2SpoolExportManifest = liConfig.DeliveryX2SpoolExportManifest
@@ -556,6 +559,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
 		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval
 		config.LIStateFile = liConfig.StateFile
+		config.LIStateKeys = liConfig.StateKeys
 	}
 
 	// Validate TLS configuration: cert and key required when TLS is enabled
@@ -623,6 +627,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	}
 	if config.EventIngressWALMaxBytes < 0 || config.EventIngressMaxBatchBytes < protoadapter.MaxEncodedBatchBytes {
 		return fmt.Errorf("event ingress WAL bytes must be non-negative and max batch bytes must be at least %d", protoadapter.MaxEncodedBatchBytes)
+	}
+	if err := applyLIStoreKeyConfig(cmd, &config); err != nil {
+		return err
 	}
 	if err := applyRADIUSLIConfig(cmd, &config); err != nil {
 		return err

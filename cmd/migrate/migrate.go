@@ -21,6 +21,7 @@ func NewCommand() *cobra.Command {
 		Long: "Initialize and migrate persisted stores while their owning nodes are stopped.",
 	}
 	cmd.AddCommand(newFilterStoreCommand())
+	addLICommands(cmd)
 	return cmd
 }
 

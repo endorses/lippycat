@@ -23,7 +23,7 @@ func TestRADIUSRestartWithdrawsLegacyFiltersAndRevokesGeneration(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.json")
 			old := &InterceptTask{XID: xid, Targets: []TargetIdentity{{Type: TargetTypeNAI, Value: "alice@example.test"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only, Status: status, ActivationGeneration: 7}
 			require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{old}, Destinations: []*persistedDestination{{DID: did, Address: "mdf.example", Port: 9443, X2Enabled: true, ProtocolType: "X2Only"}}}))
-			m := NewManager(ManagerConfig{Enabled: true, StateFile: path, FilterPusher: store, RADIUSScope: radius.ScopeBinding{OperatorScope: "operator-a", ProfileRevision: "v1"}}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path, FilterPusher: store, RADIUSScope: radius.ScopeBinding{OperatorScope: "operator-a", ProfileRevision: "v1"}}, nil)
 			require.NoError(t, m.restorePersistedState())
 			require.Zero(t, m.TaskCount())
 			require.False(t, store.has(canonical))
@@ -51,7 +51,7 @@ func TestRADIUSRestartWithdrawsLegacyFiltersAndRevokesGeneration(t *testing.T) {
 func TestRADIUSReconcileMigratesActiveNAIAndRejectsUnsupportedPolicy(t *testing.T) {
 	for _, delivery := range []DeliveryType{DeliveryX2Only, DeliveryX2andX3} {
 		t.Run(fmt.Sprint(delivery), func(t *testing.T) {
-			m := NewManager(ManagerConfig{Enabled: true, RADIUSScope: radius.ScopeBinding{OperatorScope: "operator-a", ProfileRevision: "v1"}}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, RADIUSScope: radius.ScopeBinding{OperatorScope: "operator-a", ProfileRevision: "v1"}}, nil)
 			xid, did := uuid.New(), uuid.New()
 			require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 9443, X2Enabled: true, ProtocolType: "X2Only"}))
 			// Model the registry left by the obsolete NAI-to-SIP implementation.
@@ -78,7 +78,7 @@ func TestRADIUSReconcileMigratesActiveNAIAndRejectsUnsupportedPolicy(t *testing.
 }
 
 func TestRADIUSMalformedReplacementRevokesTask(t *testing.T) {
-	m := NewManager(ManagerConfig{Enabled: true}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true}, nil)
 	task := radiusTargetTask()
 	did := task.DestinationIDs[0]
 	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 443, X2Enabled: true, ProtocolType: "X2Only"}))
@@ -94,11 +94,13 @@ func TestRADIUSMalformedReplacementRevokesTask(t *testing.T) {
 func TestRADIUSLegacyMigrationRequiresFilterInventory(t *testing.T) {
 	task := radiusTargetTask()
 	task.RADIUSScope = radius.ScopeBinding{}
+	task.Targets = []TargetIdentity{{Type: TargetTypeNAI, Value: "alice@example.test"}}
+	task.RADIUSMACProfile = ""
 	task.Status = TaskStatusActive
 	path := filepath.Join(t.TempDir(), "state.json")
-	require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{task}}))
+	require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{task}, Destinations: []*persistedDestination{{DID: task.DestinationIDs[0], Address: "mdf.example", Port: 443, X2Enabled: true, ProtocolType: "X2Only"}}}))
 	// This minimal pusher deliberately has no inventory API.
-	m := NewManager(ManagerConfig{Enabled: true, StateFile: path, FilterPusher: &mockFilterPusher{}}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path, FilterPusher: &mockFilterPusher{}}, nil)
 	require.ErrorContains(t, m.restorePersistedState(), "filter lister")
 	require.Zero(t, m.TaskCount())
 }
@@ -106,7 +108,7 @@ func TestRADIUSLegacyMigrationRequiresFilterInventory(t *testing.T) {
 func TestRADIUSReconciliationFailedReplacementNeverRetainsOldAdmission(t *testing.T) {
 	for _, reason := range []string{"unknown destination", "start time"} {
 		t.Run(reason, func(t *testing.T) {
-			m := NewManager(ManagerConfig{Enabled: true}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true}, nil)
 			task := radiusTargetTask()
 			did := task.DestinationIDs[0]
 			require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 443, X2Enabled: true, ProtocolType: "X2Only"}))

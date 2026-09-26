@@ -20,7 +20,7 @@ func TestRADIUSRetainedLegacyNAIRestoresInactive(t *testing.T) {
 			store := newStubFilterStore(id)
 			path := filepath.Join(t.TempDir(), "state.json")
 			require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{task}}))
-			m := NewManager(ManagerConfig{Enabled: true, StateFile: path, FilterPusher: store}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path, FilterPusher: store}, nil)
 			require.NoError(t, m.restorePersistedState())
 			require.False(t, store.has(id))
 			restored, err := m.GetTaskDetails(task.XID)

@@ -15,12 +15,13 @@ import (
 func TestPhase6PersistenceRestoresPendingWithoutArming(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "li-state.json")
 	did, xid := uuid.New(), uuid.New()
-	m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 9443}))
 	require.NoError(t, m.ActivateTask(&InterceptTask{XID: xid, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "alice@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2andX3, StartTime: time.Now().Add(time.Hour)}))
 	require.Equal(t, 0, m.FilterCount())
 
-	restarted := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+	m.Stop()
+	restarted := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 	require.NoError(t, restarted.restorePersistedState())
 	task, err := restarted.GetTaskDetails(xid)
 	require.NoError(t, err)
@@ -39,7 +40,7 @@ func TestPhase6PersistenceDoesNotRestoreExpiredOrUnconfirmedActive(t *testing.T)
 			{XID: uuid.New(), Status: TaskStatusPending, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "b@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only, StartTime: time.Now().Add(-2 * time.Hour), EndTime: time.Now().Add(-time.Hour)},
 		},
 	}))
-	m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 	require.NoError(t, m.restorePersistedState())
 	require.Equal(t, 0, m.TaskCount(), "active needs ADMF confirmation and expired state stays disarmed")
 }
@@ -47,7 +48,7 @@ func TestPhase6PersistenceDoesNotRestoreExpiredOrUnconfirmedActive(t *testing.T)
 func TestPhase6PersistenceCorruptionFailsClosedAndUsesRestrictivePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "li-state.json")
 	require.NoError(t, os.WriteFile(path, []byte("not json"), 0600))
-	m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 	require.ErrorContains(t, m.Start(), "interception remains disarmed")
 	require.Equal(t, 0, m.FilterCount())
 

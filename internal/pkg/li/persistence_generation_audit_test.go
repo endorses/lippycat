@@ -26,14 +26,15 @@ func TestPersistedGenerationSurvivesTaskRemoval(t *testing.T) {
 				task.DeactivatedAt = time.Now().Add(-time.Hour)
 			}
 			require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{task}, Destinations: []*persistedDestination{{DID: did, Address: "mdf.example", Port: 9443}}}))
-			m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			require.NoError(t, m.restorePersistedState())
 			if mode == "purged" {
 				require.Equal(t, 1, m.registry.PurgeDeactivatedTasks(0))
 			}
 			require.Zero(t, m.TaskCount())
 			require.NoError(t, m.persistState()) // Includes the startup checkpoint before ADMF confirmation.
-			restarted := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			m.Stop()
+			restarted := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			require.NoError(t, restarted.restorePersistedState())
 			task.EndTime = time.Time{}
 			require.NoError(t, restarted.ActivateTask(task))
@@ -51,7 +52,7 @@ func TestPersistedActiveGenerationContinuity(t *testing.T) {
 			xid, did := uuid.New(), uuid.New()
 			task := &InterceptTask{XID: xid, ActivationGeneration: 7, Status: TaskStatusActive, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "alice@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only}
 			require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{task}, Generations: map[uuid.UUID]uint64{xid: watermark}, Destinations: []*persistedDestination{{DID: did, Address: "mdf.example", Port: 9443}}}))
-			m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			require.NoError(t, m.restorePersistedState())
 			require.NoError(t, m.activateStartupTask(task))
 			active, err := m.GetTaskDetails(xid)
@@ -66,7 +67,7 @@ func TestPersistedActiveGenerationContinuity(t *testing.T) {
 }
 
 func TestTaskGenerationExhaustionRejectsActivation(t *testing.T) {
-	m := NewManager(ManagerConfig{Enabled: true}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true}, nil)
 	xid, did := uuid.New(), uuid.New()
 	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 9443}))
 	m.registry.seedGeneration(xid, ^uint64(0))
@@ -77,7 +78,7 @@ func TestTaskGenerationExhaustionRejectsActivation(t *testing.T) {
 func TestTaskGenerationPersistenceFailureStaysDisarmed(t *testing.T) {
 	for _, modify := range []bool{false, true} {
 		t.Run(fmt.Sprint(modify), func(t *testing.T) {
-			m := NewManager(ManagerConfig{Enabled: true}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true}, nil)
 			xid, did := uuid.New(), uuid.New()
 			require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 9443}))
 			task := &InterceptTask{XID: xid, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "alice@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only}

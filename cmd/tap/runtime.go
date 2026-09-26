@@ -51,6 +51,9 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 	if err := applyTapEventTransportConfig(&config); err != nil {
 		return nil, err
 	}
+	if err := applyLIStoreKeyConfig(nil, &config); err != nil {
+		return nil, err
+	}
 	if err := applyRADIUSLIConfig(nil, &config); err != nil {
 		return nil, err
 	}

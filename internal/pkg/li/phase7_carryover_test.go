@@ -30,7 +30,7 @@ func TestPhase7ExpiryGatesPacketsAndRetriesFilterRemoval(t *testing.T) {
 
 	got, err := m.GetTaskDetails(task.XID)
 	require.NoError(t, err)
-	assert.Equal(t, TaskStatusDeactivated, got.Status, "failed withdrawal remains enforcement-gated")
+	assert.Equal(t, TaskStatusSuspended, got.Status, "failed withdrawal remains enforcement-gated until cleanup completes")
 	m.ProcessPacket(&types.PacketDisplay{}, []string{filterID})
 	assert.Zero(t, processed.Load())
 

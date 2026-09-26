@@ -5,6 +5,8 @@ package tap
 import (
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/securestore"
+
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/radiusconfig"
@@ -95,6 +97,9 @@ type LIConfig struct {
 	DeliveryX2SpoolDir                    string
 	DeliveryX2SpoolMaxBytes               int64
 	DeliveryX2SpoolKeyFile                string
+	DeliveryX2SpoolKeyID                  string
+	DeliveryX2SpoolLegacyKeyID            string
+	DeliveryX2SpoolReadKeys               []securestore.KeyRef
 	DeliveryX2SpoolReplayPolicy           string
 	DeliveryX2SpoolReplayManifest         string
 	DeliveryX2SpoolExportManifest         string
@@ -118,6 +123,7 @@ type LIConfig struct {
 	ADMFSyncTimeout       time.Duration
 	ADMFReconcileInterval time.Duration
 	StateFile             string
+	StateKeys             securestore.KeyConfig
 }
 
 // RegisterLIFlags adds LI-related flags to the command.
@@ -175,7 +181,8 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVar(&liADMFSyncOnStartup, "li-admf-sync-on-startup", true, "Query ADMF for task/destination state on startup")
 	cmd.PersistentFlags().DurationVar(&liADMFSyncTimeout, "li-admf-sync-timeout", 30*time.Second, "Timeout for startup state sync")
 	cmd.PersistentFlags().DurationVar(&liADMFReconcileInterval, "li-admf-reconcile-interval", 5*time.Minute, "Periodic ADMF reconciliation interval (0 = disabled; drift is not corrected while off)")
-	cmd.PersistentFlags().StringVar(&liStateFile, "li-state-file", "", "Path to atomic LI lifecycle state file (empty disables local persistence)")
+	cmd.PersistentFlags().StringVar(&liStateFile, "li-state-file", "", "Path to initialized encrypted LI lifecycle snapshot (empty disables local persistence)")
+	registerLIStoreKeyFlags(cmd)
 }
 
 // BindLIViperFlags binds LI flags to viper for config file support.
@@ -298,6 +305,7 @@ func GetLIConfig() *LIConfig {
 
 func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {
 	config.LIStateFile = liConfig.StateFile
+	config.LIStateKeys = liConfig.StateKeys
 	config.LIDeliveryQueueSize = liConfig.DeliveryQueueSize
 	config.LIDeliveryX2QueueSize = liConfig.DeliveryX2QueueSize
 	config.LIDeliveryX3QueueSize = liConfig.DeliveryX3QueueSize
@@ -308,6 +316,9 @@ func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {
 	config.LIDeliveryX2SpoolDir = liConfig.DeliveryX2SpoolDir
 	config.LIDeliveryX2SpoolMaxBytes = liConfig.DeliveryX2SpoolMaxBytes
 	config.LIDeliveryX2SpoolKeyFile = liConfig.DeliveryX2SpoolKeyFile
+	config.LIDeliveryX2SpoolKeyID = liConfig.DeliveryX2SpoolKeyID
+	config.LIDeliveryX2SpoolLegacyKeyID = liConfig.DeliveryX2SpoolLegacyKeyID
+	config.LIDeliveryX2SpoolReadKeys = liConfig.DeliveryX2SpoolReadKeys
 	config.LIDeliveryX2SpoolReplayPolicy = liConfig.DeliveryX2SpoolReplayPolicy
 	config.LIDeliveryX2SpoolReplayManifest = liConfig.DeliveryX2SpoolReplayManifest
 	config.LIDeliveryX2SpoolExportManifest = liConfig.DeliveryX2SpoolExportManifest

@@ -71,7 +71,7 @@ func TestPersistenceLegacyStateFixture(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	require.NoError(t, os.WriteFile(path, data, 0600))
 	pusher := &mockFilterPusher{}
-	m := NewManager(ManagerConfig{Enabled: true, StateFile: path, FilterPusher: pusher}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path, FilterPusher: pusher}, nil)
 	require.NoError(t, m.restorePersistedState())
 	require.Zero(t, m.ActiveTaskCount())
 	require.Zero(t, m.FilterCount())

@@ -95,9 +95,13 @@ type Registry struct {
 	auditHistory map[uuid.UUID][]InterceptTask
 	rollbackTask map[uuid.UUID]*InterceptTask
 	generations  map[uuid.UUID]uint64
+	// unconfirmedPending retains restored definitions without granting timer authority.
+	unconfirmedPending map[uuid.UUID]bool
 
 	// onDeactivation is called when a task is implicitly deactivated.
 	onDeactivation DeactivationCallback
+	// Manager ownership routes expiration through its full administrative transaction.
+	onExpiration func(*InterceptTask)
 
 	// expirationTicker controls the implicit deactivation check interval.
 	expirationTicker *time.Ticker
@@ -111,13 +115,14 @@ type Registry struct {
 // (e.g., EndTime expiration). Pass nil if no callback is needed.
 func NewRegistry(deactivationCallback DeactivationCallback) *Registry {
 	r := &Registry{
-		tasks:          make(map[uuid.UUID]*InterceptTask),
-		destinations:   make(map[uuid.UUID]*Destination),
-		auditHistory:   make(map[uuid.UUID][]InterceptTask),
-		rollbackTask:   make(map[uuid.UUID]*InterceptTask),
-		generations:    make(map[uuid.UUID]uint64),
-		onDeactivation: deactivationCallback,
-		stopChan:       make(chan struct{}),
+		tasks:              make(map[uuid.UUID]*InterceptTask),
+		destinations:       make(map[uuid.UUID]*Destination),
+		auditHistory:       make(map[uuid.UUID][]InterceptTask),
+		rollbackTask:       make(map[uuid.UUID]*InterceptTask),
+		generations:        make(map[uuid.UUID]uint64),
+		unconfirmedPending: make(map[uuid.UUID]bool),
+		onDeactivation:     deactivationCallback,
+		stopChan:           make(chan struct{}),
 	}
 	return r
 }
@@ -168,13 +173,19 @@ func (r *Registry) checkExpiredTasks() {
 			continue
 		}
 		if !now.Before(task.EndTime) {
-			task.Status = TaskStatusSuspended // enforcement gate while filters withdraw
+			if r.onExpiration == nil {
+				task.Status = TaskStatusSuspended
+			} // standalone registry gate
 			taskCopy := *task
 			expired = append(expired, &taskCopy)
 		}
 	}
 	r.mu.Unlock()
 	for _, task := range expired {
+		if r.onExpiration != nil {
+			r.onExpiration(task)
+			continue
+		}
 		if r.onDeactivation != nil {
 			r.onDeactivation(task, DeactivationReasonExpired)
 		}
@@ -201,7 +212,7 @@ func (r *Registry) finishExpiration(xid uuid.UUID, generation uint64) error {
 		return fmt.Errorf("%w: task status is %s", ErrTaskNotActive, task.Status)
 	}
 	task.Status = TaskStatusDeactivated
-	task.DeactivatedAt = time.Now()
+	task.DeactivatedAt = time.Now().UTC()
 	return nil
 }
 
@@ -273,7 +284,7 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 	}
 
 	taskCopy := cloneInterceptTask(task)
-	taskCopy.ActivatedAt = time.Now()
+	taskCopy.ActivatedAt = time.Now().UTC()
 	// Generations are monotonic attempt identifiers. A later enforcement
 	// failure may consume a generation, but rollback restores the externally
 	// visible tombstone and its prior generation.
@@ -298,7 +309,13 @@ func cloneInterceptTask(task *InterceptTask) *InterceptTask {
 	clone := *task
 	clone.Targets = append([]TargetIdentity(nil), task.Targets...)
 	clone.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	normalizeTaskTimes(&clone)
 	return &clone
+}
+
+func normalizeTaskTimes(task *InterceptTask) {
+	task.StartTime, task.EndTime = task.StartTime.UTC(), task.EndTime.UTC()
+	task.ActivatedAt, task.DeactivatedAt = task.ActivatedAt.UTC(), task.DeactivatedAt.UTC()
 }
 
 // restorePendingTask restores durable state without installing enforcement.
@@ -511,6 +528,7 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	if mod.RADIUSMACProfile != nil {
 		candidate.RADIUSMACProfile = *mod.RADIUSMACProfile
 	}
+	normalizeTaskTimes(&candidate)
 	if err := r.validateTask(&candidate); err != nil {
 		return err
 	}
@@ -546,7 +564,7 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 
 	if mod.EndTime != nil {
-		task.EndTime = *mod.EndTime
+		task.EndTime = candidate.EndTime
 	}
 
 	if mod.ImplicitDeactivationAllowed != nil {
@@ -647,7 +665,7 @@ func (r *Registry) DeactivateTask(xid uuid.UUID) error {
 	}
 
 	task.Status = TaskStatusDeactivated
-	task.DeactivatedAt = time.Now()
+	task.DeactivatedAt = time.Now().UTC()
 
 	// Notify callback for explicit ADMF deactivation
 	if r.onDeactivation != nil {
@@ -831,7 +849,7 @@ func (r *Registry) CreateDestination(dest *Destination) error {
 
 	// Create a copy to store
 	destCopy := *dest
-	destCopy.CreatedAt = time.Now()
+	destCopy.CreatedAt = time.Now().UTC()
 	r.destinations[dest.DID] = &destCopy
 
 	return nil
@@ -931,7 +949,7 @@ func (r *Registry) MarkTaskFailed(xid uuid.UUID, errMsg string) error {
 	}
 
 	task.Status = TaskStatusFailed
-	task.DeactivatedAt = time.Now()
+	task.DeactivatedAt = time.Now().UTC()
 	task.LastError = errMsg
 
 	// Notify callback for fault deactivation

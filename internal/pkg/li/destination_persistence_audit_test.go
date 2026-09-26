@@ -14,7 +14,7 @@ func TestDestinationPersistencePrecedesDeliveryPublication(t *testing.T) {
 	for _, operation := range []string{"create", "modify", "remove", "sync_create", "sync_modify"} {
 		t.Run(operation, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.json")
-			m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			did := uuid.New()
 			creating := operation == "create" || operation == "sync_create"
 			var previous *Destination
@@ -28,7 +28,7 @@ func TestDestinationPersistencePrecedesDeliveryPublication(t *testing.T) {
 			verifyPublication := func(dest *Destination) {
 				published++
 				// Delivery callbacks must observe the already durable definition.
-				state, err := loadPersistedState(path)
+				state, err := m.stateStore.Load()
 				require.NoError(t, err)
 				require.NotNil(t, state)
 				if dest == nil {

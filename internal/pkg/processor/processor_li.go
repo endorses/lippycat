@@ -127,16 +127,26 @@ func (pfp *processorFilterPusher) DeleteFilter(filterID string) error {
 // Ensure processorFilterPusher implements li.FilterPusher.
 var _ li.FilterPusher = (*processorFilterPusher)(nil)
 
-// initLIManager creates and configures the LI Manager.
-// Called during processor initialization.
+// liStoragePreparation retains authenticated owners across New and Start.
+// Runtime globals are published only after the complete constructor succeeds.
+type liStoragePreparation struct {
+	once      sync.Once
+	err       error
+	manager   *delivery.Manager
+	client    *delivery.Client
+	published bool
+	started   atomic.Bool
+}
+
+// initLIManager constructs only this processor's administrative coordinator.
+// It neither publishes runtime globals nor restores administrative state.
 func (p *Processor) initLIManager() {
 	if !p.config.LIEnabled {
 		logger.Debug("LI not enabled in config")
 		return
 	}
 
-	liDeliveryClient = nil
-	liDeliveryMgr = nil
+	p.liStorage = &liStoragePreparation{}
 
 	// Create filter pusher adapter
 	filterPusher := &processorFilterPusher{p: p}
@@ -172,11 +182,13 @@ func (p *Processor) initLIManager() {
 			TLSCAFile:         p.config.LIADMFTLSCAFile,
 			KeepaliveInterval: keepaliveInterval,
 		},
-		FilterPusher:      filterPusher,
-		SyncOnStartup:     p.config.LIADMFSyncOnStartup,
-		SyncTimeout:       p.config.LIADMFSyncTimeout,
-		ReconcileInterval: p.config.LIADMFReconcileInterval,
-		StateFile:         p.config.LIStateFile,
+		FilterPusher:               filterPusher,
+		SyncOnStartup:              p.config.LIADMFSyncOnStartup,
+		SyncTimeout:                p.config.LIADMFSyncTimeout,
+		ReconcileInterval:          p.config.LIADMFReconcileInterval,
+		StateFile:                  p.config.LIStateFile,
+		StateKeys:                  p.config.LIStateKeys,
+		RADIUSCorrelationStateFile: p.config.LIRADIUSCorrelationStateFile,
 	}
 
 	// Deactivation callback - called when a task is implicitly deactivated
@@ -234,6 +246,16 @@ func (p *Processor) initLIManager() {
 		}
 	})
 
+}
+
+// initLIRuntime installs encoders and lifecycle callbacks after storage owners
+// authenticate and all fallible output construction has completed.
+func (p *Processor) initLIRuntime() {
+	if p.liManager == nil {
+		return
+	}
+	liDeliveryMgr, liDeliveryClient = p.liStorage.manager, p.liStorage.client
+	p.liStorage.published = true
 	liReorderWorkers = &sync.WaitGroup{}
 	liReorderBudget = nil
 	if p.config.LIDeliveryMemoryBudgetBytes > 0 {
@@ -267,44 +289,6 @@ func (p *Processor) initLIManager() {
 				return true
 			})
 		})
-	}
-
-	// Initialize delivery client if TLS certs are configured
-	if p.config.LIDeliveryTLSCertFile != "" && p.config.LIDeliveryTLSKeyFile != "" {
-		destConfig := delivery.DefaultConfig()
-		destConfig.TLSCertFile = p.config.LIDeliveryTLSCertFile
-		destConfig.TLSKeyFile = p.config.LIDeliveryTLSKeyFile
-		destConfig.TLSCAFile = p.config.LIDeliveryTLSCAFile
-		destConfig.InitialBackoff = p.config.LIDeliveryInitialBackoff
-		destConfig.MaxBackoff = p.config.LIDeliveryMaxBackoff
-		destConfig.KeepAliveIdle = p.config.LIDeliveryKeepAliveIdle
-		destConfig.KeepAliveInterval = p.config.LIDeliveryKeepAliveInterval
-		destConfig.KeepAliveCount = p.config.LIDeliveryKeepAliveCount
-		destConfig.X2KeepaliveEnabled = p.config.LIDeliveryX2KeepaliveEnabled
-		destConfig.X2KeepaliveTimeP1 = p.config.LIDeliveryX2KeepaliveTimeP1
-		destConfig.X2KeepaliveTimeP2 = p.config.LIDeliveryX2KeepaliveTimeP2
-		destConfig.X3KeepaliveEnabled = p.config.LIDeliveryX3KeepaliveEnabled
-		destConfig.X3KeepaliveTimeP1 = p.config.LIDeliveryX3KeepaliveTimeP1
-		destConfig.X3KeepaliveTimeP2 = p.config.LIDeliveryX3KeepaliveTimeP2
-		destConfig.X2AcknowledgeInboundKeepalive = p.config.LIDeliveryX2AcknowledgeInboundKeepalive
-		destConfig.X3AcknowledgeInboundKeepalive = p.config.LIDeliveryX3AcknowledgeInboundKeepalive
-		destConfig.DeliveryFault = func(did uuid.UUID, err error) { p.liManager.ReportDeliveryError(did, 1, err.Error()) }
-		if len(p.config.LIDeliveryTLSPinnedCert) > 0 {
-			destConfig.TLSPinnedCerts = p.config.LIDeliveryTLSPinnedCert
-		}
-
-		var err error
-		liDeliveryMgr, err = delivery.NewManager(destConfig)
-		if err != nil {
-			logger.Error("Failed to create LI delivery manager", "error", err)
-		} else {
-			logger.Info("LI delivery transport configured",
-				"cert", p.config.LIDeliveryTLSCertFile,
-				"ca", p.config.LIDeliveryTLSCAFile,
-			)
-		}
-	} else {
-		logger.Warn("LI delivery TLS certs not configured, X2/X3 PDUs will be encoded but not delivered")
 	}
 
 	// Set packet processor callback for X2/X3 encoding and delivery
@@ -588,6 +572,9 @@ func (p *Processor) liDeliveryConfig() delivery.ClientConfig {
 	clientConfig.X2SpoolDir = p.config.LIDeliveryX2SpoolDir
 	clientConfig.X2SpoolMaxBytes = p.config.LIDeliveryX2SpoolMaxBytes
 	clientConfig.X2SpoolKeyFile = p.config.LIDeliveryX2SpoolKeyFile
+	clientConfig.X2SpoolKeyID = p.config.LIDeliveryX2SpoolKeyID
+	clientConfig.X2SpoolLegacyKeyID = p.config.LIDeliveryX2SpoolLegacyKeyID
+	clientConfig.X2SpoolReadKeys = p.config.LIDeliveryX2SpoolReadKeys
 	clientConfig.X2SpoolReplayPolicy = p.config.LIDeliveryX2SpoolReplayPolicy
 	clientConfig.X2SpoolReplayManifest = p.config.LIDeliveryX2SpoolReplayManifest
 	clientConfig.X2SpoolExportManifest = p.config.LIDeliveryX2SpoolExportManifest
@@ -603,44 +590,106 @@ func (p *Processor) validateLIConfiguration() error {
 	if err := p.liDeliveryConfig().Validate(); err != nil {
 		return fmt.Errorf("invalid LI delivery limits: %w", err)
 	}
-	if p.config.LIDeliveryX2SpoolDir != "" && liDeliveryMgr == nil {
+	if p.config.LIDeliveryX2SpoolDir != "" && (p.liStorage == nil || p.liStorage.manager == nil) {
 		return fmt.Errorf("LI X2 persistence requires configured delivery TLS credentials")
 	}
 	if p.config.LIDeliveryX2SpoolReplayManifest != "" && (!p.config.LIADMFSyncOnStartup || p.config.LIStateFile == "") {
 		return fmt.Errorf("LI X2 replay manifest requires ADMF startup sync and persisted LI state")
 	}
-	if liDeliveryClient != nil && liDeliveryClient.Err() != nil {
-		return fmt.Errorf("initialize LI delivery: %w", liDeliveryClient.Err())
+	if p.liStorage != nil && p.liStorage.client != nil && p.liStorage.client.Err() != nil {
+		return fmt.Errorf("initialize LI delivery: %w", p.liStorage.client.Err())
 	}
 	return p.liManager.ValidateConfiguration()
 }
 
-// startLIManager starts the LI Manager and delivery client.
-// Called during processor startup.
+// prepareLIStorage authenticates and retains all configured owners before
+// outputs, target application, listeners, or administrative reconciliation.
+func (p *Processor) prepareLIStorage() error {
+	if p.liManager == nil {
+		return nil
+	}
+	p.liStorage.once.Do(func() { p.liStorage.err = p.prepareLIStorageOnce() })
+	return p.liStorage.err
+}
+
+func (p *Processor) prepareLIStorageOnce() error {
+	// Construct the transport without starting connections or delivery workers.
+	if p.config.LIDeliveryTLSCertFile != "" && p.config.LIDeliveryTLSKeyFile != "" {
+		destConfig := delivery.DefaultConfig()
+		destConfig.TLSCertFile = p.config.LIDeliveryTLSCertFile
+		destConfig.TLSKeyFile = p.config.LIDeliveryTLSKeyFile
+		destConfig.TLSCAFile = p.config.LIDeliveryTLSCAFile
+		destConfig.InitialBackoff = p.config.LIDeliveryInitialBackoff
+		destConfig.MaxBackoff = p.config.LIDeliveryMaxBackoff
+		destConfig.KeepAliveIdle = p.config.LIDeliveryKeepAliveIdle
+		destConfig.KeepAliveInterval = p.config.LIDeliveryKeepAliveInterval
+		destConfig.KeepAliveCount = p.config.LIDeliveryKeepAliveCount
+		destConfig.X2KeepaliveEnabled = p.config.LIDeliveryX2KeepaliveEnabled
+		destConfig.X2KeepaliveTimeP1 = p.config.LIDeliveryX2KeepaliveTimeP1
+		destConfig.X2KeepaliveTimeP2 = p.config.LIDeliveryX2KeepaliveTimeP2
+		destConfig.X3KeepaliveEnabled = p.config.LIDeliveryX3KeepaliveEnabled
+		destConfig.X3KeepaliveTimeP1 = p.config.LIDeliveryX3KeepaliveTimeP1
+		destConfig.X3KeepaliveTimeP2 = p.config.LIDeliveryX3KeepaliveTimeP2
+		destConfig.X2AcknowledgeInboundKeepalive = p.config.LIDeliveryX2AcknowledgeInboundKeepalive
+		destConfig.X3AcknowledgeInboundKeepalive = p.config.LIDeliveryX3AcknowledgeInboundKeepalive
+		destConfig.DeliveryFault = func(did uuid.UUID, err error) { p.liManager.ReportDeliveryError(did, 1, err.Error()) }
+		if len(p.config.LIDeliveryTLSPinnedCert) > 0 {
+			destConfig.TLSPinnedCerts = p.config.LIDeliveryTLSPinnedCert
+		}
+
+		var err error
+		p.liStorage.manager, err = delivery.NewManager(destConfig)
+		if err != nil {
+			return fmt.Errorf("configure LI delivery transport: %w", err)
+		} else {
+			logger.Info("LI delivery transport configured",
+				"cert", p.config.LIDeliveryTLSCertFile,
+				"ca", p.config.LIDeliveryTLSCAFile,
+			)
+		}
+	} else {
+		logger.Warn("LI delivery TLS certs not configured, X2/X3 PDUs will be encoded but not delivered")
+	}
+
+	if err := p.validateLIConfiguration(); err != nil {
+		return fmt.Errorf("invalid LI configuration: %w", err)
+	}
+	if err := p.liManager.PrepareAdministrativeStorage(); err != nil {
+		return fmt.Errorf("authenticate LI administrative storage: %w", err)
+	}
+	stateKeys, err := p.liManager.AdministrativeKeyring()
+	if err != nil {
+		return fmt.Errorf("read authenticated LI state keys: %w", err)
+	}
+	validateJournalKeys, err := p.storageKeyValidator(stateKeys)
+	if err != nil {
+		return fmt.Errorf("validate owned LI storage keys: %w", err)
+	}
+	if p.liStorage.manager != nil {
+		config := p.liDeliveryConfig()
+		config.X2SpoolValidateKeys = validateJournalKeys
+		p.liStorage.client = delivery.NewClient(p.liStorage.manager, config)
+		if err := p.liStorage.client.Err(); err != nil {
+			return fmt.Errorf("initialize LI delivery: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// startLIManager starts previously authenticated owners and reconciles policy.
 func (p *Processor) startLIManager() (err error) {
 	if p.liManager == nil {
 		return nil
 	}
-
-	startedManager := false
 	defer func() {
 		if err != nil {
-			if startedManager {
-				p.liManager.Stop()
-			}
-			if liDeliveryClient != nil {
-				liDeliveryClient.Stop()
-			}
-			if liDeliveryMgr != nil {
-				liDeliveryMgr.Stop()
-			}
+			err = errors.Join(err, p.stopLIManager())
 		}
 	}()
-
-	if liDeliveryMgr != nil {
-		liDeliveryClient = delivery.NewClient(liDeliveryMgr, p.liDeliveryConfig())
+	if err := p.prepareLIStorage(); err != nil {
+		return err
 	}
-
 	if liDeliveryClient != nil {
 		if err := liDeliveryClient.Err(); err != nil {
 			return fmt.Errorf("initialize LI delivery: %w", err)
@@ -730,10 +779,10 @@ func (p *Processor) startLIManager() (err error) {
 	}()
 
 	// Start the LI Manager (syncs tasks/destinations from ADMF)
+	p.liStorage.started.Store(true)
 	if err := p.liManager.Start(); err != nil {
 		return err
 	}
-	startedManager = true
 
 	// Bridge existing destinations from LI Manager registry to delivery manager
 	if liDeliveryMgr != nil {
@@ -809,12 +858,27 @@ func cleanupLIReorderBuffer(key any, buf *delivery.ReorderBuffer, maxIdle time.D
 
 // stopLIManager stops the LI Manager and delivery client.
 // Called during processor shutdown.
-func (p *Processor) stopLIManager() {
+func (p *Processor) stopLIManager() (result error) {
 	p.closeLIRADIUS()
 	if p.liManager == nil {
-		return
+		return nil
 	}
-	p.liManager.Stop()
+	if p.liStorage != nil && !p.liStorage.started.Load() {
+		result = p.liManager.ReleasePreparedAdministrativeStorage()
+	} else {
+		p.liManager.Stop()
+	}
+	if p.liStorage != nil {
+		if p.liStorage.client != nil {
+			p.liStorage.client.Stop()
+		}
+		if p.liStorage.manager != nil {
+			p.liStorage.manager.Stop()
+		}
+		if !p.liStorage.published {
+			return result
+		}
+	}
 	var reorderBuffers []*delivery.ReorderBuffer
 	liReorderBuffers.Range(func(key, value any) bool {
 		buffer := value.(*delivery.ReorderBuffer)
@@ -838,6 +902,7 @@ func (p *Processor) stopLIManager() {
 		liDeliveryMgr.Stop()
 	}
 	liMediaDirection.Close()
+	return result
 }
 
 // processLIPacket processes a packet through the LI system.

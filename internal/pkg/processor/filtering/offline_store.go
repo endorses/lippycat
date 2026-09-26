@@ -109,6 +109,22 @@ func offlineFilterStore(source, destination string, keys securestore.KeyConfig, 
 		return out, err
 	}
 	var sourceOrder string
+	if samePath {
+		// Validate the raw source spelling even when canonical pathnames are
+		// equal. Collapsing symlink/.. must not bypass descriptor traversal.
+		sourceRef, err := securestore.PreparePrivateSource(source)
+		if err != nil {
+			return out, err
+		}
+		sourceOrder, err = sourceRef.OrderKey()
+		err = errors.Join(err, sourceRef.Close())
+		if err != nil {
+			return out, err
+		}
+		if sourceOrder != targetOrder {
+			return out, errors.New("in-place source and destination descriptors differ")
+		}
+	}
 	if source != "" && !samePath {
 		input, err = securestore.PreparePrivateSource(source)
 		if err != nil {

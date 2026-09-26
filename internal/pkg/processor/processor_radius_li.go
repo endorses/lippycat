@@ -61,9 +61,12 @@ func (p *Processor) deliverLIRADIUS(task *li.InterceptTask, observation *radius.
 		return
 	}
 	if p.radiusLIAllocator == nil {
-		path := p.config.LIRADIUSCorrelationStateFile
-		if path == "" && p.config.LIStateFile != "" {
-			path = p.config.LIStateFile + ".radius-correlation"
+		path, err := p.liManager.RADIUSCorrelationStateFile()
+		if err != nil {
+			liX2Errors.Add(1)
+			p.radiusLIStats.AllocationErrors++
+			logger.Warn("RADIUS correlation allocator pin unavailable")
+			return
 		}
 		allocator, err := li.NewRADIUSCorrelationAllocator(li.RADIUSCorrelationConfig{RequestLifetime: p.config.LIRADIUSCorrelationLifetime, Path: path, NFID: p.config.ProcessorID, IPID: p.config.ProcessorID})
 		if err != nil {

@@ -38,9 +38,12 @@ const (
 	JournalState
 	CallControl
 	RevocationControl
+	// JournalBatchIndex authenticates journal batch/index metadata. Product
+	// growth uses Seal; only terminal/control metadata may use SealControl.
+	JournalBatchIndex
 )
 
-func (p Purpose) valid() bool { return p >= FilterSnapshot && p <= RevocationControl }
+func (p Purpose) valid() bool { return p >= FilterSnapshot && p <= JournalBatchIndex }
 func (p Purpose) control() bool {
 	return p.valid() && p != X2Product && p != X3Product
 }

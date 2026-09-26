@@ -19,6 +19,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/radius"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -95,8 +96,13 @@ type ManagerConfig struct {
 	// Zero uses 100 milliseconds.
 	LifecycleInterval time.Duration
 
-	// StateFile enables atomic local lifecycle persistence. Empty disables it.
+	// StateFile selects a preinitialized encrypted administrative store. Empty
+	// disables persistence; runtime never imports JSON or initializes a store.
 	StateFile string
+	StateKeys securestore.KeyConfig
+	// RADIUSCorrelationStateFile explicitly pins the preexisting reservation
+	// allocator. It must match the encrypted snapshot pin when state is enabled.
+	RADIUSCorrelationStateFile string
 
 	// RADIUSScope binds X1 targets to an explicitly configured dedicated POI.
 	// It is deployment policy, never inferred from an administrative line value.
@@ -126,12 +132,29 @@ type Manager struct {
 	callbackMu     sync.RWMutex
 	onTaskModified func(previous *InterceptTask)
 	stopOnce       sync.Once
+	stopped        atomic.Bool
 	mu             sync.RWMutex
-	lifecycleMu    sync.RWMutex
+	// adminMu serializes whole administrative transactions, including snapshots,
+	// filter cleanup and delivery callbacks. Lock order is adminMu, lifecycleMu,
+	// then short registry/filter locks. Callbacks may read but must not mutate.
+	adminMu     sync.Mutex
+	lifecycleMu sync.RWMutex
 	// destinationMu serializes registry changes with delivery callbacks. Callbacks
 	// may read manager state but must not recursively mutate destinations.
-	destinationMu sync.Mutex
-	persistenceMu sync.Mutex
+	destinationMu        sync.Mutex
+	stateStore           administrativeStateStore
+	startedLifecycle     atomic.Bool
+	preparedState        *StateSnapshot
+	statePath            string
+	stateID              uuid.UUID
+	stateIdentity        atomic.Pointer[administrativeIdentity]
+	radiusCorrelationPin string
+	stateReady           atomic.Bool
+	stateFault           atomic.Pointer[administrativeFault]
+	stateIntents         []*StateIntent
+	stateRevocations     []*StateRevocation
+	stateCleanup         map[uuid.UUID][]string
+	durableRevoker       DurableRevoker
 
 	config   ManagerConfig
 	registry *Registry
@@ -167,7 +190,7 @@ type Manager struct {
 	orphanStreak    map[uuid.UUID]int
 	persistedActive map[uuid.UUID]*InterceptTask
 	// persistenceCandidates retains unconfirmed definitions across interrupted
-	// startups. Protected by persistenceMu after restore, unlike persistedActive
+	// startups. Protected by adminMu after restore, unlike persistedActive
 	// which remains immutable evidence for replay authorization.
 	persistenceCandidates map[uuid.UUID]*InterceptTask
 	replayConfirmed       map[uuid.UUID]uint64
@@ -258,6 +281,10 @@ func (m *Manager) AcquireTaskAdmission(xid uuid.UUID, generation uint64) (*TaskA
 		return nil, false
 	}
 	m.lifecycleMu.RLock()
+	if !m.administrativeAdmissionReady() {
+		m.lifecycleMu.RUnlock()
+		return nil, false
+	}
 	task, err := m.registry.GetTaskDetails(xid)
 	if err != nil || !task.IsActive() || task.IsExpired() || task.ActivationGeneration != generation {
 		m.lifecycleMu.RUnlock()
@@ -279,6 +306,9 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 		persistedActive:       make(map[uuid.UUID]*InterceptTask),
 		persistenceCandidates: make(map[uuid.UUID]*InterceptTask),
 		replayConfirmed:       make(map[uuid.UUID]uint64),
+		stateIntents:          []*StateIntent{},
+		stateRevocations:      []*StateRevocation{},
+		stateCleanup:          make(map[uuid.UUID][]string),
 	}
 
 	// Create X1 client if ADMF endpoint is configured.
@@ -306,22 +336,6 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 
 	// Create deactivation callback that reports to ADMF and then calls user callback.
 	internalCallback := func(task *InterceptTask, reason DeactivationReason) {
-		if reason == DeactivationReasonExpired {
-			m.lifecycleMu.Lock()
-			defer m.lifecycleMu.Unlock()
-			current, err := m.registry.GetTaskDetails(task.XID)
-			if err != nil || current.ActivationGeneration != task.ActivationGeneration {
-				// A lifecycle transition won after the expiration snapshot. Its
-				// cleanup owns the old generation; do not touch its replacement.
-				return
-			}
-			if err := m.completeExpiration(task); err != nil {
-				logger.Error("LI task expiry enforcement failed", "xid", task.XID, "end_time", task.EndTime, "error", err)
-				// The expired generation is already gated. Delivery and reorder
-				// cancellation must still run when withdrawal or persistence fails;
-				// otherwise previously admitted X3 can survive task expiration.
-			}
-		}
 		// Report implicit deactivation to ADMF via X1 client.
 		if m.x1Client != nil && reason != DeactivationReasonADMF {
 			go func() {
@@ -355,6 +369,7 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 	}
 
 	m.registry = NewRegistry(internalCallback)
+	m.registry.onExpiration = m.expireAdministrativeTask
 	m.commitActivation = m.registry.commitActivation
 
 	// Create X1 server if TLS is configured.
@@ -384,7 +399,15 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 //
 // This starts the registry's expiration checker and any other
 // background goroutines needed for LI processing.
-func (m *Manager) Start() error {
+func (m *Manager) Start() (result error) {
+	m.startedLifecycle.Store(true)
+	defer func() {
+		if result != nil {
+			m.adminMu.Lock()
+			result = errors.Join(result, m.closeAdministrativeStateLocked())
+			m.adminMu.Unlock()
+		}
+	}()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -471,6 +494,9 @@ func (m *Manager) Start() error {
 		syncCancel()
 	}
 
+	if err := m.administrativeError(); err != nil {
+		return err
+	}
 	// Start periodic reconciliation if configured.
 	if m.config.ReconcileInterval > 0 && m.x1Client != nil {
 		m.wg.Add(1)
@@ -509,6 +535,7 @@ func (m *Manager) ValidateConfiguration() error {
 func (m *Manager) Stop() { m.stopOnce.Do(m.stop) }
 
 func (m *Manager) stop() {
+	m.stopped.Store(true)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -542,6 +569,11 @@ func (m *Manager) stop() {
 	close(m.stopChan)
 	m.registry.Stop()
 	m.wg.Wait()
+	m.adminMu.Lock()
+	if err := m.closeAdministrativeStateLocked(); err != nil {
+		logger.Error("Close LI state store failed", "error", err)
+	}
+	m.adminMu.Unlock()
 
 	logger.Info("LI Manager stopped",
 		"radius_stale_references", m.stats.radiusStaleReferences.Load(),
@@ -634,14 +666,15 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 	removedDestinations := m.removeOrphanedDestinations(snapshot)
 	removedFilters := m.removeOrphanedLIFilters(snapshot)
 	if snapshot.complete() {
-		m.persistenceMu.Lock()
+		m.adminMu.Lock()
 		for xid := range m.persistenceCandidates {
 			if !snapshot.tasks[xid] {
 				delete(m.persistenceCandidates, xid)
 			}
 		}
-		m.persistenceMu.Unlock()
-		if err := m.persistState(); err != nil {
+		err := m.persistStateLocked()
+		m.adminMu.Unlock()
+		if err != nil {
 			return fmt.Errorf("persist startup reconciliation: %w", err)
 		}
 	}
@@ -663,8 +696,16 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 // holding the same lifecycle barrier as normal activation. All other activations
 // must advance the durable watermark, including when ADMF never confirms a task.
 func (m *Manager) activateStartupTask(task *InterceptTask) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	if m.stateStore != nil {
+		return m.activatePersistentTaskLocked(task, true)
+	}
 	if restored := m.persistedActive[task.XID]; restored != nil {
 		generation := restored.ActivationGeneration
 		m.registry.seedGeneration(task.XID, generation)
@@ -802,6 +843,11 @@ func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool)
 // failed is deliberately excluded. Active local tasks retained during the
 // periodic orphan grace streak remain included.
 func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return 0
+	}
 	lister, ok := m.config.FilterPusher.(FilterLister)
 	if !ok || !snapshot.complete() {
 		return 0
@@ -866,6 +912,13 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 		return 0
 	}
 
+	if m.stateStore != nil {
+		removed, err := m.cleanupPersistentFiltersLocked(orchans)
+		if err != nil {
+			logger.Error("Persist orphan LI filter cleanup failed", "error", err)
+		}
+		return removed
+	}
 	removed := 0
 	for _, id := range orchans {
 		reason := "orphan"
@@ -1120,6 +1173,9 @@ func (m *Manager) ProcessPacket(pkt *types.PacketDisplay, matchedFilterIDs []str
 // single authoritatively resolved call, and the resolver's Call-ID must agree
 // with the Call-ID carried by the packet.
 func (m *Manager) ProcessPacketWithProvenance(pkt *types.PacketDisplay, provenance PacketFilterProvenance) {
+	if !m.administrativeAdmissionReady() {
+		return
+	}
 	if provenance.RADIUS != nil || (pkt != nil && (pkt.RADIUSData != nil || pkt.Protocol == "RADIUS")) {
 		m.processRADIUSPacket(pkt, provenance)
 		return
@@ -1225,12 +1281,20 @@ func stableFilterUnion(first, second []string) []string {
 // This creates filters for the task's targets and pushes them
 // to the filter management system.
 func (m *Manager) ActivateTask(task *InterceptTask) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	return m.activateTask(task)
 }
 
 func (m *Manager) activateTask(task *InterceptTask) error {
+	if m.stateStore != nil {
+		return m.activatePersistentTaskLocked(task, false)
+	}
 	if task == nil {
 		return fmt.Errorf("%w: task is nil", ErrInvalidTask)
 	}
@@ -1276,7 +1340,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 	// Reserve the generation durably before installing enforcement or releasing
 	// lifecycle admission. A later state-write fault must not let product use a
 	// generation that a restart can allocate again.
-	if err := m.persistState(); err != nil {
+	if err := m.persistStateLocked(); err != nil {
 		return errors.Join(fmt.Errorf("reserve activation generation for XID %s: %w", task.XID, err),
 			m.registry.rollbackActivation(task.XID, registered.ActivatedAt))
 	}
@@ -1286,7 +1350,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		}
 		m.retirePersistenceCandidate(task.XID)
 		logTaskActivation(isReactivation, registered, previousGeneration, 0)
-		return m.persistState()
+		return m.persistStateLocked()
 	}
 	filterIDs, err := m.filters.CreateFiltersForTask(registered)
 	if err != nil {
@@ -1300,15 +1364,13 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 	m.retirePersistenceCandidate(task.XID)
 
 	logTaskActivation(isReactivation, registered, previousGeneration, len(filterIDs))
-	return m.persistState()
+	return m.persistStateLocked()
 }
 
 // Only committed ownership replaces an unconfirmed startup candidate. Snapshot
 // writes can observe provisional activations that subsequently roll back.
 func (m *Manager) retirePersistenceCandidate(xid uuid.UUID) {
-	m.persistenceMu.Lock()
 	delete(m.persistenceCandidates, xid)
-	m.persistenceMu.Unlock()
 }
 
 func logTaskActivation(reactivation bool, task *InterceptTask, previousGeneration uint64, filterCount int) {
@@ -1340,17 +1402,25 @@ func (m *Manager) completeExpiration(task *InterceptTask) error {
 		return err
 	}
 	logger.Info("LI task expired", "xid", task.XID, "end_time", task.EndTime, "filters", len(filterIDs), "cleanup", "complete")
-	return m.persistState()
+	return m.persistStateLocked()
 }
 
 // ModifyTask updates an existing task's parameters atomically.
 func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	return m.modifyTask(xid, mod)
 }
 
 func (m *Manager) modifyTask(xid uuid.UUID, mod *TaskModification) error {
+	if m.stateStore != nil {
+		return m.modifyPersistentTaskLocked(xid, mod)
+	}
 	previous, err := m.registry.GetTaskDetails(xid)
 	if err != nil {
 		return err
@@ -1364,7 +1434,7 @@ func (m *Manager) modifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return getErr
 	}
 	if current.ActivationGeneration != previous.ActivationGeneration {
-		if err := m.persistState(); err != nil {
+		if err := m.persistStateLocked(); err != nil {
 			return errors.Join(fmt.Errorf("reserve modified generation for XID %s: %w", xid, err),
 				m.registry.restoreTask(previous))
 		}
@@ -1397,17 +1467,25 @@ func (m *Manager) modifyTask(xid uuid.UUID, mod *TaskModification) error {
 		m.notifyTaskModified(previous)
 	}
 	logger.Info("LI task modified", "xid", xid)
-	return m.persistState()
+	return m.persistStateLocked()
 }
 
 // DeactivateTask removes a task from active interception.
 func (m *Manager) DeactivateTask(xid uuid.UUID) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
 	return m.deactivateTask(xid)
 }
 
 func (m *Manager) deactivateTask(xid uuid.UUID) error {
+	if m.stateStore != nil {
+		return m.withdrawPersistentTaskLocked(xid, StateTaskDeactivate, "")
+	}
 	// Remove filters first
 	if err := m.filters.RemoveFiltersForTask(xid); err != nil {
 		logger.Error("Failed to remove filters for task",
@@ -1423,7 +1501,7 @@ func (m *Manager) deactivateTask(xid uuid.UUID) error {
 	}
 
 	logger.Info("LI task deactivated", "xid", xid)
-	return m.persistState()
+	return m.persistStateLocked()
 }
 
 func (m *Manager) runLifecycleMaintenance() {
@@ -1444,12 +1522,17 @@ func (m *Manager) runLifecycleMaintenance() {
 			return
 		case <-ticker.C:
 			m.promotePendingTasks()
-			m.registry.PurgeDeactivatedTasks(retention)
+			m.PurgeDeactivatedTasks(retention)
 		}
 	}
 }
 
 func (m *Manager) promotePendingTasks() {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return
+	}
 	var pending []*InterceptTask
 	m.registry.ListTasks(func(task *InterceptTask) bool {
 		if task.Status == TaskStatusPending && task.ShouldStart() {
@@ -1458,9 +1541,23 @@ func (m *Manager) promotePendingTasks() {
 		return true
 	})
 	for _, task := range pending {
+		if m.pendingNeedsConfirmation(task.XID) {
+			continue
+		}
 		m.lifecycleMu.Lock()
 		current, err := m.registry.GetTaskDetails(task.XID)
 		if err == nil && current.Status == TaskStatusPending && current.ActivatedAt.Equal(task.ActivatedAt) {
+			if m.stateStore != nil {
+				err = m.promotePersistentTaskLocked(current)
+				if err != nil && m.stateFault.Load() == nil {
+					err = errors.Join(err, m.withdrawPersistentTaskLocked(current.XID, StateTaskFail, err.Error()))
+				}
+				if err != nil {
+					logger.Error("LI pending task promotion failed", "xid", current.XID, "error", err)
+				}
+				m.lifecycleMu.Unlock()
+				continue
+			}
 			var filterIDs []string
 			for _, did := range current.DestinationIDs {
 				if _, err = m.registry.GetDestination(did); err != nil {
@@ -1487,7 +1584,10 @@ func (m *Manager) promotePendingTasks() {
 		}
 		m.lifecycleMu.Unlock()
 	}
-	if err := m.persistState(); err != nil {
+	if m.stateStore != nil {
+		return
+	}
+	if err := m.persistStateLocked(); err != nil {
 		logger.Error("Persist LI lifecycle state failed", "error", err)
 	}
 }
@@ -1499,13 +1599,29 @@ func (m *Manager) GetTaskDetails(xid uuid.UUID) (*InterceptTask, error) {
 
 // GetActiveTasks returns all active intercept tasks.
 func (m *Manager) GetActiveTasks() []*InterceptTask {
+	if !m.administrativeAdmissionReady() {
+		return nil
+	}
 	return m.registry.GetActiveTasks()
 }
 
 // CreateDestination adds a new X2/X3 delivery destination.
 func (m *Manager) CreateDestination(dest *Destination) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.destinationMu.Lock()
 	defer m.destinationMu.Unlock()
+	if m.stateStore != nil {
+		if dest == nil {
+			return ErrInvalidTask
+		}
+		return m.changePersistentDestinationLocked(dest.DID, dest, true)
+	}
 	if err := m.registry.CreateDestination(dest); err != nil {
 		return err
 	}
@@ -1518,12 +1634,25 @@ func (m *Manager) CreateDestination(dest *Destination) error {
 // syncDestination applies an ADMF definition through the same serialized delivery
 // boundary as X1 updates. Unchanged snapshots leave live delivery queues intact.
 func (m *Manager) syncDestination(dest *Destination) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.destinationMu.Lock()
 	defer m.destinationMu.Unlock()
 	current, err := m.registry.GetDestination(dest.DID)
 	modified := err == nil
 	if err != nil && !errors.Is(err, ErrDestinationNotFound) {
 		return err
+	}
+	if m.stateStore != nil {
+		if modified && current.Address == dest.Address && current.Port == dest.Port && current.X2Enabled == dest.X2Enabled && current.X3Enabled == dest.X3Enabled && current.ProtocolType == dest.ProtocolType && current.Description == dest.Description {
+			return nil
+		}
+		return m.changePersistentDestinationLocked(dest.DID, dest, !modified)
 	}
 	if modified {
 		if current.Address == dest.Address && current.Port == dest.Port && current.X2Enabled == dest.X2Enabled && current.X3Enabled == dest.X3Enabled && current.ProtocolType == dest.ProtocolType && current.Description == dest.Description {
@@ -1549,8 +1678,18 @@ func (m *Manager) GetDestination(did uuid.UUID) (*Destination, error) {
 
 // RemoveDestination removes a delivery destination.
 func (m *Manager) RemoveDestination(did uuid.UUID) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.destinationMu.Lock()
 	defer m.destinationMu.Unlock()
+	if m.stateStore != nil {
+		return m.removePersistentDestinationLocked(did)
+	}
 	previous, err := m.registry.GetDestination(did)
 	if err != nil {
 		return err
@@ -1572,8 +1711,18 @@ func (m *Manager) RemoveDestination(did uuid.UUID) error {
 
 // ModifyDestination updates the canonical destination and informs delivery owners.
 func (m *Manager) ModifyDestination(did uuid.UUID, dest *Destination) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.destinationMu.Lock()
 	defer m.destinationMu.Unlock()
+	if m.stateStore != nil {
+		return m.changePersistentDestinationLocked(did, dest, false)
+	}
 	previous, err := m.registry.GetDestination(did)
 	if err != nil {
 		return err
@@ -1591,7 +1740,7 @@ func (m *Manager) ModifyDestination(did uuid.UUID, dest *Destination) error {
 // transport. A failed write leaves the previously published definition in place.
 // The caller holds destinationMu across the registry mutation and callback.
 func (m *Manager) persistDestinationChange(did uuid.UUID, previous *Destination) error {
-	if err := m.persistState(); err != nil {
+	if err := m.persistStateLocked(); err != nil {
 		var rollbackErr error
 		if previous == nil {
 			rollbackErr = m.registry.RemoveDestination(did)
@@ -2075,10 +2224,18 @@ func (m *Manager) Config() ManagerConfig {
 
 // MarkTaskFailed marks a task as failed with an error message.
 func (m *Manager) MarkTaskFailed(xid uuid.UUID, errMsg string) error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return err
+	}
 	// Fault finalization must wait for admitted producers before its callback
 	// cancels delivery. Otherwise those producers can enqueue after the sweep.
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	if m.stateStore != nil {
+		return m.withdrawPersistentTaskLocked(xid, StateTaskFail, errMsg)
+	}
 	// Remove filters
 	if err := m.filters.RemoveFiltersForTask(xid); err != nil {
 		logger.Error("Failed to remove filters for failed task",
@@ -2090,12 +2247,32 @@ func (m *Manager) MarkTaskFailed(xid uuid.UUID, errMsg string) error {
 	if err := m.registry.MarkTaskFailed(xid, errMsg); err != nil {
 		return err
 	}
-	return m.persistState()
+	return m.persistStateLocked()
 }
 
 // PurgeDeactivatedTasks removes old deactivated tasks.
 func (m *Manager) PurgeDeactivatedTasks(olderThan time.Duration) int {
-	return m.registry.PurgeDeactivatedTasks(olderThan)
+	count, err := m.PurgeDeactivatedTasksWithError(olderThan)
+	if err != nil {
+		logger.Error("Purge LI administrative state failed", "error", err)
+	}
+	return count
+}
+
+// PurgeDeactivatedTasksWithError reports durable housekeeping failures. Task
+// watermarks, unfinished intents and revocation obligations are never purged.
+func (m *Manager) PurgeDeactivatedTasksWithError(olderThan time.Duration) (int, error) {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	if err := m.ensureAdministrativeStateLocked(); err != nil {
+		return 0, err
+	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.stateStore != nil {
+		return m.purgePersistentTasksLocked(olderThan)
+	}
+	return m.registry.PurgeDeactivatedTasks(olderThan), nil
 }
 
 // ReportTaskError reports a task execution error to ADMF via X1.

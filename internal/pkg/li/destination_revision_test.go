@@ -12,7 +12,7 @@ import (
 
 func TestDestinationRevisionSurvivesEndpointReversionAndRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 	did := uuid.New()
 	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf-a.example", Port: 443, X2Enabled: true}))
 	initial, err := m.GetDestination(did)
@@ -26,9 +26,10 @@ func TestDestinationRevisionSurvivesEndpointReversionAndRestart(t *testing.T) {
 	}
 	current, err := m.GetDestination(did)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), current.DeliveryRevision)
+	require.Equal(t, initial.DeliveryRevision+2, current.DeliveryRevision)
 	generation := DestinationDeliveryGeneration(current)
-	restarted := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+	m.Stop()
+	restarted := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 	require.NoError(t, restarted.restorePersistedState())
 	restored, err := restarted.GetDestination(did)
 	require.NoError(t, err)

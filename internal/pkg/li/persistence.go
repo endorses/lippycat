@@ -106,130 +106,79 @@ func writePersistedState(path string, state *persistedState) (result error) {
 	return nil
 }
 
-func (m *Manager) persistState() error {
-	m.persistenceMu.Lock()
-	defer m.persistenceMu.Unlock()
-	if m.config.StateFile == "" {
-		return nil
-	}
-	state := &persistedState{Cleanup: make(map[uuid.UUID][]string), Generations: make(map[uuid.UUID]uint64)}
-	m.registry.mu.RLock()
-	for xid, generation := range m.registry.generations {
-		state.Generations[xid] = generation
-	}
-	m.registry.mu.RUnlock()
-	// Unconfirmed startup candidates are deliberately absent from the registry,
-	// but a crash before ADMF sync must not erase their generation watermark.
-	for xid, task := range m.persistedActive {
-		if task.ActivationGeneration > state.Generations[xid] {
-			state.Generations[xid] = task.ActivationGeneration
-		}
-	}
-	registered := make(map[uuid.UUID]bool)
-	m.registry.ListTasks(func(task *InterceptTask) bool {
-		state.Tasks = append(state.Tasks, task)
-		registered[task.XID] = true
-		return true
-	})
-	for xid, task := range m.persistenceCandidates {
-		if !registered[xid] && state.Generations[xid] == task.ActivationGeneration {
-			state.Tasks = append(state.Tasks, task)
-		}
-	}
-	for _, dest := range m.ListDestinations() {
-		state.Destinations = append(state.Destinations, &persistedDestination{
-			DID: dest.DID, Address: dest.Address, Port: dest.Port,
-			X2Enabled: dest.X2Enabled, X3Enabled: dest.X3Enabled,
-			ProtocolType: dest.ProtocolType, Description: dest.Description, CreatedAt: dest.CreatedAt, DeliveryRevision: dest.DeliveryRevision,
-		})
-	}
-	m.filters.mu.RLock()
-	for xid, ids := range m.filters.xidToFilters {
-		state.Cleanup[xid] = append([]string(nil), ids...)
-	}
-	m.filters.mu.RUnlock()
-	return writePersistedState(m.config.StateFile, state)
+// restorePersistedState acquires ownership and authenticates a complete detached
+// snapshot before publishing registry data or attempting filter cleanup.
+func (m *Manager) restorePersistedState() error {
+	m.adminMu.Lock()
+	defer m.adminMu.Unlock()
+	return m.restorePersistedStateLocked()
 }
 
-func (m *Manager) restorePersistedState() error {
+func (m *Manager) restorePersistedStateLocked() (result error) {
 	if m.config.StateFile == "" {
 		return nil
 	}
-	state, err := loadPersistedState(m.config.StateFile)
-	if err != nil || state == nil {
+	if m.stateReady.Load() {
+		return m.prepareAdministrativeStorageLocked()
+	}
+	if err := m.prepareAdministrativeStorageLocked(); err != nil {
 		return err
 	}
-	for _, pd := range state.Destinations {
-		if pd == nil || pd.DID == uuid.Nil || pd.Address == "" || pd.Port <= 0 || pd.Port > 65535 {
-			return fmt.Errorf("invalid persisted LI destination")
+	store, state := m.stateStore, m.preparedState
+	defer func() {
+		if result != nil {
+			result = errors.Join(result, m.closeAdministrativeStateLocked())
 		}
-		if err := m.registry.restoreDestination(&Destination{DID: pd.DID, Address: pd.Address, Port: pd.Port,
-			X2Enabled: pd.X2Enabled, X3Enabled: pd.X3Enabled, ProtocolType: pd.ProtocolType,
-			Description: pd.Description, CreatedAt: pd.CreatedAt, DeliveryRevision: pd.DeliveryRevision}); err != nil {
-			return err
-		}
+	}()
+	if err := m.recoverAdministrativeLocked(state); err != nil {
+		return err
+	}
+	// Build the entire restored registry off to the side. Historical definitions
+	// have already passed codec validation; activation validation is deliberately
+	// not applied to retained or expired data here.
+	tasks := make(map[uuid.UUID]*InterceptTask)
+	destinations := make(map[uuid.UUID]*Destination)
+	active := make(map[uuid.UUID]*InterceptTask)
+	candidates := make(map[uuid.UUID]*InterceptTask)
+	unconfirmedPending := make(map[uuid.UUID]bool)
+	for _, d := range state.Destinations {
+		destinations[d.DID] = &Destination{DID: d.DID, Address: d.Address, Port: d.Port, X2Enabled: d.X2Enabled, X3Enabled: d.X3Enabled,
+			ProtocolType: d.ProtocolType, Description: d.Description, CreatedAt: d.CreatedAt, DeliveryRevision: d.DeliveryRevision}
 	}
 	now := time.Now()
-	if state.Generations == nil {
-		state.Generations = make(map[uuid.UUID]uint64)
-	}
 	for _, task := range state.Tasks {
-		if task == nil {
-			return fmt.Errorf("nil task in persisted LI state")
-		}
-		// Older state files stored generations only on task definitions. Preserve
-		// that watermark even when an expired task cannot be restored.
-		if task.ActivationGeneration > state.Generations[task.XID] {
-			state.Generations[task.XID] = task.ActivationGeneration
-		}
-		if IsRADIUSTask(task) {
-			if err := m.withdrawPersistedRADIUS(task, state.Cleanup[task.XID]); err != nil {
-				return err
-			}
-			delete(state.Cleanup, task.XID) // Already withdrawn, including retained cleanup IDs.
-			// Pending legacy NAI tasks must not auto-promote into either SIP
-			// interception or a newly inferred RADIUS scope. ADMF must confirm
-			// them, and all RADIUS capture evidence starts a fresh generation.
-			if task.Status == TaskStatusPending || task.Status == TaskStatusActive || task.Status == TaskStatusSuspended {
-				copyTask := *task
-				m.persistedActive[task.XID] = &copyTask
-				m.persistenceCandidates[task.XID] = &copyTask
-				continue
-			}
+		if IsRADIUSTask(task) && (task.Status == TaskStatusPending || task.Status == TaskStatusActive || task.Status == TaskStatusSuspended) {
+			active[task.XID], candidates[task.XID] = cloneInterceptTask(task), cloneInterceptTask(task)
+			continue
 		}
 		if !task.EndTime.IsZero() && !now.Before(task.EndTime) {
+			// Keep the complete historical definition in future snapshots without
+			// treating it as a registry activation or replay confirmation.
+			candidates[task.XID] = cloneInterceptTask(task)
 			continue
 		}
 		switch task.Status {
-		case TaskStatusPending:
-			if err := m.registry.restorePendingTask(task); err != nil {
-				return fmt.Errorf("restore pending XID %s: %w", task.XID, err)
-			}
-		case TaskStatusDeactivated, TaskStatusFailed:
-			if err := m.registry.restoreNonEnforcingTask(task); err != nil {
-				return fmt.Errorf("restore retained XID %s: %w", task.XID, err)
+		case TaskStatusPending, TaskStatusDeactivated, TaskStatusFailed:
+			tasks[task.XID] = cloneInterceptTask(task)
+			if task.Status == TaskStatusPending {
+				unconfirmedPending[task.XID] = true
 			}
 		case TaskStatusActive, TaskStatusSuspended:
-			// Active state is only a candidate until a complete ADMF snapshot confirms it.
-			copyTask := *task
-			m.persistedActive[task.XID] = &copyTask
-			m.persistenceCandidates[task.XID] = &copyTask
+			active[task.XID], candidates[task.XID] = cloneInterceptTask(task), cloneInterceptTask(task)
 		}
 	}
-	for xid, generation := range state.Generations {
-		m.registry.seedGeneration(xid, generation)
-	}
-	// Retry withdrawal before any task can be armed. These IDs are safe to
-	// remove because active tasks are not restored until ADMF confirmation.
-	if m.config.FilterPusher != nil {
-		for xid, ids := range state.Cleanup {
-			for _, id := range ids {
-				if err := m.config.FilterPusher.DeleteFilter(id); err != nil {
-					return fmt.Errorf("resume cleanup XID %s filter %s: %w", xid, id, err)
-				}
-			}
-		}
-	}
+	m.registry.mu.Lock()
+	m.registry.tasks, m.registry.destinations, m.registry.generations = tasks, destinations, state.Generations
+	m.registry.unconfirmedPending = unconfirmedPending
+	m.registry.mu.Unlock()
+	m.persistedActive, m.persistenceCandidates = active, candidates
+	m.stateIntents, m.stateRevocations = state.Intents, state.Revocations
+	m.stateCleanup = make(map[uuid.UUID][]string)
+	m.stateStore, m.statePath, m.stateID = store, m.config.StateFile, store.StoreID()
+	m.stateIdentity.Store(&administrativeIdentity{incarnation: m.stateID, radiusPin: state.RADIUSCorrelationStateFile})
+	m.radiusCorrelationPin = state.RADIUSCorrelationStateFile
+	m.preparedState = nil
+	m.stateReady.Store(true)
 	return nil
 }
 
@@ -237,6 +186,9 @@ func (m *Manager) restorePersistedState() error {
 // the startup ADMF snapshot. UUID/generation equality without that evidence is
 // insufficient. Call after Start; lifecycle state is revalidated on every call.
 func (m *Manager) ReplayTaskAuthorized(xid uuid.UUID, generation uint64) bool {
+	if !m.administrativeAdmissionReady() {
+		return false
+	}
 	m.mu.RLock()
 	confirmed := m.replayConfirmed[xid]
 	m.mu.RUnlock()

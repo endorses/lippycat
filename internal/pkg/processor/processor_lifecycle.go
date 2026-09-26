@@ -59,8 +59,8 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 		}
 	}()
 
-	if err := p.validateLIConfiguration(); err != nil {
-		return fmt.Errorf("invalid LI configuration: %w", err)
+	if err := p.prepareLIStorage(); err != nil {
+		return fmt.Errorf("prepare LI storage: %w", err)
 	}
 
 	logger.Info("Processor starting", "processor_id", p.config.ProcessorID, "listen_addr", p.config.ListenAddr)
@@ -229,15 +229,6 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 		"services", []string{"DataService", "ManagementService", "EventService"},
 		"tls", p.config.TLSEnabled)
 
-	// Start server in background
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		if err := p.grpcServer.Serve(listener); err != nil {
-			logger.Error("gRPC server failed", "error", err)
-		}
-	}()
-
 	// Start upstream connection manager if configured (hierarchical mode)
 	// The connection manager handles automatic reconnection on failure
 	if p.upstreamManager != nil {
@@ -262,6 +253,15 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 	if err := p.startLIManager(); err != nil {
 		return fmt.Errorf("failed to start LI manager: %w", err)
 	}
+
+	// Accept remote input only after LI state and startup policy reconciliation.
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		if err := p.grpcServer.Serve(listener); err != nil {
+			logger.Error("gRPC server failed", "error", err)
+		}
+	}()
 
 	// Start virtual interface if configured
 	if p.vifManager != nil {
@@ -405,7 +405,7 @@ func (p *Processor) Shutdown() error {
 		}
 
 		// Stop LI Manager before releasing ownership: it can still remove filters.
-		p.stopLIManager()
+		p.shutdownErr = errors.Join(p.shutdownErr, p.stopLIManager())
 		if p.filterManager != nil {
 			p.shutdownErr = errors.Join(p.shutdownErr, p.filterManager.Close())
 		}
@@ -457,7 +457,9 @@ func (p *Processor) Shutdown() error {
 		}
 
 		// Stop hunter monitor
-		p.hunterMonitor.Stop()
+		if p.hunterMonitor != nil {
+			p.hunterMonitor.Stop()
+		}
 
 		// Shutdown virtual interface
 		if p.vifManager != nil {

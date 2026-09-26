@@ -72,11 +72,14 @@ type deliveryItem struct {
 }
 
 type ClientConfig struct {
-	X2SpoolDir            string
-	X2SpoolKeyFile        string
-	X2SpoolKeyID          string
-	X2SpoolLegacyKeyID    string
-	X2SpoolReadKeys       []securestore.KeyRef
+	X2SpoolDir         string
+	X2SpoolKeyFile     string
+	X2SpoolKeyID       string
+	X2SpoolLegacyKeyID string
+	X2SpoolReadKeys    []securestore.KeyRef
+	// X2SpoolValidateKeys checks the immutable owner ring before any journal
+	// initialization or recovery effect. It must not mutate storage or retain secrets in logs.
+	X2SpoolValidateKeys   func(*securestore.Keyring) error
 	X2SpoolMaxBytes       int64
 	X2SpoolReplayPolicy   string
 	X2SpoolReplayManifest string

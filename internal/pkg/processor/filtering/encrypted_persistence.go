@@ -36,6 +36,10 @@ func NewEncryptedPersistence(keys securestore.KeyConfig) (*EncryptedPersistence,
 	return &EncryptedPersistence{keys: ring}, nil
 }
 
+// Keyring exposes the immutable loaded references/material for cross-store
+// independence checks. Keyring has no mutators or raw-key export; never log it.
+func (ep *EncryptedPersistence) Keyring() *securestore.Keyring { return ep.keys }
+
 func (ep *EncryptedPersistence) discard() error {
 	var err error
 	if ep.usage != nil {

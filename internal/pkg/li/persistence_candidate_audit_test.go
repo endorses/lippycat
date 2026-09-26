@@ -5,43 +5,68 @@ package li
 import (
 	"errors"
 	"fmt"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"net/http"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
-func TestPersistedReplayCandidateSurvivesStartupActivationRollback(t *testing.T) {
+func TestPersistedReplayCandidateRequiresFreshAuthorizationAfterReservedFailure(t *testing.T) {
 	for _, stage := range []string{"checkpoint", "commit"} {
 		t.Run(stage, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.json")
 			xid, did := uuid.New(), uuid.New()
 			task := &InterceptTask{XID: xid, Status: TaskStatusActive, ActivationGeneration: 7, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "alice@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only}
 			require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{task}, Destinations: []*persistedDestination{{DID: did, Address: "mdf.example", Port: 8443}}}))
-			m := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			require.NoError(t, m.restorePersistedState())
 			if stage == "checkpoint" {
 				m.config.StateFile = t.TempDir()
 			} else {
-				m.commitActivation = func(uuid.UUID, time.Time) error { return errors.New("injected commit failure") }
+				store := m.stateStore.(*EncryptedStateStore)
+				write := store.write
+				calls := 0
+				store.write = func(name string, data []byte) (securestore.Outcome, error) {
+					calls++
+					if calls == 3 {
+						return securestore.NotCommitted, errors.New("injected final commit failure")
+					}
+					return write(name, data)
+				}
 			}
 			require.Error(t, m.activateStartupTask(task))
-			require.Zero(t, m.TaskCount())
+			if stage == "checkpoint" {
+				require.Zero(t, m.TaskCount())
+			} else {
+				require.Empty(t, m.GetActiveTasks())
+			}
 			require.Zero(t, m.FilterCount())
 			m.config.StateFile = path
-			require.NoError(t, m.persistState())
-			restarted := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			if stage == "checkpoint" {
+				require.NoError(t, m.persistState())
+			}
+			m.Stop()
+			restarted := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			require.NoError(t, restarted.restorePersistedState())
-			require.Contains(t, restarted.persistedActive, xid)
+			if stage == "checkpoint" {
+				require.Contains(t, restarted.persistedActive, xid)
+			} else {
+				require.NotContains(t, restarted.persistedActive, xid)
+				require.NoError(t, restarted.DeactivateTask(xid))
+			}
 			require.False(t, restarted.ReplayTaskAuthorized(xid, 7))
 			require.NoError(t, restarted.activateStartupTask(task))
 			active, err := restarted.GetTaskDetails(xid)
 			require.NoError(t, err)
-			require.Equal(t, uint64(7), active.ActivationGeneration)
+			if stage == "checkpoint" {
+				require.Equal(t, uint64(7), active.ActivationGeneration)
+			} else {
+				require.Greater(t, active.ActivationGeneration, uint64(7))
+			}
 		})
 	}
 }
@@ -61,11 +86,12 @@ func TestPersistedReplayCandidateSurvivesInterruptedStartup(t *testing.T) {
 			// Simulate two exits after the startup writability checkpoint and
 			// before ADMF reconciliation (also covers failed/unsupported sync).
 			for i := 0; i < 2; i++ {
-				interrupted := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+				interrupted := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 				require.NoError(t, interrupted.restorePersistedState())
 				require.Zero(t, interrupted.TaskCount(), "unconfirmed tasks remain disarmed")
 				require.False(t, interrupted.ReplayTaskAuthorized(xid, 7))
 				require.NoError(t, interrupted.persistState())
+				interrupted.Stop()
 			}
 
 			responseTasks := []*schema.TaskResponseDetails{details}
@@ -79,7 +105,7 @@ func TestPersistedReplayCandidateSurvivesInterruptedStartup(t *testing.T) {
 					t.Errorf("write ADMF response: %v", err)
 				}
 			})
-			m := NewManager(ManagerConfig{Enabled: true, StateFile: path, ADMFEndpoint: server.URL, SyncOnStartup: true}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path, ADMFEndpoint: server.URL, SyncOnStartup: true}, nil)
 			require.NoError(t, m.Start())
 			if outcome == "absent" {
 				require.Zero(t, m.TaskCount())
@@ -90,13 +116,13 @@ func TestPersistedReplayCandidateSurvivesInterruptedStartup(t *testing.T) {
 				require.Equal(t, uint64(7), active.ActivationGeneration)
 				require.True(t, m.ReplayTaskAuthorized(xid, 7))
 			}
-			m.Stop()
 			if outcome == "superseded" {
 				require.NoError(t, m.DeactivateTask(xid))
 				require.Equal(t, 1, m.PurgeDeactivatedTasks(0))
 				require.NoError(t, m.persistState())
 			}
-			restarted := NewManager(ManagerConfig{Enabled: true, StateFile: path}, nil)
+			m.Stop()
+			restarted := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)
 			require.NoError(t, restarted.restorePersistedState())
 			if outcome == "confirmed" {
 				require.Contains(t, restarted.persistedActive, xid)

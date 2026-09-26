@@ -39,7 +39,8 @@ func (p *radiusDistributionPusher) ListFilterIDs() []string {
 
 func TestRADIUSRealDistributionLifecycleRevisions(t *testing.T) {
 	p := &radiusDistributionPusher{manager: processorfilter.NewManager("", nil, nil, nil, nil)}
-	m := NewManager(ManagerConfig{Enabled: true, FilterPusher: p}, nil)
+	path := filepath.Join(t.TempDir(), "state.json")
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, FilterPusher: p, StateFile: path}, nil)
 	task := radiusTargetTask()
 	for _, did := range task.DestinationIDs {
 		require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 443, X2Enabled: true, ProtocolType: "X2Only"}))
@@ -65,10 +66,9 @@ func TestRADIUSRealDistributionLifecycleRevisions(t *testing.T) {
 	require.Equal(t, uint64(3), third[0].Revision)
 	current, err := m.GetTaskDetails(task.XID)
 	require.NoError(t, err)
-	path := filepath.Join(t.TempDir(), "state.json")
-	m.config.StateFile = path
 	require.NoError(t, m.persistState())
-	restarted := NewManager(ManagerConfig{Enabled: true, StateFile: path, FilterPusher: p}, nil)
+	m.Stop()
+	restarted := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path, FilterPusher: p}, nil)
 	require.NoError(t, restarted.restorePersistedState())
 	require.Empty(t, p.manager.GetAll())
 	require.NoError(t, restarted.activateStartupTask(current))
@@ -88,8 +88,8 @@ func TestRADIUSFailedMigrationWithdrawalCannotArmRegistry(t *testing.T) {
 	require.NoError(t, p.UpdateFilter(legacy))
 	p.failDelete = true
 	path := filepath.Join(t.TempDir(), "state.json")
-	require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{task}}))
-	m := NewManager(ManagerConfig{Enabled: true, StateFile: path, FilterPusher: p}, nil)
+	require.NoError(t, writePersistedState(path, &persistedState{Tasks: []*InterceptTask{task}, Destinations: []*persistedDestination{{DID: task.DestinationIDs[0], Address: "mdf.example", Port: 443, X2Enabled: true, ProtocolType: "X2Only"}}}))
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path, FilterPusher: p}, nil)
 	require.Error(t, m.restorePersistedState())
 	require.Zero(t, m.TaskCount())
 	_, ok := m.AcquireTaskAdmission(task.XID, task.ActivationGeneration)
@@ -99,7 +99,7 @@ func TestRADIUSFailedMigrationWithdrawalCannotArmRegistry(t *testing.T) {
 
 func TestRADIUSInvalidReconciliationRevokesBeforeFailedWithdrawal(t *testing.T) {
 	p := &radiusDistributionPusher{manager: processorfilter.NewManager("", nil, nil, nil, nil)}
-	m := NewManager(ManagerConfig{Enabled: true, FilterPusher: p}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, FilterPusher: p}, nil)
 	task := radiusTargetTask()
 	for _, did := range task.DestinationIDs {
 		require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "mdf.example", Port: 443, X2Enabled: true, ProtocolType: "X2Only"}))

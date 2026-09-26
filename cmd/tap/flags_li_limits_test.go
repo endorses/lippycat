@@ -12,6 +12,8 @@ import (
 )
 
 func TestLIDeliveryBufferConfigurationPrecedence(t *testing.T) {
+	previousFlags := liStoreKeyFlags
+	t.Cleanup(func() { liStoreKeyFlags = previousFlags })
 	previous := *viper.GetViper()
 	t.Cleanup(func() { *viper.GetViper() = previous })
 	viper.Reset()

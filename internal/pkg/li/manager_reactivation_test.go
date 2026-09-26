@@ -151,7 +151,8 @@ func TestManagerReactivationAfterDurableRestore(t *testing.T) {
 	require.NoError(t, m1.DeactivateTask(task.XID))
 
 	pusher := newTransactionalPusher()
-	m2 := NewManager(ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
+	m1.Stop()
+	m2 := newStateTestManager(t, ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
 	require.NoError(t, m2.restorePersistedState())
 	tombstone := mustTask(t, m2.registry, task.XID)
 	require.Equal(t, TaskStatusDeactivated, tombstone.Status)
@@ -202,7 +203,7 @@ func TestManagerInvalidReactivationLeavesPersistenceUnchanged(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stateFile := t.TempDir() + "/li-state.json"
 			pusher := newTransactionalPusher()
-			m := NewManager(ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
+			m := newStateTestManager(t, ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
 			did := uuid.New()
 			require.NoError(t, m.CreateDestination(&Destination{
 				DID: did, Address: "x2.example", Port: 443, X2Enabled: true, ProtocolType: "X2Only",

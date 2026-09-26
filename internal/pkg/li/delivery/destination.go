@@ -418,7 +418,8 @@ func (p *connPool) size() int {
 // Destinations are configured via X1 (CreateDestination, RemoveDestination).
 // The manager maintains persistent TLS connections with automatic reconnection.
 type Manager struct {
-	mu sync.RWMutex
+	stopOnce sync.Once
+	mu       sync.RWMutex
 
 	// config holds the manager configuration.
 	config DestinationConfig
@@ -615,6 +616,10 @@ func (m *Manager) Start() {
 
 // Stop gracefully shuts down the manager and closes all connections.
 func (m *Manager) Stop() {
+	m.stopOnce.Do(m.stop)
+}
+
+func (m *Manager) stop() {
 	m.workerMu.Lock()
 	m.shuttingDown.Store(true)
 	if m.cancelDials != nil {

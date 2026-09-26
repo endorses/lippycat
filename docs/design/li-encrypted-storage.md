@@ -57,20 +57,23 @@ an owner cannot supply 64 MiB of payload in addition to binding overhead.
 Authentication and binding validation precede owner schema decoding. Errors
 identify an operation/classification, never plaintext, selectors, or key bytes.
 
-| Purpose                 | Value | Owner payload                                           |
-| ----------------------- | ----- | ------------------------------------------------------- |
-| Filter snapshot         | 1     | Complete managed filter document                        |
-| LI administrative state | 2     | Complete state, obligations, intents, and watermarks    |
-| X2 product              | 3     | Immutable X2 record                                     |
-| X3 product              | 4     | Immutable X3 record                                     |
-| Sequence checkpoint     | 5     | One interface-specific sequence context and next number |
-| Journal state           | 6     | Journal identity, highwaters, fault/rotation state      |
-| Call control            | 7     | Exact capture incarnation and closure state             |
-| Revocation control      | 8     | Exact revoked provenance and covered durable boundary   |
+| Purpose                      | Value | Owner payload                                                |
+| ---------------------------- | ----- | ------------------------------------------------------------ |
+| Filter snapshot              | 1     | Complete managed filter document                             |
+| LI administrative state      | 2     | Complete state, obligations, intents, and watermarks         |
+| X2 product                   | 3     | Immutable X2 record                                          |
+| X3 product                   | 4     | Immutable X3 record                                          |
+| Sequence checkpoint          | 5     | One interface-specific sequence context and next number      |
+| Journal state                | 6     | Journal identity, highwaters, fault/rotation state           |
+| Call control                 | 7     | Exact capture incarnation and closure state                  |
+| Revocation control           | 8     | Exact revoked provenance and covered durable boundary        |
+| Journal batch/index metadata | 9     | Bounded authenticated physical frame indexes and checkpoints |
 
 Zero, unknown purposes, unknown versions, and unknown algorithms fail closed.
 Envelope version dispatch is separate from each owner's payload schema version.
-X2 and X3 use different store UUIDs even when sharing purpose 5, 6, 7, or 8.
+X2 and X3 use different store UUIDs even when sharing purpose 5, 6, 7, 8, or 9.
+Purpose 9 is reserved for the measured batch-layout work; its availability in
+the envelope codec alone does not enable a journal layout or X3 admission.
 Snapshot object names are `filters` and `li-state`; journal names are canonical
 decimal record IDs, `sequence/<context digest>`, `journal-state`,
 `call/<incarnation UUID>/<XID>/<task generation>/<DID>/<destination generation>`,
@@ -233,15 +236,27 @@ RADIUS revision history that the current schema never persisted.
 
 LI state payload schema is version 2: `version`, `written_at`, `incarnation`,
 `tasks`, `destinations`, `cleanup_needed`, `generations`, `intents`, and
-`revocations`. `incarnation` must equal the envelope binding. Tasks retain every
+`revocations`, plus optional `radius_correlation_state_file`. The optional pin is
+an absolute canonical UTF-8 path of at most 4,096 bytes; it is encrypted with the
+snapshot. A configured override must match it. An absent pin permits non-RADIUS
+operation but cannot initialize a RADIUS allocator from the new snapshot filename.
+Legacy migration pins the original state path plus `.radius-correlation`, or the
+explicit prior custom allocator path. Fresh initialization pins its selected
+allocator path. `incarnation` must equal the envelope binding. Tasks retain every
 field of `InterceptTask`, including status, activation generation, all timestamps,
 RADIUS scope/profile, implicit-deactivation policy, and retained failure state.
 Destinations retain DID, address, port, interface flags, protocol, description,
 creation time, and delivery revision; TLS configuration and secrets are excluded.
 Generation watermarks survive purging tasks and cleanup records. A retained
 deactivated/failed task may legitimately reference a removed destination; an
-enforcing task may not. Restored active/suspended tasks are unconfirmed candidates
-until an unchanged ADMF activation is confirmed. RADIUS candidates require fresh
+enforcing task may not. Restored pending/active/suspended definitions are
+unconfirmed until current ADMF or explicit X1 activation permits enforcement;
+elapsed StartTime alone cannot confirm a restored pending definition. A restored
+pending task remains queryable, but neither a timer nor a metadata-only update
+confirms it. Fresh activation reserves a new generation and keeps a future start
+pending; it does not create historical replay confirmation. Unchanged
+non-RADIUS active/suspended generations require explicit startup confirmation
+for historical replay. RADIUS candidates require fresh
 activation/evidence and cannot authorize old X3.
 
 State schema 2 preserves the legacy field names and typed representations inside
@@ -249,7 +264,9 @@ State schema 2 preserves the legacy field names and typed representations inside
 route their 64-bit integers through floating-point decoding. UUID strings use
 lowercase canonical hyphenated form. Integer tokens are decimal integers with no
 fraction/exponent, decoded directly into the stated integer width. Legacy task
-timestamps remain UTC RFC3339Nano strings; a zero Go time represents only the
+timestamps use UTC RFC3339Nano strings in schema 2. The explicit legacy reader
+accepts valid RFC3339Nano zone offsets and normalizes the same instant to UTC,
+because the old runtime used local-time timestamps. A zero Go time represents only the
 existing optional start/end/activation/deactivation values. Newly introduced
 control/product timestamps use the explicit time representation below. Snapshot
 collections are nonnull arrays/maps, even when empty. Optional legacy fields
@@ -258,19 +275,19 @@ retain their established zero-value meaning.
 `intents` is an array of objects with the following fields. Unknown fields and
 unknown enum values fail; `null` is allowed only for the stated optional fields.
 
-| Intent field                              | Type and meaning                                                                                                                                    |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operation_id`                            | Nonzero random UUID; stable through equivalent retries                                                                                              |
-| `kind`                                    | One of the exact operation names in the transition table below                                                                                      |
-| `state_incarnation`                       | Nonzero UUID equal to the owning snapshot                                                                                                           |
-| `xid`, `did`                              | Subject UUID or `null`; task kinds require XID only, destination kinds DID only, cleanup/purge may name either                                      |
-| `previous_generation`                     | uint64; zero only when no prior subject exists                                                                                                      |
-| `reserved_generation`                     | uint64; prospective task generation or destination revision; nonzero for create/activate/modify/promote                                             |
-| `phase`                                   | `reserved`, `revocation_committed`, `policy_committed`, or `finished`; allowed edges depend on kind, not lexical/enum order                         |
-| `candidate_task`, `candidate_destination` | Detached complete candidate of the corresponding existing state type, or `null`; required when the operation creates/modifies/promotes that subject |
-| `cleanup_filter_ids`                      | Duplicate-free array of at most 256 exact strings; never raw selectors                                                                              |
-| `revocation_ids`                          | Duplicate-free array of at most 256 control UUIDs, linking the admin obligation to exact journal revocations                                        |
-| `failed`                                  | Boolean persistent fault latch; a failed/uncertain operation cannot be treated as an equivalent successful retry                                    |
+| Intent field                              | Type and meaning                                                                                                                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `operation_id`                            | Nonzero random UUID; stable through equivalent retries                                                                                                                                     |
+| `kind`                                    | One of the exact operation names in the transition table below                                                                                                                             |
+| `state_incarnation`                       | Nonzero UUID equal to the owning snapshot                                                                                                                                                  |
+| `xid`, `did`                              | Subject UUID or `null`; task kinds and purge require XID only, destination kinds DID only, cleanup may name either; bounded legacy orphan cleanup may be subjectless                       |
+| `previous_generation`                     | uint64; zero when no prior subject exists, for a legacy destination revision zero, or for the explicitly permitted transitions from a known non-enforcing legacy task with generation zero |
+| `reserved_generation`                     | uint64; prospective task generation or destination revision; nonzero for create/activate/modify/promote                                                                                    |
+| `phase`                                   | `reserved`, `revocation_committed`, `policy_committed`, or `finished`; allowed edges depend on kind, not lexical/enum order                                                                |
+| `candidate_task`, `candidate_destination` | Detached complete candidate of the corresponding existing state type, or `null`; required when the operation creates/modifies/promotes that subject                                        |
+| `cleanup_filter_ids`                      | Duplicate-free array of at most 256 exact strings; never raw selectors                                                                                                                     |
+| `revocation_ids`                          | Duplicate-free array of at most 256 control UUIDs, linking the admin obligation to exact journal revocations                                                                               |
+| `failed`                                  | Boolean persistent fault latch; a failed/uncertain operation cannot be treated as an equivalent successful retry                                                                           |
 
 Candidate definitions are included because an operation kind and reserved
 generation alone cannot recover the desired policy after a crash. Reserve both
@@ -282,17 +299,81 @@ until reconciliation resolves it. Equivalent retries use that same intent and
 do not allocate another generation. Retry identity uses the existing canonical
 task/destination definition, not runtime status or last-error text.
 
-| Intent kinds                                  | Allowed successful phase path                                                                                            | Admission / failure rule                                                                                                                            |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task_activate`, `task_reactivate`            | `reserved` → `policy_committed` → `finished`; future-start pending tasks may use `reserved` → `finished` without filters | New generation stays closed until committed final state; pending final state stays closed until promotion                                           |
-| `task_promote`                                | `reserved` → `policy_committed` → `finished`                                                                             | Reuses the already reserved pending activation generation; validates current destinations and ADMF state before opening admission                   |
-| `task_modify`                                 | `reserved` → `revocation_committed` → `policy_committed` → `finished`                                                    | Enforcement-changing modification revokes old generation permanently before publishing/releasing the new generation                                 |
-| `task_update`                                 | `reserved` → `finished`                                                                                                  | Definition change that existing `equivalentDeliveryDefinition` classifies as preserving delivery; no new generation or implicit retention extension |
-| `task_deactivate`, `task_expire`, `task_fail` | `reserved` → `revocation_committed` → `policy_committed` → `finished`                                                    | Block old authorization before reservation I/O; policy commit removes old selectors; faults keep it blocked                                         |
-| `destination_create`                          | `reserved` → `policy_committed` → `finished`                                                                             | Policy commit persists the new endpoint/revision; do not expose it before final admin commit                                                        |
-| `destination_modify`, `destination_remove`    | `reserved` → `revocation_committed` → `policy_committed` → `finished`                                                    | Revoke old endpoint incarnation first; policy commit installs/removes endpoint; no old-incarnation rollback after revocation                        |
-| `cleanup`                                     | `reserved` → `policy_committed` → `finished`                                                                             | Reconcile previously recorded filter/endpoint cleanup, without enabling authorization                                                               |
-| `purge`                                       | `reserved` → `finished`                                                                                                  | Remove only eligible retained task/tombstone data; preserve watermarks, unfinished cleanup and any journal-covered revocations                      |
+| Intent kinds                                  | Allowed successful phase path                                                                                            | Admission / failure rule                                                                                                                                                |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_activate`, `task_reactivate`            | `reserved` → `policy_committed` → `finished`; future-start pending tasks may use `reserved` → `finished` without filters | New generation stays closed until committed final state; pending final state stays closed until promotion                                                               |
+| `task_promote`                                | `reserved` → `policy_committed` → `finished`                                                                             | Reuses the already reserved pending activation generation; validates current destinations and ADMF state before opening admission                                       |
+| `task_confirm`                                | `reserved` → `policy_committed` → `finished`                                                                             | Unchanged non-RADIUS ADMF startup confirmation reuses the positive persisted generation; requires exact prior activation evidence and does not reserve a new generation |
+| `task_modify`                                 | `reserved` → `revocation_committed` → `policy_committed` → `finished`                                                    | Enforcement-changing modification revokes old generation permanently before publishing/releasing the new generation                                                     |
+| `task_update`                                 | `reserved` → `finished`                                                                                                  | Definition change that existing `equivalentDeliveryDefinition` classifies as preserving delivery; no new generation or implicit retention extension                     |
+| `task_deactivate`, `task_expire`, `task_fail` | `reserved` → `revocation_committed` → `policy_committed` → `finished`                                                    | Block old authorization before reservation I/O; policy commit removes old selectors; faults keep it blocked                                                             |
+| `destination_create`                          | `reserved` → `policy_committed` → `finished`                                                                             | Policy commit persists the new endpoint/revision; do not expose it before final admin commit                                                                            |
+| `destination_update`                          | `reserved` → `finished`                                                                                                  | Metadata-only update preserves the existing delivery revision and identity, including a legacy revision of zero; no revocation                                          |
+| `destination_modify`, `destination_remove`    | `reserved` → `revocation_committed` → `policy_committed` → `finished`                                                    | Revoke old endpoint incarnation first; policy commit installs/removes endpoint; no old-incarnation rollback after revocation                                            |
+| `cleanup`                                     | `reserved` → `policy_committed` → `finished`                                                                             | Reconcile previously recorded filter/endpoint cleanup, without enabling authorization                                                                                   |
+| `purge`                                       | `reserved` → `finished`                                                                                                  | Remove only eligible retained task/tombstone data; preserve watermarks, unfinished cleanup and any journal-covered revocations                                          |
+
+Withdrawal of a legacy pending/deactivated/failed task with generation zero
+retains that zero watermark and cannot create a journal revocation control.
+Active/suspended tasks and task-scoped controls require positive generations.
+Modification of a known non-enforcing legacy pending task with generation zero
+reserves a positive generation above the retained watermark. Its revocation boundary contains no
+controls, since the old definition never authorized delivery. This exception
+requires the recorded non-enforcing state; it cannot admit a zero-generation
+active task or journal control.
+
+Explicit reactivation of a retained legacy deactivated task with generation zero
+likewise reserves a positive generation above its retained watermark after
+identity and current destination validation (generation 1 only when that
+watermark is zero). It cannot create a zero-generation revocation. An
+unfinished reactivation must retain the matching non-enforcing prior definition;
+finished intents remain historical evidence after later legitimate mutations.
+
+Legacy orphan filter names may contain only an eight-character XID prefix, which
+cannot identify a complete task UUID. A subjectless `cleanup` intent records a
+nonempty, duplicate-free bounded list of exact recognized LI-owned filter IDs,
+uses zero previous/reserved generations, and has no candidate or revocation IDs.
+Its operation UUID supplies durable identity. Recovery removes only those exact
+IDs idempotently; it never invents a subject UUID or broadens cleanup by prefix.
+Other subjectless intents are invalid. Finished intents may retain historical
+candidate definitions referring to subsequently removed destinations; unfinished
+enforcing candidates and currently enforcing tasks require present destinations.
+
+Every persisted cleanup ID must be a recognized LI-owned identifier. Task-owned
+cleanup must match that task's full UUID or its recognized legacy short prefix;
+neither a non-LI ID nor another task's selector is a valid reference. This rule
+applies to decoded legacy documents as well as newly produced snapshots, before
+any deletion occurs.
+
+Purge applies only to retained task definitions. An unfinished purge names the
+exact eligible non-enforcing task generation and cannot remove an active or newer
+definition, outstanding cleanup, or retained journal controls. DID-only purge is
+unsupported and rejected; endpoint withdrawal uses `destination_remove`.
+
+Only revoking task/destination intent kinds may reference revocation controls,
+and each link requires the same scope accepted by the live planning hook. A
+call-scoped control cannot substitute for a task- or destination-scoped control.
+An unfinished destination change retains the prior destination in its root
+snapshot: its DID and numeric revision must match the intent, and each linked
+control must carry that prior destination's exact delivery-identity hash. The
+final snapshot replaces or removes the endpoint while marking the intent
+finished. Finished historical links remain data when that old endpoint no
+longer exists; they are never executed against a later incarnation. Standalone
+retained controls remain typed historical data; they do not broaden an intent's
+authority.
+
+Destination removal conservatively withdraws every enforcing task that names
+the removed DID, including tasks with other destinations, retaining definitions
+and cleanup obligations. The bounded task-withdrawal and destination intents
+are reserved together before effects; reconciliation withdraws tasks before
+removing the endpoint. Metadata-only destination updates do not withdraw tasks.
+
+Destination intent generations are numeric delivery revisions. A legacy
+destination can have revision zero; modifying it reserves a strictly newer
+revision. In contrast, a revocation control’s `destination_generation` is the
+nonzero delivery-identity hash that binds DID, creation time, and revision. A
+zero legacy revision therefore does not create an ambiguous zero-generation
+revocation or authorize a recreated destination.
 
 `revocation_committed` means all relevant journal controls and the matching
 administrative revocation/obligation are durable, not merely that the first store
@@ -483,6 +564,8 @@ After an uncertain replacement, restart authenticates both current object and
 rewrite state; it does not guess that the source or destination won. No automatic
 plaintext backup is created. The RADIUS allocator sidecar is preserved unchanged
 and remains independently validated; resetting it is not a migration strategy.
+The encrypted state pins the pre-migration allocator path so changing the
+administrative snapshot path cannot silently allocate a fresh counter sidecar.
 
 ## Filter-mode matrix
 

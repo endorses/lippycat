@@ -106,7 +106,7 @@ type Config struct {
 	LIRADIUSScope                radius.ScopeBinding
 	LIRADIUSMACProfile           string
 	LIRADIUSCorrelationLifetime  time.Duration
-	LIRADIUSCorrelationStateFile string // Durable raw RADIUS correlation reservations; defaults to LIStateFile + .radius-correlation
+	LIRADIUSCorrelationStateFile string // Explicit allocator path; encrypted LI state retains its migration-time pin
 	LIX1ListenAddr               string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
 	LIX1TLSCertFile              string // Path to X1 server TLS certificate
 	LIX1TLSKeyFile               string // Path to X1 server TLS key
@@ -121,7 +121,8 @@ type Config struct {
 	LIADMFSyncOnStartup     bool          // Query ADMF for task/destination state on startup
 	LIADMFSyncTimeout       time.Duration // Timeout for startup state sync
 	LIADMFReconcileInterval time.Duration // Periodic reconciliation interval (0 = disabled)
-	LIStateFile             string        // Atomic LI lifecycle persistence file
+	LIStateFile             string        // Explicitly initialized encrypted LI lifecycle snapshot; empty disables persistence
+	LIStateKeys             securestore.KeyConfig
 	// LI Delivery (X2/X3) TLS settings - mutual TLS is required for delivery
 	LIDeliveryTLSCertFile                   string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
 	LIDeliveryTLSKeyFile                    string   // Path to client TLS key for X2/X3 delivery
@@ -137,6 +138,9 @@ type Config struct {
 	LIDeliveryX2SpoolDir                    string
 	LIDeliveryX2SpoolMaxBytes               int64
 	LIDeliveryX2SpoolKeyFile                string
+	LIDeliveryX2SpoolKeyID                  string
+	LIDeliveryX2SpoolLegacyKeyID            string
+	LIDeliveryX2SpoolReadKeys               []securestore.KeyRef
 	LIDeliveryX2SpoolReplayPolicy           string
 	LIDeliveryX2SpoolReplayManifest         string
 	LIDeliveryX2SpoolExportManifest         string
@@ -257,6 +261,7 @@ type Processor struct {
 
 	// LI (Lawful Interception) manager
 	liManager          *li.Manager
+	liStorage          *liStoragePreparation
 	radiusLIStats      radiusDeliveryStats
 	radiusLILastReport time.Time
 	radiusLIMu         sync.Mutex
@@ -308,11 +313,13 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure managed filter storage: %w", err)
 	}
+	if err := validateIndependentStorageKeys(config, persistence); err != nil {
+		return nil, fmt.Errorf("validate encrypted store keys: %w", err)
+	}
 
 	p := &Processor{
 		config:         config,
-		callAggregator: voip.NewCallAggregator(),                               // Initialize call aggregator
-		dnsTunneling:   dns.NewTunnelingDetector(dns.DefaultTunnelingConfig()), // Initialize DNS tunneling aggregator
+		callAggregator: voip.NewCallAggregator(), // Initialize call aggregator
 	}
 	// Initialize stats collector (needs to be created first as it's used by other managers)
 	p.statsCollector = stats.NewCollector(config.ProcessorID, &p.packetsReceived, &p.packetsForwarded)
@@ -340,15 +347,19 @@ func New(config Config) (_ *Processor, constructorErr error) {
 
 	// Authenticate the complete policy before constructing any capture, listener,
 	// output, or LI runtime. Embedded users receive the same protection as CLI users.
-	filterOwnershipTransferred := false
 	defer func() {
-		if !filterOwnershipTransferred {
-			constructorErr = errors.Join(constructorErr, p.filterManager.Close())
+		if constructorErr != nil {
+			constructorErr = errors.Join(constructorErr, p.Shutdown())
 		}
 	}()
 	if err := p.filterManager.Initialize(); err != nil {
 		return nil, fmt.Errorf("initialize managed filter storage: %w", err)
 	}
+	p.initLIManager()
+	if err := p.prepareLIStorage(); err != nil {
+		return nil, err
+	}
+	p.dnsTunneling = dns.NewTunnelingDetector(dns.DefaultTunnelingConfig())
 
 	eventQueueSize := config.EventQueueSize
 	if eventQueueSize <= 0 {
@@ -399,12 +410,6 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize event analysis runtime: %w", err)
 	}
-	eventRuntimeReady := false
-	defer func() {
-		if !eventRuntimeReady {
-			p.eventRuntime.Close()
-		}
-	}()
 	if shouldEmitStructuredLogs(config) {
 		logCfg := config.LogConfig
 		queueSize := logCfg.QueueSize
@@ -771,14 +776,10 @@ func New(config Config) (_ *Processor, constructorErr error) {
 		"hunter_manager", "connected",
 		"downstream_manager", "connected")
 
-	// Initialize LI Manager (no-op if !li build or LI not enabled in config)
-	// The correlator starts a worker, so construct it only after all fallible
-	// startup validation and managed-store authentication have completed.
+	// Runtime wiring starts workers and publishes LI globals. Keep it after all
+	// fallible constructor work and authentication of the configured stores.
 	p.callCorrelator = NewCallCorrelator()
-	p.initLIManager()
-
-	eventRuntimeReady = true
-	filterOwnershipTransferred = true
+	p.initLIRuntime()
 	return p, nil
 }
 

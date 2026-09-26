@@ -17,7 +17,7 @@ import (
 func newIdempotencyManager(t *testing.T, stateFile string) (*Manager, *mockFilterPusher, []uuid.UUID) {
 	t.Helper()
 	pusher := &mockFilterPusher{}
-	m := NewManager(ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
+	m := newStateTestManager(t, ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
 	dids := []uuid.UUID{uuid.New(), uuid.New()}
 	for _, did := range dids {
 		require.NoError(t, m.CreateDestination(&Destination{
@@ -145,7 +145,8 @@ func TestActivateTaskRetryAfterPendingRestoration(t *testing.T) {
 	require.NoError(t, m1.ActivateTask(task))
 
 	pusher := &mockFilterPusher{}
-	m2 := NewManager(ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
+	m1.Stop()
+	m2 := newStateTestManager(t, ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
 	require.NoError(t, m2.Start())
 	t.Cleanup(m2.Stop)
 	beforeBytes, err := os.ReadFile(stateFile)
@@ -155,20 +156,27 @@ func TestActivateTaskRetryAfterPendingRestoration(t *testing.T) {
 	require.NoError(t, m2.ActivateTask(cloneActivationTask(task)))
 	after, err := m2.GetTaskDetails(task.XID)
 	require.NoError(t, err)
-	assert.Equal(t, before, after)
+	assert.Equal(t, before.ActivationGeneration+1, after.ActivationGeneration)
+	assert.Equal(t, TaskStatusPending, after.Status)
+	assert.True(t, equivalentTaskDefinition(before, after))
+	assert.False(t, m2.pendingNeedsConfirmation(task.XID))
 	afterBytes, err := os.ReadFile(stateFile)
 	require.NoError(t, err)
-	assert.Equal(t, beforeBytes, afterBytes)
+	assert.NotEqual(t, beforeBytes, afterBytes, "fresh confirmation durably reserves a generation")
+	require.NoError(t, m2.ActivateTask(cloneActivationTask(task)))
+	retryBytes, err := os.ReadFile(stateFile)
+	require.NoError(t, err)
+	assert.Equal(t, afterBytes, retryBytes, "confirmed retry remains idempotent")
 
 	conflict := cloneActivationTask(task)
 	conflict.Targets[0].Value = "sip:conflict@example"
 	require.ErrorIs(t, m2.ActivateTask(conflict), ErrTaskDefinitionConflict)
 	afterConflict, err := m2.GetTaskDetails(task.XID)
 	require.NoError(t, err)
-	assert.Equal(t, before, afterConflict)
+	assert.Equal(t, after, afterConflict)
 	conflictBytes, err := os.ReadFile(stateFile)
 	require.NoError(t, err)
-	assert.Equal(t, beforeBytes, conflictBytes)
+	assert.Equal(t, afterBytes, conflictBytes)
 	assert.Empty(t, pusher.updates)
 	assert.Empty(t, pusher.deletes)
 }
@@ -180,7 +188,8 @@ func TestActivateTaskRetryAfterActiveRestoration(t *testing.T) {
 	require.NoError(t, m1.ActivateTask(task))
 
 	pusher := &mockFilterPusher{}
-	m2 := NewManager(ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
+	m1.Stop()
+	m2 := newStateTestManager(t, ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
 	require.NoError(t, m2.Start())
 	t.Cleanup(m2.Stop)
 	// Active durable state remains disarmed until the ADMF reasserts it. The

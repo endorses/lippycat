@@ -73,7 +73,7 @@ lippycat implements the following ETSI interfaces for lawful interception:
 
 | Interface | Purpose                           | Protocol       | Specification |
 | --------- | --------------------------------- | -------------- | ------------- |
-| **X1**    | Administration (ADMF ↔ NE)       | XML/HTTPS      | TS 103 221-1  |
+| **X1**    | Administration (ADMF ↔ NE)        | XML/HTTPS      | TS 103 221-1  |
 | **X2**    | IRI delivery (signaling metadata) | Binary TLV/TLS | TS 103 221-2  |
 | **X3**    | CC delivery (content)             | Binary TLV/TLS | TS 103 221-2  |
 
@@ -116,6 +116,51 @@ make verify-no-li
 
 LI code is completely excluded from standard builds through dead code elimination.
 
+## Encrypted managed storage
+
+LI requires an initialized encrypted managed-filter store. `--filter-store-mode=auto`
+selects encryption when `--li-enabled` is effective; explicit YAML mode is rejected.
+LI-disabled deployments retain editable YAML by default. The filter path remains
+`--filter-file`; a custom path must contain the selected format.
+
+Provision private store/key directories owned by the service account. Each enabled
+store needs its own independently generated raw 32-byte key; do not copy one key
+between filters, administrative state, X2, and X3. Keep key references in
+configuration and key bytes in private files. For example, after provisioning the
+directories, run as their owner:
+
+```bash
+umask 077
+openssl rand -out /etc/lippycat/keys/filters.key 32
+openssl rand -out /etc/lippycat/keys/li-state.key 32
+lc migrate filter-store --init --destination /var/lib/lippycat/filters.enc \
+  --key-id filters-1 --key-file /etc/lippycat/keys/filters.key
+lc migrate li-state --init --destination /var/lib/lippycat/li-state.enc \
+  --key-id state-1 --key-file /etc/lippycat/keys/li-state.key
+```
+
+For an existing installation, stop the node and use explicit YAML/JSON migration
+instead of `--init`; see [offline migration](../cmd/migrate/README.md). No runtime
+format guessing, automatic plaintext conversion, or automatic plaintext backup
+occurs. Keep interrupted-operation metadata and use the identical command with
+`--resume`. These commands do not yet perform encrypted-key rotation.
+
+Configured `--li-state-file` persistence requires `--li-state-key-file` and
+`--li-state-key-id`. Empty `--li-state-file` disables administrative persistence
+where persistent replay does not require it. Up to four prior keys can be provided
+with `--li-state-read-key=id=path`. Settings use each role's
+`li.state_file`, `li.state_key_file`, `li.state_key_id`, and `li.state_read_keys`.
+Explicit `LIPPYCAT_PROCESSOR_LI_STATE_*` / `LIPPYCAT_TAP_LI_STATE_*` environment
+references follow CLI > environment > YAML precedence, including empty values;
+prior-key environment values are one CSV record. No raw key bytes belong in YAML.
+
+Administrative migration preserves task/destination identities, generation
+watermarks, cleanup obligations, and timestamp instants. Restored tasks require
+current authorization reconciliation. The encrypted state also pins the original
+RADIUS allocator path; changing the administrative file path never selects a fresh
+counter sidecar. Supply `--radius-state-file` to migration if the old node used a
+custom allocator. The sidecar remains separate and unencrypted.
+
 ## Quick Start
 
 ### 1. Generate Certificates
@@ -133,6 +178,10 @@ See [LI_CERTIFICATES.md](LI_CERTIFICATES.md) for detailed certificate setup.
 lc process --listen :55555 \
   --tls-cert=server.crt --tls-key=server.key \
   --li-enabled \
+  --filter-file /var/lib/lippycat/filters.enc \
+  --filter-store-key-id filters-1 --filter-store-key-file /etc/lippycat/keys/filters.key \
+  --li-state-file /var/lib/lippycat/li-state.enc \
+  --li-state-key-id state-1 --li-state-key-file /etc/lippycat/keys/li-state.key \
   --li-x1-listen :8443 \
   --li-x1-tls-cert x1-server.crt \
   --li-x1-tls-key x1-server.key \
@@ -157,7 +206,16 @@ processor:
     cert_file: "/etc/lippycat/certs/server.crt"
     key_file: "/etc/lippycat/certs/server.key"
 
+  filter_file: "/var/lib/lippycat/filters.enc"
+  filter_store:
+    mode: auto
+    key_file: "/etc/lippycat/keys/filters.key"
+    key_id: "filters-1"
+
   li:
+    state_file: "/var/lib/lippycat/li-state.enc"
+    state_key_file: "/etc/lippycat/keys/li-state.key"
+    state_key_id: "state-1"
     enabled: true
 
     # X1 server (receives requests from ADMF)
@@ -802,18 +860,21 @@ journal unless configured. `--li-delivery-queue-size` remains the fallback PDU c
 `--li-delivery-x2-queue-size` and `--li-delivery-x3-queue-size` independently override
 it (zero inherits the fallback).
 
-| Option                                 | Unit/default   | Behavior                                                        |
-| -------------------------------------- | -------------- | --------------------------------------------------------------- |
-| `--li-delivery-x2-queue-size`          | PDUs / `0`     | X2 cap per destination; zero inherits queue-size                |
-| `--li-delivery-x3-queue-size`          | PDUs / `0`     | X3 cap per destination; zero inherits queue-size                |
-| `--li-delivery-x2-queue-bytes`         | bytes / `0`    | Per-destination X2 encoded payload budget; zero disables it     |
-| `--li-delivery-x3-queue-bytes`         | bytes / `0`    | Independent X3 encoded payload budget                           |
-| `--li-delivery-x3-max-age`             | duration / `0` | Maximum local X3 residence; zero disables expiry                |
-| `--li-delivery-memory-budget-bytes`    | bytes / `0`    | Reservation ceiling; requires both byte budgets when enabled    |
-| `--li-delivery-x2-spool-dir`           | path / empty   | Enables the encrypted X2 journal                                |
-| `--li-delivery-x2-spool-max-bytes`     | bytes / `0`    | Required positive disk budget when journaling is enabled        |
-| `--li-delivery-x2-spool-key-file`      | path / empty   | Required private file containing a raw 32-byte AES key          |
-| `--li-delivery-x2-spool-replay-policy` | `hold`         | Recovered records remain held; `purge` explicitly discards them |
+| Option                                 | Unit/default     | Behavior                                                            |
+| -------------------------------------- | ---------------- | ------------------------------------------------------------------- |
+| `--li-delivery-x2-queue-size`          | PDUs / `0`       | X2 cap per destination; zero inherits queue-size                    |
+| `--li-delivery-x3-queue-size`          | PDUs / `0`       | X3 cap per destination; zero inherits queue-size                    |
+| `--li-delivery-x2-queue-bytes`         | bytes / `0`      | Per-destination X2 encoded payload budget; zero disables it         |
+| `--li-delivery-x3-queue-bytes`         | bytes / `0`      | Independent X3 encoded payload budget                               |
+| `--li-delivery-x3-max-age`             | duration / `0`   | Maximum local X3 residence; zero disables expiry                    |
+| `--li-delivery-memory-budget-bytes`    | bytes / `0`      | Reservation ceiling; requires both byte budgets when enabled        |
+| `--li-delivery-x2-spool-dir`           | path / empty     | Enables the encrypted X2 journal                                    |
+| `--li-delivery-x2-spool-max-bytes`     | bytes / `0`      | Required positive disk budget when journaling is enabled            |
+| `--li-delivery-x2-spool-key-file`      | path / empty     | Required private file containing a raw 32-byte AES key              |
+| `--li-delivery-x2-spool-key-id`        | ID / empty       | Active key ID; empty retains the original key-file-only meaning     |
+| `--li-delivery-x2-spool-read-key`      | `id=path` / none | At most four prior keys, repeatable                                 |
+| `--li-delivery-x2-spool-legacy-key-id` | ID / empty       | Explicit configured key for LCX2 records after an active-key change |
+| `--li-delivery-x2-spool-replay-policy` | `hold`           | Recovered records remain held; `purge` explicitly discards them     |
 
 Byte and PDU limits both apply, including claimed writes. Oversized PDUs are
 rejected. X2 and X3 have independent FIFO delivery and retry workers, so an X3

@@ -5,6 +5,8 @@ package tap
 import (
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/securestore"
+
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/spf13/cobra"
 )
@@ -38,6 +40,9 @@ type LIConfig struct {
 	DeliveryX2SpoolDir                    string
 	DeliveryX2SpoolMaxBytes               int64
 	DeliveryX2SpoolKeyFile                string
+	DeliveryX2SpoolKeyID                  string
+	DeliveryX2SpoolLegacyKeyID            string
+	DeliveryX2SpoolReadKeys               []securestore.KeyRef
 	DeliveryX2SpoolReplayPolicy           string
 	DeliveryX2SpoolReplayManifest         string
 	DeliveryX2SpoolExportManifest         string
@@ -61,6 +66,7 @@ type LIConfig struct {
 	ADMFSyncTimeout       time.Duration
 	ADMFReconcileInterval time.Duration
 	StateFile             string
+	StateKeys             securestore.KeyConfig
 }
 
 // RegisterLIFlags is a no-op in non-LI builds.
@@ -77,3 +83,5 @@ func GetLIConfig() *LIConfig {
 func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {}
 
 func applyRADIUSLIConfig(_ *cobra.Command, _ *processor.Config) error { return nil }
+
+func applyLIStoreKeyConfig(_ *cobra.Command, _ *processor.Config) error { return nil }

@@ -52,6 +52,22 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 	if cfg.MaxBytes <= journalFaultReserve || cfg.MaxPending <= 0 || cfg.MaxRecords <= 0 || cfg.MaxRecords > 1_000_000 {
 		return nil, errors.New("invalid X2 journal capacity")
 	}
+	keyID, legacyID := cfg.KeyID, cfg.LegacyKeyID
+	if keyID == "" {
+		keyID = journalDefaultKeyID
+		if legacyID == "" {
+			legacyID = keyID // Original raw-key configuration selects exactly one key.
+		}
+	}
+	ring, err := securestore.LoadKeyring(securestore.KeyConfig{Active: securestore.KeyRef{ID: keyID, File: cfg.KeyFile}, Prior: cfg.ReadKeys, LegacyID: legacyID})
+	if err != nil {
+		return nil, err
+	}
+	if cfg.ValidateKeys != nil {
+		if err := cfg.ValidateKeys(ring); err != nil {
+			return nil, err
+		}
+	}
 	// The owner queue may be larger; filesystem work has its own fixed ceiling.
 	cfg.MaxPending = min(cfg.MaxPending, 4096)
 	if err := securestore.EnsureDir(cfg.Dir); err != nil {
@@ -61,7 +77,7 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 	if err != nil {
 		return nil, err
 	}
-	j := &Journal{cfg: cfg, store: dir, entries: make(map[uint64]*journalEntry),
+	j := &Journal{cfg: cfg, store: dir, keys: ring, entries: make(map[uint64]*journalEntry),
 		ops: make(chan journalOperation, cfg.MaxPending), done: make(chan struct{}),
 		sequences: make(map[string]journalSequenceEntry), heldByDID: make(map[uuid.UUID]int), wake: make(chan struct{}, 1)}
 	defer func() {
@@ -100,17 +116,6 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 	}
 	j.stats.MaxBytes = cfg.MaxBytes
 	j.writeFile = j.writePath
-	keyID, legacyID := cfg.KeyID, cfg.LegacyKeyID
-	if keyID == "" {
-		keyID = journalDefaultKeyID
-		if legacyID == "" {
-			legacyID = keyID // Original raw-key configuration selects exactly one key.
-		}
-	}
-	j.keys, err = securestore.LoadKeyring(securestore.KeyConfig{Active: securestore.KeyRef{ID: keyID, File: cfg.KeyFile}, Prior: cfg.ReadKeys, LegacyID: legacyID})
-	if err != nil {
-		return nil, err
-	}
 	if _, err := dir.RecoverTemporaries(); err != nil {
 		return nil, err
 	}

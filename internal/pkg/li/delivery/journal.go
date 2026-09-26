@@ -99,6 +99,7 @@ type Journal struct {
 	entries             map[uint64]*journalEntry
 	next                uint64
 	stats               JournalStats
+	telemetry           securestore.Telemetry
 	lastErr             error
 	ops                 chan journalOperation
 	done                chan struct{}
@@ -256,6 +257,7 @@ func (j *Journal) Close() error {
 	j.mu.Lock()
 	if !j.closed {
 		j.closed = true
+		j.telemetry.Closing()
 		close(j.ops)
 	}
 	j.mu.Unlock()
@@ -342,6 +344,10 @@ func (j *Journal) run() {
 				}
 			}
 			j.mu.Unlock()
+			j.telemetry.Record(securestore.OutcomeOf(err), err)
+			if err != nil {
+				j.telemetry.Fault(err)
+			}
 			if op.callback != nil {
 				op.callback(op.record.ID, err)
 			}
@@ -359,6 +365,7 @@ func (j *Journal) checkpoint() {
 	j.mu.Unlock()
 	for _, id := range ids {
 		err := j.removeRecord(id)
+		j.telemetry.Record(securestore.OutcomeOf(err), err)
 		if err != nil {
 			j.fault(fmt.Errorf("checkpoint journal: %w", err))
 			return
@@ -402,13 +409,14 @@ func (j *Journal) Flush() error {
 	return j.lastErr
 }
 func (j *Journal) fault(err error) {
+	j.telemetry.Fault(err)
 	j.mu.Lock()
 	if j.lastErr == nil {
 		j.lastErr = err
 		j.stats.LastError = err.Error()
 	}
 	j.mu.Unlock()
-	logger.Error("X2 journal fault", "error", err)
+	logger.Error("X2 journal fault", "fault_code", securestore.PublicFaultCode(err))
 }
 func (j *Journal) write(id uint64, b []byte) error {
 	return j.writeFile(j.path(id), b)
@@ -471,6 +479,7 @@ func (j *Journal) Purge(id uint64) error {
 	e.completing = true
 	j.mu.Unlock()
 	err := j.removeRecord(id)
+	j.telemetry.Record(securestore.OutcomeOf(err), err)
 	if err != nil {
 		j.fault(err)
 		return err

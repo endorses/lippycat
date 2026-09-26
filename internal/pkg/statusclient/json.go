@@ -7,18 +7,19 @@ import (
 
 // StatusJSON represents processor status in JSON-friendly format
 type StatusJSON struct {
-	ProcessorID       string                      `json:"processor_id"`
-	Status            string                      `json:"status"`
-	TotalHunters      uint32                      `json:"total_hunters"`
-	HealthyHunters    uint32                      `json:"healthy_hunters"`
-	WarningHunters    uint32                      `json:"warning_hunters"`
-	ErrorHunters      uint32                      `json:"error_hunters"`
-	TotalPackets      uint64                      `json:"total_packets_received"`
-	PacketsForwarded  uint64                      `json:"total_packets_forwarded"`
-	TotalFilters      uint32                      `json:"total_filters"`
-	UpstreamProcessor string                      `json:"upstream_processor,omitempty"`
-	LIEncoding        *management.LIEncodingStats `json:"li_encoding,omitempty"`
-	LIDelivery        *management.LIDeliveryStats `json:"li_delivery,omitempty"`
+	Storage           *management.ProcessorStorageStats `json:"storage,omitempty"`
+	ProcessorID       string                            `json:"processor_id"`
+	Status            string                            `json:"status"`
+	TotalHunters      uint32                            `json:"total_hunters"`
+	HealthyHunters    uint32                            `json:"healthy_hunters"`
+	WarningHunters    uint32                            `json:"warning_hunters"`
+	ErrorHunters      uint32                            `json:"error_hunters"`
+	TotalPackets      uint64                            `json:"total_packets_received"`
+	PacketsForwarded  uint64                            `json:"total_packets_forwarded"`
+	TotalFilters      uint32                            `json:"total_filters"`
+	UpstreamProcessor string                            `json:"upstream_processor,omitempty"`
+	LIEncoding        *management.LIEncodingStats       `json:"li_encoding,omitempty"`
+	LIDelivery        *management.LIDeliveryStats       `json:"li_delivery,omitempty"`
 }
 
 // HunterJSON represents a connected hunter in JSON-friendly format
@@ -102,6 +103,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 		status.UpstreamProcessor = resp.ProcessorStats.UpstreamProcessor
 		status.LIEncoding = resp.ProcessorStats.LiEncoding
 		status.LIDelivery = resp.ProcessorStats.LiDelivery
+		status.Storage = resp.ProcessorStats.Storage
 	}
 
 	return output.MarshalJSONPretty(status, pretty)

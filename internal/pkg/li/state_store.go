@@ -21,17 +21,18 @@ var ErrStateStoreFault = errors.New("LI state store is faulted; close and reconc
 // EncryptedStateStore owns a preinitialized snapshot and its key-use ledger.
 // It does not select candidates, reconcile filters, or grant admission.
 type EncryptedStateStore struct {
-	mu     sync.Mutex
-	dir    *securestore.Dir
-	lock   *securestore.Lock
-	ring   *securestore.Keyring
-	usage  *securestore.Usage
-	writer *securestore.Writer
-	name   string
-	id     uuid.UUID
-	fault  error
-	closed bool
-	write  func(string, []byte) (securestore.Outcome, error)
+	mu        sync.Mutex
+	telemetry securestore.Telemetry
+	dir       *securestore.Dir
+	lock      *securestore.Lock
+	ring      *securestore.Keyring
+	usage     *securestore.Usage
+	writer    *securestore.Writer
+	name      string
+	id        uuid.UUID
+	fault     error
+	closed    bool
+	write     func(string, []byte) (securestore.Outcome, error)
 }
 
 func stateStorePath(path string) (string, string, error) {
@@ -67,6 +68,7 @@ func OpenStateStore(path string, keys securestore.KeyConfig) (store *EncryptedSt
 		return nil, err
 	}
 	s := &EncryptedStateStore{dir: dir, ring: ring, name: name, write: dir.Replace}
+	s.telemetry.Initialize("encrypted", ring)
 	defer func() {
 		if result != nil {
 			result = errors.Join(result, s.Close())
@@ -87,6 +89,7 @@ func OpenStateStore(path string, keys securestore.KeyConfig) (store *EncryptedSt
 	if err != nil {
 		return nil, err
 	}
+	s.telemetry.BindUsage(s.usage)
 	s.id = uuid.UUID(s.usage.StoreID())
 	s.writer, err = securestore.NewWriter(s.usage)
 	if err != nil {
@@ -95,6 +98,7 @@ func OpenStateStore(path string, keys securestore.KeyConfig) (store *EncryptedSt
 	if _, err := s.load(); err != nil {
 		return nil, err
 	}
+	s.telemetry.Ready()
 	return s, nil
 }
 
@@ -137,6 +141,7 @@ func (s *EncryptedStateStore) Load() (*StateSnapshot, error) {
 	snapshot, err := s.load()
 	if err != nil && !s.closed {
 		s.fault = err
+		s.telemetry.Fault(err)
 	}
 	return snapshot, err
 }
@@ -155,6 +160,12 @@ func (s *EncryptedStateStore) save(snapshot *StateSnapshot, control bool) (out s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out = securestore.NotCommitted
+	defer func() {
+		s.telemetry.Record(out, result)
+		if s.fault != nil {
+			s.telemetry.Fault(s.fault)
+		}
+	}()
 	defer func() {
 		if result != nil {
 			result = &securestore.CommitError{Outcome: out, Op: "write LI state snapshot", Err: result}
@@ -197,14 +208,15 @@ func (s *EncryptedStateStore) save(snapshot *StateSnapshot, control bool) (out s
 func (s *EncryptedStateStore) StoreID() uuid.UUID { s.mu.Lock(); defer s.mu.Unlock(); return s.id }
 func (s *EncryptedStateStore) Fault() error       { s.mu.Lock(); defer s.mu.Unlock(); return s.fault }
 
-func (s *EncryptedStateStore) Close() error {
+func (s *EncryptedStateStore) Close() (result error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return nil
 	}
 	s.closed = true
-	var result error
+	s.telemetry.Closing()
+	defer func() { s.telemetry.Closed(result) }()
 	if s.usage != nil {
 		result = s.usage.Close()
 		s.usage = nil
@@ -296,4 +308,8 @@ func initStateStore(path string, keys securestore.KeyConfig, snapshot *StateSnap
 		err = fmt.Errorf("LI state initialization did not commit")
 	}
 	return out, err
+}
+
+func (s *EncryptedStateStore) StorageStatus() securestore.StorageStatus {
+	return s.telemetry.Snapshot()
 }

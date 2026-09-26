@@ -21,6 +21,7 @@ const (
 // usage ledger. Runtime Load/Save never initialize, migrate or guess a format.
 type EncryptedPersistence struct {
 	mu        sync.Mutex
+	telemetry securestore.Telemetry
 	file      snapshotFile
 	keys      *securestore.Keyring
 	usage     *securestore.Usage
@@ -33,7 +34,9 @@ func NewEncryptedPersistence(keys securestore.KeyConfig) (*EncryptedPersistence,
 	if err != nil {
 		return nil, err
 	}
-	return &EncryptedPersistence{keys: ring}, nil
+	ep := &EncryptedPersistence{keys: ring}
+	ep.telemetry.Initialize("encrypted", ring)
+	return ep, nil
 }
 
 // Keyring exposes the immutable loaded references/material for cross-store
@@ -65,6 +68,7 @@ func (ep *EncryptedPersistence) load(path string) (map[string]*management.Filter
 		if err != nil {
 			return nil, errors.Join(err, ep.discard())
 		}
+		ep.telemetry.BindUsage(ep.usage)
 		ep.writer, err = securestore.NewWriter(ep.usage)
 		if err != nil {
 			return nil, errors.Join(err, ep.discard())
@@ -85,15 +89,30 @@ func (ep *EncryptedPersistence) load(path string) (map[string]*management.Filter
 	return filters, nil
 }
 
-func (ep *EncryptedPersistence) Load(path string) (map[string]*management.Filter, error) {
+func (ep *EncryptedPersistence) Load(path string) (_ map[string]*management.Filter, result error) {
 	ep.mu.Lock()
 	defer ep.mu.Unlock()
+	defer func() {
+		if result != nil {
+			ep.telemetry.Fault(result)
+		} else {
+			ep.telemetry.Ready()
+		}
+	}()
 	return ep.load(path)
 }
 
-func (ep *EncryptedPersistence) Save(path string, filters map[string]*management.Filter) error {
+func (ep *EncryptedPersistence) Save(path string, filters map[string]*management.Filter) (result error) {
 	ep.mu.Lock()
 	defer ep.mu.Unlock()
+	defer func() {
+		ep.telemetry.Record(securestore.OutcomeOf(result), result)
+		if ep.file.fault != nil {
+			ep.telemetry.Fault(ep.file.fault)
+		} else if ep.file.validated {
+			ep.telemetry.Ready()
+		}
+	}()
 	plain, err := filtercodec.MarshalEncryptedFilters(filters)
 	if err != nil {
 		return err
@@ -153,10 +172,12 @@ func strictlyReducesFilters(previous, candidate map[string]*management.Filter) b
 	return reduced
 }
 
-func (ep *EncryptedPersistence) Close() error {
+func (ep *EncryptedPersistence) Close() (result error) {
 	ep.mu.Lock()
 	defer ep.mu.Unlock()
 	ep.file.closed = true
+	ep.telemetry.Closing()
+	defer func() { ep.telemetry.Closed(result) }()
 	return ep.discard()
 }
 
@@ -173,4 +194,8 @@ func (ep *EncryptedPersistence) StoreID() [16]byte {
 		return [16]byte{}
 	}
 	return ep.usage.StoreID()
+}
+
+func (ep *EncryptedPersistence) StorageStatus() securestore.StorageStatus {
+	return ep.telemetry.Snapshot()
 }

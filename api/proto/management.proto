@@ -686,6 +686,53 @@ message ProcessorStats {
     LIDeliveryStats li_delivery = 12;
 
     SIPRetryTelemetry sip_retry = 13;
+    // Actual owned snapshot stores. Common filters are present in non-LI builds.
+    ProcessorStorageStats storage = 14;
+}
+
+message ProcessorStorageStats {
+    StorageStatus filters = 1;
+    // Absent unless LI is compiled in and enabled; mode may still be disabled.
+    StorageStatus li_state = 2;
+}
+
+// Public diagnostics contain fixed categories and bounded operator key IDs only.
+// They never include file paths, key material, selectors or object identities.
+message StorageStatus {
+    string mode = 1; // disabled, yaml, encrypted; unknown for an embedded custom owner
+    string state = 2; // unopened, ready, faulted, closing, closed
+    bool admission_blocked = 3;
+    string fault_code = 4;
+    string policy_fault_code = 5; // separate from the physical store's health
+    string last_outcome = 6; // empty before any mutation, committed/not_committed/uncertain
+    string last_error_code = 7;
+    // Snapshot Save calls; X2 product+checkpoint attempts or individual removals.
+    // These owner-lifetime counters are not administrative API-call counters.
+    uint64 commits = 8;
+    uint64 definite_failures = 9;
+    uint64 uncertain = 10;
+    uint64 committed_cleanup_warnings = 11;
+    string active_key_id = 12;
+    repeated string prior_key_ids = 13; // sorted, at most four
+    EncryptionUsageStats key_usage = 14; // absent for disabled/YAML/legacy read-only
+}
+
+// Reserved highwaters count unused reservations as consumed. Remaining capacity
+// is conservative, and a faulted owner must never use this view to resume writes.
+message EncryptionUsageStats {
+    uint64 reserved_invocations = 1;
+    uint64 reserved_blocks = 2; // authenticated/ciphertext 16-byte blocks
+    uint64 ordinary_invocations_remaining = 3;
+    uint64 ordinary_blocks_remaining = 4;
+    uint64 total_invocations_remaining = 5;
+    uint64 total_blocks_remaining = 6;
+    bool rotation_recommended = 7;
+    bool accounting_faulted = 8;
+    bool closed = 9;
+    // Ledger publication outcome is separate from the encrypted object's outcome.
+    string reservation_outcome = 10;
+    uint64 invocation_limit = 11;
+    uint64 block_limit = 12;
 }
 
 // Bounded-cardinality counters for INVITE retry and restart decisions.
@@ -777,6 +824,7 @@ message LIJournalStats {
     string last_error = 7;
     uint64 replay_pending = 8;
     uint64 uncertain = 9;
+    StorageStatus storage = 10;
 }
 
 // Keepalive ACKs establish control responsiveness, not product acknowledgement.

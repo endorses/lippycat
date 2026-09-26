@@ -80,6 +80,7 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 	j := &Journal{cfg: cfg, store: dir, keys: ring, entries: make(map[uint64]*journalEntry),
 		ops: make(chan journalOperation, cfg.MaxPending), done: make(chan struct{}),
 		sequences: make(map[string]journalSequenceEntry), heldByDID: make(map[uuid.UUID]int), wake: make(chan struct{}, 1)}
+	j.telemetry.Initialize("encrypted", ring)
 	defer func() {
 		if result != nil {
 			result = errors.Join(result, j.closeStorage())
@@ -273,6 +274,7 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 			}
 		}
 	}
+	j.telemetry.Ready()
 	go j.run()
 	return j, nil
 }
@@ -298,14 +300,16 @@ func (j *Journal) initializeUsage() error {
 
 func (j *Journal) installWriter() error {
 	j.storeID = j.usage.StoreID()
+	j.telemetry.BindUsage(j.usage)
 	var err error
 	j.writer, err = securestore.NewWriter(j.usage)
 	j.readOnly = false
 	return err
 }
 
-func (j *Journal) closeStorage() error {
-	var result error
+func (j *Journal) closeStorage() (result error) {
+	j.telemetry.Closing()
+	defer func() { j.telemetry.Closed(result) }()
 	if j.usage != nil {
 		result = errors.Join(result, j.usage.Close())
 	}

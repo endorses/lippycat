@@ -108,6 +108,7 @@ func (m *Manager) prepareAdministrativeStorageLocked() error {
 		return errors.Join(err, store.Close())
 	}
 	m.stateStore, m.statePath, m.stateID, m.preparedState = store, m.config.StateFile, store.StoreID(), state
+	m.stateTelemetry.Store(store)
 	m.radiusCorrelationPin = state.RADIUSCorrelationStateFile
 	m.stateIdentity.Store(&administrativeIdentity{incarnation: m.stateID, radiusPin: state.RADIUSCorrelationStateFile})
 	return nil

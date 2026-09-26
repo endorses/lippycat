@@ -143,6 +143,7 @@ type Manager struct {
 	// may read manager state but must not recursively mutate destinations.
 	destinationMu        sync.Mutex
 	stateStore           administrativeStateStore
+	stateTelemetry       atomic.Pointer[EncryptedStateStore]
 	startedLifecycle     atomic.Bool
 	preparedState        *StateSnapshot
 	statePath            string

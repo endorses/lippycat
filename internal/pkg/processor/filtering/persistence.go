@@ -110,11 +110,16 @@ func (s *snapshotFile) commit(data []byte) error {
 // YAMLPersistence retains editable YAML with strict whole-document loading and
 // durable private writes. The first Load or Save takes lifetime ownership.
 type YAMLPersistence struct {
-	mu   sync.Mutex
-	file snapshotFile
+	telemetry securestore.Telemetry
+	mu        sync.Mutex
+	file      snapshotFile
 }
 
-func NewYAMLPersistence() *YAMLPersistence { return &YAMLPersistence{} }
+func NewYAMLPersistence() *YAMLPersistence {
+	yp := &YAMLPersistence{}
+	yp.telemetry.Initialize("yaml", nil)
+	return yp
+}
 
 func yamlPath(path string) (string, error) {
 	if path != "" {
@@ -148,15 +153,30 @@ func (yp *YAMLPersistence) load(path string) (map[string]*management.Filter, err
 	return filters, nil
 }
 
-func (yp *YAMLPersistence) Load(path string) (map[string]*management.Filter, error) {
+func (yp *YAMLPersistence) Load(path string) (_ map[string]*management.Filter, result error) {
 	yp.mu.Lock()
 	defer yp.mu.Unlock()
+	defer func() {
+		if result != nil {
+			yp.telemetry.Fault(result)
+		} else {
+			yp.telemetry.Ready()
+		}
+	}()
 	return yp.load(path)
 }
 
-func (yp *YAMLPersistence) Save(path string, filters map[string]*management.Filter) error {
+func (yp *YAMLPersistence) Save(path string, filters map[string]*management.Filter) (result error) {
 	yp.mu.Lock()
 	defer yp.mu.Unlock()
+	defer func() {
+		yp.telemetry.Record(securestore.OutcomeOf(result), result)
+		if yp.file.fault != nil {
+			yp.telemetry.Fault(yp.file.fault)
+		} else if yp.file.validated {
+			yp.telemetry.Ready()
+		}
+	}()
 	data, err := filtercodec.MarshalManagedYAML(filters)
 	if err != nil {
 		return err
@@ -177,10 +197,12 @@ func (yp *YAMLPersistence) Save(path string, filters map[string]*management.Filt
 	return yp.file.commit(data)
 }
 
-func (yp *YAMLPersistence) Close() error {
+func (yp *YAMLPersistence) Close() (result error) {
 	yp.mu.Lock()
 	defer yp.mu.Unlock()
 	yp.file.closed = true
+	yp.telemetry.Closing()
+	defer func() { yp.telemetry.Closed(result) }()
 	return yp.file.discard()
 }
 
@@ -189,3 +211,5 @@ func (yp *YAMLPersistence) Fault() error {
 	defer yp.mu.Unlock()
 	return yp.file.fault
 }
+
+func (yp *YAMLPersistence) StorageStatus() securestore.StorageStatus { return yp.telemetry.Snapshot() }

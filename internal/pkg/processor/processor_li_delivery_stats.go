@@ -37,7 +37,8 @@ func (p *Processor) populateLIDeliveryStats(dst *management.ProcessorStats) {
 	dst.LiDelivery.DroppedBytesByReason = stats.DroppedBytesByReason
 	dst.LiDelivery.FirstDroppedUnixMs = deliveryUnixMillis(stats.FirstDroppedAt)
 	journal := liDeliveryClient.JournalStats()
-	dst.LiDelivery.X2Journal = &management.LIJournalStats{Bytes: journal.Bytes, MaxBytes: journal.MaxBytes, Pending: uint64(journal.Pending), Persisted: uint64(journal.Persisted), Held: uint64(journal.Held), Rejected: journal.Rejected, LastError: journal.LastError, ReplayPending: uint64(journal.ReplayPending), Uncertain: uint64(journal.Uncertain)}
+	storage := liDeliveryClient.JournalStorageStatus()
+	dst.LiDelivery.X2Journal = &management.LIJournalStats{Bytes: journal.Bytes, MaxBytes: journal.MaxBytes, Pending: uint64(journal.Pending), Persisted: uint64(journal.Persisted), Held: uint64(journal.Held), Rejected: journal.Rejected, LastError: storage.FaultCode, Storage: storageStatusProto(storage), ReplayPending: uint64(journal.ReplayPending), Uncertain: uint64(journal.Uncertain)}
 	for did, queue := range liDeliveryClient.DestinationStats() {
 		dst.LiDelivery.Destinations[did.String()] = &management.LIDestinationDeliveryStats{
 			QueueDepth:      uint64(queue.QueueDepth),

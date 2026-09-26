@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -37,9 +38,13 @@ func (e *UsageError) Unwrap() error { return e.Err }
 // UsageStats includes reservations lost after restart. Ordinary writes stop at
 // 90%; the final 10% remains available for required control records.
 type UsageStats struct {
-	Invocations, Blocks uint64
-	RotateRecommended   bool
-	Faulted             bool
+	Invocations, Blocks                                   uint64
+	RotateRecommended                                     bool
+	Faulted                                               bool
+	Closed                                                bool
+	ReservationOutcome                                    string
+	OrdinaryInvocationsRemaining, OrdinaryBlocksRemaining uint64
+	TotalInvocationsRemaining, TotalBlocksRemaining       uint64
 }
 
 // Usage is a locked, restart-persistent high-watermark allocator. Reservations
@@ -47,6 +52,7 @@ type UsageStats struct {
 // Never delete a ledger or reuse its key in an independently initialized store.
 type Usage struct {
 	mu                            sync.Mutex
+	diagnostic                    atomic.Pointer[UsageStats]
 	key                           *key
 	store                         [16]byte
 	dir                           *Dir
@@ -143,9 +149,11 @@ func OpenUsage(dir *Dir, ring *Keyring, expectedStore [16]byte) (u *Usage, resul
 	}
 	// All previously reserved values are consumed, including unused reservations
 	// from clean shutdown. No shutdown write is needed for nonce safety.
-	return &Usage{key: ring.active, store: store, dir: dir, name: name, lock: lock,
+	u = &Usage{key: ring.active, store: store, dir: dir, name: name, lock: lock,
 		usedSeals: seals, usedBlocks: blocks, reservedSeals: seals, reservedBlocks: blocks,
-		write: dir.Replace}, nil
+		write: dir.Replace}
+	u.publishUsage(Committed, seals, blocks)
+	return u, nil
 }
 
 func (u *Usage) StoreID() [16]byte { return u.store }
@@ -180,20 +188,45 @@ func (u *Usage) reserve(blocks uint64, control bool) error {
 				err = errors.New("encryption usage reservation was not committed")
 			}
 			u.fault = &UsageError{ReservationOutcome: outcome, Err: err}
+			if outcome == NotCommitted {
+				reservedSeals, reservedBlocks = u.reservedSeals, u.reservedBlocks
+			}
+			u.publishUsage(outcome, reservedSeals, reservedBlocks)
 			return errors.Join(ErrUsageFault, u.fault)
 		}
 		u.reservedSeals, u.reservedBlocks = reservedSeals, reservedBlocks
+		u.publishUsage(Committed, reservedSeals, reservedBlocks)
 	}
 	u.usedSeals, u.usedBlocks = nextSeals, nextBlocks
 	return nil
 }
 
+// Stats is a nonblocking conservative view; it never waits for ledger fsync.
+// Remaining capacity excludes all durable/possibly durable reservations, even
+// unused portions. A faulted view is diagnostic only and cannot permit writing.
 func (u *Usage) Stats() UsageStats {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return UsageStats{Invocations: u.reservedSeals, Blocks: u.reservedBlocks,
-		RotateRecommended: u.reservedSeals >= MaxKeyInvocations*3/4 || u.reservedBlocks >= MaxKeyBlocks*3/4,
-		Faulted:           u.fault != nil}
+	if view := u.diagnostic.Load(); view != nil {
+		return *view
+	}
+	return UsageStats{}
+}
+
+func usageRemaining(limit, used uint64) uint64 {
+	if used >= limit {
+		return 0
+	}
+	return limit - used
+}
+
+// Called only at open, reservation extension/fault and close, never per seal.
+func (u *Usage) publishUsage(out Outcome, seals, blocks uint64) {
+	u.diagnostic.Store(&UsageStats{Invocations: seals, Blocks: blocks,
+		RotateRecommended: seals >= MaxKeyInvocations*3/4 || blocks >= MaxKeyBlocks*3/4,
+		Faulted:           u.fault != nil, Closed: u.closed, ReservationOutcome: OutcomeName(out),
+		OrdinaryInvocationsRemaining: usageRemaining(MaxKeyInvocations*9/10, seals),
+		OrdinaryBlocksRemaining:      usageRemaining(MaxKeyBlocks*9/10, blocks),
+		TotalInvocationsRemaining:    usageRemaining(MaxKeyInvocations, seals),
+		TotalBlocksRemaining:         usageRemaining(MaxKeyBlocks, blocks)})
 }
 
 func (u *Usage) Close() error {
@@ -203,5 +236,8 @@ func (u *Usage) Close() error {
 		return nil
 	}
 	u.closed = true
+	view := u.Stats()
+	view.Closed = true
+	u.diagnostic.Store(&view)
 	return u.lock.Close()
 }

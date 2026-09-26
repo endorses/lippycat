@@ -8,7 +8,7 @@ transaction recovery, managed filters, explicit snapshot initialization/migratio
 and actual-owner filter/state/X2 key checks are implemented and verified. X3
 layout calibration has rejected the per-record protocol and all three measured
 immutable batch/head prototypes on the current ext4 platform. Phase 5 has no
-qualified production layout; durable X3, replay, rotation, telemetry, and final
+qualified production layout; durable X3, replay, rotation, X3 telemetry, and final
 qualification remain open.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
@@ -825,3 +825,32 @@ and migration commands; Prettier parsed and formatted the Markdown/YAML changes,
 and `git diff --check` passed. This documentation increment does not close the
 phase-9 rollout task: X3 persistence/replay, completed rotation tools and their
 qualification remain outstanding.
+
+### Existing-store runtime diagnostics (2026-09-26)
+
+Processor management status and `lc show status` now expose actual managed-filter,
+administrative-state and X2 storage owners. Common filter status works in non-LI
+builds and distinguishes YAML from encrypted storage. Additive protobuf fields
+preserve existing tag numbers (`ProcessorStats.storage=14`,
+`LIJournalStats.storage=10`); regeneration changed only the management binding
+semantically. No X3 journal field or counter is inferred from memory-only delivery.
+
+Immutable diagnostic views keep status reads independent of snapshot/usage sync
+and close operations. They report loaded key IDs, conservative reserved-usage
+highwaters and remaining limits, rotation advisory, fixed public fault categories,
+policy admission blocks and per-owner write outcomes. Object commitment, auxiliary
+usage-ledger uncertainty and transport uncertainty remain separate. Snapshot
+counters describe backend Save attempts; X2 counts product/checkpoint attempts
+and durable record removals. Committed cleanup errors retain their committed
+classification. Closing/closed owners cannot be reopened by rejected diagnostic
+state transitions. Public status omits raw storage errors and sensitive paths or
+content; operator semantics are documented in `cmd/show/README.md`.
+
+Full affected LI, filter/securestore, processor and status-client suites passed,
+as did non-LI processor/status-client checks and vet. Final targeted race checks
+passed for all six affected packages, covering stalled sync/close, terminal owner
+state, usage thresholds/reservation outcomes, detached bounded key labels,
+redaction and protobuf-to-JSON preservation. Logs remain in
+`/tmp/li-storage-telemetry-{full,full-nonli,race-final,vet-final}.log`; the task cache
+was cleaned. Phase 8 remains open for X3 accounting, full configuration/path
+validation, journal tools and completed rotation/recovery qualification.

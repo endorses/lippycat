@@ -52,6 +52,52 @@ on restart, and destination details disappear when that destination is removed.
 See [LI delivery telemetry](../../docs/LI_INTEGRATION.md#delivery-telemetry) for
 field semantics and troubleshooting.
 
+`storage.filters` reports the actual managed snapshot owner as `yaml`,
+`encrypted`, or `disabled`. LI-enabled processors also report `storage.li_state`;
+its mode is `disabled` when administrative persistence is not configured. X2
+journal storage appears at `li_delivery.x2_journal.storage`. These fields contain
+no store paths, selectors, task/call identifiers, payloads, or key material.
+Configured key IDs are public operator labels and should not contain sensitive
+information. No `x3_journal` field is emitted until durable X3 ownership exists.
+
+Each store reports `state` (`unopened`, `ready`, `faulted`, `closing`, `closed`),
+`admission_blocked`, fixed fault categories, and the last mutation outcome.
+Snapshot counters count backend **Save attempts**, so one administrative request
+can increment them several times. X2 counters count accepted product persistence
+attempts (including their checkpoints) and individual durable record removals;
+they exclude startup repair and offline operations. `commits`, `definite_failures`,
+`uncertain`, and `committed_cleanup_warnings` reset with the owner. A committed
+cleanup warning means the data committed even though later cleanup reported an
+error. Administrative `policy_fault_code=reconciliation_required` can block
+admission while the physical store is still `ready`.
+
+Encrypted owners expose the loaded active/prior key IDs and `key_usage`.
+`reserved_invocations` and `reserved_blocks` include unused reservations that
+will be consumed on restart; a block represents 16 bytes of authenticated or
+encrypted accounting volume, including framing overhead. Remaining capacities
+are conservative bounds, not exact record/payload capacities. Rotation is
+recommended at 75% of either hard limit; ordinary mutations stop at 90%, with
+the final allowance reserved for controls. The limits are `2^32` invocations and
+`2^40` blocks. A faulted ledger cannot be used to resume writes merely because
+its diagnostic remaining count is positive.
+
+`key_usage.reservation_outcome` describes the ledger update, separately from
+the object's `last_outcome`: an uncertain ledger write can prevent encryption
+entirely, leaving the object definitely uncommitted. These persistence outcomes
+are also distinct from delivery `uncertain_writes`/`uncertain_bytes`, which
+describe ambiguous local transport writes. Status reads use in-memory snapshots
+and do not wait for filesystem synchronization.
+
+| Fault category                                                                         | Operator action                                                                                                  |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `key_exhausted`                                                                        | Rotate offline before further ordinary writes.                                                                   |
+| `usage_ledger_fault`, `identity_mismatch`, `authentication_failed`, `invalid_envelope` | Stop admission and reconcile the original store, ledger and configured keys offline; do not recreate accounting. |
+| `required_file_missing`, `ownership_conflict`, `permission_denied`                     | Check provisioning, exclusive ownership and private-directory/key permissions.                                   |
+| `capacity_exhausted`                                                                   | Restore space/quota, then reconcile any uncertain operation.                                                     |
+| `storage_error`, `reconciliation_required`                                             | Treat the reported outcome as authoritative; repair/reconcile storage before restarting the owner.               |
+| `migration_required`                                                                   | Explicitly upgrade the legacy read-only journal offline.                                                         |
+| `closed`                                                                               | The owner has shut down; construct a new validated owner to resume.                                              |
+
 ### Hunter
 
 Show details for a specific hunter.

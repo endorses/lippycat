@@ -2,7 +2,9 @@
 
 Drafted: 2026-09-26. Code baseline: `77f7abfe`.
 
-Status: Ready for implementation; all implementation tasks remain open.
+Status: Implementation in progress. Storage contracts and compatibility fixtures
+are complete; shared storage primitives are implemented and verified in isolation.
+X2 integration and phases 3–9 remain open.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
 This plan extends the implemented
@@ -197,25 +199,25 @@ implementation work completes.
 Primary areas: `internal/pkg/li/delivery`, `internal/pkg/li/persistence.go`,
 `internal/pkg/processor/filtering`, `internal/pkg/processor/call_lifecycle.go`.
 
-- [ ] Write the envelope/schema specification, including purpose/version dispatch,
+- [x] Write the envelope/schema specification, including purpose/version dispatch,
       object/store identities, size/count bounds, key IDs, nonce usage accounting and
       rotation thresholds. Separate legacy decoding from new-format decoding; do not
       guess formats or try arbitrary keys until one decrypts.
-- [ ] Define typed definite/uncertain storage outcomes and how each public mutation,
+- [x] Define typed definite/uncertain storage outcomes and how each public mutation,
       X1 callback, background lifecycle action, and startup path reports or latches them.
-- [ ] Freeze the filter-mode matrix: runtime LI on/off, `auto`/`yaml`/`encrypted`,
+- [x] Freeze the filter-mode matrix: runtime LI on/off, `auto`/`yaml`/`encrypted`,
       default/custom paths, keys, missing files, opposite-format files, and competing
       defaults. Include LI-capable binaries with LI disabled and processor-core callers.
-- [ ] Document lock ordering among filter mutations, task admission/lifecycle,
+- [x] Document lock ordering among filter mutations, task admission/lifecycle,
       destination changes, call finalization, journal control, queue ownership, and
       persistence workers. No queue mutex may be held during disk I/O or callbacks.
-- [ ] Audit all call-finalization reasons/callers against the policy table; define
+- [x] Audit all call-finalization reasons/callers against the policy table; define
       explicit LI revocation separately from writer cleanup. Record the mode-dependent
       behavior so memory-only X3 retains its current contract.
-- [ ] Add synthetic legacy fixtures for X2 `.x2`, `.seq`, and `.state` objects,
+- [x] Add synthetic legacy fixtures for X2 `.x2`, `.seq`, and `.state` objects,
       full filter YAML (including RADIUS compound criteria/revisions), and LI state JSON
       with active, pending, retained, removed-destination, cleanup, and watermark cases.
-- [ ] Define the fault/crash matrix and X3 performance workload/acceptance thresholds
+- [x] Define the fault/crash matrix and X3 performance workload/acceptance thresholds
       before running the layout comparison in phase 5.
 
 Exit: schemas, state transitions, acknowledgement semantics, and numeric resource
@@ -484,14 +486,14 @@ Primary areas: `cmd/process`, `cmd/tap`, new `cmd/migrate`, build-tagged root fi
 Use this operator surface consistently; validate names against existing flags
 before implementation and update all references if an adjustment is necessary.
 
-| Surface                             | Planned options/behavior                                                                                                                                                                                       |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Managed filter store, common builds | Existing `--filter-file`; new `--filter-store-mode=auto\|yaml\|encrypted`, `--filter-store-key-file`, `--filter-store-key-id`, repeatable `--filter-store-read-key=id=path`; keys apply only to encrypted mode |
-| LI state                            | Existing `--li-state-file`; new `--li-state-key-file`, `--li-state-key-id`, repeatable `--li-state-read-key=id=path`                                                                                           |
-| X3 journal                          | `--li-delivery-x3-spool-dir`, `--li-delivery-x3-spool-max-bytes`, `--li-delivery-x3-spool-key-file`, key-ID/prior-read-key options, `--li-delivery-x3-spool-replay-policy=hold                                 | purge`, replay/export manifest paths; existing positive `--li-delivery-x3-max-age` |
-| X2 key rotation                     | Add corresponding key-ID/prior-read-key options without changing existing raw key-file meaning                                                                                                                 |
-| Offline snapshots                   | `lc migrate filter-store` and LI-only `lc migrate li-state`; explicit source/destination and source format, plus an exclusive empty-initialization mode                                                        |
-| Offline journal rewrite             | LI-only `lc migrate li-journal` selecting X2 or X3; version migration/rotation without sending product                                                                                                         |
+| Surface                             | Planned options/behavior                                                                                                                                                                                                                                           |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Managed filter store, common builds | Existing `--filter-file`; new `--filter-store-mode=auto\|yaml\|encrypted`, `--filter-store-key-file`, `--filter-store-key-id`, repeatable `--filter-store-read-key=id=path`; keys apply only to encrypted mode                                                     |
+| LI state                            | Existing `--li-state-file`; new `--li-state-key-file`, `--li-state-key-id`, repeatable `--li-state-read-key=id=path`                                                                                                                                               |
+| X3 journal                          | `--li-delivery-x3-spool-dir`, `--li-delivery-x3-spool-max-bytes`, `--li-delivery-x3-spool-key-file`, key-ID/prior-read-key options, `--li-delivery-x3-spool-replay-policy=hold\|purge`, replay/export manifest paths; existing positive `--li-delivery-x3-max-age` |
+| X2 key rotation                     | Add corresponding key-ID/prior-read-key options without changing existing raw key-file meaning                                                                                                                                                                     |
+| Offline snapshots                   | `lc migrate filter-store` and LI-only `lc migrate li-state`; explicit source/destination and source format, plus an exclusive empty-initialization mode                                                                                                            |
+| Offline journal rewrite             | LI-only `lc migrate li-journal` selecting X2 or X3; version migration/rotation without sending product                                                                                                                                                             |
 
 - [ ] Add a common filter-store config and resolver, outside LI-tagged files.
       Apply tap settings once in `cmd/tap/runtime.go:newTapRuntime` before processor
@@ -609,3 +611,51 @@ Completion requires a recorded successful migration/rotation rehearsal, the
 post-call outage/restart/replay scenario and its revocation variants, the final
 performance report, passing relevant tests/build partitions, and all verified
 implementation tasks checked off. Until then, the feature remains unfinished.
+
+## Implementation record
+
+### Storage contracts, fixtures, and common primitives (2026-09-26)
+
+The frozen contract is [encrypted managed storage](../design/li-encrypted-storage.md).
+It specifies LCS1 and LCUS framing, numeric limits, filter mode selection,
+transaction outcomes, lock ordering, complete call-finalization producer paths,
+and the crash/performance qualification gates. The X3 workload requires room for
+at least 1.2 million destination copies during the specified outage; the contract
+sets the X3 index ceiling to two million while retaining a one-million X2 ceiling.
+No production storage performance result is claimed yet.
+
+Synthetic legacy fixtures preserve original LCX2 product/sequence/state bytes,
+all 22 managed filter types with complete RADIUS criteria/revisions, and LI JSON
+including unconfirmed activation, pending/retained tasks, removed destinations,
+cleanup obligations, and watermarks. The LCX2 fixture generator is independent
+of the production codec and reproduces the committed bytes.
+
+The untagged `internal/pkg/securestore` package now provides bounded private key
+loading, independent bounded keyrings, purpose/store/object-bound AES-256-GCM
+envelopes, authenticated restart-persistent usage reservations, descriptor-based
+private file operations, durable replacement, no-clobber initialization, and
+stable ownership locks. Fault outcomes separate auxiliary usage reservations
+from the enclosing object: a failed seal never reports an object commitment.
+An interrupted no-clobber create can leave its private temporary hardlink; readers
+reject it until explicit owner reconciliation. Integration and offline recovery
+remain later deliverables; no runtime feature or startup requirement is enabled
+by this increment.
+
+Verified commands (outside the sandbox where ownership mappings or test sockets
+required it):
+
+```bash
+go test ./internal/pkg/securestore/...
+go test -race ./internal/pkg/securestore/...
+go vet ./internal/pkg/securestore/...
+go test -tags 'all li' ./internal/pkg/li/... ./internal/pkg/filtering/... ./internal/pkg/processor/filtering/...
+```
+
+All commands passed. Independent reviews covered fixture completeness and the
+crypto/files/usage boundary. Overlay mutation checks demonstrated that removing
+initial inode locking, durable usage reservation, or encrypted store binding
+causes the corresponding regression to fail; production files were not altered
+by those checks. Phase 2 remains open until X2 consumes the shared primitives and
+mixed-format/interrupted-replacement compatibility is verified. All broader
+qualification, migration/rotation rehearsal, historical replay scenarios, and
+benchmark evidence remain required by the original completion contract.

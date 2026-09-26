@@ -1,0 +1,137 @@
+# Synthetic legacy managed-filter schema at 77f7abfe; no real selectors.
+filters:
+  - id: fixture-sip-user
+    type: sip_user
+    pattern: fixture-user
+    enabled: true
+    revision: 17
+    target_hunters: [fixture-edge-a, fixture-edge-b]
+    description: Synthetic editable filter
+  - id: fixture-phone-number
+    type: phone_number
+    pattern: '+15550100123'
+    enabled: false
+  - id: fixture-ip-address
+    type: ip_address
+    pattern: 192.0.2.0/24
+    enabled: true
+  - id: fixture-call-id
+    type: call_id
+    pattern: synthetic-call@example.invalid
+    enabled: true
+  - id: fixture-codec
+    type: codec
+    pattern: PCMU
+    enabled: true
+  - id: fixture-bpf
+    type: bpf
+    pattern: udp port 5060
+    enabled: true
+  - id: fixture-sip-uri
+    type: FILTER_SIP_URI
+    pattern: sip:fixture@example.invalid
+    enabled: true
+  - id: fixture-imsi
+    type: imsi
+    pattern: '001010000000001'
+    enabled: true
+  - id: fixture-imei
+    type: imei
+    pattern: '000000000000001'
+    enabled: true
+  - id: fixture-dns-domain
+    type: dns_domain
+    pattern: '*.example.invalid'
+    enabled: true
+  - id: fixture-email-address
+    type: email_address
+    pattern: fixture@example.invalid
+    enabled: true
+  - id: fixture-email-subject
+    type: email_subject
+    pattern: Synthetic fixture subject
+    enabled: true
+  - id: fixture-tls-sni
+    type: tls_sni
+    pattern: mdf.example.invalid
+    enabled: true
+  - id: fixture-tls-ja3
+    type: tls_ja3
+    pattern: 0123456789abcdef0123456789abcdef
+    enabled: true
+  - id: fixture-tls-ja3s
+    type: tls_ja3s
+    pattern: fedcba9876543210fedcba9876543210
+    enabled: true
+  - id: fixture-tls-ja4
+    type: tls_ja4
+    pattern: t13d1516h2_8daaf6152771_b186095e22bb
+    enabled: true
+  - id: fixture-http-host
+    type: http_host
+    pattern: fixture.example.invalid
+    enabled: true
+  - id: fixture-http-url
+    type: http_url
+    pattern: /synthetic/*
+    enabled: true
+  - id: fixture-radius-username
+    type: radius_username
+    pattern: Fixture@example.invalid
+    enabled: true
+    revision: 19
+    radius:
+      target_kind: nai
+  - id: fixture-radius-mac
+    type: radius_mac
+    pattern: 02-00-00-00-00-01
+    enabled: true
+    revision: 20
+    radius:
+      mac_profile: calling-station-id-uppercase-hyphen-v1
+      target_kind: mac
+  - id: fixture-radius-attribute
+    type: radius_attribute
+    pattern: '570361'
+    enabled: true
+    revision: 21
+    radius:
+      target_kind: line
+      scope:
+        operator_scope: fixture-operator/nas
+        profile_revision: fixture-v1
+        origin_node_id: fixture-edge-a
+        source_id: fixture-eth0
+  - id: fixture-radius-compound
+    type: radius_compound
+    pattern: ''
+    enabled: true
+    revision: 23
+    target_hunters: [fixture-edge-a]
+    description: Synthetic conjunctive LI RADIUS selector
+    radius:
+      group_id: fixture-radius-group
+      task_id: 33333333-3333-4333-8333-333333333333
+      task_generation: 31
+      scope:
+        operator_scope: fixture-operator/nas
+        profile_revision: fixture-v1
+        origin_node_id: fixture-edge-a
+        source_id: fixture-eth0
+      criteria:
+        - filter_id: fixture-radius-user-criterion
+          filter_revision: 23
+          kind: username
+          value: Fixture@example.invalid
+          target_kind: nai
+        - filter_id: fixture-radius-mac-criterion
+          filter_revision: 23
+          kind: mac
+          value: 02-00-00-00-00-01
+          mac_profile: calling-station-id-uppercase-hyphen-v1
+          target_kind: mac
+        - filter_id: fixture-radius-line-criterion
+          filter_revision: 23
+          kind: attribute
+          value: '570361'
+          target_kind: line

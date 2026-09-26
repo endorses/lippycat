@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "written_at": "2026-01-02T03:04:05Z",
+  "tasks": [
+    {
+      "XID": "11111111-1111-4111-8111-111111111111",
+      "Targets": [
+        {
+          "Type": 1,
+          "Value": "sip:fixture-1@example.invalid"
+        }
+      ],
+      "RADIUSScope": {
+        "operator_scope": "",
+        "profile_revision": ""
+      },
+      "RADIUSMACProfile": "",
+      "DestinationIDs": [
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "DeliveryType": 3,
+      "StartTime": "0001-01-01T00:00:00Z",
+      "EndTime": "0001-01-01T00:00:00Z",
+      "ImplicitDeactivationAllowed": true,
+      "Status": 1,
+      "ActivatedAt": "2026-01-02T03:04:05Z",
+      "DeactivatedAt": "0001-01-01T00:00:00Z",
+      "LastError": "",
+      "ActivationGeneration": 3
+    },
+    {
+      "XID": "33333333-3333-4333-8333-333333333333",
+      "Targets": [
+        {
+          "Type": 3,
+          "Value": "Fixture@example.invalid"
+        },
+        {
+          "Type": 11,
+          "Value": "020000000001"
+        },
+        {
+          "Type": 12,
+          "Value": "570361"
+        }
+      ],
+      "RADIUSScope": {
+        "operator_scope": "fixture-operator/nas",
+        "profile_revision": "fixture-v1",
+        "origin_node_id": "fixture-edge-a",
+        "source_id": "fixture-eth0"
+      },
+      "RADIUSMACProfile": "calling-station-id-uppercase-hyphen-v1",
+      "DestinationIDs": [
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "DeliveryType": 1,
+      "StartTime": "0001-01-01T00:00:00Z",
+      "EndTime": "0001-01-01T00:00:00Z",
+      "ImplicitDeactivationAllowed": true,
+      "Status": 1,
+      "ActivatedAt": "2026-01-02T03:04:05Z",
+      "DeactivatedAt": "0001-01-01T00:00:00Z",
+      "LastError": "",
+      "ActivationGeneration": 31
+    },
+    {
+      "XID": "44444444-4444-4444-8444-444444444444",
+      "Targets": [
+        {
+          "Type": 1,
+          "Value": "sip:fixture-4@example.invalid"
+        }
+      ],
+      "RADIUSScope": {
+        "operator_scope": "",
+        "profile_revision": ""
+      },
+      "RADIUSMACProfile": "",
+      "DestinationIDs": [
+        "99999999-9999-4999-8999-999999999999"
+      ],
+      "DeliveryType": 3,
+      "StartTime": "2100-01-01T00:00:00Z",
+      "EndTime": "0001-01-01T00:00:00Z",
+      "ImplicitDeactivationAllowed": true,
+      "Status": 0,
+      "ActivatedAt": "0001-01-01T00:00:00Z",
+      "DeactivatedAt": "0001-01-01T00:00:00Z",
+      "LastError": "",
+      "ActivationGeneration": 4
+    },
+    {
+      "XID": "55555555-5555-4555-8555-555555555555",
+      "Targets": [
+        {
+          "Type": 1,
+          "Value": "sip:fixture-5@example.invalid"
+        }
+      ],
+      "RADIUSScope": {
+        "operator_scope": "",
+        "profile_revision": ""
+      },
+      "RADIUSMACProfile": "",
+      "DestinationIDs": [
+        "99999999-9999-4999-8999-999999999999"
+      ],
+      "DeliveryType": 3,
+      "StartTime": "0001-01-01T00:00:00Z",
+      "EndTime": "0001-01-01T00:00:00Z",
+      "ImplicitDeactivationAllowed": true,
+      "Status": 3,
+      "ActivatedAt": "2026-01-02T03:04:05Z",
+      "DeactivatedAt": "2026-01-02T03:04:05Z",
+      "LastError": "",
+      "ActivationGeneration": 7
+    },
+    {
+      "XID": "66666666-6666-4666-8666-666666666666",
+      "Targets": [
+        {
+          "Type": 1,
+          "Value": "sip:fixture-6@example.invalid"
+        }
+      ],
+      "RADIUSScope": {
+        "operator_scope": "",
+        "profile_revision": ""
+      },
+      "RADIUSMACProfile": "",
+      "DestinationIDs": [
+        "99999999-9999-4999-8999-999999999999"
+      ],
+      "DeliveryType": 3,
+      "StartTime": "0001-01-01T00:00:00Z",
+      "EndTime": "0001-01-01T00:00:00Z",
+      "ImplicitDeactivationAllowed": true,
+      "Status": 4,
+      "ActivatedAt": "2026-01-02T03:04:05Z",
+      "DeactivatedAt": "2026-01-02T03:04:05Z",
+      "LastError": "synthetic destination removed",
+      "ActivationGeneration": 9
+    },
+    {
+      "XID": "77777777-7777-4777-8777-777777777777",
+      "Targets": [
+        {
+          "Type": 1,
+          "Value": "sip:fixture-7@example.invalid"
+        }
+      ],
+      "RADIUSScope": {
+        "operator_scope": "",
+        "profile_revision": ""
+      },
+      "RADIUSMACProfile": "",
+      "DestinationIDs": [
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "DeliveryType": 3,
+      "StartTime": "2000-01-01T00:00:00Z",
+      "EndTime": "2001-01-01T00:00:00Z",
+      "ImplicitDeactivationAllowed": true,
+      "Status": 1,
+      "ActivatedAt": "2026-01-02T03:04:05Z",
+      "DeactivatedAt": "0001-01-01T00:00:00Z",
+      "LastError": "",
+      "ActivationGeneration": 13
+    }
+  ],
+  "destinations": [
+    {
+      "did": "22222222-2222-4222-8222-222222222222",
+      "address": "mdf.example.invalid",
+      "port": 9443,
+      "x2_enabled": true,
+      "x3_enabled": true,
+      "protocol_type": "X2andX3",
+      "description": "Synthetic MDF destination",
+      "created_at": "2026-01-02T03:04:05Z",
+      "delivery_revision": 5
+    }
+  ],
+  "cleanup_needed": {
+    "11111111-1111-4111-8111-111111111111": [
+      "li-11111111-1111-4111-8111-111111111111-0"
+    ],
+    "33333333-3333-4333-8333-333333333333": [
+      "li-33333333-3333-4333-8333-333333333333-0",
+      "li-33333333-legacy"
+    ],
+    "55555555-5555-4555-8555-555555555555": [
+      "li-55555555-5555-4555-8555-555555555555-0"
+    ],
+    "88888888-8888-4888-8888-888888888888": [
+      "li-88888888-8888-4888-8888-888888888888-0"
+    ]
+  },
+  "generations": {
+    "11111111-1111-4111-8111-111111111111": 3,
+    "33333333-3333-4333-8333-333333333333": 31,
+    "44444444-4444-4444-8444-444444444444": 4,
+    "55555555-5555-4555-8555-555555555555": 8,
+    "66666666-6666-4666-8666-666666666666": 9,
+    "88888888-8888-4888-8888-888888888888": 21
+  }
+}

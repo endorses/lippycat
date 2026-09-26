@@ -106,6 +106,7 @@ type CaptureTelemetryMsg capture.Telemetry
 // Data management is delegated to specialized stores
 type Model struct {
 	textSelection           *mouseTextSelection
+	modalDismissMouseDown   bool
 	scrollDrag              string
 	scrollDragRow           int
 	scrollDragOffset        int
@@ -407,24 +408,47 @@ func (m *Model) Shutdown() {
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cancelCmd tea.Cmd
+	var modalCmd tea.Cmd
+	modalHandled := false
 	if mouse, ok := msg.(tea.MouseMsg); ok {
-		key, hit := m.footerKeyAtMouse(mouse)
-		footerEditAction := hit && (key.Type == tea.KeyEnter || key.Type == tea.KeyEsc)
-		if m.uiState.Tabs.GetActive() == 3 && m.textSelectionAllowed() && !footerEditAction {
-			local := mouse
-			local.Y -= lipgloss.Height(m.uiState.Header.View()) + lipgloss.Height(m.uiState.Tabs.View())
-			cancelCmd = m.uiState.SettingsView.CancelInputOnOutsideClick(local)
+		if m.modalDismissMouseDown && (mouse.Action == tea.MouseActionMotion || mouse.Action == tea.MouseActionRelease) {
+			if mouse.Action == tea.MouseActionRelease {
+				m.modalDismissMouseDown = false
+			}
+			return m, nil
 		}
-		if hit {
-			msg = key
+		if mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {
+			// A new press also ends a gesture whose terminal omitted release.
+			m.modalDismissMouseDown = false
+			modalCmd, modalHandled = components.HandleModalMouse(m.activeModal(), mouse, m.uiState.Width, m.uiState.Height)
+		}
+		if modalHandled {
+			m.modalDismissMouseDown = true
+			m.textSelection = nil
+			m.scrollDrag = ""
+		} else {
+			key, hit := m.footerKeyAtMouse(mouse)
+			footerEditAction := hit && (key.Type == tea.KeyEnter || key.Type == tea.KeyEsc)
+			if m.uiState.Tabs.GetActive() == 3 && m.textSelectionAllowed() && !footerEditAction {
+				local := mouse
+				local.Y -= lipgloss.Height(m.uiState.Header.View()) + lipgloss.Height(m.uiState.Tabs.View())
+				cancelCmd = m.uiState.SettingsView.CancelInputOnOutsideClick(local)
+			}
+			if hit {
+				msg = key
+			}
 		}
 	}
 	switch msg.(type) {
 	case tea.KeyMsg, tea.WindowSizeMsg, tea.ResumeMsg:
 		m.textSelection = nil
 	}
-	updated, cmd := m.update(msg)
-	cmd = tea.Batch(cancelCmd, cmd)
+	var updated tea.Model = m
+	var cmd tea.Cmd
+	if !modalHandled {
+		updated, cmd = m.update(msg)
+	}
+	cmd = tea.Batch(modalCmd, cancelCmd, cmd)
 	if next, ok := updated.(Model); ok {
 		if next.textSelection != nil && !next.textSelectionAllowed() {
 			next.textSelection = nil

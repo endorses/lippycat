@@ -228,7 +228,9 @@ func TestFooterMouseDoesNotActivateHintsBehindOverlays(t *testing.T) {
 		"add node":             func(m *Model) { m.uiState.NodesView.ShowAddNodeModal() },
 		"dev console":          func(m *Model) { m.uiState.DevConsole.Toggle() },
 		"offline opening":      func(m *Model) { m.offlineOpening = true },
-		"offline filtering":    func(m *Model) { m.offlineFilter = &offlineFilterState{} },
+		"offline filtering": func(m *Model) {
+			m.offlineFilter = &offlineFilterState{owner: &offlineFilterOwner{cancel: func() {}}}
+		},
 	}
 	for name, activate := range cases {
 		t.Run(name, func(t *testing.T) {

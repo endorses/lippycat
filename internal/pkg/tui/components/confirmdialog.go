@@ -106,6 +106,18 @@ func (c *ConfirmDialog) Deactivate() {
 	c.userData = nil
 }
 
+// Dismiss cancels the dialog and preserves its result context for the caller.
+func (c *ConfirmDialog) Dismiss() tea.Cmd {
+	if !c.active {
+		return nil
+	}
+	userData := c.userData
+	c.Deactivate()
+	return func() tea.Msg {
+		return ConfirmDialogResult{Confirmed: false, UserData: userData}
+	}
+}
+
 // IsActive returns whether the dialog is currently active
 func (c *ConfirmDialog) IsActive() bool {
 	return c.active
@@ -143,15 +155,7 @@ func (c *ConfirmDialog) Update(msg tea.Msg) tea.Cmd {
 			}
 
 		case "n", "N", "esc":
-			// User cancelled
-			userData := c.userData
-			c.Deactivate()
-			return func() tea.Msg {
-				return ConfirmDialogResult{
-					Confirmed: false,
-					UserData:  userData,
-				}
-			}
+			return c.Dismiss()
 		}
 	}
 

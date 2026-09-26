@@ -169,6 +169,26 @@ func (fm *FilterManager) Deactivate() {
 	fm.searchMode = false
 }
 
+// Dismiss cancels the visible modal layer. Nested dialogs return to their
+// parent; inline search belongs to the list and closes with the manager.
+func (fm *FilterManager) Dismiss() tea.Cmd {
+	if !fm.active {
+		return nil
+	}
+	if fm.confirmDialog.IsActive() {
+		return fm.confirmDialog.Dismiss()
+	}
+	escape := tea.KeyMsg{Type: tea.KeyEsc}
+	if fm.selectingHunters {
+		return fm.handleHunterSelectionMode(escape)
+	}
+	if fm.mode == ModeAdd || fm.mode == ModeEdit {
+		return fm.handleFormMode(escape)
+	}
+	fm.Deactivate()
+	return nil
+}
+
 // IsActive returns whether the filter manager is active
 func (fm *FilterManager) IsActive() bool {
 	return fm.active

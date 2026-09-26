@@ -71,6 +71,12 @@ func (ps *ProtocolSelector) Deactivate() {
 	ps.active = false
 }
 
+// Dismiss closes the modal without applying the selected protocol.
+func (ps *ProtocolSelector) Dismiss() tea.Cmd {
+	ps.Deactivate()
+	return nil
+}
+
 // IsActive returns whether the selector is visible
 func (ps *ProtocolSelector) IsActive() bool {
 	return ps.active

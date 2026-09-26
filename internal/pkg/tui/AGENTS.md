@@ -164,6 +164,20 @@ func (m *model) OnDisconnect(address string, err error) {
 
 **IMPORTANT:** All modals MUST use `RenderModal()` for consistency.
 
+Hosted dialogs implement `components.Modal` (`View()` and `Dismiss()`) and are
+resolved by `activeModal()` in `modal.go`. This is the shared stacking order for
+rendering and backdrop dismissal. Every hosted modal automatically receives
+outside-click dismissal; do not add mouse hit testing to individual dialogs or
+render invocations. The host consumes the dismissal press and release so they
+cannot activate underlying controls.
+
+`Dismiss()` cancels the visible modal layer without accepting edits. It must
+preserve cancellation results and required cleanup. Nested modals return to
+their parent; inline text editing must not prevent the dialog from closing.
+Progress dialogs request cancellation and remain visible until their existing
+worker cleanup completes. The shared host derives bounds from the rendered
+modal canvas, including borders, padding, wrapping, and terminal clipping.
+
 ```go
 func RenderModal(opts ModalRenderOptions) string {
     // Renders:

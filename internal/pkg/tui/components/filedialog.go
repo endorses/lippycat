@@ -345,6 +345,13 @@ func (fd *FileDialog) Deactivate() {
 	fd.folderInput.Blur()
 }
 
+// Dismiss closes the entire dialog, including any active input mode, without
+// selecting a file or creating a folder.
+func (fd *FileDialog) Dismiss() tea.Cmd {
+	fd.Deactivate()
+	return nil
+}
+
 // Navigation methods
 
 func (fd *FileDialog) cursorUp() {

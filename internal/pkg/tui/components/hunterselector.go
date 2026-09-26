@@ -69,6 +69,12 @@ func (hs *HunterSelector) Deactivate() {
 	hs.loading = false
 }
 
+// Dismiss closes the modal without applying the hunter selection.
+func (hs *HunterSelector) Dismiss() tea.Cmd {
+	hs.Deactivate()
+	return nil
+}
+
 // IsActive returns whether the selector is visible
 func (hs *HunterSelector) IsActive() bool {
 	return hs.active

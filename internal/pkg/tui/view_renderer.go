@@ -10,11 +10,8 @@ import (
 
 // View renders the entire TUI based on current state
 func (m Model) View() string {
-	if m.offlineOpening {
-		return m.offlineModal()
-	}
-	if m.offlineFilter != nil {
-		return m.offlineFilterModal()
+	if modalView := m.renderActiveModal(); modalView != "" {
+		return modalView
 	}
 	if m.uiState.Quitting {
 		return "Goodbye!\n"
@@ -62,11 +59,6 @@ func (m Model) View() string {
 	bottomArea := m.renderBottomArea(footerView)
 
 	fullView := lipgloss.JoinVertical(lipgloss.Left, mainView, bottomArea)
-
-	// Check for active modals and overlay them
-	if modalView := m.renderActiveModal(); modalView != "" {
-		return modalView
-	}
 
 	// Render dev console overlay if visible (LOG_LEVEL=DEBUG only)
 	if m.uiState.DevConsole != nil && m.uiState.DevConsole.IsVisible() {
@@ -290,67 +282,7 @@ func (m Model) renderBottomArea(footerView string) string {
 
 // renderActiveModal checks for active modals and renders them as overlays
 func (m Model) renderActiveModal() string {
-	// Protocol selector modal
-	if m.uiState.ProtocolSelector.IsActive() {
-		selectorView := m.uiState.ProtocolSelector.View()
-		return lipgloss.Place(
-			m.uiState.Width, m.uiState.Height,
-			lipgloss.Center, lipgloss.Center,
-			selectorView,
-		)
-	}
-
-	// Hunter selector modal
-	if m.uiState.HunterSelector.IsActive() {
-		selectorView := m.uiState.HunterSelector.View()
-		return lipgloss.Place(
-			m.uiState.Width, m.uiState.Height,
-			lipgloss.Center, lipgloss.Center,
-			selectorView,
-		)
-	}
-
-	// Filter manager modal
-	if m.uiState.FilterManager.IsActive() {
-		filterManagerView := m.uiState.FilterManager.View()
-		return lipgloss.Place(
-			m.uiState.Width, m.uiState.Height,
-			lipgloss.Center, lipgloss.Center,
-			filterManagerView,
-		)
-	}
-
-	// Settings file dialogs (for opening PCAP or nodes files)
-	if m.uiState.SettingsView.IsFileDialogActive() {
-		if m.uiState.SettingsView.GetPcapFileDialog().IsActive() {
-			pcapDialog := m.uiState.SettingsView.GetPcapFileDialog()
-			return pcapDialog.View()
-		}
-		if m.uiState.SettingsView.GetNodesFileDialog().IsActive() {
-			nodesDialog := m.uiState.SettingsView.GetNodesFileDialog()
-			return nodesDialog.View()
-		}
-	}
-
-	// File dialog modal (for saving packets)
-	if m.uiState.FileDialog.IsActive() {
-		// FileDialog uses RenderModal internally which centers it
-		return m.uiState.FileDialog.View()
-	}
-
-	// Confirm dialog modal
-	if m.uiState.ConfirmDialog.IsActive() {
-		// ConfirmDialog uses RenderModal internally which centers it
-		return m.uiState.ConfirmDialog.View()
-	}
-
-	// Add node modal
-	if m.uiState.NodesView.IsModalOpen() {
-		return m.uiState.NodesView.RenderModal(m.uiState.Width, m.uiState.Height)
-	}
-
-	// No modal active
-	return ""
+	return components.RenderHostedModal(m.activeModal(), m.uiState.Width, m.uiState.Height)
 }
 
 // prepareViewChrome snapshots presentation state during model updates. Rendering

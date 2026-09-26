@@ -3,9 +3,67 @@
 package components
 
 import (
+	"image"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
+
+// Modal is the common lifecycle contract for hosted dialogs. Dismiss cancels
+// the visible dialog without accepting its contents, including any cleanup or
+// cancellation result the owner needs. All hosted modals inherit backdrop clicks.
+type Modal interface {
+	View() string
+	Dismiss() tea.Cmd
+}
+
+// RenderHostedModal places every dialog in the host's current terminal canvas.
+// Already-centered views retain their position; compact views are centered too.
+func RenderHostedModal(modal Modal, width, height int) string {
+	if modal == nil {
+		return ""
+	}
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal.View())
+}
+
+// HandleModalMouse consumes a left press on the backdrop. The host must also
+// consume its following release so the gesture cannot reach the underlying UI.
+func HandleModalMouse(modal Modal, msg tea.MouseMsg, width, height int) (tea.Cmd, bool) {
+	if modal == nil || msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress ||
+		msg.X < 0 || msg.Y < 0 || msg.X >= width || msg.Y >= height {
+		return nil, false
+	}
+
+	bounds := modalBounds(RenderHostedModal(modal, width, height), width, height)
+	if bounds.Empty() || image.Pt(msg.X, msg.Y).In(bounds) {
+		return nil, false
+	}
+	return modal.Dismiss(), true
+}
+
+// modalBounds measures the visible modal canvas produced by RenderModal. Using
+// the rendered border includes padding, wrapped content, and caller positioning
+// without duplicating the renderer's layout rules or mutating state in View.
+func modalBounds(view string, width, height int) image.Rectangle {
+	lines := strings.Split(ansi.Strip(view), "\n")
+	// Bubble Tea retains the bottom rows when a view exceeds terminal height.
+	if height > 0 && len(lines) > height {
+		lines = lines[len(lines)-height:]
+	}
+	bounds := image.Rectangle{}
+	for y, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		left := ansi.StringWidth(line) - ansi.StringWidth(strings.TrimLeft(line, " "))
+		right := ansi.StringWidth(strings.TrimRight(line, " "))
+		bounds = bounds.Union(image.Rect(left, y, right, y+1))
+	}
+	return bounds.Intersect(image.Rect(0, 0, width, height))
+}
 
 // ModalRenderOptions configures modal rendering
 type ModalRenderOptions struct {

@@ -242,21 +242,28 @@ an ordinary capture target.
 
 The LI-only bindings are shared by `tap` and `process`:
 
-| Flag                                 | YAML key                           | Default                                                       |
-| ------------------------------------ | ---------------------------------- | ------------------------------------------------------------- |
-| `--li-radius-operator-scope`         | `li.radius.operator_scope`         | Empty; explicit scope required for RADIUS tasks               |
-| `--li-radius-profile-revision`       | `li.radius.profile_revision`       | Empty; explicit revision required                             |
-| `--li-radius-origin-node`            | `li.radius.origin_node`            | Empty; optional origin restriction                            |
-| `--li-radius-source`                 | `li.radius.source`                 | Empty; optional interface/source restriction                  |
-| `--li-radius-mac-profile`            | `li.radius.mac_profile`            | Empty; explicit supported profile required for MAC targets    |
-| `--li-radius-transaction-timeout`    | `li.radius.transaction_timeout`    | `30s`; 1s–5m, must match capture lifetime                     |
-| `--li-radius-correlation-state-file` | `li.radius.correlation_state_file` | Empty; falls back to LI state path plus `.radius-correlation` |
+| Flag                                 | YAML key                           | Default                                                     |
+| ------------------------------------ | ---------------------------------- | ----------------------------------------------------------- |
+| `--li-radius-operator-scope`         | `li.radius.operator_scope`         | Empty; explicit scope required for RADIUS tasks             |
+| `--li-radius-profile-revision`       | `li.radius.profile_revision`       | Empty; explicit revision required                           |
+| `--li-radius-origin-node`            | `li.radius.origin_node`            | Empty; optional origin restriction                          |
+| `--li-radius-source`                 | `li.radius.source`                 | Empty; optional interface/source restriction                |
+| `--li-radius-mac-profile`            | `li.radius.mac_profile`            | Empty; explicit supported profile required for MAC targets  |
+| `--li-radius-transaction-timeout`    | `li.radius.transaction_timeout`    | `30s`; 1s–5m, must match capture lifetime                   |
+| `--li-radius-correlation-state-file` | `li.radius.correlation_state_file` | Empty; uses the allocator path pinned in encrypted LI state |
 
 These keys use `LIPPYCAT_LI_RADIUS_*` environment variables, such as
 `LIPPYCAT_LI_RADIUS_OPERATOR_SCOPE`. Capture `radius.operator_scope` and
 `radius.profile_revision` must match the explicit LI deployment binding.
 Configure the LI MAC profile for X1 MAC targets; the ordinary profile does not
 implicitly activate LI. The parent directory of durable state must already exist.
+Provision independent filter and administrative-state keys, then initialize or
+migrate both encrypted snapshots before starting the node; see the
+[LI storage setup](https://github.com/endorses/lippycat/blob/main/docs/LI_INTEGRATION.md#encrypted-managed-storage).
+Administrative initialization pins its path plus `.radius-correlation`; migration
+preserves the original allocator path. A custom runtime allocator path must match
+that pin. Moving the administrative snapshot does not reset or move the separate
+unencrypted allocator.
 `--li-radius-transaction-timeout` must equal `--radius-transaction-timeout` on
 `tap radius`; processor deployments must configure the same lifetime as their
 hunter capture deployment. A mismatch on local tap rejects startup.
@@ -265,7 +272,10 @@ hunter capture deployment. A mismatch on local tap rejects startup.
 sudo lc tap radius -i mirror0 --id poi-a \
   --tls-cert server.crt --tls-key server.key --tls-ca capture-ca.crt \
   --radius-operator-scope operator-a/nas-a --radius-profile-revision v1 \
-  --li-enabled --li-state-file /var/lib/lippycat/poi-a-li.json \
+  --li-enabled --filter-file /var/lib/lippycat/poi-a-filters.enc \
+  --filter-store-key-id filters-1 --filter-store-key-file /etc/lippycat/filters.key \
+  --li-state-file /var/lib/lippycat/poi-a-li.enc \
+  --li-state-key-id state-1 --li-state-key-file /etc/lippycat/li-state.key \
   --li-radius-operator-scope operator-a/nas-a --li-radius-profile-revision v1 \
   --li-radius-origin-node poi-a-local --li-radius-source mirror0 \
   --li-radius-mac-profile calling-station-id-uppercase-hyphen-v1 \

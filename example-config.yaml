@@ -137,14 +137,14 @@ voip:
   # pattern_buffer_mb: 64       # Pattern buffer memory in MB
 
   # TCP Stream Processing
-  max_goroutines: 1000          # Max concurrent TCP stream goroutines
-  tcp_cleanup_interval: 60s     # How often to clean up TCP resources
-  tcp_buffer_max_age: 300s      # Maximum age for TCP packet buffers
-  tcp_stream_max_queue_time: 120s  # Maximum time a stream can wait in queue
-  max_tcp_buffers: 10000        # Maximum number of TCP packet buffers
-  tcp_stream_timeout: 600s      # Timeout for TCP stream processing
-  tcp_assembler_max_pages: 100  # Maximum pages for TCP assembler
-  tcp_sip_idle_timeout: 120s    # SIP TCP idle timeout (RFC 5626)
+  max_goroutines: 1000 # Max concurrent TCP stream goroutines
+  tcp_cleanup_interval: 60s # How often to clean up TCP resources
+  tcp_buffer_max_age: 300s # Maximum age for TCP packet buffers
+  tcp_stream_max_queue_time: 120s # Maximum time a stream can wait in queue
+  max_tcp_buffers: 10000 # Maximum number of TCP packet buffers
+  tcp_stream_timeout: 600s # Timeout for TCP stream processing
+  tcp_assembler_max_pages: 100 # Maximum pages for TCP assembler
+  tcp_sip_idle_timeout: 120s # SIP TCP idle timeout (RFC 5626)
 
   # State-Based TCP Timeouts (advanced)
   # enable_state_tcp_timeouts: false     # Enable state-based timeout management
@@ -169,8 +169,8 @@ voip:
   tcp_buffer_pool_size: 1000
   tcp_batch_size: 32
   tcp_io_threads: 4
-  tcp_compression_level: 1         # 0=none, 1=fast
-  tcp_memory_limit: 104857600      # 100MB
+  tcp_compression_level: 1 # 0=none, 1=fast
+  tcp_memory_limit: 104857600 # 100MB
   tcp_latency_optimization: false
   enable_auto_tuning: true
 
@@ -185,12 +185,12 @@ voip:
 
   # VoIP Security
   security:
-    sanitize_call_ids: false          # Enable Call-ID sanitization in logs
-    call_id_hash_length: 8            # Hash prefix length for sanitized Call-IDs
-    call_id_max_log_length: 16        # Max Call-ID length before sanitization
-    enable_pcap_encryption: false     # Enable PCAP file encryption
-    max_content_length: 1048576       # Max SIP Content-Length (1MB, DoS protection)
-    max_message_size: 2097152         # Max total SIP message size (2MB)
+    sanitize_call_ids: false # Enable Call-ID sanitization in logs
+    call_id_hash_length: 8 # Hash prefix length for sanitized Call-IDs
+    call_id_max_log_length: 16 # Max Call-ID length before sanitization
+    enable_pcap_encryption: false # Enable PCAP file encryption
+    max_content_length: 1048576 # Max SIP Content-Length (1MB, DoS protection)
+    max_message_size: 2097152 # Max total SIP message size (2MB)
 
   # PCAP Encryption (only when enable_pcap_encryption is true)
   encryption:
@@ -263,7 +263,13 @@ voip:
 #   write_file: ""               # Write all packets to unified PCAP file
 #   display_stats: true          # Display statistics on stdout
 #   enable_detection: true       # Enable protocol detection
-#   filter_file: ""              # Filter persistence file (JSON)
+#   filter_file: ""              # Explicit managed store path; default filters.yaml or filters.enc
+#   filter_store:
+#     mode: auto                 # YAML with LI disabled; encrypted when LI is enabled
+#     key_file: ""               # Independent private raw 32-byte key; encrypted mode only
+#     key_id: ""                 # Required with encrypted mode
+#     read_keys: []              # Up to four prior id=path references
+#   # Stop the node and use lc migrate filter-store before selecting encrypted mode.
 #   insecure: false              # Allow unencrypted connections
 #
 #   # TLS Server Configuration
@@ -313,6 +319,12 @@ voip:
 #   # Lawful Interception (LI builds only, requires -tags li)
 #   li:
 #     enabled: false
+#     state_file: ""                  # Empty disables administrative persistence
+#     state_key_file: ""              # Independent private raw 32-byte key when state_file is set
+#     state_key_id: ""                # Required with encrypted administrative persistence
+#     state_read_keys: []             # Up to four prior id=path references
+#     # Initialize/migrate the encrypted snapshot offline with lc migrate li-state.
+#     # Migration pins the original separate RADIUS correlation allocator path.
 #     x1_listen_addr: ":8443"          # X1 admin interface listen address
 #     x1_tls_cert: ""                  # X1 server certificate
 #     x1_tls_key: ""                   # X1 server key
@@ -347,7 +359,13 @@ voip:
 #   write_file: ""               # Write all packets to unified PCAP file
 #   display_stats: true          # Display statistics on stdout
 #   enable_detection: true       # Enable protocol detection
-#   filter_file: ""              # Filter persistence file (JSON)
+#   filter_file: ""              # Explicit managed store path; default filters.yaml or filters.enc
+#   filter_store:
+#     mode: auto                 # YAML with LI disabled; encrypted when LI is enabled
+#     key_file: ""               # Independent private raw 32-byte key; encrypted mode only
+#     key_id: ""                 # Required with encrypted mode
+#     read_keys: []              # Up to four prior id=path references
+#   # Stop the node and use lc migrate filter-store before selecting encrypted mode.
 #   insecure: false              # Allow unencrypted connections
 #
 #   # TLS Server Configuration

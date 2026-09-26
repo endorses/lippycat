@@ -810,3 +810,18 @@ and owned disposable stores/caches were removed. The full 20,000-copy/s workload
 40,000-copy/s recovery, simultaneous X2 contention, compaction/expiry, million-record
 startup and soak gates remain unrun. A new reviewed layout or supported durable
 platform is required before production layout selection and phases 5–7 proceed.
+
+### Snapshot operator documentation (2026-09-26)
+
+The security guide, example configuration, manual configuration/command reference,
+LI deployment example and RADIUS deployment example now describe the implemented
+encrypted snapshot requirements. They retain editable YAML for LI-disabled nodes,
+document explicit offline initialization/migration and key references, and preserve
+the encrypted administrative state's separate RADIUS allocator pin. Security
+guidance distinguishes encrypted snapshots from other output files and explains
+usage-ledger preservation, uncertain writes, backup/rollback limits and downgrade
+constraints. Examples were checked against the implemented flag/config resolvers
+and migration commands; Prettier parsed and formatted the Markdown/YAML changes,
+and `git diff --check` passed. This documentation increment does not close the
+phase-9 rollout task: X3 persistence/replay, completed rotation tools and their
+qualification remain outstanding.

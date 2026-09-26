@@ -52,6 +52,45 @@ export LIPPYCAT_PRODUCTION=true
 
 ---
 
+## Managed Storage
+
+Use `processor` or `tap` in place of `ROLE` below. All tap protocols use the same
+settings. Filter mode is selected by effective LI enablement, independent of
+whether the binary includes LI support.
+
+| Key                                       | Default | Description                                                                                                         |
+| ----------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `ROLE.filter_file`                        | Empty   | Explicit snapshot path; otherwise select `~/.config/lippycat/filters.yaml` or `filters.enc` according to mode.      |
+| `ROLE.filter_store.mode`                  | `auto`  | `auto` selects YAML with LI disabled and encrypted with LI enabled; explicit `yaml` with LI enabled is invalid.     |
+| `ROLE.filter_store.key_id`                | Empty   | Active filter key ID; required in encrypted mode.                                                                   |
+| `ROLE.filter_store.key_file`              | Empty   | Private raw 32-byte key file reference; encrypted mode only.                                                        |
+| `ROLE.filter_store.read_keys`             | `[]`    | Up to four prior `id=path` references with distinct IDs and material.                                               |
+| `ROLE.li.state_file`                      | Empty   | Encrypted administrative snapshot path; empty disables administrative persistence where replay does not require it. |
+| `ROLE.li.state_key_id`                    | Empty   | Active administrative key ID.                                                                                       |
+| `ROLE.li.state_key_file`                  | Empty   | Required with state persistence; independent private raw 32-byte key file.                                          |
+| `ROLE.li.state_read_keys`                 | `[]`    | Up to four prior administrative `id=path` references.                                                               |
+| `ROLE.li.delivery_x2_spool_key_id`        | Empty   | Active X2 key ID; empty preserves the existing key-file-only compatibility mode.                                    |
+| `ROLE.li.delivery_x2_spool_legacy_key_id` | Empty   | Explicit configured key ID for legacy records without embedded key IDs.                                             |
+| `ROLE.li.delivery_x2_spool_read_keys`     | `[]`    | Up to four prior X2 `id=path` references.                                                                           |
+
+LI settings require an LI build. Enabled encrypted stores must use independently
+provisioned keys, including prior read keys. The existing
+`ROLE.li.delivery_x2_spool_key_file` still refers to a raw 32-byte X2 key; key
+references do not perform an offline rewrite.
+
+CLI values override explicit role-prefixed environment values, which override
+YAML, including empty values. For example,
+`LIPPYCAT_PROCESSOR_FILTER_STORE_KEY_FILE` and
+`LIPPYCAT_TAP_LI_STATE_KEY_FILE` set file references. Prior-key environment values
+are one CSV record, while YAML uses a list of `id=path` strings. Raw key bytes do
+not belong in configuration.
+
+Stop the node to initialize or migrate encrypted snapshots; see
+[managed storage commands](command-reference.md#managed-storage-flags). Missing or
+invalid encrypted stores stop startup. YAML remains editable while stopped and
+loads on restart; use management commands to change a running node's filters.
+When both default filter files exist, choose the intended mode and explicit path.
+
 ## Global Settings
 
 These top-level keys apply to all commands.
@@ -89,23 +128,23 @@ These keys configure the optional normalized protocol logs for `sniff`,
 [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md) for
 stream schemas, hierarchy behavior, rotation, and privacy guidance.
 
-| Key                               | Type     | Default                               | Description                                                                |
-| --------------------------------- | -------- | ------------------------------------- | -------------------------------------------------------------------------- |
-| `events.queue_size`               | integer  | `20000`                               | Capacity of the normalized protocol-event queue.                           |
-| `events.drop_policy`              | string   | `"drop_new"`                          | Overflow policy for normalized events.                                     |
-| `logs.dir`                        | string   | `""`                                  | Structured-log directory; an empty value disables logging.                 |
-| `logs.format`                     | string   | `"tsv"`                               | Output encoding: `"tsv"` or `"json"` (JSONL).                              |
-| `logs.streams`                    | list     | `[conn, dns, ssl, http, smtp, files, radius]` | Enabled log streams.                                               |
-| `logs.include_http_headers`       | boolean  | `false`                               | Preserve full HTTP header maps in normalized events.                       |
-| `logs.include_email_body_preview` | boolean  | `false`                               | Permit potentially sensitive email body previews for file analysis.        |
-| `logs.rotate_interval`            | duration | `"1h"`                                | Periodic rotation interval; `0` disables periodic rotation.                |
-| `logs.queue_size`                 | integer  | `10000`                               | Capacity of each stream's output queue.                                    |
-| `logs.emit_stage`                 | string   | `"terminal"`                          | `process`/`tap`: `"terminal"`, `"all"`, or `"none"`.                       |
-| `logs.post_rotate_command`        | string   | `""`                                  | Command after rotation; `%log%` expands to the safely quoted rotated path. |
-| `files.extract`                   | boolean  | `false`                               | Extract bounded HTTP and SMTP file content.                                |
-| `files.extract_dir`               | string   | `""`                                  | Extraction directory; required when extraction is enabled.                 |
-| `files.max_size`                  | integer  | `10485760`                            | Maximum bytes analyzed or extracted per file.                              |
-| `files.total_size`                | integer  | `104857600`                           | Maximum bytes extracted over the process lifetime.                         |
+| Key                               | Type     | Default                                       | Description                                                                |
+| --------------------------------- | -------- | --------------------------------------------- | -------------------------------------------------------------------------- |
+| `events.queue_size`               | integer  | `20000`                                       | Capacity of the normalized protocol-event queue.                           |
+| `events.drop_policy`              | string   | `"drop_new"`                                  | Overflow policy for normalized events.                                     |
+| `logs.dir`                        | string   | `""`                                          | Structured-log directory; an empty value disables logging.                 |
+| `logs.format`                     | string   | `"tsv"`                                       | Output encoding: `"tsv"` or `"json"` (JSONL).                              |
+| `logs.streams`                    | list     | `[conn, dns, ssl, http, smtp, files, radius]` | Enabled log streams.                                                       |
+| `logs.include_http_headers`       | boolean  | `false`                                       | Preserve full HTTP header maps in normalized events.                       |
+| `logs.include_email_body_preview` | boolean  | `false`                                       | Permit potentially sensitive email body previews for file analysis.        |
+| `logs.rotate_interval`            | duration | `"1h"`                                        | Periodic rotation interval; `0` disables periodic rotation.                |
+| `logs.queue_size`                 | integer  | `10000`                                       | Capacity of each stream's output queue.                                    |
+| `logs.emit_stage`                 | string   | `"terminal"`                                  | `process`/`tap`: `"terminal"`, `"all"`, or `"none"`.                       |
+| `logs.post_rotate_command`        | string   | `""`                                          | Command after rotation; `%log%` expands to the safely quoted rotated path. |
+| `files.extract`                   | boolean  | `false`                                       | Extract bounded HTTP and SMTP file content.                                |
+| `files.extract_dir`               | string   | `""`                                          | Extraction directory; required when extraction is enabled.                 |
+| `files.max_size`                  | integer  | `10485760`                                    | Maximum bytes analyzed or extracted per file.                              |
+| `files.total_size`                | integer  | `104857600`                                   | Maximum bytes extracted over the process lifetime.                         |
 
 ---
 
@@ -417,36 +456,36 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 
 #### Core Settings
 
-| Key                                        | Type     | Default         | Description                                                                                                  |
-| ------------------------------------------ | -------- | --------------- | ------------------------------------------------------------------------------------------------------------ |
-| `processor.id`                             | string   | `""`            | Processor identifier. Auto-generated from hostname if empty.                                                 |
-| `processor.processor_id`                   | string   | `""`            | Alias for `processor.id`.                                                                                    |
-| `processor.listen_addr`                    | string   | `":55555"`      | Address to listen on for hunter and TUI connections.                                                         |
-| `processor.processor_addr`                 | string   | `""`            | Address of an upstream processor for hierarchical forwarding.                                                |
-| `processor.upstream_addr`                  | string   | `""`            | Alias for `processor.processor_addr`.                                                                        |
-| `processor.forward_mode`                   | string   | `"packets"`     | Upstream representation: `"packets"` or normalized `"events"`.                                            |
-| `processor.events.fallback_to_packets`     | boolean  | `false`         | Explicitly allow visible packet fallback after failed event negotiation.                                     |
-| `processor.events.delivery_profile`        | string   | `"reliable"`    | Upstream event delivery: `"reliable"` or `"memory-only"`.                                                 |
-| `processor.events.spool.dir`               | string   | `"/var/tmp/lippycat-processor-event-spool"` | Recoverable per-producer upstream event spool root.                                      |
-| `processor.events.spool.max_bytes`         | integer  | `1073741824`    | Logical event spool byte limit (0 = unlimited).                                                              |
-| `processor.events.spool.max_age`           | duration | `"24h"`         | Maximum retained event-batch age (0 = unlimited).                                                            |
-| `processor.events.spool.exhaustion_policy` | string   | `"drop_oldest"` | Event spool exhaustion policy: `"drop_oldest"` or `"drop_new"`.                                           |
-| `processor.max_hunters`                    | integer  | `100`           | Maximum concurrent hunter connections (0 = unlimited).                                                       |
-| `processor.max_subscribers`                | integer  | `100`           | Maximum TUI subscriber connections (0 = unlimited).                                                          |
-| `processor.events.allow_sensitive_fields`  | boolean  | `false`         | Permit authorized event subscribers to request sensitive HTTP, SMTP, and file fields.                        |
-| `processor.events.allow_file_metadata`     | boolean  | `false`         | Permit authorized event subscribers to request file metadata; file content is never exposed.                 |
-| `processor.display_stats`                  | boolean  | `true`          | Display periodic statistics to stdout.                                                                       |
-| `processor.enable_detection`               | boolean  | `true`          | Enable protocol detection on received packets.                                                               |
-| `processor.events.ingress.profile`         | string   | `"memory-only"` | Event acknowledgement profile: `"memory-only"` or `"reliable"`.                                              |
-| `processor.events.ingress.wal_dir`         | string   | `""`            | Recoverable event-ingress WAL directory; required for reliable ingress.                                      |
-| `processor.events.ingress.wal_max_bytes`   | integer  | `1073741824`    | Maximum event-ingress WAL size.                                                                              |
-| `processor.events.ingress.max_batch_bytes` | integer  | `4194304`       | Maximum accepted serialized event batch; minimum 4194304 for durable sender compatibility.                    |
-| `processor.filter_file`                    | string   | `""`            | Path to a YAML filter file for packet filtering rules.                                                       |
-| `processor.write_file`                     | string   | `""`            | Path for unified PCAP output (all traffic to one file).                                                      |
-| `processor.command_concurrency`            | integer  | `10`            | Maximum concurrent command hook executions.                                                                  |
-| `processor.command_timeout`                | duration | `"30s"`         | Timeout for command hook execution.                                                                          |
-| `processor.debug_listen`                   | string   | `""`            | Optional pprof debug HTTP listen address. Loopback-only unless `processor.debug_allow_non_loopback` is true. |
-| `processor.debug_allow_non_loopback`       | boolean  | `false`         | Allow the pprof listener to bind non-loopback addresses.                                                     |
+| Key                                        | Type     | Default                                     | Description                                                                                                  |
+| ------------------------------------------ | -------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `processor.id`                             | string   | `""`                                        | Processor identifier. Auto-generated from hostname if empty.                                                 |
+| `processor.processor_id`                   | string   | `""`                                        | Alias for `processor.id`.                                                                                    |
+| `processor.listen_addr`                    | string   | `":55555"`                                  | Address to listen on for hunter and TUI connections.                                                         |
+| `processor.processor_addr`                 | string   | `""`                                        | Address of an upstream processor for hierarchical forwarding.                                                |
+| `processor.upstream_addr`                  | string   | `""`                                        | Alias for `processor.processor_addr`.                                                                        |
+| `processor.forward_mode`                   | string   | `"packets"`                                 | Upstream representation: `"packets"` or normalized `"events"`.                                               |
+| `processor.events.fallback_to_packets`     | boolean  | `false`                                     | Explicitly allow visible packet fallback after failed event negotiation.                                     |
+| `processor.events.delivery_profile`        | string   | `"reliable"`                                | Upstream event delivery: `"reliable"` or `"memory-only"`.                                                    |
+| `processor.events.spool.dir`               | string   | `"/var/tmp/lippycat-processor-event-spool"` | Recoverable per-producer upstream event spool root.                                                          |
+| `processor.events.spool.max_bytes`         | integer  | `1073741824`                                | Logical event spool byte limit (0 = unlimited).                                                              |
+| `processor.events.spool.max_age`           | duration | `"24h"`                                     | Maximum retained event-batch age (0 = unlimited).                                                            |
+| `processor.events.spool.exhaustion_policy` | string   | `"drop_oldest"`                             | Event spool exhaustion policy: `"drop_oldest"` or `"drop_new"`.                                              |
+| `processor.max_hunters`                    | integer  | `100`                                       | Maximum concurrent hunter connections (0 = unlimited).                                                       |
+| `processor.max_subscribers`                | integer  | `100`                                       | Maximum TUI subscriber connections (0 = unlimited).                                                          |
+| `processor.events.allow_sensitive_fields`  | boolean  | `false`                                     | Permit authorized event subscribers to request sensitive HTTP, SMTP, and file fields.                        |
+| `processor.events.allow_file_metadata`     | boolean  | `false`                                     | Permit authorized event subscribers to request file metadata; file content is never exposed.                 |
+| `processor.display_stats`                  | boolean  | `true`                                      | Display periodic statistics to stdout.                                                                       |
+| `processor.enable_detection`               | boolean  | `true`                                      | Enable protocol detection on received packets.                                                               |
+| `processor.events.ingress.profile`         | string   | `"memory-only"`                             | Event acknowledgement profile: `"memory-only"` or `"reliable"`.                                              |
+| `processor.events.ingress.wal_dir`         | string   | `""`                                        | Recoverable event-ingress WAL directory; required for reliable ingress.                                      |
+| `processor.events.ingress.wal_max_bytes`   | integer  | `1073741824`                                | Maximum event-ingress WAL size.                                                                              |
+| `processor.events.ingress.max_batch_bytes` | integer  | `4194304`                                   | Maximum accepted serialized event batch; minimum 4194304 for durable sender compatibility.                   |
+| `processor.filter_file`                    | string   | `""`                                        | Explicit managed filter snapshot path; see [managed storage](#managed-storage).                              |
+| `processor.write_file`                     | string   | `""`                                        | Path for unified PCAP output (all traffic to one file).                                                      |
+| `processor.command_concurrency`            | integer  | `10`                                        | Maximum concurrent command hook executions.                                                                  |
+| `processor.command_timeout`                | duration | `"30s"`                                     | Timeout for command hook execution.                                                                          |
+| `processor.debug_listen`                   | string   | `""`                                        | Optional pprof debug HTTP listen address. Loopback-only unless `processor.debug_allow_non_loopback` is true. |
+| `processor.debug_allow_non_loopback`       | boolean  | `false`                                     | Allow the pprof listener to bind non-loopback addresses.                                                     |
 
 #### Processor TLS
 
@@ -553,7 +592,7 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 | `tap.batch_timeout_ms`         | integer  | `100`     | Batch timeout in milliseconds.                                                                            |
 | `tap.promiscuous`              | boolean  | `false`   | Promiscuous mode for capture interfaces.                                                                  |
 | `tap.enable_detection`         | boolean  | `true`    | Enable protocol detection.                                                                                |
-| `tap.filter_file`              | string   | `""`      | Path to filter file.                                                                                      |
+| `tap.filter_file`              | string   | `""`      | Explicit managed filter snapshot path; see [managed storage](#managed-storage).                           |
 | `tap.write_file`               | string   | `""`      | Path for unified PCAP output.                                                                             |
 | `tap.command_concurrency`      | integer  | `10`      | Max concurrent command hook executions.                                                                   |
 | `tap.command_timeout`          | duration | `"30s"`   | Command hook timeout.                                                                                     |
@@ -563,22 +602,22 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 
 #### Tap TLS and Serving
 
-| Key                                  | Type    | Default         | Description                                                                            |
-| ------------------------------------ | ------- | --------------- | -------------------------------------------------------------------------------------- |
-| `tap.listen_addr`                    | string  | `":55555"`      | Listen address for hunter and TUI client connections.                                  |
-| `tap.max_hunters`                    | integer | `0`             | Maximum hunter connections (0 = unlimited).                                            |
-| `tap.max_subscribers`                | integer | `100`           | Maximum TUI subscriber connections (0 = unlimited).                                    |
-| `tap.events.allow_sensitive_fields`  | boolean | `false`         | Permit authorized subscribers to request sensitive HTTP, SMTP, and file fields.        |
-| `tap.events.allow_file_metadata`     | boolean | `false`         | Permit authorized subscribers to request file metadata; file content is never exposed. |
-| `tap.events.ingress.profile`         | string  | `"memory-only"` | Downstream event-ingress acknowledgement profile: `"memory-only"` or `"reliable"`.     |
-| `tap.events.ingress.wal_dir`         | string  | `""`            | Recoverable event-ingress WAL directory; required for reliable ingress.                |
-| `tap.events.ingress.wal_max_bytes`   | integer | `1073741824`    | Maximum event-ingress WAL size.                                                        |
+| Key                                  | Type    | Default         | Description                                                                                |
+| ------------------------------------ | ------- | --------------- | ------------------------------------------------------------------------------------------ |
+| `tap.listen_addr`                    | string  | `":55555"`      | Listen address for hunter and TUI client connections.                                      |
+| `tap.max_hunters`                    | integer | `0`             | Maximum hunter connections (0 = unlimited).                                                |
+| `tap.max_subscribers`                | integer | `100`           | Maximum TUI subscriber connections (0 = unlimited).                                        |
+| `tap.events.allow_sensitive_fields`  | boolean | `false`         | Permit authorized subscribers to request sensitive HTTP, SMTP, and file fields.            |
+| `tap.events.allow_file_metadata`     | boolean | `false`         | Permit authorized subscribers to request file metadata; file content is never exposed.     |
+| `tap.events.ingress.profile`         | string  | `"memory-only"` | Downstream event-ingress acknowledgement profile: `"memory-only"` or `"reliable"`.         |
+| `tap.events.ingress.wal_dir`         | string  | `""`            | Recoverable event-ingress WAL directory; required for reliable ingress.                    |
+| `tap.events.ingress.wal_max_bytes`   | integer | `1073741824`    | Maximum event-ingress WAL size.                                                            |
 | `tap.events.ingress.max_batch_bytes` | integer | `4194304`       | Maximum accepted serialized event batch; minimum 4194304 for durable sender compatibility. |
-| `tap.tls.cert_file`                  | string  | `""`            | Server TLS certificate.                                                                |
-| `tap.tls.key_file`                   | string  | `""`            | Server TLS private key.                                                                |
-| `tap.tls.ca_file`                    | string  | `""`            | CA certificate for client verification.                                                |
-| `tap.tls.client_auth`                | boolean | `false`         | Require client certificates.                                                           |
-| `tap.insecure`                       | boolean | `false`         | Disable TLS for local testing. Blocked when `LIPPYCAT_PRODUCTION=true`.                |
+| `tap.tls.cert_file`                  | string  | `""`            | Server TLS certificate.                                                                    |
+| `tap.tls.key_file`                   | string  | `""`            | Server TLS private key.                                                                    |
+| `tap.tls.ca_file`                    | string  | `""`            | CA certificate for client verification.                                                    |
+| `tap.tls.client_auth`                | boolean | `false`         | Require client certificates.                                                               |
+| `tap.insecure`                       | boolean | `false`         | Disable TLS for local testing. Blocked when `LIPPYCAT_PRODUCTION=true`.                    |
 
 TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_file` and `tap.tls.key_file` for encrypted serving.
 

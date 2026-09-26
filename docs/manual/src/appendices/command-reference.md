@@ -48,6 +48,9 @@ lc
 │   └── filter             Create/update a filter
 ├── rm                     Remove resources
 │   └── filter             Remove a filter
+├── migrate                Offline encrypted store initialization/migration
+│   ├── filter-store       Managed filters (all/cli/processor/tap builds)
+│   └── li-state           Administrative state (LI builds only)
 └── completion             Shell completions
     ├── bash
     ├── zsh
@@ -107,6 +110,33 @@ Used by `process` and `tap` for serving gRPC with TLS.
 | `--tls-client-auth` | bool   | `false` | Require client certificates (mTLS)            |
 
 TLS is enabled by default for `process` and `tap` unless `--insecure` is set. Provide `--tls-cert` and `--tls-key` for encrypted serving.
+
+### Managed Storage Flags
+
+These flags apply to `process` and every `tap` protocol. Key options contain
+references to private files holding exactly 32 raw bytes.
+
+| Flag                      | Default        | Description                                                                                           |
+| ------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `--filter-file`           | Mode-dependent | Explicit snapshot path; defaults to `~/.config/lippycat/filters.yaml` or `filters.enc`.               |
+| `--filter-store-mode`     | `auto`         | `auto`, `yaml`, or `encrypted`; auto selects encryption when LI is enabled. LI rejects explicit YAML. |
+| `--filter-store-key-id`   | Empty          | Active filter key ID; required in encrypted mode.                                                     |
+| `--filter-store-key-file` | Empty          | Active filter key file; required in encrypted mode.                                                   |
+| `--filter-store-read-key` | Empty          | Repeatable prior filter key `id=path`, at most four.                                                  |
+| `--li-state-file`         | Empty          | LI builds only; encrypted administrative snapshot path, or disabled when empty.                       |
+| `--li-state-key-id`       | Empty          | Active administrative key ID; required with a state file.                                             |
+| `--li-state-key-file`     | Empty          | Independent administrative key file.                                                                  |
+| `--li-state-read-key`     | Empty          | Repeatable prior administrative key `id=path`, at most four.                                          |
+
+Encrypted snapshots must already be initialized or explicitly migrated with the
+node stopped. `lc migrate filter-store --init --destination PATH --key-id ID
+--key-file PATH` creates an empty store. Existing YAML requires `--source-format
+yaml --source PATH` instead of `--init`. LI builds provide `lc migrate li-state`
+with the same initialization options and `--source-format json` for legacy state.
+Same-path conversion requires `--in-place`; interruption recovery uses the
+identical command with `--resume`. See the
+[offline migration reference](https://github.com/endorses/lippycat/blob/main/cmd/migrate/README.md)
+for source preservation and RADIUS allocator handling.
 
 ### Connection Flags
 
@@ -172,23 +202,23 @@ Used by `sniff`, `process`, and `tap`. Logging remains disabled until
 `--log-dir` is set. See [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
 for stream schemas, completeness semantics, rotation, and privacy guidance.
 
-| Flag                               | Type     | Default                        | Description                                            |
-| ---------------------------------- | -------- | ------------------------------ | ------------------------------------------------------ |
-| `--event-queue-size`               | int      | `20000`                        | Normalized protocol-event queue capacity               |
-| `--event-drop-policy`              | string   | `drop_new`                     | Normalized event overflow policy                       |
-| `--log-dir`                        | string   |                                | Directory for structured log files; enables logging    |
-| `--log-format`                     | string   | `tsv`                          | Output format: `tsv` or `json` (JSONL)                 |
-| `--log-streams`                    | strings  | `conn,dns,ssl,http,smtp,files,radius` | Enabled streams                                 |
-| `--log-include-http-headers`       | bool     | `false`                        | Preserve full HTTP header maps in normalized events    |
-| `--log-include-email-body-preview` | bool     | `false`                        | Permit sensitive email body previews for file analysis |
-| `--log-rotate-interval`            | duration | `1h`                           | Periodic rotation interval; `0` disables it            |
-| `--log-queue-size`                 | int      | `10000`                        | Queue capacity for each output stream                  |
-| `--log-post-rotate-command`        | string   |                                | Command after rotation; `%log%` is the rotated path    |
-| `--log-emit-stage`                 | string   | `terminal`                     | `process`/`tap` only: `terminal`, `all`, or `none`     |
-| `--extract-files`                  | bool     | `false`                        | Extract bounded HTTP and SMTP files                    |
-| `--extract-files-dir`              | string   |                                | Required output directory when extraction is enabled   |
-| `--extract-files-max-size`         | int64    | `10485760`                     | Maximum bytes analyzed or extracted per file           |
-| `--extract-files-total-size`       | int64    | `104857600`                    | Process-lifetime extracted-byte limit                  |
+| Flag                               | Type     | Default                               | Description                                            |
+| ---------------------------------- | -------- | ------------------------------------- | ------------------------------------------------------ |
+| `--event-queue-size`               | int      | `20000`                               | Normalized protocol-event queue capacity               |
+| `--event-drop-policy`              | string   | `drop_new`                            | Normalized event overflow policy                       |
+| `--log-dir`                        | string   |                                       | Directory for structured log files; enables logging    |
+| `--log-format`                     | string   | `tsv`                                 | Output format: `tsv` or `json` (JSONL)                 |
+| `--log-streams`                    | strings  | `conn,dns,ssl,http,smtp,files,radius` | Enabled streams                                        |
+| `--log-include-http-headers`       | bool     | `false`                               | Preserve full HTTP header maps in normalized events    |
+| `--log-include-email-body-preview` | bool     | `false`                               | Permit sensitive email body previews for file analysis |
+| `--log-rotate-interval`            | duration | `1h`                                  | Periodic rotation interval; `0` disables it            |
+| `--log-queue-size`                 | int      | `10000`                               | Queue capacity for each output stream                  |
+| `--log-post-rotate-command`        | string   |                                       | Command after rotation; `%log%` is the rotated path    |
+| `--log-emit-stage`                 | string   | `terminal`                            | `process`/`tap` only: `terminal`, `all`, or `none`     |
+| `--extract-files`                  | bool     | `false`                               | Extract bounded HTTP and SMTP files                    |
+| `--extract-files-dir`              | string   |                                       | Required output directory when extraction is enabled   |
+| `--extract-files-max-size`         | int64    | `10485760`                            | Maximum bytes analyzed or extracted per file           |
+| `--extract-files-total-size`       | int64    | `104857600`                           | Process-lifetime extracted-byte limit                  |
 
 ### LI Flags
 
@@ -458,8 +488,8 @@ lc tap [flags]
 
 **Batching**
 
-| Flag              | Short | Type     | Default | Description                 |
-| ----------------- | ----- | -------- | ------- | --------------------------- |
+| Flag                | Short | Type     | Default | Description                                                |
+| ------------------- | ----- | -------- | ------- | ---------------------------------------------------------- |
 | `--buffer-size`     | `-b`  | int      | `10000` | Internal packet buffer size                                |
 | `--sip-buffer-size` |       | int      | `0`     | SIP priority size; 0 automatically matches `--buffer-size` |
 | `--batch-size`      |       | int      | `100`   | Packets per batch                                          |
@@ -1072,8 +1102,8 @@ lc set filter [flags]
 | `--radius-mac-profile`      |       | string  |              | Subscriber MAC interpretation profile            |
 | `--radius-operator-scope`   |       | string  |              | Operator/NAS deployment scope                    |
 | `--radius-profile-revision` |       | string  |              | Deployment profile revision                      |
-| `--radius-origin-node`      |       | string  |              | Restrict RADIUS scope to an origin node           |
-| `--radius-source`           |       | string  |              | Restrict RADIUS scope to a capture source         |
+| `--radius-origin-node`      |       | string  |              | Restrict RADIUS scope to an origin node          |
+| `--radius-source`           |       | string  |              | Restrict RADIUS scope to a capture source        |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 

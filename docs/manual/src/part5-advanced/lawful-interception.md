@@ -92,10 +92,23 @@ Hunters do not need LI support. They perform edge filtering using the same filte
 
 LI is enabled with the `--li-enabled` flag on the processor or tap. The X1 listen address, server certificate, server key, and ADMF client CA are mandatory; incomplete X1 TLS configuration causes startup to fail. Delivery certificates are also needed for MDF communication.
 
+Initialize or migrate an encrypted managed-filter store before enabling LI.
+Administrative persistence, when configured, also requires an initialized encrypted
+snapshot with its own independent raw 32-byte key. Plaintext state is never loaded
+by the runtime. Follow the
+[storage setup and migration guide](https://github.com/endorses/lippycat/blob/main/docs/LI_INTEGRATION.md#encrypted-managed-storage)
+with the node stopped. The following example assumes those snapshots already
+exist. Empty `--li-state-file` disables administrative persistence where replay
+does not require it.
+
 ```bash
 lc process --listen :55555 \
   --tls-cert server.crt --tls-key server.key \
   --li-enabled \
+  --filter-file /var/lib/lippycat/filters.enc \
+  --filter-store-key-id filters-1 --filter-store-key-file /etc/lippycat/keys/filters.key \
+  --li-state-file /var/lib/lippycat/li-state.enc \
+  --li-state-key-id state-1 --li-state-key-file /etc/lippycat/keys/li-state.key \
   --li-x1-listen :8443 \
   --li-x1-tls-cert /etc/lippycat/li/x1-server.crt \
   --li-x1-tls-key /etc/lippycat/li/x1-server.key \
@@ -120,8 +133,17 @@ processor:
     cert_file: "/etc/lippycat/certs/server.crt"
     key_file: "/etc/lippycat/certs/server.key"
 
+  filter_file: "/var/lib/lippycat/filters.enc"
+  filter_store:
+    mode: auto
+    key_id: "filters-1"
+    key_file: "/etc/lippycat/keys/filters.key"
+
   li:
     enabled: true
+    state_file: "/var/lib/lippycat/li-state.enc"
+    state_key_id: "state-1"
+    state_key_file: "/etc/lippycat/keys/li-state.key"
 
     # X1 server — receives task requests from ADMF
     x1_listen_addr: ":8443"

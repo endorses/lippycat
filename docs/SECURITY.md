@@ -4,13 +4,14 @@ This document describes the security enhancements available in lippycat for prot
 
 ## Overview
 
-Lippycat includes five primary security enhancements:
+Lippycat includes these security enhancements:
 
 1. **TLS Transport Encryption** - Protects hunter-processor communication in transit
 2. **Call-ID Sanitization** - Prevents information leakage in log files
 3. **PCAP File Encryption** - Protects captured traffic data at rest
 4. **PCAP File Permissions** - Restricts file access to owner only (0600)
 5. **Content-Length Bounds Validation** - Prevents DoS attacks via memory exhaustion
+6. **Encrypted Managed Storage** - Protects managed filters and persisted LI administrative state
 
 These features are designed for sensitive deployments where VoIP traffic data requires additional protection.
 
@@ -18,6 +19,7 @@ These features are designed for sensitive deployments where VoIP traffic data re
 
 - [TLS Transport Encryption](#tls-transport-encryption)
 - [Call-ID Sanitization](#call-id-sanitization)
+- [Encrypted Managed Storage](#encrypted-managed-storage)
 - [PCAP File Encryption](#pcap-file-encryption)
 - [PCAP File Permissions](#pcap-file-permissions)
 - [Content-Length Bounds Validation](#content-length-bounds-validation)
@@ -37,6 +39,7 @@ required X1 TLS setting is missing or invalid.
 ### Purpose
 
 In distributed mode, hunters forward captured network traffic to processor nodes via gRPC. This communication includes:
+
 - Complete packet payloads (potentially containing sensitive data)
 - Network topology information
 - SIP credentials and authentication data
@@ -44,6 +47,7 @@ In distributed mode, hunters forward captured network traffic to processor nodes
 - Internal IP addresses and network configuration
 
 **Without TLS encryption, this data is transmitted in cleartext**, making it vulnerable to:
+
 - Man-in-the-middle (MitM) attacks
 - Network eavesdropping
 - Traffic injection and tampering
@@ -118,6 +122,7 @@ chmod 644 *-cert.pem
 ```
 
 **Important Notes:**
+
 - **Subject Alternative Names (SANs) are required** - Modern Go versions reject certificates using only Common Name (CN)
 - Replace `processor.example.com` with your actual processor hostname or IP address
 - Add multiple SANs if needed: `DNS:processor,DNS:processor.local,IP:10.0.1.100`
@@ -173,7 +178,7 @@ processor:
     cert_file: "/etc/lippycat/certs/server-cert.pem"
     key_file: "/etc/lippycat/certs/server-key.pem"
     ca_file: "/etc/lippycat/certs/ca-cert.pem"
-    client_auth: true  # Require client certificates
+    client_auth: true # Require client certificates
 
 # Hunter configuration
 hunter:
@@ -402,6 +407,7 @@ To revoke compromised certificates:
 **Cause:** Attempting to start without TLS certificates or explicit insecure flag
 
 **Solution:**
+
 ```bash
 # Provide CA certificate for server verification (TLS is enabled by default)
 lc hunt --tls-ca ca.crt --processor host:55555
@@ -415,6 +421,7 @@ lc hunt --insecure --processor host:55555
 **Cause:** Certificate was generated without Subject Alternative Names (SANs). Modern Go versions require SANs and reject certificates using only Common Name (CN).
 
 **Solution:**
+
 ```bash
 # Regenerate certificate with SANs
 cd /etc/lippycat/certs
@@ -447,6 +454,7 @@ openssl x509 -in server-cert.pem -noout -text | grep -A1 "Subject Alternative Na
 **Cause:** Certificate validation failed (wrong CA, hostname mismatch, expired)
 
 **Solution:**
+
 ```bash
 # Check certificate details
 openssl x509 -in server-cert.pem -noout -text
@@ -466,6 +474,7 @@ lc hunt --tls-skip-verify --processor host:55555
 **Cause:** Processor requires client certificates but hunter didn't provide one
 
 **Solution:**
+
 ```bash
 # Provide client certificate
 lc hunt \
@@ -480,6 +489,7 @@ lc hunt \
 **Cause:** Certificate validity period has passed
 
 **Solution:**
+
 ```bash
 # Check expiration
 openssl x509 -in cert.pem -noout -enddate
@@ -504,6 +514,7 @@ TLS encryption has minimal performance impact with modern hardware:
 #### Threat Model
 
 TLS protects against:
+
 - ✅ Network eavesdropping (passive attacks)
 - ✅ Man-in-the-middle attacks (active attacks)
 - ✅ Traffic injection and tampering
@@ -511,6 +522,7 @@ TLS protects against:
 - ✅ Replay attacks (via TLS nonce)
 
 TLS does NOT protect against:
+
 - ❌ Compromised hunter or processor hosts
 - ❌ Malicious insiders with valid certificates
 - ❌ Side-channel attacks (timing, power analysis)
@@ -565,6 +577,7 @@ TLS encryption helps meet regulatory requirements:
 ### Purpose
 
 Call-IDs in SIP traffic often contain sensitive information such as:
+
 - User identifiers
 - Domain names
 - Session tokens
@@ -588,12 +601,13 @@ This allows log correlation while preventing information leakage.
 ```yaml
 voip:
   security:
-    sanitize_call_ids: true           # Enable sanitization
-    call_id_hash_length: 8            # Hash prefix length (4-16 bytes)
-    call_id_max_log_length: 16        # Sanitization threshold
+    sanitize_call_ids: true # Enable sanitization
+    call_id_hash_length: 8 # Hash prefix length (4-16 bytes)
+    call_id_max_log_length: 16 # Sanitization threshold
 ```
 
 **Parameters:**
+
 - `sanitize_call_ids`: Master toggle for Call-ID sanitization
 - `call_id_hash_length`: Length of hash prefix (affects uniqueness)
 - `call_id_max_log_length`: Call-IDs longer than this are sanitized
@@ -608,11 +622,66 @@ logger.Info("Processing call", "call_id", SanitizeCallIDForLogging(callID))
 fmt.Printf("Call: %s\n", SanitizeCallIDForDisplay(callID))
 ```
 
+## Encrypted Managed Storage
+
+Managed filters use editable YAML by default when LI is disabled, including in
+LI-capable binaries. Opt into encryption with `--filter-store-mode=encrypted`.
+When LI is enabled, `auto` selects encrypted storage and explicit YAML mode is
+rejected. `--filter-file` remains the path override. Encrypted administrative
+persistence is required whenever `--li-state-file` is configured; an empty state
+path disables administrative persistence where replay does not require it.
+
+Each encrypted store uses AES-256-GCM with its own independently provisioned raw
+32-byte key. Filter, administrative-state and X2 keys, including prior read keys,
+must use distinct material. Key files are loaded once by the owning store; editing
+a key file is not a rotation procedure. Configure an active key ID and key-file
+reference, with at most four prior read-key references. Configuration contains
+references, never the raw bytes. Store and key files must be private regular
+files; store directories must be owned by the service account and mode 0700 or 0750. Symlinks, hardlinks and insecure ancestors are rejected.
+
+Encrypted snapshots require explicit offline initialization or migration while
+the owning node is stopped. Runtime startup never converts plaintext, initializes
+a missing encrypted snapshot, or falls back after authentication fails. See
+[offline migration](../cmd/migrate/README.md) for commands and
+[LI storage setup](LI_INTEGRATION.md#encrypted-managed-storage) for key provisioning
+and startup examples. YAML filters remain editable while stopped; use the
+management API or `lc set filter --file` import while running. Restart loads
+stopped-node edits; there is no live file watcher.
+
+Encrypted envelopes authenticate their format, purpose, key ID and store/object
+identity. Sensitive snapshot contents are encrypted before any temporary output.
+Independently authenticated `.usage-*` ledgers reserve encryption usage durably;
+preserve them with the store, including old-key ledgers. Deleting a ledger or
+reusing its key in an independently initialized store can invalidate the usage
+bound. Authentication or ownership failures stop the affected operation. An
+uncertain durable write requires reconciliation with the node stopped; do not
+treat it as a failed write that can safely be repeated. Interrupted offline
+migrations require their original metadata and the identical command with
+`--resume`.
+
+Back up the complete stopped store and its required sidecars consistently; keep
+keys separately controlled and retain every key needed by required backups.
+Administrative migration preserves its store identity, generation watermarks and
+the original RADIUS correlation allocator path. That allocator remains a separate
+unencrypted file and must retain its counter history. A coherent old backup is
+not detected as rollback by encryption alone: authorization must be reconciled
+before delivery. Older binaries cannot read these encrypted snapshots. Downgrade
+requires a coordinated compatible backup restore; there is no automatic plaintext
+export or fallback.
+
+This protects stored snapshot copies when their keys remain separately protected.
+It does not encrypt PCAPs, structured logs, event spools or explicit export files,
+remove plaintext from authorized process memory, or guarantee physical erasure of
+earlier plaintext copies. Operators must account for those copies and backups
+separately. Persistent X3 remains under implementation; do not infer X3 durability
+from the snapshot encryption features described here.
+
 ## PCAP File Encryption
 
 ### Purpose
 
 PCAP files contain complete network traffic, including:
+
 - SIP signaling data
 - RTP media streams
 - Authentication credentials
@@ -645,16 +714,17 @@ Encrypted PCAP files use this structure:
 ```yaml
 voip:
   security:
-    enable_pcap_encryption: true      # Enable PCAP encryption
+    enable_pcap_encryption: true # Enable PCAP encryption
   encryption:
-    enabled: true                     # Master encryption toggle
-    key_file: "/etc/lippycat/keys/pcap.key"  # Key file path
-    algorithm: "aes-256-gcm"         # Encryption algorithm
-    key_derive: "pbkdf2"             # Key derivation method
-    pbkdf2_iterations: 100000        # PBKDF2 iterations
+    enabled: true # Master encryption toggle
+    key_file: "/etc/lippycat/keys/pcap.key" # Key file path
+    algorithm: "aes-256-gcm" # Encryption algorithm
+    key_derive: "pbkdf2" # Key derivation method
+    pbkdf2_iterations: 100000 # PBKDF2 iterations
 ```
 
 **Parameters:**
+
 - `enable_pcap_encryption`: Master toggle for PCAP encryption
 - `key_file`: Path to encryption key file (auto-generated if missing)
 - `algorithm`: Encryption algorithm (only "aes-256-gcm" supported)
@@ -759,6 +829,7 @@ voip:
 - Async PCAP writer output
 
 **File Permission Details:**
+
 - **Owner**: Read and write access only
 - **Group**: No access
 - **Others**: No access
@@ -766,10 +837,12 @@ voip:
 This ensures that only the user running lippycat (typically root or a dedicated service account) can read the captured traffic data.
 
 **Recommended Directory Permissions:**
+
 - PCAP output directory: `0700` (drwx------)
 - Ensures directory browsing is also restricted
 
 **Example Setup:**
+
 ```bash
 # Create secure PCAP directory
 sudo mkdir -p /var/lib/lippycat/pcaps
@@ -810,6 +883,7 @@ ls -l /var/lib/lippycat/pcaps/*.pcap
 ### Compliance
 
 These features help with:
+
 - **GDPR**: Call-ID sanitization reduces PII in logs
 - **HIPAA**: Encryption protects healthcare communications
 - **SOX**: Data integrity through authenticated encryption
@@ -820,18 +894,22 @@ These features help with:
 ### Common Issues
 
 #### "Encryption key file not found"
+
 **Cause**: Key file path doesn't exist or lacks permissions
 **Solution**: Check path and permissions, or let lippycat generate automatically
 
 #### "Failed to decrypt data"
+
 **Cause**: Wrong key file or corrupted data
 **Solution**: Verify key file matches the one used for encryption
 
 #### "Unsupported encryption algorithm"
+
 **Cause**: Configuration specifies unsupported algorithm
 **Solution**: Use "aes-256-gcm" (only supported algorithm)
 
 #### "PBKDF2 iterations too low"
+
 **Cause**: Less than 10,000 iterations configured
 **Solution**: Use at least 10,000 iterations (100,000+ recommended)
 
@@ -883,12 +961,14 @@ journalctl -u lippycat | grep -i "encryption\|sanitiz"
 ### Enabling Security Features
 
 1. **Update Configuration**
+
    ```bash
    # Add security section to config
    vim /etc/lippycat/config.yaml
    ```
 
 2. **Test in Development**
+
    ```bash
    # Test with sample traffic
    lc sniff --config dev-secure.yaml
@@ -920,6 +1000,7 @@ This restores original behavior with no performance overhead.
 ### Purpose
 
 SIP messages can include Content-Length headers that specify the size of message bodies. Without proper validation, attackers can:
+
 - Cause memory exhaustion by specifying enormous Content-Length values
 - Trigger integer overflow conditions
 - Consume excessive server resources through DoS attacks
@@ -938,11 +1019,12 @@ Content-Length bounds validation provides multiple layers of protection:
 ```yaml
 voip:
   security:
-    max_content_length: 1048576     # Maximum Content-Length value (1MB)
-    max_message_size: 2097152       # Maximum total SIP message size (2MB)
+    max_content_length: 1048576 # Maximum Content-Length value (1MB)
+    max_message_size: 2097152 # Maximum total SIP message size (2MB)
 ```
 
 **Parameters:**
+
 - `max_content_length`: Maximum allowed Content-Length header value in bytes
 - `max_message_size`: Maximum allowed total SIP message size in bytes
 
@@ -951,6 +1033,7 @@ voip:
 #### Content-Length Parsing
 
 The secure parser validates:
+
 - String length (max 10 characters to prevent overflow)
 - Numeric format (digits only, stops at first non-digit)
 - Integer overflow protection during conversion
@@ -1010,27 +1093,30 @@ if err := ValidateMessageSize(len(messageBytes)); err != nil {
 ### Configuration Examples
 
 #### Development Environment
+
 ```yaml
 voip:
   security:
-    max_content_length: 10485760    # 10MB - generous for development
-    max_message_size: 20971520      # 20MB - generous for development
+    max_content_length: 10485760 # 10MB - generous for development
+    max_message_size: 20971520 # 20MB - generous for development
 ```
 
 #### Production Environment
+
 ```yaml
 voip:
   security:
-    max_content_length: 1048576     # 1MB - reasonable for production
-    max_message_size: 2097152       # 2MB - reasonable for production
+    max_content_length: 1048576 # 1MB - reasonable for production
+    max_message_size: 2097152 # 2MB - reasonable for production
 ```
 
 #### High-Security Environment
+
 ```yaml
 voip:
   security:
-    max_content_length: 65536       # 64KB - strict limit
-    max_message_size: 131072        # 128KB - strict limit
+    max_content_length: 65536 # 64KB - strict limit
+    max_message_size: 131072 # 128KB - strict limit
 ```
 
 ### Performance Impact
@@ -1046,28 +1132,36 @@ The security benefits far outweigh the minimal performance cost.
 ### Common Content-Length Attack Vectors
 
 #### Memory Exhaustion
+
 ```
 Content-Length: 1073741824
 ```
-*Attempts to allocate 1GB of memory*
+
+_Attempts to allocate 1GB of memory_
 
 #### Integer Overflow
+
 ```
 Content-Length: 999999999999999999
 ```
-*Attempts to cause integer overflow during parsing*
+
+_Attempts to cause integer overflow during parsing_
 
 #### Resource Consumption
+
 ```
 Content-Length: 2147483647
 ```
-*Attempts to consume maximum possible memory*
+
+_Attempts to consume maximum possible memory_
 
 #### Format Attacks
+
 ```
 Content-Length: 123456789012345678901234567890
 ```
-*Attempts to exhaust parsing resources with long strings*
+
+_Attempts to exhaust parsing resources with long strings_
 
 All of these attacks are prevented by the bounds validation system.
 
@@ -1082,6 +1176,7 @@ Virtual interface creation requires elevated privileges. Follow these guidelines
 Creating TAP/TUN devices requires the `CAP_NET_ADMIN` Linux capability.
 
 **Required for:**
+
 - `lc sniff --virtual-interface`
 - `lc sniff voip --virtual-interface`
 - `lc process --virtual-interface`
@@ -1103,12 +1198,14 @@ lc sniff voip -i eth0 --virtual-interface
 ```
 
 **Security benefits:**
+
 - Process runs as regular user (not root)
 - Only `CAP_NET_ADMIN` capability is granted (not all root capabilities)
 - Capability is effective only when needed
 - Follows principle of least privilege
 
 **Capability is used for:**
+
 1. Creating TAP/TUN device via netlink
 2. Bringing interface up (`ip link set up`)
 3. Opening `/dev/net/tun` for packet injection
@@ -1120,12 +1217,14 @@ sudo lc sniff voip -i eth0 --virtual-interface
 ```
 
 **Security drawbacks:**
+
 - Entire process runs with full root privileges
 - Increased attack surface if process is compromised
 - Violates principle of least privilege
 - Not necessary with file capabilities
 
 **Only use when:**
+
 - File capabilities are not available
 - Testing in containerized/isolated environments
 
@@ -1136,6 +1235,7 @@ sudo lc sniff voip -i eth0 --virtual-interface
 For maximum security when running as root, lippycat can automatically drop privileges to a non-privileged user after creating the virtual interface.
 
 **How it works:**
+
 1. Process starts as root (or with `CAP_NET_ADMIN`)
 2. Virtual interface is created and brought up
 3. Process drops to specified user's UID/GID
@@ -1164,27 +1264,32 @@ virtual_interface:
 ```
 
 **Requirements:**
+
 - Must run as root (UID 0) for privilege dropping to work
 - Target user must exist on the system
 - Go 1.16+ (privilege dropping fixed in Go 1.16)
 
 **Security benefits:**
+
 - Minimizes attack surface after interface creation
 - Follows principle of least privilege
 - Injection loop runs as unprivileged user
 - Limits damage from potential process compromise
 
 **Limitations:**
+
 - Only works on Linux (no-op on other platforms)
 - Requires running as root initially
 - File capabilities (`setcap`) are still preferred for most use cases
 
 **When to use:**
+
 - Production deployments requiring maximum isolation
 - Environments with strict security policies
 - When combined with other security features (network namespaces, seccomp, etc.)
 
 **When NOT to use:**
+
 - If you can use file capabilities instead (`setcap cap_net_admin+ep`)
 - Non-root deployments (privilege dropping is skipped)
 - macOS/Windows (not supported)
@@ -1198,6 +1303,7 @@ ERROR Failed to create virtual interface: operation not permitted
 ```
 
 **Diagnosis:**
+
 ```bash
 # Check if CAP_NET_ADMIN is set
 getcap /usr/local/bin/lc
@@ -1207,6 +1313,7 @@ id -u  # Should show non-zero for regular user
 ```
 
 **Solution:**
+
 ```bash
 # Set file capability
 sudo setcap cap_net_admin+ep /usr/local/bin/lc
@@ -1252,6 +1359,7 @@ sudo ip netns exec lippycat-isolated wireshark -i lc0
 ```
 
 **Benefits:**
+
 - Complete isolation from host network stack
 - Prevents unauthorized sniffing of virtual interface traffic
 - Container-like security model
@@ -1259,6 +1367,7 @@ sudo ip netns exec lippycat-isolated wireshark -i lc0
 - Additional layer of defense against privilege escalation
 
 **Requirements:**
+
 - `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` capabilities (or run as root)
 - Network namespace must exist before starting lippycat
 
@@ -1411,6 +1520,7 @@ processor:
 ```
 
 **Security implications:**
+
 - Interface is completely isolated from the default namespace
 - Only processes running in the target namespace can access the interface
 - Namespace provides additional containment boundary
@@ -1419,11 +1529,13 @@ processor:
 ### Packet Integrity
 
 Virtual interfaces only expose packets that:
+
 1. Pass lippycat's capture filters
 2. Pass protocol-specific filters (e.g., `--sipuser`)
 3. Have valid checksums and headers
 
 **Packets are NOT injected if:**
+
 - Conversion to Ethernet/IP fails
 - Payload is missing or malformed
 - Injection queue is full (dropped, not delayed)
@@ -1451,12 +1563,14 @@ CMD ["lc", "sniff", "voip", "--virtual-interface"]
 ```
 
 **Docker run with required privileges:**
+
 ```bash
 # Grant CAP_NET_ADMIN to container
 docker run --cap-add=NET_ADMIN lippycat:latest
 ```
 
 **Kubernetes deployment:**
+
 ```yaml
 apiVersion: v1
 kind: Pod
@@ -1464,14 +1578,14 @@ metadata:
   name: lippycat
 spec:
   containers:
-  - name: lippycat
-    image: lippycat:latest
-    securityContext:
-      capabilities:
-        add:
-        - NET_ADMIN
-      runAsNonRoot: true
-      runAsUser: 1000
+    - name: lippycat
+      image: lippycat:latest
+      securityContext:
+        capabilities:
+          add:
+            - NET_ADMIN
+        runAsNonRoot: true
+        runAsUser: 1000
 ```
 
 ### Security Checklist
@@ -1495,6 +1609,7 @@ Before deploying virtual interface in production:
 ### Threat Model
 
 **Threats mitigated:**
+
 - Unauthorized packet capture (via filtered stream)
 - Privilege escalation (file capabilities vs. root)
 - Memory exhaustion (bounded injection queue)
@@ -1503,16 +1618,17 @@ Before deploying virtual interface in production:
 - Unauthorized user access (group-based access control with sudo policies)
 
 **Threats NOT mitigated (future work):**
+
 - Packet tampering (read-only TAP/TUN, no ingress)
 - Resource exhaustion by malicious tools (Phase 3: rate limiting)
 - Side-channel attacks via packet timing analysis
 
 ### Performance vs. Security Trade-offs
 
-| Setting | Security | Performance | Recommendation |
-|---------|----------|-------------|----------------|
-| `--vif-buffer-size 1024` | High (low memory) | Lower throughput | High-security environments |
-| `--vif-buffer-size 4096` | Balanced | Balanced | Default (recommended) |
-| `--vif-buffer-size 16384` | Lower (high memory) | Higher throughput | Trusted environments only |
+| Setting                   | Security            | Performance       | Recommendation             |
+| ------------------------- | ------------------- | ----------------- | -------------------------- |
+| `--vif-buffer-size 1024`  | High (low memory)   | Lower throughput  | High-security environments |
+| `--vif-buffer-size 4096`  | Balanced            | Balanced          | Default (recommended)      |
+| `--vif-buffer-size 16384` | Lower (high memory) | Higher throughput | Trusted environments only  |
 
 **Guideline:** Use default buffer size unless justified by specific requirements.

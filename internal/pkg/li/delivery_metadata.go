@@ -17,8 +17,10 @@ type DeliveryMetadata struct {
 	AdmittedAt       time.Time
 	CapturedAt       time.Time
 	Deadline         time.Time
-	// TaskEndAt is a runtime claim cutoff, distinct from the original product
-	// retention deadline. Recovered work must receive current policy facts.
+	// TaskEndAt is the effective task authorization cutoff: EndTime only when
+	// ImplicitDeactivationAllowed is true, zero otherwise. It is independent of
+	// the original product retention deadline. Recovered work receives current
+	// committed policy facts; packet metadata cannot extend remembered authority.
 	TaskEndAt             time.Time
 	TaskGeneration        uint64
 	DestinationGeneration uint64

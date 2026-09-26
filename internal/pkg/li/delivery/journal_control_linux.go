@@ -319,6 +319,16 @@ func (s *journalSegments) writeControls(controls []journalControl) (securestore.
 	if len(controls) == 0 {
 		return securestore.Committed, nil
 	}
+	// Reclaim discharged task controls before accepting a new bounded identity.
+	// The selected control replacement must commit before memory is reclaimed.
+	s.j.mu.Lock()
+	atCapacity := len(s.controls)+len(controls) >= journalControlIdentities
+	s.j.mu.Unlock()
+	if atCapacity {
+		if err := s.pruneTaskControls(); err != nil {
+			return securestore.NotCommitted, err
+		}
+	}
 	ordinary := s.deferCatalog
 	for _, c := range controls {
 		ordinary = ordinary || c.Kind == "sequence" || c.Kind == "call_open"
@@ -385,6 +395,9 @@ func (s *journalSegments) controlLoop() {
 					}
 					if err == nil {
 						err = s.compactExpiredExtent()
+					}
+					if err == nil {
+						err = s.pruneTaskControls()
 					}
 				}
 				s.ioMu.Unlock()

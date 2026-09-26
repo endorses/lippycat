@@ -22,7 +22,7 @@ func (c *Client) initJournal() {
 	x2, x3 := c.config.EffectiveQueueSizes()
 	configs := []JournalConfig{
 		{PreserveSequences: true, Dir: c.config.X2SpoolDir, KeyFile: c.config.X2SpoolKeyFile, KeyID: c.config.X2SpoolKeyID, LegacyKeyID: c.config.X2SpoolLegacyKeyID, ReadKeys: c.config.X2SpoolReadKeys, ValidateKeys: c.config.X2SpoolValidateKeys, MaxBytes: c.config.X2SpoolMaxBytes, MaxPending: x2, MaxRecords: int(min(c.config.X2SpoolMaxBytes/4096, 1_000_000)), StateIncarnation: c.config.StateIncarnation},
-		{PreserveSequences: true, Interface: PDUTypeX3, Dir: c.config.X3SpoolDir, KeyFile: c.config.X3SpoolKeyFile, KeyID: c.config.X3SpoolKeyID, ReadKeys: c.config.X3SpoolReadKeys, ValidateKeys: c.config.X3SpoolValidateKeys, MaxBytes: c.config.X3SpoolMaxBytes, MaxPending: x3, MaxRecords: 2_000_000, StateIncarnation: c.config.StateIncarnation, MaxAge: c.config.X3MaxAge},
+		{AuthoritativeTaskAuthorization: c.config.AuthoritativeTaskAuthorization, PreserveSequences: true, Interface: PDUTypeX3, Dir: c.config.X3SpoolDir, KeyFile: c.config.X3SpoolKeyFile, KeyID: c.config.X3SpoolKeyID, ReadKeys: c.config.X3SpoolReadKeys, ValidateKeys: c.config.X3SpoolValidateKeys, MaxBytes: c.config.X3SpoolMaxBytes, MaxPending: x3, MaxRecords: 2_000_000, StateIncarnation: c.config.StateIncarnation, MaxAge: c.config.X3MaxAge},
 	}
 	if c.config.X3SpoolDir != "" {
 		configs[0].Interface = PDUTypeX2

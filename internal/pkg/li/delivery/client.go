@@ -77,6 +77,10 @@ type deliveryItem struct {
 }
 
 type ClientConfig struct {
+	// AuthoritativeTaskAuthorization requires ordered committed task publication.
+	// Unknown generations fail closed; legacy metadata-only clients retain tombstones.
+	AuthoritativeTaskAuthorization bool
+
 	X3SpoolDir            string
 	X3SpoolMaxBytes       int64
 	X3SpoolKeyFile        string
@@ -198,6 +202,7 @@ type DestinationDeliveryStats struct {
 type destinationQueue struct {
 	expiry          expiryHeap
 	nextExpiry      time.Time
+	taskRevision    uint64
 	capacities      [2]int
 	workers         sync.WaitGroup
 	expiryNotify    chan struct{}
@@ -471,6 +476,10 @@ type Client struct {
 	closedCalls         map[li.DeliveryCallIdentity]bool
 	acceptedCalls       map[li.DeliveryCallIdentity]bool
 	preparedCalls       map[li.DeliveryCallIdentity]int
+	taskNotify          chan struct{}
+	taskStop            chan struct{}
+	taskRevision        atomic.Uint64
+	currentTasks        map[uuid.UUID]uint64
 	taskFacts           map[x3TaskIdentity]time.Time
 	revokedTasks        map[x3TaskIdentity]bool
 	expiredTaskControls map[x3TaskIdentity]bool
@@ -525,8 +534,8 @@ func NewClient(manager *Manager, config ClientConfig) *Client {
 		config.RetrySuccessThreshold = defaults.RetrySuccessThreshold
 	}
 	c := &Client{outcomes: make(map[string]uint64), outcomeBytes: make(map[string]uint64),
-		manager: manager,
-		revoked: make(map[uuid.UUID]*li.StateRevocation), closedCalls: make(map[li.DeliveryCallIdentity]bool), acceptedCalls: make(map[li.DeliveryCallIdentity]bool), preparedCalls: make(map[li.DeliveryCallIdentity]int), taskFacts: make(map[x3TaskIdentity]time.Time), revokedTasks: make(map[x3TaskIdentity]bool), expiredTaskControls: make(map[x3TaskIdentity]bool),
+		manager: manager, taskNotify: make(chan struct{}, 1), taskStop: make(chan struct{}),
+		revoked: make(map[uuid.UUID]*li.StateRevocation), closedCalls: make(map[li.DeliveryCallIdentity]bool), acceptedCalls: make(map[li.DeliveryCallIdentity]bool), preparedCalls: make(map[li.DeliveryCallIdentity]int), currentTasks: make(map[uuid.UUID]uint64), taskFacts: make(map[x3TaskIdentity]time.Time), revokedTasks: make(map[x3TaskIdentity]bool), expiredTaskControls: make(map[x3TaskIdentity]bool),
 		config: config,
 		queues: make(map[uuid.UUID]*destinationQueue),
 	}
@@ -547,6 +556,10 @@ func (c *Client) Start() {
 	for _, q := range c.queues {
 		c.startDispatcher(q)
 	}
+	if c.config.AuthoritativeTaskAuthorization {
+		c.wg.Add(1)
+		go c.taskAuthorizationDispatcher()
+	}
 	if c.x3Journal != nil {
 		c.wg.Add(1)
 		go c.sweepTaskCutoffs()
@@ -561,6 +574,7 @@ func (c *Client) Stop() {
 	c.stopOnce.Do(func() {
 		c.admissionMu.Lock()
 		c.stopped.Store(true)
+		close(c.taskStop)
 		c.admissionMu.Unlock()
 		deadline := time.Now().Add(c.config.ShutdownTimeout)
 		for c.started.Load() && c.QueueDepth() > 0 && time.Now().Before(deadline) {
@@ -1384,13 +1398,18 @@ func (c *Client) sendSync(ctx context.Context, t PDUType, xid uuid.UUID, destIDs
 // CancelTask and CancelCall suppress matching X3 generations; X2 is retained.
 func (c *Client) CancelTask(xid uuid.UUID, generation uint64) {
 	c.gateMu.Lock()
-	if len(c.revokedTasks) >= maxDeliveryGateIdentities {
-		if !c.revokedTasks[x3TaskIdentity{xid, generation}] {
-			c.gateFault = true
+	key := x3TaskIdentity{xid, generation}
+	_, known := c.taskFacts[key]
+	if !c.config.AuthoritativeTaskAuthorization || known {
+		if len(c.revokedTasks) >= maxDeliveryGateIdentities {
+			if !c.revokedTasks[key] {
+				c.gateFault = true
+			}
+		} else {
+			c.revokedTasks[key] = true
 		}
-	} else {
-		c.revokedTasks[x3TaskIdentity{xid, generation}] = true
 	}
+	c.taskAuthorizationChanged()
 	c.gateMu.Unlock()
 	c.cancelMatching(func(item *deliveryItem) bool { return item.xid == xid && item.metadata.TaskGeneration == generation })
 }
@@ -1463,10 +1482,30 @@ func (c *Client) expireQueued(q *destinationQueue) {
 	var cancels []context.CancelFunc
 	now := time.Now()
 	q.mu.Lock()
+	// Committed publication updates facts only. Queue owners rebuild their heap
+	// lazily; recheck each expired candidate so an obsolete cutoff cannot drop
+	// content after an extension committed before that cutoff.
+	if revision := c.taskRevision.Load(); revision != q.taskRevision {
+		for e := q.items[1].Front(); e != nil; e = e.Next() {
+			item := e.Value.(*deliveryItem)
+			q.removeExpiryLocked(item)
+			item.eligibilityDeadline = c.effectiveExpiry(item)
+			if !c.itemEligible(q.did, item, false) {
+				item.eligibilityDeadline = now
+			}
+			q.observeDeadlineLocked(item)
+		}
+		q.taskRevision = revision
+	}
 	for {
 		item := q.takeExpiredLocked(now)
 		if item == nil {
 			break
+		}
+		if c.itemEligible(q.did, item, false) {
+			item.eligibilityDeadline = c.effectiveExpiry(item)
+			q.observeDeadlineLocked(item)
+			continue
 		}
 		if item.claimed {
 			item.canceled.Store(true)

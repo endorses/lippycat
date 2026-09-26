@@ -28,13 +28,15 @@ import (
 // This fixture uses the actual Processor startup, encrypted owners, ADMF XML,
 // packet encoder, reorder callbacks, journal and restart approval path.
 type persistentProcessorFixture struct {
-	config      Config
-	xid, did    uuid.UUID
-	address     string
-	mu          sync.Mutex
-	target      string
-	port        int
-	includeTask bool
+	config               Config
+	xid, did             uuid.UUID
+	address              string
+	mu                   sync.Mutex
+	target               string
+	port                 int
+	includeTask          bool
+	endTime              time.Time
+	explicitDeactivation bool
 }
 
 func TestProcessorX3ReplayPolicyWiring(t *testing.T) {
@@ -86,6 +88,9 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 		f.mu.Lock()
 		xid, did, target, ip := schema.UUID(f.xid.String()), schema.UUID(f.did.String()), schema.SIPURI(f.target), "127.0.0.1"
 		implicit := true
+		if f.explicitDeactivation {
+			implicit = false
+		}
 		response := schema.GetAllDetailsResponse{
 			ListOfTaskResponseDetails: &schema.ListOfTaskResponseDetails{},
 			ListOfDestinationResponseDetails: &schema.ListOfDestinationResponseDetails{DestinationResponseDetails: []*schema.DestinationResponseDetails{{DestinationDetails: &schema.DestinationDetails{
@@ -93,8 +98,15 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 			}}}},
 		}
 		if f.includeTask {
+			var end *schema.QualifiedMicrosecondDateTime
+			var mediation *schema.ListOfMediationDetails
+			if !f.endTime.IsZero() {
+				value := schema.QualifiedMicrosecondDateTime(f.endTime.Format(time.RFC3339Nano))
+				end = &value
+				mediation = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{{DeliveryType: "HI3Only", EndTime: end}}}
+			}
 			response.ListOfTaskResponseDetails.TaskResponseDetails = []*schema.TaskResponseDetails{{TaskDetails: &schema.TaskDetails{
-				XId: &xid, DeliveryType: "X3Only", ImplicitDeactivationAllowed: &implicit,
+				XId: &xid, DeliveryType: "X3Only", ImplicitDeactivationAllowed: &implicit, ListOfMediationDetails: mediation,
 				TargetIdentifiers: &schema.ListOfTargetIdentifiers{TargetIdentifier: []*schema.TargetIdentifier{{SipUri: &target}}}, ListOfDIDs: &schema.ListOfDids{DId: []*schema.UUID{&did}},
 			}, TaskStatus: &schema.TaskStatus{ProvisioningStatus: "active"}}}
 		}

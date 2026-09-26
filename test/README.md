@@ -90,6 +90,19 @@ Tests for protocol detection accuracy, false positive rates, and edge cases.
 
 ## Running the Tests
 
+### LI Lifecycle and Processor Regression Tests
+
+Processor tests require a role build tag as well as `li`. Use `all,li` to include
+the complete processor path; `-tags li` alone does not select that role.
+
+```bash
+go test -tags all,li ./internal/pkg/li/... ./internal/pkg/processor/...
+go test -race -tags all,li ./internal/pkg/li/delivery ./internal/pkg/processor
+
+# Compile the same packages without LI.
+go test -tags all -run '^$' ./internal/pkg/li/... ./internal/pkg/processor/...
+```
+
 ### Run All Integration Tests
 
 ```bash

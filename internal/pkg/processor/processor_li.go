@@ -309,7 +309,7 @@ func (p *Processor) initLIRuntime() {
 		if li.IsRADIUSTask(task) {
 			return
 		}
-		metadata := li.DeliveryMetadata{StateIncarnation: p.liManager.StateIncarnation(), AdmittedAt: time.Now(), CapturedAt: pkt.Timestamp, TaskGeneration: task.ActivationGeneration, TaskEndAt: task.EndTime}
+		metadata := li.DeliveryMetadata{StateIncarnation: p.liManager.StateIncarnation(), AdmittedAt: time.Now(), CapturedAt: pkt.Timestamp, TaskGeneration: task.ActivationGeneration, TaskEndAt: li.TaskAuthorizationCutoff(task)}
 		if shared, ok := p.liPacketAdmissions.Load(pkt); ok {
 			admission := shared.(*CallAdmission)
 			metadata.AdmittedAt = admission.admittedAt
@@ -708,6 +708,7 @@ func (p *Processor) prepareLIStorageOnce() error {
 	}
 	if p.liStorage.manager != nil {
 		config := p.liDeliveryConfig()
+		config.AuthoritativeTaskAuthorization = true
 		config.X2SpoolValidateKeys = validateJournalKeys
 		config.X3SpoolValidateKeys = validateJournalKeys
 		config.StateIncarnation = p.liManager.StateIncarnation()
@@ -723,12 +724,10 @@ func (p *Processor) prepareLIStorageOnce() error {
 			if err := p.liManager.SetDurableRevoker(p.liStorage.client.DurableRevoker()); err != nil {
 				return err
 			}
-			p.liManager.SetCommittedTaskCallback(func(task *li.InterceptTask) {
-				if task.Status == li.TaskStatusActive {
-					p.liStorage.client.SetX3TaskAuthorization(task.XID, task.ActivationGeneration, task.EndTime)
-				}
-			})
 		}
+		p.liManager.SetCommittedTaskCallback(func(task *li.InterceptTask) {
+			p.liStorage.client.PublishX3TaskAuthorization(task)
+		})
 	}
 
 	return nil

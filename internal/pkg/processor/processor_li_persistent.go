@@ -60,7 +60,7 @@ func (p *Processor) newRTPProvenance(pkt *types.PacketDisplay) (li.DeliveryProve
 // bounded fan-out. Delayed callbacks use only their one-use accepted permit.
 func (p *Processor) deliverPersistentX3(task *li.InterceptTask, pkt *types.PacketDisplay, data []byte, metadata li.DeliveryMetadata, admission *CallAdmission) {
 	metadata.StateIncarnation = p.liManager.StateIncarnation()
-	metadata.TaskEndAt = task.EndTime
+	metadata.TaskEndAt = li.TaskAuthorizationCutoff(task)
 	metadata.Deadline = metadata.AdmittedAt.Add(p.config.LIDeliveryX3MaxAge)
 	metadata.CallID = pkt.VoIPData.CallID
 	if admission != nil {
@@ -145,6 +145,9 @@ func (p *Processor) authorizePersistentX3Replay(record delivery.JournalRecord) b
 	if err != nil || !task.IsActive() || task.ActivationGeneration != record.TaskGeneration {
 		return false
 	}
+	if cutoff := li.TaskAuthorizationCutoff(task); !cutoff.IsZero() && !time.Now().Before(cutoff) {
+		return false
+	}
 	member := false
 	for _, did := range task.DestinationIDs {
 		if did == record.DID {
@@ -159,6 +162,7 @@ func (p *Processor) authorizePersistentX3Replay(record delivery.JournalRecord) b
 	if err != nil || !destination.X3Enabled || li.DestinationDeliveryGeneration(destination) != record.DestinationGeneration {
 		return false
 	}
-	liDeliveryClient.SetX3TaskAuthorization(record.XID, record.TaskGeneration, task.EndTime)
+	// Committed publication owns delivery facts. This snapshot may race a newer
+	// timing modification, so replay must never write it back into the gate.
 	return true
 }

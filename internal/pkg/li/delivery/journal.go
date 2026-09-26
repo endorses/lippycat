@@ -42,6 +42,11 @@ type JournalConfig struct {
 	StateIncarnation uuid.UUID
 	MaxAge           time.Duration
 
+	// AuthoritativeTaskAuthorization permits retirement of discharged task
+	// revocations. The owner must reject unknown and withdrawn task generations
+	// before journal admission; metadata-only embeddings must leave this false.
+	AuthoritativeTaskAuthorization bool
+
 	PreserveSequences  bool
 	Dir, KeyFile       string
 	KeyID, LegacyKeyID string

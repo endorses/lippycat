@@ -26,7 +26,7 @@ type x3TaskIdentity struct {
 // committed task fact yet. Later packet metadata cannot extend that cutoff;
 // only the committed control-plane publication updates an existing fact.
 func (c *Client) rememberX3TaskAuthorization(xid uuid.UUID, generation uint64, end time.Time) {
-	if end.IsZero() {
+	if c.config.AuthoritativeTaskAuthorization || end.IsZero() {
 		return
 	}
 	c.gateMu.Lock()
@@ -45,6 +45,12 @@ func (c *Client) rememberX3TaskAuthorization(xid uuid.UUID, generation uint64, e
 func (c *Client) SetX3TaskAuthorization(xid uuid.UUID, generation uint64, end time.Time) {
 	c.gateMu.Lock()
 	key := x3TaskIdentity{xid, generation}
+	if c.config.AuthoritativeTaskAuthorization {
+		if _, known := c.taskFacts[key]; !known {
+			c.gateMu.Unlock()
+			return
+		}
+	}
 	if len(c.taskFacts) >= maxDeliveryGateIdentities {
 		if _, exists := c.taskFacts[key]; !exists {
 			c.gateFault = true
@@ -62,7 +68,11 @@ func (c *Client) SetX3TaskAuthorization(xid uuid.UUID, generation uint64, end ti
 	}
 	c.taskFacts[key] = end
 	blocked := c.revokedTasks[key]
+	c.taskAuthorizationChanged()
 	c.gateMu.Unlock()
+	if c.config.AuthoritativeTaskAuthorization {
+		return
+	}
 	var cancels []context.CancelFunc
 	c.queuesMu.RLock()
 	for _, q := range c.queues {
@@ -139,7 +149,9 @@ func (c *Client) sweepTaskCutoffs() {
 				return
 			}
 			c.gateMu.Lock()
-			c.expiredTaskControls[key] = true
+			if _, retained := c.taskFacts[key]; retained {
+				c.expiredTaskControls[key] = true
+			}
 			c.gateMu.Unlock()
 		}
 		<-ticker.C
@@ -191,6 +203,9 @@ func (c *Client) itemEligible(did uuid.UUID, item *deliveryItem, newAdmission bo
 		return false
 	}
 	end, ok := c.taskFacts[x3TaskIdentity{item.xid, m.TaskGeneration}]
+	if !ok && c.config.AuthoritativeTaskAuthorization {
+		return false
+	}
 	if !ok {
 		end = m.TaskEndAt
 	}
@@ -477,6 +492,13 @@ func (d *clientDurableRevoker) Commit(controls []*li.StateRevocation) (outcome s
 	}
 	for _, control := range controls {
 		c.revoked[control.ControlID] = copyDeliveryControl(control)
+		if c.config.AuthoritativeTaskAuthorization && control.Scope == li.StateRevokeTask {
+			key := x3TaskIdentity{*control.XID, *control.TaskGeneration}
+			if _, known := c.taskFacts[key]; known {
+				c.revokedTasks[key] = true
+			}
+			c.taskAuthorizationChanged()
+		}
 	}
 	c.gateMu.Unlock()
 	// Block memory and pending callbacks before any filesystem operation. A failed
@@ -516,6 +538,18 @@ func (d *clientDurableRevoker) Commit(controls []*li.StateRevocation) (outcome s
 			}
 			return outcome, errors.Join(err, fmt.Errorf("revocation control did not fully commit"))
 		}
+	}
+	// Authoritative task facts (or their absence) reject every old generation.
+	// The journal owns durable controls until disk/pending obligations drain;
+	// the client need not retain a second lifetime copy after commit succeeds.
+	if c.config.AuthoritativeTaskAuthorization {
+		c.gateMu.Lock()
+		for _, control := range controls {
+			if control.Scope == li.StateRevokeTask {
+				delete(c.revoked, control.ControlID)
+			}
+		}
+		c.gateMu.Unlock()
 	}
 	return securestore.Committed, nil
 }

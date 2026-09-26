@@ -8,6 +8,8 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/endorses/lippycat/internal/pkg/li"
+
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/google/uuid"
 )
@@ -155,12 +157,22 @@ func (s *journalSegments) retireSelected(old []journalSegmentRef) error {
 			continue
 		}
 		contains := false
+		remaining := make([]journalFragmentLocation, 0, len(loc.chunks))
 		for _, c := range loc.chunks {
 			if removed[c.segment] {
 				contains = true
+			} else {
+				remaining = append(remaining, c)
 			}
 		}
 		if contains {
+			// A terminal product can span multiple selected extents. Preserve its
+			// identity until every fragment has left durable catalog selection.
+			if len(remaining) != 0 {
+				loc.chunks = remaining
+				s.locations[id] = loc
+				continue
+			}
 			s.indexBytes -= loc.charge
 			delete(s.locations, id)
 			if s.terminals[id] != "" {
@@ -174,8 +186,48 @@ func (s *journalSegments) retireSelected(old []journalSegmentRef) error {
 		return err
 	}
 	s.publishBytes()
-	return nil
+	return s.pruneTaskControls()
 }
+
+// Caller holds ioMu. Selected data locations remain obligations even after
+// their records become terminal: recovery could encounter those bytes until
+// catalog publication retires the extents. Anonymous reservations require the
+// conservative condition that every pending producer has drained. Authoritative
+// owners prevent later admissions from reopening a withdrawn generation.
+func (s *journalSegments) dischargedTaskControlsLocked() (map[string]bool, error) {
+	if !s.j.cfg.AuthoritativeTaskAuthorization || s.reservations != 0 || s.j.stats.Pending != 0 {
+		return nil, nil
+	}
+	retained := make(map[x3TaskIdentity]bool)
+	for _, loc := range s.locations {
+		r, _, err := decodeRecordMetadata(loc.metadata)
+		if err != nil {
+			return nil, err
+		}
+		retained[x3TaskIdentity{r.XID, r.TaskGeneration}] = true
+	}
+	retired := make(map[string]bool)
+	for key, c := range s.controls {
+		if c.Revocation != nil && c.Revocation.Scope == li.StateRevokeTask && !retained[x3TaskIdentity{*c.Revocation.XID, *c.Revocation.TaskGeneration}] {
+			retired[key] = true
+		}
+	}
+	return retired, nil
+}
+
+func (s *journalSegments) pruneTaskControls() error {
+	if s.compacting || !s.j.cfg.AuthoritativeTaskAuthorization {
+		return nil
+	}
+	s.j.mu.Lock()
+	retired, err := s.dischargedTaskControlsLocked()
+	s.j.mu.Unlock()
+	if err != nil || len(retired) == 0 {
+		return err
+	}
+	return s.compactControls()
+}
+
 func (s *journalSegments) compactControls() error {
 	if s.compacting {
 		return ErrJournalFull
@@ -183,9 +235,16 @@ func (s *journalSegments) compactControls() error {
 	s.compacting = true
 	defer func() { s.compacting = false }()
 	s.j.mu.Lock()
+	retired, err := s.dischargedTaskControlsLocked()
+	if err != nil {
+		s.j.mu.Unlock()
+		return err
+	}
 	var controls []journalControl
-	for _, c := range s.controls {
-		controls = append(controls, c)
+	for key, c := range s.controls {
+		if !retired[key] {
+			controls = append(controls, c)
+		}
 	}
 	for _, cp := range s.checkpoints {
 		copy := cp
@@ -255,6 +314,19 @@ func (s *journalSegments) compactControls() error {
 	if err := s.selectReplacements(old, targets); err != nil {
 		return err
 	}
+	// Memory follows durable catalog selection. On failure the original controls
+	// remain authoritative, and a restart selects the original control extents.
+	s.j.mu.Lock()
+	for key := range retired {
+		encoded, err := json.Marshal(s.controls[key])
+		if err != nil {
+			s.j.mu.Unlock()
+			return err
+		}
+		s.controlMemory -= int64(len(encoded) + 192)
+		delete(s.controls, key)
+	}
+	s.j.mu.Unlock()
 	s.activeControl = target
 	return s.retireSelected(old)
 }

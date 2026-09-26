@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add opt-in encrypted X3 journaling with exact, explicitly authorized historical
+  replay; replay preserves the original encoded bytes and sequence numbers and
+  adds no replay marker
+
+### Changed
+
+- Require an initialized encrypted managed-filter store when LI is enabled;
+  `--filter-store-mode=auto` selects encryption and explicit YAML mode is rejected.
+  Configure `--filter-store-key-file` and `--filter-store-key-id` with a private raw
+  32-byte key. With the owning processor or tap stopped, initialize an empty store
+  using `lc migrate filter-store --init` or convert existing YAML using
+  `lc migrate filter-store --source-format yaml --source ... --destination ...
+  --key-id ... --key-file ...`; startup does not automatically convert plaintext
+- Require store and key directories to be owned by the service account, with
+  snapshot directories provisioned as `0700` or `0750`, private snapshot/key files
+  as `0600` (or `0400` for read-only input), and journal directories as `0700`;
+  see [offline storage migration](cmd/migrate/README.md) and the
+  [LI storage guide](docs/LI_INTEGRATION.md#encrypted-managed-storage)
+
+### Fixed
+
+- Publish committed task authorization updates to X3 delivery with journaling
+  enabled or disabled, so an end-time extension committed before expiry keeps
+  delivery authorized beyond the original cutoff
+- Apply `ImplicitDeactivationAllowed` consistently to live X3, persistent X3 and
+  replay authorization; disabling implicit deactivation or removing an end time
+  clears its cutoff without reviving a revoked task generation
+- Bound retained X3 task authorization and revocation identities while preserving
+  rejection of stale queued work, transport claims and replay records
+
+### Removed
+
+- Remove the non-standard normalized LI metadata export and its
+  `--li-metadata-*` flags; standards-based protocol-specific X2 delivery remains
+  available
+
 ## [0.12.1] - 2026-09-22
 
 ### Added
@@ -132,8 +172,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Preserve established TCP SIP streams while recovering from reassembly errors
 - Keep TLS keylog FIFO readers connected across writer lifecycle changes
-
-## [Unreleased]
 
 ## [0.11.5] - 2026-09-04
 

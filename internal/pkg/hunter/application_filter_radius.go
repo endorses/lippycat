@@ -55,7 +55,7 @@ func (af *ApplicationFilter) updateRADIUSFiltersLocked(filters []*management.Fil
 		}
 		p, g, err := filtering.CompileRADIUSFilter(f)
 		if err != nil {
-			logger.Warn("Rejecting invalid RADIUS application filter", "filter_id", f.Id, "error", err)
+			logger.Warn("Rejecting invalid RADIUS application filter")
 		}
 		af.radiusFilters = append(af.radiusFilters, radiusApplicationFilter{id: f.Id, predicate: p, group: g})
 	}

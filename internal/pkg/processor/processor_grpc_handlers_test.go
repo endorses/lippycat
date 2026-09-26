@@ -171,7 +171,7 @@ func TestRegisterHunter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create processor
-			processor, err := New(tt.config)
+			processor, err := newTestProcessor(t, tt.config)
 			require.NoError(t, err)
 			require.NotNil(t, processor)
 
@@ -221,7 +221,7 @@ func TestRegisterHunter(t *testing.T) {
 // TestRegisterHunter_MaxHuntersLimit tests that registration fails when max hunters limit is reached
 func TestRegisterHunter_MaxHuntersLimit(t *testing.T) {
 	// Create processor with max 2 hunters
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  2,
@@ -269,7 +269,7 @@ func TestRegisterHunter_MaxHuntersLimit(t *testing.T) {
 // TestRegisterHunter_ReconnectDoesNotCountAgainstLimit tests that reconnection doesn't count against max hunters
 func TestRegisterHunter_ReconnectDoesNotCountAgainstLimit(t *testing.T) {
 	// Create processor with max 1 hunter
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  1,
@@ -309,7 +309,7 @@ func TestRegisterHunter_ReconnectDoesNotCountAgainstLimit(t *testing.T) {
 
 // TestRegisterHunter_FiltersInResponse tests that filters are included in registration response
 func TestRegisterHunter_FiltersInResponse(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -424,7 +424,7 @@ func TestRegisterHunter_FiltersInResponse(t *testing.T) {
 
 // TestRegisterHunter_ProcessorConfig tests that processor configuration is correctly returned
 func TestRegisterHunter_ProcessorConfig(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "my-processor-id",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -454,7 +454,7 @@ func TestRegisterHunter_ProcessorConfig(t *testing.T) {
 
 // TestRegisterHunter_Concurrent tests concurrent hunter registrations
 func TestRegisterHunter_Concurrent(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  100,
@@ -585,7 +585,7 @@ func (m *mockStreamPacketsServer) SetTrailer(metadata.MD) {}
 // TestStreamPackets_Success tests successful packet streaming from a hunter
 func TestStreamPackets_Success(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -661,7 +661,7 @@ func TestStreamPackets_Success(t *testing.T) {
 // TestStreamPackets_MultipleConcurrentHunters tests multiple hunters streaming simultaneously
 func TestStreamPackets_MultipleConcurrentHunters(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -728,7 +728,7 @@ func TestStreamPackets_MultipleConcurrentHunters(t *testing.T) {
 // TestStreamPackets_DisconnectHandling tests hunter disconnect (context cancellation)
 func TestStreamPackets_DisconnectHandling(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -782,7 +782,7 @@ func TestStreamPackets_DisconnectHandling(t *testing.T) {
 // TestStreamPackets_FlowControl tests flow control signals
 func TestStreamPackets_FlowControl(t *testing.T) {
 	// Create processor with PCAP writer to trigger flow control
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -831,7 +831,7 @@ func TestStreamPackets_FlowControl(t *testing.T) {
 // TestStreamPackets_SendError tests handling of Send() errors
 func TestStreamPackets_SendError(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -866,7 +866,7 @@ func TestStreamPackets_SendError(t *testing.T) {
 // TestStreamPackets_EmptyBatch tests handling of empty batches
 func TestStreamPackets_EmptyBatch(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -904,7 +904,7 @@ func TestStreamPackets_EmptyBatch(t *testing.T) {
 func TestStreamPackets_EnforcesNegotiatedPacketContract(t *testing.T) {
 	newProcessor := func(t *testing.T) *Processor {
 		t.Helper()
-		processor, err := New(Config{ProcessorID: "test-processor", ListenAddr: "localhost:55555", MaxHunters: 10})
+		processor, err := newTestProcessor(t, Config{ProcessorID: "test-processor", ListenAddr: "localhost:55555", MaxHunters: 10})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, processor.Shutdown()) })
 		return processor
@@ -1018,7 +1018,7 @@ func (m *mockSubscribePacketsServer) SetTrailer(metadata.MD) {}
 // TestSubscribePackets_Success tests successful packet subscription
 func TestSubscribePackets_Success(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:    "test-processor",
 		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
@@ -1099,7 +1099,7 @@ func TestSubscribePackets_Success(t *testing.T) {
 // TestSubscribePackets_WithHunterFilter tests subscription with hunter ID filter
 func TestSubscribePackets_WithHunterFilter(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:    "test-processor",
 		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
@@ -1184,7 +1184,7 @@ func TestSubscribePackets_WithHunterFilter(t *testing.T) {
 // TestSubscribePackets_EmptyHunterFilter tests subscription with empty hunter filter (no packets)
 func TestSubscribePackets_EmptyHunterFilter(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:    "test-processor",
 		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
@@ -1251,7 +1251,7 @@ func TestSubscribePackets_EmptyHunterFilter(t *testing.T) {
 // TestSubscribePackets_DisconnectHandling tests subscriber disconnect
 func TestSubscribePackets_DisconnectHandling(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:    "test-processor",
 		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
@@ -1302,7 +1302,7 @@ func TestSubscribePackets_DisconnectHandling(t *testing.T) {
 // TestSubscribePackets_SendError tests handling of Send() errors (slow subscriber)
 func TestSubscribePackets_SendError(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:    "test-processor",
 		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
@@ -1361,7 +1361,7 @@ func TestSubscribePackets_SendError(t *testing.T) {
 // TestSubscribePackets_MaxSubscribersLimit tests subscriber limit enforcement
 func TestSubscribePackets_MaxSubscribersLimit(t *testing.T) {
 	// Create processor with max 2 subscribers
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:    "test-processor",
 		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
@@ -1425,7 +1425,7 @@ func TestSubscribePackets_MaxSubscribersLimit(t *testing.T) {
 // TestSubscribePackets_AutoGeneratedClientID tests auto-generation of client IDs
 func TestSubscribePackets_AutoGeneratedClientID(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:    "test-processor",
 		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
@@ -1605,7 +1605,7 @@ func TestUpdateFilter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create processor
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: "test-processor",
 				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
@@ -1720,15 +1720,15 @@ func TestDeleteFilter(t *testing.T) {
 			filterID:    "",
 			wantSuccess: false,
 			wantErr:     true,
-			errCode:     codes.NotFound,
-			errContains: "filter not found",
+			errCode:     codes.InvalidArgument,
+			errContains: "invalid managed filter",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create processor
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: "test-processor",
 				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
@@ -1786,7 +1786,7 @@ func TestDeleteFilter(t *testing.T) {
 // TestUpdateDeleteFilterIntegration tests the interaction between UpdateFilter and DeleteFilter
 func TestUpdateDeleteFilterIntegration(t *testing.T) {
 	// Create processor
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -2116,7 +2116,7 @@ func TestGetHunterStatus_GRPCHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create processor
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: "test-processor",
 				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
@@ -2393,7 +2393,7 @@ func TestListAvailableHunters(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create processor
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: "test-processor",
 				ListenAddr:  "localhost:55555",
 				MaxHunters:  100, // Enough for "many hunters" test
@@ -2425,7 +2425,7 @@ func TestListAvailableHunters(t *testing.T) {
 
 // TestGetHunterStatusAndListAvailableHunters_Integration tests interaction between the two handlers
 func TestGetHunterStatusAndListAvailableHunters_Integration(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -2630,7 +2630,7 @@ func TestGetFilters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: "test-processor",
 				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
@@ -2693,7 +2693,7 @@ func (m *mockSubscribeFiltersServer) getUpdates() []*management.FilterUpdate {
 // Note: This is a smoke test only due to complexity of mocking streaming gRPC
 func TestSubscribeFilters(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
-		processor, err := New(Config{
+		processor, err := newTestProcessor(t, Config{
 			ProcessorID: "test-processor",
 			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
@@ -2718,7 +2718,7 @@ func TestSubscribeFilters(t *testing.T) {
 }
 
 func TestSubscribeFiltersDeliversScopeChangesWithoutReconnect(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -2817,7 +2817,7 @@ func TestSubscribeFiltersDeliversScopeChangesWithoutReconnect(t *testing.T) {
 // TestGetTopology tests the GetTopology gRPC handler
 func TestGetTopology(t *testing.T) {
 	t.Run("single processor no upstream", func(t *testing.T) {
-		processor, err := New(Config{
+		processor, err := newTestProcessor(t, Config{
 			ProcessorID: "test-processor",
 			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
@@ -2852,7 +2852,7 @@ func TestGetTopology(t *testing.T) {
 	})
 
 	t.Run("multiple hunters", func(t *testing.T) {
-		processor, err := New(Config{
+		processor, err := newTestProcessor(t, Config{
 			ProcessorID: "test-processor",
 			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
@@ -2892,7 +2892,7 @@ func TestGetTopology(t *testing.T) {
 	})
 
 	t.Run("no hunters registered", func(t *testing.T) {
-		processor, err := New(Config{
+		processor, err := newTestProcessor(t, Config{
 			ProcessorID: "test-processor",
 			ListenAddr:  "localhost:55555",
 		})
@@ -2908,7 +2908,7 @@ func TestGetTopology(t *testing.T) {
 }
 
 func TestHunterEventLossStatsAppearInStatusAndTopology(t *testing.T) {
-	processor, err := New(Config{ProcessorID: "test-processor", ListenAddr: "localhost:55555", MaxHunters: 10})
+	processor, err := newTestProcessor(t, Config{ProcessorID: "test-processor", ListenAddr: "localhost:55555", MaxHunters: 10})
 	require.NoError(t, err)
 	defer processor.Shutdown()
 
@@ -2964,7 +2964,7 @@ func assertHunterEventLossStats(t *testing.T, stats *management.HunterStats) {
 // TestRequestAuthToken tests the RequestAuthToken gRPC handler
 func TestRequestAuthToken(t *testing.T) {
 	t.Run("fails with internal error when not configured", func(t *testing.T) {
-		processor, err := New(Config{
+		processor, err := newTestProcessor(t, Config{
 			ProcessorID: "test-processor",
 			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
@@ -3020,7 +3020,7 @@ func (m *mockSubscribeTopologyServer) getUpdates() []*management.TopologyUpdate 
 // Note: This is a smoke test only due to complexity of mocking streaming gRPC
 func TestSubscribeTopology(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
-		processor, err := New(Config{
+		processor, err := newTestProcessor(t, Config{
 			ProcessorID: "test-processor",
 			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,

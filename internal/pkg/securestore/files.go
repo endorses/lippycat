@@ -65,18 +65,18 @@ type Dir struct {
 
 // fileOps keeps fault injection local to a directory and out of production APIs.
 type fileOps struct {
-	write  func(*os.File, []byte) (int, error)
-	sync   func(*os.File) error
-	close  func(*os.File) error
-	rename func(int, string, int, string) error
-	link   func(int, string, int, string, int) error
-	unlink func(int, string, int) error
+	write     func(*os.File, []byte) (int, error)
+	sync      func(*os.File) error
+	close     func(*os.File) error
+	rename    func(int, string, int, string) error
+	noReplace func(int, string, int, string) (bool, bool, error)
+	unlink    func(int, string, int) error
 }
 
 func defaultFileOps() fileOps {
 	return fileOps{
 		write: (*os.File).Write, sync: (*os.File).Sync, close: (*os.File).Close,
-		rename: unix.Renameat, link: unix.Linkat, unlink: unix.Unlinkat,
+		rename: unix.Renameat, noReplace: publishNoReplace, unlink: unix.Unlinkat,
 	}
 }
 
@@ -212,23 +212,9 @@ func validatePrivate(fd int) (*unix.Stat_t, error) {
 
 // ReadFile reads a bounded private file from a trusted, not necessarily private,
 // directory. This permits provisioned keys in locations such as /etc/lippycat.
-func ReadFile(path string, maxBytes int64) (_ []byte, retErr error) {
-	parent, name := ".", path
-	if slash := strings.LastIndexByte(path, '/'); slash >= 0 {
-		parent, name = path[:slash], path[slash+1:]
-		if parent == "" {
-			parent = "/"
-		}
-	}
-	if err := checkName(name); err != nil {
-		return nil, err
-	}
-	dir, err := openDirectory(parent, false)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { retErr = errors.Join(retErr, contextual("close key directory", dir.Close())) }()
-	return readPrivate(int(dir.Fd()), name, maxBytes)
+func ReadFile(path string, maxBytes int64) ([]byte, error) {
+	data, _, err := ReadFileWithIdentity(path, maxBytes)
+	return data, err
 }
 
 // Read checks the file's size before allocating and rejects changes in length.
@@ -253,30 +239,7 @@ func readPrivate(fd int, name string, maxBytes int64) (_ []byte, retErr error) {
 		return nil, err
 	}
 	defer func() { retErr = errors.Join(retErr, contextual("close private file", file.Close())) }()
-	st, err := validatePrivate(int(file.Fd()))
-	if err != nil {
-		return nil, err
-	}
-	if st.Size < 0 || st.Size > maxBytes || uint64(st.Size) > uint64(int(^uint(0)>>1)) {
-		return nil, errors.New("securestore: private file exceeds read limit")
-	}
-	data := make([]byte, int(st.Size))
-	if _, err := io.ReadFull(file, data); err != nil {
-		return nil, fmt.Errorf("securestore: read private file: %w", err)
-	}
-	var extra [1]byte
-	n, err := file.Read(extra[:])
-	if n != 0 || err != io.EOF {
-		return nil, errors.New("securestore: private file changed during read")
-	}
-	final, err := validatePrivate(int(file.Fd()))
-	if err != nil {
-		return nil, err
-	}
-	if final.Size != st.Size {
-		return nil, errors.New("securestore: private file changed during read")
-	}
-	return data, nil
+	return readOpenedPrivate(file, maxBytes)
 }
 
 // Replace writes already encoded bytes to an exclusive 0600 temporary file,
@@ -287,8 +250,10 @@ func (d *Dir) Replace(name string, data []byte) (Outcome, error) {
 }
 
 // Create publishes a new file without clobbering an existing destination. It
-// atomically links a fully synced temporary inode then removes the temporary
-// name. A failure after publication is uncertain, including temporary cleanup.
+// atomically renames on Linux with RENAME_NOREPLACE; unsupported filesystems fail
+// before publication. Other Unix systems link the synced inode then remove its
+// temporary name, requiring explicit recovery if interrupted between those steps.
+// A failure after publication is uncertain, including temporary cleanup.
 func (d *Dir) Create(name string, data []byte) (Outcome, error) {
 	return d.write(name, data, true)
 }
@@ -405,15 +370,15 @@ func (d *Dir) write(name string, data []byte, create bool) (out Outcome, retErr 
 		return out, fmt.Errorf("close private temporary file: %w", err)
 	}
 	if create {
-		if err := d.ops.link(fd, tempName, fd, name, 0); err != nil {
+		published, remaining, err := d.ops.noReplace(fd, tempName, fd, name)
+		tempExists = remaining
+		if published {
+			out = Uncertain
+			transferLock()
+		}
+		if err != nil {
 			return out, fmt.Errorf("publish private file: %w", err)
 		}
-		out = Uncertain
-		transferLock()
-		if err := d.ops.unlink(fd, tempName, 0); err != nil {
-			return out, fmt.Errorf("remove published temporary name: %w", err)
-		}
-		tempExists = false
 	} else {
 		if err := d.ops.rename(fd, tempName, fd, name); err != nil {
 			return out, fmt.Errorf("replace private file: %w", err)

@@ -169,7 +169,7 @@ func TestRADIUSCaptureBoundaryIncludesDrainingOldHandle(t *testing.T) {
 		// Avoid opening a real live handle in this unit test.
 		s.cancel()
 	}
-	require.NoError(t, s.SetBPFFilter("udp"))
+	require.ErrorContains(t, s.SetBPFFilter("udp"), "stopping")
 	request := s.radiusProcessor.Process(packets[0], reader.LinkType(), "mirror", matcher)
 	require.NotNil(t, request)
 	require.Len(t, request.Direct, 1)

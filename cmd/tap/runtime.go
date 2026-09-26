@@ -101,7 +101,7 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 	exclusionFilter := buildOwnTrafficExclusionFilter(config.ListenAddr, config.UpstreamAddr)
 	effectiveBPF = combineFiltersWithExclusion(effectiveBPF, exclusionFilter)
 	if exclusionFilter != "" {
-		logger.Info("Own-traffic BPF exclusion applied", "exclusion", exclusionFilter, "effective_filter", effectiveBPF)
+		logger.Info("Own-traffic BPF exclusion applied")
 	}
 
 	sourceConfig.BPFFilter = effectiveBPF

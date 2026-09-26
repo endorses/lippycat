@@ -24,7 +24,7 @@ import (
 // TestProcessor_Start_Success tests successful processor startup
 func TestProcessor_Start_Success(t *testing.T) {
 	// Create processor with unique port
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0", // Let OS assign port
 		MaxHunters:  10,
@@ -68,7 +68,7 @@ func TestProcessor_Start_Success(t *testing.T) {
 }
 
 func TestProcessorRegistersEventServiceAlongsideExistingServices(t *testing.T) {
-	processor, err := New(Config{ProcessorID: "test-processor", ListenAddr: "localhost:0"})
+	processor, err := newTestProcessor(t, Config{ProcessorID: "test-processor", ListenAddr: "localhost:0"})
 	require.NoError(t, err)
 	require.NotNil(t, processor.eventBroadcaster)
 	require.NotNil(t, processor.eventService)
@@ -82,14 +82,14 @@ func TestProcessorRegistersEventServiceAlongsideExistingServices(t *testing.T) {
 }
 
 func TestProcessorEventSubscriptionPolicyIsExplicitlyConfigurable(t *testing.T) {
-	defaultProcessor, err := New(Config{ProcessorID: "default-policy", ListenAddr: "localhost:0"})
+	defaultProcessor, err := newTestProcessor(t, Config{ProcessorID: "default-policy", ListenAddr: "localhost:0"})
 	require.NoError(t, err)
 	defaultService, ok := defaultProcessor.eventService.(*EventService)
 	require.True(t, ok)
 	assert.False(t, defaultService.policy.AllowSensitiveFields)
 	assert.False(t, defaultService.policy.AllowFileMetadata)
 
-	enabledProcessor, err := New(Config{
+	enabledProcessor, err := newTestProcessor(t, Config{
 		ProcessorID:               "enabled-policy",
 		ListenAddr:                "localhost:0",
 		EventAllowSensitiveFields: true,
@@ -103,7 +103,7 @@ func TestProcessorEventSubscriptionPolicyIsExplicitlyConfigurable(t *testing.T) 
 }
 
 func TestShutdownDrainsEventProducersBeforeClosingDispatcher(t *testing.T) {
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 4})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 4})
 	require.NoError(t, err)
 	sink := &collectingSink{}
 	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS))
@@ -136,7 +136,7 @@ func TestProcessor_Start_BindError(t *testing.T) {
 	occupiedAddr := listener.Addr().String()
 
 	// Create processor with same address
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  occupiedAddr,
 		MaxHunters:  10,
@@ -154,7 +154,7 @@ func TestProcessor_Start_BindError(t *testing.T) {
 
 // TestProcessor_Shutdown_Clean tests clean shutdown with no active components
 func TestProcessor_Shutdown_Clean(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
@@ -190,7 +190,7 @@ func TestProcessor_Shutdown_Clean(t *testing.T) {
 
 // TestProcessor_Shutdown_Idempotent tests that multiple shutdown calls are safe
 func TestProcessor_Shutdown_Idempotent(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
@@ -228,7 +228,7 @@ func TestProcessor_Shutdown_Idempotent(t *testing.T) {
 }
 
 func TestProcessor_Shutdown_Concurrent(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "concurrent-shutdown",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  1,
@@ -295,7 +295,7 @@ func TestProcessor_StartStop_Cycle(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		t.Run(fmt.Sprintf("cycle_%d", i), func(t *testing.T) {
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: fmt.Sprintf("test-processor-%d", i),
 				ListenAddr:  "localhost:0", // OS assigns port
 				MaxHunters:  10,
@@ -333,7 +333,7 @@ func TestProcessor_Shutdown_WithPcapWriter(t *testing.T) {
 	tempDir := t.TempDir()
 	pcapFile := filepath.Join(tempDir, "test.pcap")
 
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
@@ -373,7 +373,7 @@ func TestProcessor_Shutdown_WithPcapWriter(t *testing.T) {
 func TestProcessor_Shutdown_WithAutoRotatePcapWriter(t *testing.T) {
 	tempDir := t.TempDir()
 
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
@@ -452,7 +452,7 @@ func TestProcessor_Shutdown_WithAutoRotatePcapWriter(t *testing.T) {
 func TestProcessor_Shutdown_WithPerCallPcapWriter(t *testing.T) {
 	tempDir := t.TempDir()
 
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
@@ -530,7 +530,7 @@ func TestProcessor_Shutdown_WithPerCallPcapWriter(t *testing.T) {
 
 // TestProcessor_Shutdown_WithSubscribers tests shutdown notifies subscribers
 func TestProcessor_Shutdown_WithSubscribers(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
@@ -575,7 +575,7 @@ func TestProcessor_Shutdown_WithUpstream(t *testing.T) {
 	// For now, we'll test that creating processor with upstream doesn't crash on shutdown
 	// The upstream connection manager now handles reconnection in the background
 
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:  "test-processor",
 		ListenAddr:   "localhost:0",
 		MaxHunters:   10,
@@ -618,7 +618,7 @@ func TestProcessor_Start_WithTLSProductionMode(t *testing.T) {
 	os.Setenv("LIPPYCAT_PRODUCTION", "true")
 	defer os.Unsetenv("LIPPYCAT_PRODUCTION")
 
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
@@ -640,7 +640,7 @@ func TestProcessor_Start_WithTLSProductionMode(t *testing.T) {
 
 // TestProcessor_GRPCConnection tests that gRPC server is accessible
 func TestProcessor_GRPCConnection(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
@@ -682,7 +682,7 @@ func TestProcessor_Start_WithVirtualInterface(t *testing.T) {
 		t.Skip("Skipping virtual interface test (requires root)")
 	}
 
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:          "test-processor",
 		ListenAddr:           "localhost:0",
 		MaxHunters:           10,

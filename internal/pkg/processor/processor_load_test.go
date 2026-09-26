@@ -28,7 +28,7 @@ func TestProcessor_HighPacketRate_10Kpps(t *testing.T) {
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
 	}
-	p, err := New(cfg)
+	p, err := newTestProcessor(t, cfg)
 	require.NoError(t, err)
 
 	// Register a hunter
@@ -126,7 +126,7 @@ func TestProcessor_ManyHunters_100Concurrent(t *testing.T) {
 		ListenAddr:  "localhost:0",
 		MaxHunters:  150, // Allow more than test count
 	}
-	p, err := New(cfg)
+	p, err := newTestProcessor(t, cfg)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -210,7 +210,7 @@ func TestProcessor_ManySubscribers_100Concurrent(t *testing.T) {
 		MaxHunters:     10,
 		MaxSubscribers: 150, // Allow more than test count
 	}
-	p, err := New(cfg)
+	p, err := newTestProcessor(t, cfg)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -334,7 +334,7 @@ func BenchmarkProcessor_PacketProcessing(b *testing.B) {
 		ListenAddr:  "localhost:0",
 		MaxHunters:  10,
 	}
-	p, err := New(cfg)
+	p, err := newTestProcessor(b, cfg)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func BenchmarkProcessor_ManyHunters(b *testing.B) {
 				ListenAddr:  "localhost:0",
 				MaxHunters:  hunterCount + 10,
 			}
-			p, err := New(cfg)
+			p, err := newTestProcessor(b, cfg)
 			if err != nil {
 				b.Fatal(err)
 			}

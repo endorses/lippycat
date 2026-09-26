@@ -19,6 +19,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 )
 
 const (
@@ -73,6 +74,9 @@ type deliveryItem struct {
 type ClientConfig struct {
 	X2SpoolDir            string
 	X2SpoolKeyFile        string
+	X2SpoolKeyID          string
+	X2SpoolLegacyKeyID    string
+	X2SpoolReadKeys       []securestore.KeyRef
 	X2SpoolMaxBytes       int64
 	X2SpoolReplayPolicy   string
 	X2SpoolReplayManifest string

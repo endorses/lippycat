@@ -1,7 +1,9 @@
 package filtering
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -23,6 +26,8 @@ type Manager struct {
 	filters         map[string]*management.Filter
 	radiusRevisions map[string]uint64
 	initialized     bool
+	fault           error
+	closed          bool
 
 	channelsMu sync.RWMutex
 	channels   map[string]chan *management.FilterUpdate // hunterID -> channel
@@ -64,76 +69,165 @@ func NewManager(persistenceFile string, persistence PersistenceHandler, capabili
 	}
 }
 
+var (
+	ErrFilterNotFound      = errors.New("filter not found")
+	ErrFilterInvalid       = errors.New("invalid managed filter")
+	ErrFilterStoreFault    = errors.New("filter storage is faulted; restart and reconcile persistence")
+	ErrFilterManagerClosed = errors.New("filter manager is closed")
+	ErrFilterDistribution  = errors.New("filter policy committed but hunter distribution is incomplete")
+)
+
 // Load restores startup state exactly once, before any filter mutation.
 // Runtime reconciliation must use Update/Delete to preserve revision history.
 func (m *Manager) Load() error {
 	m.mutationMu.Lock()
 	defer m.mutationMu.Unlock()
+	return m.load()
+}
 
-	if m.persistence == nil {
-		return nil
-	}
+// Initialize loads a not-yet-owned store; repeated calls never reload policy.
+func (m *Manager) Initialize() error {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	return m.ensureInitialized()
+}
 
-	filters, err := m.persistence.Load(m.persistenceFile)
-	if err != nil {
+// load requires mutationMu.
+func (m *Manager) load() error {
+	if err := m.available(); err != nil {
 		return err
 	}
-
-	m.mu.Lock()
-	if m.initialized {
-		m.mu.Unlock()
+	m.mu.RLock()
+	initialized := m.initialized
+	m.mu.RUnlock()
+	if initialized {
 		return fmt.Errorf("filter Load is startup-only; use Update/Delete after initialization")
+	}
+	var filters map[string]*management.Filter
+	if m.persistence != nil {
+		var err error
+		filters, err = m.persistence.Load(m.persistenceFile)
+		if err != nil {
+			return err
+		}
 	}
 	revisions := make(map[string]uint64)
 	restored := make(map[string]*management.Filter, len(filters))
 	for id, f := range filters {
-		if f == nil {
-			m.mu.Unlock()
-			return fmt.Errorf("nil persisted filter %q", id)
+		if f == nil || id != f.Id {
+			return ErrFilterInvalid
+		}
+		if err := filtering.ValidateManagedFilter(f); err != nil {
+			return ErrFilterInvalid
 		}
 		if filtering.IsRADIUSFilter(f.Type) {
-			if err := filtering.ValidateFilter(f); err != nil {
-				m.mu.Unlock()
-				return fmt.Errorf("invalid persisted RADIUS filter: %w", err)
-			}
 			if len(revisions) >= 65536 {
-				m.mu.Unlock()
 				return fmt.Errorf("RADIUS revision history capacity reached")
 			}
 			revisions[strings.Clone(id)] = f.Revision
 		}
 		restored[id] = proto.Clone(f).(*management.Filter)
 	}
+	m.mu.Lock()
 	m.radiusRevisions = revisions
 	m.filters = restored
 	m.initialized = true
 	m.mu.Unlock()
-
 	logger.Info("Loaded filters from file", "count", len(filters), "file", m.persistenceFile)
 	return nil
 }
 
-// Save saves filters to persistence file
+// ensureInitialized prevents an embedded caller's first mutation from replacing
+// an existing store with an empty startup map. It requires mutationMu.
+func (m *Manager) ensureInitialized() error {
+	if err := m.available(); err != nil {
+		return err
+	}
+	m.mu.RLock()
+	initialized := m.initialized
+	m.mu.RUnlock()
+	if initialized {
+		return nil
+	}
+	return m.load()
+}
+
+// available requires mutationMu; Fault remains safe for concurrent readers.
+func (m *Manager) available() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed {
+		return ErrFilterManagerClosed
+	}
+	if m.fault != nil {
+		return errors.Join(ErrFilterStoreFault, m.fault)
+	}
+	return nil
+}
+
+func (m *Manager) Fault() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.fault
+}
+
+// persistCandidate returns a committed flag independently of cleanup errors.
+// Once uncertain, no mutation can assume the old policy is authoritative.
+func (m *Manager) persistCandidate(candidate map[string]*management.Filter) (bool, error) {
+	if m.persistence == nil {
+		return true, nil
+	}
+	err := m.persistence.Save(m.persistenceFile, candidate)
+	outcome := securestore.OutcomeOf(err)
+	if outcome == securestore.Uncertain {
+		m.mu.Lock()
+		m.fault = err
+		m.mu.Unlock()
+		m.closeSubscriptions()
+	}
+	return outcome == securestore.Committed, err
+}
+
+// Save persists the currently committed desired policy without republishing it.
 func (m *Manager) Save() error {
 	m.mutationMu.Lock()
 	defer m.mutationMu.Unlock()
-	return m.save()
+	if err := m.ensureInitialized(); err != nil {
+		return err
+	}
+	m.mu.RLock()
+	candidate := cloneFilterMap(m.filters)
+	m.mu.RUnlock()
+	_, err := m.persistCandidate(candidate)
+	return err
 }
 
-// save requires mutationMu, keeping the snapshot and its write in mutation order.
-func (m *Manager) save() error {
-	if m.persistence == nil {
+// Close releases store ownership only after mutations have finished. It does not
+// save again: every accepted mutation has already crossed its durable boundary.
+func (m *Manager) Close() error {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
 		return nil
 	}
-
-	m.mu.RLock()
-	filters := make(map[string]*management.Filter, len(m.filters))
-	for k, v := range m.filters {
-		filters[k] = proto.Clone(v).(*management.Filter)
+	m.closed = true
+	m.mu.Unlock()
+	m.closeSubscriptions()
+	if closer, ok := m.persistence.(io.Closer); ok {
+		return closer.Close()
 	}
-	m.mu.RUnlock()
+	return nil
+}
 
-	return m.persistence.Save(m.persistenceFile, filters)
+func (m *Manager) closeSubscriptions() {
+	m.channelsMu.Lock()
+	defer m.channelsMu.Unlock()
+	for id, ch := range m.channels {
+		close(ch)
+		delete(m.channels, id)
+	}
 }
 
 // hunterSupportsFilterType checks if a hunter supports a given filter type
@@ -191,7 +285,6 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 		if !hunterSupportsFilterType(hunterCaps, filter.Type) {
 			logger.Debug("Skipping filter incompatible with hunter capabilities",
 				"hunter_id", hunterID,
-				"filter_id", filter.Id,
 				"filter_type", filter.Type)
 			continue
 		}
@@ -214,163 +307,191 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 	return filters
 }
 
-// Update adds or modifies a filter
+// Update adds or modifies a filter without mutating the caller's protobuf.
 func (m *Manager) Update(filter *management.Filter) (uint32, error) {
+	_, count, err := m.UpdateCommitted(filter)
+	return count, err
+}
+
+// UpdateCommitted returns the detached accepted filter (including a generated ID)
+// only after persistence commits. A nonnil filter with an error means committed
+// desired policy with cleanup/distribution failure, never an ordinary rollback.
+func (m *Manager) UpdateCommitted(input *management.Filter) (*management.Filter, uint32, error) {
+	return m.UpdateValidated(input, nil)
+}
+
+// UpdateValidated performs owner validation on a detached normalized candidate
+// under mutation ordering, before any persistence or subscriber publication.
+func (m *Manager) UpdateValidated(input *management.Filter, validate func(*management.Filter) error) (*management.Filter, uint32, error) {
 	m.mutationMu.Lock()
 	defer m.mutationMu.Unlock()
-
-	if filter == nil {
-		return 0, fmt.Errorf("filter is required")
+	if err := m.ensureInitialized(); err != nil {
+		return nil, 0, err
+	}
+	if input == nil {
+		return nil, 0, ErrFilterInvalid
+	}
+	filter := proto.Clone(input).(*management.Filter)
+	if filter.Id == "" {
+		filter.Id = fmt.Sprintf("filter-%d", time.Now().UnixNano())
+	}
+	if filter.Type == management.FilterType_FILTER_PHONE_NUMBER {
+		filter.Pattern = filtering.NormalizePhonePattern(filter.Pattern)
+	}
+	if err := filtering.ValidateManagedFilter(filter); err != nil {
+		return nil, 0, ErrFilterInvalid
 	}
 	if filtering.IsRADIUSFilter(filter.Type) {
-		if err := filtering.ValidateFilter(filter); err != nil {
-			return 0, err
-		}
 		for _, hunterID := range filter.TargetHunters {
 			var caps *management.HunterCapabilities
 			if m.capabilityProvider != nil {
 				caps = m.capabilityProvider.GetCapabilities(hunterID)
 			}
 			if !hunterSupportsFilterType(caps, filter.Type) {
-				return 0, fmt.Errorf("hunter %s lacks RADIUS criteria/provenance capability v1", hunterID)
+				return nil, 0, fmt.Errorf("%w: target hunter lacks RADIUS criteria/provenance capability v1", ErrFilterInvalid)
 			}
 		}
 	}
-	// Normalize phone number patterns before storage/distribution
-	// This ensures consistent matching regardless of input format
-	if filter.Type == management.FilterType_FILTER_PHONE_NUMBER {
-		originalPattern := filter.Pattern
-		filter.Pattern = filtering.NormalizePhonePattern(filter.Pattern)
-		if filter.Pattern != originalPattern {
-			logger.Debug("Normalized phone pattern",
-				"original", originalPattern,
-				"normalized", filter.Pattern)
-		}
-	}
-
-	// Generate ID for new filters
-	m.mu.Lock()
-	if filter.Id == "" {
-		filter.Id = fmt.Sprintf("filter-%d", time.Now().UnixNano())
-		logger.Info("Generated filter ID", "filter_id", filter.Id)
-	}
-
-	// Determine if this is add or modify, and get old filter for scope comparison
+	m.mu.RLock()
 	oldFilter, exists := m.filters[filter.Id]
 	if filtering.IsRADIUSFilter(filter.Type) {
 		previous, known := m.radiusRevisions[filter.Id]
 		if (!known && len(m.radiusRevisions) >= 65536) || ((!exists || !filtering.IsRADIUSFilter(oldFilter.Type)) && known && filter.Revision <= previous) {
-			m.mu.Unlock()
-			return 0, fmt.Errorf("RADIUS revision history requires newer revision or has reached capacity")
+			m.mu.RUnlock()
+			return nil, 0, fmt.Errorf("%w: RADIUS revision history requires newer revision or has reached capacity", ErrFilterInvalid)
 		}
 	}
 
 	if exists && (filtering.IsRADIUSFilter(filter.Type) || filtering.IsRADIUSFilter(oldFilter.Type)) && !proto.Equal(oldFilter, filter) && filter.Revision <= oldFilter.Revision {
-		m.mu.Unlock()
-		return 0, fmt.Errorf("RADIUS filter modification requires a newer revision")
+		m.mu.RUnlock()
+		return nil, 0, fmt.Errorf("%w: RADIUS filter modification requires a newer revision", ErrFilterInvalid)
 	}
 	if exists && filtering.IsRADIUSFilter(filter.Type) && oldFilter.Radius != nil && filter.Radius != nil && !proto.Equal(oldFilter.Radius, filter.Radius) {
 		oldR, newR := oldFilter.Radius, filter.Radius
 		if oldR.TaskId != "" && oldR.TaskId == newR.TaskId && newR.TaskGeneration <= oldR.TaskGeneration {
-			m.mu.Unlock()
-			return 0, fmt.Errorf("RADIUS task criteria modification requires a newer task generation")
+			m.mu.RUnlock()
+			return nil, 0, fmt.Errorf("%w: RADIUS task criteria modification requires a newer task generation", ErrFilterInvalid)
 		}
 		for _, oldC := range oldR.Criteria {
 			for _, newC := range newR.Criteria {
 				if oldC != nil && newC != nil && oldC.FilterId == newC.FilterId && !proto.Equal(oldC, newC) && newC.FilterRevision <= oldC.FilterRevision {
-					m.mu.Unlock()
-					return 0, fmt.Errorf("RADIUS criterion modification requires a newer criterion revision")
+					m.mu.RUnlock()
+					return nil, 0, fmt.Errorf("%w: RADIUS criterion modification requires a newer criterion revision", ErrFilterInvalid)
 				}
 			}
 		}
 	}
+
+	candidate := cloneFilterMap(m.filters)
+	m.mu.RUnlock()
+	candidate[filter.Id] = filter
+	if validate != nil {
+		if err := validate(proto.Clone(filter).(*management.Filter)); err != nil {
+			return nil, 0, err
+		}
+	}
+	committed, saveErr := m.persistCandidate(candidate)
+	if !committed {
+		return nil, 0, saveErr
+	}
+	m.mu.Lock()
 	m.initialized = true
-	m.filters[filter.Id] = proto.Clone(filter).(*management.Filter)
+	m.filters = candidate
 	if filtering.IsRADIUSFilter(filter.Type) {
 		m.radiusRevisions[strings.Clone(filter.Id)] = filter.Revision
 	}
-
+	m.mu.Unlock()
+	var distributionErr error
+	if exists {
+		removals := m.getHuntersToRemove(oldFilter, filter)
+		if len(removals) > 0 {
+			_, distributionErr = m.pushFilterUpdateToSpecificHunters(removals, &management.FilterUpdate{
+				UpdateType: management.FilterUpdateType_UPDATE_DELETE, Filter: proto.Clone(oldFilter).(*management.Filter),
+			})
+		}
+	}
 	updateType := management.FilterUpdateType_UPDATE_ADD
 	if exists {
 		updateType = management.FilterUpdateType_UPDATE_MODIFY
 	}
-	m.mu.Unlock()
-
-	// If modifying an existing filter, check if scope changed
-	// and send DELETE to hunters that are no longer targeted
-	if exists {
-		huntersToRemove := m.getHuntersToRemove(oldFilter, filter)
-		if len(huntersToRemove) > 0 {
-			deleteUpdate := &management.FilterUpdate{
-				UpdateType: management.FilterUpdateType_UPDATE_DELETE,
-				Filter:     proto.Clone(oldFilter).(*management.Filter), // The recipient understands the previously installed type.
-			}
-			m.pushFilterUpdateToSpecificHunters(huntersToRemove, deleteUpdate)
-		}
+	count, err := m.pushFilterUpdate(filter, &management.FilterUpdate{UpdateType: updateType, Filter: proto.Clone(filter).(*management.Filter)})
+	if !exists && m.onFilterChange != nil {
+		m.onFilterChange()
 	}
-
-	// Push filter update to affected hunters
-	update := &management.FilterUpdate{
-		UpdateType: updateType,
-		Filter:     proto.Clone(filter).(*management.Filter),
+	resultErr := errors.Join(saveErr, distributionErr, err)
+	if resultErr != nil {
+		resultErr = &securestore.CommitError{Outcome: securestore.Committed, Op: "publish filter policy", Err: resultErr}
 	}
-
-	huntersUpdated := m.pushFilterUpdate(filter, update)
-
-	// Persist filters to disk
-	if err := m.save(); err != nil {
-		logger.Error("Failed to save filters to disk", "error", err)
-		// Don't fail the request - filter is already in memory
-	}
-
-	return huntersUpdated, nil
+	return proto.Clone(filter).(*management.Filter), count, resultErr
 }
 
-// Delete removes a filter
+// Delete persists the complete detached candidate before publishing deletion.
+// Deleted RADIUS revision watermarks remain process-local, as before.
 func (m *Manager) Delete(filterID string) (uint32, error) {
 	m.mutationMu.Lock()
 	defer m.mutationMu.Unlock()
-
-	m.mu.Lock()
+	if err := m.ensureInitialized(); err != nil {
+		return 0, err
+	}
+	m.mu.RLock()
 	filter, exists := m.filters[filterID]
 	if !exists {
-		m.mu.Unlock()
-		return 0, fmt.Errorf("filter not found")
+		m.mu.RUnlock()
+		return 0, ErrFilterNotFound
 	}
-	delete(m.filters, filterID)
+	candidate := cloneFilterMap(m.filters)
+	m.mu.RUnlock()
+	delete(candidate, filterID)
+	committed, saveErr := m.persistCandidate(candidate)
+	if !committed {
+		return 0, saveErr
+	}
+	m.mu.Lock()
+	m.filters = candidate
+	m.initialized = true
 	m.mu.Unlock()
-
-	// Push filter deletion to affected hunters
-	update := &management.FilterUpdate{
-		UpdateType: management.FilterUpdateType_UPDATE_DELETE,
-		Filter:     proto.Clone(filter).(*management.Filter),
+	count, err := m.pushFilterUpdate(filter, &management.FilterUpdate{UpdateType: management.FilterUpdateType_UPDATE_DELETE, Filter: proto.Clone(filter).(*management.Filter)})
+	if m.onFilterChange != nil {
+		m.onFilterChange()
 	}
-
-	huntersUpdated := m.pushFilterUpdate(filter, update)
-
-	// Persist filters to disk
-	if err := m.save(); err != nil {
-		logger.Error("Failed to save filters to disk", "error", err)
-		// Don't fail the request - filter is already removed from memory
+	resultErr := errors.Join(saveErr, err)
+	if resultErr != nil {
+		resultErr = &securestore.CommitError{Outcome: securestore.Committed, Op: "publish filter deletion", Err: resultErr}
 	}
-
-	return huntersUpdated, nil
+	return count, resultErr
 }
 
 // SubscribeSnapshot atomically captures policy and attaches the live stream.
 // mutationMu ensures no committed mutation can be queued before its snapshot.
 func (m *Manager) SubscribeSnapshot(hunterID string) (chan *management.FilterUpdate, []*management.Filter) {
+	ch, snapshot, _ := m.SubscribeSnapshotE(hunterID)
+	return ch, snapshot
+}
+
+// SubscribeSnapshotE additionally exposes failed startup/fault state to network
+// handlers so no empty authoritative snapshot is sent after a storage failure.
+func (m *Manager) SubscribeSnapshotE(hunterID string) (chan *management.FilterUpdate, []*management.Filter, error) {
 	m.mutationMu.Lock()
 	defer m.mutationMu.Unlock()
+	if err := m.ensureInitialized(); err != nil {
+		ch := make(chan *management.FilterUpdate)
+		close(ch)
+		return ch, nil, err
+	}
 	filters := m.GetForHunter(hunterID)
 	ch := m.AddChannel(hunterID)
-	return ch, filters
+	return ch, filters, nil
 }
 
 // AddChannel creates and adds a filter update channel for a hunter
 func (m *Manager) AddChannel(hunterID string) chan *management.FilterUpdate {
 	ch := make(chan *management.FilterUpdate, constants.FilterUpdateChannelBuffer)
-
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed || m.fault != nil {
+		close(ch)
+		return ch
+	}
 	m.channelsMu.Lock()
 	if oldCh, exists := m.channels[hunterID]; exists {
 		close(oldCh)
@@ -429,7 +550,7 @@ func (m *Manager) getHuntersToRemove(oldFilter, newFilter *management.Filter) []
 }
 
 // pushFilterUpdateToSpecificHunters sends filter update to a specific list of hunters
-func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *management.FilterUpdate) uint32 {
+func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *management.FilterUpdate) (uint32, error) {
 	m.channelsMu.RLock()
 	// A missed policy update invalidates the stream. Remove it after releasing
 	// the read lock, using channel identity so reconnect replacements survive.
@@ -455,7 +576,7 @@ func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *
 			if m.onFilterFailure != nil {
 				m.onFilterFailure(hunterID, false)
 			}
-			logger.Debug("Sent filter update", "hunter_id", hunterID, "filter_id", update.Filter.Id, "update_type", update.UpdateType)
+			logger.Debug("Sent filter update", "hunter_id", hunterID, "update_type", update.UpdateType)
 			return true
 
 		case <-timer.C:
@@ -467,7 +588,6 @@ func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *
 
 			logger.Warn("Filter update send timeout",
 				"hunter_id", hunterID,
-				"filter_id", update.Filter.Id,
 				"update_type", update.UpdateType)
 			return false
 		}
@@ -482,11 +602,11 @@ func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *
 		}
 	}
 
-	return huntersUpdated
+	return huntersUpdated, distributionFailure(len(failedChannels))
 }
 
 // pushFilterUpdate sends filter update to affected hunters
-func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management.FilterUpdate) uint32 {
+func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management.FilterUpdate) (uint32, error) {
 	m.channelsMu.RLock()
 	// A missed policy update invalidates the stream. Remove it after releasing
 	// the read lock, using channel identity so reconnect replacements survive.
@@ -514,7 +634,7 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 			if m.onFilterFailure != nil {
 				m.onFilterFailure(hunterID, false)
 			}
-			logger.Debug("Sent filter update", "hunter_id", hunterID, "filter_id", filter.Id)
+			logger.Debug("Sent filter update", "hunter_id", hunterID)
 			return true
 
 		case <-timer.C:
@@ -528,8 +648,7 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 			// Note: This is a bit circular since we're calling back to hunter manager
 			// but it's acceptable for logging purposes
 			logger.Warn("Filter update send timeout",
-				"hunter_id", hunterID,
-				"filter_id", filter.Id)
+				"hunter_id", hunterID)
 			return false
 		}
 	}
@@ -546,7 +665,6 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 			if !hunterSupportsFilterType(hunterCaps, filter.Type) {
 				logger.Debug("Skipping filter update for incompatible hunter",
 					"hunter_id", hunterID,
-					"filter_id", filter.Id,
 					"filter_type", filter.Type)
 				continue
 			}
@@ -555,7 +673,7 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 				huntersUpdated++
 			}
 		}
-		return huntersUpdated
+		return huntersUpdated, distributionFailure(len(failedChannels))
 	}
 
 	// Send to specific hunters (still check capabilities)
@@ -570,7 +688,6 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 			if !hunterSupportsFilterType(hunterCaps, filter.Type) {
 				logger.Warn("Skipping filter update for targeted but incompatible hunter",
 					"hunter_id", targetID,
-					"filter_id", filter.Id,
 					"filter_type", filter.Type)
 				continue
 			}
@@ -581,7 +698,7 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 		}
 	}
 
-	return huntersUpdated
+	return huntersUpdated, distributionFailure(len(failedChannels))
 }
 
 // Count returns the total number of filters
@@ -602,4 +719,11 @@ func (m *Manager) GetAll() []*management.Filter {
 		filters = append(filters, proto.Clone(filter).(*management.Filter))
 	}
 	return filters
+}
+
+func distributionFailure(failed int) error {
+	if failed == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %d subscriber streams disconnected", ErrFilterDistribution, failed)
 }

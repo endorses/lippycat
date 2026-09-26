@@ -24,7 +24,7 @@ type collectingSink struct {
 
 func TestProtocolMetadataWritesStructuredLogs(t *testing.T) {
 	dir := t.TempDir()
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16, LogConfig: &StructuredLogConfig{Enabled: true, Directory: dir, Format: "json", Streams: []string{"dns", "ssl", "http", "smtp"}, QueueSize: 16, EmitStage: "all"}})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16, LogConfig: &StructuredLogConfig{Enabled: true, Directory: dir, Format: "json", Streams: []string{"dns", "ssl", "http", "smtp"}, QueueSize: 16, EmitStage: "all"}})
 	require.NoError(t, err)
 	require.NoError(t, p.logSink.Start(context.Background()))
 	require.NoError(t, p.eventDispatcher.Start(context.Background()))
@@ -58,7 +58,7 @@ func (*collectingSink) Flush(context.Context) error { return nil }
 func (*collectingSink) Close(context.Context) error { return nil }
 
 func TestEmitDNSAndSMTPEvents(t *testing.T) {
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	sink := &collectingSink{}
 	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS, events.KindSMTP))
@@ -77,7 +77,7 @@ func TestEmitDNSAndSMTPEvents(t *testing.T) {
 }
 
 func TestEventBroadcasterReceivesNormalizedEventsWithStructuredLogsDisabled(t *testing.T) {
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	require.Nil(t, p.logSink)
 
@@ -109,7 +109,7 @@ func TestEventBroadcasterReceivesNormalizedEventsWithStructuredLogsDisabled(t *t
 }
 
 func TestFileMetadataGenerationDoesNotRequireStructuredLogs(t *testing.T) {
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	require.Nil(t, p.logSink)
 	require.NotNil(t, p.eventRuntime)
@@ -136,7 +136,7 @@ func TestFileMetadataGenerationDoesNotRequireStructuredLogs(t *testing.T) {
 }
 
 func TestTapLocalEventsUseEffectiveTapID(t *testing.T) {
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "tap-test", EventQueueSize: 16})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "tap-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	sink := &collectingSink{}
 	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS, events.KindConn))
@@ -167,7 +167,7 @@ func TestTapLocalEventsUseEffectiveTapID(t *testing.T) {
 }
 
 func TestConnectionAndProtocolEventsShareFlowIdentity(t *testing.T) {
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	sink := &collectingSink{}
 	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS, events.KindConn))
@@ -184,7 +184,7 @@ func TestConnectionAndProtocolEventsShareFlowIdentity(t *testing.T) {
 }
 
 func TestEmitTLSAndHTTPEventsNormalizesResponseDirection(t *testing.T) {
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	sink := &collectingSink{}
 	require.NoError(t, p.RegisterEventSink(sink, events.KindTLS, events.KindHTTP))
@@ -205,7 +205,7 @@ func TestEmitTLSAndHTTPEventsNormalizesResponseDirection(t *testing.T) {
 }
 
 func TestProtocolEventsPropagateFilteredCaptureProvenance(t *testing.T) {
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	sink := &collectingSink{}
 	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP))
@@ -230,7 +230,7 @@ func TestProcessorAndTapSharedFixtureProduceEquivalentEvents(t *testing.T) {
 	}
 	run := func(t *testing.T, processorID, sourceID string) result {
 		t.Helper()
-		p, err := New(Config{ListenAddr: ":0", ProcessorID: processorID, EventQueueSize: 32})
+		p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: processorID, EventQueueSize: 32})
 		require.NoError(t, err)
 		sink := &collectingSink{}
 		require.NoError(t, p.RegisterEventSink(sink, events.KindHTTP, events.KindConn))

@@ -46,7 +46,7 @@ func TestRADIUSOrdinaryOutputsPreserveRequestAndResponse(t *testing.T) {
 				cfg.AutoRotateConfig = &AutoRotateConfig{Enabled: true, OutputDir: filepath.Join(dir, "rotate"), FilePattern: "{timestamp}.pcap", MaxFileSize: 1 << 20, MaxDuration: time.Hour, MaxIdleTime: time.Hour, BufferSize: 4096, SyncInterval: time.Hour}
 				cfg.PcapWriterConfig = &PcapWriterConfig{Enabled: true, OutputDir: filepath.Join(dir, "calls"), FilePattern: "{callid}.pcap", SyncInterval: time.Hour}
 			}
-			p, err := New(cfg)
+			p, err := newTestProcessor(t, cfg)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, p.Shutdown()) })
 			if enablePCAP {
@@ -116,7 +116,7 @@ func TestRADIUSLegacySourceIsolation(t *testing.T) {
 }
 
 func TestRADIUSSlowSubscriberDoesNotThrottleHunters(t *testing.T) {
-	p, err := New(Config{ProcessorID: "radius-test", ListenAddr: "127.0.0.1:0"})
+	p, err := newTestProcessor(t, Config{ProcessorID: "radius-test", ListenAddr: "127.0.0.1:0"})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, p.Shutdown()) }()
 	slow := p.subscriberManager.Add("slow")

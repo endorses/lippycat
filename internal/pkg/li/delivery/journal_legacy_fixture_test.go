@@ -75,8 +75,10 @@ func TestJournalLegacyLCX2FixtureRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint32(42), next)
 
-	// The state watermark (11) is newer than the surviving product (7).
-	// Fresh admission must honor it even after that product is purged.
-	require.NoError(t, j.Purge(7))
-	require.Equal(t, uint64(12), journalAdmit(t, j, records[0]))
+	// Historical raw-key use is unknown, so this owner is explicitly read-only.
+	// The offline upgrade suite checks continuity after a fresh-key bootstrap.
+	require.True(t, j.ReadOnly())
+	require.ErrorIs(t, j.Purge(7), ErrJournalMigrationRequired)
+	_, err = j.Admit(records[0], nil)
+	require.ErrorIs(t, err, ErrJournalMigrationRequired)
 }

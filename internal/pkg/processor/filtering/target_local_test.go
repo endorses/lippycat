@@ -273,6 +273,7 @@ func TestLocalTarget_ApplicationFilterChangesDoNotReapplyUnchangedBPF(t *testing
 
 func TestLocalTarget_GenuineBPFChangeIsApplied(t *testing.T) {
 	target := NewLocalTarget(LocalTargetConfig{BaseBPF: "port 5060"})
+	target.SetApplicationFilter(&mockAppFilterUpdater{})
 	bpfUpdater := &mockBPFUpdater{}
 	target.SetBPFUpdater(bpfUpdater)
 
@@ -314,12 +315,14 @@ func TestLocalTarget_CoordinatorCommitsOnlyAfterSuccessfulBoundary(t *testing.T)
 
 	coordinator.err = errors.New("boundary failed")
 	_, err = target.ApplyFilter(&management.Filter{Id: "host-1", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.0.2.20", Enabled: true})
-	require.ErrorContains(t, err, "boundary failed")
+	require.ErrorContains(t, err, "failed to apply filter")
+	require.NotContains(t, err.Error(), "boundary failed")
 	assert.Equal(t, "192.0.2.10", target.GetActiveFilters()[0].Pattern, "failed boundary must not commit its candidate")
 }
 
 func TestLocalTarget_EffectiveNoOpSkipsCoordinatorButCommitsMetadata(t *testing.T) {
 	target := NewLocalTarget(LocalTargetConfig{})
+	target.SetApplicationFilter(&mockAppFilterUpdater{})
 	coordinator := &recordingLocalFilterCoordinator{}
 	target.SetCoordinator(coordinator)
 
@@ -339,13 +342,15 @@ func TestLocalTarget_FailedDefaultReconciliationDoesNotCommit(t *testing.T) {
 	target.SetBPFUpdater(bpfUpdater)
 
 	_, err := target.ApplyFilter(&management.Filter{Id: "bpf-1", Type: management.FilterType_FILTER_BPF, Pattern: "port 53", Enabled: true})
-	require.ErrorContains(t, err, "pcap failure")
+	require.ErrorContains(t, err, "failed to apply filter")
+	require.NotContains(t, err.Error(), "pcap failure")
 	assert.Empty(t, target.GetActiveFilters())
 	assert.Zero(t, target.FilterCount())
 }
 
 func TestLocalTarget_RemoveCoordinatorFailureRetainsFilter(t *testing.T) {
 	target := NewLocalTarget(LocalTargetConfig{})
+	target.SetApplicationFilter(&mockAppFilterUpdater{})
 	coordinator := &recordingLocalFilterCoordinator{}
 	target.SetCoordinator(coordinator)
 	_, err := target.ApplyFilter(&management.Filter{Id: "sip-1", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice", Enabled: true})
@@ -353,7 +358,8 @@ func TestLocalTarget_RemoveCoordinatorFailureRetainsFilter(t *testing.T) {
 
 	coordinator.err = errors.New("retire failed")
 	_, err = target.RemoveFilter("sip-1")
-	require.ErrorContains(t, err, "retire failed")
+	require.ErrorContains(t, err, "failed to reapply filters after removal")
+	require.NotContains(t, err.Error(), "retire failed")
 	assert.Equal(t, 1, target.FilterCount())
 }
 
@@ -540,36 +546,39 @@ func TestLocalTarget_BPFGeneration(t *testing.T) {
 		assert.Contains(t, lastFilter, " or ")
 	})
 
-	t.Run("invalid IP address ignored", func(t *testing.T) {
+	t.Run("invalid IP address rejected", func(t *testing.T) {
 		target := NewLocalTarget(LocalTargetConfig{})
 		bpfUpdater := &mockBPFUpdater{}
 		target.SetBPFUpdater(bpfUpdater)
 
-		_, _ = target.ApplyFilter(&management.Filter{
+		_, err := target.ApplyFilter(&management.Filter{
 			Id:      "f1",
 			Type:    management.FilterType_FILTER_IP_ADDRESS,
 			Pattern: "not-an-ip",
 			Enabled: true,
 		})
 
-		// No BPF filter should be set for invalid IP
-		// (the filter is stored but generates empty BPF)
-		assert.Equal(t, 1, target.FilterCount())
+		// Invalid input cannot broaden capture by becoming an empty expression.
+		require.ErrorIs(t, err, ErrFilterInvalid)
+		assert.Zero(t, target.FilterCount())
+		assert.Zero(t, bpfUpdater.FilterCount())
 	})
 
-	t.Run("invalid CIDR ignored", func(t *testing.T) {
+	t.Run("invalid CIDR rejected", func(t *testing.T) {
 		target := NewLocalTarget(LocalTargetConfig{})
 		bpfUpdater := &mockBPFUpdater{}
 		target.SetBPFUpdater(bpfUpdater)
 
-		_, _ = target.ApplyFilter(&management.Filter{
+		_, err := target.ApplyFilter(&management.Filter{
 			Id:      "f1",
 			Type:    management.FilterType_FILTER_IP_ADDRESS,
 			Pattern: "192.168.1.0/33", // Invalid CIDR
 			Enabled: true,
 		})
 
-		assert.Equal(t, 1, target.FilterCount())
+		require.ErrorIs(t, err, ErrFilterInvalid)
+		assert.Zero(t, target.FilterCount())
+		assert.Zero(t, bpfUpdater.FilterCount())
 	})
 }
 

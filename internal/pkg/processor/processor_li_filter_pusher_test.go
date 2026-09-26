@@ -3,7 +3,6 @@
 package processor
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/endorses/lippycat/api/gen/management"
@@ -25,7 +24,8 @@ func TestLIFilterPusherDistributedAndLocalTargets(t *testing.T) {
 			name = "local"
 		}
 		t.Run(name, func(t *testing.T) {
-			manager := filtering.NewManager(filepath.Join(t.TempDir(), "filters.yaml"), filtering.NewYAMLPersistence(), radiusFilterTestCapabilities{}, nil, nil)
+			manager := filtering.NewManager(newTestFilterFile(t), filtering.NewYAMLPersistence(), radiusFilterTestCapabilities{}, nil, nil)
+			t.Cleanup(func() { require.NoError(t, manager.Close()) })
 			p := &Processor{filterManager: manager, filterTarget: filtering.NewHunterTarget(manager)}
 			bpf := &liFilterBPFRecorder{}
 			if local {

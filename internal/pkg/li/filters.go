@@ -13,8 +13,8 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
-	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/radius"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 )
 
 // FilterManager handles the mapping between LI intercept tasks and lippycat filters.
@@ -30,7 +30,10 @@ import (
 // The manager maintains a bidirectional mapping between task XIDs and filter IDs
 // to enable correlation when packets match filters.
 type FilterManager struct {
-	mu sync.RWMutex
+	// External pushes may drain packet processing, whose lookups require mu.
+	// Serialize mutations separately and never hold mu across those calls.
+	mutationMu sync.Mutex
+	mu         sync.RWMutex
 
 	// xidToFilters maps task XID to its associated filter IDs.
 	// A single task may have multiple targets, each becoming a filter.
@@ -65,8 +68,8 @@ type FilterLister interface {
 	ListFilterIDs() []string
 }
 
-// FilterCleanupError means replacement filters were installed but superseded
-// filters could not all be withdrawn. Residual IDs remain tracked for retry.
+// FilterCleanupError means filter reconciliation left unfinished enforcement or
+// withdrawal. Residual IDs remain tracked for retry without granting admission.
 type FilterCleanupError struct{ Err error }
 
 func (e *FilterCleanupError) Error() string { return e.Err.Error() }
@@ -111,219 +114,268 @@ func NewFilterManager(filterPusher FilterPusher) *FilterManager {
 	}
 }
 
-// CreateFiltersForTask creates filters for all targets in an intercept task.
-//
-// Each target identity is mapped to the appropriate filter type and pushed
-// to the filter management system. Returns the list of created filter IDs.
-func (m *FilterManager) CreateFiltersForTask(task *InterceptTask) ([]string, error) {
-	if task == nil {
-		return nil, fmt.Errorf("task is nil")
-	}
-	if len(task.Targets) == 0 {
-		return nil, fmt.Errorf("task has no targets")
-	}
+// filterMapping is a detached mutation candidate. Maps and protobufs published
+// to packet readers never change in place.
+type filterMapping struct {
+	xidToFilters map[uuid.UUID][]string
+	filterToXID  map[string]uuid.UUID
+	filterStore  map[string]*management.Filter
+}
 
+func (m *FilterManager) snapshotMapping() filterMapping {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	state := filterMapping{make(map[uuid.UUID][]string, len(m.xidToFilters)), make(map[string]uuid.UUID, len(m.filterToXID)), make(map[string]*management.Filter, len(m.filterStore))}
+	for xid, ids := range m.xidToFilters {
+		state.xidToFilters[xid] = append([]string(nil), ids...)
+	}
+	for id, xid := range m.filterToXID {
+		state.filterToXID[id] = xid
+	}
+	for id, filter := range m.filterStore {
+		state.filterStore[id] = proto.Clone(filter).(*management.Filter)
+	}
+	return state
+}
+
+func (m *FilterManager) publishMapping(state filterMapping) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.xidToFilters, m.filterToXID, m.filterStore = state.xidToFilters, state.filterToXID, state.filterStore
+	m.mu.Unlock()
+}
 
-	// Check if task already has filters
-	if _, exists := m.xidToFilters[task.XID]; exists {
-		return nil, fmt.Errorf("filters already exist for task %s", task.XID)
+// keepCleanup retains a potentially installed ID without making it an active
+// LI correlation. Cleanup obligations must never imply authorization.
+func (s *filterMapping) keepCleanup(xid uuid.UUID, id string) {
+	delete(s.filterStore, id)
+	delete(s.filterToXID, id)
+	for _, existing := range s.xidToFilters[xid] {
+		if existing == id {
+			return
+		}
 	}
+	s.xidToFilters[xid] = append(s.xidToFilters[xid], id)
+}
 
-	var filterIDs []string
-	var createdFilters []*management.Filter
+func filterPushError(out securestore.Outcome, err error) error {
+	return &securestore.CommitError{Outcome: out, Op: "reconcile LI filters", Err: err}
+}
 
-	// RADIUS targets form one conjunction owned by the task.
-	definitions, err := m.filtersForTask(task)
+// rollbackFilters runs under mutationMu, with no packet-lookup lock held. A
+// committed warning still establishes the restored/deleted desired definition.
+// Uncertainty stops subsequent mutations and retains every unfinished cleanup ID.
+func (m *FilterManager) rollbackFilters(xid uuid.UUID, applied []*management.Filter, previous filterMapping, candidate *filterMapping) (bool, error) {
+	var errs []error
+	unresolved := false
+	for i := len(applied) - 1; i >= 0; i-- {
+		id := applied[i].Id
+		var err error
+		if old := previous.filterStore[id]; old != nil {
+			err = m.filterPusher.UpdateFilter(proto.Clone(old).(*management.Filter))
+		} else {
+			err = m.filterPusher.DeleteFilter(id)
+		}
+		if err == nil {
+			continue
+		}
+		errs = append(errs, fmt.Errorf("rollback XID %s filter %s: %w", xid, id, err))
+		if securestore.OutcomeOf(err) != securestore.Committed {
+			candidate.keepCleanup(xid, id)
+			unresolved = true
+		}
+		if securestore.OutcomeOf(err) == securestore.Uncertain {
+			for _, pending := range applied[:i] {
+				candidate.keepCleanup(xid, pending.Id)
+			}
+			break
+		}
+	}
+	return unresolved, errors.Join(errs...)
+}
+
+func (m *FilterManager) pushCandidate(xid uuid.UUID, filters []*management.Filter, previous filterMapping, candidate *filterMapping) error {
+	if m.filterPusher == nil {
+		return nil
+	}
+	var applied []*management.Filter
+	for _, filter := range filters {
+		err := m.filterPusher.UpdateFilter(proto.Clone(filter).(*management.Filter))
+		if err == nil {
+			applied = append(applied, filter)
+			continue
+		}
+		outcome := securestore.OutcomeOf(err)
+		pushErr := fmt.Errorf("install filters for XID %s filter %s: %w", xid, filter.Id, err)
+		if outcome != securestore.NotCommitted {
+			// This failed call may already have installed its candidate too.
+			applied = append(applied, filter)
+		}
+		if outcome == securestore.Uncertain {
+			for _, affected := range applied {
+				candidate.keepCleanup(xid, affected.Id)
+			}
+			m.publishMapping(*candidate)
+			return &FilterCleanupError{Err: filterPushError(securestore.Uncertain, pushErr)}
+		}
+		unresolved, rollbackErr := m.rollbackFilters(xid, applied, previous, candidate)
+		if unresolved {
+			m.publishMapping(*candidate)
+			return &FilterCleanupError{Err: filterPushError(securestore.Uncertain, errors.Join(pushErr, rollbackErr))}
+		}
+		// The complete prior desired policy was restored. Preserve nested
+		// committed warnings while describing the compound operation as failed.
+		return filterPushError(securestore.NotCommitted, errors.Join(pushErr, rollbackErr))
+	}
+	return nil
+}
+
+// CreateFiltersForTask installs all target filters before publishing correlations.
+func (m *FilterManager) CreateFiltersForTask(task *InterceptTask) ([]string, error) {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	return m.createFiltersForTask(task)
+}
+
+func (m *FilterManager) createFiltersForTask(task *InterceptTask) ([]string, error) {
+	if task == nil || len(task.Targets) == 0 {
+		return nil, errors.New("task with targets is required")
+	}
+	candidate := m.snapshotMapping()
+	if _, exists := candidate.xidToFilters[task.XID]; exists {
+		return nil, fmt.Errorf("filters or cleanup obligations already exist for task %s", task.XID)
+	}
+	filters, err := m.filtersForTask(task)
 	if err != nil {
 		return nil, err
 	}
-	for _, filter := range definitions {
-		if owner, ok := m.filterToXID[filter.Id]; ok && owner != task.XID {
-			return nil, fmt.Errorf("create filters for XID %s: filter ID %s is owned by XID %s", task.XID, filter.Id, owner)
+	ids := make([]string, 0, len(filters))
+	for _, filter := range filters {
+		if _, exists := candidate.filterToXID[filter.Id]; exists {
+			return nil, fmt.Errorf("filter ID already has an owner")
 		}
-		if _, ok := m.filterStore[filter.Id]; ok {
-			return nil, fmt.Errorf("create filters for XID %s: filter ID %s already exists", task.XID, filter.Id)
-		}
-		filterIDs = append(filterIDs, filter.Id)
-		createdFilters = append(createdFilters, filter)
+		ids = append(ids, filter.Id)
 	}
-
-	var pushed []string
-	if m.filterPusher != nil {
-		for _, filter := range createdFilters {
-			if err := m.filterPusher.UpdateFilter(filter); err != nil {
-				pushErr := fmt.Errorf("install filters for XID %s: update filter %s: %w", task.XID, filter.Id, err)
-				rollbackErr := m.rollbackRemoteFiltersLocked(task.XID, pushed)
-				if rollbackErr != nil {
-					return nil, errors.Join(pushErr, rollbackErr)
-				}
-				return nil, fmt.Errorf("%w; rollback succeeded", pushErr)
-			}
-			pushed = append(pushed, filter.Id)
-		}
+	if err := m.pushCandidate(task.XID, filters, candidate, &candidate); err != nil {
+		return nil, err
 	}
-
-	for _, filter := range createdFilters {
-		m.filterStore[filter.Id] = filter
-		m.filterToXID[filter.Id] = task.XID
+	for _, filter := range filters {
+		candidate.filterStore[filter.Id] = filter
+		candidate.filterToXID[filter.Id] = task.XID
 	}
-	m.xidToFilters[task.XID] = filterIDs
-
-	return filterIDs, nil
+	candidate.xidToFilters[task.XID] = append([]string(nil), ids...)
+	m.publishMapping(candidate)
+	return ids, nil
 }
 
-func (m *FilterManager) rollbackRemoteFiltersLocked(xid uuid.UUID, filterIDs []string) error {
-	if m.filterPusher == nil {
+// UpdateFiltersForTask stages replacements while packet lookups retain the old
+// immutable map. Failed compensation keeps cleanup IDs, without authorization.
+func (m *FilterManager) UpdateFiltersForTask(task *InterceptTask) error {
+	if task == nil {
+		return errors.New("task is nil")
+	}
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	candidate := m.snapshotMapping()
+	existingIDs, exists := candidate.xidToFilters[task.XID]
+	if !exists {
+		_, err := m.createFiltersForTask(task)
+		return err
+	}
+	filters, err := m.filtersForTask(task)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(filters))
+	newIDs := make(map[string]bool, len(filters))
+	for _, filter := range filters {
+		if owner, exists := candidate.filterToXID[filter.Id]; exists && owner != task.XID {
+			return errors.New("replacement filter ID already has a different owner")
+		}
+		ids = append(ids, filter.Id)
+		newIDs[filter.Id] = true
+	}
+	if err := m.pushCandidate(task.XID, filters, candidate, &candidate); err != nil {
+		return err
+	}
+	for _, filter := range filters {
+		candidate.filterStore[filter.Id] = filter
+		candidate.filterToXID[filter.Id] = task.XID
+	}
+	var errs []error
+	uncertain := false
+	for _, id := range existingIDs {
+		if newIDs[id] {
+			continue
+		}
+		var err error
+		if !uncertain && m.filterPusher != nil {
+			err = m.filterPusher.DeleteFilter(id)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("replace filters for XID %s delete old filter %s: %w", task.XID, id, err))
+			uncertain = securestore.OutcomeOf(err) == securestore.Uncertain
+		}
+		if uncertain || (err != nil && securestore.OutcomeOf(err) != securestore.Committed) {
+			ids = append(ids, id)
+		}
+		// Superseded definitions never remain an authorization source, even
+		// when their external withdrawal needs a later cleanup attempt.
+		delete(candidate.filterStore, id)
+		delete(candidate.filterToXID, id)
+	}
+	candidate.xidToFilters[task.XID] = ids
+	m.publishMapping(candidate)
+	if len(errs) != 0 {
+		out := securestore.Committed
+		if uncertain {
+			out = securestore.Uncertain
+		}
+		return &FilterCleanupError{Err: filterPushError(out, errors.Join(errs...))}
+	}
+	return nil
+}
+
+// RemoveFiltersForTask withdraws correlations and retains failed cleanup IDs.
+func (m *FilterManager) RemoveFiltersForTask(xid uuid.UUID) error {
+	m.mutationMu.Lock()
+	defer m.mutationMu.Unlock()
+	candidate := m.snapshotMapping()
+	ids, exists := candidate.xidToFilters[xid]
+	if !exists {
 		return nil
 	}
 	var errs []error
 	var residual []string
-	for i := len(filterIDs) - 1; i >= 0; i-- {
-		id := filterIDs[i]
-		if err := m.filterPusher.DeleteFilter(id); err != nil {
+	uncertain := false
+	for _, id := range ids {
+		var err error
+		if !uncertain && m.filterPusher != nil {
+			err = m.filterPusher.DeleteFilter(id)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("remove filters for XID %s delete filter %s: %w", xid, id, err))
+			uncertain = securestore.OutcomeOf(err) == securestore.Uncertain
+		}
+		if uncertain || (err != nil && securestore.OutcomeOf(err) != securestore.Committed) {
 			residual = append(residual, id)
-			errs = append(errs, fmt.Errorf("rollback XID %s delete filter %s: %w", xid, id, err))
 		}
-	}
-	if len(errs) != 0 {
-		logger.Error("LI filter rollback left remotely installed filters", "xid", xid, "residual_filter_ids", residual, "error", errors.Join(errs...))
-	}
-	return errors.Join(errs...)
-}
-
-// UpdateFiltersForTask atomically updates filters when a task is modified.
-//
-// This removes existing filters and creates new ones based on the updated targets.
-// If any filter creation fails, the operation is rolled back.
-func (m *FilterManager) UpdateFiltersForTask(task *InterceptTask) error {
-	if task == nil {
-		return fmt.Errorf("task is nil")
-	}
-
-	m.mu.Lock()
-
-	// Get existing filter IDs
-	existingIDs, exists := m.xidToFilters[task.XID]
-	if !exists {
-		// No existing filters, unlock and create new ones
-		m.mu.Unlock()
-		_, err := m.CreateFiltersForTask(task)
-		return err
-	}
-
-	// From here on, we hold the lock until the end
-	defer m.mu.Unlock()
-
-	// Target position is part of the filter identity. Reusing these canonical IDs
-	// keeps a target stable across modification and reactivation instead of
-	// allocating an ever-increasing index.
-	var newFilterIDs []string
-	var newFilters []*management.Filter
-	definitions, err := m.filtersForTask(task)
-	if err != nil {
-		return err
-	}
-	for _, filter := range definitions {
-		if owner, ok := m.filterToXID[filter.Id]; ok && owner != task.XID {
-			return fmt.Errorf("replace filters for XID %s: filter ID %s is owned by XID %s", task.XID, filter.Id, owner)
-		}
-		newFilterIDs = append(newFilterIDs, filter.Id)
-		newFilters = append(newFilters, filter)
-	}
-
-	// Update canonical IDs in place. If a push fails, restore every already
-	// changed filter to its previous definition (or delete it if it was new).
-	if m.filterPusher != nil {
-		var pushed []*management.Filter
-		for _, filter := range newFilters {
-			if err := m.filterPusher.UpdateFilter(filter); err != nil {
-				pushErr := fmt.Errorf("install replacement filters for XID %s: update filter %s: %w", task.XID, filter.Id, err)
-				var rollbackErrs []error
-				for i := len(pushed) - 1; i >= 0; i-- {
-					applied := pushed[i]
-					if previous, ok := m.filterStore[applied.Id]; ok {
-						if restoreErr := m.filterPusher.UpdateFilter(previous); restoreErr != nil {
-							rollbackErrs = append(rollbackErrs, fmt.Errorf("rollback XID %s restore filter %s: %w", task.XID, applied.Id, restoreErr))
-						}
-					} else if deleteErr := m.filterPusher.DeleteFilter(applied.Id); deleteErr != nil {
-						rollbackErrs = append(rollbackErrs, fmt.Errorf("rollback XID %s delete filter %s: %w", task.XID, applied.Id, deleteErr))
-					}
-				}
-				return errors.Join(pushErr, errors.Join(rollbackErrs...))
-			}
-			pushed = append(pushed, filter)
-		}
-	}
-
-	// Commit replacements locally before deleting old filters. If deletion is
-	// partial, residual IDs remain mapped so a later Remove/Update can retry.
-	for _, filter := range newFilters {
-		m.filterStore[filter.Id] = filter
-		m.filterToXID[filter.Id] = task.XID
-	}
-	committedIDs := append([]string(nil), newFilterIDs...)
-	newIDSet := make(map[string]bool, len(newFilterIDs))
-	for _, id := range newFilterIDs {
-		newIDSet[id] = true
-	}
-	var deleteErrs []error
-	for _, id := range existingIDs {
-		if newIDSet[id] {
-			continue
-		}
-		if m.filterPusher != nil {
-			if err := m.filterPusher.DeleteFilter(id); err != nil {
-				committedIDs = append(committedIDs, id)
-				deleteErrs = append(deleteErrs, fmt.Errorf("replace filters for XID %s: delete old filter %s: %w", task.XID, id, err))
-				continue
-			}
-		}
-		delete(m.filterStore, id)
-		delete(m.filterToXID, id)
-	}
-	m.xidToFilters[task.XID] = committedIDs
-	if len(deleteErrs) != 0 {
-		logger.Error("LI filter replacement left old filters installed", "xid", task.XID, "filter_ids", committedIDs[len(newFilterIDs):], "error", errors.Join(deleteErrs...))
-		return &FilterCleanupError{Err: errors.Join(deleteErrs...)}
-	}
-
-	return nil
-}
-
-// RemoveFiltersForTask removes all filters associated with a task.
-//
-// Called when a task is deactivated.
-func (m *FilterManager) RemoveFiltersForTask(xid uuid.UUID) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	filterIDs, exists := m.xidToFilters[xid]
-	if !exists {
-		return nil // No filters to remove
-	}
-
-	var deleteErrs []error
-	var residual []string
-	for _, id := range filterIDs {
-		if m.filterPusher != nil {
-			if err := m.filterPusher.DeleteFilter(id); err != nil {
-				residual = append(residual, id)
-				deleteErrs = append(deleteErrs, fmt.Errorf("remove filters for XID %s: delete filter %s: %w", xid, id, err))
-				continue
-			}
-		}
-		delete(m.filterStore, id)
-		delete(m.filterToXID, id)
+		delete(candidate.filterStore, id)
+		delete(candidate.filterToXID, id)
 	}
 	if len(residual) == 0 {
-		delete(m.xidToFilters, xid)
+		delete(candidate.xidToFilters, xid)
 	} else {
-		m.xidToFilters[xid] = residual
-		logger.Error("LI task filter removal incomplete", "xid", xid, "residual_filter_ids", residual, "error", errors.Join(deleteErrs...))
+		candidate.xidToFilters[xid] = residual
 	}
-	return errors.Join(deleteErrs...)
+	m.publishMapping(candidate)
+	if len(errs) == 0 {
+		return nil
+	}
+	out := securestore.Committed
+	if uncertain {
+		out = securestore.Uncertain
+	}
+	return filterPushError(out, errors.Join(errs...))
 }
 
 // GetXIDForFilter returns the task XID associated with a filter.
@@ -604,10 +656,10 @@ func (m *FilterManager) LookupFilter(filterID string) (MatchResult, bool) {
 		return MatchResult{}, false
 	}
 	filter, exists := m.filterStore[filterID]
-	if !exists {
+	if !exists || filter == nil {
 		return MatchResult{}, false
 	}
-	return MatchResult{XID: xid, FilterID: filterID, Filter: filter}, true
+	return MatchResult{XID: xid, FilterID: filterID, Filter: proto.Clone(filter).(*management.Filter)}, true
 }
 
 // LookupMatches finds all LI tasks that would match a given filter match.
@@ -634,11 +686,14 @@ func (m *FilterManager) LookupMatches(matchedFilterIDs []string) []MatchResult {
 		}
 		seen[xid] = true
 
-		filter, _ := m.filterStore[filterID]
+		filter := m.filterStore[filterID]
+		if filter == nil {
+			continue
+		}
 		results = append(results, MatchResult{
 			XID:      xid,
 			FilterID: filterID,
-			Filter:   filter,
+			Filter:   proto.Clone(filter).(*management.Filter),
 		})
 	}
 

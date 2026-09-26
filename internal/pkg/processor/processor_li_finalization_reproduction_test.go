@@ -28,7 +28,7 @@ func newFinalizationReproductionProcessor(t *testing.T, pcapEnabled bool) (*Proc
 		ListenAddr:  "localhost:0",
 		MaxHunters:  1,
 		LIEnabled:   true,
-		FilterFile:  t.TempDir() + "/filters.yaml",
+		FilterFile:  newTestFilterFile(t),
 	}
 	if pcapEnabled {
 		config.PcapWriterConfig = &PcapWriterConfig{
@@ -39,7 +39,7 @@ func newFinalizationReproductionProcessor(t *testing.T, pcapEnabled bool) (*Proc
 		}
 	}
 
-	p, err := New(config)
+	p, err := newTestProcessor(t, config)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if err := p.Shutdown(); err != nil {

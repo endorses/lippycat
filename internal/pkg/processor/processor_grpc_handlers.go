@@ -46,10 +46,8 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
-	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
-	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
 	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
@@ -78,6 +76,10 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 			return err
 		}
 
+		if p.filterProcessingBlocked() {
+			return status.Error(codes.Unavailable, "filter policy is faulted; packet processing blocked")
+		}
+
 		// Pin the stream to the exact packet-mode registration selected during
 		// negotiation. Re-registration invalidates the old stream so a producer
 		// can never send packets and events under one accepted contract.
@@ -102,6 +104,9 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 		}
 		internalBatch.RADIUSSourceTrusted = radiusStreamSourceTrusted(stream.Context(), batch.HunterId)
 		p.processBatch(internalBatch)
+		if p.filterProcessingBlocked() {
+			return status.Error(codes.Unavailable, "filter policy is faulted; packet processing blocked")
+		}
 
 		// Determine flow control state based on processor load
 		flowControl := p.flowController.Determine()
@@ -322,7 +327,10 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	logger.Info("Filter subscription started", "hunter_id", hunterID)
 
 	// Create filter update channel for this hunter
-	filterChan, currentFilters := p.filterManager.SubscribeSnapshot(hunterID)
+	filterChan, currentFilters, err := p.filterManager.SubscribeSnapshotE(hunterID)
+	if err != nil {
+		return filterMutationStatus(err)
+	}
 
 	// Cleanup on disconnect
 	defer func() {
@@ -343,7 +351,7 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 				Filter:     filter,
 			}
 			if err := stream.Send(update); err != nil {
-				logger.Error("Failed to send initial filter", "error", err, "filter_id", filter.Id)
+				logger.Error("Failed to send initial filter", "error", err)
 				return err
 			}
 		}
@@ -365,8 +373,7 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 
 			logger.Debug("Sending filter update",
 				"hunter_id", hunterID,
-				"update_type", update.UpdateType,
-				"filter_id", update.Filter.Id)
+				"update_type", update.UpdateType)
 
 			if err := stream.Send(update); err != nil {
 				logger.Error("Failed to send filter update", "hunter_id", hunterID, "error", err)
@@ -797,86 +804,38 @@ func (p *Processor) SubscribeTopology(req *management.TopologySubscribeRequest, 
 	}
 }
 
-// validateLocalRADIUSFilter checks local capability before committing any filter
-// state. Both local capture ingress and matching must be available.
-func (p *Processor) validateLocalRADIUSFilter(filter *management.Filter) error {
-	if filter == nil || !sharedfilter.IsRADIUSFilter(filter.Type) {
-		return nil
-	}
-	if localTarget, ok := p.filterTarget.(*filtering.LocalTarget); ok && !localTarget.SupportsFilterType(filter.Type) {
-		return status.Error(codes.FailedPrecondition, "local RADIUS ingress capability is not available")
-	}
-	return nil
-}
-
-// UpdateFilter adds or modifies a filter (Management Service)
+// UpdateFilter adds or modifies a durably committed managed filter.
 func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter) (*management.FilterUpdateResult, error) {
-	logger.Info("Update filter request", "filter_id", filter.Id, "type", filter.Type, "pattern", filter.Pattern)
-	if err := p.validateLocalRADIUSFilter(filter); err != nil {
-		return nil, err
-	}
-
-	// For tap mode (LocalTarget), also apply the filter locally to restart capture
-	// with updated BPF filter and application-layer filters
-	if localTarget, ok := p.filterTarget.(*filtering.LocalTarget); ok {
-		if _, err := localTarget.ApplyFilter(filter); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to apply filter locally: %v", err)
-		}
-	}
-	// Commit persistence/distribution only after local reconciliation succeeds.
-	huntersUpdated, err := p.filterManager.Update(filter)
+	count, err := p.updateManagedFilter(filter)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to update filter: %v", err)
+		return nil, filterMutationStatus(err)
 	}
-
-	logger.Info("Filter updated",
-		"filter_id", filter.Id,
-		"hunters_updated", huntersUpdated)
-
-	return &management.FilterUpdateResult{
-		Success:        true,
-		HuntersUpdated: huntersUpdated,
-	}, nil
+	return &management.FilterUpdateResult{Success: true, HuntersUpdated: count}, nil
 }
 
-// DeleteFilter removes a filter (Management Service)
+// DeleteFilter durably removes managed desired policy before applying it.
 func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDeleteRequest) (*management.FilterUpdateResult, error) {
-	logger.Info("Delete filter request", "filter_id", req.FilterId)
-
-	// For tap mode (LocalTarget), also remove the filter locally to restart capture
-	// with updated BPF filter and application-layer filters
-	if localTarget, ok := p.filterTarget.(*filtering.LocalTarget); ok {
-		if _, err := localTarget.RemoveFilter(req.FilterId); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to remove filter locally: %v", err)
-		}
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "filter delete request is required")
 	}
-	// Commit persistence/distribution only after local reconciliation succeeds.
-	huntersUpdated, err := p.filterManager.Delete(req.FilterId)
+	count, err := p.deleteManagedFilter(req.FilterId)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "filter not found: %s", req.FilterId)
+		return nil, filterMutationStatus(err)
 	}
-
-	logger.Info("Filter deleted",
-		"filter_id", req.FilterId,
-		"hunters_updated", huntersUpdated)
-
-	return &management.FilterUpdateResult{
-		Success:        true,
-		HuntersUpdated: huntersUpdated,
-	}, nil
+	return &management.FilterUpdateResult{Success: true, HuntersUpdated: count}, nil
 }
 
 // UpdateFilterOnProcessor adds or modifies a filter on a specific processor (Management Service)
 // Implements processor-scoped filter operations for multi-level management
 func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management.ProcessorFilterRequest) (*management.FilterUpdateResult, error) {
+	if req == nil || req.Filter == nil {
+		return nil, status.Error(codes.InvalidArgument, "filter request is required")
+	}
 	// Extract audit context for logging
 	audit := extractAuditContext(ctx, "UpdateFilter")
 
 	// Log operation start with filter details
-	logAuditOperationStart(audit, req.ProcessorId,
-		"filter_id", req.Filter.Id,
-		"filter_type", req.Filter.Type,
-		"filter_pattern", req.Filter.Pattern)
+	logAuditOperationStart(audit, req.ProcessorId, "filter_type", req.Filter.Type)
 
 	// Verify authorization token if present (must happen before routing)
 	if req.AuthToken != nil {
@@ -914,23 +873,14 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 	if routingDecision.IsLocal {
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
-		if err := p.validateLocalRADIUSFilter(req.Filter); err != nil {
-			logAuditOperationResult(audit, req.ProcessorId, false, err,
-				"filter_id", req.Filter.Id,
-				"chain_depth", 0)
-			return nil, err
-		}
-
-		huntersUpdated, err := p.filterManager.Update(req.Filter)
+		huntersUpdated, err := p.updateManagedFilter(req.Filter)
 		if err != nil {
-			logAuditOperationResult(audit, req.ProcessorId, false, err,
-				"filter_id", req.Filter.Id,
-				"chain_depth", 0)
-			return nil, status.Errorf(codes.Internal, "failed to update filter: %v", err)
+			resultErr := filterMutationStatus(err)
+			logAuditOperationResult(audit, req.ProcessorId, false, resultErr, "chain_depth", 0)
+			return nil, resultErr
 		}
 
 		logAuditOperationResult(audit, req.ProcessorId, true, nil,
-			"filter_id", req.Filter.Id,
 			"hunters_updated", huntersUpdated,
 			"chain_depth", 0)
 
@@ -973,7 +923,6 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 	}
 
 	logAuditOperationResult(audit, req.ProcessorId, true, nil,
-		"filter_id", req.Filter.Id,
 		"hunters_updated", result.HuntersUpdated,
 		"chain_depth", routingDecision.Depth)
 
@@ -983,12 +932,14 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 // DeleteFilterOnProcessor removes a filter from a specific processor (Management Service)
 // Implements processor-scoped filter operations for multi-level management
 func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management.ProcessorFilterDeleteRequest) (*management.FilterUpdateResult, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "filter delete request is required")
+	}
 	// Extract audit context for logging
 	audit := extractAuditContext(ctx, "DeleteFilter")
 
 	// Log operation start
-	logAuditOperationStart(audit, req.ProcessorId,
-		"filter_id", req.FilterId)
+	logAuditOperationStart(audit, req.ProcessorId)
 
 	// Verify authorization token if present (must happen before routing)
 	if req.AuthToken != nil {
@@ -1027,16 +978,14 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
 
-		huntersUpdated, err := p.filterManager.Delete(req.FilterId)
+		huntersUpdated, err := p.deleteManagedFilter(req.FilterId)
 		if err != nil {
-			logAuditOperationResult(audit, req.ProcessorId, false, err,
-				"filter_id", req.FilterId,
-				"chain_depth", 0)
-			return nil, status.Errorf(codes.Internal, "failed to delete filter: %v", err)
+			resultErr := filterMutationStatus(err)
+			logAuditOperationResult(audit, req.ProcessorId, false, resultErr, "chain_depth", 0)
+			return nil, resultErr
 		}
 
 		logAuditOperationResult(audit, req.ProcessorId, true, nil,
-			"filter_id", req.FilterId,
 			"hunters_updated", huntersUpdated,
 			"chain_depth", 0)
 
@@ -1079,7 +1028,6 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 	}
 
 	logAuditOperationResult(audit, req.ProcessorId, true, nil,
-		"filter_id", req.FilterId,
 		"hunters_updated", result.HuntersUpdated,
 		"chain_depth", routingDecision.Depth)
 

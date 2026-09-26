@@ -65,7 +65,7 @@ func TestRegisterProcessor_CycleDetection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create processor with ID "test-processor"
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: "test-processor",
 				ListenAddr:  "localhost:55555",
 			})
@@ -140,7 +140,7 @@ func TestRegisterProcessor_DepthLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create processor
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: "test-processor",
 				ListenAddr:  "localhost:55555",
 			})
@@ -204,7 +204,7 @@ func TestRegisterProcessor_CombinedValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create processor with ID "test-processor"
-			processor, err := New(Config{
+			processor, err := newTestProcessor(t, Config{
 				ProcessorID: "test-processor",
 				ListenAddr:  "localhost:55555",
 			})

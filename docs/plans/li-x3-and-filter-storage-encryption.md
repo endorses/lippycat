@@ -3,8 +3,9 @@
 Drafted: 2026-09-26. Code baseline: `77f7abfe`.
 
 Status: Implementation in progress. Storage contracts and compatibility fixtures
-are complete; shared storage primitives are implemented and verified in isolation.
-X2 integration and phases 3–9 remain open.
+are complete. Shared storage now backs X2 recovery and managed filter snapshots;
+transactional filter mutations and offline filter initialization/migration are
+verified. Runtime filter-mode wiring and phases 4–9 remain open.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
 This plan extends the implemented
@@ -232,23 +233,23 @@ Primary areas: new `internal/pkg/securestore`; existing
       files, unique IDs, active/prior lookup, and separate purpose configuration. Reject
       accidental reuse of the same configured key across the four stores without
       logging key material or fingerprints.
-- [ ] Implement authenticated bounded envelopes, strict header/version/purpose
+- [x] Implement authenticated bounded envelopes, strict header/version/purpose
       validation, fresh nonces and enforced usage limits. Key-use accounting must
       survive restart/rewriting sufficiently to enforce the selected limit; document
       how journal rotation capacity prevents reaching a limit with no recovery path.
-- [ ] Implement descriptor-based private reads, stable ownership locks, exclusive
+- [x] Implement descriptor-based private reads, stable ownership locks, exclusive
       temporary writes, durable replacement, and typed uncertain-commit errors. Close
       handles/release locks on construction failures as well as normal shutdown.
-- [ ] Test wrong keys, changed headers/tags, cross-purpose/store substitution,
+- [x] Test wrong keys, changed headers/tags, cross-purpose/store substitution,
       truncation, oversized input, symlink/hardlink aliases, insecure files/directories,
       competing owners, short writes, full disk, rename failures, and directory-sync
       failures. Verify encrypted stores create no plaintext temporary files or decrypted
       error output; YAML writes remain private and use the same durability guarantees.
-- [ ] Integrate the primitives into X2 without changing its delivery policy. Keep
+- [x] Integrate the primitives into X2 without changing its delivery policy. Keep
       explicit `LCX2` v1 readers and original raw-key semantics for products, sequence
       checkpoints, and journal state. Existing key-file-only configuration remains
       readable; once the active key changes, retain an explicit legacy read-key mapping.
-- [ ] Verify mixed old/new recovery and interruption during encrypted replacement.
+- [x] Verify mixed old/new recovery and interruption during encrypted replacement.
       Unknown versions and ambiguous legacy-key selection must fail closed.
 
 Exit: common primitives pass boundary/fault tests, and existing X2 recovery,
@@ -261,7 +262,7 @@ Primary areas: `internal/pkg/filtering/{parser,conversion,validation}.go`,
 `processor.go`, `processor_lifecycle.go`, `processor_grpc_handlers.go`, and
 `processor_li.go` under `internal/pkg/processor`.
 
-- [ ] Separate in-memory filter serialization from plaintext CLI file import.
+- [x] Separate in-memory filter serialization from plaintext CLI file import.
       Strict managed loading/migration must reject invalid entries, duplicate IDs,
       unknown fields/types, trailing documents, and partial parsing. Preserve every
       supported field, including revisions, disabled state, scoping, descriptions,
@@ -275,24 +276,24 @@ Primary areas: `internal/pkg/filtering/{parser,conversion,validation}.go`,
       absent-file first-run behavior. Invalid/unreadable existing files and lock/path
       failures abort startup in both modes. Preserve `lc set filter --file` import and
       stopped-node YAML editing/restart; do not add automatic format conversion.
-- [ ] Under manager mutation ordering, stage and validate a detached complete
+- [x] Under manager mutation ordering, stage and validate a detached complete
       candidate; persist it; then publish committed maps/revisions and ordered updates.
       Definite save failure leaves published state and subscribers unchanged and returns
       an error. Do not mutate caller-owned protobuf values or consume revision state
       for failed candidates. Preserve current deleted-RADIUS-revision semantics rather
       than silently promising new restart-persistent deletion history.
-- [ ] Introduce one processor mutation entrypoint for direct RPCs, processor-scoped
+- [x] Introduce one processor mutation entrypoint for direct RPCs, processor-scoped
       local RPCs, and the LI filter pusher. Remove local target application before save,
       scoped-handler bypasses, and LI target application after manager failure. Avoid
       applying the default hunter target twice.
-- [ ] Validate local policy before commit where possible; after commit, apply under
+- [x] Validate local policy before commit where possible; after commit, apply under
       the existing tap capture/reconcile boundary. A post-commit target failure keeps
       the committed desired policy, blocks affected processing, and reports a distinct
       reconciliation fault. Do not pretend restoring memory rolls back disk.
-- [ ] Preserve `SubscribeSnapshot`/update ordering and separate durable acceptance
+- [x] Preserve `SubscribeSnapshot`/update ordering and separate durable acceptance
       from remote hunter application. Map storage, uncertain-commit, not-found, and
       distribution failures accurately in RPC responses.
-- [ ] Remove raw selectors from update/normalization/local-target logs and nested
+- [x] Remove raw selectors from update/normalization/local-target logs and nested
       errors, including phone numbers, invalid IP/CIDR values, and BPF expressions.
       Review LI-derived filter IDs as sensitive identifiers; retain useful redacted
       operation/error classifications.
@@ -659,3 +660,46 @@ by those checks. Phase 2 remains open until X2 consumes the shared primitives an
 mixed-format/interrupted-replacement compatibility is verified. All broader
 qualification, migration/rotation rehearsal, historical replay scenarios, and
 benchmark evidence remain required by the original completion contract.
+
+### X2 integration and transactional managed filters (2026-09-26)
+
+X2 journals now use the shared descriptor, ownership, envelope, usage, and typed
+commit primitives. Explicit legacy readers preserve LCX2 products, sequence
+checkpoints, and journal state. A legacy key-file-only journal opens for read-only
+recovery/export; live writes require explicit upgrade with a fresh independent
+active key and the legacy read-key mapping. Mixed recovery retains original
+product bytes and sequence values. Missing usage accounting fails closed. Journal
+capacity includes actual metadata allocation and fixed recovery working space.
+
+Strict managed YAML and encrypted JSON codecs preserve all 22 filter types and
+complete RADIUS criteria. Bounded decoding rejects partial/ambiguous documents.
+YAML and encrypted backends use lifetime ownership and durable whole snapshots;
+encrypted initialization is explicit. The common `lc migrate filter-store`
+command supports empty initialization, strict YAML migration, no-clobber or
+explicit in-place operation, and authenticated interruption/resume bookkeeping.
+Its registration is verified for all/cli/processor/tap binaries. LI-state and
+journal migration/rotation commands remain open.
+
+Manager mutations validate detached candidates, commit snapshots, then publish
+maps, revisions, and ordered updates. Direct/scoped RPCs and LI mutations use one
+processor path. Definite failures preserve effective policy; uncertain commits
+and post-commit application faults block processing. Capture readiness confirms
+all interfaces and BPF installation before policy application succeeds. LI
+filter lookups remain available while capture drains, with residual cleanup IDs
+tracked separately from authorization. Diagnostics omit raw selectors and
+LI-derived filter identifiers.
+
+Verified checks include the complete processor/delivery/tap integration suites,
+shared storage and managed codec/backend tests, common migration CLI and build-tag
+registration tests, and focused race tests for manager ordering, processor
+mutations, capture readiness, LI filter transactions, journal recovery, and
+bootstrap boundaries. Shared/backend/CLI vet checks passed. Maximum-schema
+allocation measurements are recorded in the design contract; they are decoder
+bounds, not the required X3 production-storage benchmark.
+
+Core runtime filter-mode selection and the CLI mode/key flags are not wired in
+this checkpoint, so mandatory encrypted LI startup is not yet enabled. Phase 2's
+cross-store configured-key independence check remains open until all four runtime
+stores exist. The new storage foundations do not close phase 4 lifecycle
+transactions or phases 5–9; final migration/rotation rehearsal, historical replay,
+performance qualification, and release build matrix are still required.

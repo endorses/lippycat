@@ -114,8 +114,8 @@ func TestDeleteFilter_NotFound(t *testing.T) {
 		"should return NotFound status code")
 	assert.Contains(t, st.Message(), "filter not found",
 		"error message should indicate filter not found")
-	assert.Contains(t, st.Message(), "non-existent-filter",
-		"error message should include filter ID")
+	assert.NotContains(t, st.Message(), "non-existent-filter",
+		"managed filter errors must not disclose filter IDs")
 }
 
 func TestDeleteFilter_Success(t *testing.T) {

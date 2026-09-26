@@ -73,7 +73,7 @@ func radiusPOIBatch(t *testing.T, p *Processor, task *li.InterceptTask) (*source
 func radiusPOIProcessor(t *testing.T, queueSize int) (*Processor, *li.InterceptTask, string) {
 	t.Helper()
 	dir := t.TempDir()
-	p, err := New(Config{ProcessorID: "tap-poi", ListenAddr: "127.0.0.1:0", MaxHunters: 1, LIEnabled: true, LIRADIUSCorrelationStateFile: filepath.Join(dir, "correlation.json"), FilterFile: filepath.Join(dir, "filters.yaml"), WriteFile: filepath.Join(dir, "ordinary.pcap"), LogConfig: &StructuredLogConfig{Enabled: true, Directory: dir, Format: "json", Streams: []string{"radius"}, QueueSize: 32, EmitStage: "all"}})
+	p, err := newTestProcessor(t, Config{ProcessorID: "tap-poi", ListenAddr: "127.0.0.1:0", MaxHunters: 1, LIEnabled: true, LIRADIUSCorrelationStateFile: filepath.Join(dir, "correlation.json"), FilterFile: newTestFilterFile(t), WriteFile: filepath.Join(dir, "ordinary.pcap"), LogConfig: &StructuredLogConfig{Enabled: true, Directory: dir, Format: "json", Streams: []string{"radius"}, QueueSize: 32, EmitStage: "all"}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, p.Shutdown()) })
 	p.pcapWriter, err = packetpcap.NewWriter(p.config.WriteFile)

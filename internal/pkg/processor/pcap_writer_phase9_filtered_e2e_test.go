@@ -5,6 +5,7 @@ package processor
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,10 +15,13 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,6 +45,21 @@ func (f phase9IdentityFilter) MatchPacketLevelWithIDs(packet gopacket.Packet) (b
 	return f.MatchPacketWithIDs(packet)
 }
 
+// Keep a real libpcap reader alive on a synthetic stream while exercising TCP
+// injection. This requires no live-interface capture privilege.
+type phase9CaptureInterface struct {
+	path   string
+	handle *pcap.Handle
+}
+
+func (f *phase9CaptureInterface) Name() string { return "synthetic-injection-capture" }
+func (f *phase9CaptureInterface) SetHandle() error {
+	var err error
+	f.handle, err = pcap.OpenOffline(f.path)
+	return err
+}
+func (f *phase9CaptureInterface) Handle() (*pcap.Handle, error) { return f.handle, nil }
+
 func TestPhase9FilteredInviteAndInheritedByeFinalizeSessionOutput(t *testing.T) {
 	const (
 		callID   = "filtered-phase9-call"
@@ -51,7 +70,7 @@ func TestPhase9FilteredInviteAndInheritedByeFinalizeSessionOutput(t *testing.T) 
 	var completions atomic.Int32
 	completed := make(chan struct{})
 	var completeOnce sync.Once
-	p, err := New(Config{
+	p, err := newTestProcessor(t, Config{
 		ProcessorID: "phase9-e2e",
 		ListenAddr:  "127.0.0.1:0",
 		MaxHunters:  1,
@@ -79,6 +98,13 @@ func TestPhase9FilteredInviteAndInheritedByeFinalizeSessionOutput(t *testing.T) 
 	cfg := source.DefaultLocalSourceConfig()
 	cfg.BatchSize = 1
 	cfg.BatchTimeout = time.Millisecond
+	captureRead, captureWrite, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, captureRead.Close()) })
+	require.NoError(t, pcapgo.NewWriter(captureWrite).WriteFileHeader(65535, layers.LinkTypeEthernet))
+	cfg.CaptureInterfaces = func() []pcaptypes.PcapInterface {
+		return []pcaptypes.PcapInterface{&phase9CaptureInterface{path: fmt.Sprintf("/dev/fd/%d", captureRead.Fd())}}
+	}
 	local := source.NewLocalSource(cfg)
 	registry := voipprocessor.New(voipprocessor.Config{MaxCalls: 10, CallTimeout: time.Hour})
 	t.Cleanup(registry.Close)
@@ -95,6 +121,7 @@ func TestPhase9FilteredInviteAndInheritedByeFinalizeSessionOutput(t *testing.T) 
 	go func() { sourceDone <- local.Start(ctx) }()
 	t.Cleanup(func() {
 		cancel()
+		require.NoError(t, captureWrite.Close()) // unblock the synthetic reader after cancellation
 		require.NoError(t, <-sourceDone)
 	})
 	require.Eventually(t, local.IsStarted, time.Second, time.Millisecond)

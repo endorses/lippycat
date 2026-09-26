@@ -37,8 +37,9 @@ func TestTapRADIUSFilterRPCRejectsBeforeMutation(t *testing.T) {
 				operation = "replace"
 			}
 			t.Run(name+"/"+operation, func(t *testing.T) {
-				path := t.TempDir() + "/filters.yaml"
+				path := newTestFilterFile(t)
 				manager := filtering.NewManager(path, filtering.NewYAMLPersistence(), radiusFilterTestCapabilities{}, nil, nil)
+				t.Cleanup(func() { require.NoError(t, manager.Close()) })
 				local := filtering.NewLocalTarget(filtering.LocalTargetConfig{})
 				p := &Processor{filterManager: manager, filterTarget: local, proxyManager: proxy.NewManager(slog.Default(), "tap")}
 				t.Cleanup(func() { p.proxyManager.Shutdown(time.Second) })

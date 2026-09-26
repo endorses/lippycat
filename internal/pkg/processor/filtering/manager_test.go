@@ -186,7 +186,7 @@ func TestManager_Update_UpdateTypes(t *testing.T) {
 
 			filter := &management.Filter{
 				Id:      "filter-test",
-				Pattern: "test",
+				Pattern: "192.0.2.1",
 				Type:    management.FilterType_FILTER_IP_ADDRESS,
 				Enabled: true,
 			}
@@ -225,7 +225,7 @@ func TestManager_Update_ChannelFull(t *testing.T) {
 
 	filter := &management.Filter{
 		Id:      "filter-1",
-		Pattern: "test",
+		Pattern: "192.0.2.1",
 		Type:    management.FilterType_FILTER_IP_ADDRESS,
 		Enabled: true,
 	}
@@ -239,13 +239,13 @@ func TestManager_Update_ChannelFull(t *testing.T) {
 	// Try to send another - should timeout
 	filter2 := &management.Filter{
 		Id:      "filter-2",
-		Pattern: "test2",
+		Pattern: "192.0.2.2",
 		Type:    management.FilterType_FILTER_IP_ADDRESS,
 		Enabled: true,
 	}
 
 	huntersUpdated, err := manager.Update(filter2)
-	assert.NoError(t, err, "Update itself should not error")
+	assert.ErrorIs(t, err, ErrFilterDistribution, "durable acceptance must be distinct from incomplete distribution")
 
 	// Should fail to send (channel full)
 	assert.Equal(t, uint32(0), huntersUpdated, "should fail to update hunter (channel full)")
@@ -295,7 +295,7 @@ func TestManager_Update_ConcurrentSends(t *testing.T) {
 
 	filter := &management.Filter{
 		Id:      "filter-concurrent",
-		Pattern: "concurrent",
+		Pattern: "192.0.2.3",
 		Type:    management.FilterType_FILTER_IP_ADDRESS,
 		Enabled: true,
 	}
@@ -324,7 +324,7 @@ func TestManager_Update_NoHuntersConnected(t *testing.T) {
 
 	filter := &management.Filter{
 		Id:      "filter-1",
-		Pattern: "test",
+		Pattern: "192.0.2.1",
 		Type:    management.FilterType_FILTER_IP_ADDRESS,
 		Enabled: true,
 	}
@@ -393,7 +393,7 @@ func TestManager_GetForHunter(t *testing.T) {
 	// Add global filter (no target hunters)
 	globalFilter := &management.Filter{
 		Id:      "global-filter",
-		Pattern: "global",
+		Pattern: "192.0.2.0/24",
 		Type:    management.FilterType_FILTER_BPF,
 		Enabled: true,
 	}
@@ -402,7 +402,7 @@ func TestManager_GetForHunter(t *testing.T) {
 	// Add targeted filter
 	targetedFilter := &management.Filter{
 		Id:            "targeted-filter",
-		Pattern:       "targeted",
+		Pattern:       "198.51.100.0/24",
 		Type:          management.FilterType_FILTER_BPF,
 		Enabled:       true,
 		TargetHunters: []string{"hunter-1"},
@@ -426,7 +426,7 @@ func TestManager_Count(t *testing.T) {
 
 	filter1 := &management.Filter{
 		Id:      "filter-1",
-		Pattern: "test1",
+		Pattern: "192.0.2.1",
 		Type:    management.FilterType_FILTER_IP_ADDRESS,
 		Enabled: true,
 	}
@@ -435,7 +435,7 @@ func TestManager_Count(t *testing.T) {
 
 	filter2 := &management.Filter{
 		Id:      "filter-2",
-		Pattern: "test2",
+		Pattern: "192.0.2.2",
 		Type:    management.FilterType_FILTER_IP_ADDRESS,
 		Enabled: true,
 	}

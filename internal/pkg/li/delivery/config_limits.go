@@ -64,7 +64,7 @@ func (c ClientConfig) Validate() error {
 		return fmt.Errorf("LI X2 spool byte limit must not be negative")
 	}
 	if c.X2SpoolDir == "" {
-		if c.X2SpoolMaxBytes != 0 || c.X2SpoolKeyFile != "" {
+		if c.X2SpoolMaxBytes != 0 || c.X2SpoolKeyFile != "" || c.X2SpoolKeyID != "" || c.X2SpoolLegacyKeyID != "" || len(c.X2SpoolReadKeys) != 0 {
 			return fmt.Errorf("LI X2 spool limit and key require a spool directory")
 		}
 	} else if c.X2SpoolMaxBytes <= journalFaultReserve || c.X2SpoolKeyFile == "" {

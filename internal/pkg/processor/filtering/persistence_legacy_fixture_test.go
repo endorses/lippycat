@@ -1,6 +1,7 @@
 package filtering
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,7 +12,12 @@ import (
 
 func TestYAMLPersistenceLegacyFixture(t *testing.T) {
 	persistence := NewYAMLPersistence()
-	filters, err := persistence.Load(filepath.Join("testdata", "legacy_filters.yaml"))
+	t.Cleanup(func() { require.NoError(t, persistence.Close()) })
+	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_filters.yaml"))
+	require.NoError(t, err)
+	path := filepath.Join(privateStoreTestDir(t), "filters.yaml")
+	require.NoError(t, os.WriteFile(path, fixture, 0600))
+	filters, err := persistence.Load(path)
 	require.NoError(t, err)
 	// Explicitly cover every legacy managed filter type, including enum-name input.
 	expected := []struct {
@@ -77,7 +83,6 @@ func TestYAMLPersistenceLegacyFixture(t *testing.T) {
 	require.True(t, proto.Equal(wantRadius, compound.Radius), "compound ownership, scope, revisions and conjunction must all survive")
 
 	// Editable YAML writes must retain all protobuf data represented by the fixture.
-	path := filepath.Join(t.TempDir(), "filters.yaml")
 	require.NoError(t, persistence.Save(path, filters))
 	reloaded, err := persistence.Load(path)
 	require.NoError(t, err)

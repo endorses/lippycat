@@ -51,9 +51,6 @@ import (
 
 // Start begins processor operation
 func (p *Processor) Start(ctx context.Context) (startErr error) {
-	if err := p.validateLIConfiguration(); err != nil {
-		return fmt.Errorf("invalid LI configuration: %w", err)
-	}
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	defer p.cancel()
 	defer func() {
@@ -62,30 +59,43 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 		}
 	}()
 
+	if err := p.validateLIConfiguration(); err != nil {
+		return fmt.Errorf("invalid LI configuration: %w", err)
+	}
+
 	logger.Info("Processor starting", "processor_id", p.config.ProcessorID, "listen_addr", p.config.ListenAddr)
 	// Load filters from persistence file
-	if err := p.filterManager.Load(); err != nil {
-		logger.Warn("Failed to load filters from file", "error", err)
-		// Continue anyway - not a fatal error
+	if err := p.filterManager.Initialize(); err != nil {
+		return fmt.Errorf("initialize managed filter storage: %w", err)
 	}
 
 	// Apply loaded filters to the filter target (needed for tap/local mode)
 	// In distributed mode, filters are pushed when hunters connect.
 	// In tap mode, we need to apply them immediately to the LocalTarget/ApplicationFilter.
 	loadedFilters := p.filterManager.GetAll()
-	if len(loadedFilters) > 0 {
+	if len(loadedFilters) > 0 && !p.defaultHunterFilterTarget() {
+		if validator, ok := p.filterTarget.(interface {
+			ValidateFilter(*management.Filter) error
+		}); ok {
+			for _, filter := range loadedFilters {
+				if err := validator.ValidateFilter(filter); err != nil {
+					return errors.New("stored filter policy is incompatible with local capture")
+				}
+			}
+		}
+
 		// Use batch apply if available (more efficient - rebuilds automaton once)
 		if batchTarget, ok := p.filterTarget.(interface {
 			ApplyFilterBatch([]*management.Filter) (uint32, error)
 		}); ok {
 			if _, err := batchTarget.ApplyFilterBatch(loadedFilters); err != nil {
-				logger.Warn("Failed to batch apply loaded filters", "error", err)
+				return errors.New("startup filter reconciliation failed")
 			}
 		} else {
 			// Fall back to individual apply
 			for _, filter := range loadedFilters {
 				if _, err := p.filterTarget.ApplyFilter(filter); err != nil {
-					logger.Warn("Failed to apply loaded filter", "filter_id", filter.Id, "error", err)
+					return errors.New("startup filter reconciliation failed")
 				}
 			}
 		}
@@ -277,16 +287,20 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 
 	logger.Info("Processor started", "listen_addr", p.config.ListenAddr)
 
-	// Start local capture loop if using LocalSource
+	// Start local capture loop if using LocalSource. Its startup and runtime
+	// capture failures must fault the processor, not leave a serving empty node.
+	var localFailure chan error
 	if localSource, ok := p.packetSource.(*source.LocalSource); ok {
 		logger.Info("Starting local capture mode")
+		localFailure = make(chan error, 1)
 
 		// Start the local source in a goroutine
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
 			if err := localSource.Start(p.ctx); err != nil {
-				logger.Error("Local capture failed", "error", err)
+				localFailure <- errors.New("local capture startup or runtime failed")
+				p.cancel()
 			}
 		}()
 
@@ -302,8 +316,12 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 
 	// Wait for shutdown signal, then run consolidated cleanup
 	<-p.ctx.Done()
-
-	return p.Shutdown()
+	select {
+	case err := <-localFailure:
+		return errors.Join(err, p.Shutdown())
+	default:
+		return p.Shutdown()
+	}
 }
 
 func (p *Processor) registerGRPCServices(registrar grpc.ServiceRegistrar) {
@@ -386,8 +404,11 @@ func (p *Processor) Shutdown() error {
 			}
 		}
 
-		// Stop LI Manager (no-op if !li build)
+		// Stop LI Manager before releasing ownership: it can still remove filters.
 		p.stopLIManager()
+		if p.filterManager != nil {
+			p.shutdownErr = errors.Join(p.shutdownErr, p.filterManager.Close())
+		}
 
 		// Shutdown detector to stop background goroutines
 		if p.detector != nil {
@@ -457,7 +478,7 @@ func (p *Processor) Shutdown() error {
 
 		logger.Info("Processor shutdown complete")
 	})
-	return nil
+	return p.shutdownErr
 }
 
 func ingressSessionsEqual(a, b map[ingressSessionKey]ingressSession) bool {

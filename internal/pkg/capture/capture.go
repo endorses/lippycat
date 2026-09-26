@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 	"github.com/spf13/viper"
 )
 
@@ -690,6 +692,27 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 	initWithBufferAndTelemetry(ctx, ifaces, filter, buffer, packetProcessor, assembler, nil, options...)
 }
 
+// InitWithBufferReady reports readiness only after every configured interface has
+// opened and installed its filter. No interface admits packets before that gate.
+// Failure closes the entire generation before reporting a redacted error. The
+// callback runs exactly once and must not block; this function then owns capture
+// until cancellation or completion, retaining caller ownership of buffer.
+func InitWithBufferReady(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, ready func([]layers.LinkType, error), options ...CaptureOptions) {
+	if ready == nil {
+		return
+	}
+	resolved, err := resolveIPv4CaptureOptions(options)
+	if err != nil {
+		ready(nil, errors.New("capture configuration is invalid"))
+		return
+	}
+	if len(ifaces) == 0 {
+		ready(nil, errors.New("capture requires at least one interface"))
+		return
+	}
+	initWithBufferAndTelemetryReady(ctx, ifaces, filter, buffer, nil, nil, nil, ready, resolved...)
+}
+
 func resolveIPv4CaptureOptions(options []CaptureOptions) ([]CaptureOptions, error) {
 	config, err := IPv4DefragConfigFromViper()
 	if err != nil {
@@ -710,6 +733,12 @@ func resolveIPv4CaptureOptions(options []CaptureOptions) ([]CaptureOptions, erro
 }
 
 func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, telemetryCallback TelemetryCallback, options ...CaptureOptions) {
+	initWithBufferAndTelemetryReady(ctx, ifaces, filter, buffer, packetProcessor, assembler, telemetryCallback, nil, options...)
+}
+
+func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, telemetryCallback TelemetryCallback, ready func([]layers.LinkType, error), options ...CaptureOptions) {
+	ctx, cancelGeneration := context.WithCancel(ctx)
+	defer cancelGeneration()
 	packetBuffer := buffer
 	telemetry := newTelemetryCollector(telemetryCallback)
 
@@ -731,10 +760,19 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 	sharedDefragmenter, err := NewIPv4DefragmenterWithConfig(defragConfig)
 	if err != nil {
 		logger.Error("Invalid IPv4 defragmentation configuration", "error", err)
+		if ready != nil {
+			ready(nil, errors.New("capture configuration is invalid"))
+		}
 		return
 	}
 	telemetry.ipv4 = sharedDefragmenter
 	offlineInput := false
+	type startupResult struct {
+		link layers.LinkType
+		err  error
+	}
+	startup := make(chan startupResult, len(ifaces))
+	startGate := make(chan struct{})
 	for _, iface := range ifaces {
 		if source, ok := iface.(interface{ IsOffline() bool }); ok && source.IsOffline() {
 			offlineInput = true
@@ -799,21 +837,45 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 		wg.Add(1)
 		go func(pif pcaptypes.PcapInterface) {
 			defer wg.Done()
+
+			reportFailure := func(message string) {
+				if ready != nil {
+					startup <- startupResult{err: errors.New(message)}
+					cancelGeneration()
+				}
+			}
+			if pif == nil {
+				reportFailure("capture interface is unavailable")
+				return
+			}
 			logger.Debug("Capture goroutine starting", "interface", pif.Name())
 			defer logger.Debug("Capture goroutine exiting", "interface", pif.Name())
-
+			if ready != nil && ctx.Err() != nil {
+				reportFailure("capture startup was cancelled")
+				return
+			}
 			err := pif.SetHandle()
 			if err != nil {
-				logger.Error("Error setting pcap handle",
-					"error", err,
-					"interface", pif.Name())
+				if ready != nil {
+					if partial, _ := pif.Handle(); partial != nil {
+						partial.Close()
+					}
+				}
+				if ready == nil {
+					logger.Error("Error setting pcap handle", "error", err, "interface", pif.Name())
+				}
+				reportFailure("capture interface could not be opened")
 				return
 			}
 			handle, err := pif.Handle()
 			if err != nil || handle == nil {
-				logger.Error("Error getting pcap handle",
-					"error", err,
-					"interface", pif.Name())
+				if handle != nil {
+					handle.Close()
+				}
+				if ready == nil {
+					logger.Error("Error getting pcap handle", "error", err, "interface", pif.Name())
+				}
+				reportFailure("capture interface handle is unavailable")
 				return
 			}
 			// Mark that at least one capture succeeded
@@ -824,6 +886,18 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 				defer handleMu.Unlock()
 				handle.Close()
 			}()
+			if ready != nil {
+				if err := handle.SetBPFFilter(filter); err != nil {
+					reportFailure("capture filter could not be installed")
+					return
+				}
+				startup <- startupResult{link: handle.LinkType()}
+				select {
+				case <-startGate:
+				case <-ctx.Done():
+					return
+				}
+			}
 
 			// Close handle when context is cancelled to unblock packet reads
 			// This ensures captureFromInterface exits promptly on context cancellation
@@ -851,10 +925,41 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 				handle.Close() // This will cause packetSource.Packets() channel to close
 			}()
 
-			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu, options...)
+			if ready == nil {
+				captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu, options...)
+			} else {
+				captureFromPreparedHandle(ctx, pif, handle, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu, options...)
+				// Managed capture requires every configured interface. One reader's
+				// unexpected exit stops the entire generation for owner recovery.
+				if ctx.Err() == nil {
+					cancelGeneration()
+				}
+			}
 			close(captureDone)
 			<-cancelWatcherDone
 		}(iface)
+	}
+	if ready != nil {
+		links := make([]layers.LinkType, 0, len(ifaces))
+		var startupErr error
+		for range ifaces {
+			result := <-startup
+			if result.err != nil && startupErr == nil {
+				startupErr = result.err
+			}
+			links = append(links, result.link)
+		}
+		if startupErr == nil {
+			startupErr = ctx.Err()
+		}
+		if startupErr != nil {
+			cancelGeneration()
+			wg.Wait()
+			ready(nil, startupErr)
+			return
+		}
+		close(startGate)
+		ready(links, nil)
 	}
 
 	// If packetProcessor is provided, start it in a goroutine
@@ -963,12 +1068,15 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	}
 	filterErr := handle.SetBPFFilter(filter)
 	if filterErr != nil {
-		logger.Error("Error setting BPF filter",
-			"filter", filter,
-			"error", filterErr,
-			"interface", iface.Name())
+		// Dynamic BPF can contain LI selectors; neither the expanded filter nor
+		// a compiler error containing it belongs in diagnostics.
+		logger.Error("Error setting BPF filter", "interface", iface.Name())
 		return
 	}
+	captureFromPreparedHandle(ctx, iface, handle, buffer, defragmenter, v6defragmenter, telemetry, handleMu, options...)
+}
+
+func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterface, handle *pcap.Handle, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter, telemetry *telemetryCollector, handleMu *sync.Mutex, options ...CaptureOptions) {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	offlineInput := false
 	if source, ok := iface.(interface{ IsOffline() bool }); ok {

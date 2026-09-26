@@ -97,27 +97,7 @@ type processorFilterPusher struct {
 
 // UpdateFilter implements li.FilterPusher.
 func (pfp *processorFilterPusher) UpdateFilter(filter *management.Filter) error {
-	_, err := pfp.p.filterManager.Update(filter)
-	if target, ok := pfp.p.filterTarget.(*filtering.HunterTarget); ok && target.Manager() == pfp.p.filterManager {
-		// The default target delegates to the manager already updated above.
-		return err
-	}
-
-	// In tap/local mode, also apply the filter directly to the local capture engine.
-	// filterManager.Update() only broadcasts to hunters via gRPC channels, which are
-	// absent in tap mode. The filterTarget (LocalTarget) handles BPF filter updates.
-	if pfp.p.filterTarget != nil {
-		if _, targetErr := pfp.p.filterTarget.ApplyFilter(filter); targetErr != nil {
-			logger.Warn("Failed to apply LI filter to local capture target",
-				"filter_id", filter.Id,
-				"error", targetErr,
-			)
-			if err == nil {
-				err = targetErr
-			}
-		}
-	}
-
+	_, err := pfp.p.updateManagedFilter(filter)
 	return err
 }
 
@@ -134,25 +114,13 @@ func (pfp *processorFilterPusher) ListFilterIDs() []string {
 
 // DeleteFilter implements li.FilterPusher.
 func (pfp *processorFilterPusher) DeleteFilter(filterID string) error {
-	_, err := pfp.p.filterManager.Delete(filterID)
-	if target, ok := pfp.p.filterTarget.(*filtering.HunterTarget); ok && target.Manager() == pfp.p.filterManager {
-		// Removing through this target again would delete the same filter twice.
-		return err
+	_, err := pfp.p.deleteManagedFilter(filterID)
+	// Recovered cleanup obligations can describe an uncertain add that never
+	// reached disk. Its absence already satisfies LI cleanup; RPC deletion keeps
+	// the stricter not-found response in deleteManagedFilter's callers.
+	if errors.Is(err, filtering.ErrFilterNotFound) {
+		return nil
 	}
-
-	// Also remove from local capture target (see UpdateFilter comment).
-	if pfp.p.filterTarget != nil {
-		if _, targetErr := pfp.p.filterTarget.RemoveFilter(filterID); targetErr != nil {
-			logger.Warn("Failed to remove LI filter from local capture target",
-				"filter_id", filterID,
-				"error", targetErr,
-			)
-			if err == nil {
-				err = targetErr
-			}
-		}
-	}
-
 	return err
 }
 
@@ -888,6 +856,9 @@ func (p *Processor) processLIPacketWithProvenance(pkt *types.PacketDisplay, dire
 }
 
 func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, directFilterIDs, inheritedFilterIDs []string, admission *CallAdmission) {
+	if p.filterProcessingBlocked() {
+		return
+	}
 	if p.liManager == nil || !p.liManager.IsEnabled() {
 		return
 	}

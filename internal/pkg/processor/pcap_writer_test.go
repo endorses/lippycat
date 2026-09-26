@@ -56,7 +56,7 @@ func TestPerCallPCAPSemanticGolden(t *testing.T) {
 	require.NoError(t, json.Unmarshal(fixtureBytes, &fixture))
 
 	dir := t.TempDir()
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "semantic-pcap-baseline", ListenAddr: "127.0.0.1:0",
 		PcapWriterConfig: &PcapWriterConfig{
 			Enabled: true, OutputDir: dir, FilePattern: "{callid}.pcap", SyncInterval: time.Hour,

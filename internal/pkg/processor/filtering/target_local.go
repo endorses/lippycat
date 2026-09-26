@@ -14,7 +14,7 @@
 package filtering
 
 import (
-	"fmt"
+	"errors"
 	"net"
 	"sort"
 	"strings"
@@ -142,6 +142,47 @@ func (t *LocalTarget) SetApplicationFilter(filter AppFilterUpdater) {
 	t.appFilterFunc = filter
 }
 
+var ErrLocalFilterCapability = errors.New("local filter capability is unavailable")
+
+// ValidateFilter checks the detached candidate without changing capture or policy.
+// Link-type-specific BPF validation is delegated when the source can provide it.
+func (t *LocalTarget) validateFilterCapability(filter *management.Filter) error {
+	if filter == nil {
+		return ErrFilterInvalid
+	}
+	if (filter.Enabled || sharedfilter.IsRADIUSFilter(filter.Type)) && !t.SupportsFilterType(filter.Type) {
+		return ErrLocalFilterCapability
+	}
+	if filter.Type == management.FilterType_FILTER_IP_ADDRESS && filter.Enabled {
+		if strings.Contains(filter.Pattern, "/") {
+			if _, _, err := net.ParseCIDR(filter.Pattern); err != nil {
+				return ErrFilterInvalid
+			}
+		} else if net.ParseIP(filter.Pattern) == nil {
+			return ErrFilterInvalid
+		}
+	}
+	return nil
+}
+
+func (t *LocalTarget) ValidateFilter(filter *management.Filter) error {
+	if err := t.validateFilterCapability(filter); err != nil {
+		return err
+	}
+	t.mutationMu.Lock()
+	defer t.mutationMu.Unlock()
+	_, next := t.candidateState(func(filters map[string]*management.Filter) { filters[filter.Id] = cloneFilter(filter) })
+	t.mu.RLock()
+	updater := t.bpfUpdater
+	t.mu.RUnlock()
+	if validator, ok := updater.(interface{ ValidateBPFFilter(string) error }); ok {
+		if err := validator.ValidateBPFFilter(next.policy.BPFExpression); err != nil {
+			return ErrFilterInvalid
+		}
+	}
+	return nil
+}
+
 // ApplyFilter adds or updates a filter.
 // Returns 1 if the filter was applied successfully, 0 otherwise.
 func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
@@ -151,9 +192,8 @@ func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
 		return 0, nil
 	}
 
-	// Reject before mutation unless both capture ingress and matching are available.
-	if sharedfilter.IsRADIUSFilter(filter.Type) && !t.SupportsFilterType(filter.Type) {
-		return 0, fmt.Errorf("local RADIUS ingress capability is not available")
+	if err := t.validateFilterCapability(filter); err != nil {
+		return 0, err
 	}
 
 	previous, next := t.candidateState(func(filters map[string]*management.Filter) {
@@ -167,12 +207,10 @@ func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
 	}
 
 	logger.Debug("LocalTarget filter "+action,
-		"filter_id", filter.Id,
-		"filter_type", filter.Type,
-		"pattern", filter.Pattern)
+		"filter_type", filter.Type)
 
 	if err := t.reconcileCandidate(previous, next); err != nil {
-		return 0, fmt.Errorf("failed to apply filter: %w", err)
+		return 0, errors.New("failed to apply filter")
 	}
 	t.commitCandidate(next)
 
@@ -191,8 +229,10 @@ func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, er
 	}
 
 	for _, f := range filters {
-		if f != nil && sharedfilter.IsRADIUSFilter(f.Type) && !t.SupportsFilterType(f.Type) {
-			return 0, fmt.Errorf("local RADIUS ingress capability is not available")
+		if f != nil {
+			if err := t.validateFilterCapability(f); err != nil {
+				return 0, err
+			}
 		}
 	}
 	var count uint32
@@ -230,7 +270,7 @@ func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, er
 
 	// Apply all filters once
 	if err := t.reconcileCandidate(previous, next); err != nil {
-		return 0, fmt.Errorf("failed to apply filters: %w", err)
+		return 0, errors.New("failed to apply filters")
 	}
 	t.commitCandidate(next)
 
@@ -254,11 +294,11 @@ func (t *LocalTarget) RemoveFilter(filterID string) (uint32, error) {
 		return 0, nil
 	}
 
-	logger.Debug("LocalTarget filter removed", "filter_id", filterID)
+	logger.Debug("LocalTarget filter removed")
 
 	// Re-apply remaining filters
 	if err := t.reconcileCandidate(previous, next); err != nil {
-		return 0, fmt.Errorf("failed to reapply filters after removal: %w", err)
+		return 0, errors.New("failed to reapply filters after removal")
 	}
 	t.commitCandidate(next)
 
@@ -347,12 +387,12 @@ func (t *LocalTarget) applyPolicy(policy LocalFilterPolicy, bpfUpdater BPFUpdate
 	t.mu.RUnlock()
 
 	if bpfUpdater != nil && (!hasAppliedBPF || bpfExpr != lastAppliedBPF) {
-		logger.Debug("LocalTarget applying BPF filter", "expression", bpfExpr)
+		logger.Debug("LocalTarget applying BPF filter")
 		if err := bpfUpdater.SetBPFFilter(bpfExpr); err != nil {
 			if bpfExpr == "" {
-				return fmt.Errorf("failed to clear BPF filter: %w", err)
+				return errors.New("failed to clear BPF filter")
 			}
-			return fmt.Errorf("failed to set BPF filter: %w", err)
+			return errors.New("failed to set BPF filter")
 		}
 
 		t.mu.Lock()
@@ -583,9 +623,7 @@ func (t *LocalTarget) ipAddressToBPF(pattern string) string {
 		// Validate CIDR
 		_, _, err := net.ParseCIDR(pattern)
 		if err != nil {
-			logger.Warn("Invalid CIDR pattern for BPF filter",
-				"pattern", pattern,
-				"error", err)
+			logger.Warn("Invalid CIDR pattern for BPF filter")
 			return ""
 		}
 		return "net " + pattern
@@ -594,8 +632,7 @@ func (t *LocalTarget) ipAddressToBPF(pattern string) string {
 	// Single IP address
 	ip := net.ParseIP(pattern)
 	if ip == nil {
-		logger.Warn("Invalid IP address pattern for BPF filter",
-			"pattern", pattern)
+		logger.Warn("Invalid IP address pattern for BPF filter")
 		return ""
 	}
 

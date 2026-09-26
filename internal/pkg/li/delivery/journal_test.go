@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -150,13 +151,13 @@ func TestJournalRejectsCorruptionWrongKeyPermissionsAndConcurrentOwner(t *testin
 	require.NoError(t, j.Close())
 	require.NoError(t, os.WriteFile(cfg.KeyFile, bytes.Repeat([]byte{7}, 32), 0600))
 	_, err = OpenJournal(cfg)
-	require.ErrorContains(t, err, "authentication")
+	require.ErrorContains(t, err, "usage ledger")
 	require.NoError(t, os.WriteFile(cfg.KeyFile, bytes.Repeat([]byte{42}, 32), 0600))
 	b, err := os.ReadFile(j.path(id))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(j.path(id), b[:len(b)-3], 0600))
 	_, err = OpenJournal(cfg)
-	require.ErrorContains(t, err, "checksum")
+	require.ErrorContains(t, err, "envelope")
 	require.NoError(t, os.Chmod(cfg.Dir, 0755))
 	_, err = OpenJournal(cfg)
 	require.ErrorContains(t, err, "private")
@@ -183,8 +184,8 @@ func TestJournalWriteFaultRejectsFutureAdmissions(t *testing.T) {
 	cfg := journalTestConfig(t)
 	j, err := OpenJournal(cfg)
 	require.NoError(t, err)
-	// Collide with O_EXCL temporary creation to inject a filesystem write failure.
-	require.NoError(t, os.WriteFile(j.path(1)+".tmp", nil, 0600))
+	// Inject a definite failure at the descriptor-backed storage boundary.
+	j.writeFile = func(string, []byte) error { return syscall.ENOSPC }
 	done := make(chan error, 1)
 	_, err = j.Admit(JournalRecord{Data: []byte("data")}, func(_ uint64, err error) { done <- err })
 	require.NoError(t, err)

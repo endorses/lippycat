@@ -16,7 +16,7 @@ import (
 
 // TestProcessBatch tests batch processing
 func TestProcessBatch(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})
@@ -59,7 +59,7 @@ func TestProcessBatch(t *testing.T) {
 
 // TestProcessBatch_EmptyBatch tests processing empty batch
 func TestProcessBatch_EmptyBatch(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})
@@ -92,7 +92,7 @@ func TestProcessBatch_NilBatch(t *testing.T) {
 
 // TestHunterRegistration tests hunter registration and tracking
 func TestHunterRegistration(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -122,7 +122,7 @@ func TestHunterRegistration(t *testing.T) {
 
 // TestMultipleHunters tests managing multiple hunters
 func TestMultipleHunters(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -143,7 +143,7 @@ func TestMultipleHunters(t *testing.T) {
 
 // TestBroadcastToSubscribers tests packet broadcasting
 func TestBroadcastToSubscribers(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})
@@ -178,7 +178,7 @@ func TestBroadcastToSubscribers(t *testing.T) {
 
 // TestBroadcastToSubscribers_MultipleSubscribers tests broadcasting to multiple subscribers
 func TestBroadcastToSubscribers_MultipleSubscribers(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})
@@ -220,7 +220,7 @@ func TestBroadcastToSubscribers_MultipleSubscribers(t *testing.T) {
 
 // TestAddSubscriber tests adding a subscriber
 func TestAddSubscriber(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})
@@ -247,7 +247,7 @@ func TestAddSubscriber(t *testing.T) {
 
 // TestRemoveSubscriber tests removing a subscriber
 func TestRemoveSubscriber(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})
@@ -280,7 +280,7 @@ func TestRemoveSubscriber(t *testing.T) {
 
 // TestConcurrentBatchProcessing tests concurrent batch processing
 func TestConcurrentBatchProcessing(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})
@@ -327,7 +327,7 @@ func TestConcurrentBatchProcessing(t *testing.T) {
 
 // TestStatsAtomic tests atomic stats operations
 func TestStatsAtomic(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})
@@ -358,7 +358,7 @@ func TestStatsAtomic(t *testing.T) {
 
 // TestHunterPacketCounting tests per-hunter packet counting
 func TestHunterPacketCounting(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -398,7 +398,7 @@ func TestHunterPacketCounting(t *testing.T) {
 
 // TestProcessorStatsConcurrent tests concurrent stats updates
 func TestProcessorStatsConcurrent(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 	})

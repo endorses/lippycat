@@ -6,11 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/endorses/lippycat/internal/pkg/logger"
-	"io"
-	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/google/uuid"
 )
 
@@ -35,23 +34,9 @@ func (c *Client) ReplayJournalManifest(path string, authorize func(JournalRecord
 	if authorize == nil {
 		return fmt.Errorf("ADMF replay authorization callback required")
 	}
-	if err := checkJournalMode(path, false); err != nil {
-		return err
-	}
-	f, err := os.Open(path)
+	raw, err := securestore.ReadFile(path, maxReplayManifestBytes)
 	if err != nil {
 		return err
-	}
-	raw, err := io.ReadAll(io.LimitReader(f, maxReplayManifestBytes+1))
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if len(raw) > maxReplayManifestBytes {
-		return fmt.Errorf("replay manifest exceeds 4 MiB")
 	}
 	var manifest ReplayManifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
@@ -80,7 +65,7 @@ func (c *Client) ReplayJournalManifest(path string, authorize func(JournalRecord
 // The export is not authorization; replay still requires the explicit replay flag
 // and current ADMF reconciliation. Additional records can be exported after the
 // approved prefix has drained. Place the file outside the bounded spool directory.
-func (c *Client) ExportHeldJournalManifest(path string) error {
+func (c *Client) ExportHeldJournalManifest(path string) (result error) {
 	if c.journal == nil {
 		return fmt.Errorf("X2 journal is disabled")
 	}
@@ -102,11 +87,32 @@ func (c *Client) ExportHeldJournalManifest(path string) error {
 	if len(raw) > maxReplayManifestBytes {
 		return fmt.Errorf("manifest export exceeds 4 MiB")
 	}
-	abs, err := filepath.Abs(path)
+	parentPath, name := ".", path
+	if slash := strings.LastIndexByte(path, '/'); slash >= 0 {
+		parentPath, name = path[:slash], path[slash+1:]
+		if parentPath == "" {
+			parentPath = "/"
+		}
+	}
+	// Validate the uncleaned path so symlink/.. traversal cannot disappear.
+	dir, err := securestore.OpenDir(parentPath)
 	if err != nil {
 		return err
 	}
-	spool, err := filepath.Abs(c.journal.cfg.Dir)
+	outcome := securestore.NotCommitted
+	defer func() {
+		if err := dir.Close(); err != nil {
+			result = errors.Join(result, &securestore.CommitError{Outcome: outcome, Op: "close manifest directory", Err: err})
+		}
+	}()
+	same, err := c.journal.store.SameDirectory(dir)
+	if err != nil {
+		return err
+	}
+	if same {
+		return fmt.Errorf("export replay manifest outside the spool directory")
+	}
+	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
 	}
@@ -114,58 +120,34 @@ func (c *Client) ExportHeldJournalManifest(path string) error {
 	if err != nil {
 		return err
 	}
-	spool, err = filepath.EvalSymlinks(spool)
+	keyFiles := []string{c.journal.cfg.KeyFile}
+	for _, ref := range c.journal.cfg.ReadKeys {
+		keyFiles = append(keyFiles, ref.File)
+	}
+	for _, keyFile := range keyFiles {
+		key, err := filepath.Abs(keyFile)
+		if err != nil {
+			return err
+		}
+		key, err = filepath.EvalSymlinks(key)
+		if err != nil {
+			return err
+		}
+		if filepath.Join(parent, name) == key {
+			return fmt.Errorf("export replay manifest must not replace the journal key")
+		}
+	}
+	lock, err := dir.Lock(name)
 	if err != nil {
 		return err
 	}
-	if parent == spool {
-		return fmt.Errorf("export replay manifest outside the spool directory")
-	}
-	key, err := filepath.Abs(c.journal.cfg.KeyFile)
-	if err != nil {
-		return err
-	}
-	key, err = filepath.EvalSymlinks(key)
-	if err != nil {
-		return err
-	}
-	if filepath.Join(parent, filepath.Base(abs)) == key {
-		return fmt.Errorf("export replay manifest must not replace the journal key")
-	}
-	f, err := os.CreateTemp(filepath.Dir(abs), ".li-replay-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
 	defer func() {
-		if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
-			logger.Error("Remove temporary replay manifest", "error", err)
+		if err := lock.Close(); err != nil {
+			result = errors.Join(result, &securestore.CommitError{Outcome: outcome, Op: "close manifest lock", Err: err})
 		}
 	}()
-	_, writeErr := f.Write(raw)
-	if writeErr == nil {
-		writeErr = f.Sync()
-	}
-	closeErr := f.Close()
-	if writeErr != nil {
-		return writeErr
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err := os.Rename(tmp, abs); err != nil {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(abs))
-	if err != nil {
-		return err
-	}
-	syncErr := dir.Sync()
-	closeErr = dir.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
+	outcome, err = dir.Replace(name, raw)
+	return err
 }
 
 var errManifestBatchComplete = errors.New("manifest batch complete")

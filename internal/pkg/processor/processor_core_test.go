@@ -64,7 +64,11 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.config.FilterFile = newTestFilterFile(t)
 			processor, err := New(tt.config)
+			if processor != nil {
+				t.Cleanup(func() { require.NoError(t, processor.Shutdown()) })
+			}
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -316,7 +320,11 @@ func TestConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(tt.config)
+			tt.config.FilterFile = newTestFilterFile(t)
+			processor, err := New(tt.config)
+			if processor != nil {
+				t.Cleanup(func() { require.NoError(t, processor.Shutdown()) })
+			}
 
 			if tt.wantErr {
 				assert.Error(t, err)

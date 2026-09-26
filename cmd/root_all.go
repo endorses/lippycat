@@ -8,6 +8,7 @@ import (
 
 	"github.com/endorses/lippycat/cmd/hunt"
 	"github.com/endorses/lippycat/cmd/list"
+	"github.com/endorses/lippycat/cmd/migrate"
 	"github.com/endorses/lippycat/cmd/process"
 	"github.com/endorses/lippycat/cmd/rm"
 	"github.com/endorses/lippycat/cmd/set"
@@ -38,6 +39,7 @@ func Execute() {
 }
 
 func addSubCommandPalattes() {
+	rootCmd.AddCommand(migrate.MigrateCmd)
 	rootCmd.AddCommand(sniff.SniffCmd)
 	rootCmd.AddCommand(watch.WatchCmd)
 	rootCmd.AddCommand(list.ListCmd)

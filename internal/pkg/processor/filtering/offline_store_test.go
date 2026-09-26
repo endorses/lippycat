@@ -1,0 +1,162 @@
+package filtering
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+
+	filtercodec "github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+)
+
+func TestOfflineMigrationExactRecordsAndAuthenticatedResume(t *testing.T) {
+	sourceDir := privateStoreTestDir(t)
+	require.NoError(t, os.Chmod(sourceDir, 0755))
+	source := filepath.Join(sourceDir, "legacy.yaml")
+	destination := filepath.Join(privateStoreTestDir(t), "encrypted.snapshot")
+	keys := storeTestKey(t, 80)
+	want := storeTestFilters("migration-sensitive-target")
+	yaml, err := filtercodec.MarshalManagedYAML(want)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(source, yaml, 0600))
+	out, err := MigrateYAMLFilterStore(source, destination, keys, OfflineOptions{})
+	require.NoError(t, err)
+	require.Equal(t, securestore.Committed, out)
+	p, err := NewEncryptedPersistence(keys)
+	require.NoError(t, err)
+	got, err := p.Load(destination)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(want["target"], got["target"]))
+	identity := p.StoreID()
+	require.NoError(t, p.Close())
+	original, err := os.ReadFile(source)
+	require.NoError(t, err)
+	require.Equal(t, yaml, original, "changed-path migration retains its original source")
+	out, err = MigrateYAMLFilterStore(source, destination, keys, OfflineOptions{Resume: true})
+	require.NoError(t, err)
+	require.Equal(t, securestore.Committed, out)
+	// Reconstruct the durable prepared-intent state before target publication.
+	require.NoError(t, os.Remove(destination))
+	out, err = MigrateYAMLFilterStore(source, destination, keys, OfflineOptions{Resume: true})
+	require.NoError(t, err)
+	require.Equal(t, securestore.Committed, out)
+	p, err = NewEncryptedPersistence(keys)
+	require.NoError(t, err)
+	_, err = p.Load(destination)
+	require.NoError(t, err)
+	require.Equal(t, identity, p.StoreID(), "resume preserves store incarnation and existing usage")
+	require.NoError(t, p.Close())
+	before, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(source, append(yaml, []byte("# changed source\n")...), 0600))
+	out, err = MigrateYAMLFilterStore(source, destination, keys, OfflineOptions{Resume: true})
+	require.Error(t, err)
+	require.Equal(t, securestore.NotCommitted, out)
+	after, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	require.NotContains(t, string(after), "migration-sensitive-target")
+}
+
+func TestMigrationRejectsOpenedKeyInodeUnderDifferentPath(t *testing.T) {
+	parent := privateStoreTestDir(t)
+	oldDir := filepath.Join(parent, "before-key-load")
+	newDir := filepath.Join(parent, "after-key-load")
+	require.NoError(t, os.Mkdir(oldDir, 0700))
+	keyPath := filepath.Join(oldDir, "valid-source.yaml")
+	// Raw 32-byte key material can also be a syntactically valid YAML source.
+	material := append([]byte("filters: []"), bytes.Repeat([]byte{' '}, 21)...)
+	require.Len(t, material, 32)
+	require.NoError(t, os.WriteFile(keyPath, material, 0600))
+	ring, err := securestore.LoadKeyring(securestore.KeyConfig{Active: securestore.KeyRef{ID: "active", File: keyPath}})
+	require.NoError(t, err)
+	// Model the same nlink=1 inode reachable under a different pathname from the
+	// configured key. Descriptor identity also handles bind/case-insensitive aliases.
+	require.NoError(t, os.Rename(oldDir, newDir))
+	dir, err := securestore.OpenDir(newDir)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, dir.Close()) }()
+	require.ErrorContains(t, checkOfflineAliases(&snapshotFile{dir: dir, name: "valid-source.yaml"}, nil, ring), "opened encryption key")
+	source, err := securestore.PreparePrivateSource(filepath.Join(newDir, "valid-source.yaml"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, source.Close()) }()
+	require.ErrorContains(t, checkOfflineAliases(&snapshotFile{dir: dir, name: "output.enc"}, source, ring), "opened encryption key")
+	metadata := ".filter-bootstrap-" + digestString([]byte("output.enc"))
+	require.NoError(t, os.Rename(filepath.Join(newDir, "valid-source.yaml"), filepath.Join(newDir, metadata)))
+	require.ErrorContains(t, checkOfflineAliases(&snapshotFile{dir: dir, name: "output.enc"}, nil, ring), "metadata aliases")
+	after, err := os.ReadFile(filepath.Join(newDir, metadata))
+	require.NoError(t, err)
+	require.Equal(t, material, after)
+}
+
+func TestOfflineInPlaceMigrationRequiresExplicitModeAndResumesCompletion(t *testing.T) {
+	path := filepath.Join(privateStoreTestDir(t), "filters.yaml")
+	keys := storeTestKey(t, 81)
+	data, err := filtercodec.MarshalManagedYAML(storeTestFilters("old-yaml"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+	out, err := MigrateYAMLFilterStore(path, path, keys, OfflineOptions{})
+	require.Error(t, err)
+	require.Equal(t, securestore.NotCommitted, out)
+	out, err = MigrateYAMLFilterStore(path, path, keys, OfflineOptions{InPlace: true})
+	require.NoError(t, err)
+	require.Equal(t, securestore.Committed, out)
+	out, err = MigrateYAMLFilterStore(path, path, keys, OfflineOptions{InPlace: true, Resume: true})
+	require.NoError(t, err)
+	require.Equal(t, securestore.Committed, out)
+	p, err := NewEncryptedPersistence(keys)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, p.Close()) }()
+	loaded, err := p.Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "old-yaml", loaded["target"].Pattern)
+}
+
+func TestOfflineMigrationRejectsInvalidSourceAndCompetingOwners(t *testing.T) {
+	source := filepath.Join(privateStoreTestDir(t), "source.yaml")
+	destination := filepath.Join(privateStoreTestDir(t), "destination.enc")
+	keys := storeTestKey(t, 82)
+	require.NoError(t, os.WriteFile(source, []byte("filters: []\nunknown: private-marker\n"), 0600))
+	_, err := MigrateYAMLFilterStore(source, destination, keys, OfflineOptions{})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "private-marker")
+	_, err = os.Stat(destination)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	valid, err := filtercodec.MarshalManagedYAML(storeTestFilters("valid"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(source, valid, 0600))
+	p := NewYAMLPersistence()
+	_, err = p.Load(source)
+	require.NoError(t, err)
+	_, err = MigrateYAMLFilterStore(source, destination, keys, OfflineOptions{})
+	require.ErrorIs(t, err, securestore.ErrLocked)
+	require.NoError(t, p.Close())
+	_, err = MigrateYAMLFilterStore(source, destination, keys, OfflineOptions{})
+	require.NoError(t, err)
+	before, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	_, err = MigrateYAMLFilterStore(source, destination, keys, OfflineOptions{})
+	require.ErrorIs(t, err, os.ErrExist)
+	after, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+func TestOfflineInitializationNoClobberAndResumeBinding(t *testing.T) {
+	path := filepath.Join(privateStoreTestDir(t), "filters.enc")
+	keys := storeTestKey(t, 83)
+	_, err := InitializeEncryptedFilterStore(path, keys, OfflineOptions{})
+	require.NoError(t, err)
+	_, err = InitializeEncryptedFilterStore(path, keys, OfflineOptions{})
+	require.ErrorIs(t, err, os.ErrExist)
+	out, err := InitializeEncryptedFilterStore(path, keys, OfflineOptions{Resume: true})
+	require.NoError(t, err)
+	require.Equal(t, securestore.Committed, out)
+	_, err = InitializeEncryptedFilterStore(filepath.Join(filepath.Dir(path), "different.enc"), keys, OfflineOptions{Resume: true})
+	require.Error(t, err, "a usage ledger alone cannot authorize a different initialization target")
+	_, err = InitializeEncryptedFilterStore(path, keys, OfflineOptions{InPlace: true})
+	require.Error(t, err)
+}

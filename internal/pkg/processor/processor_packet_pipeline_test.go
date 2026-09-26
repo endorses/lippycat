@@ -15,7 +15,7 @@ import (
 // TestProcessBatch_BasicFlow tests the basic packet processing flow
 // This complements the existing TestProcessBatch in streaming_test.go
 func TestProcessBatch_BasicFlow(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -50,7 +50,7 @@ func TestProcessBatch_BasicFlow(t *testing.T) {
 }
 
 func TestProcessBatchRunsDeferredLocalCompletion(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -75,7 +75,7 @@ func TestProcessBatchRunsDeferredLocalCompletion(t *testing.T) {
 
 // TestProcessBatch_MultiplePackets tests processing a batch with many packets
 func TestProcessBatch_MultiplePackets(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -114,7 +114,7 @@ func TestProcessBatch_MultiplePackets(t *testing.T) {
 
 // TestProcessBatch_ConcurrentProcessing tests concurrent batch processing from multiple hunters
 func TestProcessBatch_ConcurrentProcessing(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -173,7 +173,7 @@ func TestProcessBatch_ConcurrentProcessing(t *testing.T) {
 
 // TestProcessBatch_WithVoIPMetadata tests VoIP packet processing with SIP metadata
 func TestProcessBatch_WithVoIPMetadata(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:     "test-processor",
 		ListenAddr:      "localhost:55555",
 		MaxHunters:      10,
@@ -226,7 +226,7 @@ func TestProcessBatch_WithVoIPMetadata(t *testing.T) {
 
 // TestProcessBatch_WithBroadcast tests subscriber broadcasting
 func TestProcessBatch_WithBroadcast(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -270,7 +270,7 @@ func TestProcessBatch_WithBroadcast(t *testing.T) {
 
 // TestProcessBatch_LargePackets tests processing large packets (64KB)
 func TestProcessBatch_LargePackets(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -305,7 +305,7 @@ func TestProcessBatch_LargePackets(t *testing.T) {
 
 // TestProcessBatch_HighSequenceNumber tests processing with high sequence numbers
 func TestProcessBatch_HighSequenceNumber(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -339,7 +339,7 @@ func TestProcessBatch_HighSequenceNumber(t *testing.T) {
 
 // TestProcessBatch_UnregisteredHunter tests processing batch from unknown hunter
 func TestProcessBatch_UnregisteredHunter(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -371,7 +371,7 @@ func TestProcessBatch_UnregisteredHunter(t *testing.T) {
 
 // TestProcessBatch_WithRTPMetadata tests RTP packet processing
 func TestProcessBatch_WithRTPMetadata(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:     "test-processor",
 		ListenAddr:      "localhost:55555",
 		MaxHunters:      10,
@@ -422,7 +422,7 @@ func TestProcessBatch_WithRTPMetadata(t *testing.T) {
 // TestProcessBatch_WithUpstreamForwarding tests packet forwarding to upstream processor
 func TestProcessBatch_WithUpstreamForwarding(t *testing.T) {
 	// Create processor with upstream address (enables upstream forwarding)
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:  "test-processor",
 		ListenAddr:   "localhost:55555",
 		MaxHunters:   10,
@@ -461,7 +461,7 @@ func TestProcessBatch_WithAutoRotatePcapWriter(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create processor with auto-rotate PCAP writer
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -515,7 +515,7 @@ func TestProcessBatch_WithPerCallPcapWriter(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create processor with per-call PCAP writer
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -571,7 +571,7 @@ func TestProcessBatch_WithPerCallPcapWriter_RTPPacket(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create processor with per-call PCAP writer
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -630,7 +630,7 @@ func TestProcessBatch_MixedVoIPAndNonVoIP(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create processor with both per-call and auto-rotate PCAP writers
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -717,7 +717,7 @@ func TestProcessBatch_MixedVoIPAndNonVoIP(t *testing.T) {
 
 // TestProcessBatch_EmptyPacketData tests handling of packets with empty data
 func TestProcessBatch_EmptyPacketData(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -751,7 +751,7 @@ func TestProcessBatch_EmptyPacketData(t *testing.T) {
 
 // TestProcessBatch_NilMetadata tests handling of packets with nil metadata
 func TestProcessBatch_NilMetadata(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:     "test-processor",
 		ListenAddr:      "localhost:55555",
 		MaxHunters:      10,
@@ -787,7 +787,7 @@ func TestProcessBatch_NilMetadata(t *testing.T) {
 
 // TestProcessBatch_WithEnricher tests protocol detection enrichment
 func TestProcessBatch_WithEnricher(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID:     "test-processor",
 		ListenAddr:      "localhost:55555",
 		MaxHunters:      10,
@@ -822,7 +822,7 @@ func TestProcessBatch_WithEnricher(t *testing.T) {
 // TestProcessBatch_WithCallCorrelator tests B2BUA call correlation
 func TestProcessBatch_WithCallCorrelator(t *testing.T) {
 	// Call correlator is always enabled (initialized in New)
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
@@ -869,7 +869,7 @@ func TestProcessBatch_WithCallCorrelator(t *testing.T) {
 
 // TestProcessor_GetStats tests retrieving processor statistics
 func TestProcessor_GetStats(t *testing.T) {
-	processor, err := New(Config{
+	processor, err := newTestProcessor(t, Config{
 		ProcessorID: "test-processor",
 		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,

@@ -40,10 +40,7 @@ func (t *HunterTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
 	}
 
 	logger.Debug("HunterTarget applying filter",
-		"filter_id", filter.Id,
-		"filter_type", filter.Type,
-		"pattern", filter.Pattern,
-		"target_hunters", filter.TargetHunters)
+		"filter_type", filter.Type)
 
 	return t.manager.Update(filter)
 }
@@ -55,7 +52,7 @@ func (t *HunterTarget) RemoveFilter(filterID string) (uint32, error) {
 		return 0, nil
 	}
 
-	logger.Debug("HunterTarget removing filter", "filter_id", filterID)
+	logger.Debug("HunterTarget removing filter")
 
 	return t.manager.Delete(filterID)
 }

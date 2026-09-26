@@ -787,8 +787,7 @@ func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, 
 
 	logger.Info("Forwarding filter update operation",
 		"downstream_id", downstreamID,
-		"target_processor_id", req.ProcessorId,
-		"filter_id", req.Filter.Id)
+		"target_processor_id", req.ProcessorId)
 
 	client := downstream.GetClient()
 	if client == nil {
@@ -842,8 +841,7 @@ func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, 
 
 	logger.Info("Forwarding filter delete operation",
 		"downstream_id", downstreamID,
-		"target_processor_id", req.ProcessorId,
-		"filter_id", req.FilterId)
+		"target_processor_id", req.ProcessorId)
 
 	client := downstream.GetClient()
 	if client == nil {

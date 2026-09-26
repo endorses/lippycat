@@ -47,6 +47,9 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Complete local lifecycle transitions after the processing attempt on every
 	// exit path, including normalization/encoding failures.
 	defer batch.RunAfterProcess()
+	if p.filterProcessingBlocked() {
+		return
+	}
 
 	sourceID := batch.SourceID
 	protoBatch, err := batch.ToProtoBatchE()

@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"runtime"
 	"sort"
@@ -38,6 +39,7 @@ import (
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 	"github.com/spf13/viper"
 )
 
@@ -298,6 +300,8 @@ type LocalSource struct {
 	captureDone           chan struct{}
 	batchingDone          chan struct{}
 	boundaryMu            sync.Mutex
+	captureLinks          []layers.LinkType // Confirmed live link types, protected by mu.
+	captureError          chan error
 
 	// Batching
 	batchMu      sync.Mutex
@@ -349,11 +353,16 @@ type LocalSource struct {
 
 	// State
 	started bool
+	stopped bool
 	mu      sync.Mutex
 }
 
 // LocalSourceConfig contains configuration for LocalSource.
 type LocalSourceConfig struct {
+	// CaptureInterfaces optionally supplies fresh, owned interfaces for each
+	// capture generation. Embedders can provide virtual or deterministic sources;
+	// nil opens the configured live Interfaces. Set before constructing the source.
+	CaptureInterfaces func() []pcaptypes.PcapInterface
 	RADIUSPorts       []uint16
 	RADIUSScope       radius.CaptureScope
 	RADIUSCorrelation radius.CorrelatorConfig
@@ -446,6 +455,7 @@ func NewLocalSource(cfg LocalSourceConfig) *LocalSource {
 		stats:           NewAtomicStats(),
 		callFilterCache: newCallFilterCache(cfg.CallFilterCacheSize),
 		selectionPolicy: callregistry.StickySelectionPolicy{},
+		captureError:    make(chan error, 1),
 	}
 }
 
@@ -590,15 +600,46 @@ func (s *LocalSource) newPacketBuffer() (*capture.PacketBuffer, error) {
 }
 
 // Start begins packet capture. Blocks until ctx is cancelled.
-func (s *LocalSource) Start(ctx context.Context) error {
+func (s *LocalSource) Start(ctx context.Context) (result error) {
+	s.boundaryMu.Lock()
 	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		s.boundaryMu.Unlock()
+		return errors.New("local capture source is closed")
+	}
 	if s.started {
 		s.mu.Unlock()
+		s.boundaryMu.Unlock()
 		return nil
 	}
 	s.started = true
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.mu.Unlock()
+	// Every owner exit closes Batches, including an initial handle/filter failure.
+	// The processor waits for that consumer before completing shutdown.
+	startupLocked := true
+	defer func() {
+		if startupLocked {
+			s.boundaryMu.Unlock()
+		}
+		s.boundaryMu.Lock()
+		s.mu.Lock()
+		s.stopped = true
+		s.started = false
+		s.cancel()
+		if s.captureCancel != nil {
+			s.captureCancel()
+		}
+		s.mu.Unlock()
+		if pb := s.packetBuffer.Load(); pb != nil {
+			pb.Close()
+		}
+		s.wg.Wait()
+		s.radiusProcessor.Close()
+		close(s.batches)
+		s.boundaryMu.Unlock()
+	}()
 
 	packetBuffer, err := s.newPacketBuffer()
 	if err != nil {
@@ -612,7 +653,6 @@ func (s *LocalSource) Start(ctx context.Context) error {
 
 	logger.Info("LocalSource starting",
 		"interfaces", s.config.Interfaces,
-		"bpf_filter", s.config.BPFFilter,
 		"batch_size", s.config.BatchSize)
 
 	// Start system metrics collection (CPU/RAM monitoring)
@@ -652,13 +692,13 @@ func (s *LocalSource) Start(ctx context.Context) error {
 		}
 	}()
 
-	// Create capture context (separate from main context for restart support)
-	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
-	s.captureDone = make(chan struct{})
-
-	// Start capture goroutines
-	s.wg.Add(1)
-	go s.capturePackets(s.captureCtx, s.config.BPFFilter, s.captureDone)
+	// All interface handles and filters must be ready before startup succeeds.
+	s.mu.Lock()
+	err = s.startCaptureLocked(s.config.BPFFilter)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
 
 	// Start batching goroutine
 	s.batchingDone = make(chan struct{})
@@ -667,37 +707,26 @@ func (s *LocalSource) Start(ctx context.Context) error {
 		defer close(s.batchingDone)
 		s.batchingLoop()
 	}()
+	s.boundaryMu.Unlock()
+	startupLocked = false
 
 	// Wait for context cancellation
 	<-s.ctx.Done()
-
-	// Stop capture
-	if s.captureCancel != nil {
-		s.captureCancel()
+	select {
+	case result = <-s.captureError:
+	default:
 	}
-
-	// Close packet buffer to signal batchingLoop
-	if pb := s.packetBuffer.Load(); pb != nil {
-		pb.Close()
-	}
-
-	// Wait for goroutines
-	s.wg.Wait()
-	s.radiusProcessor.Close()
-
-	// Close batches channel
-	close(s.batches)
 
 	logger.Info("LocalSource stopped",
 		"packets_captured", s.stats.packetsCaptured.Load(),
 		"packets_forwarded", s.stats.packetsForwarded.Load(),
 		"packets_dropped", s.droppedTotal())
 
-	return nil
+	return result
 }
 
 // capturePackets starts the gopacket capture loop.
-func (s *LocalSource) capturePackets(ctx context.Context, filter string, done chan<- struct{}) {
+func (s *LocalSource) capturePackets(ctx context.Context, filter string, done chan<- struct{}, ready chan<- captureStartResult) {
 	defer s.wg.Done()
 	defer close(done)
 
@@ -712,14 +741,53 @@ func (s *LocalSource) capturePackets(ctx context.Context, filter string, done ch
 		}
 	}
 
-	if len(devices) == 0 {
-		logger.Error("LocalSource: no interfaces configured")
-		return
+	if s.config.CaptureInterfaces != nil {
+		devices = s.config.CaptureInterfaces()
 	}
 
 	// Use InitWithBuffer to capture packets into our buffer
 	// nil processor means we own the buffer and read from it externally
-	capture.InitWithBuffer(ctx, devices, filter, s.packetBuffer.Load(), nil, nil, capture.CaptureOptions{ReassembleIPFragments: s.config.ProtocolMode == "voip"})
+	started := false
+	capture.InitWithBufferReady(ctx, devices, filter, s.packetBuffer.Load(), func(links []layers.LinkType, err error) {
+		started = err == nil
+		ready <- captureStartResult{links: links, err: err}
+	}, capture.CaptureOptions{ReassembleIPFragments: s.config.ProtocolMode == "voip"})
+	if started && ctx.Err() == nil {
+		select {
+		case s.captureError <- errors.New("local capture stopped unexpectedly"):
+		default:
+		}
+		if s.cancel != nil {
+			s.cancel()
+		}
+	}
+}
+
+type captureStartResult struct {
+	links []layers.LinkType
+	err   error
+}
+
+// startCaptureLocked requires mu and boundaryMu. Readiness includes every
+// configured interface; a failed replacement never starts a partial generation.
+func (s *LocalSource) startCaptureLocked(filter string) error {
+	if s.ctx == nil || s.ctx.Err() != nil {
+		return errors.New("local capture is stopping")
+	}
+	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
+	s.captureDone = make(chan struct{})
+	ready := make(chan captureStartResult, 1)
+	s.wg.Add(1)
+	go s.capturePackets(s.captureCtx, filter, s.captureDone, ready)
+	result := <-ready
+	if result.err != nil {
+		s.captureCancel()
+		<-s.captureDone
+		return errors.New("local capture could not install the requested policy")
+	}
+	s.captureLinks = append([]layers.LinkType(nil), result.links...)
+	s.config.BPFFilter = filter
+	return nil
 }
 
 // batchingLoop reads from packet buffer, applies filtering, and creates batches.
@@ -1300,8 +1368,13 @@ func (s *LocalSource) GetProtocolMode() string {
 // SetBPFFilter updates the BPF filter. This requires restarting capture.
 // Returns nil on success, or an error if the filter update fails.
 func (s *LocalSource) SetBPFFilter(filter string) error {
+	s.boundaryMu.Lock()
+	defer s.boundaryMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stopped {
+		return errors.New("local capture source is closed")
+	}
 
 	// Re-applying an identical filter needlessly tears down and recreates every
 	// live capture handle. Apart from causing a capture gap, repeated libpcap
@@ -1310,7 +1383,16 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 	// commonly arrive here without changing the effective BPF expression, so
 	// make equality a hard no-op at the capture-source boundary.
 	if filter == s.config.BPFFilter {
-		return nil
+		select {
+		case <-s.captureDone:
+			// A failed replacement left no reader; identical desired text alone
+			// cannot claim that capture is still installed.
+		default:
+			return nil
+		}
+	}
+	if err := validateLocalBPFFilter(filter, s.captureLinks); err != nil {
+		return err
 	}
 
 	if !s.started {
@@ -1319,10 +1401,7 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 		return nil
 	}
 
-	logger.Info("LocalSource updating BPF filter", "new_filter", filter)
-
-	// Update config
-	s.config.BPFFilter = filter
+	logger.Info("LocalSource updating BPF filter")
 
 	// Cancel current capture
 	if s.captureCancel != nil {
@@ -1345,18 +1424,37 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 	// Preserve the requested configuration without adding a goroutine after
 	// Start has begun waiting on its WaitGroup.
 	if s.ctx == nil || s.ctx.Err() != nil {
+		return errors.New("local capture is stopping")
+	}
+	return s.startCaptureLocked(filter)
+}
+
+// ValidateBPFFilter compiles against each confirmed link type without touching
+// live handles. Before first capture, accept syntax valid for any standard link
+// type; installing on the actual handles remains the authoritative validation.
+func (s *LocalSource) ValidateBPFFilter(filter string) error {
+	s.mu.Lock()
+	links := append([]layers.LinkType(nil), s.captureLinks...)
+	s.mu.Unlock()
+	return validateLocalBPFFilter(filter, links)
+}
+
+func validateLocalBPFFilter(filter string, links []layers.LinkType) error {
+	if len(links) == 0 {
+		for _, link := range []layers.LinkType{layers.LinkTypeEthernet, layers.LinkTypeLinuxSLL, layers.LinkTypeIEEE802_11, layers.LinkTypeIEEE80211Radio, layers.LinkTypeRaw, layers.LinkTypeNull, layers.LinkTypePPP} {
+			if _, err := pcap.CompileBPFFilter(link, pcaptypes.MaxPcapSnapshotLen, filter); err == nil {
+				return nil
+			}
+		}
+	} else {
+		for _, link := range links {
+			if _, err := pcap.CompileBPFFilter(link, pcaptypes.MaxPcapSnapshotLen, filter); err != nil {
+				return errors.New("capture filter is invalid for a configured interface")
+			}
+		}
 		return nil
 	}
-
-	// Create new capture context
-	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
-	s.captureDone = make(chan struct{})
-
-	// Start new capture goroutine
-	s.wg.Add(1)
-	go s.capturePackets(s.captureCtx, filter, s.captureDone)
-
-	return nil
+	return errors.New("capture filter syntax is invalid")
 }
 
 // ApplyPolicyBoundary stops packet admission, drains every packet already
@@ -1372,6 +1470,14 @@ func (s *LocalSource) ApplyPolicyBoundary(ctx context.Context, filter string, ap
 	defer s.boundaryMu.Unlock()
 
 	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return errors.New("local capture source is closed")
+	}
+	if err := validateLocalBPFFilter(filter, s.captureLinks); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	if !s.started {
 		s.config.BPFFilter = filter
 		s.mu.Unlock()
@@ -1421,20 +1527,20 @@ func (s *LocalSource) ApplyPolicyBoundary(ctx context.Context, filter string, ap
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.config.BPFFilter = filter
 	if s.ctx == nil || s.ctx.Err() != nil {
-		return nil
+		return errors.New("local capture is stopping")
 	}
 	replacementBuffer, err := s.newPacketBuffer()
 	if err != nil {
 		return fmt.Errorf("recreate packet buffer: %w", err)
 	}
 	s.replacePacketBuffer(packetBuffer, replacementBuffer)
-	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
-	s.captureDone = make(chan struct{})
+	if err := s.startCaptureLocked(filter); err != nil {
+		replacementBuffer.Close()
+		return err
+	}
 	s.batchingDone = make(chan struct{})
-	s.wg.Add(2)
-	go s.capturePackets(s.captureCtx, filter, s.captureDone)
+	s.wg.Add(1)
 	go func(done chan struct{}) {
 		defer close(done)
 		s.batchingLoop()

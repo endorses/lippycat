@@ -13,10 +13,11 @@ import (
 
 func TestYAMLPersistence_SaveAndLoad(t *testing.T) {
 	// Create temp directory for test
-	tempDir := t.TempDir()
+	tempDir := privateStoreTestDir(t)
 	filterFile := filepath.Join(tempDir, "filters.yaml")
 
 	persistence := NewYAMLPersistence()
+	t.Cleanup(func() { require.NoError(t, persistence.Close()) })
 
 	// Test 1: Save filters to YAML
 	t.Run("SaveFilters", func(t *testing.T) {
@@ -77,7 +78,9 @@ func TestYAMLPersistence_SaveAndLoad(t *testing.T) {
 
 	// Test 3: Load from non-existent file (should not error)
 	t.Run("LoadFromNonExistentFile", func(t *testing.T) {
-		filters, err := persistence.Load(filepath.Join(tempDir, "nonexistent.yaml"))
+		missing := NewYAMLPersistence()
+		defer func() { require.NoError(t, missing.Close()) }()
+		filters, err := missing.Load(filepath.Join(tempDir, "nonexistent.yaml"))
 		require.NoError(t, err, "loading from non-existent file should not error")
 		assert.Len(t, filters, 0, "should have no filters")
 	})
@@ -127,12 +130,13 @@ func TestSharedPackageIntegration(t *testing.T) {
 
 func TestManager_PersistenceIntegration(t *testing.T) {
 	// Create temp directory for test
-	tempDir := t.TempDir()
+	tempDir := privateStoreTestDir(t)
 	filterFile := filepath.Join(tempDir, "filters.yaml")
 
 	// Test UpdateFilter persists to disk
 	t.Run("UpdateFilterPersistence", func(t *testing.T) {
 		persistence := NewYAMLPersistence()
+		t.Cleanup(func() { require.NoError(t, persistence.Close()) })
 		manager := NewManager(filterFile, persistence, nil, nil, nil)
 
 		newFilter := &management.Filter{
@@ -166,6 +170,7 @@ func TestManager_PersistenceIntegration(t *testing.T) {
 	t.Run("DeleteFilterPersistence", func(t *testing.T) {
 		filterFile2 := filepath.Join(tempDir, "filters2.yaml")
 		persistence := NewYAMLPersistence()
+		t.Cleanup(func() { require.NoError(t, persistence.Close()) })
 		manager := NewManager(filterFile2, persistence, nil, nil, nil)
 
 		// Add initial filters

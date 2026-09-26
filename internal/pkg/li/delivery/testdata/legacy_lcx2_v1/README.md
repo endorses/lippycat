@@ -44,10 +44,12 @@ c4346fae6ee520d575391107cebbf0fe2d42263fb066492812f42526878f3510  objects/.state
 
 `TestJournalLegacyLCX2FixtureRecovery` copies files into a private test directory
 before opening them. Git does not preserve private mode bits. The test verifies
-held recovery, exact PDU/metadata, sequence restoration and ID continuity after
-purge; it never mutates the frozen fixtures.
+held recovery, exact PDU/metadata, sequence restoration and read-only legacy
+ownership. `TestJournalUpgradePreservesMixedRecordsSequencesAndWatermark` verifies
+explicit fresh-key bootstrap, mixed legacy/new recovery, and ID continuity after
+purge. The tests never mutate the frozen fixtures.
 
 The v1 format has no key ID, purpose distinction, journal UUID or authenticated
 store identity. Those are limitations of the compatibility reader, not properties
-that a new envelope should reproduce. A future version must dispatch explicitly
+that a new envelope should reproduce. The current LCS1 wrapper dispatches explicitly
 to this legacy decoder and the configured legacy raw key.

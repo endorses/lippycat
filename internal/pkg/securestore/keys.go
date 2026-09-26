@@ -33,6 +33,7 @@ type key struct {
 	id   string
 	raw  [KeyBytes]byte
 	aead cipher.AEAD
+	file FileIdentity
 }
 
 // Keyring is immutable after loading. Never format it in diagnostics.
@@ -76,7 +77,7 @@ func LoadKeyring(cfg KeyConfig) (*Keyring, error) {
 		if _, exists := r.keys[ref.ID]; exists {
 			return nil, errors.New("duplicate encryption key ID")
 		}
-		data, err := ReadFile(ref.File, KeyBytes)
+		data, identity, err := ReadFileWithIdentity(ref.File, KeyBytes)
 		if err != nil {
 			return nil, fmt.Errorf("read encryption key: %w", err)
 		}
@@ -84,7 +85,7 @@ func LoadKeyring(cfg KeyConfig) (*Keyring, error) {
 			clear(data)
 			return nil, errors.New("encryption key must contain exactly 32 raw bytes")
 		}
-		k := &key{id: ref.ID}
+		k := &key{id: ref.ID, file: identity}
 		copy(k.raw[:], data)
 		clear(data)
 		for _, other := range r.keys {
@@ -138,6 +139,21 @@ func CheckIndependent(rings ...*Keyring) error {
 }
 
 func (r *Keyring) ActiveID() string { return r.active.id }
+
+// UsageFileName is the reserved active-key accounting object name. It must not
+// be reused for a snapshot, key file, manifest, or migration source.
+func (r *Keyring) UsageFileName() string { return usageName(r.active) }
+
+// UsesFile compares the actual opened key inodes, including filesystem aliases
+// that do not involve symlinks or hardlinks (for example bind mounts).
+func (r *Keyring) UsesFile(identity FileIdentity) bool {
+	for _, key := range r.keys {
+		if key.file == identity {
+			return true
+		}
+	}
+	return false
+}
 
 // OpenLegacy authenticates a caller-parsed legacy envelope using ONLY the
 // explicitly selected legacy key. Legacy format dispatch belongs to its owner.

@@ -77,7 +77,7 @@ func dirRTPPacket(ssrc uint32, srcIP, srcPort, dstIP, dstPort string) *types.Pac
 func newLIProcessor(t *testing.T, deliveryType li.DeliveryType) (*Processor, uuid.UUID, string) {
 	t.Helper()
 
-	p, err := New(Config{
+	p, err := newTestProcessor(t, Config{
 		ProcessorID: "test-li-direction",
 		ListenAddr:  "localhost:0",
 		MaxHunters:  1,

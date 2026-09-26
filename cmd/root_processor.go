@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/endorses/lippycat/cmd/migrate"
 	"github.com/endorses/lippycat/cmd/process"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/version"
@@ -30,6 +31,7 @@ func Execute() {
 }
 
 func addSubCommandPalattes() {
+	rootCmd.AddCommand(migrate.MigrateCmd)
 	rootCmd.AddCommand(process.ProcessCmd)
 }
 

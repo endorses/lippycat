@@ -36,7 +36,7 @@ func TestRADIUSEventUsesValidatedPacket(t *testing.T) {
 	observation := ingress.Process(packet, reader.LinkType(), "fixture", nil)
 	require.NotNil(t, observation)
 	captured := &data.CapturedPacket{Data: raw, TimestampNs: ci.Timestamp.UnixNano(), CaptureLength: uint32(ci.CaptureLength), OriginalLength: uint32(ci.Length), LinkType: uint32(reader.LinkType()), Metadata: protocolmeta.Enrich(packet, nil, false), Radius: grpcadapter.RADIUSToProto(observation)}
-	p, err := New(Config{ListenAddr: ":0", ProcessorID: "event-test", EventQueueSize: 16})
+	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "event-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	sink := &collectingSink{}
 	require.NoError(t, p.RegisterEventSink(sink, events.KindRADIUS))

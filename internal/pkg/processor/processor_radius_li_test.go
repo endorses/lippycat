@@ -93,7 +93,7 @@ func TestRADIUSProcessorAdmissionRequiresInternalOriginTrust(t *testing.T) {
 }
 
 func TestRADIUSInitializedProcessorDoesNotUseVoIPEncoder(t *testing.T) {
-	p, err := New(Config{ProcessorID: "radius-encoder-test", ListenAddr: "localhost:0", MaxHunters: 1, LIEnabled: true})
+	p, err := newTestProcessor(t, Config{ProcessorID: "radius-encoder-test", ListenAddr: "localhost:0", MaxHunters: 1, LIEnabled: true})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, p.Shutdown()) })
 	packets := radiusOutputFixtures(t)

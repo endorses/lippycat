@@ -317,7 +317,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 						}
 					}
 				} else {
-					logger.Warn("Failed to parse IP address filter", "pattern", filter.Pattern)
+					logger.Warn("Failed to parse IP address filter")
 				}
 			}
 
@@ -349,7 +349,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 			if normalized != "" {
 				af.imsiFilters[normalized] = filter.Id
 			} else {
-				logger.Warn("Invalid IMSI filter pattern (expected 15 digits)", "pattern", filter.Pattern)
+				logger.Warn("Invalid IMSI filter pattern (expected 15 digits)")
 			}
 
 		case management.FilterType_FILTER_IMEI:
@@ -366,7 +366,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 			if normalized != "" {
 				af.imeiFilters[normalized] = filter.Id
 			} else {
-				logger.Warn("Invalid IMEI filter pattern (expected 14-15 digits)", "pattern", filter.Pattern)
+				logger.Warn("Invalid IMEI filter pattern (expected 14-15 digits)")
 			}
 		}
 	}

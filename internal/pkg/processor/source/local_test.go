@@ -721,6 +721,7 @@ func TestLocalSource_ImplementsPacketSource(t *testing.T) {
 
 func TestApplyPolicyBoundaryDrainsProcessorBeforeApplyAndResumes(t *testing.T) {
 	s := NewLocalSource(LocalSourceConfig{Interfaces: []string{"test0"}, BPFFilter: "old", BufferSize: 5, SIPBufferSize: 3, BatchBuffer: 4})
+	installLocalCaptureFixture(t, s)
 	sourceCtx, cancelSource := context.WithCancel(context.Background())
 	defer cancelSource()
 
@@ -750,7 +751,7 @@ func TestApplyPolicyBoundaryDrainsProcessorBeforeApplyAndResumes(t *testing.T) {
 	}()
 
 	applyCalled := false
-	err := s.ApplyPolicyBoundary(t.Context(), "new", func() error {
+	err := s.ApplyPolicyBoundary(t.Context(), "udp", func() error {
 		select {
 		case <-processedOld:
 			applyCalled = true
@@ -761,7 +762,7 @@ func TestApplyPolicyBoundaryDrainsProcessorBeforeApplyAndResumes(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, applyCalled)
-	require.Equal(t, "new", s.config.BPFFilter)
+	require.Equal(t, "udp", s.config.BPFFilter)
 	replacement := s.packetBuffer.Load()
 	require.NotSame(t, pb, replacement)
 	require.Equal(t, 3, replacement.SIPCap())
@@ -788,6 +789,7 @@ func TestApplyPolicyBoundaryDrainsAdmittedPacketsAndPreservesPressureTotals(t *t
 		SIPBufferSize: 1,
 		BatchBuffer:   8,
 	})
+	installLocalCaptureFixture(t, s)
 	sourceCtx, cancelSource := context.WithCancel(context.Background())
 	defer cancelSource()
 
@@ -835,7 +837,7 @@ func TestApplyPolicyBoundaryDrainsAdmittedPacketsAndPreservesPressureTotals(t *t
 
 	boundaryDone := make(chan error, 1)
 	go func() {
-		boundaryDone <- s.ApplyPolicyBoundary(t.Context(), "new", func() error { return nil })
+		boundaryDone <- s.ApplyPolicyBoundary(t.Context(), "udp", func() error { return nil })
 	}()
 
 	// ApplyPolicyBoundary must first close only the inputs, then wait for the
@@ -884,7 +886,7 @@ func TestApplyPolicyBoundaryDoesNotApplyWhenDrainTimesOut(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	called := false
-	err := s.ApplyPolicyBoundary(ctx, "new", func() error { called = true; return nil })
+	err := s.ApplyPolicyBoundary(ctx, "udp", func() error { called = true; return nil })
 	require.Error(t, err)
 	require.False(t, called)
 	require.Equal(t, "old", s.config.BPFFilter)

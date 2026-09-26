@@ -3,31 +3,23 @@
 package delivery
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/crc32"
-	"io"
-	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/google/uuid"
 )
 
 var ErrJournalFull = errors.New("X2 journal capacity exhausted")
 var ErrJournalClosed = errors.New("X2 journal closed or faulted")
 var ErrPersistenceUncertain = errors.New("X2 persistence outcome uncertain")
+var ErrJournalMigrationRequired = errors.New("legacy X2 journal requires offline upgrade with a fresh active key before mutation")
 
 const journalOverhead = int64(4096) // Conservative JSON/framing reservation; payload expands by 4/3.
 const journalFaultReserve = int64(16384)
@@ -36,6 +28,8 @@ const journalMaxRecord = int64(64 << 20)
 type JournalConfig struct {
 	PreserveSequences      bool
 	Dir, KeyFile           string
+	KeyID, LegacyKeyID     string
+	ReadKeys               []securestore.KeyRef
 	MaxBytes               int64
 	MaxPending, MaxRecords int
 }
@@ -90,196 +84,32 @@ type Journal struct {
 	checkpoints []uint64
 	mu          sync.Mutex
 	cfg         JournalConfig
-	aead        cipher.AEAD
-	entries     map[uint64]*journalEntry
-	next        uint64
-	stats       JournalStats
-	ops         chan journalOperation
-	done        chan struct{}
-	closed      bool
-	lock        *os.File
+	store       *securestore.Dir
+	keys        *securestore.Keyring
+	usage       *securestore.Usage
+	writer      *securestore.Writer
+	storeID     [16]byte
+	readOnly    bool
+	// Used only during offline construction to classify partial bootstrap.
+	bootstrapTouched bool
+	// A resumable legacy bootstrap with no state cannot accept new-format objects.
+	legacyBootstrapOnly bool
+	entries             map[uint64]*journalEntry
+	next                uint64
+	stats               JournalStats
+	lastErr             error
+	ops                 chan journalOperation
+	done                chan struct{}
+	closed              bool
+	lock                *securestore.Lock
 }
 
 func OpenJournal(cfg JournalConfig) (*Journal, error) {
-	if cfg.MaxBytes <= journalFaultReserve || cfg.MaxPending <= 0 || cfg.MaxRecords <= 0 {
-		return nil, fmt.Errorf("invalid X2 journal capacity")
-	}
-	if err := os.MkdirAll(cfg.Dir, 0700); err != nil {
-		return nil, fmt.Errorf("create X2 journal: %w", err)
-	}
-	if err := checkJournalMode(cfg.Dir, true); err != nil {
-		return nil, err
-	}
-	if err := checkJournalMode(cfg.KeyFile, false); err != nil {
-		return nil, err
-	}
-	key, err := os.ReadFile(cfg.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("read journal key: %w", err)
-	}
-	if len(key) != 32 {
-		return nil, fmt.Errorf("journal key must contain exactly 32 raw bytes")
-	}
-	block, err := aes.NewCipher(key)
-	for i := range key {
-		key[i] = 0
-	}
-	if err != nil {
-		return nil, err
-	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	lock, err := os.OpenFile(filepath.Join(cfg.Dir, ".lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
-	if err != nil {
-		return nil, fmt.Errorf("open journal lock: %w", err)
-	}
-	fail := func(e error) (*Journal, error) {
-		if ce := lock.Close(); ce != nil {
-			logger.Error("Close journal lock", "error", ce)
-		}
-		return nil, e
-	}
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return fail(fmt.Errorf("lock journal: %w", err))
-	}
-	j := &Journal{cfg: cfg, aead: aead, entries: make(map[uint64]*journalEntry), ops: make(chan journalOperation, cfg.MaxPending), done: make(chan struct{}), lock: lock}
-	var fs syscall.Statfs_t
-	if err := syscall.Statfs(cfg.Dir, &fs); err != nil {
-		return fail(fmt.Errorf("inspect journal filesystem: %w", err))
-	}
-	j.allocationUnit = max(4096, int64(fs.Bsize))
-	j.faultReserve = max(journalFaultReserve, 2*j.allocationUnit)
-	j.writeFile = j.writePath
-	j.sequences = make(map[string]journalSequenceEntry)
-	j.heldByDID = make(map[uuid.UUID]int)
-	j.wake = make(chan struct{}, 1)
-	j.stats.MaxBytes = cfg.MaxBytes
-	dir, err := os.Open(cfg.Dir)
-	if err != nil {
-		return fail(err)
-	}
-	defer func() {
-		if err := dir.Close(); err != nil {
-			logger.Error("Close journal recovery directory", "error", err)
-		}
-	}()
-	// Read bounded batches: a reduced limit or an unexpectedly large spool must
-	// not allocate the complete directory or index before capacity is checked.
-	for {
-		files, readErr := dir.ReadDir(128)
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			return fail(readErr)
-		}
-		for _, f := range files {
-			name := f.Name()
-			if name == ".state" {
-				path := filepath.Join(cfg.Dir, name)
-				if err := checkJournalMode(path, false); err != nil {
-					return fail(err)
-				}
-				info, err := f.Info()
-				if err != nil {
-					return fail(err)
-				}
-				if info.Size() > 4096 {
-					return fail(fmt.Errorf("oversized journal state"))
-				}
-				b, err := os.ReadFile(path)
-				if err != nil {
-					return fail(err)
-				}
-				r, err := j.decode(b)
-				if err != nil {
-					return fail(err)
-				}
-				if r.ID > j.next {
-					j.next = r.ID
-				}
-				continue
-			}
-			if name == ".lock" {
-				continue
-			}
-			if strings.HasSuffix(name, ".tmp") {
-				if _, err := strconv.ParseUint(strings.TrimSuffix(name, ".x2.tmp"), 10, 64); (err != nil || !strings.HasSuffix(name, ".x2.tmp")) && !validSequenceTemp(name) && name != ".state.tmp" {
-					return fail(fmt.Errorf("unexpected temporary journal file %q", name))
-				}
-				if err := os.Remove(filepath.Join(cfg.Dir, name)); err != nil {
-					return fail(fmt.Errorf("remove incomplete journal record: %w", err))
-				}
-				continue
-			}
-			if strings.HasSuffix(name, ".seq") {
-				if len(j.sequences) >= cfg.MaxRecords {
-					return fail(fmt.Errorf("recovered journal exceeds configured capacity"))
-				}
-				if err := j.recoverSequence(name); err != nil {
-					return fail(err)
-				}
-				if j.stats.Bytes > cfg.MaxBytes-j.faultReserve {
-					return fail(fmt.Errorf("recovered journal exceeds configured capacity"))
-				}
-				continue
-			}
-			if !strings.HasSuffix(name, ".x2") {
-				return fail(fmt.Errorf("unexpected journal file %q", name))
-			}
-			if len(j.entries) >= cfg.MaxRecords {
-				return fail(fmt.Errorf("recovered journal exceeds configured capacity"))
-			}
-			id, err := strconv.ParseUint(strings.TrimSuffix(name, ".x2"), 10, 64)
-			if err != nil || id == 0 {
-				return fail(fmt.Errorf("invalid journal record name %q", name))
-			}
-			path := filepath.Join(cfg.Dir, name)
-			if err := checkJournalMode(path, false); err != nil {
-				return fail(err)
-			}
-			info, err := f.Info()
-			if err != nil {
-				return fail(err)
-			}
-			if info.Size() > journalMaxRecord || info.Size() <= 0 {
-				return fail(fmt.Errorf("invalid journal record size"))
-			}
-			if j.diskSize(info.Size()) > cfg.MaxBytes-j.faultReserve-j.stats.Bytes {
-				return fail(fmt.Errorf("recovered journal exceeds configured capacity"))
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return fail(err)
-			}
-			rec, err := j.decode(data)
-			if err != nil {
-				return fail(fmt.Errorf("recover journal %s: %w", name, err))
-			}
-			if rec.ID != id {
-				return fail(fmt.Errorf("journal identity mismatch"))
-			}
-			j.entries[id] = &journalEntry{did: rec.DID, payloadBytes: int64(len(rec.Data)), size: j.diskSize(int64(len(data))), held: true, persisted: true}
-			j.stats.Bytes += j.diskSize(int64(len(data)))
-			j.stats.Persisted++
-			j.stats.Held++
-			j.heldByDID[rec.DID]++
-			if id > j.next {
-				j.next = id
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-	}
-	if j.stats.Bytes > cfg.MaxBytes-j.faultReserve || len(j.entries) > cfg.MaxRecords || len(j.sequences) > cfg.MaxRecords {
-		return fail(fmt.Errorf("recovered journal exceeds configured capacity"))
-	}
-	if err := j.repairRecoveredCheckpoints(); err != nil {
-		return fail(fmt.Errorf("repair recovered journal checkpoints: %w", err))
-	}
-	go j.run()
-	return j, nil
+	return openJournal(cfg, false)
 }
+
+// ReadOnly reports a legacy recovery/export owner that cannot seal or mutate.
+func (j *Journal) ReadOnly() bool { return j.readOnly }
 
 // A crash may leave a durable product without its sequence checkpoint or ID
 // watermark. Repair both before callers can purge or deliver that last evidence.
@@ -292,11 +122,7 @@ func (j *Journal) repairRecoveredCheckpoints() error {
 	sort.Slice(ids, func(a, b int) bool { return ids[a] < ids[b] })
 	if j.cfg.PreserveSequences {
 		for _, id := range ids {
-			data, err := os.ReadFile(j.path(id))
-			if err != nil {
-				return err
-			}
-			rec, err := j.decode(data)
+			rec, err := j.readRecord(id)
 			if err != nil {
 				return err
 			}
@@ -321,21 +147,11 @@ func (j *Journal) repairRecoveredCheckpoints() error {
 	if len(ids) == 0 {
 		return nil
 	}
-	state, err := j.encode(JournalRecord{ID: j.next})
+	state, err := j.encodeObject(securestore.JournalState, "journal-state", JournalRecord{ID: j.next})
 	if err != nil {
 		return err
 	}
 	return j.writeFile(filepath.Join(j.cfg.Dir, ".state"), state)
-}
-func checkJournalMode(path string, dir bool) error {
-	st, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("stat journal path: %w", err)
-	}
-	if st.Mode()&os.ModeSymlink != 0 || st.IsDir() != dir || (!dir && !st.Mode().IsRegular()) || st.Mode().Perm()&0077 != 0 {
-		return fmt.Errorf("journal path %q must be a private regular file (0600) or directory (0700)", path)
-	}
-	return nil
 }
 func (j *Journal) path(id uint64) string {
 	return filepath.Join(j.cfg.Dir, fmt.Sprintf("%020d.x2", id))
@@ -344,12 +160,19 @@ func (j *Journal) Admit(rec JournalRecord, cb func(uint64, error)) (uint64, erro
 	return j.admit(rec, cb, true)
 }
 func (j *Journal) admit(rec JournalRecord, cb func(uint64, error), clone bool) (uint64, error) {
-	size := max(journalSequenceReserve, j.allocationUnit) + j.diskSize(journalOverhead+int64(len(rec.Data))*2+int64(len(rec.CallID))*6)
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.readOnly {
+		return 0, ErrJournalMigrationRequired
+	}
 	if j.closed || j.stats.LastError != "" {
 		return 0, ErrJournalClosed
 	}
+	if len(rec.Data) > int(journalMaxRecord) || len(rec.CallID) > 64<<10 || !utf8.ValidString(rec.CallID) {
+		j.stats.Rejected++
+		return 0, ErrJournalFull
+	}
+	size := max(journalSequenceReserve, j.allocationUnit) + j.diskSize(journalOverhead+int64(len(rec.Data))*2+int64(len(rec.CallID))*6)
 	if size > journalMaxRecord || size > j.cfg.MaxBytes-j.faultReserve-j.stats.Bytes || len(j.entries) >= j.cfg.MaxRecords || len(j.ops) == cap(j.ops) {
 		j.stats.Rejected++
 		return 0, ErrJournalFull
@@ -382,6 +205,9 @@ func (j *Journal) admit(rec JournalRecord, cb func(uint64, error), clone bool) (
 // Complete checkpoints local write completion. A crash before the checkpoint may
 // replay the record: local write completion never establishes MDF receipt.
 func (j *Journal) Complete(id uint64) error {
+	if j.readOnly {
+		return ErrJournalMigrationRequired
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.closed || j.stats.LastError != "" {
@@ -435,17 +261,14 @@ func (j *Journal) Close() error {
 	<-j.done
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.stats.LastError != "" {
-		return errors.New(j.stats.LastError)
-	}
-	return nil
+	return j.lastErr
 }
 func (j *Journal) run() {
 	defer close(j.done)
 	defer func() {
 		j.purgeMu.Lock()
 		defer j.purgeMu.Unlock()
-		if err := j.lock.Close(); err != nil {
+		if err := j.closeStorage(); err != nil {
 			j.fault(err)
 		}
 	}()
@@ -463,10 +286,19 @@ func (j *Journal) run() {
 				close(op.barrier)
 				continue
 			}
-			seq, err := j.prepareSequence(op.record.Data)
+			var seq *sequenceWrite
+			var err error
+			j.mu.Lock()
+			faulted := j.stats.LastError != ""
+			j.mu.Unlock()
+			if faulted {
+				err = ErrJournalClosed
+			} else {
+				seq, err = j.prepareSequence(op.record.Data)
+			}
 			var b []byte
 			if err == nil {
-				b, err = j.encode(op.record)
+				b, err = j.encodeObject(securestore.X2Product, journalObjectID(op.record.ID), op.record)
 			}
 			productWritten := false
 			if err == nil {
@@ -478,13 +310,13 @@ func (j *Journal) run() {
 			}
 			if err == nil {
 				var state []byte
-				state, err = j.encode(JournalRecord{ID: op.record.ID})
+				state, err = j.encodeObject(securestore.JournalState, "journal-state", JournalRecord{ID: op.record.ID})
 				if err == nil {
 					err = j.writeFile(filepath.Join(j.cfg.Dir, ".state"), state)
 				}
 			}
-			if err != nil && productWritten && !errors.Is(err, ErrPersistenceUncertain) {
-				err = fmt.Errorf("%w: %w", ErrPersistenceUncertain, err)
+			if err != nil && (productWritten || errors.Is(err, ErrPersistenceUncertain)) {
+				err = &securestore.CommitError{Outcome: securestore.Uncertain, Op: "persist journal product and checkpoints", Err: errors.Join(ErrPersistenceUncertain, err)}
 			}
 			j.mu.Lock()
 			e := j.entries[op.record.ID]
@@ -499,7 +331,10 @@ func (j *Journal) run() {
 				e.persisted = true
 				j.stats.Persisted++
 			} else {
-				j.stats.LastError = err.Error()
+				if j.lastErr == nil {
+					j.lastErr = err
+					j.stats.LastError = err.Error()
+				}
 				if errors.Is(err, ErrPersistenceUncertain) {
 					j.stats.Uncertain++
 				}
@@ -513,17 +348,18 @@ func (j *Journal) run() {
 }
 func (j *Journal) checkpoint() {
 	j.mu.Lock()
+	if j.stats.LastError != "" {
+		j.mu.Unlock()
+		return
+	}
 	ids := j.checkpoints
 	j.checkpoints = nil
 	j.mu.Unlock()
 	for _, id := range ids {
-		err := os.Remove(j.path(id))
-		if err == nil {
-			err = j.syncDir()
-		}
+		err := j.removeRecord(id)
 		if err != nil {
 			j.fault(fmt.Errorf("checkpoint journal: %w", err))
-			continue
+			return
 		}
 		j.mu.Lock()
 		if e := j.entries[id]; e != nil {
@@ -559,90 +395,30 @@ func (j *Journal) Flush() error {
 	j.ops <- journalOperation{barrier: barrier}
 	j.sendMu.RUnlock()
 	<-barrier
-	stats := j.Stats()
-	if stats.LastError != "" {
-		return errors.New(stats.LastError)
-	}
-	return nil
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.lastErr
 }
 func (j *Journal) fault(err error) {
 	j.mu.Lock()
-	j.stats.LastError = err.Error()
+	if j.lastErr == nil {
+		j.lastErr = err
+		j.stats.LastError = err.Error()
+	}
 	j.mu.Unlock()
 	logger.Error("X2 journal fault", "error", err)
-}
-func (j *Journal) encode(rec JournalRecord) ([]byte, error) {
-	plain, err := json.Marshal(rec)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, j.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	out := append([]byte("LCX2\x01"), nonce...)
-	out = j.aead.Seal(out, nonce, plain, []byte("LCX2\x01"))
-	out = binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(out))
-	return out, nil
-}
-func (j *Journal) decode(b []byte) (JournalRecord, error) {
-	var rec JournalRecord
-	n := j.aead.NonceSize()
-	if len(b) < 5+n+j.aead.Overhead()+4 || string(b[:5]) != "LCX2\x01" {
-		return rec, fmt.Errorf("invalid journal version or truncated record")
-	}
-	if crc32.ChecksumIEEE(b[:len(b)-4]) != binary.BigEndian.Uint32(b[len(b)-4:]) {
-		return rec, fmt.Errorf("journal checksum mismatch")
-	}
-	plain, err := j.aead.Open(nil, b[5:5+n], b[5+n:len(b)-4], b[:5])
-	if err != nil {
-		return rec, fmt.Errorf("journal authentication: %w", err)
-	}
-	if err := json.Unmarshal(plain, &rec); err != nil {
-		return rec, err
-	}
-	return rec, nil
 }
 func (j *Journal) write(id uint64, b []byte) error {
 	return j.writeFile(j.path(id), b)
 }
 func (j *Journal) writePath(path string, b []byte) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return fmt.Errorf("create journal record: %w", err)
+	out, err := j.store.Replace(filepath.Base(path), b)
+	if out != securestore.NotCommitted {
+		j.bootstrapTouched = true
 	}
-	_, writeErr := f.Write(b)
-	if writeErr == nil {
-		writeErr = f.Sync()
-	}
-	closeErr := f.Close()
-	if writeErr != nil {
-		return fmt.Errorf("persist journal record: %w", writeErr)
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	if err := j.syncDir(); err != nil {
-		return fmt.Errorf("%w: %w", ErrPersistenceUncertain, err)
-	}
-	return nil
+	return journalStorageError(out, err)
 }
-func (j *Journal) syncDir() error {
-	f, err := os.Open(j.cfg.Dir)
-	if err != nil {
-		return err
-	}
-	err = f.Sync()
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	return closeErr
-}
+func (j *Journal) syncDir() error { return j.store.Sync() }
 
 // VisitHeld bounds recovery payload memory to a single record.
 func (j *Journal) VisitHeld(visit func(JournalRecord) error) error {
@@ -656,11 +432,7 @@ func (j *Journal) VisitHeld(visit func(JournalRecord) error) error {
 	j.mu.Unlock()
 	sort.Slice(ids, func(a, b int) bool { return ids[a] < ids[b] })
 	for _, id := range ids {
-		data, err := os.ReadFile(j.path(id))
-		if err != nil {
-			return err
-		}
-		record, err := j.decode(data)
+		record, err := j.readRecord(id)
 		if err != nil {
 			return err
 		}
@@ -673,6 +445,9 @@ func (j *Journal) VisitHeld(visit func(JournalRecord) error) error {
 
 // Purge is a synchronous explicit administrative checkpoint for held product.
 func (j *Journal) Purge(id uint64) error {
+	if j.readOnly {
+		return ErrJournalMigrationRequired
+	}
 	// Keep the exclusive spool ownership alive through deletion and directory
 	// sync. Close must not release the process lock while a purge is in flight.
 	j.purgeMu.RLock()
@@ -693,10 +468,7 @@ func (j *Journal) Purge(id uint64) error {
 	}
 	e.completing = true
 	j.mu.Unlock()
-	err := os.Remove(j.path(id))
-	if err == nil {
-		err = j.syncDir()
-	}
+	err := j.removeRecord(id)
 	if err != nil {
 		j.fault(err)
 		return err

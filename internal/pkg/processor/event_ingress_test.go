@@ -83,7 +83,7 @@ func TestNegotiateEventForwardingRejectsInsufficientStatefulAnalysis(t *testing.
 }
 
 func TestRegisterHunterAcceptsMixedPacketAndEventModes(t *testing.T) {
-	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0", MaxHunters: 2})
+	p, err := newTestProcessor(t, Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0", MaxHunters: 2})
 	require.NoError(t, err)
 
 	packetResponse, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
@@ -114,7 +114,7 @@ func TestRegisterHunterAcceptsMixedPacketAndEventModes(t *testing.T) {
 }
 
 func TestRegisterLegacyHunterDefaultsToPacketForwarding(t *testing.T) {
-	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
+	p, err := newTestProcessor(t, Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
 	require.NoError(t, err)
 
 	response, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
@@ -197,7 +197,7 @@ func TestOversizedForwardedEventThenValidEventIsAdmittedAndACKed(t *testing.T) {
 }
 
 func TestEventIngressAuthorizationRejectsPacketAndFallbackRegistrations(t *testing.T) {
-	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
+	p, err := newTestProcessor(t, Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
 	require.NoError(t, err)
 
 	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
@@ -219,7 +219,7 @@ func TestEventIngressAuthorizationRejectsPacketAndFallbackRegistrations(t *testi
 }
 
 func TestEventIngressAuthorizationEnforcesAcceptedKinds(t *testing.T) {
-	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
+	p, err := newTestProcessor(t, Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
 	require.NoError(t, err)
 	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
 		HunterId:        "event-hunter",
@@ -233,7 +233,7 @@ func TestEventIngressAuthorizationEnforcesAcceptedKinds(t *testing.T) {
 }
 
 func TestEventIngressAuthorizationUsesLatestRegistration(t *testing.T) {
-	p, err := New(Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
+	p, err := newTestProcessor(t, Config{ProcessorID: "processor-a", ListenAddr: "127.0.0.1:0"})
 	require.NoError(t, err)
 	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
 		HunterId:        "hunter-a",

@@ -211,6 +211,16 @@ encoded/decrypted/schema expansion and reject if the memory budget cannot cover
 it. The process's declared reservation includes both journals, reorder, pending
 callbacks, controls, candidates, and transient readers; it is not an RSS claim.
 
+Managed YAML admission bounds the parser tree before constructing it. It charges
+four times the encoded source length, 320 bytes per scalar, flow collection or
+sequence item, and 80 bytes per mapping separator against the 256 MiB transient
+ceiling. Quoted strings, comments and block-scalar bodies do not turn punctuation
+into structural units. These combined resource limits can reject documents whose
+individual collection counts are each below their maxima; no entries are skipped.
+The canonical 65,536-filter case fits this admission rule. The lexical preflight
+also limits nesting before the YAML parser allocates its tree; strict typed schema
+validation follows parsing.
+
 The filter payload schema is version 1 and contains `version` and `filters`.
 The filters use every field of `internal/pkg/filtering/types.go`: `id`, `type`,
 `pattern`, `revision`, `enabled`, `description`, `target_hunters`, and `radius`.

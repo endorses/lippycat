@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/stretchr/testify/require"
+	"os"
 	"testing"
 )
 
@@ -32,7 +33,9 @@ func (c radiusCapabilities) GetCapabilities(id string) *management.HunterCapabil
 
 func TestRADIUSDistributionAndPersistence(t *testing.T) {
 	caps := radiusCapabilities{"modern": {FilterTypes: []string{"radius_username", "bpf"}, RadiusFilterVersion: 1}, "legacy": {FilterTypes: []string{"radius_username", "bpf"}}}
-	path := t.TempDir() + "/filters.yaml"
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0700))
+	path := dir + "/filters.yaml"
 	m := NewManager(path, NewYAMLPersistence(), caps, nil, nil)
 	modern := m.AddChannel("modern")
 	legacy := m.AddChannel("legacy")
@@ -62,14 +65,24 @@ func TestRADIUSDistributionAndPersistence(t *testing.T) {
 	f.Radius.Scope.OperatorScope = "caller-mutated"
 	require.Equal(t, "operator", m.GetForHunter("modern")[0].Radius.Scope.OperatorScope)
 	require.Empty(t, m.GetForHunter("legacy"))
-	restored := NewManager(path, NewYAMLPersistence(), caps, nil, nil)
-	require.NoError(t, restored.Load())
-	require.Equal(t, "operator", restored.GetForHunter("modern")[0].Radius.Scope.OperatorScope)
-	require.EqualValues(t, 2, restored.GetForHunter("modern")[0].Revision)
 	_, err = m.Update(&management.Filter{Id: "raw", Type: management.FilterType_FILTER_BPF, Pattern: "udp", Enabled: true})
 	require.NoError(t, err)
 	require.Equal(t, "raw", (<-legacy).Filter.Id)
 	require.Len(t, m.GetForHunter("legacy"), 1)
+	require.NoError(t, m.Close())
+	restored := NewManager(path, NewYAMLPersistence(), caps, nil, nil)
+	require.NoError(t, restored.Load())
+	var restoredRadius *management.Filter
+	for _, f := range restored.GetForHunter("modern") {
+		if f.Id == "radius" {
+			restoredRadius = f
+		}
+	}
+	require.NotNil(t, restoredRadius)
+	require.Equal(t, "operator", restoredRadius.Radius.Scope.OperatorScope)
+	require.EqualValues(t, 2, restoredRadius.Revision)
+
+	require.NoError(t, restored.Close())
 }
 
 func TestRADIUSDeletedRevisionCannotBeReused(t *testing.T) {
@@ -110,7 +123,9 @@ func TestRADIUSRevisionHistoryBoundAndTypeSwitch(t *testing.T) {
 }
 
 func TestRADIUSLoadCannotResetRevisionHistory(t *testing.T) {
-	path := t.TempDir() + "/filters.yaml"
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0700))
+	path := dir + "/filters.yaml"
 	m := NewManager(path, NewYAMLPersistence(), nil, nil, nil)
 	f := &management.Filter{Id: "radius", Revision: 1, Type: management.FilterType_FILTER_RADIUS_USERNAME, Pattern: "alice"}
 	_, err := m.Update(f)
@@ -122,7 +137,9 @@ func TestRADIUSLoadCannotResetRevisionHistory(t *testing.T) {
 	require.Error(t, err)
 	require.EqualValues(t, 1, m.radiusRevisions[f.Id])
 	require.Empty(t, m.GetAll())
+	require.NoError(t, m.Close())
 	fresh := NewManager(path, NewYAMLPersistence(), nil, nil, nil)
+	t.Cleanup(func() { require.NoError(t, fresh.Close()) })
 	require.NoError(t, fresh.Load())
 	require.ErrorContains(t, fresh.Load(), "startup-only")
 }

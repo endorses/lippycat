@@ -284,7 +284,10 @@ func TestReplacementCleanupPreservesPrimaryError(t *testing.T) {
 
 func TestCreatePublicationAndCleanupUncertainty(t *testing.T) {
 	path, dir := privateTestDir(t)
-	dir.ops.unlink = func(int, string, int) error { return unix.EIO }
+	dir.ops.noReplace = func(oldFD int, oldName string, newFD int, newName string) (bool, bool, error) {
+		published, remaining, err := publishNoReplace(oldFD, oldName, newFD, newName)
+		return published, remaining, errors.Join(err, unix.EIO)
+	}
 	out, err := dir.Create("snapshot", []byte("new"))
 	require.Equal(t, Uncertain, out)
 	require.Equal(t, Uncertain, OutcomeOf(err))
@@ -292,9 +295,8 @@ func TestCreatePublicationAndCleanupUncertainty(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(path, "snapshot"))
 	require.NoError(t, err)
 	require.Equal(t, "new", string(data))
-	// The interrupted hardlink publication is rejected until reconciled.
 	_, err = dir.Read("snapshot", 100)
-	require.ErrorContains(t, err, "hardlinked")
+	require.NoError(t, err, "lost publication acknowledgement must retain the valid published file")
 }
 
 func TestDescriptorRemainsBoundToOpenedDirectory(t *testing.T) {

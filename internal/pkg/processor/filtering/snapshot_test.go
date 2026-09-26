@@ -76,7 +76,7 @@ func TestScopeRemovalTimeoutForcesAuthoritativeReconnect(t *testing.T) {
 	// The queued ADD fills the channel. Losing the scope-removal DELETE must
 	// close this stream rather than leave its recipient authorized indefinitely.
 	_, err = m.Update(&management.Filter{Id: "policy", Type: management.FilterType_FILTER_BPF, Pattern: "udp", TargetHunters: []string{"new-hunter"}})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrFilterDistribution)
 	<-ch
 	_, open := <-ch
 	require.False(t, open)

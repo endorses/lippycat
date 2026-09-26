@@ -13,7 +13,7 @@ import (
 func TestSubscribeFiltersNegotiatesAuthoritativeSnapshot(t *testing.T) {
 	for _, modern := range []bool{false, true} {
 		t.Run(map[bool]string{false: "legacy", true: "snapshot"}[modern], func(t *testing.T) {
-			p, err := New(Config{ProcessorID: "snapshot-test", ListenAddr: "localhost:55555", MaxHunters: 10})
+			p, err := newTestProcessor(t, Config{ProcessorID: "snapshot-test", ListenAddr: "localhost:55555", MaxHunters: 10})
 			require.NoError(t, err)
 			defer p.Shutdown()
 			_, err = p.filterManager.Update(&management.Filter{Id: "policy", Type: management.FilterType_FILTER_BPF, Pattern: "udp"})

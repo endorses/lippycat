@@ -3,7 +3,6 @@
 package delivery
 
 import (
-	"os"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -108,12 +107,7 @@ func (c *Client) feedJournalRecord(candidate replayCandidate) bool {
 	if !room {
 		return false
 	}
-	data, err := os.ReadFile(c.journal.path(candidate.id))
-	if err != nil {
-		c.journal.fault(err)
-		return false
-	}
-	r, err := c.journal.decode(data)
+	r, err := c.journal.readRecord(candidate.id)
 	if err != nil {
 		c.journal.fault(err)
 		return false

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -37,8 +38,13 @@ func TestJournalRecoveryRepairsCheckpointsBeforePurge(t *testing.T) {
 			done := make(chan error, 1)
 			id, err := j.Admit(JournalRecord{XID: xid, Data: journalSequencePDU(t, xid, 9)}, func(_ uint64, err error) { done <- err })
 			require.NoError(t, err)
-			require.ErrorIs(t, <-done, ErrPersistenceUncertain)
-			require.Error(t, j.Close())
+			persistErr := <-done
+			require.ErrorIs(t, persistErr, ErrPersistenceUncertain)
+			require.Equal(t, securestore.Uncertain, securestore.OutcomeOf(persistErr))
+			require.ErrorIs(t, j.Flush(), syscall.ENOSPC)
+			closeErr := j.Close()
+			require.ErrorIs(t, closeErr, syscall.ENOSPC)
+			require.Equal(t, securestore.Uncertain, securestore.OutcomeOf(closeErr))
 			if preserve {
 				// The surviving product fits, but repairing its missing sequence
 				// checkpoint must not consume the fault/scratch reservation.

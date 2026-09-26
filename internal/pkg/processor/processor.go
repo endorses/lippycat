@@ -206,6 +206,10 @@ type Processor struct {
 
 	// Filter target abstraction (hunter distribution or local BPF)
 	filterTarget filtering.FilterTarget
+	// Serializes durable desired-policy commits through target reconciliation.
+	filterMutationMu     sync.Mutex
+	filterPolicyBlocked  atomic.Bool
+	filterReconcileFault error // protected by filterMutationMu
 
 	// Extracted managers
 	hunterManager     *hunter.Manager
@@ -277,6 +281,7 @@ type Processor struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
 	shutdownOnce sync.Once
+	shutdownErr  error
 
 	// Embed gRPC service implementations
 	data.UnimplementedDataServiceServer
@@ -583,6 +588,9 @@ func New(config Config) (*Processor, error) {
 	// Initialize hunter manager
 	p.hunterManager = hunter.NewManager(config.ProcessorID, config.MaxHunters, onStatsChanged)
 	p.eventIngress.authorize = func(open *eventsv1.EventIngressOpen) bool {
+		if p.filterProcessingBlocked() {
+			return false
+		}
 		if open.RelayNodeId == "" {
 			registered, ok := p.hunterManager.Get(open.SourceNodeId)
 			if !ok || registered.ForwardingMode != management.ForwardingMode_FORWARDING_MODE_EVENTS ||
@@ -818,13 +826,15 @@ func (p *Processor) SetPacketSource(packetSource source.PacketSource) {
 // Must be called before Start().
 func (p *Processor) SetFilterTarget(target filtering.FilterTarget) {
 	p.filterTarget = target
-	if localTarget, ok := target.(*filtering.LocalTarget); ok && p.config.UpstreamForwardMode == "events" {
-		localTarget.SetCoordinator(p)
+	if localTarget, ok := target.(*filtering.LocalTarget); ok {
+		if _, local := p.packetSource.(*source.LocalSource); local {
+			localTarget.SetCoordinator(p)
+		}
 	}
 }
 
 // ReconcileLocalFilterChange establishes a capture and producer-session
-// boundary before an event-forwarding tap commits an effective policy change.
+// boundary before a tap applies a durably committed desired policy change.
 func (p *Processor) ReconcileLocalFilterChange(change filtering.LocalFilterChange) error {
 	p.localPolicyMu.Lock()
 	defer p.localPolicyMu.Unlock()
@@ -853,15 +863,18 @@ func (p *Processor) ReconcileLocalFilterChange(change filtering.LocalFilterChang
 				return fmt.Errorf("flush old event session: %w", err)
 			}
 		}
-		oldSession, _, err := p.eventProducers.Rotate(p.config.ProcessorID)
-		if err != nil {
-			return fmt.Errorf("rotate event producer: %w", err)
-		}
-		if oldSession != "" && p.upstreamEventRouter != nil {
-			if err := p.upstreamEventRouter.DrainAndRetire(boundaryCtx, p.config.ProcessorID, oldSession); err != nil {
-				return err
+		if p.config.UpstreamForwardMode == "events" {
+			oldSession, _, err := p.eventProducers.Rotate(p.config.ProcessorID)
+			if err != nil {
+				return fmt.Errorf("rotate event producer: %w", err)
+			}
+			if oldSession != "" && p.upstreamEventRouter != nil {
+				if err := p.upstreamEventRouter.DrainAndRetire(boundaryCtx, p.config.ProcessorID, oldSession); err != nil {
+					return err
+				}
 			}
 		}
+
 		localTarget.ApplyApplicationPolicy(change.Next)
 		return nil
 	})

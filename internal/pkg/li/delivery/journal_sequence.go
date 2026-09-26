@@ -7,12 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 )
 
 const journalSequenceReserve int64 = 16 << 10
@@ -66,7 +65,7 @@ func (j *Journal) prepareSequence(data []byte) (*sequenceWrite, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, err := j.encode(JournalRecord{Data: plain})
+	b, err := j.encodeObject(securestore.SequenceCheckpoint, "sequence/"+key, JournalRecord{Data: plain})
 	if err != nil {
 		return nil, err
 	}
@@ -75,45 +74,57 @@ func (j *Journal) prepareSequence(data []byte) (*sequenceWrite, error) {
 	}
 	return &sequenceWrite{key: key, checkpoint: cp, data: b, oldSize: old.size}, nil
 }
-func (j *Journal) recoverSequence(name string) error {
-	path := filepath.Join(j.cfg.Dir, name)
-	if err := checkJournalMode(path, false); err != nil {
-		return err
-	}
-	st, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if st.Size() > journalSequenceReserve {
-		return fmt.Errorf("oversized sequence checkpoint")
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	r, err := j.decode(b)
-	if err != nil {
-		return err
-	}
+func (j *Journal) readSequence(name string) (x2x3.SequenceCheckpoint, error) {
 	var cp x2x3.SequenceCheckpoint
-	if err := json.Unmarshal(r.Data, &cp); err != nil {
-		return err
+	key := strings.TrimSuffix(name, ".seq")
+	rawKey, err := hex.DecodeString(key)
+	if err != nil || len(rawKey) != sha256.Size || key != strings.ToLower(key) {
+		return cp, fmt.Errorf("invalid sequence checkpoint name")
+	}
+	b, err := j.store.Read(name, journalSequenceReserve)
+	if err != nil {
+		return cp, err
+	}
+	r, err := j.decodeObject(securestore.SequenceCheckpoint, "sequence/"+key, b, int(journalSequenceReserve)-1024)
+	if err != nil {
+		return cp, err
+	}
+	payload := r.Data
+	r.Data = nil
+	if r.ID != 0 || !validJournalState(r) {
+		return cp, fmt.Errorf("invalid sequence checkpoint wrapper")
+	}
+	if err := decodeJournalJSON(payload, journalSequenceFields, &cp); err != nil {
+		return cp, err
 	}
 	if cp.Context.PDUType != x2x3.PDUTypeX2 {
-		return fmt.Errorf("invalid sequence checkpoint type")
+		return cp, fmt.Errorf("invalid sequence checkpoint type")
 	}
 	if err := validateSequenceIdentity(cp.Context); err != nil {
-		return err
+		return cp, err
 	}
-	key, err := sequenceKey(cp.Context)
+	actual, err := sequenceKey(cp.Context)
+	if err != nil || actual != key {
+		return cp, fmt.Errorf("sequence checkpoint identity mismatch")
+	}
+	return cp, nil
+}
+
+func (j *Journal) recoverSequence(name string) error {
+	size, err := j.store.AllocatedSize(name)
 	if err != nil {
 		return err
 	}
-	if key+".seq" != name {
-		return fmt.Errorf("sequence checkpoint identity mismatch")
+	if size > j.cfg.MaxBytes-j.faultReserve-j.stats.Bytes {
+		return fmt.Errorf("recovered journal exceeds configured capacity: %w", ErrJournalFull)
 	}
-	j.sequences[key] = journalSequenceEntry{size: j.diskSize(int64(len(b))), next: cp.Next}
-	j.stats.Bytes += j.diskSize(int64(len(b)))
+	cp, err := j.readSequence(name)
+	if err != nil {
+		return err
+	}
+	key := strings.TrimSuffix(name, ".seq")
+	j.sequences[key] = journalSequenceEntry{size: size, next: cp.Next}
+	j.stats.Bytes += size
 	return nil
 }
 func (j *Journal) VisitSequences(visit func(x2x3.SequenceCheckpoint) error) error {
@@ -125,16 +136,8 @@ func (j *Journal) VisitSequences(visit func(x2x3.SequenceCheckpoint) error) erro
 	j.mu.Unlock()
 	sort.Strings(keys)
 	for _, key := range keys {
-		b, err := os.ReadFile(filepath.Join(j.cfg.Dir, key+".seq"))
+		cp, err := j.readSequence(key + ".seq")
 		if err != nil {
-			return err
-		}
-		r, err := j.decode(b)
-		if err != nil {
-			return err
-		}
-		var cp x2x3.SequenceCheckpoint
-		if err := json.Unmarshal(r.Data, &cp); err != nil {
 			return err
 		}
 		if err := visit(cp); err != nil {

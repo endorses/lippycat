@@ -30,6 +30,35 @@ sudo lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insec
 sudo lc tap -i eth0 --processor central-processor:55555 --tls-ca ca.crt
 ```
 
+## Managed Filter Storage
+
+All tap protocols inherit `--filter-file`, `--filter-store-mode=auto|yaml|encrypted`,
+`--filter-store-key-file`, `--filter-store-key-id`, and repeatable
+`--filter-store-read-key=id=path`. `auto` uses YAML when LI is disabled and encrypted
+storage when LI is enabled; explicit YAML mode with LI enabled is rejected.
+The default path is `~/.config/lippycat/filters.yaml` or `filters.enc` according to
+the effective mode. Encrypted stores require an active raw 32-byte key file and
+an existing initialized store; use `lc migrate filter-store` with the node stopped.
+YAML mode rejects key settings. Prior key IDs must be unique, with at most four.
+
+```yaml
+tap:
+  filter_file: "" # Leave empty to select the mode-dependent default.
+  filter_store:
+    mode: auto
+    key_file: ""
+    key_id: ""
+    read_keys: [] # For example: [old=/etc/lippycat/keys/filters-old.key]
+```
+
+Precedence is CLI, environment, YAML, then defaults. Environment names are
+`LIPPYCAT_TAP_FILTER_FILE` and
+`LIPPYCAT_TAP_FILTER_STORE_{MODE,KEY_FILE,KEY_ID,READ_KEYS}`. `READ_KEYS` accepts one
+CSV record of `id=path` entries; quote entries containing commas. Explicit empty
+values clear lower-priority settings; an empty path/mode selects runtime defaults
+and an empty read-key list clears prior keys. Startup never converts plaintext
+automatically.
+
 ## Structured Protocol Logs
 
 Tap uses the same normalized event and file-log pipeline as `process`. Enable it
@@ -733,11 +762,11 @@ bounded burst but consume more memory.
 The SIP counters describe successive outcomes rather than three independent
 loss totals:
 
-| Counter | Meaning |
-| --- | --- |
-| `sip_priority_classified` | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped. |
+| Counter                        | Meaning                                                                                                                                 |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `sip_priority_classified`      | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped.                        |
 | `capture_buffer_sip_demotions` | Classified SIP packets rejected by the full priority lane but accepted by the regular lane. This is priority pressure, not packet loss. |
-| `capture_buffer_sip_drops` | Classified SIP packets rejected by both input lanes. This is final packet loss. |
+| `capture_buffer_sip_drops`     | Classified SIP packets rejected by both input lanes. This is final packet loss.                                                         |
 
 Use the regular, SIP, and output length/capacity gauges to locate saturation.
 Persistent overload still requires more downstream throughput or a narrower

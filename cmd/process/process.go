@@ -186,7 +186,11 @@ func init() {
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 	ProcessCmd.Flags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")
 	ProcessCmd.Flags().BoolVarP(&enableDetection, "enable-detection", "d", true, "Enable centralized protocol detection (default: true)")
-	ProcessCmd.Flags().StringVarP(&filterFile, "filter-file", "f", "", "Path to filter persistence file (YAML, default: ~/.config/lippycat/filters.yaml)")
+	ProcessCmd.Flags().StringVarP(&filterFile, "filter-file", "f", "", "Managed filter store path (default: ~/.config/lippycat/filters.yaml or filters.enc, selected by store mode)")
+	filterStoreFlags = ProcessCmd.Flags()
+	if err := cmdutil.RegisterFilterStoreFlags(filterStoreFlags, viper.GetViper(), "processor"); err != nil {
+		panic(err)
+	}
 
 	// TLS configuration (security)
 	// TLS is enabled by default unless --insecure is explicitly set
@@ -269,7 +273,6 @@ func init() {
 	_ = viper.BindPFlag("processor.write_file", ProcessCmd.Flags().Lookup("write-file"))
 	_ = viper.BindPFlag("processor.display_stats", ProcessCmd.Flags().Lookup("stats"))
 	_ = viper.BindPFlag("processor.enable_detection", ProcessCmd.Flags().Lookup("enable-detection"))
-	_ = viper.BindPFlag("processor.filter_file", ProcessCmd.Flags().Lookup("filter-file"))
 	_ = viper.BindPFlag("processor.tls.cert_file", ProcessCmd.Flags().Lookup("tls-cert"))
 	_ = viper.BindPFlag("processor.tls.key_file", ProcessCmd.Flags().Lookup("tls-key"))
 	_ = viper.BindPFlag("processor.tls.ca_file", ProcessCmd.Flags().Lookup("tls-ca"))
@@ -480,7 +483,6 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		TunnelingThreshold:          cmdutil.GetFloat64Config("processor.tunneling_threshold", tunnelingThreshold),
 		TunnelingDebounce:           tunnelingDebounceDuration,
 		EnableDetection:             cmdutil.GetBoolConfig("processor.enable_detection", enableDetection),
-		FilterFile:                  cmdutil.GetStringConfig("processor.filter_file", filterFile),
 		// TLS configuration (enabled by default unless --insecure is set)
 		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   cmdutil.GetStringConfig("processor.tls.cert_file", tlsCertFile),
@@ -498,6 +500,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		VifDropPrivilegesUser: cmdutil.GetStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
 		// TLS keylog configuration (for decryption support)
 		TLSKeylogConfig: tlsKeylogConfig,
+	}
+	if err := applyProcessFilterStoreConfig(&config); err != nil {
+		return err
 	}
 	if err := applyProcessEventTransportConfig(&config); err != nil {
 		return err

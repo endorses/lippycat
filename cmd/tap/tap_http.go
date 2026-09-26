@@ -334,7 +334,6 @@ func runHTTPTap(cmd *cobra.Command, args []string) error {
 		DisplayStats:              true,
 		AutoRotateConfig:          autoRotateConfig,
 		EnableDetection:           true, // Enable protocol detection
-		FilterFile:                cmdutil.GetStringConfig("tap.filter_file", filterFile),
 		TLSEnabled:                !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:               cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),
 		TLSKeyFile:                cmdutil.GetStringConfig("tap.tls.key_file", tlsKeyFile),

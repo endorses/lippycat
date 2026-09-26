@@ -405,7 +405,6 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		CallCompletionMonitorConfig: callCompletionMonitorConfig,
 		CommandExecutorConfig:       commandExecutorConfig,
 		EnableDetection:             cmdutil.GetBoolConfig("tap.enable_detection", enableDetection),
-		FilterFile:                  cmdutil.GetStringConfig("tap.filter_file", filterFile),
 		TLSEnabled:                  !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:                 cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),
 		TLSKeyFile:                  cmdutil.GetStringConfig("tap.tls.key_file", tlsKeyFile),

@@ -286,7 +286,11 @@ func init() {
 	// ============================================================
 	// Filter Persistence (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.PersistentFlags().StringVar(&filterFile, "filter-file", "", "Path to filter persistence file (YAML, default: ~/.config/lippycat/filters.yaml)")
+	TapCmd.PersistentFlags().StringVar(&filterFile, "filter-file", "", "Managed filter store path (default: ~/.config/lippycat/filters.yaml or filters.enc, selected by store mode)")
+	filterStoreFlags = TapCmd.PersistentFlags()
+	if err := cmdutil.RegisterFilterStoreFlags(filterStoreFlags, viper.GetViper(), "tap"); err != nil {
+		panic(err)
+	}
 
 	// ============================================================
 	// TLS Configuration (persistent for voip subcommand)
@@ -387,9 +391,6 @@ func init() {
 
 	// Statistics
 	_ = viper.BindPFlag("tap.display_stats", TapCmd.PersistentFlags().Lookup("stats"))
-
-	// Filter persistence
-	_ = viper.BindPFlag("tap.filter_file", TapCmd.PersistentFlags().Lookup("filter-file"))
 
 	// TLS
 	_ = viper.BindPFlag("tap.tls.cert_file", TapCmd.PersistentFlags().Lookup("tls-cert"))
@@ -559,7 +560,6 @@ func runTapProtocol(cmd *cobra.Command, args []string, protocol protocolcatalog.
 		AutoRotateConfig:          autoRotateConfig,
 		CommandExecutorConfig:     commandExecutorConfig,
 		EnableDetection:           cmdutil.GetBoolConfig("tap.enable_detection", enableDetection),
-		FilterFile:                cmdutil.GetStringConfig("tap.filter_file", filterFile),
 		// TLS configuration (TLS enabled by default unless --insecure is set)
 		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),

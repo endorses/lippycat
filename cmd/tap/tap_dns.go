@@ -246,7 +246,6 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		TunnelingThreshold:        cmdutil.GetFloat64Config("processor.tunneling_threshold", dnsTunnelingThreshold),
 		TunnelingDebounce:         tunnelingDebounceDuration,
 		EnableDetection:           true, // Enable protocol detection for DNS
-		FilterFile:                cmdutil.GetStringConfig("tap.filter_file", filterFile),
 		TLSEnabled:                !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:               cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),
 		TLSKeyFile:                cmdutil.GetStringConfig("tap.tls.key_file", tlsKeyFile),

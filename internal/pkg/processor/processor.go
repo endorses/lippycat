@@ -59,6 +59,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/subscriber"
 	"github.com/endorses/lippycat/internal/pkg/processor/upstream"
 	"github.com/endorses/lippycat/internal/pkg/radius"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"google.golang.org/grpc"
@@ -89,7 +90,9 @@ type Config struct {
 	TunnelingThreshold                 float64                      // DNS tunneling score threshold (default: 0.7)
 	TunnelingDebounce                  time.Duration                // Min time between alerts per domain (default: 5m)
 	EnableDetection                    bool                         // Enable centralized protocol detection
-	FilterFile                         string                       // Path to filter persistence file (YAML)
+	FilterFile                         string                       // Explicit managed snapshot path; empty selects the resolved mode default
+	FilterStoreMode                    filtering.StoreMode
+	FilterStoreKeys                    securestore.KeyConfig // Key references only; rejected for YAML storage
 	// TLS settings
 	TLSEnabled    bool   // Enable TLS encryption for gRPC server
 	TLSCertFile   string // Path to TLS certificate file
@@ -289,22 +292,68 @@ type Processor struct {
 }
 
 // New creates a new processor instance
-func New(config Config) (*Processor, error) {
+func New(config Config) (_ *Processor, constructorErr error) {
 	if config.ListenAddr == "" {
 		return nil, fmt.Errorf("listen address is required")
+	}
+
+	storeConfig, err := filtering.ResolveStoreConfig(filtering.StoreConfig{
+		Mode: config.FilterStoreMode, File: config.FilterFile, Keys: config.FilterStoreKeys,
+	}, config.LIEnabled)
+	if err != nil {
+		return nil, fmt.Errorf("resolve managed filter storage: %w", err)
+	}
+	config.FilterStoreMode, config.FilterFile = storeConfig.Mode, storeConfig.File
+	persistence, err := filtering.NewStorePersistence(storeConfig)
+	if err != nil {
+		return nil, fmt.Errorf("configure managed filter storage: %w", err)
 	}
 
 	p := &Processor{
 		config:         config,
 		callAggregator: voip.NewCallAggregator(),                               // Initialize call aggregator
-		callCorrelator: NewCallCorrelator(),                                    // Initialize call correlator
 		dnsTunneling:   dns.NewTunnelingDetector(dns.DefaultTunnelingConfig()), // Initialize DNS tunneling aggregator
 	}
+	// Initialize stats collector (needs to be created first as it's used by other managers)
+	p.statsCollector = stats.NewCollector(config.ProcessorID, &p.packetsReceived, &p.packetsForwarded)
+
+	// Set upstream processor address if configured (for hierarchy visualization)
+	if config.UpstreamAddr != "" {
+		p.statsCollector.SetUpstreamProcessor(config.UpstreamAddr)
+	}
+
+	// Create callback for stats updates (called when hunter health changes)
+	onStatsChanged := func() {
+		total, healthy, warning, errCount, totalFilters := p.hunterManager.GetHealthStats()
+		p.statsCollector.UpdateHealthStats(total, healthy, warning, errCount, totalFilters)
+	}
+
+	// Initialize hunter manager
+	p.hunterManager = hunter.NewManager(config.ProcessorID, config.MaxHunters, onStatsChanged)
+	// Create callbacks for filter manager
+	onFilterFailure := func(hunterID string, failed bool) {
+		p.hunterManager.UpdateFilterFailure(hunterID, failed)
+	}
+
+	// Initialize filter manager
+	p.filterManager = filtering.NewManager(config.FilterFile, persistence, p.hunterManager, onFilterFailure, nil)
+
+	// Authenticate the complete policy before constructing any capture, listener,
+	// output, or LI runtime. Embedded users receive the same protection as CLI users.
+	filterOwnershipTransferred := false
+	defer func() {
+		if !filterOwnershipTransferred {
+			constructorErr = errors.Join(constructorErr, p.filterManager.Close())
+		}
+	}()
+	if err := p.filterManager.Initialize(); err != nil {
+		return nil, fmt.Errorf("initialize managed filter storage: %w", err)
+	}
+
 	eventQueueSize := config.EventQueueSize
 	if eventQueueSize <= 0 {
 		eventQueueSize = 20000
 	}
-	var err error
 	dropPolicy := ""
 	if config.LogConfig != nil {
 		dropPolicy = config.LogConfig.EventDropPolicy
@@ -571,22 +620,6 @@ func New(config Config) (*Processor, error) {
 		p.tlsKeylogWriter = writer
 	}
 
-	// Initialize stats collector (needs to be created first as it's used by other managers)
-	p.statsCollector = stats.NewCollector(config.ProcessorID, &p.packetsReceived, &p.packetsForwarded)
-
-	// Set upstream processor address if configured (for hierarchy visualization)
-	if config.UpstreamAddr != "" {
-		p.statsCollector.SetUpstreamProcessor(config.UpstreamAddr)
-	}
-
-	// Create callback for stats updates (called when hunter health changes)
-	onStatsChanged := func() {
-		total, healthy, warning, errCount, totalFilters := p.hunterManager.GetHealthStats()
-		p.statsCollector.UpdateHealthStats(total, healthy, warning, errCount, totalFilters)
-	}
-
-	// Initialize hunter manager
-	p.hunterManager = hunter.NewManager(config.ProcessorID, config.MaxHunters, onStatsChanged)
 	p.eventIngress.authorize = func(open *eventsv1.EventIngressOpen) bool {
 		if p.filterProcessingBlocked() {
 			return false
@@ -636,15 +669,6 @@ func New(config Config) (*Processor, error) {
 
 	// Initialize hunter monitor (will be started in Start())
 	p.hunterMonitor = hunter.NewMonitor(p.hunterManager)
-
-	// Create callbacks for filter manager
-	onFilterFailure := func(hunterID string, failed bool) {
-		p.hunterManager.UpdateFilterFailure(hunterID, failed)
-	}
-
-	// Initialize filter manager
-	persistence := filtering.NewYAMLPersistence()
-	p.filterManager = filtering.NewManager(config.FilterFile, persistence, p.hunterManager, onFilterFailure, nil)
 
 	// Create GRPCSource for distributed mode (default packet source)
 	p.packetSource = source.NewGRPCSource(source.GRPCSourceConfig{
@@ -748,9 +772,13 @@ func New(config Config) (*Processor, error) {
 		"downstream_manager", "connected")
 
 	// Initialize LI Manager (no-op if !li build or LI not enabled in config)
+	// The correlator starts a worker, so construct it only after all fallible
+	// startup validation and managed-store authentication have completed.
+	p.callCorrelator = NewCallCorrelator()
 	p.initLIManager()
 
 	eventRuntimeReady = true
+	filterOwnershipTransferred = true
 	return p, nil
 }
 

@@ -292,10 +292,23 @@ Detection results are available via the monitoring API and TUI.
 
 ### Filter Management
 
-- `-f, --filter-file` - Path to filter persistence file (YAML)
-  - Default: `~/.config/lippycat/filters.yaml`
+- `-f, --filter-file` - Managed filter store path; defaults to `~/.config/lippycat/filters.yaml` in YAML mode or `filters.enc` in encrypted mode.
+- `--filter-store-mode=auto|yaml|encrypted` - `auto` uses YAML when LI is disabled and encrypted storage when LI is enabled. LI rejects explicit YAML mode.
+- `--filter-store-key-file` and `--filter-store-key-id` - Active raw 32-byte key file and its ID, required for encrypted storage.
+- `--filter-store-read-key=id=path` - Prior read key, repeatable up to four times. Key IDs must be unique.
 
-Filters are stored in YAML format and automatically distributed to connected hunters.
+Settings live under `processor.filter_store.{mode,key_file,key_id,read_keys}`;
+`processor.filter_file` remains the path override. Precedence is CLI, environment,
+YAML, then defaults. Environment names are `LIPPYCAT_PROCESSOR_FILTER_FILE` and
+`LIPPYCAT_PROCESSOR_FILTER_STORE_{MODE,KEY_FILE,KEY_ID,READ_KEYS}`. `READ_KEYS`
+accepts one CSV record of `id=path` entries; quote entries containing commas.
+YAML `read_keys` is a list. Explicit empty values clear lower-priority settings;
+an empty path/mode selects runtime defaults and an empty read-key list clears prior keys.
+
+Encrypted startup requires an existing initialized store. With the node stopped,
+use `lc migrate filter-store --init` or explicitly migrate an existing YAML file;
+startup never converts plaintext automatically. Keys are rejected in YAML mode.
+Filters are distributed to connected hunters only after the store loads successfully.
 
 **Filter File Format:**
 
@@ -597,7 +610,12 @@ processor:
   write_file: "/var/capture/packets.pcap"
   display_stats: true
   enable_detection: true
-  filter_file: "~/.config/lippycat/filters.yaml"
+  filter_file: "" # Resolve the mode-dependent default after effective LI enablement.
+  filter_store:
+    mode: "auto"
+    key_file: "" # Raw 32-byte key-file reference; required in encrypted mode.
+    key_id: ""
+    read_keys: [] # Prior id=path references; environment equivalent accepts CSV.
 
   # Per-call PCAP writing (VoIP)
   per_call_pcap:

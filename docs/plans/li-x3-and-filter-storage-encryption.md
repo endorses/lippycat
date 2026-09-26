@@ -5,7 +5,8 @@ Drafted: 2026-09-26. Code baseline: `77f7abfe`.
 Status: Implementation in progress. Storage contracts and compatibility fixtures
 are complete. Shared storage now backs X2 recovery and managed filter snapshots;
 transactional filter mutations and offline filter initialization/migration are
-verified. Runtime filter-mode wiring and phases 4–9 remain open.
+verified. Managed filter runtime/CLI mode enforcement is complete; cross-store
+key validation and phases 4–9 remain open.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
 This plan extends the implemented
@@ -267,11 +268,11 @@ Primary areas: `internal/pkg/filtering/{parser,conversion,validation}.go`,
       unknown fields/types, trailing documents, and partial parsing. Preserve every
       supported field, including revisions, disabled state, scoping, descriptions,
       LI ownership, and compound RADIUS criteria.
-- [ ] Retain `YAMLPersistence` and add encrypted persistence behind the same manager
+- [x] Retain `YAMLPersistence` and add encrypted persistence behind the same manager
       contract, with explicit store ownership/lifecycle and durable writes in both.
       Resolve `auto` from runtime LI enablement; reject YAML mode when LI is enabled
       in the processor core before policy application, listeners, or capture/delivery.
-- [ ] In encrypted mode, missing/wrong keys, plaintext, malformed ciphertext, and a
+- [x] In encrypted mode, missing/wrong keys, plaintext, malformed ciphertext, and a
       missing initialized store abort startup. In YAML mode, require no key and preserve
       absent-file first-run behavior. Invalid/unreadable existing files and lock/path
       failures abort startup in both modes. Preserve `lc set filter --file` import and
@@ -297,11 +298,11 @@ Primary areas: `internal/pkg/filtering/{parser,conversion,validation}.go`,
       errors, including phone numbers, invalid IP/CIDR values, and BPF expressions.
       Review LI-derived filter IDs as sensitive identifiers; retain useful redacted
       operation/error classifications.
-- [ ] Exercise concurrent update/delete/subscribe; direct/scoped/LI/local target
+- [x] Exercise concurrent update/delete/subscribe; direct/scoped/LI/local target
       parity; definite and uncertain save faults; local application faults; startup
       rejection; failed-start lock release; and full schema round trips. Capture logs
       with distinctive target markers and assert they are absent.
-- [ ] Test both stores and the complete mode matrix, including unchanged non-LI
+- [x] Test both stores and the complete mode matrix, including unchanged non-LI
       startup without keys, editing YAML while stopped and loading it on restart,
       non-LI opt-in encryption, LI-disabled operation of LI builds, and rejection of
       LI with YAML before any LI selector is persisted. Verify encrypted content can
@@ -496,7 +497,7 @@ before implementation and update all references if an adjustment is necessary.
 | Offline snapshots                   | `lc migrate filter-store` and LI-only `lc migrate li-state`; explicit source/destination and source format, plus an exclusive empty-initialization mode                                                                                                            |
 | Offline journal rewrite             | LI-only `lc migrate li-journal` selecting X2 or X3; version migration/rotation without sending product                                                                                                                                                             |
 
-- [ ] Add a common filter-store config and resolver, outside LI-tagged files.
+- [x] Add a common filter-store config and resolver, outside LI-tagged files.
       Apply tap settings once in `cmd/tap/runtime.go:newTapRuntime` before processor
       construction, covering generic, DNS, TLS, HTTP, email, VoIP, and RADIUS commands.
       Preserve `processor.filter_file`/`tap.filter_file`; bind mode/key options under
@@ -703,3 +704,34 @@ cross-store configured-key independence check remains open until all four runtim
 stores exist. The new storage foundations do not close phase 4 lifecycle
 transactions or phases 5–9; final migration/rotation rehearsal, historical replay,
 performance qualification, and release build matrix are still required.
+
+### Managed filter runtime and CLI integration (2026-09-26)
+
+The processor constructor now resolves storage using effective runtime LI
+configuration and authenticates/loads the complete snapshot before constructing
+capture, outputs, listeners, or LI state. Both CLI and embedded callers reject
+LI with YAML, missing encrypted initialization, wrong keys/formats, malformed
+snapshots, competing ownership, and invalid mode/key combinations. Constructor
+failure releases snapshot ownership; worker creation follows authentication.
+Ordinary non-LI YAML first-run behavior and stopped-node editing/restart remain
+supported. The processor stores its resolved path/mode for subsequent lifecycle
+operations; shutdown closes ownership without rewriting stale policy.
+
+Common flags and explicit environment bindings cover process and every tap
+protocol through centralized runtime application. Precedence is CLI, environment,
+YAML, then constructor/default values; explicit empty values clear lower-priority
+values. Prior keys use repeatable `id=path`, YAML lists, or one CSV environment
+record. Process/tap READMEs describe modes, key provisioning, migration, and
+stopped-node editing. The filter migration CLI was delivered in the preceding
+checkpoint, so mandatory encrypted LI filter startup has an offline setup path.
+
+Verification passed for the full `all li` processor package tree; focused
+processor mutation/store race tests in both `all` and `all li`; cmdutil/process/tap
+race suites in both builds; specialized processor/tap command tests; and vet of
+the processor and affected CLI package trees. The runtime matrix exercises
+persistent round trips, stopped-node edits, ciphertext/plaintext mismatch
+preservation, wrong-key/corruption failures, exclusive ownership, and ownership
+release after subsequent constructor failure. A bounded independent review of
+the initialization seam found and resolved a pre-authentication correlator worker
+leak and a latent tap factory-error ownership leak. Phase 3 is implemented; full
+release qualification remains phase 9.

@@ -4,6 +4,7 @@ package tap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -43,6 +44,9 @@ type tapRuntime struct {
 func newTapRuntime(config processor.Config, effectiveBPF string, protocol protocolcatalog.Spec, hooks tapRuntimeHooks) (*tapRuntime, error) {
 	if protocol.Name == "" || protocol.Analyzer == "" {
 		return nil, fmt.Errorf("protocol catalog specification is incomplete")
+	}
+	if err := applyTapFilterStoreConfig(&config); err != nil {
+		return nil, err
 	}
 	if err := applyTapEventTransportConfig(&config); err != nil {
 		return nil, err
@@ -115,7 +119,7 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 	}
 	appFilter, err := createApplicationFilter(gpuConfig)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, p.Shutdown())
 	}
 	localSource.SetApplicationFilter(appFilter)
 	localTarget.SetApplicationFilter(appFilter)

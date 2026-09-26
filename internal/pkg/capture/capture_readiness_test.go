@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -110,4 +111,26 @@ func TestCaptureReadinessClosesPartialHandleOnSetupError(t *testing.T) {
 	InitWithBufferReady(t.Context(), []pcaptypes.PcapInterface{iface}, "udp", buffer, func(_ []layers.LinkType, err error) { require.Error(t, err) })
 	_, _, err := handle.ReadPacketData()
 	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestCaptureSkipsHandleMetadataAfterCancellation(t *testing.T) {
+	for _, prepared := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unprepared", true: "prepared"}[prepared], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			handle := readinessHandle(t)
+			iface := &mockPcapInterface{name: "cancelled", handle: handle}
+			buffer := NewPacketBuffer(ctx, 1)
+			defer buffer.Close()
+			cancel()
+			handle.Close()
+			var handleMu sync.Mutex
+			// Shutdown won before the reader started. Metadata/filter calls on
+			// this closed handle would race with Close or crash inside libpcap.
+			if prepared {
+				captureFromPreparedHandle(ctx, iface, handle, buffer, nil, nil, nil, &handleMu)
+			} else {
+				captureFromInterface(ctx, iface, "udp", buffer, nil, nil, nil, &handleMu)
+			}
+		})
+	}
 }

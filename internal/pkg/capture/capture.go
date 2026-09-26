@@ -1066,7 +1066,13 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 			"interface", iface.Name())
 		return
 	}
+	handleMu.Lock()
+	if ctx.Err() != nil {
+		handleMu.Unlock()
+		return
+	}
 	filterErr := handle.SetBPFFilter(filter)
+	handleMu.Unlock()
 	if filterErr != nil {
 		// Dynamic BPF can contain LI selectors; neither the expanded filter nor
 		// a compiler error containing it belongs in diagnostics.
@@ -1077,7 +1083,17 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 }
 
 func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterface, handle *pcap.Handle, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter, telemetry *telemetryCollector, handleMu *sync.Mutex, options ...CaptureOptions) {
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	// LinkType does not synchronize with pcap.Close. Snapshot it before reading
+	// packets, under the same lock as the cancellation watcher, and reuse it
+	// after shutdown may have closed the handle.
+	handleMu.Lock()
+	if ctx.Err() != nil {
+		handleMu.Unlock()
+		return
+	}
+	linkType := handle.LinkType()
+	handleMu.Unlock()
+	packetSource := gopacket.NewPacketSource(handle, linkType)
 	offlineInput := false
 	if source, ok := iface.(interface{ IsOffline() bool }); ok {
 		offlineInput = source.IsOffline()
@@ -1137,6 +1153,10 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 				frags := fragmentsReceived.Load()
 				reassembled := packetsReassembled.Load()
 				handleMu.Lock()
+				if statsCtx.Err() != nil {
+					handleMu.Unlock()
+					return
+				}
 				pcapStats, statsErr := handle.Stats()
 				handleMu.Unlock()
 				if statsErr == nil {
@@ -1225,7 +1245,6 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 				return
 			}
 
-			linkType := handle.LinkType()
 			if offlineInput && (lastOfflineSweep.IsZero() || packet.Metadata().Timestamp.Sub(lastOfflineSweep) >= defragmenter.config.SweepInterval) {
 				defragmenter.DiscardOlderThan(packet.Metadata().Timestamp.Add(-defragmenter.config.StaleAge))
 				lastOfflineSweep = packet.Metadata().Timestamp
@@ -1290,7 +1309,7 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 							"payload_len", len(reassembledIP.Payload))
 
 						// Rebuild packet from reassembled IP layer
-						packet = rebuildReassembledPacket(packet, reassembledIP, handle.LinkType())
+						packet = rebuildReassembledPacket(packet, reassembledIP, linkType)
 					}
 				}
 
@@ -1327,7 +1346,7 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 								"dst", reassembledIP6.DstIP,
 								"payload_len", len(reassembledIP6.Payload))
 
-							packet = rebuildReassembledIPv6Packet(packet, reassembledIP6, handle.LinkType())
+							packet = rebuildReassembledIPv6Packet(packet, reassembledIP6, linkType)
 						}
 					}
 				}

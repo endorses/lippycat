@@ -340,3 +340,43 @@ func TestDispatcherRejectsTypedNilEvents(t *testing.T) {
 	}
 	require.NoError(t, d.Close(context.Background()))
 }
+
+type terminalDispatcherError struct{}
+
+func (terminalDispatcherError) Error() string           { return "terminal sink failure" }
+func (terminalDispatcherError) TerminalSinkError() bool { return true }
+
+type blockingLogWriter struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (w *blockingLogWriter) Write(data []byte) (int, error) {
+	close(w.entered)
+	<-w.release
+	return len(data), nil
+}
+
+func TestDispatcherTerminalFailureRejectsAdmissionBeforeLogging(t *testing.T) {
+	writer := &blockingLogWriter{entered: make(chan struct{}), release: make(chan struct{})}
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(writer.release) }) })
+	d, err := NewDispatcher(Config{
+		QueueSize: 8, SinkQueueSize: 8,
+		Logger: slog.New(slog.NewTextHandler(writer, nil)),
+	})
+	require.NoError(t, err)
+	require.NoError(t, d.Register(&testSink{handle: func(Event) error { return terminalDispatcherError{} }}))
+	require.NoError(t, d.Start(context.Background()))
+	require.True(t, d.Enqueue(NewDNSEvent(Envelope{})))
+	select {
+	case <-writer.entered:
+	case <-time.After(time.Second):
+		t.Fatal("sink failure was not logged")
+	}
+	require.Equal(t, uint64(1), d.Stats().SinkErrors)
+	require.False(t, d.Enqueue(NewDNSEvent(Envelope{})))
+	require.False(t, d.EnqueueBatch([]Event{NewDNSEvent(Envelope{})}))
+	release.Do(func() { close(writer.release) })
+	require.NoError(t, d.Close(context.Background()))
+}

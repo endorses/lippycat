@@ -412,8 +412,9 @@ func TestDispatcherStopsForwardingAfterFatalSpoolErrorAndRetainsQueuedRanges(t *
 	first := producer.Assign(events.NewDNSEvent(envelope))
 	second := producer.Assign(events.NewDNSEvent(envelope))
 	third := producer.Assign(events.NewDNSEvent(envelope))
-	require.True(t, dispatcher.Enqueue(first))
-	require.True(t, dispatcher.Enqueue(second))
+	// Admit both events together so the first terminal failure cannot race
+	// with admission of the queued event whose loss coverage we verify.
+	require.True(t, dispatcher.EnqueueBatch([]events.Event{first, second}))
 	require.Eventually(t, func() bool { return dispatcher.Stats().SinkErrors == 1 }, time.Second, time.Millisecond)
 	require.False(t, dispatcher.Enqueue(third), "terminal forwarding failure must stop new dispatcher admission")
 	require.ErrorIs(t, dispatcher.Stop(context.Background()), eventspool.ErrClosed)

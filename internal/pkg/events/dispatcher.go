@@ -361,13 +361,16 @@ func (d *Dispatcher) runSink(reg *registration) {
 			err = reg.sink.HandleEvent(d.ctx, item.event)
 		}
 		if err != nil {
-			d.sinkErrors.Add(1)
-			d.cfg.Logger.Error("normalized event sink failed", "kind", item.event.Kind(), "error", err)
 			var terminal terminalSinkError
 			if errors.As(err, &terminal) && terminal.TerminalSinkError() {
 				d.terminal.Store(true)
 				failed = true
 			}
+			// Publish the admission boundary before reporting the failure. A
+			// logger may block, and observers of SinkErrors must already see
+			// terminal failures reject new work.
+			d.sinkErrors.Add(1)
+			d.cfg.Logger.Error("normalized event sink failed", "kind", item.event.Kind(), "error", err)
 		}
 	}
 }

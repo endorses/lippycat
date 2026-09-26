@@ -1,23 +1,20 @@
-# Proposed immutable LI journal batches
+# Historical immutable LI journal batch prototypes
 
-Status: **bounded framing/purpose 9, batch-before-head ordering, grouped
-publication and head-container exchange reviewed for benchmark-only kernels;
-all three kernels fail the frozen 25 ms median gate; no production layout selected**.
-This supplements, and does not relax,
-[the encrypted-storage contract](li-encrypted-storage.md).
-The [disk calibration](../research/li-x3-storage-benchmarks.md) rejects the
-unchanged per-record protocol on the measured platform. It does not prove this
-alternative meets throughput or latency. The conservative batch-plus-head kernel
-has now failed the 25 ms callback-median gate, as have the grouped and
-head-container alternatives below. The full checkpoint/control runtime still requires review; select a
-production layout only after comparative measurement.
+Status: **historical benchmark-only prototype designs**. The user withdrew the
+agent-imposed performance thresholds and qualification campaign. Measurements
+are observations, not acceptance gates or completion blockers. Further
+measurement is optional and requires a user task or deployment objective.
+Correctness, security and configured storage/resource limits remain in force.
+Production fixed-segment journals were implemented in `8aa35687`; the
+[production layout](li-x3-journal-layout.md), not these immutable prototypes,
+describes that implementation.
 
-A separate [bounded preallocated segment design](li-x3-segment-layout.md) now
-specifies a possible next kernel. Root reviewed its narrow helper/codec/recovery
-implementation and test scope, then separately approved the 2/200 ×40 probe.
-Its small callback-floor gate passes; the full workload and production layout
-remain unqualified. The failed immutable measurements do not qualify that
-alternative.
+This document retains the reviewed framing, ownership, durability and recovery
+contracts for three experiments: separate immutable batch/head publication,
+grouped publication, and head-container exchange. Their measured behavior is
+recorded in the [measurement report](../research/li-x3-storage-benchmarks.md).
+The later [fixed-segment kernel](li-x3-segment-layout.md) was a separate
+experiment. Neither document is an active plan for more prototype work.
 
 ## Scope and fixed bounds
 
@@ -48,10 +45,9 @@ that preserves store UUID, sequence history, raw-key usage and replay policy.
 | Checkpoint page plaintext                    | At most 1 MiB; at most 256 child descriptors; maximum tree depth 4                                                 |
 | Commit transactions after checkpoint         | At most 4,096; start the next checkpoint by 1,024 transactions                                                     |
 
-The accumulation timer is not permission to delay ready work while a synchronous
-write is in progress. Record actual queue wait and callback latency; time spent
-waiting for the worker still counts against the qualification thresholds. A
-larger pending queue cannot be used to hide a persist-rate deficit.
+The prototype uses a 10 ms accumulation timer. Recorded callback ages include
+worker queueing, with the timestamp-model limitations described in the measurement
+report. Pending queue capacity does not establish a sustainable persistence rate.
 
 This prototype only admits products that fit one bounded batch. Oversized input
 receives a definite size rejection before ownership transfer. It must not
@@ -59,8 +55,8 @@ silently reduce the existing X2 accepted size: keep the legacy X2 reader/writer
 path for larger compatible objects until an independently specified large-object
 path exists. The final supported X3 maximum PDU size must be explicit in config
 validation, documentation and tests; the 64 MiB parser ceiling alone does not
-promise admission into a 1 MiB batch. The initial comparison uses the frozen
-RTP payload mix, all of which fits.
+promise admission into a 1 MiB batch. The historical comparison used the
+report's synthetic RTP payload mix, all of which fits.
 
 ## Names and framing
 
@@ -106,7 +102,7 @@ data growth as a control merely because purpose 9 can represent both.
 Metadata bindings are `batch/<batch UUID>` and checkpoint pages use
 `index/<checkpoint UUID>`, always under the independently authenticated journal
 UUID. Product frames retain purpose 3/4 and the canonical decimal record-ID
-binding. Call and revocation frames retain purposes 7/8 and their exact frozen
+binding. Call and revocation frames retain purposes 7/8 and their exact canonical
 composite bindings. Sequence identities remain interface-specific; metadata
 grouping does not merge contexts or destinations.
 
@@ -163,21 +159,34 @@ admission IDs also bound revocations over writes still pending at their boundary
 
 ## Acknowledgement and error ordering
 
-The prototype must execute the whole sequence, including head and control I/O:
+The historical baseline specifies this transaction order, including head and
+control I/O.
 
-- [ ] Reserve the product, metadata, future terminal-control, index and pending-memory allocations before returning admission success. Clone/retain immutable PDU ownership once; assign the exact record/admission identity.
-- [ ] Establish any required call-open or other dependent control durably. Product metadata refers to its exact identity/version/digest, not only a call string.
-- [ ] Build and seal the bounded product/index frames using real durable usage reservations. Coalesce sequence updates only by the exact full context and the existing wrap-aware ordering rule.
-- [ ] `Create` the immutable batch through the descriptor-owned private directory: full write, file sync, publication, directory sync. A successful batch publication alone does not acknowledge any record.
-- [ ] Under commit serialization, verify the expected old head revision and any controls required by the transaction, then atomically replace and sync `.head` to select the new transaction. All required sequence updates and index metadata are already inside the selected authenticated batch.
-- [ ] Only after the head is definitely committed, invoke each admission callback exactly once. Recheck the in-memory revocation/expiry gate before eligibility publication. A successful persistence callback alone grants no transport claim.
+Reserve product, metadata, future terminal-control, index and pending-memory
+allocations before admission success. Clone or retain immutable PDU ownership
+once and assign the exact record/admission identity. Establish required call-open
+or other dependent controls durably; product metadata references their exact
+identity, version and digest.
+
+Build and seal bounded product/index frames using real durable usage reservations.
+Coalesce sequence updates only by exact full context and the existing wrap-aware
+ordering rule. Create the immutable batch through the descriptor-owned directory:
+full write, file sync, publication and directory sync. Batch publication alone
+acknowledges no record.
+
+Under commit serialization, verify the old head revision and required controls,
+then atomically replace and sync `.head` to select the transaction. Its sequence
+updates and index metadata are already inside the authenticated batch. Only
+then invoke each admission callback exactly once. Recheck the in-memory
+revocation/expiry gate before eligibility publication; a successful persistence
+callback alone grants no transport claim.
 
 This conservative baseline has a batch publication and a head publication. Its
 real sync costs must be included in the comparison; do not benchmark only the
 first write. A descriptor-safe grouped publication helper could reduce redundant
 directory syncs, but it is a separately reviewed optimization: all prerequisite
 files must be synced and installed before a head can reference them. Its crash
-matrix and typed outcomes must be proven before measuring that optimization.
+matrix and typed outcomes are part of that helper's correctness contract.
 
 Before batch publication, definite failure yields `NotCommitted`. If the batch
 exists but the head is definitely unchanged, no callback succeeds and no record
@@ -229,8 +238,7 @@ administrative owner has completed the matching obligation.
 
 The commit worker checks reserved control work between data batches, and does
 not wait for an entire data backlog to drain. It cannot preempt an in-flight OS
-sync; measure the actual p99/max control latency under both traffic and full data
-capacity. The final implementation must fault on control-capacity exhaustion
+sync. The protocol must fault on control-capacity exhaustion
 rather than borrow X2 space or report successful revocation.
 
 Transport completion creates a bounded terminal delta and removes in-memory
@@ -240,16 +248,16 @@ neither local transport write nor terminal bookkeeping proves MDF receipt.
 
 An independent indexed deadline sweeper uses original absolute deadlines and
 runs even when disconnected or awaiting approval. Check expiry again immediately
-before every transport claim. Deadline notice (≤1 s) and physical reclaim (≤5 s
-on healthy storage) are separate measured obligations. Cancellation and expiry
-never refresh admission/capture timestamps or recompute a later deadline.
+before every transport claim. Claim suppression and physical reclamation are
+separate operations. Cancellation and expiry never refresh admission/capture
+timestamps or recompute a later deadline.
 
 Fully dead batches are reclaimable after terminal controls are committed.
 Bulk cleanup may unlink at most 128 validated owned files before one directory
 sync; failure preserves a durable GC intent and typed uncertain outcome. This
 requires an explicitly reviewed descriptor-based helper, not pathname deletion
-or omission of the final sync. Measure bulk deadline expiry rather than assuming
-that serial per-file sync can reclaim thousands of batches within five seconds.
+or omission of the final sync. Bulk deadline expiry can require many such
+operations; the protocol gives no elapsed-time guarantee for their completion.
 Partially live batches are incrementally rewritten, at most one 2 MiB batch per
 rewrite unit: verify original frames, retain the same IDs/content/deadlines,
 publish the replacement, commit the location replacement in the head, then unlink
@@ -265,8 +273,7 @@ pause in producer admission. Charge pinned/COW metadata and every new checkpoint
 page to explicit memory/scratch reservations. Publish the new root through the
 head only after every referenced page is synced. If the operation cannot finish
 within its reserved resources and transaction bound, stop data admission; do not
-drop deltas or grow an unbounded log. Control capacity remains available. Tests
-and measurements must establish progress under the declared primary workload.
+drop deltas or grow an unbounded log. Control capacity remains available.
 
 After checkpoint publication, transactions older than the checkpoint may be
 removed only when no live product/control frame still occupies them. Checkpoint
@@ -283,31 +290,22 @@ Count directory blocks, usage/lock files, every index/transaction/control file,
 temporary, conservative pending allocation and simultaneous old/new copies.
 Reclamation must not rely on a destination borrowing another's reserved share.
 
-## Prototype comparison and acceptance
+## Historical comparison scope
 
-The benchmark-only adapter needs admission callbacks, independent disk readers,
+The intended adapter included admission callbacks, independent disk readers,
 completion, flush/close, held recovery enumeration, exact control publication,
 claim gating, expiry sweeping, capacity accounting and fault injection. The
-comparison uses identical synthetic records, readers, offered pacing and budgets.
-Per-copy encryption, usage reservations, metadata decoding, head publication,
-terminal deltas and reclamation are part of measured work. Exclude TLS only in
-the explicitly labeled storage comparison; restore real transport for the final
-system qualification.
+implemented small kernels covered only the subsets stated in the measurement
+report. Their timings included per-copy encryption, real usage reservations,
+index construction and head publication, while omitting TLS and the unimplemented
+runtime work. A small publication probe does not establish complete client cost.
 
-Run a small batch calibration before the full workload. If its measured callback
-latency fails, report that failure rather than assuming that higher throughput
-qualifies the layout. In particular, immutable publication plus head publication
-still has meaningful sync latency on the measured device; this design is not a
-promise that batching alone will meet the 25 ms median.
+X2 and X3 retain separate workers, controls and capacity even when their storage
+shares a physical device. The old comparison proposal used concurrent X2 traffic
+and an X3 outage/recovery scenario; it is historical context, not a pending test
+campaign or an elapsed-time guarantee.
 
-X2 receives its own worker and controls, but both journals contend for the same
-physical device. Run the frozen 100-product/s X2 workload alone and concurrently
-with X3 outage recovery, expiry, compaction and control pressure. Require X2 p99
-≤2× isolated and ≤100 ms, with no rejection from X3 capacity. Report all frozen
-throughput, durability, admission, control, recovery, disk and memory thresholds;
-the 4-destination 60-second overload remains an explicit saturation case.
-
-## Reviewed grouped publication experiment: failed latency gate
+## Reviewed grouped publication experiment
 
 The measured kernel performs four synchronous durability calls per transaction:
 batch file sync, batch parent sync, head file sync, head parent sync. Its
@@ -317,7 +315,8 @@ while publishing the batch and head through one descriptor-owned operation.
 It is implemented only as a generic securestore helper plus a benchmark kernel;
 the actual X2 journal and production X3 behavior do not use it. The ext4 probe
 reported exact medians of 27.071412 ms for 2 records and 36.230369 ms for 200
-records, including the latter's real usage-reservation renewal. Both fail.
+records, including the latter's real usage-reservation renewal. The report
+preserves these observations and the modeled-arrival timestamp limitation.
 
 The helper accepts exactly one immutable prerequisite batch and one
 replacement head in the same already locked private directory. It is not a
@@ -386,7 +385,8 @@ with independently durable usage reservations before calling this generic byte
 writer. The helper enforces fixed byte/path/inode limits; it is not the journal's
 quota manager and performs no encryption. The probe is separately bounded to 40
 batches, at most 81 MiB of retained/pending artifacts, with 1 GiB free required
-before opening a store. Production capacity and reclaim remain unimplemented.
+before opening a store. This prototype does not implement production capacity
+and reclamation handling.
 
 The benchmark's exact synthetic schema remains distinct from the proposed
 production schema. Each purpose-4 product contains `LRB2`, a 4-byte big-endian JSON
@@ -426,17 +426,15 @@ ledger. Close the usage reservation operation before preparing a grouped
 publication to avoid holding a directory mutex while recursively writing that
 same directory. Neither parallel file sync nor retry refunds a reservation.
 
-The optimistic latency model is one parallel file-sync round followed by one
-parent-sync round, plus encryption and average accumulation delay. The observed
-approximately 9 ms individual sync scale suggests possible but narrow headroom;
-it is not measured evidence. Serializing both file syncs would leave three
-serial sync rounds and likely still miss 25 ms. Measure the actual grouped
-kernel first, including reservation-renewal batches and p50/p99/max. That probe
-has now failed; the full workload remains deferred. The checked harness reports
-both histogram upper bounds and exact nearest-rank callback p50/p99 from at most
-8,000 retained durations (64 KiB). It does not hide head cost or weaken thresholds.
+The original latency hypothesis was one parallel file-sync round followed by
+one parent-sync round, plus encryption and modeled average accumulation age.
+Serializing both file syncs would instead require three sequential sync rounds.
+The measured grouped probe includes actual reservation-renewal batches and head
+I/O. Its harness reports histogram upper bounds and exact nearest-rank callback
+p50/p99 from at most 8,000 retained durations (64 KiB), with the timestamp erratum
+recorded in the measurement report.
 
-Completion and checkpoint costs cannot disappear from later qualification.
+This prototype does not measure completion and checkpoint costs.
 Completion should commit bounded terminal deltas in the same grouped protocol,
 with immediate memory claim suppression but no physical data deletion until the
 terminal head is durable. Coalesce compatible terminal IDs up to the existing
@@ -445,24 +443,22 @@ their own reservations; arbitrary waiting for a large completion batch is not
 allowed. Batched unlink plus a directory sync amortizes reclaim, while a durable
 GC intent retains restart authority. Incremental checkpoints still write and sync
 all newly referenced pages before their root enters a committed head. They may
-use reviewed bounded groups, but require the full additional scratch reservation
-and must be included in the 15-minute, expiry and X2-contention workloads.
+use reviewed bounded groups, but require the full additional scratch reservation.
+These protocol costs are absent from the small measurements reported here.
 
 ## Reviewed head-container exchange experiment
 
-This section specifies the root-reviewed small benchmark experiment. Only its
-bounded helper, codec, recovery checks and calibration are authorized. It does not select a production
-layout, change the logical X3 record/control schemas, or resolve the production
-checkpoint/compaction design. Existing X2 directories are never opened through
-this format. The experiment uses a fresh synthetic key, authenticated usage
-ledger and private directory, and the same 2/200-record, 40-transaction, 10 ms
-accumulation probes before considering any full workload.
+This section records the reviewed small benchmark experiment: its bounded
+helper, codec, recovery checks and calibration. It did not become the production
+layout or implement the production checkpoint/compaction design. Existing X2
+directories are never opened through this format. The experiment used a fresh
+synthetic key, authenticated usage ledger and private directory, and the same
+2/200-record, 40-transaction, 10 ms accumulation probes.
 
 Implementation and calibration are complete. Exact callback medians were
 28.607633 ms (2 records) and 29.515850 ms (200 records), including the latter's
-real usage-reservation renewal. Both fail the unchanged 25 ms gate. No further
-layout, checkpoint or full-workload implementation is authorized by this result;
-see the [measurement report](../research/li-x3-storage-benchmarks.md#head-container-exchange-kernel-failed-latency-gate).
+real usage-reservation renewal. These are modeled-arrival observations with the
+limitations in the [measurement report](../research/li-x3-storage-benchmarks.md#head-container-exchange-kernel-measurements).
 
 ### Container names, framing and authentication
 
@@ -681,7 +677,7 @@ owner obligation, unchanged by this storage experiment.
 
 The approved small implementation deliberately stops after read-only stage
 classification. It does not implement either offline reconciliation mutation;
-those remain phase-8 work. Both complete candidate/displaced classifications and
+those operations remain outside this historical prototype. Both complete candidate/displaced classifications and
 unclassified partial objects preserve all evidence and prevent startup. This
 deferral does not permit normal runtime cleanup or incomplete-chain recovery.
 
@@ -719,16 +715,13 @@ at least 1 GiB available on the declared ext4 volume before creating the private
 disposable store. Never accept production directories, keys or capture payloads.
 Clean completed disposable stores after preserving the requested measurements.
 
-Measure the same 10 ms accumulation and real per-record callbacks with exact
-p50/p99/max, real product/index/head encryption, usage renewal and the full
-single-file-sync/exchange/archive/directory-sync operation inside the interval.
-Root/control initialization is separately reported outside it, as in both prior
-probes. Measure recovery by fully authenticating the same retained chain and
-report allocation, reservation counters and sequential copies/s. Preserve exact
-captured output. The existing frozen p50 ≤25 ms remains the first feasibility
-gate; report failure and stop before checkpoint/full workload work if it fails.
-Passing that small gate would still not establish 20,000 copies/s, controls under
-pressure, bounded reclaim, X2 contention or complete production qualification.
+The recorded measurements include 10 ms accumulation, per-record callbacks,
+product/index/head encryption, usage renewal and the full file-sync/exchange/
+archive/directory-sync operation. Root/control initialization is reported
+separately. Recovery authenticates the same retained chain; the report preserves
+allocation, reservation counters and sequential copies/s. These small probes do
+not establish sustained-arrival, control-pressure, reclamation or X2-contention
+performance.
 
 ### Required fault, crash, cleanup and lock matrix
 
@@ -759,22 +752,18 @@ wrong predecessor digest, reused UUID, record/revision overflow, wrong store,
 wrong purpose, trailing bytes and corrupt embedded frames. Error output must
 exclude plaintext, keys and synthetic payload markers.
 
-A faster declared durable platform remains an alternative if the kernel floor
-is infeasible here. Neither platform selection nor this experiment permits
-omitting head durability or relaxing the frozen workload.
+Neither platform selection nor performance tuning permits omission of head
+durability or the ownership and recovery checks above.
 
-Review/implementation gates:
+Historical implementation record:
 
 - [x] Review bounded framing, purpose 9, baseline batch/head ordering and stopped-store orphan behavior for the small kernel.
-- [x] Implement and measure the real encrypted batch/head kernel with owner-boundary fault checks; record its failed median gate.
-- [x] Review the grouped operation, parallel file-sync ownership and interrupted shared-directory-sync recovery semantics.
-- [x] Implement and measure the reviewed grouped kernel; record its failed median gate.
-- [x] Specify the exact benchmark-only head-container framing, root, exchange, staging reconciliation, capacity and failure matrix.
-- [x] Root review and approve this exact head-container exchange experiment before implementation.
-- [x] Implement only the approved narrow helper/kernel and the fault/lock/recovery matrix; keep production adoption unchanged; leave explicit offline reconciliation deferred.
-- [x] Measure the 2/200-record callback floor with usage renewal and preserve exact output; record failure and stop implementation at the frozen median gate.
-- [ ] Approve full production metadata/checkpoint/control schemas and complete bounded codecs after the kernel gate demonstrates headroom.
-- [ ] Prove callbacks, control priority and restart behavior at every publication boundary, including corrupt committed batches.
-- [ ] Measure checkpoint/compaction progress and the original-deadline reclaim bound under full data capacity.
-- [ ] Compare measured results with the existing-protocol calibration and then the complete frozen workload.
-- [ ] Select/adopt a production layout only after review and measured qualification; repeat after final lifecycle integration.
+- [x] Implement and measure the encrypted batch/head kernel with owner-boundary fault checks.
+- [x] Review and measure grouped publication with parallel file-sync ownership and interrupted shared-directory-sync recovery checks.
+- [x] Specify and implement the head-container framing, root, exchange, staging classification, capacity and failure matrix.
+- [x] Preserve the 2/200-record measurements, usage-renewal observations and exact raw output.
+
+The immutable prototypes did not implement full production checkpoints,
+compaction or explicit offline stage reconciliation. These are scope limitations
+of historical experiments, not pending tasks for production completion. The
+production fixed-segment implementation is linked at the top of this document.

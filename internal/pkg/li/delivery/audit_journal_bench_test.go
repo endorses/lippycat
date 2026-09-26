@@ -168,7 +168,7 @@ func BenchmarkAuditProductionJournalOutage(b *testing.B) {
 	cfg.StateIncarnation, cfg.X3MaxAge = uuid.New(), 10*time.Minute
 	cfg.X3SpoolDir, cfg.X3SpoolKeyFile = filepath.Join(root, "x3"), filepath.Join(root, "x3.key")
 	cfg.X3SpoolKeyID, cfg.X3SpoolMaxBytes = "benchmark-x3", 4<<30
-	// The frozen 100-call/two-destination/60s workload retains 1.2m
+	// A 100-call/two-destination/60s synthetic workload retains 1.2m
 	// destination copies. Its conservative terminal-credit reserve requires
 	// 24GiB of configured capacity even though actual allocation is measured
 	// separately. A short probe keeps the smaller original budget.

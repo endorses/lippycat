@@ -1,12 +1,17 @@
-# Proposed bounded LI segment durability kernel
+# Historical bounded LI segment durability kernel
 
-Status: **root-reviewed helper/codec/recovery and narrow 2/200 ×40 measurement
-implemented; the small callback-floor gate passes; production layout remains
-unselected**. This proposes one small alternative after all three
-[immutable batch/head kernels](li-x3-batch-layout.md) failed the unchanged
-25 ms callback-median gate on the [declared ext4 device](../research/li-x3-storage-benchmarks.md).
-It supplements the [encrypted-storage contract](li-encrypted-storage.md) without
-selecting a production X3 layout, changing X2, or completing phase 5.
+Status: **historical fixed-segment benchmark kernel**. The user withdrew the
+agent-imposed performance thresholds and qualification campaign. Measurements
+are observations, not acceptance gates or completion blockers. Further
+measurement is optional and requires a user task or deployment objective.
+Correctness, security and configured storage/resource limits remain in force.
+Production fixed-segment journals were implemented in `8aa35687`; see the
+[production layout](li-x3-journal-layout.md).
+
+This document retains the reviewed helper, codec, recovery and bounded 2/200 ×40
+probe contract. It followed the [immutable kernel experiments](li-x3-batch-layout.md)
+on the [declared ext4 device](../research/li-x3-storage-benchmarks.md). Its limited
+prototype scope is not an active plan or the full production format.
 
 ## Durability premise and scope
 
@@ -27,9 +32,9 @@ heads. [Linux ext4 journal documentation](https://cdn.kernel.org/doc/html/latest
 **Original performance hypothesis:** after fully initializing extents, one
 `fdatasync` for an appended batch and its head might cost less than the immutable
 file-plus-directory protocols. Metadata still needed for retrieval must be
-flushed, and the actual device may offer insufficient headroom. Only the reviewed
-2/200-record, 40-transaction probe can test that inference. Do not change drive
-cache settings, filesystem mount options, flush behavior or any frozen threshold.
+flushed. The reviewed 2/200-record, 40-transaction probe measured that hypothesis
+on one shared host. The experiment did not change drive-cache settings,
+filesystem mount options or required flush behavior.
 
 Root's separate raw I/O diagnostic on the same ext4 volume used one fully
 zero-written/synced 64 MiB private file, then 50 iterations each of 80 KiB data
@@ -38,7 +43,7 @@ plus an alternate 4 KiB dummy head and one sync. Exact fsync p50/max were
 fsync first and fdatasync second, without randomized ordering or repeated trials;
 actual file allocation was 67,108,864 bytes. It omitted encryption, usage,
 authenticated heads/recovery, accumulation, callbacks and the workload. This is
-support for investigating the I/O floor, **not protocol or qualification evidence**.
+support for investigating the I/O floor, **not complete protocol evidence**.
 The retained artifacts are `/tmp/li-segment-sync-floor.py` and
 `/tmp/li-segment-sync-floor.log`; the private directory was removed. The encrypted
 kernel's separate measured evidence appears below; the raw diagnostic does not
@@ -47,8 +52,8 @@ substitute for it.
 The kernel uses one fresh private disposable store, synthetic raw key and source
 PDUs, actual durable call controls, and the existing independently durable usage
 ledger. It has no production admission queue, transport, expiry, revocation,
-rotation, checkpoint, compaction or offline repair runtime. Success in a small
-probe would not qualify the required 20,000 copies/s workload.
+rotation, checkpoint, compaction or offline repair runtime. Its small probes do
+not establish sustained-load behavior.
 
 ## Fixed file, names and ownership
 
@@ -244,8 +249,8 @@ replace a missing/corrupt segment automatically.
 
 The full initialized file is charged from bootstrap onward. Setup intentionally
 pays extent conversion before admission; if an implementation chooses otherwise,
-it is a different experiment that must explicitly measure conversion costs and
-obtain review rather than claim this probe's premise.
+its costs would include extent conversion and it could not claim this probe's
+initialized-extent premise.
 
 ## One data/head write and one durability boundary
 
@@ -349,7 +354,8 @@ then `fdatasync` the same fixed file and verify zero tail. No head changes,
 truncation, hole punching, implicit generation reset or nonce reuse is permitted.
 A cleanup sync error leaves the store stopped; subsequent inspection starts from
 both heads again. Reconciliation cannot issue historical callbacks. Any invalid
-head or selected data prohibits this cleanup entirely. This explicit operation is deferred by the initial implementation approval.
+head or selected data prohibits this cleanup entirely. The historical kernel
+does not implement this explicit mutation.
 
 ## Resource and measurement bounds
 
@@ -365,10 +371,10 @@ for durability claims.
 Codec/read memory is bounded by a 16 MiB reservation including simultaneous PDU,
 frame, metadata, batch, padded-write and slot buffers; zero-init/tail/hash I/O
 uses buffers no larger than 64 KiB. Preserve at most 8,000 exact callback durations
-(64 KiB). Report process heap/RSS samples with their sampling limitation; they do
-not replace the final production memory accounting or 15-minute soak. Full tail
-validation reads a bounded 32 MiB file and is part of measured reopen time; the
-future million-record lazy startup gate remains unqualified.
+(64 KiB). The reported process heap/RSS samples have sampling limitations and do
+not replace production memory accounting. Full tail validation reads a bounded
+32 MiB file and is part of measured reopen time; this is not a million-record
+startup measurement.
 
 The reservation covers conservatively overlapping live codec objects, rather
 than merely the on-disk ciphertext length:
@@ -397,24 +403,18 @@ at most 128 UUIDs. Full zero initialization streams 64 KiB writes.
 
 This is a live-object reservation derived from enforced codec limits, not a Go
 heap/RSS cap or an arena allocator. Unreachable objects awaiting collection,
-runtime/allocator overhead and the rest of the process require the separately
-reported heap/RSS observations and the eventual production memory gate. The
-benchmark memory samples retain those limitations.
+runtime/allocator overhead and the rest of the process are outside that
+reservation. The separately reported heap/RSS samples retain those limitations.
 
-After syscall/codec/authority/fault tests pass and root authorizes measurement,
-run only the same 2- and 200-record batches, 40 transactions each, 10 ms real
-accumulation and synthetic payload mix on the declared ext4 device. Product,
-index and head sealing, actual usage renewal, data/head writes, `fdatasync` and
-once-per-record callbacks stay inside timing. Root/control/zero initialization
-is outside callbacks but separately reported. Use original encoded-byte oracles,
-exact p50/p99/max, actual allocated/reserved bytes, fixed-size invariance,
-reservation counters, read/authentication recovery time and sampled CPU/memory.
-
-The first gate remains callback p50 ≤25 ms (p99 ≤100 ms, max ≤1 s); preserve raw
-output and stop if it fails. A pass authorizes no automatic workload escalation:
-throughput, completion, control priority, capacity, recovery, rotation/compaction,
-X2 contention and eventual full integration still need separate review and
-measurement. Keep the machine's shared-load caveat and all setup costs visible.
+After syscall/codec/authority/fault tests, the recorded measurements used 2- and
+200-record batches, 40 transactions each, 10 ms real accumulation and the
+synthetic payload mix on the declared ext4 device. Product, index and head
+sealing, actual usage renewal, data/head writes, `fdatasync` and once-per-record
+callbacks stayed inside timing. Root/control/zero initialization was outside
+callbacks and reported separately. The report preserves original encoded-byte
+oracles, exact p50/p99/max, actual allocated/reserved bytes, fixed-size invariance,
+reservation counters, read/authentication recovery time and sampled CPU/memory,
+along with the machine's shared-load caveat.
 
 ## Required fault and corruption matrix
 
@@ -446,7 +446,7 @@ Tests must assert preservation of earlier committed product bytes, no silent
 fallback, fixed file size/allocation, fault-latched no-continuation behavior and
 exact callback counts. Error text must omit keys, plaintext and payload markers.
 
-## Implemented test gate and API
+## Implemented tests and API
 
 The Linux-only helper exposes `Dir.InitializeFixedSegment(stage, name, bootstrap)`,
 `Dir.OpenFixedSegment(name)`, and `FixedSegment.ReadAt`, `Activate`, `Commit`,
@@ -467,20 +467,20 @@ close error preserves that established outcome. The benchmark callback receives
 the transaction outcome exactly once per supplied product, including a committed
 cleanup error; that error stops further admissions.
 
-The focused race gate passes the implemented syscall/lock/framing/two-head/tail
+The focused race tests passed the implemented syscall/lock/framing/two-head/tail
 matrix, including child death at data/head/sync boundaries, cross-helper
 exclusion, concurrent owner preparation, authenticated lower-boundary mismatch,
 selected corruption, dirty-tail reopen without mutation, malformed authenticated
 PDU preflight, and committed-error callback preservation. Deferred tail repair is
 not implemented or tested as a mutation. The exact command and retained logs are
-in the [measurement report](../research/li-x3-storage-benchmarks.md#fixed-segment-implementation-gate-no-measurement).
+in the [measurement report](../research/li-x3-storage-benchmarks.md#fixed-segment-implementation-checks).
 Tests run on disposable test directories and do not constitute ext4 measurements
-or power-loss qualification. The crash matrix composes helper-process death with
+or power-loss evidence. The crash matrix composes helper-process death with
 separately constructed authenticated codec/recovery states; it is not an
 integrated cryptographic process-crash recovery test.
 
-The separately approved real-ext4 40-transaction probes then passed only the
-small callback floor: exact actual-admission p50/p99/max were
+The separately approved real-ext4 40-transaction probes recorded exact
+actual-admission p50/p99/max of
 13.718546/18.682567/18.682567 ms for 2 records and
 14.767265/39.836771/39.838384 ms for 200 records. Every record uses its batch's
 actual admission timestamp before the full 10 ms accumulation wait. An earlier
@@ -491,45 +491,44 @@ original PDU bytes matched after full authenticated reopen. Setup durably
 zero-initialized 32 MiB; committed updates used the real single `fdatasync`
 helper. The [measurement report](../research/li-x3-storage-benchmarks.md#fixed-segment-callback-floor-measurement)
 contains exact costs, resource observations and exclusions. Sequential throughput
-was 12,769.94 copies/s in the larger probe, below the eventual 20,000/s workload;
-this accumulation harness does not establish concurrent admission or that
-qualification. Implementation stops for review of the remaining layout,
-rotation, compaction, control and throughput obligations.
+was 12,769.94 copies/s in the larger probe. This accumulation harness does not
+establish concurrent-admission or complete client behavior. Production runtime
+work followed separately, as described in the production layout.
 
-## Constraints on a later production layout
+## Production concerns outside this historical kernel
 
 Rotation cannot overwrite, wrap or reset a full segment. A successor requires its
 own full capacity reservation, initialized inode, authenticated linkage/selection
 and durable name before admissions can reference it. Exactly identifying the
 active segment and proving predecessor retirement across directory syncs are new
 protocol decisions; a filename scan or largest generation is insufficient. They
-are not implemented by this kernel and their latency must be amortized honestly
-in later measurements.
+are not implemented by this kernel; their runtime costs are absent from its
+measurements.
 
 Completion and revocation require durable authenticated terminal/control state,
 priority independent of data backlog, reserved control capacity and key usage,
 and exact coordinator boundaries before claims. Consuming the final data span
 cannot block a revocation or require overwriting a committed product. A mutable
 head's control fields do not substitute for the lifecycle/control proof. X2 must
-retain its own capacity/worker and meet its shared-device latency gate.
+retain its own capacity and worker.
 
 Compaction needs immutable original bytes/deadlines, durable relocation/terminal
 intent and selection, independently reserved old/new/scratch allocation, bounded
-incremental work and the original expiry reclaim deadline. It may not silently
+incremental work and enforcement of the original product deadline. It may not silently
 leave revoked/expired data in a live segment indefinitely, expose stale claims,
 or make deletion depend on space that full data already consumed. Full bootstrap
-zeroing costs for new segments and overlap with X2/control I/O are part of the
-later full-capacity/15-minute/expiry workloads. No production layout is selected
-until these obligations and the frozen acceptance campaign pass.
+zeroing costs for new segments and overlap with X2/control I/O are absent from
+this small probe. The production implementation and its correctness constraints
+are described in the separately linked production layout.
 
-Review and implementation gates:
+Historical implementation record:
 
-- [x] Verify the authoritative fdatasync/directory-sync and ext4 journaling premises; label speedup as an inference.
-- [x] Identify and remove the one-root/zero-peer ambiguity by requiring two authenticated bootstrap heads before publication.
+- [x] Verify the fdatasync/directory-sync and ext4 journaling premises; label the original speedup hypothesis as an inference.
+- [x] Remove the one-root/zero-peer ambiguity by requiring two authenticated bootstrap heads before publication.
 - [x] Specify exact framing, padding, authority, bounded tail rules, bootstrap allocation, callbacks and the failure matrix.
-- [x] Root review the entire narrow segment design, including rollback assumptions; explicit tail reconciliation is deferred.
-- [x] Authorize only a minimal descriptor-owned fixed-file helper and benchmark codec/recovery implementation plus tests; measurement remains separately gated.
-- [x] Pass the implemented fault/lock/framing/two-head/tail matrix before measurement; explicit tail reconciliation remains deferred.
-- [x] After separate approval, run and preserve the 2/200 ×40 real ext4 callback-floor measurements, including usage renewal and separately reported full initialization; the small gate passes.
-- [ ] If the kernel passes, review rotation, compaction, control capacity and final workload scope before extending implementation.
-- [ ] Select a production layout only after the full frozen qualification and final integration repeat.
+- [x] Review and implement the narrow helper/codec/read-only recovery; keep explicit tail reconciliation outside this prototype.
+- [x] Pass the syscall/lock/framing/two-head/tail tests, including fault and callback outcome checks.
+- [x] Preserve the corrected 2/200 ×40 ext4 measurements, usage renewal and separately reported full initialization.
+
+The historical kernel is complete within that scope. This document schedules no
+additional prototype implementation or performance campaign.

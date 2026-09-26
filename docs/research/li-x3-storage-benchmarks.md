@@ -1,19 +1,18 @@
 # LI X3 storage measurements
 
-Status: **shared-host calibration only; X3 qualification is not complete**.
-The per-record protocol and three immutable batch/head kernels missed their
-measured throughput or median-latency gates during these runs. The user was also
-using this machine for other work: these results do not isolate the storage
-layout's performance or establish an exclusive-host capacity limit. The raw
-observations and frozen thresholds remain unchanged. Production implementation
-is proceeding with fixed segments; its final integrated qualification remains
-open and must state concurrent host load rather than presenting these probes as
-a fair isolated comparison.
+Status: **historical prototype and production measurement record**. The user
+withdrew the agent-imposed performance thresholds and qualification campaign.
+The results below are observations, not acceptance gates or completion blockers.
+Further measurement is optional and requires a user task or deployment objective.
+Correctness, security and configured storage/resource limits remain in force.
+Production fixed-segment journals were implemented in `8aa35687`; see the
+[production layout](../design/li-x3-journal-layout.md).
 
-The next [bounded segment experiment](../design/li-x3-segment-layout.md) has a
-reviewed helper/codec/recovery implementation and a passing focused test gate.
-Its separately approved 2/200 ×40 real-ext4 measurement passes the small callback
-floor. Full workload and production qualification remain incomplete.
+The machine was shared with user and task activity. These runs do not isolate
+storage performance or establish an exclusive-host capacity limit. Raw results,
+commands and harness errata are retained below, including the earlier
+[immutable kernels](../design/li-x3-batch-layout.md) and
+[fixed-segment kernel](../design/li-x3-segment-layout.md).
 
 ## Synthetic fixture erratum
 
@@ -26,9 +25,9 @@ synthetic payload mix and encoded byte lengths are unchanged; header bytes are
 corrected.
 
 Earlier per-record/immutable measurements and their ciphertext/byte oracles
-remain observations of those exact bytes, including their failed latencies.
+remain observations of those exact bytes, including their measured latencies.
 They cannot establish protocol-validity for the original malformed synthetic
-PDUs. No old log or measurement has been rewritten, and the already-failed
+PDUs. No old log or measurement has been rewritten, and those earlier
 variants have not been rerun as a performance campaign. Future segment
 measurements must use the corrected valid PDUs. The sensitive strict-preflight
 failure is retained at `/tmp/li-fixed-segment-preflight-fixture-failure.log`.
@@ -38,11 +37,11 @@ failure is retained at `/tmp/li-fixed-segment-preflight-fixture-failure.log`.
 The immutable-kernel harness and first segment probe subtracted a modeled
 per-record arrival offset from one batch timestamp. Those PDUs already existed;
 the result was a schedule-model latency, not measured admission-to-callback
-latency. The old immutable observations still failed even under that favorable
-model and are not qualification evidence. Their raw logs remain unchanged.
+latency. The old immutable observations use that favorable model and do not establish
+actual admission-to-callback latency. Their raw logs remain unchanged.
 
 The first segment log `/tmp/li-fixed-segment-measurements.log` is also retained
-unchanged and **superseded** for callback qualification. Its modeled medians
+unchanged and **superseded** for actual callback timing. Its modeled medians
 9.375082/9.767713 ms must not be used as measured admission latency. After review,
 the harness removed the virtual offset and reran only the same 2/200 ×40 probes.
 Every callback now measures elapsed time from its batch's single actual admission
@@ -52,14 +51,14 @@ current segment table below.
 
 ## Method and scope
 
-The acceptance criteria are frozen in
-[the encrypted-storage contract](../design/li-encrypted-storage.md#x3-layout-qualification-gate).
+The correctness and storage requirements are described in
+[the encrypted-storage contract](../design/li-encrypted-storage.md).
 The opt-in Linux benchmark is
 `BenchmarkJournalStorageCalibration` in
 `internal/pkg/li/delivery/storage_calibration_bench_test.go`.
 
-The first calibration uses the existing X2 `Journal`, because its current reader
-and sequence validator explicitly reject X3. The benchmark builds a synthetic
+The first calibration used the then-existing X2 `Journal`, whose reader
+and sequence validator explicitly rejected X3. The benchmark builds a synthetic
 X3 RTP PDU and uses an equally sized X2 header for journal admission. This is an
 X2 storage-protocol proxy, not a claim of implemented X3 persistence. A unit test
 checks equal encoded lengths and that the real X3 counterpart is still rejected
@@ -80,8 +79,8 @@ outage, then 2 seconds of recovery with the same live arrival rate. After live
 traffic stops, all accepted work drains. Each destination has its own bounded
 reader queue. A reader decrypts the persisted record, verifies its destination,
 XID and SHA-256 of the original encoded PDU, then invokes the real `Complete`
-path. There is no loopback MDF or TLS in this calibration. The final qualification
-must add real bounded transport sinks and per-destination capacity enforcement.
+path. There is no loopback MDF or TLS in this calibration. The later production
+observations below exercise actual client paths and TLS transport.
 
 The original protocol is used without production modifications: JSON/base64,
 LCS1 envelopes, key-usage reservations, product/state replacements, advancing
@@ -107,8 +106,8 @@ restart probe.
 A separate 128-held-record warm restart probe times `OpenJournal`, authenticated
 reads, and synchronous `Purge`. Purge is a physical reclaim/control-I/O proxy;
 it does not establish task revocation, expiry, or the authorization claim boundary.
-The current restart reads/decrypts product payloads and repairs checkpoints. It
-does not satisfy the future metadata-only recovery design.
+That per-record restart reads/decrypts product payloads and repairs checkpoints;
+it is not a measurement of production segmented recovery.
 
 ## Environment and space bounds
 
@@ -132,7 +131,7 @@ Measured 2026-09-26 against production journal code at
 The machine and filesystem are shared with other activity. CPU frequency,
 temperature and unrelated I/O were not isolated. These are local calibration
 results, not a universal NVMe performance claim. `/tmp` is tmpfs, has only
-1,048,576 total inodes, and cannot qualify this workload. It holds only the build
+1,048,576 total inodes, and does not provide durable-disk evidence. It holds only the build
 cache and temporary measurement logs, which are removed after the report is
 recorded.
 
@@ -142,7 +141,7 @@ outside that sandbox with authorization; validation was not relaxed.
 
 ## Reproduction
 
-Run this exact fixed-duration calibration on the declared filesystem:
+The recorded fixed-duration calibration used this command on the declared filesystem:
 
 ```sh
 LC_LI_STORAGE_BENCH_DIR=/home/grischa/Projects/lippycat \
@@ -154,11 +153,11 @@ go test -tags li ./internal/pkg/li/delivery -run '^$' \
 
 Each successful sub-benchmark prints a `STORAGE_CALIBRATION` JSON object with
 phase counts, latency summaries, one-second samples, CPU, allocation, RSS and
-restart/reclaim measurements. Test completion alone is not qualification:
-threshold failures remain visible measurements. If all calibration levels are
-selected, a failing lower load skips larger levels. Selecting a higher
-sub-benchmark explicitly overrides that protection. No larger per-file run was
-performed after the first result established insufficient headroom.
+restart/reclaim measurements. The harness now skips automatic load increases
+when pending work, retained disk work or admission rejection indicates resource
+pressure. This is a bounded resource guard, not a latency or throughput threshold.
+Selecting a higher sub-benchmark explicitly overrides that automatic load guard.
+No larger per-file run was performed after the recorded calibration.
 
 The concurrent harness is separately exercised with the same command plus
 `-race` and `-run '^TestStorageCalibrationSyntheticProducts$'`. Race-instrumented
@@ -201,16 +200,14 @@ reflects temporary queue room, not sustainable throughput.
 Low disk allocation is a consequence of slow persistence and prompt completion
 after the short outage. Most accepted traffic was still pending in memory. It
 does not measure the disk cost of a 1.2-million-record outage. The small RSS run
-also does not establish the 15-minute memory criterion.
+also does not establish long-run memory behavior.
 
-The current serial per-record protocol fails to keep up even with the smallest
-200-copy/s calibration and produces callback delays tens of seconds beyond the
-one-second maximum. Its admission path is fast, but accumulating accepted work
-does not make that work durable. This is enough evidence to reject adoption of
-the unchanged layout for the 20,000-copy/s primary requirement on this platform.
-A full overloaded per-file campaign would add drain time without qualifying it.
+The serial per-record protocol completed fewer copies per second than the
+200-copy/s offered load, and its callback delays grew to tens of seconds. Fast
+admission did not make the accumulated work durable. This observation motivated
+the later prototype work; it is not a universal capacity limit for the layout.
 
-## Immutable batch/head kernel: failed latency gate
+## Immutable batch/head kernel measurements
 
 The review approved a small durability kernel before spending work on the full
 checkpoint tree or control runtime. `BenchmarkBatchHeadDurabilityKernel` in
@@ -270,20 +267,18 @@ sub-benchmarks completed in 4.264 seconds total and removed their stores.
 | Actual retained allocation, bytes                |               200,704 |            10,178,560 |
 | Warm reopen and complete authentication, seconds |              0.000770 |              0.054465 |
 
-The latency buckets containing both medians lie entirely above 25 ms. The failure
-does not depend on quantile rounding. Removing the accumulation window would
-still leave measured commit medians above that threshold. There is no basis to
-run the full workload or implement the checkpoint tree for this unoptimized
-publication path. The frozen thresholds remain unchanged.
+The measured callback p50 upper bounds were 45.056 and 47.104 ms, including
+the modeled accumulation ages described in the timestamp erratum. The observed
+commit costs included both batch and head publication. No full checkpoint tree
+or sustained-arrival workload was run for this prototype.
 
 Focused tests cover definite/uncertain batch failure, definite/uncertain head
 failure, committed-head cleanup errors, no callback before head publication,
 exact callback counts, complete orphan rejection, committed corruption,
 framing bounds, and purpose/usage classification. These are owner-boundary fault
-injections composed with real durable files, not a substitute for the eventual
-syscall-level fault and child-process-death matrix. The next candidate is the
-[grouped publication experiment](../design/li-x3-batch-layout.md#reviewed-grouped-publication-experiment-failed-latency-gate),
-subsequently reviewed and measured below.
+injections composed with real durable files. The subsequent grouped experiment
+added syscall-level fault and child-process-death tests, as recorded below and in
+[its protocol description](../design/li-x3-batch-layout.md#reviewed-grouped-publication-experiment).
 
 Final focused race validation passed for kernel tests, purpose 9 and the existing
 envelope tests (`go test -race -tags li ./internal/pkg/li/delivery
@@ -293,7 +288,7 @@ malformed offsets/lengths/revision/record IDs and a reauthenticated index pointi
 to a corrupted product frame. Build cache and temporary logs were removed after
 recording the measurements; no `.li-batch-kernel-*` directory remained.
 
-## Grouped batch/head kernel: failed latency gate
+## Grouped batch/head kernel measurements
 
 The narrowly reviewed optimization writes the complete encrypted batch and head
 to two mode-0600 temporary files in the held directory, syncs their independent
@@ -354,13 +349,11 @@ sub-benchmarks completed in 3.187 seconds including setup/reopen/cleanup.
 | Actual retained allocation, bytes                |               200,704 |            10,178,560 |
 | Warm reopen and complete authentication, seconds |              0.001117 |              0.047670 |
 
-Both exact medians exceed the frozen 25 ms bound, including the two-record
-best-case probe. Grouping reduces latency compared with the four-sync kernel,
-but the 200-record result also remains far below 20,000 copies/s even before
-adding the omitted runtime work. The 200-record probe crosses an actual
-4,096-invocation usage reservation boundary, and its durable renewal is included.
-No full workload, sustained recovery, checkpoint tree or next layout was run.
-The acceptance criteria remain unchanged.
+The exact modeled-age medians were 27.071412 and 36.230369 ms. Grouping
+reduced the observed latency relative to the four-sync probe. The 200-record
+probe crossed an actual 4,096-invocation usage reservation boundary, and its
+durable renewal is included. No sustained recovery or checkpoint-tree workload
+was run for this prototype.
 
 Callback success occurs only after final parent sync. Failure before head
 replacement is `NotCommitted` for the transaction and may leave a complete orphan;
@@ -391,13 +384,13 @@ complete orphans, missing selected batches, authenticated malformed indexes and
 committed corruption. Child-process death does not simulate power loss; the
 missing selected-batch case is an explicit recovery-state injection.
 
-The head-container/archive format was subsequently reviewed and measured below;
-a faster declared durable platform remains another option. No layout is selected.
+The head-container/archive format was subsequently reviewed and measured below.
+Production later adopted the fixed-segment layout referenced at the top.
 The grouped probe's artifact directories were removed
 by the harness; its build cache and temporary logs are removed after recording
 this report.
 
-## Head-container exchange kernel: failed latency gate
+## Head-container exchange kernel measurements
 
 The third narrowly reviewed probe combines one unchanged encrypted `LCB1` batch
 and a purpose-6 authenticated head into a single `LCH1` container. Its fixed
@@ -406,8 +399,8 @@ batch ciphertext digest, predecessor container digest, record/revision evidence
 and actual durable call-control digests. The root has no batch but remains fully
 authenticated. There is no self-digest or circular length calculation. The
 [exact reviewed schema and API](../design/li-x3-batch-layout.md#reviewed-head-container-exchange-experiment)
-bound the container to 2,097,591 bytes and keep all production metadata,
-checkpoint and lifecycle decisions open.
+bound the container to 2,097,591 bytes. This historical probe did not implement
+production metadata, checkpoint or lifecycle handling.
 
 The Linux helper `Dir.ExchangeAndArchive(stage, head, archive, encryptedBytes)`
 fully writes, syncs and closes one staged inode while retaining its inode lock.
@@ -424,12 +417,12 @@ authenticates only the selected head's exact archive chain and stops on a missin
 or corrupt predecessor, even if older data remains intact. It recognizes a
 complete unpublished candidate or a displaced predecessor through its exact
 authenticated relationship, then stops without mutation. Explicit stage
-reconciliation is deliberately deferred to phase 8; malformed/partial stages,
+reconciliation is not implemented by this historical prototype; malformed/partial stages,
 unknown objects, duplicate identities and excess inventory also stop without
 deleting evidence. The callback/claim semantics of a full production runtime
 are not implemented by this probe.
 
-Before measuring, the focused race gate passed without failures:
+Before measuring, the focused race tests passed without failures:
 
 ```sh
 GOCACHE=/tmp/li-exchange-kernel-cache \
@@ -498,23 +491,22 @@ compaction, continuous-arrival queue, completion or transport cost is included.
 
 The whole benchmark command completed in 2.956 seconds including setup/reopen/
 cleanup. Heap/RSS values are samples after commits, not proof of the maximum
-intracommit live memory or the final 15-minute memory gate. The deliberate
+intracommit live memory or long-run memory behavior. The deliberate
 worst-case container reservation is much larger than the small actual files;
 it prevents those small files from hiding the admitted maximum allocation.
 
-Both exact callback medians exceed 25 ms. The 200-record probe includes actual
-usage reservation renewal, improves on the grouped kernel's 36.23 ms median,
-and still fails. Its sequential rate also remains below the required 20,000
-copies/s before adding the omitted runtime obligations. Implementation stopped
-at this failed gate. No full workload, checkpoint tree, production adoption or
-fourth layout attempt followed, and no acceptance threshold changed.
+The modeled-age callback medians were 28.607633 and 29.515850 ms. The
+200-record probe included actual usage reservation renewal and had a lower
+observed median than the grouped kernel's 36.23 ms. Its sequential rate was
+5,702.69 copies/s, excluding the runtime work listed above. This prototype was
+not adopted for production; the later fixed-segment work is recorded below.
 
 Raw output is preserved for review at `/tmp/li-exchange-kernel-measurements.log`
-and the focused gate output at `/tmp/li-exchange-kernel-check.log`. Disposable
+and the focused test output at `/tmp/li-exchange-kernel-check.log`. Disposable
 stores are removed by the harness and the dedicated build cache is cleaned after
-recording this report. Further architecture/platform work requires a new review.
+recording this report.
 
-## Fixed segment implementation gate (no measurement)
+## Fixed segment implementation checks
 
 Root approved only the minimal descriptor-owned fixed-file helper plus the
 benchmark codec and read-only recovery described in
@@ -535,7 +527,7 @@ poisons the owner after every fault. Recovery requires both adjacent heads and
 the exact lower and higher selected data boundaries. Dirty tails are classified
 and preserved, and repeated reopen never resumes or mutates them.
 
-The final focused gate used:
+The final focused test command used:
 
 ```sh
 GOCACHE=/tmp/li-fixed-segment-cache go test -race -tags li \
@@ -551,7 +543,7 @@ substitution, sole-writer and cross-helper exclusion, maximum write bounds,
 two-slot and authenticated schema/overflow checks, both selected boundaries,
 committed corruption, dirty/oversized tails, strict PDU preflight before general
 decoding, callback outcomes and stopped-writer behavior. Existing grouped,
-exchange, batch and head-container regressions passed in the same gate. These
+exchange, batch and head-container regressions passed in the same run. These
 disposable-directory tests are separate from any ext4 latency measurement and
 do not emulate a power cut. The matrix combines helper-process death with
 separately constructed authenticated codec states, not an integrated
@@ -566,13 +558,13 @@ packages and `git diff --check` also passed. The dedicated
 `/tmp/li-fixed-segment-cache` is removed after the handoff; the three test logs,
 empty successful vet log and prior measurement logs are preserved.
 
-This test gate preceded the separately approved measurement below. The root-owned
+These tests preceded the separately approved measurement below. The root-owned
 raw I/O diagnostic remains explicitly incomplete protocol evidence. The task
 host is shared, and no full-workload or final-integration result is implied.
 
 ## Fixed segment callback-floor measurement
 
-After the reviewed fault/recovery gate and a passing independent byte-oracle
+After the reviewed fault/recovery tests and a passing independent byte-oracle
 test, root approved only the 2- and 200-record probes, 40 transactions each.
 The command was:
 
@@ -632,15 +624,16 @@ an isolated syscall latency measurement.
 | Warm reopen with both heads, all selected data and full tail validation, s |                          0.026312 |                          0.063781 |
 | Additional external original-byte oracle check, s                          |                          0.000204 |                          0.006580 |
 
-Both cases pass the frozen small p50 ≤25 ms, p99 ≤100 ms, max ≤1 s gate. The
-200-record case crosses a real invocation reservation boundary, and every
+The observed actual-admission callback p50 values were 13.718546 and
+14.767265 ms. The 200-record case crosses a real invocation reservation boundary,
+and every
 callback and encoded byte matches after reopen. The oracle hashes exact original
 input bytes with explicit lengths, then independently decrypts the recovered
 records and compares that digest; it does not trust only stored record hashes.
-The measured 12,770 copies/s remains below 20,000/s in this sequential harness,
-which pauses accumulation during each commit. No concurrent producer admission,
+The measured rate was 12,770 copies/s in this sequential harness, which pauses
+accumulation during each commit. No concurrent producer admission,
 completion, revocation, expiry, segment rotation, compaction, X2 contention,
-full-capacity workload or soak is implemented or qualified by these measurements.
+full-capacity workload or soak was exercised by these measurements.
 
 Heap/RSS samples occur after callbacks and do not establish the intracommit peak.
 The measured loop's CPU/allocation totals include product generation, oracle
@@ -655,75 +648,39 @@ the superseded schedule-model log remains at `/tmp/li-fixed-segment-measurements
 external-byte-oracle race check passed in 1.273 s, with raw output at
 `/tmp/li-fixed-segment-oracle-check.log`. The earlier failing strict-fixture log
 and all prior measurement logs remain unchanged. The dedicated cache is removed
-after reporting. Implementation stops here for review of the remaining
-production-layout, throughput, rotation, compaction and control requirements;
-this passing floor selects no production layout and does not close phase 5.
+after reporting. This historical probe was followed by the production
+fixed-segment implementation and the client observations below.
 
-## Required final comparison and acceptance
+## Historical workload scenarios and capacity arithmetic
 
-The primary workload remains 100 bidirectional calls, 50 pps per direction, two
-destinations: 10,000 source PDUs/s and 20,000 stored copies/s. Run 10 seconds of
-warmup, 60 healthy seconds, 60 outage seconds, then drain with unchanged live
-arrivals. Inject 100 X2 products/s of 512–4,096 bytes to two destinations during
-recovery and compare isolated X2. Use real immutable X3 metadata, independently
-bounded destinations, controls and transport; retain the encoded-byte oracle.
+The original larger scenario described 100 bidirectional calls, 50 pps per
+direction and two destinations: 10,000 source PDUs/s and 20,000 stored copies/s.
+It proposed 10 seconds of warmup, 60 healthy seconds, 60 outage seconds and a
+drain with continuing arrivals, alongside 100 X2 products/s of 512–4,096 bytes to
+two destinations. Those durations and rates are historical scenario parameters,
+not supported-load promises or a pending measurement requirement.
 
-The primary outage requires 1.2 million records. Per-record allocation alone
-would be at least 4,915,200,000 bytes (4.58 GiB) before metadata and reserves.
-Configure X3 for two million entries and sufficient byte capacity plus live
-recovery allowance. Before any full run, report the actual configured data,
-control, scratch, destination, index, memory and free-filesystem bounds. The
-current 512 MiB calibration configuration cannot qualify that outage.
+That 60-second outage would produce 1.2 million records. Per-record allocation
+alone would consume at least 4,915,200,000 bytes (4.58 GiB), before metadata and
+reserves. The earlier 512 MiB calibration store cannot retain that volume. The
+production harness's later capacity choices are recorded with its observations
+below; configured data, control, scratch, index and memory limits still apply.
 
-The 100-call/four-destination/60-second variant produces 2.4 million copies. It is
-an explicit saturation case with expected bounded rejection at the frozen
-two-million-entry ceiling, not a second lossless qualification case. The
-two-destination primary remains the supported workload.
-
-| Metric             | Frozen primary acceptance                                                             | Current evidence                                                                     |
-| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Durable copies     | ≥20,000/s, no loss with sufficient configured capacity                                | Unchanged per-record protocol infeasible from 200/s calibration                      |
-| Callback latency   | p50 ≤25 ms, p99 ≤100 ms, max ≤1 s                                                     | Immutable kernels fail; small fixed-segment kernel passes, full workload unqualified |
-| Producer admission | p99 ≤5 ms, no storage-sync wait                                                       | Short 200/s proxy passes timing only                                                 |
-| Healthy backlog    | No positive slope in final 30 s                                                       | Short proxy backlog grows; full run not performed                                    |
-| Recovery           | ≥40,000 copies/s total, backlog drained ≤90 s with arrivals                           | Full workload not performed                                                          |
-| Revocation         | No claim after memory boundary; durable p99 ≤250 ms, max ≤2 s, including full spool   | Not implemented by calibration                                                       |
-| Expiry             | No late claim; notice ≤1 s; healthy reclaim ≤5 s                                      | Not implemented by calibration                                                       |
-| Restart            | ≤10 s for 100k / ≤60 s for 1m, payloads lazy                                          | Only 128-record warm probe; current payload recovery is eager                        |
-| Allocation         | All allocations and conservative pending/rewrite reservations within budget           | Sampled small-store observations only                                                |
-| Memory             | RSS ≤managed reservation +256 MiB; final 10 min of 15-min soak <5% unexplained growth | Soak not performed                                                                   |
-| CPU/allocations    | Report per-copy cost; ≥20% CPU headroom at target                                     | Small proxy measured; target not sustained                                           |
-| X2 shared device   | p99 ≤2× isolated and ≤100 ms; no rejection from X3 capacity                           | Not measured                                                                         |
-
-Further work remains explicit:
-
-- [x] Measure the existing protocol on real ext4 with paced synthetic products.
-- [x] Record the failure and preserve production limits unchanged.
-- [x] Review the purpose-9/bounded-framing and batch-before-head ordering for a benchmark-only kernel.
-- [x] Measure that kernel's complete callback floor and record its failed median gate.
-- [x] Review the grouped-publication alternative before implementing another kernel.
-- [x] Measure the grouped kernel with exact callback percentiles and real usage renewal; record its failed median gate.
-- [x] Review the exact head-container/exchange protocol before its narrow implementation.
-- [x] Implement and fault-test that kernel, measure exact callback percentiles with real usage renewal, and stop at its failed median gate.
-- [x] Obtain review for the narrow fixed-segment helper/codec/recovery implementation and test gate; defer tail reconciliation.
-- [x] Obtain separate approval and run the corrected-PDU segment callback-floor measurement; its small latency gate passes.
-- [ ] Review the remaining segment layout, throughput, rotation, compaction and control requirements before further runtime work.
-- [ ] Complete and freeze [the full checkpoint/control protocol](../design/li-x3-batch-layout.md).
-- [ ] Implement a benchmark-only prototype with the full durable reader and completion obligations after a kernel demonstrates headroom.
-- [ ] Measure comparable batching results before selecting a production layout.
-- [ ] Add actual X3 admission, lifecycle controls, independent X2/X3 capacity and transport to the harness.
-- [ ] Run the primary workload, secondary saturation cases, full-capacity controls, 15-minute soak and 100k/1m restart cases.
-- [ ] Repeat the complete acceptance campaign after final integration; publish supported load and limitations.
+The four-destination version would produce 2.4 million copies, above the X3
+two-million-entry ceiling, so bounded rejection would be expected. That is a
+capacity fact, not a requirement to run the scenario. The former timing,
+throughput, restart, CPU and RSS acceptance table and pending qualification
+campaign have been removed at the user's request.
 
 ## Production client outage smoke — 2026-09-26
 
 This run exercises the actual segmented production journal and client on the
 project's ext4 volume. It is a one-second, one-call smoke measurement on the
-shared host, not the frozen 100-call qualification. Other task/test and user
+shared host. Other task/test and user
 activity was not excluded or synchronized; no exclusive-host throughput or
 storage-capacity claim follows from these numbers. The measured worktree was
 based on `b1520ce2` plus the in-flight production journal/client integration.
-Final integration still requires the complete workload repeat.
+Production integration was subsequently committed in `8aa35687`.
 
 The existing `BenchmarkAuditProductionJournalOutage` harness uses valid RTP PDUs
 with the corrected `SetPayload` framing and the 70%/20%/10% media-size mix.
@@ -808,7 +765,6 @@ count for every selected interface. Its X2 observations remain observations of
 that earlier limited run, not an isolated shared-device baseline comparison.
 
 - [x] Measure the corrected production client/journal path for the one-second dual-interface outage smoke, with actual callbacks and exact restart oracle.
-- [ ] Run the frozen 100-call duration, healthy transport, continuing-arrival drain, isolated X2 comparison, saturation/control, 15-minute soak and 100k/1m restart matrix against the final implementation.
 
 ## Production 100-call outage and continuing-arrival drain observation
 
@@ -849,16 +805,14 @@ bytes and reopen took 0.4767 s. The combined drain observation lasted 17.901 s;
 its reported X3 transport rate was 29.94 copies/s, drain CPU 11.64 s, ending RSS
 177,664,000 bytes and cumulative allocation 7,284,769,704 bytes.
 
-These numbers **do not pass the frozen throughput/latency/drain qualification**.
-The functional byte/retention/control oracle passed; the test's PASS does not
-mean the timing thresholds passed. Shared machine activity prevents an isolated
-capacity claim. The observed slow drain and rejected continuing arrivals remain
-explicit deployment limitations pending fair-host qualification; they are not
-hidden by reporting admission throughput alone. No timing retry or additional
-layout prototype followed this observation, per the user's instruction.
+The functional byte/retention/control oracle passed. Shared machine activity
+prevents an isolated capacity claim. The observed slow drain and rejected
+continuing arrivals remain visible limitations of this run; admission throughput
+alone does not describe them. No timing retry or additional layout prototype
+followed this observation, per the user's instruction.
 
 The raw output remains `/tmp/li-production-journal-drain-observation.log`. Short
 probes use a 4 GiB X3 budget. Runs longer than ten seconds select 24 GiB so the
 primary 1.2m-copy workload has its conservative terminal-credit capacity; actual
-allocated bytes are measured separately. The isolated 60-second/15-minute and
-large-restart matrix remains unqualified.
+allocated bytes are measured separately. No isolated 60-second, 15-minute or
+large-restart run is recorded here.

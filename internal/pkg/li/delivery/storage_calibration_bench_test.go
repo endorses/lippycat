@@ -27,7 +27,7 @@ import (
 )
 
 // BenchmarkJournalStorageCalibration is an opt-in, paced protocol calibration,
-// not X3 qualification. The current journal accepts X2 only, so it receives X2
+// using the legacy X2 backend. It receives X2
 // envelopes with exactly the encoded length of our synthetic X3 RTP PDUs. Real
 // journal encryption, sequence checkpoints, usage reservations, fsync, reads and
 // durable deletion are retained. Independent destination readers replace MDF
@@ -54,7 +54,7 @@ func BenchmarkJournalStorageCalibration(b *testing.B) {
 	for _, calls := range []int{1, 10, 100} {
 		b.Run(fmt.Sprintf("calls=%d/copies=%d", calls, calls*200), func(b *testing.B) {
 			if stopLarger {
-				b.Skip("lower paced load already failed throughput/latency; select this sub-benchmark explicitly to override")
+				b.Skip("lower load left outstanding work or hit capacity; select a larger sub-benchmark explicitly")
 			}
 			if b.N != 1 {
 				b.Fatal("fixed-duration calibration requires -benchtime=1x")
@@ -72,7 +72,10 @@ func BenchmarkJournalStorageCalibration(b *testing.B) {
 			b.ReportMetric(result.Phases[1].Callback.P99MS, "healthy-callback-p99-ms")
 			b.ReportMetric(float64(result.Phases[1].Rejected), "healthy-rejected")
 			healthy := result.Phases[1]
-			stopLarger = float64(healthy.Durable)/healthy.Seconds < float64(calls*200)*0.99 || healthy.Callback.MaxMS > 1000 || healthy.Rejected != 0
+			// Avoid automatically escalating pressure after observed backlog or
+			// capacity rejection. This is a bounded-run guard, not a latency or
+			// throughput acceptance threshold.
+			stopLarger = healthy.PendingAtEnd != 0 || healthy.DiskAtEnd != 0 || healthy.Rejected != 0
 		})
 	}
 }
@@ -401,7 +404,7 @@ func runStorageCalibration(parent string, calls int) (_ calibrationResult, resul
 		result.ObjectsPerCopy = float64(memoryEnd.Mallocs-memoryStart.Mallocs) / float64(durable)
 	}
 	// A separate small held-record restart/reclaim probe exercises the real APIs.
-	// This is deliberately not presented as the 100k/1m metadata recovery gate.
+	// Its result describes only this small held-record sample.
 	const held = 128
 	for i := 0; i < held; i++ {
 		data, _, _, err := calibrationProduct(ordinal+uint64(i), calls, false)

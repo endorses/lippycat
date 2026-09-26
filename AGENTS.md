@@ -1,5 +1,23 @@
 # lippycat - Network Traffic Sniffer
 
+## Implementation scope and performance evidence
+
+Performance acceptance gates require a traceable source: an explicit user
+requirement, an applicable external specification, or an established project gate
+that predates the task. An agent-written plan, commit, benchmark assertion, or
+"frozen" label does not supply that authority. Do not invent latency, throughput,
+restart, soak, CPU, or RSS targets and then block implementation on them.
+
+Treat unsourced performance targets as exploratory observations. Do not demand a
+waiver, mandatory follow-up, redesign, or repeated audit to satisfy them. A
+benchmark miss alone does not authorize another optimization or prototype cycle.
+When the user withdraws a gate, remove the gate and work that exists solely to
+qualify it; preserve independent correctness and safety checks.
+
+Keep durability, authorization, expiry, cryptographic bounds, and configured
+resource-limit enforcement intact. Enforcing an existing limit does not authorize
+turning an agent-selected default into a new product acceptance requirement.
+
 ## Project Overview
 
 lippycat is a Go-based CLI tool for sniffing and analyzing network traffic. It captures traffic from network interfaces or PCAP files and provides both CLI and TUI modes for real-time monitoring.

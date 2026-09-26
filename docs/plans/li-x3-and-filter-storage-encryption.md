@@ -2,14 +2,12 @@
 
 Drafted: 2026-09-26. Code baseline: `77f7abfe`.
 
-Status: Implementation closed with explicit qualification follow-ups. Shared
-storage, encrypted filters and LI state, persistent X3 lifecycle/replay, independent
-X2/X3 journals, offline migration/rotation, configuration, telemetry and operator
-documentation are implemented and verified. The single bounded closure review
-resolved its concrete defects without reopening discovery. The user explicitly
-accepted isolated performance qualification as a follow-up after commit. Its
-original workload/thresholds and observed misses remain documented below; they
-are not presented as passed.
+Status: Implementation closed. Shared storage, encrypted filters and LI state,
+persistent X3 lifecycle/replay, independent X2/X3 journals, offline migration/
+rotation, configuration, telemetry and operator documentation are implemented and
+verified. The user has withdrawn the agent-invented performance gates and the
+associated qualification follow-up. Measurements remain observations; there is
+no outstanding performance gate or benchmark campaign in this plan.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
 This plan extends the implemented
@@ -180,17 +178,17 @@ only some records are approved.
 
 ## Implementation sequence
 
-| Phase                                           | Dependencies                           | Deliverable                                                                      |
-| ----------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
-| 1. Contracts and format fixtures                | None                                   | Frozen storage/lifecycle contracts and failure matrix                            |
-| 2. Shared encrypted storage                     | 1                                      | Reusable primitives plus X2 compatibility fixtures                               |
-| 3. Managed filter transactions                  | 2                                      | Editable YAML, optional/LI-required encryption, and consistent durable mutations |
-| 4. LI administrative state                      | 2, 3                                   | Encrypted state and recoverable lifecycle transactions                           |
-| 5. X3 layout and journal generalization         | 1, 2; benchmark before layout adoption | Measured layout, separate bounded X2/X3 stores                                   |
-| 6. Durable X3 lifecycle and post-call delivery  | 4, 5                                   | Admission, drain, revocation, expiry, and shutdown                               |
-| 7. Recovery, approval, and sequence continuity  | 6                                      | Authorized historical replay across restart                                      |
-| 8. Operator interface, migration, and telemetry | Build alongside 3–7; complete after 7  | Usable configuration, upgrade/rotation tools, status                             |
-| 9. Qualification and rollout documentation      | All preceding phases                   | Verified release and operator runbooks                                           |
+| Phase                                           | Dependencies                          | Deliverable                                                                      |
+| ----------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
+| 1. Contracts and format fixtures                | None                                  | Frozen storage/lifecycle contracts and failure matrix                            |
+| 2. Shared encrypted storage                     | 1                                     | Reusable primitives plus X2 compatibility fixtures                               |
+| 3. Managed filter transactions                  | 2                                     | Editable YAML, optional/LI-required encryption, and consistent durable mutations |
+| 4. LI administrative state                      | 2, 3                                  | Encrypted state and recoverable lifecycle transactions                           |
+| 5. X3 layout and journal generalization         | 1, 2                                  | Measured layout, separate bounded X2/X3 stores                                   |
+| 6. Durable X3 lifecycle and post-call delivery  | 4, 5                                  | Admission, drain, revocation, expiry, and shutdown                               |
+| 7. Recovery, approval, and sequence continuity  | 6                                     | Authorized historical replay across restart                                      |
+| 8. Operator interface, migration, and telemetry | Build alongside 3–7; complete after 7 | Usable configuration, upgrade/rotation tools, status                             |
+| 9. Verification and rollout documentation       | All preceding phases                  | Verified release and operator runbooks                                           |
 
 Phases 3 and 5 can proceed independently after the shared contract stabilizes.
 Do not release LI's encrypted-startup requirement before its migration/initialization
@@ -222,8 +220,8 @@ Primary areas: `internal/pkg/li/delivery`, `internal/pkg/li/persistence.go`,
 - [x] Add synthetic legacy fixtures for X2 `.x2`, `.seq`, and `.state` objects,
       full filter YAML (including RADIUS compound criteria/revisions), and LI state JSON
       with active, pending, retained, removed-destination, cleanup, and watermark cases.
-- [x] Define the fault/crash matrix and X3 performance workload/acceptance thresholds
-      before running the layout comparison in phase 5.
+- [x] Define the fault/crash matrix and bounded synthetic measurement fixtures.
+      Performance observations do not impose additional acceptance criteria.
 
 Exit: schemas, state transitions, acknowledgement semantics, and numeric resource
 bounds are explicit enough to implement without another product-policy decision.
@@ -363,21 +361,15 @@ outcomes; retries and restart cannot activate uncommitted or revoked generations
 The X3 journal integration remains gated on phase 6; this phase establishes its
 administrative transaction and error-propagation foundation.
 
-### 5. Measure the X3 layout and generalize journal ownership
+### 5. Generalize bounded X2/X3 journal ownership
 
 Primary areas: `internal/pkg/li/delivery/{audit_journal_bench_test,journal,
 client_journal,config_limits,journal_sequence}.go`.
 
-- [ ] Extend `BenchmarkAuditJournalAdmissionAndSync` for RTP-sized packets, multiple
-      destinations, healthy delivery, outage accumulation, recovery with live traffic,
-      and simultaneous X2/X3 on one filesystem. Measure durability latency, persisted
-      PDU throughput, allocated disk growth, CPU/allocations/RSS, revocation/expiry
-      latency, recovery time, and backlog drain rate.
-- [x] Commit a report in `docs/research/li-x3-storage-benchmarks.md` recording workload,
-      filesystem/device, supported load and pass/fail thresholds. The current per-record
-      JSON/base64/multiple-sync format is acceptable only if it meets that workload.
-      If not, specify bounded batching/segments with per-record durability acknowledgement,
-      torn-tail recovery, compaction, and cancellation boundaries before proceeding.
+- [x] Record actual workload, filesystem/device, measured results and limitations
+      in `docs/research/li-x3-storage-benchmarks.md`. Define the production segment
+      format, per-record durable acknowledgement, strict recovery, compaction and
+      cancellation boundaries without adding performance acceptance gates.
 - [x] Replace singular `Client.journal` ownership with explicit X2/X3 instances:
       separate directories, workers, pending queues, replay workers, indexes, budgets,
       fault state, and statistics. Roll back partial initialization and close both stores.
@@ -391,11 +383,10 @@ client_journal,config_limits,journal_sequence}.go`.
 - [x] Reserve control capacity for revocation, closure, faults, and sequence updates
       even when data admission is full. Define bounded control garbage collection that
       cannot forget revocations while covered records or pending writes remain.
-- [ ] Verify independent capacity/workers and that X3 exhaustion cannot consume X2's
-      reserved budget. Quantify shared-device contention; separate workers alone are
-      not a disk-I/O isolation guarantee.
+- [x] Verify independent capacity/workers and that X3 exhaustion cannot consume X2's
+      reserved budget. Separate workers are not a claim of physical disk-I/O isolation.
 
-Exit: a measured layout decision and two bounded journal instances exist; X2
+Exit: the specified production layout and two bounded journal instances exist; X2
 behavior remains compatible. X3 replay stays disabled until phase 7.
 
 ### 6. Implement durable X3 admission, post-call delivery, and revocation
@@ -554,7 +545,7 @@ Exit: every supported node binary has a complete startup/migration/rotation path
 consistent configuration, and enough status to distinguish held, lost, retained,
 revoked, and faulted data.
 
-### 9. Qualify the change and document rollout
+### 9. Verify the change and document rollout
 
 - [x] Extend existing delivery crash/lifecycle/reorder/queue-limit suites, filter
       manager/local-target/RADIUS suites, administrative persistence/generation suites,
@@ -569,9 +560,6 @@ revoked, and faulted data.
       of an unrelated LI-state incarnation. Verify encrypted-store temporary files,
       logs, and diagnostics do not contain chosen plaintext target/payload markers;
       verify YAML mode intentionally preserves its editable plaintext representation.
-- [ ] Re-run the phase-5 workload against the final implementation, including backlog
-      drain faster than continuing arrivals at the declared supported load. Record
-      resource ceilings and X2 impact, plus any deployment sizing constraints.
 - [x] Update `docs/LI_INTEGRATION.md`, `docs/SECURITY.md`, processor/tap/show READMEs,
       manual command/config/filter/LI references, `example-config.yaml`, and deployment
       examples. Preserve stopped-node YAML editing guidance for LI-disabled operation;
@@ -618,10 +606,9 @@ this planning document.
 
 Implementation completion requires a recorded successful migration/rotation
 rehearsal, the post-call outage/restart/replay scenario and its revocation variants,
-the final performance report, passing relevant tests/build partitions, and verified
-implementation tasks checked off. By the user's explicit scope decision, the
-remaining isolated performance qualification is a documented follow-up and does
-not block that implementation closure. Deferred timing gates remain unpassed.
+passing relevant correctness tests/build partitions, operator documentation and
+verified implementation tasks checked off. The performance report preserves
+observations without an acceptance threshold or required follow-up campaign.
 
 ## Implementation record
 
@@ -630,9 +617,9 @@ not block that implementation closure. Deferred timing gates remain unpassed.
 The frozen contract is [encrypted managed storage](../design/li-encrypted-storage.md).
 It specifies LCS1 and LCUS framing, numeric limits, filter mode selection,
 transaction outcomes, lock ordering, complete call-finalization producer paths,
-and the crash/performance qualification gates. The X3 workload requires room for
-at least 1.2 million destination copies during the specified outage; the contract
-sets the X3 index ceiling to two million while retaining a one-million X2 ceiling.
+and the crash/fault matrix. The production contract sets the X3 index ceiling to
+two million while retaining a one-million X2 ceiling; these are enforced resource
+bounds, not workload or throughput requirements.
 No production storage performance result is claimed yet.
 
 Synthetic legacy fixtures preserve original LCX2 product/sequence/state bytes,
@@ -667,9 +654,8 @@ crypto/files/usage boundary. Overlay mutation checks demonstrated that removing
 initial inode locking, durable usage reservation, or encrypted store binding
 causes the corresponding regression to fail; production files were not altered
 by those checks. Phase 2 remains open until X2 consumes the shared primitives and
-mixed-format/interrupted-replacement compatibility is verified. All broader
-qualification, migration/rotation rehearsal, historical replay scenarios, and
-benchmark evidence remain required by the original completion contract.
+mixed-format/interrupted-replacement compatibility is verified. Migration/rotation rehearsal, historical replay scenarios and correctness/build
+checks remained later implementation tasks at this historical checkpoint.
 
 ### X2 integration and transactional managed filters (2026-09-26)
 
@@ -712,7 +698,7 @@ this checkpoint, so mandatory encrypted LI startup is not yet enabled. Phase 2's
 cross-store configured-key independence check remains open until all four runtime
 stores exist. The new storage foundations do not close phase 4 lifecycle
 transactions or phases 5–9; final migration/rotation rehearsal, historical replay,
-performance qualification, and release build matrix are still required.
+and the release build matrix were still required at that checkpoint.
 
 ### Managed filter runtime and CLI integration (2026-09-26)
 
@@ -790,20 +776,20 @@ Actual journal revocation/product acknowledgements remain phase 6; historical X3
 replay remains phase 7; process-kill/power-loss and full release qualification
 remain phase 9. Local injection/reopen tests do not substitute for those checks.
 
-### X3 layout calibration: no qualified layout yet (2026-09-26)
+### Historical X3 layout calibration observations (2026-09-26)
 
 The reproducible [measurement report](../research/li-x3-storage-benchmarks.md)
 records real encryption, usage reservations, product/control/head durability,
 filesystem/device details and callback timing. The original per-record X2
 protocol, used as an explicit size-equivalent X3 storage proxy, sustained only
 18.50 durable copies/s under a 200-copy/s offered calibration and accumulated a
-large backlog. It is not suitable for the frozen X3 workload on this device.
+large backlog. This records that proxy's behavior on the shared device, not a deployment limit.
 
 Three benchmark-only alternatives were specified and tested in the
 [batch-layout design](../design/li-x3-batch-layout.md): separate immutable batch
 and head publication; grouped publication with parallel file syncs; and a single
 head-container inode with descriptor-owned exchange/archive publication. Their
-2/200-record probes all missed the frozen 25ms median durability gate. The final
+2/200-record probes recorded different callback latencies. The final
 container prototype measured exact medians of 28.608/29.516ms, including actual
 usage renewal in the 200-record probe. None was adopted by production X2 or X3.
 
@@ -812,10 +798,9 @@ frame and interrupted-publication checks. Missing selected prerequisites stop
 recovery; no older-head fallback or generic cleanup deletes committed evidence.
 The exchange prototype only classifies staged evidence; its offline reconciliation
 is deliberately unsupported. Raw final measurements were retained for handoff,
-and owned disposable stores/caches were removed. The full 20,000-copy/s workload,
-40,000-copy/s recovery, simultaneous X2 contention, compaction/expiry, million-record
-startup and soak gates remain unrun. A new reviewed layout or supported durable
-platform is required before production layout selection and phases 5–7 proceed.
+and owned disposable stores/caches were removed. The former agent-selected
+throughput and timing targets are removed. These historical measurements do not
+require another layout review or prevent phase progression.
 
 ### Fixed-segment kernel and rotation I/O foundations (2026-09-26)
 
@@ -826,7 +811,7 @@ slots, appends one bounded encrypted batch, and acknowledges each product only
 after one definite `fdatasync`. Invalid peer heads or selected data fault recovery;
 there is no older-head fallback. A bounded unselected tail is classified without
 mutation. Production journal adoption, tail repair, segment succession, control
-priority, compaction, and full-load qualification remain outstanding.
+priority and compaction were later implementation tasks at this checkpoint.
 
 Focused race checks passed for securestore (3.409 s) and delivery (10.289 s),
 including helper-process death and separately constructed authenticated corrupt
@@ -837,11 +822,11 @@ process-crash test or physical power-loss evidence.
 
 The corrected real-ext4 2/200-record ×40 probes measured actual admission-to-callback
 p50/p99/max of 13.718546/18.682567/18.682567 ms and
-14.767265/39.836771/39.838384 ms. Both pass the small frozen latency gate. The
+14.767265/39.836771/39.838384 ms. The
 larger probe renewed actual usage reservations from 4,096 to 8,192, verified all
 8,000 original PDUs after reopen, and retained 33,570,816 allocated bytes within
-its 96 MiB cap. Its sequential 12,769.94 copies/s is not the 20,000/s workload
-qualification. Full initialization costs and shared-host limitations are recorded
+its 96 MiB cap. Its sequential rate was 12,769.94 copies/s. Full initialization
+costs and shared-host limitations are recorded
 in the [measurement report](../research/li-x3-storage-benchmarks.md).
 
 Two harness corrections remain explicit in that report. Synthetic PDUs now use
@@ -1063,37 +1048,31 @@ The [final performance report](../research/li-x3-storage-benchmarks.md) records
 20,000 accepted/durable X3 outage copies and exact original-byte recovery. Its
 continuing-arrival observation also records 13,270 rejected X3 copies and a slow
 29.94-copy/s transport drain. The functional received-or-retained oracle passed;
-the frozen sustained-load gates did not. Shared-host activity limits attribution
-but does not prove a pass or waive the original requirement. Full healthy-load,
-60-second/15-minute, isolated X2-impact and large-restart qualification remain
-open. No new layout or audit campaign is authorized merely by that timing miss.
+the timing and throughput values are observations, not failed acceptance gates.
+Shared-host activity limits attribution. No performance requirement, follow-up
+benchmark matrix or additional layout/audit campaign follows from these results.
 
-### Accepted performance qualification follow-up (2026-09-26)
+### Performance scope correction (2026-09-26)
 
-The user explicitly chose to document isolated performance qualification as a
-follow-up after the verified implementation commit. This changes its completion
-dependency, not the workload, thresholds or observed results. The open phase-5
-measurement/shared-device comparison and phase-9 sustained-load tasks above belong
-to this follow-up; they must not be checked off based on the short functional
-observations.
+The earlier performance thresholds were agent-selected assumptions without an
+agreed user, specification or preexisting project requirement. The user withdrew
+those thresholds and their dependent qualification tasks. They are removed from
+this plan and the normative design; the original measurements remain in the
+report. This supersedes the earlier decision to retain them as a follow-up.
 
-- [ ] Complete the remaining healthy-load/soak and large-restart benchmark variants
-      needed to reproduce the original qualification matrix on a controlled target.
-- [ ] Run the original 60-second and 15-minute workload, healthy delivery, outage
-      accumulation, continuing arrivals during drain, saturation/control and
-      100k/1m restart matrix; compare X2 alone with simultaneous X2/X3.
-- [ ] Record actual latency, durable throughput, drain versus ingress, allocated
-      disk, CPU/allocations/RSS, control/expiry latency and recovery ceilings against
-      the original thresholds. Do not infer a pass from functional test success.
+Any future blocking performance criterion must have a traceable legitimate source
+and apply to the actual workload/environment. Benchmarks and proposed sizing
+assumptions cannot create requirements by themselves. Correctness, security,
+durability and configured resource limits remain enforced.
 
 ### Bounded final closure (2026-09-26)
 
-Decision: **CLOSED_WITH_DEFERRALS**. One discovery round, one primary repair batch,
+Decision: **CLOSED** after the user withdrew the unsupported performance gates. One discovery round, one primary repair batch,
 one integrated post-fix review and one supplemental batch were consumed; no
 additional review or audit campaign followed. The finite findings were transport
 claim resolution before revocation acknowledgement, dual-journal authentication
-before writable recovery, and the explicitly accepted performance qualification
-follow-up.
+before writable recovery, and the unsupported performance qualification gate
+which has now been removed at the user's instruction.
 
 Revocation now joins exact active transport claims outside ownership locks,
 preserves the committed control outcome on join failure and leaves admission
@@ -1118,5 +1097,5 @@ resolve the named findings without another audit.
 
 The verified implementation, documentation and plan have been committed to the
 repository; completed commit/report tasks are now checked against that evidence.
-The unchecked performance tasks are accepted follow-ups, not hidden implementation
-blockers or successful qualification claims.
+There are no remaining performance tasks or deferrals in this plan. No measured
+result is presented as a guaranteed supported-load claim.

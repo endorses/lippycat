@@ -783,71 +783,34 @@ Every restart must reacquire ownership and authenticate state before effects.
 | Unrelated state UUID / replaced destination / reused XID/Call-ID               | Reject old product regardless of matching numeric generation                             | Zero unauthorized replay, including with a previously valid approval                          |
 | Coherent backup restore                                                        | Require current ADMF reconciliation and fresh write key if counters may have rolled back | No claim of trusted rollback detection; RADIUS allocator is not reset                         |
 
-## X3 layout qualification gate
+## Performance observations and requirement provenance
 
-The thresholds below are acceptance criteria selected before benchmarking, not
-measured capability. Record the storage device, filesystem/mount options, CPU,
-RAM, Go version, build, encryption/retention limits, and exact commands in
-`docs/research/li-x3-storage-benchmarks.md`. A `/tmp`/tmpfs result cannot establish
-production disk durability performance. Any workload adjustment must be explicit
-in the report and contract, not inferred from the fastest passing sub-benchmark.
+This plan has no user-established numeric performance acceptance thresholds.
+The earlier agent-selected latency, throughput, recovery, CPU and RSS gates have
+been withdrawn at the user's request. They do not constrain layout selection,
+implementation completion, or progression to another phase.
 
-Use a primary workload of 100 bidirectional RTP calls at 50 packets/second in each
-direction. Fan out to two destinations: 10,000 source PDUs/second and 20,000
-persisted destination copies/second. Exercise 160-, 320-, and 1,200-byte RTP
-payloads, with the primary mix 70%/20%/10%; count actual encoded PDU bytes as well
-as payload bytes. One destination's copies must never borrow another's capacity.
-Use fixed seeds for SSRC/order variation and include 1% short reordered runs and
-sequence wrap. Also measure 1/10/100-call levels and one/four destinations.
+Benchmarks are observations of their actual workload and environment. Preserve
+measured callback/admission latency, throughput, backlog, recovery, allocated
+blocks and resource use in the measurement report, including shared-host activity
+and harness limitations. A synthetic workload is not a supported-load promise.
+Additional benchmarking or optimization is optional work requested for an actual
+deployment objective; it is not an outstanding qualification campaign.
 
-Run healthy transport for 60 seconds after a 10-second warmup; then a 60-second
-MDF outage; then drain that backlog with unchanged live arrivals. During recovery
-inject 100 X2 products/second of 512–4,096 bytes to two destinations on the same
-filesystem. Compare the same X2 load alone. Run a 15-minute memory/accounting
-soak, a filled-capacity rejection/control test, and startup with 100,000 and
-1,000,000 held records. Call completion, task revocation, destination replacement,
-expiry, and controls must occur during load and recovery.
+A future blocking performance requirement needs a traceable source: explicit user
+acceptance, an applicable external specification, or an established project gate
+predating the task. Identify its workload and environment. Agent-written plans,
+commits and labels such as "frozen" are not that source.
 
-The 60-second primary outage retains 1,200,000 destination records before
-recovery overhead. X3's 2,000,000-entry ceiling accommodates that case; configure
-the benchmark's record and byte budgets above the full outage plus pending/live
-recovery allowance. X2 keeps its independent 1,000,000-entry ceiling. A smaller
-configured X3 capacity is a separate saturation test and cannot satisfy the
-primary workload's no-loss criterion.
+Correctness and resource safety remain required: persistence acknowledgements
+follow definite durable writes; revoked or expired products cannot become
+claimable; pending/index/control/recovery allocations stay within configured
+budgets; X3 cannot borrow X2 capacity; controls remain possible at full data
+capacity. Account allocated blocks and reserve terminal-control and rewrite space
+before admission or rewriting. Preserve the enforced cryptographic usage bounds
+and strict bounded readers.
 
-| Metric                               | Qualification threshold at the primary workload                                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Persisted destination PDU throughput | At least 20,000/s sustainable, no admission losses with explicitly adequate configured capacity                                                         |
-| Durability callback latency          | p50 ≤ 25 ms, p99 ≤ 100 ms, max ≤ 1 second outside injected faults                                                                                       |
-| Producer admission latency           | p99 ≤ 5 ms; producer must not wait for storage sync                                                                                                     |
-| Healthy backlog                      | Bounded steady state, with no positive backlog slope over the final 30 seconds                                                                          |
-| Recovery with continuing traffic     | At least 40,000 destination copies/s total; a 60-second backlog drains within 90 seconds                                                                |
-| Revocation eligibility boundary      | No new matching transport claim after in-memory boundary; durable control p99 ≤ 250 ms, max ≤ 2 seconds, including full data spool                      |
-| Online expiry                        | No claim at/after deadline; sweep notices overdue held records within 1 second; physical reclaim within 5 seconds when storage is healthy               |
-| Restart metadata recovery            | ≤ 10 seconds for 100,000 records, ≤ 60 seconds for 1,000,000 records; payloads remain lazy                                                              |
-| Disk allocation growth               | Report allocated blocks, not file lengths; all data, indexes, sequence/control/usage, pending and rewrite allocations stay within the configured budget |
-| Memory                               | Measured RSS ≤ explicit managed reservation plus 256 MiB runtime allowance; final 10 minutes show < 5% unexplained growth                               |
-| CPU/allocations                      | Report CPU seconds per 1,000 persisted copies and allocated bytes/objects per copy; sustain target with at least 20% CPU headroom on declared machine   |
-| X2 shared-device impact              | X2 p99 durability latency ≤ 2× isolated baseline and ≤ 100 ms; no X2 rejection caused by X3 capacity exhaustion                                         |
-
-Reserve disk by allocated filesystem blocks, rounding conservative pending writes
-before admission. Data gets at most 80% of each configured journal budget;
-at least 10% (minimum 4 MiB) is reserved for controls/sequence/fault/usage updates
-and at least 10% (minimum twice the maximum admitted object allocation) for one
-incremental rewrite/recovery operation. Reject configurations that cannot meet
-these minima, rather than borrowing X2 reserve for X3. Larger compaction/rotation
-work must reserve its full additional allocation before starting. No data-admission
-success may leave insufficient space to record the corresponding future terminal
-control. Control garbage collection cannot free a revocation while covered
-records or pending writes remain.
-
-The baseline per-record JSON/base64 format with multiple syncs is retained only
-if it passes this gate. If it fails, freeze a bounded segment/batch extension
-before implementation: maximum batch delay 10 ms, maximum batch plaintext 1 MiB,
-maximum segment allocation 64 MiB, per-record durable acknowledgement only after
-the containing authenticated batch is synced, strict framed torn-tail recovery,
-and incremental compaction within reserved workspace. A corrupt committed batch
-faults recovery; only an uncommitted torn tail may be discarded. Revocation and
-sequence controls retain independent reserved capacity and cannot be hidden
-behind a full data queue. Record the chosen layout and comparative measurements;
-separate workers alone do not establish storage-device isolation.
+The implemented segment/batch protocol and its concrete size/accounting limits
+are described in [the production journal contract](li-x3-journal-layout.md).
+Authenticated selected data must recover exactly or fault; only uncommitted tail
+data may be discarded. These are correctness requirements, independent of timing.

@@ -29,9 +29,12 @@ COPY --from=builder /build/bin/lc-process /usr/local/bin/lc
 RUN mkdir -p /certs /output /testdata
 
 # Non-root user
+# Alpine creates homes with setgid; clear it so managed storage directories do
+# not inherit special permission bits rejected by the private-store policy.
 RUN addgroup -g 1000 lippycat && \
     adduser -D -u 1000 -G lippycat lippycat && \
-    chown -R lippycat:lippycat /output /certs
+    chown -R lippycat:lippycat /output /certs && \
+    chmod 0750 /home/lippycat
 
 USER lippycat
 

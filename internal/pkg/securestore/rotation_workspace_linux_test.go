@@ -576,7 +576,17 @@ func TestRotationWorkspacePhysicalDriftRejectedBeforeWrite(t *testing.T) {
 			slot := w.slots[RotationPlanned]
 			switch kind {
 			case "allocation":
-				require.NoError(t, unix.Fallocate(int(slot.file.Fd()), unix.FALLOC_FL_PUNCH_HOLE|unix.FALLOC_FL_KEEP_SIZE, 0, w.round(RotationPlanned)))
+				// Reservation keeps EOF at zero. Punching a hole beyond EOF can
+				// succeed without releasing that preallocation on some filesystems.
+				// Grow then shrink so the allocated range is actually truncated,
+				// leaving only allocation changed (length is again zero).
+				require.NoError(t, slot.file.Truncate(w.round(RotationPlanned)))
+				require.NoError(t, slot.file.Truncate(0))
+				require.NoError(t, slot.file.Sync())
+				var st unix.Stat_t
+				require.NoError(t, unix.Fstat(int(slot.file.Fd()), &st))
+				require.Zero(t, st.Size)
+				require.Less(t, st.Blocks*512, w.round(RotationPlanned), "fixture must remove reserved allocation")
 			case "length":
 				_, err := slot.file.WriteAt([]byte("unexpected"), 0)
 				require.NoError(t, err)

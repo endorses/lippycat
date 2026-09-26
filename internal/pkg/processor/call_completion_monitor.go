@@ -433,6 +433,10 @@ func (m *CallCompletionMonitor) finalizeCall(callID string, reason CallFinalizat
 		return false
 	}
 	result := m.lifecycle.Finalize(callID, reason)
+	if result.Err != nil {
+		logger.Error("Call lifecycle finalization failed", "error", result.Err)
+		return false
+	}
 	if result.Finalized {
 		logger.Info("Finalized completed call", "call_id", callID, "reason", reason)
 	}

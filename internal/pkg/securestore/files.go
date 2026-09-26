@@ -404,6 +404,9 @@ type Lock struct {
 	data *os.File
 	dir  *Dir
 	name string
+	// Mutable storage helpers retain this ownership until their handles close.
+	fixedSegmentActive bool
+	rotationIOActive   bool
 }
 
 // Lock exclusively and non-blockingly acquires ownership for name. It validates
@@ -470,6 +473,9 @@ func (l *Lock) Close() error {
 	defer l.dir.mu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.fixedSegmentActive || l.rotationIOActive {
+		return errors.New("securestore: mutable storage handle still owns lock")
+	}
 	if l.file == nil {
 		return nil
 	}

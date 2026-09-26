@@ -63,6 +63,11 @@ type Usage struct {
 	fault                         error
 	closed                        bool
 	write                         func(string, []byte) (Outcome, error)
+	// Offline finite-workspace adapters gate even reservations which need no
+	// ledger rewrite and borrow an already retained lock. Runtime owners leave
+	// these nil and keep the ordinary lifetime and allocation behavior.
+	beforeReserve func(bool) error
+	closeBorrowed func() error
 }
 
 func usageName(k *key) string {
@@ -178,6 +183,13 @@ func (u *Usage) reserve(blocks uint64, control bool) error {
 	if blocks == 0 || u.usedSeals >= sealsLimit || u.usedBlocks >= blocksLimit || blocks > blocksLimit-u.usedBlocks {
 		return ErrKeyExhausted
 	}
+	if u.beforeReserve != nil {
+		if err := u.beforeReserve(control); err != nil {
+			u.fault = err
+			u.publishUsage(NotCommitted, u.reservedSeals, u.reservedBlocks)
+			return errors.Join(ErrUsageFault, err)
+		}
+	}
 	nextSeals, nextBlocks := u.usedSeals+1, u.usedBlocks+blocks
 	if nextSeals > u.reservedSeals || nextBlocks > u.reservedBlocks {
 		reservedSeals := max(u.reservedSeals, roundReservation(nextSeals, invocationReservation, sealsLimit))
@@ -239,5 +251,8 @@ func (u *Usage) Close() error {
 	view := u.Stats()
 	view.Closed = true
 	u.diagnostic.Store(&view)
+	if u.closeBorrowed != nil {
+		return u.closeBorrowed()
+	}
 	return u.lock.Close()
 }

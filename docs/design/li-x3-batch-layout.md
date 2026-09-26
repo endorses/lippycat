@@ -12,6 +12,13 @@ has now failed the 25 ms callback-median gate, as have the grouped and
 head-container alternatives below. The full checkpoint/control runtime still requires review; select a
 production layout only after comparative measurement.
 
+A separate [bounded preallocated segment design](li-x3-segment-layout.md) now
+specifies a possible next kernel. Root reviewed its narrow helper/codec/recovery
+implementation and test scope, then separately approved the 2/200 ×40 probe.
+Its small callback-floor gate passes; the full workload and production layout
+remain unqualified. The failed immutable measurements do not qualify that
+alternative.
+
 ## Scope and fixed bounds
 
 Use immutable bounded batch files, not an in-place append log. Each batch has

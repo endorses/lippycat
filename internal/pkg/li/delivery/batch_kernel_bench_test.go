@@ -81,6 +81,8 @@ type batchKernel struct {
 	create  func(string, []byte) (securestore.Outcome, error)
 	replace func(string, []byte) (securestore.Outcome, error)
 	group   func(string, []byte, string, []byte) (securestore.Outcome, error)
+	// Optional experiment-specific allocation guard; immutable kernels leave nil.
+	preflightPDU func([]byte) error
 }
 
 func newKernelDirectory(parent string) (string, string, error) {
@@ -235,6 +237,11 @@ func (k *batchKernel) encodeBatch(pdus [][]byte) (uuid.UUID, []byte, error) {
 	var frames, metadata [][]byte
 	indexLength, dataLength, totalPlain := kernelIndexFixed, 0, 0
 	for i, data := range pdus {
+		if k.preflightPDU != nil {
+			if err := k.preflightPDU(data); err != nil {
+				return id, nil, err
+			}
+		}
 		var pdu x2x3.PDU
 		if err := pdu.UnmarshalBinary(data); err != nil || pdu.Header.Type != x2x3.PDUTypeX3 || pdu.Header.XID != calibrationXID {
 			return id, nil, errors.New("kernel requires synthetic X3 encoded products")
@@ -504,6 +511,11 @@ func (k *batchKernel) readBatch(id uuid.UUID, revision, lastID uint64, data []by
 			return fail()
 		}
 		pduBytes := plain[12+int(metadataLen):]
+		if k.preflightPDU != nil {
+			if err := k.preflightPDU(pduBytes); err != nil {
+				return uuid.Nil, "", 0, err
+			}
+		}
 		var pdu x2x3.PDU
 		if kernelDigest(pduBytes) != record.PDUHash || pdu.UnmarshalBinary(pduBytes) != nil || pdu.Header.Type != x2x3.PDUTypeX3 || pdu.Header.XID != record.XID {
 			return fail()

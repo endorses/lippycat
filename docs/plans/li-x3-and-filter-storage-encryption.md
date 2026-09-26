@@ -7,9 +7,10 @@ still awaits the four-store key-independence check with X3. Administrative state
 transaction recovery, managed filters, explicit snapshot initialization/migration,
 and actual-owner filter/state/X2 key checks are implemented and verified. X3
 layout calibration has rejected the per-record protocol and all three measured
-immutable batch/head prototypes on the current ext4 platform. Phase 5 has no
-qualified production layout; durable X3, replay, rotation, X3 telemetry, and final
-qualification remain open.
+immutable batch/head prototypes on the current ext4 platform. A fixed-segment
+kernel passes the corrected small callback-latency probe, but phase 5 still has
+no qualified production layout. Durable X3, replay, completed rotation, X3
+telemetry, and final qualification remain open.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
 This plan extends the implemented
@@ -810,6 +811,113 @@ and owned disposable stores/caches were removed. The full 20,000-copy/s workload
 40,000-copy/s recovery, simultaneous X2 contention, compaction/expiry, million-record
 startup and soak gates remain unrun. A new reviewed layout or supported durable
 platform is required before production layout selection and phases 5–7 proceed.
+
+### Fixed-segment kernel and rotation I/O foundations (2026-09-26)
+
+The [fixed-segment design](../design/li-x3-segment-layout.md) now has a Linux
+descriptor-owned helper and benchmark-only codec/recovery implementation. It
+fully initializes a fixed 32 MiB inode, requires two authenticated adjacent head
+slots, appends one bounded encrypted batch, and acknowledges each product only
+after one definite `fdatasync`. Invalid peer heads or selected data fault recovery;
+there is no older-head fallback. A bounded unselected tail is classified without
+mutation. Production journal adoption, tail repair, segment succession, control
+priority, compaction, and full-load qualification remain outstanding.
+
+Focused race checks passed for securestore (3.409 s) and delivery (10.289 s),
+including helper-process death and separately constructed authenticated corrupt
+states. A tightened child-write check passed again (1.593 s), an independent
+original-byte oracle passed (1.273 s), and focused vet passed. These compose
+syscall/crash and codec checks; they are not an integrated cryptographic
+process-crash test or physical power-loss evidence.
+
+The corrected real-ext4 2/200-record ×40 probes measured actual admission-to-callback
+p50/p99/max of 13.718546/18.682567/18.682567 ms and
+14.767265/39.836771/39.838384 ms. Both pass the small frozen latency gate. The
+larger probe renewed actual usage reservations from 4,096 to 8,192, verified all
+8,000 original PDUs after reopen, and retained 33,570,816 allocated bytes within
+its 96 MiB cap. Its sequential 12,769.94 copies/s is not the 20,000/s workload
+qualification. Full initialization costs and shared-host limitations are recorded
+in the [measurement report](../research/li-x3-storage-benchmarks.md).
+
+Two harness corrections remain explicit in that report. Synthetic PDUs now use
+`SetPayload`, so their header describes the entire RTP payload; earlier raw logs
+do not establish protocol-validity of those malformed fixtures. The first segment
+run also subtracted modeled arrival offsets; its raw log is preserved as
+superseded evidence, and the corrected run uses actual elapsed time for every
+record. Prior failed-layout numbers remain historical observations. Raw corrected
+measurements are retained in `/tmp/li-fixed-segment-actual-admission.log`, with
+fault/oracle/vet logs in `/tmp/li-fixed-segment-*.log`; owned stores and caches
+were removed.
+
+Separately, the [snapshot rotation proposal](../design/li-snapshot-key-rotation.md)
+has attributed per-write `RotationIO`/usage helpers with physical preallocation,
+bounded inventory, descriptor/alias checks, atomic no-clobber publication,
+replacement-inode ownership handoff and typed outcomes. Full securestore race
+(3.407 s), vet, and an independent bounded review passed; evidence remains in
+`/tmp/li-rotation-io-{race,vet}.log` and `/tmp/li-rotation-io-review.md`. This helper
+does not itself reserve an entire remaining rotation attempt or implement a
+coordinator/CLI. The separately reviewed
+[whole-attempt workspace design](../design/li-snapshot-rotation-workspace.md)
+defines that next requirement. No phase-5 or rotation completion checkbox is
+closed by these foundations.
+
+The subsequent finite `RotationWorkspace` helper now reserves and syncs the
+entire caller-selected remaining stage set before becoming ready. Up to fourteen
+stage inodes are consumed once through write/rename; no file allocation or refill
+occurs after readiness. Retained source/destination/usage ownership, exact
+allocated-block accounting, bounded authenticated-caller cleanup, and a borrowed
+usage adapter enforce that boundary. Every seal, including one that needs no
+ledger extension, checks readiness and the finite ordinary-usage allowance.
+The peak is measured retained allocation plus held locks plus the remaining
+stage pool. Successful sync of a verified prior output advances its snapshot
+outcome even if later workspace allocation fails.
+
+[Rotation record codecs](../design/li-snapshot-rotation-records.md) implement
+canonical bounded request, HMAC bootstrap, and encrypted planned/prepared/complete
+progress records. They bind the exact original ciphertext/payload, loaded source
+ring, new key, filesystem identity, destination, and predecessor receipt. Progress
+uses ordinary new-key capacity. Independent binary/HMAC vectors and adversarial
+tests cover entire-record authentication, malformed/trailing input, key reuse,
+immutable loaded keys and correctly encrypted mismatched requests.
+
+Full securestore race passed (6.108 s), then the final affected workspace/codec
+race passed (3.234 s); vet and diff checks passed. Review found and fixed a
+post-sync verification-descriptor close error that could mislabel a committed
+stage as uncertain. Its regression covers publication, later metadata, recovery,
+settlement and readiness. Other tests cover every stage's I/O failure cuts,
+physical allocation drift, aliases/locks, ledger extensions, partial workspace
+rebuilding and helper-process death. Evidence is retained in
+`/tmp/li-rotation-workspace-{race,final-race,vet}.log`; task caches were removed.
+The helper and codecs do not yet implement the coordinator's authenticated
+state-table selection, full memory/key-budget preflight, owner adapters, inventory
+report or CLI. The full snapshot rotation task remains open.
+
+### Call incarnation foundation (2026-09-26)
+
+Each new local call lifecycle generation now receives one cryptographically
+generated UUID, retained through admission, finalization/tombstones, LI metadata,
+destination fan-out and reorder callbacks. Numeric generations still reject stale
+local callbacks; reused Call-IDs and new process registries receive distinct
+incarnations. Existing memory-only cancellation and delivery behavior remains.
+Zero identity is still permitted for legacy/non-call memory callers; the future
+durable boundary must enforce full provenance rather than infer it.
+
+Entropy failure or generation exhaustion latches new admission closed before
+publishing an identity. Already allocated calls can still finalize and drain at
+shutdown. Completion-before-admission failures now propagate through the writer
+owner and are logged by the monitor. No fallback identity or per-packet UUID
+allocation is used. This does not implement backlog permits, capture-closure
+delivery, durable controls, or the new shutdown ordering.
+
+The full affected LI processor/delivery/tree and command suites, non-LI processor
+and command suites, and vet passed. Final focused race checks passed for processor
+(1.123 s) and delivery (1.143 s), covering concurrent admission, Call-ID reuse,
+detached callbacks, stale generations, short entropy reads, failure recovery
+boundaries, queue metadata and shared/owned two-destination producer admission.
+Exact commands and results are retained in
+`/tmp/li-call-incarnation-verification.md`, with logs in
+`/tmp/li-call-incarnation-{race-final,full-li,full-nonli,vet}.log`. The task cache
+was removed. Phase 6 remains open for its integrated lifecycle obligations.
 
 ### Snapshot operator documentation (2026-09-26)
 

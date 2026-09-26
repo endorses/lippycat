@@ -483,7 +483,7 @@ func calibrationProduct(ordinal uint64, calls int, x3 bool) ([]byte, int, int, e
 		pdu.Header.PayloadFormat = x2x3.PayloadFormatSIP
 	}
 	pdu.AddAttribute((&x2x3.TLVEncoder{}).EncodeUint32(x2x3.AttrSequenceNumber, ^uint32(0)-50+uint32(packet*2+stream%2)))
-	pdu.Payload = rtp
+	pdu.SetPayload(rtp)
 	data, err := pdu.MarshalBinary()
 	return data, mediaBytes, call, err
 }
@@ -555,6 +555,12 @@ func TestStorageCalibrationSyntheticProducts(t *testing.T) {
 			x3, otherMedia, otherCall, err := calibrationProduct(ordinal, calls, true)
 			if err != nil || len(proxy) != len(x3) || media != otherMedia || call != otherCall {
 				t.Fatalf("synthetic encoded-size mismatch: %v", err)
+			}
+			for _, encoded := range [][]byte{proxy, x3} {
+				var pdu x2x3.PDU
+				if err := pdu.UnmarshalBinary(encoded); err != nil || uint64(pdu.Header.HeaderLength)+uint64(pdu.Header.PayloadLength) != uint64(len(encoded)) || len(pdu.Payload) != 12+media {
+					t.Fatalf("synthetic PDU must describe all RTP bytes exactly: %v", err)
+				}
 			}
 			if _, err := x2x3.X2SequenceCheckpoint(proxy); err != nil {
 				t.Fatal(err)

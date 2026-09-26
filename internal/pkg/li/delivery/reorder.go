@@ -43,6 +43,8 @@ type bufferedPDU struct {
 
 // ReorderEntry carries the immutable call lifecycle identity associated with an
 // X3 PDU. CallID and Generation are empty for callers using the legacy API.
+// Metadata carries the call incarnation by value; reorder neither creates nor
+// infers one from Call-ID, SSRC, or the local generation.
 type ReorderEntry struct {
 	budgetCharge int64
 	Metadata     li.DeliveryMetadata

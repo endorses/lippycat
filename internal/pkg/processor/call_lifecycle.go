@@ -4,17 +4,25 @@ package processor
 
 import (
 	"container/heap"
+	"crypto/rand"
 	"errors"
+	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/google/uuid"
 )
 
 // ErrCallLifecycleShutdown is returned when admission is attempted after the
 // registry has begun process shutdown.
 var ErrCallLifecycleShutdown = errors.New("call lifecycle registry is shut down")
+
+// ErrCallLifecycleIdentity blocks admission after a new call identity could not
+// be allocated. Existing incarnations can still finalize and drain on shutdown.
+var ErrCallLifecycleIdentity = errors.New("call lifecycle identity unavailable")
 
 // CallLifecycleConfig controls retention of terminal call state.
 type CallLifecycleConfig struct {
@@ -25,10 +33,11 @@ type CallLifecycleConfig struct {
 // CallFinalizationEvent is delivered once for each successful semantic call
 // finalization. Shutdown deliberately does not produce these events.
 type CallFinalizationEvent struct {
-	CallID      string
-	Generation  uint64
-	Reason      CallFinalizationReason
-	FinalizedAt time.Time
+	CallID          string
+	Generation      uint64
+	CallIncarnation uuid.UUID
+	Reason          CallFinalizationReason
+	FinalizedAt     time.Time
 }
 
 // CallLifecycleTelemetry is a snapshot of shared lifecycle state.
@@ -39,16 +48,18 @@ type CallLifecycleTelemetry struct {
 }
 
 type lifecycleCall struct {
-	callID     string
-	generation uint64
-	inflight   uint64
-	closed     bool
-	drained    chan struct{}
+	callID      string
+	generation  uint64
+	incarnation uuid.UUID
+	inflight    uint64
+	closed      bool
+	drained     chan struct{}
 }
 
 type lifecycleTombstone struct {
 	callID      string
 	generation  uint64
+	incarnation uuid.UUID
 	finalizedAt time.Time
 	index       int
 }
@@ -92,6 +103,8 @@ type CallLifecycleRegistry struct {
 	tombstoneTTL   time.Duration
 	tombstoneLimit int
 	nextGeneration uint64
+	entropy        io.Reader // crypto/rand.Reader; replaced only by fault-injection tests
+	identityErr    error
 	subscribers    []func(CallFinalizationEvent)
 
 	shutdown           bool
@@ -125,15 +138,56 @@ func NewCallLifecycleRegistry(config CallLifecycleConfig) *CallLifecycleRegistry
 		tombstoneTTL:   config.TombstoneTTL,
 		tombstoneLimit: config.TombstoneLimit,
 		shutdownDrain:  make(chan struct{}),
+		entropy:        rand.Reader,
 	}
 }
 
-// Generation identifies the admitted incarnation of a reused Call-ID.
+// Generation is the process-local guard against stale callbacks for a reused
+// Call-ID. It is not a durable incarnation identity.
 func (a *CallAdmission) Generation() uint64 {
 	if a == nil || a.call == nil {
 		return 0
 	}
 	return a.call.generation
+}
+
+// Incarnation identifies exactly one call lifecycle, independently of Call-ID
+// reuse and process-local generation numbering. The returned UUID is a value.
+func (a *CallAdmission) Incarnation() uuid.UUID {
+	if a == nil || a.call == nil {
+		return uuid.Nil
+	}
+	return a.call.incarnation
+}
+
+// Err reports a latched identity-allocation failure. It does not prevent
+// finalization of previously allocated calls or shutdown reference draining.
+func (r *CallLifecycleRegistry) Err() error {
+	if r == nil {
+		return ErrCallLifecycleShutdown
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.identityErr
+}
+
+// newCallLocked allocates only when a new generation is needed. Failure leaves
+// generation and lifecycle maps unchanged and permanently closes new admission.
+func (r *CallLifecycleRegistry) newCallLocked(callID string) (*lifecycleCall, error) {
+	if r.identityErr != nil {
+		return nil, r.identityErr
+	}
+	if r.nextGeneration == ^uint64(0) {
+		r.identityErr = fmt.Errorf("%w: generation exhausted", ErrCallLifecycleIdentity)
+		return nil, r.identityErr
+	}
+	incarnation, err := uuid.NewRandomFromReader(r.entropy)
+	if err != nil {
+		r.identityErr = fmt.Errorf("%w: %w", ErrCallLifecycleIdentity, err)
+		return nil, r.identityErr
+	}
+	r.nextGeneration++
+	return &lifecycleCall{callID: callID, generation: r.nextGeneration, incarnation: incarnation, drained: make(chan struct{})}, nil
 }
 
 // Release completes the admitted critical section. It is idempotent.
@@ -171,15 +225,21 @@ func (r *CallLifecycleRegistry) RestartInvite(callID string) (*CallAdmission, er
 	if r.shutdown {
 		return nil, ErrCallLifecycleShutdown
 	}
+	if r.identityErr != nil {
+		return nil, r.identityErr
+	}
 	if _, busy := r.finalizing[callID]; busy {
 		return nil, &FinalizedCallError{CallID: callID}
 	}
 	if r.tombstones[callID] == nil {
 		return nil, &FinalizedCallError{CallID: callID}
 	}
+	call, err := r.newCallLocked(callID)
+	if err != nil {
+		return nil, err
+	}
 	r.removeTombstoneLocked(callID)
-	r.nextGeneration++
-	call := &lifecycleCall{callID: callID, generation: r.nextGeneration, drained: make(chan struct{}), inflight: 1}
+	call.inflight = 1
 	r.active[callID] = call
 	r.totalInflight++
 	return &CallAdmission{registry: r, call: call, admittedAt: time.Now()}, nil
@@ -197,11 +257,17 @@ func (r *CallLifecycleRegistry) StartInviteAfterExpiry(callID string) (*CallAdmi
 	if r.shutdown {
 		return nil, ErrCallLifecycleShutdown
 	}
+	if r.identityErr != nil {
+		return nil, r.identityErr
+	}
 	if r.active[callID] != nil || r.finalizing[callID] != nil || r.tombstones[callID] != nil {
 		return nil, &FinalizedCallError{CallID: callID}
 	}
-	r.nextGeneration++
-	call := &lifecycleCall{callID: callID, generation: r.nextGeneration, drained: make(chan struct{}), inflight: 1}
+	call, err := r.newCallLocked(callID)
+	if err != nil {
+		return nil, err
+	}
+	call.inflight = 1
 	r.active[callID] = call
 	r.totalInflight++
 	return &CallAdmission{registry: r, call: call, admittedAt: time.Now()}, nil
@@ -216,6 +282,9 @@ func (r *CallLifecycleRegistry) admit(callID string, requiredGeneration uint64) 
 	if r.shutdown {
 		return nil, ErrCallLifecycleShutdown
 	}
+	if r.identityErr != nil {
+		return nil, r.identityErr
+	}
 	now := time.Now()
 	if terminal := r.finalizing[callID]; terminal != nil {
 		return nil, &FinalizedCallError{CallID: callID, FinalizedAt: terminal.finalizedAt}
@@ -224,15 +293,18 @@ func (r *CallLifecycleRegistry) admit(callID string, requiredGeneration uint64) 
 		if r.tombstoneTTL <= 0 || now.Sub(terminal.finalizedAt) < r.tombstoneTTL {
 			return nil, &FinalizedCallError{CallID: callID, FinalizedAt: terminal.finalizedAt}
 		}
-		r.removeTombstoneLocked(callID)
 	}
 	call := r.active[callID]
 	if requiredGeneration != 0 && (call == nil || call.generation != requiredGeneration) {
 		return nil, &FinalizedCallError{CallID: callID}
 	}
 	if call == nil {
-		r.nextGeneration++
-		call = &lifecycleCall{callID: callID, generation: r.nextGeneration, drained: make(chan struct{})}
+		var err error
+		call, err = r.newCallLocked(callID)
+		if err != nil {
+			return nil, err
+		}
+		r.removeTombstoneLocked(callID)
 		r.active[callID] = call
 	}
 	call.inflight++
@@ -296,7 +368,6 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 			r.mu.Unlock()
 			return result
 		}
-		r.removeTombstoneLocked(callID)
 	}
 	call := r.active[callID]
 	if requiredGeneration != 0 && (call == nil || call.generation != requiredGeneration) {
@@ -304,19 +375,25 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 		return result
 	}
 	if call == nil {
-		r.nextGeneration++
-		call = &lifecycleCall{callID: callID, generation: r.nextGeneration, drained: make(chan struct{})}
+		var err error
+		call, err = r.newCallLocked(callID)
+		if err != nil {
+			result.Err = err
+			r.mu.Unlock()
+			return result
+		}
 	}
+	r.removeTombstoneLocked(callID)
 	delete(r.active, callID)
 	call.closed = true
 	if call.inflight == 0 {
 		close(call.drained)
 	}
-	r.addTombstoneLocked(callID, call.generation, now)
-	r.finalizing[callID] = &lifecycleTombstone{callID: callID, generation: call.generation, finalizedAt: now, index: -1}
+	r.addTombstoneLocked(callID, call.generation, call.incarnation, now)
+	r.finalizing[callID] = &lifecycleTombstone{callID: callID, generation: call.generation, incarnation: call.incarnation, finalizedAt: now, index: -1}
 	r.totalFinalizing++
 	subscribers := append([]func(CallFinalizationEvent){}, r.subscribers...)
-	event := CallFinalizationEvent{CallID: callID, Generation: call.generation, Reason: reason, FinalizedAt: now}
+	event := CallFinalizationEvent{CallID: callID, Generation: call.generation, CallIncarnation: call.incarnation, Reason: reason, FinalizedAt: now}
 	result.Finalized = true
 	result.FinalizedAt = now
 	r.mu.Unlock()
@@ -440,13 +517,13 @@ func invokeLifecycleSubscriber(subscriber func(CallFinalizationEvent), event Cal
 	subscriber(event)
 }
 
-func (r *CallLifecycleRegistry) addTombstoneLocked(callID string, generation uint64, finalizedAt time.Time) {
+func (r *CallLifecycleRegistry) addTombstoneLocked(callID string, generation uint64, incarnation uuid.UUID, finalizedAt time.Time) {
 	r.pruneExpiredLocked(finalizedAt)
 	if len(r.tombstones) >= r.tombstoneLimit {
 		r.removeTombstoneLocked(r.tombstoneQueue[0].callID)
 		r.tombstoneEvictions.Add(1)
 	}
-	entry := &lifecycleTombstone{callID: callID, generation: generation, finalizedAt: finalizedAt}
+	entry := &lifecycleTombstone{callID: callID, generation: generation, incarnation: incarnation, finalizedAt: finalizedAt}
 	r.tombstones[callID] = entry
 	heap.Push(&r.tombstoneQueue, entry)
 }

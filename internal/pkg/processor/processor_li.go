@@ -300,7 +300,9 @@ func (p *Processor) initLIRuntime() {
 		}
 		metadata := li.DeliveryMetadata{AdmittedAt: time.Now(), CapturedAt: pkt.Timestamp, TaskGeneration: task.ActivationGeneration}
 		if shared, ok := p.liPacketAdmissions.Load(pkt); ok {
-			metadata.AdmittedAt = shared.(*CallAdmission).admittedAt
+			admission := shared.(*CallAdmission)
+			metadata.AdmittedAt = admission.admittedAt
+			metadata.CallIncarnation = admission.Incarnation()
 		}
 		// Determine what to deliver based on task configuration
 		deliverX2 := task.DeliveryType == li.DeliveryX2Only || task.DeliveryType == li.DeliveryX2andX3
@@ -436,6 +438,7 @@ func (p *Processor) initLIRuntime() {
 					generation := uint64(0)
 					if admission != nil {
 						generation = admission.Generation()
+						metadata.CallIncarnation = admission.Incarnation()
 					}
 					for destinationIndex, destID := range task.DestinationIDs {
 						did := destID // capture for closure

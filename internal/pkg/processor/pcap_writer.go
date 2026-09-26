@@ -54,12 +54,14 @@ const (
 
 // CallFinalizationResult describes the manager's terminal lifecycle decision.
 // Finalized is false when another caller already finalized the same Call-ID.
+// Err reports failure to allocate identity when completion precedes admission.
 type CallFinalizationResult struct {
 	CallID      string
 	Reason      CallFinalizationReason
 	FinalizedAt time.Time
 	Finalized   bool
 	HadWriter   bool
+	Err         error
 }
 
 // PcapWriterTelemetry is a snapshot of per-call output lifecycle state.
@@ -1076,7 +1078,7 @@ func (pwm *PcapWriterManager) finalizeCallGeneration(callID string, generation u
 		return result, outcome.err
 	}
 	pwm.removeFinalizationWaiter(callID, waiter)
-	return result, nil
+	return result, result.Err
 }
 
 func (pwm *PcapWriterManager) handleLifecycleFinalization(event CallFinalizationEvent) {

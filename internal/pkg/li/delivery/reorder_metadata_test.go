@@ -59,12 +59,13 @@ func TestReorderPreservesAdmissionMetadata(t *testing.T) {
 	rb := NewCallAwareReorderBuffer(func(e ReorderEntry) { out <- e }, 10*time.Millisecond)
 	defer rb.Stop()
 	admitted := time.Now().Add(-time.Second)
-	meta := li.DeliveryMetadata{AdmittedAt: admitted, CapturedAt: admitted.Add(-time.Hour), Deadline: admitted.Add(5 * time.Minute), TaskGeneration: 7, DestinationGeneration: 8, CallGeneration: 9, CallID: "call"}
+	meta := li.DeliveryMetadata{AdmittedAt: admitted, CapturedAt: admitted.Add(-time.Hour), Deadline: admitted.Add(5 * time.Minute), TaskGeneration: 7, DestinationGeneration: 8, CallGeneration: 9, CallIncarnation: uuid.New(), CallID: "call"}
 	entry := ReorderEntry{CallID: "call", Generation: 9, PDU: []byte{1}, Metadata: meta}
 	rb.DeliverEntryX3AfterCommit(entry, 1, 1, nil)
-	<-out
+	require.Equal(t, meta, (<-out).Metadata)
 	entry.PDU = []byte{3}
 	rb.DeliverEntryX3AfterCommit(entry, 1, 3, nil)
+	entry.Metadata.CallIncarnation = uuid.New() // Caller mutation cannot change buffered identity.
 	select {
 	case got := <-out:
 		require.Equal(t, meta, got.Metadata)
@@ -114,15 +115,17 @@ func TestReorderCallIdentityReachesDeliveryCancellation(t *testing.T) {
 			manager, _ := testKeepaliveManager(did)
 			client := NewClient(manager, DefaultClientConfig())
 			defer client.Stop()
+			incarnation := uuid.New()
 			rb := NewCallAwareReorderBuffer(func(entry ReorderEntry) {
 				require.NoError(t, client.SendX3WithMetadata(uuid.New(), []uuid.UUID{did}, entry.PDU, entry.Metadata))
 			}, time.Hour)
 			defer func() { rb.Stop(); rb.Wait() }()
 			rb.DeliverEntryX3AfterCommit(ReorderEntry{
 				CallID: "call", Generation: 7, PDU: []byte{1},
-				Metadata: li.DeliveryMetadata{CallGeneration: metadataGeneration},
+				Metadata: li.DeliveryMetadata{CallGeneration: metadataGeneration, CallIncarnation: incarnation},
 			}, 1, 1, nil)
 			require.Equal(t, 1, client.QueueDepth())
+			require.Equal(t, incarnation, client.queues[did].peekBatch(1)[0].metadata.CallIncarnation)
 			client.CancelCall("call", 7)
 			require.Zero(t, client.QueueDepth(), "delivery must cancel the same call generation admitted by reorder")
 			require.Equal(t, uint64(1), client.Stats().DroppedByReason["lifecycle_suppressed"])

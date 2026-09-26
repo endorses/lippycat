@@ -7,6 +7,46 @@ grouped publication and head-container exchange, fail the frozen median-latency
 gate. No production alternative is selected. Phase 5 remains open;
 its final integration must repeat the frozen workload.
 
+The next [bounded segment experiment](../design/li-x3-segment-layout.md) has a
+reviewed helper/codec/recovery implementation and a passing focused test gate.
+Its separately approved 2/200 ×40 real-ext4 measurement passes the small callback
+floor. Full workload and production qualification remain incomplete.
+
+## Synthetic fixture erratum
+
+The segment's new exact-PDU preflight exposed a defect in the earlier synthetic
+fixture: assigning `pdu.Payload` directly left its header payload length at zero,
+followed by uncounted RTP bytes. The general decoder tolerated that trailing
+data. The fixture now uses `SetPayload`; a regression checks that both X2 proxy
+and X3 headers describe the entire encoded PDU and recover all RTP bytes. The
+synthetic payload mix and encoded byte lengths are unchanged; header bytes are
+corrected.
+
+Earlier per-record/immutable measurements and their ciphertext/byte oracles
+remain observations of those exact bytes, including their failed latencies.
+They cannot establish protocol-validity for the original malformed synthetic
+PDUs. No old log or measurement has been rewritten, and the already-failed
+variants have not been rerun as a performance campaign. Future segment
+measurements must use the corrected valid PDUs. The sensitive strict-preflight
+failure is retained at `/tmp/li-fixed-segment-preflight-fixture-failure.log`.
+
+## Callback timestamp erratum
+
+The immutable-kernel harness and first segment probe subtracted a modeled
+per-record arrival offset from one batch timestamp. Those PDUs already existed;
+the result was a schedule-model latency, not measured admission-to-callback
+latency. The old immutable observations still failed even under that favorable
+model and are not qualification evidence. Their raw logs remain unchanged.
+
+The first segment log `/tmp/li-fixed-segment-measurements.log` is also retained
+unchanged and **superseded** for callback qualification. Its modeled medians
+9.375082/9.767713 ms must not be used as measured admission latency. After review,
+the harness removed the virtual offset and reran only the same 2/200 ×40 probes.
+Every callback now measures elapsed time from its batch's single actual admission
+timestamp before the full 10 ms accumulation wait. The corrected log is
+`/tmp/li-fixed-segment-actual-admission.log`; only those results appear in the
+current segment table below.
+
 ## Method and scope
 
 The acceptance criteria are frozen in
@@ -471,6 +511,151 @@ and the focused gate output at `/tmp/li-exchange-kernel-check.log`. Disposable
 stores are removed by the harness and the dedicated build cache is cleaned after
 recording this report. Further architecture/platform work requires a new review.
 
+## Fixed segment implementation gate (no measurement)
+
+Root approved only the minimal descriptor-owned fixed-file helper plus the
+benchmark codec and read-only recovery described in
+[the exact segment design](../design/li-x3-segment-layout.md). This implementation
+keeps existing X2/X3 production paths and the three immutable protocols unchanged.
+The shared benchmark codec adds an optional predecode guard, enabled only for the
+segment experiment: exact wire framing and a 4 KiB header cap before TLV object
+allocation. The design derives a conservative 14 MiB live codec-object bound
+inside its 16 MiB reservation, including decoded objects and growing slice tables.
+
+The helper creates a fully allocated and zero-written 32 MiB inode, with two
+authenticated bootstrap heads, before publication. A retained descriptor appends
+one at-most-2 MiB padded batch and overwrites the inactive 4 KiB head, then performs
+one real `fdatasync`. It validates parent/name/inode/lock/size/allocation before
+writes; duplicate mutable handles and rotation-helper coexistence are rejected.
+It preserves committed outcomes after post-sync validation/cleanup errors and
+poisons the owner after every fault. Recovery requires both adjacent heads and
+the exact lower and higher selected data boundaries. Dirty tails are classified
+and preserved, and repeated reopen never resumes or mutates them.
+
+The final focused gate used:
+
+```sh
+GOCACHE=/tmp/li-fixed-segment-cache go test -race -tags li \
+  ./internal/pkg/securestore ./internal/pkg/li/delivery \
+  -run '^Test(FixedSegment|SegmentKernel|BatchKernel|HeadContainer|Grouped|Exchange|RotationIO|StorageCalibrationSyntheticProducts)' \
+  -count=1 -v -timeout=4m
+```
+
+It passed: securestore 3.409 s; delivery 10.289 s. Raw verbose output is retained
+at `/tmp/li-fixed-segment-gate.log`, including every subtest. Coverage includes
+the helper fault and process-death boundaries, fixed-allocation/descriptor
+substitution, sole-writer and cross-helper exclusion, maximum write bounds,
+two-slot and authenticated schema/overflow checks, both selected boundaries,
+committed corruption, dirty/oversized tails, strict PDU preflight before general
+decoding, callback outcomes and stopped-writer behavior. Existing grouped,
+exchange, batch and head-container regressions passed in the same gate. These
+disposable-directory tests are separate from any ext4 latency measurement and
+do not emulate a power cut. The matrix combines helper-process death with
+separately constructed authenticated codec states, not an integrated
+cryptographic process-crash recovery run. Explicit offline tail repair remains
+deferred.
+
+After tightening child fault setup to check every partial write count/error,
+`go test -race ./internal/pkg/securestore -run '^TestFixedSegmentProcessDeath$'
+-count=1 -v` passed again in 1.593 s; its log is
+`/tmp/li-fixed-segment-process-death.log`. Focused `go vet -tags li` on both
+packages and `git diff --check` also passed. The dedicated
+`/tmp/li-fixed-segment-cache` is removed after the handoff; the three test logs,
+empty successful vet log and prior measurement logs are preserved.
+
+This test gate preceded the separately approved measurement below. The root-owned
+raw I/O diagnostic remains explicitly incomplete protocol evidence. The task
+host is shared, and no full-workload or final-integration result is implied.
+
+## Fixed segment callback-floor measurement
+
+After the reviewed fault/recovery gate and a passing independent byte-oracle
+test, root approved only the 2- and 200-record probes, 40 transactions each.
+The command was:
+
+```sh
+LC_LI_STORAGE_BENCH_DIR=/home/grischa/Projects/lippycat \
+GOCACHE=/tmp/li-fixed-segment-cache go test -tags li ./internal/pkg/li/delivery \
+  -run '^$' -bench '^BenchmarkSegmentDurabilityKernel$' \
+  -benchtime=1x -count=1 -timeout=3m -v
+```
+
+The actual project volume was `/dev/mapper/volgroup0-lv_home`, ext4 with 4 KiB
+blocks, `rw,nosuid,nodev,relatime`. Before running, 79,991,136,256 bytes were
+available. Each case created one private disposable store, physically zero-wrote
+and synced its full 32 MiB segment, and durably installed its controls, usage
+ledger and two initial authenticated heads before admitting products. Actual
+allocated blocks and the conservative 4 MiB metadata reserve stayed below the
+96 MiB artifact budget; no settings or flushes were changed.
+
+The machine remained a shared amd64/i9-13900HX host. Other task/test activity was
+not excluded or synchronized for the corrected rerun; root codec race/build
+and lifecycle tests ran during that interval. No controlled host or task-load
+isolation is claimed. This was one warm probe per batch size, in 2- then
+200-record order, with no power-loss test or randomized repetition.
+
+All records in a batch share one actual admission timestamp before the real
+10 ms accumulation wait. No virtual per-record offset is subtracted. Callback
+timing includes current-head authentication, the corrected valid
+PDU preflight, product/index/head encryption, real usage reservation renewals,
+data/head writes, the definite `fdatasync`, and callback dispatch. Every commit
+invokes that sync exactly once; there is no per-commit segment rename or directory
+sync. Usage renewals still perform the existing independently durable file and
+directory synchronization protocol. Setup's file/directory fsync costs remain
+included in the separately reported initialization duration. The helper I/O
+histogram includes writes and identity validation around `fdatasync`; it is not
+an isolated syscall latency measurement.
+
+| Metric                                                                     |                   2 records/batch |                 200 records/batch |
+| -------------------------------------------------------------------------- | --------------------------------: | --------------------------------: |
+| Batches / definite data-sync transactions                                  |                           40 / 40 |                           40 / 40 |
+| Committed callbacks / externally verified original PDUs                    |                           80 / 80 |                     8,000 / 8,000 |
+| Initialization including zero-write and bootstrap fsync, s                 |                          0.195700 |                          0.174332 |
+| Measured wall seconds                                                      |                          0.556386 |                          0.626471 |
+| Sequential-kernel copies/s                                                 |                            143.79 |                         12,769.94 |
+| Callback exact p50 / p99 / max, ms                                         | 13.718546 / 18.682567 / 18.682567 | 14.767265 / 39.836771 / 39.838384 |
+| Commit including usage/crypto/validation p50 / p99 upper, ms               |                     3.584 / 8.704 |                    4.608 / 30.720 |
+| Append/head/validation/data-sync p50 / p99 upper, ms                       |                     3.456 / 8.192 |                     3.840 / 4.608 |
+| Usage reserved invocations before → after                                  |                     4,096 → 4,096 |                     4,096 → 8,192 |
+| Usage reserved blocks before → after                                       |             1,048,576 → 1,048,576 |             1,048,576 → 1,048,576 |
+| Actual retained journal allocation, bytes / files                          |                    33,570,816 / 6 |                    33,570,816 / 6 |
+| Fixed segment allocated bytes                                              |                        33,554,432 |                        33,554,432 |
+| Conservative charged bytes / artifact budget                               |          37,765,120 / 100,663,296 |          37,765,120 / 100,663,296 |
+| Codec scratch reservation, bytes                                           |                        16,777,216 |                        16,777,216 |
+| Process CPU seconds / microseconds per copy                                |               0.016440 / 205.5000 |              0.087787 / 10.973375 |
+| Process allocations / total allocated bytes during measured loop           |                 4,664 / 1,938,808 |              179,331 / 69,726,424 |
+| Sampled heap at start / peak, bytes                                        |             2,035,472 / 3,974,280 |             2,178,432 / 9,860,584 |
+| Sampled RSS peak, bytes                                                    |                        33,124,352 |                        43,089,920 |
+| Warm reopen with both heads, all selected data and full tail validation, s |                          0.026312 |                          0.063781 |
+| Additional external original-byte oracle check, s                          |                          0.000204 |                          0.006580 |
+
+Both cases pass the frozen small p50 ≤25 ms, p99 ≤100 ms, max ≤1 s gate. The
+200-record case crosses a real invocation reservation boundary, and every
+callback and encoded byte matches after reopen. The oracle hashes exact original
+input bytes with explicit lengths, then independently decrypts the recovered
+records and compares that digest; it does not trust only stored record hashes.
+The measured 12,770 copies/s remains below 20,000/s in this sequential harness,
+which pauses accumulation during each commit. No concurrent producer admission,
+completion, revocation, expiry, segment rotation, compaction, X2 contention,
+full-capacity workload or soak is implemented or qualified by these measurements.
+
+Heap/RSS samples occur after callbacks and do not establish the intracommit peak.
+The measured loop's CPU/allocation totals include product generation, oracle
+hashing, sampling, crypto and storage; initialization and reopen/oracle-check
+costs are reported separately. The 4 MiB reserve covers the private parent/key
+and other bounded metadata in addition to the reported journal allocation.
+The corrected benchmark command finished in 1.664 s, including setup/reopen and
+cleanup. Both disposable stores were removed by the harness.
+
+Corrected exact output is preserved at `/tmp/li-fixed-segment-actual-admission.log`;
+the superseded schedule-model log remains at `/tmp/li-fixed-segment-measurements.log`. The
+external-byte-oracle race check passed in 1.273 s, with raw output at
+`/tmp/li-fixed-segment-oracle-check.log`. The earlier failing strict-fixture log
+and all prior measurement logs remain unchanged. The dedicated cache is removed
+after reporting. Implementation stops here for review of the remaining
+production-layout, throughput, rotation, compaction and control requirements;
+this passing floor selects no production layout and does not close phase 5.
+
 ## Required final comparison and acceptance
 
 The primary workload remains 100 bidirectional calls, 50 pps per direction, two
@@ -492,20 +677,20 @@ an explicit saturation case with expected bounded rejection at the frozen
 two-million-entry ceiling, not a second lossless qualification case. The
 two-destination primary remains the supported workload.
 
-| Metric             | Frozen primary acceptance                                                             | Current evidence                                                    |
-| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Durable copies     | ≥20,000/s, no loss with sufficient configured capacity                                | Unchanged per-record protocol infeasible from 200/s calibration     |
-| Callback latency   | p50 ≤25 ms, p99 ≤100 ms, max ≤1 s                                                     | Per-record calibration and all three batch/head kernels fail median |
-| Producer admission | p99 ≤5 ms, no storage-sync wait                                                       | Short 200/s proxy passes timing only                                |
-| Healthy backlog    | No positive slope in final 30 s                                                       | Short proxy backlog grows; full run not performed                   |
-| Recovery           | ≥40,000 copies/s total, backlog drained ≤90 s with arrivals                           | Full workload not performed                                         |
-| Revocation         | No claim after memory boundary; durable p99 ≤250 ms, max ≤2 s, including full spool   | Not implemented by calibration                                      |
-| Expiry             | No late claim; notice ≤1 s; healthy reclaim ≤5 s                                      | Not implemented by calibration                                      |
-| Restart            | ≤10 s for 100k / ≤60 s for 1m, payloads lazy                                          | Only 128-record warm probe; current payload recovery is eager       |
-| Allocation         | All allocations and conservative pending/rewrite reservations within budget           | Sampled small-store observations only                               |
-| Memory             | RSS ≤managed reservation +256 MiB; final 10 min of 15-min soak <5% unexplained growth | Soak not performed                                                  |
-| CPU/allocations    | Report per-copy cost; ≥20% CPU headroom at target                                     | Small proxy measured; target not sustained                          |
-| X2 shared device   | p99 ≤2× isolated and ≤100 ms; no rejection from X3 capacity                           | Not measured                                                        |
+| Metric             | Frozen primary acceptance                                                             | Current evidence                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Durable copies     | ≥20,000/s, no loss with sufficient configured capacity                                | Unchanged per-record protocol infeasible from 200/s calibration                      |
+| Callback latency   | p50 ≤25 ms, p99 ≤100 ms, max ≤1 s                                                     | Immutable kernels fail; small fixed-segment kernel passes, full workload unqualified |
+| Producer admission | p99 ≤5 ms, no storage-sync wait                                                       | Short 200/s proxy passes timing only                                                 |
+| Healthy backlog    | No positive slope in final 30 s                                                       | Short proxy backlog grows; full run not performed                                    |
+| Recovery           | ≥40,000 copies/s total, backlog drained ≤90 s with arrivals                           | Full workload not performed                                                          |
+| Revocation         | No claim after memory boundary; durable p99 ≤250 ms, max ≤2 s, including full spool   | Not implemented by calibration                                                       |
+| Expiry             | No late claim; notice ≤1 s; healthy reclaim ≤5 s                                      | Not implemented by calibration                                                       |
+| Restart            | ≤10 s for 100k / ≤60 s for 1m, payloads lazy                                          | Only 128-record warm probe; current payload recovery is eager                        |
+| Allocation         | All allocations and conservative pending/rewrite reservations within budget           | Sampled small-store observations only                                                |
+| Memory             | RSS ≤managed reservation +256 MiB; final 10 min of 15-min soak <5% unexplained growth | Soak not performed                                                                   |
+| CPU/allocations    | Report per-copy cost; ≥20% CPU headroom at target                                     | Small proxy measured; target not sustained                                           |
+| X2 shared device   | p99 ≤2× isolated and ≤100 ms; no rejection from X3 capacity                           | Not measured                                                                         |
 
 Further work remains explicit:
 
@@ -517,7 +702,9 @@ Further work remains explicit:
 - [x] Measure the grouped kernel with exact callback percentiles and real usage renewal; record its failed median gate.
 - [x] Review the exact head-container/exchange protocol before its narrow implementation.
 - [x] Implement and fault-test that kernel, measure exact callback percentiles with real usage renewal, and stop at its failed median gate.
-- [ ] Obtain a new architecture/platform review before any further layout experiment.
+- [x] Obtain review for the narrow fixed-segment helper/codec/recovery implementation and test gate; defer tail reconciliation.
+- [x] Obtain separate approval and run the corrected-PDU segment callback-floor measurement; its small latency gate passes.
+- [ ] Review the remaining segment layout, throughput, rotation, compaction and control requirements before further runtime work.
 - [ ] Complete and freeze [the full checkpoint/control protocol](../design/li-x3-batch-layout.md).
 - [ ] Implement a benchmark-only prototype with the full durable reader and completion obligations after a kernel demonstrates headroom.
 - [ ] Measure comparable batching results before selecting a production layout.

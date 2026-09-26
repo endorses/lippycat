@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // DeliveryMetadata preserves local admission time and lifecycle identity across
@@ -16,7 +18,10 @@ type DeliveryMetadata struct {
 	TaskGeneration        uint64
 	DestinationGeneration uint64
 	CallGeneration        uint64
-	CallID                string
+	// CallIncarnation is independent of CallID and the process-local generation.
+	// Zero remains valid for non-call producers and legacy memory-only callers.
+	CallIncarnation uuid.UUID
+	CallID          string
 }
 
 // DestinationDeliveryGeneration binds queued product to one endpoint incarnation.

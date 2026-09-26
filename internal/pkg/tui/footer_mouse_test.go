@@ -112,7 +112,7 @@ func TestFooterMouseSettingsInterfaceEditor(t *testing.T) {
 	require.True(t, m.uiState.SettingsView.IsEditingInterface())
 }
 
-func TestFooterMouseSpacePreservesSettingsTextInput(t *testing.T) {
+func TestFooterMouseSpaceCancelsSettingsInputAndPauses(t *testing.T) {
 	m := footerMouseModel(t, 3)
 	for range 4 {
 		m = updateEventRenderModel(t, m, tea.KeyMsg{Type: tea.KeyDown})
@@ -120,12 +120,13 @@ func TestFooterMouseSpacePreservesSettingsTextInput(t *testing.T) {
 	m = clickFooterHint(t, m, "Enter: edit/toggle")
 	require.True(t, m.uiState.SettingsView.IsEditing())
 	m = updateEventRenderModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("tcp")})
-	m = clickFooterHint(t, m, "Space: pause")
+	m = updateEventRenderModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
 	require.Equal(t, "tcp ", m.uiState.SettingsView.GetBPFFilter())
 	require.False(t, m.uiState.Paused, "editing must retain the keyboard input priority")
-	m = clickFooterHint(t, m, "Esc: cancel")
+	m = clickFooterHint(t, m, "Space: pause")
 	require.False(t, m.uiState.SettingsView.IsEditing())
 	require.Empty(t, m.uiState.SettingsView.GetBPFFilter())
+	require.True(t, m.uiState.Paused)
 }
 
 func TestFooterMouseFilterActions(t *testing.T) {

@@ -247,6 +247,22 @@ func (s *SettingsView) IsEditingInterface() bool {
 	return s.modeType == settings.CaptureModeLive && s.focusIndex == 1 && s.editing
 }
 
+// CancelInputOnOutsideClick restores an edited input when a left click lands
+// outside its field. Mouse coordinates are relative to the settings viewport.
+func (s *SettingsView) CancelInputOnOutsideClick(msg tea.MouseMsg) tea.Cmd {
+	if !s.editing || s.IsEditingInterface() || s.IsFileDialogActive() ||
+		msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress ||
+		s.fieldAtPoint(msg.X, msg.Y) == s.focusIndex {
+		return nil
+	}
+
+	cmd := s.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	// Returning to this field requires a fresh double-click after cancellation.
+	s.lastClickField = -1
+	s.lastClickTime = time.Time{}
+	return cmd
+}
+
 // HasChanges returns true if settings differ from initial values
 func (s *SettingsView) HasChanges(currentInterface string) bool {
 	return s.GetInterface() != currentInterface
@@ -426,81 +442,44 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Handle mouse clicks for focusing different settings
-		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-			// Calculate which setting was clicked based on Y position
-			relativeY := msg.Y - 6
-
-			// Exit edit mode if clicking outside the currently editing field
-			if s.editing && relativeY >= 0 {
-				clickedField := s.determineClickedField(relativeY, msg.X)
-
-				// If clicking on a different field (not empty space), exit edit mode
-				if clickedField >= 0 && clickedField != s.focusIndex {
-					s.editing = false
-				}
-			}
-
-			if relativeY >= 0 { // Within settings area
-				// Handle mode tab clicks (relativeY 2-4)
-				if relativeY >= 2 && relativeY <= 4 {
-					newMode := s.determineClickedMode(msg.X)
-					if newMode != s.modeType {
-						s.modeType = newMode
-						s.currentMode = s.factory.SwitchMode(newMode, s.currentMode)
-						return s.restartCapture()
-					}
-					s.focusIndex = 0 // Mode selector
-				} else {
-					// Determine which field was clicked based on Y position
-					// Delegate to mode-specific logic
-					// For now, just set the focus index based on relative Y
-					// Each mode has different field layouts
-					// TODO: Move this logic into mode-specific methods
-					if relativeY >= 5 && relativeY <= 7 {
-						s.focusIndex = 1
-					} else if relativeY >= 8 && relativeY <= 10 {
-						s.focusIndex = 2
-					} else if relativeY >= 11 && relativeY <= 13 {
-						s.focusIndex = 3
-					} else if relativeY >= 14 && relativeY <= 16 {
-						s.focusIndex = 4
-					}
-				}
-			}
+		if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+			return nil
 		}
 
-		// Handle double-click to enter edit mode on input fields
-		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-			relativeY := msg.Y - 6
-			now := time.Now()
-			const doubleClickThreshold = 500 * time.Millisecond
-
-			clickedField := s.determineClickedField(relativeY, msg.X)
-
-			// Check if this is a double-click on the same field
-			if clickedField >= 0 && clickedField == s.lastClickField &&
-				now.Sub(s.lastClickTime) < doubleClickThreshold && !s.editing {
-
-				// Handle double-click based on mode and field
-				// For offline/remote mode field 1 (file path), open file dialog
-				if s.modeType == settings.CaptureModeOffline && clickedField == 1 {
-					s.pcapFileDialog.Activate()
-					return nil
-				} else if s.modeType == settings.CaptureModeRemote && clickedField == 1 {
-					s.nodesFileDialog.Activate()
-					return nil
-				} else {
-					// For other fields, enter edit mode and focus the input
-					s.editing = true
-					s.currentMode.FocusField(clickedField)
-				}
-			}
-
-			// Update last click tracking
-			s.lastClickField = clickedField
-			s.lastClickTime = now
+		// Header and tabs render five rows above the settings viewport.
+		clickedField := s.fieldAtPoint(msg.X, msg.Y-5)
+		if clickedField < 0 {
+			return nil
 		}
+		s.focusIndex = clickedField
+
+		if clickedField == 0 {
+			x := msg.X - max(0, s.width-lipgloss.Width(s.renderContent()))/2
+			newMode := s.determineClickedMode(x)
+			if newMode != s.modeType {
+				s.modeType = newMode
+				s.currentMode = s.factory.SwitchMode(newMode, s.currentMode)
+				return s.restartCapture()
+			}
+			return nil
+		}
+
+		// Handle double-click to enter edit mode on input fields.
+		now := time.Now()
+		const doubleClickThreshold = 500 * time.Millisecond
+		if clickedField == s.lastClickField && now.Sub(s.lastClickTime) < doubleClickThreshold {
+			if s.modeType == settings.CaptureModeOffline && clickedField == 1 {
+				s.pcapFileDialog.Activate()
+				return nil
+			} else if s.modeType == settings.CaptureModeRemote && clickedField == 1 {
+				s.nodesFileDialog.Activate()
+				return nil
+			}
+			s.editing = true
+			s.currentMode.FocusField(clickedField)
+		}
+		s.lastClickField = clickedField
+		s.lastClickTime = now
 		return nil
 
 	case tea.KeyMsg:
@@ -691,23 +670,27 @@ func (s *SettingsView) determineClickedMode(x int) settings.CaptureMode {
 	return s.modeType // No change
 }
 
-// determineClickedField returns which field was clicked based on Y position
-func (s *SettingsView) determineClickedField(relativeY, x int) int {
-	// Mode tabs at relativeY 2-4
-	if relativeY >= 2 && relativeY <= 4 {
-		return 0
+// fieldAtPoint uses the rendered sections so borders and wrapped fields share
+// the same bounds for focusing and outside-click cancellation.
+func (s *SettingsView) fieldAtPoint(x, y int) int {
+	if x < 0 || x >= s.width || y < 0 || y >= s.height {
+		return -1
 	}
 
-	// Field-specific logic based on Y position
-	// This is a simplified version - each mode may have different layouts
-	if relativeY >= 5 && relativeY <= 7 {
-		return 1
-	} else if relativeY >= 8 && relativeY <= 10 {
-		return 2
-	} else if relativeY >= 11 && relativeY <= 13 {
-		return 3
-	} else if relativeY >= 14 && relativeY <= 16 {
-		return 4
+	sections := s.renderSections()
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	contentWidth, contentHeight := lipgloss.Size(content)
+	x -= max(0, s.width-contentWidth) / 2
+	y += s.viewport.YOffset - max(0, s.height-contentHeight)/2
+
+	top := lipgloss.Height(sections[0]) // Restart note precedes the fields.
+	for field := 0; field <= s.currentMode.GetFocusableFieldCount(); field++ {
+		section := sections[field+1]
+		width, height := lipgloss.Size(section)
+		if x >= 0 && x < width && y >= top && y < top+height {
+			return field
+		}
+		top += height
 	}
 
 	return -1
@@ -715,6 +698,23 @@ func (s *SettingsView) determineClickedField(relativeY, x int) int {
 
 // View renders the settings view
 func (s *SettingsView) View() string {
+	content := lipgloss.Place(s.width, s.height, lipgloss.Center, lipgloss.Center, s.renderContent())
+
+	// Center the form when it fits, retaining scrolling for shorter terminals.
+	if s.viewportReady {
+		s.viewport.SetContent(content)
+		return s.viewport.View()
+	}
+
+	return content
+}
+
+// renderContent builds the form without viewport padding or scrolling.
+func (s *SettingsView) renderContent() string {
+	return lipgloss.JoinVertical(lipgloss.Left, s.renderSections()...)
+}
+
+func (s *SettingsView) renderSections() []string {
 	noteStyle := lipgloss.NewStyle().
 		Foreground(s.theme.StatusBarFg).
 		//Foreground(s.theme.InfoColor).
@@ -781,15 +781,7 @@ func (s *SettingsView) View() string {
 	// helpText := "j/k: navigate • h/l: switch mode • Enter: edit/toggle • Tab: switch tabs"
 	// sections = append(sections, helpStyle.Render(helpText))
 
-	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
-
-	// Use viewport for scrolling if content is too tall
-	if s.viewportReady {
-		s.viewport.SetContent(content)
-		return s.viewport.View()
-	}
-
-	return content
+	return sections
 }
 
 // renderModeSelector renders the mode selection tabs

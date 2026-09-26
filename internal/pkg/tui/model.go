@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -405,8 +406,16 @@ func (m *Model) Shutdown() {
 
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cancelCmd tea.Cmd
 	if mouse, ok := msg.(tea.MouseMsg); ok {
-		if key, hit := m.footerKeyAtMouse(mouse); hit {
+		key, hit := m.footerKeyAtMouse(mouse)
+		footerEditAction := hit && (key.Type == tea.KeyEnter || key.Type == tea.KeyEsc)
+		if m.uiState.Tabs.GetActive() == 3 && m.textSelectionAllowed() && !footerEditAction {
+			local := mouse
+			local.Y -= lipgloss.Height(m.uiState.Header.View()) + lipgloss.Height(m.uiState.Tabs.View())
+			cancelCmd = m.uiState.SettingsView.CancelInputOnOutsideClick(local)
+		}
+		if hit {
 			msg = key
 		}
 	}
@@ -415,6 +424,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textSelection = nil
 	}
 	updated, cmd := m.update(msg)
+	cmd = tea.Batch(cancelCmd, cmd)
 	if next, ok := updated.(Model); ok {
 		if next.textSelection != nil && !next.textSelectionAllowed() {
 			next.textSelection = nil

@@ -157,6 +157,8 @@ func rotationNames(purpose Purpose, destination, usage, token string) [rotationS
 			names[s] = ".rotation-prev-bootstrap-" + token
 		case RotationPredecessorProgressStage:
 			names[s] = ".rotation-prev-progress-" + token
+		case RotationSourceCatalogStage:
+			names[s] = ".rotation-source-catalog-" + token
 		}
 	}
 	return names

@@ -16,13 +16,23 @@ type SequenceCheckpoint struct {
 }
 
 func X2SequenceCheckpoint(data []byte) (SequenceCheckpoint, error) {
+	checkpoint, err := ProductSequenceCheckpoint(data)
+	if err == nil && checkpoint.Context.PDUType != PDUTypeX2 {
+		return SequenceCheckpoint{}, fmt.Errorf("sequence recovery requires X2 product")
+	}
+	return checkpoint, err
+}
+
+// ProductSequenceCheckpoint validates the encoded interface and preserves the
+// original X2/X3 context, including serial-number wrap and fan-out duplicates.
+func ProductSequenceCheckpoint(data []byte) (SequenceCheckpoint, error) {
 	var checkpoint SequenceCheckpoint
 	var pdu PDU
 	if err := pdu.UnmarshalBinary(data); err != nil {
 		return checkpoint, fmt.Errorf("restore sequence: %w", err)
 	}
-	if pdu.Header.Type != PDUTypeX2 {
-		return checkpoint, fmt.Errorf("sequence recovery requires X2 product")
+	if pdu.Header.Type != PDUTypeX2 && pdu.Header.Type != PDUTypeX3 {
+		return checkpoint, fmt.Errorf("sequence recovery requires X2 or X3 product")
 	}
 	context := SequenceContext{PDUType: pdu.Header.Type, XID: pdu.Header.XID, CorrelationID: pdu.Header.CorrelationID}
 	var seq uint32
@@ -44,9 +54,17 @@ func X2SequenceCheckpoint(data []byte) (SequenceCheckpoint, error) {
 		}
 	}
 	if !found {
-		return checkpoint, fmt.Errorf("recovered X2 missing sequence attribute")
+		return checkpoint, fmt.Errorf("recovered product missing sequence attribute")
 	}
 	return SequenceCheckpoint{Context: context, Next: seq + 1}, nil
+}
+
+func (s *Sequencer) RestoreProduct(data []byte) error {
+	checkpoint, err := ProductSequenceCheckpoint(data)
+	if err != nil {
+		return err
+	}
+	return s.RestoreCheckpoint(checkpoint)
 }
 
 func (s *Sequencer) RestoreX2(data []byte) error {

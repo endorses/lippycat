@@ -458,7 +458,7 @@ func TestIntegration_TLS_ProductionModeEnforcement(t *testing.T) {
 		TLSEnabled:     false,         // Insecure in production
 		MaxHunters:     10,
 		MaxSubscribers: 5,
-		FilterFile:     filepath.Join(t.TempDir(), "filters.yaml"),
+		FilterFile:     privateIntegrationFilterPath(t),
 	}
 
 	proc, err := processor.New(*config)
@@ -494,7 +494,7 @@ func startTLSProcessor(t *testing.T, ctx context.Context, certsDir string, requi
 	caCert := filepath.Join(certsDir, "ca-cert.pem")
 
 	// Use t.TempDir() for filter file to ensure each test has isolated state
-	filterFile := filepath.Join(t.TempDir(), "filters.yaml")
+	filterFile := privateIntegrationFilterPath(t)
 
 	// Use port 0 to let the OS allocate an available port
 	config := &processor.Config{

@@ -116,17 +116,26 @@ TLS is enabled by default for `process` and `tap` unless `--insecure` is set. Pr
 These flags apply to `process` and every `tap` protocol. Key options contain
 references to private files holding exactly 32 raw bytes.
 
-| Flag                      | Default        | Description                                                                                           |
-| ------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
-| `--filter-file`           | Mode-dependent | Explicit snapshot path; defaults to `~/.config/lippycat/filters.yaml` or `filters.enc`.               |
-| `--filter-store-mode`     | `auto`         | `auto`, `yaml`, or `encrypted`; auto selects encryption when LI is enabled. LI rejects explicit YAML. |
-| `--filter-store-key-id`   | Empty          | Active filter key ID; required in encrypted mode.                                                     |
-| `--filter-store-key-file` | Empty          | Active filter key file; required in encrypted mode.                                                   |
-| `--filter-store-read-key` | Empty          | Repeatable prior filter key `id=path`, at most four.                                                  |
-| `--li-state-file`         | Empty          | LI builds only; encrypted administrative snapshot path, or disabled when empty.                       |
-| `--li-state-key-id`       | Empty          | Active administrative key ID; required with a state file.                                             |
-| `--li-state-key-file`     | Empty          | Independent administrative key file.                                                                  |
-| `--li-state-read-key`     | Empty          | Repeatable prior administrative key `id=path`, at most four.                                          |
+| Flag                                     | Default        | Description                                                                                           |
+| ---------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `--filter-file`                          | Mode-dependent | Explicit snapshot path; defaults to `~/.config/lippycat/filters.yaml` or `filters.enc`.               |
+| `--filter-store-mode`                    | `auto`         | `auto`, `yaml`, or `encrypted`; auto selects encryption when LI is enabled. LI rejects explicit YAML. |
+| `--filter-store-key-id`                  | Empty          | Active filter key ID; required in encrypted mode.                                                     |
+| `--filter-store-key-file`                | Empty          | Active filter key file; required in encrypted mode.                                                   |
+| `--filter-store-read-key`                | Empty          | Repeatable prior filter key `id=path`, at most four.                                                  |
+| `--li-state-file`                        | Empty          | LI builds only; encrypted administrative snapshot path, or disabled when empty.                       |
+| `--li-state-key-id`                      | Empty          | Active administrative key ID; required with a state file.                                             |
+| `--li-state-key-file`                    | Empty          | Independent administrative key file.                                                                  |
+| `--li-state-read-key`                    | Empty          | Repeatable prior administrative key `id=path`, at most four.                                          |
+| `--li-delivery-x3-spool-dir`             | Empty          | Independent encrypted X3 journal; requires encrypted state and ADMF startup reconciliation.           |
+| `--li-delivery-x3-spool-max-bytes`       | `0`            | Required positive allocated disk budget when X3 persistence is enabled.                               |
+| `--li-delivery-x3-spool-key-id`          | Empty          | Active X3 journal key ID.                                                                             |
+| `--li-delivery-x3-spool-key-file`        | Empty          | Independent private raw 32-byte X3 key.                                                               |
+| `--li-delivery-x3-spool-read-key`        | Empty          | Repeatable prior X3 `id=path`, at most four.                                                          |
+| `--li-delivery-x3-max-age`               | `0`            | Original-admission retention; must be positive for persistent X3.                                     |
+| `--li-delivery-x3-spool-export-manifest` | Empty          | Export exact held X3 identities to a private file.                                                    |
+| `--li-delivery-x3-spool-replay-policy`   | `hold`         | Recovered X3 policy: `hold` for authorization or `purge` for durable discard.                         |
+| `--li-delivery-x3-spool-replay-manifest` | Empty          | Request exact historical replay after current ADMF reconciliation.                                    |
 
 Encrypted snapshots must already be initialized or explicitly migrated with the
 node stopped. `lc migrate filter-store --init --destination PATH --key-id ID

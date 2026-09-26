@@ -338,6 +338,16 @@ voip:
 #     delivery_tls_key: ""             # X2/X3 delivery key
 #     delivery_tls_ca: ""              # X2/X3 delivery CA (MDF verification)
 #     delivery_tls_pinned_cert: []     # Pinned MDF certificates
+#     # Persistent X3 is optional and requires encrypted state plus ADMF startup sync.
+#     delivery_x3_spool_dir: ""        # Independent private journal directory
+#     delivery_x3_spool_max_bytes: 0   # Explicit positive allocated disk budget
+#     delivery_x3_spool_key_file: ""   # Independent private raw 32-byte X3 key
+#     delivery_x3_spool_key_id: ""     # Active X3 key ID
+#     delivery_x3_spool_read_keys: []  # Up to four prior id=path references
+#     delivery_x3_max_age: 0s          # Must be positive for persistent X3
+#     delivery_x3_spool_replay_policy: hold # hold for authorization, or purge
+#     delivery_x3_spool_export_manifest: "" # Private exact-identity export
+#     delivery_x3_spool_replay_manifest: "" # Reviewed v2 approval after ADMF sync
 
 # ============================================================================
 # TAP NODE (lc tap) - Standalone capture + processor

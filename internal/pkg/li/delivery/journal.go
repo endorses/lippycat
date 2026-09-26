@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/google/uuid"
@@ -26,6 +27,21 @@ const journalFaultReserve = int64(16384)
 const journalMaxRecord = int64(64 << 20)
 
 type JournalConfig struct {
+	rewriteExclusions map[string]bool
+	offline           bool
+	preflight         bool
+	rewriteCatalog    string
+	rewriteDir        *securestore.Dir
+	rewriteLock       *securestore.Lock
+	rewriteUsage      *securestore.Usage
+	Keys              *securestore.Keyring
+
+	// Interface explicitly selects the production segmented writer. Zero retains
+	// the original X2 API compatibility mode for existing deployments.
+	Interface        PDUType
+	StateIncarnation uuid.UUID
+	MaxAge           time.Duration
+
 	PreserveSequences  bool
 	Dir, KeyFile       string
 	KeyID, LegacyKeyID string
@@ -38,6 +54,12 @@ type JournalConfig struct {
 
 // JournalRecord stores the original encoded X2 product. Replay never re-encodes it.
 type JournalRecord struct {
+	Interface                                      PDUType               `json:"-"`
+	JournalUUID, StateIncarnation, CallIncarnation uuid.UUID             `json:"-"`
+	Deadline                                       time.Time             `json:"-"`
+	ContentSHA256                                  [32]byte              `json:"-"`
+	Provenance                                     li.DeliveryProvenance `json:"-"`
+
 	ID                                                    uint64
 	DID, XID                                              uuid.UUID
 	TaskGeneration, DestinationGeneration, CallGeneration uint64
@@ -46,6 +68,9 @@ type JournalRecord struct {
 	Data                                                  []byte
 }
 type JournalStats struct {
+	Approved, Retained int
+	Expired, Revoked   uint64
+
 	ReplayPending            int
 	Uncertain                int
 	Bytes, MaxBytes          int64
@@ -61,16 +86,23 @@ type journalEntry struct {
 	held, persisted, completing bool
 }
 type journalOperation struct {
-	record   JournalRecord
-	complete uint64
-	callback func(uint64, error)
-	barrier  chan struct{}
+	admission uint64
+	reserved  int64
+	metadata  []byte
+	record    JournalRecord
+	complete  uint64
+	callback  func(uint64, error)
+	barrier   chan struct{}
 }
 
 // Journal has one filesystem worker and a bounded admission channel. Admission is
 // not a durability acknowledgement: only the callback after fsync confirms it.
 // Recovered records are always held; authorization belongs to the ADMF owner.
 type Journal struct {
+	borrowedUsage       bool
+	preparedTemporaries []string
+	segments            journalSegmentBackend
+
 	heldByDID      map[uuid.UUID]int
 	replayRevision uint64
 	replayStarted  bool
@@ -107,8 +139,21 @@ type Journal struct {
 	lock                *securestore.Lock
 }
 
-func OpenJournal(cfg JournalConfig) (*Journal, error) {
-	return openJournal(cfg, false)
+func OpenJournal(cfg JournalConfig) (*Journal, error) { return openJournal(cfg, false) }
+func openJournal(cfg JournalConfig, upgrade bool) (*Journal, error) {
+	if cfg.Interface != 0 {
+		return openSegmentJournal(cfg, upgrade)
+	}
+	return openLegacyJournal(cfg, upgrade)
+}
+func (j *Journal) UUID() uuid.UUID { return uuid.UUID(j.storeID) }
+func (j *Journal) Highwaters() (uint64, uint64) {
+	if j.segments != nil {
+		return j.segments.highwaters()
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.next, j.next
 }
 
 // ReadOnly reports a legacy recovery/export owner that cannot seal or mutate.
@@ -163,6 +208,9 @@ func (j *Journal) Admit(rec JournalRecord, cb func(uint64, error)) (uint64, erro
 	return j.admit(rec, cb, true)
 }
 func (j *Journal) admit(rec JournalRecord, cb func(uint64, error), clone bool) (uint64, error) {
+	if j.segments != nil {
+		return j.segments.admit(rec, cb, clone)
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.readOnly {
@@ -208,6 +256,9 @@ func (j *Journal) admit(rec JournalRecord, cb func(uint64, error), clone bool) (
 // Complete checkpoints local write completion. A crash before the checkpoint may
 // replay the record: local write completion never establishes MDF receipt.
 func (j *Journal) Complete(id uint64) error {
+	if j.segments != nil {
+		return j.segments.terminal(id, "complete")
+	}
 	if j.readOnly {
 		return ErrJournalMigrationRequired
 	}
@@ -231,7 +282,14 @@ func (j *Journal) Complete(id uint64) error {
 	}
 	return nil
 }
-func (j *Journal) Stats() JournalStats { j.mu.Lock(); defer j.mu.Unlock(); return j.stats }
+func (j *Journal) Stats() JournalStats {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	v := j.stats
+	v.Approved = v.ReplayPending
+	v.Retained = v.Persisted
+	return v
+}
 
 // Release marks an explicitly reconciled record eligible for the delivery owner.
 // It does not delete product or make a delivery decision on its own.
@@ -253,6 +311,16 @@ func (j *Journal) releaseLocked(id uint64) {
 	}
 }
 func (j *Journal) Close() error {
+	if j.cfg.offline {
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		if j.closed {
+			return j.lastErr
+		}
+		j.closed = true
+		j.lastErr = j.closeStorage()
+		return j.lastErr
+	}
 	j.sendMu.Lock()
 	j.mu.Lock()
 	if !j.closed {
@@ -268,6 +336,10 @@ func (j *Journal) Close() error {
 	return j.lastErr
 }
 func (j *Journal) run() {
+	if j.segments != nil {
+		j.segments.run()
+		return
+	}
 	defer close(j.done)
 	defer func() {
 		j.purgeMu.Lock()
@@ -455,6 +527,9 @@ func (j *Journal) VisitHeld(visit func(JournalRecord) error) error {
 
 // Purge is a synchronous explicit administrative checkpoint for held product.
 func (j *Journal) Purge(id uint64) error {
+	if j.segments != nil {
+		return j.segments.terminal(id, "purge")
+	}
 	if j.readOnly {
 		return ErrJournalMigrationRequired
 	}

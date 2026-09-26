@@ -46,6 +46,14 @@ type LIConfig struct {
 	DeliveryX2SpoolReplayPolicy           string
 	DeliveryX2SpoolReplayManifest         string
 	DeliveryX2SpoolExportManifest         string
+	DeliveryX3SpoolDir                    string
+	DeliveryX3SpoolMaxBytes               int64
+	DeliveryX3SpoolKeyFile                string
+	DeliveryX3SpoolKeyID                  string
+	DeliveryX3SpoolReadKeys               []securestore.KeyRef
+	DeliveryX3SpoolReplayPolicy           string
+	DeliveryX3SpoolReplayManifest         string
+	DeliveryX3SpoolExportManifest         string
 	DeliverySendTimeout                   time.Duration
 	DeliveryInitialBackoff                time.Duration
 	DeliveryMaxBackoff                    time.Duration

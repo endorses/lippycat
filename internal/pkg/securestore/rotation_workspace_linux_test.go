@@ -19,7 +19,7 @@ import (
 
 func workspaceConfig() RotationWorkspaceConfig {
 	cfg := RotationWorkspaceConfig{RotationIOConfig: rotationConfig()}
-	for s := RotationStage(0); s < rotationStageCount; s++ {
+	for s := RotationStage(0); s < RotationSourceCatalogStage; s++ {
 		cfg.Stages = append(cfg.Stages, s)
 	}
 	return cfg
@@ -110,7 +110,7 @@ func TestRotationWorkspaceRejectsBeforeReadinessAndInvalidSets(t *testing.T) {
 
 func TestRotationWorkspaceEveryReservationCutRequiresWholeRebuild(t *testing.T) {
 	for _, kind := range []string{"allocate", "file-sync"} {
-		for failed := 0; failed < int(rotationStageCount); failed++ {
+		for failed := 0; failed < int(RotationSourceCatalogStage); failed++ {
 			t.Run(fmt.Sprintf("%s-%d", kind, failed), func(t *testing.T) {
 				path, d, w := workspaceFixture(t, workspaceConfig())
 				calls := 0
@@ -185,7 +185,7 @@ func TestRotationWorkspaceUnsupportedAllocationAndGateSync(t *testing.T) {
 }
 
 func TestRotationWorkspaceAllStagePublicationFaults(t *testing.T) {
-	for s := RotationStage(0); s < rotationStageCount; s++ {
+	for s := RotationStage(0); s < RotationSourceCatalogStage; s++ {
 		for _, kind := range []string{"short", "disk-full", "file-sync", "close", "rename", "directory-sync"} {
 			t.Run(rotationStageNames[s]+"-"+kind, func(t *testing.T) {
 				_, d, w := workspaceFixture(t, workspaceConfig())

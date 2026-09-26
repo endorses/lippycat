@@ -7,6 +7,7 @@
 package processor
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -130,12 +131,15 @@ var _ li.FilterPusher = (*processorFilterPusher)(nil)
 // liStoragePreparation retains authenticated owners across New and Start.
 // Runtime globals are published only after the complete constructor succeeds.
 type liStoragePreparation struct {
-	once      sync.Once
-	err       error
-	manager   *delivery.Manager
-	client    *delivery.Client
-	published bool
-	started   atomic.Bool
+	once                sync.Once
+	err                 error
+	manager             *delivery.Manager
+	client              *delivery.Client
+	published           bool
+	started             atomic.Bool
+	captureEpoch        uuid.UUID
+	observationSequence atomic.Uint64
+	packetProvenance    sync.Map // active non-call packet only; removed before producer returns
 }
 
 // initLIManager constructs only this processor's administrative coordinator.
@@ -200,7 +204,9 @@ func (p *Processor) initLIManager() {
 		}
 		liPinnedCalls.Delete(task.XID)
 		if liSequencer != nil {
-			if p.config.LIDeliveryX2SpoolDir != "" {
+			if p.config.LIDeliveryX3SpoolDir != "" {
+				// Persistent X3 sequence contexts survive task reactivation.
+			} else if p.config.LIDeliveryX2SpoolDir != "" {
 				liSequencer.ClearX3XID(task.XID)
 			} else {
 				liSequencer.ClearXID(task.XID)
@@ -258,7 +264,7 @@ func (p *Processor) initLIRuntime() {
 	p.liStorage.published = true
 	liReorderWorkers = &sync.WaitGroup{}
 	liReorderBudget = nil
-	if p.config.LIDeliveryMemoryBudgetBytes > 0 {
+	if p.config.LIDeliveryMemoryBudgetBytes > 0 || p.config.LIDeliveryX3SpoolDir != "" {
 		liReorderBudget = delivery.NewReorderBudget(delivery.DefaultReorderBudgetBytes)
 	}
 
@@ -274,8 +280,11 @@ func (p *Processor) initLIRuntime() {
 	// media for an identity target is derived from the call's signalling.
 	liMediaDirection = li.NewMediaDirectionResolver(li.MediaDirectionConfig{})
 	if p.callLifecycle != nil {
+		if p.config.LIDeliveryX3SpoolDir != "" {
+			p.callLifecycle.SubscribeFinalizer(p.closePersistentLICall)
+		}
 		p.callLifecycle.Subscribe(func(event CallFinalizationEvent) {
-			if liDeliveryClient != nil {
+			if liDeliveryClient != nil && p.config.LIDeliveryX3SpoolDir == "" {
 				liDeliveryClient.CancelCall(event.CallID, event.Generation)
 			}
 			liMediaDirection.ClearCall(event.CallID)
@@ -283,11 +292,13 @@ func (p *Processor) initLIRuntime() {
 				value.(*sync.Map).Delete(event.CallID)
 				return true
 			})
-			liReorderBuffers.Range(func(_, value any) bool {
-				discarded := value.(*delivery.ReorderBuffer).DiscardCall(event.CallID, event.Generation)
-				liX3BufferedDiscarded.Add(uint64(discarded)) // #nosec G115 -- bounded buffer count
-				return true
-			})
+			if p.config.LIDeliveryX3SpoolDir == "" {
+				liReorderBuffers.Range(func(_, value any) bool {
+					discarded := value.(*delivery.ReorderBuffer).DiscardCall(event.CallID, event.Generation)
+					liX3BufferedDiscarded.Add(uint64(discarded)) // #nosec G115 -- bounded buffer count
+					return true
+				})
+			}
 		})
 	}
 
@@ -298,7 +309,7 @@ func (p *Processor) initLIRuntime() {
 		if li.IsRADIUSTask(task) {
 			return
 		}
-		metadata := li.DeliveryMetadata{AdmittedAt: time.Now(), CapturedAt: pkt.Timestamp, TaskGeneration: task.ActivationGeneration}
+		metadata := li.DeliveryMetadata{StateIncarnation: p.liManager.StateIncarnation(), AdmittedAt: time.Now(), CapturedAt: pkt.Timestamp, TaskGeneration: task.ActivationGeneration, TaskEndAt: task.EndTime}
 		if shared, ok := p.liPacketAdmissions.Load(pkt); ok {
 			admission := shared.(*CallAdmission)
 			metadata.AdmittedAt = admission.admittedAt
@@ -433,6 +444,10 @@ func (p *Processor) initLIRuntime() {
 					logger.Warn("X3 PDU marshal error", "xid", task.XID, "error", err)
 				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
 					// Route through reorder buffer per destination
+					if p.config.LIDeliveryX3SpoolDir != "" {
+						p.deliverPersistentX3(task, pkt, data, metadata, admission)
+						return
+					}
 					ssrc := pkt.VoIPData.SSRC
 					rtpSeq := pkt.VoIPData.SequenceNum
 					generation := uint64(0)
@@ -565,6 +580,9 @@ func (p *Processor) initLIRuntime() {
 
 func (p *Processor) liDeliveryConfig() delivery.ClientConfig {
 	clientConfig := delivery.DefaultClientConfig()
+	if p.liManager != nil {
+		clientConfig.StateIncarnation = p.liManager.StateIncarnation()
+	}
 	clientConfig.QueueSize = p.config.LIDeliveryQueueSize
 	clientConfig.X2QueueSize = p.config.LIDeliveryX2QueueSize
 	clientConfig.X3QueueSize = p.config.LIDeliveryX3QueueSize
@@ -581,6 +599,14 @@ func (p *Processor) liDeliveryConfig() delivery.ClientConfig {
 	clientConfig.X2SpoolReplayPolicy = p.config.LIDeliveryX2SpoolReplayPolicy
 	clientConfig.X2SpoolReplayManifest = p.config.LIDeliveryX2SpoolReplayManifest
 	clientConfig.X2SpoolExportManifest = p.config.LIDeliveryX2SpoolExportManifest
+	clientConfig.X3SpoolDir = p.config.LIDeliveryX3SpoolDir
+	clientConfig.X3SpoolMaxBytes = p.config.LIDeliveryX3SpoolMaxBytes
+	clientConfig.X3SpoolKeyFile = p.config.LIDeliveryX3SpoolKeyFile
+	clientConfig.X3SpoolKeyID = p.config.LIDeliveryX3SpoolKeyID
+	clientConfig.X3SpoolReadKeys = p.config.LIDeliveryX3SpoolReadKeys
+	clientConfig.X3SpoolReplayPolicy = p.config.LIDeliveryX3SpoolReplayPolicy
+	clientConfig.X3SpoolReplayManifest = p.config.LIDeliveryX3SpoolReplayManifest
+	clientConfig.X3SpoolExportManifest = p.config.LIDeliveryX3SpoolExportManifest
 	clientConfig.SendTimeout = p.config.LIDeliverySendTimeout
 	clientConfig.ShutdownTimeout = p.config.LIDeliveryShutdownTimeout
 	return clientConfig
@@ -595,6 +621,11 @@ func (p *Processor) validateLIConfiguration() error {
 	}
 	if p.config.LIDeliveryX2SpoolDir != "" && (p.liStorage == nil || p.liStorage.manager == nil) {
 		return fmt.Errorf("LI X2 persistence requires configured delivery TLS credentials")
+	}
+	if p.config.LIDeliveryX3SpoolDir != "" {
+		if p.liStorage == nil || p.liStorage.manager == nil || p.config.LIStateFile == "" || !p.config.LIADMFSyncOnStartup || p.config.LIADMFEndpoint == "" {
+			return fmt.Errorf("LI X3 persistence requires delivery TLS, encrypted administrative state and ADMF startup synchronization")
+		}
 	}
 	if p.config.LIDeliveryX2SpoolReplayManifest != "" && (!p.config.LIADMFSyncOnStartup || p.config.LIStateFile == "") {
 		return fmt.Errorf("LI X2 replay manifest requires ADMF startup sync and persisted LI state")
@@ -654,11 +685,18 @@ func (p *Processor) prepareLIStorageOnce() error {
 		logger.Warn("LI delivery TLS certs not configured, X2/X3 PDUs will be encoded but not delivered")
 	}
 
+	if err := p.liManager.PrepareAdministrativeStorage(); err != nil {
+		return fmt.Errorf("authenticate LI administrative storage: %w", err)
+	}
 	if err := p.validateLIConfiguration(); err != nil {
 		return fmt.Errorf("invalid LI configuration: %w", err)
 	}
-	if err := p.liManager.PrepareAdministrativeStorage(); err != nil {
-		return fmt.Errorf("authenticate LI administrative storage: %w", err)
+	if p.config.LIDeliveryX3SpoolDir != "" {
+		epoch, err := uuid.NewRandom()
+		if err != nil {
+			return fmt.Errorf("allocate persistent LI capture identity: %w", err)
+		}
+		p.liStorage.captureEpoch = epoch
 	}
 	stateKeys, err := p.liManager.AdministrativeKeyring()
 	if err != nil {
@@ -671,9 +709,25 @@ func (p *Processor) prepareLIStorageOnce() error {
 	if p.liStorage.manager != nil {
 		config := p.liDeliveryConfig()
 		config.X2SpoolValidateKeys = validateJournalKeys
+		config.X3SpoolValidateKeys = validateJournalKeys
+		config.StateIncarnation = p.liManager.StateIncarnation()
+		config.ProtectedStoragePaths = []string{p.config.FilterFile, p.config.LIStateFile}
+		if pin, err := p.liManager.RADIUSCorrelationStateFile(); err == nil && pin != "" {
+			config.ProtectedStoragePaths = append(config.ProtectedStoragePaths, pin)
+		}
 		p.liStorage.client = delivery.NewClient(p.liStorage.manager, config)
 		if err := p.liStorage.client.Err(); err != nil {
 			return fmt.Errorf("initialize LI delivery: %w", err)
+		}
+		if p.config.LIDeliveryX3SpoolDir != "" {
+			if err := p.liManager.SetDurableRevoker(p.liStorage.client.DurableRevoker()); err != nil {
+				return err
+			}
+			p.liManager.SetCommittedTaskCallback(func(task *li.InterceptTask) {
+				if task.Status == li.TaskStatusActive {
+					p.liStorage.client.SetX3TaskAuthorization(task.XID, task.ActivationGeneration, task.EndTime)
+				}
+			})
 		}
 	}
 
@@ -703,16 +757,13 @@ func (p *Processor) startLIManager() (err error) {
 			}
 		}
 		if err := liDeliveryClient.RestoreJournalSequences(liSequencer); err != nil {
-			return fmt.Errorf("restore LI X2 sequences: %w", err)
+			return fmt.Errorf("restore LI product sequences: %w", err)
 		}
-	}
-
-	// Start delivery infrastructure
-	if liDeliveryMgr != nil {
-		liDeliveryMgr.Start()
-	}
-	if liDeliveryClient != nil {
-		liDeliveryClient.Start()
+		if p.config.LIDeliveryX3SpoolExportManifest != "" {
+			if err := liDeliveryClient.ExportHeldX3JournalManifest(p.config.LIDeliveryX3SpoolExportManifest); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Register destination callback to bridge new destinations to delivery manager
@@ -840,6 +891,19 @@ func (p *Processor) startLIManager() (err error) {
 			return fmt.Errorf("authorize LI X2 replay: %w", err)
 		}
 	}
+	if liDeliveryClient != nil && p.config.LIDeliveryX3SpoolReplayManifest != "" {
+		if err := liDeliveryClient.ReplayX3JournalManifest(p.config.LIDeliveryX3SpoolReplayManifest, p.authorizePersistentX3Replay); err != nil {
+			return fmt.Errorf("authorize LI X3 replay: %w", err)
+		}
+	}
+	// No transport claims can begin until administrative recovery and replay
+	// reconciliation have both completed.
+	if liDeliveryMgr != nil {
+		liDeliveryMgr.Start()
+	}
+	if liDeliveryClient != nil {
+		liDeliveryClient.Start()
+	}
 	return nil
 }
 
@@ -866,8 +930,26 @@ func (p *Processor) stopLIManager() (result error) {
 	if p.liManager == nil {
 		return nil
 	}
+	if p.config.LIDeliveryX3SpoolDir != "" && p.liStorage != nil && p.liStorage.published {
+		// Call admissions/packet producers were joined by Processor.Shutdown.
+		// Keep current policy and the journal alive through all accepted callbacks.
+		liReorderBuffers.Range(func(key, value any) bool {
+			buffer := value.(*delivery.ReorderBuffer)
+			buffer.Stop()
+			buffer.Wait()
+			liReorderBuffers.CompareAndDelete(key, buffer)
+			return true
+		})
+		if liReorderWorkers != nil {
+			liReorderWorkers.Wait()
+		}
+		if liDeliveryClient != nil {
+			result = errors.Join(result, liDeliveryClient.CloseAllCaptures(context.Background()))
+			result = errors.Join(result, liDeliveryClient.FlushPersistence(context.Background()))
+		}
+	}
 	if p.liStorage != nil && !p.liStorage.started.Load() {
-		result = p.liManager.ReleasePreparedAdministrativeStorage()
+		result = errors.Join(result, p.liManager.ReleasePreparedAdministrativeStorage())
 	} else {
 		p.liManager.Stop()
 	}
@@ -929,6 +1011,21 @@ func (p *Processor) processLIPacketWithAdmission(pkt *types.PacketDisplay, direc
 	}
 	if p.liManager == nil || !p.liManager.IsEnabled() {
 		return
+	}
+	if p.config.LIDeliveryX3SpoolDir != "" && pkt != nil && pkt.VoIPData != nil && pkt.VoIPData.IsRTP {
+		if p.callLifecycle != nil && p.callLifecycle.Err() != nil {
+			recordBufferedX3Discard(1)
+			return
+		}
+		if pkt.VoIPData.CallID == "" {
+			provenance, err := p.newRTPProvenance(pkt)
+			if err != nil {
+				recordBufferedX3Discard(1)
+				return
+			}
+			p.liStorage.packetProvenance.Store(pkt, provenance)
+			defer p.liStorage.packetProvenance.Delete(pkt)
+		}
 	}
 	// Finalization cleanup may already have removed the call's inherited LI
 	// filter, so account and reject terminal media before task lookup. The packet

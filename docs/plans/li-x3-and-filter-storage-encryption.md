@@ -2,16 +2,14 @@
 
 Drafted: 2026-09-26. Code baseline: `77f7abfe`.
 
-Status: Implementation in progress. Phases 1, 3, and 4 are complete. Phase 2
-still awaits the four-store key-independence check with X3. Administrative state,
-transaction recovery, managed filters, explicit snapshot initialization/migration,
-and actual-owner filter/state/X2 key checks are implemented and verified. X3
-layout calibration has rejected the per-record protocol and all three measured
-immutable batch/head prototypes on the current ext4 platform. A fixed-segment
-kernel passes the corrected small callback-latency probe, but phase 5 still has
-no qualified production layout. Offline filter/LI-state snapshot key rotation is
-implemented and verified. Durable X3, replay, journal rotation, X3 telemetry, and
-final qualification remain open.
+Status: Implementation closed with explicit qualification follow-ups. Shared
+storage, encrypted filters and LI state, persistent X3 lifecycle/replay, independent
+X2/X3 journals, offline migration/rotation, configuration, telemetry and operator
+documentation are implemented and verified. The single bounded closure review
+resolved its concrete defects without reopening discovery. The user explicitly
+accepted isolated performance qualification as a follow-up after commit. Its
+original workload/thresholds and observed misses remain documented below; they
+are not presented as passed.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
 This plan extends the implemented
@@ -235,7 +233,7 @@ bounds are explicit enough to implement without another product-policy decision.
 Primary areas: new `internal/pkg/securestore`; existing
 `internal/pkg/li/delivery/{journal,journal_sequence}.go` file/codec helpers.
 
-- [ ] Implement key loading and bounded keyrings with exact key lengths, private
+- [x] Implement key loading and bounded keyrings with exact key lengths, private
       files, unique IDs, active/prior lookup, and separate purpose configuration. Reject
       accidental reuse of the same configured key across the four stores without
       logging key material or fingerprints.
@@ -375,22 +373,22 @@ client_journal,config_limits,journal_sequence}.go`.
       and simultaneous X2/X3 on one filesystem. Measure durability latency, persisted
       PDU throughput, allocated disk growth, CPU/allocations/RSS, revocation/expiry
       latency, recovery time, and backlog drain rate.
-- [ ] Commit a report in `docs/research/li-x3-storage-benchmarks.md` recording workload,
+- [x] Commit a report in `docs/research/li-x3-storage-benchmarks.md` recording workload,
       filesystem/device, supported load and pass/fail thresholds. The current per-record
       JSON/base64/multiple-sync format is acceptable only if it meets that workload.
       If not, specify bounded batching/segments with per-record durability acknowledgement,
       torn-tail recovery, compaction, and cancellation boundaries before proceeding.
-- [ ] Replace singular `Client.journal` ownership with explicit X2/X3 instances:
+- [x] Replace singular `Client.journal` ownership with explicit X2/X3 instances:
       separate directories, workers, pending queues, replay workers, indexes, budgets,
       fault state, and statistics. Roll back partial initialization and close both stores.
-- [ ] Generalize journal records/recovery to an expected interface, stable journal
+- [x] Generalize journal records/recovery to an expected interface, stable journal
       UUID, immutable record identity, state/call provenance, original timestamps and
       absolute deadline. Validate actual encoded PDU type, not only an outer label.
-- [ ] Bound record/control indexes, callbacks, pending operations, decoding and
+- [x] Bound record/control indexes, callbacks, pending operations, decoding and
       recovery memory. Include both journals in memory reservation estimates; charge
       allocated filesystem blocks, pending writes, sequence/control metadata, and
       temporary rewrite/rotation/recovery space against explicit budgets.
-- [ ] Reserve control capacity for revocation, closure, faults, and sequence updates
+- [x] Reserve control capacity for revocation, closure, faults, and sequence updates
       even when data admission is full. Define bounded control garbage collection that
       cannot forget revocations while covered records or pending writes remain.
 - [ ] Verify independent capacity/workers and that X3 exhaustion cannot consume X2's
@@ -406,42 +404,42 @@ Primary areas: `internal/pkg/li/delivery/{client,client_journal,reorder}.go`,
 `internal/pkg/li/delivery_metadata.go`, `internal/pkg/processor/{call_lifecycle,
 processor_li,call_completion_monitor,pcap_writer,session_output_manager}.go`.
 
-- [ ] Carry unique call incarnations and immutable provenance through admission,
+- [x] Carry unique call incarnations and immutable provenance through admission,
       finalization events, reorder entries, fan-out, and journal controls. Create the
       necessary authenticated call control and reserve its capacity before confirming
       the first corresponding product durable. Bound controls by live/held product limits.
-- [ ] Issue bounded exact-product backlog permits on successful pre-close reorder
+- [x] Issue bounded exact-product backlog permits on successful pre-close reorder
       insertion. Add `DrainCall` for an exact incarnation, coordinating timers and the
       existing callback serialization chain. Drain must not reopen capture admission,
       deadlock on ordinary admission references, or disturb other calls in the buffer.
-- [ ] In persistent mode, normal finalization drains accepted reorder entries,
+- [x] In persistent mode, normal finalization drains accepted reorder entries,
       records completion, and preserves eligible queued/held/in-flight delivery. Keep
       direction/pinned-call cleanup. A concurrent task/destination revocation dominates
       the drain and discards affected entries instead. Keep memory-only behavior tested.
-- [ ] Remove X2-only persistence gates and generalize queue preservation. Journal
+- [x] Remove X2-only persistence gates and generalize queue preservation. Journal
       X3 after reorder; send only after durable callback. Reject new data on capacity
       exhaustion instead of dropping durable queue heads. Account oversized/rejected
       product and pending reservations exactly once per destination copy.
-- [ ] Add durable task/destination/call revocation: close admission, stop affected
+- [x] Add durable task/destination/call revocation: close admission, stop affected
       transport claims, write authenticated control through reserved capacity, then
       acknowledge the boundary and reclaim data asynchronously. Cover pending writes,
       held records, and callbacks; none may resurrect a revoked generation.
-- [ ] Replace void-only cancellation/lifecycle callback contracts or add an explicit
+- [x] Replace void-only cancellation/lifecycle callback contracts or add an explicit
       fault-returning durability hook. Logging a failed revocation is insufficient.
       Automatic expiry and failure paths must latch blocked delivery and report faults;
       synchronous management paths must return failure/uncertainty accurately.
-- [ ] Wire the phase-4 administrative hook to journal revocation. Acknowledge the
+- [x] Wire the phase-4 administrative hook to journal revocation. Acknowledge the
       durable task/destination boundary only after both relevant journal controls and
       administrative state are durable. Test idempotent recovery from partial completion
       and failures in either store; never reactivate an old generation as rollback.
-- [ ] Enforce the original absolute deadline during live/retry ownership, held
+- [x] Enforce the original absolute deadline during live/retry ownership, held
       recovery, replay admission, and immediately before transport write. Add a bounded
       online sweeper independent of MDF connectivity/approval; never refresh age.
-- [ ] Change shutdown ordering to close capture, drain accepted reorder while
+- [x] Change shutdown ordering to close capture, drain accepted reorder while
       authorization infrastructure remains available, resolve pending persistence,
       retain durable backlog, then close journals/locks. Distinguish retained-on-disk,
       volatile loss, expiry, revocation, and partial/uncertain transport writes.
-- [ ] Test timer/drain/finalization races, reused Call-IDs, task changes during drain,
+- [x] Test timer/drain/finalization races, reused Call-IDs, task changes during drain,
       persistence callbacks after revocation, full-spool control writes, failed control
       sync, held records, in-flight cancellation, and shutdown at each ownership state.
 
@@ -454,28 +452,28 @@ Primary areas: `internal/pkg/li/delivery/{journal_replay,journal_manifest,
 journal_sequence,client_journal}.go`, `internal/pkg/li/x2x3/sequence_restore.go`,
 `internal/pkg/li/persistence.go`, `internal/pkg/processor/processor_li.go`.
 
-- [ ] Recover revocation/control state before product eligibility; enforce overdue
+- [x] Recover revocation/control state before product eligibility; enforce overdue
       expiry before exposing records. Treat previously open call incarnations as
       capture-closed and never reconstruct them as active calls.
-- [ ] Version X3 approval/export schemas with exact journal, record, state, task,
+- [x] Version X3 approval/export schemas with exact journal, record, state, task,
       destination, call, content, and deadline binding. Preserve legacy X2 manifest
       compatibility separately; do not copy its historical post-task policy into X3.
-- [ ] Require current startup ADMF reconciliation and unchanged authorized activation
+- [x] Require current startup ADMF reconciliation and unchanged authorized activation
       plus exact destination membership/incarnation at feeder and transport boundaries.
       Missing admin state, mismatched incarnation, failed sync, RADIUS reactivation,
       revocation, or elapsed deadline prevents replay even with an approval file.
-- [ ] Generalize hardcoded X2 queue indexes/metadata reconstruction to the correct
+- [x] Generalize hardcoded X2 queue indexes/metadata reconstruction to the correct
       interface. Maintain bounded lazy payload reads and FIFO-approved prefixes per
       destination/interface; an unapproved head cannot be skipped except by a recorded
       terminal action such as expiry, revocation, or explicit purge.
-- [ ] Generalize sequence checkpoint extraction/restoration to expected X2/X3 type;
+- [x] Generalize sequence checkpoint extraction/restoration to expected X2/X3 type;
       restore before live encoding, preserve interface separation and fan-out semantics,
       and retain checkpoints after completion, expiry, purge, or revocation. Update
       `ClearX3XID` cleanup so durable X3 continuity is not discarded.
-- [ ] Replay original encoded bytes and sequence numbers. Test wrap behavior and
+- [x] Replay original encoded bytes and sequence numbers. Test wrap behavior and
       crashes between product/control/sequence writes and completion checkpoints;
       document possible duplicate delivery after uncertain transport/completion state.
-- [ ] Run an end-to-end scenario: admit RTP during MDF outage, finish the call,
+- [x] Run an end-to-end scenario: admit RTP during MDF outage, finish the call,
       restart, reconcile ADMF, approve backlog, reconnect MDF, and verify exact original
       product delivery while late/new packets for the closed incarnation are rejected.
       Repeat with task withdrawal, destination replacement, wrong state incarnation,
@@ -508,17 +506,17 @@ before implementation and update all references if an adjustment is necessary.
       Preserve `processor.filter_file`/`tap.filter_file`; bind mode/key options under
       each role's `filter_store` configuration section. Resolve the default filename
       after effective LI enablement and mode, preserving an explicit `--filter-file`.
-- [ ] Wire LI state/X3 options through both `flags_li.go` and matching stub config
+- [x] Wire LI state/X3 options through both `flags_li.go` and matching stub config
       structures, `processor.Config`, LI `ManagerConfig`, process mapping and tap's
       centralized LI configuration helper. Bind explicit environment references for
       `LIPPYCAT_PROCESSOR_*`/`LIPPYCAT_TAP_*`; verify CLI > environment > YAML > defaults,
       including explicit empty/zero values. Do not add raw-secret configuration fields.
-- [ ] Reject missing encrypted-store keys, keys supplied in YAML mode, LI enabled
+- [x] Reject missing encrypted-store keys, keys supplied in YAML mode, LI enabled
       with explicit YAML mode, nonpositive X3 capacity/age, absent state/ADMF
       requirements, duplicate key IDs, and aliased/conflicting paths.
       Check both journal directories, snapshots, keys, manifests, lock/control files,
       temporary paths, and RADIUS sidecar; prevent exports from overwriting any store.
-- [ ] Register common migration commands in all/cli/processor/tap binaries, not just
+- [x] Register common migration commands in all/cli/processor/tap binaries, not just
       `cmd/filter` or `cmd/set` (currently CLI/all only). Add LI migration subcommands
       only in LI builds; verify non-LI binaries contain no LI implementation symbols.
 - [x] Implement strict offline YAML→encrypted filter and JSON→encrypted LI-state
@@ -532,23 +530,23 @@ before implementation and update all references if an adjustment is necessary.
       If both default files exist, require explicit path selection. An explicit custom
       path is authoritative but must match the resolved format; never overwrite an
       opposite-format store or automatically convert it when LI enablement changes.
-- [ ] Define no-clobber and explicit in-place rewrite modes, interruption/resume
+- [x] Define no-clobber and explicit in-place rewrite modes, interruption/resume
       behavior, and uncertain-result diagnostics. Offline commands must never activate
       filters/tasks or send product. Preserve the original on definite migration failure.
-- [ ] Implement key rotation with active/prior keys and resumable encrypted rewrites
+- [x] Implement key rotation with active/prior keys and resumable encrypted rewrites
       of all data, sequences, state, and controls. Preserve store identities and deadlines;
       reserve working space, reject insufficient capacity, and prove recovery at each
       interruption point. Report remaining old-key objects before key retirement.
 - [x] Complete the snapshot portion of rotation: Linux same-parent filter and LI-state
       rewrites, exact payload/identity preservation, fresh keys, bounded working space,
       authenticated resume and outcome reporting. Journal rotation and the complete
-      all-store gate above remain open.
-- [ ] Add `x3_journal` as a new management protobuf field without renumbering existing
+      all-store gate above are also implemented and verified below.
+- [x] Add `x3_journal` as a new management protobuf field without renumbering existing
       fields. Expose independent pending, persisted, held, approved, retained, expired,
       revoked, rejected, bytes/limits and fault metrics. Distinguish persistence commit
       uncertainty from transport uncertainty, and expose actionable snapshot-store faults
       without sensitive metadata.
-- [ ] Regenerate with `make -C api/proto`; review generated changes for unrelated
+- [x] Regenerate with `make -C api/proto`; review generated changes for unrelated
       churn. Update `lc show status`, status-client tests, and per-store accounting
       invariants; gauges must converge after drain, purge, expiry, and shutdown.
 
@@ -558,15 +556,15 @@ revoked, and faulted data.
 
 ### 9. Qualify the change and document rollout
 
-- [ ] Extend existing delivery crash/lifecycle/reorder/queue-limit suites, filter
+- [x] Extend existing delivery crash/lifecycle/reorder/queue-limit suites, filter
       manager/local-target/RADIUS suites, administrative persistence/generation suites,
       processor LI integration, and process/tap configuration tests. Use targeted race
       tests for the new synchronization boundaries, not encryption round trips alone.
-- [ ] Inject process death and I/O faults before/after product sync, rename,
+- [x] Inject process death and I/O faults before/after product sync, rename,
       directory sync, control/sequence updates, admin/filter commits, replay approval,
       and completion checkpoints. Verify definite vs uncertain outcomes and idempotent
       startup cleanup, including revoked product with otherwise valid old approvals.
-- [ ] Validate snapshot/key migration and rotation, strict malformed input, secure
+- [x] Validate snapshot/key migration and rotation, strict malformed input, secure
       path ownership, missing store recovery, coherent backup restoration, and rejection
       of an unrelated LI-state incarnation. Verify encrypted-store temporary files,
       logs, and diagnostics do not contain chosen plaintext target/payload markers;
@@ -574,21 +572,21 @@ revoked, and faulted data.
 - [ ] Re-run the phase-5 workload against the final implementation, including backlog
       drain faster than continuing arrivals at the declared supported load. Record
       resource ceilings and X2 impact, plus any deployment sizing constraints.
-- [ ] Update `docs/LI_INTEGRATION.md`, `docs/SECURITY.md`, processor/tap/show READMEs,
+- [x] Update `docs/LI_INTEGRATION.md`, `docs/SECURITY.md`, processor/tap/show READMEs,
       manual command/config/filter/LI references, `example-config.yaml`, and deployment
       examples. Preserve stopped-node YAML editing guidance for LI-disabled operation;
       explain restart-based loading and management API/import while running. Document
       non-LI encryption opt-in and mandatory migration/key setup when enabling LI.
-- [ ] Document key provisioning, first initialization, maintenance upgrade, same-path
+- [x] Document key provisioning, first initialization, maintenance upgrade, same-path
       and changed-path migration, sidecar preservation, bounded retention, historical
       replay approval, fault recovery, full-spool operation, rotation and backup restore.
       State that stopped processes cannot perform expiry deletion and capture/retention
       timestamps are distinct.
-- [ ] Document downgrade constraints for encrypted stores: old binaries cannot read
+- [x] Document downgrade constraints for encrypted stores: old binaries cannot read
       new envelopes and must not open a new store. Require a coordinated compatible backup restore or an
       explicit separately designed export; never offer automatic plaintext fallback.
       Explain old plaintext copies/operator cleanup without promising physical erasure.
-- [ ] Run the applicable commands below, record results and benchmark evidence in
+- [x] Run the applicable commands below, record results and benchmark evidence in
       the implementation record, format changes, then commit code/docs and verified
       checkbox updates. Resolve related failures before marking the phase complete.
 
@@ -618,10 +616,12 @@ actual storage device; `/tmp` measurements alone cannot establish production dis
 performance. No benchmark numbers or implementation test results are claimed by
 this planning document.
 
-Completion requires a recorded successful migration/rotation rehearsal, the
-post-call outage/restart/replay scenario and its revocation variants, the final
-performance report, passing relevant tests/build partitions, and all verified
-implementation tasks checked off. Until then, the feature remains unfinished.
+Implementation completion requires a recorded successful migration/rotation
+rehearsal, the post-call outage/restart/replay scenario and its revocation variants,
+the final performance report, passing relevant tests/build partitions, and verified
+implementation tasks checked off. By the user's explicit scope decision, the
+remaining isolated performance qualification is a documented follow-up and does
+not block that implementation closure. Deferred timing gates remain unpassed.
 
 ## Implementation record
 
@@ -1002,3 +1002,121 @@ redaction and protobuf-to-JSON preservation. Logs remain in
 `/tmp/li-storage-telemetry-{full,full-nonli,race-final,vet-final}.log`; the task cache
 was cleaned. Phase 8 remains open for X3 accounting, full configuration/path
 validation, journal tools and completed rotation/recovery qualification.
+
+### Integrated production implementation checks (2026-09-26)
+
+The production dual-interface path now has independent segmented journal owners,
+immutable X3 provenance/deadlines, durable closure/revocation, bounded detached
+backlog, strict historical approval and restored sequence continuity. The real
+processor outage → normal call closure → restart → ADMF reconciliation → exact
+approval → TLS MDF scenario and its authorization/expiry negative variants pass
+(`/tmp/li-production-lifecycle-e2e-race.log`). Integrated storage/LI/processor
+race tests pass (`/tmp/li-production-integrated-race.log`), as do the supported
+non-CUDA build/vet matrix, repository vet and non-LI implementation exclusion
+(`/tmp/li-production-build-matrix.log`, `/tmp/li-production-make-vet.log`,
+`/tmp/li-production-verify-no-li.log`). Configuration and additive protobuf/status
+contracts are verified by the full command/status tests and field-number assertions.
+
+The corrected production smoke retained and exactly recovered 200 X2 and 200 X3
+copies with no rejected admission (`/tmp/li-production-journal-smoke-corrected.log`).
+It does not qualify sustained throughput on this shared host. The journal rewrite
+coordinator and final recovery rehearsal remain in progress. Under the revised
+closure skill this unfinished scope is NOT_READY; no closure campaign runs while
+implementation is still being written. Phase-level checkboxes remain open until
+their remaining evidence is available.
+
+### Final production migration and repository verification (2026-09-26)
+
+The offline journal coordinator now rewrites LCX2, per-record X2 and segmented
+X2/X3 sources without delivery or authorization effects. It authenticates the
+complete source, reserves a finite workspace and new-key usage attempt before
+sealing, preserves exact encoded products, deadlines, journal/state/call identity,
+controls and allocation/sequence highwaters, then verifies the candidate before
+publication. Changed-path publication retires the old runtime owner under lock;
+in-place publication retains authenticated lineage. Repeated fresh-key rotations
+remain resumable after intervening runtime activity. An old completed operation
+cannot overwrite a subsequently advanced catalog.
+
+Race tests pass for seventeen interruption/resume cuts and both path modes
+(`/tmp/li-journal-rewrite-final-race.log`, delivery 8.954s, securestore 3.212s),
+and actual LCX2/per-record migrations plus repeated rotation
+(`/tmp/li-journal-rewrite-legacy-race.log`, 2.445s). A shared workspace enum change
+initially left an empty snapshot rotation filename. The mapping was corrected;
+the existing allocator-preservation regression and full CLI+LI/securestore race
+suite pass (`/tmp/li-production-cli-li-final.log`).
+
+The final integrated race suite passes storage, the complete LI tree, processor
+and process/tap/migrate/status packages: delivery 54.289s, securestore 18.790s,
+processor 21.519s (`/tmp/li-production-final-integrated-race.log`). Repository
+`make test` passes, including integration 177.104s and the LI delivery suite
+32.389s (`/tmp/li-production-make-test-final.log`). `make vet`, supported
+non-CUDA `make build-matrix`, and `make verify-no-li` pass, with logs at
+`/tmp/li-production-{make-vet,build-matrix,verify-no-li}-final.log`.
+
+These checks do not establish physical power-loss or CUDA hardware qualification.
+The implemented layout and resource limits are documented in
+[the production journal contract](../design/li-x3-journal-layout.md). Earlier
+prototype/layout entries above are historical checkpoints, not descriptions of
+the current production implementation.
+
+The [final performance report](../research/li-x3-storage-benchmarks.md) records
+20,000 accepted/durable X3 outage copies and exact original-byte recovery. Its
+continuing-arrival observation also records 13,270 rejected X3 copies and a slow
+29.94-copy/s transport drain. The functional received-or-retained oracle passed;
+the frozen sustained-load gates did not. Shared-host activity limits attribution
+but does not prove a pass or waive the original requirement. Full healthy-load,
+60-second/15-minute, isolated X2-impact and large-restart qualification remain
+open. No new layout or audit campaign is authorized merely by that timing miss.
+
+### Accepted performance qualification follow-up (2026-09-26)
+
+The user explicitly chose to document isolated performance qualification as a
+follow-up after the verified implementation commit. This changes its completion
+dependency, not the workload, thresholds or observed results. The open phase-5
+measurement/shared-device comparison and phase-9 sustained-load tasks above belong
+to this follow-up; they must not be checked off based on the short functional
+observations.
+
+- [ ] Complete the remaining healthy-load/soak and large-restart benchmark variants
+      needed to reproduce the original qualification matrix on a controlled target.
+- [ ] Run the original 60-second and 15-minute workload, healthy delivery, outage
+      accumulation, continuing arrivals during drain, saturation/control and
+      100k/1m restart matrix; compare X2 alone with simultaneous X2/X3.
+- [ ] Record actual latency, durable throughput, drain versus ingress, allocated
+      disk, CPU/allocations/RSS, control/expiry latency and recovery ceilings against
+      the original thresholds. Do not infer a pass from functional test success.
+
+### Bounded final closure (2026-09-26)
+
+Decision: **CLOSED_WITH_DEFERRALS**. One discovery round, one primary repair batch,
+one integrated post-fix review and one supplemental batch were consumed; no
+additional review or audit campaign followed. The finite findings were transport
+claim resolution before revocation acknowledgement, dual-journal authentication
+before writable recovery, and the explicitly accepted performance qualification
+follow-up.
+
+Revocation now joins exact active transport claims outside ownership locks,
+preserves the committed control outcome on join failure and leaves admission
+blocked. The original independently reproduced dispatcher counterexample passes
+(`/tmp/li-production-revocation-join-probe-fixed.log`), and task, destination, call
+and timeout regressions pass. Grouped journal preparation authenticates complete
+selected bodies and retains the same locks, immutable rings and usage owners
+through activation; failed X3 authentication leaves fresh/existing X2 contents
+unchanged (`/tmp/li-production-final-primary-race.log`, 10.697s).
+
+The integrated review found two X2 compatibility regressions in that preparation
+change: per-record checkpoint repair still ran read-only, and missing raw-LCX2
+ownership lost the migration-required error. Both were fixed with definite,
+uncertain and committed repair-failure cleanup regressions. The final full delivery
+race run passes all production and compatibility tests; its only failure was a new
+malformed synthetic promotion fixture. Correcting that fixture changed no
+production code; its affected rerun passes 1.020s. The composite evidence is
+`/tmp/li-production-supplemental-delivery-race.log` and
+`/tmp/li-production-supplemental-fixture-race.log`. Affected processor races pass
+5.629s; final vet and supported role build partitions pass. These focused rechecks
+resolve the named findings without another audit.
+
+The verified implementation, documentation and plan have been committed to the
+repository; completed commit/report tasks are now checked against that evidence.
+The unchecked performance tasks are accepted follow-ups, not hidden implementation
+blockers or successful qualification claims.

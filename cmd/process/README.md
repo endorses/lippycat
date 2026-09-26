@@ -900,9 +900,20 @@ defaults to held records; `--li-delivery-x2-spool-export-manifest` exports ident
 for review and `--li-delivery-x2-spool-replay-manifest` requests exact authorized
 replay after ADMF startup synchronization;
 `--li-delivery-x2-spool-replay-policy=purge` explicitly discards recovered records.
-Enqueue success does not acknowledge disk sync. X3 is memory-only. See the
+Enqueue success does not acknowledge disk sync. X3 remains memory-only unless
+its independent journal is explicitly configured. See the
 [delivery sizing, configuration and recovery policy](../../docs/LI_INTEGRATION.md#delivery-byte-limits-age-and-x2-persistence)
 before enabling persistence.
+
+Persistent X3 uses `--li-delivery-x3-spool-dir`,
+`--li-delivery-x3-spool-max-bytes`, an independent
+`--li-delivery-x3-spool-key-id`/`--li-delivery-x3-spool-key-file`, and a positive
+`--li-delivery-x3-max-age`. It requires encrypted LI administrative state and
+ADMF startup reconciliation. Normal call completion drains already accepted
+content without extending its original retention deadline. Task/destination
+withdrawal and explicit call cancellation revoke that content. Recovered X3 is
+held until an exact version-2 approval and current authorization both permit it.
+See [persistent X3 recovery](../../docs/LI_INTEGRATION.md#persistent-x3-and-historical-delivery).
 
 Independent PDU caps are available through `--li-delivery-x2-queue-size` and
 `--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy

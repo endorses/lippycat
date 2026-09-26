@@ -58,20 +58,29 @@ Use `processor` or `tap` in place of `ROLE` below. All tap protocols use the sam
 settings. Filter mode is selected by effective LI enablement, independent of
 whether the binary includes LI support.
 
-| Key                                       | Default | Description                                                                                                         |
-| ----------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `ROLE.filter_file`                        | Empty   | Explicit snapshot path; otherwise select `~/.config/lippycat/filters.yaml` or `filters.enc` according to mode.      |
-| `ROLE.filter_store.mode`                  | `auto`  | `auto` selects YAML with LI disabled and encrypted with LI enabled; explicit `yaml` with LI enabled is invalid.     |
-| `ROLE.filter_store.key_id`                | Empty   | Active filter key ID; required in encrypted mode.                                                                   |
-| `ROLE.filter_store.key_file`              | Empty   | Private raw 32-byte key file reference; encrypted mode only.                                                        |
-| `ROLE.filter_store.read_keys`             | `[]`    | Up to four prior `id=path` references with distinct IDs and material.                                               |
-| `ROLE.li.state_file`                      | Empty   | Encrypted administrative snapshot path; empty disables administrative persistence where replay does not require it. |
-| `ROLE.li.state_key_id`                    | Empty   | Active administrative key ID.                                                                                       |
-| `ROLE.li.state_key_file`                  | Empty   | Required with state persistence; independent private raw 32-byte key file.                                          |
-| `ROLE.li.state_read_keys`                 | `[]`    | Up to four prior administrative `id=path` references.                                                               |
-| `ROLE.li.delivery_x2_spool_key_id`        | Empty   | Active X2 key ID; empty preserves the existing key-file-only compatibility mode.                                    |
-| `ROLE.li.delivery_x2_spool_legacy_key_id` | Empty   | Explicit configured key ID for legacy records without embedded key IDs.                                             |
-| `ROLE.li.delivery_x2_spool_read_keys`     | `[]`    | Up to four prior X2 `id=path` references.                                                                           |
+| Key                                         | Default | Description                                                                                                         |
+| ------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `ROLE.filter_file`                          | Empty   | Explicit snapshot path; otherwise select `~/.config/lippycat/filters.yaml` or `filters.enc` according to mode.      |
+| `ROLE.filter_store.mode`                    | `auto`  | `auto` selects YAML with LI disabled and encrypted with LI enabled; explicit `yaml` with LI enabled is invalid.     |
+| `ROLE.filter_store.key_id`                  | Empty   | Active filter key ID; required in encrypted mode.                                                                   |
+| `ROLE.filter_store.key_file`                | Empty   | Private raw 32-byte key file reference; encrypted mode only.                                                        |
+| `ROLE.filter_store.read_keys`               | `[]`    | Up to four prior `id=path` references with distinct IDs and material.                                               |
+| `ROLE.li.state_file`                        | Empty   | Encrypted administrative snapshot path; empty disables administrative persistence where replay does not require it. |
+| `ROLE.li.state_key_id`                      | Empty   | Active administrative key ID.                                                                                       |
+| `ROLE.li.state_key_file`                    | Empty   | Required with state persistence; independent private raw 32-byte key file.                                          |
+| `ROLE.li.state_read_keys`                   | `[]`    | Up to four prior administrative `id=path` references.                                                               |
+| `ROLE.li.delivery_x2_spool_key_id`          | Empty   | Active X2 key ID; empty preserves the existing key-file-only compatibility mode.                                    |
+| `ROLE.li.delivery_x2_spool_legacy_key_id`   | Empty   | Explicit configured key ID for legacy records without embedded key IDs.                                             |
+| `ROLE.li.delivery_x2_spool_read_keys`       | `[]`    | Up to four prior X2 `id=path` references.                                                                           |
+| `ROLE.li.delivery_x3_spool_dir`             | Empty   | Enables independent encrypted X3 persistence; requires LI state and ADMF startup reconciliation.                    |
+| `ROLE.li.delivery_x3_spool_max_bytes`       | `0`     | Explicit positive allocated disk budget, including pending and control reservations.                                |
+| `ROLE.li.delivery_x3_spool_key_file`        | Empty   | Independently provisioned private raw 32-byte X3 key.                                                               |
+| `ROLE.li.delivery_x3_spool_key_id`          | Empty   | Active X3 key ID.                                                                                                   |
+| `ROLE.li.delivery_x3_spool_read_keys`       | `[]`    | At most four prior X3 `id=path` references.                                                                         |
+| `ROLE.li.delivery_x3_max_age`               | `0`     | Original-admission retention duration; must be positive when X3 persistence is enabled.                             |
+| `ROLE.li.delivery_x3_spool_replay_policy`   | `hold`  | Recovered X3 stays held for explicit authorization; `purge` durably discards it.                                    |
+| `ROLE.li.delivery_x3_spool_replay_manifest` | Empty   | Private version-2 approval manifest for exact historical X3 records.                                                |
+| `ROLE.li.delivery_x3_spool_export_manifest` | Empty   | Private export of held X3 identities for review.                                                                    |
 
 LI settings require an LI build. Enabled encrypted stores must use independently
 provisioned keys, including prior read keys. The existing

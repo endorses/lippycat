@@ -1,11 +1,14 @@
 # LI X3 storage measurements
 
-Status: **calibration only; X3 qualification is not complete**. The current
-per-record protocol is infeasible for the required workload on the measured
-filesystem. All three benchmark-only immutable batch/head kernels, including
-grouped publication and head-container exchange, fail the frozen median-latency
-gate. No production alternative is selected. Phase 5 remains open;
-its final integration must repeat the frozen workload.
+Status: **shared-host calibration only; X3 qualification is not complete**.
+The per-record protocol and three immutable batch/head kernels missed their
+measured throughput or median-latency gates during these runs. The user was also
+using this machine for other work: these results do not isolate the storage
+layout's performance or establish an exclusive-host capacity limit. The raw
+observations and frozen thresholds remain unchanged. Production implementation
+is proceeding with fixed segments; its final integrated qualification remains
+open and must state concurrent host load rather than presenting these probes as
+a fair isolated comparison.
 
 The next [bounded segment experiment](../design/li-x3-segment-layout.md) has a
 reviewed helper/codec/recovery implementation and a passing focused test gate.
@@ -711,3 +714,151 @@ Further work remains explicit:
 - [ ] Add actual X3 admission, lifecycle controls, independent X2/X3 capacity and transport to the harness.
 - [ ] Run the primary workload, secondary saturation cases, full-capacity controls, 15-minute soak and 100k/1m restart cases.
 - [ ] Repeat the complete acceptance campaign after final integration; publish supported load and limitations.
+
+## Production client outage smoke — 2026-09-26
+
+This run exercises the actual segmented production journal and client on the
+project's ext4 volume. It is a one-second, one-call smoke measurement on the
+shared host, not the frozen 100-call qualification. Other task/test and user
+activity was not excluded or synchronized; no exclusive-host throughput or
+storage-capacity claim follows from these numbers. The measured worktree was
+based on `b1520ce2` plus the in-flight production journal/client integration.
+Final integration still requires the complete workload repeat.
+
+The existing `BenchmarkAuditProductionJournalOutage` harness uses valid RTP PDUs
+with the corrected `SetPayload` framing and the 70%/20%/10% media-size mix.
+X3 uses `PrepareX3` and `SendAcceptedX3`; X2 instruments the same detached
+`persistItem` branch used by `SendX2WithMetadata`, retaining the item only to
+observe its production durability callback. Both owners and their retry/expiry
+workers run with unavailable MDF transport. The independent producer uses source
+clock pacing, not storage completion, and records actual per-copy admission
+instants. Callback ages use the timestamp captured inside the real durability
+callback. The maximum 10 ms coalescing timer, queued work, encryption, required
+control/head/usage work and synchronization remain inside that age. The roughly
+25 ms p99 values are therefore end-to-end admission-to-durability ages, not
+isolated filesystem sync timings.
+
+Configuration was one bidirectional call at 50 pps per direction, two DIDs, plus
+100 X2 source products/s to those DIDs. X2 uses synthetic SIP with 512–4,096-byte
+message bodies and measured encoded framing overhead. Each interface has its
+own key and journal: X2 capacity 512 MiB, X3 capacity 4 GiB, 4,096 transport slots
+and 64 MiB queue payload capacity per interface per destination. Retention is
+explicitly ten minutes for this restart oracle; it is not an implicit product
+default. Setup, captured-call closure, shutdown, reopen and exact-byte checking
+are measured/reported separately from the timed producer-plus-durable interval.
+The observer and original-byte SHA-256 oracle are included in process CPU and
+memory counters; their overhead is not attributed solely to journal code.
+
+```sh
+LC_LI_STORAGE_BENCH_DIR=/home/grischa/Projects/lippycat \
+LC_LI_PRODUCTION_CALLS=1 \
+LC_LI_PRODUCTION_SECONDS=1 \
+LC_LI_PRODUCTION_DESTINATIONS=2 \
+LC_LI_PRODUCTION_MODE=dual \
+GOCACHE=/tmp/li-production-root-cache \
+go test -tags li ./internal/pkg/li/delivery \
+  -run '^$' -bench '^BenchmarkAuditProductionJournalOutage$' \
+  -benchtime=1x -count=1 -timeout=120s \
+  > /tmp/li-production-journal-smoke-corrected.log 2>&1
+```
+
+| Observation                                                         |              X2 |              X3 |
+| ------------------------------------------------------------------- | --------------: | --------------: |
+| Offered / accepted / callbacks                                      | 200 / 200 / 200 | 200 / 200 / 200 |
+| Admission rejections                                                |               0 |               0 |
+| Callback p50                                                        |        16.84 ms |        16.56 ms |
+| Callback p99                                                        |        24.98 ms |        24.77 ms |
+| Callback maximum                                                    |        26.71 ms |        24.82 ms |
+| Copies per complete producer-plus-durable second                    |           198.1 |           198.1 |
+| Exact original-byte / deadline / per-DID FIFO records after restart |             200 |             200 |
+| Additional usage invocations reserved during timed interval         |               0 |               0 |
+
+The owner creates its real authenticated usage reservation during setup; this
+short run stays within it. Zero additional reservation therefore does **not**
+exercise an in-interval renewal. It must not substitute for the earlier kernel
+renewal evidence or a production long-run renewal test.
+
+| Shared measurement                               |                Observed value |
+| ------------------------------------------------ | ----------------------------: |
+| Setup                                            |                 751.178224 ms |
+| Producer interval                                |                 991.000982 ms |
+| Producer plus durability interval                |                 1.009408502 s |
+| Admission p99                                    |                    0.05897 ms |
+| Scheduling lateness p99 / maximum                |              1.073 / 1.153 ms |
+| Actual allocated filesystem bytes, both journals |                   134,242,304 |
+| CPU                                              |                      0.1381 s |
+| Total allocated bytes / allocation objects       |           17,491,488 / 66,675 |
+| Ending Go heap / RSS                             | 15,086,496 / 53,080,064 bytes |
+| Observed transport queue / X3 pending peaks      |               392 / 6 records |
+| Reopen before payload oracle                     |                      0.1037 s |
+
+Both journals reopened held and unapproved. The oracle compared each accepted
+copy's original hash, immutable deadline and per-destination FIFO, then verified
+that no accepted identity remained unmatched. The private disposable store was
+removed by the harness. The exact successful raw output is retained at
+`/tmp/li-production-journal-smoke-corrected.log`.
+
+The earlier `/tmp/li-production-journal-smoke.log` remains unchanged as a failed
+harness smoke: it hardcoded destination generation `1` instead of the endpoint
+fingerprint returned by `DestinationDeliveryGeneration`. All 200 offered X3
+copies were rejected before reaching the journal, so its zero X3 timings and
+vacuous X3 restart oracle are invalid evidence of X3 operation. The corrected
+harness now reports the first rejection reason and requires a positive accepted
+count for every selected interface. Its X2 observations remain observations of
+that earlier limited run, not an isolated shared-device baseline comparison.
+
+- [x] Measure the corrected production client/journal path for the one-second dual-interface outage smoke, with actual callbacks and exact restart oracle.
+- [ ] Run the frozen 100-call duration, healthy transport, continuing-arrival drain, isolated X2 comparison, saturation/control, 15-minute soak and 100k/1m restart matrix against the final implementation.
+
+## Production 100-call outage and continuing-arrival drain observation
+
+One additional bounded run used the same production owner on the same shared
+ext4 host: 100 RTP calls at 100 packets/s each, two destinations, one-second
+outage, concurrent X2 at 100 source products/s, then real TLS MDF replay while
+another second of traffic continued. `LC_LI_PRODUCTION_DRAIN=1` enables the
+existing harness's control probes and received-or-retained byte oracle.
+
+```bash
+LC_LI_STORAGE_BENCH_DIR=/home/grischa/Projects/lippycat \
+LC_LI_PRODUCTION_CALLS=100 LC_LI_PRODUCTION_SECONDS=1 \
+LC_LI_PRODUCTION_DESTINATIONS=2 LC_LI_PRODUCTION_MODE=dual \
+LC_LI_PRODUCTION_DRAIN=1 GOCACHE=/tmp/li-production-root-cache \
+go test -tags li ./internal/pkg/li/delivery -run '^$' \
+  -bench '^BenchmarkAuditProductionJournalOutage$' \
+  -benchtime=1x -count=1 -timeout=120s
+```
+
+| Observation                                          |               X2 |                       X3 |
+| ---------------------------------------------------- | ---------------: | -----------------------: |
+| Outage offered / accepted / durable callbacks        |  200 / 200 / 200 | 20,000 / 20,000 / 20,000 |
+| Outage rejected                                      |                0 |                        0 |
+| Durable copies/s over producer-plus-durable interval |            195.9 |                   19,586 |
+| Outage callback p50 / p99                            | 17.83 / 34.85 ms |         63.28 / 191.1 ms |
+| Exact recovered copies after first restart           |              200 |                   20,000 |
+| Continuing arrivals offered / accepted / rejected    |    200 / 200 / 0 |  20,000 / 6,730 / 13,270 |
+| Complete original frames received by MDF             |              400 |                      536 |
+| Durable retained copies after second restart         |                0 |                   26,194 |
+| Received-and-retained overlap                        |                0 |                        0 |
+
+Every accepted copy was either received with its original encoded bytes or
+retained after restart, with no unmatched identities or partial transport frames.
+The control probe durably revoked held product in 25.69 ms and rejected later
+admission for that boundary; held expiry was observed after 729.5 ms. Allocated
+journal bytes after the outage were 134,242,304; ending outage RSS was 119,226,368
+bytes and reopen took 0.4767 s. The combined drain observation lasted 17.901 s;
+its reported X3 transport rate was 29.94 copies/s, drain CPU 11.64 s, ending RSS
+177,664,000 bytes and cumulative allocation 7,284,769,704 bytes.
+
+These numbers **do not pass the frozen throughput/latency/drain qualification**.
+The functional byte/retention/control oracle passed; the test's PASS does not
+mean the timing thresholds passed. Shared machine activity prevents an isolated
+capacity claim. The observed slow drain and rejected continuing arrivals remain
+explicit deployment limitations pending fair-host qualification; they are not
+hidden by reporting admission throughput alone. No timing retry or additional
+layout prototype followed this observation, per the user's instruction.
+
+The raw output remains `/tmp/li-production-journal-drain-observation.log`. Short
+probes use a 4 GiB X3 budget. Runs longer than ten seconds select 24 GiB so the
+primary 1.2m-copy workload has its conservative terminal-credit capacity; actual
+allocated bytes are measured separately. The isolated 60-second/15-minute and
+large-restart matrix remains unqualified.

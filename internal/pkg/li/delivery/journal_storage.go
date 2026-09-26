@@ -48,7 +48,7 @@ func UpgradeLegacyJournal(cfg JournalConfig) (securestore.Outcome, error) {
 	return securestore.Committed, nil
 }
 
-func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
+func openLegacyJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 	if cfg.MaxBytes <= journalFaultReserve || cfg.MaxPending <= 0 || cfg.MaxRecords <= 0 || cfg.MaxRecords > 1_000_000 {
 		return nil, errors.New("invalid X2 journal capacity")
 	}
@@ -59,7 +59,11 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 			legacyID = keyID // Original raw-key configuration selects exactly one key.
 		}
 	}
-	ring, err := securestore.LoadKeyring(securestore.KeyConfig{Active: securestore.KeyRef{ID: keyID, File: cfg.KeyFile}, Prior: cfg.ReadKeys, LegacyID: legacyID})
+	ring := cfg.Keys
+	var err error
+	if ring == nil {
+		ring, err = securestore.LoadKeyring(securestore.KeyConfig{Active: securestore.KeyRef{ID: keyID, File: cfg.KeyFile}, Prior: cfg.ReadKeys, LegacyID: legacyID})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -70,17 +74,16 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 	}
 	// The owner queue may be larger; filesystem work has its own fixed ceiling.
 	cfg.MaxPending = min(cfg.MaxPending, 4096)
-	if err := securestore.EnsureDir(cfg.Dir); err != nil {
-		return nil, fmt.Errorf("create X2 journal: %w", err)
-	}
-	dir, err := securestore.OpenDir(cfg.Dir)
+	dir, err := journalOpenDirectory(cfg)
 	if err != nil {
 		return nil, err
 	}
+
 	j := &Journal{cfg: cfg, store: dir, keys: ring, entries: make(map[uint64]*journalEntry),
 		ops: make(chan journalOperation, cfg.MaxPending), done: make(chan struct{}),
 		sequences: make(map[string]journalSequenceEntry), heldByDID: make(map[uuid.UUID]int), wake: make(chan struct{}, 1)}
 	j.telemetry.Initialize("encrypted", ring)
+
 	defer func() {
 		if result != nil {
 			result = errors.Join(result, j.closeStorage())
@@ -89,9 +92,34 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 			}
 		}
 	}()
-	j.lock, err = dir.Lock(".lock")
+	j.lock = cfg.rewriteLock
+	if j.lock == nil {
+		j.lock, err = dir.Lock(".lock")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("lock journal: %w", err)
+	}
+	if !cfg.offline {
+		if _, e := dir.Read(".journal-retired", 4<<20); e == nil {
+			return nil, errors.New("journal source has been retired by offline rewrite")
+		} else if !errors.Is(e, os.ErrNotExist) {
+			return nil, e
+		}
+	}
+	if !cfg.offline {
+		if _, probeErr := dir.FileIdentity(".segments"); probeErr == nil {
+			if err := j.closeStorage(); err != nil {
+				return nil, err
+			}
+			j.store = nil
+			j.lock = nil
+			cfg.Keys = ring
+			cfg.ValidateKeys = nil
+			cfg.Interface = PDUTypeX2
+			return openSegmentJournal(cfg, upgrade)
+		} else if !errors.Is(probeErr, os.ErrNotExist) {
+			return nil, probeErr
+		}
 	}
 	// The stable sidecar and this empty data inode cover new and old binaries.
 	// Old binaries flock .lock itself; Dir retains that inode lock on creation.
@@ -117,15 +145,40 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 	}
 	j.stats.MaxBytes = cfg.MaxBytes
 	j.writeFile = j.writePath
-	if _, err := dir.RecoverTemporaries(); err != nil {
-		return nil, err
+	if !cfg.offline {
+		if _, err := dir.RecoverTemporaries(); err != nil {
+			return nil, err
+		}
 	}
 	var products, sequences, temporary []string
 	stateFound, ledgerFound := false, false
 	metadataCount := 0
+	preflightTemporaryCount := 0
 	metadataAllocated := int64(0)
 	err = dir.WalkEntries(func(name string) error {
+		if cfg.offline && cfg.rewriteExclusions[name] {
+			var err error
+			switch {
+			case strings.HasPrefix(name, ".securestore-stage-"), strings.HasPrefix(name, ".securestore-tmp-"):
+				_, err = dir.RotationTemporaryAllocatedSize(name)
+			case strings.HasPrefix(name, ".securestore-lock-"), strings.HasPrefix(name, ".usage-"):
+				_, err = dir.MetadataAllocatedSize(name)
+			default:
+				_, err = dir.AllocatedSize(name)
+			}
+			return err
+		}
 		switch {
+		case cfg.preflight && strings.HasPrefix(name, ".securestore-tmp-"):
+			preflightTemporaryCount++
+			if preflightTemporaryCount > cfg.MaxPending+2 {
+				return errors.New("too many incomplete journal objects")
+			}
+			_, err := dir.RotationTemporaryAllocatedSize(name)
+			return err
+		case name == ".journal-retired" && cfg.offline:
+			_, err := dir.Read(name, 4<<20)
+			return err
 		case name == ".lock":
 			return nil
 		case strings.HasPrefix(name, ".securestore-lock-"), strings.HasPrefix(name, ".usage-"):
@@ -187,7 +240,7 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 		if !empty && !stateFound && len(products) == 0 && len(sequences) == 0 {
 			return nil, errors.New("required journal usage ledger is missing from used storage")
 		}
-		if empty && !upgrade {
+		if empty && !upgrade && !cfg.offline {
 			if err := j.initializeUsage(); err != nil {
 				return nil, err
 			}
@@ -196,6 +249,9 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 		if err := j.installWriter(); err != nil {
 			return nil, err
 		}
+	}
+	if cfg.offline && !stateFound {
+		return nil, errors.New("offline source lacks durable record highwater")
 	}
 	if stateFound {
 		data, err := dir.Read(".state", 4096)
@@ -253,7 +309,7 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 			return nil, err
 		}
 	}
-	if !j.readOnly {
+	if !j.readOnly && !cfg.offline {
 		// All published records have authenticated before any owner repair writes.
 		for _, name := range temporary {
 			out, err := dir.Remove(name)
@@ -275,6 +331,11 @@ func openJournal(cfg JournalConfig, upgrade bool) (_ *Journal, result error) {
 		}
 	}
 	j.telemetry.Ready()
+	if cfg.offline {
+		j.preparedTemporaries = temporary
+		j.readOnly = true
+		return j, nil
+	}
 	go j.run()
 	return j, nil
 }
@@ -308,15 +369,18 @@ func (j *Journal) installWriter() error {
 }
 
 func (j *Journal) closeStorage() (result error) {
+	if j.segments != nil {
+		result = errors.Join(result, j.segments.close())
+	}
 	j.telemetry.Closing()
 	defer func() { j.telemetry.Closed(result) }()
-	if j.usage != nil {
+	if j.usage != nil && !j.borrowedUsage {
 		result = errors.Join(result, j.usage.Close())
 	}
-	if j.lock != nil {
+	if j.lock != nil && j.cfg.rewriteDir == nil {
 		result = errors.Join(result, j.lock.Close())
 	}
-	if j.store != nil {
+	if j.store != nil && j.cfg.rewriteDir == nil {
 		result = errors.Join(result, j.store.Close())
 	}
 	return result
@@ -353,6 +417,9 @@ func (j *Journal) removeRecord(id uint64) error {
 }
 
 func (j *Journal) readRecord(id uint64) (JournalRecord, error) {
+	if j.segments != nil {
+		return j.segments.readRecord(id)
+	}
 	b, err := j.store.Read(journalRecordName(id), journalMaxRecord)
 	if err != nil {
 		return JournalRecord{}, err
@@ -405,7 +472,7 @@ func (j *Journal) decodeObject(p securestore.Purpose, object string, b []byte, l
 		if j.legacyBootstrapOnly {
 			return rec, errors.New("cannot recover missing journal state from new-format objects")
 		}
-		if j.readOnly || j.storeID == [16]byte{} {
+		if j.usage == nil || j.storeID == [16]byte{} {
 			return rec, fmt.Errorf("required journal usage ledger is missing: %w", ErrJournalMigrationRequired)
 		}
 		plain, err = j.keys.Open(p, securestore.Binding{Store: j.storeID, Object: object}, b, limit)
@@ -527,4 +594,19 @@ func validateJournalJSONObject(d *json.Decoder, fields journalJSONFields) error 
 		return errors.New("missing fields")
 	}
 	return nil
+}
+
+func journalOpenDirectory(cfg JournalConfig) (*securestore.Dir, error) {
+	if cfg.rewriteDir != nil {
+		if cfg.rewriteLock == nil {
+			return nil, errors.New("offline journal owner lock is required")
+		}
+		return cfg.rewriteDir, nil
+	}
+	if !cfg.offline {
+		if err := securestore.EnsureDir(cfg.Dir); err != nil {
+			return nil, err
+		}
+	}
+	return securestore.OpenDir(cfg.Dir)
 }

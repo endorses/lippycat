@@ -96,16 +96,18 @@ func (h *lifecycleTombstoneHeap) Pop() any {
 type CallLifecycleRegistry struct {
 	mu sync.Mutex
 
-	active         map[string]*lifecycleCall
-	finalizing     map[string]*lifecycleTombstone
-	tombstones     map[string]*lifecycleTombstone
-	tombstoneQueue lifecycleTombstoneHeap
-	tombstoneTTL   time.Duration
-	tombstoneLimit int
-	nextGeneration uint64
-	entropy        io.Reader // crypto/rand.Reader; replaced only by fault-injection tests
-	identityErr    error
-	subscribers    []func(CallFinalizationEvent)
+	active          map[string]*lifecycleCall
+	finalizing      map[string]*lifecycleTombstone
+	tombstones      map[string]*lifecycleTombstone
+	tombstoneQueue  lifecycleTombstoneHeap
+	tombstoneTTL    time.Duration
+	tombstoneLimit  int
+	nextGeneration  uint64
+	entropy         io.Reader // crypto/rand.Reader; replaced only by fault-injection tests
+	identityErr     error
+	subscribers     []func(CallFinalizationEvent)
+	finalizers      []func(CallFinalizationEvent) error
+	finalizationErr error
 
 	shutdown           bool
 	totalInflight      uint64
@@ -168,14 +170,14 @@ func (r *CallLifecycleRegistry) Err() error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.identityErr
+	return errors.Join(r.identityErr, r.finalizationErr)
 }
 
 // newCallLocked allocates only when a new generation is needed. Failure leaves
 // generation and lifecycle maps unchanged and permanently closes new admission.
 func (r *CallLifecycleRegistry) newCallLocked(callID string) (*lifecycleCall, error) {
-	if r.identityErr != nil {
-		return nil, r.identityErr
+	if err := errors.Join(r.identityErr, r.finalizationErr); err != nil {
+		return nil, err
 	}
 	if r.nextGeneration == ^uint64(0) {
 		r.identityErr = fmt.Errorf("%w: generation exhausted", ErrCallLifecycleIdentity)
@@ -225,8 +227,8 @@ func (r *CallLifecycleRegistry) RestartInvite(callID string) (*CallAdmission, er
 	if r.shutdown {
 		return nil, ErrCallLifecycleShutdown
 	}
-	if r.identityErr != nil {
-		return nil, r.identityErr
+	if err := errors.Join(r.identityErr, r.finalizationErr); err != nil {
+		return nil, err
 	}
 	if _, busy := r.finalizing[callID]; busy {
 		return nil, &FinalizedCallError{CallID: callID}
@@ -257,8 +259,8 @@ func (r *CallLifecycleRegistry) StartInviteAfterExpiry(callID string) (*CallAdmi
 	if r.shutdown {
 		return nil, ErrCallLifecycleShutdown
 	}
-	if r.identityErr != nil {
-		return nil, r.identityErr
+	if err := errors.Join(r.identityErr, r.finalizationErr); err != nil {
+		return nil, err
 	}
 	if r.active[callID] != nil || r.finalizing[callID] != nil || r.tombstones[callID] != nil {
 		return nil, &FinalizedCallError{CallID: callID}
@@ -282,8 +284,8 @@ func (r *CallLifecycleRegistry) admit(callID string, requiredGeneration uint64) 
 	if r.shutdown {
 		return nil, ErrCallLifecycleShutdown
 	}
-	if r.identityErr != nil {
-		return nil, r.identityErr
+	if err := errors.Join(r.identityErr, r.finalizationErr); err != nil {
+		return nil, err
 	}
 	now := time.Now()
 	if terminal := r.finalizing[callID]; terminal != nil {
@@ -331,6 +333,18 @@ func (r *CallLifecycleRegistry) Subscribe(callback func(CallFinalizationEvent)) 
 	}
 	r.mu.Lock()
 	r.subscribers = append(r.subscribers, callback)
+	r.mu.Unlock()
+}
+
+// SubscribeFinalizer adds a required error-returning closure boundary. Failure
+// remains latched against new admissions; existing calls can still finalize and
+// cleanup observers always run. Register before capture publication.
+func (r *CallLifecycleRegistry) SubscribeFinalizer(callback func(CallFinalizationEvent) error) {
+	if r == nil || callback == nil {
+		return
+	}
+	r.mu.Lock()
+	r.finalizers = append(r.finalizers, callback)
 	r.mu.Unlock()
 }
 
@@ -393,12 +407,23 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 	r.finalizing[callID] = &lifecycleTombstone{callID: callID, generation: call.generation, incarnation: call.incarnation, finalizedAt: now, index: -1}
 	r.totalFinalizing++
 	subscribers := append([]func(CallFinalizationEvent){}, r.subscribers...)
+	finalizers := append([]func(CallFinalizationEvent) error{}, r.finalizers...)
 	event := CallFinalizationEvent{CallID: callID, Generation: call.generation, CallIncarnation: call.incarnation, Reason: reason, FinalizedAt: now}
 	result.Finalized = true
 	result.FinalizedAt = now
 	r.mu.Unlock()
 
 	<-call.drained
+	for _, finalizer := range finalizers {
+		result.Err = errors.Join(result.Err, invokeRequiredFinalizer(finalizer, event))
+	}
+	if result.Err != nil {
+		r.mu.Lock()
+		if r.finalizationErr == nil {
+			r.finalizationErr = result.Err
+		}
+		r.mu.Unlock()
+	}
 	for index, subscriber := range subscribers {
 		invokeLifecycleSubscriber(subscriber, event, index)
 	}
@@ -410,6 +435,15 @@ func (r *CallLifecycleRegistry) finalize(callID string, requiredGeneration uint6
 	r.closeShutdownDrainLocked()
 	r.mu.Unlock()
 	return result
+}
+
+func invokeRequiredFinalizer(finalizer func(CallFinalizationEvent) error, event CallFinalizationEvent) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errors.New("required call closure panicked")
+		}
+	}()
+	return finalizer(event)
 }
 
 // IsFinalized reports whether callID has an unexpired terminal tombstone.

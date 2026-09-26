@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/google/uuid"
 )
 
 const (
@@ -30,6 +31,7 @@ type ReorderBuffer struct {
 	onDiscard          func(int)
 	mu                 sync.Mutex
 	streams            map[reorderStreamKey]*rtpStream
+	calls              map[reorderCallKey]*DrainTicket
 	deliverFn          func(ReorderEntry)
 	flushDelay         time.Duration
 	packetCap, byteCap int
@@ -47,15 +49,19 @@ type bufferedPDU struct {
 // infers one from Call-ID, SSRC, or the local generation.
 type ReorderEntry struct {
 	budgetCharge int64
-	Metadata     li.DeliveryMetadata
-	CallID       string
-	Generation   uint64
-	PDU          []byte
+	// Accepted owns one prepared persistent destination copy. Reorder releases
+	// it on rejection/discard; delivery consumes it exactly once on handoff.
+	Accepted   *AcceptedX3
+	Metadata   li.DeliveryMetadata
+	CallID     string
+	Generation uint64
+	PDU        []byte
 }
 type reorderStreamKey struct {
-	callID     string
-	generation uint64
-	ssrc       uint32
+	callID      string
+	generation  uint64
+	incarnation uuid.UUID
+	ssrc        uint32
 }
 type rtpStream struct {
 	budget          *ReorderBudget
@@ -106,6 +112,13 @@ func (rb *ReorderBuffer) DeliverCallX3AfterCommit(callID string, generation uint
 
 // DeliverEntryX3AfterCommit preserves the producer's immutable admission metadata.
 func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint32, seq uint16, afterCommit func()) {
+	rb.AcceptEntryX3AfterCommit(entry, ssrc, seq, afterCommit)
+}
+
+// AcceptEntryX3AfterCommit reports actual acceptance, unlike afterCommit which
+// runs on rejection too. The producer must relinquish Accepted on this call;
+// every rejection, duplicate, discard or delivered callback settles it once.
+func (rb *ReorderBuffer) AcceptEntryX3AfterCommit(entry ReorderEntry, ssrc uint32, seq uint16, afterCommit func()) bool {
 	now := time.Now()
 	// Start local residence at the first reorder admission when the producer
 	// has not supplied an earlier admission. Final delivery enqueue must not
@@ -114,9 +127,11 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 		entry.Metadata.AdmittedAt = now
 	}
 	pdu := entry.PDU
-	key := reorderStreamKey{callID: entry.CallID, generation: entry.Generation, ssrc: ssrc}
+	key := reorderStreamKey{callID: entry.CallID, generation: entry.Generation, incarnation: entry.Metadata.CallIncarnation, ssrc: ssrc}
 	rb.mu.Lock()
-	if rb.stopped || len(entry.CallID) > 128 {
+	callKey := reorderCallKey{callID: entry.CallID, generation: entry.Generation, incarnation: entry.Metadata.CallIncarnation}
+	closed := rb.calls[callKey] != nil && rb.calls[callKey].draining
+	if rb.stopped || len(entry.CallID) > 128 || closed {
 		rb.mu.Unlock()
 		if afterCommit != nil {
 			afterCommit()
@@ -124,7 +139,23 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 		if rb.onDiscard != nil {
 			rb.onDiscard(1)
 		}
-		return
+		entry.releaseAccepted()
+		return false
+	}
+	newCall := false
+	if entry.Accepted != nil && entry.CallID != "" {
+		newCall = rb.calls[callKey] == nil
+		if !callKey.valid() || rb.reserveCallLocked(callKey) == nil {
+			rb.mu.Unlock()
+			if afterCommit != nil {
+				afterCommit()
+			}
+			entry.releaseAccepted()
+			if rb.onDiscard != nil {
+				rb.onDiscard(1)
+			}
+			return false
+		}
 	}
 	entry.CallID = strings.Clone(entry.CallID)
 	entry.Metadata.CallID = entry.CallID
@@ -132,6 +163,10 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 	key.callID = entry.CallID
 	charge := int64(len(pdu)) + reorderPacketCharge
 	if !rb.budget.reserve(charge) {
+		if newCall {
+			delete(rb.calls, callKey)
+			rb.budget.release(reorderCallCharge)
+		}
 		rb.mu.Unlock()
 		if afterCommit != nil {
 			afterCommit()
@@ -139,7 +174,8 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 		if rb.onDiscard != nil {
 			rb.onDiscard(1)
 		}
-		return
+		entry.releaseAccepted()
+		return false
 	}
 	if rb.budget != nil {
 		entry.budgetCharge = charge
@@ -148,6 +184,10 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 	if s == nil {
 		if !rb.budget.reserve(reorderStreamCharge) {
 			rb.budget.release(charge)
+			if newCall {
+				delete(rb.calls, callKey)
+				rb.budget.release(reorderCallCharge)
+			}
 			rb.mu.Unlock()
 			if afterCommit != nil {
 				afterCommit()
@@ -155,7 +195,8 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 			if rb.onDiscard != nil {
 				rb.onDiscard(1)
 			}
-			return
+			entry.releaseAccepted()
+			return false
 		}
 		s = &rtpStream{budget: rb.budget, buffer: make(map[uint16]bufferedPDU)}
 		rb.streams[key] = s
@@ -166,6 +207,7 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 	// boundary just as we do for entries retained across a sequence gap.
 	entry.PDU = append([]byte(nil), entry.PDU...)
 	var out []ReorderEntry
+	accepted := true
 	if !s.hasBase {
 		s.hasBase = true
 		s.lastFlushed = seq
@@ -188,6 +230,7 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 				s.bytes += len(pdu)
 			} else {
 				rb.budget.release(entry.budgetCharge)
+				accepted = false
 			}
 			rb.armTimerLocked(key, s, now)
 			if len(s.buffer) > rb.packetCap || s.bytes > rb.byteCap {
@@ -201,7 +244,14 @@ func (rb *ReorderBuffer) DeliverEntryX3AfterCommit(entry ReorderEntry, ssrc uint
 	if afterCommit != nil {
 		afterCommit()
 	}
+	if !accepted {
+		entry.releaseAccepted()
+		if entry.Accepted != nil && rb.onDiscard != nil {
+			rb.onDiscard(1)
+		}
+	}
 	rb.deliver(out, previous, done)
+	return accepted
 }
 func drainConsecutive(s *rtpStream) (out []ReorderEntry) {
 	for {
@@ -301,6 +351,10 @@ func (rb *ReorderBuffer) reserveDeliveryLocked(out []ReorderEntry) (<-chan struc
 	if len(out) == 0 {
 		return nil, nil
 	}
+	return rb.reserveCallbackLocked()
+}
+
+func (rb *ReorderBuffer) reserveCallbackLocked() (<-chan struct{}, chan struct{}) {
 	previous := rb.callbackTail
 	done := make(chan struct{})
 	rb.callbackTail = done
@@ -318,7 +372,7 @@ func (rb *ReorderBuffer) deliver(out []ReorderEntry, previous <-chan struct{}, d
 			<-previous
 		}
 	}
-	if len(out) > 0 {
+	if done != nil {
 		defer rb.callbackWG.Done()
 		if rb.sharedWorkers != nil {
 			defer rb.sharedWorkers.Done()
@@ -326,6 +380,7 @@ func (rb *ReorderBuffer) deliver(out []ReorderEntry, previous <-chan struct{}, d
 	}
 	for _, entry := range out {
 		rb.deliverFn(entry)
+		entry.releaseAccepted()
 		rb.budget.release(entry.budgetCharge)
 	}
 }
@@ -376,6 +431,7 @@ func (rb *ReorderBuffer) Stop() {
 		rb.budgeted = false
 	}
 	clear(rb.streams)
+	rb.retireCallsLocked()
 	previous, done := rb.reserveDeliveryLocked(out)
 	rb.mu.Unlock()
 	rb.deliver(out, previous, done)
@@ -394,6 +450,9 @@ func (rb *ReorderBuffer) DiscardCall(callID string, generation uint64) int {
 		}
 		rb.disarmLocked(stream)
 		discarded += len(stream.buffer)
+		for _, item := range stream.buffer {
+			item.entry.releaseAccepted()
+		}
 		rb.budget.release(reorderStreamCharge + int64(stream.bytes) + int64(len(stream.buffer))*reorderPacketCharge)
 		delete(rb.streams, key)
 	}
@@ -419,11 +478,15 @@ func (rb *ReorderBuffer) DiscardCount() int {
 	for _, s := range rb.streams {
 		rb.disarmLocked(s)
 		discarded += len(s.buffer)
+		for _, item := range s.buffer {
+			item.entry.releaseAccepted()
+		}
 		rb.budget.release(reorderStreamCharge + int64(s.bytes) + int64(len(s.buffer))*reorderPacketCharge)
 		clear(s.buffer)
 		s.bytes = 0
 	}
 	clear(rb.streams)
+	rb.retireCallsLocked()
 	if rb.budgeted {
 		rb.budget.release(reorderBufferCharge)
 		rb.budgeted = false

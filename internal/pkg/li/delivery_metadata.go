@@ -12,9 +12,14 @@ import (
 // DeliveryMetadata preserves local admission time and lifecycle identity across
 // reorder, fan-out and retry. CapturedAt is diagnostic, never an age clock.
 type DeliveryMetadata struct {
-	AdmittedAt            time.Time
-	CapturedAt            time.Time
-	Deadline              time.Time
+	StateIncarnation uuid.UUID
+	Provenance       DeliveryProvenance
+	AdmittedAt       time.Time
+	CapturedAt       time.Time
+	Deadline         time.Time
+	// TaskEndAt is a runtime claim cutoff, distinct from the original product
+	// retention deadline. Recovered work must receive current policy facts.
+	TaskEndAt             time.Time
 	TaskGeneration        uint64
 	DestinationGeneration uint64
 	CallGeneration        uint64

@@ -51,6 +51,9 @@ type UsageStats struct {
 // are authenticated with HMAC rather than GCM to avoid recursive nonce usage.
 // Never delete a ledger or reuse its key in an independently initialized store.
 type Usage struct {
+	finiteAttempt                 bool
+	attemptWorkspace              bool
+	finiteSeals, finiteBlocks     uint64
 	mu                            sync.Mutex
 	diagnostic                    atomic.Pointer[UsageStats]
 	key                           *key
@@ -191,6 +194,9 @@ func (u *Usage) reserve(blocks uint64, control bool) error {
 		}
 	}
 	nextSeals, nextBlocks := u.usedSeals+1, u.usedBlocks+blocks
+	if u.finiteAttempt && (nextSeals > u.finiteSeals || nextBlocks > u.finiteBlocks) {
+		return ErrKeyExhausted
+	}
 	if nextSeals > u.reservedSeals || nextBlocks > u.reservedBlocks {
 		reservedSeals := max(u.reservedSeals, roundReservation(nextSeals, invocationReservation, sealsLimit))
 		reservedBlocks := max(u.reservedBlocks, roundReservation(nextBlocks, blockReservation, blocksLimit))

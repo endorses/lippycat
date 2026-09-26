@@ -5,6 +5,7 @@ package processor
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
@@ -17,6 +18,9 @@ import (
 // repeats independence with their actual loaded rings before recovery effects.
 func validateIndependentStorageKeys(config Config, persistence filtering.PersistenceHandler) error {
 	if !config.LIEnabled {
+		if config.LIDeliveryX3SpoolDir != "" || config.LIDeliveryX3SpoolReplayPolicy != "" && config.LIDeliveryX3SpoolReplayPolicy != "hold" {
+			return errors.New("persistent X3 requires LI to be enabled")
+		}
 		return nil
 	}
 	provider, ok := persistence.(interface{ Keyring() *securestore.Keyring })
@@ -38,14 +42,21 @@ func validateIndependentStorageKeys(config Config, persistence filtering.Persist
 		}
 		rings = append(rings, ring)
 	}
+	if config.LIDeliveryX3SpoolDir != "" {
+		ring, err := securestore.LoadKeyring(securestore.KeyConfig{Active: securestore.KeyRef{ID: config.LIDeliveryX3SpoolKeyID, File: config.LIDeliveryX3SpoolKeyFile}, Prior: config.LIDeliveryX3SpoolReadKeys})
+		if err != nil {
+			return fmt.Errorf("validate X3 journal encryption keys: %w", err)
+		}
+		rings = append(rings, ring)
+	}
 	return securestore.CheckIndependent(rings...)
 }
 
 // storageKeyValidator checks the authenticated administrative owner against the
 // filter owner's immutable ring, then retains both for the journal's key-load
 // boundary. The journal must call the returned validator before recovery and
-// reuse that exact ring for all subsequent operations. X3 storage must join this
-// boundary when its owner is introduced; it is not covered by the X2 callback.
+// reuse that exact ring for all subsequent operations. The shared validator
+// accumulates both actual journal rings before either journal has effects.
 func (p *Processor) storageKeyValidator(state *securestore.Keyring) (func(*securestore.Keyring) error, error) {
 	if !p.config.LIEnabled {
 		return nil, nil
@@ -63,14 +74,21 @@ func (p *Processor) storageKeyValidator(state *securestore.Keyring) (func(*secur
 	if err := securestore.CheckIndependent(rings...); err != nil {
 		return nil, err
 	}
-	if p.config.LIDeliveryX2SpoolDir == "" {
+	if p.config.LIDeliveryX2SpoolDir == "" && p.config.LIDeliveryX3SpoolDir == "" {
 		return nil, nil
 	}
+	var mu sync.Mutex
 	return func(journal *securestore.Keyring) error {
+		mu.Lock()
+		defer mu.Unlock()
 		if journal == nil {
-			return errors.New("X2 journal encryption ownership is incomplete")
+			return errors.New("LI journal encryption ownership is incomplete")
 		}
-		return securestore.CheckIndependent(append(rings, journal)...)
+		if err := securestore.CheckIndependent(append(rings, journal)...); err != nil {
+			return err
+		}
+		rings = append(rings, journal)
+		return nil
 	}, nil
 }
 

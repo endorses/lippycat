@@ -52,31 +52,47 @@ const (
 type DeliveryMetadata = li.DeliveryMetadata
 
 type deliveryItem struct {
-	element     *list.Element
-	expiryIndex int
-	payload     *sharedPayload
-	canceled    atomic.Bool
-	persisted   atomic.Bool
-	journalID   atomic.Uint64
-	metadata    DeliveryMetadata
-	claimed     bool
-	terminal    atomic.Bool
-	uncertain   atomic.Bool // any attempt may already have reached the transport
-	completion  chan error
-	cancel      context.CancelFunc
-	conn        *tls.Conn
-	pduType     PDUType
-	xid         uuid.UUID
-	data        []byte
-	queued      time.Time
+	element             *list.Element
+	expiryIndex         int
+	eligibilityDeadline time.Time
+	payload             *sharedPayload
+	canceled            atomic.Bool
+	persisted           atomic.Bool
+	durableAt           time.Time
+	detached            bool
+	journalID           atomic.Uint64
+	journalAdmission    *JournalAdmission
+	journal             *Journal
+	metadata            DeliveryMetadata
+	claimed             bool
+	terminal            atomic.Bool
+	uncertain           atomic.Bool // any attempt may already have reached the transport
+	completion          chan error
+	cancel              context.CancelFunc
+	conn                *tls.Conn
+	pduType             PDUType
+	xid                 uuid.UUID
+	data                []byte
+	queued              time.Time
 }
 
 type ClientConfig struct {
-	X2SpoolDir         string
-	X2SpoolKeyFile     string
-	X2SpoolKeyID       string
-	X2SpoolLegacyKeyID string
-	X2SpoolReadKeys    []securestore.KeyRef
+	X3SpoolDir            string
+	X3SpoolMaxBytes       int64
+	X3SpoolKeyFile        string
+	X3SpoolKeyID          string
+	X3SpoolReadKeys       []securestore.KeyRef
+	X3SpoolValidateKeys   func(*securestore.Keyring) error
+	X3SpoolReplayPolicy   string
+	X3SpoolReplayManifest string
+	X3SpoolExportManifest string
+	StateIncarnation      uuid.UUID
+	ProtectedStoragePaths []string
+	X2SpoolDir            string
+	X2SpoolKeyFile        string
+	X2SpoolKeyID          string
+	X2SpoolLegacyKeyID    string
+	X2SpoolReadKeys       []securestore.KeyRef
 	// X2SpoolValidateKeys checks the immutable owner ring before any journal
 	// initialization or recovery effect. It must not mutate storage or retain secrets in logs.
 	X2SpoolValidateKeys   func(*securestore.Keyring) error
@@ -186,6 +202,9 @@ type destinationQueue struct {
 	workers         sync.WaitGroup
 	expiryNotify    chan struct{}
 	preserveX2      bool
+	preserveX3      bool
+	reserved        [2]int
+	reservedBytes   [2]int64
 	did             uuid.UUID
 	capacity        int
 	notify          chan struct{}
@@ -194,12 +213,21 @@ type destinationQueue struct {
 	done            chan struct{}
 	mu              sync.Mutex
 	items           [2]list.List
+	claims          [2]*transportClaim
 	bytes           [2]int64
 	limits          [2]int64
 	stopped         bool
 	stopReason      string
 	stats           DestinationDeliveryStats
 	lastOverflowLog time.Time
+}
+
+// A transport claim remains owned through outcome classification, even after
+// its item has been removed from the queue. Revocation joins this fence rather
+// than treating a context cancellation request as completed transport work.
+type transportClaim struct {
+	item *deliveryItem
+	done chan struct{}
 }
 
 func queueIndex(t PDUType) int {
@@ -232,10 +260,10 @@ func (q *destinationQueue) enqueue(item *deliveryItem) (*deliveryItem, bool) {
 		return item, false
 	}
 	var dropped *deliveryItem
-	if l.Len() >= q.capacities[i] || (q.limits[i] > 0 && q.bytes[i]+size > q.limits[i]) {
+	if l.Len()+q.reserved[i] >= q.capacities[i] || (q.limits[i] > 0 && q.bytes[i]+q.reservedBytes[i]+size > q.limits[i]) {
 		// A claimed head remains charged until its owner resolves it. Reject new
 		// arrivals if one eviction cannot satisfy the budget.
-		if i == 0 && q.preserveX2 {
+		if i == 0 && q.preserveX2 || i == 1 && q.preserveX3 {
 			return item, false
 		}
 		head := l.Front()
@@ -282,6 +310,9 @@ func (q *destinationQueue) peekBatch(max int) []*deliveryItem {
 func (q *destinationQueue) claim(t PDUType) *deliveryItem {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	return q.claimLocked(t)
+}
+func (q *destinationQueue) claimLocked(t PDUType) *deliveryItem {
 	if q.stopped {
 		return nil
 	}
@@ -290,8 +321,36 @@ func (q *destinationQueue) claim(t PDUType) *deliveryItem {
 		return nil
 	}
 	item := e.Value.(*deliveryItem)
+	if (t == PDUTypeX2 && q.preserveX2 || t == PDUTypeX3 && q.preserveX3) && !item.persisted.Load() {
+		return nil
+	}
 	item.claimed = true
 	return item
+}
+func (q *destinationQueue) claimTransport(t PDUType) *transportClaim {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	i := queueIndex(t)
+	if q.claims[i] != nil {
+		return nil
+	}
+	item := q.claimLocked(t)
+	if item == nil {
+		return nil
+	}
+	claim := &transportClaim{item: item, done: make(chan struct{})}
+	q.claims[i] = claim
+	return claim
+}
+func (q *destinationQueue) finishTransport(claim *transportClaim) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	i := queueIndex(claim.item.pduType)
+	if q.claims[i] == claim {
+		claim.item.claimed = false
+		q.claims[i] = nil
+		close(claim.done)
+	}
 }
 func (q *destinationQueue) pop(item *deliveryItem) bool {
 	q.mu.Lock()
@@ -379,7 +438,7 @@ func (q *destinationQueue) stopAndDrain(reason string) []*deliveryItem {
 			if item.cancel != nil {
 				cancels = append(cancels, item.cancel)
 			}
-			if !item.claimed && !(q.preserveX2 && item.pduType == PDUTypeX2 && !item.persisted.Load()) {
+			if !item.claimed && !((q.preserveX2 && item.pduType == PDUTypeX2 || q.preserveX3 && item.pduType == PDUTypeX3) && !item.persisted.Load()) {
 				q.removeExpiryLocked(item)
 				q.items[i].Remove(e)
 				q.bytes[i] -= int64(len(item.data))
@@ -399,14 +458,25 @@ func (q *destinationQueue) stopAndDrain(reason string) []*deliveryItem {
 }
 
 type Client struct {
-	admissionMu  sync.Mutex
-	outcomesMu   sync.Mutex
-	outcomes     map[string]uint64
-	outcomeBytes map[string]uint64
-	journal      *Journal
-	initErr      error
-	manager      *Manager
-	config       ClientConfig
+	admissionMu         sync.Mutex
+	outcomesMu          sync.Mutex
+	outcomes            map[string]uint64
+	outcomeBytes        map[string]uint64
+	journal             *Journal // compatibility alias for X2
+	x2Journal           *Journal
+	x3Journal           *Journal
+	gateFault           bool
+	gateMu              sync.RWMutex
+	revoked             map[uuid.UUID]*li.StateRevocation
+	closedCalls         map[li.DeliveryCallIdentity]bool
+	acceptedCalls       map[li.DeliveryCallIdentity]bool
+	preparedCalls       map[li.DeliveryCallIdentity]int
+	taskFacts           map[x3TaskIdentity]time.Time
+	revokedTasks        map[x3TaskIdentity]bool
+	expiredTaskControls map[x3TaskIdentity]bool
+	initErr             error
+	manager             *Manager
+	config              ClientConfig
 
 	queuesMu sync.RWMutex
 	queues   map[uuid.UUID]*destinationQueue
@@ -456,8 +526,9 @@ func NewClient(manager *Manager, config ClientConfig) *Client {
 	}
 	c := &Client{outcomes: make(map[string]uint64), outcomeBytes: make(map[string]uint64),
 		manager: manager,
-		config:  config,
-		queues:  make(map[uuid.UUID]*destinationQueue),
+		revoked: make(map[uuid.UUID]*li.StateRevocation), closedCalls: make(map[li.DeliveryCallIdentity]bool), acceptedCalls: make(map[li.DeliveryCallIdentity]bool), preparedCalls: make(map[li.DeliveryCallIdentity]int), taskFacts: make(map[x3TaskIdentity]time.Time), revokedTasks: make(map[x3TaskIdentity]bool), expiredTaskControls: make(map[x3TaskIdentity]bool),
+		config: config,
+		queues: make(map[uuid.UUID]*destinationQueue),
 	}
 	c.initErr = config.Validate()
 	if c.initErr == nil {
@@ -476,6 +547,10 @@ func (c *Client) Start() {
 	for _, q := range c.queues {
 		c.startDispatcher(q)
 	}
+	if c.x3Journal != nil {
+		c.wg.Add(1)
+		go c.sweepTaskCutoffs()
+	}
 	logger.Info("delivery client started",
 		"queue_size_per_destination", c.config.QueueSize,
 		"batch_size", c.config.BatchSize,
@@ -491,9 +566,9 @@ func (c *Client) Stop() {
 		for c.started.Load() && c.QueueDepth() > 0 && time.Now().Before(deadline) {
 			time.Sleep(min(5*time.Millisecond, max(time.Until(deadline), 0)))
 		}
-		if c.journal != nil {
-			if err := c.journal.Flush(); err != nil {
-				logger.Error("flush X2 journal", "error", err)
+		for _, j := range c.journals() {
+			if err := j.Flush(); err != nil {
+				logger.Error("flush delivery journal", "fault_code", securestore.PublicFaultCode(err))
 			}
 		}
 		c.queuesMu.Lock()
@@ -506,9 +581,9 @@ func (c *Client) Stop() {
 			c.dropDestinationQueue(q, "shutdown_timeout")
 		}
 		c.wg.Wait()
-		if c.journal != nil {
-			if err := c.journal.Close(); err != nil {
-				logger.Error("close X2 journal", "error", err)
+		for _, j := range c.journals() {
+			if err := j.Close(); err != nil {
+				logger.Error("close delivery journal", "fault_code", securestore.PublicFaultCode(err))
 			}
 		}
 		logger.Info("delivery client stopped")
@@ -560,6 +635,8 @@ func (c *Client) enqueueWithMetadata(t PDUType, xid uuid.UUID, destIDs []uuid.UU
 	}
 	if t == PDUTypeX2 {
 		metadata.Deadline = time.Time{}
+	} else {
+		c.rememberX3TaskAuthorization(xid, metadata.TaskGeneration, metadata.TaskEndAt)
 	}
 	limit := c.config.X3QueueBytes
 	if t == PDUTypeX2 {
@@ -609,13 +686,35 @@ func (c *Client) enqueueWithMetadata(t PDUType, xid uuid.UUID, destIDs []uuid.UU
 			continue
 		}
 		payload.refs.Add(1)
-		item := &deliveryItem{payload: payload, pduType: t, xid: xid, data: immutable, queued: metadata.AdmittedAt, metadata: destinationMetadata}
+		item := &deliveryItem{journal: c.journalFor(t), payload: payload, pduType: t, xid: xid, data: immutable, queued: metadata.AdmittedAt, metadata: destinationMetadata}
+		if !c.itemEligible(did, item, true) {
+			c.recordTerminalDrop(did, q, item, "lifecycle_suppressed")
+			failure = ErrAllDeliveriesFailed
+			continue
+		}
 		if synchronous {
 			item.completion = make(chan error, 1)
+			if j := item.journal; j != nil && j.segments != nil {
+				stats := j.Stats()
+				if stats.Pending != 0 || stats.Persisted != 0 {
+					c.recordTerminalDrop(did, q, item, "capacity_rejected")
+					failure = ErrQueueFull
+					continue
+				}
+			}
+		}
+		if j := c.journalFor(t); j != nil && j.segments != nil && !synchronous {
+			item.detached = true
+			if err := c.persistItem(q, item); err != nil {
+				c.recordTerminalDrop(did, q, item, "journal_rejected")
+				failure = err
+			}
+			continue
 		}
 		// Charge before publishing to the dispatcher so completions cannot make gauges negative.
 		atomic.AddInt64(&c.stats.QueueDepth, 1)
 		atomic.AddInt64(&c.stats.QueueBytes, int64(len(data)))
+		item.eligibilityDeadline = c.effectiveExpiry(item)
 		dropped, ok := q.enqueue(item)
 		if !ok {
 			atomic.AddInt64(&c.stats.QueueDepth, -1)
@@ -629,7 +728,7 @@ func (c *Client) enqueueWithMetadata(t PDUType, xid uuid.UUID, destIDs []uuid.UU
 			c.recordTerminalDrop(did, q, item, reason)
 			continue
 		}
-		if t == PDUTypeX2 && c.journal != nil {
+		if c.journalFor(t) != nil {
 			if err := c.persistItem(q, item); err != nil {
 				c.removeItem(q, item, "journal_rejected")
 				failure = err
@@ -698,7 +797,8 @@ func (c *Client) getOrCreateQueue(did uuid.UUID) *destinationQueue {
 	x2Size, x3Size := c.config.EffectiveQueueSizes()
 	q.capacities = [2]int{x2Size, x3Size}
 	q.limits = [2]int64{c.config.X2QueueBytes, c.config.X3QueueBytes}
-	q.preserveX2 = c.journal != nil
+	q.preserveX2 = c.x2Journal != nil
+	q.preserveX3 = c.x3Journal != nil
 	c.queues[did] = q
 	if c.started.Load() && !c.stopped.Load() {
 		c.startDispatcher(q)
@@ -716,6 +816,15 @@ func (c *Client) startDispatcher(q *destinationQueue) {
 func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 	defer c.wg.Done()
 	defer q.workers.Done()
+	var claim *transportClaim
+	finishClaim := func() {
+		if claim != nil {
+			q.finishTransport(claim)
+			claim = nil
+		}
+	}
+	defer finishClaim()
+	// Stopped claims must finish their accounting before the owner fence closes.
 	defer c.finishStoppedClaim(q, t)
 	backoff := c.config.RetryInitialBackoff
 	notify := q.notify
@@ -723,10 +832,15 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 		notify = q.notifyX3
 	}
 	for {
+		finishClaim()
 		if t == PDUTypeX3 {
 			c.expireQueued(q)
 		}
-		item := q.claim(t)
+		claim = q.claimTransport(t)
+		var item *deliveryItem
+		if claim != nil {
+			item = claim.item
+		}
 		if item != nil && !item.persisted.Load() {
 			q.mu.Lock()
 			if q.stopped {
@@ -738,6 +852,7 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 			item = nil
 		}
 		if item == nil {
+			finishClaim()
 			select {
 			case <-notify:
 				continue
@@ -745,7 +860,19 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 				return
 			}
 		}
+		if !c.itemEligible(q.did, item, false) {
+			item.canceled.Store(true)
+			if q.pop(item) {
+				c.resolveDrop(q, item, "lifecycle_suppressed")
+			}
+			continue
+		}
 		deadline := time.Now().Add(c.config.SendTimeout)
+		if item.pduType == PDUTypeX3 {
+			if end := c.taskDeadline(item); !end.IsZero() && end.Before(deadline) {
+				deadline = end
+			}
+		}
 		if !item.metadata.Deadline.IsZero() && item.metadata.Deadline.Before(deadline) {
 			deadline = item.metadata.Deadline
 		}
@@ -790,7 +917,7 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 				continue
 			}
 			current, generationErr := c.manager.GetDestination(q.did)
-			if generationErr != nil || (item.metadata.DestinationGeneration != 0 && li.DestinationDeliveryGeneration(current) != item.metadata.DestinationGeneration) {
+			if generationErr != nil || (item.metadata.DestinationGeneration != 0 && li.DestinationDeliveryGeneration(current) != item.metadata.DestinationGeneration) || !c.itemEligible(q.did, item, false) {
 				item.canceled.Store(true)
 				cancel()
 			}
@@ -865,7 +992,7 @@ func (c *Client) destinationDispatcher(q *destinationQueue, t PDUType) {
 		if !item.metadata.Deadline.IsZero() {
 			delay = min(delay, max(time.Until(item.metadata.Deadline), 0))
 		}
-
+		finishClaim()
 		if !waitForRetry(q, delay) {
 			return
 		}
@@ -902,9 +1029,12 @@ func (c *Client) recordSuccess(q *destinationQueue, item *deliveryItem) {
 		return
 	}
 	defer item.payload.release()
-	if item.journalID.Load() != 0 && c.journal != nil {
-		if err := c.journal.Complete(item.journalID.Load()); err != nil {
-			logger.Error("checkpoint X2 journal", "error", err)
+	var checkpointErr error
+	if item.journalID.Load() != 0 && item.journal != nil {
+		checkpointErr = item.journal.Complete(item.journalID.Load())
+		if checkpointErr != nil {
+			item.journal.Hold(item.journalID.Load())
+			logger.Error("checkpoint delivery journal", "fault_code", securestore.PublicFaultCode(checkpointErr))
 		}
 	}
 	if item.pduType == PDUTypeX2 {
@@ -922,7 +1052,7 @@ func (c *Client) recordSuccess(q *destinationQueue, item *deliveryItem) {
 	q.stats.LastError = ""
 	q.mu.Unlock()
 	if item.completion != nil {
-		item.completion <- nil
+		item.completion <- checkpointErr
 	}
 }
 
@@ -942,6 +1072,20 @@ func (c *Client) recordTerminalDrop(did uuid.UUID, q *destinationQueue, item *de
 		return
 	}
 	defer item.payload.release()
+	if item.pduType == PDUTypeX3 && item.journal != nil && item.persisted.Load() {
+		var err error
+		if reason == "expired" {
+			err = item.journal.Expire(item.journalID.Load())
+		} else if reason == "lifecycle_suppressed" {
+			err = item.journal.Complete(item.journalID.Load())
+		} else {
+			item.journal.Hold(item.journalID.Load())
+		}
+		if err != nil {
+			item.journal.Hold(item.journalID.Load())
+			logger.Error("terminal delivery control failed", "fault_code", securestore.PublicFaultCode(err))
+		}
+	}
 	if item.completion != nil {
 		item.completion <- fmt.Errorf("delivery discarded: %s", reason)
 	}
@@ -1026,9 +1170,9 @@ func (c *Client) dropDestinationQueue(q *destinationQueue, reason string) {
 	}
 	retained := 0
 	for _, item := range items {
-		if item.pduType == PDUTypeX2 && item.journalID.Load() != 0 && c.journal != nil {
+		if item.journalID.Load() != 0 && item.journal != nil {
 			retained++
-			c.journal.Hold(item.journalID.Load())
+			item.journal.Hold(item.journalID.Load())
 			if item.terminal.CompareAndSwap(false, true) {
 				item.payload.release()
 				if item.completion != nil {
@@ -1040,7 +1184,7 @@ func (c *Client) dropDestinationQueue(q *destinationQueue, reason string) {
 		c.recordTerminalDrop(q.did, q, item, reason)
 	}
 	if retained > 0 {
-		logger.Info("LI delivery X2 retained on disk", "did", q.did, "items", retained)
+		logger.Info("LI delivery retained on disk", "did", q.did, "items", retained)
 	}
 	if len(items) > retained {
 		logger.Warn("LI delivery items dropped",
@@ -1059,7 +1203,7 @@ func (c *Client) finishStoppedClaim(q *destinationQueue, t PDUType) {
 		return
 	}
 	item := e.Value.(*deliveryItem)
-	if q.preserveX2 && item.pduType == PDUTypeX2 && !item.persisted.Load() {
+	if (q.preserveX2 && item.pduType == PDUTypeX2 || q.preserveX3 && item.pduType == PDUTypeX3) && !item.persisted.Load() {
 		item.claimed = false
 		q.mu.Unlock()
 		return
@@ -1074,8 +1218,8 @@ func (c *Client) finishStoppedClaim(q *destinationQueue, t PDUType) {
 	}
 	atomic.AddInt64(&c.stats.QueueDepth, -1)
 	atomic.AddInt64(&c.stats.QueueBytes, -int64(len(item.data)))
-	if item.pduType == PDUTypeX2 && item.journalID.Load() != 0 && c.journal != nil {
-		c.journal.Hold(item.journalID.Load())
+	if item.journalID.Load() != 0 && item.journal != nil {
+		item.journal.Hold(item.journalID.Load())
 		if item.terminal.CompareAndSwap(false, true) {
 			item.payload.release()
 			if item.completion != nil {
@@ -1092,12 +1236,15 @@ func (c *Client) finishStoppedClaim(q *destinationQueue, t PDUType) {
 
 // RemoveDestination stops and removes delivery state for a deleted destination.
 func (c *Client) RemoveDestination(did uuid.UUID) {
-	if c.journal != nil {
-		// Serialize revocation with authorization decisions and replay publication.
-		// Held backlog may have no queue yet, but must lose its approval too.
-		c.journal.controlMu.Lock()
-		defer c.journal.controlMu.Unlock()
-		c.journal.revokeDestinationReplay(did)
+	journals := c.journals()
+	for _, j := range journals {
+		j.controlMu.Lock()
+		j.revokeDestinationReplay(did)
+	}
+	unlockJournals := func() {
+		for i := len(journals) - 1; i >= 0; i-- {
+			journals[i].controlMu.Unlock()
+		}
 	}
 	c.admissionMu.Lock()
 	c.queuesMu.RLock()
@@ -1105,6 +1252,7 @@ func (c *Client) RemoveDestination(did uuid.UUID) {
 	c.queuesMu.RUnlock()
 	if q == nil {
 		c.admissionMu.Unlock()
+		unlockJournals()
 		return
 	}
 	// Prevent admissions before releasing the packet-path admission lock. Disk
@@ -1120,9 +1268,13 @@ func (c *Client) RemoveDestination(did uuid.UUID) {
 	q.mu.Unlock()
 	q.signal()
 	c.admissionMu.Unlock()
-	if c.journal != nil {
-		if err := c.journal.Flush(); err != nil {
-			logger.Error("flush removed destination journal", "error", err)
+	// Pending durable callbacks inspect the stopped queue before publication.
+	// They need the journal control lock to retire their ownership, so release
+	// it before waiting for the callback-inclusive Flush barrier.
+	unlockJournals()
+	for _, j := range journals {
+		if err := j.Flush(); err != nil {
+			logger.Error("flush removed destination journal", "fault_code", securestore.PublicFaultCode(err))
 		}
 	}
 	c.dropDestinationQueue(q, "destination_removed")
@@ -1231,6 +1383,15 @@ func (c *Client) sendSync(ctx context.Context, t PDUType, xid uuid.UUID, destIDs
 
 // CancelTask and CancelCall suppress matching X3 generations; X2 is retained.
 func (c *Client) CancelTask(xid uuid.UUID, generation uint64) {
+	c.gateMu.Lock()
+	if len(c.revokedTasks) >= maxDeliveryGateIdentities {
+		if !c.revokedTasks[x3TaskIdentity{xid, generation}] {
+			c.gateFault = true
+		}
+	} else {
+		c.revokedTasks[x3TaskIdentity{xid, generation}] = true
+	}
+	c.gateMu.Unlock()
 	c.cancelMatching(func(item *deliveryItem) bool { return item.xid == xid && item.metadata.TaskGeneration == generation })
 }
 func (c *Client) CancelCall(callID string, generation uint64) {
@@ -1253,7 +1414,7 @@ func (c *Client) cancelMatching(match func(*deliveryItem) bool) {
 				if item.cancel != nil {
 					cancels = append(cancels, item.cancel)
 				}
-				if !item.claimed {
+				if !item.claimed && (!q.preserveX3 || item.persisted.Load()) {
 					q.items[1].Remove(e)
 					q.removeExpiryLocked(item)
 					item.element = nil
@@ -1299,12 +1460,23 @@ func (c *Client) removeItem(q *destinationQueue, item *deliveryItem, reason stri
 
 func (c *Client) expireQueued(q *destinationQueue) {
 	var expired []*deliveryItem
+	var cancels []context.CancelFunc
 	now := time.Now()
 	q.mu.Lock()
 	for {
 		item := q.takeExpiredLocked(now)
 		if item == nil {
 			break
+		}
+		if item.claimed {
+			item.canceled.Store(true)
+			if item.cancel != nil {
+				cancels = append(cancels, item.cancel)
+			}
+		}
+		if !item.persisted.Load() && q.preserveX3 {
+			item.canceled.Store(true)
+			continue
 		}
 		if !item.claimed && item.element != nil {
 			q.items[1].Remove(item.element)
@@ -1315,6 +1487,9 @@ func (c *Client) expireQueued(q *destinationQueue) {
 	}
 	q.updateDepthLocked()
 	q.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 	for _, item := range expired {
 		c.resolveDrop(q, item, "expired")
 	}

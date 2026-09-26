@@ -129,11 +129,12 @@ type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 //
 // The Manager is the main entry point for LI operations in the processor.
 type Manager struct {
-	callbackMu     sync.RWMutex
-	onTaskModified func(previous *InterceptTask)
-	stopOnce       sync.Once
-	stopped        atomic.Bool
-	mu             sync.RWMutex
+	callbackMu      sync.RWMutex
+	onTaskModified  func(previous *InterceptTask)
+	onCommittedTask func(current *InterceptTask)
+	stopOnce        sync.Once
+	stopped         atomic.Bool
+	mu              sync.RWMutex
 	// adminMu serializes whole administrative transactions, including snapshots,
 	// filter cleanup and delivery callbacks. Lock order is adminMu, lifecycleMu,
 	// then short registry/filter locks. Callbacks may read but must not mutate.
@@ -2370,5 +2371,24 @@ func (m *Manager) notifyTaskModified(previous *InterceptTask) {
 	m.callbackMu.RUnlock()
 	if callback != nil {
 		callback(previous)
+	}
+}
+
+// SetCommittedTaskCallback publishes detached current task facts only after the
+// encrypted final administrative snapshot commits. It runs under administrative
+// ordering and must perform only bounded memory updates: no manager reentry,
+// external I/O or worker waits. Provisional and uncertain snapshots never notify.
+func (m *Manager) SetCommittedTaskCallback(callback func(*InterceptTask)) {
+	m.callbackMu.Lock()
+	m.onCommittedTask = callback
+	m.callbackMu.Unlock()
+}
+
+func (m *Manager) notifyCommittedTask(task *InterceptTask) {
+	m.callbackMu.RLock()
+	callback := m.onCommittedTask
+	m.callbackMu.RUnlock()
+	if callback != nil {
+		callback(cloneInterceptTask(task))
 	}
 }

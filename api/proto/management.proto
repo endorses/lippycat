@@ -770,6 +770,7 @@ message LIDeliveryStats {
     uint64 uncertain_writes = 19;
     uint64 uncertain_bytes = 20;
     int64 physical_queue_bytes = 21;
+    LIJournalStats x3_journal = 22;
 }
 
 message LIDestinationDeliveryStats {
@@ -825,6 +826,10 @@ message LIJournalStats {
     uint64 replay_pending = 8;
     uint64 uncertain = 9;
     StorageStatus storage = 10;
+    uint64 approved = 11;
+    uint64 retained = 12;
+    uint64 expired = 13;
+    uint64 revoked = 14;
 }
 
 // Keepalive ACKs establish control responsiveness, not product acknowledgement.

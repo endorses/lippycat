@@ -12,7 +12,7 @@ import (
 type expiryHeap []*deliveryItem
 
 func (h expiryHeap) Len() int           { return len(h) }
-func (h expiryHeap) Less(i, j int) bool { return h[i].metadata.Deadline.Before(h[j].metadata.Deadline) }
+func (h expiryHeap) Less(i, j int) bool { return h[i].expiryAt().Before(h[j].expiryAt()) }
 func (h expiryHeap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 	h[i].expiryIndex = i
@@ -34,11 +34,11 @@ func (h *expiryHeap) Pop() any {
 func (q *destinationQueue) refreshExpiryLocked() {
 	q.nextExpiry = time.Time{}
 	if len(q.expiry) > 0 {
-		q.nextExpiry = q.expiry[0].metadata.Deadline
+		q.nextExpiry = q.expiry[0].expiryAt()
 	}
 }
 func (q *destinationQueue) observeDeadlineLocked(item *deliveryItem) {
-	if q.stopped || item.element == nil || item.pduType != PDUTypeX3 || item.metadata.Deadline.IsZero() {
+	if q.stopped || item.element == nil || item.pduType != PDUTypeX3 || item.expiryAt().IsZero() {
 		return
 	}
 	if item.expiryIndex < 0 {
@@ -53,10 +53,17 @@ func (q *destinationQueue) removeExpiryLocked(item *deliveryItem) {
 	q.refreshExpiryLocked()
 }
 func (q *destinationQueue) takeExpiredLocked(now time.Time) *deliveryItem {
-	if len(q.expiry) == 0 || now.Before(q.expiry[0].metadata.Deadline) {
+	if len(q.expiry) == 0 || now.Before(q.expiry[0].expiryAt()) {
 		return nil
 	}
 	item := heap.Pop(&q.expiry).(*deliveryItem)
 	q.refreshExpiryLocked()
 	return item
+}
+
+func (item *deliveryItem) expiryAt() time.Time {
+	if !item.eligibilityDeadline.IsZero() {
+		return item.eligibilityDeadline
+	}
+	return item.metadata.Deadline
 }

@@ -632,7 +632,7 @@ persistence is required whenever `--li-state-file` is configured; an empty state
 path disables administrative persistence where replay does not require it.
 
 Each encrypted store uses AES-256-GCM with its own independently provisioned raw
-32-byte key. Filter, administrative-state and X2 keys, including prior read keys,
+32-byte key. Filter, administrative-state, X2 and X3 keys, including prior read keys,
 must use distinct material. Key files are loaded once by the owning store; editing
 a key file is not a rotation procedure. Configure an active key ID and key-file
 reference, with at most four prior read-key references. Configuration contains
@@ -670,7 +670,9 @@ its original records and keys with `--resume`; a committed snapshot may still
 require completion or cleanup. The command's inventory does not cover external
 backups or authorize key destruction. See the
 [rotation procedure](../cmd/migrate/README.md#rotate-an-encrypted-snapshot) for flags
-and configuration handoff. Journal rotation remains separate unfinished work.
+and configuration handoff. LI builds also provide the explicit offline
+[journal rewrite procedure](../cmd/migrate/README.md#rewrite-or-rotate-an-li-journal)
+for X2/X3 data, sequences, closures and revocations.
 
 Back up the complete stopped store and its required sidecars consistently; keep
 keys separately controlled and retain every key needed by required backups.
@@ -686,8 +688,15 @@ This protects stored snapshot copies when their keys remain separately protected
 It does not encrypt PCAPs, structured logs, event spools or explicit export files,
 remove plaintext from authorized process memory, or guarantee physical erasure of
 earlier plaintext copies. Operators must account for those copies and backups
-separately. Persistent X3 remains under implementation; do not infer X3 durability
-from the snapshot encryption features described here.
+separately. Optional persistent X3 uses its own bounded encrypted journal and
+requires persisted administrative state, startup ADMF reconciliation and a positive
+retention age. Normal call completion closes capture and retains eligible product;
+withdrawal, expiry and destination changes still block delivery. Historical X3
+requires exact operator approval and current authorization before transport.
+Encoded bytes and original absolute deadlines survive restart; approval does not
+refresh retention. An uncertain transport write can cause duplicate delivery.
+See [persistent X3 setup](LI_INTEGRATION.md#persistent-x3-and-historical-delivery) for configuration
+and recovery procedures.
 
 ## PCAP File Encryption
 

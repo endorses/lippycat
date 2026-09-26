@@ -52,7 +52,7 @@ func TestIntegration_CommandHooks_PcapCommand(t *testing.T) {
 		ListenAddr:      processorAddr,
 		EnableDetection: false,
 		MaxHunters:      100,
-		FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml",
+		FilterFile:      privateIntegrationFilterPath(t),
 		PcapWriterConfig: &processor.PcapWriterConfig{
 			Enabled:         true,
 			OutputDir:       pcapDir,

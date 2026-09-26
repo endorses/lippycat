@@ -113,7 +113,10 @@ func (p *Processor) deliverLIRADIUS(task *li.InterceptTask, observation *radius.
 		return
 	}
 	defer admission.Release()
-	metadata := li.DeliveryMetadata{TaskGeneration: task.ActivationGeneration, CapturedAt: observation.Capture.Timestamp, AdmittedAt: time.Now()}
+	metadata := li.DeliveryMetadata{StateIncarnation: p.liManager.StateIncarnation(), TaskGeneration: task.ActivationGeneration, CapturedAt: observation.Capture.Timestamp, AdmittedAt: time.Now(), TaskEndAt: task.EndTime,
+		Provenance: li.DeliveryProvenance{Kind: "non_call", SourceKind: "radius", OriginNodeID: observation.Scope.OriginNodeID, SourceID: observation.Scope.SourceID,
+			CaptureEpoch: observation.Capture.ID.Epoch, ObservationSequence: observation.Capture.ID.Sequence, OperatorScope: observation.Scope.OperatorScope,
+			ProfileRevision: observation.Scope.ProfileRevision, NFID: p.config.ProcessorID, IPID: p.config.ProcessorID, CorrelationID: correlation}}
 	if err := liDeliveryClient.SendX2WithMetadata(task.XID, task.DestinationIDs, raw, metadata); err != nil {
 		liX2Errors.Add(1)
 		p.radiusLIStats.QueueErrors++

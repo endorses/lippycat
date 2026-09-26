@@ -39,11 +39,14 @@ zero, increments independently, and wraps to zero after the maximum unsigned
 delivery-destination `DId`, and fan-out of one encoded PDU to several MDFs does
 not change its sequence number.
 
-Sequence state is in memory. Task deactivation removes every context for its
-XID. A lippycat process restart establishes new delivery connections and starts
-new sequence contexts at zero; operators must confirm that the MDF treats a new
-connection after a POI restart as a new sequence epoch because TS 103 221-2 does
-not define a sequence-reset signal.
+Without a journal, sequence state is in memory and restart starts new contexts
+at zero. Operators must confirm that the MDF treats this as a new sequence epoch:
+TS 103 221-2 does not define a sequence-reset signal. With a persistent interface,
+its journal restores sequence high-water marks before live encoding. Successful
+delivery, normal call completion, expiry, purge and revocation preserve these
+checkpoints; replay sends the original encoded sequence number. A reused Call-ID
+has a fresh internal call incarnation while retaining the wire correlation value
+and the next sequence value for that wire context.
 
 ### X2/X3 application keepalive
 
@@ -143,7 +146,9 @@ For an existing installation, stop the node and use explicit YAML/JSON migration
 instead of `--init`; see [offline migration](../cmd/migrate/README.md). No runtime
 format guessing, automatic plaintext conversion, or automatic plaintext backup
 occurs. Keep interrupted-operation metadata and use the identical command with
-`--resume`. These commands do not yet perform encrypted-key rotation.
+`--resume`. Encrypted snapshots use `--source-format=encrypted` for offline key
+rotation; LI journals use `lc migrate li-journal`. Follow the separate
+[rotation procedures](../cmd/migrate/README.md) and retain required prior keys.
 
 Configured `--li-state-file` persistence requires `--li-state-key-file` and
 `--li-state-key-id`. Empty `--li-state-file` disables administrative persistence
@@ -914,7 +919,8 @@ is independent of diagnostic capture timestamps. Expiry remains active during an
 outage and is checked again at the transport write lock. Task/call cancellation
 can close an active write. A partial or uncertain write is reported separately
 from a known queue discard. A successful local write does not prove MDF receipt.
-X2 does not inherit X3 expiry; X3 is never written to the journal.
+X2 does not inherit X3 expiry. X3 remains memory-only unless its independent
+journal is explicitly enabled as described below.
 
 Journal directories must be private (`0700`) and journal/key files private
 (`0600`). Keep the key across restarts: losing it prevents recovery. Journal
@@ -942,7 +948,54 @@ Aggregate dropped-byte counts survive destination removal. Shutdown uses the
 configured delivery drain deadline; persistent X2 retained on disk is distinct
 from volatile loss. Existing status field meanings remain unchanged.
 
-#### Approving held X2 from the command line
+### Persistent X3 and historical delivery
+
+Recovered X3 defaults to `--li-delivery-x3-spool-replay-policy=hold`. Use
+`purge` to durably discard recovered product rather than approve delivery.
+
+Enable X3 persistence with `--li-delivery-x3-spool-dir` and an explicit positive
+`--li-delivery-x3-spool-max-bytes`. Provision an independent private raw 32-byte
+key using `--li-delivery-x3-spool-key-id` and `--li-delivery-x3-spool-key-file`;
+`--li-delivery-x3-spool-read-key=id=path` supplies at most four prior keys.
+Filters, administrative state, X2 and X3 must use distinct actual key material.
+Persistent X3 also requires a positive `--li-delivery-x3-max-age`, initialized
+encrypted administrative state, an ADMF endpoint and startup reconciliation.
+There is no implicit retention duration. Process and tap share these options.
+
+Each journal owns its allocation, pending work, controls and faults independently.
+Reserve enough disk for data, future terminal controls and rewrite space; encoded
+payload size alone is insufficient. Capacity exhaustion rejects new product and
+preserves durable backlog. A durability callback occurs only after the product's
+required sequence and control evidence are durable. A partial or uncertain
+storage operation blocks admission and does not make its product sendable.
+
+Normal protocol completion, idle timeout and capacity eviction close capture and
+drain content accepted before closure. That content remains eligible only until
+its original deadline and only while its exact task/destination authorization
+remains valid. Explicit cancellation, task withdrawal/expiry or relevant changes,
+and destination removal/replacement revoke it. Late packets cannot reopen a
+completed incarnation. Memory-only X3 retains its existing call-end cancellation.
+
+After restart, X3 is held and its call incarnations are historical. Export exact
+identities with `--li-delivery-x3-spool-export-manifest=/secure/held-x3.json` and
+review a separate private approval file. Pass the reviewed version-2 file through
+`--li-delivery-x3-spool-replay-manifest=/secure/approved-x3.json` on a reconciled
+startup. Approval binds journal, record/content, administrative-state incarnation,
+task/destination generations, call or non-call provenance and original timestamps
+and deadline. Current ADMF-confirmed unchanged activation, exact destination and
+unexpired authorization are still required. No approval file alone authorizes
+delivery. An unapproved FIFO head cannot be skipped; expiry and revocation remain
+active even while the MDF is disconnected or approval is absent.
+
+Keep the stopped journal, its controls/checkpoints/usage history and administrative
+state together in a consistent backup, with keys separately controlled. A coherent
+old backup can roll back state; storage authentication is not trusted rollback
+detection. Reconcile with current ADMF before replay and retain every key needed
+by historical objects and required backups. Local TLS write completion does not
+prove MDF receipt; an interrupted write or completion checkpoint can cause a
+duplicate delivery of the original encoded bytes and sequence.
+
+### Approving held X2 from the command line
 
 Start with the usual spool/key configuration and
 `--li-delivery-x2-spool-export-manifest=/secure/held-x2.json`. The export is a
@@ -995,6 +1048,13 @@ reserved conservatively even when the current journal is empty. Status exposes
 reason counters and `first_dropped_unix_ms` remain available after destination
 removal. These reservations cover managed LI delivery/reorder allocations and do
 not bound total process RSS.
+
+Each segmented journal reserves 2,824 MiB for its bounded index, recovery,
+encryption, pending work and replay/approval structures. Two segmented journals
+therefore require at least 5,648 MiB of managed reservation before queue, reorder
+and authorization allowances. This is a conservative admission ceiling rather
+than an eager allocation or measured RSS; size an explicit memory budget for all
+configured destinations and leave separate headroom for other processor services.
 
 The incoming-payload allowance covers admission while existing queues are full.
 Explicit memory budgets sized exactly to older reservation totals may need to

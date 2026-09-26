@@ -23,6 +23,7 @@ func liKeyTestConfig(t *testing.T, role, yaml string) (*pflag.FlagSet, *viper.Vi
 	flags := pflag.NewFlagSet("keys", pflag.ContinueOnError)
 	flags.String("li-state-file", "", "")
 	flags.String("li-delivery-x2-spool-key-file", "", "")
+	flags.String("li-delivery-x3-spool-key-file", "", "")
 	config := viper.New()
 	require.NoError(t, RegisterLIStoreKeyFlags(flags, config, role))
 	config.SetConfigType("yaml")
@@ -43,6 +44,9 @@ func TestLIStoreKeyPrecedenceAndEmptyValues(t *testing.T) {
     delivery_x2_spool_key_id: x2-v1
     delivery_x2_spool_legacy_key_id: x2-v0
     delivery_x2_spool_read_keys: [x2-v0=/yaml/x2-old.key]
+    delivery_x3_spool_key_file: /yaml/x3.key
+    delivery_x3_spool_key_id: x3-v1
+    delivery_x3_spool_read_keys: [x3-v0=/yaml/x3-old.key]
 `)
 			got, err := ReadLIStoreKeys(flags, config, role, LIStoreKeys{})
 			require.NoError(t, err)
@@ -50,6 +54,8 @@ func TestLIStoreKeyPrecedenceAndEmptyValues(t *testing.T) {
 			require.Equal(t, securestore.KeyRef{ID: "state-v1", File: "/yaml/state.key"}, got.State.Active)
 			require.Equal(t, []securestore.KeyRef{{ID: "x2-v0", File: "/yaml/x2-old.key"}}, got.X2.Prior)
 			require.Equal(t, "x2-v0", got.X2.LegacyID)
+			require.Equal(t, securestore.KeyRef{ID: "x3-v1", File: "/yaml/x3.key"}, got.X3.Active)
+			require.Equal(t, []securestore.KeyRef{{ID: "x3-v0", File: "/yaml/x3-old.key"}}, got.X3.Prior)
 			t.Setenv(filterStoreEnv(role, "li.state_file"), "/env/state.enc")
 			t.Setenv(filterStoreEnv(role, "li.state_read_keys"), `"older=/env/path,with-comma"`)
 			got, err = ReadLIStoreKeys(flags, config, role, LIStoreKeys{})
@@ -70,7 +76,8 @@ func TestLIStoreKeyPrecedenceAndEmptyValues(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, got.State.Prior)
 			require.Empty(t, got.X2.Prior)
-			got.State.Prior, got.X2.Prior = nil, nil
+			require.Empty(t, got.X3.Prior)
+			got.State.Prior, got.X2.Prior, got.X3.Prior = nil, nil, nil
 			require.Equal(t, LIStoreKeys{}, got, "empty environment must clear YAML values")
 			for _, setting := range liStoreKeySettings {
 				t.Setenv(filterStoreEnv(role, "li."+setting.key), "invalid-sensitive-reference")
@@ -85,7 +92,8 @@ func TestLIStoreKeyPrecedenceAndEmptyValues(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, got.State.Prior)
 			require.Empty(t, got.X2.Prior)
-			got.State.Prior, got.X2.Prior = nil, nil
+			require.Empty(t, got.X3.Prior)
+			got.State.Prior, got.X2.Prior, got.X3.Prior = nil, nil, nil
 			require.Equal(t, LIStoreKeys{}, got, "empty CLI must clear environment values")
 		})
 	}
@@ -99,6 +107,10 @@ func TestLIStoreKeysMalformedAndDuplicateReferences(t *testing.T) {
 		"state_key_id: active\n    state_read_keys: [active=/duplicate]",
 		"delivery_x2_spool_read_keys: [same=/one, same=/two]",
 		"delivery_x2_spool_key_id: active\n    delivery_x2_spool_read_keys: [active=/duplicate]",
+		"delivery_x3_spool_read_keys: [same=/one, same=/two]",
+		"delivery_x3_spool_key_id: active\n    delivery_x3_spool_read_keys: [active=/duplicate]",
+		"delivery_x3_spool_key_id: null",
+		"delivery_x3_spool_read_keys: null",
 		"state_key_file: [wrong-type]",
 		"state_read_keys: [a=/a, b=/b, c=/c, d=/d, e=/e]",
 	} {

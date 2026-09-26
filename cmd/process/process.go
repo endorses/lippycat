@@ -540,6 +540,14 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryX2SpoolReplayPolicy = liConfig.DeliveryX2SpoolReplayPolicy
 		config.LIDeliveryX2SpoolReplayManifest = liConfig.DeliveryX2SpoolReplayManifest
 		config.LIDeliveryX2SpoolExportManifest = liConfig.DeliveryX2SpoolExportManifest
+		config.LIDeliveryX3SpoolDir = liConfig.DeliveryX3SpoolDir
+		config.LIDeliveryX3SpoolMaxBytes = liConfig.DeliveryX3SpoolMaxBytes
+		config.LIDeliveryX3SpoolKeyFile = liConfig.DeliveryX3SpoolKeyFile
+		config.LIDeliveryX3SpoolKeyID = liConfig.DeliveryX3SpoolKeyID
+		config.LIDeliveryX3SpoolReadKeys = liConfig.DeliveryX3SpoolReadKeys
+		config.LIDeliveryX3SpoolReplayPolicy = liConfig.DeliveryX3SpoolReplayPolicy
+		config.LIDeliveryX3SpoolReplayManifest = liConfig.DeliveryX3SpoolReplayManifest
+		config.LIDeliveryX3SpoolExportManifest = liConfig.DeliveryX3SpoolExportManifest
 		config.LIDeliverySendTimeout = liConfig.DeliverySendTimeout
 		config.LIDeliveryInitialBackoff = liConfig.DeliveryInitialBackoff
 		config.LIDeliveryMaxBackoff = liConfig.DeliveryMaxBackoff

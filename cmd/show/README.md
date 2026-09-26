@@ -266,6 +266,9 @@ Errors are output as JSON to stderr with appropriate exit codes:
 
 LI delivery status also includes `queue_bytes`, `dropped_bytes`, per-destination
 X2/X3 queued and in-flight bytes and byte capacities, `x3_expired`, and
-`dropped_bytes_by_reason`. `x2_journal` reports byte pressure and
-`pending`/`persisted`/`held` counts. Pending admission is not a durability
+`dropped_bytes_by_reason`. Independent `x2_journal` and `x3_journal` report byte pressure,
+`pending`/`persisted`/`held`, `approved`/`retained` gauges and
+`expired`/`revoked`/`rejected` counters. Each journal reports its own storage fault,
+commit uncertainty and encryption usage separately from transport uncertainty.
+Pending admission is not a durability
 acknowledgement; held records require explicit replay authorization.

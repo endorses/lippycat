@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -513,9 +516,34 @@ func getFreePort() (string, error) {
 	return listener.Addr().String(), nil
 }
 
+// privateIntegrationFilterPath gives each processor a private, isolated store.
+func privateIntegrationFilterPath(t testing.TB) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0700))
+	return filepath.Join(dir, "filters.yaml")
+}
+
+// Context-owned helpers also serve benchmarks without a testing.T handle.
+// Their existing Start goroutine removes the directory after shutdown returns.
+func newPrivateIntegrationFilter() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "lippycat-integration-filters-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() {
+		if err := os.RemoveAll(dir); err != nil {
+			logger.Error("Failed to remove integration filter store", "error", err)
+		}
+	}
+	return filepath.Join(dir, "filters.yaml"), cleanup, nil
+}
+
 func startTestProcessor(ctx context.Context, addr string) (*processor.Processor, error) {
-	// Use a unique filter file path per test to avoid contamination from previous runs
-	filterFile := fmt.Sprintf("/tmp/lippycat-test-filters-%s-%d.yaml", addr, time.Now().UnixNano())
+	filterFile, cleanup, err := newPrivateIntegrationFilter()
+	if err != nil {
+		return nil, err
+	}
 	config := processor.Config{
 		ProcessorID:     "test-processor-" + addr,
 		ListenAddr:      addr,
@@ -526,6 +554,7 @@ func startTestProcessor(ctx context.Context, addr string) (*processor.Processor,
 
 	proc, err := processor.New(config)
 	if err != nil {
+		cleanup()
 		return nil, err
 	}
 
@@ -534,6 +563,7 @@ func startTestProcessor(ctx context.Context, addr string) (*processor.Processor,
 
 	// Start processor in background
 	go func() {
+		defer cleanup()
 		if err := proc.Start(ctx); err != nil {
 			// Send error to channel for debugging
 			select {

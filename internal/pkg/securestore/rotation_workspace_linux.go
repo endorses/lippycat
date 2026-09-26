@@ -36,10 +36,11 @@ const (
 	RotationPublication
 	RotationPredecessorBootstrapStage
 	RotationPredecessorProgressStage
+	RotationSourceCatalogStage
 	rotationStageCount
 )
 
-var rotationStageNames = [...]string{"bootstrap-u", "bootstrap-r", "usage-zero", "usage-0", "usage-1", "usage-2", "usage-3", "planned", "prepared", "complete", "candidate", "publication", "predecessor-bootstrap", "predecessor-progress"}
+var rotationStageNames = [...]string{"bootstrap-u", "bootstrap-r", "usage-zero", "usage-0", "usage-1", "usage-2", "usage-3", "planned", "prepared", "complete", "candidate", "publication", "predecessor-bootstrap", "predecessor-progress", "source-catalog"}
 
 const rotationWorkspacePrefix = ".securestore-stage-"
 
@@ -94,7 +95,7 @@ type RotationWorkspace struct {
 
 func OpenRotationWorkspace(d *Dir, cfg RotationWorkspaceConfig) (*RotationWorkspace, error) {
 	if d == nil || !rotationHex(cfg.Token, 64) || cfg.Token == strings.Repeat("0", 64) ||
-		(cfg.Purpose != FilterSnapshot && cfg.Purpose != AdministrativeState) || cfg.EnvelopeBytes <= 0 || cfg.EnvelopeBytes > MaxEnvelopeBytes || cfg.MaxWorkingBytes <= 0 ||
+		(cfg.Purpose != FilterSnapshot && cfg.Purpose != AdministrativeState && cfg.Purpose != JournalState) || (cfg.Purpose == JournalState && cfg.EnvelopeBytes > 4<<20) || cfg.EnvelopeBytes <= 0 || cfg.EnvelopeBytes > MaxEnvelopeBytes || cfg.MaxWorkingBytes <= 0 ||
 		len(cfg.Stages) > int(rotationStageCount) || len(cfg.Owners) < 2 || len(cfg.Owners) > 4 || len(cfg.Keyrings) > 2 || len(cfg.Protected) > 16 {
 		return nil, errors.New("securestore: invalid finite rotation workspace")
 	}
@@ -134,10 +135,12 @@ func OpenRotationWorkspace(d *Dir, cfg RotationWorkspaceConfig) (*RotationWorksp
 			w.names[s] = ".rotation-prev-bootstrap-" + cfg.Token
 		case RotationPredecessorProgressStage:
 			w.names[s] = ".rotation-prev-progress-" + cfg.Token
+		case RotationSourceCatalogStage:
+			w.names[s] = ".rotation-source-catalog-" + cfg.Token
 		}
 	}
 	for _, s := range cfg.Stages {
-		if s >= rotationStageCount || w.slots[s].selected {
+		if s >= rotationStageCount || w.slots[s].selected || s == RotationSourceCatalogStage && cfg.Purpose != JournalState {
 			return nil, errors.New("securestore: invalid or duplicate workspace stage")
 		}
 		w.slots[s].selected = true
@@ -210,7 +213,13 @@ func OpenRotationWorkspace(d *Dir, cfg RotationWorkspaceConfig) (*RotationWorksp
 	return w, nil
 }
 func (w *RotationWorkspace) limit(s RotationStage) int64 {
+	if s == RotationSourceCatalogStage {
+		return 1 << 20
+	}
 	if s == RotationCandidateStage || s == RotationPublication {
+		return w.cfg.EnvelopeBytes
+	}
+	if w.cfg.Purpose == JournalState && (s == RotationPlanned || s == RotationPrepared || s == RotationComplete || s == RotationPredecessorProgressStage) {
 		return w.cfg.EnvelopeBytes
 	}
 	return rotationMetadataBytes

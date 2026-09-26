@@ -195,6 +195,7 @@ func (m *Manager) finishTaskIntentLocked(intent *StateIntent, task *InterceptTas
 		m.registry.mu.Unlock()
 		delete(m.persistenceCandidates, task.XID)
 		m.stateCleanup = s.CleanupNeeded
+		m.notifyCommittedTask(task)
 	}
 	return err
 }

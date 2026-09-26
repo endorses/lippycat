@@ -91,3 +91,49 @@ func (w *RotationWorkspace) OpenUsage(ring *Keyring, expectedStore [16]byte) (*U
 	u.publishUsage(Committed, seals, blocks)
 	return u, nil
 }
+
+// OpenUsageAttempt lends the authenticated ledger to a segmented journal
+// rewrite. ReserveAttempt must durably consume one preallocated ledger stage
+// before any seal; its exact seal/block fence replaces the snapshot four-seal
+// gate. This method creates no file or ownership lock.
+func (w *RotationWorkspace) OpenUsageAttempt(ring *Keyring, expectedStore [16]byte) (*Usage, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.usable(); err != nil {
+		return nil, err
+	}
+	if w.cfg.Purpose != JournalState || !w.reserved || w.usageUsed || !w.slots[RotationUsageReservation0].selected {
+		return nil, errors.New("securestore: finite journal usage workspace is not ready")
+	}
+	if err := w.usageKey(ring, expectedStore); err != nil {
+		return nil, err
+	}
+	data, err := w.dir.Read(w.cfg.UsageName, usageBytes)
+	if err != nil {
+		return nil, err
+	}
+	store, seals, blocks, err := decodeUsage(ring.active, data)
+	if err != nil {
+		return nil, err
+	}
+	if store != expectedStore {
+		return nil, ErrBinding
+	}
+	u := &Usage{key: ring.active, store: store, dir: w.dir, name: w.cfg.UsageName, usedSeals: seals, usedBlocks: blocks, reservedSeals: seals, reservedBlocks: blocks}
+	for _, owner := range w.cfg.Owners {
+		if owner.name == w.cfg.UsageName {
+			u.lock = owner
+		}
+	}
+	u.attemptWorkspace = true
+	u.beforeReserve = func(bool) error {
+		return errors.New("securestore: reserve the complete offline attempt before sealing")
+	}
+	u.write = func(string, []byte) (Outcome, error) {
+		return NotCommitted, errors.New("securestore: finite journal usage cannot refill")
+	}
+	u.closeBorrowed = func() error { w.mu.Lock(); defer w.mu.Unlock(); w.usageOpen = false; return nil }
+	w.usageOpen, w.usageUsed = true, true
+	u.publishUsage(Committed, seals, blocks)
+	return u, nil
+}

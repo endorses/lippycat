@@ -144,6 +144,14 @@ type Config struct {
 	LIDeliveryX2SpoolReplayPolicy           string
 	LIDeliveryX2SpoolReplayManifest         string
 	LIDeliveryX2SpoolExportManifest         string
+	LIDeliveryX3SpoolDir                    string
+	LIDeliveryX3SpoolMaxBytes               int64
+	LIDeliveryX3SpoolKeyFile                string
+	LIDeliveryX3SpoolKeyID                  string
+	LIDeliveryX3SpoolReadKeys               []securestore.KeyRef
+	LIDeliveryX3SpoolReplayPolicy           string
+	LIDeliveryX3SpoolReplayManifest         string
+	LIDeliveryX3SpoolExportManifest         string
 	LIDeliverySendTimeout                   time.Duration
 	LIDeliveryInitialBackoff                time.Duration
 	LIDeliveryMaxBackoff                    time.Duration

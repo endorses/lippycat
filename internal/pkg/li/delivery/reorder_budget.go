@@ -12,7 +12,10 @@ import (
 const DefaultReorderBudgetBytes int64 = 16 << 20
 const reorderStreamCharge int64 = 8192
 const reorderBufferCharge int64 = 512
-const reorderPacketCharge int64 = 512
+
+// Covers expanded provenance plus buffered map, detached output and RTP-order
+// scratch representations simultaneously. Payload bytes are charged separately.
+const reorderPacketCharge int64 = 4096
 
 type ReorderBudget struct {
 	limit int64

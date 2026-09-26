@@ -734,9 +734,10 @@ not inherit X3 age. Local write completion does not prove remote receipt.
 
 Encrypted X2 persistence is opt-in through `--li-delivery-x2-spool-dir`, a positive
 `--li-delivery-x2-spool-max-bytes` and `--li-delivery-x2-spool-key-file` containing
-a private raw 32-byte AES key. X3 stays memory-only. Enqueue success is memory
-admission, not a durability acknowledgement; a crash can lose not-yet-synced
-records. Full journals reject new product while retaining persisted records.
+a private raw 32-byte AES key. X3 is memory-only unless its independent journal
+is configured. Enqueue success is admission, not a durability acknowledgement;
+a crash can lose not-yet-synced records. Full journals reject new product while
+retaining persisted records.
 
 Recovered X2 is held by default and requires explicit identity reconciliation and
 authorization through the embedding control-plane API before replay. Reusing an
@@ -745,6 +746,34 @@ recovered records; keep the default `hold` unless discarding them is intended.
 `lc show status` reports byte budgets, queue and in-flight bytes, expired product,
 reason-labelled dropped bytes, and journal pending, persisted and held counts.
 Existing deployments retain their prior limits until new options are configured.
+
+Persistent X3 requires `--li-delivery-x3-spool-dir`, an explicit positive
+`--li-delivery-x3-spool-max-bytes`, an independent private raw 32-byte key selected
+by `--li-delivery-x3-spool-key-id` and `--li-delivery-x3-spool-key-file`, and a
+positive `--li-delivery-x3-max-age`. Encrypted administrative state and ADMF startup
+reconciliation are also required. Each store uses its own bounded capacity;
+configure memory and disk budgets for both stores and continuing arrivals.
+
+Normal call completion closes new capture for that call incarnation and retains
+eligible durable backlog. Task withdrawal, destination replacement, and explicit
+revocation block historical delivery. Original admission deadlines never restart
+at call completion or process restart. A stopped process cannot delete expired
+files; startup checks expiry before replay eligibility.
+
+Recovered X3 defaults to `--li-delivery-x3-spool-replay-policy=hold`; `purge`
+durably discards it. Export held identities with
+`--li-delivery-x3-spool-export-manifest`, review them, and provide an exact
+version-2 approval with `--li-delivery-x3-spool-replay-manifest`. Approval requires
+a currently reconciled unchanged task activation and destination, matching state
+and journal incarnations, original deadline and content identity. Replay sends
+the original encoded bytes and sequence numbers. A local successful write cannot
+prove MDF receipt, so an interrupted write can cause duplicate delivery. See the
+[historical delivery procedure](../../../LI_INTEGRATION.md#persistent-x3-and-historical-delivery)
+for reconciliation, approval, and recovery details.
+
+`lc show status` exposes independent X2 and X3 journal counts, allocated bytes,
+limits, expiry/revocation counters, and fixed storage fault codes. Storage commit
+uncertainty and transport write uncertainty are distinct outcomes.
 
 Independent PDU caps are available through `--li-delivery-x2-queue-size` and
 `--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy

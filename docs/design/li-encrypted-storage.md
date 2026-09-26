@@ -72,8 +72,12 @@ identify an operation/classification, never plaintext, selectors, or key bytes.
 Zero, unknown purposes, unknown versions, and unknown algorithms fail closed.
 Envelope version dispatch is separate from each owner's payload schema version.
 X2 and X3 use different store UUIDs even when sharing purpose 5, 6, 7, 8, or 9.
-Purpose 9 is reserved for the measured batch-layout work; its availability in
-the envelope codec alone does not enable a journal layout or X3 admission.
+The production segmented journal uses purpose 9 for authenticated frame indexes
+and strict typed batches of sequence, call, revocation, and terminal controls.
+The batch binds the exact journal, interface, segment, generation and kind; each
+logical control retains its complete identity and highwaters. Purposes 5, 7 and
+8 remain assigned to their standalone objects. See the
+[implemented physical layout](li-x3-journal-layout.md) for exact packing and bounds.
 Snapshot object names are `filters` and `li-state`; journal names are canonical
 decimal record IDs, `sequence/<context digest>`, `journal-state`,
 `call/<incarnation UUID>/<XID>/<task generation>/<DID>/<destination generation>`,
@@ -495,8 +499,8 @@ is preserved and is not an identity or generation wrap.
 Call control schema version 1 contains exactly `version` (1), `journal_uuid`,
 `state_incarnation`, `xid`, `task_generation`, `did`, `destination_generation`,
 `call_incarnation`, `call_generation`, `call_id`, `state` (`open`,
-`capture_closed`, or `revoked`), `covered_record_highwater` (uint64), and
-`closed_at` (absent while open; otherwise a timestamp in the representation
+`capture_closed`, or `revoked`), `covered_record_highwater` and
+`covered_admission_highwater` (uint64), and `closed_at` (absent while open; otherwise a timestamp in the representation
 above). All identities/generations are nonzero and the composite object binding
 must match. Both `open` → `capture_closed` → `revoked` and `open` → `revoked` are
 allowed; no transition reopens capture. One control can cover multiple records

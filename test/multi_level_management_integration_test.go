@@ -573,7 +573,7 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 			UpstreamAddr:    upstreamAddr,
 			EnableDetection: false,
 			MaxHunters:      100,
-			FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
+			FilterFile:      privateIntegrationFilterPath(t), // Isolated private filter store
 		}
 
 		proc, err := processor.New(config)
@@ -702,12 +702,23 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 
 // startProcessorHierarchy starts a processor and optionally connects it to an upstream processor
 func startProcessorHierarchy(ctx context.Context, addr, processorID, upstreamAddr string) (*processor.Processor, *grpc.ClientConn, error) {
+	filterFile, cleanup, err := newPrivateIntegrationFilter()
+	if err != nil {
+		return nil, nil, err
+	}
+	launched := false
+	defer func() {
+		if !launched {
+			cleanup()
+		}
+	}()
+
 	config := processor.Config{
 		ProcessorID:     processorID,
 		ListenAddr:      addr,
 		EnableDetection: false,
 		MaxHunters:      100,
-		FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
+		FilterFile:      filterFile, // Isolated private filter store
 	}
 
 	// If upstream address is provided, configure as downstream processor
@@ -748,7 +759,9 @@ func startProcessorHierarchy(ctx context.Context, addr, processorID, upstreamAdd
 
 	// Start processor in background
 	errChan := make(chan error, 1)
+	launched = true
 	go func() {
+		defer cleanup()
 		if err := proc.Start(ctx); err != nil {
 			select {
 			case errChan <- err:
@@ -773,6 +786,17 @@ func startProcessorHierarchy(ctx context.Context, addr, processorID, upstreamAdd
 
 // startProcessorHierarchyWithTLS starts a processor with TLS credentials configured
 func startProcessorHierarchyWithTLS(ctx context.Context, addr, processorID, upstreamAddr string) (*processor.Processor, *grpc.ClientConn, error) {
+	filterFile, cleanup, err := newPrivateIntegrationFilter()
+	if err != nil {
+		return nil, nil, err
+	}
+	launched := false
+	defer func() {
+		if !launched {
+			cleanup()
+		}
+	}()
+
 	// Generate self-signed certificate for testing
 	cert, key, err := generateTestCertificate(processorID)
 	if err != nil {
@@ -784,7 +808,7 @@ func startProcessorHierarchyWithTLS(ctx context.Context, addr, processorID, upst
 		ListenAddr:      addr,
 		EnableDetection: false,
 		MaxHunters:      100,
-		FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
+		FilterFile:      filterFile, // Isolated private filter store
 	}
 
 	// If upstream address is provided, configure as downstream processor
@@ -828,7 +852,9 @@ func startProcessorHierarchyWithTLS(ctx context.Context, addr, processorID, upst
 
 	// Start processor in background
 	errChan := make(chan error, 1)
+	launched = true
 	go func() {
+		defer cleanup()
 		if err := proc.Start(ctx); err != nil {
 			select {
 			case errChan <- err:

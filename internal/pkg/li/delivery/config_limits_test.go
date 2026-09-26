@@ -72,3 +72,13 @@ func TestDocumentedDeliverySizingConfiguration(t *testing.T) {
 	c := ClientConfig{QueueSize: 100000, X2QueueBytes: 67108864, X3QueueBytes: 83886080, X3MaxAge: 5 * time.Minute, MemoryBudgetBytes: 4294967296, X2SpoolDir: "/var/lib/lippycat/x2", X2SpoolMaxBytes: 1073741824, X2SpoolKeyFile: "/etc/lippycat/x2.key", X2SpoolReplayPolicy: "hold"}
 	require.NoError(t, c.Validate())
 }
+
+func TestDisabledX3StorageAcceptsDefaultHoldPolicy(t *testing.T) {
+	c := DefaultClientConfig()
+	c.X3SpoolReplayPolicy = "hold"
+	require.NoError(t, c.Validate())
+	c.X3SpoolReplayPolicy = "purge"
+	require.Error(t, c.Validate())
+	c.X3SpoolReplayPolicy = "invalid"
+	require.Error(t, c.Validate())
+}

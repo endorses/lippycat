@@ -22,3 +22,10 @@ func (c *Client) JournalStorageStatus() securestore.StorageStatus {
 	}
 	return c.journal.StorageStatus()
 }
+
+func (c *Client) X3JournalStorageStatus() securestore.StorageStatus {
+	if c.x3Journal == nil {
+		return securestore.StorageStatus{Mode: "disabled", State: "ready"}
+	}
+	return c.x3Journal.StorageStatus()
+}

@@ -203,27 +203,38 @@ func (m *SessionOutputManager) writePacketWithAdmission(
 
 // Close is safe for concurrent use and preserves shutdown ordering: stop the
 // lifecycle monitor first, then close all output writers.
+// Quiesce stops capture-side lifecycle work while leaving output and LI owners
+// open. Persistent delivery drains its accepted backlog after this barrier.
+func (m *SessionOutputManager) Quiesce() {
+	if m == nil {
+		return
+	}
+	m.lifecycleMu.Lock()
+	m.closed = true
+	monitor := m.monitor
+	m.lifecycleMu.Unlock()
+	if monitor != nil {
+		monitor.Stop()
+	}
+	m.writesWG.Wait()
+	if m.lifecycle != nil {
+		m.lifecycle.ShutdownAndWait()
+	}
+}
+
 func (m *SessionOutputManager) Close() error {
 	if m == nil {
 		return nil
 	}
 	m.closeOnce.Do(func() {
+		m.Quiesce()
 		m.lifecycleMu.Lock()
-		m.closed = true
-		monitor := m.monitor
 		closer := m.closer
 		m.lifecycleMu.Unlock()
 
 		// Stop and close outside the lifecycle lock. Writer shutdown invokes
 		// externally supplied file-close callbacks, which may safely re-enter
 		// this manager and observe the terminal state.
-		if monitor != nil {
-			monitor.Stop()
-		}
-		m.writesWG.Wait()
-		if m.lifecycle != nil {
-			m.lifecycle.ShutdownAndWait()
-		}
 		if closer != nil {
 			m.closeErr = closer.Close()
 		}

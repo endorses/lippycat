@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ReservedDestinationBytes estimates the isolated payload and owner allocation
@@ -70,6 +72,19 @@ func (c ClientConfig) Validate() error {
 	} else if c.X2SpoolMaxBytes <= journalFaultReserve || c.X2SpoolKeyFile == "" {
 		return fmt.Errorf("LI X2 spool requires a positive byte limit and key file")
 	}
+	if c.X3SpoolReplayPolicy != "" && c.X3SpoolReplayPolicy != "hold" && c.X3SpoolReplayPolicy != "purge" {
+		return fmt.Errorf("LI X3 spool replay policy must be hold or purge")
+	}
+	if c.X3SpoolReplayManifest != "" && c.X3SpoolReplayPolicy == "purge" {
+		return fmt.Errorf("LI X3 replay manifest requires hold policy")
+	}
+	if c.X3SpoolDir == "" {
+		if c.X3SpoolMaxBytes != 0 || c.X3SpoolKeyFile != "" || c.X3SpoolKeyID != "" || len(c.X3SpoolReadKeys) != 0 || c.X3SpoolReplayManifest != "" || c.X3SpoolExportManifest != "" || c.X3SpoolReplayPolicy == "purge" {
+			return fmt.Errorf("LI X3 spool settings require a spool directory")
+		}
+	} else if c.X3SpoolMaxBytes < 320<<20 || c.X3SpoolKeyFile == "" || c.X3MaxAge <= 0 || c.StateIncarnation == uuid.Nil {
+		return fmt.Errorf("LI X3 spool requires at least 320 MiB, a key, positive maximum age, and encrypted state incarnation")
+	}
 	return nil
 }
 
@@ -86,6 +101,13 @@ func (c ClientConfig) ReservedGlobalBytes() (int64, error) {
 		return 0, fmt.Errorf("LI global reservation overflows")
 	}
 	total := reorderBytes + journal
+	if c.X3SpoolDir != "" {
+		const gates = int64(64 << 20)
+		if total > math.MaxInt64-gates {
+			return 0, fmt.Errorf("LI gate reservation overflows")
+		}
+		total += gates
+	}
 	admission := max(c.X2QueueBytes, c.X3QueueBytes)
 	if admission > math.MaxInt64-total {
 		return 0, fmt.Errorf("LI global admission reservation overflows")

@@ -7,6 +7,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/li/delivery"
+	"github.com/endorses/lippycat/internal/pkg/securestore"
 )
 
 func (p *Processor) populateLIDeliveryStats(dst *management.ProcessorStats) {
@@ -38,7 +39,8 @@ func (p *Processor) populateLIDeliveryStats(dst *management.ProcessorStats) {
 	dst.LiDelivery.FirstDroppedUnixMs = deliveryUnixMillis(stats.FirstDroppedAt)
 	journal := liDeliveryClient.JournalStats()
 	storage := liDeliveryClient.JournalStorageStatus()
-	dst.LiDelivery.X2Journal = &management.LIJournalStats{Bytes: journal.Bytes, MaxBytes: journal.MaxBytes, Pending: uint64(journal.Pending), Persisted: uint64(journal.Persisted), Held: uint64(journal.Held), Rejected: journal.Rejected, LastError: storage.FaultCode, Storage: storageStatusProto(storage), ReplayPending: uint64(journal.ReplayPending), Uncertain: uint64(journal.Uncertain)}
+	dst.LiDelivery.X2Journal = deliveryJournalStats(journal, storage)
+	dst.LiDelivery.X3Journal = deliveryJournalStats(liDeliveryClient.X3JournalStats(), liDeliveryClient.X3JournalStorageStatus())
 	for did, queue := range liDeliveryClient.DestinationStats() {
 		dst.LiDelivery.Destinations[did.String()] = &management.LIDestinationDeliveryStats{
 			QueueDepth:      uint64(queue.QueueDepth),
@@ -83,6 +85,16 @@ func (p *Processor) populateLIDeliveryStats(dst *management.ProcessorStats) {
 		destination.X3Connections = conn.X3Connections
 		destination.X2Keepalive = deliveryKeepaliveStats(conn.X2Keepalive)
 		destination.X3Keepalive = deliveryKeepaliveStats(conn.X3Keepalive)
+	}
+}
+
+func deliveryJournalStats(stats delivery.JournalStats, storage securestore.StorageStatus) *management.LIJournalStats {
+	return &management.LIJournalStats{
+		Bytes: stats.Bytes, MaxBytes: stats.MaxBytes,
+		Pending: uint64(stats.Pending), Persisted: uint64(stats.Persisted), Held: uint64(stats.Held),
+		ReplayPending: uint64(stats.ReplayPending), Approved: uint64(stats.Approved), Retained: uint64(stats.Retained),
+		Expired: stats.Expired, Revoked: stats.Revoked, Rejected: stats.Rejected, Uncertain: uint64(stats.Uncertain),
+		LastError: storage.FaultCode, Storage: storageStatusProto(storage),
 	}
 }
 

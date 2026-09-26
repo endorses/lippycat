@@ -87,6 +87,9 @@ func (c *Client) ExportHeldJournalManifest(path string) (result error) {
 	if len(raw) > maxReplayManifestBytes {
 		return fmt.Errorf("manifest export exceeds 4 MiB")
 	}
+	return c.writeReplayManifest(path, raw)
+}
+func (c *Client) writeReplayManifest(path string, raw []byte) (result error) {
 	parentPath, name := ".", path
 	if slash := strings.LastIndexByte(path, '/'); slash >= 0 {
 		parentPath, name = path[:slash], path[slash+1:]
@@ -105,12 +108,14 @@ func (c *Client) ExportHeldJournalManifest(path string) (result error) {
 			result = errors.Join(result, &securestore.CommitError{Outcome: outcome, Op: "close manifest directory", Err: err})
 		}
 	}()
-	same, err := c.journal.store.SameDirectory(dir)
-	if err != nil {
-		return err
-	}
-	if same {
-		return fmt.Errorf("export replay manifest outside the spool directory")
+	for _, j := range c.journals() {
+		same, err := j.store.SameDirectory(dir)
+		if err != nil {
+			return err
+		}
+		if same {
+			return fmt.Errorf("export replay manifest outside the spool directories")
+		}
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -120,18 +125,21 @@ func (c *Client) ExportHeldJournalManifest(path string) (result error) {
 	if err != nil {
 		return err
 	}
-	keyFiles := []string{c.journal.cfg.KeyFile}
-	for _, ref := range c.journal.cfg.ReadKeys {
-		keyFiles = append(keyFiles, ref.File)
+	keyFiles := append([]string(nil), c.config.ProtectedStoragePaths...)
+	for _, j := range c.journals() {
+		keyFiles = append(keyFiles, j.cfg.KeyFile)
+		for _, ref := range j.cfg.ReadKeys {
+			keyFiles = append(keyFiles, ref.File)
+		}
 	}
 	for _, keyFile := range keyFiles {
 		key, err := filepath.Abs(keyFile)
 		if err != nil {
 			return err
 		}
-		key, err = filepath.EvalSymlinks(key)
-		if err != nil {
-			return err
+		resolved, e := filepath.EvalSymlinks(key)
+		if e == nil {
+			key = resolved
 		}
 		if filepath.Join(parent, name) == key {
 			return fmt.Errorf("export replay manifest must not replace the journal key")

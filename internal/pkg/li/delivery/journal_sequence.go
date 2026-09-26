@@ -128,6 +128,9 @@ func (j *Journal) recoverSequence(name string) error {
 	return nil
 }
 func (j *Journal) VisitSequences(visit func(x2x3.SequenceCheckpoint) error) error {
+	if j.segments != nil {
+		return j.segments.visitSequences(visit)
+	}
 	j.mu.Lock()
 	keys := make([]string, 0, len(j.sequences))
 	for key := range j.sequences {

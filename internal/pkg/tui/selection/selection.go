@@ -3,6 +3,7 @@ package selection
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -77,9 +78,10 @@ func (s Selection) clamp(x, y int) point {
 // Dragged reports whether the pointer has moved from the starting cell.
 func (s Selection) Dragged() bool { return s.dragged }
 
-// Text returns the selected plain text, with trailing spaces removed from each
-// line. Endpoints are inclusive. Wide glyphs and combining sequences remain
-// intact, and a glyph straddling the pane boundary is never copied.
+// Text returns the selected plain text without trailing whitespace on each line
+// or blank lines at the end. Indentation and internal blank lines are preserved.
+// Endpoints are inclusive. Wide glyphs and combining sequences remain intact,
+// and a glyph straddling the pane boundary is never copied.
 func (s Selection) Text() string {
 	if !s.dragged {
 		return ""
@@ -93,15 +95,15 @@ func (s Selection) Text() string {
 				line.WriteString(t.text)
 			}
 		}
-		lines = append(lines, strings.TrimRight(line.String(), " \t"))
+		lines = append(lines, strings.TrimRightFunc(line.String(), unicode.IsSpace))
 	}
-	return strings.Join(lines, "\n")
+	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
 }
 
-// Solarized violet (#6c71c4) with bold black text distinguishes text selection from
-// cyan-selected rows without relying on the terminal's configurable ANSI palette.
+// Solarized violet (#6c71c4) with bold base3 text (#fdf6e3) distinguishes text
+// selection from cyan-selected rows without relying on the terminal's palette.
 // Reapply after original SGR sequences, which may reset colors or reverse video.
-const highlight = "\x1b[0;1;38;2;0;0;0;48;2;108;113;196m"
+const highlight = "\x1b[0;1;38;2;253;246;227;48;2;108;113;196m"
 const reset = "\x1b[0m"
 
 // View returns the frozen screen with the selection highlighted. Original
@@ -113,6 +115,7 @@ func (s Selection) View() string {
 	var out, styles strings.Builder
 	for y, line := range s.lines {
 		active := false
+		textEnd := s.selectedTextEnd(y)
 		for _, t := range line {
 			if t.width == 0 {
 				out.WriteString(t.text)
@@ -128,7 +131,7 @@ func (s Selection) View() string {
 				}
 				continue
 			}
-			selected := s.selected(t, y)
+			selected := t.x < textEnd && s.selected(t, y)
 			if selected && !active {
 				out.WriteString(highlight)
 			} else if !selected && active {
@@ -147,6 +150,20 @@ func (s Selection) View() string {
 		}
 	}
 	return out.String()
+}
+
+// selectedTextEnd excludes trailing padding from the highlight, matching Text.
+// Only inspect the selected pane and range: adjacent panes and unselected words
+// must not make whitespace at the end of this selection appear significant.
+func (s Selection) selectedTextEnd(y int) int {
+	line := s.lines[y]
+	for i := len(line) - 1; i >= 0; i-- {
+		t := line[i]
+		if s.selected(t, y) && strings.TrimSpace(t.text) != "" {
+			return t.x + t.width
+		}
+	}
+	return s.region.X
 }
 
 func (s Selection) ordered() (point, point) {

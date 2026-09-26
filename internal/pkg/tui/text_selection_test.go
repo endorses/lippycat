@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -89,6 +90,46 @@ func TestPacketASCIITextSelectionCopiesOnlyASCII(t *testing.T) {
 	m, cmd := m.handleTextSelectionMouse(tea.MouseMsg{Action: tea.MouseActionRelease})
 	require.Nil(t, m.textSelection)
 	require.NotNil(t, cmd, "release must schedule clipboard copy")
+}
+
+func TestCallDetailsSelectionPreservesSectionsWithoutTrailingPadding(t *testing.T) {
+	m := selectionTestModel(t, "calls")
+	if !m.uiState.CallsView.IsShowingDetails() {
+		m.uiState.CallsView.ToggleDetails()
+	}
+	m.uiState.CallsView.SetCalls([]components.Call{{
+		CallID: "selection-call", From: "sip:alice@example.test", To: "sip:bob@example.test",
+		NodeID: "capture.pcap", State: components.CallStateFailed, LastResponseCode: 407,
+		StartTime: time.Date(2025, 10, 20, 6, 34, 32, 95_000_000, time.UTC),
+		EndTime:   time.Date(2025, 10, 20, 6, 34, 36, 669_000_000, time.UTC),
+		Duration:  4 * time.Second, Codec: "G.711 µ-law (PCMU)", MOS: 4.1,
+		SDPEndpoints: []string{"192.0.2.1:27572", "192.0.2.1:27573", "192.0.2.2:4000", "192.0.2.2:4001"},
+	}})
+	_ = m.View()
+	region, ok := m.textSelectionRegion(110, 8)
+	require.True(t, ok)
+	m, _ = m.handleTextSelectionMouse(selectionPress(region.X, region.Y))
+	m, _ = m.handleTextSelectionMouse(tea.MouseMsg{
+		X: region.X + region.Width - 1, Y: region.Y + region.Height - 1, Action: tea.MouseActionMotion,
+	})
+	require.Equal(t, `📞 Call Details
+
+Call-ID: selection-call
+From: sip:alice@example.test
+To: sip:bob@example.test
+Origin: capture.pcap
+State: Failed (SIP 407 Proxy Authentication Required)
+Started: 2025-10-20 06:34:32.095
+Ended: 2025-10-20 06:34:36.669
+Duration: 4s
+Codec: G.711 µ-law (PCMU)
+Quality (MOS): 4.1
+
+SDP RTP Endpoints:
+  • 192.0.2.1:27572
+  • 192.0.2.1:27573
+  • 192.0.2.2:4000
+  • 192.0.2.2:4001`, m.textSelection.Text())
 }
 
 func TestTextSelectionKeepsSnapshotWhileEventsArrive(t *testing.T) {

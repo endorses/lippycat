@@ -130,7 +130,7 @@ func TestSelectionEmptyAndTrailingLines(t *testing.T) {
 	view := "  a  \n\n b c \n"
 	s := New(view, Rect{Width: 5, Height: 4}, 0, 0)
 	s.Move(4, 3)
-	require.Equal(t, "  a\n\n b c\n", s.Text())
+	require.Equal(t, "  a\n\n b c", s.Text())
 	require.Equal(t, view, ansi.Strip(s.View()))
 	before, after := strings.Split(view, "\n"), strings.Split(s.View(), "\n")
 	require.Len(t, after, len(before))
@@ -142,6 +142,41 @@ func TestSelectionEmptyAndTrailingLines(t *testing.T) {
 	s.Move(1, 0)
 	require.Empty(t, s.Text())
 	require.Empty(t, s.View())
+}
+
+func TestSelectionExcludesPanePaddingFromHighlight(t *testing.T) {
+	view := "L|head    |R\nL|        |R\nL|  • end |R\nL|        |R\nL|        |R"
+	wantView := "L|" + highlight + "head" + reset + "    |R\nL|        |R\nL|" + highlight + "  • end" + reset + " |R\nL|        |R\nL|        |R"
+	for _, reverse := range []bool{false, true} {
+		start, end := point{2, 0}, point{9, 4}
+		if reverse {
+			start, end = end, start
+		}
+		s := New(view, Rect{X: 2, Width: 8, Height: 5}, start.x, start.y)
+		s.Move(end.x, end.y)
+		require.Equal(t, "head\n\n  • end", s.Text())
+		require.Equal(t, wantView, s.View())
+		require.Equal(t, view, ansi.Strip(s.View()))
+	}
+}
+
+func TestSelectionTrimsOnlySelectedTrailingWhitespace(t *testing.T) {
+	for _, tc := range []struct {
+		name, view, wantText, wantView string
+		end                            int
+	}{
+		{"partial line", "word   next", "word", highlight + "word" + reset + "   next", 6},
+		{"interior spaces", "word   next", "word   next", highlight + "word   next" + reset, 10},
+		{"unicode padding", "界\u00a0\u2003", "界", highlight + "界" + reset + "\u00a0\u2003", 3},
+		{"blank selection", "    ", "", "    ", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := New(tc.view, Rect{Width: ansi.StringWidth(tc.view), Height: 1}, 0, 0)
+			s.Move(tc.end, 0)
+			require.Equal(t, tc.wantText, s.Text())
+			require.Equal(t, tc.wantView, s.View())
+		})
+	}
 }
 
 func TestSelectionInvalidOrOffscreenRegion(t *testing.T) {

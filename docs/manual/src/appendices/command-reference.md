@@ -138,6 +138,15 @@ identical command with `--resume`. See the
 [offline migration reference](https://github.com/endorses/lippycat/blob/main/cmd/migrate/README.md)
 for source preservation and RADIUS allocator handling.
 
+For Linux snapshot key rotation, select `--source-format encrypted`, provide the
+old active `--source-key-id`/`--source-key-file` and the fresh output
+`--key-id`/`--key-file`. Prior `--read-key` references then belong to the source.
+Source and destination must share a private parent directory; same-path rotation
+requires `--in-place`. `--max-working-bytes` caps allocated rotation workspace
+(default 134217728). LI rotation preserves the optional allocator pin and rejects
+`--radius-state-file`. Use the identical command with `--resume` after interruption;
+update runtime configuration yourself after successful completion.
+
 ### Connection Flags
 
 Used by `list filters`, `show`, `set filter`, and `rm filter` to connect to a processor.

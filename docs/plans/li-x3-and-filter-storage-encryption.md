@@ -9,8 +9,9 @@ and actual-owner filter/state/X2 key checks are implemented and verified. X3
 layout calibration has rejected the per-record protocol and all three measured
 immutable batch/head prototypes on the current ext4 platform. A fixed-segment
 kernel passes the corrected small callback-latency probe, but phase 5 still has
-no qualified production layout. Durable X3, replay, completed rotation, X3
-telemetry, and final qualification remain open.
+no qualified production layout. Offline filter/LI-state snapshot key rotation is
+implemented and verified. Durable X3, replay, journal rotation, X3 telemetry, and
+final qualification remain open.
 
 Source: [encryption research](../research/li-x3-and-filter-storage-encryption.md).
 This plan extends the implemented
@@ -538,6 +539,10 @@ before implementation and update all references if an adjustment is necessary.
       of all data, sequences, state, and controls. Preserve store identities and deadlines;
       reserve working space, reject insufficient capacity, and prove recovery at each
       interruption point. Report remaining old-key objects before key retirement.
+- [x] Complete the snapshot portion of rotation: Linux same-parent filter and LI-state
+      rewrites, exact payload/identity preservation, fresh keys, bounded working space,
+      authenticated resume and outcome reporting. Journal rotation and the complete
+      all-store gate above remain open.
 - [ ] Add `x3_journal` as a new management protobuf field without renumbering existing
       fields. Expose independent pending, persisted, held, approved, retained, expired,
       revoked, rejected, bytes/limits and fault metrics. Distinguish persistence commit
@@ -888,9 +893,44 @@ settlement and readiness. Other tests cover every stage's I/O failure cuts,
 physical allocation drift, aliases/locks, ledger extensions, partial workspace
 rebuilding and helper-process death. Evidence is retained in
 `/tmp/li-rotation-workspace-{race,final-race,vet}.log`; task caches were removed.
-The helper and codecs do not yet implement the coordinator's authenticated
-state-table selection, full memory/key-budget preflight, owner adapters, inventory
-report or CLI. The full snapshot rotation task remains open.
+At this foundation checkpoint the coordinator, owner adapters and CLI were still
+outstanding. The following increment completes that snapshot scope.
+
+### Offline snapshot key rotation (2026-09-26)
+
+The Linux coordinator, filter/state owner wrappers and `lc migrate` commands now
+rotate encrypted snapshots in place or to an unoccupied basename in the same
+descriptor-identified private directory. They preserve exact validated payload
+bytes and store identity, including the optional LI allocator pin. Loaded keyrings
+are immutable; the new key must differ from every supplied source key. Historical
+usage ledgers remain intact. Owner decoders receive the remaining share of one
+256 MiB memory allowance after coordinator buffers and scratch are charged.
+
+Authenticated bootstrap/progress selection precedes bounded full-attempt physical
+reservation. Resume never resets usage, refills a ready workspace, or treats a
+visible replacement as proof of directory synchronization. A completed receipt
+preserves lineage while permitting legitimate subsequent runtime saves. Reports
+retain the snapshot's committed/uncertain outcome if auxiliary cleanup fails;
+bounded inventory identifies unknown dependencies and excludes external backups.
+No key retirement, journal rewrite, runtime configuration change or policy/network
+action is performed.
+
+Coordinator race checks passed (12.479 s), including sixteen injected durable
+cuts in both publication modes and eleven subprocess-death cuts. Additional I/O,
+ownership, usage-reserve and retained-source regressions passed (1.071 s). These
+are process/fault tests, not physical power-loss qualification. Full affected
+filter/LI owner suites, focused race checks, non-LI filter suites and vet passed.
+The command suite passed with LI/race (1.057 s), without LI (0.014 s), and after
+the final coordinator fixes (focused race, 1.053 s). Command vet also passed.
+
+The bounded review found two issues: late outcome latching after auxiliary
+candidate validation and an overly permissive generic payload ceiling. Both were
+fixed with regressions and independently rechecked; discovery was not reopened.
+Evidence remains in `/tmp/li-snapshot-rotation-{race,extra-race,vet}.log`,
+`/tmp/li-snapshot-rotation-review.md`, `/tmp/li-rotation-owner-verification.md`,
+`/tmp/li-rotation-owner-*.log`, and `/tmp/li-rotation-cli-*.log`.
+Task build caches were removed. The snapshot subtask is complete; phase 8 and
+the overall plan remain open for journal and X3 work.
 
 ### Call incarnation foundation (2026-09-26)
 

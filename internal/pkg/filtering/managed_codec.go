@@ -77,7 +77,21 @@ func managedSchema(encrypted bool) *managedShape {
 	return root
 }
 
-type managedCounts struct{ hunters, criteria, nodes int }
+type managedCounts struct {
+	hunters, criteria, nodes int
+	decodeRemaining          int64 // only the explicit shared-budget JSON path
+	sharedBudget             bool
+}
+
+func (c *managedCounts) chargeDecode(n int64) error {
+	if c.sharedBudget {
+		if n > c.decodeRemaining {
+			return managedError("decode memory limit exceeded")
+		}
+		c.decodeRemaining -= n
+	}
+	return nil
+}
 
 func (c *managedCounts) add(s *managedShape, n int) error {
 	if n > s.limit {
@@ -202,6 +216,16 @@ func checkManagedJSON(d *json.Decoder, s *managedShape, c *managedCounts, depth 
 	if depth > maxManagedDepth {
 		return managedError("syntax depth limit")
 	}
+	// Charge before Token or a typed collection can allocate. Per-object storage
+	// includes both FilterYAML and protobuf representations, slice spare capacity,
+	// the result-map entry, and bounded validation scratch.
+	charge := int64(128)
+	if s.kind == 'o' {
+		charge += 512
+	}
+	if err := c.chargeDecode(charge); err != nil {
+		return err
+	}
 	token, err := d.Token()
 	if err != nil {
 		return managedError("malformed JSON")
@@ -217,6 +241,9 @@ func checkManagedJSON(d *json.Decoder, s *managedShape, c *managedCounts, depth 
 			key, ok := keyToken.(string)
 			if err != nil || !ok || seen[key] || s.fields[key] == nil {
 				return managedError("unknown or duplicate field")
+			}
+			if err := c.chargeDecode(int64(128 + len(key))); err != nil {
+				return err
 			}
 			seen[key] = true
 			if err := checkManagedJSON(d, s.fields[key], c, depth+1); err != nil {
@@ -272,6 +299,29 @@ func checkManagedJSON(d *json.Decoder, s *managedShape, c *managedCounts, depth 
 // UnmarshalEncryptedFilters decodes the versioned plaintext payload AFTER the
 // snapshot owner has authenticated its securestore envelope and identity.
 func UnmarshalEncryptedFilters(data []byte) (map[string]*management.Filter, error) {
+	return unmarshalEncryptedFilters(data, &managedCounts{})
+}
+
+// UnmarshalEncryptedFiltersWithBudget validates the entire payload within an
+// explicit share of a caller's aggregate memory reservation. It retains the
+// ordinary schema and collection limits, but may reject a valid large document
+// when the remaining allowance is smaller. Admission charges 64 KiB fixed
+// scratch, four source lengths for decoder buffers and decoded strings, 128
+// bytes per value, 512 per object, and 128 plus key length per field before
+// typed decoding. No intermediate JSON tree is allocated. The source may already
+// be charged by the caller; counting it again is deliberately conservative.
+func UnmarshalEncryptedFiltersWithBudget(data []byte, remainingDecodeBytes int64) (map[string]*management.Filter, error) {
+	if remainingDecodeBytes <= 0 || remainingDecodeBytes > maxManagedDecodeBytes {
+		return nil, managedError("decode memory allowance")
+	}
+	counts := &managedCounts{sharedBudget: true, decodeRemaining: remainingDecodeBytes}
+	if err := counts.chargeDecode(64<<10 + 4*int64(len(data))); err != nil {
+		return nil, err
+	}
+	return unmarshalEncryptedFilters(data, counts)
+}
+
+func unmarshalEncryptedFilters(data []byte, counts *managedCounts) (map[string]*management.Filter, error) {
 	if err := managedInput(data); err != nil {
 		return nil, err
 	}
@@ -280,7 +330,7 @@ func UnmarshalEncryptedFilters(data []byte) (map[string]*management.Filter, erro
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
-	if err := checkManagedJSON(decoder, managedSchema(true), &managedCounts{}, 0); err != nil {
+	if err := checkManagedJSON(decoder, managedSchema(true), counts, 0); err != nil {
 		return nil, err
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {

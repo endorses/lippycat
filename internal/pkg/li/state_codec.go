@@ -91,10 +91,18 @@ func stateJSONSchema(legacy bool) *stateShape {
 	return root
 }
 
-type stateBudget struct{ memory, targets, destinations int }
+type stateBudget struct {
+	memory, targets, destinations int
+	limit                         int // zero preserves the ordinary decoder ceiling
+	shared                        bool
+}
 
 func (b *stateBudget) charge(n int) error {
-	if n < 0 || n > maxStateDecodeBytes-b.memory {
+	limit := b.limit
+	if limit == 0 {
+		limit = maxStateDecodeBytes
+	}
+	if n < 0 || n > limit-b.memory {
 		return stateError("decode memory limit exceeded")
 	}
 	b.memory += n
@@ -105,7 +113,13 @@ func checkStateJSON(d *json.Decoder, s *stateShape, b *stateBudget, depth int) e
 	if depth > 16 {
 		return stateError("JSON depth limit exceeded")
 	}
-	if err := b.charge(32 + s.memory); err != nil {
+	charge := 32 + s.memory
+	if b.shared {
+		// Include typed slice spare capacity, semantic reference indexes and
+		// RADIUS conversion scratch as well as streaming parser allocations.
+		charge = 128 + 3*s.memory
+	}
+	if err := b.charge(charge); err != nil {
 		return err
 	}
 	token, err := d.Token()
@@ -136,7 +150,11 @@ func checkStateJSON(d *json.Decoder, s *stateShape, b *stateBudget, depth int) e
 			} else if child == nil {
 				return stateError("unknown field")
 			}
-			if err := b.charge(96 + len(key)); err != nil {
+			charge := 96 + len(key)
+			if b.shared {
+				charge = 192 + 2*len(key)
+			}
+			if err := b.charge(charge); err != nil {
 				return err
 			}
 			seen[key] = true
@@ -263,12 +281,16 @@ func stateUnicode(data []byte) bool {
 }
 
 func decodeState(data []byte, legacy bool) (*StateSnapshot, error) {
+	return decodeStateBudget(data, legacy, &stateBudget{memory: 4 * len(data)})
+}
+
+func decodeStateBudget(data []byte, legacy bool, budget *stateBudget) (*StateSnapshot, error) {
 	if len(data) == 0 || len(data) > MaxStateSnapshotBytes || !stateUnicode(data) {
 		return nil, stateError("document size or encoding")
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
-	if err := checkStateJSON(d, stateJSONSchema(legacy), &stateBudget{memory: 4 * len(data)}, 0); err != nil {
+	if err := checkStateJSON(d, stateJSONSchema(legacy), budget, 0); err != nil {
 		return nil, err
 	}
 	if _, err := d.Token(); !errors.Is(err, io.EOF) {
@@ -288,6 +310,31 @@ func decodeState(data []byte, legacy bool) (*StateSnapshot, error) {
 // before allocating typed slices/maps; no intermediate JSON tree is built.
 func UnmarshalStateSnapshot(data []byte) (*StateSnapshot, error) {
 	state, err := decodeState(data, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateStateSnapshot(state); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+// UnmarshalStateSnapshotWithBudget admits a strict modern payload within the
+// caller's remaining aggregate allowance, never a second independent 256 MiB.
+// Before typed allocation it charges 64 KiB fixed scratch, four source lengths,
+// 128 bytes per value plus three typed-entry sizes, and 192 plus twice the key
+// length per field. These conservative charges include typed collection spare
+// capacity, semantic indexes and bounded RADIUS validation scratch. It retains
+// all ordinary schema and collection limits and never activates restored data.
+func UnmarshalStateSnapshotWithBudget(data []byte, remainingDecodeBytes int64) (*StateSnapshot, error) {
+	if remainingDecodeBytes <= 0 || remainingDecodeBytes > maxStateDecodeBytes {
+		return nil, stateError("decode memory allowance")
+	}
+	budget := &stateBudget{limit: int(remainingDecodeBytes), shared: true}
+	if err := budget.charge(64<<10 + 4*len(data)); err != nil {
+		return nil, err
+	}
+	state, err := decodeStateBudget(data, false, budget)
 	if err != nil {
 		return nil, err
 	}

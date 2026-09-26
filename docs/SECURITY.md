@@ -659,6 +659,19 @@ treat it as a failed write that can safely be repeated. Interrupted offline
 migrations require their original metadata and the identical command with
 `--resume`.
 
+Linux snapshot key rotation uses the same offline commands with explicit
+`--source-format=encrypted`, current `--source-key-id`/`--source-key-file`, and a
+fresh independent output `--key-id`/`--key-file`. Source and destination must
+share a private parent directory; explicit `--in-place` permits replacement.
+Rotation preserves exact validated payload bytes, store identity and the optional
+administrative RADIUS pin. It physically reserves a bounded remaining workspace
+before each attempt and retains all usage history. Interrupted rotation requires
+its original records and keys with `--resume`; a committed snapshot may still
+require completion or cleanup. The command's inventory does not cover external
+backups or authorize key destruction. See the
+[rotation procedure](../cmd/migrate/README.md#rotate-an-encrypted-snapshot) for flags
+and configuration handoff. Journal rotation remains separate unfinished work.
+
 Back up the complete stopped store and its required sidecars consistently; keep
 keys separately controlled and retain every key needed by required backups.
 Administrative migration preserves its store identity, generation watermarks and

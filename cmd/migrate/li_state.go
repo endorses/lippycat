@@ -17,11 +17,13 @@ func newLIStateCommand() *cobra.Command {
 	var source, destination, sourceFormat, keyFile, keyID, radiusStateFile string
 	var readKeys []string
 	var initialize, inPlace, resume bool
+	var rotation rotationFlags
 	cmd := &cobra.Command{
-		Use: "li-state", Short: "Initialize or encrypt a LI administrative state store offline",
-		Long: `Initialize an empty encrypted LI state store, or migrate an explicitly selected
-JSON source. Stop the owning node first. The destination directory must already
-be private (0700 or 0750), and key files must contain exactly 32 raw private bytes.
+		Use: "li-state", Short: "Initialize, encrypt or rotate a LI administrative state store offline",
+		Long: `Initialize an empty encrypted LI state store, migrate an explicitly selected JSON
+source, or rotate an encrypted snapshot to a fresh key. Stop the owning node
+first. The destination directory must already be private (0700 or 0750), and key
+files must contain exactly 32 raw private bytes.
 
 Changed-path migration retains the source. Same-path conversion requires
 --in-place. --resume accepts only the original authenticated operation, source
@@ -30,7 +32,14 @@ content, destination and active key; it never resets encryption usage.
 Migration pins the RADIUS allocator at SOURCE.radius-correlation. Empty init
 pins DESTINATION.radius-correlation. Use --radius-state-file if the existing
 allocator used a custom path. The allocator is neither moved nor rewritten.
-This command never activates tasks or sends interception product.`,
+This command never activates tasks or sends interception product.
+
+Encrypted rotation requires --source-format=encrypted, --source-key-id and
+--source-key-file. --read-key references belong to the source; --key-id and
+--key-file select a fresh independent output key. Source and destination must
+share the same private directory. Rotation preserves the exact payload and its
+optional RADIUS pin; --radius-state-file is not accepted for rotation. It keeps
+usage history and does not change runtime configuration or retire keys.`,
 		Example: `  lc migrate li-state --init --destination /var/lib/lippycat/state.enc --key-id state-1 --key-file /etc/lippycat/state.key
   lc migrate li-state --source-format json --source /var/lib/lippycat/state.json --destination /var/lib/lippycat/state.enc --key-id state-1 --key-file /etc/lippycat/state.key`,
 		Args: cobra.NoArgs,
@@ -45,8 +54,15 @@ This command never activates tasks or sends interception product.`,
 				if source != "" || sourceFormat != "" || inPlace {
 					return errors.New("--init cannot be combined with --source, --source-format, or --in-place")
 				}
-			} else if source == "" || sourceFormat != "json" {
-				return errors.New("migration requires --source and explicit --source-format=json; use --init for an empty store")
+			} else if source == "" || (sourceFormat != "json" && sourceFormat != "encrypted") {
+				return errors.New("migration requires --source and explicit --source-format=json or --source-format=encrypted; use --init for an empty store")
+			}
+			encrypted := !initialize && sourceFormat == "encrypted"
+			if err := rotation.validate(cmd, encrypted); err != nil {
+				return err
+			}
+			if encrypted && cmd.Flags().Changed("radius-state-file") {
+				return errors.New("--radius-state-file is not accepted for encrypted rotation; the existing optional pin is preserved")
 			}
 			keys := securestore.KeyConfig{Active: securestore.KeyRef{ID: keyID, File: keyFile}}
 			for _, raw := range readKeys {
@@ -55,6 +71,12 @@ This command never activates tasks or sends interception product.`,
 					return err
 				}
 				keys.Prior = append(keys.Prior, ref)
+			}
+			if encrypted {
+				sourceKeys := rotation.sourceKeys(keys.Prior)
+				keys.Prior = nil
+				result, err := li.RotateEncryptedStateStore(source, destination, sourceKeys, keys, li.StateRotationOptions{InPlace: inPlace, Resume: resume, MaxWorkingBytes: rotation.maxWorkingBytes})
+				return finishSnapshotRotation(cmd, "LI state store", result, err)
 			}
 			options := li.StateOfflineOptions{InPlace: inPlace, Resume: resume, RADIUSStateFile: radiusStateFile}
 			var outcome securestore.Outcome
@@ -79,14 +101,15 @@ This command never activates tasks or sends interception product.`,
 	flags := cmd.Flags()
 	flags.StringVar(&source, "source", "", "Explicit source snapshot path")
 	flags.StringVar(&destination, "destination", "", "Explicit destination snapshot path (required)")
-	flags.StringVar(&sourceFormat, "source-format", "", "Explicit source format: json")
+	flags.StringVar(&sourceFormat, "source-format", "", "Explicit source format: json or encrypted")
 	flags.BoolVar(&initialize, "init", false, "Initialize an empty encrypted store without a source")
 	flags.BoolVar(&inPlace, "in-place", false, "Explicitly replace the source at the same path")
-	flags.BoolVar(&resume, "resume", false, "Resume the identical authenticated initialization or migration")
+	flags.BoolVar(&resume, "resume", false, "Resume the identical authenticated initialization, migration or rotation")
 	flags.StringVar(&radiusStateFile, "radius-state-file", "", "Existing RADIUS allocator path override (default: source or initial destination plus .radius-correlation)")
 	flags.StringVar(&keyFile, "key-file", "", "Active raw 32-byte encryption key file")
 	flags.StringVar(&keyID, "key-id", "", "Active encryption key ID")
-	flags.StringArrayVar(&readKeys, "read-key", nil, "Prior read-key reference id=path (repeatable, at most four)")
+	flags.StringArrayVar(&readKeys, "read-key", nil, "Prior read-key reference id=path (source keys for encrypted rotation; at most four)")
+	rotation.register(cmd)
 	return cmd
 }
 

@@ -2,9 +2,9 @@
 
 These bounded codecs implement the authenticated records used by the
 [offline snapshot rotation protocol](li-snapshot-key-rotation.md). They are
-building blocks: no rotation coordinator, command, publication, or recovery
-authority follows from decoding a record alone. The coordinator must retain
-ownership and enforce the [remaining-attempt workspace](li-snapshot-rotation-workspace.md)
+building blocks: publication or recovery authority does not follow from decoding
+a record alone. The implemented Linux `RotateSnapshot` coordinator retains
+ownership and enforces the [remaining-attempt workspace](li-snapshot-rotation-workspace.md)
 and selected-state rules before effects.
 
 All integers are unsigned and big-endian. Unknown versions, purposes, stages,

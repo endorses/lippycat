@@ -1,8 +1,10 @@
-# Encrypted snapshot key rotation proposal
+# Encrypted snapshot key rotation
 
-Status: proposed on 2026-09-26; implementation requires review. This document
-narrows one increment of [encrypted managed storage](li-encrypted-storage.md).
-It does not complete the rotation gate in
+Status: implemented and verified for Linux snapshots on 2026-09-26. This document
+describes one increment of [encrypted managed storage](li-encrypted-storage.md).
+The coordinator, owner adapters, CLI, fault/resume tests and focused review are
+complete within the scope below. Journal rotation remains outside this increment,
+so it does not complete the full rotation gate in
 [the implementation plan](../plans/li-x3-and-filter-storage-encryption.md).
 
 The increment rotates one managed filter snapshot or LI administrative snapshot
@@ -21,7 +23,7 @@ usage ledgers. This retains one raw-key usage namespace; copying ledgers into a
 second writable directory would fork accounting. Existing plaintext migration
 with a freshly provisioned key retains its separate cross-directory behavior.
 
-The proposed commands extend the existing offline commands:
+The commands extend the existing offline commands:
 
 ```sh
 lc migrate filter-store --source-format encrypted \
@@ -64,8 +66,8 @@ accounted for; the destination snapshot itself needs only its new active key.
 ## Coordinator and owner boundary
 
 A common, untagged `securestore` coordinator owns paths, ownership, accounting,
-encrypted progress, publication, recovery, and the result report. Its proposed
-entry point accepts source/destination paths, immutable source and destination
+encrypted progress, publication, recovery, and the result report. Its
+`RotateSnapshot` entry point accepts source/destination paths, immutable source and destination
 keyrings, options, and an owner contract containing purpose, object name, payload
 ceiling, and strict preflight/validation callbacks that accept the remaining decode
 reservation. It returns a structured report, typed
@@ -80,9 +82,9 @@ operation to the sorted source key IDs and their loaded material using a keyed
 commitment; never expose raw keys or comparison fingerprints in diagnostics.
 
 The filter wrapper supplies purpose `FilterSnapshot`, object `filters`, the
-16 MiB payload ceiling, and `UnmarshalEncryptedFilters`. The LI wrapper supplies
+16 MiB payload ceiling, and `UnmarshalEncryptedFiltersWithBudget`. The LI wrapper supplies
 purpose `AdministrativeState`, the existing `stateSnapshotObject` constant
-(`administrative-state`), the 32 MiB ceiling, and `UnmarshalStateSnapshot` plus
+(`administrative-state`), the 32 MiB ceiling, and `UnmarshalStateSnapshotWithBudget` plus
 inner-incarnation equality. No shared package imports either owner package.
 
 The callback validates the whole payload before any rotation data is written and
@@ -208,7 +210,7 @@ a no-clobber error; an explicit in-place rotation authenticates that output's ow
 lineage. Tests cover rotate, runtime save, then rotate again, plus subsequent use
 of both the retained original and the prior output.
 
-## Transaction-owned temporary files: required primitive work
+## Transaction-owned temporary files
 
 The current `.securestore-tmp-<random>` naming does not identify which snapshot
 transaction owns a partial file. `RecoverTemporaries` is a whole-directory owner
@@ -216,8 +218,8 @@ operation and is unsuitable when unrelated stores share the parent. Existing
 `Dir.Replace`/`Create` alone therefore do not establish this proposal's complete
 crash-cleanup contract.
 
-Implementation needs a narrow internal transaction I/O facility. Every rotation
-write, **including new-key usage-ledger updates**, uses an exclusive unpredictable
+The internal transaction I/O facility attributes every rotation
+write, **including new-key usage-ledger updates**, to an exclusive unpredictable
 temporary whose name contains an opaque authenticated operation token and role.
 Recovery only removes matching private regular single-link files after validating
 the bootstrap/request and all path aliases. Before the first bootstrap is
@@ -231,8 +233,7 @@ initial increment should enable rotation only where that capability is available
 (Linux `RENAME_NOREPLACE`), reject unsupported platforms before operation records
 are created, and fail safely if the actual filesystem rejects publication. The
 portable hard-link fallback requires separate two-name recovery qualification and
-is not silently used by this protocol. No primitive changes are implemented by
-this proposal.
+is not used by this protocol. `RotationWorkspace` provides the Linux implementation.
 
 ## Budget ownership
 
@@ -269,10 +270,10 @@ The first `RotationIO` helper still provides only per-write preallocation. The
 separate `RotationWorkspace` primitive reserves the entire caller-selected
 remaining stage set, consumes those same inodes once, and routes new-ledger
 rewrites through borrowed retained ownership. It provides no refill after
-readiness. This is a helper contract, not a completed rotation transaction: the
-coordinator must authenticate the request/cut, select the exact remaining set,
-validate key and memory budgets, enforce bootstrap ordering, and integrate
-recovery/outcome reporting. No snapshot rotation coordinator or CLI is implemented.
+readiness. `RotateSnapshot` authenticates the request/cut, selects the exact
+remaining set, validates key and memory budgets, enforces bootstrap ordering, and
+integrates recovery/outcome reporting. The filter/state wrappers and CLI use that
+coordinator; the helper alone does not establish transaction authority.
 
 Resume may raise the supplied byte cap to cover the authenticated operation's
 already determined minimum; it cannot lower it below current allocated workspace.

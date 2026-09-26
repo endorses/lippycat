@@ -4,13 +4,14 @@ Status: protocol design accepted, 2026-09-26. A Linux `RotationWorkspace` helper
 implements the bounded physical stage pool and borrowed-lock usage adapter.
 Focused tests verify full readiness before writes, single-inode consumption,
 ledger renewals, fault cuts, recovery bounds, and monotonic prior-output outcomes.
-The coordinator, CLI, exact authenticated state-table selection, key-budget
-preflight, and aggregate memory admission remain unimplemented. The accepted
-per-write `RotationIO` helper remains unchanged.
+The Linux `RotateSnapshot` coordinator and filter/state CLI now integrate exact
+authenticated state selection, key-budget preflight and aggregate memory
+admission. Their fault, process-death and explicit-resume tests pass. The accepted
+per-write `RotationIO` helper remains unchanged; journals are outside this scope.
 This document supplements [snapshot key rotation](li-snapshot-key-rotation.md)
 and replaces neither its cryptographic identity rules nor its same-parent scope.
 
-The proposed guarantee is **one completely reserved remaining attempt**. A fresh
+The guarantee is **one completely reserved remaining attempt**. A fresh
 invocation or resume allocates every inode it may need through completion before
 its first new seal or authoritative publication. Writes and renames consume those
 same allocations. There is no reserve file that is deleted to make room for a
@@ -35,7 +36,7 @@ request token is a keyed commitment to the complete request; a random suffix,
 stage name, file count, allocation size, or last modification time is never proof
 that a seal, reservation, publication, or directory sync committed.
 
-The bootstrap has the existing proposed `U` (ledger-uninitialized) and `R`
+The bootstrap has `U` (ledger-uninitialized) and `R`
 (ledger-required) stages. In `U`, only an absent ledger or a matching zero-counter
 ledger is eligible for initialization/reconciliation; no current-operation GCM
 output may have been selected. In `R`, a missing/invalid ledger is fatal even when

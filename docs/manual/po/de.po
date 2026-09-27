@@ -5318,7 +5318,7 @@ msgstr "`1000`"
 
 #: src/appendices/command-reference.md:726
 msgid "Enable disk-based buffer for backpressure"
-msgstr "Festplattenbasierten Puffer für Rückstau aktivieren"
+msgstr "Festplattenpuffer für Rückstau aktivieren"
 
 #: src/appendices/command-reference.md:726 src/part3-distributed/hunt.md:64
 msgid "`--disk-buffer`"
@@ -16101,7 +16101,9 @@ msgstr "TLS deaktivieren (nur für Tests)"
 
 #: src/part3-distributed/hunt.md:64
 msgid "Enable disk overflow buffer"
-msgstr "Plattenüberlaufpuffer aktivieren"
+msgstr ""
+"Festplattenpuffer aktivieren (speichert Pakete bei Rückstau vorübergehend "
+"auf dem Datenträger)"
 
 #: src/part3-distributed/hunt.md:65
 msgid ""
@@ -16649,14 +16651,14 @@ msgstr ""
 
 #: src/part3-distributed/hunt.md:341
 msgid "Disk Overflow Buffer"
-msgstr "Plattenüberlaufpuffer"
+msgstr "Festplattenpuffer"
 
 #: src/part3-distributed/hunt.md:343
 msgid ""
 "For extended disconnections (hours, days), enable the disk overflow buffer:"
 msgstr ""
 "Aktivieren Sie für längere Verbindungsunterbrechungen (Stunden, Tage) den "
-"Plattenüberlaufpuffer:"
+"Festplattenpuffer:"
 
 #: src/part3-distributed/hunt.md:352
 msgid ""
@@ -16664,13 +16666,14 @@ msgid ""
 "is restored, disk batches feed back into the memory queue (FIFO ordering, "
 "oldest first)."
 msgstr ""
-"Wenn die Speicherwarteschlange voll wird, laufen Batches auf die Festplatte "
-"über. Nach Wiederherstellung der Verbindung fließen sie zurück in die "
-"Speicherwarteschlange (FIFO-Reihenfolge, älteste zuerst)."
+"Bei voller Warteschlange im Arbeitsspeicher werden Paket-Batches "
+"vorübergehend auf dem Datenträger gespeichert. Nach Wiederherstellung der "
+"Verbindung fließen sie zurück in die Speicherwarteschlange (FIFO-"
+"Reihenfolge, älteste zuerst)."
 
 #: src/part3-distributed/hunt.md:354
 msgid "`--disk-buffer` — enable disk overflow"
-msgstr "`--disk-buffer` — Plattenüberlauf aktivieren"
+msgstr "`--disk-buffer` — Festplattenpuffer aktivieren"
 
 #: src/part3-distributed/hunt.md:355
 msgid ""

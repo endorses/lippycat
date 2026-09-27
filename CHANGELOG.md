@@ -5,23 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.12.2] - 2026-09-27
 
 ### Added
 
+- Add encrypted managed-filter snapshots and LI administrative state, with
+  transactional persistence and explicit recovery
+- Add offline `lc migrate` commands to initialize or migrate filter and LI-state
+  stores, rotate snapshot keys, and rewrite or rotate X2/X3 journals with
+  authenticated resume after interruption
+- Expose store ownership, mutation outcomes, encryption-key usage, and bounded
+  storage diagnostics through processor status
+- Add configurable, bounded IPv4 fragment reassembly across live and offline
+  capture paths
+- Add SIP retry continuity through `--sip-retry-window`, retaining signaling
+  and early media across matched INVITE `503` retries
+- Add interactive TUI scrollbars, pane-contained mouse text selection with
+  local and SSH clipboard support, and clickable footer keybinding hints
 - Add opt-in encrypted X3 journaling with exact, explicitly authorized historical
   replay; replay preserves the original encoded bytes and sequence numbers and
   adds no replay marker
 
 ### Changed
 
+- Center TUI settings and support outside-click dismissal across shared modals;
+  clicking outside settings cancels uncommitted edits
+- Refine TUI selection styling, padding, and statistics icons
+- Document encrypted-store provisioning, recovery, rotation, and IPv4
+  defragmentation; treat unsourced performance targets as observations
 - Require an initialized encrypted managed-filter store when LI is enabled;
   `--filter-store-mode=auto` selects encryption and explicit YAML mode is rejected.
   Configure `--filter-store-key-file` and `--filter-store-key-id` with a private raw
   32-byte key. With the owning processor or tap stopped, initialize an empty store
-  using `lc migrate filter-store --init` or convert existing YAML using
-  `lc migrate filter-store --source-format yaml --source ... --destination ...
-  --key-id ... --key-file ...`; startup does not automatically convert plaintext
+  using `lc migrate filter-store --init` or convert existing YAML with
+  `lc migrate filter-store --source-format yaml`; startup does not automatically
+  convert plaintext
 - Require store and key directories to be owned by the service account, with
   snapshot directories provisioned as `0700` or `0750`, private snapshot/key files
   as `0600` (or `0400` for read-only input), and journal directories as `0700`;
@@ -30,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Retire observed RTP flows across call restarts to prevent stale media
+  association with a new call generation
+- Synchronize IPv4 defragmentation configuration and version the offline SIP
+  metadata schema
+- Synchronize capture startup and shutdown, and reject new event admission
+  before reporting terminal sink failures
+- Provision private Docker storage directories and make the allocation test
+  fixture portable across filesystems
 - Publish committed task authorization updates to X3 delivery with journaling
   enabled or disabled, so an end-time extension committed before expiry keeps
   delivery authorized beyond the original cutoff
@@ -38,12 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clears its cutoff without reviving a revoked task generation
 - Bound retained X3 task authorization and revocation identities while preserving
   rejection of stale queued work, transport claims and replay records
-
-### Removed
-
-- Remove the non-standard normalized LI metadata export and its
-  `--li-metadata-*` flags; standards-based protocol-specific X2 delivery remains
-  available
 
 ## [0.12.1] - 2026-09-22
 

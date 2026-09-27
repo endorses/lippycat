@@ -4,7 +4,7 @@ Hunters are lightweight capture agents that run at the network edge. If you've u
 
 ## From Sniff to Hunt {#from-sniff-to-hunt}
 
-The transition from local capture to distributed capture is small. Compare:
+If you already know `lc sniff`, you will quickly find your way around `lc hunt` too. Compare:
 
 What you learned with `sniff`:
 

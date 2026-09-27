@@ -15944,9 +15944,11 @@ msgstr "Von Sniff zu Hunt"
 
 #: src/part3-distributed/hunt.md:7
 msgid ""
-"The transition from local capture to distributed capture is small. Compare:"
+"If you already know `lc sniff`, you will quickly find your way around `lc "
+"hunt` too. Compare:"
 msgstr ""
-"Der Wechsel von lokaler zu verteilter Erfassung ist klein. Vergleichen Sie:"
+"Wenn Sie `lc sniff` bereits kennen, werden Sie sich auch mit `lc hunt` "
+"schnell zurechtfinden. Vergleichen Sie:"
 
 #: src/part3-distributed/hunt.md:9
 msgid "What you learned with `sniff`:"

@@ -22430,7 +22430,7 @@ msgstr ""
 
 #: src/part5-advanced/lawful-interception.md:677
 msgid "Operational Considerations"
-msgstr "Betriebliche Aspekte"
+msgstr "Hinweise zum Betrieb"
 
 #: src/part5-advanced/lawful-interception.md:679
 msgid "Network Isolation"

@@ -103,6 +103,10 @@ die Paketerfassung”, but “Öffnen Sie den gespeicherten Mitschnitt”. Avoid
 “gespeicherte Erfassungen” and “Erfassungsdateien”. In an already clear context,
 “Erfassung” is sufficient for the process.
 
+When **operational** refers to running the system, use **zum Betrieb** or
+**im Betrieb** as appropriate. Translate **Operational Considerations** as
+**Hinweise zum Betrieb** to avoid suggesting company or business matters.
+
 For lawful interception, translate **delivery** as **Ausleitung** (for example,
 “X2-IRI-Ausleitung” and “X3-CC-Ausleitung”). Use **Übermittlung** for general
 data/event transport and when describing the transmission itself. Avoid

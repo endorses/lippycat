@@ -80,17 +80,26 @@ address. For example: “Starten Sie den Prozessor mit folgendem Befehl.”
 Use clear technical German and retain established acronyms such as CLI, TUI,
 PCAP, TLS, SIP, and RTP. Keep these terms consistent:
 
-| English             | German                                         |
-| ------------------- | ---------------------------------------------- |
-| packet capture      | Paketerfassung                                 |
-| packet              | Paket                                          |
-| processor           | Prozessor                                      |
-| hunter node         | Hunter-Knoten                                  |
-| tap node            | Tap-Knoten                                     |
-| network interface   | Netzwerkschnittstelle                          |
-| network segment     | Netzwerksegment                                |
-| protocol analysis   | Protokollanalyse                               |
-| lawful interception | rechtmäßige Telekommunikationsüberwachung (LI) |
+| English                  | German                                         |
+| ------------------------ | ---------------------------------------------- |
+| packet capture (process) | Paketerfassung                                 |
+| capture (result)         | Paketmitschnitt / Mitschnitt                   |
+| capture file             | Mitschnittdatei / PCAP-Datei                   |
+| packet                   | Paket                                          |
+| processor                | Prozessor                                      |
+| hunter node              | Hunter-Knoten                                  |
+| tap node                 | Tap-Knoten                                     |
+| network interface        | Netzwerkschnittstelle                          |
+| network segment          | Netzwerksegment                                |
+| protocol analysis        | Protokollanalyse                               |
+| lawful interception      | rechtmäßige Telekommunikationsüberwachung (LI) |
+
+Distinguish the process from its result: use **Paketerfassung** or **Pakete
+erfassen** for the activity, and **Paketmitschnitt**, **Mitschnitt**, or
+**Mitschnittdatei** for captured data and saved files. For example, “Starten Sie
+die Paketerfassung”, but “Öffnen Sie den gespeicherten Mitschnitt”. Avoid
+“gespeicherte Erfassungen” and “Erfassungsdateien”. In an already clear context,
+“Erfassung” is sufficient for the process.
 
 Translate prose, headings, chapter titles, and descriptive table cells. Preserve
 command names, flags, configuration keys, environment variables, paths, protocol

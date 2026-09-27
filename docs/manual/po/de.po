@@ -15557,7 +15557,7 @@ msgid ""
 "means:"
 msgstr ""
 "Der DMZ-Prozessor leitet aggregierten Verkehr über einen einzigen Firewall-"
-"Port an den internen Prozessor weiter, der ihn mit internen Erfassungen "
+"Port an den internen Prozessor weiter, der ihn mit intern erfasstem Verkehr "
 "zusammenführt. Das bedeutet:"
 
 #: src/part3-distributed/architecture.md:225
@@ -26190,7 +26190,7 @@ msgstr "Offline-Analyse"
 #: src/part5-advanced/security.md:611
 msgid "Re-analyze stored captures with the paired key log:"
 msgstr ""
-"Analysieren Sie gespeicherte Erfassungen erneut mit dem zugehörigen "
+"Analysieren Sie gespeicherte Mitschnitte erneut mit dem zugehörigen "
 "Schlüsselprotokoll:"
 
 #: src/part5-advanced/security.md:613
@@ -28558,7 +28558,7 @@ msgid ""
 "for a credible SIP start line; a correctly framed but prohibited `Content-"
 "Length` remains a hard policy rejection."
 msgstr ""
-"Prüfen Sie das SIP-Nachrichtenformat anhand einer Paketerfassung. Stellen "
+"Prüfen Sie das SIP-Nachrichtenformat anhand eines Paketmitschnitts. Stellen "
 "Sie sicher, dass `Content-Length`-Header zur tatsächlichen Body-Größe "
 "passen. Eine Reassemblierungslücke oder ein abgeschnittener Body veranlasst "
 "den Stream-Parser, den unvollständigen Rahmen zu verwerfen und vorwärts nach "
@@ -29089,7 +29089,7 @@ msgid ""
 "temporary captures)."
 msgstr ""
 "**Datenträgerengpass:** PCAP-Ausgabe auf schnelleren Speicher verlegen (SSD, "
-"tmpfs für temporäre Erfassungen)."
+"tmpfs für temporäre Mitschnitte)."
 
 #: src/part5-advanced/troubleshooting.md:609
 msgid ""
@@ -30056,7 +30056,7 @@ msgstr "[Rückfall auf SIMD](#falling-back-to-simd)"
 
 #: src/part5-advanced/troubleshooting.md:1305
 msgid "Missing RTP in captures"
-msgstr "RTP fehlt in Erfassungen"
+msgstr "RTP fehlt in Mitschnitten"
 
 #: src/part5-advanced/troubleshooting.md:1305
 msgid "[Missing RTP Streams](#missing-rtp-streams)"
@@ -30484,7 +30484,7 @@ msgid ""
 "making it straightforward to archive, replay, or share individual call "
 "recordings."
 msgstr ""
-"Das Schreiben von PCAP-Dateien pro Anruf erstellt separate Erfassungsdateien "
+"Das Schreiben von PCAP-Dateien pro Anruf erstellt separate Mitschnittdateien "
 "für jeden VoIP-Anruf. So lassen sich einzelne Anrufaufzeichnungen einfach "
 "archivieren, wiedergeben oder teilen."
 

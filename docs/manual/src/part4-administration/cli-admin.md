@@ -36,6 +36,8 @@ flowchart LR
 
 All remote commands connect to a processor via gRPC and share a common set of connection flags. Local commands (`show config`, `list interfaces`) run without a processor connection.
 
+The example results below use illustrative values. Interface names and descriptions depend on the host; optional JSON fields depend on the deployment and available telemetry.
+
 ## Connection Flags {#connection-flags}
 
 Every remote command supports these flags. **TLS is enabled by default** — you must explicitly pass `--insecure` to disable it.
@@ -82,16 +84,23 @@ lc show status -P processor:55555 --tls-ca ca.crt
 
 ```json
 {
+  "storage": {
+    "filters": {
+      "mode": "yaml",
+      "state": "ready",
+      "last_outcome": "committed",
+      "commits": 3
+    }
+  },
   "processor_id": "central-proc",
   "status": "healthy",
-  "total_hunters": 3,
-  "healthy_hunters": 3,
+  "total_hunters": 1,
+  "healthy_hunters": 1,
   "warning_hunters": 0,
   "error_hunters": 0,
-  "total_packets_received": 1250000,
+  "total_packets_received": 12500,
   "total_packets_forwarded": 0,
-  "total_filters": 5,
-  "upstream_processor": ""
+  "total_filters": 3
 }
 ```
 
@@ -108,29 +117,46 @@ lc show hunter --id edge-01 -P processor:55555 --tls-ca ca.crt
 <!-- i18n:skip -->
 
 ```json
-[
-  {
-    "hunter_id": "edge-01",
-    "hostname": "capture-node-1",
-    "remote_addr": "10.0.1.10:45678",
-    "status": "healthy",
-    "connected_duration_sec": 3600,
-    "interfaces": ["eth0"],
-    "stats": {
-      "packets_captured": 500000,
-      "packets_matched": 12500,
-      "packets_forwarded": 12500,
-      "packets_dropped": 0,
-      "buffer_bytes": 1048576,
-      "active_filters": 3
-    },
-    "capabilities": {
-      "filter_types": ["sip_user", "ip_address"],
-      "gpu_acceleration": true,
-      "af_xdp": false
-    }
+{
+  "hunter_id": "edge-01",
+  "hostname": "capture-node-1",
+  "remote_addr": "10.0.1.10:45678",
+  "status": "healthy",
+  "connected_duration_sec": 3600,
+  "interfaces": ["eth0"],
+  "stats": {
+    "packets_captured": 500000,
+    "packets_matched": 12500,
+    "packets_forwarded": 12500,
+    "packets_dropped": 0,
+    "capture_buffer_regular_drops": 0,
+    "capture_buffer_sip_drops": 0,
+    "capture_buffer_sip_demotions": 0,
+    "batch_channel_drops": 0,
+    "capture_buffer_regular_len": 0,
+    "capture_buffer_regular_capacity": 1000,
+    "capture_buffer_sip_len": 0,
+    "capture_buffer_sip_capacity": 100,
+    "capture_buffer_output_len": 0,
+    "capture_buffer_output_capacity": 100,
+    "buffer_bytes": 1048576,
+    "active_filters": 3,
+    "cpu_percent": 12.5,
+    "memory_rss_bytes": 67108864,
+    "rtp_ownership_unresolved": 0,
+    "rtp_ownership_ambiguous": 0,
+    "identity_inheritance_suppressed": 0,
+    "tcp_established_idle_retentions": 0,
+    "tcp_pre_rearm_discarded_chunks": 0,
+    "tcp_rearm_rejected_chunks": 0
+  },
+  "capabilities": {
+    "filter_types": ["sip_user", "ip_address"],
+    "max_buffer_size": 67108864,
+    "gpu_acceleration": true,
+    "af_xdp": false
   }
-]
+}
 ```
 
 ### `show topology` {#show-topology}
@@ -152,15 +178,56 @@ lc show topology -P processor:55555 --tls-ca ca.crt
   "status": "healthy",
   "hierarchy_depth": 0,
   "reachable": true,
-  "hunters": ["..."],
+  "hunters": [
+    {
+      "hunter_id": "edge-01",
+      "hostname": "capture-node-1",
+      "remote_addr": "10.0.1.10:45678",
+      "status": "healthy",
+      "connected_duration_sec": 3600,
+      "interfaces": ["eth0"],
+      "stats": {
+        "packets_captured": 500000,
+        "packets_matched": 12500,
+        "packets_forwarded": 12500,
+        "packets_dropped": 0,
+        "capture_buffer_regular_drops": 0,
+        "capture_buffer_sip_drops": 0,
+        "capture_buffer_sip_demotions": 0,
+        "batch_channel_drops": 0,
+        "capture_buffer_regular_len": 0,
+        "capture_buffer_regular_capacity": 1000,
+        "capture_buffer_sip_len": 0,
+        "capture_buffer_sip_capacity": 100,
+        "capture_buffer_output_len": 0,
+        "capture_buffer_output_capacity": 100,
+        "buffer_bytes": 1048576,
+        "active_filters": 3,
+        "cpu_percent": 12.5,
+        "memory_rss_bytes": 67108864,
+        "rtp_ownership_unresolved": 0,
+        "rtp_ownership_ambiguous": 0,
+        "identity_inheritance_suppressed": 0,
+        "tcp_established_idle_retentions": 0,
+        "tcp_pre_rearm_discarded_chunks": 0,
+        "tcp_rearm_rejected_chunks": 0
+      },
+      "capabilities": {
+        "filter_types": ["sip_user", "ip_address"],
+        "max_buffer_size": 67108864,
+        "gpu_acceleration": true,
+        "af_xdp": false
+      }
+    }
+  ],
   "downstream_processors": [
     {
       "processor_id": "region-east",
       "address": "10.0.2.1:55555",
       "status": "healthy",
+      "upstream_processor": "central-proc:55555",
       "hierarchy_depth": 1,
-      "reachable": true,
-      "hunters": ["..."]
+      "reachable": true
     }
   ]
 }
@@ -178,18 +245,12 @@ lc show filter --id myfilter -P processor:55555 --tls-ca ca.crt
 
 ### `show config` {#show-config}
 
-Display local configuration. This is the only `show` subcommand that doesn't require a processor connection:
+Display local configuration as JSON. This is the only `show` subcommand that doesn't require a processor connection:
 
 <!-- i18n:skip -->
 
 ```bash
 lc show config
-```
-
-<!-- i18n:skip -->
-
-```bash
-lc show config --json
 ```
 
 ## Listing with `lc list` {#listing-with-lc-list}
@@ -207,10 +268,16 @@ lc list interfaces
 <!-- i18n:skip -->
 
 ```
+Warning: Running without root privileges. Some interfaces may not be accessible.
+Consider running with 'sudo' for full interface access.
+
 Network interfaces suitable for VoIP monitoring:
   eth0 - Ethernet adapter
   wlan0 - Wireless adapter
   enp0s3 - PCI Ethernet
+
+Note: Interface selection should comply with your organization's network monitoring policies.
+Only monitor interfaces you have explicit permission to access.
 ```
 
 The command filters out interfaces not useful for monitoring (loopback, Docker/container, VM, USB/Bluetooth, tunnel interfaces). Full listing requires root privileges:
@@ -437,7 +504,10 @@ All remote commands output JSON to stdout (results) and stderr (errors). Output 
 <!-- i18n:skip -->
 
 ```json
-{"error": "processor address is required", "code": "UNAVAILABLE"}
+{
+  "error": "processor address is required (use --processor or set remote.processor in config)",
+  "code": "UNAVAILABLE"
+}
 ```
 
 ## Scripting Examples {#scripting-examples}

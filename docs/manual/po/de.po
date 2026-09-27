@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: lippycat 🫦🐱 Manual\n"
-"POT-Creation-Date: 2026-09-27T16:18:34+02:00\n"
+"POT-Creation-Date: 2026-09-27T20:06:20+02:00\n"
 "PO-Revision-Date: 2026-09-27 10:56+0000\n"
 "Last-Translator: lippycat contributors\n"
 "Language-Team: German\n"
@@ -208,7 +208,7 @@ msgstr "Beispiel"
 #: src/appendices/bpf-reference.md:13 src/appendices/bpf-reference.md:25
 #: src/appendices/bpf-reference.md:48 src/appendices/command-reference.md:1283
 #: src/part3-distributed/hunt.md:312 src/part3-distributed/hunt.md:374
-#: src/part4-administration/cli-admin.md:427
+#: src/part4-administration/cli-admin.md:494
 #: src/part5-advanced/structured-protocol-logs.md:41
 #: src/part5-advanced/troubleshooting.md:435
 msgid "Meaning"
@@ -445,8 +445,8 @@ msgstr "Protokollqualifikatoren"
 #: src/part2-local-capture/watch-local.md:197
 #: src/part3-distributed/process.md:78 src/part3-distributed/process.md:116
 #: src/part3-distributed/process.md:330
-#: src/part4-administration/cli-admin.md:43
-#: src/part4-administration/cli-admin.md:372
+#: src/part4-administration/cli-admin.md:45
+#: src/part4-administration/cli-admin.md:439
 #: src/part4-administration/watch-remote.md:110 src/part5-advanced/dns.md:59
 #: src/part5-advanced/email.md:80 src/part5-advanced/http.md:61
 #: src/part5-advanced/lawful-interception.md:291
@@ -934,8 +934,8 @@ msgstr "Entsprechender BPF-Ausdruck"
 #: src/part2-local-capture/watch-local.md:43
 #: src/part2-local-capture/watch-local.md:197 src/part3-distributed/hunt.md:38
 #: src/part3-distributed/hunt.md:53 src/part3-distributed/process.md:78
-#: src/part4-administration/cli-admin.md:43
-#: src/part4-administration/cli-admin.md:372
+#: src/part4-administration/cli-admin.md:45
+#: src/part4-administration/cli-admin.md:439
 #: src/part5-advanced/lawful-interception.md:225
 #: src/part5-advanced/lawful-interception.md:454
 #: src/part5-advanced/radius.md:155 src/part5-advanced/radius.md:257
@@ -2433,7 +2433,7 @@ msgstr "CA-Zertifikatsdatei zur Serverprüfung"
 #: src/appendices/command-reference.md:96
 #: src/appendices/command-reference.md:111
 #: src/part3-distributed/architecture.md:239
-#: src/part4-administration/cli-admin.md:46 src/part5-advanced/security.md:26
+#: src/part4-administration/cli-admin.md:48 src/part5-advanced/security.md:26
 #: src/part5-advanced/security.md:28
 msgid "`--tls-ca`"
 msgstr "`--tls-ca`"
@@ -2444,7 +2444,7 @@ msgstr "Client-Zertifikatsdatei (für mTLS)"
 
 #: src/appendices/command-reference.md:97
 #: src/appendices/command-reference.md:109
-#: src/part4-administration/cli-admin.md:47
+#: src/part4-administration/cli-admin.md:49
 msgid "`--tls-cert`"
 msgstr "`--tls-cert`"
 
@@ -2454,7 +2454,7 @@ msgstr "Datei mit privatem Client-Schlüssel (für mTLS)"
 
 #: src/appendices/command-reference.md:98
 #: src/appendices/command-reference.md:110
-#: src/part4-administration/cli-admin.md:48
+#: src/part4-administration/cli-admin.md:50
 msgid "`--tls-key`"
 msgstr "`--tls-key`"
 
@@ -2463,7 +2463,7 @@ msgid "Skip server certificate verification"
 msgstr "Prüfung des Serverzertifikats überspringen"
 
 #: src/appendices/command-reference.md:99
-#: src/part4-administration/cli-admin.md:49
+#: src/part4-administration/cli-admin.md:51
 msgid "`--tls-skip-verify`"
 msgstr "`--tls-skip-verify`"
 
@@ -2486,7 +2486,7 @@ msgstr "TLS deaktivieren (bei `LIPPYCAT_PRODUCTION=true` gesperrt)"
 #: src/appendices/command-reference.md:901
 #: src/appendices/command-reference.md:1020
 #: src/part3-distributed/architecture.md:241 src/part3-distributed/hunt.md:63
-#: src/part4-administration/cli-admin.md:50
+#: src/part4-administration/cli-admin.md:52
 msgid "`--insecure`"
 msgstr "`--insecure`"
 
@@ -2825,7 +2825,7 @@ msgstr ""
 "selbst."
 
 #: src/appendices/command-reference.md:161
-#: src/part4-administration/cli-admin.md:39
+#: src/part4-administration/cli-admin.md:41
 msgid "Connection Flags"
 msgstr "Verbindungsoptionen"
 
@@ -4711,7 +4711,7 @@ msgstr "Knotenkennung"
 #: src/appendices/command-reference.md:1151
 #: src/appendices/command-reference.md:1184
 #: src/appendices/command-reference.md:1217
-#: src/part4-administration/cli-admin.md:374
+#: src/part4-administration/cli-admin.md:441
 msgid "`--id`"
 msgstr "`--id`"
 
@@ -5900,7 +5900,7 @@ msgid "Filter pattern"
 msgstr "Filtermuster"
 
 #: src/appendices/command-reference.md:1186
-#: src/part4-administration/cli-admin.md:376
+#: src/part4-administration/cli-admin.md:443
 msgid "`--pattern`"
 msgstr "`--pattern`"
 
@@ -5909,7 +5909,7 @@ msgid "Human-readable description"
 msgstr "Menschenlesbare Beschreibung"
 
 #: src/appendices/command-reference.md:1187
-#: src/part4-administration/cli-admin.md:377
+#: src/part4-administration/cli-admin.md:444
 msgid "`--description`"
 msgstr "`--description`"
 
@@ -5918,7 +5918,7 @@ msgid "Enable the filter"
 msgstr "Filter aktivieren"
 
 #: src/appendices/command-reference.md:1188
-#: src/part4-administration/cli-admin.md:378
+#: src/part4-administration/cli-admin.md:445
 msgid "`--enabled`"
 msgstr "`--enabled`"
 
@@ -5927,7 +5927,7 @@ msgid "Target hunter IDs"
 msgstr "Ziel-Hunter-IDs"
 
 #: src/appendices/command-reference.md:1189
-#: src/part4-administration/cli-admin.md:379
+#: src/part4-administration/cli-admin.md:446
 msgid "`--hunters`"
 msgstr "`--hunters`"
 
@@ -5945,7 +5945,7 @@ msgid "RADIUS filter revision"
 msgstr "RADIUS-Filterrevision"
 
 #: src/appendices/command-reference.md:1191
-#: src/part4-administration/cli-admin.md:381
+#: src/part4-administration/cli-admin.md:448
 msgid "`--revision`"
 msgstr "`--revision`"
 
@@ -5959,47 +5959,47 @@ msgstr "Profil zur Interpretation der Teilnehmer-MAC-Adresse"
 
 #: src/appendices/command-reference.md:1192
 #: src/part2-local-capture/sniff.md:328
-#: src/part4-administration/cli-admin.md:382 src/part5-advanced/radius.md:161
+#: src/part4-administration/cli-admin.md:449 src/part5-advanced/radius.md:161
 msgid "`--radius-mac-profile`"
 msgstr "`--radius-mac-profile`"
 
 #: src/appendices/command-reference.md:1193
-#: src/part4-administration/cli-admin.md:383
+#: src/part4-administration/cli-admin.md:450
 msgid "Operator/NAS deployment scope"
 msgstr "Geltungsbereich der Betreiber-/NAS-Bereitstellung"
 
 #: src/appendices/command-reference.md:1193
-#: src/part4-administration/cli-admin.md:383 src/part5-advanced/radius.md:164
+#: src/part4-administration/cli-admin.md:450 src/part5-advanced/radius.md:164
 msgid "`--radius-operator-scope`"
 msgstr "`--radius-operator-scope`"
 
 #: src/appendices/command-reference.md:1194
-#: src/part4-administration/cli-admin.md:384
+#: src/part4-administration/cli-admin.md:451
 msgid "Deployment profile revision"
 msgstr "Revision des Bereitstellungsprofils"
 
 #: src/appendices/command-reference.md:1194
-#: src/part4-administration/cli-admin.md:384 src/part5-advanced/radius.md:165
+#: src/part4-administration/cli-admin.md:451 src/part5-advanced/radius.md:165
 msgid "`--radius-profile-revision`"
 msgstr "`--radius-profile-revision`"
 
 #: src/appendices/command-reference.md:1195
-#: src/part4-administration/cli-admin.md:385
+#: src/part4-administration/cli-admin.md:452
 msgid "Restrict RADIUS scope to an origin node"
 msgstr "RADIUS-Geltungsbereich auf einen Ursprungsknoten beschränken"
 
 #: src/appendices/command-reference.md:1195
-#: src/part4-administration/cli-admin.md:385
+#: src/part4-administration/cli-admin.md:452
 msgid "`--radius-origin-node`"
 msgstr "`--radius-origin-node`"
 
 #: src/appendices/command-reference.md:1196
-#: src/part4-administration/cli-admin.md:386
+#: src/part4-administration/cli-admin.md:453
 msgid "Restrict RADIUS scope to a capture source"
 msgstr "RADIUS-Geltungsbereich auf eine Erfassungsquelle beschränken"
 
 #: src/appendices/command-reference.md:1196
-#: src/part4-administration/cli-admin.md:386
+#: src/part4-administration/cli-admin.md:453
 msgid "`--radius-source`"
 msgstr "`--radius-source`"
 
@@ -6092,19 +6092,19 @@ msgid "`SSLKEYLOGFILE`"
 msgstr "`SSLKEYLOGFILE`"
 
 #: src/appendices/command-reference.md:1281
-#: src/part4-administration/cli-admin.md:425
+#: src/part4-administration/cli-admin.md:492
 msgid "Exit Codes"
 msgstr "Exit-Codes"
 
 #: src/appendices/command-reference.md:1283
-#: src/part4-administration/cli-admin.md:427
+#: src/part4-administration/cli-admin.md:494
 #: src/part5-advanced/lawful-interception.md:515
 #: src/part5-advanced/troubleshooting.md:435
 msgid "Code"
 msgstr "Code"
 
 #: src/appendices/command-reference.md:1285
-#: src/part4-administration/cli-admin.md:429
+#: src/part4-administration/cli-admin.md:496
 msgid "Success"
 msgstr "Erfolg"
 
@@ -10840,23 +10840,23 @@ msgstr ""
 "strukturierte RADIUS-Änderungen bleiben jedoch CLI/YAML vorbehalten."
 
 #: src/appendices/filter-reference.md:8 src/part3-distributed/process.md:417
-#: src/part4-administration/cli-admin.md:356
+#: src/part4-administration/cli-admin.md:423
 #: src/part4-administration/watch-remote.md:249
 msgid "Filter Types"
 msgstr "Filtertypen"
 
 #: src/appendices/filter-reference.md:10 src/part3-distributed/process.md:421
-#: src/part4-administration/cli-admin.md:358 src/part5-advanced/security.md:518
+#: src/part4-administration/cli-admin.md:425 src/part5-advanced/security.md:518
 msgid "Category"
 msgstr "Kategorie"
 
 #: src/appendices/filter-reference.md:10 src/part3-distributed/process.md:421
-#: src/part4-administration/cli-admin.md:358
+#: src/part4-administration/cli-admin.md:425
 msgid "Example Pattern"
 msgstr "Beispielmuster"
 
 #: src/appendices/filter-reference.md:12 src/part3-distributed/process.md:423
-#: src/part4-administration/cli-admin.md:360
+#: src/part4-administration/cli-admin.md:427
 msgid "**VoIP**"
 msgstr "**VoIP**"
 
@@ -10865,7 +10865,7 @@ msgid "SIP user/extension (glob)"
 msgstr "SIP-Benutzer/Nebenstelle (Glob)"
 
 #: src/appendices/filter-reference.md:12 src/part3-distributed/process.md:423
-#: src/part4-administration/cli-admin.md:360
+#: src/part4-administration/cli-admin.md:427
 msgid "`alicent@example.com`"
 msgstr "`alicent@example.com`"
 
@@ -10947,7 +10947,7 @@ msgstr "`imei`"
 
 #: src/appendices/filter-reference.md:19 src/appendices/glossary.md:21
 #: src/part3-distributed/process.md:424
-#: src/part4-administration/cli-admin.md:361
+#: src/part4-administration/cli-admin.md:428
 msgid "**DNS**"
 msgstr "**DNS**"
 
@@ -10957,20 +10957,20 @@ msgstr "Domainname (Glob)"
 
 #: src/appendices/filter-reference.md:19 src/appendices/filter-reference.md:20
 #: src/appendices/filter-reference.md:24 src/part3-distributed/process.md:425
-#: src/part4-administration/cli-admin.md:361
-#: src/part4-administration/cli-admin.md:362
-#: src/part4-administration/cli-admin.md:363
+#: src/part4-administration/cli-admin.md:428
+#: src/part4-administration/cli-admin.md:429
+#: src/part4-administration/cli-admin.md:430
 msgid "`*.example.com`"
 msgstr "`*.example.com`"
 
 #: src/appendices/filter-reference.md:19 src/part3-distributed/process.md:424
-#: src/part4-administration/cli-admin.md:361
+#: src/part4-administration/cli-admin.md:428
 msgid "`dns_domain`"
 msgstr "`dns_domain`"
 
 #: src/appendices/filter-reference.md:20 src/appendices/glossary.md:60
 #: src/part3-distributed/process.md:425
-#: src/part4-administration/cli-admin.md:362
+#: src/part4-administration/cli-admin.md:429
 msgid "**TLS**"
 msgstr "**TLS**"
 
@@ -11020,7 +11020,7 @@ msgstr "`tls_ja4`"
 
 #: src/appendices/filter-reference.md:24 src/appendices/glossary.md:26
 #: src/part3-distributed/process.md:426
-#: src/part4-administration/cli-admin.md:363
+#: src/part4-administration/cli-admin.md:430
 msgid "**HTTP**"
 msgstr "**HTTP**"
 
@@ -11045,7 +11045,7 @@ msgid "`http_url`"
 msgstr "`http_url`"
 
 #: src/appendices/filter-reference.md:26 src/part3-distributed/process.md:427
-#: src/part4-administration/cli-admin.md:364
+#: src/part4-administration/cli-admin.md:431
 msgid "**Email**"
 msgstr "**E-Mail**"
 
@@ -11054,7 +11054,7 @@ msgid "Sender/recipient (glob)"
 msgstr "Absender/Empfänger (Glob)"
 
 #: src/appendices/filter-reference.md:26
-#: src/part4-administration/cli-admin.md:364
+#: src/part4-administration/cli-admin.md:431
 msgid "`*@suspicious.com`"
 msgstr "`*@suspicious.com`"
 
@@ -11076,7 +11076,7 @@ msgstr "`email_subject`"
 
 #: src/appendices/filter-reference.md:28 src/appendices/glossary.md:49
 #: src/part3-distributed/process.md:428
-#: src/part4-administration/cli-admin.md:365
+#: src/part4-administration/cli-admin.md:432
 msgid "**RADIUS**"
 msgstr "**RADIUS**"
 
@@ -11085,7 +11085,7 @@ msgid "Complete UTF-8 User-Name (exact)"
 msgstr "Vollständiger UTF-8-User-Name (exakt)"
 
 #: src/appendices/filter-reference.md:28 src/part3-distributed/process.md:428
-#: src/part4-administration/cli-admin.md:365 src/part5-advanced/radius.md:210
+#: src/part4-administration/cli-admin.md:432 src/part5-advanced/radius.md:210
 msgid "`alice@example.test`"
 msgstr "`alice@example.test`"
 
@@ -11130,7 +11130,7 @@ msgid "`radius_compound`"
 msgstr "`radius_compound`"
 
 #: src/appendices/filter-reference.md:32 src/part3-distributed/process.md:429
-#: src/part4-administration/cli-admin.md:366
+#: src/part4-administration/cli-admin.md:433
 msgid "**Universal**"
 msgstr "**Universell**"
 
@@ -11139,7 +11139,7 @@ msgid "IP address or CIDR"
 msgstr "IP-Adresse oder CIDR"
 
 #: src/appendices/filter-reference.md:32
-#: src/part4-administration/cli-admin.md:366
+#: src/part4-administration/cli-admin.md:433
 msgid "`192.168.1.0/24`"
 msgstr "`192.168.1.0/24`"
 
@@ -16070,7 +16070,7 @@ msgstr "Was neu ist"
 msgid "Processor address (host:port) — **required**"
 msgstr "Prozessoradresse (host:port) — **erforderlich**"
 
-#: src/part3-distributed/hunt.md:55 src/part4-administration/cli-admin.md:45
+#: src/part3-distributed/hunt.md:55 src/part4-administration/cli-admin.md:47
 msgid "`-P, --processor`"
 msgstr "`-P, --processor`"
 
@@ -16570,7 +16570,7 @@ msgstr "Wartezeit"
 msgid "Total Time"
 msgstr "Gesamtzeit"
 
-#: src/part3-distributed/hunt.md:327 src/part4-administration/cli-admin.md:430
+#: src/part3-distributed/hunt.md:327 src/part4-administration/cli-admin.md:497
 #: src/part5-advanced/performance.md:25 src/part5-advanced/performance.md:26
 msgid "1"
 msgstr "1"
@@ -16579,7 +16579,7 @@ msgstr "1"
 msgid "1s"
 msgstr "1s"
 
-#: src/part3-distributed/hunt.md:328 src/part4-administration/cli-admin.md:431
+#: src/part3-distributed/hunt.md:328 src/part4-administration/cli-admin.md:498
 msgid "2"
 msgstr "2"
 
@@ -16591,7 +16591,7 @@ msgstr "2s"
 msgid "3s"
 msgstr "3s"
 
-#: src/part3-distributed/hunt.md:329 src/part4-administration/cli-admin.md:432
+#: src/part3-distributed/hunt.md:329 src/part4-administration/cli-admin.md:499
 msgid "3"
 msgstr "3"
 
@@ -16607,7 +16607,7 @@ msgstr "7s"
 msgid "15s"
 msgstr "15s"
 
-#: src/part3-distributed/hunt.md:330 src/part4-administration/cli-admin.md:433
+#: src/part3-distributed/hunt.md:330 src/part4-administration/cli-admin.md:500
 msgid "4"
 msgstr "4"
 
@@ -17769,12 +17769,12 @@ msgid "Filters cover all supported protocol categories:"
 msgstr "Filter decken alle unterstützten Protokollkategorien ab:"
 
 #: src/part3-distributed/process.md:421
-#: src/part4-administration/cli-admin.md:358
+#: src/part4-administration/cli-admin.md:425
 msgid "Common Types"
 msgstr "Gängige Typen"
 
 #: src/part3-distributed/process.md:423
-#: src/part4-administration/cli-admin.md:360
+#: src/part4-administration/cli-admin.md:427
 msgid "`sip_user`, `phone_number`, `call_id`, `imsi`, `imei`"
 msgstr "`sip_user`, `phone_number`, `call_id`, `imsi`, `imei`"
 
@@ -17783,7 +17783,7 @@ msgid "`*.malware-domain.com`"
 msgstr "`*.malware-domain.com`"
 
 #: src/part3-distributed/process.md:425
-#: src/part4-administration/cli-admin.md:362
+#: src/part4-administration/cli-admin.md:429
 msgid "`tls_sni`, `tls_ja3`, `tls_ja4`"
 msgstr "`tls_sni`, `tls_ja3`, `tls_ja4`"
 
@@ -17792,7 +17792,7 @@ msgid "`api.example.com`"
 msgstr "`api.example.com`"
 
 #: src/part3-distributed/process.md:426
-#: src/part4-administration/cli-admin.md:363
+#: src/part4-administration/cli-admin.md:430
 msgid "`http_host`, `http_url`"
 msgstr "`http_host`, `http_url`"
 
@@ -17801,12 +17801,12 @@ msgid "`*@example.com`"
 msgstr "`*@example.com`"
 
 #: src/part3-distributed/process.md:427
-#: src/part4-administration/cli-admin.md:364
+#: src/part4-administration/cli-admin.md:431
 msgid "`email_address`, `email_subject`"
 msgstr "`email_address`, `email_subject`"
 
 #: src/part3-distributed/process.md:428
-#: src/part4-administration/cli-admin.md:365
+#: src/part4-administration/cli-admin.md:432
 msgid "`radius_username`, `radius_mac`, `radius_attribute`, `radius_compound`"
 msgstr "`radius_username`, `radius_mac`, `radius_attribute`, `radius_compound`"
 
@@ -17815,7 +17815,7 @@ msgid "`10.0.1.0/24`"
 msgstr "`10.0.1.0/24`"
 
 #: src/part3-distributed/process.md:429
-#: src/part4-administration/cli-admin.md:366
+#: src/part4-administration/cli-admin.md:433
 msgid "`ip_address`, `bpf`"
 msgstr "`ip_address`, `bpf`"
 
@@ -18492,7 +18492,17 @@ msgstr ""
 "gemeinsame Verbindungsflags. Lokale Befehle (`show config`, `list "
 "interfaces`) laufen ohne Prozessorverbindung."
 
-#: src/part4-administration/cli-admin.md:41
+#: src/part4-administration/cli-admin.md:39
+msgid ""
+"The example results below use illustrative values. Interface names and "
+"descriptions depend on the host; optional JSON fields depend on the "
+"deployment and available telemetry."
+msgstr ""
+"Die folgenden Ausgaben enthalten Beispielwerte. Namen und Beschreibungen der "
+"Netzwerkschnittstellen hängen vom jeweiligen Rechner ab; optionale JSON-"
+"Felder hängen von der Bereitstellung und den verfügbaren Telemetriedaten ab."
+
+#: src/part4-administration/cli-admin.md:43
 msgid ""
 "Every remote command supports these flags. **TLS is enabled by default** — "
 "you must explicitly pass `--insecure` to disable it."
@@ -18500,42 +18510,42 @@ msgstr ""
 "Jeder Remote-Befehl unterstützt diese Flags. **TLS ist standardmäßig "
 "aktiviert** — zur Deaktivierung müssen Sie ausdrücklich `--insecure` angeben."
 
-#: src/part4-administration/cli-admin.md:45
+#: src/part4-administration/cli-admin.md:47
 msgid "Processor address (host:port) — **required** for remote commands"
 msgstr "Prozessoradresse (host:port) — **erforderlich** für Remote-Befehle"
 
-#: src/part4-administration/cli-admin.md:46
+#: src/part4-administration/cli-admin.md:48
 msgid "CA certificate file"
 msgstr "CA-Zertifikatsdatei"
 
-#: src/part4-administration/cli-admin.md:47
+#: src/part4-administration/cli-admin.md:49
 msgid "Client certificate (for mTLS)"
 msgstr "Clientzertifikat (für mTLS)"
 
-#: src/part4-administration/cli-admin.md:48
+#: src/part4-administration/cli-admin.md:50
 msgid "Client private key (for mTLS)"
 msgstr "Privater Clientschlüssel (für mTLS)"
 
-#: src/part4-administration/cli-admin.md:49
+#: src/part4-administration/cli-admin.md:51
 #: src/part4-administration/watch-remote.md:118
 msgid "Skip certificate verification (testing only)"
 msgstr "Zertifikatsprüfung überspringen (nur für Tests)"
 
-#: src/part4-administration/cli-admin.md:50
+#: src/part4-administration/cli-admin.md:52
 msgid "Disable TLS entirely (testing only)"
 msgstr "TLS vollständig deaktivieren (nur für Tests)"
 
-#: src/part4-administration/cli-admin.md:52
+#: src/part4-administration/cli-admin.md:54
 msgid "These flags can also be set in the config file under `remote`:"
 msgstr ""
 "Diese Flags können auch in der Konfigurationsdatei unter `remote` gesetzt "
 "werden:"
 
-#: src/part4-administration/cli-admin.md:67
+#: src/part4-administration/cli-admin.md:69
 msgid "Inspecting with `lc show`"
 msgstr "Prüfen mit `lc show`"
 
-#: src/part4-administration/cli-admin.md:69
+#: src/part4-administration/cli-admin.md:71
 msgid ""
 "The `show` command retrieves information from a running processor. All "
 "subcommands except `show config` require `-P`."
@@ -18543,27 +18553,27 @@ msgstr ""
 "Der Befehl `show` ruft Informationen von einem laufenden Prozessor ab. Alle "
 "Unterbefehle außer `show config` benötigen `-P`."
 
-#: src/part4-administration/cli-admin.md:71
+#: src/part4-administration/cli-admin.md:73
 msgid "`show status`"
 msgstr "`show status`"
 
-#: src/part4-administration/cli-admin.md:73
+#: src/part4-administration/cli-admin.md:75
 msgid "Display processor health and aggregate statistics:"
 msgstr "Prozessorzustand und aggregierte Statistiken anzeigen:"
 
-#: src/part4-administration/cli-admin.md:98
+#: src/part4-administration/cli-admin.md:107
 msgid "`show hunter`"
 msgstr "`show hunter`"
 
-#: src/part4-administration/cli-admin.md:100
+#: src/part4-administration/cli-admin.md:109
 msgid "Display details for a specific hunter:"
 msgstr "Details zu einem bestimmten Hunter anzeigen:"
 
-#: src/part4-administration/cli-admin.md:136
+#: src/part4-administration/cli-admin.md:162
 msgid "`show topology`"
 msgstr "`show topology`"
 
-#: src/part4-administration/cli-admin.md:138
+#: src/part4-administration/cli-admin.md:164
 msgid ""
 "Display the complete distributed topology tree. Useful for verifying "
 "hierarchical deployments:"
@@ -18571,35 +18581,35 @@ msgstr ""
 "Vollständigen verteilten Topologiebaum anzeigen. Hilfreich zur Prüfung "
 "hierarchischer Installationen:"
 
-#: src/part4-administration/cli-admin.md:169
+#: src/part4-administration/cli-admin.md:236
 msgid "`show filter`"
 msgstr "`show filter`"
 
-#: src/part4-administration/cli-admin.md:171
+#: src/part4-administration/cli-admin.md:238
 msgid "Display details for a specific filter:"
 msgstr "Details zu einem bestimmten Filter anzeigen:"
 
-#: src/part4-administration/cli-admin.md:179
+#: src/part4-administration/cli-admin.md:246
 msgid "`show config`"
 msgstr "`show config`"
 
-#: src/part4-administration/cli-admin.md:181
+#: src/part4-administration/cli-admin.md:248
 msgid ""
-"Display local configuration. This is the only `show` subcommand that doesn't "
-"require a processor connection:"
+"Display local configuration as JSON. This is the only `show` subcommand that "
+"doesn't require a processor connection:"
 msgstr ""
-"Lokale Konfiguration anzeigen. Dies ist der einzige `show`-Unterbefehl ohne "
-"erforderliche Prozessorverbindung:"
+"Lokale Konfiguration als JSON anzeigen. Dies ist der einzige `show`-"
+"Unterbefehl ohne erforderliche Prozessorverbindung:"
 
-#: src/part4-administration/cli-admin.md:195
+#: src/part4-administration/cli-admin.md:256
 msgid "Listing with `lc list`"
 msgstr "Auflisten mit `lc list`"
 
-#: src/part4-administration/cli-admin.md:197
+#: src/part4-administration/cli-admin.md:258
 msgid "`list interfaces`"
 msgstr "`list interfaces`"
 
-#: src/part4-administration/cli-admin.md:199
+#: src/part4-administration/cli-admin.md:260
 msgid ""
 "Discover network interfaces available for capture. This is a local command — "
 "no processor connection needed:"
@@ -18607,7 +18617,7 @@ msgstr ""
 "Für die Erfassung verfügbare Netzwerkschnittstellen ermitteln. Dies ist ein "
 "lokaler Befehl — keine Prozessorverbindung nötig:"
 
-#: src/part4-administration/cli-admin.md:216
+#: src/part4-administration/cli-admin.md:283
 msgid ""
 "The command filters out interfaces not useful for monitoring (loopback, "
 "Docker/container, VM, USB/Bluetooth, tunnel interfaces). Full listing "
@@ -18617,40 +18627,40 @@ msgstr ""
 "(Loopback, Docker/Container, VM, USB/Bluetooth, Tunnel). Die vollständige "
 "Liste benötigt root-Rechte:"
 
-#: src/part4-administration/cli-admin.md:224
+#: src/part4-administration/cli-admin.md:291
 msgid "`list hunters`"
 msgstr "`list hunters`"
 
-#: src/part4-administration/cli-admin.md:226
+#: src/part4-administration/cli-admin.md:293
 msgid "List connected hunters on a remote processor:"
 msgstr "Verbundene Hunter auf einem entfernten Prozessor auflisten:"
 
-#: src/part4-administration/cli-admin.md:228
+#: src/part4-administration/cli-admin.md:295
 msgid "List all connected hunters:"
 msgstr "Alle verbundenen Hunter auflisten:"
 
-#: src/part4-administration/cli-admin.md:236
+#: src/part4-administration/cli-admin.md:303
 msgid "`list filters`"
 msgstr "`list filters`"
 
-#: src/part4-administration/cli-admin.md:238
+#: src/part4-administration/cli-admin.md:305
 msgid "List filters configured on a remote processor:"
 msgstr "Auf einem entfernten Prozessor konfigurierte Filter auflisten:"
 
-#: src/part4-administration/cli-admin.md:240
-#: src/part4-administration/cli-admin.md:498
+#: src/part4-administration/cli-admin.md:307
+#: src/part4-administration/cli-admin.md:568
 msgid "List all filters:"
 msgstr "Alle Filter auflisten:"
 
-#: src/part4-administration/cli-admin.md:248
+#: src/part4-administration/cli-admin.md:315
 msgid "List filters for a specific hunter:"
 msgstr "Filter für einen bestimmten Hunter auflisten:"
 
-#: src/part4-administration/cli-admin.md:256
+#: src/part4-administration/cli-admin.md:323
 msgid "Creating Filters with `lc set`"
 msgstr "Filter mit `lc set` erstellen"
 
-#: src/part4-administration/cli-admin.md:258
+#: src/part4-administration/cli-admin.md:325
 msgid ""
 "The `set filter` command creates or updates filters on a processor (upsert "
 "semantics). It operates in two modes: inline and file."
@@ -18658,59 +18668,59 @@ msgstr ""
 "Der Befehl `set filter` erstellt oder aktualisiert Filter auf einem "
 "Prozessor (Upsert-Semantik). Er arbeitet in zwei Modi: Inline und Datei."
 
-#: src/part4-administration/cli-admin.md:260
+#: src/part4-administration/cli-admin.md:327
 msgid "Inline Mode"
 msgstr "Inline-Modus"
 
-#: src/part4-administration/cli-admin.md:262
+#: src/part4-administration/cli-admin.md:329
 msgid "Specify filter properties directly via flags:"
 msgstr "Filtereigenschaften direkt über Flags angeben:"
 
-#: src/part4-administration/cli-admin.md:264
+#: src/part4-administration/cli-admin.md:331
 msgid "Create a SIP user filter:"
 msgstr "SIP-Benutzerfilter erstellen:"
 
-#: src/part4-administration/cli-admin.md:273
+#: src/part4-administration/cli-admin.md:340
 msgid "Create a DNS domain wildcard filter:"
 msgstr "DNS-Domainfilter mit Platzhalter erstellen:"
 
-#: src/part4-administration/cli-admin.md:282
+#: src/part4-administration/cli-admin.md:349
 msgid "Create a TLS JA3 fingerprint filter:"
 msgstr "TLS-JA3-Fingerabdruckfilter erstellen:"
 
-#: src/part4-administration/cli-admin.md:291
+#: src/part4-administration/cli-admin.md:358
 msgid "Create an IP CIDR range filter:"
 msgstr "IP-CIDR-Bereichsfilter erstellen:"
 
-#: src/part4-administration/cli-admin.md:300
+#: src/part4-administration/cli-admin.md:367
 msgid "Create an exact RADIUS account filter with an explicit revision:"
 msgstr "Exakten RADIUS-Kontofilter mit ausdrücklicher Revision erstellen:"
 
-#: src/part4-administration/cli-admin.md:309
+#: src/part4-administration/cli-admin.md:376
 msgid "MAC filters require the exact supported interpretation profile:"
 msgstr "MAC-Filter benötigen das exakt unterstützte Interpretationsprofil:"
 
-#: src/part4-administration/cli-admin.md:319
+#: src/part4-administration/cli-admin.md:386
 msgid "Create a filter with a custom ID and description:"
 msgstr "Filter mit eigener ID und Beschreibung erstellen:"
 
-#: src/part4-administration/cli-admin.md:330
+#: src/part4-administration/cli-admin.md:397
 msgid "Target specific hunters:"
 msgstr "Bestimmte Hunter ansprechen:"
 
-#: src/part4-administration/cli-admin.md:340
+#: src/part4-administration/cli-admin.md:407
 msgid "If `--id` is omitted, a UUID is auto-generated."
 msgstr "Wenn `--id` fehlt, wird eine UUID automatisch erzeugt."
 
-#: src/part4-administration/cli-admin.md:342
+#: src/part4-administration/cli-admin.md:409
 msgid "File Mode (Batch)"
 msgstr "Dateimodus (Sammelverarbeitung)"
 
-#: src/part4-administration/cli-admin.md:344
+#: src/part4-administration/cli-admin.md:411
 msgid "Import multiple filters from a YAML file:"
 msgstr "Mehrere Filter aus einer YAML-Datei importieren:"
 
-#: src/part4-administration/cli-admin.md:352
+#: src/part4-administration/cli-admin.md:419
 msgid ""
 "The YAML file uses the same format as the processor's filter file. Compound "
 "RADIUS criteria must use file mode; see the [RADIUS filter schema and "
@@ -18720,7 +18730,7 @@ msgstr ""
 "Zusammengesetzte RADIUS-Kriterien benötigen den Dateimodus; siehe [RADIUS-"
 "Filterschema und Beispiel](../appendices/filter-reference.md#radius-filters)."
 
-#: src/part4-administration/cli-admin.md:368
+#: src/part4-administration/cli-admin.md:435
 msgid ""
 "For the complete list of all filter types, descriptions, wildcard patterns, "
 "and matching details, see [Appendix E: Filter Type Reference](../appendices/"
@@ -18730,71 +18740,71 @@ msgstr ""
 "und Abgleichsdetails finden Sie in [Anhang E: Filtertypenreferenz](../"
 "appendices/filter-reference.md)."
 
-#: src/part4-administration/cli-admin.md:370
+#: src/part4-administration/cli-admin.md:437
 msgid "`set filter` Flags"
 msgstr "Flags für `set filter`"
 
-#: src/part4-administration/cli-admin.md:374
+#: src/part4-administration/cli-admin.md:441
 msgid "Filter ID (auto-generated UUID if omitted)"
 msgstr "Filter-ID (automatisch erzeugte UUID, wenn nicht angegeben)"
 
-#: src/part4-administration/cli-admin.md:375
+#: src/part4-administration/cli-admin.md:442
 msgid "Filter type (see table above) — required in inline mode"
 msgstr "Filtertyp (siehe Tabelle oben) — im Inline-Modus erforderlich"
 
-#: src/part4-administration/cli-admin.md:375
+#: src/part4-administration/cli-admin.md:442
 msgid "`-t, --type`"
 msgstr "`-t, --type`"
 
-#: src/part4-administration/cli-admin.md:376
+#: src/part4-administration/cli-admin.md:443
 msgid "Filter pattern — required in inline mode"
 msgstr "Filtermuster — im Inline-Modus erforderlich"
 
-#: src/part4-administration/cli-admin.md:377
+#: src/part4-administration/cli-admin.md:444
 msgid "Optional description"
 msgstr "Optionale Beschreibung"
 
-#: src/part4-administration/cli-admin.md:378
+#: src/part4-administration/cli-admin.md:445
 msgid "Enable the filter (default: true)"
 msgstr "Filter aktivieren (Standard: true)"
 
-#: src/part4-administration/cli-admin.md:379
+#: src/part4-administration/cli-admin.md:446
 msgid "Target specific hunter IDs (comma-separated)"
 msgstr "Bestimmte Hunter-IDs ansprechen (durch Kommas getrennt)"
 
-#: src/part4-administration/cli-admin.md:380
+#: src/part4-administration/cli-admin.md:447
 msgid "YAML file for batch import"
 msgstr "YAML-Datei für Sammelimport"
 
-#: src/part4-administration/cli-admin.md:380
+#: src/part4-administration/cli-admin.md:447
 msgid "`-f, --file`"
 msgstr "`-f, --file`"
 
-#: src/part4-administration/cli-admin.md:381
+#: src/part4-administration/cli-admin.md:448
 msgid "RADIUS filter revision; increment when changing the filter"
 msgstr "RADIUS-Filterrevision; bei Filteränderung erhöhen"
 
-#: src/part4-administration/cli-admin.md:382
+#: src/part4-administration/cli-admin.md:449
 msgid "Required interpretation profile for `radius_mac`"
 msgstr "Erforderliches Interpretationsprofil für `radius_mac`"
 
-#: src/part4-administration/cli-admin.md:388
+#: src/part4-administration/cli-admin.md:455
 msgid "Removing Filters with `lc rm`"
 msgstr "Filter mit `lc rm` entfernen"
 
-#: src/part4-administration/cli-admin.md:390
+#: src/part4-administration/cli-admin.md:457
 msgid "Single Filter"
 msgstr "Einzelner Filter"
 
-#: src/part4-administration/cli-admin.md:398
+#: src/part4-administration/cli-admin.md:465
 msgid "Batch Deletion"
 msgstr "Sammellöschung"
 
-#: src/part4-administration/cli-admin.md:400
+#: src/part4-administration/cli-admin.md:467
 msgid "Delete multiple filters from a file of IDs (one per line):"
 msgstr "Mehrere Filter aus einer ID-Datei löschen (eine pro Zeile):"
 
-#: src/part4-administration/cli-admin.md:408
+#: src/part4-administration/cli-admin.md:475
 msgid ""
 "The file format is simple — one filter ID per line, with `#` comments and "
 "blank lines ignored:"
@@ -18802,11 +18812,11 @@ msgstr ""
 "Das Dateiformat ist einfach — eine Filter-ID pro Zeile; `#`-Kommentare und "
 "Leerzeilen werden ignoriert:"
 
-#: src/part4-administration/cli-admin.md:421
+#: src/part4-administration/cli-admin.md:488
 msgid "JSON Output and Exit Codes"
 msgstr "JSON-Ausgabe und Exit-Codes"
 
-#: src/part4-administration/cli-admin.md:423
+#: src/part4-administration/cli-admin.md:490
 msgid ""
 "All remote commands output JSON to stdout (results) and stderr (errors). "
 "Output is pretty-printed when writing to a terminal, compact when piped."
@@ -18814,61 +18824,61 @@ msgstr ""
 "Alle Remote-Befehle geben JSON auf stdout (Ergebnisse) und stderr (Fehler) "
 "aus. Im Terminal ist die Ausgabe eingerückt, in Pipes kompakt."
 
-#: src/part4-administration/cli-admin.md:429
+#: src/part4-administration/cli-admin.md:496
 msgid "0"
 msgstr "0"
 
-#: src/part4-administration/cli-admin.md:430
+#: src/part4-administration/cli-admin.md:497
 msgid "General error"
 msgstr "Allgemeiner Fehler"
 
-#: src/part4-administration/cli-admin.md:431
+#: src/part4-administration/cli-admin.md:498
 msgid "Connection error"
 msgstr "Verbindungsfehler"
 
-#: src/part4-administration/cli-admin.md:432
+#: src/part4-administration/cli-admin.md:499
 msgid "Validation error"
 msgstr "Validierungsfehler"
 
-#: src/part4-administration/cli-admin.md:433
+#: src/part4-administration/cli-admin.md:500
 msgid "Resource not found"
 msgstr "Ressource nicht gefunden"
 
-#: src/part4-administration/cli-admin.md:435
+#: src/part4-administration/cli-admin.md:502
 msgid "Error Format"
 msgstr "Fehlerformat"
 
-#: src/part4-administration/cli-admin.md:443
+#: src/part4-administration/cli-admin.md:513
 msgid "Scripting Examples"
 msgstr "Skriptbeispiele"
 
-#: src/part4-administration/cli-admin.md:445
+#: src/part4-administration/cli-admin.md:515
 #: src/part5-advanced/troubleshooting.md:1242
 msgid "Health Check Script"
 msgstr "Skript zur Zustandsprüfung"
 
-#: src/part4-administration/cli-admin.md:461
+#: src/part4-administration/cli-admin.md:531
 msgid "Monitor Hunter Count"
 msgstr "Hunter-Anzahl überwachen"
 
-#: src/part4-administration/cli-admin.md:470
+#: src/part4-administration/cli-admin.md:540
 msgid "Export Topology Snapshot"
 msgstr "Topologie-Snapshot exportieren"
 
-#: src/part4-administration/cli-admin.md:479
+#: src/part4-administration/cli-admin.md:549
 msgid "Filter Lifecycle"
 msgstr "Filterlebenszyklus"
 
-#: src/part4-administration/cli-admin.md:481
+#: src/part4-administration/cli-admin.md:551
 #: src/part4-administration/watch-remote.md:268
 msgid "Create a filter:"
 msgstr "Filter erstellen:"
 
-#: src/part4-administration/cli-admin.md:490
+#: src/part4-administration/cli-admin.md:560
 msgid "Verify that it exists:"
 msgstr "Seine Existenz prüfen:"
 
-#: src/part4-administration/cli-admin.md:506
+#: src/part4-administration/cli-admin.md:576
 msgid "Remove the filter when done:"
 msgstr "Filter nach Abschluss entfernen:"
 

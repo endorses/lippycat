@@ -61,6 +61,11 @@ explicitly allows visible packet fallback. This lets older packet-only nodes
 coexist with newer event-capable nodes without silently weakening an event-mode
 privacy policy.
 
+A **Write-Ahead Log (WAL)** is a durable journal. In reliable event-ingress mode,
+the processor writes received events to this journal before acknowledging them
+to the producer. This allows those events to be recovered after a processor
+crash. See the [Glossary](../appendices/glossary.md).
+
 Reliable ingress acknowledges recoverable WAL admission; memory-only ingress
 acknowledges queue admission and can lose acknowledged events on processor
 crash. At-least-once ingress is deduplicated by producer/session/event identity,

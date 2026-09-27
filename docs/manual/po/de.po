@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: lippycat 🫦🐱 Manual\n"
-"POT-Creation-Date: 2026-09-27T14:28:45+02:00\n"
+"POT-Creation-Date: 2026-09-27T16:18:34+02:00\n"
 "PO-Revision-Date: 2026-09-27 10:56+0000\n"
 "Last-Translator: lippycat contributors\n"
 "Language-Team: German\n"
@@ -443,8 +443,8 @@ msgstr "Protokollqualifikatoren"
 #: src/part2-local-capture/watch-local.md:43
 #: src/part2-local-capture/watch-local.md:105
 #: src/part2-local-capture/watch-local.md:197
-#: src/part3-distributed/process.md:73 src/part3-distributed/process.md:111
-#: src/part3-distributed/process.md:325
+#: src/part3-distributed/process.md:78 src/part3-distributed/process.md:116
+#: src/part3-distributed/process.md:330
 #: src/part4-administration/cli-admin.md:43
 #: src/part4-administration/cli-admin.md:372
 #: src/part4-administration/watch-remote.md:110 src/part5-advanced/dns.md:59
@@ -933,7 +933,7 @@ msgstr "Entsprechender BPF-Ausdruck"
 #: src/part2-local-capture/sniff.md:533
 #: src/part2-local-capture/watch-local.md:43
 #: src/part2-local-capture/watch-local.md:197 src/part3-distributed/hunt.md:38
-#: src/part3-distributed/hunt.md:53 src/part3-distributed/process.md:73
+#: src/part3-distributed/hunt.md:53 src/part3-distributed/process.md:78
 #: src/part4-administration/cli-admin.md:43
 #: src/part4-administration/cli-admin.md:372
 #: src/part5-advanced/lawful-interception.md:225
@@ -1501,7 +1501,7 @@ msgstr "Diese Optionen gelten für alle Befehle."
 #: src/part2-local-capture/sniff.md:391 src/part2-local-capture/sniff.md:533
 #: src/part2-local-capture/watch-local.md:43
 #: src/part2-local-capture/watch-local.md:197
-#: src/part3-distributed/process.md:73
+#: src/part3-distributed/process.md:78
 #: src/part5-advanced/lawful-interception.md:454
 #: src/part5-advanced/radius.md:257
 #: src/part5-advanced/structured-protocol-logs.md:41
@@ -2871,7 +2871,7 @@ msgstr "`--processor`"
 #: src/appendices/command-reference.md:1150
 #: src/appendices/command-reference.md:1183
 #: src/appendices/command-reference.md:1216
-#: src/part3-distributed/process.md:119
+#: src/part3-distributed/process.md:124
 msgid "`-P`"
 msgstr "`-P`"
 
@@ -3017,7 +3017,7 @@ msgstr "Ausgabe an virtuelle Schnittstelle aktivieren"
 msgid "`--virtual-interface`"
 msgstr "`--virtual-interface`"
 
-#: src/appendices/command-reference.md:190 src/part3-distributed/process.md:118
+#: src/appendices/command-reference.md:190 src/part3-distributed/process.md:123
 msgid "`-V`"
 msgstr "`-V`"
 
@@ -3188,7 +3188,7 @@ msgstr "`--write-file`"
 msgid "Write per-call PCAP files (VoIP)"
 msgstr "PCAP-Dateien pro Anruf schreiben (VoIP)"
 
-#: src/appendices/command-reference.md:206 src/part3-distributed/process.md:114
+#: src/appendices/command-reference.md:206 src/part3-distributed/process.md:119
 msgid "`--per-call-pcap`"
 msgstr "`--per-call-pcap`"
 
@@ -3216,7 +3216,7 @@ msgstr "`--per-call-pcap-pattern`"
 msgid "Enable auto-rotating PCAP files"
 msgstr "Automatisch rotierende PCAP-Dateien aktivieren"
 
-#: src/appendices/command-reference.md:209 src/part3-distributed/process.md:115
+#: src/appendices/command-reference.md:209 src/part3-distributed/process.md:120
 msgid "`--auto-rotate-pcap`"
 msgstr "`--auto-rotate-pcap`"
 
@@ -3349,7 +3349,7 @@ msgid "Directory for structured log files; enables logging"
 msgstr ""
 "Verzeichnis für strukturierte Logdateien; aktiviert die Protokollierung"
 
-#: src/appendices/command-reference.md:229 src/part3-distributed/process.md:116
+#: src/appendices/command-reference.md:229 src/part3-distributed/process.md:121
 #: src/part5-advanced/structured-protocol-logs.md:45
 msgid "`--log-dir`"
 msgstr "`--log-dir`"
@@ -3549,7 +3549,7 @@ msgstr ""
 msgid "Enable Lawful Interception support"
 msgstr "Unterstützung für Lawful Interception aktivieren"
 
-#: src/appendices/command-reference.md:254 src/part3-distributed/process.md:121
+#: src/appendices/command-reference.md:254 src/part3-distributed/process.md:126
 msgid "`--li-enabled`"
 msgstr "`--li-enabled`"
 
@@ -3827,7 +3827,7 @@ msgstr "`-r`"
 msgid "Write packets to PCAP file"
 msgstr "Pakete in eine PCAP-Datei schreiben"
 
-#: src/appendices/command-reference.md:299 src/part3-distributed/process.md:113
+#: src/appendices/command-reference.md:299 src/part3-distributed/process.md:118
 msgid "`-w`"
 msgstr "`-w`"
 
@@ -4692,7 +4692,7 @@ msgid "`-l`"
 msgstr "`-l`"
 
 #: src/appendices/command-reference.md:538
-#: src/appendices/command-reference.md:891 src/part3-distributed/process.md:75
+#: src/appendices/command-reference.md:891 src/part3-distributed/process.md:80
 msgid "`:55555`"
 msgstr "`:55555`"
 
@@ -4735,7 +4735,7 @@ msgid "Maximum concurrent TUI subscribers (0 = unlimited)"
 msgstr "Maximale Anzahl gleichzeitiger TUI-Abonnenten (0 = unbegrenzt)"
 
 #: src/appendices/command-reference.md:541
-#: src/appendices/command-reference.md:894 src/part3-distributed/process.md:78
+#: src/appendices/command-reference.md:894 src/part3-distributed/process.md:83
 msgid "`--max-subscribers`"
 msgstr "`--max-subscribers`"
 
@@ -5556,7 +5556,7 @@ msgstr ""
 msgid "gRPC listen address"
 msgstr "gRPC-Lauschadresse"
 
-#: src/appendices/command-reference.md:892 src/part3-distributed/process.md:76
+#: src/appendices/command-reference.md:892 src/part3-distributed/process.md:81
 msgid "Processor identifier"
 msgstr "Prozessor-Kennung"
 
@@ -9196,7 +9196,7 @@ msgstr ""
 "verschlüsselten Betrieb an."
 
 #: src/appendices/config-reference.md:519 src/part2-local-capture/sniff.md:452
-#: src/part3-distributed/process.md:163
+#: src/part3-distributed/process.md:168
 msgid "Per-Call PCAP (VoIP)"
 msgstr "PCAP pro Anruf (VoIP)"
 
@@ -9278,7 +9278,7 @@ msgstr ""
 msgid "`processor.per_call_pcap.closed_call_ttl`"
 msgstr "`processor.per_call_pcap.closed_call_ttl`"
 
-#: src/appendices/config-reference.md:530 src/part3-distributed/process.md:233
+#: src/appendices/config-reference.md:530 src/part3-distributed/process.md:238
 msgid "Auto-Rotating PCAP"
 msgstr "Automatisch rotierende PCAP-Dateien"
 
@@ -9337,7 +9337,7 @@ msgstr "Zeit ohne Pakete vor Rotation der aktuellen Datei."
 msgid "`processor.auto_rotate_pcap.idle_timeout`"
 msgstr "`processor.auto_rotate_pcap.idle_timeout`"
 
-#: src/appendices/config-reference.md:540 src/part3-distributed/process.md:281
+#: src/appendices/config-reference.md:540 src/part3-distributed/process.md:286
 msgid "Command Hooks"
 msgstr "Befehls-Hooks"
 
@@ -9395,7 +9395,7 @@ msgstr "`\"5m\"`"
 msgid "`processor.tunneling_debounce`"
 msgstr "`processor.tunneling_debounce`"
 
-#: src/appendices/config-reference.md:550 src/part3-distributed/process.md:534
+#: src/appendices/config-reference.md:550 src/part3-distributed/process.md:539
 #: src/part3-distributed/tap.md:400
 msgid "Virtual Interface"
 msgstr "Virtuelle Schnittstelle"
@@ -10839,23 +10839,23 @@ msgstr ""
 "kann einfache Filtertypen bearbeiten und RADIUS-Filter anzeigen; "
 "strukturierte RADIUS-Änderungen bleiben jedoch CLI/YAML vorbehalten."
 
-#: src/appendices/filter-reference.md:8 src/part3-distributed/process.md:412
+#: src/appendices/filter-reference.md:8 src/part3-distributed/process.md:417
 #: src/part4-administration/cli-admin.md:356
 #: src/part4-administration/watch-remote.md:249
 msgid "Filter Types"
 msgstr "Filtertypen"
 
-#: src/appendices/filter-reference.md:10 src/part3-distributed/process.md:416
+#: src/appendices/filter-reference.md:10 src/part3-distributed/process.md:421
 #: src/part4-administration/cli-admin.md:358 src/part5-advanced/security.md:518
 msgid "Category"
 msgstr "Kategorie"
 
-#: src/appendices/filter-reference.md:10 src/part3-distributed/process.md:416
+#: src/appendices/filter-reference.md:10 src/part3-distributed/process.md:421
 #: src/part4-administration/cli-admin.md:358
 msgid "Example Pattern"
 msgstr "Beispielmuster"
 
-#: src/appendices/filter-reference.md:12 src/part3-distributed/process.md:418
+#: src/appendices/filter-reference.md:12 src/part3-distributed/process.md:423
 #: src/part4-administration/cli-admin.md:360
 msgid "**VoIP**"
 msgstr "**VoIP**"
@@ -10864,7 +10864,7 @@ msgstr "**VoIP**"
 msgid "SIP user/extension (glob)"
 msgstr "SIP-Benutzer/Nebenstelle (Glob)"
 
-#: src/appendices/filter-reference.md:12 src/part3-distributed/process.md:418
+#: src/appendices/filter-reference.md:12 src/part3-distributed/process.md:423
 #: src/part4-administration/cli-admin.md:360
 msgid "`alicent@example.com`"
 msgstr "`alicent@example.com`"
@@ -10897,7 +10897,7 @@ msgstr "`*456789`"
 msgid "`phone_number`"
 msgstr "`phone_number`"
 
-#: src/appendices/filter-reference.md:15 src/part3-distributed/process.md:327
+#: src/appendices/filter-reference.md:15 src/part3-distributed/process.md:332
 msgid "SIP Call-ID"
 msgstr "SIP-Call-ID"
 
@@ -10946,7 +10946,7 @@ msgid "`imei`"
 msgstr "`imei`"
 
 #: src/appendices/filter-reference.md:19 src/appendices/glossary.md:21
-#: src/part3-distributed/process.md:419
+#: src/part3-distributed/process.md:424
 #: src/part4-administration/cli-admin.md:361
 msgid "**DNS**"
 msgstr "**DNS**"
@@ -10956,20 +10956,20 @@ msgid "Domain name (glob)"
 msgstr "Domainname (Glob)"
 
 #: src/appendices/filter-reference.md:19 src/appendices/filter-reference.md:20
-#: src/appendices/filter-reference.md:24 src/part3-distributed/process.md:420
+#: src/appendices/filter-reference.md:24 src/part3-distributed/process.md:425
 #: src/part4-administration/cli-admin.md:361
 #: src/part4-administration/cli-admin.md:362
 #: src/part4-administration/cli-admin.md:363
 msgid "`*.example.com`"
 msgstr "`*.example.com`"
 
-#: src/appendices/filter-reference.md:19 src/part3-distributed/process.md:419
+#: src/appendices/filter-reference.md:19 src/part3-distributed/process.md:424
 #: src/part4-administration/cli-admin.md:361
 msgid "`dns_domain`"
 msgstr "`dns_domain`"
 
 #: src/appendices/filter-reference.md:20 src/appendices/glossary.md:60
-#: src/part3-distributed/process.md:420
+#: src/part3-distributed/process.md:425
 #: src/part4-administration/cli-admin.md:362
 msgid "**TLS**"
 msgstr "**TLS**"
@@ -11019,7 +11019,7 @@ msgid "`tls_ja4`"
 msgstr "`tls_ja4`"
 
 #: src/appendices/filter-reference.md:24 src/appendices/glossary.md:26
-#: src/part3-distributed/process.md:421
+#: src/part3-distributed/process.md:426
 #: src/part4-administration/cli-admin.md:363
 msgid "**HTTP**"
 msgstr "**HTTP**"
@@ -11044,7 +11044,7 @@ msgstr "`/api/v1/*`"
 msgid "`http_url`"
 msgstr "`http_url`"
 
-#: src/appendices/filter-reference.md:26 src/part3-distributed/process.md:422
+#: src/appendices/filter-reference.md:26 src/part3-distributed/process.md:427
 #: src/part4-administration/cli-admin.md:364
 msgid "**Email**"
 msgstr "**E-Mail**"
@@ -11075,7 +11075,7 @@ msgid "`email_subject`"
 msgstr "`email_subject`"
 
 #: src/appendices/filter-reference.md:28 src/appendices/glossary.md:49
-#: src/part3-distributed/process.md:423
+#: src/part3-distributed/process.md:428
 #: src/part4-administration/cli-admin.md:365
 msgid "**RADIUS**"
 msgstr "**RADIUS**"
@@ -11084,7 +11084,7 @@ msgstr "**RADIUS**"
 msgid "Complete UTF-8 User-Name (exact)"
 msgstr "Vollständiger UTF-8-User-Name (exakt)"
 
-#: src/appendices/filter-reference.md:28 src/part3-distributed/process.md:423
+#: src/appendices/filter-reference.md:28 src/part3-distributed/process.md:428
 #: src/part4-administration/cli-admin.md:365 src/part5-advanced/radius.md:210
 msgid "`alice@example.test`"
 msgstr "`alice@example.test`"
@@ -11129,7 +11129,7 @@ msgstr "Siehe YAML unten"
 msgid "`radius_compound`"
 msgstr "`radius_compound`"
 
-#: src/appendices/filter-reference.md:32 src/part3-distributed/process.md:424
+#: src/appendices/filter-reference.md:32 src/part3-distributed/process.md:429
 #: src/part4-administration/cli-admin.md:366
 msgid "**Universal**"
 msgstr "**Universell**"
@@ -11400,7 +11400,7 @@ msgstr ""
 "Mehrmusterfilterung (z. B. zum gleichzeitigen Abgleich vieler SIP-URIs). "
 "Siehe [Leistungsoptimierung](../part5-advanced/performance.md)."
 
-#: src/appendices/glossary.md:9 src/part3-distributed/process.md:115
+#: src/appendices/glossary.md:9 src/part3-distributed/process.md:120
 msgid "**Auto-Rotating PCAP**"
 msgstr "**Automatisch rotierende PCAP-Dateien**"
 
@@ -11945,7 +11945,7 @@ msgstr ""
 "Netzwerkpakete, kompatibel mit Werkzeugen wie Wireshark und tcpdump. Siehe "
 "[Grundkonzepte](../part1-foundations/core-concepts.md)."
 
-#: src/appendices/glossary.md:45 src/part3-distributed/process.md:114
+#: src/appendices/glossary.md:45 src/part3-distributed/process.md:119
 msgid "**Per-Call PCAP**"
 msgstr "**PCAP pro Anruf**"
 
@@ -12211,11 +12211,29 @@ msgstr ""
 "Erfassungsschnittstelle verwendet werden. Siehe [CLI-Erfassung mit `lc "
 "sniff`](../part2-local-capture/sniff.md)."
 
-#: src/appendices/glossary.md:63 src/part5-advanced/lawful-interception.md:13
+#: src/appendices/glossary.md:63
+msgid "**WAL**"
+msgstr "**WAL**"
+
+#: src/appendices/glossary.md:63
+msgid ""
+"Write-Ahead Log. A durable journal used by reliable event ingress: the "
+"processor records received events before acknowledging them to the producer, "
+"allowing recovery after a processor crash. See [Central Aggregation with `lc "
+"process`](../part3-distributed/process.md#packet-and-event-producers)."
+msgstr ""
+"Write-Ahead Log. Ein dauerhaft gespeichertes Ereignisprotokoll für den "
+"zuverlässigen Ereignisempfang: Der Prozessor speichert empfangene "
+"Ereignisse, bevor er dem Produzenten ihren Empfang bestätigt. Dadurch lassen "
+"sie sich nach einem Prozessorabsturz wiederherstellen. Siehe [Zentrale "
+"Aggregation mit `lc process`](../part3-distributed/process.md#packet-and-"
+"event-producers)."
+
+#: src/appendices/glossary.md:64 src/part5-advanced/lawful-interception.md:13
 msgid "**X1**"
 msgstr "**X1**"
 
-#: src/appendices/glossary.md:63
+#: src/appendices/glossary.md:64
 msgid ""
 "The ETSI Lawful Interception administration interface. Carries task "
 "activation and deactivation requests between the ADMF and the network "
@@ -12227,11 +12245,11 @@ msgstr ""
 "Netzelement über HTTPS/XML. Siehe [Lawful Interception](../part5-advanced/"
 "lawful-interception.md)."
 
-#: src/appendices/glossary.md:64 src/part5-advanced/lawful-interception.md:14
+#: src/appendices/glossary.md:65 src/part5-advanced/lawful-interception.md:14
 msgid "**X2**"
 msgstr "**X2**"
 
-#: src/appendices/glossary.md:64
+#: src/appendices/glossary.md:65
 msgid ""
 "The ETSI Lawful Interception IRI delivery interface. Carries signaling "
 "metadata (Intercept Related Information) from the network element to the MDF "
@@ -12243,11 +12261,11 @@ msgstr ""
 "MDF über TLS. Siehe [Lawful Interception](../part5-advanced/lawful-"
 "interception.md)."
 
-#: src/appendices/glossary.md:65 src/part5-advanced/lawful-interception.md:15
+#: src/appendices/glossary.md:66 src/part5-advanced/lawful-interception.md:15
 msgid "**X3**"
 msgstr "**X3**"
 
-#: src/appendices/glossary.md:65
+#: src/appendices/glossary.md:66
 msgid ""
 "The ETSI Lawful Interception CC delivery interface. Carries communication "
 "content (actual packet data) from the network element to the MDF over TLS. "
@@ -13377,7 +13395,7 @@ msgstr "Vorhandene PCAP-Dateien statt aktiver Schnittstellen analysieren:"
 msgid "No elevated privileges needed for reading files."
 msgstr "Zum Lesen von Dateien sind keine erhöhten Rechte erforderlich."
 
-#: src/part2-local-capture/sniff.md:113 src/part3-distributed/process.md:127
+#: src/part2-local-capture/sniff.md:113 src/part3-distributed/process.md:132
 #: src/part3-distributed/tap.md:76
 msgid "Structured protocol logs"
 msgstr "Strukturierte Protokoll-Logs"
@@ -16060,7 +16078,7 @@ msgstr "`-P, --processor`"
 msgid "Hunter identifier (default: hostname)"
 msgstr "Hunter-Kennung (Standard: Hostname)"
 
-#: src/part3-distributed/hunt.md:56 src/part3-distributed/process.md:76
+#: src/part3-distributed/hunt.md:56 src/part3-distributed/process.md:81
 msgid "`-I, --id`"
 msgstr "`-I, --id`"
 
@@ -16464,7 +16482,7 @@ msgstr ""
 msgid "Hunter Response"
 msgstr "Hunter-Reaktion"
 
-#: src/part3-distributed/hunt.md:312 src/part3-distributed/process.md:197
+#: src/part3-distributed/hunt.md:312 src/part3-distributed/process.md:202
 #: src/part5-advanced/lawful-interception.md:336
 #: src/part5-advanced/troubleshooting.md:599
 msgid "State"
@@ -16940,7 +16958,7 @@ msgstr ""
 msgid "To force Aho-Corasick for smaller filter sets:"
 msgstr "Aho-Corasick für kleinere Filtersätze erzwingen:"
 
-#: src/part3-distributed/hunt.md:501 src/part3-distributed/process.md:567
+#: src/part3-distributed/hunt.md:501 src/part3-distributed/process.md:572
 #: src/part3-distributed/tap.md:430 src/part5-advanced/security.md:252
 msgid "Configuration File"
 msgstr "Konfigurationsdatei"
@@ -17061,6 +17079,20 @@ msgstr ""
 
 #: src/part3-distributed/process.md:64
 msgid ""
+"A **Write-Ahead Log (WAL)** is a durable journal. In reliable event-ingress "
+"mode, the processor writes received events to this journal before "
+"acknowledging them to the producer. This allows those events to be recovered "
+"after a processor crash. See the [Glossary](../appendices/glossary.md)."
+msgstr ""
+"Ein **Write-Ahead Log (WAL)** ist ein dauerhaft gespeichertes "
+"Ereignisprotokoll. Beim zuverlässigen Ereignisempfang schreibt der Prozessor "
+"empfangene Ereignisse in dieses Protokoll, bevor er dem Produzenten ihren "
+"Empfang bestätigt. So lassen sich diese Ereignisse nach einem "
+"Prozessorabsturz wiederherstellen. Siehe [Glossar](../appendices/"
+"glossary.md)."
+
+#: src/part3-distributed/process.md:69
+msgid ""
 "Reliable ingress acknowledges recoverable WAL admission; memory-only ingress "
 "acknowledges queue admission and can lose acknowledged events on processor "
 "crash. At-least-once ingress is deduplicated by producer/session/event "
@@ -17077,86 +17109,86 @@ msgstr ""
 "sensible Nachweise und verwenden Sie TLS/mTLS sowie Autorisierung nach dem "
 "Prinzip geringster Rechte."
 
-#: src/part3-distributed/process.md:71
+#: src/part3-distributed/process.md:76
 msgid "Key Flags"
 msgstr "Wichtige Flags"
 
-#: src/part3-distributed/process.md:75
+#: src/part3-distributed/process.md:80
 msgid "Listen address for hunter and TUI connections"
 msgstr "Listener-Adresse für Hunter- und TUI-Verbindungen"
 
-#: src/part3-distributed/process.md:75
+#: src/part3-distributed/process.md:80
 msgid "`-l, --listen`"
 msgstr "`-l, --listen`"
 
-#: src/part3-distributed/process.md:76
+#: src/part3-distributed/process.md:81
 msgid "hostname"
 msgstr "Hostname"
 
-#: src/part3-distributed/process.md:77 src/part3-distributed/process.md:78
+#: src/part3-distributed/process.md:82 src/part3-distributed/process.md:83
 #: src/part4-administration/operations.md:561
 #: src/part5-advanced/lawful-interception.md:517
 #: src/part5-advanced/performance.md:374
 msgid "100"
 msgstr "100"
 
-#: src/part3-distributed/process.md:77
+#: src/part3-distributed/process.md:82
 msgid "Maximum concurrent hunter connections"
 msgstr "Maximale gleichzeitige Hunter-Verbindungen"
 
-#: src/part3-distributed/process.md:77
+#: src/part3-distributed/process.md:82
 msgid "`-m, --max-hunters`"
 msgstr "`-m, --max-hunters`"
 
-#: src/part3-distributed/process.md:78
+#: src/part3-distributed/process.md:83
 msgid "Maximum TUI subscribers (0 = unlimited)"
 msgstr "Maximale TUI-Abonnenten (0 = unbegrenzt)"
 
-#: src/part3-distributed/process.md:79
+#: src/part3-distributed/process.md:84
 msgid "Display periodic statistics"
 msgstr "Regelmäßige Statistiken anzeigen"
 
-#: src/part3-distributed/process.md:79
+#: src/part3-distributed/process.md:84
 msgid "`-s, --stats`"
 msgstr "`-s, --stats`"
 
-#: src/part3-distributed/process.md:79 src/part3-distributed/process.md:80
+#: src/part3-distributed/process.md:84 src/part3-distributed/process.md:85
 msgid "true"
 msgstr "true"
 
-#: src/part3-distributed/process.md:80
+#: src/part3-distributed/process.md:85
 msgid "Enable protocol detection on received packets"
 msgstr "Protokollerkennung für empfangene Pakete aktivieren"
 
-#: src/part3-distributed/process.md:80
+#: src/part3-distributed/process.md:85
 msgid "`-d, --enable-detection`"
 msgstr "`-d, --enable-detection`"
 
-#: src/part3-distributed/process.md:82
+#: src/part3-distributed/process.md:87
 msgid "Hunter Management"
 msgstr "Hunter-Verwaltung"
 
-#: src/part3-distributed/process.md:84
+#: src/part3-distributed/process.md:89
 msgid "When hunters connect, the processor:"
 msgstr "Wenn sich Hunter verbinden, führt der Prozessor Folgendes aus:"
 
-#: src/part3-distributed/process.md:86
+#: src/part3-distributed/process.md:91
 msgid "Registers the hunter and assigns it to the connection pool"
 msgstr "Registriert den Hunter und ordnet ihn dem Verbindungspool zu"
 
-#: src/part3-distributed/process.md:87
+#: src/part3-distributed/process.md:92
 msgid "Starts receiving packet batches via gRPC streaming"
 msgstr "Beginnt den Empfang von Paket-Batches per gRPC-Streaming"
 
-#: src/part3-distributed/process.md:88
+#: src/part3-distributed/process.md:93
 msgid "Sends heartbeat responses with flow control signals"
 msgstr "Sendet Heartbeat-Antworten mit Flusssteuerungssignalen"
 
-#: src/part3-distributed/process.md:89
+#: src/part3-distributed/process.md:94
 msgid "Distributes active filters to the hunter"
 msgstr "Verteilt aktive Filter an den Hunter"
 
-#: src/part3-distributed/process.md:91
+#: src/part3-distributed/process.md:96
 msgid ""
 "Hunter health is monitored via heartbeats (5-second interval). Stale hunters "
 "are cleaned up after 5 minutes of no heartbeat."
@@ -17164,11 +17196,11 @@ msgstr ""
 "Die Hunter-Funktionsfähigkeit wird über Heartbeats (alle 5 Sekunden) "
 "überwacht. Veraltete Hunter werden nach 5 Minuten ohne Heartbeat bereinigt."
 
-#: src/part3-distributed/process.md:93
+#: src/part3-distributed/process.md:98
 msgid "Output Channels"
 msgstr "Ausgabekanäle"
 
-#: src/part3-distributed/process.md:95
+#: src/part3-distributed/process.md:100
 msgid ""
 "Every packet a processor receives can be sent to multiple destinations "
 "simultaneously. These output channels are independent — enable any "
@@ -17178,87 +17210,87 @@ msgstr ""
 "gesendet werden. Diese Ausgabekanäle sind unabhängig — aktivieren Sie "
 "beliebige Kombinationen:"
 
-#: src/part3-distributed/process.md:111
+#: src/part3-distributed/process.md:116
 msgid "Channel"
 msgstr "Kanal"
 
-#: src/part3-distributed/process.md:111
+#: src/part3-distributed/process.md:116
 msgid "Flag(s)"
 msgstr "Flags"
 
-#: src/part3-distributed/process.md:113
+#: src/part3-distributed/process.md:118
 msgid "**Unified PCAP**"
 msgstr "**Gemeinsame PCAP-Datei**"
 
-#: src/part3-distributed/process.md:113
+#: src/part3-distributed/process.md:118
 msgid "All packets to a single file"
 msgstr "Alle Pakete in eine Datei"
 
-#: src/part3-distributed/process.md:114
+#: src/part3-distributed/process.md:119
 msgid "Separate files per VoIP call (SIP + RTP)"
 msgstr "Getrennte Dateien pro VoIP-Anruf (SIP und RTP)"
 
-#: src/part3-distributed/process.md:115
+#: src/part3-distributed/process.md:120
 msgid "Non-VoIP packets to time/size-rotated files"
 msgstr "Nicht-VoIP-Pakete in zeit-/größenabhängig rotierte Dateien"
 
-#: src/part3-distributed/process.md:116
+#: src/part3-distributed/process.md:121
 msgid "**Structured logs**"
 msgstr "**Strukturierte Logs**"
 
-#: src/part3-distributed/process.md:116
+#: src/part3-distributed/process.md:121
 msgid "Zeek-compatible connection and protocol metadata"
 msgstr "Zeek-kompatible Verbindungs- und Protokollmetadaten"
 
-#: src/part3-distributed/process.md:117
+#: src/part3-distributed/process.md:122
 msgid "(always on)"
 msgstr "(immer aktiv)"
 
-#: src/part3-distributed/process.md:117
+#: src/part3-distributed/process.md:122
 msgid "**TUI subscribers**"
 msgstr "**TUI-Abonnenten**"
 
-#: src/part3-distributed/process.md:117
+#: src/part3-distributed/process.md:122
 msgid "Real-time streaming to `lc watch remote` clients"
 msgstr "Echtzeitstreaming an `lc watch remote`-Clients"
 
-#: src/part3-distributed/process.md:118
+#: src/part3-distributed/process.md:123
 msgid "**Virtual interface**"
 msgstr "**Virtuelle Schnittstelle**"
 
-#: src/part3-distributed/process.md:118
+#: src/part3-distributed/process.md:123
 msgid "Inject into a tap/tun device for external tools"
 msgstr "Einspeisung in ein TAP-/TUN-Gerät für externe Werkzeuge"
 
-#: src/part3-distributed/process.md:119
+#: src/part3-distributed/process.md:124
 msgid "**Upstream forwarding**"
 msgstr "**Upstream-Weiterleitung**"
 
-#: src/part3-distributed/process.md:119
+#: src/part3-distributed/process.md:124
 msgid "Forward to another processor (hierarchical mode)"
 msgstr "Weiterleitung an einen anderen Prozessor (hierarchischer Modus)"
 
-#: src/part3-distributed/process.md:120
+#: src/part3-distributed/process.md:125
 msgid "**Command hooks**"
 msgstr "**Befehls-Hooks**"
 
-#: src/part3-distributed/process.md:120
+#: src/part3-distributed/process.md:125
 msgid "Run scripts on PCAP close or call completion"
 msgstr "Skripte beim Schließen von PCAP-Dateien oder Anrufabschluss ausführen"
 
-#: src/part3-distributed/process.md:120
+#: src/part3-distributed/process.md:125
 msgid "`--pcap-command`, `--voip-command`"
 msgstr "`--pcap-command`, `--voip-command`"
 
-#: src/part3-distributed/process.md:121
+#: src/part3-distributed/process.md:126
 msgid "**LI delivery**"
 msgstr "**LI-Zustellung**"
 
-#: src/part3-distributed/process.md:121
+#: src/part3-distributed/process.md:126
 msgid "X2/X3 PDUs to MDF (requires `-tags li` build)"
 msgstr "X2-/X3-PDUs an MDF (benötigt Build mit `-tags li`)"
 
-#: src/part3-distributed/process.md:123
+#: src/part3-distributed/process.md:128
 msgid ""
 "`lc tap` supports all the same output channels (see [Standalone Mode with "
 "`lc tap`](tap.md))."
@@ -17266,7 +17298,7 @@ msgstr ""
 "`lc tap` unterstützt dieselben Ausgabekanäle (siehe [Eigenständiger Betrieb "
 "mit `lc tap`](tap.md))."
 
-#: src/part3-distributed/process.md:125
+#: src/part3-distributed/process.md:130
 msgid ""
 "The following sections cover each channel in detail. For LI delivery, see "
 "[Lawful Interception](../part5-advanced/lawful-interception.md)."
@@ -17275,7 +17307,7 @@ msgstr ""
 "Zustellung siehe [Lawful Interception](../part5-advanced/lawful-"
 "interception.md)."
 
-#: src/part3-distributed/process.md:129
+#: src/part3-distributed/process.md:134
 msgid ""
 "Set `--log-dir` to enable the default normalized `conn`, `dns`, `ssl`, "
 "`http`, `smtp`, `files`, and `radius` streams. Logging is off by default and "
@@ -17286,7 +17318,7 @@ msgstr ""
 "Protokollierung ist standardmäßig deaktiviert und verwendet TSV im Zeek-"
 "Stil, sofern nicht `--log-format json` gewählt wird:"
 
-#: src/part3-distributed/process.md:140
+#: src/part3-distributed/process.md:145
 msgid ""
 "The default `--log-emit-stage terminal` prevents duplicate files in a "
 "processor hierarchy. Bounded queues protect packet processing, so operators "
@@ -17301,11 +17333,11 @@ msgstr ""
 "Datenschutz behandelt die vollständige Anleitung [Strukturierte Protokoll-"
 "Logs](../part5-advanced/structured-protocol-logs.md)."
 
-#: src/part3-distributed/process.md:145
+#: src/part3-distributed/process.md:150
 msgid "PCAP Writing Modes"
 msgstr "PCAP-Schreibmodi"
 
-#: src/part3-distributed/process.md:147
+#: src/part3-distributed/process.md:152
 msgid ""
 "Processors support three independent PCAP writing modes. All three can be "
 "active simultaneously."
@@ -17313,34 +17345,34 @@ msgstr ""
 "Prozessoren unterstützen drei unabhängige PCAP-Schreibmodi. Alle drei können "
 "gleichzeitig aktiv sein."
 
-#: src/part3-distributed/process.md:149
+#: src/part3-distributed/process.md:154
 msgid "Unified PCAP"
 msgstr "Gemeinsame PCAP-Datei"
 
-#: src/part3-distributed/process.md:151
+#: src/part3-distributed/process.md:156
 msgid "Write all received packets to a single continuous file:"
 msgstr "Alle empfangenen Pakete in eine einzige fortlaufende Datei schreiben:"
 
-#: src/part3-distributed/process.md:161
+#: src/part3-distributed/process.md:166
 msgid ""
 "**Use cases**: Compliance/audit trails, forensic analysis, traffic replay."
 msgstr ""
 "**Anwendungsfälle**: Compliance-/Audit-Nachweise, forensische Analyse, "
 "Verkehrswiedergabe."
 
-#: src/part3-distributed/process.md:165
+#: src/part3-distributed/process.md:170
 msgid "Write separate SIP and RTP PCAP files for each VoIP call:"
 msgstr "Getrennte SIP- und RTP-PCAP-Dateien für jeden VoIP-Anruf schreiben:"
 
-#: src/part3-distributed/process.md:177
+#: src/part3-distributed/process.md:182
 msgid "For each call, two files are created:"
 msgstr "Für jeden Anruf werden zwei Dateien erzeugt:"
 
-#: src/part3-distributed/process.md:186
+#: src/part3-distributed/process.md:191
 msgid "**Pattern placeholders**: `{callid}`, `{from}`, `{to}`, `{timestamp}`."
 msgstr "**Musterplatzhalter**: `{callid}`, `{from}`, `{to}`, `{timestamp}`."
 
-#: src/part3-distributed/process.md:188
+#: src/part3-distributed/process.md:193
 msgid ""
 "Files rotate independently when reaching 100MB. Per-call PCAP only applies "
 "to VoIP traffic; non-VoIP packets are handled by the other writers."
@@ -17348,7 +17380,7 @@ msgstr ""
 "Dateien rotieren unabhängig bei 100 MB. PCAP pro Anruf gilt nur für VoIP-"
 "Verkehr; Nicht-VoIP-Pakete übernehmen die anderen Writer."
 
-#: src/part3-distributed/process.md:190
+#: src/part3-distributed/process.md:195
 msgid ""
 "**Use cases**: VoIP call recording, per-call quality analysis, selective "
 "archival."
@@ -17356,11 +17388,11 @@ msgstr ""
 "**Anwendungsfälle**: Aufzeichnung von VoIP-Anrufen, Qualitätsanalyse pro "
 "Anruf, selektive Archivierung."
 
-#: src/part3-distributed/process.md:192
+#: src/part3-distributed/process.md:197
 msgid "Per-call file lifecycle"
 msgstr "Dateilebenszyklus pro Anruf"
 
-#: src/part3-distributed/process.md:194
+#: src/part3-distributed/process.md:199
 msgid ""
 "The per-call writer manager owns the logical lifetime of every Call-ID. Its "
 "state machine is:"
@@ -17368,15 +17400,15 @@ msgstr ""
 "Der Manager für anrufbezogene Writer verwaltet die logische Lebensdauer "
 "jeder Call-ID. Seine Zustandsmaschine lautet:"
 
-#: src/part3-distributed/process.md:197
+#: src/part3-distributed/process.md:202
 msgid "Writer admission and packet behavior"
 msgstr "Writer-Zulassung und Paketverhalten"
 
-#: src/part3-distributed/process.md:199
+#: src/part3-distributed/process.md:204
 msgid "**Live**"
 msgstr "**Aktiv**"
 
-#: src/part3-distributed/process.md:199
+#: src/part3-distributed/process.md:204
 msgid ""
 "One manager-owned writer generation accepts SIP and RTP packets. Rotation "
 "remains part of that same generation."
@@ -17384,11 +17416,11 @@ msgstr ""
 "Eine vom Manager verwaltete Writer-Generation nimmt SIP- und RTP-Pakete an. "
 "Rotation bleibt Bestandteil derselben Generation."
 
-#: src/part3-distributed/process.md:200
+#: src/part3-distributed/process.md:205
 msgid "**Finalizing**"
 msgstr "**Wird abgeschlossen**"
 
-#: src/part3-distributed/process.md:200
+#: src/part3-distributed/process.md:205
 msgid ""
 "The writer has been removed from the live set and a tombstone installed in "
 "one atomic transition. No new normal writer can be admitted while files are "
@@ -17400,11 +17432,11 @@ msgstr ""
 "geschlossen, Endpunktzuordnungen bereinigt und Abschluss-Hooks ausgeführt "
 "werden, kann kein neuer regulärer Writer zugelassen werden."
 
-#: src/part3-distributed/process.md:201
+#: src/part3-distributed/process.md:206
 msgid "**Finalized / tombstoned**"
 msgstr "**Abgeschlossen / mit Tombstone versehen**"
 
-#: src/part3-distributed/process.md:201
+#: src/part3-distributed/process.md:206
 msgid ""
 "Packets arriving for the Call-ID are expected late traffic and are "
 "suppressed. This is reported as a typed, non-fatal finalized-call result, "
@@ -17417,11 +17449,11 @@ msgstr ""
 "Warnung pro Minute und einem atomaren Zähler unterdrückter verspäteter "
 "Pakete; es wird nicht als Dateierstellungsfehler gemeldet."
 
-#: src/part3-distributed/process.md:202
+#: src/part3-distributed/process.md:207
 msgid "**Expired**"
 msgstr "**Abgelaufen**"
 
-#: src/part3-distributed/process.md:202
+#: src/part3-distributed/process.md:207
 msgid ""
 "After tombstone expiry, reuse of the Call-ID may start a new writer "
 "generation. The new generation receives a collision-proof filename and never "
@@ -17431,11 +17463,11 @@ msgstr ""
 "Writer-Generation starten. Diese erhält einen kollisionssicheren Dateinamen "
 "und überschreibt oder erweitert niemals ein früheres Anrufartefakt."
 
-#: src/part3-distributed/process.md:203
+#: src/part3-distributed/process.md:208
 msgid "**Manager shutdown**"
 msgstr "**Manager beendet**"
 
-#: src/part3-distributed/process.md:203
+#: src/part3-distributed/process.md:208
 msgid ""
 "Writer admission stops, live writers transition to finalizing, and their "
 "files are flushed and closed. Use `SIGTERM` or `SIGINT` to allow this drain "
@@ -17446,7 +17478,7 @@ msgstr ""
 "Sie `SIGTERM` oder `SIGINT`, damit diese Entleerung abgeschlossen werden "
 "kann."
 
-#: src/part3-distributed/process.md:205
+#: src/part3-distributed/process.md:210
 msgid ""
 "Finalized Call-IDs are retained for one hour, matching the closed-call "
 "compatibility window. The manager also applies a hard internal limit of "
@@ -17466,7 +17498,7 @@ msgstr ""
 "Generationsmaterial, sodass eine alte Datei nicht mit dem neuen aktiven "
 "Anruf verwechselt werden kann."
 
-#: src/part3-distributed/process.md:213
+#: src/part3-distributed/process.md:218
 msgid ""
 "`per_call_pcap.max_writers` is a soft pressure threshold, not a destructive "
 "capacity limit. Crossing it emits a rate-limited warning but does not "
@@ -17482,7 +17514,7 @@ msgstr ""
 "müssen bei Verwendung dieser Schwelle Dateideskriptorgrenzen für "
 "vorübergehende Überschreitungen dimensionieren."
 
-#: src/part3-distributed/process.md:219
+#: src/part3-distributed/process.md:224
 msgid ""
 "The current policy does not retain late packets. In particular, suppressed "
 "packets do not create a `.late` PCAP and cannot invoke the normal call-"
@@ -17496,7 +17528,7 @@ msgstr ""
 "für verspätete Pakete müsste eine getrennte eigenständige PCAP-Datei mit "
 "eigenem gültigem Header und separater Abschlusssemantik verwenden."
 
-#: src/part3-distributed/process.md:224
+#: src/part3-distributed/process.md:229
 msgid ""
 "File modification times are not lifecycle state. A process restart or an "
 "expired tombstone therefore never causes a writer to continue an existing "
@@ -17516,36 +17548,36 @@ msgstr ""
 "Wiederholungssuffix), ein neuer eigenständiger PCAP-Header geschrieben und "
 "die bestehende Datei niemals gekürzt oder mehrdeutig erweitert."
 
-#: src/part3-distributed/process.md:235
+#: src/part3-distributed/process.md:240
 msgid "Write non-VoIP packets to auto-rotating files based on activity:"
 msgstr ""
 "Nicht-VoIP-Pakete abhängig von der Aktivität in automatisch rotierende "
 "Dateien schreiben:"
 
-#: src/part3-distributed/process.md:248
+#: src/part3-distributed/process.md:253
 msgid "Rotation triggers:"
 msgstr "Rotationsauslöser:"
 
-#: src/part3-distributed/process.md:250
+#: src/part3-distributed/process.md:255
 msgid ""
 "**Idle timeout**: close file after 30 seconds of inactivity (configurable)"
 msgstr ""
 "**Inaktivitätszeitlimit**: Datei nach 30 Sekunden ohne Aktivität schließen "
 "(konfigurierbar)"
 
-#: src/part3-distributed/process.md:251
+#: src/part3-distributed/process.md:256
 msgid "**File size**: rotate when file reaches 100MB (configurable)"
 msgstr "**Dateigröße**: Bei 100 MB rotieren (konfigurierbar)"
 
-#: src/part3-distributed/process.md:252
+#: src/part3-distributed/process.md:257
 msgid "**Duration**: rotate after 1 hour maximum"
 msgstr "**Dauer**: Spätestens nach 1 Stunde rotieren"
 
-#: src/part3-distributed/process.md:254
+#: src/part3-distributed/process.md:259
 msgid "Output:"
 msgstr "Ausgabe:"
 
-#: src/part3-distributed/process.md:263
+#: src/part3-distributed/process.md:268
 msgid ""
 "**Use cases**: Network traffic bursts, session-based capture, bandwidth "
 "monitoring."
@@ -17553,11 +17585,11 @@ msgstr ""
 "**Anwendungsfälle**: Netzwerkverkehrsspitzen, sitzungsbezogene Erfassung, "
 "Bandbreitenüberwachung."
 
-#: src/part3-distributed/process.md:265
+#: src/part3-distributed/process.md:270
 msgid "Combining Modes"
 msgstr "Modi kombinieren"
 
-#: src/part3-distributed/process.md:267
+#: src/part3-distributed/process.md:272
 msgid ""
 "All three modes are independent. Enable them together for comprehensive "
 "capture:"
@@ -17565,7 +17597,7 @@ msgstr ""
 "Alle drei Modi sind unabhängig. Aktivieren Sie sie gemeinsam für umfassende "
 "Erfassung:"
 
-#: src/part3-distributed/process.md:279
+#: src/part3-distributed/process.md:284
 msgid ""
 "VoIP packets are routed to the per-call writer. Non-VoIP packets go to the "
 "auto-rotate writer. All packets go to the unified writer."
@@ -17574,98 +17606,98 @@ msgstr ""
 "den automatisch rotierenden Writer. Alle Pakete gehen an den gemeinsamen "
 "Writer."
 
-#: src/part3-distributed/process.md:283
+#: src/part3-distributed/process.md:288
 msgid ""
 "Execute custom commands when PCAP files are written or VoIP calls complete."
 msgstr ""
 "Eigene Befehle beim Schreiben von PCAP-Dateien oder Abschluss von VoIP-"
 "Anrufen ausführen."
 
-#: src/part3-distributed/process.md:285
+#: src/part3-distributed/process.md:290
 msgid "PCAP Completion Hook"
 msgstr "PCAP-Abschluss-Hook"
 
-#: src/part3-distributed/process.md:287
+#: src/part3-distributed/process.md:292
 msgid "Runs when any PCAP file is closed:"
 msgstr "Wird beim Schließen jeder PCAP-Datei ausgeführt:"
 
-#: src/part3-distributed/process.md:289
+#: src/part3-distributed/process.md:294
 msgid "To compress PCAP files:"
 msgstr "PCAP-Dateien komprimieren:"
 
-#: src/part3-distributed/process.md:299
+#: src/part3-distributed/process.md:304
 msgid "To upload PCAP files to cloud storage:"
 msgstr "PCAP-Dateien in Cloud-Speicher hochladen:"
 
-#: src/part3-distributed/process.md:309
+#: src/part3-distributed/process.md:314
 msgid "**Placeholder**: `%pcap%` — full path to the PCAP file."
 msgstr "**Platzhalter**: `%pcap%` — vollständiger Pfad zur PCAP-Datei."
 
-#: src/part3-distributed/process.md:311
+#: src/part3-distributed/process.md:316
 msgid "VoIP Call Completion Hook"
 msgstr "VoIP-Anrufabschluss-Hook"
 
-#: src/part3-distributed/process.md:313
+#: src/part3-distributed/process.md:318
 msgid ""
 "Runs when a VoIP call ends (after a 5-second grace period for late packets):"
 msgstr ""
 "Wird beim Ende eines VoIP-Anrufs ausgeführt (nach 5 Sekunden Nachlaufzeit "
 "für verspätete Pakete):"
 
-#: src/part3-distributed/process.md:323
+#: src/part3-distributed/process.md:328
 msgid "**Placeholders**:"
 msgstr "**Platzhalter**:"
 
-#: src/part3-distributed/process.md:325
+#: src/part3-distributed/process.md:330
 msgid "Placeholder"
 msgstr "Platzhalter"
 
-#: src/part3-distributed/process.md:327
+#: src/part3-distributed/process.md:332
 msgid "`%callid%`"
 msgstr "`%callid%`"
 
-#: src/part3-distributed/process.md:328
+#: src/part3-distributed/process.md:333
 msgid "Directory containing the call's PCAP files"
 msgstr "Verzeichnis mit den PCAP-Dateien des Anrufs"
 
-#: src/part3-distributed/process.md:328
+#: src/part3-distributed/process.md:333
 msgid "`%dirname%`"
 msgstr "`%dirname%`"
 
-#: src/part3-distributed/process.md:329
+#: src/part3-distributed/process.md:334
 msgid "Caller (SIP From user)"
 msgstr "Anrufer (SIP-From-Benutzer)"
 
-#: src/part3-distributed/process.md:329
+#: src/part3-distributed/process.md:334
 msgid "`%caller%`"
 msgstr "`%caller%`"
 
-#: src/part3-distributed/process.md:330
+#: src/part3-distributed/process.md:335
 msgid "Called party (SIP To user)"
 msgstr "Angerufener Teilnehmer (SIP-To-Benutzer)"
 
-#: src/part3-distributed/process.md:330
+#: src/part3-distributed/process.md:335
 msgid "`%called%`"
 msgstr "`%called%`"
 
-#: src/part3-distributed/process.md:331
+#: src/part3-distributed/process.md:336
 msgid "Call start time (RFC3339 format)"
 msgstr "Anrufbeginn (RFC3339-Format)"
 
-#: src/part3-distributed/process.md:331
+#: src/part3-distributed/process.md:336
 msgid "`%calldate%`"
 msgstr "`%calldate%`"
 
-#: src/part3-distributed/process.md:333
+#: src/part3-distributed/process.md:338
 msgid "DNS Tunneling Hook"
 msgstr "DNS-Tunneling-Hook"
 
-#: src/part3-distributed/process.md:335
+#: src/part3-distributed/process.md:340
 msgid "Runs when DNS tunneling is detected (processor or `tap dns` mode):"
 msgstr ""
 "Wird bei erkanntem DNS-Tunneling ausgeführt (Prozessor oder Modus `tap dns`):"
 
-#: src/part3-distributed/process.md:347
+#: src/part3-distributed/process.md:352
 msgid ""
 "**Placeholders**: `%domain%`, `%score%`, `%entropy%`, `%queries%`, "
 "`%srcips%`, `%hunter%`, `%timestamp%`."
@@ -17673,40 +17705,40 @@ msgstr ""
 "**Platzhalter**: `%domain%`, `%score%`, `%entropy%`, `%queries%`, "
 "`%srcips%`, `%hunter%`, `%timestamp%`."
 
-#: src/part3-distributed/process.md:349
+#: src/part3-distributed/process.md:354
 msgid "Hook Execution Details"
 msgstr "Details zur Hook-Ausführung"
 
-#: src/part3-distributed/process.md:351
+#: src/part3-distributed/process.md:356
 msgid "Commands execute asynchronously — they never block packet processing"
 msgstr ""
 "Befehle werden asynchron ausgeführt — sie blockieren niemals die "
 "Paketverarbeitung"
 
-#: src/part3-distributed/process.md:352
+#: src/part3-distributed/process.md:357
 msgid "Commands run via shell (`sh -c`)"
 msgstr "Befehle laufen über die Shell (`sh -c`)"
 
-#: src/part3-distributed/process.md:353
+#: src/part3-distributed/process.md:358
 msgid "`--command-timeout` controls execution timeout (default: 30s)"
 msgstr "`--command-timeout` steuert das Ausführungszeitlimit (Standard: 30 s)"
 
-#: src/part3-distributed/process.md:354
+#: src/part3-distributed/process.md:359
 msgid "`--command-concurrency` limits parallel executions (default: 10)"
 msgstr "`--command-concurrency` begrenzt parallele Ausführungen (Standard: 10)"
 
-#: src/part3-distributed/process.md:355
+#: src/part3-distributed/process.md:360
 msgid "Failed commands are logged but don't affect processing"
 msgstr ""
 "Fehlgeschlagene Befehle werden protokolliert, beeinträchtigen aber die "
 "Verarbeitung nicht"
 
-#: src/part3-distributed/process.md:357
+#: src/part3-distributed/process.md:362
 #: src/part4-administration/watch-remote.md:229
 msgid "Filter Management"
 msgstr "Filterverwaltung"
 
-#: src/part3-distributed/process.md:359
+#: src/part3-distributed/process.md:364
 msgid ""
 "Processors manage filters that control which packets hunters forward. This "
 "is especially important for VoIP hunters, where filters determine which "
@@ -17716,78 +17748,78 @@ msgstr ""
 "weiterleiten. Dies ist besonders für VoIP-Hunter wichtig, bei denen Filter "
 "die erfassten Anrufe bestimmen."
 
-#: src/part3-distributed/process.md:361
+#: src/part3-distributed/process.md:366
 msgid "Filter File"
 msgstr "Filterdatei"
 
-#: src/part3-distributed/process.md:363
+#: src/part3-distributed/process.md:368
 msgid "Filters are stored in a YAML file:"
 msgstr "Filter werden in einer YAML-Datei gespeichert:"
 
-#: src/part3-distributed/process.md:373
+#: src/part3-distributed/process.md:378
 msgid "Default location: `~/.config/lippycat/filters.yaml`."
 msgstr "Standardpfad: `~/.config/lippycat/filters.yaml`."
 
-#: src/part3-distributed/process.md:375
+#: src/part3-distributed/process.md:380
 msgid "**Filter file format**:"
 msgstr "**Filterdateiformat**:"
 
-#: src/part3-distributed/process.md:414
+#: src/part3-distributed/process.md:419
 msgid "Filters cover all supported protocol categories:"
 msgstr "Filter decken alle unterstützten Protokollkategorien ab:"
 
-#: src/part3-distributed/process.md:416
+#: src/part3-distributed/process.md:421
 #: src/part4-administration/cli-admin.md:358
 msgid "Common Types"
 msgstr "Gängige Typen"
 
-#: src/part3-distributed/process.md:418
+#: src/part3-distributed/process.md:423
 #: src/part4-administration/cli-admin.md:360
 msgid "`sip_user`, `phone_number`, `call_id`, `imsi`, `imei`"
 msgstr "`sip_user`, `phone_number`, `call_id`, `imsi`, `imei`"
 
-#: src/part3-distributed/process.md:419
+#: src/part3-distributed/process.md:424
 msgid "`*.malware-domain.com`"
 msgstr "`*.malware-domain.com`"
 
-#: src/part3-distributed/process.md:420
+#: src/part3-distributed/process.md:425
 #: src/part4-administration/cli-admin.md:362
 msgid "`tls_sni`, `tls_ja3`, `tls_ja4`"
 msgstr "`tls_sni`, `tls_ja3`, `tls_ja4`"
 
-#: src/part3-distributed/process.md:421
+#: src/part3-distributed/process.md:426
 msgid "`api.example.com`"
 msgstr "`api.example.com`"
 
-#: src/part3-distributed/process.md:421
+#: src/part3-distributed/process.md:426
 #: src/part4-administration/cli-admin.md:363
 msgid "`http_host`, `http_url`"
 msgstr "`http_host`, `http_url`"
 
-#: src/part3-distributed/process.md:422
+#: src/part3-distributed/process.md:427
 msgid "`*@example.com`"
 msgstr "`*@example.com`"
 
-#: src/part3-distributed/process.md:422
+#: src/part3-distributed/process.md:427
 #: src/part4-administration/cli-admin.md:364
 msgid "`email_address`, `email_subject`"
 msgstr "`email_address`, `email_subject`"
 
-#: src/part3-distributed/process.md:423
+#: src/part3-distributed/process.md:428
 #: src/part4-administration/cli-admin.md:365
 msgid "`radius_username`, `radius_mac`, `radius_attribute`, `radius_compound`"
 msgstr "`radius_username`, `radius_mac`, `radius_attribute`, `radius_compound`"
 
-#: src/part3-distributed/process.md:424
+#: src/part3-distributed/process.md:429
 msgid "`10.0.1.0/24`"
 msgstr "`10.0.1.0/24`"
 
-#: src/part3-distributed/process.md:424
+#: src/part3-distributed/process.md:429
 #: src/part4-administration/cli-admin.md:366
 msgid "`ip_address`, `bpf`"
 msgstr "`ip_address`, `bpf`"
 
-#: src/part3-distributed/process.md:426
+#: src/part3-distributed/process.md:431
 msgid ""
 "For the complete list of filter types, wildcard patterns, and matching "
 "details, see [Appendix E: Filter Type Reference](../appendices/filter-"
@@ -17797,11 +17829,11 @@ msgstr ""
 "Abgleichsdetails finden Sie in [Anhang E: Filtertypenreferenz](../appendices/"
 "filter-reference.md)."
 
-#: src/part3-distributed/process.md:428
+#: src/part3-distributed/process.md:433
 msgid "Filter Distribution"
 msgstr "Filterverteilung"
 
-#: src/part3-distributed/process.md:430
+#: src/part3-distributed/process.md:435
 msgid ""
 "When filters are loaded, the processor automatically distributes them to all "
 "connected hunters. Hunters receive filter updates via gRPC streaming and "
@@ -17811,12 +17843,12 @@ msgstr ""
 "verbundenen Hunter. Diese empfangen Filteraktualisierungen per gRPC-"
 "Streaming und wenden sie bei ihrer lokalen Paketverarbeitung an."
 
-#: src/part3-distributed/process.md:432
+#: src/part3-distributed/process.md:437
 msgid "For live changes, use the administration commands:"
 msgstr ""
 "Verwenden Sie für Änderungen im laufenden Betrieb die Administrationsbefehle:"
 
-#: src/part3-distributed/process.md:447
+#: src/part3-distributed/process.md:452
 msgid ""
 "The YAML filter file remains useful for startup state and batch import, but "
 "routine filter updates do not require a processor restart."
@@ -17824,15 +17856,15 @@ msgstr ""
 "Die YAML-Filterdatei bleibt für Startzustand und Sammelimport nützlich. "
 "Reguläre Filteränderungen benötigen jedoch keinen Prozessorneustart."
 
-#: src/part3-distributed/process.md:449
+#: src/part3-distributed/process.md:454
 msgid "Advanced Topologies"
 msgstr "Erweiterte Topologien"
 
-#: src/part3-distributed/process.md:451
+#: src/part3-distributed/process.md:456
 msgid "Hierarchical Mode"
 msgstr "Hierarchischer Modus"
 
-#: src/part3-distributed/process.md:453
+#: src/part3-distributed/process.md:458
 msgid ""
 "Processors can forward traffic to upstream processors, creating multi-tier "
 "architectures:"
@@ -17840,19 +17872,19 @@ msgstr ""
 "Prozessoren können Verkehr an übergeordnete Prozessoren weiterleiten und so "
 "mehrstufige Architekturen bilden:"
 
-#: src/part3-distributed/process.md:455
+#: src/part3-distributed/process.md:460
 msgid "Edge processor, which receives from hunters and forwards to regional:"
 msgstr "Edge-Prozessor, der von Huntern empfängt und regional weiterleitet:"
 
-#: src/part3-distributed/process.md:465
+#: src/part3-distributed/process.md:470
 msgid "Regional processor, which receives from edge and forwards to central:"
 msgstr "Regionaler Prozessor, der vom Edge empfängt und zentral weiterleitet:"
 
-#: src/part3-distributed/process.md:475
+#: src/part3-distributed/process.md:480
 msgid "Central processor for final aggregation:"
 msgstr "Zentraler Prozessor für die abschließende Aggregation:"
 
-#: src/part3-distributed/process.md:502
+#: src/part3-distributed/process.md:507
 msgid ""
 "Each processor in the chain can write PCAP locally in addition to forwarding "
 "upstream."
@@ -17860,7 +17892,7 @@ msgstr ""
 "Jeder Prozessor der Kette kann zusätzlich zur Upstream-Weiterleitung lokal "
 "PCAP schreiben."
 
-#: src/part3-distributed/process.md:504
+#: src/part3-distributed/process.md:509
 msgid ""
 "Packet forwarding is the compatibility default. To relay normalized events "
 "with a recoverable per-hop admission boundary, configure each non-terminal "
@@ -17871,7 +17903,7 @@ msgstr ""
 "weiterzuleiten, konfigurieren Sie jeden nicht terminalen Prozessor "
 "ausdrücklich:"
 
-#: src/part3-distributed/process.md:518
+#: src/part3-distributed/process.md:523
 msgid ""
 "The relay preserves the originating producer identity and sequence. Reliable "
 "mode retains unacknowledged batches in the event spool; memory-only mode can "
@@ -17884,11 +17916,11 @@ msgstr ""
 "verlieren. Der Rückfall auf Pakete ist deaktiviert, sofern `--event-fallback-"
 "to-packets` nicht ausdrücklich gesetzt ist."
 
-#: src/part3-distributed/process.md:523 src/part3-distributed/tap.md:65
+#: src/part3-distributed/process.md:528 src/part3-distributed/tap.md:65
 msgid "Operating the reliable upstream event spool"
 msgstr "Den zuverlässigen Upstream-Ereignis-Spool betreiben"
 
-#: src/part3-distributed/process.md:525
+#: src/part3-distributed/process.md:530
 msgid ""
 "Give each processor its own spool directory and monitor both its configured "
 "limit and filesystem free space. Encoded record payloads are limited to 4 "
@@ -17910,7 +17942,7 @@ msgstr ""
 "Wiederherstellung](../part4-administration/operations.md#event-spool-storage-"
 "and-recovery)."
 
-#: src/part3-distributed/process.md:536
+#: src/part3-distributed/process.md:541
 msgid ""
 "Expose aggregated traffic from all connected hunters on a virtual network "
 "interface, enabling integration with third-party tools:"
@@ -17918,19 +17950,19 @@ msgstr ""
 "Stellen Sie den aggregierten Verkehr aller verbundenen Hunter auf einer "
 "virtuellen Netzwerkschnittstelle bereit, um externe Werkzeuge anzubinden:"
 
-#: src/part3-distributed/process.md:538
+#: src/part3-distributed/process.md:543
 msgid "Start a processor with a virtual interface:"
 msgstr "Prozessor mit virtueller Schnittstelle starten:"
 
-#: src/part3-distributed/process.md:547
+#: src/part3-distributed/process.md:552
 msgid "Monitor the interface with Wireshark:"
 msgstr "Schnittstelle mit Wireshark überwachen:"
 
-#: src/part3-distributed/process.md:555
+#: src/part3-distributed/process.md:560
 msgid "Alternatively, run an IDS on the aggregated stream:"
 msgstr "Alternativ ein IDS auf dem aggregierten Stream betreiben:"
 
-#: src/part3-distributed/process.md:563
+#: src/part3-distributed/process.md:568
 msgid ""
 "Virtual interface flags: `--virtual-interface`, `--vif-name` (default: "
 "`lc0`), `--vif-type` (tap/tun), `--vif-buffer-size`."
@@ -17938,16 +17970,16 @@ msgstr ""
 "Flags für virtuelle Schnittstellen: `--virtual-interface`, `--vif-name` "
 "(Standard: `lc0`), `--vif-type` (tap/tun), `--vif-buffer-size`."
 
-#: src/part3-distributed/process.md:565
+#: src/part3-distributed/process.md:570
 msgid "Requires `CAP_NET_ADMIN` capability."
 msgstr "Benötigt die Capability `CAP_NET_ADMIN`."
 
-#: src/part3-distributed/process.md:569
+#: src/part3-distributed/process.md:574
 msgid "All processor flags can be set in `~/.config/lippycat/config.yaml`:"
 msgstr ""
 "Alle Prozessor-Flags lassen sich in `~/.config/lippycat/config.yaml` setzen:"
 
-#: src/part3-distributed/process.md:606
+#: src/part3-distributed/process.md:611
 msgid ""
 "For production deployment procedures (systemd services, monitoring, health "
 "checks), see [Chapter 12: Operations Runbook](../part4-administration/"

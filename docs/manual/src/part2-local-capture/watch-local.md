@@ -291,7 +291,6 @@ Press `Alt+4` to view and modify capture settings:
 
 - Interface selection
 - BPF filter configuration
-- Toggle theme with `t`
 
 ### Help Tab {#help-tab}
 

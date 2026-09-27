@@ -786,7 +786,6 @@ Settings for `lc watch`. See [Interactive Capture with `lc watch`](../part2-loca
 | `watch.offline.max_record_bytes` | integer | `8388608` (8 MiB)      | Positive maximum encoded packet record size, no larger than cache or disk budgets; flag `--offline-max-record-bytes`.             |
 | `watch.offline.max_sources`      | integer | `64`                   | Simultaneous offline source files, 1–64; flag `--offline-max-sources`.                                                            |
 | `watch.max_calls`                | integer | `5000`                 | Maximum VoIP calls to keep in memory.                                                                                             |
-| `watch.theme`                    | string  | `""`                   | TUI color theme (e.g., `"dark"`, `"light"`).                                                                                      |
 | `watch.file.tls_keylog`          | string  | `""`                   | TLS key log file for PCAP file analysis.                                                                                          |
 | `watch.tls_decryption_enabled`   | boolean | `false`                | Enable TLS decryption in TUI (set automatically).                                                                                 |
 | `watch.tls_keylog`               | string  | `""`                   | Path to SSLKEYLOGFILE for TLS decryption.                                                                                         |

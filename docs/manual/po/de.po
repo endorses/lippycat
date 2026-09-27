@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: lippycat 🫦🐱 Manual\n"
-"POT-Creation-Date: 2026-09-27T14:05:56+02:00\n"
+"POT-Creation-Date: 2026-09-27T14:28:45+02:00\n"
 "PO-Revision-Date: 2026-09-27 10:56+0000\n"
 "Last-Translator: lippycat contributors\n"
 "Language-Team: German\n"
@@ -434,8 +434,8 @@ msgstr "Protokollqualifikatoren"
 #: src/appendices/config-reference.md:746
 #: src/appendices/config-reference.md:762
 #: src/appendices/config-reference.md:779
-#: src/appendices/config-reference.md:814
-#: src/appendices/config-reference.md:829 src/appendices/filter-reference.md:10
+#: src/appendices/config-reference.md:813
+#: src/appendices/config-reference.md:828 src/appendices/filter-reference.md:10
 #: src/part2-local-capture/sniff.md:216 src/part2-local-capture/sniff.md:237
 #: src/part2-local-capture/sniff.md:261 src/part2-local-capture/sniff.md:289
 #: src/part2-local-capture/sniff.md:323 src/part2-local-capture/sniff.md:391
@@ -1494,8 +1494,8 @@ msgstr "Diese Optionen gelten für alle Befehle."
 #: src/appendices/config-reference.md:746
 #: src/appendices/config-reference.md:762
 #: src/appendices/config-reference.md:779
-#: src/appendices/config-reference.md:814
-#: src/appendices/config-reference.md:829 src/part2-local-capture/sniff.md:216
+#: src/appendices/config-reference.md:813
+#: src/appendices/config-reference.md:828 src/part2-local-capture/sniff.md:216
 #: src/part2-local-capture/sniff.md:237 src/part2-local-capture/sniff.md:261
 #: src/part2-local-capture/sniff.md:289 src/part2-local-capture/sniff.md:323
 #: src/part2-local-capture/sniff.md:391 src/part2-local-capture/sniff.md:533
@@ -1639,8 +1639,8 @@ msgstr "Kurzform"
 #: src/appendices/config-reference.md:746
 #: src/appendices/config-reference.md:762
 #: src/appendices/config-reference.md:779
-#: src/appendices/config-reference.md:814
-#: src/appendices/config-reference.md:829 src/appendices/filter-reference.md:10
+#: src/appendices/config-reference.md:813
+#: src/appendices/config-reference.md:828 src/appendices/filter-reference.md:10
 #: src/appendices/filter-reference.md:81
 #: src/part5-advanced/lawful-interception.md:388
 #: src/part5-advanced/lawful-interception.md:454
@@ -2039,17 +2039,16 @@ msgstr "`-c`"
 #: src/appendices/config-reference.md:782
 #: src/appendices/config-reference.md:783
 #: src/appendices/config-reference.md:789
-#: src/appendices/config-reference.md:790
-#: src/appendices/config-reference.md:792
+#: src/appendices/config-reference.md:791
+#: src/appendices/config-reference.md:793
 #: src/appendices/config-reference.md:794
 #: src/appendices/config-reference.md:795
-#: src/appendices/config-reference.md:796
-#: src/appendices/config-reference.md:798
-#: src/appendices/config-reference.md:800
-#: src/appendices/config-reference.md:816
+#: src/appendices/config-reference.md:797
+#: src/appendices/config-reference.md:799
+#: src/appendices/config-reference.md:815
+#: src/appendices/config-reference.md:817
 #: src/appendices/config-reference.md:818
 #: src/appendices/config-reference.md:819
-#: src/appendices/config-reference.md:820
 msgid "string"
 msgstr "string"
 
@@ -2278,13 +2277,13 @@ msgstr "`-p`"
 #: src/appendices/config-reference.md:765
 #: src/appendices/config-reference.md:766
 #: src/appendices/config-reference.md:772
-#: src/appendices/config-reference.md:791
-#: src/appendices/config-reference.md:793
-#: src/appendices/config-reference.md:797
-#: src/appendices/config-reference.md:799
-#: src/appendices/config-reference.md:817
-#: src/appendices/config-reference.md:821
-#: src/appendices/config-reference.md:831 src/part2-local-capture/sniff.md:221
+#: src/appendices/config-reference.md:790
+#: src/appendices/config-reference.md:792
+#: src/appendices/config-reference.md:796
+#: src/appendices/config-reference.md:798
+#: src/appendices/config-reference.md:816
+#: src/appendices/config-reference.md:820
+#: src/appendices/config-reference.md:830 src/part2-local-capture/sniff.md:221
 #: src/part2-local-capture/sniff.md:269 src/part2-local-capture/sniff.md:299
 #: src/part2-local-capture/sniff.md:396 src/part2-local-capture/sniff.md:400
 #: src/part2-local-capture/sniff.md:401 src/part2-local-capture/sniff.md:535
@@ -3780,7 +3779,7 @@ msgid "`5m`"
 msgstr "`5m`"
 
 #: src/appendices/command-reference.md:281
-#: src/part2-local-capture/watch-local.md:302
+#: src/part2-local-capture/watch-local.md:301
 msgid "Commands"
 msgstr "Befehle"
 
@@ -4657,7 +4656,7 @@ msgstr "`--batch-size`"
 #: src/appendices/config-reference.md:609
 #: src/appendices/config-reference.md:626
 #: src/appendices/config-reference.md:750
-#: src/appendices/config-reference.md:801
+#: src/appendices/config-reference.md:800
 #: src/part2-local-capture/watch-local.md:52
 msgid "`100`"
 msgstr "`100`"
@@ -6295,8 +6294,8 @@ msgstr ""
 #: src/appendices/config-reference.md:746
 #: src/appendices/config-reference.md:762
 #: src/appendices/config-reference.md:779
-#: src/appendices/config-reference.md:814
-#: src/appendices/config-reference.md:829
+#: src/appendices/config-reference.md:813
+#: src/appendices/config-reference.md:828
 #: src/part2-local-capture/watch-local.md:71
 #: src/part2-local-capture/watch-local.md:84
 #: src/part2-local-capture/watch-local.md:119
@@ -6358,10 +6357,10 @@ msgstr "`ROLE.filter_store.read_keys`"
 #: src/appendices/config-reference.md:75 src/appendices/config-reference.md:79
 #: src/appendices/config-reference.md:82 src/appendices/config-reference.md:87
 #: src/appendices/config-reference.md:592
+#: src/appendices/config-reference.md:801
 #: src/appendices/config-reference.md:802
 #: src/appendices/config-reference.md:803
-#: src/appendices/config-reference.md:804
-#: src/appendices/config-reference.md:832
+#: src/appendices/config-reference.md:831
 msgid "`[]`"
 msgstr "`[]`"
 
@@ -6660,7 +6659,7 @@ msgstr "`pcap_buffer_size`"
 #: src/appendices/config-reference.md:786
 #: src/appendices/config-reference.md:787
 #: src/appendices/config-reference.md:788
-#: src/appendices/config-reference.md:801
+#: src/appendices/config-reference.md:800
 msgid "integer"
 msgstr "Ganzzahl"
 
@@ -6771,13 +6770,13 @@ msgstr "`promiscuous`"
 #: src/appendices/config-reference.md:765
 #: src/appendices/config-reference.md:766
 #: src/appendices/config-reference.md:772
-#: src/appendices/config-reference.md:791
-#: src/appendices/config-reference.md:793
-#: src/appendices/config-reference.md:797
-#: src/appendices/config-reference.md:799
-#: src/appendices/config-reference.md:817
-#: src/appendices/config-reference.md:821
-#: src/appendices/config-reference.md:831
+#: src/appendices/config-reference.md:790
+#: src/appendices/config-reference.md:792
+#: src/appendices/config-reference.md:796
+#: src/appendices/config-reference.md:798
+#: src/appendices/config-reference.md:816
+#: src/appendices/config-reference.md:820
+#: src/appendices/config-reference.md:830
 msgid "boolean"
 msgstr "boolescher Wert"
 
@@ -7010,16 +7009,15 @@ msgstr ""
 #: src/appendices/config-reference.md:770
 #: src/appendices/config-reference.md:771
 #: src/appendices/config-reference.md:789
-#: src/appendices/config-reference.md:790
-#: src/appendices/config-reference.md:792
+#: src/appendices/config-reference.md:791
+#: src/appendices/config-reference.md:793
 #: src/appendices/config-reference.md:794
 #: src/appendices/config-reference.md:795
-#: src/appendices/config-reference.md:796
-#: src/appendices/config-reference.md:798
-#: src/appendices/config-reference.md:816
+#: src/appendices/config-reference.md:797
+#: src/appendices/config-reference.md:815
+#: src/appendices/config-reference.md:817
 #: src/appendices/config-reference.md:818
 #: src/appendices/config-reference.md:819
-#: src/appendices/config-reference.md:820
 msgid "`\"\"`"
 msgstr "`\"\"`"
 
@@ -7055,10 +7053,10 @@ msgstr "`logs.streams`"
 #: src/appendices/config-reference.md:368
 #: src/appendices/config-reference.md:592
 #: src/appendices/config-reference.md:604
+#: src/appendices/config-reference.md:801
 #: src/appendices/config-reference.md:802
 #: src/appendices/config-reference.md:803
-#: src/appendices/config-reference.md:804
-#: src/appendices/config-reference.md:832
+#: src/appendices/config-reference.md:831
 msgid "list"
 msgstr "Liste"
 
@@ -7778,7 +7776,7 @@ msgstr ""
 #: src/appendices/config-reference.md:457
 #: src/appendices/config-reference.md:733
 #: src/appendices/config-reference.md:749
-#: src/appendices/config-reference.md:800
+#: src/appendices/config-reference.md:799
 msgid "`\"auto\"`"
 msgstr "`\"auto\"`"
 
@@ -10560,143 +10558,135 @@ msgid "`watch.max_calls`"
 msgstr "`watch.max_calls`"
 
 #: src/appendices/config-reference.md:789
-msgid "TUI color theme (e.g., `\"dark\"`, `\"light\"`)."
-msgstr "TUI-Farbschema (z. B. `\"dark\"`, `\"light\"`)."
-
-#: src/appendices/config-reference.md:789
-msgid "`watch.theme`"
-msgstr "`watch.theme`"
-
-#: src/appendices/config-reference.md:790
 msgid "TLS key log file for PCAP file analysis."
 msgstr "TLS-Schlüssellogdatei für PCAP-Dateianalyse."
 
-#: src/appendices/config-reference.md:790
+#: src/appendices/config-reference.md:789
 msgid "`watch.file.tls_keylog`"
 msgstr "`watch.file.tls_keylog`"
 
-#: src/appendices/config-reference.md:791
+#: src/appendices/config-reference.md:790
 msgid "Enable TLS decryption in TUI (set automatically)."
 msgstr "TLS-Entschlüsselung in der TUI aktivieren (automatisch gesetzt)."
 
-#: src/appendices/config-reference.md:791
+#: src/appendices/config-reference.md:790
 msgid "`watch.tls_decryption_enabled`"
 msgstr "`watch.tls_decryption_enabled`"
 
-#: src/appendices/config-reference.md:792
+#: src/appendices/config-reference.md:791
 msgid "Path to SSLKEYLOGFILE for TLS decryption."
 msgstr "Pfad zu SSLKEYLOGFILE für TLS-Entschlüsselung."
 
-#: src/appendices/config-reference.md:792
+#: src/appendices/config-reference.md:791
 msgid "`watch.tls_keylog`"
 msgstr "`watch.tls_keylog`"
 
-#: src/appendices/config-reference.md:793
+#: src/appendices/config-reference.md:792
 msgid "Enable TLS for remote connections."
 msgstr "TLS für entfernte Verbindungen aktivieren."
 
-#: src/appendices/config-reference.md:793
+#: src/appendices/config-reference.md:792
 msgid "`watch.tls.enabled`"
 msgstr "`watch.tls.enabled`"
 
-#: src/appendices/config-reference.md:794
-#: src/appendices/config-reference.md:820
+#: src/appendices/config-reference.md:793
+#: src/appendices/config-reference.md:819
 msgid "CA certificate for server verification."
 msgstr "CA-Zertifikat zur Serverprüfung."
 
-#: src/appendices/config-reference.md:794
+#: src/appendices/config-reference.md:793
 msgid "`watch.tls.ca_file`"
 msgstr "`watch.tls.ca_file`"
 
-#: src/appendices/config-reference.md:795
+#: src/appendices/config-reference.md:794
 msgid "Client certificate for mTLS."
 msgstr "Client-Zertifikat für mTLS."
 
-#: src/appendices/config-reference.md:795
+#: src/appendices/config-reference.md:794
 msgid "`watch.tls.cert_file`"
 msgstr "`watch.tls.cert_file`"
 
-#: src/appendices/config-reference.md:796
+#: src/appendices/config-reference.md:795
 msgid "Client key for mTLS."
 msgstr "Client-Schlüssel für mTLS."
 
-#: src/appendices/config-reference.md:796
+#: src/appendices/config-reference.md:795
 msgid "`watch.tls.key_file`"
 msgstr "`watch.tls.key_file`"
 
-#: src/appendices/config-reference.md:797
+#: src/appendices/config-reference.md:796
 msgid "Skip TLS certificate verification (insecure)."
 msgstr "TLS-Zertifikatsprüfung überspringen (unsicher)."
 
-#: src/appendices/config-reference.md:797
+#: src/appendices/config-reference.md:796
 msgid "`watch.tls.skip_verify`"
 msgstr "`watch.tls.skip_verify`"
 
-#: src/appendices/config-reference.md:798
+#: src/appendices/config-reference.md:797
 msgid "Override server name for TLS verification."
 msgstr "Servernamen für TLS-Prüfung überschreiben."
 
-#: src/appendices/config-reference.md:798
+#: src/appendices/config-reference.md:797
 msgid "`watch.tls.server_name_override`"
 msgstr "`watch.tls.server_name_override`"
 
-#: src/appendices/config-reference.md:799
+#: src/appendices/config-reference.md:798
 msgid "Enable GPU acceleration in TUI mode."
 msgstr "GPU-Beschleunigung im TUI-Modus aktivieren."
 
-#: src/appendices/config-reference.md:799
+#: src/appendices/config-reference.md:798
 msgid "`watch.gpu.enabled`"
 msgstr "`watch.gpu.enabled`"
 
-#: src/appendices/config-reference.md:800
+#: src/appendices/config-reference.md:799
 msgid "GPU backend for TUI."
 msgstr "GPU-Backend für die TUI."
 
-#: src/appendices/config-reference.md:800
+#: src/appendices/config-reference.md:799
 msgid "`watch.gpu.backend`"
 msgstr "`watch.gpu.backend`"
 
-#: src/appendices/config-reference.md:801
+#: src/appendices/config-reference.md:800
 msgid "GPU batch size."
 msgstr "GPU-Batch-Größe."
 
-#: src/appendices/config-reference.md:801
+#: src/appendices/config-reference.md:800
 msgid "`watch.gpu.batch_size`"
 msgstr "`watch.gpu.batch_size`"
 
-#: src/appendices/config-reference.md:802
+#: src/appendices/config-reference.md:801
 msgid "History of previously connected remote nodes (managed automatically)."
 msgstr "Verlauf zuvor verbundener entfernter Knoten (automatisch verwaltet)."
 
-#: src/appendices/config-reference.md:802
+#: src/appendices/config-reference.md:801
 msgid "`watch.node_history`"
 msgstr "`watch.node_history`"
 
-#: src/appendices/config-reference.md:803
+#: src/appendices/config-reference.md:802
 msgid "History of packet filter strings (managed automatically)."
 msgstr "Verlauf von Paketfilterzeichenketten (automatisch verwaltet)."
 
-#: src/appendices/config-reference.md:803
+#: src/appendices/config-reference.md:802
 msgid "`watch.filter_history`"
 msgstr "`watch.filter_history`"
 
-#: src/appendices/config-reference.md:804
+#: src/appendices/config-reference.md:803
 msgid "History of call filter strings (managed automatically)."
 msgstr "Verlauf von Anruffilterzeichenketten (automatisch verwaltet)."
 
-#: src/appendices/config-reference.md:804
+#: src/appendices/config-reference.md:803
 msgid "`watch.call_filter_history`"
 msgstr "`watch.call_filter_history`"
 
-#: src/appendices/config-reference.md:808
+#: src/appendices/config-reference.md:807
 msgid "Remote Connection Settings"
 msgstr "Einstellungen für entfernte Verbindungen"
 
-#: src/appendices/config-reference.md:810
+#: src/appendices/config-reference.md:809
 msgid "`remote` — Remote TUI Connection"
 msgstr "`remote` — Entfernte TUI-Verbindung"
 
-#: src/appendices/config-reference.md:812
+#: src/appendices/config-reference.md:811
 msgid ""
 "Settings for connecting `lc watch remote` to a processor or tap node. See "
 "[Remote TUI Monitoring](../part4-administration/watch-remote.md)."
@@ -10705,67 +10695,67 @@ msgstr ""
 "Tap-Knoten. Siehe [Überwachung mit entfernter TUI](../part4-administration/"
 "watch-remote.md)."
 
-#: src/appendices/config-reference.md:816
+#: src/appendices/config-reference.md:815
 msgid "Processor address to connect to."
 msgstr "Prozessoradresse für die Verbindung."
 
-#: src/appendices/config-reference.md:816
+#: src/appendices/config-reference.md:815
 msgid "`remote.processor`"
 msgstr "`remote.processor`"
 
-#: src/appendices/config-reference.md:817
+#: src/appendices/config-reference.md:816
 msgid "Connect without TLS (blocked when `LIPPYCAT_PRODUCTION=true`)."
 msgstr "Ohne TLS verbinden (bei `LIPPYCAT_PRODUCTION=true` gesperrt)."
 
-#: src/appendices/config-reference.md:817
+#: src/appendices/config-reference.md:816
 msgid "`remote.insecure`"
 msgstr "`remote.insecure`"
 
-#: src/appendices/config-reference.md:818
+#: src/appendices/config-reference.md:817
 msgid "Client TLS certificate (for mTLS)."
 msgstr "TLS-Client-Zertifikat (für mTLS)."
 
-#: src/appendices/config-reference.md:818
+#: src/appendices/config-reference.md:817
 msgid "`remote.tls.cert`"
 msgstr "`remote.tls.cert`"
 
-#: src/appendices/config-reference.md:819
+#: src/appendices/config-reference.md:818
 msgid "Client TLS private key."
 msgstr "Privater TLS-Client-Schlüssel."
 
-#: src/appendices/config-reference.md:819
+#: src/appendices/config-reference.md:818
 msgid "`remote.tls.key`"
 msgstr "`remote.tls.key`"
 
-#: src/appendices/config-reference.md:820
+#: src/appendices/config-reference.md:819
 msgid "`remote.tls.ca`"
 msgstr "`remote.tls.ca`"
 
-#: src/appendices/config-reference.md:821
+#: src/appendices/config-reference.md:820
 msgid "Skip TLS certificate verification."
 msgstr "TLS-Zertifikatsprüfung überspringen."
 
-#: src/appendices/config-reference.md:821
+#: src/appendices/config-reference.md:820
 msgid "`remote.tls.skip_verify`"
 msgstr "`remote.tls.skip_verify`"
 
-#: src/appendices/config-reference.md:825
+#: src/appendices/config-reference.md:824
 msgid "Security Settings"
 msgstr "Sicherheitseinstellungen"
 
-#: src/appendices/config-reference.md:827
+#: src/appendices/config-reference.md:826
 msgid "`security` — API Security"
 msgstr "`security` — API-Sicherheit"
 
-#: src/appendices/config-reference.md:831
+#: src/appendices/config-reference.md:830
 msgid "Enable API key authentication for gRPC connections."
 msgstr "API-Schlüssel-Authentifizierung für gRPC-Verbindungen aktivieren."
 
-#: src/appendices/config-reference.md:831
+#: src/appendices/config-reference.md:830
 msgid "`security.api_keys.enabled`"
 msgstr "`security.api_keys.enabled`"
 
-#: src/appendices/config-reference.md:832
+#: src/appendices/config-reference.md:831
 msgid ""
 "Configured API keys. Each entry includes `key`, `name`, `role`, and optional "
 "`description`. Clients send the key as gRPC metadata `x-api-key`."
@@ -10774,25 +10764,25 @@ msgstr ""
 "optional `description`. Clients senden den Schlüssel als gRPC-Metadatum `x-"
 "api-key`."
 
-#: src/appendices/config-reference.md:832
+#: src/appendices/config-reference.md:831
 msgid "`security.api_keys.keys`"
 msgstr "`security.api_keys.keys`"
 
-#: src/appendices/config-reference.md:836
+#: src/appendices/config-reference.md:835
 msgid "Example Configuration Files"
 msgstr "Beispielkonfigurationsdateien"
 
-#: src/appendices/config-reference.md:838
+#: src/appendices/config-reference.md:837
 msgid "Minimal: Local VoIP Capture"
 msgstr "Minimal: Lokale VoIP-Erfassung"
 
-#: src/appendices/config-reference.md:840
+#: src/appendices/config-reference.md:839
 msgid "A simple configuration for capturing VoIP traffic on a single machine:"
 msgstr ""
 "Eine einfache Konfiguration zur Erfassung von VoIP-Verkehr auf einem "
 "einzelnen Rechner:"
 
-#: src/appendices/config-reference.md:850
+#: src/appendices/config-reference.md:849
 msgid ""
 "Use with: `sudo lc sniff voip -i eth0` or `sudo lc tap voip -i eth0 --"
 "insecure`"
@@ -10800,11 +10790,11 @@ msgstr ""
 "Verwendung mit: `sudo lc sniff voip -i eth0` oder `sudo lc tap voip -i eth0 "
 "--insecure`"
 
-#: src/appendices/config-reference.md:852
+#: src/appendices/config-reference.md:851
 msgid "Production: Distributed Deployment"
 msgstr "Produktion: Verteilte Bereitstellung"
 
-#: src/appendices/config-reference.md:854
+#: src/appendices/config-reference.md:853
 msgid ""
 "A processor node in a production distributed deployment with TLS, per-call "
 "PCAP, and command hooks:"
@@ -10812,11 +10802,11 @@ msgstr ""
 "Ein Prozessor-Knoten in einer verteilten Produktionsumgebung mit TLS, PCAP "
 "pro Anruf und Befehls-Hooks:"
 
-#: src/appendices/config-reference.md:885
+#: src/appendices/config-reference.md:884
 msgid "High-Performance: Edge Hunter"
 msgstr "Hohe Leistung: Hunter am Netzwerkrand"
 
-#: src/appendices/config-reference.md:887
+#: src/appendices/config-reference.md:886
 msgid ""
 "A hunter node optimized for high-throughput VoIP capture with GPU "
 "acceleration:"
@@ -10824,7 +10814,7 @@ msgstr ""
 "Ein für VoIP-Erfassung mit hohem Durchsatz optimierter Hunter-Knoten mit GPU-"
 "Beschleunigung:"
 
-#: src/appendices/config-reference.md:922
+#: src/appendices/config-reference.md:921
 msgid ""
 "For more on performance tuning, see [Performance Optimization](../part5-"
 "advanced/performance.md). For TLS certificate setup, see [Security](../part5-"
@@ -15181,31 +15171,27 @@ msgstr "Schnittstellenauswahl"
 msgid "BPF filter configuration"
 msgstr "BPF-Filterkonfiguration"
 
-#: src/part2-local-capture/watch-local.md:294
-msgid "Toggle theme with `t`"
-msgstr "Farbschema mit `t` wechseln"
-
-#: src/part2-local-capture/watch-local.md:296
+#: src/part2-local-capture/watch-local.md:295
 msgid "Help Tab"
 msgstr "Help-Tab"
 
-#: src/part2-local-capture/watch-local.md:298
+#: src/part2-local-capture/watch-local.md:297
 msgid "Press `?` to open the searchable help system:"
 msgstr "Drücken Sie `?`, um das durchsuchbare Hilfesystem zu öffnen:"
 
-#: src/part2-local-capture/watch-local.md:300
+#: src/part2-local-capture/watch-local.md:299
 msgid "Keybindings reference"
 msgstr "Tastenkürzelreferenz"
 
-#: src/part2-local-capture/watch-local.md:301
+#: src/part2-local-capture/watch-local.md:300
 msgid "Filter syntax"
 msgstr "Filtersyntax"
 
-#: src/part2-local-capture/watch-local.md:303
+#: src/part2-local-capture/watch-local.md:302
 msgid "Workflows"
 msgstr "Arbeitsabläufe"
 
-#: src/part2-local-capture/watch-local.md:305
+#: src/part2-local-capture/watch-local.md:304
 msgid ""
 "Search with `/`, navigate results with `n`/`N`. Jump to sections with `1`\\-"
 "`4`."
@@ -15213,11 +15199,11 @@ msgstr ""
 "Suchen Sie mit `/` und navigieren Sie mit `n`/`N` durch die Ergebnisse. "
 "Springen Sie mit `1`\\-`4` zu Abschnitten."
 
-#: src/part2-local-capture/watch-local.md:307
+#: src/part2-local-capture/watch-local.md:306
 msgid "Toast Notifications"
 msgstr "Kurzbenachrichtigungen"
 
-#: src/part2-local-capture/watch-local.md:309
+#: src/part2-local-capture/watch-local.md:308
 msgid ""
 "Status messages appear as toast notifications at the bottom of the screen, "
 "auto-dismissing after 2-5 seconds. Types include success (green), error "
@@ -15230,11 +15216,11 @@ msgstr ""
 "Meldungen ersetzen einander — beispielsweise ersetzt „Resumed“ die Meldung "
 "„Paused“."
 
-#: src/part2-local-capture/watch-local.md:311
+#: src/part2-local-capture/watch-local.md:310
 msgid "Saving Packets"
 msgstr "Pakete speichern"
 
-#: src/part2-local-capture/watch-local.md:313
+#: src/part2-local-capture/watch-local.md:312
 msgid ""
 "Press `w` on the Capture tab to save displayed packets to a PCAP file. A "
 "file dialog opens to choose the output path. Press `w` again to stop "
@@ -15244,7 +15230,7 @@ msgstr ""
 "speichern. Ein Dateidialog öffnet sich zur Wahl des Ausgabepfads. Drücken "
 "Sie erneut `w`, um das Schreiben des Streams in die Datei zu stoppen."
 
-#: src/part2-local-capture/watch-local.md:317
+#: src/part2-local-capture/watch-local.md:316
 msgid ""
 "Now that you're comfortable with local capture (CLI and TUI), you're ready "
 "to learn about distributed capture in [Part III](../part3-distributed/"

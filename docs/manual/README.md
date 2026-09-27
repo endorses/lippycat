@@ -103,6 +103,14 @@ die Paketerfassung”, but “Öffnen Sie den gespeicherten Mitschnitt”. Avoid
 “gespeicherte Erfassungen” and “Erfassungsdateien”. In an already clear context,
 “Erfassung” is sufficient for the process.
 
+Use **Tab** and **Tabs**, not “Registerkarte” or “Registerkarten”. The TUI is
+English-only: retain its visible tab names (**Capture**, **Nodes**,
+**Statistics**, **Settings**, and **Help**), including the mode-specific labels
+**Live Capture**, **Offline Capture**, and **Remote Capture**, and the short
+label **Stats**. Write natural German compounds such as “Capture-Tab” and
+“Nodes-Tab”. Preserve names of sub-views such as **Overview** and **Distributed**
+when referring to their UI labels.
+
 Translate **operational** according to the technical context. For the section
 covering setup, certificate rotation, and logging, translate **Operational
 Considerations** as **Hinweise zu Einrichtung und Wartung**.

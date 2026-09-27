@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: lippycat 🫦🐱 Manual\n"
-"POT-Creation-Date: 2026-09-27T13:43:54+02:00\n"
+"POT-Creation-Date: 2026-09-27T14:05:56+02:00\n"
 "PO-Revision-Date: 2026-09-27 10:56+0000\n"
 "Last-Translator: lippycat contributors\n"
 "Language-Team: German\n"
@@ -14321,7 +14321,11 @@ msgstr "TUI-Aufbau"
 
 #: src/part2-local-capture/watch-local.md:57
 msgid "The interface is organized into five tabs:"
-msgstr "Die Oberfläche ist in fünf Registerkarten gegliedert:"
+msgstr ""
+"Die Oberfläche ist in fünf Tabs gegliedert. Die TUI ist englischsprachig; "
+"ihre Tab-Namen bleiben daher auch hier auf Englisch. Der Capture-Tab heißt "
+"je nach Modus Live Capture, Offline Capture oder Remote Capture; bei "
+"schmaleren Fenstern werden Capture und Stats als Kurzformen angezeigt:"
 
 #: src/part2-local-capture/watch-local.md:59
 msgid "Shortcut"
@@ -14329,11 +14333,11 @@ msgstr "Tastenkürzel"
 
 #: src/part2-local-capture/watch-local.md:59
 msgid "Tab"
-msgstr "Registerkarte"
+msgstr "Tab"
 
 #: src/part2-local-capture/watch-local.md:61
 msgid "Capture"
-msgstr "Erfassung"
+msgstr "Capture"
 
 #: src/part2-local-capture/watch-local.md:61
 msgid "Packets, calls, DNS queries, email, HTTP traffic"
@@ -14349,7 +14353,7 @@ msgstr "Verwaltung von Hunter-/Prozessor-Knoten"
 
 #: src/part2-local-capture/watch-local.md:62
 msgid "Nodes"
-msgstr "Knoten"
+msgstr "Nodes"
 
 #: src/part2-local-capture/watch-local.md:62
 msgid "`Alt+2`"
@@ -14361,7 +14365,7 @@ msgstr "Protokollverteilung, Verkehrsanalyse"
 
 #: src/part2-local-capture/watch-local.md:63
 msgid "Statistics"
-msgstr "Statistik"
+msgstr "Statistics"
 
 #: src/part2-local-capture/watch-local.md:63
 msgid "`Alt+3`"
@@ -14373,7 +14377,7 @@ msgstr "Erfassungskonfiguration"
 
 #: src/part2-local-capture/watch-local.md:64
 msgid "Settings"
-msgstr "Einstellungen"
+msgstr "Settings"
 
 #: src/part2-local-capture/watch-local.md:64
 msgid "`Alt+4`"
@@ -14382,7 +14386,7 @@ msgstr "`Alt+4`"
 #: src/part2-local-capture/watch-local.md:65
 #: src/part4-administration/watch-remote.md:133
 msgid "Help"
-msgstr "Hilfe"
+msgstr "Help"
 
 #: src/part2-local-capture/watch-local.md:65
 msgid "Searchable keybindings and workflows"
@@ -14398,7 +14402,7 @@ msgstr "Globale Tastenkürzel"
 
 #: src/part2-local-capture/watch-local.md:69
 msgid "These work on any tab:"
-msgstr "Diese funktionieren auf jeder Registerkarte:"
+msgstr "Diese funktionieren auf jedem Tab:"
 
 #: src/part2-local-capture/watch-local.md:71
 #: src/part2-local-capture/watch-local.md:84
@@ -14431,7 +14435,7 @@ msgstr "`p`"
 
 #: src/part2-local-capture/watch-local.md:75
 msgid "Next / previous tab"
-msgstr "Nächste/vorherige Registerkarte"
+msgstr "Nächster/vorheriger Tab"
 
 #: src/part2-local-capture/watch-local.md:75
 msgid "`Tab` / `Shift+Tab`"
@@ -14439,15 +14443,16 @@ msgstr "`Tab` / `Shift+Tab`"
 
 #: src/part2-local-capture/watch-local.md:76
 msgid "Jump to tab"
-msgstr "Zur Registerkarte springen"
+msgstr "Zum Tab springen"
 
 #: src/part2-local-capture/watch-local.md:76
+#: src/part4-administration/watch-remote.md:130
 msgid "`Alt+1` through `Alt+5`"
 msgstr "`Alt+1` bis `Alt+5`"
 
 #: src/part2-local-capture/watch-local.md:77
 msgid "Jump to Help tab"
-msgstr "Zur Hilferegisterkarte springen"
+msgstr "Zum Help-Tab springen"
 
 #: src/part2-local-capture/watch-local.md:77
 #: src/part4-administration/watch-remote.md:133
@@ -14466,13 +14471,12 @@ msgstr "`q` / `Ctrl+C`"
 
 #: src/part2-local-capture/watch-local.md:80
 msgid "Capture Tab Navigation"
-msgstr "Navigation in der Erfassungsregisterkarte"
+msgstr "Navigation im Capture-Tab"
 
 #: src/part2-local-capture/watch-local.md:82
 msgid "The Capture tab is the main view. Navigate with vim-style keys:"
 msgstr ""
-"Die Erfassungsregisterkarte ist die Hauptansicht. Navigieren Sie mit Tasten "
-"wie in vim:"
+"Der Capture-Tab ist die Hauptansicht. Navigieren Sie mit Tasten wie in vim:"
 
 #: src/part2-local-capture/watch-local.md:86
 msgid "Scroll down"
@@ -14584,9 +14588,8 @@ msgid ""
 "Press `/` on the Capture tab to enter filter mode. Type a filter expression "
 "and press `Enter` to apply."
 msgstr ""
-"Drücken Sie auf der Erfassungsregisterkarte `/`, um den Filtermodus zu "
-"öffnen. Geben Sie einen Filterausdruck ein und drücken Sie zum Anwenden "
-"`Enter`."
+"Drücken Sie im Capture-Tab `/`, um den Filtermodus zu öffnen. Geben Sie "
+"einen Filterausdruck ein und drücken Sie zum Anwenden `Enter`."
 
 #: src/part2-local-capture/watch-local.md:103
 msgid "**Filter types:**"
@@ -14847,7 +14850,7 @@ msgstr ""
 "filterbar und exportierbar. `watch.buffer_size` / `--buffer-size` begrenzt "
 "Live-/Remote-Paketringpuffer und die gespeicherte Ereignishistorie, nicht "
 "die Vollständigkeit der Offline-Pakete. Die Kopfzeile zeigt die Gesamtzahl "
-"der Pakete; Statistik trennt Gesamt- und Trefferzahlen von "
+"der Pakete; der Statistics-Tab trennt Gesamt- und Trefferzahlen von "
 "zwischengespeicherten Zeilen/Bytes und Index-Bytes. Der untere Bereich "
 "bleibt für Benachrichtigungen reserviert. Globale und gefilterte Statistiken "
 "umfassen den vollständigen Datensatz bzw. die vollständige Abfrage; "
@@ -14971,11 +14974,11 @@ msgid ""
 msgstr ""
 "Diese Flags überschreiben die [Konfigurationsschlüssel](../appendices/config-"
 "reference.md#watch--watch-tui-settings) unter `watch.offline.*`. Sie gelten "
-"auch beim Wechsel in den Offline-Modus über Einstellungen oder einen "
+"auch beim Wechsel in den Offline-Modus über den Settings-Tab oder einen "
 "Dateidialog. Verlassen Sie den Offline-Modus, bevor Sie Ressourcenbudgets "
-"ändern. Das Pufferfeld der Einstellungen betrifft Live-/Remote-"
-"Paketringpuffer und die gespeicherte Ereignishistorie; konfigurieren Sie den "
-"Offline-Speicher über die oben genannten Flags oder YAML-Schlüssel."
+"ändern. Das Pufferfeld im Settings-Tab betrifft Live-/Remote-Paketringpuffer "
+"und die gespeicherte Ereignishistorie; konfigurieren Sie den Offline-"
+"Speicher über die oben genannten Flags oder YAML-Schlüssel."
 
 #: src/part2-local-capture/watch-local.md:214
 msgid ""
@@ -15086,7 +15089,7 @@ msgstr "TUI-Funktionen"
 
 #: src/part2-local-capture/watch-local.md:260
 msgid "Statistics Tab"
-msgstr "Statistikregisterkarte"
+msgstr "Statistics-Tab"
 
 #: src/part2-local-capture/watch-local.md:262
 msgid "Press `Alt+3` to view real-time traffic statistics:"
@@ -15120,8 +15123,8 @@ msgstr ""
 "Detailkanal kann jedoch Pakete stichprobenartig auswählen, einen wartenden "
 "Detail-Batch verwerfen oder das älteste Paket aus dem ausstehenden "
 "Ringpuffer entfernen, damit die neuesten Diagnoseinformationen sichtbar "
-"bleiben. Die Statistikregisterkarte zeigt diese Schritte getrennt als "
-"**Sampled Out**, **Batch Queue Drops** und **Pending Evictions**. **Packets "
+"bleiben. Der Statistics-Tab zeigt diese Schritte getrennt als **Sampled "
+"Out**, **Batch Queue Drops** und **Pending Evictions**. **Packets "
 "Delivered** und der zugehörige Erhaltungsprozentsatz messen den "
 "durchgehenden Detailerhalt ab dem gültigen TUI-Eingang; sie messen weder die "
 "Integrität der Erfassung noch in PCAP geschriebene Pakete."
@@ -15158,11 +15161,11 @@ msgid ""
 "keys. Export statistics to JSON with `e`."
 msgstr ""
 "Wechseln Sie mit `v` oder den Tasten `1`/`2` zwischen den Unteransichten "
-"Übersicht und Verteilt. Exportieren Sie Statistiken mit `e` als JSON."
+"Overview und Distributed. Exportieren Sie Statistiken mit `e` als JSON."
 
 #: src/part2-local-capture/watch-local.md:288
 msgid "Settings Tab"
-msgstr "Einstellungsregisterkarte"
+msgstr "Settings-Tab"
 
 #: src/part2-local-capture/watch-local.md:290
 msgid "Press `Alt+4` to view and modify capture settings:"
@@ -15183,7 +15186,7 @@ msgstr "Farbschema mit `t` wechseln"
 
 #: src/part2-local-capture/watch-local.md:296
 msgid "Help Tab"
-msgstr "Hilferegisterkarte"
+msgstr "Help-Tab"
 
 #: src/part2-local-capture/watch-local.md:298
 msgid "Press `?` to open the searchable help system:"
@@ -15236,10 +15239,9 @@ msgid ""
 "file dialog opens to choose the output path. Press `w` again to stop "
 "streaming to the file."
 msgstr ""
-"Drücken Sie auf der Erfassungsregisterkarte `w`, um angezeigte Pakete in "
-"einer PCAP-Datei zu speichern. Ein Dateidialog öffnet sich zur Wahl des "
-"Ausgabepfads. Drücken Sie erneut `w`, um das Schreiben des Streams in die "
-"Datei zu stoppen."
+"Drücken Sie im Capture-Tab `w`, um angezeigte Pakete in einer PCAP-Datei zu "
+"speichern. Ein Dateidialog öffnet sich zur Wahl des Ausgabepfads. Drücken "
+"Sie erneut `w`, um das Schreiben des Streams in die Datei zu stoppen."
 
 #: src/part2-local-capture/watch-local.md:317
 msgid ""
@@ -19635,19 +19637,16 @@ msgstr "Globale Tasten"
 
 #: src/part4-administration/watch-remote.md:129
 msgid "Switch between tabs"
-msgstr "Zwischen Registerkarten wechseln"
+msgstr "Zwischen Tabs wechseln"
 
 #: src/part4-administration/watch-remote.md:129
 msgid "`Tab`"
 msgstr "`Tab`"
 
 #: src/part4-administration/watch-remote.md:130
-msgid "Jump to tab (1=Packets, 2=Details, 3=Nodes, etc.)"
-msgstr "Zur Registerkarte springen (1=Pakete, 2=Details, 3=Knoten usw.)"
-
-#: src/part4-administration/watch-remote.md:130
-msgid "`1`\\-`6`"
-msgstr "`1`\\-`6`"
+msgid "Jump to tab (1=Capture, 2=Nodes, 3=Statistics, 4=Settings, 5=Help)"
+msgstr ""
+"Zum Tab springen (1=Capture, 2=Nodes, 3=Statistics, 4=Settings, 5=Help)"
 
 #: src/part4-administration/watch-remote.md:131
 msgid "Pause/resume packet display"
@@ -19689,7 +19688,7 @@ msgstr "`Ctrl+S`"
 
 #: src/part4-administration/watch-remote.md:149
 msgid "Nodes View"
-msgstr "Knotenansicht"
+msgstr "Nodes-Ansicht"
 
 #: src/part4-administration/watch-remote.md:153
 msgid "Navigate node list"
@@ -19741,14 +19740,12 @@ msgstr "Anrufdetails anzeigen"
 
 #: src/part4-administration/watch-remote.md:166
 msgid "Nodes Tab"
-msgstr "Knotenregisterkarte"
+msgstr "Nodes-Tab"
 
 #: src/part4-administration/watch-remote.md:168
 msgid ""
 "The Nodes tab shows connected processors and their hunters in a tree view:"
-msgstr ""
-"Die Knotenregisterkarte zeigt verbundene Prozessoren und ihre Hunter als "
-"Baum:"
+msgstr "Der Nodes-Tab zeigt verbundene Prozessoren und ihre Hunter als Baum:"
 
 #: src/part4-administration/watch-remote.md:188
 msgid "Each hunter displays:"
@@ -19783,8 +19780,8 @@ msgid "You can add nodes without editing the nodes file:"
 msgstr "Sie können Knoten ohne Bearbeitung der Knotendatei hinzufügen:"
 
 #: src/part4-administration/watch-remote.md:200
-msgid "Navigate to the Nodes tab (`3`)"
-msgstr "Zur Knotenregisterkarte (`3`) wechseln"
+msgid "Navigate to the Nodes tab (`Alt+2`)"
+msgstr "Zum Nodes-Tab (`Alt+2`) wechseln"
 
 #: src/part4-administration/watch-remote.md:201
 msgid "Select the input field and press `Enter`"
@@ -19817,7 +19814,7 @@ msgstr "Hunter abonnieren"
 
 #: src/part4-administration/watch-remote.md:211
 msgid "Navigate to a processor in the Nodes tab"
-msgstr "In der Knotenregisterkarte zu einem Prozessor navigieren"
+msgstr "Im Nodes-Tab zu einem Prozessor navigieren"
 
 #: src/part4-administration/watch-remote.md:212
 msgid "Press `s` to open the hunter selector modal"
@@ -19893,8 +19890,8 @@ msgid ""
 "From the Nodes tab, press `f` to open the filter management view. This lets "
 "you:"
 msgstr ""
-"Drücken Sie auf der Knotenregisterkarte `f`, um die Filterverwaltung zu "
-"öffnen. Damit können Sie:"
+"Drücken Sie im Nodes-Tab `f`, um die Filterverwaltung zu öffnen. Damit "
+"können Sie:"
 
 #: src/part4-administration/watch-remote.md:237
 msgid "**View active filters** on the connected processor"
@@ -20087,9 +20084,7 @@ msgstr ""
 
 #: src/part4-administration/watch-remote.md:455
 msgid "Check if you're subscribed to any hunters (press `s` in Nodes tab)"
-msgstr ""
-"Prüfen Sie, ob Sie Hunter abonniert haben (`s` auf der Knotenregisterkarte "
-"drücken)"
+msgstr "Prüfen Sie, ob Sie Hunter abonniert haben (`s` im Nodes-Tab drücken)"
 
 #: src/part4-administration/watch-remote.md:456
 msgid "Try without BPF filters to rule out over-filtering"

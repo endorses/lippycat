@@ -124,13 +124,13 @@ Each node can have its own TLS configuration, allowing mixed environments (e.g.,
 
 ### Global Keys {#global-keys}
 
-| Key            | Action                                            |
-| -------------- | ------------------------------------------------- |
-| `Tab`          | Switch between tabs                               |
-| `1`-`6`        | Jump to tab (1=Packets, 2=Details, 3=Nodes, etc.) |
-| `Space`        | Pause/resume packet display                       |
-| `q` / `Ctrl+C` | Quit                                              |
-| `?`            | Help                                              |
+| Key                     | Action                                                             |
+| ----------------------- | ------------------------------------------------------------------ |
+| `Tab`                   | Switch between tabs                                                |
+| `Alt+1` through `Alt+5` | Jump to tab (1=Capture, 2=Nodes, 3=Statistics, 4=Settings, 5=Help) |
+| `Space`                 | Pause/resume packet display                                        |
+| `q` / `Ctrl+C`          | Quit                                                               |
+| `?`                     | Help                                                               |
 
 ### Packet View {#packet-view}
 
@@ -197,7 +197,7 @@ Each hunter displays:
 
 You can add nodes without editing the nodes file:
 
-1. Navigate to the Nodes tab (`3`)
+1. Navigate to the Nodes tab (`Alt+2`)
 2. Select the input field and press `Enter`
 3. Type the processor address (e.g., `192.168.1.100:55555`)
 4. Press `Enter` to connect

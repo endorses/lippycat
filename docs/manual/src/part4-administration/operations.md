@@ -1,30 +1,36 @@
-# Operations Runbook
+# Operations Runbook {#operations-runbook}
 
 This chapter covers deploying, monitoring, and maintaining lippycat in production. It includes systemd service configuration, health checks, log management, incident response, and maintenance procedures.
 
-## Deployment
+## Deployment {#deployment}
 
-### System Requirements
+### System Requirements {#system-requirements}
 
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| RAM | 4 GB | 8 GB (high-volume) |
-| Disk | Depends on PCAP retention | ~1 GB per 1,000 VoIP calls |
-| Network | Interface access | Dedicated monitoring interface |
-| Privileges | `CAP_NET_RAW` | `CAP_NET_RAW` + `CAP_NET_ADMIN` |
-| Libraries | libpcap | libpcap-dev |
+| Requirement | Minimum                   | Recommended                     |
+| ----------- | ------------------------- | ------------------------------- |
+| RAM         | 4 GB                      | 8 GB (high-volume)              |
+| Disk        | Depends on PCAP retention | ~1 GB per 1,000 VoIP calls      |
+| Network     | Interface access          | Dedicated monitoring interface  |
+| Privileges  | `CAP_NET_RAW`             | `CAP_NET_RAW` + `CAP_NET_ADMIN` |
+| Libraries   | libpcap                   | libpcap-dev                     |
 
-### Install the Binary
+### Install the Binary {#install-the-binary}
 
 Build from source:
+
+<!-- i18n:skip -->
 
 ```bash
 make build-release
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 sudo cp bin/lc /usr/local/bin/
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 sudo chmod +x /usr/local/bin/lc
@@ -32,31 +38,43 @@ sudo chmod +x /usr/local/bin/lc
 
 Grant capture capabilities to avoid running as root:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lc
 ```
 
-### Create Configuration
+### Create Configuration {#create-configuration}
+
+<!-- i18n:skip -->
 
 ```bash
 sudo mkdir -p /etc/lippycat/certs
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 sudo cp config.yaml /etc/lippycat/
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 sudo chown root:root /etc/lippycat/config.yaml
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 sudo chmod 600 /etc/lippycat/config.yaml
 ```
 
-### systemd Services
+### systemd Services {#systemd-services}
 
-#### Standalone Capture (Sniff)
+#### Standalone Capture (Sniff) {#standalone-capture-sniff}
+
+<!-- i18n:skip -->
 
 ```ini
 # /etc/systemd/system/lippycat.service
@@ -77,7 +95,9 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-#### Processor Node
+#### Processor Node {#processor-node}
+
+<!-- i18n:skip -->
 
 ```ini
 # /etc/systemd/system/lippycat-processor.service
@@ -103,7 +123,9 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-#### Hunter Node
+#### Hunter Node {#hunter-node}
+
+<!-- i18n:skip -->
 
 ```ini
 # /etc/systemd/system/lippycat-hunter.service
@@ -126,27 +148,35 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-#### Enable and Start
+#### Enable and Start {#enable-and-start}
+
+<!-- i18n:skip -->
 
 ```bash
 sudo systemctl daemon-reload
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 sudo systemctl enable lippycat-processor
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 sudo systemctl start lippycat-processor
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 sudo systemctl status lippycat-processor
 ```
 
-## Health Checks
+## Health Checks {#health-checks}
 
-### Normalized event transport
+### Normalized event transport {#normalized-event-transport}
 
 Confirm event-mode negotiation in node logs, generate a known DNS or HTTP
 transaction, and find it in the processor structured log and TUI event timeline.
@@ -166,7 +196,7 @@ its bandwidth and privacy impact. Keep sensitive-field and file-metadata gates
 disabled unless required, and protect event spools, WALs, logs, and TUI transport
 as capture evidence.
 
-### Event spool storage and recovery
+### Event spool storage and recovery {#event-spool-storage-and-recovery}
 
 Reliable event forwarding stores unacknowledged batches in an exclusive spool
 directory. Never share that directory between processes or edit its files while
@@ -187,9 +217,11 @@ recovery errors, preserve the entire directory, correct the reported cause, and
 restart. Move it aside only when you explicitly accept all outstanding events
 as lost.
 
-### Quick Status Check
+### Quick Status Check {#quick-status-check}
 
 Check whether the service is running:
+
+<!-- i18n:skip -->
 
 ```bash
 systemctl is-active lippycat-processor
@@ -197,17 +229,23 @@ systemctl is-active lippycat-processor
 
 Check whether the processor is healthy:
 
+<!-- i18n:skip -->
+
 ```bash
 lc show status -P localhost:55555 --tls-ca ca.crt
 ```
 
 Check which hunters are connected:
 
+<!-- i18n:skip -->
+
 ```bash
 lc list hunters -P localhost:55555 --tls-ca ca.crt
 ```
 
-### Daily Health Check Script
+### Daily Health Check Script {#daily-health-check-script}
+
+<!-- i18n:skip -->
 
 ```bash
 #!/bin/bash
@@ -239,9 +277,11 @@ journalctl -u 'lippycat*' --since "24 hours ago" --priority=err --no-pager -q
 echo -e "\n=== Health Check Complete ==="
 ```
 
-### Monitoring Hunter Connections
+### Monitoring Hunter Connections {#monitoring-hunter-connections}
 
 Watch the hunter count in real time:
+
+<!-- i18n:skip -->
 
 ```bash
 watch -n 5 'lc show status -P localhost:55555 --tls-ca ca.crt | \
@@ -249,6 +289,8 @@ watch -n 5 'lc show status -P localhost:55555 --tls-ca ca.crt | \
 ```
 
 Use this script to alert on missing hunters:
+
+<!-- i18n:skip -->
 
 ```bash
 #!/bin/bash
@@ -261,13 +303,15 @@ if [ "$actual" -lt "$expected" ]; then
 fi
 ```
 
-## Log Management
+## Log Management {#log-management}
 
 lippycat uses structured logging to stdout/stderr. When running under systemd, logs go to the journal.
 
-### Viewing Logs
+### Viewing Logs {#viewing-logs}
 
 Follow live logs:
+
+<!-- i18n:skip -->
 
 ```bash
 journalctl -u lippycat-processor -f
@@ -275,11 +319,15 @@ journalctl -u lippycat-processor -f
 
 Show logs from the last hour:
 
+<!-- i18n:skip -->
+
 ```bash
 journalctl -u lippycat-processor --since "1 hour ago"
 ```
 
 Show errors only:
+
+<!-- i18n:skip -->
 
 ```bash
 journalctl -u lippycat-processor --priority=err
@@ -287,13 +335,17 @@ journalctl -u lippycat-processor --priority=err
 
 Show logs from all lippycat services:
 
+<!-- i18n:skip -->
+
 ```bash
 journalctl -u 'lippycat*' --since today
 ```
 
-### Log Rotation
+### Log Rotation {#log-rotation}
 
 If logging to files instead of the journal:
+
+<!-- i18n:skip -->
 
 ```
 # /etc/logrotate.d/lippycat
@@ -308,7 +360,9 @@ If logging to files instead of the journal:
 }
 ```
 
-### Log Analysis
+### Log Analysis {#log-analysis}
+
+<!-- i18n:skip -->
 
 ```bash
 #!/bin/bash
@@ -319,19 +373,25 @@ journalctl -u 'lippycat*' --since "24 hours ago" --priority=err --no-pager | \
   sort | uniq -c | sort -nr | head -10
 ```
 
-## Incident Response
+## Incident Response {#incident-response}
 
-### High Memory Usage
+### High Memory Usage {#high-memory-usage}
 
 **Severity**: Critical — may lead to OOM kill
 
 1. Check current usage:
+
+   <!-- i18n:skip -->
+
    ```bash
    ps aux | grep "[l]c "
    top -p $(pgrep -f "lc.*process")
    ```
 
 2. Switch to memory-optimized mode:
+
+   <!-- i18n:skip -->
+
    ```bash
    sudo systemctl stop lippycat-processor
    # Edit config: tcp_performance_mode: "memory"
@@ -339,19 +399,27 @@ journalctl -u 'lippycat*' --since "24 hours ago" --priority=err --no-pager | \
    ```
 
 3. Emergency restart if memory exceeds limits:
+   <!-- i18n:skip -->
+
    ```bash
    sudo systemctl restart lippycat-processor
    ```
 
-### Service Down
+### Service Down {#service-down}
 
 1. Check status and recent logs:
+
+   <!-- i18n:skip -->
+
    ```bash
    sudo systemctl status lippycat-processor
    journalctl -u lippycat-processor --lines=50
    ```
 
 2. Attempt restart:
+
+   <!-- i18n:skip -->
+
    ```bash
    sudo systemctl restart lippycat-processor
    sleep 5
@@ -359,31 +427,43 @@ journalctl -u 'lippycat*' --since "24 hours ago" --priority=err --no-pager | \
    ```
 
 3. If restart fails, try minimal configuration:
+   <!-- i18n:skip -->
+
    ```bash
    sudo systemctl stop lippycat-processor
    lc process --listen :55555 --insecure  # Minimal, no PCAP, no TLS
    ```
 
-### Hunter Disconnections
+### Hunter Disconnections {#hunter-disconnections}
 
 Hunters reconnect automatically with exponential backoff (see [Chapter 7: Resilience](../part3-distributed/hunt.md#resilience-and-flow-control)). If hunters stay disconnected:
 
 1. Check hunter service status on the edge node:
+
+   <!-- i18n:skip -->
+
    ```bash
    ssh edge-node systemctl status lippycat-hunter
    ```
 
 2. Verify network connectivity:
+
+   <!-- i18n:skip -->
+
    ```bash
    ssh edge-node nc -zv processor.internal 55555
    ```
 
 3. Check for TLS certificate issues:
+   <!-- i18n:skip -->
+
    ```bash
    journalctl -u lippycat-hunter --since "1 hour ago" | grep -i tls
    ```
 
-### Diagnostic Data Collection
+### Diagnostic Data Collection {#diagnostic-data-collection}
+
+<!-- i18n:skip -->
 
 ```bash
 #!/bin/bash
@@ -428,11 +508,13 @@ rm -rf "$DIAG_DIR"
 echo "Saved: /tmp/lippycat_diag_$TIMESTAMP.tar.gz"
 ```
 
-## Maintenance
+## Maintenance {#maintenance}
 
-### PCAP Storage Management
+### PCAP Storage Management {#pcap-storage-management}
 
 PCAP files accumulate quickly in production. Set up automated cleanup:
+
+<!-- i18n:skip -->
 
 ```bash
 #!/bin/bash
@@ -453,33 +535,35 @@ echo "PCAP storage: $(du -sh "$PCAP_DIR" | cut -f1)"
 
 Add to cron:
 
+<!-- i18n:skip -->
+
 ```bash
 # Daily PCAP cleanup at 3 AM
 0 3 * * * /opt/scripts/pcap-cleanup.sh >> /var/log/pcap-cleanup.log 2>&1
 ```
 
-### Capacity Planning
+### Capacity Planning {#capacity-planning}
 
-#### Estimating Disk Usage
+#### Estimating Disk Usage {#estimating-disk-usage}
 
-| Traffic Type | Approximate Rate |
-|-------------|-----------------|
-| VoIP (per-call PCAP) | ~1 GB per 1,000 calls |
+| Traffic Type                   | Approximate Rate                     |
+| ------------------------------ | ------------------------------------ |
+| VoIP (per-call PCAP)           | ~1 GB per 1,000 calls                |
 | General capture (unified PCAP) | Depends on link speed and BPF filter |
-| Auto-rotating PCAP | Bounded by `--auto-rotate-max-size` |
+| Auto-rotating PCAP             | Bounded by `--auto-rotate-max-size`  |
 
-#### Estimating Processor Resources
+#### Estimating Processor Resources {#estimating-processor-resources}
 
-| Metric | Rule of Thumb |
-|--------|--------------|
-| Memory per hunter | ~5-10 MB |
-| Memory per TUI subscriber | ~2-5 MB |
-| Max hunters (default) | 100 |
-| Packets per hunter at peak | ~10,000/sec |
+| Metric                     | Rule of Thumb |
+| -------------------------- | ------------- |
+| Memory per hunter          | ~5-10 MB      |
+| Memory per TUI subscriber  | ~2-5 MB       |
+| Max hunters (default)      | 100           |
+| Packets per hunter at peak | ~10,000/sec   |
 
 Scale horizontally with multiple processors if one can't handle the load (see [Chapter 6: Multi-Processor Topology](../part3-distributed/architecture.md#multi-processor)).
 
-### Security Review Checklist
+### Security Review Checklist {#security-review-checklist}
 
 Run monthly:
 
@@ -491,7 +575,7 @@ Run monthly:
 - [ ] PCAP directories have appropriate permissions
 - [ ] Firewall rules restrict port 55555 to authorized hosts
 
-### Upgrading
+### Upgrading {#upgrading}
 
 1. Download or build the new version
 2. Stop the service: `sudo systemctl stop lippycat-processor`
@@ -502,10 +586,10 @@ Run monthly:
 
 Hunters will reconnect automatically after the processor restarts.
 
-## Escalation Levels
+## Escalation Levels {#escalation-levels}
 
-| Level | Trigger | Action |
-|-------|---------|--------|
-| **1 — Automatic** | Service restarts on its own | Monitor for patterns |
-| **2 — Operator** | Service fails to restart, resource exhaustion | Follow incident response procedures above |
-| **3 — Engineering** | Persistent failures, unknown errors | Collect diagnostics and escalate |
+| Level               | Trigger                                       | Action                                    |
+| ------------------- | --------------------------------------------- | ----------------------------------------- |
+| **1 — Automatic**   | Service restarts on its own                   | Monitor for patterns                      |
+| **2 — Operator**    | Service fails to restart, resource exhaustion | Follow incident response procedures above |
+| **3 — Engineering** | Persistent failures, unknown errors           | Collect diagnostics and escalate          |

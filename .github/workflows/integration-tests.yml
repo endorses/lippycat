@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch: # Allow manual trigger
 
 env:
   GO_VERSION: "1.25.13"
@@ -227,11 +227,11 @@ jobs:
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
         with:
-          args: '-fmt sarif -out gosec-results.sarif -no-fail -tags=all ./...'
+          args: "-fmt sarif -out gosec-results.sarif -no-fail -tags=all ./..."
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
-        continue-on-error: true  # Don't fail build if SARIF format is invalid
+        continue-on-error: true # Don't fail build if SARIF format is invalid
         with:
           sarif_file: gosec-results.sarif
 
@@ -281,21 +281,24 @@ jobs:
   manual-build:
     name: Build User Manual
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install Gettext
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext
+
       - name: Install mdBook and plugins
         run: |
-          mkdir -p ~/.local/bin
-          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
-          curl -sSL https://github.com/badboy/mdbook-mermaid/releases/download/v0.17.0/mdbook-mermaid-v0.17.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
+          bash docs/manual/tools/install.sh "$HOME/.local"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Build manual
-        run: mdbook build docs/manual
+        run: make manual-check manual
 
   build-test:
     name: Build All Variants
@@ -356,7 +359,17 @@ jobs:
   test-results:
     name: Test Results Summary
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, docker-integration-tests, security-scan, lint, build-test, build-matrix, manual-build]
+    needs:
+      [
+        unit-tests,
+        integration-tests,
+        docker-integration-tests,
+        security-scan,
+        lint,
+        build-test,
+        build-matrix,
+        manual-build,
+      ]
     if: always()
 
     steps:

@@ -1,10 +1,12 @@
-# Core Concepts
+# Core Concepts {#core-concepts}
 
 This chapter covers the foundational concepts you need to understand before capturing traffic with lippycat. If you're already familiar with packet capture (e.g., from tcpdump or Wireshark experience), you can skim this and move to [Installation & Setup](installation.md).
 
-## Packets and Protocols
+## Packets and Protocols {#packets-and-protocols}
 
 Network traffic is composed of **packets** — discrete units of data sent between hosts. Each packet contains nested protocol layers:
+
+<!-- i18n:skip -->
 
 ```
 Ethernet → IP → TCP/UDP → Application (HTTP, SIP, DNS, ...)
@@ -12,18 +14,18 @@ Ethernet → IP → TCP/UDP → Application (HTTP, SIP, DNS, ...)
 
 lippycat captures packets at the link layer and dissects them through each protocol layer, extracting meaningful information depending on the protocol mode you're using.
 
-### Protocols lippycat Analyzes
+### Protocols lippycat Analyzes {#protocols-lippycat-analyzes}
 
-| Protocol | Subcommand | What It Captures |
-|----------|------------|-----------------|
-| DNS | `lc sniff dns` | Queries, responses, record types |
-| TLS | `lc sniff tls` | Handshakes, certificates, cipher suites |
-| HTTP | `lc sniff http` | Requests, responses, headers |
-| Email | `lc sniff email` | SMTP/IMAP/POP3 sessions |
-| RADIUS | `lc sniff radius` | Authentication/accounting messages and request association |
-| VoIP | `lc sniff voip` | SIP signaling, RTP media streams |
+| Protocol | Subcommand        | What It Captures                                           |
+| -------- | ----------------- | ---------------------------------------------------------- |
+| DNS      | `lc sniff dns`    | Queries, responses, record types                           |
+| TLS      | `lc sniff tls`    | Handshakes, certificates, cipher suites                    |
+| HTTP     | `lc sniff http`   | Requests, responses, headers                               |
+| Email    | `lc sniff email`  | SMTP/IMAP/POP3 sessions                                    |
+| RADIUS   | `lc sniff radius` | Authentication/accounting messages and request association |
+| VoIP     | `lc sniff voip`   | SIP signaling, RTP media streams                           |
 
-## Network Interfaces
+## Network Interfaces {#network-interfaces}
 
 A **network interface** is the point where your machine connects to a network. Common examples:
 
@@ -34,31 +36,39 @@ A **network interface** is the point where your machine connects to a network. C
 
 To see available interfaces:
 
+<!-- i18n:skip -->
+
 ```bash
 lc list interfaces
 ```
 
-### Capture Permissions
+### Capture Permissions {#capture-permissions}
 
 Capturing packets requires elevated privileges because it means reading all traffic on an interface, not just traffic destined for your application.
 
 **Option 1: Run as root**
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0
 ```
 
 **Option 2: Grant capability (recommended for production)**
+<!-- i18n:skip -->
+
 ```bash
 sudo setcap cap_net_raw+ep /usr/local/bin/lc
 ```
 
 This grants only the specific capability needed, following the principle of least privilege.
 
-## BPF Filters
+## BPF Filters {#bpf-filters}
 
 **Berkeley Packet Filters (BPF)** let you tell the kernel which packets to capture, reducing CPU load by filtering at the lowest level before packets reach userspace.
 
 Only capture DNS traffic:
+
+<!-- i18n:skip -->
 
 ```bash
 lc sniff -i eth0 -f "port 53"
@@ -66,11 +76,15 @@ lc sniff -i eth0 -f "port 53"
 
 Only capture traffic to or from a specific host:
 
+<!-- i18n:skip -->
+
 ```bash
 lc sniff -i eth0 -f "host 10.0.0.1"
 ```
 
 Combine filters:
+
+<!-- i18n:skip -->
 
 ```bash
 lc sniff -i eth0 -f "host 10.0.0.1 and port 5060"
@@ -78,11 +92,13 @@ lc sniff -i eth0 -f "host 10.0.0.1 and port 5060"
 
 BPF filters use a standard syntax shared with tcpdump and Wireshark. See [Appendix C: BPF Filter Reference](../appendices/bpf-reference.md) for common patterns.
 
-## PCAP Format
+## PCAP Format {#pcap-format}
 
 **PCAP (Packet Capture)** is the standard file format for storing captured packets. Files written by lippycat can be opened in Wireshark, analyzed with tshark, or replayed with tcpreplay.
 
 Write captured packets to a file:
+
+<!-- i18n:skip -->
 
 ```bash
 lc sniff -i eth0 -w capture.pcap
@@ -90,16 +106,19 @@ lc sniff -i eth0 -w capture.pcap
 
 Read a PCAP file in the TUI:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch file capture.pcap
 ```
 
 lippycat supports several PCAP writing modes:
+
 - **Unified PCAP** — All packets in one file
 - **Per-call PCAP** — One file per VoIP call (SIP Call-ID)
 - **Auto-rotating PCAP** — New file after a size or time threshold
 
-## Protocol Analysis
+## Protocol Analysis {#protocol-analysis}
 
 Beyond simple packet capture, lippycat performs **protocol analysis** — it understands the structure and semantics of the protocols it monitors:
 
@@ -112,9 +131,11 @@ Beyond simple packet capture, lippycat performs **protocol analysis** — it und
 
 This analysis happens in real time during capture and is displayed in both CLI and TUI modes.
 
-## The Distributed Model
+## The Distributed Model {#the-distributed-model}
 
 lippycat can operate as a **distributed system** for capturing traffic across multiple network segments:
+
+<!-- i18n:skip -->
 
 ```mermaid
 graph LR

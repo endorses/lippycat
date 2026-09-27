@@ -7,12 +7,22 @@ src = "src"
 
 [build]
 build-dir = "book"
+extra-watch-dirs = ["po", "languages.json"]
 
 [output.html]
 git-repository-url = "https://github.com/endorses/lippycat"
 edit-url-template = "https://github.com/endorses/lippycat/edit/main/docs/manual/{path}"
 site-url = "https://🫦🐱.ws/"
-additional-js = ["mermaid.min.js", "mermaid-init.js"]
+additional-js = [
+    "mermaid.min.js",
+    "mermaid-init.js",
+    "theme/language-selector.js",
+]
+additional-css = ["theme/language-selector.css"]
 
 [preprocessor.mermaid]
 command = "mdbook-mermaid"
+
+[preprocessor.gettext]
+after = ["links"]
+before = ["mermaid"]

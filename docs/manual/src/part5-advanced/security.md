@@ -1,37 +1,39 @@
-# Security
+# Security {#security}
 
 Lippycat captures and transports sensitive network traffic — SIP credentials, RTP media streams, internal IP addresses, and potentially regulated data. This chapter covers the security controls available to protect that data in transit, at rest, and in logs. It assumes you have a working distributed deployment as described in [Part III](../part3-distributed/architecture.md) and are preparing it for production.
 
-## TLS for Distributed Mode
+## TLS for Distributed Mode {#tls-for-distributed-mode}
 
 All gRPC connections in the distributed architecture — hunter to processor, processor to processor, TUI to processor — require TLS by default. Without it, captured packets travel in cleartext between nodes.
 
-### Security Modes
+### Security Modes {#security-modes}
 
 Lippycat supports three TLS modes:
 
-| Mode | Authentication | Use Case |
-|------|---------------|----------|
-| **Server TLS** | Processor proves identity to clients | Encrypt traffic, verify processor identity |
-| **Mutual TLS (mTLS)** | Both sides prove identity | Production deployments (recommended) |
-| **Insecure** | None | Local testing only |
+| Mode                  | Authentication                       | Use Case                                   |
+| --------------------- | ------------------------------------ | ------------------------------------------ |
+| **Server TLS**        | Processor proves identity to clients | Encrypt traffic, verify processor identity |
+| **Mutual TLS (mTLS)** | Both sides prove identity            | Production deployments (recommended)       |
+| **Insecure**          | None                                 | Local testing only                         |
 
-### Certificate Requirements by Node Type
+### Certificate Requirements by Node Type {#certificate-requirements-by-node-type}
 
 Each node type needs different certificates depending on the TLS mode:
 
-| Node | Server TLS | Mutual TLS |
-|------|-----------|------------|
-| **Processor** | `--tls-cert`, `--tls-key` | `--tls-cert`, `--tls-key`, `--tls-ca`, `--tls-client-auth` |
-| **Hunter** | `--tls-ca` | `--tls-cert`, `--tls-key`, `--tls-ca` |
-| **Tap** | `--tls-cert`, `--tls-key` (for TUI serving) | Same as processor (serves TUI clients) |
-| **TUI (`watch remote`)** | `--tls-ca` | `--tls-cert`, `--tls-key`, `--tls-ca` |
+| Node                     | Server TLS                                  | Mutual TLS                                                 |
+| ------------------------ | ------------------------------------------- | ---------------------------------------------------------- |
+| **Processor**            | `--tls-cert`, `--tls-key`                   | `--tls-cert`, `--tls-key`, `--tls-ca`, `--tls-client-auth` |
+| **Hunter**               | `--tls-ca`                                  | `--tls-cert`, `--tls-key`, `--tls-ca`                      |
+| **Tap**                  | `--tls-cert`, `--tls-key` (for TUI serving) | Same as processor (serves TUI clients)                     |
+| **TUI (`watch remote`)** | `--tls-ca`                                  | `--tls-cert`, `--tls-key`, `--tls-ca`                      |
 
-### Generating Certificates with OpenSSL
+### Generating Certificates with OpenSSL {#generating-certificates-with-openssl}
 
 Modern Go requires Subject Alternative Names (SANs) on all certificates. Certificates using only Common Name (CN) will be rejected. The following procedure generates a CA, a server certificate for the processor, and a client certificate for hunters.
 
-#### Step 1: Create a Certificate Authority
+#### Step 1: Create a Certificate Authority {#step-1-create-a-certificate-authority}
+
+<!-- i18n:skip -->
 
 ```bash
 mkdir -p /etc/lippycat/certs && cd /etc/lippycat/certs
@@ -39,15 +41,19 @@ mkdir -p /etc/lippycat/certs && cd /etc/lippycat/certs
 
 Generate the CA key and self-signed certificate:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl req -x509 -newkey rsa:4096 -days 3650 -nodes \
   -keyout ca-key.pem -out ca-cert.pem \
   -subj "/C=US/ST=State/L=City/O=YourOrg/CN=Lippycat CA"
 ```
 
-#### Step 2: Generate the Processor (Server) Certificate
+#### Step 2: Generate the Processor (Server) Certificate {#step-2-generate-the-processor-server-certificate}
 
 Generate the private key:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl genrsa -out server-key.pem 4096
@@ -55,12 +61,16 @@ openssl genrsa -out server-key.pem 4096
 
 Create the certificate signing request:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl req -new -key server-key.pem -out server-req.pem \
   -subj "/CN=processor.example.com"
 ```
 
 Create the extensions file; SANs are required:
+
+<!-- i18n:skip -->
 
 ```bash
 cat > server-ext.conf <<EOF
@@ -71,6 +81,8 @@ EOF
 
 Sign the certificate with the CA:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl x509 -req -in server-req.pem -days 365 \
   -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
@@ -79,22 +91,30 @@ openssl x509 -req -in server-req.pem -days 365 \
 
 Replace `processor.example.com` with the hostname or IP hunters will use to connect. Add multiple SANs if the processor is reachable by several names:
 
+<!-- i18n:skip -->
+
 ```
 subjectAltName = DNS:processor.example.com,DNS:processor,IP:10.0.1.100,IP:127.0.0.1
 ```
 
-#### Step 3: Generate a Hunter (Client) Certificate
+#### Step 3: Generate a Hunter (Client) Certificate {#step-3-generate-a-hunter-client-certificate}
 
 For mTLS, each hunter needs its own certificate:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl genrsa -out hunter01-key.pem 4096
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 openssl req -new -key hunter01-key.pem -out hunter01-req.pem \
   -subj "/CN=hunter-01.example.com"
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 cat > client-ext.conf <<EOF
@@ -102,31 +122,41 @@ extendedKeyUsage = clientAuth
 EOF
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 openssl x509 -req -in hunter01-req.pem -days 365 \
   -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
   -out hunter01-cert.pem -extfile client-ext.conf
 ```
 
-#### Step 4: Set Permissions and Clean Up
+#### Step 4: Set Permissions and Clean Up {#step-4-set-permissions-and-clean-up}
+
+<!-- i18n:skip -->
 
 ```bash
 chmod 600 *-key.pem
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 chmod 644 *-cert.pem
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 rm -f *.conf *-req.pem
 ```
 
-### Starting Nodes with TLS
+### Starting Nodes with TLS {#starting-nodes-with-tls}
 
 With certificates in place, start the distributed deployment:
 
 Start the processor with server TLS:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen 0.0.0.0:55555 \
@@ -136,6 +166,8 @@ lc process --listen 0.0.0.0:55555 \
 
 Start the hunter and verify the processor's identity:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt voip -i eth0 \
   --processor processor.example.com:55555 \
@@ -144,11 +176,13 @@ sudo lc hunt voip -i eth0 \
 
 For production with mTLS (covered in the next section), add client authentication flags.
 
-## Mutual TLS (mTLS)
+## Mutual TLS (mTLS) {#mutual-tls-mtls}
 
 Server TLS encrypts the channel and lets clients verify the processor, but any client can connect. Mutual TLS adds the reverse — the processor verifies hunter identity using client certificates. This is the recommended configuration for production.
 
-### Trust Model
+### Trust Model {#trust-model}
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart TB
@@ -178,9 +212,11 @@ flowchart TB
 
 All certificates are signed by the same CA. Each node trusts any certificate signed by that CA. To revoke a hunter, stop issuing it certificates and restart the processor — the revoked hunter can no longer present a valid client certificate.
 
-### Enabling mTLS
+### Enabling mTLS {#enabling-mtls}
 
 Start the processor and require client certificates:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen 0.0.0.0:55555 \
@@ -192,6 +228,8 @@ lc process --listen 0.0.0.0:55555 \
 
 Start a hunter that presents a client certificate:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt voip -i eth0 \
   --processor processor.example.com:55555 \
@@ -202,6 +240,8 @@ sudo lc hunt voip -i eth0 \
 
 Connect a TUI client that also presents a client certificate:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch remote -P processor.example.com:55555 \
   --tls-cert /etc/lippycat/certs/tui-cert.pem \
@@ -209,9 +249,11 @@ lc watch remote -P processor.example.com:55555 \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
 ```
 
-### Configuration File
+### Configuration File {#configuration-file}
 
 For production deployments, store TLS settings in the configuration file rather than on the command line. This keeps key paths out of process listings and shell history:
+
+<!-- i18n:skip -->
 
 ```yaml
 # /etc/lippycat/config.yaml — processor
@@ -224,6 +266,8 @@ processor:
     client_auth: true
 ```
 
+<!-- i18n:skip -->
+
 ```yaml
 # /etc/lippycat/config.yaml — hunter
 hunter:
@@ -234,9 +278,11 @@ hunter:
     ca_file: "/etc/lippycat/certs/ca-cert.pem"
 ```
 
-### Commercial CAs
+### Commercial CAs {#commercial-cas}
 
 If the processor uses a certificate from a well-known CA (Let's Encrypt, DigiCert, etc.), hunters do not need `--tls-ca` — the system trust store already includes the issuing CA:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt voip -i eth0 --processor processor.example.com:55555
@@ -244,13 +290,15 @@ sudo lc hunt voip -i eth0 --processor processor.example.com:55555
 
 This simplifies hunter deployment but does not provide client authentication. Combine with mTLS if you need to restrict which hunters can connect.
 
-## Certificate Lifecycle
+## Certificate Lifecycle {#certificate-lifecycle}
 
-### Monitoring Expiration
+### Monitoring Expiration {#monitoring-expiration}
 
 Check certificate validity dates and set up automated monitoring:
 
 Check a certificate's dates:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl x509 -in /etc/lippycat/certs/server-cert.pem -noout -dates
@@ -258,12 +306,16 @@ openssl x509 -in /etc/lippycat/certs/server-cert.pem -noout -dates
 
 Verify that SANs are present, as Go requires them:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl x509 -in /etc/lippycat/certs/server-cert.pem -noout -text \
   | grep -A1 "Subject Alternative Name"
 ```
 
 Add a cron job or monitoring check to alert before certificates expire:
+
+<!-- i18n:skip -->
 
 ```bash
 # /etc/cron.daily/check-lippycat-certs
@@ -278,7 +330,7 @@ if [ "$DAYS_LEFT" -lt 30 ]; then
 fi
 ```
 
-### Rotating Certificates
+### Rotating Certificates {#rotating-certificates}
 
 To rotate certificates without dropping connections:
 
@@ -288,11 +340,15 @@ To rotate certificates without dropping connections:
 
 Generate the replacement key:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl genrsa -out server-key-new.pem 4096
 ```
 
 Create its signing request:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl req -new -key server-key-new.pem -out server-req-new.pem \
@@ -300,6 +356,8 @@ openssl req -new -key server-key-new.pem -out server-req-new.pem \
 ```
 
 Sign the replacement certificate:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl x509 -req -in server-req-new.pem -days 365 \
@@ -309,9 +367,13 @@ openssl x509 -req -in server-req-new.pem -days 365 \
 
 Swap the certificate into place:
 
+<!-- i18n:skip -->
+
 ```bash
 mv server-cert-new.pem server-cert.pem
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 mv server-key-new.pem server-key.pem
@@ -319,11 +381,15 @@ mv server-key-new.pem server-key.pem
 
 Reload the service:
 
+<!-- i18n:skip -->
+
 ```bash
 systemctl reload lippycat-processor
 ```
 
 Verify the replacement certificate:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl s_client -connect processor:55555 -showcerts </dev/null 2>/dev/null \
@@ -332,7 +398,7 @@ openssl s_client -connect processor:55555 -showcerts </dev/null 2>/dev/null \
 
 Hunters will reconnect automatically using the new server certificate, provided it is signed by the same CA.
 
-### Revoking a Certificate
+### Revoking a Certificate {#revoking-a-certificate}
 
 Lippycat does not currently implement CRL or OCSP checking. To revoke a compromised certificate:
 
@@ -341,9 +407,11 @@ Lippycat does not currently implement CRL or OCSP checking. To revoke a compromi
 3. Generate a new certificate for the replacement node.
 4. If the CA key was compromised, regenerate the entire CA and re-issue all certificates.
 
-## Production Mode
+## Production Mode {#production-mode}
 
 Setting the `LIPPYCAT_PRODUCTION` environment variable blocks insecure operation:
+
+<!-- i18n:skip -->
 
 ```bash
 export LIPPYCAT_PRODUCTION=true
@@ -351,11 +419,15 @@ export LIPPYCAT_PRODUCTION=true
 
 With this set, any attempt to use `--insecure` is rejected at startup:
 
+<!-- i18n:skip -->
+
 ```
 FATAL: --insecure flag is not allowed in production mode (LIPPYCAT_PRODUCTION=true)
 ```
 
 This prevents operators from accidentally disabling TLS in production. Set it in the systemd unit file for each node:
+
+<!-- i18n:skip -->
 
 ```ini
 # /etc/systemd/system/lippycat-processor.service
@@ -366,19 +438,25 @@ ExecStart=/usr/local/bin/lc process --listen :55555 --config /etc/lippycat/confi
 
 Without `--insecure` and without TLS certificates, nodes refuse to start — there is no silent fallback to cleartext.
 
-### Insecure Mode
+### Insecure Mode {#insecure-mode}
 
 For local development and testing, `--insecure` disables TLS entirely. Both sides of the connection must use it:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 --insecure
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt voip -i eth0 --processor localhost:55555 --insecure
 ```
 
 A prominent warning banner is displayed on startup:
+
+<!-- i18n:skip -->
 
 ```
 ═══════════════════════════════════════════════════════════════
@@ -389,24 +467,26 @@ A prominent warning banner is displayed on startup:
 ═══════════════════════════════════════════════════════════════
 ```
 
-### TLS Performance
+### TLS Performance {#tls-performance}
 
 TLS adds minimal overhead on modern hardware with AES-NI support:
 
-| Metric | Impact |
-|--------|--------|
-| CPU | ~2-5% overhead |
-| Throughput | 95-98% of plaintext throughput |
-| Latency | +1-5 ms initial handshake, <1 ms per packet |
-| Memory | ~50 KB per connection for session state |
+| Metric     | Impact                                      |
+| ---------- | ------------------------------------------- |
+| CPU        | ~2-5% overhead                              |
+| Throughput | 95-98% of plaintext throughput              |
+| Latency    | +1-5 ms initial handshake, <1 ms per packet |
+| Memory     | ~50 KB per connection for session state     |
 
 There is no reason to disable TLS for performance.
 
-## API Key Authentication
+## API Key Authentication {#api-key-authentication}
 
 Processors and tap nodes can require API keys for gRPC management and streaming APIs. This is an alternative authentication layer for deployments where distributing client certificates is impractical, though TLS should still be used to protect the key in transit.
 
 Enable API key auth with `--api-key-auth` and define keys in the config file:
+
+<!-- i18n:skip -->
 
 ```yaml
 security:
@@ -421,32 +501,34 @@ security:
 
 Clients send the key as gRPC metadata named `x-api-key`. In production mode, lippycat requires either mTLS or API key authentication when mutual TLS is not enabled.
 
-## Decrypting Captured TLS Traffic
+## Decrypting Captured TLS Traffic {#decrypting-captured-tls-traffic}
 
-The previous sections covered TLS for lippycat's own gRPC connections. This section covers a different use case: decrypting TLS-encrypted traffic that lippycat has *captured* — HTTPS, SMTPS, IMAPS, and other TLS-wrapped protocols flowing through the monitored network.
+The previous sections covered TLS for lippycat's own gRPC connections. This section covers a different use case: decrypting TLS-encrypted traffic that lippycat has _captured_ — HTTPS, SMTPS, IMAPS, and other TLS-wrapped protocols flowing through the monitored network.
 
-### How It Works
+### How It Works {#how-it-works}
 
 TLS decryption requires session keys exported by the client or server application using the `SSLKEYLOGFILE` mechanism. These keys are stored in NSS Key Log Format, a de facto standard supported by Wireshark, browsers, and many server-side applications.
 
 Because modern TLS uses forward secrecy (ephemeral Diffie-Hellman), keys must be captured at runtime during the TLS handshake. After-the-fact decryption with only the server's private key is not possible.
 
-### Application Support
+### Application Support {#application-support}
 
 Most modern applications support key logging:
 
-| Category | Application | Mechanism |
-|----------|-------------|-----------|
-| Web servers | Apache 2.4.49+, Caddy v2.6+, nginx Plus R33+ | `SSLKEYLOGFILE` env var or directive |
-| Browsers | Firefox, Chrome/Chromium | `SSLKEYLOGFILE` env var |
-| CLI tools | curl, wget, OpenSSL s_client | `SSLKEYLOGFILE` env var |
-| Languages | Go (`tls.Config.KeyLogWriter`), Python, Node.js | Native API or env var |
+| Category    | Application                                     | Mechanism                            |
+| ----------- | ----------------------------------------------- | ------------------------------------ |
+| Web servers | Apache 2.4.49+, Caddy v2.6+, nginx Plus R33+    | `SSLKEYLOGFILE` env var or directive |
+| Browsers    | Firefox, Chrome/Chromium                        | `SSLKEYLOGFILE` env var              |
+| CLI tools   | curl, wget, OpenSSL s_client                    | `SSLKEYLOGFILE` env var              |
+| Languages   | Go (`tls.Config.KeyLogWriter`), Python, Node.js | Native API or env var                |
 
-### CLI Usage
+### CLI Usage {#cli-usage}
 
 Point lippycat at a key log file produced by the target application:
 
 For standalone live capture:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff http -i eth0 --tls-keylog /tmp/sslkeys.log
@@ -454,11 +536,15 @@ sudo lc sniff http -i eth0 --tls-keylog /tmp/sslkeys.log
 
 For live capture in tap mode:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log
 ```
 
 For real-time key injection via a named pipe, create the pipe:
+
+<!-- i18n:skip -->
 
 ```bash
 mkfifo /tmp/sslkeys.pipe
@@ -466,19 +552,25 @@ mkfifo /tmp/sslkeys.pipe
 
 Start tap with the pipe:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap http -i eth0 --tls-keylog-pipe /tmp/sslkeys.pipe &
 ```
 
 Start the target application with the same pipe:
 
+<!-- i18n:skip -->
+
 ```bash
 SSLKEYLOGFILE=/tmp/sslkeys.pipe ./myserver
 ```
 
-### Distributed Key Forwarding
+### Distributed Key Forwarding {#distributed-key-forwarding}
 
 In distributed mode, hunters automatically forward TLS session keys to the processor alongside captured packets:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -495,6 +587,8 @@ flowchart LR
 
 Capture with the key log on the hunter:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt http -i eth0 \
   --processor central:55555 \
@@ -504,17 +598,21 @@ sudo lc hunt http -i eth0 \
 
 On the processor, store keys alongside PCAPs:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 \
   --tls-keylog-dir /var/capture/keys \
   --tls-cert server.crt --tls-key server.key
 ```
 
-### Offline Analysis
+### Offline Analysis {#offline-analysis}
 
 Re-analyze stored captures with the paired key log:
 
 For CLI analysis:
+
+<!-- i18n:skip -->
 
 ```bash
 lc sniff http -r /var/capture/session.pcap --tls-keylog /var/capture/keys/session.keys
@@ -522,11 +620,13 @@ lc sniff http -r /var/capture/session.pcap --tls-keylog /var/capture/keys/sessio
 
 For TUI analysis:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch file /var/capture/session.pcap --tls-keylog /var/capture/keys/session.keys
 ```
 
-### Wireshark Integration
+### Wireshark Integration {#wireshark-integration}
 
 Lippycat's key log files are fully compatible with Wireshark:
 
@@ -537,25 +637,31 @@ Lippycat's key log files are fully compatible with Wireshark:
 
 For distributed captures, the processor writes paired files that you can hand directly to Wireshark:
 
+<!-- i18n:skip -->
+
 ```
 /var/capture/session.pcap        # Encrypted traffic
 /var/capture/keys/session.keys   # Session keys
 ```
 
-### Limitations
+### Limitations {#limitations}
 
 - **Key log required** — forward secrecy means there is no way to decrypt without session keys.
 - **No private-key-only decryption** — RSA key exchange (non-ephemeral) is rare and obsolete.
 - **Timing matters** — keys must arrive before or shortly after the TLS handshake.
 - **Same-machine access** — the key log file must be readable by the capturing node.
 
-### Protecting Key Log Files
+### Protecting Key Log Files {#protecting-key-log-files}
 
 Key log files contain session secrets that can decrypt all associated captured traffic. Treat them with the same care as private keys:
+
+<!-- i18n:skip -->
 
 ```bash
 chmod 600 /var/capture/keys/*.keys
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 chown lippycat:lippycat /var/capture/keys/
@@ -563,13 +669,15 @@ chown lippycat:lippycat /var/capture/keys/
 
 In distributed mode, keys are protected in transit by the gRPC TLS channel between hunter and processor.
 
-## Data Protection Features
+## Data Protection Features {#data-protection-features}
 
 Beyond transport encryption, lippycat includes several features for protecting sensitive data at rest and in logs.
 
-### Call-ID Sanitization
+### Call-ID Sanitization {#call-id-sanitization}
 
 SIP Call-IDs often contain user identifiers, domain names, or session tokens. When written to log files, this can lead to privacy breaches. Call-ID sanitization uses SHA-256 hashing to produce consistent but anonymized identifiers:
+
+<!-- i18n:skip -->
 
 ```
 Original:   john.doe@company.com-session-12345
@@ -577,6 +685,8 @@ Sanitized:  john.d...a1b2c3d4
 ```
 
 The sanitized form is deterministic — the same Call-ID always produces the same hash — so you can still correlate log entries across components.
+
+<!-- i18n:skip -->
 
 ```yaml
 # /etc/lippycat/config.yaml
@@ -589,9 +699,11 @@ voip:
 
 Enable this in all environments. The performance impact is negligible (<1 microsecond per Call-ID).
 
-### PCAP Encryption
+### PCAP Encryption {#pcap-encryption}
 
 PCAP files contain complete packet payloads — SIP credentials, RTP media, authentication data. Lippycat can encrypt PCAP files at rest using AES-256-GCM with PBKDF2 key derivation.
+
+<!-- i18n:skip -->
 
 ```yaml
 voip:
@@ -608,13 +720,19 @@ If the key file does not exist, lippycat generates one automatically with `0600`
 
 Generate a 256-bit encryption key:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl rand -out /etc/lippycat/keys/pcap.key 32
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 chmod 600 /etc/lippycat/keys/pcap.key
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 chown lippycat:lippycat /etc/lippycat/keys/pcap.key
@@ -624,19 +742,25 @@ chown lippycat:lippycat /etc/lippycat/keys/pcap.key
 
 **Performance:** AES-256-GCM adds roughly 5-10% CPU overhead and ~1-2% storage overhead (nonce and authentication tag per block). Hardware AES-NI acceleration reduces this significantly.
 
-### PCAP File Permissions
+### PCAP File Permissions {#pcap-file-permissions}
 
 All PCAP files are created with `0600` permissions (owner read/write only). This applies to unified PCAPs, per-call PCAPs, and auto-rotating PCAPs. No configuration is needed — this is the default behavior.
 
 Set up the output directory with matching restrictions:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo mkdir -p /var/lib/lippycat/pcaps
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 sudo chmod 700 /var/lib/lippycat/pcaps
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 sudo chown lippycat:lippycat /var/lib/lippycat/pcaps
@@ -644,13 +768,15 @@ sudo chown lippycat:lippycat /var/lib/lippycat/pcaps
 
 Even with PCAP encryption enabled, file permissions provide defense-in-depth by preventing unauthorized access to encrypted files.
 
-### Content-Length Bounds Validation
+### Content-Length Bounds Validation {#content-length-bounds-validation}
 
 SIP messages include a `Content-Length` header. Without validation, a malicious or malformed message specifying an enormous value can cause memory exhaustion. Lippycat validates Content-Length values during TCP SIP message parsing with multiple layers of protection:
 
 - String length limited to 10 characters (prevents integer overflow during parsing)
 - Configurable maximum value (default 1 MB)
 - Configurable maximum total message size (default 2 MB)
+
+<!-- i18n:skip -->
 
 ```yaml
 voip:
@@ -661,6 +787,8 @@ voip:
 
 For high-security environments, tighten these limits:
 
+<!-- i18n:skip -->
+
 ```yaml
 voip:
   security:
@@ -670,21 +798,25 @@ voip:
 
 Violations are logged as warnings with the offending value and source, allowing you to detect scanning or attack attempts.
 
-## Virtual Interface Security
+## Virtual Interface Security {#virtual-interface-security}
 
 As described in [Chapter 4](../part2-local-capture/sniff.md), lippycat can create virtual TAP/TUN interfaces for feeding filtered packets to downstream tools like Wireshark or Snort. This requires elevated privileges.
 
-### Least-Privilege Setup
+### Least-Privilege Setup {#least-privilege-setup}
 
 The recommended approach uses Linux file capabilities to grant only the `CAP_NET_ADMIN` capability:
 
 Grant the minimum required capability:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo setcap cap_net_admin+ep /usr/local/bin/lc
 ```
 
 Verify the capability:
+
+<!-- i18n:skip -->
 
 ```bash
 getcap /usr/local/bin/lc
@@ -694,13 +826,17 @@ The expected output is `/usr/local/bin/lc = cap_net_admin+ep`.
 
 The command can now run without `sudo`:
 
+<!-- i18n:skip -->
+
 ```bash
 lc sniff voip -i eth0 --virtual-interface
 ```
 
-### Privilege Dropping
+### Privilege Dropping {#privilege-dropping}
 
 When running as root is unavoidable, lippycat can drop to an unprivileged user after creating the interface:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 \
@@ -710,17 +846,21 @@ sudo lc sniff voip -i eth0 \
 
 The process creates the interface as root, then drops to the `lippycat` user's UID/GID. The packet injection loop runs unprivileged.
 
-### Network Namespace Isolation
+### Network Namespace Isolation {#network-namespace-isolation}
 
 For production deployments with strict security requirements, run the virtual interface in an isolated network namespace:
 
 Create the namespace:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo ip netns add lippycat-isolated
 ```
 
 Run with namespace isolation:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 \
@@ -730,21 +870,27 @@ sudo lc sniff voip -i eth0 \
 
 Only tools in the namespace can see the interface:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo ip netns exec lippycat-isolated wireshark -i lc0
 ```
 
 The interface is invisible to the host network stack, preventing unauthorized sniffing.
 
-### Containerized Deployment
+### Containerized Deployment {#containerized-deployment}
 
 For Docker or Kubernetes, grant `CAP_NET_ADMIN` without running the entire container as root:
 
 For Docker:
 
+<!-- i18n:skip -->
+
 ```bash
 docker run --cap-add=NET_ADMIN lippycat:latest
 ```
+
+<!-- i18n:skip -->
 
 ```yaml
 # Kubernetes
@@ -756,11 +902,12 @@ securityContext:
   runAsUser: 1000
 ```
 
-## Security Checklist
+## Security Checklist {#security-checklist}
 
 Before putting a deployment into production, verify the following:
 
 **Transport:**
+
 - [ ] TLS enabled on all gRPC connections (no `--insecure` flags)
 - [ ] `LIPPYCAT_PRODUCTION=true` set in systemd unit files
 - [ ] mTLS enabled with `--tls-client-auth` on the processor
@@ -768,59 +915,66 @@ Before putting a deployment into production, verify the following:
 - [ ] Certificate expiration monitoring in place
 
 **Data at rest:**
+
 - [ ] PCAP output directories have `0700` permissions
 - [ ] PCAP encryption enabled for sensitive deployments
 - [ ] Encryption key stored on a secure filesystem with `0600` permissions
 - [ ] Key log files (`--tls-keylog`) protected with `0600` permissions
 
 **Application:**
+
 - [ ] Call-ID sanitization enabled in configuration
 - [ ] Content-Length bounds configured appropriately
 - [ ] Virtual interfaces use file capabilities (not root)
 - [ ] Private keys not committed to version control
 
 **Operations:**
+
 - [ ] Configuration files use `0600` permissions (contain key paths)
 - [ ] Certificate rotation procedure documented and tested
 - [ ] Log access audited for key log files
 
-## Compliance Notes
+## Compliance Notes {#compliance-notes}
 
 These security features support common compliance frameworks:
 
-| Requirement | Relevant Features |
-|-------------|-------------------|
-| **GDPR** — encryption of personal data | TLS transport, PCAP encryption, Call-ID sanitization |
-| **HIPAA** — PHI safeguards | TLS transport, PCAP encryption, file permissions |
-| **PCI DSS** — Requirement 4 (encrypt in transit) | TLS/mTLS for all gRPC connections |
-| **SOX** — data integrity controls | GCM authenticated encryption, mTLS |
-| **NIST 800-53** — SC-8 (transmission confidentiality) | TLS transport encryption |
+| Requirement                                           | Relevant Features                                    |
+| ----------------------------------------------------- | ---------------------------------------------------- |
+| **GDPR** — encryption of personal data                | TLS transport, PCAP encryption, Call-ID sanitization |
+| **HIPAA** — PHI safeguards                            | TLS transport, PCAP encryption, file permissions     |
+| **PCI DSS** — Requirement 4 (encrypt in transit)      | TLS/mTLS for all gRPC connections                    |
+| **SOX** — data integrity controls                     | GCM authenticated encryption, mTLS                   |
+| **NIST 800-53** — SC-8 (transmission confidentiality) | TLS transport encryption                             |
 
-## Troubleshooting
+## Troubleshooting {#troubleshooting}
 
-### "certificate relies on legacy Common Name field, use SANs instead"
+### "certificate relies on legacy Common Name field, use SANs instead" {#certificate-relies-on-legacy-common-name-field-use-sans-instead}
 
 The certificate was generated without Subject Alternative Names. Regenerate it with a `subjectAltName` extension as shown in [Generating Certificates with OpenSSL](#generating-certificates-with-openssl).
 
 Verify SANs are present on an existing certificate:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl x509 -in server-cert.pem -noout -text | grep -A1 "Subject Alternative Name"
 ```
 
-### "TLS is disabled but --insecure flag not set"
+### "TLS is disabled but --insecure flag not set" {#tls-is-disabled-but-insecure-flag-not-set}
 
 No TLS certificates were provided and `--insecure` was not set. Either provide certificates or explicitly allow insecure mode for testing.
 
-### "No client certificate provided"
+### "No client certificate provided" {#no-client-certificate-provided}
 
 The processor requires mTLS (`--tls-client-auth`) but the hunter did not present a client certificate. Add `--tls-cert` and `--tls-key` on the hunter side.
 
-### "Failed to verify certificate"
+### "Failed to verify certificate" {#failed-to-verify-certificate}
 
 Certificate validation failed. Common causes:
 
 Check whether the certificate has expired:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl x509 -in cert.pem -noout -enddate
@@ -828,17 +982,21 @@ openssl x509 -in cert.pem -noout -enddate
 
 Check whether the hostname matches the SANs:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl x509 -in cert.pem -noout -text | grep -A2 "Subject Alternative Name"
 ```
 
 Verify the certificate chain:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl verify -CAfile ca-cert.pem server-cert.pem
 ```
 
-### TLS decryption not working
+### TLS decryption not working {#tls-decryption-not-working}
 
 1. Verify the key log file exists and contains entries.
 2. Check that keys were captured during the TLS handshake (keys cannot be generated after the fact).

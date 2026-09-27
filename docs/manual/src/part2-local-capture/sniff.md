@@ -1,12 +1,14 @@
-# CLI Capture with `lc sniff`
+# CLI Capture with `lc sniff` {#cli-capture-with-lc-sniff}
 
 `lc sniff` is the foundation of lippycat — a CLI packet capture tool analogous to tcpdump or tshark, but with built-in protocol analysis and VoIP awareness.
 
-## Your First Capture
+## Your First Capture {#your-first-capture}
 
-### Selecting an Interface
+### Selecting an Interface {#selecting-an-interface}
 
 First, find out which interfaces are available:
+
+<!-- i18n:skip -->
 
 ```bash
 lc list interfaces
@@ -16,9 +18,11 @@ This shows all network interfaces with their addresses and status. Use `--json` 
 
 > **Tip**: `lc list interfaces` filters out loopback, Docker, and VM interfaces by default to show only relevant capture interfaces.
 
-### Basic Capture
+### Basic Capture {#basic-capture}
 
 Start capturing on an interface:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0
@@ -26,15 +30,19 @@ sudo lc sniff -i eth0
 
 The default interface is `any` (all interfaces). You can specify multiple interfaces with comma separation:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0,eth1
 ```
 
 Press `Ctrl+C` to stop. lippycat prints a summary of packets captured.
 
-### Output Format
+### Output Format {#output-format}
 
 `lc sniff` prints each captured packet to stdout as one line of JSON. This makes it easy to pipe into `jq`, `grep`, or other tools. Switch to text format for human-readable output:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 --format text
@@ -44,11 +52,13 @@ See [Working with JSON Output](#working-with-json-output) for piping, filtering,
 
 Use `-q` (quiet mode) to suppress packet output for better performance when you only need PCAP file output.
 
-### Basic Filtering
+### Basic Filtering {#basic-filtering}
 
 Use BPF filters with `-f` / `--filter` to focus on specific traffic (see [Appendix C: BPF Filter Reference](../appendices/bpf-reference.md) for the full syntax):
 
 Only capture DNS traffic:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -f "port 53"
@@ -56,11 +66,15 @@ sudo lc sniff -i eth0 -f "port 53"
 
 Capture traffic to or from a specific host:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0 -f "host 10.0.0.1"
 ```
 
 Only capture TCP traffic on port 5060 (SIP):
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -f "tcp port 5060"
@@ -68,21 +82,27 @@ sudo lc sniff -i eth0 -f "tcp port 5060"
 
 Combine conditions:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0 -f "host 10.0.0.1 and port 5060"
 ```
 
-### Promiscuous Mode
+### Promiscuous Mode {#promiscuous-mode}
 
 By default, the interface only captures traffic destined for your machine. Enable promiscuous mode to see all traffic on the segment:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -p
 ```
 
-### Reading from PCAP Files
+### Reading from PCAP Files {#reading-from-pcap-files}
 
 Analyze existing PCAP files instead of live interfaces:
+
+<!-- i18n:skip -->
 
 ```bash
 lc sniff -r capture.pcap
@@ -90,10 +110,12 @@ lc sniff -r capture.pcap
 
 No elevated privileges needed for reading files.
 
-### Structured protocol logs
+### Structured protocol logs {#structured-protocol-logs}
 
 Set `--log-dir` to write normalized protocol files while retaining the existing
 packet output on stdout. These parent flags work on every protocol subcommand:
+
+<!-- i18n:skip -->
 
 ```bash
 lc sniff http -r capture.pcap --log-dir ./logs --log-streams conn,http,files
@@ -104,15 +126,17 @@ Logging is off by default. Output is Zeek-style TSV by default, or JSONL with
 shutdown to flush files. See [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
 for all schemas, flags, rotation, completeness semantics, and privacy guidance.
 
-## Working with JSON Output
+## Working with JSON Output {#working-with-json-output}
 
 All protocol analyzers share the same JSON output structure based on `PacketDisplay`. Every packet has common fields (timestamp, source/destination IP and port, protocol, length) plus an optional protocol-specific metadata object (`VoIPData`, `DNSData`, `TLSData`, `HTTPData`, `EmailData`, or `RADIUSData`).
 
-### stdout/stderr Separation
+### stdout/stderr Separation {#stdoutstderr-separation}
 
 lippycat follows Unix conventions: packet data goes to stdout, log messages go to stderr. This means you can pipe packet data cleanly while still seeing logs:
 
 Pipe packets to `jq` while keeping logs visible on the terminal:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0 | jq '.DNSData.QueryName'
@@ -120,21 +144,27 @@ sudo lc sniff dns -i eth0 | jq '.DNSData.QueryName'
 
 Redirect logs to a file and pipe packets to processing:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 2>dns-capture.log | jq '.DNSData.QueryName'
 ```
 
 Discard logs entirely:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 2>/dev/null | jq '.DNSData.QueryName'
 ```
 
-### Cross-Protocol Analysis
+### Cross-Protocol Analysis {#cross-protocol-analysis}
 
 Because all protocols share the same base fields, you can capture without a protocol subcommand and filter by protocol-specific metadata in `jq`:
 
 Capture general traffic, then filter for DNS and TLS:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 2>/dev/null | \
@@ -145,11 +175,13 @@ sudo lc sniff -i eth0 2>/dev/null | \
   else empty end'
 ```
 
-### Saving and Replaying
+### Saving and Replaying {#saving-and-replaying}
 
 Combine JSON output with PCAP writing for both structured analysis and full packet fidelity:
 
 Write PCAP and JSON simultaneously:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0 -w dns-traffic.pcap 2>/dev/null > dns-analysis.jsonl
@@ -157,17 +189,21 @@ sudo lc sniff dns -i eth0 -w dns-traffic.pcap 2>/dev/null > dns-analysis.jsonl
 
 Replay the PCAP later with a different protocol analyzer:
 
+<!-- i18n:skip -->
+
 ```bash
 lc sniff tls -r dns-traffic.pcap
 ```
 
 The PCAP file contains the raw packets and can be re-analyzed with any protocol subcommand or opened in Wireshark.
 
-## Protocol Modes
+## Protocol Modes {#protocol-modes}
 
 `lc sniff` has protocol-specific subcommands that enable deep analysis. Each adds protocol-aware filtering, correlation, and output.
 
-### DNS Analysis
+### DNS Analysis {#dns-analysis}
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0
@@ -186,7 +222,9 @@ Captures DNS queries and responses with query/response correlation and response 
 | `--track-queries`    | `true`  | Query/response correlation with RTT              |
 | `--detect-tunneling` | `true`  | DNS tunneling detection via entropy analysis     |
 
-### TLS Inspection
+### TLS Inspection {#tls-inspection}
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff tls -i eth0
@@ -208,7 +246,9 @@ Analyzes TLS handshakes without decrypting traffic. Extracts SNI, certificate de
 
 Each fingerprint flag has a corresponding `-file` variant for bulk loading from files.
 
-### HTTP Capture
+### HTTP Capture {#http-capture}
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff http -i eth0
@@ -234,7 +274,9 @@ Reconstructs HTTP request/response pairs from TCP streams with RTT measurement.
 
 Each pattern flag has a corresponding `-file` variant for bulk loading (e.g., `--hosts-file`, `--paths-file`). Bulk keyword matching uses the Aho-Corasick algorithm via `--keywords-file`.
 
-### Email Monitoring
+### Email Monitoring {#email-monitoring}
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff email -i eth0
@@ -257,7 +299,9 @@ Captures SMTP, IMAP, and POP3 sessions with session tracking.
 | `--capture-body`   | `false`      | Enable body capture                           |
 | `--track-sessions` | `true`       | Session tracking and correlation              |
 
-### RADIUS Authentication and Accounting
+### RADIUS Authentication and Accounting {#radius-authentication-and-accounting}
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff radius -i eth0
@@ -268,31 +312,35 @@ responses with observed requests, and redacts credential-bearing attributes
 from routine output. Narrow capture to an exact account or deployment-bound
 line identity when required:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff radius -i eth0 --radius-username 'alice@example.test'
 ```
 
 **Key flags:**
 
-| Flag                           | Default     | Description                                                       |
-| ------------------------------ | ----------- | ----------------------------------------------------------------- |
-| `--radius-port`                | `1812,1813` | Additional RADIUS UDP ports                                       |
-| `--radius-username`            | —           | Exact complete User-Name                                          |
-| `--radius-mac`                 | —           | Exact uppercase-hyphen Calling-Station-Id                          |
-| `--radius-mac-profile`         | —           | Required with MAC: `calling-station-id-uppercase-hyphen-v1`       |
-| `--radius-attribute`           | —           | Complete hex AVP; repeat for conjunctive matching                  |
-| `--radius-line-profile`        | —           | Line identity source: `nas-port-id` or `agent-circuit-id`          |
-| `--radius-line-id`             | —           | Exact line identity value                                         |
-| `--radius-transaction-timeout` | `30s`       | Request/response association lifetime                             |
+| Flag                           | Default     | Description                                                 |
+| ------------------------------ | ----------- | ----------------------------------------------------------- |
+| `--radius-port`                | `1812,1813` | Additional RADIUS UDP ports                                 |
+| `--radius-username`            | —           | Exact complete User-Name                                    |
+| `--radius-mac`                 | —           | Exact uppercase-hyphen Calling-Station-Id                   |
+| `--radius-mac-profile`         | —           | Required with MAC: `calling-station-id-uppercase-hyphen-v1` |
+| `--radius-attribute`           | —           | Complete hex AVP; repeat for conjunctive matching           |
+| `--radius-line-profile`        | —           | Line identity source: `nas-port-id` or `agent-circuit-id`   |
+| `--radius-line-id`             | —           | Exact line identity value                                   |
+| `--radius-transaction-timeout` | `30s`       | Request/response association lifetime                       |
 
 The [RADIUS capture and POI chapter](../part5-advanced/radius.md) documents all
 shared flags, scope binding, state limits, and optional LI delivery.
 
-### VoIP Analysis
+### VoIP Analysis {#voip-analysis}
 
 VoIP is lippycat's most feature-rich protocol mode:
 
 Start a basic VoIP capture:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0
@@ -300,11 +348,15 @@ sudo lc sniff voip -i eth0
 
 Filter by a SIP user (wildcards are supported):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -u alicent
 ```
 
 Use a suffix match:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -u "*456789"
@@ -312,17 +364,23 @@ sudo lc sniff voip -i eth0 -u "*456789"
 
 Filter for multiple users:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -u "alicent,robb"
 ```
 
 Restrict capture to a specific SIP port:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -S 5060
 ```
 
 Use a custom RTP port range:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -R 8000-9000
@@ -343,11 +401,13 @@ sudo lc sniff voip -i eth0 -R 8000-9000
 | `--esp-heuristic`        | —     | `false`       | Decapsulate ESP by sniffing payload content                                  |
 | `--esp-icv-size`         | —     | `-1` (auto)   | ICV size in bytes: `0`, `8`, `12`, or `16`                                   |
 
-#### ESP-NULL Decapsulation
+#### ESP-NULL Decapsulation {#esp-null-decapsulation}
 
 ESP decapsulation is off by default: without `--esp-null` or `--esp-heuristic`, ESP packets are passed through untouched and are not admitted by the VoIP BPF filter.
 
 Enable it for VoIP traffic inside ESP-NULL tunnels (common in IPsec deployments where encryption is disabled but ESP framing remains):
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 --esp-null --esp-icv-size 12
@@ -357,11 +417,13 @@ lippycat strips the ESP header and ICV trailer, exposing the inner UDP/SIP/RTP p
 
 `--esp-heuristic` identifies ESP-NULL by inspecting payload content instead of the ESP trailer. Prefer `--esp-null` where the SA is known to be NULL-encrypted: on genuinely encrypted SAs the content heuristic can mistake ciphertext for inner traffic.
 
-## PCAP File Output
+## PCAP File Output {#pcap-file-output}
 
-### Writing PCAP Files
+### Writing PCAP Files {#writing-pcap-files}
 
 Save captured packets for offline analysis with `-w`:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -w capture.pcap
@@ -373,19 +435,25 @@ Each protocol subcommand also supports `-w`:
 
 For DNS:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 -w dns-traffic.pcap
 ```
 
 For VoIP:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -w voip-traffic.pcap
 ```
 
-### Per-Call PCAP (VoIP)
+### Per-Call PCAP (VoIP) {#per-call-pcap-voip}
 
 In VoIP mode, the `-w` flag automatically creates separate PCAP files per call, split by SIP signaling and RTP media:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 --sip-user alicent -w /var/capture/alicent
@@ -395,9 +463,9 @@ This creates `/var/capture/alicent_sip_<callid>.pcap` and `/var/capture/alicent_
 
 For more advanced per-call PCAP features (directory organization, filename patterns, completion hooks), see [Central Aggregation with `lc process`](../part3-distributed/process.md) and [Standalone Mode with `lc tap`](../part3-distributed/tap.md).
 
-## Performance Tuning
+## Performance Tuning {#performance-tuning}
 
-### TCP Performance Modes
+### TCP Performance Modes {#tcp-performance-modes}
 
 TCP reassembly is needed for SIP-over-TCP and HTTP. lippycat offers pre-configured performance profiles via `-M` / `--tcp-performance-mode`:
 
@@ -408,15 +476,19 @@ TCP reassembly is needed for SIP-over-TCP and HTTP. lippycat offers pre-configur
 | `latency`    | 200 MB        | Real-time analysis            |
 | `memory`     | 25 MB         | Embedded systems, low traffic |
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -M throughput
 ```
 
 For fine-grained control, individual TCP parameters can be tuned (goroutine limits, buffer sizes, timeouts). See `lc sniff voip --help` for the full list.
 
-### Port Narrowing
+### Port Narrowing {#port-narrowing}
 
 On TCP-heavy networks, use explicit SIP and RTP port constraints to keep the capture focused while still allowing SIP-over-TCP when it exists:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -S 5060 -R 10000-20000
@@ -424,9 +496,11 @@ sudo lc sniff voip -i eth0 -S 5060 -R 10000-20000
 
 The older `--udp-only` VoIP flag is still accepted for compatibility but hidden and deprecated because it can miss TCP SIP traffic.
 
-### GPU Acceleration
+### GPU Acceleration {#gpu-acceleration}
 
 Offload application-filter pattern matching to CUDA for high-throughput capture:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -g auto
@@ -444,9 +518,11 @@ OpenCL is not currently implemented. The value is accepted for configuration com
 
 See [Performance Optimization](../part5-advanced/performance.md) for GPU configuration and benchmarks.
 
-### Virtual Interface Injection
+### Virtual Interface Injection {#virtual-interface-injection}
 
 Inject filtered packets into a virtual network interface for consumption by other tools:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -V --vif-name lc0

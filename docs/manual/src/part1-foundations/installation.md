@@ -1,13 +1,16 @@
-# Installation & Setup
+# Installation & Setup {#installation--setup}
 
-## Building from Source
+## Building from Source {#building-from-source}
 
 Requirements:
+
 - Go 1.25 or later
 - Make
 - libpcap development headers (`libpcap-dev` on Debian/Ubuntu, `libpcap-devel` on RHEL/Fedora)
 
 Clone the repository:
+
+<!-- i18n:skip -->
 
 ```bash
 git clone https://github.com/endorses/lippycat.git
@@ -15,11 +18,15 @@ git clone https://github.com/endorses/lippycat.git
 
 Enter the project directory:
 
+<!-- i18n:skip -->
+
 ```bash
 cd lippycat
 ```
 
 Create a development build (complete suite, with debug symbols):
+
+<!-- i18n:skip -->
 
 ```bash
 make build
@@ -27,40 +34,48 @@ make build
 
 Alternatively, create an optimized release build (stripped):
 
+<!-- i18n:skip -->
+
 ```bash
 make build-release
 ```
 
 For a quick development build without version information:
 
+<!-- i18n:skip -->
+
 ```bash
 make dev
 ```
 
-### Specialized Builds
+### Specialized Builds {#specialized-builds}
 
 lippycat uses Go build tags to create smaller, purpose-specific binaries. If you only need a subset of functionality:
 
 Build all variants in `bin/`:
 
+<!-- i18n:skip -->
+
 ```bash
 make binaries
 ```
 
-| Target | Binary | Purpose | Approximate Size |
-|--------|--------|---------|-----------------|
-| `make all` | `bin/lc` | Complete suite | 22 MB |
-| `make hunter` | `bin/lc-hunt` | Edge capture agent | 18 MB |
-| `make processor` | `bin/lc-process` | Central aggregation | 14 MB |
-| `make tap` | `bin/lc-tap` | Standalone capture + processing | — |
-| `make cli` | `bin/lc-cli` | CLI commands only | — |
-| `make tui` | `bin/lc-tui` | TUI interface only | — |
+| Target           | Binary           | Purpose                         | Approximate Size |
+| ---------------- | ---------------- | ------------------------------- | ---------------- |
+| `make all`       | `bin/lc`         | Complete suite                  | 22 MB            |
+| `make hunter`    | `bin/lc-hunt`    | Edge capture agent              | 18 MB            |
+| `make processor` | `bin/lc-process` | Central aggregation             | 14 MB            |
+| `make tap`       | `bin/lc-tap`     | Standalone capture + processing | —                |
+| `make cli`       | `bin/lc-cli`     | CLI commands only               | —                |
+| `make tui`       | `bin/lc-tui`     | TUI interface only              | —                |
 
 For most users, the complete suite (`make build`) is the simplest option. Specialized builds are useful for production deployments where you want minimal binaries on each node.
 
-### GPU Acceleration
+### GPU Acceleration {#gpu-acceleration}
 
 For CUDA GPU acceleration (requires NVIDIA GPU and CUDA toolkit):
+
+<!-- i18n:skip -->
 
 ```bash
 make build-cuda
@@ -68,9 +83,11 @@ make build-cuda
 
 See [Performance Optimization](../part5-advanced/performance.md) for details on GPU backends.
 
-## Install Targets
+## Install Targets {#install-targets}
 
 Install to `$GOPATH/bin`:
+
+<!-- i18n:skip -->
 
 ```bash
 make install
@@ -78,25 +95,31 @@ make install
 
 Install system-wide to `/usr/local/bin` (requires sudo):
 
+<!-- i18n:skip -->
+
 ```bash
 make install-system
 ```
 
-## Permissions
+## Permissions {#permissions}
 
 Packet capture requires access to raw network sockets. You have two options:
 
-### Option 1: Run with sudo
+### Option 1: Run with sudo {#option-1-run-with-sudo}
 
 The simplest approach for development and testing:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0
 ```
 
-### Option 2: Linux Capabilities (Recommended)
+### Option 2: Linux Capabilities (Recommended) {#option-2-linux-capabilities-recommended}
 
 Grant only the specific capability needed:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo setcap cap_net_raw+ep $(which lc)
@@ -104,13 +127,15 @@ sudo setcap cap_net_raw+ep $(which lc)
 
 After this, `lc` can capture without sudo:
 
+<!-- i18n:skip -->
+
 ```bash
 lc sniff -i eth0
 ```
 
 > **Note**: The capability is set on the binary file. If you rebuild and overwrite the binary, you need to set the capability again.
 
-## Configuration
+## Configuration {#configuration}
 
 lippycat looks for a YAML configuration file in these locations (in priority order):
 
@@ -120,11 +145,15 @@ lippycat looks for a YAML configuration file in these locations (in priority ord
 
 **Precedence order** (highest wins):
 
+<!-- i18n:skip -->
+
 ```
 CLI flags > Environment variables > Config file > Defaults
 ```
 
 Example configuration:
+
+<!-- i18n:skip -->
 
 ```yaml
 # PCAP read timeout (ms)
@@ -146,17 +175,19 @@ voip:
 
 A comprehensive `example-config.yaml` is included in the repository root with all available settings documented. See [Appendix B: Configuration Reference](../appendices/config-reference.md) for the full schema.
 
-### Environment Variables
+### Environment Variables {#environment-variables}
 
-| Variable | Purpose |
-|----------|---------|
+| Variable              | Purpose                                                            |
+| --------------------- | ------------------------------------------------------------------ |
 | `LIPPYCAT_PRODUCTION` | Set to `true` to enforce TLS encryption (blocks `--insecure` flag) |
 
-## Verifying Installation
+## Verifying Installation {#verifying-installation}
 
 After installation, verify everything works:
 
 Check the version:
+
+<!-- i18n:skip -->
 
 ```bash
 lc version
@@ -164,11 +195,15 @@ lc version
 
 List available network interfaces:
 
+<!-- i18n:skip -->
+
 ```bash
 lc list interfaces
 ```
 
 Show the current configuration:
+
+<!-- i18n:skip -->
 
 ```bash
 lc show config

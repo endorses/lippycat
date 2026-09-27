@@ -1,8 +1,10 @@
-# TLS Inspection
+# TLS Inspection {#tls-inspection}
 
 The TLS analyzer inspects handshake messages without decrypting traffic. It extracts connection metadata from ClientHello and ServerHello messages, including SNI, cipher suites, and TLS fingerprints.
 
-## TLS Handshake Analysis
+## TLS Handshake Analysis {#tls-handshake-analysis}
+
+<!-- i18n:skip -->
 
 ```mermaid
 sequenceDiagram
@@ -27,6 +29,8 @@ lippycat captures and parses the unencrypted handshake messages at the start of 
 
 Start TLS capture:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff tls -i eth0
 ```
@@ -35,11 +39,15 @@ Filter by Server Name Indication (SNI):
 
 For a specific domain:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff tls -i eth0 --sni example.com
 ```
 
 For a wildcard:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff tls -i eth0 --sni "*.example.com"
@@ -47,13 +55,17 @@ sudo lc sniff tls -i eth0 --sni "*.example.com"
 
 For bulk filtering from a file:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff tls -i eth0 --sni-file domains.txt
 ```
 
-## JA3 and JA3S Fingerprinting
+## JA3 and JA3S Fingerprinting {#ja3-and-ja3s-fingerprinting}
 
 JA3 creates a fingerprint of a TLS client by hashing the following fields from the ClientHello message:
+
+<!-- i18n:skip -->
 
 ```
 TLS Version | Cipher Suites | Extensions | Elliptic Curves | EC Point Formats
@@ -87,11 +99,15 @@ lippycat computes both automatically:
 
 To capture traffic matching a known malware JA3 fingerprint:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff tls -i eth0 --ja3 "e7d705a3286e19ea42f587b344ee6865"
 ```
 
 To load multiple fingerprints from a threat intelligence file:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff tls -i eth0 --ja3-file known-bad-ja3.txt
@@ -101,6 +117,8 @@ sudo lc sniff tls -i eth0 --ja3-file known-bad-ja3.txt
 
 To list unique JA3 fingerprints with SNI:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff tls -i eth0 2>/dev/null | \
   jq -r 'select(.TLSData.HandshakeType == "ClientHello") |
@@ -108,7 +126,7 @@ sudo lc sniff tls -i eth0 2>/dev/null | \
   sort -u
 ```
 
-## TLS Metadata Fields
+## TLS Metadata Fields {#tls-metadata-fields}
 
 | Field           | Description                                | JSON Path                  |
 | --------------- | ------------------------------------------ | -------------------------- |
@@ -121,9 +139,11 @@ sudo lc sniff tls -i eth0 2>/dev/null | \
 | Handshake Time  | ClientHello to ServerHello latency (ms)    | `.TLSData.HandshakeTimeMs` |
 | Risk Score      | Security risk assessment (0.0-1.0)         | `.TLSData.RiskScore`       |
 
-## Common TLS Investigations
+## Common TLS Investigations {#common-tls-investigations}
 
 **Detect weak TLS versions:**
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff tls -i eth0 2>/dev/null | \
@@ -135,6 +155,8 @@ sudo lc sniff tls -i eth0 2>/dev/null | \
 
 lippycat correlates handshake pairs when `--track-connections` is enabled (the default). Correlated pairs include the handshake latency:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff tls -i eth0 2>/dev/null | \
   jq -r 'select(.TLSData.CorrelatedPeer) |
@@ -143,6 +165,8 @@ sudo lc sniff tls -i eth0 2>/dev/null | \
 ```
 
 **High-risk connections:**
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff tls -i eth0 2>/dev/null | \

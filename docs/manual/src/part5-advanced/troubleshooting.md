@@ -1,14 +1,14 @@
-# Troubleshooting
+# Troubleshooting {#troubleshooting}
 
 When something goes wrong during a capture, you need answers quickly. This chapter organizes common problems by category, each following the same structure: what you see (symptom), why it happens (cause), and what to do about it (solution). Diagnostic commands are included so you can confirm the root cause before applying a fix.
 
 If you have not yet read [Chapter 12: Operations Runbook](../part4-administration/operations.md), start there for health checks and monitoring scripts. This chapter goes deeper into specific failure modes.
 
-## Capture Issues
+## Capture Issues {#capture-issues}
 
 These problems affect all capture modes — `sniff`, `hunt`, and `tap`.
 
-### Permission Denied
+### Permission Denied {#permission-denied}
 
 **Symptom:** lippycat exits immediately with `operation not permitted` or `permission denied`.
 
@@ -18,17 +18,23 @@ These problems affect all capture modes — `sniff`, `hunt`, and `tap`.
 
 Run with `sudo`:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0
 ```
 
 Or grant capabilities to the binary so it can run without root:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lc
 ```
 
 Verify the capabilities are set:
+
+<!-- i18n:skip -->
 
 ```bash
 getcap /usr/local/bin/lc
@@ -38,7 +44,7 @@ Expected output: `/usr/local/bin/lc cap_net_admin,cap_net_raw=eip`.
 
 After setting capabilities, any non-root user can run captures. Note that `setcap` must be reapplied after reinstalling or upgrading the binary.
 
-### Attribute Capture Loss by Stage
+### Attribute Capture Loss by Stage {#attribute-capture-loss-by-stage}
 
 Loss counters are cumulative for one capture session and reset when that capture
 source restarts. Classify the first non-zero local stage before assigning a root
@@ -69,7 +75,7 @@ indicates that downstream processing is not draining fast enough. Increasing a
 finite queue can absorb a bounded burst, but sustained overload requires higher
 processing/forwarding throughput or a narrower capture filter.
 
-### Interface Not Found
+### Interface Not Found {#interface-not-found}
 
 **Symptom:** lippycat reports `no such device` or the interface name is not recognized.
 
@@ -79,11 +85,15 @@ processing/forwarding throughput or a narrower capture filter.
 
 List all interfaces with their current state:
 
+<!-- i18n:skip -->
+
 ```bash
 ip link show
 ```
 
 Or use lippycat's built-in listing:
+
+<!-- i18n:skip -->
 
 ```bash
 lc list interfaces
@@ -93,13 +103,15 @@ lc list interfaces
 
 Use the correct interface name from the listing above. If you are unsure which interface carries the traffic you want, capture on all interfaces:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip --interface any
 ```
 
 The `any` pseudo-interface captures from all active interfaces simultaneously. This is useful for diagnosis but may increase CPU load in production — switch to a specific interface once you identify the correct one.
 
-### No Packets Captured
+### No Packets Captured {#no-packets-captured}
 
 **Symptom:** lippycat starts without error but shows zero packets.
 
@@ -114,11 +126,15 @@ The `any` pseudo-interface captures from all active interfaces simultaneously. T
 
 Confirm traffic exists on the interface with tcpdump:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo tcpdump -i eth0 -c 10 -n
 ```
 
 If capturing VoIP, check for SIP traffic specifically:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo tcpdump -i eth0 -n port 5060
@@ -126,11 +142,15 @@ sudo tcpdump -i eth0 -n port 5060
 
 Check firewall rules:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo iptables -L -n -v
 ```
 
 For nftables:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo nft list ruleset
@@ -141,13 +161,15 @@ sudo nft list ruleset
 - If `tcpdump` sees traffic but lippycat does not, check your BPF filter. Start without a filter and add constraints incrementally.
 - Enable promiscuous mode if capturing traffic not addressed to this host:
 
+  <!-- i18n:skip -->
+
   ```bash
   sudo lc sniff -i eth0 --promisc
   ```
 
 - If a firewall is dropping packets, add an exception for the capture interface or move the capture point before the firewall rules (e.g., use a TAP device or mirror port).
 
-### PCAP File Issues
+### PCAP File Issues {#pcap-file-issues}
 
 **Symptom:** PCAP files are not created, are empty, or appear corrupted.
 
@@ -157,17 +179,23 @@ sudo nft list ruleset
 
 Check disk space:
 
+<!-- i18n:skip -->
+
 ```bash
 df -h /var/capture/
 ```
 
 Check directory permissions:
 
+<!-- i18n:skip -->
+
 ```bash
 ls -la /var/capture/
 ```
 
 Verify file integrity with capinfos (Wireshark tools):
+
+<!-- i18n:skip -->
 
 ```bash
 capinfos capture.pcap
@@ -180,11 +208,11 @@ capinfos capture.pcap
 - If a PCAP file appears truncated, the capture process likely crashed or was killed with `SIGKILL`. Use `SIGTERM` or `SIGINT` (Ctrl+C) for graceful shutdown, which flushes and closes all open PCAP files.
 - For auto-rotating PCAP files, check that the rotation configuration does not create files faster than the disk can handle.
 
-## TCP Reassembly Problems
+## TCP Reassembly Problems {#tcp-reassembly-problems}
 
 TCP reassembly issues primarily affect SIP-over-TCP capture. See [Chapter 4](../part2-local-capture/sniff.md) for how TCP performance modes work.
 
-### No TCP SIP Messages Captured
+### No TCP SIP Messages Captured {#no-tcp-sip-messages-captured}
 
 **Symptom:** Zero active TCP streams. No SIP calls detected despite TCP SIP traffic being present on the network.
 
@@ -194,17 +222,23 @@ TCP reassembly issues primarily affect SIP-over-TCP capture. See [Chapter 4](../
 
 Verify TCP SIP traffic reaches the interface:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo tcpdump -i eth0 -n port 5060 and tcp -c 5
 ```
 
 Run lippycat with debug logging to trace processing:
 
+<!-- i18n:skip -->
+
 ```bash
 LOG_LEVEL=debug sudo lc sniff voip -i eth0 --tcp-performance-mode latency 2> debug.log
 ```
 
 Search for TCP-related messages:
+
+<!-- i18n:skip -->
 
 ```bash
 grep -i "tcp\|sip\|stream" debug.log
@@ -223,7 +257,7 @@ If `tcpdump` shows no traffic:
 1. SIP may be on a non-standard port. Check your PBX configuration.
 2. A firewall may be blocking port 5060. Check `iptables -L -n`.
 
-### Streams Created but No SIP Detected
+### Streams Created but No SIP Detected {#streams-created-but-no-sip-detected}
 
 **Symptom:** TCP streams appear in metrics but no Call-IDs are extracted. Buffers accumulate without being flushed.
 
@@ -231,11 +265,15 @@ If `tcpdump` shows no traffic:
 
 **Diagnosis:**
 
+<!-- i18n:skip -->
+
 ```bash
 LOG_LEVEL=debug sudo lc sniff voip -i eth0 --tcp-performance-mode latency 2> debug.log
 ```
 
 Then search the log for fragmentation, reassembly, content-length, or malformed-message errors:
+
+<!-- i18n:skip -->
 
 ```bash
 grep -i "fragment\|reassembl\|content-length\|malform" debug.log
@@ -245,12 +283,16 @@ grep -i "fragment\|reassembl\|content-length\|malform" debug.log
 
 1. Increase the stream timeout to give fragmented messages more time to complete:
 
+   <!-- i18n:skip -->
+
    ```yaml
    voip:
      tcp_stream_timeout: 120s
    ```
 
 2. Switch to `latency` mode for faster per-segment processing:
+
+   <!-- i18n:skip -->
 
    ```bash
    sudo lc sniff voip -i eth0 --tcp-performance-mode latency
@@ -262,7 +304,7 @@ grep -i "fragment\|reassembl\|content-length\|malform" debug.log
    credible SIP start line; a correctly framed but prohibited `Content-Length`
    remains a hard policy rejection.
 
-### SIP Parser Recovery Counters
+### SIP Parser Recovery Counters {#sip-parser-recovery-counters}
 
 TCP loss, a forced reassembly flush, or a full post-reassembly stream queue can
 leave the parser in the middle of a SIP header or body. The stream is re-armed
@@ -297,7 +339,7 @@ correctly CRLF-framed messages are rejected rather than skipped in search of a
 later message. Fix or filter the offending sender; do not interpret those hard
 rejections as ordinary loss recovery.
 
-### High Memory Usage During TCP Capture
+### High Memory Usage During TCP Capture {#high-memory-usage-during-tcp-capture}
 
 **Symptom:** Memory usage grows continuously. The system becomes unresponsive or the OOM killer terminates the process.
 
@@ -307,12 +349,17 @@ rejections as ordinary loss recovery.
 
 Monitor memory usage:
 
+<!-- i18n:skip -->
+
 ```bash
 watch -n 2 'ps -o pid,rss,vsz,comm -p $(pgrep lc)'
 ```
+
 **Solution:**
 
 Switch to memory-optimized mode and set explicit limits:
+
+<!-- i18n:skip -->
 
 ```yaml
 voip:
@@ -326,12 +373,14 @@ voip:
 
 For environments with highly variable load, use adaptive buffering:
 
+<!-- i18n:skip -->
+
 ```yaml
 voip:
   tcp_buffer_strategy: "adaptive"
 ```
 
-### High CPU Usage During TCP Capture
+### High CPU Usage During TCP Capture {#high-cpu-usage-during-tcp-capture}
 
 **Symptom:** CPU usage saturates one or more cores. Packet drops begin.
 
@@ -341,6 +390,8 @@ voip:
 
 Reduce goroutine concurrency and enable backpressure:
 
+<!-- i18n:skip -->
+
 ```yaml
 voip:
   max_goroutines: 500
@@ -349,13 +400,15 @@ voip:
 
 For high-volume environments, switch to throughput mode with larger batches:
 
+<!-- i18n:skip -->
+
 ```yaml
 voip:
   tcp_performance_mode: "throughput"
   tcp_batch_size: 64
 ```
 
-### Packet Drops and Missed Calls
+### Packet Drops and Missed Calls {#packet-drops-and-missed-calls}
 
 **Symptom:** The dropped-streams metric increases. Known calls are missing from output.
 
@@ -364,6 +417,8 @@ voip:
 **Solution:**
 
 Increase queue capacity and processing throughput:
+
+<!-- i18n:skip -->
 
 ```yaml
 voip:
@@ -375,21 +430,21 @@ voip:
 
 If drops persist, consider offloading to a distributed setup with dedicated hunters ([Chapter 7](../part3-distributed/hunt.md)) so the processing load is spread across machines.
 
-### TCP Error Codes
+### TCP Error Codes {#tcp-error-codes}
 
-| Code | Meaning | Action |
-|------|---------|--------|
-| TCP-001 | Stream creation failed | Reduce `max_goroutines` or increase system `ulimit -n` |
-| TCP-002 | Buffer overflow | Enable `memory_optimization`, reduce `max_tcp_buffers` |
-| TCP-003 | Assembly timeout | Increase `tcp_stream_timeout` |
-| TCP-004 | Invalid SIP format | Inspect traffic with tcpdump; check for malformed messages |
-| TCP-005 | Resource exhaustion | Restart with `tcp_performance_mode: memory` |
+| Code    | Meaning                | Action                                                     |
+| ------- | ---------------------- | ---------------------------------------------------------- |
+| TCP-001 | Stream creation failed | Reduce `max_goroutines` or increase system `ulimit -n`     |
+| TCP-002 | Buffer overflow        | Enable `memory_optimization`, reduce `max_tcp_buffers`     |
+| TCP-003 | Assembly timeout       | Increase `tcp_stream_timeout`                              |
+| TCP-004 | Invalid SIP format     | Inspect traffic with tcpdump; check for malformed messages |
+| TCP-005 | Resource exhaustion    | Restart with `tcp_performance_mode: memory`                |
 
-## Distributed Connectivity
+## Distributed Connectivity {#distributed-connectivity}
 
 These issues affect hunter-to-processor and processor-to-processor communication. See [Chapter 6](../part3-distributed/architecture.md) for the distributed architecture overview.
 
-### TLS Handshake Failure
+### TLS Handshake Failure {#tls-handshake-failure}
 
 **Symptom:** Hunter fails to connect with `transport: authentication handshake failed` or `certificate verify failed`.
 
@@ -404,17 +459,23 @@ These issues affect hunter-to-processor and processor-to-processor communication
 
 Check certificate expiry and SANs:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl x509 -in server.crt -noout -dates -ext subjectAltName
 ```
 
 Test TLS connection manually:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl s_client -connect processor.example.com:55555 -CAfile ca.crt
 ```
 
 Check if the CA matches:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl verify -CAfile ca.crt server.crt
@@ -428,15 +489,18 @@ For missing SANs, regenerate the server certificate with the correct entries. Th
 
 Example: certificate extensions file with SANs:
 
+<!-- i18n:skip -->
+
 ```bash
 cat > server-ext.conf <<EOF
 subjectAltName = DNS:processor.example.com,DNS:processor,IP:10.0.1.50,IP:127.0.0.1
 extendedKeyUsage = serverAuth
 EOF
 ```
+
 For hostname mismatch, either regenerate the certificate with the correct SAN entries or change the hunter's `--processor` address to match what the certificate contains.
 
-### Mutual TLS (mTLS) Rejection
+### Mutual TLS (mTLS) Rejection {#mutual-tls-mtls-rejection}
 
 **Symptom:** Hunter connects but is immediately disconnected. Processor logs show `client certificate required` or `bad certificate`.
 
@@ -445,6 +509,8 @@ For hostname mismatch, either regenerate the certificate with the correct SAN en
 **Solution:**
 
 Provide client certificates on the hunter:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt voip -i eth0 \
@@ -456,7 +522,7 @@ sudo lc hunt voip -i eth0 \
 
 Ensure the hunter certificate was signed by the CA specified in the processor's `--tls-ca`.
 
-### Hunter Cannot Reach Processor
+### Hunter Cannot Reach Processor {#hunter-cannot-reach-processor}
 
 **Symptom:** Hunter reports `connection refused` or `context deadline exceeded`.
 
@@ -466,17 +532,23 @@ Ensure the hunter certificate was signed by the CA specified in the processor's 
 
 Test basic connectivity:
 
+<!-- i18n:skip -->
+
 ```bash
 nc -zv processor.example.com 55555
 ```
 
 Check DNS resolution:
 
+<!-- i18n:skip -->
+
 ```bash
 dig processor.example.com
 ```
 
 Check if the processor is listening:
+
+<!-- i18n:skip -->
 
 ```bash
 ss -tlnp | grep 55555
@@ -488,7 +560,7 @@ ss -tlnp | grep 55555
 - Check firewall rules on both sides. The default gRPC port is 55555.
 - If using Docker or Kubernetes, verify port mappings and service discovery.
 
-### Hunter Stalls (Flow Control)
+### Hunter Stalls (Flow Control) {#hunter-stalls-flow-control}
 
 **Symptom:** Hunter is connected but stops sending packets. Logs show flow control state changes to `PAUSE` or `SLOW`.
 
@@ -498,17 +570,23 @@ ss -tlnp | grep 55555
 
 Check processor status:
 
+<!-- i18n:skip -->
+
 ```bash
 lc show status -P processor:55555 --tls-ca ca.crt
 ```
 
 Check disk I/O on the processor:
 
+<!-- i18n:skip -->
+
 ```bash
 iostat -x 1 5
 ```
 
 Check PCAP write queue depth in processor logs:
+
+<!-- i18n:skip -->
 
 ```bash
 journalctl -u lippycat-processor --since "10 minutes ago" | grep -i "queue\|flow"
@@ -518,12 +596,12 @@ journalctl -u lippycat-processor --since "10 minutes ago" | grep -i "queue\|flow
 
 Flow control states and their thresholds:
 
-| State | Queue Utilization | Hunter Behavior |
-|-------|------------------|-----------------|
-| CONTINUE | < 30% | Normal sending |
-| SLOW | 30% - 70% | Reduced batch rate |
-| PAUSE | 70% - 90% | Stop sending, buffer locally |
-| RESUME | Drops below 30% | Resume normal sending |
+| State    | Queue Utilization | Hunter Behavior              |
+| -------- | ----------------- | ---------------------------- |
+| CONTINUE | < 30%             | Normal sending               |
+| SLOW     | 30% - 70%         | Reduced batch rate           |
+| PAUSE    | 70% - 90%         | Stop sending, buffer locally |
+| RESUME   | Drops below 30%   | Resume normal sending        |
 
 To resolve:
 
@@ -533,7 +611,7 @@ To resolve:
 
 Note: TUI client slowness does not cause hunter flow control. Each TUI subscriber has an independent buffer, and slow clients are handled by selective packet drops on the subscriber channel. See [Chapter 8](../part3-distributed/process.md) for the flow control architecture.
 
-### Reconnection After Network Partition
+### Reconnection After Network Partition {#reconnection-after-network-partition}
 
 **Symptom:** After a network outage, hunters do not reconnect, or they reconnect but miss packets during the outage.
 
@@ -542,6 +620,8 @@ Note: TUI client slowness does not cause hunter flow control. Each TUI subscribe
 **Solution:**
 
 Enable disk buffering on hunters to survive network interruptions:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt voip -i eth0 \
@@ -554,22 +634,22 @@ With disk buffering, the hunter writes to a local overflow buffer when the proce
 
 If hunters are not reconnecting at all, check for persistent DNS or routing changes that occurred during the outage.
 
-## GPU Troubleshooting
+## GPU Troubleshooting {#gpu-troubleshooting}
 
 GPU acceleration is optional. The CPU SIMD backend is always available and provides approximately 30,000 packets/second for pattern matching. See [Chapter 14: Performance Optimization](performance.md) for GPU backend selection.
 
-### Backend Compatibility
+### Backend Compatibility {#backend-compatibility}
 
-| Platform | CUDA | OpenCL | SIMD (CPU) |
-|----------|------|--------|------------|
-| NVIDIA GPU | Yes (best) | Yes | Fallback |
-| AMD GPU | No | Yes (best) | Fallback |
-| Intel GPU | No | Yes | Fallback |
-| CPU only | No | No | Always works |
+| Platform   | CUDA       | OpenCL     | SIMD (CPU)   |
+| ---------- | ---------- | ---------- | ------------ |
+| NVIDIA GPU | Yes (best) | Yes        | Fallback     |
+| AMD GPU    | No         | Yes (best) | Fallback     |
+| Intel GPU  | No         | Yes        | Fallback     |
+| CPU only   | No         | No         | Always works |
 
 lippycat automatically falls back to SIMD if no GPU backend is available. You do not need a GPU to run lippycat.
 
-### "No CUDA-capable device is detected"
+### "No CUDA-capable device is detected" {#no-cuda-capable-device-is-detected}
 
 **Symptom:** lippycat built with CUDA reports no GPU available, particularly on laptops with hybrid graphics (Intel + NVIDIA).
 
@@ -579,11 +659,15 @@ lippycat automatically falls back to SIMD if no GPU backend is available. You do
 
 Check if NVIDIA kernel modules are loaded:
 
+<!-- i18n:skip -->
+
 ```bash
 lsmod | grep nvidia
 ```
 
 Check if device nodes exist:
+
+<!-- i18n:skip -->
 
 ```bash
 ls -l /dev/nvidia*
@@ -591,11 +675,15 @@ ls -l /dev/nvidia*
 
 Check PCI device visibility:
 
+<!-- i18n:skip -->
+
 ```bash
 lspci | grep -i nvidia
 ```
 
 Check GPU status (if nvidia-smi is available):
+
+<!-- i18n:skip -->
 
 ```bash
 nvidia-smi
@@ -605,17 +693,23 @@ nvidia-smi
 
 Force the GPU on via sysfs:
 
+<!-- i18n:skip -->
+
 ```bash
 echo on | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control
 ```
 
 Start the NVIDIA persistence daemon:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo nvidia-persistenced --verbose
 ```
 
 Enable compute mode:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo nvidia-smi -pm 1
@@ -627,6 +721,8 @@ Replace `0000:01:00.0` with your GPU's PCI address from `lspci`.
 
 Disable dynamic power management. Create `/etc/modprobe.d/nvidia-power.conf`:
 
+<!-- i18n:skip -->
+
 ```
 options nvidia NVreg_DynamicPowerManagement=0x00
 ```
@@ -635,21 +731,27 @@ Then regenerate initramfs and reboot:
 
 Arch Linux / Manjaro:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo mkinitcpio -P
 ```
 
 Debian / Ubuntu:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo update-initramfs -u
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 sudo reboot
 ```
 
-### NVIDIA GPU Detected but CUDA Fails
+### NVIDIA GPU Detected but CUDA Fails {#nvidia-gpu-detected-but-cuda-fails}
 
 **Symptom:** `nvidia-smi` shows the GPU, but lippycat's CUDA backend still fails.
 
@@ -659,18 +761,25 @@ sudo reboot
 
 Check if nouveau is loaded (it conflicts with nvidia):
 
+<!-- i18n:skip -->
+
 ```bash
 lsmod | grep nouveau
 ```
 
 Check CUDA environment:
 
+<!-- i18n:skip -->
+
 ```bash
 echo $CUDA_VISIBLE_DEVICES
 ```
+
 **Solution:**
 
 If nouveau is loaded, blacklist it:
+
+<!-- i18n:skip -->
 
 ```bash
 echo "blacklist nouveau" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf
@@ -678,11 +787,15 @@ echo "blacklist nouveau" | sudo tee /etc/modprobe.d/blacklist-nouveau.conf
 
 Rebuild the initramfs on Arch Linux or Manjaro:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo mkinitcpio -P
 ```
 
 On Debian or Ubuntu, use `sudo update-initramfs -u` instead. Then reboot:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo reboot
@@ -690,13 +803,19 @@ sudo reboot
 
 Set CUDA environment variables:
 
+<!-- i18n:skip -->
+
 ```bash
 export __NV_PRIME_RENDER_OFFLOAD=1
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 export __GLX_VENDOR_LIBRARY_NAME=nvidia
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0
@@ -704,7 +823,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 Add these to your shell profile for persistence.
 
-### OpenCL Backend Not Available
+### OpenCL Backend Not Available {#opencl-backend-not-available}
 
 **Symptom:** AMD or Intel GPU is present but the OpenCL backend is not detected.
 
@@ -716,11 +835,15 @@ Install the appropriate OpenCL runtime for your GPU:
 
 AMD (ROCr):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo apt install rocm-opencl-runtime
 ```
 
 On Arch Linux:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo pacman -S rocm-opencl-runtime
@@ -728,22 +851,29 @@ sudo pacman -S rocm-opencl-runtime
 
 Intel:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo apt install intel-opencl-icd
 ```
 
 On Arch Linux:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo pacman -S intel-compute-runtime
 ```
+
 Verify with:
+
+<!-- i18n:skip -->
 
 ```bash
 clinfo | head -20
 ```
 
-### Falling Back to SIMD
+### Falling Back to SIMD {#falling-back-to-simd}
 
 **Symptom:** GPU backend was expected but lippycat is using CPU SIMD instead.
 
@@ -753,12 +883,17 @@ clinfo | head -20
 
 Run with debug logging to see backend selection:
 
+<!-- i18n:skip -->
+
 ```bash
 LOG_LEVEL=debug sudo lc sniff voip -i eth0 --gpu-backend auto 2>&1 | grep -i "gpu\|cuda\|opencl\|simd\|backend"
 ```
+
 **Solution:**
 
 If you need GPU acceleration, fix the underlying GPU issue using the sections above. If SIMD performance is sufficient (30K packets/second pattern matching), no action is needed. To explicitly force a backend and see the error:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 --gpu-backend cuda
@@ -766,11 +901,11 @@ sudo lc sniff voip -i eth0 --gpu-backend cuda
 
 This will fail with a descriptive error instead of silently falling back.
 
-## VoIP-Specific Issues
+## VoIP-Specific Issues {#voip-specific-issues}
 
 VoIP capture involves correlating SIP signaling with RTP media streams. These issues are specific to `sniff voip`, `hunt voip`, and `tap voip` modes. See [Chapter 4](../part2-local-capture/sniff.md) for VoIP capture fundamentals.
 
-### LI identity matches missing for some RTP
+### LI identity matches missing for some RTP {#li-identity-matches-missing-for-some-rtp}
 
 If direct IP/CIDR interception works but an identity-based LI task omits RTP,
 check the media-resolution and inheritance-suppression counters. An exact endpoint
@@ -787,7 +922,7 @@ are bounded to 100,000; capacity-eviction growth means protection may be shorter
 under pressure. Rate-limited warnings contain sanitized or hashed identifiers, so
 use counter deltas—not warning counts—to quantify the condition.
 
-### Missing RTP Streams
+### Missing RTP Streams {#missing-rtp-streams}
 
 **Symptom:** SIP calls are detected (INVITE, 200 OK visible) but no RTP packets are captured. Per-call PCAP files contain only signaling.
 
@@ -801,18 +936,25 @@ use counter deltas—not warning counts—to quantify the condition.
 
 Check what ports the SDP negotiates (look at m= lines):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo tcpdump -i eth0 -n -A port 5060 | grep "m=audio"
 ```
 
 Check if RTP traffic exists on those ports:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo tcpdump -i eth0 -n udp portrange 10000-20000 -c 10
 ```
+
 **Solution:**
 
 Ensure the RTP port range covers the ports your PBX uses:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 --rtp-port-range 10000-20000
@@ -820,7 +962,7 @@ sudo lc sniff voip -i eth0 --rtp-port-range 10000-20000
 
 If you applied a custom BPF filter with `-f`, verify it does not exclude UDP traffic on the RTP port range. When in doubt, remove the BPF filter and let lippycat's protocol detection handle filtering.
 
-### One-Way Audio (RTP in One Direction Only)
+### One-Way Audio (RTP in One Direction Only) {#one-way-audio-rtp-in-one-direction-only}
 
 **Symptom:** Per-call PCAP shows RTP packets flowing in only one direction. The other direction is missing entirely.
 
@@ -836,15 +978,20 @@ Check the SDP `c=` (connection) lines against actual packet source IPs:
 
 Look at SDP connection lines:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo tcpdump -i eth0 -n -A port 5060 | grep "c=IN"
 ```
 
 Compare with actual RTP source IPs:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo tcpdump -i eth0 -n udp portrange 10000-20000 | head -20
 ```
+
 If the SDP says `c=IN IP4 10.0.1.100` but actual RTP comes from `203.0.113.50`, NAT is in play.
 
 **Solution:**
@@ -853,7 +1000,7 @@ If the SDP says `c=IN IP4 10.0.1.100` but actual RTP comes from `203.0.113.50`, 
 - If NAT is the issue, capture at a point in the network where both directions are visible (e.g., on the SBC or media gateway itself, or on a mirror port that sees both legs).
 - In environments with complex NAT, consider deploying hunters on both sides of the NAT boundary and aggregating at a processor.
 
-### SIP Over TCP Not Detected
+### SIP Over TCP Not Detected {#sip-over-tcp-not-detected}
 
 **Symptom:** SIP calls using TCP transport are not detected, but UDP SIP works fine.
 
@@ -864,13 +1011,15 @@ If the SDP says `c=IN IP4 10.0.1.100` but actual RTP comes from `203.0.113.50`, 
 1. Ensure your BPF filter and `--sip-port` settings include TCP SIP traffic.
 2. Select an appropriate TCP performance mode:
 
+   <!-- i18n:skip -->
+
    ```bash
    sudo lc sniff voip -i eth0 --tcp-performance-mode balanced
    ```
 
 3. If the problem persists, see the [TCP Reassembly Problems](#tcp-reassembly-problems) section above.
 
-### High Call Volume Packet Drops
+### High Call Volume Packet Drops {#high-call-volume-packet-drops}
 
 **Symptom:** In environments with hundreds of concurrent calls, some calls are missing or incomplete.
 
@@ -880,18 +1029,25 @@ If the SDP says `c=IN IP4 10.0.1.100` but actual RTP comes from `203.0.113.50`, 
 
 Check kernel drop statistics:
 
+<!-- i18n:skip -->
+
 ```bash
 cat /proc/net/dev | grep eth0
 ```
 
 Check for ring buffer overflows in system logs:
 
+<!-- i18n:skip -->
+
 ```bash
 dmesg | grep -i "drop\|overflow"
 ```
+
 **Solution:**
 
 1. Narrow capture to known SIP and RTP ports so unrelated traffic is dropped in the kernel:
+
+   <!-- i18n:skip -->
 
    ```bash
    sudo lc sniff voip -i eth0 --sip-port 5060 --rtp-port-range 10000-20000
@@ -899,11 +1055,15 @@ dmesg | grep -i "drop\|overflow"
 
 2. In CUDA builds, enable GPU acceleration for protocol detection:
 
+   <!-- i18n:skip -->
+
    ```bash
    sudo lc sniff voip -i eth0 --gpu-backend auto
    ```
 
 3. For sustained high volume, switch to a distributed architecture with dedicated hunters:
+
+   <!-- i18n:skip -->
 
    ```bash
    # Hunter handles capture and filtering
@@ -916,13 +1076,15 @@ dmesg | grep -i "drop\|overflow"
 
 4. Increase the kernel ring buffer size for the capture interface:
 
+   <!-- i18n:skip -->
+
    ```bash
    sudo ethtool -G eth0 rx 4096
    ```
 
-## Configuration Issues
+## Configuration Issues {#configuration-issues}
 
-### Configuration Not Taking Effect
+### Configuration Not Taking Effect {#configuration-not-taking-effect}
 
 **Symptom:** Changes to the config file do not change lippycat's behavior. Default values are still used.
 
@@ -932,15 +1094,20 @@ dmesg | grep -i "drop\|overflow"
 
 Check which config file is being loaded:
 
+<!-- i18n:skip -->
+
 ```bash
 lc show config
 ```
 
 Validate YAML syntax:
 
+<!-- i18n:skip -->
+
 ```bash
 python3 -c "import yaml; yaml.safe_load(open('config.yaml'))"
 ```
+
 **Solution:**
 
 1. Place the config file in one of the expected locations (in priority order):
@@ -950,17 +1117,21 @@ python3 -c "import yaml; yaml.safe_load(open('config.yaml'))"
 
 2. Or specify it explicitly:
 
+   <!-- i18n:skip -->
+
    ```bash
    sudo lc sniff voip --config /etc/lippycat/config.yaml
    ```
 
 3. Restart lippycat after any configuration change. Configuration is read once at startup.
 
-## Diagnostic Tools
+## Diagnostic Tools {#diagnostic-tools}
 
-### Debug Logging
+### Debug Logging {#debug-logging}
 
 Enable verbose logging for any lippycat command:
+
+<!-- i18n:skip -->
 
 ```bash
 LOG_LEVEL=debug sudo lc sniff voip -i eth0 2> debug.log
@@ -970,11 +1141,15 @@ Filter log output for specific subsystems:
 
 TCP reassembly issues:
 
+<!-- i18n:skip -->
+
 ```bash
 grep -i "tcp\|stream\|reassembl" debug.log
 ```
 
 SIP parsing:
+
+<!-- i18n:skip -->
 
 ```bash
 grep -i "sip\|invite\|call.id" debug.log
@@ -982,19 +1157,25 @@ grep -i "sip\|invite\|call.id" debug.log
 
 gRPC / distributed connectivity:
 
+<!-- i18n:skip -->
+
 ```bash
 grep -i "grpc\|connect\|tls\|handshake" debug.log
 ```
 
 GPU backend selection:
 
+<!-- i18n:skip -->
+
 ```bash
 grep -i "gpu\|cuda\|opencl\|simd" debug.log
 ```
 
-### System Resource Monitoring
+### System Resource Monitoring {#system-resource-monitoring}
 
 Monitor lippycat resource usage:
+
+<!-- i18n:skip -->
 
 ```bash
 watch -n 2 'ps -o pid,rss,vsz,%cpu,%mem,comm -p $(pgrep lc)'
@@ -1002,11 +1183,15 @@ watch -n 2 'ps -o pid,rss,vsz,%cpu,%mem,comm -p $(pgrep lc)'
 
 Monitor network interface statistics (drops, errors):
 
+<!-- i18n:skip -->
+
 ```bash
 watch -n 1 'ip -s link show eth0'
 ```
 
 Monitor disk I/O (relevant for PCAP writing):
+
+<!-- i18n:skip -->
 
 ```bash
 iostat -x 1
@@ -1014,13 +1199,17 @@ iostat -x 1
 
 Monitor open file descriptors:
 
+<!-- i18n:skip -->
+
 ```bash
 ls /proc/$(pgrep -f "lc ")/fd | wc -l
 ```
 
-### Distributed Deployment Diagnostics
+### Distributed Deployment Diagnostics {#distributed-deployment-diagnostics}
 
 Processor status overview:
+
+<!-- i18n:skip -->
 
 ```bash
 lc show status -P processor:55555 --tls-ca ca.crt
@@ -1028,11 +1217,15 @@ lc show status -P processor:55555 --tls-ca ca.crt
 
 List connected hunters:
 
+<!-- i18n:skip -->
+
 ```bash
 lc list hunters -P processor:55555 --tls-ca ca.crt
 ```
 
 View network topology:
+
+<!-- i18n:skip -->
 
 ```bash
 lc show topology -P processor:55555 --tls-ca ca.crt
@@ -1040,13 +1233,17 @@ lc show topology -P processor:55555 --tls-ca ca.crt
 
 Check active filters:
 
+<!-- i18n:skip -->
+
 ```bash
 lc show filter -P processor:55555 --tls-ca ca.crt
 ```
 
-### Health Check Script
+### Health Check Script {#health-check-script}
 
 A basic health check script for automated monitoring:
+
+<!-- i18n:skip -->
 
 ```bash
 #!/bin/bash
@@ -1083,30 +1280,30 @@ echo "OK: lippycat healthy (Memory: ${MEM_MB} MB, CPU: ${CPU}%)"
 exit 0
 ```
 
-## Quick Reference
+## Quick Reference {#quick-reference}
 
-| Symptom | Section |
-|---------|---------|
-| `operation not permitted` | [Permission Denied](#permission-denied) |
-| `no such device` | [Interface Not Found](#interface-not-found) |
-| Zero packets captured | [No Packets Captured](#no-packets-captured) |
-| PCAP files empty or missing | [PCAP File Issues](#pcap-file-issues) |
-| No TCP SIP messages | [No TCP SIP Messages Captured](#no-tcp-sip-messages-captured) |
-| TCP streams but no SIP | [Streams Created but No SIP Detected](#streams-created-but-no-sip-detected) |
-| Memory growing unbounded | [High Memory Usage During TCP Capture](#high-memory-usage-during-tcp-capture) |
-| CPU saturated | [High CPU Usage During TCP Capture](#high-cpu-usage-during-tcp-capture) |
-| Dropped streams / missed calls | [Packet Drops and Missed Calls](#packet-drops-and-missed-calls) |
-| TLS handshake failed | [TLS Handshake Failure](#tls-handshake-failure) |
-| mTLS client rejected | [Mutual TLS (mTLS) Rejection](#mutual-tls-mtls-rejection) |
-| Connection refused to processor | [Hunter Cannot Reach Processor](#hunter-cannot-reach-processor) |
-| Hunter stops sending | [Hunter Stalls (Flow Control)](#hunter-stalls-flow-control) |
-| No reconnection after outage | [Reconnection After Network Partition](#reconnection-after-network-partition) |
-| No CUDA device detected | ["No CUDA-capable device is detected"](#no-cuda-capable-device-is-detected) |
-| GPU detected but CUDA fails | [NVIDIA GPU Detected but CUDA Fails](#nvidia-gpu-detected-but-cuda-fails) |
-| OpenCL not available | [OpenCL Backend Not Available](#opencl-backend-not-available) |
-| Using SIMD instead of GPU | [Falling Back to SIMD](#falling-back-to-simd) |
-| Missing RTP in captures | [Missing RTP Streams](#missing-rtp-streams) |
-| One-way audio | [One-Way Audio (RTP in One Direction Only)](#one-way-audio-rtp-in-one-direction-only) |
-| TCP SIP not working | [SIP Over TCP Not Detected](#sip-over-tcp-not-detected) |
-| Drops at high call volume | [High Call Volume Packet Drops](#high-call-volume-packet-drops) |
-| Config changes ignored | [Configuration Not Taking Effect](#configuration-not-taking-effect) |
+| Symptom                         | Section                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------- |
+| `operation not permitted`       | [Permission Denied](#permission-denied)                                               |
+| `no such device`                | [Interface Not Found](#interface-not-found)                                           |
+| Zero packets captured           | [No Packets Captured](#no-packets-captured)                                           |
+| PCAP files empty or missing     | [PCAP File Issues](#pcap-file-issues)                                                 |
+| No TCP SIP messages             | [No TCP SIP Messages Captured](#no-tcp-sip-messages-captured)                         |
+| TCP streams but no SIP          | [Streams Created but No SIP Detected](#streams-created-but-no-sip-detected)           |
+| Memory growing unbounded        | [High Memory Usage During TCP Capture](#high-memory-usage-during-tcp-capture)         |
+| CPU saturated                   | [High CPU Usage During TCP Capture](#high-cpu-usage-during-tcp-capture)               |
+| Dropped streams / missed calls  | [Packet Drops and Missed Calls](#packet-drops-and-missed-calls)                       |
+| TLS handshake failed            | [TLS Handshake Failure](#tls-handshake-failure)                                       |
+| mTLS client rejected            | [Mutual TLS (mTLS) Rejection](#mutual-tls-mtls-rejection)                             |
+| Connection refused to processor | [Hunter Cannot Reach Processor](#hunter-cannot-reach-processor)                       |
+| Hunter stops sending            | [Hunter Stalls (Flow Control)](#hunter-stalls-flow-control)                           |
+| No reconnection after outage    | [Reconnection After Network Partition](#reconnection-after-network-partition)         |
+| No CUDA device detected         | ["No CUDA-capable device is detected"](#no-cuda-capable-device-is-detected)           |
+| GPU detected but CUDA fails     | [NVIDIA GPU Detected but CUDA Fails](#nvidia-gpu-detected-but-cuda-fails)             |
+| OpenCL not available            | [OpenCL Backend Not Available](#opencl-backend-not-available)                         |
+| Using SIMD instead of GPU       | [Falling Back to SIMD](#falling-back-to-simd)                                         |
+| Missing RTP in captures         | [Missing RTP Streams](#missing-rtp-streams)                                           |
+| One-way audio                   | [One-Way Audio (RTP in One Direction Only)](#one-way-audio-rtp-in-one-direction-only) |
+| TCP SIP not working             | [SIP Over TCP Not Detected](#sip-over-tcp-not-detected)                               |
+| Drops at high call volume       | [High Call Volume Packet Drops](#high-call-volume-packet-drops)                       |
+| Config changes ignored          | [Configuration Not Taking Effect](#configuration-not-taking-effect)                   |

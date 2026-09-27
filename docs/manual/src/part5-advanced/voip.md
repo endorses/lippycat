@@ -1,10 +1,12 @@
-# VoIP: SIP and RTP Analysis
+# VoIP: SIP and RTP Analysis {#voip-sip-and-rtp-analysis}
 
 VoIP analysis is lippycat's most mature protocol mode. It tracks SIP signaling dialogs, correlates RTP media streams with their controlling SIP sessions, and supports per-call PCAP extraction for offline analysis.
 
-## SIP Signaling Flow
+## SIP Signaling Flow {#sip-signaling-flow}
 
 SIP (Session Initiation Protocol) uses a request/response model to establish, modify, and tear down voice and video calls. lippycat tracks the full dialog lifecycle. A typical successful call follows this sequence:
+
+<!-- i18n:skip -->
 
 ```mermaid
 sequenceDiagram
@@ -39,9 +41,11 @@ lippycat parses each SIP message and extracts:
 
 **SIP methods lippycat recognizes:** INVITE, ACK, BYE, CANCEL, REGISTER, OPTIONS, PRACK, UPDATE, INFO, REFER, SUBSCRIBE, NOTIFY, MESSAGE, PUBLISH.
 
-## Capturing SIP Traffic
+## Capturing SIP Traffic {#capturing-sip-traffic}
 
 Basic VoIP capture shows all SIP and RTP traffic on an interface:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0
@@ -51,17 +55,23 @@ Filter by SIP user to focus on specific endpoints:
 
 For a single user:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -u alicent
 ```
 
 For multiple users:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -u "alicent,robb"
 ```
 
 For a wildcard suffix match (all numbers ending in `456789`):
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -u "*456789"
@@ -70,6 +80,8 @@ sudo lc sniff voip -i eth0 -u "*456789"
 Extract call setup information with `jq`:
 
 To show all INVITE requests with caller and callee:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 2>/dev/null | \
@@ -80,6 +92,8 @@ sudo lc sniff voip -i eth0 2>/dev/null | \
 
 To track call state transitions for a specific Call-ID:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 2>/dev/null | \
   jq -r 'select(.VoIPData.CallID == "abc123@pbx.local") |
@@ -87,7 +101,7 @@ sudo lc sniff voip -i eth0 2>/dev/null | \
     @tsv'
 ```
 
-## SIP Transport: UDP vs TCP
+## SIP Transport: UDP vs TCP {#sip-transport-udp-vs-tcp}
 
 SIP runs over both UDP and TCP. UDP is more common for signaling, but TCP is used for large messages (e.g., SIP with SDP that exceeds the MTU) and is required for TLS-encrypted SIP (SIPS).
 
@@ -95,17 +109,21 @@ By default, lippycat captures both UDP and TCP SIP traffic. TCP SIP requires str
 
 UDP-only mode generates an optimized BPF filter that excludes TCP:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -U -S 5060
 ```
 
 When TCP SIP is needed, choose a performance profile to tune reassembly parameters (see [CLI Capture with `lc sniff`](../part2-local-capture/sniff.md#tcp-performance-modes)):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -M throughput
 ```
 
-## RTP and SRTP Media Streams
+## RTP and SRTP Media Streams {#rtp-and-srtp-media-streams}
 
 Once a SIP dialog is established, media flows as RTP (Real-time Transport Protocol) packets. lippycat detects RTP streams by identifying packets within configured port ranges (default: 10000-32768) that match the RTP header structure.
 
@@ -125,6 +143,8 @@ lippycat correlates RTP streams with their controlling SIP dialog using the Call
 
 To show active RTP streams with SSRC and codec:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 2>/dev/null | \
   jq -r 'select(.VoIPData.IsRTP) |
@@ -133,6 +153,8 @@ sudo lc sniff voip -i eth0 2>/dev/null | \
 ```
 
 To detect RTP sequence gaps (potential packet loss):
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 2>/dev/null | \
@@ -149,15 +171,19 @@ sudo lc sniff voip -i eth0 2>/dev/null | \
 
 If your PBX uses non-standard RTP ports, specify the range explicitly:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -R 8000-9000
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -R "8000-9000,40000-50000"
 ```
 
-## Call Quality Metrics
+## Call Quality Metrics {#call-quality-metrics}
 
 RTP sequence numbers and timestamps enable call quality analysis. While lippycat captures the raw RTP metadata, you can derive standard quality metrics from the JSON output:
 
@@ -170,6 +196,8 @@ RTP sequence numbers and timestamps enable call quality analysis. While lippycat
 Example: calculate packet loss percentage per SSRC from a PCAP file:
 
 The following command analyzes a recording by SSRC. The comment inside the `awk` program is part of that program and remains with it:
+
+<!-- i18n:skip -->
 
 ```bash
 lc sniff voip -r call-recording.pcap 2>/dev/null | \
@@ -188,11 +216,13 @@ lc sniff voip -r call-recording.pcap 2>/dev/null | \
 
 For production call quality monitoring, export RTP data to a dedicated monitoring system or use the TUI's real-time call view (see [Interactive Capture with `lc watch`](../part2-local-capture/watch-local.md)).
 
-## Per-Call PCAP Workflow
+## Per-Call PCAP Workflow {#per-call-pcap-workflow}
 
 Per-call PCAP writing creates separate capture files for each VoIP call, making it straightforward to archive, replay, or share individual call recordings.
 
 The per-call PCAP feature is available on processor and tap nodes. It creates two files per call:
+
+<!-- i18n:skip -->
 
 ```
 20250123_143022_abc123_sip.pcap    # SIP signaling packets
@@ -200,6 +230,8 @@ The per-call PCAP feature is available on processor and tap nodes. It creates tw
 ```
 
 **Standalone capture with per-call PCAP (tap mode):**
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap voip -i eth0 \
@@ -211,6 +243,8 @@ sudo lc tap voip -i eth0 \
 
 **Distributed capture with per-call PCAP (processor):**
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 \
   --per-call-pcap \
@@ -220,6 +254,8 @@ lc process --listen :55555 \
 ```
 
 The `--pcap-command` hook runs when each PCAP file is closed, enabling automatic compression, upload, or archival. The `--voip-command` hook runs when an entire call completes (both SIP and RTP files are finalized):
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -235,9 +271,11 @@ The PCAP grace period (`--pcap-grace-period`, default 5 seconds) controls how lo
 
 For full per-call PCAP configuration, see [Central Aggregation with `lc process`](../part3-distributed/process.md#per-call-pcap-voip) and [Standalone Mode with `lc tap`](../part3-distributed/tap.md).
 
-## VoIP Data Flow
+## VoIP Data Flow {#voip-data-flow}
 
 Understanding how packets move through the VoIP analyzer helps with troubleshooting and performance tuning:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR

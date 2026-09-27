@@ -1,10 +1,12 @@
-# Appendix A: Command Reference
+# Appendix A: Command Reference {#appendix-a-command-reference}
 
 This appendix provides a complete reference of all lippycat CLI commands, subcommands, and flags. For tutorials and usage examples, see the relevant chapters in the manual.
 
 > **Tip:** Run `lc <command> --help` for the most up-to-date flag information for any command.
 
-## Command Tree
+## Command Tree {#command-tree}
+
+<!-- i18n:skip -->
 
 ```
 lc
@@ -58,7 +60,7 @@ lc
     └── powershell
 ```
 
-## Global Flags
+## Global Flags {#global-flags}
 
 These flags apply to all commands.
 
@@ -70,11 +72,11 @@ These flags apply to all commands.
 
 ---
 
-## Shared Flag Groups
+## Shared Flag Groups {#shared-flag-groups}
 
 Several flag groups appear across multiple commands. They are documented here once and referenced by name in each command section.
 
-### Capture Flags
+### Capture Flags {#capture-flags}
 
 Used by `sniff`, `hunt`, and `tap` for packet capture configuration.
 
@@ -85,7 +87,7 @@ Used by `sniff`, `hunt`, and `tap` for packet capture configuration.
 | `--promisc` / `--promiscuous` | `-p`  | bool   | `false`    | Enable promiscuous mode                                    |
 | `--pcap-buffer-size`          |       | int    | `16777216` | PCAP kernel buffer size in bytes (16 MB)                   |
 
-### TLS Client Flags
+### TLS Client Flags {#tls-client-flags}
 
 Used by commands that connect to a remote processor as a client.
 
@@ -98,7 +100,7 @@ Used by commands that connect to a remote processor as a client.
 | `--tls-server-name` | string |         | Override server name for TLS verification             |
 | `--insecure`        | bool   | `false` | Disable TLS (blocked when `LIPPYCAT_PRODUCTION=true`) |
 
-### TLS Server Flags
+### TLS Server Flags {#tls-server-flags}
 
 Used by `process` and `tap` for serving gRPC with TLS.
 
@@ -111,7 +113,7 @@ Used by `process` and `tap` for serving gRPC with TLS.
 
 TLS is enabled by default for `process` and `tap` unless `--insecure` is set. Provide `--tls-cert` and `--tls-key` for encrypted serving.
 
-### Managed Storage Flags
+### Managed Storage Flags {#managed-storage-flags}
 
 These flags apply to `process` and every `tap` protocol. Key options contain
 references to private files holding exactly 32 raw bytes.
@@ -156,7 +158,7 @@ requires `--in-place`. `--max-working-bytes` caps allocated rotation workspace
 `--radius-state-file`. Use the identical command with `--resume` after interruption;
 update runtime configuration yourself after successful completion.
 
-### Connection Flags
+### Connection Flags {#connection-flags}
 
 Used by `list filters`, `show`, `set filter`, and `rm filter` to connect to a processor.
 
@@ -167,7 +169,7 @@ Used by `list filters`, `show`, `set filter`, and `rm filter` to connect to a pr
 
 Plus the [TLS Client Flags](#tls-client-flags) above.
 
-### GPU Flags
+### GPU Flags {#gpu-flags}
 
 Used by CUDA builds of `sniff voip`, `hunt`, and `tap` for GPU-accelerated filtering. In non-CUDA builds these flags are not registered, except `watch live` has its own local GPU flags.
 
@@ -179,7 +181,7 @@ Used by CUDA builds of `sniff voip`, `hunt`, and `tap` for GPU-accelerated filte
 | `--gpu-max-memory`     |       | string |         | Maximum GPU memory allocation                                          |
 | `--enable-voip-filter` |       | bool   | `false` | Enable GPU-accelerated VoIP filtering on hunter/tap (CUDA builds only) |
 
-### Virtual Interface Flags
+### Virtual Interface Flags {#virtual-interface-flags}
 
 Used by `sniff`, `process`, and `tap` for virtual network interface output.
 
@@ -194,7 +196,7 @@ Used by `sniff`, `process`, and `tap` for virtual network interface output.
 | `--vif-replay-timing`   |       | bool     | `false` | Replay with original packet timing (sniff only)                |
 | `--vif-startup-delay`   |       | duration | `3s`    | Delay before writing to allow consumers to attach (sniff only) |
 
-### PCAP Output Flags
+### PCAP Output Flags {#pcap-output-flags}
 
 Used by `tap` and `process` for writing captured packets to disk.
 
@@ -214,7 +216,7 @@ Used by `tap` and `process` for writing captured packets to disk.
 | `--command-concurrency`      | int      | `10`      | Maximum concurrent command executions                                         |
 | `--command-timeout`          | duration | `30s`     | Timeout for command execution                                                 |
 
-### Structured Protocol Log Flags
+### Structured Protocol Log Flags {#structured-protocol-log-flags}
 
 Used by `sniff`, `process`, and `tap`. Logging remains disabled until
 `--log-dir` is set. See [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
@@ -238,7 +240,7 @@ for stream schemas, completeness semantics, rotation, and privacy guidance.
 | `--extract-files-max-size`         | int64    | `10485760`                            | Maximum bytes analyzed or extracted per file           |
 | `--extract-files-total-size`       | int64    | `104857600`                           | Process-lifetime extracted-byte limit                  |
 
-### LI Flags
+### LI Flags {#li-flags}
 
 Used by `process` and `tap`. Requires the `li` build tag (`make processor-li`, `make tap-li`, or `make build-li`).
 When `--li-enabled` is set, the X1 listen address, server certificate, server key,
@@ -276,11 +278,13 @@ See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) 
 
 ---
 
-## Commands
+## Commands {#commands}
 
-### `lc sniff`
+### `lc sniff` {#lc-sniff}
 
 Capture and display packets from a network interface or PCAP file. Output is written to stdout in the specified format.
+
+<!-- i18n:skip -->
 
 ```
 lc sniff [flags]
@@ -303,9 +307,11 @@ See [Chapter 4: CLI Capture with `lc sniff`](../part2-local-capture/sniff.md).
 
 ---
 
-### `lc sniff voip`
+### `lc sniff voip` {#lc-sniff-voip}
 
 VoIP-specific capture with SIP/RTP analysis, call tracking, and optional GPU acceleration.
+
+<!-- i18n:skip -->
 
 ```
 lc sniff voip [flags]
@@ -349,9 +355,11 @@ See [Chapter 4: CLI Capture with `lc sniff`](../part2-local-capture/sniff.md) an
 
 ---
 
-### `lc sniff dns`
+### `lc sniff dns` {#lc-sniff-dns}
 
 DNS-specific capture with domain filtering and tunnel detection.
+
+<!-- i18n:skip -->
 
 ```
 lc sniff dns [flags]
@@ -370,9 +378,11 @@ Inherits all `lc sniff` flags, plus:
 
 ---
 
-### `lc sniff tls`
+### `lc sniff tls` {#lc-sniff-tls}
 
 TLS-specific capture with SNI filtering and JA3/JA4 fingerprinting.
+
+<!-- i18n:skip -->
 
 ```
 lc sniff tls [flags]
@@ -395,9 +405,11 @@ Inherits all `lc sniff` flags, plus:
 
 ---
 
-### `lc sniff http`
+### `lc sniff http` {#lc-sniff-http}
 
 HTTP-specific capture with header and content filtering.
+
+<!-- i18n:skip -->
 
 ```
 lc sniff http [flags]
@@ -427,9 +439,11 @@ Inherits all `lc sniff` flags, plus:
 
 ---
 
-### `lc sniff email`
+### `lc sniff email` {#lc-sniff-email}
 
 Email protocol capture with address and subject filtering. Supports SMTP, POP3, and IMAP.
+
+<!-- i18n:skip -->
 
 ```
 lc sniff email [flags]
@@ -472,10 +486,12 @@ Inherits all `lc sniff` flags, plus:
 
 ---
 
-### `lc sniff radius`
+### `lc sniff radius` {#lc-sniff-radius}
 
 Capture visible UDP RADIUS authentication and accounting traffic with bounded
 request/response association and exact identity criteria.
+
+<!-- i18n:skip -->
 
 ```
 lc sniff radius [flags]
@@ -487,9 +503,11 @@ It also supports `-w` / `--write-file` for selected-packet PCAP output.
 
 ---
 
-### `lc tap`
+### `lc tap` {#lc-tap}
 
 Standalone capture node that combines hunter and processor capabilities. Captures packets locally, runs protocol analysis, serves a TUI interface via gRPC, and writes PCAP files -- all without requiring a separate processor.
+
+<!-- i18n:skip -->
 
 ```
 lc tap [flags]
@@ -561,9 +579,11 @@ See [Chapter 9: Standalone Mode with `lc tap`](../part3-distributed/tap.md).
 
 ---
 
-### `lc tap voip`
+### `lc tap voip` {#lc-tap-voip}
 
 VoIP-specific standalone capture with SIP/RTP analysis and per-call PCAP.
+
+<!-- i18n:skip -->
 
 ```
 lc tap voip [flags]
@@ -583,9 +603,11 @@ Inherits all `lc tap` flags, plus:
 
 ---
 
-### `lc tap dns`
+### `lc tap dns` {#lc-tap-dns}
 
 DNS-specific standalone capture with tunneling detection.
+
+<!-- i18n:skip -->
 
 ```
 lc tap dns [flags]
@@ -606,9 +628,11 @@ Inherits all `lc tap` flags, plus:
 
 ---
 
-### `lc tap http`
+### `lc tap http` {#lc-tap-http}
 
 HTTP-specific standalone capture.
+
+<!-- i18n:skip -->
 
 ```
 lc tap http [flags]
@@ -618,9 +642,11 @@ Inherits all `lc tap` flags, plus the same HTTP filtering flags as `lc sniff htt
 
 ---
 
-### `lc tap tls`
+### `lc tap tls` {#lc-tap-tls}
 
 TLS-specific standalone capture.
+
+<!-- i18n:skip -->
 
 ```
 lc tap tls [flags]
@@ -636,9 +662,11 @@ Inherits all `lc tap` flags, plus:
 
 ---
 
-### `lc tap email`
+### `lc tap email` {#lc-tap-email}
 
 Email-specific standalone capture.
+
+<!-- i18n:skip -->
 
 ```
 lc tap email [flags]
@@ -648,10 +676,12 @@ Inherits all `lc tap` flags, plus the same email filtering flags as `lc sniff em
 
 ---
 
-### `lc tap radius`
+### `lc tap radius` {#lc-tap-radius}
 
 Standalone RADIUS capture with processor outputs, including PCAP, structured
 logs, and remote TUI display.
+
+<!-- i18n:skip -->
 
 ```
 lc tap radius [flags]
@@ -663,9 +693,11 @@ LI builds can independently enable authorized format-11 X2 delivery.
 
 ---
 
-### `lc hunt`
+### `lc hunt` {#lc-hunt}
 
 Hunter node for distributed edge capture. Captures packets and forwards them to a processor node via gRPC.
+
+<!-- i18n:skip -->
 
 ```
 lc hunt [flags]
@@ -708,9 +740,11 @@ See [Chapter 7: Edge Capture with `lc hunt`](../part3-distributed/hunt.md).
 
 ---
 
-### `lc hunt voip`
+### `lc hunt voip` {#lc-hunt-voip}
 
 VoIP-specific hunter with SIP/RTP call filtering and buffering.
+
+<!-- i18n:skip -->
 
 ```
 lc hunt voip [flags]
@@ -730,9 +764,11 @@ Inherits all `lc hunt` flags, plus:
 
 ---
 
-### `lc hunt dns`
+### `lc hunt dns` {#lc-hunt-dns}
 
 DNS-specific hunter with domain filtering.
+
+<!-- i18n:skip -->
 
 ```
 lc hunt dns [flags]
@@ -747,9 +783,11 @@ Inherits all `lc hunt` flags, plus:
 
 ---
 
-### `lc hunt http`
+### `lc hunt http` {#lc-hunt-http}
 
 HTTP-specific hunter with edge filtering.
+
+<!-- i18n:skip -->
 
 ```
 lc hunt http [flags]
@@ -772,9 +810,11 @@ Inherits all `lc hunt` flags, plus:
 
 ---
 
-### `lc hunt tls`
+### `lc hunt tls` {#lc-hunt-tls}
 
 TLS-specific hunter.
+
+<!-- i18n:skip -->
 
 ```
 lc hunt tls [flags]
@@ -788,9 +828,11 @@ Inherits all `lc hunt` flags, plus:
 
 ---
 
-### `lc hunt email`
+### `lc hunt email` {#lc-hunt-email}
 
 Email-specific hunter with edge filtering.
+
+<!-- i18n:skip -->
 
 ```
 lc hunt email [flags]
@@ -815,11 +857,13 @@ Inherits all `lc hunt` flags, plus:
 
 ---
 
-### `lc hunt radius`
+### `lc hunt radius` {#lc-hunt-radius}
 
 Capture selected RADIUS traffic at the edge and forward packets plus validated
 observation and provenance metadata to a processor. Routine display and log
 output use a credential-redacted projection.
+
+<!-- i18n:skip -->
 
 ```
 lc hunt radius [flags]
@@ -830,9 +874,11 @@ Inherits all `lc hunt` flags and adds the
 
 ---
 
-### `lc process`
+### `lc process` {#lc-process}
 
 Processor node for central aggregation. Receives packets from hunters via gRPC, performs protocol analysis, writes PCAP files, and serves TUI clients.
+
+<!-- i18n:skip -->
 
 ```
 lc process [flags]
@@ -897,9 +943,11 @@ See [Chapter 8: Central Aggregation with `lc process`](../part3-distributed/proc
 
 ---
 
-### `lc watch`
+### `lc watch` {#lc-watch}
 
 Interactive terminal UI for monitoring packet capture. Defaults to live mode if no subcommand is specified.
+
+<!-- i18n:skip -->
 
 ```
 lc watch [subcommand] [flags]
@@ -918,9 +966,11 @@ See [Chapter 5: Interactive Capture with `lc watch`](../part2-local-capture/watc
 
 ---
 
-### `lc watch live`
+### `lc watch live` {#lc-watch-live}
 
 Live packet capture in the TUI. Requires elevated privileges.
+
+<!-- i18n:skip -->
 
 ```
 lc watch live [flags]
@@ -937,9 +987,11 @@ lc watch live [flags]
 
 ---
 
-### `lc watch file`
+### `lc watch file` {#lc-watch-file}
 
 Analyze PCAP files in the TUI. Accepts one or more PCAP files (merged display).
+
+<!-- i18n:skip -->
 
 ```
 lc watch file <file> [file...] [flags]
@@ -951,9 +1003,11 @@ lc watch file <file> [file...] [flags]
 
 ---
 
-### `lc watch remote`
+### `lc watch remote` {#lc-watch-remote}
 
 Monitor remote processor nodes in the TUI. Connects via gRPC.
+
+<!-- i18n:skip -->
 
 ```
 lc watch remote [flags]
@@ -969,9 +1023,11 @@ See [Chapter 11: Remote TUI Monitoring](../part4-administration/watch-remote.md)
 
 ---
 
-### `lc list interfaces`
+### `lc list interfaces` {#lc-list-interfaces}
 
 List available network interfaces with their addresses and status.
+
+<!-- i18n:skip -->
 
 ```
 lc list interfaces
@@ -983,9 +1039,11 @@ lc list interfaces
 
 ---
 
-### `lc list filters`
+### `lc list filters` {#lc-list-filters}
 
 List active filters on a processor node.
+
+<!-- i18n:skip -->
 
 ```
 lc list filters [flags]
@@ -1002,9 +1060,11 @@ See [Chapter 10: CLI Administration](../part4-administration/cli-admin.md).
 
 ---
 
-### `lc list hunters`
+### `lc list hunters` {#lc-list-hunters}
 
 List connected hunters on a processor node.
+
+<!-- i18n:skip -->
 
 ```
 lc list hunters [flags]
@@ -1020,9 +1080,11 @@ See [Chapter 10: CLI Administration](../part4-administration/cli-admin.md).
 
 ---
 
-### `lc show status`
+### `lc show status` {#lc-show-status}
 
 Display processor node status.
+
+<!-- i18n:skip -->
 
 ```
 lc show status [flags]
@@ -1036,9 +1098,11 @@ Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
 ---
 
-### `lc show hunter`
+### `lc show hunter` {#lc-show-hunter}
 
 Display details for a specific hunter.
+
+<!-- i18n:skip -->
 
 ```
 lc show hunter [flags]
@@ -1053,9 +1117,11 @@ Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
 ---
 
-### `lc show topology`
+### `lc show topology` {#lc-show-topology}
 
 Display the distributed topology (hunters, processors, connections).
+
+<!-- i18n:skip -->
 
 ```
 lc show topology [flags]
@@ -1069,9 +1135,11 @@ Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
 ---
 
-### `lc show filter`
+### `lc show filter` {#lc-show-filter}
 
 Display details of a specific filter.
+
+<!-- i18n:skip -->
 
 ```
 lc show filter [flags]
@@ -1086,9 +1154,11 @@ Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
 ---
 
-### `lc show config`
+### `lc show config` {#lc-show-config}
 
 Display the current local configuration (resolved from config file, environment, and defaults).
+
+<!-- i18n:skip -->
 
 ```
 lc show config
@@ -1098,9 +1168,11 @@ No additional flags.
 
 ---
 
-### `lc set filter`
+### `lc set filter` {#lc-set-filter}
 
 Create or update a filter on a processor node.
+
+<!-- i18n:skip -->
 
 ```
 lc set filter [flags]
@@ -1129,9 +1201,11 @@ See [Chapter 10: CLI Administration](../part4-administration/cli-admin.md).
 
 ---
 
-### `lc rm filter`
+### `lc rm filter` {#lc-rm-filter}
 
 Remove a filter from a processor node.
+
+<!-- i18n:skip -->
 
 ```
 lc rm filter [flags]
@@ -1147,9 +1221,11 @@ Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
 ---
 
-### `lc completion`
+### `lc completion` {#lc-completion}
 
 Generate shell completion scripts.
+
+<!-- i18n:skip -->
 
 ```
 lc completion [bash|zsh|fish|powershell]
@@ -1161,11 +1237,15 @@ No additional flags. Output the completion script to stdout; source it in your s
 
 Bash:
 
+<!-- i18n:skip -->
+
 ```bash
 lc completion bash > ~/.local/share/bash-completion/completions/lc
 ```
 
 Zsh:
+
+<!-- i18n:skip -->
 
 ```bash
 lc completion zsh > "${fpath[1]}/_lc"
@@ -1173,11 +1253,15 @@ lc completion zsh > "${fpath[1]}/_lc"
 
 Fish:
 
+<!-- i18n:skip -->
+
 ```bash
 lc completion fish > ~/.config/fish/completions/lc.fish
 ```
 
 PowerShell:
+
+<!-- i18n:skip -->
 
 ```bash
 lc completion powershell > lc.ps1
@@ -1185,7 +1269,7 @@ lc completion powershell > lc.ps1
 
 ---
 
-## Environment Variables
+## Environment Variables {#environment-variables}
 
 | Variable              | Description                                                                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -1194,7 +1278,7 @@ lc completion powershell > lc.ps1
 
 ---
 
-## Exit Codes
+## Exit Codes {#exit-codes}
 
 | Code | Meaning                                                   |
 | ---- | --------------------------------------------------------- |

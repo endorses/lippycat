@@ -1,4 +1,4 @@
-# RADIUS capture and tap POI operations
+# RADIUS capture and tap POI operations {#radius-capture-and-tap-poi-operations}
 
 `lc sniff radius`, `lc hunt radius`, and `lc tap radius` share UDP decoding,
 exact ordinary predicates, capture profiles, and bounded request association.
@@ -14,9 +14,11 @@ but do not convey capture-origin authority for X2. Production known-line
 verification and receiving-MDF acceptance remain pending; repository fixtures
 are synthetic.
 
-## Capture topology and supported scope
+## Capture topology and supported scope {#capture-topology-and-supported-scope}
 
 Mirror the visible BRAS/BNG-to-AAA UDP link into a dedicated POI interface:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart TB
@@ -51,7 +53,7 @@ suppress inheritance. A challenge does not authorize the next exchange, and
 authentication does not authorize later identity-free accounting. Responses seen
 before their requests are not buffered or retrospectively authorized.
 
-## Distributed trust and filter synchronization
+## Distributed trust and filter synchronization {#distributed-trust-and-filter-synchronization}
 
 For RADIUS X2, connect the hunter directly using mutual TLS. Its verified client
 certificate SAN must match its hunter ID; that ID must also match the observation
@@ -80,9 +82,11 @@ observations retain their original scope. A request lost in transport can still
 have a response authorized from unique capture-side evidence, subject to current
 processor task admission; a request never observed at capture cannot.
 
-## Ordinary capture
+## Ordinary capture {#ordinary-capture}
 
 Decode an offline recording; no LI build or task is required:
+
+<!-- i18n:skip -->
 
 ```bash
 lc sniff radius -r radius.pcap --format text
@@ -90,11 +94,15 @@ lc sniff radius -r radius.pcap --format text
 
 Observe an exact complete User-Name, including realm and case:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff radius -i mirror0 --radius-username 'alice@example.test'
 ```
 
 Capture additional service ports and write the optional observation stream:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap radius -i mirror0 --insecure --radius-port 1645,1646 \
@@ -102,6 +110,8 @@ sudo lc tap radius -i mirror0 --insecure --radius-port 1645,1646 \
 ```
 
 Use ordinary distributed capture; X2 additionally requires authenticated origin:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt radius -i mirror0 --processor processor.example:55555 \
@@ -134,7 +144,7 @@ LI. RADIUS does not use VoIP per-call files. Routine text, JSON and logs redact
 credentials, authenticators and unallowlisted attributes; explicit PCAP and X2
 outputs retain original validated bytes according to their output contracts.
 
-## Shared flags and configuration
+## Shared flags and configuration {#shared-flags-and-configuration}
 
 All three protocol commands use the same `radius.*` YAML keys. Environment names
 are `LIPPYCAT_RADIUS_` followed by the uppercase key. Flags override environment,
@@ -169,6 +179,8 @@ lifetime. Capacity losses retain quiet guards; if necessary guard state cannot
 fit, inheritance stops globally until a full quiet period. Direct matching and
 independently selected outputs remain available.
 
+<!-- i18n:skip -->
+
 ```yaml
 radius:
   ports: [1645, 1646]
@@ -188,7 +200,7 @@ radius:
   total_bytes: 100663296
 ```
 
-## NatParas, line mappings, and X1 targets
+## NatParas, line mappings, and X1 targets {#natparas-line-mappings-and-x1-targets}
 
 NatParas administrative values must be resolved before X1 provisioning. lippycat
 does not query subscriber inventory or infer account-to-line relationships.
@@ -231,7 +243,7 @@ See the [identity contract](https://github.com/endorses/lippycat/blob/main/docs/
 rules and the [LI deployment guide](https://github.com/endorses/lippycat/blob/main/docs/LI_INTEGRATION.md#radius-x1-authorization-and-nai-migration)
 for activation, modification, restart and current-generation admission behavior.
 
-## Tap POI and MDF setup
+## Tap POI and MDF setup {#tap-poi-and-mdf-setup}
 
 Build with `make tap-li` or `make build-li` for X1/X2 flags. Ordinary RADIUS
 commands remain available in non-LI builds. Configure a dedicated capture scope,
@@ -267,6 +279,8 @@ unencrypted allocator.
 `--li-radius-transaction-timeout` must equal `--radius-transaction-timeout` on
 `tap radius`; processor deployments must configure the same lifetime as their
 hunter capture deployment. A mismatch on local tap rejects startup.
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap radius -i mirror0 --id poi-a \
@@ -311,7 +325,7 @@ suppresses X2 while ordinary outputs continue. See
 [raw RADIUS X2 delivery](https://github.com/endorses/lippycat/blob/main/docs/LI_INTEGRATION.md#raw-radius-x2-delivery) for state ownership
 and [the observation contract](https://github.com/endorses/lippycat/blob/main/docs/design/radius-observation-contract.md) for association.
 
-## Operational counters
+## Operational counters {#operational-counters}
 
 Structured INFO messages expose bounded counter snapshots. `RADIUS capture
 counters` is owned by the capture runtime per epoch; it is emitted on first

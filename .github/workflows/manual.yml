@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/manual/**'
-      - '.github/workflows/manual.yml'
+      - "docs/manual/**"
+      - "Makefile"
+      - ".github/workflows/manual.yml"
   workflow_dispatch:
 
 permissions:
@@ -24,15 +25,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Install Gettext
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext
+
       - name: Install mdBook and plugins
         run: |
-          mkdir -p ~/.local/bin
-          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
-          curl -sSL https://github.com/badboy/mdbook-mermaid/releases/download/v0.17.0/mdbook-mermaid-v0.17.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C ~/.local/bin
+          bash docs/manual/tools/install.sh "$HOME/.local"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Build manual
-        run: mdbook build docs/manual
+        run: make manual-check manual
 
       - name: Add CNAME for custom domain
         run: echo 'xn--5o8hj1i.ws' > docs/manual/book/CNAME

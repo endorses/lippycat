@@ -1,10 +1,10 @@
-# Lawful Interception
+# Lawful Interception {#lawful-interception}
 
 lippycat implements ETSI-standard lawful interception (LI) interfaces, allowing authorized interception of communications when deployed as part of a lawful interception infrastructure. This chapter covers the architecture, deployment, and operation of LI capabilities for operators who need to integrate lippycat with ADMF (Administration Function) and MDF (Mediation/Delivery Function) systems.
 
 > **Important.** Lawful interception is subject to strict legal requirements in all jurisdictions. Deploying LI capabilities without proper legal authorization is illegal. Ensure that your organization has the necessary legal framework, oversight processes, and audit controls in place before enabling LI features.
 
-## ETSI Interface Overview
+## ETSI Interface Overview {#etsi-interface-overview}
 
 lippycat implements three ETSI interfaces defined in TS 103 221-1 and TS 103 221-2:
 
@@ -16,9 +16,11 @@ lippycat implements three ETSI interfaces defined in TS 103 221-1 and TS 103 221
 
 The **X1** interface carries administrative commands: the ADMF sends task activation, modification, and deactivation requests to the processor (acting as the Network Element). The **X2** interface delivers Intercept Related Information (IRI), including SIP signaling events. The **X3** interface delivers Content of Communication (CC) -- the actual media payloads such as RTP audio.
 
-### Architecture
+### Architecture {#architecture}
 
 The following diagram shows how the ADMF, lippycat processor, and MDF interact:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart TB
@@ -56,11 +58,13 @@ The flow works as follows:
 4. The processor encodes matched SIP signaling and enabled, authorized protocol metadata as X2 IRI PDUs, and RTP media as X3 CC PDUs.
 5. The delivery client sends encoded PDUs to the designated MDF endpoints over TLS.
 
-## Build Requirements
+## Build Requirements {#build-requirements}
 
 LI support is controlled by the `li` build tag. Standard builds exclude all LI code through dead code elimination -- no LI types, handlers, or configuration paths exist in non-LI binaries.
 
 Build the processor with LI support:
+
+<!-- i18n:skip -->
 
 ```bash
 make processor-li
@@ -68,11 +72,15 @@ make processor-li
 
 Build the complete suite with LI support:
 
+<!-- i18n:skip -->
+
 ```bash
 make build-li
 ```
 
 Build tap with LI support for standalone capture and LI delivery:
+
+<!-- i18n:skip -->
 
 ```bash
 make tap-li
@@ -80,15 +88,17 @@ make tap-li
 
 Verify that non-LI builds contain no LI code:
 
+<!-- i18n:skip -->
+
 ```bash
 make verify-no-li
 ```
 
 Hunters do not need LI support. They perform edge filtering using the same filter infrastructure regardless of whether the filters originate from LI tasks or manual configuration. Only the processor (or tap in standalone mode) needs the `li` build tag because it hosts the X1 server and X2/X3 delivery client.
 
-## Configuration and Deployment
+## Configuration and Deployment {#configuration-and-deployment}
 
-### Enabling LI
+### Enabling LI {#enabling-li}
 
 LI is enabled with the `--li-enabled` flag on the processor or tap. The X1 listen address, server certificate, server key, and ADMF client CA are mandatory; incomplete X1 TLS configuration causes startup to fail. Delivery certificates are also needed for MDF communication.
 
@@ -100,6 +110,8 @@ by the runtime. Follow the
 with the node stopped. The following example assumes those snapshots already
 exist. Empty `--li-state-file` disables administrative persistence where replay
 does not require it.
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -123,6 +135,8 @@ lc process --listen :55555 \
 ```
 
 The same configuration can be expressed in YAML. This is the recommended approach for production deployments:
+
+<!-- i18n:skip -->
 
 ```yaml
 # /etc/lippycat/config.yaml
@@ -171,9 +185,11 @@ processor:
       - "sha256:A1B2C3D4E5F6..." # Optional: pin MDF certificates
 ```
 
-### LI Certificate Setup
+### LI Certificate Setup {#li-certificate-setup}
 
 LI interfaces require mutual TLS (mTLS) on all connections. This means the processor must present a client certificate when connecting to the ADMF and MDF, and it must verify the certificates presented by those systems. Three separate certificate chains are involved:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart TB
@@ -221,17 +237,25 @@ For general TLS concepts and certificate generation, refer to [Chapter 13: Secur
 
 **File permissions.** Private keys must be readable only by the process owner:
 
+<!-- i18n:skip -->
+
 ```bash
 chmod 600 /etc/lippycat/li/*.key
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 chmod 644 /etc/lippycat/li/*.crt
 ```
 
+<!-- i18n:skip -->
+
 ```bash
 chmod 700 /etc/lippycat/li/
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 chown root:root /etc/lippycat/li/*
@@ -241,6 +265,8 @@ chown root:root /etc/lippycat/li/*
 
 Obtain the fingerprint:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl x509 -in mdf-server.crt -noout -fingerprint -sha256 | \
   sed 's/://g' | cut -d= -f2
@@ -248,17 +274,19 @@ openssl x509 -in mdf-server.crt -noout -fingerprint -sha256 | \
 
 Configure pinning with the resulting fingerprint:
 
+<!-- i18n:skip -->
+
 ```bash
 --li-delivery-tls-pinned-cert sha256:A1B2C3D4E5F6...
 ```
 
 When pinning is configured, the delivery client will reject any MDF certificate that does not match a pinned fingerprint, even if the certificate is otherwise valid under the configured CA.
 
-## X1 Administration Interface
+## X1 Administration Interface {#x1-administration-interface}
 
 The X1 interface is the control plane between the ADMF and the processor. The ADMF uses it to manage interception tasks and delivery destinations; the processor uses it to send status notifications back to the ADMF.
 
-### Supported Operations
+### Supported Operations {#supported-operations}
 
 | Operation         | Direction  | Description                                         |
 | ----------------- | ---------- | --------------------------------------------------- |
@@ -274,6 +302,8 @@ The X1 interface is the control plane between the ADMF and the processor. The AD
 | GetAllTaskDetails | NE to ADMF | Query all task details                              |
 
 All requests use XML encoding per ETSI TS 103 221-1. For example, an `ActivateTask` request includes the task identifier (XID), target identifiers, destination IDs, and the delivery type:
+
+<!-- i18n:skip -->
 
 ```xml
 <activateTaskRequest>
@@ -299,7 +329,7 @@ All requests use XML encoding per ETSI TS 103 221-1. For example, an `ActivateTa
 </activateTaskRequest>
 ```
 
-### Task Lifecycle
+### Task Lifecycle {#task-lifecycle}
 
 Tasks progress through the following states:
 
@@ -328,7 +358,7 @@ Tasks can be modified while active. The following fields are modifiable via `Mod
 
 The XID and StartTime cannot be modified after activation.
 
-#### Idempotent retry and explicit reactivation
+#### Idempotent retry and explicit reactivation {#idempotent-retry-and-explicit-reactivation}
 
 Repeating an equivalent `ActivateTask` while a task is active or pending is an
 idempotent retry. It does not reinstall filters, advance the activation
@@ -351,7 +381,7 @@ tombstone remains non-enforcing and unchanged. If the response is lost, use
 repeat; a `deactivated` result requires another explicit activation after the
 underlying error is corrected.
 
-### Delivery Types
+### Delivery Types {#delivery-types}
 
 Each task specifies what information to deliver:
 
@@ -361,7 +391,7 @@ Each task specifies what information to deliver:
 | X3Only  | No       | Yes     | Content only (media streams)                                |
 | X2andX3 | Yes      | Yes     | Both signaling and content (full interception)              |
 
-### ADMF Notifications
+### ADMF Notifications {#admf-notifications}
 
 The processor sends notifications to the ADMF to report operational status:
 
@@ -379,21 +409,27 @@ Configure the keepalive interval with `--li-admf-keepalive`:
 
 Send a keepalive every 30 seconds:
 
+<!-- i18n:skip -->
+
 ```bash
 --li-admf-keepalive 30s
 ```
 
 Disable keepalives:
 
+<!-- i18n:skip -->
+
 ```bash
 --li-admf-keepalive 0
 ```
 
-### ADMF State Synchronization
+### ADMF State Synchronization {#admf-state-synchronization}
 
 When lippycat restarts, all in-memory task and destination state is lost. To recover without waiting for the ADMF to re-push each task individually, the processor queries the ADMF for current state on startup using the standard `GetAllDetails` operation defined in ETSI TS 103 221-1.
 
 **Startup sync** is enabled by default. After sending the startup notification, the processor calls `GetAllDetails` on the ADMF, which returns all tasks and destinations assigned to this network element. The processor registers each destination and activates each task, recreating the full filter and delivery state automatically.
+
+<!-- i18n:skip -->
 
 ```mermaid
 sequenceDiagram
@@ -423,6 +459,8 @@ The sync is designed for graceful degradation:
 
 To disable startup sync (for example, in environments where the ADMF always pushes state):
 
+<!-- i18n:skip -->
+
 ```bash
 --li-admf-sync-on-startup=false
 ```
@@ -444,17 +482,23 @@ The same reconciliation runs during startup sync, where it acts on the first res
 
 Reconcile every five minutes (the default):
 
+<!-- i18n:skip -->
+
 ```bash
 --li-admf-reconcile-interval 5m
 ```
 
 Disable reconciliation, so drift is never corrected:
 
+<!-- i18n:skip -->
+
 ```bash
 --li-admf-reconcile-interval 0
 ```
 
 YAML configuration:
+
+<!-- i18n:skip -->
 
 ```yaml
 processor:
@@ -464,7 +508,7 @@ processor:
     admf_reconcile_interval: "5m" # 0 disables; drift is then never corrected
 ```
 
-### X1 Error Codes
+### X1 Error Codes {#x1-error-codes}
 
 When the processor cannot fulfil an X1 request, it returns a structured error:
 
@@ -487,16 +531,16 @@ mean a conflicting definition for an active or pending XID. Operators should
 investigate a code-100 identity mismatch rather than changing the interception
 target under the retained XID.
 
-## X2/X3 Delivery
+## X2/X3 Delivery {#x2x3-delivery}
 
 Intercepted data is delivered to MDF endpoints using binary TLV (Type-Length-Value) encoding per ETSI TS 103 221-2.
 
-### X2 IRI Delivery
+### X2 IRI Delivery {#x2-iri-delivery}
 
 X2 delivers SIP-derived IRI events, requiring an active authorizing task and an
 enabled X2 destination.
 
-#### SIP-derived IRI events
+#### SIP-derived IRI events {#sip-derived-iri-events}
 
 X2 PDUs carry signaling metadata derived from SIP messages:
 
@@ -511,7 +555,7 @@ X2 PDUs carry signaling metadata derived from SIP messages:
 
 Each X2 PDU includes structured attributes: timestamp, source/destination IP and port, SIP Call-ID, From/To headers, and a correlation number that links related events within the same session.
 
-### X3 CC Content
+### X3 CC Content {#x3-cc-content}
 
 X3 PDUs carry communication content; X3 is not a structured-log transport:
 
@@ -522,7 +566,7 @@ X3 PDUs carry communication content; X3 is not a structured-log transport:
 
 X3 PDUs include RTP-specific attributes (SSRC, sequence number, timestamp, payload type) and a stream ID that correlates back to the X2 session events.
 
-#### Fail-closed call attribution
+#### Fail-closed call attribution {#fail-closed-call-attribution}
 
 Identity-based X3 selection is inherited only after exact RTP endpoint resolution
 proves a single active call. Shared or unknown endpoints do not use a recency
@@ -536,7 +580,7 @@ rejected. Closed Call-IDs are retained for one hour by default in a bounded
 100,000-entry tombstone registry. Reuse after expiry creates a new generation;
 old buffered content cannot cross into it.
 
-### Delivery Performance
+### Delivery Performance {#delivery-performance}
 
 The delivery subsystem uses asynchronous queuing with backpressure to handle high throughput:
 
@@ -564,11 +608,11 @@ discard telemetry.
 Deployments requiring atomic cross-MDF delivery must coordinate it outside
 lippycat and reconcile the per-destination sequence and drop statistics.
 
-## Filter Integration
+## Filter Integration {#filter-integration}
 
 When the ADMF activates a task, the LI Manager translates target identifiers into lippycat's internal filter system. This uses the same optimized filter infrastructure described in earlier chapters on hunters ([Chapter 7](../part3-distributed/hunt.md)) and processors ([Chapter 8](../part3-distributed/process.md)).
 
-### Target-to-Filter Mapping
+### Target-to-Filter Mapping {#target-to-filter-mapping}
 
 | LI Target Type | X1 Element      | Example                   | Filter System       | Algorithm                      |
 | -------------- | --------------- | ------------------------- | ------------------- | ------------------------------ |
@@ -581,9 +625,11 @@ When the ADMF activates a task, the LI Manager translates target identifiers int
 | IPv6 CIDR      | `<ipv6Cidr>`    | `2001:db8::/32`           | FILTER_IP_ADDRESS   | Radix trie, O(prefix) lookup   |
 | NAI            | `<nai>`         | `user@realm.example.com`  | FILTER_SIP_URI      | Aho-Corasick pattern matching  |
 
-### Filter Flow
+### Filter Flow {#filter-flow}
 
 The end-to-end path from task activation to PDU delivery is:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart TD
@@ -604,17 +650,19 @@ Each filter created by the LI Manager is assigned an internal ID with the format
 
 When a task is deactivated, the associated filters are removed from all hunters, and matching stops immediately.
 
-## Operational Considerations
+## Operational Considerations {#operational-considerations}
 
-### Network Isolation
+### Network Isolation {#network-isolation}
 
 LI infrastructure should be deployed on a dedicated management network, separate from production traffic and regular monitoring. The X1 endpoint (default port 8443) and X2/X3 delivery connections should not be accessible from general network segments. Use firewall rules to restrict access to authorized ADMF and MDF addresses only.
 
-### Certificate Rotation
+### Certificate Rotation {#certificate-rotation}
 
 LI certificates should have short validity periods (one year or less) and be rotated before expiration. Monitor certificate expiration as part of your regular operations:
 
 Check whether a certificate expires within 30 days:
+
+<!-- i18n:skip -->
 
 ```bash
 openssl x509 -in /etc/lippycat/li/x1-server.crt -noout -checkend 2592000
@@ -629,7 +677,7 @@ To rotate certificates:
 
 For production environments, consider using a Hardware Security Module (HSM) for private key storage and an automated certificate lifecycle management system.
 
-### Audit Logging
+### Audit Logging {#audit-logging}
 
 All LI operations are recorded in the processor's structured logs. Key log fields for LI events include:
 
@@ -642,9 +690,11 @@ All LI operations are recorded in the processor's structured logs. Key log field
 
 These logs should be forwarded to a secure, tamper-evident log management system as part of your organization's LI audit requirements.
 
-### Standalone Mode with Tap
+### Standalone Mode with Tap {#standalone-mode-with-tap}
 
 For deployments where a separate hunter-processor topology is not needed, the `tap` node can be built with LI support:
+
+<!-- i18n:skip -->
 
 ```bash
 make tap-li
@@ -652,9 +702,9 @@ make tap-li
 
 In this configuration, the tap node captures packets locally and delivers X2/X3 PDUs directly to the MDF without gRPC overhead. This is useful for single-interface deployments or lab environments. All LI configuration flags work identically on the tap node.
 
-## Troubleshooting
+## Troubleshooting {#troubleshooting}
 
-### X1 Server Not Starting
+### X1 Server Not Starting {#x1-server-not-starting}
 
 If the X1 HTTPS server fails to start:
 
@@ -663,7 +713,7 @@ If the X1 HTTPS server fails to start:
 3. Confirm the CA certificate matches the ADMF client certificates.
 4. Ensure the listen port (default 8443) is not already in use.
 
-### X2/X3 Delivery Failures
+### X2/X3 Delivery Failures {#x2x3-delivery-failures}
 
 If PDUs are not reaching the MDF:
 
@@ -672,7 +722,7 @@ If PDUs are not reaching the MDF:
 3. Check that the delivery client certificate is signed by a CA the MDF trusts.
 4. Monitor the delivery queue depth -- a full queue indicates the MDF cannot keep up or is unreachable.
 
-### RTP attribution and lifecycle signals
+### RTP attribution and lifecycle signals {#rtp-attribution-and-lifecycle-signals}
 
 Treat increasing media `ambiguous`/`unknown`,
 `identity_inheritance_suppressed`, `inherited_provenance_rejected`,
@@ -683,7 +733,7 @@ rejections normally point to late batches, reorder delay, or Call-ID reuse.
 Structured warnings are rate limited and expose only sanitized or hashed
 identifiers; compare counter deltas to measure volume.
 
-### Tasks Not Matching Traffic
+### Tasks Not Matching Traffic {#tasks-not-matching-traffic}
 
 If an active task produces no intercept data:
 
@@ -692,9 +742,11 @@ If an active task produces no intercept data:
 3. Confirm that filters have been pushed to hunters (check processor logs for filter push events).
 4. Verify that hunters are receiving traffic that matches the target identifiers.
 
-### Debug Logging
+### Debug Logging {#debug-logging}
 
 Enable debug-level logging for detailed LI diagnostics:
+
+<!-- i18n:skip -->
 
 ```bash
 LOG_LEVEL=debug lc process --li-enabled ...
@@ -704,6 +756,8 @@ To verify TLS connectivity to the X1 or delivery endpoints manually:
 
 Test the X1 server:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl s_client -connect localhost:8443 \
   -cert x1-client.crt -key x1-client.key \
@@ -712,13 +766,15 @@ openssl s_client -connect localhost:8443 \
 
 Test delivery to the MDF:
 
+<!-- i18n:skip -->
+
 ```bash
 openssl s_client -connect mdf.example.com:443 \
   -cert delivery.crt -key delivery.key \
   -CAfile mdf-ca.crt
 ```
 
-### Bounded delivery and restart recovery
+### Bounded delivery and restart recovery {#bounded-delivery-and-restart-recovery}
 
 Processor and tap support independent X2/X3 encoded-byte limits via
 `--li-delivery-x2-queue-bytes` and `--li-delivery-x3-queue-bytes`. Both byte and PDU
@@ -780,7 +836,7 @@ Independent PDU caps are available through `--li-delivery-x2-queue-size` and
 `--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
 once, while `queue_bytes` counts every destination copy.
 
-## RADIUS X2 Delivery
+## RADIUS X2 Delivery {#radius-x2-delivery}
 
 Ordinary `sniff radius`, `hunt radius`, and `tap radius` capture does not require
 an LI build or X1 task. In an LI build, raw format-11 X2 delivery is a separate

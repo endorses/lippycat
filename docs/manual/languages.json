@@ -1,0 +1,34 @@
+[
+  {
+    "code": "en",
+    "name": "English",
+    "path": "",
+    "title": "lippycat 🫦🐱 Manual",
+    "description": "Comprehensive guide to network traffic capture and analysis with lippycat",
+    "selectorLabel": "Select language"
+  },
+  {
+    "code": "de",
+    "name": "Deutsch",
+    "path": "de/",
+    "title": "lippycat 🫦🐱 Benutzerhandbuch",
+    "description": "Umfassender Leitfaden zur Erfassung und Analyse von Netzwerkverkehr mit lippycat",
+    "ui": {
+      "Table of contents": "Inhaltsverzeichnis",
+      "Toggle Table of Contents": "Inhaltsverzeichnis ein-/ausblenden",
+      "Change theme": "Farbschema ändern",
+      "Themes": "Farbschemata",
+      "Search (`/`)": "Suchen (`/`)",
+      "Toggle Searchbar": "Suchleiste ein-/ausblenden",
+      "Search this book ...": "Dieses Handbuch durchsuchen …",
+      "Print this book": "Dieses Handbuch drucken",
+      "Git repository": "Git-Repository",
+      "Suggest an edit": "Änderung vorschlagen",
+      "Previous chapter": "Vorheriges Kapitel",
+      "Next chapter": "Nächstes Kapitel",
+      "Copy to clipboard": "In die Zwischenablage kopieren",
+      "Copied!": "Kopiert!"
+    },
+    "selectorLabel": "Sprache auswählen"
+  }
+]

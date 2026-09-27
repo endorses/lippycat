@@ -1,0 +1,15 @@
+#manual-language {
+  max-width: 8rem;
+  margin-inline: 0.5rem;
+  padding: 0.35rem;
+  border: 1px solid var(--table-border-color);
+  border-radius: 3px;
+  color: var(--fg);
+  background: var(--bg);
+  font: inherit;
+}
+
+#manual-language:focus-visible {
+  outline: 2px solid var(--links);
+  outline-offset: 2px;
+}

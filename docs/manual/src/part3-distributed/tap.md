@@ -1,10 +1,12 @@
-# Standalone Mode with `lc tap`
+# Standalone Mode with `lc tap` {#standalone-mode-with-lc-tap}
 
 Tap mode combines local packet capture with full processor capabilities in a single process. It's the right choice when you want per-call PCAP, TUI serving, command hooks, or upstream forwarding — but don't need the complexity of separate hunter and processor nodes.
 
 **The formula**: `tap = process + hunt - gRPC`
 
 Everything `hunt` can do (capture, GPU filtering, protocol detection) and everything `process` can do (PCAP writing, TUI serving, command hooks, virtual interface) — without the gRPC transport between them.
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -20,7 +22,7 @@ flowchart LR
     A -.->|optional| UP[Upstream<br>Processor]
 ```
 
-## When to Use Tap
+## When to Use Tap {#when-to-use-tap}
 
 | Scenario                               | Use                      | Why                                   |
 | -------------------------------------- | ------------------------ | ------------------------------------- |
@@ -32,7 +34,7 @@ flowchart LR
 
 The key question: **do you need to capture from multiple machines?** If yes, use hunt + process. If no, tap is simpler.
 
-## Upstream Forwarding Modes and Local Evidence
+## Upstream Forwarding Modes and Local Evidence {#upstream-forwarding-modes-and-local-evidence}
 
 When `--processor` is set, `--forward-mode packets` is the compatibility
 default. It sends raw packets so the upstream can create PCAPs, serve packet
@@ -43,6 +45,8 @@ sends only normalized metadata. Raw packet bytes and file content never enter
 the event transport. Packet-dependent upstream features are therefore
 unavailable, but the tap's local PCAP writers, rotation, per-call output, and
 post-write hooks continue to work:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap -i eth0 -P central:55555 --forward-mode events \
@@ -58,7 +62,7 @@ limits. Event negotiation fails closed unless
 `--event-fallback-to-packets` explicitly permits fallback. The default packet
 mode remains interoperable with packet-only upstream versions.
 
-### Operating the reliable upstream event spool
+### Operating the reliable upstream event spool {#operating-the-reliable-upstream-event-spool}
 
 Give each tap its own spool directory and monitor both its configured limit and
 filesystem free space. Encoded record payloads are limited to 4 MiB even when
@@ -67,12 +71,14 @@ be stored, forwarding stops instead of hiding the loss. For recovery behavior
 and the safe response to startup or durability errors, see
 [Event spool storage and recovery](../part4-administration/operations.md#event-spool-storage-and-recovery).
 
-## Basic Usage
+## Basic Usage {#basic-usage}
 
-### Structured protocol logs
+### Structured protocol logs {#structured-protocol-logs}
 
 Tap shares the processor's structured-log pipeline. Parent flags are inherited
 by `tap dns`, `tap http`, and the other protocol subcommands:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap dns -i eth0 --insecure \
@@ -88,11 +94,15 @@ TLS is enabled by default for the management interface (TUI connections):
 
 Standalone capture with TLS:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap -i eth0 --tls-cert server.crt --tls-key server.key
 ```
 
 For local testing without TLS:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap -i eth0 --insecure
@@ -100,11 +110,15 @@ sudo lc tap -i eth0 --insecure
 
 Connect the TUI to the tap node:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch remote -P tap-host:55555 --tls-ca ca.crt
 ```
 
 Alternatively, connect without TLS:
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch remote -P localhost:55555 --insecure
@@ -112,21 +126,25 @@ lc watch remote -P localhost:55555 --insecure
 
 `lc watch remote` can connect directly with `--processor` (`-P`) or read target processors and tap nodes from a nodes YAML file. See [Remote TUI Monitoring](../part4-administration/watch-remote.md) for the file format and default search paths.
 
-## Protocol Subcommands
+## Protocol Subcommands {#protocol-subcommands}
 
 Like `sniff` and `hunt`, `tap` has protocol-specific subcommands.
 
-### VoIP (`tap voip`)
+### VoIP (`tap voip`) {#voip-tap-voip}
 
 The most common tap mode. Per-call PCAP is enabled by default:
 
 VoIP capture with SIP user filtering:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap voip -i eth0 --sip-user alicent --insecure
 ```
 
 VoIP capture with TLS and a per-call PCAP directory:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap voip -i eth0 \
@@ -136,17 +154,23 @@ sudo lc tap voip -i eth0 \
 
 VoIP capture narrowed to a SIP port:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap voip -i eth0 --sip-port 5060 --insecure
 ```
 
 High-performance VoIP capture:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap voip -i eth0 --tcp-performance-mode high_performance --insecure
 ```
 
 Per-call PCAP creates separate SIP and RTP files for each call:
+
+<!-- i18n:skip -->
 
 ```
 20250123_143022_abc123_sip.pcap    # SIP signaling
@@ -155,17 +179,21 @@ Per-call PCAP creates separate SIP and RTP files for each call:
 
 VoIP command hooks work the same as on the processor:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap voip -i eth0 \
   --voip-command '/opt/scripts/process-call.sh %callid% %dirname%' \
   --insecure
 ```
 
-### DNS (`tap dns`)
+### DNS (`tap dns`) {#dns-tap-dns}
 
 DNS capture with tunneling detection and alerting:
 
 DNS capture with tunneling alerts:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap dns -i eth0 \
@@ -176,15 +204,19 @@ sudo lc tap dns -i eth0 \
 
 DNS capture with custom ports:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap dns -i eth0 --dns-port 53,5353 --udp-only --insecure
 ```
 
-### HTTP (`tap http`)
+### HTTP (`tap http`) {#http-tap-http}
 
 HTTP capture with host, path, and method filtering:
 
 HTTP capture with host filtering:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap http -i eth0 --host "*.example.com" --insecure
@@ -192,25 +224,31 @@ sudo lc tap http -i eth0 --host "*.example.com" --insecure
 
 HTTP capture with HTTPS decryption:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log --insecure
 ```
 
-### TLS (`tap tls`)
+### TLS (`tap tls`) {#tls-tap-tls}
 
 TLS handshake capture with JA3/JA3S/JA4 fingerprinting:
 
 TLS capture with SNI filtering:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap tls -i eth0 --sni "*.example.com" --insecure
 ```
 
-### Email (`tap email`)
+### Email (`tap email`) {#email-tap-email}
 
 SMTP, IMAP, and POP3 capture with address filtering:
 
 SMTP-only email capture:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap email -i eth0 --protocol smtp --insecure
@@ -218,14 +256,18 @@ sudo lc tap email -i eth0 --protocol smtp --insecure
 
 Email capture with sender filtering:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap email -i eth0 --sender "*@suspicious.com" --insecure
 ```
 
-### RADIUS (`tap radius`)
+### RADIUS (`tap radius`) {#radius-tap-radius}
 
 RADIUS mode combines local authentication/accounting capture with processor
 outputs such as PCAP, structured logs, and remote TUI display:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap radius -i mirror0 --radius-port 1645,1646 \
@@ -237,11 +279,13 @@ Exact account, MAC, attribute, and scoped line criteria use the same flags as
 build; optional authorized X2 delivery is configured independently. See
 [RADIUS capture and POI](../part5-advanced/radius.md) for the complete setup.
 
-## PCAP Writing
+## PCAP Writing {#pcap-writing}
 
 Tap supports all three PCAP modes from the processor (see [Chapter 8](process.md) for details):
 
 Unified PCAP:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap -i eth0 --write-file /var/capture/all.pcap --insecure
@@ -249,12 +293,16 @@ sudo lc tap -i eth0 --write-file /var/capture/all.pcap --insecure
 
 Per-call PCAP, which is enabled by default for `tap voip`:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap voip -i eth0 \
   --per-call-pcap --per-call-pcap-dir /var/capture/calls --insecure
 ```
 
 Auto-rotating PCAP:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap -i eth0 \
@@ -264,11 +312,13 @@ sudo lc tap -i eth0 \
 
 Command hooks (`--pcap-command`, `--voip-command`) work identically to the processor.
 
-## TUI Serving
+## TUI Serving {#tui-serving}
 
 Tap nodes serve a management gRPC API on `--listen` (default: `:55555`), allowing TUI clients to connect for real-time monitoring:
 
 Start the tap with TLS:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap voip -i eth0 --tls-cert server.crt --tls-key server.key
@@ -276,25 +326,33 @@ sudo lc tap voip -i eth0 --tls-cert server.crt --tls-key server.key
 
 Connect the TUI from another terminal:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch remote -P tap-host:55555 --tls-ca ca.crt
 ```
 
 For local development, use `--insecure` on both tap and TUI:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap voip -i eth0 --insecure
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch remote -P localhost:55555 --insecure
 ```
 
-## Upstream Forwarding
+## Upstream Forwarding {#upstream-forwarding}
 
 Tap nodes can forward captured traffic to a central processor, acting as edge nodes in a hierarchical deployment:
 
 An edge tap captures locally and forwards to the central processor:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap voip -i eth0 \
@@ -304,7 +362,7 @@ sudo lc tap voip -i eth0 \
 
 This gives you the best of both worlds: local PCAP writing and TUI access at the edge, plus central aggregation.
 
-### Capture Buffer Telemetry
+### Capture Buffer Telemetry {#capture-buffer-telemetry}
 
 Tap uses regular, SIP-priority, and merged-output lanes. With
 `sip_buffer_size: 0`, the SIP capacity automatically matches `buffer_size`; a
@@ -317,6 +375,8 @@ lane after the SIP lane filled and is not packet loss.
 `capture_buffer_sip_drops` counts classified packets rejected by both input
 lanes and is final packet loss. Use the three lane length/capacity pairs to
 locate the saturated stage.
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -337,11 +397,13 @@ flowchart LR
     TUI2[Central TUI] <-->|gRPC| P
 ```
 
-## Virtual Interface
+## Virtual Interface {#virtual-interface}
 
 Expose filtered traffic to third-party tools via a virtual network interface:
 
 Capture and expose traffic on a virtual interface:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap voip -i eth0 --virtual-interface --insecure
@@ -349,11 +411,15 @@ sudo lc tap voip -i eth0 --virtual-interface --insecure
 
 Monitor with Wireshark:
 
+<!-- i18n:skip -->
+
 ```bash
 wireshark -i lc0
 ```
 
 Alternatively, run tcpdump:
+
+<!-- i18n:skip -->
 
 ```bash
 tcpdump -i lc0 -w filtered.pcap
@@ -361,9 +427,11 @@ tcpdump -i lc0 -w filtered.pcap
 
 Requires `CAP_NET_ADMIN` capability. See `--vif-name`, `--vif-type`, `--vif-buffer-size` for configuration.
 
-## Configuration File
+## Configuration File {#configuration-file}
 
 All tap flags can be set in `~/.config/lippycat/config.yaml`:
+
+<!-- i18n:skip -->
 
 ```yaml
 tap:

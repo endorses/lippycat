@@ -1,8 +1,8 @@
-# Distributed Architecture Overview
+# Distributed Architecture Overview {#distributed-architecture-overview}
 
 lippycat's distributed mode lets you capture traffic across multiple network segments and aggregate it to a central point for analysis. This chapter explains the architecture, when to use it, and how to choose the right deployment topology.
 
-## Why Distribute Capture?
+## Why Distribute Capture? {#why-distribute-capture}
 
 A single capture point only sees traffic on its own network segment. In real-world networks, interesting traffic flows through multiple segments — data centers, branch offices, DMZs, cloud regions. Distributed capture solves three problems:
 
@@ -10,12 +10,14 @@ A single capture point only sees traffic on its own network segment. In real-wor
 2. **Scalability**: Spread capture load across many lightweight agents instead of one overloaded machine.
 3. **Separation of concerns**: Capture in restricted zones (DMZ, production), analyze from a monitoring zone. Hunters need `CAP_NET_RAW`; the processor doesn't.
 
-## The Hunter/Processor Model
+## The Hunter/Processor Model {#the-hunterprocessor-model}
 
 lippycat's distributed architecture has two node types:
 
 - **Hunters** capture packets at the network edge and forward them to a processor via gRPC. They're lightweight (~50MB RAM) and designed to run on every network segment you want to monitor.
 - **Processors** receive packets from multiple hunters, perform protocol analysis, write PCAP files, and serve TUI clients for real-time monitoring.
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart TB
@@ -59,15 +61,15 @@ flowchart TB
 
 **Data flow**: Hunters batch packets (default: 64 per batch) and stream them to the processor over gRPC. The processor writes to PCAP, broadcasts to TUI subscribers, injects into virtual interfaces, and optionally forwards upstream.
 
-### Packet and Event Forwarding
+### Packet and Event Forwarding {#packet-and-event-forwarding}
 
 Each hunter or forwarding tap session uses one canonical upstream
 representation:
 
-| Mode | Analysis authority | Sent upstream | Central capabilities |
-|------|--------------------|---------------|----------------------|
-| `packets` (default) | Processor | Selected raw packets | PCAP, packet views, virtual interface, reanalysis, normalized events |
-| `events` | Hunter or tap | Negotiated normalized metadata; no raw bytes or file content | Event views, structured logs, and authorized metadata consumers |
+| Mode                | Analysis authority | Sent upstream                                                | Central capabilities                                                 |
+| ------------------- | ------------------ | ------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `packets` (default) | Processor          | Selected raw packets                                         | PCAP, packet views, virtual interface, reanalysis, normalized events |
+| `events`            | Hunter or tap      | Negotiated normalized metadata; no raw bytes or file content | Event views, structured logs, and authorized metadata consumers      |
 
 Event mode reduces bandwidth and raw-content exposure, but the receiver cannot
 reconstruct packet evidence or repeat packet-dependent analysis. Use a tap with
@@ -81,11 +83,13 @@ There's also a third node type:
 
 - **Tap** combines hunter and processor in a single process. It captures locally and provides all processor capabilities without gRPC overhead between capture and processing. See [Chapter 9](tap.md) for details.
 
-## Network Topologies
+## Network Topologies {#network-topologies}
 
-### Hub-and-Spoke
+### Hub-and-Spoke {#hub-and-spoke}
 
 The simplest topology. All hunters connect directly to one processor:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart TB
@@ -105,6 +109,8 @@ flowchart TB
 
 Processor:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 --write-file /var/capture/all.pcap \
   --tls-cert server.crt --tls-key server.key
@@ -112,13 +118,17 @@ lc process --listen :55555 --write-file /var/capture/all.pcap \
 
 Hunters:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 --tls-ca ca.crt
 ```
 
-### Hierarchical
+### Hierarchical {#hierarchical}
 
 Multi-tier architecture for geographic or network segmentation. Edge processors aggregate locally and forward to regional or central processors:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -141,12 +151,16 @@ flowchart LR
 
 Central processor:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 --write-file /var/capture/central.pcap \
   --tls-cert server.crt --tls-key server.key
 ```
 
 Regional processor (forwards to central):
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 --processor central:55555 \
@@ -155,6 +169,8 @@ lc process --listen :55555 --processor central:55555 \
 
 Edge processor (forwards to regional):
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 --processor regional:55555 \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
@@ -162,9 +178,11 @@ lc process --listen :55555 --processor regional:55555 \
 
 Hierarchy depth is limited to 10 levels. Keep it at 3 or fewer for optimal performance (each hop adds ~500ms to management operations).
 
-### Multi-Processor
+### Multi-Processor {#multi-processor}
 
 Distribute hunters across multiple independent processors for load distribution:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -175,9 +193,11 @@ flowchart LR
 
 **When to use**: Very large deployments where a single processor can't handle all traffic, or when you want independent monitoring domains.
 
-### DMZ Segmentation
+### DMZ Segmentation {#dmz-segmentation}
 
 Capture from both DMZ and internal networks using hierarchical forwarding through the firewall:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart TB
@@ -208,63 +228,64 @@ The DMZ processor forwards aggregated traffic through a single firewall port to 
 
 **When to use**: Security-sensitive environments where capture spans trust boundaries.
 
-## Security Model
+## Security Model {#security-model}
 
 All gRPC connections use **TLS by default**. You must explicitly pass `--insecure` to disable encryption (blocked when `LIPPYCAT_PRODUCTION=true`).
 
 Three security modes are available:
 
-| Mode | Processor Flags | Hunter Flags | Protection |
-|------|----------------|--------------|------------|
-| **Server TLS** | `--tls-cert`, `--tls-key` | `--tls-ca` | Encrypted, hunter verifies processor |
+| Mode           | Processor Flags                                            | Hunter Flags                          | Protection                              |
+| -------------- | ---------------------------------------------------------- | ------------------------------------- | --------------------------------------- |
+| **Server TLS** | `--tls-cert`, `--tls-key`                                  | `--tls-ca`                            | Encrypted, hunter verifies processor    |
 | **Mutual TLS** | `--tls-cert`, `--tls-key`, `--tls-ca`, `--tls-client-auth` | `--tls-cert`, `--tls-key`, `--tls-ca` | Encrypted, both sides verify each other |
-| **Insecure** | `--insecure` | `--insecure` | No encryption (testing only) |
+| **Insecure**   | `--insecure`                                               | `--insecure`                          | No encryption (testing only)            |
 
 **Recommendation**: Use mutual TLS in production. It prevents unauthorized hunters from connecting to your processor.
 
 For certificate generation and management, see [Chapter 13: Security](../part5-advanced/security.md).
 
-## Choosing the Right Mode
+## Choosing the Right Mode {#choosing-the-right-mode}
 
 Not every deployment needs the full distributed architecture. Here's a decision framework:
 
-| Scenario | Recommended Mode | Why |
-|----------|-----------------|-----|
-| Quick packet inspection | `lc sniff` | CLI output, no infrastructure needed |
-| Interactive analysis on one machine | `lc watch live` | TUI with local capture |
-| VoIP monitoring, single machine | `lc tap voip` | Per-call PCAP, TUI, no gRPC setup |
-| Capture from 2+ network segments | `lc hunt` + `lc process` | Only way to see traffic from multiple segments |
-| Edge node with local TUI + central aggregation | `lc tap` with `--processor` | Standalone capture with upstream forwarding |
-| Large-scale multi-site monitoring | Hierarchical processors | Regional aggregation before central |
+| Scenario                                       | Recommended Mode            | Why                                            |
+| ---------------------------------------------- | --------------------------- | ---------------------------------------------- |
+| Quick packet inspection                        | `lc sniff`                  | CLI output, no infrastructure needed           |
+| Interactive analysis on one machine            | `lc watch live`             | TUI with local capture                         |
+| VoIP monitoring, single machine                | `lc tap voip`               | Per-call PCAP, TUI, no gRPC setup              |
+| Capture from 2+ network segments               | `lc hunt` + `lc process`    | Only way to see traffic from multiple segments |
+| Edge node with local TUI + central aggregation | `lc tap` with `--processor` | Standalone capture with upstream forwarding    |
+| Large-scale multi-site monitoring              | Hierarchical processors     | Regional aggregation before central            |
 
 **Migration path**: Start with `sniff` or `tap` on a single machine. When you need multi-segment visibility, deploy hunters and a processor. The flag knowledge transfers — most `sniff` flags work on `hunt` too (see [Chapter 7](hunt.md)).
 
-## Capacity Planning
+## Capacity Planning {#capacity-planning}
 
-### Hunters
+### Hunters {#hunters}
 
-| Resource | Typical Usage | Notes |
-|----------|--------------|-------|
-| Memory | ~50MB | Increases with buffer size and VoIP call buffers |
-| CPU | Minimal | Depends on packet rate and GPU acceleration |
-| Network | Depends on traffic | VoIP hunters reduce bandwidth by 90%+ with selective forwarding |
+| Resource | Typical Usage      | Notes                                                           |
+| -------- | ------------------ | --------------------------------------------------------------- |
+| Memory   | ~50MB              | Increases with buffer size and VoIP call buffers                |
+| CPU      | Minimal            | Depends on packet rate and GPU acceleration                     |
+| Network  | Depends on traffic | VoIP hunters reduce bandwidth by 90%+ with selective forwarding |
 
-### Processors
+### Processors {#processors}
 
-| Resource | Typical Usage | Notes |
-|----------|--------------|-------|
-| Memory | ~5-10MB per hunter | Plus ~2-5MB per TUI subscriber |
-| CPU | Minimal per hunter | Protocol detection adds some overhead |
+| Resource | Typical Usage           | Notes                                      |
+| -------- | ----------------------- | ------------------------------------------ |
+| Memory   | ~5-10MB per hunter      | Plus ~2-5MB per TUI subscriber             |
+| CPU      | Minimal per hunter      | Protocol detection adds some overhead      |
 | Disk I/O | Depends on PCAP writing | SSD/NVMe recommended for high packet rates |
-| Network | Sum of hunter traffic | Plus TUI subscriber traffic |
+| Network  | Sum of hunter traffic   | Plus TUI subscriber traffic                |
 
 **Rules of thumb**:
+
 - Default `--max-hunters` is 100; adjust based on available RAM
 - Each hunter streams ~10,000 packets/sec at peak
 - End-to-end latency is typically <100ms
 - Heartbeat interval is 5 seconds; stale hunters are cleaned up after 5 minutes
 
-## What Comes Next
+## What Comes Next {#what-comes-next}
 
 - [Chapter 7: Edge Capture with `lc hunt`](hunt.md) — deploying and configuring hunters
 - [Chapter 8: Central Aggregation with `lc process`](process.md) — setting up processors

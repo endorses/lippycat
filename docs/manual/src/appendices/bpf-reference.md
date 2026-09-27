@@ -1,60 +1,62 @@
-# BPF Filter Reference
+# BPF Filter Reference {#bpf-filter-reference}
 
 BPF (Berkeley Packet Filter) expressions tell the kernel which packets to deliver to lippycat and which to discard. Filtering happens before packets reach userspace, so a well-chosen BPF filter is the single most effective way to reduce CPU load and prevent packet drops on busy links. lippycat uses standard libpcap BPF syntax — the same language accepted by tcpdump, tshark, and Wireshark — via the `--filter` / `-f` flag on all capture commands (`sniff`, `hunt`, `tap`).
 
-## BPF Syntax Quick Reference
+## BPF Syntax Quick Reference {#bpf-syntax-quick-reference}
 
 A BPF expression is built from **primitives** joined by **operators**.
 
-### Primitives
+### Primitives {#primitives}
 
 A primitive consists of an optional qualifier followed by a value:
 
-| Qualifier | Meaning | Example |
-|-----------|---------|---------|
-| `host` | Match an IP address | `host 10.0.1.5` |
-| `net` | Match a subnet (CIDR) | `net 10.0.1.0/24` |
-| `port` | Match a port number | `port 5060` |
-| `portrange` | Match a port range | `portrange 10000-32768` |
-| `proto` | Match a protocol number | `proto 17` (UDP) |
+| Qualifier   | Meaning                 | Example                 |
+| ----------- | ----------------------- | ----------------------- |
+| `host`      | Match an IP address     | `host 10.0.1.5`         |
+| `net`       | Match a subnet (CIDR)   | `net 10.0.1.0/24`       |
+| `port`      | Match a port number     | `port 5060`             |
+| `portrange` | Match a port range      | `portrange 10000-32768` |
+| `proto`     | Match a protocol number | `proto 17` (UDP)        |
 
-### Direction Qualifiers
+### Direction Qualifiers {#direction-qualifiers}
 
 Direction qualifiers restrict matching to the source or destination:
 
-| Qualifier | Meaning | Example |
-|-----------|---------|---------|
-| `src` | Source only | `src host 10.0.1.5` |
-| `dst` | Destination only | `dst port 443` |
-| `src or dst` | Either (default) | `host 10.0.1.5` |
-| `src and dst` | Both | `src and dst net 10.0.0.0/8` |
+| Qualifier     | Meaning          | Example                      |
+| ------------- | ---------------- | ---------------------------- |
+| `src`         | Source only      | `src host 10.0.1.5`          |
+| `dst`         | Destination only | `dst port 443`               |
+| `src or dst`  | Either (default) | `host 10.0.1.5`              |
+| `src and dst` | Both             | `src and dst net 10.0.0.0/8` |
 
-### Protocol Qualifiers
+### Protocol Qualifiers {#protocol-qualifiers}
 
-| Qualifier | Description |
-|-----------|-------------|
-| `tcp` | TCP segments |
-| `udp` | UDP datagrams |
-| `icmp` | ICMP messages |
-| `icmp6` | ICMPv6 messages |
-| `arp` | ARP packets |
-| `ip` | IPv4 packets |
-| `ip6` | IPv6 packets |
-| `ether` | Ethernet frames |
-| `vlan` | VLAN-tagged frames (802.1Q) |
+| Qualifier | Description                 |
+| --------- | --------------------------- |
+| `tcp`     | TCP segments                |
+| `udp`     | UDP datagrams               |
+| `icmp`    | ICMP messages               |
+| `icmp6`   | ICMPv6 messages             |
+| `arp`     | ARP packets                 |
+| `ip`      | IPv4 packets                |
+| `ip6`     | IPv6 packets                |
+| `ether`   | Ethernet frames             |
+| `vlan`    | VLAN-tagged frames (802.1Q) |
 
-### Operators
+### Operators {#operators}
 
-| Operator | Alias | Meaning |
-|----------|-------|---------|
-| `and` | `&&` | Both conditions must match |
-| `or` | `\|\|` | Either condition must match |
-| `not` | `!` | Negate a condition |
-| `()` | — | Group sub-expressions |
+| Operator | Alias  | Meaning                     |
+| -------- | ------ | --------------------------- |
+| `and`    | `&&`   | Both conditions must match  |
+| `or`     | `\|\|` | Either condition must match |
+| `not`    | `!`    | Negate a condition          |
+| `()`     | —      | Group sub-expressions       |
 
-### Basic Expressions
+### Basic Expressions {#basic-expressions}
 
 A single primitive:
+
+<!-- i18n:skip -->
 
 ```
 udp port 5060
@@ -62,11 +64,15 @@ udp port 5060
 
 Combined with `and`:
 
+<!-- i18n:skip -->
+
 ```
 host 10.0.1.5 and udp port 5060
 ```
 
 Combined with `or`:
+
+<!-- i18n:skip -->
 
 ```
 tcp port 80 or tcp port 443
@@ -74,28 +80,35 @@ tcp port 80 or tcp port 443
 
 Negation:
 
+<!-- i18n:skip -->
+
 ```
 not host 10.0.1.254
 ```
 
 Grouped sub-expressions:
 
+<!-- i18n:skip -->
+
 ```
 host 10.0.1.5 and (tcp port 80 or tcp port 443)
 ```
 
 > **Shell quoting**: Always wrap the filter in double quotes when passing it to `-f` so the shell does not interpret parentheses or special characters:
+>
 > ```bash
 > sudo lc sniff -i eth0 -f "host 10.0.1.5 and (tcp port 80 or tcp port 443)"
 > ```
 
-## Common Filter Patterns
+## Common Filter Patterns {#common-filter-patterns}
 
-### VoIP Capture
+### VoIP Capture {#voip-capture}
 
 VoIP traffic consists of SIP signaling (typically on UDP port 5060) and RTP media streams (on high-numbered UDP ports). Capturing both requires a filter that covers the signaling port and the expected media range.
 
 SIP signaling only:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -f "udp port 5060"
@@ -103,11 +116,15 @@ sudo lc sniff voip -i eth0 -f "udp port 5060"
 
 SIP + RTP (common media port range):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -f "udp port 5060 or udp portrange 10000-32768"
 ```
 
 SIP on non-standard port:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -f "udp port 5080"
@@ -115,11 +132,15 @@ sudo lc sniff voip -i eth0 -f "udp port 5080"
 
 SIP from a specific PBX:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -f "host 10.0.1.100 and udp port 5060"
 ```
 
 Multiple SIP ports (disjunction):
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 -f "udp port 5060 or udp port 5061 or udp port 5080"
@@ -129,10 +150,15 @@ The `--sip-port` convenience flag generates optimized port filters without manua
 
 Equivalent to the multi-port filter above, but cleaner:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 --sip-port 5060,5061,5080
 ```
+
 For VoIP, prefer explicit SIP and RTP port constraints. This narrows traffic at the kernel level while still allowing SIP-over-TCP:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 --sip-port 5060 --rtp-port-range 10000-20000
@@ -140,9 +166,11 @@ sudo lc sniff voip -i eth0 --sip-port 5060 --rtp-port-range 10000-20000
 
 The older VoIP `--udp-only` flag is still accepted for compatibility, but it is hidden and deprecated because it can miss TCP SIP traffic.
 
-### DNS Analysis
+### DNS Analysis {#dns-analysis}
 
 Standard DNS (port 53):
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0 -f "udp port 53"
@@ -150,11 +178,15 @@ sudo lc sniff dns -i eth0 -f "udp port 53"
 
 Include mDNS:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 -f "udp port 53 or udp port 5353"
 ```
 
 Responses from a specific resolver:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0 -f "src host 8.8.8.8 and udp port 53"
@@ -162,19 +194,25 @@ sudo lc sniff dns -i eth0 -f "src host 8.8.8.8 and udp port 53"
 
 DNS over TCP (zone transfers, large responses):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 -f "port 53"
 ```
 
 Or use the convenience flag:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 --dns-port 53,5353
 ```
 
-### TLS / HTTPS
+### TLS / HTTPS {#tls--https}
 
 HTTPS only:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff tls -i eth0 -f "tcp port 443"
@@ -182,11 +220,15 @@ sudo lc sniff tls -i eth0 -f "tcp port 443"
 
 Multiple TLS services:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff tls -i eth0 -f "tcp port 443 or tcp port 8443 or tcp port 993"
 ```
 
 TLS handshakes to a specific server:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff tls -i eth0 -f "dst host 10.0.1.50 and tcp port 443"
@@ -194,13 +236,17 @@ sudo lc sniff tls -i eth0 -f "dst host 10.0.1.50 and tcp port 443"
 
 Or:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff tls -i eth0 --tls-port 443,8443,993
 ```
 
-### HTTP
+### HTTP {#http}
 
 Standard HTTP ports:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff http -i eth0 -f "tcp port 80 or tcp port 8080"
@@ -208,18 +254,25 @@ sudo lc sniff http -i eth0 -f "tcp port 80 or tcp port 8080"
 
 HTTP to a development server:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff http -i eth0 -f "dst host 10.0.1.10 and tcp port 3000"
 ```
+
 Or:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff http -i eth0 --http-port 80,8080,3000
 ```
 
-### Network Analysis
+### Network Analysis {#network-analysis}
 
 All traffic on a subnet:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -f "net 10.0.1.0/24"
@@ -227,11 +280,15 @@ sudo lc sniff -i eth0 -f "net 10.0.1.0/24"
 
 Traffic between two hosts:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0 -f "host 10.0.1.1 and host 10.0.1.2"
 ```
 
 Exclude management traffic:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -f "not host 10.0.1.254"
@@ -239,11 +296,15 @@ sudo lc sniff -i eth0 -f "not host 10.0.1.254"
 
 Exclude SSH (useful when capturing over SSH):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0 -f "not tcp port 22"
 ```
 
 Specific MAC address:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -f "ether host aa:bb:cc:dd:ee:ff"
@@ -251,11 +312,15 @@ sudo lc sniff -i eth0 -f "ether host aa:bb:cc:dd:ee:ff"
 
 VLAN-tagged SIP traffic:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 -f "vlan and udp port 5060"
 ```
 
 IPv6 traffic only:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -f "ip6"
@@ -263,21 +328,27 @@ sudo lc sniff -i eth0 -f "ip6"
 
 ICMP (ping, traceroute):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0 -f "icmp"
 ```
 
 ARP requests:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0 -f "arp"
 ```
 
-### Distributed Capture
+### Distributed Capture {#distributed-capture}
 
 In distributed deployments, BPF filters are applied on hunter nodes at the edge. This reduces the volume of traffic forwarded to the processor over gRPC.
 
 Hunter with BPF filter:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
@@ -287,6 +358,8 @@ sudo lc hunt --processor processor:55555 -i eth0 \
 
 VoIP hunter with convenience flags:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --sip-port 5060 --rtp-port-range 10000-20000 \
@@ -295,31 +368,35 @@ sudo lc hunt voip --processor processor:55555 -i eth0 \
 
 Tap node with filter:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc tap voip -i eth0 \
   -f "udp port 5060 or udp portrange 10000-32768" \
   --insecure
 ```
 
-## lippycat Convenience Flags
+## lippycat Convenience Flags {#lippycat-convenience-flags}
 
 lippycat provides protocol-aware flags that generate optimized BPF filters. These flags handle edge cases such as port lists and combine cleanly with any manual `-f` filter you provide.
 
-| Flag | Equivalent BPF | Available On |
-|------|---------------|--------------|
-| `--sip-port 5060,5080` | SIP port narrowing for TCP and UDP | `sniff voip`, `hunt voip`, `tap voip` |
-| `--rtp-port-range 10000-20000` | RTP port range narrowing | `sniff voip`, `hunt voip`, `tap voip` |
-| `--udp-only` | Adds `udp` to the filter | `sniff dns`, `hunt dns`, `tap dns`; legacy hidden flag in VoIP modes |
-| `--dns-port 53,5353` | `udp port 53 or udp port 5353` | `sniff dns`, `hunt dns`, `tap dns` |
-| `--radius-port 1812,1813,1912` | Listed UDP ports plus IPv6 UDP candidates for userspace RADIUS validation | `sniff radius`, `hunt radius`, `tap radius` |
-| `--http-port 80,8080` | `tcp port 80 or tcp port 8080` | `sniff http`, `tap http` |
-| `--tls-port 443,8443` | `tcp port 443 or tcp port 8443` | `sniff tls`, `tap tls` |
+| Flag                           | Equivalent BPF                                                            | Available On                                                         |
+| ------------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `--sip-port 5060,5080`         | SIP port narrowing for TCP and UDP                                        | `sniff voip`, `hunt voip`, `tap voip`                                |
+| `--rtp-port-range 10000-20000` | RTP port range narrowing                                                  | `sniff voip`, `hunt voip`, `tap voip`                                |
+| `--udp-only`                   | Adds `udp` to the filter                                                  | `sniff dns`, `hunt dns`, `tap dns`; legacy hidden flag in VoIP modes |
+| `--dns-port 53,5353`           | `udp port 53 or udp port 5353`                                            | `sniff dns`, `hunt dns`, `tap dns`                                   |
+| `--radius-port 1812,1813,1912` | Listed UDP ports plus IPv6 UDP candidates for userspace RADIUS validation | `sniff radius`, `hunt radius`, `tap radius`                          |
+| `--http-port 80,8080`          | `tcp port 80 or tcp port 8080`                                            | `sniff http`, `tap http`                                             |
+| `--tls-port 443,8443`          | `tcp port 443 or tcp port 8443`                                           | `sniff tls`, `tap tls`                                               |
 
-### Combining Convenience Flags with Manual Filters
+### Combining Convenience Flags with Manual Filters {#combining-convenience-flags-with-manual-filters}
 
 Convenience flags and `-f` filters are combined with `and` logic. This lets you use a convenience flag for port selection and a manual filter for host or subnet scoping:
 
 SIP on ports 5060/5080, but only from a specific subnet:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 --sip-port 5060,5080 -f "net 10.0.1.0/24"
@@ -327,25 +404,31 @@ sudo lc sniff voip -i eth0 --sip-port 5060,5080 -f "net 10.0.1.0/24"
 
 DNS on standard port, excluding a chatty host:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 --dns-port 53 -f "not host 10.0.1.100"
 ```
 
 VoIP from a specific PBX, constrained to known SIP/RTP ports:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff voip -i eth0 --sip-port 5060 --rtp-port-range 10000-20000 -f "host 10.0.1.50"
 ```
 
-## Performance Implications
+## Performance Implications {#performance-implications}
 
 BPF filters execute inside the kernel as compiled bytecode. The kernel discards non-matching packets before they are copied to userspace, saving both CPU cycles and memory bandwidth. On high-speed links, the difference between a broad capture and a focused BPF filter can determine whether lippycat keeps up with the wire rate or drops packets.
 
-### Filter Complexity and Cost
+### Filter Complexity and Cost {#filter-complexity-and-cost}
 
 Simple port filters compile to a handful of BPF instructions and add negligible overhead. Each additional `or` clause adds a few more instructions but remains fast — the kernel evaluates the bytecode in a tight loop with no system call overhead. In practice, the cost of the filter is always dwarfed by the cost of copying packets to userspace, so **more specific filters are almost always faster overall** even if they contain more clauses.
 
 Few BPF instructions — very fast:
+
+<!-- i18n:skip -->
 
 ```bash
 -f "udp port 5060"
@@ -353,17 +436,21 @@ Few BPF instructions — very fast:
 
 More instructions, still fast, but captures far less data:
 
+<!-- i18n:skip -->
+
 ```bash
 -f "udp port 5060 or udp portrange 10000-32768"
 ```
 
 With no filter, every packet reaches userspace, making this the slowest option.
 
-### Use `portrange` Instead of Port Lists
+### Use `portrange` Instead of Port Lists {#use-portrange-instead-of-port-lists}
 
 When filtering a contiguous range of ports, `portrange` is more efficient than listing individual ports:
 
 Efficient: single range check:
+
+<!-- i18n:skip -->
 
 ```bash
 -f "udp portrange 10000-32768"
@@ -371,11 +458,13 @@ Efficient: single range check:
 
 Less efficient: thousands of individual port comparisons:
 
+<!-- i18n:skip -->
+
 ```bash
 -f "udp port 10000 or udp port 10001 or udp port 10002 or ..."
 ```
 
-### Interaction with Other Performance Settings
+### Interaction with Other Performance Settings {#interaction-with-other-performance-settings}
 
 BPF filtering works alongside other lippycat performance features:
 
@@ -385,14 +474,15 @@ BPF filtering works alongside other lippycat performance features:
 
 - **TCP performance profiles** — BPF filters that narrow SIP and RTP ports reduce userspace work before TCP reassembly. For DNS-only captures, `--udp-only` can still exclude TCP DNS when zone transfers or large TCP DNS responses are not needed.
 
+## Tips and Gotchas {#tips-and-gotchas}
 
-## Tips and Gotchas
-
-### Shell Quoting
+### Shell Quoting {#shell-quoting}
 
 BPF expressions often contain parentheses and logical operators that the shell interprets. Always wrap the filter string in quotes:
 
 Correct — shell passes the full string to lippycat:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff -i eth0 -f "host 10.0.1.5 and (port 80 or port 443)"
@@ -400,15 +490,19 @@ sudo lc sniff -i eth0 -f "host 10.0.1.5 and (port 80 or port 443)"
 
 Wrong — shell tries to run "(port" as a subshell:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff -i eth0 -f host 10.0.1.5 and (port 80 or port 443)
 ```
 
-### VLAN-Tagged Traffic
+### VLAN-Tagged Traffic {#vlan-tagged-traffic}
 
 Standard BPF primitives do not match inside VLAN (802.1Q) headers. If your network uses VLANs, prepend the `vlan` qualifier:
 
 Matches SIP on VLAN-tagged frames:
+
+<!-- i18n:skip -->
 
 ```bash
 -f "vlan and udp port 5060"
@@ -416,15 +510,19 @@ Matches SIP on VLAN-tagged frames:
 
 Without 'vlan', VLAN-tagged SIP packets are invisible to the filter:
 
+<!-- i18n:skip -->
+
 ```bash
 -f "udp port 5060"
 ```
 
-### IPv6
+### IPv6 {#ipv6}
 
 IPv6 packets require the `ip6` qualifier. Bare `host` matches IPv4 only:
 
 IPv4 only:
+
+<!-- i18n:skip -->
 
 ```bash
 -f "host 10.0.1.5"
@@ -432,31 +530,39 @@ IPv4 only:
 
 IPv6 only:
 
+<!-- i18n:skip -->
+
 ```bash
 -f "ip6 host 2001:db8::1"
 ```
 
 Both:
 
+<!-- i18n:skip -->
+
 ```bash
 -f "host 10.0.1.5 or ip6 host 2001:db8::1"
 ```
 
-### Fragmented Packets
+### Fragmented Packets {#fragmented-packets}
 
 IP-fragmented packets pose a challenge for port-based filters. Only the first fragment carries the TCP/UDP header with port numbers; subsequent fragments lack this information and will not match port-based filters. On modern networks with Path MTU Discovery, fragmentation is rare, but if you suspect fragments are being missed:
 
 Capture all fragments from a host (regardless of port):
 
+<!-- i18n:skip -->
+
 ```bash
 -f "host 10.0.1.5"
 ```
 
-### Testing Filters with tcpdump
+### Testing Filters with tcpdump {#testing-filters-with-tcpdump}
 
 Before deploying a filter in production, test it with `tcpdump -d` to inspect the compiled BPF bytecode, or with `tcpdump -c 10` to verify it matches expected traffic:
 
 Show compiled BPF instructions (no capture needed):
+
+<!-- i18n:skip -->
 
 ```bash
 tcpdump -d "udp port 5060 or udp portrange 10000-32768"
@@ -464,15 +570,19 @@ tcpdump -d "udp port 5060 or udp portrange 10000-32768"
 
 Capture 10 matching packets to verify:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo tcpdump -i eth0 -c 10 "udp port 5060"
 ```
 
-### Broadcast and Multicast
+### Broadcast and Multicast {#broadcast-and-multicast}
 
 To exclude broadcast or multicast noise from a capture:
 
 Exclude broadcast:
+
+<!-- i18n:skip -->
 
 ```bash
 -f "not ether broadcast"
@@ -480,21 +590,25 @@ Exclude broadcast:
 
 Exclude multicast:
 
+<!-- i18n:skip -->
+
 ```bash
 -f "not ether multicast"
 ```
 
 Exclude both:
 
+<!-- i18n:skip -->
+
 ```bash
 -f "not ether broadcast and not ether multicast"
 ```
 
-### Maximum Filter Length
+### Maximum Filter Length {#maximum-filter-length}
 
 libpcap imposes a limit on BPF program length (typically 4096 instructions on Linux). Extremely complex filters with hundreds of port clauses can exceed this limit. If you hit it, consolidate port lists into `portrange` expressions or use lippycat's convenience flags, which generate optimized filters.
 
-## Further Reading
+## Further Reading {#further-reading}
 
 - [tcpdump filter syntax (pcap-filter manual page)](https://www.tcpdump.org/manpages/pcap-filter.7.html) — the authoritative reference for BPF expression syntax
 - [Performance Optimization](../part5-advanced/performance.md) — tuning capture performance with TCP profiles and GPU acceleration

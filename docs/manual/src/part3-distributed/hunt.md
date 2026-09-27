@@ -1,18 +1,22 @@
-# Edge Capture with `lc hunt`
+# Edge Capture with `lc hunt` {#edge-capture-with-lc-hunt}
 
 Hunters are lightweight capture agents that run at the network edge. If you've used `lc sniff` ([Chapter 4](../part2-local-capture/sniff.md)), you already know most of what you need — hunting is sniffing that forwards to a processor instead of writing locally.
 
-## From Sniff to Hunt
+## From Sniff to Hunt {#from-sniff-to-hunt}
 
 The transition from local capture to distributed capture is small. Compare:
 
 What you learned with `sniff`:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff voip -i eth0 --sip-user alicent -w calls.pcap
 ```
 
 The distributed equivalent starts by creating a filter:
+
+<!-- i18n:skip -->
 
 ```bash
 lc set filter -P central:55555 --tls-ca ca.crt \
@@ -21,13 +25,15 @@ lc set filter -P central:55555 --tls-ca ca.crt \
 
 Then start the hunter:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt voip -i eth0 --processor central:55555 --tls-ca ca.crt
 ```
 
 Most capture flags (`-i`, `-f`, `--sip-port`, `--rtp-port-range`) carry over. What changes is filtering and output: VoIP call filters are managed centrally on the processor with `lc set filter`, and `--processor` sends matching packets to that processor. The processor handles PCAP writing, TUI serving, and analysis (see [Chapter 8](process.md)).
 
-### What Stays the Same
+### What Stays the Same {#what-stays-the-same}
 
 | Flag               | Sniff                           | Hunt                            | Same? |
 | ------------------ | ------------------------------- | ------------------------------- | ----- |
@@ -42,14 +48,14 @@ Most capture flags (`-i`, `-f`, `--sip-port`, `--rtp-port-range`) carry over. Wh
 | `--rtp-port-range` | RTP port range (VoIP)           | RTP port range (VoIP)           | Yes   |
 | `--gpu-backend`    | GPU acceleration in CUDA builds | GPU acceleration in CUDA builds | Yes   |
 
-### What's New
+### What's New {#whats-new}
 
 | Flag                                  | Purpose                                                                        |
 | ------------------------------------- | ------------------------------------------------------------------------------ |
 | `-P, --processor`                     | Processor address (host:port) — **required**                                   |
 | `-I, --id`                            | Hunter identifier (default: hostname)                                          |
 | `-b, --buffer-size`                   | Packet buffer size (default: 10000)                                            |
-| `--sip-buffer-size`                   | SIP priority-lane size (default: 0, automatically matches `--buffer-size`)      |
+| `--sip-buffer-size`                   | SIP priority-lane size (default: 0, automatically matches `--buffer-size`)     |
 | `--batch-size`                        | Packets per gRPC batch (default: 64)                                           |
 | `--batch-timeout`                     | Batch send timeout in ms (default: 100)                                        |
 | `--batch-queue-size`                  | Batch queue buffer (default: 1000)                                             |
@@ -59,11 +65,13 @@ Most capture flags (`-i`, `-f`, `--sip-port`, `--rtp-port-range`) carry over. Wh
 | `--no-filter-policy`                  | Whether to forward all or no packets when no filters exist (`deny` by default) |
 | `--debug-listen`                      | Optional pprof listener for diagnostics                                        |
 
-### Your First Distributed Capture
+### Your First Distributed Capture {#your-first-distributed-capture}
 
 Start a processor (see [Chapter 8](process.md) for full details):
 
 In Terminal 1, start the processor:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 --write-file /tmp/captured.pcap \
@@ -72,13 +80,15 @@ lc process --listen :55555 --write-file /tmp/captured.pcap \
 
 In Terminal 2, start a hunter:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt --processor localhost:55555 -i eth0 --tls-ca ca.crt
 ```
 
 The hunter captures packets on `eth0`, batches them, and streams them to the processor via gRPC. The processor writes everything to `captured.pcap`.
 
-## Packet or Event Forwarding
+## Packet or Event Forwarding {#packet-or-event-forwarding}
 
 Hunters default to `--forward-mode packets` for compatibility. The processor
 receives raw packets, owns protocol analysis, and can provide PCAP output,
@@ -91,6 +101,8 @@ raw packets and file content do not. The central processor can log and display
 the negotiated events, but cannot reconstruct packet evidence, rerun analysis,
 or provide packet-dependent output for that producer.
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt -P processor:55555 -i eth0 --forward-mode events \
   --event-delivery-profile reliable \
@@ -102,7 +114,7 @@ edge spool. `memory-only` lowers disk use but acknowledged queue admissions may
 be lost if the processor crashes. Configure byte/age limits and choose
 `drop_oldest` or `drop_new`; loss remains visible in hunter status.
 
-### Operating the reliable event spool
+### Operating the reliable event spool {#operating-the-reliable-event-spool}
 
 Give each hunter its own spool directory and monitor both its configured limit
 and filesystem free space. Encoded record payloads are limited to 4 MiB even
@@ -124,31 +136,39 @@ For quick local testing without TLS:
 
 Start the processor in insecure mode (testing only):
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 --write-file /tmp/captured.pcap --insecure
 ```
 
 Then start the hunter in insecure mode (testing only):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt --processor localhost:55555 -i eth0 --insecure
 ```
 
-## Protocol-Specific Hunters
+## Protocol-Specific Hunters {#protocol-specific-hunters}
 
 Like `sniff`, `hunt` has protocol subcommands that add specialized filtering and analysis.
 
-### VoIP Hunter (`hunt voip`)
+### VoIP Hunter (`hunt voip`) {#voip-hunter-hunt-voip}
 
 The VoIP hunter is the most commonly used mode. It captures SIP/RTP traffic with intelligent call buffering — packets are held locally until a call matches the processor's filters, then forwarded. Unmatched calls are dropped at the edge, reducing bandwidth by 90%+.
 
 VoIP hunter with TLS:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 --tls-ca ca.crt
 ```
 
 VoIP hunter with BPF optimization for a specific SIP port:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
@@ -157,6 +177,8 @@ sudo lc hunt voip --processor processor:55555 -i eth0 \
 
 VoIP hunter with a custom RTP port range:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --rtp-port-range 8000-9000 --tls-ca ca.crt
@@ -164,12 +186,16 @@ sudo lc hunt voip --processor processor:55555 -i eth0 \
 
 VoIP hunter with mutual TLS:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --tls-cert hunter.crt --tls-key hunter.key --tls-ca ca.crt
 ```
 
 **How call buffering works**:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -188,17 +214,21 @@ flowchart LR
 
 Filters are managed centrally by the processor and pushed to hunters. Hunters don't configure call filters locally. Use `lc set filter` / `lc rm filter` for live filter changes; see [Chapter 10](../part4-administration/cli-admin.md) for CLI administration.
 
-### DNS Hunter (`hunt dns`)
+### DNS Hunter (`hunt dns`) {#dns-hunter-hunt-dns}
 
 Captures DNS queries and responses for forwarding to the processor.
 
 DNS hunter:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt dns --processor processor:55555 -i eth0 --tls-ca ca.crt
 ```
 
 UDP-only DNS hunter with custom ports:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt dns --processor processor:55555 -i eth0 \
@@ -207,11 +237,13 @@ sudo lc hunt dns --processor processor:55555 -i eth0 \
 
 **DNS-specific flags**: `--dns-port` (default: 53), `--udp-only`.
 
-### HTTP Hunter (`hunt http`)
+### HTTP Hunter (`hunt http`) {#http-hunter-hunt-http}
 
 Captures HTTP traffic with optional host/path/method filtering at the edge.
 
 HTTP hunter with host filtering:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt http --processor processor:55555 -i eth0 \
@@ -220,11 +252,13 @@ sudo lc hunt http --processor processor:55555 -i eth0 \
 
 **HTTP-specific flags**: `--http-port`, `--host`, `--path`, `--method`.
 
-### TLS Hunter (`hunt tls`)
+### TLS Hunter (`hunt tls`) {#tls-hunter-hunt-tls}
 
 Captures TLS handshakes for fingerprint analysis (JA3/JA3S/JA4).
 
 TLS hunter on multiple ports:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt tls --processor processor:55555 -i eth0 \
@@ -233,11 +267,13 @@ sudo lc hunt tls --processor processor:55555 -i eth0 \
 
 **TLS-specific flags**: `--tls-port` (default: 443).
 
-### Email Hunter (`hunt email`)
+### Email Hunter (`hunt email`) {#email-hunter-hunt-email}
 
 Captures SMTP, IMAP, and POP3 traffic with address filtering.
 
 SMTP-only email hunter with sender filtering:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt email --processor processor:55555 -i eth0 \
@@ -246,12 +282,14 @@ sudo lc hunt email --processor processor:55555 -i eth0 \
 
 **Email-specific flags**: `--protocol` (smtp/imap/pop3/all), `--smtp-port`, `--imap-port`, `--pop3-port`, `--address`, `--sender`, `--recipient`.
 
-### RADIUS Hunter (`hunt radius`)
+### RADIUS Hunter (`hunt radius`) {#radius-hunter-hunt-radius}
 
 Captures visible UDP RADIUS authentication and accounting traffic, applies
 exact identity criteria at the edge, and forwards selected packets and their
 validated observation and provenance metadata to the processor. Routine display
 and structured-log projections redact credential-bearing attributes:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt radius --processor processor:55555 -i mirror0 \
@@ -263,11 +301,11 @@ flags with `sniff radius` and `tap radius`. See
 [RADIUS capture and POI](../part5-advanced/radius.md) for the complete flag table
 and distributed deployment constraints.
 
-## Resilience and Flow Control
+## Resilience and Flow Control {#resilience-and-flow-control}
 
 Hunters are designed to survive network disruptions and processor outages.
 
-### Flow Control
+### Flow Control {#flow-control}
 
 The processor sends flow control signals to hunters via heartbeat responses:
 
@@ -280,7 +318,7 @@ The processor sends flow control signals to hunters via heartbeat responses:
 
 Flow control is based on the processor's PCAP write queue utilization. Slow TUI clients do not trigger flow control — they receive selective packet drops instead.
 
-### Automatic Reconnection
+### Automatic Reconnection {#automatic-reconnection}
 
 When the connection to the processor is lost, the hunter reconnects automatically:
 
@@ -300,9 +338,11 @@ lane automatically matches `--buffer-size` unless `--sip-buffer-size` is set to
 a positive override. Larger queues add burst headroom and memory use; they do
 not make sustained overload lossless.
 
-### Disk Overflow Buffer
+### Disk Overflow Buffer {#disk-overflow-buffer}
 
 For extended disconnections (hours, days), enable the disk overflow buffer:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
@@ -315,7 +355,7 @@ When the memory queue fills, batches overflow to disk. When the connection is re
 - `--disk-buffer-dir` — buffer directory (default: `/var/tmp/lippycat-buffer`)
 - `--disk-buffer-max-mb` — maximum disk usage in MB (default: 1024)
 
-### Circuit Breaker
+### Circuit Breaker {#circuit-breaker}
 
 When the processor is down for an extended period, the circuit breaker prevents connection thrashing:
 
@@ -323,28 +363,30 @@ When the processor is down for an extended period, the circuit breaker prevents 
 - Waits 30 seconds before allowing retry
 - Half-open state: allows limited test connections before full recovery
 
-## Performance Tuning
+## Performance Tuning {#performance-tuning}
 
-### Capture Buffer Pressure
+### Capture Buffer Pressure {#capture-buffer-pressure}
 
 Use the per-lane length and capacity gauges to identify whether the regular,
 SIP-priority, or merged-output lane is saturated. Interpret the SIP counters as
 successive outcomes:
 
-| Counter | Meaning |
-| --- | --- |
-| `sip_priority_classified` | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped. |
+| Counter                        | Meaning                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `sip_priority_classified`      | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped.   |
 | `capture_buffer_sip_demotions` | Classified SIP packets retained in the regular lane after the priority lane filled. Demotions are not packet loss. |
-| `capture_buffer_sip_drops` | Classified SIP packets rejected by both input lanes and therefore lost. |
+| `capture_buffer_sip_drops`     | Classified SIP packets rejected by both input lanes and therefore lost.                                            |
 
 Persistent growth in the output lane points to downstream processing or
 forwarding throughput rather than an input-capacity problem alone.
 
-### Batch Configuration
+### Batch Configuration {#batch-configuration}
 
 Batching controls how packets are aggregated before sending. Larger batches reduce gRPC overhead but increase latency:
 
 For low-latency, real-time monitoring:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
@@ -353,12 +395,16 @@ sudo lc hunt --processor processor:55555 -i eth0 \
 
 For high-throughput bulk capture:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
   --batch-size 256 --batch-timeout 500 --tls-ca ca.crt
 ```
 
 For the balanced default profile:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
@@ -371,13 +417,15 @@ sudo lc hunt --processor processor:55555 -i eth0 \
 | Balanced        | 64-128     | 100-200ms  | General monitoring     |
 | High throughput | 256-512    | 500-1000ms | Bulk capture, archival |
 
-### GPU Acceleration
+### GPU Acceleration {#gpu-acceleration}
 
 These flags are available in CUDA builds.
 
 Enable GPU-accelerated VoIP pattern matching at the edge:
 
 To auto-detect the best backend:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
@@ -386,12 +434,16 @@ sudo lc hunt --processor processor:55555 -i eth0 \
 
 To force CUDA on NVIDIA GPUs:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
   --enable-voip-filter --gpu-backend cuda --gpu-batch-size 200 --tls-ca ca.crt
 ```
 
 To use CPU SIMD without requiring a GPU:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
@@ -400,11 +452,13 @@ sudo lc hunt --processor processor:55555 -i eth0 \
 
 GPU acceleration is most valuable at high packet rates (>10,000 pps) with many concurrent SIP calls. See [Chapter 14: Performance](../part5-advanced/performance.md) for benchmarks.
 
-### BPF Filter Optimization
+### BPF Filter Optimization {#bpf-filter-optimization}
 
 For VoIP hunters on TCP-heavy networks, use BPF flags to skip TCP traffic and focus on SIP/RTP:
 
 To restrict capture to a specific SIP port:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
@@ -413,6 +467,8 @@ sudo lc hunt voip --processor processor:55555 -i eth0 \
 
 To restrict both the SIP port and RTP range:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --sip-port 5060 --rtp-port-range 10000-20000 --tls-ca ca.crt
@@ -420,11 +476,13 @@ sudo lc hunt voip --processor processor:55555 -i eth0 \
 
 The older VoIP `--udp-only` flag is still accepted for compatibility but hidden and deprecated because it can miss TCP SIP traffic.
 
-### Pattern Matching Algorithm
+### Pattern Matching Algorithm {#pattern-matching-algorithm}
 
 For large filter sets, the Aho-Corasick algorithm provides ~265x faster matching than linear scan:
 
 To auto-select Aho-Corasick for 100 or more patterns and linear matching otherwise:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
@@ -433,14 +491,18 @@ sudo lc hunt --processor processor:55555 -i eth0 \
 
 To force Aho-Corasick for smaller filter sets:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc hunt --processor processor:55555 -i eth0 \
   --pattern-algorithm aho-corasick --tls-ca ca.crt
 ```
 
-## Configuration File
+## Configuration File {#configuration-file}
 
 All hunt flags can be set in `~/.config/lippycat/config.yaml`:
+
+<!-- i18n:skip -->
 
 ```yaml
 hunter:

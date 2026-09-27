@@ -51,6 +51,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
 ## Installation
 
 ### Prerequisites
+
 - Go 1.25+
 - libpcap (`libpcap-dev` on Ubuntu/Debian)
 - Root/sudo for live capture
@@ -58,6 +59,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
 ### Build
 
 #### Using Makefile (recommended)
+
 ```bash
 git clone https://github.com/endorses/lippycat.git
 cd lippycat
@@ -92,6 +94,7 @@ make tui        # TUI only - terminal interface
 ```
 
 **Use cases:**
+
 - **Hunter**: Edge deployment with GPU-accelerated filtering, minimal size
 - **Processor**: Central aggregation servers without TUI/CLI overhead
 - **CLI**: Headless servers for scripted packet capture
@@ -99,6 +102,7 @@ make tui        # TUI only - terminal interface
 - **Complete suite**: All-in-one deployment with every feature
 
 #### Using go build directly
+
 ```bash
 # Build complete suite
 go build -tags all -o lc
@@ -113,6 +117,7 @@ go build -tags tui -o lc-tui
 **Note on Build Tags:** If you run `go build ./...` without specifying tags, you may see warnings about build constraints excluding files in the `cmd/` directory. This is expected behavior - the build system uses tags to exclude unused code paths for each specialized binary. Always use `make build` or specify a tag explicitly (e.g., `-tags all`) to build successfully.
 
 #### Installing system-wide
+
 ```bash
 # Install to $GOPATH/bin as 'lc'
 make install
@@ -184,45 +189,46 @@ VERBS:
   show      Display information/diagnostics
 ```
 
-| Command | Description |
-|---------|-------------|
-| `sniff` | Packet capture (general) |
-| `sniff voip` | VoIP capture with SIP/RTP analysis |
-| `sniff dns` | DNS capture with query/response correlation |
-| `sniff http` | HTTP capture with request/response tracking |
-| `sniff tls` | TLS capture with JA3 fingerprinting |
-| `sniff email` | Email (SMTP/IMAP/POP3) capture with session tracking |
-| `tap` | Standalone capture with TUI serving and PCAP writing |
-| `tap voip` | VoIP tap with per-call PCAP |
-| `tap dns` | DNS tap with domain filtering |
-| `tap http` | HTTP tap with method/path filtering |
-| `tap tls` | TLS tap with JA3/SNI filtering |
-| `tap email` | Email tap with content filtering |
-| `watch` | Interactive TUI (defaults to live mode) |
-| `watch live` | Live capture in TUI |
-| `watch file` | Analyze PCAP file in TUI |
-| `watch remote` | Monitor remote nodes in TUI |
-| `hunt` | Hunter node (distributed edge capture) |
-| `hunt voip` | VoIP hunter with call buffering |
-| `hunt dns` | DNS hunter with domain filtering |
-| `hunt http` | HTTP hunter with URL filtering |
-| `hunt tls` | TLS hunter with JA3/SNI filtering |
-| `hunt email` | Email hunter with content filtering |
-| `process` | Processor node (distributed aggregation) |
-| `list interfaces` | List available network interfaces |
-| `list filters` | List filters on a processor |
-| `list hunters` | List connected hunters |
-| `show status` | Show processor status |
-| `show hunter` | Show specific hunter details |
-| `show topology` | Show distributed topology |
-| `show filter` | Show filter details |
-| `show config` | Display local configuration |
+| Command           | Description                                          |
+| ----------------- | ---------------------------------------------------- |
+| `sniff`           | Packet capture (general)                             |
+| `sniff voip`      | VoIP capture with SIP/RTP analysis                   |
+| `sniff dns`       | DNS capture with query/response correlation          |
+| `sniff http`      | HTTP capture with request/response tracking          |
+| `sniff tls`       | TLS capture with JA3 fingerprinting                  |
+| `sniff email`     | Email (SMTP/IMAP/POP3) capture with session tracking |
+| `tap`             | Standalone capture with TUI serving and PCAP writing |
+| `tap voip`        | VoIP tap with per-call PCAP                          |
+| `tap dns`         | DNS tap with domain filtering                        |
+| `tap http`        | HTTP tap with method/path filtering                  |
+| `tap tls`         | TLS tap with JA3/SNI filtering                       |
+| `tap email`       | Email tap with content filtering                     |
+| `watch`           | Interactive TUI (defaults to live mode)              |
+| `watch live`      | Live capture in TUI                                  |
+| `watch file`      | Analyze PCAP file in TUI                             |
+| `watch remote`    | Monitor remote nodes in TUI                          |
+| `hunt`            | Hunter node (distributed edge capture)               |
+| `hunt voip`       | VoIP hunter with call buffering                      |
+| `hunt dns`        | DNS hunter with domain filtering                     |
+| `hunt http`       | HTTP hunter with URL filtering                       |
+| `hunt tls`        | TLS hunter with JA3/SNI filtering                    |
+| `hunt email`      | Email hunter with content filtering                  |
+| `process`         | Processor node (distributed aggregation)             |
+| `list interfaces` | List available network interfaces                    |
+| `list filters`    | List filters on a processor                          |
+| `list hunters`    | List connected hunters                               |
+| `show status`     | Show processor status                                |
+| `show hunter`     | Show specific hunter details                         |
+| `show topology`   | Show distributed topology                            |
+| `show filter`     | Show filter details                                  |
+| `show config`     | Display local configuration                          |
 
 Run `lc [command] --help` for detailed options.
 
 ## Configuration
 
 Configuration files (priority order):
+
 1. `~/.config/lippycat/config.yaml`
 2. `~/.config/lippycat.yaml`
 3. `~/.lippycat.yaml`
@@ -230,6 +236,7 @@ Configuration files (priority order):
 See `example-config.yaml` for configuration options.
 
 ### Basic Config Example
+
 ```yaml
 voip:
   tcp_performance_mode: "balanced"  # balanced, throughput, latency, memory
@@ -241,6 +248,7 @@ voip:
 ## Performance
 
 ### GPU Acceleration
+
 Supports GPU-accelerated pattern matching with multiple backends:
 
 - **CUDA**: Full implementation for NVIDIA GPUs (requires CUDA Toolkit and `-tags cuda` build)
@@ -250,6 +258,7 @@ Supports GPU-accelerated pattern matching with multiple backends:
 Standard builds use CPU SIMD. Use `make build-cuda` for GPU acceleration.
 
 ### Performance Modes
+
 - **balanced**: General-purpose (default)
 - **throughput**: High-volume traffic
 - **latency**: Real-time monitoring
@@ -331,6 +340,8 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 ## Documentation
 
 - **[User Manual](https://🫦🐱.ws)** - Comprehensive guide covering all features, deployment, and operations
+- **[Deutsches Benutzerhandbuch](https://🫦🐱.ws/de/)** - German edition of the user manual
+- **[Manual Translation Guide](docs/manual/README.md)** - Build the manual and maintain translations
 - [Virtual Interface](docs/VIRTUAL_INTERFACE.md) - Tool integration (Wireshark, Snort, tcpdump)
 - [Distributed Mode](docs/DISTRIBUTED_MODE.md) - Multi-node architecture
 - [TUI Remote Capture](docs/TUI_REMOTE_CAPTURE.md) - Remote monitoring setup
@@ -353,6 +364,7 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 Requires root privileges for packet capture. Use responsibly and legally.
 
 **Security Features:**
+
 - **Secure by default**: TLS enabled for all distributed connections (use `--insecure` to disable)
 - TLS/mTLS encryption with mutual authentication
 - Call-ID sanitization for privacy
@@ -366,6 +378,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation. Fo
 ## Development
 
 ### Testing
+
 ```bash
 make test
 ```
@@ -375,11 +388,13 @@ package tests. Untagged `go test ./...` does not cover every supported command
 partition.
 
 ### Code Standards
+
 - Follow Go conventions and `gofmt`
 - Add tests for new features
 - Update documentation
 
 ### Architecture
+
 - Plugin-based protocol analyzers
 - Distributed hunter/processor architecture
 - gRPC for node communication
@@ -392,12 +407,14 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 ## Roadmap
 
 ### Planned
+
 - Enhanced GPU acceleration
 - Additional protocol plugins
 
 ## Contributing
 
 Contributions welcome! Please:
+
 1. Fork and create a feature branch
 2. Follow Go code standards
 3. Add tests

@@ -253,21 +253,31 @@ clean-cuda:
 	cd $(CUDA_DIR) && $(MAKE) -f Makefile.cuda clean
 	rm -f $(CUDA_BINARY_NAME)
 
-# mdBook binary (check PATH, then ~/.cargo/bin)
-MDBOOK := $(shell which mdbook 2>/dev/null || echo $(HOME)/.cargo/bin/mdbook)
+.PHONY: manual-extract manual-translations manual-check
+
+# Manual tool locations (install.sh defaults to ~/.local/bin).
+MANUAL_TOOL_BIN ?= $(HOME)/.local/bin
 CARGO_BIN := $(HOME)/.cargo/bin
 
-# Build user manual (requires mdbook + mdbook-mermaid)
+# Build every configured manual language (English at /, translations at /<code>/).
+MANUAL_PORT ?= 3000
 manual:
-	@echo "Building user manual..."
-	PATH="$(CARGO_BIN):$$PATH" $(MDBOOK) build docs/manual
+	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 docs/manual/tools/manual.py build
 
-# Serve user manual with live reload
+# Serve all editions together so language switching works locally.
 manual-serve:
-	@echo "Serving user manual at http://localhost:3000..."
-	PATH="$(CARGO_BIN):$$PATH" $(MDBOOK) serve docs/manual
+	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 docs/manual/tools/manual.py serve --port $(MANUAL_PORT)
 
-# Clean manual build output
+manual-extract:
+	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 docs/manual/tools/manual.py extract
+
+manual-translations:
+	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 docs/manual/tools/manual.py update
+
+manual-check:
+	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 -m unittest discover -s docs/manual/tools -p 'test_manual.py'
+	PATH="$(MANUAL_TOOL_BIN):$(CARGO_BIN):$$PATH" python3 docs/manual/tools/manual.py check
+
 manual-clean:
 	rm -rf docs/manual/book
 
@@ -324,9 +334,11 @@ help:
 	@echo "  4. make build-pgo      - Build optimized binary"
 	@echo ""
 	@echo "Documentation:"
-	@echo "  make manual         - Build user manual (requires mdbook)"
-	@echo "  make manual-serve   - Serve manual with live reload"
+	@echo "  make manual         - Build all manual languages (requires mdbook + plugins)"
+	@echo "  make manual-serve   - Build and serve all manual languages"
 	@echo "  make manual-clean   - Clean manual build output"
+	@echo "  make manual-check   - Validate catalogs and report translation coverage"
+	@echo "  make manual-translations - Update catalogs from English source"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean          - Remove build artifacts"

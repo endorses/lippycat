@@ -23,3 +23,7 @@ docs/manual/book/
 *.out
 coverage.html
 coverage.txt
+
+# Generated manual translation templates
+docs/manual/po/*.pot
+docs/manual/tools/__pycache__/

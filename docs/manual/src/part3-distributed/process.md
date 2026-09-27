@@ -1,14 +1,16 @@
-# Central Aggregation with `lc process`
+# Central Aggregation with `lc process` {#central-aggregation-with-lc-process}
 
 Processors are the central hub of the distributed architecture. They receive packets from hunters, perform protocol analysis, write PCAP files, and serve TUI clients for real-time monitoring. This chapter covers everything you need to run a processor.
 
-## Processor Basics
+## Processor Basics {#processor-basics}
 
-### Starting a Processor
+### Starting a Processor {#starting-a-processor}
 
 A processor needs a listen address and TLS certificates:
 
 Minimal processor with TLS:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -16,6 +18,8 @@ lc process --listen :55555 \
 ```
 
 Processor with PCAP writing:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen 0.0.0.0:55555 \
@@ -25,13 +29,15 @@ lc process --listen 0.0.0.0:55555 \
 
 For local testing without TLS:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 --insecure
 ```
 
 Hunters connect to the processor automatically. No configuration is needed on the processor side to accept a specific hunter — any hunter with the correct TLS credentials can connect.
 
-### Packet and Event Producers
+### Packet and Event Producers {#packet-and-event-producers}
 
 A processor can accept packet-mode and event-mode nodes at the same time.
 Packet mode is the default and remains processor-authoritative: raw packets are
@@ -62,7 +68,7 @@ while sink pressure and transport loss remain separately observable. Protect
 the WAL and metadata outputs as sensitive evidence and use TLS/mTLS and
 least-privilege authorization.
 
-### Key Flags
+### Key Flags {#key-flags}
 
 | Flag                     | Default  | Description                                   |
 | ------------------------ | -------- | --------------------------------------------- |
@@ -73,7 +79,7 @@ least-privilege authorization.
 | `-s, --stats`            | true     | Display periodic statistics                   |
 | `-d, --enable-detection` | true     | Enable protocol detection on received packets |
 
-### Hunter Management
+### Hunter Management {#hunter-management}
 
 When hunters connect, the processor:
 
@@ -84,9 +90,11 @@ When hunters connect, the processor:
 
 Hunter health is monitored via heartbeats (5-second interval). Stale hunters are cleaned up after 5 minutes of no heartbeat.
 
-## Output Channels
+## Output Channels {#output-channels}
 
 Every packet a processor receives can be sent to multiple destinations simultaneously. These output channels are independent — enable any combination:
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -116,11 +124,13 @@ flowchart LR
 
 The following sections cover each channel in detail. For LI delivery, see [Lawful Interception](../part5-advanced/lawful-interception.md).
 
-### Structured protocol logs
+### Structured protocol logs {#structured-protocol-logs}
 
 Set `--log-dir` to enable the default normalized `conn`, `dns`, `ssl`, `http`,
 `smtp`, `files`, and `radius` streams. Logging is off by default and uses
 Zeek-style TSV unless `--log-format json` is selected:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 --log-dir /var/log/lippycat \
@@ -132,13 +142,15 @@ hierarchy. Bounded queues protect packet processing, so operators must monitor
 drop warnings. See the full [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
 guide for schemas, rotation, completeness, SIEM ingestion, and privacy.
 
-## PCAP Writing Modes
+## PCAP Writing Modes {#pcap-writing-modes}
 
 Processors support three independent PCAP writing modes. All three can be active simultaneously.
 
-### Unified PCAP
+### Unified PCAP {#unified-pcap}
 
 Write all received packets to a single continuous file:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -148,9 +160,11 @@ lc process --listen :55555 \
 
 **Use cases**: Compliance/audit trails, forensic analysis, traffic replay.
 
-### Per-Call PCAP (VoIP)
+### Per-Call PCAP (VoIP) {#per-call-pcap-voip}
 
 Write separate SIP and RTP PCAP files for each VoIP call:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -161,6 +175,8 @@ lc process --listen :55555 \
 ```
 
 For each call, two files are created:
+
+<!-- i18n:skip -->
 
 ```
 20250123_143022_abc123_sip.pcap    # SIP signaling
@@ -173,7 +189,7 @@ Files rotate independently when reaching 100MB. Per-call PCAP only applies to Vo
 
 **Use cases**: VoIP call recording, per-call quality analysis, selective archival.
 
-#### Per-call file lifecycle
+#### Per-call file lifecycle {#per-call-file-lifecycle}
 
 The per-call writer manager owns the logical lifetime of every Call-ID. Its
 state machine is:
@@ -214,9 +230,11 @@ exclusive creation. A path collision selects a
 writes a fresh standalone PCAP header, and never truncates or ambiguously
 appends to the existing file.
 
-### Auto-Rotating PCAP
+### Auto-Rotating PCAP {#auto-rotating-pcap}
 
 Write non-VoIP packets to auto-rotating files based on activity:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -235,6 +253,8 @@ Rotation triggers:
 
 Output:
 
+<!-- i18n:skip -->
+
 ```
 20250123_143022.pcap    # First burst
 20250123_144530.pcap    # Next burst after 30s idle
@@ -242,9 +262,11 @@ Output:
 
 **Use cases**: Network traffic bursts, session-based capture, bandwidth monitoring.
 
-### Combining Modes
+### Combining Modes {#combining-modes}
 
 All three modes are independent. Enable them together for comprehensive capture:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -256,15 +278,17 @@ lc process --listen :55555 \
 
 VoIP packets are routed to the per-call writer. Non-VoIP packets go to the auto-rotate writer. All packets go to the unified writer.
 
-## Command Hooks
+## Command Hooks {#command-hooks}
 
 Execute custom commands when PCAP files are written or VoIP calls complete.
 
-### PCAP Completion Hook
+### PCAP Completion Hook {#pcap-completion-hook}
 
 Runs when any PCAP file is closed:
 
 To compress PCAP files:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 --per-call-pcap \
@@ -274,6 +298,8 @@ lc process --listen :55555 --per-call-pcap \
 
 To upload PCAP files to cloud storage:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 --per-call-pcap \
   --pcap-command 'aws s3 cp %pcap% s3://captures/' \
@@ -282,9 +308,11 @@ lc process --listen :55555 --per-call-pcap \
 
 **Placeholder**: `%pcap%` — full path to the PCAP file.
 
-### VoIP Call Completion Hook
+### VoIP Call Completion Hook {#voip-call-completion-hook}
 
 Runs when a VoIP call ends (after a 5-second grace period for late packets):
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 --per-call-pcap \
@@ -302,9 +330,11 @@ lc process --listen :55555 --per-call-pcap \
 | `%called%`   | Called party (SIP To user)                 |
 | `%calldate%` | Call start time (RFC3339 format)           |
 
-### DNS Tunneling Hook
+### DNS Tunneling Hook {#dns-tunneling-hook}
 
 Runs when DNS tunneling is detected (processor or `tap dns` mode):
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -316,7 +346,7 @@ lc process --listen :55555 \
 
 **Placeholders**: `%domain%`, `%score%`, `%entropy%`, `%queries%`, `%srcips%`, `%hunter%`, `%timestamp%`.
 
-### Hook Execution Details
+### Hook Execution Details {#hook-execution-details}
 
 - Commands execute asynchronously — they never block packet processing
 - Commands run via shell (`sh -c`)
@@ -324,13 +354,15 @@ lc process --listen :55555 \
 - `--command-concurrency` limits parallel executions (default: 10)
 - Failed commands are logged but don't affect processing
 
-## Filter Management
+## Filter Management {#filter-management}
 
 Processors manage filters that control which packets hunters forward. This is especially important for VoIP hunters, where filters determine which calls are captured.
 
-### Filter File
+### Filter File {#filter-file}
 
 Filters are stored in a YAML file:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -341,6 +373,8 @@ lc process --listen :55555 \
 Default location: `~/.config/lippycat/filters.yaml`.
 
 **Filter file format**:
+
+<!-- i18n:skip -->
 
 ```yaml
 filters:
@@ -375,32 +409,36 @@ filters:
     enabled: true
 ```
 
-### Filter Types
+### Filter Types {#filter-types}
 
 Filters cover all supported protocol categories:
 
-| Category      | Common Types                                          | Example Pattern        |
-| ------------- | ----------------------------------------------------- | ---------------------- |
-| **VoIP**      | `sip_user`, `phone_number`, `call_id`, `imsi`, `imei` | `alicent@example.com`  |
-| **DNS**       | `dns_domain`                                          | `*.malware-domain.com` |
-| **TLS**       | `tls_sni`, `tls_ja3`, `tls_ja4`                       | `*.example.com`        |
-| **HTTP**      | `http_host`, `http_url`                               | `api.example.com`      |
-| **Email**     | `email_address`, `email_subject`                      | `*@example.com`        |
-| **RADIUS**    | `radius_username`, `radius_mac`, `radius_attribute`, `radius_compound` | `alice@example.test` |
-| **Universal** | `ip_address`, `bpf`                                   | `10.0.1.0/24`          |
+| Category      | Common Types                                                           | Example Pattern        |
+| ------------- | ---------------------------------------------------------------------- | ---------------------- |
+| **VoIP**      | `sip_user`, `phone_number`, `call_id`, `imsi`, `imei`                  | `alicent@example.com`  |
+| **DNS**       | `dns_domain`                                                           | `*.malware-domain.com` |
+| **TLS**       | `tls_sni`, `tls_ja3`, `tls_ja4`                                        | `*.example.com`        |
+| **HTTP**      | `http_host`, `http_url`                                                | `api.example.com`      |
+| **Email**     | `email_address`, `email_subject`                                       | `*@example.com`        |
+| **RADIUS**    | `radius_username`, `radius_mac`, `radius_attribute`, `radius_compound` | `alice@example.test`   |
+| **Universal** | `ip_address`, `bpf`                                                    | `10.0.1.0/24`          |
 
 For the complete list of filter types, wildcard patterns, and matching details, see [Appendix E: Filter Type Reference](../appendices/filter-reference.md).
 
-### Filter Distribution
+### Filter Distribution {#filter-distribution}
 
 When filters are loaded, the processor automatically distributes them to all connected hunters. Hunters receive filter updates via gRPC streaming and apply them to their local packet processing.
 
 For live changes, use the administration commands:
 
+<!-- i18n:skip -->
+
 ```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
   --type sip_user --pattern alicent
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 lc rm filter -P processor:55555 --tls-ca ca.crt --id filter-001
@@ -408,13 +446,15 @@ lc rm filter -P processor:55555 --tls-ca ca.crt --id filter-001
 
 The YAML filter file remains useful for startup state and batch import, but routine filter updates do not require a processor restart.
 
-## Advanced Topologies
+## Advanced Topologies {#advanced-topologies}
 
-### Hierarchical Mode
+### Hierarchical Mode {#hierarchical-mode}
 
 Processors can forward traffic to upstream processors, creating multi-tier architectures:
 
 Edge processor, which receives from hunters and forwards to regional:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 \
@@ -424,6 +464,8 @@ lc process --listen :55555 \
 
 Regional processor, which receives from edge and forwards to central:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 \
   --processor central-processor:55555 \
@@ -432,11 +474,15 @@ lc process --listen :55555 \
 
 Central processor for final aggregation:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 \
   --write-file /var/capture/all-traffic.pcap \
   --tls-cert server.crt --tls-key server.key
 ```
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -459,6 +505,8 @@ Packet forwarding is the compatibility default. To relay normalized events
 with a recoverable per-hop admission boundary, configure each non-terminal
 processor explicitly:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 --id regional \
   --processor central:55555 --forward-mode events \
@@ -472,7 +520,7 @@ mode retains unacknowledged batches in the event spool; memory-only mode can
 lose acknowledged work on a crash. Packet fallback is disabled unless
 `--event-fallback-to-packets` is explicitly set.
 
-### Operating the reliable upstream event spool
+### Operating the reliable upstream event spool {#operating-the-reliable-upstream-event-spool}
 
 Give each processor its own spool directory and monitor both its configured
 limit and filesystem free space. Encoded record payloads are limited to 4 MiB
@@ -483,11 +531,13 @@ events). For recovery behavior and the safe response to startup or durability
 errors, see
 [Event spool storage and recovery](../part4-administration/operations.md#event-spool-storage-and-recovery).
 
-### Virtual Interface
+### Virtual Interface {#virtual-interface}
 
 Expose aggregated traffic from all connected hunters on a virtual network interface, enabling integration with third-party tools:
 
 Start a processor with a virtual interface:
+
+<!-- i18n:skip -->
 
 ```bash
 lc process --listen :55555 --virtual-interface \
@@ -496,11 +546,15 @@ lc process --listen :55555 --virtual-interface \
 
 Monitor the interface with Wireshark:
 
+<!-- i18n:skip -->
+
 ```bash
 wireshark -i lc0
 ```
 
 Alternatively, run an IDS on the aggregated stream:
+
+<!-- i18n:skip -->
 
 ```bash
 snort -i lc0 -c /etc/snort/snort.conf
@@ -510,9 +564,11 @@ Virtual interface flags: `--virtual-interface`, `--vif-name` (default: `lc0`), `
 
 Requires `CAP_NET_ADMIN` capability.
 
-## Configuration File
+## Configuration File {#configuration-file}
 
 All processor flags can be set in `~/.config/lippycat/config.yaml`:
+
+<!-- i18n:skip -->
 
 ```yaml
 processor:

@@ -1,10 +1,12 @@
-# DNS Analysis
+# DNS Analysis {#dns-analysis}
 
 The DNS analyzer correlates queries with their responses and measures resolution latency.
 
-## Query/Response Correlation
+## Query/Response Correlation {#queryresponse-correlation}
 
 lippycat matches DNS queries to their responses using the transaction ID (a 16-bit identifier in the DNS header). When a response is correlated, the `QueryResponseTimeMs` field shows the round-trip time in milliseconds.
+
+<!-- i18n:skip -->
 
 ```mermaid
 sequenceDiagram
@@ -18,6 +20,8 @@ sequenceDiagram
 
 Start DNS capture:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0
 ```
@@ -26,11 +30,15 @@ Filter by domain:
 
 For an exact domain:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 --domain example.com
 ```
 
 For wildcard matching:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0 --domain "*.example.com"
@@ -38,11 +46,13 @@ sudo lc sniff dns -i eth0 --domain "*.example.com"
 
 Load domain patterns from a file for bulk monitoring:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 --domains-file watchlist.txt
 ```
 
-## DNS Metadata Fields
+## DNS Metadata Fields {#dns-metadata-fields}
 
 Each DNS packet includes structured metadata:
 
@@ -56,9 +66,11 @@ Each DNS packet includes structured metadata:
 | RTT             | Query-to-response latency (ms)      | `.DNSData.QueryResponseTimeMs` |
 | Tunneling Score | DNS tunneling probability (0.0-1.0) | `.DNSData.TunnelingScore`      |
 
-## Common DNS Investigations
+## Common DNS Investigations {#common-dns-investigations}
 
 **Find slow DNS resolutions:**
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0 2>/dev/null | \
@@ -68,6 +80,8 @@ sudo lc sniff dns -i eth0 2>/dev/null | \
 ```
 
 **Monitor NXDOMAIN responses (non-existent domains):**
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0 2>/dev/null | \
@@ -79,6 +93,8 @@ sudo lc sniff dns -i eth0 2>/dev/null | \
 
 For MX record lookups (email server discovery):
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 2>/dev/null | \
   jq -r 'select(.DNSData.QueryType == "MX") |
@@ -88,16 +104,20 @@ sudo lc sniff dns -i eth0 2>/dev/null | \
 
 For TXT records, which are often used for SPF, DKIM, and domain verification:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc sniff dns -i eth0 2>/dev/null | \
   jq 'select(.DNSData.QueryType == "TXT")'
 ```
 
-## DNS Tunneling Detection
+## DNS Tunneling Detection {#dns-tunneling-detection}
 
 lippycat includes entropy-based DNS tunneling detection. Tunneling encodes data in DNS queries, producing domain names with unusually high entropy (randomness). The analyzer scores each query from 0.0 (normal) to 1.0 (highly suspicious):
 
 To flag potential DNS tunneling:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc sniff dns -i eth0 --detect-tunneling 2>/dev/null | \

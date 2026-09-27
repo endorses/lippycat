@@ -1,6 +1,8 @@
-# Remote TUI Monitoring
+# Remote TUI Monitoring {#remote-tui-monitoring}
 
 The TUI's remote mode (`lc watch remote`) connects to processors and displays live packet data from distributed hunters. It gives you a single pane of glass across multiple network segments without running capture locally.
+
+<!-- i18n:skip -->
 
 ```mermaid
 flowchart LR
@@ -20,9 +22,11 @@ flowchart LR
     TUI["lc watch remote"] <-->|gRPC/TLS| P
 ```
 
-## Quick Start
+## Quick Start {#quick-start}
 
 Connect directly to one processor:
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
@@ -30,11 +34,15 @@ lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
 
 Connect using a nodes file:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch remote --nodes-file nodes.yaml
 ```
 
 Alternatively, use the default location at `~/.config/lippycat/nodes.yaml`:
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch remote
@@ -42,11 +50,15 @@ lc watch remote
 
 Connect with TLS:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
 ```
 
 Connect with mutual TLS:
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
@@ -54,17 +66,19 @@ lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client
 
 For local testing:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch remote -P localhost:55555 --insecure
 ```
 
-## Node File Configuration
+## Node File Configuration {#node-file-configuration}
 
 Use `--processor` (`-P`) when you want to connect to a single processor or tap node directly. Use `--nodes-file` when you want the TUI to load one or more processors from YAML at startup. You can provide both; the TUI will queue connections from both sources.
 
 The nodes file tells the TUI which processors and hunters to connect to.
 
-### File Location
+### File Location {#file-location}
 
 The TUI searches for `nodes.yaml` in this order:
 
@@ -72,7 +86,9 @@ The TUI searches for `nodes.yaml` in this order:
 2. `~/.config/lippycat/nodes.yaml`
 3. `./nodes.yaml` (current directory)
 
-### Format
+### Format {#format}
+
+<!-- i18n:skip -->
 
 ```yaml
 processors:
@@ -89,67 +105,69 @@ processors:
     address: 192.168.1.101:55555
 ```
 
-### Configuration Fields
+### Configuration Fields {#configuration-fields}
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Display name for the node |
-| `address` | Yes | Address in `host:port` format |
-| `tls.enabled` | No | Enable TLS for this node |
-| `tls.ca_file` | No | CA certificate path |
-| `tls.cert_file` | No | Client certificate path (mTLS) |
-| `tls.key_file` | No | Client private key path (mTLS) |
-| `tls.skip_verify` | No | Skip certificate verification (testing only) |
-| `subscribed_hunters` | No | List of hunter IDs to subscribe to |
+| Field                | Required | Description                                  |
+| -------------------- | -------- | -------------------------------------------- |
+| `name`               | Yes      | Display name for the node                    |
+| `address`            | Yes      | Address in `host:port` format                |
+| `tls.enabled`        | No       | Enable TLS for this node                     |
+| `tls.ca_file`        | No       | CA certificate path                          |
+| `tls.cert_file`      | No       | Client certificate path (mTLS)               |
+| `tls.key_file`       | No       | Client private key path (mTLS)               |
+| `tls.skip_verify`    | No       | Skip certificate verification (testing only) |
+| `subscribed_hunters` | No       | List of hunter IDs to subscribe to           |
 
 Each node can have its own TLS configuration, allowing mixed environments (e.g., production with mTLS, dev with insecure).
 
-## TUI Navigation
+## TUI Navigation {#tui-navigation}
 
-### Global Keys
+### Global Keys {#global-keys}
 
-| Key | Action |
-|-----|--------|
-| `Tab` | Switch between tabs |
-| `1`-`6` | Jump to tab (1=Packets, 2=Details, 3=Nodes, etc.) |
-| `Space` | Pause/resume packet display |
-| `q` / `Ctrl+C` | Quit |
-| `?` | Help |
+| Key            | Action                                            |
+| -------------- | ------------------------------------------------- |
+| `Tab`          | Switch between tabs                               |
+| `1`-`6`        | Jump to tab (1=Packets, 2=Details, 3=Nodes, etc.) |
+| `Space`        | Pause/resume packet display                       |
+| `q` / `Ctrl+C` | Quit                                              |
+| `?`            | Help                                              |
 
-### Packet View
+### Packet View {#packet-view}
 
 The packet list and detail panel include decoded, credential-redacted RADIUS
 metadata received from hunters and tap nodes; RADIUS does not require a separate
 watch subcommand.
 
-| Key | Action |
-|-----|--------|
-| `j` / `k` / `↑` / `↓` | Navigate packets |
-| `g` / `Home` | Jump to first packet |
-| `G` / `End` | Jump to last packet |
-| `Enter` | View packet details |
-| `Ctrl+S` | Save packets to PCAP file |
+| Key                   | Action                    |
+| --------------------- | ------------------------- |
+| `j` / `k` / `↑` / `↓` | Navigate packets          |
+| `g` / `Home`          | Jump to first packet      |
+| `G` / `End`           | Jump to last packet       |
+| `Enter`               | View packet details       |
+| `Ctrl+S`              | Save packets to PCAP file |
 
-### Nodes View
+### Nodes View {#nodes-view}
 
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` or `j` / `k` | Navigate node list |
-| `Enter` | Connect to processor / edit input |
-| `s` | Open hunter subscription selector |
-| `d` | Unsubscribe from hunter or remove processor |
-| `Esc` | Close modal / exit input |
+| Key                    | Action                                      |
+| ---------------------- | ------------------------------------------- |
+| `↑` / `↓` or `j` / `k` | Navigate node list                          |
+| `Enter`                | Connect to processor / edit input           |
+| `s`                    | Open hunter subscription selector           |
+| `d`                    | Unsubscribe from hunter or remove processor |
+| `Esc`                  | Close modal / exit input                    |
 
-### Calls View (VoIP)
+### Calls View (VoIP) {#calls-view-voip}
 
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Navigate calls |
-| `Enter` | View call details |
+| Key       | Action            |
+| --------- | ----------------- |
+| `j` / `k` | Navigate calls    |
+| `Enter`   | View call details |
 
-## Nodes Tab
+## Nodes Tab {#nodes-tab}
 
 The Nodes tab shows connected processors and their hunters in a tree view:
+
+<!-- i18n:skip -->
 
 ```
 ┌─ Nodes ────────────────────────────────────────────┐
@@ -168,13 +186,14 @@ The Nodes tab shows connected processors and their hunters in a tree view:
 ```
 
 Each hunter displays:
+
 - **Status**: ACTIVE, IDLE, or DISCONNECTED
 - **Packets**: captured, matched, forwarded, dropped
 - **Active filters**: number of filters applied
 - **Interfaces**: network interfaces being monitored
 - **Last heartbeat**: time since last health check
 
-### Adding Nodes Interactively
+### Adding Nodes Interactively {#adding-nodes-interactively}
 
 You can add nodes without editing the nodes file:
 
@@ -183,11 +202,11 @@ You can add nodes without editing the nodes file:
 3. Type the processor address (e.g., `192.168.1.100:55555`)
 4. Press `Enter` to connect
 
-## Hunter Subscription Management
+## Hunter Subscription Management {#hunter-subscription-management}
 
 By default, connecting to a processor streams packets from all its hunters. Hunter subscriptions let you focus on specific network segments.
 
-### Subscribing to Hunters
+### Subscribing to Hunters {#subscribing-to-hunters}
 
 1. Navigate to a processor in the Nodes tab
 2. Press `s` to open the hunter selector modal
@@ -196,22 +215,22 @@ By default, connecting to a processor streams packets from all its hunters. Hunt
 5. Press `Enter` on "Confirm Selection" to apply
 6. Press `Esc` to cancel
 
-### Unsubscribing
+### Unsubscribing {#unsubscribing}
 
 - **Single hunter**: Navigate to the hunter and press `d`
 - **All hunters**: Open the selector (`s`), deselect all, confirm
 
-### Benefits
+### Benefits {#benefits}
 
 - Reduces bandwidth — only subscribed hunters stream packets to your TUI
 - Focus on specific segments without noise from others
 - Multiple TUI clients can have independent subscriptions to the same processor
 
-## Filter Management
+## Filter Management {#filter-management}
 
 The TUI provides interactive filter management for connected processors and their hunters. Filters control which traffic hunters capture and forward — they are the primary mechanism for targeting specific calls, domains, or hosts across a distributed deployment. Filters can be applied globally (all hunters) or targeted to specific hunters.
 
-### Managing Filters from the TUI
+### Managing Filters from the TUI {#managing-filters-from-the-tui}
 
 From the Nodes tab, press `f` to open the filter management view. This lets you:
 
@@ -227,24 +246,28 @@ universal filter types. It can display and delete existing RADIUS filters, but
 creating, editing, enabling, disabling, or revising them requires `lc set filter`
 so their structured scope and revision data are preserved.
 
-### Filter Types
+### Filter Types {#filter-types}
 
 The TUI editor supports VoIP, DNS, TLS, HTTP, email, and universal filters.
 RADIUS creation and modification remain CLI/YAML-only. See
 [Appendix E: Filter Type Reference](../appendices/filter-reference.md) for the
 complete CLI-managed type list.
 
-### CLI Alternative
+### CLI Alternative {#cli-alternative}
 
 For scripted or batch filter operations, use the CLI commands instead (see [CLI Administration](cli-admin.md)):
 
 List current filters:
+
+<!-- i18n:skip -->
 
 ```bash
 lc list filters -P processor:55555 --tls-ca ca.crt
 ```
 
 Create a filter:
+
+<!-- i18n:skip -->
 
 ```bash
 lc set filter -P processor:55555 --tls-ca ca.crt \
@@ -253,21 +276,27 @@ lc set filter -P processor:55555 --tls-ca ca.crt \
 
 Show filter details:
 
+<!-- i18n:skip -->
+
 ```bash
 lc show filter --id myfilter -P processor:55555 --tls-ca ca.crt
 ```
 
 Delete a filter:
 
+<!-- i18n:skip -->
+
 ```bash
 lc rm filter --id myfilter -P processor:55555 --tls-ca ca.crt
 ```
 
-## TLS Configuration
+## TLS Configuration {#tls-configuration}
 
-### Command-Line Flags
+### Command-Line Flags {#command-line-flags}
 
 Use server TLS to verify the processor certificate:
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
@@ -275,11 +304,15 @@ lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
 
 Use mutual TLS so both sides authenticate:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
 ```
 
 Skip verification for an encrypted connection without an identity check (testing only):
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch remote -P processor.example.com:55555 --tls-skip-verify
@@ -287,13 +320,17 @@ lc watch remote -P processor.example.com:55555 --tls-skip-verify
 
 Disable TLS entirely for testing. Production mode blocks this option:
 
+<!-- i18n:skip -->
+
 ```bash
 lc watch remote -P localhost:55555 --insecure
 ```
 
-### Per-Node TLS in Nodes File
+### Per-Node TLS in Nodes File {#per-node-tls-in-nodes-file}
 
 When connecting to multiple processors with different certificate authorities:
+
+<!-- i18n:skip -->
 
 ```yaml
 processors:
@@ -312,9 +349,11 @@ processors:
       ca_file: /etc/lippycat/certs/staging-ca.crt
 ```
 
-### Config File
+### Config File {#config-file}
 
 TLS defaults can be set in the config file:
+
+<!-- i18n:skip -->
 
 ```yaml
 watch:
@@ -327,9 +366,11 @@ watch:
 
 Per-node TLS in `nodes.yaml` overrides these defaults.
 
-## Multi-Node Monitoring
+## Multi-Node Monitoring {#multi-node-monitoring}
 
-### Multi-Site Deployment
+### Multi-Site Deployment {#multi-site-deployment}
+
+<!-- i18n:skip -->
 
 ```yaml
 processors:
@@ -346,9 +387,11 @@ processors:
       ca_file: /etc/lippycat/certs/ca.crt
 ```
 
-### Network Segmentation
+### Network Segmentation {#network-segmentation}
 
 Monitor different zones from a single TUI:
+
+<!-- i18n:skip -->
 
 ```yaml
 processors:
@@ -362,9 +405,11 @@ processors:
     address: 172.16.0.20:55555
 ```
 
-### Pre-Selected Hunter Subscriptions
+### Pre-Selected Hunter Subscriptions {#pre-selected-hunter-subscriptions}
 
 Limit which hunters you receive data from at startup:
+
+<!-- i18n:skip -->
 
 ```yaml
 processors:
@@ -375,11 +420,13 @@ processors:
       - "edge-hunter-03"
 ```
 
-## Troubleshooting
+## Troubleshooting {#troubleshooting}
 
-### "Failed to connect to node"
+### "Failed to connect to node" {#failed-to-connect-to-node}
 
 Verify that the processor is running and listening:
+
+<!-- i18n:skip -->
 
 ```bash
 ss -tlnp | grep 55555
@@ -387,43 +434,47 @@ ss -tlnp | grep 55555
 
 Test network connectivity:
 
+<!-- i18n:skip -->
+
 ```bash
 nc -zv processor-host 55555
 ```
 
 Check firewall rules:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo iptables -L -n | grep 55555
 ```
 
-### No Packets Displayed
+### No Packets Displayed {#no-packets-displayed}
 
 - Check that hunters are actually connected to the processor: `lc list hunters -P processor:55555 --tls-ca ca.crt`
 - Verify traffic exists on the hunter's interface: `sudo tcpdump -i eth0 -c 10`
 - Check if you're subscribed to any hunters (press `s` in Nodes tab)
 - Try without BPF filters to rule out over-filtering
 
-### Frequent Disconnections
+### Frequent Disconnections {#frequent-disconnections}
 
 - Check network stability: `ping -c 100 processor-host`
 - Monitor processor resource usage: `top -p $(pgrep lippycat)`
 - Increase system connection limits: `ulimit -n 4096`
 - Review processor logs for errors
 
-## Performance Notes
+## Performance Notes {#performance-notes}
 
 The remote TUI is lightweight — it only renders data, not capture:
 
-| Resource | Typical Usage |
-|----------|--------------|
-| CPU | ~1-5% (display rendering) |
-| Memory | ~50-100MB (depends on buffer size) |
-| Network | Minimal (receives processed data) |
+| Resource | Typical Usage                      |
+| -------- | ---------------------------------- |
+| CPU      | ~1-5% (display rendering)          |
+| Memory   | ~50-100MB (depends on buffer size) |
+| Network  | Minimal (receives processed data)  |
 
 Adjust `--buffer-size` to control memory usage (default: 10,000 packets).
 
-### Recommended Limits
+### Recommended Limits {#recommended-limits}
 
 - **Processors per TUI**: 5-10 for responsive UI
 - **Total hunters visible**: 50-100 depending on network latency

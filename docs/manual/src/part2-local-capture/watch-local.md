@@ -1,12 +1,14 @@
-# Interactive Capture with `lc watch`
+# Interactive Capture with `lc watch` {#interactive-capture-with-lc-watch}
 
 `lc watch` provides an interactive Terminal User Interface (TUI) for real-time packet monitoring. If `lc sniff` is like tcpdump, then `lc watch` is like Wireshark — but in your terminal.
 
-## Live Capture Mode
+## Live Capture Mode {#live-capture-mode}
 
-### Starting Live Capture
+### Starting Live Capture {#starting-live-capture}
 
 Start live capture in the default mode:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc watch
@@ -14,17 +16,23 @@ sudo lc watch
 
 Explicitly specify live mode:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc watch live
 ```
 
 Capture on a specific interface with a BPF filter:
 
+<!-- i18n:skip -->
+
 ```bash
 sudo lc watch live -i eth0 -f "port 5060"
 ```
 
 Enable promiscuous mode:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc watch live -i eth0 -p
@@ -44,7 +52,7 @@ sudo lc watch live -i eth0 -p
 | `--gpu-batch-size` | —     | `100`   | Batch size for GPU processing                     |
 | `--debug-log`      | —     | —       | Write debug logs to file                          |
 
-### TUI Layout
+### TUI Layout {#tui-layout}
 
 The interface is organized into five tabs:
 
@@ -56,7 +64,7 @@ The interface is organized into five tabs:
 | Settings   | `Alt+4`        | Capture configuration                            |
 | Help       | `Alt+5` or `?` | Searchable keybindings and workflows             |
 
-### Global Keybindings
+### Global Keybindings {#global-keybindings}
 
 These work on any tab:
 
@@ -69,7 +77,7 @@ These work on any tab:
 | `?`                     | Jump to Help tab       |
 | `q` / `Ctrl+C`          | Quit                   |
 
-### Capture Tab Navigation
+### Capture Tab Navigation {#capture-tab-navigation}
 
 The Capture tab is the main view. Navigate with vim-style keys:
 
@@ -88,7 +96,7 @@ The Capture tab is the main view. Navigate with vim-style keys:
 | `x`             | Flush/clear all packets                        |
 | `w`             | Save packets to PCAP                           |
 
-### Filtering in the TUI
+### Filtering in the TUI {#filtering-in-the-tui}
 
 Press `/` on the Capture tab to enter filter mode. Type a filter expression and press `Enter` to apply.
 
@@ -116,7 +124,7 @@ Press `/` on the Capture tab to enter filter mode. Type a filter expression and 
 | `c`         | Remove last filter |
 | `C` (Shift) | Clear all filters  |
 
-### View Modes
+### View Modes {#view-modes}
 
 Press `v` to toggle between protocol-specific views:
 
@@ -131,19 +139,23 @@ RADIUS does not have a separate aggregate view. Its decoded, credential-redacted
 metadata appears in the normal packet list and detail panel in live and file
 sessions.
 
-## PCAP File Analysis
+## PCAP File Analysis {#pcap-file-analysis}
 
-### Opening PCAP Files
+### Opening PCAP Files {#opening-pcap-files}
 
 Analyze previously captured traffic — no elevated privileges needed:
 
 Open a single PCAP file:
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch file capture.pcap
 ```
 
 Open multiple PCAP files in a merged display:
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch file sip.pcap rtp.pcap signaling.pcap
@@ -233,17 +245,19 @@ The destination is replaced atomically only on success; cancellation or errors
 preserve an existing destination and remove temporary output. Export requires
 additional free space beside the destination, outside the session disk budget.
 
-### TLS Decryption
+### TLS Decryption {#tls-decryption}
 
 If you have a TLS key log file (e.g., from `SSLKEYLOGFILE` environment variable), you can decrypt HTTPS traffic in file analysis:
+
+<!-- i18n:skip -->
 
 ```bash
 lc watch file capture.pcap --tls-keylog keys.log
 ```
 
-## TUI Features
+## TUI Features {#tui-features}
 
-### Statistics Tab
+### Statistics Tab {#statistics-tab}
 
 Press `Alt+3` to view real-time traffic statistics:
 
@@ -271,7 +285,7 @@ traffic rates and a PCAP sink when complete packet evidence is required.
 
 Toggle between Overview and Distributed sub-views with `v` or the `1`/`2` keys. Export statistics to JSON with `e`.
 
-### Settings Tab
+### Settings Tab {#settings-tab}
 
 Press `Alt+4` to view and modify capture settings:
 
@@ -279,7 +293,7 @@ Press `Alt+4` to view and modify capture settings:
 - BPF filter configuration
 - Toggle theme with `t`
 
-### Help Tab
+### Help Tab {#help-tab}
 
 Press `?` to open the searchable help system:
 
@@ -290,11 +304,11 @@ Press `?` to open the searchable help system:
 
 Search with `/`, navigate results with `n`/`N`. Jump to sections with `1`-`4`.
 
-### Toast Notifications
+### Toast Notifications {#toast-notifications}
 
 Status messages appear as toast notifications at the bottom of the screen, auto-dismissing after 2-5 seconds. Types include success (green), error (red), info (blue), and warning (yellow). Related toasts supersede each other — for example, "Paused" is replaced by "Resumed".
 
-### Saving Packets
+### Saving Packets {#saving-packets}
 
 Press `w` on the Capture tab to save displayed packets to a PCAP file. A file dialog opens to choose the output path. Press `w` again to stop streaming to the file.
 

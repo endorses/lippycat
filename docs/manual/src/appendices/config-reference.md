@@ -1,8 +1,8 @@
-# Configuration Reference
+# Configuration Reference {#configuration-reference}
 
 This appendix documents every configuration key in lippycat's YAML configuration file. All keys shown here correspond to the output of `lc show config`, which displays the active configuration (defaults merged with any config file and CLI overrides) in JSON format.
 
-## Configuration File Locations
+## Configuration File Locations {#configuration-file-locations}
 
 lippycat searches for a configuration file in the following locations, in order of priority:
 
@@ -13,7 +13,7 @@ lippycat searches for a configuration file in the following locations, in order 
 
 The first file found is used. Only one configuration file is loaded.
 
-### Precedence Rules
+### Precedence Rules {#precedence-rules}
 
 When the same setting is specified in multiple places, lippycat applies this precedence order (highest wins):
 
@@ -22,9 +22,11 @@ When the same setting is specified in multiple places, lippycat applies this pre
 3. **Configuration file** — YAML values from the config file
 4. **Defaults** — Built-in defaults shown in this reference
 
-### Viewing Active Configuration
+### Viewing Active Configuration {#viewing-active-configuration}
 
 To see the full active configuration (with all sources merged):
+
+<!-- i18n:skip -->
 
 ```bash
 lc show config
@@ -32,13 +34,17 @@ lc show config
 
 This outputs JSON. To convert mentally to YAML paths, replace nesting with indentation (e.g., JSON `{"voip": {"sip_ports": "5060"}}` becomes `voip.sip_ports` or in YAML file format, `voip:` / `  sip_ports: "5060"`).
 
-### Environment Variables
+### Environment Variables {#environment-variables}
 
 Configuration keys can be set via environment variables using the pattern `LIPPYCAT_<SECTION>_<KEY>`. Nested keys use underscores:
+
+<!-- i18n:skip -->
 
 ```bash
 export LIPPYCAT_VOIP_SIP_PORTS="5060,5061"
 ```
+
+<!-- i18n:skip -->
 
 ```bash
 export LIPPYCAT_PROCESSOR_LISTEN_ADDR=":55555"
@@ -46,13 +52,15 @@ export LIPPYCAT_PROCESSOR_LISTEN_ADDR=":55555"
 
 The following setting enforces TLS encryption:
 
+<!-- i18n:skip -->
+
 ```bash
 export LIPPYCAT_PRODUCTION=true
 ```
 
 ---
 
-## Managed Storage
+## Managed Storage {#managed-storage}
 
 Use `processor` or `tap` in place of `ROLE` below. All tap protocols use the same
 settings. Filter mode is selected by effective LI enablement, independent of
@@ -100,7 +108,7 @@ invalid encrypted stores stop startup. YAML remains editable while stopped and
 loads on restart; use management commands to change a running node's filters.
 When both default filter files exist, choose the intended mode and explicit path.
 
-## Global Settings
+## Global Settings {#global-settings}
 
 These top-level keys apply to all commands.
 
@@ -113,7 +121,7 @@ These top-level keys apply to all commands.
 
 ---
 
-## Protocol Detector Capacity
+## Protocol Detector Capacity {#protocol-detector-capacity}
 
 These keys bound state retained by the protocol detector. At a positive cap,
 inserting a new key when full evicts an oldest 10% batch (with a minimum of one)
@@ -130,7 +138,7 @@ for production tuning and telemetry interpretation.
 
 ---
 
-## Structured Protocol Logging
+## Structured Protocol Logging {#structured-protocol-logging}
 
 These keys configure the optional normalized protocol logs for `sniff`,
 `process`, and `tap`. Setting `logs.dir` enables the file sink. See
@@ -157,14 +165,14 @@ stream schemas, hierarchy behavior, rotation, and privacy guidance.
 
 ---
 
-## Protocol Capture Settings
+## Protocol Capture Settings {#protocol-capture-settings}
 
 These sections configure protocol-specific analysis. DNS, email, HTTP, and TLS
 use the `lc sniff <protocol>` namespace shown below; RADIUS uses one shared
 namespace across `sniff radius`, `hunt radius`, and `tap radius`. The settings
 control ports, matching criteria, correlation, and optional content capture.
 
-### `dns` — DNS Capture
+### `dns` — DNS Capture {#dns--dns-capture}
 
 Used by `lc sniff dns`. See [CLI Capture with `lc sniff`](../part2-local-capture/sniff.md) for usage.
 
@@ -177,7 +185,7 @@ Used by `lc sniff dns`. See [CLI Capture with `lc sniff`](../part2-local-capture
 | `dns.domain_pattern`   | string  | `""`    | Regex pattern to filter by domain name. Empty means all domains. |
 | `dns.domains_file`     | string  | `""`    | Path to file containing domain patterns (one per line).          |
 
-### `email` — Email Capture
+### `email` — Email Capture {#email--email-capture}
 
 Used by `lc sniff email`. Supports SMTP, IMAP, and POP3 protocols.
 
@@ -202,7 +210,7 @@ Used by `lc sniff email`. Supports SMTP, IMAP, and POP3 protocols.
 | `email.mailbox_pattern`   | string  | `""`           | Regex pattern to filter by mailbox name.                   |
 | `email.keywords_file`     | string  | `""`           | Path to file containing content keywords.                  |
 
-### `http` — HTTP Capture
+### `http` — HTTP Capture {#http--http-capture}
 
 Used by `lc sniff http`. Supports HTTP/1.x with optional TLS decryption.
 
@@ -226,7 +234,7 @@ Used by `lc sniff http`. Supports HTTP/1.x with optional TLS decryption.
 | `http.tls_keylog`           | string  | `""`                       | Path to TLS key log file (SSLKEYLOGFILE format) for decrypting HTTPS traffic.    |
 | `http.tls_keylog_pipe`      | string  | `""`                       | Path to a named pipe for streaming TLS key log data.                             |
 
-### `tls` — TLS Capture
+### `tls` — TLS Capture {#tls--tls-capture}
 
 Used by `lc sniff tls`. Captures TLS handshakes and extracts fingerprints.
 
@@ -243,7 +251,7 @@ Used by `lc sniff tls`. Captures TLS handshakes and extracts fingerprints.
 | `tls.ja4`               | string  | `""`    | Comma-separated JA4 fingerprints to match.               |
 | `tls.ja4_file`          | string  | `""`    | Path to file containing JA4 fingerprints.                |
 
-### `radius` — RADIUS Capture
+### `radius` — RADIUS Capture {#radius--radius-capture}
 
 RADIUS uses one shared configuration section across `sniff radius`,
 `hunt radius`, and `tap radius`, rather than command-prefixed copies. See the
@@ -259,13 +267,13 @@ the [POI setup](../part5-advanced/radius.md#tap-poi-and-mdf-setup).
 
 ---
 
-## VoIP Engine Settings
+## VoIP Engine Settings {#voip-engine-settings}
 
 The `voip` section configures the core VoIP analysis engine used across all capture commands (`sniff voip`, `hunt voip`, `tap voip`). This is the most extensive configuration section, covering SIP/RTP analysis, TCP reassembly, GPU acceleration, and plugin management.
 
 For TCP performance profile details, see [Performance Optimization](../part5-advanced/performance.md#tcp-performance-profiles).
 
-### Core VoIP Settings
+### Core VoIP Settings {#core-voip-settings}
 
 | Key                        | Type    | Default  | Description                                                                                                                                                               |
 | -------------------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -276,7 +284,7 @@ For TCP performance profile details, see [Performance Optimization](../part5-adv
 | `voip.pattern_buffer_mb`   | integer | `64`     | Memory budget for pattern matching buffers in MB.                                                                                                                         |
 | `voip.max_filename_length` | integer | `100`    | Maximum length for generated PCAP filenames.                                                                                                                              |
 
-### Call Management
+### Call Management {#call-management}
 
 | Key                                 | Type     | Default    | Description                                           |
 | ----------------------------------- | -------- | ---------- | ----------------------------------------------------- |
@@ -286,7 +294,7 @@ For TCP performance profile details, see [Performance Optimization](../part5-adv
 | `voip.max_goroutines`               | integer  | `1000`     | Maximum concurrent goroutines for call processing.    |
 | `voip.log_goroutine_limit_interval` | duration | `"30s"`    | Interval for logging goroutine limit warnings.        |
 
-### TCP Reassembly
+### TCP Reassembly {#tcp-reassembly}
 
 These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performance_mode` sets sensible defaults for all TCP parameters — override individual settings only when needed.
 
@@ -313,7 +321,7 @@ These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performa
 | `voip.stream_queue_buffer`       | integer  | `500`                | Buffer size for the TCP stream processing queue.                                                                                                                                                                                               |
 | `voip.enable_state_tcp_timeouts` | boolean  | `false`              | Enable state-aware TCP timeouts (different timeouts per connection state).                                                                                                                                                                     |
 
-### Flow Control
+### Flow Control {#flow-control}
 
 | Key                              | Type    | Default | Description                                                         |
 | -------------------------------- | ------- | ------- | ------------------------------------------------------------------- |
@@ -322,7 +330,7 @@ These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performa
 | `voip.enable_call_aware_timeout` | boolean | `false` | Use call-aware timeouts that extend during active calls.            |
 | `voip.memory_optimization`       | boolean | `false` | Enable aggressive memory optimization (may reduce throughput).      |
 
-### GPU Acceleration
+### GPU Acceleration {#gpu-acceleration}
 
 | Key                   | Type    | Default  | Description                                                                             |
 | --------------------- | ------- | -------- | --------------------------------------------------------------------------------------- |
@@ -331,7 +339,7 @@ These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performa
 | `voip.gpu_batch_size` | integer | `1024`   | Number of packets per GPU processing batch.                                             |
 | `voip.gpu_max_memory` | integer | `0`      | Maximum GPU memory in bytes (0 = unlimited).                                            |
 
-### Metrics and Monitoring
+### Metrics and Monitoring {#metrics-and-monitoring}
 
 | Key                               | Type     | Default | Description                                       |
 | --------------------------------- | -------- | ------- | ------------------------------------------------- |
@@ -344,13 +352,13 @@ These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performa
 
 ---
 
-## Node Configuration
+## Node Configuration {#node-configuration}
 
-### `hunter` — Hunter Node
+### `hunter` — Hunter Node {#hunter--hunter-node}
 
 Hunter nodes capture packets at the network edge and forward them to a processor. See [Edge Capture with `lc hunt`](../part3-distributed/hunt.md) for usage.
 
-#### Core Settings
+#### Core Settings {#core-settings}
 
 | Key                                     | Type     | Default                           | Description                                                                                                |
 | --------------------------------------- | -------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -375,7 +383,7 @@ Hunter nodes capture packets at the network edge and forward them to a processor
 | `hunter.debug_listen`                   | string   | `""`                              | Optional pprof debug HTTP listen address. Loopback-only unless `hunter.debug_allow_non_loopback` is true.  |
 | `hunter.debug_allow_non_loopback`       | boolean  | `false`                           | Allow the pprof listener to bind non-loopback addresses.                                                   |
 
-#### Hunter TLS
+#### Hunter TLS {#hunter-tls}
 
 | Key                      | Type    | Default | Description                                                             |
 | ------------------------ | ------- | ------- | ----------------------------------------------------------------------- |
@@ -386,7 +394,7 @@ Hunter nodes capture packets at the network edge and forward them to a processor
 | `hunter.tls.ports`       | string  | `"443"` | TLS ports for protocol detection.                                       |
 | `hunter.insecure`        | boolean | `false` | Disable TLS for local testing. Blocked when `LIPPYCAT_PRODUCTION=true`. |
 
-#### Hunter Protocol Filters
+#### Hunter Protocol Filters {#hunter-protocol-filters}
 
 Hunters support protocol-specific subcommands (`lc hunt dns`, `lc hunt voip`,
 etc.) with dedicated filter settings. `lc hunt radius` instead uses the
@@ -449,7 +457,7 @@ tap:
 | `hunter.voip_filter.gpu_backend`    | string  | `"auto"` | GPU backend for edge filtering.                    |
 | `hunter.voip_filter.gpu_batch_size` | integer | `100`    | Batch size for GPU filter processing.              |
 
-#### Disk Buffer
+#### Disk Buffer {#disk-buffer}
 
 When the connection to the processor is interrupted, the hunter can buffer packets to disk:
 
@@ -459,11 +467,11 @@ When the connection to the processor is interrupted, the hunter can buffer packe
 | `hunter.disk_buffer.dir`     | string  | `"/var/tmp/lippycat-buffer"` | Directory for disk buffer files.                 |
 | `hunter.disk_buffer.max_mb`  | integer | `1024`                       | Maximum disk buffer size in MB.                  |
 
-### `processor` — Processor Node
+### `processor` — Processor Node {#processor--processor-node}
 
 Processor nodes receive packets from hunters, perform analysis, write PCAPs, and serve TUI clients. See [Central Aggregation with `lc process`](../part3-distributed/process.md) for usage.
 
-#### Core Settings
+#### Core Settings {#core-settings-1}
 
 | Key                                        | Type     | Default                                     | Description                                                                                                  |
 | ------------------------------------------ | -------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -496,7 +504,7 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 | `processor.debug_listen`                   | string   | `""`                                        | Optional pprof debug HTTP listen address. Loopback-only unless `processor.debug_allow_non_loopback` is true. |
 | `processor.debug_allow_non_loopback`       | boolean  | `false`                                     | Allow the pprof listener to bind non-loopback addresses.                                                     |
 
-#### Processor TLS
+#### Processor TLS {#processor-tls}
 
 | Key                         | Type    | Default | Description                                                             |
 | --------------------------- | ------- | ------- | ----------------------------------------------------------------------- |
@@ -508,7 +516,7 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 
 TLS is enabled by default unless `processor.insecure` is true. Provide `processor.tls.cert_file` and `processor.tls.key_file` for encrypted serving.
 
-#### Per-Call PCAP (VoIP)
+#### Per-Call PCAP (VoIP) {#per-call-pcap-voip}
 
 | Key                                       | Type     | Default                       | Description                                                                                           |
 | ----------------------------------------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -519,7 +527,7 @@ TLS is enabled by default unless `processor.insecure` is true. Provide `processo
 | `processor.per_call_pcap.max_writers`     | integer  | `0`                           | Soft active-writer pressure threshold (0 = disabled). Active calls are preserved above the threshold. |
 | `processor.per_call_pcap.closed_call_ttl` | duration | `"1h"`                        | Suppress duplicate close handling for completed calls for this duration.                              |
 
-#### Auto-Rotating PCAP
+#### Auto-Rotating PCAP {#auto-rotating-pcap}
 
 | Key                                       | Type     | Default                 | Description                                                 |
 | ----------------------------------------- | -------- | ----------------------- | ----------------------------------------------------------- |
@@ -529,7 +537,7 @@ TLS is enabled by default unless `processor.insecure` is true. Provide `processo
 | `processor.auto_rotate_pcap.max_size`     | string   | `"100M"`                | Maximum file size before rotation (e.g., `"100M"`, `"1G"`). |
 | `processor.auto_rotate_pcap.idle_timeout` | duration | `"30s"`                 | Time with no packets before rotating the current file.      |
 
-#### Command Hooks
+#### Command Hooks {#command-hooks}
 
 | Key                             | Type     | Default | Description                                                                                                  |
 | ------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
@@ -539,7 +547,7 @@ TLS is enabled by default unless `processor.insecure` is true. Provide `processo
 | `processor.tunneling_threshold` | float    | `0.7`   | DNS tunneling score threshold for `processor.tunneling_command`.                                             |
 | `processor.tunneling_debounce`  | duration | `"5m"`  | Minimum time between DNS tunneling command executions per domain.                                            |
 
-#### Virtual Interface
+#### Virtual Interface {#virtual-interface}
 
 | Key                             | Type    | Default | Description                                                        |
 | ------------------------------- | ------- | ------- | ------------------------------------------------------------------ |
@@ -550,13 +558,13 @@ TLS is enabled by default unless `processor.insecure` is true. Provide `processo
 | `processor.vif_drop_privileges` | string  | `""`    | User to drop privileges to after creating the virtual interface.   |
 | `processor.vif_netns`           | string  | `""`    | Network namespace for the virtual interface.                       |
 
-#### TLS Key Log
+#### TLS Key Log {#tls-key-log}
 
 | Key                               | Type   | Default | Description                                            |
 | --------------------------------- | ------ | ------- | ------------------------------------------------------ |
 | `processor.tls_keylog.output_dir` | string | `""`    | Directory for TLS key log files received from hunters. |
 
-#### Lawful Interception (LI)
+#### Lawful Interception (LI) {#lawful-interception-li}
 
 These settings require the `li` build tag. See [Lawful Interception](../part5-advanced/lawful-interception.md) for details.
 When `processor.li.enabled` is `true`, the X1 listen address, certificate, key,
@@ -583,11 +591,11 @@ if any of them is missing.
 | `processor.li.delivery_tls_ca`          | string   | `""`      | CA certificate for MDF verification.                                          |
 | `processor.li.delivery_tls_pinned_cert` | list     | `[]`      | Pinned certificates for MDF connections.                                      |
 
-### `tap` — Tap Node
+### `tap` — Tap Node {#tap--tap-node}
 
 Tap combines local capture with processor capabilities. See [Standalone Mode with `lc tap`](../part3-distributed/tap.md) for usage. Tap shares many settings with both `hunter` and `processor`.
 
-#### Core Settings
+#### Core Settings {#core-settings-2}
 
 | Key                            | Type     | Default   | Description                                                                                               |
 | ------------------------------ | -------- | --------- | --------------------------------------------------------------------------------------------------------- |
@@ -609,7 +617,7 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 | `tap.debug_listen`             | string   | `""`      | Optional pprof debug HTTP listen address. Loopback-only unless `tap.debug_allow_non_loopback` is true.    |
 | `tap.debug_allow_non_loopback` | boolean  | `false`   | Allow the pprof listener to bind non-loopback addresses.                                                  |
 
-#### Tap TLS and Serving
+#### Tap TLS and Serving {#tap-tls-and-serving}
 
 | Key                                  | Type    | Default         | Description                                                                                |
 | ------------------------------------ | ------- | --------------- | ------------------------------------------------------------------------------------------ |
@@ -630,7 +638,7 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 
 TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_file` and `tap.tls.key_file` for encrypted serving.
 
-#### Tap Upstream Forwarding
+#### Tap Upstream Forwarding {#tap-upstream-forwarding}
 
 | Key                                  | Type     | Default                               | Description                                                        |
 | ------------------------------------ | -------- | ------------------------------------- | ------------------------------------------------------------------ |
@@ -644,7 +652,7 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 | `tap.events.spool.max_age`           | duration | `"24h"`                               | Upstream event spool age limit (0 = unlimited).                    |
 | `tap.events.spool.exhaustion_policy` | string   | `"drop_oldest"`                       | Upstream spool exhaustion behavior.                                |
 
-#### Tap Per-Call PCAP
+#### Tap Per-Call PCAP {#tap-per-call-pcap}
 
 | Key                                 | Type     | Default                       | Description                                                                                           |
 | ----------------------------------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -655,7 +663,7 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 | `tap.per_call_pcap.max_writers`     | integer  | `0`                           | Soft active-writer pressure threshold (0 = disabled). Active calls are preserved above the threshold. |
 | `tap.per_call_pcap.closed_call_ttl` | duration | `"1h"`                        | Suppress duplicate close handling for completed calls for this duration.                              |
 
-#### Tap Auto-Rotating PCAP
+#### Tap Auto-Rotating PCAP {#tap-auto-rotating-pcap}
 
 | Key                                 | Type     | Default                 | Description                    |
 | ----------------------------------- | -------- | ----------------------- | ------------------------------ |
@@ -665,14 +673,14 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 | `tap.auto_rotate_pcap.max_size`     | string   | `"100M"`                | Max file size before rotation. |
 | `tap.auto_rotate_pcap.idle_timeout` | duration | `"30s"`                 | Idle timeout before rotation.  |
 
-#### Tap Command Hooks
+#### Tap Command Hooks {#tap-command-hooks}
 
 | Key                | Type   | Default | Description                                                 |
 | ------------------ | ------ | ------- | ----------------------------------------------------------- |
 | `tap.pcap_command` | string | `""`    | Command on PCAP completion. Placeholder: `%pcap%`.          |
 | `tap.voip_command` | string | `""`    | Command on call end. Placeholders: `%callid%`, `%dirname%`. |
 
-#### Tap Virtual Interface
+#### Tap Virtual Interface {#tap-virtual-interface}
 
 | Key                       | Type    | Default | Description                         |
 | ------------------------- | ------- | ------- | ----------------------------------- |
@@ -683,7 +691,7 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 | `tap.vif_drop_privileges` | string  | `""`    | User to drop privileges to.         |
 | `tap.vif_netns`           | string  | `""`    | Network namespace.                  |
 
-#### Tap LI Metadata Delivery
+#### Tap LI Metadata Delivery {#tap-li-metadata-delivery}
 
 These settings require the `li` build tag. Tap supports the same X1 and X2/X3
 delivery configuration as the processor; these keys control normalized protocol
@@ -692,7 +700,7 @@ metadata specifically.
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
 
-#### Tap Protocol Filters
+#### Tap Protocol Filters {#tap-protocol-filters}
 
 Tap supports the same protocol-specific subcommands as hunter. The configuration
 keys mirror the hunter protocol filter settings. `lc tap radius` uses the
@@ -725,13 +733,13 @@ keys mirror the hunter protocol filter settings. `lc tap radius` uses the
 | `tap.voip.pattern_algorithm`     | string  | `"auto"`     | Pattern matching algorithm: `"auto"`, `"linear"`, or `"aho-corasick"`.                                                                        |
 | `tap.voip.pattern_buffer_mb`     | integer | `64`         | Pattern buffer memory in MB.                                                                                                                  |
 
-#### Tap TLS Key Log
+#### Tap TLS Key Log {#tap-tls-key-log}
 
 | Key                         | Type   | Default | Description                                                                              |
 | --------------------------- | ------ | ------- | ---------------------------------------------------------------------------------------- |
 | `tap.tls_keylog.output_dir` | string | `""`    | Directory for TLS session keys received from local capture paths, in NSS key log format. |
 
-#### Tap VoIP Filter Acceleration
+#### Tap VoIP Filter Acceleration {#tap-voip-filter-acceleration}
 
 These keys are available in CUDA builds.
 
@@ -745,9 +753,9 @@ Tap also supports `tap.http` and `tap.email` sections with the same keys as `hun
 
 ---
 
-## Command-Specific Settings
+## Command-Specific Settings {#command-specific-settings}
 
-### `sniff` — Sniff Command
+### `sniff` — Sniff Command {#sniff--sniff-command}
 
 Settings for `lc sniff`. See [CLI Capture with `lc sniff`](../part2-local-capture/sniff.md).
 
@@ -764,7 +772,7 @@ Settings for `lc sniff`. See [CLI Capture with `lc sniff`](../part2-local-captur
 | `sniff.vif_replay_timing`   | boolean  | `false`  | Maintain original packet timing during replay.         |
 | `sniff.vif_startup_delay`   | duration | `"3s"`   | Delay before starting replay (allows interface setup). |
 
-### `watch` — Watch (TUI) Settings
+### `watch` — Watch (TUI) Settings {#watch--watch-tui-settings}
 
 Settings for `lc watch`. See [Interactive Capture with `lc watch`](../part2-local-capture/watch-local.md).
 
@@ -797,9 +805,9 @@ Settings for `lc watch`. See [Interactive Capture with `lc watch`](../part2-loca
 
 ---
 
-## Remote Connection Settings
+## Remote Connection Settings {#remote-connection-settings}
 
-### `remote` — Remote TUI Connection
+### `remote` — Remote TUI Connection {#remote--remote-tui-connection}
 
 Settings for connecting `lc watch remote` to a processor or tap node. See [Remote TUI Monitoring](../part4-administration/watch-remote.md).
 
@@ -814,9 +822,9 @@ Settings for connecting `lc watch remote` to a processor or tap node. See [Remot
 
 ---
 
-## Security Settings
+## Security Settings {#security-settings}
 
-### `security` — API Security
+### `security` — API Security {#security--api-security}
 
 | Key                         | Type    | Default | Description                                                                                                                                    |
 | --------------------------- | ------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -825,11 +833,13 @@ Settings for connecting `lc watch remote` to a processor or tap node. See [Remot
 
 ---
 
-## Example Configuration Files
+## Example Configuration Files {#example-configuration-files}
 
-### Minimal: Local VoIP Capture
+### Minimal: Local VoIP Capture {#minimal-local-voip-capture}
 
 A simple configuration for capturing VoIP traffic on a single machine:
+
+<!-- i18n:skip -->
 
 ```yaml
 voip:
@@ -839,9 +849,11 @@ voip:
 
 Use with: `sudo lc sniff voip -i eth0` or `sudo lc tap voip -i eth0 --insecure`
 
-### Production: Distributed Deployment
+### Production: Distributed Deployment {#production-distributed-deployment}
 
 A processor node in a production distributed deployment with TLS, per-call PCAP, and command hooks:
+
+<!-- i18n:skip -->
 
 ```yaml
 processor:
@@ -870,9 +882,11 @@ processor:
   command_timeout: "60s"
 ```
 
-### High-Performance: Edge Hunter
+### High-Performance: Edge Hunter {#high-performance-edge-hunter}
 
 A hunter node optimized for high-throughput VoIP capture with GPU acceleration:
+
+<!-- i18n:skip -->
 
 ```yaml
 hunter:

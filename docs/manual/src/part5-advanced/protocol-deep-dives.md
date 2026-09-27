@@ -1,4 +1,4 @@
-# Protocol Deep Dives
+# Protocol Deep Dives {#protocol-deep-dives}
 
 lippycat's protocol analyzers extract structured metadata and support protocol-aware
 filtering. These chapters cover each analyzer's behavior, metadata fields, and

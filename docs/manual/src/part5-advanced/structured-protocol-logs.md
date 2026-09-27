@@ -1,4 +1,4 @@
-# Structured Protocol Logs
+# Structured Protocol Logs {#structured-protocol-logs}
 
 lippycat can write normalized protocol metadata beside its packet, PCAP, TUI,
 virtual-interface, and LI outputs. The files use familiar Zeek stream names and
@@ -6,18 +6,22 @@ field semantics, but they are not a replacement for Zeek's analyzer and scriptin
 ecosystem. In particular, filtered or late-started capture produces useful
 lower-bound observations rather than complete connection measurements.
 
-## Enabling logs
+## Enabling logs {#enabling-logs}
 
 Logging is off by default. Supplying `--log-dir` enables it for `process`, `tap`,
 and `sniff`; the directory is created if necessary.
 
 For a terminal processor in a distributed deployment:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --listen :55555 --log-dir /var/log/lippycat
 ```
 
 For local capture with JSONL and selected streams:
+
+<!-- i18n:skip -->
 
 ```bash
 sudo lc tap dns -i eth0 --insecure \
@@ -26,35 +30,39 @@ sudo lc tap dns -i eth0 --insecure \
 
 For offline or live CLI capture, where packet standard output is unchanged:
 
+<!-- i18n:skip -->
+
 ```bash
 lc sniff http -r capture.pcap --log-dir ./logs --log-streams conn,http,files
 ```
 
 The shared flags are:
 
-| Flag                               |         Default | Meaning                                                                                   |
-| ---------------------------------- | --------------: | ----------------------------------------------------------------------------------------- |
-| `--event-queue-size`               |         `20000` | Normalized-event queue capacity                                                           |
-| `--event-drop-policy`              |      `drop_new` | Overflow policy for the normalized-event queue                                            |
-| `--log-dir`                        |           unset | Output directory; setting it enables logging                                              |
-| `--log-format`                     |           `tsv` | `tsv` or `json`                                                                           |
-| `--log-streams`                    | all seven streams | Comma-separated enabled streams                                                         |
-| `--log-rotate-interval`            |            `1h` | Time between rotations; `0` disables periodic rotation                                    |
-| `--log-queue-size`                 |         `10000` | Queue capacity for each stream                                                            |
-| `--log-post-rotate-command`        |           unset | Shell command run after rotation; `%log%` is the safely quoted rotated path               |
-| `--log-include-http-headers`       |         `false` | Preserve arbitrary HTTP header maps in normalized events; fixed log columns do not change |
-| `--log-include-email-body-preview` |         `false` | Permit captured email body previews for file analysis; potentially sensitive              |
-| `--extract-files`                  |         `false` | Write bounded HTTP/SMTP file content to disk                                              |
-| `--extract-files-dir`              |           unset | Extraction directory; required when extraction is enabled                                 |
-| `--extract-files-max-size`         |        `10 MiB` | Maximum bytes analyzed or extracted per file                                              |
-| `--extract-files-total-size`       |       `100 MiB` | Maximum bytes extracted during the process lifetime                                       |
-| `--log-emit-stage`                 |      `terminal` | `process`/`tap` only: `terminal`, `all`, or `none`                                        |
+| Flag                               |           Default | Meaning                                                                                   |
+| ---------------------------------- | ----------------: | ----------------------------------------------------------------------------------------- |
+| `--event-queue-size`               |           `20000` | Normalized-event queue capacity                                                           |
+| `--event-drop-policy`              |        `drop_new` | Overflow policy for the normalized-event queue                                            |
+| `--log-dir`                        |             unset | Output directory; setting it enables logging                                              |
+| `--log-format`                     |             `tsv` | `tsv` or `json`                                                                           |
+| `--log-streams`                    | all seven streams | Comma-separated enabled streams                                                           |
+| `--log-rotate-interval`            |              `1h` | Time between rotations; `0` disables periodic rotation                                    |
+| `--log-queue-size`                 |           `10000` | Queue capacity for each stream                                                            |
+| `--log-post-rotate-command`        |             unset | Shell command run after rotation; `%log%` is the safely quoted rotated path               |
+| `--log-include-http-headers`       |           `false` | Preserve arbitrary HTTP header maps in normalized events; fixed log columns do not change |
+| `--log-include-email-body-preview` |           `false` | Permit captured email body previews for file analysis; potentially sensitive              |
+| `--extract-files`                  |           `false` | Write bounded HTTP/SMTP file content to disk                                              |
+| `--extract-files-dir`              |             unset | Extraction directory; required when extraction is enabled                                 |
+| `--extract-files-max-size`         |          `10 MiB` | Maximum bytes analyzed or extracted per file                                              |
+| `--extract-files-total-size`       |         `100 MiB` | Maximum bytes extracted during the process lifetime                                       |
+| `--log-emit-stage`                 |        `terminal` | `process`/`tap` only: `terminal`, `all`, or `none`                                        |
 
 Equivalent YAML keys are `events.queue_size`, `events.drop_policy`, `logs.dir`, `logs.format`,
 `logs.streams`, `logs.rotate_interval`, `logs.queue_size`, `logs.emit_stage`,
 `logs.post_rotate_command`, `logs.include_http_headers`,
 `logs.include_email_body_preview`, and `files.extract`,
 `files.extract_dir`, `files.max_size`, and `files.total_size`.
+
+<!-- i18n:skip -->
 
 ```yaml
 events:
@@ -81,7 +89,7 @@ In a processor hierarchy, `terminal` prevents duplicate files by writing only on
 a node that is not forwarding upstream. Use `all` deliberately to log at every
 enabled stage, or `none` to suppress the file sink.
 
-## Output encodings
+## Output encodings {#output-encodings}
 
 TSV is the default. It writes Zeek headers (`#separator`, `#set_separator`,
 `#empty_field`, `#unset_field`, `#path`, `#open`, `#fields`, and `#types`) and a
@@ -94,14 +102,14 @@ keys such as `id.orig_h`; booleans, numbers, and arrays have native JSON types.
 Unset values are `null`, while present empty values are `""` or `[]`. JSON files
 still use the Zeek-compatible names such as `dns.log`.
 
-## Streams and fields
+## Streams and fields {#streams-and-fields}
 
 All field order and types below are fixed by `internal/pkg/logschema`. `uid` is a
 lippycat-generated Zeek-style connection ID. `community_id` is Community ID v1
 for cross-tool joins, and `node_id` identifies the originating capture source,
 not necessarily the processor writing the file. Unavailable values are unset.
 
-### `conn.log`
+### `conn.log` {#connlog}
 
 One lifecycle summary per observed flow (expiry, eviction, or graceful shutdown).
 
@@ -128,7 +136,7 @@ packets were known to be dropped, or accounting is otherwise incomplete. Treat
 all counters and duration on partial rows as lower bounds. A `full` scope can
 still be partial.
 
-### `dns.log`
+### `dns.log` {#dnslog}
 
 One DNS transaction observation. `trans_id` is the DNS transaction ID; `rtt` is
 the correlated response time. Query class/type and response code appear as both
@@ -145,7 +153,7 @@ transaction.
 | `answers`, `TTLs`, `rejected`                                            | `vector[string]`, `vector[interval]`, `bool`               |
 | `community_id`, `node_id`                                                | `string`, `string`                                         |
 
-### `ssl.log`
+### `ssl.log` {#ssllog}
 
 One TLS handshake observation. It includes negotiated `version`, `cipher`,
 `curve`, SNI `server_name`, resumption/alert/ALPN state, establishment state,
@@ -161,7 +169,7 @@ fingerprints. Fingerprints are common lippycat extensions, not base Zeek fields.
 | `subject`, `issuer`, `client_subject`, `client_issuer`, `validation_status` | `string`, `string`, `string`, `string`, `string` |
 | `ja3`, `ja3s`, `ja4`, `community_id`, `node_id`                             | `string`, `string`, `string`, `string`, `string` |
 
-### `http.log`
+### `http.log` {#httplog}
 
 One HTTP transaction observation. `trans_depth` orders transactions on a
 connection. Request/response columns describe method, authority and URI,
@@ -180,7 +188,7 @@ file vectors join to `files.log`. `password` is not collected by default.
 | `resp_fuids`, `resp_filenames`, `resp_mime_types`               | `vector[string]`, `vector[string]`, `vector[string]`      |
 | `community_id`, `node_id`                                       | `string`, `string`                                        |
 
-### `smtp.log`
+### `smtp.log` {#smtplog}
 
 One SMTP transaction observation. It records transaction depth, HELO and envelope
 sender/recipients, selected message headers and routing hops, last server reply,
@@ -197,7 +205,7 @@ message body.
 | `user_agent`, `tls`, `fuids`, `is_webmail`                      | `string`, `bool`, `vector[string]`, `bool`                 |
 | `community_id`, `node_id`                                       | `string`, `string`                                         |
 
-### `files.log`
+### `files.log` {#fileslog}
 
 One bounded HTTP entity or SMTP attachment observation. `fuid` is the file ID;
 `source` names the carrying protocol; `depth` and `parent_fuid` describe nesting;
@@ -216,9 +224,9 @@ extraction succeeds.
 | `parent_fuid`, `md5`, `sha1`, `sha256`, `hash_complete`, `extracted`       | `string`, `string`, `string`, `string`, `bool`, `string`     |
 | `community_id`, `node_id`                                                  | `string`, `string`                                           |
 
-## Rotation and operations
+## Rotation and operations {#rotation-and-operations}
 
-### Remote event transport and TUI retention
+### Remote event transport and TUI retention {#remote-event-transport-and-tui-retention}
 
 Hunters and taps can forward normalized records with `--forward-mode=events`.
 The receiver gains events, not original packets: upstream PCAP writing,
@@ -258,6 +266,8 @@ writes TSV footers. `SIGKILL`, a crash, or a full filesystem cannot do so.
 The post-rotate command is run asynchronously through `/bin/sh`; every `%log%`
 placeholder is replaced by a shell-quoted path. For example:
 
+<!-- i18n:skip -->
+
 ```bash
 lc process --log-dir /var/log/lippycat \
   --log-post-rotate-command 'gzip %log%'
@@ -267,10 +277,12 @@ The command is privileged exactly like the lippycat process. Use a fixed,
 administrator-controlled command, avoid secrets in arguments, and monitor hook
 failure logs. Retention and disk-space management remain operator responsibilities.
 
-## SIEM ingestion examples
+## SIEM ingestion examples {#siem-ingestion-examples}
 
 For JSONL, point an agent at `/var/log/lippycat/*.log`, parse one JSON object per
 line, and use the filename as the dataset. Example Vector source/transform:
+
+<!-- i18n:skip -->
 
 ```toml
 [sources.lippycat]
@@ -293,7 +305,7 @@ as exact strings. Because `uid` is local to one observed flow lifecycle,
 `community_id` is the preferred cross-product join key; include time and
 `node_id` when resolving collisions or repeated connections.
 
-## Privacy and security
+## Privacy and security {#privacy-and-security}
 
 Structured logs can contain personal data: IP addresses, DNS names, SNI, URLs,
 email addresses and subjects, user agents, filenames, certificate identities,
@@ -309,7 +321,7 @@ stronger access controls. Structured file settings do not authorize LI delivery;
 LI metadata remains independently gated by build, runtime, active task, target,
 and delivery profile.
 
-## RADIUS observations
+## RADIUS observations {#radius-observations}
 
 `lc sniff radius -r radius.pcap --log-dir ./logs --log-streams radius` selects
 the additive version-1 RADIUS observation stream. Each valid selected message

@@ -537,8 +537,9 @@ Intercepted data is delivered to MDF endpoints using binary TLV (Type-Length-Val
 
 ### X2 IRI Delivery {#x2-iri-delivery}
 
-X2 delivers SIP-derived IRI events, requiring an active authorizing task and an
-enabled X2 destination.
+X2 delivers SIP-derived IRI events, enabled protocol metadata, and raw RADIUS
+messages. Delivery requires a current authorizing task and an enabled X2
+destination; protocol-specific authorization requirements apply.
 
 #### SIP-derived IRI events {#sip-derived-iri-events}
 
@@ -553,7 +554,30 @@ X2 PDUs carry signaling metadata derived from SIP messages:
 | Registration    | REGISTER              | User registered with the network |
 | RegistrationEnd | REGISTER (Expires: 0) | User deregistered                |
 
-Each X2 PDU includes structured attributes: timestamp, source/destination IP and port, SIP Call-ID, From/To headers, and a correlation number that links related events within the same session.
+Each SIP-derived X2 PDU includes structured attributes: timestamp, source/destination IP and port, SIP Call-ID, From/To headers, and a correlation number that links related events within the same session.
+
+#### RADIUS messages (format 11) {#radius-x2-delivery}
+
+Ordinary `sniff radius`, `hunt radius`, and `tap radius` capture does not require
+an LI build or X1 task. In an LI build, raw format-11 X2 delivery is a separate
+authorized output and requires a current `X2Only` task whose scope matches the
+capture deployment. See [RADIUS capture and POI](radius.md#tap-poi-and-mdf-setup)
+for NatParas mappings, scope isolation, correlation state, and MDF setup.
+
+RADIUS uses a dedicated format-11 encoder. Its payload contains the original
+validated RADIUS message without Ethernet/IP/UDP encapsulation or trailing
+padding. Payload Direction is Unknown, and the eight-byte Correlation ID
+identifies an observed exchange rather than a subscriber session. This raw
+output is separate from SIP-derived IRI and normalized protocol metadata.
+
+Standalone tap and direct hunt/process deployments are supported. When
+forwarding RADIUS packets directly from hunter to processor, use mutual TLS and
+upgrade both peers to support authoritative capture-origin identity and filter
+snapshots. Relay-origin X2
+authorization is not supported. Before production deployment, verify target
+mappings against a known subscriber line on the operator's network and agree
+format-11, direction, correlation, duplicate, and orphan-handling conventions
+with the receiving MDF.
 
 ### X3 CC Content {#x3-cc-content}
 
@@ -835,15 +859,3 @@ Independent PDU caps are available through `--li-delivery-x2-queue-size` and
 `--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy
 `--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
 once, while `queue_bytes` counts every destination copy.
-
-## RADIUS X2 Delivery {#radius-x2-delivery}
-
-Ordinary `sniff radius`, `hunt radius`, and `tap radius` capture does not require
-an LI build or X1 task. In an LI build, raw format-11 X2 delivery is a separate
-authorized output and requires a current `X2Only` task whose scope matches the
-capture deployment. See [RADIUS capture and POI](radius.md#tap-poi-and-mdf-setup)
-for NatParas mappings, scope isolation, correlation state, and MDF setup.
-
-Direct hunt/process verification has passed with upgraded peers. Relay-origin
-X2 authorization is unsupported; external operator known-line verification and
-receiving-MDF agreement remain deployment acceptance items.

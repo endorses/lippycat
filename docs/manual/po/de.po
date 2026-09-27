@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: lippycat 🫦🐱 Manual\n"
-"POT-Creation-Date: 2026-09-27T12:52:37+02:00\n"
+"POT-Creation-Date: 2026-09-27T13:43:54+02:00\n"
 "PO-Revision-Date: 2026-09-27 10:56+0000\n"
 "Last-Translator: lippycat contributors\n"
 "Language-Team: German\n"
@@ -130,7 +130,7 @@ msgid "Lawful Interception"
 msgstr "Rechtmäßige Telekommunikationsüberwachung"
 
 #: src/SUMMARY.md:50 src/part4-administration/watch-remote.md:423
-#: src/part5-advanced/lawful-interception.md:705
+#: src/part5-advanced/lawful-interception.md:729
 #: src/part5-advanced/security.md:949 src/part5-advanced/troubleshooting.md:1
 msgid "Troubleshooting"
 msgstr "Fehlerbehebung"
@@ -200,7 +200,7 @@ msgstr ""
 
 #: src/appendices/bpf-reference.md:13 src/appendices/bpf-reference.md:25
 #: src/part2-local-capture/watch-local.md:105
-#: src/part5-advanced/lawful-interception.md:617
+#: src/part5-advanced/lawful-interception.md:641
 #: src/part5-advanced/radius.md:208
 msgid "Example"
 msgstr "Beispiel"
@@ -453,9 +453,9 @@ msgstr "Protokollqualifikatoren"
 #: src/part5-advanced/lawful-interception.md:336
 #: src/part5-advanced/lawful-interception.md:454
 #: src/part5-advanced/lawful-interception.md:515
-#: src/part5-advanced/lawful-interception.md:547
-#: src/part5-advanced/lawful-interception.md:562
-#: src/part5-advanced/lawful-interception.md:684 src/part5-advanced/tls.md:80
+#: src/part5-advanced/lawful-interception.md:548
+#: src/part5-advanced/lawful-interception.md:586
+#: src/part5-advanced/lawful-interception.md:708 src/part5-advanced/tls.md:80
 #: src/part5-advanced/tls.md:131 src/part5-advanced/voip.md:32
 #: src/part5-advanced/voip.md:132
 msgid "Description"
@@ -3593,7 +3593,7 @@ msgstr "`--li-x1-tls-ca`"
 
 #: src/appendices/command-reference.md:259
 msgid "X2/X3 delivery client certificate"
-msgstr "Client-Zertifikat für die X2/X3-Auslieferung"
+msgstr "Client-Zertifikat für die X2/X3-Ausleitung"
 
 #: src/appendices/command-reference.md:259
 msgid "`--li-delivery-tls-cert`"
@@ -3601,7 +3601,7 @@ msgstr "`--li-delivery-tls-cert`"
 
 #: src/appendices/command-reference.md:260
 msgid "X2/X3 delivery client private key"
-msgstr "Privater Client-Schlüssel für die X2/X3-Auslieferung"
+msgstr "Privater Client-Schlüssel für die X2/X3-Ausleitung"
 
 #: src/appendices/command-reference.md:260
 msgid "`--li-delivery-tls-key`"
@@ -3609,7 +3609,7 @@ msgstr "`--li-delivery-tls-key`"
 
 #: src/appendices/command-reference.md:261
 msgid "X2/X3 delivery CA certificate (MDF verification)"
-msgstr "CA-Zertifikat für die X2/X3-Auslieferung (MDF-Prüfung)"
+msgstr "CA-Zertifikat für die X2/X3-Ausleitung (MDF-Prüfung)"
 
 #: src/appendices/command-reference.md:261
 #: src/part5-advanced/lawful-interception.md:232
@@ -3626,7 +3626,7 @@ msgstr "`--li-delivery-queue-size`"
 
 #: src/appendices/command-reference.md:263
 msgid "Timeout for each delivery write"
-msgstr "Zeitlimit für jeden Schreibvorgang bei der Auslieferung"
+msgstr "Zeitlimit für jeden Schreibvorgang bei der Übermittlung"
 
 #: src/appendices/command-reference.md:263
 msgid "`--li-delivery-send-timeout`"
@@ -4921,7 +4921,7 @@ msgstr "`reliable`"
 #: src/appendices/command-reference.md:711
 #: src/appendices/command-reference.md:920
 msgid "`reliable` or `memory-only` event delivery"
-msgstr "Ereignisauslieferung mit `reliable` oder `memory-only`"
+msgstr "Ereignisübermittlung mit `reliable` oder `memory-only`"
 
 #: src/appendices/command-reference.md:561
 #: src/appendices/command-reference.md:921
@@ -5264,7 +5264,7 @@ msgid ""
 msgstr ""
 "Übernimmt alle Optionen von `lc tap` und ergänzt die [gemeinsamen RADIUS-"
 "Optionen](../part5-advanced/radius.md#shared-flags-and-configuration). LI-"
-"Builds können unabhängig davon autorisierte X2-Auslieferung im Format 11 "
+"Builds können unabhängig davon autorisierte X2-Ausleitung im Format 11 "
 "aktivieren."
 
 #: src/appendices/command-reference.md:696
@@ -8402,7 +8402,7 @@ msgstr "`hunter.events.fallback_to_packets`"
 
 #: src/appendices/config-reference.md:378
 msgid "Event delivery: `\"reliable\"` or `\"memory-only\"`."
-msgstr "Ereignisauslieferung: `\"reliable\"` oder `\"memory-only\"`."
+msgstr "Ereignisübermittlung: `\"reliable\"` oder `\"memory-only\"`."
 
 #: src/appendices/config-reference.md:378
 #: src/appendices/config-reference.md:485
@@ -8945,7 +8945,7 @@ msgstr "`processor.events.fallback_to_packets`"
 #: src/appendices/config-reference.md:649
 msgid "Upstream event delivery: `\"reliable\"` or `\"memory-only\"`."
 msgstr ""
-"Ereignisauslieferung an vorgelagerte Prozessoren: `\"reliable\"` oder "
+"Ereignisübermittlung an vorgelagerte Prozessoren: `\"reliable\"` oder "
 "`\"memory-only\"`."
 
 #: src/appendices/config-reference.md:485
@@ -9608,7 +9608,7 @@ msgstr "`processor.li.admf_reconcile_interval`"
 
 #: src/appendices/config-reference.md:589
 msgid "TLS certificate for X2/X3 delivery connections."
-msgstr "TLS-Zertifikat für X2/X3-Auslieferungsverbindungen."
+msgstr "TLS-Zertifikat für X2/X3-Ausleitungsverbindungen."
 
 #: src/appendices/config-reference.md:589
 msgid "`processor.li.delivery_tls_cert`"
@@ -9616,7 +9616,7 @@ msgstr "`processor.li.delivery_tls_cert`"
 
 #: src/appendices/config-reference.md:590
 msgid "TLS private key for X2/X3 delivery."
-msgstr "Privater TLS-Schlüssel für X2/X3-Auslieferung."
+msgstr "Privater TLS-Schlüssel für X2/X3-Ausleitung."
 
 #: src/appendices/config-reference.md:590
 msgid "`processor.li.delivery_tls_key`"
@@ -10136,7 +10136,7 @@ msgstr "`tap.vif_netns`"
 
 #: src/appendices/config-reference.md:694
 msgid "Tap LI Metadata Delivery"
-msgstr "Tap-LI-Metadatenauslieferung"
+msgstr "Tap-LI-Metadatenausleitung"
 
 #: src/appendices/config-reference.md:696
 msgid ""
@@ -10145,7 +10145,7 @@ msgid ""
 "protocol metadata specifically."
 msgstr ""
 "Diese Einstellungen erfordern das Build-Tag `li`. Tap unterstützt dieselbe "
-"X1- und X2/X3-Auslieferungskonfiguration wie der Prozessor; diese Schlüssel "
+"X1- und X2/X3-Ausleitungskonfiguration wie der Prozessor; diese Schlüssel "
 "steuern speziell normalisierte Protokollmetadaten."
 
 #: src/appendices/config-reference.md:703
@@ -12248,7 +12248,7 @@ msgid ""
 "over TLS. See [Lawful Interception](../part5-advanced/lawful-"
 "interception.md)."
 msgstr ""
-"Die ETSI-IRI-Auslieferungsschnittstelle für Lawful Interception. Überträgt "
+"Die ETSI-IRI-Ausleitungsschnittstelle für Lawful Interception. Überträgt "
 "Signalisierungsmetadaten (Intercept Related Information) vom Netzelement zum "
 "MDF über TLS. Siehe [Lawful Interception](../part5-advanced/lawful-"
 "interception.md)."
@@ -12263,7 +12263,7 @@ msgid ""
 "content (actual packet data) from the network element to the MDF over TLS. "
 "See [Lawful Interception](../part5-advanced/lawful-interception.md)."
 msgstr ""
-"Die ETSI-CC-Auslieferungsschnittstelle für Lawful Interception. Überträgt "
+"Die ETSI-CC-Ausleitungsschnittstelle für Lawful Interception. Überträgt "
 "Kommunikationsinhalte (tatsächliche Paketdaten) vom Netzelement zum MDF über "
 "TLS. Siehe [Lawful Interception](../part5-advanced/lawful-interception.md)."
 
@@ -19278,7 +19278,7 @@ msgid "Estimating Processor Resources"
 msgstr "Prozessorressourcen schätzen"
 
 #: src/part4-administration/operations.md:557
-#: src/part5-advanced/lawful-interception.md:587
+#: src/part5-advanced/lawful-interception.md:611
 #: src/part5-advanced/security.md:474
 msgid "Metric"
 msgstr "Messgröße"
@@ -19546,7 +19546,7 @@ msgstr "Konfigurationsfelder"
 
 #: src/part4-administration/watch-remote.md:110 src/part5-advanced/dns.md:59
 #: src/part5-advanced/email.md:80 src/part5-advanced/http.md:61
-#: src/part5-advanced/lawful-interception.md:684 src/part5-advanced/tls.md:80
+#: src/part5-advanced/lawful-interception.md:708 src/part5-advanced/tls.md:80
 #: src/part5-advanced/tls.md:131 src/part5-advanced/voip.md:32
 #: src/part5-advanced/voip.md:132
 msgid "Field"
@@ -20805,7 +20805,7 @@ msgstr "Binäres TLV/TLS"
 
 #: src/part5-advanced/lawful-interception.md:14
 msgid "IRI delivery (signaling metadata)"
-msgstr "IRI-Auslieferung (Signalisierungsmetadaten)"
+msgstr "IRI-Ausleitung (Signalisierungsmetadaten)"
 
 #: src/part5-advanced/lawful-interception.md:14
 #: src/part5-advanced/lawful-interception.md:15
@@ -20814,7 +20814,7 @@ msgstr "TS 103 221-2"
 
 #: src/part5-advanced/lawful-interception.md:15
 msgid "CC delivery (communication content)"
-msgstr "CC-Auslieferung (Kommunikationsinhalte)"
+msgstr "CC-Ausleitung (Kommunikationsinhalte)"
 
 #: src/part5-advanced/lawful-interception.md:17
 msgid ""
@@ -20889,8 +20889,8 @@ msgid ""
 "The delivery client sends encoded PDUs to the designated MDF endpoints over "
 "TLS."
 msgstr ""
-"Der Auslieferungsclient sendet kodierte PDUs über TLS an die vorgesehenen "
-"MDF-Endpunkte."
+"Der Ausleitungsclient sendet kodierte PDUs über TLS an die vorgesehenen MDF-"
+"Endpunkte."
 
 #: src/part5-advanced/lawful-interception.md:61
 msgid "Build Requirements"
@@ -20918,8 +20918,7 @@ msgstr "Vollständige Suite mit LI-Unterstützung bauen:"
 #: src/part5-advanced/lawful-interception.md:81
 msgid "Build tap with LI support for standalone capture and LI delivery:"
 msgstr ""
-"Tap mit LI-Unterstützung für eigenständige Erfassung und LI-Auslieferung "
-"bauen:"
+"Tap mit LI-Unterstützung für eigenständige Erfassung und LI-Ausleitung bauen:"
 
 #: src/part5-advanced/lawful-interception.md:89
 msgid "Verify that non-LI builds contain no LI code:"
@@ -20937,7 +20936,7 @@ msgstr ""
 "derselben Filterinfrastruktur, unabhängig davon, ob Filter aus LI-Aufträgen "
 "oder manueller Konfiguration stammen. Nur der Prozessor (oder Tap im "
 "eigenständigen Modus) benötigt das Build-Tag `li`, da er X1-Server und X2-/"
-"X3-Auslieferungsclient bereitstellt."
+"X3-Ausleitungsclient bereitstellt."
 
 #: src/part5-advanced/lawful-interception.md:99
 msgid "Configuration and Deployment"
@@ -20957,7 +20956,7 @@ msgstr ""
 "LI wird mit dem Flag `--li-enabled` auf Prozessor oder Tap aktiviert. X1-"
 "Listen-Adresse, Serverzertifikat, Serverschlüssel und ADMF-Client-CA sind "
 "verpflichtend; unvollständige X1-TLS-Konfiguration verhindert den Start. Für "
-"MDF-Kommunikation sind auch Auslieferungszertifikate erforderlich."
+"MDF-Kommunikation sind auch Ausleitungszertifikate erforderlich."
 
 #: src/part5-advanced/lawful-interception.md:105
 msgid ""
@@ -21055,11 +21054,11 @@ msgstr "ADMF-Serverzertifikat prüfen"
 
 #: src/part5-advanced/lawful-interception.md:231
 msgid "Authenticate to MDF for X2/X3 delivery"
-msgstr "Bei MDF für X2-/X3-Auslieferung authentifizieren"
+msgstr "Bei MDF für X2-/X3-Ausleitung authentifizieren"
 
 #: src/part5-advanced/lawful-interception.md:231
 msgid "Delivery Cert + Key"
-msgstr "Auslieferungszertifikat + Schlüssel"
+msgstr "Ausleitungszertifikat + Schlüssel"
 
 #: src/part5-advanced/lawful-interception.md:231
 msgid "`--li-delivery-tls-cert`, `--li-delivery-tls-key`"
@@ -21113,7 +21112,7 @@ msgid ""
 "path, you can pin the MDF server certificate by its SHA-256 fingerprint:"
 msgstr ""
 "**Zertifikat-Pinning.** Für zusätzliche Sicherheit auf dem X2-/X3-"
-"Auslieferungspfad können Sie das MDF-Serverzertifikat anhand seines SHA-256-"
+"Ausleitungspfad können Sie das MDF-Serverzertifikat anhand seines SHA-256-"
 "Fingerabdrucks festlegen:"
 
 #: src/part5-advanced/lawful-interception.md:266
@@ -21130,9 +21129,9 @@ msgid ""
 "certificate that does not match a pinned fingerprint, even if the "
 "certificate is otherwise valid under the configured CA."
 msgstr ""
-"Bei konfiguriertem Pinning lehnt der Auslieferungsclient jedes MDF-"
-"Zertifikat ab, das keinem festgelegten Fingerabdruck entspricht, selbst wenn "
-"es unter der konfigurierten CA ansonsten gültig ist."
+"Bei konfiguriertem Pinning lehnt der Ausleitungsclient jedes MDF-Zertifikat "
+"ab, das keinem festgelegten Fingerabdruck entspricht, selbst wenn es unter "
+"der konfigurierten CA ansonsten gültig ist."
 
 #: src/part5-advanced/lawful-interception.md:285
 msgid "X1 Administration Interface"
@@ -21145,7 +21144,7 @@ msgid ""
 "processor uses it to send status notifications back to the ADMF."
 msgstr ""
 "Die X1-Schnittstelle ist die Steuerungsebene zwischen ADMF und Prozessor. "
-"Die ADMF verwaltet darüber Überwachungsaufträge und Auslieferungsziele; der "
+"Die ADMF verwaltet darüber Überwachungsaufträge und Ausleitungsziele; der "
 "Prozessor sendet darüber Statusbenachrichtigungen an die ADMF zurück."
 
 #: src/part5-advanced/lawful-interception.md:289
@@ -21186,7 +21185,7 @@ msgstr "CreateDestination"
 
 #: src/part5-advanced/lawful-interception.md:294
 msgid "Register an MDF endpoint for delivery"
-msgstr "MDF-Endpunkt zur Auslieferung registrieren"
+msgstr "MDF-Endpunkt zur Ausleitung registrieren"
 
 #: src/part5-advanced/lawful-interception.md:295
 msgid "ModifyDestination"
@@ -21218,7 +21217,7 @@ msgstr "ModifyTask"
 
 #: src/part5-advanced/lawful-interception.md:298
 msgid "Update task targets, destinations, or delivery type"
-msgstr "Auftragsziele, Auslieferungsziele oder Auslieferungstyp aktualisieren"
+msgstr "Auftragsziele, Ausleitungsziele oder Ausleitungstyp aktualisieren"
 
 #: src/part5-advanced/lawful-interception.md:299
 msgid "DeactivateTask"
@@ -21247,7 +21246,7 @@ msgstr "NE zu ADMF"
 
 #: src/part5-advanced/lawful-interception.md:301
 msgid "Query all tasks, destinations, and NE status"
-msgstr "Alle Aufträge, Auslieferungsziele und NE-Status abfragen"
+msgstr "Alle Aufträge, Ausleitungsziele und NE-Status abfragen"
 
 #: src/part5-advanced/lawful-interception.md:302
 msgid "GetAllTaskDetails"
@@ -21265,7 +21264,7 @@ msgid ""
 msgstr ""
 "Alle Anfragen verwenden XML-Kodierung gemäß ETSI TS 103 221-1. Eine Anfrage "
 "`ActivateTask` enthält beispielsweise Auftragskennung (XID), Zielkennungen, "
-"Auslieferungsziel-IDs und Auslieferungstyp:"
+"Ausleitungsziel-IDs und Ausleitungstyp:"
 
 #: src/part5-advanced/lawful-interception.md:332
 msgid "Task Lifecycle"
@@ -21355,11 +21354,11 @@ msgstr "Zielkennungen (Filterkriterien hinzufügen oder entfernen)"
 
 #: src/part5-advanced/lawful-interception.md:354
 msgid "Destination IDs (changes delivery endpoints)"
-msgstr "Auslieferungsziel-IDs (Auslieferungsendpunkte ändern)"
+msgstr "Ausleitungsziel-IDs (Ausleitungsendpunkte ändern)"
 
 #: src/part5-advanced/lawful-interception.md:355
 msgid "Delivery type (switches between X2Only, X3Only, X2andX3)"
-msgstr "Auslieferungstyp (zwischen X2Only, X3Only, X2andX3 wechseln)"
+msgstr "Ausleitungstyp (zwischen X2Only, X3Only, X2andX3 wechseln)"
 
 #: src/part5-advanced/lawful-interception.md:356
 msgid "End time"
@@ -21402,10 +21401,10 @@ msgstr ""
 "Ein deaktivierter Auftrag wird vorübergehend als Löschmarkierung aufbewahrt "
 "und kann nicht automatisch fortgesetzt werden. Ein ausdrückliches "
 "authentifiziertes `ActivateTask` kann ihn nur reaktivieren, wenn die "
-"geschützte Überwachungsidentität unverändert bleibt: XID, Auslieferungstyp "
-"und kanonische Menge der Zieltyp-/Wertpaare müssen übereinstimmen. "
+"geschützte Überwachungsidentität unverändert bleibt: XID, Ausleitungstyp und "
+"kanonische Menge der Zieltyp-/Wertpaare müssen übereinstimmen. "
 "Zielreihenfolge und exakte Duplikate sind unerheblich. Die neue Anfrage darf "
-"Auslieferungsziel-IDs, Vermittlungsstart- und -endzeiten sowie "
+"Ausleitungsziel-IDs, Vermittlungsstart- und -endzeiten sowie "
 "Lebenszyklusoptionen ersetzen, vorbehaltlich der normalen aktuellen Prüfung. "
 "Ausgesetzte und fehlgeschlagene Aufträge bleiben von diesem Vorgang "
 "ausgeschlossen."
@@ -21421,19 +21420,19 @@ msgid ""
 "request is safe to repeat; a `deactivated` result requires another explicit "
 "activation after the underlying error is corrected."
 msgstr ""
-"Richten Sie jedes Ersatzauslieferungsziel vor der Reaktivierung ein und "
-"prüfen Sie seine Unterstützung des angeforderten Auslieferungstyps. Bei "
-"Erfolg erhält der Prozessor die alte Deaktivierung im Auditverlauf, erhöht "
-"die Aktivierungsgeneration und installiert nur die neuen Filter. Bei Prüf- "
-"oder Installationsfehler bleibt die Löschmarkierung ohne Wirkung und "
-"unverändert. Geht die Antwort verloren, verwenden Sie vor einer Wiederholung "
+"Richten Sie jedes Ersatzausleitungsziel vor der Reaktivierung ein und prüfen "
+"Sie seine Unterstützung des angeforderten Ausleitungstyps. Bei Erfolg erhält "
+"der Prozessor die alte Deaktivierung im Auditverlauf, erhöht die "
+"Aktivierungsgeneration und installiert nur die neuen Filter. Bei Prüf- oder "
+"Installationsfehler bleibt die Löschmarkierung ohne Wirkung und unverändert. "
+"Geht die Antwort verloren, verwenden Sie vor einer Wiederholung "
 "`GetTaskDetails`: Eine identische aktive/ausstehende Anfrage kann sicher "
 "wiederholt werden; ein Ergebnis `deactivated` erfordert nach Korrektur des "
 "zugrunde liegenden Fehlers eine weitere ausdrückliche Aktivierung."
 
 #: src/part5-advanced/lawful-interception.md:384
 msgid "Delivery Types"
-msgstr "Auslieferungstypen"
+msgstr "Ausleitungstypen"
 
 #: src/part5-advanced/lawful-interception.md:386
 msgid "Each task specifies what information to deliver:"
@@ -21532,7 +21531,7 @@ msgstr "DeliveryNotification"
 
 #: src/part5-advanced/lawful-interception.md:405
 msgid "X2/X3 delivery issues to MDF"
-msgstr "Probleme bei X2-/X3-Auslieferung an MDF"
+msgstr "Probleme bei X2-/X3-Ausleitung an MDF"
 
 #: src/part5-advanced/lawful-interception.md:406
 msgid "ImplicitDeactivation"
@@ -21566,7 +21565,7 @@ msgid ""
 "`GetAllDetails` operation defined in ETSI TS 103 221-1."
 msgstr ""
 "Beim Neustart von lippycat geht der gesamte Auftrags- und "
-"Auslieferungszielzustand im Arbeitsspeicher verloren. Zur Wiederherstellung, "
+"Ausleitungszielzustand im Arbeitsspeicher verloren. Zur Wiederherstellung, "
 "ohne auf erneute Einzelübertragung jedes Auftrags durch die ADMF zu warten, "
 "fragt der Prozessor beim Start den aktuellen ADMF-Zustand mit dem "
 "standardmäßigen Vorgang `GetAllDetails` gemäß ETSI TS 103 221-1 ab."
@@ -21581,9 +21580,9 @@ msgid ""
 msgstr ""
 "**Startsynchronisierung** ist standardmäßig aktiviert. Nach der "
 "Startbenachrichtigung ruft der Prozessor `GetAllDetails` bei der ADMF auf, "
-"die alle diesem Network Element zugewiesenen Aufträge und Auslieferungsziele "
-"zurückgibt. Der Prozessor registriert jedes Auslieferungsziel und aktiviert "
-"jeden Auftrag, wodurch vollständiger Filter- und Auslieferungszustand "
+"die alle diesem Network Element zugewiesenen Aufträge und Ausleitungsziele "
+"zurückgibt. Der Prozessor registriert jedes Ausleitungsziel und aktiviert "
+"jeden Auftrag, wodurch vollständiger Filter- und Ausleitungszustand "
 "automatisch wiederhergestellt werden."
 
 #: src/part5-advanced/lawful-interception.md:446
@@ -21620,9 +21619,9 @@ msgid ""
 "with a warning and the remaining items are processed."
 msgstr ""
 "**Einzelne Auftragsfehler:** Kann ein bestimmter Auftrag oder ein "
-"Auslieferungsziel nicht aktiviert werden (etwa wegen eines nicht "
-"unterstützten Zieltyps), wird es mit einer Warnung übersprungen; die übrigen "
-"Elemente werden verarbeitet."
+"Ausleitungsziel nicht aktiviert werden (etwa wegen eines nicht unterstützten "
+"Zieltyps), wird es mit einer Warnung übersprungen; die übrigen Elemente "
+"werden verarbeitet."
 
 #: src/part5-advanced/lawful-interception.md:452
 msgid "**Configuration flags:**"
@@ -21802,7 +21801,7 @@ msgstr "302"
 
 #: src/part5-advanced/lawful-interception.md:521
 msgid "A destination with this DID is already registered"
-msgstr "Ein Auslieferungsziel mit dieser DID ist bereits registriert"
+msgstr "Ein Ausleitungsziel mit dieser DID ist bereits registriert"
 
 #: src/part5-advanced/lawful-interception.md:521
 msgid "DIDAlreadyExists"
@@ -21818,7 +21817,7 @@ msgstr "DIDNotFound"
 
 #: src/part5-advanced/lawful-interception.md:522
 msgid "No destination found for the given DID"
-msgstr "Kein Auslieferungsziel für die angegebene DID gefunden"
+msgstr "Kein Ausleitungsziel für die angegebene DID gefunden"
 
 #: src/part5-advanced/lawful-interception.md:523
 msgid "400"
@@ -21826,7 +21825,7 @@ msgstr "400"
 
 #: src/part5-advanced/lawful-interception.md:523
 msgid "Cannot reach MDF for delivery"
-msgstr "MDF zur Auslieferung nicht erreichbar"
+msgstr "MDF zur Ausleitung nicht erreichbar"
 
 #: src/part5-advanced/lawful-interception.md:523
 msgid "DeliveryNotPossible"
@@ -21854,7 +21853,7 @@ msgstr "DeliveryTypeNotSupported"
 
 #: src/part5-advanced/lawful-interception.md:525
 msgid "Requested delivery type not available"
-msgstr "Angeforderter Auslieferungstyp nicht verfügbar"
+msgstr "Angeforderter Ausleitungstyp nicht verfügbar"
 
 #: src/part5-advanced/lawful-interception.md:527
 msgid ""
@@ -21865,8 +21864,8 @@ msgid ""
 "Operators should investigate a code-100 identity mismatch rather than "
 "changing the interception target under the retained XID."
 msgstr ""
-"Ändert eine Reaktivierung ein geschütztes Ziel oder den Auslieferungstyp, "
-"hat Code 100 die stabile Beschreibung `retained task's interception identity "
+"Ändert eine Reaktivierung ein geschütztes Ziel oder den Ausleitungstyp, hat "
+"Code 100 die stabile Beschreibung `retained task's interception identity "
 "differs`, gefolgt von der XID. Dies unterscheidet sich absichtlich von Code "
 "300: Code 300 bedeutet weiterhin eine widersprüchliche Definition für eine "
 "aktive oder ausstehende XID. Betreiber sollten bei Code 100 die "
@@ -21875,7 +21874,7 @@ msgstr ""
 
 #: src/part5-advanced/lawful-interception.md:534
 msgid "X2/X3 Delivery"
-msgstr "X2-/X3-Auslieferung"
+msgstr "X2-/X3-Ausleitung"
 
 #: src/part5-advanced/lawful-interception.md:536
 msgid ""
@@ -21887,147 +21886,211 @@ msgstr ""
 
 #: src/part5-advanced/lawful-interception.md:538
 msgid "X2 IRI Delivery"
-msgstr "X2-IRI-Auslieferung"
+msgstr "X2-IRI-Ausleitung"
 
 #: src/part5-advanced/lawful-interception.md:540
 msgid ""
-"X2 delivers SIP-derived IRI events, requiring an active authorizing task and "
-"an enabled X2 destination."
+"X2 delivers SIP-derived IRI events, enabled protocol metadata, and raw "
+"RADIUS messages. Delivery requires a current authorizing task and an enabled "
+"X2 destination; protocol-specific authorization requirements apply."
 msgstr ""
-"X2 liefert SIP-abgeleitete IRI-Ereignisse und erfordert einen aktiven "
-"autorisierenden Auftrag und ein aktiviertes X2-Auslieferungsziel."
+"X2 leitet aus SIP abgeleitete IRI-Ereignisse, aktivierte Protokollmetadaten "
+"und unveränderte RADIUS-Nachrichten aus. Die Ausleitung erfordert einen "
+"aktuell gültigen autorisierenden Auftrag und ein aktiviertes X2-"
+"Ausleitungsziel; zusätzlich gelten protokollspezifische "
+"Autorisierungsanforderungen."
 
-#: src/part5-advanced/lawful-interception.md:543
+#: src/part5-advanced/lawful-interception.md:544
 msgid "SIP-derived IRI events"
 msgstr "SIP-abgeleitete IRI-Ereignisse"
 
-#: src/part5-advanced/lawful-interception.md:545
+#: src/part5-advanced/lawful-interception.md:546
 msgid "X2 PDUs carry signaling metadata derived from SIP messages:"
 msgstr ""
 "X2-PDUs enthalten aus SIP-Nachrichten abgeleitete Signalisierungsmetadaten:"
 
-#: src/part5-advanced/lawful-interception.md:547
+#: src/part5-advanced/lawful-interception.md:548
 msgid "IRI Event"
 msgstr "IRI-Ereignis"
 
-#: src/part5-advanced/lawful-interception.md:547
+#: src/part5-advanced/lawful-interception.md:548
 msgid "SIP Trigger"
 msgstr "SIP-Auslöser"
 
-#: src/part5-advanced/lawful-interception.md:549
+#: src/part5-advanced/lawful-interception.md:550
 msgid "A call has been initiated"
 msgstr "Ein Anruf wurde eingeleitet"
 
-#: src/part5-advanced/lawful-interception.md:549
+#: src/part5-advanced/lawful-interception.md:550
 msgid "INVITE"
 msgstr "INVITE"
 
-#: src/part5-advanced/lawful-interception.md:549
+#: src/part5-advanced/lawful-interception.md:550
 msgid "SessionBegin"
 msgstr "SessionBegin"
 
-#: src/part5-advanced/lawful-interception.md:550
+#: src/part5-advanced/lawful-interception.md:551
 msgid "200 OK to INVITE"
 msgstr "200 OK auf INVITE"
 
-#: src/part5-advanced/lawful-interception.md:550
+#: src/part5-advanced/lawful-interception.md:551
 msgid "SessionAnswer"
 msgstr "SessionAnswer"
 
-#: src/part5-advanced/lawful-interception.md:550
+#: src/part5-advanced/lawful-interception.md:551
 msgid "The call was answered"
 msgstr "Der Anruf wurde angenommen"
 
-#: src/part5-advanced/lawful-interception.md:551
+#: src/part5-advanced/lawful-interception.md:552
 msgid "BYE"
 msgstr "BYE"
 
-#: src/part5-advanced/lawful-interception.md:551
+#: src/part5-advanced/lawful-interception.md:552
 msgid "SessionEnd"
 msgstr "SessionEnd"
 
-#: src/part5-advanced/lawful-interception.md:551
+#: src/part5-advanced/lawful-interception.md:552
 msgid "The call was terminated"
 msgstr "Der Anruf wurde beendet"
 
-#: src/part5-advanced/lawful-interception.md:552
+#: src/part5-advanced/lawful-interception.md:553
 msgid "A call attempt failed"
 msgstr "Ein Anrufversuch ist fehlgeschlagen"
 
-#: src/part5-advanced/lawful-interception.md:552
+#: src/part5-advanced/lawful-interception.md:553
 msgid "CANCEL, 4xx, 5xx, 6xx"
 msgstr "CANCEL, 4xx, 5xx, 6xx"
 
-#: src/part5-advanced/lawful-interception.md:552
+#: src/part5-advanced/lawful-interception.md:553
 msgid "SessionAttempt"
 msgstr "SessionAttempt"
 
-#: src/part5-advanced/lawful-interception.md:553
+#: src/part5-advanced/lawful-interception.md:554
 msgid "REGISTER"
 msgstr "REGISTER"
 
-#: src/part5-advanced/lawful-interception.md:553
+#: src/part5-advanced/lawful-interception.md:554
 msgid "Registration"
 msgstr "Registration"
 
-#: src/part5-advanced/lawful-interception.md:553
+#: src/part5-advanced/lawful-interception.md:554
 msgid "User registered with the network"
 msgstr "Benutzer im Netzwerk registriert"
 
-#: src/part5-advanced/lawful-interception.md:554
+#: src/part5-advanced/lawful-interception.md:555
 msgid "REGISTER (Expires: 0)"
 msgstr "REGISTER (Expires: 0)"
 
-#: src/part5-advanced/lawful-interception.md:554
+#: src/part5-advanced/lawful-interception.md:555
 msgid "RegistrationEnd"
 msgstr "RegistrationEnd"
 
-#: src/part5-advanced/lawful-interception.md:554
+#: src/part5-advanced/lawful-interception.md:555
 msgid "User deregistered"
 msgstr "Benutzer abgemeldet"
 
-#: src/part5-advanced/lawful-interception.md:556
+#: src/part5-advanced/lawful-interception.md:557
 msgid ""
-"Each X2 PDU includes structured attributes: timestamp, source/destination IP "
-"and port, SIP Call-ID, From/To headers, and a correlation number that links "
-"related events within the same session."
+"Each SIP-derived X2 PDU includes structured attributes: timestamp, source/"
+"destination IP and port, SIP Call-ID, From/To headers, and a correlation "
+"number that links related events within the same session."
 msgstr ""
-"Jede X2-PDU enthält strukturierte Attribute: Zeitstempel, Quell-/Ziel-IP und "
-"-Port, SIP-Call-ID, From-/To-Header und eine Korrelationsnummer, die "
-"zusammengehörige Ereignisse derselben Sitzung verknüpft."
+"Jede aus SIP abgeleitete X2-PDU enthält strukturierte Attribute: "
+"Zeitstempel, Quell-/Ziel-IP und -Port, SIP-Call-ID, From-/To-Header und eine "
+"Korrelationsnummer, die zusammengehörige Ereignisse innerhalb derselben "
+"Sitzung verknüpft."
 
-#: src/part5-advanced/lawful-interception.md:558
+#: src/part5-advanced/lawful-interception.md:559
+msgid "RADIUS messages (format 11)"
+msgstr "RADIUS-Nachrichten (Format 11)"
+
+#: src/part5-advanced/lawful-interception.md:561
+msgid ""
+"Ordinary `sniff radius`, `hunt radius`, and `tap radius` capture does not "
+"require an LI build or X1 task. In an LI build, raw format-11 X2 delivery is "
+"a separate authorized output and requires a current `X2Only` task whose "
+"scope matches the capture deployment. See [RADIUS capture and POI]"
+"(radius.md#tap-poi-and-mdf-setup) for NatParas mappings, scope isolation, "
+"correlation state, and MDF setup."
+msgstr ""
+"Die Paketerfassung mit `sniff radius`, `hunt radius` und `tap radius` "
+"funktioniert ohne LI-Build oder X1-Auftrag. Die Ausleitung unveränderter "
+"RADIUS-Nachrichten über X2 im Format 11 ist eine gesondert autorisierte "
+"Ausgabe eines LI-Builds. Sie erfordert einen aktuell gültigen Auftrag "
+"`X2Only`, dessen Geltungsbereich zur Erfassungsumgebung passt. Hinweise zu "
+"NatParas-Zuordnungen, zur Trennung der Geltungsbereiche, zum "
+"Korrelationszustand und zur MDF-Konfiguration finden Sie unter [RADIUS-"
+"Erfassung und POI](radius.md#tap-poi-and-mdf-setup)."
+
+#: src/part5-advanced/lawful-interception.md:567
+msgid ""
+"RADIUS uses a dedicated format-11 encoder. Its payload contains the original "
+"validated RADIUS message without Ethernet/IP/UDP encapsulation or trailing "
+"padding. Payload Direction is Unknown, and the eight-byte Correlation ID "
+"identifies an observed exchange rather than a subscriber session. This raw "
+"output is separate from SIP-derived IRI and normalized protocol metadata."
+msgstr ""
+"RADIUS verwendet einen eigenen Encoder für Format 11. Die Nutzdaten "
+"enthalten die ursprüngliche, validierte RADIUS-Nachricht ohne Ethernet/IP/"
+"UDP-Kapselung oder nachfolgende Füllbytes. Payload Direction ist Unknown; "
+"die acht Byte lange Correlation ID kennzeichnet einen beobachteten "
+"Nachrichtenaustausch, keine Teilnehmersitzung. Diese Ausgabe der "
+"unveränderten Nachricht ist von den aus SIP abgeleiteten IRI-Ereignissen und "
+"normalisierten Protokollmetadaten getrennt."
+
+#: src/part5-advanced/lawful-interception.md:573
+msgid ""
+"Standalone tap and direct hunt/process deployments are supported. When "
+"forwarding RADIUS packets directly from hunter to processor, use mutual TLS "
+"and upgrade both peers to support authoritative capture-origin identity and "
+"filter snapshots. Relay-origin X2 authorization is not supported. Before "
+"production deployment, verify target mappings against a known subscriber "
+"line on the operator's network and agree format-11, direction, correlation, "
+"duplicate, and orphan-handling conventions with the receiving MDF."
+msgstr ""
+"Unterstützt werden eigenständige Tap-Installationen und direkte Hunt-/"
+"Process-Verbindungen. Verwenden Sie für die direkte Weiterleitung erfasster "
+"RADIUS-Pakete vom Hunter zum Prozessor gegenseitiges TLS und aktualisieren "
+"Sie beide Gegenstellen, damit die Identität der Erfassungsquelle und die "
+"maßgeblichen Filterstände geprüft werden können. Eine X2-Autorisierung für "
+"über Relays weitergeleitete Daten wird nicht unterstützt. Prüfen Sie vor dem "
+"Produktiveinsatz die Zielzuordnungen anhand eines bekannten "
+"Teilnehmeranschlusses im Netz des Betreibers. Stimmen Sie mit dem "
+"empfangenden MDF die Konventionen für Format 11, Richtung, Korrelation, "
+"Duplikate und nicht zugeordnete Beobachtungen ab."
+
+#: src/part5-advanced/lawful-interception.md:582
 msgid "X3 CC Content"
 msgstr "X3-CC-Inhalte"
 
-#: src/part5-advanced/lawful-interception.md:560
+#: src/part5-advanced/lawful-interception.md:584
 msgid ""
 "X3 PDUs carry communication content; X3 is not a structured-log transport:"
 msgstr ""
 "X3-PDUs transportieren Kommunikationsinhalte; X3 ist kein Transport für "
 "strukturierte Logs:"
 
-#: src/part5-advanced/lawful-interception.md:562
+#: src/part5-advanced/lawful-interception.md:586
 msgid "Content Type"
 msgstr "Inhaltstyp"
 
-#: src/part5-advanced/lawful-interception.md:564
+#: src/part5-advanced/lawful-interception.md:588
 msgid "RTP Payload"
 msgstr "RTP-Nutzdaten"
 
-#: src/part5-advanced/lawful-interception.md:564
+#: src/part5-advanced/lawful-interception.md:588
 msgid "Voice or video media packets"
 msgstr "Sprach- oder Videomedienpakete"
 
-#: src/part5-advanced/lawful-interception.md:565
+#: src/part5-advanced/lawful-interception.md:589
 msgid "DTMF"
 msgstr "DTMF"
 
-#: src/part5-advanced/lawful-interception.md:565
+#: src/part5-advanced/lawful-interception.md:589
 msgid "Telephone keypad signals"
 msgstr "Tastatursignale des Telefons"
 
-#: src/part5-advanced/lawful-interception.md:567
+#: src/part5-advanced/lawful-interception.md:591
 msgid ""
 "X3 PDUs include RTP-specific attributes (SSRC, sequence number, timestamp, "
 "payload type) and a stream ID that correlates back to the X2 session events."
@@ -22036,11 +22099,11 @@ msgstr ""
 "Zeitstempel, Nutzdatentyp) und eine Stream-ID, die auf die X2-"
 "Sitzungsereignisse zurückverweist."
 
-#: src/part5-advanced/lawful-interception.md:569
+#: src/part5-advanced/lawful-interception.md:593
 msgid "Fail-closed call attribution"
 msgstr "Anrufzuordnung nach dem Fail-closed-Prinzip"
 
-#: src/part5-advanced/lawful-interception.md:571
+#: src/part5-advanced/lawful-interception.md:595
 msgid ""
 "Identity-based X3 selection is inherited only after exact RTP endpoint "
 "resolution proves a single active call. Shared or unknown endpoints do not "
@@ -22057,7 +22120,7 @@ msgstr ""
 "Paketendpunkte ab und bleiben somit gültig, auch wenn die Anrufzugehörigkeit "
 "mehrdeutig ist."
 
-#: src/part5-advanced/lawful-interception.md:577
+#: src/part5-advanced/lawful-interception.md:601
 msgid ""
 "Finalization closes the X3 path as well as per-call output. Buffered entries "
 "for the finalized call generation are discarded, and later encoding or "
@@ -22067,61 +22130,61 @@ msgid ""
 msgstr ""
 "Der Abschluss schließt sowohl den X3-Pfad als auch die Ausgabe pro Anruf. "
 "Gepufferte Einträge der abgeschlossenen Anrufgeneration werden verworfen; "
-"spätere Kodierung oder Auslieferung wird abgelehnt. Geschlossene Call-IDs "
+"spätere Kodierung oder Ausleitung wird abgelehnt. Geschlossene Call-IDs "
 "werden standardmäßig eine Stunde in einer auf 100.000 Einträge begrenzten "
 "Registry für Löschmarkierungen aufbewahrt. Wiederverwendung nach Ablauf "
 "erstellt eine neue Generation; alte gepufferte Inhalte können nicht in diese "
 "übergehen."
 
-#: src/part5-advanced/lawful-interception.md:583
+#: src/part5-advanced/lawful-interception.md:607
 msgid "Delivery Performance"
-msgstr "Auslieferungsleistung"
+msgstr "Ausleitungsleistung"
 
-#: src/part5-advanced/lawful-interception.md:585
+#: src/part5-advanced/lawful-interception.md:609
 msgid ""
 "The delivery subsystem uses asynchronous queuing with backpressure to handle "
 "high throughput:"
 msgstr ""
-"Das Auslieferungssystem verwendet asynchrone Warteschlangen mit "
+"Das Ausleitungssystem verwendet asynchrone Warteschlangen mit "
 "Rückstaukontrolle für hohen Durchsatz:"
 
-#: src/part5-advanced/lawful-interception.md:587
+#: src/part5-advanced/lawful-interception.md:611
 msgid "Value"
 msgstr "Wert"
 
-#: src/part5-advanced/lawful-interception.md:589
+#: src/part5-advanced/lawful-interception.md:613
 msgid "X2 encoding throughput"
 msgstr "X2-Kodierungsdurchsatz"
 
-#: src/part5-advanced/lawful-interception.md:589
+#: src/part5-advanced/lawful-interception.md:613
 msgid "~500K PDUs/s (~2 us per PDU)"
 msgstr "~500.000 PDUs/s (~2 us pro PDU)"
 
-#: src/part5-advanced/lawful-interception.md:590
+#: src/part5-advanced/lawful-interception.md:614
 msgid "X3 encoding throughput"
 msgstr "X3-Kodierungsdurchsatz"
 
-#: src/part5-advanced/lawful-interception.md:590
+#: src/part5-advanced/lawful-interception.md:614
 msgid "~1M PDUs/s (~1 us per PDU)"
 msgstr "~1 Million PDUs/s (~1 us pro PDU)"
 
-#: src/part5-advanced/lawful-interception.md:591
+#: src/part5-advanced/lawful-interception.md:615
 msgid "Delivery throughput (single destination)"
-msgstr "Auslieferungsdurchsatz (ein Auslieferungsziel)"
+msgstr "Ausleitungsdurchsatz (ein Ausleitungsziel)"
 
-#: src/part5-advanced/lawful-interception.md:591
+#: src/part5-advanced/lawful-interception.md:615
 msgid "~100K PDUs/s"
 msgstr "~100.000 PDUs/s"
 
-#: src/part5-advanced/lawful-interception.md:592
+#: src/part5-advanced/lawful-interception.md:616
 msgid "Delivery throughput (multiple destinations)"
-msgstr "Auslieferungsdurchsatz (mehrere Auslieferungsziele)"
+msgstr "Ausleitungsdurchsatz (mehrere Ausleitungsziele)"
 
-#: src/part5-advanced/lawful-interception.md:592
+#: src/part5-advanced/lawful-interception.md:616
 msgid "~50K PDUs/s per destination"
-msgstr "~50.000 PDUs/s pro Auslieferungsziel"
+msgstr "~50.000 PDUs/s pro Ausleitungsziel"
 
-#: src/part5-advanced/lawful-interception.md:594
+#: src/part5-advanced/lawful-interception.md:618
 msgid ""
 "Delivery uses connection pooling, one ordered dispatcher per MDF "
 "destination, batching (default: 100 PDUs per batch), and a bounded queue per "
@@ -22131,17 +22194,17 @@ msgid ""
 "destination delivery statistics. Retries provide at-least-once delivery; an "
 "ambiguous TCP write can therefore produce a duplicate at the MDF."
 msgstr ""
-"Die Auslieferung verwendet Verbindungspooling, einen geordneten Dispatcher "
-"pro MDF-Auslieferungsziel, Batching (standardmäßig 100 PDUs pro Batch) und "
-"eine begrenzte Warteschlange pro Auslieferungsziel (standardmäßig 10.000 "
-"Elemente). PDUs bleiben während einer Neuverbindung eingereiht und werden "
-"nach Wiederherstellung in FIFO-Reihenfolge ausgeliefert. Füllt ein längerer "
+"Die Ausleitung verwendet Verbindungspooling, einen geordneten Dispatcher pro "
+"MDF-Ausleitungsziel, Batching (standardmäßig 100 PDUs pro Batch) und eine "
+"begrenzte Warteschlange pro Ausleitungsziel (standardmäßig 10.000 Elemente). "
+"PDUs bleiben während einer Neuverbindung eingereiht und werden nach "
+"Wiederherstellung in FIFO-Reihenfolge ausgeliefert. Füllt ein längerer "
 "Ausfall eine Warteschlange, wird die älteste PDU verworfen und in der "
-"Auslieferungsstatistik des Ziels erfasst. Wiederholungsversuche bieten At-"
-"least-once-Auslieferung; ein unklarer TCP-Schreibvorgang kann daher beim MDF "
+"Ausleitungsstatistik des Ziels erfasst. Wiederholungsversuche bieten At-"
+"least-once-Ausleitung; ein unklarer TCP-Schreibvorgang kann daher beim MDF "
 "ein Duplikat erzeugen."
 
-#: src/part5-advanced/lawful-interception.md:602
+#: src/part5-advanced/lawful-interception.md:626
 msgid ""
 "Fan-out to multiple MDF destinations is fail-closed but is not atomic across "
 "destinations. The first destination accepts under the packet's existing task "
@@ -22152,21 +22215,21 @@ msgid ""
 "delivery must coordinate it outside lippycat and reconcile the per-"
 "destination sequence and drop statistics."
 msgstr ""
-"Verteilung an mehrere MDF-Auslieferungsziele folgt dem Fail-closed-Prinzip, "
+"Verteilung an mehrere MDF-Ausleitungsziele folgt dem Fail-closed-Prinzip, "
 "ist jedoch zielübergreifend nicht atomar. Das erste Ziel nimmt das Paket "
 "unter seinen bestehenden Auftrags- und Anrufzulassungen an; jedes spätere "
 "Ziel prüft diese erneut. Wird Auftrag oder Anruf während der Verteilung "
 "abgeschlossen, kann ein früherer MDF die PDU erhalten, während spätere MDFs "
 "sie ablehnen. Die Ablehnung wird in der passenden Unterdrückungs- oder "
 "Pufferverwerfungstelemetrie gezählt. Bereitstellungen mit Bedarf an atomarer "
-"MDF-übergreifender Auslieferung müssen diese außerhalb von lippycat "
+"MDF-übergreifender Ausleitung müssen diese außerhalb von lippycat "
 "koordinieren und Sequenz- und Verluststatistiken je Ziel abgleichen."
 
-#: src/part5-advanced/lawful-interception.md:611
+#: src/part5-advanced/lawful-interception.md:635
 msgid "Filter Integration"
 msgstr "Filterintegration"
 
-#: src/part5-advanced/lawful-interception.md:613
+#: src/part5-advanced/lawful-interception.md:637
 msgid ""
 "When the ADMF activates a task, the LI Manager translates target identifiers "
 "into lippycat's internal filter system. This uses the same optimized filter "
@@ -22180,170 +22243,170 @@ msgstr ""
 "(../part3-distributed/hunt.md)) und Prozessoren ([Kapitel 8](../part3-"
 "distributed/process.md)) beschrieben wurde."
 
-#: src/part5-advanced/lawful-interception.md:615
+#: src/part5-advanced/lawful-interception.md:639
 msgid "Target-to-Filter Mapping"
 msgstr "Zuordnung von Zielen zu Filtern"
 
-#: src/part5-advanced/lawful-interception.md:617
+#: src/part5-advanced/lawful-interception.md:641
 #: src/part5-advanced/performance.md:357
 msgid "Algorithm"
 msgstr "Algorithmus"
 
-#: src/part5-advanced/lawful-interception.md:617
+#: src/part5-advanced/lawful-interception.md:641
 msgid "Filter System"
 msgstr "Filtersystem"
 
-#: src/part5-advanced/lawful-interception.md:617
+#: src/part5-advanced/lawful-interception.md:641
 msgid "LI Target Type"
 msgstr "LI-Zieltyp"
 
-#: src/part5-advanced/lawful-interception.md:617
+#: src/part5-advanced/lawful-interception.md:641
 msgid "X1 Element"
 msgstr "X1-Element"
 
-#: src/part5-advanced/lawful-interception.md:619
-#: src/part5-advanced/lawful-interception.md:626
+#: src/part5-advanced/lawful-interception.md:643
+#: src/part5-advanced/lawful-interception.md:650
 msgid "Aho-Corasick pattern matching"
 msgstr "Aho-Corasick-Musterabgleich"
 
-#: src/part5-advanced/lawful-interception.md:619
-#: src/part5-advanced/lawful-interception.md:626
+#: src/part5-advanced/lawful-interception.md:643
+#: src/part5-advanced/lawful-interception.md:650
 msgid "FILTER_SIP_URI"
 msgstr "FILTER_SIP_URI"
 
-#: src/part5-advanced/lawful-interception.md:619
+#: src/part5-advanced/lawful-interception.md:643
 msgid "SIP URI"
 msgstr "SIP-URI"
 
-#: src/part5-advanced/lawful-interception.md:619
+#: src/part5-advanced/lawful-interception.md:643
 msgid "`<sipUri>`"
 msgstr "`<sipUri>`"
 
-#: src/part5-advanced/lawful-interception.md:619
+#: src/part5-advanced/lawful-interception.md:643
 msgid "`sip:alicent@example.com`"
 msgstr "`sip:alicent@example.com`"
 
-#: src/part5-advanced/lawful-interception.md:620
-#: src/part5-advanced/lawful-interception.md:621
+#: src/part5-advanced/lawful-interception.md:644
+#: src/part5-advanced/lawful-interception.md:645
 msgid "Bloom filter + suffix matching"
 msgstr "Bloom-Filter + Suffixabgleich"
 
-#: src/part5-advanced/lawful-interception.md:620
-#: src/part5-advanced/lawful-interception.md:621
+#: src/part5-advanced/lawful-interception.md:644
+#: src/part5-advanced/lawful-interception.md:645
 msgid "FILTER_PHONE_NUMBER"
 msgstr "FILTER_PHONE_NUMBER"
 
-#: src/part5-advanced/lawful-interception.md:620
+#: src/part5-advanced/lawful-interception.md:644
 msgid "TEL URI"
 msgstr "TEL-URI"
 
-#: src/part5-advanced/lawful-interception.md:620
+#: src/part5-advanced/lawful-interception.md:644
 msgid "`<telUri>`"
 msgstr "`<telUri>`"
 
-#: src/part5-advanced/lawful-interception.md:620
+#: src/part5-advanced/lawful-interception.md:644
 msgid "`tel:+15551234567`"
 msgstr "`tel:+15551234567`"
 
-#: src/part5-advanced/lawful-interception.md:621
+#: src/part5-advanced/lawful-interception.md:645
 msgid "E.164 Number"
 msgstr "E.164-Nummer"
 
-#: src/part5-advanced/lawful-interception.md:621
+#: src/part5-advanced/lawful-interception.md:645
 msgid "`+15551234567`"
 msgstr "`+15551234567`"
 
-#: src/part5-advanced/lawful-interception.md:621
+#: src/part5-advanced/lawful-interception.md:645
 msgid "`<e164Number>`"
 msgstr "`<e164Number>`"
 
-#: src/part5-advanced/lawful-interception.md:622
-#: src/part5-advanced/lawful-interception.md:623
-#: src/part5-advanced/lawful-interception.md:624
-#: src/part5-advanced/lawful-interception.md:625
+#: src/part5-advanced/lawful-interception.md:646
+#: src/part5-advanced/lawful-interception.md:647
+#: src/part5-advanced/lawful-interception.md:648
+#: src/part5-advanced/lawful-interception.md:649
 msgid "FILTER_IP_ADDRESS"
 msgstr "FILTER_IP_ADDRESS"
 
-#: src/part5-advanced/lawful-interception.md:622
-#: src/part5-advanced/lawful-interception.md:624
+#: src/part5-advanced/lawful-interception.md:646
+#: src/part5-advanced/lawful-interception.md:648
 msgid "Hash map, O(1) lookup"
 msgstr "Hashmap, O(1)-Suche"
 
-#: src/part5-advanced/lawful-interception.md:622
+#: src/part5-advanced/lawful-interception.md:646
 msgid "IPv4 Address"
 msgstr "IPv4-Adresse"
 
-#: src/part5-advanced/lawful-interception.md:622
+#: src/part5-advanced/lawful-interception.md:646
 msgid "`192.168.1.100`"
 msgstr "`192.168.1.100`"
 
-#: src/part5-advanced/lawful-interception.md:622
+#: src/part5-advanced/lawful-interception.md:646
 msgid "`<ipv4Address>`"
 msgstr "`<ipv4Address>`"
 
-#: src/part5-advanced/lawful-interception.md:623
+#: src/part5-advanced/lawful-interception.md:647
 msgid "IPv4 CIDR"
 msgstr "IPv4-CIDR"
 
-#: src/part5-advanced/lawful-interception.md:623
-#: src/part5-advanced/lawful-interception.md:625
+#: src/part5-advanced/lawful-interception.md:647
+#: src/part5-advanced/lawful-interception.md:649
 msgid "Radix trie, O(prefix) lookup"
 msgstr "Radix-Trie, O(prefix)-Suche"
 
-#: src/part5-advanced/lawful-interception.md:623
+#: src/part5-advanced/lawful-interception.md:647
 msgid "`10.0.0.0/8`"
 msgstr "`10.0.0.0/8`"
 
-#: src/part5-advanced/lawful-interception.md:623
+#: src/part5-advanced/lawful-interception.md:647
 msgid "`<ipv4Cidr>`"
 msgstr "`<ipv4Cidr>`"
 
-#: src/part5-advanced/lawful-interception.md:624
+#: src/part5-advanced/lawful-interception.md:648
 msgid "IPv6 Address"
 msgstr "IPv6-Adresse"
 
-#: src/part5-advanced/lawful-interception.md:624
+#: src/part5-advanced/lawful-interception.md:648
 msgid "`2001:db8::1`"
 msgstr "`2001:db8::1`"
 
-#: src/part5-advanced/lawful-interception.md:624
+#: src/part5-advanced/lawful-interception.md:648
 msgid "`<ipv6Address>`"
 msgstr "`<ipv6Address>`"
 
-#: src/part5-advanced/lawful-interception.md:625
+#: src/part5-advanced/lawful-interception.md:649
 msgid "IPv6 CIDR"
 msgstr "IPv6-CIDR"
 
-#: src/part5-advanced/lawful-interception.md:625
+#: src/part5-advanced/lawful-interception.md:649
 msgid "`2001:db8::/32`"
 msgstr "`2001:db8::/32`"
 
-#: src/part5-advanced/lawful-interception.md:625
+#: src/part5-advanced/lawful-interception.md:649
 msgid "`<ipv6Cidr>`"
 msgstr "`<ipv6Cidr>`"
 
-#: src/part5-advanced/lawful-interception.md:626
+#: src/part5-advanced/lawful-interception.md:650
 msgid "NAI"
 msgstr "NAI"
 
-#: src/part5-advanced/lawful-interception.md:626
+#: src/part5-advanced/lawful-interception.md:650
 msgid "`<nai>`"
 msgstr "`<nai>`"
 
-#: src/part5-advanced/lawful-interception.md:626
+#: src/part5-advanced/lawful-interception.md:650
 msgid "`user@realm.example.com`"
 msgstr "`user@realm.example.com`"
 
-#: src/part5-advanced/lawful-interception.md:628
+#: src/part5-advanced/lawful-interception.md:652
 msgid "Filter Flow"
 msgstr "Filterablauf"
 
-#: src/part5-advanced/lawful-interception.md:630
+#: src/part5-advanced/lawful-interception.md:654
 msgid "The end-to-end path from task activation to PDU delivery is:"
 msgstr ""
-"Der vollständige Pfad von Auftragsaktivierung bis PDU-Auslieferung lautet:"
+"Der vollständige Pfad von Auftragsaktivierung bis PDU-Ausleitung lautet:"
 
-#: src/part5-advanced/lawful-interception.md:649
+#: src/part5-advanced/lawful-interception.md:673
 msgid ""
 "Each filter created by the LI Manager is assigned an internal ID with the "
 "format `li-{xid_prefix}-{index}` (for example, `li-a1b2c3d4-0`). When "
@@ -22355,9 +22418,9 @@ msgstr ""
 "{xid_prefix}-{index}` (z. B. `li-a1b2c3d4-0`). Treffen zu diesen Filtern "
 "passende Pakete beim Prozessor ein, ermittelt der LI-Manager die zugehörige "
 "XID und leitet SIP-IRI, aktivierte normalisierte Protokollmetadaten und "
-"Kommunikationsinhalte über ihre jeweiligen Auslieferungspfade."
+"Kommunikationsinhalte über ihre jeweiligen Ausleitungspfade."
 
-#: src/part5-advanced/lawful-interception.md:651
+#: src/part5-advanced/lawful-interception.md:675
 msgid ""
 "When a task is deactivated, the associated filters are removed from all "
 "hunters, and matching stops immediately."
@@ -22365,15 +22428,15 @@ msgstr ""
 "Bei Auftragsdeaktivierung werden die zugehörigen Filter von allen Huntern "
 "entfernt, und der Abgleich endet sofort."
 
-#: src/part5-advanced/lawful-interception.md:653
+#: src/part5-advanced/lawful-interception.md:677
 msgid "Operational Considerations"
 msgstr "Betriebliche Aspekte"
 
-#: src/part5-advanced/lawful-interception.md:655
+#: src/part5-advanced/lawful-interception.md:679
 msgid "Network Isolation"
 msgstr "Netzwerkisolation"
 
-#: src/part5-advanced/lawful-interception.md:657
+#: src/part5-advanced/lawful-interception.md:681
 msgid ""
 "LI infrastructure should be deployed on a dedicated management network, "
 "separate from production traffic and regular monitoring. The X1 endpoint "
@@ -22383,15 +22446,15 @@ msgid ""
 msgstr ""
 "LI-Infrastruktur sollte in einem dedizierten Verwaltungsnetz getrennt von "
 "Produktivverkehr und regulärer Überwachung bereitgestellt werden. Der X1-"
-"Endpunkt (standardmäßig Port 8443) und X2-/X3-Auslieferungsverbindungen "
+"Endpunkt (standardmäßig Port 8443) und X2-/X3-Ausleitungsverbindungen "
 "sollten aus allgemeinen Netzwerksegmenten nicht erreichbar sein. Beschränken "
 "Sie den Zugriff mit Firewall-Regeln auf autorisierte ADMF- und MDF-Adressen."
 
-#: src/part5-advanced/lawful-interception.md:659
+#: src/part5-advanced/lawful-interception.md:683
 msgid "Certificate Rotation"
 msgstr "Zertifikatsrotation"
 
-#: src/part5-advanced/lawful-interception.md:661
+#: src/part5-advanced/lawful-interception.md:685
 msgid ""
 "LI certificates should have short validity periods (one year or less) and be "
 "rotated before expiration. Monitor certificate expiration as part of your "
@@ -22401,29 +22464,29 @@ msgstr ""
 "weniger) und vor Ablauf erneuert werden. Überwachen Sie den "
 "Zertifikatsablauf im regulären Betrieb:"
 
-#: src/part5-advanced/lawful-interception.md:663
+#: src/part5-advanced/lawful-interception.md:687
 msgid "Check whether a certificate expires within 30 days:"
 msgstr "Prüfen, ob ein Zertifikat innerhalb von 30 Tagen abläuft:"
 
-#: src/part5-advanced/lawful-interception.md:671
+#: src/part5-advanced/lawful-interception.md:695
 msgid "To rotate certificates:"
 msgstr "So erneuern Sie Zertifikate:"
 
-#: src/part5-advanced/lawful-interception.md:673
+#: src/part5-advanced/lawful-interception.md:697
 msgid ""
 "Generate new certificates (or obtain them from your organizational PKI)."
 msgstr ""
 "Erzeugen Sie neue Zertifikate (oder beziehen Sie diese aus Ihrer "
 "organisatorischen PKI)."
 
-#: src/part5-advanced/lawful-interception.md:674
+#: src/part5-advanced/lawful-interception.md:698
 msgid ""
 "Update the processor configuration to reference the new certificate files."
 msgstr ""
 "Aktualisieren Sie die Prozessorkonfiguration mit den neuen "
 "Zertifikatsdateien."
 
-#: src/part5-advanced/lawful-interception.md:675
+#: src/part5-advanced/lawful-interception.md:699
 msgid ""
 "Perform a graceful restart of the processor. Active tasks are automatically "
 "restored: the processor sends a shutdown notification, and on restart "
@@ -22433,15 +22496,15 @@ msgstr ""
 "Starten Sie den Prozessor kontrolliert neu. Aktive Aufträge werden "
 "automatisch wiederhergestellt: Der Prozessor sendet eine "
 "Abschaltbenachrichtigung und fragt beim Neustart die ADMF über "
-"`GetAllDetails` ab, um sämtlichen Auftrags- und Auslieferungszielzustand "
+"`GetAllDetails` ab, um sämtlichen Auftrags- und Ausleitungszielzustand "
 "wiederherzustellen (siehe [ADMF-Zustandssynchronisierung](#admf-state-"
 "synchronization))."
 
-#: src/part5-advanced/lawful-interception.md:676
+#: src/part5-advanced/lawful-interception.md:700
 msgid "Verify connectivity to ADMF and MDF after restart."
 msgstr "Prüfen Sie nach dem Neustart die Verbindung zu ADMF und MDF."
 
-#: src/part5-advanced/lawful-interception.md:678
+#: src/part5-advanced/lawful-interception.md:702
 msgid ""
 "For production environments, consider using a Hardware Security Module (HSM) "
 "for private key storage and an automated certificate lifecycle management "
@@ -22451,11 +22514,11 @@ msgstr ""
 "private Schlüssel und ein automatisches System zur Verwaltung des "
 "Zertifikatslebenszyklus."
 
-#: src/part5-advanced/lawful-interception.md:680
+#: src/part5-advanced/lawful-interception.md:704
 msgid "Audit Logging"
 msgstr "Auditprotokollierung"
 
-#: src/part5-advanced/lawful-interception.md:682
+#: src/part5-advanced/lawful-interception.md:706
 msgid ""
 "All LI operations are recorded in the processor's structured logs. Key log "
 "fields for LI events include:"
@@ -22463,39 +22526,39 @@ msgstr ""
 "Alle LI-Vorgänge werden in den strukturierten Prozessorlogs erfasst. "
 "Wichtige Logfelder für LI-Ereignisse sind:"
 
-#: src/part5-advanced/lawful-interception.md:686
+#: src/part5-advanced/lawful-interception.md:710
 msgid "Task identifier"
 msgstr "Auftragskennung"
 
-#: src/part5-advanced/lawful-interception.md:686
+#: src/part5-advanced/lawful-interception.md:710
 msgid "`xid`"
 msgstr "`xid`"
 
-#: src/part5-advanced/lawful-interception.md:687
+#: src/part5-advanced/lawful-interception.md:711
 msgid "Destination identifier"
-msgstr "Auslieferungszielkennung"
+msgstr "Ausleitungszielkennung"
 
-#: src/part5-advanced/lawful-interception.md:687
+#: src/part5-advanced/lawful-interception.md:711
 msgid "`did`"
 msgstr "`did`"
 
-#: src/part5-advanced/lawful-interception.md:688
+#: src/part5-advanced/lawful-interception.md:712
 msgid "Internal filter identifier"
 msgstr "Interne Filterkennung"
 
-#: src/part5-advanced/lawful-interception.md:688
+#: src/part5-advanced/lawful-interception.md:712
 msgid "`filter_id`"
 msgstr "`filter_id`"
 
-#: src/part5-advanced/lawful-interception.md:689
+#: src/part5-advanced/lawful-interception.md:713
 msgid "Count of matched packets"
 msgstr "Anzahl passender Pakete"
 
-#: src/part5-advanced/lawful-interception.md:689
+#: src/part5-advanced/lawful-interception.md:713
 msgid "`packets_matched`"
 msgstr "`packets_matched`"
 
-#: src/part5-advanced/lawful-interception.md:691
+#: src/part5-advanced/lawful-interception.md:715
 msgid ""
 "These logs should be forwarded to a secure, tamper-evident log management "
 "system as part of your organization's LI audit requirements."
@@ -22504,11 +22567,11 @@ msgstr ""
 "sicheres, gegen unbemerkte Manipulation geschütztes Logverwaltungssystem "
 "weitergeleitet werden."
 
-#: src/part5-advanced/lawful-interception.md:693
+#: src/part5-advanced/lawful-interception.md:717
 msgid "Standalone Mode with Tap"
 msgstr "Eigenständiger Modus mit Tap"
 
-#: src/part5-advanced/lawful-interception.md:695
+#: src/part5-advanced/lawful-interception.md:719
 msgid ""
 "For deployments where a separate hunter-processor topology is not needed, "
 "the `tap` node can be built with LI support:"
@@ -22516,7 +22579,7 @@ msgstr ""
 "Für Bereitstellungen ohne separate Hunter-/Prozessor-Topologie kann der "
 "Knoten `tap` mit LI-Unterstützung gebaut werden:"
 
-#: src/part5-advanced/lawful-interception.md:703
+#: src/part5-advanced/lawful-interception.md:727
 msgid ""
 "In this configuration, the tap node captures packets locally and delivers X2/"
 "X3 PDUs directly to the MDF without gRPC overhead. This is useful for single-"
@@ -22528,15 +22591,15 @@ msgstr ""
 "Bereitstellungen mit einer Schnittstelle oder Laborumgebungen. Alle LI-"
 "Konfigurationsflags funktionieren auf dem Tap-Knoten identisch."
 
-#: src/part5-advanced/lawful-interception.md:707
+#: src/part5-advanced/lawful-interception.md:731
 msgid "X1 Server Not Starting"
 msgstr "X1-Server startet nicht"
 
-#: src/part5-advanced/lawful-interception.md:709
+#: src/part5-advanced/lawful-interception.md:733
 msgid "If the X1 HTTPS server fails to start:"
 msgstr "Wenn der X1-HTTPS-Server nicht startet:"
 
-#: src/part5-advanced/lawful-interception.md:711
+#: src/part5-advanced/lawful-interception.md:735
 msgid ""
 "Verify the processor was built with `-tags li` (use `make processor-li` or "
 "`make build-li`)."
@@ -22544,62 +22607,62 @@ msgstr ""
 "Prüfen Sie, ob der Prozessor mit `-tags li` gebaut wurde (verwenden Sie "
 "`make processor-li` oder `make build-li`)."
 
-#: src/part5-advanced/lawful-interception.md:712
+#: src/part5-advanced/lawful-interception.md:736
 msgid "Check that TLS certificates are valid and not expired."
 msgstr "Prüfen Sie, ob TLS-Zertifikate gültig und nicht abgelaufen sind."
 
-#: src/part5-advanced/lawful-interception.md:713
+#: src/part5-advanced/lawful-interception.md:737
 msgid "Confirm the CA certificate matches the ADMF client certificates."
 msgstr ""
 "Bestätigen Sie, dass das CA-Zertifikat zu den ADMF-Clientzertifikaten passt."
 
-#: src/part5-advanced/lawful-interception.md:714
+#: src/part5-advanced/lawful-interception.md:738
 msgid "Ensure the listen port (default 8443) is not already in use."
 msgstr ""
 "Stellen Sie sicher, dass der Listen-Port (standardmäßig 8443) nicht bereits "
 "belegt ist."
 
-#: src/part5-advanced/lawful-interception.md:716
+#: src/part5-advanced/lawful-interception.md:740
 msgid "X2/X3 Delivery Failures"
-msgstr "Fehler bei X2-/X3-Auslieferung"
+msgstr "Fehler bei X2-/X3-Ausleitung"
 
-#: src/part5-advanced/lawful-interception.md:718
+#: src/part5-advanced/lawful-interception.md:742
 msgid "If PDUs are not reaching the MDF:"
 msgstr "Wenn PDUs den MDF nicht erreichen:"
 
-#: src/part5-advanced/lawful-interception.md:720
+#: src/part5-advanced/lawful-interception.md:744
 msgid ""
 "Confirm that the MDF destination was registered via a `CreateDestination` "
 "request on X1."
 msgstr ""
-"Bestätigen Sie, dass das MDF-Auslieferungsziel über eine Anfrage "
+"Bestätigen Sie, dass das MDF-Ausleitungsziel über eine Anfrage "
 "`CreateDestination` auf X1 registriert wurde."
 
-#: src/part5-advanced/lawful-interception.md:721
+#: src/part5-advanced/lawful-interception.md:745
 msgid "Verify network connectivity to the MDF endpoint."
 msgstr "Prüfen Sie die Netzwerkverbindung zum MDF-Endpunkt."
 
-#: src/part5-advanced/lawful-interception.md:722
+#: src/part5-advanced/lawful-interception.md:746
 msgid ""
 "Check that the delivery client certificate is signed by a CA the MDF trusts."
 msgstr ""
-"Prüfen Sie, ob das Auslieferungsclientzertifikat von einer vom MDF "
-"vertrauten CA signiert wurde."
+"Prüfen Sie, ob das Ausleitungsclientzertifikat von einer vom MDF vertrauten "
+"CA signiert wurde."
 
-#: src/part5-advanced/lawful-interception.md:723
+#: src/part5-advanced/lawful-interception.md:747
 msgid ""
 "Monitor the delivery queue depth -- a full queue indicates the MDF cannot "
 "keep up or is unreachable."
 msgstr ""
-"Überwachen Sie die Tiefe der Auslieferungswarteschlange – eine volle "
+"Überwachen Sie die Tiefe der Ausleitungswarteschlange – eine volle "
 "Warteschlange zeigt, dass der MDF nicht mithalten kann oder nicht erreichbar "
 "ist."
 
-#: src/part5-advanced/lawful-interception.md:725
+#: src/part5-advanced/lawful-interception.md:749
 msgid "RTP attribution and lifecycle signals"
 msgstr "RTP-Zuordnung und Lebenszyklussignale"
 
-#: src/part5-advanced/lawful-interception.md:727
+#: src/part5-advanced/lawful-interception.md:751
 msgid ""
 "Treat increasing media `ambiguous`/`unknown`, "
 "`identity_inheritance_suppressed`, `inherited_provenance_rejected`, "
@@ -22621,21 +22684,21 @@ msgstr ""
 "Strukturierte Warnungen sind ratenbegrenzt und geben nur anonymisierte oder "
 "gehashte Kennungen aus; vergleichen Sie Zählerdifferenzen zur Volumenmessung."
 
-#: src/part5-advanced/lawful-interception.md:736
+#: src/part5-advanced/lawful-interception.md:760
 msgid "Tasks Not Matching Traffic"
 msgstr "Aufträge passen nicht zum Verkehr"
 
-#: src/part5-advanced/lawful-interception.md:738
+#: src/part5-advanced/lawful-interception.md:762
 msgid "If an active task produces no intercept data:"
 msgstr "Wenn ein aktiver Auftrag keine Überwachungsdaten erzeugt:"
 
-#: src/part5-advanced/lawful-interception.md:740
+#: src/part5-advanced/lawful-interception.md:764
 msgid "Verify the task status is `Active` (use `GetTaskDetails` via X1)."
 msgstr ""
 "Prüfen Sie, ob der Auftragsstatus `Active` ist (verwenden Sie "
 "`GetTaskDetails` über X1)."
 
-#: src/part5-advanced/lawful-interception.md:741
+#: src/part5-advanced/lawful-interception.md:765
 msgid ""
 "Check that the target format matches the traffic exactly (for example, a "
 "full SIP URI `sip:user@domain` versus just the user part)."
@@ -22643,7 +22706,7 @@ msgstr ""
 "Prüfen Sie, ob das Zielformat exakt zum Verkehr passt (z. B. eine "
 "vollständige SIP-URI `sip:user@domain` statt nur des Benutzerteils)."
 
-#: src/part5-advanced/lawful-interception.md:742
+#: src/part5-advanced/lawful-interception.md:766
 msgid ""
 "Confirm that filters have been pushed to hunters (check processor logs for "
 "filter push events)."
@@ -22651,39 +22714,39 @@ msgstr ""
 "Bestätigen Sie, dass Filter an Hunter übertragen wurden (prüfen Sie "
 "Prozessorlogs auf Filterübertragungsereignisse)."
 
-#: src/part5-advanced/lawful-interception.md:743
+#: src/part5-advanced/lawful-interception.md:767
 msgid ""
 "Verify that hunters are receiving traffic that matches the target "
 "identifiers."
 msgstr "Prüfen Sie, ob Hunter Verkehr mit passenden Zielkennungen empfangen."
 
-#: src/part5-advanced/lawful-interception.md:745
+#: src/part5-advanced/lawful-interception.md:769
 #: src/part5-advanced/troubleshooting.md:1130
 msgid "Debug Logging"
 msgstr "Debugprotokollierung"
 
-#: src/part5-advanced/lawful-interception.md:747
+#: src/part5-advanced/lawful-interception.md:771
 msgid "Enable debug-level logging for detailed LI diagnostics:"
 msgstr "Aktivieren Sie Debugprotokollierung für detaillierte LI-Diagnose:"
 
-#: src/part5-advanced/lawful-interception.md:755
+#: src/part5-advanced/lawful-interception.md:779
 msgid "To verify TLS connectivity to the X1 or delivery endpoints manually:"
 msgstr ""
-"So prüfen Sie TLS-Verbindungen zu X1- oder Auslieferungsendpunkten manuell:"
+"So prüfen Sie TLS-Verbindungen zu X1- oder Ausleitungsendpunkten manuell:"
 
-#: src/part5-advanced/lawful-interception.md:757
+#: src/part5-advanced/lawful-interception.md:781
 msgid "Test the X1 server:"
 msgstr "X1-Server testen:"
 
-#: src/part5-advanced/lawful-interception.md:767
+#: src/part5-advanced/lawful-interception.md:791
 msgid "Test delivery to the MDF:"
-msgstr "Auslieferung an MDF testen:"
+msgstr "Ausleitung an MDF testen:"
 
-#: src/part5-advanced/lawful-interception.md:777
+#: src/part5-advanced/lawful-interception.md:801
 msgid "Bounded delivery and restart recovery"
-msgstr "Begrenzte Auslieferung und Wiederherstellung nach Neustart"
+msgstr "Begrenzte Ausleitung und Wiederherstellung nach Neustart"
 
-#: src/part5-advanced/lawful-interception.md:779
+#: src/part5-advanced/lawful-interception.md:803
 msgid ""
 "Processor and tap support independent X2/X3 encoded-byte limits via `--li-"
 "delivery-x2-queue-bytes` and `--li-delivery-x3-queue-bytes`. Both byte and "
@@ -22696,16 +22759,16 @@ msgid ""
 msgstr ""
 "Prozessor und Tap unterstützen unabhängige Grenzen für kodierte X2-/X3-Bytes "
 "über `--li-delivery-x2-queue-bytes` und `--li-delivery-x3-queue-bytes`. "
-"Byte- und PDU-Grenzen gelten je Auslieferungsziel und Schnittstelle, "
+"Byte- und PDU-Grenzen gelten je Ausleitungsziel und Schnittstelle, "
 "einschließlich beanspruchter Schreibvorgänge. Das optionale `--li-delivery-"
-"memory-budget-bytes` reserviert Kapazität über Auslieferungsziele hinweg und "
+"memory-budget-bytes` reserviert Kapazität über Ausleitungsziele hinweg und "
 "erfordert ausdrückliche Bytegrenzen. Dimensionieren Sie Budgets als maximale "
 "kodierte Bytes/Sekunde multipliziert mit Ausfalldauer, mit Spielraum und "
 "ausreichender PDU-Kapazität. Wiederherstellungsbandbreite muss den Live-"
 "Verkehr übersteigen. Anderer Prozessor-Speicherbedarf muss separat "
 "dimensioniert werden."
 
-#: src/part5-advanced/lawful-interception.md:787
+#: src/part5-advanced/lawful-interception.md:811
 msgid ""
 "`--li-delivery-x3-max-age=5m` expires X3 five minutes after local admission, "
 "including reordering and retries, even while disconnected. The default is no "
@@ -22718,7 +22781,7 @@ msgstr ""
 "X3-Alter nicht. Lokal abgeschlossener Schreibvorgang beweist keinen "
 "entfernten Empfang."
 
-#: src/part5-advanced/lawful-interception.md:791
+#: src/part5-advanced/lawful-interception.md:815
 msgid ""
 "Encrypted X2 persistence is opt-in through `--li-delivery-x2-spool-dir`, a "
 "positive `--li-delivery-x2-spool-max-bytes` and `--li-delivery-x2-spool-key-"
@@ -22736,7 +22799,7 @@ msgstr ""
 "Datensätze verlieren. Volle Journale lehnen neue Daten ab und erhalten "
 "persistierte Datensätze."
 
-#: src/part5-advanced/lawful-interception.md:798
+#: src/part5-advanced/lawful-interception.md:822
 msgid ""
 "Recovered X2 is held by default and requires explicit identity "
 "reconciliation and authorization through the embedding control-plane API "
@@ -22752,17 +22815,17 @@ msgstr ""
 "Wiederhergestelltes X2 wird standardmäßig zurückgehalten und benötigt vor "
 "Wiedergabe ausdrücklichen Identitätsabgleich und Autorisierung über die "
 "eingebettete Steuerungsebenen-API. Wiederverwendung einer XID oder "
-"Auslieferungsziel-UUID autorisiert keine alten Datensätze. Die CLI "
-"akzeptiert nach ADMF-Startabgleich ein ausdrückliches privates "
-"Wiedergabemanifest. `--li-delivery-x2-spool-replay-policy=purge` entfernt "
-"wiederhergestellte Datensätze ausdrücklich; behalten Sie den Standard "
-"`hold`, sofern Verwerfen nicht beabsichtigt ist. `lc show status` meldet "
-"Bytebudgets, Warteschlangen- und laufende Bytes, abgelaufene Daten, nach "
-"Grund gekennzeichnete verworfene Bytes sowie ausstehende, persistierte und "
-"zurückgehaltene Journaleinträge. Bestehende Bereitstellungen behalten ihre "
-"bisherigen Grenzen, bis neue Optionen konfiguriert werden."
+"Ausleitungsziel-UUID autorisiert keine alten Datensätze. Die CLI akzeptiert "
+"nach ADMF-Startabgleich ein ausdrückliches privates Wiedergabemanifest. `--"
+"li-delivery-x2-spool-replay-policy=purge` entfernt wiederhergestellte "
+"Datensätze ausdrücklich; behalten Sie den Standard `hold`, sofern Verwerfen "
+"nicht beabsichtigt ist. `lc show status` meldet Bytebudgets, Warteschlangen- "
+"und laufende Bytes, abgelaufene Daten, nach Grund gekennzeichnete verworfene "
+"Bytes sowie ausstehende, persistierte und zurückgehaltene Journaleinträge. "
+"Bestehende Bereitstellungen behalten ihre bisherigen Grenzen, bis neue "
+"Optionen konfiguriert werden."
 
-#: src/part5-advanced/lawful-interception.md:806
+#: src/part5-advanced/lawful-interception.md:830
 msgid ""
 "Persistent X3 requires `--li-delivery-x3-spool-dir`, an explicit positive `--"
 "li-delivery-x3-spool-max-bytes`, an independent private raw 32-byte key "
@@ -22781,7 +22844,7 @@ msgstr ""
 "Kapazität; konfigurieren Sie Speicher- und Datenträgerbudgets für beide "
 "Speicher und fortlaufende Eingänge."
 
-#: src/part5-advanced/lawful-interception.md:813
+#: src/part5-advanced/lawful-interception.md:837
 msgid ""
 "Normal call completion closes new capture for that call incarnation and "
 "retains eligible durable backlog. Task withdrawal, destination replacement, "
@@ -22792,13 +22855,12 @@ msgid ""
 msgstr ""
 "Normaler Anrufabschluss schließt neue Erfassung für diese Anrufinstanz und "
 "erhält zulässigen dauerhaften Rückstau. Auftragsrücknahme, "
-"Auslieferungszielersetzung und ausdrücklicher Widerruf blockieren "
-"historische Auslieferung. Ursprüngliche Zulassungsfristen beginnen bei "
-"Anrufabschluss oder Prozessneustart nie erneut. Ein gestoppter Prozess kann "
-"abgelaufene Dateien nicht löschen; beim Start wird Ablauf vor "
-"Wiedergabezulässigkeit geprüft."
+"Ausleitungszielersetzung und ausdrücklicher Widerruf blockieren historische "
+"Ausleitung. Ursprüngliche Zulassungsfristen beginnen bei Anrufabschluss oder "
+"Prozessneustart nie erneut. Ein gestoppter Prozess kann abgelaufene Dateien "
+"nicht löschen; beim Start wird Ablauf vor Wiedergabezulässigkeit geprüft."
 
-#: src/part5-advanced/lawful-interception.md:819
+#: src/part5-advanced/lawful-interception.md:843
 msgid ""
 "Recovered X3 defaults to `--li-delivery-x3-spool-replay-policy=hold`; "
 "`purge` durably discards it. Export held identities with `--li-delivery-x3-"
@@ -22818,15 +22880,15 @@ msgstr ""
 "prüfen Sie diese und geben Sie eine exakte Version-2-Freigabe mit `--li-"
 "delivery-x3-spool-replay-manifest` an. Freigabe erfordert eine aktuell "
 "abgeglichene unveränderte Auftragsaktivierung und ein unverändertes "
-"Auslieferungsziel, passende Zustands- und Journalinstanzen, ursprüngliche "
+"Ausleitungsziel, passende Zustands- und Journalinstanzen, ursprüngliche "
 "Frist und Inhaltsidentität. Wiedergabe sendet die ursprünglichen kodierten "
 "Bytes und Sequenznummern. Ein lokal erfolgreicher Schreibvorgang beweist "
 "keinen MDF-Empfang; ein unterbrochener Schreibvorgang kann daher doppelte "
-"Auslieferung verursachen. Einzelheiten zu Abgleich, Freigabe und "
-"Wiederherstellung finden Sie im [Verfahren für historische Auslieferung]"
+"Ausleitung verursachen. Einzelheiten zu Abgleich, Freigabe und "
+"Wiederherstellung finden Sie im [Verfahren für historische Ausleitung]"
 "(../../../LI_INTEGRATION.md#persistent-x3-and-historical-delivery)."
 
-#: src/part5-advanced/lawful-interception.md:830
+#: src/part5-advanced/lawful-interception.md:854
 msgid ""
 "`lc show status` exposes independent X2 and X3 journal counts, allocated "
 "bytes, limits, expiry/revocation counters, and fixed storage fault codes. "
@@ -22838,7 +22900,7 @@ msgstr ""
 "Ungewissheit beim Speicher-Commit und beim Transportschreiben sind "
 "unterschiedliche Ergebnisse."
 
-#: src/part5-advanced/lawful-interception.md:834
+#: src/part5-advanced/lawful-interception.md:858
 msgid ""
 "Independent PDU caps are available through `--li-delivery-x2-queue-size` and "
 "`--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy "
@@ -22849,39 +22911,7 @@ msgstr ""
 "delivery-x3-queue-size` verfügbar; beide sind standardmäßig null und "
 "übernehmen die bisherige Grenze `--li-delivery-queue-size`. "
 "`physical_queue_bytes` zählt gemeinsame kodierte Nutzdaten einmal, während "
-"`queue_bytes` jede Auslieferungszielkopie zählt."
-
-#: src/part5-advanced/lawful-interception.md:839
-msgid "RADIUS X2 Delivery"
-msgstr "RADIUS-X2-Auslieferung"
-
-#: src/part5-advanced/lawful-interception.md:841
-msgid ""
-"Ordinary `sniff radius`, `hunt radius`, and `tap radius` capture does not "
-"require an LI build or X1 task. In an LI build, raw format-11 X2 delivery is "
-"a separate authorized output and requires a current `X2Only` task whose "
-"scope matches the capture deployment. See [RADIUS capture and POI]"
-"(radius.md#tap-poi-and-mdf-setup) for NatParas mappings, scope isolation, "
-"correlation state, and MDF setup."
-msgstr ""
-"Gewöhnliche Erfassung mit `sniff radius`, `hunt radius` und `tap radius` "
-"erfordert keinen LI-Build oder X1-Auftrag. In einem LI-Build ist rohe "
-"Format-11-X2-Auslieferung eine separate autorisierte Ausgabe und erfordert "
-"einen aktuellen Auftrag `X2Only`, dessen Bereich zur "
-"Erfassungsbereitstellung passt. NatParas-Zuordnungen, Bereichsisolation, "
-"Korrelationszustand und MDF-Einrichtung finden Sie unter [RADIUS-Erfassung "
-"und POI](radius.md#tap-poi-and-mdf-setup)."
-
-#: src/part5-advanced/lawful-interception.md:847
-msgid ""
-"Direct hunt/process verification has passed with upgraded peers. Relay-"
-"origin X2 authorization is unsupported; external operator known-line "
-"verification and receiving-MDF agreement remain deployment acceptance items."
-msgstr ""
-"Direkte Hunt-/Process-Prüfung mit aktualisierten Gegenstellen ist bestanden. "
-"Relaisursprungs-X2-Autorisierung wird nicht unterstützt; externe "
-"Betreiberprüfung bekannter Leitungen und Vereinbarung mit dem empfangenden "
-"MDF bleiben Bereitstellungsabnahmepunkte."
+"`queue_bytes` jede Ausleitungszielkopie zählt."
 
 #: src/part5-advanced/performance.md:3
 msgid ""
@@ -24743,7 +24773,7 @@ msgid ""
 "according to their output contracts."
 msgstr ""
 "PCAP-Schreiben, Weiterleitung an vorgelagerte Prozessoren, Watch-Abonnenten, "
-"virtuelle Schnittstellenausgabe, strukturierte Logs und LI-Auslieferung "
+"virtuelle Schnittstellenausgabe, strukturierte Logs und LI-Ausleitung "
 "behalten eigene Aktivierung und Warteschlangen. X2-Aktivierung aktiviert "
 "weder Paketdateien noch Logs; `--log-dir` autorisiert keine LI. RADIUS "
 "verwendet keine VoIP-Dateien pro Anruf. Gewöhnlicher Text, JSON und Logs "
@@ -25155,7 +25185,7 @@ msgstr ""
 "Bauen Sie mit `make tap-li` oder `make build-li` für X1-/X2-Flags. "
 "Gewöhnliche RADIUS-Befehle bleiben in Nicht-LI-Builds verfügbar. "
 "Konfigurieren Sie einen dedizierten Erfassungsbereich, gegenseitiges TLS für "
-"X1 und MDF-Auslieferung, eine stabile eindeutige ProcessorID und dauerhaften "
+"X1 und MDF-Ausleitung, eine stabile eindeutige ProcessorID und dauerhaften "
 "LI-Zustand, bevor Sie einen X2Only-Auftrag und ein ausdrücklich X2-"
 "aktiviertes Ziel einrichten. Der MDF-Endpunkt wird über X1-Zielverwaltung "
 "bereitgestellt; er ist kein gewöhnliches Erfassungsziel."
@@ -25315,7 +25345,7 @@ msgid ""
 "inconsistent IDs."
 msgstr ""
 "Dies startet den konfigurierten POI; richten Sie das bereichsgebundene Ziel "
-"und das X2-Auslieferungsziel über X1 ein, bevor Auslieferung erfolgen kann. "
+"und das X2-Ausleitungsziel über X1 ein, bevor Ausleitung erfolgen kann. "
 "Bestehende Optionen `--log-dir`, PCAP und virtuelle Schnittstellen können "
 "unabhängig aktiviert werden. RADIUS-X3 und kombinierte X2-/X3-Anfragen "
 "werden abgelehnt. Die Korrelationsmap bleibt auf 65.536 Einträge und 16 MiB "
@@ -25364,8 +25394,8 @@ msgstr ""
 "Verwenden Sie separate ProcessorIDs für unabhängige Encoder, erhalten Sie "
 "den Korrelationsspeicher bei Neustarts und ändern Sie die Identität bei "
 "einer Speicherrücksetzung. Speicher-/Kodierungsfehler unterdrücken X2, "
-"während gewöhnliche Ausgaben weiterlaufen. Siehe [Auslieferung roher RADIUS-"
-"X2-Daten](https://github.com/endorses/lippycat/blob/main/docs/"
+"während gewöhnliche Ausgaben weiterlaufen. Siehe [Ausleitung roher RADIUS-X2-"
+"Daten](https://github.com/endorses/lippycat/blob/main/docs/"
 "LI_INTEGRATION.md#raw-radius-x2-delivery) für Zustandszuständigkeit und "
 "[Beobachtungsvertrag](https://github.com/endorses/lippycat/blob/main/docs/"
 "design/radius-observation-contract.md) für Zuordnung."
@@ -25479,14 +25509,14 @@ msgstr ""
 "Kodierungsversuche. `encoded` zählt kodierte PDUs; `queue_accepted` und "
 "`queue_errors` zählen Ergebnisse der X2-Warteschlangeneinreichung; `skipped` "
 "zählt nicht eingereichte Produkte. Warteschlangenannahme beweist keine TLS-"
-"Auslieferung. Die gemeinsame LI-Auslieferungsstatistik erfasst "
-"Zielauslieferung, Wiederholungs- und Fehlerversuche protokollübergreifend; "
-"interpretieren Sie diese nicht als reine RADIUS-Paketsummen und summieren "
-"Sie sie nicht mit Erfassungsbeobachtungen. Der LI-Manager meldet separat "
+"Ausleitung. Die gemeinsame LI-Ausleitungsstatistik erfasst Zielausleitung, "
+"Wiederholungs- und Fehlerversuche protokollübergreifend; interpretieren Sie "
+"diese nicht als reine RADIUS-Paketsummen und summieren Sie sie nicht mit "
+"Erfassungsbeobachtungen. Der LI-Manager meldet separat "
 "`radius_stale_references` in seiner Abschaltstatistik und zählt bei der "
-"Zulassung abgelehnte Auftragsreferenzen. Die vorhandene "
-"Auslieferungsstatistik finden Sie unter [LI-Auslieferungsüberwachung]"
-"(https://github.com/endorses/lippycat/blob/main/docs/LI_INTEGRATION.md)."
+"Zulassung abgelehnte Auftragsreferenzen. Die vorhandene Ausleitungsstatistik "
+"finden Sie unter [LI-Ausleitungsüberwachung](https://github.com/endorses/"
+"lippycat/blob/main/docs/LI_INTEGRATION.md)."
 
 #: src/part5-advanced/radius.md:356
 msgid ""
@@ -27132,7 +27162,7 @@ msgstr ""
 "`capture_scope=full` bedeutet, dass die Quelle den gesamten "
 "Schnittstellenstream beobachten wollte. `filtered` bedeutet, dass BPF-, "
 "Protokoll-, Ziel- oder verteilte Filter die Erfassung eingeschränkt haben. "
-"Dies beweist keine verlustfreie Auslieferung. `partial=true` bedeutet, dass "
+"Dies beweist keine verlustfreie Übermittlung. `partial=true` bedeutet, dass "
 "die Verbindung vor der Beobachtung begann, kein TCP-SYN gesehen wurde, nur "
 "eine Richtung beobachtet wurde, bekannte Paketverluste vorlagen oder die "
 "Erfassung anderweitig unvollständig ist. Behandeln Sie alle Zähler und "
@@ -27654,9 +27684,9 @@ msgstr ""
 "schreiben niemals Paketnutzdaten, HTTP-/E-Mail-Bodies, RTP-/Mediendaten oder "
 "extrahierte Bytes in Metadatenlogzeilen. Dateiextraktion erzeugt separate "
 "Inhaltsdateien und erfordert entsprechend stärkere Zugriffskontrollen. "
-"Strukturierte Dateieinstellungen autorisieren keine LI-Auslieferung; LI-"
+"Strukturierte Dateieinstellungen autorisieren keine LI-Ausleitung; LI-"
 "Metadaten bleiben unabhängig durch Build, Laufzeit, aktiven Auftrag, Ziel "
-"und Auslieferungsprofil eingeschränkt."
+"und Ausleitungsprofil eingeschränkt."
 
 #: src/part5-advanced/structured-protocol-logs.md:324
 msgid "RADIUS observations"

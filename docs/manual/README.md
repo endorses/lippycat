@@ -92,6 +92,8 @@ PCAP, TLS, SIP, and RTP. Keep these terms consistent:
 | network interface        | Netzwerkschnittstelle                          |
 | network segment          | Netzwerksegment                                |
 | protocol analysis        | Protokollanalyse                               |
+| LI delivery              | Ausleitung                                     |
+| data/event delivery      | Übermittlung                                   |
 | lawful interception      | rechtmäßige Telekommunikationsüberwachung (LI) |
 
 Distinguish the process from its result: use **Paketerfassung** or **Pakete
@@ -100,6 +102,14 @@ erfassen** for the activity, and **Paketmitschnitt**, **Mitschnitt**, or
 die Paketerfassung”, but “Öffnen Sie den gespeicherten Mitschnitt”. Avoid
 “gespeicherte Erfassungen” and “Erfassungsdateien”. In an already clear context,
 “Erfassung” is sufficient for the process.
+
+For lawful interception, translate **delivery** as **Ausleitung** (for example,
+“X2-IRI-Ausleitung” and “X3-CC-Ausleitung”). Use **Übermittlung** for general
+data/event transport and when describing the transmission itself. Avoid
+“Auslieferung” in the LI context. Keep technical identifiers such as
+`--li-delivery-*` and `delivery_type` unchanged. The Bundesnetzagentur uses
+“Ausleitung” for interception copies and IRI data in its
+[TR TKÜV terminology](https://www.bundesnetzagentur.de/DE/Allgemeines/Presse/Amtsblatt/Einzeldownloads/Amtsblatt_26_5.pdf?__blob=publicationFile&v=3).
 
 Translate prose, headings, chapter titles, and descriptive table cells. Preserve
 command names, flags, configuration keys, environment variables, paths, protocol

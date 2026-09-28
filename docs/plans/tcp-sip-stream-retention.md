@@ -2,7 +2,7 @@
 
 **Source:** `/home/grischa/2026-09-28-tcp-sip-stream-retention.md`
 
-**Status:** Implementation verified; commit pending
+**Status:** Complete
 
 ## Objective
 
@@ -101,7 +101,7 @@ contribution.
       have nil stream references and the retained channel allocations fall.
       Treat heap and RSS measurements as diagnostic evidence, without a new
       numerical pass/fail gate.
-- [ ] Format changed files, review the diff, mark only verified plan tasks
+- [x] Format changed files, review the diff, mark only verified plan tasks
       complete, and commit the code, documentation, and updated plan together.
 
 An operator can trial the THP workaround independently of code deployment.

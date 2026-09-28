@@ -70,6 +70,18 @@ func servicePort(port uint16, additional []uint16) bool {
 	return false
 }
 
+// MayContainRADIUS rules out packets whose decoded transport is certainly
+// outside the configured RADIUS scope. An undecoded transport remains a
+// candidate so DecodePacket can classify malformed and fragmented captures.
+// Callers with additional service ports must pass them here and to DecodePacket.
+func MayContainRADIUS(packet gopacket.Packet, additionalPorts ...uint16) bool {
+	if packet == nil || packet.TransportLayer() == nil {
+		return true
+	}
+	udp, ok := packet.TransportLayer().(*layers.UDP)
+	return ok && (servicePort(uint16(udp.SrcPort), additionalPorts) || servicePort(uint16(udp.DstPort), additionalPorts))
+}
+
 func packetOutcome(err error) Outcome {
 	switch {
 	case errors.Is(err, ErrFragmented):

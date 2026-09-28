@@ -14,6 +14,9 @@ func RADIUSDisplay(info PacketInfo) *types.RADIUSMetadata {
 	if info.Packet == nil {
 		return nil
 	}
+	if !radius.MayContainRADIUS(info.Packet) {
+		return nil
+	}
 	o, _, err := radius.DecodePacket(info.Packet.Data(), info.LinkType, info.Packet.Metadata().CaptureInfo, radius.CaptureScope{}, radius.Identity{})
 	if err != nil {
 		return nil

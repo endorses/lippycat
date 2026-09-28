@@ -5,9 +5,93 @@ import (
 	"encoding/binary"
 	"os"
 	"testing"
+	"unsafe"
 
+	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCompactScanReaderDetailsHeaderCache(t *testing.T) {
+	s, b, detail, provenance := compactReviewBuilder(t)
+	for i := 0; i < 3; i++ {
+		detail.Source.Sequence = uint64(i)
+		detail.Packet.VoIPData = &types.VoIPMetadata{User: "synthetic"}
+		require.NoError(t, b.AppendCompact(context.Background(), detail, provenance))
+	}
+	require.NoError(t, b.UpdateDetail(context.Background(), 1, func(d *Detail) error {
+		d.Packet.VoIPData = &types.VoIPMetadata{User: "amended"}
+		return nil
+	}))
+	dataset, err := b.Finish(context.Background())
+	require.NoError(t, err)
+	d := dataset.(*diskDataset)
+	t.Cleanup(func() { require.NoError(t, d.Close()) })
+	baseline := s.Resources().InFlightBytes
+	r, err := newCompactScanReader(context.Background(), d)
+	require.NoError(t, err)
+	reservation := s.limits.MaxRecordBytes*3 + compactBlockHeaderBytes*4 + 1024 + uint64(unsafe.Sizeof([compactDetailsHeaderCacheSlots]compactScanHeader{}))
+	require.Equal(t, baseline+reservation, s.Resources().InFlightBytes)
+	entries := make([][compactIndexBytes]byte, 3)
+	for id := range entries {
+		_, err := d.offsets.ReadAt(entries[id][:], compactHeaderBytes+int64(id)*compactIndexBytes)
+		require.NoError(t, err)
+		require.NotZero(t, binary.LittleEndian.Uint64(entries[id][16:24]))
+	}
+	for _, id := range []PacketID{0, 1, 2, 0, 1, 2} {
+		got, err := r.IndexChecksum(entries[id][:32], id)
+		require.NoError(t, err)
+		require.Equal(t, entries[id][32:], got[:])
+	}
+	// Three distinct details blocks, including the amendment, were read once
+	// each despite alternating references after the cache was populated.
+	require.EqualValues(t, 3, r.nextDetail)
+	var cached int
+	for _, header := range r.detailHeaders {
+		if header.valid {
+			cached++
+		}
+	}
+	require.Equal(t, 3, cached)
+	require.NoError(t, r.Close())
+	require.Equal(t, baseline, s.Resources().InFlightBytes)
+
+	// A fresh scan must authenticate a header corrupted before its first use.
+	r, err = newCompactScanReader(context.Background(), d)
+	require.NoError(t, err)
+	off := binary.LittleEndian.Uint64(entries[1][16:24])
+	writable, err := os.OpenFile(d.details.Name(), os.O_RDWR, 0)
+	require.NoError(t, err)
+	_, err = writable.WriteAt([]byte{0xff}, int64(off)+40)
+	require.NoError(t, err)
+	require.NoError(t, writable.Close())
+	got, err := r.IndexChecksum(entries[1][:32], 1)
+	require.NoError(t, err)
+	require.NotEqual(t, entries[1][32:], got[:])
+	_, err = r.Read(context.Background(), d.details, off, binary.LittleEndian.Uint64(entries[1][24:32]), 4, 1)
+	require.ErrorContains(t, err, "checksum")
+	require.NoError(t, r.Close())
+	require.Equal(t, baseline, s.Resources().InFlightBytes)
+}
+
+func TestCompactScanReaderDetailsCacheAdmission(t *testing.T) {
+	s, b, detail, provenance := compactReviewBuilder(t)
+	require.NoError(t, b.AppendCompact(context.Background(), detail, provenance))
+	dataset, err := b.Finish(context.Background())
+	require.NoError(t, err)
+	d := dataset.(*diskDataset)
+	t.Cleanup(func() { require.NoError(t, d.Close()) })
+	baseline := s.Resources().InFlightBytes
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = newCompactScanReader(cancelled, d)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, baseline, s.Resources().InFlightBytes)
+	reservation := s.limits.MaxRecordBytes*3 + compactBlockHeaderBytes*4 + 1024 + uint64(unsafe.Sizeof([compactDetailsHeaderCacheSlots]compactScanHeader{}))
+	s.limits.CacheBytes = baseline + reservation - 1
+	_, err = newCompactScanReader(context.Background(), d)
+	require.ErrorContains(t, err, "budget exhausted")
+	require.Equal(t, baseline, s.Resources().InFlightBytes)
+}
 
 func TestCompactScanReaderReuseIntegrityAndAdmission(t *testing.T) {
 	s, b, detail, provenance := compactReviewBuilder(t)

@@ -311,11 +311,14 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 		return time.Time{}, err
 	}
 	r.stats.Observed++
+	if packet == nil {
+		packet = gopacket.NewPacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.NoCopy)
+	}
 	observation, radiusErr := grpcadapter.RADIUSFromProto(raw)
 	if radiusErr != nil {
 		logger.Debug("Skipping inconsistent RADIUS event provenance", "error", radiusErr)
 	} else {
-		if observation == nil {
+		if observation == nil && radius.MayContainRADIUS(packet) {
 			// Generic capture can report RADIUS without creating attribution state.
 			decoded, _, decodeErr := radius.DecodePacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.CaptureInfo{Timestamp: ts, CaptureLength: int(raw.CaptureLength), Length: int(raw.OriginalLength)}, radius.CaptureScope{OriginNodeID: source.NodeID, SourceID: source.InterfaceName}, radius.Identity{})
 			if decodeErr == nil {
@@ -325,9 +328,6 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 		if event, ok := events.RADIUSFromObservation(env, observation); ok {
 			r.emit(event)
 		}
-	}
-	if packet == nil {
-		packet = gopacket.NewPacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.NoCopy)
 	}
 	connEvents, err := r.connections.Observe(conntrack.FromPacket(packet, env, raw.Metadata.Protocol))
 	if err != nil {

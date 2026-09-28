@@ -588,9 +588,11 @@ See [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) for detailed profile specif
 
 For advanced users, individual TCP parameters can be overridden:
 
-**Resource Limits:**
+**Advisory Threshold:**
 
-- `--tcp-max-goroutines` - Maximum concurrent TCP stream processing goroutines (0 = auto)
+- `--tcp-max-goroutines` - Advisory threshold for TCP stream processing goroutine warnings (0 = use default); it does not reject streams
+
+**Resource Limits:**
 - `--max-tcp-buffers` - Maximum number of TCP packet buffers (0 = use profile default)
 - `--tcp-assembler-max-pages` - Maximum pages for TCP assembler (0 = use profile default)
 
@@ -617,6 +619,7 @@ lc sniff voip -i eth0 \
   --enable-backpressure
 
 # Full manual configuration (not recommended - use profiles instead)
+# The goroutine value below changes only the warning threshold.
 lc sniff voip -i eth0 \
   --tcp-max-goroutines 8 \
   --max-tcp-buffers 5000 \
@@ -653,7 +656,7 @@ voip:
   memory_optimization: false
 
   # Fine-grained TCP config (optional)
-  max_goroutines: 0
+  max_goroutines: 0 # Use the default advisory warning threshold
   max_tcp_buffers: 5000
   tcp_cleanup_interval: 60s
   tcp_buffer_max_age: 300s

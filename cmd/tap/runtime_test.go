@@ -160,9 +160,9 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 		},
 		"voip": {
 			cmd: voipTapCmd, short: "Standalone VoIP capture with full processor capabilities",
-			helpHash: "2dbc770b7d7df537871bdf1e2525135581b027ed8cee3c38bba0d6043f7619ae",
-			flags:    tapFlagDefaults("pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-retry-window", "2m0s", "sip-user", "", "sipuser", "", "tcp-performance-mode", "balanced", "tcp-reassembly-shards", "1", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
-			bindings: tapBindings("pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-retry-window", "tap.voip.sip_retry_window", "sip-user", "tap.voip.sip_user", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-reassembly-shards", "tap.voip.tcp_reassembly_shards", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
+			helpHash: "10797fb7fd29ba60a558962363a51c8aabe454a30a176191798ea563cf54f446",
+			flags:    tapFlagDefaults("pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-retry-window", "2m0s", "sip-user", "", "sipuser", "", "tcp-max-streams", "0", "tcp-performance-mode", "balanced", "tcp-reassembly-shards", "1", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
+			bindings: tapBindings("pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-retry-window", "tap.voip.sip_retry_window", "sip-user", "tap.voip.sip_user", "tcp-max-streams", "voip.max_streams", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-reassembly-shards", "tap.voip.tcp_reassembly_shards", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
 		},
 	}
 
@@ -174,7 +174,7 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 			"http":  "96c2af91f6c447cf982ac27e91b94933ccfce744e772916ece141583b50fc195",
 			"tls":   "39adab837191685811afb74e3f432c2c02214051aa7cc4787e39e9cc46b4363a",
 			"email": "ba2c6f2164f64d492778ffe9358483d0a7c018ad78dc2e3ce79c4230710cd4d9",
-			"voip":  "c6cb6bc105f3562ef93ca7a17391e314412660e66fcaba98b34a91ac12ae0fee",
+			"voip":  "751576413388ed67d8a905721dcd32bed13017bed0bd370f6bc0eb4c0155dd79",
 		}
 		for name, hash := range liHashes {
 			contract := contracts[name]

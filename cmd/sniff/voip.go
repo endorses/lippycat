@@ -320,7 +320,7 @@ func init() {
 	voipCmd.Flags().IntVar(&patternBufferMB, "pattern-buffer-mb", 64, "Memory budget for pattern buffer in MB (default: 64)")
 
 	// TCP Performance and Configuration Flags
-	voipCmd.Flags().IntVar(&tcpMaxGoroutines, "tcp-max-goroutines", 0, "Maximum concurrent TCP stream processing goroutines (0 = use default)")
+	voipCmd.Flags().IntVar(&tcpMaxGoroutines, "tcp-max-goroutines", 0, "Advisory TCP stream processing goroutine threshold (0 = use default)")
 	voipCmd.Flags().DurationVar(&tcpCleanupInterval, "tcp-cleanup-interval", 0, "TCP resource cleanup interval (0 = use default)")
 	voipCmd.Flags().DurationVar(&tcpBufferMaxAge, "tcp-buffer-max-age", 0, "Maximum age for TCP packet buffers (0 = use default)")
 	voipCmd.Flags().DurationVar(&tcpStreamMaxQueueTime, "tcp-stream-max-queue-time", 0, "Maximum time a stream can wait in queue (0 = use default)")

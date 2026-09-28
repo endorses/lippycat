@@ -43,11 +43,12 @@ type Config struct {
 	VIFStartupDelay       time.Duration
 	ProcessorWorkers      int
 	ProcessorWorkerBuffer int
-	// Goroutine limits
+	// Advisory goroutine threshold
 	MaxGoroutines int `mapstructure:"max_goroutines"`
 
-	// MaxStreams is a hard cap on concurrent TCP SIP streams. 0 = unlimited.
-	// Unlike MaxGoroutines (a warning threshold), exceeding this rejects new streams.
+	// MaxStreams caps active buffered TCP SIP workers. 0 = unlimited.
+	// Unlike MaxGoroutines (a warning threshold), exceeding this rejects new
+	// streams and rearm attempts; it does not cap reassembly pool entries.
 	MaxStreams int `mapstructure:"max_streams"`
 
 	// Timeout configurations

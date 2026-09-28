@@ -331,10 +331,11 @@ Inherits all `lc sniff` flags, plus:
 
 **TCP Performance**
 
-| Flag                     | Type   | Default    | Description                                             |
-| ------------------------ | ------ | ---------- | ------------------------------------------------------- |
-| `--tcp-performance-mode` | string | `balanced` | TCP mode: `balanced`, `throughput`, `latency`, `memory` |
-| `--tcp-*`                |        |            | Various TCP reassembly tuning flags                     |
+| Flag                     | Type   | Default    | Description                                                                            |
+| ------------------------ | ------ | ---------- | -------------------------------------------------------------------------------------- |
+| `--tcp-performance-mode` | string | `balanced` | TCP mode: `balanced`, `throughput`, `latency`, `memory`                                |
+| `--tcp-max-goroutines`   | int    | `0`        | Advisory stream goroutine warning threshold (0 = use default); does not reject streams |
+| `--tcp-*`                |        |            | Various TCP reassembly tuning flags                                                    |
 
 **GPU Acceleration**
 
@@ -591,15 +592,21 @@ lc tap voip [flags]
 
 Inherits all `lc tap` flags, plus:
 
-| Flag                      | Type   | Default    | Description                                                        |
-| ------------------------- | ------ | ---------- | ------------------------------------------------------------------ |
-| `--sip-user`              | string |            | Filter by SIP user                                                 |
-| `--sip-port`              | int    | `5060`     | SIP signaling port                                                 |
-| `--rtp-port-range`        | string |            | RTP port range                                                     |
-| `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency` |
-| `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                        |
-| `--pattern-algorithm`     | string | `auto`     | Pattern matching algorithm: `auto`, `linear`, `aho-corasick`       |
-| `--pattern-buffer-mb`     | int    | `64`       | Pattern buffer size (MB)                                           |
+| Flag                      | Type   | Default    | Description                                                                                  |
+| ------------------------- | ------ | ---------- | -------------------------------------------------------------------------------------------- |
+| `--sip-user`              | string |            | Filter by SIP user                                                                           |
+| `--sip-port`              | int    | `5060`     | SIP signaling port                                                                           |
+| `--rtp-port-range`        | string |            | RTP port range                                                                               |
+| `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency`                           |
+| `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                                                  |
+| `--tcp-max-streams`       | int    | `0`        | Active buffered TCP SIP stream processor cap (0 = unlimited); positive values reject streams |
+| `--pattern-algorithm`     | string | `auto`     | Pattern matching algorithm: `auto`, `linear`, `aho-corasick`                                 |
+| `--pattern-buffer-mb`     | int    | `64`       | Pattern buffer size (MB)                                                                     |
+
+`--tcp-max-streams` also uses `voip.max_streams` in configuration. A positive
+value intentionally discards SIP data for rejected new or restarted streams.
+Discarded connections can still occupy reassembly pool entries until they
+close or are flushed. This does not cap total process memory.
 
 ---
 
@@ -752,15 +759,21 @@ lc hunt voip [flags]
 
 Inherits all `lc hunt` flags, plus:
 
-| Flag                     | Short | Type     | Default | Description                                        |
-| ------------------------ | ----- | -------- | ------- | -------------------------------------------------- |
-| `--sip-port`             | `-S`  | int      | `5060`  | SIP signaling port                                 |
-| `--rtp-port-range`       | `-R`  | string   |         | RTP port range                                     |
-| `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick` |
-| `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                           |
-| `--tcp-sip-idle-timeout` |       | duration |         | Idle timeout for SIP TCP connections               |
+| Flag                     | Short | Type     | Default | Description                                                                                  |
+| ------------------------ | ----- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `--sip-port`             | `-S`  | int      | `5060`  | SIP signaling port                                                                           |
+| `--rtp-port-range`       | `-R`  | string   |         | RTP port range                                                                               |
+| `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick`                                           |
+| `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                                                                     |
+| `--tcp-sip-idle-timeout` |       | duration |         | Idle timeout for SIP TCP connections                                                         |
+| `--tcp-max-streams`      |       | int      | `0`     | Active buffered TCP SIP stream processor cap (0 = unlimited); positive values reject streams |
 
 `--udp-only` is hidden and deprecated for VoIP hunters; use `--sip-port` and `--rtp-port-range` instead.
+
+`--tcp-max-streams` also uses `voip.max_streams` in configuration. A positive
+value intentionally discards SIP data for rejected new or restarted streams.
+Discarded connections can still occupy reassembly pool entries until they
+close or are flushed. This does not cap total process memory.
 
 ---
 

@@ -295,7 +295,7 @@ func (f *sipStreamFactory) GetHealthStatus() map[string]interface{} {
 	} else {
 		status["status"] = "degraded"
 		if activeGoroutines >= maxGoroutines {
-			status["warning"] = "goroutine limit reached"
+			status["warning"] = "stream count above advisory threshold"
 		}
 	}
 
@@ -310,7 +310,7 @@ func (f *sipStreamFactory) IsHealthy() bool {
 	activeGoroutines := atomic.LoadInt64(&f.activeGoroutines)
 	maxGoroutines := int64(f.config.MaxGoroutines)
 
-	// Consider healthy if under 90% of the goroutine limit
+	// Consider healthy if under 90% of the advisory threshold.
 	return activeGoroutines < maxGoroutines*9/10
 }
 
@@ -327,7 +327,7 @@ func (f *sipStreamFactory) updateMetrics() {
 	tcpStreamMetrics.mu.Unlock()
 }
 
-// logGoroutineLimit logs when goroutine limits are reached
+// logGoroutineLimit logs when the advisory goroutine threshold is reached.
 func (f *sipStreamFactory) logGoroutineLimit() {
 	current := atomic.LoadInt64(&f.activeGoroutines)
 	if current >= int64(f.config.MaxGoroutines) {
@@ -340,7 +340,7 @@ func (f *sipStreamFactory) logGoroutineLimit() {
 
 		if now-lastLog >= logInterval {
 			if atomic.CompareAndSwapInt64(&f.lastLogTime, lastLog, now) {
-				logger.Warn("TCP stream goroutine limit reached",
+				logger.Warn("TCP stream count above advisory threshold",
 					"active_goroutines", current,
 					"max_goroutines", f.config.MaxGoroutines)
 			}
@@ -348,8 +348,8 @@ func (f *sipStreamFactory) logGoroutineLimit() {
 	}
 }
 
-// logStreamLimit logs when the hard stream cap rejects a connection, rate-limited
-// to the same interval as the goroutine limit warning.
+// logStreamLimit logs when the stream-worker cap rejects new processing, rate-limited
+// to the same interval as the advisory goroutine warning.
 func (f *sipStreamFactory) logStreamLimit(current int64) {
 	now := time.Now().Unix()
 	lastLog := atomic.LoadInt64(&f.lastStreamLimitLogTime)
@@ -363,7 +363,7 @@ func (f *sipStreamFactory) logStreamLimit(current int64) {
 			tcpStreamMetrics.mu.RLock()
 			dropped := tcpStreamMetrics.droppedStreams
 			tcpStreamMetrics.mu.RUnlock()
-			logger.Warn("TCP stream limit reached, rejecting new streams",
+			logger.Warn("TCP stream processor limit reached, rejecting processing",
 				"active_streams", current,
 				"max_streams", f.config.MaxStreams,
 				"dropped_streams", dropped)

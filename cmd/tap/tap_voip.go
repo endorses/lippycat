@@ -84,6 +84,7 @@ var (
 	// TCP-specific configuration flags
 	tcpPerformanceMode  string
 	tcpSIPIdleTimeout   time.Duration
+	tcpMaxStreams       int
 	tcpReassemblyShards int
 
 	// Per-call PCAP flags (VoIP-specific)
@@ -156,6 +157,7 @@ func init() {
 	// TCP Performance Mode
 	voipTapCmd.Flags().StringVarP(&tcpPerformanceMode, "tcp-performance-mode", "M", "balanced", "TCP performance mode: 'minimal', 'balanced', 'high_performance', 'low_latency'")
 	voipTapCmd.Flags().DurationVar(&tcpSIPIdleTimeout, "tcp-sip-idle-timeout", 0, "Idle timeout for SIP TCP connections (default: 120s, 0 = use default)")
+	voipTapCmd.Flags().IntVar(&tcpMaxStreams, "tcp-max-streams", 0, "Maximum active buffered TCP SIP stream processors (0 = unlimited; positive values may reject new streams)")
 	voipTapCmd.Flags().IntVar(&tcpReassemblyShards, "tcp-reassembly-shards", 1, "Number of flow-sharded TCP reassembly assemblers (default: 1)")
 
 	// Per-call PCAP (VoIP-specific)
@@ -180,6 +182,7 @@ func init() {
 	_ = viper.BindPFlag("tap.voip.pattern_buffer_mb", voipTapCmd.Flags().Lookup("pattern-buffer-mb"))
 	_ = viper.BindPFlag("tap.voip.tcp_performance_mode", voipTapCmd.Flags().Lookup("tcp-performance-mode"))
 	_ = viper.BindPFlag("voip.tcp_sip_idle_timeout", voipTapCmd.Flags().Lookup("tcp-sip-idle-timeout"))
+	_ = viper.BindPFlag("voip.max_streams", voipTapCmd.Flags().Lookup("tcp-max-streams"))
 	_ = viper.BindPFlag("tap.voip.tcp_reassembly_shards", voipTapCmd.Flags().Lookup("tcp-reassembly-shards"))
 	_ = viper.BindPFlag("tap.per_call_pcap.enabled", voipTapCmd.Flags().Lookup("per-call-pcap"))
 	_ = viper.BindPFlag("tap.per_call_pcap.output_dir", voipTapCmd.Flags().Lookup("per-call-pcap-dir"))
@@ -192,6 +195,10 @@ func init() {
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {
+	streamConfig, err := tapSIPStreamConfig(cmd)
+	if err != nil {
+		return err
+	}
 	logger.Info("Starting lippycat in standalone VoIP tap mode")
 
 	// Initialize SIP user surveillance list
@@ -519,7 +526,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	streamFactory := voip.NewSipStreamFactoryWithConfig(
 		tapCtx,
 		tapTCPHandler,
-		*voip.GetConfig(),
+		streamConfig,
 		func(callID string) bool {
 			_, active := voipProc.Call(callID)
 			return active
@@ -577,4 +584,20 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		}()
 	}
 	return runtime.run("VoIP Tap node", config)
+}
+
+func tapSIPStreamConfig(cmd *cobra.Command) (voip.Config, error) {
+	config := *voip.GetConfig()
+	limit, err := cmdutil.GetIntConfigStrict("voip.max_streams", tcpMaxStreams)
+	if cmd.Flags().Changed("tcp-max-streams") {
+		limit, err = tcpMaxStreams, nil
+	}
+	if err != nil {
+		return config, err
+	}
+	if limit < 0 {
+		return config, fmt.Errorf("--tcp-max-streams (voip.max_streams) must be non-negative; positive values may reject new TCP SIP streams")
+	}
+	config.MaxStreams = limit
+	return config, nil
 }

@@ -488,6 +488,10 @@ type connection struct {
 	key      key // client->server
 	c2s, s2c halfconnection
 	mu       sync.Mutex
+	// pins and retired are protected by StreamPool.mu. A retired connection
+	// cannot be reused until every assembler holding a pointer has released it.
+	pins    int
+	retired bool
 }
 
 func (c *connection) reset(k key, s Stream, ts time.Time) {
@@ -620,9 +624,6 @@ type Assembler struct {
 // This sets some sane defaults for the assembler options,
 // see DefaultAssemblerOptions for details.
 func NewAssembler(pool *StreamPool) *Assembler {
-	pool.mu.Lock()
-	pool.users++
-	pool.mu.Unlock()
 	return &Assembler{
 		ret:              make([]byteContainer, 0, assemblerReturnValueInitialSize),
 		pc:               newPageCache(),
@@ -692,8 +693,12 @@ func (a *Assembler) AssembleWithContext(netFlow gopacket.Flow, t *layers.TCP, ac
 		}
 		return
 	}
+	defer a.connPool.release(conn)
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
+	if a.connPool.isRetired(conn) {
+		return
+	}
 	if half.lastSeen.Before(timestamp) {
 		half.lastSeen = timestamp
 	}
@@ -1303,6 +1308,11 @@ func (a *Assembler) FlushWithOptions(opt FlushOptions) (flushed, closed int) {
 	for _, conn := range conns {
 		remove := false
 		conn.mu.Lock()
+		if a.connPool.isRetired(conn) {
+			conn.mu.Unlock()
+			a.connPool.release(conn)
+			continue
+		}
 		for _, half := range []*halfconnection{&conn.s2c, &conn.c2s} {
 			flushed, closed := a.flushClose(conn, half, opt.T, opt.TC)
 			if flushed {
@@ -1315,10 +1325,11 @@ func (a *Assembler) FlushWithOptions(opt FlushOptions) (flushed, closed int) {
 		if conn.s2c.closed && conn.c2s.closed && conn.s2c.lastSeen.Before(opt.TC) && conn.c2s.lastSeen.Before(opt.TC) {
 			remove = true
 		}
-		conn.mu.Unlock()
 		if remove {
 			a.connPool.remove(conn)
 		}
+		conn.mu.Unlock()
+		a.connPool.release(conn)
 	}
 	return flushes, closes
 }
@@ -1357,6 +1368,11 @@ func (a *Assembler) FlushAll() (closed int) {
 	closed = len(conns)
 	for _, conn := range conns {
 		conn.mu.Lock()
+		if a.connPool.isRetired(conn) {
+			conn.mu.Unlock()
+			a.connPool.release(conn)
+			continue
+		}
 		for _, half := range []*halfconnection{&conn.s2c, &conn.c2s} {
 			for !half.closed {
 				a.skipFlush(conn, half)
@@ -1366,6 +1382,7 @@ func (a *Assembler) FlushAll() (closed int) {
 			}
 		}
 		conn.mu.Unlock()
+		a.connPool.release(conn)
 	}
 	return
 }

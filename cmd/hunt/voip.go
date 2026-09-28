@@ -29,6 +29,7 @@ var (
 
 	// TCP SIP configuration
 	hunterTCPSIPIdleTimeout time.Duration
+	hunterTCPMaxStreams     int
 )
 
 var voipHuntCmd = &cobra.Command{
@@ -73,6 +74,7 @@ func init() {
 
 	// TCP SIP configuration
 	voipHuntCmd.Flags().DurationVar(&hunterTCPSIPIdleTimeout, "tcp-sip-idle-timeout", 0, "Idle timeout for SIP TCP connections (default: 120s, 0 = use default)")
+	voipHuntCmd.Flags().IntVar(&hunterTCPMaxStreams, "tcp-max-streams", 0, "Maximum active buffered TCP SIP stream processors (0 = unlimited; positive values may reject new streams)")
 
 	// Bind BPF filter optimization flags to viper under hunter.voip.* namespace
 	_ = viper.BindPFlag("hunter.voip.udp_only", voipHuntCmd.Flags().Lookup("udp-only"))
@@ -83,9 +85,14 @@ func init() {
 	_ = viper.BindPFlag("voip.pattern_algorithm", voipHuntCmd.Flags().Lookup("pattern-algorithm"))
 	_ = viper.BindPFlag("voip.pattern_buffer_mb", voipHuntCmd.Flags().Lookup("pattern-buffer-mb"))
 	_ = viper.BindPFlag("voip.tcp_sip_idle_timeout", voipHuntCmd.Flags().Lookup("tcp-sip-idle-timeout"))
+	_ = viper.BindPFlag("voip.max_streams", voipHuntCmd.Flags().Lookup("tcp-max-streams"))
 }
 
 func runVoIPHunt(cmd *cobra.Command, args []string) error {
+	streamConfig, err := huntSIPStreamConfig(cmd)
+	if err != nil {
+		return err
+	}
 	logger.Info("Starting lippycat in VoIP hunter mode")
 	logger.Info("VoIP filters will be received from processor via filter subscription")
 
@@ -201,13 +208,13 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 			return bufferMgr.Close, nil
 		},
 		start: func(ctx context.Context, h *hunter.Hunter) error {
-			return runVoIPHunterWithBuffering(ctx, h, bufferMgr)
+			return runVoIPHunterWithBuffering(ctx, h, bufferMgr, streamConfig)
 		},
 	})
 }
 
 // runVoIPHunterWithBuffering wraps hunter packet processing with VoIP buffering and TCP reassembly
-func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr *voip.BufferManager) error {
+func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr *voip.BufferManager, streamConfig voip.Config) error {
 	tracker := voip.NewCallTracker()
 	defer tracker.Shutdown()
 	// Create TCP SIP handler for hunter mode
@@ -216,7 +223,7 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 
 	// Create TCP stream factory with hunter handler
 	// The factory creates SIPStream instances that parse TCP streams for SIP messages
-	streamFactory := voip.NewSipStreamFactoryWithConfig(ctx, tcpHandler, *voip.GetConfig(), tracker.IsCallActive)
+	streamFactory := voip.NewSipStreamFactoryWithConfig(ctx, tcpHandler, streamConfig, tracker.IsCallActive)
 
 	// Create connection-aware reassembly assembler for TCP reassembly
 	// This is the same pattern used in sniff/tap modes (see voip/core.go)
@@ -272,4 +279,20 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 	<-ctx.Done()
 
 	return nil
+}
+
+func huntSIPStreamConfig(cmd *cobra.Command) (voip.Config, error) {
+	config := *voip.GetConfig()
+	limit, err := cmdutil.GetIntConfigStrict("voip.max_streams", hunterTCPMaxStreams)
+	if cmd.Flags().Changed("tcp-max-streams") {
+		limit, err = hunterTCPMaxStreams, nil
+	}
+	if err != nil {
+		return config, err
+	}
+	if limit < 0 {
+		return config, fmt.Errorf("--tcp-max-streams (voip.max_streams) must be non-negative; positive values may reject new TCP SIP streams")
+	}
+	config.MaxStreams = limit
+	return config, nil
 }

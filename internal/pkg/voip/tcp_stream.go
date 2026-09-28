@@ -248,7 +248,9 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 			IncrementRearmRejectedChunk()
 			return // dead goroutine + non-SIP continuation: nothing can read it
 		}
-		s.rearm()
+		if !s.rearm() {
+			return
+		}
 	}
 
 	// Non-blocking send - drop data if buffer is full.
@@ -295,11 +297,26 @@ func (s *bufferedSIPStream) ReassemblyComplete(ac reassembly.AssemblerContext) b
 // flags — and restarts the processing goroutine. Metrics/goroutine accounting is
 // symmetric with the previous goroutine's teardown (which already did the
 // matching Done()/decrement), so a re-arm counts as a new stream.
-func (s *bufferedSIPStream) rearm() {
-	// Don't re-arm during factory shutdown: allWorkers.Add after Wait() has begun
-	// would panic, and the new goroutine would exit immediately anyway.
-	if s.factory != nil && atomic.LoadInt32(&s.factory.closed) != 0 {
-		return
+func (s *bufferedSIPStream) rearm() bool {
+	if s.factory != nil {
+		// Shutdown takes the same lock before starting Wait. Reserve capacity and
+		// register this worker together so no rearm can begin after Wait starts.
+		s.factory.lifecycleMu.Lock()
+		if atomic.LoadInt32(&s.factory.closed) != 0 {
+			s.factory.lifecycleMu.Unlock()
+			return false
+		}
+		current, reserved := s.factory.reserveStreamSlot()
+		if !reserved {
+			s.factory.lifecycleMu.Unlock()
+			tcpStreamMetrics.mu.Lock()
+			tcpStreamMetrics.droppedStreams++
+			tcpStreamMetrics.mu.Unlock()
+			s.factory.logStreamLimit(current)
+			return false
+		}
+		s.factory.allWorkers.Add(1)
+		s.factory.lifecycleMu.Unlock()
 	}
 
 	parentCtx := context.Background()
@@ -329,10 +346,6 @@ func (s *bufferedSIPStream) rearm() {
 
 	// Account for the restarted goroutine as a new stream (symmetric with the
 	// prior goroutine's teardown).
-	if s.factory != nil {
-		s.factory.allWorkers.Add(1)
-		atomic.AddInt64(&s.factory.activeGoroutines, 1)
-	}
 	tcpStreamMetrics.mu.Lock()
 	atomic.AddInt64(&tcpStreamMetrics.activeStreams, 1)
 	tcpStreamMetrics.totalStreamsCreated++
@@ -342,6 +355,7 @@ func (s *bufferedSIPStream) rearm() {
 		"flow", fmt.Sprintf("%s:%s->%s:%s", s.netFlow.Src(), s.transportFlow.Src(), s.netFlow.Dst(), s.transportFlow.Dst()))
 
 	go s.processLoop()
+	return true
 }
 
 // processLoop reads from the buffered channel and processes SIP messages.

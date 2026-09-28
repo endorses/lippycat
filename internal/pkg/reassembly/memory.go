@@ -139,7 +139,7 @@ func (c *pageCache) replace(p *page) {
 // connection objects it stores are accessible to multiple Assemblers.
 type StreamPool struct {
 	conns              map[key]*connection
-	users              int
+	creating           map[key]chan struct{}
 	mu                 sync.RWMutex
 	factory            StreamFactory
 	free               []*connection
@@ -172,11 +172,38 @@ func (p *StreamPool) Dump() {
 
 func (p *StreamPool) remove(conn *connection) {
 	p.mu.Lock()
-	if _, ok := p.conns[conn.key]; ok {
+	if p.conns[conn.key] == conn {
 		delete(p.conns, conn.key)
-		p.free = append(p.free, conn)
+		conn.retired = true
+		if conn.pins == 0 {
+			p.recycle(conn)
+		}
 	}
 	p.mu.Unlock()
+}
+
+// recycle is called under p.mu after the final user of a completed connection
+// has released its pointer. The slab remains available for the next stream.
+func (p *StreamPool) recycle(conn *connection) {
+	conn.c2s.stream = nil
+	conn.s2c.stream = nil
+	p.free = append(p.free, conn)
+}
+
+func (p *StreamPool) release(conn *connection) {
+	p.mu.Lock()
+	conn.pins--
+	if conn.retired && conn.pins == 0 {
+		p.recycle(conn)
+	}
+	p.mu.Unlock()
+}
+
+func (p *StreamPool) isRetired(conn *connection) bool {
+	p.mu.RLock()
+	retired := conn.retired
+	p.mu.RUnlock()
+	return retired
 }
 
 // NewStreamPool creates a new connection pool.  Streams will
@@ -184,6 +211,7 @@ func (p *StreamPool) remove(conn *connection) {
 func NewStreamPool(factory StreamFactory) *StreamPool {
 	return &StreamPool{
 		conns:     make(map[key]*connection, initialAllocSize),
+		creating:  make(map[key]chan struct{}),
 		free:      make([]*connection, 0, initialAllocSize),
 		factory:   factory,
 		nextAlloc: initialAllocSize,
@@ -191,12 +219,13 @@ func NewStreamPool(factory StreamFactory) *StreamPool {
 }
 
 func (p *StreamPool) connections() []*connection {
-	p.mu.RLock()
+	p.mu.Lock()
 	conns := make([]*connection, 0, len(p.conns))
 	for _, conn := range p.conns {
+		conn.pins++
 		conns = append(conns, conn)
 	}
-	p.mu.RUnlock()
+	p.mu.Unlock()
 	return conns
 }
 
@@ -213,6 +242,8 @@ func (p *StreamPool) newConnection(k key, s Stream, ts time.Time) (c *connection
 	index := len(p.free) - 1
 	c, p.free = p.free[index], p.free[:index]
 	c.reset(k, s, ts)
+	c.retired = false
+	c.pins = 1
 	return c, &c.c2s, &c.s2c
 }
 
@@ -233,24 +264,54 @@ func (p *StreamPool) getHalf(k key) (*connection, *halfconnection, *halfconnecti
 // does not already exist, returns nil.  This allows us to check for a
 // connection without actually creating one if it doesn't already exist.
 func (p *StreamPool) getConnection(k key, end bool, ts time.Time, tcp *layers.TCP, ac AssemblerContext) (*connection, *halfconnection, *halfconnection) {
-	p.mu.RLock()
-	conn, half, rev := p.getHalf(k)
-	p.mu.RUnlock()
-	if end || conn != nil {
+	for {
+		p.mu.Lock()
+		conn, half, rev := p.getHalf(k)
+		if conn != nil {
+			conn.pins++
+			p.mu.Unlock()
+			return conn, half, rev
+		}
+		if pending := p.creating[k]; pending != nil {
+			p.mu.Unlock()
+			<-pending
+			continue
+		}
+		if pending := p.creating[k.Reverse()]; pending != nil {
+			p.mu.Unlock()
+			<-pending
+			continue
+		}
+		if end {
+			p.mu.Unlock()
+			return nil, nil, nil
+		}
+		pending := make(chan struct{})
+		p.creating[k] = pending
+		p.mu.Unlock()
+
+		// A single factory callback creates each key. A losing callback cannot
+		// safely be completed: completion may have side effects on the live flow.
+		// Other keys can still be created while this factory call runs.
+		created := false
+		func() {
+			defer func() {
+				if !created {
+					p.mu.Lock()
+					delete(p.creating, k)
+					close(pending)
+					p.mu.Unlock()
+				}
+			}()
+			s := p.factory.New(k[0], k[1], tcp, ac)
+			p.mu.Lock()
+			conn, half, rev = p.newConnection(k, s, ts)
+			p.conns[k] = conn
+			delete(p.creating, k)
+			close(pending)
+			p.mu.Unlock()
+			created = true
+		}()
 		return conn, half, rev
 	}
-	s := p.factory.New(k[0], k[1], tcp, ac)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	conn, half, rev = p.newConnection(k, s, ts)
-	conn2, half2, rev2 := p.getHalf(k)
-	if conn2 != nil {
-		if conn2.key != k {
-			panic("FIXME: other dir added in the meantime...")
-		}
-		// FIXME: delete s ?
-		return conn2, half2, rev2
-	}
-	p.conns[k] = conn
-	return conn, half, rev
 }

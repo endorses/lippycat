@@ -27,11 +27,13 @@ type sipStreamFactory struct {
 	lastLogTime         int64
 	// lastStreamLimitLogTime rate-limits the MaxStreams rejection warning
 	lastStreamLimitLogTime int64
-	allWorkers             sync.WaitGroup // tracks all background goroutines
-	cleanupTicker          *time.Ticker
-	closed                 int32             // atomic flag to track if factory is closed
-	handler                SIPMessageHandler // handler for processing complete SIP messages
-	callActive             func(string) bool // injected registry query for call-aware timeouts
+	// lifecycleMu orders rearm worker registration before Shutdown begins Wait.
+	lifecycleMu   sync.Mutex
+	allWorkers    sync.WaitGroup // tracks all background goroutines
+	cleanupTicker *time.Ticker
+	closed        int32             // atomic flag to track if factory is closed
+	handler       SIPMessageHandler // handler for processing complete SIP messages
+	callActive    func(string) bool // injected registry query for call-aware timeouts
 }
 
 type SIPStreamFactory interface {
@@ -82,10 +84,13 @@ func NewSipStreamFactoryWithConfig(ctx context.Context, handler SIPMessageHandle
 
 // Shutdown gracefully shuts down the stream factory and waits for all goroutines to complete
 func (f *sipStreamFactory) Shutdown() error {
-	// Mark as closed
+	f.lifecycleMu.Lock()
+	// Mark as closed before Wait so rearm cannot register another worker.
 	if !atomic.CompareAndSwapInt32(&f.closed, 0, 1) {
+		f.lifecycleMu.Unlock()
 		return nil // Already closed
 	}
+	f.lifecycleMu.Unlock()
 
 	// Cancel context to signal goroutines to stop
 	f.cancel()
@@ -162,15 +167,21 @@ func (f *sipStreamFactory) cleanupRoutine() {
 }
 
 func (f *sipStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
+	// Keep worker registration ordered before Shutdown starts Wait.
+	f.lifecycleMu.Lock()
+	defer f.lifecycleMu.Unlock()
+	if atomic.LoadInt32(&f.closed) != 0 {
+		return &discardStream{}
+	}
+
 	// bufferedSIPStream uses a BUFFERED channel with non-blocking sends so
 	// ReassembledSG() NEVER blocks the packet capture loop - data is dropped only
 	// if the buffer is full. This guarantees the capture loop always continues.
 
-	// voip.max_streams is a hard cap (0 = unlimited): beyond it, new connections
-	// get a stream that discards data instead of spawning goroutines. Without it,
-	// a flood of short-lived or bogus TCP flows grows memory without bound. New
-	// may run concurrently across reassembly shards, so reserve the slot with a
-	// CAS instead of separating the limit check from the increment.
+	// voip.max_streams caps active buffered stream workers (0 = unlimited):
+	// beyond it, new connections get a stream that discards data instead of
+	// spawning a worker. Discarded connections still occupy reassembly entries.
+	// Reserve the slot atomically across reassembly shards and rearm attempts.
 	current, reserved := f.reserveStreamSlot()
 	if !reserved {
 		tcpStreamMetrics.mu.Lock()
@@ -219,7 +230,7 @@ func (f *sipStreamFactory) GetActiveGoroutines() int64 {
 	return atomic.LoadInt64(&f.activeGoroutines)
 }
 
-// GetMaxGoroutines returns the maximum number of goroutines allowed
+// GetMaxGoroutines returns the advisory stream-worker threshold.
 func (f *sipStreamFactory) GetMaxGoroutines() int64 {
 	f.configMutex.RLock()
 	defer f.configMutex.RUnlock()
@@ -227,10 +238,13 @@ func (f *sipStreamFactory) GetMaxGoroutines() int64 {
 }
 
 func (f *sipStreamFactory) Close() {
-	// Use atomic compare-and-swap to ensure Close is only executed once
+	f.lifecycleMu.Lock()
+	// Order worker registration before the Wait below.
 	if !atomic.CompareAndSwapInt32(&f.closed, 0, 1) {
+		f.lifecycleMu.Unlock()
 		return // Already closed
 	}
+	f.lifecycleMu.Unlock()
 
 	// Cancel context to stop all goroutines
 	f.cancel()

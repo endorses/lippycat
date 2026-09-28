@@ -607,6 +607,19 @@ lc sniff voip --max-tcp-buffers 2000
 lc sniff voip --tcp-performance-mode minimal
 ```
 
+### Post-burst RSS on Linux with transparent huge pages
+
+On hosts where `/sys/kernel/mm/transparent_hugepage/enabled` shows `always`,
+transparent huge pages (THP) can contribute to RSS staying high after a TCP
+connection burst even when Go has released heap memory. As an operational
+trial, start the process with `GODEBUG=disablethp=1` and compare post-burst RSS
+with Go runtime heap metrics (including heap in-use and released bytes) under
+the same workload. This setting disables huge pages for Go heap memory; it does
+not release live objects or impose a process memory cap. The observed RSS gap
+has not been apportioned to THP. See the [Go GC guidance on Linux THP](https://go.dev/doc/gc-guide#Linux_transparent_huge_pages)
+and [Go's GODEBUG documentation](https://go.dev/doc/godebug). Go describes
+`disablethp` as a workaround that may be removed in a future release.
+
 ### Detector Capacity and Retention
 
 The stateful protocol detector bounds both active flow state and cached

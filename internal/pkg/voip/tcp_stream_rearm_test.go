@@ -415,6 +415,75 @@ func TestRearm_CompletedStreamReusedForNewSIP(t *testing.T) {
 	}
 }
 
+func TestRearm_RespectsMaxStreamsAndRetriesAfterCapacityReturns(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxStreams = 1
+	rec := &recordingSIPHandler{}
+	factory := NewSipStreamFactoryWithConfig(context.Background(), rec, *cfg, nil).(*sipStreamFactory)
+	t.Cleanup(func() { _ = factory.Shutdown() })
+
+	netFlow := testNetFlow(t, "10.0.0.1", "10.0.0.2")
+	sp := layers.NewTCPPortEndpoint(60421)
+	dp := layers.NewTCPPortEndpoint(5060)
+	transportFlow := gopacket.NewFlow(layers.EndpointTCPPort, sp.Raw(), dp.Raw())
+	first := factory.New(netFlow, transportFlow, &layers.TCP{}, nil).(*bufferedSIPStream)
+	first.cancel()
+	waitFor(t, func() bool {
+		return loadFinished(first) == 1 && factory.GetActiveGoroutines() == 0
+	}, "first stream worker to exit")
+
+	second := factory.New(netFlow, transportFlow, &layers.TCP{}, nil).(*bufferedSIPStream)
+	oldChannel := first.dataChan
+	before := GetTCPStreamMetrics().DroppedStreams
+	first.ReassembledSG(&fakeScatterGather{data: moMessage("limited-rearm", "00000000000")}, nil)
+	if first.dataChan != oldChannel || loadFinished(first) != 1 {
+		t.Fatal("stream changed state after rearm was denied")
+	}
+	if got := factory.GetActiveGoroutines(); got != 1 {
+		t.Fatalf("active workers after rejected rearm = %d, want 1", got)
+	}
+	if got := GetTCPStreamMetrics().DroppedStreams - before; got != 1 {
+		t.Fatalf("stream-limit rejections = %d, want 1", got)
+	}
+	if rec.has("limited-rearm") {
+		t.Fatal("limit-rejected SIP message was dispatched")
+	}
+
+	second.ReassemblyComplete(nil)
+	waitFor(t, func() bool { return factory.GetActiveGoroutines() == 0 }, "capacity to return")
+	first.ReassembledSG(&fakeScatterGather{data: moMessage("allowed-rearm", "00000000000")}, nil)
+	waitFor(t, func() bool { return rec.has("allowed-rearm") }, "SIP message after capacity returns")
+	if got := factory.GetActiveGoroutines(); got != 1 {
+		t.Fatalf("active workers after successful rearm = %d, want 1", got)
+	}
+	first.ReassemblyComplete(nil)
+	waitFor(t, func() bool { return factory.GetActiveGoroutines() == 0 }, "rearmed worker to exit")
+}
+
+func TestRearm_AfterFactoryShutdownDoesNotQueueData(t *testing.T) {
+	cfg := DefaultConfig()
+	factory := NewSipStreamFactoryWithConfig(context.Background(), &recordingSIPHandler{}, *cfg, nil).(*sipStreamFactory)
+	netFlow := testNetFlow(t, "10.0.0.1", "10.0.0.2")
+	sp := layers.NewTCPPortEndpoint(60422)
+	dp := layers.NewTCPPortEndpoint(5060)
+	transportFlow := gopacket.NewFlow(layers.EndpointTCPPort, sp.Raw(), dp.Raw())
+	stream := factory.New(netFlow, transportFlow, &layers.TCP{}, nil).(*bufferedSIPStream)
+	if err := factory.Shutdown(); err != nil {
+		t.Fatalf("shutdown factory: %v", err)
+	}
+	if loadFinished(stream) != 1 {
+		t.Fatal("stream worker did not finish during shutdown")
+	}
+	oldChannel := stream.dataChan
+	stream.ReassembledSG(&fakeScatterGather{data: moMessage("after-shutdown", "00000000000")}, nil)
+	if stream.dataChan != oldChannel || loadFinished(stream) != 1 {
+		t.Fatal("stream rearmed after factory shutdown")
+	}
+	if got := factory.GetActiveGoroutines(); got != 0 {
+		t.Fatalf("active workers after shutdown = %d, want 0", got)
+	}
+}
+
 // TestRearm_InProgressMultiMessageNotRearmed guards the regression boundary: on
 // a single LIVE connection carrying several SIP MESSAGEs back-to-back (the
 // already-working per-message path), every message must be dispatched through

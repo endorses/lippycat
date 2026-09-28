@@ -13,6 +13,9 @@ func detectRADIUS(packet gopacket.Packet) *signatures.DetectionResult {
 	if packet == nil || packet.NetworkLayer() == nil {
 		return nil
 	}
+	if !radius.MayContainRADIUS(packet) {
+		return nil
+	}
 	ci := packet.Metadata().CaptureInfo
 	if ci.CaptureLength != ci.Length || (ci.CaptureLength != 0 && ci.CaptureLength != len(packet.Data())) {
 		return nil

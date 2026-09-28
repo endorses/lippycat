@@ -3,8 +3,36 @@ package offline
 import (
 	"context"
 	"github.com/stretchr/testify/require"
+	"runtime"
 	"testing"
 )
+
+func TestCompactParallelQueryProgressRemainsOrdered(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(previous)
+	d := compactQueryFixture(t, 2051)
+	d.storage.limits.CacheBytes = 4 << 20
+	baseline := d.Resources().InFlightBytes
+	var updates []QueryProgress
+	q, err := d.Query(context.Background(), QuerySpec{
+		Token: Token{Dataset: 17, Query: 5},
+		Match: func(s Summary) bool { return s.ID%2 == 0 },
+		Progress: func(p QueryProgress) {
+			updates = append(updates, p)
+		},
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1026, q.Count())
+	require.Len(t, updates, 4)
+	require.Zero(t, updates[0].Scanned)
+	for i := 1; i < len(updates); i++ {
+		require.Greater(t, updates[i].Scanned, updates[i-1].Scanned)
+		require.GreaterOrEqual(t, updates[i].Matched, updates[i-1].Matched)
+	}
+	require.Equal(t, QueryProgress{Token: q.Token(), Scanned: 2051, Matched: 1026, Total: 2051}, updates[len(updates)-1])
+	require.NoError(t, q.Close())
+	require.Equal(t, baseline, d.Resources().InFlightBytes)
+}
 
 func TestQueryProgressCompleteAndBounded(t *testing.T) {
 	const count = 2051

@@ -2,11 +2,14 @@ package offline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/netip"
 	"os"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/require"
@@ -214,4 +217,137 @@ func TestCompactQueryRejectsCorruptDirectoryAndReleasesScratch(t *testing.T) {
 	require.Nil(t, q)
 	require.Equal(t, baseline.DiskBytes, d.Resources().DiskBytes)
 	require.Equal(t, baseline.InFlightBytes, d.Resources().InFlightBytes)
+}
+
+func TestCompactParallelScanMatchesSequentialDirectoryOrder(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(previous)
+	d := compactQueryFixture(t, 2051)
+	d.storage.limits.CacheBytes = 4 << 20
+	for _, tc := range []struct {
+		name       string
+		expression *Expression
+		related    bool
+	}{
+		{name: "full"},
+		{name: "related", related: true},
+		{name: "amended info", expression: mustCompactQueryExpression(t, "info", "amended")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			baseline := d.Resources().InFlightBytes
+			var sequential, parallel []Summary
+			require.NoError(t, d.scanCompactSummariesSequential(context.Background(), tc.expression, tc.related, func(s Summary) error {
+				sequential = append(sequential, s)
+				return nil
+			}))
+			used, err := d.scanCompactSummariesParallel(context.Background(), tc.expression, tc.related, func(s Summary) error {
+				parallel = append(parallel, s)
+				return nil
+			})
+			require.True(t, used, "fixture must exercise the parallel worker path")
+			require.NoError(t, err)
+			require.Equal(t, sequential, parallel)
+			require.Equal(t, baseline, d.Resources().InFlightBytes)
+		})
+	}
+}
+
+func mustCompactQueryExpression(t *testing.T, field, value string) *Expression {
+	t.Helper()
+	expression, err := NewExpression(ExpressionSpec{Op: "equal", Fields: []string{field}, Text: value})
+	require.NoError(t, err)
+	return expression
+}
+
+func TestCompactParallelScanFallsBackWhenBudgetAdmitsOneReader(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(previous)
+	d := compactQueryFixture(t, 2051)
+	d.storage.limits.CacheBytes = 4 << 20
+	baseline := d.Resources()
+	oldLimit := d.storage.limits.CacheBytes
+	d.storage.limits.CacheBytes = baseline.CachedBytes + baseline.PinnedBytes + baseline.PrefetchBytes + baseline.InFlightBytes + 700<<10
+	defer func() { d.storage.limits.CacheBytes = oldLimit }()
+	used, err := d.scanCompactSummariesParallel(context.Background(), nil, false, func(Summary) error { return nil })
+	require.NoError(t, err)
+	require.False(t, used)
+	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 3}, Match: func(s Summary) bool { return s.ID == 2050 }})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, q.Count())
+	require.NoError(t, q.Close())
+	require.Equal(t, baseline.InFlightBytes, d.Resources().InFlightBytes)
+}
+
+func TestCompactParallelScanCorruptLateDirectoryReleasesWorkers(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(previous)
+	d := compactQueryFixture(t, 2051)
+	d.storage.limits.CacheBytes = 4 << 20
+	baseline := d.Resources()
+	writable, err := os.OpenFile(d.offsets.Name(), os.O_RDWR, 0)
+	require.NoError(t, err)
+	_, err = writable.WriteAt([]byte{255}, compactHeaderBytes+1700*compactIndexBytes+32)
+	require.NoError(t, err)
+	require.NoError(t, writable.Close())
+	q, err := d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 3}, Match: func(s Summary) bool { return s.ID%2 == 0 }})
+	require.ErrorContains(t, err, "checksum")
+	require.Nil(t, q)
+	require.Equal(t, baseline.DiskBytes, d.Resources().DiskBytes)
+	require.Equal(t, baseline.InFlightBytes, d.Resources().InFlightBytes)
+}
+
+func TestCompactParallelQueryCancellationProgressAndDiskCleanup(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(previous)
+	d := compactQueryFixture(t, 2051)
+	d.storage.limits.CacheBytes = 4 << 20
+	baseline := d.Resources()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var progress []QueryProgress
+	q, err := d.Query(ctx, QuerySpec{Token: Token{Dataset: 17, Query: 3}, Match: func(Summary) bool { return true }, Progress: func(p QueryProgress) {
+		progress = append(progress, p)
+		if p.Scanned == 1024 {
+			cancel()
+		}
+	}})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, q)
+	require.Len(t, progress, 2)
+	require.EqualValues(t, 1024, progress[1].Scanned)
+	require.Equal(t, baseline.DiskBytes, d.Resources().DiskBytes)
+	require.Equal(t, baseline.InFlightBytes, d.Resources().InFlightBytes)
+
+	diskLimit := d.storage.limits.DiskBytes
+	d.storage.limits.DiskBytes = baseline.DiskBytes + queryHeaderBytes + queryEntryBytes*5
+	q, err = d.Query(context.Background(), QuerySpec{Token: Token{Dataset: 17, Query: 4}, Match: func(s Summary) bool { return s.ID != 100 }})
+	d.storage.limits.DiskBytes = diskLimit
+	require.ErrorContains(t, err, "disk budget")
+	require.Nil(t, q)
+	require.Equal(t, baseline.DiskBytes, d.Resources().DiskBytes)
+	require.Equal(t, baseline.InFlightBytes, d.Resources().InFlightBytes)
+}
+
+func TestCompactParallelWorkerFailureAndEarlyVisitErrorReleaseWorkers(t *testing.T) {
+	previous := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(previous)
+	d := compactQueryFixture(t, 2051)
+	d.storage.limits.CacheBytes = 4 << 20
+	baseline := d.Resources().InFlightBytes
+	want := errors.New("stop at first row")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	used, err := d.scanCompactSummariesParallel(ctx, nil, false, func(Summary) error { return want })
+	require.True(t, used)
+	require.ErrorIs(t, err, want)
+	require.Equal(t, baseline, d.Resources().InFlightBytes)
+
+	writable, err := os.OpenFile(d.summaries.Name(), os.O_RDWR, 0)
+	require.NoError(t, err)
+	require.NoError(t, writable.Truncate(compactHeaderBytes+72))
+	require.NoError(t, writable.Close())
+	used, err = d.scanCompactSummariesParallel(context.Background(), nil, false, func(Summary) error { return nil })
+	require.True(t, used)
+	require.Error(t, err, "worker must report a truncated summary block")
+	require.Equal(t, baseline, d.Resources().InFlightBytes)
 }

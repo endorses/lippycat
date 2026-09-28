@@ -140,6 +140,34 @@ func TestPacketValidation(t *testing.T) {
 	}
 }
 
+func TestMayContainRADIUS(t *testing.T) {
+	for _, v6 := range []bool{false, true} {
+		for _, ethernet := range []bool{false, true} {
+			link := layers.LinkTypeRaw
+			prefix := []byte(nil)
+			if ethernet {
+				link = layers.LinkTypeEthernet
+				prefix = make([]byte, 14)
+				if v6 {
+					binary.BigEndian.PutUint16(prefix[12:], uint16(layers.EthernetTypeIPv6))
+				} else {
+					binary.BigEndian.PutUint16(prefix[12:], uint16(layers.EthernetTypeIPv4))
+				}
+			}
+			decode := func(port uint16) gopacket.Packet {
+				return gopacket.NewPacket(append(append([]byte(nil), prefix...), testIPPacket(v6, port)...), link, gopacket.Default)
+			}
+			require.True(t, MayContainRADIUS(decode(1812)))
+			require.True(t, MayContainRADIUS(decode(1813)))
+			require.False(t, MayContainRADIUS(decode(19120)))
+			require.True(t, MayContainRADIUS(decode(19120), 19120))
+			require.False(t, MayContainRADIUS(decode(53)))
+			truncated := append(append([]byte(nil), prefix...), testIPPacket(v6, 1812)[:5]...)
+			require.True(t, MayContainRADIUS(gopacket.NewPacket(truncated, link, gopacket.Default)))
+		}
+	}
+}
+
 func TestIPv6ExtensionsAndFragments(t *testing.T) {
 	for _, ext := range []byte{0, 43, 60, 51} {
 		b := testIPPacket(true, 1812)

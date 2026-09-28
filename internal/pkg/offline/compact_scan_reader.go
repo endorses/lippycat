@@ -10,7 +10,16 @@ import (
 	"io"
 	"math"
 	"os"
+	"unsafe"
 )
+
+const compactDetailsHeaderCacheSlots = 8
+
+type compactScanHeader struct {
+	off, size uint64
+	data      [compactBlockHeaderBytes]byte
+	valid     bool
+}
 
 // compactScanReader owns one scan's scratch, avoiding repeated block/cache copies
 // and inflater allocations. Returned blocks are borrowed until the next Read.
@@ -23,15 +32,15 @@ type compactScanReader struct {
 	held          uint64
 	inflaterHeld  bool
 	extra         [1]byte
-	headers       [2]struct {
-		off, size uint64
-		data      [72]byte
-		valid     bool
-	}
+	headers       [2]compactScanHeader
+	detailHeaders *[compactDetailsHeaderCacheSlots]compactScanHeader
+	nextDetail    uint8
 }
 
 func newCompactScanReader(ctx context.Context, d *diskDataset) (*compactScanReader, error) {
-	held := d.storage.limits.MaxRecordBytes*3 + compactBlockHeaderBytes*4 + 1024
+	// The fixed, scan-local cache is allocated only after its full storage
+	// admission. Builder checksum readers keep their existing single header.
+	held := d.storage.limits.MaxRecordBytes*3 + compactBlockHeaderBytes*4 + 1024 + uint64(unsafe.Sizeof([compactDetailsHeaderCacheSlots]compactScanHeader{}))
 	inflaterHeld := d.storage.limits.CacheBytes >= 16<<20
 	if inflaterHeld {
 		held += compactInflaterMemory
@@ -39,7 +48,7 @@ func newCompactScanReader(ctx context.Context, d *diskDataset) (*compactScanRead
 	if err := d.storage.reserveMemory(ctx, held); err != nil {
 		return nil, err
 	}
-	return &compactScanReader{dataset: d, held: held, inflaterHeld: inflaterHeld}, nil
+	return &compactScanReader{dataset: d, held: held, inflaterHeld: inflaterHeld, detailHeaders: new([compactDetailsHeaderCacheSlots]compactScanHeader)}, nil
 }
 func (r *compactScanReader) Close() error {
 	var err error
@@ -48,6 +57,7 @@ func (r *compactScanReader) Close() error {
 		r.inflater = nil
 	}
 	r.input, r.output = nil, nil
+	r.detailHeaders = nil
 	r.source.Reset(nil)
 	if r.held != 0 {
 		r.dataset.storage.releaseMemory(r.held)
@@ -123,8 +133,9 @@ func (r *compactScanReader) Read(ctx context.Context, f *os.File, off, size uint
 	return p, nil
 }
 
-// IndexChecksum authenticates each row against its original block headers while
-// retaining only the last header of each stream, not a dataset-sized directory.
+// IndexChecksum authenticates every row against its original block headers.
+// Summary headers use the last-reference cache; scan readers retain a bounded
+// set of details headers so amended rows can revisit earlier blocks cheaply.
 func (r *compactScanReader) IndexChecksum(refs []byte, id PacketID) ([32]byte, error) {
 	if r.held == 0 {
 		return [32]byte{}, errors.New("compact scan reader closed")
@@ -145,6 +156,20 @@ func (r *compactScanReader) IndexChecksum(refs []byte, id PacketID) ([32]byte, e
 			return [32]byte{}, errors.New("compact invalid directory block reference")
 		}
 		h := &r.headers[i]
+		if i == 1 && r.detailHeaders != nil {
+			var hit bool
+			for j := range r.detailHeaders {
+				candidate := &r.detailHeaders[j]
+				if candidate.valid && candidate.off == off && candidate.size == size {
+					h, hit = candidate, true
+					break
+				}
+			}
+			if !hit {
+				h = &r.detailHeaders[r.nextDetail]
+				r.nextDetail = (r.nextDetail + 1) % compactDetailsHeaderCacheSlots
+			}
+		}
 		if !h.valid || h.off != off || h.size != size {
 			h.valid = false
 			if _, err := f.ReadAt(h.data[:], int64(off)); err != nil {

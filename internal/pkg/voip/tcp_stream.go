@@ -57,6 +57,14 @@ type parsedSIPMessageHandler interface {
 // packet capture loop always continues, even if processing is slow.
 // Data is dropped only when the buffer is full (better than freezing).
 type bufferedSIPStream struct {
+	// The assembler sees the root stream. Each TCP half has its own reader and
+	// framing state; root coordinates their shared admission slot and teardown.
+	root           *bufferedSIPStream
+	reverse        *bufferedSIPStream
+	workerMu       sync.Mutex // root only: workers, slot, and terminal metrics
+	liveWorkers    int        // root only
+	slotReserved   bool       // root only
+	workerFailed   bool       // root only
 	dataChan       chan streamChunk
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -67,12 +75,13 @@ type bufferedSIPStream struct {
 	createdAt      time.Time
 	processedBytes int64
 	processedMsgs  int64
-	closed         int32     // atomic flag - set permanently when ReassemblyComplete fires (gopacket evicts)
+	closed         int32     // atomic flag - root is set permanently on assembler eviction
 	finished       int32     // atomic flag - set once the processing goroutine has fully exited (re-arm gate)
 	discard        int32     // atomic flag - set when stream is determined to be non-SIP
 	lockedOnSIP    int32     // atomic flag - set once at least one SIP message has been parsed
 	nonSIPBytes    int64     // atomic - bytes scanned as non-SIP since the last successful SIP message
 	pendingGap     streamGap // assembler-owned; attached to the next queued chunk
+	rearmPrefix    []byte    // assembler-owned; bounded start-line probe after this half exits
 
 	// State-based timeout support (Phase 3)
 	state            TCPState      // Current TCP state
@@ -125,8 +134,8 @@ func (d *discardStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly
 
 func (d *discardStream) ReassemblyComplete(ac reassembly.AssemblerContext) bool { return true }
 
-// newBufferedSIPStream creates a new buffered stream that implements reassembly.Stream.
-// The stream immediately starts a processing goroutine.
+// newBufferedSIPStream creates one reassembly.Stream with independent readers
+// for the two TCP sequence spaces. Both readers start immediately.
 // Both netFlow (IP addresses) and transportFlow (ports) are needed to construct
 // proper IP:port endpoints for the SIP message handler.
 func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, detector *CallIDDetector, netFlow, transportFlow gopacket.Flow) *bufferedSIPStream {
@@ -141,18 +150,49 @@ func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, 
 		transportFlow:  transportFlow,
 		createdAt:      time.Now(),
 		state:          TCPStateOpening,
+		liveWorkers:    2,
+		slotReserved:   factory != nil,
+	}
+	reverseCtx, reverseCancel := context.WithCancel(parentCtx)
+	s.reverse = &bufferedSIPStream{
+		root:           s,
+		dataChan:       make(chan streamChunk, streamBufferSize),
+		ctx:            reverseCtx,
+		cancel:         reverseCancel,
+		factory:        factory,
+		callIDDetector: NewCallIDDetector(),
+		netFlow:        netFlow.Reverse(),
+		transportFlow:  transportFlow.Reverse(),
+		createdAt:      s.createdAt,
+		state:          TCPStateOpening,
 	}
 
 	// Create state change channel if state-based timeouts are enabled
 	if factory != nil && factory.config != nil && factory.config.EnableStateTCPTimeouts {
 		s.stateChan = make(chan TCPState, 1)
+		s.reverse.stateChan = make(chan TCPState, 1)
 	}
 
 	// Start processing goroutine immediately
 	if factory != nil {
-		factory.allWorkers.Add(1)
+		factory.allWorkers.Add(2)
 	}
 	go s.processLoop()
+	go s.reverse.processLoop()
+	return s
+}
+
+func (s *bufferedSIPStream) connection() *bufferedSIPStream {
+	if s.root != nil {
+		return s.root
+	}
+	return s
+}
+
+func (s *bufferedSIPStream) half(dir reassembly.TCPFlowDirection) *bufferedSIPStream {
+	if dir == reassembly.TCPDirServerToClient && s.reverse != nil {
+		return s.reverse
+	}
 	return s
 }
 
@@ -163,10 +203,11 @@ func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, 
 // it is ignored once a start sequence is established). Connection-boundary
 // handling for TCP 4-tuple reuse is done via ReassemblyComplete eviction, not here.
 func (s *bufferedSIPStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection, nextSeq reassembly.Sequence, start *bool, ac reassembly.AssemblerContext) bool {
+	half := s.half(dir)
 	if !ci.Timestamp.IsZero() {
-		s.captureMu.Lock()
-		s.capturedAt = ci.Timestamp
-		s.captureMu.Unlock()
+		half.captureMu.Lock()
+		half.capturedAt = ci.Timestamp
+		half.captureMu.Unlock()
 	}
 	// A bare SYN (no ACK) on this 4-tuple signals a genuinely new connection —
 	// e.g. a reused inner port after the prior call closed. gopacket keeps the
@@ -177,9 +218,10 @@ func (s *bufferedSIPStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir
 	// reset the non-SIP accounting so it can lock onto SIP even if the previous
 	// occupant of this 4-tuple was non-SIP (or was discarded).
 	if tcp != nil && tcp.SYN && !tcp.ACK {
-		atomic.StoreInt32(&s.discard, 0)
-		atomic.StoreInt32(&s.lockedOnSIP, 0)
-		atomic.StoreInt64(&s.nonSIPBytes, 0)
+		atomic.StoreInt32(&half.discard, 0)
+		atomic.StoreInt32(&half.lockedOnSIP, 0)
+		atomic.StoreInt64(&half.nonSIPBytes, 0)
+		half.rearmPrefix = nil
 	}
 	*start = true
 	return true
@@ -198,24 +240,29 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return
 	}
+	dir, _, _, skip := sg.Info()
+	half := s.half(dir)
 
 	// Fast drop for a still-live but condemned non-SIP stream (the bounded scan
 	// decided this connection is not SIP): stop buffering entirely without even
 	// copying the segment. A FINISHED stream is handled below (it may re-arm).
-	if atomic.LoadInt32(&s.finished) == 0 && atomic.LoadInt32(&s.discard) != 0 {
+	if atomic.LoadInt32(&half.finished) == 0 && atomic.LoadInt32(&half.discard) != 0 {
 		IncrementPreRearmDiscardedChunk()
 		return
 	}
 
 	available, _ := sg.Lengths()
-	_, _, _, skip := sg.Info()
 	gap := streamGap{}
 	if skip > 0 {
 		RecordReassemblyDiscontinuity(skip)
 		gap = streamGap{reason: streamGapReassembly, missingBytes: skip}
 	}
 	if available == 0 {
-		s.pendingGap.merge(gap)
+		if gap.reason != streamGapNone && len(half.rearmPrefix) > 0 {
+			half.rearmPrefix = nil
+			IncrementRearmRejectedChunk()
+		}
+		half.pendingGap.merge(gap)
 		IncrementReassembledEmptyData()
 		return
 	}
@@ -243,33 +290,38 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	// instead of dropped. An in-progress stream (finished == 0) is never re-armed,
 	// so a multi-message connection's later messages keep flowing through the
 	// existing, already-working per-message read loop.
-	if atomic.LoadInt32(&s.finished) != 0 {
-		if !looksLikeSIPStart(data) {
+	if atomic.LoadInt32(&half.finished) != 0 {
+		if gap.reason != streamGapNone && len(half.rearmPrefix) > 0 {
+			half.rearmPrefix = nil
 			IncrementRearmRejectedChunk()
-			return // dead goroutine + non-SIP continuation: nothing can read it
 		}
-		if !s.rearm() {
+		var ready bool
+		data, ready = half.collectRearmStart(data)
+		if !ready {
+			return
+		}
+		if !half.rearm() {
 			return
 		}
 	}
 
 	// Non-blocking send - drop data if buffer is full.
 	// This is better than blocking the packet capture loop.
-	s.captureMu.RLock()
-	capturedAt := s.capturedAt
-	s.captureMu.RUnlock()
-	gap.merge(s.pendingGap)
+	half.captureMu.RLock()
+	capturedAt := half.capturedAt
+	half.captureMu.RUnlock()
+	gap.merge(half.pendingGap)
 	select {
-	case s.dataChan <- streamChunk{data: data, timestamp: capturedAt, gap: gap}:
-		s.pendingGap = streamGap{}
+	case half.dataChan <- streamChunk{data: data, timestamp: capturedAt, gap: gap}:
+		half.pendingGap = streamGap{}
 		logger.Debug("TCP data queued to stream",
 			"bytes", len(data),
-			"flow", fmt.Sprintf("%s:%s->%s:%s", s.netFlow.Src(), s.transportFlow.Src(), s.netFlow.Dst(), s.transportFlow.Dst()))
+			"flow", fmt.Sprintf("%s:%s->%s:%s", half.netFlow.Src(), half.transportFlow.Src(), half.netFlow.Dst(), half.transportFlow.Dst()))
 	default:
 		// Buffer full - drop this chunk (log at debug level to avoid spam)
 		RecordPostReassemblyDrop(len(data))
-		s.pendingGap = gap
-		s.pendingGap.merge(streamGap{reason: streamGapQueueOverflow, droppedBytes: len(data)})
+		half.pendingGap = gap
+		half.pendingGap.merge(streamGap{reason: streamGapQueueOverflow, droppedBytes: len(data)})
 		logger.Debug("TCP stream buffer full, dropping data", "bytes", len(data))
 	}
 }
@@ -281,7 +333,12 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 // Stream instead of appending to the stale one (the SIP-over-TCP port-reuse fix).
 func (s *bufferedSIPStream) ReassemblyComplete(ac reassembly.AssemblerContext) bool {
 	if atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
+		s.rearmPrefix = nil
 		close(s.dataChan)
+		if s.reverse != nil {
+			s.reverse.rearmPrefix = nil
+			close(s.reverse.dataChan)
+		}
 	}
 	return true
 }
@@ -298,6 +355,13 @@ func (s *bufferedSIPStream) ReassemblyComplete(ac reassembly.AssemblerContext) b
 // symmetric with the previous goroutine's teardown (which already did the
 // matching Done()/decrement), so a re-arm counts as a new stream.
 func (s *bufferedSIPStream) rearm() bool {
+	root := s.connection()
+	root.workerMu.Lock()
+	defer root.workerMu.Unlock()
+	if atomic.LoadInt32(&root.closed) != 0 || atomic.LoadInt32(&s.finished) == 0 {
+		return false
+	}
+	newAdmission := root.liveWorkers == 0
 	if s.factory != nil {
 		// Shutdown takes the same lock before starting Wait. Reserve capacity and
 		// register this worker together so no rearm can begin after Wait starts.
@@ -306,18 +370,22 @@ func (s *bufferedSIPStream) rearm() bool {
 			s.factory.lifecycleMu.Unlock()
 			return false
 		}
-		current, reserved := s.factory.reserveStreamSlot()
-		if !reserved {
-			s.factory.lifecycleMu.Unlock()
-			tcpStreamMetrics.mu.Lock()
-			tcpStreamMetrics.droppedStreams++
-			tcpStreamMetrics.mu.Unlock()
-			s.factory.logStreamLimit(current)
-			return false
+		if newAdmission {
+			current, reserved := s.factory.reserveStreamSlot()
+			if !reserved {
+				s.factory.lifecycleMu.Unlock()
+				tcpStreamMetrics.mu.Lock()
+				tcpStreamMetrics.droppedStreams++
+				tcpStreamMetrics.mu.Unlock()
+				s.factory.logStreamLimit(current)
+				return false
+			}
+			root.slotReserved = true
 		}
 		s.factory.allWorkers.Add(1)
 		s.factory.lifecycleMu.Unlock()
 	}
+	root.liveWorkers++
 
 	parentCtx := context.Background()
 	if s.factory != nil {
@@ -334,6 +402,7 @@ func (s *bufferedSIPStream) rearm() bool {
 	}
 	s.createdAt = time.Now()
 	s.pendingGap = streamGap{}
+	s.rearmPrefix = nil
 
 	// Reset per-message parser / lifecycle flags.
 	atomic.StoreInt32(&s.discard, 0)
@@ -344,12 +413,15 @@ func (s *bufferedSIPStream) rearm() bool {
 	s.state = TCPStateOpening
 	s.stateMu.Unlock()
 
-	// Account for the restarted goroutine as a new stream (symmetric with the
-	// prior goroutine's teardown).
-	tcpStreamMetrics.mu.Lock()
-	atomic.AddInt64(&tcpStreamMetrics.activeStreams, 1)
-	tcpStreamMetrics.totalStreamsCreated++
-	tcpStreamMetrics.mu.Unlock()
+	// A rearmed half shares the other half's connection admission. Only a fully
+	// idle connection consumes a fresh slot and becomes a new active stream.
+	if newAdmission {
+		root.workerFailed = false
+		tcpStreamMetrics.mu.Lock()
+		atomic.AddInt64(&tcpStreamMetrics.activeStreams, 1)
+		tcpStreamMetrics.totalStreamsCreated++
+		tcpStreamMetrics.mu.Unlock()
+	}
 
 	logger.Debug("Re-arming reused TCP stream for new SIP message",
 		"flow", fmt.Sprintf("%s:%s->%s:%s", s.netFlow.Src(), s.transportFlow.Src(), s.netFlow.Dst(), s.transportFlow.Dst()))
@@ -364,22 +436,10 @@ func (s *bufferedSIPStream) processLoop() {
 	logger.Debug("SIP stream starting", "flow", srcEndpoint+"->"+dstEndpoint)
 
 	defer func() {
-		if s.factory != nil {
-			defer s.factory.allWorkers.Done()
-		}
-
 		s.cancel()
-
-		// Decrement goroutine counter
-		if s.factory != nil {
-			atomic.AddInt64(&s.factory.activeGoroutines, -1)
-		}
-
-		// Update metrics
-		tcpStreamMetrics.mu.Lock()
-		atomic.AddInt64(&tcpStreamMetrics.activeStreams, -1)
+		failed := false
 		if r := recover(); r != nil {
-			tcpStreamMetrics.totalStreamsFailed++
+			failed = true
 			logger.Error("SIP stream panic recovered",
 				"panic_value", r,
 				"stack_trace", string(debug.Stack()),
@@ -387,10 +447,7 @@ func (s *bufferedSIPStream) processLoop() {
 				"stream_age", time.Since(s.createdAt),
 				"processed_bytes", atomic.LoadInt64(&s.processedBytes),
 				"processed_messages", atomic.LoadInt64(&s.processedMsgs))
-		} else {
-			tcpStreamMetrics.totalStreamsCompleted++
 		}
-		tcpStreamMetrics.mu.Unlock()
 
 		// Cleanup
 		if s.callIDDetector != nil {
@@ -402,9 +459,34 @@ func (s *bufferedSIPStream) processLoop() {
 			"processed_bytes", atomic.LoadInt64(&s.processedBytes),
 			"processed_messages", atomic.LoadInt64(&s.processedMsgs))
 
-		// LAST: mark the goroutine fully exited. Only now may ReassembledSG
-		// re-arm this Stream for a reused 4-tuple.
+		// Registration, final slot release, and rearm use the same root lock.
+		// Mark this half finished only after its channel and detector are unused.
+		root := s.connection()
+		root.workerMu.Lock()
+		if failed {
+			root.workerFailed = true
+		}
 		atomic.StoreInt32(&s.finished, 1)
+		root.liveWorkers--
+		if root.liveWorkers == 0 {
+			if root.slotReserved && root.factory != nil {
+				atomic.AddInt64(&root.factory.activeGoroutines, -1)
+				root.slotReserved = false
+			}
+			tcpStreamMetrics.mu.Lock()
+			atomic.AddInt64(&tcpStreamMetrics.activeStreams, -1)
+			if root.workerFailed {
+				tcpStreamMetrics.totalStreamsFailed++
+			} else {
+				tcpStreamMetrics.totalStreamsCompleted++
+			}
+			tcpStreamMetrics.mu.Unlock()
+			discardTCPBufferedPackets(root.netFlow, root.transportFlow)
+		}
+		root.workerMu.Unlock()
+		if s.factory != nil {
+			s.factory.allWorkers.Done()
+		}
 	}()
 
 	reader := &streamChunkReader{stream: s, state: TCPStateOpening}
@@ -585,12 +667,11 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 	bufReader := bufio.NewReader(reader)
 	timestamped, _ := reader.(interface{ Timestamp() time.Time })
 
-	// Release any per-flow buffered packets on exit. If a SIP message matched
-	// and drained the buffer, the map entry was already removed and this is a
-	// no-op; if the stream ended without a successful match (errNotSIP,
-	// errReadTimeout, ctx cancellation, EOF), this releases the packets
-	// immediately instead of waiting for TCPBufferMaxAge.
-	defer discardTCPBufferedPackets(s.netFlow, s.transportFlow)
+	// Live connections release their canonical packet buffer when both halves
+	// stop. Direct parser use has no connection owner to coordinate cleanup.
+	if s.root == nil && s.reverse == nil {
+		defer discardTCPBufferedPackets(s.netFlow, s.transportFlow)
+	}
 
 	recoveryPending := false
 	defer func() {
@@ -863,11 +944,13 @@ func (s *bufferedSIPStream) readSIPStartLine(bufReader *bufio.Reader) (string, i
 		trimmed := strings.TrimRight(line, "\r\n")
 		if trimmed == "" {
 			// Blank line: a SIP keepalive (RFC 5626 CRLF keepalive) or a message
-			// boundary. Release any per-flow buffered packets captured before
-			// this boundary — on long-lived idle connections this is the only
-			// thing that stops the buffer growing to its cap — and remember we
-			// are at a boundary so a following start line is accepted.
-			discardTCPBufferedPackets(s.netFlow, s.transportFlow)
+			// boundary. A live connection's packet buffer is shared by both
+			// directions; clearing it here could erase packets the other half
+			// still needs. Its size is bounded and it is released when both
+			// readers stop. Direct parser use has no opposite half.
+			if s.root == nil && s.reverse == nil {
+				discardTCPBufferedPackets(s.netFlow, s.transportFlow)
+			}
 			atBoundary = true
 			if scanned > resyncWindowBytes {
 				return "", scanned, errNotSIP
@@ -896,8 +979,16 @@ func (s *bufferedSIPStream) getEndpoints() (srcEndpoint, dstEndpoint string) {
 	return
 }
 
-// SetState updates the TCP connection state for state-based timeouts.
+// SetState updates both readers because TCP connection state is shared by its
+// two sequence spaces.
 func (s *bufferedSIPStream) SetState(newState TCPState) {
+	s.setHalfState(newState)
+	if s.reverse != nil {
+		s.reverse.setHalfState(newState)
+	}
+}
+
+func (s *bufferedSIPStream) setHalfState(newState TCPState) {
 	if s.stateChan == nil {
 		return // State-based timeouts not enabled
 	}
@@ -1166,14 +1257,16 @@ func isSIPResponseLine(line string) bool {
 }
 
 // looksLikeSIPStart reports whether the first line of data is a SIP request or
-// response start line. Used by ReassembledSG to decide whether a reused,
-// already-finished stream should be re-armed (fresh SIP message) rather than
-// dropped. Only the first line (bounded) is inspected so it stays cheap.
+// response start line. The rearm path uses collectRearmStart to handle split
+// lines; this helper remains useful for bounded single-chunk checks.
 func looksLikeSIPStart(data []byte) bool {
 	const maxPeek = 256
 	peek := data
 	if len(peek) > maxPeek {
 		peek = peek[:maxPeek]
+	}
+	for bytes.HasPrefix(peek, []byte("\r\n")) {
+		peek = peek[2:]
 	}
 	first := peek
 	if nl := bytes.IndexByte(peek, '\n'); nl >= 0 {
@@ -1181,6 +1274,69 @@ func looksLikeSIPStart(data []byte) bool {
 	}
 	line := strings.TrimRight(string(first), "\r")
 	return isSIPRequestLine(line) || isSIPResponseLine(line)
+}
+
+// collectRearmStart retains at most one bounded start-line probe while a half
+// has no reader. The assembler owns this state, so it never waits for a parser
+// goroutine. Once a complete valid line arrives, it returns all retained bytes
+// with the current chunk for the new reader.
+func (s *bufferedSIPStream) collectRearmStart(data []byte) ([]byte, bool) {
+	// readSIPStartLine accepts a complete start line through this bound.
+	// Rearm must use the same limit or it can reject a message the parser accepts.
+	const maxRearmPrefixBytes = resyncWindowBytes
+	if len(s.rearmPrefix) == 0 && isSIPKeepaliveOnly(data) {
+		IncrementRearmKeepaliveChunk()
+		return nil, false
+	}
+
+	total := len(s.rearmPrefix) + len(data)
+	probe := make([]byte, 0, min(total, maxRearmPrefixBytes))
+	probe = append(probe, s.rearmPrefix...)
+	probe = append(probe, data[:min(len(data), maxRearmPrefixBytes-len(probe))]...)
+	start := probe
+	for bytes.HasPrefix(start, []byte("\r\n")) {
+		start = start[2:]
+	}
+	if len(start) == 0 && total <= maxRearmPrefixBytes {
+		s.rearmPrefix = nil
+		IncrementRearmKeepaliveChunk()
+		return nil, false
+	}
+	if newline := bytes.IndexByte(start, '\n'); newline >= 0 {
+		line := strings.TrimRight(string(start[:newline]), "\r")
+		if isSIPRequestLine(line) || isSIPResponseLine(line) {
+			if len(s.rearmPrefix) == 0 {
+				return data, true
+			}
+			complete := append(s.rearmPrefix, data...)
+			s.rearmPrefix = nil
+			return complete, true
+		}
+		s.rearmPrefix = nil
+		IncrementRearmRejectedChunk()
+		return nil, false
+	}
+	if total >= maxRearmPrefixBytes {
+		s.rearmPrefix = nil
+		IncrementRearmRejectedChunk()
+		return nil, false
+	}
+	s.rearmPrefix = append(s.rearmPrefix, data...)
+	return nil, false
+}
+
+// A finished half may receive a standalone CRLF keepalive before its next
+// message. It does not need a reader and must not count as a failed rearm.
+func isSIPKeepaliveOnly(data []byte) bool {
+	if len(data) == 0 || len(data)%2 != 0 {
+		return false
+	}
+	for i := 0; i < len(data); i += 2 {
+		if data[i] != '\r' || data[i+1] != '\n' {
+			return false
+		}
+	}
+	return true
 }
 
 // compareHeaderCI performs case-insensitive comparison without allocations

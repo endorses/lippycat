@@ -157,7 +157,7 @@ func init() {
 	// TCP Performance Mode
 	voipTapCmd.Flags().StringVarP(&tcpPerformanceMode, "tcp-performance-mode", "M", "balanced", "TCP performance mode: 'minimal', 'balanced', 'high_performance', 'low_latency'")
 	voipTapCmd.Flags().DurationVar(&tcpSIPIdleTimeout, "tcp-sip-idle-timeout", 0, "Idle timeout for SIP TCP connections (default: 120s, 0 = use default)")
-	voipTapCmd.Flags().IntVar(&tcpMaxStreams, "tcp-max-streams", 0, "Maximum active buffered TCP SIP stream processors (0 = unlimited; positive values may reject new streams)")
+	voipTapCmd.Flags().IntVar(&tcpMaxStreams, "tcp-max-streams", 0, "Maximum active buffered TCP SIP connections, both directions per slot (0 = unlimited)")
 	voipTapCmd.Flags().IntVar(&tcpReassemblyShards, "tcp-reassembly-shards", 1, "Number of flow-sharded TCP reassembly assemblers (default: 1)")
 
 	// Per-call PCAP (VoIP-specific)

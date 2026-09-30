@@ -599,7 +599,7 @@ Inherits all `lc tap` flags, plus:
 | `--rtp-port-range`        | string |            | RTP port range                                                                               |
 | `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency`                           |
 | `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                                                  |
-| `--tcp-max-streams`       | int    | `0`        | Active buffered TCP SIP stream processor cap (0 = unlimited); positive values reject streams |
+| `--tcp-max-streams`       | int    | `0`        | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited)              |
 | `--pattern-algorithm`     | string | `auto`     | Pattern matching algorithm: `auto`, `linear`, `aho-corasick`                                 |
 | `--pattern-buffer-mb`     | int    | `64`       | Pattern buffer size (MB)                                                                     |
 
@@ -766,7 +766,7 @@ Inherits all `lc hunt` flags, plus:
 | `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick`                                           |
 | `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                                                                     |
 | `--tcp-sip-idle-timeout` |       | duration |         | Idle timeout for SIP TCP connections                                                         |
-| `--tcp-max-streams`      |       | int      | `0`     | Active buffered TCP SIP stream processor cap (0 = unlimited); positive values reject streams |
+| `--tcp-max-streams`      |       | int      | `0`     | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited)              |
 
 `--udp-only` is hidden and deprecated for VoIP hunters; use `--sip-port` and `--rtp-port-range` instead.
 

@@ -98,17 +98,17 @@ sudo lc tap voip -i eth0 --udp-only --sip-port 5060 --insecure
 # High-performance VoIP capture
 sudo lc tap voip -i eth0 --tcp-performance-mode high_performance --insecure
 
-# Limit active buffered TCP SIP processors
+# Limit active buffered TCP SIP connections
 sudo lc tap voip -i eth0 --tcp-max-streams 2000 --insecure
 ```
 
 `--tcp-max-streams` sets `voip.max_streams` (default `0`, unlimited). A positive
-value caps active buffered TCP SIP stream processors. When the cap is reached,
-new or restarted streams are rejected and their SIP data is intentionally
-discarded. The cap does not limit TCP connections, reassembly pool entries, or
-total process memory; discarded connections can still occupy pool entries until
-they close or are flushed. A negative value is invalid. The setting also works
-in YAML as `voip.max_streams`.
+value caps active buffered TCP SIP connections; both directions share one slot.
+When the cap is reached, new connections or fully idle rearm attempts are
+rejected and their SIP data is discarded. Discarded connections can still
+occupy reassembly pool entries until they close or are flushed, so this does
+not cap pool entries or total process memory. A negative value is invalid.
+The setting also works in YAML as `voip.max_streams`.
 
 ### `lc tap dns` - DNS Standalone Capture
 

@@ -39,6 +39,7 @@ type tcpStreamMetricsInternal struct {
 	establishedIdleRetentions    int64
 	preRearmDiscardedChunks      int64
 	rearmRejectedChunks          int64
+	rearmKeepaliveChunks         int64
 }
 
 // TCPStreamMetrics represents TCP stream statistics without mutexes for external use
@@ -71,6 +72,7 @@ type TCPStreamMetrics struct {
 	EstablishedIdleRetentions    int64 `json:"established_idle_retentions"`
 	PreRearmDiscardedChunks      int64 `json:"pre_rearm_discarded_chunks"`
 	RearmRejectedChunks          int64 `json:"rearm_rejected_chunks"`
+	RearmKeepaliveChunks         int64 `json:"rearm_keepalive_chunks"`
 }
 
 var tcpStreamMetrics = &tcpStreamMetricsInternal{
@@ -104,6 +106,7 @@ func ResetTCPStreamMetrics() {
 	tcpStreamMetrics.establishedIdleRetentions = 0
 	tcpStreamMetrics.preRearmDiscardedChunks = 0
 	tcpStreamMetrics.rearmRejectedChunks = 0
+	tcpStreamMetrics.rearmKeepaliveChunks = 0
 	tcpStreamMetrics.lastMetricsUpdate = time.Now()
 }
 
@@ -138,6 +141,7 @@ func GetTCPStreamMetrics() TCPStreamMetrics {
 		EstablishedIdleRetentions:    atomic.LoadInt64(&tcpStreamMetrics.establishedIdleRetentions),
 		PreRearmDiscardedChunks:      atomic.LoadInt64(&tcpStreamMetrics.preRearmDiscardedChunks),
 		RearmRejectedChunks:          atomic.LoadInt64(&tcpStreamMetrics.rearmRejectedChunks),
+		RearmKeepaliveChunks:         atomic.LoadInt64(&tcpStreamMetrics.rearmKeepaliveChunks),
 	}
 }
 
@@ -208,7 +212,8 @@ func IncrementEstablishedIdleRetention() {
 func IncrementPreRearmDiscardedChunk() {
 	atomic.AddInt64(&tcpStreamMetrics.preRearmDiscardedChunks, 1)
 }
-func IncrementRearmRejectedChunk() { atomic.AddInt64(&tcpStreamMetrics.rearmRejectedChunks, 1) }
+func IncrementRearmRejectedChunk()  { atomic.AddInt64(&tcpStreamMetrics.rearmRejectedChunks, 1) }
+func IncrementRearmKeepaliveChunk() { atomic.AddInt64(&tcpStreamMetrics.rearmKeepaliveChunks, 1) }
 func IncrementParserFramingDiscontinuity() {
 	atomic.AddInt64(&tcpStreamMetrics.parserFramingDiscontinuities, 1)
 }

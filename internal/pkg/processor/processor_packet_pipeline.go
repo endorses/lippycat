@@ -27,6 +27,7 @@
 package processor
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strconv"
@@ -37,9 +38,96 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	"github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
+
+// sipPayloadFromCapturedPacket returns exactly one complete SIP message from
+// a decoded transport payload. In particular, it never searches IP or TCP
+// headers for SIP text and never includes a following pipelined message.
+func sipPayloadFromCapturedPacket(raw []byte, linkType layers.LinkType) []byte {
+	packet := gopacket.NewPacket(raw, linkType, gopacket.DecodeOptions{Lazy: true, NoCopy: true})
+	if packet.ErrorLayer() != nil {
+		return nil
+	}
+	var payload []byte
+	isTCP := false
+	if tcp := packet.Layer(layers.LayerTypeTCP); tcp != nil {
+		payload = tcp.LayerPayload()
+		isTCP = true
+	} else if udp := packet.Layer(layers.LayerTypeUDP); udp != nil {
+		payload = udp.LayerPayload()
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	// The SIP parser's supported message bound also prevents an unbounded
+	// copy when a packet contains additional transport data.
+	if len(payload) > sip.MaxMessageSize {
+		payload = payload[:sip.MaxMessageSize]
+	}
+	// Synthetic TCP packets and UDP datagrams start at the SIP start line.
+	// Permit bounded CRLF keepalives before a message, but no arbitrary scan
+	// inside the transport payload.
+	for bytes.HasPrefix(payload, []byte("\r\n")) {
+		payload = payload[2:]
+	}
+	if bytes.HasPrefix(payload, []byte("\n")) {
+		payload = payload[1:]
+	}
+	parsed, err := sip.Parse(payload, sip.ParseOptions{})
+	if err != nil {
+		return nil
+	}
+	if _, framed := parsed.Headers["content-length"]; isTCP && !framed {
+		// Without Content-Length the end of a TCP SIP message is ambiguous.
+		return nil
+	}
+	headerEnd := bytes.Index(payload, []byte("\r\n\r\n"))
+	separatorLength := 4
+	if headerEnd < 0 {
+		headerEnd = bytes.Index(payload, []byte("\n\n"))
+		separatorLength = 2
+	}
+	if headerEnd < 0 {
+		return nil
+	}
+	end := headerEnd + separatorLength + len(parsed.Body)
+	if end > len(payload) {
+		return nil
+	}
+	return append([]byte(nil), payload[:end]...)
+}
+
+func sipMetadataForLI(pkt *data.CapturedPacket) *types.VoIPMetadata {
+	meta := pkt.Metadata.Sip
+	voip := &types.VoIPMetadata{
+		CallID:     meta.CallId,
+		Method:     meta.Method,
+		CSeqMethod: meta.CseqMethod,
+		CSeqNumber: meta.CseqNumber,
+		ViaBranch:  meta.ViaBranch,
+		Status:     int(meta.ResponseCode),
+		From:       meta.FromUri,
+		To:         meta.ToUri,
+		FromTag:    meta.FromTag,
+		ToTag:      meta.ToTag,
+		User:       meta.FromUser,
+		RawSIP:     sipPayloadFromCapturedPacket(pkt.Data, layers.LinkType(pkt.LinkType)),
+	}
+	if meta.AccessNetworkInfo != nil {
+		voip.AccessNetworkInfo = &types.AccessNetworkInfo{
+			AccessType: meta.AccessNetworkInfo.AccessType,
+			CellID:     meta.AccessNetworkInfo.CellId,
+			BSSID:      meta.AccessNetworkInfo.Bssid,
+			LocalIP:    meta.AccessNetworkInfo.LocalIp,
+		}
+	}
+	voip.VisitedNetworkID = meta.VisitedNetworkId
+	return voip
+}
 
 // processBatch processes a received packet batch using the source.PacketBatch abstraction.
 // This supports both gRPC (distributed) and local (standalone tap) packet sources.
@@ -221,30 +309,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 					}
 				} else if pkt.Metadata.Sip != nil {
 					// SIP signaling packet
-					display.VoIPData = &types.VoIPMetadata{
-						CallID:     pkt.Metadata.Sip.CallId,
-						Method:     pkt.Metadata.Sip.Method,
-						CSeqMethod: pkt.Metadata.Sip.CseqMethod,
-						CSeqNumber: pkt.Metadata.Sip.CseqNumber,
-						ViaBranch:  pkt.Metadata.Sip.ViaBranch,
-						Status:     int(pkt.Metadata.Sip.ResponseCode),
-						From:       pkt.Metadata.Sip.FromUri,
-						To:         pkt.Metadata.Sip.ToUri,
-						FromTag:    pkt.Metadata.Sip.FromTag,
-						ToTag:      pkt.Metadata.Sip.ToTag,
-						User:       pkt.Metadata.Sip.FromUser,
-					}
-					if pkt.Metadata.Sip.AccessNetworkInfo != nil {
-						display.VoIPData.AccessNetworkInfo = &types.AccessNetworkInfo{
-							AccessType: pkt.Metadata.Sip.AccessNetworkInfo.AccessType,
-							CellID:     pkt.Metadata.Sip.AccessNetworkInfo.CellId,
-							BSSID:      pkt.Metadata.Sip.AccessNetworkInfo.Bssid,
-							LocalIP:    pkt.Metadata.Sip.AccessNetworkInfo.LocalIp,
-						}
-					}
-					if pkt.Metadata.Sip.VisitedNetworkId != "" {
-						display.VoIPData.VisitedNetworkID = pkt.Metadata.Sip.VisitedNetworkId
-					}
+					display.VoIPData = sipMetadataForLI(pkt)
 				}
 			}
 

@@ -341,15 +341,15 @@ VoIP hunter mode provides intelligent call buffering and filtering:
 - `--sip-port` - Restrict SIP capture to specific port(s), comma-separated
 - `--rtp-port-range` - Custom RTP port range(s), comma-separated (default: 10000-32768)
 
-**TCP SIP Processor Limit:**
+**TCP SIP Connection Limit:**
 
 `--tcp-max-streams` sets `voip.max_streams` (default `0`, unlimited). A positive
-value caps active buffered TCP SIP stream processors. When the cap is reached,
-new or restarted streams are rejected and their SIP data is intentionally
-discarded. The cap does not limit TCP connections, reassembly pool entries, or
-total process memory; discarded connections can still occupy pool entries until
-they close or are flushed. A negative value is invalid. The setting also works
-in YAML as `voip.max_streams`.
+value caps active buffered TCP SIP connections; both directions share one slot.
+When the cap is reached, new connections or fully idle rearm attempts are
+rejected and their SIP data is discarded. Discarded connections can still
+occupy reassembly pool entries until they close or are flushed, so this does
+not cap pool entries or total process memory. A negative value is invalid.
+The setting also works in YAML as `voip.max_streams`.
 
 **How It Works:**
 

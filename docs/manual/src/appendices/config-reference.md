@@ -298,18 +298,18 @@ For TCP performance profile details, see [Performance Optimization](../part5-adv
 
 These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performance_mode` sets sensible defaults for all TCP parameters — override individual settings only when needed.
 
-`voip.max_streams` caps active buffered SIP stream processors when positive.
-The default of `0` is unlimited. At the limit, new or restarted TCP SIP streams
-are rejected and their SIP data is intentionally discarded. Discarded TCP
-connections can still occupy reassembly pool entries until they close or are
-flushed, so this is not a limit on TCP connections, pool entries, or total
-process memory. `tap voip` and `hunt voip` reject negative values.
+`voip.max_streams` caps active buffered TCP SIP connections when positive;
+both directions share one admission slot. The default of `0` is unlimited.
+At the limit, new connections or fully idle rearm attempts are rejected and
+their SIP data is discarded. Discarded connections can still occupy reassembly
+pool entries until they close or are flushed, so this does not cap pool entries
+or total process memory. `tap voip` and `hunt voip` reject negative values.
 
 | Key                              | Type     | Default              | Description                                                                                                                                                                                                                                    |
 | -------------------------------- | -------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `voip.tcp_performance_mode`      | string   | `"balanced"`         | `sniff voip` TCP profile: `"balanced"`, `"throughput"`, `"latency"`, or `"memory"`. `tap.voip.tcp_performance_mode` has tap-specific profile names. See [Performance Optimization](../part5-advanced/performance.md#tcp-performance-profiles). |
 | `voip.max_tcp_buffers`           | integer  | `10000`              | Maximum TCP stream buffers.                                                                                                                                                                                                                    |
-| `voip.max_streams`               | integer  | `0`                  | Maximum active buffered TCP SIP stream processors; 0 = unlimited. At a positive limit, new or restarted streams are rejected and their SIP data is discarded.                                                                                  |
+| `voip.max_streams`               | integer  | `0`                  | Maximum active buffered TCP SIP connections, both directions per slot; 0 = unlimited. At a positive limit, new connections or fully idle rearm attempts are rejected.                                                                          |
 | `voip.tcp_memory_limit`          | integer  | `104857600` (100 MB) | Memory limit for TCP reassembly in bytes.                                                                                                                                                                                                      |
 | `voip.tcp_batch_size`            | integer  | `32`                 | Number of TCP segments to process per batch.                                                                                                                                                                                                   |
 | `voip.tcp_io_threads`            | integer  | `4`                  | Number of I/O threads for TCP processing.                                                                                                                                                                                                      |

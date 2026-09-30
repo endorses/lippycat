@@ -46,7 +46,8 @@ type Config struct {
 	// Advisory goroutine threshold
 	MaxGoroutines int `mapstructure:"max_goroutines"`
 
-	// MaxStreams caps active buffered TCP SIP workers. 0 = unlimited.
+	// MaxStreams caps active buffered TCP SIP connections; both directions
+	// share one admission slot. 0 = unlimited.
 	// Unlike MaxGoroutines (a warning threshold), exceeding this rejects new
 	// streams and rearm attempts; it does not cap reassembly pool entries.
 	MaxStreams int `mapstructure:"max_streams"`

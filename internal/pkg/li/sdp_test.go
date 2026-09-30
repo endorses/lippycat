@@ -3,6 +3,7 @@
 package li
 
 import (
+	"fmt"
 	"net/netip"
 	"testing"
 
@@ -130,6 +131,13 @@ func TestSIPMessageBody(t *testing.T) {
 		assert.Equal(t, sdp, sipMessageBody(pkt))
 	})
 
+	t.Run("response wins over INVITE in header and body", func(t *testing.T) {
+		body := "v=0\r\ns=INVITE sip:decoy@example.test SIP/2.0\r\n" + sdp
+		response := fmt.Sprintf("SIP/2.0 200 OK\r\nSubject: INVITE sip:decoy@example.test SIP/2.0\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+		pkt := &types.PacketDisplay{RawData: append([]byte{0x45, 0x00}, []byte(response+"TRAILER")...)}
+		assert.Equal(t, body, sipMessageBody(pkt))
+	})
+
 	t.Run("LF-only separator", func(t *testing.T) {
 		lf := "SIP/2.0 200 OK\nCall-ID: abc\n\n" + sdp
 		pkt := &types.PacketDisplay{VoIPData: &types.VoIPMetadata{RawSIP: []byte(lf)}}
@@ -145,6 +153,11 @@ func TestSIPMessageBody(t *testing.T) {
 
 	t.Run("no SIP message in raw data", func(t *testing.T) {
 		pkt := &types.PacketDisplay{RawData: []byte{0x00, 0x01, 0x02}}
+		assert.Equal(t, "", sipMessageBody(pkt))
+	})
+
+	t.Run("incomplete fallback body", func(t *testing.T) {
+		pkt := &types.PacketDisplay{RawData: []byte("SIP/2.0 200 OK\r\nContent-Length: 10\r\n\r\nv=0")}
 		assert.Equal(t, "", sipMessageBody(pkt))
 	})
 

@@ -74,7 +74,7 @@ func init() {
 
 	// TCP SIP configuration
 	voipHuntCmd.Flags().DurationVar(&hunterTCPSIPIdleTimeout, "tcp-sip-idle-timeout", 0, "Idle timeout for SIP TCP connections (default: 120s, 0 = use default)")
-	voipHuntCmd.Flags().IntVar(&hunterTCPMaxStreams, "tcp-max-streams", 0, "Maximum active buffered TCP SIP stream processors (0 = unlimited; positive values may reject new streams)")
+	voipHuntCmd.Flags().IntVar(&hunterTCPMaxStreams, "tcp-max-streams", 0, "Maximum active buffered TCP SIP connections, both directions per slot (0 = unlimited)")
 
 	// Bind BPF filter optimization flags to viper under hunter.voip.* namespace
 	_ = viper.BindPFlag("hunter.voip.udp_only", voipHuntCmd.Flags().Lookup("udp-only"))

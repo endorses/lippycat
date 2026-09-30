@@ -1,6 +1,7 @@
 package x2x3
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -16,6 +18,114 @@ func TestNewX2Encoder(t *testing.T) {
 	assert.NotNil(t, encoder)
 	assert.NotNil(t, encoder.attrBuilder)
 	assert.Equal(t, uint32(0), encoder.GetSequenceNumber())
+}
+
+func TestFindSIPStartPrefersFirstValidMessage(t *testing.T) {
+	response := []byte("SIP/2.0 200 OK\r\nSubject: INVITE sip:wrong@example.test SIP/2.0\r\nContent-Length: 7\r\n\r\nINVITE ")
+	request := []byte("INVITE sip:bob@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n")
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want int
+	}{
+		{"response with later request token", response, 0},
+		{"binary frame prefix", append([]byte{0x45, 0x00, 0x13, 0xc4}, response...), 4},
+		{"binary frame prefix containing LF", append([]byte{0x45, 0x00, '\n', 0xc4}, response...), 4},
+		{"request", request, 0},
+		{"request midline rejected", []byte("Subject: " + string(request)), -1},
+		{"invalid response code rejected", []byte("SIP/2.0 abc Invalid\r\n\r\n"), -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, FindSIPStart(tc.data))
+		})
+	}
+
+	pkt := &types.PacketDisplay{RawData: append([]byte{0x45, 0x00}, response...), VoIPData: &types.VoIPMetadata{CallID: "call", Status: 200}}
+	pdu, err := NewX2Encoder().EncodeIRI(pkt, uuid.New())
+	require.NoError(t, err)
+	require.NotNil(t, pdu)
+	assert.Equal(t, response, pdu.Payload)
+
+	pkt.VoIPData.RawSIP = append([]byte(nil), response...)
+	pkt.RawData = []byte("INVITE sip:wrong@example.test SIP/2.0\r\n\r\n")
+	pdu, err = NewX2Encoder().EncodeIRI(pkt, uuid.New())
+	require.NoError(t, err)
+	require.NotNil(t, pdu)
+	assert.Equal(t, response, pdu.Payload, "RawSIP must take precedence over a fallback scan")
+
+	for _, raw := range [][]byte{
+		[]byte("SIP/2.0 200 OK\r\nContent-Length: 7\r\n\r\nINV"),
+		[]byte("SIP/2.0 200 OK\r\nContent-Length: bad\r\n\r\nINVITE "),
+		[]byte("SIP/2.0 200 OK\r\nContent-Length: 0\r\n"),
+	} {
+		pkt.VoIPData.RawSIP = nil
+		pkt.RawData = raw
+		pdu, err = NewX2Encoder().EncodeIRI(pkt, uuid.New())
+		require.ErrorIs(t, err, ErrNoSIPPayload)
+		require.Nil(t, pdu)
+	}
+}
+
+func TestFindSIPStartBoundedUppercaseWithoutNewline(t *testing.T) {
+	// RawData may come from an untrusted packet source. A long line of
+	// candidate initial letters must not cause a suffix scan per byte.
+	raw := append([]byte{0x45, 0x00}, bytes.Repeat([]byte{'A'}, 4*sip.MaxMessageSize)...)
+	assert.Equal(t, -1, FindSIPStart(raw))
+	assert.Nil(t, FindSIPMessage(raw))
+}
+
+func TestX2Encoder_BidirectionalSIPAttributesFollowPacketSender(t *testing.T) {
+	encoder := NewX2Encoder()
+	xid := uuid.New()
+	for _, tc := range []struct {
+		name        string
+		payload     []byte
+		meta        *types.VoIPMetadata
+		srcIP       string
+		dstIP       string
+		srcPort     string
+		dstPort     string
+		wantSrcIP   []byte
+		wantDstIP   []byte
+		wantSrcPort []byte
+		wantDstPort []byte
+	}{
+		{
+			name: "request UE to P-CSCF", payload: []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: direction\r\nContent-Length: 0\r\n\r\n"),
+			meta:  &types.VoIPMetadata{CallID: "direction", Method: "INVITE"},
+			srcIP: "192.0.2.10", dstIP: "198.51.100.20", srcPort: "9202", dstPort: "63781",
+			wantSrcIP: []byte{192, 0, 2, 10}, wantDstIP: []byte{198, 51, 100, 20}, wantSrcPort: []byte{0x23, 0xf2}, wantDstPort: []byte{0xf9, 0x25},
+		},
+		{
+			name: "response P-CSCF to UE", payload: []byte("SIP/2.0 200 OK\r\nWarning: 399 proxy INVITE check\r\nCall-ID: direction\r\nContent-Length: 0\r\n\r\n"),
+			meta:  &types.VoIPMetadata{CallID: "direction", Status: 200, CSeqMethod: "INVITE"},
+			srcIP: "198.51.100.20", dstIP: "192.0.2.10", srcPort: "63781", dstPort: "9202",
+			wantSrcIP: []byte{198, 51, 100, 20}, wantDstIP: []byte{192, 0, 2, 10}, wantSrcPort: []byte{0xf9, 0x25}, wantDstPort: []byte{0x23, 0xf2},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			packet := &types.PacketDisplay{
+				Timestamp: time.Now(), SrcIP: tc.srcIP, DstIP: tc.dstIP, SrcPort: tc.srcPort, DstPort: tc.dstPort,
+				VoIPData: tc.meta, RawData: append([]byte{0x45, 0x00}, tc.payload...),
+			}
+			packet.VoIPData.RawSIP = tc.payload
+			pdu, err := encoder.EncodeIRI(packet, xid)
+			require.NoError(t, err)
+			require.NotNil(t, pdu)
+			assert.Equal(t, tc.payload, pdu.Payload)
+			for _, attr := range []struct {
+				typ  AttributeType
+				want []byte
+			}{
+				{AttrSourceIPv4, tc.wantSrcIP}, {AttrDestIPv4, tc.wantDstIP},
+				{AttrSourcePort, tc.wantSrcPort}, {AttrDestPort, tc.wantDstPort},
+			} {
+				got := FindAttribute(pdu.Attributes, attr.typ)
+				require.NotNil(t, got)
+				assert.Equal(t, attr.want, got.Value)
+			}
+		})
+	}
 }
 
 func TestX2Encoder_EncodeIRI_SessionBegin(t *testing.T) {

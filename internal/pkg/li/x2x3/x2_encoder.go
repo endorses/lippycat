@@ -2,11 +2,13 @@
 package x2x3
 
 import (
+	"bytes"
 	"errors"
 	"hash/fnv"
 	"net/netip"
 	"sync/atomic"
 
+	"github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/uuid"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
@@ -274,19 +276,47 @@ func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *t
 }
 
 // setSIPPayload attaches the raw SIP message to the PDU, falling back to
-// scanning the raw packet data for a SIP start line.
+// recovering a complete SIP message from the raw packet data.
 func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *types.VoIPMetadata) error {
 	if len(voip.RawSIP) > 0 {
 		pdu.SetPayload(voip.RawSIP)
 		return nil
 	}
 	if len(pkt.RawData) > 0 {
-		if sipStart := FindSIPStart(pkt.RawData); sipStart >= 0 {
-			pdu.SetPayload(pkt.RawData[sipStart:])
+		if message := FindSIPMessage(pkt.RawData); len(message) > 0 {
+			pdu.SetPayload(message)
 			return nil
 		}
 	}
 	return ErrNoSIPPayload
+}
+
+// FindSIPMessage recovers the first complete SIP message from raw packet
+// bytes. Content-Length, when present, bounds the body and excludes any
+// following transport bytes.
+func FindSIPMessage(data []byte) []byte {
+	start := FindSIPStart(data)
+	if start < 0 {
+		return nil
+	}
+	message := data[start:]
+	if len(message) > sip.MaxMessageSize {
+		message = message[:sip.MaxMessageSize]
+	}
+	headerEnd := bytes.Index(message, []byte("\r\n\r\n"))
+	separatorLength := 4
+	if headerEnd < 0 {
+		headerEnd = bytes.Index(message, []byte("\n\n"))
+		separatorLength = 2
+	}
+	if headerEnd < 0 {
+		return nil
+	}
+	parsed, err := sip.Parse(message, sip.ParseOptions{})
+	if err != nil {
+		return nil
+	}
+	return message[:headerEnd+separatorLength+len(parsed.Body)]
 }
 
 // EncodeSessionBegin creates a Session Begin IRI for a SIP INVITE.
@@ -352,42 +382,50 @@ func (e *X2Encoder) GetSequenceNumber() uint32 {
 // FindSIPStart finds the start of a SIP message in raw packet data.
 // Returns the byte offset of the SIP message, or -1 if not found.
 func FindSIPStart(data []byte) int {
-	// Look for common SIP request methods and "SIP/2.0" response prefix
-	markers := [][]byte{
-		[]byte("INVITE "),
-		[]byte("BYE "),
-		[]byte("ACK "),
-		[]byte("CANCEL "),
-		[]byte("REGISTER "),
-		[]byte("OPTIONS "),
-		[]byte("NOTIFY "),
-		[]byte("SUBSCRIBE "),
-		[]byte("MESSAGE "),
-		[]byte("INFO "),
-		[]byte("UPDATE "),
-		[]byte("REFER "),
-		[]byte("PRACK "),
-		[]byte("PUBLISH "),
-		[]byte("SIP/2.0 "),
+	// Frames have binary link/IP/transport headers before their SIP payload.
+	// Within textual data, only a line boundary can begin another message.
+	// Search in wire order so a response preceding "INVITE " in a header or
+	// body wins over that later method token.
+	const maxScanBytes = sip.MaxMessageSize + 4096 // SIP message plus packet headers
+	if len(data) > maxScanBytes {
+		data = data[:maxScanBytes]
 	}
-	for _, marker := range markers {
-		for i := 0; i <= len(data)-len(marker); i++ {
-			if bytesEqual(data[i:i+len(marker)], marker) {
-				return i
+	binaryPrefix := false
+	lineEnd := -1
+	for i := 0; i < len(data); i++ {
+		if data[i] < 0x20 && data[i] != '\r' && data[i] != '\n' && data[i] != '\t' {
+			binaryPrefix = true
+		}
+		// Find the end of each line once. In particular, an uppercase run
+		// without a newline cannot trigger a repeated suffix search.
+		if i > lineEnd {
+			nextNewline := bytes.IndexByte(data[i:], '\n')
+			if nextNewline < 0 {
+				return -1
 			}
+			lineEnd = i + nextNewline
+		}
+		if i > 0 && data[i-1] != '\n' && !binaryPrefix {
+			continue
+		}
+		if data[i] != 'S' && (data[i] < 'A' || data[i] > 'Z') {
+			continue
+		}
+		if lineEnd-i > 1024 {
+			continue
+		}
+		line := bytes.TrimSuffix(data[i:lineEnd], []byte{'\r'})
+		if !sip.IsStartLine(string(line)) {
+			continue
+		}
+		if _, err := sip.Parse(line, sip.ParseOptions{}); err == nil {
+			return i
 		}
 	}
 	return -1
 }
 
+// bytesEqual is retained for the package's binary golden-file comparisons.
 func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return bytes.Equal(a, b)
 }

@@ -4,7 +4,10 @@ package voip
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,9 +15,55 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTCPLocalPath_ResponseUsesItsOwnCaptureTimestamp(t *testing.T) {
+	h := newTCPSIPHarness(t)
+	const callID = "tcp-response-timestamp@example.com"
+	resetVoipWriteState(h.tracker, callID)
+	t.Cleanup(func() { resetVoipWriteState(h.tracker, callID) })
+	sipusers.ClearAll()
+	t.Cleanup(sipusers.ClearAll)
+
+	from := "<sip:alice@example.com>"
+	invite := tcpSIPMsg("INVITE sip:bob@example.com SIP/2.0", callID, from, "")
+	flow, ports := h.bufferWithPorts(invite, "192.0.2.10", "198.51.100.20", 9202, 63781)
+	require.True(t, h.handler.HandleSIPMessageAt([]byte(invite), callID, "192.0.2.10:9202", "198.51.100.20:63781", flow, ports, time.Unix(100, 0)))
+
+	// A buffered packet from the first half precedes the complete response.
+	// Buffer lookup is connection-wide, so using its first timestamp here would
+	// incorrectly stamp the response with that other packet's capture time.
+	h.bufferWithPorts(invite, "192.0.2.10", "198.51.100.20", 9202, 63781)
+	response := tcpSIPMsg("SIP/2.0 200 OK", callID, from, "")
+	responseAt := time.Unix(1700000020, 0)
+	require.True(t, h.handler.HandleSIPMessageAt([]byte(response), callID, "198.51.100.20:63781", "192.0.2.10:9202", flow.Reverse(), ports.Reverse(), responseAt))
+
+	h.tracker.closeAsyncWriter()
+	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callID))
+	file, err := os.Open(h.sipPath(callID))
+	require.NoError(t, err)
+	defer file.Close()
+	reader, err := pcapgo.NewReader(file)
+	require.NoError(t, err)
+	found := false
+	for {
+		data, info, err := reader.ReadPacketData()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		packet := gopacket.NewPacket(data, layers.LinkTypeEthernet, gopacket.Default)
+		tcp := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
+		if strings.HasPrefix(string(tcp.Payload), "SIP/2.0 200 OK\r\n") {
+			found = true
+			require.True(t, info.Timestamp.Equal(responseAt), "response timestamp = %s, want %s", info.Timestamp, responseAt)
+		}
+	}
+	require.True(t, found, "response must be present in the per-call SIP PCAP")
+}
 
 // tcpSIPHarness drives LocalFileHandler (the lc sniff voip TCP path) against a
 // temporary per-call PCAP. Packets are buffered per network flow exactly as

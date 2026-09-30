@@ -49,7 +49,7 @@ func newLocalFileHandlerWithOutputs(tracker *CallTracker, buffer *BufferManager,
 // on their own headers. Otherwise a target identified only by
 // P-Asserted-Identity on the INVITE would have the rest of its dialog dropped.
 func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
-	return h.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, time.Now())
+	return h.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, time.Time{})
 }
 
 func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
@@ -72,17 +72,20 @@ func (h *LocalFileHandler) handleSIPMessage(sipMessage []byte, event *sharedsip.
 		return false
 	}
 
-	// Take the capture timestamp before releasing the raw buffer: those are the
-	// segments that carried this message, so their time is the message's time.
-	// Falling back to wall-clock would stamp an offline PCAP replay with today.
+	// The reassembler supplies the timestamp of the segment that completed this
+	// message. The canonical raw buffer contains both TCP directions, so its
+	// first packet may belong to the opposite half and must not override that
+	// message timestamp. Legacy callers without a timestamp may use the buffer.
 	ts := capturedAt
 	if ts.IsZero() {
-		ts = time.Now()
-	}
-	if raw, ok := peekFirstTCPBufferedPacket(netFlow, transportFlow); ok && raw.Packet != nil {
-		if bufTS := raw.Packet.Metadata().Timestamp; !bufTS.IsZero() {
-			ts = bufTS
+		if raw, ok := peekFirstTCPBufferedPacket(netFlow, transportFlow); ok && raw.Packet != nil {
+			if bufTS := raw.Packet.Metadata().Timestamp; !bufTS.IsZero() {
+				ts = bufTS
+			}
 		}
+	}
+	if ts.IsZero() {
+		ts = time.Now()
 	}
 
 	// Synthesize a packet carrying exactly this SIP message, using the

@@ -18,7 +18,7 @@ func TestHuntTCPMaxStreamsConfig(t *testing.T) {
 	flag := voipHuntCmd.Flags().Lookup("tcp-max-streams")
 	require.NotNil(t, flag)
 	require.Equal(t, "0", flag.DefValue)
-	require.Contains(t, flag.Usage, "reject new streams")
+	require.Contains(t, flag.Usage, "both directions per slot")
 	originalValue, originalChanged := flag.Value.String(), flag.Changed
 	t.Cleanup(func() {
 		require.NoError(t, flag.Value.Set(originalValue))

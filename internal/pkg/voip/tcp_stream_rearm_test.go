@@ -428,9 +428,10 @@ func TestRearm_RespectsMaxStreamsAndRetriesAfterCapacityReturns(t *testing.T) {
 	transportFlow := gopacket.NewFlow(layers.EndpointTCPPort, sp.Raw(), dp.Raw())
 	first := factory.New(netFlow, transportFlow, &layers.TCP{}, nil).(*bufferedSIPStream)
 	first.cancel()
+	first.reverse.cancel()
 	waitFor(t, func() bool {
-		return loadFinished(first) == 1 && factory.GetActiveGoroutines() == 0
-	}, "first stream worker to exit")
+		return loadFinished(first) == 1 && loadFinished(first.reverse) == 1 && factory.GetActiveGoroutines() == 0
+	}, "both first-connection readers to exit")
 
 	second := factory.New(netFlow, transportFlow, &layers.TCP{}, nil).(*bufferedSIPStream)
 	oldChannel := first.dataChan

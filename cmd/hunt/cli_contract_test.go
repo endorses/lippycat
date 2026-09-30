@@ -127,7 +127,7 @@ func TestHuntRenderedHelpSnapshots(t *testing.T) {
 		"http":  "c587117ea302b8fb34450f0f7f09174b34a599547b2d21871aaf03066b395a02",
 		"tls":   "c7033a6e7274fa02f756b211c1372f9e58baf6ef91e3de7ced459ef72766a5ec",
 		"email": "ec8d19d2c21c9a47f4aed6d083a9b10f3b85abbb7f1b089d55e615fefd1942bc",
-		"voip":  "fb48fff623a954fac18f6449e51c36b82c6ad9bd3f932ac3b8db9d730d8f3a2b",
+		"voip":  "76e589b7920a001f31c7dbface95d8b7e75623c8c412dcbb3184c16ac7e78119",
 	}
 	commands := map[string]*cobra.Command{"hunt": HuntCmd, "dns": dnsHuntCmd, "http": httpHuntCmd, "tls": tlsHuntCmd, "email": emailHuntCmd, "voip": voipHuntCmd}
 	for name, cmd := range commands {

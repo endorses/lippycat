@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
+	"github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -30,9 +31,8 @@ func (e mediaEndpoint) String() string {
 // sipMessageBody returns the message body of the SIP message carried by a
 // packet, or "" when there is no SIP message or no body.
 //
-// VoIPMetadata.RawSIP is preferred but is not populated on the processor's
-// packet pipeline, so this falls back to locating the SIP start line in the
-// raw packet bytes — the same fallback the X2 encoder uses for its payload.
+// VoIPMetadata.RawSIP is preferred. Older packet producers may omit it, so
+// the fallback locates the same SIP start line used by the X2 encoder.
 func sipMessageBody(pkt *types.PacketDisplay) string {
 	if pkt == nil {
 		return ""
@@ -42,22 +42,19 @@ func sipMessageBody(pkt *types.PacketDisplay) string {
 	if pkt.VoIPData != nil && len(pkt.VoIPData.RawSIP) > 0 {
 		msg = pkt.VoIPData.RawSIP
 	} else if len(pkt.RawData) > 0 {
-		start := x2x3.FindSIPStart(pkt.RawData)
-		if start < 0 {
-			return ""
-		}
-		msg = pkt.RawData[start:]
+		msg = x2x3.FindSIPMessage(pkt.RawData)
 	} else {
 		return ""
 	}
 
-	// Headers and body are separated by an empty line. Accept LF-only line
-	// endings as well; some stacks emit them despite RFC 3261 requiring CRLF.
-	if i := bytes.Index(msg, []byte("\r\n\r\n")); i >= 0 {
-		return string(msg[i+4:])
+	// Require complete headers before reading a body. The parser honours
+	// Content-Length, so another message after this one cannot become SDP.
+	if !bytes.Contains(msg, []byte("\r\n\r\n")) && !bytes.Contains(msg, []byte("\n\n")) {
+		return ""
 	}
-	if i := bytes.Index(msg, []byte("\n\n")); i >= 0 {
-		return string(msg[i+2:])
+	parsed, err := sip.Parse(msg, sip.ParseOptions{})
+	if err == nil {
+		return string(parsed.Body)
 	}
 	return ""
 }

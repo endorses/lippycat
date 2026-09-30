@@ -16,7 +16,7 @@ const (
 
 	// Default limits and timeouts
 	DefaultGoroutineLimit = 1000 // Warning threshold for concurrent stream goroutines
-	DefaultMaxStreams     = 0    // Hard cap on concurrent TCP SIP streams (0 = unlimited)
+	DefaultMaxStreams     = 0    // Hard cap on admitted TCP SIP connections (0 = unlimited)
 	DefaultMaxCalls       = 1000 // Default maximum calls to keep in ring buffer
 
 	// Default timeout configurations (configurable via config file)

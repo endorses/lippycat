@@ -178,9 +178,9 @@ func (f *sipStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac
 	// ReassembledSG() NEVER blocks the packet capture loop - data is dropped only
 	// if the buffer is full. This guarantees the capture loop always continues.
 
-	// voip.max_streams caps active buffered stream workers (0 = unlimited):
-	// beyond it, new connections get a stream that discards data instead of
-	// spawning a worker. Discarded connections still occupy reassembly entries.
+	// voip.max_streams caps admitted buffered TCP connections (0 = unlimited).
+	// Both SIP directions share one admission slot. Beyond the cap, new
+	// connections discard data while still occupying reassembly entries.
 	// Reserve the slot atomically across reassembly shards and rearm attempts.
 	current, reserved := f.reserveStreamSlot()
 	if !reserved {
@@ -225,7 +225,8 @@ func (f *sipStreamFactory) reserveStreamSlot() (int64, bool) {
 	}
 }
 
-// GetActiveGoroutines returns the current number of active goroutines
+// GetActiveGoroutines is a legacy name for the number of admitted buffered
+// TCP SIP connections. Both direction readers share one admission slot.
 func (f *sipStreamFactory) GetActiveGoroutines() int64 {
 	return atomic.LoadInt64(&f.activeGoroutines)
 }

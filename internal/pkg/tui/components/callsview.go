@@ -1370,6 +1370,8 @@ func (cv *CallsView) renderCallDetailsContent(selectedCall *Call, width int) str
 			}
 
 			content.WriteString(legStyle.Render(legContent.String()))
+			// End the margin line so the next card starts at the left edge.
+			content.WriteString("\n")
 		}
 
 		// Add hint about graph view (for future implementation)

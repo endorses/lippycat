@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"bytes"
 	"container/list"
 	"fmt"
 	"strings"
@@ -101,83 +102,96 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		return nil
 	}
 
-	// Check for SIP methods using SIMD byte matching (zero allocation)
+	// Preserve the standard-method SIMD fast path, then recognize bounded RFC
+	// extension-method start lines. An unlisted method is still SIP signaling.
+	matchedMethod := ""
 	for i, methodBytes := range s.methodsBytes {
-		if len(ctx.Payload) >= len(methodBytes) &&
-			simd.BytesEqual(ctx.Payload[:len(methodBytes)], methodBytes) {
-			event, err := sharedsip.Parse(ctx.Payload, sharedsip.ParseOptions{})
-			if err != nil {
-				return nil
-			}
-			metadata := s.metadataFromEvent(event)
+		if len(ctx.Payload) >= len(methodBytes) && simd.BytesEqual(ctx.Payload[:len(methodBytes)], methodBytes) {
+			matchedMethod = s.methods[i]
+			break
+		}
+	}
+	if matchedMethod == "" {
+		line := ctx.Payload
+		if len(line) > 1024 {
+			line = line[:1024]
+		}
+		end := bytes.IndexByte(line, '\n')
+		if end < 0 || !sharedsip.IsStartLine(string(bytes.TrimSuffix(line[:end], []byte{'\r'}))) {
+			return nil
+		}
+		fields := bytes.Fields(line[:end])
+		matchedMethod = string(fields[0])
+	}
+	event, err := sharedsip.Parse(ctx.Payload, sharedsip.ParseOptions{})
+	if err != nil {
+		return nil
+	}
+	metadata := s.metadataFromEvent(event)
 
-			// Extract SDP info (media ports and connection IP) for RTP correlation
-			sdpInfo := s.extractSDPInfo(string(event.SDP))
-			if len(sdpInfo.MediaPorts) > 0 {
-				// Store in flow context for RTP correlation
-				if ctx.Flow != nil {
-					ctx.Flow.UpdateState(func(state interface{}) interface{} {
-						sipState, _ := state.(*SIPFlowState)
-						if sipState == nil {
-							sipState = &SIPFlowState{MediaPorts: make([]uint16, 0)}
-						}
-						if callID, ok := metadata["call_id"].(string); ok {
-							sipState.CallID = callID
-						}
-						// Register RTP and implicit RTCP (RTP+1) ports once.
-						for _, port := range sdpInfo.MediaPorts {
-							for _, candidate := range []uint16{port, port + 1} {
-								found := false
-								for _, existing := range sipState.MediaPorts {
-									if existing == candidate {
-										found = true
-										break
-									}
-								}
-								if !found {
-									sipState.MediaPorts = append(sipState.MediaPorts, candidate)
-								}
+	// Extract SDP info (media ports and connection IP) for RTP correlation
+	sdpInfo := s.extractSDPInfo(string(event.SDP))
+	if len(sdpInfo.MediaPorts) > 0 {
+		// Store in flow context for RTP correlation
+		if ctx.Flow != nil {
+			ctx.Flow.UpdateState(func(state interface{}) interface{} {
+				sipState, _ := state.(*SIPFlowState)
+				if sipState == nil {
+					sipState = &SIPFlowState{MediaPorts: make([]uint16, 0)}
+				}
+				if callID, ok := metadata["call_id"].(string); ok {
+					sipState.CallID = callID
+				}
+				// Register RTP and implicit RTCP (RTP+1) ports once.
+				for _, port := range sdpInfo.MediaPorts {
+					for _, candidate := range []uint16{port, port + 1} {
+						found := false
+						for _, existing := range sipState.MediaPorts {
+							if existing == candidate {
+								found = true
+								break
 							}
 						}
-						return sipState
-					})
-
-					metadata["media_ports"] = sdpInfo.MediaPorts
-					// Store connection IP for RTP endpoint registration
-					if sdpInfo.ConnectionIP != "" {
-						metadata["media_ip"] = sdpInfo.ConnectionIP
+						if !found {
+							sipState.MediaPorts = append(sipState.MediaPorts, candidate)
+						}
 					}
 				}
-			}
-
-			// Calculate confidence
-			confidence := s.calculateConfidence(ctx, metadata)
-
-			// Check if we're on standard SIP port for confidence boost
-			portFactor := signatures.PortBasedConfidence(ctx.SrcPort, []uint16{5060, 5061})
-			if portFactor < 1.0 {
-				portFactor = signatures.PortBasedConfidence(ctx.DstPort, []uint16{5060, 5061})
-			}
-			confidence = signatures.AdjustConfidenceByContext(confidence, map[string]float64{
-				"port": portFactor,
+				return sipState
 			})
 
-			// Add method name to metadata from pre-computed list
-			metadata["matched_method"] = s.methods[i]
-
-			// Record this IP pair as a known SIP endpoint pair for future TCP teardown correlation.
-			s.recordSIPIPPair(ctx.SrcIP, ctx.DstIP)
-
-			return &signatures.DetectionResult{
-				Protocol:    "SIP",
-				Confidence:  confidence,
-				Metadata:    metadata,
-				ShouldCache: true,
+			metadata["media_ports"] = sdpInfo.MediaPorts
+			// Store connection IP for RTP endpoint registration
+			if sdpInfo.ConnectionIP != "" {
+				metadata["media_ip"] = sdpInfo.ConnectionIP
 			}
 		}
 	}
 
-	return nil
+	// Calculate confidence
+	confidence := s.calculateConfidence(ctx, metadata)
+
+	// Check if we're on standard SIP port for confidence boost
+	portFactor := signatures.PortBasedConfidence(ctx.SrcPort, []uint16{5060, 5061})
+	if portFactor < 1.0 {
+		portFactor = signatures.PortBasedConfidence(ctx.DstPort, []uint16{5060, 5061})
+	}
+	confidence = signatures.AdjustConfidenceByContext(confidence, map[string]float64{
+		"port": portFactor,
+	})
+
+	// Record the observed standard or extension method.
+	metadata["matched_method"] = matchedMethod
+
+	// Record this IP pair as a known SIP endpoint pair for future TCP teardown correlation.
+	s.recordSIPIPPair(ctx.SrcIP, ctx.DstIP)
+
+	return &signatures.DetectionResult{
+		Protocol:    "SIP",
+		Confidence:  confidence,
+		Metadata:    metadata,
+		ShouldCache: true,
+	}
 }
 
 // normalizeSIPIPPair returns a canonical key for an IP pair, direction-independent.

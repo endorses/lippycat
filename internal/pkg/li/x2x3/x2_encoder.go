@@ -6,6 +6,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"net/netip"
+	"strings"
 	"sync/atomic"
 
 	"github.com/endorses/lippycat/internal/pkg/sip"
@@ -22,21 +23,15 @@ var (
 	// ErrNoCallID is returned when the packet has no Call-ID.
 	ErrNoCallID = errors.New("packet has no Call-ID")
 
-	// ErrUnknownIRIType is returned when the SIP message doesn't map to a known IRI type.
-	ErrUnknownIRIType = errors.New("unknown IRI type for SIP message")
-
 	// ErrNoSIPPayload is returned when no complete SIP message can be recovered.
 	ErrNoSIPPayload = errors.New("no SIP payload available")
 )
 
 // X2Encoder encodes VoIP signaling events into X2 IRI PDUs.
 //
-// X2 carries Intercept Related Information (IRI), which includes:
-//   - Session Begin (SIP INVITE)
-//   - Session Answer (SIP 200 OK to INVITE)
-//   - Session End (SIP BYE)
-//   - Session Attempt (failed call attempts)
-//   - Registration (SIP REGISTER)
+// Every complete, admitted SIP request or response is carried as Payload Format
+// 9. The MDF derives request/response and IRI record semantics from the payload.
+// Task authorization and delivery-type checks belong to the processor.
 //
 // The encoder is safe for concurrent use.
 type X2Encoder struct {
@@ -70,28 +65,32 @@ func NewX2EncoderWithSequencer(sequencer *Sequencer, domainID, nfID string) *X2E
 // The packet must have VoIPMetadata with a valid CallID.
 // The XID identifies the intercept task this IRI belongs to.
 //
-// Returns nil PDU if the SIP message type doesn't require an IRI event
-// (e.g., provisional responses like 180 Ringing).
+// Raw SIP is validated before allocating a product sequence number.
 func (e *X2Encoder) EncodeIRI(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, error) {
-	if pkt.VoIPData == nil {
+	return e.EncodeIRIWithPolicy(pkt, xid, SIPContentFull)
+}
+
+// SIPContentPolicy selects the content that an admitted task may receive.
+type SIPContentPolicy uint8
+
+const (
+	SIPContentFull SIPContentPolicy = iota
+	// SIPContentIRIOnly preserves SDP signalling and withholds every other body,
+	// including SMS MESSAGE, extension methods, and response bodies. This is a
+	// conservative local authorization policy, not SMS TPDU redaction.
+	SIPContentIRIOnly
+)
+
+// EncodeIRIWithPolicy applies a task's content authorization without changing
+// the packet shared with other tasks or with media-direction learning.
+func (e *X2Encoder) EncodeIRIWithPolicy(pkt *types.PacketDisplay, xid uuid.UUID, policy SIPContentPolicy) (*PDU, error) {
+	if pkt == nil || pkt.VoIPData == nil || pkt.VoIPData.IsRTP {
 		return nil, ErrNotVoIP
 	}
-
-	voip := pkt.VoIPData
-	if voip.CallID == "" {
+	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-
-	// Determine whether this SIP message generates an IRI event. The IRI type
-	// itself is derived by the MDF from the raw SIP payload (per TS 103 221-2,
-	// SIP semantics are conveyed via Payload Format 9 + the raw payload, not via
-	// proprietary attributes); we only use it here to gate emission.
-	if _, ok := e.classifyIRIType(voip); !ok {
-		// Not all SIP messages generate IRI events
-		return nil, nil
-	}
-
-	return e.buildSIPPDU(pkt, xid, voip)
+	return e.buildSIPPDUWithPolicy(pkt, xid, pkt.VoIPData, policy)
 }
 
 // NewX2SIPPDU creates an X2 PDU carrying a raw SIP message: PDU Type 1,
@@ -102,70 +101,6 @@ func NewX2SIPPDU(xid uuid.UUID, correlationID uint64) *PDU {
 	pdu.Header.PayloadFormat = PayloadFormatSIP
 	pdu.Header.PayloadDirection = PayloadDirectionUnknown
 	return pdu
-}
-
-// classifyIRIType determines the IRI type from the SIP message.
-// Returns false if no IRI event should be generated.
-func (e *X2Encoder) classifyIRIType(voip *types.VoIPMetadata) (IRIType, bool) {
-	// Handle SIP requests
-	switch voip.Method {
-	case "INVITE":
-		return IRISessionBegin, true
-	case "BYE":
-		return IRISessionEnd, true
-	case "CANCEL":
-		// CANCEL generates SessionAttempt (call was not answered)
-		return IRISessionAttempt, true
-	case "REGISTER":
-		return IRIRegistration, true
-	case "MESSAGE":
-		// SMS-over-IMS, instant messaging
-		return IRIMessage, true
-	case "SUBSCRIBE":
-		// Presence, MWI, dialog event subscriptions
-		return IRISubscription, true
-	case "NOTIFY":
-		// Subscription notifications
-		return IRINotification, true
-	case "PUBLISH":
-		// Presence state publication
-		return IRIPresence, true
-	case "REFER":
-		// Call transfer initiation
-		return IRITransfer, true
-	case "INFO", "UPDATE", "PRACK", "ACK":
-		// Mid-dialog signaling
-		return IRISessionContinue, true
-	case "OPTIONS":
-		// Capability query / keepalive
-		return IRIReport, true
-	}
-
-	// Handle SIP responses
-	if voip.Status > 0 {
-		switch {
-		case voip.Status >= 200 && voip.Status < 300:
-			// 2xx responses indicate success
-			// For INVITE dialogs, 200 OK = SessionAnswer
-			// For REGISTER, 200 OK is captured with the request
-			// We check if this looks like an INVITE response by
-			// the presence of both From and To tags (established dialog)
-			if voip.ToTag != "" {
-				return IRISessionAnswer, true
-			}
-			// 200 OK to REGISTER - captured as part of registration
-			return IRIRegistration, true
-
-		case voip.Status >= 400 && voip.Status < 700:
-			// 4xx/5xx/6xx = call failure
-			// This is a SessionAttempt (failed before answer)
-			return IRISessionAttempt, true
-		}
-		// 1xx provisional responses don't generate IRIs
-		// 3xx redirects are handled at signaling layer
-	}
-
-	return 0, false
 }
 
 // generateCorrelationID creates a deterministic correlation ID from Call-ID.
@@ -261,10 +196,14 @@ func parsePort(s string) (uint16, bool) {
 // conditional attributes and the raw SIP message as payload. All IRI-type and
 // SIP-header semantics are recovered by the MDF from the raw payload.
 func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata) (*PDU, error) {
+	return e.buildSIPPDUWithPolicy(pkt, xid, voip, SIPContentFull)
+}
+
+func (e *X2Encoder) buildSIPPDUWithPolicy(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata, policy SIPContentPolicy) (*PDU, error) {
 	correlationID := e.generateCorrelationID(voip.CallID)
 
 	pdu := NewX2SIPPDU(xid, correlationID)
-	if err := e.setSIPPayload(pdu, pkt, voip); err != nil {
+	if err := e.setSIPPayload(pdu, pkt, voip, policy); err != nil {
 		return nil, err
 	}
 	if err := e.addCommonAttributes(pdu, pkt); err != nil {
@@ -277,18 +216,63 @@ func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *t
 
 // setSIPPayload attaches the raw SIP message to the PDU, falling back to
 // recovering a complete SIP message from the raw packet data.
-func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *types.VoIPMetadata) error {
+func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *types.VoIPMetadata, policy SIPContentPolicy) error {
+	var message []byte
 	if len(voip.RawSIP) > 0 {
-		pdu.SetPayload(voip.RawSIP)
-		return nil
-	}
-	if len(pkt.RawData) > 0 {
-		if message := FindSIPMessage(pkt.RawData); len(message) > 0 {
-			pdu.SetPayload(message)
-			return nil
+		// RawSIP is already framed. Never search past an invalid first message.
+		if FindSIPStart(voip.RawSIP) != 0 {
+			return ErrNoSIPPayload
 		}
+		message = FindSIPMessage(voip.RawSIP)
+	} else {
+		message = FindSIPMessage(pkt.RawData)
 	}
-	return ErrNoSIPPayload
+	if len(message) == 0 {
+		return ErrNoSIPPayload
+	}
+	parsed, err := sip.Parse(message, sip.ParseOptions{})
+	if err != nil {
+		return ErrNoSIPPayload
+	}
+	if policy == SIPContentIRIOnly && len(parsed.Body) > 0 && len(parsed.SDP) == 0 {
+		message = withholdSIPBody(message)
+	}
+	pdu.SetPayload(message)
+	return nil
+}
+
+// withholdSIPBody retains headers and their original line endings, rewrites
+// every long/compact Content-Length (including folded values), and adds it if
+// absent. No body bytes can survive via a stale or duplicate length field.
+func withholdSIPBody(message []byte) []byte {
+	separator, newline := []byte("\r\n\r\n"), []byte("\r\n")
+	headerEnd := bytes.Index(message, separator)
+	if headerEnd < 0 {
+		separator, newline = []byte("\n\n"), []byte("\n")
+		headerEnd = bytes.Index(message, separator)
+	}
+	lines := bytes.Split(message[:headerEnd], newline)
+	result := make([][]byte, 0, len(lines)+1)
+	found, lengthContinuation := false, false
+	for _, line := range lines {
+		if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') && lengthContinuation {
+			continue
+		}
+		lengthContinuation = false
+		colon := bytes.IndexByte(line, ':')
+		if colon > 0 {
+			name := strings.TrimSpace(string(line[:colon]))
+			if strings.EqualFold(name, "Content-Length") || strings.EqualFold(name, "l") {
+				line = append(append([]byte(nil), line[:colon+1]...), []byte(" 0")...)
+				found, lengthContinuation = true, true
+			}
+		}
+		result = append(result, line)
+	}
+	if !found {
+		result = append(result, []byte("Content-Length: 0"))
+	}
+	return append(bytes.Join(result, newline), separator...)
 }
 
 // FindSIPMessage recovers the first complete SIP message from raw packet
@@ -408,7 +392,7 @@ func FindSIPStart(data []byte) int {
 		if i > 0 && data[i-1] != '\n' && !binaryPrefix {
 			continue
 		}
-		if data[i] != 'S' && (data[i] < 'A' || data[i] > 'Z') {
+		if !sip.IsRequestMethod(string(data[i : i+1])) {
 			continue
 		}
 		if lineEnd-i > 1024 {

@@ -117,6 +117,14 @@ func sipMetadataForLI(pkt *data.CapturedPacket) *types.VoIPMetadata {
 		User:       meta.FromUser,
 		RawSIP:     sipPayloadFromCapturedPacket(pkt.Data, layers.LinkType(pkt.LinkType)),
 	}
+	if len(voip.RawSIP) > 0 {
+		parsed, err := sip.Parse(voip.RawSIP, sip.ParseOptions{})
+		if err != nil || parsed.CallID == "" || parsed.CallID != meta.CallId {
+			// Correlation must describe the message actually captured, rather
+			// than an unverified metadata claim from a peer.
+			voip.RawSIP = nil
+		}
+	}
 	if meta.AccessNetworkInfo != nil {
 		voip.AccessNetworkInfo = &types.AccessNetworkInfo{
 			AccessType: meta.AccessNetworkInfo.AccessType,
@@ -310,6 +318,12 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				} else if pkt.Metadata.Sip != nil {
 					// SIP signaling packet
 					display.VoIPData = sipMetadataForLI(pkt)
+					if len(display.VoIPData.RawSIP) == 0 {
+						// A failed transport framing/parse is authoritative. Do not
+						// let the encoder's legacy raw-frame scan recover a later
+						// SIP-looking line from malformed or incomplete traffic.
+						display.VoIPData = nil
+					}
 				}
 			}
 

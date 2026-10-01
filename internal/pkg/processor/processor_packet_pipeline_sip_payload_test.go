@@ -34,9 +34,9 @@ func liTestSIPFrame(t *testing.T, payload []byte, useTCP bool) []byte {
 }
 
 func TestSIPMetadataForLIPreservesCompleteTransportMessage(t *testing.T) {
-	response := []byte("SIP/2.0 200 OK\r\nSubject: INVITE sip:decoy@example.test SIP/2.0\r\nContent-Length: 7\r\n\r\nINVITE ")
-	next := []byte("BYE sip:bob@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n")
-	request := []byte("INVITE sip:bob@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n")
+	response := []byte("SIP/2.0 200 OK\r\nCall-ID: call\r\nSubject: INVITE sip:decoy@example.test SIP/2.0\r\nContent-Length: 7\r\n\r\nINVITE ")
+	next := []byte("BYE sip:bob@example.test SIP/2.0\r\nCall-ID: call\r\nContent-Length: 0\r\n\r\n")
+	request := []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: call\r\nContent-Length: 0\r\n\r\n")
 	for _, tc := range []struct {
 		name    string
 		payload []byte

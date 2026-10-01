@@ -344,7 +344,11 @@ func (p *Processor) initLIRuntime() {
 
 		// Encode and deliver X2 (IRI - signaling) for SIP packets
 		if deliverX2 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP {
-			pdu, err := liX2Encoder.EncodeIRI(pkt, task.XID)
+			policy := x2x3.SIPContentFull
+			if task.DeliveryType == li.DeliveryX2Only {
+				policy = x2x3.SIPContentIRIOnly
+			}
+			pdu, err := liX2Encoder.EncodeIRIWithPolicy(pkt, task.XID, policy)
 			if err != nil {
 				liX2Errors.Add(1)
 				logger.Warn("X2 encode error",

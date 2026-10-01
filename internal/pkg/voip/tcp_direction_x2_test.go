@@ -107,14 +107,13 @@ func TestTCPDirectionRealReassemblyCarriesSenderToX2(t *testing.T) {
 		message          string
 		srcIP, dstIP     string
 		srcPort, dstPort string
-		x2               bool
 	}{
-		"INVITE sip:bob@example.test SIP/2.0": {invite, "192.0.2.10", "198.51.100.20", "9202", "63781", true},
-		"SIP/2.0 100 Trying":                  {trying, "198.51.100.20", "192.0.2.10", "63781", "9202", false},
-		"SIP/2.0 183 Session Progress":        {progress, "198.51.100.20", "192.0.2.10", "63781", "9202", false},
-		"SIP/2.0 200 OK":                      {ok, "198.51.100.20", "192.0.2.10", "63781", "9202", true},
-		"ACK sip:bob@example.test SIP/2.0":    {ack, "192.0.2.10", "198.51.100.20", "9202", "63781", true},
-		"BYE sip:bob@example.test SIP/2.0":    {bye, "192.0.2.10", "198.51.100.20", "9202", "63781", true},
+		"INVITE sip:bob@example.test SIP/2.0": {invite, "192.0.2.10", "198.51.100.20", "9202", "63781"},
+		"SIP/2.0 100 Trying":                  {trying, "198.51.100.20", "192.0.2.10", "63781", "9202"},
+		"SIP/2.0 183 Session Progress":        {progress, "198.51.100.20", "192.0.2.10", "63781", "9202"},
+		"SIP/2.0 200 OK":                      {ok, "198.51.100.20", "192.0.2.10", "63781", "9202"},
+		"ACK sip:bob@example.test SIP/2.0":    {ack, "192.0.2.10", "198.51.100.20", "9202", "63781"},
+		"BYE sip:bob@example.test SIP/2.0":    {bye, "192.0.2.10", "198.51.100.20", "9202", "63781"},
 	} {
 		got, found := handler.records[start]
 		require.True(t, found, "missing %q", start)
@@ -124,10 +123,6 @@ func TestTCPDirectionRealReassemblyCarriesSenderToX2(t *testing.T) {
 		require.Equal(t, want.srcPort, got.srcPort)
 		require.Equal(t, want.dstPort, got.dstPort)
 		require.Equal(t, []byte(want.message), got.payload)
-		if !want.x2 {
-			require.Nil(t, got.pdu, "1xx X2 emission is tracked by the separate LI coverage plan")
-			continue
-		}
 		require.NotNil(t, got.pdu)
 		require.Equal(t, []byte(want.message), got.pdu.Payload)
 		srcIPAttr := x2x3.FindAttribute(got.pdu.Attributes, x2x3.AttrSourceIPv4)

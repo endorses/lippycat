@@ -313,9 +313,9 @@ func TestDetectSipMethod_Comprehensive(t *testing.T) {
 			expectedMethod: "INVITE",
 		},
 		{
-			name:           "Case sensitivity test",
+			name:           "Lowercase extension token",
 			startLine:      "invite sip:user@example.com SIP/2.0",
-			expectedMethod: "", // Case sensitive
+			expectedMethod: "invite", // An extension token, not the standard INVITE method
 		},
 	}
 
@@ -379,14 +379,14 @@ func TestIsSipStartLine_EdgeCases(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "Partial SIP method",
+			name:     "Short extension method",
 			line:     "INV sip:user@example.com SIP/2.0",
-			expected: false,
+			expected: true,
 		},
 		{
-			name:     "Case sensitivity",
+			name:     "Lowercase extension method",
 			line:     "invite sip:user@example.com SIP/2.0",
-			expected: false, // Case sensitive
+			expected: true, // RFC extension-method token syntax includes lowercase
 		},
 	}
 

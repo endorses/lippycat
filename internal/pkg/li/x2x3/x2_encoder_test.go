@@ -371,13 +371,13 @@ func TestX2Encoder_EncodeIRI_ProvisionalResponse(t *testing.T) {
 	encoder := NewX2Encoder()
 	xid := uuid.New()
 
-	// 180 Ringing should not generate an IRI
+	// 180 Ringing is signaling and must generate an IRI.
 	pkt := &types.PacketDisplay{
 		Timestamp: time.Now(),
 		SrcIP:     "192.168.1.200",
 		DstIP:     "192.168.1.100",
 		Protocol:  "SIP",
-		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
+		RawData:   []byte("SIP/2.0 180 Ringing\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: "abc123@192.168.1.100",
 			Status: 180, // Ringing
@@ -388,7 +388,8 @@ func TestX2Encoder_EncodeIRI_ProvisionalResponse(t *testing.T) {
 
 	pdu, err := encoder.EncodeIRI(pkt, xid)
 	assert.NoError(t, err)
-	assert.Nil(t, pdu) // No IRI for provisional responses
+	require.NotNil(t, pdu)
+	assert.Equal(t, pkt.RawData, pdu.Payload)
 }
 
 func TestX2Encoder_CorrelationID_Deterministic(t *testing.T) {
@@ -674,5 +675,100 @@ func TestParsePort(t *testing.T) {
 				assert.Equal(t, tt.expected, port)
 			}
 		})
+	}
+}
+
+func TestX2Encoder_AllSignallingSharesCorrelationAndSequence(t *testing.T) {
+	encoder := NewX2Encoder()
+	xid := uuid.New()
+	starts := []string{"SIP/2.0 100 Trying", "SIP/2.0 180 Ringing", "SIP/2.0 183 Session Progress", "SIP/2.0 302 Moved Temporarily", "SERVICE sip:bob@example.test SIP/2.0", "SIP/2.0 200 OK", "SIP/2.0 486 Busy Here"}
+	var correlation uint64
+	for i, start := range starts {
+		t.Run(start, func(t *testing.T) {
+			raw := []byte(start + "\r\nCall-ID: coverage\r\nCSeq: 1 SERVICE\r\nContent-Length: 0\r\n\r\n")
+			ev, err := sip.Parse(raw, sip.ParseOptions{})
+			require.NoError(t, err)
+			packet := &types.PacketDisplay{Timestamp: time.Unix(42, 0), SrcIP: "192.0.2.1", DstIP: "192.0.2.2", SrcPort: "12345", DstPort: "5060", VoIPData: &types.VoIPMetadata{CallID: ev.CallID, Method: ev.Method, Status: ev.ResponseCode, RawSIP: raw}}
+			pdu, err := encoder.EncodeIRI(packet, xid)
+			require.NoError(t, err)
+			require.NotNil(t, pdu)
+			require.Equal(t, raw, pdu.Payload)
+			require.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
+			require.Equal(t, xid, pdu.Header.XID)
+			if i == 0 {
+				correlation = pdu.Header.CorrelationID
+			}
+			require.Equal(t, correlation, pdu.Header.CorrelationID)
+			require.EqualValues(t, i, encoder.GetSequenceNumber())
+			require.Equal(t, []byte{192, 0, 2, 1}, FindAttribute(pdu.Attributes, AttrSourceIPv4).Value)
+			require.Equal(t, []byte{192, 0, 2, 2}, FindAttribute(pdu.Attributes, AttrDestIPv4).Value)
+			require.Equal(t, []byte{0x30, 0x39}, FindAttribute(pdu.Attributes, AttrSourcePort).Value)
+			require.Equal(t, []byte{0x13, 0xc4}, FindAttribute(pdu.Attributes, AttrDestPort).Value)
+		})
+	}
+}
+
+func TestX2Encoder_RejectsMalformedRawSIPBeforeSequencing(t *testing.T) {
+	encoder := NewX2Encoder()
+	xid := uuid.New()
+	packet := &types.PacketDisplay{VoIPData: &types.VoIPMetadata{CallID: "valid", Method: "SERVICE"}, RawData: []byte("INVITE sip:valid@example.test SIP/2.0\r\n\r\n")}
+	for _, raw := range []string{
+		"SERVICE sip:bob@example.test SIP/2.0\r\nContent-Length: 4\r\n\r\nx",
+		"SERVICE sip:bob@example.test SIP/2.0\r\nContent-Length: bad\r\n\r\n",
+		"SERVICE sip:bob@example.test SIP/2.0\r\nContent-Length: 1\r\nContent-Length: 0\r\n\r\nx",
+		"SIP/2.0 700 Invalid\r\n\r\n",
+		"SIP/2.0 abc Invalid\r\n\r\n",
+		"SERVICE sip:bob@example.test SIP/2.0\r\n",
+		"malformed\r\nINVITE sip:bob@example.test SIP/2.0\r\n\r\n",
+	} {
+		packet.VoIPData.RawSIP = []byte(raw)
+		pdu, err := encoder.EncodeIRI(packet, xid)
+		require.ErrorIs(t, err, ErrNoSIPPayload, raw)
+		require.Nil(t, pdu)
+	}
+	packet.VoIPData.RawSIP = packet.RawData
+	pdu, err := encoder.EncodeIRI(packet, xid)
+	require.NoError(t, err)
+	require.NotNil(t, pdu)
+	require.Zero(t, encoder.GetSequenceNumber(), "invalid messages must not consume a sequence")
+}
+
+func TestX2Encoder_IRIOnlyBodyPolicy(t *testing.T) {
+	for _, start := range []string{"MESSAGE sip:bob@example.test SIP/2.0", "SERVICE sip:bob@example.test SIP/2.0", "SIP/2.0 183 Session Progress", "SIP/2.0 302 Moved Temporarily"} {
+		for _, ct := range []string{"text/plain", "application/vnd.3gpp.sms", "multipart/mixed; boundary=part", "application/evil-application/sdp", "application/sdp+foo", "application/sdp", "Application/SDP; charset=utf-8"} {
+			t.Run(start+"/"+ct, func(t *testing.T) {
+				raw := []byte(start + "\r\nCall-ID: body-policy\r\nContent-Type: " + ct + "\r\nContent-Length: 6\r\nl: 6\r\n\r\nsecret")
+				packet := &types.PacketDisplay{VoIPData: &types.VoIPMetadata{CallID: "body-policy", RawSIP: raw}}
+				encoder := NewX2Encoder()
+				full, err := encoder.EncodeIRIWithPolicy(packet, uuid.New(), SIPContentFull)
+				require.NoError(t, err)
+				require.Equal(t, raw, full.Payload)
+				iri, err := encoder.EncodeIRIWithPolicy(packet, uuid.New(), SIPContentIRIOnly)
+				require.NoError(t, err)
+				parsed, err := sip.Parse(iri.Payload, sip.ParseOptions{})
+				require.NoError(t, err)
+				if ct == "application/sdp" || ct == "Application/SDP; charset=utf-8" {
+					require.Equal(t, raw, iri.Payload, "SDP remains signaling information")
+				} else {
+					require.Empty(t, parsed.Body)
+					require.Equal(t, "0", parsed.Headers["content-length"])
+					require.NotContains(t, string(iri.Payload), "secret")
+				}
+				require.Equal(t, raw, packet.VoIPData.RawSIP, "a task must never mutate the shared capture")
+			})
+		}
+	}
+	for _, raw := range []string{
+		"MESSAGE sip:bob@example.test SIP/2.0\r\nContent-Length:\r\n 6\r\nContent-Type: text/plain\r\n\r\nsecret",
+		"MESSAGE sip:bob@example.test SIP/2.0\nContent-Type: text/plain\n\nsecret",
+	} {
+		packet := &types.PacketDisplay{VoIPData: &types.VoIPMetadata{CallID: "body-policy", RawSIP: []byte(raw)}}
+		pdu, err := NewX2Encoder().EncodeIRIWithPolicy(packet, uuid.New(), SIPContentIRIOnly)
+		require.NoError(t, err)
+		parsed, err := sip.Parse(pdu.Payload, sip.ParseOptions{})
+		require.NoError(t, err)
+		require.Empty(t, parsed.Body)
+		require.Equal(t, "0", parsed.Headers["content-length"])
+		require.NotContains(t, string(pdu.Payload), "secret")
 	}
 }

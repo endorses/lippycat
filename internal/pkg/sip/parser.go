@@ -17,7 +17,8 @@ var (
 	ErrMalformedContentLength = errors.New("malformed SIP Content-Length")
 )
 
-// RequestMethods is the single method set used for SIP detection and framing.
+// RequestMethods lists standard methods for protocol signatures. SIP parsing
+// and framing also accept extension methods with the RFC 3261 token syntax.
 var RequestMethods = [...]string{
 	"INVITE", "ACK", "BYE", "CANCEL", "REGISTER", "OPTIONS", "PRACK",
 	"SUBSCRIBE", "NOTIFY", "PUBLISH", "INFO", "REFER", "MESSAGE", "UPDATE",
@@ -76,13 +77,19 @@ type SIPEvent struct {
 // Event is retained as the short spelling for consumers.
 type Event = SIPEvent
 
+// IsRequestMethod accepts standard and extension methods (RFC 3261 section
+// 25.1: Method = ... / extension-method; extension-method = token).
 func IsRequestMethod(method string) bool {
-	for _, candidate := range RequestMethods {
-		if method == candidate {
-			return true
-		}
+	if method == "" {
+		return false
 	}
-	return false
+	for _, c := range []byte(method) {
+		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || strings.ContainsRune("-.!%*_+`'~", rune(c)) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func IsStartLine(line string) bool {

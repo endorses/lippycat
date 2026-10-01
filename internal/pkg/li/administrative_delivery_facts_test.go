@@ -23,7 +23,7 @@ func TestCommittedTaskFactsIncludeTimingOnlyUpdateAndAreDetached(t *testing.T) {
 	task := idempotencyTask(uuid.New(), dids, time.Time{})
 	require.NoError(t, m.ActivateTask(task))
 	require.Len(t, facts, 1)
-	end := time.Now().Add(time.Hour).UTC()
+	end := task.EndTime.Add(time.Hour)
 	require.NoError(t, m.ModifyTask(task.XID, &TaskModification{EndTime: &end}))
 	require.Len(t, facts, 2)
 	require.Equal(t, facts[0].ActivationGeneration, facts[1].ActivationGeneration)
@@ -55,7 +55,7 @@ func TestCommittedTaskFactsExcludeFailedAndUncertainProvisionalUpdates(t *testin
 				}
 				return write(name, data)
 			}
-			end := time.Now().Add(time.Hour).UTC()
+			end := task.EndTime.Add(time.Hour)
 			err := m.ModifyTask(task.XID, &TaskModification{EndTime: &end})
 			require.Error(t, err)
 			if outcome == securestore.Committed {

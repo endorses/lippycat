@@ -1,6 +1,6 @@
 # LI task-definition convergence and X1 read-back
 
-**Status:** Proposed
+**Status:** Complete — implemented and verified 2026-10-01
 
 **Implementation baseline:** `main` at `7ac7a1f3` or later
 
@@ -69,24 +69,24 @@ destination addresses, or incident data. Tests must use synthetic definitions.
 
 ## Work 1 — Represent completeness and provenance
 
-- [ ] Add a typed snapshot conversion result that records whether mediation
+- [x] Add a typed snapshot conversion result that records whether mediation
       details, start, end, and implicit-deactivation fields were supplied.
       Keep omission distinct from an explicitly absent end in a complete
       mediation definition. Validate inconsistent or malformed combinations.
-- [ ] Track whether the effective definition came from an X1 push/modify, an
+- [x] Track whether the effective definition came from an X1 push/modify, an
       ADMF pull, or local restore. Persist enough provenance and completeness
       state to survive restart, without turning a restored candidate into an
       authority on its own. Migrate older state files conservatively.
-- [ ] Include provenance and completeness changes in the existing
+- [x] Include provenance and completeness changes in the existing
       administrative and lifecycle transactions. Remove or retire metadata
       with its task so it cannot affect reuse of an XID.
-- [ ] Add an opt-in configuration setting for the complete-ADMF contract.
+- [x] Add an opt-in configuration setting for the complete-ADMF contract.
       Default to compatibility mode. Read the setting at startup, rather than
       switching live tasks in place. Document its effect on startup and
       reconciliation. Before enabling it, verify that held unknown-window
       tasks have been repaired or will be replaced by a complete startup
       snapshot; do not silently disarm them through a configuration change.
-- [ ] In strict mode, keep a new incomplete task outside the enforcing
+- [x] In strict mode, keep a new incomplete task outside the enforcing
       registry/filter path until a complete definition arrives. In
       compatibility mode, preserve current admission but mark the window
       unknown. A partial pull of a held task must retain known fields in both
@@ -94,88 +94,122 @@ destination addresses, or incident data. Tests must use synthetic definitions.
 
 ## Work 2 — Converge task definitions safely
 
-- [ ] Add one internal full-definition promotion operation for a pull-owned
+- [x] Add one internal full-definition promotion operation for a pull-owned
       partial task, including a missing start time. Validate the proposed
       definition and destinations before changing live state; apply filters,
       delivery authorization, generation, and persistence atomically, with
       rollback on failure. Do not route this case through the public X1
       `ModifyTask` method, which has no start-time field.
-- [ ] Use that operation when a full `ActivateTask` follows a partial pull.
+- [x] Use that operation when a full `ActivateTask` follows a partial pull.
       Keep the existing error 300 for a genuinely conflicting push-owned task
       and preserve idempotent behavior for equivalent retries.
-- [ ] Reconcile complete definitions for held pull-owned and restored tasks.
+- [x] Reconcile complete definitions for held pull-owned and restored tasks.
       Use the existing modification path for fields it supports, and the
       internal promotion path when start time must be filled. Do not overwrite
       known fields from an incomplete pull. Keep RADIUS tasks on their
       existing specialized path.
-- [ ] For a conflict between a complete pull and a push-owned definition,
+- [x] For a conflict between a complete pull and a push-owned definition,
       record drift and require an explicit X1 change unless the ADMF provides
       a monotonic task revision or another verifiable freshness guarantee.
       Do not infer freshness from the response message timestamp or local
       lock ordering. Document this limitation in operator guidance.
-- [ ] Review narrowing changes to start/end, targets, delivery type, and
+- [x] Review narrowing changes to start/end, targets, delivery type, and
       destination set against queued X2/X3 and replay authorization. Cancel or
       reject buffered product that cannot be shown to belong to the resulting
       authorization; preserve a generation only when the existing lifecycle
       rules permit it.
-- [ ] Keep incomplete startup snapshots from confirming persisted replay or
+- [x] Keep incomplete startup snapshots from confirming persisted replay or
       removing tasks based on conversion failures. On a later complete
       snapshot, restore replay authorization only after exact authorized
       identity and generation checks.
 
 ## Work 3 — E.164 type and X1 response validity
 
-- [ ] Add an internal E.164 target type without renumbering existing persisted
+- [x] Add an internal E.164 target type without renumbering existing persisted
       target values. Update X1 push/pull conversion, canonical comparisons,
       registry validation, filters, direction matching, and state codec.
-- [ ] Accept schema-valid E.164 wire values as 1–15 digits. Reject a
+- [x] Accept schema-valid E.164 wire values as 1–15 digits. Reject a
       plus-prefixed `e164Number` as invalid input unless an explicit
       compatibility rule is justified and tested; never emit an invalid
       `<e164Number>`. Keep a valid `tel:` URI as TEL URI.
-- [ ] Handle legacy persisted bare-digit TEL URI values without changing their
+- [x] Handle legacy persisted bare-digit TEL URI values without changing their
       matching behavior or emitting invalid XML. Test how a full ADMF snapshot
       with the new E.164 type interacts with persisted activation identity and
       replay confirmation.
-- [ ] Validate representative `GetTaskDetails` and related X1 responses
+- [x] Validate representative `GetTaskDetails` and related X1 responses
       against the bundled ETSI XSD, including E.164, TEL URI, and legacy state.
 
 ## Work 4 — Drift visibility and deactivation logs
 
-- [ ] Expose aggregate counts for incomplete task definitions, pull-only
+- [x] Expose aggregate counts for incomplete task definitions, pull-only
       definitions, and unresolved definition conflicts through existing LI
       status/telemetry. Distinguish unknown windows from explicitly open-ended
       tasks; avoid per-task metric labels.
-- [ ] Log definition changes and unresolved conflicts with field names,
+- [x] Log definition changes and unresolved conflicts with field names,
       provenance, and reason, without logging target or destination values.
       Count successful reconciliation repairs separately from unresolved
       conflicts.
-- [ ] Change the processor deactivation message to a neutral phrase and a
+- [x] Change the processor deactivation message to a neutral phrase and a
       stable named cause (`admf`, `expired`, `fault`). Include the task end time
       only for expiry. Verify explicit ADMF deactivation is never described as
       implicit expiry.
 
 ## Verification and rollout
 
-- [ ] Test compatibility and strict modes with synthetic complete, partial,
+- [x] Test compatibility and strict modes with synthetic complete, partial,
       and explicitly open-ended snapshots. Cover restart, missing destination,
       conversion failure, and a partial pull followed by a full push.
-- [ ] Test held-task reconciliation for changed end time, targets, and
+- [x] Test held-task reconciliation for changed end time, targets, and
       destinations; a missing start filled by promotion; rollback on failure;
       and an outdated ADMF response returned after an X1 push. Assert no
       unauthorized filters or X2/X3 delivery during transitions.
-- [ ] Test persisted candidates and replay authorization across partial then
+- [x] Test persisted candidates and replay authorization across partial then
       complete snapshots, including legacy state and activation-generation
       changes. Confirm incomplete definitions cannot authorize replay.
-- [ ] Test X1 error mapping, schema-valid E.164 read-back, TEL URI read-back,
+- [x] Test X1 error mapping, schema-valid E.164 read-back, TEL URI read-back,
       phone matching, and named deactivation reasons. Use synthetic identifiers
       and payloads only.
-- [ ] Run focused LI, X1, processor, and persistence tests with the `li` build
+- [x] Run focused LI, X1, processor, and persistence tests with the `li` build
       tag; run relevant race tests and build processor/tap variants with and
       without LI. Record actual results without introducing performance gates.
-- [ ] Document the compatibility default and the explicit precondition for
+- [x] Document the compatibility default and the explicit precondition for
       strict mode. Before declaring old tasks repaired, verify complete
       start/end/implicit fields through a schema-valid X1 read-back or an
       equivalent authoritative check. A reassert request or error code alone
       is not proof of full repair.
-- [ ] Format changed files, check off only verified plan tasks, and commit the
+- [x] Format changed files, check off only verified plan tasks, and commit the
       code and updated plan when implementation is complete.
+
+
+## Implementation and verification record
+
+Definitions carry persisted source, field presence, restoration, candidate, and
+conflict state. Generic startup and periodic pulls share convergence logic;
+strict candidates remain outside enforcement. Pushed ownership survives restart,
+while a partial pull retains the known authorization and cannot confirm replay.
+Full repairs use the administrative transaction, filter, delivery-revocation,
+and activation-generation barriers. Narrowing a window cancels the previous
+generation; permitted extensions retain it. RADIUS retains its specialized path.
+
+E.164 has appended target enum value 13, accepts 1–15 ASCII digits, and retains
+legacy bare-digit TEL identity equivalence without changing phone matching.
+X1 field-presence read-back preserves unknown windows and validates against the
+bundled ETSI XSD. Configuration, aggregate status, neutral deactivation causes,
+and rollout requirements are documented in `docs/LI_INTEGRATION.md`.
+
+| Verification | Result |
+| --- | --- |
+| `go test -tags li ./internal/pkg/li/... -count=1 -timeout 180s` | Passed: LI, delivery/persistence, X1, X2/X3 |
+| `go test -tags all,li ./internal/pkg/li/... ./cmd/process ./cmd/tap ./internal/pkg/statusclient -count=1 -timeout 180s` | LI, process, and status passed; expected tap help snapshots updated for the new flag, then the full tap suite passed separately |
+| `go test -tags all ./cmd/tap ./cmd/process ./internal/pkg/statusclient -count=1` | Passed without LI |
+| Focused LI/X1 race tests for definition, snapshot, replay, restore, strict-mode, candidate, E.164, and wire-presence behavior | Passed |
+| Focused RADIUS isolation, completeness-only repair, and log-privacy race regressions | Passed |
+| Focused processor persistence, replay, timing-policy, cutoff, configuration, deactivation, and telemetry race tests | Passed: 38 cases |
+| `go build -tags processor`, `tap`, `processor,li`, and `tap,li` | All four role variants passed |
+| Bundled XSD validation via required `xmllint` | E.164, TEL URI, legacy state, partial/complete windows, and related X1 responses passed |
+| Formatting and whitespace | Changed Go files formatted; `git diff --check` passed |
+
+The bounded closure review resolved RADIUS isolation and completeness-only
+repair visibility findings. The integrated review found no remaining material
+issue. Verification used synthetic identities and local test endpoints; no live
+ADMF task was changed or claimed repaired. Strict mode remains opt-in.

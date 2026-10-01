@@ -16,7 +16,7 @@ func TestStartupReplayGenerationRequiresSameTaskDefinition(t *testing.T) {
 		t.Run(fmt.Sprint(changed), func(t *testing.T) {
 			did, xid := uuid.New(), uuid.New()
 			target := schema.SIPURI("sip:alice@example.com")
-			details := makeTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})
+			details := makeCompleteTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})
 			restored, err := TaskResponseDetailsToInterceptTask(details)
 			require.NoError(t, err)
 			restored.ActivationGeneration = 7

@@ -118,11 +118,12 @@ type Config struct {
 	LIADMFTLSCAFile   string // Path to CA certificate for verifying ADMF server
 	LIADMFKeepalive   string // Keepalive interval for ADMF notifications (e.g., "30s", "0" to disable)
 	// LI ADMF state sync settings
-	LIADMFSyncOnStartup     bool          // Query ADMF for task/destination state on startup
-	LIADMFSyncTimeout       time.Duration // Timeout for startup state sync
-	LIADMFReconcileInterval time.Duration // Periodic reconciliation interval (0 = disabled)
-	LIStateFile             string        // Explicitly initialized encrypted LI lifecycle snapshot; empty disables persistence
-	LIStateKeys             securestore.KeyConfig
+	LIADMFSyncOnStartup        bool          // Query ADMF for task/destination state on startup
+	LIADMFSyncTimeout          time.Duration // Timeout for startup state sync
+	LIADMFReconcileInterval    time.Duration // Periodic reconciliation interval (0 = disabled)
+	LIADMFCompleteTaskContract bool          // Strict admission; requires a complete-task ADMF contract
+	LIStateFile                string        // Explicitly initialized encrypted LI lifecycle snapshot; empty disables persistence
+	LIStateKeys                securestore.KeyConfig
 	// LI Delivery (X2/X3) TLS settings - mutual TLS is required for delivery
 	LIDeliveryTLSCertFile                   string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
 	LIDeliveryTLSKeyFile                    string   // Path to client TLS key for X2/X3 delivery

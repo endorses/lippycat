@@ -69,10 +69,11 @@ var (
 	liDeliveryX3AcknowledgeInboundKeepalive bool
 	liDeliveryShutdownTimeout               time.Duration
 	// LI ADMF state sync flags
-	liADMFSyncOnStartup     bool
-	liADMFSyncTimeout       time.Duration
-	liADMFReconcileInterval time.Duration
-	liStateFile             string
+	liADMFSyncOnStartup        bool
+	liADMFSyncTimeout          time.Duration
+	liADMFReconcileInterval    time.Duration
+	liADMFCompleteTaskContract bool
+	liStateFile                string
 )
 
 // LIConfig holds all LI-related configuration.
@@ -133,11 +134,12 @@ type LIConfig struct {
 	DeliveryX3AcknowledgeInboundKeepalive bool
 	DeliveryShutdownTimeout               time.Duration
 	// ADMF state sync
-	ADMFSyncOnStartup     bool
-	ADMFSyncTimeout       time.Duration
-	ADMFReconcileInterval time.Duration
-	StateFile             string
-	StateKeys             securestore.KeyConfig
+	ADMFSyncOnStartup        bool
+	ADMFSyncTimeout          time.Duration
+	ADMFReconcileInterval    time.Duration
+	ADMFCompleteTaskContract bool
+	StateFile                string
+	StateKeys                securestore.KeyConfig
 }
 
 // RegisterLIFlags adds LI-related flags to the command.
@@ -201,6 +203,7 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVar(&liADMFSyncOnStartup, "li-admf-sync-on-startup", true, "Query ADMF for task/destination state on startup")
 	cmd.PersistentFlags().DurationVar(&liADMFSyncTimeout, "li-admf-sync-timeout", 30*time.Second, "Timeout for startup state sync")
 	cmd.PersistentFlags().DurationVar(&liADMFReconcileInterval, "li-admf-reconcile-interval", 5*time.Minute, "Periodic ADMF reconciliation interval (0 = disabled; drift is not corrected while off)")
+	cmd.PersistentFlags().BoolVar(&liADMFCompleteTaskContract, "li-admf-complete-task-contract", false, "Require complete ADMF task definitions before admitting new tasks (enable only after establishing the complete-task contract)")
 	cmd.PersistentFlags().StringVar(&liStateFile, "li-state-file", "", "Path to initialized encrypted LI lifecycle snapshot (empty disables local persistence)")
 	registerLIStoreKeyFlags(cmd)
 }
@@ -280,6 +283,8 @@ func BindLIViperFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("tap.li.admf_sync_on_startup", cmd.PersistentFlags().Lookup("li-admf-sync-on-startup"))
 	_ = viper.BindPFlag("tap.li.admf_sync_timeout", cmd.PersistentFlags().Lookup("li-admf-sync-timeout"))
 	_ = viper.BindPFlag("tap.li.admf_reconcile_interval", cmd.PersistentFlags().Lookup("li-admf-reconcile-interval"))
+	_ = viper.BindPFlag("tap.li.admf_complete_task_contract", cmd.PersistentFlags().Lookup("li-admf-complete-task-contract"))
+	_ = viper.BindEnv("tap.li.admf_complete_task_contract", "LIPPYCAT_TAP_LI_ADMF_COMPLETE_TASK_CONTRACT")
 	_ = viper.BindPFlag("tap.li.state_file", cmd.PersistentFlags().Lookup("li-state-file"))
 }
 
@@ -335,10 +340,11 @@ func GetLIConfig() *LIConfig {
 		DeliveryX3AcknowledgeInboundKeepalive: cmdutil.GetBoolConfig("tap.li.delivery_x3_ack_inbound_keepalive", liDeliveryX3AcknowledgeInboundKeepalive),
 		DeliveryShutdownTimeout:               viper.GetDuration("tap.li.delivery_shutdown_timeout"),
 		// ADMF state sync
-		ADMFSyncOnStartup:     cmdutil.GetBoolConfig("tap.li.admf_sync_on_startup", liADMFSyncOnStartup),
-		ADMFSyncTimeout:       viper.GetDuration("tap.li.admf_sync_timeout"),
-		ADMFReconcileInterval: viper.GetDuration("tap.li.admf_reconcile_interval"),
-		StateFile:             cmdutil.GetStringConfig("tap.li.state_file", liStateFile),
+		ADMFSyncOnStartup:        cmdutil.GetBoolConfig("tap.li.admf_sync_on_startup", liADMFSyncOnStartup),
+		ADMFSyncTimeout:          viper.GetDuration("tap.li.admf_sync_timeout"),
+		ADMFReconcileInterval:    viper.GetDuration("tap.li.admf_reconcile_interval"),
+		ADMFCompleteTaskContract: cmdutil.GetBoolConfig("tap.li.admf_complete_task_contract", liADMFCompleteTaskContract),
+		StateFile:                cmdutil.GetStringConfig("tap.li.state_file", liStateFile),
 	}
 }
 

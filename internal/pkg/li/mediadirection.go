@@ -478,7 +478,7 @@ func sipIdentitySide(target TargetIdentity, voip *types.VoIPMetadata) dialogSide
 // identities (as opposed to packet addresses).
 func isSIPIdentityTarget(t TargetType) bool {
 	switch t {
-	case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeUsername:
+	case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeUsername, TargetTypeE164:
 		return true
 	default:
 		return false

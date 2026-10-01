@@ -35,7 +35,7 @@ func (p *startupFailingPusher) UpdateFilter(filter *management.Filter) error {
 func startupResponse(t *testing.T, xid, did uuid.UUID) string {
 	t.Helper()
 	target := schema.SIPURI("sip:alice@example.com")
-	return buildGetAllDetailsResponseXML([]*schema.DestinationResponseDetails{makeDestinationResponseDetails(did, "127.0.0.1", 8443)}, []*schema.TaskResponseDetails{makeTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})})
+	return buildGetAllDetailsResponseXML([]*schema.DestinationResponseDetails{makeDestinationResponseDetails(did, "127.0.0.1", 8443)}, []*schema.TaskResponseDetails{makeCompleteTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})})
 }
 
 func startupQuery(t *testing.T, r *http.Request) bool {
@@ -59,7 +59,7 @@ func TestStartupSyncRetryPersistedCandidates(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			xid, did := uuid.New(), uuid.New()
 			target := schema.SIPURI("sip:alice@example.com")
-			task, err := TaskResponseDetailsToInterceptTask(makeTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}}))
+			task, err := TaskResponseDetailsToInterceptTask(makeCompleteTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}}))
 			require.NoError(t, err)
 			task.Status, task.ActivationGeneration = TaskStatusActive, 7
 			path := filepath.Join(t.TempDir(), "state")
@@ -148,7 +148,7 @@ func TestStartupSyncUnsupportedTerminal(t *testing.T) {
 func TestStartupSyncPartialSnapshotAndUnconfirmedDestination(t *testing.T) {
 	xid, did, orphan := uuid.New(), uuid.New(), uuid.New()
 	target := schema.SIPURI("sip:alice@example.com")
-	good := makeTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})
+	good := makeCompleteTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})
 	var mode atomic.Int32
 	server := newTestADMFServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if !startupQuery(t, r) {
@@ -244,7 +244,7 @@ func TestStartupSyncSerializesSnapshotWithX1AndPeriodic(t *testing.T) {
 	m := NewManager(ManagerConfig{Enabled: true, ADMFEndpoint: server.URL, SyncOnStartup: true}, nil)
 	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "127.0.0.1", Port: 8443}))
 	target := schema.SIPURI("sip:alice@example.com")
-	initial, err := TaskResponseDetailsToInterceptTask(makeTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}}))
+	initial, err := TaskResponseDetailsToInterceptTask(makeCompleteTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}}))
 	require.NoError(t, err)
 	require.NoError(t, m.ActivateTask(initial))
 	synced := make(chan bool, 1)
@@ -284,7 +284,7 @@ func TestStartupSyncEntryApplicationFailuresRemainPending(t *testing.T) {
 				response := startupResponse(t, xid, did)
 				if entry == "destination" && !valid.Load() {
 					target := schema.SIPURI("sip:alice@example.com")
-					response = buildGetAllDetailsResponseXML([]*schema.DestinationResponseDetails{{}}, []*schema.TaskResponseDetails{makeTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})})
+					response = buildGetAllDetailsResponseXML([]*schema.DestinationResponseDetails{{}}, []*schema.TaskResponseDetails{makeCompleteTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})})
 				}
 				_, err := fmt.Fprint(w, response)
 				require.NoError(t, err)

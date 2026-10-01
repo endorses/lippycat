@@ -76,6 +76,11 @@ type ManagerConfig struct {
 	// When true, the manager will call GetAllDetails to restore state after restart.
 	SyncOnStartup bool
 
+	// ADMFCompleteTaskContract enables strict admission of ADMF snapshot tasks.
+	// Enable only after establishing complete mediation definitions and repairing
+	// existing unknown-window tasks. Read at startup; false preserves compatibility.
+	ADMFCompleteTaskContract bool
+
 	// SyncTimeout is the timeout for the startup state sync operation.
 	// Defaults to 30s if zero.
 	SyncTimeout time.Duration
@@ -129,12 +134,13 @@ type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 //
 // The Manager is the main entry point for LI operations in the processor.
 type Manager struct {
-	callbackMu      sync.RWMutex
-	onTaskModified  func(previous *InterceptTask)
-	onCommittedTask func(current *InterceptTask)
-	stopOnce        sync.Once
-	stopped         atomic.Bool
-	mu              sync.RWMutex
+	definitionRepairs atomic.Uint64
+	callbackMu        sync.RWMutex
+	onTaskModified    func(previous *InterceptTask)
+	onCommittedTask   func(current *InterceptTask)
+	stopOnce          sync.Once
+	stopped           atomic.Bool
+	mu                sync.RWMutex
 	// snapshotMu orders complete ADMF snapshots with X1 mutations.
 	// Inner administrative transactions, filter cleanup and delivery callbacks
 	// retain adminMu, lifecycleMu, then short registry/filter lock ordering.
@@ -238,6 +244,7 @@ type managerAtomicStats struct {
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
+	Definitions DefinitionStats
 	StartupSync StartupSyncStatus
 	// RADIUSStaleReferences counts rejected task owner references at admission.
 	RADIUSStaleReferences       uint64
@@ -432,6 +439,9 @@ func (m *Manager) Start() (result error) {
 	}
 	if err := m.restorePersistedState(); err != nil {
 		return fmt.Errorf("restore LI state (interception remains disarmed): %w", err)
+	}
+	if err := m.validateStrictTransition(); err != nil {
+		return err
 	}
 	// Verify the configured store is writable before starting any listener or
 	// lifecycle goroutine. A persistence fault must fail closed.
@@ -647,7 +657,7 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 	// Activate tasks.
 	if resp.ListOfTaskResponseDetails != nil {
 		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
-			task, convErr := TaskResponseDetailsToInterceptTask(td)
+			converted, convErr := ConvertSnapshotTask(td)
 			if convErr != nil {
 				logger.Warn("Failed to convert ADMF task, skipping",
 					"error", convErr,
@@ -656,6 +666,8 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 				snapshot.convErrors++
 				continue
 			}
+			task := converted.Task
+			converted.confirmedDestinations = confirmedDestinations
 			m.bindRADIUSDeployment(task)
 			snapshot.tasks[task.XID] = true
 			// A persisted destination is only a candidate. Never arm delivery to
@@ -674,7 +686,13 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 				logger.Warn("ADMF task has an unconfirmed destination", "xid", task.XID)
 				continue
 			}
-			if activateErr := m.activateStartupTask(task); activateErr != nil {
+			activate := func() error {
+				if IsRADIUSTask(task) {
+					return m.activateStartupTask(task)
+				}
+				return m.applySnapshotDefinition(converted)
+			}
+			if activateErr := activate(); activateErr != nil {
 				// Task may already exist if sync is called multiple times.
 				if !errors.Is(activateErr, ErrTaskAlreadyExists) {
 					logger.Warn("Failed to activate ADMF task, skipping",
@@ -687,12 +705,7 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 				}
 				continue
 			}
-			if restored := m.persistedActive[task.XID]; restored != nil && !IsRADIUSTask(task) && restored.ActivationGeneration > 0 && equivalentTaskDefinition(restored, task) {
-				// Recovery may run after Start returns.
-				m.replayMu.Lock()
-				m.replayConfirmed[task.XID] = restored.ActivationGeneration
-				m.replayMu.Unlock()
-			}
+
 			taskCount++
 		}
 	}
@@ -840,6 +853,14 @@ func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool)
 		}
 		return true
 	})
+	m.adminMu.Lock()
+	for xid, task := range m.persistenceCandidates {
+		if task.Definition.Candidate && !snapshot.tasks[xid] {
+			orphans = append(orphans, xid)
+			localActive++
+		}
+	}
+	m.adminMu.Unlock()
 
 	if len(orphans) == 0 {
 		m.clearOrphanStreaks()
@@ -1132,7 +1153,7 @@ func (m *Manager) reconcileWithADMF() {
 	var activated int
 	if resp.ListOfTaskResponseDetails != nil {
 		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
-			task, convErr := TaskResponseDetailsToInterceptTask(td)
+			converted, convErr := ConvertSnapshotTask(td)
 			if convErr != nil {
 				if td != nil && td.TaskDetails != nil && td.TaskDetails.XId != nil {
 					if xid, parseErr := uuid.Parse(string(*td.TaskDetails.XId)); parseErr == nil {
@@ -1147,6 +1168,8 @@ func (m *Manager) reconcileWithADMF() {
 				snapshot.convErrors++
 				continue
 			}
+			task := converted.Task
+			converted.confirmedDestinations = confirmedDestinations
 			m.bindRADIUSDeployment(task)
 			snapshot.tasks[task.XID] = true
 
@@ -1171,21 +1194,13 @@ func (m *Manager) reconcileWithADMF() {
 				continue
 			}
 
-			// If task is in ADMF but not in local registry, activate it.
-			if _, getErr := m.registry.GetTaskDetails(task.XID); getErr != nil {
-				if activateErr := m.ActivateTask(task); activateErr != nil {
-					snapshot.convErrors++
-					logger.Warn("Reconciliation: failed to activate missing task",
-						"xid", task.XID,
-						"error", activateErr,
-					)
-				} else {
-					activated++
-					logger.Info("Reconciliation: activated missing task from ADMF",
-						"xid", task.XID,
-					)
-				}
+			if err := m.applySnapshotDefinition(converted); err != nil {
+				snapshot.convErrors++
+				logger.Warn("ADMF definition reconciliation failed", "xid", task.XID, "reason", "application_failed")
+			} else {
+				activated++
 			}
+
 		}
 	}
 
@@ -1376,6 +1391,10 @@ func stableFilterUnion(first, second []string) []string {
 // This creates filters for the task's targets and pushes them
 // to the filter management system.
 func (m *Manager) ActivateTask(task *InterceptTask) error {
+	if task != nil && task.Definition.Source == "" {
+		task = cloneInterceptTask(task)
+		task.Definition = authoritativeDefinition(task)
+	}
 	m.adminMu.Lock()
 	defer m.adminMu.Unlock()
 	if err := m.ensureAdministrativeStateLocked(); err != nil {
@@ -1383,6 +1402,27 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	if task != nil && !IsRADIUSTask(task) && task.Definition.Source == DefinitionPush {
+		if !task.Definition.Completeness.Complete() && m.config.ADMFCompleteTaskContract {
+			if _, err := m.registry.GetTaskDetails(task.XID); errors.Is(err, ErrTaskNotFound) {
+				if held := m.persistenceCandidates[task.XID]; held != nil {
+					if equivalentTaskDefinition(held, task) {
+						return nil
+					}
+					return ErrTaskDefinitionConflict
+				}
+				return m.storeDefinitionCandidateLocked(task)
+			}
+		}
+		if held, err := m.registry.GetTaskDetails(task.XID); err == nil && held.Definition.Source == DefinitionPull && !held.Definition.Completeness.Complete() && task.Definition.Completeness.Complete() && (held.Status == TaskStatusActive || held.Status == TaskStatusPending) {
+			if err := m.promoteTaskDefinitionLocked(task); err != nil {
+				return err
+			}
+			m.definitionRepairs.Add(1)
+			logger.Info("LI task definition repaired", "xid", task.XID, "provenance", DefinitionPush, "fields", changedDefinitionFields(held, task), "reason", "full_activation")
+			return nil
+		}
+	}
 	return m.activateTask(task)
 }
 
@@ -1509,6 +1549,21 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	if mod != nil {
+		if held, err := m.registry.GetTaskDetails(xid); err == nil && !IsRADIUSTask(held) {
+			copyMod := *mod
+			d := held.Definition
+			d.Source, d.Restored, d.Conflict = DefinitionPush, false, false
+			if mod.EndTime != nil {
+				d.Completeness.End, d.Completeness.EndProvided = true, !mod.EndTime.IsZero()
+			}
+			if mod.ImplicitDeactivationAllowed != nil {
+				d.Completeness.Implicit = true
+			}
+			copyMod.definition = &d
+			mod = &copyMod
+		}
+	}
 	return m.modifyTask(xid, mod)
 }
 
@@ -1578,6 +1633,14 @@ func (m *Manager) DeactivateTask(xid uuid.UUID) error {
 }
 
 func (m *Manager) deactivateTask(xid uuid.UUID) error {
+	if candidate := m.persistenceCandidates[xid]; candidate != nil && candidate.Definition.Candidate {
+		delete(m.persistenceCandidates, xid)
+		if err := m.persistStateLocked(); err != nil {
+			m.persistenceCandidates[xid] = candidate
+			return err
+		}
+		return nil
+	}
 	if m.stateStore != nil {
 		return m.withdrawPersistentTaskLocked(xid, StateTaskDeactivate, "")
 	}
@@ -2047,6 +2110,11 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 		EndTime:                     task.EndTime,
 		ImplicitDeactivationAllowed: task.ImplicitDeactivationAllowed,
 	}
+	if p := task.DefinitionPresence; p != nil {
+		liTask.Definition = TaskDefinitionState{Source: DefinitionPush, Completeness: DefinitionCompleteness{
+			Mediation: p.Mediation, Start: p.Start, End: p.End, EndProvided: p.EndProvided, Implicit: p.Implicit,
+		}}
+	}
 
 	// Convert targets
 	for _, t := range task.Targets {
@@ -2175,6 +2243,10 @@ func (m *Manager) GetTaskDetailsX1(xid uuid.UUID) (*x1.Task, error) {
 		ActivatedAt:                 liTask.ActivatedAt,
 		LastError:                   liTask.LastError,
 	}
+	if !IsRADIUSTask(liTask) {
+		p := liTask.Definition.Completeness
+		task.DefinitionPresence = &x1.TaskDefinitionPresence{Mediation: p.Mediation, Start: p.Start, End: p.End, EndProvided: p.EndProvided, Implicit: p.Implicit}
+	}
 
 	// Convert targets
 	for _, t := range liTask.Targets {
@@ -2212,7 +2284,7 @@ func convertTargetType(t x1.TargetType) TargetType {
 	case x1.TargetTypeRADIUSAttribute:
 		return TargetTypeRADIUSAttribute
 	case x1.TargetTypeE164:
-		return TargetTypeTELURI // E.164 is essentially TEL URI without prefix
+		return TargetTypeE164
 	default:
 		return 0 // Unknown targets must fail registry validation.
 	}
@@ -2225,6 +2297,8 @@ func convertTargetTypeToX1(t TargetType) x1.TargetType {
 		return x1.TargetTypeSIPURI
 	case TargetTypeTELURI:
 		return x1.TargetTypeTELURI
+	case TargetTypeE164:
+		return x1.TargetTypeE164
 	case TargetTypeIPv4Address:
 		return x1.TargetTypeIPv4Address
 	case TargetTypeIPv4CIDR:
@@ -2293,6 +2367,7 @@ func convertTaskStatusToX1(s TaskStatus) x1.TaskStatus {
 // Stats returns current LI processing statistics.
 func (m *Manager) Stats() ManagerStats {
 	return ManagerStats{
+		Definitions:                 m.definitionStats(),
 		StartupSync:                 m.StartupSyncStatus(),
 		RADIUSStaleReferences:       m.stats.radiusStaleReferences.Load(),
 		PacketsProcessed:            m.stats.packetsProcessed.Load(),

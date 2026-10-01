@@ -1056,7 +1056,7 @@ func TestParseDeliveryType(t *testing.T) {
 func TestExtractTargetIdentifiers(t *testing.T) {
 	sipUri := schema.SIPURI("sip:alice@example.com")
 	telUri := schema.TELURI("tel:+15551234567")
-	e164 := schema.InternationalE164("+15551234567")
+	e164 := schema.InternationalE164("15551234567")
 	ipv4 := schema.IPv4Address("192.168.1.100")
 
 	tests := []struct {
@@ -1103,7 +1103,7 @@ func TestExtractTargetIdentifiers(t *testing.T) {
 				},
 			},
 			expected: []TargetIdentity{
-				{Type: TargetTypeE164, Value: "+15551234567"},
+				{Type: TargetTypeE164, Value: "15551234567"},
 			},
 			hasError: false,
 		},
@@ -1315,7 +1315,7 @@ func TestServer_HandleActivateTask_MultipleTargets(t *testing.T) {
         <telUri>tel:+15551234567</telUri>
       </targetIdentifier>
       <targetIdentifier>
-        <e164Number>+15559876543</e164Number>
+        <e164Number>15559876543</e164Number>
       </targetIdentifier>
     </targetIdentifiers>
     <deliveryType>X2andX3</deliveryType>
@@ -1343,7 +1343,7 @@ func TestServer_HandleActivateTask_MultipleTargets(t *testing.T) {
 	assert.Equal(t, TargetTypeTELURI, task.Targets[1].Type)
 	assert.Equal(t, "tel:+15551234567", task.Targets[1].Value)
 	assert.Equal(t, TargetTypeE164, task.Targets[2].Type)
-	assert.Equal(t, "+15559876543", task.Targets[2].Value)
+	assert.Equal(t, "15559876543", task.Targets[2].Value)
 
 	// Verify multiple destinations
 	require.Len(t, task.DestinationIDs, 2)

@@ -272,3 +272,10 @@ X2/X3 queued and in-flight bytes and byte capacities, `x3_expired`, and
 commit uncertainty and encryption usage separately from transport uncertainty.
 Pending admission is not a durability
 acknowledgement; held records require explicit replay authorization.
+
+LI-enabled processor status includes `li_definitions` with aggregate `incomplete`,
+`pull_only`, `conflicts`, `unknown_windows`, and `open_ended` gauges plus a
+manager-lifetime `repairs` counter. Strict candidates contribute to incomplete
+counts; unknown mediation windows are distinct from explicitly open-ended
+definitions. The object is absent when LI is disabled or unavailable, and never
+contains task, target, or destination labels.

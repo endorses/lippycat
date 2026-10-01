@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/google/uuid"
 )
@@ -68,6 +69,7 @@ type DeactivationCallback func(task *InterceptTask, reason DeactivationReason)
 // TaskModification specifies which fields to modify in a task.
 // nil values indicate no change; non-nil values indicate the new value.
 type TaskModification struct {
+	definition *TaskDefinitionState
 	// Targets replaces the target list if non-nil.
 	Targets          *[]TargetIdentity
 	RADIUSScope      *radius.ScopeBinding
@@ -505,6 +507,9 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	// task. This prevents a later invalid field from leaving earlier fields
 	// partially applied.
 	candidate := *task
+	if mod.definition != nil {
+		candidate.Definition = *mod.definition
+	}
 	candidate.Targets = append([]TargetIdentity(nil), task.Targets...)
 	candidate.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
 	if mod.Targets != nil {
@@ -544,11 +549,12 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return err
 	}
 
-	deliveryChanged := !equivalentDeliveryDefinition(task, &candidate)
+	deliveryChanged := !equivalentDeliveryDefinition(task, &candidate) || authorizationWindowNarrows(task, &candidate)
 	if deliveryChanged && r.generations[xid] == ^uint64(0) {
 		return fmt.Errorf("%w: task generation exhausted", ErrInvalidTask)
 	}
 	// Apply modifications atomically
+	task.Definition = candidate.Definition
 	task.RADIUSScope = candidate.RADIUSScope
 	task.RADIUSMACProfile = candidate.RADIUSMACProfile
 	if mod.Targets != nil {
@@ -781,6 +787,9 @@ func (r *Registry) validateTask(task *InterceptTask) error {
 		if target.Type == 0 {
 			return fmt.Errorf("%w: target %d has invalid type", ErrInvalidTask, i)
 		}
+		if target.Type == TargetTypeE164 && !schema.ValidE164Number(target.Value) {
+			return fmt.Errorf("%w: target %d is not a valid E.164 number", ErrInvalidTask, i)
+		}
 	}
 
 	if len(task.DestinationIDs) == 0 {
@@ -796,7 +805,7 @@ func (r *Registry) validateTask(task *InterceptTask) error {
 		switch target.Type {
 		case TargetTypeIPv4Address, TargetTypeIPv4CIDR, TargetTypeIPv6Address, TargetTypeIPv6CIDR:
 			return fmt.Errorf("%w: %s targets require raw-IP interception, whose correlated IRI/CC session model is not implemented", ErrUnsupportedDeliveryCombination, target.Type)
-		case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeNAI, TargetTypeUsername, TargetTypeIMSI, TargetTypeIMEI, TargetTypeMACAddress, TargetTypeRADIUSAttribute:
+		case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeE164, TargetTypeNAI, TargetTypeUsername, TargetTypeIMSI, TargetTypeIMEI, TargetTypeMACAddress, TargetTypeRADIUSAttribute:
 		default:
 			return fmt.Errorf("%w: target type %d has no encoder", ErrUnsupportedDeliveryCombination, target.Type)
 		}
@@ -982,4 +991,11 @@ func (r *Registry) PurgeDeactivatedTasks(olderThan time.Duration) int {
 	}
 
 	return count
+}
+
+// authorizationWindowNarrows detects timing changes for which already buffered
+// product cannot prove membership in the resulting authorization window.
+func authorizationWindowNarrows(previous, candidate *InterceptTask) bool {
+	return (!candidate.StartTime.IsZero() && (previous.StartTime.IsZero() || candidate.StartTime.After(previous.StartTime))) ||
+		(!candidate.EndTime.IsZero() && (previous.EndTime.IsZero() || candidate.EndTime.Before(previous.EndTime)))
 }

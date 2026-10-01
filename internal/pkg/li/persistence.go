@@ -147,6 +147,19 @@ func (m *Manager) restorePersistedStateLocked() (result error) {
 	}
 	now := time.Now()
 	for _, task := range state.Tasks {
+		task = cloneInterceptTask(task)
+		if !IsRADIUSTask(task) {
+			if task.Definition.Source == "" {
+				task.Definition.Source = DefinitionRestore
+				// Legacy zeros and false cannot prove field presence.
+				task.Definition.Completeness = DefinitionCompleteness{Mediation: !task.StartTime.IsZero(), Start: !task.StartTime.IsZero(), End: !task.EndTime.IsZero(), EndProvided: !task.EndTime.IsZero(), Implicit: task.ImplicitDeactivationAllowed}
+			}
+			task.Definition.Restored = true
+			if task.Definition.Candidate {
+				candidates[task.XID] = task
+				continue
+			}
+		}
 		if IsRADIUSTask(task) && (task.Status == TaskStatusPending || task.Status == TaskStatusActive || task.Status == TaskStatusSuspended) {
 			active[task.XID], candidates[task.XID] = cloneInterceptTask(task), cloneInterceptTask(task)
 			continue

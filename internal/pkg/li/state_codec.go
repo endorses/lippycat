@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/google/uuid"
 )
 
@@ -49,8 +50,11 @@ func stateJSONSchema(legacy bool) *stateShape {
 	nullNumber := &stateShape{kind: 'u', nullable: true}
 	scope := &stateShape{kind: 'o', fields: map[string]*stateShape{"operator_scope": str, "profile_revision": str, "origin_node_id": str, "source_id": str}}
 	target := &stateShape{kind: 'o', required: []string{"Type", "Value"}, memory: 40, fields: map[string]*stateShape{"Type": num, "Value": str}}
+	completeness := &stateShape{kind: 'o', fields: map[string]*stateShape{"Mediation": boolean, "Start": boolean, "End": boolean, "EndProvided": boolean, "Implicit": boolean}}
+	definition := &stateShape{kind: 'o', fields: map[string]*stateShape{"Source": str, "Completeness": completeness, "Restored": boolean, "Candidate": boolean, "Conflict": boolean}}
 	task := &stateShape{kind: 'o', memory: 384, required: []string{"XID", "Targets", "DestinationIDs", "DeliveryType", "Status"}, fields: map[string]*stateShape{
-		"XID": uid, "Targets": {kind: 'a', item: target, limit: maxStateReferences, count: 't'}, "RADIUSScope": scope, "RADIUSMACProfile": str,
+		"definition": definition,
+		"XID":        uid, "Targets": {kind: 'a', item: target, limit: maxStateReferences, count: 't'}, "RADIUSScope": scope, "RADIUSMACProfile": str,
 		"DestinationIDs": {kind: 'a', item: uid, limit: maxStateReferences, count: 'd'}, "DeliveryType": num, "StartTime": stamp, "EndTime": stamp,
 		"ImplicitDeactivationAllowed": boolean, "Status": num, "ActivatedAt": stamp, "DeactivatedAt": stamp, "LastError": str, "ActivationGeneration": num,
 	}}
@@ -410,6 +414,16 @@ func validateStateTask(task *InterceptTask, b *stateBudget) error {
 	if task == nil || task.XID == uuid.Nil || task.Targets == nil || task.DestinationIDs == nil || len(task.Targets) == 0 || len(task.Targets) > maxStateReferences || len(task.DestinationIDs) == 0 || len(task.DestinationIDs) > maxStateReferences {
 		return stateError("task identity or references")
 	}
+	d := task.Definition
+	if d.Source != "" && d.Source != DefinitionPush && d.Source != DefinitionPull && d.Source != DefinitionRestore {
+		return stateError("definition provenance")
+	}
+	if d.Candidate && task.Status != TaskStatusPending {
+		return stateError("definition candidate lifecycle")
+	}
+	if d.Completeness.EndProvided && (!d.Completeness.End || task.EndTime.IsZero()) {
+		return stateError("definition end presence")
+	}
 	if task.Status < TaskStatusPending || task.Status > TaskStatusFailed || task.DeliveryType < DeliveryX2Only || task.DeliveryType > DeliveryX2andX3 {
 		return stateError("task enum")
 	}
@@ -437,7 +451,7 @@ func validateStateTask(task *InterceptTask, b *stateBudget) error {
 	}
 	seenTargets := make(map[TargetIdentity]bool, len(task.Targets))
 	for _, target := range task.Targets {
-		if target.Type < TargetTypeSIPURI || target.Type > TargetTypeRADIUSAttribute || target.Value == "" || seenTargets[target] {
+		if target.Type < TargetTypeSIPURI || target.Type > TargetTypeE164 || target.Value == "" || seenTargets[target] {
 			return stateError("target identity or enum")
 		}
 		seenTargets[target] = true
@@ -445,6 +459,10 @@ func validateStateTask(task *InterceptTask, b *stateBudget) error {
 			return err
 		}
 		switch target.Type {
+		case TargetTypeE164:
+			if !schema.ValidE164Number(target.Value) {
+				return stateError("target E.164 number")
+			}
 		case TargetTypeIPv4Address, TargetTypeIPv6Address:
 			addr, err := netip.ParseAddr(target.Value)
 			if err != nil || addr.Zone() != "" || addr.Is4() != (target.Type == TargetTypeIPv4Address) {

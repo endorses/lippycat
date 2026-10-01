@@ -482,6 +482,68 @@ a new transaction UUID, following [TS 103 221-1 V1.22.1 clause
 5.2.3](https://www.etsi.org/deliver/etsi_ts/103200_103299/10322101/01.22.01_60/ts_10322101v012201p.pdf).
 Notification acknowledgment never substitutes for authoritative state sync.
 
+### Complete task contract and definition convergence
+
+Compatibility mode is the default. An ADMF pull that omits mediation details can
+admit a new task, but its window is **unknown**, rather than an explicitly
+open-ended grant. Such a task depends on explicit ADMF deactivation (or a
+terminating fault) until a complete definition supplies its lifecycle fields.
+Partial pulls never clear a known start, end, or explicit implicit-deactivation
+value. A present, complete mediation definition with no end is explicitly
+open-ended; omission of the mediation definition is not.
+
+Enable `--li-admf-complete-task-contract` only after establishing that the ADMF
+returns complete task definitions, including mediation start, optional end, and
+an explicit implicit-deactivation flag. The corresponding YAML key is
+`processor.li.admf_complete_task_contract` for process and
+`tap.li.admf_complete_task_contract` for tap; both default to `false`.
+The environment variables are
+`LIPPYCAT_PROCESSOR_LI_ADMF_COMPLETE_TASK_CONTRACT` and
+`LIPPYCAT_TAP_LI_ADMF_COMPLETE_TASK_CONTRACT`. The policy is read at startup.
+Changing configuration does not switch live tasks in place.
+
+With the contract enabled, new incomplete snapshot tasks remain non-enforcing
+candidates outside the registry and filter admission path until a complete
+snapshot or X1 activation arrives. A full X1 activation can complete a
+pull-owned partial task, including its missing start, through the normal
+filter, delivery, durable-state, and authorization-generation barriers.
+Equivalent activation retries remain no-op reads. A partial snapshot never
+confirms buffered X2/X3 replay, even in compatibility mode; replay requires a
+complete equivalent authorized definition and the correct activation generation.
+
+Before enabling strict mode, repair held unknown-window tasks or establish that
+a complete startup snapshot will replace them. Startup refuses the transition
+when previously enforcing or pending unknown definitions remain unresolved.
+Verify repair through a schema-valid X1 `GetTaskDetails`
+read-back or an equivalent authoritative check of the complete start, end, and
+implicit-deactivation fields. An activation reassertion or error code alone is
+not evidence that the effective definition is complete.
+
+Complete snapshots can repair pull-owned or legacy restored definitions.
+Persisted X1 ownership survives restart. A conflicting pull cannot replace a
+definition established by an X1 push or modification
+without verifiable freshness. The bundled X1 schema has no per-task monotonic
+revision; response timestamps and local snapshot lock ordering do not establish
+freshness. Unresolved conflicts retain the pushed definition, expose aggregate
+drift, and require an explicit authenticated X1 change. If a restored task is
+still awaiting confirmation outside the registry, reassert its full definition
+through X1 activation. RADIUS tasks keep their specialized reconciliation,
+authorization, and read-back behavior and are excluded from these generic
+completeness counters.
+
+`lc show status` exposes aggregate `li_definitions` gauges: `incomplete`,
+`pull_only`, `conflicts`, `unknown_windows`, and `open_ended`. `repairs` counts
+successful reconciliation repairs over the manager lifetime. Incomplete strict
+candidates are included; unknown windows are distinct from complete open-ended
+definitions. No metric has target, destination, or per-task labels. The same
+values are available through `Manager.Stats().Definitions` and gRPC processor
+status; the object is absent when LI is disabled or unavailable.
+
+The processor logs `LI task deactivated` with the stable cause `admf`, `expired`,
+or `fault`. Only expiry includes `end_time`; explicit ADMF deactivation is never
+reported as implicit expiry. Definition and deactivation telemetry excludes
+target values and destination details.
+
 ## X2/X3 Protocol (Binary TLV)
 
 Content is delivered to MDF using binary TLV encoding per TS 103 221-2.

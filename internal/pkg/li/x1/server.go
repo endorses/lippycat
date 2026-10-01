@@ -189,7 +189,19 @@ const (
 )
 
 // Task represents an intercept task for X1 operations.
+// TaskDefinitionPresence records authorization field knowledge independently of
+// zero times and false values. A nil pointer is reserved for typed callers that
+// supply an authoritative definition; parsed XML always supplies this metadata.
+type TaskDefinitionPresence struct {
+	Mediation   bool
+	Start       bool
+	End         bool
+	EndProvided bool
+	Implicit    bool
+}
+
 type Task struct {
+	DefinitionPresence *TaskDefinitionPresence
 	// XID is the unique identifier for this task (UUID v4).
 	XID uuid.UUID
 	// Targets specifies the identities to intercept.
@@ -1376,6 +1388,11 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 	}
 	task.StartTime = startTime
 	task.EndTime = endTime
+	task.DefinitionPresence, err = extractTaskDefinitionPresence(details)
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, "invalid mediation definition: "+err.Error())
+	}
 
 	// Parse implicit deactivation allowed
 	if details.ImplicitDeactivationAllowed != nil {
@@ -1658,6 +1675,41 @@ func parseMediationTime(value *schema.QualifiedMicrosecondDateTime) (time.Time, 
 	return parsed, nil
 }
 
+func extractTaskDefinitionPresence(details *schema.TaskDetails) (*TaskDefinitionPresence, error) {
+	// RADIUS retains its specialized administration contract and serializer.
+	if details.TargetIdentifiers != nil {
+		for _, target := range details.TargetIdentifiers.TargetIdentifier {
+			if target != nil && (target.Nai != nil || target.MacAddress != nil || target.RadiusAttribute != nil) {
+				return nil, nil
+			}
+		}
+	}
+	p := &TaskDefinitionPresence{Implicit: details.ImplicitDeactivationAllowed != nil}
+	list := details.ListOfMediationDetails
+	if list == nil {
+		return p, nil
+	}
+	p.Mediation = true
+	if len(list.MediationDetails) == 0 {
+		return nil, fmt.Errorf("empty mediation definition")
+	}
+	for i, md := range list.MediationDetails {
+		if md == nil {
+			return nil, fmt.Errorf("nil mediation entry")
+		}
+		if md.StartTime != nil && *md.StartTime == "" || md.EndTime != nil && *md.EndTime == "" {
+			return nil, fmt.Errorf("empty mediation timestamp")
+		}
+		start, end := md.StartTime != nil, md.EndTime != nil
+		if i > 0 && (p.Start != start || p.EndProvided != end) {
+			return nil, fmt.Errorf("inconsistent mediation presence")
+		}
+		p.Start, p.EndProvided = start, end
+		p.End = start || end
+	}
+	return p, nil
+}
+
 // handleGetTaskDetails handles GetTaskDetailsRequest.
 func (s *Server) handleGetTaskDetails(req *schema.GetTaskDetailsRequest) any {
 	if s.taskManager == nil {
@@ -1688,6 +1740,12 @@ func (s *Server) handleGetTaskDetails(req *schema.GetTaskDetailsRequest) any {
 			ErrorCodeGenericError, "failed to get task details: "+err.Error())
 	}
 
+	for _, target := range task.Targets {
+		if target.Type == TargetTypeE164 && !schema.ValidE164Number(target.Value) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeGetTaskDetails,
+				ErrorCodeGenericError, "stored E.164 target is invalid")
+		}
+	}
 	logger.Debug("X1 task details retrieved", "xid", xid, "status", task.Status)
 
 	return &schema.GetTaskDetailsResponse{
@@ -1711,6 +1769,10 @@ func taskDetailsResponse(task *Task) *schema.TaskDetails {
 		TargetIdentifiers:           &schema.ListOfTargetIdentifiers{},
 		ListOfDIDs:                  &schema.ListOfDids{},
 	}
+	p := task.DefinitionPresence
+	if p != nil && !p.Implicit {
+		details.ImplicitDeactivationAllowed = nil
+	}
 	for _, target := range task.Targets {
 		details.TargetIdentifiers.TargetIdentifier = append(details.TargetIdentifiers.TargetIdentifier, targetIdentifierResponse(target))
 	}
@@ -1718,13 +1780,23 @@ func taskDetailsResponse(task *Task) *schema.TaskDetails {
 		did := schema.UUID(id.String())
 		details.ListOfDIDs.DId = append(details.ListOfDIDs.DId, &did)
 	}
+	if p != nil && !p.Mediation && !p.Start && !p.EndProvided {
+		return details
+	}
+	if p != nil && p.Start && !p.End {
+		// A supplied start without an end inside mediation would claim an
+		// explicitly open end. Legacy state can know the start while its
+		// omitted end remains unknown; X1 has no unknown-end sentinel.
+		// Omit the window rather than turn that uncertainty into a grant.
+		return details
+	}
 	liid := schema.LIID(strings.ReplaceAll(task.XID.String(), "-", ""))
 	mediation := &schema.MediationDetails{LIID: &liid, DeliveryType: mediationDeliveryTypeResponse(task.DeliveryType), ListOfDIDs: details.ListOfDIDs}
-	if !task.StartTime.IsZero() {
+	if !task.StartTime.IsZero() && (p == nil || p.Start) {
 		start := formatQualifiedMicrosecondDateTime(task.StartTime)
 		mediation.StartTime = &start
 	}
-	if !task.EndTime.IsZero() {
+	if !task.EndTime.IsZero() && (p == nil || p.EndProvided) {
 		end := formatQualifiedMicrosecondDateTime(task.EndTime)
 		mediation.EndTime = &end
 	}
@@ -1765,6 +1837,13 @@ func targetIdentifierResponse(target TargetIdentity) *schema.TargetIdentifier {
 		v := schema.SIPURI(target.Value)
 		result.SipUri = &v
 	case TargetTypeTELURI:
+		// Older state collapsed e164Number into a bare-digit TEL URI. Emit
+		// its original schema type while keeping actual tel: URIs unchanged.
+		if schema.ValidE164Number(target.Value) {
+			v := schema.InternationalE164(target.Value)
+			result.E164Number = &v
+			break
+		}
 		v := schema.TELURI(target.Value)
 		result.TelUri = &v
 	case TargetTypeIPv4Address:
@@ -1869,7 +1948,10 @@ func parseTargetIdentifier(ti *schema.TargetIdentifier) (*TargetIdentity, error)
 	}
 
 	// E.164 Number
-	if ti.E164Number != nil && *ti.E164Number != "" {
+	if ti.E164Number != nil {
+		if !schema.ValidE164Number(string(*ti.E164Number)) {
+			return nil, fmt.Errorf("invalid E.164 target: expected 1–15 digits")
+		}
 		return &TargetIdentity{
 			Type:  TargetTypeE164,
 			Value: string(*ti.E164Number),

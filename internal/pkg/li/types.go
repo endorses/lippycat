@@ -110,6 +110,9 @@ const (
 	TargetTypeMACAddress
 	// TargetTypeRADIUSAttribute identifies one complete supported hex-encoded RADIUS AVP.
 	TargetTypeRADIUSAttribute
+	// TargetTypeE164 identifies an international E.164 number (1–15 digits).
+	// Append new values to preserve the persisted target enum contract.
+	TargetTypeE164
 )
 
 // String returns the string representation of TargetType.
@@ -119,6 +122,8 @@ func (t TargetType) String() string {
 		return "SIPURI"
 	case TargetTypeTELURI:
 		return "TELURI"
+	case TargetTypeE164:
+		return "E164"
 	case TargetTypeNAI:
 		return "NAI"
 	case TargetTypeIPv4Address:
@@ -152,6 +157,10 @@ func (t TargetType) String() string {
 //   - What content to deliver (DeliveryType)
 //   - When the task is valid (StartTime, EndTime)
 type InterceptTask struct {
+	// Definition records supplied authorization fields and their administrative source.
+	// It travels with lifecycle transactions and is never itself replay authority.
+	Definition TaskDefinitionState `json:"definition,omitempty"`
+
 	// XID is the unique identifier for this task (UUID v4 per ETSI spec).
 	XID uuid.UUID
 

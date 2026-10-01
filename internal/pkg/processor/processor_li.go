@@ -190,14 +190,14 @@ func (p *Processor) initLIManager() {
 		SyncOnStartup:              p.config.LIADMFSyncOnStartup,
 		SyncTimeout:                p.config.LIADMFSyncTimeout,
 		ReconcileInterval:          p.config.LIADMFReconcileInterval,
+		ADMFCompleteTaskContract:   p.config.LIADMFCompleteTaskContract,
 		StateFile:                  p.config.LIStateFile,
 		StateKeys:                  p.config.LIStateKeys,
 		RADIUSCorrelationStateFile: p.config.LIRADIUSCorrelationStateFile,
 	}
 
-	// Deactivation callback - called when a task is implicitly deactivated
-	// (e.g., EndTime expiration with ImplicitDeactivationAllowed=true)
-	// The LI Manager automatically reports these to ADMF via X1 client.
+	// Deactivation callback handles explicit ADMF requests, expiry, and faults.
+	// The LI Manager reports implicit deactivations to ADMF via the X1 client.
 	deactivationCallback := func(task *li.InterceptTask, reason li.DeactivationReason) {
 		if liDeliveryClient != nil {
 			liDeliveryClient.CancelTask(task.XID, task.ActivationGeneration)
@@ -226,10 +226,7 @@ func (p *Processor) initLIManager() {
 			}
 			return true
 		})
-		logger.Info("LI task implicitly deactivated",
-			"xid", task.XID,
-			"reason", reason,
-		)
+		logLITaskDeactivation(task, reason)
 	}
 
 	// Create LI manager
@@ -1106,6 +1103,14 @@ func (p *Processor) populateLIEncodingStats(dst *management.ProcessorStats) {
 	}
 	stats := p.getLIEncodingStats()
 	managerStats := p.liManager.Stats()
+	dst.LiDefinitions = &management.LIDefinitionStats{
+		Incomplete:     managerStats.Definitions.Incomplete,
+		PullOnly:       managerStats.Definitions.PullOnly,
+		Conflicts:      managerStats.Definitions.Conflicts,
+		UnknownWindows: managerStats.Definitions.UnknownWindows,
+		OpenEnded:      managerStats.Definitions.OpenEnded,
+		Repairs:        managerStats.Definitions.Repairs,
+	}
 	dst.LiEncoding = &management.LIEncodingStats{
 		X2Encoded:                    stats.X2Encoded,
 		X2Errors:                     stats.X2Errors,
@@ -1157,4 +1162,13 @@ func replaceLIDeliveryDestination(manager *delivery.Manager, client *delivery.Cl
 		return err
 	}
 	return nil
+}
+
+// logLITaskDeactivation records only administrative identity and the actual cause.
+func logLITaskDeactivation(task *li.InterceptTask, reason li.DeactivationReason) {
+	fields := []any{"xid", task.XID, "reason", strings.ToLower(reason.String())}
+	if reason == li.DeactivationReasonExpired {
+		fields = append(fields, "end_time", task.EndTime)
+	}
+	logger.Info("LI task deactivated", fields...)
 }

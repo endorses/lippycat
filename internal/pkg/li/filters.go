@@ -13,6 +13,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/endorses/lippycat/internal/pkg/radius"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 )
@@ -461,7 +462,10 @@ func (m *FilterManager) mapTargetToFilterType(target TargetIdentity) (management
 		pattern := extractSIPURIPattern(target.Value)
 		return management.FilterType_FILTER_SIP_URI, pattern, nil
 
-	case TargetTypeTELURI:
+	case TargetTypeTELURI, TargetTypeE164:
+		if target.Type == TargetTypeE164 && !schema.ValidE164Number(target.Value) {
+			return 0, "", fmt.Errorf("invalid E.164 target: expected 1–15 digits")
+		}
 		// tel:+15551234567 → extract phone number for phone number filter
 		pattern := extractPhonePattern(target.Value)
 		return management.FilterType_FILTER_PHONE_NUMBER, pattern, nil

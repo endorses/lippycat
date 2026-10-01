@@ -939,3 +939,12 @@ func TestManager_Start_SyncDisabled(t *testing.T) {
 	// There should be no GetAllDetails request since SyncOnStartup is false.
 	assert.Equal(t, 0, m.TaskCount())
 }
+
+// makeCompleteTaskResponseDetails supplies an explicit window for fixtures that
+// exercise authoritative replay confirmation rather than compatibility pulls.
+func makeCompleteTaskResponseDetails(xid uuid.UUID, dids []uuid.UUID, targets []schema.TargetIdentifier) *schema.TaskResponseDetails {
+	details := makeTaskResponseDetails(xid, dids, targets)
+	start := schema.QualifiedMicrosecondDateTime("2020-01-01T00:00:00.000000Z")
+	details.TaskDetails.ListOfMediationDetails = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{{StartTime: &start}}}
+	return details
+}

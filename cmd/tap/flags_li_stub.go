@@ -70,11 +70,12 @@ type LIConfig struct {
 	DeliveryX2AcknowledgeInboundKeepalive bool
 	DeliveryX3AcknowledgeInboundKeepalive bool
 	// ADMF state sync
-	ADMFSyncOnStartup     bool
-	ADMFSyncTimeout       time.Duration
-	ADMFReconcileInterval time.Duration
-	StateFile             string
-	StateKeys             securestore.KeyConfig
+	ADMFSyncOnStartup        bool
+	ADMFSyncTimeout          time.Duration
+	ADMFReconcileInterval    time.Duration
+	ADMFCompleteTaskContract bool
+	StateFile                string
+	StateKeys                securestore.KeyConfig
 }
 
 // RegisterLIFlags is a no-op in non-LI builds.

@@ -32,6 +32,7 @@ func TestProcessorX3CommittedTimingPolicy(t *testing.T) {
 						f.config.LIDeliveryX3SpoolMaxBytes = 0
 						f.config.LIDeliveryX3SpoolReplayPolicy = ""
 					}
+					f.endTime = time.Now().Add(time.Second).UTC()
 					p := f.open(t)
 					require.NoError(t, p.startLIManager())
 					original, err := p.liManager.GetTaskDetails(f.xid)
@@ -117,6 +118,7 @@ func TestProcessorX3ExplicitDeactivationReplayPolicy(t *testing.T) {
 
 func TestProcessorX3ExplicitDeactivationHeldReplay(t *testing.T) {
 	f := newPersistentProcessorFixture(t)
+	f.endTime, f.explicitDeactivation = time.Now().Add(time.Second).UTC(), true
 	p := f.open(t)
 	f.captureAndClose(t, p)
 	end := time.Now().Add(2 * time.Second).UTC()
@@ -194,7 +196,7 @@ func TestProcessorX3CommittedCutoffSuppressesRetainedWork(t *testing.T) {
 					}
 					current, err := p.liManager.GetTaskDetails(f.xid)
 					require.NoError(t, err)
-					require.Equal(t, task.ActivationGeneration, current.ActivationGeneration)
+					require.Greater(t, current.ActivationGeneration, task.ActivationGeneration, "narrowing revokes the prior authorization generation")
 					require.True(t, time.Now().Before(cutoff))
 					timer := time.NewTimer(time.Until(cutoff))
 					defer timer.Stop()

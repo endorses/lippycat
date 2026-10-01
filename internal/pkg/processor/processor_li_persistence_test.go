@@ -36,6 +36,7 @@ type persistentProcessorFixture struct {
 	port                 int
 	includeTask          bool
 	endTime              time.Time
+	partialSnapshot      bool
 	explicitDeactivation bool
 }
 
@@ -101,11 +102,14 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 		}
 		if f.includeTask {
 			var end *schema.QualifiedMicrosecondDateTime
+			start := schema.QualifiedMicrosecondDateTime("2020-01-02T03:04:05.000000Z")
 			var mediation *schema.ListOfMediationDetails
 			if !f.endTime.IsZero() {
 				value := schema.QualifiedMicrosecondDateTime(f.endTime.Format(time.RFC3339Nano))
 				end = &value
-				mediation = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{{DeliveryType: "HI3Only", EndTime: end}}}
+			}
+			if !f.partialSnapshot {
+				mediation = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{{DeliveryType: "HI3Only", StartTime: &start, EndTime: end}}}
 			}
 			response.ListOfTaskResponseDetails.TaskResponseDetails = []*schema.TaskResponseDetails{{TaskDetails: &schema.TaskDetails{
 				XId: &xid, DeliveryType: "X3Only", ImplicitDeactivationAllowed: &implicit, ListOfMediationDetails: mediation,
@@ -375,7 +379,7 @@ func TestProcessorPersistentX3ReplayRequiresCurrentAuthority(t *testing.T) {
 	}
 }
 
-func TestProcessorPersistentX3TimingCommitWithoutNewPacket(t *testing.T) {
+func TestProcessorPersistentX3NarrowingCommitWithoutNewPacket(t *testing.T) {
 	f := newPersistentProcessorFixture(t)
 	p := f.open(t)
 	f.captureAndClose(t, p)
@@ -385,8 +389,8 @@ func TestProcessorPersistentX3TimingCommitWithoutNewPacket(t *testing.T) {
 	require.NoError(t, p.liManager.ModifyTask(f.xid, &li.TaskModification{EndTime: &end}))
 	current, err := p.liManager.GetTaskDetails(f.xid)
 	require.NoError(t, err)
-	require.Equal(t, before.ActivationGeneration, current.ActivationGeneration)
-	// No new packet is needed to propagate the committed shortened cutoff.
+	require.Greater(t, current.ActivationGeneration, before.ActivationGeneration, "narrowing creates a new authorization generation")
+	// No new packet is needed to revoke buffered product from the old generation.
 	require.Eventually(t, func() bool { return liDeliveryClient.X3JournalStats().Persisted == 0 }, time.Second, 5*time.Millisecond)
 	extended := time.Now().Add(time.Minute).UTC()
 	require.NoError(t, p.liManager.ModifyTask(f.xid, &li.TaskModification{EndTime: &extended}))
@@ -396,6 +400,55 @@ func TestProcessorPersistentX3TimingCommitWithoutNewPacket(t *testing.T) {
 	p.processLIPacketWithProvenance(packet, nil, []string{"li-" + f.xid.String() + "-0"})
 	require.Equal(t, encodedBefore+1, p.getLIEncodingStats().X3Encoded, "fresh capture reaches the immutable client gate after the metadata extension")
 	require.NoError(t, liDeliveryClient.FlushPersistence(context.Background()))
-	require.Zero(t, liDeliveryClient.X3JournalStats().Persisted, "extension cannot resurrect the already expired task generation")
+	require.Equal(t, 1, liDeliveryClient.X3JournalStats().Persisted, "extension admits fresh capture in the new generation without resurrecting revoked backlog")
 	require.NoError(t, p.Shutdown())
+}
+
+func TestProcessorPersistentX3PartialThenCompleteSnapshotReplay(t *testing.T) {
+	f := newPersistentProcessorFixture(t)
+	f.config.LIADMFReconcileInterval = 20 * time.Millisecond
+	p := f.open(t)
+	f.captureAndClose(t, p)
+	original, err := p.liManager.GetTaskDetails(f.xid)
+	require.NoError(t, err)
+	require.NoError(t, p.Shutdown())
+
+	f.mu.Lock()
+	f.partialSnapshot = true
+	f.mu.Unlock()
+	restarted := f.open(t)
+	path, manifest := exportProcessorX3Approval(t)
+	require.Len(t, manifest.Records, 2)
+	products := f.listenMDF(t)
+	restarted.config.LIDeliveryX3SpoolReplayManifest = path
+	require.NoError(t, restarted.startLIManager())
+	require.False(t, restarted.liManager.ReplayTaskAuthorized(f.xid, original.ActivationGeneration), "a partial pull cannot authorize historical product")
+	require.Equal(t, 2, liDeliveryClient.X3JournalStats().Held)
+	require.Zero(t, liDeliveryClient.QueueDepth())
+	current, err := restarted.liManager.GetTaskDetails(f.xid)
+	require.NoError(t, err)
+	require.Equal(t, original.StartTime, current.StartTime, "partial pull retains the known start")
+	require.Equal(t, original.ActivationGeneration, current.ActivationGeneration)
+	select {
+	case <-products:
+		t.Fatal("partial snapshot authorized historical X3")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	f.mu.Lock()
+	f.partialSnapshot = false
+	f.mu.Unlock()
+	require.Eventually(t, func() bool {
+		return restarted.liManager.ReplayTaskAuthorized(f.xid, original.ActivationGeneration)
+	}, 2*time.Second, 5*time.Millisecond, "only complete equivalent authorization confirms the persisted generation")
+	require.NoError(t, liDeliveryClient.ReplayX3JournalManifest(path, restarted.authorizePersistentX3Replay))
+	for range 2 {
+		select {
+		case product := <-products:
+			require.Equal(t, f.xid, product.Header.XID)
+		case <-time.After(5 * time.Second):
+			t.Fatal("complete equivalent snapshot did not permit approved historical X3")
+		}
+	}
+	require.NoError(t, restarted.Shutdown())
 }

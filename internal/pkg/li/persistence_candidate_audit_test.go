@@ -77,7 +77,7 @@ func TestPersistedReplayCandidateSurvivesInterruptedStartup(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.json")
 			xid, did := uuid.New(), uuid.New()
 			target := schema.SIPURI("sip:alice@example.com")
-			details := makeTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})
+			details := makeCompleteTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})
 			task, err := TaskResponseDetailsToInterceptTask(details)
 			require.NoError(t, err)
 			task.Status, task.ActivationGeneration = TaskStatusActive, 7

@@ -77,6 +77,14 @@ func TestPersistenceLegacyStateFixture(t *testing.T) {
 	require.Zero(t, m.FilterCount())
 	require.Empty(t, pusher.updates)
 	require.Len(t, m.persistedActive, 2)
+	// Missing legacy presence is migrated conservatively, without authority.
+	for _, task := range state.Tasks {
+		if !IsRADIUSTask(task) {
+			task.Definition = TaskDefinitionState{Source: DefinitionRestore, Restored: true, Completeness: DefinitionCompleteness{
+				Mediation: !task.StartTime.IsZero(), Start: !task.StartTime.IsZero(), End: !task.EndTime.IsZero(), EndProvided: !task.EndTime.IsZero(), Implicit: task.ImplicitDeactivationAllowed,
+			}}
+		}
+	}
 	require.Equal(t, state.Tasks[0], m.persistedActive[xid])
 	require.Equal(t, state.Tasks[1], m.persistedActive[radiusID])
 	for _, task := range state.Tasks[2:5] {

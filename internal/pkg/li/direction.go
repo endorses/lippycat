@@ -26,7 +26,7 @@ func PayloadDirectionForTarget(target TargetIdentity, pkt *types.PacketDisplay) 
 	switch target.Type {
 	case TargetTypeIPv4Address, TargetTypeIPv6Address, TargetTypeIPv4CIDR, TargetTypeIPv6CIDR:
 		return ipDirection(target, pkt)
-	case TargetTypeSIPURI, TargetTypeUsername, TargetTypeTELURI:
+	case TargetTypeSIPURI, TargetTypeUsername, TargetTypeTELURI, TargetTypeE164:
 		return sipIdentityDirection(target, pkt)
 	default:
 		// IMSI/IMEI and any future types: no per-packet direction available here.
@@ -104,7 +104,7 @@ func sipIdentityMatches(target TargetIdentity, header string) bool {
 		return strings.EqualFold(uri, extractSIPURIPattern(target.Value))
 	case TargetTypeUsername:
 		return strings.EqualFold(uriUserPart(uri), strings.TrimSpace(target.Value))
-	case TargetTypeTELURI:
+	case TargetTypeTELURI, TargetTypeE164:
 		tgt := extractPhonePattern(target.Value)
 		return tgt != "" && onlyDigits(uriUserPart(uri)) == tgt
 	}

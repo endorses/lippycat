@@ -20,7 +20,7 @@ func TestTaskResponseDetailsToInterceptTask_FullyPopulated(t *testing.T) {
 
 	sipURI := schema.SIPURI("sip:alice@example.com")
 	telURI := schema.TELURI("tel:+15551234567")
-	e164 := schema.InternationalE164("+15559876543")
+	e164 := schema.InternationalE164("15559876543")
 	ipv4 := schema.IPv4Address("192.168.1.100")
 	ipv6 := schema.IPv6Address("2001:db8::1")
 	ipv4CIDR := "10.0.0.0/8"
@@ -66,9 +66,9 @@ func TestTaskResponseDetailsToInterceptTask_FullyPopulated(t *testing.T) {
 	assert.Equal(t, TargetTypeTELURI, task.Targets[1].Type)
 	assert.Equal(t, "tel:+15551234567", task.Targets[1].Value)
 
-	// E.164 maps to TEL URI type.
-	assert.Equal(t, TargetTypeTELURI, task.Targets[2].Type)
-	assert.Equal(t, "+15559876543", task.Targets[2].Value)
+	// E.164 retains its wire type.
+	assert.Equal(t, TargetTypeE164, task.Targets[2].Type)
+	assert.Equal(t, "15559876543", task.Targets[2].Value)
 
 	assert.Equal(t, TargetTypeIPv4Address, task.Targets[3].Type)
 	assert.Equal(t, "192.168.1.100", task.Targets[3].Value)
@@ -242,7 +242,7 @@ func TestTaskResponseDetailsToInterceptTask_ProvisioningStatus(t *testing.T) {
 func TestTaskResponseDetailsToInterceptTask_TargetIdentifierTypes(t *testing.T) {
 	sipURI := schema.SIPURI("sip:alice@example.com")
 	telURI := schema.TELURI("tel:+15551234567")
-	e164 := schema.InternationalE164("+15559876543")
+	e164 := schema.InternationalE164("15559876543")
 	ipv4 := schema.IPv4Address("192.168.1.100")
 	ipv6 := schema.IPv6Address("2001:db8::1")
 	ipv4CIDR := "10.0.0.0/8"
@@ -259,7 +259,7 @@ func TestTaskResponseDetailsToInterceptTask_TargetIdentifierTypes(t *testing.T) 
 	}{
 		{"SIP URI", &schema.TargetIdentifier{SipUri: &sipURI}, TargetTypeSIPURI, "sip:alice@example.com"},
 		{"TEL URI", &schema.TargetIdentifier{TelUri: &telURI}, TargetTypeTELURI, "tel:+15551234567"},
-		{"E164", &schema.TargetIdentifier{E164Number: &e164}, TargetTypeTELURI, "+15559876543"},
+		{"E164", &schema.TargetIdentifier{E164Number: &e164}, TargetTypeE164, "15559876543"},
 		{"IPv4", &schema.TargetIdentifier{Ipv4Address: &ipv4}, TargetTypeIPv4Address, "192.168.1.100"},
 		{"IPv6", &schema.TargetIdentifier{Ipv6Address: &ipv6}, TargetTypeIPv6Address, "2001:db8::1"},
 		{"IPv4 CIDR", &schema.TargetIdentifier{Ipv4Cidr: &schema.IPCIDR{IPv4CIDR: &ipv4CIDR}}, TargetTypeIPv4CIDR, "10.0.0.0/8"},

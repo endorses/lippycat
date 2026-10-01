@@ -4,6 +4,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/endorses/lippycat/internal/pkg/radius"
 )
 
@@ -27,6 +28,14 @@ type canonicalTaskDefinition struct {
 // returned slice never aliases the caller's task definition.
 func canonicalizeTargets(targets []TargetIdentity) []TargetIdentity {
 	canonical := append([]TargetIdentity(nil), targets...)
+	for i := range canonical {
+		// Before E.164 had its own enum, schema-valid bare-digit numbers
+		// were stored as TEL URI. Preserve their authorized identity across
+		// a complete modern snapshot, without equating arbitrary TEL URIs.
+		if canonical[i].Type == TargetTypeTELURI && schema.ValidE164Number(canonical[i].Value) {
+			canonical[i].Type = TargetTypeE164
+		}
+	}
 	sort.Slice(canonical, func(i, j int) bool {
 		if canonical[i].Type != canonical[j].Type {
 			return canonical[i].Type < canonical[j].Type

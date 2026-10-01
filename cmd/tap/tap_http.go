@@ -368,6 +368,7 @@ func runHTTPTap(cmd *cobra.Command, args []string) error {
 		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
 		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
 		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval
+		config.LIADMFCompleteTaskContract = liConfig.ADMFCompleteTaskContract
 	}
 
 	// Security check: TLS is enabled by default, require cert/key when enabled

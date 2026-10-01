@@ -688,6 +688,19 @@ message ProcessorStats {
     SIPRetryTelemetry sip_retry = 13;
     // Actual owned snapshot stores. Common filters are present in non-LI builds.
     ProcessorStorageStats storage = 14;
+    // Aggregate task definition health; absent when LI is disabled or unavailable.
+    LIDefinitionStats li_definitions = 15;
+}
+
+// Definition gauges contain no target, destination, or per-task labels.
+message LIDefinitionStats {
+    uint64 incomplete = 1;
+    uint64 pull_only = 2;
+    uint64 conflicts = 3;
+    uint64 unknown_windows = 4;
+    uint64 open_ended = 5;
+    // Monotonic successful repair count for this manager lifetime.
+    uint64 repairs = 6;
 }
 
 message ProcessorStorageStats {

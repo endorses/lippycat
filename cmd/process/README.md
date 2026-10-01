@@ -919,3 +919,14 @@ Independent PDU caps are available through `--li-delivery-x2-queue-size` and
 `--li-delivery-x3-queue-size`; each defaults to zero, inheriting the legacy
 `--li-delivery-queue-size` cap. `physical_queue_bytes` counts shared encoded payload
 once, while `queue_bytes` counts every destination copy.
+
+### Complete ADMF task definitions
+
+LI defaults to compatibility admission for partial ADMF snapshots. Enable
+`--li-admf-complete-task-contract` only after establishing complete task
+definitions and repairing held unknown-window tasks, or verifying that a
+complete startup snapshot will replace them. The startup policy holds new
+incomplete pull definitions as non-enforcing candidates until completed.
+Use `processor.li.admf_complete_task_contract: true` in YAML. See the
+[LI definition convergence and rollout guidance](../../docs/LI_INTEGRATION.md#complete-task-contract-and-definition-convergence)
+for lifecycle completeness, replay, and the lack of authoritative pull freshness.

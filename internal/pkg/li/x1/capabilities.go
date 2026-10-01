@@ -131,6 +131,9 @@ func validateTargetChoice(target *schema.TargetIdentifier) *capabilityError {
 		}
 		return nil
 	case target.SipUri != nil, target.TelUri != nil, target.E164Number != nil:
+		if target.E164Number != nil && !schema.ValidE164Number(string(*target.E164Number)) {
+			return invalidCapability("invalid E.164 target: expected 1–15 digits")
+		}
 		var value string
 		switch {
 		case target.SipUri != nil:

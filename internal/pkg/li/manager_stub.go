@@ -38,6 +38,7 @@ type Manager struct{}
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
+	Definitions      DefinitionStats
 	StartupSync      StartupSyncStatus
 	PacketsProcessed uint64
 	PacketsMatched   uint64

@@ -19,6 +19,7 @@ type StatusJSON struct {
 	TotalFilters      uint32                            `json:"total_filters"`
 	UpstreamProcessor string                            `json:"upstream_processor,omitempty"`
 	LIEncoding        *management.LIEncodingStats       `json:"li_encoding,omitempty"`
+	LIDefinitions     *management.LIDefinitionStats     `json:"li_definitions,omitempty"`
 	LIDelivery        *management.LIDeliveryStats       `json:"li_delivery,omitempty"`
 }
 
@@ -103,6 +104,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 		status.UpstreamProcessor = resp.ProcessorStats.UpstreamProcessor
 		status.LIEncoding = resp.ProcessorStats.LiEncoding
 		status.LIDelivery = resp.ProcessorStats.LiDelivery
+		status.LIDefinitions = resp.ProcessorStats.LiDefinitions
 		status.Storage = resp.ProcessorStats.Storage
 	}
 

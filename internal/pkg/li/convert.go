@@ -234,10 +234,13 @@ func convertTargetIdentifier(ti *schema.TargetIdentifier) (*TargetIdentity, erro
 		}, nil
 	}
 
-	// E.164 Number — maps to TEL URI type (E.164 is essentially TEL URI without prefix).
-	if ti.E164Number != nil && *ti.E164Number != "" {
+	// Preserve the wire type independently of telephone URI matching.
+	if ti.E164Number != nil {
+		if !schema.ValidE164Number(string(*ti.E164Number)) {
+			return nil, fmt.Errorf("invalid E.164 target: expected 1–15 digits")
+		}
 		return &TargetIdentity{
-			Type:  TargetTypeTELURI,
+			Type:  TargetTypeE164,
 			Value: string(*ti.E164Number),
 		}, nil
 	}

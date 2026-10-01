@@ -566,6 +566,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
 		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
 		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval
+		config.LIADMFCompleteTaskContract = liConfig.ADMFCompleteTaskContract
 		config.LIStateFile = liConfig.StateFile
 		config.LIStateKeys = liConfig.StateKeys
 	}

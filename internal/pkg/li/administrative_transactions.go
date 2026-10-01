@@ -325,10 +325,19 @@ func (m *Manager) modifyPersistentTaskLocked(xid uuid.UUID, mod *TaskModificatio
 	if err != nil {
 		return err
 	}
+	return m.commitPersistentTaskDefinitionLocked(previous, candidate)
+}
+
+// commitPersistentTaskDefinitionLocked is shared by ordinary modifications and
+// internal complete-definition promotion. Callers validate in a detached view.
+func (m *Manager) commitPersistentTaskDefinitionLocked(previous, candidate *InterceptTask) error {
+	xid := candidate.XID
 	candidate = canonicalStateTask(candidate)
 	kind := StateTaskUpdate
 	if candidate.ActivationGeneration != previous.ActivationGeneration {
 		kind = StateTaskModify
+	} else if previous.Status == TaskStatusPending && candidate.Status == TaskStatusActive {
+		kind = StateTaskPromote
 	}
 	intent, err := m.taskIntentLocked(kind, previous, candidate)
 	if err != nil {
@@ -366,8 +375,14 @@ func (m *Manager) modifyPersistentTaskLocked(xid uuid.UUID, mod *TaskModificatio
 		if err := m.checkpointIntentLocked(intent, StateRevocationCommitted, true); err != nil {
 			return m.failAdministrativeTaskLocked(intent, candidate, err)
 		}
+	}
+	if kind == StateTaskModify || previous.Status != candidate.Status {
 		if candidate.Status == TaskStatusActive {
 			if err := m.filters.UpdateFiltersForTask(candidate); err != nil {
+				return m.failAdministrativeTaskLocked(intent, candidate, err)
+			}
+		} else if previous.Status == TaskStatusActive {
+			if err := m.filters.RemoveFiltersForTask(xid); err != nil {
 				return m.failAdministrativeTaskLocked(intent, candidate, err)
 			}
 		}

@@ -64,6 +64,7 @@ type PacketBufferSnapshot struct {
 	OutputCapacity  int
 	SIPClassified   int64
 	SIPDemoted      int64
+	SIPOrdered      int64
 	RegularDropped  int64
 	SIPDropped      int64
 }

@@ -238,9 +238,9 @@ func TestTCPDirectionRearmGapClearsPartialPrefix(t *testing.T) {
 	stream := newLiveStream(t, handler, 60421, 5060)
 	stream.reverse.cancel()
 	waitFor(t, func() bool { return atomic.LoadInt32(&stream.reverse.finished) == 1 }, "reverse half exit before gap")
-	stream.ReassembledSG(&fakeScatterGather{data: []byte("INV"), dir: reassembly.TCPDirServerToClient}, nil)
+	stream.ReassembledSG(&fakeScatterGather{data: []byte("INVITE sip:bob@example.test SIP/2."), dir: reassembly.TCPDirServerToClient}, nil)
 	stream.ReassembledSG(&fakeScatterGather{skip: 5, dir: reassembly.TCPDirServerToClient}, nil)
-	stream.ReassembledSG(&fakeScatterGather{data: []byte("ITE sip:bob@example.test SIP/2.0\r\nCall-ID: broken\r\nContent-Length: 0\r\n\r\n"), dir: reassembly.TCPDirServerToClient}, nil)
+	stream.ReassembledSG(&fakeScatterGather{data: []byte("0\r\nCall-ID: broken\r\nContent-Length: 0\r\n\r\n"), dir: reassembly.TCPDirServerToClient}, nil)
 	stream.ReassembledSG(&fakeScatterGather{data: sipDirectionMessage("SIP/2.0 200 OK", "after-gap"), dir: reassembly.TCPDirServerToClient}, nil)
 	waitFor(t, func() bool { _, ok := handler.find("after-gap"); return ok }, "complete response after split-prefix gap")
 	if _, ok := handler.find("broken"); ok {

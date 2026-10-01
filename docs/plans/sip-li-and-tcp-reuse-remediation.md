@@ -38,7 +38,7 @@ production.
 
 ## Constraints
 
-- [ ] Keep the retention fix's pool pin/recycle lifecycle, one completion per
+- [x] Keep the retention fix's pool pin/recycle lifecycle, one completion per
       retired stream, bounded queued pages, and configured `MaxStreams` limit.
 - [ ] Keep X2 delivery behind the existing task/filter admission and delivery
       type checks. A broader SIP emission rule must not create an unauthorized
@@ -74,29 +74,29 @@ production.
 
 ## 2. Make TCP connection reuse safe after teardown
 
-- [ ] Add a real-assembler regression that closes both halves, then feeds a
+- [x] Add a real-assembler regression that closes both halves, then feeds a
       trailing RST, duplicate FIN, or final ACK before a new SYN and INVITE on
       the same 4-tuple. Cover both tuple orientations and new initial sequence
       numbers. Assert the second connection's requests and responses reach
       separate half-streams.
-- [ ] Prevent an unmatched control-only segment without SYN from creating a
+- [x] Prevent an unmatched control-only segment without SYN from creating a
       new pool connection. A SYN must still create a connection, and a data
       segment must still support passive midstream capture. In VoIP `Accept`,
       prevent bare ACK/FIN/RST from forcing a start when the half has no
       sequence state. Count rejected orphan controls without allocating a SIP
       worker for them.
-- [ ] Handle a credible new SYN on a reused 4-tuple when the prior connection
+- [x] Handle a credible new SYN on a reused 4-tuple when the prior connection
       remains in the pool because FINs were missed or only one half closed.
       Distinguish SYN retransmission from a new connection. Retire old state
       safely, notify its stream once, release queued pages, and create fresh
       sequence state and stream ownership under the retention fix's locks and
       pins. Preserve `MaxStreams` admission and both tuple orientations.
-- [ ] Reproduce the capture-lane ordering case: a regular-lane SYN queued
+- [x] Reproduce the capture-lane ordering case: a regular-lane SYN queued
       before SIP-lane data but delivered to reassembly after that data. Choose
       and implement a bounded per-flow ordering or late-SYN policy that keeps
       the first message and the following connection usable. Preserve the
       existing SIP-priority behavior for other flows.
-- [ ] Add deterministic capture-to-assembler and real-assembler tests for
+- [x] Add deterministic capture-to-assembler and real-assembler tests for
       orphan controls, clean close, missed FIN, closed-half reuse, SYN
       retransmission, late SYN, and idle flush. Run the relevant tests with
       the race detector; verify pool/worker counts and completion behavior

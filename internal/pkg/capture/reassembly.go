@@ -153,6 +153,10 @@ func (a *TCPAssembler) LimitStats() ReassemblyLimitSnapshot {
 	}
 }
 
+// OrphanControls counts unmatched ACK/FIN/RST packets discarded before factory
+// creation, so teardown remnants cannot reserve a SIP worker or sequence space.
+func (a *TCPAssembler) OrphanControls() uint64 { return a.pool.OrphanControls() }
+
 // timestampContext carries a packet's capture timestamp into the assembler so
 // FlushCloseOlderThan ages streams by capture time (essential for offline replay),
 // not wall-clock time.

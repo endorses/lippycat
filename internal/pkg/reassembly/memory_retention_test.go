@@ -284,3 +284,43 @@ func TestStreamPoolEndLookupWaitsForReverseCreation(t *testing.T) {
 	NewAssembler(p).FlushAll()
 	assertRetiredStreamsReleased(t, p)
 }
+
+// Replacement can race with another assembler retaining the same old tuple.
+// The old stream is completed once and no pinned slab is reset in place.
+func TestStreamPoolConcurrentSameTupleReplacement(t *testing.T) {
+	f := &retentionFactory{}
+	p := NewStreamPool(f)
+	const workers, sessions = 6, 24
+	var wg sync.WaitGroup
+	for worker := range workers {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			a := NewAssembler(p)
+			for session := range sessions {
+				syn := retentionPacket(50123, 5060, true, false)
+				syn.Seq = uint32(1000 + worker*sessions + session)
+				flow := netFlow
+				if worker%2 != 0 {
+					syn.SrcPort, syn.DstPort = syn.DstPort, syn.SrcPort
+					syn.SetInternalPortsForTesting()
+					flow = flow.Reverse()
+				}
+				a.Assemble(flow, &syn)
+				if session%3 == 0 {
+					a.FlushAll()
+				}
+			}
+		}(worker)
+	}
+	wg.Wait()
+	NewAssembler(p).FlushAll()
+	assertRetiredStreamsReleased(t, p)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, stream := range f.streams {
+		if got := stream.completed(); got != 1 {
+			t.Errorf("stream %d completed %d times, want 1", i, got)
+		}
+	}
+}

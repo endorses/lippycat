@@ -12,6 +12,7 @@ type Telemetry struct {
 	PacketBufferRegularDrops  int64
 	PacketBufferSIPDrops      int64
 	PacketBufferSIPDemotions  int64
+	PacketBufferSIPOrdered    int64
 	PacketBufferRegularLength int
 	PacketBufferRegularCap    int
 	PacketBufferSIPLength     int
@@ -120,6 +121,7 @@ func (c *telemetryCollector) report(interfaceName string, received, kernelDrops,
 		snapshot.PacketBufferRegularDrops = bufferSnapshot.RegularDropped
 		snapshot.PacketBufferSIPDrops = bufferSnapshot.SIPDropped
 		snapshot.PacketBufferSIPDemotions = bufferSnapshot.SIPDemoted
+		snapshot.PacketBufferSIPOrdered = bufferSnapshot.SIPOrdered
 		snapshot.PacketBufferDrops = snapshot.PacketBufferRegularDrops + snapshot.PacketBufferSIPDrops
 		snapshot.PacketBufferRegularLength = bufferSnapshot.RegularLength
 		snapshot.PacketBufferRegularCap = bufferSnapshot.RegularCapacity

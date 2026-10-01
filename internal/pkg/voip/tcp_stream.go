@@ -196,34 +196,20 @@ func (s *bufferedSIPStream) half(dir reassembly.TCPFlowDirection) *bufferedSIPSt
 	return s
 }
 
-// Accept implements reassembly.Stream. We accept every packet for the stream and
-// force reassembly to start from the first packet we see for the connection —
-// even mid-stream with no observed SYN — matching the passive-monitor behaviour
-// of the legacy tcpassembly path (start has effect only on a fresh connection;
-// it is ignored once a start sequence is established). Connection-boundary
-// handling for TCP 4-tuple reuse is done via ReassemblyComplete eviction, not here.
+// Accept starts passive capture only from payload, never an orphan control.
+// Connection generations and delayed SYNs are handled by the assembler; a SYN
+// retransmission must not reset SIP framing or discard state in a live half.
 func (s *bufferedSIPStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection, nextSeq reassembly.Sequence, start *bool, ac reassembly.AssemblerContext) bool {
+	if nextSeq < 0 && tcp != nil && !tcp.SYN && len(tcp.Payload) == 0 {
+		return false
+	}
 	half := s.half(dir)
 	if !ci.Timestamp.IsZero() {
 		half.captureMu.Lock()
 		half.capturedAt = ci.Timestamp
 		half.captureMu.Unlock()
 	}
-	// A bare SYN (no ACK) on this 4-tuple signals a genuinely new connection —
-	// e.g. a reused inner port after the prior call closed. gopacket keeps the
-	// same Stream object for a reused 4-tuple (it only allocates a fresh Stream
-	// via factory.New once the pool has evicted the old connection, which in
-	// ESP-NULL tap mode rarely happens because FIN/RST is seldom observed). So
-	// give the new connection a clean slate here: clear any permanent discard and
-	// reset the non-SIP accounting so it can lock onto SIP even if the previous
-	// occupant of this 4-tuple was non-SIP (or was discarded).
-	if tcp != nil && tcp.SYN && !tcp.ACK {
-		atomic.StoreInt32(&half.discard, 0)
-		atomic.StoreInt32(&half.lockedOnSIP, 0)
-		atomic.StoreInt64(&half.nonSIPBytes, 0)
-		half.rearmPrefix = nil
-	}
-	*start = true
+	*start = tcp != nil && (tcp.SYN || len(tcp.Payload) != 0)
 	return true
 }
 

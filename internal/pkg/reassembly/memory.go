@@ -10,6 +10,7 @@ import (
 	"flag"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/gopacket/layers"
@@ -146,6 +147,7 @@ type StreamPool struct {
 	all                [][]connection
 	nextAlloc          int
 	newConnectionCount int64
+	orphanControls     atomic.Uint64
 }
 
 func (p *StreamPool) grow() {
@@ -260,6 +262,9 @@ func (p *StreamPool) getHalf(k key) (*connection, *halfconnection, *halfconnecti
 	return nil, nil, nil
 }
 
+// OrphanControls returns control-only packets rejected without creating a stream.
+func (p *StreamPool) OrphanControls() uint64 { return p.orphanControls.Load() }
+
 // getConnection returns a connection.  If end is true and a connection
 // does not already exist, returns nil.  This allows us to check for a
 // connection without actually creating one if it doesn't already exist.
@@ -283,6 +288,7 @@ func (p *StreamPool) getConnection(k key, end bool, ts time.Time, tcp *layers.TC
 			continue
 		}
 		if end {
+			p.orphanControls.Add(1)
 			p.mu.Unlock()
 			return nil, nil, nil
 		}

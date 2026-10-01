@@ -24,6 +24,7 @@ import (
 )
 
 type PacketInfo struct {
+	queuedTCP         *queuedTCPFlow // internal regular-lane ordering marker
 	RADIUS            *radius.Observation
 	Provenance        *offline.PacketProvenance // Immutable normalized-byte locator; nil on legacy/live paths.
 	LinkType          layers.LinkType
@@ -113,14 +114,18 @@ func ResetESPConfigCache() {
 }
 
 type PacketBuffer struct {
-	ch         chan PacketInfo
-	sipCh      chan PacketInfo // High-priority channel for SIP packets
-	mergedCh   chan PacketInfo // Merged output channel (prioritizes SIP)
-	ctx        context.Context
-	cancel     context.CancelFunc
-	dropped    int64
-	sipDropped int64
-	sipDemoted int64
+	ch           chan PacketInfo
+	sipCh        chan PacketInfo // High-priority channel for SIP packets
+	mergedCh     chan PacketInfo // Merged output channel (prioritizes SIP)
+	ctx          context.Context
+	cancel       context.CancelFunc
+	dropped      int64
+	sipDropped   int64
+	sipDemoted   int64
+	sipOrdered   int64
+	tcpEnqueueMu sync.Mutex // serialize lane selection and insertion across senders
+	tcpOrderMu   sync.Mutex
+	tcpRegular   map[tcpSIPFlowKey]*queuedTCPFlow
 	// sipClassified counts packets routed as recognized SIP, including UDP starts
 	// and every TCP segment protected by stateful flow classification.
 	sipClassified int64
@@ -218,9 +223,7 @@ func (pb *PacketBuffer) mergeChannels() {
 				pb.drainMainChannel()
 				return
 			}
-			select {
-			case pb.mergedCh <- pkt:
-			case <-pb.ctx.Done():
+			if !pb.emitPacket(pkt) {
 				return
 			}
 		default:
@@ -231,9 +234,7 @@ func (pb *PacketBuffer) mergeChannels() {
 					pb.drainMainChannel()
 					return
 				}
-				select {
-				case pb.mergedCh <- pkt:
-				case <-pb.ctx.Done():
+				if !pb.emitPacket(pkt) {
 					return
 				}
 			case pkt, ok := <-pb.ch:
@@ -242,9 +243,7 @@ func (pb *PacketBuffer) mergeChannels() {
 					pb.drainSIPChannel()
 					return
 				}
-				select {
-				case pb.mergedCh <- pkt:
-				case <-pb.ctx.Done():
+				if !pb.emitPacket(pkt) {
 					return
 				}
 			case <-pb.ctx.Done():
@@ -262,9 +261,7 @@ func (pb *PacketBuffer) drainMainChannel() {
 			if !ok {
 				return
 			}
-			select {
-			case pb.mergedCh <- pkt:
-			case <-pb.ctx.Done():
+			if !pb.emitPacket(pkt) {
 				return
 			}
 		case <-pb.ctx.Done():
@@ -281,9 +278,7 @@ func (pb *PacketBuffer) drainSIPChannel() {
 			if !ok {
 				return
 			}
-			select {
-			case pb.mergedCh <- pkt:
-			case <-pb.ctx.Done():
+			if !pb.emitPacket(pkt) {
 				return
 			}
 		case <-pb.ctx.Done():
@@ -326,6 +321,8 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 	pb.sendersMu.Unlock()
 
 	defer pb.sendersWg.Done()
+	pb.tcpEnqueueMu.Lock()
+	defer pb.tcpEnqueueMu.Unlock()
 
 	// Check context cancellation first with higher priority
 	select {
@@ -339,6 +336,15 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 
 	if isSIP {
 		atomic.AddInt64(&pb.sipClassified, 1)
+		if pb.hasRegularTCPPredecessor(pkt) {
+			if pb.enqueueRegular(pkt, false) {
+				atomic.AddInt64(&pb.sipOrdered, 1)
+				return true
+			}
+			atomic.AddInt64(&pb.sipDropped, 1)
+			pb.reportBufferPressure(false)
+			return false
+		}
 		// Try SIP priority channel first
 		select {
 		case pb.sipCh <- pkt:
@@ -347,34 +353,30 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 			return false
 		default:
 			// The priority lane is full; try the regular lane as fallback.
-			select {
-			case pb.ch <- pkt:
+			if pb.enqueueRegular(pkt, false) {
 				atomic.AddInt64(&pb.sipDemoted, 1)
 				pb.reportBufferPressure(false)
 				return true
-			case <-pb.ctx.Done():
-				return false
-			default:
-				// Both input lanes are full: this is a final SIP drop.
-				atomic.AddInt64(&pb.sipDropped, 1)
-				pb.reportBufferPressure(false)
-				return false
 			}
+			// Both input lanes are full: this is a final SIP drop.
+			atomic.AddInt64(&pb.sipDropped, 1)
+			pb.reportBufferPressure(false)
+			return false
 		}
 	}
 
-	// Regular packet - send to main channel
-	select {
-	case pb.ch <- pkt:
+	// Regular TCP packets retain tuple order until emitted.
+	if pb.enqueueRegular(pkt, false) {
 		return true
+	}
+	select {
 	case <-pb.ctx.Done():
 		return false
 	default:
-		// Non-blocking send failed - buffer full
-		atomic.AddInt64(&pb.dropped, 1)
-		pb.reportBufferPressure(false)
-		return false
 	}
+	atomic.AddInt64(&pb.dropped, 1)
+	pb.reportBufferPressure(false)
+	return false
 }
 
 // SendBlocking sends a packet to the buffer, blocking until there's space.
@@ -405,6 +407,8 @@ func (pb *PacketBuffer) SendBlocking(pkt PacketInfo) bool {
 	pb.sendersMu.Unlock()
 
 	defer pb.sendersWg.Done()
+	pb.tcpEnqueueMu.Lock()
+	defer pb.tcpEnqueueMu.Unlock()
 
 	// Check context cancellation first
 	select {
@@ -418,6 +422,13 @@ func (pb *PacketBuffer) SendBlocking(pkt PacketInfo) bool {
 
 	if isSIP {
 		atomic.AddInt64(&pb.sipClassified, 1)
+		if pb.hasRegularTCPPredecessor(pkt) {
+			if pb.enqueueRegular(pkt, true) {
+				atomic.AddInt64(&pb.sipOrdered, 1)
+				return true
+			}
+			return false
+		}
 		// Try SIP priority channel first (blocking)
 		select {
 		case pb.sipCh <- pkt:
@@ -427,13 +438,7 @@ func (pb *PacketBuffer) SendBlocking(pkt PacketInfo) bool {
 		}
 	}
 
-	// Regular packet - send to main channel (blocking)
-	select {
-	case pb.ch <- pkt:
-		return true
-	case <-pb.ctx.Done():
-		return false
-	}
+	return pb.enqueueRegular(pkt, true)
 }
 
 // isSIPPacket performs fast SIP detection on a packet.
@@ -531,6 +536,7 @@ func (pb *PacketBuffer) Snapshot() PacketBufferSnapshot {
 		OutputCapacity:  cap(pb.mergedCh),
 		SIPClassified:   atomic.LoadInt64(&pb.sipClassified),
 		SIPDemoted:      atomic.LoadInt64(&pb.sipDemoted),
+		SIPOrdered:      atomic.LoadInt64(&pb.sipOrdered),
 		RegularDropped:  atomic.LoadInt64(&pb.dropped),
 		SIPDropped:      atomic.LoadInt64(&pb.sipDropped),
 	}
@@ -583,6 +589,9 @@ func (pb *PacketBuffer) Close() {
 
 	// Always wait for merger goroutine to finish (it will close mergedCh)
 	pb.mergerWg.Wait()
+	pb.tcpOrderMu.Lock()
+	clear(pb.tcpRegular)
+	pb.tcpOrderMu.Unlock()
 
 	// Log drop statistics (only on first close to avoid duplicate logs)
 	if !alreadyClosed {
@@ -1172,6 +1181,7 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 							"packet_buffer_dropped", snapshot.PacketBufferDrops,
 							"packet_buffer_regular_dropped", snapshot.PacketBufferRegularDrops,
 							"packet_buffer_sip_demoted", snapshot.PacketBufferSIPDemotions,
+							"packet_buffer_sip_ordered", snapshot.PacketBufferSIPOrdered,
 							"packet_buffer_sip_dropped", snapshot.PacketBufferSIPDrops,
 							"sip_priority_classified", snapshot.SIPClassified,
 							"sip_flow_promotions", snapshot.SIPFlowPromotions,

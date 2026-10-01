@@ -448,10 +448,13 @@ type halfconnection struct {
 	saved             *page    // Doubly-linked list of in-order pages (seq < nextSeq) already given to Stream who told us to keep
 	first, last       *page    // Doubly-linked list of out-of-order pages (seq > nextSeq)
 	nextSeq           Sequence // sequence number of in-order received bytes
+	synSeq            Sequence // observed SYN ISN, or invalidSequence for passive capture
+	firstSeq          Sequence // first accepted passive sequence (late-SYN correlation)
 	ackSeq            Sequence
 	created, lastSeen time.Time
 	stream            Stream
 	closed            bool
+	hasData           bool // accepted payload in this generation
 	// for stats
 	queuedBytes    int
 	queuedPackets  int
@@ -490,14 +493,18 @@ type connection struct {
 	mu       sync.Mutex
 	// pins and retired are protected by StreamPool.mu. A retired connection
 	// cannot be reused until every assembler holding a pointer has released it.
-	pins    int
-	retired bool
+	pins      int
+	retired   bool
+	completed bool // protected by mu: notify the stream at most once
 }
 
 func (c *connection) reset(k key, s Stream, ts time.Time) {
 	c.key = k
+	c.completed = false
 	base := halfconnection{
 		nextSeq:  invalidSequence,
+		synSeq:   invalidSequence,
+		firstSeq: invalidSequence,
 		ackSeq:   invalidSequence,
 		created:  ts,
 		lastSeen: ts,
@@ -663,6 +670,75 @@ type assemblerAction struct {
 	queue   bool
 }
 
+// connectionForPacket returns a pinned connection with its mutex held. Retry
+// retirement races without registering defers inside the hot-path retry loop.
+func (a *Assembler) connectionForPacket(key key, t *layers.TCP, timestamp time.Time, ac AssemblerContext) (*connection, *halfconnection, *halfconnection) {
+	for {
+		conn, half, rev := a.connPool.getConnection(key, !t.SYN && len(t.Payload) == 0, timestamp, t, ac)
+		if conn == nil {
+			if *debugLog {
+				log.Printf("%v got empty packet on otherwise empty connection", key)
+			}
+			return nil, nil, nil
+		}
+		conn.mu.Lock()
+		if a.connPool.isRetired(conn) {
+			conn.mu.Unlock()
+			a.connPool.release(conn)
+			continue
+		}
+		// A different bare SYN ISN starts a new generation. A SYN retransmission
+		// belongs to the current generation, as does a delayed handshake matching
+		// the first passive data sequence. SYN+ACK establishes the other half.
+		if newSYNGeneration(t, half, rev, timestamp) {
+			a.retireForReplacement(conn)
+			continue
+		}
+		return conn, half, rev
+	}
+}
+
+// newSYNGeneration distinguishes retransmission and late handshakes from tuple
+// reuse. When only the opposite half was captured, its ACK can confirm the late
+// opening SYN. An unmatched SYN captured after passive data is a new generation.
+// Two bare SYNs without payload/ACK evidence may be simultaneous open.
+func newSYNGeneration(t *layers.TCP, half, rev *halfconnection, timestamp time.Time) bool {
+	if !t.SYN || t.ACK {
+		return false
+	}
+	seq := Sequence(t.Seq)
+	if half.synSeq != invalidSequence {
+		return seq != half.synSeq
+	}
+	if half.nextSeq != invalidSequence {
+		return half.closed || seq.Add(1) != half.firstSeq
+	}
+	if rev.closed {
+		return true
+	}
+	if !rev.hasData && rev.ackSeq == invalidSequence {
+		return false
+	}
+	if seq.Add(1) == rev.ackSeq {
+		return false
+	}
+	// A handshake captured before the first observed packet may legitimately
+	// arrive late from another capture lane. Missing timestamps supply no such
+	// evidence; an unmatched SYN after data establishes fresh ownership.
+	return timestamp.IsZero() || !timestamp.Before(rev.created)
+}
+
+// retireForReplacement consumes the caller's lock and pin, including when a
+// callback panics. It always evicts the completed generation; outstanding pins
+// still protect its slab from recycling.
+func (a *Assembler) retireForReplacement(conn *connection) {
+	defer a.connPool.release(conn)
+	defer conn.mu.Unlock()
+	a.closeHalfConnection(conn, &conn.c2s)
+	a.closeHalfConnection(conn, &conn.s2c)
+	a.connPool.remove(conn)
+}
+
 // AssembleWithContext reassembles the given TCP packet into its appropriate
 // stream.
 //
@@ -686,18 +762,14 @@ func (a *Assembler) AssembleWithContext(netFlow gopacket.Flow, t *layers.TCP, ac
 	ci := ac.GetCaptureInfo()
 	timestamp := ci.Timestamp
 
-	conn, half, rev = a.connPool.getConnection(key, false, timestamp, t, ac)
+	conn, half, rev = a.connectionForPacket(key, t, timestamp, ac)
 	if conn == nil {
-		if *debugLog {
-			log.Printf("%v got empty packet on otherwise empty connection", key)
-		}
 		return
 	}
 	defer a.connPool.release(conn)
-	conn.mu.Lock()
 	defer conn.mu.Unlock()
-	if a.connPool.isRetired(conn) {
-		return
+	if t.SYN && half.synSeq == invalidSequence {
+		half.synSeq = Sequence(t.Seq)
 	}
 	if half.lastSeen.Before(timestamp) {
 		half.lastSeen = timestamp
@@ -723,6 +795,9 @@ func (a *Assembler) AssembleWithContext(netFlow gopacket.Flow, t *layers.TCP, ac
 		return
 	}
 
+	if len(t.Payload) > 0 {
+		half.hasData = true
+	}
 	seq, ack, bytes := Sequence(t.Seq), Sequence(t.Ack), t.Payload
 	if t.ACK {
 		half.ackSeq = ack
@@ -740,12 +815,14 @@ func (a *Assembler) AssembleWithContext(netFlow gopacket.Flow, t *layers.TCP, ac
 			}
 			seq = seq.Add(1)
 			half.nextSeq = seq
+			half.firstSeq = seq
 			action.queue = false
 		} else if a.start {
 			if *debugLog {
 				log.Printf("%v start forced", key)
 			}
 			half.nextSeq = seq
+			half.firstSeq = seq
 			action.queue = false
 		} else {
 			if *debugLog {
@@ -1243,13 +1320,21 @@ func (a *Assembler) closeHalfConnection(conn *connection, half *halfconnection) 
 	if *debugLog {
 		log.Printf("%v closing", conn)
 	}
-	half.closed = true
-	for p := half.first; p != nil; p = p.next {
-		// FIXME: it should be already empty
-		a.pc.replace(p)
-		half.pages--
+	if half.closed {
+		return
 	}
-	if conn.s2c.closed && conn.c2s.closed {
+	half.closed = true
+	for _, first := range []*page{half.first, half.saved} {
+		for p := first; p != nil; {
+			next := p.next
+			a.pc.replace(p)
+			half.pages--
+			p = next
+		}
+	}
+	half.first, half.last, half.saved = nil, nil, nil
+	if conn.s2c.closed && conn.c2s.closed && !conn.completed {
+		conn.completed = true
 		if half.stream.ReassemblyComplete(nil) { //FIXME: which context to pass ?
 			a.connPool.remove(conn)
 		}

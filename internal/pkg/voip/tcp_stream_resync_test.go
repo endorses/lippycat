@@ -375,8 +375,8 @@ func FuzzTCPFramingRecovery(f *testing.F) {
 // TestResync_ReusedFourTupleReassembles verifies the eviction/reset behaviour:
 // after one stream on a 4-tuple is discarded as non-SIP, a fresh stream on the
 // SAME 4-tuple re-assembles SIP normally (no discard state leaks across
-// connections); and a bare SYN on a discarded stream resets it so a reused inner
-// port gets a clean chance to lock onto SIP.
+// connections). SYN retransmissions on a live half must leave its discard and
+// framing state intact; a new generation is replaced by the real assembler.
 func TestResync_ReusedFourTupleReassembles(t *testing.T) {
 	// Stream 1: genuine non-SIP, never locks on.
 	rec1 := &recordingSIPHandler{}
@@ -397,8 +397,8 @@ func TestResync_ReusedFourTupleReassembles(t *testing.T) {
 		t.Fatalf("reused 4-tuple fresh stream did not re-assemble SIP; got %v", rec2.callIDs)
 	}
 
-	// A bare SYN on a discarded stream resets it (reused inner port ⇒ fresh
-	// chance to lock onto SIP).
+	// Accept cannot distinguish retransmission from a new generation. It must
+	// preserve live state; connection replacement belongs to the assembler.
 	s3, cancel3 := newResyncTestStream(t, &recordingSIPHandler{})
 	defer cancel3()
 	storeDiscard(s3, 1)
@@ -410,8 +410,8 @@ func TestResync_ReusedFourTupleReassembles(t *testing.T) {
 	if !start {
 		t.Error("Accept did not force-start reassembly")
 	}
-	if loadDiscard(s3) != 0 || loadLocked(s3) != 0 || loadNonSIP(s3) != 0 {
-		t.Errorf("SYN did not reset stream state: discard=%d locked=%d nonSIP=%d",
+	if loadDiscard(s3) != 1 || loadLocked(s3) != 1 || loadNonSIP(s3) != maxNonSIPBytesBeforeDiscard {
+		t.Errorf("SYN incorrectly reset live stream state: discard=%d locked=%d nonSIP=%d",
 			loadDiscard(s3), loadLocked(s3), loadNonSIP(s3))
 	}
 }

@@ -307,6 +307,13 @@ message HunterStats {
     uint64 capture_buffer_sip_capacity = 30;
     uint64 capture_buffer_output_len = 31;
     uint64 capture_buffer_output_capacity = 32;
+
+    // Harmless keepalive chunks and rejected controls are distinct from SIP loss.
+    uint64 tcp_rearm_keepalive_chunks = 33;
+    uint64 tcp_orphan_controls = 34;
+    uint64 tcp_accept_rejected_controls = 35;
+    // Queued bytes discarded when a new SYN replaces a stale connection.
+    uint64 tcp_replacement_dropped_bytes = 36;
 }
 
 // ProcessorHeartbeat response from processor
@@ -690,6 +697,19 @@ message ProcessorStats {
     ProcessorStorageStats storage = 14;
     // Aggregate task definition health; absent when LI is disabled or unavailable.
     LIDefinitionStats li_definitions = 15;
+    // Startup ADMF synchronization, absent when LI is disabled or unavailable.
+    LIStartupSyncStats li_startup_sync = 16;
+}
+
+message LIStartupSyncStats {
+    // Empty when startup synchronization was not requested.
+    string state = 1;
+    uint64 attempts = 2;
+    // Sanitized operational category, never remote response text or selectors.
+    string last_failure = 3;
+    // UTC RFC3339 timestamps, empty before the corresponding event.
+    string last_attempt = 4;
+    string recovered_at = 5;
 }
 
 // Definition gauges contain no target, destination, or per-task labels.

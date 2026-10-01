@@ -201,6 +201,7 @@ func (s *bufferedSIPStream) half(dir reassembly.TCPFlowDirection) *bufferedSIPSt
 // retransmission must not reset SIP framing or discard state in a live half.
 func (s *bufferedSIPStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection, nextSeq reassembly.Sequence, start *bool, ac reassembly.AssemblerContext) bool {
 	if nextSeq < 0 && tcp != nil && !tcp.SYN && len(tcp.Payload) == 0 {
+		atomic.AddInt64(&tcpStreamMetrics.acceptRejectedControls, 1)
 		return false
 	}
 	half := s.half(dir)

@@ -171,7 +171,9 @@ func shouldReverseTCPBufferKey(netFlow, transportFlow gopacket.Flow) bool {
 }
 
 // BufferTCPPacket buffers a TCP packet for a network and transport flow.
-// This is used by TCP SIP handlers to buffer packets before reassembly completes.
+// This legacy API supports direct handler callers without reassembly metadata.
+// Production capture paths use per-message timestamps from the assembler and
+// must not buffer here: this key does not distinguish reused tuple generations.
 func BufferTCPPacket(netFlow, transportFlow gopacket.Flow, pkt capture.PacketInfo) {
 	BufferTCPPacketWithConfig(netFlow, transportFlow, pkt, DefaultConfig())
 }

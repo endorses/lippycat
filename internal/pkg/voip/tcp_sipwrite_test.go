@@ -20,6 +20,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type inspectTCPAssembler func(gopacket.Flow, *layers.TCP, time.Time) error
+
+func (f inspectTCPAssembler) AssembleTCP(flow gopacket.Flow, tcp *layers.TCP, at time.Time) error {
+	return f(flow, tcp, at)
+}
+
+func TestTCPLocalCaptureDoesNotRetainTupleBuffer(t *testing.T) {
+	resetTCPBuffers()
+	t.Cleanup(resetTCPBuffers)
+	packet := createTCPSIPPacket(t, tcpSIPMsg("INVITE sip:bob@example.com SIP/2.0", "bufferless", "<sip:alice@example.com>", ""), "192.0.2.1", "192.0.2.2")
+	tcp := packet.TransportLayer().(*layers.TCP)
+	called := false
+	assembler := inspectTCPAssembler(func(flow gopacket.Flow, segment *layers.TCP, at time.Time) error {
+		called = true
+		tcpPacketBuffersMu.RLock()
+		defer tcpPacketBuffersMu.RUnlock()
+		require.Empty(t, tcpPacketBuffers, "raw buffering must be absent before asynchronous stream processing")
+		require.Equal(t, packet.NetworkLayer().NetworkFlow(), flow)
+		require.Equal(t, tcp, segment)
+		require.Equal(t, packet.Metadata().Timestamp, at)
+		return nil
+	})
+	handleTcpPackets(capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}, tcp, assembler)
+	require.True(t, called)
+}
+
+func TestTCPLocalPath_CaptureAndLegacyTimestampFallback(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			h := newTCPSIPHarness(t)
+			const callID = "tcp-bufferless-timestamp@example.com"
+			resetVoipWriteState(h.tracker, callID)
+			t.Cleanup(func() { resetVoipWriteState(h.tracker, callID) })
+			sipusers.ClearAll()
+			t.Cleanup(sipusers.ClearAll)
+			message := tcpSIPMsg("INVITE sip:bob@example.com SIP/2.0", callID, "<sip:alice@example.com>", "")
+			packet := createTCPSIPPacket(t, message, "192.168.1.100", "192.168.1.101")
+			packet.Metadata().Timestamp = time.Unix(1711111111, 123000000)
+			info := capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}
+			if legacy {
+				flow, ports := packet.NetworkLayer().NetworkFlow(), packet.TransportLayer().TransportFlow()
+				BufferTCPPacket(flow, ports, info)
+				require.True(t, h.dispatch(message, callID, flow, ports))
+			} else {
+				factory := NewSipStreamFactory(t.Context(), h.handler).(*sipStreamFactory)
+				assembler := capture.NewTCPAssembler(factory)
+				t.Cleanup(func() { assembler.FlushAll(); require.NoError(t, factory.Shutdown()) })
+				handleTcpPackets(info, packet.TransportLayer().(*layers.TCP), assembler)
+				assembler.FlushAll()
+				require.Eventually(t, func() bool { return factory.GetActiveGoroutines() == 0 }, time.Second, time.Millisecond)
+			}
+			h.tracker.closeAsyncWriter()
+			require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callID))
+			file, err := os.Open(h.sipPath(callID))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, file.Close()) })
+			reader, err := pcapgo.NewReader(file)
+			require.NoError(t, err)
+			data, ci, err := reader.ReadPacketData()
+			require.NoError(t, err)
+			require.True(t, ci.Timestamp.Equal(packet.Metadata().Timestamp), "timestamp: %s", ci.Timestamp)
+			written := gopacket.NewPacket(data, layers.LinkTypeEthernet, gopacket.Default)
+			require.Equal(t, message, string(written.TransportLayer().(*layers.TCP).Payload))
+			_, _, err = reader.ReadPacketData()
+			require.ErrorIs(t, err, io.EOF)
+		})
+	}
+}
+
 func TestTCPLocalPath_ResponseUsesItsOwnCaptureTimestamp(t *testing.T) {
 	h := newTCPSIPHarness(t)
 	const callID = "tcp-response-timestamp@example.com"
@@ -66,9 +135,8 @@ func TestTCPLocalPath_ResponseUsesItsOwnCaptureTimestamp(t *testing.T) {
 }
 
 // tcpSIPHarness drives LocalFileHandler (the lc sniff voip TCP path) against a
-// temporary per-call PCAP. Packets are buffered per network flow exactly as
-// handleTcpPackets does, then a complete SIP message is dispatched the way the
-// reassembler dispatches it.
+// temporary per-call PCAP. Its explicit buffer helpers exercise the legacy
+// timestamp fallback; production capture uses per-message reassembly metadata.
 type tcpSIPHarness struct {
 	t       *testing.T
 	tracker *CallTracker
@@ -156,8 +224,8 @@ func (h *tcpSIPHarness) sipPath(callID string) string {
 	return filepath.Join(h.tmpDir, fmt.Sprintf("capture_sip_%s.pcap", sanitize(callID)))
 }
 
-// buffer records one raw TCP packet for its network flow, mirroring
-// handleTcpPackets. Returns the flow the reassembler would report.
+// buffer records a legacy raw TCP packet for its network flow and returns the
+// flow the reassembler would report.
 func (h *tcpSIPHarness) buffer(payload string, srcIP, dstIP string) (gopacket.Flow, gopacket.Flow) {
 	h.t.Helper()
 	return h.bufferWithPorts(payload, srcIP, dstIP, 5060, 5060)

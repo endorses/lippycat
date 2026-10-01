@@ -139,15 +139,16 @@ func (c *pageCache) replace(p *page) {
 // Assembler, though, it does have to do some locking to make sure that the
 // connection objects it stores are accessible to multiple Assemblers.
 type StreamPool struct {
-	conns              map[key]*connection
-	creating           map[key]chan struct{}
-	mu                 sync.RWMutex
-	factory            StreamFactory
-	free               []*connection
-	all                [][]connection
-	nextAlloc          int
-	newConnectionCount int64
-	orphanControls     atomic.Uint64
+	conns                   map[key]*connection
+	creating                map[key]chan struct{}
+	mu                      sync.RWMutex
+	factory                 StreamFactory
+	free                    []*connection
+	all                     [][]connection
+	nextAlloc               int
+	newConnectionCount      int64
+	orphanControls          atomic.Uint64
+	replacementDroppedBytes atomic.Uint64
 }
 
 func (p *StreamPool) grow() {
@@ -265,6 +266,10 @@ func (p *StreamPool) getHalf(k key) (*connection, *halfconnection, *halfconnecti
 // OrphanControls returns control-only packets rejected without creating a stream.
 func (p *StreamPool) OrphanControls() uint64 { return p.orphanControls.Load() }
 
+// ReplacementDroppedBytes counts queued, undelivered bytes discarded when a
+// new SYN replaces a stale connection, including data captured ahead of its SYN.
+func (p *StreamPool) ReplacementDroppedBytes() uint64 { return p.replacementDroppedBytes.Load() }
+
 // getConnection returns a connection.  If end is true and a connection
 // does not already exist, returns nil.  This allows us to check for a
 // connection without actually creating one if it doesn't already exist.
@@ -290,6 +295,9 @@ func (p *StreamPool) getConnection(k key, end bool, ts time.Time, tcp *layers.TC
 		if end {
 			p.orphanControls.Add(1)
 			p.mu.Unlock()
+			if observer, ok := p.factory.(StreamPoolObserver); ok {
+				observer.RecordOrphanControl()
+			}
 			return nil, nil, nil
 		}
 		pending := make(chan struct{})

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/li/x1"
+	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/google/uuid"
 )
 
 var errStartupSyncUnsupported = errors.New("ADMF GetAllDetails unsupported")
@@ -72,6 +74,10 @@ func (m *Manager) attemptStartupSync() bool {
 	cancel()
 	// Publish another immutable copy: readers may still hold the pending one.
 	result := status
+	var partial *incompleteStartupSnapshot
+	if errors.As(err, &partial) {
+		result.partialSnapshot = true
+	}
 	switch {
 	case errors.Is(err, errStartupSyncUnsupported):
 		result.State = StartupSyncUnsupported
@@ -108,4 +114,24 @@ func (m *Manager) retryStartupSync() {
 		}
 		backoff = min(backoff*2, 30*time.Second)
 	}
+}
+
+// Report only validated identifiers. Malformed remote identifiers may contain
+// arbitrary target data; the zero-based entry index still locates those entries.
+func snapshotTaskID(td *schema.TaskResponseDetails) string {
+	if td != nil && td.TaskDetails != nil && td.TaskDetails.XId != nil {
+		if id, err := uuid.Parse(string(*td.TaskDetails.XId)); err == nil {
+			return id.String()
+		}
+	}
+	return "unknown"
+}
+
+func snapshotDestinationID(dd *schema.DestinationResponseDetails) string {
+	if dd != nil && dd.DestinationDetails != nil && dd.DestinationDetails.DId != nil {
+		if id, err := uuid.Parse(string(*dd.DestinationDetails.DId)); err == nil {
+			return id.String()
+		}
+	}
+	return "unknown"
 }

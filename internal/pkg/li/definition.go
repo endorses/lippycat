@@ -20,7 +20,9 @@ type DefinitionCompleteness struct {
 	Implicit    bool
 }
 
-func (c DefinitionCompleteness) Complete() bool { return c.Mediation && c.Start && c.End && c.Implicit }
+// The optional implicit-deactivation flag defaults to false. Its presence is
+// retained for faithful read-back, but does not make a known window incomplete.
+func (c DefinitionCompleteness) Complete() bool { return c.Mediation && c.Start && c.End }
 
 type TaskDefinitionState struct {
 	Source       TaskDefinitionSource

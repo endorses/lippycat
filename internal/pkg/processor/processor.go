@@ -1058,6 +1058,10 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 			TcpEstablishedIdleRetentions:  stats.TCPEstablishedIdleRetentions,
 			TcpPreRearmDiscardedChunks:    stats.TCPPreRearmDiscardedChunks,
 			TcpRearmRejectedChunks:        stats.TCPRearmRejectedChunks,
+			TcpRearmKeepaliveChunks:       stats.TCPRearmKeepaliveChunks,
+			TcpOrphanControls:             stats.TCPOrphanControls,
+			TcpAcceptRejectedControls:     stats.TCPAcceptRejectedControls,
+			TcpReplacementDroppedBytes:    stats.TCPReplacementDroppedBytes,
 			Detector: &management.DetectorTelemetry{
 				FlowEntries:                 detectorStats.FlowEntries,
 				CacheEntries:                detectorStats.CacheEntries,

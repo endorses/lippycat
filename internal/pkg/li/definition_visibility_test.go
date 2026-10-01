@@ -19,14 +19,18 @@ func TestCompletenessOnlyRepairCountsAndLogsWithoutValues(t *testing.T) {
 	did, xid := uuid.New(), uuid.New()
 	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "127.0.0.1", Port: 8443}))
 	incomplete := convergenceDetails(xid, did, true)
-	incomplete.TaskDetails.ImplicitDeactivationAllowed = nil
-	applyConvergence(t, m, incomplete)
+	flag := false
+	incomplete.TaskDetails.ImplicitDeactivationAllowed = &flag
+	converted, err := ConvertSnapshotTask(incomplete)
+	require.NoError(t, err)
+	// Legacy definitions may retain values without knowing the end boundary.
+	converted.Task.Definition.Completeness.End = false
+	require.NoError(t, m.ActivateTask(converted.Task))
 	before, _ := m.GetTaskDetails(xid)
 	var output bytes.Buffer
 	logger.UseFile(&output)
 	t.Cleanup(logger.UseStderr)
 	full := convergenceDetails(xid, did, true)
-	flag := false
 	full.TaskDetails.ImplicitDeactivationAllowed = &flag
 	applyConvergence(t, m, full)
 	require.EqualValues(t, 1, m.Stats().Definitions.Repairs)

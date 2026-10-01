@@ -86,13 +86,14 @@ func radiusPOIProcessor(t *testing.T, queueSize int) (*Processor, *li.InterceptT
 	cfg.TLSCertFile = filepath.Join(certDir, "delivery-client-cert.pem")
 	cfg.TLSKeyFile = filepath.Join(certDir, "delivery-client-key.pem")
 	cfg.TLSCAFile = filepath.Join(certDir, "ca-cert.pem")
-	cfg.DialTimeout = 50 * time.Millisecond
+	// Exercise shutdown draining without making TLS scheduling a 50 ms gate.
+	cfg.DialTimeout = 5 * time.Second
 	liDeliveryMgr, err = delivery.NewManager(cfg)
 	require.NoError(t, err)
 	clientCfg := delivery.DefaultClientConfig()
 	clientCfg.QueueSize = queueSize
-	clientCfg.ShutdownTimeout = time.Second
-	clientCfg.SendTimeout = 100 * time.Millisecond
+	clientCfg.ShutdownTimeout = 10 * time.Second
+	clientCfg.SendTimeout = 5 * time.Second
 	liDeliveryClient = delivery.NewClient(liDeliveryMgr, clientCfg)
 	require.NoError(t, liDeliveryClient.Err())
 	dest := &li.Destination{DID: uuid.New(), Address: "127.0.0.1", Port: 1, X2Enabled: true, ProtocolType: "X2Only"}

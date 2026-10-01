@@ -26,10 +26,10 @@ func handleTcpPacketsWithConfig(pkt capture.PacketInfo, layer *layers.TCP, assem
 		setCurrentLinkType(layers.LinkTypeEthernet) // Default to ethernet
 	}
 
-	// Buffer the packet for potential PCAP writing
-	flow := pkt.Packet.NetworkLayer().NetworkFlow()
-	transportFlow := layer.TransportFlow()
-	BufferTCPPacketWithConfig(flow, transportFlow, pkt, config)
+	// Reassembly supplies each message's capture timestamp and handlers write
+	// a synthesized packet containing exactly that message. Raw tuple-keyed
+	// buffering is unnecessary here and would let an old generation's delayed
+	// cleanup erase packets captured for a new connection on the same tuple.
 
 	// Feed the packet to the TCP assembler for stream reconstruction
 	offline := len(offlineMode) > 0 && offlineMode[0]

@@ -1839,8 +1839,8 @@ func targetIdentifierResponse(target TargetIdentity) *schema.TargetIdentifier {
 	case TargetTypeTELURI:
 		// Older state collapsed e164Number into a bare-digit TEL URI. Emit
 		// its original schema type while keeping actual tel: URIs unchanged.
-		if schema.ValidE164Number(target.Value) {
-			v := schema.InternationalE164(target.Value)
+		if number := strings.TrimPrefix(target.Value, "+"); schema.ValidE164Number(number) {
+			v := schema.InternationalE164(number)
 			result.E164Number = &v
 			break
 		}

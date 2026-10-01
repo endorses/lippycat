@@ -1,19 +1,41 @@
 # TCP SIP Troubleshooting Guide
 
 ## Overview
+
 This guide provides comprehensive troubleshooting procedures for TCP SIP capture issues in lippycat. It covers common problems, diagnostic techniques, and resolution strategies for production deployments.
 
 ## Common Issues and Solutions
 
+### Distinguishing keepalives from discarded TCP data
+
+Tap capture heartbeats and `lc show hunter` statistics expose these cumulative
+TCP SIP counters (also present in the hunter objects from `lc list hunters`):
+
+| Counter                         | Meaning                                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `tcp_rearm_keepalive_chunks`    | CRLF keepalive chunks seen while a parser is idle; not rejected SIP messages.                                                     |
+| `tcp_orphan_controls`           | Payload-free non-SYN packets ignored because no connection exists.                                                                |
+| `tcp_accept_rejected_controls`  | Control packets refused because they cannot start the uninitialized half of an existing connection.                               |
+| `tcp_rearm_rejected_chunks`     | Chunks rejected because parser rearming did not find a valid SIP start.                                                           |
+| `tcp_replacement_dropped_bytes` | Queued out-of-order bytes discarded when a new SYN replaces a stale connection. These may belong to either connection generation. |
+
+A new connection's data arriving before its SYN on a stale tuple can still be
+discarded during replacement. The replacement counter makes that loss visible;
+it does not establish a lost SIP message count. Capture-lane ordering prevents
+this reordering within the normal single capture-buffer path.
+
 ### 1. TCP Stream Processing Issues
 
 #### Issue: No TCP SIP messages being captured
+
 **Symptoms:**
+
 - Zero active streams in metrics
 - No PCAP files created for TCP SIP calls
 - TCP buffer stats show no activity
 
 **Diagnostic Steps:**
+
 ```bash
 # Check if TCP SIP traffic is reaching the interface
 sudo tcpdump -i any -n port 5060 and tcp
@@ -23,6 +45,7 @@ sudo lc sniff voip --interface any --tcp-performance-mode latency
 ```
 
 **Common Causes & Solutions:**
+
 1. **Wrong Interface:** SIP traffic on different interface
    - Solution: Use `--interface any` or specify correct interface
 
@@ -33,12 +56,15 @@ sudo lc sniff voip --interface any --tcp-performance-mode latency
    - Solution: Currently only port 5060 supported, contact development for custom ports
 
 #### Issue: TCP streams created but no SIP messages processed
+
 **Symptoms:**
+
 - Active streams > 0 in metrics
 - No call IDs detected
 - TCP buffers accumulating but not flushed
 
 **Diagnostic Steps:**
+
 ```bash
 # Enable debug logging
 export LOG_LEVEL=debug
@@ -49,6 +75,7 @@ sudo lc sniff voip --tcp-performance-mode latency
 ```
 
 **Common Causes & Solutions:**
+
 1. **Fragmented SIP Messages:** TCP segments not reassembling correctly
    - Solution: Increase `tcp_stream_timeout` in config
    - Solution: Use `tcp_performance_mode: latency` for faster processing
@@ -60,12 +87,15 @@ sudo lc sniff voip --tcp-performance-mode latency
 ### 2. Performance Issues
 
 #### Issue: High memory usage
+
 **Symptoms:**
+
 - Memory usage continuously increasing
 - System becoming unresponsive
 - TCP buffer stats showing high packet counts
 
 **Diagnostic Steps:**
+
 ```bash
 # Check current memory usage
 ps aux | grep lippycat
@@ -83,15 +113,18 @@ debug binds require `--debug-allow-non-loopback`. `LC_PPROF_ADDR=127.0.0.1:6060`
 is still accepted as a compatibility fallback when the flag is omitted.
 
 **Solutions:**
+
 1. **Enable Memory Optimization:**
+
    ```yaml
    voip:
      tcp_performance_mode: "memory"
      memory_optimization: true
-     tcp_memory_limit: 52428800  # 50MB
+     tcp_memory_limit: 52428800 # 50MB
    ```
 
 2. **Reduce Buffer Limits:**
+
    ```yaml
    voip:
      max_tcp_buffers: 1000
@@ -106,19 +139,24 @@ is still accepted as a compatibility fallback when the flag is omitted.
    ```
 
 #### Issue: High CPU usage
+
 **Symptoms:**
+
 - CPU usage near 100%
 - System lag and responsiveness issues
 - High goroutine count in metrics
 
 **Solutions:**
+
 1. **Reduce Goroutine Limit:**
+
    ```yaml
    voip:
      max_goroutines: 500
    ```
 
 2. **Enable Backpressure:**
+
    ```yaml
    voip:
      enable_backpressure: true
@@ -132,19 +170,24 @@ is still accepted as a compatibility fallback when the flag is omitted.
    ```
 
 #### Issue: Packet drops and missed calls
+
 **Symptoms:**
+
 - Dropped streams metric increasing
 - Missing SIP calls in output
 - Queue utilization near 100%
 
 **Solutions:**
+
 1. **Increase Queue Capacity:**
+
    ```yaml
    voip:
      stream_queue_buffer: 1000
    ```
 
 2. **Throughput Mode:**
+
    ```yaml
    voip:
      tcp_performance_mode: "throughput"
@@ -160,11 +203,14 @@ is still accepted as a compatibility fallback when the flag is omitted.
 ### 3. Configuration Issues
 
 #### Issue: Configuration not taking effect
+
 **Symptoms:**
+
 - Changes to config file not reflected in behavior
 - Default values still being used
 
 **Diagnostic Steps:**
+
 ```bash
 # Verify config file location
 ls -la ~/.lippycat.yaml
@@ -177,6 +223,7 @@ sudo lc sniff voip --tcp-performance-mode invalid  # Should show error
 ```
 
 **Solutions:**
+
 1. **Correct Config Location:** Place config at `~/.lippycat.yaml`
 2. **Proper YAML Format:** Validate YAML syntax
 3. **Restart Application:** Configuration loaded at startup
@@ -184,11 +231,14 @@ sudo lc sniff voip --tcp-performance-mode invalid  # Should show error
 ### 4. Network Interface Issues
 
 #### Issue: Permission denied accessing network interface
+
 **Symptoms:**
+
 - "Operation not permitted" errors
 - Cannot capture live traffic
 
 **Solutions:**
+
 ```bash
 # Run with sudo
 sudo lc sniff voip
@@ -198,11 +248,14 @@ sudo setcap cap_net_raw,cap_net_admin=eip lc
 ```
 
 #### Issue: Interface not found
+
 **Symptoms:**
+
 - "No such device" errors
 - Interface name errors
 
 **Diagnostic Steps:**
+
 ```bash
 # List available interfaces
 ip link show
@@ -261,6 +314,7 @@ lsof -p $(pgrep lippycat)
 ## Performance Tuning
 
 ### Baseline Configuration
+
 Start with baseline configuration for your environment:
 
 ```yaml
@@ -273,6 +327,7 @@ voip:
 ```
 
 ### High-Volume Environments
+
 For high SIP call volume (>1000 calls/minute):
 
 ```yaml
@@ -286,6 +341,7 @@ voip:
 ```
 
 ### Low-Latency Requirements
+
 For real-time monitoring with <1ms latency:
 
 ```yaml
@@ -297,6 +353,7 @@ voip:
 ```
 
 ### Resource-Constrained Environments
+
 For limited memory/CPU environments:
 
 ```yaml
@@ -305,12 +362,13 @@ voip:
   max_goroutines: 100
   max_tcp_buffers: 1000
   memory_optimization: true
-  tcp_memory_limit: 52428800  # 50MB
+  tcp_memory_limit: 52428800 # 50MB
 ```
 
 ## Emergency Procedures
 
 ### Immediate Actions for System Overload
+
 1. **Stop Processing:** Kill lippycat process immediately
 2. **Check Resources:** Verify system memory/CPU availability
 3. **Restart with Conservative Settings:**
@@ -319,6 +377,7 @@ voip:
    ```
 
 ### Data Recovery
+
 If PCAP files are corrupted or incomplete:
 
 1. **Check Disk Space:** Ensure sufficient storage for PCAP files
@@ -326,6 +385,7 @@ If PCAP files are corrupted or incomplete:
 3. **Restart with File Output:** Use `--write-file` flag to ensure PCAP creation
 
 ### Health Check Script
+
 Create a monitoring script for production environments:
 
 ```bash
@@ -362,6 +422,7 @@ exit 0
 ## Support and Escalation
 
 ### Information to Collect
+
 When reporting issues, collect:
 
 1. **Configuration:** Full config file content
@@ -371,11 +432,13 @@ When reporting issues, collect:
 5. **Network Sample:** Sample PCAP file if possible
 
 ### Contact Information
+
 - **Issues:** GitHub Issues for bug reports
 - **Feature Requests:** GitHub Issues for enhancements
 - **Security Issues:** security@endorses.com (private)
 
 ### Known Limitations
+
 1. **Port Support:** Currently only standard SIP port 5060
 2. **Protocol Support:** TCP SIP only (UDP SIP separately supported)
 3. **Scale Limits:** Tested up to 10,000 concurrent TCP streams
@@ -385,23 +448,23 @@ When reporting issues, collect:
 
 ### Configuration Parameter Reference
 
-| Parameter | Default | Description | Tuning Notes |
-|-----------|---------|-------------|--------------|
-| `max_goroutines` | 1000 | Max concurrent processing threads | Increase for high volume |
-| `tcp_cleanup_interval` | 60s | Resource cleanup frequency | Decrease for memory optimization |
-| `tcp_buffer_max_age` | 300s | Max buffer retention time | Adjust based on call duration |
-| `max_tcp_buffers` | 10000 | Maximum packet buffers | Reduce for memory constraints |
-| `tcp_performance_mode` | "balanced" | Performance optimization mode | Choose based on use case |
-| `tcp_buffer_strategy` | "adaptive" | Buffer management strategy | "ring" for high volume |
-| `enable_backpressure` | true | Enable load management | Always recommended |
-| `tcp_batch_size` | 32 | Packets per processing batch | 1 for latency, 64 for throughput |
+| Parameter              | Default    | Description                       | Tuning Notes                     |
+| ---------------------- | ---------- | --------------------------------- | -------------------------------- |
+| `max_goroutines`       | 1000       | Max concurrent processing threads | Increase for high volume         |
+| `tcp_cleanup_interval` | 60s        | Resource cleanup frequency        | Decrease for memory optimization |
+| `tcp_buffer_max_age`   | 300s       | Max buffer retention time         | Adjust based on call duration    |
+| `max_tcp_buffers`      | 10000      | Maximum packet buffers            | Reduce for memory constraints    |
+| `tcp_performance_mode` | "balanced" | Performance optimization mode     | Choose based on use case         |
+| `tcp_buffer_strategy`  | "adaptive" | Buffer management strategy        | "ring" for high volume           |
+| `enable_backpressure`  | true       | Enable load management            | Always recommended               |
+| `tcp_batch_size`       | 32         | Packets per processing batch      | 1 for latency, 64 for throughput |
 
 ### Error Code Reference
 
-| Error Code | Meaning | Action |
-|------------|---------|--------|
-| TCP-001 | Stream creation failed | Check goroutine limits |
-| TCP-002 | Buffer overflow | Enable memory optimization |
-| TCP-003 | Assembly timeout | Increase stream timeout |
-| TCP-004 | Invalid SIP format | Check input data |
-| TCP-005 | Resource exhaustion | Restart with conservative settings |
+| Error Code | Meaning                | Action                             |
+| ---------- | ---------------------- | ---------------------------------- |
+| TCP-001    | Stream creation failed | Check goroutine limits             |
+| TCP-002    | Buffer overflow        | Enable memory optimization         |
+| TCP-003    | Assembly timeout       | Increase stream timeout            |
+| TCP-004    | Invalid SIP format     | Check input data                   |
+| TCP-005    | Resource exhaustion    | Restart with conservative settings |

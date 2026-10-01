@@ -19,4 +19,8 @@ type StartupSyncStatus struct {
 	LastFailure string
 	LastAttempt time.Time
 	RecoveredAt time.Time
+
+	// A parsed snapshot may contain failing entries while other tasks need
+	// normal periodic reconciliation. Keep retrying startup independently.
+	partialSnapshot bool
 }

@@ -139,6 +139,10 @@ type Stats struct {
 	TCPEstablishedIdleRetentions uint64
 	TCPPreRearmDiscardedChunks   uint64
 	TCPRearmRejectedChunks       uint64
+	TCPRearmKeepaliveChunks      uint64
+	TCPOrphanControls            uint64
+	TCPAcceptRejectedControls    uint64
+	TCPReplacementDroppedBytes   uint64
 
 	// BytesReceived is the total bytes received/captured
 	BytesReceived uint64
@@ -169,6 +173,10 @@ type TCPStreamTelemetry struct {
 	EstablishedIdleRetentions uint64
 	PreRearmDiscardedChunks   uint64
 	RearmRejectedChunks       uint64
+	RearmKeepaliveChunks      uint64
+	OrphanControls            uint64
+	AcceptRejectedControls    uint64
+	ReplacementDroppedBytes   uint64
 }
 
 // AtomicStats provides thread-safe access to Stats fields.

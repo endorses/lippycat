@@ -96,13 +96,8 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 		// The assembler reconstructs complete SIP messages and calls HunterForwardHandler.
 		// HunterForwardHandler checks filters and forwards matched calls to processor.
 		if p.assembler != nil {
-			// Get the network flow for buffering and assembly
-			flow := packet.NetworkLayer().NetworkFlow()
-			transportFlow := layer.TransportFlow()
-
-			// Buffer the raw packet for later forwarding when SIP message is matched
-			BufferTCPPacketWithConfig(flow, transportFlow, pktInfo, p.config)
-
+			// Handlers match and forward synthesized per-message packets using
+			// reassembly timestamps; no raw tuple-keyed buffer is needed.
 			// Feed the packet to the TCP assembler for stream reconstruction
 			if err := p.assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)); err != nil {
 				logger.Error("Failed to assemble TCP packet", "error", err)

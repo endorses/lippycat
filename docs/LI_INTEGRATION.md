@@ -458,22 +458,33 @@ capped at 30 seconds, independently of the periodic reconciliation interval;
 each attempt uses the configured sync timeout (30 seconds by default).
 Shutdown cancels the request or backoff and joins the recovery worker.
 
-Persisted tasks remain disarmed candidates until the ADMF confirms both their
-task definition and delivery destinations. Wrong response types or missing NE
+Persisted tasks remain disarmed candidates until the ADMF confirms their
+presence and delivery destinations. A complete snapshot conflicting with a
+persisted X1 definition re-arms the retained X1 definition, preserving its
+original expiry, and flags the conflict; it does not authorize buffered replay.
+Tasks requiring explicit deactivation retain their activation generation across
+restart even after `EndTime`; replay still requires equivalent ADMF confirmation.
+Wrong response types or missing NE
 status, task-list, or destination-list sections are rejected before applying any
 state; present empty lists remain valid. Valid entries in a partial snapshot
 can be applied, but conversion or activation failures keep recovery pending and
-prevent removal of possible orphans. Known filters for a refused task without
+prevent removal of possible orphans. After a usable partial snapshot, periodic
+reconciliation continues alongside startup retries, so a failing entry cannot
+starve reconciliation of other tasks. Failure logs identify the entry index and
+valid task or destination UUID without target content. Known filters for a refused task without
 an active local owner are withdrawn. Repeated equivalent snapshots preserve
 delivery queues, filter state, and activation generations. Complete snapshots
 retain the existing protection against removing every active task on an empty
 ADMF response. Unsupported `GetAllDetails` is terminal: candidates remain
 disarmed and must be provisioned through X1.
 
-Manager status (`Stats().StartupSync` / `StartupSyncStatus()`) exposes `pending`,
+`lc show status` exposes `li_startup_sync` (also available through
+`Stats().StartupSync` / `StartupSyncStatus()`) with states `pending`,
 `retryable_failure`, `succeeded`, or `unsupported`, with attempt count, last
 failure, last attempt time, and successful recovery time. An empty state means
-startup sync was not requested. Logs report pending recovery, retries, and
+startup sync was not requested. Pending synchronization may leave tasks unarmed;
+a partial snapshot can have armed valid tasks while recovery remains pending.
+The object is absent when LI is disabled. Logs report pending recovery, retries, and
 recovery without target content.
 
 The separate NE startup notification uses bounded X1 client retries and its own
@@ -493,8 +504,10 @@ value. A present, complete mediation definition with no end is explicitly
 open-ended; omission of the mediation definition is not.
 
 Enable `--li-admf-complete-task-contract` only after establishing that the ADMF
-returns complete task definitions, including mediation start, optional end, and
-an explicit implicit-deactivation flag. The corresponding YAML key is
+returns complete task definitions, including mediation start and optional end.
+When mediation details are present, an omitted `implicitDeactivationAllowed`
+defaults to false; an open-ended task does not need to supply the flag.
+The corresponding YAML key is
 `processor.li.admf_complete_task_contract` for process and
 `tap.li.admf_complete_task_contract` for tap; both default to `false`.
 The environment variables are
@@ -504,8 +517,9 @@ Changing configuration does not switch live tasks in place.
 
 With the contract enabled, new incomplete snapshot tasks remain non-enforcing
 candidates outside the registry and filter admission path until a complete
-snapshot or X1 activation arrives. A full X1 activation can complete a
-pull-owned partial task, including its missing start, through the normal
+snapshot or X1 activation arrives. The first full X1 activation can replace a
+pull-owned definition, including a complete but stale snapshot or a partial
+task with a missing start, through the normal
 filter, delivery, durable-state, and authorization-generation barriers.
 Equivalent activation retries remain no-op reads. A partial snapshot never
 confirms buffered X2/X3 replay, even in compatibility mode; replay requires a
@@ -525,9 +539,9 @@ definition established by an X1 push or modification
 without verifiable freshness. The bundled X1 schema has no per-task monotonic
 revision; response timestamps and local snapshot lock ordering do not establish
 freshness. Unresolved conflicts retain the pushed definition, expose aggregate
-drift, and require an explicit authenticated X1 change. If a restored task is
-still awaiting confirmation outside the registry, reassert its full definition
-through X1 activation. RADIUS tasks keep their specialized reconciliation,
+drift, and require an explicit authenticated X1 change. Entering a conflict logs
+a warning and queues an ADMF task warning; repeated polls in the same conflict
+do not repeat those notifications. RADIUS tasks keep their specialized reconciliation,
 authorization, and read-back behavior and are excluded from these generic
 completeness counters.
 

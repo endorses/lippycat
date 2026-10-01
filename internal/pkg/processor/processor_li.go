@@ -1103,6 +1103,17 @@ func (p *Processor) populateLIEncodingStats(dst *management.ProcessorStats) {
 	}
 	stats := p.getLIEncodingStats()
 	managerStats := p.liManager.Stats()
+	dst.LiStartupSync = &management.LIStartupSyncStats{
+		State:       string(managerStats.StartupSync.State),
+		Attempts:    managerStats.StartupSync.Attempts,
+		LastFailure: managerStats.StartupSync.LastFailure,
+	}
+	if !managerStats.StartupSync.LastAttempt.IsZero() {
+		dst.LiStartupSync.LastAttempt = managerStats.StartupSync.LastAttempt.UTC().Format(time.RFC3339Nano)
+	}
+	if !managerStats.StartupSync.RecoveredAt.IsZero() {
+		dst.LiStartupSync.RecoveredAt = managerStats.StartupSync.RecoveredAt.UTC().Format(time.RFC3339Nano)
+	}
 	dst.LiDefinitions = &management.LIDefinitionStats{
 		Incomplete:     managerStats.Definitions.Incomplete,
 		PullOnly:       managerStats.Definitions.PullOnly,

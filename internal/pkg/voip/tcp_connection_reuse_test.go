@@ -118,6 +118,7 @@ func TestTCPSIPOrphanControlsDoNotStartWorkers(t *testing.T) {
 	t.Cleanup(func() { assembler.FlushAll(); require.NoError(t, factory.Shutdown()) })
 	flow := testNetFlow(t, "10.0.0.1", "10.0.0.2")
 	before := GetTCPStreamMetrics().TotalStreamsCreated
+	metricsBefore := GetTCPStreamMetrics()
 	for _, flags := range []string{"ack", "fin", "rst"} {
 		tcp := &layers.TCP{SrcPort: 60421, DstPort: 5060, Seq: 1, ACK: flags == "ack", FIN: flags == "fin", RST: flags == "rst"}
 		tcp.SetInternalPortsForTesting()
@@ -126,6 +127,7 @@ func TestTCPSIPOrphanControlsDoNotStartWorkers(t *testing.T) {
 	require.Equal(t, before, GetTCPStreamMetrics().TotalStreamsCreated)
 	require.Zero(t, factory.GetActiveGoroutines())
 	require.EqualValues(t, 3, assembler.OrphanControls())
+	require.EqualValues(t, 3, GetTCPStreamMetrics().OrphanControls-metricsBefore.OrphanControls)
 	// Once a connection exists, an unseen half must not start from a bare ACK.
 	stream := factory.New(flow, gopacket.NewFlow(layers.EndpointTCPPort, []byte{0, 1}, []byte{0, 2}), &layers.TCP{}, nil).(*bufferedSIPStream)
 	start := false
@@ -133,7 +135,27 @@ func TestTCPSIPOrphanControlsDoNotStartWorkers(t *testing.T) {
 		require.False(t, stream.Accept(tcp, gopacket.CaptureInfo{}, reassembly.TCPDirServerToClient, -1, &start, nil))
 		require.False(t, start)
 	}
+	require.EqualValues(t, 3, GetTCPStreamMetrics().AcceptRejectedControls-metricsBefore.AcceptRejectedControls)
 	stream.ReassemblyComplete(nil)
+}
+
+func TestTCPSIPReplacementDropMetrics(t *testing.T) {
+	handler := &directionMessageHandler{}
+	factory := NewSipStreamFactory(t.Context(), handler).(*sipStreamFactory)
+	assembler := capture.NewTCPAssembler(factory)
+	t.Cleanup(func() { assembler.FlushAll(); require.NoError(t, factory.Shutdown()) })
+	flow := testNetFlow(t, "10.0.0.1", "10.0.0.2")
+	feed := func(seq uint32, syn bool, payload []byte) {
+		tcp := &layers.TCP{SrcPort: 60421, DstPort: 5060, Seq: seq, SYN: syn, ACK: !syn, BaseLayer: layers.BaseLayer{Payload: payload}}
+		tcp.SetInternalPortsForTesting()
+		assembler.Assemble(flow, tcp, time.Now())
+	}
+	before := GetTCPStreamMetrics().ReplacementDroppedBytes
+	feed(100, true, nil)
+	early := sipDirectionMessage("INVITE sip:bob@example.test SIP/2.0", "early-new-request")
+	feed(9001, false, early)
+	feed(9000, true, nil)
+	require.EqualValues(t, len(early), GetTCPStreamMetrics().ReplacementDroppedBytes-before)
 }
 
 type blockedReuseHandler struct{ entered, release chan struct{} }

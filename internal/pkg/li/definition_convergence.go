@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/google/uuid"
@@ -59,16 +60,29 @@ func (m *Manager) applySnapshotDefinition(in *SnapshotTask) error {
 	}
 	if held != nil && held.Definition.Source == DefinitionPush {
 		if !equivalentTaskDefinition(held, task) {
-			logger.Warn("LI task definition conflict", "xid", task.XID, "provenance", held.Definition.Source, "fields", changedDefinitionFields(held, task), "reason", "pull_freshness_unproven")
+			newConflict := !held.Definition.Conflict
 			held.Definition.Conflict = true
-			if live {
-				return m.updateDefinitionMetadataLocked(held)
-			}
-			previous := m.persistenceCandidates[task.XID]
-			m.persistenceCandidates[task.XID] = held
-			if err := m.persistStateLocked(); err != nil {
-				m.persistenceCandidates[task.XID] = previous
+			if !live || m.pendingNeedsConfirmation(task.XID) {
+				// A differing pull proves the task still exists, but cannot
+				// replace push authority. Re-arm the persisted definition only
+				// with destinations confirmed by this snapshot. Replay still
+				// requires exact definition confirmation below.
+				if in.confirmedDestinations != nil {
+					for _, did := range held.DestinationIDs {
+						if !in.confirmedDestinations[did] {
+							return fmt.Errorf("%w: retained definition has unconfirmed destination", ErrDestinationNotFound)
+						}
+					}
+				}
+				if err := m.activateSnapshotLocked(held); err != nil {
+					return err
+				}
+			} else if err := m.updateDefinitionMetadataLocked(held); err != nil {
 				return err
+			}
+			if newConflict {
+				logger.Warn("LI task definition conflict", "xid", task.XID, "provenance", held.Definition.Source, "fields", changedDefinitionFields(held, task), "reason", "pull_freshness_unproven")
+				m.ReportTaskError(task.XID, x1.ErrorCodeGenericWarning, "Task definition conflict: retaining X1 definition; send ModifyTask to resolve")
 			}
 			return nil
 		}

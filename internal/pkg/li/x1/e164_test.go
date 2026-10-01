@@ -40,6 +40,7 @@ func TestE164TaskReadbackBundledSchema(t *testing.T) {
 	}{
 		{"E164", TargetIdentity{Type: TargetTypeE164, Value: "15551234567"}, "<e164Number>15551234567</e164Number>"},
 		{"TEL URI", TargetIdentity{Type: TargetTypeTELURI, Value: "tel:+15551234567"}, "<telUri>tel:+15551234567</telUri>"},
+		{"legacy plus-prefixed TEL URI", TargetIdentity{Type: TargetTypeTELURI, Value: "+15551234567"}, "<e164Number>15551234567</e164Number>"},
 		{"legacy bare-digit TEL URI", TargetIdentity{Type: TargetTypeTELURI, Value: "15551234567"}, "<e164Number>15551234567</e164Number>"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

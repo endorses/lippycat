@@ -20,6 +20,7 @@ type StatusJSON struct {
 	UpstreamProcessor string                            `json:"upstream_processor,omitempty"`
 	LIEncoding        *management.LIEncodingStats       `json:"li_encoding,omitempty"`
 	LIDefinitions     *management.LIDefinitionStats     `json:"li_definitions,omitempty"`
+	LIStartupSync     *management.LIStartupSyncStats    `json:"li_startup_sync,omitempty"`
 	LIDelivery        *management.LIDeliveryStats       `json:"li_delivery,omitempty"`
 }
 
@@ -63,6 +64,10 @@ type HunterStatsJSON struct {
 	TCPEstablishedIdleRetentions  uint64                        `json:"tcp_established_idle_retentions"`
 	TCPPreRearmDiscardedChunks    uint64                        `json:"tcp_pre_rearm_discarded_chunks"`
 	TCPRearmRejectedChunks        uint64                        `json:"tcp_rearm_rejected_chunks"`
+	TCPRearmKeepaliveChunks       uint64                        `json:"tcp_rearm_keepalive_chunks"`
+	TCPOrphanControls             uint64                        `json:"tcp_orphan_controls"`
+	TCPAcceptRejectedControls     uint64                        `json:"tcp_accept_rejected_controls"`
+	TCPReplacementDroppedBytes    uint64                        `json:"tcp_replacement_dropped_bytes"`
 }
 
 // CapabilitiesJSON represents hunter capabilities in JSON-friendly format
@@ -105,6 +110,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 		status.LIEncoding = resp.ProcessorStats.LiEncoding
 		status.LIDelivery = resp.ProcessorStats.LiDelivery
 		status.LIDefinitions = resp.ProcessorStats.LiDefinitions
+		status.LIStartupSync = resp.ProcessorStats.LiStartupSync
 		status.Storage = resp.ProcessorStats.Storage
 	}
 
@@ -175,6 +181,10 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 			TCPEstablishedIdleRetentions:  h.Stats.TcpEstablishedIdleRetentions,
 			TCPPreRearmDiscardedChunks:    h.Stats.TcpPreRearmDiscardedChunks,
 			TCPRearmRejectedChunks:        h.Stats.TcpRearmRejectedChunks,
+			TCPRearmKeepaliveChunks:       h.Stats.TcpRearmKeepaliveChunks,
+			TCPOrphanControls:             h.Stats.TcpOrphanControls,
+			TCPAcceptRejectedControls:     h.Stats.TcpAcceptRejectedControls,
+			TCPReplacementDroppedBytes:    h.Stats.TcpReplacementDroppedBytes,
 		}
 	}
 

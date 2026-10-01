@@ -40,6 +40,9 @@ type tcpStreamMetricsInternal struct {
 	preRearmDiscardedChunks      int64
 	rearmRejectedChunks          int64
 	rearmKeepaliveChunks         int64
+	acceptRejectedControls       int64
+	orphanControls               int64
+	replacementDroppedBytes      int64
 }
 
 // TCPStreamMetrics represents TCP stream statistics without mutexes for external use
@@ -73,6 +76,9 @@ type TCPStreamMetrics struct {
 	PreRearmDiscardedChunks      int64 `json:"pre_rearm_discarded_chunks"`
 	RearmRejectedChunks          int64 `json:"rearm_rejected_chunks"`
 	RearmKeepaliveChunks         int64 `json:"rearm_keepalive_chunks"`
+	AcceptRejectedControls       int64 `json:"accept_rejected_controls"`
+	OrphanControls               int64 `json:"orphan_controls"`
+	ReplacementDroppedBytes      int64 `json:"replacement_dropped_bytes"`
 }
 
 var tcpStreamMetrics = &tcpStreamMetricsInternal{
@@ -107,6 +113,9 @@ func ResetTCPStreamMetrics() {
 	tcpStreamMetrics.preRearmDiscardedChunks = 0
 	tcpStreamMetrics.rearmRejectedChunks = 0
 	tcpStreamMetrics.rearmKeepaliveChunks = 0
+	tcpStreamMetrics.acceptRejectedControls = 0
+	tcpStreamMetrics.orphanControls = 0
+	tcpStreamMetrics.replacementDroppedBytes = 0
 	tcpStreamMetrics.lastMetricsUpdate = time.Now()
 }
 
@@ -142,6 +151,9 @@ func GetTCPStreamMetrics() TCPStreamMetrics {
 		PreRearmDiscardedChunks:      atomic.LoadInt64(&tcpStreamMetrics.preRearmDiscardedChunks),
 		RearmRejectedChunks:          atomic.LoadInt64(&tcpStreamMetrics.rearmRejectedChunks),
 		RearmKeepaliveChunks:         atomic.LoadInt64(&tcpStreamMetrics.rearmKeepaliveChunks),
+		AcceptRejectedControls:       atomic.LoadInt64(&tcpStreamMetrics.acceptRejectedControls),
+		OrphanControls:               atomic.LoadInt64(&tcpStreamMetrics.orphanControls),
+		ReplacementDroppedBytes:      atomic.LoadInt64(&tcpStreamMetrics.replacementDroppedBytes),
 	}
 }
 
@@ -214,6 +226,17 @@ func IncrementPreRearmDiscardedChunk() {
 }
 func IncrementRearmRejectedChunk()  { atomic.AddInt64(&tcpStreamMetrics.rearmRejectedChunks, 1) }
 func IncrementRearmKeepaliveChunk() { atomic.AddInt64(&tcpStreamMetrics.rearmKeepaliveChunks, 1) }
+
+// RecordOrphanControl aggregates pool rejections across reassembly shards.
+func (f *sipStreamFactory) RecordOrphanControl() {
+	atomic.AddInt64(&tcpStreamMetrics.orphanControls, 1)
+}
+
+// RecordReplacementDrop counts queued bytes lost on TCP tuple reuse. It does
+// not imply SIP message loss: queued data may also belong to the stale session.
+func (f *sipStreamFactory) RecordReplacementDrop(bytes uint64) {
+	atomic.AddInt64(&tcpStreamMetrics.replacementDroppedBytes, int64(bytes))
+}
 func IncrementParserFramingDiscontinuity() {
 	atomic.AddInt64(&tcpStreamMetrics.parserFramingDiscontinuities, 1)
 }

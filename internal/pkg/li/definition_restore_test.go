@@ -25,6 +25,7 @@ func TestStrictCandidateRetainsKnownFieldsAcrossPartialSnapshots(t *testing.T) {
 				end := schema.QualifiedMicrosecondDateTime("2090-01-01T00:00:00Z")
 				partial.TaskDetails.ListOfMediationDetails.MediationDetails[0].EndTime = &end
 				partial.TaskDetails.ImplicitDeactivationAllowed = nil
+				partial.TaskDetails.ListOfMediationDetails.MediationDetails[0].StartTime = nil
 			} else {
 				flag := field == "implicit_true"
 				partial.TaskDetails.ImplicitDeactivationAllowed = &flag
@@ -52,7 +53,7 @@ func TestStrictCandidateRetainsKnownFieldsAcrossPartialSnapshots(t *testing.T) {
 	}
 }
 
-func TestRestoredPushRejectsStalePullThenConfirmsExactDefinition(t *testing.T) {
+func TestRestoredPushRetainsAuthorityOnConflictThenConfirmsExactDefinition(t *testing.T) {
 	cfg := ManagerConfig{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state")}
 	m := newStateTestManager(t, cfg, nil)
 	xid, did := uuid.New(), uuid.New()
@@ -72,10 +73,9 @@ func TestRestoredPushRejectsStalePullThenConfirmsExactDefinition(t *testing.T) {
 	end := schema.QualifiedMicrosecondDateTime("2090-01-01T00:00:00Z")
 	stale.TaskDetails.ListOfMediationDetails.MediationDetails[0].EndTime = &end
 	applyConvergence(t, next, stale)
-	_, err = next.GetTaskDetails(xid)
-	require.ErrorIs(t, err, ErrTaskNotFound)
-	require.Zero(t, next.FilterCount())
-	held := next.persistenceCandidates[xid]
+	held, err := next.GetTaskDetails(xid)
+	require.NoError(t, err)
+	require.Equal(t, 1, next.FilterCount())
 	require.True(t, equivalentTaskDefinition(original, held))
 	require.Equal(t, DefinitionPush, held.Definition.Source)
 	require.True(t, held.Definition.Conflict)
@@ -138,7 +138,11 @@ func TestStrictTransitionRejectsUnknownRestoredPendingTask(t *testing.T) {
 	start := schema.QualifiedMicrosecondDateTime(time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano))
 	partial.TaskDetails.ListOfMediationDetails.MediationDetails[0].StartTime = &start
 	partial.TaskDetails.ImplicitDeactivationAllowed = nil
-	applyConvergence(t, m, partial)
+	converted, err := ConvertSnapshotTask(partial)
+	require.NoError(t, err)
+	// Legacy state can have a future start without a known complete window.
+	converted.Task.Definition.Completeness.End = false
+	require.NoError(t, m.ActivateTask(converted.Task))
 	m.Stop()
 	cfg.ADMFCompleteTaskContract = true
 	next := newStateTestManager(t, cfg, nil)

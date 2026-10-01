@@ -2,6 +2,7 @@ package reassembly
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,9 +36,14 @@ func (s *reuseStream) ReassembledSG(sg ScatterGather, _ AssemblerContext) {
 func (s *reuseStream) ReassemblyComplete(AssemblerContext) bool { s.completions++; return true }
 
 type reuseFactory struct {
-	streams []*reuseStream
-	keep    bool
+	streams                 []*reuseStream
+	keep                    bool
+	orphanControls          uint64
+	replacementDroppedBytes uint64
 }
+
+func (f *reuseFactory) RecordOrphanControl()               { f.orphanControls++ }
+func (f *reuseFactory) RecordReplacementDrop(bytes uint64) { f.replacementDroppedBytes += bytes }
 
 func (f *reuseFactory) New(gopacket.Flow, gopacket.Flow, *layers.TCP, AssemblerContext) Stream {
 	s := &reuseStream{keep: f.keep}
@@ -80,6 +86,7 @@ func TestConnectionReuseAfterCloseAndOrphanControl(t *testing.T) {
 				reuseFeed(a, !orientation, 216, control, "")
 				require.Len(t, f.streams, 1)
 				require.EqualValues(t, 1, p.OrphanControls())
+				require.EqualValues(t, 1, f.orphanControls)
 				reuseFeed(a, orientation, 3000, "syn", "")
 				reuseFeed(a, !orientation, 7000, "synack", "")
 				reuseFeed(a, orientation, 3001, "ack", "next-request")
@@ -174,9 +181,46 @@ func TestConnectionReplacementReleasesRetainedPages(t *testing.T) {
 	reuseFeed(a, false, 500, "syn", "")
 	require.Len(t, f.streams, 2)
 	require.Zero(t, a.pc.used)
+	require.Zero(t, p.ReplacementDroppedBytes(), "saved pages were already delivered")
 	require.Equal(t, 1, f.streams[0].completions)
 	a.FlushAll()
 	assertRetiredStreamsReleased(t, p)
+}
+
+func TestConnectionLateSYNCountsUndeliveredReplacementBytes(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reverse=%t", reverse), func(t *testing.T) {
+			f := &reuseFactory{}
+			pool := NewStreamPool(f)
+			a := NewAssembler(pool)
+			reuseFeed(a, reverse, 100, "syn", "")
+			reuseFeed(a, !reverse, 200, "synack", "")
+			reuseFeed(a, reverse, 101, "ack", "old")
+			// New-session data arrives before its SYN and sits behind a gap in
+			// the stale connection. Include continuation pages and both halves.
+			early := strings.Repeat("x", pageBytes+19)
+			reuseFeed(a, reverse, 9001, "ack", early)
+			reuseFeed(a, !reverse, 12001, "ack", "queued reverse")
+			require.Equal(t, "old", string(f.streams[0].data[0]))
+			require.Positive(t, a.pc.used)
+			reuseFeed(a, reverse, 9000, "syn", "")
+			want := uint64(len(early) + len("queued reverse"))
+			require.Equal(t, want, pool.ReplacementDroppedBytes())
+			require.Equal(t, want, f.replacementDroppedBytes)
+			require.Len(t, f.streams, 2)
+			require.Zero(t, a.pc.used)
+			// Retransmitted SYNs do not double-count, and a retransmission of
+			// the missing payload can still restore the new connection.
+			reuseFeed(a, reverse, 9000, "syn", "")
+			reuseFeed(a, reverse, 9001, "ack", early)
+			require.Equal(t, early, string(f.streams[1].data[0]))
+			a.FlushAll()
+			require.Equal(t, want, pool.ReplacementDroppedBytes())
+			require.Equal(t, want, f.replacementDroppedBytes)
+			require.Zero(t, a.pc.used)
+			assertRetiredStreamsReleased(t, pool)
+		})
+	}
 }
 
 func TestConnectionSYNOnPreviouslyUnobservedHalf(t *testing.T) {

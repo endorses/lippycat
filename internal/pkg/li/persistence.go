@@ -164,7 +164,9 @@ func (m *Manager) restorePersistedStateLocked() (result error) {
 			active[task.XID], candidates[task.XID] = cloneInterceptTask(task), cloneInterceptTask(task)
 			continue
 		}
-		if !task.EndTime.IsZero() && !now.Before(task.EndTime) {
+		if task.ImplicitDeactivationAllowed && !task.EndTime.IsZero() && !now.Before(task.EndTime) {
+			// Only implicit deactivation makes an elapsed end a historical task.
+			// Explicit-deactivation tasks retain their generation until revoked.
 			// Keep the complete historical definition in future snapshots without
 			// treating it as a registry activation or replay confirmation.
 			candidates[task.XID] = cloneInterceptTask(task)

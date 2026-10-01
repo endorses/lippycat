@@ -37,7 +37,7 @@ func TestPhase6PersistenceDoesNotRestoreExpiredOrUnconfirmedActive(t *testing.T)
 		Destinations: []*persistedDestination{{DID: did, Address: "mdf.example", Port: 9443}},
 		Tasks: []*InterceptTask{
 			{XID: uuid.New(), Status: TaskStatusActive, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "a@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only, EndTime: time.Now().Add(time.Hour)},
-			{XID: uuid.New(), Status: TaskStatusPending, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "b@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only, StartTime: time.Now().Add(-2 * time.Hour), EndTime: time.Now().Add(-time.Hour)},
+			{XID: uuid.New(), Status: TaskStatusPending, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "b@example"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2Only, StartTime: time.Now().Add(-2 * time.Hour), EndTime: time.Now().Add(-time.Hour), ImplicitDeactivationAllowed: true},
 		},
 	}))
 	m := newStateTestManager(t, ManagerConfig{Enabled: true, StateFile: path}, nil)

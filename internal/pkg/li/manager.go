@@ -632,11 +632,11 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 
 	// Register destinations first (tasks reference destinations by DID).
 	if resp.ListOfDestinationResponseDetails != nil {
-		for _, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
+		for index, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
 			dest, convErr := DestinationResponseDetailsToDestination(dd)
 			if convErr != nil {
 				logger.Warn("Failed to convert ADMF destination, skipping",
-					"error", convErr,
+					"entry_index", index, "did", snapshotDestinationID(dd), "reason", "conversion_failed",
 				)
 				destErrors++
 				snapshot.destinationConvErrors++
@@ -656,11 +656,11 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 
 	// Activate tasks.
 	if resp.ListOfTaskResponseDetails != nil {
-		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
+		for index, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
 			converted, convErr := ConvertSnapshotTask(td)
 			if convErr != nil {
 				logger.Warn("Failed to convert ADMF task, skipping",
-					"error", convErr,
+					"entry_index", index, "xid", snapshotTaskID(td), "reason", "conversion_failed",
 				)
 				taskErrors++
 				snapshot.convErrors++
@@ -1103,8 +1103,11 @@ func (m *Manager) reconcileWithADMF() {
 	if m.StartupSyncStatus().State == StartupSyncUnsupported {
 		return
 	}
-	// A pending startup snapshot retains startup replay/candidate semantics.
-	if status := m.StartupSyncStatus(); status.State == StartupSyncPending || status.State == StartupSyncRetryableFailure {
+	// Before the first usable snapshot, retain startup replay/candidate semantics.
+	// Once individual entries have been applied, a persistently failing entry
+	// must not starve normal reconciliation of the other tasks. Startup retries
+	// continue independently, and both paths retain incomplete-snapshot guards.
+	if status := m.StartupSyncStatus(); !status.partialSnapshot && (status.State == StartupSyncPending || status.State == StartupSyncRetryableFailure) {
 		m.attemptStartupSync()
 		return
 	}
@@ -1135,9 +1138,10 @@ func (m *Manager) reconcileWithADMF() {
 	snapshot := newADMFSnapshot()
 	confirmedDestinations := make(map[uuid.UUID]bool)
 	if resp.ListOfDestinationResponseDetails != nil {
-		for _, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
+		for index, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
 			dest, convErr := DestinationResponseDetailsToDestination(dd)
 			if convErr != nil {
+				logger.Warn("Failed to convert ADMF destination, skipping", "entry_index", index, "did", snapshotDestinationID(dd), "reason", "conversion_failed")
 				snapshot.destinationConvErrors++
 				continue
 			}
@@ -1152,7 +1156,7 @@ func (m *Manager) reconcileWithADMF() {
 	}
 	var activated int
 	if resp.ListOfTaskResponseDetails != nil {
-		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
+		for index, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
 			converted, convErr := ConvertSnapshotTask(td)
 			if convErr != nil {
 				if td != nil && td.TaskDetails != nil && td.TaskDetails.XId != nil {
@@ -1163,7 +1167,7 @@ func (m *Manager) reconcileWithADMF() {
 					}
 				}
 				logger.Warn("Reconciliation: failed to convert ADMF task, skipping",
-					"error", convErr,
+					"entry_index", index, "xid", snapshotTaskID(td), "reason", "conversion_failed",
 				)
 				snapshot.convErrors++
 				continue
@@ -1414,7 +1418,7 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 				return m.storeDefinitionCandidateLocked(task)
 			}
 		}
-		if held, err := m.registry.GetTaskDetails(task.XID); err == nil && held.Definition.Source == DefinitionPull && !held.Definition.Completeness.Complete() && task.Definition.Completeness.Complete() && (held.Status == TaskStatusActive || held.Status == TaskStatusPending) {
+		if held, err := m.registry.GetTaskDetails(task.XID); err == nil && held.Definition.Source == DefinitionPull && task.Definition.Completeness.Complete() && (held.Status == TaskStatusActive || held.Status == TaskStatusPending) {
 			if err := m.promoteTaskDefinitionLocked(task); err != nil {
 				return err
 			}

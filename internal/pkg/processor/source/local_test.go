@@ -313,6 +313,10 @@ func TestLocalSourceStatsIncludesTCPStreamTelemetry(t *testing.T) {
 			EstablishedIdleRetentions: 7,
 			PreRearmDiscardedChunks:   11,
 			RearmRejectedChunks:       13,
+			RearmKeepaliveChunks:      17,
+			OrphanControls:            19,
+			AcceptRejectedControls:    23,
+			ReplacementDroppedBytes:   29,
 		}
 	})
 
@@ -320,10 +324,18 @@ func TestLocalSourceStatsIncludesTCPStreamTelemetry(t *testing.T) {
 	assert.Equal(t, uint64(7), stats.TCPEstablishedIdleRetentions)
 	assert.Equal(t, uint64(11), stats.TCPPreRearmDiscardedChunks)
 	assert.Equal(t, uint64(13), stats.TCPRearmRejectedChunks)
+	assert.Equal(t, uint64(17), stats.TCPRearmKeepaliveChunks)
+	assert.Equal(t, uint64(19), stats.TCPOrphanControls)
+	assert.Equal(t, uint64(23), stats.TCPAcceptRejectedControls)
+	assert.Equal(t, uint64(29), stats.TCPReplacementDroppedBytes)
 	assert.Equal(t, []any{
 		"tcp_established_idle_retentions", uint64(7),
 		"tcp_pre_rearm_discarded_chunks", uint64(11),
 		"tcp_rearm_rejected_chunks", uint64(13),
+		"tcp_rearm_keepalive_chunks", uint64(17),
+		"tcp_orphan_controls", uint64(19),
+		"tcp_accept_rejected_controls", uint64(23),
+		"tcp_replacement_dropped_bytes", uint64(29),
 	}, s.captureHeartbeatFields())
 }
 

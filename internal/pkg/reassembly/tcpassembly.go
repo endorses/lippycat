@@ -426,6 +426,14 @@ type StreamFactory interface {
 	New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP, ac AssemblerContext) Stream
 }
 
+// StreamPoolObserver optionally receives pool-level accounting that happens
+// before a stream exists or while a connection generation is being replaced.
+// Implementations must not block or call back into the assembler or pool.
+type StreamPoolObserver interface {
+	RecordOrphanControl()
+	RecordReplacementDrop(bytes uint64)
+}
+
 type key [2]gopacket.Flow
 
 func (k *key) String() string {
@@ -734,6 +742,20 @@ func newSYNGeneration(t *layers.TCP, half, rev *halfconnection, timestamp time.T
 func (a *Assembler) retireForReplacement(conn *connection) {
 	defer a.connPool.release(conn)
 	defer conn.mu.Unlock()
+	// Queued out-of-order bytes have never reached the stream. Saved pages
+	// were already delivered (KeepFrom), so do not count them as new loss.
+	var dropped uint64
+	for _, half := range []*halfconnection{&conn.c2s, &conn.s2c} {
+		for p := half.first; p != nil; p = p.next {
+			dropped += uint64(len(p.bytes))
+		}
+	}
+	if dropped > 0 {
+		a.connPool.replacementDroppedBytes.Add(dropped)
+		if observer, ok := a.connPool.factory.(StreamPoolObserver); ok {
+			observer.RecordReplacementDrop(dropped)
+		}
+	}
 	a.closeHalfConnection(conn, &conn.c2s)
 	a.closeHalfConnection(conn, &conn.s2c)
 	a.connPool.remove(conn)

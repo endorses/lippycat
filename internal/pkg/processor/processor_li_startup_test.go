@@ -67,6 +67,13 @@ func TestLIStartupReconciliationPrecedesRemoteServing(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("startup did not request ADMF reconciliation")
 	}
+	stats := &management.ProcessorStats{}
+	p.populateLIEncodingStats(stats)
+	require.NotNil(t, stats.LiStartupSync)
+	require.Equal(t, "pending", stats.LiStartupSync.State)
+	require.EqualValues(t, 1, stats.LiStartupSync.Attempts)
+	require.Equal(t, p.liManager.StartupSyncStatus().LastAttempt.UTC().Format(time.RFC3339Nano), stats.LiStartupSync.LastAttempt)
+	require.Empty(t, stats.LiStartupSync.RecoveredAt)
 	p.listenerMu.Lock()
 	address := p.listener.Addr().String()
 	p.listenerMu.Unlock()

@@ -584,6 +584,10 @@ func (s *LocalSource) captureHeartbeatFields() []any {
 		"tcp_established_idle_retentions", telemetry.EstablishedIdleRetentions,
 		"tcp_pre_rearm_discarded_chunks", telemetry.PreRearmDiscardedChunks,
 		"tcp_rearm_rejected_chunks", telemetry.RearmRejectedChunks,
+		"tcp_rearm_keepalive_chunks", telemetry.RearmKeepaliveChunks,
+		"tcp_orphan_controls", telemetry.OrphanControls,
+		"tcp_accept_rejected_controls", telemetry.AcceptRejectedControls,
+		"tcp_replacement_dropped_bytes", telemetry.ReplacementDroppedBytes,
 	}
 }
 
@@ -1301,6 +1305,10 @@ func (s *LocalSource) Stats() Stats {
 	st.TCPEstablishedIdleRetentions = tcpTelemetry.EstablishedIdleRetentions
 	st.TCPPreRearmDiscardedChunks = tcpTelemetry.PreRearmDiscardedChunks
 	st.TCPRearmRejectedChunks = tcpTelemetry.RearmRejectedChunks
+	st.TCPRearmKeepaliveChunks = tcpTelemetry.RearmKeepaliveChunks
+	st.TCPOrphanControls = tcpTelemetry.OrphanControls
+	st.TCPAcceptRejectedControls = tcpTelemetry.AcceptRejectedControls
+	st.TCPReplacementDroppedBytes = tcpTelemetry.ReplacementDroppedBytes
 	return st
 }
 

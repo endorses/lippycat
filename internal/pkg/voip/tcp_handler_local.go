@@ -34,15 +34,15 @@ func newLocalFileHandlerWithOutputs(tracker *CallTracker, buffer *BufferManager,
 
 // HandleSIPMessage processes a complete SIP message for local file writing.
 // srcEndpoint and dstEndpoint are in "IP:port" format (e.g., "192.168.1.1:5060").
-// netFlow is used for TCP packet buffer lookup.
+// netFlow supplies packet endpoints and legacy timestamp fallback lookup.
 //
 // Per-message semantics, matching the tap and hunter TCP handlers: the
 // reassembler invokes this once for EACH complete SIP message, and we write one
 // synthesized packet carrying exactly that message. The raw per-flow buffer is
-// NOT written, because it is keyed by network flow (IP pair) and therefore holds
-// every connection and every call between the two hosts — flushing it under one
-// Call-ID wrote other calls' packets, and filtered-out traffic, into that call's
-// PCAP, while a segment shared by two pipelined messages reached only the first.
+// NOT written: even a single TCP connection can carry several calls, and a
+// segment shared by two pipelined messages must reach both calls independently.
+// Capture paths no longer retain raw packet buffers; only legacy direct callers
+// lacking a message timestamp use them for timestamp fallback.
 //
 // Matching is per message but the decision is remembered per call: once a call
 // has matched, its later in-dialog messages are written without having to match

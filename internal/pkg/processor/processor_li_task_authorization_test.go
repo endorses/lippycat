@@ -32,13 +32,16 @@ func TestProcessorX3CommittedTimingPolicy(t *testing.T) {
 						f.config.LIDeliveryX3SpoolMaxBytes = 0
 						f.config.LIDeliveryX3SpoolReplayPolicy = ""
 					}
-					f.endTime = time.Now().Add(time.Second).UTC()
+					f.endTime = time.Now().Add(time.Hour).UTC()
 					p := f.open(t)
 					require.NoError(t, p.startLIManager())
+					// Start the cutoff only after TLS, state recovery, and startup
+					// are complete. Leave room for durable administrative writes
+					// under the race-enabled full suite.
+					oldEnd := time.Now().Add(5 * time.Second).UTC()
+					require.NoError(t, p.liManager.ModifyTask(f.xid, &li.TaskModification{EndTime: &oldEnd}))
 					original, err := p.liManager.GetTaskDetails(f.xid)
 					require.NoError(t, err)
-					oldEnd := time.Now().Add(time.Second).UTC()
-					require.NoError(t, p.liManager.ModifyTask(f.xid, &li.TaskModification{EndTime: &oldEnd}))
 					captureAuthorizationPacket(t, p, f, "before-cutoff", 1)
 					modification := &li.TaskModification{}
 					switch change {
@@ -118,10 +121,12 @@ func TestProcessorX3ExplicitDeactivationReplayPolicy(t *testing.T) {
 
 func TestProcessorX3ExplicitDeactivationHeldReplay(t *testing.T) {
 	f := newPersistentProcessorFixture(t)
-	f.endTime, f.explicitDeactivation = time.Now().Add(time.Second).UTC(), true
+	// Explicit deactivation permits capture and replay beyond EndTime. Use
+	// an already elapsed window so disk/TLS setup has no timing deadline.
+	f.endTime, f.explicitDeactivation = time.Now().Add(-time.Hour).UTC(), true
 	p := f.open(t)
 	f.captureAndClose(t, p)
-	end := time.Now().Add(2 * time.Second).UTC()
+	end := time.Now().Add(-time.Minute).UTC()
 	implicit := false
 	require.NoError(t, p.liManager.ModifyTask(f.xid, &li.TaskModification{EndTime: &end, ImplicitDeactivationAllowed: &implicit}))
 	f.mu.Lock()
@@ -132,10 +137,10 @@ func TestProcessorX3ExplicitDeactivationHeldReplay(t *testing.T) {
 	path, manifest := exportProcessorX3Approval(t)
 	require.Len(t, manifest.Records, 2)
 	require.NoError(t, restarted.startLIManager())
-	require.True(t, time.Now().Before(end))
-	timer := time.NewTimer(time.Until(end))
-	defer timer.Stop()
-	<-timer.C
+	for _, record := range manifest.Records {
+		require.True(t, restarted.liManager.ReplayTaskAuthorized(record.XID, record.TaskGeneration), "an elapsed explicit-deactivation window must preserve the confirmed generation")
+	}
+	require.True(t, time.Now().After(end))
 	products := f.listenMDF(t)
 	require.NoError(t, liDeliveryClient.ReplayX3JournalManifest(path, restarted.authorizePersistentX3Replay))
 	for range 2 {

@@ -26,6 +26,7 @@ func TestRawActivationPreservesDefinitionPresenceAndReadback(t *testing.T) {
 		{"omitted", "", TaskDefinitionPresence{}},
 		{"implicit only", "<implicitDeactivationAllowed>false</implicitDeactivationAllowed>", TaskDefinitionPresence{Implicit: true}},
 		{"unknown mediation window", mediation(""), TaskDefinitionPresence{Mediation: true}},
+		{"open end with default implicit flag", mediation(start), TaskDefinitionPresence{Mediation: true, Start: true, End: true}},
 		{"explicit open end", mediation(start) + "<implicitDeactivationAllowed>false</implicitDeactivationAllowed>", TaskDefinitionPresence{Mediation: true, Start: true, End: true, Implicit: true}},
 		{"explicit end", mediation(start+"<EndTime>2099-01-01T00:00:00.000000Z</EndTime>") + "<implicitDeactivationAllowed>true</implicitDeactivationAllowed>", TaskDefinitionPresence{Mediation: true, Start: true, End: true, EndProvided: true, Implicit: true}},
 	} {

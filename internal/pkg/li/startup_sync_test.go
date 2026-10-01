@@ -305,3 +305,52 @@ func TestStartupSyncEntryApplicationFailuresRemainPending(t *testing.T) {
 		})
 	}
 }
+
+func TestPartialStartupDoesNotStarvePeriodicReconciliation(t *testing.T) {
+	xid, did, orphan := uuid.New(), uuid.New(), uuid.New()
+	var changed atomic.Bool
+	server := newTestADMFServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if !startupQuery(t, r) {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		target := schema.SIPURI("sip:before@example.invalid")
+		if changed.Load() {
+			target = "sip:after@example.invalid"
+		}
+		good := makeCompleteTaskResponseDetails(xid, []uuid.UUID{did}, []schema.TargetIdentifier{{SipUri: &target}})
+		response := buildGetAllDetailsResponseXML([]*schema.DestinationResponseDetails{makeDestinationResponseDetails(did, "127.0.0.1", 8443)}, []*schema.TaskResponseDetails{good, {}})
+		_, err := fmt.Fprint(w, response)
+		require.NoError(t, err)
+	})
+	m := NewManager(ManagerConfig{Enabled: true, ADMFEndpoint: server.URL, SyncOnStartup: true}, nil)
+	defer m.Stop()
+	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "127.0.0.1", Port: 8443}))
+	require.NoError(t, m.ActivateTask(&InterceptTask{XID: orphan, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "sip:orphan@example.invalid"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2andX3}))
+	require.True(t, m.attemptStartupSync())
+	require.True(t, m.StartupSyncStatus().partialSnapshot)
+	changed.Store(true)
+	m.reconcileWithADMF()
+	require.EqualValues(t, 1, m.StartupSyncStatus().Attempts, "periodic reconciliation must not divert into startup retry")
+	require.Equal(t, StartupSyncRetryableFailure, m.StartupSyncStatus().State)
+	task, err := m.GetTaskDetails(xid)
+	require.NoError(t, err)
+	require.Equal(t, "sip:after@example.invalid", task.Targets[0].Value)
+	retained, err := m.GetTaskDetails(orphan)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusActive, retained.Status, "a malformed entry must still suppress orphan removal")
+}
+
+func TestSnapshotFailureIdentifiersDoNotExposeMalformedValues(t *testing.T) {
+	id := uuid.New()
+	value := schema.UUID(id.String())
+	td := &schema.TaskResponseDetails{TaskDetails: &schema.TaskDetails{XId: &value}}
+	dd := &schema.DestinationResponseDetails{DestinationDetails: &schema.DestinationDetails{DId: &value}}
+	require.Equal(t, id.String(), snapshotTaskID(td))
+	require.Equal(t, id.String(), snapshotDestinationID(dd))
+	value = "sip:sensitive@example.invalid"
+	require.Equal(t, "unknown", snapshotTaskID(td))
+	require.Equal(t, "unknown", snapshotDestinationID(dd))
+	require.Equal(t, "unknown", snapshotTaskID(nil))
+	require.Equal(t, "unknown", snapshotDestinationID(nil))
+}

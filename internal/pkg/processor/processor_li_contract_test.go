@@ -75,6 +75,11 @@ func TestLIDefinitionTelemetryPopulatesFromManager(t *testing.T) {
 	dst := &management.ProcessorStats{}
 	p.populateLIEncodingStats(dst)
 	require.NotNil(t, dst.LiDefinitions)
+	require.NotNil(t, dst.LiStartupSync)
+	require.Equal(t, string(manager.Stats().StartupSync.State), dst.LiStartupSync.State)
+	require.Equal(t, manager.Stats().StartupSync.Attempts, dst.LiStartupSync.Attempts)
+	require.Empty(t, dst.LiStartupSync.LastAttempt)
+	require.Empty(t, dst.LiStartupSync.RecoveredAt)
 	stats := manager.Stats().Definitions
 	require.Equal(t, stats.Incomplete, dst.LiDefinitions.Incomplete)
 	require.Equal(t, stats.PullOnly, dst.LiDefinitions.PullOnly)
@@ -85,4 +90,5 @@ func TestLIDefinitionTelemetryPopulatesFromManager(t *testing.T) {
 	disabled := &management.ProcessorStats{}
 	(&Processor{}).populateLIEncodingStats(disabled)
 	require.Nil(t, disabled.LiDefinitions)
+	require.Nil(t, disabled.LiStartupSync)
 }

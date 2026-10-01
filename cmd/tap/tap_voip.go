@@ -28,7 +28,7 @@ import (
 )
 
 // TapTCPAssembler implements source.TCPAssembler for tap mode.
-// It buffers TCP packets and feeds them to the assembler for SIP stream reconstruction.
+// It feeds TCP packets to the assembler for SIP stream reconstruction.
 type TapTCPAssembler struct {
 	assembler *pipeline.ReassemblyEngine
 }
@@ -39,24 +39,17 @@ func NewTapTCPAssembler(assembler *pipeline.ReassemblyEngine) *TapTCPAssembler {
 }
 
 // AssemblePacket implements source.TCPAssembler.
-// It buffers the TCP packet and feeds it to the tcpassembly for stream reconstruction.
+// Reassembly supplies capture timestamps to the per-message packet handler.
 func (a *TapTCPAssembler) AssemblePacket(pktInfo capture.PacketInfo) bool {
 	packet := pktInfo.Packet
 	if packet == nil || packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
 		return false
 	}
 
-	tcpLayer, ok := packet.TransportLayer().(*layers.TCP)
+	_, ok := packet.TransportLayer().(*layers.TCP)
 	if !ok {
 		return false
 	}
-
-	// Get the network flow for assembly
-	netFlow := packet.NetworkLayer().NetworkFlow()
-	transportFlow := tcpLayer.TransportFlow()
-
-	// Buffer the raw packet for later retrieval by the handler
-	voip.BufferTCPPacket(netFlow, transportFlow, pktInfo)
 
 	// Feed the packet to the TCP assembler for stream reconstruction
 	if err := a.assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)); err != nil {
@@ -557,6 +550,10 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 			EstablishedIdleRetentions: uint64(metrics.EstablishedIdleRetentions), // #nosec G115 -- monotonic non-negative counter
 			PreRearmDiscardedChunks:   uint64(metrics.PreRearmDiscardedChunks),   // #nosec G115 -- monotonic non-negative counter
 			RearmRejectedChunks:       uint64(metrics.RearmRejectedChunks),       // #nosec G115 -- monotonic non-negative counter
+			RearmKeepaliveChunks:      uint64(metrics.RearmKeepaliveChunks),      // #nosec G115 -- monotonic non-negative counter
+			OrphanControls:            uint64(metrics.OrphanControls),            // #nosec G115 -- monotonic non-negative counter
+			AcceptRejectedControls:    uint64(metrics.AcceptRejectedControls),    // #nosec G115 -- monotonic non-negative counter
+			ReplacementDroppedBytes:   uint64(metrics.ReplacementDroppedBytes),   // #nosec G115 -- monotonic non-negative counter
 		}
 	})
 

@@ -1561,6 +1561,8 @@ func TestClient_GetAllDetails(t *testing.T) {
     <neStatusDetails>
       <neStatus>operational</neStatus>
     </neStatusDetails>
+    <listOfTaskResponseDetails/>
+    <listOfDestinationResponseDetails/>
   </x1ResponseMessage>
 </X1Response>`
 
@@ -1579,8 +1581,10 @@ func TestClient_GetAllDetails(t *testing.T) {
 		resp, err := client.GetAllDetails(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, resp)
-		assert.Nil(t, resp.ListOfTaskResponseDetails)
-		assert.Nil(t, resp.ListOfDestinationResponseDetails)
+		require.NotNil(t, resp.ListOfTaskResponseDetails)
+		require.NotNil(t, resp.ListOfDestinationResponseDetails)
+		assert.Empty(t, resp.ListOfTaskResponseDetails.TaskResponseDetails)
+		assert.Empty(t, resp.ListOfDestinationResponseDetails.DestinationResponseDetails)
 	})
 
 	t.Run("error when stopped", func(t *testing.T) {

@@ -627,6 +627,7 @@ func newTestADMFServer(t *testing.T, handler http.HandlerFunc) *httptest.Server 
 // buildGetAllDetailsResponseXML builds an XML response containing destinations and tasks.
 func buildGetAllDetailsResponseXML(destinations []*schema.DestinationResponseDetails, tasks []*schema.TaskResponseDetails) string {
 	resp := schema.GetAllDetailsResponse{
+		NeStatusDetails: &schema.NeStatusDetails{NeStatus: "operational"},
 		ListOfTaskResponseDetails: &schema.ListOfTaskResponseDetails{
 			TaskResponseDetails: tasks,
 		},

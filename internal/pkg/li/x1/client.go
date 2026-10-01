@@ -133,7 +133,7 @@ func (e *ADMFError) Unwrap() error {
 
 // IsUnsupportedOperation returns true if the ADMF returned an "unsupported operation" error.
 func (e *ADMFError) IsUnsupportedOperation() bool {
-	return e.ErrorCode == ErrorCodeUnsupportedOperation
+	return e.ErrorCode == ErrorCodeUnsupportedOperation || e.ErrorCode == 1080
 }
 
 // ETSI TS 103 221-1 error codes used by the client.
@@ -614,10 +614,14 @@ func (c *Client) ReportNEIssue(ctx context.Context, issueType string, descriptio
 		TypeOfNeIssueMessage: issueType,
 		Description:          description,
 		IssueCode:            issueCode,
-		X1RequestMessage:     c.buildRequestMessage(),
 	}
 
-	err := c.sendRequestWithRetry(ctx, "ReportNEIssueRequest", req)
+	// A resend after a lost request or response is a new X1 transaction,
+	// per ETSI TS 103 221-1 clause 5.2.3. Keep the issue itself unchanged.
+	err := c.sendRequestWithRetryFactory(ctx, "ReportNEIssueRequest", func() any {
+		req.X1RequestMessage = c.buildRequestMessage()
+		return req
+	})
 	c.mu.Lock()
 	if err != nil {
 		c.stats.NEReportsFailed++
@@ -664,6 +668,11 @@ func (c *Client) GetAllDetails(ctx context.Context) (*schema.GetAllDetailsRespon
 	var resp schema.GetAllDetailsResponse
 	if err := c.sendQueryRequestWithRetry(ctx, "GetAllDetailsRequest", req, &resp); err != nil {
 		return nil, err
+	}
+	// All three sections are mandatory in TS 103 221-1 clause 6.4.5 and
+	// its bundled schema. Missing sections are not evidence of empty state.
+	if resp.NeStatusDetails == nil || resp.NeStatusDetails.NeStatus == "" || resp.ListOfTaskResponseDetails == nil || resp.ListOfDestinationResponseDetails == nil {
+		return nil, fmt.Errorf("incomplete GetAllDetails response: NE status, task list, and destination list are required")
 	}
 
 	return &resp, nil
@@ -952,6 +961,11 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 			}
 		}
 	}
+	if rootElement == "GetAllDetailsRequest" {
+		if err := validateGetAllDetailsEnvelope(respBody, rootDetector.XMLName.Local, container.RawMessages); err != nil {
+			return err
+		}
+	}
 
 	// Unmarshal the first x1ResponseMessage into the expected response type.
 	if len(container.RawMessages) > 0 {
@@ -971,6 +985,33 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 	return nil
 }
 
+// Keep support for direct and legacy untyped responses, but never interpret
+// a different response type or an empty envelope as an authoritative snapshot.
+func validateGetAllDetailsEnvelope(data []byte, root string, messages []rawXML) error {
+	var attrs []xml.Attr
+	switch root {
+	case "GetAllDetailsResponse":
+		var direct rawXML
+		if err := xml.Unmarshal(data, &direct); err != nil {
+			return fmt.Errorf("parse GetAllDetails response: %w", err)
+		}
+		attrs = direct.Attrs
+	case "X1Response", "responseContainer":
+		if len(messages) != 1 {
+			return fmt.Errorf("invalid GetAllDetails response envelope: expected one response message")
+		}
+		attrs = messages[0].Attrs
+	default:
+		return fmt.Errorf("unexpected GetAllDetails response element %q", root)
+	}
+	for _, attr := range attrs {
+		if attr.Name.Local == "type" && localXMLName(attr.Value) != "GetAllDetailsResponse" {
+			return fmt.Errorf("unexpected GetAllDetails response type %q", localXMLName(attr.Value))
+		}
+	}
+	return nil
+}
+
 // localXMLName returns the local part of a lexical XML QName. encoding/xml
 // preserves namespace prefixes in attribute values rather than resolving them.
 func localXMLName(name string) string {
@@ -982,6 +1023,11 @@ func localXMLName(name string) string {
 
 // sendRequestWithRetry sends an X1 request with exponential backoff retry.
 func (c *Client) sendRequestWithRetry(ctx context.Context, rootElement string, req any) error {
+	return c.sendRequestWithRetryFactory(ctx, rootElement, func() any { return req })
+}
+
+// sendRequestWithRetryFactory builds each attempt immediately before sending it.
+func (c *Client) sendRequestWithRetryFactory(ctx context.Context, rootElement string, request func() any) error {
 	backoff := c.config.InitialBackoff
 	var lastErr error
 
@@ -1003,9 +1049,18 @@ func (c *Client) sendRequestWithRetry(ctx context.Context, rootElement string, r
 			}
 		}
 
-		err := c.sendRequest(ctx, rootElement, req)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if c.stopped.Load() {
+			return ErrClientStopped
+		}
+		err := c.sendRequest(ctx, rootElement, request())
 		if err == nil {
 			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 
 		lastErr = err

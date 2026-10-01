@@ -450,6 +450,38 @@ error 100 and the stable description `retained task's interception identity
 differs` (followed by the XID). It is deliberately not error 300. Suspended and
 failed tasks cannot be reactivated with `ActivateTask`.
 
+### ADMF startup recovery
+
+With startup synchronization enabled, a transient `GetAllDetails` failure keeps
+recovery pending. The manager retries after 1 second with exponential backoff
+capped at 30 seconds, independently of the periodic reconciliation interval;
+each attempt uses the configured sync timeout (30 seconds by default).
+Shutdown cancels the request or backoff and joins the recovery worker.
+
+Persisted tasks remain disarmed candidates until the ADMF confirms both their
+task definition and delivery destinations. Wrong response types or missing NE
+status, task-list, or destination-list sections are rejected before applying any
+state; present empty lists remain valid. Valid entries in a partial snapshot
+can be applied, but conversion or activation failures keep recovery pending and
+prevent removal of possible orphans. Known filters for a refused task without
+an active local owner are withdrawn. Repeated equivalent snapshots preserve
+delivery queues, filter state, and activation generations. Complete snapshots
+retain the existing protection against removing every active task on an empty
+ADMF response. Unsupported `GetAllDetails` is terminal: candidates remain
+disarmed and must be provisioned through X1.
+
+Manager status (`Stats().StartupSync` / `StartupSyncStatus()`) exposes `pending`,
+`retryable_failure`, `succeeded`, or `unsupported`, with attempt count, last
+failure, last attempt time, and successful recovery time. An empty state means
+startup sync was not requested. Logs report pending recovery, retries, and
+recovery without target content.
+
+The separate NE startup notification uses bounded X1 client retries and its own
+cancellable request. Retried issue reports retain their semantic content and use
+a new transaction UUID, following [TS 103 221-1 V1.22.1 clause
+5.2.3](https://www.etsi.org/deliver/etsi_ts/103200_103299/10322101/01.22.01_60/ts_10322101v012201p.pdf).
+Notification acknowledgment never substitutes for authoritative state sync.
+
 ## X2/X3 Protocol (Binary TLV)
 
 Content is delivered to MDF using binary TLV encoding per TS 103 221-2.
@@ -471,25 +503,44 @@ The fixed PDU header is 40 bytes; conditional TLV attributes extend it.
 | 40+    | Conditional Attributes (TLV)        | variable |
 | ...    | Payload                             | variable |
 
-### X2 IRI Events
+### X2 SIP signaling
 
-| Event           | SIP Trigger           | Description         |
-| --------------- | --------------------- | ------------------- |
-| SessionBegin    | INVITE                | Call initiated      |
-| SessionAnswer   | 200 OK to INVITE      | Call answered       |
-| SessionEnd      | BYE                   | Call terminated     |
-| SessionAttempt  | CANCEL/4xx/5xx/6xx    | Call attempt failed |
-| Registration    | REGISTER              | User registration   |
-| RegistrationEnd | REGISTER (Expires: 0) | User deregistration |
+Every complete, admitted target SIP request and response is delivered as an X2
+PDU with Payload Format 9 (SIP Message). This includes `100`, `180`, `183`,
+redirects (`3xx`), failures (`4xx`–`6xx`), and extension request methods such as
+`SERVICE`. Method classification does not control emission. The MDF reads the SIP
+request/response semantics from the payload; no proprietary IRI-type or SIP-header
+TLVs are added. Messages in one Call-ID share a correlation number and one X2
+sequence context. Invalid or incomplete SIP is rejected before a product sequence
+number is allocated. Existing task, matched-filter, generation, and delivery-type
+admission still applies; `X3Only` tasks do not deliver X2.
 
-**X2 PDU Attributes:**
+This coverage follows [ETSI TS 102 232-5 V3.22.1, clauses 5.2.1 and
+5.4](https://www.etsi.org/deliver/etsi_ts/102200_102299/10223205/03.22.01_60/ts_10223205v032201p.pdf).
 
-- Timestamp (POSIX timespec)
-- Sequence Number
-- Source/Destination IP and Port
-- IRI Type
-- SIP Call-ID, From, To, Method
-- Correlation Number
+For `X2Only` tasks, lippycat applies a conservative content authorization policy:
+it retains SIP headers and SDP signaling (`application/sdp`) and withholds all
+other message bodies, including SMS `MESSAGE` (`application/vnd.3gpp.sms`),
+extension requests, multipart bodies, and body-bearing responses. Long and
+compact Content-Length fields are rewritten to zero, or a zero-length field is
+added if missing, so the delivered SIP remains parseable. The captured packet is
+unchanged; a separate `X2andX3` task receives the original SIP message and body.
+
+This is whole-body withholding at the X2 capture boundary, rather than the
+SMS TPDU-preserving content modification specified for HI2 in clause 5.2.6.2.
+The MDF must implement the applicable national HI2 policy, including the
+`iRIOnlySIPMessage`/`iRIOnlyOriginalIPMMMessage` indication described in clause
+5.2.6.1. lippycat does not claim those ASN.1 or SMS TPDU transformations.
+
+**X2 conditional attributes:**
+
+- Capture timestamp and sequence number
+- Source/destination IP address and port from the actual packet sender
+- Configured domain/network-function identifiers and capture node identifier
+- Matched target identifier when the task has one unambiguous target
+
+The task XID, correlation number, Payload Format, and Payload Direction are PDU
+header fields. Direction remains unknown unless it can be resolved reliably.
 
 ### X3 CC Content
 

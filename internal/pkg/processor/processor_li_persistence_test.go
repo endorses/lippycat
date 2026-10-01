@@ -92,7 +92,9 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 			implicit = false
 		}
 		response := schema.GetAllDetailsResponse{
-			ListOfTaskResponseDetails: &schema.ListOfTaskResponseDetails{},
+			NeStatusDetails:                    &schema.NeStatusDetails{NeStatus: "operational"},
+			ListOfGenericObjectResponseDetails: &schema.ListOfGenericObjectResponseDetails{},
+			ListOfTaskResponseDetails:          &schema.ListOfTaskResponseDetails{},
 			ListOfDestinationResponseDetails: &schema.ListOfDestinationResponseDetails{DestinationResponseDetails: []*schema.DestinationResponseDetails{{DestinationDetails: &schema.DestinationDetails{
 				DId: &did, DeliveryType: "X3Only", DeliveryAddress: &schema.DeliveryAddress{IpAddressAndPort: &schema.IPAddressPort{Address: &schema.IPAddress{IPv4Address: &ip}, Port: &schema.Port{TCPPort: &f.port}}},
 			}}}},

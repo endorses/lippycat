@@ -1,6 +1,6 @@
 # SIP LI coverage, TCP tuple reuse, and ADMF startup recovery
 
-**Status:** In progress
+**Status:** Complete
 
 **Baseline:** main at `8f4cfd19` (TCP SIP stream retention complete)
 
@@ -40,13 +40,13 @@ production.
 
 - [x] Keep the retention fix's pool pin/recycle lifecycle, one completion per
       retired stream, bounded queued pages, and configured `MaxStreams` limit.
-- [ ] Keep X2 delivery behind the existing task/filter admission and delivery
+- [x] Keep X2 delivery behind the existing task/filter admission and delivery
       type checks. A broader SIP emission rule must not create an unauthorized
       intercept or expose message body content forbidden for an IRI-only task.
-- [ ] Keep ADMF authority over arming persisted tasks. A failed, unsupported,
+- [x] Keep ADMF authority over arming persisted tasks. A failed, unsupported,
       or incomplete startup snapshot must not arm candidates from local state
       alone or authorize delivery to an unconfirmed destination.
-- [ ] Use synthetic SIP traffic, fake ADMF responses, and deterministic queue
+- [x] Use synthetic SIP traffic, fake ADMF responses, and deterministic queue
       ordering for tests. Treat operational timing and memory observations as
       diagnostic evidence without a new numerical performance gate.
 
@@ -104,29 +104,29 @@ production.
 
 ## 3. Retry ADMF startup synchronization without arming by inference
 
-- [ ] Model startup sync as pending, succeeded, unsupported, or retryable
+- [x] Model startup sync as pending, succeeded, unsupported, or retryable
       failure. Keep `GetAllDetails` unsupported as a terminal capability
       outcome. Distinguish transport/timeouts from per-destination and
       per-task conversion/activation failures; the current startup sync logs
       those entry failures but returns nil, so they cannot silently mark the
       snapshot fully recovered.
-- [ ] Add a manager-owned, cancellable retry after a transient startup sync
+- [x] Add a manager-owned, cancellable retry after a transient startup sync
       failure, with bounded backoff and the configured per-attempt timeout.
       It must work when `ReconcileInterval` is zero, serialize with periodic
       reconciliation and X1 task changes, stop after a confirmed complete
       recovery, and join cleanly during `Manager.Stop`.
-- [ ] Preserve authoritative reconciliation: persisted active tasks stay
+- [x] Preserve authoritative reconciliation: persisted active tasks stay
       candidates until ADMF confirmation; incomplete snapshots do not remove
       possible orphans, and repeated snapshots do not duplicate task
       activation, delivery destinations, generations, or filter state.
-- [ ] Expose a useful startup-sync pending/recovery state through existing
+- [x] Expose a useful startup-sync pending/recovery state through existing
       manager status or telemetry, including the last failure and successful
       recovery. Log retries and recovery without logging target content.
-- [ ] Review the separately sent X1 startup notification that also timed out
+- [x] Review the separately sent X1 startup notification that also timed out
       in the incident. Determine whether its protocol semantics require an
       idempotent retry; implement and test that retry if needed without making
       notification success a substitute for authoritative state sync.
-- [ ] Test a first sync timeout followed by ADMF recovery, including
+- [x] Test a first sync timeout followed by ADMF recovery, including
       `ReconcileInterval = 0`; unsupported operation; partial snapshot errors;
       persisted candidates; concurrent periodic reconciliation; shutdown
       during backoff/request; and repeated successful snapshots. Assert no
@@ -135,15 +135,22 @@ production.
 
 ## Verification and closure
 
-- [ ] Run focused reassembly/capture/VoIP tests and race tests for connection
+- [x] Run focused reassembly/capture/VoIP tests and race tests for connection
       replacement. Run LI encoder, processor, manager, persistence, and X1
       tests with the `li` build tag; build processor and tap with and without
       LI support. Record commands and results in the implementation review.
-- [ ] Replay synthetic normal-close and trailing-RST pcaps through the
+- [x] Replay synthetic normal-close and trailing-RST pcaps through the
       processor/tap path. Confirm the next same-tuple call retains both
       directions, and admitted `1xx`/`3xx` SIP messages appear as X2 PDUs
       without changing X3 attribution or task admission.
-- [ ] Review operator-facing status and documentation, format changed files,
+- [x] Review operator-facing status and documentation, format changed files,
       mark only verified checklist items complete, and commit the code and
       updated plan. Keep independently reviewable commits for the three
       workstreams if they are implemented separately.
+
+## Implementation evidence
+
+The [implementation review](sip-li-and-tcp-reuse-implementation-review.md) records
+production paths, content policy, command results, the corrected ADMF fixture,
+and the bounded closure decision. All scoped requirements are verified; no
+required gate is deferred.

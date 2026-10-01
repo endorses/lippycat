@@ -189,9 +189,9 @@ func (m *Manager) ReplayTaskAuthorized(xid uuid.UUID, generation uint64) bool {
 	if !m.administrativeAdmissionReady() {
 		return false
 	}
-	m.mu.RLock()
+	m.replayMu.RLock()
 	confirmed := m.replayConfirmed[xid]
-	m.mu.RUnlock()
+	m.replayMu.RUnlock()
 	if generation == 0 || confirmed != generation {
 		return false
 	}

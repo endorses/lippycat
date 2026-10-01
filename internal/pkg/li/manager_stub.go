@@ -38,6 +38,7 @@ type Manager struct{}
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
+	StartupSync      StartupSyncStatus
 	PacketsProcessed uint64
 	PacketsMatched   uint64
 	X2EventsSent     uint64
@@ -143,3 +144,6 @@ func (m *Manager) MarkTaskFailed(_ uuid.UUID, _ string) error {
 func (m *Manager) PurgeDeactivatedTasks(_ time.Duration) int {
 	return 0
 }
+
+// StartupSyncStatus is empty when LI is unavailable.
+func (m *Manager) StartupSyncStatus() StartupSyncStatus { return StartupSyncStatus{} }

@@ -135,11 +135,17 @@ type Manager struct {
 	stopOnce        sync.Once
 	stopped         atomic.Bool
 	mu              sync.RWMutex
-	// adminMu serializes whole administrative transactions, including snapshots,
-	// filter cleanup and delivery callbacks. Lock order is adminMu, lifecycleMu,
-	// then short registry/filter locks. Callbacks may read but must not mutate.
-	adminMu     sync.Mutex
-	lifecycleMu sync.RWMutex
+	// snapshotMu orders complete ADMF snapshots with X1 mutations.
+	// Inner administrative transactions, filter cleanup and delivery callbacks
+	// retain adminMu, lifecycleMu, then short registry/filter lock ordering.
+	// Callbacks may read but must not mutate administration.
+	snapshotMu     sync.Mutex
+	replayMu       sync.RWMutex
+	startupStatus  atomic.Pointer[StartupSyncStatus]
+	recoveryCtx    context.Context
+	recoveryCancel context.CancelFunc
+	adminMu        sync.Mutex
+	lifecycleMu    sync.RWMutex
 	// destinationMu serializes registry changes with delivery callbacks. Callbacks
 	// may read manager state but must not recursively mutate destinations.
 	destinationMu        sync.Mutex
@@ -232,6 +238,7 @@ type managerAtomicStats struct {
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
+	StartupSync StartupSyncStatus
 	// RADIUSStaleReferences counts rejected task owner references at admission.
 	RADIUSStaleReferences       uint64
 	PacketsProcessed            uint64
@@ -300,7 +307,10 @@ func (m *Manager) AcquireTaskAdmission(xid uuid.UUID, generation uint64) (*TaskA
 // The deactivationCallback is called when a task is implicitly deactivated
 // (e.g., EndTime expiration). This is used to notify ADMF via X1.
 func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback) *Manager {
+	recoveryCtx, recoveryCancel := context.WithCancel(context.Background())
 	m := &Manager{
+		recoveryCtx:           recoveryCtx,
+		recoveryCancel:        recoveryCancel,
 		config:                config,
 		filters:               NewFilterManager(config.FilterPusher),
 		stopChan:              make(chan struct{}),
@@ -466,8 +476,10 @@ func (m *Manager) Start() (result error) {
 		m.x1Client.Start()
 
 		// Send startup notification to ADMF.
+		m.wg.Add(1)
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer m.wg.Done()
+			ctx, cancel := context.WithTimeout(m.recoveryCtx, m.syncAttemptTimeout())
 			defer cancel()
 			if err := m.x1Client.ReportStartup(ctx); err != nil {
 				logger.Warn("Failed to send startup notification to ADMF",
@@ -482,18 +494,10 @@ func (m *Manager) Start() (result error) {
 
 	// Sync state from ADMF on startup if configured.
 	if m.config.SyncOnStartup && m.x1Client != nil {
-		syncTimeout := m.config.SyncTimeout
-		if syncTimeout == 0 {
-			syncTimeout = 30 * time.Second
+		if m.attemptStartupSync() {
+			m.wg.Add(1)
+			go m.retryStartupSync()
 		}
-		syncCtx, syncCancel := context.WithTimeout(context.Background(), syncTimeout)
-		if err := m.syncStateFromADMF(syncCtx); err != nil {
-			logger.Warn("ADMF state sync failed, continuing without pre-loaded state",
-				"error", err,
-				"admf", m.config.ADMFEndpoint,
-			)
-		}
-		syncCancel()
 	}
 
 	if err := m.administrativeError(); err != nil {
@@ -538,6 +542,7 @@ func (m *Manager) Stop() { m.stopOnce.Do(m.stop) }
 
 func (m *Manager) stop() {
 	m.stopped.Store(true)
+	m.recoveryCancel()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -588,15 +593,24 @@ func (m *Manager) stop() {
 // and restores them into the local registry. This is used on startup
 // to recover state after a restart without waiting for ADMF to re-push.
 func (m *Manager) syncStateFromADMF(ctx context.Context) error {
+	m.snapshotMu.Lock()
+	defer m.snapshotMu.Unlock()
+	return m.syncStateFromADMFLocked(ctx)
+}
+
+func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	resp, err := m.x1Client.GetAllDetails(ctx)
 	if err != nil {
-		// If ADMF does not support this operation, log and return nil.
+		// Unsupported is a terminal capability outcome, not a recovered snapshot.
 		var admfErr *x1.ADMFError
 		if errors.As(err, &admfErr) && admfErr.IsUnsupportedOperation() {
 			logger.Warn("ADMF does not support GetAllDetails, skipping state sync",
 				"admf", m.config.ADMFEndpoint,
 			)
-			return nil
+			return errStartupSyncUnsupported
 		}
 		return fmt.Errorf("get all details from ADMF: %w", err)
 	}
@@ -604,6 +618,7 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 	var destCount, taskCount int
 	var destErrors, taskErrors int
 	snapshot := newADMFSnapshot()
+	confirmedDestinations := make(map[uuid.UUID]bool)
 
 	// Register destinations first (tasks reference destinations by DID).
 	if resp.ListOfDestinationResponseDetails != nil {
@@ -625,6 +640,7 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 				continue
 			}
 			destCount++
+			confirmedDestinations[dest.DID] = true
 		}
 	}
 
@@ -642,6 +658,22 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 			}
 			m.bindRADIUSDeployment(task)
 			snapshot.tasks[task.XID] = true
+			// A persisted destination is only a candidate. Never arm delivery to
+			// an endpoint that this snapshot omitted or failed to apply.
+			confirmed := true
+			for _, did := range task.DestinationIDs {
+				if !confirmedDestinations[did] {
+					confirmed = false
+					break
+				}
+			}
+			if !confirmed {
+				snapshot.rejectedTasks[task.XID] = len(task.Targets)
+				taskErrors++
+				snapshot.convErrors++
+				logger.Warn("ADMF task has an unconfirmed destination", "xid", task.XID)
+				continue
+			}
 			if activateErr := m.activateStartupTask(task); activateErr != nil {
 				// Task may already exist if sync is called multiple times.
 				if !errors.Is(activateErr, ErrTaskAlreadyExists) {
@@ -649,13 +681,17 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 						"xid", task.XID,
 						"error", activateErr,
 					)
+					snapshot.rejectedTasks[task.XID] = len(task.Targets)
 					taskErrors++
+					snapshot.convErrors++
 				}
 				continue
 			}
 			if restored := m.persistedActive[task.XID]; restored != nil && !IsRADIUSTask(task) && restored.ActivationGeneration > 0 && equivalentTaskDefinition(restored, task) {
-				// Start holds m.mu for the complete startup reconciliation.
+				// Recovery may run after Start returns.
+				m.replayMu.Lock()
 				m.replayConfirmed[task.XID] = restored.ActivationGeneration
+				m.replayMu.Unlock()
 			}
 			taskCount++
 		}
@@ -679,6 +715,10 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("persist startup reconciliation: %w", err)
 		}
+	}
+
+	if taskErrors > 0 || destErrors > 0 {
+		return &incompleteStartupSnapshot{taskFailures: taskErrors, destinationFailures: destErrors}
 	}
 
 	logger.Info("ADMF state sync complete",
@@ -757,18 +797,19 @@ type admfSnapshot struct {
 	destinations          map[uuid.UUID]bool
 	convErrors            int
 	destinationConvErrors int
+	rejectedTasks         map[uuid.UUID]int
 }
 
 func newADMFSnapshot() admfSnapshot {
-	return admfSnapshot{tasks: make(map[uuid.UUID]bool), destinations: make(map[uuid.UUID]bool)}
+	return admfSnapshot{tasks: make(map[uuid.UUID]bool), destinations: make(map[uuid.UUID]bool), rejectedTasks: make(map[uuid.UUID]int)}
 }
 
 // complete reports whether the snapshot can be trusted to say what the ADMF
 // does NOT have. A conversion error drops an XID for reasons unrelated to the
 // ADMF's intent, so a parsing bug must never deactivate a live warrant.
-func (s admfSnapshot) complete() bool { return s.convErrors == 0 }
+func (s admfSnapshot) complete() bool { return s.convErrors == 0 && s.destinationConvErrors == 0 }
 
-func (s admfSnapshot) destinationsComplete() bool { return s.destinationConvErrors == 0 }
+func (s admfSnapshot) destinationsComplete() bool { return s.complete() }
 
 // removeOrphanedTasks deactivates local tasks the ADMF no longer has, so a lost
 // DeactivateTask cannot leave an intercept running without authorisation.
@@ -851,8 +892,33 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 		return 0
 	}
 	lister, ok := m.config.FilterPusher.(FilterLister)
-	if !ok || !snapshot.complete() {
+	if !ok {
 		return 0
+	}
+	if !snapshot.complete() {
+		// Preserve unknown possible orphans on a partial snapshot. Filters
+		// explicitly owned by a parsed but refused task are safe to withdraw
+		// when no live local activation owns them. Legacy prefixes are ambiguous.
+		removed := 0
+		for xid, targets := range snapshot.rejectedTasks {
+			if current, err := m.registry.GetTaskDetails(xid); err == nil && current.Status == TaskStatusActive {
+				continue
+			}
+			for i := 0; i < targets; i++ {
+				id := fmt.Sprintf(liFilterIDPrefix+"%s-%d", xid.String(), i)
+				for _, existing := range lister.ListFilterIDs() {
+					if existing != id {
+						continue
+					}
+					if err := m.config.FilterPusher.DeleteFilter(id); err != nil {
+						logger.Error("Withdraw refused ADMF task filter", "filter_id", id, "error", err)
+					} else {
+						removed++
+					}
+				}
+			}
+		}
+		return removed
 	}
 
 	expected := make(map[string]bool)
@@ -1010,15 +1076,24 @@ func (m *Manager) startReconciliation() {
 }
 
 // reconcileWithADMF queries the ADMF for current state and compares it
-// with the local registry, activating any tasks found in ADMF but missing
-// locally. Tasks present locally but not in ADMF are logged as warnings
-// but not automatically deactivated (could be a transient ADMF issue).
+// with the local registry, activating missing tasks and withdrawing absent
+// tasks after the configured number of complete, agreeing snapshots.
 func (m *Manager) reconcileWithADMF() {
+	if m.StartupSyncStatus().State == StartupSyncUnsupported {
+		return
+	}
+	// A pending startup snapshot retains startup replay/candidate semantics.
+	if status := m.StartupSyncStatus(); status.State == StartupSyncPending || status.State == StartupSyncRetryableFailure {
+		m.attemptStartupSync()
+		return
+	}
+	m.snapshotMu.Lock()
+	defer m.snapshotMu.Unlock()
 	syncTimeout := m.config.SyncTimeout
 	if syncTimeout == 0 {
 		syncTimeout = 30 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+	ctx, cancel := context.WithTimeout(m.recoveryCtx, syncTimeout)
 	defer cancel()
 
 	resp, err := m.x1Client.GetAllDetails(ctx)
@@ -1037,6 +1112,7 @@ func (m *Manager) reconcileWithADMF() {
 
 	// Build set of ADMF task XIDs.
 	snapshot := newADMFSnapshot()
+	confirmedDestinations := make(map[uuid.UUID]bool)
 	if resp.ListOfDestinationResponseDetails != nil {
 		for _, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
 			dest, convErr := DestinationResponseDetailsToDestination(dd)
@@ -1048,6 +1124,8 @@ func (m *Manager) reconcileWithADMF() {
 			if err := m.syncDestination(dest); err != nil {
 				logger.Warn("Failed to reconcile destination", "did", dest.DID, "error", err)
 				snapshot.destinationConvErrors++
+			} else {
+				confirmedDestinations[dest.DID] = true
 			}
 		}
 	}
@@ -1072,9 +1150,23 @@ func (m *Manager) reconcileWithADMF() {
 			m.bindRADIUSDeployment(task)
 			snapshot.tasks[task.XID] = true
 
+			confirmed := true
+			for _, did := range task.DestinationIDs {
+				if !confirmedDestinations[did] {
+					confirmed = false
+					break
+				}
+			}
+			if !confirmed {
+				snapshot.convErrors++
+				logger.Warn("ADMF task has an unconfirmed destination", "xid", task.XID)
+				continue
+			}
+
 			if handled, err := m.reconcileRADIUSTask(task); handled {
 				if err != nil {
 					logger.Error("RADIUS task reconciliation rejected", "xid", task.XID, "error", err)
+					snapshot.convErrors++
 				}
 				continue
 			}
@@ -1082,6 +1174,7 @@ func (m *Manager) reconcileWithADMF() {
 			// If task is in ADMF but not in local registry, activate it.
 			if _, getErr := m.registry.GetTaskDetails(task.XID); getErr != nil {
 				if activateErr := m.ActivateTask(task); activateErr != nil {
+					snapshot.convErrors++
 					logger.Warn("Reconciliation: failed to activate missing task",
 						"xid", task.XID,
 						"error", activateErr,
@@ -1831,6 +1924,8 @@ func (a *managerDestinationAdapter) ModifyDestination(did uuid.UUID, dest *x1.De
 
 // CreateDestinationX1 creates a destination from X1 request data.
 func (m *Manager) CreateDestinationX1(dest *x1.Destination) error {
+	m.snapshotMu.Lock()
+	defer m.snapshotMu.Unlock()
 	liDest := &Destination{
 		DID:          dest.DID,
 		Address:      dest.Address,
@@ -1874,6 +1969,8 @@ func (m *Manager) GetDestinationX1(did uuid.UUID) (*x1.Destination, error) {
 
 // RemoveDestinationX1 removes a destination via X1 request.
 func (m *Manager) RemoveDestinationX1(did uuid.UUID) error {
+	m.snapshotMu.Lock()
+	defer m.snapshotMu.Unlock()
 	err := m.RemoveDestination(did)
 	if err != nil {
 		if errors.Is(err, ErrDestinationNotFound) {
@@ -1886,6 +1983,8 @@ func (m *Manager) RemoveDestinationX1(did uuid.UUID) error {
 
 // ModifyDestinationX1 modifies a destination via X1 request.
 func (m *Manager) ModifyDestinationX1(did uuid.UUID, dest *x1.Destination) error {
+	m.snapshotMu.Lock()
+	defer m.snapshotMu.Unlock()
 	liDest := &Destination{
 		DID:          dest.DID,
 		Address:      dest.Address,
@@ -1938,6 +2037,8 @@ func (a *managerTaskAdapter) GetTaskDetails(xid uuid.UUID) (*x1.Task, error) {
 
 // ActivateTaskX1 activates a task from X1 request data.
 func (m *Manager) ActivateTaskX1(task *x1.Task) error {
+	m.snapshotMu.Lock()
+	defer m.snapshotMu.Unlock()
 	// Convert x1.Task to li.InterceptTask
 	liTask := &InterceptTask{
 		XID:                         task.XID,
@@ -1987,6 +2088,8 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 
 // DeactivateTaskX1 deactivates a task via X1 request.
 func (m *Manager) DeactivateTaskX1(xid uuid.UUID) error {
+	m.snapshotMu.Lock()
+	defer m.snapshotMu.Unlock()
 	err := m.DeactivateTask(xid)
 	if err != nil {
 		if errors.Is(err, ErrTaskNotFound) {
@@ -1998,6 +2101,8 @@ func (m *Manager) DeactivateTaskX1(xid uuid.UUID) error {
 
 // ModifyTaskX1 modifies a task via X1 request.
 func (m *Manager) ModifyTaskX1(xid uuid.UUID, mod *x1.TaskModification) error {
+	m.snapshotMu.Lock()
+	defer m.snapshotMu.Unlock()
 	// Convert x1.TaskModification to li.TaskModification
 	liMod := &TaskModification{
 		DestinationIDs:              mod.DestinationIDs,
@@ -2188,6 +2293,7 @@ func convertTaskStatusToX1(s TaskStatus) x1.TaskStatus {
 // Stats returns current LI processing statistics.
 func (m *Manager) Stats() ManagerStats {
 	return ManagerStats{
+		StartupSync:                 m.StartupSyncStatus(),
 		RADIUSStaleReferences:       m.stats.radiusStaleReferences.Load(),
 		PacketsProcessed:            m.stats.packetsProcessed.Load(),
 		PacketsMatched:              m.stats.packetsMatched.Load(),

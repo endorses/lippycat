@@ -273,17 +273,11 @@ func TestSanitizeCallID(t *testing.T) {
 	}
 }
 
-// TestConcurrentWritesToSameCall tests that concurrent writes to the same call's
-// SIP and RTP writers are properly synchronized with mutexes to prevent race conditions.
-// This test verifies Phase 1.1 of the code review remediation plan.
 // TestConcurrentShutdownAndWrites tests that concurrent writes during shutdown
-// are handled gracefully. This verifies Phase 1.2 of the code review remediation plan:
-// - Shutdown sets the shuttingDown flag
-// - Active writes are tracked with activeWrites WaitGroup
-// - Shutdown waits for active writes to complete before closing files
-// - New writes during shutdown are rejected
+// use the production admission gate and are drained before calls are closed.
 func TestConcurrentShutdownAndWrites(t *testing.T) {
 	tracker := NewCallTracker()
+	t.Cleanup(tracker.Shutdown)
 
 	callID := "test-shutdown-race-call"
 	call := &CallInfo{
@@ -301,26 +295,34 @@ func TestConcurrentShutdownAndWrites(t *testing.T) {
 	const numWriters = 20
 	const writesPerWriter = 50
 	var wg sync.WaitGroup
+	var started sync.WaitGroup
+	started.Add(numWriters)
+	start := make(chan struct{})
 
 	// Start concurrent writers
 	for i := 0; i < numWriters; i++ {
 		wg.Add(1)
-		go func(id int) {
+		go func() {
 			defer wg.Done()
 			for j := 0; j < writesPerWriter; j++ {
-				// Simulate write operations by acquiring activeWrites
-				if tracker.shuttingDown.Load() == 0 {
-					tracker.activeWrites.Add(1)
+				// Use the same admission gate as synchronous packet writes.
+				admitted := tracker.beginWrite()
+				if j == 0 {
+					started.Done()
+					<-start
+				}
+				if admitted {
 					// Simulate some work
 					time.Sleep(time.Microsecond)
 					tracker.activeWrites.Done()
 				}
 			}
-		}(i)
+		}()
 	}
 
-	// Let some writes happen
-	time.Sleep(10 * time.Millisecond)
+	// Ensure writers have entered the admission path before racing shutdown.
+	started.Wait()
+	close(start)
 
 	// Trigger shutdown while writes are still happening
 	shutdownDone := make(chan struct{})
@@ -349,15 +351,20 @@ func TestConcurrentShutdownAndWrites(t *testing.T) {
 	tracker.mu.RUnlock()
 
 	// Verify no new writes can happen after shutdown
-	tracker.activeWrites.Add(1)
-	tracker.activeWrites.Done()
-	// If this doesn't panic, the WaitGroup is working correctly
+	for _, begin := range []func() bool{tracker.beginWrite, tracker.beginAcceptedWrite} {
+		admitted := begin()
+		if admitted {
+			tracker.activeWrites.Done()
+		}
+		assert.False(t, admitted, "Writes must be rejected after shutdown")
+	}
 }
 
 // TestShutdownWithActiveWrites tests that shutdown waits for active writes
 // to complete before closing files.
 func TestShutdownWithActiveWrites(t *testing.T) {
 	tracker := NewCallTracker()
+	t.Cleanup(tracker.Shutdown)
 
 	callID := "test-shutdown-wait-call"
 	call := &CallInfo{
@@ -374,7 +381,7 @@ func TestShutdownWithActiveWrites(t *testing.T) {
 
 	// Start a long-running write operation
 	writeDone := make(chan struct{})
-	tracker.activeWrites.Add(1)
+	require.True(t, tracker.beginWrite())
 	go func() {
 		defer tracker.activeWrites.Done()
 		// Simulate long write
@@ -408,15 +415,14 @@ func TestShutdownWithActiveWrites(t *testing.T) {
 // TestWritesDuringShutdown tests that writes are rejected during shutdown
 func TestWritesDuringShutdown(t *testing.T) {
 	tracker := NewCallTracker()
+	t.Cleanup(tracker.Shutdown)
 
 	// Trigger shutdown
 	tracker.shuttingDown.Store(1)
 
 	// Try to start a new write after shutdown flag is set
-	writeAttempted := false
-	if tracker.shuttingDown.Load() == 0 {
-		tracker.activeWrites.Add(1)
-		writeAttempted = true
+	writeAttempted := tracker.beginWrite()
+	if writeAttempted {
 		tracker.activeWrites.Done()
 	}
 

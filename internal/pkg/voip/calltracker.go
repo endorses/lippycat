@@ -40,6 +40,8 @@ type CallInfo struct {
 	EndTime     *time.Time // Set when BYE/CANCEL is detected
 	LinkType    layers.LinkType
 	tracker     *CallTracker
+	// Protected by tracker.mu; publication precedes lifecycle observer callbacks.
+	lifecycleReady bool
 }
 
 // CallLifecycleObserver owns side effects caused by registry admission and
@@ -427,13 +429,15 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 	}
 	tracker.mu.RLock()
 	call, exists := tracker.callMap[callID]
-	if exists {
+	if exists && call.lifecycleReady {
 		tracker.mu.RUnlock()
 		tracker.registry.Touch(callID, time.Now())
 		return call
 	}
 	tracker.mu.RUnlock()
 
+	// A published call may still be opening its output. Wait for the creator's
+	// lifecycle callbacks and recheck the map, including initialization rollback.
 	tracker.lifecycleMu.Lock()
 	defer tracker.lifecycleMu.Unlock()
 	tracker.mu.Lock()
@@ -498,6 +502,9 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 			}
 			return nil
 		}
+		tracker.mu.Lock()
+		call.lifecycleReady = true
+		tracker.mu.Unlock()
 	}
 	return call
 }

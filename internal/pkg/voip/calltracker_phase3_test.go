@@ -33,11 +33,13 @@ func (r *recordingCallOutput) CloseSession(id string) error {
 func (r *recordingCallOutput) Shutdown() error { return nil }
 
 type queryingLifecycleOutput struct {
-	mu           sync.Mutex
-	tracker      *CallTracker
-	events       []string
-	startEntered chan struct{}
-	releaseStart chan struct{}
+	mu            sync.Mutex
+	tracker       *CallTracker
+	events        []string
+	startEntered  chan struct{}
+	releaseStart  chan struct{}
+	firstStart    sync.Once
+	firstStartErr error
 }
 
 func (o *queryingLifecycleOutput) OnCallStarted(call *CallInfo) error {
@@ -47,11 +49,15 @@ func (o *queryingLifecycleOutput) OnCallStarted(call *CallInfo) error {
 	o.mu.Lock()
 	o.events = append(o.events, "start:"+call.CallID)
 	o.mu.Unlock()
+	var startErr error
 	if o.startEntered != nil {
-		close(o.startEntered)
-		<-o.releaseStart
+		o.firstStart.Do(func() {
+			close(o.startEntered)
+			<-o.releaseStart
+			startErr = o.firstStartErr
+		})
 	}
-	return nil
+	return startErr
 }
 
 func (o *queryingLifecycleOutput) OnCallEnded(call *CallInfo) error {
@@ -120,6 +126,97 @@ func TestLifecycleStartPrecedesConcurrentShutdownEnd(t *testing.T) {
 	output.mu.Lock()
 	defer output.mu.Unlock()
 	require.Equal(t, []string{"start:concurrent", "end:concurrent"}, output.events)
+}
+
+func TestConcurrentCallLookupWaitsForLifecycleInitialization(t *testing.T) {
+	for _, failFirstStart := range []bool{false, true} {
+		name := "success"
+		if failFirstStart {
+			name = "failed_start_is_rolled_back_before_retry"
+		}
+		t.Run(name, func(t *testing.T) {
+			const callID = "initializing"
+			output := &queryingLifecycleOutput{
+				startEntered: make(chan struct{}),
+				releaseStart: make(chan struct{}),
+			}
+			if failFirstStart {
+				output.firstStartErr = fmt.Errorf("injected lifecycle initialization failure")
+			}
+			tracker := NewCallTrackerWithOutput(DefaultConfig(), output)
+			output.tracker = tracker
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(output.releaseStart) }) }
+			t.Cleanup(func() {
+				release()
+				tracker.Shutdown()
+			})
+
+			created := make(chan *CallInfo, 1)
+			go func() {
+				created <- tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
+			}()
+			select {
+			case <-output.startEntered:
+			case <-time.After(time.Second):
+				t.Fatal("lifecycle initialization did not start")
+			}
+
+			// Observers must still be able to query the admitted call while they
+			// initialize it; only callers asking to use/create it must wait.
+			initializing, err := tracker.GetCall(callID)
+			require.NoError(t, err)
+			require.NotNil(t, initializing)
+			lookupEntered := make(chan struct{})
+			lookedUp := make(chan *CallInfo, 1)
+			go func() {
+				close(lookupEntered)
+				lookedUp <- tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
+			}()
+			select {
+			case <-lookupEntered:
+			case <-time.After(time.Second):
+				t.Fatal("concurrent lookup did not start")
+			}
+			select {
+			case <-lookedUp:
+				t.Fatal("concurrent lookup returned before lifecycle initialization completed")
+			case <-time.After(20 * time.Millisecond):
+			}
+
+			release()
+			var first, second *CallInfo
+			select {
+			case first = <-created:
+			case <-time.After(time.Second):
+				t.Fatal("initial creation did not finish")
+			}
+			select {
+			case second = <-lookedUp:
+			case <-time.After(time.Second):
+				t.Fatal("concurrent lookup did not finish")
+			}
+			require.NotNil(t, second)
+			if failFirstStart {
+				require.Nil(t, first)
+				require.NotSame(t, initializing, second, "lookup must retry after the failed generation is removed")
+			} else {
+				require.Same(t, initializing, first)
+				require.Same(t, first, second)
+			}
+			current, err := tracker.GetCall(callID)
+			require.NoError(t, err)
+			require.Same(t, second, current)
+			output.mu.Lock()
+			events := append([]string(nil), output.events...)
+			output.mu.Unlock()
+			if failFirstStart {
+				require.Equal(t, []string{"start:initializing", "end:initializing", "start:initializing"}, events)
+			} else {
+				require.Equal(t, []string{"start:initializing"}, events)
+			}
+		})
+	}
 }
 
 func TestPinnedCallSurvivesCapacityPressure(t *testing.T) {

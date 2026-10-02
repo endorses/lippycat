@@ -592,16 +592,16 @@ lc tap voip [flags]
 
 Inherits all `lc tap` flags, plus:
 
-| Flag                      | Type   | Default    | Description                                                                                  |
-| ------------------------- | ------ | ---------- | -------------------------------------------------------------------------------------------- |
-| `--sip-user`              | string |            | Filter by SIP user                                                                           |
-| `--sip-port`              | int    | `5060`     | SIP signaling port                                                                           |
-| `--rtp-port-range`        | string |            | RTP port range                                                                               |
-| `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency`                           |
-| `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                                                  |
-| `--tcp-max-streams`       | int    | `0`        | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited)              |
-| `--pattern-algorithm`     | string | `auto`     | Pattern matching algorithm: `auto`, `linear`, `aho-corasick`                                 |
-| `--pattern-buffer-mb`     | int    | `64`       | Pattern buffer size (MB)                                                                     |
+| Flag                      | Type   | Default    | Description                                                                      |
+| ------------------------- | ------ | ---------- | -------------------------------------------------------------------------------- |
+| `--sip-user`              | string |            | Filter by SIP user                                                               |
+| `--sip-port`              | int    | `5060`     | SIP signaling port                                                               |
+| `--rtp-port-range`        | string |            | RTP port range                                                                   |
+| `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency`               |
+| `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                                      |
+| `--tcp-max-streams`       | int    | `0`        | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited) |
+| `--pattern-algorithm`     | string | `auto`     | Pattern matching algorithm: `auto`, `linear`, `aho-corasick`                     |
+| `--pattern-buffer-mb`     | int    | `64`       | Pattern buffer size (MB)                                                         |
 
 `--tcp-max-streams` also uses `voip.max_streams` in configuration. A positive
 value intentionally discards SIP data for rejected new or restarted streams.
@@ -759,14 +759,14 @@ lc hunt voip [flags]
 
 Inherits all `lc hunt` flags, plus:
 
-| Flag                     | Short | Type     | Default | Description                                                                                  |
-| ------------------------ | ----- | -------- | ------- | -------------------------------------------------------------------------------------------- |
-| `--sip-port`             | `-S`  | int      | `5060`  | SIP signaling port                                                                           |
-| `--rtp-port-range`       | `-R`  | string   |         | RTP port range                                                                               |
-| `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick`                                           |
-| `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                                                                     |
-| `--tcp-sip-idle-timeout` |       | duration |         | Idle timeout for SIP TCP connections                                                         |
-| `--tcp-max-streams`      |       | int      | `0`     | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited)              |
+| Flag                     | Short | Type     | Default | Description                                                                      |
+| ------------------------ | ----- | -------- | ------- | -------------------------------------------------------------------------------- |
+| `--sip-port`             | `-S`  | int      | `5060`  | SIP signaling port                                                               |
+| `--rtp-port-range`       | `-R`  | string   |         | RTP port range                                                                   |
+| `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick`                               |
+| `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                                                         |
+| `--tcp-sip-idle-timeout` |       | duration |         | Idle timeout for SIP TCP connections                                             |
+| `--tcp-max-streams`      |       | int      | `0`     | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited) |
 
 `--udp-only` is hidden and deprecated for VoIP hunters; use `--sip-port` and `--rtp-port-range` instead.
 
@@ -1046,9 +1046,20 @@ List available network interfaces with their addresses and status.
 lc list interfaces
 ```
 
-| Flag     | Type | Default | Description                   |
-| -------- | ---- | ------- | ----------------------------- |
-| `--json` | bool | `false` | Output interface data as JSON |
+| Flag      | Type | Default | Description                                                      |
+| --------- | ---- | ------- | ---------------------------------------------------------------- |
+| `--all`   | bool | `false` | Include bridges, virtual interfaces, and special capture sources |
+| `--names` | bool | `false` | Output one interface name per line                               |
+| `--json`  | bool | `false` | Output interface metadata as JSON                                |
+| `--check` | bool | `false` | Test capture access on displayed network interfaces              |
+
+The table shows `NAME`, `TYPE`, `STATE`, `ADDRESSES`, and `NOTES`. Loopback, tunnels, down interfaces, and unknown network interfaces remain visible; `any` appears only when provided by pcap. Default-route interfaces remain visible even if their type would otherwise be hidden. Linux supplies OS-based types, operational state, and IPv4/IPv6 default-route hints; other systems use available metadata with unknown fallbacks.
+
+`--names` cannot be combined with `--json` or `--check`. JSON preserves the `interfaces` array and adds interface `type`, `state`, and `default_route`, plus a top-level `hidden_count` and optional `warnings`.
+
+Listing does not test capture permissions. `--check` opens displayed network interfaces without promiscuous mode and closes them without reading packets. Special capture sources are skipped. It adds `CAPTURE` results (`available`, `unavailable`, `skipped`) and failure details in `NOTES`; JSON uses `capture_access` and optional `capture_error`. Per-interface access failures do not fail the command. Enumeration failures exit nonzero and write diagnostics to stderr, using a JSON error object with `--json`.
+
+See [Listing interfaces](../part4-administration/cli-admin.md#list-interfaces).
 
 ---
 

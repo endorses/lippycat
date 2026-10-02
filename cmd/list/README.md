@@ -6,43 +6,51 @@ The `list` command displays available resources such as network interfaces and f
 
 ### List Interfaces
 
-List network interfaces available for monitoring (local command).
+List capture interfaces with their type, operational state, and IP addresses. This is a local command and needs no processor connection.
 
 ```bash
 lc list interfaces
 ```
 
-**Output Example:**
+**Illustrative output:**
+
+```text
+NAME     TYPE       STATE  ADDRESSES                NOTES
+eth0     Ethernet   up     192.168.1.42/24           default route
+wlan0    Wi-Fi      down   —
+lo       Loopback   up     127.0.0.1/8, ::1/128
+any      Aggregate  —      —                        all network interfaces
+
+7 additional capture devices hidden; use --all to show them.
 ```
-Network interfaces suitable for VoIP monitoring:
-  eth0 - Ethernet adapter
-  wlan0 - Wireless adapter
-  enp0s3 - PCI Ethernet
 
-Note: Interface selection should comply with your organization's network monitoring policies.
-Only monitor interfaces you have explicit permission to access.
-```
+The default view includes physical interfaces, loopback, VPN/tunnel interfaces, and unclassified network interfaces, including those that are down. `any` appears only when the capture library provides it. Bridges, container/VM links, and special capture sources such as D-Bus and NFQUEUE are hidden unless `--all` is used. Interfaces with a detected default route remain visible.
 
-## Interface Filtering
+On Linux, OS metadata supplies interface classification, operational state, and IPv4/IPv6 default-route hints. Other systems use available metadata and report unknown values when details cannot be determined. A default-route hint identifies a route out of the host; choose the interface connected to the traffic you want to capture.
 
-The command filters out interfaces not typically useful for network monitoring:
-- Loopback interfaces (`lo`, `loopback`)
-- USB/Bluetooth interfaces
-- Container interfaces (`docker*`, `veth*`)
-- Virtual machine interfaces (`vmnet*`, `vbox*`)
-- Tunnel interfaces (`isatap`, `teredo`)
-
-## Permissions
-
-Full interface listing requires appropriate privileges:
+| Flag      | Description                                                       |
+| --------- | ----------------------------------------------------------------- |
+| `--all`   | Include bridges, virtual interfaces, and special capture sources. |
+| `--names` | Print one interface name per line.                                |
+| `--json`  | Print structured interface metadata as JSON.                      |
+| `--check` | Test capture access on the displayed network interfaces.          |
 
 ```bash
-# As root (full access)
-sudo lc list interfaces
+# Include every capture device
+lc list interfaces --all
 
-# Without root (limited access, shows warning)
-lc list interfaces
+# Names for scripts
+lc list interfaces --names
+
+# Metadata and capture-access results
+lc list interfaces --json --check
 ```
+
+`--names` cannot be combined with `--json` or `--check`. JSON retains the `interfaces` array and includes `type`, `state`, and `default_route` for each interface, a top-level `hidden_count`, and optional `warnings`. Addresses include their IP values and prefix lengths when available.
+
+Listing alone does not test capture permissions and does not require root. With `--check`, the command briefly opens each displayed network interface without promiscuous mode, then closes it without reading packets. The table adds a `CAPTURE` column with `available`, `unavailable`, or `skipped`; failures appear in `NOTES`. Special capture sources are skipped. JSON includes `capture_access` and, for failures, `capture_error`. A successful check does not guarantee that a later capture with different options will succeed.
+
+An unavailable interface does not make `--check` fail the command. Device-enumeration failures return a nonzero exit status and report the error on stderr; with `--json`, the error is a JSON object on stderr. Discovery warnings are written to stderr in text/names mode and included in the JSON result in JSON mode.
 
 ### List Filters
 

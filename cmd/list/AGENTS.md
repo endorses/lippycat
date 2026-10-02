@@ -26,21 +26,16 @@ cmd/list/
 
 ### interfaces.go
 
-Uses gopacket's pcap library to enumerate interfaces:
+Uses `capture.DiscoverInterfaces()` to enumerate capture devices once through `pcap.FindAllDevs()` and enrich them with OS metadata. The same discovery result feeds table, `--names`, and `--json` output.
 
-```go
-devices, err := pcap.FindAllDevs()
-```
+- Linux classification, operational state, and IPv4/IPv6 default-route hints come from OS metadata. Other platforms use best-effort metadata with explicit unknown fallbacks.
+- Default filtering hides bridges, container/VM links, and special capture sources; default-route interfaces stay visible. Loopback, physical interfaces, tunnels, down interfaces, and unknown network interfaces remain visible. `any` is included only when pcap enumerates it.
+- `--all` exposes hidden devices. `--names` cannot be combined with `--json` or `--check`.
+- `--check` briefly opens displayed network devices nonpromiscuously and closes the handles without reading packets. It skips special capture sources. Per-device failures are reported as results, not command errors.
+- Enumeration errors propagate through `RunE` for a nonzero exit status. Diagnostics go to stderr; JSON mode reports fatal discovery errors as JSON on stderr and includes discovery warnings in the result.
+- Table cells sanitize terminal control characters. Root status alone is not treated as evidence of capture access.
 
-**Security Filtering:**
-- Filters sensitive interfaces (loopback, USB, containers, VMs)
-- Sanitizes descriptions (removes MAC addresses, serial numbers)
-- Limits description length to 50 characters
-
-**Functions:**
-- `isValidMonitoringInterface(name)` - Filter exclusion patterns
-- `containsSensitiveInfo(desc)` - Check for sensitive keywords
-- `sanitizeDescription(desc)` - Clean description output
+`capture.ListInterfaces()` remains separate for the existing TUI interface picker. Its legacy filtering and description sanitization do not define the CLI discovery view; changing CLI discovery must not silently change TUI picker behavior.
 
 ## Extension Pattern
 

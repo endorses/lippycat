@@ -105,7 +105,7 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 			Status:            proc.Status,
 			ConnectionState:   connState,
 			TLSInsecure:       proc.TLSInsecure,
-			UpstreamAddr:      proc.UpstreamAddr, // Upstream processor (for hierarchy display)
+			UpstreamAddr:      m.nodeProcessorAddress(proc.UpstreamAddr), // Upstream processor (for hierarchy display)
 			Hunters:           displayHunters,
 			TotalHunters:      len(allHunters),        // Total hunters connected to processor
 			HierarchyDepth:    depth,                  // Hierarchy depth (0 = root, -1 = unknown)
@@ -359,6 +359,12 @@ func (m *Model) reconnectWithHunterFilter(processorAddr string, hunterIDs []stri
 
 	// Store the new subscription list for this processor
 	proc.SubscribedHunters = hunterIDs
+	// Existing nodes newly made visible by a subscription are baselines, not
+	// new arrivals, even if a duplicate stream event follows the next poll.
+	for _, hunter := range m.connectionMgr.HuntersByProcessor[processorAddr] {
+		m.uiState.NodesView.NodeBaseline(processorAddr, hunter.ID, hunter.ID)
+	}
+	m.uiState.NodesView.SetProcessors(m.getProcessorInfoList())
 
 	// Find the root processor (the one we're directly connected to)
 	// This handles hierarchical subscriptions where hunters may be on downstream processors

@@ -218,6 +218,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	loadCallFilterHistory(&uiState.CallFilterInput)
 	loadEventFilterHistory(&uiState.EventFilterInput)
 	loadNodeHistory(uiState.NodesView)
+	uiState.NodesView.SetHighlightMode(loadNodesHighlightingPreference())
 
 	// Determine initial capture mode and interface name
 	initialMode := components.CaptureModeLive
@@ -261,6 +262,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	}
 
 	// Create settings view with correct initial mode
+	uiState.NodesView.SetRemoteChanges(initialMode == components.CaptureModeRemote)
 	uiState.SettingsView = components.NewSettingsView(interfaceName, bufferSize, promiscuous, bpfFilter, initialPCAPFile)
 	uiState.SettingsView.SetTheme(theme)
 	// Set the correct capture mode in settings
@@ -775,6 +777,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case HunterStatusMsg:
 		return m.handleHunterStatusMsg(msg)
+	case components.UpdateNodesHighlightingMsg:
+		m.uiState.NodesView.SetHighlightMode(msg.Mode)
+		saveNodesHighlightingPreference(msg.Mode)
+		return m, nil
 	case components.UpdateBufferSizeMsg:
 		return m.handleUpdateBufferSizeMsg(msg)
 	case components.RestartCaptureMsg:

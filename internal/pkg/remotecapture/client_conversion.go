@@ -270,6 +270,10 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.HunterInfo {
 	// Safe: duration seconds won't overflow int64 nanoseconds (would require ~292 years uptime)
 	connectedAt := time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9) // #nosec G115
+	stats := h.Stats
+	if stats == nil {
+		stats = &management.HunterStats{CpuPercent: -1}
+	}
 
 	return types.HunterInfo{
 		ID:                           h.HunterId,
@@ -278,24 +282,25 @@ func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.Hunter
 		Status:                       h.Status,
 		ConnectedAt:                  connectedAt,
 		LastHeartbeat:                h.LastHeartbeatNs,
-		PacketsCaptured:              h.Stats.PacketsCaptured,
-		PacketsMatched:               h.Stats.PacketsMatched,
-		PacketsForwarded:             h.Stats.PacketsForwarded,
-		PacketsDropped:               h.Stats.PacketsDropped,
-		CaptureBufferRegularDrops:    h.Stats.CaptureBufferRegularDrops,
-		CaptureBufferSIPDrops:        h.Stats.CaptureBufferSipDrops,
-		CaptureBufferSIPDemotions:    h.Stats.CaptureBufferSipDemotions,
-		BatchChannelDrops:            h.Stats.BatchChannelDrops,
-		CaptureBufferRegularLen:      h.Stats.CaptureBufferRegularLen,
-		CaptureBufferRegularCapacity: h.Stats.CaptureBufferRegularCapacity,
-		CaptureBufferSIPLen:          h.Stats.CaptureBufferSipLen,
-		CaptureBufferSIPCapacity:     h.Stats.CaptureBufferSipCapacity,
-		CaptureBufferOutputLen:       h.Stats.CaptureBufferOutputLen,
-		CaptureBufferOutputCapacity:  h.Stats.CaptureBufferOutputCapacity,
-		ActiveFilters:                h.Stats.ActiveFilters,
-		CPUPercent:                   float64(h.Stats.CpuPercent),
-		MemoryRSSBytes:               h.Stats.MemoryRssBytes,
-		MemoryLimitBytes:             h.Stats.MemoryLimitBytes,
+		StatsUnavailable:             h.Stats == nil,
+		PacketsCaptured:              stats.PacketsCaptured,
+		PacketsMatched:               stats.PacketsMatched,
+		PacketsForwarded:             stats.PacketsForwarded,
+		PacketsDropped:               stats.PacketsDropped,
+		CaptureBufferRegularDrops:    stats.CaptureBufferRegularDrops,
+		CaptureBufferSIPDrops:        stats.CaptureBufferSipDrops,
+		CaptureBufferSIPDemotions:    stats.CaptureBufferSipDemotions,
+		BatchChannelDrops:            stats.BatchChannelDrops,
+		CaptureBufferRegularLen:      stats.CaptureBufferRegularLen,
+		CaptureBufferRegularCapacity: stats.CaptureBufferRegularCapacity,
+		CaptureBufferSIPLen:          stats.CaptureBufferSipLen,
+		CaptureBufferSIPCapacity:     stats.CaptureBufferSipCapacity,
+		CaptureBufferOutputLen:       stats.CaptureBufferOutputLen,
+		CaptureBufferOutputCapacity:  stats.CaptureBufferOutputCapacity,
+		ActiveFilters:                stats.ActiveFilters,
+		CPUPercent:                   float64(stats.CpuPercent),
+		MemoryRSSBytes:               stats.MemoryRssBytes,
+		MemoryLimitBytes:             stats.MemoryLimitBytes,
 		Interfaces:                   h.Interfaces,
 		ProcessorAddr:                c.addr,         // Address of processor this client is connected to
 		Capabilities:                 h.Capabilities, // Hunter capabilities (filter types, etc.)

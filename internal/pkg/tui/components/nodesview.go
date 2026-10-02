@@ -106,6 +106,12 @@ type NodesView struct {
 
 	// Real-time topology updates
 	lastTopologyChange time.Time // Timestamp of last topology change (hunter/processor add/remove/status update)
+	changes            *nodesview.ChangeTracker
+	highlightMode      string
+	changeState        map[nodesview.NodeKey]nodesview.NodeChanges
+	recentChange       string
+	changeNow          func() time.Time
+	remoteChanges      bool
 
 	// Node address history
 	nodeHistory    []string // History of entered node addresses
@@ -120,6 +126,8 @@ func NewNodesView() NodesView {
 	ti.Width = 50
 
 	return NodesView{
+		changes:                 &nodesview.ChangeTracker{},
+		changeNow:               time.Now,
 		hunters:                 []HunterInfo{},
 		selectedIndex:           -1, // Start with nothing selected
 		selectedProcessorAddr:   "",
@@ -143,6 +151,7 @@ func NewNodesView() NodesView {
 // SetTheme updates the theme
 func (n *NodesView) SetTheme(theme themes.Theme) {
 	n.theme = theme
+	n.updateViewportContent()
 }
 
 // ShowAddNodeModal shows the add node modal
@@ -257,7 +266,8 @@ func (n *NodesView) SetSize(width, height int) {
 	n.height = height
 
 	// Use full height for viewport (hints moved to context-aware footer)
-	viewportHeight := max(1, height)
+	viewportHeight := max(1, height-n.recentEventHeight())
+	heightChanged := n.viewport.Height != viewportHeight
 
 	if !n.ready {
 		n.viewport = viewport.New(contentWidth, viewportHeight)
@@ -268,7 +278,7 @@ func (n *NodesView) SetSize(width, height int) {
 		n.viewport.Width = contentWidth
 		n.viewport.Height = viewportHeight
 		// Re-render content when width changes (for centering, line wrapping, etc.)
-		if widthChanged {
+		if widthChanged || heightChanged {
 			n.updateViewportContent()
 		}
 	}
@@ -359,56 +369,58 @@ func (n *NodesView) SetHuntersAndProcessors(hunters []HunterInfo, processorAddrs
 
 // SetProcessors updates the processor list directly with ProcessorInfo
 func (n *NodesView) SetProcessors(processors []ProcessorInfo) {
-	// Sort processors alphabetically by address
-	sort.Slice(processors, func(i, j int) bool {
-		return processors[i].Address < processors[j].Address
-	})
-
-	// Sort hunters within each processor by ID for consistent ordering
+	var selected nodesview.NodeKey
+	hadHunter := n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters)
+	if hadHunter {
+		h := n.hunters[n.selectedIndex]
+		selected = nodesview.NodeKey{ProcessorAddr: h.ProcessorAddr, HunterID: h.ID}
+	}
+	// Own slices so sorting or subsequent producer mutations cannot change our snapshot.
+	processors = append([]ProcessorInfo(nil), processors...)
 	for i := range processors {
-		sort.Slice(processors[i].Hunters, func(a, b int) bool {
-			return processors[i].Hunters[a].ID < processors[i].Hunters[b].ID
-		})
+		processors[i].Hunters = append([]HunterInfo(nil), processors[i].Hunters...)
+		for j := range processors[i].Hunters {
+			processors[i].Hunters[j].ProcessorAddr = processors[i].Address
+		}
+		sort.Slice(processors[i].Hunters, func(a, b int) bool { return processors[i].Hunters[a].ID < processors[i].Hunters[b].ID })
 	}
-
+	sort.Slice(processors, func(i, j int) bool { return processors[i].Address < processors[j].Address })
 	n.processors = processors
-
-	// Flatten all hunters from all processors (maintaining sorted order)
-	allHunters := make([]HunterInfo, 0)
-	for _, proc := range processors {
-		allHunters = append(allHunters, proc.Hunters...)
+	n.hunters = nil
+	for _, p := range processors {
+		n.hunters = append(n.hunters, p.Hunters...)
 	}
-	n.hunters = allHunters
-
-	// Validate and adjust selection after update
-	if n.selectedIndex >= 0 {
-		// A hunter was selected - check if it still exists
-		if n.selectedIndex >= len(n.hunters) {
-			// Selected hunter disappeared - move selection to first processor
-			n.selectedIndex = -1
-			if len(n.processors) > 0 {
-				n.selectedProcessorAddr = n.processors[0].Address
-			} else {
-				n.selectedProcessorAddr = ""
+	if hadHunter {
+		n.selectedIndex = -1
+		for i, h := range n.hunters {
+			if h.ID == selected.HunterID && h.ProcessorAddr == selected.ProcessorAddr {
+				n.selectedIndex = i
+				break
 			}
 		}
-	} else if n.selectedProcessorAddr != "" {
-		// Processor selected - verify it still exists
+		if n.selectedIndex < 0 {
+			n.selectedProcessorAddr = selected.ProcessorAddr
+		}
+	}
+	if n.selectedIndex >= len(n.hunters) {
+		n.selectedIndex = -1
+	}
+	if n.selectedIndex < 0 && n.selectedProcessorAddr != "" {
 		found := false
-		for _, proc := range n.processors {
-			if proc.Address == n.selectedProcessorAddr {
+		for _, p := range processors {
+			if p.Address == n.selectedProcessorAddr {
 				found = true
 				break
 			}
 		}
 		if !found {
-			// Selected processor disappeared
 			n.selectedProcessorAddr = ""
-			n.selectedIndex = -1
+			if len(processors) > 0 {
+				n.selectedProcessorAddr = processors[0].Address
+			}
 		}
 	}
-
-	// Update viewport content
+	n.observeNodeChanges()
 	n.updateViewportContent()
 }
 
@@ -1076,6 +1088,7 @@ func (n *NodesView) renderContent() string {
 		}
 
 		params := nodesview.GraphViewParams{
+			Changes: n.changeState, Quiet: n.highlightMode == "quiet",
 			Processors:              convertProcessorInfos(filteredProcessors),
 			Hunters:                 filteredHunters,
 			SelectedIndex:           graphSelectedIndex,
@@ -1146,6 +1159,7 @@ func (n *NodesView) renderContent() string {
 		if len(n.processors) > 0 {
 			// Use extracted table view rendering
 			params := nodesview.TableViewParams{
+				Changes: n.changeState, Quiet: n.highlightMode == "quiet",
 				Processors:            convertProcessorInfos(n.processors),
 				Hunters:               n.hunters,
 				SelectedIndex:         n.selectedIndex,
@@ -1161,6 +1175,7 @@ func (n *NodesView) renderContent() string {
 		} else {
 			// Flat view (if no processors but have hunters)
 			params := nodesview.TableViewParams{
+				Changes: n.changeState, Quiet: n.highlightMode == "quiet",
 				Processors:            nil,
 				Hunters:               n.hunters,
 				SelectedIndex:         n.selectedIndex,
@@ -1235,7 +1250,11 @@ func (n *NodesView) View() string {
 	// Just return viewport (hints now in context-aware footer)
 	view := n.viewport.View()
 	bar := RenderScrollbar(n.viewport.TotalLineCount(), n.viewport.Height, n.viewport.YOffset, n.viewport.Height, n.theme)
-	return OverlayScrollbar(view, n.displayWidth-1, 0, bar)
+	view = OverlayScrollbar(view, n.displayWidth-1, 0, bar)
+	if n.recentEventHeight() > 0 {
+		view += "\n" + n.renderRecentChange()
+	}
+	return view
 }
 
 // RenderModal renders the add node modal if it's open (for top-level overlay)
@@ -1293,6 +1312,9 @@ func (n *NodesView) renderAddNodeModal(width, height int) string {
 
 // handleMouseClick handles mouse click events
 func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
+	if msg.Y < 5 || msg.Y >= 5+n.viewport.Height {
+		return nil
+	}
 	// Convert internal box regions to the format expected by the pure function
 	hunterBoxRegions := make([]nodesview.HunterBoxRegion, len(n.hunterBoxRegions))
 	for i, region := range n.hunterBoxRegions {

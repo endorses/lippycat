@@ -5,6 +5,7 @@ This document describes the architecture and component patterns for lippycat's T
 ## Overview
 
 The TUI provides an interactive real-time packet monitoring interface with support for:
+
 - Local interface capture
 - Remote monitoring of distributed hunter/processor nodes
 - Protocol filtering and hunter subscription management
@@ -15,6 +16,7 @@ The TUI provides an interactive real-time packet monitoring interface with suppo
 ## Security: TLS Configuration
 
 **TLS (Transport Layer Security)** can be configured for remote processor connections using either:
+
 1. Command-line flags (override config file)
 2. Configuration file (`~/.config/lippycat/config.yaml`)
 3. The `--insecure` flag to explicitly disable TLS for testing/development
@@ -22,6 +24,7 @@ The TUI provides an interactive real-time packet monitoring interface with suppo
 ### Configuration Options
 
 #### Command-Line Flags
+
 ```bash
 # Enable TLS with CA certificate (server verification only)
 lc tui --remote --tls --tls-ca /path/to/ca.crt
@@ -32,17 +35,20 @@ lc tui --remote --tls --tls-ca /path/to/ca.crt \
 ```
 
 #### Configuration File
+
 ```yaml
 tui:
   tls:
     enabled: true
     ca_file: "/etc/lippycat/certs/ca.crt"
-    cert_file: "/etc/lippycat/certs/client.crt"  # Optional: for mutual TLS
-    key_file: "/etc/lippycat/certs/client.key"   # Optional: for mutual TLS
+    cert_file: "/etc/lippycat/certs/client.crt" # Optional: for mutual TLS
+    key_file: "/etc/lippycat/certs/client.key" # Optional: for mutual TLS
 ```
 
 #### Flag Priority
+
 Command-line flags override config file settings:
+
 - `--tls` enables TLS (overrides config)
 - `--tls-ca <path>` sets CA certificate path
 - `--tls-cert <path>` sets client certificate path (for mutual TLS)
@@ -52,26 +58,32 @@ Command-line flags override config file settings:
 ### Secure Mode Examples
 
 **Server verification only:**
+
 ```bash
 lc tui --remote --tls --tls-ca ca.crt
 ```
+
 - TUI verifies processor's certificate using CA
 - Processors shown with 🔒 icon in Nodes tab
 - Connection toast: "Connected to <address>"
 
 **Mutual TLS (recommended for production):**
+
 ```bash
 lc tui --remote --tls --tls-ca ca.crt \
   --tls-cert client.crt --tls-key client.key
 ```
+
 - Both TUI and processor verify each other's certificates
 - Highest security level
 - Prevents unauthorized TUI connections
 
 ### Insecure Mode (Testing/Development Only)
+
 ```bash
 lc tui --remote --insecure
 ```
+
 - Connections do NOT use TLS encryption
 - Processors shown with 🚫 icon in Nodes tab
 - Connection toast: "⚠ Connected to <address> (INSECURE - no TLS)"
@@ -83,17 +95,20 @@ lc tui --remote --insecure
 TUI clients can selectively subscribe to specific hunters on a processor:
 
 **Features:**
+
 - Subscribe to all hunters on a processor (default)
 - Subscribe to specific hunters by ID (selective monitoring)
 - Unsubscribe from hunters to stop receiving packets
 - Multi-select interface with visual feedback
 
 **TUI Controls:**
+
 - Press `s` on a processor to select hunters to subscribe to
 - Press `d` on a hunter to unsubscribe or on a processor to remove it
 - Multi-select with arrow keys and Enter to confirm
 
 **Implementation Details:**
+
 - Uses `has_hunter_filter` boolean to distinguish empty list from nil (Proto3 serialization)
 - Prevents subscriber backpressure from affecting hunter flow control
 - Packets are filtered at the processor before being sent to TUI clients
@@ -103,23 +118,27 @@ TUI clients can selectively subscribe to specific hunters on a processor:
 TUI survives network interruptions with intelligent reconnection:
 
 **Features:**
+
 - Exponential backoff prevents resource exhaustion during outages
 - Lenient keepalive settings tolerate temporary delays (laptop standby)
 - Max retry limit prevents infinite reconnection loops
 - Manual reconnection available after max retries
 
 **Behavior:**
+
 - First attempts: Quick retries (2s, 4s, 8s) for transient issues
 - Extended outages: Longer waits (up to 10 min) between attempts
 - After 10 failures (~17 min total): Stop auto-reconnect, show warning
 - User can manually reconnect from Nodes view (press `r` on processor)
 
 **Keepalive Settings:**
+
 - TCP keepalive: 10s idle, 5s interval, 3 probes (25s detection)
 - gRPC keepalive: 30s ping, 20s timeout
 - Combined tolerance: ~50s network interruption before disconnect
 
 **Use Cases:**
+
 - Laptop suspend/resume
 - Brief network outages (WiFi handoff, etc.)
 - Processor restarts
@@ -144,6 +163,7 @@ The `RenderModal()` function provides consistent modal chrome (border, centering
    - Business logic (search, filtering, CRUD operations)
 
 2. **Modal Content Components** call `RenderModal()` to wrap their content:
+
    ```go
    func (component *Component) View() string {
        if !component.active {
@@ -175,6 +195,7 @@ The `RenderModal()` function provides consistent modal chrome (border, centering
 ### Current Modal Components
 
 All components use unified `RenderModal()`:
+
 - `ProtocolSelector` - Protocol filter selection (`internal/pkg/tui/components/protocolselector.go`)
 - `HunterSelector` - Hunter subscription selection (`internal/pkg/tui/components/hunterselector.go`)
 - `NodesView.renderAddNodeModal` - Add processor/hunter node (`internal/pkg/tui/components/nodesview.go`)
@@ -201,12 +222,14 @@ All components use unified `RenderModal()`:
 `FileDialog` (`internal/pkg/tui/components/filedialog.go`) - Modal for file/directory operations with navigation and filtering.
 
 **Architecture:**
+
 - Uses unified `RenderModal()` for consistent chrome
 - Returns `FileSelectedMsg` on confirmation
 - Four input modes: Navigation, Filename (save), Filter, CreateFolder
 - Supports save/open modes with single/multiple file selection
 
 **Key Features:**
+
 - Vim-style navigation (hjkl) + arrow keys + home/end/pgup/pgdown
 - Real-time filtering (press `/`) with file type and text matching
 - Inline folder creation (press `n`)
@@ -215,6 +238,7 @@ All components use unified `RenderModal()`:
 - Fixed-height scrollable viewport
 
 **Usage:**
+
 ```go
 // Create dialog
 dialog := NewSaveFileDialog("~/captures", "capture.pcap", []string{".pcap"})
@@ -230,6 +254,7 @@ case FileSelectedMsg:
 `Toast` (`internal/pkg/tui/components/toast.go`) - Non-blocking temporary notifications at bottom-center of screen.
 
 **Architecture:**
+
 - Overlay component (NOT a modal)
 - Queue-based: only one toast visible at a time
 - Auto-dismiss with `ToastTickMsg` lifecycle
@@ -238,6 +263,7 @@ case FileSelectedMsg:
 - Durations: Short (2s), Normal (3s), Long (5s)
 
 **Usage:**
+
 ```go
 // Show toast
 cmd := toast.Show("File saved!", ToastSuccess, ToastDurationLong)
@@ -247,6 +273,28 @@ cmd := m.toast.Update(msg)
 ```
 
 **Best Practices:**
+
 - Use for transient status, not critical errors requiring action
 - Keep messages concise (one line)
 - Let queue handle multiple toasts - don't show simultaneously
+
+## Remote Nodes change cues
+
+CPU and RAM changes briefly highlight the displayed value with an up/down arrow.
+Packet totals share one subtle activity marker per node; filter changes show a
+signed delta. `NEW` and `RECOVERED` mark observed lifecycle transitions. Initial
+snapshots and subscription changes establish a baseline without join alerts.
+Activity and direction do not indicate health: existing status symbols and colors
+remain authoritative, and idle counters do not imply stale or disconnected nodes.
+
+The table and graph share the same cues. A stationary recent-event line shows the
+latest lifecycle or health transition, its age, and any additional events in the
+preceding 30 seconds. It disappears after 30 seconds and is omitted on very short
+terminals. Metric cues last about one second and lifecycle markers about five
+seconds, expiring on the next UI tick even while capture is paused.
+
+In remote **Settings**, select **Nodes highlighting** and press `Enter` to switch
+between `normal` (default) and `quiet`. Quiet mode retains arrows, labels, status,
+and recent events while suppressing temporary backgrounds and border accents.
+The change takes effect immediately without restarting capture and is saved as
+`watch.nodes_highlighting` in the configuration file.

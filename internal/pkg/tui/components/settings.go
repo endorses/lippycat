@@ -39,6 +39,9 @@ type RestartCaptureMsg struct {
 // UpdateBufferSizeMsg is sent when buffer size changes
 type UpdateBufferSizeMsg = settings.UpdateBufferSizeMsg
 
+// UpdateNodesHighlightingMsg changes the remote Nodes presentation preference.
+type UpdateNodesHighlightingMsg = settings.UpdateNodesHighlightingMsg
+
 // LoadNodesMsg is sent when nodes should be loaded from YAML file
 type LoadNodesMsg struct {
 	FilePath string
@@ -474,6 +477,10 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 			} else if s.modeType == settings.CaptureModeRemote && clickedField == 1 {
 				s.nodesFileDialog.Activate()
 				return nil
+			}
+			if s.modeType == settings.CaptureModeRemote && clickedField == 3 {
+				result := s.currentMode.HandleKey("enter", settings.KeyHandlerParams{FocusIndex: clickedField})
+				return result.Cmd
 			}
 			s.editing = true
 			s.currentMode.FocusField(clickedField)

@@ -12,8 +12,9 @@ import (
 
 // RemoteSettings encapsulates all settings for remote (processor/hunter) capture mode
 type RemoteSettings struct {
-	nodesFileInput textinput.Model
-	bufferInput    textinput.Model
+	nodesFileInput    textinput.Model
+	bufferInput       textinput.Model
+	nodesHighlighting string
 
 	// For text input editing state (restore on Escape)
 	savedNodesFileValue string
@@ -32,8 +33,9 @@ func NewRemoteSettings(nodesFile string, bufferSize int, theme themes.Theme) *Re
 	nodesFileInput.SetValue(nodesFile)
 
 	return &RemoteSettings{
-		nodesFileInput: nodesFileInput,
-		bufferInput:    bufferInput,
+		nodesFileInput:    nodesFileInput,
+		bufferInput:       bufferInput,
+		nodesHighlighting: LoadNodesHighlightingPreference(),
 	}
 }
 
@@ -68,9 +70,9 @@ func (rs *RemoteSettings) GetBPFFilter() string {
 	return ""
 }
 
-// GetFocusableFieldCount returns 2: nodesFile(1), buffer(2)
+// GetFocusableFieldCount returns nodesFile(1), buffer(2), highlighting(3)
 func (rs *RemoteSettings) GetFocusableFieldCount() int {
-	return 2
+	return 3
 }
 
 // Render renders the remote mode fields
@@ -109,6 +111,14 @@ func (rs *RemoteSettings) Render(params RenderParams) []string {
 		params.LabelStyle.Render("Buffer Size:")+" "+rs.bufferInput.View(),
 	))
 
+	highlightStyle := params.UnfocusedStyle
+	if params.FocusIndex == 3 {
+		highlightStyle = params.SelectedStyle
+	}
+	sections = append(sections, highlightStyle.Width(boxWidth).Render(
+		params.LabelStyle.Render("Nodes highlighting:")+" "+rs.nodesHighlighting,
+	))
+
 	return sections
 }
 
@@ -134,6 +144,16 @@ func (rs *RemoteSettings) HandleKey(key string, params KeyHandlerParams) KeyHand
 					result.TriggerRestart = true
 				}
 			}
+
+		case 3: // Presentation preference changes immediately, without restarting capture.
+			if rs.nodesHighlighting == "quiet" {
+				rs.nodesHighlighting = "normal"
+			} else {
+				rs.nodesHighlighting = "quiet"
+			}
+			mode := rs.nodesHighlighting
+			result.Editing = false
+			result.Cmd = func() tea.Msg { return UpdateNodesHighlightingMsg{Mode: mode} }
 
 		case 2: // Buffer size
 			result.Editing = !params.Editing

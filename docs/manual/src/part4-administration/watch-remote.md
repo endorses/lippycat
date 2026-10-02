@@ -193,6 +193,27 @@ Each hunter displays:
 - **Interfaces**: network interfaces being monitored
 - **Last heartbeat**: time since last health check
 
+### Change Cues {#node-change-cues}
+
+CPU and RAM changes briefly highlight the displayed value with an up/down arrow.
+Packet totals share one subtle activity marker per node; filter changes show a
+signed delta. `NEW` and `RECOVERED` mark observed lifecycle transitions. Initial
+snapshots and subscription changes establish a baseline without join alerts.
+Activity and direction do not indicate health: existing status symbols and colors
+remain authoritative, and idle counters do not imply stale or disconnected nodes.
+
+The table and graph share the same cues. A stationary recent-event line shows the
+latest lifecycle or health transition, its age, and any additional events in the
+preceding 30 seconds. It disappears after 30 seconds and is omitted on very short
+terminals. Metric cues last about one second and lifecycle markers about five
+seconds, expiring on the next UI tick even while capture is paused.
+
+In remote **Settings**, select **Nodes highlighting** and press `Enter` to switch
+between `normal` (default) and `quiet`. Quiet mode retains arrows, labels, status,
+and recent events while suppressing temporary backgrounds and border accents.
+The change takes effect immediately without restarting capture and is saved as
+`watch.nodes_highlighting` in the configuration file.
+
 ### Adding Nodes Interactively {#adding-nodes-interactively}
 
 You can add nodes without editing the nodes file:

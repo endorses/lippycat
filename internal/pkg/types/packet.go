@@ -492,6 +492,7 @@ type HunterInfo struct {
 	CaptureBufferOutputLen       uint64
 	CaptureBufferOutputCapacity  uint64
 	ActiveFilters                uint32
+	StatsUnavailable             bool    // No statistics were supplied; zero values are not measurements.
 	CPUPercent                   float64 // CPU usage percentage (0-100, -1 if unavailable)
 	MemoryRSSBytes               uint64  // Process resident set size in bytes
 	MemoryLimitBytes             uint64  // Memory limit from cgroup (0 if unavailable)

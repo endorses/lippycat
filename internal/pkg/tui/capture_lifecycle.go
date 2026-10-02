@@ -28,6 +28,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	if m.offlineOpening || m.offlineSession != nil {
 		return m.leaveOffline(&msg, false)
 	}
+	m.uiState.NodesView.ResetChanges()
 	configureLiveTLSDetails(&m.uiState.DetailsPanel)
 	m.uiState.DetailsPanel.SetPacket(nil)
 
@@ -120,6 +121,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 
 	// Update mode BEFORE starting new capture so packet handlers check the right mode
 	m.captureMode = msg.Mode
+	m.uiState.NodesView.SetRemoteChanges(msg.Mode == components.CaptureModeRemote)
 	m.uiState.Paused = false                     // Unpause when restarting capture
 	globalCaptureState.GetPauseSignal().Resume() // Reset pause state for new capture
 

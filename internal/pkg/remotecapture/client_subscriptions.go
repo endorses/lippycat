@@ -70,11 +70,13 @@ func (c *Client) SubscribeHunterStatus() error {
 					// Create hunter info for this direct connection
 					hunters := []types.HunterInfo{
 						{
-							ID:            c.nodeID,
-							Hostname:      c.addr,
-							RemoteAddr:    c.addr,
-							Status:        management.HunterStatus_STATUS_HEALTHY,
-							ProcessorAddr: "Direct", // Direct hunter connection (no processor)
+							ID:               c.nodeID,
+							Hostname:         c.addr,
+							RemoteAddr:       c.addr,
+							Status:           management.HunterStatus_STATUS_HEALTHY,
+							ProcessorAddr:    "Direct", // Direct hunter connection (no processor)
+							StatsUnavailable: true,
+							CPUPercent:       -1,
 							// Stats will be inferred from packet stream
 						},
 					}

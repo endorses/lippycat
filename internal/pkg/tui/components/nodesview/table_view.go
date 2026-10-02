@@ -266,8 +266,8 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		}
 		procLine += fmt.Sprintf(" (%d hunters)", proc.TotalHunters)
 		procLine = withChangeLabel(procLine, change.Label, max(0, params.Width-lipgloss.Width(treePrefix)-1))
-		procLine = changeAccent(procLine, change.Label != "", isSelected, params.Quiet, params.Theme)
-		statusStyled := statusCell(statusIcon, statusColor, change.StatusChanged, isSelected, params.Quiet, params.Theme)
+		procLine = changeAccent(procLine, change.Label != "", params.Quiet, params.Theme)
+		statusStyled := statusCell(statusIcon, statusColor, change.StatusChanged, params.Quiet)
 		rowStyle := processorStyle
 		if isSelected {
 			rowStyle = selectedStyle
@@ -423,16 +423,17 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				selectedNodeLine = linesRendered
 			}
 			params.HunterLines[linesRendered] = globalIndex
-			status := statusCell(statusIcon, statusColor, change.StatusChanged, isSelected, params.Quiet, params.Theme)
+			status := statusCell(statusIcon, statusColor, change.StatusChanged, params.Quiet)
 			id := withChangeLabel(hunter.ID, change.Label, widths[1])
 			row := nodeTableLine(widths,
 				status+activityMarker(change.Activity),
-				changeAccent(id, change.Label != "", isSelected, params.Quiet, params.Theme),
+				changeAccent(id, change.Label != "", params.Quiet, params.Theme),
 				GetHunterModeBadge(hunter.Capabilities, params.Theme), hunter.Hostname, uptimeStr,
-				changeAccent(metricText(cpu, change.CPU, widths[5]), change.CPU.Changed, isSelected, params.Quiet, params.Theme),
-				changeAccent(metricText(memory, change.Memory, widths[6]), change.Memory.Changed, isSelected, params.Quiet, params.Theme),
-				captured, forwarded,
-				changeAccent(filters, change.FiltersChanged, isSelected, params.Quiet, params.Theme))
+				resourceAccent(metricText(cpu, change.CPU, widths[5]), change.CPU, params.Quiet, params.Theme),
+				resourceAccent(metricText(memory, change.Memory, widths[6]), change.Memory, params.Quiet, params.Theme),
+				cellAccent(fitCell(captured, widths[7]), change.CapturedChanged, params.Quiet, params.Theme.SuccessColor),
+				cellAccent(fitCell(forwarded, widths[8]), change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor),
+				changeAccent(filters, change.FiltersChanged, params.Quiet, params.Theme))
 			row = TruncateString(row, max(0, params.Width-lipgloss.Width(prefix)))
 			if isSelected {
 				row = renderTableRow(row, selectedStyle)
@@ -551,17 +552,18 @@ func RenderFlatView(params TableViewParams) (string, int) {
 		cpu, memory, captured, forwarded, filters, change := hunterMetricValues(hunter, change, widths[9])
 		isSelected := i == params.SelectedIndex
 		row := nodeTableLine(widths,
-			statusCell(statusText, statusColor, change.StatusChanged, isSelected, params.Quiet, params.Theme)+activityMarker(change.Activity),
-			changeAccent(withChangeLabel(hunter.ID, change.Label, widths[1]), change.Label != "", isSelected, params.Quiet, params.Theme),
+			statusCell(statusText, statusColor, change.StatusChanged, params.Quiet)+activityMarker(change.Activity),
+			changeAccent(withChangeLabel(hunter.ID, change.Label, widths[1]), change.Label != "", params.Quiet, params.Theme),
 			"", hunter.Hostname, uptime,
-			changeAccent(metricText(cpu, change.CPU, widths[5]), change.CPU.Changed, isSelected, params.Quiet, params.Theme),
-			changeAccent(metricText(memory, change.Memory, widths[6]), change.Memory.Changed, isSelected, params.Quiet, params.Theme),
-			captured, forwarded,
-			changeAccent(filters, change.FiltersChanged, isSelected, params.Quiet, params.Theme))
+			resourceAccent(metricText(cpu, change.CPU, widths[5]), change.CPU, params.Quiet, params.Theme),
+			resourceAccent(metricText(memory, change.Memory, widths[6]), change.Memory, params.Quiet, params.Theme),
+			cellAccent(fitCell(captured, widths[7]), change.CapturedChanged, params.Quiet, params.Theme.SuccessColor),
+			cellAccent(fitCell(forwarded, widths[8]), change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor),
+			changeAccent(filters, change.FiltersChanged, params.Quiet, params.Theme))
 		row = TruncateString(row, params.Width)
 
 		// Apply style to entire row
-		if i == params.SelectedIndex {
+		if isSelected {
 			selectedNodeLine = i + 2 // Account for header and separator lines
 
 			rowStyle := lipgloss.NewStyle().

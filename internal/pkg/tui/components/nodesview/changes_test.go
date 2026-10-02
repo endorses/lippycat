@@ -17,6 +17,30 @@ func trackerFixture() ([]ProcessorInfo, NodeKey) {
 	return []ProcessorInfo{{Address: "processor:5555", ConnectionState: ProcessorConnectionStateConnected, Hunters: []types.HunterInfo{{ID: "hunter", Hostname: "edge", CPUPercent: 12.1, MemoryRSSBytes: 1000000, ActiveFilters: 5, PacketsCaptured: 10, PacketsForwarded: 8}}}}, NodeKey{ProcessorAddr: "processor:5555", HunterID: "hunter"}
 }
 
+func TestCounterAccentsAdvanceAndExpireIndependently(t *testing.T) {
+	now := time.Unix(100, 0)
+	p, key := trackerFixture()
+	var tracker ChangeTracker
+	tracker.Observe(p, now)
+	p[0].Hunters[0].PacketsCaptured++
+	tracker.Observe(p, now)
+	assert.Equal(t, NodeChanges{CapturedChanged: true, Activity: true}, tracker.Snapshot()[key])
+	p[0].Hunters[0].PacketsForwarded++
+	tracker.Observe(p, now.Add(500*time.Millisecond))
+	assert.Equal(t, NodeChanges{CapturedChanged: true, ForwardedChanged: true, Activity: true}, tracker.Snapshot()[key])
+	tracker.Observe(p, now.Add(900*time.Millisecond))
+	tracker.Advance(now.Add(time.Second))
+	assert.Equal(t, NodeChanges{ForwardedChanged: true, Activity: true}, tracker.Snapshot()[key])
+	tracker.Advance(now.Add(1500 * time.Millisecond))
+	assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key])
+	p[0].Hunters[0].PacketsCaptured++
+	p[0].Hunters[0].PacketsForwarded++
+	tracker.Observe(p, now.Add(2*time.Second))
+	p[0].Hunters[0].PacketsForwarded = 0
+	tracker.Observe(p, now.Add(2100*time.Millisecond))
+	assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key], "counter reset clears both accents")
+}
+
 func TestChangesMetricBaselinesAndDisplayedValues(t *testing.T) {
 	now := time.Unix(100, 0)
 	p, key := trackerFixture()

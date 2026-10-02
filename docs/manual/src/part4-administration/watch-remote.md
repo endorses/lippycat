@@ -202,6 +202,12 @@ snapshots and subscription changes establish a baseline without join alerts.
 Activity and direction do not indicate health: existing status symbols and colors
 remain authoritative, and idle counters do not imply stale or disconnected nodes.
 
+Highlighted cells use Solarized base3 (`#fdf6e3`) text. CPU/RAM increases use a
+red (`#dc322f`) background and decreases use green (`#859900`), indicating the
+direction of resource pressure. Advancing captured/forwarded totals briefly use
+green; counter resets establish a new baseline without a directional highlight.
+Filter changes use a neutral blue (`#268bd2`) background with a signed delta.
+
 The table and graph share the same cues. A stationary recent-event line shows the
 latest lifecycle or health transition, its age, and any additional events in the
 preceding 30 seconds. It disappears after 30 seconds and is omitted on very short

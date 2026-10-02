@@ -23,12 +23,13 @@ type MetricChange struct {
 
 // NodeChanges is immutable presentation state shared by both renderers.
 type NodeChanges struct {
-	CPU, Memory    MetricChange
-	FilterDelta    int64
-	FiltersChanged bool
-	Activity       bool
-	Label          string
-	StatusChanged  bool
+	CPU, Memory                       MetricChange
+	FilterDelta                       int64
+	FiltersChanged                    bool
+	Activity                          bool
+	CapturedChanged, ForwardedChanged bool
+	Label                             string
+	StatusChanged                     bool
 }
 
 const (
@@ -39,19 +40,20 @@ const (
 )
 
 type observedNode struct {
-	name                        string
-	observed, metricsKnown      bool
-	lifecycleKnown              bool
-	failed                      bool
-	health                      int32
-	connection                  ProcessorConnectionState
-	cpu                         float64
-	memory, captured, sent      uint64
-	filters                     uint32
-	changes                     NodeChanges
-	cpuUntil, memoryUntil       time.Time
-	filtersUntil, activityUntil time.Time
-	statusUntil                 time.Time
+	name                          string
+	observed, metricsKnown        bool
+	lifecycleKnown                bool
+	failed                        bool
+	health                        int32
+	connection                    ProcessorConnectionState
+	cpu                           float64
+	memory, captured, sent        uint64
+	filters                       uint32
+	changes                       NodeChanges
+	cpuUntil, memoryUntil         time.Time
+	filtersUntil                  time.Time
+	capturedUntil, forwardedUntil time.Time
+	statusUntil                   time.Time
 }
 
 type recentNodeEvent struct {
@@ -180,6 +182,7 @@ func (t *ChangeTracker) metrics(n *observedNode, h types.HunterInfo, unavailable
 		n.metricsKnown = false
 		n.changes.CPU, n.changes.Memory = MetricChange{}, MetricChange{}
 		n.changes.FiltersChanged, n.changes.Activity, n.changes.FilterDelta = false, false, 0
+		n.changes.CapturedChanged, n.changes.ForwardedChanged = false, false
 		return
 	}
 	if n.metricsKnown {
@@ -196,11 +199,18 @@ func (t *ChangeTracker) metrics(n *observedNode, h types.HunterInfo, unavailable
 			n.filtersUntil = now.Add(metricHighlightDuration)
 		}
 		if h.PacketsCaptured < n.captured || h.PacketsForwarded < n.sent {
-			n.changes.Activity = false
-		} else if h.PacketsCaptured > n.captured || h.PacketsForwarded > n.sent {
-			n.changes.Activity = true
-			n.activityUntil = now.Add(metricHighlightDuration)
+			n.changes.CapturedChanged, n.changes.ForwardedChanged = false, false
+		} else {
+			if h.PacketsCaptured > n.captured {
+				n.changes.CapturedChanged = true
+				n.capturedUntil = now.Add(metricHighlightDuration)
+			}
+			if h.PacketsForwarded > n.sent {
+				n.changes.ForwardedChanged = true
+				n.forwardedUntil = now.Add(metricHighlightDuration)
+			}
 		}
+		n.changes.Activity = n.changes.CapturedChanged || n.changes.ForwardedChanged
 	}
 	if h.CPUPercent < 0 {
 		n.changes.CPU = MetricChange{}
@@ -290,9 +300,13 @@ func (t *ChangeTracker) Advance(now time.Time) bool {
 		if !now.Before(n.filtersUntil) {
 			n.changes.FiltersChanged, n.changes.FilterDelta = false, 0
 		}
-		if !now.Before(n.activityUntil) {
-			n.changes.Activity = false
+		if !now.Before(n.capturedUntil) {
+			n.changes.CapturedChanged = false
 		}
+		if !now.Before(n.forwardedUntil) {
+			n.changes.ForwardedChanged = false
+		}
+		n.changes.Activity = n.changes.CapturedChanged || n.changes.ForwardedChanged
 		if !now.Before(n.statusUntil) {
 			n.changes.Label, n.changes.StatusChanged = "", false
 		}

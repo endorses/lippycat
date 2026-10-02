@@ -33,17 +33,25 @@ func metricText(value string, change MetricChange, width int) string {
 	return fitCell(value, width-1) + marker
 }
 
-func changeAccent(value string, changed, selected, quiet bool, theme themes.Theme) string {
+func cellAccent(value string, changed, quiet bool, background lipgloss.Color) string {
 	if !changed || quiet {
 		return value
 	}
-	style := lipgloss.NewStyle().Bold(true)
-	if selected {
-		style = style.Underline(true)
-	} else {
-		style = style.Background(theme.StatusBarBg).Foreground(theme.Foreground)
+	return lipgloss.NewStyle().Bold(true).Background(background).Foreground(themes.SolarizedBase3).Render(value)
+}
+
+func changeAccent(value string, changed, quiet bool, theme themes.Theme) string {
+	return cellAccent(value, changed, quiet, theme.InfoColor)
+}
+
+func resourceAccent(value string, change MetricChange, quiet bool, theme themes.Theme) string {
+	background := theme.InfoColor
+	if change.Direction > 0 {
+		background = theme.ErrorColor
+	} else if change.Direction < 0 {
+		background = theme.SuccessColor
 	}
-	return style.Render(value)
+	return cellAccent(value, change.Changed, quiet, background)
 }
 
 func filterText(value uint32, change NodeChanges, width int) string {
@@ -126,22 +134,18 @@ func hunterMetricValues(hunter types.HunterInfo, change NodeChanges, filterWidth
 	if hunter.StatsUnavailable {
 		visibleChange.CPU, visibleChange.Memory = MetricChange{}, MetricChange{}
 		visibleChange.Activity, visibleChange.FiltersChanged = false, false
+		visibleChange.CapturedChanged, visibleChange.ForwardedChanged = false, false
 		return "-", "-", "-", "-", fitCell("-", filterWidth), visibleChange
 	}
 	return FormatCPU(hunter.CPUPercent), FormatMemory(hunter.MemoryRSSBytes), FormatPacketNumber(hunter.PacketsCaptured), FormatPacketNumber(hunter.PacketsForwarded), filterText(hunter.ActiveFilters, change, filterWidth), visibleChange
 }
 
-// Render the raw status text once: Lip Gloss underline styling splits input by
-// rune, so wrapping an already ANSI-colored symbol corrupts its escape codes.
-func statusCell(text string, color lipgloss.Color, changed, selected, quiet bool, theme themes.Theme) string {
+// Keep health recognizable during a highlight by moving its color to the
+// background; all highlighted cells share the same light foreground.
+func statusCell(text string, color lipgloss.Color, changed, quiet bool) string {
 	style := lipgloss.NewStyle().Foreground(color)
 	if changed && !quiet {
-		style = style.Bold(true)
-		if selected {
-			style = style.Underline(true)
-		} else {
-			style = style.Background(theme.StatusBarBg)
-		}
+		style = style.Bold(true).Background(color).Foreground(themes.SolarizedBase3)
 	}
 	return style.Render(text)
 }

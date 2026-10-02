@@ -3,6 +3,9 @@
 package nodesview
 
 import (
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -17,12 +20,119 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Inspect effective terminal colors, including surrounding row/box styles and
+// resets, rather than only checking that an escape sequence occurs somewhere.
+func colorsAtText(t *testing.T, output, token string) (foreground, background string) {
+	t.Helper()
+	index := strings.Index(output, token)
+	require.NotEqual(t, -1, index, "missing token %q", token)
+	for _, match := range regexp.MustCompile(`\x1b\[([0-9;]*)m`).FindAllStringSubmatch(output[:index], -1) {
+		params := strings.Split(match[1], ";")
+		for i := 0; i < len(params); i++ {
+			switch params[i] {
+			case "", "0":
+				foreground, background = "", ""
+			case "39":
+				foreground = ""
+			case "49":
+				background = ""
+			case "38", "48":
+				require.GreaterOrEqual(t, len(params)-i, 3)
+				if params[i+1] == "5" {
+					if params[i] == "38" {
+						foreground = "indexed:" + params[i+2]
+					} else {
+						background = "indexed:" + params[i+2]
+					}
+					i += 2
+					continue
+				}
+				require.GreaterOrEqual(t, len(params)-i, 5)
+				require.Equal(t, "2", params[i+1], "expected truecolor output")
+				var rgb [3]int
+				for j := range rgb {
+					value, err := strconv.Atoi(params[i+j+2])
+					require.NoError(t, err)
+					rgb[j] = value
+				}
+				color := fmt.Sprintf("#%02x%02x%02x", rgb[0], rgb[1], rgb[2])
+				if params[i] == "38" {
+					foreground = color
+				} else {
+					background = color
+				}
+				i += 4
+			case "30":
+				foreground = "#000000"
+			case "40":
+				background = "#000000"
+			}
+		}
+	}
+	return foreground, background
+}
+
+func TestNodeHighlightPaletteInRenderedViews(t *testing.T) {
+	original := lipgloss.ColorProfile()
+	t.Cleanup(func() { lipgloss.SetColorProfile(original) })
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	for _, view := range []string{"tree", "flat", "graph"} {
+		for _, selected := range []bool{false, true} {
+			for _, reverse := range []bool{false, true} {
+				for _, quiet := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/selected=%v/reverse=%v/quiet=%v", view, selected, reverse, quiet), func(t *testing.T) {
+						processor, changes := changeRenderingFixture()
+						key := NodeKey{ProcessorAddr: processor.Address, HunterID: "edge"}
+						change := changes[key]
+						change.CapturedChanged, change.ForwardedChanged = !reverse, reverse
+						cpuColor, ramColor, activeCounter, idleCounter, delta := "#dc322f", "#859900", "12.4M", "12.3M", "+2"
+						if reverse {
+							change.CPU.Direction, change.Memory.Direction, change.FilterDelta = -1, 1, -2
+							cpuColor, ramColor, activeCounter, idleCounter, delta = ramColor, cpuColor, idleCounter, activeCounter, "-2"
+						}
+						changes[key] = change
+						index := -1
+						if selected {
+							index = 0
+						}
+						params := TableViewParams{Processors: []ProcessorInfo{processor}, Hunters: processor.Hunters, SelectedIndex: index, Width: 160, Theme: themes.Solarized(), Changes: changes, Quiet: quiet, HunterLines: map[int]int{}, ProcessorLines: map[int]int{}}
+						var output string
+						switch view {
+						case "tree":
+							output, _ = RenderTreeView(params)
+						case "flat":
+							output, _ = RenderFlatView(params)
+						case "graph":
+							output = RenderGraphView(GraphViewParams{Processors: params.Processors, Hunters: params.Hunters, SelectedIndex: index, Width: 160, Theme: params.Theme, Changes: changes, Quiet: quiet}).Content
+						}
+						for token, want := range map[string]string{"24%": cpuColor, "182.0M": ramColor, delta: "#268bd2", activeCounter: "#859900"} {
+							fg, bg := colorsAtText(t, output, token)
+							if quiet {
+								assert.NotEqual(t, want, bg, token)
+								continue
+							}
+							assert.Equal(t, "#fdf6e3", fg, token)
+							assert.Equal(t, want, bg, token)
+						}
+						_, bg := colorsAtText(t, output, idleCounter)
+						assert.NotEqual(t, "#859900", bg, "unchanged counter must not inherit activity highlight")
+						if selected && view != "graph" {
+							_, bg = colorsAtText(t, output, "192.0.2.1")
+							assert.Equal(t, "#2aa198", bg, "row selection remains visible between highlights")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
 func changeRenderingFixture() (ProcessorInfo, map[NodeKey]NodeChanges) {
 	hunter := types.HunterInfo{ID: "edge", ProcessorAddr: "central:55555", Hostname: "192.0.2.1", CPUPercent: 24, MemoryRSSBytes: 182000000, PacketsCaptured: 12400000, PacketsForwarded: 12300000, ActiveFilters: 10, Status: management.HunterStatus_STATUS_HEALTHY}
 	processor := ProcessorInfo{Address: hunter.ProcessorAddr, ProcessorID: "central", Hunters: []types.HunterInfo{hunter}, TotalHunters: 1, ConnectionState: ProcessorConnectionStateConnected}
 	changes := map[NodeKey]NodeChanges{
 		{ProcessorAddr: processor.Address}:                      {Label: "NEW", StatusChanged: true},
-		{ProcessorAddr: processor.Address, HunterID: hunter.ID}: {CPU: MetricChange{Changed: true, Direction: 1}, Memory: MetricChange{Changed: true, Direction: -1}, FiltersChanged: true, FilterDelta: 2, Activity: true, Label: "RECOVERED", StatusChanged: true},
+		{ProcessorAddr: processor.Address, HunterID: hunter.ID}: {CPU: MetricChange{Changed: true, Direction: 1}, Memory: MetricChange{Changed: true, Direction: -1}, FiltersChanged: true, FilterDelta: 2, Activity: true, CapturedChanged: true, ForwardedChanged: true, Label: "RECOVERED", StatusChanged: true},
 	}
 	return processor, changes
 }

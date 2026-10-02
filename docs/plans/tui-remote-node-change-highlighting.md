@@ -14,18 +14,20 @@ highlight that expires.
 
 | Change                                            | Presentation                                                                         |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| CPU or RAM displayed value changes                | Brief neutral cell highlight and an up/down arrow                                    |
-| Captured or forwarded counters advance            | One subtle activity marker per node, without flashing both counters                  |
-| Active filter count changes                       | Highlight the count with a temporary signed delta                                    |
+| CPU or RAM displayed value changes                | Brief Solarized red background on increase, green on decrease, plus an up/down arrow |
+| Captured or forwarded counters advance            | Brief green background on each advancing counter and one activity marker per node    |
+| Active filter count changes                       | Neutral Solarized blue background with a temporary signed delta                      |
 | Hunter or processor joins an established topology | Temporary `NEW` marker and a subtle node accent                                      |
 | Connection or reported health deteriorates        | Highlight the status area; retain the existing health/connection indicator afterward |
 | Connection or reported health recovers            | Temporary `RECOVERED` marker; restore the current status styling                     |
 | Node disappears through a confirmed disconnect    | Record the removal in a stationary recent-event line                                 |
 
-Direction is distinct from severity. Rising CPU, RAM, or traffic does not itself
-create a warning. Existing reported health and connection states remain the
-authority for red/amber/green status styling. Use arrows and labels so color is
-not the only signal.
+Every highlighted cell uses Solarized base3 (`#fdf6e3`) text. Backgrounds are
+Solarized red (`#dc322f`), green (`#859900`), or neutral blue (`#268bd2`). Apply
+the same colors to selected cells; selection remains visible around them.
+Resource colors show direction of resource pressure, without creating a warning
+or changing reported health. Health/connection highlights retain their status
+color as the background. Use arrows and labels so color is not the only signal.
 
 Use a single temporary highlight followed by normal styling. Start with a
 one-second metric highlight and a five-second lifecycle marker. These are
@@ -69,7 +71,7 @@ from new lifecycle events.
 - [x] Key processors by their established address identity and hunters by owning processor identity plus hunter ID, resolving hierarchical address/ID aliases at the reconciliation boundary. Never key changes or selection by row index alone.
 - [x] Establish a baseline on initial discovery and first metrics receipt for each node. Unknown-to-known CPU/RAM values initialize their baseline without directional highlights. Opening the tab, resizing, changing theme, or changing view must not generate changes.
 - [x] Compare formatted CPU/RAM values using the existing formatting contract before highlighting. Derive direction from the underlying values only after a visible change is established. Ignore ordinary uptime and heartbeat progression.
-- [x] Compare packet totals for a single node activity cue. A counter decrease resets the baseline rather than producing underflow, negative traffic, or an inferred restart. Clear activity when telemetry is unavailable or the connection is lost.
+- [x] Compare packet totals for independent captured/forwarded cell highlights and a shared node activity cue. A counter decrease resets the baseline rather than producing underflow, negative traffic, or an inferred restart. Clear activity when telemetry is unavailable or the connection is lost.
 - [x] Compute filter deltas against the preceding observed count. Retain normal values after transient deltas expire.
 - [x] Feed explicit connection/topology transitions into the tracker before removed nodes disappear. Deduplicate transitions also observed through status polling; unchanged reports and repeated snapshot setters are not events.
 - [x] Suppress `NEW` events for initial/reconnect snapshots and user subscription changes. Emit recovery only after an observed disconnected/unhealthy state; a first healthy observation is a baseline.
@@ -147,3 +149,17 @@ were removed. Existing unrelated untranslated manual entries were not changed.
 
 Closure: all scoped implementation and verification obligations are satisfied.
 The implementation and this completed checklist are committed together.
+
+## Solarized color follow-up
+
+- [x] Apply red/green resource direction backgrounds, green advancing-counter backgrounds, and neutral blue filter backgrounds, with base3 foregrounds in tree, flat, and graph views, including selected cells.
+- [x] Track counter highlights and expiry independently; unchanged reports do not extend them, and resets/unavailable telemetry clear them.
+- [x] Verify actual terminal foreground/background colors, both resource directions, positive/negative filter deltas, selection visibility, quiet mode, and independent counter expiry with regression tests.
+- [x] Update English documentation and the German manual translation; run `make manual-check` and `make manual` successfully.
+- [x] Run the full TUI tests and vet, format and inspect the scoped changes, and commit this follow-up with the updated plan.
+
+Follow-up validation passed: `go test -tags all ./internal/pkg/tui/...`,
+`go vet -tags all ./internal/pkg/tui/...`, `make manual-check`, and `make manual`.
+Rendering regressions inspect effective ANSI colors in all three views with
+selected/unselected nodes and normal/quiet modes; tracker tests verify staggered
+counter expiry and reset suppression.

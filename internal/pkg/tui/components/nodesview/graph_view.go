@@ -466,9 +466,11 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 					filterWidth -= labelWidth + 1
 				}
 				cpuValue, ramValue, capturedStr, forwardedStr, filtersValue, change := hunterMetricValues(hunter, change, filterWidth)
-				cpuStr := changeAccent(metricText(cpuValue, change.CPU, lipgloss.Width(cpuValue)+1), change.CPU.Changed, false, params.Quiet, params.Theme)
-				ramStr := changeAccent(metricText(ramValue, change.Memory, lipgloss.Width(ramValue)+1), change.Memory.Changed, false, params.Quiet, params.Theme)
-				filtersStr := changeAccent(filtersValue, change.FiltersChanged, false, params.Quiet, params.Theme)
+				cpuStr := resourceAccent(metricText(cpuValue, change.CPU, lipgloss.Width(cpuValue)+1), change.CPU, params.Quiet, params.Theme)
+				ramStr := resourceAccent(metricText(ramValue, change.Memory, lipgloss.Width(ramValue)+1), change.Memory, params.Quiet, params.Theme)
+				capturedStr = cellAccent(capturedStr, change.CapturedChanged, params.Quiet, params.Theme.SuccessColor)
+				forwardedStr = cellAccent(forwardedStr, change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor)
+				filtersStr := changeAccent(filtersValue, change.FiltersChanged, params.Quiet, params.Theme)
 
 				if hunterBoxWidth < minWidthForLabels {
 					// Condensed format without labels for narrow boxes

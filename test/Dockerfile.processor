@@ -6,8 +6,9 @@ RUN apk add --no-cache git make gcc musl-dev libpcap-dev linux-headers
 
 WORKDIR /build
 
-# Copy go mod files
+# Copy go mod files and the local gopacket replacement
 COPY go.mod go.sum ./
+COPY third_party/gopacket ./third_party/gopacket
 RUN go mod download
 
 # Copy source code

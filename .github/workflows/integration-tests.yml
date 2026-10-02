@@ -269,9 +269,11 @@ jobs:
 
       - name: Check go fmt
         run: |
-          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          # Preserve upstream formatting in vendored third-party modules.
+          unformatted=$(git ls-files -z -- '*.go' ':!:third_party/**' | xargs -0 -r gofmt -s -l)
+          if [ -n "$unformatted" ]; then
             echo "The following files need formatting:"
-            gofmt -s -l .
+            printf '%s\n' "$unformatted"
             exit 1
           fi
 

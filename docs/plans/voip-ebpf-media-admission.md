@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-02
 
-**Status:** Planned; implementation has not started
+**Status:** In progress; attachment, controller, and lifecycle integration are under implementation
 
 **Source:** [Selective VoIP Media Capture with eBPF](../research/voip-ebpf-media-admission.md), including its second opinion and subsequent runtime-failure discussion.
 
@@ -419,3 +419,29 @@ platforms must have explicit diagnostics and accurate coverage statements. An
 exploratory performance result alone does not authorize another optimization cycle
 or prevent completion. Do not add mandatory follow-up work or a production rollout
 merely to meet an agent-selected performance target.
+
+## Implementation evidence (in progress)
+
+The implementation worktree is `lippycat-voip-ebpf`, branch
+`feature/voip-ebpf-media-admission`. The research and original plan are committed
+as `9e670d4c`. The unchecked items above remain the completion contract.
+
+Stable registry lifetimes now use a session identity and an immutable generation,
+separate from recency. Accepted endpoint mutations publish owned snapshots outside
+registry locks. Lifetime-checked association prevents a late SDP promotion from
+modifying a reused Call-ID. Focused verification:
+
+```sh
+go test -race ./internal/pkg/callregistry
+go test ./internal/pkg/sip
+```
+
+Both passed on 2026-10-02. The shared bounded SDP parser covers per-media connection
+overrides, IPv4/IPv6, default and explicit RTCP endpoints, mux, disabled/inactive
+media, multicast TTL, and multiple port pairs. It returns no partial set on malformed
+input or endpoint overflow. Its protocol references are
+[RFC 8866](https://www.rfc-editor.org/rfc/rfc8866.html),
+[RFC 3605](https://www.rfc-editor.org/rfc/rfc3605.html), and
+[RFC 5761](https://www.rfc-editor.org/rfc/rfc5761.html).
+Topology integration and broad verification are still pending; these focused tests
+do not establish end-to-end readiness.

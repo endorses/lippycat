@@ -31,6 +31,8 @@ func TestEvictionShortcutMatchesOriginalFullScan(t *testing.T) {
 			config.Observers = []LifecycleObserver{referenceObserver}
 			config.EvictionPriority = func(Call) int { return 0 }
 			reference := New(config)
+			// Compare the same logical session; separate registry identity is tested independently.
+			reference.session = fast.session
 			random := rand.New(rand.NewSource(72341))
 			for step := 0; step < 1500; step++ {
 				id := fmt.Sprint(random.Intn(17))

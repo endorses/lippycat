@@ -1,9 +1,9 @@
 package processor
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -31,6 +31,7 @@ type processorNoCompletion struct{}
 func (processorNoCompletion) Completes(sharedsip.Event) bool { return false }
 
 type processorSIPAttachment struct {
+	lifetime   callregistry.Lifetime
 	metadata   *CallMetadata
 	pbMetadata *data.PacketMetadata
 }
@@ -42,16 +43,32 @@ func (r processorSIPRegistry) Observe(result pipeline.SIPResult) (sipflow.Regist
 	if err := validateCallID(result.CallID); err != nil {
 		return sipflow.RegistryObservation{}, fmt.Errorf("validate Call-ID: %w", err)
 	}
-	_ = p.getOrCreateCall(result.CallID)
+	observedState := p.getOrCreateCall(result.CallID)
+	if observedState == nil {
+		return sipflow.RegistryObservation{}, fmt.Errorf("processor closed")
+	}
+	// Serialize the entire observation against expiry/finalization and reuse.
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	p.mu.RLock()
+	sameLifetime := p.calls[result.CallID] == observedState
+	p.mu.RUnlock()
+	if !sameLifetime {
+		return sipflow.RegistryObservation{}, fmt.Errorf("call lifetime retired before SIP observation")
+	}
+	call, exists := p.registry.Call(result.CallID)
+	if !exists {
+		return sipflow.RegistryObservation{}, fmt.Errorf("call retired before SIP observation")
+	}
 	metadata := callMetadataFromResult(result)
 	p.updateCallState(result.CallID, result.Method, metadata)
-	if bytes.Contains(result.SDP, []byte("m=audio")) {
-		for _, port := range extractRTPPortsFromSDP(string(result.SDP)) {
-			p.registerRTPPort(result.CallID, port)
+	if len(result.SDP) > 0 {
+		for _, port := range extractRTPPortsFromSDP(string(result.SDP), p.config.MaxEndpointsPerCall) {
+			p.registry.TryAssociateEndpointForLifetime(result.CallID, call.Lifetime, port)
 		}
 	}
 	return sipflow.RegistryObservation{Attachment: processorSIPAttachment{
-		metadata: metadata, pbMetadata: protobufMetadataFromResult(result, metadata),
+		lifetime: call.Lifetime, metadata: metadata, pbMetadata: protobufMetadataFromResult(result, metadata),
 	}}, nil
 }
 

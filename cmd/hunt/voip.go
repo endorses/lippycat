@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture/admissionintegration"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -60,6 +61,7 @@ Example:
 
 func init() {
 	HuntCmd.AddCommand(voipHuntCmd)
+	cmdutil.RegisterMediaAdmissionFlags(voipHuntCmd, viper.GetViper(), "hunter.voip.rtp_ebpf")
 
 	// BPF Filter Optimization Flags (VoIP-specific)
 	voipHuntCmd.Flags().BoolVarP(&hunterUDPOnly, "udp-only", "U", false, "")
@@ -89,6 +91,10 @@ func init() {
 }
 
 func runVoIPHunt(cmd *cobra.Command, args []string) error {
+	admissionConfig, err := cmdutil.ReadMediaAdmissionConfig(viper.GetViper(), "hunter.voip.rtp_ebpf")
+	if err != nil {
+		return err
+	}
 	streamConfig, err := huntSIPStreamConfig(cmd)
 	if err != nil {
 		return err
@@ -121,7 +127,7 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Only build VoIP filter if any optimization flags are set
-	if voipUDPOnly || voipSIPPorts != "" || voipRTPPortRanges != "" {
+	if !admissionConfig.Enabled && (voipUDPOnly || voipSIPPorts != "" || voipRTPPortRanges != "") {
 		// Parse SIP ports
 		parsedSIPPorts, err := voip.ParsePorts(voipSIPPorts)
 		if err != nil {
@@ -151,6 +157,26 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 			"effective_filter", effectiveBPFFilter)
 	}
 
+	var admissionOptions admissionintegration.SessionOptions
+	if admissionConfig.Enabled {
+		ports, err := voip.ParsePorts(voipSIPPorts)
+		if err != nil {
+			return err
+		}
+		ranges, err := voip.ParsePortRanges(voipRTPPortRanges)
+		if err != nil {
+			return err
+		}
+		policy, err := voip.BuildAdmissionFilter(voip.VoIPFilterConfig{SIPPorts: ports, RTPPortRanges: ranges, UDPOnly: voipUDPOnly, BaseFilter: baseBPFFilter})
+		if err != nil {
+			return err
+		}
+		effectiveBPFFilter = policy.Expression
+		admissionOptions = admissionintegration.SessionOptions{SIPPorts: policy.SIPPorts, UDPOnly: policy.UDPOnly, ESPEnabled: true}
+		for _, r := range policy.RTPPortRanges {
+			admissionOptions.RTPPortRanges = append(admissionOptions.RTPPortRanges, admissionintegration.PortRange{Start: r.Start, End: r.End})
+		}
+	}
 	// Get configuration (reuse flags from parent command)
 	config, err := buildHunterConfigChecked(protocolHunterConfigSpec("voip", effectiveBPFFilter))
 	if err != nil {
@@ -200,14 +226,32 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		"pattern_algorithm", viper.GetString("voip.pattern_algorithm"),
 		"pattern_buffer_mb", viper.GetInt("voip.pattern_buffer_mb"))
 
+	if admissionConfig.Enabled {
+		session, err := admissionintegration.NewSession(context.Background(), admissionConfig, admissionOptions)
+		if err != nil {
+			return fmt.Errorf("initialize hunter RTP admission: %w", err)
+		}
+		defer func() {
+			if err := session.Close(); err != nil {
+				logger.Error("Close hunter RTP admission", "error", err)
+			}
+		}()
+		config.MediaAdmission = session
+	}
 	var bufferMgr *voip.BufferManager
 	return runCatalogHunterRuntime(config, "voip", hunterRuntimeHooks{
 		setup: func(_ context.Context, _ *hunter.Hunter) (func(), error) {
+			if config.MediaAdmission != nil {
+				return nil, nil
+			}
 			bufferMgr = voip.NewBufferManager(5*time.Second, 200)
 			logger.Info("VoIP buffer manager initialized", "max_age", "5s", "max_size", 200)
 			return bufferMgr.Close, nil
 		},
 		start: func(ctx context.Context, h *hunter.Hunter) error {
+			if config.MediaAdmission != nil {
+				return runAdmissionVoIPHunter(ctx, h, config.MediaAdmission, config.Interfaces, streamConfig)
+			}
 			return runVoIPHunterWithBuffering(ctx, h, bufferMgr, streamConfig)
 		},
 	})

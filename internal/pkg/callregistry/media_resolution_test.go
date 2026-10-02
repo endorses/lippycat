@@ -33,6 +33,11 @@ func TestResolveMediaEndpoints(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if test.want.Status == MediaResolved {
+				call, ok := registry.Call(test.want.CallID)
+				require.True(t, ok)
+				test.want.Lifetime = call.Lifetime
+			}
 			require.Equal(t, test.want, registry.ResolveMediaEndpoints(test.source, test.destination))
 		})
 	}
@@ -42,14 +47,16 @@ func TestResolveMediaEndpointsRemovalAndReuse(t *testing.T) {
 	registry := New(Config{MaxCalls: 4, MaxEndpointsPerCall: 2})
 	registry.Upsert(Call{CallID: "old"})
 	registry.AssociateEndpoint("old", "192.0.2.1:10000")
-	require.Equal(t, MediaResolution{Status: MediaResolved, CallID: "old"}, registry.ResolveMediaEndpoints("192.0.2.1:10000", ""))
+	oldCall, _ := registry.Call("old")
+	require.Equal(t, MediaResolution{Status: MediaResolved, CallID: "old", Lifetime: oldCall.Lifetime}, registry.ResolveMediaEndpoints("192.0.2.1:10000", ""))
 
 	require.True(t, registry.Remove("old", EndCompleted))
 	require.Equal(t, MediaResolution{Status: MediaUnresolved}, registry.ResolveMediaEndpoints("192.0.2.1:10000", ""))
 
 	registry.Upsert(Call{CallID: "new"})
 	registry.AssociateEndpoint("new", "192.0.2.1:10000")
-	require.Equal(t, MediaResolution{Status: MediaResolved, CallID: "new"}, registry.ResolveMediaEndpoints("192.0.2.1:10000", ""))
+	newCall, _ := registry.Call("new")
+	require.Equal(t, MediaResolution{Status: MediaResolved, CallID: "new", Lifetime: newCall.Lifetime}, registry.ResolveMediaEndpoints("192.0.2.1:10000", ""))
 }
 
 func TestCallIDsForEndpointReturnsSnapshot(t *testing.T) {
@@ -60,4 +67,18 @@ func TestCallIDsForEndpointReturnsSnapshot(t *testing.T) {
 	owners := registry.CallIDsForEndpoint("192.0.2.1:10000")
 	owners[0] = "mutated"
 	require.Equal(t, []string{"call-a"}, registry.CallIDsForEndpoint("192.0.2.1:10000"))
+}
+
+func TestMediaResolutionKeepsOriginalLifetimeAcrossReuse(t *testing.T) {
+	registry := New(Config{MaxCalls: 1, MaxEndpointsPerCall: 1})
+	registry.Upsert(Call{CallID: "same"})
+	registry.AssociateEndpoint("same", "192.0.2.1:9000")
+	old := registry.ResolveMediaEndpoints("192.0.2.1:9000", "")
+	registry.Remove("same", EndCompleted)
+	registry.Upsert(Call{CallID: "same"})
+	registry.AssociateEndpoint("same", "192.0.2.1:9000")
+	current := registry.ResolveMediaEndpoints("192.0.2.1:9000", "")
+	require.Equal(t, old.CallID, current.CallID)
+	require.NotEqual(t, old.Lifetime, current.Lifetime)
+	require.Equal(t, old.Lifetime.Session, current.Lifetime.Session)
 }

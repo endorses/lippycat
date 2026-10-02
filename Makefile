@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li build-matrix build-matrix-cuda manual manual-serve manual-clean
+.PHONY: test-ebpf build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li build-matrix build-matrix-cuda manual manual-serve manual-clean
 
 # Build variables
 BINARY_NAME=lc
@@ -133,6 +133,10 @@ build-cuda: cuda-kernels
 # to include all three CUDA variants, including the complete LI build.
 build-matrix:
 	./scripts/check-build-matrix.sh
+
+# Kernel and command admission tests run in a disposable privileged container.
+test-ebpf:
+	./test/scripts/test_voip_ebpf.sh
 
 # CUDA builders must use this target; unlike build-matrix it fails if the CUDA
 # toolchain or either supported CUDA partition cannot be built and vetted.
@@ -301,6 +305,7 @@ help:
 	@echo "  make tui            - Build TUI interface only"
 	@echo "  make tap            - Build tap node (standalone capture + processor)"
 	@echo "  make binaries       - Build all variants"
+	@echo "  make test-ebpf      - Isolated privileged VoIP eBPF integration tests"
 	@echo "  make build-matrix   - Test and vet every supported build partition"
 	@echo ""
 	@echo "LI (Lawful Interception) builds:"

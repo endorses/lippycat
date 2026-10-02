@@ -917,3 +917,15 @@ incomplete pull definitions as non-enforcing candidates until completed.
 Use `tap.li.admf_complete_task_contract: true` in YAML. See the
 [LI definition convergence and rollout guidance](../../docs/LI_INTEGRATION.md#complete-task-contract-and-definition-convergence)
 for lifecycle completeness, replay, and the lack of authoritative pull freshness.
+
+## Opt-in VoIP eBPF media admission
+
+`voip --rtp-ebpf` enables Linux socket-level admission for media belonging to
+selected calls. It is off by default and retains libpcap capture. Use
+`--rtp-ebpf-mode=shadow` for bounded diagnostics and
+`--rtp-ebpf-failure-policy=closed` to change the default scoped runtime fail-open
+behavior. Mode/policy flags alone do not enable it. Pre-match RTP is not retained.
+
+See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
+semantics, platform/privilege requirements, observation domains, configuration,
+failure states and verification status.

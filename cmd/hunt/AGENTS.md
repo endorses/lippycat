@@ -5,6 +5,7 @@ This document describes the architecture and implementation patterns for the `hu
 ## Purpose
 
 Hunters are **edge capture agents** that:
+
 1. Capture packets from network interfaces
 2. Apply local filtering (BPF, VoIP call matching)
 3. Batch packets for efficiency
@@ -59,6 +60,7 @@ and result handling.
 ```
 
 The hunt command is only included in:
+
 - `hunter` builds (hunter-only binary ~18MB)
 - `all` builds (complete suite ~22MB)
 
@@ -89,13 +91,13 @@ VoIP hunter with intelligent call buffering and selective forwarding.
 
 **Architecture Difference from Base:**
 
-| Aspect | Base Hunter | VoIP Hunter |
-|--------|-------------|-------------|
-| Forwarding | All packets | Only matched calls |
-| Buffering | No buffering | Per-call buffering |
-| Filtering | BPF only | BPF + SIP user filters |
-| Bandwidth | Full traffic | 90%+ reduction |
-| Use Case | General monitoring | Targeted VoIP capture |
+| Aspect     | Base Hunter        | VoIP Hunter            |
+| ---------- | ------------------ | ---------------------- |
+| Forwarding | All packets        | Only matched calls     |
+| Buffering  | No buffering       | Per-call buffering     |
+| Filtering  | BPF only           | BPF + SIP user filters |
+| Bandwidth  | Full traffic       | 90%+ reduction         |
+| Use Case   | General monitoring | Targeted VoIP capture  |
 
 ## Data Flow
 
@@ -152,6 +154,7 @@ cancel()  // Triggers shutdown
 ```
 
 **Lifecycle:**
+
 1. **Init** - Create gRPC connection, setup capture
 2. **Connect** - Establish stream to processor
 3. **Capture** - Start packet capture loop
@@ -185,6 +188,7 @@ bufferMgr.DiscardBuffer(callID)
 ```
 
 **Memory Safety:**
+
 - `maxAge`: Automatic expiration (default: 5s)
 - `maxSize`: Per-buffer packet limit (default: 200 packets)
 - Prevents unbounded growth
@@ -208,6 +212,7 @@ h.onFilterUpdate(filterUpdate)
 ```
 
 **Filter Types:**
+
 - `sipuser` - Match SIP From/To/P-Asserted-Identity headers
 - `callid` - Match SIP Call-ID
 - `ip` - Match IP address or CIDR
@@ -237,6 +242,7 @@ if len(batcher.packets) >= maxSize || time.Since(lastSend) > timeout {
 ```
 
 **Tuning:**
+
 - Small batch + short timeout = Low latency
 - Large batch + long timeout = High throughput
 
@@ -257,6 +263,7 @@ const (
 ```
 
 **Hunter Response:**
+
 ```go
 switch flowControl {
 case PAUSE:
@@ -311,6 +318,7 @@ err := circuitBreaker.Call(func() error {
 ```
 
 **Behavior:**
+
 - **Closed:** Normal operation, all calls allowed
 - **Open:** After 5 failures, reject calls for 30s (prevents thrashing)
 - **Half-Open:** Allow 3 test calls, return to Closed on success or Open on failure
@@ -409,6 +417,7 @@ service ManagementService {
 ```
 
 **Bidirectional streaming:**
+
 - Hunter → Processor: Health status, packet counts
 - Processor → Hunter: Flow control signals
 
@@ -485,6 +494,7 @@ _ = voip.NewSipStreamFactory(ctx, tcpHandler)
 ### Memory Management
 
 **Per-Hunter Memory:**
+
 - Packet capture buffer: `--buffer-size` packets (~10MB default)
 - Batch queue: `--batch-queue-size` batches (~1-5MB)
 - VoIP call buffers: `maxSize * numCalls` packets (~20-100MB with 100 calls)
@@ -494,6 +504,7 @@ _ = voip.NewSipStreamFactory(ctx, tcpHandler)
 ### CPU Optimization
 
 **Packet Processing Pipeline:**
+
 1. Kernel → gopacket (zero-copy where possible)
 2. BPF filter (kernel space)
 3. VoIP detection (user space, GPU-accelerated optional)
@@ -506,6 +517,7 @@ _ = voip.NewSipStreamFactory(ctx, tcpHandler)
 ### Network Optimization
 
 **Batch Size Impact:**
+
 - Larger batches: Lower network overhead, higher latency
 - Smaller batches: Lower latency, higher network overhead
 
@@ -565,6 +577,7 @@ Tests full hunter-processor flow with TLS.
 ### Adding a New Filter Type
 
 1. Update `api/proto/management.proto`:
+
 ```protobuf
 message Filter {
     string type = 1;  // Add new type here
@@ -572,12 +585,14 @@ message Filter {
 ```
 
 2. Implement in `internal/pkg/hunter/filter/matcher.go`:
+
 ```go
 case "newtype":
     return matchNewType(packet, pattern)
 ```
 
 3. Regenerate proto:
+
 ```bash
 make proto
 ```
@@ -589,11 +604,13 @@ Edit `internal/pkg/hunter/hunter.go` batch logic.
 ## Dependencies
 
 **External:**
+
 - `google.golang.org/grpc` - gRPC client
 - `github.com/google/gopacket` - Packet capture
 - `github.com/spf13/cobra` - CLI framework
 
 **Internal:**
+
 - `internal/pkg/hunter` - Core hunter logic
 - `internal/pkg/capture` - Capture abstraction
 - `internal/pkg/voip` - VoIP filtering & buffering
@@ -604,3 +621,18 @@ Edit `internal/pkg/hunter/hunter.go` batch logic.
 - [README.md](README.md) - User-facing command documentation
 - [../process/CLAUDE.md](../process/CLAUDE.md) - Processor architecture
 - [../../docs/DISTRIBUTED_MODE.md](../../docs/DISTRIBUTED_MODE.md) - Distributed system overview
+
+## Optional VoIP media admission
+
+The `voip --rtp-ebpf` path uses `capture/admissionintegration` to own one shared
+map/controller session and an installer for libpcap handles. `mediaadmission`
+owns bounded desired/installed state; `voip/admission` joins validated SIP metadata,
+accepted registry endpoints, selection and lifetime cleanup. Call churn changes
+maps only. Default/offline capture paths must not allocate or load BPF state.
+
+Kernel membership is candidate admission, never call ownership or output
+permission. Keep explicit capture restrictions before compatibility, shadow and
+runtime-open bypasses. Observation domains must scope userspace association,
+selection and reassembly as well as kernel keys. See
+[the operator guide](../../docs/VOIP_EBPF_ADMISSION.md) and
+[implementation plan](../../docs/plans/voip-ebpf-media-admission.md).

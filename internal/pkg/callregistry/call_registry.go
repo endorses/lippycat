@@ -6,10 +6,18 @@ import (
 	"container/list"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
+// Lifetime identifies one registry session and one immutable call incarnation.
+// It is independent of recency and survives updates to an existing call.
+type Lifetime struct{ Session, Generation uint64 }
+
+var registrySessions atomic.Uint64
+
 type Call struct {
+	Lifetime    Lifetime
 	CallID      string
 	State       string
 	From        string
@@ -80,13 +88,28 @@ const (
 // MediaResolution is an attribution result, not a candidate list. CallID is
 // populated only when Status is MediaResolved.
 type MediaResolution struct {
-	Status MediaResolutionStatus
-	CallID string
+	// Lifetime is captured atomically with ownership; callers must not look up
+	// a potentially reused Call-ID later to inherit selection.
+	Lifetime Lifetime
+	Status   MediaResolutionStatus
+	CallID   string
 }
 
 // Config bounds the state owned by a Core. Limits are hard limits; an
 // association rejected because of a limit is not partially installed.
+// EndpointObservation is an owned, ordered snapshot of accepted associations.
+// Observers run outside registry locks and may reenter the registry. Concurrent
+// delivery can reorder callbacks; consumers must compare Revision and Lifetime.
+type EndpointObservation struct {
+	Call      Call
+	Revision  uint64
+	Endpoints []string
+}
+
+type EndpointObserver interface{ OnEndpointsChanged(EndpointObservation) }
+
 type Config struct {
+	EndpointObservers       []EndpointObserver
 	MaxCalls                int
 	MaxEndpointsPerCall     int
 	MaxEndpointAssociations int
@@ -99,6 +122,9 @@ type Config struct {
 // registry. It deliberately stores only protocol-neutral call data; analyzers
 // retain their topology-specific metadata beside it.
 type Core struct {
+	session           uint64
+	nextLifetime      uint64
+	nextObservation   uint64
 	mu                sync.RWMutex
 	calls             map[string]Call
 	endpointCalls     map[string][]string
@@ -125,7 +151,9 @@ func New(config Config) *Core {
 		config.MaxEndpointAssociations = config.MaxCalls * config.MaxEndpointsPerCall
 	}
 	config.Observers = append([]LifecycleObserver(nil), config.Observers...)
+	config.EndpointObservers = append([]EndpointObserver(nil), config.EndpointObservers...)
 	return &Core{
+		session:           registrySessions.Add(1),
 		calls:             make(map[string]Call),
 		endpointCalls:     make(map[string][]string),
 		endpointWinner:    make(map[string]string),
@@ -169,8 +197,9 @@ func (c *Core) UpsertWithEviction(call Call) (accepted bool, evictedID string) {
 		c.mu.Unlock()
 		return false, ""
 	}
-	_, existed := c.calls[call.CallID]
+	previous, existed := c.calls[call.CallID]
 	if existed {
+		call.Lifetime = previous.Lifetime
 		c.calls[call.CallID] = call
 		c.touchLocked(call.CallID)
 		c.mu.Unlock()
@@ -189,6 +218,8 @@ func (c *Core) UpsertWithEviction(call Call) (accepted bool, evictedID string) {
 			return false, ""
 		}
 	}
+	c.nextLifetime++
+	call.Lifetime = Lifetime{Session: c.session, Generation: c.nextLifetime}
 	c.calls[call.CallID] = call
 	c.recencyIndex[call.CallID] = c.recency.PushFront(call.CallID)
 	c.markRecentLocked(call.CallID)
@@ -319,21 +350,37 @@ func (c *Core) Call(callID string) (Call, bool) {
 
 // AssociateEndpoint adds a deduplicated, multi-owner endpoint association.
 func (c *Core) TryAssociateEndpoint(callID, endpoint string) bool {
+	return c.tryAssociateEndpoint(callID, Lifetime{}, endpoint)
+}
+
+// TryAssociateEndpointForLifetime prevents a delayed promotion from mutating a
+// different incarnation of a reused Call-ID. Zero lifetime is never accepted.
+func (c *Core) TryAssociateEndpointForLifetime(callID string, lifetime Lifetime, endpoint string) bool {
+	if lifetime == (Lifetime{}) {
+		return false
+	}
+	return c.tryAssociateEndpoint(callID, lifetime, endpoint)
+}
+
+func (c *Core) tryAssociateEndpoint(callID string, lifetime Lifetime, endpoint string) bool {
 	if callID == "" || endpoint == "" {
 		return false
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.closed {
+		c.mu.Unlock()
 		return false
 	}
-	if _, ok := c.calls[callID]; !ok {
+	if call, ok := c.calls[callID]; !ok || (lifetime != (Lifetime{}) && call.Lifetime != lifetime) {
+		c.mu.Unlock()
 		return false
 	}
 	if _, ok := c.callEndpoints[callID][endpoint]; ok {
+		c.mu.Unlock()
 		return true
 	}
 	if len(c.callEndpoints[callID]) >= c.config.MaxEndpointsPerCall || c.associationCount >= c.config.MaxEndpointAssociations {
+		c.mu.Unlock()
 		return false
 	}
 	if c.callEndpoints[callID] == nil {
@@ -345,7 +392,43 @@ func (c *Core) TryAssociateEndpoint(callID, endpoint string) bool {
 		c.endpointWinner[endpoint] = callID
 	}
 	c.associationCount++
+	observation, observers := c.endpointObservationLocked(callID)
+	c.mu.Unlock()
+	notifyEndpoints(observers, observation)
 	return true
+}
+
+func (c *Core) AddEndpointObserver(observer EndpointObserver) {
+	if observer == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.config.EndpointObservers = append(c.config.EndpointObservers, observer)
+	}
+}
+
+func (c *Core) endpointObservationLocked(callID string) (EndpointObservation, []EndpointObserver) {
+	// Disabled consumers impose no snapshot allocation on the normal hot path.
+	if len(c.config.EndpointObservers) == 0 {
+		return EndpointObservation{}, nil
+	}
+	c.nextObservation++
+	observation := EndpointObservation{Call: c.calls[callID], Revision: c.nextObservation}
+	for endpoint := range c.callEndpoints[callID] {
+		observation.Endpoints = append(observation.Endpoints, endpoint)
+	}
+	sort.Strings(observation.Endpoints)
+	return observation, append([]EndpointObserver(nil), c.config.EndpointObservers...)
+}
+
+func notifyEndpoints(observers []EndpointObserver, observation EndpointObservation) {
+	for _, observer := range observers {
+		snapshot := observation
+		snapshot.Endpoints = append([]string(nil), observation.Endpoints...)
+		observer.OnEndpointsChanged(snapshot)
+	}
 }
 
 func (c *Core) AssociateEndpoint(callID, endpoint string) {
@@ -403,7 +486,7 @@ func (c *Core) ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint string)
 	case 0:
 		return MediaResolution{Status: MediaUnresolved}
 	case 1:
-		return MediaResolution{Status: MediaResolved, CallID: resolvedID}
+		return MediaResolution{Status: MediaResolved, CallID: resolvedID, Lifetime: c.calls[resolvedID].Lifetime}
 	default:
 		return MediaResolution{Status: MediaAmbiguous}
 	}
@@ -454,19 +537,16 @@ func (c *Core) ExpiredUnpinned(cutoff time.Time) []Call {
 // the call lifecycle record (for example during a trailing-media grace period).
 func (c *Core) DissociateEndpoints(callID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	for endpoint := range c.callEndpoints[callID] {
-		c.endpointCalls[endpoint] = withoutCallID(c.endpointCalls[endpoint], callID)
-		if len(c.endpointCalls[endpoint]) == 0 {
-			delete(c.endpointCalls, endpoint)
-			delete(c.endpointWinner, endpoint)
-		} else if c.endpointWinner[endpoint] == callID {
-			c.recomputeEndpointWinnerLocked(endpoint)
-		}
-		c.associationCount--
-	}
-	delete(c.callEndpoints, callID)
+	_, exists := c.calls[callID]
+	c.dissociateEndpointsLocked(callID)
 	delete(c.pins, callID)
+	var observation EndpointObservation
+	var observers []EndpointObserver
+	if exists {
+		observation, observers = c.endpointObservationLocked(callID)
+	}
+	c.mu.Unlock()
+	notifyEndpoints(observers, observation)
 }
 
 func (c *Core) Remove(callID string, reason EndReason) bool {
@@ -573,3 +653,21 @@ func withoutCallID(callIDs []string, removed string) []string {
 }
 
 var _ Registry = (*Core)(nil)
+
+// EndpointSnapshot returns call identity and accepted endpoints atomically.
+// Revision is a registry-wide sequence; a later snapshot supersedes earlier
+// callbacks for the same lifetime even if concurrent delivery reorders them.
+func (c *Core) EndpointSnapshot(callID string) (EndpointObservation, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	call, ok := c.calls[callID]
+	if !ok {
+		return EndpointObservation{}, false
+	}
+	snapshot := EndpointObservation{Call: call, Revision: c.nextObservation}
+	for endpoint := range c.callEndpoints[callID] {
+		snapshot.Endpoints = append(snapshot.Endpoints, endpoint)
+	}
+	sort.Strings(snapshot.Endpoints)
+	return snapshot, true
+}

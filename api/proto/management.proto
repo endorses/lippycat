@@ -314,6 +314,7 @@ message HunterStats {
     uint64 tcp_accept_rejected_controls = 35;
     // Queued bytes discarded when a new SYN replaces a stale connection.
     uint64 tcp_replacement_dropped_bytes = 36;
+    MediaAdmissionStatus rtp_ebpf = 37;
 }
 
 // ProcessorHeartbeat response from processor
@@ -701,6 +702,7 @@ message ProcessorStats {
     LIStartupSyncStats li_startup_sync = 16;
     // Latest startup or periodic snapshot diagnostics; absent when LI is disabled.
     LIReconciliationStats li_reconciliation = 17;
+    MediaAdmissionStatus rtp_ebpf = 18;
 }
 
 // Diagnostic details are bounded to the first 32 failures per snapshot. Counts
@@ -1149,4 +1151,58 @@ message PcapWriterTelemetry {
     uint64 tombstone_capacity_evictions = 8;
     uint64 filename_collisions = 9;
     uint64 callback_failures = 10;
+}
+
+// Bounded admission snapshots; absent means an older peer or unavailable data.
+// No call identifiers, selector values or packet payload are exposed.
+message MediaAdmissionStatus {
+ bool enabled = 1;
+ string configured_mode = 2;
+ string failure_policy = 3;
+ uint64 endpoint_capacity = 4;
+ repeated MediaAdmissionScope scopes = 5;
+ uint64 pending_dialogs = 6;
+ uint64 pending_endpoints = 7;
+ uint64 pending_bytes = 8;
+ uint64 metadata_evicted = 9;
+ uint64 metadata_expired = 10;
+ uint64 metadata_rejected = 11;
+ uint64 promotion_misses = 12;
+ uint64 metadata_promotions = 13;
+ uint64 evidence_received = 14;
+ uint64 evidence_overwritten = 15;
+ uint64 evidence_malformed = 16;
+ uint64 evidence_read_errors = 17;
+ uint64 evidence_retained = 18;
+ uint64 evidence_capacity = 19;
+ bool evidence_incomplete = 20;
+ uint64 diagnostic_calls = 21;
+ uint64 selected_answered_without_media = 22;
+ uint64 attributed_media_packets = 23;
+ uint64 diagnostic_tracking_rejected = 24;
+}
+message MediaAdmissionScope {
+ uint32 domain = 1;
+ string state = 2;
+ uint32 confirmed_mode = 3;
+ uint64 confirmed_generation = 4;
+ bool control_uncertain = 5;
+ uint64 desired_generation = 6;
+ uint64 installed_generation = 7;
+ uint64 owners = 8;
+ uint64 desired_endpoints = 9;
+ uint64 installed_endpoints = 10;
+ uint64 pending_updates = 11;
+ uint64 update_errors = 12;
+ uint64 control_errors = 13;
+ uint64 recoveries = 14;
+ uint64 stale_updates = 15;
+ string reason = 16;
+ int64 degraded_since_unix_ns = 17;
+ uint64 open_duration_ns = 18;
+ // Fixed reason indexes documented by ebpfadmission.ReasonNames.
+ repeated uint64 decision_counters = 19;
+ bool counter_read_failed = 20;
+ int64 publication_started_unix_ns = 21;
+ int64 last_published_unix_ns = 22;
 }

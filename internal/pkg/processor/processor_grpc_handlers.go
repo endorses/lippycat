@@ -285,6 +285,7 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 
 		// Send response
 		processorStats := p.statsCollector.GetProto()
+		p.populateAdmissionStats(processorStats)
 		resp := &management.ProcessorHeartbeat{
 			TimestampNs:      hb.TimestampNs,
 			Status:           management.ProcessorStatus_PROCESSOR_HEALTHY,
@@ -403,6 +404,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			ConnectedDurationSec: durationSec,
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
+				RtpEbpf:                       p.hunterManager.AdmissionStatus(h.ID),
 				PacketsCaptured:               h.PacketsCaptured, // From hunter's heartbeat stats
 				PacketsMatched:                h.PacketsMatched,
 				PacketsForwarded:              h.PacketsForwarded,
@@ -475,6 +477,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 	}
 
 	processorStats := p.statsCollector.GetProto()
+	p.populateAdmissionStats(processorStats)
 	p.populateStorageStats(processorStats)
 	p.populateLIEncodingStats(processorStats)
 	p.populateLIDeliveryStats(processorStats)
@@ -672,6 +675,7 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 			ConnectedDurationSec: durationSec,
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
+				RtpEbpf:                       p.hunterManager.AdmissionStatus(h.ID),
 				PacketsCaptured:               h.PacketsCaptured,
 				PacketsMatched:                h.PacketsMatched,
 				PacketsForwarded:              h.PacketsForwarded,
@@ -714,6 +718,7 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 
 	// Get processor stats
 	processorStats := p.statsCollector.GetProto()
+	p.populateAdmissionStats(processorStats)
 
 	// Get upstream processor ID (empty if this is the root processor)
 	upstreamProcessorID := ""

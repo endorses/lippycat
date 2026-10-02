@@ -49,6 +49,11 @@ type parsedFilter struct {
 // ApplicationFilter handles GPU-accelerated application-layer packet filtering
 // Supports multiple protocols via the detector and can be extended with protocol-specific filters
 type ApplicationFilter struct {
+	// Serializes policy mutation and admission publication while callbacks run
+	// outside mu (and may safely query the authoritative application filter).
+	admissionMu       sync.Mutex
+	admissionObserver func([]netip.Prefix, bool) error
+
 	radiusFilters  []radiusApplicationFilter
 	gpuAccel       *gpuaccel.GPUAccelerator
 	detector       *detector.Detector // Protocol detector for accurate protocol detection
@@ -161,8 +166,11 @@ func NewApplicationFilter(config *gpuaccel.GPUConfig) (*ApplicationFilter, error
 // NoFilterPolicyAllow (default) allows all packets when no filters are set.
 // NoFilterPolicyDeny blocks all packets when no filters are set.
 func (af *ApplicationFilter) SetNoFilterPolicy(policy NoFilterPolicy) {
+	af.admissionMu.Lock()
+	defer af.admissionMu.Unlock()
 	af.mu.Lock()
-	defer af.mu.Unlock()
+	defer af.publishAdmissionAndUnlock()
+
 	af.noFilterPolicy = policy
 	logger.Info("No-filter policy updated", "policy", string(policy))
 }
@@ -198,8 +206,10 @@ func filteringToGPUPatternType(pt filtering.PatternType) gpuaccel.PatternType {
 // UpdateFilters updates the filter list from processor
 // This method supports hot-reload without restarting capture for application-level filters
 func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
+	af.admissionMu.Lock()
+	defer af.admissionMu.Unlock()
 	af.mu.Lock()
-	defer af.mu.Unlock()
+	defer af.publishAdmissionAndUnlock()
 
 	af.updateRADIUSFiltersLocked(filters)
 
@@ -1688,4 +1698,47 @@ func (af *ApplicationFilter) Close() {
 		// GPU cleanup would happen here
 		logger.Info("Application filter closed")
 	}
+}
+
+// SetAdmissionObserver installs one synchronous observer and publishes the
+// current authoritative snapshot before returning. It is configured before
+// capture starts. Callback errors must leave desired policy recorded for retry.
+// Callbacks may query matching state but must not reenter policy mutations.
+func (af *ApplicationFilter) SetAdmissionObserver(observer func([]netip.Prefix, bool) error) error {
+	af.admissionMu.Lock()
+	defer af.admissionMu.Unlock()
+	af.mu.Lock()
+	af.admissionObserver = observer
+	prefixes, noFilters := af.admissionSnapshotLocked()
+	af.mu.Unlock()
+	if observer != nil {
+		return observer(prefixes, noFilters)
+	}
+	return nil
+}
+func (af *ApplicationFilter) publishAdmissionAndUnlock() {
+	observer := af.admissionObserver
+	prefixes, noFilters := af.admissionSnapshotLocked()
+	af.mu.Unlock()
+	if observer != nil {
+		if err := observer(prefixes, noFilters); err != nil {
+			logger.Error("Media admission selector publication is incomplete", "error", err)
+		}
+	}
+}
+func (af *ApplicationFilter) admissionSnapshotLocked() ([]netip.Prefix, bool) {
+	prefixes := make([]netip.Prefix, 0, len(af.ipAddresses))
+	for _, pattern := range af.ipAddresses {
+		if prefix, err := netip.ParsePrefix(pattern); err == nil {
+			prefixes = append(prefixes, prefix.Masked())
+			continue
+		}
+		if addr, err := netip.ParseAddr(pattern); err == nil {
+			addr = addr.Unmap()
+			prefixes = append(prefixes, netip.PrefixFrom(addr, addr.BitLen()))
+		}
+	}
+	hasOther := len(af.radiusFilters) > 0 || len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0 || len(af.imsiFilters) > 0 || len(af.imeiFilters) > 0
+	hasOther = hasOther || (af.dnsMatcher != nil && af.dnsMatcher.HasFilters()) || (af.emailMatcher != nil && af.emailMatcher.HasFilters()) || (af.tlsMatcher != nil && af.tlsMatcher.HasFilters())
+	return prefixes, !hasOther && len(af.ipAddresses) == 0 && af.noFilterPolicy == NoFilterPolicyAllow
 }

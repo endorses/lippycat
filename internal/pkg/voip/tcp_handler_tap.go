@@ -50,6 +50,12 @@ func (a tapRegistryAdapter) Observe(r pipeline.SIPResult) (sipflow.RegistryObser
 	if a.registry == nil || r.Packet == nil {
 		return sipflow.RegistryObservation{}, nil
 	}
+	if scoped, ok := a.registry.(interface {
+		ProcessReassembledSIPResultWithLifetime(pipeline.SIPResult) (*data.PacketMetadata, callregistry.Lifetime, error)
+	}); ok {
+		metadata, lifetime, err := scoped.ProcessReassembledSIPResultWithLifetime(r)
+		return sipflow.RegistryObservation{Attachment: tapAttachment{metadata: metadata, lifetime: lifetime}}, err
+	}
 	metadata, err := a.registry.ProcessReassembledSIPResult(r)
 	if err != nil {
 		return sipflow.RegistryObservation{}, err
@@ -63,6 +69,7 @@ func (a tapRegistryAdapter) Complete(id string, _ time.Time) ([]pipeline.CallLif
 type tapInjectionSink struct{ ch chan<- source.InjectedPacket }
 
 type tapAttachment struct {
+	lifetime callregistry.Lifetime
 	metadata *data.PacketMetadata
 	terminal bool
 	complete func()
@@ -95,7 +102,7 @@ func (s tapInjectionSink) HandleSIP(ctx context.Context, in sipflow.SinkInput) p
 			})
 		}
 	}
-	injected := source.InjectedPacket{PacketInfo: captureadapter.ToPacketInfo(in.Result.Packet), Metadata: metadata, AfterProcess: callback}
+	injected := source.InjectedPacket{PacketInfo: captureadapter.ToPacketInfo(in.Result.Packet), Metadata: metadata, CallLifetime: attachment.lifetime, AfterProcess: callback}
 	select {
 	case s.ch <- injected:
 		if attachment.accepted != nil {
@@ -138,18 +145,30 @@ func metadataFromSIPResult(r pipeline.SIPResult) *data.PacketMetadata {
 
 // TapTCPHandler adapts reassembled TCP messages to shared SIP orchestration.
 type TapTCPHandler struct {
-	packetChan chan<- source.InjectedPacket
-	appFilter  ApplicationFilter
-	registry   tapCallRegistry
-	mu         sync.Mutex
-	flow       *sipflow.Orchestrator
+	captureInterface string
+	packetChan       chan<- source.InjectedPacket
+	appFilter        ApplicationFilter
+	registry         tapCallRegistry
+	mu               sync.Mutex
+	flow             *sipflow.Orchestrator
+	metadataObserver sipflow.MetadataObserver
 }
 
 func NewTapTCPHandler(ch chan<- source.InjectedPacket) *TapTCPHandler {
 	return &TapTCPHandler{packetChan: ch}
 }
+
+// SetCaptureInterface preserves the observation domain on synthesized packets.
+// A per-domain stream factory uses a representative interface from that domain.
+func (h *TapTCPHandler) SetCaptureInterface(iface string) { h.captureInterface = iface }
+
 func (h *TapTCPHandler) SetApplicationFilter(f ApplicationFilter) { h.appFilter = f }
 func (h *TapTCPHandler) SetCallRegistry(r tapCallRegistry)        { h.registry = r }
+
+// SetMetadataObserver wires the local admission bridge before reassembly starts.
+func (h *TapTCPHandler) SetMetadataObserver(observer sipflow.MetadataObserver) {
+	h.metadataObserver = observer
+}
 
 func (h *TapTCPHandler) ensureFlow() *sipflow.Orchestrator {
 	h.mu.Lock()
@@ -157,7 +176,7 @@ func (h *TapTCPHandler) ensureFlow() *sipflow.Orchestrator {
 	if h.flow != nil {
 		return h.flow
 	}
-	o, err := sipflow.New(sipflow.Config{SelectionPolicy: callregistry.StickySelectionPolicy{}, SelectionStore: &tapSelections{m: make(map[string]struct{})}, Registry: tapRegistryAdapter{h.registry}, Completion: tapTerminalResponses{}})
+	o, err := sipflow.New(sipflow.Config{MetadataObserver: h.metadataObserver, SelectionPolicy: callregistry.StickySelectionPolicy{}, SelectionStore: &tapSelections{m: make(map[string]struct{})}, Registry: tapRegistryAdapter{h.registry}, Completion: tapTerminalResponses{}})
 	if err != nil {
 		logger.Error("Failed to create tap SIP orchestration", "error", err)
 		return nil
@@ -208,12 +227,13 @@ func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id,
 		logger.Warn("TCP SIP synthesis failed", "call_id", SanitizeCallIDForLogging(id))
 		return false
 	}
+	pkt.Interface = h.captureInterface
 	o := h.ensureFlow()
 	if o == nil {
 		return false
 	}
 	r := o.Analyze(sipflow.Message{
-		Payload: msg, Event: event, ExpectedCallID: id, Envelope: captureadapter.FromPacketInfo(pkt),
+		Payload: msg, Event: event, ExpectedCallID: id, Envelope: captureadapter.FromPacketInfo(pkt, pipeline.SourceLiveCapture),
 		ParseOptions: sharedsip.OptionsForEndpoints(at, src, dst), FilterConfigured: true,
 		Match: func(event sharedsip.Event) bool {
 			if h.appFilter != nil {
@@ -229,14 +249,26 @@ func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id,
 		},
 	})
 	if r.Stage.Outcome == pipeline.OutcomeAccepted {
-		metadata, _ := r.Attachment.(*data.PacketMetadata)
+		attachment, _ := r.Attachment.(tapAttachment)
+		metadata := attachment.metadata
+		if metadata == nil {
+			metadata, _ = r.Attachment.(*data.PacketMetadata)
+		}
 		accepted := make(chan struct{})
 		var complete func()
 		if r.Terminal && h.registry != nil {
 			callID := r.SIP.CallID
-			complete = func() { h.registry.CompleteCall(callID) }
+			complete = func() {
+				if scoped, ok := h.registry.(interface {
+					CompleteCallLifetime(string, callregistry.Lifetime)
+				}); ok {
+					scoped.CompleteCallLifetime(callID, attachment.lifetime)
+				} else {
+					h.registry.CompleteCall(callID)
+				}
+			}
 		}
-		r.Attachment = tapAttachment{metadata: metadata, terminal: r.Terminal, complete: complete, accepted: accepted}
+		r.Attachment = tapAttachment{lifetime: attachment.lifetime, metadata: metadata, terminal: r.Terminal, complete: complete, accepted: accepted}
 		r = o.Dispatch(r)
 		if sinkResult, ok := r.Sinks["tap_processor"]; ok && sinkResult.Outcome == pipeline.OutcomeAccepted {
 			<-accepted

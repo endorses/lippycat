@@ -1309,3 +1309,19 @@ lc completion powershell > lc.ps1
 | `0`  | Success                                                   |
 | `1`  | General error (runtime failure, connection refused, etc.) |
 | `2`  | Usage error (invalid flags, missing required arguments)   |
+
+### VoIP eBPF capture options {#voip-ebpf-capture-options}
+
+These flags exist only on `lc hunt voip` and `lc tap voip`:
+
+| Flag                        | Default   | Description                                         |
+| --------------------------- | --------- | --------------------------------------------------- |
+| `--rtp-ebpf`                | `false`   | Enable Linux socket-level selected-media admission. |
+| `--rtp-ebpf-mode`           | `enforce` | `enforce` or `shadow`; does not enable the feature. |
+| `--rtp-ebpf-failure-policy` | `open`    | Runtime update failure policy, `open` or `closed`.  |
+
+Enabling unavailable functionality is a startup error. Explicit `--filter`,
+`--sip-port`, `--udp-only`, and `--rtp-port-range` restrictions are retained;
+generated default RTP ranges do not limit learned selected endpoints. See
+[VoIP capture](../part5-advanced/voip.md#selective-media-capture-with-ebpf) and the
+[configuration members](config-reference.md#voip-ebpf-media-admission).

@@ -1,8 +1,10 @@
 package processor
 
 import (
+	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"net"
 	"strconv"
-	"strings"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
@@ -35,10 +37,10 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 	}
 	sourceEndpoint, destinationEndpoint := "", ""
 	if srcIP != "" {
-		sourceEndpoint = srcIP + ":" + srcPort
+		sourceEndpoint = net.JoinHostPort(srcIP, srcPort)
 	}
 	if dstIP != "" {
-		destinationEndpoint = dstIP + ":" + dstPort
+		destinationEndpoint = net.JoinHostPort(dstIP, dstPort)
 	}
 	resolution := p.registry.ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint)
 	callID := resolution.CallID
@@ -63,6 +65,7 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 		IsVoIP:          true,
 		PacketType:      PacketTypeRTP,
 		CallID:          callID,
+		CallLifetime:    resolution.Lifetime,
 		CallIDs:         callIDs,
 		MediaResolution: resolution,
 		Metadata:        pbMetadata,
@@ -104,49 +107,21 @@ func extractRTPMetadata(payload []byte) *data.RTPMetadata {
 // Media lines without an accompanying c= connection address are skipped —
 // port-only entries cause false correlations on busy networks where the same
 // RTP port is reused across unrelated calls.
-func extractRTPPortsFromSDP(sdp string) []string {
-	endpoints := make([]string, 0, 4)
-
-	// First, extract the session-level connection address (c= line)
-	// Can be overridden per media line
-	sessionIP := ""
-	lines := strings.Split(sdp, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 3 {
-				sessionIP = fields[2]
-				break
-			}
-		}
+func extractRTPPortsFromSDP(body string, limits ...int) []string {
+	limit := DefaultConfig().MaxEndpointsPerCall
+	if len(limits) > 0 && limits[0] > 0 {
+		limit = limits[0]
 	}
-
-	currentIP := sessionIP
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 3 {
-				currentIP = fields[2]
-			}
-			continue
-		}
-
-		// Format: m=audio <port> RTP/AVP <payload_types>
-		if strings.HasPrefix(line, "m=audio ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				port := fields[1]
-				if isValidPort(port) && currentIP != "" {
-					endpoints = append(endpoints, currentIP+":"+port)
-				}
-			}
-		}
+	parsed, err := sharedsip.ParseSDPEndpoints(body, limit)
+	if err != nil {
+		logger.Warn("Cannot extract SDP media endpoints", "error", err)
+		return []string{}
 	}
-
-	return endpoints
+	result := make([]string, 0, len(parsed))
+	for _, endpoint := range parsed {
+		result = append(result, endpoint.Address.String())
+	}
+	return result
 }
 
 // isValidPort validates that a string represents a valid port number.

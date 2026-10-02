@@ -1,10 +1,14 @@
 package capture
 
-import "sync"
+import (
+	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
+	"sync"
+)
 
 // Telemetry is a cumulative snapshot of live capture health across all
 // interfaces participating in one capture session.
 type Telemetry struct {
+	MediaAdmission            *mediaadmission.Snapshot
 	PacketsReceived           int64
 	KernelDrops               int64
 	InterfaceDrops            int64
@@ -28,7 +32,7 @@ type Telemetry struct {
 	SIPFlowActive             int
 	// FragmentIngress is cumulative by interface for this capture session.
 	FragmentIngress map[string]FragmentIngress
-	// IPv4Defrag is one shared session snapshot, never summed across interfaces.
+	// IPv4Defrag sums distinct observation domains once, never once per interface.
 	IPv4Defrag IPv4DefragSnapshot
 }
 
@@ -44,12 +48,14 @@ type FragmentIngress struct {
 type TelemetryCallback func(Telemetry)
 
 type telemetryCollector struct {
+	admission       mediaadmission.StatusProvider
 	mu              sync.Mutex
 	callbackMu      sync.Mutex
 	interfaces      map[string]interfaceTelemetry
 	callback        TelemetryCallback
 	fragmentIngress map[string]FragmentIngress
 	ipv4            *IPv4Defragmenter
+	ipv4Domains     []*IPv4Defragmenter
 }
 
 type interfaceTelemetry struct {
@@ -113,7 +119,9 @@ func (c *telemetryCollector) report(interfaceName string, received, kernelDrops,
 			snapshot.FragmentIngress[name] = stats
 		}
 	}
-	if c.ipv4 != nil {
+	if len(c.ipv4Domains) > 0 {
+		snapshot.IPv4Defrag = sumIPv4Defrag(c.ipv4Domains)
+	} else if c.ipv4 != nil {
 		snapshot.IPv4Defrag = c.ipv4.Snapshot()
 	}
 	if buffer != nil {
@@ -139,6 +147,10 @@ func (c *telemetryCollector) report(interfaceName string, received, kernelDrops,
 		snapshot.SIPFlowActive = active
 	}
 	c.mu.Unlock()
+	if c.admission != nil {
+		status := c.admission.Status()
+		snapshot.MediaAdmission = &status
+	}
 	if c.callback != nil {
 		c.callback(snapshot)
 	}

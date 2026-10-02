@@ -927,3 +927,33 @@ promiscuous: true
 ```
 
 For more on performance tuning, see [Performance Optimization](../part5-advanced/performance.md). For TLS certificate setup, see [Security](../part5-advanced/security.md).
+
+## VoIP eBPF media admission {#voip-ebpf-media-admission}
+
+The optional Linux capture optimization is configured under
+`hunter.voip.rtp_ebpf` and `tap.voip.rtp_ebpf`. Only `enabled: true` activates it;
+setting `mode` or `failure_policy` alone does not.
+
+| Member                      | Default   | Purpose                                                        |
+| --------------------------- | --------- | -------------------------------------------------------------- |
+| `enabled`                   | `false`   | Explicit activation for live VoIP capture.                     |
+| `mode`                      | `enforce` | `enforce` or diagnostic `shadow`.                              |
+| `failure_policy`            | `open`    | Scoped runtime `open` or `closed` behavior.                    |
+| `interface_domains`         | `{}`      | Interface-to-domain mapping; unassigned interfaces share zero. |
+| `endpoint_capacity`         | `40000`   | Distinct installed candidate endpoints.                        |
+| `owner_capacity`            | `10000`   | Eligible call lifetime owners.                                 |
+| `max_endpoints_per_owner`   | `32`      | Accepted RTP plus separate RTCP endpoints per owner.           |
+| `pending_dialog_capacity`   | `10000`   | Retained unmatched dialog metadata records.                    |
+| `pending_endpoint_capacity` | `40000`   | Retained metadata endpoints.                                   |
+| `pending_bytes`             | `8388608` | Pending metadata accounting bound.                             |
+| `pending_ttl`               | `30s`     | Pending metadata expiry.                                       |
+| `expiration_batch`          | `256`     | Bounded expiry work per sweep.                                 |
+| `retry_interval`            | `1s`      | Reconciliation interval.                                       |
+| `shadow_evidence_capacity`  | `1024`    | Retained diagnostic samples.                                   |
+| `missing_media_interval`    | `30s`     | Selected/answered-without-media diagnostic interval.           |
+
+Positive resource limits and durations are required. Interface domains are below 4096. The same domain must contain related signaling and media. Explicit capture
+restrictions remain effective during shadow and runtime-open admission. These
+settings do not preserve pre-match RTP. See
+[selective VoIP media capture](../part5-advanced/voip.md#selective-media-capture-with-ebpf)
+for behavior and implementation status.

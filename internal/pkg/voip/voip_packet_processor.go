@@ -7,6 +7,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	mediaadaptor "github.com/endorses/lippycat/internal/pkg/voip/admission"
 	"github.com/google/gopacket/layers"
 )
 
@@ -129,5 +130,22 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 		logger.Debug("Dropping non-TCP/UDP packet in VoIP mode",
 			"type", packet.TransportLayer().LayerType())
 		return false
+	}
+}
+
+// SetMediaAdmission is startup-only. Both transports share selection and metadata
+// within one observation domain, while domain routers use independent processors.
+func (p *VoIPPacketProcessor) SetMediaAdmission(bridge *mediaadaptor.Bridge, domainInterface string) {
+	store := newHunterSelectionStore()
+	p.udpHandler.orchestrator.Close()
+	p.udpHandler.orchestrator = newHunterSIPOrchestrator(p.udpHandler.forwarder, p.udpHandler.selectionPolicy, store)
+	p.udpHandler.admission = bridge
+	p.udpHandler.orchestrator.SetMetadataObserver(bridge)
+	if p.tcpHandler != nil {
+		p.tcpHandler.orchestrator.Close()
+		p.tcpHandler.orchestrator = newHunterSIPOrchestrator(p.tcpHandler.forwarder, p.tcpHandler.selectionPolicy, store)
+		p.tcpHandler.admission = bridge
+		p.tcpHandler.captureInterface = domainInterface
+		p.tcpHandler.orchestrator.SetMetadataObserver(bridge)
 	}
 }

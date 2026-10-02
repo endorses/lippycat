@@ -145,6 +145,7 @@ go test -v ./test/... -run TestIntegration -timeout 5m
 ### Dependencies
 
 All dependencies are standard lippycat dependencies:
+
 - `github.com/stretchr/testify` - assertions
 - `google.golang.org/grpc` - gRPC client/server
 - `github.com/google/gopacket` - packet manipulation
@@ -154,21 +155,25 @@ All dependencies are standard lippycat dependencies:
 ### Test Helpers
 
 **startTestProcessor(ctx, addr)**: Creates and starts a test processor instance
+
 - Minimal configuration for testing
 - Background goroutine execution
 - Returns processor instance for stats/control
 
 **connectHunter(ctx, addr, hunterID)**: Connects a simulated hunter to processor
+
 - Registers hunter with processor
 - Creates bidirectional gRPC stream
 - Returns connection and stream for packet sending
 
 **createTestBatch(hunterID, sequence, numPackets)**: Creates synthetic packet batches
+
 - Generates realistic packet structures
 - Includes metadata and stats
 - Configurable size and content
 
 **createSyntheticPacket(index)**: Creates individual test packets
+
 - Ethernet/IP/UDP/payload structure
 - Unique identifiers per packet
 - Valid checksums and headers
@@ -176,6 +181,7 @@ All dependencies are standard lippycat dependencies:
 ### Mock Infrastructure
 
 **MockPacketSource**: Simulates packet capture source
+
 - In-memory packet queue
 - Controllable packet generation
 - Used for isolated testing
@@ -197,6 +203,7 @@ Integration tests are designed to complement unit tests by validating:
 These integration tests implement recommendation 20 from the code review:
 
 > **20. Write integration tests** - E2E VALIDATION - 1 week
+>
 > - Hunter failure scenarios
 > - High volume tests (10,000 packets/second sustained)
 > - Protocol detection accuracy tests
@@ -225,7 +232,9 @@ These integration tests implement recommendation 20 from the code review:
 ## New Features (2025-10-10)
 
 ### ✅ TLS Integration Tests (`tls_integration_test.go`)
+
 Comprehensive TLS security testing:
+
 - **Mutual TLS Authentication**: Full mTLS with client certificates
 - **TLS 1.3 Enforcement**: Validates TLS version requirements
 - **Certificate Validation**: Tests invalid/self-signed cert rejection
@@ -233,12 +242,15 @@ Comprehensive TLS security testing:
 - **Production Mode Enforcement**: Tests security guards
 
 **Run TLS tests:**
+
 ```bash
 go test -v ./test/ -run TestIntegration_TLS
 ```
 
 ### ✅ Filter Distribution Tests (`filter_distribution_integration_test.go`)
+
 Dynamic filter management testing:
+
 - **Single Hunter**: Filter push to individual hunter
 - **Multiple Hunters**: Broadcast filters to hunter groups
 - **Update/Remove**: Filter lifecycle management
@@ -246,12 +258,15 @@ Dynamic filter management testing:
 - **Priority Ordering**: Filter priority enforcement
 
 **Run filter tests:**
+
 ```bash
 go test -v ./test/ -run TestIntegration_FilterDistribution
 ```
 
 ### ✅ Docker Compose Environment (`docker-compose.yml`)
+
 Isolated multi-node testing infrastructure:
+
 - **Multiple Processors**: Primary + upstream hierarchical setup
 - **Multiple Hunters**: 3 hunter nodes with TLS
 - **Packet Generator**: Synthetic traffic generation
@@ -259,6 +274,7 @@ Isolated multi-node testing infrastructure:
 - **Network Isolation**: Dedicated test network
 
 **Quick start:**
+
 ```bash
 cd test
 ./testcerts/generate_test_certs.sh
@@ -268,7 +284,9 @@ docker-compose up --build
 See [DOCKER_TESTING.md](DOCKER_TESTING.md) for detailed Docker Compose usage.
 
 ### ✅ Performance Benchmarks (`benchmark_test.go`)
+
 Comprehensive performance testing:
+
 - **Packet Throughput**: Measures packets/sec and MB/sec
 - **End-to-End Latency**: Measures µs per packet
 - **Filter Distribution**: Measures distribution speed
@@ -276,12 +294,15 @@ Comprehensive performance testing:
 - **Protocol Detection**: Detection performance
 
 **Run benchmarks:**
+
 ```bash
 go test -v ./test/ -bench=. -benchmem -benchtime=10s
 ```
 
 ### ✅ CI/CD Integration (`.github/workflows/integration-tests.yml`)
+
 Automated testing pipeline:
+
 - **Unit Tests**: With race detection and coverage
 - **Integration Tests**: All TestIntegration_* tests
 - **Docker Integration**: Multi-node Docker testing
@@ -290,13 +311,16 @@ Automated testing pipeline:
 - **Lint**: golangci-lint + gofmt checks
 
 ### ✅ Test Certificate Generation (`testcerts/`)
+
 Automated TLS certificate generation:
+
 - **CA Certificate**: Test certificate authority
 - **Server Certificates**: Processor + upstream
 - **Client Certificates**: Hunter + TUI client
 - **10-Year Validity**: Long-lived test certs
 
 **Generate certificates:**
+
 ```bash
 cd test/testcerts
 ./generate_test_certs.sh
@@ -359,14 +383,14 @@ When adding integration tests:
 
 ## Test Coverage Matrix
 
-| Test Category | Test Files | Coverage |
-|---------------|-----------|----------|
-| Hunter/Processor Integration | `integration_test.go` | Basic flow, crash recovery, network partition, high volume, multiple hunters, jumbo frames |
-| Protocol Detection | `protocol_detection_integration_test.go` | False positives, multi-protocol, malformed packets, accuracy |
-| TLS Security | `tls_integration_test.go` | mTLS, TLS 1.3, cert validation, SNI, production mode |
-| Filter Distribution | `filter_distribution_integration_test.go` | Single/multi-hunter, update/remove, circuit breaker, priority |
-| Performance | `benchmark_test.go` | Throughput, latency, filter distribution, concurrent hunters |
-| Docker Multi-Node | `docker-compose.yml` | Hierarchical processors, TLS-enabled, packet generation |
+| Test Category                | Test Files                                | Coverage                                                                                   |
+| ---------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Hunter/Processor Integration | `integration_test.go`                     | Basic flow, crash recovery, network partition, high volume, multiple hunters, jumbo frames |
+| Protocol Detection           | `protocol_detection_integration_test.go`  | False positives, multi-protocol, malformed packets, accuracy                               |
+| TLS Security                 | `tls_integration_test.go`                 | mTLS, TLS 1.3, cert validation, SNI, production mode                                       |
+| Filter Distribution          | `filter_distribution_integration_test.go` | Single/multi-hunter, update/remove, circuit breaker, priority                              |
+| Performance                  | `benchmark_test.go`                       | Throughput, latency, filter distribution, concurrent hunters                               |
+| Docker Multi-Node            | `docker-compose.yml`                      | Hierarchical processors, TLS-enabled, packet generation                                    |
 
 ## Quick Reference Commands
 
@@ -393,3 +417,18 @@ docker-compose up --build
 cd test
 docker-compose down -v
 ```
+
+## Privileged VoIP eBPF tests
+
+Run `make test-ebpf` from the repository root. It builds the recorded compiler
+image and runs kernel program, real libpcap/veth, and `tap voip` / `hunt voip`
+command tests in a disposable privileged container with a separate network
+namespace. The repository/module cache are mounted read-only for tests; build
+caches and command artifacts are removed with the container.
+
+The harness sets `LIPPYCAT_EBPF_TEST=1`. With explicit opt-in, missing privileges,
+unsupported kernel features or a missing command binary fail the test. Ordinary
+unprivileged test runs report the privileged cases as not exercised. No kernel
+coverage should be inferred from a skipped test. BPF object generation is a
+separate operation:
+`internal/pkg/capture/ebpfadmission/toolchain.sh generate`.

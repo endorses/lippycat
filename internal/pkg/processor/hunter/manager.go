@@ -16,6 +16,7 @@ type TopologyPublisher interface {
 
 // ConnectedHunter represents a connected hunter node
 type ConnectedHunter struct {
+	admission                     *management.MediaAdmissionStatus
 	ID                            string
 	Hostname                      string
 	RemoteAddr                    string
@@ -238,6 +239,11 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 			hunter.CpuPercent = stats.CpuPercent
 			hunter.MemoryRssBytes = stats.MemoryRssBytes
 			hunter.MemoryLimitBytes = stats.MemoryLimitBytes
+			if stats.RtpEbpf == nil {
+				hunter.admission = nil
+			} else {
+				hunter.admission = proto.Clone(stats.RtpEbpf).(*management.MediaAdmissionStatus)
+			}
 			if stats.Detector == nil {
 				hunter.Detector = nil
 			} else {
@@ -540,4 +546,15 @@ func (m *Manager) GetFilterFailures(hunterID string) (failures uint32, lastFailu
 		return hunter.FilterUpdateFailures, hunter.LastFilterUpdateFailure
 	}
 	return 0, 0
+}
+
+// AdmissionStatus clones the latest snapshot under the heartbeat lock.
+func (m *Manager) AdmissionStatus(hunterID string) *management.MediaAdmissionStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	hunter := m.hunters[hunterID]
+	if hunter == nil || hunter.admission == nil {
+		return nil
+	}
+	return proto.Clone(hunter.admission).(*management.MediaAdmissionStatus)
 }

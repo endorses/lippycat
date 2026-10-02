@@ -717,3 +717,7 @@ func getCapturesDir() (string, error) {
 
 	return filepath.Join(homeDir, ".local", "share", "lippycat", "captures"), nil
 }
+
+// AdmissionRegistry exposes the authoritative endpoint/lifetime observation
+// contract for optional local kernel admission. Callers must not invent owners.
+func (ct *CallTracker) AdmissionRegistry() *callregistry.Core { return ct.registry }

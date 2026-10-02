@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/capture/admissionintegration"
 	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
@@ -53,6 +56,7 @@ func stableFilterIDUnion(direct, inherited []string) []string {
 
 // Config contains hunter configuration
 type Config struct {
+	MediaAdmission    *admissionintegration.Session
 	RADIUSPorts       []uint16
 	RADIUSScope       radius.CaptureScope
 	RADIUSOnly        bool
@@ -167,13 +171,32 @@ func New(config Config) (*Hunter, error) {
 		config.SendTimeout = 5 * time.Second // Default: 5s timeout
 	}
 
+	// Admission routes SIP state and kernel keys by the concrete device name.
+	// Normalize the capture list once so both sides use the same names.
+	if config.MediaAdmission != nil && config.MediaAdmission.Config.Enabled {
+		var interfaces []string
+		for _, list := range config.Interfaces {
+			for _, name := range strings.Split(list, ",") {
+				if name = strings.TrimSpace(name); name != "" {
+					interfaces = append(interfaces, name)
+				}
+			}
+		}
+		config.Interfaces = interfaces
+	}
+
 	// Create main context for initialization (will be replaced in Start())
 	// This is just for the capture manager constructor
 	ctx := context.Background()
 
 	// Create capture manager (will be recreated with proper context in Start())
+	var admissionInstaller capture.FilterInstaller
+	if config.MediaAdmission != nil {
+		admissionInstaller = config.MediaAdmission.Installer()
+	}
 	captureManager := huntercapture.New(huntercapture.Config{
 		ReassembleIPFragments: config.VoIPMode,
+		FilterInstaller:       admissionInstaller,
 		RADIUSPorts:           config.RADIUSPorts,
 		Interfaces:            config.Interfaces,
 		BaseFilter:            config.BPFFilter,
@@ -195,6 +218,10 @@ func New(config Config) (*Hunter, error) {
 		captureManager: captureManager,
 		batchQueue:     make(chan *pipeline.PacketBatch, batchQueueSize),
 		batchQueueSize: batchQueueSize,
+	}
+
+	if config.MediaAdmission != nil {
+		h.statsCollector.SetMediaAdmissionProvider(config.MediaAdmission)
 	}
 
 	// Create filter manager with capture restarter interface
@@ -294,6 +321,9 @@ func (h *Hunter) Start(ctx context.Context) error {
 
 	appFilter, err := NewApplicationFilter(gpuConfig)
 	if err != nil {
+		if h.config.MediaAdmission != nil {
+			return fmt.Errorf("initialize required admission selection filter: %w", err)
+		}
 		logger.Warn("Failed to initialize application filter, continuing without it", "error", err)
 	} else {
 		h.applicationFilter = appFilter
@@ -309,6 +339,14 @@ func (h *Hunter) Start(ctx context.Context) error {
 			"batch_size", h.config.GPUBatchSize,
 			"no_filter_policy", h.config.NoFilterPolicy)
 
+		if h.config.MediaAdmission != nil {
+			if err := appFilter.SetAdmissionObserver(func(prefixes []netip.Prefix, noFilters bool) error {
+				return h.config.MediaAdmission.UpdateSelectors(h.ctx, prefixes, noFilters)
+			}); err != nil {
+				appFilter.Close()
+				return fmt.Errorf("initialize admission packet selectors: %w", err)
+			}
+		}
 		// Wire up application filter to filter manager for hot-reload
 		h.filterManager.SetApplicationFilterUpdater(appFilter)
 		logger.Info("Application filter hot-reload enabled (filters update without restart)")

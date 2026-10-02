@@ -111,9 +111,13 @@ func (s hunterForwardSink) HandleSIP(ctx context.Context, input sipflow.SinkInpu
 	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
 }
 
-func newHunterSIPOrchestrator(forwarder PacketForwarder, policy callregistry.SelectionPolicy) *sipflow.Orchestrator {
+func newHunterSIPOrchestrator(forwarder PacketForwarder, policy callregistry.SelectionPolicy, stores ...*hunterSelectionStore) *sipflow.Orchestrator {
+	store := newHunterSelectionStore()
+	if len(stores) > 0 {
+		store = stores[0]
+	}
 	orchestrator, err := sipflow.New(sipflow.Config{
-		SelectionStore:  newHunterSelectionStore(),
+		SelectionStore:  store,
 		SelectionPolicy: policy,
 		Completion:      hunterDialogCompletionPolicy{},
 	})

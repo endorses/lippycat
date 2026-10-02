@@ -96,21 +96,31 @@ func (DialogCompletionPolicy) Completes(event sharedsip.Event) bool {
 	return event.ResponseCode >= 200 && (event.CSeqMethod == "BYE" || event.CSeqMethod == "CANCEL")
 }
 
+// MetadataObserver observes only validated parsed metadata. Implementations
+// must not retain payloads. Errors are exposed without changing SIP output
+// selection: admission degradation is an independent runtime concern.
+type MetadataObserver interface {
+	ObserveValidated(pipeline.SIPResult) error
+	Selected(pipeline.SIPResult) error
+}
+
 type Config struct {
-	SelectionPolicy callregistry.SelectionPolicy
-	SelectionStore  SelectionStore
-	Registry        Registry
-	Completion      CompletionPolicy
+	MetadataObserver MetadataObserver
+	SelectionPolicy  callregistry.SelectionPolicy
+	SelectionStore   SelectionStore
+	Registry         Registry
+	Completion       CompletionPolicy
 }
 
 // ProcessResult reports orchestration acceptance separately from asynchronous
 // sink delivery. Sink enqueue outcomes are attributable by sink name.
 type ProcessResult struct {
-	SIP        pipeline.SIPResult
-	Stage      pipeline.Result
-	Sinks      map[string]pipeline.Result
-	Attachment any
-	Terminal   bool
+	MetadataError error
+	SIP           pipeline.SIPResult
+	Stage         pipeline.Result
+	Sinks         map[string]pipeline.Result
+	Attachment    any
+	Terminal      bool
 }
 
 type sinkRegistration struct {
@@ -249,6 +259,10 @@ func (o *Orchestrator) Analyze(message Message) ProcessResult {
 			return ProcessResult{SIP: pipeline.SIPResultFromEvent(event, message.Envelope), Stage: pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: err}}
 		}
 	}
+	var metadataErr error
+	if o.cfg.MetadataObserver != nil {
+		metadataErr = o.cfg.MetadataObserver.ObserveValidated(result)
+	}
 	previouslySelected := o.cfg.SelectionStore.Selected(event.CallID)
 	directMatch := message.DirectMatch
 	if message.Match != nil {
@@ -259,7 +273,7 @@ func (o *Orchestrator) Analyze(message Message) ProcessResult {
 		DirectMatch:        directMatch,
 		PreviouslySelected: previouslySelected,
 	}) {
-		return ProcessResult{SIP: result, Stage: pipeline.Result{Outcome: pipeline.OutcomeFiltered}}
+		return ProcessResult{SIP: result, MetadataError: metadataErr, Stage: pipeline.Result{Outcome: pipeline.OutcomeFiltered}}
 	}
 	o.cfg.SelectionStore.MarkSelected(event.CallID)
 	if o.cfg.Registry != nil {
@@ -268,15 +282,18 @@ func (o *Orchestrator) Analyze(message Message) ProcessResult {
 			if !previouslySelected {
 				o.cfg.SelectionStore.Forget(event.CallID)
 			}
-			return ProcessResult{SIP: result, Stage: pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: fmt.Errorf("observe SIP call: %w", observeErr)}}
+			return ProcessResult{SIP: result, MetadataError: metadataErr, Stage: pipeline.Result{Outcome: pipeline.OutcomePermanentFailure, Err: fmt.Errorf("observe SIP call: %w", observeErr)}}
 		}
 		result.Lifecycle = append(result.Lifecycle, observation.Lifecycle...)
 		if len(observation.MatchedFilterIDs) > 0 {
 			result.MatchedFilterIDs = append([]string(nil), observation.MatchedFilterIDs...)
 		}
-		return ProcessResult{SIP: result, Stage: pipeline.Result{Outcome: pipeline.OutcomeAccepted}, Attachment: observation.Attachment, Terminal: o.cfg.Completion.Completes(event)}
+		if o.cfg.MetadataObserver != nil {
+			metadataErr = errors.Join(metadataErr, o.cfg.MetadataObserver.Selected(result))
+		}
+		return ProcessResult{SIP: result, MetadataError: metadataErr, Stage: pipeline.Result{Outcome: pipeline.OutcomeAccepted}, Attachment: observation.Attachment, Terminal: o.cfg.Completion.Completes(event)}
 	}
-	return ProcessResult{SIP: result, Stage: pipeline.Result{Outcome: pipeline.OutcomeAccepted}, Terminal: o.cfg.Completion.Completes(event)}
+	return ProcessResult{SIP: result, MetadataError: metadataErr, Stage: pipeline.Result{Outcome: pipeline.OutcomeAccepted}, Terminal: o.cfg.Completion.Completes(event)}
 }
 
 // Dispatch offers an accepted analysis to every sink. A full sink queue does
@@ -427,4 +444,16 @@ func (s *sinkCounters) snapshot() SinkStats {
 		QueueFull: s.queueFull.Load(), BufferFull: s.bufferFull.Load(), RateLimited: s.rateLimited.Load(),
 		Expired: s.expired.Load(), ShutdownDrops: s.shutdownDrop.Load(),
 	}
+}
+
+// SetMetadataObserver wires an instance-owned optional observer. Hunter adapters
+// without a Registry call Selected themselves after accepted associations exist.
+func (o *Orchestrator) SetMetadataObserver(observer MetadataObserver) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed {
+		return ErrClosed
+	}
+	o.cfg.MetadataObserver = observer
+	return nil
 }

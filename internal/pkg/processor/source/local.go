@@ -31,6 +31,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
@@ -63,8 +64,9 @@ type VoIPProcessor = *voipprocessor.SourceAdapter
 // for injection into the batch processing pipeline.
 // Used by TCP SIP handlers to inject reassembled packets with metadata.
 type InjectedPacket struct {
-	PacketInfo capture.PacketInfo
-	Metadata   *data.PacketMetadata
+	CallLifetime callregistry.Lifetime
+	PacketInfo   capture.PacketInfo
+	Metadata     *data.PacketMetadata
 	// AfterProcess runs after the packet's batch has traversed the processor
 	// pipeline. It is used for lifecycle transitions that must follow the final
 	// packet's processing and synchronous output writes.
@@ -359,6 +361,9 @@ type LocalSource struct {
 
 // LocalSourceConfig contains configuration for LocalSource.
 type LocalSourceConfig struct {
+	// FilterInstaller installs an optional composed filter on every capture generation.
+	FilterInstaller capture.FilterInstaller
+	AdmissionStatus mediaadmission.StatusProvider
 	// CaptureInterfaces optionally supplies fresh, owned interfaces for each
 	// capture generation. Embedders can provide virtual or deterministic sources;
 	// nil opens the configured live Interfaces. Set before constructing the source.
@@ -487,7 +492,7 @@ func (s *LocalSource) SetVoIPProcessor(processor VoIPProcessor) {
 	defer s.mu.Unlock()
 	s.voipProcessor = processor
 	if processor != nil {
-		processor.AddLifecycleObserver(s)
+		processor.AddSelectionLifecycleObserver(s)
 	}
 }
 
@@ -755,7 +760,7 @@ func (s *LocalSource) capturePackets(ctx context.Context, filter string, done ch
 	capture.InitWithBufferReady(ctx, devices, filter, s.packetBuffer.Load(), func(links []layers.LinkType, err error) {
 		started = err == nil
 		ready <- captureStartResult{links: links, err: err}
-	}, capture.CaptureOptions{ReassembleIPFragments: s.config.ProtocolMode == "voip"})
+	}, capture.CaptureOptions{ReassembleIPFragments: s.config.ProtocolMode == "voip", FilterInstaller: s.config.FilterInstaller})
 	if started && ctx.Err() == nil {
 		select {
 		case s.captureError <- errors.New("local capture stopped unexpectedly"):
@@ -938,7 +943,8 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil {
 					callID = pbPkt.Metadata.Sip.CallId
 				}
-				inheritedIDs := s.cachedFilterIDsForCall(callID)
+				cacheKey := s.filterCacheKey(callID, injectedPkt.PacketInfo.Interface, injectedPkt.CallLifetime)
+				inheritedIDs := s.cachedFilterIDsForCall(cacheKey)
 				selected := selectionPolicy.Select(callregistry.SelectionInput{
 					FilterConfigured:   true,
 					DirectMatch:        matched,
@@ -956,11 +962,14 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
-							cachedCallIDs := s.cachedFilterIDsForCall(callID)
-							s.callFilterCache.Store(callID, cachedFilterIDs{
-								filterIDs: composeFilterIDs(cachedCallIDs, directIDs),
-								storedAt:  time.Now(),
-							})
+							cacheKey := s.filterCacheKey(callID, injectedPkt.PacketInfo.Interface, injectedPkt.CallLifetime)
+							if cacheKey != "" {
+								cachedCallIDs := s.cachedFilterIDsForCall(cacheKey)
+								s.callFilterCache.Store(cacheKey, cachedFilterIDs{
+									filterIDs: composeFilterIDs(cachedCallIDs, directIDs),
+									storedAt:  time.Now(),
+								})
+							}
 						}
 					}
 				}
@@ -1050,12 +1059,14 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			// detecting SIP, so reuse its verdict rather than matching again.
 			var isVoIPPacket bool
 			var voipCallID string
+			var voipLifetime callregistry.Lifetime
 			var mediaResolution callregistry.MediaResolution
 			var reuseVerdict, reuseMatched bool
 			var reuseIDs []string
 			if voipProc != nil {
-				if result := voipProc.Process(pktInfo.Packet); result != nil {
+				if result := voipProc.ProcessPacketInfo(pktInfo); result != nil {
 					voipCallID = result.GetCallID()
+					voipLifetime = result.GetCallLifetime()
 					mediaResolution = result.GetMediaResolution()
 					reuseVerdict, reuseMatched, reuseIDs = result.FilterVerdict()
 					if result.IsVoIPPacket() {
@@ -1133,7 +1144,7 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				} else if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && voipCallID == "" {
 					voipCallID = pbPkt.Metadata.Sip.CallId
 				}
-				inheritedFilterIDs := s.cachedFilterIDsForCall(voipCallID)
+				inheritedFilterIDs := s.cachedFilterIDsForCall(s.filterCacheKey(voipCallID, pktInfo.Interface, voipLifetime))
 				selected := selectionPolicy.Select(callregistry.SelectionInput{
 					FilterConfigured:   filterConfigured,
 					DirectMatch:        matched,
@@ -1152,11 +1163,14 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 					if len(directFilterIDs) > 0 && pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
 						callID := pbPkt.Metadata.Sip.CallId
 						if callID != "" {
-							cachedCallIDs := s.cachedFilterIDsForCall(callID)
-							s.callFilterCache.Store(callID, cachedFilterIDs{
-								filterIDs: composeFilterIDs(cachedCallIDs, directFilterIDs),
-								storedAt:  time.Now(),
-							})
+							cacheKey := s.filterCacheKey(callID, pktInfo.Interface, voipLifetime)
+							if cacheKey != "" {
+								cachedCallIDs := s.cachedFilterIDsForCall(cacheKey)
+								s.callFilterCache.Store(cacheKey, cachedFilterIDs{
+									filterIDs: composeFilterIDs(cachedCallIDs, directFilterIDs),
+									storedAt:  time.Now(),
+								})
+							}
 						}
 					}
 				} else {
@@ -1193,6 +1207,9 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 				continue
 			}
 			envelope.RADIUS = radiusObservation
+			if voipProc != nil && mediaResolution.Status == callregistry.MediaResolved && pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil {
+				voipProc.RecordAttributedMedia(mediaResolution.CallID, pktInfo.Interface, mediaResolution.Lifetime)
+			}
 			// A packet is forwarded only after it can be admitted to a batch.
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 			s.batchMu.Lock()
@@ -1309,6 +1326,7 @@ func (s *LocalSource) Stats() Stats {
 	st.TCPOrphanControls = tcpTelemetry.OrphanControls
 	st.TCPAcceptRejectedControls = tcpTelemetry.AcceptRejectedControls
 	st.TCPReplacementDroppedBytes = tcpTelemetry.ReplacementDroppedBytes
+	st.MediaAdmission = s.MediaAdmissionStatus()
 	return st
 }
 
@@ -1647,3 +1665,23 @@ func (s *LocalSource) SupportsRADIUS() bool {
 
 // RADIUSCaptureBPF returns bidirectional service visibility for configured ports.
 func (s *LocalSource) RADIUSCaptureBPF() string { return radius.CaptureBPF(s.config.RADIUSPorts...) }
+
+// MediaAdmissionStatus snapshots the optional local capture optimization without
+// changing existing capture drop counter meanings.
+func (s *LocalSource) MediaAdmissionStatus() *mediaadmission.Snapshot {
+	if s.config.AdmissionStatus == nil {
+		return &mediaadmission.Snapshot{Scopes: []mediaadmission.ScopeTelemetry{{ScopeStatus: mediaadmission.ScopeStatus{State: mediaadmission.StateDisabled}}}}
+	}
+	snapshot := s.config.AdmissionStatus.Status()
+	return &snapshot
+}
+
+func (s *LocalSource) filterCacheKey(callID, iface string, lifetime callregistry.Lifetime) string {
+	s.mu.Lock()
+	processor := s.voipProcessor
+	s.mu.Unlock()
+	if processor == nil {
+		return callID
+	}
+	return processor.FilterCacheKeyForLifetime(callID, iface, lifetime)
+}

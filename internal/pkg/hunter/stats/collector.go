@@ -6,12 +6,15 @@ import (
 	"sync/atomic"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/admissiontelemetry"
 	"github.com/endorses/lippycat/internal/pkg/detector"
+	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 )
 
 // Collector tracks hunter statistics with lock-free atomic operations
 type Collector struct {
+	admissionProvider                          atomic.Value // stores func() *management.MediaAdmissionStatus
 	packetsCaptured, packetsMatched            atomic.Uint64
 	packetsForwarded, packetsDropped           atomic.Uint64
 	bufferBytes                                atomic.Uint64
@@ -130,7 +133,12 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 	if d := detector.GetDefaultIfInitialized(); d != nil {
 		detectorStats = d.Telemetry()
 	}
+	admission := disabledMediaAdmissionStatus()
+	if provider := c.admissionProvider.Load(); provider != nil {
+		admission = provider.(func() *management.MediaAdmissionStatus)()
+	}
 	return &management.HunterStats{
+		RtpEbpf:                       admission,
 		PacketsCaptured:               c.packetsCaptured.Load(),
 		PacketsMatched:                c.packetsMatched.Load(),
 		PacketsForwarded:              c.packetsForwarded.Load(),
@@ -168,4 +176,24 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 			SipIpPairCapEvictions:       detectorStats.SIPIPPairCapEvictions,
 		},
 	}
+}
+
+// SetMediaAdmissionProvider installs a snapshot callback before hunter startup.
+func (c *Collector) SetMediaAdmissionProvider(provider mediaadmission.StatusProvider) {
+	c.admissionProvider.Store(func() *management.MediaAdmissionStatus {
+		if provider == nil {
+			return disabledMediaAdmissionStatus()
+		}
+		return admissiontelemetry.ToProto(provider.Status())
+	})
+}
+
+// Current hunters publish an explicit disabled state; a missing field remains
+// distinguishable as an older peer that does not report admission telemetry.
+func disabledMediaAdmissionStatus() *management.MediaAdmissionStatus {
+	return admissiontelemetry.ToProto(mediaadmission.Snapshot{
+		Scopes: []mediaadmission.ScopeTelemetry{{
+			ScopeStatus: mediaadmission.ScopeStatus{State: mediaadmission.StateDisabled},
+		}},
+	})
 }

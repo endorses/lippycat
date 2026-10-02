@@ -1053,9 +1053,9 @@ lc list interfaces
 | `--json`  | bool | `false` | Output interface metadata as JSON                                |
 | `--check` | bool | `false` | Test capture access on displayed network interfaces              |
 
-The table shows `NAME`, `TYPE`, `STATE`, `ADDRESSES`, and `NOTES`. Loopback, tunnels, down interfaces, and unknown network interfaces remain visible; `any` appears only when provided by pcap. Default-route interfaces remain visible even if their type would otherwise be hidden. Linux supplies OS-based types, operational state, and IPv4/IPv6 default-route hints; other systems use available metadata with unknown fallbacks.
+The table shows `NAME`, `TYPE`, `STATE`, `ADDRESSES`, and `NOTES`; long address lists wrap onto continuation lines. Loopback, tunnels, down interfaces, and unknown network interfaces remain visible; `any` appears only when provided by pcap. Default-route interfaces remain visible even if their type would otherwise be hidden. Linux supplies OS-based types, operational state, and IPv4/IPv6 default-route hints from the main routing table; these hints do not evaluate policy routing. Other systems use available metadata with unknown fallbacks.
 
-`--names` cannot be combined with `--json` or `--check`. JSON preserves the `interfaces` array and adds interface `type`, `state`, and `default_route`, plus a top-level `hidden_count` and optional `warnings`.
+`--names` cannot be combined with `--json` or `--check`. JSON contains an `interfaces` array with `name`, `type`, `state`, and `default_route`, plus optional `description` and `addresses`. Address entries contain `ip` and an optional `prefix_len`. The top-level result also includes `hidden_count` and optional `warnings`.
 
 Listing does not test capture permissions. `--check` opens displayed network interfaces without promiscuous mode and closes them without reading packets. Special capture sources are skipped. It adds `CAPTURE` results (`available`, `unavailable`, `skipped`) and failure details in `NOTES`; JSON uses `capture_access` and optional `capture_error`. Per-interface access failures do not fail the command. Enumeration failures exit nonzero and write diagnostics to stderr, using a JSON error object with `--json`.
 

@@ -16,7 +16,7 @@ lc list interfaces
 
 This shows capture interfaces with their type, operational state, and IP addresses, including loopback, VPN/tunnel interfaces, and interfaces that are down. A default-route hint, when available, helps identify the host's outgoing interfaces. Pick the interface connected to the network you want to monitor. Use `--json` for structured metadata or `--names` for one interface name per line.
 
-> **Tip**: Use `lc list interfaces --all` to include bridges, container/VM links, and special capture sources. Use `--check` to briefly test capture access without promiscuous mode or reading packets; special capture sources are skipped. Listing alone does not test permissions.
+> **Tip**: Use `lc list interfaces --all` to include recognized bridges, container/VM links, and special capture sources hidden from the default view. Use `--check` to briefly test capture access without promiscuous mode or reading packets; special capture sources are skipped. Listing alone does not test permissions.
 
 ### Basic Capture {#basic-capture}
 

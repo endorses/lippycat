@@ -620,6 +620,17 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 
 ## Documentation Index
 
+### Manual Translation Requirements
+
+Whenever manual content changes, update the affected content in every language
+configured in `docs/manual/languages.json` as part of the same task. English
+Markdown in `docs/manual/src/` is the source; translations belong in the matching
+`docs/manual/po/<language>.po` catalogs. Follow `docs/manual/README.md`, translate
+new and changed text, and review affected fuzzy entries so the changed content
+does not fall back to English. Preserve command examples, code spans, link targets,
+and heading IDs. Run `make manual-check` and `make manual` to validate translations
+and build every edition before considering the manual update complete.
+
 ### User Manual (mdBook)
 
 - [docs/manual/](docs/manual/) - Comprehensive mdBook documentation site (`mdbook serve` to preview)

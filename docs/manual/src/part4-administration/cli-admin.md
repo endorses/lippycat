@@ -277,9 +277,9 @@ any      Aggregate  —      —                        all network interfaces
 7 additional capture devices hidden; use --all to show them.
 ```
 
-The default view includes physical interfaces, loopback, VPN/tunnel interfaces, and unclassified network interfaces, even when down. `any` appears only when provided by the capture library. Bridges, container/VM links, and special capture sources such as D-Bus and NFQUEUE are hidden; interfaces with a detected default route remain visible. Use `--all` to see every capture device.
+The default view includes physical interfaces, loopback, VPN/tunnel interfaces, and unclassified network interfaces, even when down. `any` appears only when provided by the capture library. Recognized bridges, selected virtual links such as container veth and VM TAP devices, and special capture sources such as D-Bus and NFQUEUE are hidden; interfaces with a detected default route remain visible. Use `--all` to see every capture device. Long address lists wrap onto continuation lines without omitting addresses.
 
-On Linux, OS metadata supplies interface types, operational state, and IPv4/IPv6 default-route hints. Other platforms use available metadata with unknown fallbacks. The default-route hint helps identify outgoing interfaces; it does not select the right interface for your capture automatically.
+On Linux, OS metadata supplies interface types, operational state, and IPv4/IPv6 default-route hints from the main routing table. Other platforms use available metadata with unknown fallbacks. The default-route hint does not evaluate policy routing or select the right interface for your capture automatically.
 
 <!-- i18n:skip -->
 
@@ -289,7 +289,7 @@ lc list interfaces --names
 lc list interfaces --json --check
 ```
 
-`--names` prints one name per line and cannot be combined with `--json` or `--check`. JSON contains an `interfaces` array, a `hidden_count`, and optional `warnings`. Each interface includes its name, description, addresses, type, state, and `default_route` hint.
+`--names` prints one name per line and cannot be combined with `--json` or `--check`. JSON contains an `interfaces` array, a `hidden_count`, and optional `warnings`. Each interface includes `name`, `type`, `state`, and `default_route`; `description` and `addresses` are included when available. Address entries contain `ip` and an optional `prefix_len`.
 
 Listing does not test permissions or require root. `--check` briefly opens displayed network devices without promiscuous mode and closes them without reading packets. Its `CAPTURE` column reports `available`, `unavailable`, or `skipped`; failures appear in `NOTES`. Special capture sources are skipped. With `--json`, results use `capture_access` and optional `capture_error` fields. These results describe access at the time of the check; later captures may use different options.
 

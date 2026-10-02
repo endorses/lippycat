@@ -202,8 +202,8 @@ func (m *Model) handleDeleteNode() tea.Cmd {
 			Title:       "Remove Processor",
 			Message:     "Are you sure you want to remove this processor?",
 			Details:     details,
-			ConfirmText: "y",
-			CancelText:  "n",
+			ConfirmText: "Remove",
+			CancelText:  "Cancel",
 			UserData: NodeDeletionData{
 				ProcessorAddr: selectedProcessorAddr,
 				ProcessorID:   proc.ProcessorID,
@@ -222,8 +222,8 @@ func (m *Model) handleDeleteNode() tea.Cmd {
 			Title:       "Unsubscribe from Hunter",
 			Message:     "Are you sure you want to unsubscribe from this hunter?",
 			Details:     details,
-			ConfirmText: "y",
-			CancelText:  "n",
+			ConfirmText: "Unsubscribe",
+			CancelText:  "Cancel",
 			UserData: NodeDeletionData{
 				ProcessorAddr: selectedHunter.ProcessorAddr,
 				HunterID:      selectedHunter.ID,

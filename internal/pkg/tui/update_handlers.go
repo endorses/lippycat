@@ -40,6 +40,10 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.uiState.EventFilterInput.SetWidth(msg.Width)
 	m.uiState.FileDialog.SetSize(msg.Width, msg.Height)
 	m.uiState.ConfirmDialog.SetSize(msg.Width, msg.Height)
+	m.uiState.ProtocolSelector.SetSize(msg.Width, msg.Height)
+	m.uiState.HunterSelector.SetSize(msg.Width, msg.Height)
+	m.uiState.FilterManager.SetSize(msg.Width, msg.Height)
+	m.uiState.NodesView.SetModalSize(msg.Width, msg.Height)
 	m.uiState.Toast.SetSize(msg.Width, msg.Height)
 
 	// Set dev console size (full screen when visible)
@@ -378,7 +382,7 @@ func (m Model) handleFileSelectedMsg(msg components.FileSelectedMsg) (Model, tea
 	filePath := msg.Path()
 
 	// Check if file exists
-	if _, err := os.Stat(filePath); err == nil {
+	if _, err := os.Stat(filePath); err == nil && !msg.OverwriteConfirmed {
 		// File exists - show confirmation dialog
 		fileName := filepath.Base(filePath)
 		cmd := m.uiState.ConfirmDialog.Show(components.ConfirmDialogOptions{
@@ -386,8 +390,8 @@ func (m Model) handleFileSelectedMsg(msg components.FileSelectedMsg) (Model, tea
 			Title:       "File Already Exists",
 			Message:     fmt.Sprintf("File '%s' already exists. Overwrite?", fileName),
 			Details:     []string{"Path: " + filePath},
-			ConfirmText: "y",
-			CancelText:  "n",
+			ConfirmText: "Overwrite",
+			CancelText:  "Cancel",
 			UserData: FileOverwriteData{
 				FilePath: filePath,
 			},
@@ -480,7 +484,8 @@ func (m Model) handleSaveCompleteMsg(msg SaveCompleteMsg) (Model, tea.Cmd) {
 
 // handleFilterOperationResultMsg handles filter operation completion
 func (m Model) handleFilterOperationResultMsg(msg components.FilterOperationResultMsg) (Model, tea.Cmd) {
-	// Filter operation completed (create/update/delete)
+	// Deliver completion even if its modal is inactive.
+	modalCmd := m.uiState.FilterManager.Update(msg)
 	if msg.Success {
 		var toastMsg string
 		switch msg.Operation {
@@ -493,20 +498,20 @@ func (m Model) handleFilterOperationResultMsg(msg components.FilterOperationResu
 		default:
 			toastMsg = fmt.Sprintf("Filter operation completed")
 		}
-		return m, m.uiState.Toast.Show(
+		return m, tea.Batch(modalCmd, m.uiState.Toast.Show(
 			toastMsg,
 			components.ToastSuccess,
 			components.ToastDurationShort,
-		)
+		))
 	}
 
 	// Operation failed - display error with chain context if available
 	errorMsg := m.formatChainError(msg.Operation, msg.FilterPattern, msg.Error)
-	return m, m.uiState.Toast.Show(
+	return m, tea.Batch(modalCmd, m.uiState.Toast.Show(
 		errorMsg,
 		components.ToastError,
 		components.ToastDurationLong,
-	)
+	))
 }
 
 // handleHunterSelectionConfirmedMsg handles confirmed hunter selection

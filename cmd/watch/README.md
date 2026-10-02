@@ -181,6 +181,39 @@ lc watch remote -P localhost:55555 --insecure
 - `q` / `Ctrl+C` - Quit
 - `?` - Help
 
+### Mouse and Keyboard in Dialogs
+
+Click a button to perform its action. Tab and Shift+Tab move between fields,
+lists, and enabled buttons; Enter or Space activates a focused button. Existing
+list and text-editing shortcuts remain available when those controls have focus.
+Disabled buttons cannot be activated. The action bar wraps in narrow terminals;
+use the wheel over a list to scroll its contents.
+
+Click a protocol row to select it, then choose **Apply**; double-clicking a row
+also applies it. In file dialogs, single-click selects, **Open** opens a file or
+enters a directory, and double-click performs the same navigation in open mode.
+Click breadcrumbs or **Up** to change directories, and click the search or
+filename field to edit it. **New folder** and **Show details** provide the
+corresponding file-browser controls.
+
+In save mode, selecting an existing file fills its filename; double-clicking
+focuses that name without saving. Choose **Save** to submit it. An existing
+destination requires **Replace** confirmation; **Keep editing** returns to the
+filename. **Cancel edit** leaves the current inline edit, while **Cancel** closes
+the file dialog. These controls also apply to Settings file pickers.
+
+The filter manager provides **New**, **Edit**, **Delete**, and **Close** buttons.
+Click a filter row to select it, or its checkbox to toggle it. Search, Type,
+Status, editor fields, and hunter targets are clickable. Hunter selectors have
+**All**, **None**, **Confirm**, and **Cancel** controls. Target choices remain
+local until confirmed; filter targets only offer compatible hunters. An empty
+filter target list means all compatible hunters, while an empty subscription
+means receiving packets from none.
+
+Clicking outside a dialog cancels only its visible layer. Offline opening and
+filtering dialogs also have **Cancel** buttons and stay open while cleanup
+finishes. If cleanup fails, use **Retry cleanup** or **Quit** where offered.
+
 ### Packet View
 
 - `j` / `k` / `Up` / `Down` - Navigate packets

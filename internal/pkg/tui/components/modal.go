@@ -12,16 +12,38 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
 
-// Modal is the common lifecycle contract for hosted dialogs. Dismiss cancels
-// the visible dialog without accepting its contents, including any cleanup or
-// cancellation result the owner needs. All hosted modals inherit backdrop clicks.
+// Modal is the lifecycle contract for hosted dialogs. Dismiss cancels only the
+// visible layer, including any cancellation result and asynchronous cleanup.
 type Modal interface {
 	View() string
 	Dismiss() tea.Cmd
 }
 
-// RenderHostedModal places every dialog in the host's current terminal canvas.
-// Already-centered views retain their position; compact views are centered too.
+// InteractiveModal declares actions and content targets using the same layout
+// as its View. Owners handle semantics; the host owns coordinates and gestures.
+type InteractiveModal interface {
+	Modal
+	ModalOptions() ModalRenderOptions
+	HandleModalAction(string) tea.Cmd
+	HandleModalFocus(string) tea.Cmd
+}
+
+// VisibleModal resolves an optional nested layer without allowing click-through.
+func VisibleModal(modal Modal) Modal {
+	for i := 0; i < 16 && modal != nil; i++ {
+		nested, ok := modal.(interface{ ActiveModal() Modal })
+		if !ok {
+			break
+		}
+		next := nested.ActiveModal()
+		if next == nil {
+			break
+		}
+		modal = next
+	}
+	return modal
+}
+
 func RenderHostedModal(modal Modal, width, height int) string {
 	if modal == nil {
 		return ""
@@ -29,27 +51,183 @@ func RenderHostedModal(modal Modal, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal.View())
 }
 
-// HandleModalMouse consumes a left press on the backdrop. The host must also
-// consume its following release so the gesture cannot reach the underlying UI.
-func HandleModalMouse(modal Modal, msg tea.MouseMsg, width, height int) (tea.Cmd, bool) {
-	if modal == nil || msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress ||
-		msg.X < 0 || msg.Y < 0 || msg.X >= width || msg.Y >= height {
-		return nil, false
-	}
-
-	bounds := modalBounds(RenderHostedModal(modal, width, height), width, height)
-	if bounds.Empty() || image.Pt(msg.X, msg.Y).In(bounds) {
-		return nil, false
-	}
-	return modal.Dismiss(), true
+// ModalRenderOptions separates information, controls and interaction state.
+type ModalRenderOptions struct {
+	ID, Title, Content, Footer string
+	Width, Height              int
+	Theme                      themes.Theme
+	ModalWidth                 int
+	ShowOverlay                bool
+	Actions                    []ModalAction
+	Targets                    []ModalTarget
+	State                      *ModalState
 }
 
-// modalBounds measures the visible modal canvas produced by RenderModal. Using
-// the rendered border includes padding, wrapped content, and caller positioning
-// without duplicating the renderer's layout rules or mutating state in View.
+// ModalLayout contains screen coordinates for the exact rendered canvas.
+type ModalLayout struct {
+	View                                            string
+	Bounds, ContentBounds                           image.Rectangle
+	Hits                                            []ModalTarget
+	ContentHeight, ContentOffset, FullContentHeight int
+	Fallback                                        bool
+}
+
+func modalContentWidth(opts ModalRenderOptions) int {
+	width := opts.ModalWidth
+	if width == 0 {
+		width = max(60, min(80, opts.Width*7/10))
+	}
+	return max(1, min(width+2, opts.Width-2)-6)
+}
+
+// ModalContentWidth lets content owners size rows without copying modal chrome.
+func ModalContentWidth(opts ModalRenderOptions) int { return modalContentWidth(opts) }
+
+func wrappedModalLines(text string, width int) []string {
+	return strings.Split(ansi.Hardwrap(text, max(1, width), true), "\n")
+}
+
+// LayoutModal is pure: hit testing is correct even before the next View call.
+func LayoutModal(opts ModalRenderOptions) ModalLayout {
+	var layout ModalLayout
+	if opts.Width <= 0 || opts.Height <= 0 {
+		layout.Fallback = true
+		return layout
+	}
+	width := modalContentWidth(opts)
+	focus := ""
+	offset := 0
+	if opts.State != nil {
+		focus = opts.State.Focus
+		offset = opts.State.Scroll
+	}
+	bar := layoutActionBar(opts.Actions, focus, width, opts.Theme)
+	var title, footer []string
+	if opts.Title != "" {
+		title = wrappedModalLines(opts.Title, width)
+		title = append(title, "")
+	}
+	if opts.Footer != "" {
+		footer = append([]string{""}, wrappedModalLines(opts.Footer, width)...)
+	}
+	actionHeight := len(bar.lines)
+	if actionHeight > 0 {
+		actionHeight++
+	}
+	padY := 1
+	overhead := 2 + 2*padY + len(title) + len(footer) + actionHeight
+	if overhead+1 > opts.Height {
+		padY = 0
+		overhead -= 2
+	}
+	if overhead+1 > opts.Height {
+		// Preserve controls before optional navigation hints and title wrapping.
+		footer = nil
+		if opts.Title != "" {
+			title = []string{ansi.Truncate(opts.Title, width, "…")}
+		}
+		compact := append([]ModalAction(nil), opts.Actions...)
+		for i := range compact {
+			compact[i].Shortcut = ""
+		}
+		bar = layoutActionBar(compact, focus, width, opts.Theme)
+		actionHeight = len(bar.lines)
+		if actionHeight > 0 {
+			actionHeight++
+		}
+		overhead = 2 + len(title) + actionHeight
+	}
+	if opts.Width < 16 || opts.Height < overhead+1 {
+		layout.Fallback = true
+		text := ansi.Truncate("Resize terminal · Esc: Cancel", max(1, opts.Width-4), "")
+		if opts.Width >= 4 && opts.Height >= 3 {
+			canvas := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(opts.Theme.InfoColor).Padding(0, 1).Render(text)
+			layout.View = lipgloss.Place(opts.Width, opts.Height, lipgloss.Center, lipgloss.Center, canvas)
+		} else {
+			layout.View = lipgloss.Place(opts.Width, opts.Height, lipgloss.Center, lipgloss.Center, ansi.Truncate(text, opts.Width, ""))
+		}
+		layout.Bounds = modalBounds(layout.View, opts.Width, opts.Height)
+		return layout
+	}
+	var content []string
+	var localHits []ModalTarget
+	for rawY, line := range strings.Split(opts.Content, "\n") {
+		parts := wrappedModalLines(line, width)
+		segmentStart := 0
+		for partIndex, part := range parts {
+			y := len(content)
+			content = append(content, part)
+			// Hardwrap preserves cell columns within each source line. Intersect each
+			// target with the visible segment, retaining multiple fragments for wrapping.
+			segmentEnd := segmentStart + ansi.StringWidth(part)
+			if partIndex == len(parts)-1 {
+				segmentEnd = segmentStart + width
+			}
+			segment := image.Rect(segmentStart, rawY, segmentEnd, rawY+1)
+			for _, target := range opts.Targets {
+				fragment := target.Bounds.Intersect(segment)
+				if !fragment.Empty() {
+					target.Bounds = image.Rect(fragment.Min.X-segmentStart, y, fragment.Max.X-segmentStart, y+1)
+					localHits = append(localHits, target)
+				}
+			}
+			segmentStart += ansi.StringWidth(part)
+		}
+	}
+	layout.FullContentHeight = len(content)
+	layout.ContentHeight = min(len(content), opts.Height-overhead)
+	offset = max(0, min(offset, len(content)-layout.ContentHeight))
+	layout.ContentOffset = offset
+	lines := make([]string, 0, opts.Height)
+	if padY > 0 {
+		lines = append(lines, "")
+	}
+	for _, line := range title {
+		lines = append(lines, lipgloss.NewStyle().Foreground(opts.Theme.HeaderBg).Bold(true).Render(line))
+	}
+	contentY := len(lines)
+	for _, line := range content[offset : offset+layout.ContentHeight] {
+		lines = append(lines, lipgloss.NewStyle().Foreground(opts.Theme.Foreground).Render(line))
+	}
+	for _, line := range footer {
+		lines = append(lines, lipgloss.NewStyle().Foreground(opts.Theme.StatusBarFg).Render(line))
+	}
+	actionY := len(lines) + 1
+	if len(bar.lines) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, bar.lines...)
+	}
+	if padY > 0 {
+		lines = append(lines, "")
+	}
+	for i := range lines {
+		lines[i] = fitModalLine(lines[i], width)
+	}
+	canvas := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(opts.Theme.InfoColor).Padding(0, 2).Render(strings.Join(lines, "\n"))
+	outerWidth, outerHeight := lipgloss.Width(canvas), lipgloss.Height(canvas)
+	left, top := (opts.Width-outerWidth)/2, (opts.Height-outerHeight)/2
+	layout.Bounds = image.Rect(left, top, left+outerWidth, top+outerHeight)
+	origin := image.Pt(left+3, top+1)
+	layout.ContentBounds = image.Rect(origin.X, origin.Y+contentY, origin.X+width, origin.Y+contentY+layout.ContentHeight)
+	for _, target := range localHits {
+		target.Bounds = target.Bounds.Add(image.Pt(origin.X, origin.Y+contentY-offset)).Intersect(layout.ContentBounds)
+		if !target.Bounds.Empty() {
+			layout.Hits = append(layout.Hits, target)
+		}
+	}
+	for _, hit := range bar.hits {
+		hit.Bounds = hit.Bounds.Add(image.Pt(origin.X, origin.Y+actionY))
+		layout.Hits = append(layout.Hits, hit)
+	}
+	layout.View = lipgloss.Place(opts.Width, opts.Height, lipgloss.Center, lipgloss.Center, canvas)
+	return layout
+}
+
+func RenderModal(opts ModalRenderOptions) string { return LayoutModal(opts).View }
+
+// modalBounds also supports legacy/modal-adapter views that have no actions.
 func modalBounds(view string, width, height int) image.Rectangle {
 	lines := strings.Split(ansi.Strip(view), "\n")
-	// Bubble Tea retains the bottom rows when a view exceeds terminal height.
 	if height > 0 && len(lines) > height {
 		lines = lines[len(lines)-height:]
 	}
@@ -65,113 +243,22 @@ func modalBounds(view string, width, height int) image.Rectangle {
 	return bounds.Intersect(image.Rect(0, 0, width, height))
 }
 
-// ModalRenderOptions configures modal rendering
-type ModalRenderOptions struct {
-	Title       string       // Modal title (optional)
-	Content     string       // Modal content (required)
-	Footer      string       // Footer text (optional, e.g. keybindings)
-	Width       int          // Terminal width
-	Height      int          // Terminal height
-	Theme       themes.Theme // Color theme
-	ModalWidth  int          // Specific modal width (0 = auto-calculate)
-	ShowOverlay bool         // Whether to show dimmed background overlay
-}
-
-// RenderModal is the unified modal rendering function.
-// All modals in the codebase MUST use this function for consistent styling.
-//
-// Content components (ProtocolSelector, HunterSelector, FilterManager, etc.)
-// should manage their own state and content rendering, then call this function
-// to wrap their content in a consistent modal chrome.
-//
-// Example usage:
-//
-//	content := "My modal content..."
-//	footer := "Enter: Select | Esc: Cancel"
-//	return RenderModal(ModalRenderOptions{
-//	    Title: "My Modal",
-//	    Content: content,
-//	    Footer: footer,
-//	    Width: width,
-//	    Height: height,
-//	    Theme: theme,
-//	})
-func RenderModal(opts ModalRenderOptions) string {
-	// Calculate modal width
-	modalWidth := opts.ModalWidth
-	if modalWidth == 0 {
-		// Default: 60-80 characters, or 70% of screen width
-		modalWidth = opts.Width * 7 / 10
-		if modalWidth > 80 {
-			modalWidth = 80
-		}
-		if modalWidth < 60 {
-			modalWidth = 60
+func HandleModalMouse(modal Modal, msg tea.MouseMsg, width, height int) (tea.Cmd, bool) {
+	if modal == nil || msg.X < 0 || msg.Y < 0 || msg.X >= width || msg.Y >= height {
+		return nil, false
+	}
+	modal = VisibleModal(modal)
+	if interactive, ok := modal.(InteractiveModal); ok {
+		if cmd, handled := HandleModalInput(interactive, msg); handled {
+			return cmd, true
 		}
 	}
-
-	// Ensure modal fits in terminal
-	if modalWidth > opts.Width-4 {
-		modalWidth = opts.Width - 4
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return nil, false
 	}
-	if modalWidth < 40 {
-		modalWidth = 40
+	bounds := modalBounds(RenderHostedModal(modal, width, height), width, height)
+	if bounds.Empty() || image.Pt(msg.X, msg.Y).In(bounds) {
+		return nil, false
 	}
-
-	// Modal container style
-	modalStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(opts.Theme.InfoColor).
-		Padding(1, 2).
-		Width(modalWidth)
-
-	// Title style (if provided)
-	var titleRendered string
-	if opts.Title != "" {
-		titleStyle := lipgloss.NewStyle().
-			Foreground(opts.Theme.HeaderBg).
-			Bold(true).
-			Padding(0, 1).
-			Width(modalWidth - 4)
-		titleRendered = titleStyle.Render(opts.Title) + "\n\n"
-	}
-
-	// Content style
-	contentStyle := lipgloss.NewStyle().
-		Foreground(opts.Theme.Foreground).
-		Width(modalWidth - 4)
-	contentRendered := contentStyle.Render(opts.Content)
-
-	// Footer style (if provided)
-	var footerRendered string
-	if opts.Footer != "" {
-		footerStyle := lipgloss.NewStyle().
-			Foreground(opts.Theme.StatusBarFg).
-			Italic(true).
-			Width(modalWidth - 4)
-		footerRendered = "\n\n" + footerStyle.Render(opts.Footer)
-	}
-
-	// Assemble modal content
-	modalContent := titleRendered + contentRendered + footerRendered
-	modal := modalStyle.Render(modalContent)
-
-	// Center the modal
-	centeredModal := lipgloss.Place(
-		opts.Width,
-		opts.Height,
-		lipgloss.Center,
-		lipgloss.Center,
-		modal,
-	)
-
-	// Return with or without overlay
-	if opts.ShowOverlay {
-		// Create dimmed background overlay
-		// Note: Actual dimming of underlay content must be handled by caller
-		// as we don't have access to the underlay content here
-		return centeredModal
-	}
-
-	return centeredModal
+	return modal.Dismiss(), true
 }

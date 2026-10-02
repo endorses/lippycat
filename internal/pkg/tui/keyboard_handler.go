@@ -24,8 +24,8 @@ func (m Model) requestQuitConfirmation() (Model, tea.Cmd) {
 		Type:        components.ConfirmDialogWarning,
 		Title:       "Quit lippycat?",
 		Message:     "Are you sure you want to quit?",
-		ConfirmText: "y",
-		CancelText:  "n",
+		ConfirmText: "Quit",
+		CancelText:  "Cancel",
 		UserData:    quitConfirmationData{},
 	})
 	return m, cmd

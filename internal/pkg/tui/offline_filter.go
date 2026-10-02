@@ -26,12 +26,13 @@ type offlineFilterOwner struct {
 	progress offline.QueryProgress
 }
 type offlineFilterState struct {
-	owner     *offlineFilterOwner
-	token     offline.Token
-	chain     *filters.FilterChain
-	protocol  *components.Protocol
-	cancelled bool
-	jump      *offline.PacketID
+	modalState components.ModalState
+	owner      *offlineFilterOwner
+	token      offline.Token
+	chain      *filters.FilterChain
+	protocol   *components.Protocol
+	cancelled  bool
+	jump       *offline.PacketID
 }
 type offlineFilterMsg struct {
 	state *offlineFilterState
@@ -284,6 +285,9 @@ func (m Model) handleOfflineFilter(msg offlineFilterMsg) (Model, tea.Cmd) {
 	}
 }
 func (m Model) offlineFilterModal() string {
+	return components.RenderModal(m.offlineFilterModalOptions())
+}
+func (m *Model) offlineFilterModalOptions() components.ModalRenderOptions {
 	s := m.offlineFilter
 	s.owner.mu.Lock()
 	p := s.owner.progress
@@ -301,5 +305,13 @@ func (m Model) offlineFilterModal() string {
 	if !s.cancelled {
 		content += "\n\n" + offlineProgressBar(p.Scanned, p.Total, true, 0)
 	}
-	return components.RenderModal(components.ModalRenderOptions{Title: title, Content: content, Footer: footer, Width: m.uiState.Width, Height: m.uiState.Height, Theme: m.uiState.Theme, ModalWidth: offlineProgressModalWidth})
+	label := "Cancel"
+	if s.cancelled {
+		label = "Cancelling"
+	}
+	if !s.cancelled {
+		footer = ""
+	}
+	return components.ModalRenderOptions{ID: fmt.Sprintf("offline-filter-%p", s), Title: title, Content: content, Footer: footer, Width: m.uiState.Width, Height: m.uiState.Height, Theme: m.uiState.Theme, ModalWidth: offlineProgressModalWidth,
+		State: &s.modalState, Actions: []components.ModalAction{{ID: "cancel", Label: label, Shortcut: "Esc", Disabled: s.cancelled}, {ID: "quit", Label: "Quit", Shortcut: "Ctrl+C", Disabled: s.cancelled}}}
 }

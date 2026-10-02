@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/tui/components/filtermanager"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
@@ -54,7 +53,12 @@ type FilterManager struct {
 	filterByEnabled  *bool
 	loading          bool
 	availableHunters []filtermanager.HunterSelectorItem // Available hunters for target selection
-	selectingHunters bool                               // Whether we're in hunter selection mode
+	pending          bool
+	statusText       string
+	hunterDraft      []string
+	hunterCursor     int
+	modalState       ModalState
+	selectingHunters bool // Whether we're in hunter selection mode
 
 	// Form state (for Add/Edit mode)
 	formState *FilterFormState
@@ -118,40 +122,30 @@ func (fm *FilterManager) SetTheme(theme themes.Theme) {
 
 // SetSize updates the size
 func (fm *FilterManager) SetSize(width, height int) {
-	fm.width = width
-	fm.height = height
-
-	// Calculate modal width (same logic as RenderModal)
-	modalWidth := width * 7 / 10
-	if modalWidth > 80 {
-		modalWidth = 80
+	fm.width, fm.height = width, height
+	contentWidth := ModalContentWidth(ModalRenderOptions{Width: width, ModalWidth: 80})
+	fm.filterList.SetSize(max(1, contentWidth), max(1, height-15))
+	fm.searchInput.Width = max(1, contentWidth-10)
+	if fm.formState != nil {
+		fm.formState.patternInput.Width = max(1, contentWidth-14)
+		fm.formState.descInput.Width = max(1, contentWidth-14)
 	}
-	if modalWidth < 60 {
-		modalWidth = 60
-	}
-	if modalWidth > width-4 {
-		modalWidth = width - 4
-	}
-
-	// Modal has padding(1,2) = 4 chars, and content uses Width(modalWidth-4)
-	// So actual content area is modalWidth - 4
-	contentWidth := modalWidth - 4
-
-	// List takes the full content width
-	listWidth := contentWidth
-	listHeight := max(height-15, 5) // Account for title, search bar, footer
-
-	fm.filterList.SetSize(listWidth, listHeight)
 	fm.confirmDialog.SetSize(width, height)
+	fm.modalState.ResetClicks()
 }
 
 // Activate shows the filter manager for a specific node
 func (fm *FilterManager) Activate(targetNode string, processorAddr string, targetType NodeType) {
+	fm.modalState.Reset()
+	fm.statusText = ""
 	fm.active = true
 	fm.targetNode = targetNode
 	fm.processorAddr = processorAddr
 	fm.targetType = targetType
 	fm.mode = ModeList
+	fm.formState = nil
+	fm.selectingHunters = false
+	fm.hunterDraft = nil
 	fm.searchMode = false
 	fm.searchInput.SetValue("")
 	fm.loading = true
@@ -178,12 +172,8 @@ func (fm *FilterManager) Dismiss() tea.Cmd {
 	if fm.confirmDialog.IsActive() {
 		return fm.confirmDialog.Dismiss()
 	}
-	escape := tea.KeyMsg{Type: tea.KeyEsc}
-	if fm.selectingHunters {
-		return fm.handleHunterSelectionMode(escape)
-	}
-	if fm.mode == ModeAdd || fm.mode == ModeEdit {
-		return fm.handleFormMode(escape)
+	if fm.selectingHunters || fm.mode != ModeList {
+		return fm.ActivateAction("cancel")
 	}
 	fm.Deactivate()
 	return nil
@@ -212,11 +202,17 @@ func (fm *FilterManager) SetAvailableHunters(hunters []HunterSelectorItem) {
 			Capabilities: h.Capabilities,
 		}
 	}
+	selectedID := fm.selectedHunterID()
 	fm.availableHunters = fmHunters
+	fm.reconcileHunterCursor(selectedID)
 }
 
 // applyFilters applies search and filter criteria
 func (fm *FilterManager) applyFilters() {
+	selectedID := ""
+	if selected := fm.GetSelectedFilter(); selected != nil {
+		selectedID = selected.Id
+	}
 	// Use the pure function from filtermanager package
 	result := filtermanager.ApplyFilters(filtermanager.StateParams{
 		AllFilters:      fm.allFilters,
@@ -234,6 +230,12 @@ func (fm *FilterManager) applyFilters() {
 	}
 
 	fm.filterList.SetItems(items)
+	for i, filter := range fm.filteredFilters {
+		if filter.Id == selectedID {
+			fm.filterList.Select(i)
+			break
+		}
+	}
 
 	// Update status bar
 	fm.updateStatusBar()
@@ -258,13 +260,19 @@ func (fm *FilterManager) updateStatusBar() {
 // EnterSearchMode activates search mode
 func (fm *FilterManager) EnterSearchMode() {
 	fm.searchMode = true
+	fm.modalState.Focus = "search"
 	fm.searchInput.Focus()
+	EnsureModalTargetVisible(fm.ModalOptions(), "search")
 }
 
 // ExitSearchMode deactivates search mode
 func (fm *FilterManager) ExitSearchMode() {
 	fm.searchMode = false
 	fm.searchInput.Blur()
+	if fm.modalState.Focus == "search" || fm.modalState.Focus == "keep-search" {
+		fm.modalState.Focus = "filter-list"
+		fm.ensureVisible()
+	}
 }
 
 // CycleTypeFilter cycles through filter type options
@@ -311,6 +319,7 @@ func (fm *FilterManager) CycleEnabledFilterBackward() {
 func (fm *FilterManager) JumpToTop() {
 	if len(fm.filteredFilters) > 0 {
 		fm.filterList.Select(0)
+		fm.ensureVisible()
 	}
 }
 
@@ -318,6 +327,7 @@ func (fm *FilterManager) JumpToTop() {
 func (fm *FilterManager) JumpToBottom() {
 	if len(fm.filteredFilters) > 0 {
 		fm.filterList.Select(len(fm.filteredFilters) - 1)
+		fm.ensureVisible()
 	}
 }
 
@@ -331,6 +341,7 @@ func (fm *FilterManager) PageUp() {
 	currentIndex := fm.filterList.Index()
 	newIndex := max(0, currentIndex-pageSize)
 	fm.filterList.Select(newIndex)
+	fm.ensureVisible()
 }
 
 // PageDown moves down one page in the list
@@ -347,6 +358,7 @@ func (fm *FilterManager) PageDown() {
 		newIndex = maxIndex
 	}
 	fm.filterList.Select(newIndex)
+	fm.ensureVisible()
 }
 
 // GetSelectedFilter returns the currently selected filter
@@ -365,13 +377,17 @@ func (fm *FilterManager) GetSelectedFilter() *management.Filter {
 
 // toggleFilterEnabled toggles the enabled state of the selected filter
 func (fm *FilterManager) toggleFilterEnabled() tea.Cmd {
+	if fm.pending {
+		return nil
+	}
 	selectedFilter := fm.GetSelectedFilter()
 	if selectedFilter == nil {
 		return nil
 	}
 
 	if selectedFilter.Type >= management.FilterType_FILTER_RADIUS_USERNAME && selectedFilter.Type <= management.FilterType_FILTER_RADIUS_COMPOUND {
-		fm.filterList.NewStatusMessage("Change RADIUS enablement and revision with lc set filter --file")
+		fm.statusText = "Change RADIUS enablement and revision with lc set filter --file"
+		fm.filterList.NewStatusMessage(fm.statusText)
 		return nil
 	}
 
@@ -385,6 +401,7 @@ func (fm *FilterManager) toggleFilterEnabled() tea.Cmd {
 	fm.filterList.NewStatusMessage(result.StatusMessage)
 	fm.applyFilters()
 
+	fm.pending = true
 	// Return command to persist change via gRPC
 	return func() tea.Msg {
 		return FilterOperationMsg{
@@ -398,10 +415,16 @@ func (fm *FilterManager) toggleFilterEnabled() tea.Cmd {
 
 // Update handles key events and messages
 func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
+	if result, ok := msg.(FilterOperationResultMsg); ok {
+		return fm.handleOperationResult(result)
+	}
 	if !fm.active {
 		return nil
 	}
 
+	if cmd, handled := HandleModalInput(fm, msg); handled {
+		return cmd
+	}
 	// Check if confirm dialog is active first
 	if fm.confirmDialog.IsActive() {
 		return fm.confirmDialog.Update(msg)
@@ -441,6 +464,7 @@ func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 
 // handleOperationResult handles the result of a filter operation
 func (fm *FilterManager) handleOperationResult(msg FilterOperationResultMsg) tea.Cmd {
+	fm.pending = false
 	statusMsg := filtermanager.FormatOperationResult(filtermanager.FormatOperationResultParams{
 		Success:        msg.Success,
 		Operation:      msg.Operation,
@@ -448,6 +472,7 @@ func (fm *FilterManager) handleOperationResult(msg FilterOperationResultMsg) tea
 		Error:          msg.Error,
 		HuntersUpdated: msg.HuntersUpdated,
 	})
+	fm.statusText = statusMsg
 	fm.filterList.NewStatusMessage(statusMsg)
 	return nil
 }
@@ -468,6 +493,7 @@ func (fm *FilterManager) handleSearchMode(msg tea.KeyMsg) tea.Cmd {
 	case "up", "down":
 		var cmd tea.Cmd
 		fm.filterList, cmd = fm.filterList.Update(msg)
+		fm.ensureVisible()
 		return cmd
 
 	default:
@@ -480,6 +506,11 @@ func (fm *FilterManager) handleSearchMode(msg tea.KeyMsg) tea.Cmd {
 
 // handleListMode handles keyboard input in list mode
 func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
+	if msg.String() == "enter" || msg.String() == " " {
+		if fm.modalState.Focus == "type" || fm.modalState.Focus == "status" {
+			return fm.ActivateAction(fm.modalState.Focus)
+		}
+	}
 	switch msg.String() {
 	case "esc", "q":
 		fm.Deactivate()
@@ -530,118 +561,46 @@ func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "n":
-		fm.initializeAddForm()
-		return nil
-
+		return fm.ActivateAction("new")
 	case "enter":
-		selectedFilter := fm.GetSelectedFilter()
-		if selectedFilter != nil {
-			fm.initializeEditForm(selectedFilter)
-		}
-		return nil
-
+		return fm.ActivateAction("edit")
 	case "d":
-		selectedFilter := fm.GetSelectedFilter()
-		if selectedFilter != nil {
-			// Build details for confirmation
-			details := []string{
-				"Pattern: " + selectedFilter.Pattern,
-				"Type: " + selectedFilter.Type.String(),
-			}
-			if selectedFilter.Description != "" {
-				details = append(details, "Description: "+selectedFilter.Description)
-			}
-
-			// Show confirmation dialog
-			fm.confirmDialog.Show(ConfirmDialogOptions{
-				Type:        ConfirmDialogDanger,
-				Title:       "Delete Filter",
-				Message:     "Are you sure you want to delete this filter?",
-				Details:     details,
-				ConfirmText: "y",
-				CancelText:  "n",
-				UserData:    selectedFilter,
-			})
-		}
-		return nil
-
+		return fm.ActivateAction("delete")
 	case " ":
-		return fm.toggleFilterEnabled()
+		return fm.ActivateAction("toggle")
 
 	default:
 		var cmd tea.Cmd
 		fm.filterList, cmd = fm.filterList.Update(msg)
+		fm.ensureVisible()
 		return cmd
 	}
 }
 
-// handleHunterSelectionMode handles keyboard input in hunter selection mode
+// handleHunterSelectionMode uses the same capability projection as drawing and clicks.
 func (fm *FilterManager) handleHunterSelectionMode(msg tea.KeyMsg) tea.Cmd {
 	if fm.formState == nil {
 		fm.selectingHunters = false
 		return nil
 	}
-
 	switch msg.String() {
 	case "up", "k":
-		if len(fm.availableHunters) > 0 {
-			currentIdx := fm.formState.activeField
-			if currentIdx > 0 {
-				fm.formState.activeField--
-			}
-		}
-		return nil
-
+		fm.hunterCursor = max(0, fm.hunterCursor-1)
 	case "down", "j":
-		if len(fm.availableHunters) > 0 {
-			currentIdx := fm.formState.activeField
-			if currentIdx < len(fm.availableHunters)-1 {
-				fm.formState.activeField++
-			}
-		}
-		return nil
-
+		fm.hunterCursor = min(max(0, len(fm.eligibleHunters())-1), fm.hunterCursor+1)
 	case " ":
-		if len(fm.availableHunters) > 0 {
-			hunterID := fm.availableHunters[fm.formState.activeField].HunterID
-			found := false
-			for i, id := range fm.formState.targetHunters {
-				if id == hunterID {
-					fm.formState.targetHunters = slices.Delete(fm.formState.targetHunters, i, i+1)
-					found = true
-					break
-				}
-			}
-			if !found {
-				fm.formState.targetHunters = append(fm.formState.targetHunters, hunterID)
-			}
-		}
-		return nil
-
+		fm.toggleHunter(fm.selectedHunterID())
 	case "a":
-		fm.formState.targetHunters = make([]string, 0, len(fm.availableHunters))
-		for _, hunter := range fm.availableHunters {
-			fm.formState.targetHunters = append(fm.formState.targetHunters, hunter.HunterID)
-		}
-		return nil
-
+		return fm.ActivateAction("hunters-all")
 	case "n":
-		fm.formState.targetHunters = []string{}
-		return nil
-
+		return fm.ActivateAction("hunters-none")
 	case "enter":
-		fm.selectingHunters = false
-		fm.formState.activeField = 4
-		return nil
-
+		return fm.ActivateAction("hunters-confirm")
 	case "esc":
-		fm.selectingHunters = false
-		fm.formState.activeField = 4
-		return nil
-
-	default:
-		return nil
+		return fm.ActivateAction("cancel")
 	}
+	fm.ensureVisible()
+	return nil
 }
 
 // handleConfirmResult handles the result from the confirmation dialog
@@ -664,7 +623,7 @@ func (fm *FilterManager) handleConfirmResult(msg ConfirmDialogResult) tea.Cmd {
 
 // deleteFilter deletes the specified filter
 func (fm *FilterManager) deleteFilter(filter *management.Filter) tea.Cmd {
-	if filter == nil {
+	if filter == nil || fm.pending {
 		return nil
 	}
 
@@ -679,6 +638,7 @@ func (fm *FilterManager) deleteFilter(filter *management.Filter) tea.Cmd {
 	fm.filterList.NewStatusMessage(result.StatusMessage)
 	fm.applyFilters()
 
+	fm.pending = true
 	// Return command to persist deletion via gRPC
 	return func() tea.Msg {
 		return FilterOperationMsg{
@@ -692,16 +652,17 @@ func (fm *FilterManager) deleteFilter(filter *management.Filter) tea.Cmd {
 
 // initializeAddForm initializes the form for adding a new filter
 func (fm *FilterManager) initializeAddForm() {
+	fm.statusText = ""
 	patternInput := textinput.New()
 	patternInput.Placeholder = "e.g., alicent@example.com"
 	patternInput.CharLimit = 200
-	patternInput.Width = 60
+	patternInput.Width = max(1, ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80})-14)
 	patternInput.Focus()
 
 	descInput := textinput.New()
 	descInput.Placeholder = "Optional description"
 	descInput.CharLimit = 500
-	descInput.Width = 60
+	descInput.Width = max(1, ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80})-14)
 
 	// Choose default filter type based on available hunters
 	defaultType := management.FilterType_FILTER_BPF
@@ -719,25 +680,29 @@ func (fm *FilterManager) initializeAddForm() {
 		activeField:   0,
 	}
 
+	fm.modalState.Focus = "pattern"
+	fm.modalState.Scroll = 0
 	fm.mode = ModeAdd
 }
 
 // initializeEditForm initializes the form for editing an existing filter
 func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
 	if filter.Type >= management.FilterType_FILTER_RADIUS_USERNAME && filter.Type <= management.FilterType_FILTER_RADIUS_COMPOUND {
-		fm.filterList.NewStatusMessage("Edit RADIUS criteria and revisions with lc set filter --file")
+		fm.statusText = "Edit RADIUS criteria and revisions with lc set filter --file"
+		fm.filterList.NewStatusMessage(fm.statusText)
 		return
 	}
+	fm.statusText = ""
 	patternInput := textinput.New()
 	patternInput.SetValue(filter.Pattern)
 	patternInput.CharLimit = 200
-	patternInput.Width = 60
+	patternInput.Width = max(1, ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80})-14)
 	patternInput.Focus()
 
 	descInput := textinput.New()
 	descInput.SetValue(filter.Description)
 	descInput.CharLimit = 500
-	descInput.Width = 60
+	descInput.Width = max(1, ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80})-14)
 
 	fm.formState = &FilterFormState{
 		filterID:      filter.Id,
@@ -749,6 +714,8 @@ func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
 		activeField:   0,
 	}
 
+	fm.modalState.Focus = "pattern"
+	fm.modalState.Scroll = 0
 	fm.mode = ModeEdit
 }
 
@@ -756,14 +723,11 @@ func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
 func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
-		fm.formState = nil
-		fm.mode = ModeList
-		return nil
+		return fm.ActivateAction("cancel")
 
 	case "s":
 		if fm.formState != nil && fm.formState.activeField == 4 {
-			fm.selectingHunters = true
-			fm.formState.activeField = 0
+			fm.beginHunterSelection()
 			return nil
 		}
 		if fm.formState != nil && (fm.formState.activeField == 0 || fm.formState.activeField == 1) {
@@ -779,12 +743,32 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "enter", "ctrl+s":
-		return fm.saveFilter()
+		return fm.ActivateAction("save")
+	case " ":
+		if fm.formState != nil && fm.formState.activeField == 3 {
+			return fm.ActivateAction("form-enabled")
+		}
+		if fm.formState != nil && fm.formState.activeField == 4 {
+			return fm.ActivateAction("form-targets")
+		}
+		if fm.formState != nil && fm.formState.activeField == 0 {
+			var cmd tea.Cmd
+			fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
+			return cmd
+		}
+		if fm.formState != nil && fm.formState.activeField == 1 {
+			var cmd tea.Cmd
+			fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
+			return cmd
+		}
+		return nil
 
 	case "down", "tab":
 		if fm.formState != nil {
 			fm.formState.activeField = (fm.formState.activeField + 1) % 5
 			fm.updateFormFieldFocus()
+			fm.modalState.Focus = []string{"pattern", "description", "form-type", "form-enabled", "form-targets"}[fm.formState.activeField]
+			EnsureModalTargetVisible(fm.ModalOptions(), fm.modalState.Focus)
 		}
 		return nil
 
@@ -792,6 +776,8 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		if fm.formState != nil {
 			fm.formState.activeField = (fm.formState.activeField - 1 + 5) % 5
 			fm.updateFormFieldFocus()
+			fm.modalState.Focus = []string{"pattern", "description", "form-type", "form-enabled", "form-targets"}[fm.formState.activeField]
+			EnsureModalTargetVisible(fm.ModalOptions(), fm.modalState.Focus)
 		}
 		return nil
 
@@ -883,6 +869,9 @@ func (fm *FilterManager) updateFormFieldFocus() {
 
 // saveFilter saves the current form (add or update)
 func (fm *FilterManager) saveFilter() tea.Cmd {
+	if fm.pending {
+		return nil
+	}
 	if fm.formState == nil {
 		fm.mode = ModeList
 		return nil
@@ -898,10 +887,12 @@ func (fm *FilterManager) saveFilter() tea.Cmd {
 	})
 
 	if !validationResult.Valid {
+		fm.statusText = validationResult.ErrorMessage
 		fm.filterList.NewStatusMessage(validationResult.ErrorMessage)
 		return nil
 	}
 
+	fm.statusText = ""
 	var operation string
 	var filter *management.Filter
 
@@ -949,8 +940,10 @@ func (fm *FilterManager) saveFilter() tea.Cmd {
 	// Return to list mode
 	fm.formState = nil
 	fm.mode = ModeList
+	fm.modalState.Reset()
 	fm.applyFilters()
 
+	fm.pending = true
 	// Return command to persist via gRPC
 	return func() tea.Msg {
 		return FilterOperationMsg{
@@ -962,170 +955,15 @@ func (fm *FilterManager) saveFilter() tea.Cmd {
 	}
 }
 
-// View renders the filter manager using unified modal
+// View renders the visible layer using the shared geometry.
 func (fm *FilterManager) View() string {
 	if !fm.active {
 		return ""
 	}
-
-	// Show confirm dialog if active
 	if fm.confirmDialog.IsActive() {
 		return fm.confirmDialog.View()
 	}
-
-	// Show hunter selection if in that mode
-	if fm.selectingHunters {
-		return fm.renderHunterSelection()
-	}
-
-	// Show add/edit form if in form mode
-	if fm.mode == ModeAdd || fm.mode == ModeEdit {
-		return fm.renderFilterForm()
-	}
-
-	var content strings.Builder
-
-	// Render search bar
-	searchBar := filtermanager.RenderSearchBar(filtermanager.RenderSearchBarParams{
-		SearchMode:      fm.searchMode,
-		SearchValue:     fm.searchInput.Value(),
-		FilterByType:    fm.filterByType,
-		FilterByEnabled: fm.filterByEnabled,
-		Theme:           fm.theme,
-	})
-
-	// If in search mode, append the actual input view
-	if fm.searchMode {
-		searchBar += fm.searchInput.View()
-	}
-
-	content.WriteString(searchBar)
-	content.WriteString("\n\n")
-
-	// Render filter list or loading state
-	if fm.loading {
-		loadingStyle := lipgloss.NewStyle().
-			Foreground(fm.theme.Foreground).
-			Italic(true)
-		content.WriteString(loadingStyle.Render("Loading filters..."))
-	} else {
-		content.WriteString(fm.filterList.View())
-	}
-
-	// Build footer based on mode
-	var footer string
-	if fm.searchMode {
-		footer = "Type to search  ↑/↓: Navigate  Enter: Keep search  Esc: Clear"
-	} else {
-		footer = "/: Search  ←/→: Type  ⇧←/⇧→: Status  g/G: Top/Bottom  PgUp/PgDn: Page  Space: Toggle  n: New  Enter: Edit  d: Delete  Esc: Close"
-	}
-
-	// Build title
-	nodeDesc := fm.targetNode
-	if fm.targetType == NodeTypeProcessor {
-		nodeDesc = "Processor: " + nodeDesc
-	} else {
-		nodeDesc = "Hunter: " + nodeDesc
-	}
-
-	return RenderModal(ModalRenderOptions{
-		Title:      "🔧 Filter Management - " + nodeDesc,
-		Content:    content.String(),
-		Footer:     footer,
-		Width:      fm.width,
-		Height:     fm.height,
-		Theme:      fm.theme,
-		ModalWidth: 0,
-	})
-}
-
-// renderHunterSelection renders the hunter selection UI
-func (fm *FilterManager) renderHunterSelection() string {
-	if fm.formState == nil {
-		return ""
-	}
-
-	// Calculate modal width
-	modalWidth := 70
-	if modalWidth > fm.width-4 {
-		modalWidth = fm.width - 4
-	}
-
-	// Filter hunters based on filter type capabilities
-	compatibleHunters := filtermanager.FilterHuntersByCapability(fm.availableHunters, fm.formState.filterType)
-
-	// Add warning if no compatible hunters available
-	warning := ""
-	if len(compatibleHunters) == 0 && filtermanager.IsVoIPFilterType(fm.formState.filterType) {
-		warning = "\nWarning: No VoIP-capable hunters available. Start a VoIP hunter with 'lc hunt voip' to use this filter type."
-	}
-
-	content := filtermanager.RenderHunterSelection(filtermanager.RenderHunterSelectionParams{
-		AvailableHunters: compatibleHunters,
-		SelectedHunters:  fm.formState.targetHunters,
-		CursorIndex:      fm.formState.activeField,
-		ModalWidth:       modalWidth,
-		Theme:            fm.theme,
-	})
-
-	content += warning
-
-	return RenderModal(ModalRenderOptions{
-		Title:      "Select Target Hunters",
-		Content:    content,
-		Footer:     "↑/↓: Navigate  Space: Toggle  a: All  n: None  Enter: Confirm  Esc: Cancel",
-		Width:      fm.width,
-		Height:     fm.height,
-		Theme:      fm.theme,
-		ModalWidth: modalWidth,
-	})
-}
-
-// renderFilterForm renders the add/edit filter form
-func (fm *FilterManager) renderFilterForm() string {
-	if fm.formState == nil {
-		return ""
-	}
-
-	content := filtermanager.RenderForm(filtermanager.RenderFormParams{
-		FilterID:      fm.formState.filterID,
-		FilterType:    fm.formState.filterType,
-		PatternInput:  fm.formState.patternInput,
-		DescInput:     fm.formState.descInput,
-		Enabled:       fm.formState.enabled,
-		TargetHunters: fm.formState.targetHunters,
-		ActiveField:   fm.formState.activeField,
-		IsEditMode:    fm.mode == ModeEdit,
-		Theme:         fm.theme,
-	})
-
-	// Determine title and footer
-	var title, footer string
-	if fm.mode == ModeAdd {
-		title = "➕ Add Filter"
-		if fm.formState.activeField == 4 {
-			footer = "↑/↓/Tab: Navigate  s: Select hunters  Enter: Save  Esc: Cancel"
-		} else {
-			footer = "↑/↓/Tab: Navigate  ←/→: Change Setting  Enter: Save  Esc: Cancel"
-		}
-	} else {
-		title = "✏️  Edit Filter"
-		if fm.formState.activeField == 4 {
-			footer = "↑/↓/Tab: Navigate  s: Select hunters  Enter: Save  Esc: Cancel"
-		} else {
-			footer = "↑/↓/Tab: Navigate  ←/→: Change Setting  Enter: Save  Esc: Cancel"
-		}
-	}
-
-	return RenderModal(ModalRenderOptions{
-		Title:      title,
-		Content:    content,
-		Footer:     footer,
-		Width:      fm.width,
-		Height:     fm.height,
-		Theme:      fm.theme,
-		ModalWidth: 70,
-	})
+	return RenderModal(fm.ModalOptions())
 }
 
 // FilterManagerOpenMsg is sent when filter manager should open

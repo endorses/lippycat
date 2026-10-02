@@ -3,6 +3,8 @@
 package components
 
 import (
+	"github.com/charmbracelet/x/ansi"
+	"image"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,6 +26,8 @@ type HunterSelectorItem struct {
 
 // HunterSelector provides a UI for selecting which hunters to subscribe to
 type HunterSelector struct {
+	modalState    ModalState
+	rowOffset     int
 	hunters       []HunterSelectorItem
 	cursorIndex   int  // Current cursor position
 	active        bool // Whether modal is visible
@@ -54,10 +58,13 @@ func (hs *HunterSelector) SetTheme(theme themes.Theme) {
 func (hs *HunterSelector) SetSize(width, height int) {
 	hs.width = width
 	hs.height = height
+	hs.keepSelectedVisible()
 }
 
 // Activate shows the hunter selector and starts loading hunters
 func (hs *HunterSelector) Activate(processorAddr string) {
+	hs.modalState.Reset()
+	hs.rowOffset = 0
 	hs.active = true
 	hs.loading = true
 	hs.processorAddr = processorAddr
@@ -82,12 +89,28 @@ func (hs *HunterSelector) IsActive() bool {
 
 // SetHunters updates the list of available hunters (called when list is loaded)
 func (hs *HunterSelector) SetHunters(hunters []HunterSelectorItem) {
-	hs.hunters = hunters
-	hs.loading = false
-	// Reset cursor if out of bounds
-	if hs.cursorIndex >= len(hs.hunters) {
-		hs.cursorIndex = 0
+	selected := make(map[string]bool)
+	cursorID := ""
+	if !hs.loading {
+		for _, hunter := range hs.hunters {
+			selected[hunter.HunterID] = hunter.Selected
+		}
+		if hs.cursorIndex >= 0 && hs.cursorIndex < len(hs.hunters) {
+			cursorID = hs.hunters[hs.cursorIndex].HunterID
+		}
 	}
+	hs.hunters = append([]HunterSelectorItem(nil), hunters...)
+	hs.cursorIndex = 0
+	for i := range hs.hunters {
+		if value, ok := selected[hs.hunters[i].HunterID]; ok {
+			hs.hunters[i].Selected = value
+		}
+		if hs.hunters[i].HunterID == cursorID {
+			hs.cursorIndex = i
+		}
+	}
+	hs.loading = false
+	hs.keepSelectedVisible()
 }
 
 // GetSelectedHunterIDs returns the list of hunter IDs that are selected
@@ -107,38 +130,32 @@ func (hs *HunterSelector) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
+	if cmd, handled := HandleModalInput(hs, msg); handled {
+		return cmd
+	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
 			if hs.cursorIndex > 0 {
 				hs.cursorIndex--
+				hs.keepSelectedVisible()
 			}
 		case "down", "j":
 			if hs.cursorIndex < len(hs.hunters)-1 {
 				hs.cursorIndex++
+				hs.keepSelectedVisible()
 			}
-		case " ": // Space to toggle selection
+		case " ": // Space shares the checkbox action path.
 			if hs.cursorIndex >= 0 && hs.cursorIndex < len(hs.hunters) {
-				hs.hunters[hs.cursorIndex].Selected = !hs.hunters[hs.cursorIndex].Selected
+				return hs.HandleModalAction("hunter:" + hs.hunters[hs.cursorIndex].HunterID)
 			}
-		case "a": // Select all
-			for i := range hs.hunters {
-				hs.hunters[i].Selected = true
-			}
-		case "n": // Select none
-			for i := range hs.hunters {
-				hs.hunters[i].Selected = false
-			}
+		case "a":
+			return hs.HandleModalAction("all")
+		case "n":
+			return hs.HandleModalAction("none")
 		case "enter":
-			// Confirm selection and close
-			hs.Deactivate()
-			return func() tea.Msg {
-				return HunterSelectionConfirmedMsg{
-					ProcessorAddr:     hs.processorAddr,
-					SelectedHunterIDs: hs.GetSelectedHunterIDs(),
-				}
-			}
+			return hs.HandleModalAction("confirm")
 		case "esc":
 			// Cancel selection
 			hs.Deactivate()
@@ -148,148 +165,126 @@ func (hs *HunterSelector) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// View renders the hunter selector using the unified modal component
+// View renders the hunter subscription selector.
 func (hs *HunterSelector) View() string {
 	if !hs.active {
 		return ""
 	}
+	return RenderModal(hs.ModalOptions())
+}
 
-	// Calculate modal width
-	modalWidth := 80
-	if modalWidth > hs.width-4 {
-		modalWidth = hs.width - 4
-	}
-	if modalWidth < 60 {
-		modalWidth = 60
-	}
+func (hs *HunterSelector) baseModalOptions() ModalRenderOptions {
+	return ModalRenderOptions{ID: "hunter-subscriptions", Title: "Select Hunters to Subscribe", Footer: "↑/↓: Navigate  Space: Toggle", Width: hs.width, Height: hs.height, Theme: hs.theme, ModalWidth: 80, State: &hs.modalState,
+		Actions: []ModalAction{{ID: "all", Label: "All", Shortcut: "a", Disabled: hs.loading || len(hs.hunters) == 0}, {ID: "none", Label: "None", Shortcut: "n", Disabled: hs.loading || len(hs.hunters) == 0}, {ID: "confirm", Label: "Confirm", Shortcut: "Enter", Kind: ButtonPrimary, Disabled: hs.loading}, {ID: "cancel", Label: "Cancel", Shortcut: "Esc"}}}
+}
 
-	// Modal has padding(1,2) = 4 chars, content uses Width(modalWidth-4)
-	// So items should be (modalWidth - 4) minus our own padding (2 chars)
-	contentWidth := modalWidth - 4
-	itemWidth := contentWidth - 2 // Account for padding(0, 1) = 2 chars
+func (hs *HunterSelector) visibleRows() int {
+	opts := hs.baseModalOptions()
+	opts.Content = strings.Repeat("\n", len(hs.hunters)+2)
+	return max(1, min(len(hs.hunters), LayoutModal(opts).ContentHeight-2))
+}
 
-	// Content styles
-	itemStyle := lipgloss.NewStyle().
-		Foreground(hs.theme.Foreground).
-		Padding(0, 1)
-
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(hs.theme.SelectionFg).
-		Background(hs.theme.SelectionBg).
-		Bold(true).
-		Padding(0, 1).
-		Width(itemWidth)
-
-	descStyle := lipgloss.NewStyle().
-		Foreground(hs.theme.StatusBarFg).
-		Italic(true)
-
-	// Build content
-	var content strings.Builder
-
+func (hs *HunterSelector) ModalOptions() ModalRenderOptions {
+	opts := hs.baseModalOptions()
 	if hs.loading {
-		content.WriteString(itemStyle.Render("Loading hunters..."))
-	} else if len(hs.hunters) == 0 {
-		content.WriteString(descStyle.Render("No hunters available on this processor."))
-	} else {
-		for i, hunter := range hs.hunters {
-			// Checkbox indicator
-			checkbox := "[ ] "
-			if hunter.Selected {
-				checkbox = "[✓] "
-			}
-
-			// Status icon - only apply color if NOT cursor-selected (to avoid breaking background)
-			var statusIcon string
-			if i == hs.cursorIndex {
-				// When selected, use plain icon without color styling
-				statusIcon = "●"
-			} else {
-				// When not selected, apply status color
-				switch hunter.Status {
-				case management.HunterStatus_STATUS_HEALTHY:
-					statusIcon = lipgloss.NewStyle().Foreground(hs.theme.SuccessColor).Render("●")
-				case management.HunterStatus_STATUS_WARNING:
-					statusIcon = lipgloss.NewStyle().Foreground(hs.theme.WarningColor).Render("●")
-				case management.HunterStatus_STATUS_ERROR:
-					statusIcon = lipgloss.NewStyle().Foreground(hs.theme.ErrorColor).Render("●")
-				default:
-					statusIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("●")
+		opts.Content = "Loading hunters..."
+		return opts
+	}
+	if len(hs.hunters) == 0 {
+		opts.Content = "No hunters available on this processor."
+		return opts
+	}
+	width := ModalContentWidth(opts)
+	rows := hs.visibleRows()
+	start := min(hs.rowOffset, max(0, len(hs.hunters)-rows))
+	opts.Targets = []ModalTarget{{ID: "list", Bounds: image.Rect(0, 0, width, rows), Focusable: true}}
+	var content strings.Builder
+	for i := start; i < min(len(hs.hunters), start+rows); i++ {
+		hunter := hs.hunters[i]
+		checkbox := "[ ]"
+		if hunter.Selected {
+			checkbox = "[✓]"
+		}
+		mode := "Generic"
+		if hunter.Capabilities != nil {
+			for _, ft := range hunter.Capabilities.FilterTypes {
+				if ft == "sip_user" {
+					mode = "VoIP"
+					break
 				}
 			}
+		}
+		line := checkbox + " ● " + hunter.HunterID + " [" + mode + "]"
+		if hunter.Hostname != "" {
+			line += " (" + hunter.Hostname + ")"
+		} else if hunter.RemoteAddr != "" {
+			line += " (" + hunter.RemoteAddr + ")"
+		}
+		style := lipgloss.NewStyle().Foreground(hs.theme.Foreground).Width(width)
+		if i == hs.cursorIndex {
+			style = style.Foreground(hs.theme.SelectionFg).Background(hs.theme.SelectionBg).Bold(true)
+		}
+		content.WriteString(style.Render(ansi.Truncate(line, width, "…")) + "\n")
+		opts.Targets = append(opts.Targets, ModalTarget{ID: "hunter:" + hunter.HunterID, Bounds: image.Rect(0, i-start, width, i-start+1)})
+	}
+	content.WriteString("\n")
+	if hs.cursorIndex >= 0 && hs.cursorIndex < len(hs.hunters) {
+		content.WriteString(ansi.Truncate("Interfaces: "+strings.Join(hs.hunters[hs.cursorIndex].Interfaces, ", "), width, "…"))
+	}
+	opts.Content = content.String()
+	return opts
+}
 
-			// Determine mode (VoIP or Generic)
-			mode := "Generic"
-			if hunter.Capabilities != nil && len(hunter.Capabilities.FilterTypes) > 0 {
-				for _, ft := range hunter.Capabilities.FilterTypes {
-					if ft == "sip_user" {
-						mode = "VoIP"
-						break
-					}
+func (hs *HunterSelector) keepSelectedVisible() {
+	rows := hs.visibleRows()
+	if hs.cursorIndex < hs.rowOffset {
+		hs.rowOffset = hs.cursorIndex
+	}
+	if hs.cursorIndex >= hs.rowOffset+rows {
+		hs.rowOffset = hs.cursorIndex - rows + 1
+	}
+}
+
+func (hs *HunterSelector) ScrollModal(delta int) tea.Cmd {
+	hs.rowOffset = max(0, min(hs.rowOffset+delta, len(hs.hunters)-hs.visibleRows()))
+	return nil
+}
+
+func (hs *HunterSelector) HandleModalFocus(string) tea.Cmd { return nil }
+
+func (hs *HunterSelector) HandleModalAction(id string) tea.Cmd {
+	if !hs.active {
+		return nil
+	}
+	if id == "cancel" {
+		return hs.Dismiss()
+	}
+	if hs.loading {
+		return nil
+	}
+	switch id {
+	case "all", "none":
+		for i := range hs.hunters {
+			hs.hunters[i].Selected = id == "all"
+		}
+	case "confirm":
+		ids := hs.GetSelectedHunterIDs()
+		addr := hs.processorAddr
+		hs.Deactivate()
+		return func() tea.Msg { return HunterSelectionConfirmedMsg{ProcessorAddr: addr, SelectedHunterIDs: ids} }
+	default:
+		if strings.HasPrefix(id, "hunter:") {
+			for i := range hs.hunters {
+				if "hunter:"+hs.hunters[i].HunterID == id {
+					hs.cursorIndex = i
+					hs.hunters[i].Selected = !hs.hunters[i].Selected
+					hs.modalState.Focus = "list"
+					break
 				}
 			}
-
-			// Mode badge (use Solarized colors)
-			// When cursor-selected, don't apply background to avoid breaking selected item's cyan background
-			var modeBadge string
-			if i == hs.cursorIndex {
-				// Cursor selected - plain text badge without background
-				if mode == "VoIP" {
-					modeBadge = "[VoIP]"
-				} else {
-					modeBadge = "[Generic]"
-				}
-			} else {
-				// Not selected - apply Solarized colored badges
-				if mode == "VoIP" {
-					// Solarized violet for VoIP, base3 for text
-					modeBadge = lipgloss.NewStyle().
-						Foreground(lipgloss.Color("#fdf6e3")).
-						Background(lipgloss.Color("#6c71c4")).
-						Render(" VoIP ")
-				} else {
-					// Solarized green for Generic, base3 for text
-					modeBadge = lipgloss.NewStyle().
-						Foreground(lipgloss.Color("#fdf6e3")).
-						Background(lipgloss.Color("#859900")).
-						Render(" Generic ")
-				}
-			}
-
-			// Build single-line display: [✓] ● hunter-id [Mode] (hostname)
-			line := checkbox + statusIcon + " " + hunter.HunterID + " " + modeBadge
-			if hunter.Hostname != "" && hunter.Hostname != hunter.RemoteAddr {
-				line += " (" + hunter.Hostname + ")"
-			} else if hunter.RemoteAddr != "" {
-				line += " (" + hunter.RemoteAddr + ")"
-			}
-
-			// Apply cursor style
-			if i == hs.cursorIndex {
-				content.WriteString(selectedStyle.Render(line))
-				// Show interfaces on separate line when cursor is on this item
-				if len(hunter.Interfaces) > 0 {
-					content.WriteString("\n")
-					interfacesStr := "  Interfaces: " + strings.Join(hunter.Interfaces, ", ")
-					content.WriteString(descStyle.Render(interfacesStr))
-				}
-			} else {
-				content.WriteString(itemStyle.Render(line))
-			}
-			content.WriteString("\n")
 		}
 	}
-
-	// Use unified modal rendering
-	return RenderModal(ModalRenderOptions{
-		Title:      "Select Hunters to Subscribe",
-		Content:    content.String(),
-		Footer:     "↑/↓: Navigate  Space: Toggle  a: All  n: None  Enter: Confirm  Esc: Cancel",
-		Width:      hs.width,
-		Height:     hs.height,
-		Theme:      hs.theme,
-		ModalWidth: modalWidth,
-	})
+	return nil
 }
 
 // HunterSelectionConfirmedMsg is sent when user confirms hunter selection
@@ -307,4 +302,12 @@ type LoadHuntersFromProcessorMsg struct {
 type HuntersLoadedMsg struct {
 	ProcessorAddr string
 	Hunters       []HunterSelectorItem
+}
+
+// ScrollModalAt limits wheel scrolling to the list, excluding its description.
+func (hs *HunterSelector) ScrollModalAt(delta, x, y int) tea.Cmd {
+	if y >= 0 && y < hs.visibleRows() {
+		return hs.ScrollModal(delta)
+	}
+	return nil
 }

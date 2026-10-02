@@ -408,7 +408,8 @@ func (m Model) retryOfflineCancellation() (Model, tea.Cmd) {
 		return offlineCleanupMsg{generation: generation, cancelled: true, err: c.dispose(session)}
 	}
 }
-func (m Model) offlineModal() string {
+func (m Model) offlineModal() string { return components.RenderModal(m.offlineModalOptions()) }
+func (m *Model) offlineModalOptions() components.ModalRenderOptions {
 	p := m.offlineProgress
 	content := fmt.Sprintf("Phase: %s\nSources: %d\nLogical packets: %d\nBytes scanned: %d\nTemporary disk: %d bytes\nElapsed: %s", p.State, p.Sources, p.LogicalPackets, p.ScannedBytes, p.DiskBytes, p.Elapsed.Round(time.Millisecond))
 	policy := m.offlinePending.Config.BackingPolicy
@@ -420,20 +421,22 @@ func (m Model) offlineModal() string {
 		known := p.State == offline.Indexing || p.State == offline.Ready
 		content += "\n\n" + offlineProgressBar(p.LogicalPackets, p.TotalPackets, known, p.Elapsed)
 	}
-	footer := "Esc: Cancel   Ctrl+C: Quit"
+	cancelling := p.State == offline.Cancelling || m.offlineLeaving || m.offlineCancelledSession != nil
+	label := "Cancel"
+	if cancelling {
+		label = "Cancelling"
+	}
+	actions := []components.ModalAction{{ID: "cancel", Label: label, Shortcut: "Esc", Disabled: cancelling}, {ID: "quit", Label: "Quit", Shortcut: "Ctrl+C", Disabled: m.offlineLeaving}}
 	if m.offlineCleanupFailed {
 		content += "\n\nCleanup failed: " + m.offlineCleanupError
-		footer = "Enter: Retry cleanup   Ctrl+C: Retry and quit"
+		actions = []components.ModalAction{{ID: "retry", Label: "Retry cleanup", Shortcut: "Enter", Kind: components.ButtonPrimary}, {ID: "quit", Label: "Retry and quit", Shortcut: "Ctrl+C"}}
 	}
-	return components.RenderModal(components.ModalRenderOptions{
-		Title:      "Opening offline dataset",
-		Content:    content,
-		Footer:     footer,
-		Width:      m.uiState.Width,
-		Height:     m.uiState.Height,
-		Theme:      m.uiState.Theme,
-		ModalWidth: offlineProgressModalWidth,
-	})
+	return components.ModalRenderOptions{
+		ID:    fmt.Sprintf("offline-open-%v-%t", m.offlineGeneration, m.offlineCleanupFailed),
+		Title: "Opening offline dataset", Content: content, Actions: actions,
+		State: &m.offlineModalState, Width: m.uiState.Width, Height: m.uiState.Height,
+		Theme: m.uiState.Theme, ModalWidth: offlineProgressModalWidth,
+	}
 }
 
 // Mode changes and quit join workers and release sessions in a command, keeping

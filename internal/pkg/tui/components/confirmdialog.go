@@ -38,6 +38,7 @@ type ConfirmDialogOptions struct {
 
 // ConfirmDialog is a reusable yes/no confirmation modal with customizable styling
 type ConfirmDialog struct {
+	modalState  ModalState
 	active      bool
 	dialogType  ConfirmDialogType
 	title       string
@@ -65,6 +66,7 @@ func NewConfirmDialog() ConfirmDialog {
 // Activate shows the confirmation dialog with the given message (simple version)
 // For backward compatibility. Use Show() for more control.
 func (c *ConfirmDialog) Activate(message string) tea.Cmd {
+	c.modalState.Reset()
 	c.active = true
 	c.dialogType = ConfirmDialogWarning
 	c.title = "Confirmation"
@@ -78,6 +80,7 @@ func (c *ConfirmDialog) Activate(message string) tea.Cmd {
 
 // Show activates the confirmation dialog with full options
 func (c *ConfirmDialog) Show(opts ConfirmDialogOptions) tea.Cmd {
+	c.modalState.Reset()
 	c.active = true
 	c.dialogType = opts.Type
 	c.title = opts.Title
@@ -140,19 +143,14 @@ func (c *ConfirmDialog) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
+	if cmd, handled := HandleModalInput(c, msg); handled {
+		return cmd
+	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "y", "Y", "enter":
-			// User confirmed
-			userData := c.userData
-			c.Deactivate()
-			return func() tea.Msg {
-				return ConfirmDialogResult{
-					Confirmed: true,
-					UserData:  userData,
-				}
-			}
+			return c.HandleModalAction("confirm")
 
 		case "n", "N", "esc":
 			return c.Dismiss()
@@ -167,6 +165,10 @@ func (c *ConfirmDialog) View() string {
 	if !c.active {
 		return ""
 	}
+	return RenderModal(c.ModalOptions())
+}
+
+func (c *ConfirmDialog) ModalOptions() ModalRenderOptions {
 
 	var content strings.Builder
 
@@ -218,17 +220,38 @@ func (c *ConfirmDialog) View() string {
 		content.WriteString(emphasisStyle.Render("This action cannot be undone."))
 	}
 
-	// Build footer with dynamic confirm/cancel text
-	footer := c.confirmText + ": Confirm  " + c.cancelText + "/Esc: Cancel"
+	kind := ButtonPrimary
+	if c.dialogType == ConfirmDialogDanger {
+		kind = ButtonDanger
+	}
 
 	// Use unified modal rendering
-	return RenderModal(ModalRenderOptions{
+	return ModalRenderOptions{
 		Title:      "",
 		Content:    content.String(),
-		Footer:     footer,
+		ID:         "confirmation",
+		State:      &c.modalState,
+		Actions:    []ModalAction{{ID: "confirm", Keys: []string{"y", "Y"}, Label: c.confirmText, Shortcut: "Enter", Kind: kind}, {ID: "cancel", Keys: []string{"n", "N"}, Label: c.cancelText, Shortcut: "Esc"}},
 		Width:      c.width,
 		Height:     c.height,
 		Theme:      c.theme,
 		ModalWidth: 60,
-	})
+	}
+}
+
+func (c *ConfirmDialog) HandleModalFocus(string) tea.Cmd { return nil }
+
+func (c *ConfirmDialog) HandleModalAction(id string) tea.Cmd {
+	if !c.active {
+		return nil
+	}
+	switch id {
+	case "cancel":
+		return c.Dismiss()
+	case "confirm":
+		data := c.userData
+		c.Deactivate()
+		return func() tea.Msg { return ConfirmDialogResult{Confirmed: true, UserData: data} }
+	}
+	return nil
 }

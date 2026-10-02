@@ -107,6 +107,7 @@ type CaptureTelemetryMsg capture.Telemetry
 type Model struct {
 	textSelection           *mouseTextSelection
 	modalDismissMouseDown   bool
+	offlineModalState       components.ModalState
 	scrollDrag              string
 	scrollDragRow           int
 	scrollDragOffset        int
@@ -420,10 +421,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {
 			// A new press also ends a gesture whose terminal omitted release.
 			m.modalDismissMouseDown = false
-			modalCmd, modalHandled = components.HandleModalMouse(m.activeModal(), mouse, m.uiState.Width, m.uiState.Height)
 		}
+		modalCmd, modalHandled = components.HandleModalMouse(m.activeModal(), mouse, m.uiState.Width, m.uiState.Height)
 		if modalHandled {
-			m.modalDismissMouseDown = true
+			m.modalDismissMouseDown = mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress
 			m.textSelection = nil
 			m.scrollDrag = ""
 		} else {
@@ -442,6 +443,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case tea.KeyMsg, tea.WindowSizeMsg, tea.ResumeMsg:
 		m.textSelection = nil
+	}
+	if _, ok := msg.(tea.KeyMsg); ok && !modalHandled {
+		if modal, ok := components.VisibleModal(m.activeModal()).(components.InteractiveModal); ok {
+			modalCmd, modalHandled = components.HandleModalInput(modal, msg)
+		}
 	}
 	var updated tea.Model = m
 	var cmd tea.Cmd

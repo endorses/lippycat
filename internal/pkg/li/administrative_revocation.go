@@ -13,6 +13,7 @@ import (
 // destination revisions are deliberately separate from the delivery identity
 // hash, which also binds the destination's creation identity and endpoint.
 type RevocationRequest struct {
+	IncludeX2             bool // conflict narrowing revokes both products; ordinary teardown retains X2
 	OperationID           uuid.UUID
 	StateIncarnation      uuid.UUID
 	Kind                  StateIntentKind
@@ -67,6 +68,7 @@ func (m *Manager) prepareRevocationsLocked(intent *StateIntent, task *InterceptT
 	}
 	request := RevocationRequest{OperationID: intent.OperationID, StateIncarnation: m.stateID, Kind: intent.Kind,
 		Task: cloneInterceptTask(task), Destination: stateDestination(dest)}
+	request.IncludeX2 = intent.CandidateTask != nil && intent.CandidateTask.Definition.Conflict
 	if dest != nil {
 		request.DestinationGeneration = DestinationDeliveryGeneration(dest)
 	}

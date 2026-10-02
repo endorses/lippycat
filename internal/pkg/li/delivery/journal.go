@@ -114,21 +114,25 @@ type Journal struct {
 	allocationUnit int64
 	faultReserve   int64
 	// writeFile is the atomic storage boundary, injected by fault tests before admission.
-	writeFile   func(string, []byte) error
-	sequences   map[string]journalSequenceEntry
-	sendMu      sync.RWMutex
-	purgeMu     sync.RWMutex
-	controlMu   sync.Mutex
-	wake        chan struct{}
-	checkpoints []uint64
-	mu          sync.Mutex
-	cfg         JournalConfig
-	store       *securestore.Dir
-	keys        *securestore.Keyring
-	usage       *securestore.Usage
-	writer      *securestore.Writer
-	storeID     [16]byte
-	readOnly    bool
+	writeFile         func(string, []byte) error
+	sequences         map[string]journalSequenceEntry
+	sendMu            sync.RWMutex
+	purgeMu           sync.RWMutex
+	controlMu         sync.Mutex
+	legacyDiskMu      sync.Mutex
+	legacyRevocations map[uuid.UUID]*li.StateRevocation
+	// removeLegacyRecord is the durable unlink/fsync fault seam for revocation tests.
+	removeLegacyRecord func(uint64) error
+	wake               chan struct{}
+	checkpoints        []uint64
+	mu                 sync.Mutex
+	cfg                JournalConfig
+	store              *securestore.Dir
+	keys               *securestore.Keyring
+	usage              *securestore.Usage
+	writer             *securestore.Writer
+	storeID            [16]byte
+	readOnly           bool
 	// Used only during offline construction to classify partial bootstrap.
 	bootstrapTouched bool
 	// A resumable legacy bootstrap with no state cannot accept new-format objects.
@@ -223,6 +227,11 @@ func (j *Journal) admit(rec JournalRecord, cb func(uint64, error), clone bool) (
 	}
 	if j.closed || j.stats.LastError != "" {
 		return 0, ErrJournalClosed
+	}
+	for _, control := range j.legacyRevocations {
+		if legacyControlMatches(control, rec) {
+			return 0, fmt.Errorf("journal task authorization revoked")
+		}
 	}
 	if len(rec.Data) > int(journalMaxRecord) || len(rec.CallID) > 64<<10 || !utf8.ValidString(rec.CallID) {
 		j.stats.Rejected++
@@ -432,6 +441,8 @@ func (j *Journal) run() {
 	}
 }
 func (j *Journal) checkpoint() {
+	j.legacyDiskMu.Lock()
+	defer j.legacyDiskMu.Unlock()
 	j.mu.Lock()
 	if j.stats.LastError != "" {
 		j.mu.Unlock()
@@ -441,6 +452,12 @@ func (j *Journal) checkpoint() {
 	j.checkpoints = nil
 	j.mu.Unlock()
 	for _, id := range ids {
+		j.mu.Lock()
+		exists := j.entries[id] != nil
+		j.mu.Unlock()
+		if !exists {
+			continue
+		}
 		err := j.removeRecord(id)
 		j.telemetry.Record(securestore.OutcomeOf(err), err)
 		if err != nil {
@@ -542,6 +559,8 @@ func (j *Journal) Purge(id uint64) error {
 	// sync. Close must not release the process lock while a purge is in flight.
 	j.purgeMu.RLock()
 	defer j.purgeMu.RUnlock()
+	j.legacyDiskMu.Lock()
+	defer j.legacyDiskMu.Unlock()
 	j.mu.Lock()
 	if j.closed || j.stats.LastError != "" {
 		j.mu.Unlock()

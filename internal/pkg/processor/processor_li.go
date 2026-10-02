@@ -231,6 +231,12 @@ func (p *Processor) initLIManager() {
 
 	// Create LI manager
 	p.liManager = li.NewManager(config, deactivationCallback)
+	p.liManager.SetTaskConflictCallback(func(previous *li.InterceptTask) error {
+		if liDeliveryClient != nil {
+			return liDeliveryClient.CancelTaskProducts(previous.XID, previous.ActivationGeneration)
+		}
+		return nil
+	})
 	p.liManager.SetTaskModifiedCallback(func(previous *li.InterceptTask) {
 		liPinnedCalls.Delete(previous.XID)
 		if liDeliveryClient != nil {
@@ -721,7 +727,7 @@ func (p *Processor) prepareLIStorageOnce() error {
 		if err := p.liStorage.client.Err(); err != nil {
 			return fmt.Errorf("initialize LI delivery: %w", err)
 		}
-		if p.config.LIDeliveryX3SpoolDir != "" {
+		if p.config.LIDeliveryX3SpoolDir != "" || (p.config.LIDeliveryX2SpoolDir != "" && p.config.LIStateFile != "") {
 			if err := p.liManager.SetDurableRevoker(p.liStorage.client.DurableRevoker()); err != nil {
 				return err
 			}
@@ -1114,6 +1120,7 @@ func (p *Processor) populateLIEncodingStats(dst *management.ProcessorStats) {
 	if !managerStats.StartupSync.RecoveredAt.IsZero() {
 		dst.LiStartupSync.RecoveredAt = managerStats.StartupSync.RecoveredAt.UTC().Format(time.RFC3339Nano)
 	}
+	dst.LiReconciliation = mapLISnapshotSyncStats(managerStats.SnapshotSync)
 	dst.LiDefinitions = &management.LIDefinitionStats{
 		Incomplete:     managerStats.Definitions.Incomplete,
 		PullOnly:       managerStats.Definitions.PullOnly,
@@ -1182,4 +1189,24 @@ func logLITaskDeactivation(task *li.InterceptTask, reason li.DeactivationReason)
 		fields = append(fields, "end_time", task.EndTime)
 	}
 	logger.Info("LI task deactivated", fields...)
+}
+
+// mapLISnapshotSyncStats copies the bounded diagnostic snapshot; UUID detail is
+// status-only and never becomes a metric label.
+func mapLISnapshotSyncStats(status li.SnapshotSyncStatus) *management.LIReconciliationStats {
+	result := &management.LIReconciliationStats{
+		Source: status.Source, State: status.State, Attempts: status.Attempts,
+		TaskFailures: status.TaskFailures, DestinationFailures: status.DestinationFailures,
+		TotalFailures: status.TotalFailures, FailuresTruncated: status.FailuresTruncated,
+		TaskOrphanRemovalSuppressed:        status.TaskOrphanRemovalSuppressed,
+		DestinationOrphanRemovalSuppressed: status.DestinationOrphanRemovalSuppressed,
+		WarningsSuppressed:                 status.WarningsSuppressed,
+	}
+	if !status.LastAttempt.IsZero() {
+		result.LastAttempt = status.LastAttempt.UTC().Format(time.RFC3339Nano)
+	}
+	for _, failure := range status.Failures {
+		result.Failures = append(result.Failures, &management.LIReconciliationFailure{Kind: failure.Kind, Category: failure.Category, EntryIndex: int32(failure.EntryIndex), Uuid: failure.UUID})
+	}
+	return result
 }

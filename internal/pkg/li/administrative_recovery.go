@@ -92,6 +92,10 @@ func (m *Manager) recoverAdministrativeLocked(state *StateSnapshot) error {
 			for _, task := range state.Tasks {
 				if task.XID == *intent.XID {
 					task.Status, task.DeactivatedAt = TaskStatusDeactivated, time.Now().UTC()
+					if intent.Kind == StateTaskDeactivate {
+						task.Definition.Conflict, task.Definition.ConflictDisarmed = false, false
+						task.Definition.ConflictReason = ""
+					}
 					if intent.Kind == StateTaskFail {
 						task.Status = TaskStatusFailed
 						task.LastError = "interrupted administrative withdrawal"

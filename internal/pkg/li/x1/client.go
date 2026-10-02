@@ -46,52 +46,31 @@ const (
 	DefaultMaxRetries = 3
 )
 
-// TaskReportType constants per ETSI TS 103 221-1.
+// Report categories defined by the bundled ETSI TS 103 221-1 schema.
 const (
-	// TaskReportTypeError indicates an error report.
-	TaskReportTypeError = "Error"
+	TaskReportTypeAllClear                     = "AllClear"
+	TaskReportTypeWarning                      = "Warning"
+	TaskReportTypeNonTerminatingFault          = "NonTerminatingFault"
+	TaskReportTypeTerminatingFault             = "TerminatingFault"
+	TaskReportTypeFullyActionedAndSuccessful   = "FullyActionedAndSuccessful"
+	TaskReportTypeFullyActionedAndUnsuccessful = "FullyActionedAndUnsuccessful"
+	TaskReportTypeImplicitDeactivation         = "ImplicitDeactivation"
 
-	// TaskReportTypeTaskProgress indicates task progress.
-	TaskReportTypeTaskProgress = "TaskProgress"
-
-	// TaskReportTypeActivationAcknowledgement indicates activation acknowledgement.
-	TaskReportTypeActivationAcknowledgement = "ActivationAcknowledgement"
-
-	// TaskReportTypeDeactivationAcknowledgement indicates deactivation acknowledgement.
-	TaskReportTypeDeactivationAcknowledgement = "DeactivationAcknowledgement"
-
-	// TaskReportTypeImplicitDeactivation indicates implicit deactivation.
-	TaskReportTypeImplicitDeactivation = "ImplicitDeactivation"
-)
-
-// DestinationReportType constants per ETSI TS 103 221-1.
-const (
-	// DestinationReportTypeDeliveryError indicates a delivery error.
-	DestinationReportTypeDeliveryError = "DeliveryError"
-
-	// DestinationReportTypeDeliveryRecovered indicates delivery has recovered.
-	DestinationReportTypeDeliveryRecovered = "DeliveryRecovered"
-
-	// DestinationReportTypeConnectionLost indicates connection was lost.
-	DestinationReportTypeConnectionLost = "ConnectionLost"
-
-	// DestinationReportTypeConnectionEstablished indicates connection was established.
-	DestinationReportTypeConnectionEstablished = "ConnectionEstablished"
-)
-
-// NEIssueType constants per ETSI TS 103 221-1.
-const (
-	// NEIssueTypeStartup indicates NE startup.
-	NEIssueTypeStartup = "Startup"
-
-	// NEIssueTypeShutdown indicates NE shutdown.
-	NEIssueTypeShutdown = "Shutdown"
-
-	// NEIssueTypeWarning indicates a warning condition.
-	NEIssueTypeWarning = "Warning"
-
-	// NEIssueTypeError indicates an error condition.
-	NEIssueTypeError = "Error"
+	// Compatibility names retain their public API while using valid wire values.
+	TaskReportTypeError = TaskReportTypeNonTerminatingFault
+	// Progress is informational; it does not assert that activation completed.
+	TaskReportTypeTaskProgress                 = TaskReportTypeAllClear
+	TaskReportTypeActivationAcknowledgement    = TaskReportTypeFullyActionedAndSuccessful
+	TaskReportTypeDeactivationAcknowledgement  = TaskReportTypeFullyActionedAndSuccessful
+	DestinationReportTypeDeliveryError         = TaskReportTypeNonTerminatingFault
+	DestinationReportTypeDeliveryRecovered     = TaskReportTypeAllClear
+	DestinationReportTypeConnectionLost        = TaskReportTypeNonTerminatingFault
+	DestinationReportTypeConnectionEstablished = TaskReportTypeAllClear
+	NEIssueTypeStartup                         = "Alert"
+	NEIssueTypeShutdown                        = "Alert"
+	NEIssueTypeWarning                         = "Warning"
+	NEIssueTypeError                           = "FaultReport"
+	NEIssueTypeFaultCleared                    = "FaultCleared"
 )
 
 // Errors returned by the client.
@@ -104,6 +83,14 @@ var (
 
 	// ErrRequestFailed indicates an HTTP request to ADMF failed.
 	ErrRequestFailed = errors.New("ADMF request failed")
+
+	// ErrInvalidAcknowledgment indicates a successful HTTP response without a
+	// valid, correlated X1 acknowledgment. Retrying the same peer immediately
+	// will not fix its protocol response; the caller may retry on its schedule.
+	ErrInvalidAcknowledgment = errors.New("invalid X1 acknowledgment")
+
+	// ErrIncompleteGetAllDetailsResponse indicates missing mandatory snapshot sections.
+	ErrIncompleteGetAllDetailsResponse = errors.New("incomplete GetAllDetails response")
 
 	// ErrADMFError indicates the ADMF returned an X1 error response.
 	ErrADMFError = errors.New("ADMF error response")
@@ -459,48 +446,44 @@ func (c *Client) SendKeepalive(ctx context.Context) error {
 	return c.sendRequestWithRetry(ctx, "KeepaliveRequest", req)
 }
 
-// ReportTaskError sends an error report for a task to ADMF.
+// ReportTaskError reports a nonterminating task fault. It does not deactivate the task.
 func (c *Client) ReportTaskError(ctx context.Context, xid uuid.UUID, errorCode int, details string) error {
-	if c.stopped.Load() {
-		return ErrClientStopped
-	}
-
-	xidStr := schema.UUID(xid.String())
-	req := &schema.ReportTaskIssueRequest{
-		XId:                &xidStr,
-		TaskReportType:     TaskReportTypeError,
-		TaskIssueErrorCode: &errorCode,
-		TaskIssueDetails:   &details,
-		X1RequestMessage:   c.buildRequestMessage(),
-	}
-
-	err := c.sendRequestWithRetry(ctx, "ReportTaskIssueRequest", req)
-	c.mu.Lock()
-	if err != nil {
-		c.stats.TaskReportsFailed++
-		c.stats.LastError = err.Error()
-	} else {
-		c.stats.TaskReportsSent++
-	}
-	c.mu.Unlock()
-
-	return err
+	return c.reportTaskIssue(ctx, xid, TaskReportTypeNonTerminatingFault, &errorCode, details)
 }
 
-// ReportTaskProgress sends a progress report for a task to ADMF.
+// ReportTaskWarning reports unresolved authorization or other task warnings.
+func (c *Client) ReportTaskWarning(ctx context.Context, xid uuid.UUID, details string) error {
+	return c.reportTaskIssue(ctx, xid, TaskReportTypeWarning, nil, details)
+}
+
+// ReportTaskTerminatingFault reports a fault that has terminated task execution.
+func (c *Client) ReportTaskTerminatingFault(ctx context.Context, xid uuid.UUID, errorCode int, details string) error {
+	return c.reportTaskIssue(ctx, xid, TaskReportTypeTerminatingFault, &errorCode, details)
+}
+
+// ReportTaskCompletion reports the outcome of a fully actioned task operation.
+func (c *Client) ReportTaskCompletion(ctx context.Context, xid uuid.UUID, successful bool, details string) error {
+	reportType := TaskReportTypeFullyActionedAndUnsuccessful
+	if successful {
+		reportType = TaskReportTypeFullyActionedAndSuccessful
+	}
+	return c.reportTaskIssue(ctx, xid, reportType, nil, details)
+}
+
+// ReportTaskProgress reports informational progress without claiming completion.
 func (c *Client) ReportTaskProgress(ctx context.Context, xid uuid.UUID, details string) error {
+	return c.reportTaskIssue(ctx, xid, TaskReportTypeAllClear, nil, details)
+}
+
+func (c *Client) reportTaskIssue(ctx context.Context, xid uuid.UUID, reportType string, errorCode *int, details string) error {
 	if c.stopped.Load() {
 		return ErrClientStopped
 	}
-
 	xidStr := schema.UUID(xid.String())
 	req := &schema.ReportTaskIssueRequest{
-		XId:              &xidStr,
-		TaskReportType:   TaskReportTypeTaskProgress,
+		XId: &xidStr, TaskReportType: reportType, TaskIssueErrorCode: errorCode,
 		TaskIssueDetails: &details,
-		X1RequestMessage: c.buildRequestMessage(),
 	}
-
 	err := c.sendRequestWithRetry(ctx, "ReportTaskIssueRequest", req)
 	c.mu.Lock()
 	if err != nil {
@@ -510,34 +493,13 @@ func (c *Client) ReportTaskProgress(ctx context.Context, xid uuid.UUID, details 
 		c.stats.TaskReportsSent++
 	}
 	c.mu.Unlock()
-
 	return err
 }
 
 // ReportTaskImplicitDeactivation sends an implicit deactivation report for a task to ADMF.
 // This is sent when the NE autonomously deactivates a task (e.g., EndTime reached).
 func (c *Client) ReportTaskImplicitDeactivation(ctx context.Context, xid uuid.UUID, reason string) error {
-	if c.stopped.Load() {
-		return ErrClientStopped
-	}
-
-	xidStr := schema.UUID(xid.String())
-	req := &schema.ReportTaskIssueRequest{
-		XId:              &xidStr,
-		TaskReportType:   TaskReportTypeImplicitDeactivation,
-		TaskIssueDetails: &reason,
-		X1RequestMessage: c.buildRequestMessage(),
-	}
-
-	err := c.sendRequestWithRetry(ctx, "ReportTaskIssueRequest", req)
-	c.mu.Lock()
-	if err != nil {
-		c.stats.TaskReportsFailed++
-		c.stats.LastError = err.Error()
-	} else {
-		c.stats.TaskReportsSent++
-	}
-	c.mu.Unlock()
+	err := c.reportTaskIssue(ctx, xid, TaskReportTypeImplicitDeactivation, nil, reason)
 
 	if err != nil {
 		logger.Error("X1 implicit deactivation report failed",
@@ -561,6 +523,9 @@ func (c *Client) ReportDestinationIssue(ctx context.Context, did uuid.UUID, repo
 		return ErrClientStopped
 	}
 
+	if !validTaskReportType(reportType) {
+		return fmt.Errorf("invalid destination report type %q", reportType)
+	}
 	didStr := schema.UUID(did.String())
 	req := &schema.ReportDestinationIssueRequest{
 		DId:                       &didStr,
@@ -610,6 +575,11 @@ func (c *Client) ReportNEIssue(ctx context.Context, issueType string, descriptio
 		return ErrClientStopped
 	}
 
+	switch issueType {
+	case NEIssueTypeStartup, NEIssueTypeWarning, NEIssueTypeError, NEIssueTypeFaultCleared:
+	default:
+		return fmt.Errorf("invalid NE issue type %q", issueType)
+	}
 	req := &schema.ReportNEIssueRequest{
 		TypeOfNeIssueMessage: issueType,
 		Description:          description,
@@ -654,6 +624,21 @@ func (c *Client) ReportError(ctx context.Context, errorCode int, description str
 	return c.ReportNEIssue(ctx, NEIssueTypeError, description, &errorCode)
 }
 
+// ReportFaultCleared reports recovery from a previously reported NE fault.
+func (c *Client) ReportFaultCleared(ctx context.Context, description string) error {
+	return c.ReportNEIssue(ctx, NEIssueTypeFaultCleared, description, nil)
+}
+
+func validTaskReportType(value string) bool {
+	switch value {
+	case TaskReportTypeAllClear, TaskReportTypeWarning, TaskReportTypeNonTerminatingFault,
+		TaskReportTypeTerminatingFault, TaskReportTypeImplicitDeactivation,
+		TaskReportTypeFullyActionedAndSuccessful, TaskReportTypeFullyActionedAndUnsuccessful:
+		return true
+	}
+	return false
+}
+
 // GetAllDetails queries ADMF for all task and destination details.
 // Returns the full state including NE status, tasks, and destinations.
 func (c *Client) GetAllDetails(ctx context.Context) (*schema.GetAllDetailsResponse, error) {
@@ -672,7 +657,7 @@ func (c *Client) GetAllDetails(ctx context.Context) (*schema.GetAllDetailsRespon
 	// All three sections are mandatory in TS 103 221-1 clause 6.4.5 and
 	// its bundled schema. Missing sections are not evidence of empty state.
 	if resp.NeStatusDetails == nil || resp.NeStatusDetails.NeStatus == "" || resp.ListOfTaskResponseDetails == nil || resp.ListOfDestinationResponseDetails == nil {
-		return nil, fmt.Errorf("incomplete GetAllDetails response: NE status, task list, and destination list are required")
+		return nil, fmt.Errorf("%w: NE status, task list, and destination list are required", ErrIncompleteGetAllDetailsResponse)
 	}
 
 	return &resp, nil
@@ -838,6 +823,7 @@ func (c *Client) sendQueryRequestWithRetry(ctx context.Context, rootElement stri
 			}
 		}
 
+		c.refreshRequestMessage(req)
 		err := c.sendQueryRequest(ctx, rootElement, req, resp)
 		if err == nil {
 			return nil
@@ -845,7 +831,7 @@ func (c *Client) sendQueryRequestWithRetry(ctx context.Context, rootElement stri
 
 		// Don't retry ADMF application-level errors (e.g., unsupported operation).
 		var admfErr *ADMFError
-		if errors.As(err, &admfErr) {
+		if errors.As(err, &admfErr) || errors.Is(err, ErrInvalidAcknowledgment) {
 			return err
 		}
 
@@ -1021,9 +1007,29 @@ func localXMLName(name string) string {
 	return name
 }
 
+// Each resend is a new X1 transaction, including query and keepalive retries.
+func (c *Client) refreshRequestMessage(req any) {
+	base := c.buildRequestMessage()
+	switch request := req.(type) {
+	case *schema.KeepaliveRequest:
+		request.X1RequestMessage = base
+	case *schema.ReportTaskIssueRequest:
+		request.X1RequestMessage = base
+	case *schema.ReportDestinationIssueRequest:
+		request.X1RequestMessage = base
+	case *schema.GetAllDetailsRequest:
+		request.X1RequestMessage = base
+	case *schema.GetAllTaskDetailsRequest:
+		request.X1RequestMessage = base
+	}
+}
+
 // sendRequestWithRetry sends an X1 request with exponential backoff retry.
 func (c *Client) sendRequestWithRetry(ctx context.Context, rootElement string, req any) error {
-	return c.sendRequestWithRetryFactory(ctx, rootElement, func() any { return req })
+	return c.sendRequestWithRetryFactory(ctx, rootElement, func() any {
+		c.refreshRequestMessage(req)
+		return req
+	})
 }
 
 // sendRequestWithRetryFactory builds each attempt immediately before sending it.
@@ -1063,6 +1069,10 @@ func (c *Client) sendRequestWithRetryFactory(ctx context.Context, rootElement st
 			return ctx.Err()
 		}
 
+		var admfErr *ADMFError
+		if errors.As(err, &admfErr) || errors.Is(err, ErrInvalidAcknowledgment) {
+			return err
+		}
 		lastErr = err
 		logger.Debug("X1 request failed, will retry",
 			"attempt", attempt+1,
@@ -1110,14 +1120,12 @@ func (c *Client) sendRequest(ctx context.Context, rootElement string, req any) e
 		return fmt.Errorf("HTTP status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Parse response to check for X1 errors.
-	// For now, we accept any 2xx response as success.
-	// A more complete implementation would parse the X1 response and check for error codes.
-	logger.Debug("X1 response received",
-		"status", resp.StatusCode,
-		"body_length", len(respBody),
-	)
-
+	if err := validateReportAcknowledgment(xmlData, respBody, rootElement); err != nil {
+		if errors.Is(err, ErrADMFError) {
+			return err
+		}
+		return fmt.Errorf("%w: %v", ErrInvalidAcknowledgment, err)
+	}
 	return nil
 }
 

@@ -8,6 +8,12 @@ bounds. No new performance acceptance gates are introduced.
 
 ## Findings and implementation decisions
 
+The D1/D5 retained-authority decisions and their completion record below describe
+the historical implementation at `702c2c3f`. They are superseded by
+[LI conflict authorization and X1 reporting](li-conflict-authorization-and-x1-reporting.md):
+complete conflicts enforce only common authorized scope, disarm empty or expired
+results, withhold replay, and retry schema-valid conflict reports until acknowledged.
+
 ### LI task definitions
 
 **D1 — restored push-owned tasks become unarmed on definition conflicts.**
@@ -160,6 +166,6 @@ implicit flag and unconditional end-time expiry). The implementation and
 fixtures were corrected; those initial failures are not unrelated blockers.
 
 The remaining T1 limitation is deliberate: queued bytes lost on SYN replacement
-are counted, not recovered. Push-owned conflicts preserve the original task's
-window until an explicit X1 change; this preserves authority but cannot recover
-a missed renewal automatically. T5 remains an operator sizing consideration.
+are counted, not recovered. The original full-definition retention policy for
+push-owned conflicts was found to permit excessive scope and is superseded by
+the linked common-authorization plan. T5 remains an operator sizing consideration.

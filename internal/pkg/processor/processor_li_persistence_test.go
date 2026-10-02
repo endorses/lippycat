@@ -3,11 +3,13 @@
 package processor
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/xml"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -28,16 +30,18 @@ import (
 // This fixture uses the actual Processor startup, encrypted owners, ADMF XML,
 // packet encoder, reorder callbacks, journal and restart approval path.
 type persistentProcessorFixture struct {
-	config               Config
-	xid, did             uuid.UUID
-	address              string
-	mu                   sync.Mutex
-	target               string
-	port                 int
-	includeTask          bool
-	endTime              time.Time
-	partialSnapshot      bool
-	explicitDeactivation bool
+	config                  Config
+	xid, did                uuid.UUID
+	address                 string
+	mu                      sync.Mutex
+	target                  string
+	port                    int
+	includeTask             bool
+	endTime                 time.Time
+	partialSnapshot         bool
+	explicitDeactivation    bool
+	taskDeliveryType        string
+	destinationDeliveryType string
 }
 
 func TestProcessorX3ReplayPolicyWiring(t *testing.T) {
@@ -86,7 +90,25 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 	require.NoError(t, listener.Close()) // MDF is deliberately unavailable during capture.
 	f := &persistentProcessorFixture{config: storageKeyStartupConfig(t), xid: uuid.New(), did: uuid.New(), address: address, port: port, target: "sip:alice@example.invalid", includeTask: true}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestBody, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			t.Errorf("read ADMF request: %v", readErr)
+			return
+		}
+		if !bytes.Contains(requestBody, []byte("GetAllDetailsRequest")) {
+			if _, err := w.Write(processorConflictAcknowledgment(t, requestBody)); err != nil {
+				t.Logf("ADMF acknowledgment: %v", err)
+			}
+			return
+		}
 		f.mu.Lock()
+		taskDelivery, destinationDelivery := f.taskDeliveryType, f.destinationDeliveryType
+		if taskDelivery == "" {
+			taskDelivery = "X3Only"
+		}
+		if destinationDelivery == "" {
+			destinationDelivery = "X3Only"
+		}
 		xid, did, target, ip := schema.UUID(f.xid.String()), schema.UUID(f.did.String()), schema.SIPURI(f.target), "127.0.0.1"
 		implicit := true
 		if f.explicitDeactivation {
@@ -97,7 +119,7 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 			ListOfGenericObjectResponseDetails: &schema.ListOfGenericObjectResponseDetails{},
 			ListOfTaskResponseDetails:          &schema.ListOfTaskResponseDetails{},
 			ListOfDestinationResponseDetails: &schema.ListOfDestinationResponseDetails{DestinationResponseDetails: []*schema.DestinationResponseDetails{{DestinationDetails: &schema.DestinationDetails{
-				DId: &did, DeliveryType: "X3Only", DeliveryAddress: &schema.DeliveryAddress{IpAddressAndPort: &schema.IPAddressPort{Address: &schema.IPAddress{IPv4Address: &ip}, Port: &schema.Port{TCPPort: &f.port}}},
+				DId: &did, DeliveryType: destinationDelivery, DeliveryAddress: &schema.DeliveryAddress{IpAddressAndPort: &schema.IPAddressPort{Address: &schema.IPAddress{IPv4Address: &ip}, Port: &schema.Port{TCPPort: &f.port}}},
 			}}}},
 		}
 		if f.includeTask {
@@ -109,10 +131,11 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 				end = &value
 			}
 			if !f.partialSnapshot {
-				mediation = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{{DeliveryType: "HI3Only", StartTime: &start, EndTime: end}}}
+				mediationType := map[string]string{"X3Only": "HI3Only", "X2Only": "HI2Only", "X2andX3": "HI2andHI3"}[taskDelivery]
+				mediation = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{{DeliveryType: mediationType, StartTime: &start, EndTime: end}}}
 			}
 			response.ListOfTaskResponseDetails.TaskResponseDetails = []*schema.TaskResponseDetails{{TaskDetails: &schema.TaskDetails{
-				XId: &xid, DeliveryType: "X3Only", ImplicitDeactivationAllowed: &implicit, ListOfMediationDetails: mediation,
+				XId: &xid, DeliveryType: taskDelivery, ImplicitDeactivationAllowed: &implicit, ListOfMediationDetails: mediation,
 				TargetIdentifiers: &schema.ListOfTargetIdentifiers{TargetIdentifier: []*schema.TargetIdentifier{{SipUri: &target}}}, ListOfDIDs: &schema.ListOfDids{DId: []*schema.UUID{&did}},
 			}, TaskStatus: &schema.TaskStatus{ProvisioningStatus: "active"}}}
 		}

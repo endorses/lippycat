@@ -85,7 +85,6 @@ func (m *Manager) attemptStartupSync() bool {
 	case err != nil:
 		result.State = StartupSyncRetryableFailure
 		result.LastFailure = startupFailureSummary(err)
-		logger.Warn("ADMF startup synchronization pending", "attempt", result.Attempts, "failure", result.LastFailure)
 	default:
 		result.State = StartupSyncSucceeded
 		result.RecoveredAt = time.Now().UTC()
@@ -108,7 +107,7 @@ func (m *Manager) retryStartupSync() {
 			return
 		case <-timer.C:
 		}
-		logger.Info("Retrying ADMF startup synchronization", "attempt", m.StartupSyncStatus().Attempts+1)
+		logger.Debug("Retrying ADMF startup synchronization", "attempt", m.StartupSyncStatus().Attempts+1)
 		if !m.attemptStartupSync() {
 			return
 		}

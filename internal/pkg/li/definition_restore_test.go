@@ -53,7 +53,7 @@ func TestStrictCandidateRetainsKnownFieldsAcrossPartialSnapshots(t *testing.T) {
 	}
 }
 
-func TestRestoredPushRetainsAuthorityOnConflictThenConfirmsExactDefinition(t *testing.T) {
+func TestRestoredPushConflictNarrowsAndExactPullCannotResolve(t *testing.T) {
 	cfg := ManagerConfig{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state")}
 	m := newStateTestManager(t, cfg, nil)
 	xid, did := uuid.New(), uuid.New()
@@ -76,7 +76,7 @@ func TestRestoredPushRetainsAuthorityOnConflictThenConfirmsExactDefinition(t *te
 	held, err := next.GetTaskDetails(xid)
 	require.NoError(t, err)
 	require.Equal(t, 1, next.FilterCount())
-	require.True(t, equivalentTaskDefinition(original, held))
+	require.Equal(t, time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC), held.EndTime)
 	require.Equal(t, DefinitionPush, held.Definition.Source)
 	require.True(t, held.Definition.Conflict)
 	require.EqualValues(t, 1, next.Stats().Definitions.Conflicts)
@@ -85,15 +85,15 @@ func TestRestoredPushRetainsAuthorityOnConflictThenConfirmsExactDefinition(t *te
 	current, err := next.GetTaskDetails(xid)
 	require.NoError(t, err)
 	require.Equal(t, DefinitionPush, current.Definition.Source)
-	require.False(t, current.Definition.Conflict)
-	require.Equal(t, original.ActivationGeneration, current.ActivationGeneration)
-	require.True(t, next.ReplayTaskAuthorized(xid, original.ActivationGeneration))
+	require.True(t, current.Definition.Conflict)
+	require.Greater(t, current.ActivationGeneration, original.ActivationGeneration)
+	require.False(t, next.ReplayTaskAuthorized(xid, original.ActivationGeneration))
 	require.Equal(t, 1, next.FilterCount())
 	// Later pulls still cannot replace the confirmed push.
 	applyConvergence(t, next, stale)
 	current, err = next.GetTaskDetails(xid)
 	require.NoError(t, err)
-	require.True(t, equivalentTaskDefinition(original, current))
+	require.True(t, equivalentTaskDefinition(held, current))
 	require.True(t, current.Definition.Conflict)
 }
 

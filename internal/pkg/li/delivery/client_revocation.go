@@ -186,7 +186,20 @@ func deliveryCall(xid uuid.UUID, m DeliveryMetadata) li.DeliveryCallIdentity {
 }
 
 func (c *Client) itemEligible(did uuid.UUID, item *deliveryItem, newAdmission bool) bool {
+	c.gateMu.RLock()
+	conflictBlocked := c.conflictGateFault || (c.conflictGenerations[item.xid] != 0 && item.metadata.TaskGeneration <= c.conflictGenerations[item.xid])
+	c.gateMu.RUnlock()
+	if conflictBlocked || item.canceled.Load() {
+		return false
+	}
 	if item.pduType != PDUTypeX3 {
+		c.gateMu.RLock()
+		defer c.gateMu.RUnlock()
+		for _, control := range c.revoked {
+			if c.productControlMatches(control, did, item) {
+				return false
+			}
+		}
 		return true
 	}
 	m := item.metadata
@@ -216,7 +229,7 @@ func (c *Client) itemEligible(did uuid.UUID, item *deliveryItem, newAdmission bo
 		return false
 	}
 	for _, control := range c.revoked {
-		if controlMatches(control, did, item) {
+		if c.productControlMatches(control, did, item) {
 			return false
 		}
 	}
@@ -442,46 +455,47 @@ func (d *clientDurableRevoker) Prepare(req li.RevocationRequest) ([]*li.StateRev
 	if c.initErr != nil {
 		return nil, c.initErr
 	}
-	if req.StateIncarnation == uuid.Nil || req.StateIncarnation != c.config.StateIncarnation {
+	if (req.StateIncarnation == uuid.Nil && c.x3Journal != nil) || req.StateIncarnation != c.config.StateIncarnation {
 		return nil, fmt.Errorf("revocation state incarnation mismatch")
-	}
-	if c.x3Journal == nil {
-		return []*li.StateRevocation{}, nil
 	}
 	if req.OperationID == uuid.Nil || (req.Task == nil) == (req.Destination == nil) {
 		return nil, fmt.Errorf("invalid revocation subject")
 	}
-	record, admission := c.x3Journal.Highwaters()
-	journal := c.x3Journal.UUID()
-	control := &li.StateRevocation{Version: 1, ControlID: uuid.NewSHA1(req.OperationID, journal[:]), JournalUUID: journal, StateIncarnation: req.StateIncarnation, CoveredRecordHighwater: record, CoveredAdmissionHighwater: admission, RevokedAt: li.NewStateTimestamp(time.Now())}
-	if req.Task != nil {
-		xid, gen := req.Task.XID, req.Task.ActivationGeneration
-		control.Scope = li.StateRevokeTask
-		control.XID = &xid
-		control.TaskGeneration = &gen
-	} else {
-		did, gen := req.Destination.DID, req.DestinationGeneration
-		control.Scope = li.StateRevokeDestination
-		control.DID = &did
-		control.DestinationGeneration = &gen
+	var controls []*li.StateRevocation
+	for _, owner := range c.journals() {
+		if owner == c.x2Journal && !req.IncludeX2 {
+			continue
+		}
+		record, admission := owner.Highwaters()
+		journal := owner.UUID()
+		control := &li.StateRevocation{Version: 1, ControlID: uuid.NewSHA1(req.OperationID, journal[:]), JournalUUID: journal, StateIncarnation: req.StateIncarnation, CoveredRecordHighwater: record, CoveredAdmissionHighwater: admission, RevokedAt: li.NewStateTimestamp(time.Now())}
+		if req.Task != nil {
+			xid, gen := req.Task.XID, req.Task.ActivationGeneration
+			control.Scope, control.XID, control.TaskGeneration = li.StateRevokeTask, &xid, &gen
+		} else {
+			did, gen := req.Destination.DID, req.DestinationGeneration
+			control.Scope, control.DID, control.DestinationGeneration = li.StateRevokeDestination, &did, &gen
+		}
+		controls = append(controls, control)
 	}
-	return []*li.StateRevocation{control}, nil
+	return controls, nil
 }
 func (d *clientDurableRevoker) Commit(controls []*li.StateRevocation) (outcome securestore.Outcome, resultErr error) {
 	c := d.client
 	if len(controls) == 0 {
 		return securestore.Committed, nil
 	}
-	if c.x3Journal == nil {
-		return securestore.NotCommitted, fmt.Errorf("recorded X3 journal is unavailable")
-	}
 	c.gateMu.Lock()
+	newControls := make(map[uuid.UUID]bool, len(controls))
 	for _, control := range controls {
-		if control == nil || control.JournalUUID != c.x3Journal.UUID() || control.StateIncarnation != c.config.StateIncarnation || control.ControlID == uuid.Nil || !validDeliveryControl(control) {
+		if control == nil || c.revocationJournal(control.JournalUUID) == nil || control.StateIncarnation != c.config.StateIncarnation || control.ControlID == uuid.Nil || !validDeliveryControl(control) {
 			c.gateMu.Unlock()
 			return securestore.NotCommitted, fmt.Errorf("revocation journal binding mismatch")
 		}
-		if _, exists := c.revoked[control.ControlID]; !exists && len(c.revoked) >= maxDeliveryGateIdentities {
+		if _, exists := c.revoked[control.ControlID]; !exists {
+			newControls[control.ControlID] = true
+		}
+		if len(c.revoked)+len(newControls) > maxDeliveryGateIdentities {
 			c.gateMu.Unlock()
 			return securestore.NotCommitted, ErrQueueFull
 		}
@@ -509,17 +523,17 @@ func (d *clientDurableRevoker) Commit(controls []*li.StateRevocation) (outcome s
 		// while reporting an unresolved owner as an unsuccessful boundary.
 		resultErr = errors.Join(resultErr, joinRevokedTransport(claims, c.config.SendTimeout))
 	}()
-	c.cancelMatching(func(item *deliveryItem) bool {
+	c.cancelMatchingProducts(func(item *deliveryItem) bool {
 		for _, control := range controls {
 			if control.Scope != li.StateRevokeTask {
 				continue
 			}
-			if controlMatches(control, uuid.Nil, item) {
+			if c.productControlMatches(control, uuid.Nil, item) {
 				return true
 			}
 		}
 		return false
-	})
+	}, true)
 	for _, control := range controls {
 		if control.Scope == li.StateRevokeDestination && control.DID != nil {
 			c.cancelDestinationGeneration(*control.DID, *control.DestinationGeneration)
@@ -528,7 +542,7 @@ func (d *clientDurableRevoker) Commit(controls []*li.StateRevocation) (outcome s
 		}
 	}
 	for n, control := range controls {
-		current, err := c.x3Journal.Revoke(control)
+		current, err := c.revocationJournal(control.JournalUUID).Revoke(control)
 		if err != nil || current != securestore.Committed {
 			outcome := securestore.NotCommitted
 			if current == securestore.Committed && n == len(controls)-1 {
@@ -545,7 +559,7 @@ func (d *clientDurableRevoker) Commit(controls []*li.StateRevocation) (outcome s
 	if c.config.AuthoritativeTaskAuthorization {
 		c.gateMu.Lock()
 		for _, control := range controls {
-			if control.Scope == li.StateRevokeTask {
+			if control.Scope == li.StateRevokeTask && c.revocationJournal(control.JournalUUID) == c.x3Journal {
 				delete(c.revoked, control.ControlID)
 			}
 		}
@@ -554,22 +568,80 @@ func (d *clientDurableRevoker) Commit(controls []*li.StateRevocation) (outcome s
 	return securestore.Committed, nil
 }
 
+// Match controls only to their bound product journal. Ordinary X3 revocation
+// must never suppress retained X2, even when their task generations match.
+func (c *Client) productControlMatches(control *li.StateRevocation, did uuid.UUID, item *deliveryItem) bool {
+	owner := c.journalFor(item.pduType)
+	return owner != nil && owner.UUID() == control.JournalUUID && controlMatches(control, did, item)
+}
+
+func (c *Client) revocationJournal(id uuid.UUID) *Journal {
+	for _, owner := range c.journals() {
+		if owner.UUID() == id {
+			return owner
+		}
+	}
+	return nil
+}
+
+// CancelTaskProducts is reserved for conservative authorization conflicts. It
+// blocks new admission, discards both products and joins existing transport
+// owners. Historical writes already completed cannot be recalled.
+func (c *Client) CancelTaskProducts(xid uuid.UUID, generation uint64) error {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	c.gateMu.Lock()
+	var gateErr error
+	if _, exists := c.conflictGenerations[xid]; !exists && len(c.conflictGenerations) >= maxDeliveryGateIdentities {
+		c.conflictGateFault = true
+		gateErr = ErrQueueFull
+	} else {
+		c.conflictGenerations[xid] = max(c.conflictGenerations[xid], generation)
+	}
+	allBlocked := c.conflictGateFault
+	c.gateMu.Unlock()
+	match := func(_ uuid.UUID, item *deliveryItem) bool {
+		return allBlocked || item.xid == xid && item.metadata.TaskGeneration <= generation
+	}
+	claims := c.cancelTransportMatching(match)
+	c.cancelMatchingProducts(func(item *deliveryItem) bool { return match(uuid.Nil, item) }, true)
+	// X2-only journaling also supports deployments without administrative state.
+	// No manager intent exists in that mode, so finish the durable backlog boundary
+	// here. With persistent state the manager records its complete control plan.
+	var durableErr error
+	if c.config.StateIncarnation == uuid.Nil && c.x2Journal != nil {
+		controls, err := c.DurableRevoker().Prepare(li.RevocationRequest{OperationID: uuid.New(), IncludeX2: true, Task: &li.InterceptTask{XID: xid, ActivationGeneration: generation}})
+		durableErr = err
+		if err == nil {
+			_, durableErr = c.DurableRevoker().Commit(controls)
+		}
+	}
+	return errors.Join(gateErr, durableErr, joinRevokedTransport(claims, c.config.SendTimeout))
+}
+
 func (c *Client) cancelRevokedTransport(controls []*li.StateRevocation) []<-chan struct{} {
+	return c.cancelTransportMatching(func(did uuid.UUID, item *deliveryItem) bool {
+		for _, control := range controls {
+			if c.productControlMatches(control, did, item) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func (c *Client) cancelTransportMatching(match func(uuid.UUID, *deliveryItem) bool) []<-chan struct{} {
 	var claims []<-chan struct{}
 	var cancels []context.CancelFunc
 	c.queuesMu.RLock()
 	for _, q := range c.queues {
 		q.mu.Lock()
-		claim := q.claims[1]
-		if claim != nil {
-			for _, control := range controls {
-				if controlMatches(control, q.did, claim.item) {
-					claim.item.canceled.Store(true)
-					claims = append(claims, claim.done)
-					if claim.item.cancel != nil {
-						cancels = append(cancels, claim.item.cancel)
-					}
-					break
+		for _, claim := range q.claims {
+			if claim != nil && match(q.did, claim.item) {
+				claim.item.canceled.Store(true)
+				claims = append(claims, claim.done)
+				if claim.item.cancel != nil {
+					cancels = append(cancels, claim.item.cancel)
 				}
 			}
 		}

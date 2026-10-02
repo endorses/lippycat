@@ -699,6 +699,34 @@ message ProcessorStats {
     LIDefinitionStats li_definitions = 15;
     // Startup ADMF synchronization, absent when LI is disabled or unavailable.
     LIStartupSyncStats li_startup_sync = 16;
+    // Latest startup or periodic snapshot diagnostics; absent when LI is disabled.
+    LIReconciliationStats li_reconciliation = 17;
+}
+
+// Diagnostic details are bounded to the first 32 failures per snapshot. Counts
+// cover all failures. No selectors, delivery addresses or remote text are exposed.
+message LIReconciliationFailure {
+    string kind = 1;
+    string category = 2;
+    // Zero-based entry index; -1 denotes a request or list-level failure.
+    int32 entry_index = 3;
+    // Validated UUID only; empty when unknown.
+    string uuid = 4;
+}
+
+message LIReconciliationStats {
+    string source = 1;
+    string state = 2;
+    uint64 attempts = 3;
+    string last_attempt = 4;
+    uint64 task_failures = 5;
+    uint64 destination_failures = 6;
+    uint64 total_failures = 7;
+    repeated LIReconciliationFailure failures = 8;
+    uint64 failures_truncated = 9;
+    bool task_orphan_removal_suppressed = 10;
+    bool destination_orphan_removal_suppressed = 11;
+    uint64 warnings_suppressed = 12;
 }
 
 message LIStartupSyncStats {

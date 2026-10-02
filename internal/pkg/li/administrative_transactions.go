@@ -435,6 +435,10 @@ func (m *Manager) withdrawPersistentTaskLocked(xid uuid.UUID, kind StateIntentKi
 	}
 	closed := cloneInterceptTask(previous)
 	closed.Status, closed.DeactivatedAt = TaskStatusDeactivated, time.Now().UTC()
+	if kind == StateTaskDeactivate {
+		closed.Definition.Conflict, closed.Definition.ConflictDisarmed = false, false
+		closed.Definition.ConflictReason = ""
+	}
 	callbackReason := DeactivationReasonADMF
 	if kind == StateTaskExpire {
 		callbackReason = DeactivationReasonExpired

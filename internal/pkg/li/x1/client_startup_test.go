@@ -55,7 +55,7 @@ func TestClient_ReportStartupRecoversAfterTimeout(t *testing.T) {
 			<-r.Context().Done()
 			return nil, r.Context().Err()
 		}
-		return startupResponse(http.StatusOK), nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(reportAcknowledgment(t, body, "")))), Header: make(http.Header)}, nil
 	})
 
 	require.NoError(t, client.ReportStartup(context.Background()))

@@ -24,7 +24,7 @@ type journalSegmentBackend interface {
 
 func (j *Journal) Revoke(r *li.StateRevocation) (securestore.Outcome, error) {
 	if j.segments == nil {
-		return securestore.NotCommitted, ErrJournalMigrationRequired
+		return j.revokeLegacy(r)
 	}
 	return j.segments.revoke(r)
 }

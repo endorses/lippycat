@@ -78,9 +78,11 @@ func TestRestoredPushRenewalConflictRemainsArmedAndReportedOnce(t *testing.T) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		if strings.Contains(string(body), "ReportTaskIssueRequest") {
-			require.Contains(t, string(body), "retaining X1 definition")
+			require.Contains(t, string(body), "common authorized scope")
 			reports.Add(1)
-			_, err = io.WriteString(w, "<ReportTaskIssueResponse/>")
+			_, err = w.Write(conflictTestAcknowledgment(t, body))
+		} else if strings.Contains(string(body), "ReportNEIssueRequest") {
+			_, err = w.Write(conflictTestAcknowledgment(t, body))
 		} else {
 			_, err = io.WriteString(w, response)
 		}
@@ -120,7 +122,7 @@ func TestRestoredPushRenewalConflictRemainsArmedAndReportedOnce(t *testing.T) {
 	require.True(t, retained.Definition.Conflict)
 	require.Equal(t, before.EndTime, retained.EndTime)
 	require.Equal(t, 1, next.FilterCount())
-	require.EqualValues(t, 1, reports.Load(), "persisted conflicts do not report on every restart")
+	require.Eventually(t, func() bool { return reports.Load() == 2 }, 3*time.Second, time.Millisecond, "persisted conflicts must be reported after restart")
 	require.False(t, next.ReplayTaskAuthorized(xid, before.ActivationGeneration))
 	// Explicit renewal clears the conflict without granting historical replay.
 	renewedEnd, err := time.Parse(time.RFC3339Nano, string(end))
@@ -149,16 +151,21 @@ func TestConcurrentCompleteStaleSnapshotThenFirstPush(t *testing.T) {
 		require.NoError(t, err)
 	})
 	m := newStateTestManager(t, ManagerConfig{Enabled: true, ADMFEndpoint: admf.URL}, nil)
+	contending := make(chan struct{})
+	m.snapshotWaitHook = func() { close(contending) }
 	pulled := make(chan error, 1)
 	go func() { pulled <- m.syncStateFromADMF(context.Background()) }()
 	<-entered
-	pushed, pushing := make(chan error, 1), make(chan struct{})
+	pushed := make(chan error, 1)
 	start := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
 	go func() {
-		close(pushing)
 		pushed <- m.ActivateTaskX1(&x1.Task{XID: xid, Targets: []x1.TargetIdentity{{Type: x1.TargetTypeSIPURI, Value: "sip:newer@example.invalid"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: x1.DeliveryX2andX3, StartTime: start, DefinitionPresence: &x1.TaskDefinitionPresence{Mediation: true, Start: true, End: true}})
 	}()
-	<-pushing
+	select {
+	case <-contending:
+	case <-time.After(5 * time.Second):
+		t.Fatal("push did not contend on the in-progress snapshot")
+	}
 	close(release)
 	require.NoError(t, <-pulled)
 	require.NoError(t, <-pushed)
@@ -171,7 +178,8 @@ func TestConcurrentCompleteStaleSnapshotThenFirstPush(t *testing.T) {
 	applyConvergence(t, m, stale)
 	retained, err := m.GetTaskDetails(xid)
 	require.NoError(t, err)
-	require.True(t, equivalentTaskDefinition(task, retained))
+	require.False(t, retained.IsActive(), "a disjoint later snapshot must stop enforcement")
+	require.True(t, retained.Definition.ConflictDisarmed)
 	require.True(t, retained.Definition.Conflict)
 }
 
@@ -234,7 +242,10 @@ func TestConflictingRestoreCannotUseUnconfirmedRetainedDestination(t *testing.T)
 	in, err := ConvertSnapshotTask(productionOpenDefinition(xid, other))
 	require.NoError(t, err)
 	in.confirmedDestinations = map[uuid.UUID]bool{other: true}
-	require.ErrorIs(t, next.applySnapshotDefinition(in), ErrDestinationNotFound)
+	require.NoError(t, next.applySnapshotDefinition(in))
+	disarmed, err := next.GetTaskDetails(xid)
+	require.NoError(t, err)
+	require.True(t, disarmed.Definition.ConflictDisarmed)
 	require.Zero(t, next.FilterCount())
 	require.False(t, next.ReplayTaskAuthorized(xid, old.ActivationGeneration))
 }

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/securestore"
 	"github.com/google/uuid"
@@ -33,6 +32,13 @@ func (m *Manager) applySnapshotDefinition(in *SnapshotTask) error {
 	if held == nil {
 		held = cloneInterceptTask(m.persistenceCandidates[task.XID])
 	}
+	if held != nil && held.Definition.Source == DefinitionPush && (held.Status == TaskStatusDeactivated || held.Status == TaskStatusFailed) {
+		// A stale pull cannot reactivate an explicitly withdrawn or faulted push.
+		return nil
+	}
+	if held != nil && held.Definition.ConflictDisarmed {
+		return m.applyConflictAuthorizationLocked(held, in, live)
+	}
 	if !in.Completeness.Complete() {
 		if live && !m.pendingNeedsConfirmation(task.XID) {
 			return nil
@@ -55,39 +61,33 @@ func (m *Manager) applySnapshotDefinition(in *SnapshotTask) error {
 			}
 			return m.storeDefinitionCandidateLocked(task)
 		}
+		if err := m.activateSnapshotLocked(task); err != nil {
+			return err
+		}
 		logPartialDefinitionAdmission(task)
-		return m.activateSnapshotLocked(task)
+		return nil
 	}
 	if held != nil && held.Definition.Source == DefinitionPush {
-		if !equivalentTaskDefinition(held, task) {
-			newConflict := !held.Definition.Conflict
-			held.Definition.Conflict = true
-			if !live || m.pendingNeedsConfirmation(task.XID) {
-				// A differing pull proves the task still exists, but cannot
-				// replace push authority. Re-arm the persisted definition only
-				// with destinations confirmed by this snapshot. Replay still
-				// requires exact definition confirmation below.
-				if in.confirmedDestinations != nil {
-					for _, did := range held.DestinationIDs {
-						if !in.confirmedDestinations[did] {
-							return fmt.Errorf("%w: retained definition has unconfirmed destination", ErrDestinationNotFound)
-						}
-					}
+		unconfirmedDestination := false
+		if in.confirmedDestinations != nil {
+			for _, did := range held.DestinationIDs {
+				if !in.confirmedDestinations[did] {
+					unconfirmedDestination = true
 				}
-				if err := m.activateSnapshotLocked(held); err != nil {
-					return err
-				}
-			} else if err := m.updateDefinitionMetadataLocked(held); err != nil {
-				return err
 			}
-			if newConflict {
-				logger.Warn("LI task definition conflict", "xid", task.XID, "provenance", held.Definition.Source, "fields", changedDefinitionFields(held, task), "reason", "pull_freshness_unproven")
-				m.ReportTaskError(task.XID, x1.ErrorCodeGenericWarning, "Task definition conflict: retaining X1 definition; send ModifyTask to resolve")
-			}
-			return nil
+		}
+		if held.Definition.Conflict || !equivalentTaskDefinition(held, task) || unconfirmedDestination {
+			return m.applyConflictAuthorizationLocked(held, in, live)
 		}
 		// Exact confirmation never transfers ownership from a push to a pull.
 		task.Definition.Source = DefinitionPush
+	}
+	if in.confirmedDestinations != nil {
+		for _, did := range task.DestinationIDs {
+			if !in.confirmedDestinations[did] {
+				return fmt.Errorf("%w: definition has unconfirmed destination", ErrDestinationNotFound)
+			}
+		}
 	}
 
 	repaired := held != nil && (!held.Definition.Completeness.Complete() || !equivalentTaskDefinition(held, task))
@@ -191,7 +191,7 @@ func (m *Manager) updateDefinitionMetadataLocked(task *InterceptTask) error {
 }
 
 func (m *Manager) confirmDefinitionReplayLocked(task *InterceptTask) {
-	if !task.Definition.Completeness.Complete() {
+	if task.Definition.Conflict || !task.Definition.Completeness.Complete() {
 		return
 	}
 	old := m.persistedActive[task.XID]

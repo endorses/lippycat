@@ -2910,8 +2910,10 @@ type ProcessorStats struct {
 	LiDefinitions *LIDefinitionStats `protobuf:"bytes,15,opt,name=li_definitions,json=liDefinitions,proto3" json:"li_definitions,omitempty"`
 	// Startup ADMF synchronization, absent when LI is disabled or unavailable.
 	LiStartupSync *LIStartupSyncStats `protobuf:"bytes,16,opt,name=li_startup_sync,json=liStartupSync,proto3" json:"li_startup_sync,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Latest startup or periodic snapshot diagnostics; absent when LI is disabled.
+	LiReconciliation *LIReconciliationStats `protobuf:"bytes,17,opt,name=li_reconciliation,json=liReconciliation,proto3" json:"li_reconciliation,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ProcessorStats) Reset() {
@@ -3056,6 +3058,217 @@ func (x *ProcessorStats) GetLiStartupSync() *LIStartupSyncStats {
 	return nil
 }
 
+func (x *ProcessorStats) GetLiReconciliation() *LIReconciliationStats {
+	if x != nil {
+		return x.LiReconciliation
+	}
+	return nil
+}
+
+// Diagnostic details are bounded to the first 32 failures per snapshot. Counts
+// cover all failures. No selectors, delivery addresses or remote text are exposed.
+type LIReconciliationFailure struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Kind     string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Category string                 `protobuf:"bytes,2,opt,name=category,proto3" json:"category,omitempty"`
+	// Zero-based entry index; -1 denotes a request or list-level failure.
+	EntryIndex int32 `protobuf:"varint,3,opt,name=entry_index,json=entryIndex,proto3" json:"entry_index,omitempty"`
+	// Validated UUID only; empty when unknown.
+	Uuid          string `protobuf:"bytes,4,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LIReconciliationFailure) Reset() {
+	*x = LIReconciliationFailure{}
+	mi := &file_management_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LIReconciliationFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LIReconciliationFailure) ProtoMessage() {}
+
+func (x *LIReconciliationFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_management_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LIReconciliationFailure.ProtoReflect.Descriptor instead.
+func (*LIReconciliationFailure) Descriptor() ([]byte, []int) {
+	return file_management_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *LIReconciliationFailure) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *LIReconciliationFailure) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *LIReconciliationFailure) GetEntryIndex() int32 {
+	if x != nil {
+		return x.EntryIndex
+	}
+	return 0
+}
+
+func (x *LIReconciliationFailure) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+type LIReconciliationStats struct {
+	state                              protoimpl.MessageState     `protogen:"open.v1"`
+	Source                             string                     `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
+	State                              string                     `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	Attempts                           uint64                     `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	LastAttempt                        string                     `protobuf:"bytes,4,opt,name=last_attempt,json=lastAttempt,proto3" json:"last_attempt,omitempty"`
+	TaskFailures                       uint64                     `protobuf:"varint,5,opt,name=task_failures,json=taskFailures,proto3" json:"task_failures,omitempty"`
+	DestinationFailures                uint64                     `protobuf:"varint,6,opt,name=destination_failures,json=destinationFailures,proto3" json:"destination_failures,omitempty"`
+	TotalFailures                      uint64                     `protobuf:"varint,7,opt,name=total_failures,json=totalFailures,proto3" json:"total_failures,omitempty"`
+	Failures                           []*LIReconciliationFailure `protobuf:"bytes,8,rep,name=failures,proto3" json:"failures,omitempty"`
+	FailuresTruncated                  uint64                     `protobuf:"varint,9,opt,name=failures_truncated,json=failuresTruncated,proto3" json:"failures_truncated,omitempty"`
+	TaskOrphanRemovalSuppressed        bool                       `protobuf:"varint,10,opt,name=task_orphan_removal_suppressed,json=taskOrphanRemovalSuppressed,proto3" json:"task_orphan_removal_suppressed,omitempty"`
+	DestinationOrphanRemovalSuppressed bool                       `protobuf:"varint,11,opt,name=destination_orphan_removal_suppressed,json=destinationOrphanRemovalSuppressed,proto3" json:"destination_orphan_removal_suppressed,omitempty"`
+	WarningsSuppressed                 uint64                     `protobuf:"varint,12,opt,name=warnings_suppressed,json=warningsSuppressed,proto3" json:"warnings_suppressed,omitempty"`
+	unknownFields                      protoimpl.UnknownFields
+	sizeCache                          protoimpl.SizeCache
+}
+
+func (x *LIReconciliationStats) Reset() {
+	*x = LIReconciliationStats{}
+	mi := &file_management_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LIReconciliationStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LIReconciliationStats) ProtoMessage() {}
+
+func (x *LIReconciliationStats) ProtoReflect() protoreflect.Message {
+	mi := &file_management_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LIReconciliationStats.ProtoReflect.Descriptor instead.
+func (*LIReconciliationStats) Descriptor() ([]byte, []int) {
+	return file_management_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *LIReconciliationStats) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *LIReconciliationStats) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *LIReconciliationStats) GetAttempts() uint64 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
+
+func (x *LIReconciliationStats) GetLastAttempt() string {
+	if x != nil {
+		return x.LastAttempt
+	}
+	return ""
+}
+
+func (x *LIReconciliationStats) GetTaskFailures() uint64 {
+	if x != nil {
+		return x.TaskFailures
+	}
+	return 0
+}
+
+func (x *LIReconciliationStats) GetDestinationFailures() uint64 {
+	if x != nil {
+		return x.DestinationFailures
+	}
+	return 0
+}
+
+func (x *LIReconciliationStats) GetTotalFailures() uint64 {
+	if x != nil {
+		return x.TotalFailures
+	}
+	return 0
+}
+
+func (x *LIReconciliationStats) GetFailures() []*LIReconciliationFailure {
+	if x != nil {
+		return x.Failures
+	}
+	return nil
+}
+
+func (x *LIReconciliationStats) GetFailuresTruncated() uint64 {
+	if x != nil {
+		return x.FailuresTruncated
+	}
+	return 0
+}
+
+func (x *LIReconciliationStats) GetTaskOrphanRemovalSuppressed() bool {
+	if x != nil {
+		return x.TaskOrphanRemovalSuppressed
+	}
+	return false
+}
+
+func (x *LIReconciliationStats) GetDestinationOrphanRemovalSuppressed() bool {
+	if x != nil {
+		return x.DestinationOrphanRemovalSuppressed
+	}
+	return false
+}
+
+func (x *LIReconciliationStats) GetWarningsSuppressed() uint64 {
+	if x != nil {
+		return x.WarningsSuppressed
+	}
+	return 0
+}
+
 type LIStartupSyncStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Empty when startup synchronization was not requested.
@@ -3072,7 +3285,7 @@ type LIStartupSyncStats struct {
 
 func (x *LIStartupSyncStats) Reset() {
 	*x = LIStartupSyncStats{}
-	mi := &file_management_proto_msgTypes[28]
+	mi := &file_management_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3084,7 +3297,7 @@ func (x *LIStartupSyncStats) String() string {
 func (*LIStartupSyncStats) ProtoMessage() {}
 
 func (x *LIStartupSyncStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[28]
+	mi := &file_management_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3097,7 +3310,7 @@ func (x *LIStartupSyncStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LIStartupSyncStats.ProtoReflect.Descriptor instead.
 func (*LIStartupSyncStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{28}
+	return file_management_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *LIStartupSyncStats) GetState() string {
@@ -3151,7 +3364,7 @@ type LIDefinitionStats struct {
 
 func (x *LIDefinitionStats) Reset() {
 	*x = LIDefinitionStats{}
-	mi := &file_management_proto_msgTypes[29]
+	mi := &file_management_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3163,7 +3376,7 @@ func (x *LIDefinitionStats) String() string {
 func (*LIDefinitionStats) ProtoMessage() {}
 
 func (x *LIDefinitionStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[29]
+	mi := &file_management_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3176,7 +3389,7 @@ func (x *LIDefinitionStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LIDefinitionStats.ProtoReflect.Descriptor instead.
 func (*LIDefinitionStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{29}
+	return file_management_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *LIDefinitionStats) GetIncomplete() uint64 {
@@ -3232,7 +3445,7 @@ type ProcessorStorageStats struct {
 
 func (x *ProcessorStorageStats) Reset() {
 	*x = ProcessorStorageStats{}
-	mi := &file_management_proto_msgTypes[30]
+	mi := &file_management_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3244,7 +3457,7 @@ func (x *ProcessorStorageStats) String() string {
 func (*ProcessorStorageStats) ProtoMessage() {}
 
 func (x *ProcessorStorageStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[30]
+	mi := &file_management_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3257,7 +3470,7 @@ func (x *ProcessorStorageStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessorStorageStats.ProtoReflect.Descriptor instead.
 func (*ProcessorStorageStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{30}
+	return file_management_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ProcessorStorageStats) GetFilters() *StorageStatus {
@@ -3300,7 +3513,7 @@ type StorageStatus struct {
 
 func (x *StorageStatus) Reset() {
 	*x = StorageStatus{}
-	mi := &file_management_proto_msgTypes[31]
+	mi := &file_management_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3312,7 +3525,7 @@ func (x *StorageStatus) String() string {
 func (*StorageStatus) ProtoMessage() {}
 
 func (x *StorageStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[31]
+	mi := &file_management_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3325,7 +3538,7 @@ func (x *StorageStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageStatus.ProtoReflect.Descriptor instead.
 func (*StorageStatus) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{31}
+	return file_management_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *StorageStatus) GetMode() string {
@@ -3449,7 +3662,7 @@ type EncryptionUsageStats struct {
 
 func (x *EncryptionUsageStats) Reset() {
 	*x = EncryptionUsageStats{}
-	mi := &file_management_proto_msgTypes[32]
+	mi := &file_management_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3461,7 +3674,7 @@ func (x *EncryptionUsageStats) String() string {
 func (*EncryptionUsageStats) ProtoMessage() {}
 
 func (x *EncryptionUsageStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[32]
+	mi := &file_management_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3474,7 +3687,7 @@ func (x *EncryptionUsageStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EncryptionUsageStats.ProtoReflect.Descriptor instead.
 func (*EncryptionUsageStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{32}
+	return file_management_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *EncryptionUsageStats) GetReservedInvocations() uint64 {
@@ -3575,7 +3788,7 @@ type SIPRetryTelemetry struct {
 
 func (x *SIPRetryTelemetry) Reset() {
 	*x = SIPRetryTelemetry{}
-	mi := &file_management_proto_msgTypes[33]
+	mi := &file_management_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3587,7 +3800,7 @@ func (x *SIPRetryTelemetry) String() string {
 func (*SIPRetryTelemetry) ProtoMessage() {}
 
 func (x *SIPRetryTelemetry) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[33]
+	mi := &file_management_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3600,7 +3813,7 @@ func (x *SIPRetryTelemetry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SIPRetryTelemetry.ProtoReflect.Descriptor instead.
 func (*SIPRetryTelemetry) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{33}
+	return file_management_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SIPRetryTelemetry) GetRetriesSeen() uint64 {
@@ -3672,7 +3885,7 @@ type LIDeliveryStats struct {
 
 func (x *LIDeliveryStats) Reset() {
 	*x = LIDeliveryStats{}
-	mi := &file_management_proto_msgTypes[34]
+	mi := &file_management_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3684,7 +3897,7 @@ func (x *LIDeliveryStats) String() string {
 func (*LIDeliveryStats) ProtoMessage() {}
 
 func (x *LIDeliveryStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[34]
+	mi := &file_management_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3697,7 +3910,7 @@ func (x *LIDeliveryStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LIDeliveryStats.ProtoReflect.Descriptor instead.
 func (*LIDeliveryStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{34}
+	return file_management_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *LIDeliveryStats) GetX2EnqueueCalls() uint64 {
@@ -3900,7 +4113,7 @@ type LIDestinationDeliveryStats struct {
 
 func (x *LIDestinationDeliveryStats) Reset() {
 	*x = LIDestinationDeliveryStats{}
-	mi := &file_management_proto_msgTypes[35]
+	mi := &file_management_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3912,7 +4125,7 @@ func (x *LIDestinationDeliveryStats) String() string {
 func (*LIDestinationDeliveryStats) ProtoMessage() {}
 
 func (x *LIDestinationDeliveryStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[35]
+	mi := &file_management_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3925,7 +4138,7 @@ func (x *LIDestinationDeliveryStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LIDestinationDeliveryStats.ProtoReflect.Descriptor instead.
 func (*LIDestinationDeliveryStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{35}
+	return file_management_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *LIDestinationDeliveryStats) GetQueueDepth() uint64 {
@@ -4203,7 +4416,7 @@ type LIJournalStats struct {
 
 func (x *LIJournalStats) Reset() {
 	*x = LIJournalStats{}
-	mi := &file_management_proto_msgTypes[36]
+	mi := &file_management_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4215,7 +4428,7 @@ func (x *LIJournalStats) String() string {
 func (*LIJournalStats) ProtoMessage() {}
 
 func (x *LIJournalStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[36]
+	mi := &file_management_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4228,7 +4441,7 @@ func (x *LIJournalStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LIJournalStats.ProtoReflect.Descriptor instead.
 func (*LIJournalStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{36}
+	return file_management_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *LIJournalStats) GetBytes() int64 {
@@ -4351,7 +4564,7 @@ type LIInterfaceKeepaliveStats struct {
 
 func (x *LIInterfaceKeepaliveStats) Reset() {
 	*x = LIInterfaceKeepaliveStats{}
-	mi := &file_management_proto_msgTypes[37]
+	mi := &file_management_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4363,7 +4576,7 @@ func (x *LIInterfaceKeepaliveStats) String() string {
 func (*LIInterfaceKeepaliveStats) ProtoMessage() {}
 
 func (x *LIInterfaceKeepaliveStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[37]
+	mi := &file_management_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4376,7 +4589,7 @@ func (x *LIInterfaceKeepaliveStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LIInterfaceKeepaliveStats.ProtoReflect.Descriptor instead.
 func (*LIInterfaceKeepaliveStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{37}
+	return file_management_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *LIInterfaceKeepaliveStats) GetEnabled() bool {
@@ -4491,7 +4704,7 @@ type LIEncodingStats struct {
 
 func (x *LIEncodingStats) Reset() {
 	*x = LIEncodingStats{}
-	mi := &file_management_proto_msgTypes[38]
+	mi := &file_management_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4503,7 +4716,7 @@ func (x *LIEncodingStats) String() string {
 func (*LIEncodingStats) ProtoMessage() {}
 
 func (x *LIEncodingStats) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[38]
+	mi := &file_management_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4516,7 +4729,7 @@ func (x *LIEncodingStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LIEncodingStats.ProtoReflect.Descriptor instead.
 func (*LIEncodingStats) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{38}
+	return file_management_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *LIEncodingStats) GetX2Encoded() uint64 {
@@ -4633,7 +4846,7 @@ type ListHuntersRequest struct {
 
 func (x *ListHuntersRequest) Reset() {
 	*x = ListHuntersRequest{}
-	mi := &file_management_proto_msgTypes[39]
+	mi := &file_management_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4645,7 +4858,7 @@ func (x *ListHuntersRequest) String() string {
 func (*ListHuntersRequest) ProtoMessage() {}
 
 func (x *ListHuntersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[39]
+	mi := &file_management_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4658,7 +4871,7 @@ func (x *ListHuntersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListHuntersRequest.ProtoReflect.Descriptor instead.
 func (*ListHuntersRequest) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{39}
+	return file_management_proto_rawDescGZIP(), []int{41}
 }
 
 // ListHuntersResponse contains list of available hunters
@@ -4672,7 +4885,7 @@ type ListHuntersResponse struct {
 
 func (x *ListHuntersResponse) Reset() {
 	*x = ListHuntersResponse{}
-	mi := &file_management_proto_msgTypes[40]
+	mi := &file_management_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4684,7 +4897,7 @@ func (x *ListHuntersResponse) String() string {
 func (*ListHuntersResponse) ProtoMessage() {}
 
 func (x *ListHuntersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[40]
+	mi := &file_management_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4697,7 +4910,7 @@ func (x *ListHuntersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListHuntersResponse.ProtoReflect.Descriptor instead.
 func (*ListHuntersResponse) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{40}
+	return file_management_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ListHuntersResponse) GetHunters() []*AvailableHunter {
@@ -4730,7 +4943,7 @@ type AvailableHunter struct {
 
 func (x *AvailableHunter) Reset() {
 	*x = AvailableHunter{}
-	mi := &file_management_proto_msgTypes[41]
+	mi := &file_management_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4742,7 +4955,7 @@ func (x *AvailableHunter) String() string {
 func (*AvailableHunter) ProtoMessage() {}
 
 func (x *AvailableHunter) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[41]
+	mi := &file_management_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4755,7 +4968,7 @@ func (x *AvailableHunter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AvailableHunter.ProtoReflect.Descriptor instead.
 func (*AvailableHunter) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{41}
+	return file_management_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *AvailableHunter) GetHunterId() string {
@@ -4816,7 +5029,7 @@ type TopologyRequest struct {
 
 func (x *TopologyRequest) Reset() {
 	*x = TopologyRequest{}
-	mi := &file_management_proto_msgTypes[42]
+	mi := &file_management_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4828,7 +5041,7 @@ func (x *TopologyRequest) String() string {
 func (*TopologyRequest) ProtoMessage() {}
 
 func (x *TopologyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[42]
+	mi := &file_management_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4841,7 +5054,7 @@ func (x *TopologyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopologyRequest.ProtoReflect.Descriptor instead.
 func (*TopologyRequest) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{42}
+	return file_management_proto_rawDescGZIP(), []int{44}
 }
 
 // TopologyResponse contains the complete topology
@@ -4855,7 +5068,7 @@ type TopologyResponse struct {
 
 func (x *TopologyResponse) Reset() {
 	*x = TopologyResponse{}
-	mi := &file_management_proto_msgTypes[43]
+	mi := &file_management_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4867,7 +5080,7 @@ func (x *TopologyResponse) String() string {
 func (*TopologyResponse) ProtoMessage() {}
 
 func (x *TopologyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[43]
+	mi := &file_management_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4880,7 +5093,7 @@ func (x *TopologyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopologyResponse.ProtoReflect.Descriptor instead.
 func (*TopologyResponse) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{43}
+	return file_management_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *TopologyResponse) GetProcessor() *ProcessorNode {
@@ -4921,7 +5134,7 @@ type ProcessorNode struct {
 
 func (x *ProcessorNode) Reset() {
 	*x = ProcessorNode{}
-	mi := &file_management_proto_msgTypes[44]
+	mi := &file_management_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4933,7 +5146,7 @@ func (x *ProcessorNode) String() string {
 func (*ProcessorNode) ProtoMessage() {}
 
 func (x *ProcessorNode) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[44]
+	mi := &file_management_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4946,7 +5159,7 @@ func (x *ProcessorNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessorNode.ProtoReflect.Descriptor instead.
 func (*ProcessorNode) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{44}
+	return file_management_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ProcessorNode) GetAddress() string {
@@ -5039,7 +5252,7 @@ type TopologySubscribeRequest struct {
 
 func (x *TopologySubscribeRequest) Reset() {
 	*x = TopologySubscribeRequest{}
-	mi := &file_management_proto_msgTypes[45]
+	mi := &file_management_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5051,7 +5264,7 @@ func (x *TopologySubscribeRequest) String() string {
 func (*TopologySubscribeRequest) ProtoMessage() {}
 
 func (x *TopologySubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[45]
+	mi := &file_management_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5064,7 +5277,7 @@ func (x *TopologySubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopologySubscribeRequest.ProtoReflect.Descriptor instead.
 func (*TopologySubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{45}
+	return file_management_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *TopologySubscribeRequest) GetIncludeDownstream() bool {
@@ -5106,7 +5319,7 @@ type TopologyUpdate struct {
 
 func (x *TopologyUpdate) Reset() {
 	*x = TopologyUpdate{}
-	mi := &file_management_proto_msgTypes[46]
+	mi := &file_management_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5118,7 +5331,7 @@ func (x *TopologyUpdate) String() string {
 func (*TopologyUpdate) ProtoMessage() {}
 
 func (x *TopologyUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[46]
+	mi := &file_management_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5131,7 +5344,7 @@ func (x *TopologyUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopologyUpdate.ProtoReflect.Descriptor instead.
 func (*TopologyUpdate) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{46}
+	return file_management_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *TopologyUpdate) GetUpdateType() TopologyUpdateType {
@@ -5252,7 +5465,7 @@ type HunterConnectedEvent struct {
 
 func (x *HunterConnectedEvent) Reset() {
 	*x = HunterConnectedEvent{}
-	mi := &file_management_proto_msgTypes[47]
+	mi := &file_management_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5264,7 +5477,7 @@ func (x *HunterConnectedEvent) String() string {
 func (*HunterConnectedEvent) ProtoMessage() {}
 
 func (x *HunterConnectedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[47]
+	mi := &file_management_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5277,7 +5490,7 @@ func (x *HunterConnectedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HunterConnectedEvent.ProtoReflect.Descriptor instead.
 func (*HunterConnectedEvent) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{47}
+	return file_management_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *HunterConnectedEvent) GetHunter() *ConnectedHunter {
@@ -5300,7 +5513,7 @@ type HunterDisconnectedEvent struct {
 
 func (x *HunterDisconnectedEvent) Reset() {
 	*x = HunterDisconnectedEvent{}
-	mi := &file_management_proto_msgTypes[48]
+	mi := &file_management_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5312,7 +5525,7 @@ func (x *HunterDisconnectedEvent) String() string {
 func (*HunterDisconnectedEvent) ProtoMessage() {}
 
 func (x *HunterDisconnectedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[48]
+	mi := &file_management_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5325,7 +5538,7 @@ func (x *HunterDisconnectedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HunterDisconnectedEvent.ProtoReflect.Descriptor instead.
 func (*HunterDisconnectedEvent) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{48}
+	return file_management_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *HunterDisconnectedEvent) GetHunterId() string {
@@ -5353,7 +5566,7 @@ type ProcessorConnectedEvent struct {
 
 func (x *ProcessorConnectedEvent) Reset() {
 	*x = ProcessorConnectedEvent{}
-	mi := &file_management_proto_msgTypes[49]
+	mi := &file_management_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5365,7 +5578,7 @@ func (x *ProcessorConnectedEvent) String() string {
 func (*ProcessorConnectedEvent) ProtoMessage() {}
 
 func (x *ProcessorConnectedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[49]
+	mi := &file_management_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5378,7 +5591,7 @@ func (x *ProcessorConnectedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessorConnectedEvent.ProtoReflect.Descriptor instead.
 func (*ProcessorConnectedEvent) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{49}
+	return file_management_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ProcessorConnectedEvent) GetProcessor() *ProcessorNode {
@@ -5403,7 +5616,7 @@ type ProcessorDisconnectedEvent struct {
 
 func (x *ProcessorDisconnectedEvent) Reset() {
 	*x = ProcessorDisconnectedEvent{}
-	mi := &file_management_proto_msgTypes[50]
+	mi := &file_management_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5415,7 +5628,7 @@ func (x *ProcessorDisconnectedEvent) String() string {
 func (*ProcessorDisconnectedEvent) ProtoMessage() {}
 
 func (x *ProcessorDisconnectedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[50]
+	mi := &file_management_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5428,7 +5641,7 @@ func (x *ProcessorDisconnectedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessorDisconnectedEvent.ProtoReflect.Descriptor instead.
 func (*ProcessorDisconnectedEvent) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{50}
+	return file_management_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ProcessorDisconnectedEvent) GetProcessorId() string {
@@ -5467,7 +5680,7 @@ type HunterStatusChangedEvent struct {
 
 func (x *HunterStatusChangedEvent) Reset() {
 	*x = HunterStatusChangedEvent{}
-	mi := &file_management_proto_msgTypes[51]
+	mi := &file_management_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5479,7 +5692,7 @@ func (x *HunterStatusChangedEvent) String() string {
 func (*HunterStatusChangedEvent) ProtoMessage() {}
 
 func (x *HunterStatusChangedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[51]
+	mi := &file_management_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5492,7 +5705,7 @@ func (x *HunterStatusChangedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HunterStatusChangedEvent.ProtoReflect.Descriptor instead.
 func (*HunterStatusChangedEvent) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{51}
+	return file_management_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *HunterStatusChangedEvent) GetHunterId() string {
@@ -5542,7 +5755,7 @@ type DetectorTelemetry struct {
 
 func (x *DetectorTelemetry) Reset() {
 	*x = DetectorTelemetry{}
-	mi := &file_management_proto_msgTypes[52]
+	mi := &file_management_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5554,7 +5767,7 @@ func (x *DetectorTelemetry) String() string {
 func (*DetectorTelemetry) ProtoMessage() {}
 
 func (x *DetectorTelemetry) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[52]
+	mi := &file_management_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5567,7 +5780,7 @@ func (x *DetectorTelemetry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetectorTelemetry.ProtoReflect.Descriptor instead.
 func (*DetectorTelemetry) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{52}
+	return file_management_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *DetectorTelemetry) GetFlowEntries() uint64 {
@@ -5700,7 +5913,7 @@ type PcapWriterTelemetry struct {
 
 func (x *PcapWriterTelemetry) Reset() {
 	*x = PcapWriterTelemetry{}
-	mi := &file_management_proto_msgTypes[53]
+	mi := &file_management_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5712,7 +5925,7 @@ func (x *PcapWriterTelemetry) String() string {
 func (*PcapWriterTelemetry) ProtoMessage() {}
 
 func (x *PcapWriterTelemetry) ProtoReflect() protoreflect.Message {
-	mi := &file_management_proto_msgTypes[53]
+	mi := &file_management_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5725,7 +5938,7 @@ func (x *PcapWriterTelemetry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PcapWriterTelemetry.ProtoReflect.Descriptor instead.
 func (*PcapWriterTelemetry) Descriptor() ([]byte, []int) {
-	return file_management_proto_rawDescGZIP(), []int{53}
+	return file_management_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *PcapWriterTelemetry) GetActiveWriters() uint64 {
@@ -6011,7 +6224,7 @@ const file_management_proto_rawDesc = "" +
 	"interfaces\x18\t \x03(\tR\n" +
 	"interfaces\x12K\n" +
 	"\fcapabilities\x18\n" +
-	" \x01(\v2'.lippycat.management.HunterCapabilitiesR\fcapabilities\"\x88\a\n" +
+	" \x01(\v2'.lippycat.management.HunterCapabilitiesR\fcapabilities\"\xe1\a\n" +
 	"\x0eProcessorStats\x12#\n" +
 	"\rtotal_hunters\x18\x01 \x01(\rR\ftotalHunters\x12'\n" +
 	"\x0fhealthy_hunters\x18\x02 \x01(\rR\x0ehealthyHunters\x12'\n" +
@@ -6031,7 +6244,28 @@ const file_management_proto_rawDesc = "" +
 	"\tsip_retry\x18\r \x01(\v2&.lippycat.management.SIPRetryTelemetryR\bsipRetry\x12D\n" +
 	"\astorage\x18\x0e \x01(\v2*.lippycat.management.ProcessorStorageStatsR\astorage\x12M\n" +
 	"\x0eli_definitions\x18\x0f \x01(\v2&.lippycat.management.LIDefinitionStatsR\rliDefinitions\x12O\n" +
-	"\x0fli_startup_sync\x18\x10 \x01(\v2'.lippycat.management.LIStartupSyncStatsR\rliStartupSync\"\xaf\x01\n" +
+	"\x0fli_startup_sync\x18\x10 \x01(\v2'.lippycat.management.LIStartupSyncStatsR\rliStartupSync\x12W\n" +
+	"\x11li_reconciliation\x18\x11 \x01(\v2*.lippycat.management.LIReconciliationStatsR\x10liReconciliation\"~\n" +
+	"\x17LIReconciliationFailure\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1a\n" +
+	"\bcategory\x18\x02 \x01(\tR\bcategory\x12\x1f\n" +
+	"\ventry_index\x18\x03 \x01(\x05R\n" +
+	"entryIndex\x12\x12\n" +
+	"\x04uuid\x18\x04 \x01(\tR\x04uuid\"\xc5\x04\n" +
+	"\x15LIReconciliationStats\x12\x16\n" +
+	"\x06source\x18\x01 \x01(\tR\x06source\x12\x14\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\x12\x1a\n" +
+	"\battempts\x18\x03 \x01(\x04R\battempts\x12!\n" +
+	"\flast_attempt\x18\x04 \x01(\tR\vlastAttempt\x12#\n" +
+	"\rtask_failures\x18\x05 \x01(\x04R\ftaskFailures\x121\n" +
+	"\x14destination_failures\x18\x06 \x01(\x04R\x13destinationFailures\x12%\n" +
+	"\x0etotal_failures\x18\a \x01(\x04R\rtotalFailures\x12H\n" +
+	"\bfailures\x18\b \x03(\v2,.lippycat.management.LIReconciliationFailureR\bfailures\x12-\n" +
+	"\x12failures_truncated\x18\t \x01(\x04R\x11failuresTruncated\x12C\n" +
+	"\x1etask_orphan_removal_suppressed\x18\n" +
+	" \x01(\bR\x1btaskOrphanRemovalSuppressed\x12Q\n" +
+	"%destination_orphan_removal_suppressed\x18\v \x01(\bR\"destinationOrphanRemovalSuppressed\x12/\n" +
+	"\x13warnings_suppressed\x18\f \x01(\x04R\x12warningsSuppressed\"\xaf\x01\n" +
 	"\x12LIStartupSyncStats\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12\x1a\n" +
 	"\battempts\x18\x02 \x01(\x04R\battempts\x12!\n" +
@@ -6415,7 +6649,7 @@ func file_management_proto_rawDescGZIP() []byte {
 }
 
 var file_management_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 59)
+var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
 var file_management_proto_goTypes = []any{
 	(ForwardingMode)(0),                   // 0: lippycat.management.ForwardingMode
 	(HunterStatus)(0),                     // 1: lippycat.management.HunterStatus
@@ -6452,37 +6686,39 @@ var file_management_proto_goTypes = []any{
 	(*StatusResponse)(nil),                // 32: lippycat.management.StatusResponse
 	(*ConnectedHunter)(nil),               // 33: lippycat.management.ConnectedHunter
 	(*ProcessorStats)(nil),                // 34: lippycat.management.ProcessorStats
-	(*LIStartupSyncStats)(nil),            // 35: lippycat.management.LIStartupSyncStats
-	(*LIDefinitionStats)(nil),             // 36: lippycat.management.LIDefinitionStats
-	(*ProcessorStorageStats)(nil),         // 37: lippycat.management.ProcessorStorageStats
-	(*StorageStatus)(nil),                 // 38: lippycat.management.StorageStatus
-	(*EncryptionUsageStats)(nil),          // 39: lippycat.management.EncryptionUsageStats
-	(*SIPRetryTelemetry)(nil),             // 40: lippycat.management.SIPRetryTelemetry
-	(*LIDeliveryStats)(nil),               // 41: lippycat.management.LIDeliveryStats
-	(*LIDestinationDeliveryStats)(nil),    // 42: lippycat.management.LIDestinationDeliveryStats
-	(*LIJournalStats)(nil),                // 43: lippycat.management.LIJournalStats
-	(*LIInterfaceKeepaliveStats)(nil),     // 44: lippycat.management.LIInterfaceKeepaliveStats
-	(*LIEncodingStats)(nil),               // 45: lippycat.management.LIEncodingStats
-	(*ListHuntersRequest)(nil),            // 46: lippycat.management.ListHuntersRequest
-	(*ListHuntersResponse)(nil),           // 47: lippycat.management.ListHuntersResponse
-	(*AvailableHunter)(nil),               // 48: lippycat.management.AvailableHunter
-	(*TopologyRequest)(nil),               // 49: lippycat.management.TopologyRequest
-	(*TopologyResponse)(nil),              // 50: lippycat.management.TopologyResponse
-	(*ProcessorNode)(nil),                 // 51: lippycat.management.ProcessorNode
-	(*TopologySubscribeRequest)(nil),      // 52: lippycat.management.TopologySubscribeRequest
-	(*TopologyUpdate)(nil),                // 53: lippycat.management.TopologyUpdate
-	(*HunterConnectedEvent)(nil),          // 54: lippycat.management.HunterConnectedEvent
-	(*HunterDisconnectedEvent)(nil),       // 55: lippycat.management.HunterDisconnectedEvent
-	(*ProcessorConnectedEvent)(nil),       // 56: lippycat.management.ProcessorConnectedEvent
-	(*ProcessorDisconnectedEvent)(nil),    // 57: lippycat.management.ProcessorDisconnectedEvent
-	(*HunterStatusChangedEvent)(nil),      // 58: lippycat.management.HunterStatusChangedEvent
-	(*DetectorTelemetry)(nil),             // 59: lippycat.management.DetectorTelemetry
-	(*PcapWriterTelemetry)(nil),           // 60: lippycat.management.PcapWriterTelemetry
-	nil,                                   // 61: lippycat.management.LIDeliveryStats.DestinationsEntry
-	nil,                                   // 62: lippycat.management.LIDeliveryStats.DroppedByReasonEntry
-	nil,                                   // 63: lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
-	nil,                                   // 64: lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
-	nil,                                   // 65: lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
+	(*LIReconciliationFailure)(nil),       // 35: lippycat.management.LIReconciliationFailure
+	(*LIReconciliationStats)(nil),         // 36: lippycat.management.LIReconciliationStats
+	(*LIStartupSyncStats)(nil),            // 37: lippycat.management.LIStartupSyncStats
+	(*LIDefinitionStats)(nil),             // 38: lippycat.management.LIDefinitionStats
+	(*ProcessorStorageStats)(nil),         // 39: lippycat.management.ProcessorStorageStats
+	(*StorageStatus)(nil),                 // 40: lippycat.management.StorageStatus
+	(*EncryptionUsageStats)(nil),          // 41: lippycat.management.EncryptionUsageStats
+	(*SIPRetryTelemetry)(nil),             // 42: lippycat.management.SIPRetryTelemetry
+	(*LIDeliveryStats)(nil),               // 43: lippycat.management.LIDeliveryStats
+	(*LIDestinationDeliveryStats)(nil),    // 44: lippycat.management.LIDestinationDeliveryStats
+	(*LIJournalStats)(nil),                // 45: lippycat.management.LIJournalStats
+	(*LIInterfaceKeepaliveStats)(nil),     // 46: lippycat.management.LIInterfaceKeepaliveStats
+	(*LIEncodingStats)(nil),               // 47: lippycat.management.LIEncodingStats
+	(*ListHuntersRequest)(nil),            // 48: lippycat.management.ListHuntersRequest
+	(*ListHuntersResponse)(nil),           // 49: lippycat.management.ListHuntersResponse
+	(*AvailableHunter)(nil),               // 50: lippycat.management.AvailableHunter
+	(*TopologyRequest)(nil),               // 51: lippycat.management.TopologyRequest
+	(*TopologyResponse)(nil),              // 52: lippycat.management.TopologyResponse
+	(*ProcessorNode)(nil),                 // 53: lippycat.management.ProcessorNode
+	(*TopologySubscribeRequest)(nil),      // 54: lippycat.management.TopologySubscribeRequest
+	(*TopologyUpdate)(nil),                // 55: lippycat.management.TopologyUpdate
+	(*HunterConnectedEvent)(nil),          // 56: lippycat.management.HunterConnectedEvent
+	(*HunterDisconnectedEvent)(nil),       // 57: lippycat.management.HunterDisconnectedEvent
+	(*ProcessorConnectedEvent)(nil),       // 58: lippycat.management.ProcessorConnectedEvent
+	(*ProcessorDisconnectedEvent)(nil),    // 59: lippycat.management.ProcessorDisconnectedEvent
+	(*HunterStatusChangedEvent)(nil),      // 60: lippycat.management.HunterStatusChangedEvent
+	(*DetectorTelemetry)(nil),             // 61: lippycat.management.DetectorTelemetry
+	(*PcapWriterTelemetry)(nil),           // 62: lippycat.management.PcapWriterTelemetry
+	nil,                                   // 63: lippycat.management.LIDeliveryStats.DestinationsEntry
+	nil,                                   // 64: lippycat.management.LIDeliveryStats.DroppedByReasonEntry
+	nil,                                   // 65: lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
+	nil,                                   // 66: lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
+	nil,                                   // 67: lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
 }
 var file_management_proto_depIdxs = []int32{
 	11, // 0: lippycat.management.HunterRegistration.capabilities:type_name -> lippycat.management.HunterCapabilities
@@ -6495,11 +6731,11 @@ var file_management_proto_depIdxs = []int32{
 	0,  // 7: lippycat.management.RegistrationResponse.accepted_forwarding_mode:type_name -> lippycat.management.ForwardingMode
 	1,  // 8: lippycat.management.HunterHeartbeat.status:type_name -> lippycat.management.HunterStatus
 	15, // 9: lippycat.management.HunterHeartbeat.stats:type_name -> lippycat.management.HunterStats
-	59, // 10: lippycat.management.HunterStats.detector:type_name -> lippycat.management.DetectorTelemetry
-	60, // 11: lippycat.management.HunterStats.pcap_writer:type_name -> lippycat.management.PcapWriterTelemetry
+	61, // 10: lippycat.management.HunterStats.detector:type_name -> lippycat.management.DetectorTelemetry
+	62, // 11: lippycat.management.HunterStats.pcap_writer:type_name -> lippycat.management.PcapWriterTelemetry
 	2,  // 12: lippycat.management.ProcessorHeartbeat.status:type_name -> lippycat.management.ProcessorStatus
-	60, // 13: lippycat.management.ProcessorHeartbeat.pcap_writer:type_name -> lippycat.management.PcapWriterTelemetry
-	40, // 14: lippycat.management.ProcessorHeartbeat.sip_retry:type_name -> lippycat.management.SIPRetryTelemetry
+	62, // 13: lippycat.management.ProcessorHeartbeat.pcap_writer:type_name -> lippycat.management.PcapWriterTelemetry
+	42, // 14: lippycat.management.ProcessorHeartbeat.sip_retry:type_name -> lippycat.management.SIPRetryTelemetry
 	19, // 15: lippycat.management.FilterResponse.filters:type_name -> lippycat.management.Filter
 	3,  // 16: lippycat.management.Filter.type:type_name -> lippycat.management.FilterType
 	22, // 17: lippycat.management.Filter.radius:type_name -> lippycat.management.RadiusFilterCriteria
@@ -6519,79 +6755,81 @@ var file_management_proto_depIdxs = []int32{
 	19, // 31: lippycat.management.ConnectedHunter.filters:type_name -> lippycat.management.Filter
 	11, // 32: lippycat.management.ConnectedHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
 	2,  // 33: lippycat.management.ProcessorStats.status:type_name -> lippycat.management.ProcessorStatus
-	45, // 34: lippycat.management.ProcessorStats.li_encoding:type_name -> lippycat.management.LIEncodingStats
-	41, // 35: lippycat.management.ProcessorStats.li_delivery:type_name -> lippycat.management.LIDeliveryStats
-	40, // 36: lippycat.management.ProcessorStats.sip_retry:type_name -> lippycat.management.SIPRetryTelemetry
-	37, // 37: lippycat.management.ProcessorStats.storage:type_name -> lippycat.management.ProcessorStorageStats
-	36, // 38: lippycat.management.ProcessorStats.li_definitions:type_name -> lippycat.management.LIDefinitionStats
-	35, // 39: lippycat.management.ProcessorStats.li_startup_sync:type_name -> lippycat.management.LIStartupSyncStats
-	38, // 40: lippycat.management.ProcessorStorageStats.filters:type_name -> lippycat.management.StorageStatus
-	38, // 41: lippycat.management.ProcessorStorageStats.li_state:type_name -> lippycat.management.StorageStatus
-	39, // 42: lippycat.management.StorageStatus.key_usage:type_name -> lippycat.management.EncryptionUsageStats
-	61, // 43: lippycat.management.LIDeliveryStats.destinations:type_name -> lippycat.management.LIDeliveryStats.DestinationsEntry
-	43, // 44: lippycat.management.LIDeliveryStats.x2_journal:type_name -> lippycat.management.LIJournalStats
-	62, // 45: lippycat.management.LIDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedByReasonEntry
-	63, // 46: lippycat.management.LIDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
-	43, // 47: lippycat.management.LIDeliveryStats.x3_journal:type_name -> lippycat.management.LIJournalStats
-	64, // 48: lippycat.management.LIDestinationDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
-	44, // 49: lippycat.management.LIDestinationDeliveryStats.x2_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
-	44, // 50: lippycat.management.LIDestinationDeliveryStats.x3_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
-	65, // 51: lippycat.management.LIDestinationDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
-	38, // 52: lippycat.management.LIJournalStats.storage:type_name -> lippycat.management.StorageStatus
-	48, // 53: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
-	1,  // 54: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
-	11, // 55: lippycat.management.AvailableHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
-	51, // 56: lippycat.management.TopologyResponse.processor:type_name -> lippycat.management.ProcessorNode
-	2,  // 57: lippycat.management.ProcessorNode.status:type_name -> lippycat.management.ProcessorStatus
-	33, // 58: lippycat.management.ProcessorNode.hunters:type_name -> lippycat.management.ConnectedHunter
-	51, // 59: lippycat.management.ProcessorNode.downstream_processors:type_name -> lippycat.management.ProcessorNode
-	5,  // 60: lippycat.management.ProcessorNode.node_type:type_name -> lippycat.management.NodeType
-	6,  // 61: lippycat.management.TopologyUpdate.update_type:type_name -> lippycat.management.TopologyUpdateType
-	54, // 62: lippycat.management.TopologyUpdate.hunter_connected:type_name -> lippycat.management.HunterConnectedEvent
-	55, // 63: lippycat.management.TopologyUpdate.hunter_disconnected:type_name -> lippycat.management.HunterDisconnectedEvent
-	56, // 64: lippycat.management.TopologyUpdate.processor_connected:type_name -> lippycat.management.ProcessorConnectedEvent
-	57, // 65: lippycat.management.TopologyUpdate.processor_disconnected:type_name -> lippycat.management.ProcessorDisconnectedEvent
-	58, // 66: lippycat.management.TopologyUpdate.hunter_status_changed:type_name -> lippycat.management.HunterStatusChangedEvent
-	33, // 67: lippycat.management.HunterConnectedEvent.hunter:type_name -> lippycat.management.ConnectedHunter
-	51, // 68: lippycat.management.ProcessorConnectedEvent.processor:type_name -> lippycat.management.ProcessorNode
-	1,  // 69: lippycat.management.HunterStatusChangedEvent.old_status:type_name -> lippycat.management.HunterStatus
-	1,  // 70: lippycat.management.HunterStatusChangedEvent.new_status:type_name -> lippycat.management.HunterStatus
-	42, // 71: lippycat.management.LIDeliveryStats.DestinationsEntry.value:type_name -> lippycat.management.LIDestinationDeliveryStats
-	7,  // 72: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
-	9,  // 73: lippycat.management.ManagementService.RegisterProcessor:input_type -> lippycat.management.ProcessorRegistration
-	14, // 74: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
-	17, // 75: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
-	17, // 76: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
-	31, // 77: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
-	19, // 78: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
-	25, // 79: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
-	46, // 80: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
-	49, // 81: lippycat.management.ManagementService.GetTopology:input_type -> lippycat.management.TopologyRequest
-	52, // 82: lippycat.management.ManagementService.SubscribeTopology:input_type -> lippycat.management.TopologySubscribeRequest
-	28, // 83: lippycat.management.ManagementService.UpdateFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterRequest
-	29, // 84: lippycat.management.ManagementService.DeleteFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterDeleteRequest
-	30, // 85: lippycat.management.ManagementService.GetFiltersFromProcessor:input_type -> lippycat.management.ProcessorFilterQuery
-	26, // 86: lippycat.management.ManagementService.RequestAuthToken:input_type -> lippycat.management.AuthTokenRequest
-	12, // 87: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
-	10, // 88: lippycat.management.ManagementService.RegisterProcessor:output_type -> lippycat.management.ProcessorRegistrationResponse
-	16, // 89: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
-	18, // 90: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
-	23, // 91: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
-	32, // 92: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
-	24, // 93: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
-	24, // 94: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
-	47, // 95: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
-	50, // 96: lippycat.management.ManagementService.GetTopology:output_type -> lippycat.management.TopologyResponse
-	53, // 97: lippycat.management.ManagementService.SubscribeTopology:output_type -> lippycat.management.TopologyUpdate
-	24, // 98: lippycat.management.ManagementService.UpdateFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
-	24, // 99: lippycat.management.ManagementService.DeleteFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
-	18, // 100: lippycat.management.ManagementService.GetFiltersFromProcessor:output_type -> lippycat.management.FilterResponse
-	27, // 101: lippycat.management.ManagementService.RequestAuthToken:output_type -> lippycat.management.AuthorizationToken
-	87, // [87:102] is the sub-list for method output_type
-	72, // [72:87] is the sub-list for method input_type
-	72, // [72:72] is the sub-list for extension type_name
-	72, // [72:72] is the sub-list for extension extendee
-	0,  // [0:72] is the sub-list for field type_name
+	47, // 34: lippycat.management.ProcessorStats.li_encoding:type_name -> lippycat.management.LIEncodingStats
+	43, // 35: lippycat.management.ProcessorStats.li_delivery:type_name -> lippycat.management.LIDeliveryStats
+	42, // 36: lippycat.management.ProcessorStats.sip_retry:type_name -> lippycat.management.SIPRetryTelemetry
+	39, // 37: lippycat.management.ProcessorStats.storage:type_name -> lippycat.management.ProcessorStorageStats
+	38, // 38: lippycat.management.ProcessorStats.li_definitions:type_name -> lippycat.management.LIDefinitionStats
+	37, // 39: lippycat.management.ProcessorStats.li_startup_sync:type_name -> lippycat.management.LIStartupSyncStats
+	36, // 40: lippycat.management.ProcessorStats.li_reconciliation:type_name -> lippycat.management.LIReconciliationStats
+	35, // 41: lippycat.management.LIReconciliationStats.failures:type_name -> lippycat.management.LIReconciliationFailure
+	40, // 42: lippycat.management.ProcessorStorageStats.filters:type_name -> lippycat.management.StorageStatus
+	40, // 43: lippycat.management.ProcessorStorageStats.li_state:type_name -> lippycat.management.StorageStatus
+	41, // 44: lippycat.management.StorageStatus.key_usage:type_name -> lippycat.management.EncryptionUsageStats
+	63, // 45: lippycat.management.LIDeliveryStats.destinations:type_name -> lippycat.management.LIDeliveryStats.DestinationsEntry
+	45, // 46: lippycat.management.LIDeliveryStats.x2_journal:type_name -> lippycat.management.LIJournalStats
+	64, // 47: lippycat.management.LIDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedByReasonEntry
+	65, // 48: lippycat.management.LIDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
+	45, // 49: lippycat.management.LIDeliveryStats.x3_journal:type_name -> lippycat.management.LIJournalStats
+	66, // 50: lippycat.management.LIDestinationDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
+	46, // 51: lippycat.management.LIDestinationDeliveryStats.x2_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
+	46, // 52: lippycat.management.LIDestinationDeliveryStats.x3_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
+	67, // 53: lippycat.management.LIDestinationDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
+	40, // 54: lippycat.management.LIJournalStats.storage:type_name -> lippycat.management.StorageStatus
+	50, // 55: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
+	1,  // 56: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
+	11, // 57: lippycat.management.AvailableHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
+	53, // 58: lippycat.management.TopologyResponse.processor:type_name -> lippycat.management.ProcessorNode
+	2,  // 59: lippycat.management.ProcessorNode.status:type_name -> lippycat.management.ProcessorStatus
+	33, // 60: lippycat.management.ProcessorNode.hunters:type_name -> lippycat.management.ConnectedHunter
+	53, // 61: lippycat.management.ProcessorNode.downstream_processors:type_name -> lippycat.management.ProcessorNode
+	5,  // 62: lippycat.management.ProcessorNode.node_type:type_name -> lippycat.management.NodeType
+	6,  // 63: lippycat.management.TopologyUpdate.update_type:type_name -> lippycat.management.TopologyUpdateType
+	56, // 64: lippycat.management.TopologyUpdate.hunter_connected:type_name -> lippycat.management.HunterConnectedEvent
+	57, // 65: lippycat.management.TopologyUpdate.hunter_disconnected:type_name -> lippycat.management.HunterDisconnectedEvent
+	58, // 66: lippycat.management.TopologyUpdate.processor_connected:type_name -> lippycat.management.ProcessorConnectedEvent
+	59, // 67: lippycat.management.TopologyUpdate.processor_disconnected:type_name -> lippycat.management.ProcessorDisconnectedEvent
+	60, // 68: lippycat.management.TopologyUpdate.hunter_status_changed:type_name -> lippycat.management.HunterStatusChangedEvent
+	33, // 69: lippycat.management.HunterConnectedEvent.hunter:type_name -> lippycat.management.ConnectedHunter
+	53, // 70: lippycat.management.ProcessorConnectedEvent.processor:type_name -> lippycat.management.ProcessorNode
+	1,  // 71: lippycat.management.HunterStatusChangedEvent.old_status:type_name -> lippycat.management.HunterStatus
+	1,  // 72: lippycat.management.HunterStatusChangedEvent.new_status:type_name -> lippycat.management.HunterStatus
+	44, // 73: lippycat.management.LIDeliveryStats.DestinationsEntry.value:type_name -> lippycat.management.LIDestinationDeliveryStats
+	7,  // 74: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
+	9,  // 75: lippycat.management.ManagementService.RegisterProcessor:input_type -> lippycat.management.ProcessorRegistration
+	14, // 76: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
+	17, // 77: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
+	17, // 78: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
+	31, // 79: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
+	19, // 80: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
+	25, // 81: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
+	48, // 82: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
+	51, // 83: lippycat.management.ManagementService.GetTopology:input_type -> lippycat.management.TopologyRequest
+	54, // 84: lippycat.management.ManagementService.SubscribeTopology:input_type -> lippycat.management.TopologySubscribeRequest
+	28, // 85: lippycat.management.ManagementService.UpdateFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterRequest
+	29, // 86: lippycat.management.ManagementService.DeleteFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterDeleteRequest
+	30, // 87: lippycat.management.ManagementService.GetFiltersFromProcessor:input_type -> lippycat.management.ProcessorFilterQuery
+	26, // 88: lippycat.management.ManagementService.RequestAuthToken:input_type -> lippycat.management.AuthTokenRequest
+	12, // 89: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
+	10, // 90: lippycat.management.ManagementService.RegisterProcessor:output_type -> lippycat.management.ProcessorRegistrationResponse
+	16, // 91: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
+	18, // 92: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
+	23, // 93: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
+	32, // 94: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
+	24, // 95: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
+	24, // 96: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
+	49, // 97: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
+	52, // 98: lippycat.management.ManagementService.GetTopology:output_type -> lippycat.management.TopologyResponse
+	55, // 99: lippycat.management.ManagementService.SubscribeTopology:output_type -> lippycat.management.TopologyUpdate
+	24, // 100: lippycat.management.ManagementService.UpdateFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
+	24, // 101: lippycat.management.ManagementService.DeleteFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
+	18, // 102: lippycat.management.ManagementService.GetFiltersFromProcessor:output_type -> lippycat.management.FilterResponse
+	27, // 103: lippycat.management.ManagementService.RequestAuthToken:output_type -> lippycat.management.AuthorizationToken
+	89, // [89:104] is the sub-list for method output_type
+	74, // [74:89] is the sub-list for method input_type
+	74, // [74:74] is the sub-list for extension type_name
+	74, // [74:74] is the sub-list for extension extendee
+	0,  // [0:74] is the sub-list for field type_name
 }
 
 func init() { file_management_proto_init() }
@@ -6599,7 +6837,7 @@ func file_management_proto_init() {
 	if File_management_proto != nil {
 		return
 	}
-	file_management_proto_msgTypes[46].OneofWrappers = []any{
+	file_management_proto_msgTypes[48].OneofWrappers = []any{
 		(*TopologyUpdate_HunterConnected)(nil),
 		(*TopologyUpdate_HunterDisconnected)(nil),
 		(*TopologyUpdate_ProcessorConnected)(nil),
@@ -6612,7 +6850,7 @@ func file_management_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_management_proto_rawDesc), len(file_management_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   59,
+			NumMessages:   61,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

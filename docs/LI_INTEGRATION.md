@@ -460,15 +460,24 @@ Shutdown cancels the request or backoff and joins the recovery worker.
 
 Persisted tasks remain disarmed candidates until the ADMF confirms their
 presence and delivery destinations. A complete snapshot conflicting with a
-persisted X1 definition re-arms the retained X1 definition, preserving its
-original expiry, and flags the conflict; it does not authorize buffered replay.
+persisted X1 definition permits only their common authorized scope, as described
+below. An empty or expired intersection remains disarmed. The conflict does not
+authorize buffered replay.
 Tasks requiring explicit deactivation retain their activation generation across
 restart even after `EndTime`; replay still requires equivalent ADMF confirmation.
+After upgrading from versions that treated every elapsed end as historical,
+these existing tasks can re-arm following ADMF confirmation. An elapsed nominal
+end does not terminate a task with implicit deactivation disabled.
 Wrong response types or missing NE
 status, task-list, or destination-list sections are rejected before applying any
 state; present empty lists remain valid. Valid entries in a partial snapshot
-can be applied, but conversion or activation failures keep recovery pending and
-prevent removal of possible orphans. After a usable partial snapshot, periodic
+can be applied, but conversion or activation failures keep recovery pending.
+Orphan decisions use independently validated identifier membership: a listed
+task whose definition cannot be converted is still present, while reliably absent
+tasks remain eligible for the existing consecutive-poll cleanup. Unknown or
+duplicate identifiers suppress cleanup; destination failures alone do not hide
+known task absence. Destination cleanup also respects retained task references.
+After a usable partial snapshot, periodic
 reconciliation continues alongside startup retries, so a failing entry cannot
 starve reconciliation of other tasks. Failure logs identify the entry index and
 valid task or destination UUID without target content. Known filters for a refused task without
@@ -486,6 +495,18 @@ startup sync was not requested. Pending synchronization may leave tasks unarmed;
 a partial snapshot can have armed valid tasks while recovery remains pending.
 The object is absent when LI is disabled. Logs report pending recovery, retries, and
 recovery without target content.
+
+The separate `li_reconciliation` status object describes the latest startup or
+periodic snapshot: source, state, attempt count and time, task/destination/total
+failure counts, and suppression flags for task and destination orphan removal.
+Its `failures` list retains at most 32 details, with a fixed category, entry kind,
+zero-based index (or -1 for a request/list failure), and validated UUID when
+available. `failures_truncated` counts omitted details. This limit bounds
+diagnostics only; it does not limit processing or authorization checks. Raw
+identifiers, selectors, destination addresses, and remote error text are excluded.
+`warnings_suppressed` counts repeated identical failure warnings omitted from
+logs. Retries continue independently; changed failures and recovery are logged.
+The object is omitted when LI is disabled.
 
 The separate NE startup notification uses bounded X1 client retries and its own
 cancellable request. Retried issue reports retain their semantic content and use
@@ -534,14 +555,46 @@ implicit-deactivation fields. An activation reassertion or error code alone is
 not evidence that the effective definition is complete.
 
 Complete snapshots can repair pull-owned or legacy restored definitions.
-Persisted X1 ownership survives restart. A conflicting pull cannot replace a
-definition established by an X1 push or modification
-without verifiable freshness. The bundled X1 schema has no per-task monotonic
+Persisted X1 ownership survives restart. The bundled X1 schema has no per-task monotonic
 revision; response timestamps and local snapshot lock ordering do not establish
-freshness. Unresolved conflicts retain the pushed definition, expose aggregate
-drift, and require an explicit authenticated X1 change. Entering a conflict logs
-a warning and queues an ADMF task warning; repeated polls in the same conflict
-do not repeat those notifications. RADIUS tasks keep their specialized reconciliation,
+freshness. A complete conflicting pull restricts enforcement to the common scope
+of the held and snapshot definitions, both live and after restart:
+
+- The later start and earlier effective cutoff apply. An end is a cutoff only
+  when implicit deactivation is enabled; an absent cutoff is unbounded.
+- Only canonical target identities present in both definitions remain. No new
+  CIDR or pattern-overlap inference is performed.
+- Destinations must occur in both tasks' DID lists and be successfully confirmed
+  by the snapshot's destination definitions. Global DID existence is insufficient.
+- Delivery is the intersection of allowed interfaces. `X2andX3` with `X2Only`
+  allows only X2; `X2Only` with `X3Only` allows neither.
+
+An empty or expired intersection disarms the task and retains conflict diagnostics.
+A future start remains pending without capture filters. Repeated pulls may
+restrict further but cannot restore withdrawn scope. An exact later pull does not
+clear the conflict. Resolve it through an authenticated X1 `ModifyTask` supplying
+the intended scope, or explicitly deactivate it. Push ownership remains intact;
+replay stays unconfirmed while the conflict is unresolved. Narrowing changes the
+authorization generation and revokes affected old-generation queued delivery;
+bytes already written cannot be recalled. Failed narrowing closes admission
+rather than restoring wider authorization.
+
+Conflict state is persisted; report acknowledgment is process-local. Entry,
+restoration, and meaningful scope changes log a warning and queue a schema-valid
+`Warning` task report. A single manager worker sends reports with bounded client
+retries and retries failed reports after 30 seconds until a valid correlated ADMF
+acknowledgment arrives. Equivalent polls do not create duplicate work or warnings.
+Restart reports unresolved conflicts again. Resolution cancels obsolete reporting,
+and acknowledgment does not clear the enforcement conflict.
+
+Existing state files remain readable. New conflict-disarming metadata preserves
+withdrawn scope across restart. The strict codec in older binaries rejects the
+new metadata fields, so newly written state is not backward-readable by those
+binaries. Withhold persistence rollout until the
+conflict authorization regressions are verified for the deployed build. The same
+correction is required for live conflicts even when persistence is disabled.
+
+RADIUS tasks keep their specialized reconciliation,
 authorization, and read-back behavior and are excluded from these generic
 completeness counters.
 

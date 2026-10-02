@@ -21,6 +21,7 @@ type StatusJSON struct {
 	LIEncoding        *management.LIEncodingStats       `json:"li_encoding,omitempty"`
 	LIDefinitions     *management.LIDefinitionStats     `json:"li_definitions,omitempty"`
 	LIStartupSync     *management.LIStartupSyncStats    `json:"li_startup_sync,omitempty"`
+	LIReconciliation  *management.LIReconciliationStats `json:"li_reconciliation,omitempty"`
 	LIDelivery        *management.LIDeliveryStats       `json:"li_delivery,omitempty"`
 }
 
@@ -111,6 +112,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 		status.LIDelivery = resp.ProcessorStats.LiDelivery
 		status.LIDefinitions = resp.ProcessorStats.LiDefinitions
 		status.LIStartupSync = resp.ProcessorStats.LiStartupSync
+		status.LIReconciliation = resp.ProcessorStats.LiReconciliation
 		status.Storage = resp.ProcessorStats.Storage
 	}
 

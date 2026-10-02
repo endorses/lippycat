@@ -482,6 +482,8 @@ type Client struct {
 	currentTasks        map[uuid.UUID]uint64
 	taskFacts           map[x3TaskIdentity]time.Time
 	revokedTasks        map[x3TaskIdentity]bool
+	conflictGenerations map[uuid.UUID]uint64
+	conflictGateFault   bool
 	expiredTaskControls map[x3TaskIdentity]bool
 	initErr             error
 	manager             *Manager
@@ -535,7 +537,7 @@ func NewClient(manager *Manager, config ClientConfig) *Client {
 	}
 	c := &Client{outcomes: make(map[string]uint64), outcomeBytes: make(map[string]uint64),
 		manager: manager, taskNotify: make(chan struct{}, 1), taskStop: make(chan struct{}),
-		revoked: make(map[uuid.UUID]*li.StateRevocation), closedCalls: make(map[li.DeliveryCallIdentity]bool), acceptedCalls: make(map[li.DeliveryCallIdentity]bool), preparedCalls: make(map[li.DeliveryCallIdentity]int), currentTasks: make(map[uuid.UUID]uint64), taskFacts: make(map[x3TaskIdentity]time.Time), revokedTasks: make(map[x3TaskIdentity]bool), expiredTaskControls: make(map[x3TaskIdentity]bool),
+		conflictGenerations: make(map[uuid.UUID]uint64), revoked: make(map[uuid.UUID]*li.StateRevocation), closedCalls: make(map[li.DeliveryCallIdentity]bool), acceptedCalls: make(map[li.DeliveryCallIdentity]bool), preparedCalls: make(map[li.DeliveryCallIdentity]int), currentTasks: make(map[uuid.UUID]uint64), taskFacts: make(map[x3TaskIdentity]time.Time), revokedTasks: make(map[x3TaskIdentity]bool), expiredTaskControls: make(map[x3TaskIdentity]bool),
 		config: config,
 		queues: make(map[uuid.UUID]*destinationQueue),
 	}
@@ -1419,29 +1421,38 @@ func (c *Client) CancelCall(callID string, generation uint64) {
 	})
 }
 func (c *Client) cancelMatching(match func(*deliveryItem) bool) {
+	c.cancelMatchingProducts(match, false)
+}
+func (c *Client) cancelMatchingProducts(match func(*deliveryItem) bool, includeX2 bool) {
 	c.queuesMu.RLock()
 	defer c.queuesMu.RUnlock()
 	for _, q := range c.queues {
 		var removed []*deliveryItem
 		var cancels []context.CancelFunc
 		q.mu.Lock()
-		for e := q.items[1].Front(); e != nil; {
-			next := e.Next()
-			item := e.Value.(*deliveryItem)
-			if match(item) {
-				item.canceled.Store(true)
-				if item.cancel != nil {
-					cancels = append(cancels, item.cancel)
+		first := 1
+		if includeX2 {
+			first = 0
+		}
+		for index := first; index < 2; index++ {
+			for e := q.items[index].Front(); e != nil; {
+				next := e.Next()
+				item := e.Value.(*deliveryItem)
+				if match(item) {
+					item.canceled.Store(true)
+					if item.cancel != nil {
+						cancels = append(cancels, item.cancel)
+					}
+					if !item.claimed && (!(index == 0 && q.preserveX2 || index == 1 && q.preserveX3) || item.persisted.Load()) {
+						q.items[index].Remove(e)
+						q.removeExpiryLocked(item)
+						item.element = nil
+						q.bytes[index] -= int64(len(item.data))
+						removed = append(removed, item)
+					}
 				}
-				if !item.claimed && (!q.preserveX3 || item.persisted.Load()) {
-					q.items[1].Remove(e)
-					q.removeExpiryLocked(item)
-					item.element = nil
-					q.bytes[1] -= int64(len(item.data))
-					removed = append(removed, item)
-				}
+				e = next
 			}
-			e = next
 		}
 		q.updateDepthLocked()
 		q.mu.Unlock()

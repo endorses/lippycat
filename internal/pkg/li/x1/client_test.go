@@ -79,7 +79,7 @@ func TestNewClient(t *testing.T) {
 func TestClient_SendKeepalive(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		var requestCount int32
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&requestCount, 1)
 			// Verify request
 			assert.Equal(t, "POST", r.Method)
@@ -93,7 +93,6 @@ func TestClient_SendKeepalive(t *testing.T) {
 			assert.Contains(t, string(body), `xsi:type="KeepaliveRequest"`)
 
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("<KeepaliveResponse/>"))
 		}))
 		defer server.Close()
 
@@ -110,7 +109,7 @@ func TestClient_SendKeepalive(t *testing.T) {
 	})
 
 	t.Run("error when stopped", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer server.Close()
@@ -130,7 +129,7 @@ func TestClient_SendKeepalive(t *testing.T) {
 func TestClient_ReportTaskError(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -148,7 +147,7 @@ func TestClient_ReportTaskError(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, receivedBody, `xsi:type="ReportTaskIssueRequest"`)
 		assert.Contains(t, receivedBody, xid.String())
-		assert.Contains(t, receivedBody, "Error")
+		assert.Contains(t, receivedBody, "NonTerminatingFault")
 		assert.Contains(t, receivedBody, "Internal error")
 
 		// Check stats
@@ -158,7 +157,7 @@ func TestClient_ReportTaskError(t *testing.T) {
 	})
 
 	t.Run("increments failed counter on error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer server.Close()
@@ -180,7 +179,7 @@ func TestClient_ReportTaskError(t *testing.T) {
 
 func TestClient_ReportTaskProgress(t *testing.T) {
 	var receivedBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		receivedBody = string(body)
 		w.WriteHeader(http.StatusOK)
@@ -197,13 +196,13 @@ func TestClient_ReportTaskProgress(t *testing.T) {
 	err = client.ReportTaskProgress(context.Background(), xid, "Activation in progress")
 	assert.NoError(t, err)
 	assert.Contains(t, receivedBody, `xsi:type="ReportTaskIssueRequest"`)
-	assert.Contains(t, receivedBody, "TaskProgress")
+	assert.Contains(t, receivedBody, "AllClear")
 	assert.Contains(t, receivedBody, "Activation in progress")
 }
 
 func TestClient_ReportTaskImplicitDeactivation(t *testing.T) {
 	var receivedBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		receivedBody = string(body)
 		w.WriteHeader(http.StatusOK)
@@ -227,7 +226,7 @@ func TestClient_ReportTaskImplicitDeactivation(t *testing.T) {
 func TestClient_ReportDestinationIssue(t *testing.T) {
 	t.Run("delivery error", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -245,7 +244,7 @@ func TestClient_ReportDestinationIssue(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, receivedBody, `xsi:type="ReportDestinationIssueRequest"`)
 		assert.Contains(t, receivedBody, did.String())
-		assert.Contains(t, receivedBody, "DeliveryError")
+		assert.Contains(t, receivedBody, "NonTerminatingFault")
 		assert.Contains(t, receivedBody, "Connection refused")
 
 		stats := client.Stats()
@@ -254,7 +253,7 @@ func TestClient_ReportDestinationIssue(t *testing.T) {
 
 	t.Run("delivery recovered", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -269,12 +268,12 @@ func TestClient_ReportDestinationIssue(t *testing.T) {
 
 		err = client.ReportDeliveryRecovered(context.Background(), uuid.New())
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, "DeliveryRecovered")
+		assert.Contains(t, receivedBody, "AllClear")
 	})
 
 	t.Run("connection lost", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -289,13 +288,13 @@ func TestClient_ReportDestinationIssue(t *testing.T) {
 
 		err = client.ReportConnectionLost(context.Background(), uuid.New(), "Network unreachable")
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, "ConnectionLost")
+		assert.Contains(t, receivedBody, "NonTerminatingFault")
 		assert.Contains(t, receivedBody, "Network unreachable")
 	})
 
 	t.Run("connection established", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -310,14 +309,14 @@ func TestClient_ReportDestinationIssue(t *testing.T) {
 
 		err = client.ReportConnectionEstablished(context.Background(), uuid.New())
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, "ConnectionEstablished")
+		assert.Contains(t, receivedBody, "AllClear")
 	})
 }
 
 func TestClient_ReportNEIssue(t *testing.T) {
 	t.Run("startup", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -333,7 +332,7 @@ func TestClient_ReportNEIssue(t *testing.T) {
 		err = client.ReportStartup(context.Background())
 		assert.NoError(t, err)
 		assert.Contains(t, receivedBody, `xsi:type="ReportNEIssueRequest"`)
-		assert.Contains(t, receivedBody, "Startup")
+		assert.Contains(t, receivedBody, "Alert")
 
 		stats := client.Stats()
 		assert.Equal(t, uint64(1), stats.NEReportsSent)
@@ -341,7 +340,7 @@ func TestClient_ReportNEIssue(t *testing.T) {
 
 	t.Run("shutdown", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -356,12 +355,12 @@ func TestClient_ReportNEIssue(t *testing.T) {
 
 		err = client.ReportShutdown(context.Background())
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, "Shutdown")
+		assert.Contains(t, receivedBody, "Alert")
 	})
 
 	t.Run("warning", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -382,7 +381,7 @@ func TestClient_ReportNEIssue(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		var receivedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			receivedBody = string(body)
 			w.WriteHeader(http.StatusOK)
@@ -397,7 +396,7 @@ func TestClient_ReportNEIssue(t *testing.T) {
 
 		err = client.ReportError(context.Background(), 500, "Database connection lost")
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, "Error")
+		assert.Contains(t, receivedBody, "FaultReport")
 		assert.Contains(t, receivedBody, "Database connection lost")
 	})
 }
@@ -405,7 +404,7 @@ func TestClient_ReportNEIssue(t *testing.T) {
 func TestClient_RetryWithBackoff(t *testing.T) {
 	t.Run("retries on failure", func(t *testing.T) {
 		var requestCount int32
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			count := atomic.AddInt32(&requestCount, 1)
 			if count < 3 {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -431,7 +430,7 @@ func TestClient_RetryWithBackoff(t *testing.T) {
 
 	t.Run("fails after max retries", func(t *testing.T) {
 		var requestCount int32
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&requestCount, 1)
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
@@ -452,7 +451,7 @@ func TestClient_RetryWithBackoff(t *testing.T) {
 	})
 
 	t.Run("respects context cancellation during retry", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer server.Close()
@@ -476,7 +475,7 @@ func TestClient_RetryWithBackoff(t *testing.T) {
 func TestClient_KeepaliveLoop(t *testing.T) {
 	t.Run("sends periodic keepalives", func(t *testing.T) {
 		var requestCount int32
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&requestCount, 1)
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -512,7 +511,7 @@ func TestClient_IsConnected(t *testing.T) {
 	})
 
 	t.Run("true after keepalive loop runs", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer server.Close()
@@ -552,7 +551,7 @@ func TestClient_IsConnected(t *testing.T) {
 func TestClient_XMLFormat(t *testing.T) {
 	t.Run("produces valid XML", func(t *testing.T) {
 		var receivedBody []byte
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			receivedBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -611,7 +610,7 @@ func TestDefaultClientConfig(t *testing.T) {
 // TestClient_KeepaliveLoop_StopsCleanly tests that keepalive loop stops cleanly when client is stopped.
 func TestClient_KeepaliveLoop_StopsCleanly(t *testing.T) {
 	var requestCount int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requestCount, 1)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -651,7 +650,7 @@ func TestClient_KeepaliveLoop_StopsCleanly(t *testing.T) {
 
 // TestClient_DoubleStop tests that stopping a client twice is safe.
 func TestClient_DoubleStop(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -679,7 +678,7 @@ func TestClient_DoubleStop(t *testing.T) {
 // TestClient_KeepaliveDisabled tests that keepalive can be disabled.
 func TestClient_KeepaliveDisabled(t *testing.T) {
 	var requestCount int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requestCount, 1)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -701,7 +700,7 @@ func TestClient_KeepaliveDisabled(t *testing.T) {
 
 // TestClient_KeepaliveUpdatesStats tests that keepalive updates statistics correctly.
 func TestClient_KeepaliveUpdatesStats(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -736,7 +735,7 @@ func TestClient_KeepaliveShutdownIsNotFailure(t *testing.T) {
 // TestClient_KeepaliveFailureUpdatesStats tests that failed keepalives update stats.
 func TestClient_KeepaliveFailureUpdatesStats(t *testing.T) {
 	var requestCount int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := atomic.AddInt32(&requestCount, 1)
 		if count == 1 {
 			// First request succeeds
@@ -774,7 +773,7 @@ func TestClient_KeepaliveFailureUpdatesStats(t *testing.T) {
 
 // TestClient_ReportTaskError_UpdatesStats tests error reporting updates stats.
 func TestClient_ReportTaskError_UpdatesStats(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -802,7 +801,7 @@ func TestClient_ReportTaskError_UpdatesStats(t *testing.T) {
 
 // TestClient_ReportNEIssue_AllTypes tests all NE issue types.
 func TestClient_ReportNEIssue_AllTypes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -837,7 +836,7 @@ func TestClient_ReportNEIssue_AllTypes(t *testing.T) {
 
 // TestClient_ReportDestinationIssue_AllTypes tests all destination issue types.
 func TestClient_ReportDestinationIssue_AllTypes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -875,7 +874,7 @@ func TestClient_ReportDestinationIssue_AllTypes(t *testing.T) {
 // TestClient_ContextCancellation tests that requests respect context cancellation.
 func TestClient_ContextCancellation(t *testing.T) {
 	// Server that delays response
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -902,7 +901,7 @@ func TestClient_ContextCancellation(t *testing.T) {
 
 // TestClient_StoppedClientRejectsRequests tests that stopped client rejects requests.
 func TestClient_StoppedClientRejectsRequests(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -941,7 +940,7 @@ func TestClient_BackoffCalculation(t *testing.T) {
 	var requestTimes []time.Time
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestTimes = append(requestTimes, time.Now())
 		mu.Unlock()
@@ -979,7 +978,7 @@ func TestClient_XMLRequestContent(t *testing.T) {
 	var receivedBodies []string
 	var mu sync.Mutex
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		receivedBodies = append(receivedBodies, string(body))
@@ -1056,7 +1055,7 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
   </x1ResponseMessage>
 </X1Response>`
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "POST", r.Method)
 			assert.Equal(t, contentTypeXML, r.Header.Get("Content-Type"))
 
@@ -1105,7 +1104,7 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
   </x1ResponseMessage>
 </X1Response>`
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(responseXML))
 		}))
@@ -1141,7 +1140,7 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
   </listOfTaskResponseDetails>
 </GetAllTaskDetailsResponse>`
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(responseXML))
 		}))
@@ -1192,7 +1191,7 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
   </x1ResponseMessage>
 </X1Response>`
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(responseXML))
 		}))
@@ -1231,7 +1230,7 @@ func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
   </x1ResponseMessage>
 </X1Response>`
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(responseXML))
 		}))
@@ -1270,7 +1269,7 @@ func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
   </errorResponse>
 </X1Response>`
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(responseXML))
 		}))
@@ -1298,7 +1297,7 @@ func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
 
 func TestClient_SendQueryRequest_HTTPErrors(t *testing.T) {
 	t.Run("returns error on HTTP 500", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte("internal server error"))
 		}))
@@ -1320,7 +1319,7 @@ func TestClient_SendQueryRequest_HTTPErrors(t *testing.T) {
 	})
 
 	t.Run("returns error on context cancellation", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(500 * time.Millisecond)
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -1354,7 +1353,7 @@ func TestClient_SendQueryRequestWithRetry(t *testing.T) {
   </x1ResponseMessage>
 </X1Response>`
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			count := atomic.AddInt32(&requestCount, 1)
 			if count < 3 {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -1395,7 +1394,7 @@ func TestClient_SendQueryRequestWithRetry(t *testing.T) {
   </errorResponse>
 </X1Response>`
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&requestCount, 1)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(responseXML))
@@ -1426,7 +1425,7 @@ func TestClient_SendQueryRequestWithRetry(t *testing.T) {
 
 	t.Run("fails after max retries", func(t *testing.T) {
 		var requestCount int32
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&requestCount, 1)
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
@@ -1450,7 +1449,7 @@ func TestClient_SendQueryRequestWithRetry(t *testing.T) {
 	})
 
 	t.Run("respects context cancellation during retry", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer server.Close()
@@ -1733,7 +1732,7 @@ func TestADMFError(t *testing.T) {
 // TestClient_X1RequestWrapping verifies the client wraps requests in X1Request envelope.
 func TestClient_X1RequestWrapping(t *testing.T) {
 	var receivedBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newReportingTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		receivedBody = string(body)
 		w.WriteHeader(http.StatusOK)

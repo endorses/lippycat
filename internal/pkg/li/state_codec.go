@@ -51,7 +51,7 @@ func stateJSONSchema(legacy bool) *stateShape {
 	scope := &stateShape{kind: 'o', fields: map[string]*stateShape{"operator_scope": str, "profile_revision": str, "origin_node_id": str, "source_id": str}}
 	target := &stateShape{kind: 'o', required: []string{"Type", "Value"}, memory: 40, fields: map[string]*stateShape{"Type": num, "Value": str}}
 	completeness := &stateShape{kind: 'o', fields: map[string]*stateShape{"Mediation": boolean, "Start": boolean, "End": boolean, "EndProvided": boolean, "Implicit": boolean}}
-	definition := &stateShape{kind: 'o', fields: map[string]*stateShape{"Source": str, "Completeness": completeness, "Restored": boolean, "Candidate": boolean, "Conflict": boolean}}
+	definition := &stateShape{kind: 'o', fields: map[string]*stateShape{"Source": str, "Completeness": completeness, "Restored": boolean, "Candidate": boolean, "Conflict": boolean, "ConflictDisarmed": boolean, "ConflictReason": str}}
 	task := &stateShape{kind: 'o', memory: 384, required: []string{"XID", "Targets", "DestinationIDs", "DeliveryType", "Status"}, fields: map[string]*stateShape{
 		"definition": definition,
 		"XID":        uid, "Targets": {kind: 'a', item: target, limit: maxStateReferences, count: 't'}, "RADIUSScope": scope, "RADIUSMACProfile": str,
@@ -418,6 +418,14 @@ func validateStateTask(task *InterceptTask, b *stateBudget) error {
 	if d.Source != "" && d.Source != DefinitionPush && d.Source != DefinitionPull && d.Source != DefinitionRestore {
 		return stateError("definition provenance")
 	}
+	switch d.ConflictReason {
+	case "", "common_scope", "expired", "empty_window", "no_common_targets", "no_confirmed_destinations", "no_common_delivery":
+	default:
+		return stateError("definition conflict reason")
+	}
+	if d.ConflictDisarmed && (!d.Conflict || task.Status == TaskStatusActive || task.Status == TaskStatusPending) {
+		return stateError("disarmed conflict lifecycle")
+	}
 	if d.Candidate && task.Status != TaskStatusPending {
 		return stateError("definition candidate lifecycle")
 	}
@@ -698,7 +706,8 @@ func validateStateIntent(i *StateIntent, s *StateSnapshot, b *stateBudget) error
 		if i.CandidateTask.XID != *i.XID || i.CandidateTask.ActivationGeneration != i.ReservedGeneration {
 			return stateError("candidate task identity")
 		}
-		if i.Kind != StateTaskUpdate && i.CandidateTask.Status != TaskStatusActive && i.CandidateTask.Status != TaskStatusPending || (i.Kind == StateTaskPromote || i.Kind == StateTaskConfirm) && i.CandidateTask.Status != TaskStatusActive {
+		disarmedModification := i.Kind == StateTaskModify && i.CandidateTask.Status == TaskStatusSuspended && i.CandidateTask.Definition.ConflictDisarmed
+		if i.Kind != StateTaskUpdate && !disarmedModification && i.CandidateTask.Status != TaskStatusActive && i.CandidateTask.Status != TaskStatusPending || (i.Kind == StateTaskPromote || i.Kind == StateTaskConfirm) && i.CandidateTask.Status != TaskStatusActive {
 			return stateError("candidate task status for operation")
 		}
 	}

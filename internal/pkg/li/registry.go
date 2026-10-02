@@ -549,7 +549,7 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return err
 	}
 
-	deliveryChanged := !equivalentDeliveryDefinition(task, &candidate) || authorizationWindowNarrows(task, &candidate)
+	deliveryChanged := !equivalentDeliveryDefinition(task, &candidate) || authorizationWindowNarrows(task, &candidate) || (task.Definition.Conflict && !candidate.Definition.Conflict)
 	if deliveryChanged && r.generations[xid] == ^uint64(0) {
 		return fmt.Errorf("%w: task generation exhausted", ErrInvalidTask)
 	}
@@ -671,6 +671,8 @@ func (r *Registry) DeactivateTask(xid uuid.UUID) error {
 	}
 
 	task.Status = TaskStatusDeactivated
+	task.Definition.Conflict, task.Definition.ConflictDisarmed = false, false
+	task.Definition.ConflictReason = ""
 	task.DeactivatedAt = time.Now().UTC()
 
 	// Notify callback for explicit ADMF deactivation
@@ -996,6 +998,7 @@ func (r *Registry) PurgeDeactivatedTasks(olderThan time.Duration) int {
 // authorizationWindowNarrows detects timing changes for which already buffered
 // product cannot prove membership in the resulting authorization window.
 func authorizationWindowNarrows(previous, candidate *InterceptTask) bool {
+	previousCutoff, candidateCutoff := TaskAuthorizationCutoff(previous), TaskAuthorizationCutoff(candidate)
 	return (!candidate.StartTime.IsZero() && (previous.StartTime.IsZero() || candidate.StartTime.After(previous.StartTime))) ||
-		(!candidate.EndTime.IsZero() && (previous.EndTime.IsZero() || candidate.EndTime.Before(previous.EndTime)))
+		(!candidateCutoff.IsZero() && (previousCutoff.IsZero() || candidateCutoff.Before(previousCutoff)))
 }

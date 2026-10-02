@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -134,13 +135,21 @@ type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 //
 // The Manager is the main entry point for LI operations in the processor.
 type Manager struct {
-	definitionRepairs atomic.Uint64
-	callbackMu        sync.RWMutex
-	onTaskModified    func(previous *InterceptTask)
-	onCommittedTask   func(current *InterceptTask)
-	stopOnce          sync.Once
-	stopped           atomic.Bool
-	mu                sync.RWMutex
+	conflictReportMu      sync.Mutex
+	conflictReports       map[uuid.UUID]*conflictReportState
+	conflictReportWake    chan struct{}
+	conflictReportStarted bool
+	// Optional test seams are installed before concurrent use.
+	conflictReportSend func(context.Context, uuid.UUID, string) error
+	snapshotWaitHook   func()
+	definitionRepairs  atomic.Uint64
+	callbackMu         sync.RWMutex
+	onTaskModified     func(previous *InterceptTask)
+	onTaskConflict     func(previous *InterceptTask) error
+	onCommittedTask    func(current *InterceptTask)
+	stopOnce           sync.Once
+	stopped            atomic.Bool
+	mu                 sync.RWMutex
 	// snapshotMu orders complete ADMF snapshots with X1 mutations.
 	// Inner administrative transactions, filter cleanup and delivery callbacks
 	// retain adminMu, lifecycleMu, then short registry/filter lock ordering.
@@ -148,6 +157,7 @@ type Manager struct {
 	snapshotMu     sync.Mutex
 	replayMu       sync.RWMutex
 	startupStatus  atomic.Pointer[StartupSyncStatus]
+	snapshotStatus atomic.Pointer[SnapshotSyncStatus]
 	recoveryCtx    context.Context
 	recoveryCancel context.CancelFunc
 	adminMu        sync.Mutex
@@ -244,8 +254,9 @@ type managerAtomicStats struct {
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
-	Definitions DefinitionStats
-	StartupSync StartupSyncStatus
+	Definitions  DefinitionStats
+	StartupSync  StartupSyncStatus
+	SnapshotSync SnapshotSyncStatus
 	// RADIUSStaleReferences counts rejected task owner references at admission.
 	RADIUSStaleReferences       uint64
 	PacketsProcessed            uint64
@@ -355,6 +366,7 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 
 	// Create deactivation callback that reports to ADMF and then calls user callback.
 	internalCallback := func(task *InterceptTask, reason DeactivationReason) {
+		m.clearConflictReport(task.XID)
 		// Report implicit deactivation to ADMF via X1 client.
 		if m.x1Client != nil && reason != DeactivationReasonADMF {
 			go func() {
@@ -371,11 +383,17 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 					}
 				}
 
-				if err := m.x1Client.ReportTaskImplicitDeactivation(ctx, task.XID, reasonStr); err != nil {
-					logger.Error("Failed to report implicit deactivation to ADMF",
+				var reportErr error
+				if reason == DeactivationReasonFault {
+					reportErr = m.x1Client.ReportTaskTerminatingFault(ctx, task.XID, x1.ErrorCodeGenericError, reasonStr)
+				} else {
+					reportErr = m.x1Client.ReportTaskImplicitDeactivation(ctx, task.XID, reasonStr)
+				}
+				if reportErr != nil {
+					logger.Error("Failed to report task deactivation to ADMF",
 						"xid", task.XID,
 						"reason", reason,
-						"error", err,
+						"error", reportErr,
 					)
 				}
 			}()
@@ -553,6 +571,7 @@ func (m *Manager) Stop() { m.stopOnce.Do(m.stop) }
 func (m *Manager) stop() {
 	m.stopped.Store(true)
 	m.recoveryCancel()
+	m.stopConflictReports()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -614,6 +633,7 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 	}
 	resp, err := m.x1Client.GetAllDetails(ctx)
 	if err != nil {
+		m.recordSnapshotRequestFailure(err, "startup")
 		// Unsupported is a terminal capability outcome, not a recovered snapshot.
 		var admfErr *x1.ADMFError
 		if errors.As(err, &admfErr) && admfErr.IsUnsupportedOperation() {
@@ -625,90 +645,8 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 		return fmt.Errorf("get all details from ADMF: %w", err)
 	}
 
-	var destCount, taskCount int
-	var destErrors, taskErrors int
-	snapshot := newADMFSnapshot()
-	confirmedDestinations := make(map[uuid.UUID]bool)
-
-	// Register destinations first (tasks reference destinations by DID).
-	if resp.ListOfDestinationResponseDetails != nil {
-		for index, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
-			dest, convErr := DestinationResponseDetailsToDestination(dd)
-			if convErr != nil {
-				logger.Warn("Failed to convert ADMF destination, skipping",
-					"entry_index", index, "did", snapshotDestinationID(dd), "reason", "conversion_failed",
-				)
-				destErrors++
-				snapshot.destinationConvErrors++
-				continue
-			}
-			snapshot.destinations[dest.DID] = true
-			if syncErr := m.syncDestination(dest); syncErr != nil {
-				logger.Warn("Failed to register ADMF destination", "did", dest.DID, "error", syncErr)
-				destErrors++
-				snapshot.destinationConvErrors++
-				continue
-			}
-			destCount++
-			confirmedDestinations[dest.DID] = true
-		}
-	}
-
-	// Activate tasks.
-	if resp.ListOfTaskResponseDetails != nil {
-		for index, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
-			converted, convErr := ConvertSnapshotTask(td)
-			if convErr != nil {
-				logger.Warn("Failed to convert ADMF task, skipping",
-					"entry_index", index, "xid", snapshotTaskID(td), "reason", "conversion_failed",
-				)
-				taskErrors++
-				snapshot.convErrors++
-				continue
-			}
-			task := converted.Task
-			converted.confirmedDestinations = confirmedDestinations
-			m.bindRADIUSDeployment(task)
-			snapshot.tasks[task.XID] = true
-			// A persisted destination is only a candidate. Never arm delivery to
-			// an endpoint that this snapshot omitted or failed to apply.
-			confirmed := true
-			for _, did := range task.DestinationIDs {
-				if !confirmedDestinations[did] {
-					confirmed = false
-					break
-				}
-			}
-			if !confirmed {
-				snapshot.rejectedTasks[task.XID] = len(task.Targets)
-				taskErrors++
-				snapshot.convErrors++
-				logger.Warn("ADMF task has an unconfirmed destination", "xid", task.XID)
-				continue
-			}
-			activate := func() error {
-				if IsRADIUSTask(task) {
-					return m.activateStartupTask(task)
-				}
-				return m.applySnapshotDefinition(converted)
-			}
-			if activateErr := activate(); activateErr != nil {
-				// Task may already exist if sync is called multiple times.
-				if !errors.Is(activateErr, ErrTaskAlreadyExists) {
-					logger.Warn("Failed to activate ADMF task, skipping",
-						"xid", task.XID,
-						"error", activateErr,
-					)
-					snapshot.rejectedTasks[task.XID] = len(task.Targets)
-					taskErrors++
-					snapshot.convErrors++
-				}
-				continue
-			}
-
-			taskCount++
-		}
-	}
+	snapshot, taskCount, destCount := m.applyADMFSnapshotEntries(resp, true)
+	defer m.publishSnapshotStatus(snapshot, "startup")
 
 	// The ADMF defines what may be armed. Merging additively lets state that no
 	// ADMF ever authorised survive on disk and be re-armed every restart, so
@@ -716,7 +654,7 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 	removedTasks := m.removeOrphanedTasks(snapshot, false)
 	removedDestinations := m.removeOrphanedDestinations(snapshot)
 	removedFilters := m.removeOrphanedLIFilters(snapshot)
-	if snapshot.complete() {
+	if snapshot.tasksComplete() && !snapshot.status.TaskOrphanRemovalSuppressed {
 		m.adminMu.Lock()
 		for xid := range m.persistenceCandidates {
 			if !snapshot.tasks[xid] {
@@ -726,19 +664,20 @@ func (m *Manager) syncStateFromADMFLocked(ctx context.Context) error {
 		err := m.persistStateLocked()
 		m.adminMu.Unlock()
 		if err != nil {
+			snapshot.fail("snapshot", "persistence_failed", -1, uuid.Nil)
 			return fmt.Errorf("persist startup reconciliation: %w", err)
 		}
 	}
 
-	if taskErrors > 0 || destErrors > 0 {
-		return &incompleteStartupSnapshot{taskFailures: taskErrors, destinationFailures: destErrors}
+	if snapshot.status.TotalFailures > 0 {
+		return &incompleteStartupSnapshot{taskFailures: snapshot.convErrors, destinationFailures: snapshot.destinationConvErrors}
 	}
 
 	logger.Info("ADMF state sync complete",
 		"tasks", taskCount,
 		"destinations", destCount,
-		"task_errors", taskErrors,
-		"destination_errors", destErrors,
+		"task_errors", snapshot.convErrors,
+		"destination_errors", snapshot.destinationConvErrors,
 		"orphan_tasks_removed", removedTasks,
 		"orphan_destinations_removed", removedDestinations,
 		"orphan_filters_removed", removedFilters,
@@ -777,25 +716,44 @@ func (m *Manager) activateStartupTask(task *InterceptTask) error {
 	return m.activateTask(task)
 }
 
-func (m *Manager) removeOrphanedDestinations(snapshot admfSnapshot) int {
-	if !snapshot.destinationsComplete() {
-		logger.Warn("Reconciliation: incomplete ADMF destination response, skipping removal",
-			"conversion_errors", snapshot.destinationConvErrors)
+func (m *Manager) removeOrphanedDestinations(snapshot *admfSnapshot) int {
+	if !snapshot.destinationsComplete() || !snapshot.tasksComplete() {
+		snapshot.status.DestinationOrphanRemovalSuppressed = true
 		return 0
 	}
 	local := m.ListDestinations()
+	slices.SortFunc(local, func(a, b *Destination) int { return strings.Compare(a.DID.String(), b.DID.String()) })
 	if len(local) > 0 && len(snapshot.destinations) == 0 {
-		logger.Warn("Reconciliation: ADMF returned no destinations while destinations exist locally, keeping them",
-			"local_destinations", len(local))
+		snapshot.status.DestinationOrphanRemovalSuppressed = true
 		return 0
 	}
+	// Retained tasks, including unconfirmed persisted candidates and tasks
+	// awaiting their absence threshold, may still own destination references.
+	referenced := snapshot.referencedDestinations
+	retain := func(task *InterceptTask) {
+		if task.Status == TaskStatusActive || task.Status == TaskStatusPending || task.Status == TaskStatusSuspended || task.Definition.Candidate {
+			for _, did := range task.DestinationIDs {
+				referenced[did] = true
+			}
+		}
+	}
+	m.registry.ListTasks(func(task *InterceptTask) bool { retain(task); return true })
+	m.adminMu.Lock()
+	for _, task := range m.persistenceCandidates {
+		retain(task)
+	}
+	m.adminMu.Unlock()
 	removed := 0
 	for _, dest := range local {
 		if snapshot.destinations[dest.DID] {
 			continue
 		}
+		if referenced[dest.DID] {
+			snapshot.status.DestinationOrphanRemovalSuppressed = true
+			continue
+		}
 		if err := m.RemoveDestination(dest.DID); err != nil {
-			logger.Error("Reconciliation: failed to remove orphan destination", "did", dest.DID, "error", err)
+			snapshot.fail("destination", "removal_failed", -1, dest.DID)
 			continue
 		}
 		removed++
@@ -803,51 +761,26 @@ func (m *Manager) removeOrphanedDestinations(snapshot admfSnapshot) int {
 	return removed
 }
 
-// admfSnapshot is one GetAllDetails response: the task XIDs it returned, plus
-// how many entries failed conversion.
-type admfSnapshot struct {
-	tasks                 map[uuid.UUID]bool
-	destinations          map[uuid.UUID]bool
-	convErrors            int
-	destinationConvErrors int
-	rejectedTasks         map[uuid.UUID]int
-}
-
-func newADMFSnapshot() admfSnapshot {
-	return admfSnapshot{tasks: make(map[uuid.UUID]bool), destinations: make(map[uuid.UUID]bool), rejectedTasks: make(map[uuid.UUID]int)}
-}
-
-// complete reports whether the snapshot can be trusted to say what the ADMF
-// does NOT have. A conversion error drops an XID for reasons unrelated to the
-// ADMF's intent, so a parsing bug must never deactivate a live warrant.
-func (s admfSnapshot) complete() bool { return s.convErrors == 0 && s.destinationConvErrors == 0 }
-
-func (s admfSnapshot) destinationsComplete() bool { return s.complete() }
-
 // removeOrphanedTasks deactivates local tasks the ADMF no longer has, so a lost
 // DeactivateTask cannot leave an intercept running without authorisation.
 //
 // requireStreak makes N consecutive polls agree before acting; startup passes
 // false because its local state came off disk and was never ADMF-checked.
 // A GetAllDetails failure never reaches here — callers return first.
-func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool) int {
-	if !snapshot.complete() {
-		logger.Warn("Reconciliation: incomplete ADMF response, skipping orphan removal",
-			"conversion_errors", snapshot.convErrors,
-			"admf_tasks", len(snapshot.tasks),
-		)
+func (m *Manager) removeOrphanedTasks(snapshot *admfSnapshot, requireStreak bool) int {
+	if !snapshot.tasksComplete() {
+		snapshot.status.TaskOrphanRemovalSuppressed = true
+		m.clearOrphanStreaks()
 		return 0
 	}
 
 	// Collect before deactivating: ListTasks holds the registry read lock for
 	// the callback, and DeactivateTask takes the write lock.
 	var orphans []uuid.UUID
-	var localActive int
 	m.registry.ListTasks(func(task *InterceptTask) bool {
-		if task.Status != TaskStatusActive && task.Status != TaskStatusPending {
+		if task.Status != TaskStatusActive && task.Status != TaskStatusPending && !(task.Status == TaskStatusSuspended && task.Definition.ConflictDisarmed) {
 			return true
 		}
-		localActive++
 		if !snapshot.tasks[task.XID] {
 			orphans = append(orphans, task.XID)
 		}
@@ -857,7 +790,6 @@ func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool)
 	for xid, task := range m.persistenceCandidates {
 		if task.Definition.Candidate && !snapshot.tasks[xid] {
 			orphans = append(orphans, xid)
-			localActive++
 		}
 	}
 	m.adminMu.Unlock()
@@ -870,10 +802,8 @@ func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool)
 	// The ADMF recovery procedure truncates its tables and re-syncs, answering
 	// successfully with zero tasks meanwhile. Never disarm everything on that.
 	if len(snapshot.tasks) == 0 {
-		logger.Warn("Reconciliation: ADMF returned no tasks while tasks are active locally, "+
-			"keeping them (explicit DeactivateTask required to clear the last task)",
-			"local_active", localActive,
-		)
+		snapshot.status.TaskOrphanRemovalSuppressed = true
+		m.clearOrphanStreaks()
 		return 0
 	}
 
@@ -882,20 +812,15 @@ func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool)
 		threshold = m.orphanPollThreshold()
 	}
 
+	slices.SortFunc(orphans, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
 	removed := 0
 	for _, xid := range m.recordOrphanStreaks(orphans, threshold) {
-		// Removing an intercept is auditable; never silent.
-		logger.Warn("Reconciliation: deactivating task absent from ADMF",
-			"xid", xid,
-			"admf_tasks", len(snapshot.tasks),
-		)
 		if err := m.DeactivateTask(xid); err != nil {
-			logger.Error("Reconciliation: failed to deactivate orphaned task",
-				"xid", xid,
-				"error", err,
-			)
+			snapshot.fail("task", "removal_failed", -1, xid)
 			continue
 		}
+		// Log the committed removal; failed attempts use deduplicated diagnostics.
+		logger.Warn("Reconciliation: deactivated task absent from ADMF", "xid", xid, "admf_tasks", len(snapshot.tasks))
 		m.clearOrphanStreak(xid)
 		removed++
 	}
@@ -906,7 +831,7 @@ func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool)
 // tasks that are actually active locally. An ADMF-listed task whose activation
 // failed is deliberately excluded. Active local tasks retained during the
 // periodic orphan grace streak remain included.
-func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
+func (m *Manager) removeOrphanedLIFilters(snapshot *admfSnapshot) int {
 	m.adminMu.Lock()
 	defer m.adminMu.Unlock()
 	if err := m.ensureAdministrativeStateLocked(); err != nil {
@@ -994,10 +919,7 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 	}
 
 	if len(snapshot.tasks) == 0 && activeTasks > 0 {
-		logger.Warn("Startup reconciliation: ADMF returned no tasks while LI filters are installed, "+
-			"keeping them (explicit DeactivateTask required)",
-			"li_filters", len(orphans),
-		)
+		snapshot.status.TaskOrphanRemovalSuppressed = true
 		return 0
 	}
 
@@ -1122,91 +1044,17 @@ func (m *Manager) reconcileWithADMF() {
 
 	resp, err := m.x1Client.GetAllDetails(ctx)
 	if err != nil {
+		m.recordSnapshotRequestFailure(err, "periodic")
 		var admfErr *x1.ADMFError
 		if errors.As(err, &admfErr) && admfErr.IsUnsupportedOperation() {
 			logger.Debug("ADMF does not support GetAllDetails, skipping reconciliation")
 			return
 		}
-		logger.Warn("ADMF reconciliation failed",
-			"error", err,
-			"admf", m.config.ADMFEndpoint,
-		)
 		return
 	}
 
-	// Build set of ADMF task XIDs.
-	snapshot := newADMFSnapshot()
-	confirmedDestinations := make(map[uuid.UUID]bool)
-	if resp.ListOfDestinationResponseDetails != nil {
-		for index, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
-			dest, convErr := DestinationResponseDetailsToDestination(dd)
-			if convErr != nil {
-				logger.Warn("Failed to convert ADMF destination, skipping", "entry_index", index, "did", snapshotDestinationID(dd), "reason", "conversion_failed")
-				snapshot.destinationConvErrors++
-				continue
-			}
-			snapshot.destinations[dest.DID] = true
-			if err := m.syncDestination(dest); err != nil {
-				logger.Warn("Failed to reconcile destination", "did", dest.DID, "error", err)
-				snapshot.destinationConvErrors++
-			} else {
-				confirmedDestinations[dest.DID] = true
-			}
-		}
-	}
-	var activated int
-	if resp.ListOfTaskResponseDetails != nil {
-		for index, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
-			converted, convErr := ConvertSnapshotTask(td)
-			if convErr != nil {
-				if td != nil && td.TaskDetails != nil && td.TaskDetails.XId != nil {
-					if xid, parseErr := uuid.Parse(string(*td.TaskDetails.XId)); parseErr == nil {
-						if revokeErr := m.rejectRADIUSReplacement(xid, convErr); revokeErr != nil {
-							logger.Error("Revoke invalid RADIUS replacement", "xid", xid, "error", revokeErr)
-						}
-					}
-				}
-				logger.Warn("Reconciliation: failed to convert ADMF task, skipping",
-					"entry_index", index, "xid", snapshotTaskID(td), "reason", "conversion_failed",
-				)
-				snapshot.convErrors++
-				continue
-			}
-			task := converted.Task
-			converted.confirmedDestinations = confirmedDestinations
-			m.bindRADIUSDeployment(task)
-			snapshot.tasks[task.XID] = true
-
-			confirmed := true
-			for _, did := range task.DestinationIDs {
-				if !confirmedDestinations[did] {
-					confirmed = false
-					break
-				}
-			}
-			if !confirmed {
-				snapshot.convErrors++
-				logger.Warn("ADMF task has an unconfirmed destination", "xid", task.XID)
-				continue
-			}
-
-			if handled, err := m.reconcileRADIUSTask(task); handled {
-				if err != nil {
-					logger.Error("RADIUS task reconciliation rejected", "xid", task.XID, "error", err)
-					snapshot.convErrors++
-				}
-				continue
-			}
-
-			if err := m.applySnapshotDefinition(converted); err != nil {
-				snapshot.convErrors++
-				logger.Warn("ADMF definition reconciliation failed", "xid", task.XID, "reason", "application_failed")
-			} else {
-				activated++
-			}
-
-		}
-	}
+	snapshot, activated, _ := m.applyADMFSnapshotEntries(resp, false)
+	defer m.publishSnapshotStatus(snapshot, "periodic")
 
 	// Tear down tasks the ADMF no longer has, rather than only warning: an
 	// intercept the ADMF has dropped is running without authorisation.
@@ -1214,7 +1062,7 @@ func (m *Manager) reconcileWithADMF() {
 	removedDestinations := m.removeOrphanedDestinations(snapshot)
 	removedFilters := m.removeOrphanedLIFilters(snapshot)
 	if err := m.persistState(); err != nil {
-		logger.Error("Reconciliation: persist LI state failed", "error", err)
+		snapshot.fail("snapshot", "persistence_failed", -1, uuid.Nil)
 	}
 
 	if activated > 0 || deactivated > 0 || removedDestinations > 0 || removedFilters > 0 {
@@ -1553,11 +1401,14 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
+	var disarmedConflict bool
 	if mod != nil {
 		if held, err := m.registry.GetTaskDetails(xid); err == nil && !IsRADIUSTask(held) {
+			disarmedConflict = held.Definition.ConflictDisarmed
 			copyMod := *mod
 			d := held.Definition
 			d.Source, d.Restored, d.Conflict = DefinitionPush, false, false
+			d.ConflictDisarmed, d.ConflictReason = false, ""
 			if mod.EndTime != nil {
 				d.Completeness.End, d.Completeness.EndProvided = true, !mod.EndTime.IsZero()
 			}
@@ -1568,7 +1419,16 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 			mod = &copyMod
 		}
 	}
-	return m.modifyTask(xid, mod)
+	var err error
+	if disarmedConflict {
+		err = m.resolveDisarmedConflictLocked(xid, mod)
+	} else {
+		err = m.modifyTask(xid, mod)
+	}
+	if err == nil {
+		m.clearConflictReport(xid)
+	}
+	return err
 }
 
 func (m *Manager) modifyTask(xid uuid.UUID, mod *TaskModification) error {
@@ -1633,7 +1493,11 @@ func (m *Manager) DeactivateTask(xid uuid.UUID) error {
 	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
-	return m.deactivateTask(xid)
+	err := m.deactivateTask(xid)
+	if err == nil {
+		m.clearConflictReport(xid)
+	}
+	return err
 }
 
 func (m *Manager) deactivateTask(xid uuid.UUID) error {
@@ -2104,7 +1968,7 @@ func (a *managerTaskAdapter) GetTaskDetails(xid uuid.UUID) (*x1.Task, error) {
 
 // ActivateTaskX1 activates a task from X1 request data.
 func (m *Manager) ActivateTaskX1(task *x1.Task) error {
-	m.snapshotMu.Lock()
+	m.lockSnapshotForX1()
 	defer m.snapshotMu.Unlock()
 	// Convert x1.Task to li.InterceptTask
 	liTask := &InterceptTask{
@@ -2373,6 +2237,7 @@ func (m *Manager) Stats() ManagerStats {
 	return ManagerStats{
 		Definitions:                 m.definitionStats(),
 		StartupSync:                 m.StartupSyncStatus(),
+		SnapshotSync:                m.SnapshotSyncStatus(),
 		RADIUSStaleReferences:       m.stats.radiusStaleReferences.Load(),
 		PacketsProcessed:            m.stats.packetsProcessed.Load(),
 		PacketsMatched:              m.stats.packetsMatched.Load(),
@@ -2542,6 +2407,24 @@ func (m *Manager) IsADMFConnected() bool {
 	return m.x1Client.IsConnected()
 }
 
+// SetTaskConflictCallback withdraws both product types before a conflicting
+// definition can narrow or disarm authorization. The admission barrier is held.
+func (m *Manager) SetTaskConflictCallback(callback func(*InterceptTask) error) {
+	m.callbackMu.Lock()
+	m.onTaskConflict = callback
+	m.callbackMu.Unlock()
+}
+
+func (m *Manager) notifyTaskConflict(previous *InterceptTask) error {
+	m.callbackMu.RLock()
+	callback := m.onTaskConflict
+	m.callbackMu.RUnlock()
+	if callback != nil {
+		return callback(cloneInterceptTask(previous))
+	}
+	return nil
+}
+
 // SetTaskModifiedCallback receives the revoked generation after an enforcement
 // definition change, while the task admission barrier is still held.
 func (m *Manager) SetTaskModifiedCallback(callback func(previous *InterceptTask)) {
@@ -2570,6 +2453,9 @@ func (m *Manager) SetCommittedTaskCallback(callback func(*InterceptTask)) {
 }
 
 func (m *Manager) notifyCommittedTask(task *InterceptTask) {
+	if !task.Definition.Conflict || task.Status == TaskStatusDeactivated {
+		m.clearConflictReport(task.XID)
+	}
 	m.callbackMu.RLock()
 	callback := m.onCommittedTask
 	m.callbackMu.RUnlock()

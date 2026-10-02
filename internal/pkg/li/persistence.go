@@ -155,6 +155,10 @@ func (m *Manager) restorePersistedStateLocked() (result error) {
 				task.Definition.Completeness = DefinitionCompleteness{Mediation: !task.StartTime.IsZero(), Start: !task.StartTime.IsZero(), End: !task.EndTime.IsZero(), EndProvided: !task.EndTime.IsZero(), Implicit: task.ImplicitDeactivationAllowed}
 			}
 			task.Definition.Restored = true
+			if task.Definition.ConflictDisarmed {
+				tasks[task.XID] = task
+				continue
+			}
 			if task.Definition.Candidate {
 				candidates[task.XID] = task
 				continue
@@ -211,5 +215,5 @@ func (m *Manager) ReplayTaskAuthorized(xid uuid.UUID, generation uint64) bool {
 		return false
 	}
 	task, err := m.GetTaskDetails(xid)
-	return err == nil && !IsRADIUSTask(task) && task.IsActive() && task.ActivationGeneration == generation && equivalentTaskDefinition(m.persistedActive[xid], task)
+	return err == nil && !task.Definition.Conflict && !IsRADIUSTask(task) && task.IsActive() && task.ActivationGeneration == generation && equivalentTaskDefinition(m.persistedActive[xid], task)
 }

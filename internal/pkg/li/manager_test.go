@@ -3,13 +3,16 @@
 package li
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -615,11 +618,30 @@ func TestManager_Destinations(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// newTestADMFServer creates an httptest server that returns the given XML response body
-// for any POST request. The server URL can be used as the ADMFEndpoint for Manager.
+// newTestADMFServer supplies valid report acknowledgments for legacy query-only
+// fixtures. Handlers still observe every request; explicit report/error responses
+// are preserved. Query response validation remains exercised by the real client.
 func newTestADMFServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, r)
+		for key, values := range recorder.Header() {
+			w.Header()[key] = values
+		}
+		response := recorder.Body.Bytes()
+		reporting := bytes.Contains(body, []byte("ReportNEIssueRequest")) || bytes.Contains(body, []byte("ReportTaskIssueRequest")) || bytes.Contains(body, []byte("ReportDestinationIssueRequest")) || bytes.Contains(body, []byte("KeepaliveRequest"))
+		placeholder := len(bytes.TrimSpace(response)) == 0 || bytes.Contains(response, []byte("<GetAllDetailsResponse")) || strings.TrimSpace(string(response)) == "<KeepaliveResponse/>"
+		if reporting && recorder.Code == http.StatusOK && placeholder {
+			response = conflictTestAcknowledgment(t, body)
+		}
+		w.WriteHeader(recorder.Code)
+		_, err = w.Write(response)
+		require.NoError(t, err)
+	}))
 	t.Cleanup(server.Close)
 	return server
 }

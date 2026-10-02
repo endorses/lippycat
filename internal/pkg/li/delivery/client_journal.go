@@ -200,7 +200,7 @@ func (c *Client) persistItem(q *destinationQueue, item *deliveryItem) error {
 		item.journalID.Store(id)
 		item.durableAt = time.Now()
 		item.persisted.Store(true)
-		if item.pduType == PDUTypeX3 && (item.terminal.Load() || !c.itemEligible(q.did, item, false)) {
+		if item.terminal.Load() || !c.itemEligible(q.did, item, false) {
 			if !item.metadata.Deadline.IsZero() && !time.Now().Before(item.metadata.Deadline) {
 				err = j.Expire(id)
 			} else {

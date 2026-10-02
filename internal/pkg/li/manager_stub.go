@@ -40,6 +40,7 @@ type Manager struct{}
 type ManagerStats struct {
 	Definitions      DefinitionStats
 	StartupSync      StartupSyncStatus
+	SnapshotSync     SnapshotSyncStatus
 	PacketsProcessed uint64
 	PacketsMatched   uint64
 	X2EventsSent     uint64
@@ -148,3 +149,6 @@ func (m *Manager) PurgeDeactivatedTasks(_ time.Duration) int {
 
 // StartupSyncStatus is empty when LI is unavailable.
 func (m *Manager) StartupSyncStatus() StartupSyncStatus { return StartupSyncStatus{} }
+
+// SnapshotSyncStatus is empty when LI is unavailable.
+func (m *Manager) SnapshotSyncStatus() SnapshotSyncStatus { return SnapshotSyncStatus{} }

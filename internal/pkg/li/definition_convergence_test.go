@@ -111,7 +111,7 @@ func TestDefinitionConvergenceModesAndFullPush(t *testing.T) {
 			changed.TaskDetails.ListOfMediationDetails.MediationDetails[0].EndTime = &end
 			applyConvergence(t, m, changed)
 			after, _ = m.GetTaskDetails(xid)
-			require.True(t, after.EndTime.IsZero())
+			require.Equal(t, time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC), after.EndTime)
 			require.EqualValues(t, 1, m.Stats().Definitions.Conflicts)
 			et := time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC)
 			require.NoError(t, m.ModifyTaskX1(xid, &x1.TaskModification{EndTime: &et}))
@@ -212,16 +212,24 @@ func TestStrictTransitionRequiresAuthoritativeRepair(t *testing.T) {
 	require.True(t, live.Definition.Completeness.Complete())
 }
 
-func TestIncompleteSnapshotCannotConfirmReplayOrRemoveOnConversionFailure(t *testing.T) {
-	xid, did := uuid.New(), testDestDID
-	bad := convergenceDetails(uuid.New(), did, true)
+func TestMalformedKnownSnapshotPreservesListedTaskButWithdrawsOrphan(t *testing.T) {
+	xid, listed, did := uuid.New(), uuid.New(), testDestDID
+	bad := convergenceDetails(listed, did, true)
 	bad.TaskDetails.ListOfMediationDetails = &schema.ListOfMediationDetails{}
 	m := admfServing(t, nil, 1, bad)
-	require.NoError(t, m.ActivateTask(&InterceptTask{XID: xid, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "sip:held@example.invalid"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2andX3}))
+	defer m.Stop()
+	snapshotTestTask(t, m, xid, did)
+	snapshotTestTask(t, m, listed, did)
+	held, err := m.GetTaskDetails(listed)
+	require.NoError(t, err)
 	require.Error(t, m.syncStateFromADMF(context.Background()))
 	task, err := m.GetTaskDetails(xid)
 	require.NoError(t, err)
-	require.True(t, task.IsActive())
+	require.Equal(t, TaskStatusDeactivated, task.Status, "known malformed ID does not hide independent task absence")
+	retained, err := m.GetTaskDetails(listed)
+	require.NoError(t, err)
+	require.True(t, retained.IsActive())
+	require.False(t, m.ReplayTaskAuthorized(listed, held.ActivationGeneration), "malformed definition cannot confirm replay")
 }
 
 func TestSnapshotReconcilesHeldDefinitionAndRejectsLaterStalePull(t *testing.T) {
@@ -265,7 +273,7 @@ func TestSnapshotReconcilesHeldDefinitionAndRejectsLaterStalePull(t *testing.T) 
 	m.reconcileWithADMF()
 	held, err := m.GetTaskDetails(xid)
 	require.NoError(t, err)
-	require.Equal(t, newEnd, held.EndTime)
+	require.Equal(t, repaired.EndTime, held.EndTime)
 	require.True(t, held.Definition.Conflict)
 	require.Equal(t, DefinitionPush, held.Definition.Source)
 	require.EqualValues(t, 1, m.Stats().Definitions.Repairs)

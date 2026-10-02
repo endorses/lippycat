@@ -32,6 +32,9 @@ type TaskDefinitionState struct {
 	// Candidate never belongs to the enforcing registry or filter path.
 	Candidate bool
 	Conflict  bool
+	// ConflictDisarmed makes the retained definition diagnostic only until X1 resolution.
+	ConflictDisarmed bool
+	ConflictReason   string
 }
 
 func authoritativeDefinition(task *InterceptTask) TaskDefinitionState {

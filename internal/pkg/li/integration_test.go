@@ -152,6 +152,21 @@ func (m *MockADMFServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reqType := rootDetector.XMLName.Local
+	messageBody := body
+	if reqType == "X1Request" {
+		var wrapped struct {
+			Message struct {
+				Type  string `xml:"http://www.w3.org/2001/XMLSchema-instance type,attr"`
+				Inner string `xml:",innerxml"`
+			} `xml:"x1RequestMessage"`
+		}
+		if err := xml.Unmarshal(body, &wrapped); err != nil {
+			http.Error(w, "invalid X1 request", http.StatusBadRequest)
+			return
+		}
+		reqType = wrapped.Message.Type
+		messageBody = []byte("<message>" + wrapped.Message.Inner + "</message>")
+	}
 
 	m.mu.Lock()
 	m.Requests = append(m.Requests, MockADMFRequest{
@@ -166,13 +181,13 @@ func (m *MockADMFServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		m.KeepaliveCount++
 
 	case "ReportTaskIssueRequest", "reportTaskIssueRequest":
-		m.parseTaskReport(body)
+		m.parseTaskReport(messageBody)
 
 	case "ReportDestinationIssueRequest", "reportDestinationIssueRequest":
-		m.parseDestinationReport(body)
+		m.parseDestinationReport(messageBody)
 
 	case "ReportNEIssueRequest", "reportNEIssueRequest":
-		m.parseNEReport(body)
+		m.parseNEReport(messageBody)
 	}
 	m.mu.Unlock()
 
@@ -184,15 +199,25 @@ func (m *MockADMFServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default: return success response
+	// Return a correlated acknowledgment for the actual request.
+	var base schema.X1RequestMessage
+	if err := xml.Unmarshal(messageBody, &base); err != nil {
+		http.Error(w, "invalid base request", http.StatusBadRequest)
+		return
+	}
+	responseFields, err := xml.Marshal(base)
+	if err != nil {
+		http.Error(w, "marshal acknowledgment", http.StatusInternalServerError)
+		return
+	}
+	fields := string(responseFields)
+	fields = fields[strings.IndexByte(fields, '>')+1 : strings.LastIndex(fields, "</")]
+	responseType := strings.TrimSuffix(reqType, "Request") + "Response"
 	w.Header().Set("Content-Type", "application/xml")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
-<responseContainer>
-  <x1ResponseMessage>
-    <neIdentifier>mock-admf</neIdentifier>
-  </x1ResponseMessage>
-</responseContainer>`))
+	if _, err := fmt.Fprintf(w, `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><x1ResponseMessage xsi:type="%s">%s<oK>AcknowledgedAndCompleted</oK></x1ResponseMessage></X1Response>`, responseType, fields); err != nil {
+		return
+	}
+
 }
 
 // parseTaskReport parses a task issue report.

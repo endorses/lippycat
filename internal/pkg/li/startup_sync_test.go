@@ -175,6 +175,13 @@ func TestStartupSyncPartialSnapshotAndUnconfirmedDestination(t *testing.T) {
 	require.Equal(t, StartupSyncRetryableFailure, m.StartupSyncStatus().State)
 	_, err := m.GetTaskDetails(xid)
 	require.ErrorIs(t, err, ErrTaskNotFound)
+	absent, err := m.GetTaskDetails(orphan)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusDeactivated, absent.Status, "destination failure does not invalidate complete task membership")
+	// An unidentified task in the next snapshot must still protect a newly
+	// active local task whose absence can no longer be established.
+	orphan = uuid.New()
+	require.NoError(t, m.ActivateTask(&InterceptTask{XID: orphan, Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "sip:bob@example.com"}}, DestinationIDs: []uuid.UUID{did}, DeliveryType: DeliveryX2andX3}))
 	mode.Store(1)
 	require.True(t, m.attemptStartupSync())
 	orphanTask, err := m.GetTaskDetails(orphan)

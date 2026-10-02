@@ -27,6 +27,11 @@ func (m *Manager) promoteTaskDefinitionLocked(task *InterceptTask) error {
 	if IsRADIUSTask(previous) {
 		return ErrModifyNotAllowed
 	}
+	if previous.Status == TaskStatusSuspended {
+		// Restored definitions and conflict-disarmed tasks are validated without
+		// opening the live admission barrier.
+		view.tasks[task.XID].Status = TaskStatusPending
+	}
 	// Changing the start only in this private view allows shared modification
 	// validation to check the proposed complete window and destination set.
 	view.tasks[task.XID].StartTime = task.StartTime
@@ -34,6 +39,7 @@ func (m *Manager) promoteTaskDefinitionLocked(task *InterceptTask) error {
 		Targets: &task.Targets, DestinationIDs: &task.DestinationIDs,
 		DeliveryType: &task.DeliveryType, EndTime: &task.EndTime,
 		ImplicitDeactivationAllowed: &task.ImplicitDeactivationAllowed,
+		definition:                  &task.Definition,
 	}
 	if err := view.ModifyTask(task.XID, mod); err != nil {
 		return err
@@ -43,7 +49,10 @@ func (m *Manager) promoteTaskDefinitionLocked(task *InterceptTask) error {
 		return err
 	}
 	candidate.Definition = task.Definition
-	if authorizationWindowNarrows(previous, candidate) && candidate.ActivationGeneration == previous.ActivationGeneration {
+	if previous.Definition.Conflict && !candidate.Definition.Conflict {
+		candidate.LastError = ""
+	}
+	if (authorizationWindowNarrows(previous, candidate) || previous.Status == TaskStatusSuspended) && candidate.ActivationGeneration == previous.ActivationGeneration {
 		if view.generations[task.XID] == ^uint64(0) {
 			return fmt.Errorf("%w: task generation exhausted", ErrInvalidTask)
 		}

@@ -1,5 +1,3 @@
-//go:build li
-
 package li
 
 import "time"

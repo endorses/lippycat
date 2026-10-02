@@ -83,6 +83,20 @@ func TestButtonsUseRenderedCellGeometry(t *testing.T) {
 		count := len(m.actions)
 		HandleModalInput(m, buttonPress(image.Pt(hit.Bounds.Max.X, hit.Bounds.Min.Y)))
 		require.Len(t, m.actions, count)
+		// Wrapped rows have an empty, non-clickable row between their surfaces.
+		cancel := buttonHit(t, m, "cancel")
+		if cancel.Bounds.Min.Y != hit.Bounds.Min.Y {
+			gapY := cancel.Bounds.Min.Y - 1
+			gap := ansi.Cut(lines[gapY], layout.ContentBounds.Min.X, layout.ContentBounds.Max.X)
+			require.Empty(t, strings.TrimSpace(gap))
+			for _, target := range layout.Hits {
+				require.False(t, image.Pt(cancel.Bounds.Min.X, gapY).In(target.Bounds))
+			}
+			HandleModalInput(m, buttonPress(image.Pt(cancel.Bounds.Min.X, gapY)))
+			require.Len(t, m.actions, count)
+			HandleModalInput(m, buttonPress(cancel.Bounds.Min))
+			require.Equal(t, "cancel", m.actions[len(m.actions)-1])
+		}
 	}
 }
 

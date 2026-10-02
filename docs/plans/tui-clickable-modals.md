@@ -26,7 +26,9 @@ results, validation, asynchronous operations, and cancellation cleanup intact.
 
 Buttons show a clear action label and, when useful, its shortcut. Render them
 as filled rectangular surfaces with two cells of horizontal padding, separated
-by an unfilled gap. Use neutral, primary, and destructive background colors.
+by an unfilled gap. Wrapped button rows have one empty terminal row between
+them, included in layout height and excluded from click targets. Use neutral,
+primary, and destructive background colors.
 Keyboard focus adds a leading triangle and underline without changing button
 dimensions. Mouse activation preserves content focus; clicking an action while a
 button has keyboard focus returns focus to the first available content control.

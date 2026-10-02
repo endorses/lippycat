@@ -97,9 +97,9 @@ func layoutActionBar(actions []ModalAction, focus string, width int, theme theme
 		text := left + label + right
 		cells := ansi.StringWidth(text)
 		if x > 0 && x+1+cells > width {
-			layout.lines = append(layout.lines, line)
+			layout.lines = append(layout.lines, line, "")
 			line, x = "", 0
-			y++
+			y += 2
 		}
 		if x > 0 {
 			line += " "

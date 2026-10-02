@@ -14,7 +14,7 @@ type PcapInterface interface {
 
 func CreateLiveInterface(device string) PcapInterface {
 	var result PcapInterface
-	iface := liveInterface{device, nil}
+	iface := liveInterface{Device: device}
 	result = PcapInterface(&iface)
 	return result
 }

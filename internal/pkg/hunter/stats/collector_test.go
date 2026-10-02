@@ -234,3 +234,16 @@ func TestToProto_WithUnavailableCPU(t *testing.T) {
 		t.Errorf("Expected proto.MemoryLimitBytes 0 for unset limit, got %d", proto.MemoryLimitBytes)
 	}
 }
+
+func TestDisabledMediaAdmissionStatusIsExplicit(t *testing.T) {
+	collector := New()
+	for _, resetProvider := range []bool{false, true} {
+		if resetProvider {
+			collector.SetMediaAdmissionProvider(nil)
+		}
+		status := collector.ToProto(0).RtpEbpf
+		if status == nil || status.Enabled || len(status.Scopes) != 1 || status.Scopes[0].State != "disabled" {
+			t.Fatalf("disabled admission must be explicit (reset=%v): %+v", resetProvider, status)
+		}
+	}
+}

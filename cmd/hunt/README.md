@@ -513,11 +513,11 @@ reduce memory use at the cost of less protected burst headroom.
 The SIP counters describe successive outcomes rather than three independent
 loss totals:
 
-| Counter | Meaning |
-| --- | --- |
-| `sip_priority_classified` | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped. |
+| Counter                        | Meaning                                                                                                                                 |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `sip_priority_classified`      | Packets recognized and routed through the SIP-priority path, including packets later demoted or finally dropped.                        |
 | `capture_buffer_sip_demotions` | Classified SIP packets rejected by the full priority lane but accepted by the regular lane. This is priority pressure, not packet loss. |
-| `capture_buffer_sip_drops` | Classified SIP packets rejected by both input lanes. This is final packet loss. |
+| `capture_buffer_sip_drops`     | Classified SIP packets rejected by both input lanes. This is final packet loss.                                                         |
 
 The per-lane length and capacity fields identify which queue is saturated.
 
@@ -697,3 +697,15 @@ messages, MAC and line mapping rules, mirrored BRAS/BNG deployment, counters and
 local tap and direct mutual-TLS hunt/process POI setup. Synthetic distributed
 release verification has passed with upgraded peers; external operator and MDF
 acceptance remain pending. Relays preserve ordinary outputs but cannot authorize X2.
+
+## Opt-in VoIP eBPF media admission
+
+`voip --rtp-ebpf` enables Linux socket-level admission for media belonging to
+selected calls. It is off by default and retains libpcap capture. Use
+`--rtp-ebpf-mode=shadow` for bounded diagnostics and
+`--rtp-ebpf-failure-policy=closed` to change the default scoped runtime fail-open
+behavior. Mode/policy flags alone do not enable it. Pre-match RTP is not retained.
+
+See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
+semantics, platform/privilege requirements, observation domains, configuration,
+failure states and verification status.

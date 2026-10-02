@@ -5,6 +5,7 @@ package tap
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/capture/admissionintegration"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
@@ -128,6 +130,7 @@ Example:
 
 func init() {
 	TapCmd.AddCommand(voipTapCmd)
+	cmdutil.RegisterMediaAdmissionFlags(voipTapCmd, viper.GetViper(), "tap.voip.rtp_ebpf")
 
 	// VoIP-specific flags
 	// --sip-user is the new flag, --sipuser is deprecated
@@ -188,6 +191,11 @@ func init() {
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {
+	admissionConfig, err := cmdutil.ReadMediaAdmissionConfig(viper.GetViper(), "tap.voip.rtp_ebpf")
+	if err != nil {
+		return err
+	}
+
 	streamConfig, err := tapSIPStreamConfig(cmd)
 	if err != nil {
 		return err
@@ -275,6 +283,23 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		logger.Info("ESP admission applied to base BPF filter",
 			"base_filter", baseBPFFilter,
 			"effective_filter", effectiveBPFFilter)
+	}
+
+	var admissionPolicy voip.AdmissionFilter
+	if admissionConfig.Enabled {
+		ports, err := voip.ParsePorts(voipSIPPorts)
+		if err != nil {
+			return err
+		}
+		ranges, err := voip.ParsePortRanges(voipRTPPortRanges)
+		if err != nil {
+			return err
+		}
+		admissionPolicy, err = voip.BuildAdmissionFilter(voip.VoIPFilterConfig{BaseFilter: baseBPFFilter, UDPOnly: voipUDPOnly, SIPPorts: ports, RTPPortRanges: ranges})
+		if err != nil {
+			return err
+		}
+		effectiveBPFFilter = admissionPolicy.Expression
 	}
 
 	// Set TCP performance mode in viper for VoIP processing
@@ -464,7 +489,31 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
+	var admissionSession *admissionintegration.Session
+	if admissionConfig.Enabled {
+		options := admissionintegration.SessionOptions{SIPPorts: admissionPolicy.SIPPorts, UDPOnly: admissionPolicy.UDPOnly, ESPEnabled: capture.ESPDecapEnabled()}
+		for _, r := range admissionPolicy.RTPPortRanges {
+			options.RTPPortRanges = append(options.RTPPortRanges, admissionintegration.PortRange{Start: r.Start, End: r.End})
+		}
+		admissionSession, err = admissionintegration.NewSession(context.Background(), admissionConfig, options)
+		if err != nil {
+			return fmt.Errorf("initialize tap RTP eBPF admission: %w", err)
+		}
+		defer func() {
+			if err := admissionSession.Close(); err != nil {
+				logger.Error("Close tap RTP eBPF admission", "error", err)
+			}
+		}()
+	}
+
 	runtime, err := newTapRuntime(config, effectiveBPFFilter, protocolcatalog.MustLookup("voip"), tapRuntimeHooks{
+		ApplicationIPSelectors: admissionSession != nil,
+		ConfigureSourceConfig: func(cfg *source.LocalSourceConfig) {
+			if admissionSession != nil {
+				cfg.FilterInstaller = admissionSession.Installer()
+				cfg.AdmissionStatus = admissionSession
+			}
+		},
 		ConfigureGPU: func(gpuConfig GPUConfig) GPUConfig {
 			// VoIP mode should always enable VoIP filtering.
 			gpuConfig.EnableVoIPFilter = true
@@ -476,6 +525,13 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	}
 	localSource := runtime.localSource
 	appFilter := runtime.appFilter
+	if admissionSession != nil {
+		if err := appFilter.SetAdmissionObserver(func(prefixes []netip.Prefix, noFilters bool) error {
+			return admissionSession.UpdateSelectors(context.Background(), prefixes, noFilters)
+		}); err != nil {
+			return fmt.Errorf("initialize tap RTP selectors: %w", err)
+		}
+	}
 
 	// Create VoIPProcessor for SIP/RTP metadata extraction
 	// This enables per-call PCAP writing and RTP association in tap mode
@@ -493,57 +549,16 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// calls are tracked, so the default suits a normal target set — make it
 	// tunable for deployments with many simultaneous targets.
 	voipProcConfig.MaxCalls = cmdutil.GetIntConfig("voip.max_calls", voipProcConfig.MaxCalls)
-	voipProc := voipprocessor.New(voipProcConfig)
-	voipAdapter := voipprocessor.NewSourceAdapter(voipProc)
-	// The tap composition root owns this registry. Close it after packet
-	// processing and TCP reassembly have stopped so its janitor terminates and
-	// remaining calls receive deterministic shutdown lifecycle notifications.
-	defer voipAdapter.Close()
-	localSource.SetVoIPProcessor(voipAdapter)
+	routing, err := newTapVoIPRouting(voipProcConfig, streamConfig, cmdutil.GetIntConfig("tap.voip.tcp_reassembly_shards", tcpReassemblyShards), admissionSession, callCompletionMonitorConfig.GracePeriod, runtime.sourceConfig.Interfaces)
+	if err != nil {
+		return err
+	}
+	defer routing.Close()
+	localSource.SetVoIPProcessor(routing.adapter)
 	localSource.SetSelectionPolicy(selectionPolicy)
-	logger.Info("VoIP processor enabled for tap mode (UDP SIP/RTP)")
-
-	// Set up TCP SIP reassembly for tap mode
-	// This enables TCP SIP support (the same as hunt mode) following the principle: tap = process + hunt - gRPC
-	tcpInjectionChan := make(chan source.InjectedPacket, 1000)
-
-	// Create TapTCPHandler that sends processed TCP packets to the injection channel
-	tapTCPHandler := voip.NewTapTCPHandler(tcpInjectionChan)
-	defer tapTCPHandler.Close()
-	tapTCPHandler.SetApplicationFilter(appFilter)
-	tapTCPHandler.SetCallRegistry(voipProc)
-
-	// Create SipStreamFactory with the tap TCP handler. Query the tap-local call
-	// registry so active dialogs retain their TCP streams across idle intervals.
-	// Use a background context for the stream factory - it runs for the lifetime of the tap node
-	tapCtx := context.Background()
-	streamFactory := voip.NewSipStreamFactoryWithConfig(
-		tapCtx,
-		tapTCPHandler,
-		streamConfig,
-		func(callID string) bool {
-			_, active := voipProc.Call(callID)
-			return active
-		},
-	)
-
-	// Create connection-aware reassembly assemblers. Sharding is opt-in so the
-	// compatibility default retains the historical single-assembler behavior.
-	reassemblyConfig := pipeline.DefaultReassemblyConfig()
-	reassemblyConfig.ShardCount = cmdutil.GetIntConfig("tap.voip.tcp_reassembly_shards", tcpReassemblyShards)
-	reassemblyEngine := pipeline.NewReassemblyEngine(streamFactory, reassemblyConfig)
-	defer func() {
-		if err := reassemblyEngine.Close(); err != nil {
-			logger.Error("Failed to close TCP reassembly engine", "error", err)
-		}
-	}()
-
-	// Create TapTCPAssembler wrapper that implements source.TCPAssembler
-	tapTCPAssemblerWrapper := NewTapTCPAssembler(reassemblyEngine)
-
-	// Wire TCP injection channel and assembler to LocalSource
-	localSource.SetTCPInjectionChannel(tcpInjectionChan)
-	localSource.SetTCPAssembler(tapTCPAssemblerWrapper)
+	runtime.processor.SetPacketSource(localSource)
+	localSource.SetTCPInjectionChannel(routing.injection)
+	localSource.SetTCPAssembler(routing)
 	localSource.SetTCPStreamTelemetryProvider(func() source.TCPStreamTelemetry {
 		metrics := voip.GetTCPStreamMetrics()
 		return source.TCPStreamTelemetry{
@@ -560,7 +575,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	logger.Info("TCP SIP reassembly enabled for tap mode",
 		"tcp_handler", "TapTCPHandler",
 		"tcp_assembler", "reassembly.Assembler",
-		"tcp_reassembly_shards", reassemblyEngine.ShardCount(),
+		"tcp_reassembly_shards", routing.shards,
 		"injection_buffer", 1000)
 
 	logger.Info("VoIP Tap configuration",
@@ -574,13 +589,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		"tcp_performance_mode", tcpPerformanceMode,
 		"pattern_algorithm", patternAlgorithm)
 
-	runtime.startHook = func(ctx context.Context) {
-		go func() {
-			if err := reassemblyEngine.Run(ctx); err != nil {
-				logger.Error("TCP reassembly engine stopped", "error", err)
-			}
-		}()
-	}
+	runtime.startHook = routing.Start
 	return runtime.run("VoIP Tap node", config)
 }
 

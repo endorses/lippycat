@@ -17,13 +17,15 @@ import (
 	sharedfilter "github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/radius"
+	"github.com/google/gopacket/layers"
 )
 
 // Manager handles packet capture lifecycle
 type Manager struct {
-	captureOptions capture.CaptureOptions
-	radiusPorts    []uint16
-	radiusBoundary atomic.Int64
+	captureOptions    capture.CaptureOptions
+	captureInterfaces func() []pcaptypes.PcapInterface
+	radiusPorts       []uint16
+	radiusBoundary    atomic.Int64
 	// Configuration
 	interfaces    []string
 	baseFilter    string
@@ -44,25 +46,29 @@ type Manager struct {
 // Config contains capture manager configuration
 type Config struct {
 	ReassembleIPFragments bool
-	RADIUSPorts           []uint16
-	Interfaces            []string // Network interfaces to capture on
-	BaseFilter            string   // Base BPF filter
-	BufferSize            int      // Packet buffer size
-	SIPBufferSize         int      // SIP priority buffer size (0 = match BufferSize)
-	ProcessorAddr         string   // Processor address (for automatic port exclusion)
+	FilterInstaller       capture.FilterInstaller
+	// CaptureInterfaces optionally supplies capture devices for embedding/tests.
+	CaptureInterfaces func() []pcaptypes.PcapInterface
+	RADIUSPorts       []uint16
+	Interfaces        []string // Network interfaces to capture on
+	BaseFilter        string   // Base BPF filter
+	BufferSize        int      // Packet buffer size
+	SIPBufferSize     int      // SIP priority buffer size (0 = match BufferSize)
+	ProcessorAddr     string   // Processor address (for automatic port exclusion)
 }
 
 // New creates a new capture manager
 func New(config Config, mainCtx context.Context) *Manager {
 	return &Manager{
-		captureOptions: capture.CaptureOptions{ReassembleIPFragments: config.ReassembleIPFragments},
-		radiusPorts:    append([]uint16(nil), config.RADIUSPorts...),
-		interfaces:     config.Interfaces,
-		baseFilter:     config.BaseFilter,
-		bufferSize:     config.BufferSize,
-		sipBufferSize:  config.SIPBufferSize,
-		processorAddr:  config.ProcessorAddr,
-		mainCtx:        mainCtx,
+		captureOptions:    capture.CaptureOptions{ReassembleIPFragments: config.ReassembleIPFragments, FilterInstaller: config.FilterInstaller},
+		captureInterfaces: config.CaptureInterfaces,
+		radiusPorts:       append([]uint16(nil), config.RADIUSPorts...),
+		interfaces:        config.Interfaces,
+		baseFilter:        config.BaseFilter,
+		bufferSize:        config.BufferSize,
+		sipBufferSize:     config.SIPBufferSize,
+		processorAddr:     config.ProcessorAddr,
+		mainCtx:           mainCtx,
 	}
 }
 
@@ -108,6 +114,14 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 		}
 	}
 
+	if m.captureInterfaces != nil {
+		devices = m.captureInterfaces()
+	}
+	var ready chan error
+	if m.captureOptions.FilterInstaller != nil {
+		ready = make(chan error, 1)
+	}
+
 	// Create done channel to signal when capture goroutines exit
 	m.captureDone = make(chan struct{})
 	logger.Debug("Created new captureDone channel")
@@ -123,9 +137,20 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 		//
 		// By passing nil as the processor, we indicate that we own the buffer and
 		// will read from it externally (via the forwarding manager).
-		capture.InitWithBuffer(m.captureCtx, devices, bpfFilter, m.packetBuffer, nil, nil, m.captureOptions)
+		if ready != nil {
+			capture.InitWithBufferReady(m.captureCtx, devices, bpfFilter, m.packetBuffer, func(_ []layers.LinkType, err error) { ready <- err }, m.captureOptions)
+		} else {
+			capture.InitWithBuffer(m.captureCtx, devices, bpfFilter, m.packetBuffer, nil, nil, m.captureOptions)
+		}
 	}()
 
+	if ready != nil {
+		if err := <-ready; err != nil {
+			m.captureCancel()
+			<-m.captureDone
+			return fmt.Errorf("initialize socket admission capture: %w", err)
+		}
+	}
 	logger.Info("Packet capture started", "interfaces", m.interfaces)
 	return nil
 }

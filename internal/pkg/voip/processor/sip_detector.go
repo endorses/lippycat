@@ -25,6 +25,10 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 }
 
 func (p *Processor) detectSIPWithCompletion(packet gopacket.Packet, udp *layers.UDP, payload []byte, completeTerminal bool) *ProcessResult {
+	return p.detectSIPWithEnvelope(packet, udp, payload, completeTerminal, nil)
+}
+
+func (p *Processor) detectSIPWithEnvelope(packet gopacket.Packet, udp *layers.UDP, payload []byte, completeTerminal bool, envelope *pipeline.PacketEnvelope) *ProcessResult {
 	if len(payload) == 0 {
 		return nil
 	}
@@ -55,10 +59,13 @@ func (p *Processor) detectSIPWithCompletion(packet gopacket.Packet, udp *layers.
 	if packet.LinkLayer() != nil {
 		linkType = layers.LinkTypeEthernet
 	}
-	envelope := captureadapter.FromPacketInfo(capture.PacketInfo{Packet: packet, LinkType: linkType}, pipeline.SourceLiveCapture)
+	if envelope == nil {
+		envelope = captureadapter.FromPacketInfo(capture.PacketInfo{Packet: packet, LinkType: linkType}, pipeline.SourceLiveCapture)
+	}
 	analysis := p.sipFlow.Analyze(sipflow.Message{
 		Payload: payload, Envelope: envelope, ParseOptions: opts,
 		FilterConfigured: filterEvaluated, DirectMatch: filterMatched,
+		Validate: func(event sharedsip.Event) error { return validateCallID(event.CallID) },
 	})
 	if analysis.Stage.Outcome == pipeline.OutcomeFiltered {
 		if analysis.SIP.CallID == "" {
@@ -76,13 +83,14 @@ func (p *Processor) detectSIPWithCompletion(packet gopacket.Packet, udp *layers.
 		return nil
 	}
 	if completeTerminal && isTerminalDialogResponse(attachment.metadata) {
-		p.CompleteCall(callID)
+		p.CompleteCallLifetime(callID, attachment.lifetime)
 	}
 
 	return &ProcessResult{
 		IsVoIP:          true,
 		PacketType:      PacketTypeSIP,
 		CallID:          callID,
+		CallLifetime:    attachment.lifetime,
 		CallIDs:         []string{callID},
 		Metadata:        attachment.pbMetadata,
 		CallMetadata:    attachment.metadata,

@@ -636,6 +636,11 @@ func (pb *PacketBuffer) CloseInputs() {
 // preserves original fragments so validation and packet sinks see captured bytes.
 // Dedicated VoIP capture opts into reassembly for SIP messages exceeding the MTU.
 type CaptureOptions struct {
+	// FilterInstaller opts into coordinated socket-filter preparation. Nil uses classic libpcap filtering.
+	FilterInstaller FilterInstaller
+	// discardThrough fences packets queued before the enabled startup boundary.
+	discardThrough        time.Time
+	domainState           *captureDomainState
 	ReassembleIPFragments bool
 	IPv4Defrag            IPv4DefragConfig
 	// ReassembleIPFragmentsWhen overrides the static option for interactive
@@ -748,8 +753,19 @@ func initWithBufferAndTelemetry(ctx context.Context, ifaces []pcaptypes.PcapInte
 func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, telemetryCallback TelemetryCallback, ready func([]layers.LinkType, error), options ...CaptureOptions) {
 	ctx, cancelGeneration := context.WithCancel(ctx)
 	defer cancelGeneration()
+	installer := captureFilterInstaller(options)
+	if installer != nil && ready == nil {
+		// Custom socket admission always needs the all-interface startup barrier,
+		// even when a legacy owner does not consume an explicit readiness result.
+		ready = func(_ []layers.LinkType, err error) {
+			if err != nil {
+				logger.Error("Socket admission capture startup failed", "error", err)
+			}
+		}
+	}
 	packetBuffer := buffer
 	telemetry := newTelemetryCollector(telemetryCallback)
+	telemetry.admission = captureAdmissionStatus(options)
 
 	var wg sync.WaitGroup
 	var processorWg sync.WaitGroup
@@ -777,9 +793,11 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 	telemetry.ipv4 = sharedDefragmenter
 	offlineInput := false
 	type startupResult struct {
-		link layers.LinkType
-		err  error
+		link       layers.LinkType
+		err        error
+		attachment PreparedFilter
 	}
+	var startupBoundary time.Time
 	startup := make(chan startupResult, len(ifaces))
 	startGate := make(chan struct{})
 	for _, iface := range ifaces {
@@ -793,6 +811,16 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 	// IPv6 reassembly, so without this a fragmented IPv6 SIP INVITE is
 	// dropped (transport header stranded behind the Fragment ext header).
 	sharedV6Defragmenter := NewIPv6Defragmenter()
+	domainStates, err := newCaptureDomainStates(ifaces, installer, sharedDefragmenter, sharedV6Defragmenter)
+	if err != nil {
+		if ready != nil {
+			ready(nil, errors.New("capture domain reassembly initialization failed"))
+		}
+		return
+	}
+	for _, state := range domainStates {
+		telemetry.ipv4Domains = append(telemetry.ipv4Domains, state.ipv4)
+	}
 
 	// Start a single cleanup goroutine for stale fragments (shared across all interfaces)
 	cleanupCtx, stopCleanup := context.WithCancel(ctx)
@@ -810,11 +838,13 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 			case tickTime := <-ticker.C:
 				discarded := 0
 				if !offlineInput {
-					discarded = sharedDefragmenter.DiscardOlderThan(time.Now().Add(-sharedDefragmenter.config.StaleAge))
+					for _, state := range domainStates {
+						discarded += state.ipv4.DiscardOlderThan(time.Now().Add(-state.ipv4.config.StaleAge))
+					}
 				}
 				if tickTime.Sub(lastReport) >= 30*time.Second {
 					lastReport = tickTime
-					s := sharedDefragmenter.Snapshot()
+					s := sumIPv4Defrag(telemetry.ipv4Domains)
 					logger.Info("IPv4 defragmenter heartbeat",
 						"ipv4_fragments_observed", s.ObservedFragments,
 						"ipv4_datagrams_completed", s.CompletedDatagrams,
@@ -828,15 +858,16 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 				if discarded > 0 {
 					logger.Debug("Discarded stale IP fragments", "count", discarded)
 				}
-				if v6discarded := sharedV6Defragmenter.DiscardOlderThan(time.Now().Add(-30 * time.Second)); v6discarded > 0 {
-					logger.Debug("Discarded stale IPv6 fragments", "count", v6discarded)
-				}
-				// Sweep TTL caches to prevent unbounded growth
-				if swept := espNullSPICache.Sweep(); swept > 0 {
-					logger.Debug("Swept stale ESP SPI cache entries", "count", swept)
-				}
-				if swept := ipv6FragIDCache.Sweep(); swept > 0 {
-					logger.Debug("Swept stale IPv6 fragment cache entries", "count", swept)
+				for _, state := range domainStates {
+					if n := state.ipv6.DiscardOlderThan(time.Now().Add(-30 * time.Second)); n > 0 {
+						logger.Debug("Discarded stale IPv6 fragments", "count", n)
+					}
+					if n := state.esp.Sweep(); n > 0 {
+						logger.Debug("Swept stale ESP SPI cache entries", "count", n)
+					}
+					if n := state.fragments.Sweep(); n > 0 {
+						logger.Debug("Swept stale IPv6 fragment cache entries", "count", n)
+					}
 				}
 			}
 		}
@@ -857,11 +888,29 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 				reportFailure("capture interface is unavailable")
 				return
 			}
+			domainState := domainStates[captureScope(installer, pif.Name())]
+			workerOptions := append([]CaptureOptions(nil), options...)
+			if len(workerOptions) == 0 {
+				workerOptions = []CaptureOptions{{}}
+			}
+			workerOptions[len(workerOptions)-1].domainState = domainState
 			logger.Debug("Capture goroutine starting", "interface", pif.Name())
 			defer logger.Debug("Capture goroutine exiting", "interface", pif.Name())
 			if ready != nil && ctx.Err() != nil {
 				reportFailure("capture startup was cancelled")
 				return
+			}
+			if installer != nil {
+				if source, ok := pif.(interface{ IsOffline() bool }); ok && source.IsOffline() {
+					reportFailure("socket admission requires live capture")
+					return
+				}
+				if configurable, ok := pif.(interface{ ConfigureSocketAdmission() error }); ok {
+					if err := configurable.ConfigureSocketAdmission(); err != nil {
+						reportFailure("socket admission capture configuration failed")
+						return
+					}
+				}
 			}
 			err := pif.SetHandle()
 			if err != nil {
@@ -890,17 +939,24 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 			// Mark that at least one capture succeeded
 			captureSuccessCount.Add(1)
 			var handleMu sync.Mutex
+			var attachment PreparedFilter
 			defer func() {
 				handleMu.Lock()
 				defer handleMu.Unlock()
 				handle.Close()
+				if attachment != nil {
+					if err := attachment.Close(); err != nil {
+						logger.Error("Close socket admission", "interface", pif.Name(), "error", err)
+					}
+				}
 			}()
 			if ready != nil {
-				if err := handle.SetBPFFilter(filter); err != nil {
-					reportFailure("capture filter could not be installed")
+				attachment, err = prepareCaptureFilter(ctx, handle, pif.Name(), filter, installer)
+				if err != nil {
+					reportFailure(err.Error())
 					return
 				}
-				startup <- startupResult{link: handle.LinkType()}
+				startup <- startupResult{link: handle.LinkType(), attachment: attachment}
 				select {
 				case <-startGate:
 				case <-ctx.Done():
@@ -935,9 +991,16 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 			}()
 
 			if ready == nil {
-				captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu, options...)
+				captureFromInterface(ctx, pif, filter, packetBuffer, domainState.ipv4, domainState.ipv6, telemetry, &handleMu, workerOptions...)
 			} else {
-				captureFromPreparedHandle(ctx, pif, handle, packetBuffer, sharedDefragmenter, sharedV6Defragmenter, telemetry, &handleMu, options...)
+				preparedOptions := workerOptions
+				if installer != nil {
+					if len(preparedOptions) == 0 {
+						preparedOptions = []CaptureOptions{{}}
+					}
+					preparedOptions[len(preparedOptions)-1].discardThrough = startupBoundary
+				}
+				captureFromPreparedHandle(ctx, pif, handle, packetBuffer, domainState.ipv4, domainState.ipv6, telemetry, &handleMu, preparedOptions...)
 				// Managed capture requires every configured interface. One reader's
 				// unexpected exit stops the entire generation for owner recovery.
 				if ctx.Err() == nil {
@@ -950,6 +1013,7 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 	}
 	if ready != nil {
 		links := make([]layers.LinkType, 0, len(ifaces))
+		attachments := make([]PreparedFilter, 0, len(ifaces))
 		var startupErr error
 		for range ifaces {
 			result := <-startup
@@ -957,15 +1021,32 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 				startupErr = result.err
 			}
 			links = append(links, result.link)
+			if result.attachment != nil {
+				attachments = append(attachments, result.attachment)
+			}
 		}
 		if startupErr == nil {
 			startupErr = ctx.Err()
+		}
+		if startupErr == nil {
+			for _, attachment := range attachments {
+				if err := attachment.Activate(); err != nil {
+					startupErr = fmt.Errorf("activate socket admission: %w", err)
+					break
+				}
+			}
+			if startupErr == nil {
+				startupErr = ctx.Err()
+			}
 		}
 		if startupErr != nil {
 			cancelGeneration()
 			wg.Wait()
 			ready(nil, startupErr)
 			return
+		}
+		if installer != nil {
+			startupBoundary = time.Now()
 		}
 		close(startGate)
 		ready(links, nil)
@@ -1080,13 +1161,31 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 		handleMu.Unlock()
 		return
 	}
-	filterErr := handle.SetBPFFilter(filter)
+	attachment, filterErr := prepareCaptureFilter(ctx, handle, iface.Name(), filter, captureFilterInstaller(options))
+	if filterErr == nil && attachment != nil {
+		filterErr = attachment.Activate()
+	}
 	handleMu.Unlock()
+	if attachment != nil {
+		defer func() {
+			// The legacy direct helper owns no further reads after return.
+			handleMu.Lock()
+			defer handleMu.Unlock()
+			handle.Close()
+			if err := attachment.Close(); err != nil {
+				logger.Error("Close socket admission", "interface", iface.Name(), "error", err)
+			}
+		}()
+	}
 	if filterErr != nil {
 		// Dynamic BPF can contain LI selectors; neither the expanded filter nor
 		// a compiler error containing it belongs in diagnostics.
 		logger.Error("Error setting BPF filter", "interface", iface.Name())
 		return
+	}
+	if attachment != nil {
+		options = append([]CaptureOptions(nil), options...)
+		options[len(options)-1].discardThrough = time.Now()
 	}
 	captureFromPreparedHandle(ctx, iface, handle, buffer, defragmenter, v6defragmenter, telemetry, handleMu, options...)
 }
@@ -1107,7 +1206,16 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 	if source, ok := iface.(interface{ IsOffline() bool }); ok {
 		offlineInput = source.IsOffline()
 	}
+	scopeESP, scopeFragments := espNullSPICache, ipv6FragIDCache
+	if len(options) > 0 && options[len(options)-1].domainState != nil {
+		scopeESP = options[len(options)-1].domainState.esp
+		scopeFragments = options[len(options)-1].domainState.fragments
+	}
 	var lastOfflineSweep time.Time
+	var discardThrough time.Time
+	if len(options) > 0 {
+		discardThrough = options[len(options)-1].discardThrough
+	}
 
 	// Note: defragmenter is shared across all interfaces to correctly reassemble
 	// IP fragments that may arrive on different interfaces (e.g., due to port mirror splits)
@@ -1205,6 +1313,7 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 							"buffer_output_cap", snapshot.PacketBufferOutputCap,
 							"buffer_closed", buffer.IsClosed(),
 						}
+						fields = append(fields, admissionHeartbeatFields(snapshot.MediaAdmission)...)
 						fields = append(fields, defaultSIPIPPairHeartbeatFields()...)
 						fields = append(fields, buffer.heartbeatFields()...)
 						logger.Info("Capture heartbeat", fields...)
@@ -1255,6 +1364,12 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 				return
 			}
 
+			// Activated sockets can retain pre-attachment frames in libpcap or
+			// partially retired packet-mmap blocks. A host timestamp fence is a
+			// second boundary in addition to the installer's bounded drain.
+			if !discardThrough.IsZero() && !packet.Metadata().Timestamp.After(discardThrough) {
+				continue
+			}
 			if offlineInput && (lastOfflineSweep.IsZero() || packet.Metadata().Timestamp.Sub(lastOfflineSweep) >= defragmenter.config.SweepInterval) {
 				defragmenter.DiscardOlderThan(packet.Metadata().Timestamp.Add(-defragmenter.config.StaleAge))
 				lastOfflineSweep = packet.Metadata().Timestamp
@@ -1373,9 +1488,9 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 				// mode provides integrity without encryption. Must run after VXLAN
 				// decapsulation so it sees the inner packets from VXLAN tunnels.
 				if ESPDecapEnabled() {
-					if inner, ok := decapsulateESPNull(packet); ok {
+					if inner, ok := decapsulateESPNullWithCache(packet, scopeESP); ok {
 						packet = inner
-					} else if inner, ok := decapsulateIPv6FragmentESP(packet); ok {
+					} else if inner, ok := decapsulateIPv6FragmentESPWithCaches(packet, scopeESP, scopeFragments); ok {
 						packet = inner
 					}
 				}

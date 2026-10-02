@@ -252,38 +252,38 @@ t=0 0
 m=audio 10000 RTP/AVP 0 8 101
 a=rtpmap:0 PCMU/8000`,
 			callID:            "single-stream-call",
-			expectedPorts:     []string{"10000"},
-			expectedEndpoints: []string{"192.168.1.100:10000"},
+			expectedPorts:     []string{"10000", "10001"},
+			expectedEndpoints: []string{"192.168.1.100:10000", "192.168.1.100:10001"},
 		},
 		{
 			name: "Multiple audio streams (conference call)",
 			sdpBody: `v=0
-o=conf 2890844526 2890844527 IN IP4 conference.example.com
+o=conf 2890844526 2890844527 IN IP4 192.0.2.10
 s=Conference
-c=IN IP4 conference.example.com
+c=IN IP4 192.0.2.10
 t=0 0
 m=audio 49170 RTP/AVP 0
 a=rtpmap:0 PCMU/8000
 m=audio 49172 RTP/AVP 0
 a=rtpmap:0 PCMU/8000`,
 			callID:            "multi-stream-call",
-			expectedPorts:     []string{"49170", "49172"},
-			expectedEndpoints: []string{"conference.example.com:49170", "conference.example.com:49172"},
+			expectedPorts:     []string{"49170", "49171", "49172", "49173"},
+			expectedEndpoints: []string{"192.0.2.10:49170", "192.0.2.10:49171", "192.0.2.10:49172", "192.0.2.10:49173"},
 		},
 		{
-			name: "Audio and video (only audio ports extracted)",
+			name: "Audio and video with RTCP",
 			sdpBody: `v=0
-o=alicent 2890844526 2890844527 IN IP4 client.example.com
+o=alicent 2890844526 2890844527 IN IP4 192.0.2.20
 s=Session SDP
-c=IN IP4 client.example.com
+c=IN IP4 192.0.2.20
 t=0 0
 m=audio 49170 RTP/AVP 0 8 97
 a=rtpmap:0 PCMU/8000
 m=video 51372 RTP/AVP 31 32
 a=rtpmap:31 H261/90000`,
 			callID:            "audio-video-call",
-			expectedPorts:     []string{"49170"},
-			expectedEndpoints: []string{"client.example.com:49170"},
+			expectedPorts:     []string{"49170", "49171", "51372", "51373"},
+			expectedEndpoints: []string{"192.0.2.20:49170", "192.0.2.20:49171", "192.0.2.20:51372", "192.0.2.20:51373"},
 		},
 		{
 			name: "Three audio streams (multi-party conference)",
@@ -296,8 +296,8 @@ m=audio 8000 RTP/AVP 0
 m=audio 8002 RTP/AVP 0
 m=audio 8004 RTP/AVP 0`,
 			callID:            "three-stream-call",
-			expectedPorts:     []string{"8000", "8002", "8004"},
-			expectedEndpoints: []string{"10.0.0.1:8000", "10.0.0.1:8002", "10.0.0.1:8004"},
+			expectedPorts:     []string{"8000", "8001", "8002", "8003", "8004", "8005"},
+			expectedEndpoints: []string{"10.0.0.1:8000", "10.0.0.1:8001", "10.0.0.1:8002", "10.0.0.1:8003", "10.0.0.1:8004", "10.0.0.1:8005"},
 		},
 		{
 			name: "Mixed valid and inactive streams",
@@ -311,8 +311,8 @@ a=sendrecv
 m=audio 0 RTP/AVP 0
 a=inactive`,
 			callID:            "mixed-streams-call",
-			expectedPorts:     []string{"8000"},
-			expectedEndpoints: []string{"10.0.0.1:8000"},
+			expectedPorts:     []string{"8000", "8001"},
+			expectedEndpoints: []string{"10.0.0.1:8000", "10.0.0.1:8001"},
 		},
 	}
 

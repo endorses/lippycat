@@ -5,6 +5,7 @@ This document describes the architecture and implementation patterns for the `ta
 ## Purpose
 
 Tap mode provides **standalone capture with processor capabilities**:
+
 1. Captures packets from local network interfaces (like hunters)
 2. Processes packets locally (like processors)
 3. Writes PCAP files (unified, per-call, auto-rotating)
@@ -14,6 +15,7 @@ Tap mode provides **standalone capture with processor capabilities**:
 **Architectural Principle: `tap = process + hunt - gRPC`**
 
 Tap must have **all capabilities** of both processor and hunter nodes, running locally without gRPC overhead between them:
+
 - Everything `hunt` can do (capture, GPU filtering, protocol detection)
 - Everything `process` can do (analysis, PCAP writing, LI, TUI serving, command hooks)
 - Minus gRPC transport between hunter and processor (they're in the same process)
@@ -69,6 +71,7 @@ local tap ingress contract.
 ```
 
 The tap command is only included in:
+
 - `tap` builds (tap-only binary)
 - `all` builds (complete suite ~22MB)
 
@@ -87,6 +90,7 @@ General-purpose standalone capture. Reuses processor infrastructure with local p
 **File:** `cmd/tap/tap_voip.go`
 
 VoIP-optimized capture with:
+
 - SIP user filtering
 - Per-call PCAP writing (enabled by default)
 - TCP reassembly configuration
@@ -158,6 +162,7 @@ type PacketBatch struct {
 ```
 
 **Implementations:**
+
 - `LocalSource` - Local network capture (used by tap)
 - `GRPCSource` - Remote hunter connections (used by process)
 
@@ -215,6 +220,7 @@ type FilterTarget interface {
 ```
 
 **Implementations:**
+
 - `LocalTarget` - BPF-based filtering for local capture (used by tap)
 - `HunterTarget` - Distributes filters to remote hunters (used by process)
 
@@ -311,10 +317,10 @@ if viper.GetBool("tap.voip.udp_only") || viper.GetString("tap.voip.sip_ports") !
 
 **Generated Filters:**
 
-| Input | Generated BPF Filter |
-|-------|---------------------|
-| `--udp-only` | `udp` |
-| `--sip-port 5060` | `(port 5060) or (udp portrange 10000-32768)` |
+| Input                        | Generated BPF Filter                               |
+| ---------------------------- | -------------------------------------------------- |
+| `--udp-only`                 | `udp`                                              |
+| `--sip-port 5060`            | `(port 5060) or (udp portrange 10000-32768)`       |
 | `--udp-only --sip-port 5060` | `udp and ((port 5060) or (portrange 10000-32768))` |
 
 ### 7. Per-Call PCAP Default Pattern
@@ -362,6 +368,7 @@ if !config.TLSEnabled {
 Tap reuses the full processor infrastructure without modification:
 
 **Reused Components:**
+
 - `processor.New(config)` - Same processor constructor
 - `processor.Config` - Same configuration struct
 - Per-call PCAP writing
@@ -372,6 +379,7 @@ Tap reuses the full processor infrastructure without modification:
 - Protocol detection
 
 **What's Different:**
+
 - `PacketSource`: LocalSource instead of GRPCSource
 - `FilterTarget`: LocalTarget instead of HunterTarget
 - No hunter connection management
@@ -451,6 +459,7 @@ cmdutil.GetStringSliceConfig("tap.interfaces", interfaces)
 ### Memory Management
 
 **Per-Tap Memory:**
+
 - LocalSource packet buffer: `--buffer-size` × ~1KB ≈ 10MB
 - Batch queue: 1000 batches × 100 packets × ~1KB ≈ 100MB
 - Per-subscriber channels: 100 × ~2MB = 200MB
@@ -461,6 +470,7 @@ cmdutil.GetStringSliceConfig("tap.interfaces", interfaces)
 ### CPU Optimization
 
 **Pipeline:**
+
 1. Kernel → gopacket (zero-copy where possible)
 2. BPF filter (kernel space)
 3. LocalSource batching
@@ -471,11 +481,11 @@ cmdutil.GetStringSliceConfig("tap.interfaces", interfaces)
 
 ### Latency Comparison
 
-| Mode | Capture to TUI Latency |
-|------|----------------------|
-| `lc tap` | ~1-10ms (local) |
+| Mode                     | Capture to TUI Latency  |
+| ------------------------ | ----------------------- |
+| `lc tap`                 | ~1-10ms (local)         |
 | `lc hunt` + `lc process` | ~10-100ms (network hop) |
-| `lc sniff` | N/A (no TUI) |
+| `lc sniff`               | N/A (no TUI)            |
 
 ## Error Handling Patterns
 
@@ -542,12 +552,14 @@ lc tap voip -r testdata/pcaps/sip-call.pcap --insecure
 ### Adding a New Capture Option
 
 1. Add flag in `cmd/tap/tap.go`:
+
 ```go
 TapCmd.Flags().IntVar(&newOption, "new-option", 100, "...")
 _ = viper.BindPFlag("tap.new_option", TapCmd.Flags().Lookup("new-option"))
 ```
 
 2. Pass to LocalSourceConfig:
+
 ```go
 localSourceConfig := source.LocalSourceConfig{
     NewOption: cmdutil.GetIntConfig("tap.new_option", newOption),
@@ -555,6 +567,7 @@ localSourceConfig := source.LocalSourceConfig{
 ```
 
 3. Handle in LocalSource:
+
 ```go
 func NewLocalSource(config LocalSourceConfig) *LocalSource {
     // Use config.NewOption
@@ -574,11 +587,13 @@ Edit `cmd/tap/tap_voip.go` default handling logic.
 ## Dependencies
 
 **External:**
+
 - `google.golang.org/grpc` - gRPC server (for TUI)
 - `github.com/google/gopacket` - Packet capture
 - `github.com/spf13/cobra` - CLI framework
 
 **Internal:**
+
 - `internal/pkg/processor` - Core processor logic
 - `internal/pkg/processor/source` - PacketSource abstraction
 - `internal/pkg/processor/filtering` - FilterTarget abstraction
@@ -593,3 +608,18 @@ Edit `cmd/tap/tap_voip.go` default handling logic.
 - [../process/CLAUDE.md](../process/CLAUDE.md) - Processor architecture
 - [../../docs/DISTRIBUTED_MODE.md](../../docs/DISTRIBUTED_MODE.md) - Distributed system overview
 - [../../docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) - Performance tuning
+
+## Optional VoIP media admission
+
+The `voip --rtp-ebpf` path uses `capture/admissionintegration` to own one shared
+map/controller session and an installer for libpcap handles. `mediaadmission`
+owns bounded desired/installed state; `voip/admission` joins validated SIP metadata,
+accepted registry endpoints, selection and lifetime cleanup. Call churn changes
+maps only. Default/offline capture paths must not allocate or load BPF state.
+
+Kernel membership is candidate admission, never call ownership or output
+permission. Keep explicit capture restrictions before compatibility, shadow and
+runtime-open bypasses. Observation domains must scope userspace association,
+selection and reassembly as well as kernel keys. See
+[the operator guide](../../docs/VOIP_EBPF_ADMISSION.md) and
+[implementation plan](../../docs/plans/voip-ebpf-media-admission.md).

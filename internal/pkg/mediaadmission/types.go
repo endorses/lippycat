@@ -94,6 +94,8 @@ var (
 // ScopeStatus separates desired publication from the last confirmed kernel
 // control. ControlUncertain means a failed write may have changed that control.
 type ScopeStatus struct {
+	PublicationStarted  time.Time
+	LastPublished       time.Time
 	Domain              DomainID
 	State               State
 	LastConfirmed       Control

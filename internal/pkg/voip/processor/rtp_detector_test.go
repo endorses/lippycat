@@ -92,7 +92,9 @@ func TestDetectRTPAuthoritativeResolution(t *testing.T) {
 	t.Run("intersection resolves one call", func(t *testing.T) {
 		result := p.Process(createRTPPacket(t, net.ParseIP("192.0.2.1"), net.ParseIP("192.0.2.2"), 20000, 10000))
 		require.NotNil(t, result)
-		require.Equal(t, callregistry.MediaResolution{Status: callregistry.MediaResolved, CallID: "call-a"}, result.MediaResolution)
+		call, ok := p.registry.Call("call-a")
+		require.True(t, ok)
+		require.Equal(t, callregistry.MediaResolution{Status: callregistry.MediaResolved, CallID: "call-a", Lifetime: call.Lifetime}, result.MediaResolution)
 		require.Equal(t, "call-a", result.CallID)
 		require.Equal(t, "call-a", result.Metadata.GetSip().GetCallId())
 	})
@@ -181,7 +183,7 @@ c=IN IP4 192.168.1.1
 t=0 0
 m=audio 16384 RTP/AVP 0 8
 `,
-			expected: []string{"192.168.1.1:16384"},
+			expected: []string{"192.168.1.1:16384", "192.168.1.1:16385"},
 		},
 		{
 			name: "Multiple audio streams",
@@ -193,10 +195,10 @@ t=0 0
 m=audio 16384 RTP/AVP 0
 m=audio 16386 RTP/AVP 8
 `,
-			expected: []string{"192.168.1.1:16384", "192.168.1.1:16386"},
+			expected: []string{"192.168.1.1:16384", "192.168.1.1:16385", "192.168.1.1:16386", "192.168.1.1:16387"},
 		},
 		{
-			name: "Video and audio",
+			name: "Video and audio with RTCP",
 			sdp: `v=0
 o=- 12345 12345 IN IP4 192.168.1.1
 s=Video Call
@@ -205,7 +207,7 @@ t=0 0
 m=audio 16384 RTP/AVP 0
 m=video 16386 RTP/AVP 96
 `,
-			expected: []string{"192.168.1.1:16384"},
+			expected: []string{"192.168.1.1:16384", "192.168.1.1:16385", "192.168.1.1:16386", "192.168.1.1:16387"},
 		},
 		{
 			name:     "No media lines",

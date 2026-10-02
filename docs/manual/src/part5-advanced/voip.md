@@ -295,3 +295,37 @@ flowchart LR
 ```
 
 UDP SIP packets are parsed directly. TCP SIP packets go through the reassembly engine first (configured by `--tcp-performance-mode`). RTP packets are detected by header structure within the configured port range. The VoIP Packet Processor correlates RTP streams with SIP dialogs using the Call-ID. GPU acceleration, when available, offloads pattern matching for SIP user filtering.
+
+## Selective media capture with eBPF {#selective-media-capture-with-ebpf}
+
+`hunt voip --rtp-ebpf` and `tap voip --rtp-ebpf` can reject unrelated media before
+libpcap delivers it for userspace decoding. This explicitly enabled Linux path
+keeps the libpcap reader and updates a persistent socket filter's maps as selected
+calls change. It does not restart capture for call activity. Existing userspace
+ownership, filter attribution, expiry and output checks remain authoritative.
+
+This mode captures media only after call selection and endpoint publication.
+Bounded validated SDP metadata may be retained before selection; RTP history is
+not retained. Independent IP/CIDR filters and the configured no-filter policy
+continue to apply. Without an explicit RTP range, learned endpoints are not
+restricted to the old generated 10000–32768 range.
+
+`--rtp-ebpf-mode=shadow` records bounded decisions while retaining dynamic media
+reception. Runtime update failures default to scoped broad admission, preserving
+explicit capture restrictions; `--rtp-ebpf-failure-policy=closed` keeps valid
+installed entries without opening. A failed mode-control write is reported
+separately. Enforcement resumes only after complete current-state reconciliation.
+Startup failure never silently enables shadow or broad capture.
+
+All interfaces share one observation domain by default. Explicit domain settings
+separate overlapping local traffic and must put related signaling/media together.
+Ethernet is supported; cooked `any` capture and explicit VLAN predicates are
+rejected. Fragments, complex extension chains and supported encapsulation may
+pass a counted compatibility path, reducing selectivity. Unknown packets and
+missing-media diagnostics do not open a domain.
+
+See the [configuration reference](../appendices/config-reference.md#voip-ebpf-media-admission)
+for all resource bounds. The repository's `docs/VOIP_EBPF_ADMISSION.md` provides
+platform, privilege, diagnostic and verification details; the implementation plan
+records current integration status. libpcap remains a cgo dependency, and cgo does
+not disable goroutine concurrency.

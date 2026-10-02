@@ -12,6 +12,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
@@ -98,6 +99,7 @@ func (b *PacketBatch) RunAfterProcess() {
 
 // Stats contains packet source statistics.
 type Stats struct {
+	MediaAdmission *mediaadmission.Snapshot
 	// PacketsCaptured is the total number of packets received from the capture buffer
 	// (before any application-layer filtering)
 	PacketsCaptured uint64

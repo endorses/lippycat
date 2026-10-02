@@ -83,7 +83,8 @@ type LocalTarget struct {
 	filters map[string]*management.Filter
 
 	// Base BPF filter (from command line or config)
-	baseBPF string
+	baseBPF                string
+	applicationIPSelectors bool // immutable; opt-in media admission publishes these to maps
 
 	// Dependencies (optional, set via Set* methods)
 	bpfUpdater    BPFUpdater
@@ -109,13 +110,17 @@ type LocalTargetConfig struct {
 	// BaseBPF is the initial BPF filter expression from CLI/config.
 	// This filter is always applied in addition to any dynamic filters.
 	BaseBPF string
+	// ApplicationIPSelectors routes IP/CIDR selectors through userspace matching
+	// and its admission-map observer. Explicit BPF restrictions still use BPF.
+	ApplicationIPSelectors bool
 }
 
 // NewLocalTarget creates a new LocalTarget for local filtering.
 func NewLocalTarget(cfg LocalTargetConfig) *LocalTarget {
 	return &LocalTarget{
-		filters: make(map[string]*management.Filter),
-		baseBPF: cfg.BaseBPF,
+		filters:                make(map[string]*management.Filter),
+		baseBPF:                cfg.BaseBPF,
+		applicationIPSelectors: cfg.ApplicationIPSelectors,
 	}
 }
 
@@ -473,8 +478,14 @@ func (t *LocalTarget) buildPolicy(baseBPF string, filters map[string]*management
 			continue
 		}
 		switch f.Type {
-		case management.FilterType_FILTER_BPF, management.FilterType_FILTER_IP_ADDRESS:
+		case management.FilterType_FILTER_BPF:
 			bpfFilters = append(bpfFilters, f)
+		case management.FilterType_FILTER_IP_ADDRESS:
+			if t.applicationIPSelectors {
+				appFilters = append(appFilters, f)
+			} else {
+				bpfFilters = append(bpfFilters, f)
+			}
 		case management.FilterType_FILTER_SIP_USER, management.FilterType_FILTER_PHONE_NUMBER,
 			management.FilterType_FILTER_CALL_ID, management.FilterType_FILTER_CODEC,
 			management.FilterType_FILTER_RADIUS_USERNAME, management.FilterType_FILTER_RADIUS_MAC,

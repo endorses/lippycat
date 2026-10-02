@@ -10,6 +10,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	capturepkg "github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/google/gopacket/pcap"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -342,4 +343,22 @@ func TestRADIUSFiltersPreserveBidirectionalCompetitors(t *testing.T) {
 		{Id: "radius", Enabled: true, Type: management.FilterType_FILTER_RADIUS_USERNAME, Pattern: "alice", Revision: 1},
 	})
 	require.Contains(t, filter, "or (udp port 1812 or udp port 1813", "identity filtering must see responses and all competing client requests")
+}
+
+// An enabled manager must return startup errors rather than reporting success
+// while its asynchronous reader failed to initialize.
+type testAdmissionInstaller struct{}
+
+func (testAdmissionInstaller) Prepare(context.Context, *pcap.Handle, string, string) (capturepkg.PreparedFilter, error) {
+	panic("empty interface startup must fail before preparation")
+}
+func TestAdmissionStartWaitsForReadinessFailure(t *testing.T) {
+	m := New(Config{BufferSize: 8, SIPBufferSize: 3, FilterInstaller: testAdmissionInstaller{}}, t.Context())
+	require.ErrorContains(t, m.Start(nil), "capture requires at least one interface")
+	select {
+	case <-m.captureDone:
+	default:
+		t.Fatal("startup failure returned before capture generation closed")
+	}
+	m.Stop()
 }

@@ -9,10 +9,12 @@ import (
 	"net/netip"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type ownerState struct {
+	pending   bool // stable token awaiting an active owner slot; no endpoints retained
 	domain    DomainID
 	endpoints map[EndpointKey]struct{}
 	rejected  bool
@@ -33,15 +35,22 @@ type scopeState struct {
 // Controller serializes all backend operations with desired-state changes. No
 // asynchronous update queue can overflow or replay a retired owner's mutation.
 // Backend calls must be bounded/cancelable and may not call back into Controller.
+type statusSnapshot struct {
+	scopes []ScopeStatus
+	at     time.Time
+}
+
 type Controller struct {
-	mu        sync.Mutex
-	config    Config
-	backend   Backend
-	session   uint64
-	nextOwner uint64
-	owners    map[OwnerID]*ownerState
-	scopes    map[DomainID]*scopeState
-	closed    bool
+	snapshot      atomic.Pointer[statusSnapshot]
+	mu            sync.Mutex
+	config        Config
+	backend       Backend
+	session       uint64
+	nextOwner     uint64
+	pendingOwners int // globally bounded by PendingDialogCapacity, across all domains
+	owners        map[OwnerID]*ownerState
+	scopes        map[DomainID]*scopeState
+	closed        bool
 }
 
 func NewController(ctx context.Context, config Config, backend Backend) (*Controller, error) {
@@ -50,6 +59,7 @@ func NewController(ctx context.Context, config Config, backend Backend) (*Contro
 	}
 	c := &Controller{config: config, backend: backend, owners: make(map[OwnerID]*ownerState), scopes: make(map[DomainID]*scopeState)}
 	if !config.Enabled {
+		c.publishStatusLocked()
 		return c, nil
 	}
 	if backend == nil {
@@ -84,6 +94,7 @@ func NewController(ctx context.Context, config Config, backend Backend) (*Contro
 		}
 		s.status.State = c.normalState()
 	}
+	c.publishStatusLocked()
 	return c, nil
 }
 
@@ -115,9 +126,15 @@ func (c *Controller) scope(domain DomainID) (*scopeState, error) {
 
 // BeginOwner is called exactly once per selected authoritative lifetime. The
 // returned token must be retained by its adapter; CallID is diagnostic only.
+// Capacity failure may still return a nonzero token: the caller owns that bounded
+// pending reservation and must retry it with UpdateOwner or retire it with EndOwner.
+// Pending reservations retain no endpoints and never count as active owners.
+// Once the global PendingDialogCapacity is exhausted, zero-token failure marks
+// desired state unknown; ordinary retries cannot clear that lost observation.
 func (c *Controller) BeginOwner(domain DomainID, callID string) (OwnerID, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publishStatusLocked()
 	s, err := c.scope(domain)
 	if err != nil {
 		return OwnerID{}, err
@@ -125,7 +142,8 @@ func (c *Controller) BeginOwner(domain DomainID, callID string) (OwnerID, error)
 	if callID == "" || len(callID) > 4096 {
 		return OwnerID{}, errors.New("invalid admission Call-ID")
 	}
-	if len(c.owners) >= c.config.OwnerCapacity {
+	pending := len(c.owners)-c.pendingOwners >= c.config.OwnerCapacity
+	if pending && c.pendingOwners >= c.config.PendingDialogCapacity {
 		s.unknownDesired = true
 		return OwnerID{}, c.fail(s, ErrCapacity)
 	}
@@ -134,7 +152,11 @@ func (c *Controller) BeginOwner(domain DomainID, callID string) (OwnerID, error)
 		return OwnerID{}, errors.New("admission owner generation exhausted")
 	}
 	id := OwnerID{Session: c.session, Generation: c.nextOwner, CallID: callID}
-	c.owners[id] = &ownerState{domain: domain, endpoints: make(map[EndpointKey]struct{})}
+	c.owners[id] = &ownerState{domain: domain, endpoints: make(map[EndpointKey]struct{}), pending: pending}
+	if pending {
+		c.pendingOwners++
+		return id, c.fail(s, ErrCapacity)
+	}
 	return id, nil
 }
 
@@ -158,6 +180,7 @@ func (c *Controller) normalizedSet(domain DomainID, keys []EndpointKey) (map[End
 func (c *Controller) UpdateOwner(ctx context.Context, domain DomainID, id OwnerID, keys []EndpointKey) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publishStatusLocked()
 	s, err := c.scope(domain)
 	if err != nil {
 		return err
@@ -166,6 +189,9 @@ func (c *Controller) UpdateOwner(ctx context.Context, domain DomainID, id OwnerI
 	if !ok || owner.domain != domain {
 		s.status.StaleUpdates++
 		return ErrStaleOwner
+	}
+	if owner.pending && len(c.owners)-c.pendingOwners >= c.config.OwnerCapacity {
+		return c.fail(s, ErrCapacity)
 	}
 	next, err := c.normalizedSet(domain, keys)
 	if err != nil {
@@ -187,6 +213,10 @@ func (c *Controller) UpdateOwner(ctx context.Context, domain DomainID, id OwnerI
 		owner.rejected = true
 		return c.fail(s, ErrCapacity)
 	}
+	if owner.pending {
+		owner.pending = false
+		c.pendingOwners--
+	}
 	changed := !sameSet(owner.endpoints, next)
 	if changed {
 		c.removeDesired(s, owner.endpoints)
@@ -206,6 +236,7 @@ func (c *Controller) UpdateOwner(ctx context.Context, domain DomainID, id OwnerI
 func (c *Controller) EndOwner(ctx context.Context, domain DomainID, id OwnerID) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publishStatusLocked()
 	s, err := c.scope(domain)
 	if err != nil {
 		return err
@@ -216,6 +247,9 @@ func (c *Controller) EndOwner(ctx context.Context, domain DomainID, id OwnerID) 
 		return ErrStaleOwner
 	}
 	c.removeDesired(s, owner.endpoints)
+	if owner.pending {
+		c.pendingOwners--
+	}
 	delete(c.owners, id)
 	s.status.DesiredGeneration++
 	return c.sync(ctx, s, false)
@@ -253,6 +287,7 @@ func sameSet(a, b map[EndpointKey]struct{}) bool {
 func (c *Controller) MarkUnsynchronized(domain DomainID, reason error) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publishStatusLocked()
 	s, err := c.scope(domain)
 	if err != nil {
 		return err
@@ -274,6 +309,7 @@ type OwnerEndpoints struct {
 func (c *Controller) ReplaceDesired(ctx context.Context, domain DomainID, snapshot []OwnerEndpoints) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publishStatusLocked()
 	s, err := c.scope(domain)
 	if err != nil {
 		return err
@@ -300,9 +336,22 @@ func (c *Controller) ReplaceDesired(ctx context.Context, domain DomainID, snapsh
 	if c.totalDesired()-len(s.desired)+len(counts) > c.config.EndpointCapacity {
 		return c.fail(s, ErrCapacity)
 	}
+	otherActive := 0
+	for _, owner := range c.owners {
+		if owner.domain != domain && !owner.pending {
+			otherActive++
+		}
+	}
+	if otherActive+len(next) > c.config.OwnerCapacity {
+		return c.fail(s, ErrCapacity)
+	}
 	for id, owner := range c.owners {
 		if owner.domain != domain {
 			continue
+		}
+		if owner.pending {
+			c.pendingOwners--
+			owner.pending = false
 		}
 		keys, keep := next[id]
 		if !keep {
@@ -321,6 +370,7 @@ func (c *Controller) ReplaceDesired(ctx context.Context, domain DomainID, snapsh
 func (c *Controller) Reconcile(ctx context.Context, domain DomainID) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publishStatusLocked()
 	s, err := c.scope(domain)
 	if err != nil {
 		return err
@@ -333,7 +383,7 @@ func (c *Controller) incomplete(s *scopeState) bool {
 		return true
 	}
 	for _, owner := range c.owners {
-		if owner.domain == s.status.Domain && owner.rejected {
+		if owner.domain == s.status.Domain && (owner.pending || owner.rejected) {
 			return true
 		}
 	}
@@ -341,11 +391,16 @@ func (c *Controller) incomplete(s *scopeState) bool {
 }
 
 func (c *Controller) sync(ctx context.Context, s *scopeState, enumerate bool) error {
+	s.status.PublicationStarted = time.Now()
 	recovering := s.status.State != c.normalState()
 	if recovering {
 		s.status.State = StateRecovery
 		enumerate = true
 	}
+	if enumerate {
+		s.status.State = StateRecovery
+	}
+	c.publishStatusLocked()
 	if enumerate {
 		keys, err := c.backend.ListEndpoints(ctx, s.status.Domain)
 		if err != nil {
@@ -399,6 +454,7 @@ func (c *Controller) sync(ctx context.Context, s *scopeState, enumerate bool) er
 		return c.fail(s, fmt.Errorf("publish admission generation: %w", err))
 	}
 	recovered := !s.status.DegradedSince.IsZero()
+	s.status.LastPublished = time.Now()
 	s.status.InstalledGeneration = s.status.DesiredGeneration
 	s.status.State = c.normalState()
 	s.status.Reason = ""
@@ -426,6 +482,7 @@ func (c *Controller) control(ctx context.Context, s *scopeState, mode KernelMode
 	}
 	s.status.LastConfirmed = next
 	s.status.ControlUncertain = false
+	c.publishStatusLocked()
 	return nil
 }
 
@@ -453,9 +510,7 @@ func (c *Controller) fail(s *scopeState, cause error) error {
 	return cause
 }
 
-func (c *Controller) Status() []ScopeStatus {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *Controller) statusLocked() []ScopeStatus {
 	if !c.config.Enabled {
 		return []ScopeStatus{{State: StateDisabled}}
 	}
@@ -466,8 +521,10 @@ func (c *Controller) Status() []ScopeStatus {
 		st.InstalledEndpoints = len(s.installed)
 		for _, owner := range c.owners {
 			if owner.domain == domain {
-				st.Owners++
-				if owner.rejected {
+				if !owner.pending {
+					st.Owners++
+				}
+				if owner.pending || owner.rejected {
 					st.PendingUpdates++
 				}
 			}
@@ -506,11 +563,13 @@ func (c *Controller) Status() []ScopeStatus {
 func (c *Controller) Close(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publishStatusLocked()
 	if c.closed {
 		return nil
 	}
 	var errs []error
 	c.owners = make(map[OwnerID]*ownerState)
+	c.pendingOwners = 0
 	for _, s := range c.scopes {
 		s.desired = make(map[EndpointKey]int)
 		s.unknownDesired = false
@@ -531,6 +590,7 @@ func (c *Controller) Close(ctx context.Context) error {
 func (c *Controller) ReplaceSelectors(ctx context.Context, domain DomainID, prefixes []netip.Prefix, noFilters bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publishStatusLocked()
 	s, err := c.scope(domain)
 	if err != nil {
 		return err
@@ -575,4 +635,23 @@ func (c *Controller) ReplaceSelectors(ctx context.Context, domain DomainID, pref
 	}
 	s.status.State = StateRecovery
 	return c.sync(ctx, s, true)
+}
+
+// Status returns an immutable published snapshot without waiting for backend
+// syscalls or reconciliation. It never exposes controller-owned slices/maps.
+func (c *Controller) Status() []ScopeStatus {
+	snapshot := c.snapshot.Load()
+	if snapshot == nil {
+		return nil
+	}
+	result := append([]ScopeStatus(nil), snapshot.scopes...)
+	for i := range result {
+		if result[i].LastConfirmed.Mode == KernelOpen {
+			result[i].OpenDuration += time.Since(snapshot.at)
+		}
+	}
+	return result
+}
+func (c *Controller) publishStatusLocked() {
+	c.snapshot.Store(&statusSnapshot{scopes: c.statusLocked(), at: time.Now()})
 }

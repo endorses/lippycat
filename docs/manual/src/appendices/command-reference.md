@@ -592,16 +592,16 @@ lc tap voip [flags]
 
 Inherits all `lc tap` flags, plus:
 
-| Flag                      | Type   | Default    | Description                                                                                  |
-| ------------------------- | ------ | ---------- | -------------------------------------------------------------------------------------------- |
-| `--sip-user`              | string |            | Filter by SIP user                                                                           |
-| `--sip-port`              | int    | `5060`     | SIP signaling port                                                                           |
-| `--rtp-port-range`        | string |            | RTP port range                                                                               |
-| `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency`                           |
-| `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                                                  |
-| `--tcp-max-streams`       | int    | `0`        | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited)              |
-| `--pattern-algorithm`     | string | `auto`     | Pattern matching algorithm: `auto`, `linear`, `aho-corasick`                                 |
-| `--pattern-buffer-mb`     | int    | `64`       | Pattern buffer size (MB)                                                                     |
+| Flag                      | Type   | Default    | Description                                                                      |
+| ------------------------- | ------ | ---------- | -------------------------------------------------------------------------------- |
+| `--sip-user`              | string |            | Filter by SIP user                                                               |
+| `--sip-port`              | int    | `5060`     | SIP signaling port                                                               |
+| `--rtp-port-range`        | string |            | RTP port range                                                                   |
+| `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency`               |
+| `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                                      |
+| `--tcp-max-streams`       | int    | `0`        | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited) |
+| `--pattern-algorithm`     | string | `auto`     | Pattern matching algorithm: `auto`, `linear`, `aho-corasick`                     |
+| `--pattern-buffer-mb`     | int    | `64`       | Pattern buffer size (MB)                                                         |
 
 `--tcp-max-streams` also uses `voip.max_streams` in configuration. A positive
 value intentionally discards SIP data for rejected new or restarted streams.
@@ -759,14 +759,14 @@ lc hunt voip [flags]
 
 Inherits all `lc hunt` flags, plus:
 
-| Flag                     | Short | Type     | Default | Description                                                                                  |
-| ------------------------ | ----- | -------- | ------- | -------------------------------------------------------------------------------------------- |
-| `--sip-port`             | `-S`  | int      | `5060`  | SIP signaling port                                                                           |
-| `--rtp-port-range`       | `-R`  | string   |         | RTP port range                                                                               |
-| `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick`                                           |
-| `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                                                                     |
-| `--tcp-sip-idle-timeout` |       | duration |         | Idle timeout for SIP TCP connections                                                         |
-| `--tcp-max-streams`      |       | int      | `0`     | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited)              |
+| Flag                     | Short | Type     | Default | Description                                                                      |
+| ------------------------ | ----- | -------- | ------- | -------------------------------------------------------------------------------- |
+| `--sip-port`             | `-S`  | int      | `5060`  | SIP signaling port                                                               |
+| `--rtp-port-range`       | `-R`  | string   |         | RTP port range                                                                   |
+| `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick`                               |
+| `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                                                         |
+| `--tcp-sip-idle-timeout` |       | duration |         | Idle timeout for SIP TCP connections                                             |
+| `--tcp-max-streams`      |       | int      | `0`     | Active buffered TCP SIP connection cap (both directions per slot; 0 = unlimited) |
 
 `--udp-only` is hidden and deprecated for VoIP hunters; use `--sip-port` and `--rtp-port-range` instead.
 
@@ -1298,3 +1298,19 @@ lc completion powershell > lc.ps1
 | `0`  | Success                                                   |
 | `1`  | General error (runtime failure, connection refused, etc.) |
 | `2`  | Usage error (invalid flags, missing required arguments)   |
+
+### VoIP eBPF capture options {#voip-ebpf-capture-options}
+
+These flags exist only on `lc hunt voip` and `lc tap voip`:
+
+| Flag                        | Default   | Description                                         |
+| --------------------------- | --------- | --------------------------------------------------- |
+| `--rtp-ebpf`                | `false`   | Enable Linux socket-level selected-media admission. |
+| `--rtp-ebpf-mode`           | `enforce` | `enforce` or `shadow`; does not enable the feature. |
+| `--rtp-ebpf-failure-policy` | `open`    | Runtime update failure policy, `open` or `closed`.  |
+
+Enabling unavailable functionality is a startup error. Explicit `--filter`,
+`--sip-port`, `--udp-only`, and `--rtp-port-range` restrictions are retained;
+generated default RTP ranges do not limit learned selected endpoints. See
+[VoIP capture](../part5-advanced/voip.md#selective-media-capture-with-ebpf) and the
+[configuration members](config-reference.md#voip-ebpf-media-admission).

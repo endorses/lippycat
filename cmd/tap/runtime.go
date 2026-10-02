@@ -25,9 +25,10 @@ import (
 // tapRuntimeHooks binds flag-derived setup hooks to a catalog protocol. It is
 // topology wiring, not a second protocol specification.
 type tapRuntimeHooks struct {
-	ConfigureGPU          func(GPUConfig) GPUConfig
-	ConfigureSource       func(*source.LocalSource)
-	ConfigureSourceConfig func(*source.LocalSourceConfig)
+	ApplicationIPSelectors bool
+	ConfigureGPU           func(GPUConfig) GPUConfig
+	ConfigureSource        func(*source.LocalSource)
+	ConfigureSourceConfig  func(*source.LocalSourceConfig)
 }
 
 type tapRuntime struct {
@@ -113,7 +114,7 @@ func newTapRuntime(config processor.Config, effectiveBPF string, protocol protoc
 
 	sourceConfig.BPFFilter = effectiveBPF
 	localSource := source.NewLocalSource(sourceConfig)
-	localTarget := filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF})
+	localTarget := filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF, ApplicationIPSelectors: hooks.ApplicationIPSelectors})
 	localTarget.SetBPFUpdater(localSource)
 
 	gpuConfig := GetGPUConfig()

@@ -1,7 +1,7 @@
 package voip
 
 import (
-	"strings"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"sync"
 	"time"
 
@@ -13,15 +13,17 @@ import (
 
 // BufferManager manages per-call packet buffers
 type BufferManager struct {
-	buffers      map[string]*CallBuffer // callID -> buffer (temporary until filter decision)
-	matchedCalls map[string]time.Time   // callID -> matchTime (persists after buffer cleanup)
-	matchedIDs   map[string][]string    // callID -> direct filter IDs selecting the call
-	mu           sync.RWMutex
-	maxAge       time.Duration // Max time to buffer before decision
-	maxSize      int           // Max packets per buffer
-	matchedTTL   time.Duration // How long to remember matched calls (default: 24h)
-	janitorCh    chan struct{} // Signal channel for janitor
-	stopCh       chan struct{} // Stop channel
+	registry         *callregistry.Core
+	matchedLifetimes map[string]callregistry.Lifetime
+	buffers          map[string]*CallBuffer // callID -> buffer (temporary until filter decision)
+	matchedCalls     map[string]time.Time   // callID -> matchTime (persists after buffer cleanup)
+	matchedIDs       map[string][]string    // callID -> direct filter IDs selecting the call
+	mu               sync.RWMutex
+	maxAge           time.Duration // Max time to buffer before decision
+	maxSize          int           // Max packets per buffer
+	matchedTTL       time.Duration // How long to remember matched calls (default: 24h)
+	janitorCh        chan struct{} // Signal channel for janitor
+	stopCh           chan struct{} // Stop channel
 }
 
 // DefaultMatchedTTL is how long to remember matched calls after filter decision.
@@ -32,14 +34,15 @@ const DefaultMatchedTTL = 24 * time.Hour
 // NewBufferManager creates a new buffer manager
 func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 	bm := &BufferManager{
-		buffers:      make(map[string]*CallBuffer),
-		matchedCalls: make(map[string]time.Time),
-		matchedIDs:   make(map[string][]string),
-		maxAge:       maxAge,
-		maxSize:      maxSize,
-		matchedTTL:   DefaultMatchedTTL,
-		janitorCh:    make(chan struct{}),
-		stopCh:       make(chan struct{}),
+		buffers:          make(map[string]*CallBuffer),
+		matchedLifetimes: make(map[string]callregistry.Lifetime),
+		matchedCalls:     make(map[string]time.Time),
+		matchedIDs:       make(map[string][]string),
+		maxAge:           maxAge,
+		maxSize:          maxSize,
+		matchedTTL:       DefaultMatchedTTL,
+		janitorCh:        make(chan struct{}),
+		stopCh:           make(chan struct{}),
 	}
 
 	// Start janitor goroutine for cleanup
@@ -73,7 +76,8 @@ func (bm *BufferManager) addSIPPacket(callID string, packet gopacket.Packet, res
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
-	_, alreadyMatched := bm.matchedCalls[callID]
+	bm.discardStaleMatchLocked(callID)
+	alreadyMatched := bm.matchedValidLocked(callID)
 
 	buffer, exists := bm.buffers[callID]
 	if !exists {
@@ -138,7 +142,7 @@ func (bm *BufferManager) CheckFilterWithTypedCallback(
 		return false
 	}
 
-	bm.matchedCalls[callID] = time.Now()
+	bm.recordMatchLocked(callID)
 	sip, rtp := buffer.DrainTypedPackets()
 	interfaceName, linkType := buffer.GetInterfaceName(), buffer.GetLinkType()
 	bm.mu.Unlock()
@@ -232,7 +236,7 @@ func (bm *BufferManager) CheckFilter(callID string, filterFunc func(*CallMetadat
 
 	if matched {
 		// Record in matchedCalls so BYE can be processed even after buffer cleanup
-		bm.matchedCalls[callID] = time.Now()
+		bm.recordMatchLocked(callID)
 
 		// Hand over all buffered packets and empty the buffer, so a later
 		// filter check for the same call cannot re-emit them.
@@ -274,7 +278,7 @@ func (bm *BufferManager) CheckFilterWithCallback(
 
 	if matched {
 		// Record in matchedCalls so BYE can be processed even after buffer cleanup
-		bm.matchedCalls[callID] = time.Now()
+		bm.recordMatchLocked(callID)
 
 		// Take all buffered packets and empty the buffer, so a later filter
 		// check for the same call cannot re-emit them.
@@ -329,7 +333,7 @@ func (bm *BufferManager) MarkCallMatched(callID string, metadata *CallMetadata, 
 	}
 
 	buffer.SetFilterResult(true)
-	bm.matchedCalls[callID] = time.Now()
+	bm.recordMatchLocked(callID)
 }
 
 // IsCallMatched checks if a call has been evaluated and matched the filter.
@@ -341,7 +345,7 @@ func (bm *BufferManager) IsCallMatched(callID string) bool {
 
 	// First check the persistent matchedCalls map - this survives buffer cleanup
 	if _, exists := bm.matchedCalls[callID]; exists {
-		return true
+		return bm.matchedValidLocked(callID)
 	}
 
 	// Fall back to buffer check for recent calls
@@ -361,6 +365,7 @@ func (bm *BufferManager) StoreMatchedFilterIDs(callID string, filterIDs []string
 		return
 	}
 	bm.mu.Lock()
+	bm.discardStaleMatchLocked(callID)
 	combined := append(append([]string(nil), bm.matchedIDs[callID]...), filterIDs...)
 	bm.matchedIDs[callID] = stableFilterIDs(combined)
 	bm.mu.Unlock()
@@ -370,6 +375,9 @@ func (bm *BufferManager) StoreMatchedFilterIDs(callID string, filterIDs []string
 func (bm *BufferManager) MatchedFilterIDs(callID string) []string {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
+	if _, matched := bm.matchedCalls[callID]; matched && !bm.matchedValidLocked(callID) {
+		return nil
+	}
 	return append([]string(nil), bm.matchedIDs[callID]...)
 }
 
@@ -467,6 +475,7 @@ func (bm *BufferManager) cleanupOldBuffers() {
 				"call_id", SanitizeCallIDForLogging(callID),
 				"age_hours", int(now.Sub(matchTime).Hours()))
 			delete(bm.matchedCalls, callID)
+			delete(bm.matchedLifetimes, callID)
 			delete(bm.matchedIDs, callID)
 		}
 	}
@@ -487,62 +496,95 @@ func (bm *BufferManager) Close() {
 // extractRTPPortsFromSDP extracts RTP ports and IP:PORT endpoints from SDP body
 // Returns exact IP:PORT endpoints. Port-only ownership is not authoritative.
 func extractRTPPortsFromSDP(sdp string) []string {
-	endpoints := make([]string, 0, 4)
+	return extractAllRTPEndpoints(sdp)
+}
 
-	// First, extract the session-level connection address (c= line)
-	// Can be overridden per media line
-	sessionIP := ""
-	lines := strings.Split(sdp, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
-			// Format: c=IN IP4 <ip> or c=IN IP6 <ip>
-			fields := strings.Fields(line)
-			if len(fields) >= 3 {
-				sessionIP = fields[2]
-				break // Use first c= line as session-level
-			}
+// BindRegistry binds the manager once at handler construction, before packet
+// processing. The registry remains the sole owner of endpoint and call identity.
+func (bm *BufferManager) BindRegistry(registry *callregistry.Core) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if bm.registry == registry {
+		return
+	}
+	if bm.registry != nil {
+		panic("buffer manager cannot change call registry")
+	}
+	bm.registry = registry
+	for callID := range bm.matchedCalls {
+		if call, ok := registry.Call(callID); ok {
+			bm.matchedLifetimes[callID] = call.Lifetime
 		}
 	}
-
-	// Now extract media ports and combine with IP
-	currentIP := sessionIP
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Update connection IP if we see a media-level c= line
-		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 3 {
-				currentIP = fields[2]
-			}
-			continue
-		}
-
-		// Check for m=audio
-		if strings.HasPrefix(line, "m=audio ") {
-			// Extract port (second field)
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				port := fields[1]
-				// Validate port
-				if isValidPort(port) {
-					if currentIP != "" {
-						// Register IP:port endpoint
-						endpoint := currentIP + ":" + port
-						endpoints = append(endpoints, endpoint)
-						logger.Debug("Extracted RTP endpoint from SDP",
-							"ip", currentIP,
-							"port", port,
-							"endpoint", endpoint)
-					}
-					// Retain port-only membership for legacy buffer bookkeeping.
-					// Security-sensitive attribution never queries this fallback.
-					endpoints = append(endpoints, port)
-				}
-			}
+}
+func (bm *BufferManager) recordMatchLocked(callID string) {
+	bm.matchedCalls[callID] = time.Now()
+	if bm.registry != nil {
+		if call, ok := bm.registry.Call(callID); ok {
+			bm.matchedLifetimes[callID] = call.Lifetime
+		} else {
+			delete(bm.matchedLifetimes, callID)
 		}
 	}
+}
+func (bm *BufferManager) matchedValidLocked(callID string) bool {
+	at, ok := bm.matchedCalls[callID]
+	if !ok || time.Since(at) > bm.matchedTTL {
+		return false
+	}
+	if bm.registry == nil {
+		return true
+	}
+	call, ok := bm.registry.Call(callID)
+	return ok && call.Lifetime == bm.matchedLifetimes[callID]
+}
+func (bm *BufferManager) discardStaleMatchLocked(callID string) {
+	if _, ok := bm.matchedCalls[callID]; ok && !bm.matchedValidLocked(callID) {
+		delete(bm.matchedCalls, callID)
+		delete(bm.matchedLifetimes, callID)
+		delete(bm.matchedIDs, callID)
+		delete(bm.buffers, callID)
+	}
+}
 
-	return endpoints
+// MatchedFilterIDsForResolution revalidates the captured lifetime and exact
+// endpoint ownership before returning identity provenance for media.
+func (bm *BufferManager) MatchedFilterIDsForResolution(resolution callregistry.MediaResolution, source, destination string) []string {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	if !bm.currentResolutionLocked(resolution, source, destination) || !bm.matchedValidLocked(resolution.CallID) {
+		return nil
+	}
+	return append([]string(nil), bm.matchedIDs[resolution.CallID]...)
+}
+func (bm *BufferManager) currentResolutionLocked(resolution callregistry.MediaResolution, source, destination string) bool {
+	if bm.registry == nil || resolution.Status != callregistry.MediaResolved {
+		return false
+	}
+	current := bm.registry.ResolveMediaEndpoints(source, destination)
+	return current.Status == callregistry.MediaResolved && current.CallID == resolution.CallID && current.Lifetime == resolution.Lifetime
+}
+
+// AddResolvedRTPPacket preserves matched forwarding after temporary packet
+// storage expires. No packet payloads or endpoint copies are retained for this
+// path: the live registry and the original selection lifetime authorize it.
+func (bm *BufferManager) AddResolvedRTPPacket(resolution callregistry.MediaResolution, source, destination string, packet gopacket.Packet) (forward, accepted bool, filterIDs []string) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if !bm.currentResolutionLocked(resolution, source, destination) {
+		return false, false, nil
+	}
+	if bm.matchedValidLocked(resolution.CallID) {
+		return true, true, append([]string(nil), bm.matchedIDs[resolution.CallID]...)
+	}
+	// An expired or revoked match must not fall back to a stale matched buffer.
+	if _, matched := bm.matchedCalls[resolution.CallID]; matched {
+		return false, false, nil
+	}
+	buffer := bm.buffers[resolution.CallID]
+	if buffer == nil || (!buffer.IsRTPPort(source) && !buffer.IsRTPPort(destination)) {
+		return false, false, nil
+	}
+	buffer.AddRTPPacket(packet)
+	return false, true, nil
 }

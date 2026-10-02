@@ -14,8 +14,16 @@ import (
 const DefaultPcapBufferSize = 16 * 1024 * 1024 // 16MB
 
 type liveInterface struct {
-	Device string
-	handle *pcap.Handle
+	Device          string
+	handle          *pcap.Handle
+	socketAdmission bool
+}
+
+// ConfigureSocketAdmission selects a drainable live ring and host timestamps.
+// It is called before handle activation only for explicitly enabled admission.
+func (iface *liveInterface) ConfigureSocketAdmission() error {
+	iface.socketAdmission = true
+	return nil
 }
 
 func (iface *liveInterface) SetHandle() error {
@@ -64,6 +72,19 @@ func (iface *liveInterface) SetHandle() error {
 	}
 	if err := inactive.SetBufferSize(bufferSize); err != nil {
 		return err
+	}
+
+	if iface.socketAdmission {
+		if err := inactive.SetImmediateMode(true); err != nil {
+			return err
+		}
+		host, err := pcap.TimestampSourceFromString("host")
+		if err != nil {
+			return err
+		}
+		if err := inactive.SetTimestampSource(host); err != nil {
+			return err
+		}
 	}
 
 	handle, err := inactive.Activate()

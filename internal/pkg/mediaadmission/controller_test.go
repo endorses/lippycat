@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type fakeBackend struct {
@@ -370,4 +372,166 @@ func TestRejectedSelectorSnapshotBlocksFalseRecovery(t *testing.T) {
 	if c.Status()[0].State != StateEnforcing {
 		t.Fatal("valid selector replacement did not clear rejected snapshot")
 	}
+}
+
+type blockingBackend struct {
+	*fakeBackend
+	block   atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingBackend) ListEndpoints(ctx context.Context, domain DomainID) ([]EndpointKey, error) {
+	if b.block.Load() {
+		close(b.entered)
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return b.fakeBackend.ListEndpoints(ctx, domain)
+}
+func TestStatusObservableDuringBlockedRecovery(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Enabled = true
+	b := &blockingBackend{fakeBackend: newFake(), entered: make(chan struct{}), release: make(chan struct{})}
+	c, err := NewController(context.Background(), cfg, b)
+	must(t, err)
+	b.block.Store(true)
+	done := make(chan error, 1)
+	go func() { done <- c.Reconcile(context.Background(), 0) }()
+	<-b.entered
+	read := make(chan []ScopeStatus, 1)
+	go func() { read <- c.Status() }()
+	select {
+	case scopes := <-read:
+		if scopes[0].State != StateRecovery || scopes[0].PublicationStarted.IsZero() {
+			t.Fatal("pending recovery not published")
+		}
+	case <-time.After(time.Second):
+		close(b.release)
+		<-done
+		t.Fatal("status blocked behind backend I/O")
+	}
+	close(b.release)
+	must(t, <-done)
+	if c.Status()[0].LastPublished.IsZero() {
+		t.Fatal("confirmed publication timing missing")
+	}
+}
+
+func TestPendingOwnerReservationIsBoundedAndLifetimeSafe(t *testing.T) {
+	c, maps := testController(t, func(cfg *Config) {
+		cfg.OwnerCapacity = 1
+		cfg.PendingDialogCapacity = 1
+		cfg.InterfaceDomains = map[string]DomainID{"other": 1}
+	})
+	ctx := context.Background()
+	active := begin(t, c, 0, "active")
+	must(t, c.UpdateOwner(ctx, 0, active, []EndpointKey{ep(0, 10000)}))
+	pending, err := c.BeginOwner(1, "pending")
+	if !errors.Is(err, ErrCapacity) || pending.Session == 0 {
+		t.Fatalf("capacity must retain a bounded retry token: %v %v", pending, err)
+	}
+	if err := c.UpdateOwner(ctx, 1, pending, []EndpointKey{ep(1, 10002)}); !errors.Is(err, ErrCapacity) {
+		t.Fatalf("pending owner consumed active capacity: %v", err)
+	}
+	if len(c.owners[pending].endpoints) != 0 || c.pendingOwners != 1 {
+		t.Fatal("pending reservation retained endpoints or lost its bound")
+	}
+	// Pending capacity is global, even when the next failure is another domain.
+	lost, err := c.BeginOwner(0, "lost")
+	if !errors.Is(err, ErrCapacity) || lost != (OwnerID{}) || len(c.owners) != 2 {
+		t.Fatalf("global pending bound not enforced: %v %v", lost, err)
+	}
+	if err := c.UpdateOwner(ctx, 0, pending, nil); !errors.Is(err, ErrStaleOwner) {
+		t.Fatalf("foreign domain accepted reservation: %v", err)
+	}
+	if c.EndOwner(ctx, 0, active) == nil {
+		t.Fatal("lost observation was cleared by unrelated owner retirement")
+	}
+	must(t, c.UpdateOwner(ctx, 1, pending, []EndpointKey{ep(1, 10002)}))
+	if c.pendingOwners != 0 || c.owners[pending].pending {
+		t.Fatal("reservation did not promote after active capacity freed")
+	}
+	if c.Reconcile(ctx, 0) == nil {
+		t.Fatal("another domain's retry cleared lost desired state")
+	}
+	if _, ok := maps.endpoints[ep(1, 10002)]; !ok {
+		t.Fatal("promoted reservation endpoints missing")
+	}
+	must(t, c.EndOwner(ctx, 1, pending))
+	replacement := begin(t, c, 1, "pending")
+	if replacement == pending {
+		t.Fatal("reused call received stale token")
+	}
+	if err := c.UpdateOwner(ctx, 1, pending, []EndpointKey{ep(1, 10004)}); !errors.Is(err, ErrStaleOwner) {
+		t.Fatalf("stale retry modified reused lifetime: %v", err)
+	}
+	must(t, c.Close(ctx))
+	if c.pendingOwners != 0 || len(c.owners) != 0 || len(maps.endpoints) != 0 {
+		t.Fatal("shutdown retained owner reservations")
+	}
+}
+
+func TestPendingRetirementFreesReservationAndPreservesRejectedEndpoints(t *testing.T) {
+	c, _ := testController(t, func(cfg *Config) {
+		cfg.OwnerCapacity = 2
+		cfg.PendingDialogCapacity = 1
+		cfg.EndpointCapacity = 1
+		cfg.MaxEndpointsPerOwner = 1
+	})
+	ctx := context.Background()
+	first := begin(t, c, 0, "first")
+	second := begin(t, c, 0, "second")
+	must(t, c.UpdateOwner(ctx, 0, first, []EndpointKey{ep(0, 10000)}))
+	if !errors.Is(c.UpdateOwner(ctx, 0, second, []EndpointKey{ep(0, 10002)}), ErrCapacity) {
+		t.Fatal("endpoint capacity not enforced")
+	}
+	pending, err := c.BeginOwner(0, "pending")
+	if !errors.Is(err, ErrCapacity) || pending.Session == 0 {
+		t.Fatal("pending token missing")
+	}
+	if c.EndOwner(ctx, 0, pending) == nil {
+		t.Fatal("pending retirement hid rejected active endpoint")
+	}
+	if c.pendingOwners != 0 {
+		t.Fatal("pending retirement did not free reservation")
+	}
+	pending, err = c.BeginOwner(0, "pending")
+	if !errors.Is(err, ErrCapacity) || pending.Session == 0 {
+		t.Fatal("freed reservation was not reusable")
+	}
+	if c.EndOwner(ctx, 0, first) == nil {
+		t.Fatal("other incomplete owners allowed recovery")
+	}
+	if c.UpdateOwner(ctx, 0, pending, nil) == nil {
+		t.Fatal("pending promotion hid rejected endpoint update")
+	}
+	if c.Status()[0].State == StateEnforcing {
+		t.Fatal("incomplete endpoint set enabled enforcement")
+	}
+	must(t, c.EndOwner(ctx, 0, second))
+	if c.Status()[0].Owners != 1 || c.Status()[0].PendingUpdates != 0 {
+		t.Fatal("unexpected recovered ownership accounting")
+	}
+	must(t, c.Close(ctx))
+}
+
+func TestCompleteSnapshotCannotPromoteOverActiveOwnerLimit(t *testing.T) {
+	c, _ := testController(t, func(cfg *Config) { cfg.OwnerCapacity = 1 })
+	ctx := context.Background()
+	first := begin(t, c, 0, "first")
+	pending, err := c.BeginOwner(0, "pending")
+	if !errors.Is(err, ErrCapacity) || pending.Session == 0 {
+		t.Fatal("pending token missing")
+	}
+	if !errors.Is(c.ReplaceDesired(ctx, 0, []OwnerEndpoints{{Owner: first}, {Owner: pending}}), ErrCapacity) {
+		t.Fatal("complete snapshot bypassed active owner limit")
+	}
+	if c.pendingOwners != 1 {
+		t.Fatal("rejected snapshot mutated reservations")
+	}
+	must(t, c.Close(ctx))
 }

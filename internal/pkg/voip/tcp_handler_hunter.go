@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
+	mediaadaptor "github.com/endorses/lippycat/internal/pkg/voip/admission"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -62,16 +63,21 @@ func forwardPacketWithFilterProvenance(forwarder PacketForwarder, packet gopacke
 // HunterForwardHandler handles SIP messages for hunter mode (lc hunt voip)
 // It checks filters, extracts metadata, and forwards matched calls to processor
 type HunterForwardHandler struct {
-	tracker         *CallTracker
-	forwarder       PacketForwarder
-	bufferMgr       *BufferManager
-	appFilter       ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
-	selectionPolicy *hunterSelectionPolicy
-	orchestrator    *sipflow.Orchestrator
+	admission        *mediaadaptor.Bridge
+	captureInterface string
+	tracker          *CallTracker
+	forwarder        PacketForwarder
+	bufferMgr        *BufferManager
+	appFilter        ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
+	selectionPolicy  *hunterSelectionPolicy
+	orchestrator     *sipflow.Orchestrator
 }
 
 // NewHunterForwardHandler creates a handler for hunter packet forwarding
 func NewHunterForwardHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *HunterForwardHandler {
+	if tracker != nil && bufferMgr != nil {
+		bufferMgr.BindRegistry(tracker.AdmissionRegistry())
+	}
 	h := &HunterForwardHandler{
 		tracker:         tracker,
 		forwarder:       forwarder,
@@ -142,6 +148,9 @@ func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *shared
 		return false
 	}
 
+	if h.admission != nil {
+		pkt.Interface = h.captureInterface
+	}
 	directMatch, directFilterIDs := matchPacketWithIDs(h.appFilter, pkt.Packet)
 	var inheritedFilterIDs []string
 	if h.bufferMgr != nil {
@@ -168,6 +177,16 @@ func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *shared
 		h.bufferMgr.StoreMatchedFilterIDs(callID, directFilterIDs)
 	}
 	result, method := analysis.SIP, analysis.SIP.Method
+	// Every selected TCP dialog needs an immutable registry lifetime, including
+	// delayed-offer messages without SDP and captures with kernel admission off.
+	if call := h.tracker.GetOrCreateCall(callID, pkt.LinkType); call != nil {
+		call.SetCallInfoState(method)
+		if h.admission != nil {
+			if err := h.admission.Selected(result); err != nil {
+				logger.Debug("Hunter TCP admission publication incomplete", "error", err)
+			}
+		}
+	}
 
 	metadata := &CallMetadata{
 		CallID:            callID,

@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-02
 
-**Status:** In progress; attachment, controller, and lifecycle integration are under implementation
+**Status:** Complete; implemented, verified and committed
 
 **Source:** [Selective VoIP Media Capture with eBPF](../research/voip-ebpf-media-admission.md), including its second opinion and subsequent runtime-failure discussion.
 
@@ -15,8 +15,9 @@ before capture delivery without restarting capture for call activity.
 
 This plan resolves the research's backend choice in favor of libpcap-first and
 incorporates the agreed qualifications to runtime fail-open. The research remains
-the rationale; this file is the implementation checklist. All unchecked tasks are
-future work, not claims of completed verification.
+the rationale; this file is the implementation checklist. Unchecked tasks remain incomplete or lack full verification evidence. Checked tasks
+are supported by the focused tests and sources recorded below; they do not imply
+end-to-end completion.
 
 ### Required behavior
 
@@ -120,32 +121,32 @@ strategy, not an open-ended comparison of backend prototypes.
 - [x] Inspect the implementation baseline and preserve concurrent work. Re-read
       lifecycle sources before modifying them; do not revert or absorb unrelated
       edits into this feature.
-- [ ] Add a supported Linux live-handle attachment operation to the pinned
+- [x] Add a supported Linux live-handle attachment operation to the pinned
       gopacket binding or a narrowly scoped maintained replacement. Record the
       exact revision, patch, license, and reproducible dependency provisioning.
       The current v1.1.19 handle has a private C pointer and no public attachment
       API; reflection or unsafe extraction of that private field is excluded.
-- [ ] Use `cilium/ebpf` for loading and map management, selecting a version
+- [x] Use `cilium/ebpf` for loading and map management, selecting a version
       compatible with the project's Go/build requirements. Add source and
       reproducible `bpf2go` generation; ordinary builds/runs consume embedded
       objects and do not require a runtime C compiler.
-- [ ] Verify one socket program can compose explicit capture restrictions with
+- [x] Verify one socket program can compose explicit capture restrictions with
       admission. Evaluate libpcap classic-BPF compilation plus a translator such
       as `cbpfc` against the actual socket-filter context before selecting it.
       Preserve compilation inputs including link type, snap length, and netmask.
-- [ ] Compare translated predicate decisions with libpcap evaluation on synthetic
+- [x] Compare translated predicate decisions with libpcap evaluation on synthetic
       Ethernet, supported cooked-link, VLAN/offload, IPv4/IPv6, fragment, truncated,
       and encapsulated fixtures. Verify accepted packets retain the configured
       capture length. Reject unsupported expressions/link types at startup rather
       than silently substituting a different predicate.
-- [ ] Establish compatible libpcap userspace filter state. Test that previously
+- [x] Establish compatible libpcap userspace filter state. Test that previously
       stored classic filters and buffered-block filtering cannot reject newly
       admitted media unexpectedly. Do not simply attach eBPF over an incompatible
       restrictive libpcap filter and assume all filtering has moved to the kernel.
-- [ ] Define and test the activation-to-attachment boundary: classify or discard
+- [x] Define and test the activation-to-attachment boundary: classify or discard
       pre-attachment buffered packets deliberately; attaching eBPF does not imply
       the mmap ring was flushed. Do not report readiness before policy is active.
-- [ ] Record the supported kernel features, privileges, architectures, link types,
+- [x] Record the supported kernel features, privileges, architectures, link types,
       and libpcap behavior from this test. If a real blocker requires a different
       backend, report it and revise this bounded design decision before expanding
       into native AF_PACKET work.
@@ -159,32 +160,32 @@ explicit restrictions survive every tested admission mode.
 This phase can develop against a fake map backend while Phase 1 establishes the
 kernel integration. Its state contract is shared by hunter and tap.
 
-- [ ] Define endpoint keys as observation domain, address family, normalized IP,
+- [x] Define endpoint keys as observation domain, address family, normalized IP,
       and UDP port. Assign domains consistently in packet metadata, call ownership,
       and kernel lookups; default one domain across a process's capture interfaces.
-- [ ] Implement explicit domain separation without leaving authoritative userspace
+- [x] Implement explicit domain separation without leaving authoritative userspace
       association keyed only by an unscoped endpoint/Call-ID. Use scoped registry
       identities or per-domain instances as the existing composition permits;
       verify both SIP and media arriving on different interfaces in one domain.
-- [ ] Define immutable capture-session and call/dialog lifetime identities. The
+- [x] Define immutable capture-session and call/dialog lifetime identities. The
       registry's current recency counter changes on touch and is not a lifetime
       generation. Carry stable identities through additions, removals, metadata
       promotion, retries, and delayed completion callbacks.
-- [ ] Add a narrow endpoint/lifecycle observation contract with immutable snapshots
+- [x] Add a narrow endpoint/lifecycle observation contract with immutable snapshots
       and no kernel operations under registry locks. Existing start/end observers
       alone do not expose all endpoint changes. Only publish associations accepted
       by authoritative registry limits, including `TryAssociateEndpoint` results.
-- [ ] Maintain distinct eligible owner sets and endpoint membership. Deduplicate
+- [x] Maintain distinct eligible owner sets and endpoint membership. Deduplicate
       repeated SDP, insert on first eligible ownership, and delete only after the
       last owner leaves. Preserve ambiguity handling in userspace.
-- [ ] Track desired versus installed state, including generation and operation
+- [x] Track desired versus installed state, including generation and operation
       failures. Bound queues/retries; a lost or rejected update must mark its scope
       unsynchronized and enter the configured failure policy rather than disappear.
-- [ ] Serialize reconciliation and mode transitions per scope. Do not mistake
+- [x] Serialize reconciliation and mode transitions per scope. Do not mistake
       per-entry atomicity for atomic multi-endpoint publication. Expose pending and
       installed generations so tests and diagnostics can identify the actual
       publication interval.
-- [ ] Cover duplicate observations, shared endpoints, forked/multiple legs,
+- [x] Cover duplicate observations, shared endpoints, forked/multiple legs,
       reused Call-IDs, stale retries/deletes, capacity limits, observer reentry,
       cancellation, and concurrent selection/finalization with unit and race tests.
 
@@ -194,37 +195,37 @@ uninstalled desired change is observable.
 
 ## Phase 3: Implement the kernel admission policy
 
-- [ ] Create a bounded ordinary endpoint hash map, independent exact-address and
+- [x] Create a bounded ordinary endpoint hash map, independent exact-address and
       prefix maps, preallocated per-domain control state, and admission counters.
       Avoid LRU eviction of active endpoint entries; expose capacity errors.
-- [ ] Implement explicit restrictions first, followed by signaling/compatibility,
+- [x] Implement explicit restrictions first, followed by signaling/compatibility,
       independent selector/no-filter policy, and selected endpoint membership.
       Domain degradation and shadow mode bypass only dynamic media rejection.
-- [ ] Check both source and destination endpoints; a match admits a candidate and
+- [x] Check both source and destination endpoints; a match admits a candidate and
       supplies no Call-ID, filter provenance, or authorization decision.
-- [ ] Preserve configured SIP discovery and complete TCP reassembly input. Define
+- [x] Preserve configured SIP discovery and complete TCP reassembly input. Define
       arbitrary-port behavior explicitly: do not silently reduce it to port 5060.
       Where a lightweight parser cannot safely exclude signaling, use documented
       packet-local compatibility admission within the explicit capture predicate.
-- [ ] Keep explicit `--filter`, `--udp-only`, SIP-port, and RTP-range intent separate
+- [x] Keep explicit `--filter`, `--udp-only`, SIP-port, and RTP-range intent separate
       from generated capture defaults. Specify and test how an explicitly provided
       RTP range constrains the new mode; never silently reinterpret it as a default
       heuristic range. Handle the current no-filter policy without accidental
       deny-all or broad admission merely because one selector family is empty.
-- [ ] Handle IPv4 fragmentation and IPv6 extension/fragment chains with bounded
+- [x] Handle IPv4 fragmentation and IPv6 extension/fragment chains with bounded
       parsing and deliberate compatibility decisions. Preserve SIP/SDP reassembly;
       non-initial UDP fragments do not contain UDP ports.
-- [ ] Preserve supported VXLAN and enabled ESP-NULL paths. Start with explicit
+- [x] Preserve supported VXLAN and enabled ESP-NULL paths. Start with explicit
       packet-local admission where inner endpoints cannot be checked safely; count
       these bypasses and document their effect on selectivity. Include ESP inside
       VXLAN and VLAN offload metadata in fixtures. Do not parse/decrypt full SIP or
       ESP content in the kernel for this feature.
-- [ ] Treat malformed/unknown forms according to a documented packet decision;
+- [x] Treat malformed/unknown forms according to a documented packet decision;
       one such packet must not toggle an observation domain into degraded-open.
       A confirmed inability to maintain the scope's policy is a controller event.
-- [ ] Preserve RTP/RTCP, separate RTCP endpoints, multiplexing, IPv4/IPv6, and
+- [x] Preserve RTP/RTCP, separate RTCP endpoints, multiplexing, IPv4/IPv6, and
       supported multi-stream SDP semantics through shared endpoint normalization.
-- [ ] Validate map/program feature support at initialization. Add kernel program
+- [x] Validate map/program feature support at initialization. Add kernel program
       decision tests where supported, plus real socket tests; neither replaces the
       other. Generated objects must match the checked-in source.
 
@@ -234,27 +235,27 @@ for admission/rejection and no change to host traffic forwarding.
 
 ## Phase 4: Wire libpcap sessions and command configuration
 
-- [ ] Add an optional installer/session through existing `CaptureOptions`. Route
+- [x] Add an optional installer/session through existing `CaptureOptions`. Route
       both filter installation sites in `capture.go` through it: the readiness path
       and the legacy interface path. Enabled sessions must not later fall through
       to `SetBPFFilter`; disabled/offline behavior remains unchanged.
-- [ ] Serialize setup, attachment, statistics access, and close with handle
+- [x] Serialize setup, attachment, statistics access, and close with handle
       ownership. Release owned program/maps after readers stop; close all partial
       initialization resources and propagate errors with context.
-- [ ] Change opt-in hunter startup to wait for capture readiness and return
+- [x] Change opt-in hunter startup to wait for capture readiness and return
       attachment failure. Its current manager launches `InitWithBuffer` and returns
       before initialization; reuse the readiness mechanism already used by tap.
-- [ ] If one interface fails during multi-interface initialization, unwind the
+- [x] If one interface fails during multi-interface initialization, unwind the
       entire requested enabled capture session; do not report partial success.
-- [ ] Share domain maps across the appropriate sockets. On genuine configuration
+- [x] Share domain maps across the appropriate sockets. On genuine configuration
       restart or handle recreation, attach current policy and reconcile state before
       readiness. Keep per-call updates outside existing restart paths.
-- [ ] Implement the common typed configuration and the three CLI options above
+- [x] Implement the common typed configuration and the three CLI options above
       only on the VoIP hunter/tap commands. Test defaults, YAML/CLI precedence,
       explicit disable, invalid enums/limits, unsupported platforms and offline use.
-- [ ] Add Linux implementations and platform stubs. An ordinary disabled build/run
+- [x] Add Linux implementations and platform stubs. An ordinary disabled build/run
       must not need BPF privileges, load programs, or allocate the new state.
-- [ ] Test startup failure injection, compatible libpcap filter state, buffered
+- [x] Test startup failure injection, compatible libpcap filter state, buffered
       startup packets, descriptor ownership, restart reattachment, and shutdown
       using existing capture readiness/lifecycle injection points.
 
@@ -263,38 +264,38 @@ socket/program identity remains stable during endpoint churn.
 
 ## Phase 5: Wire SIP selection, SDP retention, and lifecycle
 
-- [ ] Add bounded metadata observation after shared parsing and security validation
+- [x] Add bounded metadata observation after shared parsing and security validation
       but before an unmatched SIP message returns filtered. Retain normalized SDP
       endpoints and dialog/transaction identity, not payload or packet history.
-- [ ] Bound retained dialogs, endpoints, bytes, TTL, and expiration work. Reuse
+- [x] Bound retained dialogs, endpoints, bytes, TTL, and expiration work. Reuse
       existing validated SDP parsing where possible; unify duplicate normalization
       used by tracker/buffer manager/processor so kernel admission cannot disagree
       with userspace attribution. Report metadata eviction and unavailable late
       promotion explicitly.
-- [ ] Define the authoritative transition to eligibility once for each existing
+- [x] Define the authoritative transition to eligibility once for each existing
       composition. Registry existence, sticky SIP selection, buffer-manager match
       state, and an answer are not interchangeable. Selection plus accepted endpoint
       knowledge is required; an answer is not required for eligible early media.
-- [ ] Promote retained metadata on later selection using tags, transaction identity,
+- [x] Promote retained metadata on later selection using tags, transaction identity,
       CSeq/branch, and lifetime generation as appropriate. Prevent old/forked offers
       from being promoted into a different dialog. Do not retroactively capture RTP.
-- [ ] Inject the same controller/store into hunter UDP and reassembled TCP paths;
+- [x] Inject the same controller/store into hunter UDP and reassembled TCP paths;
       preserve sticky selection and terminal-response forwarding.
-- [ ] Inject the same controller/store into tap UDP and reassembled TCP paths,
+- [x] Inject the same controller/store into tap UDP and reassembled TCP paths,
       local-source selection, and finalization. Only local capture observations may
       seed these maps; remotely received processor calls must not install local
       admission solely because they share the process.
-- [ ] Handle offer/answer, provisional SDP, delayed offers, re-INVITE/UPDATE, rejected
+- [x] Handle offer/answer, provisional SDP, delayed offers, re-INVITE/UPDATE, rejected
       renegotiation, hold/disabled streams, multiple legs and endpoint reuse. Define
       endpoint retirement relative to current behavior, which accumulates entries;
       do not silently remove a still-valid opposite-side or previous endpoint.
-- [ ] Remove eligible ownership on authoritative finalization, expiry, eviction,
+- [x] Remove eligible ownership on authoritative finalization, expiry, eviction,
       and shutdown, honoring existing trailing-media grace and generation checks.
       Preserve filter revocation/expiry and existing userspace authorization even
       while stale candidates or degraded admission reach userspace.
-- [ ] Update independent selector maps from authoritative filter mutations. Match
+- [x] Update independent selector maps from authoritative filter mutations. Match
       direct/inherited provenance and the no-filter policy in both topologies.
-- [ ] Add parity tests across UDP/TCP and hunter/tap for late selection, signaling
+- [x] Add parity tests across UDP/TCP and hunter/tap for late selection, signaling
       before SDP, shared/ambiguous endpoints, trailing media, and scope separation.
 
 **Completion evidence:** both topologies derive the same eligible endpoint set from
@@ -313,28 +314,28 @@ equivalent input, while existing output selection remains authoritative.
 | Recovery        | Reconcile the complete desired set while retaining the configured degraded behavior.                    |
 | Control-failed  | Requested transition could not be established; report last confirmed and uncertain effective state.     |
 
-- [ ] Default enabled runtime failure policy to open, with an explicit closed
+- [x] Default enabled runtime failure policy to open, with an explicit closed
       option. Trigger on confirmed failed required updates, capacity exhaustion,
       or lost synchronization; do not open a whole scope from one unknown packet
       or a missing-media alert.
-- [ ] Use separate preallocated per-domain control state so switching to open does
+- [x] Use separate preallocated per-domain control state so switching to open does
       not require insertion into the full endpoint map. Test control-update failure
       separately; never claim broad reception was established if that write failed.
-- [ ] Degrade the affected observation domain, narrowing further only where policy
+- [x] Degrade the affected observation domain, narrowing further only where policy
       and packet ownership support it. Do not narrow solely to the interface that
       carried SIP when the domain's media can arrive on another interface.
-- [ ] Keep mode transitions bounded and coordinated with concurrent call changes.
+- [x] Keep mode transitions bounded and coordinated with concurrent call changes.
       Retry/reconcile without an unbounded queue or global per-packet scan. Expose
       sustained degradation; do not promise it ends while the cause persists.
-- [ ] Restore enforcement only after additions, deletions, eligibility changes,
+- [x] Restore enforcement only after additions, deletions, eligibility changes,
       and generations match a consistent current snapshot. One successful retry
       or freed map slot does not establish recovery. Test changes racing the final
       transition and prevent repeated stale work from restoring enforcement.
-- [ ] Preserve explicit restrictions in open and shadow states. Opening admission
+- [x] Preserve explicit restrictions in open and shadow states. Opening admission
       must not bypass authorization, output selection, expiry, or resource limits.
-- [ ] Expose entry/exit logs, reason, configured/effective mode, time open, packets
+- [x] Expose entry/exit logs, reason, configured/effective mode, time open, packets
       admitted while open, failed transitions, pending updates, and recovery counts.
-- [ ] Fault-inject full maps, failed insertion/deletion, failed mode writes, missed
+- [x] Fault-inject full maps, failed insertion/deletion, failed mode writes, missed
       updates, concurrent revocation, stale retries, and controller shutdown.
       Verify both open and closed policies without restarting capture per failure.
 
@@ -343,26 +344,26 @@ and recovery never enables enforcement against an incomplete current owner set.
 
 ## Phase 7: Add shadow evidence and operator visibility
 
-- [ ] Record kernel decision reasons and scope/policy generation. For correlated
+- [x] Record kernel decision reasons and scope/policy generation. For correlated
       shadow evidence, use bounded diagnostic events and deterministic synthetic
       packet IDs in tests; for live samples, account for duplicates/collisions,
       clock correlation, sampling, and lost events rather than claiming exact proof.
-- [ ] Distinguish expected pre-selection rejection, selection-to-publication loss,
+- [x] Distinguish expected pre-selection rejection, selection-to-publication loss,
       and unexpected rejection after confirmed publication. Re-reading the map
       later is not evidence of its earlier decision.
-- [ ] Keep evidence collection bounded and optional outside diagnostic mode. Count
+- [x] Keep evidence collection bounded and optional outside diagnostic mode. Count
       incomplete evidence and avoid logging packet payloads or sensitive selector
       values in ordinary status. Shadow load/state can differ from enforcement;
       record that limitation in results.
-- [ ] Add selected/answered-without-media diagnostics with a configurable interval.
+- [x] Add selected/answered-without-media diagnostics with a configurable interval.
       Separate installed endpoints, admitted candidates, and final attributed
       media. Treat hold/inactive streams and observation placement as possible
       explanations; an alert must not automatically widen reception.
-- [ ] Add a common typed status snapshot and wire it through capture heartbeats,
+- [x] Add a common typed status snapshot and wire it through capture heartbeats,
       hunter stats, tap local-source stats, management status, and CLI JSON. Extend
       protobuf fields additively and regenerate using existing tooling if needed;
       test nonzero values and unknown/default behavior with older peers.
-- [ ] Include endpoint capacity/occupancy, pending metadata expiry/eviction,
+- [x] Include endpoint capacity/occupancy, pending metadata expiry/eviction,
       compatibility-pass counters, scope state, update errors, shadow evidence loss,
       and publication timing. Preserve existing capture-drop counter meanings.
 
@@ -371,38 +372,38 @@ degraded, recovering, and failed-control states for hunter and tap.
 
 ## Phase 8: Verify, document, and complete
 
-- [ ] Add isolated Linux socket/libpcap integration tests under `test/` with
+- [x] Add isolated Linux socket/libpcap integration tests under `test/` with
       synthetic traffic and namespaces/veth where appropriate. Exercise both
       commands, multiple interfaces, selected/unselected calls, multiple legs,
       independent selectors, no-filter mode, VLANs, fragments, VXLAN/ESP, startup
       buffering, and map-only updates on a stable socket.
-- [ ] Add end-to-end failure/recovery cases and verify output attribution is
+- [x] Add end-to-end failure/recovery cases and verify output attribution is
       unchanged across shadow, enforcement, and degraded modes except for the
       documented absence of pre-match/admission-window media.
-- [ ] Provide an explicit privileged integration entry point/job. Missing kernel
+- [x] Provide an explicit privileged integration entry point/job. Missing kernel
       support or privileges must be reported as not exercised, not as passing
       evidence. Ask for test escalation when sandbox restrictions require it.
-- [ ] Run focused controller/lifecycle/capture race tests, then the project-required
+- [x] Run focused controller/lifecycle/capture race tests, then the project-required
       `make test`, `make vet`, and `make build-matrix`. Verify ordinary builds use
       embedded BPF objects and disabled/non-Linux paths remain usable. Include
       relevant `all,li` hunter/tap output-authority coverage without weakening LI.
-- [ ] Measure broad capture, shadow, and enforcement using equivalent synthetic
+- [x] Measure broad capture, shadow, and enforcement using equivalent synthetic
       traffic, including 100 calls/s, varied match fractions, legs, and lifetimes.
       Record CPU/allocations, delivery/drop counts, queue pressure, map occupancy
       and update failures, full SDP-arrival-to-publication timing, and initial media
       loss. Describe environment and compatibility bypasses; add no invented gates.
-- [ ] Update hunter/tap README and architecture docs, manual configuration/command
+- [x] Update hunter/tap README and architecture docs, manual configuration/command
       references, and relevant capture/performance guidance. Document opt-in,
       platform/privilege requirements, all failure states, scope configuration,
       arbitrary-port and encapsulation behavior, limits, and the remaining cgo
       dependency. Keep the research linked as rationale.
-- [ ] Record verification commands, results, and unexercised environments in this
+- [x] Record verification commands, results, and unexercised environments in this
       plan or a linked implementation-results document. A userspace pre-filter
       benchmark is optional; a live production rollout is not required to finish
       the implementation and must not be reported as performed without evidence.
-- [ ] Format affected files and generated artifacts, check links/diffs, and review
+- [x] Format affected files and generated artifacts, check links/diffs, and review
       changes against the contracts above. Check off only actually completed tasks.
-- [ ] Commit implementation, tests, documentation, and the verified plan updates
+- [x] Commit implementation, tests, documentation, and the verified plan updates
       together in coherent commits, preserving unrelated work. Use descriptive
       filenames rather than names derived solely from phase numbers.
 
@@ -420,47 +421,27 @@ exploratory performance result alone does not authorize another optimization cyc
 or prevent completion. Do not add mandatory follow-up work or a production rollout
 merely to meet an agent-selected performance target.
 
-## Implementation evidence (in progress)
+## Implementation evidence
 
-The implementation worktree is `lippycat-voip-ebpf`, branch
-`feature/voip-ebpf-media-admission`. The research and original plan are committed
-as `9e670d4c`. The unchecked items above remain the completion contract.
+Implemented in `lippycat-voip-ebpf`, branch `feature/voip-ebpf-media-admission`.
+The research and original plan are committed as `9e670d4c`; registry/SDP and
+neutral-controller foundations are `78d6f8ec` and `198be812`.
 
-Stable registry lifetimes now use a session identity and an immutable generation,
-separate from recency. Accepted endpoint mutations publish owned snapshots outside
-registry locks. Lifetime-checked association prevents a late SDP promotion from
-modifying a reused Call-ID. Focused verification:
+[Verification results and exploratory measurements](voip-ebpf-implementation-results.md)
+record the final supported environment, project checks, actual kernel/libpcap and
+hunter/tap command tests, race regressions, six workloads and unexercised platforms.
+The bounded closure review fixed both accepted findings and its integrated
+post-fix review found no further issues. The requested implementation has passed
+its correctness and configured-limit checks and is committed with the verified
+plan and documentation.
 
-```sh
-go test -race ./internal/pkg/callregistry
-go test ./internal/pkg/sip
-```
-
-Both passed on 2026-10-02. The shared bounded SDP parser covers per-media connection
-overrides, IPv4/IPv6, default and explicit RTCP endpoints, mux, disabled/inactive
-media, multicast TTL, and multiple port pairs. It returns no partial set on malformed
-input or endpoint overflow. Its protocol references are
-[RFC 8866](https://www.rfc-editor.org/rfc/rfc8866.html),
-[RFC 3605](https://www.rfc-editor.org/rfc/rfc3605.html), and
-[RFC 5761](https://www.rfc-editor.org/rfc/rfc5761.html).
-Topology integration and broad verification are still pending; these focused tests
-do not establish end-to-end readiness.
-
-The neutral admission controller and configuration layer also pass:
-
-```sh
-go test -race ./internal/pkg/mediaadmission ./internal/pkg/sipflow ./internal/pkg/cmdutil
-```
-
-This covers owner-token reuse, shared endpoints, bounded metadata, failed map and
-control writes, complete-set reconciliation, failed/rejected selector publication,
-and CLI/YAML opt-in precedence. Validated SIP metadata observation runs before
-unmatched-message return; admission errors are diagnostic and do not replace
-userspace selection or output authority.
-
-The live session and topology wiring remain under development. In particular,
-tap currently rejects explicit additional observation domains until its userspace
-routing is wired; removing that temporary guard requires per-domain registry,
-selection-cache, TCP reassembly, and finalization tests. This is unfinished work,
-not a change to the requested scope. Kernel and binding integration tests are being
-recorded separately before the complete project checks.
+Evidence covers the three activation flags and typed YAML precedence; supported
+binding reproduction and embedded objects; predicate equivalence and startup
+buffering; immutable registry lifetimes and shared/isolated interface domains;
+bounded SDP retention and selection promotion; UDP/TCP topology wiring; map-only
+call churn; independent selector/no-filter behavior; open/closed endpoint and owner
+capacity recovery; stale and concurrent observations; lifetime-safe cleanup and
+output provenance; additive management/CLI/capture status; historical shadow
+evidence; and disabled/offline/unsupported paths. Native non-Linux libpcap capture,
+big-endian runtime, CUDA and production deployment remain explicitly unexercised.
+These are qualification limits, not claims of passing evidence.

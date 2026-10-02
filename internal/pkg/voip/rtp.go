@@ -1,6 +1,8 @@
 package voip
 
 import (
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"net"
 	"strconv"
 	"strings"
 
@@ -17,7 +19,7 @@ func (tracker *CallTracker) endpointCallIDs(endpoint string) []string {
 // ExtractPortFromSDP registers every RTP endpoint advertised by SDP on this tracker.
 func (tracker *CallTracker) ExtractPortFromSDP(sdpBody string, callID string) {
 	// Extract all RTP endpoints (IP:port) from SDP body (supports multi-stream calls)
-	endpoints := extractAllRTPEndpoints(sdpBody)
+	endpoints := extractAllRTPEndpoints(sdpBody, tracker.config.MaxEndpointsPerCall)
 
 	if len(endpoints) == 0 {
 		return
@@ -38,65 +40,34 @@ func (tracker *CallTracker) ExtractPortFromSDP(sdpBody string, callID string) {
 // extractAllRTPEndpoints extracts all RTP endpoints (IP:port) from SDP body
 // Uses the connection address (c= line) combined with media port (m= line)
 // Supports multi-stream calls (conference calls, multiple audio streams)
-func extractAllRTPEndpoints(sdp string) []string {
-	endpoints := make([]string, 0, 2)
-
-	// First, extract the session-level connection address (c= line)
-	// Can be overridden per media line
-	sessionIP := ""
-	lines := strings.Split(sdp, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
-			// Format: c=IN IP4 <ip> or c=IN IP6 <ip>
-			fields := strings.Fields(line)
-			if len(fields) >= 3 {
-				sessionIP = fields[2]
-				break // Use first c= line as session-level
-			}
+func extractAllRTPEndpoints(body string, limits ...int) []string {
+	limit := DefaultConfig().MaxEndpointsPerCall
+	if len(limits) > 0 && limits[0] > 0 {
+		limit = limits[0]
+	}
+	parsed, err := sharedsip.ParseSDPEndpoints(body, limit)
+	if err != nil {
+		logger.Warn("Cannot extract SDP media endpoints", "error", err)
+		return extractAllRTPPorts(body)
+	}
+	result := make([]string, 0, len(parsed)*2)
+	seen := make(map[string]bool)
+	add := func(endpoint string) {
+		if !seen[endpoint] {
+			seen[endpoint] = true
+			result = append(result, endpoint)
 		}
 	}
-
-	// Now extract media ports and combine with IP
-	currentIP := sessionIP
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Update connection IP if we see a media-level c= line
-		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 3 {
-				currentIP = fields[2]
-			}
-			continue
-		}
-
-		// Check for m=audio
-		if strings.HasPrefix(line, "m=audio ") {
-			// Extract port (second field)
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				port := fields[1]
-				// Validate port
-				if isValidPort(port) {
-					if currentIP != "" {
-						// Register IP:port endpoint
-						endpoint := currentIP + ":" + port
-						endpoints = append(endpoints, endpoint)
-						logger.Debug("Extracted RTP endpoint from SDP",
-							"ip", currentIP,
-							"port", port,
-							"endpoint", endpoint)
-					}
-					// Retain the port-only association for diagnostics and legacy
-					// detection. Authoritative attribution never consults it.
-					endpoints = append(endpoints, port)
-				}
-			}
-		}
+	for _, endpoint := range parsed {
+		add(endpoint.Address.String())
+		add(strconv.Itoa(int(endpoint.Address.Port())))
 	}
-
-	return endpoints
+	// Preserve legacy port-only audio bookkeeping when SDP lacks a connection
+	// address. These entries are never used for authoritative media resolution.
+	for _, port := range extractAllRTPPorts(body) {
+		add(port)
+	}
+	return result
 }
 
 // extractAllRTPPorts extracts all RTP ports from SDP body (legacy, port-only)
@@ -148,8 +119,8 @@ func (tracker *CallTracker) ResolveMediaPacket(packet gopacket.Packet) callregis
 		return callregistry.MediaResolution{Status: callregistry.MediaUnresolved}
 	}
 	udp := udpLayer.(*layers.UDP)
-	source := network.NetworkFlow().Src().String() + ":" + strconv.Itoa(int(udp.SrcPort))
-	destination := network.NetworkFlow().Dst().String() + ":" + strconv.Itoa(int(udp.DstPort))
+	source := net.JoinHostPort(network.NetworkFlow().Src().String(), strconv.Itoa(int(udp.SrcPort)))
+	destination := net.JoinHostPort(network.NetworkFlow().Dst().String(), strconv.Itoa(int(udp.DstPort)))
 	resolution := tracker.registry.ResolveMediaEndpoints(source, destination)
 	if resolution.Status == callregistry.MediaResolved {
 		tracker.touchCall(resolution.CallID)
@@ -176,8 +147,8 @@ func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []str
 		dstIP := networkLayer.NetworkFlow().Dst().String()
 		srcIP := networkLayer.NetworkFlow().Src().String()
 
-		dstEndpoint := dstIP + ":" + dstPort
-		srcEndpoint := srcIP + ":" + srcPort
+		dstEndpoint := net.JoinHostPort(dstIP, dstPort)
+		srcEndpoint := net.JoinHostPort(srcIP, srcPort)
 
 		if callIDs := tracker.endpointCallIDs(dstEndpoint); len(callIDs) > 0 {
 			matched = append([]string(nil), callIDs...)

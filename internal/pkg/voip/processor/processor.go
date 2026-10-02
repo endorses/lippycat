@@ -12,7 +12,9 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -44,7 +46,8 @@ type ProcessResult struct {
 	// For SIP packets, this is extracted from headers.
 	// For RTP packets, this is populated only after authoritative exact-endpoint
 	// resolution succeeds.
-	CallID string
+	CallID       string
+	CallLifetime callregistry.Lifetime
 
 	// CallIDs contains the Call-IDs associated with this packet. For RTP it is
 	// either empty or contains the single authoritatively resolved Call-ID;
@@ -310,15 +313,19 @@ func (p *Processor) ProcessReassembledSIP(packet gopacket.Packet) *data.PacketMe
 // detectSIPWithCompletion would parse and select the same message a second
 // time.
 func (p *Processor) ProcessReassembledSIPResult(result pipeline.SIPResult) (*data.PacketMetadata, error) {
+	metadata, _, err := p.ProcessReassembledSIPResultWithLifetime(result)
+	return metadata, err
+}
+func (p *Processor) ProcessReassembledSIPResultWithLifetime(result pipeline.SIPResult) (*data.PacketMetadata, callregistry.Lifetime, error) {
 	observation, err := (processorSIPRegistry{processor: p}).Observe(result)
 	if err != nil {
-		return nil, fmt.Errorf("observe reassembled SIP result: %w", err)
+		return nil, callregistry.Lifetime{}, fmt.Errorf("observe reassembled SIP result: %w", err)
 	}
 	attachment, ok := observation.Attachment.(processorSIPAttachment)
 	if !ok {
-		return nil, fmt.Errorf("observe reassembled SIP result: unexpected attachment type %T", observation.Attachment)
+		return nil, callregistry.Lifetime{}, fmt.Errorf("observe reassembled SIP result: unexpected attachment type %T", observation.Attachment)
 	}
-	return attachment.pbMetadata, nil
+	return attachment.pbMetadata, attachment.lifetime, nil
 }
 
 // processUDP processes a UDP packet for SIP/RTP content.
@@ -405,7 +412,7 @@ func (p *Processor) RegisterSDP(callID, sdp string) {
 		return
 	}
 	_ = p.getOrCreateCall(callID)
-	for _, endpoint := range extractRTPPortsFromSDP(sdp) {
+	for _, endpoint := range extractRTPPortsFromSDP(sdp, p.config.MaxEndpointsPerCall) {
 		p.registerRTPPort(callID, endpoint)
 	}
 }
@@ -489,6 +496,9 @@ func (p *Processor) getOrCreateCall(callID string) *callState {
 			evicted, notifyEviction = p.evictOldestCallLocked(callID)
 		}
 		p.registry.Upsert(state.info)
+		if observed, ok := p.registry.Call(callID); ok {
+			state.info = observed
+		}
 		p.mu.Unlock()
 		handler := p.completionHandler
 		p.eventMu.Unlock()
@@ -599,8 +609,17 @@ func (p *Processor) CleanupCallPorts(callID string) {
 // processors remove attribution immediately; processors with an external
 // completion handler retain it through that coordinator's trailing-media grace
 // period.
-func (p *Processor) CompleteCall(callID string) {
+func (p *Processor) CompleteCall(callID string) { p.completeCall(callID, callregistry.Lifetime{}) }
+func (p *Processor) CompleteCallLifetime(callID string, lifetime callregistry.Lifetime) {
+	p.completeCall(callID, lifetime)
+}
+func (p *Processor) completeCall(callID string, expected callregistry.Lifetime) {
 	p.eventMu.Lock()
+	current, exists := p.registry.Call(callID)
+	if !exists || (expected.Session != 0 && current.Lifetime != expected) {
+		p.eventMu.Unlock()
+		return
+	}
 	if p.completionHandler != nil {
 		if _, pending := p.pendingCompletion[callID]; pending {
 			p.eventMu.Unlock()
@@ -618,7 +637,7 @@ func (p *Processor) CompleteCall(callID string) {
 		return
 	}
 	p.eventMu.Unlock()
-	p.removeCall(callID, callregistry.EndCompleted)
+	p.FinalizeCallLifetime(callID, current.Lifetime)
 }
 
 // FinalizeCallCleanup removes a call after an external lifecycle coordinator
@@ -683,3 +702,54 @@ func (p *Processor) updateCallState(callID, state string, metadata *CallMetadata
 // Ensure Processor implements VoIPProcessor.
 var _ VoIPProcessor = (*Processor)(nil)
 var _ callregistry.Registry = (*Processor)(nil)
+
+// ProcessPacketInfo preserves capture provenance for local-only admission and
+// observation domains. Process remains available for callers without provenance.
+func (p *Processor) ProcessPacketInfo(info capture.PacketInfo) *ProcessResult {
+	packet := info.Packet
+	if packet == nil {
+		return nil
+	}
+	envelope := captureadapter.FromPacketInfo(info, pipeline.SourceLiveCapture)
+	if layer := packet.Layer(layers.LayerTypeUDP); layer != nil {
+		udp := layer.(*layers.UDP)
+		if result := p.detectRTP(packet, udp); result != nil {
+			return result
+		}
+		return p.detectSIPWithEnvelope(packet, udp, udp.Payload, true, envelope)
+	}
+	if layer := packet.Layer(layers.LayerTypeTCP); layer != nil {
+		return p.detectSIPWithEnvelope(packet, nil, layer.(*layers.TCP).Payload, true, envelope)
+	}
+	return nil
+}
+
+// CallRegistry exposes the instance-owned authoritative association registry to
+// local composition. Remote processor analysis must never install local admission.
+func (p *Processor) CallRegistry() *callregistry.Core { return p.registry }
+
+// SetMetadataObserver must be wired before this instance starts processing packets.
+func (p *Processor) SetMetadataObserver(observer sipflow.MetadataObserver) error {
+	return p.sipFlow.SetMetadataObserver(observer)
+}
+
+// FinalizeCallLifetime retires only the immutable local lifetime captured by a
+// domain completion timer. A delayed callback cannot remove reused Call-ID state.
+func (p *Processor) FinalizeCallLifetime(callID string, lifetime callregistry.Lifetime) {
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	p.mu.Lock()
+	call, exists := p.registry.Call(callID)
+	if !exists || call.Lifetime != lifetime {
+		p.mu.Unlock()
+		return
+	}
+	reason := p.pendingCompletion[callID]
+	if reason == "" {
+		reason = callregistry.EndCompleted
+	}
+	delete(p.calls, callID)
+	delete(p.pendingCompletion, callID)
+	p.mu.Unlock()
+	p.registry.Remove(callID, reason)
+}

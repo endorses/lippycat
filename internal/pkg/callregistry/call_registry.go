@@ -88,8 +88,11 @@ const (
 // MediaResolution is an attribution result, not a candidate list. CallID is
 // populated only when Status is MediaResolved.
 type MediaResolution struct {
-	Status MediaResolutionStatus
-	CallID string
+	// Lifetime is captured atomically with ownership; callers must not look up
+	// a potentially reused Call-ID later to inherit selection.
+	Lifetime Lifetime
+	Status   MediaResolutionStatus
+	CallID   string
 }
 
 // Config bounds the state owned by a Core. Limits are hard limits; an
@@ -483,7 +486,7 @@ func (c *Core) ResolveMediaEndpoints(sourceEndpoint, destinationEndpoint string)
 	case 0:
 		return MediaResolution{Status: MediaUnresolved}
 	case 1:
-		return MediaResolution{Status: MediaResolved, CallID: resolvedID}
+		return MediaResolution{Status: MediaResolved, CallID: resolvedID, Lifetime: c.calls[resolvedID].Lifetime}
 	default:
 		return MediaResolution{Status: MediaAmbiguous}
 	}

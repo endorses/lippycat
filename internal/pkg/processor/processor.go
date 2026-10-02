@@ -34,6 +34,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/admissiontelemetry"
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/dns"
@@ -1027,7 +1028,7 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		Status:               management.HunterStatus_STATUS_HEALTHY,
 		ConnectedDurationSec: durationSec,
 		LastHeartbeatNs:      time.Now().UnixNano(),
-		Stats: &management.HunterStats{
+		Stats: &management.HunterStats{RtpEbpf: admissiontelemetry.ToProtoPointer(stats.MediaAdmission),
 			PacketsCaptured: stats.PacketsCaptured,
 			// Local capture has no forwarding hop, so matched == forwarded.
 			PacketsMatched:                stats.PacketsForwarded,

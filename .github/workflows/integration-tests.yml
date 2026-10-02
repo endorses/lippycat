@@ -356,6 +356,21 @@ jobs:
       - name: Check non-CUDA build matrix
         run: make build-matrix
 
+  ebpf-admission:
+    name: VoIP eBPF Kernel and Command Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Run isolated privileged tests
+        run: make test-ebpf
+
   test-results:
     name: Test Results Summary
     runs-on: ubuntu-latest
@@ -368,6 +383,7 @@ jobs:
         lint,
         build-test,
         build-matrix,
+        ebpf-admission,
         manual-build,
       ]
     if: always()
@@ -382,6 +398,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Job Status" >> $GITHUB_STEP_SUMMARY
           echo "- Unit Tests: ${{ needs.unit-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- VoIP eBPF Integration: ${{ needs.ebpf-admission.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Integration Tests: ${{ needs.integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Docker Integration Tests: ${{ needs.docker-integration-tests.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Security Scan: ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY

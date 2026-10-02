@@ -7,6 +7,7 @@ import (
 
 // StatusJSON represents processor status in JSON-friendly format
 type StatusJSON struct {
+	RTPEBPF           *management.MediaAdmissionStatus  `json:"rtp_ebpf,omitempty"`
 	Storage           *management.ProcessorStorageStats `json:"storage,omitempty"`
 	ProcessorID       string                            `json:"processor_id"`
 	Status            string                            `json:"status"`
@@ -39,36 +40,37 @@ type HunterJSON struct {
 
 // HunterStatsJSON represents hunter statistics in JSON-friendly format
 type HunterStatsJSON struct {
-	Detector                      *management.DetectorTelemetry `json:"detector,omitempty"`
-	PacketsCaptured               uint64                        `json:"packets_captured"`
-	PacketsMatched                uint64                        `json:"packets_matched"`
-	PacketsForwarded              uint64                        `json:"packets_forwarded"`
-	PacketsDropped                uint64                        `json:"packets_dropped"`
-	CaptureBufferRegularDrops     uint64                        `json:"capture_buffer_regular_drops"`
-	CaptureBufferSIPDrops         uint64                        `json:"capture_buffer_sip_drops"`
-	CaptureBufferSIPDemotions     uint64                        `json:"capture_buffer_sip_demotions"`
-	BatchChannelDrops             uint64                        `json:"batch_channel_drops"`
-	CaptureBufferRegularLen       uint64                        `json:"capture_buffer_regular_len"`
-	CaptureBufferRegularCapacity  uint64                        `json:"capture_buffer_regular_capacity"`
-	CaptureBufferSIPLen           uint64                        `json:"capture_buffer_sip_len"`
-	CaptureBufferSIPCapacity      uint64                        `json:"capture_buffer_sip_capacity"`
-	CaptureBufferOutputLen        uint64                        `json:"capture_buffer_output_len"`
-	CaptureBufferOutputCapacity   uint64                        `json:"capture_buffer_output_capacity"`
-	BufferBytes                   uint64                        `json:"buffer_bytes"`
-	ActiveFilters                 uint32                        `json:"active_filters"`
-	CPUPercent                    float64                       `json:"cpu_percent"`
-	MemoryRSSBytes                uint64                        `json:"memory_rss_bytes"`
-	MemoryLimitBytes              uint64                        `json:"memory_limit_bytes,omitempty"`
-	RTPOwnershipUnresolved        uint64                        `json:"rtp_ownership_unresolved"`
-	RTPOwnershipAmbiguous         uint64                        `json:"rtp_ownership_ambiguous"`
-	IdentityInheritanceSuppressed uint64                        `json:"identity_inheritance_suppressed"`
-	TCPEstablishedIdleRetentions  uint64                        `json:"tcp_established_idle_retentions"`
-	TCPPreRearmDiscardedChunks    uint64                        `json:"tcp_pre_rearm_discarded_chunks"`
-	TCPRearmRejectedChunks        uint64                        `json:"tcp_rearm_rejected_chunks"`
-	TCPRearmKeepaliveChunks       uint64                        `json:"tcp_rearm_keepalive_chunks"`
-	TCPOrphanControls             uint64                        `json:"tcp_orphan_controls"`
-	TCPAcceptRejectedControls     uint64                        `json:"tcp_accept_rejected_controls"`
-	TCPReplacementDroppedBytes    uint64                        `json:"tcp_replacement_dropped_bytes"`
+	RTPEBPF                       *management.MediaAdmissionStatus `json:"rtp_ebpf,omitempty"`
+	Detector                      *management.DetectorTelemetry    `json:"detector,omitempty"`
+	PacketsCaptured               uint64                           `json:"packets_captured"`
+	PacketsMatched                uint64                           `json:"packets_matched"`
+	PacketsForwarded              uint64                           `json:"packets_forwarded"`
+	PacketsDropped                uint64                           `json:"packets_dropped"`
+	CaptureBufferRegularDrops     uint64                           `json:"capture_buffer_regular_drops"`
+	CaptureBufferSIPDrops         uint64                           `json:"capture_buffer_sip_drops"`
+	CaptureBufferSIPDemotions     uint64                           `json:"capture_buffer_sip_demotions"`
+	BatchChannelDrops             uint64                           `json:"batch_channel_drops"`
+	CaptureBufferRegularLen       uint64                           `json:"capture_buffer_regular_len"`
+	CaptureBufferRegularCapacity  uint64                           `json:"capture_buffer_regular_capacity"`
+	CaptureBufferSIPLen           uint64                           `json:"capture_buffer_sip_len"`
+	CaptureBufferSIPCapacity      uint64                           `json:"capture_buffer_sip_capacity"`
+	CaptureBufferOutputLen        uint64                           `json:"capture_buffer_output_len"`
+	CaptureBufferOutputCapacity   uint64                           `json:"capture_buffer_output_capacity"`
+	BufferBytes                   uint64                           `json:"buffer_bytes"`
+	ActiveFilters                 uint32                           `json:"active_filters"`
+	CPUPercent                    float64                          `json:"cpu_percent"`
+	MemoryRSSBytes                uint64                           `json:"memory_rss_bytes"`
+	MemoryLimitBytes              uint64                           `json:"memory_limit_bytes,omitempty"`
+	RTPOwnershipUnresolved        uint64                           `json:"rtp_ownership_unresolved"`
+	RTPOwnershipAmbiguous         uint64                           `json:"rtp_ownership_ambiguous"`
+	IdentityInheritanceSuppressed uint64                           `json:"identity_inheritance_suppressed"`
+	TCPEstablishedIdleRetentions  uint64                           `json:"tcp_established_idle_retentions"`
+	TCPPreRearmDiscardedChunks    uint64                           `json:"tcp_pre_rearm_discarded_chunks"`
+	TCPRearmRejectedChunks        uint64                           `json:"tcp_rearm_rejected_chunks"`
+	TCPRearmKeepaliveChunks       uint64                           `json:"tcp_rearm_keepalive_chunks"`
+	TCPOrphanControls             uint64                           `json:"tcp_orphan_controls"`
+	TCPAcceptRejectedControls     uint64                           `json:"tcp_accept_rejected_controls"`
+	TCPReplacementDroppedBytes    uint64                           `json:"tcp_replacement_dropped_bytes"`
 }
 
 // CapabilitiesJSON represents hunter capabilities in JSON-friendly format
@@ -114,6 +116,7 @@ func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte,
 		status.LIStartupSync = resp.ProcessorStats.LiStartupSync
 		status.LIReconciliation = resp.ProcessorStats.LiReconciliation
 		status.Storage = resp.ProcessorStats.Storage
+		status.RTPEBPF = resp.ProcessorStats.RtpEbpf
 	}
 
 	return output.MarshalJSONPretty(status, pretty)
@@ -157,6 +160,7 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 
 	if h.Stats != nil {
 		hunter.Stats = &HunterStatsJSON{
+			RTPEBPF:                       h.Stats.RtpEbpf,
 			Detector:                      h.Stats.Detector,
 			PacketsCaptured:               h.Stats.PacketsCaptured,
 			PacketsMatched:                h.Stats.PacketsMatched,

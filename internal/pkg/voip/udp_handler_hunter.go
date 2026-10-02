@@ -5,6 +5,7 @@ package voip
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net"
 	"sort"
 	"strconv"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
+	mediaadaptor "github.com/endorses/lippycat/internal/pkg/voip/admission"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -27,6 +29,7 @@ import (
 
 // UDPPacketHandler processes UDP SIP/RTP packets for hunter mode with buffering
 type UDPPacketHandler struct {
+	admission              *mediaadaptor.Bridge
 	tracker                *CallTracker
 	forwarder              PacketForwarder
 	bufferMgr              *BufferManager
@@ -91,6 +94,9 @@ func (h *UDPPacketHandler) warnAmbiguousRTP(packet gopacket.Packet) {
 
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
 func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
+	if tracker != nil && bufferMgr != nil {
+		bufferMgr.BindRegistry(tracker.AdmissionRegistry())
+	}
 	h := &UDPPacketHandler{
 		tracker:         tracker,
 		forwarder:       forwarder,
@@ -289,7 +295,17 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	}
 	alreadyMatched := h.bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName, pkt.LinkType)
 
-	hasSDP := BytesContains(result.SDP, []byte("m=audio"))
+	hasSDP := len(result.SDP) > 0
+	if h.admission != nil && call != nil {
+		// The orchestrator already made the authoritative selection. Publish
+		// retained/current SDP before any output buffering or forwarding.
+		if err := h.admission.Selected(result); err != nil {
+			logger.Debug("Hunter UDP admission publication incomplete", "error", err)
+		}
+		if snapshot, ok := h.tracker.registry.EndpointSnapshot(callID); ok && len(snapshot.Endpoints) > 0 {
+			hasSDP = true
+		}
+	}
 	method := metadata.Method
 
 	if alreadyMatched {
@@ -411,8 +427,16 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 		}
 		return false
 	}
+	// Exact endpoint ownership alone does not make STUN/DTLS media. Include
+	// short RTCP receiver reports as well as packets with the basic RTP header.
+	payload := layer.Payload
+	mediaHeader := len(payload) >= 12 || (len(payload) >= 8 && payload[1] >= 192 && payload[1] <= 223)
+	if h.admission != nil && mediaHeader && payload[0]>>6 == 2 {
+		h.admission.RecordAttributedMedia(resolution.CallID, resolution.Lifetime)
+	}
 	bufCallID := resolution.CallID
-	inheritedFilterIDs := h.bufferMgr.MatchedFilterIDs(bufCallID)
+	sourceEndpoint, destinationEndpoint := net.JoinHostPort(srcIP, srcPort), net.JoinHostPort(dstIP, dstPort)
+	inheritedFilterIDs := h.bufferMgr.MatchedFilterIDsForResolution(resolution, sourceEndpoint, destinationEndpoint)
 	if directMatched {
 		// Direct evidence selects this packet independently. Do not also place it
 		// in the call buffer, where a later identity decision could forward it a
@@ -422,12 +446,7 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 	}
 
 	// Buffer only after the same resolved call owns one of these exact endpoints.
-	shouldForward, accepted := h.bufferMgr.AddRTPPacketForEndpoints(
-		bufCallID,
-		srcIP+":"+srcPort,
-		dstIP+":"+dstPort,
-		packet,
-	)
+	shouldForward, accepted, inheritedFilterIDs := h.bufferMgr.AddResolvedRTPPacket(resolution, sourceEndpoint, destinationEndpoint, packet)
 	if !accepted {
 		return false
 	}

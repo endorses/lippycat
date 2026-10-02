@@ -54,7 +54,9 @@ func runHunterRuntime(config hunter.Config, protocol protocolcatalog.Spec, hooks
 		start = func(ctx context.Context, h *hunter.Hunter) error { return h.Start(ctx) }
 	}
 	errChan := make(chan error, constants.ErrorChannelBuffer)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		if err := start(ctx, h); err != nil {
 			errChan <- err
 		}
@@ -62,8 +64,15 @@ func runHunterRuntime(config hunter.Config, protocol protocolcatalog.Spec, hooks
 
 	select {
 	case err := <-errChan:
+		if config.MediaAdmission != nil {
+			cancel()
+			<-finished
+		}
 		return fmt.Errorf("hunter error: %w", err)
 	case <-ctx.Done():
+		if config.MediaAdmission != nil {
+			<-finished
+		}
 		logger.Info("Shutdown signal received, stopping hunter...", "protocol", protocol.Name)
 		if hooks.shutdownDelay > 0 {
 			time.Sleep(hooks.shutdownDelay)

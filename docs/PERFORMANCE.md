@@ -25,17 +25,20 @@ TCP performance profiles provide pre-configured settings for different use cases
 **Use Case:** Embedded systems, low-traffic environments, resource-constrained deployments
 
 **Characteristics:**
+
 - Memory: 25MB
 - Max Buffers: 500
 - Throughput: Low
 - Latency: Medium
 
 **Configuration:**
+
 ```bash
 lc sniff voip --tcp-performance-mode minimal
 ```
 
 **Detailed Settings:**
+
 ```yaml
 voip:
   tcp_performance_mode: "minimal"
@@ -56,6 +59,7 @@ voip:
 ```
 
 **When to Use:**
+
 - Raspberry Pi or embedded devices
 - Test/development environments
 - Low call volume (<10 concurrent calls)
@@ -66,12 +70,14 @@ voip:
 **Use Case:** General-purpose deployments, production environments with moderate traffic
 
 **Characteristics:**
+
 - Memory: 100MB
 - Max Buffers: 5,000
 - Throughput: Medium
 - Latency: Medium
 
 **Configuration:**
+
 ```bash
 lc sniff voip --tcp-performance-mode balanced
 # Or omit flag (balanced is default)
@@ -79,6 +85,7 @@ lc sniff voip
 ```
 
 **Detailed Settings:**
+
 ```yaml
 voip:
   tcp_performance_mode: "balanced"
@@ -100,6 +107,7 @@ voip:
 ```
 
 **When to Use:**
+
 - Standard production deployments
 - 10-100 concurrent calls
 - Memory 2-8GB available
@@ -110,17 +118,20 @@ voip:
 **Use Case:** High-traffic environments, data center deployments, maximum throughput
 
 **Characteristics:**
+
 - Memory: 500MB
 - Max Buffers: 20,000
 - Throughput: High
 - Latency: Higher (due to batching)
 
 **Configuration:**
+
 ```bash
 lc sniff voip --tcp-performance-mode high_performance
 ```
 
 **Detailed Settings:**
+
 ```yaml
 voip:
   tcp_performance_mode: "high_performance"
@@ -143,6 +154,7 @@ voip:
 ```
 
 **When to Use:**
+
 - High call volume (100-1000+ concurrent calls)
 - Memory >8GB available
 - Data center environments
@@ -153,17 +165,20 @@ voip:
 **Use Case:** Real-time analysis, immediate processing requirements, minimal delay
 
 **Characteristics:**
+
 - Memory: 200MB
 - Max Buffers: 2,000
 - Throughput: Medium
 - Latency: Low
 
 **Configuration:**
+
 ```bash
 lc sniff voip --tcp-performance-mode low_latency
 ```
 
 **Detailed Settings:**
+
 ```yaml
 voip:
   tcp_performance_mode: "low_latency"
@@ -186,6 +201,7 @@ voip:
 ```
 
 **When to Use:**
+
 - Real-time call analysis
 - Fraud detection systems
 - Call quality monitoring
@@ -193,16 +209,16 @@ voip:
 
 ### Profile Comparison
 
-| Metric | Minimal | Balanced | High Perf | Low Latency |
-|--------|---------|----------|-----------|-------------|
-| Memory | 25MB | 100MB | 500MB | 200MB |
-| Max Buffers | 500 | 5,000 | 20,000 | 2,000 |
-| Batch Size | 8 | 32 | 64 | 1 |
-| IO Threads | 1 | NumCPU | NumCPU*2 | NumCPU |
-| Buffer Strategy | Fixed | Adaptive | Ring | Fixed |
-| Backpressure | Yes | Yes | No | No |
-| Auto-Tuning | No | Yes | Yes | No |
-| Best For | Embedded | Production | High Traffic | Real-Time |
+| Metric          | Minimal  | Balanced   | High Perf    | Low Latency |
+| --------------- | -------- | ---------- | ------------ | ----------- |
+| Memory          | 25MB     | 100MB      | 500MB        | 200MB       |
+| Max Buffers     | 500      | 5,000      | 20,000       | 2,000       |
+| Batch Size      | 8        | 32         | 64           | 1           |
+| IO Threads      | 1        | NumCPU     | NumCPU*2     | NumCPU      |
+| Buffer Strategy | Fixed    | Adaptive   | Ring         | Fixed       |
+| Backpressure    | Yes      | Yes        | No           | No          |
+| Auto-Tuning     | No       | Yes        | Yes          | No          |
+| Best For        | Embedded | Production | High Traffic | Real-Time   |
 
 ### Overriding Profile Settings
 
@@ -248,16 +264,19 @@ Automatically selects the best available backend.
 #### CUDA Backend
 
 **Requirements:**
+
 - NVIDIA GPU (Compute Capability 6.0+)
 - CUDA Toolkit 11.0+
 - nvidia-driver 470+
 
 **Configuration:**
+
 ```bash
 lc sniff voip --gpu-backend cuda --gpu-batch-size 2048
 ```
 
 **Best For:**
+
 - NVIDIA GPU available
 - Very high packet rates (>100K pps)
 - Maximum throughput needed
@@ -267,11 +286,13 @@ lc sniff voip --gpu-backend cuda --gpu-batch-size 2048
 **Requirements:** None (always available)
 
 **Configuration:**
+
 ```bash
 lc sniff voip --gpu-backend cpu-simd
 ```
 
 **Best For:**
+
 - No GPU available
 - Moderate performance improvement needed
 - Default fallback
@@ -279,6 +300,7 @@ lc sniff voip --gpu-backend cpu-simd
 ### GPU Tuning Parameters
 
 **Batch Size:**
+
 ```bash
 # Small batches (low latency)
 --gpu-batch-size 256
@@ -291,6 +313,7 @@ lc sniff voip --gpu-backend cpu-simd
 ```
 
 **Memory Limits:**
+
 ```bash
 # Auto-detect available GPU memory
 --gpu-max-memory 0
@@ -309,18 +332,20 @@ lippycat uses configurable pattern matching algorithms for filtering SIP usernam
 
 **Flag:** `--pattern-algorithm`
 
-| Algorithm | Complexity | Memory | Best For |
-|-----------|------------|--------|----------|
-| `auto` | Adaptive | Variable | General use (default) |
-| `linear` | O(n×m) | Low | <100 patterns |
-| `aho-corasick` | O(n+m+z) | Higher | ≥100 patterns |
+| Algorithm      | Complexity | Memory   | Best For              |
+| -------------- | ---------- | -------- | --------------------- |
+| `auto`         | Adaptive   | Variable | General use (default) |
+| `linear`       | O(n×m)     | Low      | <100 patterns         |
+| `aho-corasick` | O(n+m+z)   | Higher   | ≥100 patterns         |
 
 Where:
+
 - n = input length (username)
 - m = total pattern length
 - z = number of matches
 
 **Auto Mode Behavior:**
+
 - Uses Aho-Corasick for ≥100 patterns
 - Falls back to linear scan for fewer patterns
 - Provides optimal balance of speed and memory
@@ -342,6 +367,7 @@ lc sniff voip -i eth0 --pattern-algorithm aho-corasick --pattern-buffer-mb 128
 ```
 
 **Config File:**
+
 ```yaml
 voip:
   pattern_algorithm: "auto"
@@ -353,14 +379,15 @@ voip:
 Performance comparison at various pattern counts:
 
 | Pattern Count | Linear Scan | Aho-Corasick | Speedup |
-|---------------|-------------|--------------|---------|
-| 10 | 1.2 µs | 0.8 µs | 1.5x |
-| 100 | 12 µs | 0.9 µs | 13x |
-| 1,000 | 120 µs | 1.0 µs | 120x |
-| 10,000 | 1.2 ms | 1.1 µs | ~1,100x |
-| 100,000 | 12 ms | 1.3 µs | ~9,200x |
+| ------------- | ----------- | ------------ | ------- |
+| 10            | 1.2 µs      | 0.8 µs       | 1.5x    |
+| 100           | 12 µs       | 0.9 µs       | 13x     |
+| 1,000         | 120 µs      | 1.0 µs       | 120x    |
+| 10,000        | 1.2 ms      | 1.1 µs       | ~1,100x |
+| 100,000       | 12 ms       | 1.3 µs       | ~9,200x |
 
 **Key Observations:**
+
 - Aho-Corasick has ~constant match time regardless of pattern count
 - Linear scan time scales linearly with pattern count
 - At 10K patterns, AC is ~265x faster than linear scan
@@ -379,6 +406,7 @@ lc hunt voip --processor processor:55555 \
 ```
 
 **Memory Usage:**
+
 - ~1 byte per pattern character for automaton
 - 100K patterns (avg 20 chars) ≈ 2MB automaton
 - Dense state tables add ~1MB per 1K states
@@ -395,10 +423,10 @@ The application-filter microbenchmark was measured before and after the fix on
 the same generic CPU-only environment (Linux/amd64, Go 1.26.3, benchmark
 concurrency 32, 13th-generation Intel Core i9 class CPU):
 
-| Revision | Identity filters | ns/op | B/op | allocs/op |
-|----------|-----------------:|------:|-----:|----------:|
-| Before | 400 | 4,449–4,879 | 2,259 | 52 |
-| After | 500 | 1,536–1,616 | 1,475 | 18 |
+| Revision | Identity filters |       ns/op |  B/op | allocs/op |
+| -------- | ---------------: | ----------: | ----: | --------: |
+| Before   |              400 | 4,449–4,879 | 2,259 |        52 |
+| After    |              500 | 1,536–1,616 | 1,475 |        18 |
 
 The post-fix run deliberately uses the Phase 4 minimum of 500 identity filters,
 so this is a conservative comparison rather than an identical-input
@@ -410,9 +438,9 @@ The LocalSource benchmark uses a 100-packet generated cycle: three SDP INVITEs,
 selected inherited-only traffic, unselected traffic, and direct IP-filter-only
 traffic. Five repeated one-second runs produced:
 
-| ns/op | packets/s | B/op | allocs/op | LocalSource full calls/op | packet-level calls/op | processor matcher calls/op | processor identity work/op |
-|------:|----------:|-----:|----------:|--------------------------:|----------------------:|---------------------------:|---------------------------:|
-| 3,546–3,927 | 254,678–281,971 | 1,885 | 28 | 0 | 0.92 | 0.08 | 0.08 |
+|       ns/op |       packets/s |  B/op | allocs/op | LocalSource full calls/op | packet-level calls/op | processor matcher calls/op | processor identity work/op |
+| ----------: | --------------: | ----: | --------: | ------------------------: | --------------------: | -------------------------: | -------------------------: |
+| 3,546–3,927 | 254,678–281,971 | 1,885 |        28 |                         0 |                  0.92 |                       0.08 |                       0.08 |
 
 The benchmark exercises packet classification, VoIP call association, direct
 and inherited selection, local packet conversion and normalization, batching,
@@ -458,6 +486,7 @@ go test -tags all ./internal/pkg/processor/source -run '^$' \
 ### Interface Configuration
 
 **Promiscuous Mode:**
+
 ```bash
 # Enable for shared network segments
 lc hunt --processor processor:55555 --promisc
@@ -467,6 +496,7 @@ lc hunt --processor processor:55555
 ```
 
 **Buffer Sizes:**
+
 ```bash
 # Default (10,000 packets)
 --buffer-size 10000
@@ -558,6 +588,7 @@ lc process --max-subscribers 0
 ```
 
 **Resource Usage:**
+
 - Per hunter: ~5-10MB RAM
 - Per subscriber: ~2-5MB RAM
 
@@ -570,6 +601,7 @@ Edge (50 hunters) → Regional (10 edge procs) → Central (5 regional procs)
 ```
 
 **Benefits:**
+
 - Reduced central load
 - Geographic distribution
 - Gradual filtering and aggregation
@@ -581,6 +613,7 @@ See [docs/DISTRIBUTED_MODE.md](DISTRIBUTED_MODE.md#hierarchical-mode) for comple
 ### Memory Profiling
 
 **Enable pprof on loopback:**
+
 ```bash
 # Start a node with the debug listener enabled
 lc tap voip -i eth0 --debug-listen 127.0.0.1:6060
@@ -687,14 +720,14 @@ top -p $(pgrep -f 'lc (sniff|hunt|process|tap)')
 Detector telemetry is nested under each `HunterStats.detector` heartbeat; tap
 reports the same fields for its local capture source:
 
-| Fields | Semantics |
-|---|---|
-| `flow_entries`, `cache_entries` | Current gauges |
-| `flow_evictions`, `cache_evictions` | Cumulative entries removed to make capacity headroom |
-| `flow_expired_removals`, `cache_expired_removals` | Cumulative TTL removals |
-| `flow_pressure_episodes`, `cache_pressure_episodes` | Cumulative eviction-batch events |
-| `flow_last_eviction_duration_ns`, `cache_last_eviction_duration_ns` | Most recent batch duration snapshots |
-| `flow_last_eviction_batch_size`, `cache_last_eviction_batch_size` | Most recent batch-size snapshots |
+| Fields                                                              | Semantics                                            |
+| ------------------------------------------------------------------- | ---------------------------------------------------- |
+| `flow_entries`, `cache_entries`                                     | Current gauges                                       |
+| `flow_evictions`, `cache_evictions`                                 | Cumulative entries removed to make capacity headroom |
+| `flow_expired_removals`, `cache_expired_removals`                   | Cumulative TTL removals                              |
+| `flow_pressure_episodes`, `cache_pressure_episodes`                 | Cumulative eviction-batch events                     |
+| `flow_last_eviction_duration_ns`, `cache_last_eviction_duration_ns` | Most recent batch duration snapshots                 |
+| `flow_last_eviction_batch_size`, `cache_last_eviction_batch_size`   | Most recent batch-size snapshots                     |
 
 Counters are monotonic for the lifetime of that detector and reset when a new
 detector/capture process starts. Heartbeats are snapshots: never sum cumulative
@@ -741,6 +774,7 @@ lc show topology -P processor:55555 --tls-ca ca.crt
 ### Integration with Monitoring Systems
 
 **Prometheus/Grafana:**
+
 ```bash
 # Export processor status periodically
 */5 * * * * lc show status -P localhost:55555 --insecure > /var/metrics/lippycat-status.json
@@ -772,6 +806,7 @@ lc sniff voip \
 ```
 
 **Considerations:**
+
 - CPU SIMD works well in VMs
 - Avoid GPU passthrough complexity
 - Adjust buffers based on allocated RAM
@@ -807,6 +842,7 @@ lc sniff voip \
 ```
 
 **Considerations:**
+
 - Match profile to memory limits
 - Use CPU SIMD (no GPU in containers)
 - Monitor with debug commands
@@ -816,10 +852,12 @@ lc sniff voip \
 ### High CPU Usage
 
 **Symptoms:**
+
 - CPU >80% consistently
 - System becoming unresponsive
 
 **Solutions:**
+
 ```bash
 # Reduce batch processing
 --tcp-batch-size 16
@@ -834,10 +872,12 @@ lc sniff voip \
 ### High Memory Usage
 
 **Symptoms:**
+
 - Memory continuously increasing
 - OOM killer triggered
 
 **Solutions:**
+
 ```bash
 # Use minimal profile
 --tcp-performance-mode minimal
@@ -852,10 +892,12 @@ lc sniff voip \
 ### Packet Drops
 
 **Symptoms:**
+
 - Buffer drop rate >5%
 - Missing calls in capture
 
 **Solutions:**
+
 ```bash
 # Increase buffers
 --max-tcp-buffers 10000
@@ -871,10 +913,12 @@ lc sniff voip \
 ### High Latency
 
 **Symptoms:**
+
 - Slow call processing
 - Delayed SIP message extraction
 
 **Solutions:**
+
 ```bash
 # Use low latency profile
 --tcp-performance-mode low_latency
@@ -1008,3 +1052,19 @@ datagram, respectively. The timer itself adds overhead and was removed after
 measurement. This bounded synthetic workload did not justify sharding the
 shared defragmenter; remeasure under production-like packet sizes before
 changing that design.
+
+## Opt-in selective VoIP media capture
+
+For `hunt voip` and `tap voip`, `--rtp-ebpf` moves selected endpoint candidate
+admission before libpcap packet delivery. It targets unnecessary delivery and
+decoding of unrelated RTP/RTCP. It keeps libpcap/cgo; no per-call capture restart
+or classic-filter replacement is involved. See
+[VoIP eBPF admission](VOIP_EBPF_ADMISSION.md) for configuration and limitations.
+
+Measure broad capture, shadow and enforcement with equivalent traffic and filter
+policy. Record match fraction, media legs/lifetimes, compatibility passes, kernel
+and userspace drops, queue pressure, map occupancy/errors, allocation and CPU
+costs, and SDP-to-publication timing. Separate expected pre-match loss and the
+publication interval from unexpected post-publication rejection. Shadow changes
+load and cannot stand in for enforcement measurements. The 100 calls/s example is
+workload context; there is no new performance acceptance gate.

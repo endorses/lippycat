@@ -205,6 +205,23 @@ func HandleModalInput(modal InteractiveModal, msg tea.Msg) (tea.Cmd, bool) {
 			if hit.Disabled {
 				return nil, true
 			}
+			if _, button := modalAction(opts, hit.ID); button {
+				// Mouse activation must not steal editing/navigation focus or
+				// leave a momentary action looking like a selected toggle.
+				var focusCmd tea.Cmd
+				if _, focusedButton := modalAction(opts, state.Focus); focusedButton {
+					state.Focus = ""
+					for _, target := range opts.Targets {
+						if target.Focusable && !target.Disabled {
+							state.Focus = target.ID
+							break
+						}
+					}
+					focusCmd = modal.HandleModalFocus(state.Focus)
+					EnsureModalTargetVisible(modal.ModalOptions(), state.Focus)
+				}
+				return tea.Batch(focusCmd, modal.HandleModalAction(hit.ID)), true
+			}
 			if hit.Focusable {
 				state.Focus = hit.ID
 				focusCmd := modal.HandleModalFocus(hit.ID)

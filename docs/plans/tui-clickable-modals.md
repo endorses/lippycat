@@ -27,7 +27,10 @@ results, validation, asynchronous operations, and cancellation cleanup intact.
 Buttons show a clear action label and, when useful, its shortcut. Render them
 as filled rectangular surfaces with two cells of horizontal padding, separated
 by an unfilled gap. Use neutral, primary, and destructive background colors.
-Focus adds a leading triangle and underline without changing button dimensions;
+Keyboard focus adds a leading triangle and underline without changing button
+dimensions. Mouse activation preserves content focus; clicking an action while a
+button has keyboard focus returns focus to the first available content control.
+Buttons do not retain a selected appearance after a mouse click;
 disabled buttons use a muted surface and struck-through text. Action labels
 continue to name destructive operations explicitly. Hover feedback is optional
 when mouse motion is available; it must not be required to discover or activate controls.

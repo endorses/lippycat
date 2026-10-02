@@ -262,3 +262,24 @@ func TestFileDialogEnterHintsFollowEditingMode(t *testing.T) {
 		require.Equal(t, "Enter", fd.actions()[0].Shortcut)
 	}
 }
+
+func TestFileDialogMouseButtonsDoNotRetainActionFocus(t *testing.T) {
+	fd := fileDialogFixture(t, true)
+	original := fd.currentDir
+	fd.enterDirectory("folder")
+	clickFileControl(t, &fd, "up")
+	require.Equal(t, original, fd.currentDir)
+	require.Equal(t, "files", fd.modalState.Focus)
+	fd.Update(tea.KeyMsg{Type: tea.KeyDown})
+	require.Equal(t, 1, fd.cursor, "Up must leave keyboard file navigation working")
+
+	clickFileControl(t, &fd, "filename")
+	before := fd.GetFilename()
+	details := fd.showDetails
+	clickFileControl(t, &fd, "details")
+	require.Equal(t, !details, fd.showDetails)
+	require.Equal(t, "filename", fd.modalState.Focus)
+	require.True(t, fd.filename.Focused())
+	fd.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	require.Equal(t, before+"x", fd.GetFilename(), "Details must preserve filename editing")
+}

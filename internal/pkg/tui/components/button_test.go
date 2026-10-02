@@ -170,3 +170,26 @@ func TestModalWrappedWideGlyphTarget(t *testing.T) {
 	}
 	require.True(t, found)
 }
+
+func TestButtonsMouseActivationPreservesContentFocus(t *testing.T) {
+	for _, initial := range []string{"", "field", "save", "cancel"} {
+		t.Run("focus="+initial, func(t *testing.T) {
+			m := newButtonTestModal()
+			m.state.Focus = initial
+			HandleModalInput(m, buttonPress(buttonHit(t, m, "save").Bounds.Min))
+			require.Equal(t, []string{"save"}, m.actions)
+			if initial == "" {
+				require.Empty(t, m.state.Focus)
+			} else {
+				require.Equal(t, "field", m.state.Focus)
+			}
+			_, handled := HandleModalInput(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+			require.False(t, handled, "typing must still reach the content")
+			HandleModalInput(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+			require.Equal(t, "cancel", m.state.Focus, "keyboard navigation still focuses buttons")
+			HandleModalInput(m, tea.KeyMsg{Type: tea.KeyEnter})
+			require.Equal(t, []string{"save", "cancel"}, m.actions)
+			require.Equal(t, "cancel", m.state.Focus, "keyboard activation retains focus")
+		})
+	}
+}

@@ -1411,6 +1411,14 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 	if mod != nil {
 		if held, err := m.registry.GetTaskDetails(xid); err == nil && !IsRADIUSTask(held) {
+			// Resolving a narrowed conflict requires an explicitly supplied task
+			// field. Internal definition metadata does not express ADMF intent.
+			if held.Definition.Conflict && (held.Status == TaskStatusActive || held.Status == TaskStatusPending) &&
+				mod.Targets == nil && mod.DestinationIDs == nil && mod.DeliveryType == nil &&
+				mod.EndTime == nil && mod.ImplicitDeactivationAllowed == nil &&
+				mod.RADIUSScope == nil && mod.RADIUSMACProfile == nil {
+				return fmt.Errorf("%w: resolving a narrowed conflict requires an explicit task field", ErrModifyNotAllowed)
+			}
 			copyMod := *mod
 			d := held.Definition
 			d.Source, d.Restored, d.Conflict = DefinitionPush, false, false

@@ -3,6 +3,7 @@
 package li
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -233,7 +234,10 @@ func TestNonemptyConflictRenewalRetainsEffectiveScope(t *testing.T) {
 			narrowed, err := m.GetTaskDetails(initial.XID)
 			require.NoError(t, err)
 			// Omitted window retains both the cutoff and the implicit expiry policy.
-			require.NoError(t, m.ModifyTaskX1(initial.XID, &x1.TaskModification{}))
+			require.ErrorIs(t, m.ModifyTaskX1(initial.XID, &x1.TaskModification{}), x1.ErrModifyNotAllowed)
+			// An explicit same-value field can resolve the conflict.
+			delivery := x1.DeliveryX2Only
+			require.NoError(t, m.ModifyTaskX1(initial.XID, &x1.TaskModification{DeliveryType: &delivery}))
 			current, err := m.GetTaskDetails(initial.XID)
 			require.NoError(t, err)
 			require.True(t, equivalentTaskDefinition(narrowed, current))
@@ -395,6 +399,236 @@ func TestElapsedTerminalTaskRetainsRecoveryContractAcrossRestart(t *testing.T) {
 			require.Equal(t, TaskStatusActive, fresh.Status)
 			require.Greater(t, fresh.ActivationGeneration, retained.ActivationGeneration)
 			require.False(t, m.ReplayTaskAuthorized(task.XID, retained.ActivationGeneration))
+		})
+	}
+}
+
+// The report worker is deliberately not started: drive its acknowledgment and
+// retry state directly so request rejection can be checked without timer races.
+func TestNarrowedConflictRejectsEmptyModificationWithoutSideEffects(t *testing.T) {
+	for _, mode := range []string{"memory", "persistent", "restored"} {
+		for _, status := range []TaskStatus{TaskStatusActive, TaskStatusPending} {
+			for _, acknowledged := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/acknowledged=%t", mode, status, acknowledged), func(t *testing.T) {
+					var m *Manager
+					var pusher *mockFilterPusher
+					var dids []uuid.UUID
+					var revoker *administrativeTestRevoker
+					if mode == "memory" {
+						m, pusher, dids = newIdempotencyManager(t, "")
+					} else {
+						m, pusher, revoker, dids = administrativeTransactionManager(t)
+					}
+					initial := idempotencyTask(uuid.New(), dids, time.Now().Add(-time.Hour).UTC())
+					require.NoError(t, m.ActivateTask(initial))
+					original := mustTask(t, m.registry, initial.XID)
+					in := conflictSnapshot(original)
+					in.Task.Targets = in.Task.Targets[:1]
+					in.Task.DestinationIDs = in.Task.DestinationIDs[:1]
+					in.Task.DeliveryType = DeliveryX2Only
+					if status == TaskStatusPending {
+						in.Task.StartTime = time.Now().Add(time.Hour).UTC()
+					}
+					if mode == "restored" {
+						m = restartAdministrativeTestManager(t, m, revoker)
+					}
+					require.NoError(t, m.applySnapshotDefinition(in))
+					before := mustTask(t, m.registry, initial.XID)
+					require.Equal(t, status, before.Status)
+					require.True(t, before.Definition.Conflict)
+					require.False(t, before.Definition.ConflictDisarmed)
+					filters := m.filters.GetFiltersForXID(initial.XID)
+					report := m.conflictReports[initial.XID]
+					require.NotNil(t, report)
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					report.cancel = cancel
+					report.acknowledged = acknowledged
+					report.failureLogged = true
+					report.deferRetry(time.Now())
+					report.deferRetry(report.retryAt)
+					retryAt, retryDelay := report.retryAt, report.retryDelay
+					reportTask := cloneInterceptTask(report.task)
+					callbacks := 0
+					m.SetTaskModifiedCallback(func(*InterceptTask) { callbacks++ })
+					m.SetTaskConflictCallback(func(*InterceptTask) error { callbacks++; return nil })
+					m.SetCommittedTaskCallback(func(*InterceptTask) { callbacks++ })
+					pusher.reset()
+					writes := 0
+					var persisted *StateSnapshot
+					if mode != "memory" {
+						persisted = readManagerStateTest(t, m)
+						revoker.requests, revoker.committed = nil, nil
+						store := m.stateStore.(*EncryptedStateStore)
+						write := store.write
+						store.write = func(name string, data []byte) (securestore.Outcome, error) {
+							writes++
+							return write(name, data)
+						}
+					}
+					for _, request := range []string{"direct", "metadata_only", "x1"} {
+						switch request {
+						case "direct":
+							require.ErrorIs(t, m.ModifyTask(initial.XID, &TaskModification{}), ErrModifyNotAllowed)
+						case "metadata_only":
+							require.ErrorIs(t, m.ModifyTask(initial.XID, &TaskModification{definition: &TaskDefinitionState{Source: DefinitionPush}}), ErrModifyNotAllowed)
+						case "x1":
+							require.ErrorIs(t, m.ModifyTaskX1(initial.XID, &x1.TaskModification{}), x1.ErrModifyNotAllowed)
+						}
+						require.Equal(t, before, mustTask(t, m.registry, initial.XID), request)
+						require.Equal(t, filters, m.filters.GetFiltersForXID(initial.XID), request)
+						for generation, expected := range map[uint64]bool{original.ActivationGeneration: false, before.ActivationGeneration: status == TaskStatusActive} {
+							admission, admitted := m.AcquireTaskAdmission(initial.XID, generation)
+							admission.Release()
+							require.Equal(t, expected, admitted, request)
+							require.False(t, m.ReplayTaskAuthorized(initial.XID, generation), request)
+						}
+						require.Same(t, report, m.conflictReports[initial.XID], request)
+						require.Equal(t, reportTask, report.task, request)
+						require.Equal(t, acknowledged, report.acknowledged, request)
+						require.Equal(t, retryAt, report.retryAt, request)
+						require.Equal(t, retryDelay, report.retryDelay, request)
+						require.True(t, report.failureLogged, request)
+						require.NoError(t, ctx.Err(), request)
+					}
+					require.ErrorIs(t, m.ModifyTask(initial.XID, nil), ErrInvalidTask)
+					require.Equal(t, before, mustTask(t, m.registry, initial.XID))
+					require.Zero(t, callbacks)
+					require.Zero(t, writes)
+					require.Empty(t, pusher.updates)
+					require.Empty(t, pusher.deletes)
+					if mode != "memory" {
+						require.Empty(t, revoker.requests)
+						require.Empty(t, revoker.committed)
+						require.Equal(t, persisted, readManagerStateTest(t, m))
+						m = restartAdministrativeTestManager(t, m, revoker)
+						retained := readManagerStateTest(t, m)
+						require.Len(t, retained.Tasks, 1)
+						require.True(t, retained.Tasks[0].Definition.Conflict)
+						require.True(t, equivalentTaskDefinition(before, retained.Tasks[0]))
+						require.Equal(t, before.ActivationGeneration, retained.Tasks[0].ActivationGeneration)
+						// Restoration alone does not arm historical tasks or restore
+						// process-local reporting; reconciliation starts a new episode.
+						require.Empty(t, m.conflictReports)
+						require.NoError(t, m.applySnapshotDefinition(in))
+						restored := mustTask(t, m.registry, initial.XID)
+						require.Equal(t, status, restored.Status)
+						require.True(t, restored.Definition.Conflict)
+						require.True(t, equivalentTaskDefinition(before, restored))
+						restoredReport := m.conflictReports[initial.XID]
+						require.NotNil(t, restoredReport)
+						require.NotSame(t, report, restoredReport)
+						require.False(t, restoredReport.acknowledged)
+						require.Zero(t, restoredReport.retryDelay)
+						require.True(t, restoredReport.retryAt.IsZero())
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestNarrowedConflictExplicitModificationPresence(t *testing.T) {
+	cases := []struct {
+		name    string
+		modify  func(*InterceptTask) *TaskModification
+		invalid bool
+	}{
+		{name: "same_targets", modify: func(task *InterceptTask) *TaskModification { return &TaskModification{Targets: &task.Targets} }},
+		{name: "same_destinations", modify: func(task *InterceptTask) *TaskModification {
+			return &TaskModification{DestinationIDs: &task.DestinationIDs}
+		}},
+		{name: "same_delivery", modify: func(task *InterceptTask) *TaskModification {
+			return &TaskModification{DeliveryType: &task.DeliveryType}
+		}},
+		{name: "same_end", modify: func(task *InterceptTask) *TaskModification { return &TaskModification{EndTime: &task.EndTime} }},
+		{name: "same_implicit", modify: func(task *InterceptTask) *TaskModification {
+			return &TaskModification{ImplicitDeactivationAllowed: &task.ImplicitDeactivationAllowed}
+		}},
+		{name: "renew_end", modify: func(task *InterceptTask) *TaskModification {
+			end := task.EndTime.Add(time.Hour)
+			return &TaskModification{EndTime: &end}
+		}},
+		{name: "false_implicit", modify: func(*InterceptTask) *TaskModification {
+			value := false
+			return &TaskModification{ImplicitDeactivationAllowed: &value}
+		}},
+		{name: "open_end", modify: func(*InterceptTask) *TaskModification { return &TaskModification{EndTime: new(time.Time)} }},
+		{name: "empty_targets", invalid: true, modify: func(*InterceptTask) *TaskModification { return &TaskModification{Targets: &[]TargetIdentity{}} }},
+		{name: "empty_destinations", invalid: true, modify: func(*InterceptTask) *TaskModification { return &TaskModification{DestinationIDs: &[]uuid.UUID{}} }},
+		{name: "invalid_delivery", invalid: true, modify: func(*InterceptTask) *TaskModification { return &TaskModification{DeliveryType: new(DeliveryType)} }},
+		{name: "end_before_start", invalid: true, modify: func(task *InterceptTask) *TaskModification {
+			end := task.StartTime.Add(-time.Second)
+			return &TaskModification{EndTime: &end}
+		}},
+	}
+	for _, persistent := range []bool{false, true} {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("persistent=%t/%s", persistent, tc.name), func(t *testing.T) {
+				var m *Manager
+				var dids []uuid.UUID
+				if persistent {
+					m, _, _, dids = administrativeTransactionManager(t)
+				} else {
+					m, _, dids = newIdempotencyManager(t, "")
+				}
+				initial := idempotencyTask(uuid.New(), dids, time.Now().Add(-time.Hour).UTC())
+				require.NoError(t, m.ActivateTask(initial))
+				in := conflictSnapshot(mustTask(t, m.registry, initial.XID))
+				in.Task.Targets = in.Task.Targets[:1]
+				in.Task.DestinationIDs = in.Task.DestinationIDs[:1]
+				in.Task.DeliveryType = DeliveryX2Only
+				require.NoError(t, m.applySnapshotDefinition(in))
+				before := mustTask(t, m.registry, initial.XID)
+				mod := tc.modify(cloneInterceptTask(before))
+				err := m.ModifyTask(initial.XID, mod)
+				after := mustTask(t, m.registry, initial.XID)
+				if tc.invalid {
+					require.ErrorIs(t, err, ErrInvalidTask)
+					require.Equal(t, before, after)
+					require.NotNil(t, m.conflictReports[initial.XID])
+					return
+				}
+				require.NoError(t, err)
+				require.False(t, after.Definition.Conflict)
+				require.Nil(t, m.conflictReports[initial.XID])
+				require.Greater(t, after.ActivationGeneration, before.ActivationGeneration)
+				require.Equal(t, before.Targets, after.Targets)
+				require.Equal(t, before.DestinationIDs, after.DestinationIDs)
+				require.Equal(t, before.DeliveryType, after.DeliveryType)
+				require.Equal(t, before.StartTime, after.StartTime)
+				if mod.EndTime != nil {
+					require.Equal(t, *mod.EndTime, after.EndTime)
+				} else {
+					require.Equal(t, before.EndTime, after.EndTime)
+				}
+				if mod.ImplicitDeactivationAllowed != nil {
+					require.Equal(t, *mod.ImplicitDeactivationAllowed, after.ImplicitDeactivationAllowed)
+				} else {
+					require.Equal(t, before.ImplicitDeactivationAllowed, after.ImplicitDeactivationAllowed)
+				}
+			})
+		}
+	}
+}
+
+func TestEmptyModificationPreservesNonconflictingAndRADIUSBehavior(t *testing.T) {
+	for _, radiusTask := range []bool{false, true} {
+		t.Run(fmt.Sprintf("radius=%t", radiusTask), func(t *testing.T) {
+			m, _, dids := newIdempotencyManager(t, "")
+			task := idempotencyTask(uuid.New(), dids, time.Now().Add(-time.Hour).UTC())
+			if radiusTask {
+				task = radiusTargetTask()
+				require.NoError(t, m.CreateDestination(&Destination{DID: task.DestinationIDs[0], Address: "mdf.example", Port: 5001, ProtocolType: "X2Only", X2Enabled: true}))
+			}
+			require.NoError(t, m.ActivateTask(task))
+			before := mustTask(t, m.registry, task.XID)
+			require.ErrorIs(t, m.ModifyTask(task.XID, nil), ErrInvalidTask)
+			require.Equal(t, before, mustTask(t, m.registry, task.XID))
+			require.NoError(t, m.ModifyTask(task.XID, &TaskModification{}))
+			require.Equal(t, before, mustTask(t, m.registry, task.XID))
+			require.NoError(t, m.ModifyTaskX1(task.XID, &x1.TaskModification{}))
+			require.Equal(t, before, mustTask(t, m.registry, task.XID))
 		})
 	}
 }

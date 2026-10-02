@@ -565,10 +565,16 @@ read-back or an equivalent authoritative check of the complete start, end, and
 implicit-deactivation fields. An activation reassertion or error code alone is
 not evidence that the effective definition is complete.
 
-Complete snapshots can repair pull-owned or legacy restored definitions.
+Complete snapshots can repair pull-owned or legacy restored definitions. For a
+pull-owned task without an existing conflict, a complete snapshot can replace
+the definition even when the scopes are disjoint. Once a conflict exists,
+subsequent snapshots are constrained by the intersection rules below regardless
+of pull ownership. See [recovery behavior](#recovering-a-narrowed-or-disarmed-task)
+for the distinction between first push promotion and push-owned recovery.
 Persisted X1 ownership survives restart. The bundled X1 schema has no per-task monotonic
 revision; response timestamps and local snapshot lock ordering do not establish
-freshness. A complete conflicting pull restricts enforcement to the common scope
+freshness. For push-owned tasks or tasks already in conflict, a complete
+conflicting pull restricts enforcement to the common scope
 of the held and snapshot definitions, both live and after restart:
 
 - The later start and earlier effective cutoff apply. An end is a cutoff only
@@ -601,11 +607,18 @@ running; the global barrier applies to failures, not ordinary conflicts.
 
 #### Recovering a narrowed or disarmed task
 
-| Task condition                                                                            | Authenticated recovery operation                                                                                                                                      |
-| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Active/pending with nonempty narrowed scope; intended change is supported by modification | Send `ModifyTask` with the intended changed fields. An end-only renewal preserves narrowed targets, destinations, delivery type, and start.                           |
-| Conflict-disarmed, or start must change; retained targets and delivery type are unchanged | Successfully `DeactivateTask`, then send a complete `ActivateTask` for the same XID. Include the intended mediation window, targets, destinations, and delivery type. |
-| Lifecycle recovery must change retained targets or delivery type                          | Successfully deactivate the old XID, then activate a complete definition under a new XID.                                                                             |
+| Task condition                                                                            | Authenticated recovery operation                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Active/pending with nonempty narrowed scope; intended change is supported by modification | Send `ModifyTask` with the intended changed fields. An end-only renewal preserves narrowed targets, destinations, delivery type, and start.                                      |
+| Conflict-disarmed, or start must change; retained targets and delivery type are unchanged | Confirm deactivation (send `DeactivateTask` if needed), then send a complete `ActivateTask` for the same XID with the intended window, targets, destinations, and delivery type. |
+| Lifecycle recovery must change retained targets or delivery type                          | Confirm deactivation of the old XID, then activate a complete definition under a new XID.                                                                                        |
+
+An empty `ModifyTask` on a narrowed conflicted task returns X1 error 100
+(`modification not allowed`) and preserves the conflict, reporting state, and
+generation. Supply at least one supported task field. An explicitly supplied
+field counts even when its value is unchanged; ordinary validation still applies.
+Successful explicit modifications can resolve the conflict, and omitted fields
+retain the narrowed values. End-only renewals keep their existing behavior.
 
 For example, if a snapshot moves a task's start into the future, `ModifyTask`
 cannot restore the earlier start. Deactivate it and activate a complete definition
@@ -613,10 +626,18 @@ with the intended start and unchanged protected identity. If target narrowing
 removed a selector and lifecycle recovery must restore it, use a new XID for the
 replacement rather than changing the old tombstone's identity.
 
-Do not send the activation until deactivation has succeeded. If an operation
-fails or the process stops between operations, read back the task state and
-complete recovery through X1; do not edit persisted records. A complete activation
-can explicitly specify no end, and an omitted `implicitDeactivationAllowed`
+Do not send a lifecycle reactivation until read-back confirms deactivation. A
+suspended conflict-disarmed task can expire under its held window: a nonzero
+`EndTime` is an effective cutoff only when `ImplicitDeactivationAllowed` is true.
+Disarming retains that held window rather than the failed snapshot's cutoff.
+After implicit deactivation completes, no additional `DeactivateTask` is needed.
+A nominal end with implicit deactivation disabled does not cause this transition.
+The retained-task identity, completeness, and fresh-generation requirements still
+apply after expiry.
+
+If an operation fails or the process stops between operations, read back the
+task state and complete recovery through X1; do not edit persisted records. A
+complete activation can explicitly specify no end, and an omitted `implicitDeactivationAllowed`
 retains its established false default. Complete does not mean time-bounded.
 
 Disarmed modification returns X1 error 100 (`modification not allowed`). An
@@ -626,8 +647,22 @@ must now send them, including in compatibility mode. RADIUS retains its separate
 activation contract. An equivalent active/pending activation retry is still a
 no-op. Recovery reserves fresh authorization generations and does not authorize
 old-generation X2/X3 queues or replay. Neither an equal snapshot nor deactivation
-erases the retained protected identity.
+erases the protected identity while the task record remains retained. Tombstones
+are normally eligible for purge after 24 hours; outstanding durable obligations
+can extend retention. After purge the old identity is no longer compared. See
+[tombstone retention](#explicit-tombstone-reactivation) for the configuration and
+generation safeguards. Use a new XID when replacing an identity rather than
+waiting for purge.
 
+Pull-owned tasks have a separate first-push path. A complete authenticated
+`ActivateTask` can replace an active or pending pull-owned definition, including
+its start, and establish push ownership through the existing authorization and
+durability checks. This promotion is distinct from an equivalent retry of an
+already push-owned activation, which is a no-op. A differing activation against
+an active or pending push-owned task is rejected; use modification or the
+lifecycle procedure above. A conflict-disarmed task cannot use first-push
+promotion, even if it is pull-owned. Pull ownership also does not let later
+snapshots clear an existing conflict or restore withdrawn scope.
 
 Conflict state is persisted; report acknowledgment is process-local. Entry,
 restoration, and meaningful scope changes log a warning and queue a schema-valid
@@ -849,6 +884,17 @@ authenticated `ActivateTask` with the same protected identity described under
 [X1 Error Codes](#x1-error-codes). A successful reactivation increments the
 activation generation, preserves the prior deactivated task in audit history,
 and installs only the replacement task's filters.
+
+Identity comparison lasts while the tombstone is retained. Lifecycle maintenance
+uses `li.ManagerConfig.TombstoneRetention`, a Go API setting with a default of
+24 hours after deactivation; it is not exposed as a CLI flag. Purge runs during
+maintenance rather than at an exact deadline. For persistent state, outstanding
+filter cleanup, revocation obligations, or unfinished administrative work delay
+removal. After purge, a same-XID activation follows first-activation rules and
+does not compare against the removed identity. Generation watermarks are retained,
+so it receives a newer generation and cannot authorize old-generation product.
+Use a new XID for an intended identity replacement as described in
+[conflict recovery](#recovering-a-narrowed-or-disarmed-task).
 
 Provision destinations before sending the reactivation. A missing destination
 or an incompatible task/destination delivery combination rejects the request

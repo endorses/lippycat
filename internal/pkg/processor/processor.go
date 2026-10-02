@@ -1046,6 +1046,8 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 			CaptureBufferOutputCapacity:   stats.CaptureBufferOutputCapacity,
 			ActiveFilters:                 activeFilters,
 			CpuPercent:                    float32(stats.CPUPercent),
+			CpuCapacityCores:              stats.CPUCapacityCores,
+			MetricsSampleTimeNs:           stats.MetricsSampleTimeNS,
 			MemoryRssBytes:                stats.MemoryRSSBytes,
 			MemoryLimitBytes:              stats.MemoryLimitBytes,
 			RtpOwnershipUnresolved:        stats.RTPOwnershipUnresolved,

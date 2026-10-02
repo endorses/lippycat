@@ -16,14 +16,9 @@ type NodeKey struct {
 	HunterID      string
 }
 
-type MetricChange struct {
-	Direction int
-	Changed   bool
-}
-
 // NodeChanges is immutable presentation state shared by both renderers.
 type NodeChanges struct {
-	CPU, Memory                       MetricChange
+	CPU, Memory                       ResourceLevel
 	FilterDelta                       int64
 	FiltersChanged                    bool
 	Activity                          bool
@@ -46,11 +41,10 @@ type observedNode struct {
 	failed                        bool
 	health                        int32
 	connection                    ProcessorConnectionState
-	cpu                           float64
-	memory, captured, sent        uint64
+	captured, sent                uint64
 	filters                       uint32
 	changes                       NodeChanges
-	cpuUntil, memoryUntil         time.Time
+	resources                     resourceObservation
 	filtersUntil                  time.Time
 	capturedUntil, forwardedUntil time.Time
 	activityUntil                 time.Time
@@ -66,6 +60,7 @@ type recentNodeEvent struct {
 // ChangeTracker records observations, never inferring lifecycle events from a
 // missing row. All times come from the caller; there are no timers or goroutines.
 type ChangeTracker struct {
+	Thresholds ResourceThresholds
 	nodes      map[NodeKey]*observedNode
 	events     []recentNodeEvent
 	recentText string
@@ -181,20 +176,13 @@ func healthText(status int32) string {
 func (t *ChangeTracker) metrics(n *observedNode, h types.HunterInfo, unavailable bool, now time.Time) {
 	if unavailable {
 		n.metricsKnown = false
-		n.changes.CPU, n.changes.Memory = MetricChange{}, MetricChange{}
+		n.resources.reset()
+		n.changes.CPU, n.changes.Memory = ResourceNormal, ResourceNormal
 		n.changes.FiltersChanged, n.changes.Activity, n.changes.FilterDelta = false, false, 0
 		n.changes.CapturedChanged, n.changes.ForwardedChanged = false, false
 		return
 	}
 	if n.metricsKnown {
-		if h.CPUPercent >= 0 && n.cpu >= 0 && FormatCPU(h.CPUPercent) != FormatCPU(n.cpu) {
-			n.changes.CPU = MetricChange{Direction: direction(h.CPUPercent, n.cpu), Changed: true}
-			n.cpuUntil = now.Add(metricHighlightDuration)
-		}
-		if h.MemoryRSSBytes != 0 && n.memory != 0 && FormatMemory(h.MemoryRSSBytes) != FormatMemory(n.memory) {
-			n.changes.Memory = MetricChange{Direction: direction(h.MemoryRSSBytes, n.memory), Changed: true}
-			n.memoryUntil = now.Add(metricHighlightDuration)
-		}
 		if h.ActiveFilters != n.filters {
 			n.changes.FiltersChanged, n.changes.FilterDelta = true, int64(h.ActiveFilters)-int64(n.filters)
 			n.filtersUntil = now.Add(metricHighlightDuration)
@@ -219,21 +207,10 @@ func (t *ChangeTracker) metrics(n *observedNode, h types.HunterInfo, unavailable
 			}
 		}
 	}
-	if h.CPUPercent < 0 {
-		n.changes.CPU = MetricChange{}
-	}
-	if h.MemoryRSSBytes == 0 {
-		n.changes.Memory = MetricChange{}
-	}
+	n.resources.observe(h, t.resourceThresholds())
+	n.changes.CPU, n.changes.Memory = n.resources.cpu.level, n.resources.memory.level
 	n.metricsKnown = true
-	n.cpu, n.memory, n.filters, n.captured, n.sent = h.CPUPercent, h.MemoryRSSBytes, h.ActiveFilters, h.PacketsCaptured, h.PacketsForwarded
-}
-
-func direction[T ~uint64 | ~float64](new, old T) int {
-	if new > old {
-		return 1
-	}
-	return -1
+	n.filters, n.captured, n.sent = h.ActiveFilters, h.PacketsCaptured, h.PacketsForwarded
 }
 
 func (t *ChangeTracker) transition(key NodeKey, n *observedNode, label, text string, now time.Time) {
@@ -298,12 +275,6 @@ func (t *ChangeTracker) Advance(now time.Time) bool {
 	dirty := false
 	for _, n := range t.nodes {
 		before := n.changes
-		if !now.Before(n.cpuUntil) {
-			n.changes.CPU = MetricChange{}
-		}
-		if !now.Before(n.memoryUntil) {
-			n.changes.Memory = MetricChange{}
-		}
 		if !now.Before(n.filtersUntil) {
 			n.changes.FiltersChanged, n.changes.FilterDelta = false, 0
 		}
@@ -355,4 +326,4 @@ func (t *ChangeTracker) RecentText(now time.Time) string {
 	return text
 }
 
-func (t *ChangeTracker) Reset() { *t = ChangeTracker{} }
+func (t *ChangeTracker) Reset() { *t = ChangeTracker{Thresholds: t.Thresholds} }

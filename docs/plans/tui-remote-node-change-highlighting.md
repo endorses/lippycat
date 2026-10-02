@@ -2,6 +2,9 @@
 
 Status: implemented and verified on `feature/tui-node-change-highlighting`.
 
+The CPU/RAM change cues below are historical. Their replacement with persistent
+utilization foregrounds is tracked in [the resource utilization plan](tui-node-resource-utilization.md).
+
 ## Objective
 
 Make changes in the remote-mode Nodes tab easy to spot using brief cell

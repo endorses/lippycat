@@ -57,10 +57,12 @@ type ConnectedHunter struct {
 	FilterUpdateFailures          uint32 // Consecutive filter update send failures
 	LastFilterUpdateFailure       int64  // Timestamp of last filter update failure
 	// System metrics (from heartbeat stats)
-	CpuPercent       float32 // CPU usage percentage (0-100, -1 if unavailable)
-	MemoryRssBytes   uint64  // Process RSS memory in bytes
-	MemoryLimitBytes uint64  // Cgroup memory limit in bytes (0 if no limit)
-	Detector         *management.DetectorTelemetry
+	CpuPercent          float32 // Process CPU percentage (100% per core, -1 if unavailable)
+	CPUCapacityCores    float64 // Effective visible CPU capacity; zero if unknown
+	MetricsSampleTimeNS int64   // Actual CPU/memory sample Unix nanoseconds; zero if unknown
+	MemoryRssBytes      uint64  // Process RSS memory in bytes
+	MemoryLimitBytes    uint64  // Cgroup memory limit in bytes (0 if no limit)
+	Detector            *management.DetectorTelemetry
 }
 
 // ForwardingContract is the processor-authoritative transport contract
@@ -237,6 +239,8 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 
 			// Update system metrics (CPU/RAM)
 			hunter.CpuPercent = stats.CpuPercent
+			hunter.CPUCapacityCores = stats.CpuCapacityCores
+			hunter.MetricsSampleTimeNS = stats.MetricsSampleTimeNs
 			hunter.MemoryRssBytes = stats.MemoryRssBytes
 			hunter.MemoryLimitBytes = stats.MemoryLimitBytes
 			if stats.RtpEbpf == nil {

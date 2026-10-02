@@ -466,8 +466,8 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 					filterWidth -= labelWidth + 1
 				}
 				cpuValue, ramValue, capturedStr, forwardedStr, filtersValue, change := hunterMetricValues(hunter, change, filterWidth)
-				cpuStr := resourceAccent(metricText(cpuValue, change.CPU, lipgloss.Width(cpuValue)+1), change.CPU, params.Quiet, params.Theme)
-				ramStr := resourceAccent(metricText(ramValue, change.Memory, lipgloss.Width(ramValue)+1), change.Memory, params.Quiet, params.Theme)
+				cpuStr := resourceAccent(cpuValue, change.CPU, false, params.Theme)
+				ramStr := resourceAccent(ramValue, change.Memory, false, params.Theme)
 				capturedStr = cellAccent(capturedStr, change.CapturedChanged, params.Quiet, params.Theme.SuccessColor)
 				forwardedStr = cellAccent(forwardedStr, change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor)
 				filtersStr := changeAccent(filtersValue, change.FiltersChanged, params.Quiet, params.Theme)

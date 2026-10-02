@@ -75,25 +75,17 @@ func TestCounterAccentsOnlyFollowDisplayedChanges(t *testing.T) {
 	}
 }
 
-func TestChangesMetricBaselinesAndDisplayedValues(t *testing.T) {
+func TestResourcesWithoutCapacityRemainNeutral(t *testing.T) {
 	now := time.Unix(100, 0)
 	p, key := trackerFixture()
 	var tracker ChangeTracker
-	tracker.Observe(p, now)
-	assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key])
-	p[0].Hunters[0].CPUPercent = 12.2
-	p[0].Hunters[0].MemoryRSSBytes = 1000001
-	tracker.Observe(p, now)
-	assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key], "invisible changes remain quiet")
-	p[0].Hunters[0].CPUPercent = 13
-	p[0].Hunters[0].MemoryRSSBytes = 900000
-	tracker.Observe(p, now)
-	assert.Equal(t, MetricChange{Direction: 1, Changed: true}, tracker.Snapshot()[key].CPU)
-	assert.Equal(t, MetricChange{Direction: -1, Changed: true}, tracker.Snapshot()[key].Memory)
-	tracker.Observe(p, now.Add(900*time.Millisecond))
-	assert.True(t, tracker.Advance(now.Add(time.Second)))
-	assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key], "identical reports do not prolong highlights")
-	assert.False(t, tracker.Advance(now.Add(2*time.Second)))
+	for i := 0; i < 5; i++ {
+		p[0].Hunters[0].CPUPercent = float64(10 + i*100)
+		p[0].Hunters[0].MemoryRSSBytes = uint64(1000000 + i*1000000)
+		p[0].Hunters[0].MetricsSampleTimeNS = int64(i + 1)
+		tracker.Observe(p, now)
+		assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key])
+	}
 }
 
 func TestChangesUnknownTelemetryAndAvailability(t *testing.T) {
@@ -111,7 +103,7 @@ func TestChangesUnknownTelemetryAndAvailability(t *testing.T) {
 	p[0].Hunters[0].CPUPercent = 2
 	tracker.Observe(p, now)
 	assert.True(t, tracker.Snapshot()[key].Activity)
-	assert.True(t, tracker.Snapshot()[key].CPU.Changed)
+	assert.Equal(t, ResourceNormal, tracker.Snapshot()[key].CPU)
 	p[0].Hunters[0].StatsUnavailable = true
 	tracker.Observe(p, now)
 	assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key])
@@ -228,7 +220,7 @@ func TestChangesTopologyBaselinePreservesMetricsAndSuppressesJoins(t *testing.T)
 	tracker.Joined(key, "edge", now.Add(time.Second))
 	assert.Empty(t, tracker.events)
 	tracker.Advance(now.Add(time.Second))
-	assert.False(t, tracker.Snapshot()[key].CPU.Changed)
+	assert.Equal(t, ResourceNormal, tracker.Snapshot()[key].CPU)
 	// Removing a subscription/node also discards lifecycle bookkeeping.
 	tracker.Observe(nil, now)
 	assert.Empty(t, tracker.nodes)

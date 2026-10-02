@@ -17,22 +17,6 @@ func fitCell(value string, width int) string {
 	return value + strings.Repeat(" ", max(0, width-lipgloss.Width(value)))
 }
 
-func metricText(value string, change MetricChange, width int) string {
-	marker := " "
-	if change.Changed && value != "-" {
-		if change.Direction > 0 {
-			marker = "↑"
-		} else if change.Direction < 0 {
-			marker = "↓"
-		}
-	}
-	// Keep the complete value if it fills this column; the cue is optional.
-	if lipgloss.Width(value) >= width {
-		return fitCell(value, width)
-	}
-	return fitCell(value, width-1) + marker
-}
-
 func cellAccent(value string, changed, quiet bool, background lipgloss.Color) string {
 	if !changed || quiet {
 		return value
@@ -44,14 +28,24 @@ func changeAccent(value string, changed, quiet bool, theme themes.Theme) string 
 	return cellAccent(value, changed, quiet, theme.InfoColor)
 }
 
-func resourceAccent(value string, change MetricChange, quiet bool, theme themes.Theme) string {
-	background := theme.InfoColor
-	if change.Direction > 0 {
-		background = theme.ErrorColor
-	} else if change.Direction < 0 {
-		background = theme.SuccessColor
+// Resource utilization is persistent state, including in quiet mode. On a
+// selected row, use the normal background behind the value so orange/red remain
+// legible against the cyan selection; the surrounding row still shows selection.
+func resourceAccent(value string, level ResourceLevel, selected bool, theme themes.Theme) string {
+	var foreground lipgloss.Color
+	switch level {
+	case ResourceElevated:
+		foreground = theme.WarningColor
+	case ResourceHigh:
+		foreground = theme.ErrorColor
+	default:
+		return value
 	}
-	return cellAccent(value, change.Changed, quiet, background)
+	style := lipgloss.NewStyle().Foreground(foreground)
+	if selected {
+		style = style.Background(theme.Background)
+	}
+	return style.Render(value)
 }
 
 func filterText(value uint32, change NodeChanges, width int) string {
@@ -80,7 +74,7 @@ func activityMarker(active bool) string {
 }
 
 func hasNodeAccent(change NodeChanges, quiet bool) bool {
-	return !quiet && (change.StatusChanged || change.Label != "" || change.CPU.Changed || change.Memory.Changed || change.FiltersChanged)
+	return !quiet && (change.StatusChanged || change.Label != "" || change.FiltersChanged)
 }
 
 // Table columns retain cue space even when no change is active. Optional columns
@@ -132,7 +126,7 @@ func nodeTableLine(widths []int, values ...string) string {
 func hunterMetricValues(hunter types.HunterInfo, change NodeChanges, filterWidth int) (cpu, memory, captured, forwarded, filters string, visibleChange NodeChanges) {
 	visibleChange = change
 	if hunter.StatsUnavailable {
-		visibleChange.CPU, visibleChange.Memory = MetricChange{}, MetricChange{}
+		visibleChange.CPU, visibleChange.Memory = ResourceNormal, ResourceNormal
 		visibleChange.Activity, visibleChange.FiltersChanged = false, false
 		visibleChange.CapturedChanged, visibleChange.ForwardedChanged = false, false
 		return "-", "-", "-", "-", fitCell("-", filterWidth), visibleChange

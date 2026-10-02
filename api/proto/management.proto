@@ -246,7 +246,7 @@ message HunterStats {
     // Active filters count
     uint32 active_filters = 6;
 
-    // CPU usage percentage (0-100, -1 if unavailable)
+    // Process CPU percentage: 100% is one core, may exceed 100; -1 if unavailable.
     float cpu_percent = 7;
 
     // Process resident set size in bytes
@@ -315,6 +315,14 @@ message HunterStats {
     // Queued bytes discarded when a new SYN replaces a stale connection.
     uint64 tcp_replacement_dropped_bytes = 36;
     MediaAdmissionStatus rtp_ebpf = 37;
+
+    // Effective visible CPU capacity in cores, including fractional cgroup quotas.
+    // Zero means unknown (including older senders). Does not change cpu_percent units.
+    double cpu_capacity_cores = 38;
+
+    // Unix nanoseconds identifying the actual CPU/memory sample, not a status poll.
+    // Zero means unknown. Consumers must not count repeated samples as fresh data.
+    int64 metrics_sample_time_ns = 39;
 }
 
 // ProcessorHeartbeat response from processor

@@ -59,6 +59,8 @@ type HunterStatsJSON struct {
 	BufferBytes                   uint64                           `json:"buffer_bytes"`
 	ActiveFilters                 uint32                           `json:"active_filters"`
 	CPUPercent                    float64                          `json:"cpu_percent"`
+	CPUCapacityCores              float64                          `json:"cpu_capacity_cores,omitempty"`
+	MetricsSampleTimeNS           int64                            `json:"metrics_sample_time_ns,omitempty"`
 	MemoryRSSBytes                uint64                           `json:"memory_rss_bytes"`
 	MemoryLimitBytes              uint64                           `json:"memory_limit_bytes,omitempty"`
 	RTPOwnershipUnresolved        uint64                           `json:"rtp_ownership_unresolved"`
@@ -179,6 +181,8 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 			BufferBytes:                   h.Stats.BufferBytes,
 			ActiveFilters:                 h.Stats.ActiveFilters,
 			CPUPercent:                    float64(h.Stats.CpuPercent),
+			CPUCapacityCores:              h.Stats.CpuCapacityCores,
+			MetricsSampleTimeNS:           h.Stats.MetricsSampleTimeNs,
 			MemoryRSSBytes:                h.Stats.MemoryRssBytes,
 			MemoryLimitBytes:              h.Stats.MemoryLimitBytes,
 			RTPOwnershipUnresolved:        h.Stats.RtpOwnershipUnresolved,

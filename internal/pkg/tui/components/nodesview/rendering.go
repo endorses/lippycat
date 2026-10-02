@@ -4,6 +4,7 @@ package nodesview
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ func FormatPacketNumber(n uint64) string {
 
 // FormatCPU formats CPU percentage for display
 func FormatCPU(percent float64) string {
-	if percent < 0 {
+	if percent < 0 || math.IsNaN(percent) || math.IsInf(percent, 0) {
 		return "-"
 	}
 	return fmt.Sprintf("%.0f%%", percent)

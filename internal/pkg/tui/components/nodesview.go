@@ -126,7 +126,7 @@ func NewNodesView() NodesView {
 	ti.Width = 50
 
 	return NodesView{
-		changes:                 &nodesview.ChangeTracker{},
+		changes:                 newNodeChangeTracker(),
 		changeNow:               time.Now,
 		hunters:                 []HunterInfo{},
 		selectedIndex:           -1, // Start with nothing selected

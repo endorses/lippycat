@@ -920,6 +920,8 @@ func (m *Model) addHunterFromTopologyUpdate(processorAddr string, hunter *manage
 	// Stats may be nil if hunter disconnected abruptly
 	if hunter.Stats != nil {
 		hunterInfo.CPUPercent = float64(hunter.Stats.CpuPercent)
+		hunterInfo.CPUCapacityCores = hunter.Stats.CpuCapacityCores
+		hunterInfo.MetricsSampleTimeNS = hunter.Stats.MetricsSampleTimeNs
 		hunterInfo.MemoryRSSBytes = hunter.Stats.MemoryRssBytes
 		hunterInfo.MemoryLimitBytes = hunter.Stats.MemoryLimitBytes
 		hunterInfo.PacketsCaptured = hunter.Stats.PacketsCaptured
@@ -1048,6 +1050,8 @@ func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNo
 			}
 			if h.Stats != nil {
 				hunterInfo.CPUPercent = float64(h.Stats.CpuPercent)
+				hunterInfo.CPUCapacityCores = h.Stats.CpuCapacityCores
+				hunterInfo.MetricsSampleTimeNS = h.Stats.MetricsSampleTimeNs
 				hunterInfo.MemoryRSSBytes = h.Stats.MemoryRssBytes
 				hunterInfo.MemoryLimitBytes = h.Stats.MemoryLimitBytes
 				hunterInfo.PacketsCaptured = h.Stats.PacketsCaptured
@@ -1178,6 +1182,8 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 		// Stats may be nil if hunter disconnected abruptly
 		if h.Stats != nil {
 			hunterInfo.CPUPercent = float64(h.Stats.CpuPercent)
+			hunterInfo.CPUCapacityCores = h.Stats.CpuCapacityCores
+			hunterInfo.MetricsSampleTimeNS = h.Stats.MetricsSampleTimeNs
 			hunterInfo.MemoryRSSBytes = h.Stats.MemoryRssBytes
 			hunterInfo.MemoryLimitBytes = h.Stats.MemoryLimitBytes
 			hunterInfo.PacketsCaptured = h.Stats.PacketsCaptured

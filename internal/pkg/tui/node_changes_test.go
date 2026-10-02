@@ -30,6 +30,41 @@ func nodeJoin(owner, id string) TopologyUpdateMsg {
 	}}
 }
 
+func TestNodeResourcesPreservedAcrossTopologyConversions(t *testing.T) {
+	for _, path := range []string{"join", "processor join", "snapshot"} {
+		t.Run(path, func(t *testing.T) {
+			m := nodeChangeModel()
+			hunter := &management.ConnectedHunter{HunterId: "edge", Stats: &management.HunterStats{
+				CpuPercent: 180, CpuCapacityCores: 2, MetricsSampleTimeNs: 123,
+				MemoryRssBytes: 900, MemoryLimitBytes: 1000,
+			}}
+			owner := "root"
+			switch path {
+			case "join":
+				msg := nodeJoin("root-id", "edge")
+				msg.Update.GetHunterConnected().Hunter = hunter
+				m, _ = m.handleTopologyUpdateMsg(msg)
+			case "processor join":
+				owner = "child"
+				m, _ = m.handleTopologyUpdateMsg(TopologyUpdateMsg{ProcessorAddr: "root", Update: &management.TopologyUpdate{
+					ProcessorId: "root-id", UpdateType: management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED,
+					Event: &management.TopologyUpdate_ProcessorConnected{ProcessorConnected: &management.ProcessorConnectedEvent{Processor: &management.ProcessorNode{Address: owner, ProcessorId: "child-id", Hunters: []*management.ConnectedHunter{hunter}}}},
+				}})
+			case "snapshot":
+				m, _ = m.handleTopologyReceivedMsg(TopologyReceivedMsg{Address: "root", Topology: &management.ProcessorNode{
+					Address: "root", ProcessorId: "root-id", Hunters: []*management.ConnectedHunter{hunter},
+				}})
+			}
+			require.Len(t, m.connectionMgr.HuntersByProcessor[owner], 1)
+			actual := m.connectionMgr.HuntersByProcessor[owner][0]
+			require.Equal(t, 2.0, actual.CPUCapacityCores)
+			require.EqualValues(t, 123, actual.MetricsSampleTimeNS)
+			require.Equal(t, 180.0, actual.CPUPercent)
+			require.EqualValues(t, 1000, actual.MemoryLimitBytes)
+		})
+	}
+}
+
 func TestNodeChangesTopologyAndPollingDeduplicate(t *testing.T) {
 	m := nodeChangeModel()
 	m, _ = m.handleTopologyUpdateMsg(nodeJoin("root-id", "edge"))
@@ -126,7 +161,8 @@ func TestNodeChangesFreshMetricsBaselineAfterReconnect(t *testing.T) {
 	require.NotContains(t, view, "↑")
 	require.NotContains(t, view, "+7")
 	m, _ = m.handleHunterStatusMsg(HunterStatusMsg{ProcessorAddr: "root", Hunters: []components.HunterInfo{{ID: "edge", CPUPercent: 90, MemoryRSSBytes: 3000, PacketsCaptured: 110, ActiveFilters: 8}}})
-	require.Contains(t, m.uiState.NodesView.View(), "↑")
+	require.NotContains(t, m.uiState.NodesView.View(), "↑")
+	require.Contains(t, m.uiState.NodesView.View(), "110")
 }
 
 func TestNodeChangesSubscriptionsAndInitialSnapshotsStayQuiet(t *testing.T) {

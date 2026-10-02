@@ -85,9 +85,9 @@ func TestNodeHighlightPaletteInRenderedViews(t *testing.T) {
 						key := NodeKey{ProcessorAddr: processor.Address, HunterID: "edge"}
 						change := changes[key]
 						change.CapturedChanged, change.ForwardedChanged = !reverse, reverse
-						cpuColor, ramColor, activeCounter, idleCounter, delta := "#dc322f", "#859900", "12.4M", "12.3M", "+2"
+						cpuColor, ramColor, activeCounter, idleCounter, delta := "#dc322f", "#cb4b16", "12.4M", "12.3M", "+2"
 						if reverse {
-							change.CPU.Direction, change.Memory.Direction, change.FilterDelta = -1, 1, -2
+							change.CPU, change.Memory, change.FilterDelta = ResourceElevated, ResourceHigh, -2
 							cpuColor, ramColor, activeCounter, idleCounter, delta = ramColor, cpuColor, idleCounter, activeCounter, "-2"
 						}
 						changes[key] = change
@@ -105,7 +105,15 @@ func TestNodeHighlightPaletteInRenderedViews(t *testing.T) {
 						case "graph":
 							output = RenderGraphView(GraphViewParams{Processors: params.Processors, Hunters: params.Hunters, SelectedIndex: index, Width: 160, Theme: params.Theme, Changes: changes, Quiet: quiet}).Content
 						}
-						for token, want := range map[string]string{"24%": cpuColor, "182.0M": ramColor, delta: "#268bd2", activeCounter: "#859900"} {
+						for token, want := range map[string]string{"24%": cpuColor, "182.0M": ramColor} {
+							fg, bg := colorsAtText(t, output, token)
+							assert.Equal(t, want, fg, token)
+							assert.NotEqual(t, want, bg, token)
+							if selected && view != "graph" {
+								assert.Equal(t, "#000000", bg, "resource value stays legible against selection")
+							}
+						}
+						for token, want := range map[string]string{delta: "#268bd2", activeCounter: "#859900"} {
 							fg, bg := colorsAtText(t, output, token)
 							if quiet {
 								assert.NotEqual(t, want, bg, token)
@@ -132,7 +140,7 @@ func changeRenderingFixture() (ProcessorInfo, map[NodeKey]NodeChanges) {
 	processor := ProcessorInfo{Address: hunter.ProcessorAddr, ProcessorID: "central", Hunters: []types.HunterInfo{hunter}, TotalHunters: 1, ConnectionState: ProcessorConnectionStateConnected}
 	changes := map[NodeKey]NodeChanges{
 		{ProcessorAddr: processor.Address}:                      {Label: "NEW", StatusChanged: true},
-		{ProcessorAddr: processor.Address, HunterID: hunter.ID}: {CPU: MetricChange{Changed: true, Direction: 1}, Memory: MetricChange{Changed: true, Direction: -1}, FiltersChanged: true, FilterDelta: 2, Activity: true, CapturedChanged: true, ForwardedChanged: true, Label: "RECOVERED", StatusChanged: true},
+		{ProcessorAddr: processor.Address, HunterID: hunter.ID}: {CPU: ResourceHigh, Memory: ResourceElevated, FiltersChanged: true, FilterDelta: 2, Activity: true, CapturedChanged: true, ForwardedChanged: true, Label: "RECOVERED", StatusChanged: true},
 	}
 	return processor, changes
 }
@@ -157,8 +165,8 @@ func TestNodeTableChangesKeepColumnWidthsAndSelection(t *testing.T) {
 			assert.Contains(t, changedRow, "24%")
 			assert.Contains(t, changedRow, "182.0M")
 			if width >= 65 {
-				assert.Contains(t, changedRow, "↑")
-				assert.Contains(t, changedRow, "↓")
+				assert.NotContains(t, changedRow, "↑")
+				assert.NotContains(t, changedRow, "↓")
 				assert.Contains(t, changedRow, "+2")
 				assert.Contains(t, changedRow, "·")
 			}
@@ -184,8 +192,8 @@ func TestNodeGraphChangesPreserveRegionsAndBoxWidths(t *testing.T) {
 		assert.Equal(t, baseline.SelectedNodeLine, changed.SelectedNodeLine)
 		assert.Equal(t, baseline.HunterBoxRegions, changed.HunterBoxRegions)
 		assert.Equal(t, baseline.ProcessorBoxRegions, changed.ProcessorBoxRegions)
-		assert.Contains(t, ansi.Strip(changed.Content), "24%↑")
-		assert.Contains(t, ansi.Strip(changed.Content), "182.0M↓")
+		assert.Contains(t, ansi.Strip(changed.Content), "24%")
+		assert.Contains(t, ansi.Strip(changed.Content), "182.0M")
 		assert.Contains(t, ansi.Strip(changed.Content), "10 +2")
 		assert.Contains(t, changed.Content, "┏") // Selection survives an accent.
 		baselineLines := strings.Split(baseline.Content, "\n")
@@ -218,7 +226,7 @@ func TestNodeChangeColorsAndQuietAcrossThemeAndColorProfiles(t *testing.T) {
 			quiet := RenderGraphView(params)
 			assert.Equal(t, ansi.Strip(normal.Content), ansi.Strip(quiet.Content))
 			assert.Contains(t, ansi.Strip(quiet.Content), "RECOVERED")
-			assert.Contains(t, ansi.Strip(quiet.Content), "↑")
+			assert.NotContains(t, ansi.Strip(quiet.Content), "↑")
 			if profile != termenv.Ascii {
 				assert.NotEqual(t, normal.Content, quiet.Content)
 			}
@@ -230,8 +238,8 @@ func TestNodeChangeColorsAndQuietAcrossThemeAndColorProfiles(t *testing.T) {
 }
 
 func TestNodeCellsPrioritizeValuesAndUseTerminalWidths(t *testing.T) {
-	assert.Equal(t, "-    ", metricText("-", MetricChange{Changed: true, Direction: 1}, 5))
-	assert.Equal(t, "100%", metricText("100%", MetricChange{Changed: true, Direction: 1}, 4))
+	assert.Equal(t, "-    ", fitCell("-", 5))
+	assert.Equal(t, "100%", fitCell("100%", 4))
 	assert.Equal(t, "10     ", filterText(10, NodeChanges{FiltersChanged: true, FilterDelta: 1234567}, 7))
 	assert.Equal(t, "edge", withChangeLabel("edge", "RECOVERED", 4))
 	for _, input := range []string{"界界界", "ééééé", "\x1b[31m界界界\x1b[0m"} {

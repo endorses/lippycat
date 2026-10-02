@@ -22,6 +22,27 @@ func TestCollector_GetReturnsInitialState(t *testing.T) {
 	if m.CPUPercent != -1 {
 		t.Errorf("expected initial CPUPercent = -1, got %f", m.CPUPercent)
 	}
+	if m.SampleTimeNS != 0 || m.CPUCapacityCores != 0 {
+		t.Fatalf("expected unknown capacity and no initial sample, got %+v", m)
+	}
+}
+
+func TestCollector_SampleTimestampBelongsToCollection(t *testing.T) {
+	c := New().(*collector)
+	c.initPlatform()
+	before := time.Now().UnixNano()
+	c.collect()
+	first := c.Get()
+	if first.SampleTimeNS < before || first.SampleTimeNS > time.Now().UnixNano() {
+		t.Fatalf("sample timestamp is not from collection: %d", first.SampleTimeNS)
+	}
+	if again := c.Get(); again != first {
+		t.Fatal("reading the snapshot changed the metrics or sample timestamp")
+	}
+	c.collect()
+	if second := c.Get(); second.SampleTimeNS <= first.SampleTimeNS {
+		t.Fatal("new collection did not advance the sample timestamp")
+	}
 }
 
 func TestCollector_StartStop(t *testing.T) {

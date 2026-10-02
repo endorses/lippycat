@@ -299,6 +299,8 @@ func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.Hunter
 		CaptureBufferOutputCapacity:  stats.CaptureBufferOutputCapacity,
 		ActiveFilters:                stats.ActiveFilters,
 		CPUPercent:                   float64(stats.CpuPercent),
+		CPUCapacityCores:             stats.CpuCapacityCores,
+		MetricsSampleTimeNS:          stats.MetricsSampleTimeNs,
 		MemoryRSSBytes:               stats.MemoryRssBytes,
 		MemoryLimitBytes:             stats.MemoryLimitBytes,
 		Interfaces:                   h.Interfaces,

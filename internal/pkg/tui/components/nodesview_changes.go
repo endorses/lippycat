@@ -19,7 +19,7 @@ func (n *NodesView) changesTime() time.Time {
 
 func (n *NodesView) ensureChanges() {
 	if n.changes == nil {
-		n.changes = &nodesview.ChangeTracker{}
+		n.changes = newNodeChangeTracker()
 	}
 }
 

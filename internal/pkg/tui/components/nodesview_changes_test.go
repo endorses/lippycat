@@ -31,15 +31,15 @@ func TestNodesChangesRemoteBaselineAndExpiry(t *testing.T) {
 	key := nodesview.NodeKey{ProcessorAddr: p[0].Address, HunterID: "hunter"}
 	assert.Equal(t, nodesview.NodeChanges{}, n.changeState[key])
 	assert.NotContains(t, ansi.Strip(n.View()), "↑")
-	p[0].Hunters[0].CPUPercent = 15
+	p[0].Hunters[0].ActiveFilters = 15
 	n.SetProcessors(p)
-	assert.True(t, n.changeState[key].CPU.Changed)
-	assert.Contains(t, ansi.Strip(n.View()), "↑")
+	assert.True(t, n.changeState[key].FiltersChanged)
+	assert.Contains(t, ansi.Strip(n.View()), "+13")
 	*now = now.Add(500 * time.Millisecond)
 	n.SetProcessors(p)
 	*now = now.Add(500 * time.Millisecond)
 	assert.True(t, n.AdvanceChanges(*now))
-	assert.False(t, n.changeState[key].CPU.Changed)
+	assert.False(t, n.changeState[key].FiltersChanged)
 	assert.NotContains(t, ansi.Strip(n.View()), "↑")
 	assert.False(t, n.AdvanceChanges(now.Add(time.Second)))
 	n.SetRemoteChanges(false)
@@ -135,7 +135,7 @@ func TestNodesChangesEventSlotExcludedFromInputAndScrollbar(t *testing.T) {
 func TestNodesChangesQuietAndViewSwitchPreserveExpiry(t *testing.T) {
 	n, p, now := changeViewFixture()
 	n.selectedIndex, n.selectedProcessorAddr = 0, ""
-	p[0].Hunters[0].CPUPercent = 20
+	p[0].Hunters[0].ActiveFilters = 15
 	p[0].Hunters[0].MemoryRSSBytes = 2000000
 	n.SetProcessors(p)
 	before := ansi.Strip(n.View())
@@ -148,10 +148,10 @@ func TestNodesChangesQuietAndViewSwitchPreserveExpiry(t *testing.T) {
 	require.True(t, n.ToggleView())
 	assert.Equal(t, "graph", n.GetViewMode())
 	assert.Equal(t, change, n.changeState[key])
-	assert.Contains(t, ansi.Strip(n.View()), "↑")
+	assert.Contains(t, ansi.Strip(n.View()), "+13")
 	*now = now.Add(500 * time.Millisecond)
 	n.AdvanceChanges(*now)
-	assert.False(t, n.changeState[key].CPU.Changed)
+	assert.False(t, n.changeState[key].FiltersChanged)
 	require.True(t, n.ToggleView())
 	assert.NotContains(t, ansi.Strip(n.View()), "↑", "switching back cannot replay expired cues")
 	n.SetHighlightMode("unknown")
@@ -165,7 +165,7 @@ func TestNodesChangesExpiryPreservesScrollPosition(t *testing.T) {
 	}
 	n.SetSize(100, 8)
 	n.SetProcessors(p)
-	p[0].Hunters[0].CPUPercent = 90
+	p[0].Hunters[0].ActiveFilters = 90
 	n.SetProcessors(p)
 	n.viewport.SetYOffset(10)
 	require.Equal(t, 10, n.viewport.YOffset)

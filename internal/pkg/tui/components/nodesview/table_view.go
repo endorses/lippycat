@@ -429,8 +429,8 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				status+activityMarker(change.Activity),
 				changeAccent(id, change.Label != "", params.Quiet, params.Theme),
 				GetHunterModeBadge(hunter.Capabilities, params.Theme), hunter.Hostname, uptimeStr,
-				resourceAccent(metricText(cpu, change.CPU, widths[5]), change.CPU, params.Quiet, params.Theme),
-				resourceAccent(metricText(memory, change.Memory, widths[6]), change.Memory, params.Quiet, params.Theme),
+				resourceAccent(fitCell(cpu, widths[5]), change.CPU, isSelected, params.Theme),
+				resourceAccent(fitCell(memory, widths[6]), change.Memory, isSelected, params.Theme),
 				cellAccent(fitCell(captured, widths[7]), change.CapturedChanged, params.Quiet, params.Theme.SuccessColor),
 				cellAccent(fitCell(forwarded, widths[8]), change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor),
 				changeAccent(filters, change.FiltersChanged, params.Quiet, params.Theme))
@@ -555,8 +555,8 @@ func RenderFlatView(params TableViewParams) (string, int) {
 			statusCell(statusText, statusColor, change.StatusChanged, params.Quiet)+activityMarker(change.Activity),
 			changeAccent(withChangeLabel(hunter.ID, change.Label, widths[1]), change.Label != "", params.Quiet, params.Theme),
 			"", hunter.Hostname, uptime,
-			resourceAccent(metricText(cpu, change.CPU, widths[5]), change.CPU, params.Quiet, params.Theme),
-			resourceAccent(metricText(memory, change.Memory, widths[6]), change.Memory, params.Quiet, params.Theme),
+			resourceAccent(fitCell(cpu, widths[5]), change.CPU, isSelected, params.Theme),
+			resourceAccent(fitCell(memory, widths[6]), change.Memory, isSelected, params.Theme),
 			cellAccent(fitCell(captured, widths[7]), change.CapturedChanged, params.Quiet, params.Theme.SuccessColor),
 			cellAccent(fitCell(forwarded, widths[8]), change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor),
 			changeAccent(filters, change.FiltersChanged, params.Quiet, params.Theme))

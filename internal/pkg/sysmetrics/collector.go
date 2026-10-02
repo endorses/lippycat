@@ -10,9 +10,18 @@ import (
 
 // Metrics contains the current system metrics snapshot.
 type Metrics struct {
-	// CPUPercent is the CPU usage as a percentage (0-100).
+	// CPUPercent is process CPU usage, where 100% means one fully occupied core.
+	// It can exceed 100% when multiple cores are used.
 	// Returns -1 if unavailable (e.g., on non-Linux platforms).
 	CPUPercent float64
+
+	// CPUCapacityCores is the available logical CPU capacity, including visible
+	// affinity and cgroup quota limits. Fractional cores are possible; 0 is unknown.
+	CPUCapacityCores float64
+
+	// SampleTimeNS is the Unix nanosecond timestamp of this collection, not of a
+	// subsequent heartbeat or status query. Zero means no sample is available.
+	SampleTimeNS int64
 
 	// MemoryRSSBytes is the process resident set size in bytes.
 	MemoryRSSBytes uint64
@@ -105,6 +114,7 @@ func (c *collector) collectLoop() {
 // collect gathers current metrics from the platform.
 func (c *collector) collect() {
 	m := c.collectPlatform()
+	m.SampleTimeNS = time.Now().UnixNano()
 
 	c.mu.Lock()
 	c.metrics = m

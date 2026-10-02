@@ -191,12 +191,11 @@ func (s *droppedEventTestSink) HandleDroppedEventLocked(event Event, _ time.Time
 func TestDispatcherNotifiesSinkAboutDeliveryQueueOverflow(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	// Remember entry even if the sink runs before the test starts waiting.
+	signalEntered := sync.OnceFunc(func() { close(entered) })
 	sink := &droppedEventTestSink{}
 	sink.handle = func(Event) error {
-		select {
-		case entered <- struct{}{}:
-		default:
-		}
+		signalEntered()
 		<-release
 		return nil
 	}
@@ -204,14 +203,22 @@ func TestDispatcherNotifiesSinkAboutDeliveryQueueOverflow(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, d.Register(sink))
 	require.NoError(t, d.Start(context.Background()))
+	t.Cleanup(func() {
+		close(release)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, d.Close(ctx))
+	})
 	require.True(t, d.Enqueue(NewDNSEvent(Envelope{})))
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sink did not receive the first event")
+	}
 	require.True(t, d.Enqueue(NewDNSEvent(Envelope{})))
 	require.Eventually(t, func() bool { return d.Stats().Dispatched == 2 }, time.Second, time.Millisecond)
 	require.True(t, d.Enqueue(NewDNSEvent(Envelope{})))
 	require.Eventually(t, func() bool { return sink.dropped.Load() == 1 }, time.Second, time.Millisecond)
-	close(release)
-	require.NoError(t, d.Close(context.Background()))
 	require.Equal(t, uint64(1), d.Stats().SinkDropped)
 }
 

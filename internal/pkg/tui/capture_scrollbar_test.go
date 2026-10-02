@@ -24,7 +24,7 @@ func TestCapturePacketScrollbarDragAndPaneWidth(t *testing.T) {
 		require.Equal(t, 180, ansi.StringWidth(line))
 	}
 	barX := ansi.StringWidth(strings.Split(m.uiState.PacketList.View(true, true), "\n")[0]) - 2
-	require.Contains(t, "│▉", string([]rune(ansi.Strip(strings.Split(content, "\n")[2]))[barX]))
+	require.Equal(t, "▉", string([]rune(ansi.Strip(strings.Split(content, "\n")[2]))[barX]))
 	m, _ = m.handleMouse(tea.MouseMsg{X: barX, Y: 22, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	require.Equal(t, "list", m.scrollDrag)
 	require.Greater(t, m.uiState.PacketList.LogicalOffset(), uint64(0))
@@ -72,7 +72,7 @@ func TestCaptureScrollbarSplitLayouts(t *testing.T) {
 			require.Equalf(t, 180, ansi.StringWidth(line), "%s pane width", mode)
 		}
 		line := ansi.Strip(strings.Split(content, "\n")[2])
-		require.Equal(t, 2, strings.Count(line, "▉"))
+		require.NotContains(t, line, "▉")
 	}
 }
 

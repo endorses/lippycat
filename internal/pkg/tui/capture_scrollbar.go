@@ -82,8 +82,12 @@ func (m Model) handleCaptureScrollbar(msg tea.MouseMsg, contentTop, contentHeigh
 			total, visible, offset = m.uiState.DetailsPanel.ScrollState()
 		}
 	}
+	start, size := components.ScrollbarThumb(total, visible, offset, trackHeight)
+	if size == 0 {
+		m.scrollDrag = ""
+		return m, nil, false
+	}
 	if msg.Action == tea.MouseActionPress {
-		start, size := components.ScrollbarThumb(total, visible, offset, trackHeight)
 		row := msg.Y - trackTop
 		m.scrollDrag = target
 		m.scrollDragRow = row

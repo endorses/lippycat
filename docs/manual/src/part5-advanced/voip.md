@@ -307,8 +307,24 @@ ownership, filter attribution, expiry and output checks remain authoritative.
 This mode captures media only after call selection and endpoint publication.
 Bounded validated SDP metadata may be retained before selection; RTP history is
 not retained. Independent IP/CIDR filters and the configured no-filter policy
-continue to apply. Without an explicit RTP range, learned endpoints are not
-restricted to the old generated 10000–32768 range.
+continue to apply.
+
+With `--rtp-ebpf`, you do not need `--rtp-port-range`: RTP and RTCP endpoints
+are learned from the selected call's SDP, including endpoints outside the
+generated default 10000–32768 range. Use `--sip-port` to narrow signaling capture
+to your SIP ports; it is optional, and omitting it preserves discovery on
+arbitrary ports. For example:
+
+<!-- i18n:skip -->
+
+```bash
+sudo lc hunt voip --processor processor:55555 -i eth0 \
+  --rtp-ebpf --sip-port 5060 --tls-ca ca.crt
+```
+
+If you explicitly set `--rtp-port-range`, it remains a capture restriction:
+learned media endpoints outside that range are excluded. An explicit `--filter`
+also remains in effect and must allow the signaling and media you want to capture.
 
 `--rtp-ebpf-mode=shadow` records bounded decisions while retaining dynamic media
 reception. Runtime update failures default to scoped broad admission, preserving

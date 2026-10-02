@@ -175,6 +175,21 @@ sudo lc hunt voip --processor processor:55555 -i eth0 \
   --sip-port 5060 --tls-ca ca.crt
 ```
 
+VoIP hunter with selective media capture on Linux:
+
+<!-- i18n:skip -->
+
+```bash
+sudo lc hunt voip --processor processor:55555 -i eth0 \
+  --rtp-ebpf --sip-port 5060 --tls-ca ca.crt
+```
+
+With `--rtp-ebpf`, RTP/RTCP endpoints are learned from matched calls' SDP;
+`--rtp-port-range` is unnecessary. `--sip-port` is optional and narrows signaling
+capture. Media is captured only after selection and endpoint publication, so
+earlier RTP is not buffered. An explicitly configured RTP range still restricts
+learned endpoints. See [selective media capture with eBPF](../part5-advanced/voip.md#selective-media-capture-with-ebpf).
+
 VoIP hunter with a custom RTP port range:
 
 <!-- i18n:skip -->

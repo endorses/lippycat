@@ -595,7 +595,7 @@ Inherits all `lc tap` flags, plus:
 | Flag                      | Type   | Default    | Description                                                                      |
 | ------------------------- | ------ | ---------- | -------------------------------------------------------------------------------- |
 | `--sip-user`              | string |            | Filter by SIP user                                                               |
-| `--sip-port`              | int    | `5060`     | SIP signaling port                                                               |
+| `--sip-port`              | string |            | Optional SIP port restriction, comma-separated                                   |
 | `--rtp-port-range`        | string |            | RTP port range                                                                   |
 | `--tcp-performance-mode`  | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency`               |
 | `--tcp-reassembly-shards` | int    | `1`        | Flow-sharded TCP reassembly assembler count                                      |
@@ -761,7 +761,7 @@ Inherits all `lc hunt` flags, plus:
 
 | Flag                     | Short | Type     | Default | Description                                                                      |
 | ------------------------ | ----- | -------- | ------- | -------------------------------------------------------------------------------- |
-| `--sip-port`             | `-S`  | int      | `5060`  | SIP signaling port                                                               |
+| `--sip-port`             | `-S`  | string   |         | Optional SIP port restriction, comma-separated                                   |
 | `--rtp-port-range`       | `-R`  | string   |         | RTP port range                                                                   |
 | `--pattern-algorithm`    |       | string   | `auto`  | Pattern matching: `auto`, `linear`, `aho-corasick`                               |
 | `--pattern-buffer-mb`    |       | int      | `64`    | Pattern buffer size (MB)                                                         |
@@ -1319,6 +1319,11 @@ These flags exist only on `lc hunt voip` and `lc tap voip`:
 | `--rtp-ebpf`                | `false`   | Enable Linux socket-level selected-media admission. |
 | `--rtp-ebpf-mode`           | `enforce` | `enforce` or `shadow`; does not enable the feature. |
 | `--rtp-ebpf-failure-policy` | `open`    | Runtime update failure policy, `open` or `closed`.  |
+
+With `--rtp-ebpf`, omit `--rtp-port-range` to learn RTP/RTCP endpoints from
+selected calls' SDP. `--sip-port` is optional; set it to narrow signaling capture
+(for example, `--sip-port 5060,5080`). An explicitly configured RTP range still
+excludes learned media endpoints outside that range.
 
 Enabling unavailable functionality is a startup error. Explicit `--filter`,
 `--sip-port`, `--udp-only`, and `--rtp-port-range` restrictions are retained;

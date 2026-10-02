@@ -30633,3 +30633,414 @@ msgstr ""
 "Portbereichs erkannt. Der VoIP-Paketprozessor korreliert RTP-Streams über "
 "die Call-ID mit SIP-Dialogen. GPU-Beschleunigung lagert, sofern verfügbar, "
 "den Musterabgleich für SIP-Benutzerfilterung aus."
+
+#: src/appendices/command-reference.md:598
+#: src/appendices/command-reference.md:764
+msgid "Optional SIP port restriction, comma-separated"
+msgstr "Optionale Beschränkung auf SIP-Ports, durch Kommas getrennt"
+
+#: src/appendices/command-reference.md:1313
+msgid "VoIP eBPF capture options"
+msgstr "VoIP-Erfassungsoptionen für eBPF"
+
+#: src/appendices/command-reference.md:1315
+msgid "These flags exist only on `lc hunt voip` and `lc tap voip`:"
+msgstr "Diese Flags sind nur für `lc hunt voip` und `lc tap voip` verfügbar:"
+
+#: src/appendices/command-reference.md:1319
+msgid "Enable Linux socket-level selected-media admission."
+msgstr "Zulassung ausgewählter Medien auf Socket-Ebene unter Linux aktivieren."
+
+#: src/appendices/command-reference.md:1319
+msgid "`--rtp-ebpf`"
+msgstr "`--rtp-ebpf`"
+
+#: src/appendices/command-reference.md:1320
+msgid "`--rtp-ebpf-mode`"
+msgstr "`--rtp-ebpf-mode`"
+
+#: src/appendices/command-reference.md:1320
+#: src/appendices/config-reference.md:940
+msgid "`enforce`"
+msgstr "`enforce`"
+
+#: src/appendices/command-reference.md:1320
+msgid "`enforce` or `shadow`; does not enable the feature."
+msgstr "`enforce` oder `shadow`; aktiviert die Funktion nicht."
+
+#: src/appendices/command-reference.md:1321
+msgid "Runtime update failure policy, `open` or `closed`."
+msgstr ""
+"Verhalten bei Aktualisierungsfehlern zur Laufzeit: `open` oder `closed`."
+
+#: src/appendices/command-reference.md:1321
+msgid "`--rtp-ebpf-failure-policy`"
+msgstr "`--rtp-ebpf-failure-policy`"
+
+#: src/appendices/command-reference.md:1321
+#: src/appendices/config-reference.md:941
+msgid "`open`"
+msgstr "`open`"
+
+#: src/appendices/command-reference.md:1323
+msgid ""
+"With `--rtp-ebpf`, omit `--rtp-port-range` to learn RTP/RTCP endpoints from "
+"selected calls' SDP. `--sip-port` is optional; set it to narrow signaling "
+"capture (for example, `--sip-port 5060,5080`). An explicitly configured RTP "
+"range still excludes learned media endpoints outside that range."
+msgstr ""
+"Lassen Sie bei `--rtp-ebpf` die Option `--rtp-port-range` weg, um RTP/RTCP-"
+"Endpunkte aus dem SDP ausgewählter Anrufe zu ermitteln. `--sip-port` ist "
+"optional; setzen Sie die Option, um die Erfassung der Signalisierung "
+"einzuschränken (zum Beispiel `--sip-port 5060,5080`). Ein ausdrücklich "
+"konfigurierter RTP-Portbereich schließt ermittelte Medienendpunkte außerhalb "
+"dieses Bereichs weiterhin aus."
+
+#: src/appendices/command-reference.md:1328
+msgid ""
+"Enabling unavailable functionality is a startup error. Explicit `--filter`, "
+"`--sip-port`, `--udp-only`, and `--rtp-port-range` restrictions are "
+"retained; generated default RTP ranges do not limit learned selected "
+"endpoints. See [VoIP capture](../part5-advanced/voip.md#selective-media-"
+"capture-with-ebpf) and the [configuration members](config-reference.md#voip-"
+"ebpf-media-admission)."
+msgstr ""
+"Das Aktivieren nicht verfügbarer Funktionalität führt zu einem Startfehler. "
+"Ausdrückliche Beschränkungen durch `--filter`, `--sip-port`, `--udp-only` "
+"und `--rtp-port-range` bleiben erhalten; automatisch erzeugte "
+"Standardbereiche für RTP schränken die ermittelten ausgewählten Endpunkte "
+"nicht ein. Siehe [VoIP-Erfassung](../part5-advanced/voip.md#selective-media-"
+"capture-with-ebpf) und [Konfigurationseinträge](config-reference.md#voip-"
+"ebpf-media-admission)."
+
+#: src/appendices/config-reference.md:931
+msgid "VoIP eBPF media admission"
+msgstr "Zulassung von VoIP-Medien mit eBPF"
+
+#: src/appendices/config-reference.md:933
+msgid ""
+"The optional Linux capture optimization is configured under "
+"`hunter.voip.rtp_ebpf` and `tap.voip.rtp_ebpf`. Only `enabled: true` "
+"activates it; setting `mode` or `failure_policy` alone does not."
+msgstr ""
+"Die optionale Optimierung der Paketerfassung unter Linux wird unter "
+"`hunter.voip.rtp_ebpf` und `tap.voip.rtp_ebpf` konfiguriert. Nur `enabled: "
+"true` aktiviert sie; das Setzen von `mode` oder `failure_policy` allein "
+"reicht nicht aus."
+
+#: src/appendices/config-reference.md:937
+msgid "Member"
+msgstr "Eintrag"
+
+#: src/appendices/config-reference.md:939
+msgid "Explicit activation for live VoIP capture."
+msgstr "Ausdrückliche Aktivierung für die Live-Erfassung von VoIP."
+
+#: src/appendices/config-reference.md:939
+msgid "`enabled`"
+msgstr "`enabled`"
+
+#: src/appendices/config-reference.md:940
+msgid "`enforce` or diagnostic `shadow`."
+msgstr "`enforce` oder `shadow` zur Diagnose."
+
+#: src/appendices/config-reference.md:940
+msgid "`mode`"
+msgstr "`mode`"
+
+#: src/appendices/config-reference.md:941
+msgid "Scoped runtime `open` or `closed` behavior."
+msgstr ""
+"Verhalten `open` oder `closed` zur Laufzeit im betroffenen Geltungsbereich."
+
+#: src/appendices/config-reference.md:941
+msgid "`failure_policy`"
+msgstr "`failure_policy`"
+
+#: src/appendices/config-reference.md:942
+msgid "Interface-to-domain mapping; unassigned interfaces share zero."
+msgstr ""
+"Zuordnung von Schnittstellen zu Domänen; nicht zugeordnete Schnittstellen "
+"teilen sich Domäne null."
+
+#: src/appendices/config-reference.md:942
+msgid "`interface_domains`"
+msgstr "`interface_domains`"
+
+#: src/appendices/config-reference.md:942
+msgid "`{}`"
+msgstr "`{}`"
+
+#: src/appendices/config-reference.md:943
+msgid "Distinct installed candidate endpoints."
+msgstr "Anzahl unterschiedlicher installierter Endpunktkandidaten."
+
+#: src/appendices/config-reference.md:943
+#: src/appendices/config-reference.md:947
+msgid "`40000`"
+msgstr "`40000`"
+
+#: src/appendices/config-reference.md:943
+msgid "`endpoint_capacity`"
+msgstr "`endpoint_capacity`"
+
+#: src/appendices/config-reference.md:944
+msgid "Eligible call lifetime owners."
+msgstr ""
+"Anzahl zulassungsberechtigter Anrufinstanzen als Eigentümer der Endpunkte."
+
+#: src/appendices/config-reference.md:944
+msgid "`owner_capacity`"
+msgstr "`owner_capacity`"
+
+#: src/appendices/config-reference.md:945
+msgid "Accepted RTP plus separate RTCP endpoints per owner."
+msgstr ""
+"Akzeptierte RTP-Endpunkte einschließlich separater RTCP-Endpunkte pro "
+"Eigentümer."
+
+#: src/appendices/config-reference.md:945
+msgid "`max_endpoints_per_owner`"
+msgstr "`max_endpoints_per_owner`"
+
+#: src/appendices/config-reference.md:946
+msgid "Retained unmatched dialog metadata records."
+msgstr "Gespeicherte Metadatensätze noch nicht ausgewählter Dialoge."
+
+#: src/appendices/config-reference.md:946
+msgid "`pending_dialog_capacity`"
+msgstr "`pending_dialog_capacity`"
+
+#: src/appendices/config-reference.md:947
+msgid "Retained metadata endpoints."
+msgstr "In Metadaten gespeicherte Endpunkte."
+
+#: src/appendices/config-reference.md:947
+msgid "`pending_endpoint_capacity`"
+msgstr "`pending_endpoint_capacity`"
+
+#: src/appendices/config-reference.md:948
+msgid "Pending metadata accounting bound."
+msgstr "Grenze für die Speicherbilanz ausstehender Metadaten."
+
+#: src/appendices/config-reference.md:948
+msgid "`8388608`"
+msgstr "`8388608`"
+
+#: src/appendices/config-reference.md:948
+msgid "`pending_bytes`"
+msgstr "`pending_bytes`"
+
+#: src/appendices/config-reference.md:949
+msgid "Pending metadata expiry."
+msgstr "Ablaufzeit ausstehender Metadaten."
+
+#: src/appendices/config-reference.md:949
+msgid "`pending_ttl`"
+msgstr "`pending_ttl`"
+
+#: src/appendices/config-reference.md:950
+msgid "Bounded expiry work per sweep."
+msgstr "Begrenzte Anzahl von Ablaufbereinigungen pro Durchlauf."
+
+#: src/appendices/config-reference.md:950
+msgid "`256`"
+msgstr "`256`"
+
+#: src/appendices/config-reference.md:950
+msgid "`expiration_batch`"
+msgstr "`expiration_batch`"
+
+#: src/appendices/config-reference.md:951
+msgid "Reconciliation interval."
+msgstr "Intervall für den Zustandsabgleich."
+
+#: src/appendices/config-reference.md:951
+msgid "`1s`"
+msgstr "`1s`"
+
+#: src/appendices/config-reference.md:951
+msgid "`retry_interval`"
+msgstr "`retry_interval`"
+
+#: src/appendices/config-reference.md:952
+msgid "Retained diagnostic samples."
+msgstr "Gespeicherte Diagnosestichproben."
+
+#: src/appendices/config-reference.md:952
+msgid "`shadow_evidence_capacity`"
+msgstr "`shadow_evidence_capacity`"
+
+#: src/appendices/config-reference.md:953
+msgid "Selected/answered-without-media diagnostic interval."
+msgstr ""
+"Diagnoseintervall für ausgewählte oder beantwortete Anrufe ohne Medien."
+
+#: src/appendices/config-reference.md:953
+msgid "`missing_media_interval`"
+msgstr "`missing_media_interval`"
+
+#: src/appendices/config-reference.md:955
+msgid ""
+"Positive resource limits and durations are required. Interface domains are "
+"below 4096. The same domain must contain related signaling and media. "
+"Explicit capture restrictions remain effective during shadow and runtime-"
+"open admission. These settings do not preserve pre-match RTP. See [selective "
+"VoIP media capture](../part5-advanced/voip.md#selective-media-capture-with-"
+"ebpf) for behavior and implementation status."
+msgstr ""
+"Ressourcengrenzen und Zeitspannen müssen positiv sein. Schnittstellendomänen "
+"müssen kleiner als 4096 sein. Zusammengehörige Signalisierung und Medien "
+"müssen derselben Domäne angehören. Ausdrückliche Beschränkungen der "
+"Paketerfassung bleiben im Shadow-Modus und bei offener Zulassung zur "
+"Laufzeit wirksam. Diese Einstellungen bewahren keine RTP-Pakete aus der Zeit "
+"vor einem Filtertreffer auf. Verhalten und Implementierungsstand sind unter "
+"[selektive VoIP-Medienerfassung](../part5-advanced/voip.md#selective-media-"
+"capture-with-ebpf) beschrieben."
+
+#: src/part3-distributed/hunt.md:178
+msgid "VoIP hunter with selective media capture on Linux:"
+msgstr "VoIP-Hunter mit selektiver Medienerfassung unter Linux:"
+
+#: src/part3-distributed/hunt.md:187 src/part3-distributed/tap.md:172
+msgid ""
+"With `--rtp-ebpf`, RTP/RTCP endpoints are learned from matched calls' SDP; "
+"`--rtp-port-range` is unnecessary. `--sip-port` is optional and narrows "
+"signaling capture. Media is captured only after selection and endpoint "
+"publication, so earlier RTP is not buffered. An explicitly configured RTP "
+"range still restricts learned endpoints. See [selective media capture with "
+"eBPF](../part5-advanced/voip.md#selective-media-capture-with-ebpf)."
+msgstr ""
+"Mit `--rtp-ebpf` werden RTP/RTCP-Endpunkte aus dem SDP passender Anrufe "
+"ermittelt; `--rtp-port-range` ist nicht erforderlich. `--sip-port` ist "
+"optional und schränkt die Erfassung der Signalisierung ein. Medien werden "
+"erst nach der Auswahl des Anrufs und der Veröffentlichung seiner Endpunkte "
+"erfasst; vorherige RTP-Pakete werden nicht gepuffert. Ein ausdrücklich "
+"konfigurierter RTP-Portbereich schränkt die ermittelten Endpunkte weiterhin "
+"ein. Siehe [selektive Medienerfassung mit eBPF](../part5-advanced/"
+"voip.md#selective-media-capture-with-ebpf)."
+
+#: src/part3-distributed/tap.md:163
+msgid "Selective media capture on Linux:"
+msgstr "Selektive Medienerfassung unter Linux:"
+
+#: src/part5-advanced/voip.md:299
+msgid "Selective media capture with eBPF"
+msgstr "Selektive Medienerfassung mit eBPF"
+
+#: src/part5-advanced/voip.md:301
+msgid ""
+"`hunt voip --rtp-ebpf` and `tap voip --rtp-ebpf` can reject unrelated media "
+"before libpcap delivers it for userspace decoding. This explicitly enabled "
+"Linux path keeps the libpcap reader and updates a persistent socket filter's "
+"maps as selected calls change. It does not restart capture for call "
+"activity. Existing userspace ownership, filter attribution, expiry and "
+"output checks remain authoritative."
+msgstr ""
+"`hunt voip --rtp-ebpf` und `tap voip --rtp-ebpf` können nicht zugehörige "
+"Medienpakete verwerfen, bevor libpcap sie zur Dekodierung an den Userspace "
+"übergibt. Diese ausdrücklich aktivierte Linux-Funktion verwendet weiterhin "
+"den libpcap-Reader und aktualisiert die Maps eines dauerhaft installierten "
+"Socket-Filters, wenn sich die ausgewählten Anrufe ändern. Die Paketerfassung "
+"wird bei Anrufaktivität nicht neu gestartet. Die bestehenden Prüfungen im "
+"Userspace für Anrufzuordnung, Filterzuordnung, Ablauf und Ausgabe bleiben "
+"maßgeblich."
+
+#: src/part5-advanced/voip.md:307
+msgid ""
+"This mode captures media only after call selection and endpoint publication. "
+"Bounded validated SDP metadata may be retained before selection; RTP history "
+"is not retained. Independent IP/CIDR filters and the configured no-filter "
+"policy continue to apply."
+msgstr ""
+"Dieser Modus erfasst Medien erst nach der Auswahl des Anrufs und der "
+"Veröffentlichung seiner Endpunkte. Vor der Auswahl können validierte SDP-"
+"Metadaten in begrenztem Umfang gespeichert werden; vorherige RTP-Pakete "
+"werden nicht gespeichert. Unabhängige IP/CIDR-Filter und das konfigurierte "
+"Verhalten bei fehlenden Filtern gelten weiterhin."
+
+#: src/part5-advanced/voip.md:312
+msgid ""
+"With `--rtp-ebpf`, you do not need `--rtp-port-range`: RTP and RTCP "
+"endpoints are learned from the selected call's SDP, including endpoints "
+"outside the generated default 10000–32768 range. Use `--sip-port` to narrow "
+"signaling capture to your SIP ports; it is optional, and omitting it "
+"preserves discovery on arbitrary ports. For example:"
+msgstr ""
+"Mit `--rtp-ebpf` benötigen Sie `--rtp-port-range` nicht: RTP- und RTCP-"
+"Endpunkte werden aus dem SDP des ausgewählten Anrufs ermittelt, auch "
+"außerhalb des automatisch erzeugten Standardbereichs 10000–32768. Mit `--sip-"
+"port` können Sie die Erfassung der Signalisierung auf Ihre SIP-Ports "
+"beschränken. Die Angabe ist optional; ohne sie bleibt die Erkennung auf "
+"beliebigen Ports möglich. Beispiel:"
+
+#: src/part5-advanced/voip.md:325
+msgid ""
+"If you explicitly set `--rtp-port-range`, it remains a capture restriction: "
+"learned media endpoints outside that range are excluded. An explicit `--"
+"filter` also remains in effect and must allow the signaling and media you "
+"want to capture."
+msgstr ""
+"Wenn Sie `--rtp-port-range` ausdrücklich setzen, bleibt der Bereich eine "
+"Beschränkung der Paketerfassung: Ermittelte Medienendpunkte außerhalb dieses "
+"Bereichs werden ausgeschlossen. Auch ein ausdrücklich gesetzter `--filter` "
+"bleibt wirksam und muss die gewünschte Signalisierung und die gewünschten "
+"Medien zulassen."
+
+#: src/part5-advanced/voip.md:329
+msgid ""
+"`--rtp-ebpf-mode=shadow` records bounded decisions while retaining dynamic "
+"media reception. Runtime update failures default to scoped broad admission, "
+"preserving explicit capture restrictions; `--rtp-ebpf-failure-policy=closed` "
+"keeps valid installed entries without opening. A failed mode-control write "
+"is reported separately. Enforcement resumes only after complete current-"
+"state reconciliation. Startup failure never silently enables shadow or broad "
+"capture."
+msgstr ""
+"`--rtp-ebpf-mode=shadow` protokolliert Entscheidungen in begrenztem Umfang, "
+"während der dynamische Medienempfang erhalten bleibt. Schlagen "
+"Aktualisierungen zur Laufzeit fehl, werden standardmäßig im betroffenen "
+"Geltungsbereich mehr Pakete zugelassen; ausdrückliche Beschränkungen der "
+"Paketerfassung bleiben wirksam. `--rtp-ebpf-failure-policy=closed` behält "
+"gültige installierte Einträge bei, ohne die Zulassung zu erweitern. Ein "
+"fehlgeschlagener Schreibzugriff zur Modussteuerung wird gesondert gemeldet. "
+"Die Filterdurchsetzung wird erst nach einem vollständigen Abgleich mit dem "
+"aktuellen Zustand fortgesetzt. Ein Startfehler aktiviert niemals "
+"stillschweigend den Shadow-Modus oder eine breitere Paketerfassung."
+
+#: src/part5-advanced/voip.md:336
+msgid ""
+"All interfaces share one observation domain by default. Explicit domain "
+"settings separate overlapping local traffic and must put related signaling/"
+"media together. Ethernet is supported; cooked `any` capture and explicit "
+"VLAN predicates are rejected. Fragments, complex extension chains and "
+"supported encapsulation may pass a counted compatibility path, reducing "
+"selectivity. Unknown packets and missing-media diagnostics do not open a "
+"domain."
+msgstr ""
+"Standardmäßig teilen sich alle Schnittstellen eine Beobachtungsdomäne. "
+"Ausdrückliche Domäneneinstellungen trennen überlappenden lokalen Verkehr; "
+"zusammengehörige Signalisierung und Medien müssen derselben Domäne "
+"zugeordnet sein. Ethernet wird unterstützt; Cooked-Capture über `any` und "
+"ausdrückliche VLAN-Prädikate werden abgelehnt. Fragmente, komplexe "
+"Erweiterungsheader-Ketten und unterstützte Kapselungen können einen separat "
+"gezählten Kompatibilitätspfad durchlaufen, was die Selektivität verringert. "
+"Unbekannte Pakete und Diagnosen zu fehlenden Medien erweitern die Zulassung "
+"einer Domäne nicht."
+
+#: src/part5-advanced/voip.md:343
+msgid ""
+"See the [configuration reference](../appendices/config-reference.md#voip-"
+"ebpf-media-admission) for all resource bounds. The repository's `docs/"
+"VOIP_EBPF_ADMISSION.md` provides platform, privilege, diagnostic and "
+"verification details; the implementation plan records current integration "
+"status. libpcap remains a cgo dependency, and cgo does not disable goroutine "
+"concurrency."
+msgstr ""
+"Alle Ressourcengrenzen finden Sie in der [Konfigurationsreferenz](../"
+"appendices/config-reference.md#voip-ebpf-media-admission). Die Datei `docs/"
+"VOIP_EBPF_ADMISSION.md` im Repository enthält Einzelheiten zu Plattformen, "
+"Berechtigungen, Diagnose und Überprüfung; der Implementierungsplan "
+"dokumentiert den aktuellen Integrationsstand. libpcap bleibt eine cgo-"
+"Abhängigkeit, und cgo verhindert nicht die nebenläufige Ausführung von "
+"Goroutinen."

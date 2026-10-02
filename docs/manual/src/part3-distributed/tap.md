@@ -160,6 +160,21 @@ VoIP capture narrowed to a SIP port:
 sudo lc tap voip -i eth0 --sip-port 5060 --insecure
 ```
 
+Selective media capture on Linux:
+
+<!-- i18n:skip -->
+
+```bash
+sudo lc tap voip -i eth0 --sip-user alicent \
+  --rtp-ebpf --sip-port 5060 --insecure
+```
+
+With `--rtp-ebpf`, RTP/RTCP endpoints are learned from matched calls' SDP;
+`--rtp-port-range` is unnecessary. `--sip-port` is optional and narrows signaling
+capture. Media is captured only after selection and endpoint publication, so
+earlier RTP is not buffered. An explicitly configured RTP range still restricts
+learned endpoints. See [selective media capture with eBPF](../part5-advanced/voip.md#selective-media-capture-with-ebpf).
+
 High-performance VoIP capture:
 
 <!-- i18n:skip -->

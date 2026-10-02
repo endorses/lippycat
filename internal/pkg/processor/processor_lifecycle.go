@@ -236,6 +236,10 @@ func (p *Processor) Start(ctx context.Context) (startErr error) {
 			return fmt.Errorf("failed to start upstream connection manager: %w", err)
 		}
 	}
+	// Release analysis state after an explicitly negotiated packet fallback.
+	p.eventAnalysisMu.Lock()
+	p.releaseUnusedEventAnalysisLocked()
+	p.eventAnalysisMu.Unlock()
 
 	// Start hunter monitor (heartbeat monitoring and cleanup)
 	p.hunterMonitor.Start(p.ctx)
@@ -375,9 +379,10 @@ func (p *Processor) Shutdown() error {
 			p.shutdownErr = errors.Join(p.shutdownErr, p.callLifecycle.Err())
 		}
 
-		if p.eventRuntime != nil {
-			p.eventRuntime.Close()
-		}
+		p.eventAnalysisMu.Lock()
+		p.eventAnalysisClosed = true
+		p.releaseUnusedEventAnalysisLocked()
+		p.eventAnalysisMu.Unlock()
 		// Stop reliable-ingress retries before closing the dispatcher. Any batch
 		// that has not crossed the volatile queue boundary remains in the WAL and
 		// is excluded from the delivered checkpoint below.

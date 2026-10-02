@@ -230,7 +230,7 @@ sudo lc tap tls -i eth0 \
 ### Upstream Forwarding
 
 - `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
-- `--forward-mode` - `packets` (default) or normalized `events`
+- `--forward-mode` - `packets` (default) or normalized `events`, for upstream forwarding and TUI monitoring
 - `--event-fallback-to-packets` - Explicitly permit compatibility fallback to raw packets
 - `--event-delivery-profile` - `reliable` (default) or `memory-only`
 - `--event-spool-dir` - Recoverable upstream event spool directory
@@ -246,6 +246,16 @@ mode analyzes locally and sends normalized metadata without raw packet bytes or
 file content. The upstream processor consequently cannot create PCAP evidence,
 serve upstream packet views, inject packets into a virtual interface, or rerun
 analysis from the original payload.
+
+In packet mode, the TUI derives its Events view from received packets. In event
+mode, tap analyzes for a configured upstream destination or a connected event
+monitor and sends only events to monitors. `--forward-mode events` also applies
+without `--processor`; analysis stops when the last event monitor disconnects
+unless another configured output needs it. Explicit local structured logs can
+also enable analysis. Without a forwarding destination, connected monitor, or
+local output, tap counts captured packets but skips protocol parsing and batching. Monitoring
+batches identify where analysis occurs so clients do not derive duplicate events
+when a configured server output already produces them.
 
 Unlike a hunter, a tap can retain packet evidence locally while forwarding
 events. Unified, rotating, and per-call PCAP writers and their post-write hooks

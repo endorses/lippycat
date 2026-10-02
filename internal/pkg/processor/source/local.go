@@ -319,6 +319,9 @@ type LocalSource struct {
 	// Optional filtering
 	appFilter       ApplicationFilter
 	selectionPolicy callregistry.SelectionPolicy
+	// packetDemand reports whether a configured output needs captured packets.
+	// The callback is read under mu and invoked without holding the source lock.
+	packetDemand func() bool
 
 	// Optional VoIP processing for SIP/RTP metadata extraction
 	voipProcessor VoIPProcessor
@@ -462,6 +465,24 @@ func NewLocalSource(cfg LocalSourceConfig) *LocalSource {
 		selectionPolicy: callregistry.StickySelectionPolicy{},
 		captureError:    make(chan error, 1),
 	}
+}
+
+// SetPacketDemand sets a dynamic output-demand callback before Start. A nil
+// callback preserves unconditional processing for standalone source consumers.
+// Packets received while demand is false still contribute to capture statistics,
+// but bypass analysis, filtering, normalization, and batching. Already admitted
+// batches retain their normal processing and lifecycle completion semantics.
+func (s *LocalSource) SetPacketDemand(demand func() bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.packetDemand = demand
+}
+
+func (s *LocalSource) hasPacketDemand() bool {
+	s.mu.Lock()
+	demand := s.packetDemand
+	s.mu.Unlock()
+	return demand == nil || demand()
 }
 
 // SetApplicationFilter sets an optional application-layer filter.
@@ -848,6 +869,10 @@ func (s *LocalSource) batchingLoop() {
 	}
 
 	for pktInfo := range packetBuffer.Receive() {
+		if !s.hasPacketDemand() {
+			s.stats.AddCaptured()
+			continue
+		}
 		idx := 0
 		if pkt := pktInfo.Packet; pkt != nil {
 			netLayer := pkt.NetworkLayer()
@@ -924,6 +949,12 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			// TCP SIP packet injected from TCP reassembly handler
 			// These packets already have metadata attached, so skip VoIP/DNS processing
 			s.stats.AddCaptured()
+			if !s.hasPacketDemand() {
+				if injectedPkt.AfterProcess != nil {
+					injectedPkt.AfterProcess()
+				}
+				continue
+			}
 
 			// Convert to protobuf format
 			pbPkt := convertPacketInfo(injectedPkt.PacketInfo)
@@ -1017,6 +1048,9 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 
 			// Count ALL packets received from buffer (before filtering)
 			s.stats.AddCaptured()
+			if !s.hasPacketDemand() {
+				continue
+			}
 
 			// Route TCP packets to assembler if set (for TCP SIP reassembly)
 			// TCP packets will come back via tcpInjectionChan when SIP messages are complete

@@ -290,6 +290,18 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 	if raw.TimestampNs == 0 {
 		ts = r.cfg.Now()
 	}
+	if packet == nil {
+		packet = gopacket.NewPacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.NoCopy)
+	}
+	flowMetadata, supported := capturedFlowMetadata(packet, raw.Metadata)
+	if len(raw.Data) > 0 && !supported && (packet.ErrorLayer() == nil || capturedNonIPFrame(packet)) {
+		// Generic capture includes non-IP frames, unsupported IP protocols, and
+		// fragments without a transport header. They cannot produce flow events,
+		// but their timestamps must still advance offline connection expiry.
+		// Unknown non-IP EtherTypes also produce decoder errors. Keep
+		// metadata-only inputs and failures decoding IP on the validation path.
+		return ts, nil
+	}
 	// Transported captures carry interface provenance per packet. Preserve an
 	// explicitly supplied source value, but fill it from the packet when the
 	// batch-level source cannot describe packets from multiple interfaces.
@@ -306,14 +318,11 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 	if len(raw.MatchedFilterIds) > 0 {
 		scope = events.CaptureScopeFiltered
 	}
-	env, err := r.envelope(source, raw.Metadata, ts, scope, source.Partial || scope == events.CaptureScopeFiltered)
+	env, err := r.envelope(source, flowMetadata, ts, scope, source.Partial || scope == events.CaptureScopeFiltered)
 	if err != nil {
 		return time.Time{}, err
 	}
 	r.stats.Observed++
-	if packet == nil {
-		packet = gopacket.NewPacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.NoCopy)
-	}
 	observation, radiusErr := grpcadapter.RADIUSFromProto(raw)
 	if radiusErr != nil {
 		logger.Debug("Skipping inconsistent RADIUS event provenance", "error", radiusErr)
@@ -353,6 +362,74 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 		r.emitMetadata(env, raw.Metadata)
 	}
 	return ts, nil
+}
+
+// capturedNonIPFrame recognizes a decoded link header that selects a protocol
+// outside IP flow analysis. A decoder error in that protocol does not make the
+// frame an invalid IP flow. Encapsulation headers alone are not enough evidence:
+// their payload could be a malformed IP packet or an incomplete VLAN header.
+func capturedNonIPFrame(packet gopacket.Packet) bool {
+	if packet.NetworkLayer() != nil {
+		return false
+	}
+	var etherType layers.EthernetType
+	found := false
+	for _, layer := range packet.Layers() {
+		switch header := layer.(type) {
+		case *layers.IPv4, *layers.IPv6:
+			return false
+		case *layers.Ethernet:
+			etherType, found = header.EthernetType, true
+		case *layers.LinuxSLL:
+			etherType, found = header.EthernetType, true
+		case *layers.Dot1Q:
+			if len(header.LayerContents()) >= 4 {
+				etherType, found = header.Type, true
+			}
+		case *layers.SNAP:
+			etherType, found = header.Type, true
+		}
+	}
+	if !found {
+		return false
+	}
+	switch etherType {
+	case layers.EthernetTypeARP, layers.EthernetTypeEAPOL,
+		layers.EthernetTypeCiscoDiscovery, layers.EthernetTypeNortelDiscovery,
+		layers.EthernetTypeLinkLayerDiscovery, layers.EthernetTypeEthernetCTP,
+		layers.EthernetTypePPPoEDiscovery:
+		return true
+	default:
+		// Unregistered EtherTypes have no decoder; this is ordinary traffic
+		// outside the event model, not a failed attempt to decode an IP flow.
+		return etherType.LayerType() == gopacket.LayerTypeZero
+	}
+}
+
+// capturedFlowMetadata distinguishes decoded flow protocols from other valid
+// capture traffic. ICMP type/code occupy the port fields only in event flow
+// tuples; leave the shared packet metadata unchanged for other consumers.
+func capturedFlowMetadata(packet gopacket.Packet, metadata *data.PacketMetadata) (*data.PacketMetadata, bool) {
+	var transport string
+	var icmpType, icmpCode uint8
+	if icmp, ok := packet.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4); ok && len(icmp.LayerContents()) >= 8 {
+		transport, icmpType, icmpCode = "icmp", icmp.TypeCode.Type(), icmp.TypeCode.Code()
+	} else if icmp, ok := packet.Layer(layers.LayerTypeICMPv6).(*layers.ICMPv6); ok && len(icmp.LayerContents()) >= 4 {
+		transport, icmpType, icmpCode = "icmpv6", icmp.TypeCode.Type(), icmp.TypeCode.Code()
+	} else {
+		switch packet.TransportLayer().(type) {
+		case *layers.TCP, *layers.UDP:
+			return metadata, true
+		default:
+			return metadata, false
+		}
+	}
+	flowMetadata := proto.Clone(metadata).(*data.PacketMetadata)
+	if flowMetadata.Transport == "" {
+		flowMetadata.Transport = transport
+	}
+	flowMetadata.SrcPort, flowMetadata.DstPort = uint32(icmpType), uint32(icmpCode)
+	return flowMetadata, true
 }
 
 func applicationProtocolHint(meta *data.PacketMetadata) string {

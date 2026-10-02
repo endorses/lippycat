@@ -243,11 +243,12 @@ func (f *BPFFilter) FilterBatch(batch *data.PacketBatch) *data.PacketBatch {
 
 	// Return new batch with filtered packets
 	return &data.PacketBatch{
-		HunterId:    batch.HunterId,
-		Sequence:    batch.Sequence,
-		TimestampNs: batch.TimestampNs,
-		Packets:     filtered,
-		Stats:       batch.Stats,
+		HunterId:             batch.HunterId,
+		Sequence:             batch.Sequence,
+		TimestampNs:          batch.TimestampNs,
+		Packets:              filtered,
+		Stats:                batch.Stats,
+		MonitorEventAnalysis: batch.MonitorEventAnalysis,
 	}
 }
 

@@ -161,6 +161,13 @@ lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client
 lc watch remote -P localhost:55555 --insecure
 ```
 
+Packet-mode nodes send packets, and the TUI derives its Events view locally.
+Event-mode nodes send normalized events without packet rows. A standalone tap
+with `--forward-mode events` starts analysis when an event monitor connects and
+releases it after the last disconnect unless another output needs it. Monitoring
+batches identify existing server analysis to avoid duplicate events. Use an
+updated TUI and node together for packet-mode event derivation.
+
 **Flags:**
 
 - `-P, --processor` - Processor address (host:port) to connect directly

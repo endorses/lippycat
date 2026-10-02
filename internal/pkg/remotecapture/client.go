@@ -208,9 +208,10 @@ func (c *Client) detectNodeType() {
 	ctx, cancel := context.WithTimeout(c.ctx, 2*time.Second)
 	defer cancel()
 
-	_, err := c.mgmtClient.GetHunterStatus(ctx, &management.StatusRequest{})
+	status, err := c.mgmtClient.GetHunterStatus(ctx, &management.StatusRequest{})
 	if err == nil {
 		c.nodeType = NodeTypeProcessor
+		c.nodeID = status.GetProcessorStats().GetProcessorId()
 	} else {
 		// If GetHunterStatus fails, it's a hunter
 		c.nodeType = NodeTypeHunter

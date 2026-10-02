@@ -1317,6 +1317,12 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 
 // SubscribeCorrelatedCalls streams correlated call updates to monitoring clients (Data Service)
 func (p *Processor) SubscribeCorrelatedCalls(req *data.SubscribeRequest, stream data.DataService_SubscribeCorrelatedCallsServer) error {
+	if !p.packetMonitoringAllowed() {
+		<-stream.Context().Done()
+		return nil
+	}
+	p.correlatedCallSubscribers.Add(1)
+	defer p.correlatedCallSubscribers.Add(-1)
 	clientID := req.ClientId
 	if clientID == "" {
 		clientID = fmt.Sprintf("correlation-subscriber-%d", time.Now().UnixNano())

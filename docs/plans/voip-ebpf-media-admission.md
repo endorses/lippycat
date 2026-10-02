@@ -117,7 +117,7 @@ Resolve the narrow libpcap integration before implementing a new capture backend
 This phase ends with a reproducible attachment/decision test and a selected binding
 strategy, not an open-ended comparison of backend prototypes.
 
-- [ ] Inspect the implementation baseline and preserve concurrent work. Re-read
+- [x] Inspect the implementation baseline and preserve concurrent work. Re-read
       lifecycle sources before modifying them; do not revert or absorb unrelated
       edits into this feature.
 - [ ] Add a supported Linux live-handle attachment operation to the pinned
@@ -445,3 +445,22 @@ input or endpoint overflow. Its protocol references are
 [RFC 5761](https://www.rfc-editor.org/rfc/rfc5761.html).
 Topology integration and broad verification are still pending; these focused tests
 do not establish end-to-end readiness.
+
+The neutral admission controller and configuration layer also pass:
+
+```sh
+go test -race ./internal/pkg/mediaadmission ./internal/pkg/sipflow ./internal/pkg/cmdutil
+```
+
+This covers owner-token reuse, shared endpoints, bounded metadata, failed map and
+control writes, complete-set reconciliation, failed/rejected selector publication,
+and CLI/YAML opt-in precedence. Validated SIP metadata observation runs before
+unmatched-message return; admission errors are diagnostic and do not replace
+userspace selection or output authority.
+
+The live session and topology wiring remain under development. In particular,
+tap currently rejects explicit additional observation domains until its userspace
+routing is wired; removing that temporary guard requires per-domain registry,
+selection-cache, TCP reassembly, and finalization tests. This is unfinished work,
+not a change to the requested scope. Kernel and binding integration tests are being
+recorded separately before the complete project checks.

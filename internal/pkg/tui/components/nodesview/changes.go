@@ -53,6 +53,7 @@ type observedNode struct {
 	cpuUntil, memoryUntil         time.Time
 	filtersUntil                  time.Time
 	capturedUntil, forwardedUntil time.Time
+	activityUntil                 time.Time
 	statusUntil                   time.Time
 }
 
@@ -200,17 +201,23 @@ func (t *ChangeTracker) metrics(n *observedNode, h types.HunterInfo, unavailable
 		}
 		if h.PacketsCaptured < n.captured || h.PacketsForwarded < n.sent {
 			n.changes.CapturedChanged, n.changes.ForwardedChanged = false, false
+			n.changes.Activity = false
 		} else {
-			if h.PacketsCaptured > n.captured {
+			// The activity dot follows raw traffic; cell accents follow the
+			// rounded values that the operator can actually see changing.
+			if h.PacketsCaptured > n.captured || h.PacketsForwarded > n.sent {
+				n.changes.Activity = true
+				n.activityUntil = now.Add(metricHighlightDuration)
+			}
+			if h.PacketsCaptured > n.captured && FormatPacketNumber(h.PacketsCaptured) != FormatPacketNumber(n.captured) {
 				n.changes.CapturedChanged = true
 				n.capturedUntil = now.Add(metricHighlightDuration)
 			}
-			if h.PacketsForwarded > n.sent {
+			if h.PacketsForwarded > n.sent && FormatPacketNumber(h.PacketsForwarded) != FormatPacketNumber(n.sent) {
 				n.changes.ForwardedChanged = true
 				n.forwardedUntil = now.Add(metricHighlightDuration)
 			}
 		}
-		n.changes.Activity = n.changes.CapturedChanged || n.changes.ForwardedChanged
 	}
 	if h.CPUPercent < 0 {
 		n.changes.CPU = MetricChange{}
@@ -306,7 +313,9 @@ func (t *ChangeTracker) Advance(now time.Time) bool {
 		if !now.Before(n.forwardedUntil) {
 			n.changes.ForwardedChanged = false
 		}
-		n.changes.Activity = n.changes.CapturedChanged || n.changes.ForwardedChanged
+		if !now.Before(n.activityUntil) {
+			n.changes.Activity = false
+		}
 		if !now.Before(n.statusUntil) {
 			n.changes.Label, n.changes.StatusChanged = "", false
 		}

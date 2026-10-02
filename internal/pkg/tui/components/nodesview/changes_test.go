@@ -41,6 +41,40 @@ func TestCounterAccentsAdvanceAndExpireIndependently(t *testing.T) {
 	assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key], "counter reset clears both accents")
 }
 
+func TestCounterAccentsOnlyFollowDisplayedChanges(t *testing.T) {
+	for _, scale := range []uint64{1000, 1000000, 1000000000} {
+		t.Run(FormatPacketNumber(scale), func(t *testing.T) {
+			now := time.Unix(100, 0)
+			p, key := trackerFixture()
+			hunter := &p[0].Hunters[0]
+			hunter.PacketsCaptured, hunter.PacketsForwarded = scale, scale
+			var tracker ChangeTracker
+			tracker.Observe(p, now)
+			hunter.PacketsCaptured++
+			hunter.PacketsForwarded++
+			tracker.Observe(p, now)
+			assert.Equal(t, NodeChanges{Activity: true}, tracker.Snapshot()[key], "raw traffic alone must not highlight unchanged rounded totals")
+			hunter.PacketsCaptured, hunter.PacketsForwarded = scale+scale/10, scale+scale/10
+			tracker.Observe(p, now.Add(100*time.Millisecond))
+			assert.Equal(t, NodeChanges{Activity: true, CapturedChanged: true, ForwardedChanged: true}, tracker.Snapshot()[key])
+			hunter.PacketsCaptured++
+			hunter.PacketsForwarded++
+			tracker.Observe(p, now.Add(900*time.Millisecond))
+			tracker.Advance(now.Add(1100 * time.Millisecond))
+			assert.Equal(t, NodeChanges{Activity: true}, tracker.Snapshot()[key], "sub-rounding increments must not extend cell highlights")
+			tracker.Advance(now.Add(1900 * time.Millisecond))
+			assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key])
+			// A decrease can stay in the same rounded bucket, but still resets
+			// the raw baseline and clears activity.
+			hunter.PacketsCaptured++
+			tracker.Observe(p, now.Add(2*time.Second))
+			hunter.PacketsCaptured--
+			tracker.Observe(p, now.Add(2100*time.Millisecond))
+			assert.Equal(t, NodeChanges{}, tracker.Snapshot()[key])
+		})
+	}
+}
+
 func TestChangesMetricBaselinesAndDisplayedValues(t *testing.T) {
 	now := time.Unix(100, 0)
 	p, key := trackerFixture()

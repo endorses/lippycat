@@ -163,3 +163,11 @@ Follow-up validation passed: `go test -tags all ./internal/pkg/tui/...`,
 Rendering regressions inspect effective ANSI colors in all three views with
 selected/unselected nodes and normal/quiet modes; tracker tests verify staggered
 counter expiry and reset suppression.
+
+## Rounded counter correction
+
+- [x] Trigger captured/forwarded cell highlights only when their formatted totals change; raw increments within the same rounded value must not start or extend a highlight. Keep the activity dot tied to raw traffic and retain reset suppression.
+- [x] Verify K/M/G rounding, highlight expiry during continued traffic, and counter resets; format and commit the fix with this plan.
+
+Correction validation passed: `go test -tags all ./internal/pkg/tui/...` and
+`go vet -tags all ./internal/pkg/tui/...`.

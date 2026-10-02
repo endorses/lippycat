@@ -33,8 +33,8 @@ type TaskDefinitionState struct {
 	Candidate bool
 	Conflict  bool
 	// ConflictDisarmed makes the retained definition diagnostic only until X1 resolution.
-	ConflictDisarmed bool
-	ConflictReason   string
+	ConflictDisarmed bool   `json:"ConflictDisarmed,omitempty"`
+	ConflictReason   string `json:"ConflictReason,omitempty"`
 }
 
 func authoritativeDefinition(task *InterceptTask) TaskDefinitionState {

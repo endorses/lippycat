@@ -1,6 +1,7 @@
 package li
 
 import (
+	"fmt"
 	"slices"
 	"sort"
 
@@ -105,4 +106,13 @@ func equivalentDeliveryDefinition(a, b *InterceptTask) bool {
 	}
 	ca, cb := canonicalizeTaskDefinition(a), canonicalizeTaskDefinition(b)
 	return ca.XID == cb.XID && ca.RADIUSScope == cb.RADIUSScope && ca.RADIUSMACProfile == cb.RADIUSMACProfile && ca.DeliveryType == cb.DeliveryType && slices.Equal(ca.Targets, cb.Targets) && slices.Equal(ca.DestinationIDs, cb.DestinationIDs)
+}
+
+// Retained generic identities require an explicit complete window even in
+// compatibility mode. RADIUS uses its specialized activation validation.
+func validateReactivationDefinition(task *InterceptTask) error {
+	if !IsRADIUSTask(task) && !task.Definition.Completeness.Complete() {
+		return fmt.Errorf("%w: retained-task reactivation requires complete mediation details", ErrInvalidTask)
+	}
+	return nil
 }

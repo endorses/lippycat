@@ -17,12 +17,44 @@ type conflictReportState struct {
 	task          *InterceptTask
 	acknowledged  bool
 	retryAt       time.Time
+	retryDelay    time.Duration
 	cancel        context.CancelFunc
 	failureLogged bool
 }
 
 const conflictReportRetryInterval = 30 * time.Second
+
+// The cap is an operational retry policy, not a delivery deadline. Reports keep
+// retrying at the cap until the ADMF acknowledges the current conflict episode.
+const conflictReportRetryMax = 5 * time.Minute
 const conflictReportDetails = "Task definition conflict: enforcement restricted to common authorized scope; send an explicit X1 change to resolve"
+const disarmedConflictReportDetails = "Task definition conflict: task disarmed; explicitly deactivate, then activate a complete definition with unchanged protected identity, or use a new XID"
+
+func (s *conflictReportState) deferRetry(now time.Time) {
+	if s.retryDelay == 0 {
+		s.retryDelay = conflictReportRetryInterval
+	} else {
+		s.retryDelay = min(2*s.retryDelay, conflictReportRetryMax)
+	}
+	s.retryAt = now.Add(s.retryDelay)
+}
+
+// Earliest-due selection prevents one failing task from starving older work.
+// The UUID tie break makes equal deadlines deterministic without another queue.
+// Caller holds conflictReportMu.
+func (m *Manager) nextConflictReportLocked() *conflictReportState {
+	var selected *conflictReportState
+	for id, state := range m.conflictReports {
+		if state.acknowledged {
+			continue
+		}
+		if selected == nil || state.retryAt.Before(selected.retryAt) ||
+			(state.retryAt.Equal(selected.retryAt) && id.String() < selected.task.XID.String()) {
+			selected = state
+		}
+	}
+	return selected
+}
 
 // Called only for a successfully established conflict, under administration
 // ordering. It performs no network I/O and never re-enters administration.
@@ -107,20 +139,11 @@ func (m *Manager) runConflictReports() {
 			m.conflictReportMu.Unlock()
 			return
 		}
-		var selected *conflictReportState
+		selected := m.nextConflictReportLocked()
 		var next time.Time
-		now := time.Now()
-		for _, state := range m.conflictReports {
-			if state.acknowledged {
-				continue
-			}
-			if !state.retryAt.After(now) {
-				selected = state
-				break
-			}
-			if next.IsZero() || state.retryAt.Before(next) {
-				next = state.retryAt
-			}
+		if selected != nil && selected.retryAt.After(time.Now()) {
+			next = selected.retryAt
+			selected = nil
 		}
 		if selected == nil {
 			m.conflictReportMu.Unlock()
@@ -143,12 +166,16 @@ func (m *Manager) runConflictReports() {
 		ctx, cancel := context.WithTimeout(m.recoveryCtx, m.syncAttemptTimeout())
 		selected.cancel = cancel
 		xid := selected.task.XID
+		details := conflictReportDetails
+		if selected.task.Definition.ConflictDisarmed {
+			details = disarmedConflictReportDetails
+		}
 		m.conflictReportMu.Unlock()
 		var err error
 		if m.conflictReportSend != nil {
-			err = m.conflictReportSend(ctx, xid, conflictReportDetails)
+			err = m.conflictReportSend(ctx, xid, details)
 		} else {
-			err = m.x1Client.ReportTaskWarning(ctx, xid, conflictReportDetails)
+			err = m.x1Client.ReportTaskWarning(ctx, xid, details)
 		}
 		cancel()
 		m.conflictReportMu.Lock()
@@ -158,7 +185,7 @@ func (m *Manager) runConflictReports() {
 			if err == nil {
 				logger.Info("LI task definition conflict acknowledged", "xid", xid)
 			} else {
-				selected.retryAt = time.Now().Add(conflictReportRetryInterval)
+				selected.deferRetry(time.Now())
 				if !selected.failureLogged && m.recoveryCtx.Err() == nil {
 					logger.Warn("LI task definition conflict report pending", "xid", xid, "reason", "report_failed")
 					selected.failureLogged = true

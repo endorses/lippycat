@@ -1302,6 +1302,9 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 			if !equivalentReactivationIdentity(existing, task) {
 				return fmt.Errorf("%w: XID %s", ErrReactivationIdentityConflict, task.XID)
 			}
+			if err := validateReactivationDefinition(task); err != nil {
+				return err
+			}
 			isReactivation = true
 			previousGeneration = existing.ActivationGeneration
 		default:
@@ -1401,10 +1404,13 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 	m.lifecycleMu.Lock()
 	defer m.lifecycleMu.Unlock()
-	var disarmedConflict bool
+	// A disarmed conflict retains diagnostic scope, not authorization that a
+	// patch can restore. Recovery requires deactivation and complete activation.
+	if held, err := m.registry.GetTaskDetails(xid); err == nil && held.Definition.ConflictDisarmed {
+		return fmt.Errorf("%w: conflict-disarmed task requires deactivation and complete activation", ErrModifyNotAllowed)
+	}
 	if mod != nil {
 		if held, err := m.registry.GetTaskDetails(xid); err == nil && !IsRADIUSTask(held) {
-			disarmedConflict = held.Definition.ConflictDisarmed
 			copyMod := *mod
 			d := held.Definition
 			d.Source, d.Restored, d.Conflict = DefinitionPush, false, false
@@ -1419,12 +1425,7 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 			mod = &copyMod
 		}
 	}
-	var err error
-	if disarmedConflict {
-		err = m.resolveDisarmedConflictLocked(xid, mod)
-	} else {
-		err = m.modifyTask(xid, mod)
-	}
+	err := m.modifyTask(xid, mod)
 	if err == nil {
 		m.clearConflictReport(xid)
 	}

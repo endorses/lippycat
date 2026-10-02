@@ -24,11 +24,11 @@ func (m *Manager) promoteTaskDefinitionLocked(task *InterceptTask) error {
 	if err != nil {
 		return err
 	}
-	if IsRADIUSTask(previous) {
+	if IsRADIUSTask(previous) || previous.Definition.ConflictDisarmed {
 		return ErrModifyNotAllowed
 	}
 	if previous.Status == TaskStatusSuspended {
-		// Restored definitions and conflict-disarmed tasks are validated without
+		// Restored definitions are validated without
 		// opening the live admission barrier.
 		view.tasks[task.XID].Status = TaskStatusPending
 	}
@@ -94,6 +94,7 @@ func (m *Manager) promoteTaskDefinitionLocked(task *InterceptTask) error {
 	m.registry.tasks[task.XID] = cloneInterceptTask(candidate)
 	delete(m.registry.unconfirmedPending, task.XID)
 	m.registry.mu.Unlock()
+	delete(m.persistenceCandidates, task.XID)
 	if candidate.ActivationGeneration != previous.ActivationGeneration {
 		m.notifyTaskModified(previous)
 	}

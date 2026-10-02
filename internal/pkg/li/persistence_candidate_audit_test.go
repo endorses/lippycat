@@ -57,6 +57,11 @@ func TestPersistedReplayCandidateRequiresFreshAuthorizationAfterReservedFailure(
 			} else {
 				require.NotContains(t, restarted.persistedActive, xid)
 				require.NoError(t, restarted.DeactivateTask(xid))
+				// The failed reserved activation now has a retained tombstone.
+				// Fresh authorization must explicitly supply a complete window;
+				// this direct input declares a known immediate start and open end.
+				task = cloneInterceptTask(task)
+				task.Definition = authoritativeDefinition(task)
 			}
 			require.False(t, restarted.ReplayTaskAuthorized(xid, 7))
 			require.NoError(t, restarted.activateStartupTask(task))

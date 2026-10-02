@@ -155,6 +155,15 @@ func (m *Manager) restorePersistedStateLocked() (result error) {
 				task.Definition.Completeness = DefinitionCompleteness{Mediation: !task.StartTime.IsZero(), Start: !task.StartTime.IsZero(), End: !task.EndTime.IsZero(), EndProvided: !task.EndTime.IsZero(), Implicit: task.ImplicitDeactivationAllowed}
 			}
 			task.Definition.Restored = true
+		}
+		// Terminal records retain their identity and reactivation requirements
+		// even after the old cutoff elapses. Treating them as unregistered replay
+		// candidates would turn the next push into an unchecked first activation.
+		if task.Status == TaskStatusDeactivated || task.Status == TaskStatusFailed {
+			tasks[task.XID] = task
+			continue
+		}
+		if !IsRADIUSTask(task) {
 			if task.Definition.ConflictDisarmed {
 				tasks[task.XID] = task
 				continue
@@ -177,11 +186,9 @@ func (m *Manager) restorePersistedStateLocked() (result error) {
 			continue
 		}
 		switch task.Status {
-		case TaskStatusPending, TaskStatusDeactivated, TaskStatusFailed:
+		case TaskStatusPending:
 			tasks[task.XID] = cloneInterceptTask(task)
-			if task.Status == TaskStatusPending {
-				unconfirmedPending[task.XID] = true
-			}
+			unconfirmedPending[task.XID] = true
 		case TaskStatusActive, TaskStatusSuspended:
 			active[task.XID], candidates[task.XID] = cloneInterceptTask(task), cloneInterceptTask(task)
 		}

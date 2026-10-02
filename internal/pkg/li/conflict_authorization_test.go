@@ -236,7 +236,14 @@ func TestConflictResolutionRequiresExplicitMutationAndFreshGeneration(t *testing
 				current, err := m.GetTaskDetails(initial.XID)
 				require.NoError(t, err)
 				require.True(t, current.Definition.Conflict)
-				// An authenticated mutation may accept the retained effective definition.
+				if disarm {
+					require.ErrorIs(t, m.ModifyTaskX1(initial.XID, &x1.TaskModification{DeliveryType: ptrX1Delivery(x1.DeliveryX2andX3)}), x1.ErrModifyNotAllowed)
+					after, err := m.GetTaskDetails(initial.XID)
+					require.NoError(t, err)
+					require.Equal(t, current, after)
+					return
+				}
+				// An authenticated mutation may accept a nonempty effective definition.
 				require.NoError(t, m.ModifyTaskX1(initial.XID, &x1.TaskModification{DeliveryType: ptrX1Delivery(x1.DeliveryX2andX3)}))
 				resolved, err := m.GetTaskDetails(initial.XID)
 				require.NoError(t, err)
@@ -352,14 +359,16 @@ func TestConflictStateCodecCompatibleOptionalFields(t *testing.T) {
 	state := readManagerStateTest(t, m)
 	encoded, err := MarshalStateSnapshot(state)
 	require.NoError(t, err)
-	// The previous version omitted these optional fields entirely.
-	require.Contains(t, string(encoded), `,"ConflictDisarmed":false,"ConflictReason":""`)
-	encoded = bytes.ReplaceAll(encoded, []byte(`,"ConflictDisarmed":false,"ConflictReason":""`), nil)
+	// Default-valued fields stay absent for old readers.
 	require.NotContains(t, string(encoded), "ConflictDisarmed")
 	require.NotContains(t, string(encoded), "ConflictReason")
 	restored, err := UnmarshalStateSnapshot(encoded)
 	require.NoError(t, err)
 	require.False(t, restored.Tasks[0].Definition.ConflictDisarmed)
+	// Earlier conflict-aware writers included explicit defaults; still accept them.
+	explicit := bytes.ReplaceAll(encoded, []byte(`"Conflict":false`), []byte(`"Conflict":false,"ConflictDisarmed":false,"ConflictReason":""`))
+	_, err = UnmarshalStateSnapshot(explicit)
+	require.NoError(t, err)
 	in := conflictSnapshot(state.Tasks[0])
 	in.Task.DeliveryType = DeliveryX2Only
 	require.NoError(t, m.applySnapshotDefinition(in))

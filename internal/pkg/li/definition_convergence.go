@@ -40,12 +40,18 @@ func (m *Manager) applySnapshotDefinition(in *SnapshotTask) error {
 		return m.applyConflictAuthorizationLocked(held, in, live)
 	}
 	if !in.Completeness.Complete() {
-		if live && !m.pendingNeedsConfirmation(task.XID) {
-			return nil
-		} // No omitted field or partial replacement can clear authority.
 		if held != nil {
-			// Retain the complete known definition, including targets/destinations;
-			// an incomplete pull supplies no replacement authorization.
+			// A missing window cannot grant authority, but mandatory supplied
+			// selectors, task destinations and delivery still restrict it.
+			comparison := cloneInterceptTask(task)
+			comparison.StartTime, comparison.EndTime = held.StartTime, held.EndTime
+			comparison.ImplicitDeactivationAllowed = held.ImplicitDeactivationAllowed
+			if held.Definition.Conflict || !equivalentTaskDefinition(held, comparison) || snapshotHasUnconfirmedDestination(held, in) {
+				return m.applyConflictAuthorizationLocked(held, in, live)
+			}
+			if live && !m.pendingNeedsConfirmation(task.XID) {
+				return nil
+			}
 			task = cloneInterceptTask(held)
 		}
 		if in.confirmedDestinations != nil {
@@ -67,16 +73,8 @@ func (m *Manager) applySnapshotDefinition(in *SnapshotTask) error {
 		logPartialDefinitionAdmission(task)
 		return nil
 	}
-	if held != nil && held.Definition.Source == DefinitionPush {
-		unconfirmedDestination := false
-		if in.confirmedDestinations != nil {
-			for _, did := range held.DestinationIDs {
-				if !in.confirmedDestinations[did] {
-					unconfirmedDestination = true
-				}
-			}
-		}
-		if held.Definition.Conflict || !equivalentTaskDefinition(held, task) || unconfirmedDestination {
+	if held != nil && (held.Definition.Source == DefinitionPush || held.Definition.Conflict) {
+		if held.Definition.Conflict || !equivalentTaskDefinition(held, task) || snapshotHasUnconfirmedDestination(held, in) {
 			return m.applyConflictAuthorizationLocked(held, in, live)
 		}
 		// Exact confirmation never transfers ownership from a push to a pull.
@@ -315,4 +313,16 @@ func logPartialDefinitionAdmission(task *InterceptTask) {
 	logger.Warn("LI task admitted from partial ADMF snapshot", "xid", task.XID,
 		"provenance", task.Definition.Source, "reason", "incomplete_snapshot", "window", window,
 		"explicit_deactivation_required", task.EndTime.IsZero() || !task.ImplicitDeactivationAllowed)
+}
+
+// Global destination existence alone is insufficient evidence for delivery.
+func snapshotHasUnconfirmedDestination(held *InterceptTask, in *SnapshotTask) bool {
+	if in.confirmedDestinations != nil {
+		for _, did := range held.DestinationIDs {
+			if !in.confirmedDestinations[did] {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -285,6 +285,8 @@ func TestPartialRestoreCannotUseUnconfirmedRetainedDestination(t *testing.T) {
 	m := newStateTestManager(t, cfg, nil)
 	require.NoError(t, m.CreateDestination(&Destination{DID: did, Address: "127.0.0.1", Port: 8443}))
 	applyConvergence(t, m, convergenceDetails(xid, did, true))
+	original, err := m.GetTaskDetails(xid)
+	require.NoError(t, err)
 	m.Stop()
 	next := newStateTestManager(t, cfg, nil)
 	require.NoError(t, next.restorePersistedState())
@@ -292,7 +294,34 @@ func TestPartialRestoreCannotUseUnconfirmedRetainedDestination(t *testing.T) {
 	partial, err := ConvertSnapshotTask(convergenceDetails(xid, other, false))
 	require.NoError(t, err)
 	partial.confirmedDestinations = map[uuid.UUID]bool{other: true}
-	require.ErrorIs(t, next.applySnapshotDefinition(partial), ErrDestinationNotFound)
+	var revoked uint64
+	next.SetTaskConflictCallback(func(task *InterceptTask) error {
+		revoked = task.ActivationGeneration
+		return nil
+	})
+	// The confirmed replacement DID is not in the held task. Intersecting
+	// per-task authorization disarms the task instead of ignoring withdrawal.
+	require.NoError(t, next.applySnapshotDefinition(partial))
+	current, err := next.GetTaskDetails(xid)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusSuspended, current.Status)
+	require.True(t, current.Definition.ConflictDisarmed)
+	require.Equal(t, "no_confirmed_destinations", current.Definition.ConflictReason)
+	require.Equal(t, original.ActivationGeneration, revoked)
+	require.Greater(t, current.ActivationGeneration, original.ActivationGeneration)
 	require.Zero(t, next.FilterCount())
-	require.False(t, next.ReplayTaskAuthorized(xid, 1))
+	for _, generation := range []uint64{original.ActivationGeneration, current.ActivationGeneration} {
+		lease, admitted := next.AcquireTaskAdmission(xid, generation)
+		if lease != nil {
+			lease.Release()
+		}
+		require.False(t, admitted, "neither DID may receive product from the disarmed task")
+		require.False(t, next.ReplayTaskAuthorized(xid, generation))
+	}
+	next.conflictReportMu.Lock()
+	report := next.conflictReports[xid]
+	next.conflictReportMu.Unlock()
+	require.NotNil(t, report)
+	require.True(t, report.task.Definition.ConflictDisarmed)
+	require.False(t, report.acknowledged)
 }

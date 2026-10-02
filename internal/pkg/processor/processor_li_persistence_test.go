@@ -39,6 +39,9 @@ type persistentProcessorFixture struct {
 	includeTask             bool
 	endTime                 time.Time
 	partialSnapshot         bool
+	extraDID                uuid.UUID
+	extraTarget             string
+	includeExtraScope       bool
 	explicitDeactivation    bool
 	taskDeliveryType        string
 	destinationDeliveryType string
@@ -122,6 +125,12 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 				DId: &did, DeliveryType: destinationDelivery, DeliveryAddress: &schema.DeliveryAddress{IpAddressAndPort: &schema.IPAddressPort{Address: &schema.IPAddress{IPv4Address: &ip}, Port: &schema.Port{TCPPort: &f.port}}},
 			}}}},
 		}
+		if f.extraDID != uuid.Nil {
+			extraDID := schema.UUID(f.extraDID.String())
+			response.ListOfDestinationResponseDetails.DestinationResponseDetails = append(response.ListOfDestinationResponseDetails.DestinationResponseDetails, &schema.DestinationResponseDetails{DestinationDetails: &schema.DestinationDetails{
+				DId: &extraDID, DeliveryType: destinationDelivery, DeliveryAddress: &schema.DeliveryAddress{IpAddressAndPort: &schema.IPAddressPort{Address: &schema.IPAddress{IPv4Address: &ip}, Port: &schema.Port{TCPPort: &f.port}}},
+			}})
+		}
 		if f.includeTask {
 			var end *schema.QualifiedMicrosecondDateTime
 			start := schema.QualifiedMicrosecondDateTime("2020-01-02T03:04:05.000000Z")
@@ -138,6 +147,12 @@ func newPersistentProcessorFixture(t *testing.T) *persistentProcessorFixture {
 				XId: &xid, DeliveryType: taskDelivery, ImplicitDeactivationAllowed: &implicit, ListOfMediationDetails: mediation,
 				TargetIdentifiers: &schema.ListOfTargetIdentifiers{TargetIdentifier: []*schema.TargetIdentifier{{SipUri: &target}}}, ListOfDIDs: &schema.ListOfDids{DId: []*schema.UUID{&did}},
 			}, TaskStatus: &schema.TaskStatus{ProvisioningStatus: "active"}}}
+		}
+		if f.includeTask && f.includeExtraScope {
+			details := response.ListOfTaskResponseDetails.TaskResponseDetails[0].TaskDetails
+			extraDID, extraTarget := schema.UUID(f.extraDID.String()), schema.SIPURI(f.extraTarget)
+			details.ListOfDIDs.DId = append(details.ListOfDIDs.DId, &extraDID)
+			details.TargetIdentifiers.TargetIdentifier = append(details.TargetIdentifiers.TargetIdentifier, &schema.TargetIdentifier{SipUri: &extraTarget})
 		}
 		body, err := xml.Marshal(response)
 		f.mu.Unlock()

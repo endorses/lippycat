@@ -20,27 +20,35 @@ func resolveConflictAuthorization(held, snapshot *InterceptTask, confirmed map[u
 	common := cloneInterceptTask(held)
 	common.Definition.Conflict = true
 	common.Definition.ConflictReason = "common_scope"
-	if snapshot.StartTime.After(common.StartTime) {
-		common.StartTime = snapshot.StartTime
-	}
-	cutoff, incoming := TaskAuthorizationCutoff(held), TaskAuthorizationCutoff(snapshot)
-	if cutoff.IsZero() || (!incoming.IsZero() && incoming.Before(cutoff)) {
-		cutoff = incoming
-	}
-	if !cutoff.IsZero() {
-		common.EndTime, common.ImplicitDeactivationAllowed = cutoff, true
-		common.Definition.Completeness.EndProvided = true
-		common.Definition.Completeness.Implicit = true
-		if !now.Before(cutoff) {
-			return nil, "expired"
+	if snapshot.Definition.Completeness.Complete() {
+		if !held.Definition.Completeness.Complete() {
+			common.Definition.Completeness = snapshot.Definition.Completeness
 		}
-		if !common.StartTime.IsZero() && !common.StartTime.Before(cutoff) {
-			return nil, "empty_window"
+		common.Definition.Candidate = false
+		if snapshot.StartTime.After(common.StartTime) {
+			common.StartTime = snapshot.StartTime
 		}
-	} else if !common.EndTime.IsZero() && !common.StartTime.Before(common.EndTime) {
-		// Nominal ends cannot create an invalid descriptive interval or expiry.
-		common.EndTime = time.Time{}
-		common.Definition.Completeness.EndProvided = false
+		cutoff, incoming := TaskAuthorizationCutoff(held), TaskAuthorizationCutoff(snapshot)
+		if cutoff.IsZero() || (!incoming.IsZero() && incoming.Before(cutoff)) {
+			cutoff = incoming
+		}
+		if !cutoff.IsZero() {
+			common.EndTime, common.ImplicitDeactivationAllowed = cutoff, true
+			common.Definition.Completeness.EndProvided = true
+			common.Definition.Completeness.Implicit = true
+			if !now.Before(cutoff) {
+				return nil, "expired"
+			}
+			if !common.StartTime.IsZero() && !common.StartTime.Before(cutoff) {
+				return nil, "empty_window"
+			}
+		} else if !common.EndTime.IsZero() && !common.StartTime.Before(common.EndTime) {
+			// Nominal ends cannot create an invalid descriptive interval or expiry.
+			common.EndTime = time.Time{}
+			common.Definition.Completeness.EndProvided = false
+		}
+	} else if cutoff := TaskAuthorizationCutoff(held); !cutoff.IsZero() && !now.Before(cutoff) {
+		return nil, "expired"
 	}
 	common.Targets = nil
 	snapshotTargets := canonicalizeTargets(snapshot.Targets)
@@ -80,12 +88,29 @@ func (m *Manager) applyConflictAuthorizationLocked(held *InterceptTask, in *Snap
 	m.replayMu.Lock()
 	delete(m.replayConfirmed, held.XID)
 	m.replayMu.Unlock()
+	if common != nil && held.Definition.Candidate && !in.Completeness.Complete() {
+		if err := m.storeDefinitionCandidateLocked(common); err != nil {
+			return err
+		}
+		m.queueConflictReport(common)
+		return nil
+	}
 	if !live {
 		restored := cloneInterceptTask(held)
 		restored.Status = TaskStatusSuspended
 		m.registry.mu.Lock()
+		if restored.Definition.Candidate {
+			// Never-armed candidates can have generation zero, which is valid
+			// only in their pending candidate state. Preserve that state while
+			// preparing the durable result, with lifecycle promotion barred.
+			restored.Status = TaskStatusPending
+			m.registry.unconfirmedPending[held.XID] = true
+		}
 		m.registry.tasks[held.XID] = restored
 		m.registry.mu.Unlock()
+	}
+	if common != nil && !in.Completeness.Complete() && m.config.ADMFCompleteTaskContract && (!live || m.pendingNeedsConfirmation(held.XID)) {
+		return m.restrictUnconfirmedDefinitionLocked(held, common)
 	}
 	if live && held.Definition.ConflictDisarmed {
 		m.queueConflictReport(held)
@@ -136,6 +161,7 @@ func (m *Manager) disarmConflictLocked(held *InterceptTask, reason string) error
 		return nil
 	}
 	closed := cloneInterceptTask(previous)
+	closed.Definition.Candidate = false
 	closed.Definition.Conflict = true
 	closed.Definition.ConflictDisarmed = true
 	closed.Definition.ConflictReason = reason
@@ -152,37 +178,11 @@ func (m *Manager) disarmConflictLocked(held *InterceptTask, reason string) error
 	m.registry.tasks[closed.XID] = closed
 	m.registry.generations[closed.XID] = max(m.registry.generations[closed.XID], closed.ActivationGeneration)
 	m.registry.mu.Unlock()
+	delete(m.persistenceCandidates, closed.XID)
 	m.notifyTaskModified(previous)
 	if err := m.filters.RemoveFiltersForTask(closed.XID); err != nil {
 		return err
 	}
 	m.notifyCommittedTask(closed)
 	return nil
-}
-
-// resolveDisarmedConflictLocked applies an explicit authenticated mutation to a
-// diagnostic-only suspended definition. It validates in a detached view, then
-// uses promotion to publish a fresh generation and policy atomically.
-func (m *Manager) resolveDisarmedConflictLocked(xid uuid.UUID, mod *TaskModification) error {
-	view := m.prospectiveRegistry(xid)
-	previous, err := view.GetTaskDetails(xid)
-	if err != nil {
-		return err
-	}
-	view.tasks[xid].Status = TaskStatusPending
-	if err := view.ModifyTask(xid, mod); err != nil {
-		return err
-	}
-	candidate, err := view.GetTaskDetails(xid)
-	if err != nil {
-		return err
-	}
-	candidate.Definition.Conflict, candidate.Definition.ConflictDisarmed = false, false
-	candidate.Definition.ConflictReason = ""
-	// The promotion helper can validate a suspended conflict only in its private
-	// view. Existing suspended tasks outside this policy remain non-modifiable.
-	if !previous.Definition.ConflictDisarmed {
-		return ErrModifyNotAllowed
-	}
-	return m.promoteTaskDefinitionLocked(candidate)
 }

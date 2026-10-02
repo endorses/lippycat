@@ -336,7 +336,11 @@ func TestReconcile_StreakResetsWhenTaskReappears(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, buildGetAllDetailsResponseXML(nil, tasks))
+		// This test varies task membership only. Confirm the unchanged DID
+		// so reappearance does not independently withdraw authorization.
+		fmt.Fprint(w, buildGetAllDetailsResponseXML([]*schema.DestinationResponseDetails{
+			makeDestinationResponseDetails(testDestDID, "10.0.0.1", 8443),
+		}, tasks))
 	})
 
 	store := newStubFilterStore()

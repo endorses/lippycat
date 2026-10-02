@@ -255,6 +255,9 @@ func (m *Manager) activatePersistentTaskLocked(task *InterceptTask, startup bool
 			if !equivalentReactivationIdentity(previous, task) {
 				return ErrReactivationIdentityConflict
 			}
+			if err := validateReactivationDefinition(task); err != nil {
+				return err
+			}
 			kind = StateTaskReactivate
 		default:
 			return ErrTaskDefinitionConflict

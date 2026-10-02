@@ -444,6 +444,10 @@ identity is unchanged. The protected identity is the XID, delivery type, and
 canonical set of target type/value pairs; target order and exact duplicates do
 not matter. Destination IDs, mediation start/end times, and lifecycle options
 may be replaced, but the complete replacement must pass current validation.
+Generic retained-task reactivation requires a complete mediation window even
+when `--li-admf-complete-task-contract` is disabled. An explicitly open end is
+valid; omitted mediation details are not. This requirement does not change
+compatibility-mode first activation or an equivalent active/pending retry.
 
 If a retained task's protected identity differs, activation fails closed with
 error 100 and the stable description `retained task's interception identity
@@ -523,6 +527,13 @@ terminating fault) until a complete definition supplies its lifecycle fields.
 Partial pulls never clear a known start, end, or explicit implicit-deactivation
 value. A present, complete mediation definition with no end is explicitly
 open-ended; omission of the mediation definition is not.
+The mandatory targets, task DID list, and delivery type in a partial pull still
+restrict a held definition. The NE intersects those fields with the held scope,
+retains its known window, and reports differences as a conflict. A DID that
+remains configured globally but is absent from this task is not authorized for
+that task. An empty intersection disarms it. Partial input cannot arm a strict
+candidate or confirm a restored task under the complete-task contract; any
+restrictions are retained while confirmation remains pending.
 
 Enable `--li-admf-complete-task-contract` only after establishing that the ADMF
 returns complete task definitions, including mediation start and optional end.
@@ -572,27 +583,94 @@ of the held and snapshot definitions, both live and after restart:
 An empty or expired intersection disarms the task and retains conflict diagnostics.
 A future start remains pending without capture filters. Repeated pulls may
 restrict further but cannot restore withdrawn scope. An exact later pull does not
-clear the conflict. Resolve it through an authenticated X1 `ModifyTask` supplying
-the intended scope, or explicitly deactivate it. Push ownership remains intact;
+clear the conflict. An active or pending task with a nonempty narrowed definition
+can be modified through authenticated X1 `ModifyTask`; omitted fields retain the
+effective narrowed values. A conflict-disarmed task rejects every `ModifyTask`,
+including a routine end-time renewal or a modification supplying all mutable
+fields. Its retained definition is diagnostic scope and cannot safely serve as
+the base of a patch. Use the recovery procedure below. Push ownership remains
+intact;
 replay stays unconfirmed while the conflict is unresolved. Narrowing changes the
 authorization generation and revokes affected old-generation queued delivery;
 bytes already written cannot be recalled. Failed narrowing closes admission
-rather than restoring wider authorization.
+process-wide until restart and reconciliation. Current administrative transactions
+share a durable owner, and a failed reservation, revocation, or filter transaction
+does not establish durable task-local isolation. Removing a filter alone is not
+enough to reopen admission safely. Successful narrowing leaves unrelated tasks
+running; the global barrier applies to failures, not ordinary conflicts.
+
+#### Recovering a narrowed or disarmed task
+
+| Task condition                                                                            | Authenticated recovery operation                                                                                                                                      |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Active/pending with nonempty narrowed scope; intended change is supported by modification | Send `ModifyTask` with the intended changed fields. An end-only renewal preserves narrowed targets, destinations, delivery type, and start.                           |
+| Conflict-disarmed, or start must change; retained targets and delivery type are unchanged | Successfully `DeactivateTask`, then send a complete `ActivateTask` for the same XID. Include the intended mediation window, targets, destinations, and delivery type. |
+| Lifecycle recovery must change retained targets or delivery type                          | Successfully deactivate the old XID, then activate a complete definition under a new XID.                                                                             |
+
+For example, if a snapshot moves a task's start into the future, `ModifyTask`
+cannot restore the earlier start. Deactivate it and activate a complete definition
+with the intended start and unchanged protected identity. If target narrowing
+removed a selector and lifecycle recovery must restore it, use a new XID for the
+replacement rather than changing the old tombstone's identity.
+
+Do not send the activation until deactivation has succeeded. If an operation
+fails or the process stops between operations, read back the task state and
+complete recovery through X1; do not edit persisted records. A complete activation
+can explicitly specify no end, and an omitted `implicitDeactivationAllowed`
+retains its established false default. Complete does not mean time-bounded.
+
+Disarmed modification returns X1 error 100 (`modification not allowed`). An
+incomplete generic reactivation returns the existing invalid-task error mapping.
+Clients that previously omitted mediation details on retained-task reactivation
+must now send them, including in compatibility mode. RADIUS retains its separate
+activation contract. An equivalent active/pending activation retry is still a
+no-op. Recovery reserves fresh authorization generations and does not authorize
+old-generation X2/X3 queues or replay. Neither an equal snapshot nor deactivation
+erases the retained protected identity.
+
 
 Conflict state is persisted; report acknowledgment is process-local. Entry,
 restoration, and meaningful scope changes log a warning and queue a schema-valid
 `Warning` task report. A single manager worker sends reports with bounded client
-retries and retries failed reports after 30 seconds until a valid correlated ADMF
-acknowledgment arrives. Equivalent polls do not create duplicate work or warnings.
+retries and retries failed reports with exponential backoff: 30 seconds, 1 minute,
+2 minutes, 4 minutes, then every 5 minutes until a valid correlated ADMF
+acknowledgment arrives. The cap is a retry policy, not a delivery deadline.
+The oldest pending deadline is serviced first. Equivalent polls do not create
+duplicate work or warnings and do not reset backoff.
 Restart reports unresolved conflicts again. Resolution cancels obsolete reporting,
 and acknowledgment does not clear the enforcement conflict.
 
-Existing state files remain readable. New conflict-disarming metadata preserves
-withdrawn scope across restart. The strict codec in older binaries rejects the
-new metadata fields, so newly written state is not backward-readable by those
-binaries. Withhold persistence rollout until the
-conflict authorization regressions are verified for the deployed build. The same
-correction is required for live conflicts even when persistence is disabled.
+Existing state files remain readable, including the explicit false/empty conflict
+fields written by `3b387355`. The writer now omits default-valued
+`ConflictDisarmed` and `ConflictReason`, allowing unaffected state to be decoded
+by `702c2c3f`. Non-default conflict metadata remains mandatory evidence: older
+readers reject it, and it must not be stripped to make downgrade appear to work.
+Successful decoding alone does not establish safe authorization after downgrade.
+
+#### Persistence backup and rollback
+
+Before an upgrade, stop the relevant processor/tap and delivery owners. Back up
+administrative state and the applicable X2/X3 journal directories as one
+consistent set, including controls, checkpoints, sequence/usage history, and
+storage metadata. Record the matching binary version and configuration. Retain
+every required encryption key separately under appropriate access controls.
+Copying only the main state file is insufficient.
+
+For rollback, keep the owners stopped while restoring the matching binary,
+configuration, and complete consistent backup set. Never place an older
+administrative snapshot over newer journals. Authenticated storage does not
+detect a coherent rollback: the backup may omit later withdrawals or refer to
+older generations. Establish current ADMF authority during startup reconciliation
+before interception and apply the existing exact task/destination generation,
+expiry, and replay-approval checks before replay. If current authority cannot be
+established safely, keep interception and replay disarmed.
+
+A downgrade to `702c2c3f` or `3b387355` also restores that binary's known
+authorization limitations. A readable backup is not evidence that those defects
+are safe for a deployment. Where the older build cannot enforce current
+restrictions, keep LI stopped and recover on a corrected build. This procedure
+does not promise a safe downgrade to an affected binary or authorize manual
+removal of conflict metadata.
 
 RADIUS tasks keep their specialized reconciliation,
 authorization, and read-back behavior and are excluded from these generic

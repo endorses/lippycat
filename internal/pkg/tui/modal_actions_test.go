@@ -193,7 +193,7 @@ func TestModalActionsOfflineCancelRetainsCleanupOwnership(t *testing.T) {
 				require.Equal(t, offline.Cancelling, m.offlineProgress.State)
 			}
 			// Disabled cancellation stays visible and a repeated click cannot call cancel again.
-			m, cmd = pressModalAction(t, m, "( Cancelling")
+			m, cmd = pressModalAction(t, m, "Cancelling")
 			require.Nil(t, cmd)
 			require.Equal(t, 1, cancellations)
 			require.NotNil(t, m.activeModal(), "cleanup still owns the modal")
@@ -216,7 +216,7 @@ func TestModalActionsOfflineCleanupRetryAndQuit(t *testing.T) {
 			require.False(t, m.offlineCleanupFailed)
 			require.False(t, m.uiState.Quitting, "quit must wait for cleanup")
 			// Pressing the disabled pending control cannot launch another cleanup command.
-			m, duplicate := pressModalAction(t, m, "( Cancelling")
+			m, duplicate := pressModalAction(t, m, "Cancelling")
 			require.Nil(t, duplicate)
 			result := retry()
 			require.IsType(t, offlineCleanupMsg{}, result)
@@ -262,7 +262,7 @@ func TestModalActionsOfflineCancelWaitsForWorker(t *testing.T) {
 		t.Fatal("worker must retain cleanup ownership until released")
 	default:
 	}
-	m, cmd = pressModalAction(t, m, "( Cancelling")
+	m, cmd = pressModalAction(t, m, "Cancelling")
 	require.Nil(t, cmd)
 	releaseWorker()
 	updated, cleanup := m.Update(<-completed)

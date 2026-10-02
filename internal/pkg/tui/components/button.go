@@ -78,20 +78,21 @@ func layoutActionBar(actions []ModalAction, focus string, width int, theme theme
 			label += " · " + action.Shortcut
 		}
 		label = ansi.Truncate(label, width-4, "…")
-		left, right := "[ ", " ]"
-		style := lipgloss.NewStyle().Foreground(theme.Foreground)
+		// Filled surfaces include the padding in both rendering and hit testing.
+		// Keep every state the same size so focusing a button cannot move it.
+		left, right := "  ", "  "
+		style := lipgloss.NewStyle().Background(theme.BorderColor).Foreground(theme.Background)
 		if action.Kind == ButtonPrimary {
-			style = style.Bold(true).Foreground(theme.InfoColor)
+			style = style.Background(theme.InfoColor).Bold(true)
 		}
 		if action.Kind == ButtonDanger {
-			style = style.Bold(true).Foreground(theme.ErrorColor)
+			style = style.Background(theme.ErrorColor).Bold(true)
 		}
 		if action.Disabled {
-			left, right = "( ", " )"
-			style = lipgloss.NewStyle().Foreground(theme.StatusBarFg).Faint(true)
+			style = lipgloss.NewStyle().Background(theme.StatusBarBg).Foreground(theme.StatusBarFg).Strikethrough(true)
 		} else if action.ID == focus {
-			left, right = "> ", " <"
-			style = style.Background(theme.SelectionBg).Foreground(theme.SelectionFg).Bold(true)
+			left = "▸ "
+			style = style.Background(theme.SelectionBg).Foreground(theme.SelectionFg).Bold(true).Underline(true)
 		}
 		text := left + label + right
 		cells := ansi.StringWidth(text)

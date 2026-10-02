@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
+	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,6 +57,9 @@ func buttonPress(point image.Point) tea.MouseMsg {
 }
 
 func TestButtonsUseRenderedCellGeometry(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 	m := newButtonTestModal()
 	m.options.Actions[0].Label = "保存 e\u0301"
 	for _, width := range []int{83, 44, 25} {
@@ -67,7 +72,7 @@ func TestButtonsUseRenderedCellGeometry(t *testing.T) {
 				continue
 			}
 			line := ansi.Cut(lines[hit.Bounds.Min.Y], hit.Bounds.Min.X, hit.Bounds.Max.X)
-			require.True(t, strings.HasPrefix(line, "[ ") || strings.HasPrefix(line, "( ") || strings.HasPrefix(line, "> "), line)
+			require.True(t, strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "▸ "), line)
 			require.Equal(t, hit.Bounds.Dx(), ansi.StringWidth(line))
 		}
 		// The displayed button padding is clickable; the gap after it is not.

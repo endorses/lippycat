@@ -24,11 +24,13 @@ results, validation, asynchronous operations, and cancellation cleanup intact.
 | Scrollable list | Wheel scrolls the list under the pointer                       | Existing page and navigation keys remain                                                                                           |
 | Modal backdrop  | Dismisses only the visible modal layer through the shared host | Existing Esc cancellation semantics remain                                                                                         |
 
-Buttons show a clear action label and, when useful, its shortcut, for example
-`[ Cancel · Esc ] [ Apply · Enter ]`. Use theme colors and visible boundaries;
-focus, disabled state, and destructive actions must remain distinguishable
-without relying only on color. Hover feedback is optional when mouse motion is
-available; it must not be required to discover or activate controls.
+Buttons show a clear action label and, when useful, its shortcut. Render them
+as filled rectangular surfaces with two cells of horizontal padding, separated
+by an unfilled gap. Use neutral, primary, and destructive background colors.
+Focus adds a leading triangle and underline without changing button dimensions;
+disabled buttons use a muted surface and struck-through text. Action labels
+continue to name destructive operations explicitly. Hover feedback is optional
+when mouse motion is available; it must not be required to discover or activate controls.
 
 Single-click selects, and an explicit button confirms. Add double-click shortcuts
 for protocol application, directory navigation, and opening files in open mode,

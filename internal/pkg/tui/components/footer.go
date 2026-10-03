@@ -173,9 +173,6 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		keybinds := []TabKeybind{
 			{Key: "d", Description: detailLabel, ShortDesc: detailShort, TinyDesc: detailTiny, Essential: true},
 		}
-		if f.detailsFocused {
-			keybinds = append(keybinds, TabKeybind{Key: "Esc", Description: "back", ShortDesc: "back", Essential: true})
-		}
 		keybinds = append(keybinds, TabKeybind{Key: "/", Description: "filter", ShortDesc: "flt", Essential: true})
 
 		// Conditional keybinds based on view mode

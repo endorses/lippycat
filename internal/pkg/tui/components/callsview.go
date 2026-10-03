@@ -17,6 +17,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
+// CallsTableMinWidth fits the ten minimum columns (50 cells), nine separators,
+// and the table border and padding (six cells).
+const CallsTableMinWidth = 65
+
 // ExtractSIPURI extracts the SIP URI from a header value, removing display names and parameters
 // Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "sip:alicent@domain.com"
 // Example: "<sip:robb@example.org>;tag=456" -> "sip:robb@example.org"

@@ -35,3 +35,6 @@ were fixed and covered by regressions.
 
 - [x] Expand event endpoint and origin columns with available pane width, and
       verify contraction and cached rendering across width changes.
+
+- [x] Support Home/g and End/G in all focused details and base call layout
+      transitions on the minimum width its table actually needs.

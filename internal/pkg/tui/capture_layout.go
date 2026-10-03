@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
 
 type captureRect struct{ X, Y, Width, Height int }
@@ -72,7 +73,7 @@ func (m Model) captureLayout() captureLayout {
 		listMin, detailMin = 64, 40
 	}
 	if m.uiState.ViewMode == "calls" {
-		listMin, detailMin = 48, 40
+		listMin, detailMin = components.CallsTableMinWidth, 40
 	}
 	if w >= listMin+detailMin && h >= 8 {
 		dw := min(80, w-listMin)

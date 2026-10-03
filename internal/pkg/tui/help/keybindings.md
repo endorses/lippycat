@@ -78,6 +78,9 @@ layout restores the previous following setting. Use `End` in the list to resume
 following after browsing history. Long values wrap and packet hex rows adapt
 to the pane width. Very short terminals reduce padding and header/tab chrome.
 
+When packet, event, or call details have focus, `Home`/`g` scrolls to the top and
+`End`/`G` scrolls to the bottom of the details without changing the selected item.
+
 ### Filter Mode
 
 | Key       | Action                |

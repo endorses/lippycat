@@ -125,6 +125,16 @@ func (d *DetailsPanel) Update(msg tea.Msg) tea.Cmd {
 	if !d.ready {
 		return nil
 	}
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.Type {
+		case tea.KeyHome:
+			d.viewport.GotoTop()
+			return nil
+		case tea.KeyEnd:
+			d.viewport.GotoBottom()
+			return nil
+		}
+	}
 	var cmd tea.Cmd
 	d.viewport, cmd = d.viewport.Update(msg)
 	return cmd

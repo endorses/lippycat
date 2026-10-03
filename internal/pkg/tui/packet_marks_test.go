@@ -124,7 +124,7 @@ func TestPacketMarksRetainBytesAndExportHiddenEvictedSnapshot(t *testing.T) {
 	cmd := m.proceedWithSave(path)
 	require.True(t, m.uiState.SaveInProgress)
 	require.False(t, m.uiState.StreamingSave)
-	m.clearPacketMarks() // Export owns the submission snapshot even after clearing.
+	m = markKey(t, m, 'u') // Export owns the submission snapshot even after unmarking.
 	result := runMarkedSave(t, cmd)
 	require.NoError(t, result.Error)
 	require.Equal(t, uint64(2), result.PacketsSaved)
@@ -222,4 +222,27 @@ func TestMarkedExportLateStreamingCompletionKeepsGuard(t *testing.T) {
 	require.True(t, m.exportRunning())
 	m = markKey(t, m, 'w')
 	require.False(t, m.uiState.FileDialog.IsActive(), "late stop completion must not admit another save")
+}
+
+func TestUnmarkAllPacketsKeyboardAndFooter(t *testing.T) {
+	for _, action := range []string{"keyboard", "footer"} {
+		t.Run(action, func(t *testing.T) {
+			m := markedPacketModel(t)
+			m = markKey(t, m, 'm')
+			m.uiState.PacketList.SetCursor(3)
+			m = markKey(t, m, 'm')
+			before := m.uiState.PacketList.GetPackets()
+			if action == "keyboard" {
+				m = markKey(t, m, 'u')
+			} else {
+				m = clickFooterHint(t, m, "u:")
+			}
+			require.Empty(t, m.packetMarks.records)
+			require.Zero(t, m.packetMarks.bytes)
+			require.Zero(t, m.packetMarks.anchor)
+			require.Equal(t, before, m.uiState.PacketList.GetPackets())
+			require.Equal(t, uint64(3), m.uiState.PacketList.LogicalCursor())
+			require.NotContains(t, m.uiState.Footer.View(), "unmark")
+		})
+	}
 }

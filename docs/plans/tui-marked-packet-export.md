@@ -31,3 +31,7 @@ Verified with the TUI, components, packet-store, and offline package tests, focu
 race checks for marking/export ownership, and `make build`. The bounded closure
 review is complete; save-dialog refresh and resident-export lifecycle findings
 were fixed and regression-tested.
+
+- [x] Add direct `u` / clickable footer action to unmark all packets from the list,
+      release retained marks, and invalidate pending range results. Preserve packets
+      and any export snapshot already submitted; document and verify the shortcut.

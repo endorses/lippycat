@@ -326,6 +326,8 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "t": // Toggle time display mode (clock/relative) - Capture tab only
 		return m.handleToggleTimeDisplay()
 
+	case "u":
+		return m.handleUnmarkAllPackets()
 	case "m", "M":
 		return m.handleMarkPacket(msg.String() == "M")
 	case "w": // Save packets to file (or stop streaming save)

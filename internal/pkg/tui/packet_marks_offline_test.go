@@ -41,7 +41,7 @@ func TestOfflinePacketMarksDiscardStaleRange(t *testing.T) {
 	m.ensurePacketMarks()
 	cmd := m.startOfflineMarkRange(1, 500, false)
 	msg := cmd().(offlineMarkRangeMsg)
-	m.clearPacketMarks()
+	m = markKey(t, m, 'u')
 	m, _ = m.handleOfflineMarkRange(msg)
 	require.Empty(t, m.packetMarks.records)
 }

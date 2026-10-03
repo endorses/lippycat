@@ -225,6 +225,9 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		)
 		if (f.viewMode == "packets" || f.viewMode == "") && !f.detailsFocused {
 			keybinds = append(keybinds, TabKeybind{Key: "m", Description: "mark", ShortDesc: "mark", Essential: false})
+			if f.markedPacketCount > 0 {
+				keybinds = append(keybinds, TabKeybind{Key: "u", Description: "unmark all", ShortDesc: "unmark", Essential: true})
+			}
 		}
 		return keybinds
 

@@ -232,3 +232,17 @@ func (m *Model) markPacketClick(msg tea.MouseMsg) tea.Cmd {
 	}
 	return m.markError(fmt.Errorf("packet is not loaded yet"))
 }
+
+// Clearing also invalidates pending offline ranges when no marks are installed yet.
+func (m Model) handleUnmarkAllPackets() (Model, tea.Cmd) {
+	if m.uiState.Tabs.GetActive() != 0 || m.uiState.ViewMode != "packets" || m.captureDetailsFocused() {
+		return m, nil
+	}
+	count := len(m.packetMarks.records)
+	m.clearPacketMarks()
+	if count == 0 {
+		return m, nil
+	}
+	cmd := m.uiState.Toast.Show(fmt.Sprintf("Unmarked %d packets", count), components.ToastInfo, components.ToastDurationShort)
+	return m, cmd
+}

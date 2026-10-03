@@ -81,6 +81,7 @@ func TestFooterMarkedSaveHint(t *testing.T) {
 	f.SetMarkedPacketCount(12)
 	require.Contains(t, ansi.Strip(f.View()), "w: save marked (12)")
 	require.Contains(t, ansi.Strip(f.View()), "m: mark")
+	require.Contains(t, ansi.Strip(f.View()), "u: unmark all")
 	f.SetWidth(100)
 	require.Contains(t, ansi.Strip(f.View()), "w:sav 12*")
 	f.SetWidth(60)
@@ -92,6 +93,7 @@ func TestFooterMarkedSaveHint(t *testing.T) {
 	f.SetMarkedPacketCount(0)
 	require.Contains(t, ansi.Strip(f.View()), "w:sav")
 	require.NotContains(t, ansi.Strip(f.View()), "12*")
+	require.NotContains(t, ansi.Strip(f.View()), "unmark")
 	f.SetDetailsFocused(true)
 	require.NotContains(t, ansi.Strip(f.View()), "m:mark")
 }

@@ -60,6 +60,7 @@ Vim-style navigation works in list views.
 | `Esc` | Return from details to list                              |
 | `v`   | Cycle packet/event/call views                            |
 | `m`   | Toggle current packet mark                               |
+| `u`   | Unmark all packets                                       |
 | `M`   | Add packet range to marks                                |
 | `w`   | Save marked packets, or normal save when none are marked |
 | `x`   | Flush/clear packets                                      |
@@ -97,8 +98,9 @@ Marks survive filtering and buffer eviction. With marks present, `w` saves only
 marked packets, including ones no longer shown in the list, as a one-shot PCAP in
 capture order. Press `Esc` to cancel an export in progress. The footer shows the
 count and the save dialog identifies the
-marked export. Saving keeps marks; use **Clear marks** in the save dialog to remove
-all of them. Flushing packets or replacing the capture clears marks. An active
+marked export. Saving keeps marks; press `u` in the packet list (or click its footer
+hint) to unmark all packets, including hidden and evicted ones. **Clear marks** in
+the save dialog does the same. Flushing packets or replacing the capture clears marks. An active
 recording still uses `w` to stop first; press it again to export the marked set.
 
 Live and remote marks retain independent copies of packet bytes; offline marks

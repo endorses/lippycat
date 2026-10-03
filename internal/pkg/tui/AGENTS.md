@@ -253,14 +253,17 @@ toast.Update(ToastTickMsg{})  // Decrements timer
 Rendering, keyboard and mouse input, scrollbars, and text selection use the same
 outer rectangles. Prefer side-by-side panes when useful widths fit, stacked panes
 when height permits, and the focused pane alone otherwise. `d` toggles visible
-details; `Esc` returns focus to the list without changing the split preference.
+details, keeping list focus in split layouts; `Esc` returns focus to the list
+without changing the split preference.
 Prepare geometry during updates, before offline page requests or input handling.
 
 Detail components take exact outer dimensions and use `DetailPaneGeometry` for
 padding and content bounds. `PrepareDetails`/`SetSize` prepare wrapping and viewport
 content; rendering remains read-only. Zero dimensions preserve hidden pane scroll.
-Focused inspection disables following and holds one bounded snapshot if the row
-is evicted; explicit clear/replacement releases inspection. Use `DetailSelection`
+Only full-area details with the list hidden disable following and hold one bounded
+snapshot if the row is evicted. Leaving full-area details restores the previous
+following state; focusing split details does not pin. Explicit clear/replacement
+releases inspection. Use `DetailSelection`
 for event actions and related-packet lookup so they target the displayed event.
 
 ### Context-Aware Footer

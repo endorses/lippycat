@@ -35,22 +35,23 @@ type (
 
 // PacketList is a component that displays a list of packets
 type PacketList struct {
-	virtual        bool
-	logicalCount   uint64
-	logicalCursor  uint64
-	logicalOffset  uint64
-	pageStart      uint64
-	packets        []PacketDisplay
-	cursor         int // Currently selected packet
-	offset         int // Scroll offset
-	width          int
-	height         int
-	headerHeight   int
-	autoScroll     bool         // Whether to auto-scroll to bottom (like chat)
-	inspecting     bool         // Details own navigation while the selected packet is inspected.
-	followPaused   bool         // Inspection stops following until the user explicitly goes to End.
-	theme          themes.Theme // Color theme
-	detailsVisible bool         // Whether details panel is visible (affects column widths)
+	virtual         bool
+	logicalCount    uint64
+	logicalCursor   uint64
+	logicalOffset   uint64
+	pageStart       uint64
+	packets         []PacketDisplay
+	cursor          int // Currently selected packet
+	offset          int // Scroll offset
+	width           int
+	height          int
+	headerHeight    int
+	autoScroll      bool         // Whether to auto-scroll to bottom (like chat)
+	inspecting      bool         // The list is hidden while the selected packet is inspected.
+	followPaused    bool         // Inspection temporarily suspends following.
+	resumeFollowing bool         // Restore the prior follow preference when inspection ends.
+	theme           themes.Theme // Color theme
+	detailsVisible  bool         // Whether details panel is visible (affects column widths)
 
 	// Time display settings
 	timeDisplayMode  TimeDisplayMode // Clock or relative time
@@ -201,13 +202,24 @@ func (p *PacketList) GetSelectedPacket() *PacketDisplay {
 	return &pkt
 }
 
-// SetInspecting stops incoming packets from moving the selection while details
-// have focus. Returning to the list keeps following stopped; End resumes it.
+// SetInspecting suspends following while the list is hidden, then restores the
+// previous preference when the list becomes visible again.
 func (p *PacketList) SetInspecting(inspecting bool) {
+	if p.inspecting == inspecting {
+		return
+	}
 	p.inspecting = inspecting
 	if inspecting {
+		p.resumeFollowing = p.autoScroll
 		p.followPaused = true
 		p.autoScroll = false
+		return
+	}
+	p.followPaused = false
+	p.autoScroll = p.resumeFollowing
+	p.resumeFollowing = false
+	if p.autoScroll {
+		p.GotoBottom()
 	}
 }
 
@@ -480,6 +492,7 @@ func (p *PacketList) Reset() {
 	p.autoScroll = true
 	p.inspecting = false
 	p.followPaused = false
+	p.resumeFollowing = false
 	p.captureStartTime = time.Time{} // Reset capture start time
 }
 
@@ -549,9 +562,9 @@ func (p *PacketList) TrimOldPackets(trimCount int) {
 
 	if trimCount >= len(p.packets) {
 		// Retention eviction must not resume following or restart relative time.
-		inspecting, followPaused, captureStart := p.inspecting, p.followPaused, p.captureStartTime
+		inspecting, followPaused, resumeFollowing, captureStart := p.inspecting, p.followPaused, p.resumeFollowing, p.captureStartTime
 		p.Reset()
-		p.inspecting, p.followPaused, p.captureStartTime = inspecting, followPaused, captureStart
+		p.inspecting, p.followPaused, p.resumeFollowing, p.captureStartTime = inspecting, followPaused, resumeFollowing, captureStart
 		if followPaused {
 			p.autoScroll = false
 		}

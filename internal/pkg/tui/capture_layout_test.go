@@ -75,7 +75,11 @@ func responsiveDetailScroll(m Model) (int, int, int) {
 func TestResponsivePacketOpenRefreshesBeforeInspection(t *testing.T) {
 	for _, entry := range []string{"d", "right", "mouse"} {
 		t.Run(entry, func(t *testing.T) {
-			m := responsiveDetailModel(t, "packets", 180, 40)
+			width, height := 180, 40
+			if entry == "d" {
+				width, height = 80, 24
+			}
+			m := responsiveDetailModel(t, "packets", width, height)
 			m.doFullPacketListRefresh(false)
 			m.updateDetailsPanel()
 			m = responsiveDetailKey(t, m, 'd')
@@ -125,7 +129,7 @@ func TestResponsiveDetailsToggleAtEveryLayout(t *testing.T) {
 				m = responsiveDetailKey(t, m, 'd')
 				require.True(t, m.captureDetailsEnabled())
 				require.Equal(t, size.layout, m.captureLayout().Mode)
-				require.True(t, m.captureDetailsFocused())
+				require.Equal(t, size.layout == captureDetailsOnly, m.captureDetailsFocused())
 				m = updateEventRenderModel(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 				require.Equal(t, "left", m.uiState.FocusedPane)
 				require.True(t, m.captureDetailsEnabled(), "Esc returns focus without changing the detail preference")
@@ -148,6 +152,7 @@ func TestResponsiveDetailsResizePreservesFocusAndHiddenPreference(t *testing.T) 
 		t.Run(mode, func(t *testing.T) {
 			m := responsiveDetailModel(t, mode, 180, 40)
 			m = responsiveDetailKey(t, m, 'd')
+			m.focusCapturePane("right")
 			selected := responsiveSelected(m)
 			m = updateEventRenderModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 			require.Equal(t, captureDetailsOnly, m.captureLayout().Mode)

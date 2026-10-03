@@ -14,7 +14,7 @@ import (
 
 func responsiveFilterModel(t *testing.T, mode string) Model {
 	t.Helper()
-	m := responsiveDetailModel(t, mode, 180, 40)
+	m := responsiveDetailModel(t, mode, 80, 24)
 	if mode == "calls" {
 		m.callStore.AddOrUpdateCalls([]components.Call{{CallID: "first-call"}, {CallID: "selected-call"}})
 	}

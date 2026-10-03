@@ -391,6 +391,7 @@ type CallsView struct {
 	detailsViewportReady bool
 	lastSelectedCallID   string // Track which call details are rendered
 	inspecting           bool
+	resumeFollowing      bool
 	inspectedCall        *Call
 }
 
@@ -876,9 +877,15 @@ func (cv *CallsView) RenderTable(width, height int, focused bool) string {
 	return cv.renderTableWithSize(width, height, focused)
 }
 
-// SetInspecting keeps the selected call stable while its details have focus.
+// SetInspecting keeps the selected call stable while the list is hidden and
+// restores its prior following preference when the list becomes visible again.
 func (cv *CallsView) SetInspecting(inspecting bool) {
-	if inspecting && !cv.inspecting {
+	if cv.inspecting == inspecting {
+		return
+	}
+	if inspecting {
+		cv.resumeFollowing = cv.autoScroll
+		cv.autoScroll = false
 		if call := cv.GetSelected(); call != nil {
 			copy := *call
 			cv.inspectedCall = &copy
@@ -887,6 +894,11 @@ func (cv *CallsView) SetInspecting(inspecting bool) {
 	cv.inspecting = inspecting
 	if !inspecting {
 		cv.inspectedCall = nil
+		cv.autoScroll = cv.resumeFollowing
+		cv.resumeFollowing = false
+		if cv.autoScroll {
+			cv.GotoBottom()
+		}
 	}
 }
 

@@ -178,7 +178,19 @@ func (m *Model) prepareCaptureLayout() {
 		return
 	}
 	l := m.captureLayout()
-	inspecting := m.uiState.Tabs.GetActive() == 0 && m.captureDetailsFocused()
+	previousInspection := m.captureInspectionMode
+	inspecting := m.uiState.Tabs.GetActive() == 0 && l.Mode == captureDetailsOnly
+	m.captureInspectionMode = ""
+	if inspecting {
+		m.captureInspectionMode = m.uiState.ViewMode
+	}
+	if inspecting && m.uiState.ViewMode == "packets" && previousInspection != "packets" {
+		m.updateDetailsPanel()
+	}
+	eventSelectionChanged := false
+	if m.eventStore != nil && m.uiState.EventsView != nil {
+		eventSelectionChanged = m.eventStore.SetInspecting(inspecting && m.uiState.ViewMode == "events", m.uiState.EventsView.SelectedID())
+	}
 	m.uiState.PacketList.SetInspecting(inspecting && m.uiState.ViewMode == "packets")
 	// Offline packet bytes belong to a charged DetailPin; never retain them
 	// after the browser releases it. Its immutable cursor preserves identity.
@@ -187,6 +199,12 @@ func (m *Model) prepareCaptureLayout() {
 		m.uiState.EventsView.SetInspecting(inspecting && m.uiState.ViewMode == "events")
 	}
 	m.uiState.CallsView.SetInspecting(inspecting && m.uiState.ViewMode == "calls")
+	if eventSelectionChanged || (previousInspection == "events" && m.captureInspectionMode != "events") {
+		m.syncEventsView()
+	}
+	if previousInspection == "packets" && m.captureInspectionMode != "packets" {
+		m.updateDetailsPanel()
+	}
 	switch m.uiState.ViewMode {
 	case "events":
 		m.prepareEventsViewLayout()
@@ -213,13 +231,11 @@ func (m *Model) prepareCaptureLayout() {
 func (m Model) toggleCaptureDetails() (Model, tea.Cmd) {
 	visible := m.captureLayout().Details.Width > 0
 	if m.uiState.ViewMode == "events" && m.eventViewDirty {
-		if !visible {
-			m.eventStore.SelectByID(m.uiState.EventsView.SelectedID())
-		}
 		m.syncEventsView()
 	}
 	m.setCaptureDetails(!visible)
-	if visible {
+	layout := m.captureLayout()
+	if visible || layout.Mode == captureSideBySide || layout.Mode == captureStacked {
 		m.focusCapturePane("left")
 	} else {
 		m.focusCapturePane("right")
@@ -229,7 +245,11 @@ func (m Model) toggleCaptureDetails() (Model, tea.Cmd) {
 
 // Explicit replacement/clear releases the bounded inspection snapshots.
 func (m *Model) resetCaptureInspection() {
+	m.captureInspectionMode = ""
 	m.uiState.FocusedPane = "left"
+	if m.eventStore != nil {
+		m.eventStore.SetInspecting(false, "")
+	}
 	m.uiState.PacketList.SetInspecting(false)
 	m.uiState.DetailsPanel.SetInspecting(false)
 	m.uiState.CallsView.SetInspecting(false)
@@ -245,9 +265,6 @@ func (m *Model) focusCapturePane(pane string) {
 		// Refresh before SetInspecting captures its immutable snapshot. The
 		// list may have advanced while the details pane was hidden.
 		m.updateDetailsPanel()
-	}
-	if changed && pane == "right" && m.uiState.ViewMode == "events" {
-		m.eventStore.SelectByID(m.uiState.EventsView.SelectedID())
 	}
 	m.uiState.FocusedPane = pane
 	m.prepareCaptureLayout()

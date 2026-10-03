@@ -20,7 +20,7 @@ func inspectionPackets(count int) []PacketDisplay {
 	return packets
 }
 
-func TestPacketListInspectionStopsFollowingUntilEnd(t *testing.T) {
+func TestPacketListInspectionRestoresFollowing(t *testing.T) {
 	packets := inspectionPackets(8)
 	p := NewPacketList()
 	p.SetPackets(packets[:3])
@@ -37,10 +37,10 @@ func TestPacketListInspectionStopsFollowingUntilEnd(t *testing.T) {
 	require.Equal(t, packets[2], *p.GetSelectedPacket())
 
 	p.SetInspecting(false)
+	require.Equal(t, packets[5], *p.GetSelectedPacket())
 	p.SetPackets(packets[2:7])
-	require.Equal(t, packets[2], *p.GetSelectedPacket())
-	require.False(t, p.IsAutoScrolling())
-	p.GotoBottom()
+	require.Equal(t, packets[6], *p.GetSelectedPacket())
+	require.True(t, p.IsAutoScrolling())
 	p.AppendPackets(packets[7:])
 	require.Equal(t, packets[7], *p.GetSelectedPacket())
 	require.True(t, p.IsAutoScrolling())
@@ -57,13 +57,14 @@ func TestPacketListInspectionMatchesCaptureSourceAndBytes(t *testing.T) {
 	otherBytes.RawData = []byte{2}
 	p.SetPackets([]PacketDisplay{otherSource, otherBytes, selected})
 	require.Equal(t, 2, p.GetCursor())
+	// Repeated preparation must not overwrite the prior following preference.
+	p.SetInspecting(true)
 	p.SetInspecting(false)
-	// Refreshing while the inspected item is last must not re-enable follow.
 	p.SetPackets([]PacketDisplay{selected})
 	p.SetPackets([]PacketDisplay{selected})
 	p.AppendPackets([]PacketDisplay{otherBytes})
-	require.Equal(t, selected, *p.GetSelectedPacket())
-	require.False(t, p.IsAutoScrolling())
+	require.Equal(t, otherBytes, *p.GetSelectedPacket())
+	require.True(t, p.IsAutoScrolling())
 }
 
 func TestPacketListInspectionSurvivesCompleteRetentionEviction(t *testing.T) {
@@ -76,6 +77,9 @@ func TestPacketListInspectionSurvivesCompleteRetentionEviction(t *testing.T) {
 	require.Equal(t, packets[1], *p.GetSelectedPacket())
 	require.False(t, p.IsAutoScrolling())
 	require.Equal(t, packets[0].Timestamp, p.captureStartTime)
+	p.SetInspecting(false)
+	require.Equal(t, packets[2], *p.GetSelectedPacket())
+	require.True(t, p.IsAutoScrolling())
 	p.Reset()
 	p.SetPackets(packets)
 	require.True(t, p.IsAutoScrolling())
@@ -94,4 +98,44 @@ func TestPacketListInspectionPreservesViewportDuringTrim(t *testing.T) {
 	p.SetPackets(packets[5:25])
 	require.Equal(t, row, p.GetCursor()-p.GetOffset())
 	require.Equal(t, packets[19], *p.GetSelectedPacket())
+}
+
+func TestPacketListInspectionPreservesManualSelection(t *testing.T) {
+	packets := inspectionPackets(8)
+	p := NewPacketList()
+	p.SetPackets(packets[:3])
+	p.GotoTop()
+	p.SetInspecting(true)
+	p.AppendPackets(packets[3:5])
+	p.SetInspecting(true)
+	p.SetInspecting(false)
+	p.AppendPackets(packets[5:])
+	require.Equal(t, packets[0], *p.GetSelectedPacket())
+	require.False(t, p.IsAutoScrolling())
+}
+
+func TestCallsInspectionRestoresFollowingPreference(t *testing.T) {
+	for _, following := range []bool{true, false} {
+		t.Run(map[bool]string{true: "following", false: "manual"}[following], func(t *testing.T) {
+			calls := NewCallsView()
+			calls.SetCalls([]Call{{CallID: "one"}, {CallID: "two"}, {CallID: "three"}})
+			if !following {
+				calls.SelectPrevious()
+			}
+			selectedID := calls.GetSelected().CallID
+			calls.SetInspecting(true)
+			calls.SetCalls([]Call{{CallID: "one"}, {CallID: "two"}, {CallID: "three"}, {CallID: "four"}})
+			require.Equal(t, selectedID, calls.GetSelected().CallID)
+			require.False(t, calls.IsAutoScrolling())
+			calls.SetInspecting(true)
+			calls.SetInspecting(false)
+			calls.SetCalls([]Call{{CallID: "one"}, {CallID: "two"}, {CallID: "three"}, {CallID: "four"}, {CallID: "five"}})
+			if following {
+				require.Equal(t, "five", calls.GetSelected().CallID)
+			} else {
+				require.Equal(t, selectedID, calls.GetSelected().CallID)
+			}
+			require.Equal(t, following, calls.IsAutoScrolling())
+		})
+	}
 }

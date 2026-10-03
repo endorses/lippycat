@@ -165,3 +165,38 @@ func TestEventStoreRejectsUnsupportedEventsWithoutChangingRetention(t *testing.T
 	assert.Equal(t, uint64(1), items[0].ArrivalSequence)
 	assert.Equal(t, uint64(1), store.Stats().Arrived)
 }
+
+func TestEventStoreInspectionRestoresFollowingPreference(t *testing.T) {
+	for _, following := range []bool{true, false} {
+		t.Run(map[bool]string{true: "following", false: "manual"}[following], func(t *testing.T) {
+			store := NewEventStore(4)
+			store.AddBatch([]events.Event{testEvent("one", "a", events.KindDNS), testEvent("two", "a", events.KindDNS)})
+			if !following {
+				require.True(t, store.SelectByID("two"))
+			}
+			// The displayed event can lag behind the most recently ingested one.
+			require.True(t, store.SetInspecting(true, "one"))
+			require.Equal(t, "one", store.SelectedID())
+			store.AddEvent(testEvent("three", "a", events.KindDNS))
+			require.Equal(t, "one", store.SelectedID())
+			require.False(t, store.SetInspecting(true, "two"))
+			require.Equal(t, following, store.SetInspecting(false, ""))
+			store.AddEvent(testEvent("four", "a", events.KindDNS))
+			if following {
+				require.Equal(t, "four", store.SelectedID())
+			} else {
+				require.Equal(t, "one", store.SelectedID())
+			}
+		})
+	}
+}
+
+func TestEventStoreInspectionRestoresFollowingAfterEviction(t *testing.T) {
+	store := NewEventStore(2)
+	store.AddEvent(testEvent("one", "a", events.KindDNS))
+	store.SetInspecting(true, "one")
+	store.AddBatch([]events.Event{testEvent("two", "a", events.KindDNS), testEvent("three", "a", events.KindDNS)})
+	require.Equal(t, "two", store.SelectedID())
+	require.True(t, store.SetInspecting(false, ""))
+	require.Equal(t, "three", store.SelectedID())
+}

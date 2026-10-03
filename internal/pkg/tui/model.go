@@ -161,6 +161,7 @@ type Model struct {
 	// Performance optimization - throttle details panel updates during high packet rate
 	lastDetailsPanelUpdate     time.Time     // Last time details panel was updated
 	detailsPanelUpdateInterval time.Duration // Minimum interval between updates (e.g., 50ms = 20 Hz)
+	captureInspectionMode      string        // View held while its list is hidden
 
 	// Performance optimization - throttle packet list updates during high packet rate
 	lastPacketListUpdate     time.Time     // Last time packet list was updated

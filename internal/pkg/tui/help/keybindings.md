@@ -64,14 +64,18 @@ Vim-style navigation works in list views.
 
 Packet, event, and call details adapt to the available space: beside the list,
 below it when the terminal is tall enough, or in the full content area. Press
-`d` to open or close details at any size; `Esc` returns focus to the list. Use
+`d` to open or close details at any size. Split layouts keep the list focused
+and following incoming traffic; full-area details take focus. `Esc` returns focus
+to the list. Use
 `h`/`Left` and `l`/`Right` to switch panes. Resizing preserves the focused pane,
 selection, and scroll position (clamped to the available content).
 
-While details have focus, new arrivals do not replace the inspected item. Packet
+Only full-area details, with the list hidden, pin the inspected item. Focusing
+details in either split layout does not pause following. Packet
 and event snapshots remain readable if their list row leaves the capture buffer;
-call details continue updating for the same call. Return to the list and use `End`
-to follow the latest arrivals again. Long values wrap and packet hex rows adapt
+call details continue updating for the same call. Returning to the list or a split
+layout restores the previous following setting. Use `End` in the list to resume
+following after browsing history. Long values wrap and packet hex rows adapt
 to the pane width. Very short terminals reduce padding and header/tab chrome.
 
 ### Filter Mode

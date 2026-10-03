@@ -23,3 +23,5 @@ were fixed and covered by regressions.
 
 - [x] Correct the event list's outer width so its scrollbar stays inside the
       border in full-width, stacked, and side-by-side layouts.
+- [x] Keep list focus and automatic following when toggling either split layout;
+      pin only in full-area details and restore prior following when returning.

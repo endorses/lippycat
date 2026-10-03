@@ -45,6 +45,25 @@ func responsiveDetailModel(t *testing.T, mode string, width, height int) Model {
 	return updateEventRenderModel(t, m, tea.WindowSizeMsg{Width: width, Height: height})
 }
 
+func TestPacketListFillsHeightAfterStackedToSideBySide(t *testing.T) {
+	m := responsiveDetailModel(t, "packets", 80, 50)
+	packets := make([]components.PacketDisplay, 100)
+	for i := range packets {
+		packets[i] = components.PacketDisplay{Timestamp: time.Unix(int64(i+1), 0), Protocol: "TCP"}
+	}
+	m.uiState.PacketList.SetPackets(packets)
+	m = responsiveDetailKey(t, m, 'd')
+	require.Equal(t, captureStacked, m.captureLayout().Mode)
+	oldVisible := m.uiState.PacketList.VisibleRows()
+	m = updateEventRenderModel(t, m, tea.WindowSizeMsg{Width: 180, Height: 50})
+	require.Equal(t, captureSideBySide, m.captureLayout().Mode)
+	p := &m.uiState.PacketList
+	require.Greater(t, p.VisibleRows(), oldVisible)
+	require.Equal(t, len(packets)-p.VisibleRows(), p.GetOffset())
+	require.Equal(t, len(packets)-1, p.GetCursor())
+	require.True(t, p.IsAutoScrolling())
+}
+
 func responsiveDetailKey(t *testing.T, m Model, key rune) Model {
 	t.Helper()
 	return updateEventRenderModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})

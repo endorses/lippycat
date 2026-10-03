@@ -29,3 +29,6 @@ were fixed and covered by regressions.
 - [x] Remove the blank line after blue detail headings in every layout.
 
 - [x] Limit spacing between detail sections to one blank line.
+
+- [x] Fill the packet list immediately when its pane grows, preserving selection
+      and following across stacked-to-side-by-side transitions.

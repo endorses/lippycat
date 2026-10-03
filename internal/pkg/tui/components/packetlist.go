@@ -761,10 +761,9 @@ func (p *PacketList) adjustOffset() {
 		p.offset = p.cursor - visibleLines + 1
 	}
 
-	// Ensure offset is valid
-	if p.offset < 0 {
-		p.offset = 0
-	}
+	// Fill newly available rows when the pane grows near the end of the list.
+	maxOffset := max(0, len(p.packets)-visibleLines)
+	p.offset = max(0, min(p.offset, maxOffset))
 }
 
 // IsAutoScrolling returns whether auto-scroll is enabled

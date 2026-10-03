@@ -76,6 +76,39 @@ func TestCaptureScrollbarSplitLayouts(t *testing.T) {
 	}
 }
 
+func TestEventScrollbarInsidePanel(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		width, height int
+		details       bool
+		layout        captureLayoutMode
+	}{
+		{"list only", 80, 30, false, captureListOnly},
+		{"stacked", 80, 50, true, captureStacked},
+		{"side by side", 180, 40, true, captureSideBySide},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel(200, 8, "test0", "", nil, false, false, "", false)
+			t.Cleanup(m.Shutdown)
+			m.uiState.ViewMode = "events"
+			m.uiState.EventShowDetails = tc.details
+			m.eventStore.AddBatch(makeEventBatch(100, "scrollbar").Events)
+			m.eventStore.SelectFirst()
+			m, _ = m.handleWindowSizeMsg(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+			layout := m.captureLayout()
+			require.Equal(t, tc.layout, layout.Mode)
+			row := strings.Split(m.renderCaptureTab(m.captureContentHeight()), "\n")[2]
+			barX := layout.List.X + layout.List.Width - 2
+			require.Equal(t, "▉", ansi.Strip(ansi.Cut(row, barX, barX+1)))
+			border := ansi.Strip(ansi.Cut(row, barX+1, barX+2))
+			require.Contains(t, []string{"│", "┃"}, border, "the right panel border must enclose the scrollbar")
+
+			m, _ = m.handleMouse(tea.MouseMsg{X: barX, Y: m.captureContentOrigin() + 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+			require.Equal(t, "list", m.scrollDrag, "the visible scrollbar must remain clickable")
+		})
+	}
+}
+
 func TestOfflinePacketScrollbarRequestsNewPage(t *testing.T) {
 	m := loadOfflineBrowser(t, readyOfflineBrowser(t))
 	m, _ = m.handleWindowSizeMsg(tea.WindowSizeMsg{Width: 180, Height: 35})

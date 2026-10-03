@@ -246,6 +246,6 @@ func (m *Model) prepareEventsViewLayout() {
 	if l.List.Width == 0 {
 		m.uiState.EventsView.PrepareDetails(l.Details.Width, l.Details.Height)
 	} else {
-		m.uiState.EventsView.PrepareLayout(max(1, l.List.Width-2), l.List.Height, l.Details.Width, l.Details.Height)
+		m.uiState.EventsView.PrepareLayout(l.List.Width, l.List.Height, l.Details.Width, l.Details.Height)
 	}
 }

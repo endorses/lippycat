@@ -175,7 +175,7 @@ func (m Model) renderResponsiveCapture() string {
 		total, visible, offset := 0, 0, 0
 		switch m.uiState.ViewMode {
 		case "events":
-			list = m.uiState.EventsView.RenderTimeline(max(1, l.List.Width-2), l.List.Height, m.uiState.FocusedPane == "left" && l.Details.Width > 0)
+			list = m.uiState.EventsView.RenderTimeline(l.List.Width, l.List.Height, m.uiState.FocusedPane == "left" && l.Details.Width > 0)
 			total, visible, offset = m.uiState.EventsView.TimelineScrollState(l.List.Height)
 		case "calls":
 			list = m.uiState.CallsView.RenderTable(l.List.Width, l.List.Height, m.uiState.FocusedPane == "left" && l.Details.Width > 0)

@@ -20,3 +20,6 @@ Validation: `go test -tags tui ./internal/pkg/tui/...` passed, along with focuse
 race checks for responsive details, inspection, mouse input, and offline browsing.
 The bounded closure review is complete; both discovered state-transition defects
 were fixed and covered by regressions.
+
+- [x] Correct the event list's outer width so its scrollbar stays inside the
+      border in full-width, stacked, and side-by-side layouts.

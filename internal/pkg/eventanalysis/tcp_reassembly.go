@@ -586,8 +586,17 @@ func (s *applicationStream) emit(ctx reassemblyContext, ci gopacket.CaptureInfo,
 	case email != nil:
 		service = "SMTP"
 	}
-	if err := s.runtime.connections.SetAnalyzedService(env, s.runtime.associationScope(ctx.source, env), service, s.runtime.cfg.Policy.Inventory.Enabled && !ci.Timestamp.Before(s.runtime.watermark)); err != nil {
+	analysisScope := s.runtime.associationScope(ctx.source, env)
+	eligible := s.runtime.cfg.Policy.Inventory.Enabled && !ci.Timestamp.Before(s.runtime.watermark) && ci.Timestamp.After(s.runtime.expiryWatermark.Add(-s.runtime.cfg.Connections.IdleTimeout))
+	if err := s.runtime.connections.SetAnalyzedService(env, analysisScope, service, eligible); err != nil {
 		s.runtime.stats.Invalid++
+	} else if eligible {
+		proof, err := s.runtime.connections.InventoryObservation(env, analysisScope)
+		if err != nil {
+			s.runtime.stats.Invalid++
+		} else {
+			s.runtime.emitInventory(proof)
+		}
 	}
 	s.runtime.emitMetadata(env, metadata)
 	s.partial = false

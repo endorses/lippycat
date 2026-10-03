@@ -32,11 +32,12 @@ CIDRs are configured. CIDRs classify subjects, not capture eligibility. Known
 hosts require an observed completed TCP handshake or both UDP directions; known
 services additionally require a reliably oriented responder and actual protocol
 analysis. Ports, cached labels, lone SYNs, destination addresses, and DHCP offers
-are insufficient. Summaries at expiry, eviction, EOF/reset/close trigger output;
-relays do not derive inventory again. Global/per-scope entry and byte caps and a
-capture-time retention window bound state; expiry/eviction permit re-emission.
-Scope separates sensors, epochs, interfaces, and offline inputs. Policy changes
-participate in producer identity.
+are insufficient. Inventory events emit as soon as the required packet evidence
+is available; connection summaries retain their existing expiry, eviction, and
+EOF/reset/close behavior. Relays do not derive inventory again. Global/per-scope
+entry and byte caps and a capture-time retention window bound state;
+expiry/eviction permit re-emission. Scope separates sensors, epochs, interfaces,
+and offline inputs. Policy changes participate in producer identity.
 
 DHCP identifiers/names and inventory details are sensitive. Subscribers need
 sensitive-field permission; unauthorized inventory events are omitted with

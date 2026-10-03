@@ -276,8 +276,9 @@ handshake or both UDP directions. Service evidence additionally requires a
 reliably oriented responder and actual protocol analysis. Port hints and cached
 labels are insufficient. UDP services require decoded, successfully associated
 request/reply roles; ambiguous, broadcast and relay cases do not invent a client
-service. Inventory records are emitted on connection summaries (expiry, eviction,
-EOF, reset or close), so they can appear later than the first qualifying packet.
+service. Inventory records are emitted as soon as the required packet evidence
+is available, without waiting for connection expiry. Ordinary connection
+summaries retain their existing expiry, eviction, EOF, reset, or close behavior.
 Ingress and relays carry source-derived inventories without deriving them again.
 
 Explicit IPv4/IPv6 local CIDRs classify inventory subjects, not capture

@@ -61,11 +61,12 @@ type associationEntry struct {
 // Duplicate client timestamps are ambiguous even if they may be retransmissions:
 // their replies cannot establish which independently observed request was echoed.
 type Associator struct {
-	mu        sync.Mutex
-	cfg       Config
-	entries   map[[32]byte]associationEntry
-	watermark time.Time
-	stats     Stats
+	mu              sync.Mutex
+	cfg             Config
+	entries         map[[32]byte]associationEntry
+	watermark       time.Time // Capture progress used to reject reordered new requests.
+	expiryWatermark time.Time // Capture progress plus live idle aging used for timeout expiry.
+	stats           Stats
 }
 
 func NewAssociator(cfg Config) (*Associator, error) {
@@ -99,7 +100,14 @@ func (a *Associator) advance(at time.Time) {
 	if at.After(a.watermark) {
 		a.watermark = at
 	}
-	cutoff := a.watermark.Add(-a.cfg.Timeout)
+	a.expireIdle(at)
+}
+
+func (a *Associator) expireIdle(at time.Time) {
+	if at.After(a.expiryWatermark) {
+		a.expiryWatermark = at
+	}
+	cutoff := a.expiryWatermark.Add(-a.cfg.Timeout)
 	for key, entry := range a.entries {
 		if !entry.first.After(cutoff) {
 			delete(a.entries, key)
@@ -108,8 +116,16 @@ func (a *Associator) advance(at time.Time) {
 	}
 }
 
-// Advance expires idle state, including when unrelated protocols advance capture time.
+// Advance expires state as capture time advances, including other protocols.
 func (a *Associator) Advance(at time.Time) { a.mu.Lock(); defer a.mu.Unlock(); a.advance(at) }
+
+// ExpireIdle expires state without advancing capture admission. Live timers
+// may run ahead of transport-delayed packets that are still within the timeout.
+func (a *Associator) ExpireIdle(at time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.expireIdle(at)
+}
 
 func (a *Associator) Observe(scope string, src, dst netip.AddrPort, at time.Time, o *Observation) Association {
 	a.mu.Lock()
@@ -122,7 +138,7 @@ func (a *Associator) Observe(scope string, src, dst netip.AddrPort, at time.Time
 		a.stats.Missing++
 		return Association{Status: AssociationMissing}
 	}
-	if !at.After(a.watermark.Add(-a.cfg.Timeout)) {
+	if !at.After(a.expiryWatermark.Add(-a.cfg.Timeout)) {
 		a.stats.Late++
 		return Association{Status: AssociationExpired}
 	}
@@ -197,6 +213,7 @@ func (a *Associator) Reset() {
 	defer a.mu.Unlock()
 	clear(a.entries)
 	a.watermark = time.Time{}
+	a.expiryWatermark = time.Time{}
 }
 
 func associationEndpoint(ep netip.AddrPort) bool {

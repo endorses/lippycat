@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const AnalysisRevision = "network-observations-v1"
+const AnalysisRevision = "network-observations-v2"
 
 type Inventory struct {
 	Enabled                        bool

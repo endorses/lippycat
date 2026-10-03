@@ -467,8 +467,13 @@ available in the All view.
 Local inventory analysis requires `--inventory` and explicit nonempty
 `--inventory-local-cidrs`; configure event-mode producers separately for remote
 inventory. Scope separates sensors, epochs, interfaces, and offline inputs.
-Known-host/service events arrive with qualifying connection summaries, not the
-first handshake packet. Changing offline policy changes the analysis identity.
+Known-host events appear as soon as a completed TCP handshake or both UDP
+directions confirm a local host. Known-service events appear once the responder
+and analyzed protocol are confirmed. They do not wait for connection expiry;
+ordinary connection summaries retain their existing expiry behavior. In remote
+packet mode, the TUI derives these events locally from received packets. Use the
+All view and filter for `known` to find both kinds. Changing offline policy changes
+the analysis identity.
 Sensitive DHCP identifiers/names and inventory details require subscriber and
 server permission; policy omissions are reported separately from local ring
 eviction. See the [network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)

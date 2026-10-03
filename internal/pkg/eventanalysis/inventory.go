@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"net/netip"
 	"strings"
-	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/events"
@@ -14,24 +13,26 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-func (r *Runtime) advanceWatermark(at time.Time) {
-	if at.After(r.watermark) {
-		r.watermark = at
-	}
-}
-
-// emitConnection is the sole derivation point. Ingress relays source-produced
-// inventory; internal proof is removed before the public connection is emitted.
+// emitConnection publishes only the lifecycle summary. Inventory is derived
+// when positive evidence becomes available, independently of connection expiry.
 func (r *Runtime) emitConnection(conn events.ConnEvent) {
 	conn.LocalOrigin = r.inventory.Local(conn.Envelope().Flow.SourceAddress)
 	conn.LocalResponse = r.inventory.Local(conn.Envelope().Flow.DestinationAddress)
-	proof := conn.Evidence
-	derived := r.inventory.Observe(conn.AnalysisScope, r.watermark, conn, inventory.Evidence{
-		Host: proof.Host, Service: proof.Service, Responder: proof.Responder, Protocol: proof.Protocol,
-	})
 	conn.Evidence = events.ConnEvidence{}
 	conn.AnalysisScope = ""
 	r.emit(conn)
+}
+
+// emitInventory is used only by local packet analysis. Event ingress relays
+// source-produced inventory without deriving it again from connection events.
+func (r *Runtime) emitInventory(conn *events.ConnEvent) {
+	if conn == nil {
+		return
+	}
+	proof := conn.Evidence
+	derived := r.inventory.Observe(conn.AnalysisScope, r.expiryWatermark, *conn, inventory.Evidence{
+		Host: proof.Host, Service: proof.Service, Responder: proof.Responder, Protocol: proof.Protocol,
+	})
 	for _, event := range derived {
 		r.emit(event)
 	}

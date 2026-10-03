@@ -407,11 +407,14 @@ exchange. Ambiguous responders and broadcast/relay client-service guesses are
 omitted. Evidence values are `tcp_handshake`, `udp_bidirectional`,
 `dns_exchange`, `ntp_exchange`, and `dhcp_exchange`.
 
-Inventories emit when connection summaries become available through expiry,
-eviction, EOF, reset, or close, so they can appear after the initial handshake.
-The qualifying connection supplies the envelope; the separate `host` field is
-the subject. Partial capture remains visible. Event ingress and hierarchy relays
-forward source-derived inventory events without deriving a second copy.
+Inventory events emit as soon as the required packet evidence is available,
+without waiting for connection expiry. Ordinary connection summaries retain their
+existing expiry, eviction, EOF, reset, or close behavior. In remote packet mode,
+the TUI derives inventory events locally from received packets; use the All view
+and filter for `known` to find them. The qualifying connection supplies the
+envelope; the separate `host` field is the subject. Partial capture remains
+visible. Event ingress and hierarchy relays forward source-derived inventory
+events without deriving a second copy.
 
 Host deduplication includes scope and address; service keys also include
 responder port, transport, and protocol. Scope separates origin nodes,

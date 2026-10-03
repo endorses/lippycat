@@ -298,9 +298,9 @@ func (t *Tracker) admit(k key, at time.Time) bool {
 }
 
 // Observe emits inventory only for proven evidence, preserving the qualifying
-// connection envelope. at is when the summary becomes available in capture time;
-// the derived envelope retains the connection timestamp. Late summaries cannot
-// revive state, even after eviction. Equal timestamps are processed in caller
+// connection envelope. at is when positive evidence becomes available in capture
+// time; the derived envelope retains the connection timestamp. Late observations
+// cannot revive state, even after eviction. Equal timestamps are processed in caller
 // order, with origin host, response host, then service as stable candidate order.
 func (t *Tracker) Observe(scope string, at time.Time, conn events.ConnEvent, evidence Evidence) []events.Event {
 	t.mu.Lock()

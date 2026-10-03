@@ -76,12 +76,13 @@ type entry struct {
 // capture authority, producer epoch and input identity. Capture-time watermarks
 // only advance. Reset must accompany producer-session/EOF/close boundaries.
 type Tracker struct {
-	mu        sync.Mutex
-	config    Config
-	entries   map[key]entry
-	watermark time.Time
-	sequence  uint64
-	stats     Stats
+	mu              sync.Mutex
+	config          Config
+	entries         map[key]entry
+	watermark       time.Time // Capture progress used to reject reordered new requests.
+	expiryWatermark time.Time // Capture progress plus live idle aging used for timeout expiry.
+	sequence        uint64
+	stats           Stats
 }
 
 func NewTracker(c Config) (*Tracker, error) {
@@ -96,18 +97,34 @@ func (t *Tracker) Reset() {
 	defer t.mu.Unlock()
 	clear(t.entries)
 	t.watermark = time.Time{}
+	t.expiryWatermark = time.Time{}
 	t.stats.Entries = 0
 	t.stats.Bytes = 0
 }
 
 func (t *Tracker) Stats() Stats { t.mu.Lock(); defer t.mu.Unlock(); return t.stats }
 
-// Advance expires state during idle periods or while observing other protocols.
+// Advance expires state as capture time advances, including other protocols.
 func (t *Tracker) Advance(at time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if at.After(t.watermark) {
 		t.watermark = at
+	}
+	t.expireIdle(at)
+}
+
+// ExpireIdle expires state without advancing capture admission. Live timers
+// may run ahead of transport-delayed packets that are still within the timeout.
+func (t *Tracker) ExpireIdle(at time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.expireIdle(at)
+}
+
+func (t *Tracker) expireIdle(at time.Time) {
+	if at.After(t.expiryWatermark) {
+		t.expiryWatermark = at
 	}
 	t.expire()
 }
@@ -121,11 +138,11 @@ func (t *Tracker) Observe(scope string, at time.Time, m *Message) Association {
 	if at.After(t.watermark) {
 		t.watermark = at
 	}
-	t.expire()
+	t.expireIdle(at)
 	if m == nil || m.Partial || m.Truncated || m.Role() == RoleUnknown || scope == "" {
 		return Association{Status: AssociationNotApplicable}
 	}
-	if !at.After(t.watermark.Add(-t.config.Timeout)) {
+	if !at.After(t.expiryWatermark.Add(-t.config.Timeout)) {
 		return Association{Status: AssociationExpired}
 	}
 	hardware := sha256.Sum256(append([]byte{m.HardwareType}, m.HardwareAddress...))
@@ -231,7 +248,7 @@ func association(status AssociationStatus, e entry, server netip.Addr) Associati
 }
 
 func (t *Tracker) expire() {
-	cutoff := t.watermark.Add(-t.config.Timeout)
+	cutoff := t.expiryWatermark.Add(-t.config.Timeout)
 	for k, e := range t.entries {
 		if !e.last.After(cutoff) {
 			delete(t.entries, k)

@@ -61,9 +61,10 @@ type Config struct {
 	Now                     func() time.Time
 	ExpiryInterval          time.Duration
 	MaxReassemblyStreams    int
-	// LiveExpiry advances connection expiry from the wall clock when capture is
-	// idle. Leave it disabled for deterministic offline replay, where packet
-	// timestamps and EOF exclusively drive the capture clock.
+	// LiveExpiry advances connection expiry by local elapsed time when capture is
+	// idle, anchored to the latest capture timestamp. Leave it disabled for
+	// deterministic offline replay, where packet timestamps and EOF exclusively
+	// drive the capture clock.
 	LiveExpiry bool
 	// LosslessDelivery waits for bounded dispatcher and sink queue space. It is
 	// intended for deterministic offline analysis only; live callers should
@@ -86,6 +87,8 @@ type Runtime struct {
 	generation      uint64
 	inventory       *inventory.Tracker
 	watermark       time.Time
+	expiryWatermark time.Time
+	captureReceived time.Time
 	identity        *flowid.Cache
 	connections     *conntrack.Tracker
 	tcpAssembler    *capture.TCPAssembler
@@ -169,7 +172,7 @@ func (r *Runtime) runLiveExpiry() {
 	for {
 		select {
 		case <-ticker.C:
-			r.Expire(r.cfg.Now())
+			r.expireIdle(r.cfg.Now())
 		case <-r.expiryStop:
 			return
 		}
@@ -198,7 +201,7 @@ func (r *Runtime) resetState() error {
 	if err != nil {
 		return fmt.Errorf("initialize inventory: %w", err)
 	}
-	r.watermark = time.Time{}
+	r.resetClocks()
 	r.generation++
 	r.identity, err = flowid.NewCache(r.cfg.Flow)
 	if err != nil {
@@ -379,7 +382,7 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 	}
 	r.stats.Observed++
 	truncated := raw.CaptureLength < raw.OriginalLength || packet.Metadata().Truncated
-	eligible := r.cfg.Policy.Inventory.Enabled && !ts.Before(r.watermark) && !truncated && packetEvidenceMatches(packet, env.Flow)
+	eligible := r.cfg.Policy.Inventory.Enabled && !ts.Before(r.watermark) && ts.After(r.expiryWatermark.Add(-r.cfg.Connections.IdleTimeout)) && !truncated && packetEvidenceMatches(packet, env.Flow)
 	r.advanceWatermark(ts)
 	udpEvidence := r.observeNetworkDatagram(source, env, packet, truncated)
 	observation, radiusErr := grpcadapter.RADIUSFromProto(raw)
@@ -401,10 +404,11 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 	connObservation.AnalysisScope = r.associationScope(source, env)
 	connObservation.InventoryEligible = eligible
 	connObservation.UDP = udpEvidence
-	connEvents, err := r.connections.Observe(connObservation)
+	connEvents, inventoryProof, err := r.connections.ObserveWithInventory(connObservation)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("observe connection: %w", err)
 	}
+	r.emitInventory(inventoryProof)
 	for _, ev := range connEvents {
 		r.emitConnection(ev)
 	}
@@ -615,11 +619,58 @@ func (r *Runtime) emitHTTPFile(env events.Envelope, meta *data.HTTPMetadata) {
 	}
 }
 
+// Capture progress governs evidence ordering; timer progress only governs
+// expiry. Transport delay must not make an ordered packet look out of order.
+func (r *Runtime) advanceWatermark(at time.Time) {
+	if at.After(r.watermark) {
+		r.watermark = at
+		if r.cfg.LiveExpiry {
+			r.captureReceived = r.cfg.Now()
+		}
+	}
+	if at.After(r.expiryWatermark) {
+		r.expiryWatermark = at
+	}
+}
+
+func (r *Runtime) resetClocks() {
+	r.watermark = time.Time{}
+	r.expiryWatermark = time.Time{}
+	r.captureReceived = time.Time{}
+}
+
+func (r *Runtime) expireIdle(now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.captureReceived.IsZero() {
+		return
+	}
+	// Use elapsed local time, not the watcher's absolute clock: a remote
+	// capture clock can be offset from the watcher clock.
+	elapsed := now.Sub(r.captureReceived)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	r.expireState(r.watermark.Add(elapsed), true)
+}
+
 func (r *Runtime) expire(now time.Time) {
 	r.advanceWatermark(now)
-	r.inventory.Advance(r.watermark)
-	r.dhcp.Advance(now)
-	r.ntp.Advance(now)
+	r.expireState(now, false)
+}
+
+func (r *Runtime) expireState(now time.Time, idle bool) {
+	if now.After(r.expiryWatermark) {
+		r.expiryWatermark = now
+	}
+	r.inventory.Advance(r.expiryWatermark)
+	if idle {
+		r.dhcp.ExpireIdle(now)
+		r.ntp.ExpireIdle(now)
+	} else {
+		r.dhcp.Advance(now)
+		r.ntp.Advance(now)
+	}
 	if r.tcpAssembler != nil {
 		r.tcpAssembler.FlushCloseOlderThan(now.Add(-r.cfg.Connections.IdleTimeout))
 	}
@@ -649,7 +700,7 @@ func (r *Runtime) EOF() {
 	r.dhcp.Reset()
 	r.ntp.Reset()
 	r.inventory.Reset()
-	r.watermark = time.Time{}
+	r.resetClocks()
 	r.generation++
 }
 func (r *Runtime) Reset() error {
@@ -682,7 +733,7 @@ func (r *Runtime) Close() {
 	r.dhcp.Reset()
 	r.ntp.Reset()
 	r.inventory.Reset()
-	r.watermark = time.Time{}
+	r.resetClocks()
 	r.closed = true
 }
 func (r *Runtime) Stats() Stats {

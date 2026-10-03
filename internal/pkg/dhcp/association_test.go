@@ -156,3 +156,33 @@ func TestAssociationConcurrent(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, 1, tr.Stats().Entries)
 }
+
+func TestAssociationIdleExpiryAcceptsDelayedOrderedPackets(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Timeout = time.Minute
+	tr := tracker(t, cfg)
+	at := time.Unix(1000, 0)
+	request, reply := message(t, 1), message(t, 2)
+
+	tr.ExpireIdle(at.Add(2 * time.Second))
+	first := tr.Observe("scope", at, request)
+	require.Equal(t, AssociationRequest, first.Status)
+	tr.ExpireIdle(at.Add(3 * time.Second))
+	matched := tr.Observe("scope", at.Add(time.Second), reply)
+	require.Equal(t, AssociationUnique, matched.Status)
+	require.Equal(t, first.ID, matched.ID)
+
+	// Idle expiry remains monotonic and cannot be undone by late input or an
+	// older timer value. An expired exchange must not be recreated.
+	tr.ExpireIdle(at.Add(time.Minute))
+	require.Zero(t, tr.Stats().Entries)
+	tr.ExpireIdle(at)
+	require.Equal(t, AssociationExpired, tr.Observe("scope", at, request).Status)
+	require.Zero(t, tr.Stats().Entries)
+
+	// A later ordered exchange within the live timeout is still admissible.
+	request.TransactionID++
+	require.Equal(t, AssociationRequest, tr.Observe("scope", at.Add(30*time.Second), request).Status)
+	tr.Reset()
+	require.Equal(t, AssociationRequest, tr.Observe("scope", at, request).Status)
+}

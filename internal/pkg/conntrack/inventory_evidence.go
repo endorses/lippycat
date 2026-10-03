@@ -222,3 +222,28 @@ func (t *Tracker) SetAnalyzedService(env events.Envelope, scope, service string,
 	}
 	return nil
 }
+
+// InventoryObservation snapshots the proof available for a still-active flow.
+// It leaves accounting and lifecycle state unchanged.
+func (t *Tracker) InventoryObservation(env events.Envelope, scope string) (*events.ConnEvent, error) {
+	key, err := flowid.Normalize(env.Flow)
+	if err != nil {
+		return nil, err
+	}
+	tk := trackerKeyForEnvelope(key, env, scope)
+	s := t.shardFor(tk)
+	s.Lock()
+	defer s.Unlock()
+	if f := s.flows[tk]; f != nil {
+		return f.inventoryObservation(), nil
+	}
+	return nil, nil
+}
+
+func (f *flow) inventoryObservation() *events.ConnEvent {
+	if proof := f.inventory.evidence(); proof.Host == "" && proof.Service == "" {
+		return nil
+	}
+	event := f.event()
+	return &event
+}

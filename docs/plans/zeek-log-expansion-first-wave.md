@@ -351,3 +351,22 @@ and verified: disabled evidence allocation, recovered analysis-policy identity,
 relay production guarantees, decoded truncation, and link-local service policy.
 No deferred requirement or invented performance gate remains for this wave.
 Implementation, documentation, and this checked plan are committed together.
+
+## Live inventory follow-up (2026-10-03)
+
+The user requested immediate inventory after observing the five-minute delay in
+remote packet-mode monitoring. This supersedes the summary-triggered inventory
+timing above; the original wave closure remains unchanged.
+
+- [x] Emit inventory as soon as local packet analysis establishes sufficient
+      host/service evidence, preserving bounded deduplication and the existing
+      connection-summary lifecycle.
+- [x] Separate live idle expiry from capture-order admission, including DHCP/NTP
+      association state; anchor idle aging to capture time plus local elapsed
+      time so transport delay and sensor clock offsets do not reject valid proof.
+- [x] Advance the analysis revision for offline/recovery identity and update
+      operator documentation and the English/German manual.
+- [x] Validate immediate TCP/DNS inventory, delayed live packets, association
+      expiry/replay bounds, and unchanged connection summaries under race tests;
+      pass remote, offline, TUI, inventory, and configuration package tests,
+      `make manual-check`, `make manual`, and `make build`.

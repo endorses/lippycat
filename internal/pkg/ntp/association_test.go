@@ -100,3 +100,36 @@ func TestLateRequestDoesNotReviveEvictedAssociation(t *testing.T) {
 	require.Equal(t, AssociationMissing, a.Observe("scope", dst, src, at.Add(3*time.Second), &Observation{Mode: 4, Origin: Timestamp{Raw: 1}}).Status)
 	require.Equal(t, 1, a.Stats().Entries)
 }
+
+func TestAssociationIdleExpiryAcceptsDelayedOrderedPackets(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Timeout = time.Minute
+	a, err := NewAssociator(cfg)
+	require.NoError(t, err)
+	src, dst := netip.MustParseAddrPort("192.0.2.1:49152"), netip.MustParseAddrPort("192.0.2.2:123")
+	at := time.Unix(1000, 0)
+	request := Observation{Mode: 3, Transmit: Timestamp{Raw: 12345}}
+	reply := Observation{Mode: 4, Origin: request.Transmit}
+
+	a.ExpireIdle(at.Add(2 * time.Second))
+	first := a.Observe("scope", src, dst, at, &request)
+	require.Equal(t, AssociationRequest, first.Status)
+	a.ExpireIdle(at.Add(3 * time.Second))
+	matched := a.Observe("scope", dst, src, at.Add(time.Second), &reply)
+	require.Equal(t, AssociationUnique, matched.Status)
+	require.Equal(t, first.ID, matched.ID)
+
+	// Idle expiry remains monotonic and cannot be undone by late input or an
+	// older timer value. An expired exchange must not be recreated.
+	a.ExpireIdle(at.Add(time.Minute))
+	require.Zero(t, a.Stats().Entries)
+	a.ExpireIdle(at)
+	require.Equal(t, AssociationExpired, a.Observe("scope", src, dst, at, &request).Status)
+	require.Zero(t, a.Stats().Entries)
+
+	// A later ordered exchange within the live timeout is still admissible.
+	request.Transmit.Raw++
+	require.Equal(t, AssociationRequest, a.Observe("scope", src, dst, at.Add(30*time.Second), &request).Status)
+	a.Reset()
+	require.Equal(t, AssociationRequest, a.Observe("scope", src, dst, at, &request).Status)
+}

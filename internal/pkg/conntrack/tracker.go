@@ -115,9 +115,20 @@ func New(cfg Config) (*Tracker, error) {
 
 // Observe updates one flow and returns records evicted to preserve the hard cap.
 func (t *Tracker) Observe(o Observation) ([]events.ConnEvent, error) {
+	evicted, _, err := t.observe(o, false)
+	return evicted, err
+}
+
+// ObserveWithInventory also returns a snapshot of proven inventory evidence.
+// The snapshot is taken before capacity eviction and does not finalize the flow.
+func (t *Tracker) ObserveWithInventory(o Observation) ([]events.ConnEvent, *events.ConnEvent, error) {
+	return t.observe(o, o.InventoryEligible)
+}
+
+func (t *Tracker) observe(o Observation, inventory bool) ([]events.ConnEvent, *events.ConnEvent, error) {
 	key, err := flowid.Normalize(o.Envelope.Flow)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	now := o.Envelope.Timestamp
 	if now.IsZero() {
@@ -138,15 +149,19 @@ func (t *Tracker) Observe(o Observation) ([]events.ConnEvent, error) {
 	if f.inventory != nil {
 		f.inventory.requestTimeout = t.cfg.IdleTimeout
 	}
+	var proof *events.ConnEvent
+	if inventory {
+		proof = f.inventoryObservation()
+	}
 	s.Unlock()
 	if int(t.depth.Load()) <= t.cfg.MaxFlows {
-		return nil, nil
+		return nil, proof, nil
 	}
 	if ev, ok := t.evictOldest(); ok {
 		t.evictions.Add(1)
-		return []events.ConnEvent{ev}, nil
+		return []events.ConnEvent{ev}, proof, nil
 	}
-	return nil, nil
+	return nil, proof, nil
 }
 
 // SetService records a protocol service discovered after packet accounting,

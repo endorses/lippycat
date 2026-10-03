@@ -34,8 +34,8 @@ packets and leaves canonical protocol analysis to the processor, preserving
 central PCAP writing, packet views, virtual-interface output, and any feature
 that needs payload bytes.
 
-`--forward-mode events` runs normalized DNS, TLS, HTTP, SMTP, file-metadata,
-and connection analysis at the hunter and sends metadata events only. No raw
+`--forward-mode events` runs normalized DNS, TLS, HTTP, SMTP, RADIUS, DHCP, NTP,
+file-metadata, and connection analysis at the hunter and sends metadata events only. No raw
 packet bytes or file content are carried by the event transport. This reduces
 upstream bandwidth and limits disclosure, but the processor cannot reconstruct
 PCAPs, feed packet views or a virtual interface, redo analysis with a different
@@ -52,6 +52,22 @@ acknowledges processor queue admission and can lose admitted events if the
 processor crashes. Bound the spool with `--event-spool-max-bytes` and
 `--event-spool-max-age`; exhaustion defaults to `drop_oldest`, with exact loss
 ranges reported, or can use `drop_new`.
+
+### DHCP/NTP and inventory events
+
+DHCPv4 and NTP time messages are produced independently of log sinks, one event
+per accepted message. Enable bounded host/service inventory at the hunter with
+`--inventory --inventory-local-cidrs 192.0.2.0/24,2001:db8::/32`. Use the same
+explicit local policy when comparing hunter and processor/tap analysis. Inventory
+requires positive handshake or bidirectional UDP evidence; service records also
+require decoded protocol evidence and a reliable responder. No inventory is
+advertised as enabled without its producer policy, and processors do not remotely
+distribute these settings. Optional unsupported kinds report compatibility loss;
+required kinds must negotiate or use the explicit packet fallback.
+
+The shared `--inventory-*`, `--dhcp-association-*`, and `--ntp-association-*`
+flags bound state and retention. See the [network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)
+for defaults, scope/epoch isolation, partial observations, and privacy.
 
 ### Reliable event spool operation
 

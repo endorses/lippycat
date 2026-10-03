@@ -25,8 +25,18 @@ func TestEventTransportSchemaHasNoRawPacketBytes(t *testing.T) {
 		fields := message.Fields()
 		for i := 0; i < fields.Len(); i++ {
 			field := fields.Get(i)
-			require.NotEqualf(t, protoreflect.BytesKind, field.Kind(),
-				"event transport field %s must not carry raw packet bytes", field.FullName())
+			// Bounded identifiers and fixed header values are typed metadata, not
+			// raw packet bodies. The adapter validates these exact field bounds.
+			boundedMetadata := map[protoreflect.FullName]bool{
+				"lippycat.events.v1.DHCPEvent.hardware_address":       true,
+				"lippycat.events.v1.DHCPEvent.client_identifier":      true,
+				"lippycat.events.v1.DHCPEvent.parameter_request_list": true,
+				"lippycat.events.v1.NTPEvent.reference_id":            true,
+			}
+			if !boundedMetadata[field.FullName()] {
+				require.NotEqualf(t, protoreflect.BytesKind, field.Kind(),
+					"event transport field %s must not carry raw packet bytes", field.FullName())
+			}
 			if field.Kind() == protoreflect.MessageKind {
 				checkMessage(field.Message())
 			}

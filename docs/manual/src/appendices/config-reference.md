@@ -163,6 +163,34 @@ stream schemas, hierarchy behavior, rotation, and privacy guidance.
 | `files.max_size`                  | integer  | `10485760`                                    | Maximum bytes analyzed or extracted per file.                              |
 | `files.total_size`                | integer  | `104857600`                                   | Maximum bytes extracted over the process lifetime.                         |
 
+### Network Observation Settings {#network-observation-settings}
+
+These shared settings apply to hunter, processor/tap, sniff, local/offline TUI,
+and monitoring-client packet analysis independently of file logging. Explicit
+inventory enablement requires local CIDRs. Per-scope caps cannot exceed global
+caps; all state caps, retention windows, and association timeouts must be positive.
+
+| Key                                      | Default   | Meaning                                 |
+| ---------------------------------------- | --------- | --------------------------------------- |
+| `events.inventory.enabled`               | `false`   | Produce known-host/service observations |
+| `events.inventory.local_cidrs`           | `[]`      | Explicit local IPv4/IPv6 subject policy |
+| `events.inventory.max_entries`           | `16384`   | Global inventory entry cap              |
+| `events.inventory.max_bytes`             | `8388608` | Global accounted inventory byte cap     |
+| `events.inventory.max_entries_per_scope` | `4096`    | Per-scope inventory entry cap           |
+| `events.inventory.max_bytes_per_scope`   | `2097152` | Per-scope accounted inventory byte cap  |
+| `events.inventory.retention`             | `24h`     | Capture-time deduplication window       |
+| `events.dhcp.max_entries`                | `4096`    | DHCP association entry cap              |
+| `events.dhcp.max_bytes`                  | `4194304` | Accounted DHCP association byte cap     |
+| `events.dhcp.timeout`                    | `2m`      | DHCP capture-time association timeout   |
+| `events.ntp.max_entries`                 | `4096`    | NTP association entry cap               |
+| `events.ntp.max_bytes`                   | `4194304` | Accounted NTP association byte cap      |
+| `events.ntp.timeout`                     | `30s`     | NTP capture-time association timeout    |
+
+The four optional stream names are `dhcp`, `ntp`, `known_hosts`, and
+`known_services`; `logs.streams` keeps its existing seven-stream default. See
+[DHCP, NTP, and local inventories](../part5-advanced/structured-protocol-logs.md#network-observations)
+for record granularity, evidence, privacy, and bounded-state behavior.
+
 ---
 
 ## Protocol Capture Settings {#protocol-capture-settings}

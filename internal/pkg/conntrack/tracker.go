@@ -29,10 +29,22 @@ type Observation struct {
 	IPBytes, PayloadBytes uint64
 	Service               string
 	TCP                   *TCPFlags
+	// AnalysisScope distinguishes capture/producer epochs before delivery
+	// identity is assigned. InventoryEligible requires complete, in-order wire
+	// input; ordinary accounting remains available for ineligible observations.
+	AnalysisScope     string
+	InventoryEligible bool
+	UDP               *UDPEvidence
 }
 
 // TCPFlags is the TCP control information used by the state machine.
-type TCPFlags struct{ SYN, ACK, FIN, RST bool }
+// SequenceValid is set only for wire-decoded headers. Legacy flag-only callers
+// retain ordinary connection accounting but cannot prove inventory evidence.
+type TCPFlags struct {
+	SYN, ACK, FIN, RST       bool
+	Sequence, Acknowledgment uint32
+	SequenceValid            bool
+}
 
 // Stats is a lock-free snapshot apart from the current depth calculation.
 type Stats struct {
@@ -41,6 +53,7 @@ type Stats struct {
 }
 
 type trackerKey struct {
+	AnalysisScope  string
 	Flow           flowid.Key
 	NodeID         string
 	CaptureSource  string
@@ -56,6 +69,7 @@ const (
 )
 
 type flow struct {
+	inventory                          *inventoryProof
 	key                                trackerKey
 	env                                events.Envelope
 	orig                               events.FlowTuple
@@ -110,7 +124,7 @@ func (t *Tracker) Observe(o Observation) ([]events.ConnEvent, error) {
 		now = time.Now()
 	}
 	t.observations.Add(1)
-	tk := trackerKeyForEnvelope(key, o.Envelope)
+	tk := trackerKeyForEnvelope(key, o.Envelope, o.AnalysisScope)
 	s := t.shardFor(tk)
 	s.Lock()
 	f := s.flows[tk]
@@ -120,6 +134,9 @@ func (t *Tracker) Observe(o Observation) ([]events.ConnEvent, error) {
 		t.depth.Add(1)
 	} else {
 		f.update(o, now)
+	}
+	if f.inventory != nil {
+		f.inventory.requestTimeout = t.cfg.IdleTimeout
 	}
 	s.Unlock()
 	if int(t.depth.Load()) <= t.cfg.MaxFlows {
@@ -135,7 +152,7 @@ func (t *Tracker) Observe(o Observation) ([]events.ConnEvent, error) {
 // SetService records a protocol service discovered after packet accounting,
 // such as when an application message becomes recognizable only after TCP
 // reassembly. It does not alter packet or byte counters.
-func (t *Tracker) SetService(env events.Envelope, service string) error {
+func (t *Tracker) SetService(env events.Envelope, service string, scope ...string) error {
 	if service == "" {
 		return nil
 	}
@@ -143,7 +160,7 @@ func (t *Tracker) SetService(env events.Envelope, service string) error {
 	if err != nil {
 		return err
 	}
-	tk := trackerKeyForEnvelope(key, env)
+	tk := trackerKeyForEnvelope(key, env, scope...)
 	s := t.shardFor(tk)
 	s.Lock()
 	if f := s.flows[tk]; f != nil {
@@ -153,8 +170,13 @@ func (t *Tracker) SetService(env events.Envelope, service string) error {
 	return nil
 }
 
-func trackerKeyForEnvelope(key flowid.Key, env events.Envelope) trackerKey {
+func trackerKeyForEnvelope(key flowid.Key, env events.Envelope, scope ...string) trackerKey {
+	analysisScope := ""
+	if len(scope) > 0 {
+		analysisScope = scope[0]
+	}
 	return trackerKey{
+		AnalysisScope:  analysisScope,
 		Flow:           key,
 		NodeID:         env.NodeID,
 		CaptureSource:  env.Provenance.CaptureSource,
@@ -165,6 +187,7 @@ func trackerKeyForEnvelope(key flowid.Key, env events.Envelope) trackerKey {
 }
 
 func newFlow(key trackerKey, o Observation, now time.Time) *flow {
+	inventoryObservation := o
 	if o.Envelope.Flow.Protocol == flowid.ProtocolTCP && o.TCP != nil && o.TCP.SYN && o.TCP.ACK {
 		o.Envelope.Flow.SourceAddress, o.Envelope.Flow.DestinationAddress = o.Envelope.Flow.DestinationAddress, o.Envelope.Flow.SourceAddress
 		o.Envelope.Flow.SourcePort, o.Envelope.Flow.DestinationPort = o.Envelope.Flow.DestinationPort, o.Envelope.Flow.SourcePort
@@ -177,11 +200,16 @@ func newFlow(key trackerKey, o Observation, now time.Time) *flow {
 	if o.Envelope.CaptureScope == events.CaptureScopeFiltered {
 		f.partial = true
 	}
+	// Preserve legacy accounting orientation while proving inventory against
+	// the actual packet direction, including a first-observed SYN/ACK.
+	o.InventoryEligible = false
 	f.update(o, now)
+	f.observeInventory(inventoryObservation, now)
 	return f
 }
 
 func (f *flow) update(o Observation, now time.Time) {
+	f.observeInventory(o, now)
 	d := origin
 	if o.Envelope.Flow.SourceAddress != f.orig.SourceAddress || o.Envelope.Flow.SourcePort != f.orig.SourcePort {
 		d = responder
@@ -301,6 +329,9 @@ func (t *Tracker) Close() []events.ConnEvent {
 
 func sortConnEvents(out []events.ConnEvent) {
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].AnalysisScope != out[j].AnalysisScope {
+			return out[i].AnalysisScope < out[j].AnalysisScope
+		}
 		a, b := out[i].Envelope(), out[j].Envelope()
 		if a.NodeID != b.NodeID {
 			return a.NodeID < b.NodeID
@@ -344,6 +375,9 @@ func flowTupleLess(a, b events.FlowTuple) bool {
 }
 
 func trackerKeyLess(a, b trackerKey) bool {
+	if a.AnalysisScope != b.AnalysisScope {
+		return a.AnalysisScope < b.AnalysisScope
+	}
 	if a.NodeID != b.NodeID {
 		return a.NodeID < b.NodeID
 	}
@@ -374,6 +408,8 @@ func (f *flow) event() events.ConnEvent {
 	env.Flow = f.orig
 	env.Partial = env.Partial || f.partial || !f.seenResp
 	e := events.NewConnEvent(env)
+	e.AnalysisScope = f.key.AnalysisScope
+	e.Evidence = f.inventory.evidence()
 	e.Service = f.service
 	e.Duration = f.last.Sub(f.first)
 	e.OriginBytes = f.origPayload
@@ -427,6 +463,7 @@ func (t *Tracker) shardFor(k trackerKey) *shard {
 	var h maphash.Hash
 	h.SetSeed(t.seed)
 	h.WriteString(k.NodeID)
+	h.WriteString(k.AnalysisScope)
 	h.WriteByte(k.Flow.Protocol)
 	h.Write(k.Flow.Address1.AsSlice())
 	h.Write(k.Flow.Address2.AsSlice())

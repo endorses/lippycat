@@ -18,6 +18,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/hunter/circuitbreaker"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventforwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
@@ -41,6 +42,7 @@ type Config struct {
 	BatchTimeout  time.Duration
 	VoIPMode      bool // Determines filter capabilities advertised to processor (legacy)
 	// Filter capabilities advertised to processor
+	InventoryEnabled     bool
 	RADIUSIngress        bool     // Observation-aware capture and provenance transport are installed.
 	SupportedFilterTypes []string // If set, overrides VoIPMode-based defaults
 	// TLS settings
@@ -54,6 +56,7 @@ type Config struct {
 	MaxReconnectAttempts   int
 	ForwardMode            string
 	EventFallbackToPackets bool
+	RequiredEventKinds     []eventsv1.EventKind
 	EventSpoolMaxBytes     uint64
 	EventSpoolMaxAge       time.Duration
 }
@@ -532,6 +535,10 @@ func (m *Manager) register() error {
 		filterTypes = append(append([]string(nil), filterTypes...), "radius_username", "radius_mac", "radius_attribute", "radius_compound")
 	}
 
+	features := []string{"tcp_reassembly", "connection_tracking", "file_metadata"}
+	if m.config.InventoryEnabled {
+		features = append(features, protoadapter.InventoryProductionFeature)
+	}
 	req := &management.HunterRegistration{
 		HunterId:   m.config.HunterID,
 		Hostname:   hostname,
@@ -546,8 +553,8 @@ func (m *Manager) register() error {
 		},
 		EventForwarding: &management.EventForwardingCapabilities{
 			RequestedMode: requestedMode, EventApiMajors: []uint32{1},
-			EventKinds: []int32{1, 2, 3, 4, 5, 6, 7}, SemanticProfileRevision: 1,
-			StatefulAnalysisFeatures: []string{"tcp_reassembly", "connection_tracking", "file_metadata"},
+			EventKinds: protoadapter.SupportedKindIDs(m.config.InventoryEnabled), SemanticProfileRevision: 1,
+			StatefulAnalysisFeatures: features,
 			SensitiveEnrichment:      viper.GetBool("logs.include_http_headers"),
 			MaxSpoolBytes:            m.config.EventSpoolMaxBytes, MaxSpoolAgeSeconds: uint64(max(m.config.EventSpoolMaxAge/time.Second, 0)),
 			AllowPacketFallback: m.config.EventFallbackToPackets,
@@ -578,12 +585,21 @@ func (m *Manager) register() error {
 		m.config.ForwardMode = "packets"
 	}
 	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS {
-		if err := validateAcceptedEventProfile(resp); err != nil {
+		if err := validateAcceptedEventProfile(resp, m.config.RequiredEventKinds...); err != nil {
 			return fmt.Errorf("registration accepted an insufficient event forwarding profile: %w", err)
 		}
 	}
 	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS && m.getEventForwarder() == nil {
 		return fmt.Errorf("registration selected event forwarding without an event runtime")
+	}
+	if accepted == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+		var kinds []eventsv1.EventKind
+		for _, kind := range resp.GetAcceptedEventKinds() {
+			kinds = append(kinds, eventsv1.EventKind(kind))
+		}
+		if err := m.getEventForwarder().SetAcceptedKinds(kinds); err != nil {
+			return fmt.Errorf("apply accepted event kinds: %w", err)
+		}
 	}
 	m.acceptedMode = accepted
 
@@ -603,7 +619,7 @@ func (m *Manager) register() error {
 	return nil
 }
 
-func validateAcceptedEventProfile(resp *management.RegistrationResponse) error {
+func validateAcceptedEventProfile(resp *management.RegistrationResponse, extraRequired ...eventsv1.EventKind) error {
 	if resp.GetAcceptedEventApiMajor() != 1 {
 		return fmt.Errorf("unsupported event API major %d", resp.GetAcceptedEventApiMajor())
 	}
@@ -615,7 +631,11 @@ func validateAcceptedEventProfile(resp *management.RegistrationResponse) error {
 	for _, kind := range resp.GetAcceptedEventKinds() {
 		acceptedKinds[kind] = struct{}{}
 	}
-	for _, required := range []int32{1, 2, 3, 4, 5, 6, 7} {
+	requiredKinds := []int32{1, 2, 3, 4, 5, 6, 7}
+	for _, kind := range extraRequired {
+		requiredKinds = append(requiredKinds, int32(kind))
+	}
+	for _, required := range requiredKinds {
 		if _, ok := acceptedKinds[required]; !ok {
 			return fmt.Errorf("required event kind %d was not accepted", required)
 		}

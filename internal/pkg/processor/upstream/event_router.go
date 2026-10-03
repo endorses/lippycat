@@ -348,6 +348,9 @@ func (r *EventRouter) HandleEvent(ctx context.Context, event events.Event) error
 	if route.beforeHandle != nil {
 		route.beforeHandle()
 	}
+	if err := route.sink.SetAcceptedKinds(r.manager.eventKinds()); err != nil {
+		return err
+	}
 	return route.sink.HandleEvent(ctx, event)
 }
 
@@ -371,7 +374,7 @@ func (r *EventRouter) routeFromSpool(nodeID, sessionID string, lastBatch uint64,
 	if err := spool.BindSessionPolicy(r.sessionPolicy(nodeID, sessionID)); err != nil {
 		return nil, errors.Join(fmt.Errorf("bind upstream event route session policy: %w", err), spool.Close())
 	}
-	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: nodeID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{1, 2, 3, 4, 5, 6, 7}, Profile: r.config.Profile, RelayNodeID: r.manager.config.ProcessorID, OnLoss: r.recordLoss}, spool)
+	client, err := eventforwarding.New(eventforwarding.Config{SourceNodeID: nodeID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: r.manager.eventKinds(), Profile: r.config.Profile, RelayNodeID: r.manager.config.ProcessorID, OnLoss: r.recordLoss}, spool)
 	if err != nil {
 		return nil, errors.Join(err, spool.Close())
 	}
@@ -431,7 +434,11 @@ func (r *EventRouter) serve(ctx context.Context, client *eventforwarding.Client)
 		attemptCtx, cancelAttempt := context.WithCancel(ctx)
 		stream, err := service.StreamEvents(attemptCtx)
 		if err == nil {
-			err = client.Serve(attemptCtx, stream, cancelAttempt)
+			if err = client.SetAcceptedKinds(r.manager.eventKinds()); err == nil {
+				err = client.Serve(attemptCtx, stream, cancelAttempt)
+			} else {
+				cancelAttempt()
+			}
 		} else {
 			cancelAttempt()
 		}

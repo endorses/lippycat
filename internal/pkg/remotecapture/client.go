@@ -27,6 +27,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"github.com/endorses/lippycat/internal/pkg/types"
@@ -43,6 +44,8 @@ const (
 
 // ClientConfig holds configuration for remote capture client
 type ClientConfig struct {
+	// EventAnalysis is an owned snapshot for monitoring packet fallback.
+	EventAnalysis *eventconfig.Config
 	// Address of remote node (host:port)
 	Address string
 
@@ -61,16 +64,17 @@ type ClientConfig struct {
 
 // Client wraps gRPC client for remote packet capture
 type Client struct {
-	conn        *grpc.ClientConn
-	dataClient  data.DataServiceClient
-	eventClient eventsv1.EventServiceClient
-	mgmtClient  management.ManagementServiceClient
-	handler     types.EventHandler
-	ctx         context.Context
-	cancel      context.CancelFunc
-	nodeType    NodeType
-	nodeID      string // ID of connected node
-	addr        string // Address of connected node
+	eventAnalysis *eventconfig.Config
+	conn          *grpc.ClientConn
+	dataClient    data.DataServiceClient
+	eventClient   eventsv1.EventServiceClient
+	mgmtClient    management.ManagementServiceClient
+	handler       types.EventHandler
+	ctx           context.Context
+	cancel        context.CancelFunc
+	nodeType      NodeType
+	nodeID        string // ID of connected node
+	addr          string // Address of connected node
 
 	// Interface mapping: hunterID -> []interfaceName (indexed by interface_index)
 	interfacesMu sync.RWMutex
@@ -111,6 +115,14 @@ func NewClient(addr string, handler types.EventHandler) (*Client, error) {
 
 // NewClientWithConfig creates a new remote capture client with TLS support
 func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Client, error) {
+	if config == nil {
+		return nil, fmt.Errorf("remote client configuration is required")
+	}
+	policy, err := eventconfig.Resolve(config.EventAnalysis)
+	if err != nil {
+		return nil, fmt.Errorf("monitoring event configuration: %w", err)
+	}
+
 	// Dial node (hunter or processor)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -181,6 +193,7 @@ func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Cli
 	}
 
 	client := &Client{
+		eventAnalysis:         policy,
 		conn:                  conn,
 		dataClient:            data.NewDataServiceClient(conn),
 		eventClient:           eventsv1.NewEventServiceClient(conn),

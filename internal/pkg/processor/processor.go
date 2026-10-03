@@ -40,8 +40,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
 	"github.com/endorses/lippycat/internal/pkg/eventcoalesce"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -67,6 +69,7 @@ import (
 
 // Config contains processor configuration
 type Config struct {
+	EventAnalysis                      *eventconfig.Config
 	ListenAddr                         string
 	ProcessorID                        string
 	UpstreamAddr                       string
@@ -312,6 +315,12 @@ type Processor struct {
 
 // New creates a new processor instance
 func New(config Config) (_ *Processor, constructorErr error) {
+	policy, policyErr := eventconfig.Resolve(config.EventAnalysis)
+	if policyErr != nil {
+		return nil, fmt.Errorf("event analysis configuration: %w", policyErr)
+	}
+	config.EventAnalysis = policy
+
 	if config.ListenAddr == "" {
 		return nil, fmt.Errorf("listen address is required")
 	}
@@ -434,6 +443,14 @@ func New(config Config) (_ *Processor, constructorErr error) {
 		}
 		for _, stream := range streams {
 			switch stream {
+			case "dhcp":
+				err = p.logSink.Register(events.KindDHCP, "dhcp", logrecords.DHCP)
+			case "ntp":
+				err = p.logSink.Register(events.KindNTP, "ntp", logrecords.NTP)
+			case "known_hosts":
+				err = p.logSink.Register(events.KindKnownHost, "known_hosts", logrecords.KnownHosts)
+			case "known_services":
+				err = p.logSink.Register(events.KindKnownService, "known_services", logrecords.KnownServices)
 			case "radius":
 				err = p.logSink.Register(events.KindRADIUS, "radius", logrecords.RADIUS)
 			case "dns":
@@ -459,7 +476,7 @@ func New(config Config) (_ *Processor, constructorErr error) {
 		if coalesceErr != nil {
 			return nil, fmt.Errorf("initialize structured log event coalescer: %w", coalesceErr)
 		}
-		if err = p.eventDispatcher.Register(coalescedLogs, events.KindRADIUS, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
+		if err = p.eventDispatcher.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
 			return nil, fmt.Errorf("register structured log event sink: %w", err)
 		}
 	}
@@ -696,10 +713,20 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	// Initialize subscriber manager
 	p.subscriberManager = subscriber.NewManager(config.MaxSubscribers)
 
+	var requiredEventKinds []eventsv1.EventKind
+	if config.LogConfig != nil && config.LogConfig.Enabled {
+		var requiredErr error
+		requiredEventKinds, requiredErr = protoadapter.RequiredKinds(config.LogConfig.Streams)
+		if requiredErr != nil {
+			return nil, fmt.Errorf("required upstream event kinds: %w", requiredErr)
+		}
+	}
 	// Initialize upstream manager if configured
 	if config.UpstreamAddr != "" {
 		p.upstreamManager = upstream.NewManager(
 			upstream.Config{
+				InventoryEnabled:       config.EventAnalysis.Inventory.Enabled,
+				RequiredEventKinds:     requiredEventKinds,
 				Address:                config.UpstreamAddr,
 				TLSEnabled:             config.TLSEnabled,
 				TLSCAFile:              config.TLSCAFile,

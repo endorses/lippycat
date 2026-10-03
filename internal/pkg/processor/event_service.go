@@ -238,7 +238,10 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 			}
 		case event, ok := <-sub.Events():
 			if !ok {
-				return nil
+				// A graceful dispatcher close can precede the periodic loss tick.
+				// Deliver terminal policy/queue omissions before ending the stream.
+				_, err = sendLossGaps(stream, streamID, deliverySequence, subscriberLosses(sub.ConsumeLosses()), maxMessageBytes)
+				return err
 			}
 			deliverySequence, batchSequence, pending, err = s.sendEventBatch(stream, sub, event, maxBatchEvents, maxMessageBytes, streamID, deliverySequence, batchSequence)
 			if err != nil {
@@ -373,35 +376,16 @@ func controlMessage(sequence uint64, control *eventsv1.EventSubscriptionControl)
 
 func requestedEventKinds(input []eventsv1.EventKind, includeFileMetadata bool) ([]events.Kind, error) {
 	if len(input) == 0 {
-		kinds := []events.Kind{events.KindConn, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindRADIUS}
-		if includeFileMetadata {
-			kinds = append(kinds, events.KindFileMetadata)
-		}
-		return kinds, nil
+		input = supportedEventKinds(includeFileMetadata)
 	}
 	kinds := make([]events.Kind, 0, len(input))
 	for _, kind := range input {
-		var mapped events.Kind
-		switch kind {
-		case eventsv1.EventKind_EVENT_KIND_CONN:
-			mapped = events.KindConn
-		case eventsv1.EventKind_EVENT_KIND_DNS:
-			mapped = events.KindDNS
-		case eventsv1.EventKind_EVENT_KIND_TLS:
-			mapped = events.KindTLS
-		case eventsv1.EventKind_EVENT_KIND_HTTP:
-			mapped = events.KindHTTP
-		case eventsv1.EventKind_EVENT_KIND_SMTP:
-			mapped = events.KindSMTP
-		case eventsv1.EventKind_EVENT_KIND_RADIUS:
-			mapped = events.KindRADIUS
-		case eventsv1.EventKind_EVENT_KIND_FILE_METADATA:
-			if !includeFileMetadata {
-				return nil, fmt.Errorf("file metadata kind requires include_file_metadata")
-			}
-			mapped = events.KindFileMetadata
-		default:
+		mapped, ok := protoadapter.NativeKind(kind)
+		if !ok {
 			return nil, fmt.Errorf("unsupported event kind %s", kind)
+		}
+		if mapped == events.KindFileMetadata && !includeFileMetadata {
+			return nil, fmt.Errorf("file metadata kind requires include_file_metadata")
 		}
 		kinds = append(kinds, mapped)
 	}
@@ -409,9 +393,11 @@ func requestedEventKinds(input []eventsv1.EventKind, includeFileMetadata bool) (
 }
 
 func supportedEventKinds(includeFileMetadata bool) []eventsv1.EventKind {
-	kinds := []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_RADIUS}
-	if includeFileMetadata {
-		kinds = append(kinds, eventsv1.EventKind_EVENT_KIND_FILE_METADATA)
+	var kinds []eventsv1.EventKind
+	for _, kind := range protoadapter.SupportedKinds(true) {
+		if kind != eventsv1.EventKind_EVENT_KIND_FILE_METADATA || includeFileMetadata {
+			kinds = append(kinds, kind)
+		}
 	}
 	return kinds
 }
@@ -420,7 +406,9 @@ func subscriberLosses(losses []broadcast.Loss) []*eventsv1.EventLoss {
 	result := make([]*eventsv1.EventLoss, 0, len(losses))
 	for _, loss := range losses {
 		kind := eventsv1.LossKind_LOSS_KIND_SUBSCRIBER
-		if loss.Cause == broadcast.LossCauseDispatcherOverflow {
+		if loss.Cause == broadcast.LossCausePolicyOmission {
+			kind = eventsv1.LossKind_LOSS_KIND_POLICY_OMISSION
+		} else if loss.Cause == broadcast.LossCauseDispatcherOverflow {
 			kind = eventsv1.LossKind_LOSS_KIND_DISPATCH
 		}
 		wire := &eventsv1.EventLoss{Kind: kind, Count: loss.Count, SourceNodeId: loss.SourceNodeID, ProducerSessionId: loss.ProducerSessionID}
@@ -444,6 +432,18 @@ func safeEventProjector(includeSensitiveFields, includeFileMetadata bool) broadc
 			return event, true, nil
 		}
 		switch value := event.(type) {
+		case events.KnownHostEvent, *events.KnownHostEvent, events.KnownServiceEvent, *events.KnownServiceEvent:
+			return nil, false, broadcast.ErrPolicyOmission
+		case events.DHCPEvent:
+			value.HardwareAddress, value.ClientIdentifier = nil, nil
+			value.Hostname, value.Domain = "", ""
+			return value, true, nil
+		case *events.DHCPEvent:
+			copy := *value
+			copy.HardwareAddress, copy.ClientIdentifier = nil, nil
+			copy.Hostname, copy.Domain = "", ""
+			return copy, true, nil
+
 		case events.HTTPEvent:
 			value.Headers, value.Username = nil, ""
 			value.RequestFilenames, value.ResponseFilenames = nil, nil

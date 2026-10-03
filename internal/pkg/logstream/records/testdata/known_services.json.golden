@@ -1,0 +1,1 @@
+{"capture_scope":"filtered","community_id":"1:network","evidence":"ntp_exchange","host":"192.0.2.123","id.orig_h":"192.0.2.20","id.orig_p":40000,"id.resp_h":"192.0.2.123","id.resp_p":123,"node_id":"sensor-a","partial":true,"port":123,"proto":"udp","service":"ntp","transport":"udp","ts":1.5,"uid":"Cnetwork"}

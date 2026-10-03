@@ -4,6 +4,8 @@ package eventanalysis
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"mime"
 	"net/netip"
@@ -14,12 +16,16 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
+	"github.com/endorses/lippycat/internal/pkg/dhcp"
 	dnsparser "github.com/endorses/lippycat/internal/pkg/dns"
 	emailparser "github.com/endorses/lippycat/internal/pkg/email"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/flowid"
+	"github.com/endorses/lippycat/internal/pkg/inventory"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/ntp"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/endorses/lippycat/internal/pkg/radius"
@@ -32,6 +38,7 @@ import (
 // Source identifies the analysis authority and capture provenance for an input.
 type Source struct {
 	NodeID, CaptureSource, InterfaceName, InputFile string
+	CaptureEpoch                                    string
 	InterfaceIndex                                  uint32
 	ProcessorNodeIDs                                []string
 	CaptureScope                                    events.CaptureScope
@@ -41,6 +48,10 @@ type Source struct {
 // Config controls bounded analysis state. Dispatcher lifecycle remains owned by
 // the caller so sinks can be registered before it is started.
 type Config struct {
+	// Policy is an owned snapshot; nil selects finite defaults.
+	Policy *eventconfig.Config
+	// AnalysisEpoch is the producer session identity when available.
+	AnalysisEpoch           string
 	Dispatcher              *events.Dispatcher
 	Flow                    flowid.Config
 	Connections             conntrack.Config
@@ -60,11 +71,21 @@ type Config struct {
 	LosslessDelivery bool
 }
 
-type Stats struct{ Observed, Emitted, Invalid, Dropped, ReassemblyEvicted uint64 }
+type Stats struct {
+	Observed, Emitted, Invalid, Dropped, ReassemblyEvicted uint64
+	DHCP                                                   dhcp.Stats
+	NTP                                                    ntp.Stats
+	Inventory                                              inventory.Stats
+}
 
 type Runtime struct {
 	mu              sync.Mutex
 	cfg             Config
+	dhcp            *dhcp.Tracker
+	ntp             *ntp.Associator
+	generation      uint64
+	inventory       *inventory.Tracker
+	watermark       time.Time
 	identity        *flowid.Cache
 	connections     *conntrack.Tracker
 	tcpAssembler    *capture.TCPAssembler
@@ -110,6 +131,25 @@ func New(cfg Config) (*Runtime, error) {
 	if cfg.MaxReassemblyStreams <= 0 {
 		cfg.MaxReassemblyStreams = cfg.Connections.MaxFlows
 	}
+	if cfg.Policy == nil {
+		defaults := eventconfig.Default()
+		cfg.Policy = &defaults
+	} else {
+		copy := cfg.Policy.Clone()
+		cfg.Policy = &copy
+	}
+	if err := cfg.Policy.Validate(); err != nil {
+		return nil, fmt.Errorf("event analysis policy: %w", err)
+	}
+	if cfg.AnalysisEpoch == "" {
+		// Offline callers supply their deterministic producer session. Other
+		// callers receive an independent capture epoch for this runtime lifetime.
+		var epoch [16]byte
+		if _, err := rand.Read(epoch[:]); err != nil {
+			return nil, fmt.Errorf("create analysis epoch: %w", err)
+		}
+		cfg.AnalysisEpoch = hex.EncodeToString(epoch[:])
+	}
 	r := &Runtime{cfg: cfg}
 	if err := r.resetState(); err != nil {
 		return nil, err
@@ -146,6 +186,20 @@ func (r *Runtime) stopLiveExpiry() {
 
 func (r *Runtime) resetState() error {
 	var err error
+	r.dhcp, err = dhcp.NewTracker(r.cfg.Policy.DHCP)
+	if err != nil {
+		return fmt.Errorf("initialize DHCP association: %w", err)
+	}
+	r.ntp, err = ntp.NewAssociator(r.cfg.Policy.NTP)
+	if err != nil {
+		return fmt.Errorf("initialize NTP association: %w", err)
+	}
+	r.inventory, err = inventory.New(r.cfg.Policy.Inventory)
+	if err != nil {
+		return fmt.Errorf("initialize inventory: %w", err)
+	}
+	r.watermark = time.Time{}
+	r.generation++
 	r.identity, err = flowid.NewCache(r.cfg.Flow)
 	if err != nil {
 		return fmt.Errorf("initialize flow identity: %w", err)
@@ -300,6 +354,7 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 		// but their timestamps must still advance offline connection expiry.
 		// Unknown non-IP EtherTypes also produce decoder errors. Keep
 		// metadata-only inputs and failures decoding IP on the validation path.
+		r.advanceWatermark(ts)
 		return ts, nil
 	}
 	// Transported captures carry interface provenance per packet. Preserve an
@@ -323,6 +378,10 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 		return time.Time{}, err
 	}
 	r.stats.Observed++
+	truncated := raw.CaptureLength < raw.OriginalLength || packet.Metadata().Truncated
+	eligible := r.cfg.Policy.Inventory.Enabled && !ts.Before(r.watermark) && !truncated && packetEvidenceMatches(packet, env.Flow)
+	r.advanceWatermark(ts)
+	udpEvidence := r.observeNetworkDatagram(source, env, packet, truncated)
 	observation, radiusErr := grpcadapter.RADIUSFromProto(raw)
 	if radiusErr != nil {
 		logger.Debug("Skipping inconsistent RADIUS event provenance", "error", radiusErr)
@@ -338,12 +397,16 @@ func (r *Runtime) observeDecodedCaptured(source Source, raw *data.CapturedPacket
 			r.emit(event)
 		}
 	}
-	connEvents, err := r.connections.Observe(conntrack.FromPacket(packet, env, raw.Metadata.Protocol))
+	connObservation := conntrack.FromPacket(packet, env, raw.Metadata.Protocol)
+	connObservation.AnalysisScope = r.associationScope(source, env)
+	connObservation.InventoryEligible = eligible
+	connObservation.UDP = udpEvidence
+	connEvents, err := r.connections.Observe(connObservation)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("observe connection: %w", err)
 	}
 	for _, ev := range connEvents {
-		r.emit(ev)
+		r.emitConnection(ev)
 	}
 	if _, tcp := packet.TransportLayer().(*layers.TCP); tcp {
 		// Packet-local analyzers may recognize an incomplete TCP segment. Wait
@@ -553,11 +616,15 @@ func (r *Runtime) emitHTTPFile(env events.Envelope, meta *data.HTTPMetadata) {
 }
 
 func (r *Runtime) expire(now time.Time) {
+	r.advanceWatermark(now)
+	r.inventory.Advance(r.watermark)
+	r.dhcp.Advance(now)
+	r.ntp.Advance(now)
 	if r.tcpAssembler != nil {
 		r.tcpAssembler.FlushCloseOlderThan(now.Add(-r.cfg.Connections.IdleTimeout))
 	}
 	for _, ev := range r.connections.Expire(now) {
-		r.emit(ev)
+		r.emitConnection(ev)
 	}
 }
 func (r *Runtime) Expire(now time.Time) {
@@ -577,8 +644,13 @@ func (r *Runtime) EOF() {
 		r.tcpAssembler.FlushAll()
 	}
 	for _, ev := range r.connections.Close() {
-		r.emit(ev)
+		r.emitConnection(ev)
 	}
+	r.dhcp.Reset()
+	r.ntp.Reset()
+	r.inventory.Reset()
+	r.watermark = time.Time{}
+	r.generation++
 }
 func (r *Runtime) Reset() error {
 	r.mu.Lock()
@@ -590,7 +662,7 @@ func (r *Runtime) Reset() error {
 		r.tcpAssembler.FlushAll()
 	}
 	for _, ev := range r.connections.Close() {
-		r.emit(ev)
+		r.emitConnection(ev)
 	}
 	return r.resetState()
 }
@@ -605,11 +677,23 @@ func (r *Runtime) Close() {
 		r.tcpAssembler.FlushAll()
 	}
 	for _, ev := range r.connections.Close() {
-		r.emit(ev)
+		r.emitConnection(ev)
 	}
+	r.dhcp.Reset()
+	r.ntp.Reset()
+	r.inventory.Reset()
+	r.watermark = time.Time{}
 	r.closed = true
 }
-func (r *Runtime) Stats() Stats { r.mu.Lock(); defer r.mu.Unlock(); return r.stats }
+func (r *Runtime) Stats() Stats {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stats := r.stats
+	stats.DHCP = r.dhcp.Stats()
+	stats.NTP = r.ntp.Stats()
+	stats.Inventory = r.inventory.Stats()
+	return stats
+}
 
 func FlowTuple(meta *data.PacketMetadata) (events.FlowTuple, error) {
 	src, e := netip.ParseAddr(meta.SrcIp)

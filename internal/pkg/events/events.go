@@ -157,8 +157,19 @@ func NewHTTPEvent(env Envelope) HTTPEvent { return HTTPEvent{eventBase: eventBas
 func (HTTPEvent) Kind() Kind              { return KindHTTP }
 func (HTTPEvent) eventMarker()            {}
 
+// ConnEvidence is internal positive parser/tracker evidence for local inventory.
+// It is deliberately not transported in conn events: inventory is derived once
+// at its producer, never again at an ingress or relay.
+type ConnEvidence struct {
+	Host, Service InventoryEvidence
+	Responder     netip.AddrPort
+	Protocol      string
+}
+
 type ConnEvent struct {
 	eventBase
+	Evidence                                                       ConnEvidence `json:"-"`
+	AnalysisScope                                                  string       `json:"-"`
 	Service                                                        string
 	Duration                                                       time.Duration
 	OriginBytes, ResponseBytes                                     uint64

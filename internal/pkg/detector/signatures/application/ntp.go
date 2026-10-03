@@ -2,6 +2,8 @@ package application
 
 import (
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
+	"github.com/endorses/lippycat/internal/pkg/ntp"
+	"time"
 )
 
 // NTPSignature detects NTP (Network Time Protocol) traffic
@@ -34,57 +36,12 @@ func (n *NTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		return nil
 	}
 
-	// NTP packet is typically 48 bytes
-	// Minimum size is 48 bytes for standard NTP
-	if len(ctx.Payload) < 48 {
+	observation, err := ntp.Decode(ctx.Payload, time.Time{})
+	if err != nil || observation.Partial {
 		return nil
 	}
-
-	payload := ctx.Payload
-
-	// NTP header structure (first byte):
-	// LI (2 bits) + VN (3 bits) + Mode (3 bits)
-
-	firstByte := payload[0]
-
-	// Extract fields from first byte
-	li := (firstByte >> 6) & 0x03 // Leap Indicator (bits 0-1)
-	vn := (firstByte >> 3) & 0x07 // Version Number (bits 2-4)
-	mode := firstByte & 0x07      // Mode (bits 5-7)
-
-	// Validate version (1-4 are valid NTP versions)
-	if vn == 0 || vn > 4 {
-		return nil
-	}
-
-	// Validate mode (0-7, but 0 and 6-7 are reserved/rare)
-	if mode == 0 || mode == 6 {
-		return nil // Reserved modes
-	}
-
-	// Extract stratum (second byte)
-	stratum := payload[1]
-
-	// Validate stratum (0-16, where 0 is special and 16 is unsynchronized)
-	if stratum > 16 {
-		return nil
-	}
-
-	// Extract poll interval (third byte)
-	poll := payload[2]
-
-	// Poll interval should be reasonable (typically 4-17, representing 2^poll seconds)
-	if poll > 24 {
-		return nil // Unreasonable poll interval
-	}
-
-	// Extract precision (fourth byte, signed)
-	precision := int8(payload[3])
-
-	// Precision should be reasonable (typically -6 to -20)
-	if precision > 0 || precision < -30 {
-		return nil
-	}
+	li, vn, mode := observation.LeapIndicator, observation.Version, observation.Mode
+	stratum, poll, precision := observation.Stratum, observation.Poll, observation.Precision
 
 	metadata := map[string]interface{}{
 		"version":        vn,

@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/spf13/cobra"
@@ -99,6 +100,8 @@ var (
 )
 
 func init() {
+	eventPolicyFlags = HuntCmd.PersistentFlags()
+	eventconfig.Register(eventPolicyFlags)
 	// Required flags (persistent so subcommands inherit them)
 	HuntCmd.PersistentFlags().StringVarP(&processorAddr, "processor", "P", "", "Processor address (host:port)")
 	_ = HuntCmd.MarkPersistentFlagRequired("processor") // Error only occurs with invalid flag name (hard-coded string)

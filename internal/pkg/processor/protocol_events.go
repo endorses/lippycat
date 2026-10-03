@@ -61,6 +61,7 @@ func (p *Processor) initializeEventAnalysisLocked() error {
 	}
 	runtime, err := eventanalysis.New(eventanalysis.Config{
 		Dispatcher: p.eventDispatcher, Files: fileCfg,
+		Policy:             p.config.EventAnalysis,
 		IncludeHTTPHeaders: includeHeaders, IncludeEmailBodyPreview: includeEmailBody,
 		LiveExpiry: true,
 	})

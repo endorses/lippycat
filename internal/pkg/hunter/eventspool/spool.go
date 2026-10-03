@@ -55,12 +55,13 @@ var (
 )
 
 type SessionPolicy struct {
-	Version            uint32 `json:"version"`
-	SourceNodeID       string `json:"source_node_id"`
-	ProducerSessionID  string `json:"producer_session_id"`
-	DeliveryProfile    string `json:"delivery_profile"`
-	IncludeHTTPHeaders bool   `json:"include_http_headers"`
-	SemanticRevision   uint32 `json:"semantic_revision"`
+	Version             uint32 `json:"version"`
+	SourceNodeID        string `json:"source_node_id"`
+	ProducerSessionID   string `json:"producer_session_id"`
+	DeliveryProfile     string `json:"delivery_profile"`
+	IncludeHTTPHeaders  bool   `json:"include_http_headers"`
+	SemanticRevision    uint32 `json:"semantic_revision"`
+	AnalysisFingerprint string `json:"analysis_fingerprint,omitempty"`
 }
 
 type ExhaustionPolicy string
@@ -1099,6 +1100,16 @@ func (s *Spool) updateHighWater() {
 	}
 }
 
+// SessionPolicy returns a copy of the recovered policy without exposing mutable state.
+func (s *Spool) SessionPolicy() (SessionPolicy, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionPolicy == nil {
+		return SessionPolicy{}, false
+	}
+	return *s.sessionPolicy, true
+}
+
 func (s *Spool) BindSessionPolicy(policy SessionPolicy) error {
 	if policy.Version == 0 {
 		policy.Version = 1
@@ -1144,6 +1155,10 @@ func (s *Spool) ResetSession(policy SessionPolicy) error {
 	return s.resetSessionLocked(policy)
 }
 func (s *Spool) resetSessionLocked(policy SessionPolicy) error {
+	// Resetting sequence counters under the same identity would reuse event IDs.
+	if s.identitySet && s.singleSource == policy.SourceNodeID && s.singleProducer == policy.ProducerSessionID {
+		return errors.New("reset event spool session: a new producer session identity is required")
+	}
 	copyPolicy := policy
 	tx := transaction{Version: manifestVersion, Generation: s.generation, Sequence: s.txSequence + 1, SourceNodeID: policy.SourceNodeID, ProducerSessionID: policy.ProducerSessionID, SessionPolicy: &copyPolicy, ResetSession: true}
 	return s.commit(tx)
@@ -1169,6 +1184,9 @@ func readSessionPolicy(path string) (SessionPolicy, error) {
 }
 
 func validateSessionPolicy(policy SessionPolicy) error {
+	if len(policy.AnalysisFingerprint) > 256 {
+		return errors.New("analysis fingerprint exceeds maximum length")
+	}
 	if policy.Version != 1 {
 		return fmt.Errorf("unsupported version %d", policy.Version)
 	}

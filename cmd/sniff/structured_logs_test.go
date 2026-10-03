@@ -120,7 +120,7 @@ func TestSniffProducesNormalizedEventsWithoutLogDirectory(t *testing.T) {
 	require.NotEmpty(t, dnsEvent.Envelope().EventID)
 }
 
-func TestWithEventAnalysisStillRunsWhenInitializationFails(t *testing.T) {
+func TestWithEventAnalysisRejectsCaptureWhenInitializationFails(t *testing.T) {
 	viper.Set("logs.dir", "")
 	viper.Set("events.drop_policy", "invalid")
 	t.Cleanup(func() { viper.Set("events.drop_policy", "") })
@@ -128,7 +128,7 @@ func TestWithEventAnalysisStillRunsWhenInitializationFails(t *testing.T) {
 	runs := 0
 	withEventAnalysis(nil, "test-profile", "", func() { runs++ })
 
-	require.Equal(t, 1, runs)
+	require.Equal(t, 0, runs)
 }
 
 func TestSniffSharedFixtureProducesReassembledHTTPEvent(t *testing.T) {

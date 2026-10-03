@@ -11,6 +11,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -43,6 +44,10 @@ type tapRuntime struct {
 // newTapRuntime constructs the shared processor/source/filter graph used by tap
 // protocol commands.
 func newTapRuntime(config processor.Config, effectiveBPF string, protocol protocolcatalog.Spec, hooks tapRuntimeHooks) (*tapRuntime, error) {
+	eventconfig.Bind(filterStoreFlags)
+	if config.EventAnalysis == nil {
+		config.EventAnalysis = eventconfig.FromViper(viper.GetViper())
+	}
 	if protocol.Name == "" || protocol.Analyzer == "" {
 		return nil, fmt.Errorf("protocol catalog specification is incomplete")
 	}

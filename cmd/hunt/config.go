@@ -8,13 +8,17 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
 // hunterConfigSpec contains the protocol-specific differences in the otherwise
 // common hunter transport configuration.
+var eventPolicyFlags *pflag.FlagSet
+
 type hunterConfigSpec struct {
 	protocol            protocolcatalog.Spec
 	bpfFilter           string
@@ -41,7 +45,9 @@ func protocolHunterConfigSpec(name, bpfFilter string) hunterConfigSpec {
 }
 
 func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
+	eventconfig.Bind(eventPolicyFlags)
 	config := hunter.Config{
+		EventAnalysis:              eventconfig.FromViper(viper.GetViper()),
 		ProcessorAddr:              cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),
 		HunterID:                   cmdutil.GetStringConfig("hunter.hunter_id", hunterID),
 		Interfaces:                 cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),

@@ -240,6 +240,29 @@ for stream schemas, completeness semantics, rotation, and privacy guidance.
 | `--extract-files-max-size`         | int64    | `10485760`                            | Maximum bytes analyzed or extracted per file           |
 | `--extract-files-total-size`       | int64    | `104857600`                           | Process-lifetime extracted-byte limit                  |
 
+### Network Observation Flags {#network-observation-flags}
+
+These shared flags configure analysis in `sniff`, `hunt`, `process`, `tap`, and
+`watch`; they do not enable file logging. Inventory requires both `--inventory`
+and explicit nonempty local CIDRs. The matching YAML keys and validation rules
+are listed under [Network Observation Settings](config-reference.md#network-observation-settings).
+
+| Flag                             | Default   | Meaning                                 |
+| -------------------------------- | --------- | --------------------------------------- |
+| `--inventory`                    | `false`   | Produce known-host/service observations |
+| `--inventory-local-cidrs`        | unset     | Explicit local IPv4/IPv6 subject policy |
+| `--inventory-max-entries`        | `16384`   | Global inventory entry cap              |
+| `--inventory-max-bytes`          | `8388608` | Global accounted inventory byte cap     |
+| `--inventory-scope-max-entries`  | `4096`    | Per-scope inventory entry cap           |
+| `--inventory-scope-max-bytes`    | `2097152` | Per-scope accounted inventory byte cap  |
+| `--inventory-retention`          | `24h`     | Capture-time deduplication window       |
+| `--dhcp-association-max-entries` | `4096`    | DHCP association entry cap              |
+| `--dhcp-association-max-bytes`   | `4194304` | Accounted DHCP association byte cap     |
+| `--dhcp-association-timeout`     | `2m`      | DHCP capture-time association timeout   |
+| `--ntp-association-max-entries`  | `4096`    | NTP association entry cap               |
+| `--ntp-association-max-bytes`    | `4194304` | Accounted NTP association byte cap      |
+| `--ntp-association-timeout`      | `30s`     | NTP capture-time association timeout    |
+
 ### LI Flags {#li-flags}
 
 Used by `process` and `tap`. Requires the `li` build tag (`make processor-li`, `make tap-li`, or `make build-li`).

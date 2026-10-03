@@ -37,7 +37,7 @@ lc process --listen :55555 --log-dir /var/log/lippycat
 ## Structured Protocol Logs
 
 Set `--log-dir` to write `conn.log`, `dns.log`, `ssl.log`, `http.log`,
-`smtp.log`, and `files.log`. Logging is disabled by default; TSV is the default
+`smtp.log`, `files.log`, and `radius.log`. Logging is disabled by default; TSV is the default
 encoding. Select streams and JSONL output when needed:
 
 ```bash
@@ -56,6 +56,15 @@ See [Structured Protocol Logs](../../docs/STRUCTURED_LOGS.md) for all flags,
 schemas, rotation hooks, completeness semantics, SIEM examples, and privacy
 guidance.
 
+The default seven streams remain `conn,dns,ssl,http,smtp,files,radius`. Opt in to
+`dhcp,ntp,known_hosts,known_services` with `--log-streams`. DHCP/NTP preserve one
+record per accepted message. Inventory additionally requires `--inventory` and
+explicit nonempty `--inventory-local-cidrs`; ports and cached labels alone never
+establish a service. Records appear on qualifying connection summaries and are
+bounded by capture-time retention and global/per-scope state caps. See the
+[network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)
+for evidence, privacy, configuration, and old-peer behavior.
+
 ## Command Flags
 
 ### Required Flags
@@ -68,7 +77,7 @@ guidance.
 - `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
 - `-m, --max-hunters` - Maximum concurrent hunter connections (default: 100, 0 = unlimited)
 - `--max-subscribers` - Maximum TUI/monitoring subscribers (default: 100, 0 = unlimited)
-- `--event-allow-sensitive-fields` - Allow subscribers to request sensitive HTTP, SMTP, and file fields (default: false)
+- `--event-allow-sensitive-fields` - Allow subscribers to request sensitive HTTP, SMTP, DHCP, inventory, and file fields (default: false)
 - `--event-allow-file-metadata` - Allow subscribers to request file metadata, never file content (default: false)
 - `-s, --stats` - Display statistics (default: true)
 - `--event-ingress-profile` - Event acknowledgement profile: `memory-only` (default) or `reliable`

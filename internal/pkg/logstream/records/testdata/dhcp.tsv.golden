@@ -1,0 +1,11 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	dhcp
+#open	1970-01-01-00-00-00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	op	message_type	transaction_id	hardware_type	hardware_address	client_identifier	client_addr	offered_addr	next_server	relay_addr	server_identifier	requested_addr	hostname	domain	lease_seconds	routers	dns_servers	parameter_request_list	association	association_id	truncated	community_id	node_id	capture_scope	partial
+#types	time	string	addr	port	addr	port	enum	count	count	count	count	string	string	addr	addr	addr	addr	addr	addr	string	string	count	vector[addr]	vector[addr]	vector[count]	enum	string	bool	string	string	enum	bool
+1.500000	Cnetwork	0.0.0.0	68	255.255.255.255	67	udp	1	3	4294967295	1	0001020304ff	00ff80	0.0.0.0	192.0.2.20	192.0.2.2	0.0.0.0	-	-	host	example.test	0	192.0.2.1,192.0.2.2	(empty)	1,3,6,255	request	exchange-id	T	1:network	sensor-a	filtered	T
+1.500000	Cnetwork	0.0.0.0	68	255.255.255.255	67	udp	1	3	4294967295	1	0001020304ff	-	0.0.0.0	192.0.2.20	192.0.2.2	0.0.0.0	-	-	-	-	-	-	-	-	missing	-	T	1:network	sensor-a	filtered	T
+#close	1970-01-01-00-00-00

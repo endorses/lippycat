@@ -78,6 +78,11 @@ func DecodeEvent(in *eventsv1.ProtocolEvent) (DecodedEvent, error) {
 	}
 	var ev events.Event
 	switch payload := in.Payload.(type) {
+	case *eventsv1.ProtocolEvent_Dhcp, *eventsv1.ProtocolEvent_Ntp, *eventsv1.ProtocolEvent_KnownHost, *eventsv1.ProtocolEvent_KnownService:
+		ev, err = decodeNetwork(in, env)
+		if err != nil {
+			return DecodedEvent{}, err
+		}
 	case *eventsv1.ProtocolEvent_Conn:
 		if payload.Conn == nil {
 			return DecodedEvent{}, errors.New("decode conn event: nil payload")
@@ -260,6 +265,8 @@ func ToProto(ev events.Event) (*eventsv1.ProtocolEvent, error) {
 	}
 	out := &eventsv1.ProtocolEvent{EventId: ev.Envelope().EventID, EventSequence: ev.Envelope().EventSequence, Envelope: env}
 	switch e := ev.(type) {
+	case events.DHCPEvent, events.NTPEvent, events.KnownHostEvent, events.KnownServiceEvent:
+		encodeNetwork(out, ev)
 	case events.RADIUSEvent:
 		out.Payload = &eventsv1.ProtocolEvent_Radius{Radius: &eventsv1.RADIUSEvent{Code: uint32(e.Code), Identifier: uint32(e.Identifier), Length: uint32(e.Length), ObservationId: e.ObservationID, RequestInstanceId: e.RequestInstanceID, Association: e.Association, OriginNodeId: e.OriginNodeID, SourceId: e.SourceID, CaptureEpoch: e.CaptureEpoch, Attributes: cloneStrings(e.Attributes)}}
 	case events.ConnEvent:
@@ -449,6 +456,8 @@ func validateEventCollections(ev events.Event) error {
 	var values []string
 	collections := [][]string{}
 	switch e := ev.(type) {
+	case events.DHCPEvent, events.NTPEvent, events.KnownHostEvent, events.KnownServiceEvent:
+		return validateNetwork(ev)
 	case events.DNSEvent:
 		values = []string{e.Query}
 		collections = [][]string{e.Answers}
@@ -539,6 +548,26 @@ func validateEventCollections(ev events.Event) error {
 
 func eventValue(ev events.Event) (events.Event, error) {
 	switch e := ev.(type) {
+	case *events.DHCPEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil DHCP pointer")
+		}
+		return *e, nil
+	case *events.NTPEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil NTP pointer")
+		}
+		return *e, nil
+	case *events.KnownHostEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil KnownHost pointer")
+		}
+		return *e, nil
+	case *events.KnownServiceEvent:
+		if e == nil {
+			return nil, errors.New("event is a nil KnownService pointer")
+		}
+		return *e, nil
 	case *events.ConnEvent:
 		if e == nil {
 			return nil, errors.New("event is a nil connection pointer")

@@ -17,7 +17,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/admissionintegration"
 	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
 	huntercapture "github.com/endorses/lippycat/internal/pkg/hunter/capture"
 	"github.com/endorses/lippycat/internal/pkg/hunter/connection"
@@ -56,6 +58,7 @@ func stableFilterIDUnion(direct, inherited []string) []string {
 
 // Config contains hunter configuration
 type Config struct {
+	EventAnalysis     *eventconfig.Config
 	MediaAdmission    *admissionintegration.Session
 	RADIUSPorts       []uint16
 	RADIUSScope       radius.CaptureScope
@@ -144,6 +147,12 @@ type Hunter struct {
 
 // New creates a new hunter instance
 func New(config Config) (*Hunter, error) {
+	policy, policyErr := eventconfig.Resolve(config.EventAnalysis)
+	if policyErr != nil {
+		return nil, fmt.Errorf("event analysis configuration: %w", policyErr)
+	}
+	config.EventAnalysis = policy
+
 	if _, err := radius.NewCorrelator(config.RADIUSCorrelation); err != nil {
 		return nil, err
 	}
@@ -391,6 +400,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 	// Create and start connection manager (handles initial connect and reconnections)
 	h.connectionManager = connection.New(
 		connection.Config{
+			InventoryEnabled:      h.config.EventAnalysis.Inventory.Enabled,
 			ProcessorAddr:         h.config.ProcessorAddr,
 			HunterID:              h.config.HunterID,
 			Interfaces:            h.config.Interfaces,
@@ -601,15 +611,30 @@ func (h *Hunter) initializeEventForwarding() error {
 	if err != nil {
 		return err
 	}
+	policy := h.eventSessionPolicy(session)
+	if session != "" {
+		if source != h.config.HunterID {
+			return fmt.Errorf("event spool belongs to node %q, configured node is %q", source, h.config.HunterID)
+		}
+		recovered, ok := spool.SessionPolicy()
+		// Pre-fingerprint policies represent the original default analysis only.
+		// Keep their pending records and identity intact without rewriting the spool.
+		if ok && recovered.AnalysisFingerprint == "" && policy.AnalysisFingerprint == eventconfig.Default().Fingerprint() {
+			policy.AnalysisFingerprint = ""
+		}
+		if !ok || recovered != policy {
+			// Binding the new identity below rejects pending records atomically.
+			// Once drained, changed semantics must not reuse the old event IDs.
+			session, lastEvent, lastBatch = "", 0, 0
+			policy = h.eventSessionPolicy("")
+		}
+	}
 	var producer *events.Producer
 	if session == "" {
 		producer, err = events.NewLiveProducer(h.config.HunterID)
 	} else {
-		if source != h.config.HunterID {
-			return fmt.Errorf("event spool belongs to node %q, configured node is %q", source, h.config.HunterID)
-		}
 		if lastEvent == ^uint64(0) || lastBatch == ^uint64(0) {
-			if err := spool.BindSessionPolicy(h.eventSessionPolicy(session)); err != nil {
+			if err := spool.BindSessionPolicy(policy); err != nil {
 				return err
 			}
 			forwarder, forwardErr := h.newEventForwarder(spool, session)
@@ -628,7 +653,8 @@ func (h *Hunter) initializeEventForwarding() error {
 	if err != nil {
 		return err
 	}
-	if err := spool.BindSessionPolicy(h.eventSessionPolicy(producer.SessionID())); err != nil {
+	policy.ProducerSessionID = producer.SessionID()
+	if err := spool.BindSessionPolicy(policy); err != nil {
 		return err
 	}
 	h.eventSpool = spool
@@ -646,8 +672,13 @@ func (h *Hunter) eventSessionPolicy(sessionID string) eventspool.SessionPolicy {
 	if deliveryProfile == "" {
 		deliveryProfile = "reliable"
 	}
+	analysis := eventconfig.Default()
+	if h.config.EventAnalysis != nil {
+		analysis = h.config.EventAnalysis.Clone()
+	}
 	return eventspool.SessionPolicy{
-		Version: 1, SourceNodeID: h.config.HunterID, ProducerSessionID: sessionID,
+		AnalysisFingerprint: analysis.Fingerprint(),
+		Version:             1, SourceNodeID: h.config.HunterID, ProducerSessionID: sessionID,
 		DeliveryProfile: deliveryProfile, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers"), SemanticRevision: 1,
 	}
 }
@@ -668,7 +699,7 @@ func (h *Hunter) newEventPipeline(spool *eventspool.Spool, producer *events.Prod
 	if err = dispatcher.Register(sink); err != nil {
 		return nil, nil, nil, err
 	}
-	runtime, err := eventanalysis.New(eventanalysis.Config{Dispatcher: dispatcher, LiveExpiry: true, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers")})
+	runtime, err := eventanalysis.New(eventanalysis.Config{Policy: h.config.EventAnalysis, AnalysisEpoch: producer.SessionID(), Dispatcher: dispatcher, LiveExpiry: true, IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers")})
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -684,7 +715,7 @@ func (h *Hunter) newEventForwarder(spool *eventspool.Spool, sessionID string) (*
 	if h.config.EventDeliveryProfile == "memory_only" {
 		profile = eventsv1.IngressProfile_INGRESS_PROFILE_MEMORY_ONLY
 	}
-	return eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_CONN, eventsv1.EventKind_EVENT_KIND_DNS, eventsv1.EventKind_EVENT_KIND_TLS, eventsv1.EventKind_EVENT_KIND_HTTP, eventsv1.EventKind_EVENT_KIND_SMTP, eventsv1.EventKind_EVENT_KIND_FILE_METADATA, eventsv1.EventKind_EVENT_KIND_RADIUS}, Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
+	return eventforwarding.New(eventforwarding.Config{SourceNodeID: h.config.HunterID, ProducerSessionID: sessionID, EventAPIMajor: 1, SemanticProfileRevision: 1, EventKinds: protoadapter.SupportedKinds(h.config.EventAnalysis != nil && h.config.EventAnalysis.Inventory.Enabled), Profile: profile, OnLoss: func(kind eventsv1.LossKind, count uint64) {
 		switch kind {
 		case eventsv1.LossKind_LOSS_KIND_TRANSPORT:
 			h.statsCollector.IncrementTransportLoss(count)

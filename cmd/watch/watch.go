@@ -4,6 +4,7 @@ package watch
 
 import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"os"
@@ -30,6 +31,11 @@ Examples:
   lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
   lc watch remote -n nodes.yaml --tls-ca ca.crt
   lc watch remote -P localhost:55555 --insecure  # Local testing only`,
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+		eventconfig.Bind(cmd.InheritedFlags())
+		eventconfig.Bind(cmd.Flags())
+		return eventconfig.FromViper(viper.GetViper()).Validate()
+	},
 	PreRunE: func(_ *cobra.Command, _ []string) error {
 		if err := capture.ValidatePacketBufferConfig(); err != nil {
 			return err
@@ -57,6 +63,7 @@ var (
 )
 
 func init() {
+	eventconfig.Register(WatchCmd.PersistentFlags())
 	// Add subcommands
 	WatchCmd.AddCommand(liveCmd)
 	WatchCmd.AddCommand(fileCmd)

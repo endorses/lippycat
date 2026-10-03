@@ -426,24 +426,7 @@ func lossRangeCovered(losses []*eventsv1.EventLoss, sourceNodeID, producerSessio
 }
 
 func ingressEventKind(kind eventsv1.EventKind) (events.Kind, bool) {
-	switch kind {
-	case eventsv1.EventKind_EVENT_KIND_CONN:
-		return events.KindConn, true
-	case eventsv1.EventKind_EVENT_KIND_DNS:
-		return events.KindDNS, true
-	case eventsv1.EventKind_EVENT_KIND_TLS:
-		return events.KindTLS, true
-	case eventsv1.EventKind_EVENT_KIND_HTTP:
-		return events.KindHTTP, true
-	case eventsv1.EventKind_EVENT_KIND_SMTP:
-		return events.KindSMTP, true
-	case eventsv1.EventKind_EVENT_KIND_RADIUS:
-		return events.KindRADIUS, true
-	case eventsv1.EventKind_EVENT_KIND_FILE_METADATA:
-		return events.KindFileMetadata, true
-	default:
-		return "", false
-	}
+	return protoadapter.NativeKind(kind)
 }
 
 func (i *eventIngress) currentFlowControl() int32 {

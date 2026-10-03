@@ -112,6 +112,14 @@ func isNilEvent(event Event) bool {
 	switch ev := event.(type) {
 	case *DNSEvent:
 		return ev == nil
+	case *DHCPEvent:
+		return ev == nil
+	case *NTPEvent:
+		return ev == nil
+	case *KnownHostEvent:
+		return ev == nil
+	case *KnownServiceEvent:
+		return ev == nil
 	case *RADIUSEvent:
 		return ev == nil
 	case *SMTPEvent:
@@ -248,6 +256,50 @@ func (p *Producer) Assign(event Event) Event {
 		copy := *ev
 		copy.eventBase.EventEnvelope = p.envelope(copy.EventEnvelope)
 		return copy
+	case DHCPEvent:
+		ev = ev.Clone()
+		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
+		return ev
+	case *DHCPEvent:
+		if ev == nil {
+			return ev
+		}
+		copy := ev.Clone()
+		copy.eventBase.EventEnvelope = p.envelope(copy.EventEnvelope)
+		return copy
+	case NTPEvent:
+		ev = ev.Clone()
+		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
+		return ev
+	case *NTPEvent:
+		if ev == nil {
+			return ev
+		}
+		copy := ev.Clone()
+		copy.eventBase.EventEnvelope = p.envelope(copy.EventEnvelope)
+		return copy
+	case KnownHostEvent:
+		ev = ev.Clone()
+		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
+		return ev
+	case *KnownHostEvent:
+		if ev == nil {
+			return ev
+		}
+		copy := ev.Clone()
+		copy.eventBase.EventEnvelope = p.envelope(copy.EventEnvelope)
+		return copy
+	case KnownServiceEvent:
+		ev = ev.Clone()
+		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
+		return ev
+	case *KnownServiceEvent:
+		if ev == nil {
+			return ev
+		}
+		copy := ev.Clone()
+		copy.eventBase.EventEnvelope = p.envelope(copy.EventEnvelope)
+		return copy
 	case RADIUSEvent:
 		ev.eventBase.EventEnvelope = p.envelope(ev.EventEnvelope)
 		return ev
@@ -377,3 +429,15 @@ func (p *Producer) NewFileContentEvent(env Envelope) FileContentEvent {
 }
 
 func (p *Producer) NewRADIUSEvent(env Envelope) RADIUSEvent { return NewRADIUSEvent(p.envelope(env)) }
+
+func (p *Producer) NewDHCPEvent(env Envelope) DHCPEvent { return NewDHCPEvent(p.envelope(env)) }
+
+func (p *Producer) NewNTPEvent(env Envelope) NTPEvent { return NewNTPEvent(p.envelope(env)) }
+
+func (p *Producer) NewKnownHostEvent(env Envelope) KnownHostEvent {
+	return NewKnownHostEvent(p.envelope(env))
+}
+
+func (p *Producer) NewKnownServiceEvent(env Envelope) KnownServiceEvent {
+	return NewKnownServiceEvent(p.envelope(env))
+}

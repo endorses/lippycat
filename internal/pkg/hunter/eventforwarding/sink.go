@@ -47,12 +47,21 @@ func NewSink(client *Client, firstBatchSequence uint64, semanticProfileRevision 
 	return &Sink{client: client, nextBatchSequence: firstBatchSequence, semanticProfileRevision: semanticProfileRevision}, nil
 }
 
+// SetAcceptedKinds shares the sink admission lock with capability changes.
+func (s *Sink) SetAcceptedKinds(kinds []eventsv1.EventKind) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.client.SetAcceptedKinds(kinds)
+}
+
 func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	if event == nil {
 		return fmt.Errorf("forward event: nil event")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.client.kindsMu.RLock()
+	defer s.client.kindsMu.RUnlock()
 	if s.failed != nil {
 		s.retainFailedEventLocked(event)
 		return &fatalForwardingError{err: s.failed}
@@ -86,6 +95,12 @@ func (s *Sink) HandleEvent(_ context.Context, event events.Event) error {
 	}
 	stats := &eventsv1.EventBatchStats{Losses: cloneLosses(s.pendingLosses)}
 	batch, err := protoadapter.ToProtoBatch(env.NodeID, env.ProducerSessionID, s.nextBatchSequence, []events.Event{event}, stats, s.semanticProfileRevision)
+	if err == nil {
+		kind, ok := protoadapter.WireKind(event.Kind())
+		if !ok || !s.client.supportsKindLocked(kind) {
+			err = fmt.Errorf("event kind %s is unsupported by negotiated peer", event.Kind())
+		}
+	}
 	if err != nil {
 		// Identity was validated above, so any remaining encoding failure means
 		// this assigned event cannot be represented by the transport contract.

@@ -44,7 +44,11 @@ func (a *packetEventAnalysis) start() error {
 	if err := dispatcher.Register(&packetEventSink{analysis: a}); err != nil {
 		return fmt.Errorf("register monitoring event sink: %w", err)
 	}
-	runtime, err := eventanalysis.New(eventanalysis.Config{Dispatcher: dispatcher, LiveExpiry: true})
+	epoch, err := events.NewLiveProducer("monitor-analysis")
+	if err != nil {
+		return fmt.Errorf("create monitoring analysis epoch: %w", err)
+	}
+	runtime, err := eventanalysis.New(eventanalysis.Config{Policy: a.client.eventAnalysis, AnalysisEpoch: epoch.SessionID(), Dispatcher: dispatcher, LiveExpiry: true})
 	if err != nil {
 		return fmt.Errorf("create monitoring event analysis: %w", err)
 	}

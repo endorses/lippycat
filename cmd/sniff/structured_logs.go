@@ -12,7 +12,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
 	"github.com/endorses/lippycat/internal/pkg/eventcoalesce"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/flowid"
 	"github.com/endorses/lippycat/internal/pkg/logflags"
@@ -49,7 +51,6 @@ func withEventAnalysisMode(inputFiles []string, analysisProfile, effectiveFilter
 	s, err := newSniffEventSession(dir, inputFiles, analysisProfile, nil)
 	if err != nil {
 		logger.Error("Failed to initialize normalized event analysis", "error", err)
-		run(nil)
 		return
 	}
 	s.filtered = strings.TrimSpace(effectiveFilter) != ""
@@ -79,6 +80,10 @@ func withEventAnalysisMode(inputFiles []string, analysisProfile, effectiveFilter
 }
 
 func newSniffEventSession(dir string, inputFiles []string, analysisProfile string, additionalSink events.Sink) (*sniffEventSession, error) {
+	if err := validateSniffAnalysisPolicy(); err != nil {
+		return nil, err
+	}
+
 	eventSize := viper.GetInt("events.queue_size")
 	if eventSize <= 0 {
 		eventSize = 20000
@@ -102,6 +107,8 @@ func newSniffEventSession(dir string, inputFiles []string, analysisProfile strin
 	}
 	analysis, err := eventanalysis.New(eventanalysis.Config{
 		Dispatcher:              d,
+		Policy:                  eventconfig.FromViper(viper.GetViper()),
+		AnalysisEpoch:           producer.SessionID(),
 		Flow:                    flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute},
 		Connections:             conntrack.Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second},
 		Files:                   fileanalysis.Config{MaxFileSize: viper.GetInt64("files.max_size"), MaxTotalSize: viper.GetInt64("files.total_size"), Extract: viper.GetBool("files.extract"), Directory: viper.GetString("files.extract_dir")},
@@ -146,6 +153,8 @@ func registerSniffLogSink(d *events.Dispatcher, dir string, queueSize int) (*log
 		kind  events.Kind
 		build logstream.Builder
 	}{
+		"dhcp": {events.KindDHCP, logrecords.DHCP}, "ntp": {events.KindNTP, logrecords.NTP},
+		"known_hosts": {events.KindKnownHost, logrecords.KnownHosts}, "known_services": {events.KindKnownService, logrecords.KnownServices},
 		"radius": {events.KindRADIUS, logrecords.RADIUS}, "dns": {events.KindDNS, logrecords.DNS}, "ssl": {events.KindTLS, logrecords.SSL}, "http": {events.KindHTTP, logrecords.HTTP}, "smtp": {events.KindSMTP, logrecords.SMTP}, "conn": {events.KindConn, logrecords.Conn}, "files": {events.KindFileMetadata, logrecords.Files},
 	}
 	for _, stream := range viper.GetStringSlice("logs.streams") {
@@ -161,7 +170,7 @@ func registerSniffLogSink(d *events.Dispatcher, dir string, queueSize int) (*log
 	if err != nil {
 		return nil, err
 	}
-	if err := d.Register(coalescedLogs, events.KindRADIUS, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
+	if err := d.Register(coalescedLogs, events.KindDHCP, events.KindNTP, events.KindKnownHost, events.KindKnownService, events.KindRADIUS, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
 		return nil, err
 	}
 	return sink, nil
@@ -183,9 +192,9 @@ func sniffEventProducer(inputFiles []string, analysisProfile string) (*events.Pr
 }
 
 func structuredLogAnalysisProfile(scope, effectiveFilter string) string {
-	return fmt.Sprintf("events-v1|scope=%s|filter=%s|headers=%t|email-body=%t|file-max=%d|file-total=%d|extract=%t|extract-dir=%s",
+	return fmt.Sprintf("events-v1|scope=%s|filter=%s|headers=%t|email-body=%t|file-max=%d|file-total=%d|extract=%t|extract-dir=%s|policy=%s",
 		scope, effectiveFilter, viper.GetBool("logs.include_http_headers"), viper.GetBool("logs.include_email_body_preview"), viper.GetInt64("files.max_size"),
-		viper.GetInt64("files.total_size"), viper.GetBool("files.extract"), viper.GetString("files.extract_dir"))
+		viper.GetInt64("files.total_size"), viper.GetBool("files.extract"), viper.GetString("files.extract_dir"), eventconfig.FromViper(viper.GetViper()).Fingerprint())
 }
 
 func (s *sniffEventSession) observe(info *capture.PacketInfo) {
@@ -208,4 +217,28 @@ func (s *sniffEventSession) observe(info *capture.PacketInfo) {
 	if err := s.analysis.ObservePacket(source, *info); err != nil {
 		logger.Debug("Skipping invalid packet during normalized event analysis", "source", info.Interface, "error", err)
 	}
+}
+
+// bindSniffEventFlags selects the active command after all role commands register.
+func bindSniffEventFlags(cmd *cobra.Command) {
+	logflags.Bind(cmd.InheritedFlags())
+	logflags.Bind(cmd.Flags())
+	logflags.Bind(cmd.PersistentFlags())
+}
+
+func validateSniffAnalysisPolicy() error {
+	policy := eventconfig.FromViper(viper.GetViper())
+	if err := policy.Validate(); err != nil {
+		return fmt.Errorf("event analysis configuration: %w", err)
+	}
+	streams := viper.GetStringSlice("logs.streams")
+	if _, err := protoadapter.RequiredKinds(streams); err != nil {
+		return err
+	}
+	for _, stream := range streams {
+		if (stream == "known_hosts" || stream == "known_services") && !policy.Inventory.Enabled {
+			return fmt.Errorf("inventory log %q requires enabled inventory and explicit local CIDRs", stream)
+		}
+	}
+	return nil
 }

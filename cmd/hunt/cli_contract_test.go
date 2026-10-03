@@ -22,6 +22,10 @@ func TestHuntPersistentFlagContract(t *testing.T) {
 	assert.Contains(t, HuntCmd.Long, "lc hunt --processor processor.example.com:55555")
 
 	want := map[string]string{
+		"dhcp-association-max-bytes": "4194304", "dhcp-association-max-entries": "4096", "dhcp-association-timeout": "2m0s",
+		"ntp-association-max-bytes": "4194304", "ntp-association-max-entries": "4096", "ntp-association-timeout": "30s",
+		"inventory": "false", "inventory-local-cidrs": "[]", "inventory-max-bytes": "8388608", "inventory-max-entries": "16384",
+		"inventory-retention": "24h0m0s", "inventory-scope-max-bytes": "2097152", "inventory-scope-max-entries": "4096",
 		"batch-queue-size": "0", "batch-size": "64", "batch-timeout": "100",
 		"buffer-size": "10000", "debug-allow-non-loopback": "false", "debug-listen": "",
 		"disk-buffer": "false", "disk-buffer-dir": "/var/tmp/lippycat-buffer", "disk-buffer-max-mb": "1024",
@@ -123,12 +127,12 @@ func bindingFixture(flagType, original string) string {
 
 func TestHuntRenderedHelpSnapshots(t *testing.T) {
 	want := map[string]string{
-		"hunt":  "edbf7d9548d24d2ec83158a38f2d530fca66140c01685bd4b69e86165809e3fe",
-		"dns":   "acc479ead183c0d797265ea2814b1ddfd41d555a4e7132f456cea1a0b6dd7a50",
-		"http":  "c587117ea302b8fb34450f0f7f09174b34a599547b2d21871aaf03066b395a02",
-		"tls":   "c7033a6e7274fa02f756b211c1372f9e58baf6ef91e3de7ced459ef72766a5ec",
-		"email": "ec8d19d2c21c9a47f4aed6d083a9b10f3b85abbb7f1b089d55e615fefd1942bc",
-		"voip":  "a4d584cbf377f8fa7bd0fcd3d216153278618f278d1303e4f93be2a34a05c0ac",
+		"hunt":  "df6082b10f7e3c6fb158379f006b8eb470316732856a3ce13894432f1556210f",
+		"dns":   "48e6041d5651b2e40b99a20b91570ce2b531890cfb2759873deef0e3c8dde239",
+		"http":  "efad2e84055e3fcb37228c5bf90f2d0342beb0c6362f27c78ad4d31882a2047e",
+		"tls":   "e10ddbc3cdf75b43465a61d00c655473475e7f605781f4c607824508a9ea9e22",
+		"email": "4c4b2cbe0cbfdf97331fad3e8c870376ec32d4bbf78077b14196ed34b5e237ba",
+		"voip":  "efbb6b87986e78efbbf6549d3e3b175c1ed33ae9a28943eb3a25ce8c4a137735",
 	}
 	commands := map[string]*cobra.Command{"hunt": HuntCmd, "dns": dnsHuntCmd, "http": httpHuntCmd, "tls": tlsHuntCmd, "email": emailHuntCmd, "voip": voipHuntCmd}
 	for name, cmd := range commands {

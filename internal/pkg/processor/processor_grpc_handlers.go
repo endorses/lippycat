@@ -44,18 +44,22 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
 	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	"github.com/endorses/lippycat/internal/pkg/processor/upstream"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // StreamPackets handles packet streaming from hunters (Data Service)
@@ -141,7 +145,7 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 // For production deployments, set LIPPYCAT_PRODUCTION=true to enforce mutual TLS.
 func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRegistration) (*management.RegistrationResponse, error) {
 	hunterID := req.HunterId
-	mode, apiMajor, kinds, profileRevision, notice, err := negotiateEventForwarding(req.EventForwarding)
+	mode, apiMajor, kinds, profileRevision, notice, err := p.negotiateEventForwarding(req.EventForwarding)
 	if err != nil {
 		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
@@ -194,9 +198,9 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 
 const supportedEventSemanticProfile uint32 = 1
 
-var supportedIngressEventKinds = []int32{1, 2, 3, 4, 5, 6, 7}
+var supportedIngressEventKinds = protoadapter.SupportedKindIDs(true)
 
-func negotiateEventForwarding(c *management.EventForwardingCapabilities) (management.ForwardingMode, uint32, []int32, uint32, string, error) {
+func negotiateEventForwarding(c *management.EventForwardingCapabilities, requiredKinds ...eventsv1.EventKind) (management.ForwardingMode, uint32, []int32, uint32, string, error) {
 	if c == nil || c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_UNSPECIFIED || c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS {
 		return management.ForwardingMode_FORWARDING_MODE_PACKETS, 0, nil, 0, "", nil
 	}
@@ -226,6 +230,29 @@ func negotiateEventForwarding(c *management.EventForwardingCapabilities) (manage
 			accepted = append(accepted, kind)
 		}
 	}
+	inventoryProduction := false
+	for _, feature := range c.StatefulAnalysisFeatures {
+		inventoryProduction = inventoryProduction || feature == protoadapter.InventoryProductionFeature
+	}
+	for _, required := range requiredKinds {
+		found := false
+		for _, kind := range accepted {
+			if kind == int32(required) {
+				found = true
+				break
+			}
+		}
+		if (required == eventsv1.EventKind_EVENT_KIND_KNOWN_HOST || required == eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE) && !inventoryProduction {
+			found = false
+		}
+		if !found {
+			reason := fmt.Sprintf("required event kind %s is unavailable from source", required)
+			if c.AllowPacketFallback {
+				return management.ForwardingMode_FORWARDING_MODE_PACKETS, 0, nil, 0, "explicit packet fallback: " + reason, nil
+			}
+			return 0, 0, nil, 0, "", errors.New(reason)
+		}
+	}
 	if len(accepted) == 0 {
 		reason := "event profile has no mutually supported event kinds"
 		if c.AllowPacketFallback {
@@ -233,7 +260,53 @@ func negotiateEventForwarding(c *management.EventForwardingCapabilities) (manage
 		}
 		return 0, 0, nil, 0, "", errors.New(reason)
 	}
-	return management.ForwardingMode_FORWARDING_MODE_EVENTS, 1, accepted, supportedEventSemanticProfile, "", nil
+	notice := ""
+	if len(accepted) < len(c.EventKinds) {
+		notice = "optional unsupported event kinds omitted; sender must report compatibility loss"
+	}
+	return management.ForwardingMode_FORWARDING_MODE_EVENTS, 1, accepted, supportedEventSemanticProfile, notice, nil
+}
+
+// Configured consumers constrain sources; codec support alone does not imply
+// that inventory policy is enabled on a hunter.
+func (p *Processor) negotiateEventForwarding(c *management.EventForwardingCapabilities) (management.ForwardingMode, uint32, []int32, uint32, string, error) {
+	var required []eventsv1.EventKind
+	if cfg := p.config.LogConfig; cfg != nil && cfg.Enabled {
+		var err error
+		required, err = protoadapter.RequiredKinds(cfg.Streams)
+		if err != nil {
+			return 0, 0, nil, 0, "", err
+		}
+	}
+	// A forwarding relay's inventory_production feature promises coverage for
+	// every accepted source, including event-only children which bypass local
+	// packet analysis. Local policy alone cannot fill missing child events.
+	// Require both inventory kinds whenever this relay makes that promise;
+	// packet fallback remains viable only with enabled local inventory below.
+	if p.config.UpstreamAddr != "" && p.config.UpstreamForwardMode == "events" {
+		required = upstream.RequiredInventoryKinds(required, p.config.EventAnalysis != nil && p.config.EventAnalysis.Inventory.Enabled)
+	}
+
+	if p.config.EventAnalysis == nil || !p.config.EventAnalysis.Inventory.Enabled {
+		needsInventory := false
+		for _, kind := range required {
+			needsInventory = needsInventory || kind == eventsv1.EventKind_EVENT_KIND_KNOWN_HOST || kind == eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE
+		}
+		if needsInventory && (c == nil || c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_UNSPECIFIED || c.RequestedMode == management.ForwardingMode_FORWARDING_MODE_PACKETS) {
+			return 0, 0, nil, 0, "", errors.New("inventory log streams require an inventory-producing event source or enabled local inventory policy")
+		}
+	}
+	if c != nil && c.AllowPacketFallback && (p.config.EventAnalysis == nil || !p.config.EventAnalysis.Inventory.Enabled) {
+		for _, kind := range required {
+			if kind == eventsv1.EventKind_EVENT_KIND_KNOWN_HOST || kind == eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE {
+				clone := proto.Clone(c).(*management.EventForwardingCapabilities)
+				clone.AllowPacketFallback = false
+				c = clone
+				break
+			}
+		}
+	}
+	return negotiateEventForwarding(c, required...)
 }
 
 func sufficientEventAnalysisFeatures(features []string) bool {
@@ -535,7 +608,7 @@ func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.Li
 
 // RegisterProcessor registers a downstream processor that forwards packets to this processor
 func (p *Processor) RegisterProcessor(ctx context.Context, req *management.ProcessorRegistration) (*management.ProcessorRegistrationResponse, error) {
-	mode, apiMajor, kinds, profileRevision, notice, negotiationErr := negotiateEventForwarding(req.EventForwarding)
+	mode, apiMajor, kinds, profileRevision, notice, negotiationErr := p.negotiateEventForwarding(req.EventForwarding)
 	if negotiationErr != nil {
 		return nil, status.Error(codes.FailedPrecondition, negotiationErr.Error())
 	}

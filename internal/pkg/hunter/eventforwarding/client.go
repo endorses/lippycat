@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
@@ -36,9 +38,12 @@ type Config struct {
 // Re-running Serve with a replacement stream retransmits every unacknowledged
 // batch with its original identity for processor-side deduplication.
 type Client struct {
-	config Config
-	spool  *eventspool.Spool
-	wake   chan struct{}
+	config        Config
+	kindsMu       sync.RWMutex
+	acceptedKinds []eventsv1.EventKind
+	negotiated    bool
+	spool         *eventspool.Spool
+	wake          chan struct{}
 
 	batchFetches atomic.Uint64
 	// controlReceived is a deterministic test seam invoked after a received
@@ -75,6 +80,83 @@ func New(config Config, spool *eventspool.Spool) (*Client, error) {
 		config.SlowInterval = 25 * time.Millisecond
 	}
 	return &Client{config: config, spool: spool, wake: make(chan struct{}, 1)}, nil
+}
+
+// SetAcceptedKinds applies registration negotiation without rewriting durable
+// batches. A downgrade incompatible with pending data is rejected explicitly;
+// existing delivery identities and acknowledgement boundaries remain intact.
+func (c *Client) SetAcceptedKinds(kinds []eventsv1.EventKind) error {
+	c.kindsMu.Lock()
+	defer c.kindsMu.Unlock()
+	same := c.negotiated && len(kinds) == len(c.acceptedKinds)
+	if same {
+		for i, k := range kinds {
+			if k != c.acceptedKinds[i] {
+				same = false
+				break
+			}
+		}
+	}
+	if same {
+		return nil
+	}
+	supported := func(kind eventsv1.EventKind) bool {
+		for _, k := range kinds {
+			if k == kind {
+				return true
+			}
+		}
+		return false
+	}
+	var after uint64
+	for {
+		batches, err := c.spool.BatchesAfter(c.config.SourceNodeID, c.config.ProducerSessionID, after, batchFetchLimit)
+		if err != nil {
+			return fmt.Errorf("check negotiated event kinds: %w", err)
+		}
+		for _, batch := range batches {
+			for _, event := range batch.Events {
+				native, omission, err := protoadapter.FromProto(event)
+				if err != nil {
+					return fmt.Errorf("decode unacknowledged event: %w", err)
+				}
+				if omission != nil || native == nil {
+					return errors.New("unacknowledged event kind is unknown")
+				}
+				kind, ok := protoadapter.WireKind(native.Kind())
+				if !ok || !supported(kind) {
+					return fmt.Errorf("unacknowledged event kind %s is unsupported by negotiated peer", kind)
+				}
+			}
+			after = batch.BatchSequence
+		}
+		if len(batches) < batchFetchLimit {
+			break
+		}
+	}
+	c.acceptedKinds = append([]eventsv1.EventKind(nil), kinds...)
+	c.negotiated = true
+	return nil
+}
+
+func (c *Client) eventKindsLocked() []eventsv1.EventKind {
+	if c.negotiated {
+		return c.acceptedKinds
+	}
+	return c.config.EventKinds
+}
+
+func (c *Client) supportsKindLocked(kind eventsv1.EventKind) bool {
+	kinds := c.eventKindsLocked()
+	if len(kinds) == 0 && !c.negotiated {
+		return true
+	}
+	for _, k := range kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) Enqueue(batch *eventsv1.ProtocolEventBatch) (eventspool.EnqueueResult, error) {
@@ -153,7 +235,10 @@ func (c *Client) Serve(ctx context.Context, stream Stream, cancelStream context.
 	if stream == nil {
 		return errors.New("serve event forwarding: stream is required")
 	}
-	open := &eventsv1.EventIngressOpen{SourceNodeId: c.config.SourceNodeID, ProducerSessionId: c.config.ProducerSessionID, EventApiMajor: c.config.EventAPIMajor, SemanticProfileRevision: c.config.SemanticProfileRevision, EventKinds: append([]eventsv1.EventKind(nil), c.config.EventKinds...), Profile: c.config.Profile, RelayNodeId: c.config.RelayNodeID}
+	c.kindsMu.RLock()
+	kinds := append([]eventsv1.EventKind(nil), c.eventKindsLocked()...)
+	c.kindsMu.RUnlock()
+	open := &eventsv1.EventIngressOpen{SourceNodeId: c.config.SourceNodeID, ProducerSessionId: c.config.ProducerSessionID, EventApiMajor: c.config.EventAPIMajor, SemanticProfileRevision: c.config.SemanticProfileRevision, EventKinds: kinds, Profile: c.config.Profile, RelayNodeId: c.config.RelayNodeID}
 	if err := stream.Send(&eventsv1.EventIngressMessage{Message: &eventsv1.EventIngressMessage_Open{Open: open}}); err != nil {
 		return fmt.Errorf("serve event forwarding: send open: %w", err)
 	}

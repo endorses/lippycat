@@ -22,6 +22,8 @@ const (
 
 // Projector applies an authorization-sensitive projection before an event is
 // placed on a subscriber queue. Returning false omits the event.
+var ErrPolicyOmission = errors.New("event omitted by subscriber policy")
+
 type Projector func(events.Event) (projected events.Event, include bool, err error)
 
 type Options struct {
@@ -42,6 +44,7 @@ type LossCause uint8
 const (
 	LossCauseSubscriberOverflow LossCause = iota + 1
 	LossCauseDispatcherOverflow
+	LossCausePolicyOmission
 )
 
 // Loss describes events omitted because one subscriber's queue was full.
@@ -175,6 +178,10 @@ func (b *Broadcaster) handleEvent(event events.Event, admittedAt time.Time) erro
 			var include bool
 			var err error
 			projected, include, err = subscriber.project(event)
+			if errors.Is(err, ErrPolicyOmission) {
+				subscriber.recordDrop(event.Envelope(), LossCausePolicyOmission)
+				continue
+			}
 			if err != nil {
 				subscriber.projectErrs.Add(1)
 				b.projectErrs.Add(1)
@@ -299,6 +306,10 @@ func (s *Subscription) matchesProjected(event events.Event) bool {
 		return true
 	}
 	projected, include, err := s.project(event)
+	if errors.Is(err, ErrPolicyOmission) {
+		s.recordDrop(event.Envelope(), LossCausePolicyOmission)
+		return false
+	}
 	if err != nil {
 		s.projectErrs.Add(1)
 		s.owner.projectErrs.Add(1)

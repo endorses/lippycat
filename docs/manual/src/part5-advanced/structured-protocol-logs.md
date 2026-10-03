@@ -44,7 +44,7 @@ The shared flags are:
 | `--event-drop-policy`              |        `drop_new` | Overflow policy for the normalized-event queue                                            |
 | `--log-dir`                        |             unset | Output directory; setting it enables logging                                              |
 | `--log-format`                     |             `tsv` | `tsv` or `json`                                                                           |
-| `--log-streams`                    | all seven streams | Comma-separated enabled streams                                                           |
+| `--log-streams`                    | default seven streams | Comma-separated enabled streams                                                           |
 | `--log-rotate-interval`            |              `1h` | Time between rotations; `0` disables periodic rotation                                    |
 | `--log-queue-size`                 |           `10000` | Queue capacity for each stream                                                            |
 | `--log-post-rotate-command`        |             unset | Shell command run after rotation; `%log%` is the safely quoted rotated path               |
@@ -332,3 +332,119 @@ validation counts.
 Credentials, authenticators, task evidence and unknown attributes are omitted
 from routine logs. PCAP and X2 retain their separate byte-output contracts.
 See [RADIUS operations](radius.md) for selection, scope, state and counters.
+
+## DHCP, NTP, and local inventories {#network-observations}
+
+The default selection remains `conn,dns,ssl,http,smtp,files,radius`. Four additional
+streams are opt-in: `dhcp`, `ntp`, `known_hosts`, and `known_services`. Select them
+with `--log-streams`; no new protocol subcommands are needed. Typed DHCP/NTP
+observations are also available to event subscribers and the TUI when file
+logging is disabled.
+
+<!-- i18n:skip -->
+
+```bash
+lc sniff -r network.pcap --log-dir ./logs --log-streams dhcp,ntp
+sudo lc tap -i eth0 --insecure --inventory \
+  --inventory-local-cidrs 192.0.2.0/24,2001:db8::/32 \
+  --log-dir ./logs --log-streams dhcp,ntp,known_hosts,known_services
+```
+
+### Message records and association {#network-message-records}
+
+DHCP and NTP write one record per accepted message, including protocol
+retransmissions. Unlike Zeek transaction/session aggregation, a response adds a
+new record and never rewrites or consumes a request. The envelope retains the
+observed UDP endpoints, flow UID, Community ID, capture scope, and source.
+Association IDs supply separate bounded exchange context; transport retries
+retain their original delivery identity and are deduplicated at ingress.
+
+DHCP covers DHCPv4 message types 1–8, including decline, release, and inform.
+DHCPv6 and bare BOOTP are excluded from this log; BOOTP detection remains
+available. Records keep next-server and server-identifier addresses separate.
+Hardware/client identifiers use hexadecimal output, never assumed printable
+text. Missing options are unset; a present zero lease remains zero. Repeated
+options and overloaded option areas are validated within bounded readers.
+Malformed accepted messages expose `partial` and, for incomplete input,
+`truncated`; unknown and vendor option bytes are not logged.
+
+DHCP association separates capture authority/epoch/source, client identity,
+transaction ID, relay context, and server distinctions. It never joins clients
+using transaction ID alone or manufactures one flow UID across broadcasts and
+address changes. Association expiry or eviction does not suppress the current
+message. No complete lease history is promised.
+
+NTP covers time-message modes 1–5. Control/private modes, NTS analysis,
+authentication, clock-quality conclusions, and client clock-offset calculations
+are excluded. Signed poll/precision and root delay retain their signed values;
+root dispersion and raw 32.32 timestamps retain exact wire values. Raw timestamps
+are hexadecimal strings. Zero timestamps are unavailable; nonzero conversions
+use the era nearest capture time. Reference IDs remain four raw bytes because
+their interpretation depends on version and stratum.
+
+NTP client/server association requires matching scope, reversed endpoints, and
+the echoed request timestamp. Duplicate timestamps are ambiguous. Unmatched,
+broadcast, and symmetric messages still produce records. Both protocols use
+`request`, `unique`, `missing`, `ambiguous`, `expired`, `capacity_suppressed`, and
+`not_applicable` association states; these states never claim authentication.
+
+### Inventory evidence and policy {#inventory-evidence-policy}
+
+Inventory production is disabled by default. Enable `--inventory` and provide
+nonempty explicit IPv4/IPv6 `--inventory-local-cidrs`. CIDRs classify inventory
+subjects, not capture eligibility; private space is not implicitly local.
+Unspecified, multicast, and broadcast subjects are excluded. Inventory log
+selection requires a compatible local policy or compatible inventory-producing
+event sources. Configure hunters through their normal configuration path;
+processors do not distribute this policy to them.
+
+Known hosts require an observed completed TCP handshake or both UDP directions.
+Known services additionally require a reliably oriented responder, responder
+port, and protocol supported by actual analysis. A lone SYN, destination address,
+DHCP offer, port hint, or cached protocol label is insufficient. UDP service
+records require a decoded, successfully associated DNS, NTP, or eligible DHCP
+exchange. Ambiguous responders and broadcast/relay client-service guesses are
+omitted. Evidence values are `tcp_handshake`, `udp_bidirectional`,
+`dns_exchange`, `ntp_exchange`, and `dhcp_exchange`.
+
+Inventories emit when connection summaries become available through expiry,
+eviction, EOF, reset, or close, so they can appear after the initial handshake.
+The qualifying connection supplies the envelope; the separate `host` field is
+the subject. Partial capture remains visible. Event ingress and hierarchy relays
+forward source-derived inventory events without deriving a second copy.
+
+Host deduplication includes scope and address; service keys also include
+responder port, transport, and protocol. Scope separates origin nodes,
+producer/capture epochs, and interfaces or offline inputs. The first qualifying
+observation in the retention window emits; expiry or eviction permits later
+re-emission. This is a bounded observation inventory, not permanent asset
+identity. Entry and accounted-byte limits apply globally and per scope.
+
+Capture-time watermarks never move backward, including offline replay; late
+input cannot revive expired state. Reset clears association/dedup state, and
+EOF/close drain connection summaries. Offline identity includes effective policy
+and analysis revision; live policy changes require a producer-session boundary.
+Invalid CIDRs and zero/negative state caps or timeouts fail validation. Disabled
+inventory retains no inventory state. Association pressure, event loss, and TUI
+ring eviction have distinct counters. See the
+[shared settings](../appendices/config-reference.md#network-observation-settings)
+and [flags](../appendices/command-reference.md#network-observation-flags).
+
+### Privacy and compatibility {#network-privacy-compatibility}
+
+DHCP hardware/client identifiers, hostname, and domain require both a subscriber
+request for sensitive fields and server permission through
+`--event-allow-sensitive-fields`. Inventory subject/service details use the same
+policy: unauthorized inventory events are omitted with explicit policy-loss
+accounting. Projection does not mutate shared events or disable internal
+correlation. NTP header metadata requires no additional sensitive-field opt-in.
+Explicitly selected local logs include these sensitive fields; restrict file
+access, storage, and retention.
+
+The four kinds extend event API version 1 without renumbering existing kinds or
+changing the semantic profile. Supported kinds are distinct from configured
+consumer requirements. Older peers can continue existing workloads when new
+kinds are optional, with explicit compatibility-loss reporting for omissions.
+Required unavailable streams reject negotiation or use explicitly configured
+packet fallback; they never silently succeed with missing output. Existing
+spool/WAL acknowledgement and unknown-field preservation rules still apply.

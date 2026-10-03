@@ -195,6 +195,10 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
+	analysis, policyErr := resolveLocalEventOptions(cfg.Analysis)
+	if policyErr != nil {
+		return nil, fmt.Errorf("offline event policy: %w", policyErr)
+	}
 	if cfg.BackingPolicy, err = offline.ParseBackingPolicy(string(cfg.BackingPolicy)); err != nil {
 		return nil, err
 	}
@@ -292,7 +296,7 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	protocols := detector.NewWithDefaultSignatures()
 	defer protocols.Shutdown()
 	tlsParser := tlspkg.NewParser()
-	analysis := cfg.Analysis
+
 	if analysis.NodeID == "" {
 		analysis.NodeID = "watch-local"
 	}
@@ -336,7 +340,7 @@ func indexOfflineDatasetBackendWithWorkers(ctx context.Context, storage *offline
 	if err = dispatcher.Register(sink); err != nil {
 		return nil, errors.Join(err, sink.Close(context.Background()))
 	}
-	runtime, err := eventanalysis.New(eventanalysis.Config{Dispatcher: dispatcher, LosslessDelivery: true, LiveExpiry: false})
+	runtime, err := eventanalysis.New(eventanalysis.Config{Policy: analysis.Policy, AnalysisEpoch: producer.SessionID(), Dispatcher: dispatcher, LosslessDelivery: true, LiveExpiry: false})
 	if err != nil {
 		return nil, errors.Join(err, dispatcher.Close(context.Background()))
 	}

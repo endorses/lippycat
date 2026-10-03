@@ -2,7 +2,7 @@ package application
 
 import (
 	"encoding/binary"
-	"fmt"
+	"github.com/endorses/lippycat/internal/pkg/dhcp"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 )
@@ -32,81 +32,55 @@ func (d *DHCPSignature) Layer() signatures.LayerType {
 }
 
 func (d *DHCPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
-	// DHCP requires minimum 240 bytes (236 + 4 magic cookie)
-	if len(ctx.Payload) < 240 {
+	if !dhcp.ValidBOOTPHeader(ctx.Payload) {
 		return nil
 	}
-
 	payload := ctx.Payload
-
-	// DHCP packet structure:
-	// op(1) + htype(1) + hlen(1) + hops(1) + xid(4) + secs(2) + flags(2) +
-	// ciaddr(4) + yiaddr(4) + siaddr(4) + giaddr(4) + chaddr(16) +
-	// sname(64) + file(128) + magic(4) = 236 bytes minimum
-
-	// Check op field (1 = BOOTREQUEST, 2 = BOOTREPLY)
-	op := payload[0]
-	if op != 1 && op != 2 {
+	if len(payload) < 240 || binary.BigEndian.Uint32(payload[236:240]) != 0x63825363 {
+		return d.detectBOOTP(ctx, payload[0], binary.BigEndian.Uint32(payload[4:8]))
+	}
+	message, err := dhcp.Decode(payload)
+	if message == nil {
+		// BOOTP can use the RFC vendor cookie without DHCP message type.
+		if err == dhcp.ErrBOOTP {
+			return d.detectBOOTP(ctx, payload[0], binary.BigEndian.Uint32(payload[4:8]))
+		}
 		return nil
 	}
-
-	// Check htype (hardware type, 1 = Ethernet is most common)
-	htype := payload[1]
-	if htype == 0 || htype > 32 {
-		// Valid hardware types are 1-32
-		return nil
-	}
-
-	// Check hlen (hardware address length, 6 for Ethernet MAC)
-	hlen := payload[2]
-	if hlen == 0 || hlen > 16 {
-		// MAC address length should be reasonable
-		return nil
-	}
-
-	// Check hops (should be 0-16 in normal scenarios)
-	hops := payload[3]
-	if hops > 16 {
-		return nil
-	}
-
-	// Extract transaction ID (XID)
-	xid := binary.BigEndian.Uint32(payload[4:8])
-
-	// Check for DHCP magic cookie at offset 236: 0x63825363
-	magicCookie := binary.BigEndian.Uint32(payload[236:240])
-	if magicCookie != 0x63825363 {
-		// This is BOOTP without DHCP options
-		return d.detectBOOTP(ctx, op, xid)
-	}
-
-	// Extract IP addresses
-	ciaddr := payload[12:16] // Client IP
-	yiaddr := payload[16:20] // Your (client) IP
-	siaddr := payload[20:24] // Server IP
-	giaddr := payload[24:28] // Gateway IP
-
 	metadata := map[string]interface{}{
-		"type":           d.opToString(op),
-		"transaction_id": xid,
-		"htype":          htype,
-		"hlen":           hlen,
-		"hops":           hops,
-		"client_ip":      d.ipToString(ciaddr),
-		"your_ip":        d.ipToString(yiaddr),
-		"server_ip":      d.ipToString(siaddr),
-		"gateway_ip":     d.ipToString(giaddr),
+		"type":           d.opToString(message.Operation),
+		"transaction_id": message.TransactionID,
+		"htype":          message.HardwareType,
+		"hlen":           uint8(len(message.HardwareAddress)),
+		"hops":           message.Hops,
+		"client_ip":      message.ClientAddress.String(),
+		"your_ip":        message.OfferedAddress.String(),
+		"server_ip":      message.NextServerAddress.String(),
+		"gateway_ip":     message.RelayAddress.String(),
+		"message_type":   d.messageTypeToString(message.MessageType),
 	}
-
-	// Parse DHCP options (starting at offset 240)
-	if len(payload) > 240 {
-		messageType, options := d.parseOptions(payload[240:])
-		if messageType != 0 {
-			metadata["message_type"] = d.messageTypeToString(messageType)
-		}
-		if len(options) > 0 {
-			metadata["options"] = options
-		}
+	options := make(map[string]interface{})
+	if message.Hostname != "" {
+		options["hostname"] = message.Hostname
+	}
+	if message.RequestedAddress.IsValid() {
+		options["requested_ip"] = message.RequestedAddress.String()
+	}
+	if message.ServerIdentifier.IsValid() {
+		options["server_identifier"] = message.ServerIdentifier.String()
+	}
+	if message.LeaseSeconds != nil {
+		options["lease_time"] = *message.LeaseSeconds
+	}
+	if message.ParameterRequestList != nil {
+		options["param_request_list"] = message.ParameterRequestList
+	}
+	if len(options) > 0 {
+		metadata["options"] = options
+	}
+	if err != nil {
+		metadata["partial"] = true
+		metadata["truncated"] = message.Truncated
 	}
 
 	// Calculate confidence
@@ -194,65 +168,6 @@ func (d *DHCPSignature) calculateConfidence(ctx *signatures.DetectionContext, me
 	return signatures.ScoreDetection(indicators)
 }
 
-func (d *DHCPSignature) parseOptions(options []byte) (byte, map[string]interface{}) {
-	var messageType byte
-	parsedOptions := make(map[string]interface{})
-
-	i := 0
-	for i < len(options) {
-		if options[i] == 0xFF { // End option
-			break
-		}
-		if options[i] == 0x00 { // Pad option
-			i++
-			continue
-		}
-
-		// Option format: code(1) + len(1) + data(len)
-		if i+1 >= len(options) {
-			break
-		}
-
-		code := options[i]
-		length := int(options[i+1])
-
-		if i+2+length > len(options) {
-			break // Malformed option
-		}
-
-		data := options[i+2 : i+2+length]
-
-		switch code {
-		case 53: // DHCP Message Type
-			if length == 1 {
-				messageType = data[0]
-			}
-		case 12: // Hostname
-			if length > 0 {
-				parsedOptions["hostname"] = string(data)
-			}
-		case 50: // Requested IP Address
-			if length == 4 {
-				parsedOptions["requested_ip"] = d.ipToString(data)
-			}
-		case 54: // Server Identifier
-			if length == 4 {
-				parsedOptions["server_identifier"] = d.ipToString(data)
-			}
-		case 51: // IP Address Lease Time
-			if length == 4 {
-				parsedOptions["lease_time"] = binary.BigEndian.Uint32(data)
-			}
-		case 55: // Parameter Request List
-			parsedOptions["param_request_list"] = data
-		}
-
-		i += 2 + length
-	}
-
-	return messageType, parsedOptions
-}
-
 func (d *DHCPSignature) opToString(op byte) string {
 	if op == 1 {
 		return "BOOTREQUEST"
@@ -278,16 +193,4 @@ func (d *DHCPSignature) messageTypeToString(msgType byte) string {
 		return s
 	}
 	return "Unknown"
-}
-
-func (d *DHCPSignature) ipToString(ip []byte) string {
-	if len(ip) != 4 {
-		return "0.0.0.0"
-	}
-	// Only return non-zero IPs as strings
-	if ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0 {
-		return "0.0.0.0"
-	}
-	// Format as dotted decimal
-	return fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
 }

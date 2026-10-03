@@ -1,0 +1,10 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	known_hosts
+#open	1970-01-01-00-00-00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	host	evidence	community_id	node_id	capture_scope	partial
+#types	time	string	addr	port	addr	port	enum	addr	enum	string	string	enum	bool
+1.500000	Cnetwork	2001:db8::20	40000	192.0.2.123	123	udp	2001:db8::20	udp_bidirectional	1:network	sensor-a	filtered	T
+#close	1970-01-01-00-00-00

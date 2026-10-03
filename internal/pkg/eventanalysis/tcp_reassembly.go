@@ -45,6 +45,7 @@ type reassemblyContext struct {
 // inputs from being combined merely because they share a network 5-tuple.
 type reassemblySourceKey struct {
 	nodeID         string
+	captureEpoch   string
 	captureSource  string
 	interfaceName  string
 	interfaceIndex uint32
@@ -64,7 +65,7 @@ type reassemblyEndpoint struct {
 
 func sourceReassemblyKey(source Source) reassemblySourceKey {
 	return reassemblySourceKey{
-		nodeID: source.NodeID, captureSource: source.CaptureSource,
+		nodeID: source.NodeID, captureSource: source.CaptureSource, captureEpoch: source.CaptureEpoch,
 		interfaceName: source.InterfaceName, interfaceIndex: source.InterfaceIndex,
 		inputFile: source.InputFile,
 	}
@@ -585,7 +586,7 @@ func (s *applicationStream) emit(ctx reassemblyContext, ci gopacket.CaptureInfo,
 	case email != nil:
 		service = "SMTP"
 	}
-	if err := s.runtime.connections.SetService(env, service); err != nil {
+	if err := s.runtime.connections.SetAnalyzedService(env, s.runtime.associationScope(ctx.source, env), service, s.runtime.cfg.Policy.Inventory.Enabled && !ci.Timestamp.Before(s.runtime.watermark)); err != nil {
 		s.runtime.stats.Invalid++
 	}
 	s.runtime.emitMetadata(env, metadata)

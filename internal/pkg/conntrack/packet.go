@@ -17,7 +17,7 @@ func FromPacket(packet gopacket.Packet, env events.Envelope, service string) Obs
 	}
 	if tcp, ok := packet.Layer(layers.LayerTypeTCP).(*layers.TCP); ok {
 		o.PayloadBytes = uint64(len(tcp.Payload))
-		o.TCP = &TCPFlags{SYN: tcp.SYN, ACK: tcp.ACK, FIN: tcp.FIN, RST: tcp.RST}
+		o.TCP = &TCPFlags{SYN: tcp.SYN, ACK: tcp.ACK, FIN: tcp.FIN, RST: tcp.RST, Sequence: tcp.Seq, Acknowledgment: tcp.Ack, SequenceValid: len(tcp.LayerContents()) >= 20}
 	}
 	if udp, ok := packet.Layer(layers.LayerTypeUDP).(*layers.UDP); ok {
 		o.PayloadBytes = uint64(len(udp.Payload))

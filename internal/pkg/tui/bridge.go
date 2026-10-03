@@ -18,6 +18,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 	"github.com/endorses/lippycat/internal/pkg/eventanalysis"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
@@ -1025,6 +1026,7 @@ func StartEnvelopeBridge(packetChan <-chan *pipeline.PacketEnvelope, program *te
 // LocalEventAnalysisOptions defines the stable identity inputs for one local
 // capture session. Offline source order is the user-specified file order.
 type LocalEventAnalysisOptions struct {
+	Policy          *eventconfig.Config
 	NodeID          string
 	InputIdentity   string
 	AnalysisProfile string
@@ -1292,12 +1294,18 @@ func (b *envelopeBridgePipeline) run(packetChan <-chan *pipeline.PacketEnvelope)
 }
 
 func (b *envelopeBridgePipeline) startEventAnalysis(handler *TUIEventHandler) (*eventanalysis.Runtime, *events.Dispatcher) {
+	owned, policyErr := resolveLocalEventOptions(b.analysis)
+	if policyErr != nil {
+		logger.Error("Invalid local event policy", "error", policyErr)
+		return nil, nil
+	}
+	b.analysis = owned
 	nodeID := b.analysis.NodeID
 	if nodeID == "" {
 		nodeID = "watch-local"
 		b.analysis.NodeID = nodeID
 	}
-	var producer events.IdentityAssigner
+	var producer *events.Producer
 	var err error
 	if b.preserveAll {
 		inputIdentity := b.analysis.InputIdentity
@@ -1336,6 +1344,8 @@ func (b *envelopeBridgePipeline) startEventAnalysis(handler *TUIEventHandler) (*
 		return nil, nil
 	}
 	runtime, err := eventanalysis.New(eventanalysis.Config{
+		Policy:           b.analysis.Policy,
+		AnalysisEpoch:    producer.SessionID(),
 		Dispatcher:       dispatcher,
 		LosslessDelivery: b.preserveAll,
 		LiveExpiry:       !b.preserveAll,

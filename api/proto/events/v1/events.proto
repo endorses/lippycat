@@ -17,6 +17,10 @@ enum EventKind {
   EVENT_KIND_SMTP = 5;
   EVENT_KIND_FILE_METADATA = 6;
   EVENT_KIND_RADIUS = 7;
+  EVENT_KIND_DHCP = 8;
+  EVENT_KIND_NTP = 9;
+  EVENT_KIND_KNOWN_HOST = 10;
+  EVENT_KIND_KNOWN_SERVICE = 11;
 }
 
 enum CaptureScope {
@@ -218,6 +222,90 @@ message RADIUSEvent {
   repeated string attributes = 10;
 }
 
+// Association describes observational correlation, never authentication.
+enum AssociationStatus {
+  ASSOCIATION_STATUS_UNSPECIFIED = 0;
+  ASSOCIATION_STATUS_REQUEST = 1;
+  ASSOCIATION_STATUS_UNIQUE = 2;
+  ASSOCIATION_STATUS_MISSING = 3;
+  ASSOCIATION_STATUS_AMBIGUOUS = 4;
+  ASSOCIATION_STATUS_EXPIRED = 5;
+  ASSOCIATION_STATUS_CAPACITY_SUPPRESSED = 6;
+  ASSOCIATION_STATUS_NOT_APPLICABLE = 7;
+}
+
+enum InventoryEvidence {
+  INVENTORY_EVIDENCE_UNSPECIFIED = 0;
+  INVENTORY_EVIDENCE_TCP_HANDSHAKE = 1;
+  INVENTORY_EVIDENCE_UDP_BIDIRECTIONAL = 2;
+  INVENTORY_EVIDENCE_DNS_EXCHANGE = 3;
+  INVENTORY_EVIDENCE_NTP_EXCHANGE = 4;
+  INVENTORY_EVIDENCE_DHCP_EXCHANGE = 5;
+}
+
+// One DHCPv4 datagram, with its actual observed flow envelope.
+message DHCPEvent {
+  uint32 operation = 1;
+  uint32 message_type = 2;
+  uint32 hardware_type = 3;
+  uint32 transaction_id = 4;
+  bytes hardware_address = 5;
+  bytes client_identifier = 6;
+  string client_address = 7;
+  string offered_address = 8;
+  string next_server_address = 9;
+  string relay_address = 10;
+  string server_identifier = 11;
+  string requested_address = 12;
+  string hostname = 13;
+  string domain = 14;
+  optional uint32 lease_seconds = 15;
+  repeated string routers = 16;
+  repeated string dns_servers = 17;
+  bytes parameter_request_list = 18;
+  AssociationStatus association = 19;
+  string association_id = 20;
+  bool truncated = 21;
+}
+
+message NTPTimestamp {
+  fixed64 raw = 1;
+  // Absent for wire zero; otherwise the era nearest capture time.
+  google.protobuf.Timestamp time = 2;
+}
+
+message NTPEvent {
+  uint32 version = 1;
+  uint32 mode = 2;
+  uint32 leap_indicator = 3;
+  uint32 stratum = 4;
+  sint32 poll = 5;
+  sint32 precision = 6;
+  sint32 root_delay = 7;
+  uint32 root_dispersion = 8;
+  bytes reference_id = 9;
+  NTPTimestamp reference = 10;
+  NTPTimestamp origin = 11;
+  NTPTimestamp receive = 12;
+  NTPTimestamp transmit = 13;
+  AssociationStatus association = 14;
+  string association_id = 15;
+  bool truncated = 16;
+}
+
+// Subjects are separate from the qualifying connection's flow envelope.
+message KnownHostEvent {
+  string host = 1;
+  InventoryEvidence evidence = 2;
+}
+message KnownServiceEvent {
+  string host = 1;
+  uint32 port = 2;
+  uint32 transport = 3;
+  string protocol = 4;
+  InventoryEvidence evidence = 5;
+}
+
 message ProtocolEvent {
   // event_id is an opaque, retry-stable representation of node ID, producer
   // session ID, and event sequence.
@@ -237,6 +325,10 @@ message ProtocolEvent {
     SMTPEvent smtp = 14;
     FileMetadataEvent file_metadata = 15;
     RADIUSEvent radius = 16;
+    DHCPEvent dhcp = 17;
+    NTPEvent ntp = 18;
+    KnownHostEvent known_host = 19;
+    KnownServiceEvent known_service = 20;
   }
 }
 

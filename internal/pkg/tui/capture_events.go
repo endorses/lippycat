@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/dns"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/remotecapture"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
@@ -478,6 +479,26 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 	}
 	pendingEvents := m.pendingRemoteEvents
 
+	// Build client config with TLS settings from viper
+	// If --insecure flag is set, disable TLS entirely
+	tlsEnabled := viper.GetBool("watch.tls.enabled")
+	if insecure {
+		tlsEnabled = false
+	}
+
+	clientConfig := &remotecapture.ClientConfig{
+		EventAnalysis:                 eventconfig.FromViper(viper.GetViper()),
+		Address:                       msg.Address,
+		TLSEnabled:                    tlsEnabled,
+		TLSCAFile:                     viper.GetString("watch.tls.ca_file"),
+		TLSCertFile:                   viper.GetString("watch.tls.cert_file"),
+		TLSKeyFile:                    viper.GetString("watch.tls.key_file"),
+		TLSSkipVerify:                 viper.GetBool("watch.tls.skip_verify"),
+		TLSServerNameOverride:         viper.GetString("watch.tls.server_name_override"),
+		PreviousEventStreamID:         previousEventStreamID,
+		PreviousEventDeliverySequence: previousEventDeliverySequence,
+	}
+
 	// Attempt connection in background
 	go func() {
 		// Get program reference via synchronized CaptureState
@@ -489,25 +510,6 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 
 		// Create TUI event handler adapter
 		handler := newRemoteTUIEventHandler(program, pendingEvents)
-
-		// Build client config with TLS settings from viper
-		// If --insecure flag is set, disable TLS entirely
-		tlsEnabled := viper.GetBool("watch.tls.enabled")
-		if insecure {
-			tlsEnabled = false
-		}
-
-		clientConfig := &remotecapture.ClientConfig{
-			Address:                       msg.Address,
-			TLSEnabled:                    tlsEnabled,
-			TLSCAFile:                     viper.GetString("watch.tls.ca_file"),
-			TLSCertFile:                   viper.GetString("watch.tls.cert_file"),
-			TLSKeyFile:                    viper.GetString("watch.tls.key_file"),
-			TLSSkipVerify:                 viper.GetBool("watch.tls.skip_verify"),
-			TLSServerNameOverride:         viper.GetString("watch.tls.server_name_override"),
-			PreviousEventStreamID:         previousEventStreamID,
-			PreviousEventDeliverySequence: previousEventDeliverySequence,
-		}
 
 		client, err := remotecapture.NewClientWithConfig(clientConfig, handler)
 		if err != nil {

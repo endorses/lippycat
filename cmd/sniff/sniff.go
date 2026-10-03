@@ -24,11 +24,17 @@ var SniffCmd = &cobra.Command{
 	Run:               sniff,
 }
 
-func validateLiveCaptureBufferConfig(_ *cobra.Command, _ []string) error {
+func validateLiveCaptureBufferConfig(cmd *cobra.Command, _ []string) error {
+	if cmd != nil {
+		bindSniffEventFlags(cmd)
+	}
 	if err := capture.ValidatePacketBufferConfig(); err != nil {
 		return err
 	}
-	return capture.ValidateIPv4DefragConfig()
+	if err := capture.ValidateIPv4DefragConfig(); err != nil {
+		return err
+	}
+	return validateSniffAnalysisPolicy()
 }
 
 var (

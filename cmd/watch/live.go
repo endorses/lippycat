@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
@@ -128,6 +129,8 @@ func runLive(cmd *cobra.Command, args []string) {
 	// Store program reference for packet bridge
 	tui.SetCurrentProgram(p)
 
+	analysisOptions := localEventAnalysisOptions(liveFilter)
+
 	// Start packet capture in background
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -141,7 +144,7 @@ func runLive(cmd *cobra.Command, args []string) {
 		tui.WaitForTUIReady()
 
 		capture.StartLiveSniffer(liveInterfaces, liveFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-			startLiveSniffer(ctx, devices, filter, p, model.CallTracker(), aggregator)
+			startLiveSniffer(ctx, devices, filter, p, model.CallTracker(), aggregator, analysisOptions)
 		})
 	}()
 
@@ -152,11 +155,19 @@ func runLive(cmd *cobra.Command, args []string) {
 	}
 }
 
-func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator) {
+func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker, aggregator *tui.LocalCallAggregator, frozenOptions ...tui.LocalEventAnalysisOptions) {
+	options := tui.LocalEventAnalysisOptions{NodeID: "watch-local"}
+	if len(frozenOptions) > 0 {
+		options = frozenOptions[0]
+	}
+	if strings.TrimSpace(filter) != "" {
+		options.CaptureScope = events.CaptureScopeFiltered
+		options.Partial = true
+	}
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
 		tui.StartEnvelopeBridge(tui.NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator,
-			localEventAnalysisOptions(filter))
+			options)
 	}
 	// Pass pause function to drop packets at source when paused (reduces CPU)
 	err := capture.InitWithContextAndTelemetryChecked(ctx, devices, filter, processor, nil, pauseSignal.IsPaused, func(stats capture.Telemetry) {
@@ -173,7 +184,7 @@ func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 }
 
 func localEventAnalysisOptions(filter string) tui.LocalEventAnalysisOptions {
-	options := tui.LocalEventAnalysisOptions{NodeID: "watch-local"}
+	options := tui.LocalEventAnalysisOptions{NodeID: "watch-local", Policy: eventconfig.FromViper(viper.GetViper())}
 	if strings.TrimSpace(filter) != "" {
 		options.CaptureScope = events.CaptureScopeFiltered
 		options.Partial = true

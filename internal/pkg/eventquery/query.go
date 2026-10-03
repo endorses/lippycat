@@ -185,7 +185,21 @@ func knownFields() map[string]string {
 	m := map[string]string{"event_id": "string", "producer_session_id": "string", "event_sequence": "count", "capture_source": "string", "interface_name": "string", "interface_index": "count", "input_file": "string", "processor_node_ids": "vector[string]"}
 	for _, s := range logschema.Streams {
 		for _, f := range s.Fields {
-			m[strings.ToLower(f.Name)] = f.Type
+			name := strings.ToLower(f.Name)
+			previous := m[name]
+			if previous == "" {
+				m[name] = f.Type
+				continue
+			}
+			found := false
+			for _, typ := range strings.Split(previous, "|") {
+				if typ == f.Type {
+					found = true
+				}
+			}
+			if !found {
+				m[name] = previous + "|" + f.Type
+			}
 		}
 	}
 	return m
@@ -221,8 +235,17 @@ func (n term) match(p Projection) bool {
 			return false
 		}
 	}
+	typ, typed := n.typ, n.typed
+	if strings.Contains(typ, "|") {
+		var err error
+		typ = v.Type
+		typed, err = parseTyped(typ, n.text)
+		if err != nil {
+			return false
+		}
+	}
 	for _, x := range v.Values {
-		if compareValue(x, n.typed, n.typ, n.op) {
+		if compareValue(x, typed, typ, n.op) {
 			return true
 		}
 	}
@@ -230,7 +253,20 @@ func (n term) match(p Projection) bool {
 }
 
 func parseTyped(typ, value string) (any, error) {
+	if strings.Contains(typ, "|") {
+		var last error
+		for _, variant := range strings.Split(typ, "|") {
+			if parsed, err := parseTyped(variant, value); err == nil {
+				return parsed, nil
+			} else {
+				last = err
+			}
+		}
+		return nil, last
+	}
 	switch baseType(typ) {
+	case "int":
+		return strconv.ParseInt(value, 10, 64)
 	case "count", "port":
 		v, e := strconv.ParseUint(value, 10, 64)
 		return v, e
@@ -254,6 +290,9 @@ func baseType(t string) string {
 }
 func compareValue(a, b any, typ, op string) bool {
 	switch baseType(typ) {
+	case "int":
+		av, err := strconv.ParseInt(fmt.Sprint(a), 10, 64)
+		return err == nil && compareOrdered(float64(av), float64(b.(int64)), op)
 	case "count", "port":
 		return compareOrdered(float64(toUint(a)), float64(b.(uint64)), op)
 	case "interval":

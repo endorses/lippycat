@@ -12,6 +12,7 @@ import (
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/grpcpool"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
@@ -36,6 +37,8 @@ type Config struct {
 	OutboundQueueSize      int
 	ForwardMode            string
 	EventFallbackToPackets bool
+	RequiredEventKinds     []eventsv1.EventKind
+	InventoryEnabled       bool
 }
 
 const defaultOutboundQueueSize = 256
@@ -78,6 +81,7 @@ type Manager struct {
 
 	// Upstream processor ID (learned during registration)
 	upstreamProcessorID string
+	acceptedEventKinds  []eventsv1.EventKind
 
 	// Packet forwarding stats
 	packetsForwarded *atomic.Uint64
@@ -284,7 +288,7 @@ func (m *Manager) connectAndRegister() error {
 			ProcessorId:     m.config.ProcessorID,
 			ListenAddress:   m.config.ListenAddress,
 			Version:         "dev", // TODO: Use actual version
-			EventForwarding: &management.EventForwardingCapabilities{RequestedMode: requestedMode, EventApiMajors: []uint32{1}, EventKinds: []int32{1, 2, 3, 4, 5, 6, 7}, SemanticProfileRevision: 1, StatefulAnalysisFeatures: []string{"relay"}, AllowPacketFallback: allowFallback},
+			EventForwarding: &management.EventForwardingCapabilities{RequestedMode: requestedMode, EventApiMajors: []uint32{1}, EventKinds: protoadapter.SupportedKindIDs(true), SemanticProfileRevision: 1, StatefulAnalysisFeatures: m.eventAnalysisFeatures(), AllowPacketFallback: allowFallback},
 		})
 		if err != nil {
 			grpcpool.Release(m.connPool, m.config.Address)
@@ -313,10 +317,18 @@ func (m *Manager) connectAndRegister() error {
 			logger.Warn("Upstream explicitly selected packet fallback", "notice", regResp.GetForwardingNotice())
 		}
 		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
-			if err := validateAcceptedEventProfile(regResp); err != nil {
+			if err := validateAcceptedEventProfile(regResp, m.config.RequiredEventKinds...); err != nil {
 				grpcpool.Release(m.connPool, m.config.Address)
 				return fmt.Errorf("upstream accepted an insufficient event forwarding profile: %w", err)
 			}
+		}
+		if acceptedMode == management.ForwardingMode_FORWARDING_MODE_EVENTS {
+			m.mu.Lock()
+			m.acceptedEventKinds = nil
+			for _, kind := range regResp.GetAcceptedEventKinds() {
+				m.acceptedEventKinds = append(m.acceptedEventKinds, eventsv1.EventKind(kind))
+			}
+			m.mu.Unlock()
 		}
 		m.modeNegotiated.Store(true)
 
@@ -364,7 +376,7 @@ func (m *Manager) connectAndRegister() error {
 	return nil
 }
 
-func validateAcceptedEventProfile(resp *management.ProcessorRegistrationResponse) error {
+func validateAcceptedEventProfile(resp *management.ProcessorRegistrationResponse, extraRequired ...eventsv1.EventKind) error {
 	if resp.GetAcceptedEventApiMajor() != 1 {
 		return fmt.Errorf("unsupported event API major %d", resp.GetAcceptedEventApiMajor())
 	}
@@ -376,7 +388,11 @@ func validateAcceptedEventProfile(resp *management.ProcessorRegistrationResponse
 	for _, kind := range resp.GetAcceptedEventKinds() {
 		acceptedKinds[kind] = struct{}{}
 	}
-	for _, required := range []int32{1, 2, 3, 4, 5, 6, 7} {
+	requiredKinds := []int32{1, 2, 3, 4, 5, 6, 7}
+	for _, kind := range extraRequired {
+		requiredKinds = append(requiredKinds, int32(kind))
+	}
+	for _, required := range requiredKinds {
 		if _, ok := acceptedKinds[required]; !ok {
 			return fmt.Errorf("required event kind %d was not accepted", required)
 		}
@@ -390,6 +406,56 @@ func (m *Manager) ForwardingEvents() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.config.ForwardMode == "events"
+}
+
+// RequiredInventoryKinds expands an inventory production promise to both
+// inventory kinds when accepting downstream sources. This must not expand
+// outbound consumer requirements: an optional inventory producer can still
+// forward baseline events to an older upstream and report compatibility loss.
+// One required inventory stream cannot promise an unchecked other kind.
+func RequiredInventoryKinds(required []eventsv1.EventKind, inventoryEnabled bool) []eventsv1.EventKind {
+	for _, kind := range required {
+		inventoryEnabled = inventoryEnabled || kind == eventsv1.EventKind_EVENT_KIND_KNOWN_HOST || kind == eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE
+	}
+	result := append([]eventsv1.EventKind(nil), required...)
+	if !inventoryEnabled {
+		return result
+	}
+	for _, kind := range []eventsv1.EventKind{eventsv1.EventKind_EVENT_KIND_KNOWN_HOST, eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE} {
+		found := false
+		for _, existing := range result {
+			found = found || existing == kind
+		}
+		if !found {
+			result = append(result, kind)
+		}
+	}
+	return result
+}
+
+func (m *Manager) eventAnalysisFeatures() []string {
+	features := []string{"relay"}
+	// Processor registration enforces both inventory kinds on event-mode
+	// children whenever either of these conditions makes an upstream promise.
+	// Merely having inventory codecs is deliberately insufficient.
+	inventory := m.config.InventoryEnabled
+	for _, kind := range m.config.RequiredEventKinds {
+		inventory = inventory || kind == eventsv1.EventKind_EVENT_KIND_KNOWN_HOST || kind == eventsv1.EventKind_EVENT_KIND_KNOWN_SERVICE
+	}
+	if inventory {
+		features = append(features, protoadapter.InventoryProductionFeature)
+	}
+	return features
+}
+
+// Until registration completes only legacy kinds are eligible for spooling.
+func (m *Manager) eventKinds() []eventsv1.EventKind {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.acceptedEventKinds) == 0 {
+		return []eventsv1.EventKind{1, 2, 3, 4, 5, 6, 7}
+	}
+	return append([]eventsv1.EventKind(nil), m.acceptedEventKinds...)
 }
 
 func (m *Manager) eventServiceClient() eventsv1.EventServiceClient {

@@ -31,7 +31,7 @@ func FreezeOfflineOpen(inputs []string, filter string, capacity int) OpenOffline
 		limits.MaxSources = viper.GetUint32("watch.offline.max_sources")
 	}
 	analysis := localCaptureEventOptions(filter)
-	analysis.AnalysisProfile = localFileAnalysisProfile(filter)
+	analysis.AnalysisProfile = localFileAnalysisProfile(filter, analysis.Policy)
 	analysis.SourceOrdering = append([]string(nil), inputs...)
 	cfg := OfflineAnalysisConfig{Inputs: append([]string(nil), inputs...), BPFFilter: filter, VoIP: IsVoIPModeEnabled(), EventCapacity: capacity, Analysis: analysis, SIPConfig: *voip.GetConfig()}
 	cfg.ESP = capture.FreezeOfflineESPConfig()

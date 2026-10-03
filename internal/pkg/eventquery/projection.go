@@ -4,6 +4,7 @@ package eventquery
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -80,6 +81,14 @@ func canonicalRecord(event events.Event) (logstream.Record, bool) {
 		build = records.SSL
 	case events.KindHTTP:
 		build = records.HTTP
+	case events.KindDHCP:
+		build = records.DHCP
+	case events.KindNTP:
+		build = records.NTP
+	case events.KindKnownHost:
+		build = records.KnownHosts
+	case events.KindKnownService:
+		build = records.KnownServices
 	case events.KindRADIUS:
 		build = records.RADIUS
 	case events.KindSMTP:
@@ -95,6 +104,18 @@ func canonicalRecord(event events.Event) (logstream.Record, bool) {
 
 func anyValues(v any) []any {
 	switch x := v.(type) {
+	case []netip.Addr:
+		r := make([]any, len(x))
+		for i := range x {
+			r[i] = x[i]
+		}
+		return r
+	case []uint64:
+		r := make([]any, len(x))
+		for i := range x {
+			r[i] = x[i]
+		}
+		return r
 	case []string:
 		return stringsToAny(x)
 	case []time.Duration:
@@ -124,6 +145,14 @@ func Summary(event events.Event) string {
 		return strings.TrimSpace(fmt.Sprintf("%s %s%s status=%d", e.Method, e.Host, e.URI, e.StatusCode))
 	case events.TLSEvent:
 		return strings.TrimSpace(fmt.Sprintf("%s %s %s", e.ServerName, e.Version, e.ValidationStatus))
+	case events.DHCPEvent:
+		return fmt.Sprintf("DHCP type=%d xid=%08x %s", e.MessageType, e.TransactionID, e.Association)
+	case events.NTPEvent:
+		return fmt.Sprintf("NTP v%d mode=%d stratum=%d %s", e.Version, e.Mode, e.Stratum, e.Association)
+	case events.KnownHostEvent:
+		return fmt.Sprintf("Host %s %s", e.Host, e.Evidence)
+	case events.KnownServiceEvent:
+		return fmt.Sprintf("Service %s:%d %s %s", e.Host, e.Port, e.Protocol, e.Evidence)
 	case events.RADIUSEvent:
 		return fmt.Sprintf("RADIUS code=%d id=%d %s", e.Code, e.Identifier, e.Association)
 	case events.SMTPEvent:

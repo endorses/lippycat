@@ -454,3 +454,22 @@ across all connections and both directions in each offline session. Exceeding
 this analyzer budget fails indexing explicitly and preserves the previous ready
 dataset. The plaintext budget is separate from the display cache; allocation
 overhead is additional.
+
+## DHCP/NTP and inventory observations
+
+The Events view receives typed DHCPv4/NTP message observations without enabling
+file logs, through local live/offline analysis, remote event subscription, or
+monitoring packet fallback. DHCP/NTP preserve every accepted message and expose
+partial input and bounded association context. Events can be filtered by their
+canonical fields; UDP includes network message events, while inventory remains
+available in the All view.
+
+Local inventory analysis requires `--inventory` and explicit nonempty
+`--inventory-local-cidrs`; configure event-mode producers separately for remote
+inventory. Scope separates sensors, epochs, interfaces, and offline inputs.
+Known-host/service events arrive with qualifying connection summaries, not the
+first handshake packet. Changing offline policy changes the analysis identity.
+Sensitive DHCP identifiers/names and inventory details require subscriber and
+server permission; policy omissions are reported separately from local ring
+eviction. See the [network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)
+for evidence, defaults, bounded state, and compatibility behavior.

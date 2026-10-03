@@ -642,6 +642,14 @@ func eventKindIcon(kind events.Kind) string {
 		return "🌐"
 	case events.KindDNS:
 		return "🔍"
+	case events.KindDHCP:
+		return "📡"
+	case events.KindNTP:
+		return "⏱"
+	case events.KindKnownHost:
+		return "🖥"
+	case events.KindKnownService:
+		return "⚙"
 	case events.KindConn:
 		return "🔗"
 	case events.KindSMTP:
@@ -655,8 +663,13 @@ func eventKindIcon(kind events.Kind) string {
 
 func eventKindSectionTitle(kind events.Kind) string {
 	name := strings.ToUpper(string(kind))
-	if kind == events.KindFileMetadata {
+	switch kind {
+	case events.KindFileMetadata:
 		name = "File"
+	case events.KindKnownHost:
+		name = "Known Host"
+	case events.KindKnownService:
+		name = "Known Service"
 	}
 	return name + " Details"
 }
@@ -681,6 +694,10 @@ func (v *EventsView) eventColor(kind events.Kind) lipgloss.Color {
 		return v.theme.DNSColor
 	case events.KindConn:
 		return v.theme.TCPColor
+	case events.KindDHCP, events.KindNTP:
+		return v.theme.DNSColor
+	case events.KindKnownHost, events.KindKnownService:
+		return v.theme.SuccessColor
 	default:
 		return v.theme.Foreground
 	}
@@ -794,6 +811,10 @@ func eventFields(event events.Event) []eventField {
 		streamName = "ssl"
 	} else if event.Kind() == events.KindFileMetadata {
 		streamName = "files"
+	} else if event.Kind() == events.KindKnownHost {
+		streamName = "known_hosts"
+	} else if event.Kind() == events.KindKnownService {
+		streamName = "known_services"
 	}
 	schema, ok := logschema.ByName(streamName)
 	if !ok {

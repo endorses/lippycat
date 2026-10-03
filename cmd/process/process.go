@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/logflags"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -449,7 +450,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (flags override config file)
+	eventconfig.Bind(cmd.Flags())
 	config := processor.Config{
+		EventAnalysis:  eventconfig.FromViper(viper.GetViper()),
 		EventQueueSize: cmdutil.GetIntConfig("events.queue_size", structuredLogFlags.EventQueueSize),
 		LogConfig: &processor.StructuredLogConfig{
 			Enabled:   cmdutil.GetStringConfig("logs.dir", structuredLogFlags.Directory) != "" || viper.GetBool("logs.enabled"),

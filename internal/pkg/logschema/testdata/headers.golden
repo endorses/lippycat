@@ -26,3 +26,19 @@
 #path	radius
 #fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	code	identifier	length	observation_id	request_instance_id	association	attributes	origin_node_id	source_id	capture_epoch	community_id	node_id
 #types	time	string	addr	port	addr	port	enum	count	count	count	string	string	enum	vector[string]	string	string	string	string	string
+[dhcp.log]
+#path	dhcp
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	op	message_type	transaction_id	hardware_type	hardware_address	client_identifier	client_addr	offered_addr	next_server	relay_addr	server_identifier	requested_addr	hostname	domain	lease_seconds	routers	dns_servers	parameter_request_list	association	association_id	truncated	community_id	node_id	capture_scope	partial
+#types	time	string	addr	port	addr	port	enum	count	count	count	count	string	string	addr	addr	addr	addr	addr	addr	string	string	count	vector[addr]	vector[addr]	vector[count]	enum	string	bool	string	string	enum	bool
+[ntp.log]
+#path	ntp
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	version	mode	leap	stratum	poll	precision	root_delay_raw	root_dispersion_raw	reference_id	reference_raw	origin_raw	receive_raw	transmit_raw	reference_time	origin_time	receive_time	transmit_time	association	association_id	truncated	community_id	node_id	capture_scope	partial
+#types	time	string	addr	port	addr	port	enum	count	count	count	count	int	int	int	count	string	string	string	string	string	time	time	time	time	enum	string	bool	string	string	enum	bool
+[known_hosts.log]
+#path	known_hosts
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	host	evidence	community_id	node_id	capture_scope	partial
+#types	time	string	addr	port	addr	port	enum	addr	enum	string	string	enum	bool
+[known_services.log]
+#path	known_services
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	host	port	transport	service	evidence	community_id	node_id	capture_scope	partial
+#types	time	string	addr	port	addr	port	enum	addr	port	enum	string	enum	string	string	enum	bool

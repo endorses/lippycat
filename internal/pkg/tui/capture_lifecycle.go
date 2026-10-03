@@ -6,12 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/spf13/viper"
 	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
@@ -24,6 +26,11 @@ import (
 func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model, tea.Cmd) {
 	if msg.Mode == components.CaptureModeOffline {
 		return m.openOffline(FreezeOfflineOpen(msg.PCAPFiles, msg.Filter, msg.BufferSize))
+	}
+
+	analysisOptions := localCaptureEventOptions(msg.Filter)
+	if err := analysisOptions.Policy.Validate(); err != nil {
+		return m, m.uiState.Toast.Show(fmt.Sprintf("Invalid event policy: %v", err), components.ToastError, components.ToastDurationLong)
 	}
 	if m.offlineOpening || m.offlineSession != nil {
 		return m.leaveOffline(&msg, false)
@@ -179,7 +186,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				}
 
 				// Initialize call tracker for RTP-to-CallID mapping (shared with offline mode)
-				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, program, done, m.callTracker, m.liveCallAggregator)
+				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, program, done, m.callTracker, m.liveCallAggregator, analysisOptions)
 			case components.CaptureModeOffline:
 				// Initialize offline call aggregator for VoIP analysis
 				m.callTracker = NewCallTracker()
@@ -192,7 +199,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				}
 
 				// Initialize offline call tracker for RTP-to-CallID mapping
-				go startOfflineCapture(ctx, msg.PCAPFiles, m.bpfFilter, program, done, m.callTracker, m.offlineCallAggregator)
+				go startOfflineCapture(ctx, msg.PCAPFiles, m.bpfFilter, program, done, m.callTracker, m.offlineCallAggregator, analysisOptions)
 			}
 
 			// Mark capture as active for live/offline modes
@@ -227,17 +234,17 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 }
 
 // startLiveCapture starts live packet capture on a network interface
-func startLiveCapture(ctx context.Context, interfaceName string, filter string, program *tea.Program, done chan struct{}, tracker *CallTracker, aggregator *LocalCallAggregator) {
+func startLiveCapture(ctx context.Context, interfaceName string, filter string, program *tea.Program, done chan struct{}, tracker *CallTracker, aggregator *LocalCallAggregator, analysisOptions ...LocalEventAnalysisOptions) {
 	defer close(done) // Signal completion when capture goroutine exits
 	capture.StartLiveSniffer(interfaceName, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startTUISniffer(ctx, devices, filter, program, tracker, aggregator)
+		startTUISniffer(ctx, devices, filter, program, tracker, aggregator, analysisOptions...)
 	})
 }
 
 // startOfflineCapture starts packet capture from PCAP files
 // Uses timestamp-ordered processing so earlier SIP signaling can register media
 // ports before later RTP is analyzed, without prioritizing later SIP packets.
-func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string, program *tea.Program, done chan struct{}, tracker *CallTracker, aggregator *LocalCallAggregator) {
+func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string, program *tea.Program, done chan struct{}, tracker *CallTracker, aggregator *LocalCallAggregator, analysisOptions ...LocalEventAnalysisOptions) {
 	defer close(done) // Signal completion when capture goroutine exits
 	inputIdentity, err := events.OfflineInputIdentity(pcapFiles)
 	if err != nil {
@@ -245,7 +252,7 @@ func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string,
 	}
 	var replayErr error
 	openErr := capture.StartOfflineSnifferOrdered(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		replayErr = startTUISnifferOrdered(ctx, devices, filter, inputIdentity, program, tracker, aggregator)
+		replayErr = startTUISnifferOrdered(ctx, devices, filter, inputIdentity, program, tracker, aggregator, analysisOptions...)
 	})
 	if ctx.Err() != nil {
 		return
@@ -263,14 +270,14 @@ func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string,
 }
 
 // startTUISniffer initializes packet capture and bridges packets to the TUI
-func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *CallTracker, aggregator *LocalCallAggregator) {
+func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *CallTracker, aggregator *LocalCallAggregator, analysisOptions ...LocalEventAnalysisOptions) {
 	// Get pause signal for bridge to respect pause/resume
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
 		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourceLiveCapture), program, pauseSignal, tracker, false, aggregator,
-			localCaptureEventOptions(filter))
+			selectLocalEventOptions(filter, analysisOptions))
 	}
 
 	// Run capture - InitWithContext handles both live and offline modes
@@ -295,15 +302,15 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 // startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
 // Earlier SIP signaling registers media ports before later RTP is analyzed.
 // SIP packets are never prioritized ahead of earlier traffic.
-func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter, inputIdentity string, program *tea.Program, tracker *CallTracker, aggregator *LocalCallAggregator) error {
+func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter, inputIdentity string, program *tea.Program, tracker *CallTracker, aggregator *LocalCallAggregator, analysisOptions ...LocalEventAnalysisOptions) error {
 	// Get pause signal for bridge to respect pause/resume
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
-		options := localCaptureEventOptions(filter)
+		options := selectLocalEventOptions(filter, analysisOptions)
 		options.InputIdentity = inputIdentity
-		options.AnalysisProfile = localFileAnalysisProfile(filter)
+		options.AnalysisProfile = localFileAnalysisProfile(filter, options.Policy)
 		options.SourceOrdering = pcapInterfaceNames(devices)
 		StartEnvelopeBridge(NormalizeCaptureStream(ctx, ch, pipeline.SourcePCAPReplay), program, pauseSignal, tracker, true, aggregator, options)
 	}
@@ -313,7 +320,7 @@ func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterfa
 }
 
 func localCaptureEventOptions(filter string) LocalEventAnalysisOptions {
-	options := LocalEventAnalysisOptions{NodeID: "watch-local"}
+	options := LocalEventAnalysisOptions{NodeID: "watch-local", Policy: eventconfig.FromViper(viper.GetViper())}
 	if strings.TrimSpace(filter) != "" {
 		options.CaptureScope = events.CaptureScopeFiltered
 		options.Partial = true
@@ -321,8 +328,18 @@ func localCaptureEventOptions(filter string) LocalEventAnalysisOptions {
 	return options
 }
 
-func localFileAnalysisProfile(filter string) string {
-	return fmt.Sprintf("watch-eventanalysis-v1|filter=%s", filter)
+func localFileAnalysisProfile(filter string, policy ...*eventconfig.Config) string {
+	var p *eventconfig.Config
+	if len(policy) > 0 {
+		p = policy[0]
+		if p == nil {
+			defaults := eventconfig.Default()
+			p = &defaults
+		}
+	} else {
+		p = eventconfig.FromViper(viper.GetViper())
+	}
+	return fmt.Sprintf("watch-eventanalysis-v1|filter=%s|policy=%s", filter, p.Fingerprint())
 }
 
 func pcapInterfaceNames(devices []pcaptypes.PcapInterface) []string {

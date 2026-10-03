@@ -100,6 +100,12 @@ func eventKindsForProtocol(protocol string) []events.Kind {
 		return nil
 	case "DNS":
 		return []events.Kind{events.KindDNS}
+	case "DHCP":
+		return []events.Kind{events.KindDHCP}
+	case "NTP":
+		return []events.Kind{events.KindNTP}
+	case "UDP":
+		return []events.Kind{events.KindDHCP, events.KindNTP}
 	case "HTTP":
 		return []events.Kind{events.KindHTTP, events.KindFileMetadata}
 	case "HTTPS/TLS":
@@ -115,7 +121,7 @@ func eventKindsForProtocol(protocol string) []events.Kind {
 
 func eventScopeAvailable(protocol string) bool {
 	switch protocol {
-	case "All", "DNS", "HTTP", "HTTPS/TLS", "Email", "TCP":
+	case "All", "DNS", "DHCP", "NTP", "UDP", "HTTP", "HTTPS/TLS", "Email", "TCP":
 		return true
 	default:
 		return false

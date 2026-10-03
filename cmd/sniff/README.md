@@ -49,6 +49,15 @@ See [Structured Protocol Logs](../../docs/STRUCTURED_LOGS.md) for every flag and
 field, rotation hooks, `partial` connection semantics, SIEM examples, and privacy
 guidance.
 
+The default seven streams remain `conn,dns,ssl,http,smtp,files,radius`. Opt in to
+`dhcp,ntp,known_hosts,known_services` with `--log-streams`. DHCP/NTP preserve one
+record per accepted message. Inventory additionally requires `--inventory` and
+explicit nonempty `--inventory-local-cidrs`; ports and cached labels alone never
+establish a service. Records appear on qualifying connection summaries and are
+bounded by capture-time retention and global/per-scope state caps. See the
+[network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)
+for evidence, privacy, configuration, and old-peer behavior.
+
 ## Output Formats
 
 ### JSON Format (Default)

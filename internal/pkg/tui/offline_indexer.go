@@ -44,6 +44,7 @@ type OfflineAnalysisConfig struct {
 }
 
 type offlineIndexedSession struct {
+	markRange    *offlineMarkRangeState
 	export       *offlineExportState
 	browser      *offlineBrowser
 	filter       *offlineFilterOwner
@@ -62,6 +63,10 @@ func (s *offlineIndexedSession) Close() error {
 		return nil
 	}
 	var closeErr error
+	if s.markRange != nil {
+		s.markRange.cancel()
+		<-s.markRange.done
+	}
 	if s.export != nil {
 		s.export.cancel()
 		<-s.export.done

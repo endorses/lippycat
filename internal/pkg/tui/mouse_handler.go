@@ -265,6 +265,12 @@ func (m Model) handlePacketListClick(msg tea.MouseMsg, _, _ int) (Model, tea.Cmd
 		m.uiState.LastClickTime = now
 		m.uiState.PacketList.SetLogicalCursor(index)
 		m.updateDetailsPanel()
+		if msg.Ctrl || msg.Shift {
+			m.offlineLastClickValid = false
+			cmd := m.markPacketClick(msg)
+			return m, cmd
+		}
+		m.setPacketMarkAnchor()
 		if double {
 			return m.toggleCaptureDetails()
 		}
@@ -281,6 +287,12 @@ func (m Model) handlePacketListClick(msg tea.MouseMsg, _, _ int) (Model, tea.Cmd
 	m.uiState.LastClickPacket = index
 	m.uiState.PacketList.SetCursor(index)
 	m.updateDetailsPanel()
+	if msg.Ctrl || msg.Shift {
+		m.uiState.LastClickTime = time.Time{}
+		cmd := m.markPacketClick(msg)
+		return m, cmd
+	}
+	m.setPacketMarkAnchor()
 	if double {
 		m.uiState.LastClickTime = time.Time{}
 		return m.toggleCaptureDetails()

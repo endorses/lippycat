@@ -54,6 +54,7 @@ type FileDialog struct {
 	width        int
 	height       int
 	errorMessage string
+	packetMarks  int
 
 	// Custom file list management (replacing bubbles/filepicker display)
 	currentDir    string
@@ -75,6 +76,23 @@ type FileDialog struct {
 type FileSelectedMsg struct {
 	Paths              []string // Support multiple files
 	OverwriteConfirmed bool     // Existing destination explicitly confirmed by this dialog
+}
+
+// ClearPacketMarksMsg requests release of retained packet marks without closing
+// the save dialog.
+type ClearPacketMarksMsg struct{}
+
+// SetPacketMarks identifies the packet selection that this save will export.
+func (fd *FileDialog) SetPacketMarks(count int) {
+	fd.packetMarks = max(0, count)
+	fd.prepareLayout()
+}
+
+func (fd *FileDialog) title() string {
+	if fd.config.Type == FileDialogTypeSave && fd.packetMarks > 0 {
+		return fmt.Sprintf("Save %d marked packets", fd.packetMarks)
+	}
+	return fd.config.Title
 }
 
 // Helper to get single path (for backwards compatibility)

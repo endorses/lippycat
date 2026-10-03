@@ -45,6 +45,8 @@ func (ps *PacketStore) AddPacket(packet components.PacketDisplay) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
+	packet.CaptureID = uint64(ps.packetSequence) + 1
+
 	// Add to ring buffer
 	if ps.flowIndexEnabled {
 		if ps.PacketsCount == ps.MaxPackets {
@@ -87,16 +89,17 @@ func (ps *PacketStore) AddPacketBatch(packets []components.PacketDisplay) {
 	filterActive := !ps.FilterChain.IsEmpty()
 
 	for i := range packets {
-		packet := &packets[i]
+		packet := packets[i]
+		packet.CaptureID = uint64(ps.packetSequence) + 1
 
 		// Add to ring buffer
 		if ps.flowIndexEnabled {
 			if ps.PacketsCount == ps.MaxPackets {
 				ps.updatePacketFlowLocked(ps.Packets[ps.PacketsHead], -1)
 			}
-			ps.updatePacketFlowLocked(*packet, 1)
+			ps.updatePacketFlowLocked(packet, 1)
 		}
-		ps.Packets[ps.PacketsHead] = *packet
+		ps.Packets[ps.PacketsHead] = packet
 		ps.PacketsHead = (ps.PacketsHead + 1) % ps.MaxPackets
 		if ps.PacketsCount < ps.MaxPackets {
 			ps.PacketsCount++
@@ -106,8 +109,8 @@ func (ps *PacketStore) AddPacketBatch(packets []components.PacketDisplay) {
 		ps.packetSequence++
 
 		// Apply filter (batch evaluation)
-		if !filterActive || ps.FilterChain.Match(*packet) {
-			ps.FilteredPackets = append(ps.FilteredPackets, *packet)
+		if !filterActive || ps.FilterChain.Match(packet) {
+			ps.FilteredPackets = append(ps.FilteredPackets, packet)
 			ps.MatchedPackets++
 		}
 	}

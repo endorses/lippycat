@@ -294,6 +294,7 @@ func (m *Model) prepareViewChrome() {
 		m.uiState.Header.SetTLSDecryption(viper.GetBool("watch.tls_decryption_enabled"))
 	}
 
+	m.uiState.Footer.SetMarkedPacketCount(len(m.packetMarks.records))
 	// Update footer state
 	m.uiState.Footer.SetDetailsFocused(m.uiState.Tabs.GetActive() == 0 && m.captureDetailsFocused())
 	m.uiState.Footer.SetFilterMode(m.uiState.FilterMode)

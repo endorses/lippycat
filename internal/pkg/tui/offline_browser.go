@@ -314,6 +314,7 @@ func (m Model) handleOfflineBrowse(msg offlineBrowseMsg) (Model, tea.Cmd) {
 	packets := make([]components.PacketDisplay, len(r.page.Rows))
 	for i, row := range r.page.Rows {
 		packets[i] = row.DisplayFields()
+		packets[i].CaptureID = uint64(row.ID) + 1
 	}
 	m.uiState.PacketList.SetVirtualPackets(m.offlinePacketCount(), r.page.Row, packets)
 	m.uiState.DetailsPanel.SetPacket(nil)

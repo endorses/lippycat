@@ -105,6 +105,8 @@ type CaptureTelemetryMsg capture.Telemetry
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
+	packetMarks             packetMarks
+	markedExports           *markedExportOwner
 	textSelection           *mouseTextSelection
 	modalDismissMouseDown   bool
 	offlineModalState       components.ModalState
@@ -297,6 +299,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 
 	m := Model{
 		offlineController:          newOfflineController(),
+		markedExports:              &markedExportOwner{},
 		maxOfflineCalls:            maxCalls,
 		packetStore:                packetStore,
 		callStore:                  callStore,
@@ -391,6 +394,7 @@ func (m Model) Init() tea.Cmd {
 // Shutdown cleans up resources before quitting.
 // Call this before tea.Quit to ensure proper cleanup.
 func (m *Model) Shutdown() {
+	m.markedExports.close()
 	if m.packetStore != nil {
 		m.packetStore.CancelFilter()
 	}
@@ -481,6 +485,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Lifecycle messages bypass modal/settings routing so cleanup cannot stall.
 	switch value := msg.(type) {
+	case offlineMarkRangeMsg:
+		return m.handleOfflineMarkRange(value)
+	case components.ClearPacketMarksMsg:
+		m.clearPacketMarks()
+		return m, nil
 	case packetFilterMsg:
 		return m.handlePacketFilter(value)
 	case offlineFilterMsg:

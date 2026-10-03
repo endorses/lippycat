@@ -21,7 +21,7 @@ func (fd *FileDialog) ModalOptions() ModalRenderOptions {
 	if fd.overwrite.IsActive() {
 		return fd.overwrite.ModalOptions()
 	}
-	opts := ModalRenderOptions{ID: "file-dialog", Title: fd.config.Title, Width: fd.width, Height: fd.height, Theme: fd.theme, State: &fd.modalState}
+	opts := ModalRenderOptions{ID: "file-dialog", Title: fd.title(), Width: fd.width, Height: fd.height, Theme: fd.theme, State: &fd.modalState}
 	opts.Actions = fd.actions()
 	width := ModalContentWidth(opts)
 	var lines []string
@@ -135,6 +135,9 @@ func (fd *FileDialog) actions() []ModalAction {
 	if fd.mode == ModeFilter {
 		actions = append(actions, ModalAction{ID: "apply-filter", Label: "Apply filter", Shortcut: "Enter"})
 	}
+	if fd.config.Type == FileDialogTypeSave && fd.packetMarks > 0 {
+		actions = append(actions, ModalAction{ID: "clear-marks", Label: "Clear marks"})
+	}
 	if fd.filterInput.Value() != "" {
 		actions = append(actions, ModalAction{ID: "clear-filter", Label: "Clear filter"})
 	}
@@ -243,6 +246,14 @@ func (fd *FileDialog) HandleModalAction(id string) tea.Cmd {
 	case "clear-filter":
 		fd.filterInput.SetValue("")
 		fd.applyFilters()
+	case "clear-marks":
+		if fd.config.Type != FileDialogTypeSave || fd.packetMarks == 0 {
+			return nil
+		}
+		fd.SetPacketMarks(0)
+		fd.modalState.Focus = "files"
+		fd.HandleModalFocus("files")
+		return func() tea.Msg { return ClearPacketMarksMsg{} }
 	case "create-folder":
 		return fd.createFolder()
 	case "cancel-edit":
@@ -381,7 +392,7 @@ func (fd *FileDialog) prepareLayout() {
 	if fd.width <= 0 || fd.height <= 0 {
 		return
 	}
-	opts := ModalRenderOptions{Title: fd.config.Title, Width: fd.width, Height: fd.height, Theme: fd.theme, Actions: fd.actions(), Content: strings.Repeat("\n", 100), Footer: "↑/↓ Navigate · ←/→ Change directory · Tab Focus"}
+	opts := ModalRenderOptions{Title: fd.title(), Width: fd.width, Height: fd.height, Theme: fd.theme, Actions: fd.actions(), Content: strings.Repeat("\n", 100), Footer: "↑/↓ Navigate · ←/→ Change directory · Tab Focus"}
 	inputWidth := max(1, ModalContentWidth(opts)-12)
 	fd.filename.Width = inputWidth
 	fd.filterInput.Width = inputWidth

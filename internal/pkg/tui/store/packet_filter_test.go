@@ -36,6 +36,7 @@ func TestPacketFilterScanDoesNotBlockArrivals(t *testing.T) {
 	ps := NewPacketStore(8)
 	old := scanPacket("old", "TCP")
 	fresh := scanPacket("new", "TCP")
+	old.CaptureID, fresh.CaptureID = 1, 3
 	ps.AddPacketBatch([]components.PacketDisplay{old, scanPacket("excluded", "UDP")})
 	entered, release := make(chan struct{}), make(chan struct{})
 	defer close(release)
@@ -86,7 +87,7 @@ func TestPacketFilterScanPreservesIdenticalArrivals(t *testing.T) {
 	chain.Add(packetScanPredicate{match: func(filters.Filterable) bool { return false }})
 	ps.AddPacketBatch([]components.PacketDisplay{packet, packet})
 	require.True(t, ps.CompleteFilter(scan.Run()))
-	require.Equal(t, []components.PacketDisplay{packet, packet, packet, packet}, ps.GetFilteredPackets())
+	require.Equal(t, []components.PacketDisplay{scanPacketID(1, packet), scanPacketID(2, packet), scanPacketID(3, packet), scanPacketID(4, packet)}, ps.GetFilteredPackets())
 	_, matched := ps.Stats()
 	require.EqualValues(t, 4, matched)
 }
@@ -94,6 +95,7 @@ func TestPacketFilterScanPreservesIdenticalArrivals(t *testing.T) {
 func TestPacketFilterScanOmitsEvictedSnapshotMatches(t *testing.T) {
 	ps := NewPacketStore(3)
 	oldest, middle, newest := scanPacket("oldest", "TCP"), scanPacket("middle", "TCP"), scanPacket("newest", "TCP")
+	oldest.CaptureID, middle.CaptureID, newest.CaptureID = 1, 2, 3
 	ps.AddPacketBatch([]components.PacketDisplay{oldest, middle, newest})
 	scan := ps.BeginFilter(scanChain(func(record filters.Filterable) bool { return record.GetStringField("protocol") == "TCP" }))
 	result := scan.Run()
@@ -110,7 +112,7 @@ func TestPacketFilterScanPreservesWrappedOrder(t *testing.T) {
 	scan := ps.BeginFilter(filters.NewFilterChain())
 	ps.AddPacket(scanPacket("4", "TCP"))
 	require.True(t, ps.CompleteFilter(scan.Run()))
-	require.Equal(t, []components.PacketDisplay{scanPacket("2", "TCP"), scanPacket("3", "TCP"), scanPacket("4", "TCP")}, ps.GetFilteredPackets())
+	require.Equal(t, []components.PacketDisplay{scanPacketID(3, scanPacket("2", "TCP")), scanPacketID(4, scanPacket("3", "TCP")), scanPacketID(5, scanPacket("4", "TCP"))}, ps.GetFilteredPackets())
 }
 
 func TestPacketFilterScanKeepsArrivalHistoryBounded(t *testing.T) {
@@ -119,7 +121,7 @@ func TestPacketFilterScanKeepsArrivalHistoryBounded(t *testing.T) {
 	scan := ps.BeginFilter(filters.NewFilterChain())
 	ps.AddPacketBatch([]components.PacketDisplay{scanPacket("1", "TCP"), scanPacket("2", "TCP"), scanPacket("3", "TCP")})
 	require.True(t, ps.CompleteFilter(scan.Run()))
-	require.Equal(t, []components.PacketDisplay{scanPacket("2", "TCP"), scanPacket("3", "TCP")}, ps.GetFilteredPackets())
+	require.Equal(t, []components.PacketDisplay{scanPacketID(3, scanPacket("2", "TCP")), scanPacketID(4, scanPacket("3", "TCP"))}, ps.GetFilteredPackets())
 	_, matched := ps.Stats()
 	require.EqualValues(t, 3, matched, "incremental matched counter remains cumulative")
 }
@@ -163,7 +165,7 @@ func TestPacketFilterScanRejectsPreviousSessionWithSameCounters(t *testing.T) {
 	oldScan := ps.BeginFilter(filters.NewFilterChain())
 	result := oldScan.Run()
 	ps.Clear()
-	fresh := scanPacket("new session", "TCP")
+	fresh := scanPacketID(2, scanPacket("new session", "TCP"))
 	ps.AddPacket(fresh)
 	newScan := ps.BeginFilter(filters.NewFilterChain())
 	require.False(t, ps.CompleteFilter(result))
@@ -184,4 +186,9 @@ func TestPacketFilterScanCancellation(t *testing.T) {
 	require.Nil(t, scan.Run(), "cancellation during the final predicate discards its result")
 	require.Equal(t, 1, calls)
 	require.False(t, ps.CompleteFilter(nil))
+}
+
+func scanPacketID(id uint64, p components.PacketDisplay) components.PacketDisplay {
+	p.CaptureID = id
+	return p
 }

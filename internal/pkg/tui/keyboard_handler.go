@@ -326,6 +326,8 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "t": // Toggle time display mode (clock/relative) - Capture tab only
 		return m.handleToggleTimeDisplay()
 
+	case "m", "M":
+		return m.handleMarkPacket(msg.String() == "M")
 	case "w": // Save packets to file (or stop streaming save)
 		return m.handleSavePackets()
 
@@ -538,6 +540,7 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	packetCount := m.packetStore.PacketsCount
 
 	m.resetCaptureInspection()
+	m.clearPacketMarks()
 	m.packetStore.Clear()
 	m.eventViewDirty = true
 	m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
@@ -709,6 +712,10 @@ func (m Model) handleSavePackets() (Model, tea.Cmd) {
 			m.uiState.Header.SetStreamingSave(false) // Update header status
 			return m, cmd
 		}
+		if m.uiState.SaveInProgress || m.exportRunning() {
+			return m, m.markError(fmt.Errorf("a packet export is already in progress"))
+		}
+		m.uiState.FileDialog.SetPacketMarks(len(m.packetMarks.records))
 		// Update default filename with current timestamp before opening file dialog
 		m.uiState.FileDialog.SetDefaultFilename(m.generateDefaultFilename())
 		// Open file dialog to start new save

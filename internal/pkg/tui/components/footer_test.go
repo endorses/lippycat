@@ -62,7 +62,7 @@ func TestFooterClickableHintsAcrossTabs(t *testing.T) {
 		{"capture", 0, []footerHintExpectation{
 			footerRuneHint("/: filter", "/"), footerRuneHint("d: details", "d"),
 			footerRuneHint("t: time", "t"), footerRuneHint("w: save", "w"),
-			footerRuneHint("x: flush", "x"),
+			footerRuneHint("x: flush", "x"), footerRuneHint("m: mark", "m"),
 		}},
 		{"nodes", 1, []footerHintExpectation{
 			footerRuneHint("f: filters", "f"), footerRuneHint("a: add", "a"),
@@ -111,6 +111,9 @@ func TestFooterClickableDynamicHints(t *testing.T) {
 				footerRuneHint("w: stop", "w"), footerRuneHint("x: flush", "x"),
 				{text: "Space: resume", key: tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}},
 				footerRuneHint("p: protocol", "p"), footerRuneHint("q: quit", "q"),
+			}
+			if mode == "packets" {
+				hints = append(hints, footerRuneHint("m: mark", "m"))
 			}
 			assertFooterHints(t, &footer, hints)
 			switch mode {
@@ -178,7 +181,7 @@ func TestFooterResponsiveHitRegions(t *testing.T) {
 	assertFooterHints(t, &footer, []footerHintExpectation{
 		footerRuneHint("/:flt", "/"), footerRuneHint("d:details", "d"),
 		footerRuneHint("t:tm", "t"), footerRuneHint("w:sav", "w"),
-		footerRuneHint("x:flsh", "x"),
+		footerRuneHint("x:flsh", "x"), footerRuneHint("m:mark", "m"),
 		{text: "Space:pse", key: tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}},
 		footerRuneHint("p:prt", "p"), footerRuneHint("q:qt", "q"),
 	})

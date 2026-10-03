@@ -326,6 +326,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
 	m.uiState.SetCapturing(false)
 	m.uiState.Paused = false
+	m.clearPacketMarks()
 	m.packetStore.ClearAndResize(m.offlinePending.Config.EventCapacity)
 	m.packetStore.ClearFilter()
 	m.resetCaptureInspection()

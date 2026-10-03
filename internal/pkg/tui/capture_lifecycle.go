@@ -125,6 +125,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	globalCaptureState.GetPauseSignal().Resume() // Reset pause state for new capture
 
 	// Clear old packets with new buffer size
+	m.clearPacketMarks()
 	m.packetStore.ClearAndResize(msg.BufferSize)
 	m.uiState.PacketList.Reset() // Reset packet list including autoscroll state
 

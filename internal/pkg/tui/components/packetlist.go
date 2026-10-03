@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
@@ -41,6 +42,7 @@ type PacketList struct {
 	logicalOffset   uint64
 	pageStart       uint64
 	packets         []PacketDisplay
+	markedPackets   map[uint64]bool
 	cursor          int // Currently selected packet
 	offset          int // Scroll offset
 	width           int
@@ -65,6 +67,9 @@ type PacketList struct {
 	cachedHeaderStyle lipgloss.Style // header style cache
 	sizeChanged       bool           // flag to recalculate caches
 }
+
+// SetMarkedPackets installs an immutable snapshot of marked capture identities.
+func (p *PacketList) SetMarkedPackets(ids map[uint64]bool) { p.markedPackets = ids }
 
 // NewPacketList creates a new packet list component
 func NewPacketList() PacketList {
@@ -924,7 +929,27 @@ func (p PacketList) View(focused bool, detailsVisible bool) string {
 	p.paneStyles.prepare(p.theme, borderWidth, contentHeight)
 	borderStyle := p.paneStyles.border(focused && detailsVisible)
 
-	return borderStyle.Render(sb.String())
+	view := borderStyle.Render(sb.String())
+	if len(p.markedPackets) == 0 || p.LogicalCount() == 0 {
+		return view
+	}
+	lines := strings.Split(view, "\n")
+	start := p.LogicalOffset()
+	count := int(min(uint64(max(1, availableForPackets)), p.LogicalCount()-start))
+	markStyle := lipgloss.NewStyle().Foreground(p.theme.Foreground).Bold(true)
+	for i := 0; i < count; i++ {
+		index, loaded := p.pageIndex(start + uint64(i))
+		if !loaded || p.packets[index].CaptureID == 0 || !p.markedPackets[p.packets[index].CaptureID] {
+			continue
+		}
+		// Border, top padding, and header precede the first row. Replace a
+		// left padding cell, preserving data columns and pane dimensions.
+		y := i + 3
+		if y < len(lines)-1 && ansi.StringWidth(lines[y]) >= 4 {
+			lines[y] = ansi.Cut(lines[y], 0, 1) + markStyle.Render("*") + ansi.Cut(lines[y], 2, ansi.StringWidth(lines[y]))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // getColumnWidths returns responsive column widths based on available width

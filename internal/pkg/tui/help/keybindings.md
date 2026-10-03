@@ -51,16 +51,18 @@ Vim-style navigation works in list views.
 
 ## Capture Tab
 
-| Key   | Action                        |
-| ----- | ----------------------------- |
-| `/`   | Enter filter mode             |
-| `c`   | Remove last filter            |
-| `C`   | Clear all filters             |
-| `d`   | Toggle details                |
-| `Esc` | Return from details to list   |
-| `v`   | Cycle packet/event/call views |
-| `w`   | Save packets to PCAP          |
-| `x`   | Flush/clear packets           |
+| Key   | Action                                                   |
+| ----- | -------------------------------------------------------- |
+| `/`   | Enter filter mode                                        |
+| `c`   | Remove last filter                                       |
+| `C`   | Clear all filters                                        |
+| `d`   | Toggle details                                           |
+| `Esc` | Return from details to list                              |
+| `v`   | Cycle packet/event/call views                            |
+| `m`   | Toggle current packet mark                               |
+| `M`   | Add packet range to marks                                |
+| `w`   | Save marked packets, or normal save when none are marked |
+| `x`   | Flush/clear packets                                      |
 
 Packet, event, and call details adapt to the available space: beside the list,
 below it when the terminal is tall enough, or in the full content area. Press
@@ -80,6 +82,32 @@ to the pane width. Very short terminals reduce padding and header/tab chrome.
 
 When packet, event, or call details have focus, `Home`/`g` scrolls to the top and
 `End`/`G` scrolls to the bottom of the details without changing the selected item.
+
+### Mark packets for export
+
+In the packet list, `m` toggles a mark and `M` adds the range from the last clicked
+or individually marked packet to the current row. Marked rows have an asterisk in
+the left margin. Plain clicks move the row and range anchor without clearing marks.
+Ctrl+click toggles a mark, Shift+click replaces marks with a range, and
+Ctrl+Shift+click adds a range. Ranges use the current filtered list order. If the
+anchor was filtered out or evicted, click or mark another packet first. Some
+terminals intercept modified clicks; `m` and `M` remain available from the keyboard.
+
+Marks survive filtering and buffer eviction. With marks present, `w` saves only
+marked packets, including ones no longer shown in the list, as a one-shot PCAP in
+capture order. Press `Esc` to cancel an export in progress. The footer shows the
+count and the save dialog identifies the
+marked export. Saving keeps marks; use **Clear marks** in the save dialog to remove
+all of them. Flushing packets or replacing the capture clears marks. An active
+recording still uses `w` to stop first; press it again to export the marked set.
+
+Live and remote marks retain independent copies of packet bytes; offline marks
+reference the indexed capture. The defaults allow 10,000 marked packets and
+64 MiB of retained payload, configurable with `watch.marked_packet_limit` and
+`watch.marked_bytes_limit` in YAML configuration. Additions exceeding a limit are
+rejected without changing existing marks; save and clear marks to release space.
+Packets without available capture bytes cannot be marked. PCAP export rejects
+mixed link types and invalid timestamps without replacing an existing file.
 
 ### Filter Mode
 

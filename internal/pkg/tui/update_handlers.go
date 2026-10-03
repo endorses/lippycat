@@ -426,8 +426,8 @@ func (m Model) handleConfirmDialogResult(msg components.ConfirmDialogResult) (Mo
 
 // handleSaveCompleteMsg handles save operation completion
 func (m Model) handleSaveCompleteMsg(msg SaveCompleteMsg) (Model, tea.Cmd) {
-	// Save operation completed
-	m.uiState.SaveInProgress = false
+	// An older streaming-stop completion must not release a running export.
+	m.uiState.SaveInProgress = m.exportRunning()
 
 	// If this was a streaming save completion, update UI
 	if msg.Streaming {

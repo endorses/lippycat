@@ -45,20 +45,20 @@ func TestPacketFilterSnapshotLiveAndRemote(t *testing.T) {
 			t.Run(fmt.Sprintf("mode=%d/paused=%t", mode, paused), func(t *testing.T) {
 				m := packetFilterTestModel(mode, 8)
 				m.uiState.Paused = paused
-				old := components.PacketDisplay{Protocol: "TCP", Info: "old keep"}
+				old := components.PacketDisplay{CaptureID: 1, Protocol: "TCP", Info: "old keep"}
 				nonmatch := components.PacketDisplay{Protocol: "UDP", Info: "skip"}
 				m.packetStore.AddPacketBatch([]components.PacketDisplay{old, nonmatch})
 				m.updatePacketListIncremental()
 
 				cmd := m.parseAndApplyFilter("protocol:TCP")
-				newPacket := components.PacketDisplay{Protocol: "TCP", Info: "new keep"}
+				newPacket := components.PacketDisplay{CaptureID: 4, Protocol: "TCP", Info: "new keep"}
 				m.packetStore.AddPacketBatch([]components.PacketDisplay{nonmatch, newPacket})
 				m.updatePacketListIncremental()
 				require.Equal(t, []components.PacketDisplay{newPacket}, m.uiState.PacketList.GetPackets(), "new arrivals are visible before historical filtering completes")
 
 				result := packetFilterResult(t, cmd)
 				// Another arrival between evaluation and completion must also survive.
-				latest := components.PacketDisplay{Protocol: "TCP", Info: "latest other"}
+				latest := components.PacketDisplay{CaptureID: 5, Protocol: "TCP", Info: "latest other"}
 				m.packetStore.AddPacket(latest)
 				m.updatePacketListIncremental()
 				// Async completion must bypass modal routing.
@@ -94,7 +94,7 @@ func TestPacketFilterInputStartsSnapshot(t *testing.T) {
 		viper.Set("watch.filter_history", previousHistory)
 	})
 	m := packetFilterTestModel(components.CaptureModeLive, 8)
-	packet := components.PacketDisplay{Protocol: "TCP"}
+	packet := components.PacketDisplay{CaptureID: 1, Protocol: "TCP"}
 	m.packetStore.AddPacket(packet)
 	m, _ = m.handleEnterFilterMode()
 	for _, r := range "protocol:TCP" {
@@ -154,5 +154,5 @@ func TestPacketFilterResizeRestartsSnapshot(t *testing.T) {
 	m, cmd := m.handleUpdateBufferSizeMsg(components.UpdateBufferSizeMsg{Size: 2})
 	m, _ = m.handlePacketFilter(packetFilterResult(t, cmd))
 	m, _ = m.handlePacketFilter(stale)
-	require.Equal(t, []components.PacketDisplay{{Protocol: "TCP", Info: "retained"}}, m.uiState.PacketList.GetPackets())
+	require.Equal(t, []components.PacketDisplay{{CaptureID: 3, Protocol: "TCP", Info: "retained"}}, m.uiState.PacketList.GetPackets())
 }

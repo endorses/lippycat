@@ -28,6 +28,9 @@ type offlineExportState struct {
 }
 
 func (m *Model) exportRunning() bool {
+	if markedExportActive(m.markedExports.current()) {
+		return true
+	}
 	if m.offlineExport == nil {
 		return false
 	}
@@ -40,11 +43,16 @@ func (m *Model) exportRunning() bool {
 }
 
 func (m *Model) cancelOfflineExport() bool {
-	if !m.exportRunning() {
-		return false
+	cancelled := false
+	if state := m.markedExports.current(); markedExportActive(state) {
+		state.cancel()
+		cancelled = true
 	}
-	m.offlineExport.cancel()
-	return true
+	if markedExportActive(m.offlineExport) {
+		m.offlineExport.cancel()
+		cancelled = true
+	}
+	return cancelled
 }
 
 func (m *Model) startOfflineExport(path string) tea.Cmd {

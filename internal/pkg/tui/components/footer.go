@@ -28,8 +28,9 @@ type Footer struct {
 	theme                themes.Theme
 	filterMode           bool
 	hasFilter            bool
-	filterCount          int     // Number of stacked filters
-	streamingSave        bool    // True when streaming save is active
+	filterCount          int  // Number of stacked filters
+	streamingSave        bool // True when streaming save is active
+	markedPacketCount    int
 	activeTab            int     // Active tab index
 	hasProtocolSelection bool    // True when a protocol is selected
 	hasEvents            bool    // True when the common Events view is available
@@ -86,6 +87,9 @@ func (f *Footer) SetFilterCount(count int) {
 func (f *Footer) SetStreamingSave(active bool) {
 	f.streamingSave = active
 }
+
+// SetMarkedPacketCount updates the capture save hint and retained mark count.
+func (f *Footer) SetMarkedPacketCount(count int) { f.markedPacketCount = max(0, count) }
 
 // SetActiveTab sets the active tab index
 func (f *Footer) SetActiveTab(index int) {
@@ -209,6 +213,8 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 			keybinds = append(keybinds,
 				TabKeybind{Key: "w", Description: "stop", ShortDesc: "stp", Essential: true},
 			)
+		} else if f.markedPacketCount > 0 {
+			keybinds = append(keybinds, TabKeybind{Key: "w", Description: fmt.Sprintf("save marked (%d)", f.markedPacketCount), ShortDesc: fmt.Sprintf("sav %d*", f.markedPacketCount), Essential: true})
 		} else {
 			keybinds = append(keybinds,
 				TabKeybind{Key: "w", Description: "save", ShortDesc: "sav", Essential: true},
@@ -217,6 +223,9 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		keybinds = append(keybinds,
 			TabKeybind{Key: "x", Description: "flush", ShortDesc: "flsh", Essential: false},
 		)
+		if (f.viewMode == "packets" || f.viewMode == "") && !f.detailsFocused {
+			keybinds = append(keybinds, TabKeybind{Key: "m", Description: "mark", ShortDesc: "mark", Essential: false})
+		}
 		return keybinds
 
 	case 1: // Nodes tab
@@ -354,6 +363,9 @@ func (f *Footer) renderSection(bindings []TabKeybind, widthClass responsive.Widt
 		default:
 			if f.activeTab == 0 && binding.Key == "d" && f.width >= 18 {
 				hint += descStyle.Render(":" + binding.Description)
+			}
+			if f.activeTab == 0 && binding.Key == "w" && f.markedPacketCount > 0 && !f.streamingSave {
+				hint += descStyle.Render(fmt.Sprintf(":%d*", f.markedPacketCount))
 			}
 		}
 		hintWidth := lipgloss.Width(hint)

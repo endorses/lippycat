@@ -51,17 +51,9 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 		m.uiState.DevConsole.SetSize(msg.Width, msg.Height)
 	}
 
-	// Calculate available space for main content
-	headerHeight := 2 // header (2 lines: text + border)
-	tabsHeight := 4   // tabs (4 lines: top border + content + bottom corners + bottom line)
-	bottomHeight := 4 // Reserve 4 lines at bottom (footer + space for filter overlay)
-
-	contentHeight := msg.Height - headerHeight - tabsHeight - bottomHeight
-
-	// Set nodes view size (consistent bottom spacing across all tabs)
-	// Hints bar is part of the nodes view content, not bottom area
-	nodesContentHeight := msg.Height - headerHeight - tabsHeight - bottomHeight
-	m.uiState.NodesView.SetSize(msg.Width, nodesContentHeight)
+	// Toasts overlay content; only persistent chrome consumes rows.
+	contentHeight := m.standardContentHeight()
+	m.uiState.NodesView.SetSize(msg.Width, contentHeight)
 
 	// Set statistics view size
 	m.uiState.StatisticsView.SetSize(msg.Width, contentHeight)

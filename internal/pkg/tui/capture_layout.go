@@ -137,7 +137,7 @@ func nonemptyHeight(s string) int {
 
 func (m Model) captureContentOrigin() int {
 	if m.uiState.Tabs.GetActive() != 0 || !m.responsiveCaptureView() {
-		return 6
+		return nonemptyHeight(m.uiState.Header.View()) + nonemptyHeight(m.uiState.Tabs.View())
 	}
 	h, t, _ := m.captureChrome()
 	return nonemptyHeight(h) + nonemptyHeight(t)
@@ -145,10 +145,17 @@ func (m Model) captureContentOrigin() int {
 
 func (m Model) captureContentHeight() int {
 	if m.uiState.Tabs.GetActive() != 0 || !m.responsiveCaptureView() {
-		return max(0, m.uiState.Height-10)
+		filterHeight := nonemptyHeight(m.renderBottomArea(m.uiState.Footer.View())) - nonemptyHeight(m.uiState.Footer.View())
+		return max(0, m.standardContentHeight()-filterHeight)
 	}
 	h, t, b := m.captureChrome()
 	return max(0, m.uiState.Height-nonemptyHeight(h)-nonemptyHeight(t)-nonemptyHeight(b))
+}
+
+// standardContentHeight budgets the persistent chrome on non-responsive tabs.
+func (m Model) standardContentHeight() int {
+	return max(0, m.uiState.Height-nonemptyHeight(m.uiState.Header.View())-
+		nonemptyHeight(m.uiState.Tabs.View())-nonemptyHeight(m.uiState.Footer.View()))
 }
 
 func fitCapturePane(view string, width, height int) string {

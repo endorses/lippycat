@@ -34,7 +34,7 @@ func (m Model) View() string {
 			return m.uiState.DevConsole.View()
 		}
 		view := fitCapturePane(strings.Join(parts, "\n"), m.uiState.Width, m.uiState.Height)
-		return m.overlayCaptureToast(view)
+		return m.overlayToast(view)
 	}
 
 	// Render components
@@ -45,10 +45,7 @@ func (m Model) View() string {
 	var mainContent string
 
 	// Calculate content dimensions
-	headerHeight := 2
-	tabsHeight := 4
-	bottomHeight := 4
-	contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
+	contentHeight := m.captureContentHeight()
 
 	// Render main content based on active tab
 	switch m.uiState.Tabs.GetActive() {
@@ -68,11 +65,11 @@ func (m Model) View() string {
 	mainViews := []string{
 		headerView,
 		tabsView,
-		mainContent,
+		fitCapturePane(mainContent, m.uiState.Width, contentHeight),
 	}
 	mainView := lipgloss.JoinVertical(lipgloss.Left, mainViews...)
 
-	// Render bottom area (footer + filter/toast)
+	// Render the footer and active filter input.
 	bottomArea := m.renderBottomArea(footerView)
 
 	fullView := lipgloss.JoinVertical(lipgloss.Left, mainView, bottomArea)
@@ -82,7 +79,7 @@ func (m Model) View() string {
 		return m.uiState.DevConsole.View()
 	}
 
-	return fullView
+	return m.overlayToast(fitCapturePane(fullView, m.uiState.Width, m.uiState.Height))
 }
 
 // renderCaptureTab renders the Capture tab content (packets or calls)
@@ -229,17 +226,11 @@ func (m Model) captureScrollbar(pane string, total, visible, offset, height int)
 	return components.OverlayScrollbar(pane, lipgloss.Width(pane)-2, 2, bar)
 }
 
-// renderBottomArea renders the bottom area (footer + filter input or toast)
+// renderBottomArea renders the footer and any active filter input.
 func (m Model) renderBottomArea(footerView string) string {
-	// Check if any modal is active (hide toast when modal is open)
-	modalActive := m.uiState.ProtocolSelector.IsActive() ||
-		m.uiState.HunterSelector.IsActive() ||
-		m.uiState.FilterManager.IsActive() ||
-		m.uiState.SettingsView.IsFileDialogActive() ||
-		m.uiState.FileDialog.IsActive() ||
-		m.uiState.ConfirmDialog.IsActive() ||
-		m.uiState.NodesView.IsModalOpen()
-
+	if m.uiState.Tabs.GetActive() != 0 {
+		return footerView
+	}
 	if m.uiState.FilterMode {
 		// Packet filter (3 lines) + footer (1 line) = 4 lines
 		filterView := m.uiState.FilterInput.View()
@@ -257,16 +248,7 @@ func (m Model) renderBottomArea(footerView string) string {
 		return filterView + "\n" + footerView
 	}
 
-	if m.uiState.Toast.IsActive() && !modalActive {
-		// Toast notification (3 lines with padding) + footer (1 line) = 4 lines
-		// Hidden when modal is active
-		toastView := m.uiState.Toast.View()
-		return toastView + "\n" + footerView
-	}
-
-	// All tabs: 3 blank lines + footer (2 lines) = 5 lines for bottomArea
-	// (Nodes tab hints bar is part of mainContent, not bottomArea)
-	return "\n\n\n" + footerView
+	return footerView
 }
 
 // renderActiveModal checks for active modals and renders them as overlays

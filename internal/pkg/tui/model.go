@@ -645,8 +645,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var toastCmd tea.Cmd
 	if m.uiState.Toast.IsActive() {
 		mouse, isMouse := msg.(tea.MouseMsg)
-		if isMouse && m.uiState.Tabs.GetActive() == 0 && m.responsiveCaptureView() {
-			_, rect := m.captureToast()
+		if isMouse {
+			_, rect := m.toastOverlay()
 			if rect.contains(mouse.X, mouse.Y) {
 				m.scrollDrag = ""
 				if mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {

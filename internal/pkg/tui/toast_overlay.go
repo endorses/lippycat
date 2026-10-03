@@ -9,10 +9,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// captureToast shares exact placement between rendering and mouse handling.
-func (m Model) captureToast() (string, captureRect) {
-	if m.uiState.Tabs.GetActive() != 0 || !m.responsiveCaptureView() ||
-		!m.uiState.Toast.IsActive() || m.uiState.FilterMode ||
+// toastOverlay shares exact placement between rendering and mouse handling.
+func (m Model) toastOverlay() (string, captureRect) {
+	if !m.uiState.Toast.IsActive() || m.uiState.FilterMode ||
 		m.uiState.CallFilterMode || m.uiState.EventFilterMode ||
 		m.activeModal() != nil || m.textSelection != nil ||
 		(m.uiState.DevConsole != nil && m.uiState.DevConsole.IsVisible()) {
@@ -30,8 +29,8 @@ func (m Model) captureToast() (string, captureRect) {
 	}
 }
 
-func (m Model) overlayCaptureToast(view string) string {
-	toast, rect := m.captureToast()
+func (m Model) overlayToast(view string) string {
+	toast, rect := m.toastOverlay()
 	if toast == "" {
 		return view
 	}

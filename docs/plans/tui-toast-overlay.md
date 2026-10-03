@@ -11,3 +11,6 @@ call panes. Keep the experiment on `experiment/tui-toast-overlay` for comparison
 Validation: `go test -tags tui ./internal/pkg/tui/components ./internal/pkg/tui`
 passed. Coverage includes all three capture views, layout thresholds, tiny
 terminals, expiry, and queued dismissal without selecting underlying packets.
+
+- [x] Extend the overlay to every tab, reclaim reserved toast rows, and verify
+      content sizing, footer placement, and notification dismissal.

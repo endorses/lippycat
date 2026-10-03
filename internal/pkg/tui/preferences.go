@@ -8,6 +8,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/tui/components/settings"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 	"github.com/spf13/viper"
 )
@@ -146,22 +147,22 @@ func saveEventFilterHistory(filterInput *components.FilterInput) {
 func writePreferences() {
 	if err := viper.WriteConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			logger.Warn("Failed to save event filter history", "error", err)
+			logger.Warn("Failed to save TUI preferences", "error", err)
 			return
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {
-			logger.Warn("Failed to locate home directory for event filter history", "error", err)
+			logger.Warn("Failed to locate home directory for TUI preferences", "error", err)
 			return
 		}
 		configDir := filepath.Join(home, ".config", "lippycat")
 		if err := os.MkdirAll(configDir, 0750); err != nil {
-			logger.Warn("Failed to create config directory for event filter history", "error", err, "directory", configDir)
+			logger.Warn("Failed to create config directory for TUI preferences", "error", err, "directory", configDir)
 			return
 		}
 		viper.SetConfigFile(filepath.Join(configDir, "config.yaml"))
 		if err := viper.SafeWriteConfig(); err != nil {
-			logger.Warn("Failed to save event filter history", "error", err)
+			logger.Warn("Failed to save TUI preferences", "error", err)
 		}
 	}
 }
@@ -203,4 +204,19 @@ func saveNodeHistory(nodesView *components.NodesView) {
 			}
 		}
 	}
+}
+
+// loadNodesHighlightingPreference loads the validated remote presentation mode.
+func loadNodesHighlightingPreference() string {
+	return settings.LoadNodesHighlightingPreference()
+}
+
+// saveNodesHighlightingPreference persists the setting, retaining it in memory if saving fails.
+func saveNodesHighlightingPreference(mode string) {
+	if mode != "normal" && mode != "quiet" {
+		logger.Warn("Refusing invalid Nodes highlighting preference", "value", mode)
+		return
+	}
+	viper.Set("watch.nodes_highlighting", mode)
+	writePreferences()
 }

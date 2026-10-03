@@ -158,8 +158,14 @@ type Stats struct {
 	// StartTime is when the source started
 	StartTime time.Time
 
-	// CPUPercent is the CPU usage percentage (0-100, -1 if unavailable)
+	// CPUPercent is process CPU usage (100% per core, -1 if unavailable)
 	CPUPercent float64
+
+	// CPUCapacityCores is effective visible capacity; zero means unknown.
+	CPUCapacityCores float64
+
+	// MetricsSampleTimeNS identifies the actual CPU/memory sample.
+	MetricsSampleTimeNS int64
 
 	// MemoryRSSBytes is the process resident set size in bytes
 	MemoryRSSBytes uint64
@@ -196,9 +202,7 @@ type AtomicStats struct {
 	startTime                     int64        // Set once at start
 
 	// System metrics (CPU/RAM)
-	cpuPercent       atomic.Value // stores float64
-	memoryRSSBytes   atomic.Uint64
-	memoryLimitBytes atomic.Uint64
+	systemMetrics atomic.Value // stores one immutable sysmetrics.Metrics snapshot
 }
 
 // NewAtomicStats creates a new AtomicStats initialized with the current time.
@@ -206,7 +210,7 @@ func NewAtomicStats() *AtomicStats {
 	s := &AtomicStats{
 		startTime: time.Now().UnixNano(),
 	}
-	s.cpuPercent.Store(float64(-1)) // Initialize as unavailable
+	s.systemMetrics.Store(sysmetrics.Metrics{CPUPercent: -1})
 	return s
 }
 
@@ -250,13 +254,12 @@ func (s *AtomicStats) AddRTPResolution(status callregistry.MediaResolutionStatus
 
 // SetSystemMetrics updates the system metrics (CPU/RAM) from sysmetrics collector.
 func (s *AtomicStats) SetSystemMetrics(m sysmetrics.Metrics) {
-	s.cpuPercent.Store(m.CPUPercent)
-	s.memoryRSSBytes.Store(m.MemoryRSSBytes)
-	s.memoryLimitBytes.Store(m.MemoryLimitBytes)
+	s.systemMetrics.Store(m)
 }
 
 // Snapshot returns a copy of the current stats.
 func (s *AtomicStats) Snapshot() Stats {
+	metrics := s.systemMetrics.Load().(sysmetrics.Metrics)
 	lastNano := s.lastPacketTime.Load()
 	var lastTime time.Time
 	if lastNano > 0 {
@@ -275,9 +278,11 @@ func (s *AtomicStats) Snapshot() Stats {
 		RTPOwnershipAmbiguous:         s.rtpOwnershipAmbiguous.Load(),
 		LastPacketTime:                lastTime,
 		StartTime:                     time.Unix(0, s.startTime),
-		CPUPercent:                    s.cpuPercent.Load().(float64),
-		MemoryRSSBytes:                s.memoryRSSBytes.Load(),
-		MemoryLimitBytes:              s.memoryLimitBytes.Load(),
+		CPUPercent:                    metrics.CPUPercent,
+		CPUCapacityCores:              metrics.CPUCapacityCores,
+		MetricsSampleTimeNS:           metrics.SampleTimeNS,
+		MemoryRSSBytes:                metrics.MemoryRSSBytes,
+		MemoryLimitBytes:              metrics.MemoryLimitBytes,
 	}
 }
 

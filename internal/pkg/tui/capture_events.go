@@ -361,7 +361,7 @@ func (m Model) handleCorrelatedCallUpdateMsg(msg CorrelatedCallUpdateMsg) (Model
 func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 	// Handle hunter status from remote capture client
 	// Now we have the processor address directly from the message
-	processorAddr := msg.ProcessorAddr
+	processorAddr := m.nodeProcessorAddress(msg.ProcessorAddr)
 
 	// Update processor info if we have this processor in our connection manager
 	if processorAddr != "" {
@@ -396,51 +396,30 @@ func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	// Update hunters - merge stats into existing hunters (from topology) or add new ones
-	// This handles downstream hunters whose stats come via GetHunterStatus but whose
-	// structure (ProcessorAddr) comes from topology updates
+	// Merge by canonical owner and hunter ID, not a global first-ID match.
 	for _, hunter := range msg.Hunters {
-		// Try to find existing hunter by ID across all processors
+		owner, ok := m.hunterStatusOwner(processorAddr, hunter)
+		if !ok {
+			logger.Warn("Ambiguous hunter status owner", "hunter_id", hunter.ID, "processor", processorAddr)
+			continue
+		}
+		hunter.ProcessorAddr = owner
+		if !m.nodeSourceEstablished(processorAddr) {
+			m.uiState.NodesView.NodeBaseline(owner, hunter.ID, hunter.ID)
+		}
+		hunters := m.connectionMgr.HuntersByProcessor[owner]
 		found := false
-		for procAddr, hunters := range m.connectionMgr.HuntersByProcessor {
-			for i, existing := range hunters {
-				if existing.ID == hunter.ID {
-					// Update stats for existing hunter (preserve ProcessorAddr from topology)
-					hunters[i].Status = hunter.Status
-					hunters[i].PacketsCaptured = hunter.PacketsCaptured
-					hunters[i].PacketsForwarded = hunter.PacketsForwarded
-					hunters[i].PacketsDropped = hunter.PacketsDropped
-					hunters[i].CaptureBufferRegularDrops = hunter.CaptureBufferRegularDrops
-					hunters[i].CaptureBufferSIPDrops = hunter.CaptureBufferSIPDrops
-					hunters[i].CaptureBufferSIPDemotions = hunter.CaptureBufferSIPDemotions
-					hunters[i].BatchChannelDrops = hunter.BatchChannelDrops
-					hunters[i].CaptureBufferRegularLen = hunter.CaptureBufferRegularLen
-					hunters[i].CaptureBufferRegularCapacity = hunter.CaptureBufferRegularCapacity
-					hunters[i].CaptureBufferSIPLen = hunter.CaptureBufferSIPLen
-					hunters[i].CaptureBufferSIPCapacity = hunter.CaptureBufferSIPCapacity
-					hunters[i].CaptureBufferOutputLen = hunter.CaptureBufferOutputLen
-					hunters[i].CaptureBufferOutputCapacity = hunter.CaptureBufferOutputCapacity
-					hunters[i].ActiveFilters = hunter.ActiveFilters
-					hunters[i].CPUPercent = hunter.CPUPercent
-					hunters[i].MemoryRSSBytes = hunter.MemoryRSSBytes
-					hunters[i].LastHeartbeat = hunter.LastHeartbeat
-					hunters[i].ConnectedAt = hunter.ConnectedAt
-					m.connectionMgr.HuntersByProcessor[procAddr] = hunters
-					found = true
-					break
-				}
-			}
-			if found {
+		for i, existing := range hunters {
+			if existing.ID == hunter.ID {
+				hunters[i] = hunter
+				found = true
 				break
 			}
 		}
-
-		// If not found, add to connected processor's list (directly connected hunter)
 		if !found {
-			hunters := m.connectionMgr.HuntersByProcessor[processorAddr]
 			hunters = append(hunters, hunter)
-			m.connectionMgr.HuntersByProcessor[processorAddr] = hunters
 		}
+		m.connectionMgr.HuntersByProcessor[owner] = hunters
 	}
 
 	// Update NodesView with processor info (includes processor IDs, status, and hierarchy)
@@ -669,6 +648,15 @@ func (m Model) handleProcessorDisconnectedMsg(msg ProcessorDisconnectedMsg) (Mod
 	// Processor connection lost or failed
 	if proc, exists := m.connectionMgr.Processors[msg.Address]; exists {
 		proc.State = store.ProcessorStateFailed
+		// Retained counters are not fresh measurements after reconnect. Keep
+		// their baseline unavailable until a new status response supplies it.
+		for owner, hunters := range m.connectionMgr.HuntersByProcessor {
+			if m.nodeWithinSource(owner, msg.Address) {
+				for i := range hunters {
+					hunters[i].StatsUnavailable = true
+				}
+			}
+		}
 		proc.FailureCount++
 		proc.LastDisconnectedAt = time.Now() // Track when disconnected for cleanup
 		proc.Reachable = false               // Mark as unreachable since connection failed
@@ -789,6 +777,8 @@ func (m Model) handleCleanupOldProcessorsMsg(msg CleanupOldProcessorsMsg) (Model
 		}
 	}
 
+	m.uiState.NodesView.SetProcessors(m.getProcessorInfoList())
+
 	// Schedule next cleanup
 	return m, cleanupProcessorsCmd()
 }
@@ -818,6 +808,15 @@ func (m Model) handleTopologyReceivedMsg(msg TopologyReceivedMsg) (Model, tea.Cm
 
 // handleTopologyUpdateMsg processes streaming topology updates from a processor
 func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
+	if msg.Update == nil {
+		return m, nil
+	}
+	owner := m.nodeProcessorAddress(msg.Update.ProcessorId)
+	if owner == "" {
+		owner = m.nodeProcessorAddress(msg.ProcessorAddr)
+	}
+	established := m.nodeSourceEstablished(msg.ProcessorAddr)
+
 	logger.Debug("Received topology update",
 		"address", msg.ProcessorAddr,
 		"type", msg.Update.UpdateType)
@@ -825,12 +824,17 @@ func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
 	// Process the update based on its type
 	switch msg.Update.UpdateType {
 	case management.TopologyUpdateType_TOPOLOGY_HUNTER_CONNECTED:
-		if event := msg.Update.GetHunterConnected(); event != nil {
+		if event := msg.Update.GetHunterConnected(); event != nil && event.Hunter != nil {
+			if established && m.nodeHunterVisible(owner, event.Hunter.HunterId) {
+				m.uiState.NodesView.NodeJoined(owner, event.Hunter.HunterId, event.Hunter.HunterId)
+			} else if !established {
+				m.uiState.NodesView.NodeBaseline(owner, event.Hunter.HunterId, event.Hunter.HunterId)
+			}
 			logger.Info("Hunter connected via topology update",
 				"hunter_id", event.Hunter.HunterId,
 				"processor", msg.ProcessorAddr)
 			// Add hunter to the processor's hunter list
-			m.addHunterFromTopologyUpdate(msg.ProcessorAddr, event.Hunter)
+			m.addHunterFromTopologyUpdate(owner, event.Hunter)
 		}
 
 	case management.TopologyUpdateType_TOPOLOGY_HUNTER_DISCONNECTED:
@@ -839,16 +843,22 @@ func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
 				"hunter_id", event.HunterId,
 				"processor", msg.ProcessorAddr)
 			// Remove hunter from the processor's hunter list
-			m.removeHunterFromTopologyUpdate(msg.ProcessorAddr, event.HunterId)
+			m.uiState.NodesView.NodeRemoved(owner, event.HunterId, event.HunterId)
+			m.removeHunterFromTopologyUpdate(owner, event.HunterId)
 		}
 
 	case management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED:
-		if event := msg.Update.GetProcessorConnected(); event != nil {
+		if event := msg.Update.GetProcessorConnected(); event != nil && event.Processor != nil {
+			if established {
+				m.uiState.NodesView.NodeJoined(event.Processor.Address, "", event.Processor.Address)
+			} else {
+				m.uiState.NodesView.NodeBaseline(event.Processor.Address, "", event.Processor.Address)
+			}
 			logger.Info("Processor connected via topology update",
 				"processor_id", event.Processor.ProcessorId,
 				"address", event.Processor.Address)
 			// Add downstream processor to topology
-			m.addProcessorFromTopologyUpdate(event.Processor, msg.ProcessorAddr)
+			m.addProcessorFromTopologyUpdate(event.Processor, m.connectedNodeParent(msg.ProcessorAddr, owner, event.Processor))
 		}
 
 	case management.TopologyUpdateType_TOPOLOGY_PROCESSOR_DISCONNECTED:
@@ -856,6 +866,7 @@ func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
 			logger.Info("Processor disconnected via topology update",
 				"processor_id", event.ProcessorId)
 			// Remove downstream processor from topology
+			m.uiState.NodesView.NodeRemoved(m.nodeProcessorAddress(event.ProcessorId), "", "")
 			m.removeProcessorFromTopologyUpdate(event.ProcessorId)
 		}
 
@@ -866,7 +877,7 @@ func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
 				"status", event.NewStatus,
 				"processor", msg.ProcessorAddr)
 			// Update hunter status in the processor's hunter list
-			m.updateHunterStatusFromTopologyUpdate(msg.ProcessorAddr, event.HunterId, event.NewStatus)
+			m.updateHunterStatusFromTopologyUpdate(owner, event.HunterId, event.NewStatus)
 		}
 	}
 
@@ -893,19 +904,26 @@ func (m *Model) addHunterFromTopologyUpdate(processorAddr string, hunter *manage
 
 	// Convert to components.HunterInfo
 	hunterInfo := components.HunterInfo{
-		ID:            hunter.HunterId,
-		Hostname:      hunter.Hostname,
-		RemoteAddr:    hunter.RemoteAddr,
-		Status:        hunter.Status,
-		ConnectedAt:   time.Now().UnixNano() - int64(hunter.ConnectedDurationSec*1e9),
-		LastHeartbeat: hunter.LastHeartbeatNs,
-		Interfaces:    hunter.Interfaces,
-		ProcessorAddr: processorAddr,
-		Capabilities:  hunter.Capabilities,
+		ID:               hunter.HunterId,
+		Hostname:         hunter.Hostname,
+		RemoteAddr:       hunter.RemoteAddr,
+		Status:           hunter.Status,
+		ConnectedAt:      time.Now().UnixNano() - int64(hunter.ConnectedDurationSec*1e9),
+		LastHeartbeat:    hunter.LastHeartbeatNs,
+		Interfaces:       hunter.Interfaces,
+		ProcessorAddr:    processorAddr,
+		Capabilities:     hunter.Capabilities,
+		StatsUnavailable: hunter.Stats == nil,
+		CPUPercent:       -1,
 	}
 
 	// Stats may be nil if hunter disconnected abruptly
 	if hunter.Stats != nil {
+		hunterInfo.CPUPercent = float64(hunter.Stats.CpuPercent)
+		hunterInfo.CPUCapacityCores = hunter.Stats.CpuCapacityCores
+		hunterInfo.MetricsSampleTimeNS = hunter.Stats.MetricsSampleTimeNs
+		hunterInfo.MemoryRSSBytes = hunter.Stats.MemoryRssBytes
+		hunterInfo.MemoryLimitBytes = hunter.Stats.MemoryLimitBytes
 		hunterInfo.PacketsCaptured = hunter.Stats.PacketsCaptured
 		hunterInfo.PacketsForwarded = hunter.Stats.PacketsForwarded
 		hunterInfo.PacketsDropped = hunter.Stats.PacketsDropped
@@ -1016,18 +1034,26 @@ func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNo
 			if h == nil {
 				continue
 			}
+			m.uiState.NodesView.NodeBaseline(nodeAddr, h.HunterId, h.HunterId)
 			hunterInfo := components.HunterInfo{
-				ID:            h.HunterId,
-				Hostname:      h.Hostname,
-				RemoteAddr:    h.RemoteAddr,
-				Status:        h.Status,
-				ConnectedAt:   time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9),
-				LastHeartbeat: h.LastHeartbeatNs,
-				Interfaces:    h.Interfaces,
-				ProcessorAddr: nodeAddr,
-				Capabilities:  h.Capabilities,
+				ID:               h.HunterId,
+				Hostname:         h.Hostname,
+				RemoteAddr:       h.RemoteAddr,
+				Status:           h.Status,
+				ConnectedAt:      time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9),
+				LastHeartbeat:    h.LastHeartbeatNs,
+				Interfaces:       h.Interfaces,
+				ProcessorAddr:    nodeAddr,
+				Capabilities:     h.Capabilities,
+				StatsUnavailable: h.Stats == nil,
+				CPUPercent:       -1,
 			}
 			if h.Stats != nil {
+				hunterInfo.CPUPercent = float64(h.Stats.CpuPercent)
+				hunterInfo.CPUCapacityCores = h.Stats.CpuCapacityCores
+				hunterInfo.MetricsSampleTimeNS = h.Stats.MetricsSampleTimeNs
+				hunterInfo.MemoryRSSBytes = h.Stats.MemoryRssBytes
+				hunterInfo.MemoryLimitBytes = h.Stats.MemoryLimitBytes
 				hunterInfo.PacketsCaptured = h.Stats.PacketsCaptured
 				hunterInfo.PacketsMatched = h.Stats.PacketsMatched
 				hunterInfo.PacketsForwarded = h.Stats.PacketsForwarded
@@ -1086,6 +1112,7 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 	if nodeAddr == "" {
 		nodeAddr = address
 	}
+	m.uiState.NodesView.NodeBaseline(nodeAddr, "", nodeAddr)
 
 	// Determine TLS security for this processor
 	// If we're directly connected to this processor, use its TLS settings
@@ -1138,19 +1165,27 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 		if h == nil {
 			continue
 		}
+		m.uiState.NodesView.NodeBaseline(nodeAddr, h.HunterId, h.HunterId)
 		hunterInfo := components.HunterInfo{
-			ID:            h.HunterId,
-			Hostname:      h.Hostname,
-			RemoteAddr:    h.RemoteAddr,
-			Status:        h.Status,
-			ConnectedAt:   time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9),
-			LastHeartbeat: h.LastHeartbeatNs,
-			Interfaces:    h.Interfaces,
-			ProcessorAddr: nodeAddr,
-			Capabilities:  h.Capabilities,
+			ID:               h.HunterId,
+			Hostname:         h.Hostname,
+			RemoteAddr:       h.RemoteAddr,
+			Status:           h.Status,
+			ConnectedAt:      time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9),
+			LastHeartbeat:    h.LastHeartbeatNs,
+			Interfaces:       h.Interfaces,
+			ProcessorAddr:    nodeAddr,
+			Capabilities:     h.Capabilities,
+			StatsUnavailable: h.Stats == nil,
+			CPUPercent:       -1,
 		}
 		// Stats may be nil if hunter disconnected abruptly
 		if h.Stats != nil {
+			hunterInfo.CPUPercent = float64(h.Stats.CpuPercent)
+			hunterInfo.CPUCapacityCores = h.Stats.CpuCapacityCores
+			hunterInfo.MetricsSampleTimeNS = h.Stats.MetricsSampleTimeNs
+			hunterInfo.MemoryRSSBytes = h.Stats.MemoryRssBytes
+			hunterInfo.MemoryLimitBytes = h.Stats.MemoryLimitBytes
 			hunterInfo.PacketsCaptured = h.Stats.PacketsCaptured
 			hunterInfo.PacketsMatched = h.Stats.PacketsMatched
 			hunterInfo.PacketsForwarded = h.Stats.PacketsForwarded

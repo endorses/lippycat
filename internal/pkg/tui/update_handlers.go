@@ -91,6 +91,9 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 	if now.IsZero() {
 		now = time.Now()
 	}
+	if m.captureMode == components.CaptureModeRemote {
+		m.uiState.NodesView.AdvanceChanges(now)
+	}
 	var eventCmds []tea.Cmd
 	// Remote delivery is pulled even while paused so skipped events and
 	// transport losses are accounted for under the current capture state.

@@ -25,15 +25,13 @@ type Collector struct {
 	identityInheritanceSuppressed              atomic.Uint64
 
 	// System metrics (CPU/RAM)
-	cpuPercent       atomic.Value // stores float64
-	memoryRSSBytes   atomic.Uint64
-	memoryLimitBytes atomic.Uint64
+	systemMetrics atomic.Value // stores one immutable sysmetrics.Metrics snapshot
 }
 
 // New creates a new statistics collector
 func New() *Collector {
 	c := &Collector{}
-	c.cpuPercent.Store(float64(-1)) // Initialize as unavailable
+	c.systemMetrics.Store(sysmetrics.Metrics{CPUPercent: -1})
 	return c
 }
 
@@ -103,18 +101,12 @@ func (c *Collector) GetBufferBytes() uint64 {
 
 // SetSystemMetrics updates the system metrics (CPU/RAM) from sysmetrics collector
 func (c *Collector) SetSystemMetrics(m sysmetrics.Metrics) {
-	c.cpuPercent.Store(m.CPUPercent)
-	c.memoryRSSBytes.Store(m.MemoryRSSBytes)
-	c.memoryLimitBytes.Store(m.MemoryLimitBytes)
+	c.systemMetrics.Store(m)
 }
 
 // GetSystemMetrics returns the current system metrics
 func (c *Collector) GetSystemMetrics() sysmetrics.Metrics {
-	return sysmetrics.Metrics{
-		CPUPercent:       c.cpuPercent.Load().(float64),
-		MemoryRSSBytes:   c.memoryRSSBytes.Load(),
-		MemoryLimitBytes: c.memoryLimitBytes.Load(),
-	}
+	return c.systemMetrics.Load().(sysmetrics.Metrics)
 }
 
 // GetAll returns all statistics as individual values
@@ -128,6 +120,7 @@ func (c *Collector) GetAll() (captured, matched, forwarded, dropped, bufferBytes
 
 // ToProto converts statistics to protobuf HunterStats message
 func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
+	metrics := c.GetSystemMetrics()
 	batchDrops := c.packetsDropped.Load()
 	var detectorStats detector.Telemetry
 	if d := detector.GetDefaultIfInitialized(); d != nil {
@@ -146,9 +139,11 @@ func (c *Collector) ToProto(activeFilters uint32) *management.HunterStats {
 		BatchChannelDrops:             batchDrops,
 		BufferBytes:                   c.bufferBytes.Load(),
 		ActiveFilters:                 activeFilters,
-		CpuPercent:                    float32(c.cpuPercent.Load().(float64)),
-		MemoryRssBytes:                c.memoryRSSBytes.Load(),
-		MemoryLimitBytes:              c.memoryLimitBytes.Load(),
+		CpuPercent:                    float32(metrics.CPUPercent),
+		CpuCapacityCores:              metrics.CPUCapacityCores,
+		MetricsSampleTimeNs:           metrics.SampleTimeNS,
+		MemoryRssBytes:                metrics.MemoryRSSBytes,
+		MemoryLimitBytes:              metrics.MemoryLimitBytes,
 		CaptureLosses:                 c.captureLosses.Load(),
 		AnalysisLosses:                c.analysisLosses.Load(),
 		QueueLosses:                   c.queueLosses.Load(),

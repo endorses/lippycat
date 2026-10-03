@@ -246,6 +246,55 @@ preserve-all path.
 - `d` - Unsubscribe from hunters
 - `Enter` - Connect to processor
 
+CPU and RAM use persistent text colors based on utilization: the normal theme
+foreground below 70%, Solarized orange (`#cb4b16`) from 70%, and Solarized red
+(`#dc322f`) from 90%. Escalation requires three distinct actual metrics samples;
+repeated snapshots and redraws do not count. Elevated color clears below 65% and
+high color below 85%. These presentation thresholds do not change node health.
+CPU/RAM values no longer flash or show change arrows.
+
+The displayed CPU percentage remains raw process usage: 100% means one core, so
+values can exceed 100%. Color classification divides that percentage by the
+reported effective CPU capacity in cores, including fractional quotas. Capacity
+reflects visible CPU affinity and cgroup quota constraints, including restrictive
+ancestors; it is not a guaranteed CPU reservation. RAM color compares process RSS
+with the reported cgroup memory limit. This is an approximate process-to-limit
+ratio: it excludes other memory charged to the cgroup.
+
+Both metrics share the validated percentage thresholds
+`watch.nodes_resources.elevated` (default 70) and `watch.nodes_resources.high`
+(default 90). Values must be finite and satisfy 0 < elevated < high <= 100;
+invalid pairs are logged and replaced by both defaults. The default clearing gap
+is five percentage points. For low or closely spaced custom thresholds, the gap
+shrinks to half the elevated threshold or half the distance between thresholds,
+whichever is smaller. Missing capacity or memory limits, invalid metrics, and disconnected
+nodes use neutral text. Additive capacity and sample-timestamp telemetry fields
+preserve compatibility: older clients ignore them, while older nodes or
+intermediaries may omit them. Without an actual metrics sample timestamp,
+resource colors stay neutral even when values can still be displayed.
+
+Packet totals share one subtle activity marker per node. Advancing captured or
+forwarded totals briefly use a green (`#859900`) background only when the rounded
+displayed total changes; counter resets establish a new baseline without a
+highlight. Filter changes use a neutral blue (`#268bd2`) background with a signed
+delta. These temporary cells use Solarized base3 (`#fdf6e3`) text. `NEW` and
+`RECOVERED` mark observed lifecycle transitions. Initial snapshots and
+subscription changes establish a baseline without join alerts. Idle counters do
+not imply stale or disconnected nodes.
+
+The table and graph share the same cues. A stationary recent-event line shows the
+latest lifecycle or health transition, its age, and any additional events in the
+preceding 30 seconds. It disappears after 30 seconds and is omitted on very short
+terminals. Counter and filter cues last about one second and lifecycle markers
+about five seconds, expiring on the next UI tick even while capture is paused.
+
+In remote **Settings**, select **Nodes highlighting** and press `Enter` to switch
+between `normal` (default) and `quiet`. Quiet mode retains persistent CPU/RAM
+foreground colors, labels, status, and recent events while suppressing temporary
+counter, filter, and lifecycle backgrounds and border accents. The change takes
+effect immediately without restarting capture and is saved as
+`watch.nodes_highlighting` in the configuration file.
+
 ### Calls View (VoIP)
 
 - `j` / `k` - Navigate calls
@@ -258,6 +307,7 @@ All flags can be specified in the configuration file:
 ```yaml
 watch:
   buffer_size: 10000
+  nodes_highlighting: normal # normal or quiet
   gpu:
     enabled: false
     backend: "auto"

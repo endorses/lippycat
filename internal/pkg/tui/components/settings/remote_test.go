@@ -246,5 +246,5 @@ func TestRemoteSettings_GetFocusableFieldCount(t *testing.T) {
 	rs := NewRemoteSettings("/tmp/nodes.yaml", 10000, theme)
 
 	count := rs.GetFocusableFieldCount()
-	assert.Equal(t, 2, count, "Remote mode should have 2 focusable fields: nodes file, buffer")
+	assert.Equal(t, 3, count, "Remote mode should have 3 focusable fields: nodes file, buffer, highlighting")
 }

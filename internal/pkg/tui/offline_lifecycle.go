@@ -320,6 +320,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.installOfflineSettings(m.offlineInstalled)
 	m.uiState.SettingsView.SaveBufferSize()
 	m.captureMode = components.CaptureModeOffline
+	m.uiState.NodesView.SetRemoteChanges(false)
 	m.pcapFiles = append([]string(nil), m.offlinePending.Config.Inputs...)
 	m.bpfFilter = m.offlinePending.Config.BPFFilter
 	m.interfaceName = formatPCAPFilesDisplay(m.pcapFiles)

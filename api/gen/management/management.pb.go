@@ -1247,7 +1247,7 @@ type HunterStats struct {
 	BufferBytes uint64 `protobuf:"varint,5,opt,name=buffer_bytes,json=bufferBytes,proto3" json:"buffer_bytes,omitempty"`
 	// Active filters count
 	ActiveFilters uint32 `protobuf:"varint,6,opt,name=active_filters,json=activeFilters,proto3" json:"active_filters,omitempty"`
-	// CPU usage percentage (0-100, -1 if unavailable)
+	// Process CPU percentage: 100% is one core, may exceed 100; -1 if unavailable.
 	CpuPercent float32 `protobuf:"fixed32,7,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
 	// Process resident set size in bytes
 	MemoryRssBytes uint64 `protobuf:"varint,8,opt,name=memory_rss_bytes,json=memoryRssBytes,proto3" json:"memory_rss_bytes,omitempty"`
@@ -1301,8 +1301,14 @@ type HunterStats struct {
 	// Queued bytes discarded when a new SYN replaces a stale connection.
 	TcpReplacementDroppedBytes uint64                `protobuf:"varint,36,opt,name=tcp_replacement_dropped_bytes,json=tcpReplacementDroppedBytes,proto3" json:"tcp_replacement_dropped_bytes,omitempty"`
 	RtpEbpf                    *MediaAdmissionStatus `protobuf:"bytes,37,opt,name=rtp_ebpf,json=rtpEbpf,proto3" json:"rtp_ebpf,omitempty"`
-	unknownFields              protoimpl.UnknownFields
-	sizeCache                  protoimpl.SizeCache
+	// Effective visible CPU capacity in cores, including fractional cgroup quotas.
+	// Zero means unknown (including older senders). Does not change cpu_percent units.
+	CpuCapacityCores float64 `protobuf:"fixed64,38,opt,name=cpu_capacity_cores,json=cpuCapacityCores,proto3" json:"cpu_capacity_cores,omitempty"`
+	// Unix nanoseconds identifying the actual CPU/memory sample, not a status poll.
+	// Zero means unknown. Consumers must not count repeated samples as fresh data.
+	MetricsSampleTimeNs int64 `protobuf:"varint,39,opt,name=metrics_sample_time_ns,json=metricsSampleTimeNs,proto3" json:"metrics_sample_time_ns,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *HunterStats) Reset() {
@@ -1592,6 +1598,20 @@ func (x *HunterStats) GetRtpEbpf() *MediaAdmissionStatus {
 		return x.RtpEbpf
 	}
 	return nil
+}
+
+func (x *HunterStats) GetCpuCapacityCores() float64 {
+	if x != nil {
+		return x.CpuCapacityCores
+	}
+	return 0
+}
+
+func (x *HunterStats) GetMetricsSampleTimeNs() int64 {
+	if x != nil {
+		return x.MetricsSampleTimeNs
+	}
+	return 0
 }
 
 // ProcessorHeartbeat response from processor
@@ -6540,7 +6560,7 @@ const file_management_proto_rawDesc = "" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x129\n" +
 	"\x06status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\x06status\x126\n" +
-	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xf9\x0f\n" +
+	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xdc\x10\n" +
 	"\vHunterStats\x12)\n" +
 	"\x10packets_captured\x18\x01 \x01(\x04R\x0fpacketsCaptured\x12'\n" +
 	"\x0fpackets_matched\x18\x02 \x01(\x04R\x0epacketsMatched\x12+\n" +
@@ -6581,7 +6601,9 @@ const file_management_proto_rawDesc = "" +
 	"\x13tcp_orphan_controls\x18\" \x01(\x04R\x11tcpOrphanControls\x12?\n" +
 	"\x1ctcp_accept_rejected_controls\x18# \x01(\x04R\x19tcpAcceptRejectedControls\x12A\n" +
 	"\x1dtcp_replacement_dropped_bytes\x18$ \x01(\x04R\x1atcpReplacementDroppedBytes\x12D\n" +
-	"\brtp_ebpf\x18% \x01(\v2).lippycat.management.MediaAdmissionStatusR\artpEbpf\"\xd5\x02\n" +
+	"\brtp_ebpf\x18% \x01(\v2).lippycat.management.MediaAdmissionStatusR\artpEbpf\x12,\n" +
+	"\x12cpu_capacity_cores\x18& \x01(\x01R\x10cpuCapacityCores\x123\n" +
+	"\x16metrics_sample_time_ns\x18' \x01(\x03R\x13metricsSampleTimeNs\"\xd5\x02\n" +
 	"\x12ProcessorHeartbeat\x12!\n" +
 	"\ftimestamp_ns\x18\x01 \x01(\x03R\vtimestampNs\x12<\n" +
 	"\x06status\x18\x02 \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\x12+\n" +

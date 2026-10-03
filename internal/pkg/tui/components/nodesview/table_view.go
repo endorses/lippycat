@@ -35,6 +35,8 @@ type ProcessorInfo struct {
 
 // TableViewParams contains all parameters needed for rendering table views
 type TableViewParams struct {
+	Changes               map[NodeKey]NodeChanges
+	Quiet                 bool
 	Processors            []ProcessorInfo
 	Hunters               []types.HunterInfo
 	SelectedIndex         int
@@ -123,13 +125,11 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		Foreground(params.Theme.InfoColor)
 
 	selectedStyle := lipgloss.NewStyle().
-		Foreground(params.Theme.SelectionBg).
-		Reverse(true).
+		Foreground(params.Theme.SelectionFg).
+		Background(params.Theme.SelectionBg).
 		Bold(true)
 
 	// Calculate column widths
-	calc := ColumnWidthCalculator{Width: params.Width}
-	idCol, hostCol, _, uptimeCol, cpuCol, ramCol, capturedCol, forwardedCol, filtersCol := calc.GetColumnWidths()
 
 	// Build hierarchical processor structure (same as graph view)
 	sortedProcs := buildProcessorHierarchy(params.Processors)
@@ -170,9 +170,6 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			}
 		}
 		params.ProcessorLines[linesRendered] = originalIdx
-
-		// Determine if this processor is a child (has upstream)
-		isChildProcessor := proc.Depth > 0
 
 		// Status indicator for processor - prioritize connection state over reported status
 		var statusIcon string
@@ -248,87 +245,34 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			}
 		}
 
-		// Apply selection styling if this processor is selected
-		if params.SelectedProcessorAddr == proc.Address {
+		change := params.Changes[NodeKey{ProcessorAddr: proc.Address}]
+		isSelected := params.SelectedProcessorAddr == proc.Address
+		if isSelected {
 			selectedNodeLine = linesRendered
-
-			// Build depth indicator and warning for deep hierarchies
-			depthIndicator := ""
-			if proc.HierarchyDepth >= 0 {
-				depthIndicator = fmt.Sprintf("[L%d]", proc.HierarchyDepth)
-				if proc.HierarchyDepth > 7 {
-					depthIndicator += "⚠" // Warning for deep hierarchies
-				}
-			}
-
-			// Add reachability indicator (only for failed connections)
-			if !proc.Reachable && proc.ConnectionState == ProcessorConnectionStateFailed {
-				depthIndicator += "✗" // Processor unreachable
-			}
-
-			// Build node type badge
-			nodeTypeBadge := buildNodeTypeBadge(proc.NodeType, proc.CaptureInterfaces)
-
-			if isChildProcessor {
-				// Child processor - show with tree branch (gray) before status icon
-				// Even when selected, keep tree prefix gray
-				treePrefixRendered := treePrefixStyle.Render(treePrefix)
-				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf("%s %s %s 📡 %s %s [%s] (%d hunters)", statusIcon, securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.ProcessorID, proc.TotalHunters)
-				} else {
-					procLine = fmt.Sprintf("%s %s %s 📡 %s %s (%d hunters)", statusIcon, securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.TotalHunters)
-				}
-				// Combine gray prefix with selected line
-				b.WriteString(treePrefixRendered + selectedStyle.Render(procLine) + "\n")
-			} else {
-				// Root processor - no tree prefix
-				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf("%s %s %s 📡 %s %s [%s] (%d hunters)", statusIcon, securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.ProcessorID, proc.TotalHunters)
-				} else {
-					procLine = fmt.Sprintf("%s %s %s 📡 %s %s (%d hunters)", statusIcon, securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.TotalHunters)
-				}
-				b.WriteString(selectedStyle.Width(params.Width).Render(procLine) + "\n")
-			}
-		} else {
-			// Style the status icon with color separately
-			statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
-
-			// Build depth indicator and warning for deep hierarchies
-			depthIndicator := ""
-			if proc.HierarchyDepth >= 0 {
-				depthIndicator = fmt.Sprintf("[L%d]", proc.HierarchyDepth)
-				if proc.HierarchyDepth > 7 {
-					depthIndicator += "⚠" // Warning for deep hierarchies
-				}
-			}
-
-			// Add reachability indicator (only for failed connections)
-			if !proc.Reachable && proc.ConnectionState == ProcessorConnectionStateFailed {
-				depthIndicator += "✗" // Processor unreachable
-			}
-
-			// Build node type badge
-			nodeTypeBadge := buildNodeTypeBadge(proc.NodeType, proc.CaptureInterfaces)
-
-			if isChildProcessor {
-				// Child processor - gray tree prefix, then colored status icon
-				treePrefixRendered := treePrefixStyle.Render(treePrefix)
-				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf(" %s %s 📡 %s %s [%s] (%d hunters)", securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.ProcessorID, proc.TotalHunters)
-				} else {
-					procLine = fmt.Sprintf(" %s %s 📡 %s %s (%d hunters)", securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.TotalHunters)
-				}
-				b.WriteString(treePrefixRendered + statusStyled + processorStyle.Render(procLine) + "\n")
-			} else {
-				// Root processor - no tree prefix
-				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf(" %s %s 📡 %s %s [%s] (%d hunters)", securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.ProcessorID, proc.TotalHunters)
-				} else {
-					procLine = fmt.Sprintf(" %s %s 📡 %s %s (%d hunters)", securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.TotalHunters)
-				}
-				b.WriteString(statusStyled + processorStyle.Render(procLine) + "\n")
+		}
+		depthIndicator := ""
+		if proc.HierarchyDepth >= 0 {
+			depthIndicator = fmt.Sprintf("[L%d]", proc.HierarchyDepth)
+			if proc.HierarchyDepth > 7 {
+				depthIndicator += "⚠"
 			}
 		}
+		if !proc.Reachable && proc.ConnectionState == ProcessorConnectionStateFailed {
+			depthIndicator += "✗"
+		}
+		procLine = fmt.Sprintf(" %s %s 📡 %s %s", securityIcon, depthIndicator, buildNodeTypeBadge(proc.NodeType, proc.CaptureInterfaces), proc.Address)
+		if proc.ProcessorID != "" {
+			procLine += " [" + proc.ProcessorID + "]"
+		}
+		procLine += fmt.Sprintf(" (%d hunters)", proc.TotalHunters)
+		procLine = withChangeLabel(procLine, change.Label, max(0, params.Width-lipgloss.Width(treePrefix)-1))
+		procLine = changeAccent(procLine, change.Label != "", params.Quiet, params.Theme)
+		statusStyled := statusCell(statusIcon, statusColor, change.StatusChanged, params.Quiet)
+		rowStyle := processorStyle
+		if isSelected {
+			rowStyle = selectedStyle
+		}
+		b.WriteString(treePrefixStyle.Render(treePrefix) + renderTableRow(statusStyled+procLine, rowStyle) + "\n")
 		linesRendered++
 
 		// Show unreachable reason if processor is not reachable (only for failed connections)
@@ -366,22 +310,12 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			// Style the tree prefix in gray, rest of header in bold
 			treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 			headerTreePrefixStyled := treePrefixStyle.Render(headerTreePrefix)
-			headerLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-				"S", // Status
-				idCol, "Hunter ID",
-				8, "Mode", // Mode column (Generic/VoIP)
-				hostCol, "IP Address",
-				uptimeCol, "Uptime",
-				cpuCol, "CPU",
-				ramCol, "RAM",
-				capturedCol, "Captured",
-				forwardedCol, "Forwarded",
-				filtersCol, "Filters",
-			)
+			widths := nodeTableWidths(params.Width-lipgloss.Width(headerTreePrefix), false)
+			headerLine := nodeTableLine(widths, "S", "Hunter ID", "Mode", "IP Address", "Uptime", "CPU", "RAM", "Captured", "Forwarded", "Filters")
 			headerStyle := lipgloss.NewStyle().
 				Foreground(params.Theme.Foreground).
 				Bold(true)
-			b.WriteString(headerTreePrefixStyled + headerStyle.Render(headerLine) + "\n")
+			b.WriteString(headerTreePrefixStyled + headerStyle.Render(TruncateString(headerLine, max(0, params.Width-lipgloss.Width(headerTreePrefix)))) + "\n")
 			linesRendered++
 
 			// Render hunters under this processor in table format
@@ -481,64 +415,30 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				uptimeStr = "-"
 			}
 
-			// Format table columns
-			idStr := TruncateString(hunter.ID, idCol)
-			hostnameStr := TruncateString(hunter.Hostname, hostCol)
-			cpuStr := FormatCPU(hunter.CPUPercent)
-			ramStr := FormatMemory(hunter.MemoryRSSBytes)
-			capturedStr := FormatPacketNumber(hunter.PacketsCaptured)
-			forwardedStr := FormatPacketNumber(hunter.PacketsForwarded)
-			filtersStr := fmt.Sprintf("%d", hunter.ActiveFilters)
-
-			// Determine mode from capabilities
-			modeStr := GetHunterModeBadge(hunter.Capabilities, params.Theme)
-
-			// Track this hunter's line position for mouse clicks
-			// Current line is linesRendered (before we increment it)
-			params.HunterLines[linesRendered] = globalIndex
-
-			// Style tree prefix in gray
-			treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-			prefixStyled := treePrefixStyle.Render(prefix)
-
-			// Build the line differently based on selection
-			if globalIndex == params.SelectedIndex {
+			widths := nodeTableWidths(params.Width-lipgloss.Width(prefix), false)
+			change := params.Changes[NodeKey{ProcessorAddr: proc.Address, HunterID: hunter.ID}]
+			cpu, memory, captured, forwarded, filters, change := hunterMetricValues(hunter, change, widths[9])
+			isSelected := globalIndex == params.SelectedIndex
+			if isSelected {
 				selectedNodeLine = linesRendered
-				// For selected row: build plain text line, then apply full-width background
-				// Prefix is styled gray separately, status is 1 char, then space before next column
-				hunterLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-					statusIcon,
-					idCol, idStr,
-					8, modeStr,
-					hostCol, hostnameStr,
-					uptimeCol, uptimeStr,
-					cpuCol, cpuStr,
-					ramCol, ramStr,
-					capturedCol, capturedStr,
-					forwardedCol, forwardedStr,
-					filtersCol, filtersStr,
-				)
-				// Combine gray prefix with selected line
-				renderedRow := prefixStyled + selectedStyle.Render(hunterLine)
-				b.WriteString(renderedRow + "\n")
-			} else {
-				// For non-selected: style the status icon and prefix separately
-				statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
-				// Prefix is styled gray separately, status is colored, then space before next column
-				hunterLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-					statusStyled,
-					idCol, idStr,
-					8, modeStr,
-					hostCol, hostnameStr,
-					uptimeCol, uptimeStr,
-					cpuCol, cpuStr,
-					ramCol, ramStr,
-					capturedCol, capturedStr,
-					forwardedCol, forwardedStr,
-					filtersCol, filtersStr,
-				)
-				b.WriteString(prefixStyled + hunterLine + "\n")
 			}
+			params.HunterLines[linesRendered] = globalIndex
+			status := statusCell(statusIcon, statusColor, change.StatusChanged, params.Quiet)
+			id := withChangeLabel(hunter.ID, change.Label, widths[1])
+			row := nodeTableLine(widths,
+				status+activityMarker(change.Activity),
+				changeAccent(id, change.Label != "", params.Quiet, params.Theme),
+				GetHunterModeBadge(hunter.Capabilities, params.Theme), hunter.Hostname, uptimeStr,
+				resourceAccent(fitCell(cpu, widths[5]), change.CPU, isSelected, params.Theme),
+				resourceAccent(fitCell(memory, widths[6]), change.Memory, isSelected, params.Theme),
+				cellAccent(fitCell(captured, widths[7]), change.CapturedChanged, params.Quiet, params.Theme.SuccessColor),
+				cellAccent(fitCell(forwarded, widths[8]), change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor),
+				changeAccent(filters, change.FiltersChanged, params.Quiet, params.Theme))
+			row = TruncateString(row, max(0, params.Width-lipgloss.Width(prefix)))
+			if isSelected {
+				row = renderTableRow(row, selectedStyle)
+			}
+			b.WriteString(treePrefixStyle.Render(prefix) + row + "\n")
 
 			linesRendered++
 		}
@@ -601,30 +501,14 @@ func RenderFlatView(params TableViewParams) (string, int) {
 	var b strings.Builder
 	selectedNodeLine := -1
 
-	// This is a fallback case - shouldn't normally be used with current architecture
-	// Get responsive column widths
-	calc := ColumnWidthCalculator{Width: params.Width}
-	idCol, hostCol, statusCol, uptimeCol, cpuCol, ramCol, capturedCol, forwardedCol, filtersCol := calc.GetColumnWidths()
-
-	// Table header
-	header := fmt.Sprintf(
-		" %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-		idCol, "Hunter ID",
-		hostCol, "IP Address",
-		statusCol, "Status",
-		uptimeCol, "Uptime",
-		cpuCol, "CPU",
-		ramCol, "RAM",
-		capturedCol, "Captured",
-		forwardedCol, "Forwarded",
-		filtersCol, "Filters",
-	)
+	widths := nodeTableWidths(params.Width, true)
+	header := nodeTableLine(widths, "Status", "Hunter ID", "", "IP Address", "Uptime", "CPU", "RAM", "Captured", "Forwarded", "Filters")
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(params.Theme.InfoColor)
 
-	b.WriteString(headerStyle.Render(header) + "\n")
+	b.WriteString(headerStyle.Render(TruncateString(header, params.Width)) + "\n")
 
 	// Separator
 	sepStyle := lipgloss.NewStyle().Foreground(params.Theme.BorderColor)
@@ -634,20 +518,20 @@ func RenderFlatView(params TableViewParams) (string, int) {
 	// Render all hunters
 	for i, hunter := range params.Hunters {
 		// Status color
-		statusStyle := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
+		var statusColor lipgloss.Color
 		var statusText string
 		switch hunter.Status {
 		case management.HunterStatus_STATUS_HEALTHY:
-			statusStyle = statusStyle.Foreground(params.Theme.SuccessColor)
+			statusColor = params.Theme.SuccessColor
 			statusText = "HEALTHY"
 		case management.HunterStatus_STATUS_WARNING:
-			statusStyle = statusStyle.Foreground(params.Theme.WarningColor)
+			statusColor = params.Theme.WarningColor
 			statusText = "WARNING"
 		case management.HunterStatus_STATUS_ERROR:
-			statusStyle = statusStyle.Foreground(params.Theme.ErrorColor)
+			statusColor = params.Theme.ErrorColor
 			statusText = "ERROR"
 		case management.HunterStatus_STATUS_STOPPING:
-			statusStyle = statusStyle.Foreground(lipgloss.Color("240"))
+			statusColor = lipgloss.Color("240")
 			statusText = "STOPPING"
 		}
 
@@ -664,34 +548,30 @@ func RenderFlatView(params TableViewParams) (string, int) {
 			}
 		}
 
-		// Format CPU and RAM
-		cpuStr := FormatCPU(hunter.CPUPercent)
-		ramStr := FormatMemory(hunter.MemoryRSSBytes)
-
-		// Format row string
-		row := fmt.Sprintf(
-			" %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-			idCol, TruncateString(hunter.ID, idCol),
-			hostCol, TruncateString(hunter.Hostname, hostCol),
-			statusCol, statusText,
-			uptimeCol, uptime,
-			cpuCol, cpuStr,
-			ramCol, ramStr,
-			capturedCol, FormatPacketNumber(hunter.PacketsCaptured),
-			forwardedCol, FormatPacketNumber(hunter.PacketsForwarded),
-			filtersCol, fmt.Sprintf("%d", hunter.ActiveFilters),
-		)
+		change := params.Changes[NodeKey{ProcessorAddr: hunter.ProcessorAddr, HunterID: hunter.ID}]
+		cpu, memory, captured, forwarded, filters, change := hunterMetricValues(hunter, change, widths[9])
+		isSelected := i == params.SelectedIndex
+		row := nodeTableLine(widths,
+			statusCell(statusText, statusColor, change.StatusChanged, params.Quiet)+activityMarker(change.Activity),
+			changeAccent(withChangeLabel(hunter.ID, change.Label, widths[1]), change.Label != "", params.Quiet, params.Theme),
+			"", hunter.Hostname, uptime,
+			resourceAccent(fitCell(cpu, widths[5]), change.CPU, isSelected, params.Theme),
+			resourceAccent(fitCell(memory, widths[6]), change.Memory, isSelected, params.Theme),
+			cellAccent(fitCell(captured, widths[7]), change.CapturedChanged, params.Quiet, params.Theme.SuccessColor),
+			cellAccent(fitCell(forwarded, widths[8]), change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor),
+			changeAccent(filters, change.FiltersChanged, params.Quiet, params.Theme))
+		row = TruncateString(row, params.Width)
 
 		// Apply style to entire row
-		if i == params.SelectedIndex {
+		if isSelected {
 			selectedNodeLine = i + 2 // Account for header and separator lines
 
 			rowStyle := lipgloss.NewStyle().
-				Foreground(params.Theme.SelectionBg).
-				Reverse(true).
+				Foreground(params.Theme.SelectionFg).
+				Background(params.Theme.SelectionBg).
 				Bold(true)
 
-			renderedRow := rowStyle.Render(row)
+			renderedRow := renderTableRow(row, rowStyle)
 			rowLen := lipgloss.Width(renderedRow)
 			if rowLen < params.Width {
 				padding := params.Width - rowLen

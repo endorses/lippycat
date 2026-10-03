@@ -35,6 +35,8 @@ type ProcessorBoxRegion struct {
 
 // GraphViewParams contains all parameters needed for rendering graph views
 type GraphViewParams struct {
+	Changes                 map[NodeKey]NodeChanges
+	Quiet                   bool
 	Processors              []ProcessorInfo
 	Hunters                 []types.HunterInfo
 	SelectedIndex           int
@@ -261,6 +263,8 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 			procHeader = depthIndicator + " " + procHeader
 		}
 
+		procChange := params.Changes[NodeKey{ProcessorAddr: proc.Address}]
+		procHeader = withChangeLabel(procHeader, procChange.Label, processorBoxWidth-4)
 		procLines = append(procLines, procHeader)
 		// Only add address line if different from header
 		if proc.ProcessorID != "" {
@@ -291,7 +295,7 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 		isProcessorSelected := params.SelectedProcessorAddr == proc.Address
 
 		// Render processor box (centered) with selection styling and status
-		processorBox := RenderProcessorBox(procLines, processorBoxWidth, processorStyle, isProcessorSelected, proc.ConnectionState, proc.Status, params.Theme)
+		processorBox := RenderProcessorBox(procLines, processorBoxWidth, processorStyle, isProcessorSelected, proc.ConnectionState, proc.Status, params.Theme, hasNodeAccent(procChange, params.Quiet))
 
 		// Center the processor box
 		centerPos := max(0, (renderWidth-processorBoxWidth)/2)
@@ -413,27 +417,25 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 			for hIdx, hunter := range proc.Hunters {
 				var headerLines []string
 				var bodyLines []string
+				change := params.Changes[NodeKey{ProcessorAddr: proc.Address, HunterID: hunter.ID}]
 
 				// Hunter header (centered, bold)
 				hunterName := fmt.Sprintf("Hunter-%d", hIdx+1)
 				if hunter.ID != "" {
 					hunterName = hunter.ID
-					if len(hunterName) > hunterBoxWidth-2 {
-						hunterName = hunterName[:hunterBoxWidth-5] + "..."
-					}
+					hunterName = TruncateString(hunterName, hunterBoxWidth-4)
 				}
 				headerLines = append(headerLines, hunterName)
 
 				// IP address (shortened) (centered, bold)
 				ip := hunter.Hostname
-				if len(ip) > hunterBoxWidth-2 {
-					ip = ip[:hunterBoxWidth-5] + "..."
-				}
+				ip = TruncateString(ip, hunterBoxWidth-4)
 				headerLines = append(headerLines, ip)
 
 				// Mode badge (centered, bold)
 				modeBadge := GetHunterModeBadge(hunter.Capabilities, params.Theme)
-				headerLines = append(headerLines, modeBadge)
+				modeBadge = withChangeLabel(modeBadge, change.Label, hunterBoxWidth-5)
+				headerLines = append(headerLines, modeBadge+activityMarker(change.Activity && !hunter.StatsUnavailable))
 
 				// Body content - use condensed format for narrow boxes, labeled format for wider boxes
 				const minWidthForLabels = 26 // Minimum width needed for labels
@@ -458,13 +460,17 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 					uptimeStr = "-"
 				}
 
-				// CPU and RAM
-				cpuStr := FormatCPU(hunter.CPUPercent)
-				ramStr := FormatMemory(hunter.MemoryRSSBytes)
-
-				// Captured and Forwarded
-				capturedStr := FormatPacketNumber(hunter.PacketsCaptured)
-				forwardedStr := FormatPacketNumber(hunter.PacketsForwarded)
+				// CPU/RAM accents remain separate from health color in the header.
+				filterWidth := hunterBoxWidth - 4
+				if hunterBoxWidth >= minWidthForLabels {
+					filterWidth -= labelWidth + 1
+				}
+				cpuValue, ramValue, capturedStr, forwardedStr, filtersValue, change := hunterMetricValues(hunter, change, filterWidth)
+				cpuStr := resourceAccent(cpuValue, change.CPU, false, params.Theme)
+				ramStr := resourceAccent(ramValue, change.Memory, false, params.Theme)
+				capturedStr = cellAccent(capturedStr, change.CapturedChanged, params.Quiet, params.Theme.SuccessColor)
+				forwardedStr = cellAccent(forwardedStr, change.ForwardedChanged, params.Quiet, params.Theme.SuccessColor)
+				filtersStr := changeAccent(filtersValue, change.FiltersChanged, params.Quiet, params.Theme)
 
 				if hunterBoxWidth < minWidthForLabels {
 					// Condensed format without labels for narrow boxes
@@ -472,7 +478,7 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 					bodyLines = append(bodyLines, uptimeStr)
 					bodyLines = append(bodyLines, fmt.Sprintf("%s %s", cpuStr, ramStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%s/%s", forwardedStr, capturedStr))
-					bodyLines = append(bodyLines, fmt.Sprintf("%d", hunter.ActiveFilters))
+					bodyLines = append(bodyLines, filtersStr)
 				} else {
 					// Full format with aligned labels for wider boxes
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, ifaceLabel, TruncateString(iface, hunterBoxWidth-labelWidth-2)))
@@ -481,7 +487,7 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "RAM:", ramStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Captured:", capturedStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Forwarded:", forwardedStr))
-					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %d", labelWidth, "Filters:", hunter.ActiveFilters))
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Filters:", filtersStr))
 				}
 
 				hunterBoxContents = append(hunterBoxContents, HunterBoxContent{
@@ -520,7 +526,8 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 
 				// Get status color for this hunter
 				hunter := proc.Hunters[hIdx]
-				box := RenderHunterBox(content.HeaderLines, content.BodyLines, hunterBoxWidth, boxStyle, isSelected, hunter.Status, params.Theme)
+				change := params.Changes[NodeKey{ProcessorAddr: proc.Address, HunterID: hunter.ID}]
+				box := RenderHunterBox(content.HeaderLines, content.BodyLines, hunterBoxWidth, boxStyle, isSelected, hunter.Status, params.Theme, hasNodeAccent(change, params.Quiet))
 				renderedBoxes[hIdx] = strings.Split(box, "\n")
 			}
 

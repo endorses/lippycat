@@ -9,17 +9,20 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
 // platformCollector holds Linux-specific state for CPU calculation.
 type platformCollector struct {
 	// Previous CPU times for delta calculation
-	prevCPUTime  uint64    // utime + stime in clock ticks
-	prevWallTime time.Time // Wall clock time of previous sample
-	clockTicksHz uint64    // Clock ticks per second (usually 100)
-	memoryLimit  uint64    // Cached cgroup memory limit
-	limitChecked bool      // Whether we've checked for cgroup limit
-	hasSample    bool      // Whether we have a previous sample for delta calculation
+	prevCPUTime   uint64    // utime + stime in clock ticks
+	prevWallTime  time.Time // Wall clock time of previous sample
+	clockTicksHz  uint64    // Clock ticks per second (usually 100)
+	memoryLimit   uint64    // Cached cgroup memory limit
+	limitChecked  bool      // Whether we've checked for cgroup limit
+	hasSample     bool      // Whether we have a previous sample for delta calculation
+	capacityError string    // Suppress repeated diagnostics for unavailable CPU capacity
 }
 
 // initPlatform initializes Linux-specific collection state.
@@ -32,6 +35,16 @@ func (c *collector) initPlatform() {
 // collectPlatform gathers metrics from Linux /proc filesystem.
 func (c *collector) collectPlatform() Metrics {
 	m := Metrics{}
+	capacity, err := readCPUCapacity(os.ReadFile, processAffinityCount)
+	if err != nil {
+		if message := err.Error(); message != c.platformData.capacityError {
+			logger.Debug("CPU capacity unavailable", "error", err)
+			c.platformData.capacityError = message
+		}
+	} else {
+		m.CPUCapacityCores = capacity
+		c.platformData.capacityError = ""
+	}
 
 	// Read RSS from /proc/self/status
 	m.MemoryRSSBytes = readMemoryRSS()

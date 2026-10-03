@@ -806,6 +806,7 @@ Settings for `lc watch`. See [Interactive Capture with `lc watch`](../part2-loca
 | `watch.gpu.enabled`              | boolean | `false`                | Enable GPU acceleration in TUI mode.                                                                                              |
 | `watch.gpu.backend`              | string  | `"auto"`               | GPU backend for TUI.                                                                                                              |
 | `watch.gpu.batch_size`           | integer | `100`                  | GPU batch size.                                                                                                                   |
+| `watch.nodes_highlighting`       | string  | `normal`               | Remote Nodes change cues: `normal` uses temporary accents; `quiet` keeps text and status without accents.                         |
 | `watch.node_history`             | list    | `[]`                   | History of previously connected remote nodes (managed automatically).                                                             |
 | `watch.filter_history`           | list    | `[]`                   | History of packet filter strings (managed automatically).                                                                         |
 | `watch.call_filter_history`      | list    | `[]`                   | History of call filter strings (managed automatically).                                                                           |

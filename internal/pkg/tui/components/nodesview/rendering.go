@@ -4,11 +4,12 @@ package nodesview
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
@@ -26,13 +27,13 @@ const (
 
 // TruncateString truncates a string to maxLen with ellipsis if needed
 func TruncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+	if maxLen <= 0 {
+		return ""
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return ansi.Truncate(s, maxLen, "")
 	}
-	return s[:maxLen-3] + "..."
+	return ansi.Truncate(s, maxLen, "...")
 }
 
 // FormatPacketNumber formats a packet count with K/M/G suffixes
@@ -51,7 +52,7 @@ func FormatPacketNumber(n uint64) string {
 
 // FormatCPU formats CPU percentage for display
 func FormatCPU(percent float64) string {
-	if percent < 0 {
+	if percent < 0 || math.IsNaN(percent) || math.IsInf(percent, 0) {
 		return "-"
 	}
 	return fmt.Sprintf("%.0f%%", percent)
@@ -144,14 +145,13 @@ func RenderBox(lines []string, width int, style lipgloss.Style) string {
 
 	// Content lines
 	for _, line := range lines {
-		// Truncate or pad to fit width (use rune count for proper Unicode character counting)
+		// Truncate or pad using terminal cell width, including styled values
 		displayLine := line
-		lineLen := utf8.RuneCountInString(displayLine)
+		lineLen := lipgloss.Width(displayLine)
 		if lineLen > width-4 {
 			// Truncate to fit with ellipsis
-			runes := []rune(displayLine)
-			displayLine = string(runes[:width-7]) + "..."
-			lineLen = width - 4
+			displayLine = TruncateString(displayLine, width-4)
+			lineLen = lipgloss.Width(displayLine)
 		}
 		padding := width - lineLen - 4
 		leftPad := padding / 2
@@ -174,7 +174,7 @@ func RenderBox(lines []string, width int, style lipgloss.Style) string {
 }
 
 // RenderProcessorBox renders a processor box with optional selection highlighting and status color
-func RenderProcessorBox(lines []string, width int, style lipgloss.Style, isSelected bool, connState ProcessorConnectionState, status management.ProcessorStatus, theme themes.Theme) string {
+func RenderProcessorBox(lines []string, width int, style lipgloss.Style, isSelected bool, connState ProcessorConnectionState, status management.ProcessorStatus, theme themes.Theme, accent bool) string {
 	var b strings.Builder
 
 	// Determine status color for text - prioritize connection state
@@ -233,6 +233,11 @@ func RenderProcessorBox(lines []string, width int, style lipgloss.Style, isSelec
 		vertical = "│"
 	}
 
+	// Selection owns the heavy border; temporary accents never hide it.
+	if accent && !isSelected {
+		borderStyle = borderStyle.Foreground(theme.InfoColor).Bold(true)
+	}
+
 	// Top border
 	b.WriteString(borderStyle.Render(topLeft))
 	b.WriteString(borderStyle.Render(strings.Repeat(horizontal, width-2)))
@@ -241,14 +246,13 @@ func RenderProcessorBox(lines []string, width int, style lipgloss.Style, isSelec
 
 	// Content lines
 	for _, line := range lines {
-		// Truncate or pad to fit width (use rune count for proper Unicode character counting)
+		// Truncate or pad using terminal cell width, including styled values
 		displayLine := line
-		lineLen := utf8.RuneCountInString(displayLine)
+		lineLen := lipgloss.Width(displayLine)
 		if lineLen > width-4 {
 			// Truncate to fit with ellipsis
-			runes := []rune(displayLine)
-			displayLine = string(runes[:width-7]) + "..."
-			lineLen = width - 4
+			displayLine = TruncateString(displayLine, width-4)
+			lineLen = lipgloss.Width(displayLine)
 		}
 		padding := width - lineLen - 4
 		leftPad := padding / 2
@@ -340,7 +344,7 @@ func (c *ColumnWidthCalculator) GetColumnWidths() (idCol, hostCol, statusCol, up
 }
 
 // RenderHunterBox renders a hunter box with centered bold headers and left-aligned body
-func RenderHunterBox(headerLines []string, bodyLines []string, width int, baseStyle lipgloss.Style, isSelected bool, status management.HunterStatus, theme themes.Theme) string {
+func RenderHunterBox(headerLines []string, bodyLines []string, width int, baseStyle lipgloss.Style, isSelected bool, status management.HunterStatus, theme themes.Theme, accent bool) string {
 	var b strings.Builder
 
 	// Determine status color for header text
@@ -389,6 +393,11 @@ func RenderHunterBox(headerLines []string, bodyLines []string, width int, baseSt
 		vertical = "│"
 	}
 
+	// Selection owns the heavy border; temporary accents never hide it.
+	if accent && !isSelected {
+		borderStyle = borderStyle.Foreground(theme.InfoColor).Bold(true)
+	}
+
 	// Top border
 	b.WriteString(borderStyle.Render(topLeft))
 	b.WriteString(borderStyle.Render(strings.Repeat(horizontal, width-2)))
@@ -398,10 +407,8 @@ func RenderHunterBox(headerLines []string, bodyLines []string, width int, baseSt
 	// Header lines (centered and bold)
 	for _, line := range headerLines {
 		displayLine := line
-		if len(displayLine) > width-4 {
-			displayLine = displayLine[:width-7] + "..."
-		}
-		padding := width - len(displayLine) - 4
+		displayLine = TruncateString(displayLine, width-4)
+		padding := width - lipgloss.Width(displayLine) - 4
 		leftPad := padding / 2
 		rightPad := padding - leftPad
 
@@ -426,10 +433,8 @@ func RenderHunterBox(headerLines []string, bodyLines []string, width int, baseSt
 	// Body lines (left-aligned, not bold)
 	for _, line := range bodyLines {
 		displayLine := line
-		if len(displayLine) > width-4 {
-			displayLine = displayLine[:width-7] + "..."
-		}
-		padding := width - len(displayLine) - 4
+		displayLine = TruncateString(displayLine, width-4)
+		padding := width - lipgloss.Width(displayLine) - 4
 
 		b.WriteString(borderStyle.Render(vertical))
 		b.WriteString(" ")

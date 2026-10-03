@@ -4,6 +4,9 @@ package themes
 
 import "github.com/charmbracelet/lipgloss"
 
+// SolarizedBase3 is the light foreground for cells with accent backgrounds.
+const SolarizedBase3 lipgloss.Color = "#fdf6e3"
+
 // Theme represents a color theme for the TUI
 type Theme struct {
 	Name string
@@ -57,7 +60,6 @@ var (
 	solarizedBase0  = lipgloss.Color("#839496") // body text / default code
 	solarizedBase1  = lipgloss.Color("#93a1a1") // optional emphasized content
 	solarizedBase2  = lipgloss.Color("#eee8d5") // background highlights (light)
-	solarizedBase3  = lipgloss.Color("#fdf6e3") // background (light)
 
 	// Solarized accent colors
 	solarizedYellow  = lipgloss.Color("#b58900")
@@ -86,7 +88,7 @@ func Solarized() Theme {
 		SelectionBg:        solarizedCyan,
 		SelectionFg:        lipgloss.Color("0"),
 		CursorBg:           solarizedBlue,
-		CursorFg:           solarizedBase3, // Light foreground for cursor in dark mode
+		CursorFg:           SolarizedBase3, // Light foreground for cursor in dark mode
 		BorderColor:        solarizedBase1,
 		FocusedBorderColor: solarizedRed,
 

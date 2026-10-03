@@ -12,6 +12,7 @@ import (
 func TestDefaultsAndExplicitInvalidValues(t *testing.T) {
 	v := viper.New()
 	require.NoError(t, FromViper(v).Validate())
+	require.True(t, FromViper(v).Inventory.Enabled)
 	for _, key := range []string{"events.dhcp.max_entries", "events.dhcp.max_bytes", "events.dhcp.timeout", "events.ntp.max_entries", "events.ntp.max_bytes", "events.ntp.timeout", "events.inventory.max_entries", "events.inventory.max_bytes", "events.inventory.max_entries_per_scope", "events.inventory.max_bytes_per_scope", "events.inventory.retention"} {
 		for _, value := range []int{0, -1} {
 			t.Run(key+string(rune('0'-value)), func(t *testing.T) {
@@ -22,7 +23,7 @@ func TestDefaultsAndExplicitInvalidValues(t *testing.T) {
 		}
 	}
 	v.Set("events.inventory.enabled", true)
-	require.ErrorContains(t, FromViper(v).Validate(), "local CIDRs")
+	require.NoError(t, FromViper(v).Validate())
 	v.Set("events.inventory.local_cidrs", []string{"192.0.2.0/24", "2001:db8::/32"})
 	require.NoError(t, FromViper(v).Validate())
 	v.Set("events.inventory.local_cidrs", []string{"not-a-prefix"})
@@ -61,4 +62,23 @@ func TestSharedFlagsBindActiveCommand(t *testing.T) {
 	require.NoError(t, got.Validate())
 	require.NoError(t, first.Set("dhcp-association-max-entries", "0"))
 	require.Error(t, FromViper(viper.GetViper()).Validate())
+}
+
+func TestInventoryCanBeDisabledExplicitly(t *testing.T) {
+	v := viper.New()
+	v.Set("events.inventory.enabled", false)
+	require.False(t, FromViper(v).Inventory.Enabled)
+	require.NoError(t, FromViper(v).Validate())
+}
+
+func TestInventoryFlagDefaultAndExplicitDisable(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	flags := pflag.NewFlagSet("inventory", pflag.ContinueOnError)
+	Register(flags)
+	require.True(t, FromViper(viper.GetViper()).Inventory.Enabled)
+	require.NoError(t, FromViper(viper.GetViper()).Validate())
+	require.NoError(t, flags.Parse([]string{"--inventory=false"}))
+	require.False(t, FromViper(viper.GetViper()).Inventory.Enabled)
+	require.NoError(t, FromViper(viper.GetViper()).Validate())
 }

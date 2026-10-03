@@ -80,10 +80,12 @@ rotation, extraction limits, completeness semantics, and privacy guidance.
 
 The default seven streams remain `conn,dns,ssl,http,smtp,files,radius`. Opt in to
 `dhcp,ntp,known_hosts,known_services` with `--log-streams`. DHCP/NTP preserve one
-record per accepted message. Inventory additionally requires `--inventory` and
-explicit nonempty `--inventory-local-cidrs`; ports and cached labels alone never
-establish a service. Records appear on qualifying connection summaries and are
-bounded by capture-time retention and global/per-scope state caps. See the
+record per accepted message. Inventory events are enabled by default for all
+observed eligible unicast hosts and services. Optionally restrict subjects with
+`--inventory-local-cidrs`, or disable inventory with `--inventory=false`. Ports
+and cached labels alone never establish a service. Records appear as soon as
+required packet evidence is available and are bounded by capture-time retention
+and global/per-scope state caps. See the
 [network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)
 for evidence, privacy, configuration, and old-peer behavior.
 

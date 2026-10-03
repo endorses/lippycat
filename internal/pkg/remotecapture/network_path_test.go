@@ -21,6 +21,26 @@ func TestNetworkMonitoringFallbackAndRemoteSubscription(t *testing.T) {
 func TestInventoryMonitoringFallbackAndRemoteSubscription(t *testing.T) {
 	assertMonitoringFixture(t, eventfixture.InventoryPolicy(), eventfixture.InventoryMessages, eventfixture.AssertInventory)
 }
+
+func TestInventoryMonitoringDefaultsEmitBeforeExpiry(t *testing.T) {
+	a, handler := newMonitoringAnalysis(t)
+	// No inventory flag or CIDRs: raw remote packets must be enough.
+	packets, err := eventfixture.InventoryMessages()
+	require.NoError(t, err)
+	for _, info := range packets {
+		ci := info.Packet.Metadata().CaptureInfo
+		require.NoError(t, a.observe(&data.PacketBatch{HunterId: "packet-tap", MonitorEventAnalysis: data.MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_CLIENT_REQUIRED, Packets: []*data.CapturedPacket{{Data: info.Packet.Data(), TimestampNs: ci.Timestamp.UnixNano(), LinkType: uint32(info.LinkType), CaptureLength: uint32(ci.CaptureLength), OriginalLength: uint32(ci.Length), InterfaceName: info.Interface}}}))
+	}
+	flushMonitoringAnalysis(t, a)
+	var observed []events.Event
+	for _, batch := range handler.EventBatches {
+		for _, event := range batch.Events {
+			require.NotEqual(t, events.KindConn, event.Kind(), "inventory must not wait for a connection summary")
+			observed = append(observed, event)
+		}
+	}
+	eventfixture.AssertInventory(t, observed)
+}
 func assertMonitoringFixture(t *testing.T, policy *eventconfig.Config, fixture func() ([]capture.PacketInfo, error), assertFixture func(testing.TB, []events.Event) []events.Event) {
 	a, handler := newMonitoringAnalysis(t)
 	a.client.eventAnalysis = policy

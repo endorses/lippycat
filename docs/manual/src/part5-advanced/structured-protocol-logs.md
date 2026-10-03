@@ -390,13 +390,15 @@ broadcast, and symmetric messages still produce records. Both protocols use
 
 ### Inventory evidence and policy {#inventory-evidence-policy}
 
-Inventory production is disabled by default. Enable `--inventory` and provide
-nonempty explicit IPv4/IPv6 `--inventory-local-cidrs`. CIDRs classify inventory
-subjects, not capture eligibility; private space is not implicitly local.
-Unspecified, multicast, and broadcast subjects are excluded. Inventory log
-selection requires a compatible local policy or compatible inventory-producing
-event sources. Configure hunters through their normal configuration path;
-processors do not distribute this policy to them.
+Inventory events are enabled by default for all observed eligible unicast hosts
+and services. Disable them with `--inventory=false`, or optionally restrict
+subjects with IPv4/IPv6 `--inventory-local-cidrs`. CIDRs do not restrict packet
+capture. Only explicitly configured CIDRs classify connection endpoints as local;
+an empty list does not mark every observed address as local, and private space
+is not implicitly local. Unspecified, multicast, and broadcast subjects are
+excluded. Inventory log streams remain opt-in and require a compatible local
+policy or compatible inventory-producing event sources. Configure hunters through
+their normal configuration path; processors do not distribute this policy to them.
 
 Known hosts require an observed completed TCP handshake or both UDP directions.
 Known services additionally require a reliably oriented responder, responder

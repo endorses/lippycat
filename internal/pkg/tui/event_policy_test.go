@@ -43,11 +43,11 @@ func TestEventPolicyFrozenForOfflineAndLive(t *testing.T) {
 func TestEventPolicyWorkerDefaultsIgnoreViper(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(viper.Reset)
-	viper.Set("events.inventory.enabled", true)
+	viper.Set("events.inventory.enabled", false)
 	viper.Set("events.ntp.max_entries", 0)
 	options, err := resolveLocalEventOptions(selectLocalEventOptions("", nil))
 	require.NoError(t, err)
-	require.False(t, options.Policy.Inventory.Enabled)
+	require.True(t, options.Policy.Inventory.Enabled)
 	require.Equal(t, eventconfig.Default().NTP.MaxEntries, options.Policy.NTP.MaxEntries)
 	policy := eventconfig.Default()
 	policy.NTP.MaxEntries = 0
@@ -57,7 +57,19 @@ func TestEventPolicyWorkerDefaultsIgnoreViper(t *testing.T) {
 
 func TestEventPolicyInvalidOfflineRejectedBeforeInputOpen(t *testing.T) {
 	policy := eventconfig.Default()
-	policy.Inventory.Enabled = true
+	policy.Inventory.LocalCIDRs = []string{"invalid-cidr"}
 	_, err := indexOfflineDataset(context.Background(), nil, 1, OfflineAnalysisConfig{Inputs: []string{"missing.pcap"}, Analysis: LocalEventAnalysisOptions{Policy: &policy}}, nil)
-	require.ErrorContains(t, err, "local CIDRs")
+	require.ErrorContains(t, err, "local CIDR")
+}
+
+func TestEventPolicyDefaultCaptureIncludesInventory(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	live := localCaptureEventOptions("")
+	offline := FreezeOfflineOpen([]string{"capture.pcap"}, "", 10)
+	for _, policy := range []*eventconfig.Config{live.Policy, offline.Config.Analysis.Policy} {
+		require.True(t, policy.Inventory.Enabled)
+		require.Empty(t, policy.Inventory.LocalCIDRs)
+		require.NoError(t, policy.Validate())
+	}
 }

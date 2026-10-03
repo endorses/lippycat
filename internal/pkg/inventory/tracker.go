@@ -1,4 +1,4 @@
-// Package inventory derives bounded observations of local hosts and services
+// Package inventory derives bounded observations of hosts and services
 // from positive connection evidence. It is not a persistent asset database.
 package inventory
 
@@ -126,6 +126,15 @@ func (t *Tracker) Local(address netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+// subject applies the optional inventory filter. An omitted filter admits all
+// eligible unicast endpoints without declaring those addresses local.
+func (t *Tracker) subject(address netip.Addr) bool {
+	if !t.cfg.Enabled || !t.Unicast(address) {
+		return false
+	}
+	return len(t.prefixes) == 0 || t.Local(address)
 }
 
 // Unicast excludes special subjects and directed broadcast in configured local
@@ -327,7 +336,7 @@ func (t *Tracker) Observe(scope string, at time.Time, conn events.ConnEvent, evi
 	var output []events.Event
 	if hostEvidenceValid(evidence.Host, env.Flow.Protocol) {
 		for _, host := range []netip.Addr{origin, response} {
-			if !t.Local(host) || !t.admit(key{scope: scopeID, host: host}, at) {
+			if !t.subject(host) || !t.admit(key{scope: scopeID, host: host}, at) {
 				continue
 			}
 			event := events.NewKnownHostEvent(env)
@@ -344,7 +353,7 @@ func (t *Tracker) Observe(scope string, at time.Time, conn events.ConnEvent, evi
 		responder = netip.AddrPortFrom(normalized(responder.Addr()), responder.Port())
 	}
 	observed := responder.IsValid() && (responder.Addr() == origin && responder.Port() == env.Flow.SourcePort || responder.Addr() == response && responder.Port() == env.Flow.DestinationPort)
-	if serviceEvidenceValid(evidence, env.Flow.Protocol, id) && observed && responder.Port() != 0 && t.Local(responder.Addr()) {
+	if serviceEvidenceValid(evidence, env.Flow.Protocol, id) && observed && responder.Port() != 0 && t.subject(responder.Addr()) {
 		k := key{scope: scopeID, host: responder.Addr(), port: responder.Port(), transport: env.Flow.Protocol, protocol: id, service: true}
 		if t.admit(k, at) {
 			event := events.NewKnownServiceEvent(env)

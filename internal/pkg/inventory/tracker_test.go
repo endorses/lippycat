@@ -55,7 +55,6 @@ func TestExplicitLocalPolicy(t *testing.T) {
 
 func TestPolicyValidationAndDisabledAllocation(t *testing.T) {
 	mutators := []func(*eventconfig.Inventory){
-		func(c *eventconfig.Inventory) { c.LocalCIDRs = nil },
 		func(c *eventconfig.Inventory) { c.LocalCIDRs = []string{"bad"} },
 		func(c *eventconfig.Inventory) { c.LocalCIDRs = []string{"::ffff:192.0.2.1/80"} },
 		func(c *eventconfig.Inventory) { c.MaxEntries = 0 }, func(c *eventconfig.Inventory) { c.MaxEntries = -1 },
@@ -69,6 +68,7 @@ func TestPolicyValidationAndDisabledAllocation(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) { cfg := policy(); mutate(&cfg); _, err := New(cfg); require.Error(t, err) })
 	}
 	cfg := eventconfig.Default().Inventory
+	cfg.Enabled = false
 	tracker, err := New(cfg)
 	require.NoError(t, err)
 	require.Nil(t, tracker.entries)
@@ -276,4 +276,50 @@ func TestServiceDedupIncludesEndpointTransportAndProtocol(t *testing.T) {
 	require.Len(t, tracker.Observe("sensor", at, connection(17), evidence), 1, "TCP and UDP services do not merge")
 	require.Len(t, tracker.Observe("other-sensor", at, connection(17), evidence), 1, "sensor scopes do not merge")
 	require.Equal(t, 5, tracker.Stats().Entries)
+}
+
+func TestDefaultInventoryIncludesPublicIPv4AndIPv6WithoutLocalClassification(t *testing.T) {
+	for _, addresses := range [][2]string{{"8.8.8.8", "1.1.1.1"}, {"2606:4700:4700::1111", "2001:4860:4860::8888"}} {
+		t.Run(addresses[0], func(t *testing.T) {
+			tracker, err := New(eventconfig.Default().Inventory)
+			require.NoError(t, err)
+			env := connection(6).Envelope()
+			env.Flow.SourceAddress = netip.MustParseAddr(addresses[0])
+			env.Flow.DestinationAddress = netip.MustParseAddr(addresses[1])
+			require.False(t, tracker.Local(env.Flow.SourceAddress))
+			require.False(t, tracker.Local(env.Flow.DestinationAddress))
+			got := tracker.Observe("sensor", time.Unix(100, 0), events.NewConnEvent(env), Evidence{Host: events.EvidenceTCPHandshake, Service: events.EvidenceTCPHandshake, Protocol: "tls", Responder: netip.AddrPortFrom(env.Flow.DestinationAddress, env.Flow.DestinationPort)})
+			require.Len(t, got, 3)
+			require.Equal(t, env.Flow.SourceAddress, got[0].(events.KnownHostEvent).Host)
+			require.Equal(t, env.Flow.DestinationAddress, got[1].(events.KnownHostEvent).Host)
+			require.Equal(t, env.Flow.DestinationAddress, got[2].(events.KnownServiceEvent).Host)
+		})
+	}
+}
+
+func TestDefaultInventoryExcludesSpecialSubjects(t *testing.T) {
+	for _, address := range []string{"0.0.0.0", "::", "255.255.255.255", "224.0.0.1", "ff02::1"} {
+		t.Run(address, func(t *testing.T) {
+			tracker, err := New(eventconfig.Default().Inventory)
+			require.NoError(t, err)
+			env := connection(6).Envelope()
+			env.Flow.SourceAddress = netip.MustParseAddr(address)
+			env.Flow.DestinationAddress = env.Flow.SourceAddress
+			got := tracker.Observe("sensor", time.Unix(100, 0), events.NewConnEvent(env), Evidence{Host: events.EvidenceTCPHandshake, Service: events.EvidenceTCPHandshake, Protocol: "tls", Responder: netip.AddrPortFrom(env.Flow.DestinationAddress, env.Flow.DestinationPort)})
+			require.Empty(t, got)
+			require.Zero(t, tracker.Stats().Entries)
+		})
+	}
+}
+
+func TestOptionalInventoryFilterRestrictsHostsAndServices(t *testing.T) {
+	cfg := eventconfig.Default().Inventory
+	cfg.LocalCIDRs = []string{"192.0.2.0/24"}
+	tracker, err := New(cfg)
+	require.NoError(t, err)
+	env := connection(6).Envelope()
+	env.Flow.DestinationAddress = netip.MustParseAddr("1.1.1.1")
+	got := tracker.Observe("sensor", time.Unix(100, 0), events.NewConnEvent(env), Evidence{Host: events.EvidenceTCPHandshake, Service: events.EvidenceTCPHandshake, Protocol: "tls", Responder: netip.AddrPortFrom(env.Flow.DestinationAddress, env.Flow.DestinationPort)})
+	require.Len(t, got, 1)
+	require.Equal(t, env.Flow.SourceAddress, got[0].(events.KnownHostEvent).Host)
 }

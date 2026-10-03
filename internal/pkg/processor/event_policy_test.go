@@ -11,8 +11,15 @@ import (
 
 func TestEventPolicyProcessorValidationPrecedesInitialization(t *testing.T) {
 	policy := eventconfig.Default()
-	policy.Inventory.Enabled = true
+	policy.Inventory.LocalCIDRs = []string{"invalid-prefix"}
 	p, err := New(Config{EventAnalysis: &policy})
 	require.Nil(t, p)
-	require.ErrorContains(t, err, "local CIDRs")
+	require.ErrorContains(t, err, "local CIDR")
+}
+
+func TestEventPolicyProcessorDefaultInventory(t *testing.T) {
+	p, err := newTestProcessor(t, Config{ListenAddr: "127.0.0.1:0"})
+	require.NoError(t, err)
+	require.True(t, p.config.EventAnalysis.Inventory.Enabled)
+	require.Empty(t, p.config.EventAnalysis.Inventory.LocalCIDRs)
 }

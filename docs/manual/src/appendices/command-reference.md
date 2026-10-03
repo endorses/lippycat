@@ -243,14 +243,15 @@ for stream schemas, completeness semantics, rotation, and privacy guidance.
 ### Network Observation Flags {#network-observation-flags}
 
 These shared flags configure analysis in `sniff`, `hunt`, `process`, `tap`, and
-`watch`; they do not enable file logging. Inventory requires both `--inventory`
-and explicit nonempty local CIDRs. The matching YAML keys and validation rules
-are listed under [Network Observation Settings](config-reference.md#network-observation-settings).
+`watch`; they do not enable file logging. Inventory is enabled by default for all
+observed eligible unicast hosts and services. Use `--inventory-local-cidrs` as an
+optional subject filter, or disable inventory with `--inventory=false`. The
+matching YAML keys and validation rules are listed under [Network Observation Settings](config-reference.md#network-observation-settings).
 
 | Flag                             | Default   | Meaning                                 |
 | -------------------------------- | --------- | --------------------------------------- |
-| `--inventory`                    | `false`   | Produce known-host/service observations |
-| `--inventory-local-cidrs`        | unset     | Explicit local IPv4/IPv6 subject policy |
+| `--inventory`                    | `true`   | Produce known-host/service observations |
+| `--inventory-local-cidrs`        | unset     | Optional IPv4/IPv6 subject filter |
 | `--inventory-max-entries`        | `16384`   | Global inventory entry cap              |
 | `--inventory-max-bytes`          | `8388608` | Global accounted inventory byte cap     |
 | `--inventory-scope-max-entries`  | `4096`    | Per-scope inventory entry cap           |

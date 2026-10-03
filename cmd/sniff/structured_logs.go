@@ -237,7 +237,7 @@ func validateSniffAnalysisPolicy() error {
 	}
 	for _, stream := range streams {
 		if (stream == "known_hosts" || stream == "known_services") && !policy.Inventory.Enabled {
-			return fmt.Errorf("inventory log %q requires enabled inventory and explicit local CIDRs", stream)
+			return fmt.Errorf("inventory log %q requires enabled inventory", stream)
 		}
 	}
 	return nil

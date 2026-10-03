@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/eventconfig"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
@@ -202,7 +203,7 @@ func TestInitializeEventForwardingAllowsRecoveredFinalSequenceToDrain(t *testing
 	dir := t.TempDir()
 	spool, err := eventspool.Open(eventspool.Config{Directory: dir})
 	require.NoError(t, err)
-	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}
+	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1, AnalysisFingerprint: eventconfig.Default().Fingerprint()}
 	require.NoError(t, spool.BindSessionPolicy(policy))
 	event := events.NewDNSEvent(events.Envelope{Timestamp: time.Unix(1, 0), EventID: events.DeliveryEventID("hunter-final", session, ^uint64(0)), ProducerSessionID: session, EventSequence: ^uint64(0), UID: "uid", NodeID: "hunter-final", Flow: events.FlowTuple{Protocol: 17, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.2"), SourcePort: 53, DestinationPort: 53000}, CaptureScope: events.CaptureScopeFiltered})
 	batch, err := protoadapter.ToProtoBatch("hunter-final", session, ^uint64(0), []events.Event{event}, nil, 1)
@@ -231,7 +232,7 @@ func TestInitializeEventForwardingStagesRecoveredTerminalLosses(t *testing.T) {
 	dir := t.TempDir()
 	spool, err := eventspool.Open(eventspool.Config{Directory: dir})
 	require.NoError(t, err)
-	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-loss-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}
+	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-loss-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1, AnalysisFingerprint: eventconfig.Default().Fingerprint()}
 	require.NoError(t, spool.BindSessionPolicy(policy))
 	retention, err := spool.RetainLosses([]*eventsv1.EventLoss{{Kind: eventsv1.LossKind_LOSS_KIND_TRANSPORT, Count: 1, SourceNodeId: "hunter-loss-final", ProducerSessionId: session, EventSequenceRanges: []*eventsv1.SequenceRange{{First: ^uint64(0), Last: ^uint64(0)}}}})
 	require.NoError(t, err)
@@ -261,7 +262,7 @@ func TestInitializeEventForwardingDrainsFinalCarrierBeforeTerminalResidualLoss(t
 	dir := t.TempDir()
 	spool, err := eventspool.Open(eventspool.Config{Directory: dir})
 	require.NoError(t, err)
-	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-fragmented-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}
+	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-fragmented-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1, AnalysisFingerprint: eventconfig.Default().Fingerprint()}
 	require.NoError(t, spool.BindSessionPolicy(policy))
 	seed := &eventsv1.ProtocolEventBatch{SourceNodeId: policy.SourceNodeID, ProducerSessionId: session, BatchSequence: ^uint64(0) - 1, SemanticProfileRevision: 1}
 	result, err := spool.Enqueue(seed)
@@ -301,7 +302,7 @@ func TestInitializeEventForwardingDrainsFinalCarrierBeforeTerminalResidualLoss(t
 func TestInitializeEventForwardingStartsDrainBeforeTerminalLossOnFullDropNewSpool(t *testing.T) {
 	const session = "30313233343536373839616263646566"
 	dir := t.TempDir()
-	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-full-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1}
+	policy := eventspool.SessionPolicy{Version: 1, SourceNodeID: "hunter-full-final", ProducerSessionID: session, DeliveryProfile: "reliable", SemanticRevision: 1, AnalysisFingerprint: eventconfig.Default().Fingerprint()}
 	spool, err := eventspool.Open(eventspool.Config{Directory: dir, Policy: eventspool.DropNew})
 	require.NoError(t, err)
 	require.NoError(t, spool.BindSessionPolicy(policy))

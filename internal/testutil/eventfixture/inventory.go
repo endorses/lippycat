@@ -10,7 +10,7 @@ import (
 )
 
 // InventoryMessages observes one associated unicast NTP exchange between two
-// explicitly local endpoints. Inventory emits only when its conn summary exists.
+// endpoints. Inventory emits as soon as the reply confirms the exchange.
 func InventoryMessages() ([]capture.PacketInfo, error) {
 	packets, err := NetworkMessages()
 	if err != nil {

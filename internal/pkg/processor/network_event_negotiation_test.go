@@ -40,7 +40,9 @@ func TestNetworkOptionalKindsKeepOldSourcesCompatible(t *testing.T) {
 }
 
 func TestNetworkRequiredInventoryDependsOnSourcePolicy(t *testing.T) {
-	p := &Processor{config: Config{LogConfig: &StructuredLogConfig{Enabled: true, Streams: []string{"known_hosts"}}}}
+	disabledPolicy := eventconfig.Default()
+	disabledPolicy.Inventory.Enabled = false
+	p := &Processor{config: Config{EventAnalysis: &disabledPolicy, LogConfig: &StructuredLogConfig{Enabled: true, Streams: []string{"known_hosts"}}}}
 	_, _, _, _, _, packetErr := p.negotiateEventForwarding(nil)
 	require.ErrorContains(t, packetErr, "inventory-producing event source")
 	disabled := eventForwardingCapabilities(protoadapter.SupportedKindIDs(false)...)
@@ -82,15 +84,16 @@ func TestInventoryPromiseAcrossThreeNodeRegistration(t *testing.T) {
 			}
 			central, centralAddress := inventoryRegistrationServer(t, centralCfg)
 			relayCfg := Config{ProcessorID: "relay", ListenAddr: "127.0.0.1:0", UpstreamAddr: centralAddress, UpstreamForwardMode: "events", UpstreamEventDeliveryProfile: "memory_only", UpstreamEventSpoolDirectory: t.TempDir()}
-			if scenario == "local_policy" {
+			if scenario != "local_policy" {
 				policy := eventconfig.Default()
-				policy.Inventory.Enabled = true
-				policy.Inventory.LocalCIDRs = []string{"192.0.2.0/24"}
+				policy.Inventory.Enabled = false
 				relayCfg.EventAnalysis = &policy
 			}
 			if scenario == "consumer_only" {
 				relayCfg.LogConfig = &StructuredLogConfig{Enabled: true, Streams: []string{"known_hosts"}}
 			}
+			// With no explicit EventAnalysis, local_policy verifies default inventory
+			// is resolved and advertised through the upstream registration.
 			relay, relayAddress := inventoryRegistrationServer(t, relayCfg)
 			require.NoError(t, relay.upstreamManager.Start())
 			require.Eventually(t, func() bool { return relay.upstreamManager.GetUpstreamProcessorID() == central.config.ProcessorID }, 5*time.Second, time.Millisecond)

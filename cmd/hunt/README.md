@@ -56,13 +56,15 @@ ranges reported, or can use `drop_new`.
 ### DHCP/NTP and inventory events
 
 DHCPv4 and NTP time messages are produced independently of log sinks, one event
-per accepted message. Enable bounded host/service inventory at the hunter with
-`--inventory --inventory-local-cidrs 192.0.2.0/24,2001:db8::/32`. Use the same
-explicit local policy when comparing hunter and processor/tap analysis. Inventory
-requires positive handshake or bidirectional UDP evidence; service records also
-require decoded protocol evidence and a reliable responder. No inventory is
-advertised as enabled without its producer policy, and processors do not remotely
-distribute these settings. Optional unsupported kinds report compatibility loss;
+per accepted message. Bounded host/service inventory is enabled by default for
+all observed eligible unicast hosts and services. Optionally restrict subjects
+with `--inventory-local-cidrs 192.0.2.0/24,2001:db8::/32`, or disable inventory
+with `--inventory=false`. Use the same policy when comparing hunter and
+processor/tap analysis. Inventory requires positive handshake or bidirectional
+UDP evidence; service records also require decoded protocol evidence and a
+reliable responder. Events appear as soon as that evidence is available.
+Processors do not remotely distribute these settings. Optional unsupported kinds
+report compatibility loss;
 required kinds must negotiate or use the explicit packet fallback.
 
 The shared `--inventory-*`, `--dhcp-association-*`, and `--ntp-association-*`

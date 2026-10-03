@@ -370,3 +370,20 @@ timing above; the original wave closure remains unchanged.
       expiry/replay bounds, and unchanged connection summaries under race tests;
       pass remote, offline, TUI, inventory, and configuration package tests,
       `make manual-check`, `make manual`, and `make build`.
+
+## Default inventory follow-up (2026-10-03)
+
+The user requested that known-host/service events behave like other packet-derived
+events. This supersedes the opt-in and mandatory local-CIDR policy above.
+
+- [x] Enable inventory by default; include all qualifying unicast IPv4/IPv6
+      subjects when CIDRs are omitted, keep explicit CIDRs as an optional filter,
+      and retain `--inventory=false` as an explicit opt-out.
+- [x] Preserve evidence checks, bounded state and deduplication, and explicit
+      local-endpoint classification without treating every address as local.
+- [x] Update analysis identity and recovered-session compatibility for the new
+      defaults; verify packet-mode remote derivation before connection expiry.
+- [x] Update command help, operator docs, and English/German manuals; validate
+      affected integration and race tests plus `make manual-check` and `make manual`.
+- [x] Complete `make test`, `make vet`, and `make build`; verify the rebuilt
+      remote command's help advertises the new defaults.

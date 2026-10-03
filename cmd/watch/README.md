@@ -464,11 +464,12 @@ partial input and bounded association context. Events can be filtered by their
 canonical fields; UDP includes network message events, while inventory remains
 available in the All view.
 
-Local inventory analysis requires `--inventory` and explicit nonempty
-`--inventory-local-cidrs`; configure event-mode producers separately for remote
-inventory. Scope separates sensors, epochs, interfaces, and offline inputs.
-Known-host events appear as soon as a completed TCP handshake or both UDP
-directions confirm a local host. Known-service events appear once the responder
+Inventory analysis is enabled by default for all observed eligible unicast hosts
+and services. Optionally restrict subjects with `--inventory-local-cidrs`, or
+disable inventory with `--inventory=false`. Configure event-mode producers
+separately for remote inventory. Scope separates sensors, epochs, interfaces,
+and offline inputs. Known-host events appear as soon as a completed TCP handshake
+or both UDP directions confirm a host. Known-service events appear once the responder
 and analyzed protocol are confirmed. They do not wait for connection expiry;
 ordinary connection summaries retain their existing expiry behavior. In remote
 packet mode, the TUI derives these events locally from received packets. Use the

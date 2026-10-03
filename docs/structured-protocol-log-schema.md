@@ -281,10 +281,12 @@ is available, without waiting for connection expiry. Ordinary connection
 summaries retain their existing expiry, eviction, EOF, reset, or close behavior.
 Ingress and relays carry source-derived inventories without deriving them again.
 
-Explicit IPv4/IPv6 local CIDRs classify inventory subjects, not capture
-eligibility. Normalize mapped addresses; exclude unspecified, multicast and
-broadcast subjects. Evaluate both qualifying endpoints. Do not assume private
-address ranges are local. Partial capture scope remains visible despite positive
+Inventory is enabled by default. Without configured CIDRs, all observed eligible
+unicast subjects are included. Explicit IPv4/IPv6 local CIDRs optionally filter
+inventory subjects and classify connection endpoints as local; they do not
+restrict packet capture. An empty list does not mark every address as local.
+Normalize mapped addresses; exclude unspecified, multicast and broadcast subjects.
+Evaluate both qualifying endpoints. Do not assume private address ranges are local. Partial capture scope remains visible despite positive
 evidence. The dedup key includes origin node, producer/capture epoch, interface
 or offline input identity and subject; services add port, transport and protocol.
 Expiry/eviction permit later re-emission. This is bounded observation inventory,
@@ -296,8 +298,8 @@ Shared keys and finite defaults (configuration choices, not performance gates):
 
 | Key | Default |
 | --- | --- |
-| `events.inventory.enabled` | `false` |
-| `events.inventory.local_cidrs` | empty; enabled inventory requires an explicit nonempty policy |
+| `events.inventory.enabled` | `true`; set to `false` to disable inventory |
+| `events.inventory.local_cidrs` | empty; no inventory subject filter |
 | `events.inventory.max_entries` | `16384` |
 | `events.inventory.max_bytes` | `8388608` |
 | `events.inventory.max_entries_per_scope` | `4096` |

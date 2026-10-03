@@ -26,15 +26,19 @@ func TestEventPolicySniffActiveFlagsAndEarlyValidation(t *testing.T) {
 	require.ErrorContains(t, validateLiveCaptureBufferConfig(SniffCmd, nil), "NTP")
 }
 
-func TestEventPolicySniffInventorySelectionRequiresLocalPolicy(t *testing.T) {
+func TestEventPolicySniffInventorySelectionDefaultsAndOptOut(t *testing.T) {
 	for _, key := range []string{"logs.streams", "events.inventory.enabled", "events.inventory.local_cidrs", "events.inventory.retention"} {
 		old := viper.Get(key)
 		t.Cleanup(func() { viper.Set(key, old) })
 	}
 	viper.Set("logs.streams", []string{"known_hosts"})
+	viper.Set("events.inventory.enabled", nil)
+	viper.Set("events.inventory.local_cidrs", nil)
+	require.NoError(t, validateSniffAnalysisPolicy())
+	viper.Set("events.inventory.enabled", false)
 	require.ErrorContains(t, validateSniffAnalysisPolicy(), "inventory")
 	viper.Set("events.inventory.enabled", true)
-	require.ErrorContains(t, validateSniffAnalysisPolicy(), "local CIDRs")
+	require.NoError(t, validateSniffAnalysisPolicy())
 	viper.Set("events.inventory.local_cidrs", []string{"192.0.2.0/24"})
 	require.NoError(t, validateSniffAnalysisPolicy())
 	first := structuredLogAnalysisProfile("sniff", "")

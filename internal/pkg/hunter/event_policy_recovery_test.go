@@ -31,6 +31,8 @@ func TestRecoveredEventAnalysisPolicy(t *testing.T) {
 		{name: "changed bounds drained", change: "bounds", drained: true, rotate: true},
 		{name: "unchanged drained", drained: true},
 		{name: "legacy default pending", legacy: true},
+		{name: "legacy enabled inventory pending", legacy: true, change: "enable", reject: true},
+		{name: "legacy enabled inventory drained", legacy: true, change: "enable", drained: true, rotate: true},
 		{name: "legacy changed pending", legacy: true, change: "bounds", reject: true},
 		{name: "legacy changed drained", legacy: true, change: "bounds", drained: true, rotate: true},
 	} {
@@ -39,8 +41,8 @@ func TestRecoveredEventAnalysisPolicy(t *testing.T) {
 			const session = "30313233343536373839616263646566"
 			dir := t.TempDir()
 			old := eventconfig.Default()
+			old.Inventory.Enabled = tc.inventory
 			if tc.inventory {
-				old.Inventory.Enabled = true
 				old.Inventory.LocalCIDRs = []string{"192.0.2.0/24", "2001:db8::/32"}
 			}
 			config := Config{ProcessorAddr: "processor:55555", HunterID: node, ForwardMode: "events", EventSpoolDir: dir, EventDeliveryProfile: "reliable", EventAnalysis: &old}
@@ -66,6 +68,8 @@ func TestRecoveredEventAnalysisPolicy(t *testing.T) {
 			require.NoError(t, spool.Close())
 			next := old.Clone()
 			switch tc.change {
+			case "enable":
+				next.Inventory.Enabled = true
 			case "cidr":
 				next.Inventory.LocalCIDRs = []string{"198.51.100.0/24"}
 			case "bounds":

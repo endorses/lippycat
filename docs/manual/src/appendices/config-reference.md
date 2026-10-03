@@ -166,14 +166,18 @@ stream schemas, hierarchy behavior, rotation, and privacy guidance.
 ### Network Observation Settings {#network-observation-settings}
 
 These shared settings apply to hunter, processor/tap, sniff, local/offline TUI,
-and monitoring-client packet analysis independently of file logging. Explicit
-inventory enablement requires local CIDRs. Per-scope caps cannot exceed global
-caps; all state caps, retention windows, and association timeouts must be positive.
+and monitoring-client packet analysis independently of file logging. Inventory
+is enabled by default; an empty CIDR list includes all observed eligible unicast
+hosts and services. Set `events.inventory.enabled` to `false` to disable it.
+Configured CIDRs optionally filter inventory subjects and classify connection
+endpoints as local; an empty list does not mark every address as local. Per-scope
+caps cannot exceed global caps; all state caps, retention windows, and association
+timeouts must be positive.
 
 | Key                                      | Default   | Meaning                                 |
 | ---------------------------------------- | --------- | --------------------------------------- |
-| `events.inventory.enabled`               | `false`   | Produce known-host/service observations |
-| `events.inventory.local_cidrs`           | `[]`      | Explicit local IPv4/IPv6 subject policy |
+| `events.inventory.enabled`               | `true`   | Produce known-host/service observations |
+| `events.inventory.local_cidrs`           | `[]`      | Optional IPv4/IPv6 subject filter |
 | `events.inventory.max_entries`           | `16384`   | Global inventory entry cap              |
 | `events.inventory.max_bytes`             | `8388608` | Global accounted inventory byte cap     |
 | `events.inventory.max_entries_per_scope` | `4096`    | Per-scope inventory entry cap           |

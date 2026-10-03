@@ -617,9 +617,12 @@ func (h *Hunter) initializeEventForwarding() error {
 			return fmt.Errorf("event spool belongs to node %q, configured node is %q", source, h.config.HunterID)
 		}
 		recovered, ok := spool.SessionPolicy()
-		// Pre-fingerprint policies represent the original default analysis only.
-		// Keep their pending records and identity intact without rewriting the spool.
-		if ok && recovered.AnalysisFingerprint == "" && policy.AnalysisFingerprint == eventconfig.Default().Fingerprint() {
+		// Pre-fingerprint policies used the historical inventory-disabled default.
+		// Preserve their identity only when inventory is explicitly disabled; the
+		// new enabled default must reject pending records or rotate a drained session.
+		legacyAnalysis := eventconfig.Default()
+		legacyAnalysis.Inventory.Enabled = false
+		if ok && recovered.AnalysisFingerprint == "" && policy.AnalysisFingerprint == legacyAnalysis.Fingerprint() {
 			policy.AnalysisFingerprint = ""
 		}
 		if !ok || recovered != policy {

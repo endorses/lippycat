@@ -27,8 +27,11 @@ timestamps retain safe, exact representations. BOOTP/DHCPv6, NTP control/private
 analysis, authentication, and clock-offset conclusions are outside these logs.
 Typed events remain available without file logging.
 
-Inventory is disabled until `--inventory` and explicit nonempty IPv4/IPv6 local
-CIDRs are configured. CIDRs classify subjects, not capture eligibility. Known
+Inventory events are enabled by default for all observed eligible unicast hosts
+and services. Disable them with `--inventory=false`, or optionally restrict
+subjects with IPv4/IPv6 `--inventory-local-cidrs`. CIDRs do not restrict packet
+capture. Only explicitly configured CIDRs classify connection endpoints as local;
+an empty list does not mark every observed address as local. Known
 hosts require an observed completed TCP handshake or both UDP directions; known
 services additionally require a reliably oriented responder and actual protocol
 analysis. Ports, cached labels, lone SYNs, destination addresses, and DHCP offers

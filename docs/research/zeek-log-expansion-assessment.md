@@ -87,17 +87,19 @@ The canonical schema registry defines:
 | `radius.log` | Validated RADIUS message observations and bounded request association |
 | `dhcp.log` | DHCPv4 messages with bounded client/XID/relay association |
 | `ntp.log` | NTP time-message modes 1–5 with exact wire fields and bounded association |
-| `known_hosts.log` | Local endpoints proven by observed TCP handshake or bidirectional UDP |
-| `known_services.log` | Local responders with handshake/application or matched UDP protocol evidence |
+| `known_hosts.log` | Observed eligible unicast endpoints proven by observed TCP handshake or bidirectional UDP |
+| `known_services.log` | Observed eligible unicast responders with handshake/application or matched UDP protocol evidence |
 
 The normalized event model contains twelve kinds: eleven metadata kinds cross
 the versioned event API, while file content stays local and outside the TUI
 metadata store. DHCP/NTP add independent message observations. Inventory derives
-once from local connection summaries and retains the qualifying flow envelope;
+once when local packet analysis confirms sufficient evidence and retains the
+qualifying flow envelope;
 event ingress and hierarchy relay the resulting source event without deriving
 it again. Existing seven-stream defaults remain unchanged.
 
-Inventory is disabled by default and requires explicit local CIDRs. Its bounded
+Inventory events are enabled by default; optional local CIDRs filter subjects.
+Inventory log streams remain opt-in. Its bounded
 retention is an observation deduplication policy, not persistent asset identity.
 Protocol/profile compatibility remains additive: codec support is separate from
 inventory production policy; required streams fail clearly when unavailable.

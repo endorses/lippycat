@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const AnalysisRevision = "network-observations-v2"
+const AnalysisRevision = "network-observations-v3"
 
 type Inventory struct {
 	Enabled                        bool
@@ -32,7 +32,7 @@ type Config struct {
 }
 
 func Default() Config {
-	return Config{DHCP: dhcp.DefaultConfig(), NTP: ntp.DefaultConfig(), Inventory: Inventory{MaxEntries: 16384, MaxEntriesPerScope: 4096, MaxBytes: 8 << 20, MaxBytesPerScope: 2 << 20, Retention: 24 * time.Hour}}
+	return Config{DHCP: dhcp.DefaultConfig(), NTP: ntp.DefaultConfig(), Inventory: Inventory{Enabled: true, MaxEntries: 16384, MaxEntriesPerScope: 4096, MaxBytes: 8 << 20, MaxBytesPerScope: 2 << 20, Retention: 24 * time.Hour}}
 }
 func (c Config) Clone() Config {
 	c.Inventory.LocalCIDRs = append([]string(nil), c.Inventory.LocalCIDRs...)
@@ -51,9 +51,6 @@ func (c Config) Validate() error {
 	}
 	if i.MaxEntriesPerScope > i.MaxEntries || i.MaxBytesPerScope > i.MaxBytes {
 		return fmt.Errorf("inventory per-scope limits cannot exceed global limits")
-	}
-	if i.Enabled && len(i.LocalCIDRs) == 0 {
-		return fmt.Errorf("enabled inventory requires explicit local CIDRs")
 	}
 	for _, cidr := range i.LocalCIDRs {
 		p, err := netip.ParsePrefix(cidr)
@@ -117,7 +114,9 @@ func FromViper(v *viper.Viper) *Config {
 			*dst = v.GetDuration(key)
 		}
 	}
-	c.Inventory.Enabled = v.GetBool("events.inventory.enabled")
+	if v.IsSet("events.inventory.enabled") {
+		c.Inventory.Enabled = v.GetBool("events.inventory.enabled")
+	}
 	c.Inventory.LocalCIDRs = append([]string(nil), v.GetStringSlice("events.inventory.local_cidrs")...)
 	setInt("events.inventory.max_entries", &c.Inventory.MaxEntries)
 	setInt("events.inventory.max_entries_per_scope", &c.Inventory.MaxEntriesPerScope)
@@ -145,8 +144,8 @@ var bindings = map[string]string{
 
 func Register(flags *pflag.FlagSet) {
 	c := Default()
-	flags.Bool("inventory", false, "Produce bounded known-host/service observations (requires local CIDRs)")
-	flags.StringSlice("inventory-local-cidrs", nil, "Explicit local IPv4/IPv6 CIDRs for inventory subjects")
+	flags.Bool("inventory", c.Inventory.Enabled, "Produce bounded known-host/service observations")
+	flags.StringSlice("inventory-local-cidrs", nil, "Optional IPv4/IPv6 CIDRs restricting inventory subjects (default: all observed unicast addresses)")
 	flags.Int("inventory-max-entries", c.Inventory.MaxEntries, "Maximum retained inventory entries")
 	flags.Int64("inventory-max-bytes", c.Inventory.MaxBytes, "Maximum accounted inventory state bytes")
 	flags.Int("inventory-scope-max-entries", c.Inventory.MaxEntriesPerScope, "Maximum inventory entries per capture scope")

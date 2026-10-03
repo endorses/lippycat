@@ -29,6 +29,7 @@ type DetailsPanel struct {
 	theme               themes.Theme
 	ready               bool
 	loading             bool
+	inspecting          bool
 	decryptedDataGetter DecryptedDataGetter // Callback to get decrypted TLS data
 }
 
@@ -46,6 +47,9 @@ func NewDetailsPanel() DetailsPanel {
 // SetTheme updates the theme
 func (d *DetailsPanel) SetTheme(theme themes.Theme) {
 	d.theme = theme
+	if d.ready {
+		d.viewport.SetContent(d.renderContent())
+	}
 }
 
 // SetDecryptedDataGetter sets the callback for retrieving decrypted TLS data
@@ -55,6 +59,9 @@ func (d *DetailsPanel) SetDecryptedDataGetter(getter DecryptedDataGetter) {
 
 // SetPacket sets the packet to display
 func (d *DetailsPanel) SetPacket(packet *PacketDisplay) {
+	if d.inspecting && d.packet != nil {
+		return
+	}
 	d.loading = false
 	// Only update if packet actually changed
 	packetChanged := false
@@ -69,6 +76,10 @@ func (d *DetailsPanel) SetPacket(packet *PacketDisplay) {
 		}
 	}
 
+	if d.inspecting && packet != nil {
+		snapshot := *packet
+		packet = &snapshot
+	}
 	d.packet = packet
 
 	// Update viewport content when packet changes
@@ -80,37 +91,32 @@ func (d *DetailsPanel) SetPacket(packet *PacketDisplay) {
 
 // SetLoading clears the prior selection while its details are being read.
 func (d *DetailsPanel) SetLoading() {
+	if d.inspecting && d.packet != nil {
+		return
+	}
 	d.SetPacket(nil)
 	d.loading = true
 }
 
 // SetSize sets the display size
 func (d *DetailsPanel) SetSize(width, height int) {
-	d.width = width
-	d.height = height
-
-	// Account for border (2) and padding (2)
-	viewportHeight := height - 4
-	if viewportHeight < 5 {
-		viewportHeight = 5
+	if width <= 0 || height <= 0 {
+		return
 	}
-
-	// Width accounting: border (2) + padding left/right (4) = 6 total
-	// Ensure minimum width for hex dump (72 chars: offset(4) + spaces(2) + hex(49) + space(1) + ascii(16))
-	viewportWidth := width - 6
-	if viewportWidth < 72 {
-		viewportWidth = 72
-	}
-
+	oldWidth, oldHeight := d.width, d.height
+	d.width, d.height = width, height
+	_, _, viewportWidth, viewportHeight := DetailPaneGeometry(width, height)
 	if !d.ready {
 		d.viewport = viewport.New(viewportWidth, viewportHeight)
 		d.ready = true
-		if d.packet != nil {
+		d.viewport.SetContent(d.renderContent())
+	} else {
+		offset := d.viewport.YOffset
+		d.viewport.Width, d.viewport.Height = viewportWidth, viewportHeight
+		if oldWidth != width || oldHeight != height {
 			d.viewport.SetContent(d.renderContent())
 		}
-	} else {
-		d.viewport.Width = viewportWidth
-		d.viewport.Height = viewportHeight
+		d.viewport.SetYOffset(offset)
 	}
 }
 
@@ -145,33 +151,15 @@ func (d *DetailsPanel) View(focused bool) string {
 		return ""
 	}
 
-	borderColor := d.theme.BorderColor
-	borderType := lipgloss.RoundedBorder()
-	if focused {
-		borderColor = d.theme.SelectionBg   // Cyan when focused
-		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
-	}
-
-	borderStyle := lipgloss.NewStyle().
-		Border(borderType).
-		BorderForeground(borderColor).
-		Padding(1, 2).
-		Width(d.width).
-		Height(d.height - 2)
-
+	content := d.viewport.View()
 	if d.packet == nil {
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
-			Align(lipgloss.Center)
-		message := "Select a packet to view details"
+		content = "Select a packet to view details"
 		if d.loading {
-			message = "Loading packet details..."
+			content = "Loading packet details..."
 		}
-		content := emptyStyle.Render(message)
-		return borderStyle.Render(content)
+		content = wrapDetailContent(content, d.viewport.Width, false)
 	}
-
-	return borderStyle.Render(d.viewport.View())
+	return renderDetailPane(content, d.width, d.height, focused, d.theme)
 }
 
 // renderContent generates the combined packet details and hex dump content
@@ -180,10 +168,7 @@ func (d *DetailsPanel) renderContent() string {
 		return ""
 	}
 
-	contentWidth := d.width - 8
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
+	_, _, contentWidth, _ := DetailPaneGeometry(d.width, d.height)
 
 	labelStyle := lipgloss.NewStyle().
 		Foreground(d.theme.StatusBarFg).
@@ -218,17 +203,13 @@ func (d *DetailsPanel) renderContent() string {
 
 	content.WriteString(labelStyle.Render("Source: "))
 	srcAddr := fmt.Sprintf("%s:%s", d.packet.SrcIP, d.packet.SrcPort)
-	if len(srcAddr) > contentWidth-10 {
-		srcAddr = srcAddr[:contentWidth-13] + "..."
-	}
+
 	content.WriteString(valueStyle.Render(srcAddr))
 	content.WriteString("\n")
 
 	content.WriteString(labelStyle.Render("Destination: "))
 	dstAddr := fmt.Sprintf("%s:%s", d.packet.DstIP, d.packet.DstPort)
-	if len(dstAddr) > contentWidth-10 {
-		dstAddr = dstAddr[:contentWidth-13] + "..."
-	}
+
 	content.WriteString(valueStyle.Render(dstAddr))
 	content.WriteString("\n")
 
@@ -237,18 +218,7 @@ func (d *DetailsPanel) renderContent() string {
 	content.WriteString("\n")
 
 	content.WriteString(labelStyle.Render("Info: "))
-	// Word wrap info if it's too long
-	wrapWidth := contentWidth - 6 // Account for padding and label
-	if wrapWidth < 20 {
-		wrapWidth = 20
-	}
-	infoLines := d.wordWrap(d.packet.Info, wrapWidth)
-	for i, line := range infoLines {
-		if i > 0 {
-			content.WriteString("\n      ")
-		}
-		content.WriteString(valueStyle.Render(line))
-	}
+	content.WriteString(valueStyle.Render(d.packet.Info))
 
 	// Layer Summary Section (parsed from raw packet data)
 	if layerSummary := d.renderLayerSummary(contentWidth); layerSummary != "" {
@@ -583,7 +553,7 @@ func (d *DetailsPanel) renderContent() string {
 			Render("No raw packet data available"))
 	}
 
-	return content.String()
+	return wrapDetailContent(content.String(), contentWidth, d.height < 12)
 }
 
 // getProtocolColor returns the theme color for a protocol
@@ -612,33 +582,7 @@ func (d *DetailsPanel) getProtocolColor(protocol string) lipgloss.Color {
 
 // wordWrap wraps text to fit within maxWidth
 func (d *DetailsPanel) wordWrap(text string, maxWidth int) []string {
-	if len(text) <= maxWidth {
-		return []string{text}
-	}
-
-	var lines []string
-	var currentLine string
-
-	words := strings.Fields(text)
-	for _, word := range words {
-		if len(currentLine)+len(word)+1 <= maxWidth {
-			if currentLine != "" {
-				currentLine += " "
-			}
-			currentLine += word
-		} else {
-			if currentLine != "" {
-				lines = append(lines, currentLine)
-			}
-			currentLine = word
-		}
-	}
-
-	if currentLine != "" {
-		lines = append(lines, currentLine)
-	}
-
-	return lines
+	return strings.Split(wrapDetailContent(text, maxWidth, false), "\n")
 }
 
 // renderHexDump renders a hex/ASCII dump of the packet data
@@ -672,14 +616,15 @@ func (d *DetailsPanel) renderHexDump(data []byte) string {
 	// Style for offset
 	offsetStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg).Bold(true)
 
-	for offset := 0; offset < len(data); offset += 16 {
+	bytesPerRow, offsetWidth, _ := d.HexDumpColumns(len(data))
+	for offset := 0; offset < len(data); offset += bytesPerRow {
 		// Offset column
-		sb.WriteString(offsetStyle.Render(fmt.Sprintf("%04x", offset)))
+		sb.WriteString(offsetStyle.Render(fmt.Sprintf("%0*x", offsetWidth, offset)))
 		sb.WriteString("  ")
 
 		// Hex column (16 bytes per line)
 		asciiPart := ""
-		for i := 0; i < 16; i++ {
+		for i := 0; i < bytesPerRow; i++ {
 			if offset+i < len(data) {
 				b := data[offset+i]
 
@@ -761,11 +706,6 @@ func (d *DetailsPanel) renderDecryptedContent(data []byte, maxWidth int) string 
 			// Trim carriage returns
 			line = strings.TrimSuffix(line, "\r")
 
-			// Truncate long lines
-			if len(line) > maxWidth {
-				line = line[:maxWidth-3] + "..."
-			}
-
 			// Highlight HTTP request/response lines
 			if strings.HasPrefix(line, "GET ") || strings.HasPrefix(line, "POST ") ||
 				strings.HasPrefix(line, "PUT ") || strings.HasPrefix(line, "DELETE ") ||
@@ -797,7 +737,7 @@ func (d *DetailsPanel) renderDecryptedContent(data []byte, maxWidth int) string 
 			Render(fmt.Sprintf("\n... (showing %d of %d bytes)", maxDisplaySize, len(data))))
 	}
 
-	return sb.String()
+	return wrapDetailContent(sb.String(), maxWidth, false)
 }
 
 // isHTTPHeaderName checks if a string looks like an HTTP header name
@@ -944,13 +884,7 @@ func (d *DetailsPanel) renderLayerSummary(contentWidth int) string {
 	if d.packet.Protocol != "" && d.packet.Protocol != "TCP" && d.packet.Protocol != "UDP" && d.packet.Protocol != "ICMP" {
 		info := d.getApplicationLayerInfo()
 		if info != "" {
-			maxInfoLen := contentWidth - 12 // Account for label width
-			if maxInfoLen < 20 {
-				maxInfoLen = 20
-			}
-			if len(info) > maxInfoLen {
-				info = info[:maxInfoLen-3] + "..."
-			}
+
 			sb.WriteString(labelStyle.Render(fmt.Sprintf("%-10s", d.packet.Protocol)))
 			sb.WriteString(appStyle.Render(info))
 			sb.WriteString("\n")
@@ -1106,4 +1040,29 @@ func (d *DetailsPanel) formatTCPFlags(tcp *layers.TCP) string {
 		return "[]"
 	}
 	return "[" + strings.Join(flags, ",") + "]"
+}
+
+// HexDumpColumns returns the responsive byte count and offset/hex column widths.
+func (d *DetailsPanel) HexDumpColumns(dataLength int) (bytesPerRow, offsetWidth, hexWidth int) {
+	offsetWidth = max(4, len(fmt.Sprintf("%x", max(0, dataLength-1))))
+	_, _, width, _ := DetailPaneGeometry(d.width, d.height)
+	for _, n := range []int{16, 8, 4, 2, 1} {
+		hexWidth = 3 * n
+		if n >= 8 {
+			hexWidth++
+		}
+		if offsetWidth+3+hexWidth+n <= width || n == 1 {
+			return n, offsetWidth, hexWidth
+		}
+	}
+	return
+}
+
+// SetInspecting retains the current packet snapshot while details have focus.
+func (d *DetailsPanel) SetInspecting(inspecting bool) {
+	if inspecting && !d.inspecting && d.packet != nil {
+		copy := *d.packet
+		d.packet = &copy
+	}
+	d.inspecting = inspecting
 }

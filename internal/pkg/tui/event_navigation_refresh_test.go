@@ -31,7 +31,7 @@ func TestEventRelativeNavigationUsesDisplayedSelection(t *testing.T) {
 			m.uiState.Tabs.SetActive(0)
 			m.uiState.ViewMode = "events"
 			m.uiState.EventShowDetails = false
-			m.uiState.Height = 12 // Two event rows per page.
+			m.uiState.Height = 8 // Compact chrome leaves two event rows per page.
 			m.eventStore.AddBatch(makeEventBatch(3, "initial").Events)
 			m.syncEventsView()
 			m, _ = m.handleEventBatchMsg(EventBatchMsg{Batch: makeEventBatch(3, "pending")})

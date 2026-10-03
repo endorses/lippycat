@@ -83,7 +83,7 @@ func (m *Model) requestOfflineRelated() tea.Cmd {
 		}
 		return nil
 	}
-	selected, ok := m.uiState.EventsView.Selected()
+	selected, ok := m.uiState.EventsView.DetailSelection()
 	if !ok {
 		m.cancelOfflineRelated()
 		return nil
@@ -181,11 +181,11 @@ func (m Model) handleOfflineRelated(msg offlineRelatedMsg) (Model, tea.Cmd) {
 		return m, m.uiState.Toast.Show("Related packet lookup failed: "+msg.err.Error(), components.ToastError, components.ToastDurationLong)
 	}
 	s.known, s.available, s.first = true, msg.available, msg.first
-	if selected, ok := m.uiState.EventsView.Selected(); ok {
+	if selected, ok := m.uiState.EventsView.DetailSelection(); ok {
 		m.presentOfflineRelated(selected.Event)
 	}
 	m.prepareEventsViewLayout()
-	selected, selectedOK := m.uiState.EventsView.Selected()
+	selected, selectedOK := m.uiState.EventsView.DetailSelection()
 	if s.navigate && s.available && selectedOK && s.flow == offlineEventFlow(m.relatedPacketEnvelope(selected.Event)) && m.uiState.ViewMode == "events" && m.uiState.Tabs.GetActive() == 0 {
 		return m.navigateOfflineRelated()
 	}

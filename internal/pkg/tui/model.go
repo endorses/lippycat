@@ -462,6 +462,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if next.textSelection != nil && !next.textSelectionAllowed() {
 			next.textSelection = nil
 		}
+		next.prepareCaptureLayout()
 		cmd = tea.Batch(cmd, next.syncOfflineBrowser(), next.requestOfflineRelated())
 		next.prepareViewChrome()
 		return next, cmd

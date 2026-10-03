@@ -3,6 +3,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/spf13/viper"
@@ -18,6 +20,20 @@ func (m Model) View() string {
 	}
 	if m.textSelection != nil && m.textSelectionAllowed() {
 		return m.textSelection.View()
+	}
+
+	if m.uiState.Tabs.GetActive() == 0 && m.responsiveCaptureView() {
+		header, tabs, bottom := m.captureChrome()
+		parts := []string{}
+		for _, part := range []string{header, tabs, m.renderCaptureTab(m.captureContentHeight()), bottom} {
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+		if m.uiState.DevConsole != nil && m.uiState.DevConsole.IsVisible() {
+			return m.uiState.DevConsole.View()
+		}
+		return fitCapturePane(strings.Join(parts, "\n"), m.uiState.Width, m.uiState.Height)
 	}
 
 	// Render components
@@ -70,61 +86,8 @@ func (m Model) View() string {
 
 // renderCaptureTab renders the Capture tab content (packets or calls)
 func (m Model) renderCaptureTab(contentHeight int) string {
-	// Check if we should display calls view, queries view, or packets view
-	if m.uiState.ViewMode == "events" && m.uiState.EventsView != nil {
-		const minWidthForDetails = 160
-		if m.uiState.EventShowDetails && m.uiState.Width >= minWidthForDetails {
-			const detailsWidth = 77
-			// Match the packet split pane's actual rendered boundary.
-			timelineWidth := m.uiState.Width - detailsWidth - 2
-			leftFocused := m.uiState.FocusedPane == "left"
-			rightFocused := m.uiState.FocusedPane == "right"
-			list := m.uiState.EventsView.RenderTimeline(timelineWidth, contentHeight, leftFocused)
-			details := m.uiState.EventsView.RenderDetails(detailsWidth, contentHeight, rightFocused)
-			listTotal, listVisible, listOffset := m.uiState.EventsView.TimelineScrollState(contentHeight)
-			detailTotal, detailVisible, detailOffset := m.uiState.EventsView.DetailsScrollState()
-			return lipgloss.JoinHorizontal(lipgloss.Top,
-				m.captureScrollbar(list, listTotal, listVisible, listOffset, contentHeight),
-				m.captureScrollbar(details, detailTotal, detailVisible, detailOffset, contentHeight),
-			)
-		}
-		list := m.uiState.EventsView.RenderTimeline(m.uiState.Width, contentHeight, false)
-		total, visible, offset := m.uiState.EventsView.TimelineScrollState(contentHeight)
-		return m.captureScrollbar(list, total, visible, offset, contentHeight)
-	}
-
-	if m.uiState.ViewMode == "calls" {
-		// Render calls view with optional details panel
-		minWidthForDetails := 120 // Need enough width for call details
-		showDetails := m.uiState.CallsView.IsShowingDetails()
-		detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
-
-		if detailsVisible {
-			// Split pane layout for calls
-			leftFocused := m.uiState.FocusedPane == "left"
-			rightFocused := m.uiState.FocusedPane == "right"
-
-			detailsWidth := 79 // Call details panel width
-
-			// Calculate available width for calls table
-			tableWidth := m.uiState.Width - detailsWidth
-
-			// Render calls table and details side by side
-			callsTableView := m.uiState.CallsView.RenderTable(tableWidth, contentHeight, leftFocused)
-			callDetailsView := m.uiState.CallsView.RenderDetails(detailsWidth, contentHeight, rightFocused)
-
-			listTotal, listVisible, listOffset := m.uiState.CallsView.TableScrollState(contentHeight)
-			detailTotal, detailVisible, detailOffset := m.uiState.CallsView.DetailsScrollState()
-			return lipgloss.JoinHorizontal(lipgloss.Top,
-				m.captureScrollbar(callsTableView, listTotal, listVisible, listOffset, contentHeight),
-				m.captureScrollbar(callDetailsView, detailTotal, detailVisible, detailOffset, contentHeight),
-			)
-		}
-
-		// Full width calls table (size is set in handleWindowSizeMsg)
-		list := m.uiState.CallsView.View()
-		total, visible, offset := m.uiState.CallsView.TableScrollState(contentHeight)
-		return m.captureScrollbar(list, total, visible, offset, contentHeight)
+	if m.responsiveCaptureView() {
+		return m.renderResponsiveCapture()
 	}
 
 	if m.uiState.ViewMode == "queries" {
@@ -202,36 +165,61 @@ func (m Model) renderCaptureTab(contentHeight int) string {
 		return m.uiState.HTTPView.View()
 	}
 
-	// Render packets view
-	minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-	detailsVisible := m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails
+	return ""
+}
 
-	if detailsVisible {
-		// Split pane layout
-		leftFocused := m.uiState.FocusedPane == "left"
-		rightFocused := m.uiState.FocusedPane == "right"
-
-		detailsWidth := 77 // Hex dump (72) + borders/padding (5)
-
-		// Ensure details panel has the right size set
-		m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
-
-		packetListView := m.uiState.PacketList.View(leftFocused, true)
-		detailsPanelView := m.uiState.DetailsPanel.View(rightFocused)
-
-		listTotal := int(m.uiState.PacketList.LogicalCount())
-		listVisible := m.uiState.PacketList.VisibleRows()
-		listOffset := int(m.uiState.PacketList.LogicalOffset())
-		detailTotal, detailVisible, detailOffset := m.uiState.DetailsPanel.ScrollState()
-		return lipgloss.JoinHorizontal(lipgloss.Top,
-			m.captureScrollbar(packetListView, listTotal, listVisible, listOffset, contentHeight),
-			m.captureScrollbar(detailsPanelView, detailTotal, detailVisible, detailOffset, contentHeight),
-		)
+func (m Model) renderResponsiveCapture() string {
+	l := m.captureLayout()
+	list, details := "", ""
+	if l.List.Width > 0 && l.List.Height > 0 {
+		total, visible, offset := 0, 0, 0
+		switch m.uiState.ViewMode {
+		case "events":
+			list = m.uiState.EventsView.RenderTimeline(max(1, l.List.Width-2), l.List.Height, m.uiState.FocusedPane == "left" && l.Details.Width > 0)
+			total, visible, offset = m.uiState.EventsView.TimelineScrollState(l.List.Height)
+		case "calls":
+			list = m.uiState.CallsView.RenderTable(l.List.Width, l.List.Height, m.uiState.FocusedPane == "left" && l.Details.Width > 0)
+			total, visible, offset = m.uiState.CallsView.TableScrollState(l.List.Height)
+		default:
+			list = m.uiState.PacketList.View(m.uiState.FocusedPane == "left", l.Details.Width > 0)
+			total, visible, offset = int(m.uiState.PacketList.LogicalCount()), m.uiState.PacketList.VisibleRows(), int(m.uiState.PacketList.LogicalOffset())
+		}
+		list = fitCapturePane(list, l.List.Width, l.List.Height)
+		list = m.captureScrollbar(list, total, visible, offset, l.List.Height)
 	}
-
-	// Full width packet list - always show unfocused when details are hidden
-	list := m.uiState.PacketList.View(false, false)
-	return m.captureScrollbar(list, int(m.uiState.PacketList.LogicalCount()), m.uiState.PacketList.VisibleRows(), int(m.uiState.PacketList.LogicalOffset()), contentHeight)
+	if l.Details.Width > 0 && l.Details.Height > 0 {
+		total, visible, offset := 0, 0, 0
+		switch m.uiState.ViewMode {
+		case "events":
+			details = m.uiState.EventsView.RenderDetails(l.Details.Width, l.Details.Height, m.uiState.FocusedPane == "right")
+			total, visible, offset = m.uiState.EventsView.DetailsScrollState()
+		case "calls":
+			details = m.uiState.CallsView.RenderDetails(l.Details.Width, l.Details.Height, m.uiState.FocusedPane == "right")
+			total, visible, offset = m.uiState.CallsView.DetailsScrollState()
+		default:
+			details = m.uiState.DetailsPanel.View(m.uiState.FocusedPane == "right")
+			total, visible, offset = m.uiState.DetailsPanel.ScrollState()
+		}
+		details = fitCapturePane(details, l.Details.Width, l.Details.Height)
+		x, y, _, track := components.DetailPaneGeometry(l.Details.Width, l.Details.Height)
+		if x > 0 {
+			column := l.Details.Width - 1
+			if x >= 3 {
+				column--
+			}
+			details = components.OverlayScrollbar(details, column, y, components.RenderScrollbar(total, visible, offset, track, m.uiState.Theme))
+		}
+	}
+	switch l.Mode {
+	case captureSideBySide:
+		return lipgloss.JoinHorizontal(lipgloss.Top, list, details)
+	case captureStacked:
+		return lipgloss.JoinVertical(lipgloss.Left, list, details)
+	case captureDetailsOnly:
+		return details
+	default:
+		return list
+	}
 }
 
 func (m Model) captureScrollbar(pane string, total, visible, offset, height int) string {
@@ -288,10 +276,10 @@ func (m Model) renderActiveModal() string {
 // prepareViewChrome snapshots presentation state during model updates. Rendering
 // must not read the event store or mutate the shared header and footer.
 func (m *Model) prepareViewChrome() {
-	m.uiState.PacketList.PrepareLayout(m.uiState.ShowDetails && m.uiState.Width >= 160)
 	if m.uiState == nil || m.packetStore == nil || m.callStore == nil || m.eventStore == nil {
 		return
 	}
+	m.prepareCaptureLayout()
 	if m.uiState.SettingsView.IsFileDialogActive() {
 		if dialog := m.uiState.SettingsView.GetPcapFileDialog(); dialog.IsActive() {
 			dialog.SetSize(m.uiState.Width, m.uiState.Height)
@@ -324,6 +312,7 @@ func (m *Model) prepareViewChrome() {
 	}
 
 	// Update footer state
+	m.uiState.Footer.SetDetailsFocused(m.uiState.Tabs.GetActive() == 0 && m.captureDetailsFocused())
 	m.uiState.Footer.SetFilterMode(m.uiState.FilterMode)
 	m.uiState.Footer.SetHasFilter(m.packetStore.HasFilter())
 	m.uiState.Footer.SetFilterCount(m.packetStore.FilterChain.Count())

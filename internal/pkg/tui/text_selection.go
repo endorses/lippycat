@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/selection"
 )
 
@@ -91,7 +92,7 @@ func (m Model) textSelectionRegion(x, y int) (selection.Rect, bool) {
 	var ok bool
 	switch m.uiState.Tabs.GetActive() {
 	case 0:
-		return m.captureTextSelectionRegion(x, y, top)
+		return m.captureTextSelectionRegion(x, y, m.captureContentOrigin())
 	case 1:
 		region, ok = m.uiState.NodesView.TextSelectionAt(x, y-top)
 	case 2:
@@ -103,53 +104,24 @@ func (m Model) textSelectionRegion(x, y int) (selection.Rect, bool) {
 	return region, ok
 }
 
-func captureTextBody(left, top int, pane string) selection.Rect {
-	return selection.Rect{X: left + 3, Y: top + 2, Width: max(0, lipgloss.Width(pane)-6), Height: max(0, lipgloss.Height(pane)-4)}
-}
-
 func (m Model) captureTextSelectionRegion(x, y, top int) (selection.Rect, bool) {
-	height := m.uiState.Height - 10
-	width := m.uiState.Width
-	var list, details string
-	packetDetails := false
-	switch m.uiState.ViewMode {
-	case "events":
-		if m.uiState.EventShowDetails && width >= 160 {
-			list = m.uiState.EventsView.RenderTimeline(width-79, height, m.uiState.FocusedPane == "left")
-			details = m.uiState.EventsView.RenderDetails(77, height, m.uiState.FocusedPane == "right")
-		} else {
-			list = m.uiState.EventsView.RenderTimeline(width, height, false)
-		}
-	case "calls":
-		if m.uiState.CallsView.IsShowingDetails() && width >= 120 {
-			list = m.uiState.CallsView.RenderTable(width-79, height, m.uiState.FocusedPane == "left")
-			details = m.uiState.CallsView.RenderDetails(79, height, m.uiState.FocusedPane == "right")
-		} else {
-			list = m.uiState.CallsView.View()
-		}
-	case "packets", "":
-		packetDetails = m.uiState.ShowDetails && width >= 160
-		list = m.uiState.PacketList.View(m.uiState.FocusedPane == "left", packetDetails)
-		if packetDetails {
-			details = m.uiState.DetailsPanel.View(m.uiState.FocusedPane == "right")
-		}
-	default:
-		return selection.Rect{}, false
-	}
-	region := captureTextBody(0, top, list)
+	layout := m.captureLayout()
+	list := layout.List
+	region := selection.Rect{X: list.X + 3, Y: top + list.Y + 2, Width: max(0, list.Width-6), Height: max(0, list.Height-4)}
 	if region.Contains(x, y) {
 		return region, true
 	}
-	if details == "" {
+	details := layout.Details
+	if !details.contains(x, y-top) {
 		return selection.Rect{}, false
 	}
-	left := lipgloss.Width(list)
-	if packetDetails {
-		region, ok := m.uiState.DetailsPanel.TextSelectionAt(x-left, y-top)
-		region.X += left
-		region.Y += top
+	if m.uiState.ViewMode == "packets" || m.uiState.ViewMode == "" {
+		region, ok := m.uiState.DetailsPanel.TextSelectionAt(x-details.X, y-top-details.Y)
+		region.X += details.X
+		region.Y += top + details.Y
 		return region, ok
 	}
-	region = captureTextBody(left, top, details)
+	left, bodyTop, width, height := components.DetailPaneGeometry(details.Width, details.Height)
+	region = selection.Rect{X: details.X + left, Y: top + details.Y + bodyTop, Width: width, Height: height}
 	return region, region.Contains(x, y)
 }

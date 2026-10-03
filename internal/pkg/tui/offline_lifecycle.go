@@ -328,6 +328,7 @@ func (m Model) completeOffline(msg offlineOpenCompleteMsg) (Model, tea.Cmd) {
 	m.uiState.Paused = false
 	m.packetStore.ClearAndResize(m.offlinePending.Config.EventCapacity)
 	m.packetStore.ClearFilter()
+	m.resetCaptureInspection()
 	m.uiState.PacketList.Reset()
 	m.uiState.PacketList.SetVirtualPackets(msg.session.Dataset.Count(), 0, nil)
 	m.lastSyncedTotal = 0

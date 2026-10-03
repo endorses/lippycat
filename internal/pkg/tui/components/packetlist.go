@@ -3,6 +3,7 @@
 package components
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -46,6 +47,8 @@ type PacketList struct {
 	height         int
 	headerHeight   int
 	autoScroll     bool         // Whether to auto-scroll to bottom (like chat)
+	inspecting     bool         // Details own navigation while the selected packet is inspected.
+	followPaused   bool         // Inspection stops following until the user explicitly goes to End.
 	theme          themes.Theme // Color theme
 	detailsVisible bool         // Whether details panel is visible (affects column widths)
 
@@ -198,6 +201,16 @@ func (p *PacketList) GetSelectedPacket() *PacketDisplay {
 	return &pkt
 }
 
+// SetInspecting stops incoming packets from moving the selection while details
+// have focus. Returning to the list keeps following stopped; End resumes it.
+func (p *PacketList) SetInspecting(inspecting bool) {
+	p.inspecting = inspecting
+	if inspecting {
+		p.followPaused = true
+		p.autoScroll = false
+	}
+}
+
 // SetPackets updates the slice-backed live/remote packet list.
 func (p *PacketList) SetPackets(packets []PacketDisplay) {
 	if p.virtual {
@@ -212,6 +225,26 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 	if oldLen > 0 && p.cursor >= 0 && p.cursor < oldLen {
 		pkt := p.packets[p.cursor]
 		selectedPacket = &pkt
+	}
+	if p.followPaused {
+		p.packets = packets
+		if p.captureStartTime.IsZero() && newLen > 0 {
+			p.captureStartTime = packets[0].Timestamp
+		}
+		oldCursor := p.cursor
+		p.cursor = min(p.cursor, max(0, newLen-1))
+		if selectedPacket != nil {
+			for i := range packets {
+				if sameInspectedPacket(packets[i], *selectedPacket) {
+					p.cursor = i
+					break
+				}
+			}
+		}
+		p.offset = max(0, p.offset+p.cursor-oldCursor)
+		p.autoScroll = false
+		p.adjustOffset()
+		return
 	}
 
 	// Detect if this is a filter change (drastic change in packet list)
@@ -445,7 +478,19 @@ func (p *PacketList) Reset() {
 	p.cursor = 0
 	p.offset = 0
 	p.autoScroll = true
+	p.inspecting = false
+	p.followPaused = false
 	p.captureStartTime = time.Time{} // Reset capture start time
+}
+
+// PacketDisplay has no durable packet ID. Include capture source and bytes to
+// distinguish observations of the same flow at the same timestamp.
+func sameInspectedPacket(a, b PacketDisplay) bool {
+	return a.Timestamp.Equal(b.Timestamp) && a.NodeID == b.NodeID &&
+		a.Interface == b.Interface && a.SrcIP == b.SrcIP && a.DstIP == b.DstIP &&
+		a.SrcPort == b.SrcPort && a.DstPort == b.DstPort &&
+		a.Transport == b.Transport && a.Protocol == b.Protocol &&
+		a.Length == b.Length && a.Info == b.Info && bytes.Equal(a.RawData, b.RawData)
 }
 
 // ToggleTimeDisplay cycles between clock and relative time display modes
@@ -487,7 +532,7 @@ func (p *PacketList) AppendPackets(packets []PacketDisplay) {
 	p.packets = append(p.packets, packets...)
 
 	// Auto-scroll to bottom if enabled and was at bottom
-	if p.autoScroll && wasAtBottom {
+	if p.autoScroll && !p.followPaused && wasAtBottom {
 		p.cursor = len(p.packets) - 1
 		p.adjustOffset()
 	}
@@ -503,8 +548,13 @@ func (p *PacketList) TrimOldPackets(trimCount int) {
 	}
 
 	if trimCount >= len(p.packets) {
-		// Trim everything - use Reset instead
+		// Retention eviction must not resume following or restart relative time.
+		inspecting, followPaused, captureStart := p.inspecting, p.followPaused, p.captureStartTime
 		p.Reset()
+		p.inspecting, p.followPaused, p.captureStartTime = inspecting, followPaused, captureStart
+		if followPaused {
+			p.autoScroll = false
+		}
 		return
 	}
 
@@ -512,6 +562,9 @@ func (p *PacketList) TrimOldPackets(trimCount int) {
 
 	// Remove packets from front
 	p.packets = p.packets[trimCount:]
+	if p.followPaused {
+		p.offset = max(0, p.offset-trimCount)
+	}
 
 	// Adjust cursor
 	if !wasAtBottom {
@@ -598,6 +651,9 @@ func (p *PacketList) GotoTop() {
 
 // GotoBottom moves to the last packet
 func (p *PacketList) GotoBottom() {
+	if !p.inspecting {
+		p.followPaused = false
+	}
 	if p.virtual {
 		if p.logicalCount > 0 {
 			p.SetLogicalCursor(p.logicalCount - 1)
@@ -700,7 +756,7 @@ func (p *PacketList) adjustOffset() {
 
 // IsAutoScrolling returns whether auto-scroll is enabled
 func (p *PacketList) IsAutoScrolling() bool {
-	return p.autoScroll
+	return p.autoScroll && !p.followPaused
 }
 
 // GetCursor returns the current cursor position

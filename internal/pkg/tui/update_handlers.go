@@ -72,25 +72,7 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	// Set help view size (returns cmd if content needs re-rendering due to width change)
 	helpCmd := m.uiState.HelpView.SetSize(msg.Width, contentHeight)
 
-	// Set calls view size (always full width, no split view)
-	m.uiState.CallsView.SetSize(msg.Width, contentHeight)
-	if m.uiState.EventsView != nil {
-		m.uiState.EventsView.SetSize(msg.Width, contentHeight)
-	}
-
-	// Auto-hide details panel if terminal is too narrow or if details are toggled off
-	minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-	if m.uiState.ShowDetails && msg.Width >= minWidthForDetails {
-		// Details panel gets exactly what it needs for hex dump, packet list gets the rest
-		detailsWidth := 77 // Hex dump (72) + borders/padding (5)
-		listWidth := msg.Width - detailsWidth
-		m.uiState.PacketList.SetSize(listWidth, contentHeight)
-		m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
-	} else {
-		// Full width for packet list (details hidden or terminal too narrow)
-		m.uiState.PacketList.SetSize(msg.Width, contentHeight)
-		m.uiState.DetailsPanel.SetSize(0, contentHeight) // Set to 0 when hidden
-	}
+	m.prepareCaptureLayout()
 
 	if m.uiState.ViewMode == "events" {
 		m.syncEventsView()
@@ -308,6 +290,7 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 		return m, m.startOfflineFilter(chain, &protocol)
 	}
 	// User selected a protocol from the protocol selector
+	m.resetCaptureInspection()
 	preserveEvents := m.uiState.ViewMode == "events" && eventScopeAvailable(msg.Protocol.Name)
 	m.uiState.SelectedProtocol = msg.Protocol
 

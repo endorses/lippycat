@@ -23,6 +23,7 @@ type TabKeybind struct {
 
 // Footer displays the bottom footer bar with keybindings
 type Footer struct {
+	detailsFocused       bool
 	width                int
 	theme                themes.Theme
 	filterMode           bool
@@ -53,6 +54,8 @@ func NewFooter() Footer {
 		hasFilter:  false,
 	}
 }
+
+func (f *Footer) SetDetailsFocused(focused bool) { f.detailsFocused = focused }
 
 // SetTheme updates the theme
 func (f *Footer) SetTheme(theme themes.Theme) {
@@ -158,9 +161,17 @@ func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
 func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	switch tabIndex {
 	case 0: // Capture tab
-		keybinds := []TabKeybind{
-			{Key: "/", Description: "filter", ShortDesc: "flt", Essential: true},
+		detailLabel := "details"
+		if f.detailsFocused {
+			detailLabel = "list"
 		}
+		keybinds := []TabKeybind{
+			{Key: "d", Description: detailLabel, ShortDesc: detailLabel, Essential: true},
+		}
+		if f.detailsFocused {
+			keybinds = append(keybinds, TabKeybind{Key: "Esc", Description: "back", ShortDesc: "back", Essential: true})
+		}
+		keybinds = append(keybinds, TabKeybind{Key: "/", Description: "filter", ShortDesc: "flt", Essential: true})
 
 		// Conditional keybinds based on view mode
 		if f.viewMode == "events" {
@@ -188,7 +199,6 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 			}
 		}
 		keybinds = append(keybinds,
-			TabKeybind{Key: "d", Description: "details", ShortDesc: "det", Essential: true},
 			TabKeybind{Key: "t", Description: "time", ShortDesc: "tm", Essential: false},
 		)
 
@@ -339,6 +349,10 @@ func (f *Footer) renderSection(bindings []TabKeybind, widthClass responsive.Widt
 			hint += descStyle.Render(":" + desc)
 		case responsive.Wide:
 			hint += descStyle.Render(": " + binding.Description)
+		default:
+			if f.activeTab == 0 && binding.Key == "d" && f.width >= 18 {
+				hint += descStyle.Render(":" + binding.Description)
+			}
 		}
 		hintWidth := lipgloss.Width(hint)
 		start := width

@@ -41,10 +41,12 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			saveFilterHistory(&m.uiState.FilterInput)
 		} else {
 			// Empty filter = clear all filters
+			m.resetCaptureInspection()
 			m.packetStore.ClearFilter()
 			m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 			m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
 			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+			m.updateDetailsPanel()
 			// Reset sync counters for incremental updates
 			_, _, total, _ := m.packetStore.GetBufferInfo()
 			m.lastSyncedTotal = total
@@ -118,10 +120,12 @@ func (m Model) handleEventFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		value := input.Value()
 		var cmd tea.Cmd
 		if value == "" {
+			m.resetCaptureInspection()
 			m.eventStore.ClearUserFilters()
 		} else if err := m.eventStore.AddUserFilter(value); err != nil {
 			cmd = m.uiState.Toast.Show(fmt.Sprintf("Invalid event filter: %s", err), components.ToastError, components.ToastDurationLong)
 		} else {
+			m.resetCaptureInspection()
 			input.AddToHistory(value)
 			saveEventFilterHistory(input)
 			cmd = m.uiState.Toast.Show(fmt.Sprintf("Event filter added (%d active)", m.eventStore.UserFilterCount()), components.ToastSuccess, components.ToastDurationShort)
@@ -174,6 +178,7 @@ func (m Model) handleRemoveLastEventFilter() (Model, tea.Cmd) {
 	if !m.eventStore.RemoveLastUserFilter() {
 		return m, nil
 	}
+	m.resetCaptureInspection()
 	m.syncEventsView()
 	return m, m.uiState.Toast.Show("Last event filter removed", components.ToastInfo, components.ToastDurationShort)
 }
@@ -184,6 +189,7 @@ func (m Model) handleClearAllEventFilters() (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.eventStore.ClearUserFilters()
+	m.resetCaptureInspection()
 	m.syncEventsView()
 	return m, m.uiState.Toast.Show(fmt.Sprintf("All event filters cleared (%d removed)", count), components.ToastInfo, components.ToastDurationShort)
 }
@@ -449,6 +455,7 @@ func (m Model) handleCallFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			saveCallFilterHistory(&m.uiState.CallFilterInput)
 		} else {
 			// Empty filter = clear all filters
+			m.resetCaptureInspection()
 			m.callStore.ClearFilter()
 			// Refresh calls view
 			if m.callStore.HasFilter() {
@@ -535,6 +542,7 @@ func (m Model) handleRemoveLastCallFilter() (Model, tea.Cmd) {
 	if m.callStore.HasFilter() {
 		filterCount := m.callStore.FilterChain.Count()
 		if m.callStore.RemoveLastFilter() {
+			m.resetCaptureInspection()
 			// Show toast notification
 			remainingCount := filterCount - 1
 			msg := "Last call filter removed"
@@ -565,6 +573,7 @@ func (m Model) handleClearAllCallFilters() (Model, tea.Cmd) {
 	if m.callStore.HasFilter() {
 		filterCount := m.callStore.FilterChain.Count()
 		m.callStore.ClearFilter()
+		m.resetCaptureInspection()
 
 		// Refresh calls view
 		m.uiState.CallsView.SetCalls(m.callStore.GetCallsInOrder())
@@ -595,6 +604,7 @@ func (m *Model) parseAndApplyCallFilter(filterStr string) tea.Cmd {
 		return f
 	})
 	if err == nil && filter != nil {
+		m.resetCaptureInspection()
 		m.callStore.AddFilter(filter)
 	} else if err != nil {
 		// Try simple filter parse
@@ -608,6 +618,7 @@ func (m *Model) parseAndApplyCallFilter(filterStr string) tea.Cmd {
 			)
 		}
 		if simpleFilter != nil {
+			m.resetCaptureInspection()
 			m.callStore.AddFilter(simpleFilter)
 		}
 	}

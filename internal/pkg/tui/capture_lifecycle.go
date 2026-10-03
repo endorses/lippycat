@@ -77,6 +77,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	// Every capture restart begins a new normalized-event analysis session.
 	// Clear retained events before the new runtime starts so identities and
 	// partial flows from different inputs cannot be presented as one timeline.
+	m.resetCaptureInspection()
 	m.eventStore.Reset()
 	m.eventStore.ClearUserFilters()
 	m.eventStore.SetPaused(false)

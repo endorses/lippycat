@@ -17,10 +17,12 @@ type packetFilterMsg struct {
 // snapshot. Only predicate evaluation runs in the command; model and display
 // updates stay on the UI loop.
 func (m *Model) startPacketFilter(chain *filters.FilterChain) tea.Cmd {
+	m.resetCaptureInspection()
 	source := m.packetStore
 	scan := source.BeginFilter(chain)
 	m.lastFilterState = source.HasFilter()
 	m.doFullPacketListRefresh(m.lastFilterState)
+	m.updateDetailsPanel()
 	return func() tea.Msg {
 		return packetFilterMsg{source: source, result: scan.Run()}
 	}

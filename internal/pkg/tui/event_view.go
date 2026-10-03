@@ -179,7 +179,7 @@ func (m *Model) syncEventsViewAt(now time.Time) {
 	}
 	m.eventViewCursor = delta.Cursor
 	m.uiState.EventsView.SetSelectedID(delta.SelectedID)
-	if selected, ok := m.uiState.EventsView.Selected(); ok {
+	if selected, ok := m.uiState.EventsView.DetailSelection(); ok {
 		if m.offlineSession == nil {
 			m.uiState.EventsView.SetRelatedPacketsAvailable(m.hasRelatedPacket(selected.Event))
 		} else {
@@ -241,10 +241,11 @@ func (m *Model) prepareEventsViewLayout() {
 	if m.uiState.EventsView == nil || m.uiState.ViewMode != "events" {
 		return
 	}
-	contentHeight := m.uiState.Height - 2 - 4 - 4
-	if m.uiState.EventShowDetails && m.uiState.Width >= 160 {
-		m.uiState.EventsView.PrepareLayout(m.uiState.Width-77-2, contentHeight, 77, contentHeight)
+	l := m.captureLayout()
+	// Preserve the hidden list viewport while inspecting a single detail pane.
+	if l.List.Width == 0 {
+		m.uiState.EventsView.PrepareDetails(l.Details.Width, l.Details.Height)
 	} else {
-		m.uiState.EventsView.PrepareLayout(m.uiState.Width, contentHeight, 0, 0)
+		m.uiState.EventsView.PrepareLayout(max(1, l.List.Width-2), l.List.Height, l.Details.Width, l.Details.Height)
 	}
 }

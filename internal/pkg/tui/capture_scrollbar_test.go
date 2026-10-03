@@ -17,9 +17,9 @@ func TestCapturePacketScrollbarDragAndPaneWidth(t *testing.T) {
 	m, _ = m.handleWindowSizeMsg(tea.WindowSizeMsg{Width: 180, Height: 35})
 	m.uiState.ViewMode = "packets"
 	m.uiState.ShowDetails = true
-	m.uiState.PacketList.SetSize(103, 25)
+	m.prepareCaptureLayout()
 	m.uiState.PacketList.SetVirtualPackets(1000, 0, make([]components.PacketDisplay, 50))
-	content := m.renderCaptureTab(25)
+	content := m.renderCaptureTab(m.captureContentHeight())
 	for _, line := range strings.Split(content, "\n") {
 		require.Equal(t, 180, ansi.StringWidth(line))
 	}
@@ -43,9 +43,9 @@ func TestPacketScrollbarThumbPressAndDragWithDetails(t *testing.T) {
 	m.uiState.PacketList.SetVirtualPackets(1000, 0, make([]components.PacketDisplay, 50))
 	m = m.toggleDetailsPanel()
 	m.uiState.PacketList.SetScrollOffset(123)
-	start, _ := components.ScrollbarThumb(1000, m.uiState.PacketList.VisibleRows(), 123, 21)
+	start, _ := components.ScrollbarThumb(1000, m.uiState.PacketList.VisibleRows(), 123, m.captureLayout().List.Height-4)
 	barX := ansi.StringWidth(strings.Split(m.uiState.PacketList.View(true, true), "\n")[0]) - 2
-	barY := 7 + start // Actual content starts at Y=5.
+	barY := m.captureContentOrigin() + 2 + start
 	lines := strings.Split(m.View(), "\n")
 	require.Equal(t, "▉", string([]rune(ansi.Strip(lines[barY]))[barX]))
 
@@ -67,7 +67,7 @@ func TestCaptureScrollbarSplitLayouts(t *testing.T) {
 		if mode == "calls" && !m.uiState.CallsView.IsShowingDetails() {
 			m.uiState.CallsView.ToggleDetails()
 		}
-		content := m.renderCaptureTab(25)
+		content := m.renderCaptureTab(m.captureContentHeight())
 		for _, line := range strings.Split(content, "\n") {
 			require.Equalf(t, 180, ansi.StringWidth(line), "%s pane width", mode)
 		}
@@ -81,7 +81,7 @@ func TestOfflinePacketScrollbarRequestsNewPage(t *testing.T) {
 	m, _ = m.handleWindowSizeMsg(tea.WindowSizeMsg{Width: 180, Height: 35})
 	m.uiState.ViewMode = "packets"
 	m.uiState.ShowDetails = false
-	m.uiState.PacketList.SetSize(180, 25)
+	m.prepareCaptureLayout()
 	barX := ansi.StringWidth(strings.Split(m.uiState.PacketList.View(false, false), "\n")[0]) - 2
 	m, cmd := m.handleMouse(tea.MouseMsg{X: barX, Y: 27, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	require.NotNil(t, cmd)

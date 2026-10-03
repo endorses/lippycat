@@ -61,6 +61,8 @@ type EventsView struct {
 	detailsViewport         viewport.Model
 	detailsViewportReady    bool
 	detailsSelectedID       string
+	inspecting              bool
+	inspectedEvent          *EventItem
 	timelineCache           eventTimelineCache
 	timelineGeneration      uint64
 }
@@ -86,38 +88,48 @@ func (v *EventsView) SetSize(width, height int) {
 func (v *EventsView) PrepareLayout(timelineWidth, timelineHeight, detailsWidth, detailsHeight int) {
 	v.SetSize(timelineWidth, timelineHeight)
 	v.prepareTimeline()
+	v.PrepareDetails(detailsWidth, detailsHeight)
+}
+
+// PrepareDetails sizes details without changing a hidden timeline's geometry.
+func (v *EventsView) PrepareDetails(detailsWidth, detailsHeight int) {
 	if detailsWidth <= 0 || detailsHeight <= 0 {
 		return
 	}
-	contentWidth := max(1, detailsWidth-6)
-	contentHeight := max(5, detailsHeight-4)
+	_, _, contentWidth, contentHeight := DetailPaneGeometry(detailsWidth, detailsHeight)
+	widthChanged := v.detailsViewport.Width != contentWidth
+	oldOffset := v.detailsViewport.YOffset
 	if !v.detailsViewportReady {
 		v.detailsViewport = viewport.New(contentWidth, contentHeight)
 		v.detailsViewportReady = true
 	} else {
-		if v.detailsViewport.Width != contentWidth {
-			v.detailsSelectedID = ""
-		}
 		v.detailsViewport.Width = contentWidth
 		v.detailsViewport.Height = contentHeight
 	}
-	if v.detailsSelectedID == v.selectedID && v.selectedID != "" {
-		// A taller viewport can reduce the maximum valid scroll offset.
+	item, found := v.DetailSelection()
+	selectedID := ""
+	if found {
+		selectedID = item.Event.Envelope().EventID
+	}
+	if v.detailsSelectedID == selectedID && found && !widthChanged {
 		v.detailsViewport.SetYOffset(v.detailsViewport.YOffset)
 		return
 	}
-	i := v.indexByID(v.selectedID)
-	if i < 0 {
+	if !found {
 		v.detailsSelectedID = ""
 		v.detailsViewport.SetContent("")
 		v.detailsViewport.GotoTop()
 		return
 	}
-	if v.detailsSelectedID != v.selectedID {
-		v.detailsSelectedID = v.selectedID
-		v.detailsViewport.SetContent(v.renderEventDetailsContent(v.items[i], contentWidth))
+	selectionChanged := v.detailsSelectedID != selectedID
+	v.detailsSelectedID = selectedID
+	v.detailsViewport.SetContent(v.renderEventDetailsContent(item, contentWidth))
+	if selectionChanged {
 		v.detailsViewport.GotoTop()
+	} else {
+		v.detailsViewport.SetYOffset(oldOffset)
 	}
+
 }
 
 func (v *EventsView) timelineOffset(height, selected int) int {
@@ -156,7 +168,9 @@ func (v *EventsView) SetEvents(items []EventItem) {
 		v.offset = v.timelineOffset(v.height, newSelected)
 		return
 	}
-	v.detailsSelectedID = ""
+	if !v.inspecting {
+		v.detailsSelectedID = ""
+	}
 	if len(v.items) == 0 {
 		v.selectedID = ""
 		v.offset = 0
@@ -371,6 +385,13 @@ func (v *EventsView) SetRelatedPacketsAvailable(available bool) {
 // An asynchronous availability update belongs to the same selected event;
 // preserve the user's reading position while replacing only its notice.
 func (v *EventsView) invalidateRelatedDetails() {
+	if v.inspecting && v.inspectedEvent != nil && v.detailsViewportReady {
+		offset := v.detailsViewport.YOffset
+		v.detailsViewport.SetContent(v.renderEventDetailsContent(*v.inspectedEvent, v.detailsViewport.Width))
+		v.detailsViewport.SetYOffset(offset)
+		return
+	}
+
 	if v.offlinePacketNavigation && v.detailsViewportReady && v.selectedID != "" && v.detailsSelectedID == v.selectedID {
 		if i := v.indexByID(v.selectedID); i >= 0 {
 			offset := v.detailsViewport.YOffset
@@ -439,23 +460,12 @@ func (v *EventsView) RenderDetails(width, height int, focused bool) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
-	borderColor := v.theme.BorderColor
-	borderType := lipgloss.RoundedBorder()
-	if focused {
-		borderColor = v.theme.SelectionBg
-		borderType = lipgloss.ThickBorder()
+	content := v.detailsViewport.View()
+	if _, found := v.DetailSelection(); !found {
+		_, _, cw, _ := DetailPaneGeometry(width, height)
+		content = wrapDetailContent("No event selected", cw, false)
 	}
-	borderStyle := lipgloss.NewStyle().
-		Border(borderType).
-		BorderForeground(borderColor).
-		Padding(1, 2).
-		Width(width).
-		Height(height - 2)
-	i := v.indexByID(v.selectedID)
-	if i < 0 {
-		return borderStyle.Render("No event selected")
-	}
-	return borderStyle.Render(v.detailsViewport.View())
+	return renderDetailPane(content, width, height, focused, v.theme)
 }
 
 func (v *EventsView) ScrollDetailsUp() {
@@ -570,16 +580,24 @@ func (v *EventsView) renderEventDetailsContent(item EventItem, width int) string
 		{"Sequence", fmt.Sprint(env.EventSequence)},
 		{"Arrival", fmt.Sprint(item.ArrivalSequence)},
 	})
-	return strings.TrimRight(content.String(), "\n")
+	return wrapDetailContent(strings.TrimRight(content.String(), "\n"), width, width < 42)
 }
 
 type eventDetailRow struct{ label, value string }
 
 func renderEventDetailRow(label, value string, width int, labelStyle, valueStyle, mutedStyle lipgloss.Style, theme themes.Theme) string {
-	const labelWidth = 15
-	valueWidth := max(10, width-labelWidth)
+	labelWidth := 15
+	if width < 30 {
+		labelWidth = 0
+	}
+	valueWidth := max(1, width-labelWidth)
 	var content strings.Builder
-	content.WriteString(labelStyle.Render(fitRunes(label, labelWidth)))
+	if labelWidth == 0 {
+		content.WriteString(wrapDetailContent(labelStyle.Render(label+":"), width, false))
+		content.WriteByte('\n')
+	} else {
+		content.WriteString(labelStyle.Render(fitRunes(label, labelWidth)))
+	}
 	style := valueStyle
 	displayValue := sanitizeEventText(value)
 	if value == "false" {
@@ -604,13 +622,7 @@ func wrapEventValue(value string, width int) []string {
 	if value == "" {
 		return []string{"-"}
 	}
-	runes := []rune(value)
-	lines := make([]string, 0, (len(runes)/width)+1)
-	for len(runes) > width {
-		lines = append(lines, string(runes[:width]))
-		runes = runes[width:]
-	}
-	return append(lines, string(runes))
+	return strings.Split(wrapDetailContent(value, width, false), "\n")
 }
 
 func humanizeEventField(name string) string {
@@ -987,4 +999,25 @@ func compactNode(node string) string {
 	parts := strings.Fields(sanitizeEventText(node))
 	sort.Strings(parts)
 	return truncateRunes(strings.Join(parts, " "), 16)
+}
+
+// SetInspecting retains one immutable event even when capture evicts its row.
+func (v *EventsView) SetInspecting(inspecting bool) {
+	if inspecting && !v.inspecting {
+		if item, ok := v.Selected(); ok {
+			v.inspectedEvent = &item
+		}
+	}
+	v.inspecting = inspecting
+	if !inspecting {
+		v.inspectedEvent = nil
+	}
+}
+
+// DetailSelection returns the inspected event, including after its row is evicted.
+func (v *EventsView) DetailSelection() (EventItem, bool) {
+	if v.inspecting && v.inspectedEvent != nil {
+		return *v.inspectedEvent, true
+	}
+	return v.Selected()
 }

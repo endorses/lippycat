@@ -247,6 +247,22 @@ toast.Update(ToastTickMsg{})  // Decrements timer
 
 **NOT a modal** - overlay at bottom of screen.
 
+### Responsive Capture Details
+
+`capture_layout.go` owns packet/event/call pane geometry and capture chrome.
+Rendering, keyboard and mouse input, scrollbars, and text selection use the same
+outer rectangles. Prefer side-by-side panes when useful widths fit, stacked panes
+when height permits, and the focused pane alone otherwise. `d` toggles visible
+details; `Esc` returns focus to the list without changing the split preference.
+Prepare geometry during updates, before offline page requests or input handling.
+
+Detail components take exact outer dimensions and use `DetailPaneGeometry` for
+padding and content bounds. `PrepareDetails`/`SetSize` prepare wrapping and viewport
+content; rendering remains read-only. Zero dimensions preserve hidden pane scroll.
+Focused inspection disables following and holds one bounded snapshot if the row
+is evicted; explicit clear/replacement releases inspection. Use `DetailSelection`
+for event actions and related-packet lookup so they target the displayed event.
+
 ### Context-Aware Footer
 
 **File:** `internal/pkg/tui/components/footer.go`

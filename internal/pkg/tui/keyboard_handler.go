@@ -306,6 +306,12 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case " ": // Space to pause/resume
 		return m.handlePauseResume()
 
+	case "esc":
+		if m.uiState.Tabs.GetActive() == 0 && m.captureDetailsFocused() {
+			m.focusCapturePane("left")
+		}
+		return m, nil
+
 	case "d":
 		return m.handleDKey()
 
@@ -445,10 +451,12 @@ func (m Model) handleClearAllFilters() (Model, tea.Cmd) {
 	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
+		m.resetCaptureInspection()
 		m.packetStore.ClearFilter()
 		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 		m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
 		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		m.updateDetailsPanel()
 
 		// Reset sync counters for incremental updates
 		_, _, total, _ := m.packetStore.GetBufferInfo()
@@ -494,9 +502,11 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 
 			// If no filters remain, show all packets
 			if chain.IsEmpty() {
+				m.resetCaptureInspection()
 				m.packetStore.ClearFilter()
 				m.lastFilterState = false
 				m.doFullPacketListRefresh(false)
+				m.updateDetailsPanel()
 				return m, toastCmd
 			}
 
@@ -511,6 +521,7 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	if m.uiState.ViewMode == "events" && m.eventStore != nil {
 		stats := m.eventStore.Stats()
+		m.resetCaptureInspection()
 		m.pendingRemoteEvents.clear()
 		m.eventStore.Reset()
 		m.syncEventsView()
@@ -526,9 +537,11 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	// Store count before clearing
 	packetCount := m.packetStore.PacketsCount
 
+	m.resetCaptureInspection()
 	m.packetStore.Clear()
 	m.eventViewDirty = true
 	m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+	m.updateDetailsPanel()
 
 	// Reset incremental sync counters so new packets will be added
 	m.lastSyncedTotal = 0
@@ -601,18 +614,8 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 
 	// On Capture tab: check view mode
 	if m.uiState.Tabs.GetActive() == 0 {
-		if m.uiState.ViewMode == "events" {
-			m.uiState.EventShowDetails = !m.uiState.EventShowDetails
-			m.syncEventsView()
-			if !m.uiState.EventShowDetails {
-				m.uiState.FocusedPane = "left"
-			}
-			return m, nil
-		}
-		// If in calls view mode, toggle CallsView details
-		if m.uiState.ViewMode == "calls" {
-			m.uiState.CallsView.ToggleDetails()
-			return m, nil
+		if m.responsiveCaptureView() {
+			return m.toggleCaptureDetails()
 		}
 
 		// If in queries view mode, toggle DNSQueriesView details
@@ -633,31 +636,6 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Otherwise, toggle packet details panel
-		m.uiState.ShowDetails = !m.uiState.ShowDetails
-
-		// When hiding details, return focus to packet list
-		if !m.uiState.ShowDetails && m.uiState.FocusedPane == "right" {
-			m.uiState.FocusedPane = "left"
-		}
-
-		// Recalculate packet list size based on new showDetails state
-		headerHeight := 2
-		tabsHeight := 4
-		bottomHeight := 4
-		contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
-		minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-		if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
-			// Details panel gets exactly what it needs for hex dump, packet list gets the rest
-			detailsWidth := 77 // Hex dump (72) + borders/padding (5)
-			listWidth := m.uiState.Width - detailsWidth
-			m.uiState.PacketList.SetSize(listWidth, contentHeight)
-			m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
-		} else {
-			// Full width for packet list
-			m.uiState.PacketList.SetSize(m.uiState.Width, contentHeight)
-			m.uiState.DetailsPanel.SetSize(0, contentHeight)
-		}
 		return m, nil
 	}
 

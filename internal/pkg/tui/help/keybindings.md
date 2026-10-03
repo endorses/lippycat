@@ -38,28 +38,41 @@ The tmux passthrough path requires `set -g allow-passthrough on` in tmux.
 
 Vim-style navigation works in list views.
 
-| Key           | Action           |
-| ------------- | ---------------- |
-| `j` / `Down`  | Move down        |
-| `k` / `Up`    | Move up          |
-| `h` / `Left`  | Focus left pane  |
-| `l` / `Right` | Focus right pane |
-| `g` / `Home`  | Jump to top      |
-| `G` / `End`   | Jump to bottom   |
-| `PgUp`        | Page up          |
-| `PgDown`      | Page down        |
+| Key           | Action             |
+| ------------- | ------------------ |
+| `j` / `Down`  | Move down          |
+| `k` / `Up`    | Move up            |
+| `h` / `Left`  | Focus list pane    |
+| `l` / `Right` | Focus details pane |
+| `g` / `Home`  | Jump to top        |
+| `G` / `End`   | Jump to bottom     |
+| `PgUp`        | Page up            |
+| `PgDown`      | Page down          |
 
 ## Capture Tab
 
-| Key | Action                      |
-| --- | --------------------------- |
-| `/` | Enter filter mode           |
-| `c` | Remove last filter          |
-| `C` | Clear all filters           |
-| `d` | Toggle details panel        |
-| `v` | Toggle view (packets/calls) |
-| `w` | Save packets to PCAP        |
-| `x` | Flush/clear packets         |
+| Key   | Action                        |
+| ----- | ----------------------------- |
+| `/`   | Enter filter mode             |
+| `c`   | Remove last filter            |
+| `C`   | Clear all filters             |
+| `d`   | Toggle details                |
+| `Esc` | Return from details to list   |
+| `v`   | Cycle packet/event/call views |
+| `w`   | Save packets to PCAP          |
+| `x`   | Flush/clear packets           |
+
+Packet, event, and call details adapt to the available space: beside the list,
+below it when the terminal is tall enough, or in the full content area. Press
+`d` to open or close details at any size; `Esc` returns focus to the list. Use
+`h`/`Left` and `l`/`Right` to switch panes. Resizing preserves the focused pane,
+selection, and scroll position (clamped to the available content).
+
+While details have focus, new arrivals do not replace the inspected item. Packet
+and event snapshots remain readable if their list row leaves the capture buffer;
+call details continue updating for the same call. Return to the list and use `End`
+to follow the latest arrivals again. Long values wrap and packet hex rows adapt
+to the pane width. Very short terminals reduce padding and header/tab chrome.
 
 ### Filter Mode
 

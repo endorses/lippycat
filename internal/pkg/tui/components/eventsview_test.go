@@ -46,14 +46,14 @@ func TestEventsViewSplitPanesExposeFocusAndFixedSize(t *testing.T) {
 	details := view.RenderDetails(60, 20, false)
 	assert.Equal(t, 100, lipgloss.Width(timeline))
 	assert.Equal(t, 20, lipgloss.Height(timeline))
-	assert.Equal(t, 62, lipgloss.Width(details))
+	assert.Equal(t, 60, lipgloss.Width(details))
 	assert.Equal(t, 20, lipgloss.Height(details))
 	assert.Contains(t, timeline, "┏")
 	assert.Contains(t, details, "╭")
 
 	view.PrepareLayout(100, 20, 60, 20)
 	focusedDetails := view.RenderDetails(60, 20, true)
-	assert.Equal(t, 62, lipgloss.Width(focusedDetails))
+	assert.Equal(t, 60, lipgloss.Width(focusedDetails))
 	assert.Contains(t, focusedDetails, "┏")
 }
 
@@ -451,8 +451,9 @@ func TestEventsViewDetailsPreparationPreservesAndInvalidatesCache(t *testing.T) 
 	assert.Contains(t, view.RenderDetails(77, 16, false), "Related packets are no longer buffered.")
 
 	view.ScrollDetailsToBottom()
+	oldOffset := view.detailsViewport.YOffset
 	view.PrepareLayout(100, 10, 90, 16)
-	assert.Zero(t, view.detailsViewport.YOffset, "width changes must rewrap detail content")
+	assert.Equal(t, min(oldOffset, max(0, view.detailsViewport.TotalLineCount()-view.detailsViewport.Height)), view.detailsViewport.YOffset, "width changes rewrap and clamp scrolling")
 	assert.Equal(t, 84, view.detailsViewport.Width)
 	view.ScrollDetailsToBottom()
 	view.SetTheme(view.theme)

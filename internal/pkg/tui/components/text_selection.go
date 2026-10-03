@@ -17,7 +17,8 @@ func (d *DetailsPanel) TextSelectionAt(x, y int) (selection.Rect, bool) {
 	if !d.ready {
 		return selection.Rect{}, false
 	}
-	body := selection.Rect{X: 3, Y: 2, Width: d.viewport.Width, Height: d.viewport.Height}
+	bodyLeft, top, _, _ := DetailPaneGeometry(d.width, d.height)
+	body := selection.Rect{X: bodyLeft, Y: top, Width: d.viewport.Width, Height: d.viewport.Height}
 	if !body.Contains(x, y) {
 		return selection.Rect{}, false
 	}
@@ -26,28 +27,28 @@ func (d *DetailsPanel) TextSelectionAt(x, y int) (selection.Rect, bool) {
 	if row >= len(lines) {
 		return body, true
 	}
-	offsetWidth, ok := selectionHexRow(lines[row])
+	offsetWidth, bytesPerRow, hexWidth, ok := selectionHexRowColumns(lines[row])
 	if !ok {
 		return body, true
 	}
 	left, width := 0, offsetWidth
 	switch column := x - body.X; {
-	case column >= offsetWidth+52:
-		left, width = offsetWidth+52, 16
-	case column >= offsetWidth+2 && column < offsetWidth+51:
-		left, width = offsetWidth+2, 49
+	case column >= offsetWidth+3+hexWidth:
+		left, width = offsetWidth+3+hexWidth, bytesPerRow
+	case column >= offsetWidth+2 && column < offsetWidth+2+hexWidth:
+		left, width = offsetWidth+2, hexWidth
 	case column >= offsetWidth:
 		return selection.Rect{}, false // Gaps between offset, hex, and ASCII.
 	}
 	first, last := row, row
 	for first > 0 {
-		if w, valid := selectionHexRow(lines[first-1]); !valid || w != offsetWidth {
+		if w, n, _, valid := selectionHexRowColumns(lines[first-1]); !valid || w != offsetWidth || n != bytesPerRow {
 			break
 		}
 		first--
 	}
 	for last+1 < len(lines) {
-		if w, valid := selectionHexRow(lines[last+1]); !valid || w != offsetWidth {
+		if w, n, _, valid := selectionHexRowColumns(lines[last+1]); !valid || w != offsetWidth || n != bytesPerRow {
 			break
 		}
 		last++
@@ -59,32 +60,53 @@ func (d *DetailsPanel) TextSelectionAt(x, y int) (selection.Rect, bool) {
 // selectionHexRow recognizes renderHexDump rows, including its space-padded
 // final row and offsets wider than four digits. Arbitrary metadata is not a dump.
 func selectionHexRow(line string) (int, bool) {
+	offsetWidth, _, _, ok := selectionHexRowColumns(line)
+	return offsetWidth, ok
+}
+
+func selectionHexRowColumns(line string) (int, int, int, bool) {
 	offsetWidth := strings.Index(line, "  ")
-	if offsetWidth < 4 || len(line) < offsetWidth+52 {
-		return 0, false
+	if offsetWidth < 4 {
+		return 0, 0, 0, false
 	}
 	for i := 0; i < offsetWidth; i++ {
 		if !selectionHexDigit(line[i]) {
-			return 0, false
+			return 0, 0, 0, false
 		}
 	}
-	filled := false
-	padding := false
-	for i := 0; i < 16; i++ {
-		start := offsetWidth + 2 + i*3
-		if i >= 8 {
-			start++
+	for _, count := range []int{16, 8, 4, 2, 1} {
+		hexWidth := 3 * count
+		if count >= 8 {
+			hexWidth++
 		}
-		if line[start:start+3] == "   " {
-			padding = true
+		asciiStart := offsetWidth + 3 + hexWidth
+		if len(line) < asciiStart+count || line[asciiStart-1] != ' ' {
 			continue
 		}
-		if padding || !selectionHexDigit(line[start]) || !selectionHexDigit(line[start+1]) || line[start+2] != ' ' {
-			return 0, false
+		filled, padding, valid := false, false, true
+		for i := 0; i < count; i++ {
+			start := offsetWidth + 2 + i*3
+			if i >= 8 {
+				start++
+			}
+			if line[start:start+3] == "   " {
+				padding = true
+				continue
+			}
+			if padding || !selectionHexDigit(line[start]) || !selectionHexDigit(line[start+1]) || line[start+2] != ' ' {
+				valid = false
+				break
+			}
+			filled = true
 		}
-		filled = true
+		if count >= 8 && line[offsetWidth+26] != ' ' {
+			valid = false
+		}
+		if filled && valid {
+			return offsetWidth, count, hexWidth, true
+		}
 	}
-	return offsetWidth, filled && line[offsetWidth+26] == ' ' && line[offsetWidth+51] == ' '
+	return 0, 0, 0, false
 }
 
 func selectionHexDigit(b byte) bool {

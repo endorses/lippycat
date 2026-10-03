@@ -253,6 +253,7 @@ func (m Model) handleOfflineFilter(msg offlineFilterMsg) (Model, tea.Cmd) {
 		b.current = nil
 		b.mu.Unlock()
 	}
+	m.resetCaptureInspection()
 	m.uiState.PacketList.Reset()
 	m.uiState.PacketList.SetVirtualPackets(msg.query.Count(), 0, nil)
 	if s.jump != nil {

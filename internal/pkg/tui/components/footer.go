@@ -248,6 +248,8 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	case 4: // Help tab
 		keybinds := []TabKeybind{
 			{Key: "/", Description: "search", ShortDesc: "srch", Essential: true},
+			{Key: "g", Description: "top", ShortDesc: "top", Essential: false},
+			{Key: "G", Description: "bottom", ShortDesc: "btm", Essential: false},
 		}
 		if f.hasHelpSearch {
 			keybinds = append(keybinds,

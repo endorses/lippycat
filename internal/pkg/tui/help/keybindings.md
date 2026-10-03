@@ -116,3 +116,12 @@ Arrow keys navigate spatially in the graph view.
 | `Esc`        | Cancel editing               |
 | `Left/Right` | Switch between modes         |
 | `j/k`        | Navigate settings            |
+
+## Help Tab
+
+| Key          | Action                          |
+| ------------ | ------------------------------- |
+| `Home` / `g` | Go to the top of the section    |
+| `End` / `G`  | Go to the bottom of the section |
+
+While entering a search, `g` and `G` are typed into the search query.

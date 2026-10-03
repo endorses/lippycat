@@ -80,6 +80,7 @@ func TestFooterClickableHintsAcrossTabs(t *testing.T) {
 			{text: "→: next", key: tea.KeyMsg{Type: tea.KeyRight}},
 		}},
 		{"help", 4, []footerHintExpectation{
+			footerRuneHint("g: top", "g"), footerRuneHint("G: bottom", "G"),
 			footerRuneHint("/: search", "/"), footerRuneHint("1: keys", "1"),
 			footerRuneHint("2: filters", "2"), footerRuneHint("3: commands", "3"),
 			footerRuneHint("4: workflows", "4"),
@@ -137,6 +138,7 @@ func TestFooterClickableDynamicHints(t *testing.T) {
 		footer.SetActiveTab(4)
 		footer.SetHasHelpSearch(true)
 		assertFooterHints(t, &footer, []footerHintExpectation{
+			footerRuneHint("g: top", "g"), footerRuneHint("G: bottom", "G"),
 			footerRuneHint("/: search", "/"), footerRuneHint("n: next", "n"),
 			footerRuneHint("N: previous", "N"), footerRuneHint("c: clear", "c"),
 			footerRuneHint("1: keys", "1"), footerRuneHint("2: filters", "2"),

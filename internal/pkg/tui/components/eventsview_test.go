@@ -4,6 +4,7 @@ package components
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -114,12 +115,56 @@ func TestEventTimelineColumnsContractResponsively(t *testing.T) {
 	narrow := eventTimelineColumnWidths(80)
 
 	assert.Equal(t, eventKindWidth, wide.kind)
-	assert.Equal(t, eventOriginWidth, wide.origin)
-	assert.Equal(t, eventFlowWidth, wide.flow)
+	assert.Greater(t, wide.origin, eventOriginWidth)
+	assert.Greater(t, wide.flow, eventFlowWidth)
 	assert.Equal(t, eventKindMinWidth, narrow.kind)
 	assert.Equal(t, eventOriginMinWidth, narrow.origin)
 	assert.GreaterOrEqual(t, narrow.flow, eventFlowMinWidth)
 	assert.Equal(t, 80, len([]rune(eventTimelineRow("12:34:56.789", "file_metadata", "processor-long", "192.0.2.1:12345 -> 198.51.100.2:443", "summary", 80))))
+}
+
+func TestEventTimelineUsesSurplusWidthForEndpointsAndOrigin(t *testing.T) {
+	flow := "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff:65535 -> ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff:65535"
+	origin := "processor-with-a-long-name"
+	wide := eventTimelineRow("12:34:56.789", "conn", compactNode(origin), flow, "TLS SF 21s", 194)
+	require.Contains(t, wide, flow)
+	require.Contains(t, wide, origin)
+	require.Contains(t, wide, "TLS SF 21s")
+	previous := eventTimelineColumnWidths(70)
+	for width := 71; width <= 300; width++ {
+		columns := eventTimelineColumnWidths(width)
+		require.GreaterOrEqual(t, columns.flow, previous.flow)
+		require.GreaterOrEqual(t, columns.origin, previous.origin)
+		require.GreaterOrEqual(t, width-columns.time-columns.kind-columns.origin-columns.flow-4, eventInfoMinWidth)
+		previous = columns
+	}
+}
+
+func TestEventTimelineResizeReformatsCachedRows(t *testing.T) {
+	v := NewEventsView()
+	event := dnsEvent("one", "example.org")
+	env := event.Envelope()
+	env.NodeID = "processor-with-a-long-name"
+	env.Flow.SourceAddress = netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+	env.Flow.DestinationAddress = env.Flow.SourceAddress
+	env.Flow.SourcePort, env.Flow.DestinationPort = 65535, 65535
+	v.SetEvents([]EventItem{{Event: events.NewDNSEvent(env)}})
+	var wide string
+	for _, width := range []int{120, 200, 120, 200} {
+		v.PrepareLayout(width, 20, 0, 0)
+		rendered := v.RenderTimeline(width, 20, true)
+		require.Equal(t, width, lipgloss.Width(rendered))
+		if width == 200 {
+			require.Contains(t, rendered, env.NodeID)
+			require.Contains(t, rendered, env.Flow.SourceAddress.String()+":65535 -> "+env.Flow.DestinationAddress.String()+":65535")
+			if wide != "" {
+				require.Equal(t, wide, rendered)
+			}
+			wide = rendered
+		} else {
+			require.NotContains(t, rendered, env.NodeID)
+		}
+	}
 }
 
 func TestEventsViewUsesPacketProtocolColors(t *testing.T) {

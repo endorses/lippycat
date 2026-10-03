@@ -752,6 +752,15 @@ func eventTimelineColumnWidths(width int) eventTimelineWidths {
 	grow(&columns.flow, eventFlowWidth)
 	grow(&columns.origin, eventOriginWidth)
 	grow(&columns.kind, eventKindWidth)
+	// Share surplus space between endpoints, origin, and Info. Keep bounded
+	// fields at useful maxima; Info receives everything left over.
+	const flowMaxWidth = 94 // Two full IPv6 addresses with ports and " -> ".
+	const originMaxWidth = 32
+	const infoPreferredWidth = 26
+	remaining -= min(remaining, infoPreferredWidth-eventInfoMinWidth)
+	extra := remaining
+	grow(&columns.flow, min(flowMaxWidth, columns.flow+extra*2/3))
+	grow(&columns.origin, min(originMaxWidth, columns.origin+extra/6))
 	return columns
 }
 
@@ -998,7 +1007,7 @@ func compactNode(node string) string {
 	}
 	parts := strings.Fields(sanitizeEventText(node))
 	sort.Strings(parts)
-	return truncateRunes(strings.Join(parts, " "), 16)
+	return strings.Join(parts, " ")
 }
 
 // SetInspecting retains one immutable event even when capture evicts its row.

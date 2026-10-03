@@ -112,27 +112,10 @@ func legacyEventTimelineRow(timestamp, kind, origin, flow, info string, width in
 	return legacyPadRunes(legacyTruncateRunes(row, width), width)
 }
 
+// The uncached renderer shares the current column policy; these comparisons
+// validate styling and caching, while dedicated tests validate responsive widths.
 func legacyEventTimelineColumnWidths(width int) eventTimelineWidths {
-	columns := eventTimelineWidths{
-		time: eventTimeWidth, kind: eventKindMinWidth,
-		origin: eventOriginMinWidth, flow: eventFlowMinWidth,
-	}
-	const separators = 4
-	remaining := width - columns.time - columns.kind - columns.origin - columns.flow - eventInfoMinWidth - separators
-	if remaining <= 0 {
-		return columns
-	}
-	grow := func(current *int, preferred int) {
-		extra := min(remaining, preferred-*current)
-		*current += extra
-		remaining -= extra
-	}
-	// Preserve endpoint readability first. Event kind and origin can safely
-	// contract to their short forms in narrower split layouts.
-	grow(&columns.flow, eventFlowWidth)
-	grow(&columns.origin, eventOriginWidth)
-	grow(&columns.kind, eventKindWidth)
-	return columns
+	return eventTimelineColumnWidths(width)
 }
 
 func legacyFitRunes(value string, width int) string {
@@ -177,7 +160,7 @@ func legacyCompactNode(node string) string {
 	}
 	parts := strings.Fields(legacySanitizeEventText(node))
 	sort.Strings(parts)
-	return legacyTruncateRunes(strings.Join(parts, " "), 16)
+	return strings.Join(parts, " ")
 }
 
 func renderEquivalenceItems(count int) []EventItem {

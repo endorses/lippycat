@@ -32,3 +32,6 @@ were fixed and covered by regressions.
 
 - [x] Fill the packet list immediately when its pane grows, preserving selection
       and following across stacked-to-side-by-side transitions.
+
+- [x] Expand event endpoint and origin columns with available pane width, and
+      verify contraction and cached rendering across width changes.

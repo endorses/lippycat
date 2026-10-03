@@ -27,6 +27,7 @@ type LiveSettings struct {
 	// For interface editing state
 	savedInterfaceIndex int
 	savedSelectedIfaces map[string]bool
+	savedPromiscuous    bool
 
 	// For text input editing state (restore on Escape)
 	savedBufferValue string
@@ -273,6 +274,7 @@ func (ls *LiveSettings) HandleKey(key string, params KeyHandlerParams) KeyHandle
 		switch params.FocusIndex {
 		case 1: // Interface field
 			// Handled specially by parent for editing state management
+			ls.FocusField(1)
 			result.Editing = true
 			return result
 
@@ -352,6 +354,7 @@ func (ls *LiveSettings) HandleInterfaceKey(msg tea.KeyMsg, theme themes.Theme) (
 		if !ls.interfaceList.SettingFilter() && !ls.interfaceList.IsFiltered() {
 			// Revert to saved state
 			ls.selectedIfaces = ls.savedSelectedIfaces
+			ls.promiscuous = ls.savedPromiscuous
 			delegate := newInterfaceDelegate(ls.selectedIfaces, theme)
 			ls.interfaceList.SetDelegate(delegate)
 			ls.interfaceList.Select(ls.savedInterfaceIndex)
@@ -369,6 +372,7 @@ func (ls *LiveSettings) HandleInterfaceKey(msg tea.KeyMsg, theme themes.Theme) (
 // SaveInterfaceState saves current interface selection state
 func (ls *LiveSettings) SaveInterfaceState() {
 	ls.savedInterfaceIndex = ls.interfaceList.Index()
+	ls.savedPromiscuous = ls.promiscuous
 	ls.savedSelectedIfaces = make(map[string]bool)
 	for k, v := range ls.selectedIfaces {
 		ls.savedSelectedIfaces[k] = v
@@ -406,10 +410,12 @@ func (ls *LiveSettings) Update(msg tea.Msg, focusIndex int) tea.Cmd {
 
 // FocusField focuses the text input at the given field index.
 // Live mode: field 3 = buffer, field 4 = filter.
-// Fields 1 (interface list) and 2 (promiscuous toggle) are not text inputs.
+// Field 1 saves interface selection; field 2 is an immediate toggle.
 // Also saves the current value for restoration on Escape.
 func (ls *LiveSettings) FocusField(fieldIndex int) {
 	switch fieldIndex {
+	case 1:
+		ls.SaveInterfaceState()
 	case 3:
 		ls.savedBufferValue = ls.bufferInput.Value()
 		ls.bufferInput.Focus()
@@ -458,6 +464,7 @@ func (ls *LiveSettings) UpdateInterfaceList(msg tea.Msg, theme themes.Theme) (bo
 			if !ls.interfaceList.SettingFilter() && !ls.interfaceList.IsFiltered() {
 				// Revert to saved state and exit
 				ls.selectedIfaces = ls.savedSelectedIfaces
+				ls.promiscuous = ls.savedPromiscuous
 				delegate := newInterfaceDelegate(ls.selectedIfaces, theme)
 				ls.interfaceList.SetDelegate(delegate)
 				ls.interfaceList.Select(ls.savedInterfaceIndex)

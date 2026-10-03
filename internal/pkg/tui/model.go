@@ -644,7 +644,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// This ensures toast auto-dismiss timer continues working
 	var toastCmd tea.Cmd
 	if m.uiState.Toast.IsActive() {
-		toastCmd = m.uiState.Toast.Update(msg)
+		mouse, isMouse := msg.(tea.MouseMsg)
+		if isMouse && m.uiState.Tabs.GetActive() == 0 && m.responsiveCaptureView() {
+			_, rect := m.captureToast()
+			if rect.contains(mouse.X, mouse.Y) {
+				m.scrollDrag = ""
+				if mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {
+					return m, m.uiState.Toast.Dismiss()
+				}
+				return m, nil
+			}
+		} else {
+			toastCmd = m.uiState.Toast.Update(msg)
+		}
 	}
 
 	// BUT: Don't intercept PacketMsg, TickMsg, or RestartCaptureMsg - those need to be handled by the main model

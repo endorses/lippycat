@@ -33,7 +33,8 @@ func (m Model) View() string {
 		if m.uiState.DevConsole != nil && m.uiState.DevConsole.IsVisible() {
 			return m.uiState.DevConsole.View()
 		}
-		return fitCapturePane(strings.Join(parts, "\n"), m.uiState.Width, m.uiState.Height)
+		view := fitCapturePane(strings.Join(parts, "\n"), m.uiState.Width, m.uiState.Height)
+		return m.overlayCaptureToast(view)
 	}
 
 	// Render components

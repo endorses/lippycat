@@ -107,8 +107,6 @@ func (m Model) captureChrome() (header, tabs, bottom string) {
 		extra = m.uiState.CallFilterInput.View()
 	case m.uiState.EventFilterMode:
 		extra = m.uiState.EventFilterInput.View()
-	case m.uiState.Toast.IsActive():
-		extra = m.uiState.Toast.View()
 	}
 	bottom = footer
 	if extra != "" {
@@ -121,7 +119,7 @@ func (m Model) captureChrome() (header, tabs, bottom string) {
 		tabs = ""
 	}
 	// Keep one content row even at extremely small sizes. The final hint row
-	// stays at the bottom, including while a filter or toast is displayed.
+	// stays at the bottom, including while a filter is displayed.
 	maxBottom := max(0, m.uiState.Height-1)
 	lines := strings.Split(bottom, "\n")
 	if len(lines) > maxBottom {

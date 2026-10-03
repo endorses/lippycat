@@ -3,10 +3,12 @@
 package components
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
@@ -51,7 +53,7 @@ type toastQueueItem struct {
 	supersessionKey string // Optional key for supersession (empty = no supersession)
 }
 
-// Toast represents a temporary notification that appears at the top-center of the screen
+// Toast represents a temporary notification positioned by its host view.
 type Toast struct {
 	active     bool
 	message    string
@@ -132,6 +134,17 @@ func (t *Toast) ShowWithKey(message string, toastType ToastType, duration time.D
 func (t *Toast) Hide() {
 	t.active = false
 	t.currentKey = ""
+}
+
+// Dismiss advances to the next queued notification after a user dismissal.
+func (t *Toast) Dismiss() tea.Cmd {
+	t.Hide()
+	if len(t.queue) == 0 {
+		return nil
+	}
+	next := t.queue[0]
+	t.queue = t.queue[1:]
+	return t.ShowWithKey(next.message, next.toastType, next.duration, next.supersessionKey)
 }
 
 // IsActive returns whether the toast is currently visible
@@ -238,6 +251,22 @@ func (t *Toast) View() string {
 	if !t.active {
 		return ""
 	}
+	return lipgloss.PlaceHorizontal(t.width, lipgloss.Center, t.renderBox(0, 0))
+}
+
+// OverlayView returns only the notification box, bounded by available cells.
+// Short panes omit vertical padding so the message remains visible.
+func (t *Toast) OverlayView(width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	return t.renderBox(width, height)
+}
+
+func (t *Toast) renderBox(width, height int) string {
+	if !t.active {
+		return ""
+	}
 
 	// Get colors based on toast type
 	var bgColor, fgColor string
@@ -266,12 +295,16 @@ func (t *Toast) View() string {
 		Background(lipgloss.Color(bgColor)).
 		Padding(1, 2) // Vertical padding of 1, horizontal padding of 2
 
-	styledContent := toastStyle.Render(content)
-
-	// Center the toast horizontally
-	return lipgloss.PlaceHorizontal(
-		t.width,
-		lipgloss.Center,
-		styledContent,
-	)
+	if width > 0 {
+		// Keep notifications compact: long messages are truncated to one row.
+		content = strings.ReplaceAll(content, "\n", " ")
+		verticalPadding := 1
+		if height < 3 {
+			verticalPadding = 0
+		}
+		horizontalPadding := min(2, max(0, (width-1)/2))
+		content = ansi.Truncate(content, width-2*horizontalPadding, "…")
+		toastStyle = toastStyle.Padding(verticalPadding, horizontalPadding).MaxWidth(width).MaxHeight(height)
+	}
+	return toastStyle.Render(content)
 }

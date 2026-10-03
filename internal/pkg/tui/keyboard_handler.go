@@ -478,7 +478,8 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
-		if m.packetStore.FilterChain.RemoveLast() {
+		chain := m.packetStore.FilterChain.Clone()
+		if chain.RemoveLast() {
 			// Show toast notification first
 			remainingCount := filterCount - 1
 			msg := "Last filter removed"
@@ -492,41 +493,15 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 			)
 
 			// If no filters remain, show all packets
-			if !m.packetStore.HasFilter() {
-				// Show all packets immediately when paused or offline
-				if m.captureMode == components.CaptureModeOffline || m.uiState.IsPaused() {
-					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-					_, _, total, _ := m.packetStore.GetBufferInfo()
-					m.lastSyncedTotal = total
-					m.lastSyncedFilteredCount = 0
-					m.lastFilterState = false
-				} else {
-					// Reset to unfiltered mode - incremental updates will handle the rest
-					m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
-					m.lastSyncedTotal = 0
-					m.lastSyncedFilteredCount = 0
-					m.lastFilterState = false
-				}
+			if chain.IsEmpty() {
+				m.packetStore.ClearFilter()
+				m.lastFilterState = false
+				m.doFullPacketListRefresh(false)
 				return m, toastCmd
 			}
 
-			// Reapply remaining filters when paused or offline
-			if m.captureMode == components.CaptureModeOffline || m.uiState.IsPaused() {
-				m.packetStore.ReapplyFilters()
-				m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
-				_, _, _, matchedPackets := m.packetStore.GetBufferInfo()
-				m.lastSyncedFilteredCount = matchedPackets
-				m.lastFilterState = true
-			} else {
-				// Clear filtered packets - new packets will flow through remaining filters
-				// via AddPacketBatch() and incremental updates in updatePacketListFiltered()
-				m.packetStore.ClearFilteredPackets()
-				m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
-				m.lastSyncedFilteredCount = 0
-				m.lastFilterState = true
-			}
-
-			return m, toastCmd
+			filterCmd := m.startPacketFilter(chain)
+			return m, tea.Batch(filterCmd, toastCmd)
 		}
 	}
 	return m, nil

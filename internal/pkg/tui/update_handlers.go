@@ -214,16 +214,17 @@ func (m Model) handleUpdateBufferSizeMsg(msg components.UpdateBufferSizeMsg) (Mo
 		m.uiState.SettingsView.SaveBufferSize()
 		return m, nil
 	}
+	var filterCmd tea.Cmd
 	if !m.packetStore.HasFilter() {
-		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		m.doFullPacketListRefresh(false)
 	} else {
-		m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+		filterCmd = m.startPacketFilter(m.packetStore.FilterChain)
 	}
 
 	// Save to config file
 	m.uiState.SettingsView.SaveBufferSize()
 
-	return m, nil
+	return m, filterCmd
 }
 
 // handleAddNodeMsg handles adding a new remote processor node

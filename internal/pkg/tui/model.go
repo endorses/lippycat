@@ -390,6 +390,9 @@ func (m Model) Init() tea.Cmd {
 // Shutdown cleans up resources before quitting.
 // Call this before tea.Quit to ensure proper cleanup.
 func (m *Model) Shutdown() {
+	if m.packetStore != nil {
+		m.packetStore.CancelFilter()
+	}
 	// Clear program reference FIRST to prevent goroutines from sending
 	// messages to a terminated program (causes "kevent: bad file descriptor")
 	ClearCurrentProgram()
@@ -476,6 +479,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Lifecycle messages bypass modal/settings routing so cleanup cannot stall.
 	switch value := msg.(type) {
+	case packetFilterMsg:
+		return m.handlePacketFilter(value)
 	case offlineFilterMsg:
 		return m.handleOfflineFilter(value)
 	case offlineFilterProgressMsg:

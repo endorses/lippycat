@@ -14,6 +14,8 @@ import (
 // and prevent overflow for long-running capture sessions.
 type PacketStore struct {
 	mu               sync.RWMutex
+	filterScan       *PacketFilterScan
+	packetSequence   int64 // Arrival identity, independent of resettable display counters.
 	flowIndexEnabled bool
 	flowCounts       map[packetFlowKey]int
 	flowSelection    packetFlowSelection
@@ -57,6 +59,7 @@ func (ps *PacketStore) AddPacket(packet components.PacketDisplay) {
 	}
 
 	ps.TotalPackets++
+	ps.packetSequence++
 
 	// Apply filter
 	if ps.FilterChain.Match(packet) {
@@ -100,6 +103,7 @@ func (ps *PacketStore) AddPacketBatch(packets []components.PacketDisplay) {
 		}
 
 		ps.TotalPackets++
+		ps.packetSequence++
 
 		// Apply filter (batch evaluation)
 		if !filterActive || ps.FilterChain.Match(*packet) {
@@ -166,6 +170,7 @@ func (ps *PacketStore) GetFilteredPackets() []components.PacketDisplay {
 func (ps *PacketStore) ResizeBuffer(newSize int) []components.PacketDisplay {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 
 	oldMaxPackets := ps.MaxPackets
 	oldPackets := ps.Packets
@@ -229,6 +234,7 @@ func (ps *PacketStore) ResizeBuffer(newSize int) []components.PacketDisplay {
 func (ps *PacketStore) SetFilter(filterChain *filters.FilterChain) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 
 	ps.FilterChain = filterChain
 	ps.reapplyFilters()
@@ -238,6 +244,7 @@ func (ps *PacketStore) SetFilter(filterChain *filters.FilterChain) {
 func (ps *PacketStore) ClearFilter() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 
 	ps.FilterChain = filters.NewFilterChain()
 	ps.reapplyFilters()
@@ -280,6 +287,7 @@ func (ps *PacketStore) getPacketsInOrderLocked() []components.PacketDisplay {
 func (ps *PacketStore) Clear() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 
 	clear(ps.Packets)
 	ps.flowCounts = nil
@@ -330,16 +338,17 @@ func (ps *PacketStore) MatchFilter(packet components.PacketDisplay) bool {
 func (ps *PacketStore) AddFilter(filter filters.Filter) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 	ps.FilterChain.Add(filter)
 }
 
 // ReapplyFilters re-evaluates all packets against the current filter chain.
 // Call this after AddFilter() when you need immediate results (e.g., offline mode).
-// For live capture at high traffic rates, this is typically not needed as new
-// packets will flow through the filter automatically.
+// Use BeginFilter for an asynchronous scan while new arrivals continue filtering.
 func (ps *PacketStore) ReapplyFilters() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 	ps.reapplyFilters()
 }
 
@@ -358,7 +367,9 @@ func (ps *PacketStore) GetPackets() []components.PacketDisplay {
 func (ps *PacketStore) SetPackets(packets []components.PacketDisplay, head, count int) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 	ps.Packets = packets
+	ps.packetSequence += int64(count)
 	ps.PacketsHead = head
 	ps.PacketsCount = count
 	ps.rebuildPacketFlowsLocked()
@@ -375,6 +386,7 @@ func (ps *PacketStore) GetBufferInfo() (maxPackets, packetsCount int, totalPacke
 func (ps *PacketStore) SetBufferSize(size int) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 	ps.MaxPackets = size
 }
 
@@ -382,6 +394,7 @@ func (ps *PacketStore) SetBufferSize(size int) {
 func (ps *PacketStore) ResetCounts() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 	ps.TotalPackets = 0
 	ps.MatchedPackets = 0
 }
@@ -390,6 +403,7 @@ func (ps *PacketStore) ResetCounts() {
 func (ps *PacketStore) ClearAndResize(newSize int) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 	ps.Packets = make([]components.PacketDisplay, newSize)
 	ps.PacketsHead = 0
 	ps.PacketsCount = 0
@@ -417,6 +431,7 @@ func (ps *PacketStore) UpdateMatchedCount() {
 func (ps *PacketStore) ClearFilteredPackets() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	ps.cancelFilterScanLocked()
 	ps.FilteredPackets = []components.PacketDisplay{}
 	ps.MatchedPackets = 0
 }

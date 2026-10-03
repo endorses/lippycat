@@ -12,9 +12,8 @@ import (
 )
 
 // parseAndApplyFilter parses and applies a filter expression to the packet list.
-// For offline mode or paused: Reapplies filter to existing packets immediately.
-// For live mode (not paused): Does NOT reapply - at high traffic rates the buffer refills quickly.
-// This prevents UI freezing at 300-400+ Mbit/s by avoiding O(n) scans.
+// Retained live/remote packets are filtered in the background while new arrivals
+// are evaluated incrementally against the new chain.
 func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 	if m.offlineSession != nil {
 		filter, err := filters.ParseBooleanExpression(filterStr, m.parseSimpleFilter)
@@ -36,8 +35,9 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 
 	// Try to parse as boolean expression first
 	filter, err := filters.ParseBooleanExpression(filterStr, m.parseSimpleFilter)
+	chain := m.packetStore.FilterChain.Clone()
 	if err == nil && filter != nil {
-		m.packetStore.AddFilter(filter)
+		chain.Add(filter)
 	} else if err != nil {
 		// Show error toast for invalid filter
 		return m.uiState.Toast.Show(
@@ -47,37 +47,19 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 		)
 	}
 
-	// For offline mode or when paused, reapply filters to existing packets immediately
-	// since no new packets will arrive.
-	if m.captureMode == components.CaptureModeOffline || m.uiState.IsPaused() {
-		m.packetStore.ReapplyFilters()
-		m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
-		// Reset sync counters for incremental updates
-		_, _, _, matchedPackets := m.packetStore.GetBufferInfo()
-		m.lastSyncedFilteredCount = matchedPackets
-		m.lastFilterState = true
-	} else {
-		// For live mode (not paused), clear filtered packets - new packets will flow through
-		// filter automatically via AddPacketBatch() and incremental updates.
-		// At high traffic rates (300-400 Mbit/s), buffer refills in seconds anyway.
-		m.packetStore.ClearFilteredPackets()
-		m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
-		// Reset sync counters so incremental updates work correctly
-		m.lastSyncedFilteredCount = 0
-		m.lastFilterState = true
-	}
+	filterCmd := m.startPacketFilter(chain)
 
 	// Show toast with filter count
 	filterCount := m.packetStore.FilterChain.Count()
 	if filterCount > 1 {
-		return m.uiState.Toast.Show(
+		return tea.Batch(filterCmd, m.uiState.Toast.Show(
 			fmt.Sprintf("Filter added (%d filters active)", filterCount),
 			components.ToastSuccess,
 			components.ToastDurationShort,
-		)
+		))
 	}
 
-	return nil
+	return filterCmd
 }
 
 // parseSimpleFilter parses a simple (non-boolean) filter expression
@@ -154,9 +136,6 @@ func isBPFExpression(s string) bool {
 
 	return false
 }
-
-// Note: applyFilters() was removed in favor of async reapplication
-// via startAsyncFilterReapply() to prevent UI freezing at high packet rates.
 
 // parseCallFilter parses a filter expression for call filtering
 // Supports:

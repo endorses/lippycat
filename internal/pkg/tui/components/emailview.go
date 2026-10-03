@@ -500,8 +500,7 @@ func truncateEmail(s string, width int) string {
 func (ev *EmailView) renderSessionDetails(session *EmailSession, width, height int) string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(ev.theme.InfoColor).
-		MarginBottom(1)
+		Foreground(ev.theme.InfoColor)
 
 	sectionHeaderStyle := lipgloss.NewStyle().
 		Bold(true).

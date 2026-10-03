@@ -185,7 +185,7 @@ func (d *DetailsPanel) renderContent() string {
 
 	// Packet Details Section
 	content.WriteString(sectionStyle.Render("📋 Packet Details"))
-	content.WriteString("\n\n")
+	content.WriteString("\n")
 
 	content.WriteString(labelStyle.Render("Timestamp: "))
 	content.WriteString(valueStyle.Render(d.packet.Timestamp.Format("2006-01-02 15:04:05.000000")))
@@ -230,7 +230,7 @@ func (d *DetailsPanel) renderContent() string {
 	if d.packet.VoIPData != nil {
 		content.WriteString("\n\n")
 		content.WriteString(sectionStyle.Render("📞 VoIP Details"))
-		content.WriteString("\n\n")
+		content.WriteString("\n")
 
 		if d.packet.VoIPData.CallID != "" {
 			content.WriteString(labelStyle.Render("Call-ID: "))
@@ -326,7 +326,7 @@ func (d *DetailsPanel) renderContent() string {
 	if d.packet.DNSData != nil {
 		content.WriteString("\n\n")
 		content.WriteString(sectionStyle.Render("🔍 DNS Details"))
-		content.WriteString("\n\n")
+		content.WriteString("\n")
 
 		// Transaction ID
 		content.WriteString(labelStyle.Render("Transaction ID: "))
@@ -425,7 +425,7 @@ func (d *DetailsPanel) renderContent() string {
 	if d.packet.TLSData != nil {
 		content.WriteString("\n\n")
 		content.WriteString(sectionStyle.Render("🔐 TLS Details"))
-		content.WriteString("\n\n")
+		content.WriteString("\n")
 
 		// Handshake type
 		content.WriteString(labelStyle.Render("Handshake: "))
@@ -543,7 +543,7 @@ func (d *DetailsPanel) renderContent() string {
 	// Hex Dump Section
 	content.WriteString("\n\n")
 	content.WriteString(sectionStyle.Render("🔍 Hex Dump"))
-	content.WriteString("\n\n")
+	content.WriteString("\n")
 
 	if d.packet.RawData != nil && len(d.packet.RawData) > 0 {
 		content.WriteString(d.renderHexDump(d.packet.RawData))
@@ -801,7 +801,7 @@ func (d *DetailsPanel) renderLayerSummary(contentWidth int) string {
 		Foreground(d.theme.InfoColor)
 
 	sb.WriteString(sectionStyle.Render("📑 Layers"))
-	sb.WriteString("\n\n")
+	sb.WriteString("\n")
 
 	// Link layer (Ethernet, Linux SLL, etc.)
 	if eth := packet.Layer(layers.LayerTypeEthernet); eth != nil {

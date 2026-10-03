@@ -555,8 +555,7 @@ func truncateHTTP(s string, width int) string {
 func (hv *HTTPView) renderRequestDetails(req *HTTPRequest, width, height int) string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(hv.theme.InfoColor).
-		MarginBottom(1)
+		Foreground(hv.theme.InfoColor)
 
 	sectionHeaderStyle := lipgloss.NewStyle().
 		Bold(true).

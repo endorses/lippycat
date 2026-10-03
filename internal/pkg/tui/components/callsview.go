@@ -1254,8 +1254,7 @@ func (cv *CallsView) renderCallDetailsContent(selectedCall *Call, width int) str
 	// Title style
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(cv.theme.InfoColor).
-		MarginBottom(1)
+		Foreground(cv.theme.InfoColor)
 
 	// Section header style
 	sectionHeaderStyle := lipgloss.NewStyle().

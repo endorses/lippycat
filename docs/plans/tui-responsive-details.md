@@ -25,3 +25,5 @@ were fixed and covered by regressions.
       border in full-width, stacked, and side-by-side layouts.
 - [x] Keep list focus and automatic following when toggling either split layout;
       pin only in full-area details and restore prior following when returning.
+
+- [x] Remove the blank line after blue detail headings in every layout.

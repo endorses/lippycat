@@ -114,7 +114,6 @@ func TestCallDetailsSelectionPreservesSectionsWithoutTrailingPadding(t *testing.
 		X: region.X + region.Width - 1, Y: region.Y + region.Height - 1, Action: tea.MouseActionMotion,
 	})
 	require.Equal(t, `📞 Call Details
-
 Call-ID: selection-call
 From: sip:alice@example.test
 To: sip:bob@example.test

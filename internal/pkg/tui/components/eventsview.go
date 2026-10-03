@@ -534,7 +534,7 @@ func (v *EventsView) renderEventDetailsContent(item EventItem, width int) string
 		}
 		content.WriteString("\n\n")
 		content.WriteString(sectionStyle.Render(title))
-		content.WriteString("\n\n")
+		content.WriteString("\n")
 		for _, row := range visible {
 			content.WriteString(renderEventDetailRow(row.label, row.value, width, labelStyle, valueStyle, mutedStyle, v.theme))
 			content.WriteByte('\n')

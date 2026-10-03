@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/tui/components/filtermanager"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
@@ -126,12 +127,22 @@ func (fm *FilterManager) SetSize(width, height int) {
 	contentWidth := ModalContentWidth(ModalRenderOptions{Width: width, ModalWidth: 80})
 	fm.filterList.SetSize(max(1, contentWidth), max(1, height-15))
 	fm.searchInput.Width = max(1, contentWidth-10)
-	if fm.formState != nil {
-		fm.formState.patternInput.Width = max(1, contentWidth-14)
-		fm.formState.descInput.Width = max(1, contentWidth-14)
-	}
+	fm.sizeFormInputs(contentWidth)
 	fm.confirmDialog.SetSize(width, height)
 	fm.modalState.ResetClicks()
+}
+
+// sizeFormInputs reserves room for each label, prompt, and cursor cell.
+func (fm *FilterManager) sizeFormInputs(contentWidth int) {
+	if fm.formState == nil {
+		return
+	}
+	resize := func(input *textinput.Model, label string) {
+		input.Width = max(1, contentWidth-ansi.StringWidth(label+input.Prompt)-1)
+		input.SetCursor(input.Position())
+	}
+	resize(&fm.formState.patternInput, "Pattern: ")
+	resize(&fm.formState.descInput, "Description: ")
 }
 
 // Activate shows the filter manager for a specific node
@@ -654,15 +665,12 @@ func (fm *FilterManager) deleteFilter(filter *management.Filter) tea.Cmd {
 func (fm *FilterManager) initializeAddForm() {
 	fm.statusText = ""
 	patternInput := textinput.New()
-	patternInput.Placeholder = "e.g., alicent@example.com"
 	patternInput.CharLimit = 200
-	patternInput.Width = max(1, ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80})-14)
 	patternInput.Focus()
 
 	descInput := textinput.New()
 	descInput.Placeholder = "Optional description"
 	descInput.CharLimit = 500
-	descInput.Width = max(1, ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80})-14)
 
 	// Choose default filter type based on available hunters
 	defaultType := management.FilterType_FILTER_BPF
@@ -680,6 +688,8 @@ func (fm *FilterManager) initializeAddForm() {
 		activeField:   0,
 	}
 
+	fm.formState.patternInput.Placeholder = filtermanager.PatternPlaceholder(fm.formState.filterType)
+	fm.sizeFormInputs(ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80}))
 	fm.modalState.Focus = "pattern"
 	fm.modalState.Scroll = 0
 	fm.mode = ModeAdd
@@ -696,13 +706,11 @@ func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
 	patternInput := textinput.New()
 	patternInput.SetValue(filter.Pattern)
 	patternInput.CharLimit = 200
-	patternInput.Width = max(1, ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80})-14)
 	patternInput.Focus()
 
 	descInput := textinput.New()
 	descInput.SetValue(filter.Description)
 	descInput.CharLimit = 500
-	descInput.Width = max(1, ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80})-14)
 
 	fm.formState = &FilterFormState{
 		filterID:      filter.Id,
@@ -714,6 +722,8 @@ func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
 		activeField:   0,
 	}
 
+	fm.formState.patternInput.Placeholder = filtermanager.PatternPlaceholder(fm.formState.filterType)
+	fm.sizeFormInputs(ModalContentWidth(ModalRenderOptions{Width: fm.width, ModalWidth: 80}))
 	fm.modalState.Focus = "pattern"
 	fm.modalState.Scroll = 0
 	fm.mode = ModeEdit
@@ -731,14 +741,7 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		if fm.formState != nil && (fm.formState.activeField == 0 || fm.formState.activeField == 1) {
-			var cmd tea.Cmd
-			switch fm.formState.activeField {
-			case 0:
-				fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
-			case 1:
-				fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
-			}
-			return cmd
+			return fm.updateFormInput(msg)
 		}
 		return nil
 
@@ -752,14 +755,10 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 			return fm.ActivateAction("form-targets")
 		}
 		if fm.formState != nil && fm.formState.activeField == 0 {
-			var cmd tea.Cmd
-			fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
-			return cmd
+			return fm.updateFormInput(msg)
 		}
 		if fm.formState != nil && fm.formState.activeField == 1 {
-			var cmd tea.Cmd
-			fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
-			return cmd
+			return fm.updateFormInput(msg)
 		}
 		return nil
 
@@ -783,19 +782,12 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 
 	case "left":
 		if fm.formState != nil && (fm.formState.activeField == 0 || fm.formState.activeField == 1) {
-			var cmd tea.Cmd
-			switch fm.formState.activeField {
-			case 0:
-				fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
-			case 1:
-				fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
-			}
-			return cmd
+			return fm.updateFormInput(msg)
 		}
 		if fm.formState != nil {
 			switch fm.formState.activeField {
 			case 2:
-				fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, false, fm.availableHunters)
+				fm.cycleFormFilterType(false)
 			case 3:
 				fm.formState.enabled = !fm.formState.enabled
 			}
@@ -804,19 +796,12 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 
 	case "right":
 		if fm.formState != nil && (fm.formState.activeField == 0 || fm.formState.activeField == 1) {
-			var cmd tea.Cmd
-			switch fm.formState.activeField {
-			case 0:
-				fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
-			case 1:
-				fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
-			}
-			return cmd
+			return fm.updateFormInput(msg)
 		}
 		if fm.formState != nil {
 			switch fm.formState.activeField {
 			case 2:
-				fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, true, fm.availableHunters)
+				fm.cycleFormFilterType(true)
 			case 3:
 				fm.formState.enabled = !fm.formState.enabled
 			}
@@ -825,7 +810,7 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 
 	case "ctrl+t":
 		if fm.formState != nil {
-			fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, true, fm.availableHunters)
+			fm.cycleFormFilterType(true)
 		}
 		return nil
 
@@ -837,16 +822,37 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 
 	default:
 		if fm.formState != nil {
-			var cmd tea.Cmd
-			switch fm.formState.activeField {
-			case 0:
-				fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
-			case 1:
-				fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
-			}
-			return cmd
+			return fm.updateFormInput(msg)
 		}
 		return nil
+	}
+}
+
+func (fm *FilterManager) updateFormInput(msg tea.Msg) tea.Cmd {
+	var input *textinput.Model
+	switch fm.formState.activeField {
+	case 0:
+		input = &fm.formState.patternInput
+	case 1:
+		input = &fm.formState.descInput
+	default:
+		return nil
+	}
+	previous := input.Value()
+	var cmd tea.Cmd
+	*input, cmd = input.Update(msg)
+	if input.Value() != previous {
+		fm.statusText = ""
+	}
+	return cmd
+}
+
+func (fm *FilterManager) cycleFormFilterType(forward bool) {
+	previous := fm.formState.filterType
+	fm.formState.filterType = filtermanager.CycleFormFilterType(previous, forward, fm.availableHunters)
+	fm.formState.patternInput.Placeholder = filtermanager.PatternPlaceholder(fm.formState.filterType)
+	if fm.formState.filterType != previous {
+		fm.statusText = ""
 	}
 }
 

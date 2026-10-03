@@ -82,7 +82,9 @@ func (fm *FilterManager) ModalOptions() ModalRenderOptions {
 		y := len(lines)
 		text = ansi.Truncate(strings.ReplaceAll(text, "\n", " "), width, "…")
 		if fm.modalState.Focus == id {
-			text = lipgloss.NewStyle().Bold(true).Underline(true).Render(text)
+			// Inputs already contain ANSI cursor and color sequences. Lip Gloss
+			// renders underlines rune by rune, which corrupts those sequences.
+			text = lipgloss.NewStyle().Bold(true).Render(text)
 		}
 		lines = append(lines, text)
 		if id != "" {
@@ -191,7 +193,12 @@ func (fm *FilterManager) ModalOptions() ModalRenderOptions {
 		row("", "Operation pending…", false)
 	}
 	if fm.statusText != "" {
-		row("", fm.statusText, false)
+		status := fm.statusText
+		if fm.mode == ModeAdd || fm.mode == ModeEdit {
+			// Form validation errors block saving and should stand out from normal status.
+			status = lipgloss.NewStyle().Foreground(fm.theme.ErrorColor).Render(status)
+		}
+		row("", status, false)
 	}
 	opts.Content = strings.Join(lines, "\n")
 	return opts
@@ -270,7 +277,7 @@ func (fm *FilterManager) ActivateAction(id string) tea.Cmd {
 		case "save":
 			return fm.saveFilter()
 		case "form-type":
-			fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, true, fm.availableHunters)
+			fm.cycleFormFilterType(true)
 		case "form-enabled":
 			fm.formState.enabled = !fm.formState.enabled
 		case "form-targets":

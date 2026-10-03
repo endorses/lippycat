@@ -8,7 +8,10 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,6 +24,128 @@ func clickableFilterManager() FilterManager {
 		{Id: "two", Pattern: "two", Type: management.FilterType_FILTER_BPF, Enabled: false},
 	})
 	return fm
+}
+
+func TestFilterModalEditorColoredNavigation(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+
+	for _, mode := range []string{"new", "edit"} {
+		for _, width := range []int{100, 48} {
+			t.Run(fmt.Sprintf("%s/width-%d", mode, width), func(t *testing.T) {
+				fm := clickableFilterManager()
+				fm.SetSize(width, 32)
+				fm.ActivateAction(mode)
+				initialBounds := LayoutModal(fm.ModalOptions()).Bounds
+				check := func() {
+					t.Helper()
+					opts := fm.ModalOptions()
+					rows := strings.Split(ansi.Strip(opts.Content), "\n")
+					require.Len(t, rows, 5)
+					// Styling a focused row must preserve the input's visible text,
+					// including its cursor, placeholder, and viewport padding.
+					require.Equal(t, "Pattern: "+ansi.Strip(fm.formState.patternInput.View()), rows[0])
+					require.Equal(t, "Description: "+ansi.Strip(fm.formState.descInput.View()), rows[1])
+					layout := LayoutModal(opts)
+					require.Equal(t, 5, layout.FullContentHeight)
+					require.Equal(t, initialBounds, layout.Bounds)
+					lines := strings.Split(ansi.Strip(layout.View), "\n")
+					require.Len(t, lines, 32)
+					for _, line := range lines {
+						require.Equal(t, width, ansi.StringWidth(line))
+					}
+					for i, label := range []string{"Pattern:", "Description:", "Type:", "Status:", "Targets:"} {
+						require.Contains(t, lines[layout.ContentBounds.Min.Y+i], label)
+					}
+				}
+				check()
+				for _, key := range []tea.KeyType{tea.KeyDown, tea.KeyUp, tea.KeyTab, tea.KeyShiftTab} {
+					for i := 0; i < 20; i++ {
+						fm.Update(tea.KeyMsg{Type: key})
+						check()
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestFilterModalPatternExamplesFollowType(t *testing.T) {
+	fm := clickableFilterManager()
+	fm.ActivateAction("new")
+	require.Equal(t, management.FilterType_FILTER_BPF, fm.formState.filterType)
+	require.Equal(t, "e.g., port 5060", fm.formState.patternInput.Placeholder)
+
+	// Both keyboard cycling and the clickable type control refresh the example.
+	fm.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	require.Equal(t, management.FilterType_FILTER_IP_ADDRESS, fm.formState.filterType)
+	require.Equal(t, "e.g., 192.168.1.0/24", fm.formState.patternInput.Placeholder)
+	fm.ActivateAction("form-type")
+	require.Equal(t, "e.g., port 5060", fm.formState.patternInput.Placeholder)
+	fm.HandleModalFocus("form-type")
+	fm.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	require.Equal(t, "e.g., 192.168.1.0/24", fm.formState.patternInput.Placeholder)
+	fm.Update(tea.KeyMsg{Type: tea.KeyRight})
+	require.Equal(t, "e.g., port 5060", fm.formState.patternInput.Placeholder)
+
+	fm.ActivateAction("cancel")
+	fm.allFilters[0].Type = management.FilterType_FILTER_IP_ADDRESS
+	fm.ActivateAction("edit")
+	require.Equal(t, "e.g., 192.168.1.0/24", fm.formState.patternInput.Placeholder)
+	require.Equal(t, "one", fm.formState.patternInput.Value())
+}
+
+func TestFilterModalValidationClearsAfterEditing(t *testing.T) {
+	fm := clickableFilterManager()
+	fm.ActivateAction("new")
+	require.Nil(t, fm.ActivateAction("save"))
+	require.Contains(t, fm.ModalOptions().Content, "Pattern cannot be empty")
+
+	// Navigation alone does not dismiss the error.
+	fm.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	require.Contains(t, fm.ModalOptions().Content, "Pattern cannot be empty")
+	fm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("port 5060")})
+	require.NotContains(t, fm.ModalOptions().Content, "Pattern cannot be empty")
+	cmd := fm.ActivateAction("save")
+	require.NotNil(t, cmd)
+	require.Equal(t, "port 5060", cmd().(FilterOperationMsg).Filter.Pattern)
+}
+
+func TestFilterModalValidationClearsAfterTypeChange(t *testing.T) {
+	for _, useMouse := range []bool{false, true} {
+		fm := clickableFilterManager()
+		fm.ActivateAction("new")
+		fm.ActivateAction("save")
+		if useMouse {
+			clickFilterTarget(t, &fm, "form-type")
+		} else {
+			fm.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+		}
+		require.Empty(t, fm.statusText)
+		// The next save still validates the empty pattern.
+		require.Nil(t, fm.ActivateAction("save"))
+		require.Contains(t, fm.ModalOptions().Content, "Pattern cannot be empty")
+	}
+}
+
+func TestFilterModalInputSizingAfterResize(t *testing.T) {
+	fm := clickableFilterManager()
+	fm.ActivateAction("new")
+	fm.formState.patternInput.SetValue(strings.Repeat("p", 100))
+	fm.formState.descInput.SetValue(strings.Repeat("d", 200))
+	for _, width := range []int{48, 100, 60} {
+		fm.SetSize(width, 32)
+		for _, field := range []string{"pattern", "description"} {
+			fm.HandleModalFocus(field)
+			opts := fm.ModalOptions()
+			rows := strings.Split(ansi.Strip(opts.Content), "\n")
+			require.Equal(t, "Pattern: "+ansi.Strip(fm.formState.patternInput.View()), rows[0])
+			require.Equal(t, "Description: "+ansi.Strip(fm.formState.descInput.View()), rows[1])
+			require.NotContains(t, rows[1], "…")
+			require.LessOrEqual(t, ansi.StringWidth(rows[1]), ModalContentWidth(opts))
+		}
+	}
 }
 func clickFilterTarget(t *testing.T, fm *FilterManager, id string) tea.Cmd {
 	t.Helper()

@@ -67,6 +67,7 @@ func TestButtonsUseRenderedCellGeometry(t *testing.T) {
 		layout := LayoutModal(m.ModalOptions())
 		require.False(t, layout.Fallback)
 		lines := strings.Split(ansi.Strip(layout.View), "\n")
+		buttonRows := make(map[int]image.Rectangle)
 		for _, hit := range layout.Hits {
 			if hit.ID == "field" {
 				continue
@@ -74,6 +75,21 @@ func TestButtonsUseRenderedCellGeometry(t *testing.T) {
 			line := ansi.Cut(lines[hit.Bounds.Min.Y], hit.Bounds.Min.X, hit.Bounds.Max.X)
 			require.True(t, strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "▸ "), line)
 			require.Equal(t, hit.Bounds.Dx(), ansi.StringWidth(line))
+			buttonRows[hit.Bounds.Min.Y] = buttonRows[hit.Bounds.Min.Y].Union(hit.Bounds)
+		}
+		for _, bounds := range buttonRows {
+			left := bounds.Min.X - layout.ContentBounds.Min.X
+			right := layout.ContentBounds.Max.X - bounds.Max.X
+			require.GreaterOrEqual(t, left, 0)
+			require.InDelta(t, left, right, 1, "each button row must be centered")
+			count := len(m.actions)
+			if left > 0 {
+				HandleModalInput(m, buttonPress(image.Pt(bounds.Min.X-1, bounds.Min.Y)))
+			}
+			if right > 0 {
+				HandleModalInput(m, buttonPress(image.Pt(bounds.Max.X, bounds.Min.Y)))
+			}
+			require.Len(t, m.actions, count, "centering margins must not activate buttons")
 		}
 		// The displayed button padding is clickable; the gap after it is not.
 		hit := buttonHit(t, m, "save")

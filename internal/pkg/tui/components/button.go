@@ -112,6 +112,18 @@ func layoutActionBar(actions []ModalAction, focus string, width int, theme theme
 	if line != "" {
 		layout.lines = append(layout.lines, line)
 	}
+	// Center each wrapped row as a group, moving its click targets with it.
+	offsets := make([]int, len(layout.lines))
+	for i, line := range layout.lines {
+		if line != "" {
+			offsets[i] = (width - ansi.StringWidth(line)) / 2
+			layout.lines[i] = strings.Repeat(" ", offsets[i]) + line
+		}
+	}
+	for i := range layout.hits {
+		hit := &layout.hits[i]
+		hit.Bounds = hit.Bounds.Add(image.Pt(offsets[hit.Bounds.Min.Y], 0))
+	}
 	return layout
 }
 

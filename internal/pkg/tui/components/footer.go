@@ -18,6 +18,7 @@ type TabKeybind struct {
 	Key         string // Display key (e.g., "/", "Space", "Enter")
 	Description string // Action description (e.g., "filter", "pause")
 	ShortDesc   string // Abbreviated description (e.g., "flt", "pse")
+	TinyDesc    string // Optional label retained in narrow layouts (e.g., "dt", "mk")
 	Essential   bool   // If true, show even in narrow mode
 }
 
@@ -165,12 +166,12 @@ func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
 func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	switch tabIndex {
 	case 0: // Capture tab
-		detailLabel := "details"
+		detailLabel, detailShort, detailTiny := "details", "dtls", "dt"
 		if f.detailsFocused {
-			detailLabel = "list"
+			detailLabel, detailShort, detailTiny = "list", "lst", "ls"
 		}
 		keybinds := []TabKeybind{
-			{Key: "d", Description: detailLabel, ShortDesc: detailLabel, Essential: true},
+			{Key: "d", Description: detailLabel, ShortDesc: detailShort, TinyDesc: detailTiny, Essential: true},
 		}
 		if f.detailsFocused {
 			keybinds = append(keybinds, TabKeybind{Key: "Esc", Description: "back", ShortDesc: "back", Essential: true})
@@ -224,9 +225,9 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 			TabKeybind{Key: "x", Description: "flush", ShortDesc: "flsh", Essential: false},
 		)
 		if (f.viewMode == "packets" || f.viewMode == "") && !f.detailsFocused {
-			keybinds = append(keybinds, TabKeybind{Key: "m", Description: "mark", ShortDesc: "mark", Essential: false})
+			keybinds = append(keybinds, TabKeybind{Key: "m", Description: "mark", ShortDesc: "mrk", TinyDesc: "mk", Essential: true})
 			if f.markedPacketCount > 0 {
-				keybinds = append(keybinds, TabKeybind{Key: "u", Description: "unmark all", ShortDesc: "unmark", Essential: true})
+				keybinds = append(keybinds, TabKeybind{Key: "u", Description: "unmark all", ShortDesc: "unmk", TinyDesc: "unm", Essential: true})
 			}
 		}
 		return keybinds
@@ -364,8 +365,8 @@ func (f *Footer) renderSection(bindings []TabKeybind, widthClass responsive.Widt
 		case responsive.Wide:
 			hint += descStyle.Render(": " + binding.Description)
 		default:
-			if f.activeTab == 0 && binding.Key == "d" && f.width >= 18 {
-				hint += descStyle.Render(":" + binding.Description)
+			if binding.TinyDesc != "" && f.width >= 18 {
+				hint += descStyle.Render(":" + binding.TinyDesc)
 			}
 			if f.activeTab == 0 && binding.Key == "w" && f.markedPacketCount > 0 && !f.streamingSave {
 				hint += descStyle.Render(fmt.Sprintf(":%d*", f.markedPacketCount))

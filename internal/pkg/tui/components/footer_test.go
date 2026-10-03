@@ -179,21 +179,21 @@ func TestFooterResponsiveHitRegions(t *testing.T) {
 	footer := NewFooter()
 	footer.SetWidth(100)
 	assertFooterHints(t, &footer, []footerHintExpectation{
-		footerRuneHint("/:flt", "/"), footerRuneHint("d:details", "d"),
+		footerRuneHint("/:flt", "/"), footerRuneHint("d:dtls", "d"),
 		footerRuneHint("t:tm", "t"), footerRuneHint("w:sav", "w"),
-		footerRuneHint("x:flsh", "x"), footerRuneHint("m:mark", "m"),
+		footerRuneHint("x:flsh", "x"), footerRuneHint("m:mrk", "m"),
 		{text: "Space:pse", key: tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}},
 		footerRuneHint("p:prt", "p"), footerRuneHint("q:qt", "q"),
 	})
 	footer.SetWidth(40)
 	assertFooterHints(t, &footer, []footerHintExpectation{
-		footerRuneHint("/", "/"), footerRuneHint("d:details", "d"), footerRuneHint("w", "w"),
+		footerRuneHint("/", "/"), footerRuneHint("d:dt", "d"), footerRuneHint("w", "w"), footerRuneHint("m:mk", "m"),
 		{text: "Space", key: tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}},
 		footerRuneHint("p", "p"), footerRuneHint("q", "q"),
 	})
 	footer.SetWidth(20)
 	assertFooterHints(t, &footer, []footerHintExpectation{
-		footerRuneHint("/", "/"), footerRuneHint("d:details", "d"), footerRuneHint("w", "w"),
+		footerRuneHint("/", "/"), footerRuneHint("d:dt", "d"), footerRuneHint("w", "w"),
 	})
 	footer.SetWidth(3)
 	assertFooterHints(t, &footer, []footerHintExpectation{footerRuneHint("d", "d")})

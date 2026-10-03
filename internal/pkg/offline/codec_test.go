@@ -26,6 +26,9 @@ func filledValue(v reflect.Value) {
 	switch v.Kind() {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).Tag.Get("offline") == "-" {
+				continue
+			}
 			filledValue(v.Field(i))
 		}
 	case reflect.Pointer:
@@ -196,6 +199,9 @@ func schemaShape(t reflect.Type, b *strings.Builder) {
 		switch t.Kind() {
 		case reflect.Struct:
 			for i := 0; i < t.NumField(); i++ {
+				if t.Field(i).Tag.Get("offline") == "-" {
+					continue
+				}
 				b.WriteString(t.Field(i).Name)
 				b.WriteByte(':')
 				schemaShape(t.Field(i).Type, b)
@@ -215,6 +221,21 @@ func TestCodecSchemaV4Shape(t *testing.T) {
 	schemaShape(reflect.TypeOf(summaryWire{}), &b)
 	schemaShape(reflect.TypeOf(detailWire{}), &b)
 	require.Equal(t, "8880fa7c173435252e30b98317436d81c7472acfea767182526162ae3080ce8b", fmt.Sprintf("%x", sha256.Sum256([]byte(b.String()))), "Persisted field layout changed: explicitly version the schema before accepting the new shape")
+}
+
+func TestCodecOmitsTransientCaptureIdentity(t *testing.T) {
+	packet := Detail{ID: 3, Packet: types.PacketDisplay{Info: "same packet", RawData: []byte{1, 2, 3}}}
+	var before, after bytes.Buffer
+	_, err := writeRecord(&before, recordKindDetail, packet.ID, packet, 1<<20)
+	require.NoError(t, err)
+	packet.Packet.CaptureID = 9876
+	_, err = writeRecord(&after, recordKindDetail, packet.ID, packet, 1<<20)
+	require.NoError(t, err)
+	require.Equal(t, before.Bytes(), after.Bytes(), "capture-local identity must not change persisted schema")
+	var decoded Detail
+	_, err = readRecordAt(bytes.NewReader(after.Bytes()), 0, recordKindDetail, packet.ID, 1<<20, &decoded)
+	require.NoError(t, err)
+	require.Zero(t, decoded.Packet.CaptureID)
 }
 
 func TestCodecTruncatedPayloadCheckedBeforeAllocation(t *testing.T) {

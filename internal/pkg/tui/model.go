@@ -105,8 +105,11 @@ type CaptureTelemetryMsg capture.Telemetry
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
+	packetMarks             packetMarks
+	markedExports           *markedExportOwner
 	textSelection           *mouseTextSelection
 	modalDismissMouseDown   bool
+	offlineModalState       components.ModalState
 	scrollDrag              string
 	scrollDragRow           int
 	scrollDragOffset        int
@@ -160,6 +163,7 @@ type Model struct {
 	// Performance optimization - throttle details panel updates during high packet rate
 	lastDetailsPanelUpdate     time.Time     // Last time details panel was updated
 	detailsPanelUpdateInterval time.Duration // Minimum interval between updates (e.g., 50ms = 20 Hz)
+	captureInspectionMode      string        // View held while its list is hidden
 
 	// Performance optimization - throttle packet list updates during high packet rate
 	lastPacketListUpdate     time.Time     // Last time packet list was updated
@@ -297,6 +301,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 
 	m := Model{
 		offlineController:          newOfflineController(),
+		markedExports:              &markedExportOwner{},
 		maxOfflineCalls:            maxCalls,
 		packetStore:                packetStore,
 		callStore:                  callStore,
@@ -391,6 +396,10 @@ func (m Model) Init() tea.Cmd {
 // Shutdown cleans up resources before quitting.
 // Call this before tea.Quit to ensure proper cleanup.
 func (m *Model) Shutdown() {
+	m.markedExports.close()
+	if m.packetStore != nil {
+		m.packetStore.CancelFilter()
+	}
 	// Clear program reference FIRST to prevent goroutines from sending
 	// messages to a terminated program (causes "kevent: bad file descriptor")
 	ClearCurrentProgram()
@@ -422,10 +431,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {
 			// A new press also ends a gesture whose terminal omitted release.
 			m.modalDismissMouseDown = false
-			modalCmd, modalHandled = components.HandleModalMouse(m.activeModal(), mouse, m.uiState.Width, m.uiState.Height)
 		}
+		modalCmd, modalHandled = components.HandleModalMouse(m.activeModal(), mouse, m.uiState.Width, m.uiState.Height)
 		if modalHandled {
-			m.modalDismissMouseDown = true
+			m.modalDismissMouseDown = mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress
 			m.textSelection = nil
 			m.scrollDrag = ""
 		} else {
@@ -445,6 +454,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg, tea.WindowSizeMsg, tea.ResumeMsg:
 		m.textSelection = nil
 	}
+	if _, ok := msg.(tea.KeyMsg); ok && !modalHandled {
+		if modal, ok := components.VisibleModal(m.activeModal()).(components.InteractiveModal); ok {
+			modalCmd, modalHandled = components.HandleModalInput(modal, msg)
+		}
+	}
 	var updated tea.Model = m
 	var cmd tea.Cmd
 	if !modalHandled {
@@ -455,6 +469,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if next.textSelection != nil && !next.textSelectionAllowed() {
 			next.textSelection = nil
 		}
+		next.prepareCaptureLayout()
 		cmd = tea.Batch(cmd, next.syncOfflineBrowser(), next.requestOfflineRelated())
 		next.prepareViewChrome()
 		return next, cmd
@@ -472,6 +487,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Lifecycle messages bypass modal/settings routing so cleanup cannot stall.
 	switch value := msg.(type) {
+	case offlineMarkRangeMsg:
+		return m.handleOfflineMarkRange(value)
+	case components.ClearPacketMarksMsg:
+		m.clearPacketMarks()
+		return m, nil
+	case packetFilterMsg:
+		return m.handlePacketFilter(value)
 	case offlineFilterMsg:
 		return m.handleOfflineFilter(value)
 	case offlineFilterProgressMsg:
@@ -633,7 +655,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// This ensures toast auto-dismiss timer continues working
 	var toastCmd tea.Cmd
 	if m.uiState.Toast.IsActive() {
-		toastCmd = m.uiState.Toast.Update(msg)
+		mouse, isMouse := msg.(tea.MouseMsg)
+		if isMouse {
+			_, rect := m.toastOverlay()
+			if rect.contains(mouse.X, mouse.Y) {
+				m.scrollDrag = ""
+				if mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {
+					return m, m.uiState.Toast.Dismiss()
+				}
+				return m, nil
+			}
+		} else {
+			toastCmd = m.uiState.Toast.Update(msg)
+		}
 	}
 
 	// BUT: Don't intercept PacketMsg, TickMsg, or RestartCaptureMsg - those need to be handled by the main model

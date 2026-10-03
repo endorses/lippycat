@@ -25,25 +25,13 @@ func (m Model) footerKeyAtMouse(msg tea.MouseMsg) (tea.KeyMsg, bool) {
 
 // handleMouse processes mouse events for the TUI
 func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
-	// DEBUG: Uncomment to log mouse events to /tmp/lippycat-mouse-debug.log for troubleshooting
-	// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-	// 	fmt.Fprintf(f, "handleMouse: Y=%d Type=%v Action=%v Button=%v ActiveTab=%d\n",
-	// 		msg.Y, msg.Type, msg.Action, msg.Button, m.uiState.Tabs.GetActive())
-	// 	f.Close()
-	// }
-
-	// Layout constants
-	headerHeight := 2                          // Header takes 2 lines (text + border)
-	tabsHeight := 4                            // Tabs take 4 lines
-	bottomHeight := 4                          // Footer/filter area
-	contentStartY := headerHeight + tabsHeight // Y=6
-	contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
+	contentStartY := m.captureContentOrigin()
+	contentHeight := m.captureContentHeight()
 	if msg.Action == tea.MouseActionRelease && m.uiState.Tabs.GetActive() != 0 {
 		m.scrollDrag = ""
 	}
 	if m.uiState.Tabs.GetActive() == 0 && (m.uiState.ViewMode == "packets" || m.uiState.ViewMode == "calls" || m.uiState.ViewMode == "events") {
-		// Tabs render three rows, leaving the capture content at Y=5.
-		if next, cmd, handled := m.handleCaptureScrollbar(msg, contentStartY-1, contentHeight); handled {
+		if next, cmd, handled := m.handleCaptureScrollbar(msg, contentStartY, contentHeight); handled {
 			return next, cmd
 		}
 	}
@@ -59,153 +47,17 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Handle mouse wheel scrolling - based on hover position, not focus
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
-		if m.uiState.Tabs.GetActive() == 0 {
-			if m.uiState.ViewMode == "events" {
-				if !m.uiState.EventShowDetails || m.uiState.Width < 160 || msg.X < m.uiState.Width-79 {
-					m.moveEventSelection(-1)
-				} else {
-					m.uiState.EventsView.ScrollDetailsUp()
-				}
-				return m, nil
-			}
-			// On capture tab - check if we're in calls view or packet list
-			if m.uiState.ViewMode == "calls" {
-				// Check if details panel is visible and determine which pane we're hovering
-				minWidthForDetails := 120
-				showDetails := m.uiState.CallsView.IsShowingDetails()
-				detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
-
-				if detailsVisible {
-					// Split pane mode - check X position to determine which pane
-					detailsWidth := 79
-					listWidth := m.uiState.Width - detailsWidth
-					detailsContentStart := listWidth
-
-					if msg.X < detailsContentStart {
-						// Hovering over call list - scroll it
-						m.uiState.CallsView.SelectPrevious()
-					} else {
-						// Hovering over details panel - scroll it
-						m.uiState.CallsView.ScrollDetailsUp()
-					}
-				} else {
-					// Full width call list - just scroll it
-					m.uiState.CallsView.SelectPrevious()
-				}
-				return m, nil
-			}
-
-			// On capture tab - determine which pane we're hovering over
-			minWidthForDetails := 160
-			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
-				// Split pane mode - check X position to determine which pane
-				detailsWidth := 79
-				listWidth := m.uiState.Width - detailsWidth
-				detailsContentStart := listWidth
-
-				if msg.X < detailsContentStart {
-					// Hovering over packet list - scroll it
-					m.uiState.PacketList.CursorUp()
-					m.updateDetailsPanel()
-				} else {
-					// Hovering over details panel - scroll it
-					cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyUp})
-					return m, cmd
-				}
-			} else {
-				// Full width packet list - just scroll it
-				m.uiState.PacketList.CursorUp()
-				m.updateDetailsPanel()
-			}
-		} else if m.uiState.Tabs.GetActive() == 1 {
-			// On nodes tab - pass to NodesView
-			cmd := m.uiState.NodesView.Update(msg)
-			return m, cmd
-		} else if m.uiState.Tabs.GetActive() == 2 {
-			// On statistics tab - pass to StatisticsView
-			cmd := m.uiState.StatisticsView.Update(msg)
-			return m, cmd
-		} else if m.uiState.Tabs.GetActive() == 4 {
-			// On help tab - pass to HelpView
-			cmd := m.uiState.HelpView.Update(msg)
-			return m, cmd
-		}
-		return m, nil
-	}
-
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
-		if m.uiState.Tabs.GetActive() == 0 {
-			if m.uiState.ViewMode == "events" {
-				if !m.uiState.EventShowDetails || m.uiState.Width < 160 || msg.X < m.uiState.Width-79 {
-					m.moveEventSelection(1)
-				} else {
-					m.uiState.EventsView.ScrollDetailsDown()
-				}
-				return m, nil
-			}
-			// On capture tab - check if we're in calls view or packet list
-			if m.uiState.ViewMode == "calls" {
-				// Check if details panel is visible and determine which pane we're hovering
-				minWidthForDetails := 120
-				showDetails := m.uiState.CallsView.IsShowingDetails()
-				detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
-
-				if detailsVisible {
-					// Split pane mode - check X position to determine which pane
-					detailsWidth := 79
-					listWidth := m.uiState.Width - detailsWidth
-					detailsContentStart := listWidth
-
-					if msg.X < detailsContentStart {
-						// Hovering over call list - scroll it
-						m.uiState.CallsView.SelectNext()
-					} else {
-						// Hovering over details panel - scroll it
-						m.uiState.CallsView.ScrollDetailsDown()
-					}
-				} else {
-					// Full width call list - just scroll it
-					m.uiState.CallsView.SelectNext()
-				}
-				return m, nil
-			}
-
-			// On capture tab - determine which pane we're hovering over
-			minWidthForDetails := 160
-			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
-				// Split pane mode - check X position to determine which pane
-				detailsWidth := 79
-				listWidth := m.uiState.Width - detailsWidth
-				detailsContentStart := listWidth
-
-				if msg.X < detailsContentStart {
-					// Hovering over packet list - scroll it
-					m.uiState.PacketList.CursorDown()
-					m.updateDetailsPanel()
-				} else {
-					// Hovering over details panel - scroll it
-					cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyDown})
-					return m, cmd
-				}
-			} else {
-				// Full width packet list - just scroll it
-				m.uiState.PacketList.CursorDown()
-				m.updateDetailsPanel()
-			}
-		} else if m.uiState.Tabs.GetActive() == 1 {
-			// On nodes tab - pass to NodesView
-			cmd := m.uiState.NodesView.Update(msg)
-			return m, cmd
-		} else if m.uiState.Tabs.GetActive() == 2 {
-			// On statistics tab - pass to StatisticsView
-			cmd := m.uiState.StatisticsView.Update(msg)
-			return m, cmd
-		} else if m.uiState.Tabs.GetActive() == 4 {
-			// On help tab - pass to HelpView
-			cmd := m.uiState.HelpView.Update(msg)
-			return m, cmd
+	// Wheel gestures follow the visible pane under the pointer.
+	if msg.Action == tea.MouseActionPress && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
+		switch m.uiState.Tabs.GetActive() {
+		case 0:
+			return m.handleCaptureWheel(msg)
+		case 1:
+			return m, m.uiState.NodesView.Update(msg)
+		case 2:
+			return m, m.uiState.StatisticsView.Update(msg)
+		case 4:
+			return m, m.uiState.HelpView.Update(msg)
 		}
 		return m, nil
 	}
@@ -215,9 +67,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Tab bar is at Y=2-5 (4 lines including borders)
-	// Clickable area is Y=2-4 (bottom extends one row too much at Y=5)
-	if msg.Y >= 2 && msg.Y <= 4 {
+	tabTop, tabBottom := 2, 5
+	if m.uiState.Tabs.GetActive() == 0 && m.responsiveCaptureView() {
+		header, tabs, _ := m.captureChrome()
+		tabTop = nonemptyHeight(header)
+		tabBottom = tabTop + nonemptyHeight(tabs)
+	}
+	if msg.Y >= tabTop && msg.Y < tabBottom {
 		// Use the tab component's method to get the clicked tab
 		clickedTab := m.uiState.Tabs.GetTabAtX(msg.X)
 		if clickedTab >= 0 {
@@ -289,28 +145,92 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleEventsViewClick(msg tea.MouseMsg, contentStartY int) (Model, tea.Cmd) {
-	detailsVisible := m.uiState.EventShowDetails && m.uiState.Width >= 160
-	listWidth := m.uiState.Width
-	if detailsVisible {
-		listWidth = m.uiState.Width - 79
-	}
-	if msg.X >= listWidth {
-		m.uiState.FocusedPane = "right"
+// handleCaptureWheel routes scrolling using the same rectangles as rendering.
+func (m Model) handleCaptureWheel(msg tea.MouseMsg) (Model, tea.Cmd) {
+	layout := m.captureLayout()
+	x, y := msg.X, msg.Y-m.captureContentOrigin()
+	up := msg.Button == tea.MouseButtonWheelUp
+	if layout.Details.contains(x, y) {
+		m.focusCapturePane("right")
+		switch m.uiState.ViewMode {
+		case "events":
+			if up {
+				m.uiState.EventsView.ScrollDetailsUp()
+			} else {
+				m.uiState.EventsView.ScrollDetailsDown()
+			}
+		case "calls":
+			if up {
+				m.uiState.CallsView.ScrollDetailsUp()
+			} else {
+				m.uiState.CallsView.ScrollDetailsDown()
+			}
+		default:
+			key := tea.KeyDown
+			if up {
+				key = tea.KeyUp
+			}
+			return m, m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: key})
+		}
 		return m, nil
 	}
+	if !layout.List.contains(x, y) {
+		return m, nil
+	}
+	m.focusCapturePane("left")
+	switch m.uiState.ViewMode {
+	case "events":
+		if up {
+			m.moveEventSelection(-1)
+		} else {
+			m.moveEventSelection(1)
+		}
+	case "calls":
+		if up {
+			m.uiState.CallsView.SelectPrevious()
+		} else {
+			m.uiState.CallsView.SelectNext()
+		}
+	default:
+		if up {
+			m.uiState.PacketList.CursorUp()
+		} else {
+			m.uiState.PacketList.CursorDown()
+		}
+		m.updateDetailsPanel()
+	}
+	return m, nil
+}
 
-	m.uiState.FocusedPane = "left"
-	// The first event row follows the panel border and table header.
-	visibleRow := msg.Y - contentStartY - 2
-	id, ok := m.uiState.EventsView.EventIDAtVisibleRow(visibleRow)
+// captureClickRow focuses the visible pane and translates a list click to its
+// data row, excluding the outer border, padding, and table header.
+func (m *Model) captureClickRow(msg tea.MouseMsg) (int, bool) {
+	layout := m.captureLayout()
+	x, y := msg.X, msg.Y-m.captureContentOrigin()
+	if layout.Details.contains(x, y) {
+		m.focusCapturePane("right")
+		return 0, false
+	}
+	if !layout.List.contains(x, y) {
+		return 0, false
+	}
+	m.focusCapturePane("left")
+	row := y - layout.List.Y - 3
+	return row, row >= 0 && row < max(0, layout.List.Height-4)
+}
+
+func (m Model) handleEventsViewClick(msg tea.MouseMsg, _ int) (Model, tea.Cmd) {
+	row, ok := m.captureClickRow(msg)
+	if !ok {
+		return m, nil
+	}
+	id, ok := m.uiState.EventsView.EventIDAtVisibleRow(row)
 	if !ok {
 		return m, nil
 	}
 	now := time.Now()
-	isDoubleClick := id == m.uiState.LastEventClickID &&
-		now.Sub(m.uiState.LastEventClickTime) < 500*time.Millisecond
-	if isDoubleClick {
+	double := id == m.uiState.LastEventClickID && now.Sub(m.uiState.LastEventClickTime) < 500*time.Millisecond
+	if double {
 		m.uiState.LastEventClickID = ""
 		m.uiState.LastEventClickTime = time.Time{}
 	} else {
@@ -318,26 +238,20 @@ func (m Model) handleEventsViewClick(msg tea.MouseMsg, contentStartY int) (Model
 		m.uiState.LastEventClickTime = now
 	}
 	m.eventStore.SelectByIDFollowingLatest(id)
-	if isDoubleClick {
-		m.uiState.EventShowDetails = !m.uiState.EventShowDetails
-		if !m.uiState.EventShowDetails {
-			m.uiState.FocusedPane = "left"
-		}
-	}
 	m.syncEventsView()
+	if double {
+		return m.toggleCaptureDetails()
+	}
 	return m, nil
 }
 
-// handlePacketListClick processes clicks on the packet list
-func (m Model) handlePacketListClick(msg tea.MouseMsg, contentStartY, contentHeight int) (Model, tea.Cmd) {
+func (m Model) handlePacketListClick(msg tea.MouseMsg, _, _ int) (Model, tea.Cmd) {
+	row, ok := m.captureClickRow(msg)
+	if !ok {
+		return m, nil
+	}
 	if m.offlineSession != nil {
-		if m.uiState.ShowDetails && m.uiState.Width >= 160 && msg.X >= m.uiState.Width-79 {
-			m.uiState.FocusedPane = "right"
-			return m, nil
-		}
-		m.uiState.FocusedPane = "left"
-		row := msg.Y - contentStartY - 2
-		if row < 0 || row >= m.uiState.PacketList.VisibleRows() {
+		if row >= m.uiState.PacketList.VisibleRows() {
 			return m, nil
 		}
 		index := m.uiState.PacketList.LogicalOffset() + uint64(row)
@@ -347,201 +261,68 @@ func (m Model) handlePacketListClick(msg tea.MouseMsg, contentStartY, contentHei
 		now := time.Now()
 		double := m.offlineLastClickValid && index == m.offlineLastClick && now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
 		m.offlineLastClick = index
-		m.offlineLastClickValid = true
+		m.offlineLastClickValid = !double
 		m.uiState.LastClickTime = now
 		m.uiState.PacketList.SetLogicalCursor(index)
 		m.updateDetailsPanel()
+		if msg.Ctrl || msg.Shift {
+			m.offlineLastClickValid = false
+			cmd := m.markPacketClick(msg)
+			return m, cmd
+		}
+		m.setPacketMarkAnchor()
 		if double {
-			m = m.toggleDetailsPanel()
+			return m.toggleCaptureDetails()
 		}
 		return m, nil
 	}
-
-	minWidthForDetails := 160
-
-	// Check if we're in split pane mode
-	if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
-		// Match the fixed-width details pane used by rendering and selection.
-		detailsContentStart := m.uiState.Width - 79
-
-		if msg.X < detailsContentStart {
-			// Click in packet list area - switch focus to left pane
-			m.uiState.FocusedPane = "left"
-
-			// First line of data is at contentStartY + 1 (after table header)
-			tableHeaderY := contentStartY + 1
-			if msg.Y > tableHeaderY {
-				// Calculate which row was clicked (relative to visible area)
-				visibleRow := msg.Y - tableHeaderY - 1 // -1 for separator line
-
-				// Use the packet list from the PacketList component (matches what's displayed)
-				packets := m.uiState.PacketList.GetPackets()
-
-				// Add scroll offset to get actual packet index
-				actualPacketIndex := m.uiState.PacketList.GetOffset() + visibleRow
-
-				if actualPacketIndex >= 0 && actualPacketIndex < len(packets) {
-					// Check for double-click (same packet clicked within 500ms)
-					now := time.Now()
-					isDoubleClick := actualPacketIndex == m.uiState.LastClickPacket &&
-						now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
-
-					// Update last click tracking
-					m.uiState.LastClickTime = now
-					m.uiState.LastClickPacket = actualPacketIndex
-
-					// Set cursor directly without scrolling
-					m.uiState.PacketList.SetCursor(actualPacketIndex)
-					m.uiState.DetailsPanel.SetPacket(&packets[actualPacketIndex])
-
-					// Toggle details panel on double-click
-					if isDoubleClick {
-						m = m.toggleDetailsPanel()
-					}
-				}
-			}
-		} else {
-			// Click inside details panel content - switch focus to right pane
-			m.uiState.FocusedPane = "right"
-		}
-	} else {
-		// Full width packet list
-		tableHeaderY := contentStartY + 1
-		if msg.Y > tableHeaderY {
-			// Calculate which row was clicked (relative to visible area)
-			visibleRow := msg.Y - tableHeaderY - 1
-
-			// Use the packet list from the PacketList component (matches what's displayed)
-			packets := m.uiState.PacketList.GetPackets()
-
-			// Add scroll offset to get actual packet index
-			actualPacketIndex := m.uiState.PacketList.GetOffset() + visibleRow
-
-			if actualPacketIndex >= 0 && actualPacketIndex < len(packets) {
-				// Check for double-click (same packet clicked within 500ms)
-				now := time.Now()
-				isDoubleClick := actualPacketIndex == m.uiState.LastClickPacket &&
-					now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
-
-				// Update last click tracking
-				m.uiState.LastClickTime = now
-				m.uiState.LastClickPacket = actualPacketIndex
-
-				// Set cursor directly without scrolling
-				m.uiState.PacketList.SetCursor(actualPacketIndex)
-				m.uiState.DetailsPanel.SetPacket(&packets[actualPacketIndex])
-				m.uiState.FocusedPane = "left"
-
-				// Toggle details panel on double-click
-				if isDoubleClick {
-					m = m.toggleDetailsPanel()
-				}
-			}
-		}
+	packets := m.uiState.PacketList.GetPackets()
+	index := m.uiState.PacketList.GetOffset() + row
+	if index < 0 || index >= len(packets) {
+		return m, nil
+	}
+	now := time.Now()
+	double := index == m.uiState.LastClickPacket && now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
+	m.uiState.LastClickTime = now
+	m.uiState.LastClickPacket = index
+	m.uiState.PacketList.SetCursor(index)
+	m.updateDetailsPanel()
+	if msg.Ctrl || msg.Shift {
+		m.uiState.LastClickTime = time.Time{}
+		cmd := m.markPacketClick(msg)
+		return m, cmd
+	}
+	m.setPacketMarkAnchor()
+	if double {
+		m.uiState.LastClickTime = time.Time{}
+		return m.toggleCaptureDetails()
 	}
 	return m, nil
 }
 
-// handleCallsViewClick processes clicks on the calls view
-func (m Model) handleCallsViewClick(msg tea.MouseMsg, contentStartY, contentHeight int) (Model, tea.Cmd) {
-	minWidthForDetails := 120
-	showDetails := m.uiState.CallsView.IsShowingDetails()
-	detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
-
-	// Check if we're in split pane mode
-	if detailsVisible {
-		// Split pane: call list on left, details on right
-		detailsWidth := 79
-		listWidth := m.uiState.Width - detailsWidth
-		detailsContentStart := listWidth - 2
-
-		if msg.X < detailsContentStart {
-			// Click in call list area - switch focus to left pane
-			m.uiState.FocusedPane = "left"
-
-			// Calculate row position using the same approach as packet list
-			tableHeaderY := contentStartY + 1
-			if msg.Y > tableHeaderY {
-				// Calculate which row was clicked (relative to visible area)
-				visibleRow := msg.Y - tableHeaderY - 1
-
-				// Add scroll offset to get actual call index
-				actualCallIndex := m.uiState.CallsView.GetOffset() + visibleRow
-
-				calls := m.uiState.CallsView.GetCalls()
-				if actualCallIndex >= 0 && actualCallIndex < len(calls) {
-					// Check for double-click (same call clicked within 500ms)
-					now := time.Now()
-					isDoubleClick := actualCallIndex == m.uiState.LastClickPacket &&
-						now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
-
-					// Update last click tracking (reuse packet click tracking vars)
-					m.uiState.LastClickTime = now
-					m.uiState.LastClickPacket = actualCallIndex
-
-					m.uiState.CallsView.SetSelected(actualCallIndex)
-
-					// Toggle details panel on double-click
-					if isDoubleClick {
-						m.uiState.CallsView.ToggleDetails()
-					}
-				}
-			}
-		} else {
-			// Click inside details panel content - switch focus to right pane
-			m.uiState.FocusedPane = "right"
-		}
-	} else {
-		// Full width call list
-		tableHeaderY := contentStartY + 1
-		if msg.Y > tableHeaderY {
-			// Calculate which row was clicked (relative to visible area)
-			visibleRow := msg.Y - tableHeaderY - 1
-
-			// Add scroll offset to get actual call index
-			actualCallIndex := m.uiState.CallsView.GetOffset() + visibleRow
-
-			calls := m.uiState.CallsView.GetCalls()
-			if actualCallIndex >= 0 && actualCallIndex < len(calls) {
-				// Check for double-click (same call clicked within 500ms)
-				now := time.Now()
-				isDoubleClick := actualCallIndex == m.uiState.LastClickPacket &&
-					now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
-
-				// Update last click tracking (reuse packet click tracking vars)
-				m.uiState.LastClickTime = now
-				m.uiState.LastClickPacket = actualCallIndex
-
-				m.uiState.CallsView.SetSelected(actualCallIndex)
-				m.uiState.FocusedPane = "left"
-
-				// Toggle details panel on double-click
-				if isDoubleClick {
-					m.uiState.CallsView.ToggleDetails()
-				}
-			}
-		}
+func (m Model) handleCallsViewClick(msg tea.MouseMsg, _, _ int) (Model, tea.Cmd) {
+	row, ok := m.captureClickRow(msg)
+	if !ok {
+		return m, nil
+	}
+	index := m.uiState.CallsView.GetOffset() + row
+	if index < 0 || index >= len(m.uiState.CallsView.GetCalls()) {
+		return m, nil
+	}
+	now := time.Now()
+	double := index == m.uiState.LastClickPacket && now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
+	m.uiState.LastClickTime = now
+	m.uiState.LastClickPacket = index
+	m.uiState.CallsView.SetSelected(index)
+	if double {
+		m.uiState.LastClickTime = time.Time{}
+		return m.toggleCaptureDetails()
 	}
 	return m, nil
 }
 
-// toggleDetailsPanel toggles the details panel and recalculates sizes
+// toggleDetailsPanel retains the packet-only convenience helper used by tests.
 func (m Model) toggleDetailsPanel() Model {
-	m.uiState.ShowDetails = !m.uiState.ShowDetails
-	// Recalculate sizes when toggling details
-	headerHeight := 2
-	tabsHeight := 4
-	bottomHeight := 4
-	contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
-	minWidthForDetails := 160
-	if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
-		detailsWidth := 77
-		listWidth := m.uiState.Width - detailsWidth
-		m.uiState.PacketList.SetSize(listWidth, contentHeight)
-		m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
-	} else {
-		m.uiState.PacketList.SetSize(m.uiState.Width, contentHeight)
-		m.uiState.DetailsPanel.SetSize(0, contentHeight)
-	}
+	m, _ = m.toggleCaptureDetails()
 	return m
 }

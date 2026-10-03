@@ -15,6 +15,7 @@ func TestOfflinePublicationClearsForeignCallCorrelation(t *testing.T) {
 	foreign := CorrelatedCallUpdateMsg{CorrelatedCalls: []types.CorrelatedCallInfo{{CorrelationID: "foreign", Legs: []types.CallLegInfo{{CallID: "shared-call", HunterID: "foreign-hunter"}, {CallID: "second-leg", HunterID: "other-hunter"}}}}}
 	m, _ = m.handleCorrelatedCallUpdateMsg(foreign)
 	m, _ = m.handleCallUpdateMsg(CallUpdateMsg{Calls: []types.CallInfo{{CallID: "shared-call", Hunters: []string{"remote"}}}})
+	m.uiState.CallsView.PrepareDetails(120, 50)
 	require.Contains(t, m.uiState.CallsView.RenderDetails(120, 50, true), "foreign-hunter")
 	failed := open
 	failed.Config.Inputs = []string{filepath.Join(t.TempDir(), "missing.pcap")}
@@ -22,14 +23,17 @@ func TestOfflinePublicationClearsForeignCallCorrelation(t *testing.T) {
 	failedResult := offlineWorker(t, failedCmd)().(offlineOpenCompleteMsg)
 	require.Error(t, failedResult.err)
 	m, _ = m.completeOffline(failedResult)
+	m.uiState.CallsView.PrepareDetails(120, 50)
 	require.Contains(t, m.uiState.CallsView.RenderDetails(120, 50, true), "foreign-hunter", "failed replacement must preserve previous details")
 	m, cmd := m.openOffline(open)
+	m.uiState.CallsView.PrepareDetails(120, 50)
 	require.Contains(t, m.uiState.CallsView.RenderDetails(120, 50, true), "foreign-hunter", "pending replacement must preserve previous details")
 	result := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
 	require.NoError(t, result.err)
 	result.session.Calls = []types.CallInfo{{CallID: "shared-call", Hunters: []string{"Local"}}}
 	m, cleanup := m.completeOffline(result)
 	cleanup()
+	m.uiState.CallsView.PrepareDetails(120, 50)
 	require.NotContains(t, m.uiState.CallsView.RenderDetails(120, 50, true), "foreign-hunter")
 }
 
@@ -39,6 +43,7 @@ func TestOfflineOpeningRejectsForeignCallCorrelation(t *testing.T) {
 	m, cmd := m.openOffline(open)
 	next, _ := m.update(CorrelatedCallUpdateMsg{CorrelatedCalls: []types.CorrelatedCallInfo{{CorrelationID: "foreign", Legs: []types.CallLegInfo{{CallID: "shared-call", HunterID: "foreign-hunter"}, {CallID: "second-leg", HunterID: "other-hunter"}}}}})
 	m = next.(Model)
+	m.uiState.CallsView.PrepareDetails(120, 50)
 	require.NotContains(t, m.uiState.CallsView.RenderDetails(120, 50, true), "foreign-hunter")
 	result := offlineWorker(t, cmd)().(offlineOpenCompleteMsg)
 	require.NoError(t, result.err)
@@ -56,5 +61,6 @@ func TestOfflineRejectsForeignCallCorrelation(t *testing.T) {
 	cleanup()
 	next, _ := m.update(CorrelatedCallUpdateMsg{CorrelatedCalls: []types.CorrelatedCallInfo{{CorrelationID: "foreign", Legs: []types.CallLegInfo{{CallID: "shared-call", HunterID: "foreign-hunter"}, {CallID: "second-leg", HunterID: "other-hunter"}}}}})
 	m = next.(Model)
+	m.uiState.CallsView.PrepareDetails(120, 50)
 	require.NotContains(t, m.uiState.CallsView.RenderDetails(120, 50, true), "foreign-hunter")
 }

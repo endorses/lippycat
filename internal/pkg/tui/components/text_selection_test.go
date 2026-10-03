@@ -15,7 +15,7 @@ import (
 
 func TestDetailsTextSelectionSeparatesScrolledDumpColumns(t *testing.T) {
 	d := NewDetailsPanel()
-	d.SetSize(77, 12)
+	d.SetSize(79, 12)
 	d.SetPacket(&PacketDisplay{Timestamp: time.Now(), RawData: []byte(strings.Repeat("INVITE sip:test  ", 8) + "LAST")})
 	d.SetScrollOffset(d.viewport.TotalLineCount())
 	lines := strings.Split(ansi.Strip(d.viewport.View()), "\n")
@@ -55,14 +55,14 @@ func TestDetailsTextSelectionSeparatesScrolledDumpColumns(t *testing.T) {
 
 func TestDetailsTextSelectionRecognizesBinaryDecryptedBlocksAndWideOffsets(t *testing.T) {
 	d := NewDetailsPanel()
-	d.SetSize(77, 16)
+	d.SetSize(79, 16)
 	d.viewport.SetContent("Metadata\n\n" + d.renderHexDump([]byte(strings.Repeat("B", 33))) + "\nOther metadata")
 	region, ok := d.TextSelectionAt(60, 4)
 	require.True(t, ok)
 	require.Equal(t, selection.Rect{X: 59, Y: 4, Width: 16, Height: 3}, region)
 	region, ok = d.TextSelectionAt(5, 2)
 	require.True(t, ok)
-	require.Equal(t, selection.Rect{X: 3, Y: 2, Width: 72, Height: 12}, region)
+	require.Equal(t, selection.Rect{X: 3, Y: 2, Width: 73, Height: 12}, region)
 	wide := ansi.Strip(d.renderHexDump(make([]byte, 65537)))
 	rows := strings.Split(strings.TrimSuffix(wide, "\n"), "\n")
 	width, valid := selectionHexRow(rows[len(rows)-1])
@@ -141,5 +141,29 @@ func TestHelpTextSelectionExcludesControlsAndScrollbar(t *testing.T) {
 	for _, point := range [][2]int{{3, 0}, {99, 3}, {3, 20}} {
 		_, ok := h.TextSelectionAt(point[0], point[1])
 		require.False(t, ok)
+	}
+}
+
+func TestResponsiveDetailsTextSelectionSeparatesDumpColumns(t *testing.T) {
+	for _, width := range []int{16, 20, 25, 48, 80} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			d := NewDetailsPanel()
+			d.SetSize(width, 12)
+			data := []byte(strings.Repeat("ABC", 16))
+			d.viewport.SetContent(d.renderHexDump(data))
+			bytes, offsetWidth, hexWidth := d.HexDumpColumns(len(data))
+			left, top, _, _ := DetailPaneGeometry(width, 12)
+			asciiX := left + offsetWidth + 3 + hexWidth
+			region, ok := d.TextSelectionAt(asciiX, top)
+			require.True(t, ok)
+			require.Equal(t, asciiX, region.X)
+			require.Equal(t, bytes, region.Width)
+			require.Greater(t, region.Height, 1)
+			_, ok = d.TextSelectionAt(asciiX-1, top)
+			require.False(t, ok, "separator must remain outside selected columns")
+			region, ok = d.TextSelectionAt(left+offsetWidth+2, top)
+			require.True(t, ok)
+			require.Equal(t, hexWidth, region.Width)
+		})
 	}
 }

@@ -476,6 +476,15 @@ canonical analysis. Event mode is edge-authoritative: the processor receives
 already-normalized metadata, never raw packet bytes or file content, and must
 not derive a second canonical event stream for that producer session.
 
+In packet mode, monitoring clients derive their Events view from received
+packets. In event mode, a configured upstream destination or connected event
+monitor enables analysis of received packets; monitors receive only events.
+An explicit local structured-log output can also require analysis. Monitoring
+batches identify where analysis occurs to avoid duplicate client-derived events.
+With no packet output or event analysis output, received batches update counters
+without further processing. Configured local PCAP, LI, key-log, and
+virtual-interface outputs remain active.
+
 An event-mode producer negotiates the event API, event kinds, analysis profile,
 enrichment, and resource bounds during registration. An insufficient profile
 is rejected. Compatibility fallback to packet mode occurs only when the

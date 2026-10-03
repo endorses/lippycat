@@ -24,8 +24,8 @@ func (m Model) requestQuitConfirmation() (Model, tea.Cmd) {
 		Type:        components.ConfirmDialogWarning,
 		Title:       "Quit lippycat?",
 		Message:     "Are you sure you want to quit?",
-		ConfirmText: "y",
-		CancelText:  "n",
+		ConfirmText: "Quit",
+		CancelText:  "Cancel",
 		UserData:    quitConfirmationData{},
 	})
 	return m, cmd
@@ -306,6 +306,12 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case " ": // Space to pause/resume
 		return m.handlePauseResume()
 
+	case "esc":
+		if m.uiState.Tabs.GetActive() == 0 && m.captureDetailsFocused() {
+			m.focusCapturePane("left")
+		}
+		return m, nil
+
 	case "d":
 		return m.handleDKey()
 
@@ -320,6 +326,10 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "t": // Toggle time display mode (clock/relative) - Capture tab only
 		return m.handleToggleTimeDisplay()
 
+	case "u":
+		return m.handleUnmarkAllPackets()
+	case "m", "M":
+		return m.handleMarkPacket(msg.String() == "M")
 	case "w": // Save packets to file (or stop streaming save)
 		return m.handleSavePackets()
 
@@ -445,10 +455,12 @@ func (m Model) handleClearAllFilters() (Model, tea.Cmd) {
 	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
+		m.resetCaptureInspection()
 		m.packetStore.ClearFilter()
 		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 		m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
 		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		m.updateDetailsPanel()
 
 		// Reset sync counters for incremental updates
 		_, _, total, _ := m.packetStore.GetBufferInfo()
@@ -478,7 +490,8 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 	}
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
-		if m.packetStore.FilterChain.RemoveLast() {
+		chain := m.packetStore.FilterChain.Clone()
+		if chain.RemoveLast() {
 			// Show toast notification first
 			remainingCount := filterCount - 1
 			msg := "Last filter removed"
@@ -492,41 +505,17 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 			)
 
 			// If no filters remain, show all packets
-			if !m.packetStore.HasFilter() {
-				// Show all packets immediately when paused or offline
-				if m.captureMode == components.CaptureModeOffline || m.uiState.IsPaused() {
-					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-					_, _, total, _ := m.packetStore.GetBufferInfo()
-					m.lastSyncedTotal = total
-					m.lastSyncedFilteredCount = 0
-					m.lastFilterState = false
-				} else {
-					// Reset to unfiltered mode - incremental updates will handle the rest
-					m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
-					m.lastSyncedTotal = 0
-					m.lastSyncedFilteredCount = 0
-					m.lastFilterState = false
-				}
+			if chain.IsEmpty() {
+				m.resetCaptureInspection()
+				m.packetStore.ClearFilter()
+				m.lastFilterState = false
+				m.doFullPacketListRefresh(false)
+				m.updateDetailsPanel()
 				return m, toastCmd
 			}
 
-			// Reapply remaining filters when paused or offline
-			if m.captureMode == components.CaptureModeOffline || m.uiState.IsPaused() {
-				m.packetStore.ReapplyFilters()
-				m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
-				_, _, _, matchedPackets := m.packetStore.GetBufferInfo()
-				m.lastSyncedFilteredCount = matchedPackets
-				m.lastFilterState = true
-			} else {
-				// Clear filtered packets - new packets will flow through remaining filters
-				// via AddPacketBatch() and incremental updates in updatePacketListFiltered()
-				m.packetStore.ClearFilteredPackets()
-				m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
-				m.lastSyncedFilteredCount = 0
-				m.lastFilterState = true
-			}
-
-			return m, toastCmd
+			filterCmd := m.startPacketFilter(chain)
+			return m, tea.Batch(filterCmd, toastCmd)
 		}
 	}
 	return m, nil
@@ -536,6 +525,7 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	if m.uiState.ViewMode == "events" && m.eventStore != nil {
 		stats := m.eventStore.Stats()
+		m.resetCaptureInspection()
 		m.pendingRemoteEvents.clear()
 		m.eventStore.Reset()
 		m.syncEventsView()
@@ -551,9 +541,12 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	// Store count before clearing
 	packetCount := m.packetStore.PacketsCount
 
+	m.resetCaptureInspection()
+	m.clearPacketMarks()
 	m.packetStore.Clear()
 	m.eventViewDirty = true
 	m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+	m.updateDetailsPanel()
 
 	// Reset incremental sync counters so new packets will be added
 	m.lastSyncedTotal = 0
@@ -626,18 +619,8 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 
 	// On Capture tab: check view mode
 	if m.uiState.Tabs.GetActive() == 0 {
-		if m.uiState.ViewMode == "events" {
-			m.uiState.EventShowDetails = !m.uiState.EventShowDetails
-			m.syncEventsView()
-			if !m.uiState.EventShowDetails {
-				m.uiState.FocusedPane = "left"
-			}
-			return m, nil
-		}
-		// If in calls view mode, toggle CallsView details
-		if m.uiState.ViewMode == "calls" {
-			m.uiState.CallsView.ToggleDetails()
-			return m, nil
+		if m.responsiveCaptureView() {
+			return m.toggleCaptureDetails()
 		}
 
 		// If in queries view mode, toggle DNSQueriesView details
@@ -658,31 +641,6 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Otherwise, toggle packet details panel
-		m.uiState.ShowDetails = !m.uiState.ShowDetails
-
-		// When hiding details, return focus to packet list
-		if !m.uiState.ShowDetails && m.uiState.FocusedPane == "right" {
-			m.uiState.FocusedPane = "left"
-		}
-
-		// Recalculate packet list size based on new showDetails state
-		headerHeight := 2
-		tabsHeight := 4
-		bottomHeight := 4
-		contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
-		minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-		if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
-			// Details panel gets exactly what it needs for hex dump, packet list gets the rest
-			detailsWidth := 77 // Hex dump (72) + borders/padding (5)
-			listWidth := m.uiState.Width - detailsWidth
-			m.uiState.PacketList.SetSize(listWidth, contentHeight)
-			m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
-		} else {
-			// Full width for packet list
-			m.uiState.PacketList.SetSize(m.uiState.Width, contentHeight)
-			m.uiState.DetailsPanel.SetSize(0, contentHeight)
-		}
 		return m, nil
 	}
 
@@ -756,6 +714,10 @@ func (m Model) handleSavePackets() (Model, tea.Cmd) {
 			m.uiState.Header.SetStreamingSave(false) // Update header status
 			return m, cmd
 		}
+		if m.uiState.SaveInProgress || m.exportRunning() {
+			return m, m.markError(fmt.Errorf("a packet export is already in progress"))
+		}
+		m.uiState.FileDialog.SetPacketMarks(len(m.packetMarks.records))
 		// Update default filename with current timestamp before opening file dialog
 		m.uiState.FileDialog.SetDefaultFilename(m.generateDefaultFilename())
 		// Open file dialog to start new save

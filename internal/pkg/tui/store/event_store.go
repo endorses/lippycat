@@ -66,6 +66,7 @@ type EventStore struct {
 	projectionRevision, visibleEvicted           uint64
 	selectedID                                   string
 	followLatest                                 bool
+	inspecting, resumeFollowing                  bool
 	paused                                       bool
 	arrived, evicted, pausedCount, transportLost uint64
 	lossByKind                                   map[string]uint64
@@ -199,6 +200,7 @@ func (s *EventStore) Reset() {
 	s.firstVisible, s.lastVisible = -1, -1
 	s.selectedID = ""
 	s.followLatest = true
+	s.inspecting, s.resumeFollowing = false, false
 	s.nextArrival = 0
 	s.projectionRevision++
 	s.visibleEvicted = 0
@@ -397,6 +399,41 @@ func (s *EventStore) selectByID(id string, followWhenLast bool) bool {
 	}
 	return false
 }
+
+// SetInspecting suspends following while the list is hidden. On entry, selectedID
+// aligns the store with the displayed event when it is still retained. On exit,
+// the previous follow preference is restored. The result reports a changed
+// selection; unchanged inspection state is a constant-time no-op.
+func (s *EventStore) SetInspecting(inspecting bool, selectedID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inspecting == inspecting {
+		return false
+	}
+	previousID := s.selectedID
+	s.inspecting = inspecting
+	if inspecting {
+		s.resumeFollowing = s.followLatest
+		s.followLatest = false
+		if selectedID != "" && selectedID != s.selectedID {
+			for i := 0; i < s.count; i++ {
+				index := (s.head - s.count + s.capacity + i) % s.capacity
+				if s.visible[index] && s.items[index].Event.Envelope().EventID == selectedID {
+					s.selectedID = selectedID
+					break
+				}
+			}
+		}
+	} else {
+		s.followLatest = s.resumeFollowing
+		s.resumeFollowing = false
+		if s.followLatest && s.lastVisible >= 0 {
+			s.selectedID = s.items[s.lastVisible].Event.Envelope().EventID
+		}
+	}
+	return previousID != s.selectedID
+}
+
 func (s *EventStore) SelectNext()            { s.moveSelection(1) }
 func (s *EventStore) SelectPrevious()        { s.moveSelection(-1) }
 func (s *EventStore) SelectFirst()           { s.selectBoundary(false) }

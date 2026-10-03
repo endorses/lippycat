@@ -56,7 +56,7 @@ func TestTabScrollbarsReserveContentColumn(t *testing.T) {
 	nodes := NewNodesView()
 	nodes.SetSize(8, 3)
 	nodes.viewport.SetContent("1234567")
-	if got := ansi.Strip(strings.Split(nodes.View(), "\n")[0]); got != "1234567▉" {
+	if got := ansi.Strip(strings.Split(nodes.View(), "\n")[0]); got != "1234567" {
 		t.Errorf("nodes first row = %q", got)
 	}
 
@@ -70,14 +70,14 @@ func TestTabScrollbarsReserveContentColumn(t *testing.T) {
 	}
 	stats.viewport.SetContent("1234567")
 	stats.dirty = false
-	if got := ansi.Strip(strings.Split(stats.View(), "\n")[0]); got != "1234567▉" {
+	if got := ansi.Strip(strings.Split(stats.View(), "\n")[0]); got != "1234567" {
 		t.Errorf("statistics first row = %q", got)
 	}
 
 	help := NewHelpView()
 	help.SetSize(8, 4)
 	help.HandleContentLoaded(HelpContentLoadedMsg{Section: SectionKeybindings, RenderedContent: "1234567"})
-	if got := ansi.Strip(strings.Split(help.View(), "\n")[1]); got != "1234567▉" {
+	if got := ansi.Strip(strings.Split(help.View(), "\n")[1]); got != "1234567" {
 		t.Errorf("help first content row = %q", got)
 	}
 }

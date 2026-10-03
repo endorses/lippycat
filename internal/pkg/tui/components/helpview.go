@@ -269,6 +269,17 @@ func (h *HelpView) GetMatchInfo() (int, int) {
 // Update handles viewport messages for scrolling and mouse clicks
 func (h *HelpView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if !h.searchMode {
+			switch msg.Type {
+			case tea.KeyHome:
+				h.viewport.GotoTop()
+				return nil
+			case tea.KeyEnd:
+				h.viewport.GotoBottom()
+				return nil
+			}
+		}
 	case tea.MouseMsg:
 		if offset, handled := handleScrollbarMouse(msg, h.width-1, 6, h.viewport.TotalLineCount(), h.viewport.Height, h.viewport.YOffset, h.viewport.Height, &h.scrollbarDrag); handled {
 			h.viewport.SetYOffset(offset)

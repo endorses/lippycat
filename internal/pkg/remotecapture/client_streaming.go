@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	eventsv1 "github.com/endorses/lippycat/api/gen/events/v1"
 	"github.com/endorses/lippycat/internal/pkg/events/protoadapter"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -61,6 +62,8 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 	// Note: gRPC keepalive (30s ping + 20s timeout) detects dead connections
 	// No additional health monitoring needed
 	go func() {
+		analysis := &packetEventAnalysis{client: c, ctx: streamCtx, generation: eventStreamGeneration}
+		defer analysis.close()
 		defer func() {
 			if r := recover(); r != nil {
 				// Notify handler of disconnection after panic
@@ -95,6 +98,12 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 
 				// Convert entire batch to PacketDisplay and send to handler
 				if c.handler != nil && len(batch.Packets) > 0 {
+					if streamCtx.Err() != nil || !c.isCurrentEventStream(eventStreamGeneration) {
+						return
+					}
+					if err := analysis.observe(batch); err != nil {
+						logger.Warn("Failed to analyze remote monitoring packets", "source_id", batch.HunterId, "error", err)
+					}
 					displays := make([]types.PacketDisplay, 0, len(batch.Packets))
 					callEnded := false
 					for _, pkt := range batch.Packets {
@@ -140,7 +149,7 @@ func (c *Client) startEventStream(ctx context.Context, nodeIDs []string, generat
 
 	stream, err := c.eventClient.SubscribeEvents(ctx, &eventsv1.EventSubscribeRequest{
 		SubscriptionVersion:      1,
-		NodeIds:                  nodeIDs,
+		NodeIds:                  c.eventSubscriptionNodes(nodeIDs),
 		MaxBatchEvents:           128,
 		MaxMessageBytes:          4 << 20,
 		PreviousStreamId:         previousStreamID,
@@ -152,6 +161,23 @@ func (c *Client) startEventStream(ctx context.Context, nodeIDs []string, generat
 	}
 
 	go c.receiveEventsGeneration(ctx, stream, generation)
+}
+
+// Tap packet subscriptions use the local capture-source ID, while event
+// subscriptions select the tap's producer node ID.
+func (c *Client) eventSubscriptionNodes(nodeIDs []string) []string {
+	if nodeIDs == nil {
+		return nil
+	}
+	result := append([]string{}, nodeIDs...)
+	if c.nodeID != "" {
+		for i, nodeID := range result {
+			if nodeID == c.nodeID+"-local" {
+				result[i] = c.nodeID
+			}
+		}
+	}
+	return result
 }
 
 func (c *Client) receiveEvents(ctx context.Context, stream eventsv1.EventService_SubscribeEventsClient) {

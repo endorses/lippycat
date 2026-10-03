@@ -251,7 +251,7 @@ You can add nodes without editing the nodes file:
 1. Navigate to the Nodes tab (`Alt+2`)
 2. Select the input field and press `Enter`
 3. Type the processor address (e.g., `192.168.1.100:55555`)
-4. Press `Enter` to connect
+4. Click **Confirm** or press `Enter` to connect; **Cancel** closes the add-node dialog. Click the address field to focus it.
 
 ## Hunter Subscription Management {#hunter-subscription-management}
 
@@ -259,12 +259,7 @@ By default, connecting to a processor streams packets from all its hunters. Hunt
 
 ### Subscribing to Hunters {#subscribing-to-hunters}
 
-1. Navigate to a processor in the Nodes tab
-2. Press `s` to open the hunter selector modal
-3. Use `↑`/`↓` or `j`/`k` to navigate hunters
-4. Press `Enter` to toggle selection (highlighted in cyan)
-5. Press `Enter` on "Confirm Selection" to apply
-6. Press `Esc` to cancel
+Select a processor in the Nodes tab and press `s`. Click hunter checkboxes or their labels to toggle subscriptions, or navigate with `↑` / `↓` and toggle with `Space`. **All** and **None** change the entire list. Choose **Confirm** (or press `Enter` while the list has focus) to apply; **Cancel** or `Esc` discards changes. Confirming an empty selection subscribes to no hunters.
 
 ### Unsubscribing {#unsubscribing}
 
@@ -289,6 +284,10 @@ From the Nodes tab, press `f` to open the filter management view. This lets you:
 - **Create new filters** with type and pattern
 - **Enable/disable filters** without deleting them
 - **Delete filters** you no longer need
+
+Click a filter row to select it, then use **Edit** or **Delete**; clicking its checkbox toggles its enabled state without opening the editor. **New** creates a filter and **Close** leaves the manager. Search, Type, and Status are clickable; **Clear search** removes the search text. Deletion requires confirmation.
+
+In the editor, click text fields, type choices, the enabled checkbox, or hunter targets. **Save** validates and submits the draft; **Cancel** discards it. The target selector offers only compatible hunters, with **All**, **None**, **Confirm**, and **Cancel** controls. Cancelling target selection preserves the parent draft. An empty filter target list means all compatible hunters; this differs from an empty packet subscription, which receives nothing.
 
 Filter changes take effect immediately — the processor pushes updated filters to all connected hunters.
 

@@ -144,78 +144,71 @@ TUI survives network interruptions with intelligent reconnection:
 - Processor restarts
 - Network maintenance windows
 
+## Dialog Interaction
+
+Click a button to perform its action. Tab and Shift+Tab move between fields,
+lists, and enabled buttons; Enter or Space activates a focused button. Existing
+list and text-editing shortcuts remain available when those controls have focus.
+Disabled buttons cannot be activated. The action bar wraps in narrow terminals;
+use the wheel over a list to scroll its contents.
+
+Click a protocol row to select it, then choose **Apply**; double-clicking a row
+also applies it. In file dialogs, single-click selects, **Open** opens a file or
+enters a directory, and double-click performs the same navigation in open mode.
+Click breadcrumbs or **Up** to change directories, and click the search or
+filename field to edit it. **New folder** and **Show details** provide the
+corresponding file-browser controls.
+
+In save mode, selecting an existing file fills its filename; double-clicking
+focuses that name without saving. Choose **Save** to submit it. An existing
+destination requires **Replace** confirmation; **Keep editing** returns to the
+filename. **Cancel edit** leaves the current inline edit, while **Cancel** closes
+the file dialog. These controls also apply to Settings file pickers.
+
+The filter manager provides **New**, **Edit**, **Delete**, and **Close** buttons.
+Click a filter row to select it, or its checkbox to toggle it. Search, Type,
+Status, editor fields, and hunter targets are clickable. Hunter selectors have
+**All**, **None**, **Confirm**, and **Cancel** controls. Target choices remain
+local until confirmed; filter targets only offer compatible hunters. An empty
+filter target list means all compatible hunters, while an empty subscription
+means receiving packets from none.
+
+Clicking outside a dialog cancels only its visible layer. Offline opening and
+filtering dialogs also have **Cancel** buttons and stay open while cleanup
+finishes. If cleanup fails, use **Retry cleanup** or **Quit** where offered.
+
 ## TUI Modal Architecture
 
-**IMPORTANT: All modals in the TUI MUST use the unified modal component.**
+All dialogs use `RenderModal(ModalOptions())`. `ModalRenderOptions` contains a
+stable layer `ID`, content, informational footer text, explicit `ModalAction`
+buttons, content-local `ModalTarget` rectangles, and the owner's `ModalState`.
+`LayoutModal` is the shared source for rendering and screen-space hit geometry,
+including terminal-cell widths, clipping, scrolling, and wrapped action bars.
+`View` and layout calculation are read-only; hit testing works before rendering
+following a resize. Use `ModalContentWidth` to size content without duplicating
+chrome offsets.
 
-The TUI uses a standardized modal architecture to ensure consistency across all modal dialogs. There is ONE modal rendering function that all modal components must use:
+Interactive owners implement `ModalOptions`, `HandleModalAction`, and
+`HandleModalFocus` in addition to `View` and `Dismiss`. Call `HandleModalInput`
+from `Update` before contextual keyboard handling. Keyboard shortcuts and button
+clicks invoke the same explicit action handlers, which revalidate current state.
+`HandleModalFocus` focuses or blurs owned inputs; `ModalState` tracks focus,
+scroll position, and double-click identity. Reset click state when navigation,
+resizing, dismissal, or list replacement changes the target context.
 
-**Unified Modal Component:** `internal/pkg/tui/components/modal.go`
+The host resolves the visible layer with `activeModal` and `VisibleModal`.
+Composite owners expose nested dialogs through `ActiveModal`, including file
+overwrite and filter deletion confirmations. The host routes modal mouse input
+before the underlying UI and consumes gestures that close or replace a layer.
+`Dismiss` preserves result payloads and cleanup; progress owners request
+cancellation and remain visible until workers finish. Asynchronous results still
+reach their owners while a modal is visible.
 
-The `RenderModal()` function provides consistent modal chrome (border, centering, title, footer) for all modals in the codebase.
-
-### Architecture Pattern
-
-1. **Modal Content Components** manage their own:
-   - State (selection, input, navigation)
-   - Content rendering (building the modal body as a string)
-   - Event handling (keyboard/mouse events)
-   - Business logic (search, filtering, CRUD operations)
-
-2. **Modal Content Components** call `RenderModal()` to wrap their content:
-
-   ```go
-   func (component *Component) View() string {
-       if !component.active {
-           return ""
-       }
-
-       // Build content string
-       var content strings.Builder
-       content.WriteString("My modal content...")
-
-       // Use unified modal rendering
-       return RenderModal(ModalRenderOptions{
-           Title:      "My Modal Title",
-           Content:    content.String(),
-           Footer:     "Enter: Select | Esc: Cancel",
-           Width:      component.width,
-           Height:     component.height,
-           Theme:      component.theme,
-           ModalWidth: 60, // Optional: specific width
-       })
-   }
-   ```
-
-3. **Parent (model.go)** handles:
-   - Checking if modal is active (`IsActive()`)
-   - Routing events to the modal
-   - Overlaying the modal on the main view
-
-### Current Modal Components
-
-All components use unified `RenderModal()`:
-
-- `ProtocolSelector` - Protocol filter selection (`internal/pkg/tui/components/protocolselector.go`)
-- `HunterSelector` - Hunter subscription selection (`internal/pkg/tui/components/hunterselector.go`)
-- `NodesView.renderAddNodeModal` - Add processor/hunter node (`internal/pkg/tui/components/nodesview.go`)
-
-### When Creating New Modals
-
-- ✅ DO: Create a component that manages state and content
-- ✅ DO: Call `RenderModal()` in your component's `View()` method
-- ✅ DO: Follow the same lifecycle pattern (Activate/Deactivate/IsActive/View/Update)
-- ❌ DON'T: Render modal chrome (border, centering) yourself
-- ❌ DON'T: Create custom modal styling - use RenderModal for consistency
-- ❌ DON'T: Duplicate modal rendering logic
-
-### Benefits
-
-- Consistent look and feel across all modals
-- Centralized styling and theming
-- Easy to maintain and update modal appearance
-- Reduces code duplication
-- Clear separation of concerns (content vs. chrome)
+The same contract covers protocol selection, hunter subscriptions, file dialogs,
+filter lists/editors/target selectors, generic confirmations, add-node input, and
+offline progress. Concrete actions belong in `Actions`; navigation hints remain
+in `Footer`. Content owners supply local targets; the shared layout owns border,
+padding, centering, and viewport transformations.
 
 ## FileDialog Component
 
@@ -226,7 +219,7 @@ All components use unified `RenderModal()`:
 - Uses unified `RenderModal()` for consistent chrome
 - Returns `FileSelectedMsg` on confirmation
 - Four input modes: Navigation, Filename (save), Filter, CreateFolder
-- Supports save/open modes with single/multiple file selection
+- Supports save/open modes with single-file selection
 
 **Key Features:**
 
@@ -235,7 +228,8 @@ All components use unified `RenderModal()`:
 - Inline folder creation (press `n`)
 - Details toggle (press `d`) - permissions and file sizes
 - Filename validation and extension enforcement
-- Fixed-height scrollable viewport
+- Scrollable content viewport with persistent action buttons
+- Explicit overwrite confirmation before returning an existing save destination
 
 **Usage:**
 

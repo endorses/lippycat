@@ -43,6 +43,11 @@ type offlineBrowserState struct {
 	rows           int
 	current        *offlineBrowseResult
 	requested      bool
+	// Scroll retention contains only scalar identity/position, never leased packet data.
+	detailScroll       int
+	detailScrollCursor uint64
+	detailScrollToken  offline.Token
+	detailScrollValid  bool
 }
 
 func (b *offlineBrowser) releaseLocked(r *offlineBrowseResult) error {
@@ -218,6 +223,7 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 			return nil
 		}
 		m.cancelOfflineBrowserReads()
+		m.rememberOfflineDetailScroll(s)
 		m.uiState.DetailsPanel.SetPacket(nil)
 		m.uiState.PacketList.SetVirtualPackets(m.offlinePacketCount(), m.uiState.PacketList.LogicalOffset(), nil)
 		err := s.owner.release(s.current)
@@ -243,6 +249,11 @@ func (m *Model) syncOfflineBrowser() tea.Cmd {
 	shortViewport := selectedMissing && s.current.token.Request == s.request && s.offset == offset && s.rows == rows && s.current.page.Row == offset
 	if s.requested && s.cursor == cursor && s.offset == offset && s.rows == rows && !selectedMissing {
 		return nil
+	}
+	token := offline.Token{Dataset: m.offlineSession.Dataset.Generation(), Query: m.offlineQueryGeneration()}
+	m.rememberOfflineDetailScroll(s)
+	if !s.matchesDetailScroll(token, cursor) {
+		s.detailScrollValid = false
 	}
 	s.request++
 	s.cursor = cursor
@@ -303,11 +314,15 @@ func (m Model) handleOfflineBrowse(msg offlineBrowseMsg) (Model, tea.Cmd) {
 	packets := make([]components.PacketDisplay, len(r.page.Rows))
 	for i, row := range r.page.Rows {
 		packets[i] = row.DisplayFields()
+		packets[i].CaptureID = uint64(row.ID) + 1
 	}
 	m.uiState.PacketList.SetVirtualPackets(m.offlinePacketCount(), r.page.Row, packets)
 	m.uiState.DetailsPanel.SetPacket(nil)
 	if r.detail != nil {
 		m.uiState.DetailsPanel.SetPacket(&r.detail.Value.Packet)
+		if s.matchesDetailScroll(r.token, r.cursor) {
+			m.uiState.DetailsPanel.SetScrollOffset(s.detailScroll)
+		}
 	}
 	old := s.current
 	s.current = r
@@ -338,4 +353,23 @@ func offlinePageBudget(limits offline.ResourceLimits) uint64 {
 		budget = min(headroom, max(budget, recordBudget))
 	}
 	return max(uint64(1), budget)
+}
+
+// rememberOfflineDetailScroll saves a reading position before releasing its pin.
+// An in-flight replacement has no pin and must not replace the saved position
+// with the loading viewport's zero offset.
+func (m *Model) rememberOfflineDetailScroll(s *offlineBrowserState) {
+	if s.current == nil || s.current.detail == nil {
+		return
+	}
+	_, _, s.detailScroll = m.uiState.DetailsPanel.ScrollState()
+	s.detailScrollCursor = s.current.cursor
+	s.detailScrollToken = s.current.token
+	s.detailScrollToken.Request = 0
+	s.detailScrollValid = true
+}
+
+func (s *offlineBrowserState) matchesDetailScroll(token offline.Token, cursor uint64) bool {
+	token.Request = 0
+	return s.detailScrollValid && s.detailScrollCursor == cursor && s.detailScrollToken == token
 }

@@ -47,7 +47,7 @@ func TestCaptureTextSelectionPaneBoundaries(t *testing.T) {
 					require.Equal(t, 3, region.X)
 					require.LessOrEqual(t, region.X+region.Width, 99)
 				} else {
-					require.Equal(t, 104, region.X)
+					require.Equal(t, m.captureLayout().Details.X+3, region.X)
 					require.LessOrEqual(t, region.X+region.Width, 178)
 				}
 				m, _ = m.handleTextSelectionMouse(selectionPress(x, 8))
@@ -60,7 +60,7 @@ func TestCaptureTextSelectionPaneBoundaries(t *testing.T) {
 				}
 				m.textSelection = nil
 			}
-			for _, x := range []int{0, 100, 101, 179, 99, 178} {
+			for _, x := range []int{0, m.captureLayout().List.Width - 1, m.captureLayout().Details.X, 179, m.captureLayout().List.Width - 2, 178} {
 				_, ok := m.textSelectionRegion(x, 8)
 				require.False(t, ok, "border/scrollbar at x=%d", x)
 			}
@@ -105,6 +105,7 @@ func TestCallDetailsSelectionPreservesSectionsWithoutTrailingPadding(t *testing.
 		Duration:  4 * time.Second, Codec: "G.711 µ-law (PCMU)", MOS: 4.1,
 		SDPEndpoints: []string{"192.0.2.1:27572", "192.0.2.1:27573", "192.0.2.2:4000", "192.0.2.2:4001"},
 	}})
+	m.prepareViewChrome()
 	_ = m.View()
 	region, ok := m.textSelectionRegion(110, 8)
 	require.True(t, ok)
@@ -113,7 +114,6 @@ func TestCallDetailsSelectionPreservesSectionsWithoutTrailingPadding(t *testing.
 		X: region.X + region.Width - 1, Y: region.Y + region.Height - 1, Action: tea.MouseActionMotion,
 	})
 	require.Equal(t, `📞 Call Details
-
 Call-ID: selection-call
 From: sip:alice@example.test
 To: sip:bob@example.test
@@ -196,7 +196,7 @@ func TestTextSelectionCancellation(t *testing.T) {
 func TestTextSelectionLeavesScrollbarsAndTabsWorking(t *testing.T) {
 	m := selectionTestModel(t, "packets")
 	m.uiState.PacketList.SetVirtualPackets(1000, 0, make([]components.PacketDisplay, 50))
-	m, _ = m.handleTextSelectionMouse(selectionPress(99, 15))
+	m, _ = m.handleTextSelectionMouse(selectionPress(m.captureLayout().List.Width-2, m.captureContentOrigin()+10))
 	require.Nil(t, m.textSelection)
 	require.Equal(t, "list", m.scrollDrag)
 	m, _ = m.handleTextSelectionMouse(tea.MouseMsg{X: 80, Y: 32, Action: tea.MouseActionMotion})

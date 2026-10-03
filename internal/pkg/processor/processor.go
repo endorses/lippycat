@@ -42,7 +42,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/eventcoalesce"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/events/broadcast"
-	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/hunter/eventspool"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -242,9 +241,10 @@ type Processor struct {
 	proxyManager      *proxy.Manager // Manages topology subscriptions and operation proxying
 
 	// Packet counters (shared with stats collector and flow controller)
-	packetsReceived    atomic.Uint64
-	packetsForwarded   atomic.Uint64
-	vifInjectionErrors atomic.Uint64 // Virtual interface injection failures
+	packetsReceived           atomic.Uint64
+	packetsForwarded          atomic.Uint64
+	vifInjectionErrors        atomic.Uint64 // Virtual interface injection failures
+	correlatedCallSubscribers atomic.Int64
 
 	sessionOutputManager *SessionOutputManager
 	callLifecycle        *CallLifecycleRegistry
@@ -282,17 +282,21 @@ type Processor struct {
 	}
 
 	// TLS keylog writer for session key storage and file output
-	tlsKeylogWriter     *TLSKeylogWriter
-	eventDispatcher     *events.Dispatcher
-	eventBroadcaster    *broadcast.Broadcaster
-	eventService        eventsv1.EventServiceServer
-	eventIngress        *eventIngress
-	eventRuntime        *eventanalysis.Runtime
-	eventProducers      *events.ProducerSet
-	upstreamEventRouter *upstream.EventRouter
-	localPolicyMu       sync.Mutex
-	subscriptionLimit   *subscriptionLimiter
-	logSink             *logstream.Sink
+	tlsKeylogWriter          *TLSKeylogWriter
+	eventDispatcher          *events.Dispatcher
+	eventBroadcaster         *broadcast.Broadcaster
+	eventService             eventsv1.EventServiceServer
+	eventIngress             *eventIngress
+	eventAnalysisMu          sync.RWMutex
+	eventAnalysisSubscribers int
+	eventAnalysisClosed      bool
+	eventRuntime             *eventanalysis.Runtime
+	localEventAnalysis       bool // Explicit local output requires analysis independently of upstream mode.
+	eventProducers           *events.ProducerSet
+	upstreamEventRouter      *upstream.EventRouter
+	localPolicyMu            sync.Mutex
+	subscriptionLimit        *subscriptionLimiter
+	logSink                  *logstream.Sink
 
 	// Control
 	ctx          context.Context
@@ -401,24 +405,14 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize event subscription service: %w", err)
 	}
+	service.beginSubscription = p.beginEventSubscription
 	p.eventService = service
 	p.eventIngress = service.ingress
-	fileCfg := fileanalysis.Config{}
-	if config.LogConfig != nil {
-		fileCfg = fileanalysis.Config{MaxFileSize: config.LogConfig.FileMaxSize, MaxTotalSize: config.LogConfig.FileTotalSize, Extract: config.LogConfig.ExtractFiles, Directory: config.LogConfig.ExtractionDirectory}
-	}
-	includeHeaders, includeEmailBody := false, false
-	if config.LogConfig != nil {
-		includeHeaders = config.LogConfig.IncludeHTTPHeaders
-		includeEmailBody = config.LogConfig.IncludeEmailBodyPreview
-	}
-	p.eventRuntime, err = eventanalysis.New(eventanalysis.Config{
-		Dispatcher: p.eventDispatcher, Files: fileCfg,
-		IncludeHTTPHeaders: includeHeaders, IncludeEmailBodyPreview: includeEmailBody,
-		LiveExpiry: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("initialize event analysis runtime: %w", err)
+	p.localEventAnalysis = shouldEmitStructuredLogs(config)
+	if p.wantsEventAnalysis() {
+		if err := p.initializeEventAnalysis(); err != nil {
+			return nil, err
+		}
 	}
 	if shouldEmitStructuredLogs(config) {
 		logCfg := config.LogConfig
@@ -809,9 +803,24 @@ func shouldEmitStructuredLogs(config Config) bool {
 	}
 }
 
-// RegisterEventSink subscribes an output-neutral sink before Start is called.
+// RegisterEventSink subscribes an output-neutral sink and opts into local event
+// analysis. It must be called before Start.
 func (p *Processor) RegisterEventSink(sink events.Sink, kinds ...events.Kind) error {
-	return p.eventDispatcher.Register(sink, kinds...)
+	p.eventAnalysisMu.Lock()
+	defer p.eventAnalysisMu.Unlock()
+	hadRuntime := p.eventRuntime != nil
+	if err := p.initializeEventAnalysisLocked(); err != nil {
+		return err
+	}
+	if err := p.eventDispatcher.Register(sink, kinds...); err != nil {
+		if !hadRuntime {
+			p.eventRuntime.Close()
+			p.eventRuntime = nil
+		}
+		return err
+	}
+	p.localEventAnalysis = true
+	return nil
 }
 
 // SetProxyTLSCredentials sets TLS credentials on the proxy manager for authorization token signing.
@@ -849,6 +858,9 @@ func (p *Processor) sipRetryTelemetryProto() *management.SIPRetryTelemetry {
 // Must be called before Start().
 func (p *Processor) SetPacketSource(packetSource source.PacketSource) {
 	p.packetSource = packetSource
+	if localSource, ok := packetSource.(*source.LocalSource); ok {
+		localSource.SetPacketDemand(p.needsPacketProcessing)
+	}
 	if p.sessionOutputManager == nil {
 		return
 	}
@@ -892,10 +904,8 @@ func (p *Processor) ReconcileLocalFilterChange(change filtering.LocalFilterChang
 	boundaryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	err := localSource.ApplyPolicyBoundary(boundaryCtx, change.Next.BPFExpression, func() error {
-		if p.eventRuntime != nil {
-			if err := p.eventRuntime.Reset(); err != nil {
-				return fmt.Errorf("reset event analysis: %w", err)
-			}
+		if err := p.resetEventAnalysis(); err != nil {
+			return fmt.Errorf("reset event analysis: %w", err)
 		}
 		if p.eventDispatcher != nil {
 			if err := p.eventDispatcher.Flush(boundaryCtx); err != nil {
@@ -968,10 +978,7 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 	}
 
 	stats := localSource.Stats()
-	var eventRuntimeStats eventanalysis.Stats
-	if p.eventRuntime != nil {
-		eventRuntimeStats = p.eventRuntime.Stats()
-	}
+	eventRuntimeStats := p.eventAnalysisStats()
 	var eventDispatcherStats events.Stats
 	if p.eventDispatcher != nil {
 		eventDispatcherStats = p.eventDispatcher.Stats()

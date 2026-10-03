@@ -18,17 +18,20 @@ type TabKeybind struct {
 	Key         string // Display key (e.g., "/", "Space", "Enter")
 	Description string // Action description (e.g., "filter", "pause")
 	ShortDesc   string // Abbreviated description (e.g., "flt", "pse")
+	TinyDesc    string // Optional label retained in narrow layouts (e.g., "dt", "mk")
 	Essential   bool   // If true, show even in narrow mode
 }
 
 // Footer displays the bottom footer bar with keybindings
 type Footer struct {
+	detailsFocused       bool
 	width                int
 	theme                themes.Theme
 	filterMode           bool
 	hasFilter            bool
-	filterCount          int     // Number of stacked filters
-	streamingSave        bool    // True when streaming save is active
+	filterCount          int  // Number of stacked filters
+	streamingSave        bool // True when streaming save is active
+	markedPacketCount    int
 	activeTab            int     // Active tab index
 	hasProtocolSelection bool    // True when a protocol is selected
 	hasEvents            bool    // True when the common Events view is available
@@ -53,6 +56,8 @@ func NewFooter() Footer {
 		hasFilter:  false,
 	}
 }
+
+func (f *Footer) SetDetailsFocused(focused bool) { f.detailsFocused = focused }
 
 // SetTheme updates the theme
 func (f *Footer) SetTheme(theme themes.Theme) {
@@ -83,6 +88,9 @@ func (f *Footer) SetFilterCount(count int) {
 func (f *Footer) SetStreamingSave(active bool) {
 	f.streamingSave = active
 }
+
+// SetMarkedPacketCount updates the capture save hint and retained mark count.
+func (f *Footer) SetMarkedPacketCount(count int) { f.markedPacketCount = max(0, count) }
 
 // SetActiveTab sets the active tab index
 func (f *Footer) SetActiveTab(index int) {
@@ -158,9 +166,14 @@ func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
 func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	switch tabIndex {
 	case 0: // Capture tab
-		keybinds := []TabKeybind{
-			{Key: "/", Description: "filter", ShortDesc: "flt", Essential: true},
+		detailLabel, detailShort, detailTiny := "details", "dtls", "dt"
+		if f.detailsFocused {
+			detailLabel, detailShort, detailTiny = "list", "lst", "ls"
 		}
+		keybinds := []TabKeybind{
+			{Key: "d", Description: detailLabel, ShortDesc: detailShort, TinyDesc: detailTiny, Essential: true},
+		}
+		keybinds = append(keybinds, TabKeybind{Key: "/", Description: "filter", ShortDesc: "flt", Essential: true})
 
 		// Conditional keybinds based on view mode
 		if f.viewMode == "events" {
@@ -188,7 +201,6 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 			}
 		}
 		keybinds = append(keybinds,
-			TabKeybind{Key: "d", Description: "details", ShortDesc: "det", Essential: true},
 			TabKeybind{Key: "t", Description: "time", ShortDesc: "tm", Essential: false},
 		)
 
@@ -199,6 +211,8 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 			keybinds = append(keybinds,
 				TabKeybind{Key: "w", Description: "stop", ShortDesc: "stp", Essential: true},
 			)
+		} else if f.markedPacketCount > 0 {
+			keybinds = append(keybinds, TabKeybind{Key: "w", Description: fmt.Sprintf("save marked (%d)", f.markedPacketCount), ShortDesc: fmt.Sprintf("sav %d*", f.markedPacketCount), Essential: true})
 		} else {
 			keybinds = append(keybinds,
 				TabKeybind{Key: "w", Description: "save", ShortDesc: "sav", Essential: true},
@@ -207,6 +221,12 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		keybinds = append(keybinds,
 			TabKeybind{Key: "x", Description: "flush", ShortDesc: "flsh", Essential: false},
 		)
+		if (f.viewMode == "packets" || f.viewMode == "") && !f.detailsFocused {
+			keybinds = append(keybinds, TabKeybind{Key: "m", Description: "mark", ShortDesc: "mrk", TinyDesc: "mk", Essential: true})
+			if f.markedPacketCount > 0 {
+				keybinds = append(keybinds, TabKeybind{Key: "u", Description: "unmark all", ShortDesc: "unmk", TinyDesc: "unm", Essential: true})
+			}
+		}
 		return keybinds
 
 	case 1: // Nodes tab
@@ -238,6 +258,8 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	case 4: // Help tab
 		keybinds := []TabKeybind{
 			{Key: "/", Description: "search", ShortDesc: "srch", Essential: true},
+			{Key: "g", Description: "top", ShortDesc: "top", Essential: false},
+			{Key: "G", Description: "bottom", ShortDesc: "btm", Essential: false},
 		}
 		if f.hasHelpSearch {
 			keybinds = append(keybinds,
@@ -339,6 +361,13 @@ func (f *Footer) renderSection(bindings []TabKeybind, widthClass responsive.Widt
 			hint += descStyle.Render(":" + desc)
 		case responsive.Wide:
 			hint += descStyle.Render(": " + binding.Description)
+		default:
+			if binding.TinyDesc != "" && f.width >= 18 {
+				hint += descStyle.Render(":" + binding.TinyDesc)
+			}
+			if f.activeTab == 0 && binding.Key == "w" && f.markedPacketCount > 0 && !f.streamingSave {
+				hint += descStyle.Render(fmt.Sprintf(":%d*", f.markedPacketCount))
+			}
 		}
 		hintWidth := lipgloss.Width(hint)
 		start := width

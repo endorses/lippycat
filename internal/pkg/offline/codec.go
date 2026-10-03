@@ -176,6 +176,9 @@ func (e *encoder) value(v reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).Tag.Get("offline") == "-" {
+				continue
+			}
 			if err := e.value(v.Field(i)); err != nil {
 				return err
 			}
@@ -354,6 +357,9 @@ func (d *decoder) value(v reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).Tag.Get("offline") == "-" {
+				continue
+			}
 			if err := d.value(v.Field(i)); err != nil {
 				return err
 			}

@@ -28,6 +28,11 @@ func handleScrollbarMouse(msg tea.MouseMsg, x, top, total, visible, offset, heig
 		}
 		return offset, false
 	}
+	start, size := ScrollbarThumb(total, visible, offset, height)
+	if size == 0 {
+		drag.active = false
+		return offset, false
+	}
 	if msg.Action == tea.MouseActionMotion {
 		if !drag.active {
 			return offset, false
@@ -37,7 +42,6 @@ func handleScrollbarMouse(msg tea.MouseMsg, x, top, total, visible, offset, heig
 	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress || msg.X != x || msg.Y < top || msg.Y >= top+height {
 		return offset, false
 	}
-	start, size := ScrollbarThumb(total, visible, offset, height)
 	row := msg.Y - top
 	drag.active = true
 	if row >= start && row < start+size {
@@ -53,12 +57,10 @@ func handleScrollbarMouse(msg tea.MouseMsg, x, top, total, visible, offset, heig
 
 // ScrollbarThumb returns the thumb's first row and height. All measurements are
 // in terminal cells or content lines, so callers can use these for hit testing.
+// The size is zero when there is nothing to scroll or no room to display it.
 func ScrollbarThumb(total, visible, offset, height int) (start, size int) {
-	if height <= 0 {
+	if height <= 0 || total <= visible || visible <= 0 {
 		return 0, 0
-	}
-	if total <= visible || total <= 0 || visible <= 0 {
-		return 0, height
 	}
 	size = max(1, min(height, (visible*height+total/2)/total))
 	maxOffset := total - visible
@@ -108,18 +110,17 @@ func ScrollbarOffsetForDrag(total, visible, height, startOffset, startRow, row i
 	return max(0, min(startOffset+change, total-visible))
 }
 
-// RenderScrollbar draws a one-cell-wide scrollbar with a visible track, even
-// when the content currently fits the viewport.
+// RenderScrollbar draws only the one-cell-wide thumb, leaving the track blank.
+// The scrollbar is hidden when the content fits the viewport.
 func RenderScrollbar(total, visible, offset, height int, theme themes.Theme) string {
-	if height <= 0 {
+	start, size := ScrollbarThumb(total, visible, offset, height)
+	if size == 0 {
 		return ""
 	}
-	start, size := ScrollbarThumb(total, visible, offset, height)
-	track := lipgloss.NewStyle().Foreground(theme.BorderColor).Render("│")
 	thumb := lipgloss.NewStyle().Foreground(theme.Foreground).Render("▉")
 	lines := make([]string, height)
 	for row := range lines {
-		lines[row] = track
+		lines[row] = " "
 		if row >= start && row < start+size {
 			lines[row] = thumb
 		}

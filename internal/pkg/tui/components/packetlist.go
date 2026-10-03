@@ -3,11 +3,13 @@
 package components
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
@@ -34,20 +36,24 @@ type (
 
 // PacketList is a component that displays a list of packets
 type PacketList struct {
-	virtual        bool
-	logicalCount   uint64
-	logicalCursor  uint64
-	logicalOffset  uint64
-	pageStart      uint64
-	packets        []PacketDisplay
-	cursor         int // Currently selected packet
-	offset         int // Scroll offset
-	width          int
-	height         int
-	headerHeight   int
-	autoScroll     bool         // Whether to auto-scroll to bottom (like chat)
-	theme          themes.Theme // Color theme
-	detailsVisible bool         // Whether details panel is visible (affects column widths)
+	virtual         bool
+	logicalCount    uint64
+	logicalCursor   uint64
+	logicalOffset   uint64
+	pageStart       uint64
+	packets         []PacketDisplay
+	markedPackets   map[uint64]bool
+	cursor          int // Currently selected packet
+	offset          int // Scroll offset
+	width           int
+	height          int
+	headerHeight    int
+	autoScroll      bool         // Whether to auto-scroll to bottom (like chat)
+	inspecting      bool         // The list is hidden while the selected packet is inspected.
+	followPaused    bool         // Inspection temporarily suspends following.
+	resumeFollowing bool         // Restore the prior follow preference when inspection ends.
+	theme           themes.Theme // Color theme
+	detailsVisible  bool         // Whether details panel is visible (affects column widths)
 
 	// Time display settings
 	timeDisplayMode  TimeDisplayMode // Clock or relative time
@@ -61,6 +67,9 @@ type PacketList struct {
 	cachedHeaderStyle lipgloss.Style // header style cache
 	sizeChanged       bool           // flag to recalculate caches
 }
+
+// SetMarkedPackets installs an immutable snapshot of marked capture identities.
+func (p *PacketList) SetMarkedPackets(ids map[uint64]bool) { p.markedPackets = ids }
 
 // NewPacketList creates a new packet list component
 func NewPacketList() PacketList {
@@ -198,6 +207,27 @@ func (p *PacketList) GetSelectedPacket() *PacketDisplay {
 	return &pkt
 }
 
+// SetInspecting suspends following while the list is hidden, then restores the
+// previous preference when the list becomes visible again.
+func (p *PacketList) SetInspecting(inspecting bool) {
+	if p.inspecting == inspecting {
+		return
+	}
+	p.inspecting = inspecting
+	if inspecting {
+		p.resumeFollowing = p.autoScroll
+		p.followPaused = true
+		p.autoScroll = false
+		return
+	}
+	p.followPaused = false
+	p.autoScroll = p.resumeFollowing
+	p.resumeFollowing = false
+	if p.autoScroll {
+		p.GotoBottom()
+	}
+}
+
 // SetPackets updates the slice-backed live/remote packet list.
 func (p *PacketList) SetPackets(packets []PacketDisplay) {
 	if p.virtual {
@@ -212,6 +242,26 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 	if oldLen > 0 && p.cursor >= 0 && p.cursor < oldLen {
 		pkt := p.packets[p.cursor]
 		selectedPacket = &pkt
+	}
+	if p.followPaused {
+		p.packets = packets
+		if p.captureStartTime.IsZero() && newLen > 0 {
+			p.captureStartTime = packets[0].Timestamp
+		}
+		oldCursor := p.cursor
+		p.cursor = min(p.cursor, max(0, newLen-1))
+		if selectedPacket != nil {
+			for i := range packets {
+				if sameInspectedPacket(packets[i], *selectedPacket) {
+					p.cursor = i
+					break
+				}
+			}
+		}
+		p.offset = max(0, p.offset+p.cursor-oldCursor)
+		p.autoScroll = false
+		p.adjustOffset()
+		return
 	}
 
 	// Detect if this is a filter change (drastic change in packet list)
@@ -445,7 +495,20 @@ func (p *PacketList) Reset() {
 	p.cursor = 0
 	p.offset = 0
 	p.autoScroll = true
+	p.inspecting = false
+	p.followPaused = false
+	p.resumeFollowing = false
 	p.captureStartTime = time.Time{} // Reset capture start time
+}
+
+// PacketDisplay has no durable packet ID. Include capture source and bytes to
+// distinguish observations of the same flow at the same timestamp.
+func sameInspectedPacket(a, b PacketDisplay) bool {
+	return a.Timestamp.Equal(b.Timestamp) && a.NodeID == b.NodeID &&
+		a.Interface == b.Interface && a.SrcIP == b.SrcIP && a.DstIP == b.DstIP &&
+		a.SrcPort == b.SrcPort && a.DstPort == b.DstPort &&
+		a.Transport == b.Transport && a.Protocol == b.Protocol &&
+		a.Length == b.Length && a.Info == b.Info && bytes.Equal(a.RawData, b.RawData)
 }
 
 // ToggleTimeDisplay cycles between clock and relative time display modes
@@ -487,7 +550,7 @@ func (p *PacketList) AppendPackets(packets []PacketDisplay) {
 	p.packets = append(p.packets, packets...)
 
 	// Auto-scroll to bottom if enabled and was at bottom
-	if p.autoScroll && wasAtBottom {
+	if p.autoScroll && !p.followPaused && wasAtBottom {
 		p.cursor = len(p.packets) - 1
 		p.adjustOffset()
 	}
@@ -503,8 +566,13 @@ func (p *PacketList) TrimOldPackets(trimCount int) {
 	}
 
 	if trimCount >= len(p.packets) {
-		// Trim everything - use Reset instead
+		// Retention eviction must not resume following or restart relative time.
+		inspecting, followPaused, resumeFollowing, captureStart := p.inspecting, p.followPaused, p.resumeFollowing, p.captureStartTime
 		p.Reset()
+		p.inspecting, p.followPaused, p.resumeFollowing, p.captureStartTime = inspecting, followPaused, resumeFollowing, captureStart
+		if followPaused {
+			p.autoScroll = false
+		}
 		return
 	}
 
@@ -512,6 +580,9 @@ func (p *PacketList) TrimOldPackets(trimCount int) {
 
 	// Remove packets from front
 	p.packets = p.packets[trimCount:]
+	if p.followPaused {
+		p.offset = max(0, p.offset-trimCount)
+	}
 
 	// Adjust cursor
 	if !wasAtBottom {
@@ -598,6 +669,9 @@ func (p *PacketList) GotoTop() {
 
 // GotoBottom moves to the last packet
 func (p *PacketList) GotoBottom() {
+	if !p.inspecting {
+		p.followPaused = false
+	}
 	if p.virtual {
 		if p.logicalCount > 0 {
 			p.SetLogicalCursor(p.logicalCount - 1)
@@ -692,15 +766,14 @@ func (p *PacketList) adjustOffset() {
 		p.offset = p.cursor - visibleLines + 1
 	}
 
-	// Ensure offset is valid
-	if p.offset < 0 {
-		p.offset = 0
-	}
+	// Fill newly available rows when the pane grows near the end of the list.
+	maxOffset := max(0, len(p.packets)-visibleLines)
+	p.offset = max(0, min(p.offset, maxOffset))
 }
 
 // IsAutoScrolling returns whether auto-scroll is enabled
 func (p *PacketList) IsAutoScrolling() bool {
-	return p.autoScroll
+	return p.autoScroll && !p.followPaused
 }
 
 // GetCursor returns the current cursor position
@@ -856,7 +929,27 @@ func (p PacketList) View(focused bool, detailsVisible bool) string {
 	p.paneStyles.prepare(p.theme, borderWidth, contentHeight)
 	borderStyle := p.paneStyles.border(focused && detailsVisible)
 
-	return borderStyle.Render(sb.String())
+	view := borderStyle.Render(sb.String())
+	if len(p.markedPackets) == 0 || p.LogicalCount() == 0 {
+		return view
+	}
+	lines := strings.Split(view, "\n")
+	start := p.LogicalOffset()
+	count := int(min(uint64(max(1, availableForPackets)), p.LogicalCount()-start))
+	markStyle := lipgloss.NewStyle().Foreground(p.theme.Foreground).Bold(true)
+	for i := 0; i < count; i++ {
+		index, loaded := p.pageIndex(start + uint64(i))
+		if !loaded || p.packets[index].CaptureID == 0 || !p.markedPackets[p.packets[index].CaptureID] {
+			continue
+		}
+		// Border, top padding, and header precede the first row. Replace a
+		// left padding cell, preserving data columns and pane dimensions.
+		y := i + 3
+		if y < len(lines)-1 && ansi.StringWidth(lines[y]) >= 4 {
+			lines[y] = ansi.Cut(lines[y], 0, 1) + markStyle.Render("*") + ansi.Cut(lines[y], 2, ansi.StringWidth(lines[y]))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // getColumnWidths returns responsive column widths based on available width

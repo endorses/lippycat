@@ -27,6 +27,9 @@ func (m *Model) determineSaveMode() string {
 
 // proceedWithSave starts the save operation for the given file path
 func (m *Model) proceedWithSave(filePath string) tea.Cmd {
+	if len(m.packetMarks.records) > 0 {
+		return m.startMarkedPacketExport(filePath)
+	}
 	if m.offlineSession != nil {
 		return m.startOfflineExport(filePath)
 	}

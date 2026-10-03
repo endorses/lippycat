@@ -185,6 +185,9 @@ func TestProcessBatch_WithVoIPMetadata(t *testing.T) {
 	_, _, err = processor.hunterManager.Register("hunter-1", "host1", []string{"eth0"}, nil)
 	require.NoError(t, err)
 
+	// A packet consumer enables call aggregation.
+	processor.subscriberManager.Add("voip-monitor")
+
 	// Create packet with SIP metadata
 	batch := &data.PacketBatch{
 		HunterId:    "hunter-1",

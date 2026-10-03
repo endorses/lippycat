@@ -10,6 +10,7 @@ import (
 // PacketDisplay represents a packet for display purposes.
 // This type is shared between capture, remote capture, and TUI components.
 type PacketDisplay struct {
+	CaptureID  uint64 `json:"-" offline:"-"` // TUI arrival identity; scoped to the active capture/dataset.
 	Timestamp  time.Time
 	SrcIP      string
 	DstIP      string

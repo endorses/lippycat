@@ -645,8 +645,7 @@ func normalizeDomain(domain string) string {
 func (dv *DNSQueriesView) renderQueryDetails(query *DNSQuery, width, height int) string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(dv.theme.InfoColor).
-		MarginBottom(1)
+		Foreground(dv.theme.InfoColor)
 
 	sectionHeaderStyle := lipgloss.NewStyle().
 		Bold(true).

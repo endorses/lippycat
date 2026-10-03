@@ -78,6 +78,57 @@ func (FlowControl) EnumDescriptor() ([]byte, []int) {
 	return file_data_proto_rawDescGZIP(), []int{0}
 }
 
+// Event analysis ownership for a monitoring packet batch. Legacy servers omit
+// this field and continue providing their existing event subscription stream.
+type MonitorEventAnalysis int32
+
+const (
+	MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_UNSPECIFIED     MonitorEventAnalysis = 0
+	MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_CLIENT_REQUIRED MonitorEventAnalysis = 1
+	MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_SERVER_PROVIDED MonitorEventAnalysis = 2
+)
+
+// Enum value maps for MonitorEventAnalysis.
+var (
+	MonitorEventAnalysis_name = map[int32]string{
+		0: "MONITOR_EVENT_ANALYSIS_UNSPECIFIED",
+		1: "MONITOR_EVENT_ANALYSIS_CLIENT_REQUIRED",
+		2: "MONITOR_EVENT_ANALYSIS_SERVER_PROVIDED",
+	}
+	MonitorEventAnalysis_value = map[string]int32{
+		"MONITOR_EVENT_ANALYSIS_UNSPECIFIED":     0,
+		"MONITOR_EVENT_ANALYSIS_CLIENT_REQUIRED": 1,
+		"MONITOR_EVENT_ANALYSIS_SERVER_PROVIDED": 2,
+	}
+)
+
+func (x MonitorEventAnalysis) Enum() *MonitorEventAnalysis {
+	p := new(MonitorEventAnalysis)
+	*p = x
+	return p
+}
+
+func (x MonitorEventAnalysis) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MonitorEventAnalysis) Descriptor() protoreflect.EnumDescriptor {
+	return file_data_proto_enumTypes[1].Descriptor()
+}
+
+func (MonitorEventAnalysis) Type() protoreflect.EnumType {
+	return &file_data_proto_enumTypes[1]
+}
+
+func (x MonitorEventAnalysis) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MonitorEventAnalysis.Descriptor instead.
+func (MonitorEventAnalysis) EnumDescriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{1}
+}
+
 // PacketBatch contains multiple packets captured by a hunter
 type PacketBatch struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -90,9 +141,13 @@ type PacketBatch struct {
 	// Individual packets in this batch
 	Packets []*CapturedPacket `protobuf:"bytes,4,rep,name=packets,proto3" json:"packets,omitempty"`
 	// Statistics about this hunter's capture
-	Stats         *BatchStats `protobuf:"bytes,5,opt,name=stats,proto3" json:"stats,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Stats *BatchStats `protobuf:"bytes,5,opt,name=stats,proto3" json:"stats,omitempty"`
+	// Monitoring consumers use this to avoid deriving duplicate events.
+	// Each serving node sets its own value; ingress never trusts a sender's
+	// claim about the current node's analysis policy.
+	MonitorEventAnalysis MonitorEventAnalysis `protobuf:"varint,6,opt,name=monitor_event_analysis,json=monitorEventAnalysis,proto3,enum=lippycat.data.MonitorEventAnalysis" json:"monitor_event_analysis,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *PacketBatch) Reset() {
@@ -158,6 +213,13 @@ func (x *PacketBatch) GetStats() *BatchStats {
 		return x.Stats
 	}
 	return nil
+}
+
+func (x *PacketBatch) GetMonitorEventAnalysis() MonitorEventAnalysis {
+	if x != nil {
+		return x.MonitorEventAnalysis
+	}
+	return MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_UNSPECIFIED
 }
 
 // CapturedPacket represents a single captured network packet
@@ -2802,13 +2864,14 @@ var File_data_proto protoreflect.FileDescriptor
 const file_data_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"data.proto\x12\rlippycat.data\"\xd3\x01\n" +
+	"data.proto\x12\rlippycat.data\"\xae\x02\n" +
 	"\vPacketBatch\x12\x1b\n" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12!\n" +
 	"\ftimestamp_ns\x18\x03 \x01(\x03R\vtimestampNs\x127\n" +
 	"\apackets\x18\x04 \x03(\v2\x1d.lippycat.data.CapturedPacketR\apackets\x12/\n" +
-	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\xdd\x04\n" +
+	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\x12Y\n" +
+	"\x16monitor_event_analysis\x18\x06 \x01(\x0e2#.lippycat.data.MonitorEventAnalysisR\x14monitorEventAnalysis\"\xdd\x04\n" +
 	"\x0eCapturedPacket\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12%\n" +
@@ -3098,7 +3161,11 @@ const file_data_proto_rawDesc = "" +
 	"\tFLOW_SLOW\x10\x01\x12\x0e\n" +
 	"\n" +
 	"FLOW_PAUSE\x10\x02\x12\x0f\n" +
-	"\vFLOW_RESUME\x10\x032\x93\x02\n" +
+	"\vFLOW_RESUME\x10\x03*\x96\x01\n" +
+	"\x14MonitorEventAnalysis\x12&\n" +
+	"\"MONITOR_EVENT_ANALYSIS_UNSPECIFIED\x10\x00\x12*\n" +
+	"&MONITOR_EVENT_ANALYSIS_CLIENT_REQUIRED\x10\x01\x12*\n" +
+	"&MONITOR_EVENT_ANALYSIS_SERVER_PROVIDED\x10\x022\x93\x02\n" +
 	"\vDataService\x12M\n" +
 	"\rStreamPackets\x12\x1a.lippycat.data.PacketBatch\x1a\x1c.lippycat.data.StreamControl(\x010\x01\x12Q\n" +
 	"\x10SubscribePackets\x12\x1f.lippycat.data.SubscribeRequest\x1a\x1a.lippycat.data.PacketBatch0\x01\x12b\n" +
@@ -3116,74 +3183,76 @@ func file_data_proto_rawDescGZIP() []byte {
 	return file_data_proto_rawDescData
 }
 
-var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_data_proto_goTypes = []any{
 	(FlowControl)(0),             // 0: lippycat.data.FlowControl
-	(*PacketBatch)(nil),          // 1: lippycat.data.PacketBatch
-	(*CapturedPacket)(nil),       // 2: lippycat.data.CapturedPacket
-	(*PacketMetadata)(nil),       // 3: lippycat.data.PacketMetadata
-	(*TLSMetadata)(nil),          // 4: lippycat.data.TLSMetadata
-	(*HTTPMetadata)(nil),         // 5: lippycat.data.HTTPMetadata
-	(*SIPMetadata)(nil),          // 6: lippycat.data.SIPMetadata
-	(*AccessNetworkInfo)(nil),    // 7: lippycat.data.AccessNetworkInfo
-	(*RTPMetadata)(nil),          // 8: lippycat.data.RTPMetadata
-	(*DNSMetadata)(nil),          // 9: lippycat.data.DNSMetadata
-	(*DNSAnswer)(nil),            // 10: lippycat.data.DNSAnswer
-	(*EmailMetadata)(nil),        // 11: lippycat.data.EmailMetadata
-	(*BatchStats)(nil),           // 12: lippycat.data.BatchStats
-	(*StreamControl)(nil),        // 13: lippycat.data.StreamControl
-	(*SubscribeRequest)(nil),     // 14: lippycat.data.SubscribeRequest
-	(*CorrelatedCallUpdate)(nil), // 15: lippycat.data.CorrelatedCallUpdate
-	(*CallLegInfo)(nil),          // 16: lippycat.data.CallLegInfo
-	(*TLSSessionKeys)(nil),       // 17: lippycat.data.TLSSessionKeys
-	(*RADIUSIdentity)(nil),       // 18: lippycat.data.RADIUSIdentity
-	(*RADIUSScope)(nil),          // 19: lippycat.data.RADIUSScope
-	(*RADIUSCriterion)(nil),      // 20: lippycat.data.RADIUSCriterion
-	(*RADIUSAttribution)(nil),    // 21: lippycat.data.RADIUSAttribution
-	(*RADIUSObservation)(nil),    // 22: lippycat.data.RADIUSObservation
-	nil,                          // 23: lippycat.data.PacketMetadata.DetailsEntry
-	nil,                          // 24: lippycat.data.HTTPMetadata.HeadersEntry
-	nil,                          // 25: lippycat.data.AccessNetworkInfo.ParametersEntry
+	(MonitorEventAnalysis)(0),    // 1: lippycat.data.MonitorEventAnalysis
+	(*PacketBatch)(nil),          // 2: lippycat.data.PacketBatch
+	(*CapturedPacket)(nil),       // 3: lippycat.data.CapturedPacket
+	(*PacketMetadata)(nil),       // 4: lippycat.data.PacketMetadata
+	(*TLSMetadata)(nil),          // 5: lippycat.data.TLSMetadata
+	(*HTTPMetadata)(nil),         // 6: lippycat.data.HTTPMetadata
+	(*SIPMetadata)(nil),          // 7: lippycat.data.SIPMetadata
+	(*AccessNetworkInfo)(nil),    // 8: lippycat.data.AccessNetworkInfo
+	(*RTPMetadata)(nil),          // 9: lippycat.data.RTPMetadata
+	(*DNSMetadata)(nil),          // 10: lippycat.data.DNSMetadata
+	(*DNSAnswer)(nil),            // 11: lippycat.data.DNSAnswer
+	(*EmailMetadata)(nil),        // 12: lippycat.data.EmailMetadata
+	(*BatchStats)(nil),           // 13: lippycat.data.BatchStats
+	(*StreamControl)(nil),        // 14: lippycat.data.StreamControl
+	(*SubscribeRequest)(nil),     // 15: lippycat.data.SubscribeRequest
+	(*CorrelatedCallUpdate)(nil), // 16: lippycat.data.CorrelatedCallUpdate
+	(*CallLegInfo)(nil),          // 17: lippycat.data.CallLegInfo
+	(*TLSSessionKeys)(nil),       // 18: lippycat.data.TLSSessionKeys
+	(*RADIUSIdentity)(nil),       // 19: lippycat.data.RADIUSIdentity
+	(*RADIUSScope)(nil),          // 20: lippycat.data.RADIUSScope
+	(*RADIUSCriterion)(nil),      // 21: lippycat.data.RADIUSCriterion
+	(*RADIUSAttribution)(nil),    // 22: lippycat.data.RADIUSAttribution
+	(*RADIUSObservation)(nil),    // 23: lippycat.data.RADIUSObservation
+	nil,                          // 24: lippycat.data.PacketMetadata.DetailsEntry
+	nil,                          // 25: lippycat.data.HTTPMetadata.HeadersEntry
+	nil,                          // 26: lippycat.data.AccessNetworkInfo.ParametersEntry
 }
 var file_data_proto_depIdxs = []int32{
-	2,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
-	12, // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
-	3,  // 2: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
-	17, // 3: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
-	22, // 4: lippycat.data.CapturedPacket.radius:type_name -> lippycat.data.RADIUSObservation
-	6,  // 5: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
-	8,  // 6: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
-	23, // 7: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
-	11, // 8: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
-	9,  // 9: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
-	4,  // 10: lippycat.data.PacketMetadata.tls:type_name -> lippycat.data.TLSMetadata
-	5,  // 11: lippycat.data.PacketMetadata.http:type_name -> lippycat.data.HTTPMetadata
-	24, // 12: lippycat.data.HTTPMetadata.headers:type_name -> lippycat.data.HTTPMetadata.HeadersEntry
-	7,  // 13: lippycat.data.SIPMetadata.access_network_info:type_name -> lippycat.data.AccessNetworkInfo
-	25, // 14: lippycat.data.AccessNetworkInfo.parameters:type_name -> lippycat.data.AccessNetworkInfo.ParametersEntry
-	10, // 15: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
-	0,  // 16: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
-	16, // 17: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
-	20, // 18: lippycat.data.RADIUSAttribution.criteria:type_name -> lippycat.data.RADIUSCriterion
-	19, // 19: lippycat.data.RADIUSAttribution.scope:type_name -> lippycat.data.RADIUSScope
-	19, // 20: lippycat.data.RADIUSObservation.scope:type_name -> lippycat.data.RADIUSScope
-	18, // 21: lippycat.data.RADIUSObservation.observation_id:type_name -> lippycat.data.RADIUSIdentity
-	18, // 22: lippycat.data.RADIUSObservation.request_instance_id:type_name -> lippycat.data.RADIUSIdentity
-	18, // 23: lippycat.data.RADIUSObservation.request_observation_id:type_name -> lippycat.data.RADIUSIdentity
-	21, // 24: lippycat.data.RADIUSObservation.direct:type_name -> lippycat.data.RADIUSAttribution
-	21, // 25: lippycat.data.RADIUSObservation.inherited:type_name -> lippycat.data.RADIUSAttribution
-	1,  // 26: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
-	14, // 27: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
-	14, // 28: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
-	13, // 29: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
-	1,  // 30: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
-	15, // 31: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
-	29, // [29:32] is the sub-list for method output_type
-	26, // [26:29] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	3,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
+	13, // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
+	1,  // 2: lippycat.data.PacketBatch.monitor_event_analysis:type_name -> lippycat.data.MonitorEventAnalysis
+	4,  // 3: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
+	18, // 4: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
+	23, // 5: lippycat.data.CapturedPacket.radius:type_name -> lippycat.data.RADIUSObservation
+	7,  // 6: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
+	9,  // 7: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
+	24, // 8: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
+	12, // 9: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
+	10, // 10: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
+	5,  // 11: lippycat.data.PacketMetadata.tls:type_name -> lippycat.data.TLSMetadata
+	6,  // 12: lippycat.data.PacketMetadata.http:type_name -> lippycat.data.HTTPMetadata
+	25, // 13: lippycat.data.HTTPMetadata.headers:type_name -> lippycat.data.HTTPMetadata.HeadersEntry
+	8,  // 14: lippycat.data.SIPMetadata.access_network_info:type_name -> lippycat.data.AccessNetworkInfo
+	26, // 15: lippycat.data.AccessNetworkInfo.parameters:type_name -> lippycat.data.AccessNetworkInfo.ParametersEntry
+	11, // 16: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
+	0,  // 17: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
+	17, // 18: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
+	21, // 19: lippycat.data.RADIUSAttribution.criteria:type_name -> lippycat.data.RADIUSCriterion
+	20, // 20: lippycat.data.RADIUSAttribution.scope:type_name -> lippycat.data.RADIUSScope
+	20, // 21: lippycat.data.RADIUSObservation.scope:type_name -> lippycat.data.RADIUSScope
+	19, // 22: lippycat.data.RADIUSObservation.observation_id:type_name -> lippycat.data.RADIUSIdentity
+	19, // 23: lippycat.data.RADIUSObservation.request_instance_id:type_name -> lippycat.data.RADIUSIdentity
+	19, // 24: lippycat.data.RADIUSObservation.request_observation_id:type_name -> lippycat.data.RADIUSIdentity
+	22, // 25: lippycat.data.RADIUSObservation.direct:type_name -> lippycat.data.RADIUSAttribution
+	22, // 26: lippycat.data.RADIUSObservation.inherited:type_name -> lippycat.data.RADIUSAttribution
+	2,  // 27: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
+	15, // 28: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
+	15, // 29: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
+	14, // 30: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
+	2,  // 31: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
+	16, // 32: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
+	30, // [30:33] is the sub-list for method output_type
+	27, // [27:30] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_data_proto_init() }
@@ -3196,7 +3265,7 @@ func file_data_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,

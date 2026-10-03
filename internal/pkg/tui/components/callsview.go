@@ -17,6 +17,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
+// CallsTableMinWidth fits the ten minimum columns (50 cells), nine separators,
+// and the table border and padding (six cells).
+const CallsTableMinWidth = 65
+
 // ExtractSIPURI extracts the SIP URI from a header value, removing display names and parameters
 // Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "sip:alicent@domain.com"
 // Example: "<sip:robb@example.org>;tag=456" -> "sip:robb@example.org"
@@ -390,6 +394,9 @@ type CallsView struct {
 	detailsViewport      viewport.Model
 	detailsViewportReady bool
 	lastSelectedCallID   string // Track which call details are rendered
+	inspecting           bool
+	resumeFollowing      bool
+	inspectedCall        *Call
 }
 
 // CorrelatedCall represents a correlated call with multiple legs
@@ -487,7 +494,7 @@ func (cv *CallsView) SetCalls(calls []Call) {
 		// keep selection at top (follow new oldest calls)
 		// Note: We don't check len(cv.calls) > oldLen because at max capacity
 		// with LRU eviction, the list size stays constant even as new calls arrive.
-		if wasAtTop && cv.selected > 0 {
+		if !cv.inspecting && wasAtTop && cv.selected > 0 {
 			// User was at top, but their call moved down (new call inserted at top)
 			// Stay at top to follow new calls
 			cv.selected = 0
@@ -498,7 +505,7 @@ func (cv *CallsView) SetCalls(calls []Call) {
 			// Already at bottom with autoScroll enabled - stay there
 		} else if cv.selected != len(cv.calls)-1 {
 			// Selected call is no longer at the bottom (new calls arrived after it)
-			if cv.autoScroll && wasAtBottom {
+			if !cv.inspecting && cv.autoScroll && wasAtBottom {
 				// Auto-scroll was enabled and user was at the bottom
 				// Move selection to the new bottom to follow new calls.
 				// Note: We don't check len(cv.calls) > oldLen because at max capacity
@@ -511,7 +518,7 @@ func (cv *CallsView) SetCalls(calls []Call) {
 		// Note: if autoScroll is false and selected is at bottom, no special handling needed
 	} else {
 		// Selected call was removed from the filtered list
-		if cv.autoScroll && wasAtBottom {
+		if !cv.inspecting && cv.autoScroll && wasAtBottom {
 			// Was auto-scrolling at bottom - go to new bottom
 			cv.selected = len(cv.calls) - 1
 		} else {
@@ -874,69 +881,81 @@ func (cv *CallsView) RenderTable(width, height int, focused bool) string {
 	return cv.renderTableWithSize(width, height, focused)
 }
 
-// RenderDetails renders the call details panel
-func (cv *CallsView) RenderDetails(width, height int, focused bool) string {
-	selectedCall := cv.GetSelected()
-
-	// Initialize or resize viewport
-	viewportHeight := height - 4 // Account for border (2) and padding (2)
-	if viewportHeight < 5 {
-		viewportHeight = 5
+// SetInspecting keeps the selected call stable while the list is hidden and
+// restores its prior following preference when the list becomes visible again.
+func (cv *CallsView) SetInspecting(inspecting bool) {
+	if cv.inspecting == inspecting {
+		return
 	}
-	viewportWidth := width - 6 // Account for border (2) and padding (4)
-	if viewportWidth < 40 {
-		viewportWidth = 40
-	}
-
-	if !cv.detailsViewportReady {
-		cv.detailsViewport = viewport.New(viewportWidth, viewportHeight)
-		cv.detailsViewportReady = true
-	} else {
-		cv.detailsViewport.Width = viewportWidth
-		cv.detailsViewport.Height = viewportHeight
-	}
-
-	// Update viewport content if selected call changed
-	callID := ""
-	if selectedCall != nil {
-		callID = selectedCall.CallID
-	}
-	if callID != cv.lastSelectedCallID {
-		cv.lastSelectedCallID = callID
-		if selectedCall != nil {
-			cv.detailsViewport.SetContent(cv.renderCallDetailsContent(selectedCall, viewportWidth))
-			cv.detailsViewport.GotoTop()
-		} else {
-			cv.detailsViewport.SetContent("")
+	if inspecting {
+		cv.resumeFollowing = cv.autoScroll
+		cv.autoScroll = false
+		if call := cv.GetSelected(); call != nil {
+			copy := *call
+			cv.inspectedCall = &copy
 		}
 	}
-
-	// Focus styling
-	borderColor := cv.theme.BorderColor
-	borderType := lipgloss.RoundedBorder()
-	if focused {
-		borderColor = cv.theme.SelectionBg  // Cyan when focused
-		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
+	cv.inspecting = inspecting
+	if !inspecting {
+		cv.inspectedCall = nil
+		cv.autoScroll = cv.resumeFollowing
+		cv.resumeFollowing = false
+		if cv.autoScroll {
+			cv.GotoBottom()
+		}
 	}
+}
 
-	borderStyle := lipgloss.NewStyle().
-		Border(borderType).
-		BorderForeground(borderColor).
-		Padding(1, 2).
-		Width(width - 2).
-		Height(height - 2)
-
-	if selectedCall == nil {
-		// No call selected
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(cv.theme.StatusBarFg).
-			Italic(true).
-			Align(lipgloss.Center)
-		content := emptyStyle.Render("Select a call to view details")
-		return borderStyle.Render(content)
+func (cv *CallsView) detailCall() *Call {
+	if cv.inspecting && cv.inspectedCall != nil {
+		// Refresh a retained call's metrics without replacing an evicted selection.
+		if i, ok := cv.callIndex[cv.inspectedCall.CallID]; ok {
+			return &cv.calls[i]
+		}
+		return cv.inspectedCall
 	}
+	return cv.GetSelected()
+}
 
-	return borderStyle.Render(cv.detailsViewport.View())
+// PrepareDetails commits detail sizing and content before rendering/input.
+// Hidden panes retain their scroll state; only selecting another call resets it.
+func (cv *CallsView) PrepareDetails(width, height int) {
+	if width <= 0 || height <= 0 {
+		return
+	}
+	_, _, cw, ch := DetailPaneGeometry(width, height)
+	if !cv.detailsViewportReady {
+		cv.detailsViewport = viewport.New(cw, ch)
+		cv.detailsViewportReady = true
+	}
+	offset := cv.detailsViewport.YOffset
+	cv.detailsViewport.Width, cv.detailsViewport.Height = cw, ch
+	call := cv.detailCall()
+	if call == nil {
+		cv.detailsViewport.SetContent("")
+		cv.lastSelectedCallID = ""
+		return
+	}
+	cv.detailsViewport.SetContent(wrapDetailContent(cv.renderCallDetailsContent(call, cw), cw, height < 12))
+	if call.CallID != cv.lastSelectedCallID {
+		offset = 0
+	}
+	cv.lastSelectedCallID = call.CallID
+	cv.detailsViewport.SetYOffset(offset)
+	if cv.inspecting {
+		copy := *call
+		cv.inspectedCall = &copy
+	}
+}
+
+// RenderDetails is read-only; PrepareDetails owns viewport state.
+func (cv *CallsView) RenderDetails(width, height int, focused bool) string {
+	content := cv.detailsViewport.View()
+	if cv.detailCall() == nil {
+		_, _, cw, _ := DetailPaneGeometry(width, height)
+		content = wrapDetailContent("Select a call to view details", cw, false)
+	}
+	return renderDetailPane(content, width, height, focused, cv.theme)
 }
 
 // renderEmpty shows a message when no calls are present
@@ -1239,8 +1258,7 @@ func (cv *CallsView) renderCallDetailsContent(selectedCall *Call, width int) str
 	// Title style
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(cv.theme.InfoColor).
-		MarginBottom(1)
+		Foreground(cv.theme.InfoColor)
 
 	// Section header style
 	sectionHeaderStyle := lipgloss.NewStyle().
@@ -1339,7 +1357,7 @@ func (cv *CallsView) renderCallDetailsContent(selectedCall *Call, width int) str
 				BorderForeground(cv.theme.BorderColor).
 				Padding(0, 1).
 				MarginBottom(1).
-				Width(width - 6)
+				Width(max(1, width-2))
 
 			var legContent strings.Builder
 			legContent.WriteString(fmt.Sprintf("Leg %d: %s\n", i+1, leg.HunterID))
@@ -1369,7 +1387,11 @@ func (cv *CallsView) renderCallDetailsContent(selectedCall *Call, width int) str
 				}
 			}
 
-			content.WriteString(legStyle.Render(legContent.String()))
+			if width >= 30 {
+				content.WriteString(legStyle.Render(wrapDetailContent(legContent.String(), max(1, width-4), false)))
+			} else {
+				content.WriteString(wrapDetailContent(legContent.String(), width, true))
+			}
 			// End the margin line so the next card starts at the left edge.
 			content.WriteString("\n")
 		}

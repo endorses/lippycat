@@ -36,6 +36,11 @@ message PacketBatch {
 
     // Statistics about this hunter's capture
     BatchStats stats = 5;
+
+    // Monitoring consumers use this to avoid deriving duplicate events.
+    // Each serving node sets its own value; ingress never trusts a sender's
+    // claim about the current node's analysis policy.
+    MonitorEventAnalysis monitor_event_analysis = 6;
 }
 
 // CapturedPacket represents a single captured network packet
@@ -566,4 +571,12 @@ message RADIUSObservation {
     repeated RADIUSAttribution direct = 9;
     repeated RADIUSAttribution inherited = 10;
     uint32 service_port = 11;
+}
+
+// Event analysis ownership for a monitoring packet batch. Legacy servers omit
+// this field and continue providing their existing event subscription stream.
+enum MonitorEventAnalysis {
+    MONITOR_EVENT_ANALYSIS_UNSPECIFIED = 0;
+    MONITOR_EVENT_ANALYSIS_CLIENT_REQUIRED = 1;
+    MONITOR_EVENT_ANALYSIS_SERVER_PROVIDED = 2;
 }

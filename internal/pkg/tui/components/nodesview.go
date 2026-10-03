@@ -60,20 +60,22 @@ type AddNodeMsg struct {
 
 // NodesView displays connected hunter nodes in a tree view grouped by processor
 type NodesView struct {
-	processors            []ProcessorInfo // Grouped by processor
-	hunters               []HunterInfo    // Flat list for backward compatibility
-	selectedIndex         int             // -1 means nothing selected, >= 0 means hunter is selected
-	selectedProcessorAddr string          // Non-empty means a processor is selected (instead of hunter)
-	width                 int
-	displayWidth          int
-	height                int
-	theme                 themes.Theme
-	nodeInput             textinput.Model // Input field for node address (used in modal)
-	showModal             bool            // Whether add node modal is visible
-	viewport              viewport.Model  // Viewport for scrolling
-	ready                 bool            // Whether viewport is initialized
-	viewMode              string          // "table" or "graph" - current view mode
-	graphViewTargetAddr   string          // The processor address whose graph is being viewed (stays fixed in graph mode)
+	processors              []ProcessorInfo // Grouped by processor
+	hunters                 []HunterInfo    // Flat list for backward compatibility
+	selectedIndex           int             // -1 means nothing selected, >= 0 means hunter is selected
+	selectedProcessorAddr   string          // Non-empty means a processor is selected (instead of hunter)
+	width                   int
+	displayWidth            int
+	height                  int
+	theme                   themes.Theme
+	nodeInput               textinput.Model // Input field for node address (used in modal)
+	modalState              ModalState
+	modalWidth, modalHeight int
+	showModal               bool           // Whether add node modal is visible
+	viewport                viewport.Model // Viewport for scrolling
+	ready                   bool           // Whether viewport is initialized
+	viewMode                string         // "table" or "graph" - current view mode
+	graphViewTargetAddr     string         // The processor address whose graph is being viewed (stays fixed in graph mode)
 
 	// Mouse click regions
 	hunterLines    map[int]int // Map of line number -> hunter index (for table view)
@@ -156,6 +158,8 @@ func (n *NodesView) SetTheme(theme themes.Theme) {
 
 // ShowAddNodeModal shows the add node modal
 func (n *NodesView) ShowAddNodeModal() {
+	n.modalState.Reset()
+	n.modalState.Focus = "address"
 	n.showModal = true
 	n.nodeInput.Focus()
 	n.nodeInput.SetValue("")
@@ -768,7 +772,11 @@ func (n *NodesView) SelectRight() {
 // Update handles key presses and mouse events
 func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
-
+	if n.showModal {
+		if cmd, handled := HandleModalInput(nodeModal{n}, msg); handled {
+			return cmd
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		// If modal is open, don't handle mouse events on the underlying content
@@ -799,18 +807,7 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 		if n.showModal {
 			switch msg.String() {
 			case "enter":
-				// Submit node address
-				addr := n.nodeInput.Value()
-				if addr != "" {
-					n.AddNodeToHistory(addr)
-					n.HideAddNodeModal()
-					return func() tea.Msg {
-						return AddNodeMsg{Address: addr}
-					}
-				}
-				// If empty, just close modal
-				n.HideAddNodeModal()
-				return nil
+				return nodeModal{n}.HandleModalAction("confirm")
 			case "esc":
 				// Cancel and close modal
 				n.HideAddNodeModal()
@@ -1267,47 +1264,10 @@ func (n *NodesView) RenderModal(width, height int) string {
 
 // renderAddNodeModal renders the add node modal using the unified modal component
 func (n *NodesView) renderAddNodeModal(width, height int) string {
-	// Calculate modal dimensions
-	modalWidth := 60
-	if modalWidth > width-4 {
-		modalWidth = width - 4
-	}
-	if modalWidth < 40 {
-		modalWidth = 40
-	}
-
-	// Build content
-	var content strings.Builder
-
-	// Input label
-	labelStyle := lipgloss.NewStyle().
-		Foreground(n.theme.Foreground).
-		Padding(0, 1).
-		MarginTop(1)
-	content.WriteString(labelStyle.Render("Address (host:port):"))
-	content.WriteString("\n")
-
-	// Input field
-	inputStyle := lipgloss.NewStyle().
-		Padding(0, 1)
-	content.WriteString(inputStyle.Render(n.nodeInput.View()))
-
-	// Build footer with history hint if history exists
-	footer := "Enter: confirm | Esc: cancel"
-	if len(n.nodeHistory) > 0 {
-		footer = "Enter: confirm | Esc: cancel | Up/Down: history"
-	}
-
-	// Use unified modal rendering
-	return RenderModal(ModalRenderOptions{
-		Title:      "Add Node",
-		Content:    content.String(),
-		Footer:     footer,
-		Width:      width,
-		Height:     height,
-		Theme:      n.theme,
-		ModalWidth: modalWidth,
-	})
+	opts := nodeModal{n}.ModalOptions()
+	opts.Width = width
+	opts.Height = height
+	return RenderModal(opts)
 }
 
 // handleMouseClick handles mouse click events

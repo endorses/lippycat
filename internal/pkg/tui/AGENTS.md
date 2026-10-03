@@ -5,6 +5,7 @@ This document describes the architecture and implementation patterns for the TUI
 ## Purpose
 
 The TUI provides **interactive real-time monitoring** in three modes:
+
 1. **Live Mode** - Local interface capture with VoIP analysis
 2. **Offline Mode** - PCAP file playback
 3. **Remote Mode** - Monitor distributed hunter/processor nodes
@@ -45,6 +46,7 @@ The TUI provides **interactive real-time monitoring** in three modes:
 ```
 
 The TUI is included in:
+
 - `tui` builds (TUI-only binary)
 - `all` builds (complete suite)
 
@@ -112,6 +114,7 @@ The `cmd/watch/` subcommands (live, file, remote) create the TUI model with the 
 ### Live Mode
 
 **Flow:**
+
 ```
 Interface → gopacket → VoIP Analysis → Display
 ```
@@ -121,6 +124,7 @@ Capture runs in a background goroutine started by `cmd/watch/live.go`.
 ### Offline Mode
 
 **Flow:**
+
 ```
 PCAP File(s) → gopacket → Replay → Display
 ```
@@ -130,6 +134,7 @@ Supports multiple PCAP files merged into a single display.
 ### Remote Mode
 
 **Flow:**
+
 ```
 gRPC Client → EventHandler → Display
 ```
@@ -164,41 +169,38 @@ func (m *model) OnDisconnect(address string, err error) {
 
 **IMPORTANT:** All modals MUST use `RenderModal()` for consistency.
 
-Hosted dialogs implement `components.Modal` (`View()` and `Dismiss()`) and are
-resolved by `activeModal()` in `modal.go`. This is the shared stacking order for
-rendering and backdrop dismissal. Every hosted modal automatically receives
-outside-click dismissal; do not add mouse hit testing to individual dialogs or
-render invocations. The host consumes the dismissal press and release so they
-cannot activate underlying controls.
+Hosted dialogs implement `components.Modal` (`View()` and `Dismiss()`).
+Interactive owners also implement `InteractiveModal`: `ModalOptions()`,
+`HandleModalAction(id)`, and `HandleModalFocus(id)`. `View()` delegates to
+`RenderModal(ModalOptions())`; `Update()` calls `HandleModalInput` before its
+contextual keyboard handling. Actions have stable IDs, labels, shortcuts,
+disabled state, and button kinds. Keyboard shortcuts and clicks invoke the same
+owner action handler; never synthesize editing keys to perform Save or Confirm.
 
-`Dismiss()` cancels the visible modal layer without accepting edits. It must
-preserve cancellation results and required cleanup. Nested modals return to
-their parent; inline text editing must not prevent the dialog from closing.
-Progress dialogs request cancellation and remain visible until their existing
-worker cleanup completes. The shared host derives bounds from the rendered
-modal canvas, including borders, padding, wrapping, and terminal clipping.
+`ModalRenderOptions` supplies a stable visible-layer `ID`, `Actions`,
+content-local `Targets`, and owner-held `ModalState`. `LayoutModal` computes both
+rendering and hit geometry using terminal-cell widths, wrapping, clipping,
+scrolling, and one shared origin. Use `ModalContentWidth` for content sizing and
+`EnsureModalTargetVisible` during input/navigation. Rendering and layout must
+remain read-only; prepare input dimensions and state before rendering so a click
+after resize works without a preceding `View`. Do not duplicate terminal offsets
+or parse action semantics from footer strings. Keep navigation hints in `Footer`.
 
-```go
-func RenderModal(opts ModalRenderOptions) string {
-    // Renders:
-    // - Border
-    // - Title
-    // - Content (provided by caller)
-    // - Footer
-    // - Centering
-}
-```
+`activeModal()` and `VisibleModal()` resolve the visible layer. Composite owners
+expose `ActiveModal()` for nested confirmations or selectors. Scope actions and
+focus to that layer; the host handles backdrop dismissal and consumes the rest
+of a gesture that closes or replaces a modal. Content targets are declared by
+owners and hit-tested centrally. Buttons activate on left press only; disabled
+buttons are skipped by keyboard focus. Owners revalidate enabled state and guard
+pending submissions. Reset double-click identity when navigation, resizing,
+dismissal, or list replacement changes the target context.
 
-**Component Responsibility:**
-- Build content string
-- Call `RenderModal()` to wrap
-- Handle input events
-- Manage own state
-
-**Parent Responsibility:**
-- Check `IsActive()`
-- Route events to modal
-- Overlay on main view
+`Dismiss()` cancels the visible layer and preserves cancellation result payloads
+and cleanup. Nested dialogs return to their parent; inline editing has a separate
+Cancel edit action. Offline progress requests cancellation, disables its Cancel
+button, and remains visible until cleanup finishes. Async results, errors, and
+progress must continue reaching their owner; modal input must not restart or
+interrupt the recurring capture tick chain.
 
 ### Modal Components
 
@@ -215,6 +217,7 @@ type ModalComponent interface {
 ```
 
 **Examples:**
+
 - `ProtocolSelector` - Protocol filter selection
 - `HunterSelector` - Hunter subscription selection
 - `FileDialog` - File/directory picker
@@ -244,6 +247,25 @@ toast.Update(ToastTickMsg{})  // Decrements timer
 
 **NOT a modal** - overlay at bottom of screen.
 
+### Responsive Capture Details
+
+`capture_layout.go` owns packet/event/call pane geometry and capture chrome.
+Rendering, keyboard and mouse input, scrollbars, and text selection use the same
+outer rectangles. Prefer side-by-side panes when useful widths fit, stacked panes
+when height permits, and the focused pane alone otherwise. `d` toggles visible
+details, keeping list focus in split layouts; `Esc` returns focus to the list
+without changing the split preference.
+Prepare geometry during updates, before offline page requests or input handling.
+
+Detail components take exact outer dimensions and use `DetailPaneGeometry` for
+padding and content bounds. `PrepareDetails`/`SetSize` prepare wrapping and viewport
+content; rendering remains read-only. Zero dimensions preserve hidden pane scroll.
+Only full-area details with the list hidden disable following and hold one bounded
+snapshot if the row is evicted. Leaving full-area details restores the previous
+following state; focusing split details does not pin. Explicit clear/replacement
+releases inspection. Use `DetailSelection`
+for event actions and related-packet lookup so they target the displayed event.
+
 ### Context-Aware Footer
 
 **File:** `internal/pkg/tui/components/footer.go`
@@ -270,6 +292,7 @@ type Footer struct {
 ```
 
 **Tab-specific keybinds:**
+
 - Tab 0 (Capture): `/` filter, `w` save, `d` toggle details
 - Tab 1 (Nodes): `f` filters, `s` hunters, `v` view
 - Tab 2 (Statistics): `v` view
@@ -278,6 +301,7 @@ type Footer struct {
 **General keybinds:** Always visible (Space, n, p, q)
 
 **Color-coding:** Each tab has its own background color matching tab theme:
+
 ```go
 func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
     tabColors := []lipgloss.Color{
@@ -483,6 +507,7 @@ if proc.FailureCount < maxAttempts {
 ```
 
 **Behavior:**
+
 - First few attempts: Quick retries (2s, 4s, 8s) for transient issues
 - Extended outages: Longer waits (up to 10 minutes) to reduce resource usage
 - After 10 failures (~17 min): Stop auto-reconnect, require manual reconnection
@@ -551,6 +576,7 @@ hunters:
 ```
 
 **In-memory state:**
+
 ```go
 type NodesView struct {
     processors []ProcessorNode
@@ -755,42 +781,15 @@ func TestProtocolSelector(t *testing.T) {
 
 ### Adding a New Modal
 
-1. Create component file in `components/`:
-```go
-type NewModal struct {
-    active bool
-    // ... state
-}
+Use `components.ProtocolSelector` as a complete reference for a modal owner.
 
-func (nm *NewModal) IsActive() bool { return nm.active }
-func (nm *NewModal) Activate() { nm.active = true }
-func (nm *NewModal) Deactivate() { nm.active = false }
-
-func (nm *NewModal) View() string {
-    if !nm.active {
-        return ""
-    }
-
-    content := buildContent()
-
-    return RenderModal(ModalRenderOptions{
-        Title:   "New Modal",
-        Content: content,
-        Footer:  "Enter: OK | Esc: Cancel",
-    })
-}
-```
-
-2. Add to model:
-```go
-type model struct {
-    newModal *NewModal
-}
-```
-
-3. Route events in Update()
-
-4. Render in View()
+- [ ] Keep lifecycle, input, and `ModalState` on the component; prepare dimensions before rendering.
+- [ ] Implement `ModalOptions()` with a stable layer ID, content targets, explicit actions, and a pointer to the component's `ModalState`.
+- [ ] Implement `View()` as a read-only call to `RenderModal(ModalOptions())`, returning an empty view when inactive.
+- [ ] Implement `HandleModalAction(id)` to revalidate and execute actions, sharing handlers with contextual keyboard shortcuts.
+- [ ] Implement `HandleModalFocus(id)` to focus or blur owned inputs and expose `Dismiss()` with the required cancellation results or cleanup.
+- [ ] Call `HandleModalInput(component, msg)` at the start of `Update()`; handle ordinary editing and navigation keys afterward.
+- [ ] Register the owner in `activeModal()` and route asynchronous results to it. Composite owners expose their top nested layer with `ActiveModal()`.
 
 ### Adding a Capture Mode
 
@@ -802,12 +801,14 @@ type model struct {
 ## Dependencies
 
 **External:**
+
 - `github.com/charmbracelet/bubbletea` - TUI framework
 - `github.com/charmbracelet/lipgloss` - Styling
 - `github.com/google/gopacket` - Packet capture (live/offline)
 - `google.golang.org/grpc` - Remote mode
 
 **Internal:**
+
 - `internal/pkg/remotecapture` - Remote capture client
 - `internal/pkg/types` - Shared types (PacketDisplay, EventHandler)
 - `internal/pkg/voip` - VoIP analysis (live mode)

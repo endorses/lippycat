@@ -4,18 +4,12 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
 
 // handleCaptureScrollbar handles the right padding column inside each capture
 // pane. Its geometry matches renderCaptureTab and captureScrollbar.
 func (m Model) handleCaptureScrollbar(msg tea.MouseMsg, contentTop, contentHeight int) (Model, tea.Cmd, bool) {
-	trackTop := contentTop + 2
-	trackHeight := max(0, contentHeight-4)
-	if trackHeight == 0 {
-		return m, nil, false
-	}
 	if msg.Action == tea.MouseActionRelease {
 		if m.scrollDrag != "" {
 			m.scrollDrag = ""
@@ -24,40 +18,42 @@ func (m Model) handleCaptureScrollbar(msg tea.MouseMsg, contentTop, contentHeigh
 		return m, nil, false
 	}
 
+	layout := m.captureLayout()
+	detailX, _, _, _ := components.DetailPaneGeometry(layout.Details.Width, layout.Details.Height)
+	detailScrollbarX := layout.Details.X + layout.Details.Width - 1
+	if detailX >= 3 {
+		detailScrollbarX--
+	}
 	target := m.scrollDrag
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-		if msg.Y < trackTop || msg.Y >= trackTop+trackHeight {
-			return m, nil, false
-		}
-		listWidth := m.uiState.Width
-		details := false
-		switch m.uiState.ViewMode {
-		case "events":
-			details = m.uiState.EventShowDetails && m.uiState.Width >= 160
-			if details {
-				listWidth -= 79
-			}
-			listWidth = lipgloss.Width(m.uiState.EventsView.RenderTimeline(listWidth, contentHeight, m.uiState.FocusedPane == "left"))
-		case "calls":
-			details = m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= 120
-			if details {
-				listWidth -= 79
-			}
-			listWidth = lipgloss.Width(m.uiState.CallsView.RenderTable(listWidth, contentHeight, m.uiState.FocusedPane == "left"))
-		default:
-			details = m.uiState.ShowDetails && m.uiState.Width >= 160
-			listWidth = lipgloss.Width(m.uiState.PacketList.View(m.uiState.FocusedPane == "left", details))
-		}
-		if msg.X == listWidth-2 {
+		switch {
+		case layout.List.contains(msg.X, msg.Y-contentTop) && msg.X == layout.List.X+layout.List.Width-2:
 			target = "list"
-		} else if details && msg.X == m.uiState.Width-2 {
+		case detailX > 0 && layout.Details.contains(msg.X, msg.Y-contentTop) && msg.X == detailScrollbarX:
 			target = "details"
-		} else {
+		default:
 			return m, nil, false
 		}
 	} else if msg.Action != tea.MouseActionMotion || target == "" {
 		return m, nil, false
 	}
+	rect := layout.List
+	trackTop := contentTop + rect.Y + 2
+	trackHeight := max(0, rect.Height-4)
+	if target == "details" {
+		rect = layout.Details
+		_, bodyY, _, bodyHeight := components.DetailPaneGeometry(rect.Width, rect.Height)
+		trackTop = contentTop + rect.Y + bodyY
+		trackHeight = bodyHeight
+	}
+	if rect.Width == 0 || trackHeight == 0 {
+		m.scrollDrag = ""
+		return m, nil, false
+	}
+	if msg.Action == tea.MouseActionPress && (msg.Y < trackTop || msg.Y >= trackTop+trackHeight) {
+		return m, nil, false
+	}
+	contentHeight = layout.List.Height
 
 	var total, visible, offset int
 	switch m.uiState.ViewMode {
@@ -82,8 +78,17 @@ func (m Model) handleCaptureScrollbar(msg tea.MouseMsg, contentTop, contentHeigh
 			total, visible, offset = m.uiState.DetailsPanel.ScrollState()
 		}
 	}
+	start, size := components.ScrollbarThumb(total, visible, offset, trackHeight)
+	if size == 0 {
+		m.scrollDrag = ""
+		return m, nil, false
+	}
 	if msg.Action == tea.MouseActionPress {
-		start, size := components.ScrollbarThumb(total, visible, offset, trackHeight)
+		if target == "details" {
+			m.focusCapturePane("right")
+		} else {
+			m.focusCapturePane("left")
+		}
 		row := msg.Y - trackTop
 		m.scrollDrag = target
 		m.scrollDragRow = row
@@ -107,7 +112,7 @@ func (m Model) handleCaptureScrollbar(msg tea.MouseMsg, contentTop, contentHeigh
 
 func (m Model) setCaptureScrollOffset(target string, newOffset, contentHeight int) (Model, tea.Cmd, bool) {
 	if target == "details" {
-		m.uiState.FocusedPane = "right"
+		m.focusCapturePane("right")
 		switch m.uiState.ViewMode {
 		case "events":
 			m.uiState.EventsView.SetDetailsScrollOffset(newOffset)
@@ -118,7 +123,7 @@ func (m Model) setCaptureScrollOffset(target string, newOffset, contentHeight in
 		}
 		return m, nil, true
 	}
-	m.uiState.FocusedPane = "left"
+	m.focusCapturePane("left")
 	switch m.uiState.ViewMode {
 	case "events":
 		if id, ok := m.uiState.EventsView.EventIDAtIndex(newOffset); ok {

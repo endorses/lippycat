@@ -257,6 +257,18 @@ lc watch file capture.pcap --tls-keylog keys.log
 
 ## TUI Features {#tui-features}
 
+### Clickable Dialogs {#clickable-dialogs}
+
+Dialogs support mouse and keyboard input. Click an enabled button to act, or use `Tab` / `Shift+Tab` to focus controls and `Enter` / `Space` to activate a focused button. Click text fields to edit them. The action bar wraps in narrow terminals; use the wheel over a list to scroll it. Clicking outside a dialog cancels only its visible layer.
+
+In the protocol selector, click a row and choose **Apply**, or double-click the row to apply it. The description stays below the list so selection does not move other rows.
+
+File dialogs provide clickable path breadcrumbs, **Up**, **New folder**, and **Show details** controls. Single-click selects a row; **Open** opens a file or enters a directory. Double-clicking also enters a directory or opens a file in open mode. Click the search or filename field to edit it; **Cancel edit** leaves the inline edit, while **Cancel** closes the dialog. The same controls apply to Settings file pickers.
+
+In save mode, selecting an existing file fills its name and double-clicking focuses the filename without saving. Choose **Save** to submit the filename. If the destination exists, **Replace** confirms overwriting it and **Keep editing** returns to the file dialog with the name preserved.
+
+Offline opening and filtering dialogs expose **Cancel** and remain visible while cleanup finishes. Cancellation cannot be submitted again while in progress. If cleanup fails, **Retry cleanup** and **Quit** are available where offered.
+
 ### Statistics Tab {#statistics-tab}
 
 Press `Alt+3` to view real-time traffic statistics:

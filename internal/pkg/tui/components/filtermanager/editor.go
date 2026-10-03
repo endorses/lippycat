@@ -380,6 +380,46 @@ func HasTLSHunters(hunters []HunterSelectorItem) bool {
 	return false
 }
 
+// PatternPlaceholder gives an example appropriate to the selected filter type.
+func PatternPlaceholder(filterType management.FilterType) string {
+	switch filterType {
+	case management.FilterType_FILTER_BPF:
+		return "e.g., port 5060"
+	case management.FilterType_FILTER_IP_ADDRESS:
+		return "e.g., 192.168.1.0/24"
+	case management.FilterType_FILTER_SIP_USER:
+		return "e.g., alicent@example.com"
+	case management.FilterType_FILTER_PHONE_NUMBER:
+		return "e.g., *456789"
+	case management.FilterType_FILTER_CALL_ID:
+		return "e.g., abc123@host"
+	case management.FilterType_FILTER_CODEC:
+		return "e.g., PCMU"
+	case management.FilterType_FILTER_SIP_URI:
+		return "e.g., sip:*@example.com"
+	case management.FilterType_FILTER_IMSI:
+		return "e.g., 262011234567890"
+	case management.FilterType_FILTER_IMEI:
+		return "e.g., 35399405123456"
+	case management.FilterType_FILTER_DNS_DOMAIN, management.FilterType_FILTER_TLS_SNI, management.FilterType_FILTER_HTTP_HOST:
+		return "e.g., *.example.com"
+	case management.FilterType_FILTER_EMAIL_ADDRESS:
+		return "e.g., *@example.com"
+	case management.FilterType_FILTER_EMAIL_SUBJECT:
+		return "e.g., *confidential*"
+	case management.FilterType_FILTER_HTTP_URL:
+		return "e.g., /api/v1/*"
+	case management.FilterType_FILTER_TLS_JA3:
+		return "e.g., e7d705a3286e19ea42f587b344ee6865"
+	case management.FilterType_FILTER_TLS_JA3S:
+		return "e.g., eb1d94daa7e0344597e756a1fb6e7054"
+	case management.FilterType_FILTER_TLS_JA4:
+		return "e.g., t13d1516h2_8daaf6152771_b186095e22bb"
+	default:
+		return "Enter a pattern"
+	}
+}
+
 // CycleFormFilterType cycles to the next/previous filter type in the form.
 // Filter types are skipped if no compatible hunters are available.
 func CycleFormFilterType(current management.FilterType, forward bool, availableHunters []HunterSelectorItem) management.FilterType {

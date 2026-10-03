@@ -11,7 +11,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
 
@@ -55,6 +54,7 @@ type FileDialog struct {
 	width        int
 	height       int
 	errorMessage string
+	packetMarks  int
 
 	// Custom file list management (replacing bubbles/filepicker display)
 	currentDir    string
@@ -67,11 +67,32 @@ type FileDialog struct {
 
 	// Selection state
 	selectedFiles []string // Selected files (for multiple selection)
+	modalState    ModalState
+	overwrite     ConfirmDialog
+	overwritePath string
 }
 
 // FileSelectedMsg is sent when a file path is confirmed
 type FileSelectedMsg struct {
-	Paths []string // Support multiple files
+	Paths              []string // Support multiple files
+	OverwriteConfirmed bool     // Existing destination explicitly confirmed by this dialog
+}
+
+// ClearPacketMarksMsg requests release of retained packet marks without closing
+// the save dialog.
+type ClearPacketMarksMsg struct{}
+
+// SetPacketMarks identifies the packet selection that this save will export.
+func (fd *FileDialog) SetPacketMarks(count int) {
+	fd.packetMarks = max(0, count)
+	fd.prepareLayout()
+}
+
+func (fd *FileDialog) title() string {
+	if fd.config.Type == FileDialogTypeSave && fd.packetMarks > 0 {
+		return fmt.Sprintf("Save %d marked packets", fd.packetMarks)
+	}
+	return fd.config.Title
 }
 
 // Helper to get single path (for backwards compatibility)
@@ -155,6 +176,7 @@ func NewFileDialog(config FileDialogConfig) FileDialog {
 
 	return FileDialog{
 		active:        false,
+		overwrite:     NewConfirmDialog(),
 		config:        config,
 		filename:      filenameInput,
 		filterInput:   filterInput,
@@ -202,34 +224,25 @@ func generateDefaultFilename() string {
 // SetTheme sets the color theme
 func (fd *FileDialog) SetTheme(theme themes.Theme) {
 	fd.theme = theme
+	fd.overwrite.SetTheme(theme)
 }
 
 // SetSize sets the dimensions
 func (fd *FileDialog) SetSize(width, height int) {
+	if fd.width == width && fd.height == height {
+		return
+	}
+	fd.modalState.ResetClicks()
 	fd.width = width
 	fd.height = height
 
-	// Calculate responsive list height based on terminal height
-	// Reserve space for: title (1), dir path (2), filename input (2-3),
-	// filter/folder input (1), footer (3), borders/padding (~6)
-	// Total reserved: ~14-15 lines
-	const (
-		minListHeight = 5  // Minimum visible files
-		maxListHeight = 20 // Maximum for very tall terminals
-		reservedLines = 15 // Lines used by other UI elements
-	)
-
-	// Calculate available height for file list
-	availableHeight := height - reservedLines
-
-	// Clamp to min/max bounds
-	if availableHeight < minListHeight {
-		fd.listHeight = minListHeight
-	} else if availableHeight > maxListHeight {
-		fd.listHeight = maxListHeight
-	} else {
-		fd.listHeight = availableHeight
-	}
+	fd.overwrite.SetSize(width, height)
+	fd.listHeight = max(1, min(20, height-17))
+	fd.adjustViewOffset()
+	fd.filename.Width = max(1, min(50, width-24))
+	fd.filterInput.Width = fd.filename.Width
+	fd.folderInput.Width = fd.filename.Width
+	fd.prepareLayout()
 }
 
 // matchesAllowedType checks if a file matches the allowed types
@@ -277,8 +290,10 @@ func (fd *FileDialog) shouldShowEntry(entry os.DirEntry) bool {
 func (fd *FileDialog) readDirectory() error {
 	entries, err := os.ReadDir(fd.currentDir)
 	if err != nil {
+		fd.errorMessage = fmt.Sprintf("Cannot read directory: %v", err)
 		return err
 	}
+	fd.modalState.ResetClicks()
 
 	// Store all files
 	fd.allFiles = entries
@@ -305,12 +320,30 @@ func (fd *FileDialog) applyFilters() {
 			filtered = append(filtered, entry)
 		}
 	}
+	if len(filtered) != len(fd.filteredFiles) {
+		fd.modalState.ResetClicks()
+	} else {
+		for i := range filtered {
+			if filtered[i].Name() != fd.filteredFiles[i].Name() {
+				fd.modalState.ResetClicks()
+				break
+			}
+		}
+	}
 	fd.filteredFiles = filtered
+	fd.cursor = max(0, min(fd.cursor, len(filtered)-1))
+	fd.adjustViewOffset()
 }
 
 // Activate shows the file dialog and returns initialization command
 func (fd *FileDialog) Activate() tea.Cmd {
 	fd.active = true
+	defer fd.prepareLayout()
+	fd.modalState.Reset()
+	fd.modalState.Focus = "files"
+	fd.modalState.context = "file-dialog"
+	fd.overwrite.Deactivate()
+	fd.overwritePath = ""
 	fd.mode = ModeNavigation
 	fd.errorMessage = ""
 	fd.cursor = 0
@@ -340,6 +373,9 @@ func (fd *FileDialog) Activate() tea.Cmd {
 // Deactivate hides the file dialog
 func (fd *FileDialog) Deactivate() {
 	fd.active = false
+	fd.modalState.Reset()
+	fd.overwrite.Deactivate()
+	fd.overwritePath = ""
 	fd.filename.Blur()
 	fd.filterInput.Blur()
 	fd.folderInput.Blur()
@@ -348,6 +384,11 @@ func (fd *FileDialog) Deactivate() {
 // Dismiss closes the entire dialog, including any active input mode, without
 // selecting a file or creating a folder.
 func (fd *FileDialog) Dismiss() tea.Cmd {
+	if fd.overwrite.IsActive() {
+		fd.overwrite.Deactivate()
+		fd.overwritePath = ""
+		return nil
+	}
 	fd.Deactivate()
 	return nil
 }
@@ -427,26 +468,11 @@ func (fd *FileDialog) adjustViewOffset() {
 
 // enterDirectory changes to a directory
 func (fd *FileDialog) enterDirectory(dir string) {
-	newPath := filepath.Join(fd.currentDir, dir)
-	if absPath, err := filepath.Abs(newPath); err == nil {
-		fd.currentDir = absPath
-		fd.cursor = 0
-		fd.viewOffset = 0
-		// Clear filter when entering a directory
-		fd.filterInput.SetValue("")
-		_ = fd.readDirectory() // Best-effort, errors shown in UI
-	}
+	fd.changeDirectory(filepath.Join(fd.currentDir, dir))
 }
 
-// goToParent goes to the parent directory
 func (fd *FileDialog) goToParent() {
-	parent := filepath.Dir(fd.currentDir)
-	if parent != fd.currentDir { // Not at root
-		fd.currentDir = parent
-		fd.cursor = 0
-		fd.viewOffset = 0
-		_ = fd.readDirectory() // Best-effort, errors shown in UI
-	}
+	fd.changeDirectory(filepath.Dir(fd.currentDir))
 }
 
 // IsActive returns whether the dialog is visible
@@ -481,6 +507,19 @@ func (fd *FileDialog) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
+	defer fd.prepareLayout()
+	if fd.overwrite.IsActive() {
+		return fd.mapOverwrite(fd.overwrite.Update(msg))
+	}
+	if cmd, handled := HandleModalInput(fd, msg); handled {
+		return cmd
+	}
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "up", "down", "left", "right", "pgup", "pgdown", "home", "end", "j", "k", "h", "l", "g", "G", "J", "K":
+			fd.modalState.ResetClicks()
+		}
+	}
 	// Handle different modes
 	switch fd.mode {
 	case ModeFilter:
@@ -508,14 +547,7 @@ func (fd *FileDialog) handleFilterMode(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "esc":
-			// Exit filter mode
-			fd.mode = ModeNavigation
-			fd.filterInput.Blur()
-			// Clear filter if it's empty
-			if fd.filterInput.Value() == "" {
-				fd.applyFilters()
-			}
-			return nil
+			return fd.HandleModalAction("cancel-edit")
 
 		case "tab":
 			// Exit filter mode and focus filename input (save mode only)
@@ -529,11 +561,7 @@ func (fd *FileDialog) handleFilterMode(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case "enter":
-			// Apply filter and return to navigation
-			fd.mode = ModeNavigation
-			fd.filterInput.Blur()
-			fd.applyFilters()
-			return nil
+			return fd.HandleModalAction("apply-filter")
 
 		case "up":
 			// Navigate up in file list (stay in filter mode)
@@ -599,38 +627,14 @@ func (fd *FileDialog) handleFilenameMode(msg tea.Msg) tea.Cmd {
 		switch keyMsg.String() {
 		case "esc":
 			// Exit filename mode
-			fd.mode = ModeNavigation
-			fd.filename.Blur()
-			return nil
+			return fd.HandleModalAction("cancel-edit")
 
 		case "tab":
 			// Switch to navigation
-			fd.mode = ModeNavigation
-			fd.filename.Blur()
-			return nil
+			return fd.HandleModalAction("cancel-edit")
 
 		case "enter":
-			// Confirm save
-			fullPath := fd.GetFullPath()
-
-			// Validate filename
-			if err := fd.validateFilename(); err != nil {
-				fd.errorMessage = err.Error()
-				return nil
-			}
-
-			// Ensure .pcap extension (or other configured extension)
-			fullPath = fd.ensurePcapExtension(fullPath)
-
-			// Check if file exists
-			if _, err := os.Stat(fullPath); err == nil {
-				fd.errorMessage = "File exists. Press Enter again to overwrite, Esc to cancel."
-			}
-
-			fd.Deactivate()
-			return func() tea.Msg {
-				return FileSelectedMsg{Paths: []string{fullPath}}
-			}
+			return fd.acceptFile()
 		}
 	}
 
@@ -645,54 +649,10 @@ func (fd *FileDialog) handleCreateFolderMode(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "esc":
-			// Cancel folder creation
-			fd.mode = ModeNavigation
-			fd.folderInput.Blur()
-			fd.errorMessage = ""
-			return nil
+			return fd.HandleModalAction("cancel-edit")
 
 		case "enter":
-			// Create the folder
-			folderName := strings.TrimSpace(fd.folderInput.Value())
-
-			// Validate folder name
-			if folderName == "" {
-				fd.errorMessage = "Folder name cannot be empty"
-				return nil
-			}
-
-			// Check for invalid characters
-			invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
-			for _, char := range invalidChars {
-				if strings.Contains(folderName, char) {
-					fd.errorMessage = fmt.Sprintf("Folder name contains invalid character: %s", char)
-					return nil
-				}
-			}
-
-			// Create the folder
-			newPath := filepath.Join(fd.currentDir, folderName)
-			if err := os.MkdirAll(newPath, 0750); err != nil {
-				fd.errorMessage = fmt.Sprintf("Failed to create folder: %s", err.Error())
-				return nil
-			}
-
-			// Success - return to navigation mode and refresh directory
-			fd.mode = ModeNavigation
-			fd.folderInput.Blur()
-			fd.errorMessage = ""
-			_ = fd.readDirectory() // Best-effort, errors shown in UI
-
-			// Move cursor to the newly created folder
-			for i, entry := range fd.filteredFiles {
-				if entry.Name() == folderName {
-					fd.cursor = i
-					fd.adjustViewOffset()
-					break
-				}
-			}
-
-			return nil
+			return fd.createFolder()
 		}
 	}
 
@@ -702,9 +662,55 @@ func (fd *FileDialog) handleCreateFolderMode(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+func (fd *FileDialog) createFolder() tea.Cmd {
+	// Create the folder
+	folderName := strings.TrimSpace(fd.folderInput.Value())
+
+	// Validate folder name
+	if folderName == "" || folderName == "." || folderName == ".." {
+		fd.errorMessage = "Folder name cannot be empty"
+		return nil
+	}
+
+	// Check for invalid characters
+	invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	for _, char := range invalidChars {
+		if strings.Contains(folderName, char) {
+			fd.errorMessage = fmt.Sprintf("Folder name contains invalid character: %s", char)
+			return nil
+		}
+	}
+
+	// Create the folder
+	newPath := filepath.Join(fd.currentDir, folderName)
+	if err := os.Mkdir(newPath, 0750); err != nil {
+		fd.errorMessage = fmt.Sprintf("Failed to create folder: %s", err.Error())
+		return nil
+	}
+
+	// Success - return to navigation mode and refresh directory
+	fd.mode = ModeNavigation
+	fd.modalState.Focus = "files"
+	fd.folderInput.Blur()
+	fd.errorMessage = ""
+	_ = fd.readDirectory() // Best-effort, errors shown in UI
+
+	// Move cursor to the newly created folder
+	for i, entry := range fd.filteredFiles {
+		if entry.Name() == folderName {
+			fd.cursor = i
+			fd.adjustViewOffset()
+			break
+		}
+	}
+
+	return nil
+}
+
 // handleNavigationMode handles messages in navigation mode
 func (fd *FileDialog) handleNavigationMode(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		fd.errorMessage = ""
 		switch keyMsg.String() {
 		case "esc", "q":
 			// Close dialog
@@ -713,21 +719,15 @@ func (fd *FileDialog) handleNavigationMode(msg tea.Msg) tea.Cmd {
 
 		case "/":
 			// Enter filter mode
-			fd.mode = ModeFilter
-			fd.filterInput.Focus()
-			return nil
+			fd.modalState.Focus = "filter"
+			return fd.HandleModalFocus("filter")
 
 		case "n":
-			// Enter create folder mode
-			fd.mode = ModeCreateFolder
-			fd.folderInput.SetValue("")
-			fd.folderInput.Focus()
-			return nil
+			return fd.HandleModalAction("new-folder")
 
 		case "d":
 			// Toggle details display
-			fd.showDetails = !fd.showDetails
-			return nil
+			return fd.HandleModalAction("details")
 
 		case "tab":
 			// Enter filename mode (save mode only)
@@ -756,247 +756,20 @@ func (fd *FileDialog) handleNavigationMode(msg tea.Msg) tea.Cmd {
 			fd.goToParent()
 
 		case "right", "l", "enter":
-			// Enter directory or select file
-			entry, ok := fd.getCurrentEntry()
-			if !ok {
-				return nil
-			}
-
-			if entry.IsDir() {
-				// Enter directory
-				fd.enterDirectory(entry.Name())
-			} else if fd.config.Type == FileDialogTypeOpen {
-				// Select file in open mode
-				fullPath := filepath.Join(fd.currentDir, entry.Name())
-				fd.Deactivate()
-				return func() tea.Msg {
-					return FileSelectedMsg{Paths: []string{fullPath}}
-				}
-			}
+			return fd.activateEntry()
 		}
 
-		// Clear error when navigating
-		if fd.errorMessage != "" {
-			fd.errorMessage = ""
-		}
 	}
 
 	return nil
 }
 
-// View renders the file dialog
+// View renders the currently visible layer without changing state.
 func (fd *FileDialog) View() string {
 	if !fd.active {
 		return ""
 	}
-
-	var content strings.Builder
-
-	// Current directory
-	dirStyle := lipgloss.NewStyle().
-		Foreground(fd.theme.InfoColor).
-		Bold(true)
-	content.WriteString(dirStyle.Render("Directory: " + fd.currentDir))
-	content.WriteString("\n\n")
-
-	// File list
-	content.WriteString(fd.renderFileList())
-	content.WriteString("\n\n")
-
-	// Filter input (if in filter mode)
-	if fd.mode == ModeFilter {
-		labelStyle := lipgloss.NewStyle().
-			Foreground(fd.theme.Foreground).
-			Bold(true)
-		inputStyle := lipgloss.NewStyle().
-			Foreground(fd.theme.Foreground)
-
-		content.WriteString(labelStyle.Render("Filter: "))
-		content.WriteString(inputStyle.Render(fd.filterInput.View()))
-		content.WriteString("\n")
-	}
-
-	// Folder input (if in create folder mode)
-	if fd.mode == ModeCreateFolder {
-		labelStyle := lipgloss.NewStyle().
-			Foreground(fd.theme.Foreground).
-			Bold(true)
-		inputStyle := lipgloss.NewStyle().
-			Foreground(fd.theme.Foreground)
-
-		content.WriteString(labelStyle.Render("New folder: "))
-		content.WriteString(inputStyle.Render(fd.folderInput.View()))
-		content.WriteString("\n")
-	}
-
-	// Filename input (save mode only)
-	if fd.config.Type == FileDialogTypeSave {
-		labelStyle := lipgloss.NewStyle().
-			Foreground(fd.theme.Foreground).
-			Bold(true)
-
-		inputStyle := lipgloss.NewStyle()
-		if fd.mode == ModeFilename {
-			inputStyle = inputStyle.
-				Foreground(fd.theme.Foreground).
-				Padding(0, 1)
-		} else {
-			inputStyle = inputStyle.
-				Foreground(fd.theme.Foreground).
-				Padding(0, 1)
-		}
-
-		content.WriteString(labelStyle.Render("Filename: "))
-		content.WriteString(inputStyle.Render(fd.filename.View()))
-		content.WriteString("\n")
-
-		// Full path preview
-		pathPreviewStyle := lipgloss.NewStyle().
-			Foreground(fd.theme.StatusBarFg).
-			Italic(true)
-		content.WriteString(pathPreviewStyle.Render("→ " + fd.GetFullPath()))
-	}
-
-	// Error message (if any)
-	if fd.errorMessage != "" {
-		content.WriteString("\n\n")
-		errorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("9")). // Red
-			Bold(true)
-		content.WriteString(errorStyle.Render("⚠ " + fd.errorMessage))
-	}
-
-	// Footer based on mode
-	footer := fd.getFooter()
-
-	// Use unified modal rendering
-	return RenderModal(ModalRenderOptions{
-		Title:   fd.config.Title,
-		Content: content.String(),
-		Footer:  footer,
-		Width:   fd.width,
-		Height:  fd.height,
-		Theme:   fd.theme,
-	})
-}
-
-// renderFileList renders the custom file list with filtering
-func (fd *FileDialog) renderFileList() string {
-	if len(fd.filteredFiles) == 0 {
-		// Render "No files found" message with fixed height padding
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(fd.theme.StatusBarFg).
-			Italic(true)
-		var listBuilder strings.Builder
-		listBuilder.WriteString(emptyStyle.Render("No files found."))
-		listBuilder.WriteString("\n")
-
-		// Pad remaining lines for fixed height
-		for i := 1; i < fd.listHeight; i++ {
-			listBuilder.WriteString("\n")
-		}
-		return listBuilder.String()
-	}
-
-	var listBuilder strings.Builder
-
-	// Render visible entries (always render exactly fd.listHeight lines for fixed height)
-	start := fd.viewOffset
-	for i := start; i < start+fd.listHeight; i++ {
-		// Check if we have an entry to display
-		if i >= len(fd.filteredFiles) {
-			// Pad with empty lines for fixed height
-			listBuilder.WriteString("\n")
-			continue
-		}
-
-		entry := fd.filteredFiles[i]
-		name := entry.Name()
-
-		// Get file info for mod time, numeric perms, size (only if showing details)
-		var modTimeStr string
-		var permStr string
-		var sizeStr string
-		if fd.showDetails {
-			info, err := entry.Info()
-			if err == nil {
-				// Format modification time (e.g., "2025-10-17 14:30")
-				modTimeStr = info.ModTime().Format("2006-01-02 15:04")
-
-				// Format permissions as numeric (e.g., "755")
-				mode := info.Mode()
-				perm := mode.Perm()
-				permStr = fmt.Sprintf("%03o", perm)
-
-				// Format file size
-				if entry.IsDir() {
-					sizeStr = "DIR"
-				} else {
-					sizeStr = formatSize(info.Size())
-				}
-			}
-		}
-
-		// Build the line
-		cursor := " "
-		if i == fd.cursor {
-			cursor = ">"
-		}
-
-		// Check if this line is selected
-		isSelected := i == fd.cursor
-
-		var line string
-		if fd.showDetails {
-			// With details: <mod time> <numeric perms> <size> <name>
-			// Use tab spacing between fields, right-align file size
-			if isSelected {
-				// Selected: don't apply any color styling to name, let highlight handle it
-				line = fmt.Sprintf("%s %-16s\t%s\t%8s\t%s", cursor, modTimeStr, permStr, sizeStr, name)
-			} else if entry.IsDir() {
-				// Non-selected directory: blue
-				dirStyle := lipgloss.NewStyle().
-					Foreground(fd.theme.InfoColor).
-					Bold(true)
-				line = fmt.Sprintf("%s %-16s\t%s\t%8s\t%s", cursor, modTimeStr, permStr, sizeStr, dirStyle.Render(name))
-			} else {
-				// Non-selected file: grey
-				fileStyle := lipgloss.NewStyle().
-					Foreground(fd.theme.Foreground)
-				line = fmt.Sprintf("%s %-16s\t%s\t%8s\t%s", cursor, modTimeStr, permStr, sizeStr, fileStyle.Render(name))
-			}
-		} else {
-			// Without details - just name
-			if isSelected {
-				// Selected: don't apply any color styling to name, let highlight handle it
-				line = fmt.Sprintf("%s %s", cursor, name)
-			} else if entry.IsDir() {
-				// Non-selected directory: blue
-				dirStyle := lipgloss.NewStyle().
-					Foreground(fd.theme.InfoColor).
-					Bold(true)
-				line = fmt.Sprintf("%s %s", cursor, dirStyle.Render(name))
-			} else {
-				// Non-selected file: grey
-				fileStyle := lipgloss.NewStyle().
-					Foreground(fd.theme.Foreground)
-				line = fmt.Sprintf("%s %s", cursor, fileStyle.Render(name))
-			}
-		}
-
-		// Apply selection styling: cyan background + terminal bg color as foreground
-		if isSelected {
-			highlightStyle := lipgloss.NewStyle().
-				Foreground(fd.theme.Background). // Terminal bg color as text color
-				Background(fd.theme.SelectionBg) // Cyan background
-			line = highlightStyle.Render(line)
-		}
-
-		listBuilder.WriteString(line)
-		listBuilder.WriteString("\n")
-	}
-
-	return listBuilder.String()
+	return RenderModal(fd.ModalOptions())
 }
 
 // formatSize formats file size in human-readable format with consistent width
@@ -1013,37 +786,11 @@ func formatSize(size int64) string {
 	return fmt.Sprintf("%4.1f%cB", float64(size)/float64(div), "kMGTPE"[exp])
 }
 
-// getFooter returns the appropriate footer text based on mode
-func (fd *FileDialog) getFooter() string {
-	switch fd.mode {
-	case ModeFilter:
-		if fd.config.Type == FileDialogTypeSave {
-			return "Tab: Edit Filename | Enter: Apply | Esc: Cancel"
-			// return "↑/↓: Navigate | ←/→: Change Dir | Tab: Edit Filename | Enter: Apply | Esc: Cancel"
-		}
-		return "Enter: Apply | Esc: Cancel"
-
-	case ModeFilename:
-		return "Enter: Save | Tab/Esc: Cancel"
-
-	case ModeCreateFolder:
-		return "Enter: Create Folder | Esc: Cancel"
-
-	case ModeNavigation:
-		if fd.config.Type == FileDialogTypeSave {
-			return "/: Filter | n: New Folder | d: Details | Tab: Edit Filename | Esc: Cancel"
-		}
-		return "/: Filter | n: New Folder | d: Details | Esc: Cancel"
-	}
-
-	return ""
-}
-
 // validateFilename checks if the filename is valid
 func (fd *FileDialog) validateFilename() error {
 	filename := strings.TrimSpace(fd.filename.Value())
 
-	if filename == "" {
+	if filename == "" || filename == "." || filename == ".." {
 		return fmt.Errorf("filename cannot be empty")
 	}
 
@@ -1072,10 +819,16 @@ func (fd *FileDialog) validateFilename() error {
 // ensurePcapExtension adds .pcap extension if missing
 func (fd *FileDialog) ensurePcapExtension(path string) string {
 	ext := filepath.Ext(path)
-	if ext != ".pcap" && ext != ".pcapng" {
-		return path + ".pcap"
+	extensions := fd.config.AllowedTypes
+	if len(extensions) == 0 {
+		extensions = []string{".pcap", ".pcapng"}
 	}
-	return path
+	for _, allowed := range extensions {
+		if ext == allowed {
+			return path
+		}
+	}
+	return path + extensions[0]
 }
 
 // GetDirectory returns the current directory

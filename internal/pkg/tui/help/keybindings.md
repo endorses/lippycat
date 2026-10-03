@@ -38,28 +38,78 @@ The tmux passthrough path requires `set -g allow-passthrough on` in tmux.
 
 Vim-style navigation works in list views.
 
-| Key           | Action           |
-| ------------- | ---------------- |
-| `j` / `Down`  | Move down        |
-| `k` / `Up`    | Move up          |
-| `h` / `Left`  | Focus left pane  |
-| `l` / `Right` | Focus right pane |
-| `g` / `Home`  | Jump to top      |
-| `G` / `End`   | Jump to bottom   |
-| `PgUp`        | Page up          |
-| `PgDown`      | Page down        |
+| Key           | Action             |
+| ------------- | ------------------ |
+| `j` / `Down`  | Move down          |
+| `k` / `Up`    | Move up            |
+| `h` / `Left`  | Focus list pane    |
+| `l` / `Right` | Focus details pane |
+| `g` / `Home`  | Jump to top        |
+| `G` / `End`   | Jump to bottom     |
+| `PgUp`        | Page up            |
+| `PgDown`      | Page down          |
 
 ## Capture Tab
 
-| Key | Action                      |
-| --- | --------------------------- |
-| `/` | Enter filter mode           |
-| `c` | Remove last filter          |
-| `C` | Clear all filters           |
-| `d` | Toggle details panel        |
-| `v` | Toggle view (packets/calls) |
-| `w` | Save packets to PCAP        |
-| `x` | Flush/clear packets         |
+| Key   | Action                                                   |
+| ----- | -------------------------------------------------------- |
+| `/`   | Enter filter mode                                        |
+| `c`   | Remove last filter                                       |
+| `C`   | Clear all filters                                        |
+| `d`   | Toggle details                                           |
+| `Esc` | Return from details to list                              |
+| `v`   | Cycle packet/event/call views                            |
+| `m`   | Toggle current packet mark                               |
+| `u`   | Unmark all packets                                       |
+| `M`   | Add packet range to marks                                |
+| `w`   | Save marked packets, or normal save when none are marked |
+| `x`   | Flush/clear packets                                      |
+
+Packet, event, and call details adapt to the available space: beside the list,
+below it when the terminal is tall enough, or in the full content area. Press
+`d` to open or close details at any size. Split layouts keep the list focused
+and following incoming traffic; full-area details take focus. `Esc` returns focus
+to the list. Use
+`h`/`Left` and `l`/`Right` to switch panes. Resizing preserves the focused pane,
+selection, and scroll position (clamped to the available content).
+
+Only full-area details, with the list hidden, pin the inspected item. Focusing
+details in either split layout does not pause following. Packet
+and event snapshots remain readable if their list row leaves the capture buffer;
+call details continue updating for the same call. Returning to the list or a split
+layout restores the previous following setting. Use `End` in the list to resume
+following after browsing history. Long values wrap and packet hex rows adapt
+to the pane width. Very short terminals reduce padding and header/tab chrome.
+
+When packet, event, or call details have focus, `Home`/`g` scrolls to the top and
+`End`/`G` scrolls to the bottom of the details without changing the selected item.
+
+### Mark packets for export
+
+In the packet list, `m` toggles a mark and `M` adds the range from the last clicked
+or individually marked packet to the current row. Marked rows have an asterisk in
+the left margin. Plain clicks move the row and range anchor without clearing marks.
+Ctrl+click toggles a mark, Shift+click replaces marks with a range, and
+Ctrl+Shift+click adds a range. Ranges use the current filtered list order. If the
+anchor was filtered out or evicted, click or mark another packet first. Some
+terminals intercept modified clicks; `m` and `M` remain available from the keyboard.
+
+Marks survive filtering and buffer eviction. With marks present, `w` saves only
+marked packets, including ones no longer shown in the list, as a one-shot PCAP in
+capture order. Press `Esc` to cancel an export in progress. The footer shows the
+count and the save dialog identifies the
+marked export. Saving keeps marks; press `u` in the packet list (or click its footer
+hint) to unmark all packets, including hidden and evicted ones. **Clear marks** in
+the save dialog does the same. Flushing packets or replacing the capture clears marks. An active
+recording still uses `w` to stop first; press it again to export the marked set.
+
+Live and remote marks retain independent copies of packet bytes; offline marks
+reference the indexed capture. The defaults allow 10,000 marked packets and
+64 MiB of retained payload, configurable with `watch.marked_packet_limit` and
+`watch.marked_bytes_limit` in YAML configuration. Additions exceeding a limit are
+rejected without changing existing marks; save and clear marks to release space.
+Packets without available capture bytes cannot be marked. PCAP export rejects
+mixed link types and invalid timestamps without replacing an existing file.
 
 ### Filter Mode
 
@@ -99,3 +149,12 @@ Arrow keys navigate spatially in the graph view.
 | `Esc`        | Cancel editing               |
 | `Left/Right` | Switch between modes         |
 | `j/k`        | Navigate settings            |
+
+## Help Tab
+
+| Key          | Action                          |
+| ------------ | ------------------------------- |
+| `Home` / `g` | Go to the top of the section    |
+| `End` / `G`  | Go to the bottom of the section |
+
+While entering a search, `g` and `G` are typed into the search query.

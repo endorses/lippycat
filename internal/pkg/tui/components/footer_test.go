@@ -62,7 +62,7 @@ func TestFooterClickableHintsAcrossTabs(t *testing.T) {
 		{"capture", 0, []footerHintExpectation{
 			footerRuneHint("/: filter", "/"), footerRuneHint("d: details", "d"),
 			footerRuneHint("t: time", "t"), footerRuneHint("w: save", "w"),
-			footerRuneHint("x: flush", "x"),
+			footerRuneHint("x: flush", "x"), footerRuneHint("m: mark", "m"),
 		}},
 		{"nodes", 1, []footerHintExpectation{
 			footerRuneHint("f: filters", "f"), footerRuneHint("a: add", "a"),
@@ -80,6 +80,7 @@ func TestFooterClickableHintsAcrossTabs(t *testing.T) {
 			{text: "→: next", key: tea.KeyMsg{Type: tea.KeyRight}},
 		}},
 		{"help", 4, []footerHintExpectation{
+			footerRuneHint("g: top", "g"), footerRuneHint("G: bottom", "G"),
 			footerRuneHint("/: search", "/"), footerRuneHint("1: keys", "1"),
 			footerRuneHint("2: filters", "2"), footerRuneHint("3: commands", "3"),
 			footerRuneHint("4: workflows", "4"),
@@ -111,6 +112,9 @@ func TestFooterClickableDynamicHints(t *testing.T) {
 				{text: "Space: resume", key: tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}},
 				footerRuneHint("p: protocol", "p"), footerRuneHint("q: quit", "q"),
 			}
+			if mode == "packets" {
+				hints = append(hints, footerRuneHint("m: mark", "m"))
+			}
 			assertFooterHints(t, &footer, hints)
 			switch mode {
 			case "packets":
@@ -137,6 +141,7 @@ func TestFooterClickableDynamicHints(t *testing.T) {
 		footer.SetActiveTab(4)
 		footer.SetHasHelpSearch(true)
 		assertFooterHints(t, &footer, []footerHintExpectation{
+			footerRuneHint("g: top", "g"), footerRuneHint("G: bottom", "G"),
 			footerRuneHint("/: search", "/"), footerRuneHint("n: next", "n"),
 			footerRuneHint("N: previous", "N"), footerRuneHint("c: clear", "c"),
 			footerRuneHint("1: keys", "1"), footerRuneHint("2: filters", "2"),
@@ -174,24 +179,24 @@ func TestFooterResponsiveHitRegions(t *testing.T) {
 	footer := NewFooter()
 	footer.SetWidth(100)
 	assertFooterHints(t, &footer, []footerHintExpectation{
-		footerRuneHint("/:flt", "/"), footerRuneHint("d:det", "d"),
+		footerRuneHint("/:flt", "/"), footerRuneHint("d:dtls", "d"),
 		footerRuneHint("t:tm", "t"), footerRuneHint("w:sav", "w"),
-		footerRuneHint("x:flsh", "x"),
+		footerRuneHint("x:flsh", "x"), footerRuneHint("m:mrk", "m"),
 		{text: "Space:pse", key: tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}},
 		footerRuneHint("p:prt", "p"), footerRuneHint("q:qt", "q"),
 	})
 	footer.SetWidth(40)
 	assertFooterHints(t, &footer, []footerHintExpectation{
-		footerRuneHint("/", "/"), footerRuneHint("d", "d"), footerRuneHint("w", "w"),
+		footerRuneHint("/", "/"), footerRuneHint("d:dt", "d"), footerRuneHint("w", "w"), footerRuneHint("m:mk", "m"),
 		{text: "Space", key: tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}},
 		footerRuneHint("p", "p"), footerRuneHint("q", "q"),
 	})
 	footer.SetWidth(20)
 	assertFooterHints(t, &footer, []footerHintExpectation{
-		footerRuneHint("/", "/"), footerRuneHint("d", "d"), footerRuneHint("w", "w"),
+		footerRuneHint("/", "/"), footerRuneHint("d:dt", "d"), footerRuneHint("w", "w"),
 	})
 	footer.SetWidth(3)
-	assertFooterHints(t, &footer, []footerHintExpectation{footerRuneHint("/", "/")})
+	assertFooterHints(t, &footer, []footerHintExpectation{footerRuneHint("d", "d")})
 	footer.SetWidth(2)
 	assertFooterHints(t, &footer, nil)
 

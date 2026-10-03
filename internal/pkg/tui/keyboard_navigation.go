@@ -15,14 +15,17 @@ func (m Model) handleFocusLeft() (Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	m.uiState.FocusedPane = "left"
+	m.focusCapturePane("left")
 	return m, nil
 }
 
 // handleFocusRight focuses the right pane (details/hex)
 func (m Model) handleFocusRight() (Model, tea.Cmd) {
-	if m.offlineSession != nil && m.uiState.Tabs.GetActive() == 0 && m.uiState.ViewMode == "packets" && (!m.uiState.ShowDetails || m.uiState.Width < 160) {
-		m.uiState.FocusedPane = "left"
+	if m.uiState.Tabs.GetActive() == 0 && m.responsiveCaptureView() {
+		if !m.captureDetailsEnabled() {
+			return m, nil
+		}
+		m.focusCapturePane("right")
 		return m, nil
 	}
 
@@ -42,16 +45,13 @@ func (m Model) handleMoveDown() (Model, tea.Cmd) {
 	switch m.uiState.Tabs.GetActive() {
 	case 0: // Capture tab
 		if m.uiState.ViewMode == "events" {
-			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsDown()
 			} else {
 				m.moveEventSelection(1)
 			}
 		} else if m.uiState.ViewMode == "calls" {
-			// Check if details panel is visible and focused
-			minWidthForDetails := 120
-			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
-			if detailsVisible && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.CallsView.ScrollDetailsDown()
 			} else {
 				m.uiState.CallsView.SelectNext()
@@ -85,16 +85,13 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 	switch m.uiState.Tabs.GetActive() {
 	case 0: // Capture tab
 		if m.uiState.ViewMode == "events" {
-			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsUp()
 			} else {
 				m.moveEventSelection(-1)
 			}
 		} else if m.uiState.ViewMode == "calls" {
-			// Check if details panel is visible and focused
-			minWidthForDetails := 120
-			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
-			if detailsVisible && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.CallsView.ScrollDetailsUp()
 			} else {
 				m.uiState.CallsView.SelectPrevious()
@@ -127,17 +124,14 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "events" {
-			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsToTop()
 			} else {
 				m.eventStore.SelectFirst()
 				m.syncEventsView()
 			}
 		} else if m.uiState.ViewMode == "calls" {
-			// Check if details panel is visible and focused
-			minWidthForDetails := 120
-			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
-			if detailsVisible && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.CallsView.ScrollDetailsToTop()
 				return m, nil
 			}
@@ -165,17 +159,14 @@ func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "events" {
-			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsToBottom()
 			} else {
 				m.eventStore.SelectLast()
 				m.syncEventsView()
 			}
 		} else if m.uiState.ViewMode == "calls" {
-			// Check if details panel is visible and focused
-			minWidthForDetails := 120
-			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
-			if detailsVisible && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.CallsView.ScrollDetailsToBottom()
 				return m, nil
 			}
@@ -203,16 +194,13 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 func (m Model) handlePageUp() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "events" {
-			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsPageUp()
 			} else {
-				m.moveEventSelection(-max(1, m.uiState.Height-10))
+				m.moveEventSelection(-max(1, m.captureLayout().List.Height-5))
 			}
 		} else if m.uiState.ViewMode == "calls" {
-			// Check if details panel is visible and focused
-			minWidthForDetails := 120
-			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
-			if detailsVisible && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.CallsView.ScrollDetailsPageUp()
 				return m, nil
 			}
@@ -240,16 +228,13 @@ func (m Model) handlePageUp() (Model, tea.Cmd) {
 func (m Model) handlePageDown() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "events" {
-			if m.uiState.EventShowDetails && m.uiState.Width >= 160 && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.EventsView.ScrollDetailsPageDown()
 			} else {
-				m.moveEventSelection(max(1, m.uiState.Height-10))
+				m.moveEventSelection(max(1, m.captureLayout().List.Height-5))
 			}
 		} else if m.uiState.ViewMode == "calls" {
-			// Check if details panel is visible and focused
-			minWidthForDetails := 120
-			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
-			if detailsVisible && m.uiState.FocusedPane == "right" {
+			if m.captureDetailsFocused() {
 				m.uiState.CallsView.ScrollDetailsPageDown()
 				return m, nil
 			}
@@ -360,5 +345,5 @@ func (m Model) handleFilterManagerKey() (Model, tea.Cmd) {
 
 // A hidden offline details pane must not swallow packet navigation after resize.
 func (m Model) packetListHasKeyboardFocus() bool {
-	return m.uiState.FocusedPane == "left" || (m.offlineSession != nil && (!m.uiState.ShowDetails || m.uiState.Width < 160))
+	return !m.captureDetailsFocused()
 }

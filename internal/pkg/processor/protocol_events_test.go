@@ -76,10 +76,11 @@ func TestEmitDNSAndSMTPEvents(t *testing.T) {
 	}
 }
 
-func TestEventBroadcasterReceivesNormalizedEventsWithStructuredLogsDisabled(t *testing.T) {
+func TestEventBroadcasterReceivesExplicitLocalSinkEventsWithStructuredLogsDisabled(t *testing.T) {
 	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	require.Nil(t, p.logSink)
+	require.NoError(t, p.RegisterEventSink(&collectingSink{}))
 
 	subscription, err := p.eventBroadcaster.Subscribe(broadcast.Options{
 		QueueSize:        1,
@@ -112,6 +113,7 @@ func TestFileMetadataGenerationDoesNotRequireStructuredLogs(t *testing.T) {
 	p, err := newTestProcessor(t, Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)
 	require.Nil(t, p.logSink)
+	require.NoError(t, p.RegisterEventSink(&collectingSink{}))
 	require.NotNil(t, p.eventRuntime)
 
 	subscription, err := p.eventBroadcaster.Subscribe(broadcast.Options{QueueSize: 2, Kinds: []events.Kind{events.KindHTTP, events.KindFileMetadata}})

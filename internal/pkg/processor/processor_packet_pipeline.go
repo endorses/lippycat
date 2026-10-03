@@ -148,6 +148,16 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	}
 
 	sourceID := batch.SourceID
+	packetCount := uint64(len(batch.Envelopes))
+	if p.hunterManager != nil && sourceID != "" && sourceID != "local" {
+		p.hunterManager.UpdatePacketStats(sourceID, packetCount, batch.TimestampNs)
+	}
+	p.packetsReceived.Add(packetCount)
+
+	packetOutput := p.needsPacketOutput()
+	if !packetOutput && !p.wantsEventAnalysis() {
+		return
+	}
 	protoBatch, err := batch.ToProtoBatchE()
 	if err != nil {
 		logger.Error("Failed to project normalized packet batch", "error", err, "source_id", sourceID, "sequence", batch.Sequence)
@@ -160,18 +170,10 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		"sequence", batch.Sequence,
 		"packets", len(packets))
 
-	// Update hunter statistics (only for gRPC sources with hunter IDs)
-	if p.hunterManager != nil && sourceID != "" && sourceID != "local" {
-		p.hunterManager.UpdatePacketStats(sourceID, uint64(len(packets)), batch.TimestampNs)
-	}
-
 	// Queue packets for async PCAP write if configured
 	if p.pcapWriter != nil {
 		p.pcapWriter.QueuePackets(packets)
 	}
-
-	// Update processor statistics (atomic increment)
-	p.packetsReceived.Add(uint64(len(packets)))
 
 	// Process TLS session keys from packets (for decryption support)
 	if p.tlsKeylogWriter != nil {
@@ -191,6 +193,11 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 	// Normalize protocol metadata after enrichment and before forwarding/broadcasting.
 	p.emitProtocolEvents(sourceID, packets)
+	if !packetOutput {
+		// Event forwarding and structured logs consume the analysis above. With
+		// no packet output, avoid packet-only aggregation and serialization.
+		return
+	}
 
 	// Aggregate VoIP call state from packet metadata
 	voipAllowed := make([]bool, len(packets))
@@ -408,23 +415,29 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		}
 	}
 
-	if err := refreshEnvelopes(batch, packets); err != nil {
-		logger.Error("Failed to retain processed packet metadata", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
-		return
+	forwardPackets := p.upstreamManager != nil && !p.upstreamManager.ForwardingEvents()
+	monitorPackets := p.hasPacketSubscribers()
+	if forwardPackets || monitorPackets {
+		if err := refreshEnvelopes(batch, packets); err != nil {
+			logger.Error("Failed to retain processed packet metadata", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
+			return
+		}
+		protoBatch, err = batch.ToProtoBatchE()
+		if err != nil {
+			logger.Error("Failed to encode processed packet batch", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
+			return
+		}
+		if monitorPackets {
+			protoBatch.MonitorEventAnalysis = data.MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_CLIENT_REQUIRED
+			if p.wantsEventAnalysis() {
+				protoBatch.MonitorEventAnalysis = data.MonitorEventAnalysis_MONITOR_EVENT_ANALYSIS_SERVER_PROVIDED
+			}
+			p.subscriberManager.Broadcast(protoBatch)
+		}
+		if forwardPackets {
+			p.upstreamManager.Forward(protoBatch)
+		}
 	}
-	protoBatch, err = batch.ToProtoBatchE()
-	if err != nil {
-		logger.Error("Failed to encode processed packet batch", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
-		return
-	}
-
-	// Forward to upstream in hierarchical mode
-	if p.upstreamManager != nil && !p.upstreamManager.ForwardingEvents() {
-		p.upstreamManager.Forward(protoBatch)
-	}
-
-	// Broadcast to monitoring subscribers (TUI clients)
-	p.subscriberManager.Broadcast(protoBatch)
 
 	// Inject packets to virtual interface if configured
 	if p.vifManager != nil {
@@ -455,6 +468,29 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		}
 	}
 
+}
+
+// needsPacketProcessing is also used by local capture before protocol parsing.
+// Explicit local outputs remain useful without an upstream connection.
+func (p *Processor) needsPacketProcessing() bool {
+	return p.wantsEventAnalysis() || p.needsPacketOutput()
+}
+
+func (p *Processor) hasPacketSubscribers() bool {
+	return p.packetMonitoringAllowed() && p.subscriberManager != nil && p.subscriberManager.Count() > 0
+}
+
+func (p *Processor) packetMonitoringAllowed() bool {
+	return !p.monitorEventMode()
+}
+
+func (p *Processor) needsPacketOutput() bool {
+	return (p.upstreamManager != nil && !p.upstreamManager.ForwardingEvents()) ||
+		(p.packetMonitoringAllowed() && p.correlatedCallSubscribers.Load() > 0) ||
+		p.hasPacketSubscribers() || p.pcapWriter != nil || p.config.WriteFile != "" ||
+		(p.sessionOutputManager != nil && p.sessionOutputManager.writer != nil) ||
+		p.autoRotatePcapWriter != nil || p.vifManager != nil || p.tlsKeylogWriter != nil ||
+		p.isLIEnabled() || p.commandExecutor.HasTunnelingCommand() || p.commandExecutor.HasVoipCommand()
 }
 
 // refreshEnvelopes retains metadata produced by protobuf-backed analyzers while

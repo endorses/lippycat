@@ -17,14 +17,14 @@ func TestCapturePacketScrollbarDragAndPaneWidth(t *testing.T) {
 	m, _ = m.handleWindowSizeMsg(tea.WindowSizeMsg{Width: 180, Height: 35})
 	m.uiState.ViewMode = "packets"
 	m.uiState.ShowDetails = true
-	m.uiState.PacketList.SetSize(103, 25)
+	m.prepareCaptureLayout()
 	m.uiState.PacketList.SetVirtualPackets(1000, 0, make([]components.PacketDisplay, 50))
-	content := m.renderCaptureTab(25)
+	content := m.renderCaptureTab(m.captureContentHeight())
 	for _, line := range strings.Split(content, "\n") {
 		require.Equal(t, 180, ansi.StringWidth(line))
 	}
 	barX := ansi.StringWidth(strings.Split(m.uiState.PacketList.View(true, true), "\n")[0]) - 2
-	require.Contains(t, "│▉", string([]rune(ansi.Strip(strings.Split(content, "\n")[2]))[barX]))
+	require.Equal(t, "▉", string([]rune(ansi.Strip(strings.Split(content, "\n")[2]))[barX]))
 	m, _ = m.handleMouse(tea.MouseMsg{X: barX, Y: 22, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	require.Equal(t, "list", m.scrollDrag)
 	require.Greater(t, m.uiState.PacketList.LogicalOffset(), uint64(0))
@@ -43,9 +43,9 @@ func TestPacketScrollbarThumbPressAndDragWithDetails(t *testing.T) {
 	m.uiState.PacketList.SetVirtualPackets(1000, 0, make([]components.PacketDisplay, 50))
 	m = m.toggleDetailsPanel()
 	m.uiState.PacketList.SetScrollOffset(123)
-	start, _ := components.ScrollbarThumb(1000, m.uiState.PacketList.VisibleRows(), 123, 21)
+	start, _ := components.ScrollbarThumb(1000, m.uiState.PacketList.VisibleRows(), 123, m.captureLayout().List.Height-4)
 	barX := ansi.StringWidth(strings.Split(m.uiState.PacketList.View(true, true), "\n")[0]) - 2
-	barY := 7 + start // Actual content starts at Y=5.
+	barY := m.captureContentOrigin() + 2 + start
 	lines := strings.Split(m.View(), "\n")
 	require.Equal(t, "▉", string([]rune(ansi.Strip(lines[barY]))[barX]))
 
@@ -67,12 +67,45 @@ func TestCaptureScrollbarSplitLayouts(t *testing.T) {
 		if mode == "calls" && !m.uiState.CallsView.IsShowingDetails() {
 			m.uiState.CallsView.ToggleDetails()
 		}
-		content := m.renderCaptureTab(25)
+		content := m.renderCaptureTab(m.captureContentHeight())
 		for _, line := range strings.Split(content, "\n") {
 			require.Equalf(t, 180, ansi.StringWidth(line), "%s pane width", mode)
 		}
 		line := ansi.Strip(strings.Split(content, "\n")[2])
-		require.Equal(t, 2, strings.Count(line, "▉"))
+		require.NotContains(t, line, "▉")
+	}
+}
+
+func TestEventScrollbarInsidePanel(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		width, height int
+		details       bool
+		layout        captureLayoutMode
+	}{
+		{"list only", 80, 30, false, captureListOnly},
+		{"stacked", 80, 50, true, captureStacked},
+		{"side by side", 180, 40, true, captureSideBySide},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel(200, 8, "test0", "", nil, false, false, "", false)
+			t.Cleanup(m.Shutdown)
+			m.uiState.ViewMode = "events"
+			m.uiState.EventShowDetails = tc.details
+			m.eventStore.AddBatch(makeEventBatch(100, "scrollbar").Events)
+			m.eventStore.SelectFirst()
+			m, _ = m.handleWindowSizeMsg(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+			layout := m.captureLayout()
+			require.Equal(t, tc.layout, layout.Mode)
+			row := strings.Split(m.renderCaptureTab(m.captureContentHeight()), "\n")[2]
+			barX := layout.List.X + layout.List.Width - 2
+			require.Equal(t, "▉", ansi.Strip(ansi.Cut(row, barX, barX+1)))
+			border := ansi.Strip(ansi.Cut(row, barX+1, barX+2))
+			require.Contains(t, []string{"│", "┃"}, border, "the right panel border must enclose the scrollbar")
+
+			m, _ = m.handleMouse(tea.MouseMsg{X: barX, Y: m.captureContentOrigin() + 2, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+			require.Equal(t, "list", m.scrollDrag, "the visible scrollbar must remain clickable")
+		})
 	}
 }
 
@@ -81,7 +114,7 @@ func TestOfflinePacketScrollbarRequestsNewPage(t *testing.T) {
 	m, _ = m.handleWindowSizeMsg(tea.WindowSizeMsg{Width: 180, Height: 35})
 	m.uiState.ViewMode = "packets"
 	m.uiState.ShowDetails = false
-	m.uiState.PacketList.SetSize(180, 25)
+	m.prepareCaptureLayout()
 	barX := ansi.StringWidth(strings.Split(m.uiState.PacketList.View(false, false), "\n")[0]) - 2
 	m, cmd := m.handleMouse(tea.MouseMsg{X: barX, Y: 27, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	require.NotNil(t, cmd)

@@ -75,9 +75,10 @@ func (l *subscriptionLimiter) release() {
 // EventService serves the live-only v1 normalized event subscription API.
 type EventService struct {
 	eventsv1.UnimplementedEventServiceServer
-	broadcaster *broadcast.Broadcaster
-	policy      EventSubscriptionPolicy
-	ingress     *eventIngress
+	broadcaster       *broadcast.Broadcaster
+	policy            EventSubscriptionPolicy
+	ingress           *eventIngress
+	beginSubscription func() (func(), error)
 }
 
 func NewEventService(broadcaster *broadcast.Broadcaster, policy EventSubscriptionPolicy, ingressPolicies ...EventIngressPolicy) (*EventService, error) {
@@ -158,6 +159,13 @@ func (s *EventService) SubscribeEvents(req *eventsv1.EventSubscribeRequest, stre
 		return status.Errorf(codes.Unavailable, "subscribe to processor events: %v", err)
 	}
 	defer sub.Close()
+	if s.beginSubscription != nil {
+		endSubscription, err := s.beginSubscription()
+		if err != nil {
+			return status.Errorf(codes.Unavailable, "start event analysis: %v", err)
+		}
+		defer endSubscription()
+	}
 	liveBoundary := timestamppb.New(sub.AdmittedAt())
 
 	streamID, err := newEventStreamID()

@@ -123,9 +123,9 @@ func TestOfflineBrowserMouseSplitBoundaryAndHiddenDetailsKeys(t *testing.T) {
 		focus    string
 		cursor   uint64
 	}{
-		{"wide details boundary", 180, 101, "right", 0},
-		{"wide last list column", 180, 100, "left", 2},
-		{"narrow full width", 140, 139, "left", 2},
+		{"wide details boundary", 180, 100, "right", 0},
+		{"wide last list column", 180, 99, "left", 1},
+		{"narrow full width", 80, 79, "left", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := readyOfflineBrowser(t)
@@ -139,18 +139,24 @@ func TestOfflineBrowserMouseSplitBoundaryAndHiddenDetailsKeys(t *testing.T) {
 	}
 	m := readyOfflineBrowser(t)
 	m.uiState.ShowDetails = true
-	m.uiState.Width = 140
+	m.uiState.Width = 80
+	m.uiState.Height = 24
 	m.uiState.ViewMode = "packets"
-	m.uiState.FocusedPane = "right"
+	m.uiState.FocusedPane = "left"
+	m.prepareCaptureLayout()
 	m, _ = m.handleMoveDown()
 	require.Equal(t, uint64(1), m.uiState.PacketList.LogicalCursor())
 	m, _ = m.handleFocusRight()
-	require.Equal(t, "left", m.uiState.FocusedPane)
-	m.uiState.Width = 180
-	m, _ = m.handleFocusRight()
 	require.Equal(t, "right", m.uiState.FocusedPane)
+	require.Equal(t, captureDetailsOnly, m.captureLayout().Mode)
 	m, _ = m.handleMoveDown()
-	require.Equal(t, uint64(1), m.uiState.PacketList.LogicalCursor(), "visible details receive navigation")
+	require.Equal(t, uint64(1), m.uiState.PacketList.LogicalCursor(), "full-area details receive navigation")
+	m.uiState.Width = 180
+	m.prepareCaptureLayout()
+	require.Equal(t, captureSideBySide, m.captureLayout().Mode)
+	m, _ = m.handleMoveDown()
+	require.Equal(t, uint64(1), m.uiState.PacketList.LogicalCursor(), "split details receive navigation")
+
 }
 
 func TestOfflineBrowserPartialPageLoadsSelectedRow(t *testing.T) {

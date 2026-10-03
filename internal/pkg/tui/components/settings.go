@@ -399,7 +399,10 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				shouldExit, cmd := liveMode.UpdateInterfaceList(msg, s.theme)
 				if shouldExit {
 					s.editing = false
-					// Trigger restart when exiting interface editing
+					if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyEsc {
+						return cmd
+					}
+					// Apply confirmed interface changes.
 					return s.restartCapture()
 				}
 				return cmd

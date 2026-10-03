@@ -40,6 +40,10 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.uiState.EventFilterInput.SetWidth(msg.Width)
 	m.uiState.FileDialog.SetSize(msg.Width, msg.Height)
 	m.uiState.ConfirmDialog.SetSize(msg.Width, msg.Height)
+	m.uiState.ProtocolSelector.SetSize(msg.Width, msg.Height)
+	m.uiState.HunterSelector.SetSize(msg.Width, msg.Height)
+	m.uiState.FilterManager.SetSize(msg.Width, msg.Height)
+	m.uiState.NodesView.SetModalSize(msg.Width, msg.Height)
 	m.uiState.Toast.SetSize(msg.Width, msg.Height)
 
 	// Set dev console size (full screen when visible)
@@ -47,17 +51,9 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 		m.uiState.DevConsole.SetSize(msg.Width, msg.Height)
 	}
 
-	// Calculate available space for main content
-	headerHeight := 2 // header (2 lines: text + border)
-	tabsHeight := 4   // tabs (4 lines: top border + content + bottom corners + bottom line)
-	bottomHeight := 4 // Reserve 4 lines at bottom (footer + space for filter overlay)
-
-	contentHeight := msg.Height - headerHeight - tabsHeight - bottomHeight
-
-	// Set nodes view size (consistent bottom spacing across all tabs)
-	// Hints bar is part of the nodes view content, not bottom area
-	nodesContentHeight := msg.Height - headerHeight - tabsHeight - bottomHeight
-	m.uiState.NodesView.SetSize(msg.Width, nodesContentHeight)
+	// Toasts overlay content; only persistent chrome consumes rows.
+	contentHeight := m.standardContentHeight()
+	m.uiState.NodesView.SetSize(msg.Width, contentHeight)
 
 	// Set statistics view size
 	m.uiState.StatisticsView.SetSize(msg.Width, contentHeight)
@@ -68,25 +64,7 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	// Set help view size (returns cmd if content needs re-rendering due to width change)
 	helpCmd := m.uiState.HelpView.SetSize(msg.Width, contentHeight)
 
-	// Set calls view size (always full width, no split view)
-	m.uiState.CallsView.SetSize(msg.Width, contentHeight)
-	if m.uiState.EventsView != nil {
-		m.uiState.EventsView.SetSize(msg.Width, contentHeight)
-	}
-
-	// Auto-hide details panel if terminal is too narrow or if details are toggled off
-	minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-	if m.uiState.ShowDetails && msg.Width >= minWidthForDetails {
-		// Details panel gets exactly what it needs for hex dump, packet list gets the rest
-		detailsWidth := 77 // Hex dump (72) + borders/padding (5)
-		listWidth := msg.Width - detailsWidth
-		m.uiState.PacketList.SetSize(listWidth, contentHeight)
-		m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
-	} else {
-		// Full width for packet list (details hidden or terminal too narrow)
-		m.uiState.PacketList.SetSize(msg.Width, contentHeight)
-		m.uiState.DetailsPanel.SetSize(0, contentHeight) // Set to 0 when hidden
-	}
+	m.prepareCaptureLayout()
 
 	if m.uiState.ViewMode == "events" {
 		m.syncEventsView()
@@ -213,16 +191,17 @@ func (m Model) handleUpdateBufferSizeMsg(msg components.UpdateBufferSizeMsg) (Mo
 		m.uiState.SettingsView.SaveBufferSize()
 		return m, nil
 	}
+	var filterCmd tea.Cmd
 	if !m.packetStore.HasFilter() {
-		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		m.doFullPacketListRefresh(false)
 	} else {
-		m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+		filterCmd = m.startPacketFilter(m.packetStore.FilterChain)
 	}
 
 	// Save to config file
 	m.uiState.SettingsView.SaveBufferSize()
 
-	return m, nil
+	return m, filterCmd
 }
 
 // handleAddNodeMsg handles adding a new remote processor node
@@ -306,6 +285,7 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 		return m, m.startOfflineFilter(chain, &protocol)
 	}
 	// User selected a protocol from the protocol selector
+	m.resetCaptureInspection()
 	preserveEvents := m.uiState.ViewMode == "events" && eventScopeAvailable(msg.Protocol.Name)
 	m.uiState.SelectedProtocol = msg.Protocol
 
@@ -381,7 +361,7 @@ func (m Model) handleFileSelectedMsg(msg components.FileSelectedMsg) (Model, tea
 	filePath := msg.Path()
 
 	// Check if file exists
-	if _, err := os.Stat(filePath); err == nil {
+	if _, err := os.Stat(filePath); err == nil && !msg.OverwriteConfirmed {
 		// File exists - show confirmation dialog
 		fileName := filepath.Base(filePath)
 		cmd := m.uiState.ConfirmDialog.Show(components.ConfirmDialogOptions{
@@ -389,8 +369,8 @@ func (m Model) handleFileSelectedMsg(msg components.FileSelectedMsg) (Model, tea
 			Title:       "File Already Exists",
 			Message:     fmt.Sprintf("File '%s' already exists. Overwrite?", fileName),
 			Details:     []string{"Path: " + filePath},
-			ConfirmText: "y",
-			CancelText:  "n",
+			ConfirmText: "Overwrite",
+			CancelText:  "Cancel",
 			UserData: FileOverwriteData{
 				FilePath: filePath,
 			},
@@ -449,8 +429,8 @@ func (m Model) handleConfirmDialogResult(msg components.ConfirmDialogResult) (Mo
 
 // handleSaveCompleteMsg handles save operation completion
 func (m Model) handleSaveCompleteMsg(msg SaveCompleteMsg) (Model, tea.Cmd) {
-	// Save operation completed
-	m.uiState.SaveInProgress = false
+	// An older streaming-stop completion must not release a running export.
+	m.uiState.SaveInProgress = m.exportRunning()
 
 	// If this was a streaming save completion, update UI
 	if msg.Streaming {
@@ -483,7 +463,8 @@ func (m Model) handleSaveCompleteMsg(msg SaveCompleteMsg) (Model, tea.Cmd) {
 
 // handleFilterOperationResultMsg handles filter operation completion
 func (m Model) handleFilterOperationResultMsg(msg components.FilterOperationResultMsg) (Model, tea.Cmd) {
-	// Filter operation completed (create/update/delete)
+	// Deliver completion even if its modal is inactive.
+	modalCmd := m.uiState.FilterManager.Update(msg)
 	if msg.Success {
 		var toastMsg string
 		switch msg.Operation {
@@ -496,20 +477,20 @@ func (m Model) handleFilterOperationResultMsg(msg components.FilterOperationResu
 		default:
 			toastMsg = fmt.Sprintf("Filter operation completed")
 		}
-		return m, m.uiState.Toast.Show(
+		return m, tea.Batch(modalCmd, m.uiState.Toast.Show(
 			toastMsg,
 			components.ToastSuccess,
 			components.ToastDurationShort,
-		)
+		))
 	}
 
 	// Operation failed - display error with chain context if available
 	errorMsg := m.formatChainError(msg.Operation, msg.FilterPattern, msg.Error)
-	return m, m.uiState.Toast.Show(
+	return m, tea.Batch(modalCmd, m.uiState.Toast.Show(
 		errorMsg,
 		components.ToastError,
 		components.ToastDurationLong,
-	)
+	))
 }
 
 // handleHunterSelectionConfirmedMsg handles confirmed hunter selection

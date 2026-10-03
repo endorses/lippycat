@@ -53,3 +53,16 @@ func wrapDetailContent(content string, width int, compact bool) string {
 	}
 	return ansi.Hardwrap(content, max(1, width), true)
 }
+
+// Separate sections by one blank line, accounting for the last row's newline.
+func writeDetailSectionBreak(content *strings.Builder) {
+	s := content.String()
+	switch {
+	case s == "", strings.HasSuffix(s, "\n\n"):
+		return
+	case strings.HasSuffix(s, "\n"):
+		content.WriteByte('\n')
+	default:
+		content.WriteString("\n\n")
+	}
+}

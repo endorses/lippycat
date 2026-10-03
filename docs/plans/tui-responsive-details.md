@@ -27,3 +27,5 @@ were fixed and covered by regressions.
       pin only in full-area details and restore prior following when returning.
 
 - [x] Remove the blank line after blue detail headings in every layout.
+
+- [x] Limit spacing between detail sections to one blank line.

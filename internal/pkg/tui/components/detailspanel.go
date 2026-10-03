@@ -222,13 +222,13 @@ func (d *DetailsPanel) renderContent() string {
 
 	// Layer Summary Section (parsed from raw packet data)
 	if layerSummary := d.renderLayerSummary(contentWidth); layerSummary != "" {
-		content.WriteString("\n\n")
+		writeDetailSectionBreak(&content)
 		content.WriteString(layerSummary)
 	}
 
 	// VoIP Details Section (only for VoIP protocols)
 	if d.packet.VoIPData != nil {
-		content.WriteString("\n\n")
+		writeDetailSectionBreak(&content)
 		content.WriteString(sectionStyle.Render("📞 VoIP Details"))
 		content.WriteString("\n")
 
@@ -324,7 +324,7 @@ func (d *DetailsPanel) renderContent() string {
 	}
 
 	if d.packet.DNSData != nil {
-		content.WriteString("\n\n")
+		writeDetailSectionBreak(&content)
 		content.WriteString(sectionStyle.Render("🔍 DNS Details"))
 		content.WriteString("\n")
 
@@ -423,7 +423,7 @@ func (d *DetailsPanel) renderContent() string {
 
 	// TLS Details Section (only for TLS handshakes)
 	if d.packet.TLSData != nil {
-		content.WriteString("\n\n")
+		writeDetailSectionBreak(&content)
 		content.WriteString(sectionStyle.Render("🔐 TLS Details"))
 		content.WriteString("\n")
 
@@ -516,7 +516,7 @@ func (d *DetailsPanel) renderContent() string {
 	if d.decryptedDataGetter != nil && d.packet.Protocol == "TLS" {
 		clientData, serverData := d.decryptedDataGetter(d.packet.SrcIP, d.packet.DstIP, d.packet.SrcPort, d.packet.DstPort)
 		if len(clientData) > 0 || len(serverData) > 0 {
-			content.WriteString("\n\n")
+			writeDetailSectionBreak(&content)
 			decryptedStyle := lipgloss.NewStyle().
 				Bold(true).
 				Foreground(d.theme.SuccessColor)
@@ -541,7 +541,7 @@ func (d *DetailsPanel) renderContent() string {
 	}
 
 	// Hex Dump Section
-	content.WriteString("\n\n")
+	writeDetailSectionBreak(&content)
 	content.WriteString(sectionStyle.Render("🔍 Hex Dump"))
 	content.WriteString("\n")
 

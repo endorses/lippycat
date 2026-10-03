@@ -514,7 +514,7 @@ func (v *EventsView) renderEventDetailsContent(item EventItem, width int) string
 		content.WriteString("\n" + mutedStyle.Render("Enter: jump to first related packet"))
 	}
 	if v.relatedPacketsKnown && !v.relatedPacketsAvailable {
-		content.WriteString("\n\n")
+		writeDetailSectionBreak(&content)
 		notice := "⚠ Related packets are no longer buffered."
 		if v.offlinePacketNavigation {
 			notice = "No related packets in this dataset."
@@ -532,7 +532,7 @@ func (v *EventsView) renderEventDetailsContent(item EventItem, width int) string
 		if len(visible) == 0 {
 			return
 		}
-		content.WriteString("\n\n")
+		writeDetailSectionBreak(&content)
 		content.WriteString(sectionStyle.Render(title))
 		content.WriteString("\n")
 		for _, row := range visible {

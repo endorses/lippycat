@@ -85,6 +85,18 @@ func TestTelemetryCollectorNilCallbackIsSafe(t *testing.T) {
 	}, collector.report("eth0", 1, 2, 3, nil))
 }
 
+func TestTelemetryStartupDiscardsAreSeparateFromDrops(t *testing.T) {
+	collector := newTelemetryCollector(nil)
+	collector.recordStartupDiscards(&testPreparedFilter{discarded: 3})
+	collector.recordStartupDiscards(&testPreparedFilter{discarded: 5})
+	collector.report("first", 10, 2, 0, nil)
+	snapshot := collector.report("second", 20, 4, 1, nil)
+	require.Equal(t, uint64(8), snapshot.StartupDiscards)
+	require.Equal(t, int64(6), snapshot.KernelDrops)
+	require.Equal(t, int64(1), snapshot.InterfaceDrops)
+	require.Zero(t, snapshot.PacketBufferDrops)
+}
+
 func TestTelemetryCollectorSeparatesIngressFromSharedIPv4Outcome(t *testing.T) {
 	collector := newTelemetryCollector(nil)
 	collector.ipv4 = NewIPv4Defragmenter()

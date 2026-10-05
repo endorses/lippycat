@@ -145,7 +145,6 @@ func metadataFromSIPResult(r pipeline.SIPResult) *data.PacketMetadata {
 
 // TapTCPHandler adapts reassembled TCP messages to shared SIP orchestration.
 type TapTCPHandler struct {
-	captureInterface string
 	packetChan       chan<- source.InjectedPacket
 	appFilter        ApplicationFilter
 	registry         tapCallRegistry
@@ -157,10 +156,6 @@ type TapTCPHandler struct {
 func NewTapTCPHandler(ch chan<- source.InjectedPacket) *TapTCPHandler {
 	return &TapTCPHandler{packetChan: ch}
 }
-
-// SetCaptureInterface preserves the observation domain on synthesized packets.
-// A per-domain stream factory uses a representative interface from that domain.
-func (h *TapTCPHandler) SetCaptureInterface(iface string) { h.captureInterface = iface }
 
 func (h *TapTCPHandler) SetApplicationFilter(f ApplicationFilter) { h.appFilter = f }
 func (h *TapTCPHandler) SetCallRegistry(r tapCallRegistry)        { h.registry = r }
@@ -210,14 +205,21 @@ func (h *TapTCPHandler) HandleSIPMessage(msg []byte, id, src, dst string, nf, tf
 }
 
 func (h *TapTCPHandler) HandleSIPMessageAt(msg []byte, id, src, dst string, nf, tf gopacket.Flow, at time.Time) bool {
-	return h.handleSIPMessage(msg, nil, id, src, dst, nf, tf, at)
+	return h.handleSIPMessage(msg, nil, id, src, dst, nf, tf, at, pipeline.SourceProvenance{})
 }
 
 func (h *TapTCPHandler) HandleParsedSIPMessage(msg []byte, event sharedsip.Event, src, dst string, nf, tf gopacket.Flow) bool {
-	return h.handleSIPMessage(msg, &event, event.CallID, src, dst, nf, tf, event.Timestamp)
+	return h.HandleParsedSIPMessageFromSource(msg, event, src, dst, nf, tf, pipeline.SourceProvenance{})
 }
 
-func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id, src, dst string, nf, tf gopacket.Flow, at time.Time) bool {
+// HandleParsedSIPMessageFromSource retains the actual source of the message's
+// final byte. Streams may share framing across interfaces in the same domain;
+// their synthesized messages must never inherit an unrelated configured source.
+func (h *TapTCPHandler) HandleParsedSIPMessageFromSource(msg []byte, event sharedsip.Event, src, dst string, nf, tf gopacket.Flow, provenance pipeline.SourceProvenance) bool {
+	return h.handleSIPMessage(msg, &event, event.CallID, src, dst, nf, tf, event.Timestamp, provenance)
+}
+
+func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id, src, dst string, nf, tf gopacket.Flow, at time.Time, provenance pipeline.SourceProvenance) bool {
 	defer discardTCPBufferedPackets(nf, tf)
 	if id == "" {
 		return false
@@ -227,7 +229,11 @@ func (h *TapTCPHandler) handleSIPMessage(msg []byte, event *sharedsip.Event, id,
 		logger.Warn("TCP SIP synthesis failed", "call_id", SanitizeCallIDForLogging(id))
 		return false
 	}
-	pkt.Interface = h.captureInterface
+	pkt.Interface = provenance.InterfaceName
+	pkt.SourceInterfaceID = provenance.InterfaceIndex
+	pkt.SourcePath = provenance.InputFile
+	pkt.SourceIndex = provenance.ArgumentIndex
+	pkt.SourceSequence = provenance.LogicalSequence
 	o := h.ensureFlow()
 	if o == nil {
 		return false

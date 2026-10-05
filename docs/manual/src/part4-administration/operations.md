@@ -217,6 +217,15 @@ recovery errors, preserve the entire directory, correct the reported cause, and
 restart. Move it aside only when you explicitly accept all outstanding events
 as lost.
 
+Before an upgrade that changes the event analysis policy fingerprint, drain
+pending events-mode spool records with the prior version and its original
+configuration. Stop new capture, allow outstanding batches to be acknowledged,
+and verify the pending count reaches zero before stopping the old process.
+Incompatible pending records intentionally block startup under the new policy;
+the application does not silently discard or reinterpret them. If startup reports
+a policy mismatch, preserve the directory and reopen it with the prior version
+and configuration to finish delivery.
+
 ### Quick Status Check {#quick-status-check}
 
 Check whether the service is running:

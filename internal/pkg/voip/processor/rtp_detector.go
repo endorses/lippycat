@@ -1,7 +1,6 @@
 package processor
 
 import (
-	"github.com/endorses/lippycat/internal/pkg/logger"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"net"
 	"strconv"
@@ -112,17 +111,25 @@ func extractRTPPortsFromSDP(body string, limits ...int) []string {
 	if len(limits) > 0 && limits[0] > 0 {
 		limit = limits[0]
 	}
-	parsed, err := sharedsip.ParseSDPEndpoints(body, limit)
-	if err != nil {
-		logger.Warn("Cannot extract SDP media endpoints", "error", err)
-		return []string{}
-	}
-	result := make([]string, 0, len(parsed))
-	for _, endpoint := range parsed {
+	return sdpEndpointKeys(sharedsip.ParseSDPResult(body, limit))
+}
+
+func sdpEndpointKeys(parsed sharedsip.SDPResult) []string {
+	result := make([]string, 0, len(parsed.Endpoints))
+	for _, endpoint := range parsed.Endpoints {
 		result = append(result, endpoint.Address.String())
 	}
 	return result
 }
+
+func (p *Processor) parseSDPEndpointKeys(body string) []string {
+	parsed := sharedsip.ParseSDPResult(body, p.config.MaxEndpointsPerCall)
+	p.sdpParseCounters.Observe(parsed)
+	return sdpEndpointKeys(parsed)
+}
+
+// SDPParseStats reports bounded parse diagnostics for this processor only.
+func (p *Processor) SDPParseStats() sharedsip.SDPParseStats { return p.sdpParseCounters.Snapshot() }
 
 // isValidPort validates that a string represents a valid port number.
 func isValidPort(portStr string) bool {

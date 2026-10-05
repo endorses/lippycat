@@ -15,9 +15,22 @@ import (
 
 // associationScope is independent of flow direction, since DHCP exchanges span
 // multiple broadcast/unicast flows. Quoted components avoid delimiter aliases.
+type associationScopeKey struct {
+	node, analysisEpoch, captureEpoch, captureSource, interfaceName, inputFile string
+	generation                                                                 uint64
+	interfaceIndex                                                             uint32
+}
+
 func (r *Runtime) associationScope(source Source, env events.Envelope) string {
 	p := env.Provenance
-	return fmt.Sprintf("%q/%q/%q/%d/%q/%q/%d/%q", env.NodeID, r.cfg.AnalysisEpoch, source.CaptureEpoch, r.generation, p.CaptureSource, p.InterfaceName, p.InterfaceIndex, p.InputFile)
+	key := associationScopeKey{env.NodeID, r.cfg.AnalysisEpoch, source.CaptureEpoch, p.CaptureSource, p.InterfaceName, p.InputFile, r.generation, p.InterfaceIndex}
+	if !r.associationValid || key != r.associationKey {
+		r.associationKey = key
+		r.associationValue = fmt.Sprintf("%q/%q/%q/%d/%q/%q/%d/%q", env.NodeID, r.cfg.AnalysisEpoch, source.CaptureEpoch, r.generation, p.CaptureSource, p.InterfaceName, p.InterfaceIndex, p.InputFile)
+		r.associationDigest = sha256.Sum256([]byte(r.associationValue))
+		r.associationValid = true
+	}
+	return r.associationValue
 }
 
 func (r *Runtime) observeNetworkDatagram(source Source, env events.Envelope, packet gopacket.Packet, captureTruncated bool) *conntrack.UDPEvidence {

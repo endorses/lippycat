@@ -1188,6 +1188,25 @@ message MediaAdmissionStatus {
  uint64 selected_answered_without_media = 22;
  uint64 attributed_media_packets = 23;
  uint64 diagnostic_tracking_rejected = 24;
+ // Sampled observations, never exact all-traffic parity or rejection totals.
+ uint64 shadow_sample_every = 25;
+ uint64 evidence_kernel_lost = 26;
+ uint64 sampled_pre_selection = 27;
+ uint64 sampled_publication_window = 28;
+ uint64 sampled_rejected_after_publication = 29;
+ uint64 sampled_admitted = 30;
+ uint64 sampled_incomplete = 31;
+ uint64 sampled_ambiguous = 32;
+ uint64 sampled_identity_unavailable = 33;
+ uint64 sampled_late = 34;
+ uint64 correlation_tracking_rejected = 35;
+ uint64 correlation_pending = 36;
+ uint64 media_expectation_unknown = 37;
+ uint64 media_expectation_inactive = 38;
+ uint64 missing_media_alerts = 39;
+ uint64 diagnostic_attribution_dropped = 40;
+ uint64 diagnostic_observation_uncertain = 41;
+ uint64 evidence_clock_read_errors = 42;
 }
 message MediaAdmissionScope {
  uint32 domain = 1;

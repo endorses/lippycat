@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -176,7 +177,8 @@ func DefaultConfig() Config {
 
 // Processor implements VoIPProcessor for SIP/RTP packet processing.
 type Processor struct {
-	config Config
+	sdpParseCounters sharedsip.SDPParseCounters
+	config           Config
 
 	// Call tracking
 	calls     map[string]*callState
@@ -412,7 +414,7 @@ func (p *Processor) RegisterSDP(callID, sdp string) {
 		return
 	}
 	_ = p.getOrCreateCall(callID)
-	for _, endpoint := range extractRTPPortsFromSDP(sdp, p.config.MaxEndpointsPerCall) {
+	for _, endpoint := range p.parseSDPEndpointKeys(sdp) {
 		p.registerRTPPort(callID, endpoint)
 	}
 }

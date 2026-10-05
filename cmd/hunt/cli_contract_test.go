@@ -50,7 +50,7 @@ func TestHuntProtocolCLIContract(t *testing.T) {
 		{"http", "Run as HTTP hunter with content filtering", "lc hunt http --processor processor:55555", httpHuntCmd, map[string]string{"capture-body": "false", "host": "", "http-port": "80,8080,8000,3000,8888", "keywords": "", "max-body-size": "65536", "method": "", "path": "", "status": "", "tls-keylog": "", "tls-keylog-pipe": ""}},
 		{"tls", "Run as TLS hunter with fingerprint filtering", "lc hunt tls --processor processor:55555", tlsHuntCmd, map[string]string{"tls-port": "443"}},
 		{"email", "Run as Email hunter with SMTP/IMAP/POP3 filtering", "lc hunt email --processor processor:55555", emailHuntCmd, map[string]string{"capture-body": "false", "command": "", "imap-port": "143,993", "keywords": "", "mailbox": "", "max-body-size": "65536", "pop3-port": "110,995", "protocol": "all", "recipient": "", "sender": "", "smtp-port": "25,587,465", "subject": ""}},
-		{"voip", "Run as VoIP hunter with call buffering", "lc hunt voip --processor processor:55555", voipHuntCmd, map[string]string{"pattern-algorithm": "auto", "pattern-buffer-mb": "64", "rtp-ebpf": "false", "rtp-ebpf-failure-policy": "open", "rtp-ebpf-mode": "enforce", "rtp-port-range": "", "sip-port": "", "tcp-max-streams": "0", "tcp-sip-idle-timeout": "0s", "udp-only": "false"}},
+		{"voip", "Run as VoIP hunter with call buffering", "lc hunt voip --processor processor:55555", voipHuntCmd, map[string]string{"pattern-algorithm": "auto", "pattern-buffer-mb": "64", "rtp-ebpf": "false", "rtp-ebpf-failure-policy": "open", "rtp-ebpf-mode": "enforce", "rtp-ebpf-shadow-sample-every": "1", "rtp-port-range": "", "sip-port": "", "tcp-max-streams": "0", "tcp-sip-idle-timeout": "0s", "udp-only": "false"}},
 	}
 
 	rootFlags := flagDefaults(HuntCmd.PersistentFlags())
@@ -87,7 +87,7 @@ func TestHuntViperBindingContract(t *testing.T) {
 		"hunter.http.ports": httpHuntCmd.Flags().Lookup("http-port"), "hunter.http.host": httpHuntCmd.Flags().Lookup("host"), "hunter.http.path": httpHuntCmd.Flags().Lookup("path"), "hunter.http.method": httpHuntCmd.Flags().Lookup("method"), "hunter.http.status": httpHuntCmd.Flags().Lookup("status"), "hunter.http.keywords": httpHuntCmd.Flags().Lookup("keywords"), "hunter.http.capture_body": httpHuntCmd.Flags().Lookup("capture-body"), "hunter.http.max_body_size": httpHuntCmd.Flags().Lookup("max-body-size"), "hunter.http.tls_keylog": httpHuntCmd.Flags().Lookup("tls-keylog"), "hunter.http.tls_keylog_pipe": httpHuntCmd.Flags().Lookup("tls-keylog-pipe"),
 		"hunter.tls.ports":      tlsHuntCmd.Flags().Lookup("tls-port"),
 		"hunter.email.protocol": emailHuntCmd.Flags().Lookup("protocol"), "hunter.email.smtp_ports": emailHuntCmd.Flags().Lookup("smtp-port"), "hunter.email.imap_ports": emailHuntCmd.Flags().Lookup("imap-port"), "hunter.email.pop3_ports": emailHuntCmd.Flags().Lookup("pop3-port"), "hunter.email.sender": emailHuntCmd.Flags().Lookup("sender"), "hunter.email.recipient": emailHuntCmd.Flags().Lookup("recipient"), "hunter.email.subject": emailHuntCmd.Flags().Lookup("subject"), "hunter.email.keywords": emailHuntCmd.Flags().Lookup("keywords"), "hunter.email.mailbox": emailHuntCmd.Flags().Lookup("mailbox"), "hunter.email.command": emailHuntCmd.Flags().Lookup("command"), "hunter.email.capture_body": emailHuntCmd.Flags().Lookup("capture-body"), "hunter.email.max_body_size": emailHuntCmd.Flags().Lookup("max-body-size"),
-		"hunter.voip.rtp_ebpf.enabled": voipHuntCmd.Flags().Lookup("rtp-ebpf"), "hunter.voip.rtp_ebpf.mode": voipHuntCmd.Flags().Lookup("rtp-ebpf-mode"), "hunter.voip.rtp_ebpf.failure_policy": voipHuntCmd.Flags().Lookup("rtp-ebpf-failure-policy"),
+		"hunter.voip.rtp_ebpf.shadow_sample_every": voipHuntCmd.Flags().Lookup("rtp-ebpf-shadow-sample-every"), "hunter.voip.rtp_ebpf.enabled": voipHuntCmd.Flags().Lookup("rtp-ebpf"), "hunter.voip.rtp_ebpf.mode": voipHuntCmd.Flags().Lookup("rtp-ebpf-mode"), "hunter.voip.rtp_ebpf.failure_policy": voipHuntCmd.Flags().Lookup("rtp-ebpf-failure-policy"),
 		"hunter.voip.udp_only": voipHuntCmd.Flags().Lookup("udp-only"), "hunter.voip.sip_ports": voipHuntCmd.Flags().Lookup("sip-port"), "hunter.voip.rtp_port_ranges": voipHuntCmd.Flags().Lookup("rtp-port-range"), "voip.pattern_algorithm": voipHuntCmd.Flags().Lookup("pattern-algorithm"), "voip.pattern_buffer_mb": voipHuntCmd.Flags().Lookup("pattern-buffer-mb"), "voip.max_streams": voipHuntCmd.Flags().Lookup("tcp-max-streams"), "voip.tcp_sip_idle_timeout": voipHuntCmd.Flags().Lookup("tcp-sip-idle-timeout"),
 	}
 	for key, flag := range bindings {
@@ -114,7 +114,7 @@ func bindingFixture(flagType, original string) string {
 	switch flagType {
 	case "bool":
 		return fmt.Sprint(original != "true")
-	case "int":
+	case "int", "uint32":
 		return "314159"
 	case "duration":
 		return "37s"
@@ -132,7 +132,7 @@ func TestHuntRenderedHelpSnapshots(t *testing.T) {
 		"http":  "7ab60bfac879c10c181c78a228b719fbf1c05b9ab8c47f8451192f2669f36f44",
 		"tls":   "1f5a0eac78fb13e6d11c12eae77cf6558293dcaa7e0299650647201cac70ee73",
 		"email": "6b0b23c26c80cf7d3c6923cc123c58072ec1bd06fdd75cc52e02dd2a7e1c584f",
-		"voip":  "aaa4151d5f8525a446bcdf3f4e746b35d1ac89b2c5bc8e7cba91fe1a50b784d8",
+		"voip":  "8974fbac3e7630297a51a6e2d47abc20e90cd19b716e0fd2982d3cd0d344b440",
 	}
 	commands := map[string]*cobra.Command{"hunt": HuntCmd, "dns": dnsHuntCmd, "http": httpHuntCmd, "tls": tlsHuntCmd, "email": emailHuntCmd, "voip": voipHuntCmd}
 	for name, cmd := range commands {

@@ -37,6 +37,7 @@ type Config struct {
 	ExpirationBatch         int                 `mapstructure:"expiration_batch" yaml:"expiration_batch"`
 	RetryInterval           time.Duration       `mapstructure:"retry_interval" yaml:"retry_interval"`
 	ShadowEvidenceCapacity  int                 `mapstructure:"shadow_evidence_capacity" yaml:"shadow_evidence_capacity"`
+	ShadowSampleEvery       uint32              `mapstructure:"shadow_sample_every" yaml:"shadow_sample_every"`
 	MissingMediaInterval    time.Duration       `mapstructure:"missing_media_interval" yaml:"missing_media_interval"`
 }
 
@@ -45,7 +46,7 @@ func DefaultConfig() Config {
 		EndpointCapacity: 40000, OwnerCapacity: 10000, MaxEndpointsPerOwner: 32,
 		PendingDialogCapacity: 10000, PendingEndpointCapacity: 40000, PendingBytes: 8 << 20,
 		PendingTTL: 30 * time.Second, ExpirationBatch: 256, RetryInterval: time.Second,
-		ShadowEvidenceCapacity: 1024, MissingMediaInterval: 30 * time.Second}
+		ShadowEvidenceCapacity: 1024, ShadowSampleEvery: 1, MissingMediaInterval: 30 * time.Second}
 }
 
 // Validate does not silently substitute defaults for explicitly invalid limits.
@@ -67,6 +68,9 @@ func (c Config) Validate() error {
 	}
 	if c.PendingTTL <= 0 || c.RetryInterval <= 0 || c.MissingMediaInterval <= 0 {
 		return fmt.Errorf("RTP eBPF durations must be positive")
+	}
+	if c.ShadowSampleEvery == 0 {
+		return fmt.Errorf("RTP eBPF shadow_sample_every must be positive")
 	}
 	if c.MaxEndpointsPerOwner > c.EndpointCapacity {
 		return fmt.Errorf("RTP eBPF per-owner endpoints exceed endpoint capacity")

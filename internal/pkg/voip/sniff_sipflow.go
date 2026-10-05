@@ -52,6 +52,10 @@ func (r sniffRegistry) Observe(result pipeline.SIPResult) (sipflow.RegistryObser
 	}
 	if r.markBuffer && r.buffer != nil {
 		r.buffer.MarkCallMatched(result.CallID, callMetadataFromSIPResult(result), "", linkType)
+	} else if r.buffer != nil {
+		// Buffered selection happens before its first registry observation.
+		// Bind that decision to the newly admitted lifetime before output.
+		r.buffer.bindMatchedLifetime(result.CallID)
 	}
 	return sipflow.RegistryObservation{}, nil
 }
@@ -103,6 +107,9 @@ func newSniffSIPFlowWithOutputs(tracker *CallTracker, markSelection, updateRegis
 		buffer = buffers[0]
 	} else {
 		buffer = globalBufferMgr
+	}
+	if buffer != nil {
+		buffer.BindRegistry(tracker.AdmissionRegistry(), tracker.config.MaxEndpointsPerCall)
 	}
 	cfg := sipflow.Config{
 		SelectionStore: sniffSelectionStore{mark: markSelection, buffer: buffer},

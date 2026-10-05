@@ -450,3 +450,18 @@ func createRTPPacket(srcPort, dstPort uint16) capture.PacketInfo {
 		Packet:   packet,
 	}
 }
+
+func TestTrackerRetainsSafePartialSDPAndPreviousLifetimeEndpoints(t *testing.T) {
+	tracker := TestCallTracker(t)
+	tracker.GetOrCreateCall("synthetic-call", layers.LinkTypeEthernet)
+	tracker.ExtractPortFromSDP("c=IN IP4 192.0.2.1\nm=audio 8000 RTP/AVP 0", "synthetic-call")
+	tracker.ExtractPortFromSDP("c=IN IP6 2001:db8::1\nm=audio 9000 RTP/AVP 0\nm=audio invalid RTP/AVP 0\nc=IN IP4 192.0.2.99\nm=video 10000 RTP/AVP 96", "synthetic-call")
+	for _, endpoint := range []string{"192.0.2.1:8000", "[2001:db8::1]:9000", "[2001:db8::1]:9001", "[2001:db8::1]:10000", "[2001:db8::1]:10001"} {
+		assert.Equal(t, []string{"synthetic-call"}, tracker.endpointCallIDs(endpoint))
+	}
+	assert.Empty(t, tracker.endpointCallIDs("192.0.2.99:10000"))
+	assert.Equal(t, uint64(1), tracker.SDPParseStats().Partial)
+	assert.Equal(t, uint64(1), tracker.SDPParseStats().Failures)
+	tracker.ExtractPortFromSDP("c=IN IP4 192.0.2.1\nm=audio 0 RTP/AVP 0", "synthetic-call")
+	assert.Equal(t, []string{"synthetic-call"}, tracker.endpointCallIDs("192.0.2.1:8000"), "retirement remains call lifetime policy")
+}

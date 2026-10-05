@@ -312,6 +312,17 @@ func (t *Tracker) admit(k key, at time.Time) bool {
 // cannot revive state, even after eviction. Equal timestamps are processed in caller
 // order, with origin host, response host, then service as stable candidate order.
 func (t *Tracker) Observe(scope string, at time.Time, conn events.ConnEvent, evidence Evidence) []events.Event {
+	return t.observe(sha256.Sum256([]byte(scope)), scope != "", at, conn, evidence)
+}
+
+// ObserveScoped accepts the SHA-256 identity of a nonempty analysis scope. It
+// avoids hashing stable producer provenance on every packet; retention and
+// re-emission still run for every observation.
+func (t *Tracker) ObserveScoped(scopeID [32]byte, at time.Time, conn events.ConnEvent, evidence Evidence) []events.Event {
+	return t.observe(scopeID, true, at, conn, evidence)
+}
+
+func (t *Tracker) observe(scopeID [32]byte, qualified bool, at time.Time, conn events.ConnEvent, evidence Evidence) []events.Event {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if !t.cfg.Enabled {
@@ -322,7 +333,7 @@ func (t *Tracker) Observe(scope string, at time.Time, conn events.ConnEvent, evi
 		return nil
 	}
 	t.advance(at)
-	if scope == "" || at.IsZero() {
+	if !qualified || at.IsZero() {
 		t.stats.Unqualified++
 		return nil
 	}
@@ -332,7 +343,6 @@ func (t *Tracker) Observe(scope string, at time.Time, conn events.ConnEvent, evi
 		t.stats.Unqualified++
 		return nil
 	}
-	scopeID := sha256.Sum256([]byte(scope))
 	var output []events.Event
 	if hostEvidenceValid(evidence.Host, env.Flow.Protocol) {
 		for _, host := range []netip.Addr{origin, response} {

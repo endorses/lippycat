@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"sync"
@@ -15,8 +16,10 @@ import (
 )
 
 type backend struct {
-	mu   sync.Mutex
-	keys map[mediaadmission.EndpointKey]bool
+	failControl bool
+	control     mediaadmission.Control
+	mu          sync.Mutex
+	keys        map[mediaadmission.EndpointKey]bool
 }
 
 func (b *backend) PutEndpoint(_ context.Context, key mediaadmission.EndpointKey) error {
@@ -42,7 +45,13 @@ func (b *backend) ListEndpoints(_ context.Context, domain mediaadmission.DomainI
 	}
 	return keys, nil
 }
-func (b *backend) SetControl(context.Context, mediaadmission.DomainID, mediaadmission.Control) error {
+func (b *backend) SetControl(_ context.Context, _ mediaadmission.DomainID, control mediaadmission.Control) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.failControl {
+		return errors.New("synthetic control failure")
+	}
+	b.control = control
 	return nil
 }
 func (b *backend) count() int { b.mu.Lock(); defer b.mu.Unlock(); return len(b.keys) }
@@ -150,7 +159,9 @@ func TestUnrelatedForkOrTransactionCannotPromote(t *testing.T) {
 				selected.ViaBranch = "other"
 			}
 			registry.Upsert(callregistry.Call{CallID: "same-call"})
-			check(t, bridge.Selected(selected))
+			if bridge.Selected(selected) == nil {
+				t.Fatal("missing compatible offer was acknowledged as complete empty media")
+			}
 			if maps.count() != 0 {
 				t.Fatal("unrelated SIP identity inherited SDP")
 			}
@@ -195,6 +206,7 @@ func TestOnlySelectedLocalAcceptedAssociationsArePublished(t *testing.T) {
 	if maps.count() != 0 {
 		t.Fatal("remote or merely existing registry call installed local admission")
 	}
+	message.SDP = []byte("m=audio 0 RTP/AVP 0")
 	check(t, bridge.Selected(message))
 	if maps.count() != 1 {
 		t.Fatal("accepted local registry association missing")
@@ -462,6 +474,10 @@ func TestPendingPoolOverflowNeverCreatesZeroOwnerOrClearsLostSelection(t *testin
 	if bridge.Stats().SelectedLifetimes != 0 {
 		t.Fatal("pending lifetime survived finalization")
 	}
+	check(t, bridge.retrySelected())
+	if controller.Status()[0].State != mediaadmission.StateEnforcing {
+		t.Fatal("retired lost selections prevented complete empty-snapshot recovery")
+	}
 }
 
 func TestForegroundErrorCallbackCanCloseRetryWorker(t *testing.T) {
@@ -568,7 +584,9 @@ func TestUnrelatedCallMutationCannotLoseSelectedEndpointPublication(t *testing.T
 	t.Cleanup(func() { release.Do(func() { close(pause.release) }) })
 	registry.Upsert(callregistry.Call{CallID: "selected-a"})
 	registry.Upsert(callregistry.Call{CallID: "unrelated-b"})
-	check(t, bridge.Selected(offer("selected-a")))
+	selected := offer("selected-a")
+	selected.SDP = []byte("m=audio 0 RTP/AVP 0")
+	check(t, bridge.Selected(selected))
 	if maps.count() != 0 {
 		t.Fatal("fixture unexpectedly installed endpoints before association")
 	}
@@ -607,5 +625,271 @@ func TestUnrelatedCallMutationCannotLoseSelectedEndpointPublication(t *testing.T
 	bridge.mu.Unlock()
 	if !consistent {
 		t.Fatal("bridge did not consume the fresh exact-lifetime snapshot")
+	}
+}
+
+func recoveryFixture(t *testing.T, policy mediaadmission.FailurePolicy, wrap func(*callregistry.Core) Registry) (*Bridge, *callregistry.Core, *backend, *mediaadmission.Controller) {
+	t.Helper()
+	cfg := mediaadmission.DefaultConfig()
+	cfg.Enabled = true
+	cfg.FailurePolicy = policy
+	cfg.RetryInterval = time.Hour
+	maps := &backend{keys: make(map[mediaadmission.EndpointKey]bool)}
+	controller, err := mediaadmission.NewController(context.Background(), cfg, maps)
+	check(t, err)
+	store, err := mediaadmission.NewMetadataStore(cfg)
+	check(t, err)
+	registry := callregistry.New(callregistry.Config{MaxCalls: 10, MaxEndpointsPerCall: 32, MaxEndpointAssociations: 100})
+	var source Registry = registry
+	if wrap != nil {
+		source = wrap(registry)
+	}
+	bridge, err := New(Config{Limits: cfg, Registry: source, Controller: controller, Metadata: store})
+	check(t, err)
+	t.Cleanup(func() { registry.Close(); check(t, bridge.Close()); check(t, controller.Close(context.Background())) })
+	return bridge, registry, maps, controller
+}
+
+func TestIncompleteSelectedDerivationRetainsSafeAttributionAndRequiresCompleteRecovery(t *testing.T) {
+	for _, policy := range []mediaadmission.FailurePolicy{mediaadmission.FailureOpen, mediaadmission.FailureClosed} {
+		t.Run(string(policy), func(t *testing.T) {
+			bridge, registry, maps, controller := recoveryFixture(t, policy, nil)
+			message := offer("partial")
+			message.SDP = append(message.SDP, []byte("m=video invalid RTP/AVP 96\r\n")...)
+			if bridge.ObserveValidated(message) == nil {
+				t.Fatal("partial SDP accepted as complete")
+			}
+			registry.Upsert(callregistry.Call{CallID: message.CallID})
+			if bridge.Selected(message) == nil {
+				t.Fatal("unknown selected media was not reported")
+			}
+			if bridge.Stats().UnknownDerivations != 1 || registry.EndpointAssociationCount() != 2 || maps.count() != 2 {
+				t.Fatal("safe partial endpoints or unknown state lost")
+			}
+			if got := registry.ResolveMediaEndpoints("192.0.2.1:10000", ""); got.CallID != message.CallID {
+				t.Fatal("opening policy did not preserve userspace attribution")
+			}
+			wantState := mediaadmission.StateDegradedOpen
+			if policy == mediaadmission.FailureClosed {
+				wantState = mediaadmission.StateDegradedClosed
+			}
+			if controller.Status()[0].State != wantState {
+				t.Fatal("wrong failure policy")
+			}
+			if bridge.retrySelected() == nil || controller.Status()[0].State != wantState {
+				t.Fatal("known partial snapshot falsely restored enforcement")
+			}
+			repaired := offer(message.CallID)
+			repaired.CSeqNumber++
+			check(t, bridge.ObserveValidated(repaired))
+			check(t, bridge.Selected(repaired))
+			status := controller.Status()[0]
+			if status.State != mediaadmission.StateEnforcing || status.PendingUpdates != 0 || bridge.Stats().UnknownDerivations != 0 {
+				t.Fatalf("complete SDP did not recover: %+v", status)
+			}
+		})
+	}
+}
+
+func TestUnknownPendingSDPDoesNotDisappearWhenLateSelectionHasNoBody(t *testing.T) {
+	bridge, registry, _, controller := recoveryFixture(t, mediaadmission.FailureOpen, nil)
+	bad := offer("pending")
+	bad.SDP = []byte("m=audio invalid RTP/AVP 0\r\n")
+	if bridge.ObserveValidated(bad) == nil {
+		t.Fatal("missing pending parse error")
+	}
+	answer := bad
+	answer.SDP = nil
+	answer.ToTag = "to"
+	answer.ResponseCode = 200
+	check(t, bridge.ObserveValidated(answer))
+	registry.Upsert(callregistry.Call{CallID: answer.CallID})
+	if bridge.Selected(answer) == nil || bridge.Stats().UnknownDerivations != 1 {
+		t.Fatal("empty unknown staging disappeared")
+	}
+	if controller.Status()[0].State != mediaadmission.StateDegradedOpen {
+		t.Fatal("unknown selected staging did not apply policy")
+	}
+	registry.Remove(answer.CallID, callregistry.EndCompleted)
+	check(t, bridge.retrySelected())
+	if controller.Status()[0].State != mediaadmission.StateEnforcing {
+		t.Fatal("retired unknown lifetime prevented recovery")
+	}
+	registry.Upsert(callregistry.Call{CallID: answer.CallID})
+	reused := offer(answer.CallID)
+	reused.FromTag, reused.ViaBranch = "replacement", "replacement"
+	reused.SDP = []byte("c=IN IP4 192.0.2.2\r\nm=audio 0 RTP/AVP 0\r\n")
+	check(t, bridge.ObserveValidated(reused))
+	check(t, bridge.Selected(reused))
+	if bridge.Stats().UnknownDerivations != 0 {
+		t.Fatal("intentional empty replacement inherited unknown derivation")
+	}
+}
+
+func TestFailedControlRemainsUncertainUntilConfirmedSnapshotRecovery(t *testing.T) {
+	bridge, registry, maps, controller := recoveryFixture(t, mediaadmission.FailureOpen, nil)
+	message := offer("control")
+	registry.Upsert(callregistry.Call{CallID: message.CallID})
+	check(t, bridge.Selected(message))
+	maps.mu.Lock()
+	maps.failControl = true
+	maps.mu.Unlock()
+	bad := message
+	bad.SDP = []byte("m=audio invalid RTP/AVP 0")
+	if bridge.Selected(bad) == nil {
+		t.Fatal("failed control was not reported")
+	}
+	status := controller.Status()[0]
+	if status.State != mediaadmission.StateControlFailed || !status.ControlUncertain || status.LastConfirmed.Mode == mediaadmission.KernelOpen {
+		t.Fatalf("unconfirmed open mode claimed: %+v", status)
+	}
+	if bridge.Selected(message) == nil {
+		t.Fatal("repair ignored failed control operation")
+	}
+	maps.mu.Lock()
+	maps.failControl = false
+	maps.mu.Unlock()
+	check(t, bridge.retrySelected())
+	status = controller.Status()[0]
+	if status.State != mediaadmission.StateEnforcing || status.ControlUncertain {
+		t.Fatalf("confirmed retry failed to recover: %+v", status)
+	}
+}
+
+type rejectionRegistry struct {
+	*callregistry.Core
+	reject atomic.Bool
+	retire atomic.Bool
+}
+
+func (r *rejectionRegistry) TryAssociateEndpointForLifetime(id string, lifetime callregistry.Lifetime, endpoint string) bool {
+	if r.retire.CompareAndSwap(true, false) {
+		r.Core.Remove(id, callregistry.EndCompleted)
+		return false
+	}
+	if r.reject.Load() {
+		return false
+	}
+	return r.Core.TryAssociateEndpointForLifetime(id, lifetime, endpoint)
+}
+
+func TestSelectedAssociationLossRetriesButRetirementIsNotSynchronizationLoss(t *testing.T) {
+	var source *rejectionRegistry
+	bridge, registry, _, controller := recoveryFixture(t, mediaadmission.FailureOpen, func(core *callregistry.Core) Registry {
+		source = &rejectionRegistry{Core: core}
+		return source
+	})
+	message := offer("rejected")
+	registry.Upsert(callregistry.Call{CallID: message.CallID})
+	source.reject.Store(true)
+	if bridge.Selected(message) == nil || controller.Status()[0].State != mediaadmission.StateDegradedOpen {
+		t.Fatal("live selected association loss did not apply failure policy")
+	}
+	source.reject.Store(false)
+	check(t, bridge.retrySelected())
+	if registry.EndpointAssociationCount() != 2 || controller.Status()[0].State != mediaadmission.StateEnforcing {
+		t.Fatal("current lifetime association retry failed")
+	}
+	registry.Remove(message.CallID, callregistry.EndCompleted)
+	registry.Upsert(callregistry.Call{CallID: "retiring"})
+	message = offer("retiring")
+	source.retire.Store(true)
+	_ = bridge.Selected(message) // finalization legitimately races promotion
+	if controller.Status()[0].State != mediaadmission.StateEnforcing || bridge.Stats().SelectedLifetimes != 0 {
+		t.Fatal("stale promotion changed failure policy or retained lifetime")
+	}
+}
+
+type lifetimeDiagnosticRecorder struct {
+	*diagnosticRecorder
+	selectionBeforeLifetime bool
+	created, selected       time.Time
+	expectationKnown        bool
+}
+
+func (d *lifetimeDiagnosticRecorder) RecordSelectionLifetime(owner mediaadmission.OwnerID, _ mediaadmission.DomainID, created, selected time.Time) {
+	_, d.selectionBeforeLifetime = d.selections[owner]
+	d.created, d.selected = created, selected
+}
+func (d *lifetimeDiagnosticRecorder) RecordMediaExpectation(_ mediaadmission.OwnerID, _ mediaadmission.DomainID, known, _ bool, _ uint64, _ time.Time) {
+	d.expectationKnown = known
+}
+
+func TestLifecycleDiagnosticsReceiveSelectionBeforeAuthoritativeLifetimeBoundary(t *testing.T) {
+	bridge, registry, _, _ := recoveryFixture(t, mediaadmission.FailureOpen, nil)
+	diagnostics := &lifetimeDiagnosticRecorder{diagnosticRecorder: &diagnosticRecorder{selections: make(map[mediaadmission.OwnerID]recordedSelection)}}
+	bridge.mu.Lock()
+	bridge.cfg.Diagnostics = diagnostics
+	bridge.mu.Unlock()
+	message := offer("synthetic-lifetime")
+	registry.Upsert(callregistry.Call{CallID: message.CallID})
+	check(t, bridge.Selected(message))
+	call, ok := registry.Call(message.CallID)
+	if !ok || !diagnostics.selectionBeforeLifetime || diagnostics.created != call.Created || diagnostics.selected.IsZero() || diagnostics.selected.Before(diagnostics.created) {
+		t.Fatal("diagnostic lifetime boundary was unavailable or preceded selection registration")
+	}
+	if !diagnostics.expectationKnown {
+		t.Fatal("confirmed endpoints did not establish known media expectation")
+	}
+}
+
+func TestExpiredPendingOfferKeepsInitialSelectedInviteUnknownUntilCompleteSDP(t *testing.T) {
+	bridge, registry, _, controller := recoveryFixture(t, mediaadmission.FailureOpen, nil)
+	message := offer("expired-offer")
+	check(t, bridge.ObserveValidated(message))
+	bridge.cfg.Metadata.Expire(time.Now().Add(bridge.cfg.Limits.PendingTTL))
+	selected := message
+	selected.SDP = nil
+	selected.ResponseCode = 200
+	selected.ToTag = "destination"
+	registry.Upsert(callregistry.Call{CallID: selected.CallID})
+	if bridge.Selected(selected) == nil || bridge.Stats().UnknownDerivations != 1 || controller.Status()[0].State != mediaadmission.StateDegradedOpen {
+		t.Fatal("lost offer was synchronized as empty media")
+	}
+	if bridge.retrySelected() == nil {
+		t.Fatal("empty accepted registry snapshot cleared missing derivation")
+	}
+	check(t, bridge.Selected(message))
+	if controller.Status()[0].State != mediaadmission.StateEnforcing {
+		t.Fatal("complete selected SDP did not recover missing offer")
+	}
+}
+
+type nonblockingAttributionRecorder struct {
+	*diagnosticRecorder
+	unavailable, packets int
+}
+
+func (d *nonblockingAttributionRecorder) RecordAttributionUnavailable() { d.unavailable++ }
+func (d *nonblockingAttributionRecorder) RecordAttributedPacket(mediaadmission.OwnerID, mediaadmission.DomainID, []byte) {
+	d.packets++
+}
+
+func TestAttributionDiagnosticsReturnImmediatelyWhenReconciliationOwnsBridge(t *testing.T) {
+	bridge, registry, _, _ := recoveryFixture(t, mediaadmission.FailureOpen, nil)
+	diagnostics := &nonblockingAttributionRecorder{diagnosticRecorder: &diagnosticRecorder{selections: make(map[mediaadmission.OwnerID]recordedSelection)}}
+	bridge.mu.Lock()
+	bridge.cfg.Diagnostics = diagnostics
+	bridge.mu.Unlock()
+	message := offer("synthetic-attribution")
+	registry.Upsert(callregistry.Call{CallID: message.CallID})
+	check(t, bridge.Selected(message))
+	call, ok := registry.Call(message.CallID)
+	if !ok {
+		t.Fatal("selected lifetime missing")
+	}
+	// The same goroutine owns the lock: a blocking diagnostic call would
+	// deadlock, whereas TryLock must record unavailable evidence and return.
+	bridge.mu.Lock()
+	bridge.RecordAttributedMedia(message.CallID, call.Lifetime)
+	bridge.RecordAttributedPacket(message.CallID, call.Lifetime, []byte("synthetic frame"))
+	bridge.mu.Unlock()
+	if diagnostics.unavailable != 2 || diagnostics.attributed != 0 || diagnostics.packets != 0 {
+		t.Fatal("unavailable evidence was not conservatively accounted")
+	}
+	bridge.RecordAttributedMedia(message.CallID, call.Lifetime)
+	bridge.RecordAttributedPacket(message.CallID, call.Lifetime, []byte("synthetic frame"))
+	if diagnostics.attributed != 1 || diagnostics.packets != 1 {
+		t.Fatal("uncontended current lifetime attribution stopped working")
 	}
 }

@@ -304,10 +304,27 @@ keeps the libpcap reader and updates a persistent socket filter's maps as select
 calls change. It does not restart capture for call activity. Existing userspace
 ownership, filter attribution, expiry and output checks remain authoritative.
 
-This mode captures media only after call selection and endpoint publication.
+Call-selected media is captured only after selection and endpoint publication.
 Bounded validated SDP metadata may be retained before selection; RTP history is
 not retained. Independent IP/CIDR filters and the configured no-filter policy
 continue to apply.
+
+Shared SDP learning retains valid independent media sections before and after an
+invalid section, with exact numeric IP/port endpoints only. It performs no DNS,
+ICE-candidate, or address-range inference. RTP and UDP/TLS/RTP profiles are
+supported for audio, video, and other media kinds. RTCP defaults to the next port;
+an explicit RTCP port/address overrides that default, while RTCP mux uses one
+shared endpoint. Invalid media, connection, or RTCP data invalidates its affected
+section without reusing a previous section's address. Invalid session connection
+data prevents inherited endpoints; a later valid media-level address can still
+be used. Zero ports, inactive media, and unspecified hold addresses contribute
+no new endpoints. Previously accepted endpoints remain until authoritative call
+lifetime cleanup. At capacity, only the first unique endpoints in wire order
+within the configured bound are retained, and derivation remains incomplete.
+Incomplete selected-call derivation applies the configured admission failure
+policy and blocks enforcement recovery until a complete later description or
+retirement of the affected lifetime. These shared endpoint semantics also apply
+with eBPF disabled; opening kernel admission never invents userspace attribution.
 
 With `--rtp-ebpf`, you do not need `--rtp-port-range`: RTP and RTCP endpoints
 are learned from the selected call's SDP, including endpoints outside the
@@ -326,6 +343,21 @@ If you explicitly set `--rtp-port-range`, it remains a capture restriction:
 learned media endpoints outside that range are excluded. An explicit `--filter`
 also remains in effect and must allow the signaling and media you want to capture.
 
+Explicit SIP ports also narrow non-media UDP discovery: a datagram without a
+confident RTP/RTCP header is excluded outside those signaling ports, even on an
+explicit media-range port. Disabled admission's ordinary port-based BPF can admit
+such a datagram. Shadow and degraded-open modes preserve this explicit narrowing.
+
+With `--rtp-ebpf`, including shadow mode, hunt and tap IP/CIDR selectors admit
+eligible media independently of selected-call endpoints. They never bypass
+explicit packet predicates or userspace output checks. With eBPF disabled, tap
+routes IP/CIDR filters through classic BPF. In mixed IP and SIP-identity filter
+configurations, an IP-matched RTP packet can be captured but rejected by userspace
+because it has no selected-call association. Disabling admission therefore does
+not preserve this mixed-filter output for unassociated media. True IP-only tap
+configurations have no SIP-identity filter requiring that association. Hunter
+IP/CIDR media selection remains independent with eBPF enabled or disabled.
+
 `--rtp-ebpf-mode=shadow` records bounded decisions while retaining dynamic media
 reception. Runtime update failures default to scoped broad admission, preserving
 explicit capture restrictions; `--rtp-ebpf-failure-policy=closed` keeps valid
@@ -333,12 +365,61 @@ installed entries without opening. A failed mode-control write is reported
 separately. Enforcement resumes only after complete current-state reconciliation.
 Startup failure never silently enables shadow or broad capture.
 
+`--rtp-ebpf-shadow-sample-every` (default `1`) samples approximately one in every
+positive N decisions; YAML uses `rtp_ebpf.shadow_sample_every` beneath the role's
+VoIP settings. This setting alone does not enable admission. Correlation retains
+bounded transient frame evidence for at most two `pending_ttl` intervals and
+requires a unique kernel sample, the captured frame, verified selected-lifetime
+attribution, and historical publication generation. Frames over 256 bytes,
+truncated or duplicate evidence, late samples, missing ownership, and changed
+endpoint revisions remain incomplete. Status exposes no packet contents or call
+identities. Kernel-ring loss, retained-sample overwrite, malformed samples,
+collection errors, and incomplete correlation have separate counters. Classified
+rejections are sampled observations, never exact whole-traffic rejection counts
+or proof of parity.
+
+Missing-media diagnostics distinguish unknown endpoint derivation from
+intentionally inactive media. An accepted endpoint or completeness revision
+resets the expectation, so an earlier media packet cannot mask a subsequent
+media move. Per-owner notices are bounded and rate-limited and identify only a
+transient numeric owner reference. They never widen admission automatically.
+
 All interfaces share one observation domain by default. Explicit domain settings
 separate overlapping local traffic and must put related signaling/media together.
 Ethernet is supported; cooked `any` capture and explicit VLAN predicates are
 rejected. Fragments, complex extension chains and supported encapsulation may
 pass a counted compatibility path, reducing selectivity. Unknown packets and
 missing-media diagnostics do not open a domain.
+
+Reassembled tap TCP signaling uses the interface and capture timestamp of the
+message's final contributing byte. Interfaces in the same observation domain
+share framing, including queued segments, but each synthesized message retains
+its actual contributing source. Interfaces in separate domains never complete
+one another's frames. TCP-signaled calls share the same capacity accounting as
+UDP-signaled calls. Terminal dialog responses complete only after processor
+handling (or an explicit injection drop), preserving trailing-media grace and
+lifetime-specific cleanup. With admission disabled, nonpositive call limits
+retain the legacy default; configured positive budgets remain enforced.
+
+Socket admission requires Linux AF_PACKET sockets, `SO_ATTACH_BPF`, enabled BPF
+syscalls, the required map types, and ring-buffer helpers. Ring buffers were
+introduced in Linux 5.8; that is a feature floor, not a universally verified
+minimum kernel version. Kernel configuration, verifier behavior, distribution
+policy, and container restrictions can still reject startup. Packet sockets
+require `CAP_NET_RAW`; privileged BPF object operations require `CAP_BPF` or the
+older `CAP_SYS_ADMIN` fallback. `CAP_NET_ADMIN` is not a general socket-filter
+loader requirement; capture configuration may independently require permission.
+Before Linux 5.11, BPF memory commonly counts against `RLIMIT_MEMLOCK`; newer
+kernels can use memory-cgroup accounting. The application does not automatically
+raise the locked-memory limit. See the [Linux BPF loader](https://github.com/torvalds/linux/blob/v6.18/kernel/bpf/syscall.c),
+[ring-buffer documentation](https://docs.kernel.org/bpf/ringbuf.html), and
+[memory-accounting guidance](https://ebpf-go.dev/concepts/rlimit/).
+
+Enabled handles use immediate mode and retire retained socket/ring data before
+activation; subsequent packets are not compared to a permanent wall-clock
+boundary. Startup drain is bounded and permits packet loss. Unsupported links,
+explicit VLAN predicates, offline use, unsupported packet-mmap retirement,
+loading, attachment, or draining errors fail startup explicitly.
 
 See the [configuration reference](../appendices/config-reference.md#voip-ebpf-media-admission)
 for all resource bounds. The repository's `docs/VOIP_EBPF_ADMISSION.md` provides

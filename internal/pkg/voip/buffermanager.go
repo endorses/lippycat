@@ -2,6 +2,7 @@ package voip
 
 import (
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"sync"
 	"time"
 
@@ -13,17 +14,20 @@ import (
 
 // BufferManager manages per-call packet buffers
 type BufferManager struct {
-	registry         *callregistry.Core
-	matchedLifetimes map[string]callregistry.Lifetime
-	buffers          map[string]*CallBuffer // callID -> buffer (temporary until filter decision)
-	matchedCalls     map[string]time.Time   // callID -> matchTime (persists after buffer cleanup)
-	matchedIDs       map[string][]string    // callID -> direct filter IDs selecting the call
-	mu               sync.RWMutex
-	maxAge           time.Duration // Max time to buffer before decision
-	maxSize          int           // Max packets per buffer
-	matchedTTL       time.Duration // How long to remember matched calls (default: 24h)
-	janitorCh        chan struct{} // Signal channel for janitor
-	stopCh           chan struct{} // Stop channel
+	registry               *callregistry.Core
+	sdpEndpointLimit       int
+	sdpAssociationRejected uint64
+	sdpParseCounters       sharedsip.SDPParseCounters
+	matchedLifetimes       map[string]callregistry.Lifetime
+	buffers                map[string]*CallBuffer // callID -> buffer (temporary until filter decision)
+	matchedCalls           map[string]time.Time   // callID -> matchTime (persists after buffer cleanup)
+	matchedIDs             map[string][]string    // callID -> direct filter IDs selecting the call
+	mu                     sync.RWMutex
+	maxAge                 time.Duration // Max time to buffer before decision
+	maxSize                int           // Max packets per buffer
+	matchedTTL             time.Duration // How long to remember matched calls (default: 24h)
+	janitorCh              chan struct{} // Signal channel for janitor
+	stopCh                 chan struct{} // Stop channel
 }
 
 // DefaultMatchedTTL is how long to remember matched calls after filter decision.
@@ -34,6 +38,7 @@ const DefaultMatchedTTL = 24 * time.Hour
 // NewBufferManager creates a new buffer manager
 func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 	bm := &BufferManager{
+		sdpEndpointLimit: DefaultConfig().MaxEndpointsPerCall,
 		buffers:          make(map[string]*CallBuffer),
 		matchedLifetimes: make(map[string]callregistry.Lifetime),
 		matchedCalls:     make(map[string]time.Time),
@@ -81,7 +86,7 @@ func (bm *BufferManager) addSIPPacket(callID string, packet gopacket.Packet, res
 
 	buffer, exists := bm.buffers[callID]
 	if !exists {
-		buffer = NewCallBuffer(callID)
+		buffer = NewCallBuffer(callID, bm.sdpEndpointLimit)
 		buffer.SetInterfaceName(interfaceName)
 		buffer.SetLinkType(linkType)
 		if alreadyMatched {
@@ -99,13 +104,15 @@ func (bm *BufferManager) addSIPPacket(callID string, packet gopacket.Packet, res
 	// answers can introduce new ports mid-call, so this runs for every packet
 	// carrying SDP, matched or not.
 	if metadata.SDPBody != "" {
-		ports := extractRTPPortsFromSDP(metadata.SDPBody)
+		ports := bm.extractSDPEndpoints(metadata.SDPBody)
 		for _, port := range ports {
-			buffer.AddRTPPort(port)
+			if !buffer.AddRTPPort(port) {
+				bm.sdpAssociationRejected++
+			}
 		}
 	}
 
-	if alreadyMatched || (buffer.IsFilterChecked() && buffer.IsMatched()) {
+	if alreadyMatched {
 		return true // Caller writes/forwards immediately; nothing to buffer
 	}
 
@@ -317,7 +324,7 @@ func (bm *BufferManager) MarkCallMatched(callID string, metadata *CallMetadata, 
 
 	buffer, exists := bm.buffers[callID]
 	if !exists {
-		buffer = NewCallBuffer(callID)
+		buffer = NewCallBuffer(callID, bm.sdpEndpointLimit)
 		buffer.SetInterfaceName(interfaceName)
 		buffer.SetLinkType(linkType)
 		bm.buffers[callID] = buffer
@@ -326,8 +333,10 @@ func (bm *BufferManager) MarkCallMatched(callID string, metadata *CallMetadata, 
 	if metadata != nil {
 		buffer.SetMetadata(metadata)
 		if metadata.SDPBody != "" {
-			for _, port := range extractRTPPortsFromSDP(metadata.SDPBody) {
-				buffer.AddRTPPort(port)
+			for _, port := range bm.extractSDPEndpoints(metadata.SDPBody) {
+				if !buffer.AddRTPPort(port) {
+					bm.sdpAssociationRejected++
+				}
 			}
 		}
 	}
@@ -337,24 +346,13 @@ func (bm *BufferManager) MarkCallMatched(callID string, metadata *CallMetadata, 
 }
 
 // IsCallMatched checks if a call has been evaluated and matched the filter.
-// This checks both the persistent matchedCalls map (for calls whose buffers
-// have been cleaned up) and the active buffers (for recent calls).
+// The persistent decision is authoritative; a retained packet buffer cannot
+// extend selection after expiry or registry retirement.
 func (bm *BufferManager) IsCallMatched(callID string) bool {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 
-	// First check the persistent matchedCalls map - this survives buffer cleanup
-	if _, exists := bm.matchedCalls[callID]; exists {
-		return bm.matchedValidLocked(callID)
-	}
-
-	// Fall back to buffer check for recent calls
-	buffer, exists := bm.buffers[callID]
-	if !exists {
-		return false
-	}
-
-	return buffer.IsFilterChecked() && buffer.IsMatched()
+	return bm.matchedValidLocked(callID)
 }
 
 // StoreMatchedFilterIDs retains the direct filter evidence that selected one
@@ -477,6 +475,7 @@ func (bm *BufferManager) cleanupOldBuffers() {
 			delete(bm.matchedCalls, callID)
 			delete(bm.matchedLifetimes, callID)
 			delete(bm.matchedIDs, callID)
+			delete(bm.buffers, callID)
 		}
 	}
 }
@@ -499,9 +498,30 @@ func extractRTPPortsFromSDP(sdp string) []string {
 	return extractAllRTPEndpoints(sdp)
 }
 
+// extractSDPEndpoints is called with bm.mu held. Exact endpoint keys precede
+// legacy port diagnostics, so diagnostics never displace an attributable key.
+func (bm *BufferManager) extractSDPEndpoints(body string) []string {
+	parsed := sharedsip.ParseSDPResult(body, bm.sdpEndpointLimit)
+	bm.sdpParseCounters.Observe(parsed)
+	return legacySDPEndpointKeys(body, parsed, bm.sdpEndpointLimit)
+}
+
+// SDPParseStats reports sanitized aggregate parsing diagnostics for this manager.
+func (bm *BufferManager) SDPParseStats() sharedsip.SDPParseStats {
+	return bm.sdpParseCounters.Snapshot()
+}
+
+// SDPAssociationRejected counts bounded per-call diagnostic keys rejected after
+// earlier SDP observations filled the configured association budget.
+func (bm *BufferManager) SDPAssociationRejected() uint64 {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	return bm.sdpAssociationRejected
+}
+
 // BindRegistry binds the manager once at handler construction, before packet
 // processing. The registry remains the sole owner of endpoint and call identity.
-func (bm *BufferManager) BindRegistry(registry *callregistry.Core) {
+func (bm *BufferManager) BindRegistry(registry *callregistry.Core, endpointLimits ...int) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 	if bm.registry == registry {
@@ -511,6 +531,9 @@ func (bm *BufferManager) BindRegistry(registry *callregistry.Core) {
 		panic("buffer manager cannot change call registry")
 	}
 	bm.registry = registry
+	if len(endpointLimits) > 0 && endpointLimits[0] > 0 {
+		bm.sdpEndpointLimit = endpointLimits[0]
+	}
 	for callID := range bm.matchedCalls {
 		if call, ok := registry.Call(callID); ok {
 			bm.matchedLifetimes[callID] = call.Lifetime
@@ -525,6 +548,27 @@ func (bm *BufferManager) recordMatchLocked(callID string) {
 		} else {
 			delete(bm.matchedLifetimes, callID)
 		}
+	}
+}
+
+// bindMatchedLifetime finishes a buffered decision whose first selected SIP
+// observation creates the registry call. It never renews selection or transfers
+// an existing decision to a reused Call-ID.
+func (bm *BufferManager) bindMatchedLifetime(callID string) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if bm.registry == nil {
+		return
+	}
+	at, matched := bm.matchedCalls[callID]
+	if !matched || time.Since(at) > bm.matchedTTL {
+		return
+	}
+	if _, bound := bm.matchedLifetimes[callID]; bound {
+		return
+	}
+	if call, ok := bm.registry.Call(callID); ok {
+		bm.matchedLifetimes[callID] = call.Lifetime
 	}
 }
 func (bm *BufferManager) matchedValidLocked(callID string) bool {

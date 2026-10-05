@@ -76,7 +76,7 @@ type HunterForwardHandler struct {
 // NewHunterForwardHandler creates a handler for hunter packet forwarding
 func NewHunterForwardHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *HunterForwardHandler {
 	if tracker != nil && bufferMgr != nil {
-		bufferMgr.BindRegistry(tracker.AdmissionRegistry())
+		bufferMgr.BindRegistry(tracker.AdmissionRegistry(), tracker.config.MaxEndpointsPerCall)
 	}
 	h := &HunterForwardHandler{
 		tracker:         tracker,

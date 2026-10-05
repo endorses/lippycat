@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/reassembly"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
@@ -46,6 +48,10 @@ type timestampedSIPMessageHandler interface {
 // second time; legacy handlers continue through the interfaces above.
 type parsedSIPMessageHandler interface {
 	HandleParsedSIPMessage([]byte, sharedsip.Event, string, string, gopacket.Flow, gopacket.Flow) bool
+}
+
+type sourcedSIPMessageHandler interface {
+	HandleParsedSIPMessageFromSource([]byte, sharedsip.Event, string, string, gopacket.Flow, gopacket.Flow, pipeline.SourceProvenance) bool
 }
 
 // bufferedSIPStream implements reassembly.Stream with a buffered channel.
@@ -100,6 +106,47 @@ type streamChunk struct {
 	data      []byte
 	timestamp time.Time
 	gap       streamGap
+	spans     []streamCaptureSpan
+}
+
+type streamCaptureSpan struct {
+	end       int
+	timestamp time.Time
+	source    pipeline.SourceProvenance
+}
+
+func sipCaptureSpans(sg reassembly.ScatterGather) []streamCaptureSpan {
+	available, _ := sg.Lengths()
+	if available == 0 {
+		return nil
+	}
+	sourced := false
+	for _, item := range sg.CaptureInfo(0).AncillaryData {
+		if source, ok := item.(pipeline.SourceProvenance); ok && source.Kind != pipeline.SourceUnknown {
+			sourced = true
+			break
+		}
+	}
+	if !sourced {
+		// Timestamp-only adapters retain their established semantics without
+		// allocating per-byte-range provenance.
+		return nil
+	}
+	var spans []streamCaptureSpan
+	reassembly.ForEachCaptureInfo(sg, func(end int, ci gopacket.CaptureInfo) {
+		var source pipeline.SourceProvenance
+		for _, item := range ci.AncillaryData {
+			if value, ok := item.(pipeline.SourceProvenance); ok {
+				source = value
+			}
+		}
+		if len(spans) > 0 && spans[len(spans)-1].source == source && spans[len(spans)-1].timestamp.Equal(ci.Timestamp) {
+			spans[len(spans)-1].end = end
+			return
+		}
+		spans = append(spans, streamCaptureSpan{end: end, timestamp: ci.Timestamp, source: source})
+	})
+	return spans
 }
 
 type streamGapReason uint8
@@ -298,8 +345,16 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	capturedAt := half.capturedAt
 	half.captureMu.RUnlock()
 	gap.merge(half.pendingGap)
+	spans := sipCaptureSpans(sg)
+	// Rearm may prepend a retained incomplete start line. Offset ranges still
+	// end on the newly captured bytes that completed the message.
+	if prefix := len(data) - available; prefix > 0 {
+		for i := range spans {
+			spans[i].end += prefix
+		}
+	}
 	select {
-	case half.dataChan <- streamChunk{data: data, timestamp: capturedAt, gap: gap}:
+	case half.dataChan <- streamChunk{data: data, timestamp: capturedAt, gap: gap, spans: spans}:
 		half.pendingGap = streamGap{}
 		logger.Debug("TCP data queued to stream",
 			"bytes", len(data),
@@ -487,6 +542,9 @@ type streamChunkReader struct {
 	gotData   bool
 	state     TCPState
 	pending   *streamChunk
+	spans     []streamCaptureSpan
+	position  int
+	source    pipeline.SourceProvenance
 }
 
 // recoverableFramingError marks loss of framing without weakening SIP security
@@ -588,6 +646,8 @@ func (r *streamChunkReader) Read(dst []byte) (int, error) {
 			chunk := *r.pending
 			r.pending = nil
 			r.current, r.timestamp, r.gotData = chunk.data, chunk.timestamp, true
+			r.spans, r.position = chunk.spans, 0
+			r.source = pipeline.SourceProvenance{}
 			if r.state == TCPStateOpening {
 				r.state = TCPStateEstablished
 			}
@@ -620,6 +680,8 @@ func (r *streamChunkReader) Read(dst []byte) (int, error) {
 				}
 			}
 			r.current, r.timestamp, r.gotData = chunk.data, chunk.timestamp, true
+			r.spans, r.position = chunk.spans, 0
+			r.source = pipeline.SourceProvenance{}
 			if r.state == TCPStateOpening {
 				r.state = TCPStateEstablished
 			}
@@ -642,17 +704,31 @@ func (r *streamChunkReader) Read(dst []byte) (int, error) {
 			return 0, errReadTimeout
 		}
 	}
-	n := copy(dst, r.current)
+	data := r.current
+	if len(r.spans) > 0 {
+		span := r.spans[0]
+		r.timestamp, r.source = span.timestamp, span.source
+		data = data[:min(len(data), span.end-r.position)]
+	}
+	n := copy(dst, data)
 	r.current = r.current[n:]
+	r.position += n
+	if len(r.spans) > 0 && r.position == r.spans[0].end {
+		r.spans = r.spans[1:]
+	}
 	return n, nil
 }
 
-func (r *streamChunkReader) Timestamp() time.Time { return r.timestamp }
+func (r *streamChunkReader) Timestamp() time.Time              { return r.timestamp }
+func (r *streamChunkReader) Source() pipeline.SourceProvenance { return r.source }
 
 // processSIPFromReader reads SIP messages from an io.Reader and processes them.
 func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 	bufReader := bufio.NewReader(reader)
 	timestamped, _ := reader.(interface{ Timestamp() time.Time })
+	sourced, _ := reader.(interface {
+		Source() pipeline.SourceProvenance
+	})
 
 	// Live connections release their canonical packet buffer when both halves
 	// stop. Direct parser use has no connection owner to coordinate cleanup.
@@ -769,7 +845,11 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 		if timestamped != nil {
 			capturedAt = timestamped.Timestamp()
 		}
-		s.processSipMessage(sipMessage, capturedAt)
+		var source pipeline.SourceProvenance
+		if sourced != nil {
+			source = sourced.Source()
+		}
+		s.processSipMessageFromSource(sipMessage, capturedAt, source)
 	}
 }
 
@@ -961,8 +1041,8 @@ func (s *bufferedSIPStream) readSIPStartLine(bufReader *bufio.Reader) (string, i
 
 // getEndpoints constructs IP:port endpoint strings from the network and transport flows
 func (s *bufferedSIPStream) getEndpoints() (srcEndpoint, dstEndpoint string) {
-	srcEndpoint = fmt.Sprintf("%s:%s", s.netFlow.Src().String(), s.transportFlow.Src().String())
-	dstEndpoint = fmt.Sprintf("%s:%s", s.netFlow.Dst().String(), s.transportFlow.Dst().String())
+	srcEndpoint = net.JoinHostPort(s.netFlow.Src().String(), s.transportFlow.Src().String())
+	dstEndpoint = net.JoinHostPort(s.netFlow.Dst().String(), s.transportFlow.Dst().String())
 	return
 }
 
@@ -1056,6 +1136,10 @@ func (s *bufferedSIPStream) processSipMessage(sipMessage []byte, timestamps ...t
 	if len(timestamps) > 0 {
 		capturedAt = timestamps[0]
 	}
+	s.processSipMessageFromSource(sipMessage, capturedAt, pipeline.SourceProvenance{})
+}
+
+func (s *bufferedSIPStream) processSipMessageFromSource(sipMessage []byte, capturedAt time.Time, source pipeline.SourceProvenance) {
 	srcEndpoint, dstEndpoint := s.getEndpoints()
 	event, err := sharedsip.Parse(sipMessage, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint))
 	if err == nil && event.CallID != "" {
@@ -1068,7 +1152,9 @@ func (s *bufferedSIPStream) processSipMessage(sipMessage []byte, timestamps ...t
 		}
 
 		if s.factory != nil && s.factory.handler != nil {
-			if handler, ok := s.factory.handler.(parsedSIPMessageHandler); ok {
+			if handler, ok := s.factory.handler.(sourcedSIPMessageHandler); ok {
+				handler.HandleParsedSIPMessageFromSource(sipMessage, event, srcEndpoint, dstEndpoint, s.netFlow, s.transportFlow, source)
+			} else if handler, ok := s.factory.handler.(parsedSIPMessageHandler); ok {
 				handler.HandleParsedSIPMessage(sipMessage, event, srcEndpoint, dstEndpoint, s.netFlow, s.transportFlow)
 			} else if handler, ok := s.factory.handler.(timestampedSIPMessageHandler); ok {
 				handler.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, s.netFlow, s.transportFlow, capturedAt)

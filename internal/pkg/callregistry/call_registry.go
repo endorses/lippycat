@@ -671,3 +671,26 @@ func (c *Core) EndpointSnapshot(callID string) (EndpointObservation, bool) {
 	sort.Strings(snapshot.Endpoints)
 	return snapshot, true
 }
+
+// WithEndpointSnapshots holds the registry read lock through a bounded consumer
+// operation, so a complete reconciliation cannot publish an already superseded
+// lifetime or endpoint set. The callback must not reenter or mutate this registry.
+// Missing calls are omitted; callers must verify every requested lifetime exists.
+func (c *Core) WithEndpointSnapshots(callIDs []string, consume func([]EndpointObservation) error) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	observations := make([]EndpointObservation, 0, len(callIDs))
+	for _, id := range callIDs {
+		call, ok := c.calls[id]
+		if !ok {
+			continue
+		}
+		observation := EndpointObservation{Call: call, Revision: c.nextObservation}
+		for endpoint := range c.callEndpoints[id] {
+			observation.Endpoints = append(observation.Endpoints, endpoint)
+		}
+		sort.Strings(observation.Endpoints)
+		observations = append(observations, observation)
+	}
+	return consume(observations)
+}

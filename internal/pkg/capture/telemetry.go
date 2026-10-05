@@ -3,11 +3,14 @@ package capture
 import (
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
 	"sync"
+	"sync/atomic"
 )
 
 // Telemetry is a cumulative snapshot of live capture health across all
 // interfaces participating in one capture session.
 type Telemetry struct {
+	// StartupDiscards counts retained frames deliberately drained before activation.
+	StartupDiscards           uint64
 	MediaAdmission            *mediaadmission.Snapshot
 	PacketsReceived           int64
 	KernelDrops               int64
@@ -48,6 +51,7 @@ type FragmentIngress struct {
 type TelemetryCallback func(Telemetry)
 
 type telemetryCollector struct {
+	startupDiscards atomic.Uint64
 	admission       mediaadmission.StatusProvider
 	mu              sync.Mutex
 	callbackMu      sync.Mutex
@@ -69,6 +73,17 @@ func newTelemetryCollector(callback TelemetryCallback) *telemetryCollector {
 		interfaces:      make(map[string]interfaceTelemetry),
 		fragmentIngress: make(map[string]FragmentIngress),
 		callback:        callback,
+	}
+}
+
+// Startup discard providers report immutable preparation results, independently
+// of capture drop counters. Called once per prepared socket.
+func (c *telemetryCollector) recordStartupDiscards(attachment PreparedFilter) {
+	if c == nil || attachment == nil {
+		return
+	}
+	if stats, ok := attachment.(interface{ StartupDiscards() uint64 }); ok {
+		c.startupDiscards.Add(stats.StartupDiscards())
 	}
 }
 
@@ -108,6 +123,7 @@ func (c *telemetryCollector) report(interfaceName string, received, kernelDrops,
 		interfaceDrops: interfaceDrops,
 	}
 	var snapshot Telemetry
+	snapshot.StartupDiscards = c.startupDiscards.Load()
 	for _, stats := range c.interfaces {
 		snapshot.PacketsReceived += stats.received
 		snapshot.KernelDrops += stats.kernelDrops

@@ -63,7 +63,7 @@ func TestHunterAdmissionDiagnosticsRequireSelectedCurrentResolution(t *testing.T
 			bridge, err := sipadmission.New(sipadmission.Config{Limits: cfg, Registry: registry, Controller: controller, Metadata: metadata, Diagnostics: diagnostics})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, bridge.Close()) })
-			selected := pipeline.SIPResult{CallID: "selected-call", Method: "INVITE", FromTag: "from", ViaBranch: "branch", CSeqMethod: "INVITE", CSeqNumber: 1, Packet: &pipeline.PacketEnvelope{Source: pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, InterfaceName: "eth-test"}}}
+			selected := pipeline.SIPResult{SDP: []byte("m=audio 0 RTP/AVP 0"), CallID: "selected-call", Method: "INVITE", FromTag: "from", ViaBranch: "branch", CSeqMethod: "INVITE", CSeqNumber: 1, Packet: &pipeline.PacketEnvelope{Source: pipeline.SourceProvenance{Kind: pipeline.SourceLiveCapture, InterfaceName: "eth-test"}}}
 			registry.Upsert(callregistry.Call{CallID: selected.CallID})
 			if scenario != "unselected" {
 				require.NoError(t, bridge.Selected(selected))

@@ -12,16 +12,18 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/ebpfadmission"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
-	"golang.org/x/sys/unix"
 )
 
 func (s *Session) initTelemetry(ctx context.Context, backend *ebpfadmission.Backend) error {
 	telemetry := &sessionTelemetry{counters: backend.Counters, diagnostics: mediaadmission.NewDiagnostics(s.Config.OwnerCapacity, s.Config.MissingMediaInterval), last: make(map[mediaadmission.DomainID]mediaadmission.State)}
 	telemetry.evidence.Capacity = s.Config.ShadowEvidenceCapacity
+	telemetry.clockErrorsBaseline = monotonicReadErrors()
+	telemetry.evidence.SampleEvery = s.Config.ShadowSampleEvery
 	s.telemetry = telemetry
 	if s.Config.Mode != mediaadmission.ModeShadow {
 		return nil
 	}
+	telemetry.correlator = mediaadmission.NewShadowCorrelator(s.Config.ShadowEvidenceCapacity, s.Config.OwnerCapacity, uint64(s.Config.PendingTTL))
 	reader, err := backend.DecisionReader()
 	if err != nil {
 		return err
@@ -60,11 +62,16 @@ func (s *Session) initTelemetry(ctx context.Context, backend *ebpfadmission.Back
 				telemetry.mu.Unlock()
 				continue
 			}
-			var monotonic unix.Timespec
-			if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &monotonic); err != nil {
+			monotonic := monotonicNow()
+			if monotonic == 0 {
 				telemetry.evidence.Incomplete = true
 			}
-			sample := mediaadmission.ShadowSample{Domain: decision.Domain, Generation: decision.Generation, EventMonotonicNS: decision.TimeNS, ObservedMonotonicNS: uint64(monotonic.Nano()), ObservedAt: time.Now(), Reason: decision.Reason, Length: decision.Length, Fingerprint: decision.Fingerprint, Source: decision.Source, Destination: decision.Destination}
+			sample := mediaadmission.ShadowSample{Domain: decision.Domain, Generation: decision.Generation, EventMonotonicNS: decision.TimeNS, ObservedMonotonicNS: monotonic, ObservedAt: time.Now(), Reason: decision.Reason, Length: decision.Length, Fingerprint: decision.Fingerprint, Source: decision.Source, Destination: decision.Destination, IdentityLength: decision.IdentityLength, Identity: decision.Identity}
+			telemetry.correlator.Sample(sample, sample.ObservedMonotonicNS)
+			// Retained diagnostic samples contain no frame bytes. The bounded
+			// correlator exclusively owns full identity until its expiry.
+			sample.IdentityLength = 0
+			sample.Identity = [256]byte{}
 			telemetry.evidence.Received++
 			if len(telemetry.samples) < s.Config.ShadowEvidenceCapacity {
 				telemetry.samples = append(telemetry.samples, sample)

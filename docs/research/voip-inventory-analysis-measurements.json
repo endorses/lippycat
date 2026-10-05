@@ -1,0 +1,420 @@
+{
+  "date": "2026-10-05",
+  "baseline": "0c8fd186384fdbb52917495bc4cff7a0a7eb0819",
+  "after_source_sha256": "ca45e4e40286b205c7511eac5f7229aa1c2c740c6e3c16627cfe57de9cc2b869",
+  "after_source_files": [
+    "internal/pkg/eventanalysis/runtime.go",
+    "internal/pkg/eventanalysis/network.go",
+    "internal/pkg/eventanalysis/inventory.go",
+    "internal/pkg/inventory/tracker.go",
+    "internal/pkg/eventanalysis/inventory_benchmark_test.go"
+  ],
+  "go_version": "go1.27.1-X:nodwarf5",
+  "platform": "linux/amd64",
+  "gomaxprocs": 32,
+  "benchtime": "300ms",
+  "trials": 5,
+  "workload": "2048 bidirectional synthetic UDP flows; 172-byte payload; 214-byte Ethernet frame; ObservePacket",
+  "records": [
+    {
+      "trial": 1,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 180454,
+      "ns_per_packet": 2294.0,
+      "bytes_per_packet": 1155,
+      "allocations_per_packet": 17
+    },
+    {
+      "trial": 1,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 239263,
+      "ns_per_packet": 1529.0,
+      "bytes_per_packet": 480,
+      "allocations_per_packet": 12
+    },
+    {
+      "trial": 1,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 107349,
+      "ns_per_packet": 3161.0,
+      "bytes_per_packet": 1975,
+      "allocations_per_packet": 19
+    },
+    {
+      "trial": 1,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 217368,
+      "ns_per_packet": 1776.0,
+      "bytes_per_packet": 1088,
+      "allocations_per_packet": 14
+    },
+    {
+      "trial": 1,
+      "revision": "after",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 300657,
+      "ns_per_packet": 1079.0,
+      "bytes_per_packet": 951,
+      "allocations_per_packet": 10
+    },
+    {
+      "trial": 1,
+      "revision": "after",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 553629,
+      "ns_per_packet": 678.5,
+      "bytes_per_packet": 288,
+      "allocations_per_packet": 5
+    },
+    {
+      "trial": 1,
+      "revision": "after",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 200444,
+      "ns_per_packet": 1680.0,
+      "bytes_per_packet": 1719,
+      "allocations_per_packet": 11
+    },
+    {
+      "trial": 1,
+      "revision": "after",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 366477,
+      "ns_per_packet": 953.9,
+      "bytes_per_packet": 800,
+      "allocations_per_packet": 6
+    },
+    {
+      "trial": 2,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 229090,
+      "ns_per_packet": 1728.0,
+      "bytes_per_packet": 1156,
+      "allocations_per_packet": 17
+    },
+    {
+      "trial": 2,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 267584,
+      "ns_per_packet": 1220.0,
+      "bytes_per_packet": 480,
+      "allocations_per_packet": 12
+    },
+    {
+      "trial": 2,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 177132,
+      "ns_per_packet": 2296.0,
+      "bytes_per_packet": 1978,
+      "allocations_per_packet": 19
+    },
+    {
+      "trial": 2,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 191468,
+      "ns_per_packet": 1845.0,
+      "bytes_per_packet": 1088,
+      "allocations_per_packet": 14
+    },
+    {
+      "trial": 2,
+      "revision": "after",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 312867,
+      "ns_per_packet": 1166.0,
+      "bytes_per_packet": 951,
+      "allocations_per_packet": 10
+    },
+    {
+      "trial": 2,
+      "revision": "after",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 536995,
+      "ns_per_packet": 659.8,
+      "bytes_per_packet": 288,
+      "allocations_per_packet": 5
+    },
+    {
+      "trial": 2,
+      "revision": "after",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 244069,
+      "ns_per_packet": 1610.0,
+      "bytes_per_packet": 1719,
+      "allocations_per_packet": 11
+    },
+    {
+      "trial": 2,
+      "revision": "after",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 412576,
+      "ns_per_packet": 975.6,
+      "bytes_per_packet": 800,
+      "allocations_per_packet": 6
+    },
+    {
+      "trial": 3,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 154250,
+      "ns_per_packet": 2261.0,
+      "bytes_per_packet": 1155,
+      "allocations_per_packet": 17
+    },
+    {
+      "trial": 3,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 289304,
+      "ns_per_packet": 1201.0,
+      "bytes_per_packet": 480,
+      "allocations_per_packet": 12
+    },
+    {
+      "trial": 3,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 181851,
+      "ns_per_packet": 2344.0,
+      "bytes_per_packet": 1978,
+      "allocations_per_packet": 19
+    },
+    {
+      "trial": 3,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 212792,
+      "ns_per_packet": 1785.0,
+      "bytes_per_packet": 1088,
+      "allocations_per_packet": 14
+    },
+    {
+      "trial": 3,
+      "revision": "after",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 293430,
+      "ns_per_packet": 1319.0,
+      "bytes_per_packet": 951,
+      "allocations_per_packet": 10
+    },
+    {
+      "trial": 3,
+      "revision": "after",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 459931,
+      "ns_per_packet": 684.6,
+      "bytes_per_packet": 288,
+      "allocations_per_packet": 5
+    },
+    {
+      "trial": 3,
+      "revision": "after",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 249558,
+      "ns_per_packet": 1562.0,
+      "bytes_per_packet": 1719,
+      "allocations_per_packet": 11
+    },
+    {
+      "trial": 3,
+      "revision": "after",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 311914,
+      "ns_per_packet": 1079.0,
+      "bytes_per_packet": 800,
+      "allocations_per_packet": 6
+    },
+    {
+      "trial": 4,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 204392,
+      "ns_per_packet": 1762.0,
+      "bytes_per_packet": 1156,
+      "allocations_per_packet": 17
+    },
+    {
+      "trial": 4,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 246284,
+      "ns_per_packet": 1362.0,
+      "bytes_per_packet": 480,
+      "allocations_per_packet": 12
+    },
+    {
+      "trial": 4,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 184198,
+      "ns_per_packet": 2138.0,
+      "bytes_per_packet": 1979,
+      "allocations_per_packet": 19
+    },
+    {
+      "trial": 4,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 208497,
+      "ns_per_packet": 1888.0,
+      "bytes_per_packet": 1088,
+      "allocations_per_packet": 14
+    },
+    {
+      "trial": 4,
+      "revision": "after",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 329001,
+      "ns_per_packet": 1221.0,
+      "bytes_per_packet": 951,
+      "allocations_per_packet": 10
+    },
+    {
+      "trial": 4,
+      "revision": "after",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 525138,
+      "ns_per_packet": 715.8,
+      "bytes_per_packet": 288,
+      "allocations_per_packet": 5
+    },
+    {
+      "trial": 4,
+      "revision": "after",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 265015,
+      "ns_per_packet": 1463.0,
+      "bytes_per_packet": 1719,
+      "allocations_per_packet": 11
+    },
+    {
+      "trial": 4,
+      "revision": "after",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 392235,
+      "ns_per_packet": 1093.0,
+      "bytes_per_packet": 800,
+      "allocations_per_packet": 6
+    },
+    {
+      "trial": 5,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 180195,
+      "ns_per_packet": 2062.0,
+      "bytes_per_packet": 1155,
+      "allocations_per_packet": 17
+    },
+    {
+      "trial": 5,
+      "revision": "baseline",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 267763,
+      "ns_per_packet": 1409.0,
+      "bytes_per_packet": 480,
+      "allocations_per_packet": 12
+    },
+    {
+      "trial": 5,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 135516,
+      "ns_per_packet": 2723.0,
+      "bytes_per_packet": 1977,
+      "allocations_per_packet": 19
+    },
+    {
+      "trial": 5,
+      "revision": "baseline",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 206701,
+      "ns_per_packet": 1780.0,
+      "bytes_per_packet": 1088,
+      "allocations_per_packet": 14
+    },
+    {
+      "trial": 5,
+      "revision": "after",
+      "inventory": false,
+      "phase": "discovery",
+      "iterations": 340015,
+      "ns_per_packet": 1165.0,
+      "bytes_per_packet": 951,
+      "allocations_per_packet": 10
+    },
+    {
+      "trial": 5,
+      "revision": "after",
+      "inventory": false,
+      "phase": "steady",
+      "iterations": 540136,
+      "ns_per_packet": 711.7,
+      "bytes_per_packet": 288,
+      "allocations_per_packet": 5
+    },
+    {
+      "trial": 5,
+      "revision": "after",
+      "inventory": true,
+      "phase": "discovery",
+      "iterations": 248826,
+      "ns_per_packet": 1686.0,
+      "bytes_per_packet": 1719,
+      "allocations_per_packet": 11
+    },
+    {
+      "trial": 5,
+      "revision": "after",
+      "inventory": true,
+      "phase": "steady",
+      "iterations": 389492,
+      "ns_per_packet": 1170.0,
+      "bytes_per_packet": 800,
+      "allocations_per_packet": 6
+    }
+  ]
+}

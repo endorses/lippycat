@@ -28,7 +28,17 @@ endpoint does not assign a Call-ID or authorize delivery. Independent IP/CIDR
 selectors and the configured no-filter policy continue to work; an empty IP
 selector map alone does not mean there are no filters.
 
-Only media after selection and endpoint publication can be selectively captured.
+With `--rtp-ebpf`, including shadow mode, hunt and tap IP/CIDR selectors can select
+eligible media independently of a selected call, subject to explicit packet
+predicates and userspace output checks. With eBPF disabled, tap routes IP/CIDR
+filters through classic BPF. A mixed IP and SIP-identity configuration can capture
+IP-matched RTP but reject it in userspace without a selected-call association;
+disabling admission does not preserve that output for unassociated media. True
+IP-only tap configurations have no SIP-identity filter requiring the association.
+Hunter IP/CIDR media selection remains independent with eBPF enabled or disabled.
+
+For call-selected media, selective capture starts after selection and endpoint
+publication.
 There is no pre-match RTP history. Bounded SDP metadata from validated, unmatched
 SIP messages can be promoted when the same dialog later matches. Promotion does
 not recover packets already rejected by the kernel. Media arriving between SIP

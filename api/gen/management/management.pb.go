@@ -6075,8 +6075,27 @@ type MediaAdmissionStatus struct {
 	SelectedAnsweredWithoutMedia uint64                 `protobuf:"varint,22,opt,name=selected_answered_without_media,json=selectedAnsweredWithoutMedia,proto3" json:"selected_answered_without_media,omitempty"`
 	AttributedMediaPackets       uint64                 `protobuf:"varint,23,opt,name=attributed_media_packets,json=attributedMediaPackets,proto3" json:"attributed_media_packets,omitempty"`
 	DiagnosticTrackingRejected   uint64                 `protobuf:"varint,24,opt,name=diagnostic_tracking_rejected,json=diagnosticTrackingRejected,proto3" json:"diagnostic_tracking_rejected,omitempty"`
-	unknownFields                protoimpl.UnknownFields
-	sizeCache                    protoimpl.SizeCache
+	// Sampled observations, never exact all-traffic parity or rejection totals.
+	ShadowSampleEvery               uint64 `protobuf:"varint,25,opt,name=shadow_sample_every,json=shadowSampleEvery,proto3" json:"shadow_sample_every,omitempty"`
+	EvidenceKernelLost              uint64 `protobuf:"varint,26,opt,name=evidence_kernel_lost,json=evidenceKernelLost,proto3" json:"evidence_kernel_lost,omitempty"`
+	SampledPreSelection             uint64 `protobuf:"varint,27,opt,name=sampled_pre_selection,json=sampledPreSelection,proto3" json:"sampled_pre_selection,omitempty"`
+	SampledPublicationWindow        uint64 `protobuf:"varint,28,opt,name=sampled_publication_window,json=sampledPublicationWindow,proto3" json:"sampled_publication_window,omitempty"`
+	SampledRejectedAfterPublication uint64 `protobuf:"varint,29,opt,name=sampled_rejected_after_publication,json=sampledRejectedAfterPublication,proto3" json:"sampled_rejected_after_publication,omitempty"`
+	SampledAdmitted                 uint64 `protobuf:"varint,30,opt,name=sampled_admitted,json=sampledAdmitted,proto3" json:"sampled_admitted,omitempty"`
+	SampledIncomplete               uint64 `protobuf:"varint,31,opt,name=sampled_incomplete,json=sampledIncomplete,proto3" json:"sampled_incomplete,omitempty"`
+	SampledAmbiguous                uint64 `protobuf:"varint,32,opt,name=sampled_ambiguous,json=sampledAmbiguous,proto3" json:"sampled_ambiguous,omitempty"`
+	SampledIdentityUnavailable      uint64 `protobuf:"varint,33,opt,name=sampled_identity_unavailable,json=sampledIdentityUnavailable,proto3" json:"sampled_identity_unavailable,omitempty"`
+	SampledLate                     uint64 `protobuf:"varint,34,opt,name=sampled_late,json=sampledLate,proto3" json:"sampled_late,omitempty"`
+	CorrelationTrackingRejected     uint64 `protobuf:"varint,35,opt,name=correlation_tracking_rejected,json=correlationTrackingRejected,proto3" json:"correlation_tracking_rejected,omitempty"`
+	CorrelationPending              uint64 `protobuf:"varint,36,opt,name=correlation_pending,json=correlationPending,proto3" json:"correlation_pending,omitempty"`
+	MediaExpectationUnknown         uint64 `protobuf:"varint,37,opt,name=media_expectation_unknown,json=mediaExpectationUnknown,proto3" json:"media_expectation_unknown,omitempty"`
+	MediaExpectationInactive        uint64 `protobuf:"varint,38,opt,name=media_expectation_inactive,json=mediaExpectationInactive,proto3" json:"media_expectation_inactive,omitempty"`
+	MissingMediaAlerts              uint64 `protobuf:"varint,39,opt,name=missing_media_alerts,json=missingMediaAlerts,proto3" json:"missing_media_alerts,omitempty"`
+	DiagnosticAttributionDropped    uint64 `protobuf:"varint,40,opt,name=diagnostic_attribution_dropped,json=diagnosticAttributionDropped,proto3" json:"diagnostic_attribution_dropped,omitempty"`
+	DiagnosticObservationUncertain  uint64 `protobuf:"varint,41,opt,name=diagnostic_observation_uncertain,json=diagnosticObservationUncertain,proto3" json:"diagnostic_observation_uncertain,omitempty"`
+	EvidenceClockReadErrors         uint64 `protobuf:"varint,42,opt,name=evidence_clock_read_errors,json=evidenceClockReadErrors,proto3" json:"evidence_clock_read_errors,omitempty"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
 }
 
 func (x *MediaAdmissionStatus) Reset() {
@@ -6273,6 +6292,132 @@ func (x *MediaAdmissionStatus) GetAttributedMediaPackets() uint64 {
 func (x *MediaAdmissionStatus) GetDiagnosticTrackingRejected() uint64 {
 	if x != nil {
 		return x.DiagnosticTrackingRejected
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetShadowSampleEvery() uint64 {
+	if x != nil {
+		return x.ShadowSampleEvery
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetEvidenceKernelLost() uint64 {
+	if x != nil {
+		return x.EvidenceKernelLost
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetSampledPreSelection() uint64 {
+	if x != nil {
+		return x.SampledPreSelection
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetSampledPublicationWindow() uint64 {
+	if x != nil {
+		return x.SampledPublicationWindow
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetSampledRejectedAfterPublication() uint64 {
+	if x != nil {
+		return x.SampledRejectedAfterPublication
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetSampledAdmitted() uint64 {
+	if x != nil {
+		return x.SampledAdmitted
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetSampledIncomplete() uint64 {
+	if x != nil {
+		return x.SampledIncomplete
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetSampledAmbiguous() uint64 {
+	if x != nil {
+		return x.SampledAmbiguous
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetSampledIdentityUnavailable() uint64 {
+	if x != nil {
+		return x.SampledIdentityUnavailable
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetSampledLate() uint64 {
+	if x != nil {
+		return x.SampledLate
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetCorrelationTrackingRejected() uint64 {
+	if x != nil {
+		return x.CorrelationTrackingRejected
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetCorrelationPending() uint64 {
+	if x != nil {
+		return x.CorrelationPending
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetMediaExpectationUnknown() uint64 {
+	if x != nil {
+		return x.MediaExpectationUnknown
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetMediaExpectationInactive() uint64 {
+	if x != nil {
+		return x.MediaExpectationInactive
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetMissingMediaAlerts() uint64 {
+	if x != nil {
+		return x.MissingMediaAlerts
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetDiagnosticAttributionDropped() uint64 {
+	if x != nil {
+		return x.DiagnosticAttributionDropped
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetDiagnosticObservationUncertain() uint64 {
+	if x != nil {
+		return x.DiagnosticObservationUncertain
+	}
+	return 0
+}
+
+func (x *MediaAdmissionStatus) GetEvidenceClockReadErrors() uint64 {
+	if x != nil {
+		return x.EvidenceClockReadErrors
 	}
 	return 0
 }
@@ -7047,7 +7192,7 @@ const file_management_proto_rawDesc = "" +
 	"\x1ctombstone_capacity_evictions\x18\b \x01(\x04R\x1atombstoneCapacityEvictions\x12/\n" +
 	"\x13filename_collisions\x18\t \x01(\x04R\x12filenameCollisions\x12+\n" +
 	"\x11callback_failures\x18\n" +
-	" \x01(\x04R\x10callbackFailures\"\x83\t\n" +
+	" \x01(\x04R\x10callbackFailures\"\xfe\x10\n" +
 	"\x14MediaAdmissionStatus\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12'\n" +
 	"\x0fconfigured_mode\x18\x02 \x01(\tR\x0econfiguredMode\x12%\n" +
@@ -7073,7 +7218,25 @@ const file_management_proto_rawDesc = "" +
 	"\x10diagnostic_calls\x18\x15 \x01(\x04R\x0fdiagnosticCalls\x12E\n" +
 	"\x1fselected_answered_without_media\x18\x16 \x01(\x04R\x1cselectedAnsweredWithoutMedia\x128\n" +
 	"\x18attributed_media_packets\x18\x17 \x01(\x04R\x16attributedMediaPackets\x12@\n" +
-	"\x1cdiagnostic_tracking_rejected\x18\x18 \x01(\x04R\x1adiagnosticTrackingRejected\"\xa4\a\n" +
+	"\x1cdiagnostic_tracking_rejected\x18\x18 \x01(\x04R\x1adiagnosticTrackingRejected\x12.\n" +
+	"\x13shadow_sample_every\x18\x19 \x01(\x04R\x11shadowSampleEvery\x120\n" +
+	"\x14evidence_kernel_lost\x18\x1a \x01(\x04R\x12evidenceKernelLost\x122\n" +
+	"\x15sampled_pre_selection\x18\x1b \x01(\x04R\x13sampledPreSelection\x12<\n" +
+	"\x1asampled_publication_window\x18\x1c \x01(\x04R\x18sampledPublicationWindow\x12K\n" +
+	"\"sampled_rejected_after_publication\x18\x1d \x01(\x04R\x1fsampledRejectedAfterPublication\x12)\n" +
+	"\x10sampled_admitted\x18\x1e \x01(\x04R\x0fsampledAdmitted\x12-\n" +
+	"\x12sampled_incomplete\x18\x1f \x01(\x04R\x11sampledIncomplete\x12+\n" +
+	"\x11sampled_ambiguous\x18  \x01(\x04R\x10sampledAmbiguous\x12@\n" +
+	"\x1csampled_identity_unavailable\x18! \x01(\x04R\x1asampledIdentityUnavailable\x12!\n" +
+	"\fsampled_late\x18\" \x01(\x04R\vsampledLate\x12B\n" +
+	"\x1dcorrelation_tracking_rejected\x18# \x01(\x04R\x1bcorrelationTrackingRejected\x12/\n" +
+	"\x13correlation_pending\x18$ \x01(\x04R\x12correlationPending\x12:\n" +
+	"\x19media_expectation_unknown\x18% \x01(\x04R\x17mediaExpectationUnknown\x12<\n" +
+	"\x1amedia_expectation_inactive\x18& \x01(\x04R\x18mediaExpectationInactive\x120\n" +
+	"\x14missing_media_alerts\x18' \x01(\x04R\x12missingMediaAlerts\x12D\n" +
+	"\x1ediagnostic_attribution_dropped\x18( \x01(\x04R\x1cdiagnosticAttributionDropped\x12H\n" +
+	" diagnostic_observation_uncertain\x18) \x01(\x04R\x1ediagnosticObservationUncertain\x12;\n" +
+	"\x1aevidence_clock_read_errors\x18* \x01(\x04R\x17evidenceClockReadErrors\"\xa4\a\n" +
 	"\x13MediaAdmissionScope\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\rR\x06domain\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12%\n" +

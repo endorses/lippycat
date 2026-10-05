@@ -72,6 +72,7 @@ func (s *Session) start(ctx context.Context) {
 				return
 			case <-ticker.C:
 				s.Metadata.Expire(time.Now())
+				s.maintainTelemetry()
 				s.logTransitions()
 				for _, domain := range s.Config.Domains() {
 					// Controller status records each failure and the effective mode;

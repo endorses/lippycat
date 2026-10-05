@@ -41,7 +41,7 @@ func (r *admissionHunterRouter) ProcessPacket(packet capture.PacketInfo) bool {
 	}
 	return scope.processor.ProcessPacket(packet)
 }
-func (r *admissionHunterRouter) SetApplicationFilter(filter forwarding.ApplicationFilter) {
+func (r *admissionHunterRouter) SetApplicationFilter(filter voip.ApplicationFilter) {
 	for _, scope := range r.domains {
 		scope.processor.SetApplicationFilter(filter)
 	}

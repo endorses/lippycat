@@ -121,15 +121,15 @@ func TestGenericSniffRADIUSObservationMatchesPacketOutput(t *testing.T) {
 	t.Cleanup(func() { viper.Set("logs.streams", nil); viper.Set("logs.format", nil); viper.Set("logs.dir", nil) })
 	observations := make(map[string]*radius.Observation)
 	input := filepath.Join(radiusfixture.Write(t), "acceptance.pcap")
-	withEventAnalysisMode([]string{input}, "generic-radius-test", "", false, func(session *sniffEventSession) {
+	withEventAnalysisMode([]string{input}, "generic-radius-test", "", true, func(session *sniffEventSession) {
 		require.NotNil(t, session)
-		require.NotNil(t, session.radius)
+		require.Nil(t, session.radius, "local pipeline owns ordinary RADIUS observations")
 		file, err := os.Open(input)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, file.Close()) }()
 		reader, err := pcapgo.NewReader(file)
 		require.NoError(t, err)
-		fanout, err := pipeline.NewPacketFanout(pipeline.SinkRegistration{Name: "discard", Sink: newCLIEnvelopeSink(io.Discard, "json", false)})
+		fanout, err := pipeline.NewPacketFanout(pipeline.SinkRegistration{Name: "observations", Sink: &radiusObservationSink{observations: observations}})
 		require.NoError(t, err)
 		local := &localEnvelopePipeline{fanout: fanout, logSession: session}
 		defer local.close()
@@ -143,13 +143,6 @@ func TestGenericSniffRADIUSObservationMatchesPacketOutput(t *testing.T) {
 			packet := gopacket.NewPacket(raw, reader.LinkType(), gopacket.Default)
 			packet.Metadata().CaptureInfo = ci
 			info := capture.PacketInfo{Packet: packet, LinkType: reader.LinkType(), Interface: "fixture"}
-			// Capture invokes the global observer before handing packets to fan-out.
-			session.observe(&info)
-			if info.RADIUS != nil {
-				id := radius.IdentityString(info.RADIUS.Capture.ID)
-				require.NotEmpty(t, id)
-				observations[id] = info.RADIUS
-			}
 			packets <- info
 		}
 		close(packets)
@@ -173,3 +166,16 @@ func TestGenericSniffRADIUSObservationMatchesPacketOutput(t *testing.T) {
 	}
 	require.Positive(t, associated, "fixture must prove identity-free response correlation")
 }
+
+type radiusObservationSink struct {
+	observations map[string]*radius.Observation
+}
+
+func (s *radiusObservationSink) HandlePacket(_ context.Context, env *pipeline.PacketEnvelope) pipeline.Result {
+	if env.RADIUS != nil {
+		s.observations[radius.IdentityString(env.RADIUS.Capture.ID)] = env.RADIUS
+	}
+	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
+}
+
+func (*radiusObservationSink) Close(context.Context) error { return nil }

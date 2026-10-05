@@ -71,7 +71,19 @@ The shared `--inventory-*`, `--dhcp-association-*`, and `--ntp-association-*`
 flags bound state and retention. See the [network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)
 for defaults, scope/epoch isolation, partial observations, and privacy.
 
+The YAML off switch is `events.inventory.enabled: false`. Inventory CIDRs filter
+observed subjects, not packet capture or connection/protocol analysis work.
+Inventory logs remain optional; packet-mode hunters retain their existing capture
+path, while events-mode hunters run analysis for their upstream event consumer.
+
 ### Reliable event spool operation
+
+Before an upgrade that changes the event analysis policy fingerprint, drain
+pending records using the prior version and original configuration. Verify all
+pending batches are acknowledged before stopping it. Incompatible pending records
+block startup under the new policy. Preserve the spool and reopen it with the
+prior version to finish delivery; records are never silently discarded or
+reinterpreted during an upgrade.
 
 Each encoded spool record payload is limited to 4 MiB by default, even when
 `--event-spool-max-bytes=0` makes the total logical spool unlimited. The final
@@ -723,6 +735,15 @@ selected calls. It is off by default and retains libpcap capture. Use
 `--rtp-ebpf-mode=shadow` for bounded diagnostics and
 `--rtp-ebpf-failure-policy=closed` to change the default scoped runtime fail-open
 behavior. Mode/policy flags alone do not enable it. Pre-match RTP is not retained.
+
+IP/CIDR selectors can select eligible media independently of a selected call,
+including alongside SIP-identity filters, with eBPF enabled or disabled. Explicit
+packet predicates and userspace output checks still apply.
+
+`--rtp-ebpf-shadow-sample-every=N` (default `1`, positive) samples approximately
+one in N decisions without enabling admission. Sampled outcomes remain incomplete
+when frame, ownership, revision, or publication evidence is missing or ambiguous;
+counts do not prove parity for all traffic. Loss categories remain separate.
 
 See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
 semantics, platform/privilege requirements, observation domains, configuration,

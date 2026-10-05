@@ -311,11 +311,33 @@ func TestKernelExplicitProtocolConstraints(t *testing.T) {
 			port    uint16
 			payload []byte
 			want    uint32
-		}{{5060, []byte("INVITE sip:user"), 65535}, {5080, []byte("INVITE sip:user"), 65535}, {5090, []byte("INVITE sip:user"), 0}, {4100, media, 65535}, {6000, media, 0}} {
+		}{{5060, []byte("INVITE sip:user"), 65535}, {5080, []byte("INVITE sip:user"), 65535}, {5090, []byte("INVITE sip:user"), 0}, {4100, media, 65535}, {4100, []byte("ordinary UDP"), 0}, {6000, media, 0}} {
 			packet := fixture(t, "192.0.2.1", "192.0.2.2", 7000, tc.port, tc.payload)
 			got, _, err := p.Test(testRunFrame(packet))
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got, "mode=%d port=%d", mode, tc.port)
+		}
+
+		// IP selectors admit candidates independently of call endpoints. The
+		// configured failure-open/shadow modes retain the explicit port predicate,
+		// even when the selector itself misses; userspace still applies selection.
+		for _, selector := range []struct {
+			prefix string
+			match  bool
+		}{
+			{"192.0.2.2/32", true}, {"198.51.100.0/24", false},
+		} {
+			require.NoError(t, b.ReplaceSelectors(context.Background(), 0, []netip.Prefix{netip.MustParsePrefix(selector.prefix)}, false))
+			for _, port := range []uint16{4100, 6000} {
+				packet := fixture(t, "192.0.2.1", "192.0.2.2", 7000, port, media)
+				got, _, err := p.Test(testRunFrame(packet))
+				require.NoError(t, err)
+				want := uint32(0)
+				if port == 4100 && (selector.match || mode != mediaadmission.KernelEnforce) {
+					want = 65535
+				}
+				require.Equal(t, want, got, "mode=%d selector-match=%t port=%d", mode, selector.match, port)
+			}
 		}
 		// UDP-only remains explicit even when ESP compatibility is otherwise enabled.
 		esp := fixture(t, "192.0.2.1", "192.0.2.2", 4000, 5000, media)

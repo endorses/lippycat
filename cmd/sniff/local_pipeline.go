@@ -48,7 +48,7 @@ func (p *localEnvelopePipeline) process(in <-chan capture.PacketInfo, kind pipel
 		if p.radiusConfig != nil && (info.RADIUS == nil || !radiusconfig.Selected(cfg.Matcher, info.RADIUS)) {
 			continue
 		}
-		if p.radiusConfig != nil && p.logSession != nil {
+		if p.logSession != nil {
 			p.logSession.observe(&info)
 		}
 		env := captureadapter.FromPacketInfo(info, kind)

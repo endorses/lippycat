@@ -52,10 +52,14 @@ func newSession(ctx context.Context, config mediaadmission.Config, options ...Se
 		}
 	}
 	evidence := uint32(4096)
-	for evidence < uint32(config.ShadowEvidenceCapacity)*64 {
+	evidenceTarget := uint64(config.ShadowEvidenceCapacity) * 512
+	if evidenceTarget > 1<<31 {
+		return nil, fmt.Errorf("admission evidence capacity exceeds ring-buffer representation")
+	}
+	for uint64(evidence) < evidenceTarget {
 		evidence *= 2
 	}
-	backend, err := ebpfadmission.NewBackend(ebpfadmission.Options{EndpointCapacity: uint32(config.EndpointCapacity), SelectorCapacity: uint32(config.EndpointCapacity), Domains: domains, EvidenceBytes: evidence, SIPPorts: static.SIPPorts, RTPPortRanges: ranges, UDPOnly: static.UDPOnly, ESPEnabled: static.ESPEnabled, ShadowSampleEvery: 1})
+	backend, err := ebpfadmission.NewBackend(ebpfadmission.Options{EndpointCapacity: uint32(config.EndpointCapacity), SelectorCapacity: uint32(config.EndpointCapacity), Domains: domains, EvidenceBytes: evidence, SIPPorts: static.SIPPorts, RTPPortRanges: ranges, UDPOnly: static.UDPOnly, ESPEnabled: static.ESPEnabled, ShadowSampleEvery: config.ShadowSampleEvery})
 	if err != nil {
 		return nil, err
 	}

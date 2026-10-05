@@ -68,9 +68,11 @@ func TestLiveSocketAdmissionLifecycle(t *testing.T) {
 	attachment, err := installer.Prepare(ctx, handle, leftName, "udp and not port 53")
 	require.NoError(t, err)
 	t.Cleanup(func() { handle.Close(); require.NoError(t, attachment.Close()) })
-	shortDrain, cancelDrain := context.WithTimeout(ctx, time.Millisecond)
-	require.ErrorIs(t, handle.DrainSocketBuffer(shortDrain), context.DeadlineExceeded)
+	shortDrain, cancelDrain := context.WithTimeout(ctx, time.Second)
 	cancelDrain()
+	require.ErrorIs(t, handle.DrainSocketBuffer(shortDrain), context.Canceled)
+	cancelDrain()
+	require.GreaterOrEqual(t, attachment.(interface{ StartupDiscards() uint64 }).StartupDiscards(), uint64(1))
 	require.NoError(t, attachment.Activate())
 	program := attachment.(*preparedFilter).program
 	programFD := program.FD()

@@ -51,9 +51,19 @@ until full selector and endpoint reconciliation succeeds. Domain IDs must fit th
 configured control-map size. Maps are shared across sockets in one backend.
 
 Counters are per-domain/per-CPU. Optional shadow events use a bounded ring buffer,
-monotonic timestamps and the control's confirmed generation. Header fingerprints
-are not unique packet IDs. Samples can collide, duplicate or be lost; ring loss
-has a separate counter. No packet payload is emitted. Explicit predicate rejection
+monotonic timestamps and the control's confirmed generation. Sampling is explicit:
+`--rtp-ebpf-shadow-sample-every N` samples approximately one in N decisions and
+does not enable admission by itself. Header fingerprints are not unique packet
+IDs. Complete frames up to 256 bytes provide transient exact-byte correlation;
+larger or truncated frames have no complete identity. These bytes can include
+payload and stay within the local bounded correlation state, expiring after two
+configured `pending_ttl` intervals. Retained samples, status, logs and management
+transport contain no frame bytes. Duplicate, late, missing, changed-lifetime or
+changed-generation evidence remains incomplete. Classified counts describe sampled
+observations, never all-traffic parity. Ring loss, retained overwrite, malformed
+records, collection errors and correlation pressure have separate accounting.
+Packet diagnostics drop on lock contention and invalidate overlapping correlation
+windows rather than waiting for maintenance. Explicit predicate rejection
 has its own counter and occurs before diagnostic event emission. Out-of-bounds
 classic packet loads are rejected directly by the kernel without a counter event.
 

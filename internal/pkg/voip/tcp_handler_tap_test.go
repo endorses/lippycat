@@ -425,7 +425,7 @@ func TestEndpointPort(t *testing.T) {
 		ok   bool
 	}{
 		{"10.0.0.1:5060", 5060, true},
-		{"2001:db8::1:5061", 5061, true}, // IPv6 unbracketed (getEndpoints form)
+		{"2001:db8::1:5061", 5061, true}, // Legacy unbracketed adapter input.
 		{"[2001:db8::1]:5062", 5062, true},
 		{"10.0.0.1", 0, false},
 		{"10.0.0.1:", 0, false},

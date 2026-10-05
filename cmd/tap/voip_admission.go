@@ -35,6 +35,10 @@ func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config
 	cfg := mediaadmission.DefaultConfig()
 	if session != nil {
 		cfg = session.Config
+	} else if procConfig.MaxCalls <= 0 {
+		// Disabled admission preserves the processor's historical default
+		// substitution before partitioning its process budget.
+		procConfig.MaxCalls = voipprocessor.DefaultConfig().MaxCalls
 	}
 	domains := cfg.Domains()
 	// Limits are process budgets. Partition them deterministically instead of
@@ -61,24 +65,6 @@ func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config
 		r.handlers = append(r.handlers, handler)
 		handler.SetApplicationFilter(procConfig.ApplicationFilter)
 		handler.SetCallRegistry(proc)
-		// Reassembled packets need domain provenance even when a stream crosses
-		// interfaces declared to be the same domain. Preserve one real representative.
-		representative := ""
-		for _, iface := range interfaces {
-			if cfg.DomainForInterface(iface) == domain {
-				representative = iface
-				break
-			}
-		}
-		if representative == "" {
-			for iface, d := range cfg.InterfaceDomains {
-				if d == domain {
-					representative = iface
-					break
-				}
-			}
-		}
-		handler.SetCaptureInterface(representative)
 		if session != nil {
 			bridge, bridgeErr := voipadmission.New(voipadmission.Config{Domain: domain, Limits: cfg, Registry: proc.CallRegistry(), Controller: session.Controller, Metadata: session.Metadata, Diagnostics: session, OnError: func(err error) { logger.Error("Tap media admission update failed", "error", err) }})
 			if bridgeErr != nil {

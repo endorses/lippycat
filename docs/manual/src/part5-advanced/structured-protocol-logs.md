@@ -400,6 +400,14 @@ excluded. Inventory log streams remain opt-in and require a compatible local
 policy or compatible inventory-producing event sources. Configure hunters through
 their normal configuration path; processors do not distribute this policy to them.
 
+Inventory enablement is an analysis policy, not an output request. Consumerless
+`sniff` creates no optional event runtime; structured logs, an explicit event sink,
+or requested file extraction activate it. Ordinary protocol decoding, selection,
+and packet output remain available without that runtime. Other topologies retain
+their own event consumers and lifecycle. The YAML equivalent of
+`--inventory=false` is `events.inventory.enabled: false`. CIDRs scope inventory
+subjects, not packet capture or the cost of connection and protocol analysis.
+
 Known hosts require an observed completed TCP handshake or both UDP directions.
 Known services additionally require a reliably oriented responder, responder
 port, and protocol supported by actual analysis. A lone SYN, destination address,

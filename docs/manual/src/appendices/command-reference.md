@@ -1338,6 +1338,10 @@ lc completion powershell > lc.ps1
 
 These flags exist only on `lc hunt voip` and `lc tap voip`:
 
+`--rtp-ebpf-shadow-sample-every` defaults to `1` and must be positive. It samples
+approximately one in N decisions without activating admission. Incomplete or
+ambiguous evidence never proves parity for all traffic.
+
 | Flag                        | Default   | Description                                         |
 | --------------------------- | --------- | --------------------------------------------------- |
 | `--rtp-ebpf`                | `false`   | Enable Linux socket-level selected-media admission. |

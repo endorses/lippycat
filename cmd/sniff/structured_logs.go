@@ -39,9 +39,8 @@ type sniffEventSession struct {
 	filtered   bool
 }
 
-// withEventAnalysis keeps normalized event production active independently of
-// optional structured-log output. The observer is best-effort and cannot block
-// the packet display/output pipeline.
+// withEventAnalysis installs optional normalized analysis only for requested
+// consumers. Ordinary protocol decoding and packet output own their lifecycle.
 func withEventAnalysis(inputFiles []string, analysisProfile, effectiveFilter string, run func()) {
 	withEventAnalysisMode(inputFiles, analysisProfile, effectiveFilter, false, func(*sniffEventSession) { run() })
 }
@@ -51,6 +50,10 @@ func withEventAnalysisMode(inputFiles []string, analysisProfile, effectiveFilter
 	s, err := newSniffEventSession(dir, inputFiles, analysisProfile, nil)
 	if err != nil {
 		logger.Error("Failed to initialize normalized event analysis", "error", err)
+		return
+	}
+	if s == nil {
+		run(nil)
 		return
 	}
 	s.filtered = strings.TrimSpace(effectiveFilter) != ""
@@ -82,6 +85,9 @@ func withEventAnalysisMode(inputFiles []string, analysisProfile, effectiveFilter
 func newSniffEventSession(dir string, inputFiles []string, analysisProfile string, additionalSink events.Sink) (*sniffEventSession, error) {
 	if err := validateSniffAnalysisPolicy(); err != nil {
 		return nil, err
+	}
+	if dir == "" && additionalSink == nil && !viper.GetBool("files.extract") {
+		return nil, nil
 	}
 
 	eventSize := viper.GetInt("events.queue_size")
@@ -198,9 +204,9 @@ func structuredLogAnalysisProfile(scope, effectiveFilter string) string {
 }
 
 func (s *sniffEventSession) observe(info *capture.PacketInfo) {
-	// Generic sniff observes before packet fan-out. Attach the same stateful
-	// observation that logs and downstream packet sinks will share. Dedicated
-	// radius capture attaches its configured observation before calling us.
+	// Protocol ingress uses the optional capture observer. The local packet
+	// pipeline instead attaches its ordinary RADIUS observation before calling us,
+	// so logs and packet sinks share one stateful decoding/association pass.
 	if info.RADIUS == nil && s.radius != nil {
 		info.RADIUS = s.radius.Process(info.Packet, info.LinkType, info.Interface, nil)
 	}
@@ -227,6 +233,9 @@ func bindSniffEventFlags(cmd *cobra.Command) {
 }
 
 func validateSniffAnalysisPolicy() error {
+	if dropPolicy := events.DropPolicy(viper.GetString("events.drop_policy")); dropPolicy != "" && dropPolicy != events.DropNew {
+		return fmt.Errorf("unsupported event drop policy %q", dropPolicy)
+	}
 	policy := eventconfig.FromViper(viper.GetViper())
 	if err := policy.Validate(); err != nil {
 		return fmt.Errorf("event analysis configuration: %w", err)

@@ -95,7 +95,7 @@ func (h *UDPPacketHandler) warnAmbiguousRTP(packet gopacket.Packet) {
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
 func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
 	if tracker != nil && bufferMgr != nil {
-		bufferMgr.BindRegistry(tracker.AdmissionRegistry())
+		bufferMgr.BindRegistry(tracker.AdmissionRegistry(), tracker.config.MaxEndpointsPerCall)
 	}
 	h := &UDPPacketHandler{
 		tracker:         tracker,
@@ -433,6 +433,7 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 	mediaHeader := len(payload) >= 12 || (len(payload) >= 8 && payload[1] >= 192 && payload[1] <= 223)
 	if h.admission != nil && mediaHeader && payload[0]>>6 == 2 {
 		h.admission.RecordAttributedMedia(resolution.CallID, resolution.Lifetime)
+		h.admission.RecordAttributedPacket(resolution.CallID, resolution.Lifetime, packet.Data())
 	}
 	bufCallID := resolution.CallID
 	sourceEndpoint, destinationEndpoint := net.JoinHostPort(srcIP, srcPort), net.JoinHostPort(dstIP, dstPort)
@@ -510,6 +511,13 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 				h.orchestrator.Dispatch(analysis)
 			}
 			continue
+		}
+		if h.admission != nil {
+			resolution := h.tracker.ResolveMediaPacket(pkt)
+			if resolution.Status == callregistry.MediaResolved && resolution.CallID == callID {
+				h.admission.RecordAttributedMedia(callID, resolution.Lifetime)
+				h.admission.RecordAttributedPacket(callID, resolution.Lifetime, pkt.Data())
+			}
 		}
 
 		if err := forwardPacketWithFilterProvenance(h.forwarder, pkt, packetMetadata, interfaceName, linkType, nil, h.bufferMgr.MatchedFilterIDs(callID)); err != nil {

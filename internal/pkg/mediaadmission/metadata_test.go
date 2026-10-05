@@ -137,3 +137,34 @@ func TestConfigAndEndpointNormalization(t *testing.T) {
 		t.Fatal("disabled unspecified stream admitted")
 	}
 }
+
+func TestMetadataEmptyDerivationRetainsCompletenessAndBounds(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PendingDialogCapacity = 2
+	s, err := NewMetadataStore(cfg)
+	must(t, err)
+	now := time.Now()
+	must(t, s.ObserveDerived(dialog(1), nil, false, now))
+	must(t, s.ObserveDerived(dialog(2), nil, true, now))
+	stats := s.Stats()
+	if stats.Dialogs != 2 || stats.Endpoints != 0 || stats.Bytes <= 0 {
+		t.Fatalf("empty derivation was not charged: %+v", stats)
+	}
+	first, ok := s.TakeRecord(dialog(1), now)
+	if !ok || first.Complete {
+		t.Fatal("unknown derivation became intentional empty media")
+	}
+	second, ok := s.TakeRecord(dialog(2), now)
+	if !ok || !second.Complete {
+		t.Fatal("intentional empty media lost completeness")
+	}
+	must(t, s.ObserveDerived(dialog(3), nil, false, now))
+	must(t, s.ObserveDerived(dialog(4), nil, false, now))
+	must(t, s.ObserveDerived(dialog(5), nil, false, now))
+	if s.Stats().Dialogs != 2 || s.Stats().Evicted != 1 {
+		t.Fatal("empty unknown records bypassed capacity")
+	}
+	if _, ok := s.TakeRecord(dialog(5), now.Add(cfg.PendingTTL)); ok {
+		t.Fatal("unknown empty record bypassed expiry")
+	}
+}

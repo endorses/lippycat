@@ -63,7 +63,7 @@ func (r processorSIPRegistry) Observe(result pipeline.SIPResult) (sipflow.Regist
 	metadata := callMetadataFromResult(result)
 	p.updateCallState(result.CallID, result.Method, metadata)
 	if len(result.SDP) > 0 {
-		for _, port := range extractRTPPortsFromSDP(string(result.SDP), p.config.MaxEndpointsPerCall) {
+		for _, port := range p.parseSDPEndpointKeys(string(result.SDP)) {
 			p.registry.TryAssociateEndpointForLifetime(result.CallID, call.Lifetime, port)
 		}
 	}

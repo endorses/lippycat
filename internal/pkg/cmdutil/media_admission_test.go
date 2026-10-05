@@ -64,3 +64,33 @@ func TestMediaAdmissionInvalidSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestShadowSamplingFlagPrecedenceAndBounds(t *testing.T) {
+	for _, prefix := range []string{"tap.voip.rtp_ebpf", "hunter.voip.rtp_ebpf"} {
+		t.Run(prefix, func(t *testing.T) {
+			cmd := &cobra.Command{Use: "synthetic"}
+			v := viper.New()
+			RegisterMediaAdmissionFlags(cmd, v, prefix)
+			cfg, err := ReadMediaAdmissionConfig(v, prefix)
+			require.NoError(t, err)
+			require.Equal(t, uint32(1), cfg.ShadowSampleEvery)
+			v.Set(prefix+".shadow_sample_every", uint32(7))
+			cfg, err = ReadMediaAdmissionConfig(v, prefix)
+			require.NoError(t, err)
+			require.Equal(t, uint32(7), cfg.ShadowSampleEvery)
+			// Config-file values have lower precedence than a changed bound flag.
+			v = viper.New()
+			cmd = &cobra.Command{Use: "synthetic"}
+			RegisterMediaAdmissionFlags(cmd, v, prefix)
+			v.SetDefault(prefix+".shadow_sample_every", uint32(7))
+			require.NoError(t, cmd.Flags().Set("rtp-ebpf-shadow-sample-every", "3"))
+			cfg, err = ReadMediaAdmissionConfig(v, prefix)
+			require.NoError(t, err)
+			require.Equal(t, uint32(3), cfg.ShadowSampleEvery)
+			require.False(t, cfg.Enabled, "sampling alone does not enable capture admission")
+			require.NoError(t, cmd.Flags().Set("rtp-ebpf-shadow-sample-every", "0"))
+			_, err = ReadMediaAdmissionConfig(v, prefix)
+			require.ErrorContains(t, err, "shadow_sample_every")
+		})
+	}
+}

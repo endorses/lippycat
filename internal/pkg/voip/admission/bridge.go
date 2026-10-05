@@ -6,7 +6,6 @@ package admission
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/netip"
 	"strings"
 	"sync"
@@ -55,9 +54,16 @@ type Stats struct {
 	AssociationRejected  uint64
 	StaleObservations    uint64
 	SelectedLifetimes    int
+	UnknownDerivations   int
+	SDP                  sip.SDPParseStats
 }
 
 type selectedCall struct {
+	unknown        bool
+	known          bool
+	mediaRevision  uint64
+	mediaSet       map[mediaadmission.EndpointKey]struct{}
+	promote        []mediaadmission.EndpointKey
 	retry          bool
 	answered       bool
 	activeMedia    bool
@@ -69,15 +75,18 @@ type selectedCall struct {
 }
 
 type Bridge struct {
-	stop         chan struct{}
-	done         chan struct{}
-	mu           sync.Mutex
-	cfg          Config
-	session      uint64
-	nextMetadata uint64
-	selected     map[string]*selectedCall
-	stats        Stats
-	closed       bool
+	needsSnapshot    bool
+	lostSelection    bool
+	sdpParseCounters sip.SDPParseCounters
+	stop             chan struct{}
+	done             chan struct{}
+	mu               sync.Mutex
+	cfg              Config
+	session          uint64
+	nextMetadata     uint64
+	selected         map[string]*selectedCall
+	stats            Stats
+	closed           bool
 }
 
 func New(cfg Config) (*Bridge, error) {
@@ -139,7 +148,7 @@ func (b *Bridge) ObserveValidated(result pipeline.SIPResult) error {
 				continue
 			}
 			key := b.key(result, candidates)
-			if err := b.cfg.Metadata.Observe(key, record.Endpoints, now); err != nil {
+			if err := b.cfg.Metadata.ObserveDerived(key, record.Endpoints, record.Complete, now); err != nil {
 				b.stats.MetadataErrors++
 				errs = append(errs, err)
 			}
@@ -149,26 +158,27 @@ func (b *Bridge) ObserveValidated(result pipeline.SIPResult) error {
 		if result.FromTag == "" && result.ViaBranch == "" {
 			b.stats.UnkeyedMetadata++
 		} else {
-			parsed, err := sip.ParseSDPEndpoints(string(result.SDP), b.cfg.Limits.MaxEndpointsPerOwner)
-			if err != nil {
+			parsed := sip.ParseSDPResult(string(result.SDP), b.cfg.Limits.MaxEndpointsPerOwner)
+			b.sdpParseCounters.Observe(parsed)
+			if err := parsed.Err(); err != nil {
 				b.stats.MetadataErrors++
 				errs = append(errs, err)
-			} else {
-				endpoints := make([]mediaadmission.EndpointKey, 0, len(parsed))
-				for _, endpoint := range parsed {
-					key, keyErr := mediaadmission.NewEndpoint(b.cfg.Domain, endpoint.Address.Addr(), endpoint.Address.Port())
-					if keyErr != nil {
-						errs = append(errs, keyErr)
-						continue
-					}
-					endpoints = append(endpoints, key)
-				}
-				key := b.key(result, b.cfg.Metadata.Candidates(b.cfg.Domain, b.session, result.CallID, now))
-				if err = b.cfg.Metadata.Observe(key, endpoints, now); err != nil {
-					b.stats.MetadataErrors++
-					errs = append(errs, err)
-				}
 			}
+			endpoints := make([]mediaadmission.EndpointKey, 0, len(parsed.Endpoints))
+			for _, endpoint := range parsed.Endpoints {
+				key, keyErr := mediaadmission.NewEndpoint(b.cfg.Domain, endpoint.Address.Addr(), endpoint.Address.Port())
+				if keyErr != nil {
+					errs = append(errs, keyErr)
+					continue
+				}
+				endpoints = append(endpoints, key)
+			}
+			key := b.key(result, b.cfg.Metadata.Candidates(b.cfg.Domain, b.session, result.CallID, now))
+			if err := b.cfg.Metadata.ObserveDerived(key, endpoints, parsed.Complete, now); err != nil {
+				b.stats.MetadataErrors++
+				errs = append(errs, err)
+			}
+
 		}
 	}
 	b.mu.Unlock()
@@ -240,6 +250,8 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		if err != nil {
 			errs = append(errs, err)
 			if owner.Session == 0 {
+				b.lostSelection = true
+				b.needsSnapshot = true
 				// The bounded pending-token pool is exhausted or unavailable.
 				// Controller keeps unknown desired state blocked; never retain an
 				// unowned bridge entry or acknowledge this as complete recovery.
@@ -249,46 +261,110 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		}
 		current = &selectedCall{lifetime: call.Lifetime, owner: owner, metadataCutoff: b.nextMetadata, selectedAt: time.Now(), retry: err != nil}
 		b.selected[result.CallID] = current
+
 	}
 	now := time.Now()
 	var promote []mediaadmission.EndpointKey
-	for _, record := range b.cfg.Metadata.Candidates(b.cfg.Domain, b.session, result.CallID, now) {
-		if !compatible(record.Key, result) {
+	var derived []mediaadmission.EndpointKey
+	known, incomplete := false, false
+	for _, candidate := range b.cfg.Metadata.Candidates(b.cfg.Domain, b.session, result.CallID, now) {
+		if !compatible(candidate.Key, result) {
 			continue
 		}
-		endpoints, found := b.cfg.Metadata.Take(record.Key, now)
+		record, found := b.cfg.Metadata.TakeRecord(candidate.Key, now)
 		if found {
-			promote = append(promote, endpoints...)
+			promote = append(promote, record.Endpoints...)
+			derived = append(derived, record.Endpoints...)
+			known = true
+			incomplete = incomplete || !record.Complete
 			current.metadataCutoff = b.nextMetadata
 		}
 	}
-	if len(promote) == 0 && len(result.SDP) == 0 {
+	if len(result.SDP) > 0 {
+		parsed := sip.ParseSDPResult(string(result.SDP), b.cfg.Limits.MaxEndpointsPerOwner)
+		b.sdpParseCounters.Observe(parsed)
+		known, incomplete = true, !parsed.Complete
+		derived = nil
+		for _, endpoint := range parsed.Endpoints {
+			key, err := mediaadmission.NewEndpoint(b.cfg.Domain, endpoint.Address.Addr(), endpoint.Address.Port())
+			if err != nil {
+				incomplete = true
+				continue
+			}
+			derived = append(derived, key)
+		}
+		// Direct selected metadata is available even if pending staging was lost.
+		promote = append(promote, derived...)
+		if err := parsed.Err(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	derived = uniqueEndpoints(derived, b.cfg.Limits.MaxEndpointsPerOwner+1)
+	promote = uniqueEndpoints(promote, b.cfg.Limits.MaxEndpointsPerOwner+1)
+	if len(derived) > b.cfg.Limits.MaxEndpointsPerOwner || len(promote) > b.cfg.Limits.MaxEndpointsPerOwner {
+		incomplete = true
+		derived = derived[:min(len(derived), b.cfg.Limits.MaxEndpointsPerOwner)]
+		promote = promote[:min(len(promote), b.cfg.Limits.MaxEndpointsPerOwner)]
+	}
+	if len(promote) == 0 && !known {
 		b.stats.PromotionUnavailable++
+	}
+	if !known && !current.known && (result.Method == "INVITE" || result.CSeqMethod == "INVITE") {
+		// An absent/expired pending offer cannot prove a selected call has no
+		// media. A later valid offer/answer or lifetime retirement supplies the
+		// missing derivation; a registry snapshot alone does not.
+		incomplete = true
+		current.unknown = true
 	}
 	if result.ResponseCode >= 200 && result.ResponseCode < 300 && result.CSeqMethod == "INVITE" {
 		current.answered = true
 	}
-	if len(result.SDP) > 0 {
-		if endpoints, err := sip.ParseSDPEndpoints(string(result.SDP), b.cfg.Limits.MaxEndpointsPerOwner); err == nil {
-			current.activeMedia = len(endpoints) > 0
+	if known {
+		previousKnown, previousUnknown := current.known, current.unknown
+		current.known = true
+		current.unknown = incomplete
+		next := make(map[mediaadmission.EndpointKey]struct{}, len(derived))
+		for _, key := range derived {
+			next[key] = struct{}{}
 		}
-	} else if len(promote) > 0 {
-		current.activeMedia = true
+		if !sameMediaSet(current.mediaSet, next) || current.mediaRevision == 0 || !previousKnown || previousUnknown != incomplete {
+			current.mediaRevision++
+		}
+		current.mediaSet = next
+		current.activeMedia = len(derived) > 0
+	}
+	if known && !incomplete {
+		current.promote = uniqueEndpoints(promote, b.cfg.Limits.MaxEndpointsPerOwner)
+	} else {
+		combined := uniqueEndpoints(append(append([]mediaadmission.EndpointKey(nil), current.promote...), promote...), b.cfg.Limits.MaxEndpointsPerOwner+1)
+		if len(combined) > b.cfg.Limits.MaxEndpointsPerOwner {
+			incomplete = true
+			current.unknown = true
+			combined = combined[:b.cfg.Limits.MaxEndpointsPerOwner]
+		}
+		current.promote = combined
+	}
+	if incomplete {
+		b.needsSnapshot = true
+		errs = append(errs, b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, errors.New("selected media derivation incomplete")))
+	}
+	if incomplete {
+		b.recordExpectationLocked(current, false)
 	}
 	if b.cfg.Diagnostics != nil {
 		b.cfg.Diagnostics.RecordSelection(current.owner, b.cfg.Domain, current.answered, current.activeMedia, current.selectedAt)
+	}
+	if diagnostic, ok := b.cfg.Diagnostics.(interface {
+		RecordSelectionLifetime(mediaadmission.OwnerID, mediaadmission.DomainID, time.Time, time.Time)
+	}); ok {
+		diagnostic.RecordSelectionLifetime(current.owner, b.cfg.Domain, call.Created, current.selectedAt)
 	}
 	lifetime := call.Lifetime
 	b.mu.Unlock()
 	// Registry endpoint callbacks reenter this bridge, so promotion happens with
 	// no bridge lock held. The registry enforces the exact captured lifetime.
-	for _, endpoint := range promote {
-		if !b.cfg.Registry.TryAssociateEndpointForLifetime(result.CallID, lifetime, netip.AddrPortFrom(endpoint.Addr, endpoint.Port).String()) {
-			b.mu.Lock()
-			b.stats.AssociationRejected++
-			b.mu.Unlock()
-			errs = append(errs, errors.New("authoritative registry rejected promoted media endpoint"))
-		}
+	if err := b.promoteCurrent(result.CallID, lifetime); err != nil {
+		errs = append(errs, err)
 	}
 	if snapshot, exists := b.cfg.Registry.EndpointSnapshot(result.CallID); exists && snapshot.Call.Lifetime == lifetime {
 		if err := b.apply(snapshot); err != nil {
@@ -297,6 +373,17 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	} else {
 		errs = append(errs, ErrCallUnavailable)
 	}
+	b.mu.Lock()
+	recovering := b.needsSnapshot
+	if err := b.recoverLocked(); err != nil {
+		errs = append(errs, err)
+	} else if recovering {
+		// Intermediate controller updates remain blocked by unknownDesired until
+		// this complete atomic snapshot succeeds. Final confirmation supersedes
+		// those transitional errors.
+		errs = nil
+	}
+	b.mu.Unlock()
 	return b.report(errors.Join(errs...))
 }
 
@@ -342,13 +429,15 @@ func (b *Bridge) apply(observation callregistry.EndpointObservation) error {
 		key, err := parseEndpoint(b.cfg.Domain, endpoint)
 		if err != nil {
 			state.retry = true
-			return b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, fmt.Errorf("invalid authoritative media endpoint: %w", err))
+			b.needsSnapshot = true
+			return b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, errors.New("invalid authoritative media endpoint"))
 		}
 		endpoints = append(endpoints, key)
 	}
 	state.revision = observation.Revision
 	err := b.cfg.Controller.UpdateOwner(context.Background(), b.cfg.Domain, state.owner, endpoints)
-	state.retry = err != nil
+	state.retry = err != nil || len(state.promote) > 0
+	b.recordExpectationLocked(state, err == nil)
 	return err
 }
 func (b *Bridge) OnEndpointsChanged(observation callregistry.EndpointObservation) {
@@ -369,6 +458,7 @@ func (b *Bridge) OnCallStarted(call callregistry.Call) {
 	if b.cfg.Diagnostics != nil {
 		b.cfg.Diagnostics.RecordFinalized(old.owner)
 	}
+	err = errors.Join(err, b.recoverLocked())
 	b.mu.Unlock()
 	if !errors.Is(err, mediaadmission.ErrStaleOwner) {
 		b.report(err)
@@ -387,6 +477,7 @@ func (b *Bridge) OnCallEnded(call callregistry.Call, _ callregistry.EndReason) {
 	if b.cfg.Diagnostics != nil {
 		b.cfg.Diagnostics.RecordFinalized(old.owner)
 	}
+	err = errors.Join(err, b.recoverLocked())
 	b.mu.Unlock()
 	if !errors.Is(err, mediaadmission.ErrStaleOwner) {
 		b.report(err)
@@ -397,6 +488,12 @@ func (b *Bridge) Stats() Stats {
 	defer b.mu.Unlock()
 	stats := b.stats
 	stats.SelectedLifetimes = len(b.selected)
+	stats.SDP = b.sdpParseCounters.Snapshot()
+	for _, state := range b.selected {
+		if state.unknown {
+			stats.UnknownDerivations++
+		}
+	}
 	return stats
 }
 func (b *Bridge) Close() error {
@@ -446,7 +543,12 @@ func (b *Bridge) clearMetadata(callID string, cutoff uint64) {
 // endpoint resolution. A retired/reused lifetime cannot update the new owner's
 // diagnostic record through a delayed callback.
 func (b *Bridge) RecordAttributedMedia(callID string, lifetime callregistry.Lifetime) {
-	b.mu.Lock()
+	if !b.mu.TryLock() {
+		if diagnostic, ok := b.cfg.Diagnostics.(interface{ RecordAttributionUnavailable() }); ok {
+			diagnostic.RecordAttributionUnavailable()
+		}
+		return
+	}
 	defer b.mu.Unlock()
 	if b.closed || b.cfg.Diagnostics == nil {
 		return
@@ -490,13 +592,16 @@ func (b *Bridge) retrySelected() error {
 	}
 	pending := make(map[string]callregistry.Lifetime)
 	for id, state := range b.selected {
-		if state.retry {
+		if state.retry || len(state.promote) > 0 {
 			pending[id] = state.lifetime
 		}
 	}
 	b.mu.Unlock()
 	var errs []error
 	for id, lifetime := range pending {
+		if err := b.promoteCurrent(id, lifetime); err != nil {
+			errs = append(errs, err)
+		}
 		observation, ok := b.cfg.Registry.EndpointSnapshot(id)
 		if !ok || observation.Call.Lifetime != lifetime {
 			continue
@@ -505,5 +610,190 @@ func (b *Bridge) retrySelected() error {
 			errs = append(errs, err)
 		}
 	}
+	b.mu.Lock()
+	recovering := b.needsSnapshot
+	if err := b.recoverLocked(); err != nil {
+		errs = append(errs, err)
+	} else if recovering {
+		// Intermediate controller updates remain blocked by unknownDesired until
+		// this complete atomic snapshot succeeds. Final confirmation supersedes
+		// those transitional errors.
+		errs = nil
+	}
+	b.mu.Unlock()
 	return errors.Join(errs...)
+}
+
+func uniqueEndpoints(keys []mediaadmission.EndpointKey, limit int) []mediaadmission.EndpointKey {
+	set := make(map[mediaadmission.EndpointKey]bool)
+	var result []mediaadmission.EndpointKey
+	for _, key := range keys {
+		if !set[key] && len(result) < limit {
+			set[key] = true
+			result = append(result, key)
+		}
+	}
+	return result
+}
+
+func sameMediaSet(a, b map[mediaadmission.EndpointKey]struct{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key := range a {
+		if _, ok := b[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *Bridge) promoteCurrent(id string, lifetime callregistry.Lifetime) error {
+	b.mu.Lock()
+	state := b.selected[id]
+	if b.closed || state == nil || state.lifetime != lifetime {
+		b.mu.Unlock()
+		return nil
+	}
+	keys := append([]mediaadmission.EndpointKey(nil), state.promote...)
+	b.mu.Unlock()
+	var rejected []mediaadmission.EndpointKey
+	for _, key := range keys {
+		if !b.cfg.Registry.TryAssociateEndpointForLifetime(id, lifetime, netip.AddrPortFrom(key.Addr, key.Port).String()) {
+			rejected = append(rejected, key)
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	state = b.selected[id]
+	call, active := b.cfg.Registry.Call(id)
+	if state == nil || state.lifetime != lifetime || !active || call.Lifetime != lifetime {
+		b.stats.StaleObservations++
+		return nil // legitimate retirement/reuse does not open admission
+	}
+	// Remove only keys actually accepted by this attempt. A concurrent selected
+	// update may have appended more keys while registry observers reentered us.
+	accepted := make(map[mediaadmission.EndpointKey]bool)
+	for _, key := range keys {
+		accepted[key] = true
+	}
+	for _, key := range rejected {
+		delete(accepted, key)
+	}
+	pending := state.promote[:0]
+	for _, key := range state.promote {
+		if !accepted[key] {
+			pending = append(pending, key)
+		}
+	}
+	state.promote = pending
+	if len(rejected) > 0 {
+		b.stats.AssociationRejected += uint64(len(rejected))
+		state.retry = true
+		b.needsSnapshot = true
+		return b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, errors.New("selected media association rejected"))
+	}
+	return nil
+}
+
+// recoverLocked publishes the complete current eligible owner set only once all
+// derivations and registry promotions are known. The registry read lock spans
+// publication so concurrent lifetimes/revisions cannot supersede this snapshot.
+func (b *Bridge) recoverLocked() error {
+	if !b.needsSnapshot || b.closed {
+		return nil
+	}
+	if b.lostSelection {
+		counter, ok := b.cfg.Registry.(interface{ ActiveCallCount() int })
+		if !ok || counter.ActiveCallCount() != 0 {
+			return errors.New("selected owner overflow remains unresolved")
+		}
+		b.lostSelection = false
+	}
+	for _, state := range b.selected {
+		if state.unknown || len(state.promote) > 0 {
+			return errors.New("selected media derivation remains incomplete")
+		}
+	}
+	registry, ok := b.cfg.Registry.(interface {
+		WithEndpointSnapshots([]string, func([]callregistry.EndpointObservation) error) error
+	})
+	if !ok {
+		return errors.New("registry cannot confirm atomic admission snapshot")
+	}
+	ids := make([]string, 0, len(b.selected))
+	for id := range b.selected {
+		ids = append(ids, id)
+	}
+	return registry.WithEndpointSnapshots(ids, func(observations []callregistry.EndpointObservation) error {
+		if len(observations) != len(ids) {
+			return errors.New("selected lifetime retired during reconciliation")
+		}
+		snapshot := make([]mediaadmission.OwnerEndpoints, 0, len(observations))
+		for _, observation := range observations {
+			state := b.selected[observation.Call.CallID]
+			if state == nil || state.lifetime != observation.Call.Lifetime {
+				return ErrCallUnavailable
+			}
+			item := mediaadmission.OwnerEndpoints{Owner: state.owner}
+			for _, endpoint := range observation.Endpoints {
+				if !strings.Contains(endpoint, ":") {
+					continue
+				}
+				key, err := parseEndpoint(b.cfg.Domain, endpoint)
+				if err != nil {
+					return errors.New("invalid authoritative media endpoint")
+				}
+				item.Endpoints = append(item.Endpoints, key)
+			}
+			snapshot = append(snapshot, item)
+		}
+		if err := b.cfg.Controller.ReplaceDesired(context.Background(), b.cfg.Domain, snapshot); err != nil {
+			return err
+		}
+		b.needsSnapshot = false
+		for _, observation := range observations {
+			state := b.selected[observation.Call.CallID]
+			state.retry = false
+			state.revision = observation.Revision
+			b.recordExpectationLocked(state, true)
+		}
+		return nil
+	})
+}
+
+func (b *Bridge) recordExpectationLocked(state *selectedCall, synchronized bool) {
+	if diagnostic, ok := b.cfg.Diagnostics.(interface {
+		RecordMediaExpectation(mediaadmission.OwnerID, mediaadmission.DomainID, bool, bool, uint64, time.Time)
+	}); ok {
+		diagnostic.RecordMediaExpectation(state.owner, b.cfg.Domain, synchronized && state.known && !state.unknown && len(state.promote) == 0, state.activeMedia, state.mediaRevision, time.Now())
+	}
+}
+
+// RecordAttributedPacket supplies bounded sampled diagnostic evidence only after
+// authoritative attribution to a current selected lifetime. It never authorizes output.
+func (b *Bridge) RecordAttributedPacket(callID string, lifetime callregistry.Lifetime, frame []byte) {
+	if !b.mu.TryLock() {
+		if diagnostic, ok := b.cfg.Diagnostics.(interface{ RecordAttributionUnavailable() }); ok {
+			diagnostic.RecordAttributionUnavailable()
+		}
+		return
+	}
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
+	state := b.selected[callID]
+	if state == nil || state.lifetime != lifetime {
+		return
+	}
+	call, ok := b.cfg.Registry.Call(callID)
+	if !ok || call.Lifetime != lifetime {
+		return
+	}
+	if diagnostic, ok := b.cfg.Diagnostics.(interface {
+		RecordAttributedPacket(mediaadmission.OwnerID, mediaadmission.DomainID, []byte)
+	}); ok {
+		diagnostic.RecordAttributedPacket(state.owner, b.cfg.Domain, frame)
+	}
 }

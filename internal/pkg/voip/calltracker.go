@@ -15,6 +15,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -127,6 +128,7 @@ func (ct *CallTracker) detachCallLocked(callID string) *CallInfo {
 }
 
 type CallTracker struct {
+	sdpParseCounters   sharedsip.SDPParseCounters
 	callMap            map[string]*CallInfo
 	registry           *callregistry.Core
 	maxCalls           int // Maximum calls to keep

@@ -10,13 +10,22 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 )
 
 type testFilterInstaller struct {
 	prepare func(context.Context, *pcap.Handle, string, string) (PreparedFilter, error)
+	observe func(string, []byte)
+}
+
+func (f testFilterInstaller) RecordObservedPacket(name string, frame []byte) {
+	if f.observe != nil {
+		f.observe(name, frame)
+	}
 }
 
 func (f testFilterInstaller) Prepare(ctx context.Context, h *pcap.Handle, name, filter string) (PreparedFilter, error) {
@@ -24,12 +33,14 @@ func (f testFilterInstaller) Prepare(ctx context.Context, h *pcap.Handle, name, 
 }
 
 type testPreparedFilter struct {
-	activate func() error
-	close    func() error
+	discarded uint64
+	activate  func() error
+	close     func() error
 }
 
-func (f *testPreparedFilter) Activate() error { return f.activate() }
-func (f *testPreparedFilter) Close() error    { return f.close() }
+func (f *testPreparedFilter) Activate() error         { return f.activate() }
+func (f *testPreparedFilter) Close() error            { return f.close() }
+func (f *testPreparedFilter) StartupDiscards() uint64 { return f.discarded }
 
 func TestSocketFilterStartupPreparesAllBeforeActivation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -50,7 +61,19 @@ func TestSocketFilterStartupPreparesAllBeforeActivation(t *testing.T) {
 			}
 		}
 		prepared.Add(1)
-		return &testPreparedFilter{activate: func() error {
+		// Preparation, rather than the reader's wall clock, owns queue retirement.
+		var discarded uint64
+		for {
+			_, _, err := h.ReadPacketData()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			discarded++
+		}
+		return &testPreparedFilter{discarded: discarded, activate: func() error {
 			if prepared.Load() != 2 {
 				return errors.New("activated before all interfaces prepared")
 			}
@@ -90,6 +113,48 @@ func TestSocketFilterStartupPreparesAllBeforeActivation(t *testing.T) {
 		t.Fatalf("pre-attachment packet escaped startup boundary: %v", packet)
 	default:
 	}
+}
+
+func TestSocketFilterPreparedReaderPreservesClockRollback(t *testing.T) {
+	// The installer guarantees retirement. Post-activation frames may legitimately
+	// have older or unordered host timestamps and must not be discarded by time.
+	sample := readinessHandle(t)
+	data, _, err := sample.ReadPacketData()
+	require.NoError(t, err)
+	file, err := os.CreateTemp(t.TempDir(), "clock-*.pcap")
+	require.NoError(t, err)
+	writer := pcapgo.NewWriter(file)
+	require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+	timestamps := []time.Time{time.Now().Add(-time.Hour), time.Now().Add(-2 * time.Hour)}
+	for _, timestamp := range timestamps {
+		require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: timestamp, CaptureLength: len(data), Length: len(data)}, data))
+	}
+	require.NoError(t, file.Close())
+	handle, err := pcap.OpenOffline(file.Name())
+	require.NoError(t, err)
+	t.Cleanup(handle.Close)
+	buffer := NewPacketBuffer(t.Context(), 8)
+	defer buffer.Close()
+	observed := make(chan []byte, 2)
+	installer := testFilterInstaller{observe: func(name string, frame []byte) {
+		if name == "synthetic" {
+			observed <- append([]byte(nil), frame...)
+		}
+	}, prepare: func(context.Context, *pcap.Handle, string, string) (PreparedFilter, error) {
+		return &testPreparedFilter{activate: func() error { return nil }, close: func() error { return nil }}, nil
+	}}
+	InitWithBufferReady(t.Context(), []pcaptypes.PcapInterface{&mockPcapInterface{name: "synthetic", handle: handle}}, "", buffer,
+		func(_ []layers.LinkType, err error) { require.NoError(t, err) }, CaptureOptions{FilterInstaller: installer})
+	for _, timestamp := range timestamps {
+		select {
+		case packet := <-buffer.Receive():
+			require.WithinDuration(t, timestamp, packet.Packet.Metadata().Timestamp, time.Microsecond)
+		case <-time.After(time.Second):
+			t.Fatal("post-activation frame with older timestamp was lost")
+		}
+		require.Equal(t, data, <-observed, "each original frame supplies exactly one identity observation")
+	}
+	require.Empty(t, observed)
 }
 
 func TestSocketFilterStartupFailureUnwindsAllAttachments(t *testing.T) {

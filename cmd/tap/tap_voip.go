@@ -54,7 +54,8 @@ func (a *TapTCPAssembler) AssemblePacket(pktInfo capture.PacketInfo) bool {
 	}
 
 	// Feed the packet to the TCP assembler for stream reconstruction
-	if err := a.assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)); err != nil {
+	env := captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)
+	if err := a.assembler.AssembleWithContext(env, tapPacketContext(packet, env.Source)); err != nil {
 		logger.Error("Failed to assemble tap TCP packet", "error", err)
 		return false
 	}

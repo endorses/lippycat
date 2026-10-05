@@ -967,6 +967,10 @@ The optional Linux capture optimization is configured under
 `hunter.voip.rtp_ebpf` and `tap.voip.rtp_ebpf`. Only `enabled: true` activates it;
 setting `mode` or `failure_policy` alone does not.
 
+`shadow_sample_every` defaults to `1` and must be positive. It samples
+approximately one in N decisions without activating admission; sampled outcomes
+and evidence-loss categories remain distinct from exact whole-traffic counts.
+
 | Member                      | Default   | Purpose                                                        |
 | --------------------------- | --------- | -------------------------------------------------------------- |
 | `enabled`                   | `false`   | Explicit activation for live VoIP capture.                     |

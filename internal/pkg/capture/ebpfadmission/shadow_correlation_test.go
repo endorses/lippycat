@@ -100,6 +100,8 @@ func TestKernelShadowHistoricalCorrelation(t *testing.T) {
 		require.GreaterOrEqual(t, event.TimeNS, before)
 		require.LessOrEqual(t, event.TimeNS, observed)
 		require.Equal(t, shadowFingerprint(p), event.Fingerprint)
+		require.Equal(t, uint32(len(p)), event.IdentityLength)
+		require.Equal(t, p, event.Identity[:event.IdentityLength], "full bounded frame bytes, not the fingerprint, establish correlation identity")
 		return mediaadmission.ShadowSample{Domain: event.Domain, Generation: event.Generation, EventMonotonicNS: event.TimeNS, ObservedMonotonicNS: observed, ObservedAt: time.Now(), Reason: event.Reason, Length: event.Length, Fingerprint: event.Fingerprint, Source: event.Source, Destination: event.Destination}
 	}
 	beforeSelection := emit(packet(101))

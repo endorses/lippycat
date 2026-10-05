@@ -637,9 +637,7 @@ func (pb *PacketBuffer) CloseInputs() {
 // Dedicated VoIP capture opts into reassembly for SIP messages exceeding the MTU.
 type CaptureOptions struct {
 	// FilterInstaller opts into coordinated socket-filter preparation. Nil uses classic libpcap filtering.
-	FilterInstaller FilterInstaller
-	// discardThrough fences packets queued before the enabled startup boundary.
-	discardThrough        time.Time
+	FilterInstaller       FilterInstaller
 	domainState           *captureDomainState
 	ReassembleIPFragments bool
 	IPv4Defrag            IPv4DefragConfig
@@ -797,7 +795,6 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 		err        error
 		attachment PreparedFilter
 	}
-	var startupBoundary time.Time
 	startup := make(chan startupResult, len(ifaces))
 	startGate := make(chan struct{})
 	for _, iface := range ifaces {
@@ -956,6 +953,7 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 					reportFailure(err.Error())
 					return
 				}
+				telemetry.recordStartupDiscards(attachment)
 				startup <- startupResult{link: handle.LinkType(), attachment: attachment}
 				select {
 				case <-startGate:
@@ -994,12 +992,6 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 				captureFromInterface(ctx, pif, filter, packetBuffer, domainState.ipv4, domainState.ipv6, telemetry, &handleMu, workerOptions...)
 			} else {
 				preparedOptions := workerOptions
-				if installer != nil {
-					if len(preparedOptions) == 0 {
-						preparedOptions = []CaptureOptions{{}}
-					}
-					preparedOptions[len(preparedOptions)-1].discardThrough = startupBoundary
-				}
 				captureFromPreparedHandle(ctx, pif, handle, packetBuffer, domainState.ipv4, domainState.ipv6, telemetry, &handleMu, preparedOptions...)
 				// Managed capture requires every configured interface. One reader's
 				// unexpected exit stops the entire generation for owner recovery.
@@ -1044,9 +1036,6 @@ func initWithBufferAndTelemetryReady(ctx context.Context, ifaces []pcaptypes.Pca
 			wg.Wait()
 			ready(nil, startupErr)
 			return
-		}
-		if installer != nil {
-			startupBoundary = time.Now()
 		}
 		close(startGate)
 		ready(links, nil)
@@ -1177,15 +1166,12 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 			}
 		}()
 	}
+	telemetry.recordStartupDiscards(attachment)
 	if filterErr != nil {
 		// Dynamic BPF can contain LI selectors; neither the expanded filter nor
 		// a compiler error containing it belongs in diagnostics.
 		logger.Error("Error setting BPF filter", "interface", iface.Name())
 		return
-	}
-	if attachment != nil {
-		options = append([]CaptureOptions(nil), options...)
-		options[len(options)-1].discardThrough = time.Now()
 	}
 	captureFromPreparedHandle(ctx, iface, handle, buffer, defragmenter, v6defragmenter, telemetry, handleMu, options...)
 }
@@ -1212,10 +1198,6 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 		scopeFragments = options[len(options)-1].domainState.fragments
 	}
 	var lastOfflineSweep time.Time
-	var discardThrough time.Time
-	if len(options) > 0 {
-		discardThrough = options[len(options)-1].discardThrough
-	}
 
 	// Note: defragmenter is shared across all interfaces to correctly reassemble
 	// IP fragments that may arrive on different interfaces (e.g., due to port mirror splits)
@@ -1283,6 +1265,7 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 							"interface", iface.Name(),
 							"packets_processed", count,
 							"pcap_packets_received", pcapStats.PacketsReceived,
+							"startup_frames_discarded", snapshot.StartupDiscards,
 							"pcap_kernel_dropped", pcapStats.PacketsDropped,
 							"pcap_interface_dropped", pcapStats.PacketsIfDropped,
 							"total_kernel_dropped", snapshot.KernelDrops + snapshot.InterfaceDrops,
@@ -1364,11 +1347,10 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 				return
 			}
 
-			// Activated sockets can retain pre-attachment frames in libpcap or
-			// partially retired packet-mmap blocks. A host timestamp fence is a
-			// second boundary in addition to the installer's bounded drain.
-			if !discardThrough.IsZero() && !packet.Metadata().Timestamp.After(discardThrough) {
-				continue
+			if observer, ok := captureFilterInstaller(options).(interface {
+				RecordObservedPacket(string, []byte)
+			}); ok {
+				observer.RecordObservedPacket(iface.Name(), packet.Data())
 			}
 			if offlineInput && (lastOfflineSweep.IsZero() || packet.Metadata().Timestamp.Sub(lastOfflineSweep) >= defragmenter.config.SweepInterval) {
 				defragmenter.DiscardOlderThan(packet.Metadata().Timestamp.Add(-defragmenter.config.StaleAge))

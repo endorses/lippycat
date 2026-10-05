@@ -194,3 +194,22 @@ func (a *SourceAdapter) RecordAttributedMedia(callID, iface string, lifetime cal
 		a.mediaObserver.RecordAttributedMedia(callID, lifetime)
 	}
 }
+
+// RecordAttributedPacket carries transient full-frame evidence only after the
+// source has resolved media to an exact current selected call lifetime.
+func (a *SourceAdapter) RecordAttributedPacket(callID, iface string, lifetime callregistry.Lifetime, frame []byte) {
+	if a == nil {
+		return
+	}
+	if a.scoped != nil {
+		if child := a.scoped.child(iface); child != nil {
+			child.RecordAttributedPacket(callID, iface, lifetime, frame)
+		}
+		return
+	}
+	if observer, ok := a.mediaObserver.(interface {
+		RecordAttributedPacket(string, callregistry.Lifetime, []byte)
+	}); ok {
+		observer.RecordAttributedPacket(callID, lifetime, frame)
+	}
+}

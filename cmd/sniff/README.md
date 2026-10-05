@@ -60,6 +60,13 @@ and global/per-scope state caps. See the
 [network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)
 for evidence, privacy, configuration, and old-peer behavior.
 
+Inventory is enabled by default within active event analysis. Ordinary `sniff`
+without structured logs, an explicit event sink, or requested file extraction
+does not create that optional runtime. Protocol decoding, selection, and packet
+output remain available. Disable inventory with `--inventory=false` or
+`events.inventory.enabled: false` in YAML. Inventory CIDRs filter observed
+subjects; they do not reduce packet capture or other analysis work.
+
 ## Output Formats
 
 ### JSON Format (Default)

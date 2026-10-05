@@ -89,6 +89,10 @@ and global/per-scope state caps. See the
 [network observation guide](../../docs/manual/src/part5-advanced/structured-protocol-logs.md#network-observations)
 for evidence, privacy, configuration, and old-peer behavior.
 
+Inventory enablement controls active event analysis; it does not request an
+additional log stream. The YAML off switch is `events.inventory.enabled: false`.
+Inventory CIDRs filter observed subjects, not capture or other analysis work.
+
 ## Commands
 
 ### `lc tap` - General Standalone Capture
@@ -287,6 +291,13 @@ fallback. Packet-only upstream nodes remain compatible with the default packet
 mode.
 
 #### Reliable upstream event spool operation
+
+Before an upgrade that changes the event analysis policy fingerprint, drain
+pending records using the prior version and original configuration. Verify all
+pending batches are acknowledged before stopping it. Incompatible pending records
+block startup under the new policy. Preserve the spool and reopen it with the
+prior version to finish delivery; records are never silently discarded or
+reinterpreted during an upgrade.
 
 Each encoded spool record payload is limited to 4 MiB by default, even when the
 total logical spool limit is unlimited. The final record, including loss reports,
@@ -946,6 +957,19 @@ selected calls. It is off by default and retains libpcap capture. Use
 `--rtp-ebpf-mode=shadow` for bounded diagnostics and
 `--rtp-ebpf-failure-policy=closed` to change the default scoped runtime fail-open
 behavior. Mode/policy flags alone do not enable it. Pre-match RTP is not retained.
+
+With `--rtp-ebpf`, including shadow mode, IP/CIDR selectors can select eligible
+media independently of a selected call. Explicit packet predicates and userspace
+output checks still apply. With eBPF disabled, tap puts IP/CIDR filters in classic
+BPF: a mixed IP and SIP-identity configuration can capture IP-matched RTP but
+reject it in userspace if it has no selected-call association. Disabling admission
+therefore does not preserve unassociated-media output for mixed filters. True
+IP-only configurations have no SIP-identity filter requiring that association.
+
+`--rtp-ebpf-shadow-sample-every=N` (default `1`, positive) samples approximately
+one in N decisions without enabling admission. Sampled outcomes remain incomplete
+when frame, ownership, revision, or publication evidence is missing or ambiguous;
+counts do not prove parity for all traffic. Loss categories remain separate.
 
 See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
 semantics, platform/privilege requirements, observation domains, configuration,

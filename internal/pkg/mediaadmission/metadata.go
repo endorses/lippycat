@@ -35,6 +35,7 @@ type MetadataStats struct {
 }
 
 type metadataEntry struct {
+	complete  bool
 	key       DialogKey
 	endpoints map[EndpointKey]struct{}
 	updated   time.Time
@@ -48,6 +49,7 @@ type pendingCall struct {
 }
 
 type MetadataRecord struct {
+	Complete  bool
 	Key       DialogKey
 	Endpoints []EndpointKey
 }
@@ -76,6 +78,13 @@ func metadataBytes(key DialogKey, endpoints int) int {
 }
 
 func (s *MetadataStore) Observe(key DialogKey, endpoints []EndpointKey, now time.Time) error {
+	return s.ObserveDerived(key, endpoints, true, now)
+}
+
+// ObserveDerived retains bounded derivation completeness even when no safe
+// endpoint exists. A zero-endpoint complete record is intentional empty media;
+// an incomplete record remains unknown rather than disappearing.
+func (s *MetadataStore) ObserveDerived(key DialogKey, endpoints []EndpointKey, complete bool, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if key.CallID == "" || key.Session == 0 || key.Generation == 0 || now.IsZero() {
@@ -116,9 +125,6 @@ func (s *MetadataStore) Observe(key DialogKey, endpoints []EndpointKey, now time
 			}
 		}
 	}
-	if len(normalized) == 0 {
-		return nil
-	}
 	cost := metadataBytes(key, len(normalized))
 	if len(normalized) > s.config.MaxEndpointsPerOwner || len(normalized) > s.config.PendingEndpointCapacity || cost > s.config.PendingBytes {
 		s.stats.Rejected++
@@ -138,7 +144,7 @@ func (s *MetadataStore) Observe(key DialogKey, endpoints []EndpointKey, now time
 		s.remove(oldest)
 		s.stats.Evicted++
 	}
-	entry := &metadataEntry{key: key, endpoints: normalized, updated: now, bytes: cost}
+	entry := &metadataEntry{complete: complete, key: key, endpoints: normalized, updated: now, bytes: cost}
 	// Calls normally arrive in monotonic wall-clock order. Enforce the ordering
 	// when a caller replays out-of-order capture timestamps as well.
 	if newest := s.oldest.Back(); newest != nil && now.Before(newest.Value.(*metadataEntry).updated) {
@@ -196,14 +202,20 @@ func (s *MetadataStore) Peek(key DialogKey, now time.Time) ([]EndpointKey, bool)
 	return copyEndpoints(element.Value.(*metadataEntry)), true
 }
 func (s *MetadataStore) Take(key DialogKey, now time.Time) ([]EndpointKey, bool) {
+	r, ok := s.TakeRecord(key, now)
+	return r.Endpoints, ok
+}
+
+func (s *MetadataStore) TakeRecord(key DialogKey, now time.Time) (MetadataRecord, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	element, ok := s.lookup(key, now)
 	if !ok {
 		s.stats.PromotionMisses++
-		return nil, false
+		return MetadataRecord{}, false
 	}
-	result := copyEndpoints(element.Value.(*metadataEntry))
+	entry := element.Value.(*metadataEntry)
+	result := MetadataRecord{Key: key, Complete: entry.complete, Endpoints: copyEndpoints(entry)}
 	s.remove(element)
 	s.stats.Promotions++
 	return result, true
@@ -264,7 +276,7 @@ func (s *MetadataStore) Candidates(domain DomainID, session uint64, callID strin
 	for key := range keys {
 		element, ok := s.lookup(key, now)
 		if ok {
-			result = append(result, MetadataRecord{Key: key, Endpoints: copyEndpoints(element.Value.(*metadataEntry))})
+			result = append(result, MetadataRecord{Complete: element.Value.(*metadataEntry).complete, Key: key, Endpoints: copyEndpoints(element.Value.(*metadataEntry))})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Key.Generation < result[j].Key.Generation })

@@ -48,8 +48,10 @@ type ApplicationFilter interface {
 // supporting the pattern where processors are created before Hunter.Start() but need the filter
 // that is created inside Start().
 type ApplicationFilterReceiver interface {
-	SetApplicationFilter(filter ApplicationFilter)
+	SetApplicationFilter(filter voip.ApplicationFilter)
 }
+
+var _ ApplicationFilterReceiver = (*voip.VoIPPacketProcessor)(nil)
 
 // DNSMetadataProvider provides DNS metadata for packets.
 // Used for DNS tunneling detection at the hunter edge.

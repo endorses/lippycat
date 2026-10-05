@@ -82,20 +82,24 @@ func (i *Installer) Prepare(ctx context.Context, handle *pcap.Handle, name, filt
 	}
 	drainCtx, cancel := context.WithTimeout(ctx, i.drainTimeout)
 	defer cancel()
-	if err := handle.DrainSocketBuffer(drainCtx); err != nil {
+	prepared.discarded, err = handle.DrainSocketBufferCount(drainCtx)
+	if err != nil {
 		return fail(err)
 	}
 	return prepared, nil
 }
 
 type preparedFilter struct {
-	mu      sync.Mutex
-	handle  *pcap.Handle
-	program *ebpf.Program
-	drop    *ebpf.Program
-	closed  bool
-	active  bool
+	discarded uint64
+	mu        sync.Mutex
+	handle    *pcap.Handle
+	program   *ebpf.Program
+	drop      *ebpf.Program
+	closed    bool
+	active    bool
 }
+
+func (p *preparedFilter) StartupDiscards() uint64 { return p.discarded }
 
 func (p *preparedFilter) Activate() error {
 	p.mu.Lock()
@@ -133,6 +137,15 @@ func (p *preparedFilter) Close() error {
 var _ capture.FilterInstaller = (*Installer)(nil)
 
 func (i *Installer) CaptureScope(name string) uint32 { return uint32(i.domains[name]) }
+
+// RecordObservedPacket supplies bounded identity evidence before any reassembly.
+func (i *Installer) RecordObservedPacket(name string, frame []byte) {
+	if observer, ok := i.status.(interface {
+		RecordObservedPacket(mediaadmission.DomainID, []byte)
+	}); ok {
+		observer.RecordObservedPacket(i.domains[name], frame)
+	}
+}
 
 var _ capture.FilterScopeProvider = (*Installer)(nil)
 

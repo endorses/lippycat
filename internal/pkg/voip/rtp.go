@@ -19,7 +19,9 @@ func (tracker *CallTracker) endpointCallIDs(endpoint string) []string {
 // ExtractPortFromSDP registers every RTP endpoint advertised by SDP on this tracker.
 func (tracker *CallTracker) ExtractPortFromSDP(sdpBody string, callID string) {
 	// Extract all RTP endpoints (IP:port) from SDP body (supports multi-stream calls)
-	endpoints := extractAllRTPEndpoints(sdpBody, tracker.config.MaxEndpointsPerCall)
+	parsed := sharedsip.ParseSDPResult(sdpBody, tracker.config.MaxEndpointsPerCall)
+	tracker.sdpParseCounters.Observe(parsed)
+	endpoints := legacySDPEndpointKeys(sdpBody, parsed, tracker.config.MaxEndpointsPerCall)
 
 	if len(endpoints) == 0 {
 		return
@@ -45,26 +47,39 @@ func extractAllRTPEndpoints(body string, limits ...int) []string {
 	if len(limits) > 0 && limits[0] > 0 {
 		limit = limits[0]
 	}
-	parsed, err := sharedsip.ParseSDPEndpoints(body, limit)
-	if err != nil {
-		logger.Warn("Cannot extract SDP media endpoints", "error", err)
-		return extractAllRTPPorts(body)
-	}
-	result := make([]string, 0, len(parsed)*2)
+	parsed := sharedsip.ParseSDPResult(body, limit)
+	return legacySDPEndpointKeys(body, parsed, limit)
+}
+
+// SDPParseStats reports bounded parse diagnostics for this tracker only.
+func (tracker *CallTracker) SDPParseStats() sharedsip.SDPParseStats {
+	return tracker.sdpParseCounters.Snapshot()
+}
+
+func legacySDPEndpointKeys(body string, parsed sharedsip.SDPResult, limit int) []string {
+	result := make([]string, 0, len(parsed.Endpoints)*2)
 	seen := make(map[string]bool)
 	add := func(endpoint string) {
-		if !seen[endpoint] {
+		if !seen[endpoint] && len(result) < limit {
 			seen[endpoint] = true
 			result = append(result, endpoint)
 		}
 	}
-	for _, endpoint := range parsed {
+	for _, endpoint := range parsed.Endpoints {
 		add(endpoint.Address.String())
+	}
+	for _, endpoint := range parsed.Endpoints {
 		add(strconv.Itoa(int(endpoint.Address.Port())))
 	}
 	// Preserve legacy port-only audio bookkeeping when SDP lacks a connection
 	// address. These entries are never used for authoritative media resolution.
+	if len(body) > sharedsip.MaxMessageSize {
+		return result
+	}
 	for _, port := range extractAllRTPPorts(body) {
+		if parsed.ResourceLimited {
+			break
+		}
 		add(port)
 	}
 	return result

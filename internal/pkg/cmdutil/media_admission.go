@@ -17,7 +17,8 @@ func RegisterMediaAdmissionFlags(cmd *cobra.Command, v *viper.Viper, prefix stri
 	cmd.Flags().Bool("rtp-ebpf", false, "Enable Linux eBPF admission for media belonging to selected VoIP calls")
 	cmd.Flags().String("rtp-ebpf-mode", string(defaults.Mode), "RTP eBPF admission mode: enforce or shadow (requires --rtp-ebpf)")
 	cmd.Flags().String("rtp-ebpf-failure-policy", string(defaults.FailurePolicy), "RTP eBPF runtime update failure policy: open or closed")
-	for flag, key := range map[string]string{"rtp-ebpf": "enabled", "rtp-ebpf-mode": "mode", "rtp-ebpf-failure-policy": "failure_policy"} {
+	cmd.Flags().Uint32("rtp-ebpf-shadow-sample-every", defaults.ShadowSampleEvery, "Sample approximately one in N shadow decisions for bounded diagnostics")
+	for flag, key := range map[string]string{"rtp-ebpf": "enabled", "rtp-ebpf-mode": "mode", "rtp-ebpf-failure-policy": "failure_policy", "rtp-ebpf-shadow-sample-every": "shadow_sample_every"} {
 		if err := v.BindPFlag(prefix+"."+key, cmd.Flags().Lookup(flag)); err != nil {
 			panic(fmt.Errorf("bind RTP eBPF flag: %w", err))
 		}

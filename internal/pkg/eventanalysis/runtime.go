@@ -80,30 +80,34 @@ type Stats struct {
 }
 
 type Runtime struct {
-	mu              sync.Mutex
-	cfg             Config
-	dhcp            *dhcp.Tracker
-	ntp             *ntp.Associator
-	generation      uint64
-	inventory       *inventory.Tracker
-	watermark       time.Time
-	expiryWatermark time.Time
-	captureReceived time.Time
-	identity        *flowid.Cache
-	connections     *conntrack.Tracker
-	tcpAssembler    *capture.TCPAssembler
-	activeTCPFlows  map[reassemblyFlowKey]struct{}
-	namespaceSource reassemblySourceKey
-	namespaceValue  uint64
-	namespaceValid  bool
-	files           *fileanalysis.Analyzer
-	dns             *dnsparser.Parser
-	nextExpiry      time.Time
-	closed          bool
-	stats           Stats
-	expiryStop      chan struct{}
-	expiryDone      chan struct{}
-	stopExpiry      sync.Once
+	mu                sync.Mutex
+	cfg               Config
+	dhcp              *dhcp.Tracker
+	ntp               *ntp.Associator
+	generation        uint64
+	inventory         *inventory.Tracker
+	watermark         time.Time
+	expiryWatermark   time.Time
+	captureReceived   time.Time
+	identity          *flowid.Cache
+	connections       *conntrack.Tracker
+	tcpAssembler      *capture.TCPAssembler
+	activeTCPFlows    map[reassemblyFlowKey]struct{}
+	namespaceSource   reassemblySourceKey
+	namespaceValue    uint64
+	namespaceValid    bool
+	associationKey    associationScopeKey
+	associationValue  string
+	associationDigest [32]byte
+	associationValid  bool
+	files             *fileanalysis.Analyzer
+	dns               *dnsparser.Parser
+	nextExpiry        time.Time
+	closed            bool
+	stats             Stats
+	expiryStop        chan struct{}
+	expiryDone        chan struct{}
+	stopExpiry        sync.Once
 }
 
 func New(cfg Config) (*Runtime, error) {

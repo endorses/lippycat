@@ -57,6 +57,25 @@ func sipDirectionMessage(start, callID string) []byte {
 	return []byte(start + "\r\nCall-ID: " + callID + "\r\nContent-Length: 0\r\n\r\n")
 }
 
+func TestTCPDirectionIPv6CanonicalEndpoints(t *testing.T) {
+	handler := &directionMessageHandler{}
+	network := gopacket.NewFlow(layers.EndpointIPv6, net.ParseIP("2001:db8::1").To16(), net.ParseIP("2001:db8::2").To16())
+	ports := testTransportFlow(t, 60421, 5060)
+	stream := &bufferedSIPStream{factory: &sipStreamFactory{handler: handler}, netFlow: network, transportFlow: ports}
+	stream.processSipMessage(sipDirectionMessage("INVITE sip:bob@example.test SIP/2.0", "ipv6-forward"), time.Unix(100, 0))
+	stream.netFlow, stream.transportFlow = network.Reverse(), ports.Reverse()
+	stream.processSipMessage(sipDirectionMessage("SIP/2.0 200 OK", "ipv6-reverse"), time.Unix(200, 0))
+	for _, want := range []struct{ id, src, dst string }{
+		{"ipv6-forward", "[2001:db8::1]:60421", "[2001:db8::2]:5060"},
+		{"ipv6-reverse", "[2001:db8::2]:5060", "[2001:db8::1]:60421"},
+	} {
+		got, ok := handler.find(want.id)
+		if !ok || got.src != want.src || got.dst != want.dst {
+			t.Fatalf("IPv6 framed message %s endpoints=%s -> %s, want %s -> %s", want.id, got.src, got.dst, want.src, want.dst)
+		}
+	}
+}
+
 func TestTCPDirectionPartialRequestDoesNotBlockResponse(t *testing.T) {
 	handler := &directionMessageHandler{}
 	stream := newLiveStream(t, handler, 60421, 5060)

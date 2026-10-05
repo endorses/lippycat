@@ -434,3 +434,19 @@ func createRTPPayload(version, payloadType uint8, sequence uint16, timestamp, ss
 	payload[11] = byte(ssrc)
 	return payload
 }
+
+func TestProcessorRetainsSafePartialSDPAndPreviousLifetimeEndpoints(t *testing.T) {
+	p := New(DefaultConfig())
+	t.Cleanup(p.Close)
+	p.RegisterSDP("synthetic-call", "c=IN IP4 192.0.2.1\nm=audio 8000 RTP/AVP 0")
+	p.RegisterSDP("synthetic-call", "c=IN IP6 2001:db8::1\nm=audio 9000 RTP/AVP 0\nm=audio 11000 RTP/AVP 0\na=rtcp:bad\nm=video 12000 RTP/AVP 96")
+	for _, endpoint := range []string{"192.0.2.1:8000", "[2001:db8::1]:9000", "[2001:db8::1]:9001", "[2001:db8::1]:12000", "[2001:db8::1]:12001"} {
+		require.Equal(t, []string{"synthetic-call"}, p.CallIDsForEndpoint(endpoint))
+	}
+	require.Empty(t, p.CallIDsForEndpoint("[2001:db8::1]:11000"))
+	require.Empty(t, p.CallIDsForEndpoint("9000"), "diagnostic port candidates cannot supply authoritative endpoints")
+	require.Equal(t, uint64(1), p.SDPParseStats().Partial)
+	require.Equal(t, uint64(1), p.SDPParseStats().Failures)
+	p.RegisterSDP("synthetic-call", "c=IN IP4 192.0.2.1\nm=audio 0 RTP/AVP 0")
+	require.Equal(t, []string{"synthetic-call"}, p.CallIDsForEndpoint("192.0.2.1:8000"))
+}

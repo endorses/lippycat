@@ -30,7 +30,14 @@ func (r *Runtime) emitInventory(conn *events.ConnEvent) {
 		return
 	}
 	proof := conn.Evidence
-	derived := r.inventory.Observe(conn.AnalysisScope, r.expiryWatermark, *conn, inventory.Evidence{
+	if conn.AnalysisScope == "" {
+		return
+	}
+	scopeID := r.associationDigest
+	if !r.associationValid || conn.AnalysisScope != r.associationValue {
+		scopeID = sha256.Sum256([]byte(conn.AnalysisScope))
+	}
+	derived := r.inventory.ObserveScoped(scopeID, r.expiryWatermark, *conn, inventory.Evidence{
 		Host: proof.Host, Service: proof.Service, Responder: proof.Responder, Protocol: proof.Protocol,
 	})
 	for _, event := range derived {
@@ -84,7 +91,7 @@ func (r *Runtime) unicastEndpoints(flow events.FlowTuple) bool {
 // uses every question and its type/class, not merely the 16-bit transaction ID.
 // A fixed-size digest is retained by conntrack; raw query names are not retained.
 func (r *Runtime) dnsInventoryEvidence(udp *layers.UDP, env events.Envelope, truncated bool) *conntrack.UDPEvidence {
-	if !r.cfg.Policy.Inventory.Enabled || truncated || !r.unicastEndpoints(env.Flow) || (udp.SrcPort != 53 && udp.DstPort != 53) {
+	if !r.cfg.Policy.Inventory.Enabled || truncated || (udp.SrcPort != 53 && udp.DstPort != 53) || !r.unicastEndpoints(env.Flow) {
 		return nil
 	}
 	var message layers.DNS

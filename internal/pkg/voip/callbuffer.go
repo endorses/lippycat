@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ type CallBuffer struct {
 	filterChecked bool                // Whether filter match was evaluated
 	matched       bool                // Whether call matches filter
 	createdAt     time.Time
+	rtpPortLimit  int
 	rtpPorts      []string        // RTP ports for this call
 	interfaceName string          // Interface where packets were captured
 	linkType      layers.LinkType // Link type for PCAP writing (e.g., Ethernet, Linux cooked, raw IP)
@@ -49,13 +51,18 @@ type CallMetadata struct {
 }
 
 // NewCallBuffer creates a new call buffer
-func NewCallBuffer(callID string) *CallBuffer {
+func NewCallBuffer(callID string, endpointLimits ...int) *CallBuffer {
+	limit := DefaultConfig().MaxEndpointsPerCall
+	if len(endpointLimits) > 0 && endpointLimits[0] > 0 {
+		limit = endpointLimits[0]
+	}
 	return &CallBuffer{
-		callID:     callID,
-		sipPackets: make([]BufferedSIPPacket, 0, 10),
-		rtpPackets: make([]gopacket.Packet, 0, 100),
-		createdAt:  time.Now(),
-		rtpPorts:   make([]string, 0, 2),
+		callID:       callID,
+		rtpPortLimit: limit,
+		sipPackets:   make([]BufferedSIPPacket, 0, 10),
+		rtpPackets:   make([]gopacket.Packet, 0, 100),
+		createdAt:    time.Now(),
+		rtpPorts:     make([]string, 0, 2),
 	}
 }
 
@@ -144,15 +151,31 @@ func (cb *CallBuffer) isRTPPortLocked(port string) bool {
 	return false
 }
 
-// AddRTPPort adds an RTP port to the call's port list
-func (cb *CallBuffer) AddRTPPort(port string) {
+// AddRTPPort retains a bounded diagnostic association. Exact endpoints can
+// displace port-only candidates at capacity, but never another exact endpoint.
+// This index cannot authorize output; the registry owns media attribution.
+func (cb *CallBuffer) AddRTPPort(port string) bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-
-	// Avoid duplicates
-	if !cb.isRTPPortLocked(port) {
-		cb.rtpPorts = append(cb.rtpPorts, port)
+	if port == "" {
+		return false
 	}
+	if cb.isRTPPortLocked(port) {
+		return true
+	}
+	if len(cb.rtpPorts) < cb.rtpPortLimit {
+		cb.rtpPorts = append(cb.rtpPorts, port)
+		return true
+	}
+	if strings.Contains(port, ":") {
+		for i, existing := range cb.rtpPorts {
+			if !strings.Contains(existing, ":") {
+				cb.rtpPorts[i] = port
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetCallID returns the call ID

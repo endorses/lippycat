@@ -8,7 +8,7 @@ struct endpoint { __u32 domain; __u8 address[16]; __u16 port; __u8 family; __u8 
 struct address { __u32 domain; __u8 family; __u8 pad[3]; __u8 address[16]; };
 struct prefix { __u32 bits; struct address address; };
 struct control { __u64 generation; __u32 mode; __u32 no_filters; };
-struct decision { __u64 time_ns; __u64 generation; __u32 domain; __u32 reason; __u32 length; __u32 fingerprint; struct endpoint source; struct endpoint destination; };
+struct decision { __u64 time_ns; __u64 generation; __u32 domain; __u32 reason; __u32 length; __u32 fingerprint; struct endpoint source; struct endpoint destination; __u32 identity_length; __u8 identity[256]; };
 struct { __uint(type, BPF_MAP_TYPE_HASH); __uint(max_entries, 65536); __type(key, struct endpoint); __type(value, __u8); } endpoints SEC(".maps");
 struct { __uint(type, BPF_MAP_TYPE_HASH); __uint(max_entries, 4096); __type(key, struct address); __type(value, __u8); } addresses SEC(".maps");
 struct { __uint(type, BPF_MAP_TYPE_LPM_TRIE); __uint(max_entries, 4096); __uint(map_flags, BPF_F_NO_PREALLOC); __type(key, struct prefix); __type(value, __u8); } prefixes SEC(".maps");
@@ -50,6 +50,7 @@ static __always_inline int finish(struct __sk_buff *skb, struct control *ctl, __
         if (shadow_sample_every && bpf_get_prandom_u32() % shadow_sample_every == 0) {
             struct decision *d = bpf_ringbuf_reserve(&decisions, sizeof(*d), 0);
             if (d) {
+                __builtin_memset(d, 0, sizeof(*d));
                 d->time_ns = bpf_ktime_get_ns(); d->generation = ctl->generation;
                 d->domain = domain; d->reason = reason; d->length = skb->len;
                 // Bounded header fingerprint, not payload or collision-free identity.
@@ -59,6 +60,21 @@ static __always_inline int finish(struct __sk_buff *skb, struct control *ctl, __
                 #pragma unroll
                 for (int i = 0; i < 8; i++) hash = (hash ^ words[i]) * 16777619U;
                 d->fingerprint = hash; d->source = *src; d->destination = *dst;
+                // Exact transient correlation is possible only for a complete
+                // bounded frame. Partial prefixes never establish identity.
+                d->identity_length = 0;
+                __u32 identity_length = skb->len;
+                if (identity_length && identity_length <= sizeof(d->identity)) {
+                    // Bound the helper's scalar argument explicitly. A fresh
+                    // skb->len read has no verifier range from an earlier read.
+                    __u32 bounded_length = identity_length & 255;
+                    long copied;
+                    if (bounded_length)
+                        copied = bpf_skb_load_bytes(skb, 0, d->identity, bounded_length);
+                    else
+                        copied = bpf_skb_load_bytes(skb, 0, d->identity, 256);
+                    if (!copied) d->identity_length = identity_length;
+                }
                 bpf_ringbuf_submit(d, 0);
             } else count(11);
         }

@@ -99,7 +99,9 @@ func sniffConfigured(cmd *cobra.Command, args []string, radiusConfig *radiusconf
 	}
 
 	files := collectReadFiles(readFile, args)
-	withEventAnalysisMode(files, structuredLogAnalysisProfile("sniff", filter), filter, radiusConfig != nil, func(logSession *sniffEventSession) {
+	// The local pipeline owns ordinary RADIUS association and shares that same
+	// observation with optional consumers before packet fan-out.
+	withEventAnalysisMode(files, structuredLogAnalysisProfile("sniff", filter), filter, true, func(logSession *sniffEventSession) {
 		registrations := []pipeline.SinkRegistration{{Name: "cli", Sink: newCLIEnvelopeSink(os.Stdout, format, quiet)}}
 		if writeFile != "" {
 			pcapSink, err := newPCAPEnvelopeSink(writeFile)

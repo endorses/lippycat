@@ -3,6 +3,7 @@ package voip
 import (
 	"bytes"
 	"context"
+	"net"
 	"strconv"
 	"time"
 
@@ -221,23 +222,12 @@ func handleUdpPacketsWithBufferAndOutputs(tracker *CallTracker, pkt capture.Pack
 				srcIP = netLayer.NetworkFlow().Src().String()
 			}
 
-			bufCallID := callID
-			sourceEndpoint := srcIP + ":" + srcPort
-			destinationEndpoint := dstIP + ":" + dstPort
-			shouldWrite, accepted := buffer.AddRTPPacketForEndpoints(bufCallID, sourceEndpoint, destinationEndpoint, packet)
-			if accepted {
-
-				if shouldWrite {
-					// Call already matched, inject into virtual interface and write immediately
-					dispatchSelectedPacket(outputs, pkt)
-
-					if tracker.config.WriteVoIP {
-						WriteRTP(tracker, bufCallID, packet)
-					}
-				}
-				// Otherwise packet is buffered, waiting for filter decision
-			} else {
-				// Call already decided and tracker knows about it, inject into virtual interface
+			sourceEndpoint := net.JoinHostPort(srcIP, srcPort)
+			destinationEndpoint := net.JoinHostPort(dstIP, dstPort)
+			shouldWrite, accepted, _ := buffer.AddResolvedRTPPacket(resolution, sourceEndpoint, destinationEndpoint, packet)
+			if accepted && shouldWrite {
+				// Current exact ownership and a live selection authorize output,
+				// including after the temporary packet buffer has expired.
 				dispatchSelectedPacket(outputs, pkt)
 
 				if tracker.config.WriteVoIP {

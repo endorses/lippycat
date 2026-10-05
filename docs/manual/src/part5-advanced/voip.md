@@ -314,8 +314,11 @@ invalid section, with exact numeric IP/port endpoints only. It performs no DNS,
 ICE-candidate, or address-range inference. RTP and UDP/TLS/RTP profiles are
 supported for audio, video, and other media kinds. RTCP defaults to the next port;
 an explicit RTCP port/address overrides that default, while RTCP mux uses one
-shared endpoint. Invalid media, connection, or RTCP data invalidates its affected
-section without reusing a previous section's address. Invalid session connection
+shared endpoint. RTP port 65535 requires `a=rtcp-mux`, `a=rtcp-mux-only` or a
+valid explicit `a=rtcp:` port/address: the implicit next port would be 65536,
+outside the UDP port range. Without one of those declarations, the parser
+conservatively rejects the whole section. Invalid media, connection, or RTCP data
+invalidates its affected section without reusing a previous section's address. Invalid session connection
 data prevents inherited endpoints; a later valid media-level address can still
 be used. Zero ports, inactive media, and unspecified hold addresses contribute
 no new endpoints. Previously accepted endpoints remain until authoritative call
@@ -327,13 +330,48 @@ repaired, validly superseded or retired. A complete opposite-side answer does no
 by itself resolve an incomplete offer. SDP in unrelated SIP methods does not
 resolve negotiation uncertainty. Rejecting a later offer preserves uncertainty
 in its predecessor until successful negotiation establishes supersession.
+
+Admission recovery supports the delayed-offer sequence of an observed bodyless
+INVITE, an initial tagged reliable provisional response (for example, 183)
+carrying the SDP offer with valid `Require: 100rel` and `RSeq` headers, and a
+complete SDP answer in matching PRACK. Proof requires the same dialog fork and
+selected call lifetime: PRACK's RAck response number must match RSeq, and its
+referenced CSeq number/method must match the provisional response's INVITE
+CSeq. PRACK's own CSeq and Via branch identify its separate transaction. The
+offer alone, a bodyless final response or ACK, and unrelated PRACK SDP cannot
+resolve the missing answer. Missing, conflicting, expired unmatched or
+capacity-lost proof remains uncertain; independently safe endpoints can still
+be promoted. Other unresolved contexts, failed endpoint promotions or control
+writes also prevent recovery. Retained linkage is bounded and absent from
+status and warning logs.
+
+Recovery retains one reliable offer/answer link per request initiator and dialog
+fork. The initial reliable response must have RSeq between 1 and 2^31-1; later or
+ambiguous reliable offer exchanges remain conservative. Unmatched linkage expires
+with `pending_ttl`. Once the answer is validated, its bounded current-lifetime
+context survives that expiry until applicable supersession or retirement. An
+exactly matched rejection of the PRACK restores uncertainty.
+
+This supports the delayed-offer answer defined in
+[RFC 3262 section 5](https://www.rfc-editor.org/rfc/rfc3262.html#section-5), rather
+than unrestricted PRACK offer/answer negotiation. After that offer has been
+answered in PRACK, a valid UPDATE can carry a new offer and its response can carry
+the answer, as described in
+[RFC 3311 sections 3 and 5](https://www.rfc-editor.org/rfc/rfc3311.html#section-5).
+Arbitrary UPDATE SDP is not the answer to an outstanding reliable 183 offer.
+
 These shared endpoint semantics also apply
 with eBPF disabled; opening kernel admission never invents userspace attribution.
 
 The tracker endpoint budget includes RTP, separate RTCP and retained legacy
 port-only diagnostic keys. Diagnostic keys cannot authorize media, but can consume
 space needed for later exact endpoints during media moves. This shared budget
-predates the follow-up remediation. Tracker eviction or retirement ends inherited
+predates the follow-up remediation. Without admission, the ordinary tracker has
+a library default of 64 endpoints per call and the local VoIP processor has a
+default of 32; their current command wiring has no operator endpoint-limit
+setting. Admission resource settings do not raise these ordinary registry limits.
+Account for separate RTCP and diagnostic keys when interpreting resource-limited
+warnings. Tracker eviction or retirement ends inherited
 hunter selection even when a temporary buffer remains; stale buffered matches
 do not authorize output. If the selected-owner token pool overflows, recovery
 requires an empty authoritative registry, including retirement of unselected
@@ -394,6 +432,15 @@ identity. Identical copies share eligibility and every eligible copy is counted.
 Hashes choose samples; exact bytes establish identity. Unsampled observations do
 not occupy correlation entries. This setting alone does not enable admission.
 
+**Shadow sizing warning:** the defaults retain only 1024 distinct eligible frame
+identities, sample every identity (`N=1`) and keep entries for about 60–61 seconds.
+This leaves little room for distinct eligible background traffic. Dividing 1024
+by that retention window gives roughly 17 distinct eligible identities per second
+before reserving burst headroom. This is a theoretical storage-sizing calculation,
+not a supported packet rate, measured throughput or acceptance threshold. An
+identity is a complete frame, so changing sequence numbers or payloads create new
+identities even within one flow.
+
 `shadow_evidence_capacity` bounds distinct eligible full-frame identities.
 Correlation entries expire strictly after twice `pending_ttl`, at the next
 `retry_interval` maintenance pass. Approximate sizing is eligible distinct
@@ -403,6 +450,22 @@ shortening it changes promotion behavior. Retired owner history lasts beyond
 three TTLs and remains bounded by owner capacity. Separate sample history uses
 the same evidence-capacity setting, counts occurrences and can overwrite even
 when the identity table has space.
+
+As eligible identity volume grows, consider increasing the sampling interval
+before increasing capacity. Sampling reduces both retained identities and hook
+work while counting every copy of each eligible identity. Larger capacity
+retains more evidence but increases memory and maintenance work: maintenance
+scans entries while holding the correlation mutex, and concurrent eligible
+observations use `TryLock`. A lock miss is actual evidence loss and can prevent
+classification; higher capacity alone does not guarantee complete evidence.
+
+Storage grows separately for the full-frame correlation table, diagnostic sample
+history, owner history and kernel ring. The identity table holds exact frame
+bytes and correlation state; sample history holds bounded occurrences and can
+overwrite independently; owner history is bounded by owner capacity; kernel-ring
+storage is separately bounded. Sampling changes which observations enter these
+paths but does not raise their configured capacities. No fixed per-entry memory
+estimate or scan-duration guarantee is implied.
 
 Classification requires unique full-frame evidence, capture observation,
 verified selected-lifetime attribution and historical publication generation.

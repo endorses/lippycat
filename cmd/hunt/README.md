@@ -733,9 +733,10 @@ acceptance remain pending. Relays preserve ordinary outputs but cannot authorize
 **Upgrade behavior:** VoIP hunters now receive their application filters when
 eBPF is disabled. An earlier interface mismatch could leave a hunter selecting
 calls broadly despite distributed identity or IP filters. The repaired path
-applies those filters and can forward fewer calls after an upgrade. For
-intentional broad selection, use an empty applicable filter set with
-`--no-filter-policy allow`; `allow` does not override installed filters or
+applies those filters and the empty-filter policy. **`--no-filter-policy` defaults
+to `deny`: an empty applicable filter set forwards no calls.** Upgrading can
+therefore reduce forwarded traffic. For intentional broad selection, use an empty
+applicable filter set with `--no-filter-policy allow`; `allow` does not override installed filters or
 explicit capture predicates. See the next-release [changelog](../../CHANGELOG.md).
 
 `voip --rtp-ebpf` enables Linux socket-level admission for media belonging to
@@ -754,6 +755,14 @@ userspace; identical copies share eligibility and every eligible copy is counted
 The option does not enable admission. Sampled outcomes remain incomplete
 when frame, ownership, revision, or publication evidence is missing or ambiguous;
 counts do not prove parity for all traffic. Loss categories remain separate.
+
+**Shadow sizing warning:** the default 1024 identities with sampling interval `1`
+and roughly 60–61-second retention leave little room for distinct eligible
+background frames. About 17 identities per second follows from capacity divided
+by retention before burst headroom; it is a storage-sizing observation, not a
+supported packet rate. Consider sampling first as identity volume grows. Larger
+capacity increases memory and mutex-held maintenance scans, during which eligible
+`TryLock` misses remain evidence loss. See the guide for separate storage costs.
 
 See [VoIP eBPF admission](../../docs/VOIP_EBPF_ADMISSION.md) for explicit filter
 semantics, platform/privilege requirements, observation domains, configuration,

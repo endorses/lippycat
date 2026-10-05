@@ -3,6 +3,7 @@ package admission
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/mediaadmission"
@@ -13,6 +14,7 @@ import (
 // responder that later originates a request therefore uses a separate context.
 type derivationSide struct {
 	sender, peer, initiator string
+	prack                   bool
 }
 
 type derivationState struct {
@@ -24,6 +26,15 @@ type derivationState struct {
 	digest                    [32]byte
 	endpoints                 []mediaadmission.EndpointKey
 	previous                  *derivationState
+	responseCode              int
+	reliable                  bool
+	rseq                      uint32
+	rackValid                 bool
+	rackRSeq, rackCSeq        uint32
+	proofExpires              time.Time
+	reliableAnswered          bool
+	prackCSeq                 uint64
+	prackBranch               string
 }
 
 func validRecoveryCSeq(result pipeline.SIPResult) bool {
@@ -51,16 +62,16 @@ func sideFor(key mediaadmission.DialogKey) (derivationSide, bool) {
 		if key.ToTag == "" {
 			return derivationSide{}, false
 		}
-		return derivationSide{key.ToTag, key.FromTag, key.FromTag}, true
+		return derivationSide{key.ToTag, key.FromTag, key.FromTag, false}, true
 	}
-	return derivationSide{key.FromTag, key.ToTag, key.FromTag}, true
+	return derivationSide{key.FromTag, key.ToTag, key.FromTag, false}, true
 }
 
 func derivationCost(side derivationSide, state *derivationState) (int, int) {
 	if state == nil {
 		return 0, 0
 	}
-	bytes := 256 + len(side.sender) + len(side.peer) + len(side.initiator) + len(state.branch) + len(state.method) + len(state.endpoints)*128
+	bytes := 352 + len(side.sender) + len(side.peer) + len(side.initiator) + len(state.branch) + len(state.method) + len(state.prackBranch) + len(state.endpoints)*128
 	endpoints := len(state.endpoints)
 	if state.previous != nil {
 		priorBytes, priorEndpoints := derivationCost(side, state.previous)
@@ -99,8 +110,9 @@ func (b *Bridge) storeDerivation(call *selectedCall, side derivationSide, next *
 	if call.derivations == nil {
 		call.derivations = make(map[derivationSide]*derivationState)
 	}
-	side = derivationSide{strings.Clone(side.sender), strings.Clone(side.peer), strings.Clone(side.initiator)}
+	side = derivationSide{strings.Clone(side.sender), strings.Clone(side.peer), strings.Clone(side.initiator), side.prack}
 	next.branch, next.method = strings.Clone(next.branch), strings.Clone(next.method)
+	next.prackBranch = strings.Clone(next.prackBranch)
 	next.endpoints = append([]mediaadmission.EndpointKey(nil), next.endpoints...)
 	call.derivations[side] = next
 }
@@ -150,12 +162,12 @@ func (b *Bridge) bindEarlyDerivation(call *selectedCall, key mediaadmission.Dial
 	if key.ToTag == "" {
 		return
 	}
-	early := derivationSide{key.FromTag, "", key.FromTag}
+	early := derivationSide{key.FromTag, "", key.FromTag, false}
 	old := call.derivations[early]
 	if old == nil || old.cseq != key.CSeq || old.branch != key.Branch || old.method != key.CSeqMethod {
 		return
 	}
-	bound := derivationSide{key.FromTag, key.ToTag, key.FromTag}
+	bound := derivationSide{key.FromTag, key.ToTag, key.FromTag, false}
 	if call.derivations[bound] != nil {
 		return
 	}
@@ -175,6 +187,13 @@ func (b *Bridge) bindEarlyDerivation(call *selectedCall, key mediaadmission.Dial
 
 func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.MetadataRecord) bool {
 	key := b.bindRequestKey(call, record.Key)
+	if key.CSeqMethod == "PRACK" && key.ResponseCode == 0 {
+		return b.observePRACK(call, record)
+	}
+	if key.CSeqMethod == "PRACK" && !key.DescriptorOnly {
+		call.contextLost = true // SDP in the PRACK response has an unsupported role.
+		return true
+	}
 	if !b.negotiationKey(call, key) {
 		// Non-negotiation SDP can still contain independently safe endpoints,
 		// but cannot repair a missing or unresolved offer/answer context.
@@ -200,7 +219,7 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 	}
 	b.bindEarlyDerivation(call, key)
 	old := call.derivations[side]
-	next := &derivationState{cseq: key.CSeq, branch: key.Branch, method: key.CSeqMethod, complete: record.Complete, hasSDP: !key.DescriptorOnly, endpoints: record.Endpoints, digest: key.SDPDigest}
+	next := &derivationState{cseq: key.CSeq, branch: key.Branch, method: key.CSeqMethod, complete: record.Complete, hasSDP: !key.DescriptorOnly, endpoints: record.Endpoints, digest: key.SDPDigest, responseCode: key.ResponseCode, reliable: key.ReliableResponse, rseq: key.RSeq, proofExpires: time.Now().Add(b.cfg.Limits.PendingTTL)}
 	if old != nil {
 		if key.CSeq < old.cseq {
 			return false
@@ -211,6 +230,11 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 			}
 			// Descriptors must not erase a body or resolve missing derivation.
 			if key.DescriptorOnly {
+				if old.missing && key.ResponseCode == 0 && key.CSeqMethod == "INVITE" && key.Branch == old.branch {
+					next.previous, next.accepted = old.previous, old.accepted
+					b.putDerivation(call, side, next)
+					return true
+				}
 				return false
 			}
 			if old.missing || !old.hasSDP {
@@ -223,13 +247,35 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 			} else {
 				next.complete = old.complete && next.complete && key.Branch == old.branch && key.CSeqMethod == old.method && old.digest == next.digest && sameDerivationEndpoints(old.endpoints, next.endpoints)
 			}
+			// A final SDP retransmission may repeat the reliable offer, but
+			// cannot replace its exact response linkage or its matched answer.
+			if old.reliable && key.ResponseCode >= 200 && old.digest == next.digest {
+				next.reliable, next.rseq, next.proofExpires = old.reliable, old.rseq, old.proofExpires
+			} else if old.hasSDP && (old.reliable != next.reliable || old.rseq != next.rseq) {
+				next.complete = false
+			}
 			next.previous = old.previous
 			next.accepted = old.accepted
+			next.reliableAnswered = old.reliableAnswered
+			next.prackCSeq, next.prackBranch = old.prackCSeq, old.prackBranch
+			if old.reliable {
+				next.proofExpires = old.proofExpires
+			}
 		} else if side.peer == "" && (!old.complete || old.missing) {
 			// Without an established dialog a new transaction cannot prove
 			// that the original unresolved early offer was superseded.
 			call.contextLost = true
 		} else {
+			if old.method == "INVITE" && (!old.hasSDP || old.reliableAnswered) && !old.missing {
+				answerSide := side
+				answerSide.prack = true
+				if b.bodylessReliablyAnswered(call, side, old, time.Now()) {
+					b.removeDerivation(call, answerSide)
+				} else if response := call.derivations[derivationSide{side.peer, side.sender, side.initiator, false}]; response != nil && response.hasSDP && response.cseq == old.cseq {
+					// A new UPDATE offer cannot answer the outstanding response.
+					next.complete = false
+				}
+			}
 			next.previous = rollbackDerivation(old)
 		}
 	}
@@ -279,7 +325,7 @@ func (b *Bridge) acceptDerivation(call *selectedCall, result pipeline.SIPResult)
 		return
 	}
 	for side, state := range call.derivations {
-		if state.rejected || side.initiator != key.FromTag || state.cseq != key.CSeq || state.branch != key.Branch || state.method != key.CSeqMethod || (side.peer != key.ToTag && side.sender != key.ToTag) {
+		if side.prack || state.rejected || side.initiator != key.FromTag || state.cseq != key.CSeq || state.branch != key.Branch || state.method != key.CSeqMethod || (side.peer != key.ToTag && side.sender != key.ToTag) {
 			continue
 		}
 		next := *state
@@ -291,7 +337,7 @@ func (b *Bridge) acceptDerivation(call *selectedCall, result pipeline.SIPResult)
 func (b *Bridge) requireRequestDerivation(call *selectedCall, result pipeline.SIPResult) {
 	key := b.key(result, nil)
 	b.bindEarlyDerivation(call, key)
-	side := derivationSide{key.FromTag, key.ToTag, key.FromTag}
+	side := derivationSide{key.FromTag, key.ToTag, key.FromTag, false}
 	old := call.derivations[side]
 	if old != nil && old.cseq >= key.CSeq {
 		if old.cseq == key.CSeq && (old.branch != key.Branch || old.method != key.CSeqMethod) {
@@ -318,6 +364,10 @@ func (b *Bridge) requireRequestDerivation(call *selectedCall, result pipeline.SI
 // Rejected current transactions retain a bounded sequence watermark. Removing
 // them entirely would allow a delayed successful response to revive the offer.
 func (b *Bridge) rejectDerivation(call *selectedCall, result pipeline.SIPResult) {
+	if result.CSeqMethod == "PRACK" && validRecoveryCSeq(result) {
+		b.rejectPRACK(call, b.key(result, nil))
+		return
+	}
 	if !validRecoveryCSeq(result) || (result.CSeqMethod != "INVITE" && result.CSeqMethod != "UPDATE") {
 		return
 	}
@@ -329,7 +379,7 @@ func (b *Bridge) rejectDerivation(call *selectedCall, result pipeline.SIPResult)
 	b.bindEarlyDerivation(call, key)
 	retired := false
 	for side, state := range call.derivations {
-		if side.initiator != result.FromTag || state.cseq != result.CSeqNumber || state.branch != result.ViaBranch || state.method != result.CSeqMethod {
+		if side.prack || side.initiator != result.FromTag || state.cseq != result.CSeqNumber || state.branch != result.ViaBranch || state.method != result.CSeqMethod {
 			continue
 		}
 		if side.peer != "" && side.sender != result.ToTag && side.peer != result.ToTag {
@@ -346,7 +396,7 @@ func (b *Bridge) rejectDerivation(call *selectedCall, result pipeline.SIPResult)
 		retired = true
 	}
 	if !retired {
-		side := derivationSide{key.FromTag, key.ToTag, key.FromTag}
+		side := derivationSide{key.FromTag, key.ToTag, key.FromTag, false}
 		old := call.derivations[side]
 		if old != nil && old.cseq >= key.CSeq {
 			return
@@ -360,11 +410,16 @@ func (b *Bridge) rejectDerivation(call *selectedCall, result pipeline.SIPResult)
 		b.putDerivation(call, side, next)
 	}
 	call.known = true
+	for side, state := range call.derivations {
+		if side.prack && side.initiator == key.FromTag && side.peer == key.ToTag && uint64(state.rackCSeq) == key.CSeq {
+			b.removeDerivation(call, side)
+		}
+	}
 }
 
 func (b *Bridge) derivationRejected(call *selectedCall, key mediaadmission.DialogKey) bool {
 	for side, state := range call.derivations {
-		if state.rejected && side.initiator == key.FromTag && state.cseq == key.CSeq && state.branch == key.Branch && state.method == key.CSeqMethod && (side.peer == "" || side.peer == key.ToTag || side.sender == key.ToTag) {
+		if !side.prack && state.rejected && side.initiator == key.FromTag && state.cseq == key.CSeq && state.branch == key.Branch && state.method == key.CSeqMethod && (side.peer == "" || side.peer == key.ToTag || side.sender == key.ToTag) {
 			return true
 		}
 	}
@@ -379,7 +434,7 @@ func (b *Bridge) bindRequestKey(call *selectedCall, key mediaadmission.DialogKey
 	}
 	peer := ""
 	for side, state := range call.derivations {
-		if side.sender != key.FromTag || side.initiator != key.FromTag || side.peer == "" || state.cseq != key.CSeq || state.branch != key.Branch || state.method != key.CSeqMethod {
+		if side.prack || side.sender != key.FromTag || side.initiator != key.FromTag || side.peer == "" || state.cseq != key.CSeq || state.branch != key.Branch || state.method != key.CSeqMethod {
 			continue
 		}
 		if peer != "" && peer != side.peer {
@@ -398,14 +453,19 @@ func (b *Bridge) delayedOfferAnswer(call *selectedCall, side derivationSide, req
 	if key.ResponseCode != 0 || key.CSeqMethod != "ACK" || request.method != "INVITE" || request.hasSDP || request.missing || side.peer == "" {
 		return false
 	}
-	response := call.derivations[derivationSide{side.peer, side.sender, side.initiator}]
-	return response != nil && !response.rejected && response.hasSDP && response.cseq == key.CSeq && response.branch == request.branch && response.method == "INVITE"
+	response := call.derivations[derivationSide{side.peer, side.sender, side.initiator, false}]
+	return response != nil && response.responseCode >= 200 && !response.reliable && !response.rejected && response.hasSDP && response.cseq == key.CSeq && response.branch == request.branch && response.method == "INVITE"
 }
 
 func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadmission.EndpointKey]struct{}) {
 	known, unknown := call.known, call.contextLost
 	media := make(map[mediaadmission.EndpointKey]struct{})
 	for side, state := range call.derivations {
+		if side.prack {
+			// PRACK is an answer only with its exact observed reliable offer.
+			known = known || state.hasSDP
+			unknown = unknown || !b.reliableAnswerMatches(call, side, state, time.Now())
+		}
 		if state.rejected {
 			state = state.previous
 			if state == nil {
@@ -419,9 +479,9 @@ func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadm
 			// A bodyless INVITE followed by an SDP response is a delayed
 			// offer. Until its ACK answer arrives the initiator's media is
 			// unresolved, even though the responder's endpoints are safe.
-			response := call.derivations[derivationSide{side.peer, side.sender, side.initiator}]
+			response := call.derivations[derivationSide{side.peer, side.sender, side.initiator, false}]
 			if response != nil && response.hasSDP && !response.rejected && response.cseq == state.cseq {
-				unknown = true
+				unknown = unknown || !b.bodylessReliablyAnswered(call, side, state, time.Now())
 			}
 		}
 		for _, endpoint := range state.endpoints {

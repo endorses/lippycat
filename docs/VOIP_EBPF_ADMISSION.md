@@ -28,6 +28,13 @@ endpoint does not assign a Call-ID or authorize delivery. Independent IP/CIDR
 selectors and the configured no-filter policy continue to work; an empty IP
 selector map alone does not mean there are no filters.
 
+**Hunter upgrade behavior:** `--no-filter-policy` defaults to `deny`, so an empty
+applicable filter set forwards no calls. VoIP hunters now apply distributed
+application filters even when eBPF is disabled; upgrading from the earlier
+receiver-interface mismatch can reduce forwarded traffic. Deliberate broad
+selection requires an empty applicable filter set and `--no-filter-policy allow`.
+Installed filters and explicit capture predicates continue to apply.
+
 With `--rtp-ebpf`, including shadow mode, hunt and tap IP/CIDR selectors can select
 eligible media independently of a selected call, subject to explicit packet
 predicates and userspace output checks. With eBPF disabled, tap routes IP/CIDR
@@ -52,6 +59,12 @@ call policy retains accepted endpoints until authoritative cleanup, including
 trailing-media grace; a new description does not silently remove an opposite-side
 or previously valid endpoint. Metadata is bounded by dialog count, endpoint count,
 bytes, and expiry. Expired or evicted metadata can make later promotion unavailable.
+
+RTP port 65535 cannot derive the default next-port RTCP endpoint: 65536 is outside
+the valid UDP port range. The parser conservatively rejects that whole media
+section when RTCP is implicit. Port 65535 is supported with `a=rtcp-mux` or
+`a=rtcp-mux-only`, or with a valid explicit `a=rtcp:` port/address. Invalid RTCP
+still invalidates the section; independent valid media sections remain usable.
 
 By default all captured interfaces share observation domain zero: SIP on one
 interface can admit media on another. Explicit domains separate overlapping local
@@ -146,10 +159,15 @@ These defaults are resource settings, not throughput or latency guarantees.
 The authoritative tracker budget also includes retained legacy port-only
 diagnostic keys. Those keys cannot authorize media, but can consume space needed
 for later exact endpoints during media moves. This shared accounting and separate
-RTCP endpoints predate the follow-up remediation; configure limits with that
-retention in mind. Malformed RTCP invalidates its whole media section, including
-otherwise usable RTP. Finer salvage and separate diagnostic storage remain
-future enhancements.
+RTCP endpoints predate the follow-up remediation. Without admission, the ordinary
+tracker has a library default of 64 endpoints per call and the local VoIP
+processor has a default of 32. Their current command wiring exposes no operator
+endpoint-limit setting. Admission resource settings are separate from those
+ordinary registry defaults; increasing admission capacity does not raise an
+ordinary-path endpoint limit. Account for diagnostic keys and separate RTCP when
+interpreting resource-limited warnings. Malformed RTCP invalidates its whole media
+section, including otherwise usable RTP. Finer salvage and separate diagnostic
+storage remain future enhancements.
 
 Selected derivation descriptors are bounded separately using the pending dialog,
 byte and endpoint settings across all observation domains in the capture session,
@@ -157,6 +175,37 @@ with at most one retained predecessor per context and an owner context count
 bounded by the per-owner endpoint setting. Exhaustion
 preserves unknown state until the affected lifetime retires; reducing history
 must not manufacture complete negotiation evidence.
+
+## Reliable provisional answers
+
+Admission recovery supports the delayed-offer sequence of an observed bodyless
+INVITE, an initial tagged reliable provisional response (for example, 183)
+carrying the SDP offer with valid `Require: 100rel` and `RSeq` headers, and a
+complete SDP answer in matching PRACK. Proof requires the same dialog fork and
+selected call lifetime: PRACK's RAck response number must match RSeq, and its
+referenced CSeq number/method must match the provisional response's INVITE
+CSeq. PRACK's own CSeq and Via branch identify its separate transaction. The
+offer alone, a bodyless final response or ACK, and unrelated PRACK SDP cannot
+resolve the missing answer. Missing, conflicting, expired unmatched or
+capacity-lost proof remains uncertain; independently safe endpoints can still
+be promoted. Other unresolved contexts, failed endpoint promotions or control
+writes also prevent recovery. Retained linkage is bounded and absent from
+status and warning logs.
+
+Recovery retains one reliable offer/answer link per request initiator and dialog
+fork. The initial reliable response must have RSeq between 1 and 2^31-1; later or
+ambiguous reliable offer exchanges remain conservative. Unmatched linkage expires
+with `pending_ttl`. Once the answer is validated, its bounded current-lifetime
+context survives that expiry until applicable supersession or retirement. An
+exactly matched rejection of the PRACK restores uncertainty.
+
+This supports the delayed-offer answer defined in
+[RFC 3262 section 5](https://www.rfc-editor.org/rfc/rfc3262.html#section-5), rather
+than unrestricted PRACK offer/answer negotiation. After that offer has been
+answered in PRACK, a valid UPDATE can carry a new offer and its response can carry
+the answer, as described in
+[RFC 3311 sections 3 and 5](https://www.rfc-editor.org/rfc/rfc3311.html#section-5).
+Arbitrary UPDATE SDP is not the answer to an outstanding reliable 183 offer.
 
 ## Failure and diagnostic modes
 
@@ -213,6 +262,15 @@ Hashes choose samples; exact bytes establish identity. Unsampled observations do
 not acquire correlation locks or allocate entries. Oversized or unavailable full
 frames can produce incomplete diagnostic samples but cannot be correlated.
 
+**Shadow sizing warning:** the defaults retain only 1024 distinct eligible frame
+identities, sample every identity (`N=1`) and keep entries for about 60–61 seconds.
+This leaves little room for distinct eligible background traffic. Dividing 1024
+by that retention window gives roughly 17 distinct eligible identities per second
+before reserving burst headroom. This is a theoretical storage-sizing calculation,
+not a supported packet rate, measured throughput or acceptance threshold. An
+identity is a complete frame, so changing sequence numbers or payloads create new
+identities even within one flow.
+
 The correlator holds distinct eligible full-frame identities, bounded by
 `shadow_evidence_capacity`. Entries expire strictly after twice `pending_ttl`,
 then at the next `retry_interval` maintenance pass. Approximate capacity sizing
@@ -223,6 +281,22 @@ it changes promotion behavior. Retired owner history lasts beyond three TTLs and
 remains bounded by the owner capacity. The separate diagnostic sample history is
 bounded by the same evidence-capacity setting but counts sample occurrences and
 can overwrite independently of the identity table.
+
+As eligible identity volume grows, consider increasing the sampling interval
+before increasing capacity. Sampling reduces both retained identities and hook
+work while counting every copy of each eligible identity. Larger capacity
+retains more evidence but increases memory and maintenance work: maintenance
+scans entries while holding the correlation mutex, and concurrent eligible
+observations use `TryLock`. A lock miss is actual evidence loss and can prevent
+classification; higher capacity alone does not guarantee complete evidence.
+
+Storage grows separately for the full-frame correlation table, diagnostic sample
+history, owner history and kernel ring. The identity table holds exact frame
+bytes and correlation state; sample history holds bounded occurrences and can
+overwrite independently; owner history is bounded by owner capacity; kernel-ring
+storage is separately bounded. Sampling changes which observations enter these
+paths but does not raise their configured capacities. No fixed per-entry memory
+estimate or scan-duration guarantee is implied.
 
 Distinguish expected rejection before selection, the selection-to-publication
 interval and rejection after confirmed publication. Classification requires a

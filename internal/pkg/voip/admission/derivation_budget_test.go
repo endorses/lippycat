@@ -20,7 +20,7 @@ func TestSelectedDerivationBudgetIsGlobalAcrossDomainBridges(t *testing.T) {
 			case "contexts":
 				cfg.PendingDialogCapacity = 1
 			case "bytes":
-				cfg.PendingBytes = 600
+				cfg.PendingBytes = 700
 			case "endpoints":
 				cfg.PendingEndpointCapacity = 2
 			}

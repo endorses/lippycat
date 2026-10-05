@@ -160,9 +160,10 @@ The VoIP hunter is the most commonly used mode. It captures SIP/RTP traffic with
 
 **Upgrade behavior:** VoIP hunters now receive application filters with eBPF
 disabled. An earlier interface mismatch could select calls broadly despite
-installed distributed identity or IP filters. The repair can reduce forwarded
-traffic after upgrading. To intentionally select broadly, use an empty applicable
-filter set with `--no-filter-policy allow`; `allow` does not override installed
+installed distributed identity or IP filters. **`--no-filter-policy` defaults to
+`deny`: an empty applicable filter set forwards no calls.** The repair can reduce
+forwarded traffic after upgrading. To intentionally select broadly, use an empty
+applicable filter set with `--no-filter-policy allow`; `allow` does not override installed
 filters or explicit capture predicates. See the repository changelog for the
 release behavior changes.
 

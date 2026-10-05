@@ -173,7 +173,14 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 		if name == "via" && topVia == "" {
 			topVia = value
 		}
-		ev.Headers[name] = value
+		// List-valued Require combines across header lines. Singleton proof
+		// fields retain duplicates as an invalid comma-separated value, so a
+		// later line cannot replace conflicting reliable-response evidence.
+		if previous, exists := ev.Headers[name]; exists && (name == "require" || name == "rseq" || name == "rack" || name == "cseq") {
+			ev.Headers[name] = previous + ", " + value
+		} else {
+			ev.Headers[name] = value
+		}
 	}
 	bodyStart := headerEnd + sepLen
 	if bodyStart < len(data) {

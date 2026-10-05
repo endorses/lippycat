@@ -63,7 +63,7 @@ func newAdmissionCommandFixtureDomains(t *testing.T, binary, topology, mode, set
 	require.NoError(t, os.WriteFile(filterFile, []byte("filters:\n  - id: selected-identity\n    type: sip_user\n    pattern: selected\n    enabled: true\n"), 0600))
 	out := filepath.Join(dir, "pcaps")
 	require.NoError(t, os.Mkdir(out, 0700))
-	captureName, sender := admissionVeth(t)
+	captureName, sender, tcpSender := admissionVethSenders(t)
 	interfaces := []string{captureName}
 	senders := []func(uint16, uint16, []byte) error{sender}
 	if len(domains) > 0 {
@@ -138,7 +138,7 @@ func newAdmissionCommandFixtureDomains(t *testing.T, binary, topology, mode, set
 		scope := snapshot()
 		return scope != nil && (scope.State == "enforcing" || scope.State == "shadow")
 	}, 20*time.Second, 100*time.Millisecond, "admission readiness/status")
-	return &admissionCommandFixture{sender: sender, senders: senders, client: client, snapshot: snapshot, status: status, out: out, processState: &processState, stop: func() {
+	return &admissionCommandFixture{sender: sender, tcpSender: tcpSender, senders: senders, client: client, snapshot: snapshot, status: status, out: out, processState: &processState, stop: func() {
 		stopCapture()
 		if stopProcessor != nil {
 			stopProcessor()
@@ -151,6 +151,7 @@ type admissionCommandFixture struct {
 	senders      []func(uint16, uint16, []byte) error
 	processState **os.ProcessState
 	sender       func(uint16, uint16, []byte) error
+	tcpSender    func(uint16, uint16, []byte) error
 	snapshot     func() *management.MediaAdmissionScope
 	status       func() *management.StatusResponse
 	out          string
@@ -284,6 +285,12 @@ func startAdmissionCommandObserved(t *testing.T, binary, dir, name string, obser
 
 func admissionVeth(t *testing.T) (string, func(uint16, uint16, []byte) error) {
 	t.Helper()
+	name, udp, _ := admissionVethSenders(t)
+	return name, udp
+}
+
+func admissionVethSenders(t *testing.T) (string, func(uint16, uint16, []byte) error, func(uint16, uint16, []byte) error) {
+	t.Helper()
 	seq := admissionLinkSequence.Add(1)
 	leftName, rightName := fmt.Sprintf("lc_ea%d", seq), fmt.Sprintf("lc_eb%d", seq)
 	require.NoError(t, netlink.LinkAdd(&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: leftName}, PeerName: rightName}))
@@ -310,7 +317,48 @@ func admissionVeth(t *testing.T) (string, func(uint16, uint16, []byte) error) {
 		}
 		return handle.WritePacketData(buffer.Bytes())
 	}
-	return leftName, send
+
+	// A single synthetic connection exercises the real TCP assembler. Repeated
+	// SIP observations use new transport bytes with monotonically increasing
+	// sequence numbers; only the SIP transaction itself is retransmitted.
+	tcpSequence := uint32(1000)
+	tcpStarted := false
+	writeTCP := func(src, dst uint16, payload []byte, syn bool) error {
+		eth := &layers.Ethernet{SrcMAC: right.Attrs().HardwareAddr, DstMAC: left.Attrs().HardwareAddr, EthernetType: layers.EthernetTypeIPv4}
+		ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolTCP, SrcIP: net.IPv4(192, 0, 2, 1), DstIP: net.IPv4(192, 0, 2, 2)}
+		tcp := &layers.TCP{SrcPort: layers.TCPPort(src), DstPort: layers.TCPPort(dst), Seq: tcpSequence, SYN: syn, ACK: !syn, PSH: !syn, Window: 65535}
+		if err := tcp.SetNetworkLayerForChecksum(ip); err != nil {
+			return err
+		}
+		buffer := gopacket.NewSerializeBuffer()
+		if err := gopacket.SerializeLayers(buffer, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, tcp, gopacket.Payload(payload)); err != nil {
+			return err
+		}
+		if err := handle.WritePacketData(buffer.Bytes()); err != nil {
+			return err
+		}
+		tcpSequence += uint32(len(payload))
+		if syn {
+			tcpSequence++
+		}
+		return nil
+	}
+	sendTCP := func(src, dst uint16, payload []byte) error {
+		if !tcpStarted {
+			if err := writeTCP(src, dst, nil, true); err != nil {
+				return err
+			}
+			tcpStarted = true
+		}
+		// Split the message so linkage must survive normal SIP stream framing,
+		// rather than relying on each transport packet being a complete message.
+		middle := len(payload) / 2
+		if err := writeTCP(src, dst, payload[:middle], false); err != nil {
+			return err
+		}
+		return writeTCP(src, dst, payload[middle:], false)
+	}
+	return leftName, send, sendTCP
 }
 
 func admissionSIP(callID, user string, port uint16) []byte {

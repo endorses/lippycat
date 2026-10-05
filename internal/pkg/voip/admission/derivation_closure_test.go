@@ -22,7 +22,7 @@ func TestCompleteRequestRetainsUnknownPredecessorUntilAcceptedSupersession(t *te
 				require.NoError(t, submitDerivation(t, bridge, registry, repair))
 				assertDerivationState(t, bridge, controller, policy, false)
 				bridge.mu.Lock()
-				state := bridge.selected[initial.CallID].derivations[derivationSide{"from", "to", "from"}]
+				state := bridge.selected[initial.CallID].derivations[derivationSide{"from", "to", "from", false}]
 				require.NotNil(t, state.previous)
 				require.False(t, state.previous.complete)
 				require.Nil(t, state.previous.previous)
@@ -40,7 +40,7 @@ func TestCompleteRequestRetainsUnknownPredecessorUntilAcceptedSupersession(t *te
 					require.NoError(t, submitDerivation(t, bridge, registry, response))
 					assertDerivationState(t, bridge, controller, policy, false)
 					bridge.mu.Lock()
-					state = bridge.selected[initial.CallID].derivations[derivationSide{"from", "to", "from"}]
+					state = bridge.selected[initial.CallID].derivations[derivationSide{"from", "to", "from", false}]
 					require.Nil(t, state.previous, "exact observed acceptance retires rollback state")
 					require.True(t, state.accepted)
 					bridge.mu.Unlock()
@@ -83,7 +83,7 @@ func TestUnrelatedMethodsCannotRepairOfferAnswerDerivation(t *testing.T) {
 					require.Equal(t, message.CallID, registry.ResolveMediaEndpoints("192.0.2.1:20000", "").CallID)
 					if !missing {
 						bridge.mu.Lock()
-						state := bridge.selected[message.CallID].derivations[derivationSide{"from", "to", "from"}]
+						state := bridge.selected[message.CallID].derivations[derivationSide{"from", "to", "from", false}]
 						require.Equal(t, uint64(1), state.cseq)
 						require.Equal(t, "INVITE", state.method)
 						require.False(t, state.complete)
@@ -111,7 +111,7 @@ func TestRequestMethodCannotBorrowNegotiationFromCSeqHeader(t *testing.T) {
 			require.Error(t, submitDerivation(t, bridge, registry, mismatch))
 			assertDerivationState(t, bridge, controller, policy, true)
 			bridge.mu.Lock()
-			state := bridge.selected[initial.CallID].derivations[derivationSide{"from", "to", "from"}]
+			state := bridge.selected[initial.CallID].derivations[derivationSide{"from", "to", "from", false}]
 			require.Equal(t, uint64(1), state.cseq)
 			require.False(t, state.complete)
 			bridge.mu.Unlock()

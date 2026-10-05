@@ -202,6 +202,9 @@ func (b *Bridge) ObserveValidated(result pipeline.SIPResult) error {
 
 func (b *Bridge) key(result pipeline.SIPResult, candidates []mediaadmission.MetadataRecord) mediaadmission.DialogKey {
 	key := mediaadmission.DialogKey{Domain: b.cfg.Domain, Session: b.session, CallID: result.CallID, FromTag: result.FromTag, ToTag: result.ToTag, Branch: result.ViaBranch, CSeq: result.CSeqNumber, CSeqMethod: result.CSeqMethod, ResponseCode: result.ResponseCode, DescriptorOnly: len(result.SDP) == 0, CSeqValid: validRecoveryCSeq(result)}
+	reliable := sip.ParseReliableHeaders(result.Headers)
+	key.ReliableResponse = reliable.ResponseValid && result.ResponseCode > 100 && result.ResponseCode < 200 && result.CSeqMethod == "INVITE"
+	key.RSeq, key.RAckValid, key.RAckRSeq, key.RAckCSeq = reliable.RSeq, reliable.RAckValid && result.ResponseCode == 0 && result.Method == "PRACK", reliable.RAckRSeq, reliable.RAckCSeq
 	if len(result.SDP) != 0 && len(result.SDP) <= sip.MaxMessageSize {
 		key.SDPDigest = sha256.Sum256(result.SDP)
 	}

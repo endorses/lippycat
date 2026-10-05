@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admission disabled. Previously, a receiver-interface mismatch could leave
   hunters selecting calls broadly despite distributed identity or IP filters.
   The corrected path applies those filters and the configured empty-filter
-  policy, so an upgrade can reduce forwarded traffic. For intentional broad
+  policy, whose default is `deny`: an empty applicable filter set forwards no
+  calls. An upgrade can therefore reduce forwarded traffic. For intentional broad
   selection, use an empty applicable filter set with `--no-filter-policy allow`;
   `allow` does not override installed filters or explicit capture predicates.
 - Recover independently valid SDP sections while preserving numeric-address
@@ -33,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Coordinate shadow sampling across kernel decisions and userspace evidence.
   Sampling reduces retained frame identities while preserving duplicate counts;
   loss or ambiguous evidence remains incomplete rather than proving parity.
+- Recover delayed offers in observed initial reliable provisional INVITE responses
+  from complete PRACK answers with matching dialog and RAck/RSeq/CSeq proof. Missing,
+  conflicting or discarded proof remains uncertain; unrelated PRACK or UPDATE
+  SDP does not supply that answer.
+- Clarify hunter empty-filter defaults, shadow evidence sizing, ordinary-path
+  endpoint limits and the RTCP requirements for RTP port 65535. Existing resource
+  defaults and parsing limits are unchanged.
 - Retain unresolved SDP by signaling context until a corresponding repair,
   validated supersession or retirement. A complete opposite-side answer cannot
   clear an incomplete offer; safe endpoints remain independently usable.

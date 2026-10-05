@@ -295,7 +295,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	}
 	var promote []mediaadmission.EndpointKey
 	var derived []mediaadmission.EndpointKey
-	known, incomplete := false, false
+	known := false
 	for _, candidate := range b.cfg.Metadata.Candidates(b.cfg.Domain, b.session, result.CallID, now) {
 		if !compatible(candidate.Key, result) {
 			continue
@@ -308,19 +308,16 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 			promote = append(promote, record.Endpoints...)
 			derived = append(derived, record.Endpoints...)
 			known = known || !record.Key.DescriptorOnly
-			incomplete = incomplete || !record.Complete
 			current.metadataCutoff = b.nextMetadata
 		}
 	}
 	if len(result.SDP) > 0 && result.ResponseCode < 300 {
 		parsed := sip.ParseSDPResult(string(result.SDP), b.cfg.Limits.MaxEndpointsPerOwner)
 		b.sdpParseCounters.Observe(parsed)
-		incomplete = !parsed.Complete
 		derived = nil
 		for _, endpoint := range parsed.Endpoints {
 			key, err := mediaadmission.NewEndpoint(b.cfg.Domain, endpoint.Address.Addr(), endpoint.Address.Port())
 			if err != nil {
-				incomplete = true
 				continue
 			}
 			derived = append(derived, key)
@@ -338,7 +335,6 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	promote = uniqueEndpoints(promote, b.cfg.Limits.MaxEndpointsPerOwner+1)
 	if len(derived) > b.cfg.Limits.MaxEndpointsPerOwner || len(promote) > b.cfg.Limits.MaxEndpointsPerOwner {
 		current.contextLost = true
-		incomplete = true
 		derived = derived[:min(len(derived), b.cfg.Limits.MaxEndpointsPerOwner)]
 		promote = promote[:min(len(promote), b.cfg.Limits.MaxEndpointsPerOwner)]
 	}
@@ -355,7 +351,6 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		// An absent/expired pending offer cannot prove a selected call has no
 		// media. A later valid offer/answer or lifetime retirement supplies the
 		// missing derivation; a registry snapshot alone does not.
-		incomplete = true
 		if result.ResponseCode == 0 {
 			b.observeDerivation(current, mediaadmission.MetadataRecord{Key: b.key(result, nil), Complete: true})
 		}
@@ -365,7 +360,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	}
 	contextKnown, contextUnknown, mediaSet := b.derivationSummary(current)
 	previousUnknown := current.unknown
-	incomplete = contextUnknown
+	incomplete := contextUnknown
 	current.unknown = contextUnknown
 	if contextKnown || known {
 		previousKnown := current.known

@@ -21,17 +21,47 @@ type DialogKey struct {
 	Branch     string
 	CSeq       uint64
 	CSeqMethod string
+	// Message role prevents an answer from overwriting its offer's derivation.
+	ResponseCode   int
+	DescriptorOnly bool
+	CSeqValid      bool
+	SDPDigest      [32]byte
 }
 
 type MetadataStats struct {
-	Dialogs         int
-	Endpoints       int
-	Bytes           int
-	Evicted         uint64
-	Expired         uint64
-	Rejected        uint64
-	PromotionMisses uint64
-	Promotions      uint64
+	SelectedContexts, SelectedBytes, SelectedEndpoints int
+	SelectedRejected                                   uint64
+	Dialogs                                            int
+	Endpoints                                          int
+	Bytes                                              int
+	Evicted                                            uint64
+	Expired                                            uint64
+	Rejected                                           uint64
+	PromotionMisses                                    uint64
+	Promotions                                         uint64
+}
+
+// SelectedDerivationUsage charges the separate, session-wide selected-context
+// pool. It shares configured limits with pending metadata, not retained entries.
+type SelectedDerivationUsage struct{ Contexts, Bytes, Endpoints int }
+
+// ReserveSelectedDerivation atomically replaces one context's resource charge.
+// Bridges in different domains share this store and therefore these limits.
+func (s *MetadataStore) ReserveSelectedDerivation(old, next SelectedDerivationUsage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if old.Contexts < 0 || old.Bytes < 0 || old.Endpoints < 0 || next.Contexts < 0 || next.Bytes < 0 || next.Endpoints < 0 || old.Contexts > s.stats.SelectedContexts || old.Bytes > s.stats.SelectedBytes || old.Endpoints > s.stats.SelectedEndpoints {
+		return errors.New("invalid selected derivation reservation")
+	}
+	contexts := s.stats.SelectedContexts - old.Contexts + next.Contexts
+	bytes := s.stats.SelectedBytes - old.Bytes + next.Bytes
+	endpoints := s.stats.SelectedEndpoints - old.Endpoints + next.Endpoints
+	if contexts > s.config.PendingDialogCapacity || bytes > s.config.PendingBytes || endpoints > s.config.PendingEndpointCapacity {
+		s.stats.SelectedRejected++
+		return ErrCapacity
+	}
+	s.stats.SelectedContexts, s.stats.SelectedBytes, s.stats.SelectedEndpoints = contexts, bytes, endpoints
+	return nil
 }
 
 type metadataEntry struct {
@@ -116,9 +146,16 @@ func (s *MetadataStore) ObserveDerived(key DialogKey, endpoints []EndpointKey, c
 			s.stats.Expired++
 			existing = nil
 		} else {
+			// Conflicting or incomplete copies of one transaction/body cannot
+			// be repaired by overwriting their completeness with a retransmit.
+			identical := len(normalized) == len(old.endpoints)
 			for ep := range old.endpoints {
+				if _, exists := normalized[ep]; !exists {
+					identical = false
+				}
 				normalized[ep] = struct{}{}
 			}
+			complete = complete && old.complete && identical
 			// Out-of-order captures must not rewind expiry or break list ordering.
 			if now.Before(old.updated) {
 				now = old.updated

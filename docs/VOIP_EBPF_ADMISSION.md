@@ -143,6 +143,21 @@ without requiring another SDP message. They do not count as active owners or
 retain packet payloads. Metadata and token pools each enforce their stated bounds.
 These defaults are resource settings, not throughput or latency guarantees.
 
+The authoritative tracker budget also includes retained legacy port-only
+diagnostic keys. Those keys cannot authorize media, but can consume space needed
+for later exact endpoints during media moves. This shared accounting and separate
+RTCP endpoints predate the follow-up remediation; configure limits with that
+retention in mind. Malformed RTCP invalidates its whole media section, including
+otherwise usable RTP. Finer salvage and separate diagnostic storage remain
+future enhancements.
+
+Selected derivation descriptors are bounded separately using the pending dialog,
+byte and endpoint settings across all observation domains in the capture session,
+with at most one retained predecessor per context and an owner context count
+bounded by the per-owner endpoint setting. Exhaustion
+preserves unknown state until the affected lifetime retires; reducing history
+must not manufacture complete negotiation evidence.
+
 ## Failure and diagnostic modes
 
 Explicit enablement fails startup if required maps, program attachment, privileges,
@@ -166,11 +181,22 @@ allows opening even when the endpoint map is full. If the control write itself
 fails, status does not claim fail-open succeeded. Explicit restrictions and all
 userspace authorization checks remain in force. Recovery includes additions,
 deletions, selector changes and current ownership; one successful map update is
-not sufficient evidence of recovery. Persistent failures can keep a domain degraded.
+not sufficient evidence of recovery. Unresolved SDP is tracked by media sender,
+request initiator and current lifetime. A complete opposite-side answer adds its
+own knowledge without repairing an incomplete offer. Recovery requires a proved
+same-context repair, supersession or transaction retirement, followed by confirmed
+complete reconciliation. SDP in unrelated SIP methods cannot supply that proof.
+Rejecting a later offer restores any unresolved predecessor; an observed successful
+negotiation can retire it. Failed endpoint associations remain pending across all
+still-current contexts; an unrelated message or opposite-side answer cannot erase
+them. Only successful association or proved context supersession/retirement can
+remove that requirement. Persistent failures can keep a domain degraded.
 If even the bounded pending-owner pool is exhausted, the lost selection is marked
 unknown and ordinary retries cannot establish completeness. Restart the enabled
-capture after correcting capacity/traffic conditions; it must not silently declare
-recovery from an incomplete owner set.
+capture after correcting capacity/traffic conditions, or let every authoritative
+call retire so the registry is empty. An unselected call can also prevent this
+empty-registry recovery. The application must not silently declare recovery from
+an incomplete owner set.
 
 Status includes configured/effective modes, desired/installed generations,
 occupancy, pending changes, update/control errors, compatibility decisions,
@@ -178,12 +204,44 @@ metadata eviction/expiry, and diagnostic evidence loss. Existing capture-drop
 counters retain their meaning. Ordinary status does not expose endpoint addresses,
 selector values, packet payloads or Call-IDs.
 
-Shadow evidence is bounded and timing-sensitive. Distinguish expected rejection
-before selection, packets during the selection-to-publication interval, and a
-rejection after confirmed publication. Aggregate counters or a later map lookup
-cannot prove an earlier packet decision. Live fingerprints can collide, samples
-can duplicate, and events can be lost. Synthetic test packet identities supply
-stronger evidence. Shadow also has a different load profile from enforcement.
+`--rtp-ebpf-shadow-sample-every=N` uses a deterministic rule shared by the kernel,
+capture observation and verified attribution. For complete frames up to 256 bytes,
+the rule hashes the domain, frame length and all frame bytes. `N=1` includes every
+eligible identity; larger values select approximately one in N. Identical copies
+share eligibility, and all eligible copies count toward duplicate detection.
+Hashes choose samples; exact bytes establish identity. Unsampled observations do
+not acquire correlation locks or allocate entries. Oversized or unavailable full
+frames can produce incomplete diagnostic samples but cannot be correlated.
+
+The correlator holds distinct eligible full-frame identities, bounded by
+`shadow_evidence_capacity`. Entries expire strictly after twice `pending_ttl`,
+then at the next `retry_interval` maintenance pass. Approximate capacity sizing
+uses eligible distinct identities per second multiplied by that retention window,
+plus burst headroom. With the default TTL and maintenance interval, the window is
+about 60–61 seconds. `pending_ttl` also controls pending SIP metadata; shortening
+it changes promotion behavior. Retired owner history lasts beyond three TTLs and
+remains bounded by the owner capacity. The separate diagnostic sample history is
+bounded by the same evidence-capacity setting but counts sample occurrences and
+can overwrite independently of the identity table.
+
+Distinguish expected rejection before selection, the selection-to-publication
+interval and rejection after confirmed publication. Classification requires a
+unique complete frame, capture observation, verified lifetime attribution and
+historical generation/publication evidence. Duplicate, late, truncated or lost
+evidence and configuration mismatches remain incomplete. Eligible overflow or
+lock pressure invalidates unsupported uniqueness claims, including other pending
+evidence; continued loss can prevent useful classifications. Sampled observations
+are not exact whole-traffic rejection counts or live-capacity/parity guarantees.
+No frame contents or signaling identities are exposed in status or warning logs.
+
+SDP endpoint derivation warnings are aggregated on maintenance, at most once per
+30-second reporting interval, with one final outstanding summary on shutdown.
+They use the normal logger level and report only sanitized reasons and counts of
+partial, failed, resource-limited and suppressed observations. Sniff and hunter
+use the buffer's reporting path to avoid duplicate tracker warnings; standalone
+tap uses its local processor and distributed processing has its own complete-SIP
+reporting path. This reporting does not require eBPF or structured-log output and
+does not wait for log I/O on the packet path.
 
 Selected, answered calls without attributed media produce a diagnostic after the
 configured interval. Installed endpoints and kernel-admitted candidates are
@@ -212,16 +270,19 @@ make test-ebpf
 `make test-ebpf` requires Docker and explicitly runs a disposable privileged
 container with its own network namespace. It verifies real kernel decisions,
 libpcap attachment, and command behavior. Default unprivileged tests report these
-cases as not exercised. Compiler/container caches are ephemeral; generated source
+cases as not exercised. The prior remediation's isolated kernel and command run
+is recorded in [its execution record](plans/voip-admission-inventory-review-remediation.md#execution-record);
+a verifier that did not repeat that run should reference it as implementation
+evidence. Compiler/container caches are ephemeral; generated source
 and both endian objects are checked in. See the
 [backend notes](../internal/pkg/capture/ebpfadmission/README.md) and
 [binding patch provenance](../third_party/gopacket/LIPPYCAT_PATCH.md).
 
 Enabled handles use immediate mode, attach a startup reject-all policy, drain
-queued data, then activate the final program. Host-timestamp startup fencing also
-rejects pre-activation frames. This deliberately permits startup packet loss;
-clock adjustments can affect the timestamp boundary. The implementation rejects
-unsupported ring-drain modes rather than declaring an unretired block empty.
+retire earlier kernel receivers and queued socket/ring data, then activate the
+final program. This deliberately permits counted startup packet loss. Future
+packets are not compared to a permanent wall-clock boundary, so clock rollback
+does not create a discard window. Unsupported ring-drain modes fail startup.
 
 libpcap remains a cgo dependency. Cgo is not single-threaded and does not disable
 Go goroutines. This feature avoids unnecessary packet delivery and decoding; it

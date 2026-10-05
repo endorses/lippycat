@@ -96,6 +96,7 @@ func (h *UDPPacketHandler) warnAmbiguousRTP(packet gopacket.Packet) {
 func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
 	if tracker != nil && bufferMgr != nil {
 		bufferMgr.BindRegistry(tracker.AdmissionRegistry(), tracker.config.MaxEndpointsPerCall)
+		tracker.sdpReporter.Disable()
 	}
 	h := &UDPPacketHandler{
 		tracker:         tracker,
@@ -433,7 +434,9 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 	mediaHeader := len(payload) >= 12 || (len(payload) >= 8 && payload[1] >= 192 && payload[1] <= 223)
 	if h.admission != nil && mediaHeader && payload[0]>>6 == 2 {
 		h.admission.RecordAttributedMedia(resolution.CallID, resolution.Lifetime)
-		h.admission.RecordAttributedPacket(resolution.CallID, resolution.Lifetime, packet.Data())
+		if completeCorrelationPacket(packet) {
+			h.admission.RecordAttributedPacket(resolution.CallID, resolution.Lifetime, packet.Data())
+		}
 	}
 	bufCallID := resolution.CallID
 	sourceEndpoint, destinationEndpoint := net.JoinHostPort(srcIP, srcPort), net.JoinHostPort(dstIP, dstPort)
@@ -516,7 +519,9 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 			resolution := h.tracker.ResolveMediaPacket(pkt)
 			if resolution.Status == callregistry.MediaResolved && resolution.CallID == callID {
 				h.admission.RecordAttributedMedia(callID, resolution.Lifetime)
-				h.admission.RecordAttributedPacket(callID, resolution.Lifetime, pkt.Data())
+				if completeCorrelationPacket(pkt) {
+					h.admission.RecordAttributedPacket(callID, resolution.Lifetime, pkt.Data())
+				}
 			}
 		}
 
@@ -584,4 +589,13 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)
 	}
+}
+
+// completeCorrelationPacket requires an original full frame for exact evidence.
+func completeCorrelationPacket(packet gopacket.Packet) bool {
+	if packet == nil {
+		return false
+	}
+	info := packet.Metadata().CaptureInfo
+	return info.Length == len(packet.Data()) && info.CaptureLength == info.Length
 }

@@ -158,6 +158,14 @@ Like `sniff`, `hunt` has protocol subcommands that add specialized filtering and
 
 The VoIP hunter is the most commonly used mode. It captures SIP/RTP traffic with intelligent call buffering — packets are held locally until a call matches the processor's filters, then forwarded. Unmatched calls are dropped at the edge, reducing bandwidth by 90%+.
 
+**Upgrade behavior:** VoIP hunters now receive application filters with eBPF
+disabled. An earlier interface mismatch could select calls broadly despite
+installed distributed identity or IP filters. The repair can reduce forwarded
+traffic after upgrading. To intentionally select broadly, use an empty applicable
+filter set with `--no-filter-policy allow`; `allow` does not override installed
+filters or explicit capture predicates. See the repository changelog for the
+release behavior changes.
+
 VoIP hunter with TLS:
 
 <!-- i18n:skip -->

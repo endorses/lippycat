@@ -302,7 +302,10 @@ func TestDiagnosticAnswerAndHoldStateSurvivesAbsentSDP(t *testing.T) {
 			t.Fatal("SDP-absent message reset diagnostic state")
 		}
 	}
-	hold := answer
+	hold := message
+	hold.ToTag = "to"
+	hold.CSeqNumber = 2
+	hold.ViaBranch = "hold-branch"
 	hold.SDP = []byte("v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 0 RTP/AVP 0\r\n")
 	check(t, bridge.Selected(hold))
 	for _, state := range recorder.selections {
@@ -481,7 +484,7 @@ func TestPendingPoolOverflowNeverCreatesZeroOwnerOrClearsLostSelection(t *testin
 }
 
 func TestForegroundErrorCallbackCanCloseRetryWorker(t *testing.T) {
-	bridge, registry, _, _ := retryFixture(t, 1, 1, nil)
+	bridge, registry, _, _ := retryFixture(t, 1, 2, nil)
 	registry.Upsert(callregistry.Call{CallID: "active"})
 	check(t, bridge.Selected(offer("active")))
 	closed := make(chan error, 1)
@@ -523,7 +526,7 @@ func TestRetryFailureDoesNotReenterErrorCallback(t *testing.T) {
 }
 
 func TestBackgroundRetryRecoversWithoutMoreSIPAndStopsOnClose(t *testing.T) {
-	bridge, registry, maps, controller := retryFixture(t, 1, 1, nil, time.Millisecond)
+	bridge, registry, maps, controller := retryFixture(t, 1, 2, nil, time.Millisecond)
 	for _, id := range []string{"active", "pending"} {
 		message := offer(id)
 		if id == "pending" {
@@ -679,7 +682,16 @@ func TestIncompleteSelectedDerivationRetainsSafeAttributionAndRequiresCompleteRe
 			if bridge.retrySelected() == nil || controller.Status()[0].State != wantState {
 				t.Fatal("known partial snapshot falsely restored enforcement")
 			}
+			binding := message
+			binding.SDP = nil
+			binding.ResponseCode = 200
+			binding.ToTag = "destination"
+			if bridge.Selected(binding) == nil {
+				t.Fatal("opposite response cleared unresolved offer")
+			}
 			repaired := offer(message.CallID)
+			repaired.ToTag = "destination"
+			repaired.ViaBranch = "repair-branch"
 			repaired.CSeqNumber++
 			check(t, bridge.ObserveValidated(repaired))
 			check(t, bridge.Selected(repaired))
@@ -729,12 +741,15 @@ func TestUnknownPendingSDPDoesNotDisappearWhenLateSelectionHasNoBody(t *testing.
 func TestFailedControlRemainsUncertainUntilConfirmedSnapshotRecovery(t *testing.T) {
 	bridge, registry, maps, controller := recoveryFixture(t, mediaadmission.FailureOpen, nil)
 	message := offer("control")
+	message.ToTag = "destination"
 	registry.Upsert(callregistry.Call{CallID: message.CallID})
 	check(t, bridge.Selected(message))
 	maps.mu.Lock()
 	maps.failControl = true
 	maps.mu.Unlock()
 	bad := message
+	bad.CSeqNumber = 2
+	bad.ViaBranch = "failed-branch"
 	bad.SDP = []byte("m=audio invalid RTP/AVP 0")
 	if bridge.Selected(bad) == nil {
 		t.Fatal("failed control was not reported")
@@ -743,7 +758,10 @@ func TestFailedControlRemainsUncertainUntilConfirmedSnapshotRecovery(t *testing.
 	if status.State != mediaadmission.StateControlFailed || !status.ControlUncertain || status.LastConfirmed.Mode == mediaadmission.KernelOpen {
 		t.Fatalf("unconfirmed open mode claimed: %+v", status)
 	}
-	if bridge.Selected(message) == nil {
+	repair := message
+	repair.CSeqNumber = 3
+	repair.ViaBranch = "repair-branch"
+	if bridge.Selected(repair) == nil {
 		t.Fatal("repair ignored failed control operation")
 	}
 	maps.mu.Lock()

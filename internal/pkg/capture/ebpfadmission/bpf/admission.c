@@ -8,7 +8,7 @@ struct endpoint { __u32 domain; __u8 address[16]; __u16 port; __u8 family; __u8 
 struct address { __u32 domain; __u8 family; __u8 pad[3]; __u8 address[16]; };
 struct prefix { __u32 bits; struct address address; };
 struct control { __u64 generation; __u32 mode; __u32 no_filters; };
-struct decision { __u64 time_ns; __u64 generation; __u32 domain; __u32 reason; __u32 length; __u32 fingerprint; struct endpoint source; struct endpoint destination; __u32 identity_length; __u8 identity[256]; };
+struct decision { __u64 time_ns; __u64 generation; __u32 domain; __u32 reason; __u32 length; __u32 fingerprint; struct endpoint source; struct endpoint destination; __u32 identity_length; __u8 identity[256]; __u32 sample_every; };
 struct { __uint(type, BPF_MAP_TYPE_HASH); __uint(max_entries, 65536); __type(key, struct endpoint); __type(value, __u8); } endpoints SEC(".maps");
 struct { __uint(type, BPF_MAP_TYPE_HASH); __uint(max_entries, 4096); __type(key, struct address); __type(value, __u8); } addresses SEC(".maps");
 struct { __uint(type, BPF_MAP_TYPE_LPM_TRIE); __uint(max_entries, 4096); __uint(map_flags, BPF_F_NO_PREALLOC); __type(key, struct prefix); __type(value, __u8); } prefixes SEC(".maps");
@@ -47,33 +47,52 @@ static __always_inline int finish(struct __sk_buff *skb, struct control *ctl, __
     count(reason);
     if (ctl->mode == 1) {
         count(9);
-        if (shadow_sample_every && bpf_get_prandom_u32() % shadow_sample_every == 0) {
+        // The same deterministic eligibility is applied before userspace
+        // retention. Full bounded bytes supply identity; hashes select only.
+        __u8 frame[256] = {};
+        __u32 length = skb->len;
+        __u32 copied_length = length > sizeof(frame) ? sizeof(frame) : length;
+        long copied = -1;
+        if (copied_length) {
+            __u32 bounded_length = copied_length & 255;
+            if (bounded_length)
+                copied = bpf_skb_load_bytes(skb, 0, frame, bounded_length);
+            else
+                copied = bpf_skb_load_bytes(skb, 0, frame, 256);
+        }
+        __u32 hash = 2166136261U;
+        // Fixed little-endian domain/length bytes on either BPF architecture.
+        #pragma unroll
+        for (int i = 0; i < 4; i++) hash = (hash ^ ((__u32)domain >> (i * 8) & 255)) * 16777619U;
+        #pragma unroll
+        for (int i = 0; i < 4; i++) hash = (hash ^ (length >> (i * 8) & 255)) * 16777619U;
+        // Oversized prefixes still allow sampled incomplete diagnostics, never
+        // exact correlation. Unreadable frames hash only domain and length.
+        if (!copied) {
+            for (int i = 0; i < 256; i++) {
+                if ((__u32)i >= copied_length) break;
+                hash = (hash ^ frame[i]) * 16777619U;
+            }
+        }
+        hash ^= hash >> 16; hash *= 0x85ebca6bU;
+        hash ^= hash >> 13; hash *= 0xc2b2ae35U; hash ^= hash >> 16;
+        if (shadow_sample_every && hash % shadow_sample_every == 0) {
             struct decision *d = bpf_ringbuf_reserve(&decisions, sizeof(*d), 0);
             if (d) {
                 __builtin_memset(d, 0, sizeof(*d));
                 d->time_ns = bpf_ktime_get_ns(); d->generation = ctl->generation;
-                d->domain = domain; d->reason = reason; d->length = skb->len;
-                // Bounded header fingerprint, not payload or collision-free identity.
+                d->domain = domain; d->reason = reason; d->length = length;
+                d->sample_every = shadow_sample_every;
+                // Legacy bounded header fingerprint remains diagnostic only.
                 __u32 words[8] = {};
                 bpf_skb_load_bytes(skb, 0, words, sizeof(words));
-                __u32 hash = 2166136261U;
+                __u32 fingerprint = 2166136261U;
                 #pragma unroll
-                for (int i = 0; i < 8; i++) hash = (hash ^ words[i]) * 16777619U;
-                d->fingerprint = hash; d->source = *src; d->destination = *dst;
-                // Exact transient correlation is possible only for a complete
-                // bounded frame. Partial prefixes never establish identity.
-                d->identity_length = 0;
-                __u32 identity_length = skb->len;
-                if (identity_length && identity_length <= sizeof(d->identity)) {
-                    // Bound the helper's scalar argument explicitly. A fresh
-                    // skb->len read has no verifier range from an earlier read.
-                    __u32 bounded_length = identity_length & 255;
-                    long copied;
-                    if (bounded_length)
-                        copied = bpf_skb_load_bytes(skb, 0, d->identity, bounded_length);
-                    else
-                        copied = bpf_skb_load_bytes(skb, 0, d->identity, 256);
-                    if (!copied) d->identity_length = identity_length;
+                for (int i = 0; i < 8; i++) fingerprint = (fingerprint ^ words[i]) * 16777619U;
+                d->fingerprint = fingerprint; d->source = *src; d->destination = *dst;
+                if (!copied && length && length <= sizeof(d->identity)) {
+                    __builtin_memcpy(d->identity, frame, sizeof(frame));
+                    d->identity_length = length;
                 }
                 bpf_ringbuf_submit(d, 0);
             } else count(11);

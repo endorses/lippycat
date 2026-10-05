@@ -208,9 +208,10 @@ type StructuredLogConfig struct {
 
 // Processor represents a processor node
 type Processor struct {
-	radiusMu      sync.Mutex
-	radiusCapture *radius.CaptureProcessor
-	config        Config
+	sdpDiagnostics *processorSDPDiagnostics
+	radiusMu       sync.Mutex
+	radiusCapture  *radius.CaptureProcessor
+	config         Config
 
 	// Protocol detector (for centralized detection)
 	detector *detector.Detector
@@ -811,6 +812,7 @@ func New(config Config) (_ *Processor, constructorErr error) {
 	// fallible constructor work and authentication of the configured stores.
 	p.callCorrelator = NewCallCorrelator()
 	p.initLIRuntime()
+	p.sdpDiagnostics = newProcessorSDPDiagnostics()
 	return p, nil
 }
 

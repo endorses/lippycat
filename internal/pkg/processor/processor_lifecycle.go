@@ -369,6 +369,7 @@ func (p *Processor) Shutdown() error {
 		// Includes the gRPC Serve goroutine and local source/consumer goroutines.
 		// Once this returns there is no producer that can call processBatch.
 		p.wg.Wait()
+		p.sdpDiagnostics.close()
 		// Capture is closed before persistent LI drains, while administration,
 		// delivery journals and file ownership remain available.
 		if p.sessionOutputManager != nil {

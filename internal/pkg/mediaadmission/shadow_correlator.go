@@ -61,6 +61,7 @@ type ShadowCorrelator struct {
 	mu                      sync.Mutex
 	capacity, ownerCapacity int
 	ttl                     uint64
+	sampleEvery             uint32
 	entries                 map[shadowIdentity]*shadowEntry
 	owners                  map[OwnerID]shadowOwner
 	stats                   ShadowStats
@@ -70,7 +71,19 @@ type ShadowCorrelator struct {
 }
 
 func NewShadowCorrelator(capacity, ownerCapacity int, ttlNS uint64) *ShadowCorrelator {
-	return &ShadowCorrelator{capacity: capacity, ownerCapacity: ownerCapacity, ttl: ttlNS, entries: make(map[shadowIdentity]*shadowEntry), owners: make(map[OwnerID]shadowOwner)}
+	return NewSampledShadowCorrelator(capacity, ownerCapacity, ttlNS, 1)
+}
+
+// NewSampledShadowCorrelator binds one immutable interval to every correlation
+// hook for this capture session. Zero never produces classifiable evidence.
+func NewSampledShadowCorrelator(capacity, ownerCapacity int, ttlNS uint64, sampleEvery uint32) *ShadowCorrelator {
+	return &ShadowCorrelator{capacity: capacity, ownerCapacity: ownerCapacity, ttl: ttlNS, sampleEvery: sampleEvery, entries: make(map[shadowIdentity]*shadowEntry), owners: make(map[OwnerID]shadowOwner)}
+}
+
+// FrameEligible is safe before locks and prevents unsampled traffic from
+// allocating correlation entries or creating diagnostic evidence-loss epochs.
+func (c *ShadowCorrelator) FrameEligible(domain DomainID, frame []byte) bool {
+	return ShadowFrameEligible(domain, frame, c.sampleEvery)
 }
 func (c *ShadowCorrelator) Selection(owner OwnerID, domain DomainID, selectedNS uint64) {
 	c.mu.Lock()
@@ -144,9 +157,21 @@ func (c *ShadowCorrelator) entry(key shadowIdentity, now uint64) *shadowEntry {
 	return v
 }
 func (c *ShadowCorrelator) Sample(sample ShadowSample, now uint64) {
+	valid := sample.IdentityLength > 0 && sample.IdentityLength <= ShadowIdentityBytes && sample.IdentityLength == sample.Length
+	// A record emitted under another interval cannot establish that all copies
+	// were observed. Reject even an accidentally shared eligible identity.
+	mismatch := c.sampleEvery == 0 || sample.SampleEvery != c.sampleEvery
+	if valid && !mismatch && !c.FrameEligible(sample.Domain, sample.Identity[:sample.IdentityLength]) {
+		mismatch = true // unexpected kernel emission also invalidates uniqueness
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if sample.IdentityLength == 0 || sample.IdentityLength > ShadowIdentityBytes || sample.IdentityLength != sample.Length {
+	if mismatch {
+		c.stats.Incomplete++
+		c.markLoss(now)
+		return
+	}
+	if !valid {
 		c.stats.Incomplete++
 		c.stats.TooLarge++
 		return
@@ -154,6 +179,10 @@ func (c *ShadowCorrelator) Sample(sample ShadowSample, now uint64) {
 	if sample.EventMonotonicNS == 0 || now < sample.EventMonotonicNS || now-sample.EventMonotonicNS > c.ttl {
 		c.stats.Incomplete++
 		c.stats.Late++
+		// Discarding an eligible copy cannot leave a pending identity unique.
+		// Delayed kernel delivery can reveal a duplicate even when the capture
+		// socket supplied only one observed/attributed copy.
+		c.markLoss(now)
 		return
 	}
 	key := shadowIdentity{domain: sample.Domain, length: sample.IdentityLength, frame: sample.Identity}
@@ -168,6 +197,9 @@ func (c *ShadowCorrelator) Sample(sample ShadowSample, now uint64) {
 	}
 }
 func (c *ShadowCorrelator) Observed(domain DomainID, frame []byte, now uint64) {
+	if !c.FrameEligible(domain, frame) {
+		return
+	}
 	if !c.mu.TryLock() {
 		c.pressure.Add(1)
 		c.markLoss(now)
@@ -186,6 +218,9 @@ func (c *ShadowCorrelator) Observed(domain DomainID, frame []byte, now uint64) {
 	v.observed = now
 }
 func (c *ShadowCorrelator) Attributed(owner OwnerID, domain DomainID, frame []byte, now uint64) {
+	if !c.FrameEligible(domain, frame) {
+		return
+	}
 	if !c.mu.TryLock() {
 		c.pressure.Add(1)
 		c.markLoss(now)

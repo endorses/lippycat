@@ -1349,7 +1349,7 @@ func captureFromPreparedHandle(ctx context.Context, iface pcaptypes.PcapInterfac
 
 			if observer, ok := captureFilterInstaller(options).(interface {
 				RecordObservedPacket(string, []byte)
-			}); ok {
+			}); ok && packet.Metadata().Length == len(packet.Data()) && packet.Metadata().CaptureLength == packet.Metadata().Length {
 				observer.RecordObservedPacket(iface.Name(), packet.Data())
 			}
 			if offlineInput && (lastOfflineSweep.IsZero() || packet.Metadata().Timestamp.Sub(lastOfflineSweep) >= defragmenter.config.SweepInterval) {

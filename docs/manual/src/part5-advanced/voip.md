@@ -322,9 +322,29 @@ no new endpoints. Previously accepted endpoints remain until authoritative call
 lifetime cleanup. At capacity, only the first unique endpoints in wire order
 within the configured bound are retained, and derivation remains incomplete.
 Incomplete selected-call derivation applies the configured admission failure
-policy and blocks enforcement recovery until a complete later description or
-retirement of the affected lifetime. These shared endpoint semantics also apply
+policy and blocks enforcement recovery until the affected signaling context is
+repaired, validly superseded or retired. A complete opposite-side answer does not
+by itself resolve an incomplete offer. SDP in unrelated SIP methods does not
+resolve negotiation uncertainty. Rejecting a later offer preserves uncertainty
+in its predecessor until successful negotiation establishes supersession.
+These shared endpoint semantics also apply
 with eBPF disabled; opening kernel admission never invents userspace attribution.
+
+The tracker endpoint budget includes RTP, separate RTCP and retained legacy
+port-only diagnostic keys. Diagnostic keys cannot authorize media, but can consume
+space needed for later exact endpoints during media moves. This shared budget
+predates the follow-up remediation. Tracker eviction or retirement ends inherited
+hunter selection even when a temporary buffer remains; stale buffered matches
+do not authorize output. If the selected-owner token pool overflows, recovery
+requires an empty authoritative registry, including retirement of unselected
+calls, or an explicitly restarted capture after correcting capacity conditions.
+
+SDP warnings report sanitized aggregate partial, failed, resource-limited and
+suppressed counts during maintenance, at most once per 30-second reporting
+interval, plus one final outstanding summary on shutdown. Normal logger settings
+apply. They need neither eBPF nor structured-log output. Sniff/hunter use buffer
+reporting, tap uses its local processor, and distributed processing reports
+complete SIP messages on its own path. Packet handling does not wait for log I/O.
 
 With `--rtp-ebpf`, you do not need `--rtp-port-range`: RTP and RTCP endpoints
 are learned from the selected call's SDP, including endpoints outside the
@@ -365,16 +385,34 @@ installed entries without opening. A failed mode-control write is reported
 separately. Enforcement resumes only after complete current-state reconciliation.
 Startup failure never silently enables shadow or broad capture.
 
-`--rtp-ebpf-shadow-sample-every` (default `1`) samples approximately one in every
-positive N decisions; YAML uses `rtp_ebpf.shadow_sample_every` beneath the role's
-VoIP settings. This setting alone does not enable admission. Correlation retains
-bounded transient frame evidence for at most two `pending_ttl` intervals and
-requires a unique kernel sample, the captured frame, verified selected-lifetime
-attribution, and historical publication generation. Frames over 256 bytes,
-truncated or duplicate evidence, late samples, missing ownership, and changed
-endpoint revisions remain incomplete. Status exposes no packet contents or call
+`--rtp-ebpf-shadow-sample-every` (default `1`) uses deterministic sampling shared
+by kernel decisions, capture observation and verified attribution; YAML uses
+`rtp_ebpf.shadow_sample_every` beneath the role's VoIP settings. For complete
+frames up to 256 bytes the rule includes domain, full length and all frame bytes.
+Positive N selects approximately one in N identities; `1` includes every eligible
+identity. Identical copies share eligibility and every eligible copy is counted.
+Hashes choose samples; exact bytes establish identity. Unsampled observations do
+not occupy correlation entries. This setting alone does not enable admission.
+
+`shadow_evidence_capacity` bounds distinct eligible full-frame identities.
+Correlation entries expire strictly after twice `pending_ttl`, at the next
+`retry_interval` maintenance pass. Approximate sizing is eligible distinct
+identities per second times that window, with burst headroom; the default window
+is about 60–61 seconds. `pending_ttl` also controls pending SIP metadata, so
+shortening it changes promotion behavior. Retired owner history lasts beyond
+three TTLs and remains bounded by owner capacity. Separate sample history uses
+the same evidence-capacity setting, counts occurrences and can overwrite even
+when the identity table has space.
+
+Classification requires unique full-frame evidence, capture observation,
+verified selected-lifetime attribution and historical publication generation.
+Frames over 256 bytes, truncated or duplicate evidence, late samples, missing
+ownership, configuration mismatches and changed endpoint revisions remain
+incomplete. Actual eligible overflow or lock pressure invalidates unsupported
+uniqueness claims, potentially across other pending evidence. Persistent loss can
+prevent useful classifications. Status exposes no packet contents or call
 identities. Kernel-ring loss, retained-sample overwrite, malformed samples,
-collection errors, and incomplete correlation have separate counters. Classified
+collection errors and incomplete correlation have separate counters. Classified
 rejections are sampled observations, never exact whole-traffic rejection counts
 or proof of parity.
 

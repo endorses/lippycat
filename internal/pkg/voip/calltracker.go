@@ -129,6 +129,7 @@ func (ct *CallTracker) detachCallLocked(callID string) *CallInfo {
 
 type CallTracker struct {
 	sdpParseCounters   sharedsip.SDPParseCounters
+	sdpReporter        *sharedsip.SDPDiagnosticReporter
 	callMap            map[string]*CallInfo
 	registry           *callregistry.Core
 	maxCalls           int // Maximum calls to keep
@@ -236,6 +237,7 @@ func newCallTracker(config *Config, maxCalls int, output CallOutput) *CallTracke
 		writePacket:      output.WritePacket,
 		completionTimers: make(map[string]*time.Timer),
 	}
+	tracker.sdpReporter = sharedsip.NewSDPDiagnosticReporter(&tracker.sdpParseCounters, sharedsip.SDPTrackerPath)
 	if observer, ok := output.(CallLifecycleObserver); ok {
 		tracker.lifecycleObservers = append(tracker.lifecycleObservers, observer)
 	} else {
@@ -324,6 +326,7 @@ func (ct *CallTracker) Shutdown() {
 			}
 		}
 		ct.lifecycleMu.Unlock()
+		ct.sdpReporter.Flush()
 		logger.Info("Call tracker shutdown complete")
 	})
 }
@@ -672,6 +675,7 @@ func (ct *CallTracker) janitorLoop() {
 			return
 		case <-ticker.C:
 			ct.cleanupOldCalls()
+			ct.sdpReporter.Report(time.Now())
 		}
 	}
 }

@@ -730,6 +730,14 @@ acceptance remain pending. Relays preserve ordinary outputs but cannot authorize
 
 ## Opt-in VoIP eBPF media admission
 
+**Upgrade behavior:** VoIP hunters now receive their application filters when
+eBPF is disabled. An earlier interface mismatch could leave a hunter selecting
+calls broadly despite distributed identity or IP filters. The repaired path
+applies those filters and can forward fewer calls after an upgrade. For
+intentional broad selection, use an empty applicable filter set with
+`--no-filter-policy allow`; `allow` does not override installed filters or
+explicit capture predicates. See the next-release [changelog](../../CHANGELOG.md).
+
 `voip --rtp-ebpf` enables Linux socket-level admission for media belonging to
 selected calls. It is off by default and retains libpcap capture. Use
 `--rtp-ebpf-mode=shadow` for bounded diagnostics and
@@ -741,7 +749,9 @@ including alongside SIP-identity filters, with eBPF enabled or disabled. Explici
 packet predicates and userspace output checks still apply.
 
 `--rtp-ebpf-shadow-sample-every=N` (default `1`, positive) samples approximately
-one in N decisions without enabling admission. Sampled outcomes remain incomplete
+one in N frame identities using the same eligibility rule in the kernel and
+userspace; identical copies share eligibility and every eligible copy is counted.
+The option does not enable admission. Sampled outcomes remain incomplete
 when frame, ownership, revision, or publication evidence is missing or ambiguous;
 counts do not prove parity for all traffic. Loss categories remain separate.
 

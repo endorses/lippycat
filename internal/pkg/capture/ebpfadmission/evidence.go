@@ -23,6 +23,7 @@ type Decision struct {
 	Source, Destination mediaadmission.EndpointKey
 	IdentityLength      uint32
 	Identity            [256]byte
+	SampleEvery         uint32
 }
 
 var ReasonNames = [16]string{"unselected-media", "selected-endpoint", "signaling", "independent-selector", "no-filters", "non-udp", "fragment-compatibility", "encapsulation-compatibility", "unknown-compatibility", "shadow", "degraded-open", "evidence-lost", "explicit-restriction", "explicit-protocol-restriction", "reserved", "reserved"}
@@ -37,7 +38,7 @@ func DecodeDecision(raw []byte) (Decision, error) {
 		Source, Destination                 endpoint
 		IdentityLength                      uint32
 		Identity                            [256]byte
-		Padding                             uint32
+		SampleEvery                         uint32
 	}
 	if err := binary.Read(bytes.NewReader(raw), binary.NativeEndian, &wire); err != nil {
 		return Decision{}, err
@@ -48,5 +49,5 @@ func DecodeDecision(raw []byte) (Decision, error) {
 	if wire.IdentityLength != 0 && (wire.IdentityLength > 256 || wire.IdentityLength != wire.Length) {
 		return Decision{}, fmt.Errorf("invalid complete-frame identity length")
 	}
-	return Decision{TimeNS: wire.TimeNS, Generation: wire.Generation, Domain: mediaadmission.DomainID(wire.Domain), Reason: wire.Reason, Length: wire.Length, Fingerprint: wire.Fingerprint, Source: unpack(wire.Source), Destination: unpack(wire.Destination), IdentityLength: wire.IdentityLength, Identity: wire.Identity}, nil
+	return Decision{TimeNS: wire.TimeNS, Generation: wire.Generation, Domain: mediaadmission.DomainID(wire.Domain), Reason: wire.Reason, Length: wire.Length, Fingerprint: wire.Fingerprint, Source: unpack(wire.Source), Destination: unpack(wire.Destination), IdentityLength: wire.IdentityLength, Identity: wire.Identity, SampleEvery: wire.SampleEvery}, nil
 }

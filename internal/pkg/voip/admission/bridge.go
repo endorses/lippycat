@@ -5,6 +5,7 @@ package admission
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net/netip"
 	"strings"
@@ -59,6 +60,8 @@ type Stats struct {
 }
 
 type selectedCall struct {
+	derivations    map[derivationSide]*derivationState
+	contextLost    bool
 	unknown        bool
 	known          bool
 	mediaRevision  uint64
@@ -75,18 +78,21 @@ type selectedCall struct {
 }
 
 type Bridge struct {
-	needsSnapshot    bool
-	lostSelection    bool
-	sdpParseCounters sip.SDPParseCounters
-	stop             chan struct{}
-	done             chan struct{}
-	mu               sync.Mutex
-	cfg              Config
-	session          uint64
-	nextMetadata     uint64
-	selected         map[string]*selectedCall
-	stats            Stats
-	closed           bool
+	derivationCount     int
+	derivationBytes     int
+	derivationEndpoints int
+	needsSnapshot       bool
+	lostSelection       bool
+	sdpParseCounters    sip.SDPParseCounters
+	stop                chan struct{}
+	done                chan struct{}
+	mu                  sync.Mutex
+	cfg                 Config
+	session             uint64
+	nextMetadata        uint64
+	selected            map[string]*selectedCall
+	stats               Stats
+	closed              bool
 }
 
 func New(cfg Config) (*Bridge, error) {
@@ -132,7 +138,7 @@ func (b *Bridge) ObserveValidated(result pipeline.SIPResult) error {
 	// selected endpoint retirement remains the authoritative registry's policy.
 	if result.ResponseCode >= 300 || (result.ResponseCode >= 200 && (result.CSeqMethod == "BYE" || result.CSeqMethod == "CANCEL")) {
 		for _, record := range candidates {
-			if compatible(record.Key, result) {
+			if sameTransaction(record.Key, result) {
 				b.cfg.Metadata.Delete(record.Key)
 			}
 		}
@@ -147,7 +153,10 @@ func (b *Bridge) ObserveValidated(result pipeline.SIPResult) error {
 			if record.Key.ToTag != "" || !sameTransaction(record.Key, result) {
 				continue
 			}
-			key := b.key(result, candidates)
+			key := record.Key
+			key.ToTag = result.ToTag
+			key.Generation = 0
+			key = b.metadataKey(key, candidates)
 			if err := b.cfg.Metadata.ObserveDerived(key, record.Endpoints, record.Complete, now); err != nil {
 				b.stats.MetadataErrors++
 				errs = append(errs, err)
@@ -180,16 +189,31 @@ func (b *Bridge) ObserveValidated(result pipeline.SIPResult) error {
 			}
 
 		}
+	} else if result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE" {
+		key := b.key(result, candidates)
+		if err := b.cfg.Metadata.ObserveDerived(key, nil, true, now); err != nil {
+			b.stats.MetadataErrors++
+			errs = append(errs, err)
+		}
 	}
 	b.mu.Unlock()
 	return b.report(errors.Join(errs...))
 }
 
 func (b *Bridge) key(result pipeline.SIPResult, candidates []mediaadmission.MetadataRecord) mediaadmission.DialogKey {
-	key := mediaadmission.DialogKey{Domain: b.cfg.Domain, Session: b.session, CallID: result.CallID, FromTag: result.FromTag, ToTag: result.ToTag, Branch: result.ViaBranch, CSeq: result.CSeqNumber, CSeqMethod: result.CSeqMethod}
+	key := mediaadmission.DialogKey{Domain: b.cfg.Domain, Session: b.session, CallID: result.CallID, FromTag: result.FromTag, ToTag: result.ToTag, Branch: result.ViaBranch, CSeq: result.CSeqNumber, CSeqMethod: result.CSeqMethod, ResponseCode: result.ResponseCode, DescriptorOnly: len(result.SDP) == 0, CSeqValid: validRecoveryCSeq(result)}
+	if len(result.SDP) != 0 && len(result.SDP) <= sip.MaxMessageSize {
+		key.SDPDigest = sha256.Sum256(result.SDP)
+	}
+	return b.metadataKey(key, candidates)
+}
+
+func (b *Bridge) metadataKey(key mediaadmission.DialogKey, candidates []mediaadmission.MetadataRecord) mediaadmission.DialogKey {
 	for _, record := range candidates {
 		old := record.Key
-		if old.FromTag == key.FromTag && old.ToTag == key.ToTag && old.Branch == key.Branch && old.CSeq == key.CSeq && old.CSeqMethod == key.CSeqMethod {
+		old.Generation = 0
+		if old == key {
+			old.Generation = record.Key.Generation
 			return old
 		}
 	}
@@ -243,6 +267,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 			b.cfg.Diagnostics.RecordFinalized(current.owner)
 		}
 		delete(b.selected, result.CallID)
+		b.releaseDerivations(current)
 		current = nil
 	}
 	if current == nil {
@@ -264,6 +289,10 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 
 	}
 	now := time.Now()
+	previousDerivations := make(map[derivationSide]*derivationState, len(current.derivations))
+	for side, state := range current.derivations {
+		previousDerivations[side] = state
+	}
 	var promote []mediaadmission.EndpointKey
 	var derived []mediaadmission.EndpointKey
 	known, incomplete := false, false
@@ -273,17 +302,20 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 		}
 		record, found := b.cfg.Metadata.TakeRecord(candidate.Key, now)
 		if found {
+			if !b.observeDerivation(current, record) {
+				continue
+			}
 			promote = append(promote, record.Endpoints...)
 			derived = append(derived, record.Endpoints...)
-			known = true
+			known = known || !record.Key.DescriptorOnly
 			incomplete = incomplete || !record.Complete
 			current.metadataCutoff = b.nextMetadata
 		}
 	}
-	if len(result.SDP) > 0 {
+	if len(result.SDP) > 0 && result.ResponseCode < 300 {
 		parsed := sip.ParseSDPResult(string(result.SDP), b.cfg.Limits.MaxEndpointsPerOwner)
 		b.sdpParseCounters.Observe(parsed)
-		known, incomplete = true, !parsed.Complete
+		incomplete = !parsed.Complete
 		derived = nil
 		for _, endpoint := range parsed.Endpoints {
 			key, err := mediaadmission.NewEndpoint(b.cfg.Domain, endpoint.Address.Addr(), endpoint.Address.Port())
@@ -294,7 +326,10 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 			derived = append(derived, key)
 		}
 		// Direct selected metadata is available even if pending staging was lost.
-		promote = append(promote, derived...)
+		if b.observeDerivation(current, mediaadmission.MetadataRecord{Key: b.key(result, nil), Complete: parsed.Complete, Endpoints: derived}) {
+			known = true
+			promote = append(promote, derived...)
+		}
 		if err := parsed.Err(); err != nil {
 			errs = append(errs, err)
 		}
@@ -302,6 +337,7 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	derived = uniqueEndpoints(derived, b.cfg.Limits.MaxEndpointsPerOwner+1)
 	promote = uniqueEndpoints(promote, b.cfg.Limits.MaxEndpointsPerOwner+1)
 	if len(derived) > b.cfg.Limits.MaxEndpointsPerOwner || len(promote) > b.cfg.Limits.MaxEndpointsPerOwner {
+		current.contextLost = true
 		incomplete = true
 		derived = derived[:min(len(derived), b.cfg.Limits.MaxEndpointsPerOwner)]
 		promote = promote[:min(len(promote), b.cfg.Limits.MaxEndpointsPerOwner)]
@@ -309,41 +345,46 @@ func (b *Bridge) Selected(result pipeline.SIPResult) error {
 	if len(promote) == 0 && !known {
 		b.stats.PromotionUnavailable++
 	}
+	if result.ResponseCode >= 300 {
+		b.rejectDerivation(current, result)
+	} else if result.ResponseCode > 100 && result.ResponseCode < 300 && (result.CSeqMethod == "INVITE" || result.CSeqMethod == "UPDATE") {
+		b.requireRequestDerivation(current, result)
+		b.acceptDerivation(current, result)
+	}
 	if !known && !current.known && (result.Method == "INVITE" || result.CSeqMethod == "INVITE") {
 		// An absent/expired pending offer cannot prove a selected call has no
 		// media. A later valid offer/answer or lifetime retirement supplies the
 		// missing derivation; a registry snapshot alone does not.
 		incomplete = true
-		current.unknown = true
+		if result.ResponseCode == 0 {
+			b.observeDerivation(current, mediaadmission.MetadataRecord{Key: b.key(result, nil), Complete: true})
+		}
 	}
 	if result.ResponseCode >= 200 && result.ResponseCode < 300 && result.CSeqMethod == "INVITE" {
 		current.answered = true
 	}
-	if known {
-		previousKnown, previousUnknown := current.known, current.unknown
+	contextKnown, contextUnknown, mediaSet := b.derivationSummary(current)
+	previousUnknown := current.unknown
+	incomplete = contextUnknown
+	current.unknown = contextUnknown
+	if contextKnown || known {
+		previousKnown := current.known
 		current.known = true
-		current.unknown = incomplete
-		next := make(map[mediaadmission.EndpointKey]struct{}, len(derived))
-		for _, key := range derived {
-			next[key] = struct{}{}
-		}
+		next := mediaSet
 		if !sameMediaSet(current.mediaSet, next) || current.mediaRevision == 0 || !previousKnown || previousUnknown != incomplete {
 			current.mediaRevision++
 		}
 		current.mediaSet = next
-		current.activeMedia = len(derived) > 0
+		current.activeMedia = len(next) > 0
 	}
-	if known && !incomplete {
-		current.promote = uniqueEndpoints(promote, b.cfg.Limits.MaxEndpointsPerOwner)
-	} else {
-		combined := uniqueEndpoints(append(append([]mediaadmission.EndpointKey(nil), current.promote...), promote...), b.cfg.Limits.MaxEndpointsPerOwner+1)
-		if len(combined) > b.cfg.Limits.MaxEndpointsPerOwner {
-			incomplete = true
-			current.unknown = true
-			combined = combined[:b.cfg.Limits.MaxEndpointsPerOwner]
-		}
-		current.promote = combined
+	combined := mergePromotions(current, previousDerivations, promote, b.cfg.Limits.MaxEndpointsPerOwner+1)
+	if len(combined) > b.cfg.Limits.MaxEndpointsPerOwner {
+		current.contextLost = true
+		incomplete = true
+		current.unknown = true
+		combined = combined[:b.cfg.Limits.MaxEndpointsPerOwner]
 	}
+	current.promote = combined
 	if incomplete {
 		b.needsSnapshot = true
 		errs = append(errs, b.cfg.Controller.MarkUnsynchronized(b.cfg.Domain, errors.New("selected media derivation incomplete")))
@@ -453,6 +494,7 @@ func (b *Bridge) OnCallStarted(call callregistry.Call) {
 		return
 	}
 	delete(b.selected, call.CallID)
+	b.releaseDerivations(old)
 	err := b.cfg.Controller.EndOwner(context.Background(), b.cfg.Domain, old.owner)
 	b.clearMetadata(call.CallID, old.metadataCutoff)
 	if b.cfg.Diagnostics != nil {
@@ -472,6 +514,7 @@ func (b *Bridge) OnCallEnded(call callregistry.Call, _ callregistry.EndReason) {
 		return
 	}
 	delete(b.selected, call.CallID)
+	b.releaseDerivations(old)
 	err := b.cfg.Controller.EndOwner(context.Background(), b.cfg.Domain, old.owner)
 	b.clearMetadata(call.CallID, old.metadataCutoff)
 	if b.cfg.Diagnostics != nil {
@@ -508,6 +551,7 @@ func (b *Bridge) Close() error {
 	close(b.stop)
 	var errs []error
 	for _, state := range b.selected {
+		b.releaseDerivations(state)
 		if b.cfg.Diagnostics != nil {
 			b.cfg.Diagnostics.RecordFinalized(state.owner)
 		}
@@ -544,7 +588,9 @@ func (b *Bridge) clearMetadata(callID string, cutoff uint64) {
 // diagnostic record through a delayed callback.
 func (b *Bridge) RecordAttributedMedia(callID string, lifetime callregistry.Lifetime) {
 	if !b.mu.TryLock() {
-		if diagnostic, ok := b.cfg.Diagnostics.(interface{ RecordAttributionUnavailable() }); ok {
+		if diagnostic, ok := b.cfg.Diagnostics.(interface{ RecordMediaAttributionUnavailable() }); ok {
+			diagnostic.RecordMediaAttributionUnavailable()
+		} else if diagnostic, ok := b.cfg.Diagnostics.(interface{ RecordAttributionUnavailable() }); ok {
 			diagnostic.RecordAttributionUnavailable()
 		}
 		return
@@ -646,6 +692,47 @@ func sameMediaSet(a, b map[mediaadmission.EndpointKey]struct{}) bool {
 		}
 	}
 	return true
+}
+
+// mergePromotions preserves rejected associations independently of the latest
+// SDP message. Only a complete same-side supersession or exact transaction
+// rejection retires its prior requirements; other current contexts still apply.
+func mergePromotions(call *selectedCall, previous map[derivationSide]*derivationState, observed []mediaadmission.EndpointKey, limit int) []mediaadmission.EndpointKey {
+	retired := make(map[mediaadmission.EndpointKey]bool)
+	for side, old := range previous {
+		next := call.derivations[side]
+		if next == nil {
+			continue // Binding an early dialog tag does not retire its endpoints.
+		}
+		rejected := next.rejected && !old.rejected && next.cseq == old.cseq && next.branch == old.branch && next.method == old.method
+		superseded := side.peer != "" && next.cseq > old.cseq && next.complete && next.hasSDP && !next.missing && !next.rejected
+		if !rejected && !superseded {
+			continue
+		}
+		for _, key := range old.endpoints {
+			retired[key] = true
+		}
+		if superseded && old.previous != nil {
+			for _, key := range old.previous.endpoints {
+				retired[key] = true
+			}
+		}
+	}
+	keys := make([]mediaadmission.EndpointKey, 0, len(call.promote)+len(observed)+len(call.mediaSet))
+	for _, key := range call.promote {
+		_, required := call.mediaSet[key]
+		if !retired[key] || required {
+			keys = append(keys, key)
+		}
+	}
+	keys = append(keys, observed...)
+	// A rejection can restore a complete predecessor whose failed associations
+	// were superseded. Reconstruct every current requirement, including these
+	// restored endpoints; the registry confirms already accepted keys idempotently.
+	for key := range call.mediaSet {
+		keys = append(keys, key)
+	}
+	return uniqueEndpoints(keys, limit)
 }
 
 func (b *Bridge) promoteCurrent(id string, lifetime callregistry.Lifetime) error {
@@ -773,6 +860,11 @@ func (b *Bridge) recordExpectationLocked(state *selectedCall, synchronized bool)
 // RecordAttributedPacket supplies bounded sampled diagnostic evidence only after
 // authoritative attribution to a current selected lifetime. It never authorizes output.
 func (b *Bridge) RecordAttributedPacket(callID string, lifetime callregistry.Lifetime, frame []byte) {
+	if diagnostic, ok := b.cfg.Diagnostics.(interface {
+		ShadowFrameEligible(mediaadmission.DomainID, []byte) bool
+	}); ok && !diagnostic.ShadowFrameEligible(b.cfg.Domain, frame) {
+		return
+	}
 	if !b.mu.TryLock() {
 		if diagnostic, ok := b.cfg.Diagnostics.(interface{ RecordAttributionUnavailable() }); ok {
 			diagnostic.RecordAttributionUnavailable()

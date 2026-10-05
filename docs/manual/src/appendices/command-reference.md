@@ -1339,8 +1339,10 @@ lc completion powershell > lc.ps1
 These flags exist only on `lc hunt voip` and `lc tap voip`:
 
 `--rtp-ebpf-shadow-sample-every` defaults to `1` and must be positive. It samples
-approximately one in N decisions without activating admission. Incomplete or
-ambiguous evidence never proves parity for all traffic.
+approximately one in N frame identities using the same eligibility rule in the
+kernel and userspace; identical copies share eligibility and every eligible copy
+is counted. The option does not activate admission. Incomplete or ambiguous
+evidence never proves parity for all traffic.
 
 | Flag                        | Default   | Description                                         |
 | --------------------------- | --------- | --------------------------------------------------- |

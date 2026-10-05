@@ -968,8 +968,10 @@ The optional Linux capture optimization is configured under
 setting `mode` or `failure_policy` alone does not.
 
 `shadow_sample_every` defaults to `1` and must be positive. It samples
-approximately one in N decisions without activating admission; sampled outcomes
-and evidence-loss categories remain distinct from exact whole-traffic counts.
+approximately one in N frame identities using the same eligibility rule in the
+kernel and userspace; identical copies share eligibility and every eligible copy
+is counted. The option does not activate admission. Sampled outcomes and
+evidence-loss categories remain distinct from exact whole-traffic counts.
 
 | Member                      | Default   | Purpose                                                        |
 | --------------------------- | --------- | -------------------------------------------------------------- |

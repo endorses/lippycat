@@ -178,6 +178,7 @@ func DefaultConfig() Config {
 // Processor implements VoIPProcessor for SIP/RTP packet processing.
 type Processor struct {
 	sdpParseCounters sharedsip.SDPParseCounters
+	sdpReporter      *sharedsip.SDPDiagnosticReporter
 	config           Config
 
 	// Call tracking
@@ -248,6 +249,7 @@ func New(cfg Config) *Processor {
 		closeDone:       make(chan struct{}),
 	}
 	p.sipFlow = newProcessorSIPFlow(p)
+	p.sdpReporter = sharedsip.NewSDPDiagnosticReporter(&p.sdpParseCounters, sharedsip.SDPLocalProcessorPath)
 
 	// Start janitor goroutine for cleanup
 	p.janitorWG.Add(1)
@@ -402,6 +404,7 @@ func (p *Processor) Close() {
 	p.registry.Close()
 	p.eventMu.Unlock()
 	p.janitorWG.Wait()
+	p.sdpReporter.Flush()
 	close(p.closeDone)
 }
 
@@ -431,6 +434,7 @@ func (p *Processor) janitorLoop() {
 			return
 		case <-ticker.C:
 			p.cleanupExpiredCalls()
+			p.sdpReporter.Report(time.Now())
 		}
 	}
 }

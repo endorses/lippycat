@@ -168,3 +168,30 @@ func TestMetadataEmptyDerivationRetainsCompletenessAndBounds(t *testing.T) {
 		t.Fatal("unknown empty record bypassed expiry")
 	}
 }
+
+func TestPendingCopiesCannotOverwriteIncompleteOrConflictingDerivation(t *testing.T) {
+	for _, scenario := range []string{"partial then complete", "conflicting complete bodies"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, err := NewMetadataStore(DefaultConfig())
+			must(t, err)
+			now := time.Now()
+			key := dialog(1)
+			key.CSeqValid = true
+			first := []EndpointKey{ep(0, 10000)}
+			second := first
+			complete := scenario != "partial then complete"
+			if complete {
+				second = []EndpointKey{ep(0, 20000)}
+			}
+			must(t, s.ObserveDerived(key, first, complete, now))
+			must(t, s.ObserveDerived(key, second, true, now.Add(time.Millisecond)))
+			record, exists := s.TakeRecord(key, now.Add(2*time.Millisecond))
+			if !exists || record.Complete {
+				t.Fatal("a later copy erased unresolved pending evidence")
+			}
+			if len(record.Endpoints) == 0 {
+				t.Fatal("safe pending endpoint observation was lost")
+			}
+		})
+	}
+}

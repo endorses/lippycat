@@ -18,6 +18,7 @@ type BufferManager struct {
 	sdpEndpointLimit       int
 	sdpAssociationRejected uint64
 	sdpParseCounters       sharedsip.SDPParseCounters
+	sdpReporter            *sharedsip.SDPDiagnosticReporter
 	matchedLifetimes       map[string]callregistry.Lifetime
 	buffers                map[string]*CallBuffer // callID -> buffer (temporary until filter decision)
 	matchedCalls           map[string]time.Time   // callID -> matchTime (persists after buffer cleanup)
@@ -28,6 +29,8 @@ type BufferManager struct {
 	matchedTTL             time.Duration // How long to remember matched calls (default: 24h)
 	janitorCh              chan struct{} // Signal channel for janitor
 	stopCh                 chan struct{} // Stop channel
+	janitorDone            chan struct{}
+	closeOnce              sync.Once
 }
 
 // DefaultMatchedTTL is how long to remember matched calls after filter decision.
@@ -48,7 +51,9 @@ func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 		matchedTTL:       DefaultMatchedTTL,
 		janitorCh:        make(chan struct{}),
 		stopCh:           make(chan struct{}),
+		janitorDone:      make(chan struct{}),
 	}
+	bm.sdpReporter = sharedsip.NewSDPDiagnosticReporter(&bm.sdpParseCounters, sharedsip.SDPBufferPath)
 
 	// Start janitor goroutine for cleanup
 	go bm.janitor()
@@ -414,6 +419,7 @@ func (bm *BufferManager) GetBufferCount() int {
 
 // janitor periodically cleans up old buffers
 func (bm *BufferManager) janitor() {
+	defer close(bm.janitorDone)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -421,6 +427,7 @@ func (bm *BufferManager) janitor() {
 		select {
 		case <-ticker.C:
 			bm.cleanupOldBuffers()
+			bm.sdpReporter.Report(time.Now())
 		case <-bm.stopCh:
 			return
 		}
@@ -483,13 +490,11 @@ func (bm *BufferManager) cleanupOldBuffers() {
 // Close stops the buffer manager
 // Safe to call multiple times (idempotent)
 func (bm *BufferManager) Close() {
-	select {
-	case <-bm.stopCh:
-		// Already closed
-		return
-	default:
+	bm.closeOnce.Do(func() {
 		close(bm.stopCh)
-	}
+		<-bm.janitorDone
+		bm.sdpReporter.Flush()
+	})
 }
 
 // extractRTPPortsFromSDP extracts RTP ports and IP:PORT endpoints from SDP body

@@ -32,12 +32,15 @@ func (hunterDiagnosticBackend) SetControl(context.Context, mediaadmission.Domain
 	return nil
 }
 
-type hunterDiagnosticRecorder struct{ attributed int }
+type hunterDiagnosticRecorder struct{ attributed, frames int }
 
 func (*hunterDiagnosticRecorder) RecordSelection(mediaadmission.OwnerID, mediaadmission.DomainID, bool, bool, time.Time) {
 }
 func (d *hunterDiagnosticRecorder) RecordAttributedMedia(mediaadmission.OwnerID) { d.attributed++ }
 func (*hunterDiagnosticRecorder) RecordFinalized(mediaadmission.OwnerID)         {}
+func (d *hunterDiagnosticRecorder) RecordAttributedPacket(mediaadmission.OwnerID, mediaadmission.DomainID, []byte) {
+	d.frames++
+}
 
 type hunterDiagnosticRaceFilter struct{ change func() }
 
@@ -48,7 +51,7 @@ func (f *hunterDiagnosticRaceFilter) MatchPacketLevelWithIDs(gopacket.Packet) (b
 }
 
 func TestHunterAdmissionDiagnosticsRequireSelectedCurrentResolution(t *testing.T) {
-	for _, scenario := range []string{"selected", "short RTCP", "nonmedia", "unselected", "unresolved", "ambiguous", "reused after resolution"} {
+	for _, scenario := range []string{"selected", "short RTCP", "wire truncated", "decoder truncated", "nonmedia", "unselected", "unresolved", "ambiguous", "reused after resolution"} {
 		t.Run(scenario, func(t *testing.T) {
 			tracker := TestCallTracker(t)
 			registry := tracker.AdmissionRegistry()
@@ -94,12 +97,24 @@ func TestHunterAdmissionDiagnosticsRequireSelectedCurrentResolution(t *testing.T
 				payload[0] = 0 // STUN and DTLS must not clear missing-media diagnostics.
 			}
 			packet := createUDPPacket(30000, 20000, payload)
+			packet.Metadata().CaptureLength, packet.Metadata().Length = len(packet.Data()), len(packet.Data())
+			if scenario == "wire truncated" {
+				packet.Metadata().Length += 8
+			} else if scenario == "decoder truncated" {
+				// Protocol decoding uncertainty is not a truncated original frame.
+				packet.Metadata().Truncated = true
+			}
 			handler.handleRTPPacket(capture.PacketInfo{Packet: packet, Interface: "eth-test", LinkType: layers.LinkTypeEthernet}, packet.TransportLayer().(*layers.UDP))
 			want := 0
-			if scenario == "selected" || scenario == "short RTCP" {
+			if scenario == "selected" || scenario == "short RTCP" || scenario == "wire truncated" || scenario == "decoder truncated" {
 				want = 1
 			}
 			require.Equal(t, want, diagnostics.attributed)
+			wantFrames := want
+			if scenario == "wire truncated" {
+				wantFrames = 0
+			}
+			require.Equal(t, wantFrames, diagnostics.frames, "exact correlation needs original full bytes independently of media attribution")
 		})
 	}
 }

@@ -23,7 +23,7 @@ func (s *Session) initTelemetry(ctx context.Context, backend *ebpfadmission.Back
 	if s.Config.Mode != mediaadmission.ModeShadow {
 		return nil
 	}
-	telemetry.correlator = mediaadmission.NewShadowCorrelator(s.Config.ShadowEvidenceCapacity, s.Config.OwnerCapacity, uint64(s.Config.PendingTTL))
+	telemetry.correlator = mediaadmission.NewSampledShadowCorrelator(s.Config.ShadowEvidenceCapacity, s.Config.OwnerCapacity, uint64(s.Config.PendingTTL), s.Config.ShadowSampleEvery)
 	reader, err := backend.DecisionReader()
 	if err != nil {
 		return err
@@ -47,6 +47,7 @@ func (s *Session) initTelemetry(ctx context.Context, backend *ebpfadmission.Back
 			record, err := reader.Read()
 			if err != nil {
 				if !errors.Is(err, ringbuf.ErrClosed) {
+					telemetry.correlator.EvidenceLost(monotonicNow())
 					telemetry.mu.Lock()
 					telemetry.evidence.ReadErrors++
 					telemetry.evidence.Incomplete = true
@@ -57,6 +58,7 @@ func (s *Session) initTelemetry(ctx context.Context, backend *ebpfadmission.Back
 			decision, err := ebpfadmission.DecodeDecision(record.RawSample)
 			telemetry.mu.Lock()
 			if err != nil {
+				telemetry.correlator.EvidenceLost(monotonicNow())
 				telemetry.evidence.Malformed++
 				telemetry.evidence.Incomplete = true
 				telemetry.mu.Unlock()
@@ -66,7 +68,7 @@ func (s *Session) initTelemetry(ctx context.Context, backend *ebpfadmission.Back
 			if monotonic == 0 {
 				telemetry.evidence.Incomplete = true
 			}
-			sample := mediaadmission.ShadowSample{Domain: decision.Domain, Generation: decision.Generation, EventMonotonicNS: decision.TimeNS, ObservedMonotonicNS: monotonic, ObservedAt: time.Now(), Reason: decision.Reason, Length: decision.Length, Fingerprint: decision.Fingerprint, Source: decision.Source, Destination: decision.Destination, IdentityLength: decision.IdentityLength, Identity: decision.Identity}
+			sample := mediaadmission.ShadowSample{Domain: decision.Domain, Generation: decision.Generation, EventMonotonicNS: decision.TimeNS, ObservedMonotonicNS: monotonic, ObservedAt: time.Now(), Reason: decision.Reason, Length: decision.Length, Fingerprint: decision.Fingerprint, Source: decision.Source, Destination: decision.Destination, IdentityLength: decision.IdentityLength, Identity: decision.Identity, SampleEvery: decision.SampleEvery}
 			telemetry.correlator.Sample(sample, sample.ObservedMonotonicNS)
 			// Retained diagnostic samples contain no frame bytes. The bounded
 			// correlator exclusively owns full identity until its expiry.

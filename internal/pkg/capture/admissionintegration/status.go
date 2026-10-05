@@ -127,18 +127,32 @@ func (s *Session) RecordMediaExpectation(owner mediaadmission.OwnerID, domain me
 	s.telemetry.correlator.Expectation(owner, domain, known, active, revision, published, generation)
 }
 
+// ShadowFrameEligible binds pre-lock attribution checks to the immutable
+// sampling interval installed for this capture session.
+func (s *Session) ShadowFrameEligible(domain mediaadmission.DomainID, frame []byte) bool {
+	return s.telemetry != nil && s.telemetry.correlator != nil && s.telemetry.correlator.FrameEligible(domain, frame)
+}
+
 // RecordObservedPacket runs once after managed capture activation and before
 // decoding. Full bounded bytes remain transient; status exposes counts only.
 func (s *Session) RecordObservedPacket(domain mediaadmission.DomainID, frame []byte) {
-	if s.telemetry != nil && s.telemetry.correlator != nil {
+	if s.ShadowFrameEligible(domain, frame) {
 		s.telemetry.correlator.Observed(domain, frame, monotonicNow())
+	}
+}
+
+// RecordMediaAttributionUnavailable belongs to unsampled missing-media
+// accounting. It cannot imply loss of sampled full-frame correlation evidence.
+func (s *Session) RecordMediaAttributionUnavailable() {
+	if s.telemetry != nil {
+		s.telemetry.diagnostics.AttributionUnavailable()
 	}
 }
 
 // RecordAttributedPacket requires the adapter to verify current exact endpoint
 // attribution to this selected owner lifetime before calling it.
 func (s *Session) RecordAttributedPacket(owner mediaadmission.OwnerID, domain mediaadmission.DomainID, frame []byte) {
-	if s.telemetry != nil && s.telemetry.correlator != nil {
+	if s.ShadowFrameEligible(domain, frame) {
 		s.telemetry.correlator.Attributed(owner, domain, frame, monotonicNow())
 	}
 }

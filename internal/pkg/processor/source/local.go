@@ -1243,7 +1243,10 @@ func (s *LocalSource) batchingWorkerWithInjection(input <-chan capture.PacketInf
 			envelope.RADIUS = radiusObservation
 			if voipProc != nil && mediaResolution.Status == callregistry.MediaResolved && pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil {
 				voipProc.RecordAttributedMedia(mediaResolution.CallID, pktInfo.Interface, mediaResolution.Lifetime)
-				voipProc.RecordAttributedPacket(mediaResolution.CallID, pktInfo.Interface, mediaResolution.Lifetime, pktInfo.Packet.Data())
+				captureInfo := pktInfo.Packet.Metadata().CaptureInfo
+				if captureInfo.Length == len(pktInfo.Packet.Data()) && captureInfo.CaptureLength == captureInfo.Length {
+					voipProc.RecordAttributedPacket(mediaResolution.CallID, pktInfo.Interface, mediaResolution.Lifetime, pktInfo.Packet.Data())
+				}
 			}
 			// A packet is forwarded only after it can be admitted to a batch.
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))

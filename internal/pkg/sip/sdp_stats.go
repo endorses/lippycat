@@ -1,6 +1,6 @@
 package sip
 
-import "sync/atomic"
+import "sync"
 
 var sdpReasons = [...]SDPReason{SDPMediaInvalid, SDPConnectionInvalid, SDPConnectionMissing, SDPRTCPInvalid, SDPBodyLimit, SDPEndpointLimit}
 
@@ -16,8 +16,13 @@ func sdpReasonIndex(reason SDPReason) int {
 // SDPParseCounters is a fixed-size, concurrency-safe per-consumer aggregate.
 // It stores no bodies, call identities, or endpoints.
 type SDPParseCounters struct {
-	bodies, failures, partial, resourceLimited, diagnosticsDropped atomic.Uint64
-	reasons                                                        [len(sdpReasons)]atomic.Uint64
+	mu     sync.Mutex
+	counts sdpCounts
+}
+
+type sdpCounts struct {
+	bodies, failures, partial, resourceLimited, diagnosticsDropped uint64
+	reasons                                                        [len(sdpReasons)]uint64
 }
 
 type SDPParseStats struct {
@@ -30,26 +35,35 @@ type SDPParseStats struct {
 }
 
 func (c *SDPParseCounters) Observe(r SDPResult) {
-	c.bodies.Add(1)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.counts.bodies++
 	if !r.Complete {
-		c.failures.Add(1)
+		c.counts.failures++
 	}
 	if !r.Complete && len(r.Endpoints) > 0 {
-		c.partial.Add(1)
+		c.counts.partial++
 	}
 	if r.ResourceLimited {
-		c.resourceLimited.Add(1)
+		c.counts.resourceLimited++
 	}
-	c.diagnosticsDropped.Add(r.DiagnosticsDropped)
+	c.counts.diagnosticsDropped += r.DiagnosticsDropped
 	for i, count := range r.reasonCounts {
-		c.reasons[i].Add(count)
+		c.counts.reasons[i] += count
 	}
 }
 
+func (c *SDPParseCounters) snapshotCounts() sdpCounts {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.counts
+}
+
 func (c *SDPParseCounters) Snapshot() SDPParseStats {
-	s := SDPParseStats{Bodies: c.bodies.Load(), Failures: c.failures.Load(), Partial: c.partial.Load(), ResourceLimited: c.resourceLimited.Load(), DiagnosticsDropped: c.diagnosticsDropped.Load(), Reasons: make(map[SDPReason]uint64, len(sdpReasons))}
+	counts := c.snapshotCounts()
+	s := SDPParseStats{Bodies: counts.bodies, Failures: counts.failures, Partial: counts.partial, ResourceLimited: counts.resourceLimited, DiagnosticsDropped: counts.diagnosticsDropped, Reasons: make(map[SDPReason]uint64, len(sdpReasons))}
 	for i, reason := range sdpReasons {
-		s.Reasons[reason] = c.reasons[i].Load()
+		s.Reasons[reason] = counts.reasons[i]
 	}
 	return s
 }

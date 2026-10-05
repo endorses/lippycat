@@ -153,6 +153,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		p.hunterManager.UpdatePacketStats(sourceID, packetCount, batch.TimestampNs)
 	}
 	p.packetsReceived.Add(packetCount)
+	p.observeSDPDiagnostics(batch)
 
 	packetOutput := p.needsPacketOutput()
 	if !packetOutput && !p.wantsEventAnalysis() {

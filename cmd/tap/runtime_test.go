@@ -160,7 +160,7 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 		},
 		"voip": {
 			cmd: voipTapCmd, short: "Standalone VoIP capture with full processor capabilities",
-			helpHash: "f9d7250fbd6ba1ebe9344b1a7e9eeec576ab3b756f2394d37e3651716e4c1cbb",
+			helpHash: "123764fd8e5f585814d5c4ea27d88f67c4b3fdd652b9d2ca459aeccfa905e6b4",
 			flags:    tapFlagDefaults("rtp-ebpf", "false", "rtp-ebpf-mode", "enforce", "rtp-ebpf-failure-policy", "open", "rtp-ebpf-shadow-sample-every", "1", "pattern-algorithm", "auto", "pattern-buffer-mb", "64", "pcap-closed-call-ttl", "1h0m0s", "pcap-grace-period", "5s", "per-call-pcap", "false", "per-call-pcap-dir", "./pcaps", "per-call-pcap-max-idle", "10m0s", "per-call-pcap-max-writers", "0", "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "rtp-port-range", "", "sip-port", "", "sip-retry-window", "2m0s", "sip-user", "", "sipuser", "", "tcp-max-streams", "0", "tcp-performance-mode", "balanced", "tcp-reassembly-shards", "1", "tcp-sip-idle-timeout", "0s", "udp-only", "false"),
 			bindings: tapBindings("rtp-ebpf", "tap.voip.rtp_ebpf.enabled", "rtp-ebpf-mode", "tap.voip.rtp_ebpf.mode", "rtp-ebpf-failure-policy", "tap.voip.rtp_ebpf.failure_policy", "rtp-ebpf-shadow-sample-every", "tap.voip.rtp_ebpf.shadow_sample_every", "pattern-algorithm", "tap.voip.pattern_algorithm", "pattern-buffer-mb", "tap.voip.pattern_buffer_mb", "pcap-closed-call-ttl", "tap.per_call_pcap.closed_call_ttl", "pcap-grace-period", "tap.per_call_pcap.grace_period", "per-call-pcap", "tap.per_call_pcap.enabled", "per-call-pcap-dir", "tap.per_call_pcap.output_dir", "per-call-pcap-max-idle", "tap.per_call_pcap.max_idle", "per-call-pcap-max-writers", "tap.per_call_pcap.max_writers", "per-call-pcap-pattern", "tap.per_call_pcap.file_pattern", "rtp-port-range", "tap.voip.rtp_port_ranges", "sip-port", "tap.voip.sip_ports", "sip-retry-window", "tap.voip.sip_retry_window", "sip-user", "tap.voip.sip_user", "tcp-max-streams", "voip.max_streams", "tcp-performance-mode", "tap.voip.tcp_performance_mode", "tcp-reassembly-shards", "tap.voip.tcp_reassembly_shards", "tcp-sip-idle-timeout", "voip.tcp_sip_idle_timeout", "udp-only", "tap.voip.udp_only"),
 		},
@@ -174,7 +174,7 @@ func TestTapProtocolCLIContracts(t *testing.T) {
 			"http":  "9a4fa9e02b0ad312b94ed35eefffdd463b3d0515491d297f7e4333aaaebfdb11",
 			"tls":   "e6304832220c413fa578a8ecfb860c8df2a02c41ebfcd9f21aad9392ea542e79",
 			"email": "382c9832a8228cf869eaa5380e2fc9134c44ad56b968385884ead538255d9370",
-			"voip":  "db09188a9fe6d575de085ebd7f6f792c234f37b266ba9490f87a728c536a5596",
+			"voip":  "100a313f49077bef12c1d3f3198299261d23e2df7a0b1daee7a80e2a39e89a57",
 		}
 		for name, hash := range liHashes {
 			contract := contracts[name]

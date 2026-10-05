@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **VoIP hunter upgrade:** application filters now reach hunters with eBPF
+  admission disabled. Previously, a receiver-interface mismatch could leave
+  hunters selecting calls broadly despite distributed identity or IP filters.
+  The corrected path applies those filters and the configured empty-filter
+  policy, so an upgrade can reduce forwarded traffic. For intentional broad
+  selection, use an empty applicable filter set with `--no-filter-policy allow`;
+  `allow` does not override installed filters or explicit capture predicates.
+- Recover independently valid SDP sections while preserving numeric-address
+  validation and configured endpoint limits. Supported RTP media includes RTCP,
+  non-audio RTP sections and mux; disabled/inactive media does not create active
+  endpoints. Malformed RTCP still invalidates its media section. RTP/RTCP and
+  legacy port-only diagnostic keys continue to share the tracker endpoint budget.
+- Preserve the interface and timestamp of the final contributing byte in
+  reassembled tap TCP signaling, including streams shared across interfaces in
+  the same observation domain.
+- Bind inherited hunter media selection to the authoritative tracker lifetime.
+  Tracker eviction or retirement ends that selection even if temporary buffer
+  state remains; stale buffer matches do not authorize output.
+- Restore aggregate, sanitized SDP warnings for sniff, hunter, tap and processor,
+  including operation without eBPF or structured logs. Warnings run during
+  maintenance with throttling and a final outstanding shutdown summary.
+- Coordinate shadow sampling across kernel decisions and userspace evidence.
+  Sampling reduces retained frame identities while preserving duplicate counts;
+  loss or ambiguous evidence remains incomplete rather than proving parity.
+- Retain unresolved SDP by signaling context until a corresponding repair,
+  validated supersession or retirement. A complete opposite-side answer cannot
+  clear an incomplete offer; safe endpoints remain independently usable.
+
 ## [0.12.2] - 2026-09-27
 
 ### Added

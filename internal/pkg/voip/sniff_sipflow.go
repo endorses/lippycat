@@ -110,6 +110,7 @@ func newSniffSIPFlowWithOutputs(tracker *CallTracker, markSelection, updateRegis
 	}
 	if buffer != nil {
 		buffer.BindRegistry(tracker.AdmissionRegistry(), tracker.config.MaxEndpointsPerCall)
+		tracker.sdpReporter.Disable()
 	}
 	cfg := sipflow.Config{
 		SelectionStore: sniffSelectionStore{mark: markSelection, buffer: buffer},

@@ -967,7 +967,9 @@ therefore does not preserve unassociated-media output for mixed filters. True
 IP-only configurations have no SIP-identity filter requiring that association.
 
 `--rtp-ebpf-shadow-sample-every=N` (default `1`, positive) samples approximately
-one in N decisions without enabling admission. Sampled outcomes remain incomplete
+one in N frame identities using the same eligibility rule in the kernel and
+userspace; identical copies share eligibility and every eligible copy is counted.
+The option does not enable admission. Sampled outcomes remain incomplete
 when frame, ownership, revision, or publication evidence is missing or ambiguous;
 counts do not prove parity for all traffic. Loss categories remain separate.
 

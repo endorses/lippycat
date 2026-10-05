@@ -52,6 +52,7 @@ type ShadowSample struct {
 	Source, Destination                               EndpointKey
 	IdentityLength                                    uint32
 	Identity                                          [256]byte
+	SampleEvery                                       uint32
 }
 type diagnosticCall struct {
 	domain                       DomainID

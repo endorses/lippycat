@@ -14,9 +14,11 @@ func TestDecisionRequiresCompleteBoundedFrameIdentity(t *testing.T) {
 	binary.NativeEndian.PutUint32(raw[24:], 3)
 	binary.NativeEndian.PutUint32(raw[80:], 3)
 	copy(raw[84:], []byte{1, 2, 3})
+	binary.NativeEndian.PutUint32(raw[340:], 7)
 	got, err := DecodeDecision(raw)
 	require.NoError(t, err)
 	require.Equal(t, []byte{1, 2, 3}, got.Identity[:got.IdentityLength])
+	require.Equal(t, uint32(7), got.SampleEvery, "wire interval replaces trailing padding without changing record bounds")
 	for _, scenario := range []string{"partial prefix", "too large", "missing time", "unknown reason", "malformed size"} {
 		t.Run(scenario, func(t *testing.T) {
 			invalid := append([]byte(nil), raw...)

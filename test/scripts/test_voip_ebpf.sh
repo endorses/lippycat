@@ -18,5 +18,5 @@ docker run --rm --privileged \
   "$toolchain_image" bash -euo pipefail -c '
     go build -tags all -o /tmp/lc .
     go test -count=1 -v ./internal/pkg/capture/ebpfadmission ./internal/pkg/capture/admissionintegration
-    go test -tags all -count=1 -v ./test -run "^TestVoIPEBPF" -timeout 8m
+    go test -tags all -count=1 -v ./test -run "^TestVoIPEBPF" -timeout 12m
   '

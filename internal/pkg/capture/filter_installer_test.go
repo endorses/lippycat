@@ -157,6 +157,44 @@ func TestSocketFilterPreparedReaderPreservesClockRollback(t *testing.T) {
 	require.Empty(t, observed)
 }
 
+func TestShadowObservationSkipsTruncatedCaptureWithoutDroppingOutput(t *testing.T) {
+	sample := readinessHandle(t)
+	data, _, err := sample.ReadPacketData()
+	require.NoError(t, err)
+	file, err := os.CreateTemp(t.TempDir(), "shadow-completeness-*.pcap")
+	require.NoError(t, err)
+	writer := pcapgo.NewWriter(file)
+	require.NoError(t, writer.WriteFileHeader(65535, layers.LinkTypeEthernet))
+	for _, originalLength := range []int{len(data), len(data) + 300} {
+		require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{Timestamp: time.Now(), CaptureLength: len(data), Length: originalLength}, data))
+	}
+	require.NoError(t, file.Close())
+	handle, err := pcap.OpenOffline(file.Name())
+	require.NoError(t, err)
+	t.Cleanup(handle.Close)
+	buffer := NewPacketBuffer(t.Context(), 8)
+	defer buffer.Close()
+	observed := make(chan []byte, 2)
+	installer := testFilterInstaller{
+		observe: func(_ string, frame []byte) { observed <- append([]byte(nil), frame...) },
+		prepare: func(context.Context, *pcap.Handle, string, string) (PreparedFilter, error) {
+			return &testPreparedFilter{activate: func() error { return nil }, close: func() error { return nil }}, nil
+		},
+	}
+	InitWithBufferReady(t.Context(), []pcaptypes.PcapInterface{&mockPcapInterface{name: "synthetic", handle: handle}}, "", buffer,
+		func(_ []layers.LinkType, err error) { require.NoError(t, err) }, CaptureOptions{FilterInstaller: installer})
+	for i := 0; i < 2; i++ {
+		select {
+		case packet := <-buffer.Receive():
+			require.Equal(t, data, packet.Packet.Data(), "sampling completeness never drops ordinary packet output")
+		case <-time.After(time.Second):
+			t.Fatal("ordinary capture output was lost")
+		}
+	}
+	require.Len(t, observed, 1, "only the complete original frame supplies correlation evidence")
+	require.Equal(t, data, <-observed)
+}
+
 func TestSocketFilterStartupFailureUnwindsAllAttachments(t *testing.T) {
 	for _, activationFailure := range []bool{false, true} {
 		t.Run(map[bool]string{false: "prepare", true: "activate"}[activationFailure], func(t *testing.T) {

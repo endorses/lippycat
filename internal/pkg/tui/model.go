@@ -113,6 +113,9 @@ type Model struct {
 	scrollDrag              string
 	scrollDragRow           int
 	scrollDragOffset        int
+	captureResizeDrag       *capturePaneDrag
+	captureSideRatio        float64
+	captureStackRatio       float64
 	offlineController       *offlineController
 	offlineSession          *offlineIndexedSession
 	offlineBrowse           *offlineBrowserState
@@ -437,6 +440,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modalDismissMouseDown = mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress
 			m.textSelection = nil
 			m.scrollDrag = ""
+			m.captureResizeDrag = nil
 		} else {
 			key, hit := m.footerKeyAtMouse(mouse)
 			footerEditAction := hit && (key.Type == tea.KeyEnter || key.Type == tea.KeyEsc)
@@ -453,6 +457,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case tea.KeyMsg, tea.WindowSizeMsg, tea.ResumeMsg:
 		m.textSelection = nil
+		m.captureResizeDrag = nil
 	}
 	if _, ok := msg.(tea.KeyMsg); ok && !modalHandled {
 		if modal, ok := components.VisibleModal(m.activeModal()).(components.InteractiveModal); ok {
@@ -466,6 +471,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	cmd = tea.Batch(modalCmd, cancelCmd, cmd)
 	if next, ok := updated.(Model); ok {
+		if !next.textSelectionAllowed() {
+			next.captureResizeDrag = nil
+		}
 		if next.textSelection != nil && !next.textSelectionAllowed() {
 			next.textSelection = nil
 		}

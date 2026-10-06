@@ -32,6 +32,11 @@ func (m Model) textSelectionAllowed() bool {
 // Click actions are deferred until release so dragging a row cannot change the
 // details, toggle a pane, or activate a control. Scrollbars bypass this handler.
 func (m Model) handleTextSelectionMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	var resized bool
+	m, resized = m.handleCaptureResize(msg)
+	if resized {
+		return m, nil
+	}
 	// Modified packet clicks mark rows immediately and never start text selection.
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && (msg.Ctrl || msg.Shift) && m.uiState.Tabs.GetActive() == 0 && m.uiState.ViewMode == "packets" {
 		m.textSelection = nil

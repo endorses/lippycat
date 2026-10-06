@@ -61,13 +61,7 @@ func (m *Model) setCaptureDetails(enabled bool) {
 
 // Pane minima describe useful content, rather than a particular terminal size.
 // Below these widths, long detail values wrap in a stacked or single pane.
-func (m Model) captureLayout() captureLayout {
-	w, h := max(0, m.uiState.Width), m.captureContentHeight()
-	full := captureRect{Width: w, Height: h}
-	layout := captureLayout{List: full}
-	if !m.captureDetailsEnabled() || w == 0 || h == 0 {
-		return layout
-	}
+func (m Model) capturePaneMinWidths() (int, int) {
 	listMin, detailMin := 72, 56
 	if m.uiState.ViewMode == "events" {
 		listMin, detailMin = 64, 40
@@ -75,13 +69,30 @@ func (m Model) captureLayout() captureLayout {
 	if m.uiState.ViewMode == "calls" {
 		listMin, detailMin = components.CallsTableMinWidth, 40
 	}
+	return listMin, detailMin
+}
+
+func (m Model) captureLayout() captureLayout {
+	w, h := max(0, m.uiState.Width), m.captureContentHeight()
+	full := captureRect{Width: w, Height: h}
+	layout := captureLayout{List: full}
+	if !m.captureDetailsEnabled() || w == 0 || h == 0 {
+		return layout
+	}
+	listMin, detailMin := m.capturePaneMinWidths()
 	if w >= listMin+detailMin && h >= 8 {
-		dw := min(80, w-listMin)
-		return captureLayout{captureSideBySide, captureRect{Width: w - dw, Height: h}, captureRect{X: w - dw, Width: dw, Height: h}}
+		lw := w - min(80, w-listMin)
+		if m.captureSideRatio > 0 {
+			lw = min(w-detailMin, max(listMin, int(float64(w)*m.captureSideRatio+0.5)))
+		}
+		return captureLayout{captureSideBySide, captureRect{Width: lw, Height: h}, captureRect{X: lw, Width: w - lw, Height: h}}
 	}
 	// Ten list rows and fourteen detail rows include their border/padding.
 	if w >= max(40, detailMin) && h >= 24 {
 		lh := max(10, h/3)
+		if m.captureStackRatio > 0 {
+			lh = min(h-14, max(10, int(float64(h)*m.captureStackRatio+0.5)))
+		}
 		return captureLayout{captureStacked, captureRect{Width: w, Height: lh}, captureRect{Y: lh, Width: w, Height: h - lh}}
 	}
 	if m.uiState.FocusedPane == "right" {
@@ -180,6 +191,9 @@ func (m Model) captureDetailsFocused() bool {
 }
 
 func (m *Model) prepareCaptureLayout() {
+	if m.captureResizeDrag != nil && !m.captureResizeDrag.valid(*m) {
+		m.captureResizeDrag = nil
+	}
 	if !m.responsiveCaptureView() {
 		return
 	}

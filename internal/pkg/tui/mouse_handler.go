@@ -25,6 +25,11 @@ func (m Model) footerKeyAtMouse(msg tea.MouseMsg) (tea.KeyMsg, bool) {
 
 // handleMouse processes mouse events for the TUI
 func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	var resized bool
+	m, resized = m.handleCaptureResize(msg)
+	if resized {
+		return m, nil
+	}
 	contentStartY := m.captureContentOrigin()
 	contentHeight := m.captureContentHeight()
 	if msg.Action == tea.MouseActionRelease && m.uiState.Tabs.GetActive() != 0 {

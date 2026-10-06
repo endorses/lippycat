@@ -88,20 +88,20 @@ func TestVoIPEBPFCommandNegotiationRecovery(t *testing.T) {
 					return bytes.Contains(readAdmissionPCAPs(t, f.out), []byte("NEGOTIATION-AFTER-INFO-SAFE"))
 				}, 15*time.Second, 100*time.Millisecond, "independently safe selected media survives the unrelated SDP update")
 
-				// A complete offer can temporarily supersede the partial offer, but
-				// rejection of that exact transaction restores the unresolved prior.
+				// A complete request adds safe endpoints but cannot supersede the
+				// partial negotiation until its complete matching answer is confirmed.
 				temporary := admissionNegotiationSIP(callID, false, 3, "temporary", "destination", "192.0.2.2", "m=audio 42002 RTP/AVP 0\r\nm=audio 44002 RTP/AVP 0\r\n")
 				require.Eventually(t, func() bool {
 					require.NoError(t, f.sender(5060, 5060, temporary))
 					s := f.snapshot()
-					return s != nil && s.State == "enforcing" && s.Owners == 1 && s.InstalledEndpoints == 6 && s.PendingUpdates == 0
-				}, 20*time.Second, 100*time.Millisecond, "complete same-side offer temporarily establishes the unknown endpoint")
+					return s != nil && s.State == "degraded-"+policy && s.Owners == 1 && s.InstalledEndpoints == 6
+				}, 20*time.Second, 100*time.Millisecond, "complete request adds safe endpoints while retaining unconfirmed negotiation uncertainty")
 				rejected := admissionNegotiationTransaction(callID, 486, "INVITE", 3, "temporary", "destination", "", "")
 				require.Eventually(t, func() bool {
 					require.NoError(t, f.sender(5060, 5060, rejected))
 					s := f.snapshot()
 					return s != nil && s.State == "degraded-"+policy && s.Owners == 1 && s.InstalledEndpoints == 6
-				}, 20*time.Second, 100*time.Millisecond, "exact rejected offer restores the prior partial negotiation and its failure policy")
+				}, 20*time.Second, 100*time.Millisecond, "exact rejected offer preserves the prior partial negotiation and its failure policy")
 				require.NoError(t, f.sender(41000, 42002, admissionNegotiationRTP("NEGOTIATION-ROLLBACK-SAFE")))
 				require.Eventually(t, func() bool {
 					return bytes.Contains(readAdmissionPCAPs(t, f.out), []byte("NEGOTIATION-ROLLBACK-SAFE"))

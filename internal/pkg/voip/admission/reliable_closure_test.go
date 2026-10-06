@@ -121,9 +121,8 @@ func TestReliablePRACKRejectionProvenanceIsBoundedAndReleased(t *testing.T) {
 			require.Equal(t, before.SelectedEndpoints, after.SelectedEndpoints)
 			registry.Remove(invite.CallID, callregistry.EndCompleted)
 			require.NoError(t, bridge.retrySelected())
-			require.Zero(t, bridge.cfg.Metadata.Stats().SelectedContexts)
-			require.Zero(t, bridge.cfg.Metadata.Stats().SelectedBytes)
-			require.Zero(t, bridge.cfg.Metadata.Stats().SelectedEndpoints)
+			assertRetiredLifetimeCharges(t, bridge, 1)
+			assertClosedLifetimeCharges(t, bridge)
 		})
 	}
 }

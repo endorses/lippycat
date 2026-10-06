@@ -69,6 +69,7 @@ type SIPEvent struct {
 	FromTag, ToTag, PAssertedIdentity, ContentType     string
 	Headers                                            map[string]string
 	DuplicateReliableHeaders                           ReliableHeaderDuplicates
+	ReliableHeaderEvidence                             ReliableHeaderEvidence
 	Body                                               []byte
 	SDP                                                []byte
 	SourceIP, DestinationIP                            string
@@ -138,6 +139,7 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 	ev.Headers = make(map[string]string)
 	var contentLengths []string
 	var previousHeader string
+	var reliableEvidence reliableEvidenceAccumulator
 	var topVia string
 	for _, raw := range lines[1:] {
 		raw = bytes.TrimSuffix(raw, []byte("\r"))
@@ -153,6 +155,10 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 			}
 			continue
 		}
+		if previousHeader != "" {
+			reliableEvidence.observe(previousHeader, ev.Headers[previousHeader])
+		}
+		previousHeader = ""
 		line := bytes.TrimSpace(raw)
 		if len(line) == 0 {
 			continue
@@ -192,6 +198,10 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 		}
 		ev.Headers[name] = value
 	}
+	if previousHeader != "" {
+		reliableEvidence.observe(previousHeader, ev.Headers[previousHeader])
+	}
+	ev.ReliableHeaderEvidence = reliableEvidence.result()
 	bodyStart := headerEnd + sepLen
 	if bodyStart < len(data) {
 		ev.Body = append([]byte(nil), data[bodyStart:]...)

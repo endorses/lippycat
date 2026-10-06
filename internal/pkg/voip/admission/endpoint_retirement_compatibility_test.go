@@ -172,11 +172,11 @@ func TestFaultyRecoveryRetirementRespectsModeAndDoesNotLeakEligibility(t *testin
 	}
 }
 
-func TestCalleeReofferDoesNotRepairCallerPRACKUncertainty(t *testing.T) {
+func TestCalleeConfirmedReofferRepairsCallerPRACKUncertainty(t *testing.T) {
 	for _, policy := range []mediaadmission.FailurePolicy{mediaadmission.FailureOpen, mediaadmission.FailureClosed} {
 		t.Run(string(policy), func(t *testing.T) {
 			bridge, registry, controller := retirementFixture(t, mediaadmission.ModeEnforce, policy)
-			invite, response, prack := faultyReliableSequence("callee-limitation", "partial-prack")
+			invite, response, prack := faultyReliableSequence("callee-recovery", "partial-prack")
 			_ = submitDerivation(t, bridge, registry, invite)
 			_ = submitDerivation(t, bridge, registry, response)
 			_ = submitDerivation(t, bridge, registry, prack)
@@ -184,14 +184,15 @@ func TestCalleeReofferDoesNotRepairCallerPRACKUncertainty(t *testing.T) {
 			request, answer := reliableReplacement(invite, "INVITE")
 			request.FromTag, request.ToTag, answer.FromTag, answer.ToTag = "to", "from", "to", "from"
 			_ = submitDerivation(t, bridge, registry, request)
-			_ = submitDerivation(t, bridge, registry, answer)
-			assertDerivationState(t, bridge, controller, policy, true)
-			retirementOwns(t, registry, invite.CallID, "192.0.2.1:10000", "192.0.2.2:20000")
+			require.NoError(t, submitDerivation(t, bridge, registry, answer))
+			assertDerivationState(t, bridge, controller, policy, false)
+			require.Empty(t, registry.ResolveMediaEndpoints("192.0.2.1:10000", "").CallID)
+			retirementOwns(t, registry, invite.CallID, "192.0.2.1:30000", "192.0.2.2:40000")
 		})
 	}
 }
 
-func TestDuplicateCSeqOrdinaryNegotiationUncertaintyPersists(t *testing.T) {
+func TestDuplicateCSeqOrdinaryNegotiationUsesValidatedEvidence(t *testing.T) {
 	for _, policy := range []mediaadmission.FailurePolicy{mediaadmission.FailureOpen, mediaadmission.FailureClosed} {
 		for _, duplicate := range []string{"identical", "conflicting"} {
 			for _, location := range []string{"request", "response"} {
@@ -216,16 +217,18 @@ func TestDuplicateCSeqOrdinaryNegotiationUncertaintyPersists(t *testing.T) {
 					parsed, err := sip.Parse([]byte(wire), sip.ParseOptions{})
 					require.NoError(t, err)
 					target.Headers, target.DuplicateReliableHeaders = parsed.Headers, parsed.DuplicateReliableHeaders
+					target.ReliableHeaderEvidence = parsed.ReliableHeaderEvidence
 					require.Equal(t, uint64(1), parsed.CSeqNumber)
 					require.Equal(t, "INVITE", parsed.CSeqMethod)
 					_ = submitDerivation(t, bridge, registry, invite)
 					_ = submitDerivation(t, bridge, registry, answer)
-					assertDerivationState(t, bridge, controller, policy, true)
+					assertDerivationState(t, bridge, controller, policy, duplicate == "conflicting")
 					request, response := reliableReplacement(invite, "INVITE")
 					request.DuplicateReliableHeaders, response.DuplicateReliableHeaders = sip.ReliableHeaderDuplicates{}, sip.ReliableHeaderDuplicates{}
+					request.ReliableHeaderEvidence, response.ReliableHeaderEvidence = sip.ReliableHeaderEvidence{}, sip.ReliableHeaderEvidence{}
 					_ = submitDerivation(t, bridge, registry, request)
 					_ = submitDerivation(t, bridge, registry, response)
-					assertDerivationState(t, bridge, controller, policy, true)
+					assertDerivationState(t, bridge, controller, policy, duplicate == "conflicting")
 				})
 			}
 		}

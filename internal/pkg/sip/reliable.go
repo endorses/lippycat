@@ -15,13 +15,43 @@ type ReliableHeaders struct {
 	RAckCSeq      uint32
 }
 
-// ReliableHeaderDuplicates records ambiguous singleton linkage independently
-// of the last-line values exposed to ordinary SIP consumers. Identical repeated
-// singleton headers are ambiguous too; folded continuations are not duplicates.
+// ReliableHeaderDuplicates records repeated singleton occurrences independently
+// of semantic validity. Folded continuations are not duplicates.
 type ReliableHeaderDuplicates struct {
 	CSeq bool
 	RSeq bool
 	RAck bool
+}
+
+// ReliableHeaderConflicts identifies singleton evidence that is conflicting or
+// malformed. Valid equivalent numbers (including leading zeroes) compare equal;
+// methods are validated SIP tokens and compare case sensitively.
+type ReliableHeaderConflicts struct {
+	CSeq bool
+	RSeq bool
+	RAck bool
+}
+
+// ReliableHeaderEvidence contains bounded proof metadata, never raw values.
+// CSeqMin/Max include only fully valid occurrences. CSeqBoundsValid requires
+// every occurrence valid and a single method; conflicting numbers still provide
+// a range. CSeqValid additionally requires a single sequence number.
+type ReliableHeaderEvidence struct {
+	Conflicts          ReliableHeaderConflicts
+	CSeqValid          bool
+	CSeqBoundsValid    bool
+	CSeqMin, CSeqMax   uint32
+	CSeqMethodConflict bool
+	CSeqMalformed      bool
+}
+
+// ParseReliableHeadersWithEvidence accepts identical valid repetitions while
+// rejecting conflicting or malformed occurrences, including an invalid earlier
+// value hidden by the ordinary last-line representation.
+func ParseReliableHeadersWithEvidence(headers map[string]string, evidence ReliableHeaderEvidence) ReliableHeaders {
+	return ParseReliableHeaders(headers, ReliableHeaderDuplicates{
+		CSeq: evidence.Conflicts.CSeq, RSeq: evidence.Conflicts.RSeq, RAck: evidence.Conflicts.RAck,
+	})
 }
 
 // ParseReliableHeaders validates RFC 3262 linkage. An INVITE response uses

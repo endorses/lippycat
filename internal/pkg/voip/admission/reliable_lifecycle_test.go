@@ -76,9 +76,8 @@ func TestReliableContextBudgetsAndRetirement(t *testing.T) {
 			require.NotZero(t, usage.SelectedRejected)
 			registry.Remove(invite.CallID, callregistry.EndCompleted)
 			require.NoError(t, bridge.retrySelected())
-			require.Zero(t, store.Stats().SelectedContexts)
-			require.Zero(t, store.Stats().SelectedBytes)
-			require.Zero(t, store.Stats().SelectedEndpoints)
+			assertRetiredLifetimeCharges(t, bridge, 1)
+			assertClosedLifetimeCharges(t, bridge)
 		})
 	}
 }
@@ -91,7 +90,7 @@ func TestReliableRetirementReuseAndWrongDomainCannotBorrowProof(t *testing.T) {
 	require.NoError(t, submitDerivation(t, bridge, registry, prack))
 	registry.Remove(invite.CallID, callregistry.EndCompleted)
 	require.NoError(t, bridge.retrySelected())
-	require.Zero(t, bridge.cfg.Metadata.Stats().SelectedContexts)
+	assertRetiredLifetimeCharges(t, bridge, 1)
 	_ = submitDerivation(t, bridge, registry, invite)
 	// This old answer cannot use the previous lifetime's discarded response.
 	_ = submitDerivation(t, bridge, registry, prack)
@@ -286,4 +285,29 @@ func TestReliablePendingProofExpiryAndEvictionCannotSupplyMissingResponse(t *tes
 			require.Empty(t, registry.ResolveMediaEndpoints("192.0.2.2:20000", "").CallID)
 		})
 	}
+}
+
+// Final removal releases live proof and endpoint reservations. A bounded hash
+// watermark remains charged until bridge shutdown to reject lifetime replay.
+func assertRetiredLifetimeCharges(t *testing.T, bridge *Bridge, historyCount int) {
+	t.Helper()
+	bridge.mu.Lock()
+	contexts, bytes, endpoints := bridge.derivationCount, bridge.derivationBytes, bridge.derivationEndpoints
+	bridge.mu.Unlock()
+	require.Zero(t, contexts)
+	require.Zero(t, bytes)
+	require.Zero(t, endpoints)
+	usage := bridge.cfg.Metadata.Stats()
+	require.Equal(t, historyCount, usage.SelectedContexts)
+	require.Equal(t, historyCount*lifetimeProofEntryBytes, usage.SelectedBytes)
+	require.Zero(t, usage.SelectedEndpoints)
+}
+
+func assertClosedLifetimeCharges(t *testing.T, bridge *Bridge) {
+	t.Helper()
+	require.NoError(t, bridge.Close())
+	usage := bridge.cfg.Metadata.Stats()
+	require.Zero(t, usage.SelectedContexts)
+	require.Zero(t, usage.SelectedBytes)
+	require.Zero(t, usage.SelectedEndpoints)
 }

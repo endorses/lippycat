@@ -65,6 +65,11 @@ func (s *scopedSource) complete(domain mediaadmission.DomainID, child *SourceAda
 		child.proc.FinalizeCallLifetime(call.CallID, lifetime)
 		return
 	}
+	// Notification runs before the existing call completion timer and outside
+	// coordinator locks, so observers can safely cancel intermediate cleanup.
+	if !child.proc.registry.NotifyCallCompleting(call.CallID, lifetime) {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
@@ -277,6 +278,7 @@ func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.Hunter
 
 	return types.HunterInfo{
 		ID:                           h.HunterId,
+		MediaAdmission:               cloneMediaAdmissionStatus(stats.RtpEbpf),
 		Hostname:                     h.Hostname,
 		RemoteAddr:                   h.RemoteAddr,
 		Status:                       h.Status,
@@ -722,4 +724,11 @@ func (c *Client) maybeNotifyCallUpdates(force bool) {
 	if c.handler != nil && len(calls) > 0 {
 		c.handler.OnCallUpdate(calls)
 	}
+}
+
+func cloneMediaAdmissionStatus(status *management.MediaAdmissionStatus) *management.MediaAdmissionStatus {
+	if status == nil {
+		return nil
+	}
+	return proto.Clone(status).(*management.MediaAdmissionStatus)
 }

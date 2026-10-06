@@ -273,6 +273,13 @@ preserve compatibility: older clients ignore them, while older nodes or
 intermediaries may omit them. Without an actual metrics sample timestamp,
 resource colors stay neutral even when values can still be displayed.
 
+For an admission-enabled selected hunter or processor/tap, the Nodes view also
+shows per-domain unique unknown-call totals, overlapping uncertainty reasons,
+duplicate-bearing header-group counters and elapsed degradation. These aggregate
+diagnostics appear in table and graph layouts; duplicate counters are cumulative
+and do not count current unknown calls. Older nodes omit the additive telemetry.
+See [media admission diagnostics](../../docs/VOIP_EBPF_ADMISSION.md#failure-and-diagnostic-modes).
+
 Packet totals share one subtle activity marker per node. Advancing captured or
 forwarded totals briefly use a green (`#859900`) background only when the rounded
 displayed total changes; counter resets establish a new baseline without a

@@ -12,6 +12,7 @@ func SIPResultFromEvent(event sharedsip.Event, env *PacketEnvelope) SIPResult {
 		PAssertedIdentity: event.PAssertedIdentity, ContentType: event.ContentType,
 		Body: append([]byte(nil), event.Body...), Headers: cloneSIPHeaders(event.Headers),
 		DuplicateReliableHeaders: event.DuplicateReliableHeaders,
+		ReliableHeaderEvidence:   event.ReliableHeaderEvidence,
 		SourceIP:                 event.SourceIP, DestinationIP: event.DestinationIP,
 		SourcePort: event.SourcePort, DestinationPort: event.DestinationPort,
 		SDP: append([]byte(nil), event.SDP...), Packet: env,

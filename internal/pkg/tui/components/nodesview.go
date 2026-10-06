@@ -60,6 +60,7 @@ type AddNodeMsg struct {
 
 // NodesView displays connected hunter nodes in a tree view grouped by processor
 type NodesView struct {
+	mediaAdmission          map[string]*management.MediaAdmissionStatus
 	processors              []ProcessorInfo // Grouped by processor
 	hunters                 []HunterInfo    // Flat list for backward compatibility
 	selectedIndex           int             // -1 means nothing selected, >= 0 means hunter is selected
@@ -373,6 +374,18 @@ func (n *NodesView) SetHuntersAndProcessors(hunters []HunterInfo, processorAddrs
 
 // SetProcessors updates the processor list directly with ProcessorInfo
 func (n *NodesView) SetProcessors(processors []ProcessorInfo) {
+	for address := range n.mediaAdmission {
+		present := false
+		for _, processor := range processors {
+			if processor.Address == address {
+				present = true
+				break
+			}
+		}
+		if !present {
+			delete(n.mediaAdmission, address)
+		}
+	}
 	var selected nodesview.NodeKey
 	hadHunter := n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters)
 	if hadHunter {
@@ -1189,6 +1202,9 @@ func (n *NodesView) renderContent() string {
 	}
 
 	content := b.String()
+	if detail := n.renderMediaAdmission(); detail != "" {
+		content += "\n" + detail
+	}
 
 	// In graph mode, center the content vertically if it's shorter than viewport
 	if n.viewMode == "graph" && n.ready {

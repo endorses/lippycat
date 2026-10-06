@@ -11,6 +11,9 @@ import (
 // never becomes an offer merely because it carries a complete SDP body.
 func (b *Bridge) observePRACK(call *selectedCall, record mediaadmission.MetadataRecord) bool {
 	key := record.Key
+	if b.observeRepeatedPRACKLocked(call, key) {
+		return true
+	}
 	side, valid := sideFor(key)
 	if !valid || side.peer == "" || key.DescriptorOnly {
 		call.contextLost = true
@@ -26,6 +29,7 @@ func (b *Bridge) observePRACK(call *selectedCall, record mediaadmission.Metadata
 		endpoints: record.Endpoints, rackValid: key.RAckValid,
 		rackRSeq: key.RAckRSeq, rackCSeq: key.RAckCSeq,
 		proofExpires: time.Now().Add(b.cfg.Limits.PendingTTL),
+		observed:     key.Generation,
 	}
 	if old := call.derivations[side]; old != nil {
 		// This implementation retains one answer, not a PRACK exchange history.

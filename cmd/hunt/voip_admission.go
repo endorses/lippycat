@@ -147,7 +147,11 @@ func newAdmissionHunterRouter(ctx context.Context, h voip.PacketForwarder, sessi
 		domain := child.domain
 		scope := &admissionHunterDomain{tracker: voip.NewCallTrackerWithConfig(&child.config), buffer: voip.NewBufferManager(5*time.Second, 200)}
 		router.domains[domain] = scope
-		bridge, err := sipadmission.New(sipadmission.Config{Domain: domain, Limits: session.Config, Registry: scope.tracker.AdmissionRegistry(), Controller: session.Controller, Metadata: session.Metadata, Diagnostics: session, OnError: func(err error) { logger.Error("Hunter media admission is incomplete", "domain", domain, "error", err) }})
+		retirementGrace := child.config.PCAPGracePeriod
+		if retirementGrace <= 0 {
+			retirementGrace = voip.DefaultConfig().PCAPGracePeriod
+		}
+		bridge, err := sipadmission.New(sipadmission.Config{RetirementGrace: retirementGrace, Domain: domain, Limits: session.Config, Registry: scope.tracker.AdmissionRegistry(), Controller: session.Controller, Metadata: session.Metadata, Diagnostics: session, OnError: func(err error) { logger.Error("Hunter media admission is incomplete", "domain", domain, "error", err) }})
 		if err != nil {
 			return nil, errors.Join(err, router.Close())
 		}

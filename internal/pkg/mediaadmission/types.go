@@ -113,4 +113,6 @@ type ScopeStatus struct {
 	Reason              string
 	DegradedSince       time.Time
 	OpenDuration        time.Duration
+	DegradedDuration    time.Duration
+	Uncertainty         UncertaintyStats
 }

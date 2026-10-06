@@ -31,3 +31,13 @@ func TestResourceMetricsConversion(t *testing.T) {
 	require.Equal(t, uint64(750), got.MemoryRSSBytes)
 	require.Equal(t, uint64(1000), got.MemoryLimitBytes)
 }
+
+func TestHunterAdmissionDiagnosticsOwnSnapshot(t *testing.T) {
+	status := &management.MediaAdmissionStatus{Enabled: true, Scopes: []*management.MediaAdmissionScope{{Uncertainty: &management.MediaAdmissionUncertainty{UnknownCalls: 2}}}}
+	c := &Client{addr: "example:5555"}
+	got := c.convertToHunterInfo(&management.ConnectedHunter{Stats: &management.HunterStats{RtpEbpf: status}})
+	require.Equal(t, uint64(2), got.MediaAdmission.Scopes[0].Uncertainty.UnknownCalls)
+	status.Scopes[0].Uncertainty.UnknownCalls = 99
+	require.Equal(t, uint64(2), got.MediaAdmission.Scopes[0].Uncertainty.UnknownCalls)
+	require.Nil(t, c.convertToHunterInfo(&management.ConnectedHunter{}).MediaAdmission)
+}

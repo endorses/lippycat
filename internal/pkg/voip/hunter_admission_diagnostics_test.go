@@ -87,7 +87,9 @@ func TestHunterAdmissionDiagnosticsRequireSelectedCurrentResolution(t *testing.T
 				handler.SetApplicationFilter(&hunterDiagnosticRaceFilter{change: func() {
 					registry.Remove(selected.CallID, callregistry.EndCompleted)
 					registry.Upsert(callregistry.Call{CallID: selected.CallID})
-					require.NoError(t, bridge.Selected(selected))
+					replacement := selected
+					replacement.FromTag, replacement.ViaBranch = "replacement-origin", "replacement-transaction"
+					require.NoError(t, bridge.Selected(replacement))
 				}})
 			}
 			payload := []byte{0x80, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1}

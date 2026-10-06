@@ -22,15 +22,21 @@ type DialogKey struct {
 	CSeq       uint64
 	CSeqMethod string
 	// Message role prevents an answer from overwriting its offer's derivation.
-	ResponseCode     int
-	DescriptorOnly   bool
-	CSeqValid        bool
-	SDPDigest        [32]byte
-	ReliableResponse bool
-	RSeq             uint32
-	RAckValid        bool
-	RAckRSeq         uint32
-	RAckCSeq         uint32
+	ResponseCode                        int
+	DescriptorOnly                      bool
+	CSeqValid                           bool
+	SDPDigest                           [32]byte
+	ReliableResponse                    bool
+	RSeq                                uint32
+	RAckValid                           bool
+	RAckRSeq                            uint32
+	RAckCSeq                            uint32
+	HeaderConflict                      bool
+	CSeqConflict                        bool
+	CSeqBoundsValid                     bool
+	CSeqMaximum                         uint64
+	LifetimeSession, LifetimeGeneration uint64
+	CapturedAtUnixNano                  int64
 }
 
 type MetadataStats struct {
@@ -109,7 +115,7 @@ func NewMetadataStore(config Config) (*MetadataStore, error) {
 // retained endpoint/map storage, and per-entry/list overhead. It bounds charged
 // retained state; the Go allocator's runtime bookkeeping is not an RSS guarantee.
 func metadataBytes(key DialogKey, endpoints int) int {
-	return 288 + len(key.CallID) + len(key.FromTag) + len(key.ToTag) + len(key.Branch) + len(key.CSeqMethod) + endpoints*128
+	return 328 + len(key.CallID) + len(key.FromTag) + len(key.ToTag) + len(key.Branch) + len(key.CSeqMethod) + endpoints*128
 }
 
 func (s *MetadataStore) Observe(key DialogKey, endpoints []EndpointKey, now time.Time) error {

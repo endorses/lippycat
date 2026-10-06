@@ -375,6 +375,18 @@ func (ct *CallTracker) scheduleCallCompletion(call *CallInfo) {
 		ct.mu.Unlock()
 		return
 	}
+	active, exists := ct.registry.Call(call.CallID)
+	ct.mu.Unlock()
+	if !exists || !ct.registry.NotifyCallCompleting(call.CallID, active.Lifetime) {
+		return
+	}
+	// Completion observers may reenter shutdown or replace the call. Revalidate
+	// the owned pointer before installing a timer for the captured generation.
+	ct.mu.Lock()
+	if ct.shuttingDown.Load() != 0 || ct.callMap[call.CallID] != call {
+		ct.mu.Unlock()
+		return
+	}
 	if timer := ct.completionTimers[call.CallID]; timer != nil {
 		timer.Stop()
 	}

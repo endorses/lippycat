@@ -20,7 +20,9 @@ func TestSelectedDerivationBudgetIsGlobalAcrossDomainBridges(t *testing.T) {
 			case "contexts":
 				cfg.PendingDialogCapacity = 1
 			case "bytes":
-				cfg.PendingBytes = 700
+				cfg.PendingBytes, _ = derivationCost(derivationSide{"from", "to", "from", false}, &derivationState{
+					branch: "branch", method: "INVITE", endpoints: make([]mediaadmission.EndpointKey, 2),
+				})
 			case "endpoints":
 				cfg.PendingEndpointCapacity = 2
 			}
@@ -58,22 +60,38 @@ func TestSelectedDerivationBudgetIsGlobalAcrossDomainBridges(t *testing.T) {
 					require.Equal(t, mediaadmission.StateDegradedClosed, scope.State)
 				}
 			}
-			// Retirement releases the shared charge, but cannot reconstruct the
-			// other domain's lost context. That lifetime must be retired too.
+			// Final removal releases live descriptors but retains charged
+			// anti-replay history within this same configured shared pool.
 			registry.Remove("domain-zero", callregistry.EndCompleted)
-			require.Zero(t, store.Stats().SelectedContexts)
+			assertRetiredLifetimeCharges(t, first, 1)
 			require.Error(t, second.retrySelected())
 			registry.Remove("domain-one", callregistry.EndCompleted)
 			require.NoError(t, second.retrySelected())
-			message.CallID = "replacement"
-			require.NoError(t, submitDerivation(t, second, registry, message))
-			require.Equal(t, 1, store.Stats().SelectedContexts)
-			// Close also releases descriptors even while the registry survives.
+			require.Zero(t, first.derivationCount)
+			require.Zero(t, second.derivationCount)
+			stats = store.Stats()
+			require.LessOrEqual(t, stats.SelectedContexts, cfg.PendingDialogCapacity)
+			require.LessOrEqual(t, stats.SelectedBytes, cfg.PendingBytes)
+			require.Zero(t, stats.SelectedEndpoints)
+			if limit != "endpoints" {
+				message.CallID = "replacement-before-shutdown"
+				require.Error(t, submitDerivation(t, second, registry, message), "charged history prevents another live reservation at this configured limit")
+				registry.Remove(message.CallID, callregistry.EndCompleted)
+			}
+			require.NoError(t, first.Close())
 			require.NoError(t, second.Close())
 			stats = store.Stats()
 			require.Zero(t, stats.SelectedContexts)
 			require.Zero(t, stats.SelectedBytes)
 			require.Zero(t, stats.SelectedEndpoints)
+			fresh, err := New(Config{Domain: 1, Limits: cfg, Registry: registry, Controller: controller, Metadata: store})
+			require.NoError(t, err)
+			t.Cleanup(func() { check(t, fresh.Close()) })
+			message.CallID = "replacement-after-shutdown"
+			require.NoError(t, submitDerivation(t, fresh, registry, message))
+			require.Equal(t, 1, store.Stats().SelectedContexts)
+			assertClosedLifetimeCharges(t, fresh)
+
 		})
 	}
 }

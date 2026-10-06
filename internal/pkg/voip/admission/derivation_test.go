@@ -64,7 +64,7 @@ func assertDerivationMedia(t *testing.T, bridge *Bridge, callID string, endpoint
 	require.Equal(t, want, state.mediaSet)
 }
 
-func TestDerivationOppositeAnswerRequiresSameSideRepair(t *testing.T) {
+func TestDerivationOppositeAnswerRequiresConfirmedRepair(t *testing.T) {
 	for _, policy := range []mediaadmission.FailurePolicy{mediaadmission.FailureOpen, mediaadmission.FailureClosed} {
 		t.Run(string(policy), func(t *testing.T) {
 			bridge, registry, maps, controller := recoveryFixture(t, policy, nil)
@@ -85,7 +85,11 @@ func TestDerivationOppositeAnswerRequiresSameSideRepair(t *testing.T) {
 			repair := initial
 			repair.ToTag, repair.CSeqNumber, repair.ViaBranch = "to", 2, "repair"
 			repair.SDP = derivationSDP("192.0.2.1", 30002, false)
-			require.NoError(t, submitDerivation(t, bridge, registry, repair))
+			require.Error(t, submitDerivation(t, bridge, registry, repair))
+			confirmed := repair
+			confirmed.Method, confirmed.ResponseCode = "200", 200
+			confirmed.SDP = answer.SDP
+			require.NoError(t, submitDerivation(t, bridge, registry, confirmed))
 			assertDerivationState(t, bridge, controller, policy, false)
 			assertDerivationMedia(t, bridge, initial.CallID, "192.0.2.1:30002", "192.0.2.1:30003", "192.0.2.2:20000", "192.0.2.2:20001")
 			// An old answer and the old partial request cannot undo a newer offer.
@@ -201,7 +205,11 @@ func TestDerivationRequestInitiatorsHaveIndependentSequences(t *testing.T) {
 	assertDerivationState(t, bridge, controller, mediaadmission.FailureOpen, true)
 	reverse.CSeqNumber, reverse.ViaBranch = 2, "reverse-repair"
 	reverse.SDP = derivationSDP("192.0.2.2", 40000, false)
-	require.NoError(t, submitDerivation(t, bridge, registry, reverse))
+	require.Error(t, submitDerivation(t, bridge, registry, reverse))
+	confirmed := reverse
+	confirmed.Method, confirmed.ResponseCode = "200", 200
+	confirmed.SDP = forward.SDP
+	require.NoError(t, submitDerivation(t, bridge, registry, confirmed))
 	assertDerivationState(t, bridge, controller, mediaadmission.FailureOpen, false)
 	assertDerivationMedia(t, bridge, initial.CallID, "192.0.2.1:30000", "192.0.2.1:30001", "192.0.2.2:40000", "192.0.2.2:40001")
 }
@@ -218,7 +226,11 @@ func TestDerivationConflictingRetransmissionStaysUnknown(t *testing.T) {
 	require.Error(t, submitDerivation(t, bridge, registry, initial))
 	assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, true)
 	conflict.CSeqNumber, conflict.ViaBranch = 2, "repair"
-	require.NoError(t, submitDerivation(t, bridge, registry, conflict))
+	require.Error(t, submitDerivation(t, bridge, registry, conflict))
+	confirmed := conflict
+	confirmed.Method, confirmed.ResponseCode = "200", 200
+	confirmed.SDP = derivationSDP("192.0.2.2", 30000, false)
+	require.NoError(t, submitDerivation(t, bridge, registry, confirmed))
 	assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, false)
 }
 
@@ -281,8 +293,16 @@ func testDerivationContextCapacity(t *testing.T, limit string) {
 	assertDerivationState(t, bridge, controller, cfg.FailurePolicy, false)
 	reused := offer(initial.CallID)
 	reused.FromTag, reused.ToTag, reused.ViaBranch = "replacement", "peer", "replacement"
-	require.NoError(t, submitDerivation(t, bridge, registry, reused))
-	assertDerivationState(t, bridge, controller, cfg.FailurePolicy, false)
+	// Retired missing evidence leaves a charged Call-ID replay guard. New tags
+	// cannot certify that a transaction from this reused Call-ID is fresh.
+	require.Error(t, submitDerivation(t, bridge, registry, reused))
+	assertDerivationState(t, bridge, controller, cfg.FailurePolicy, true)
+	require.LessOrEqual(t, store.Stats().SelectedContexts, cfg.PendingDialogCapacity)
+	require.LessOrEqual(t, store.Stats().SelectedBytes, cfg.PendingBytes)
+	registry.Remove(reused.CallID, callregistry.EndCompleted)
+	require.NoError(t, bridge.Close())
+	require.Zero(t, store.Stats().SelectedContexts)
+	require.Zero(t, store.Stats().SelectedBytes)
 }
 
 func TestDerivationConcurrentRetransmissionsAndLifetimeReuse(t *testing.T) {
@@ -343,7 +363,14 @@ func TestDerivationInactiveAndInitialRejectionResolveUnknown(t *testing.T) {
 			} else {
 				resolved.Method, resolved.ResponseCode, resolved.SDP = "486", 486, nil
 			}
-			require.NoError(t, submitDerivation(t, bridge, registry, resolved))
+			if repair == "inactive" {
+				require.Error(t, submitDerivation(t, bridge, registry, resolved))
+				confirmed := resolved
+				confirmed.Method, confirmed.ResponseCode = "200", 200
+				require.NoError(t, submitDerivation(t, bridge, registry, confirmed))
+			} else {
+				require.NoError(t, submitDerivation(t, bridge, registry, resolved))
+			}
 			assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, false)
 			assertDerivationMedia(t, bridge, initial.CallID)
 			if repair == "rejection" {

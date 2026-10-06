@@ -19,8 +19,8 @@ func TestCompleteRequestRetainsUnknownPredecessorUntilAcceptedSupersession(t *te
 				repair := initial
 				repair.CSeqNumber, repair.ViaBranch = 2, "repair"
 				repair.SDP = derivationSDP("192.0.2.1", 20000, false)
-				require.NoError(t, submitDerivation(t, bridge, registry, repair))
-				assertDerivationState(t, bridge, controller, policy, false)
+				require.Error(t, submitDerivation(t, bridge, registry, repair))
+				assertDerivationState(t, bridge, controller, policy, true)
 				bridge.mu.Lock()
 				state := bridge.selected[initial.CallID].derivations[derivationSide{"from", "to", "from", false}]
 				require.NotNil(t, state.previous)
@@ -37,6 +37,7 @@ func TestCompleteRequestRetainsUnknownPredecessorUntilAcceptedSupersession(t *te
 					require.Error(t, bridge.retrySelected(), "a registry snapshot cannot repair rejected supersession")
 				} else {
 					response.Method, response.ResponseCode = "200", 200
+					response.SDP = derivationSDP("192.0.2.2", 30000, false)
 					require.NoError(t, submitDerivation(t, bridge, registry, response))
 					assertDerivationState(t, bridge, controller, policy, false)
 					bridge.mu.Lock()

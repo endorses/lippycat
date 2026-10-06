@@ -256,7 +256,7 @@ func TestReliableReplacementSuccessCapturedBeforeRequest(t *testing.T) {
 	}
 }
 
-func TestReliableSupersessionPreservesSameCallIndependentUncertainty(t *testing.T) {
+func TestReliableSupersessionRepairsSameDialogAndPreservesOtherDialogUncertainty(t *testing.T) {
 	for _, context := range []string{"same-dialog-other-initiator", "other-dialog"} {
 		t.Run(context, func(t *testing.T) {
 			bridge, registry, _, controller := recoveryFixture(t, mediaadmission.FailureClosed, nil)
@@ -277,10 +277,18 @@ func TestReliableSupersessionPreservesSameCallIndependentUncertainty(t *testing.
 			request, answer := reliableReplacement(invite, "INVITE")
 			_ = submitDerivation(t, bridge, registry, request)
 			_ = submitDerivation(t, bridge, registry, answer)
-			assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, true)
-			require.Equal(t, invite.CallID, registry.ResolveMediaEndpoints("192.0.2.9:50000", "").CallID)
+			assertDerivationState(t, bridge, controller, mediaadmission.FailureClosed, context == "other-dialog")
+			if context == "other-dialog" {
+				require.Equal(t, invite.CallID, registry.ResolveMediaEndpoints("192.0.2.9:50000", "").CallID)
+			} else {
+				require.Empty(t, registry.ResolveMediaEndpoints("192.0.2.9:50000", "").CallID, "superseded partial same-dialog ownership retires under the fixture zero-grace policy")
+			}
 			require.Empty(t, registry.ResolveMediaEndpoints("192.0.2.1:10000", "").CallID)
-			assertDerivationMedia(t, bridge, invite.CallID, "192.0.2.1:30000", "192.0.2.1:30001", "192.0.2.2:40000", "192.0.2.2:40001", "192.0.2.9:50000", "192.0.2.9:50001")
+			if context == "other-dialog" {
+				assertDerivationMedia(t, bridge, invite.CallID, "192.0.2.1:30000", "192.0.2.1:30001", "192.0.2.2:40000", "192.0.2.2:40001", "192.0.2.9:50000", "192.0.2.9:50001")
+			} else {
+				assertDerivationMedia(t, bridge, invite.CallID, "192.0.2.1:30000", "192.0.2.1:30001", "192.0.2.2:40000", "192.0.2.2:40001")
+			}
 		})
 	}
 }
@@ -304,10 +312,8 @@ func TestReliableSupersessionReleasesAccountingAndRetirement(t *testing.T) {
 	require.Equal(t, 4, maps.count())
 	registry.Remove(invite.CallID, callregistry.EndCompleted)
 	require.NoError(t, bridge.retrySelected())
-	retired := bridge.cfg.Metadata.Stats()
-	require.Zero(t, retired.SelectedContexts)
-	require.Zero(t, retired.SelectedBytes)
-	require.Zero(t, retired.SelectedEndpoints)
+	assertRetiredLifetimeCharges(t, bridge, 1)
+	assertClosedLifetimeCharges(t, bridge)
 	require.Zero(t, maps.count())
 	require.Zero(t, bridge.Stats().SelectedLifetimes)
 	require.Zero(t, bridge.Stats().UnknownDerivations)
@@ -374,10 +380,8 @@ func TestReliablePartialReplacementChainRetiresAllSupersededEndpoints(t *testing
 				require.Less(t, after.SelectedBytes, before.SelectedBytes)
 				registry.Remove(invite.CallID, callregistry.EndCompleted)
 				require.NoError(t, bridge.retrySelected())
-				retired := bridge.cfg.Metadata.Stats()
-				require.Zero(t, retired.SelectedContexts)
-				require.Zero(t, retired.SelectedBytes)
-				require.Zero(t, retired.SelectedEndpoints)
+				assertRetiredLifetimeCharges(t, bridge, 1)
+				assertClosedLifetimeCharges(t, bridge)
 				require.Zero(t, maps.count())
 			})
 		}
@@ -477,10 +481,8 @@ func TestReliableRetirementProvenanceLimitPreservesConservativeUncertainty(t *te
 	require.Equal(t, invite.CallID, registry.ResolveMediaEndpoints("192.0.2.2:20000", "").CallID, "budget exhaustion cannot erase untracked ownership")
 	registry.Remove(invite.CallID, callregistry.EndCompleted)
 	require.NoError(t, bridge.retrySelected())
-	retired := bridge.cfg.Metadata.Stats()
-	require.Zero(t, retired.SelectedContexts)
-	require.Zero(t, retired.SelectedBytes)
-	require.Zero(t, retired.SelectedEndpoints)
+	assertRetiredLifetimeCharges(t, bridge, 1)
+	assertClosedLifetimeCharges(t, bridge)
 	require.Zero(t, maps.count())
 }
 
@@ -520,10 +522,8 @@ func TestReliableSupersessionPreservesSharedIndependentSDP(t *testing.T) {
 				require.Equal(t, 6, bridge.cfg.Metadata.Stats().SelectedEndpoints, "retransmitted independent SDP is charged once")
 				registry.Remove(invite.CallID, callregistry.EndCompleted)
 				require.NoError(t, bridge.retrySelected())
-				retired := bridge.cfg.Metadata.Stats()
-				require.Zero(t, retired.SelectedContexts)
-				require.Zero(t, retired.SelectedBytes)
-				require.Zero(t, retired.SelectedEndpoints)
+				assertRetiredLifetimeCharges(t, bridge, 1)
+				assertClosedLifetimeCharges(t, bridge)
 				require.Zero(t, maps.count())
 			})
 		}
@@ -573,10 +573,8 @@ func TestReliableIndependentSDPEndpointUnionIsBoundedAndCharged(t *testing.T) {
 	require.Equal(t, charged, bridge.cfg.Metadata.Stats(), "overflow leaves the prior charged descriptor intact")
 	registry.Remove(invite.CallID, callregistry.EndCompleted)
 	require.NoError(t, bridge.retrySelected())
-	retired := bridge.cfg.Metadata.Stats()
-	require.Zero(t, retired.SelectedContexts)
-	require.Zero(t, retired.SelectedBytes)
-	require.Zero(t, retired.SelectedEndpoints)
+	assertRetiredLifetimeCharges(t, bridge, 1)
+	assertClosedLifetimeCharges(t, bridge)
 }
 
 func TestReliableIndependentSDPCannotResolveUnobservedNegotiation(t *testing.T) {

@@ -35,6 +35,12 @@ const (
 	EndShutdown  EndReason = "shutdown"
 )
 
+// CompletingObserver is optional: completion grace begins before final removal.
+// Implementations receive exact-lifetime snapshots outside registry locks.
+type CompletingObserver interface {
+	OnCallCompleting(Call)
+}
+
 type LifecycleObserver interface {
 	OnCallStarted(Call)
 	OnCallEnded(Call, EndReason)
@@ -601,6 +607,27 @@ func (c *Core) Remove(callID string, reason EndReason) bool {
 	observers := append([]LifecycleObserver(nil), c.config.Observers...)
 	c.mu.Unlock()
 	notifyEnded(observers, call, reason)
+	return true
+}
+
+// NotifyCallCompleting publishes the beginning of authoritative completion grace.
+// A reused Call-ID cannot receive delayed completion from its prior incarnation.
+// Observer callbacks may reenter the registry and must validate their captured
+// lifetime again before changing any external ownership.
+func (c *Core) NotifyCallCompleting(callID string, lifetime Lifetime) bool {
+	c.mu.RLock()
+	call, exists := c.calls[callID]
+	if !exists || call.Lifetime != lifetime {
+		c.mu.RUnlock()
+		return false
+	}
+	observers := append([]LifecycleObserver(nil), c.config.Observers...)
+	c.mu.RUnlock()
+	for _, observer := range observers {
+		if completing, ok := observer.(CompletingObserver); ok {
+			completing.OnCallCompleting(call)
+		}
+	}
 	return true
 }
 

@@ -548,6 +548,9 @@ func (c *Controller) statusLocked() []ScopeStatus {
 		if st.DesiredGeneration != st.InstalledGeneration || st.ControlUncertain {
 			st.PendingUpdates++
 		}
+		if !st.DegradedSince.IsZero() {
+			st.DegradedDuration = time.Since(st.DegradedSince)
+		}
 		st.OpenDuration = s.openTotal
 		if !s.openSince.IsZero() {
 			st.OpenDuration += time.Since(s.openSince)
@@ -578,6 +581,8 @@ func (c *Controller) Close(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 		s.status.State = StateClosed
+		s.status.Uncertainty.UnknownCalls = 0
+		s.status.Uncertainty.Reasons = [UncertaintyReasonCount]uint64{}
 	}
 	c.closed = true
 	return errors.Join(errs...)
@@ -646,6 +651,9 @@ func (c *Controller) Status() []ScopeStatus {
 	}
 	result := append([]ScopeStatus(nil), snapshot.scopes...)
 	for i := range result {
+		if !result[i].DegradedSince.IsZero() {
+			result[i].DegradedDuration = time.Since(result[i].DegradedSince)
+		}
 		if result[i].LastConfirmed.Mode == KernelOpen {
 			result[i].OpenDuration += time.Since(snapshot.at)
 		}

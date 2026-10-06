@@ -11,7 +11,7 @@ import (
 )
 
 func TestAdmissionTelemetryTransportAndJSON(t *testing.T) {
-	s := mediaadmission.Snapshot{Enabled: true, ConfiguredMode: mediaadmission.ModeShadow, EndpointCapacity: 20, Scopes: []mediaadmission.ScopeTelemetry{{ScopeStatus: mediaadmission.ScopeStatus{Domain: 2, State: mediaadmission.StateControlFailed, ControlUncertain: true, DesiredGeneration: 5, InstalledGeneration: 4, Reason: "sensitive-value", PendingUpdates: 3}, Counters: [16]uint64{0: 11, 11: 7}}}, Metadata: mediaadmission.MetadataStats{Expired: 6}, Evidence: mediaadmission.EvidenceStats{ReadErrors: 1, Incomplete: true}}
+	s := mediaadmission.Snapshot{Enabled: true, ConfiguredMode: mediaadmission.ModeShadow, EndpointCapacity: 20, Scopes: []mediaadmission.ScopeTelemetry{{ScopeStatus: mediaadmission.ScopeStatus{Domain: 2, State: mediaadmission.StateControlFailed, ControlUncertain: true, DesiredGeneration: 5, InstalledGeneration: 4, Reason: "sensitive-value", PendingUpdates: 3, DegradedDuration: 123, Uncertainty: mediaadmission.UncertaintyStats{UnknownCalls: 2, Reasons: [mediaadmission.UncertaintyReasonCount]uint64{mediaadmission.ReasonFaultyPRACK: 2}, IdenticalDuplicates: 8, ConflictingDuplicates: 3}}, Counters: [16]uint64{0: 11, 11: 7}}}, Metadata: mediaadmission.MetadataStats{Expired: 6}, Evidence: mediaadmission.EvidenceStats{ReadErrors: 1, Incomplete: true}}
 	stats := admissiontelemetry.ToProto(s)
 	wire, err := proto.Marshal(&management.HunterStats{RtpEbpf: stats})
 	require.NoError(t, err)
@@ -23,6 +23,9 @@ func TestAdmissionTelemetryTransportAndJSON(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(bytes), "rtp_ebpf")
 	require.Contains(t, string(bytes), "control-failed")
+	require.Contains(t, string(bytes), `"unknown_calls":2`)
+	require.Contains(t, string(bytes), `"faulty_prack":2`)
+	require.Contains(t, string(bytes), `"degraded_duration_ns":123`)
 	bytes, err = StatusResponseToJSON(&management.StatusResponse{ProcessorStats: &management.ProcessorStats{RtpEbpf: stats}}, false)
 	require.NoError(t, err)
 	var object map[string]any

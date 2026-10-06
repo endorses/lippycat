@@ -472,6 +472,7 @@ func (p PacketDisplay) RecordType() string {
 // HunterInfo represents a hunter node's status information.
 // This type is shared between processor, remote capture client, and TUI.
 type HunterInfo struct {
+	MediaAdmission               *management.MediaAdmissionStatus
 	ID                           string
 	Hostname                     string
 	RemoteAddr                   string

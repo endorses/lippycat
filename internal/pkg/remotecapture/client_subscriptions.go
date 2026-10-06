@@ -138,6 +138,9 @@ func (c *Client) SubscribeHunterStatus() error {
 				// Send to handler with processor address and upstream info
 				if c.handler != nil {
 					c.handler.OnHunterStatus(hunters, processorID, processorStatus, c.addr, upstreamProcessor)
+					if handler, ok := c.handler.(types.MediaAdmissionStatusHandler); ok {
+						handler.OnMediaAdmissionStatus(resp.GetProcessorStats().GetRtpEbpf(), c.addr)
+					}
 				}
 			}
 		}

@@ -1232,4 +1232,20 @@ message MediaAdmissionScope {
  bool counter_read_failed = 20;
  int64 publication_started_unix_ns = 21;
  int64 last_published_unix_ns = 22;
+ MediaAdmissionUncertainty uncertainty = 23;
+ uint64 degraded_duration_ns = 24;
+}
+
+// Active reason counts overlap and must not be summed as distinct calls.
+// Duplicate counters are cumulative occurrences, independent of active counts.
+message MediaAdmissionUncertainty {
+ uint64 unknown_calls = 1;
+ uint64 conflicting_headers = 2;
+ uint64 faulty_prack = 3;
+ uint64 partial_sdp = 4;
+ uint64 delayed_offer = 5;
+ uint64 fork_ambiguity = 6;
+ uint64 evidence_loss = 7;
+ uint64 identical_duplicates = 8;
+ uint64 conflicting_duplicates = 9;
 }

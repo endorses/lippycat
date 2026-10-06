@@ -694,7 +694,14 @@ func TestIncompleteSelectedDerivationRetainsSafeAttributionAndRequiresCompleteRe
 			repaired.ViaBranch = "repair-branch"
 			repaired.CSeqNumber++
 			check(t, bridge.ObserveValidated(repaired))
-			check(t, bridge.Selected(repaired))
+			if bridge.Selected(repaired) == nil {
+				t.Fatal("unconfirmed request cleared uncertainty")
+			}
+			confirmed := repaired
+			confirmed.Method, confirmed.ResponseCode = "200", 200
+			confirmed.SDP = derivationSDP("192.0.2.2", 20000, false)
+			check(t, bridge.ObserveValidated(confirmed))
+			check(t, bridge.Selected(confirmed))
 			status := controller.Status()[0]
 			if status.State != mediaadmission.StateEnforcing || status.PendingUpdates != 0 || bridge.Stats().UnknownDerivations != 0 {
 				t.Fatalf("complete SDP did not recover: %+v", status)
@@ -763,6 +770,12 @@ func TestFailedControlRemainsUncertainUntilConfirmedSnapshotRecovery(t *testing.
 	repair.ViaBranch = "repair-branch"
 	if bridge.Selected(repair) == nil {
 		t.Fatal("repair ignored failed control operation")
+	}
+	confirmed := repair
+	confirmed.Method, confirmed.ResponseCode = "200", 200
+	confirmed.SDP = derivationSDP("192.0.2.2", 20000, false)
+	if bridge.Selected(confirmed) == nil {
+		t.Fatal("confirmed exchange ignored failed control operation")
 	}
 	maps.mu.Lock()
 	maps.failControl = false

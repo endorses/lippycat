@@ -9,18 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Recover VoIP admission after faulty, unmatched or partial PRACK evidence through
-  a later complete, confirmed caller-initiated re-INVITE or established-dialog
-  UPDATE. Enforce-mode repair removes obsolete faulty-context ownership while
-  preserving current shared and independent requirements. Healthy re-offers and
-  hold/resume retain historical endpoint attribution; shadow-mode recovery keeps
-  userspace registry ownership. Early UPDATE and ACK SDP cannot supply the missing
-  admission proof for an outstanding reliable provisional offer.
-- Combine repeated SIP `Require` headers while preserving the last singleton
-  `CSeq`, `RSeq` and `RAck` value for general consumers. Duplicate singleton
-  headers invalidate reliable offer/answer proof without corrupting CSeq methods.
-  Duplicate CSeq also invalidates ordinary admission negotiation evidence and
-  keeps that call lifetime uncertain, including after a later valid re-offer.
+- Recover applicable SIP admission uncertainty through a complete confirmed
+  negotiation from either participant, using separate initiator sequence spaces.
+  Preserve faulty-context trailing-media attribution through the existing grace
+  policy and cancel retirement when valid negotiation reuses an endpoint.
+  Healthy and shadow attribution remain compatible; post-grace one-sided resolver
+  fallback remains a documented limitation.
+- Accept semantically identical valid singleton SIP header repetitions while
+  retaining last-line values for ordinary consumers. Conflicting or malformed
+  repetitions cannot supply proof; bounded uncertainty can recover through a
+  fresh complete exchange. Repeated `Require` retains list semantics.
+- Bind proof and delayed cleanup to call lifetimes, isolate early-dialog forks,
+  and preserve resolved SDP across valid repeated reliable provisionals while
+  requiring correct acknowledgment of each reliable transaction.
+- Expose sanitized per-domain unique unknown-call totals, overlapping uncertainty
+  reasons, duplicate-bearing header-group counters and elapsed degradation through
+  management telemetry, CLI JSON and the TUI Nodes view.
 - **VoIP hunter upgrade:** application filters now reach hunters with eBPF
   admission disabled. Previously, a receiver-interface mismatch could leave
   hunters selecting calls broadly despite distributed identity or IP filters.

@@ -20,34 +20,48 @@ type derivationSide struct {
 }
 
 type derivationState struct {
-	cseq                      uint64
-	branch, method            string
-	complete, hasSDP, missing bool
-	rejected                  bool
-	accepted                  bool
-	dialogConfirmed           bool
-	recoveryEligible          bool
-	recoveryPending           bool
-	prackRecovery             bool
-	prackRecoveryCSeq         uint64
-	digest                    [32]byte
-	endpoints                 []mediaadmission.EndpointKey
-	retirementEndpoints       []mediaadmission.EndpointKey
-	retainedEndpoints         []mediaadmission.EndpointKey
-	previous                  *derivationState
-	responseCode              int
-	reliable                  bool
-	rseq                      uint32
-	rackValid                 bool
-	rackRSeq, rackCSeq        uint32
-	proofExpires              time.Time
-	reliableAnswered          bool
-	prackCSeq                 uint64
-	prackBranch               string
+	delayedAckAnswered               bool
+	delayedAckBranch                 string
+	cseq                             uint64
+	branch, method                   string
+	complete, hasSDP, missing        bool
+	rejected                         bool
+	accepted                         bool
+	dialogConfirmed                  bool
+	recoveryEligible                 bool
+	recoveryPending                  bool
+	prackRecovery                    bool
+	prackRecoveryCSeq                uint64
+	digest                           [32]byte
+	endpoints                        []mediaadmission.EndpointKey
+	retirementEndpoints              []mediaadmission.EndpointKey
+	retainedEndpoints                []mediaadmission.EndpointKey
+	previous                         *derivationState
+	responseCode                     int
+	reliable                         bool
+	rseq                             uint32
+	rackValid                        bool
+	rackRSeq, rackCSeq               uint32
+	proofExpires                     time.Time
+	reliableAnswered                 bool
+	prackCSeq                        uint64
+	prackBranch                      string
+	conflict                         bool
+	conflictBoundValid               bool
+	conflictMaximum                  uint64
+	observed                         uint64
+	forkRetired                      bool
+	repeatedRSeq                     uint32
+	repeatedPending                  bool
+	repeatedAckRSeq, repeatedAckCSeq uint32
+	repeatedAckSequence              uint64
+	repeatedAckBranch                string
+	repeatedAckExpires               time.Time
+	repeatedAckValid                 bool
 }
 
 func validRecoveryCSeq(result pipeline.SIPResult) bool {
-	if result.DuplicateReliableHeaders.CSeq {
+	if result.ReliableHeaderEvidence.Conflicts.CSeq || (result.DuplicateReliableHeaders.CSeq && !result.ReliableHeaderEvidence.CSeqValid) {
 		return false
 	}
 	if result.ResponseCode == 0 && !strings.EqualFold(result.Method, result.CSeqMethod) {
@@ -84,7 +98,7 @@ func derivationCost(side derivationSide, state *derivationState) (int, int) {
 		return 0, 0
 	}
 	endpoints := len(state.endpoints) + len(state.retirementEndpoints) + len(state.retainedEndpoints)
-	bytes := 416 + len(side.sender) + len(side.peer) + len(side.initiator) + len(state.branch) + len(state.method) + len(state.prackBranch) + endpoints*128
+	bytes := 552 + len(side.sender) + len(side.peer) + len(side.initiator) + len(state.branch) + len(state.method) + len(state.prackBranch) + len(state.repeatedAckBranch) + len(state.delayedAckBranch) + endpoints*128
 	if state.previous != nil {
 		priorBytes, priorEndpoints := derivationCost(side, state.previous)
 		bytes += priorBytes
@@ -138,6 +152,8 @@ func (b *Bridge) storeDerivation(call *selectedCall, side derivationSide, next *
 	side = derivationSide{strings.Clone(side.sender), strings.Clone(side.peer), strings.Clone(side.initiator), side.prack}
 	next.branch, next.method = strings.Clone(next.branch), strings.Clone(next.method)
 	next.prackBranch = strings.Clone(next.prackBranch)
+	next.repeatedAckBranch = strings.Clone(next.repeatedAckBranch)
+	next.delayedAckBranch = strings.Clone(next.delayedAckBranch)
 	next.endpoints = append([]mediaadmission.EndpointKey(nil), next.endpoints...)
 	next.retirementEndpoints = append([]mediaadmission.EndpointKey(nil), next.retirementEndpoints...)
 	next.retainedEndpoints = append([]mediaadmission.EndpointKey(nil), next.retainedEndpoints...)
@@ -212,6 +228,9 @@ func (b *Bridge) removeDerivation(call *selectedCall, side derivationSide) {
 }
 
 func (b *Bridge) releaseDerivations(call *selectedCall) {
+	if err := b.releaseRetirementsLocked(call); err != nil {
+		logger.Error("Failed to release endpoint retirement reservation", "error", err)
+	}
 	for side := range call.derivations {
 		b.removeDerivation(call, side)
 	}
@@ -243,7 +262,11 @@ func (b *Bridge) bindEarlyDerivation(call *selectedCall, key mediaadmission.Dial
 	}
 	early := derivationSide{key.FromTag, "", key.FromTag, false}
 	old := call.derivations[early]
-	if old == nil || old.cseq != key.CSeq || old.branch != key.Branch || old.method != key.CSeqMethod {
+	if old == nil {
+		b.cloneEarlyForkLocked(call, key)
+		return
+	}
+	if old == nil || (old.cseq != key.CSeq && !old.conflict) || old.branch != key.Branch || old.method != key.CSeqMethod {
 		return
 	}
 	bound := derivationSide{key.FromTag, key.ToTag, key.FromTag, false}
@@ -266,6 +289,12 @@ func (b *Bridge) bindEarlyDerivation(call *selectedCall, key mediaadmission.Dial
 
 func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.MetadataRecord) bool {
 	key := b.bindRequestKey(call, record.Key)
+	if b.observeRetiredForkLocked(call, record) {
+		return false
+	}
+	if key.HeaderConflict {
+		return b.observeConflict(call, record)
+	}
 	if key.CSeqMethod == "PRACK" && key.ResponseCode == 0 {
 		return b.observePRACK(call, record)
 	}
@@ -324,7 +353,9 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 	}
 	b.bindEarlyDerivation(call, key)
 	old := call.derivations[side]
-	next := &derivationState{cseq: key.CSeq, branch: key.Branch, method: key.CSeqMethod, complete: record.Complete, hasSDP: !key.DescriptorOnly, endpoints: record.Endpoints, digest: key.SDPDigest, responseCode: key.ResponseCode, reliable: key.ReliableResponse, rseq: key.RSeq, proofExpires: time.Now().Add(b.cfg.Limits.PendingTTL)}
+	delayedACK := old != nil && b.delayedOfferAnswer(call, side, old, key)
+	ackRetransmission := old != nil && old.delayedAckAnswered && key.ResponseCode == 0 && key.CSeqMethod == "ACK" && old.cseq == key.CSeq && old.delayedAckBranch == key.Branch
+	next := &derivationState{cseq: key.CSeq, branch: key.Branch, method: key.CSeqMethod, complete: record.Complete, hasSDP: !key.DescriptorOnly, endpoints: record.Endpoints, digest: key.SDPDigest, responseCode: key.ResponseCode, reliable: key.ReliableResponse, rseq: key.RSeq, observed: key.Generation, proofExpires: time.Now().Add(b.cfg.Limits.PendingTTL)}
 	if old != nil {
 		next.dialogConfirmed = old.dialogConfirmed
 		next.recoveryEligible = old.recoveryEligible
@@ -336,6 +367,11 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 			return false
 		}
 		if key.CSeq == old.cseq {
+			next.delayedAckAnswered, next.delayedAckBranch = old.delayedAckAnswered, old.delayedAckBranch
+			next.observed = old.observed
+			if old.conflict {
+				return false
+			}
 			if old.rejected {
 				return false
 			}
@@ -356,13 +392,15 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 					next.complete = false
 				}
 			} else {
-				next.complete = old.complete && next.complete && key.Branch == old.branch && key.CSeqMethod == old.method && old.digest == next.digest && sameDerivationEndpoints(old.endpoints, next.endpoints)
+				next.complete = old.complete && next.complete && (ackRetransmission || (key.Branch == old.branch && key.CSeqMethod == old.method)) && old.digest == next.digest && sameDerivationEndpoints(old.endpoints, next.endpoints)
 			}
+			next.repeatedRSeq, next.repeatedPending = old.repeatedRSeq, old.repeatedPending
 			// A final SDP retransmission may repeat the reliable offer, but
 			// cannot replace its exact response linkage or its matched answer.
+			repeated := b.repeatReliableResponseLocked(call, side, old, next, key)
 			if old.reliable && key.ResponseCode >= 200 && old.digest == next.digest {
 				next.reliable, next.rseq, next.proofExpires = old.reliable, old.rseq, old.proofExpires
-			} else if old.hasSDP && (old.reliable != next.reliable || old.rseq != next.rseq) {
+			} else if !repeated && old.hasSDP && (old.reliable != next.reliable || old.rseq != next.rseq) {
 				next.complete = false
 			}
 			next.previous = old.previous
@@ -391,7 +429,12 @@ func (b *Bridge) observeDerivation(call *selectedCall, record mediaadmission.Met
 				}
 			}
 			next.previous = rollbackDerivation(old)
+			next.recoveryPending = next.recoveryPending || old.recoveryPending || unresolvedState(old)
 		}
+	}
+	if delayedACK || ackRetransmission {
+		next.branch, next.method = old.branch, "INVITE"
+		next.delayedAckAnswered, next.delayedAckBranch = true, key.Branch
 	}
 	b.putDerivation(call, side, next)
 	return true
@@ -427,7 +470,7 @@ func (b *Bridge) negotiationKey(call *selectedCall, key mediaadmission.DialogKey
 		return false
 	}
 	old := call.derivations[side]
-	return old != nil && old.cseq == key.CSeq && (old.method == "ACK" || b.delayedOfferAnswer(call, side, old, key))
+	return old != nil && old.cseq == key.CSeq && (old.delayedAckAnswered || b.delayedOfferAnswer(call, side, old, key))
 }
 
 // A successful response retires rollback evidence only for its exact observed
@@ -441,14 +484,14 @@ func (b *Bridge) acceptDerivation(call *selectedCall, result pipeline.SIPResult)
 		return false, 0
 	}
 	request := call.derivations[derivationSide{key.FromTag, key.ToTag, key.FromTag, false}]
-	holdPrevious := request != nil && request.recoveryEligible
+	holdPrevious := request != nil && (request.recoveryEligible || request.recoveryPending || unresolvedState(request.previous))
 	for side, state := range call.derivations {
 		if side.prack || state.rejected || side.initiator != key.FromTag || state.cseq != key.CSeq || state.branch != key.Branch || state.method != key.CSeqMethod || (side.peer != key.ToTag && side.sender != key.ToTag) {
 			continue
 		}
 		next := *state
 		next.accepted = true
-		if !holdPrevious {
+		if !holdPrevious && !state.recoveryPending && !unresolvedState(state.previous) {
 			next.previous = nil
 		}
 		b.putDerivation(call, side, &next)
@@ -460,6 +503,13 @@ func (b *Bridge) acceptDerivation(call *selectedCall, result pipeline.SIPResult)
 // dialog was established before this exchange survives the bounded predecessor
 // and is distinct from acceptance of the current transaction.
 func (b *Bridge) finishConfirmedNegotiation(call *selectedCall, key mediaadmission.DialogKey) (bool, uint64) {
+	if key.CSeqMethod == "ACK" {
+		var valid bool
+		key, valid = b.confirmedDelayedACKKey(call, key)
+		if !valid {
+			return false, 0
+		}
+	}
 	requestSide := derivationSide{key.FromTag, key.ToTag, key.FromTag, false}
 	request := call.derivations[requestSide]
 	response := call.derivations[derivationSide{key.ToTag, key.FromTag, key.FromTag, false}]
@@ -475,9 +525,14 @@ func (b *Bridge) finishConfirmedNegotiation(call *selectedCall, key mediaadmissi
 		request = call.derivations[requestSide]
 	}
 	if !request.complete || !response.complete || !request.hasSDP || !response.hasSDP || response.missing {
+		b.confirmForkLocked(call, key)
 		return false, 0
 	}
-	replacement := request.recoveryEligible
+	repaired := b.supersedeUncertainty(call, key)
+	replacement := repaired || (request.recoveryEligible && !request.recoveryPending && !unresolvedState(request.previous) && !unresolvedState(response.previous))
+	if b.canConfirmedLifetimeLocked(call, key) {
+		call.lifetimeAmbiguous = false
+	}
 	retirePRACK := replacement && request.prackRecovery
 	answerSide := requestSide
 	answerSide.prack = true
@@ -489,7 +544,9 @@ func (b *Bridge) finishConfirmedNegotiation(call *selectedCall, key mediaadmissi
 	}
 	for _, side := range []derivationSide{requestSide, {key.ToTag, key.FromTag, key.FromTag, false}} {
 		next := *call.derivations[side]
-		next.previous = nil
+		if repaired || (!next.recoveryPending && !unresolvedState(next.previous)) {
+			next.previous = nil
+		}
 		if replacement {
 			next.recoveryPending = false
 			next.retirementEndpoints = nil
@@ -499,6 +556,7 @@ func (b *Bridge) finishConfirmedNegotiation(call *selectedCall, key mediaadmissi
 			return false, 0
 		}
 	}
+	b.confirmForkLocked(call, key)
 	return retirePRACK, request.prackRecoveryCSeq
 }
 
@@ -508,11 +566,14 @@ func acceptedTransaction(state *derivationState, key mediaadmission.DialogKey) b
 
 func (b *Bridge) requireRequestDerivation(call *selectedCall, result pipeline.SIPResult) {
 	key := b.key(result, nil)
+	if b.forkDispositionLocked(call, key) {
+		return
+	}
 	b.bindEarlyDerivation(call, key)
 	side := derivationSide{key.FromTag, key.ToTag, key.FromTag, false}
 	old := call.derivations[side]
 	if old != nil && old.cseq >= key.CSeq {
-		if old.cseq == key.CSeq && (old.branch != key.Branch || old.method != key.CSeqMethod) {
+		if !old.conflict && old.cseq == key.CSeq && (old.branch != key.Branch || old.method != key.CSeqMethod) {
 			call.contextLost = true
 		}
 		return
@@ -524,7 +585,7 @@ func (b *Bridge) requireRequestDerivation(call *selectedCall, result pipeline.SI
 		call.contextLost = true
 		return
 	}
-	next := &derivationState{cseq: key.CSeq, branch: key.Branch, method: key.CSeqMethod, hasSDP: true, missing: true}
+	next := &derivationState{cseq: key.CSeq, branch: key.Branch, method: key.CSeqMethod, hasSDP: true, missing: true, observed: key.Generation}
 	if old != nil {
 		next.dialogConfirmed, next.recoveryEligible = old.dialogConfirmed, old.dialogConfirmed
 		next.recoveryPending = old.recoveryPending
@@ -638,16 +699,35 @@ func (b *Bridge) bindRequestKey(call *selectedCall, key mediaadmission.DialogKey
 	return key
 }
 
+// Only an ordinary accepted final-response offer can obtain its answer in
+// ACK. Reliable provisional offers keep their mandatory PRACK answer role.
 func (b *Bridge) delayedOfferAnswer(call *selectedCall, side derivationSide, request *derivationState, key mediaadmission.DialogKey) bool {
-	if key.ResponseCode != 0 || key.CSeqMethod != "ACK" || request.method != "INVITE" || request.hasSDP || request.missing || side.peer == "" {
+	if key.ResponseCode != 0 || key.CSeqMethod != "ACK" || !key.CSeqValid || key.HeaderConflict || request.method != "INVITE" || request.hasSDP || request.missing || request.rejected || request.conflict || !request.accepted || request.cseq != key.CSeq || side.peer == "" {
 		return false
 	}
 	response := call.derivations[derivationSide{side.peer, side.sender, side.initiator, false}]
-	return response != nil && response.responseCode >= 200 && !response.reliable && !response.rejected && response.hasSDP && response.cseq == key.CSeq && response.branch == request.branch && response.method == "INVITE"
+	return response != nil && response.responseCode >= 200 && response.responseCode < 300 && response.accepted && !response.reliable && !response.rejected && !response.conflict && response.hasSDP && response.cseq == key.CSeq && response.branch == request.branch && response.method == "INVITE"
+}
+
+// The ACK uses a separate branch, while acceptance belongs to the original
+// INVITE. Normalize only retained exact ACK-answer provenance, so common
+// supersession verifies the original request/response transaction unchanged.
+func (b *Bridge) confirmedDelayedACKKey(call *selectedCall, key mediaadmission.DialogKey) (mediaadmission.DialogKey, bool) {
+	if key.ResponseCode != 0 || key.CSeqMethod != "ACK" || !key.CSeqValid || key.HeaderConflict || key.FromTag == "" || key.ToTag == "" || key.Branch == "" {
+		return key, false
+	}
+	side := derivationSide{key.FromTag, key.ToTag, key.FromTag, false}
+	request := call.derivations[side]
+	response := call.derivations[derivationSide{key.ToTag, key.FromTag, key.FromTag, false}]
+	if request == nil || response == nil || !request.delayedAckAnswered || request.delayedAckBranch != key.Branch || request.cseq != key.CSeq || response.cseq != key.CSeq || request.method != "INVITE" || response.method != "INVITE" || request.branch != response.branch || response.responseCode < 200 || response.responseCode >= 300 || response.reliable {
+		return key, false
+	}
+	key.CSeqMethod, key.Branch = "INVITE", request.branch
+	return key, true
 }
 
 func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadmission.EndpointKey]struct{}) {
-	known, unknown := call.known, call.contextLost
+	known, unknown := call.known, call.contextLost || call.lifetimeAmbiguous || call.forkAmbiguous
 	media := make(map[mediaadmission.EndpointKey]struct{})
 	for side, state := range call.derivations {
 		if side.initiator == "" {
@@ -659,10 +739,15 @@ func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadm
 			continue
 		}
 		unknown = unknown || state.recoveryPending
+		unknown = unknown || state.conflict
+		if !state.accepted && state.previous != nil {
+			unknown = unknown || unresolvedState(state.previous)
+		}
 		if side.prack {
 			// PRACK is an answer only with its exact observed reliable offer.
 			known = known || state.hasSDP
-			unknown = unknown || !b.reliableAnswerMatches(call, side, state, time.Now())
+			matches := b.reliableAnswerMatches(call, side, state, time.Now())
+			unknown = unknown || !matches
 		}
 		if state.rejected {
 			state = state.previous
@@ -679,7 +764,8 @@ func (b *Bridge) derivationSummary(call *selectedCall) (bool, bool, map[mediaadm
 			// unresolved, even though the responder's endpoints are safe.
 			response := call.derivations[derivationSide{side.peer, side.sender, side.initiator, false}]
 			if response != nil && response.hasSDP && !response.rejected && response.cseq == state.cseq {
-				unknown = unknown || !b.bodylessReliablyAnswered(call, side, state, time.Now())
+				matches := b.bodylessReliablyAnswered(call, side, state, time.Now())
+				unknown = unknown || !matches
 			}
 		}
 		for _, endpoint := range state.endpoints {

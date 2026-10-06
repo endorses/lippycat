@@ -6443,10 +6443,12 @@ type MediaAdmissionScope struct {
 	DegradedSinceUnixNs int64                  `protobuf:"varint,17,opt,name=degraded_since_unix_ns,json=degradedSinceUnixNs,proto3" json:"degraded_since_unix_ns,omitempty"`
 	OpenDurationNs      uint64                 `protobuf:"varint,18,opt,name=open_duration_ns,json=openDurationNs,proto3" json:"open_duration_ns,omitempty"`
 	// Fixed reason indexes documented by ebpfadmission.ReasonNames.
-	DecisionCounters         []uint64 `protobuf:"varint,19,rep,packed,name=decision_counters,json=decisionCounters,proto3" json:"decision_counters,omitempty"`
-	CounterReadFailed        bool     `protobuf:"varint,20,opt,name=counter_read_failed,json=counterReadFailed,proto3" json:"counter_read_failed,omitempty"`
-	PublicationStartedUnixNs int64    `protobuf:"varint,21,opt,name=publication_started_unix_ns,json=publicationStartedUnixNs,proto3" json:"publication_started_unix_ns,omitempty"`
-	LastPublishedUnixNs      int64    `protobuf:"varint,22,opt,name=last_published_unix_ns,json=lastPublishedUnixNs,proto3" json:"last_published_unix_ns,omitempty"`
+	DecisionCounters         []uint64                   `protobuf:"varint,19,rep,packed,name=decision_counters,json=decisionCounters,proto3" json:"decision_counters,omitempty"`
+	CounterReadFailed        bool                       `protobuf:"varint,20,opt,name=counter_read_failed,json=counterReadFailed,proto3" json:"counter_read_failed,omitempty"`
+	PublicationStartedUnixNs int64                      `protobuf:"varint,21,opt,name=publication_started_unix_ns,json=publicationStartedUnixNs,proto3" json:"publication_started_unix_ns,omitempty"`
+	LastPublishedUnixNs      int64                      `protobuf:"varint,22,opt,name=last_published_unix_ns,json=lastPublishedUnixNs,proto3" json:"last_published_unix_ns,omitempty"`
+	Uncertainty              *MediaAdmissionUncertainty `protobuf:"bytes,23,opt,name=uncertainty,proto3" json:"uncertainty,omitempty"`
+	DegradedDurationNs       uint64                     `protobuf:"varint,24,opt,name=degraded_duration_ns,json=degradedDurationNs,proto3" json:"degraded_duration_ns,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -6631,6 +6633,130 @@ func (x *MediaAdmissionScope) GetPublicationStartedUnixNs() int64 {
 func (x *MediaAdmissionScope) GetLastPublishedUnixNs() int64 {
 	if x != nil {
 		return x.LastPublishedUnixNs
+	}
+	return 0
+}
+
+func (x *MediaAdmissionScope) GetUncertainty() *MediaAdmissionUncertainty {
+	if x != nil {
+		return x.Uncertainty
+	}
+	return nil
+}
+
+func (x *MediaAdmissionScope) GetDegradedDurationNs() uint64 {
+	if x != nil {
+		return x.DegradedDurationNs
+	}
+	return 0
+}
+
+// Active reason counts overlap and must not be summed as distinct calls.
+// Duplicate counters are cumulative occurrences, independent of active counts.
+type MediaAdmissionUncertainty struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	UnknownCalls          uint64                 `protobuf:"varint,1,opt,name=unknown_calls,json=unknownCalls,proto3" json:"unknown_calls,omitempty"`
+	ConflictingHeaders    uint64                 `protobuf:"varint,2,opt,name=conflicting_headers,json=conflictingHeaders,proto3" json:"conflicting_headers,omitempty"`
+	FaultyPrack           uint64                 `protobuf:"varint,3,opt,name=faulty_prack,json=faultyPrack,proto3" json:"faulty_prack,omitempty"`
+	PartialSdp            uint64                 `protobuf:"varint,4,opt,name=partial_sdp,json=partialSdp,proto3" json:"partial_sdp,omitempty"`
+	DelayedOffer          uint64                 `protobuf:"varint,5,opt,name=delayed_offer,json=delayedOffer,proto3" json:"delayed_offer,omitempty"`
+	ForkAmbiguity         uint64                 `protobuf:"varint,6,opt,name=fork_ambiguity,json=forkAmbiguity,proto3" json:"fork_ambiguity,omitempty"`
+	EvidenceLoss          uint64                 `protobuf:"varint,7,opt,name=evidence_loss,json=evidenceLoss,proto3" json:"evidence_loss,omitempty"`
+	IdenticalDuplicates   uint64                 `protobuf:"varint,8,opt,name=identical_duplicates,json=identicalDuplicates,proto3" json:"identical_duplicates,omitempty"`
+	ConflictingDuplicates uint64                 `protobuf:"varint,9,opt,name=conflicting_duplicates,json=conflictingDuplicates,proto3" json:"conflicting_duplicates,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *MediaAdmissionUncertainty) Reset() {
+	*x = MediaAdmissionUncertainty{}
+	mi := &file_management_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MediaAdmissionUncertainty) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MediaAdmissionUncertainty) ProtoMessage() {}
+
+func (x *MediaAdmissionUncertainty) ProtoReflect() protoreflect.Message {
+	mi := &file_management_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MediaAdmissionUncertainty.ProtoReflect.Descriptor instead.
+func (*MediaAdmissionUncertainty) Descriptor() ([]byte, []int) {
+	return file_management_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *MediaAdmissionUncertainty) GetUnknownCalls() uint64 {
+	if x != nil {
+		return x.UnknownCalls
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetConflictingHeaders() uint64 {
+	if x != nil {
+		return x.ConflictingHeaders
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetFaultyPrack() uint64 {
+	if x != nil {
+		return x.FaultyPrack
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetPartialSdp() uint64 {
+	if x != nil {
+		return x.PartialSdp
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetDelayedOffer() uint64 {
+	if x != nil {
+		return x.DelayedOffer
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetForkAmbiguity() uint64 {
+	if x != nil {
+		return x.ForkAmbiguity
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetEvidenceLoss() uint64 {
+	if x != nil {
+		return x.EvidenceLoss
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetIdenticalDuplicates() uint64 {
+	if x != nil {
+		return x.IdenticalDuplicates
+	}
+	return 0
+}
+
+func (x *MediaAdmissionUncertainty) GetConflictingDuplicates() uint64 {
+	if x != nil {
+		return x.ConflictingDuplicates
 	}
 	return 0
 }
@@ -7236,7 +7362,7 @@ const file_management_proto_rawDesc = "" +
 	"\x14missing_media_alerts\x18' \x01(\x04R\x12missingMediaAlerts\x12D\n" +
 	"\x1ediagnostic_attribution_dropped\x18( \x01(\x04R\x1cdiagnosticAttributionDropped\x12H\n" +
 	" diagnostic_observation_uncertain\x18) \x01(\x04R\x1ediagnosticObservationUncertain\x12;\n" +
-	"\x1aevidence_clock_read_errors\x18* \x01(\x04R\x17evidenceClockReadErrors\"\xa4\a\n" +
+	"\x1aevidence_clock_read_errors\x18* \x01(\x04R\x17evidenceClockReadErrors\"\xa8\b\n" +
 	"\x13MediaAdmissionScope\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\rR\x06domain\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12%\n" +
@@ -7262,7 +7388,20 @@ const file_management_proto_rawDesc = "" +
 	"\x11decision_counters\x18\x13 \x03(\x04R\x10decisionCounters\x12.\n" +
 	"\x13counter_read_failed\x18\x14 \x01(\bR\x11counterReadFailed\x12=\n" +
 	"\x1bpublication_started_unix_ns\x18\x15 \x01(\x03R\x18publicationStartedUnixNs\x123\n" +
-	"\x16last_published_unix_ns\x18\x16 \x01(\x03R\x13lastPublishedUnixNs*j\n" +
+	"\x16last_published_unix_ns\x18\x16 \x01(\x03R\x13lastPublishedUnixNs\x12P\n" +
+	"\vuncertainty\x18\x17 \x01(\v2..lippycat.management.MediaAdmissionUncertaintyR\vuncertainty\x120\n" +
+	"\x14degraded_duration_ns\x18\x18 \x01(\x04R\x12degradedDurationNs\"\x90\x03\n" +
+	"\x19MediaAdmissionUncertainty\x12#\n" +
+	"\runknown_calls\x18\x01 \x01(\x04R\funknownCalls\x12/\n" +
+	"\x13conflicting_headers\x18\x02 \x01(\x04R\x12conflictingHeaders\x12!\n" +
+	"\ffaulty_prack\x18\x03 \x01(\x04R\vfaultyPrack\x12\x1f\n" +
+	"\vpartial_sdp\x18\x04 \x01(\x04R\n" +
+	"partialSdp\x12#\n" +
+	"\rdelayed_offer\x18\x05 \x01(\x04R\fdelayedOffer\x12%\n" +
+	"\x0efork_ambiguity\x18\x06 \x01(\x04R\rforkAmbiguity\x12#\n" +
+	"\revidence_loss\x18\a \x01(\x04R\fevidenceLoss\x121\n" +
+	"\x14identical_duplicates\x18\b \x01(\x04R\x13identicalDuplicates\x125\n" +
+	"\x16conflicting_duplicates\x18\t \x01(\x04R\x15conflictingDuplicates*j\n" +
 	"\x0eForwardingMode\x12\x1f\n" +
 	"\x1bFORWARDING_MODE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17FORWARDING_MODE_PACKETS\x10\x01\x12\x1a\n" +
@@ -7347,7 +7486,7 @@ func file_management_proto_rawDescGZIP() []byte {
 }
 
 var file_management_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
+var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
 var file_management_proto_goTypes = []any{
 	(ForwardingMode)(0),                   // 0: lippycat.management.ForwardingMode
 	(HunterStatus)(0),                     // 1: lippycat.management.HunterStatus
@@ -7414,11 +7553,12 @@ var file_management_proto_goTypes = []any{
 	(*PcapWriterTelemetry)(nil),           // 62: lippycat.management.PcapWriterTelemetry
 	(*MediaAdmissionStatus)(nil),          // 63: lippycat.management.MediaAdmissionStatus
 	(*MediaAdmissionScope)(nil),           // 64: lippycat.management.MediaAdmissionScope
-	nil,                                   // 65: lippycat.management.LIDeliveryStats.DestinationsEntry
-	nil,                                   // 66: lippycat.management.LIDeliveryStats.DroppedByReasonEntry
-	nil,                                   // 67: lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
-	nil,                                   // 68: lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
-	nil,                                   // 69: lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
+	(*MediaAdmissionUncertainty)(nil),     // 65: lippycat.management.MediaAdmissionUncertainty
+	nil,                                   // 66: lippycat.management.LIDeliveryStats.DestinationsEntry
+	nil,                                   // 67: lippycat.management.LIDeliveryStats.DroppedByReasonEntry
+	nil,                                   // 68: lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
+	nil,                                   // 69: lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
+	nil,                                   // 70: lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
 }
 var file_management_proto_depIdxs = []int32{
 	11, // 0: lippycat.management.HunterRegistration.capabilities:type_name -> lippycat.management.HunterCapabilities
@@ -7468,15 +7608,15 @@ var file_management_proto_depIdxs = []int32{
 	40, // 44: lippycat.management.ProcessorStorageStats.filters:type_name -> lippycat.management.StorageStatus
 	40, // 45: lippycat.management.ProcessorStorageStats.li_state:type_name -> lippycat.management.StorageStatus
 	41, // 46: lippycat.management.StorageStatus.key_usage:type_name -> lippycat.management.EncryptionUsageStats
-	65, // 47: lippycat.management.LIDeliveryStats.destinations:type_name -> lippycat.management.LIDeliveryStats.DestinationsEntry
+	66, // 47: lippycat.management.LIDeliveryStats.destinations:type_name -> lippycat.management.LIDeliveryStats.DestinationsEntry
 	45, // 48: lippycat.management.LIDeliveryStats.x2_journal:type_name -> lippycat.management.LIJournalStats
-	66, // 49: lippycat.management.LIDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedByReasonEntry
-	67, // 50: lippycat.management.LIDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
+	67, // 49: lippycat.management.LIDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedByReasonEntry
+	68, // 50: lippycat.management.LIDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDeliveryStats.DroppedBytesByReasonEntry
 	45, // 51: lippycat.management.LIDeliveryStats.x3_journal:type_name -> lippycat.management.LIJournalStats
-	68, // 52: lippycat.management.LIDestinationDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
+	69, // 52: lippycat.management.LIDestinationDeliveryStats.dropped_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedByReasonEntry
 	46, // 53: lippycat.management.LIDestinationDeliveryStats.x2_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
 	46, // 54: lippycat.management.LIDestinationDeliveryStats.x3_keepalive:type_name -> lippycat.management.LIInterfaceKeepaliveStats
-	69, // 55: lippycat.management.LIDestinationDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
+	70, // 55: lippycat.management.LIDestinationDeliveryStats.dropped_bytes_by_reason:type_name -> lippycat.management.LIDestinationDeliveryStats.DroppedBytesByReasonEntry
 	40, // 56: lippycat.management.LIJournalStats.storage:type_name -> lippycat.management.StorageStatus
 	50, // 57: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
 	1,  // 58: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
@@ -7497,42 +7637,43 @@ var file_management_proto_depIdxs = []int32{
 	1,  // 73: lippycat.management.HunterStatusChangedEvent.old_status:type_name -> lippycat.management.HunterStatus
 	1,  // 74: lippycat.management.HunterStatusChangedEvent.new_status:type_name -> lippycat.management.HunterStatus
 	64, // 75: lippycat.management.MediaAdmissionStatus.scopes:type_name -> lippycat.management.MediaAdmissionScope
-	44, // 76: lippycat.management.LIDeliveryStats.DestinationsEntry.value:type_name -> lippycat.management.LIDestinationDeliveryStats
-	7,  // 77: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
-	9,  // 78: lippycat.management.ManagementService.RegisterProcessor:input_type -> lippycat.management.ProcessorRegistration
-	14, // 79: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
-	17, // 80: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
-	17, // 81: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
-	31, // 82: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
-	19, // 83: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
-	25, // 84: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
-	48, // 85: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
-	51, // 86: lippycat.management.ManagementService.GetTopology:input_type -> lippycat.management.TopologyRequest
-	54, // 87: lippycat.management.ManagementService.SubscribeTopology:input_type -> lippycat.management.TopologySubscribeRequest
-	28, // 88: lippycat.management.ManagementService.UpdateFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterRequest
-	29, // 89: lippycat.management.ManagementService.DeleteFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterDeleteRequest
-	30, // 90: lippycat.management.ManagementService.GetFiltersFromProcessor:input_type -> lippycat.management.ProcessorFilterQuery
-	26, // 91: lippycat.management.ManagementService.RequestAuthToken:input_type -> lippycat.management.AuthTokenRequest
-	12, // 92: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
-	10, // 93: lippycat.management.ManagementService.RegisterProcessor:output_type -> lippycat.management.ProcessorRegistrationResponse
-	16, // 94: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
-	18, // 95: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
-	23, // 96: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
-	32, // 97: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
-	24, // 98: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
-	24, // 99: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
-	49, // 100: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
-	52, // 101: lippycat.management.ManagementService.GetTopology:output_type -> lippycat.management.TopologyResponse
-	55, // 102: lippycat.management.ManagementService.SubscribeTopology:output_type -> lippycat.management.TopologyUpdate
-	24, // 103: lippycat.management.ManagementService.UpdateFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
-	24, // 104: lippycat.management.ManagementService.DeleteFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
-	18, // 105: lippycat.management.ManagementService.GetFiltersFromProcessor:output_type -> lippycat.management.FilterResponse
-	27, // 106: lippycat.management.ManagementService.RequestAuthToken:output_type -> lippycat.management.AuthorizationToken
-	92, // [92:107] is the sub-list for method output_type
-	77, // [77:92] is the sub-list for method input_type
-	77, // [77:77] is the sub-list for extension type_name
-	77, // [77:77] is the sub-list for extension extendee
-	0,  // [0:77] is the sub-list for field type_name
+	65, // 76: lippycat.management.MediaAdmissionScope.uncertainty:type_name -> lippycat.management.MediaAdmissionUncertainty
+	44, // 77: lippycat.management.LIDeliveryStats.DestinationsEntry.value:type_name -> lippycat.management.LIDestinationDeliveryStats
+	7,  // 78: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
+	9,  // 79: lippycat.management.ManagementService.RegisterProcessor:input_type -> lippycat.management.ProcessorRegistration
+	14, // 80: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
+	17, // 81: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
+	17, // 82: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
+	31, // 83: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
+	19, // 84: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
+	25, // 85: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
+	48, // 86: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
+	51, // 87: lippycat.management.ManagementService.GetTopology:input_type -> lippycat.management.TopologyRequest
+	54, // 88: lippycat.management.ManagementService.SubscribeTopology:input_type -> lippycat.management.TopologySubscribeRequest
+	28, // 89: lippycat.management.ManagementService.UpdateFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterRequest
+	29, // 90: lippycat.management.ManagementService.DeleteFilterOnProcessor:input_type -> lippycat.management.ProcessorFilterDeleteRequest
+	30, // 91: lippycat.management.ManagementService.GetFiltersFromProcessor:input_type -> lippycat.management.ProcessorFilterQuery
+	26, // 92: lippycat.management.ManagementService.RequestAuthToken:input_type -> lippycat.management.AuthTokenRequest
+	12, // 93: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
+	10, // 94: lippycat.management.ManagementService.RegisterProcessor:output_type -> lippycat.management.ProcessorRegistrationResponse
+	16, // 95: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
+	18, // 96: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
+	23, // 97: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
+	32, // 98: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
+	24, // 99: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
+	24, // 100: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
+	49, // 101: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
+	52, // 102: lippycat.management.ManagementService.GetTopology:output_type -> lippycat.management.TopologyResponse
+	55, // 103: lippycat.management.ManagementService.SubscribeTopology:output_type -> lippycat.management.TopologyUpdate
+	24, // 104: lippycat.management.ManagementService.UpdateFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
+	24, // 105: lippycat.management.ManagementService.DeleteFilterOnProcessor:output_type -> lippycat.management.FilterUpdateResult
+	18, // 106: lippycat.management.ManagementService.GetFiltersFromProcessor:output_type -> lippycat.management.FilterResponse
+	27, // 107: lippycat.management.ManagementService.RequestAuthToken:output_type -> lippycat.management.AuthorizationToken
+	93, // [93:108] is the sub-list for method output_type
+	78, // [78:93] is the sub-list for method input_type
+	78, // [78:78] is the sub-list for extension type_name
+	78, // [78:78] is the sub-list for extension extendee
+	0,  // [0:78] is the sub-list for field type_name
 }
 
 func init() { file_management_proto_init() }
@@ -7553,7 +7694,7 @@ func file_management_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_management_proto_rawDesc), len(file_management_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   63,
+			NumMessages:   64,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

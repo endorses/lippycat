@@ -7,6 +7,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"google.golang.org/protobuf/proto"
 )
 
 // TUIEventHandler adapts types.EventHandler to Bubbletea's tea.Program
@@ -77,6 +78,7 @@ func (h *TUIEventHandler) OnEventBatch(batch types.EventBatch) {
 }
 
 var _ types.EventHandler = (*TUIEventHandler)(nil)
+var _ types.MediaAdmissionStatusHandler = (*TUIEventHandler)(nil)
 
 // OnHunterStatus sends HunterStatusMsg to TUI
 func (h *TUIEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string) {
@@ -178,5 +180,20 @@ type TopologyReceivedMsg struct {
 // TopologyUpdateMsg is sent when a topology update is received from a processor
 type TopologyUpdateMsg struct {
 	Update        *management.TopologyUpdate
+	ProcessorAddr string
+}
+
+// OnMediaAdmissionStatus implements the optional remote diagnostics callback.
+func (h *TUIEventHandler) OnMediaAdmissionStatus(status *management.MediaAdmissionStatus, processorAddr string) {
+	if h.program != nil {
+		if status != nil {
+			status = proto.Clone(status).(*management.MediaAdmissionStatus)
+		}
+		h.program.Send(MediaAdmissionStatusMsg{Status: status, ProcessorAddr: processorAddr})
+	}
+}
+
+type MediaAdmissionStatusMsg struct {
+	Status        *management.MediaAdmissionStatus
 	ProcessorAddr string
 }

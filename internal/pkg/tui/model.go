@@ -817,6 +817,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleLocalCallPacketResultMsg(msg)
 	case backgroundProcessorStoppedMsg:
 		return m, nil
+	case MediaAdmissionStatusMsg:
+		m.uiState.NodesView.UpdateMediaAdmission(msg.ProcessorAddr, msg.Status)
+		return m, nil
 	case HunterStatusMsg:
 		return m.handleHunterStatusMsg(msg)
 	case components.UpdateNodesHighlightingMsg:

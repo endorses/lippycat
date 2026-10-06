@@ -223,39 +223,79 @@ func TestReliableFaultReplacementThroughUDPAndFragmentedTCPPipeline(t *testing.T
 }
 
 func TestDuplicateReliableProofThroughUDPAndFragmentedTCPPipeline(t *testing.T) {
-	for _, transport := range []string{"udp", "tcp"} {
-		for _, duplicate := range []string{"cseq", "rseq", "rack"} {
-			t.Run(transport+"/"+duplicate, func(t *testing.T) {
-				controller, bridge, _, process := reliablePipelineFixture(t, mediaadmission.FailureClosed, transport)
-				provisionalHeaders := "Require: 100rel\r\nRSeq: 101\r\n"
-				prackHeaders := "RAck: 101 1 INVITE\r\n"
-				prackCSeq := "2 PRACK"
-				switch duplicate {
-				case "cseq":
-					prackCSeq = "2 UPDATE"
-					prackHeaders += "CSeq: 2 PRACK\r\n"
-				case "rseq":
-					provisionalHeaders += "RSeq: 101\r\n"
-				case "rack":
-					prackHeaders += "RAck: 101 1 INVITE\r\n"
+	for _, policy := range []mediaadmission.FailurePolicy{mediaadmission.FailureOpen, mediaadmission.FailureClosed} {
+		for _, transport := range []string{"udp", "tcp"} {
+			for _, header := range []string{"cseq", "rseq", "rack"} {
+				for _, duplicate := range []string{"identical", "conflicting"} {
+					t.Run(fmt.Sprintf("%s/%s/%s/%s", policy, transport, header, duplicate), func(t *testing.T) {
+						controller, bridge, registry, process := reliablePipelineFixture(t, policy, transport)
+						provisionalHeaders := "Require: timer\r\nRequire: 100rel\r\nRSeq: 101\r\n"
+						prackHeaders := "RAck: 101 1 INVITE\r\n"
+						prackCSeq := "2 PRACK"
+						switch header {
+						case "cseq":
+							if duplicate == "conflicting" {
+								prackCSeq = "2 UPDATE"
+							}
+							prackHeaders += "CSeq: 2 PRACK\r\n"
+						case "rseq":
+							if duplicate == "conflicting" {
+								provisionalHeaders = "Require: 100rel\r\nRSeq: 102\r\n"
+							}
+							provisionalHeaders += "RSeq: 101\r\n"
+						case "rack":
+							if duplicate == "conflicting" {
+								prackHeaders = "RAck: 102 1 INVITE\r\n"
+							}
+							prackHeaders += "RAck: 101 1 INVITE\r\n"
+						}
+						messages := [][]byte{
+							reliablePipelineMessage("INVITE sip:peer@example.invalid SIP/2.0", "", "invite", "1 INVITE", "Supported: 100rel\r\n", ""),
+							reliablePipelineMessage("SIP/2.0 183 Progress", "peer", "invite", "1 INVITE", provisionalHeaders, "c=IN IP4 192.0.2.2\r\nm=audio 20000 RTP/AVP 0\r\n"),
+							reliablePipelineMessage("PRACK sip:peer@example.invalid SIP/2.0", "peer", "prack", prackCSeq, prackHeaders, "c=IN IP4 192.0.2.1\r\nm=audio 10000 RTP/AVP 0\r\n"),
+							reliablePipelineMessage("SIP/2.0 200 OK", "peer", "invite", "1 INVITE", "", ""),
+							reliablePipelineMessage("ACK sip:peer@example.invalid SIP/2.0", "peer", "ack", "1 ACK", "", ""),
+						}
+						degraded := mediaadmission.StateDegradedOpen
+						if policy == mediaadmission.FailureClosed {
+							degraded = mediaadmission.StateDegradedClosed
+						}
+						for index, message := range messages {
+							result := process(message)
+							unknown := duplicate == "conflicting" || index < 2
+							if unknown {
+								require.Equal(t, degraded, controller.Status()[0].State)
+								require.Equal(t, 1, bridge.Stats().UnknownDerivations)
+							} else {
+								require.NoError(t, result.MetadataError)
+								require.Equal(t, mediaadmission.StateEnforcing, controller.Status()[0].State)
+								require.Zero(t, bridge.Stats().UnknownDerivations)
+							}
+							if (header == "rseq" && index == 1) || (header != "rseq" && index == 2) {
+								occurrences := result.SIP.DuplicateReliableHeaders
+								conflicts := result.SIP.ReliableHeaderEvidence.Conflicts
+								switch header {
+								case "cseq":
+									require.True(t, occurrences.CSeq)
+									require.Equal(t, duplicate == "conflicting", conflicts.CSeq)
+								case "rseq":
+									require.True(t, occurrences.RSeq)
+									require.Equal(t, duplicate == "conflicting", conflicts.RSeq)
+								case "rack":
+									require.True(t, occurrences.RAck)
+									require.Equal(t, duplicate == "conflicting", conflicts.RAck)
+								}
+							}
+							if index == 2 {
+								require.Equal(t, "PRACK", result.SIP.CSeqMethod)
+								require.Equal(t, "2 PRACK", result.SIP.Headers["cseq"], "general consumer preserves last-line value")
+							}
+						}
+						require.Equal(t, "parsed-reliable", registry.ResolveMediaEndpoints("192.0.2.1:10000", "").CallID, "conflicts retain safe selected-call endpoint learning")
+						require.Equal(t, "parsed-reliable", registry.ResolveMediaEndpoints("192.0.2.2:20000", "").CallID)
+					})
 				}
-				messages := [][]byte{
-					reliablePipelineMessage("INVITE sip:peer@example.invalid SIP/2.0", "", "invite", "1 INVITE", "Supported: 100rel\r\n", ""),
-					reliablePipelineMessage("SIP/2.0 183 Progress", "peer", "invite", "1 INVITE", provisionalHeaders, "c=IN IP4 192.0.2.2\r\nm=audio 20000 RTP/AVP 0\r\n"),
-					reliablePipelineMessage("PRACK sip:peer@example.invalid SIP/2.0", "peer", "prack", prackCSeq, prackHeaders, "c=IN IP4 192.0.2.1\r\nm=audio 10000 RTP/AVP 0\r\n"),
-					reliablePipelineMessage("SIP/2.0 200 OK", "peer", "invite", "1 INVITE", "", ""),
-					reliablePipelineMessage("ACK sip:peer@example.invalid SIP/2.0", "peer", "ack", "1 ACK", "", ""),
-				}
-				for index, message := range messages {
-					result := process(message)
-					require.Equal(t, mediaadmission.StateDegradedClosed, controller.Status()[0].State)
-					require.Equal(t, 1, bridge.Stats().UnknownDerivations)
-					if index == 2 {
-						require.Equal(t, "PRACK", result.SIP.CSeqMethod)
-						require.Equal(t, "2 PRACK", result.SIP.Headers["cseq"])
-					}
-				}
-			})
+			}
 		}
 	}
 }

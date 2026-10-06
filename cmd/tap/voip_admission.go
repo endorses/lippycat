@@ -66,7 +66,7 @@ func newTapVoIPRouting(procConfig voipprocessor.Config, streamConfig voip.Config
 		handler.SetApplicationFilter(procConfig.ApplicationFilter)
 		handler.SetCallRegistry(proc)
 		if session != nil {
-			bridge, bridgeErr := voipadmission.New(voipadmission.Config{Domain: domain, Limits: cfg, Registry: proc.CallRegistry(), Controller: session.Controller, Metadata: session.Metadata, Diagnostics: session, OnError: func(err error) { logger.Error("Tap media admission update failed", "error", err) }})
+			bridge, bridgeErr := voipadmission.New(voipadmission.Config{RetirementGrace: grace, Domain: domain, Limits: cfg, Registry: proc.CallRegistry(), Controller: session.Controller, Metadata: session.Metadata, Diagnostics: session, OnError: func(err error) { logger.Error("Tap media admission update failed", "error", err) }})
 			if bridgeErr != nil {
 				return nil, bridgeErr
 			}

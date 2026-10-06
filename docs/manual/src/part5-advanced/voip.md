@@ -345,12 +345,13 @@ be promoted. Other unresolved contexts, failed endpoint promotions or control
 writes also prevent recovery. Retained linkage is bounded and absent from
 status and warning logs.
 
-Recovery retains one reliable offer/answer link per request initiator and dialog
-fork. The initial reliable response must have RSeq between 1 and 2^31-1; later or
-ambiguous reliable offer exchanges remain conservative. Unmatched linkage expires
-with `pending_ttl`. Once the answer is validated, its bounded current-lifetime
-context survives that expiry until applicable supersession or retirement. An
-exactly matched rejection of the PRACK restores uncertainty.
+Recovery retains bounded reliable offer/answer linkage per request initiator and
+dialog fork. The initial reliable response must have RSeq between 1 and 2^31-1;
+later valid reliable responses remain subject to exact linkage and acknowledgment.
+Unmatched linkage expires with `pending_ttl`. Once the answer is validated, its
+bounded current-lifetime context survives that expiry until applicable
+supersession or retirement. An exactly matched rejection of the PRACK restores
+uncertainty.
 
 The reliable provisional offer requires its answer in PRACK, as defined in
 [RFC 3262 section 5](https://www.rfc-editor.org/rfc/rfc3262.html#section-5).
@@ -363,38 +364,85 @@ offer/answer constraints, as described in
 [RFC 3311 section 5.1](https://www.rfc-editor.org/rfc/rfc3311.html#section-5.1).
 
 After an observed successful final INVITE response establishes the dialog, a
-later complete caller-initiated offer and matching successful answer in re-INVITE
-or UPDATE can supersede unresolved evidence from a faulty, unmatched, unreliable
-or partial PRACK exchange in that same dialog and live call. A request alone, an
-incomplete answer, a rejected exchange or input from another dialog cannot
-establish this recovery. Callee-initiated re-offers do not repair the caller's
-PRACK uncertainty; support for that repair remains deferred. Other unresolved
-contexts and failed endpoint or control writes still prevent recovery.
+complete confirmed re-INVITE or established-dialog UPDATE from either participant
+can supersede applicable negotiation uncertainty in that same dialog and live
+call. This includes conflicting transaction headers, faulty PRACK, unresolved
+delayed offers and partial SDP. Freshness is checked in the repair initiator's
+sequence space; caller and callee CSeq numbers are never compared with each other.
+A request alone, partial or rejected answer, conflicting replacement headers,
+stale exchange or another dialog cannot establish recovery. Independent unresolved
+contexts, lost lifecycle/resource evidence, failed endpoint promotions and control
+writes still prevent restored enforcement.
 
-In enforce mode, confirmed faulty-PRACK repair removes only obsolete endpoint
-ownership from the superseded faulty context. Endpoints required by current valid
-evidence, independent descriptions, other dialogs or other calls remain. Replayed
-superseded PRACK evidence cannot restore legitimately retired endpoints. Healthy
-re-offers, including hold/resume, retain historical registry ownership under the
-existing call lifecycle and trailing-media policy; they do not acquire destructive
-retirement eligibility merely because the dialog is established. No new grace
-timer is introduced. In shadow mode, proof supersession and diagnostic
-reconciliation still advance, but this recovery cleanup preserves userspace
-registry ownership and trailing-media attribution. Authoritative call-finalization
-cleanup continues to apply in both modes.
+In enforce mode, obsolete uncertain-context endpoint ownership remains available
+for the role's existing trailing-media grace, using `--pcap-grace-period`. Valid
+negotiation that takes an endpoint back cancels only that endpoint's pending
+retirement. Cleanup rechecks exact lifetime and current independent requirements;
+a stale callback cannot remove a reused lifetime's ownership. Authoritative call
+completion leaves final cleanup to the existing completion grace. Healthy
+re-offers and hold/resume retain historical registry ownership. Shadow recovery
+advances proof and diagnostics while preserving userspace endpoint ownership.
+Retirement state uses existing configured metadata and per-owner limits.
 
-The SIP parser combines repeated `Require` lines. For duplicate singleton
-`CSeq`, `RSeq` and `RAck` headers, general consumers retain the last value, while
-reliable offer/answer matching treats the duplicates as invalid proof. Duplicate
-`CSeq` also invalidates ordinary admission negotiation evidence, including an
-initial INVITE or its successful response, whether the duplicate values agree or
-conflict. The last parsed number and method remain available to general consumers
-without a comma-corrupted method. Admission context remains unknown for that call
-lifetime, even after a later well-formed re-offer. The default open failure policy
-bypasses dynamic media rejection within the affected scope; closed retains valid
-installed admissions without opening for missing evidence. Explicit restrictions
-and userspace authorization still apply. Duplicate `RSeq` or `RAck` cannot supply
-reliable proof; repeated `Require` retains its list semantics.
+Grace protects attribution during its window, including an obsolete pair with
+one endpoint shared by another call. After expiry, the existing one-sided
+resolver fallback still applies: arbitrary late packets may resolve through the
+remaining owner of a shared endpoint. Release markers that suppress that fallback
+are secondary hardening and are not implemented by this change.
+
+The SIP parser combines repeated `Require` lines and preserves the last singleton
+`CSeq`, `RSeq` and `RAck` value for general consumers. Admission accepts identical
+valid duplicates after semantic comparison: numeric fields ignore leading zeroes,
+whitespace is normalized and SIP methods compare case sensitively. Any malformed
+occurrence or conflicting value invalidates the affected proof, even if the last
+line is valid. Conflicting CSeq retains only bounded valid minimum/maximum evidence
+for its initiator; method conflicts and malformed or unavailable bounds remain
+explicitly uncertain. A complete clean confirmed replacement must exceed the
+applicable uncertainty watermark. Safe selected-call SDP endpoints may still be
+learned within configured limits, without authorizing output or supplying proof.
+The open/closed failure policy and all explicit capture/userspace restrictions
+remain in force.
+
+Pending proof, endpoint provenance and delayed cleanup are bound to authoritative
+call lifetimes. Retirement invalidates old work. Bounded prior-initiator sequence
+watermarks conservatively quarantine replay after Call-ID reuse, including reused
+tags. Each retained Call-ID/initiator identity consumes one configured derivation
+context and 128 accounted bytes until the admission bridge closes; this history
+has no TTL eviction. Malformed conflicts without usable bounds quarantine that
+initiator identity; lost context with unavailable identity/bounds blocks the
+reused Call-ID. History exhaustion conservatively retains evidence loss rather
+than forgetting old proof. Local generations cannot distinguish arbitrary
+identical wire messages; when available provenance and retained bounds cannot
+establish freshness, negotiation remains uncertain rather than borrowing the
+previous lifetime's proof.
+
+Early-dialog proof is kept separately for each bounded fork. Observed confirmation
+resolves the winning dialog; losing-dialog exclusive ownership follows trailing
+media grace while shared and independent requirements remain. Multiple successful
+forks remain conservative. Identical repeated SDP in a later valid reliable
+provisional does not reopen an answered body, but its new reliable transaction
+still requires correct acknowledgment/linkage. Equal SDP bytes alone cannot
+validate an unrelated RSeq, RAck, dialog or lifetime.
+
+Per-domain `rtp_ebpf.scopes[].uncertainty` reports unique active `unknown_calls`
+and overlapping reason counts: `conflicting_headers`, `faulty_prack`,
+`partial_sdp`, `delayed_offer`, `fork_ambiguity` and `evidence_loss`. One call can
+have several reasons; do not add the reason counts to obtain a call total.
+`identical_duplicates` and `conflicting_duplicates` are cumulative counts of
+messages bearing a repeated singleton header group, counted separately for
+CSeq, RSeq and RAck. Three or more repeated lines in one group count once, not
+once per line; these counters do not count currently unknown calls. Identical
+valid duplicates alone create no uncertainty.
+
+`degraded_since_unix_ns` identifies the current degradation start and
+`degraded_duration_ns` its elapsed duration, including degraded-closed and
+control-failed states. Successful complete reconciliation resets both;
+`open_duration_ns` remains cumulative confirmed-open time and has a different
+meaning. CLI status JSON exposes these additive fields. The Nodes view displays
+aggregate admission diagnostics for the selected hunter or processor/tap in
+both table and graph layouts. No endpoint addresses, call identities or raw
+parser/backend errors appear in these diagnostics. Older nodes omit the new
+fields and older clients ignore them.
 
 These shared endpoint semantics also apply
 with eBPF disabled; opening kernel admission never invents userspace attribution.

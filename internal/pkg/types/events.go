@@ -118,3 +118,9 @@ func (n *NoopEventHandler) OnCorrelatedCallUpdate(correlatedCalls []CorrelatedCa
 func (n *NoopEventHandler) OnDisconnect(address string, err error)                      {}
 func (n *NoopEventHandler) OnTopologyUpdate(update *management.TopologyUpdate, processorAddr string) {
 }
+
+// MediaAdmissionStatusHandler optionally receives sanitized processor/tap admission
+// diagnostics. Existing EventHandler implementations need not support them.
+type MediaAdmissionStatusHandler interface {
+	OnMediaAdmissionStatus(status *management.MediaAdmissionStatus, processorAddr string)
+}

@@ -27,6 +27,7 @@ type SIPResult struct {
 	Body                           []byte
 	Headers                        map[string]string
 	DuplicateReliableHeaders       sip.ReliableHeaderDuplicates
+	ReliableHeaderEvidence         sip.ReliableHeaderEvidence
 	Packet                         *PacketEnvelope
 	MatchedFilterIDs               []string
 	Lifecycle                      []CallLifecycleObservation

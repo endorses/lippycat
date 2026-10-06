@@ -35,6 +35,15 @@ lc show status -P localhost:55555 --insecure
 }
 ```
 
+When media admission is enabled, `rtp_ebpf.scopes[].uncertainty` reports unique
+unknown-call totals and overlapping reason counts. Duplicate counters count
+messages with repeated singleton header groups, separately for CSeq, RSeq and
+RAck; they are cumulative and distinct from active uncertainty. The additive
+`degraded_duration_ns` reports current elapsed degradation for open, closed and
+control-failed states; `open_duration_ns` retains cumulative confirmed-open time.
+These fields contain no call identities, endpoint addresses or raw errors. See
+[media admission diagnostics](../../docs/VOIP_EBPF_ADMISSION.md#failure-and-diagnostic-modes).
+
 When LI delivery is configured, status also includes `li_delivery` with aggregate
 X2/X3 enqueue, written, dropped, retry, and queue-depth statistics. Its
 `destinations` object is keyed by destination UUID and includes separate X2/X3

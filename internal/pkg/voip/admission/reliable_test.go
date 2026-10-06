@@ -145,7 +145,7 @@ func TestReliableConflictingProofCannotOverwriteAnswer(t *testing.T) {
 			changed := response
 			switch conflict {
 			case "response-rseq":
-				changed.Headers = map[string]string{"cseq": "1 INVITE", "require": "100rel", "rseq": "102"}
+				changed.Headers = map[string]string{"cseq": "1 INVITE", "require": "100rel", "rseq": "103"}
 			case "response-body":
 				changed.SDP = append(append([]byte(nil), response.SDP...), []byte("a=sendrecv\r\n")...)
 			case "answer-body":

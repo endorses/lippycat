@@ -34,6 +34,9 @@ func ToProto(s mediaadmission.Snapshot) *management.MediaAdmissionStatus {
 	p.EvidenceClockReadErrors = s.Evidence.ClockReadErrors
 	for _, s := range s.Scopes {
 		v := &management.MediaAdmissionScope{Domain: uint32(s.Domain), State: string(s.State), ConfirmedMode: uint32(s.LastConfirmed.Mode), ConfirmedGeneration: s.LastConfirmed.Generation, ControlUncertain: s.ControlUncertain, DesiredGeneration: s.DesiredGeneration, InstalledGeneration: s.InstalledGeneration, Owners: uint64(s.Owners), DesiredEndpoints: uint64(s.DesiredEndpoints), InstalledEndpoints: uint64(s.InstalledEndpoints), PendingUpdates: uint64(s.PendingUpdates), UpdateErrors: s.UpdateErrors, ControlErrors: s.ControlErrors, Recoveries: s.Recoveries, StaleUpdates: s.StaleUpdates, OpenDurationNs: uint64(s.OpenDuration), DecisionCounters: append([]uint64(nil), s.Counters[:]...), CounterReadFailed: s.CounterReadFailed}
+		v.DegradedDurationNs = uint64(s.DegradedDuration)
+		u := s.Uncertainty
+		v.Uncertainty = &management.MediaAdmissionUncertainty{UnknownCalls: u.UnknownCalls, ConflictingHeaders: u.Reasons[mediaadmission.ReasonConflictingHeaders], FaultyPrack: u.Reasons[mediaadmission.ReasonFaultyPRACK], PartialSdp: u.Reasons[mediaadmission.ReasonPartialSDP], DelayedOffer: u.Reasons[mediaadmission.ReasonDelayedOffer], ForkAmbiguity: u.Reasons[mediaadmission.ReasonForkAmbiguity], EvidenceLoss: u.Reasons[mediaadmission.ReasonEvidenceLoss], IdenticalDuplicates: u.IdenticalDuplicates, ConflictingDuplicates: u.ConflictingDuplicates}
 		if s.Reason != "" {
 			v.Reason = "admission synchronization failed"
 		}

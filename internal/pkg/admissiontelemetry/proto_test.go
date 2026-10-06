@@ -24,3 +24,29 @@ func TestSampledTelemetryProjectionAndCompatibility(t *testing.T) {
 	require.True(t, proto.Equal(got, decoded))
 	require.Zero(t, ToProto(mediaadmission.Snapshot{}).SampledRejectedAfterPublication, "older snapshots retain zero-valued additive fields")
 }
+
+func TestUncertaintyTelemetryProjection(t *testing.T) {
+	u := mediaadmission.UncertaintyStats{UnknownCalls: 2, IdenticalDuplicates: 8, ConflictingDuplicates: 3}
+	for i := range u.Reasons {
+		u.Reasons[i] = uint64(i + 1)
+	}
+	snapshot := mediaadmission.Snapshot{Scopes: []mediaadmission.ScopeTelemetry{{ScopeStatus: mediaadmission.ScopeStatus{Uncertainty: u, DegradedDuration: 123}}}}
+	wire := ToProto(snapshot)
+	got := wire.Scopes[0]
+	require.Equal(t, uint64(123), got.DegradedDurationNs)
+	require.Equal(t, uint64(2), got.Uncertainty.UnknownCalls)
+	require.Equal(t, uint64(1), got.Uncertainty.ConflictingHeaders)
+	require.Equal(t, uint64(2), got.Uncertainty.FaultyPrack)
+	require.Equal(t, uint64(3), got.Uncertainty.PartialSdp)
+	require.Equal(t, uint64(4), got.Uncertainty.DelayedOffer)
+	require.Equal(t, uint64(5), got.Uncertainty.ForkAmbiguity)
+	require.Equal(t, uint64(6), got.Uncertainty.EvidenceLoss)
+	require.Equal(t, uint64(8), got.Uncertainty.IdenticalDuplicates)
+	require.Equal(t, uint64(3), got.Uncertainty.ConflictingDuplicates)
+	raw, err := proto.Marshal(wire)
+	require.NoError(t, err)
+	decoded := proto.Clone(wire)
+	proto.Reset(decoded)
+	require.NoError(t, proto.Unmarshal(raw, decoded))
+	require.True(t, proto.Equal(wire, decoded))
+}
